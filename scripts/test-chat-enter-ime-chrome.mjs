@@ -16,7 +16,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE } from './scratch.mjs';
+import { ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -57,7 +57,7 @@ const port = await freePort(), cdpPort = await freePort();
 const srv = http.createServer((q, r) => { r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); r.end(PAGES[q.url] || ''); }).listen(port, '127.0.0.1');
 const env = { ...process.env, HOME: path.join(tmp, 'home'), XDG_RUNTIME_DIR: path.join(tmp, 'xdg') };
 delete env.DISPLAY; delete env.WAYLAND_DISPLAY;
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
   '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${tmp}/chrome`, 'about:blank'], { stdio: 'ignore', env });
 let ws = null;
 try {

@@ -39,6 +39,7 @@ try {
   fs.writeFileSync(ENTRY, `
 import { installSidebarMounts } from ${JSON.stringify(path.join(ROOT, 'src/lib/sidebar-mounts.js'))};
 import { createModalShell } from ${JSON.stringify(path.join(ROOT, 'src/lib/utils.js'))};
+import { CHROME_STORE } from './scratch.mjs';   // lane setting-doors: a suite's Chrome keeps its own store
 const ENC=${ENC}, PLAIN=${PLAIN};
 const out=[]; const ok=(n,c,x="")=>out.push((c?"ok   ":"FAIL ")+n+(c?"":" -- "+x));
 function S(){} installSidebarMounts(S); const s=new S();
@@ -129,7 +130,7 @@ const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
     `<link rel="stylesheet" href="file://${path.join(ROOT, 'public/style.css')}"></head>` +
     `<body><script src="file://${path.join(D, 'b.js')}"></script></body></html>`);
 
-  const { stdout } = await execFileP(CHROME, ['--headless', '--disable-gpu', '--no-sandbox',
+  const { stdout } = await execFileP(CHROME, [...CHROME_STORE, '--headless', '--disable-gpu', '--no-sandbox',
     '--virtual-time-budget=8000', '--dump-dom', `file://${path.join(D, 't.html')}`], { maxBuffer: 1 << 26 });
   const m = /<pre id="res">([\s\S]*?)<\/pre>/.exec(stdout);
   if (!m) { console.log('FAIL — the dialog harness produced no result element'); cleanup(); process.exit(1); }
@@ -150,7 +151,7 @@ const pre = document.createElement("pre"); pre.id = "res"; pre.textContent = (do
   await build({ stdin: { contents: ctlEntry, resolveDir: ROOT, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(D, 'c.js'), loader: { '.css': 'empty' }, logLevel: 'error',
     plugins: [{ name: 'pre-fix', setup(b) { b.onLoad({ filter: /utils\.js$/ }, (a) => (a.path === UTILS ? { contents: usrc.replace(BIND, ''), loader: 'js', resolveDir: path.dirname(a.path) } : undefined)); } }] });
   fs.writeFileSync(path.join(D, 'c.html'), `<!doctype html><html><head><meta charset="utf-8"></head><body><script src="file://${path.join(D, 'c.js')}"></script></body></html>`);
-  const ctl = (await execFileP(CHROME, ['--headless', '--disable-gpu', '--no-sandbox', '--virtual-time-budget=4000', '--dump-dom', `file://${path.join(D, 'c.html')}`], { maxBuffer: 1 << 26 })).stdout;
+  const ctl = (await execFileP(CHROME, [...CHROME_STORE, '--headless', '--disable-gpu', '--no-sandbox', '--virtual-time-budget=4000', '--dump-dom', `file://${path.join(D, 'c.html')}`], { maxBuffer: 1 << 26 })).stdout;
   const cm = /<pre id="res">([\s\S]*?)<\/pre>/.exec(ctl);
   const ctlLine = usrc.split(BIND).length === 2 && cm && cm[1] === 'body STAYS'
     ? 'ok   CONTROL: the pre-fix createModalShell (its idle-Escape listener never bound) leaves the modal OPEN after the same Escape (body STAYS) — the ESC leg is the fix'

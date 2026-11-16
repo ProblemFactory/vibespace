@@ -34,7 +34,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -214,7 +214,7 @@ else await (async () => {
       fs.writeFileSync(fc, `<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig><dir>/usr/share/fonts/truetype/dejavu</dir><dir>/usr/share/fonts/truetype/liberation</dir><dir>/usr/share/fonts/opentype/noto</dir><dir>/usr/share/fonts/opentype/noto-cjk</dir><dir>/usr/share/fonts/truetype/noto</dir><cachedir>${ROOT}/fc-cache</cachedir><include ignore_missing="yes">/etc/fonts/conf.d</include></fontconfig>`);
       cenv.FONTCONFIG_FILE = fc;
     }
-    const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--force-device-scale-factor=1', '--disable-background-timer-throttling', `--user-data-dir=${path.join(ROOT, 'chrome-' + (dejavu ? 'dv' : 'box'))}`, '--window-size=1920,1080', 'about:blank'], { stdio: 'ignore', env: cenv });
+    const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--force-device-scale-factor=1', '--disable-background-timer-throttling', `--user-data-dir=${path.join(ROOT, 'chrome-' + (dejavu ? 'dv' : 'box'))}`, '--window-size=1920,1080', 'about:blank'], { stdio: 'ignore', env: cenv });
     procs.add(chrome);
     let target = null;
     for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }

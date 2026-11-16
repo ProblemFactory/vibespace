@@ -6,7 +6,7 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { freePort, scratch, ONBOARDED_SOURCE, vncEnv, stillPresser } from './scratch.mjs';
+import { freePort, scratch, ONBOARDED_SOURCE, vncEnv, stillPresser, CHROME_STORE } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = await freePort(), CDP_PORT = await freePort(), wt = scratch('incident-smoke'); // per-process (scripts/scratch.mjs)
@@ -193,7 +193,7 @@ if (CHROME) {
   const { spawn: sp } = await import('node:child_process');
   const { createRequire } = await import('node:module');
   const WebSocket = createRequire(import.meta.url)('ws');
-  const chrome = sp(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', `--user-data-dir=${scratch('inc-chrome')}`, 'about:blank'], { stdio: 'ignore' });
+  const chrome = sp(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', `--user-data-dir=${scratch('inc-chrome')}`, 'about:blank'], { stdio: 'ignore' });
   process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {}; try { fs.rmSync(scratch('inc-chrome'), { recursive: true, force: true }); } catch {} });
   let target = null;
   for (let i = 0; i < 40 && !target; i++) {

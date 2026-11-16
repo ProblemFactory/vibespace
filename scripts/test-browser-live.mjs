@@ -101,7 +101,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort, CHROME_STORE } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
@@ -987,7 +987,7 @@ async function launchChrome({ userDataDir, args = [], deadlineMs = 30000, stdio 
   fs.mkdirSync(userDataDir, { recursive: true });
   const apf = path.join(userDataDir, 'DevToolsActivePort');
   try { fs.unlinkSync(apf); } catch { }
-  const proc = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0', '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${userDataDir}`, ...args, 'about:blank'], { stdio });
+  const proc = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=0', '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${userDataDir}`, ...args, 'about:blank'], { stdio });
   const tail = []; let tailLen = 0;
   if (proc.stderr) proc.stderr.on('data', (d) => { const s = d.toString(); tail.push(s); tailLen += s.length; while (tail.length > 1 && tailLen > 4000) tailLen -= tail.shift().length; });
   let exited = null; proc.on('exit', (code, signal) => { exited = { code, signal }; });

@@ -1935,6 +1935,39 @@ for (const [edge] of EXCEPTIONS) {
 }
 
 
+// 47b. THE CHROME-STORE CENSUS (lane setting-doors, 主开发 2026-11-16). On 2026-11-15 the login keyring was LOCKED and every heavy
+//     Chrome suite that asked the session bus's Secret Service for its cookie key hung to its full budget, twice, on any sha (14
+//     suites; the boot sentinel at its Chrome step). A suite's Chrome never reaches a person's keyring, locked or not: every
+//     Chrome a suite (or a module a suite imports) launches carries scripts/scratch.mjs CHROME_STORE — Chrome's basic store flag +
+//     the mock keychain, the product's own src/browser-attach.js PROFILE_STORE, pinned equal here. scripts/chrome-store-census.mjs
+//     says what a launch is (a Chrome program, or an argv with a Chrome marker); ONE exempt row (a suite that brings its own
+//     Secret Service on a private bus), pinned to its private address. The lane's insertion script makes the edit and can run again.
+{
+  const CS = await import('./chrome-store-census.mjs');
+  const c = CS.census(process.cwd(), { acorn });
+  ok(c.files >= 200 && c.launches >= 200, `§47b census scope is non-vacuous (${c.launches} Chrome launches in ${c.files} files)`);
+  ok(c.bad.length === 0 && c.unread.length === 0 && c.unparsed.length === 0, `every Chrome a suite launches carries CHROME_STORE (no keyring is ever asked)${c.bad.length || c.unread.length || c.unparsed.length ? ' — ' + [...c.bad.map((b) => `${b.file}:${b.line}`), ...c.unread.map((u) => `${u.file}:${u.line} (argv unread)`), ...c.unparsed.map((f) => `${f} (not parsed)`)].join('; ') : ''}`);
+  ok(c.uncovered.length === 0 && c.stale.length === 0 && c.rows >= 12, `§47b A MISS IS NEVER SILENT: every file of the scope whose text holds a Chrome marker is covered (its launches carry it) or a NAMED row with its reason (${c.rows} rows); no row is stale${c.uncovered.length || c.stale.length ? ' — uncovered: ' + c.uncovered.join(', ') + ' · stale: ' + c.stale.join(', ') : ''}`);
+  ok(c.exempt.length === 1 && c.exempt[0].file === 'scripts/test-app-display-secrets-chrome.mjs' && c.exempt[0].pinned && Object.keys(CS.EXEMPT).length === 1, '§47b ONE exempt row — the suite that starts its OWN Secret Service on the plan\'s private bus, pinned to that private address (never the session bus a lane inherits)', c.exempt);
+  const arr = (s, re) => { const m = re.exec(s); return m ? m[1].replace(/\s/g, '') : null; };
+  const prof = arr(fs.readFileSync('src/browser-attach.js', 'utf8'), /const PROFILE_STORE = Object\.freeze\((\[[^\]]*\])\)/), store = arr(fs.readFileSync('scripts/scratch.mjs', 'utf8'), /^export const CHROME_STORE = Object\.freeze\((\[[^\]]*\])\)/m);
+  ok(!!store && store === prof && /'--password-store=basic'/.test(store), `§47b scripts/scratch.mjs CHROME_STORE is the product's src/browser-attach.js PROFILE_STORE (${store})`);
+  const L = (src) => CS.launchesOf(src, { acorn });
+  const planted = L("import { scratch } from './scratch.mjs';\nconst c = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0']);\n");
+  const carried = L("import { CHROME_STORE } from './scratch.mjs';\nconst c = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=0']);\n");
+  const viaVar = L("const argv = ['--headless=new', '--remote-debugging-port=0'];\nspawn(bin, argv);\n"), unread = L('spawn(chromeBin, argvOf());\n');
+  // 主开发's check of d3d571afe (03:13Z): a launch is judged by WHAT is launched, whatever the callee is called
+  const alias = L("import { spawn as sp } from 'node:child_process';\nconst c = sp(CHROME, ['--headless=new', '--remote-debugging-port=0']);\n");
+  const prom = L("import { execFile } from 'node:child_process';\nimport { promisify } from 'node:util';\nconst run = promisify(execFile);\nawait run(CHROME, ['--headless', '--dump-dom', 'file:///x']);\n");
+  const markerOnly = CS.census(process.cwd(), { acorn, extra: { 'scripts/test-planted-marker.mjs': "// it names --remote-debugging-port=0 and launches nothing of its own\nexport const X = 1;\n" } });
+  const staleRow = CS.census(process.cwd(), { acorn, rows: { ...CS.ROWS, 'scripts/test-planted-nomark.mjs': 'a row whose file holds no marker' }, extra: { 'scripts/test-planted-nomark.mjs': 'export const X = 1;\n' } });
+  ok(alias.launches.length === 1 && !alias.launches[0].carried && prom.launches.length === 1 && !prom.launches[0].carried && markerOnly.uncovered.includes('scripts/test-planted-marker.mjs') && staleRow.stale.includes('scripts/test-planted-nomark.mjs'),
+    '§47b CONTROLS (the check\'s): a spawn imported under another name is a launch, RED without the store; a promisified execFile of Chrome is a launch, RED; a file whose text names a marker with no launch and no row is UNCOVERED, red; a row whose file holds no marker is STALE, red');
+  const one = 'scripts/test-chat-hygiene-ui.mjs', pc = CS.census(process.cwd(), { acorn, patch: { [one]: fs.readFileSync(one, 'utf8').replace('...CHROME_STORE, ', '') } });
+  ok(planted.launches.length === 1 && !planted.launches[0].carried && carried.launches[0].carried && viaVar.launches.length === 1 && !viaVar.launches[0].carried && unread.unread.length === 1 && pc.bad.some((b) => b.file === one),
+    '§47b CONTROLS: a planted launch without the store is RED, with it green; an argv named by a variable is read; a Chrome program whose argv cannot be read is UNREAD (red); a real suite with its spread removed is red by file');
+}
+
 // 49. THE WAKE-DOOR CENSUS (r3 of agent groups, 2026-09-23). With auth OFF the
 //     owner's routes are reachable by any local caller, so every owner route
 //     that can start a BILLED turn (a group post/create/invite, and the

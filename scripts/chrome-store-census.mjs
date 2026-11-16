@@ -1,0 +1,129 @@
+// lane setting-doors — THE CHROME-STORE CENSUS (主开发's GO 2026-11-16 02:38Z, after the night a LOCKED login keyring hung every
+// heavy Chrome suite that reached it: 14 suites to their full budget twice, on any sha). A suite's Chrome must never reach a
+// person's keyring, locked or not: every Chrome a suite launches carries scripts/scratch.mjs CHROME_STORE (Chrome's basic store
+// flag + the mock keychain — the product's own src/browser-attach.js PROFILE_STORE, pinned equal), so it keeps its cookies in its
+// own profile and never asks the session bus's Secret Service.
+// A LAUNCH IS JUDGED BY WHAT IS LAUNCHED (主开发's check of d3d571afe, 03:13Z — a spawn imported under another name and a
+// promisified execFile were not seen at all): ANY call whose PROGRAM is named like Chrome (CHROME, chromeBin, a …/chrome path),
+// whatever the callee is called — or a call of a child-process spawner under ANY of its names (spawn / spawnSync / execFile /
+// execFileSync, an `import { spawn as sp }`, a `const { spawn: sp } = require(…)`, a `promisify(execFile)`, a plain alias) whose
+// argv holds a Chrome marker (the remote-debugging port or pipe, headless — one dash or two) inline, or as an array variable of
+// the same file it names or spreads. A Chrome launch whose argv the census cannot read is UNREAD — red, never skipped.
+// A MISS IS NEVER SILENT: a file of the scope whose TEXT holds a Chrome marker but no launch is UNCOVERED — red — unless it is a
+// NAMED ROW (ROWS: a fixture, a string, a product argv, a fake — each read, with its reason); a row whose file no longer holds a
+// marker, or now holds a launch, is STALE — red. The census and the lane's insertion script read THIS module.
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+
+export const MARK = /^--?(remote-debugging-port|remote-debugging-pipe|headless)\b/;
+export const TEXT_MARK = /remote-debugging-(?:port|pipe)\b|--headless\b/;   // the coverage reading: the file's whole TEXT (a comment and a string included)
+const SPAWNERS = new Set(['spawn', 'spawnSync', 'execFile', 'execFileSync']);
+const CHROMEISH = /chrom/i;
+const strOf = (n) => (!n ? null : n.type === 'Literal' && typeof n.value === 'string' ? n.value : n.type === 'TemplateLiteral' ? n.quasis.map((q) => q.value.cooked).join('${}') : null);
+const isArgv = (a) => !!a && a.type === 'ArrayExpression' && a.elements.some((e) => e && MARK.test(strOf(e) || ''));
+/** the array carries the store: a spread of CHROME_STORE, or Chrome's basic store flag as a literal */
+export const carries = (a) => a.elements.some((e) => e && ((e.type === 'SpreadElement' && e.argument.type === 'Identifier' && e.argument.name === 'CHROME_STORE') || /^--password-store=basic$/.test(strOf(e) || '')));
+function walk(n, f, up = null) { if (!n || typeof n.type !== 'string') return; f(n, up); for (const k of Object.keys(n)) { if (k === 'start' || k === 'end' || k === 'loc') continue; const v = n[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') walk(x, f, n); } else if (v && typeof v.type === 'string') walk(v, f, n); } }
+const nameOf = (c) => (!c ? null : c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && !c.computed && c.property.type === 'Identifier' ? c.property.name : null);
+const progName = (x) => (!x ? '' : x.type === 'Identifier' ? x.name : x.type === 'MemberExpression' ? (nameOf(x) || '') + ' ' + progName(x.object) : '');
+const CHROME_PATH = /\/(google-)?chrom(e|ium)(-stable|-browser)?$/i;
+
+/** one file's source → { launches: [{ line, carried, open }], unread: [{ line, argv }], parsed } — `open` = just after the argv's `[` */
+export function launchesOf(src, { acorn }) {
+  const code = String(src).replace(/^#!.*/, (m) => ' '.repeat(m.length));
+  let ast;
+  try { ast = acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'module', allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true, allowHashBang: true }); }
+  catch (e) { return { launches: [], unread: [], parsed: false, error: e.message }; }
+  const arrays = new Map();   // a variable → the array literal it is declared with (one file, by name)
+  walk(ast, (n) => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && n.init.type === 'ArrayExpression') arrays.set(n.id.name, n.init); });
+  // THE SPAWNER'S OTHER NAMES: an import alias, a require destructuring with a rename, a promisify(…) of a spawner, a plain alias
+  const aliases = new Set();
+  const isSp = (x) => !!x && ((x.type === 'Identifier' && (SPAWNERS.has(x.name) || aliases.has(x.name))) || (x.type === 'MemberExpression' && SPAWNERS.has(nameOf(x))));
+  for (let pass = 0; pass < 3; pass++) walk(ast, (n) => {
+    if (n.type === 'ImportSpecifier' && n.imported && SPAWNERS.has(n.imported.name || n.imported.value)) aliases.add(n.local.name);
+    if (n.type === 'VariableDeclarator' && n.id.type === 'ObjectPattern') for (const pr of n.id.properties) if (pr.type === 'Property' && !pr.computed && SPAWNERS.has(pr.key.name || pr.key.value) && pr.value.type === 'Identifier') aliases.add(pr.value.name);
+    if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) {
+      const i = n.init;
+      if (isSp(i)) aliases.add(n.id.name);
+      if (i.type === 'CallExpression' && nameOf(i.callee) === 'promisify' && isSp(i.arguments[0])) aliases.add(n.id.name);
+    }
+  });
+  const lineOf = (at) => code.slice(0, at).split('\n').length;
+  const seen = new Set(), launches = [], unread = [];
+  const take = (arr) => { if (!arr || seen.has(arr.start)) return; seen.add(arr.start); launches.push({ line: lineOf(arr.start), carried: carries(arr), open: arr.start + 1 }); };
+  walk(ast, (n) => {
+    if (n.type !== 'CallExpression') return;
+    const p0 = n.arguments[0];
+    const chromeProg = CHROMEISH.test(progName(p0)) || (!!p0 && p0.type === 'Literal' && typeof p0.value === 'string' && CHROME_PATH.test(p0.value));
+    const sp = isSp(n.callee);
+    if (!chromeProg && !sp) return;   // judged by WHAT is launched: a Chrome program under any callee, or a spawner under any name
+    const a = n.arguments[1];
+    const cand = !a ? [] : a.type === 'Identifier' ? [arrays.get(a.name)] : a.type === 'ArrayExpression' ? [a, ...a.elements.filter((e) => e && e.type === 'SpreadElement' && e.argument.type === 'Identifier').map((e) => arrays.get(e.argument.name))] : [];
+    const argvs = cand.filter(isArgv);
+    if (argvs.length) { for (const x of argvs) take(x); return; }
+    if (!chromeProg) return;   // a spawner whose argv holds no marker: no Chrome
+    const arr = a && a.type === 'ArrayExpression' ? a : a && a.type === 'Identifier' ? arrays.get(a.name) : null;
+    if (arr) take(arr);   // a spawner under any name, or a suite's own wrapper, given a Chrome program and an argv array
+    else if (sp) unread.push({ line: lineOf(n.start), argv: a ? { start: a.start, end: a.end } : null });   // a SPAWNER of a Chrome whose argv cannot be read — the lane's script wraps it [...CHROME_STORE, ...argv]
+    // (a non-spawner given a Chrome program and no argv array — fs.existsSync(CHROME), path.join(chromeDir, …) — launches nothing)
+  });
+  return { launches, unread, parsed: true };
+}
+
+/** the scope: every scripts/test-*.mjs, and every scripts/ module a suite imports (a boot module launches Chrome for its suites) */
+export function filesOf(repo) {
+  const dir = path.join(repo, 'scripts'), tests = fs.readdirSync(dir).filter((f) => /^test-.*\.mjs$/.test(f));
+  const mods = new Set();
+  for (const f of tests) for (const m of fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/\bfrom\s*'\.\/((?!test-)[\w.-]+\.mjs)'/g)) mods.add(m[1]);
+  return [...tests, ...[...mods].filter((m) => fs.existsSync(path.join(dir, m)))].sort().map((f) => 'scripts/' + f);
+}
+
+/** THE ONE EXEMPT ROW: a suite that brings its OWN Secret Service on a private bus — never the person's (its pin: the private address) */
+export const EXEMPT = Object.freeze({
+  'scripts/test-app-display-secrets-chrome.mjs': { why: 'it tests Chrome\'s OSCrypt key in a Secret Service — its OWN, started on the plan\'s private bus (DBUS_SESSION_BUS_ADDRESS = plan.address); never the session bus a lane inherits', pin: /DBUS_SESSION_BUS_ADDRESS: plan\.address/ },
+});
+
+/** THE NAMED ROWS — files whose text holds a Chrome marker and that launch no Chrome of their own, each READ (主开发 03:13Z) */
+export const ROWS = Object.freeze({
+  'scripts/test-browser-builds.mjs': 'a PRODUCT argv it asserts: the engine plugin\'s launch rows (splitLaunchArgs, the forbidden-switch census) — it launches no Chrome',
+  'scripts/test-browser-display-chrome.mjs': 'its markers are COMMENTS; its Chrome is launched by the REAL agent-browser CLI it drives (the vendor\'s own launch, with the owner\'s config args) — not a launch of this suite',
+  'scripts/test-browser-orphans.mjs': 'process-table FIXTURES: rows whose argv names a Chrome (pid, ppid, starttime) for the orphan judge — its children are /bin/sleep and node, never Chrome',
+  'scripts/test-browser-profiles.mjs': 'a config FIXTURE: an agent-browser.json / config.json whose `args` STRING names the debugging port, written to disk for the reader under test',
+  'scripts/test-browser-providers.mjs': 'an ERROR-TEXT assertion: a regex over the provider\'s cdp_unreachable message naming the debugging port',
+  'scripts/test-browser-rejudge.mjs': 'a FAKE Chrome: a node process (process.execPath -e FAKE_CHROME_SRC) carrying Chrome-like argv inside a fake daemon\'s SOURCE STRING',
+  'scripts/test-browser-switch.mjs': 'a fake engine plugin\'s SOURCE STRING (FAKE_FILE) whose launchArgs name the debugging port — a fixture, never run as Chrome',
+  'scripts/test-browser-verbs.mjs': 'the sanitizer under test: sanitizeArgs / sanctionedConfig inputs that name the debugging port, judged as data',
+  'scripts/test-ci-gate-reaper.mjs': 'process-table FIXTURES for the scratch reaper (mk / mk3 rows whose argv or raw command names a headless Chrome)',
+  'scripts/test-ci-gate-tiers.mjs': 'a tier census\'s own REGEX table and a planted suite TEXT (a string) that holds the markers',
+  'scripts/test-ci-gate.mjs': 'a sentence naming the headless switch, and markers BUILT by concatenation for the gate\'s own census controls',
+  'scripts/test-memory-pressure.mjs': 'process-table FIXTURES (P rows: pid, ppid, rss, name, a command line naming a Chrome) for the pressure reader',
+  // read by the lane beyond 主开发's list (they hold Chrome's basic store flag literally, or are scripts/ modules a suite imports)
+  'scripts/test-browser-keeper.mjs': 'the PRODUCT\'s launch argv it asserts (WANT, argvVerdict, the sync census\'s planted literal) and the product\'s spawnChrome over a FAKE google-chrome in FAKE_BIN — never a real Chrome',
+  'scripts/test-desktop-apps.mjs': 'the desktop-app rung\'s FORBIDDEN-switch list and its url verdicts — data the PURE verdicts judge, nothing launched',
+  'scripts/ci.mjs': 'the gate runner (a module suites import): the tier rule\'s own text — a `chrome` key whose description and regex name the markers, and the suite rows\' words',
+  'scripts/test-architecture.mjs': 'the census\'s own controls: §47b\'s planted sources (strings) naming the markers',
+});
+
+/** the census over a tree → { files, launches, rows, bad: [{ file, line }], unread: [{ file, line }], exempt: [{ file, pinned }],
+ *  unparsed: [file], uncovered: [file] (a marker, no launch, no row), stale: [file] (a row whose file holds no marker, or a launch) }.
+ *  `patch` = a file's text replaced, `extra` = more files read as if in the scope (planted controls), `rows` = the named rows */
+export function census(repo, { acorn = null, patch = {}, extra = {}, rows = ROWS } = {}) {
+  const A = acorn || createRequire(path.join(repo, 'package.json'))('acorn');
+  const out = { files: 0, launches: 0, rows: 0, bad: [], exempt: [], unparsed: [], unread: [], uncovered: [], stale: [] };
+  for (const f of [...filesOf(repo), ...Object.keys(extra)]) {
+    const src = f in extra ? extra[f] : f in patch ? patch[f] : fs.readFileSync(path.join(repo, f), 'utf8');
+    const r = launchesOf(src, { acorn: A });
+    if (!r.parsed) { out.unparsed.push(f); continue; }
+    const marked = TEXT_MARK.test(src), launched = r.launches.length > 0 || r.unread.length > 0;
+    if (rows[f]) { out.rows++; if (!marked || launched) out.stale.push(f); }
+    else if (marked && !launched && !EXEMPT[f]) out.uncovered.push(f);
+    for (const u of r.unread) if (!EXEMPT[f]) out.unread.push({ file: f, line: u.line });
+    if (!r.launches.length) continue;
+    out.files++; out.launches += r.launches.length;
+    if (EXEMPT[f]) { out.exempt.push({ file: f, pinned: EXEMPT[f].pin.test(src) }); continue; }
+    for (const l of r.launches) if (!l.carried) out.bad.push({ file: f, line: l.line });
+  }
+  for (const f of Object.keys(rows)) if (!fs.existsSync(path.join(repo, f)) && !(f in extra)) out.stale.push(f);
+  return out;
+}

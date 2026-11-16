@@ -4,7 +4,7 @@
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path'; import http from 'node:http';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
@@ -19,7 +19,7 @@ for (const f of execSync('git diff --name-only HEAD',{cwd:repo}).toString().spli
 const env={...process.env}; delete env.VIBESPACE_PASSWORD; delete env.VIBESPACE_GENERATE_PASSWORD;
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs)
 const srv=spawn('node',[path.join(wt,'server.js')],{cwd:wt,env:{...env, ...VNC_ENV,PORT:String(PORT),VIBESPACE_SKIP_AGENT_HOOKS:'1'},stdio:'ignore'});
-const chrome=spawn(CHROME,['--headless=new',`--remote-debugging-port=${CDP_PORT}`,'--no-sandbox','--disable-gpu','about:blank'],{stdio:'ignore'});
+const chrome=spawn(CHROME,[...CHROME_STORE, '--headless=new',`--remote-debugging-port=${CDP_PORT}`,'--no-sandbox','--disable-gpu','about:blank'],{stdio:'ignore'});
 await new Promise(r=>setTimeout(r,4000));
 const get=(u)=>new Promise((res,rej)=>http.get(u,s=>{let b='';s.on('data',d=>b+=d);s.on('end',()=>res(b))}).on('error',rej));
 const WebSocket=require(path.join(repo,'node_modules/ws/index.js'));

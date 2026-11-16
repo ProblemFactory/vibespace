@@ -78,7 +78,7 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { scratchDir, freePorts, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { scratchDir, freePorts, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 
 const REPO = process.cwd();
 const require = createRequire(path.join(REPO, 'package.json'));
@@ -254,7 +254,7 @@ try {
   const wrote = await stub({ kind: 'write', files: [[P, BRIEF], [TP, TABLE]] });
   ok(wrote.ok && fs.readFileSync(P, 'utf8') === BRIEF, 'the agent (stub) wrote docs/BRIEF.md + docs/TABLE.md', wrote);
 
-  chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: CHOME, XDG_RUNTIME_DIR: CXDG, DISPLAY: ':' + (7000 + (CDP % 1000)) } });
+  chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: CHOME, XDG_RUNTIME_DIR: CXDG, DISPLAY: ':' + (7000 + (CDP % 1000)) } });
   const target = await until(async () => { try { return (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { return null; } }, 30000, 250);
   if (!ok(!!target, 'headless chrome (scratch profile, own DISPLAY, private XDG_RUNTIME_DIR + HOME) exposed a page target')) throw new Error('no chrome');
   cdp = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 256 * 1024 * 1024 });

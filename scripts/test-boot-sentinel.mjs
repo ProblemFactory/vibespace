@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE, vncEnv, scratch, scratchHome, freePort, endRootedProcesses, withoutVendorKeys } from './scratch.mjs';
+import { ONBOARDED_SOURCE, vncEnv, scratch, scratchHome, freePort, endRootedProcesses, withoutVendorKeys, CHROME_STORE } from './scratch.mjs';
 import * as RM from './reach-model.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -122,7 +122,7 @@ if (!CHROME) { console.log(`④ SKIP: no chrome/chromium — the window half is 
 console.log(`④ every window type opened once (${openable.length}) — headless chrome`);
 const CDP_PORT = await freePort();
 const profile = path.join(home, 'chrome');
-chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,900', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
+chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,900', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
 let target = null;
 for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
 ok(!!target, 'chrome exposes a page target');

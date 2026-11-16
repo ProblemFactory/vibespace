@@ -65,7 +65,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
 import zhDict from '../src/lib/i18n-zh.js';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 // P8-2 (2026-09-21): xpra is wired and wins the default ladder when installed; this suite drives the noVNC picture, so the
@@ -144,7 +144,7 @@ const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, VIB
 let srv = null;
 const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: 'ignore' }); return srv; };
 bootServer();
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${scratch('deskapp-chrome')}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${scratch('deskapp-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 const recordedPids = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(wt, 'data/desktop-apps.json'), 'utf8')).apps).flatMap((a) => Object.values(a.pids || {})).filter(Boolean); } catch { return []; } };
 // the singleton's X server THIS run caused, by evidence: an Xvnc-style argv naming our per-run display AND port
 const VNC_DISPLAY = VNC_ENV.VIBESPACE_VNC_DISPLAY, VNC_PORT = VNC_ENV.VIBESPACE_VNC_PORT;
