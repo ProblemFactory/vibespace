@@ -187,7 +187,14 @@ const integrations = STORE.create({ dataDir: storeDir, env: {}, now, broadcast: 
 const v = mkVendor();
 const engDir = path.join(ROOT, 'eng'); fs.mkdirSync(engDir, { recursive: true });
 const frames = [];
-const eng = ENG.create({ dataDir: engDir, env: {}, now, broadcast: (m) => frames.push(m), integrations, fetch: v.fetchFn, log: quiet , ...FAST_PACE });
+// THE TIMING PAIR (2.369.405, lane artifacts-by-intent): a leg that needs «the landing / the pass ended» waits on the engine's OWN end — the
+// broadcast that carries it (`pred` over the engine's state, looked at once now and at every broadcast), then idle() — never a fixed sleep
+// (60 / 80 / 120 ms stood for those ends and lost to two loaded hosted runners), never the clock; an end that never comes keeps the
+// suite waiting — red at its time budget (or as an unsettled top-level await), never green
+const frameWake = [];
+const eng = ENG.create({ dataDir: engDir, env: {}, now, broadcast: (m) => { frames.push(m); for (const look of frameWake.splice(0)) look(); }, integrations, fetch: v.fetchFn, log: quiet , ...FAST_PACE });
+const atBroadcast = (pred) => new Promise((res) => { const look = () => (pred() ? res() : frameWake.push(look)); look(); });
+const gmailRec = () => eng.adapterRecords().adapters.find((a) => a.id === 'gmail');
 process.on('exit', () => { try { eng.stop(); } catch {} });
 let flowState = null;
 {
@@ -204,7 +211,8 @@ let flowState = null;
   const bad = await get(`${r.flow.redirectUri}/?state=forged&code=stolen`);
   ok(bad.status === 400 && !v.calls.some((c) => c.host === 'oauth2.googleapis.com'), 'a forged state on the loopback exchanges nothing');
   const good = await get(`${r.flow.redirectUri}/?state=${flowState}&code=auth-code-0001`);
-  await sleep(60);
+  // the loopback answers the browser BEFORE its exchange: the landing's own end = its broadcast — the row connected, the flow gone
+  await atBroadcast(() => { const row = eng.digest().adapters.find((a) => a.id === 'gmail'); return !!(row && row.auth.state === 'connected' && row.flow === null); });
   const ex = v.calls.find((c) => c.host === 'oauth2.googleapis.com');
   ok(good.status === 200 && ex && ex.method === 'POST' && ex.form.grant_type === 'authorization_code' && ex.form.code === 'auth-code-0001' && ex.form.client_secret === 'channels-secret-0000' && ex.form.redirect_uri === r.flow.redirectUri,
     'the redirect landed and the code was exchanged FORM-ENCODED with the `channels` preset\'s secret and the same redirect_uri', JSON.stringify(ex));
@@ -218,8 +226,11 @@ let flowState = null;
   ok(row && row.auth.state === 'connected' && row.auth.user === 'member.a@example.com' && row.auth.credentialSource === 'cluster' && row.flow === null && row.lastAuthError === null && !d1.available.some((x) => x.kind === 'gmail'),
     'the digest row is connected as the user, the flow is gone from the wire, and gmail left the "available" list', JSON.stringify(row && row.auth));
   ok(!JSON.stringify(d1).includes('tokenEnc') && !JSON.stringify(d1).includes('ya29.'), 'the digest (the broadcast payload) never carries the token, encrypted or not');
-  // the pass connect() kicked: discovery under the include query
-  await sleep(80);
+  // the pass connect() kicked: discovery under the include query — waited to its OWN end: it writes lastPass and broadcasts; idle() =
+  // nothing in flight or queued; settleWakes() = the writes it tracks without awaiting (a mail's formatted body, kept at ingest — D2)
+  await atBroadcast(() => !!(gmailRec() || {}).lastPass);
+  await eng.idle('gmail');
+  await eng.settleWakes();
   const convs = eng.digest().conversations.filter((c) => c.adapterId === 'gmail');
   ok(convs.length === 3 && convs.every((c) => !('tracked' in c)), `discovery listed the 3 threads under label:INBOX and every one is fetched (2026-09-26: no opt-in)`, JSON.stringify(convs.map((c) => c.id)));
   const tl = v.calls.filter((c) => c.path.endsWith('/threads'));
@@ -236,7 +247,7 @@ let flowState = null;
   const full1 = v.calls.filter((c) => /\/threads\/thr_ops_0001$/.test(c.path) && c.q.format === 'full').length;
   v.calls.length = 0;
   await eng.refresh('gmail', 'thr_ops_0001');
-  await sleep(120);
+  await eng.idle('gmail');   // refresh() resolves at its answer — the request's pass ends here, not after a sleep
   const msgs = eng.messages('gmail', 'thr_ops_0001', { limit: 50 });
   ok(msgs.length === 2 && msgs[0].vendorId === 'msg_ops_a' && msgs[1].vendorId === 'msg_ops_b', `tracking ingested the thread's two messages oldest-first (${msgs.map((m) => m.vendorId).join(',')})`);
   ok(msgs[0].text === 'the nightly job was slow again, can someone look at the queue?' && msgs[0].author.name === 'Ada' && msgs[0].author.id === 'ada@example.com' && msgs[0].author.isSelf === false, 'the text is the text/plain part (the html sibling ignored); the author parsed from From');
