@@ -33,6 +33,9 @@
 //      re-read removed ⇒ the browser the conversation just started is closed, RED.
 //   F3 THE FIELD'S SHAPE (in ②): 30 records left `ready` with a scratch DIRECTORY and a launch MARK each — each pays the
 //      reap's own road (the directory's lock read, the /proc walk by mark, counted) — still no child start, one per turn.
+//   ⑩ THE RETIRE'S CONTRACT (the 2.369.406 union's red, test-browser-mediation-chrome ⑧b): a record its conversation still holds
+//      is KEPT by a retire — the record AND its browser (F2: nothing of a carried conversation is ended; on 2.369.405 the browser
+//      was stopped first) — and the product's own road, a detach and then the retire, ends it (1 CLI close, the daemon ended).
 //   ④ L3's lifecycle, pinned: a sub-agent's child handle — and its record — lives exactly as long as its parent conversation
 //      is carried (newChild; reconcile §3.7); only a job's handle is dropped earlier (dropChild). The pile is the parent's.
 import { createRequire } from 'node:module';
@@ -290,6 +293,34 @@ console.log('— ⑧ F5: one registry write and one broadcast per PIECE of the w
     const sm = await sweep(M.load('src/server/browser-keeper.js', noBatch, 'no-batch'), registry(300), { stallMs: 0 });
     ok(sm.writes >= 300 && sm.broadcasts >= 300, `MUTANT (the batching dropped) is RED on the law: ${sm.writes} registry writes and ${sm.broadcasts} broadcasts for 300 removals`, { writes: sm.writes, broadcasts: sm.broadcasts });
   }
+}
+
+console.log('— ⑩ the retire\'s contract: a record its conversation still holds is kept with its browser; detach, then retire, ends it');
+const carriedRetire = async (Km, detachFirst) => {
+  const dataDir = path.join(ROOT, 'c' + (++dirN)); fs.mkdirSync(dataDir, { recursive: true });
+  const daemon = spawn('sleep', ['30'], { stdio: 'ignore' });
+  await new Promise((res) => setTimeout(res, 50));
+  const KEY = 'bk-0000c8b8', id = 'bp-18b18b18';
+  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+    profiles: [B.newProfileRecord({ id, label: '(ephemeral) carried', dir: null, ephemeral: true, owner: { kind: 'conversation', id: KEY }, now: 1790000000000 })],
+    leases: [{ profileId: id, browserKey: KEY, sessionId: 'sess-c', targetId: null, since: 1790000000000, input: 'agent', viewers: 0, carrierLostAt: null, alias: 'ephemeral' }],
+    browsers: { [id]: { profileId: id, state: 'ready', pid: daemon.pid, starttime: F.procStart(daemon.pid), cdpUrl: null, ns: 'vs-' + KEY, startedAt: 1790000000000 } },
+    children: {}, told: {}, pins: {} }));
+  const closes = [];
+  const execFileImpl = (bin, args, opts, cb) => { if (Array.isArray(args) && args[0] === 'close') { closes.push(1); try { process.kill(daemon.pid, 'SIGTERM'); } catch { /* gone */ } } const cbk = typeof opts === 'function' ? opts : cb; setTimeout(() => cbk(null, '{"success":true,"data":{}}', ''), 20); return { on() { }, kill() { } }; };
+  const k = Km.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv, execFileImpl }), liveKeys: () => new Set([KEY]), install: false, log: { log() { }, warn() { }, error() { }, info() { } }, tickMs: 3600e3 });
+  try {
+    if (detachFirst) { try { k.detach({ profileId: id, browserKey: KEY, by: 'user' }); } catch { /* none */ } }
+    let answer; try { answer = await k.retireEphemeral(id, 'test'); } catch (e) { answer = { threw: String(e && e.message) }; }
+    await new Promise((res) => setTimeout(res, 100));
+    return { answer, closes: closes.length, running: daemon.exitCode === null && !daemon.signalCode && F.pidAlive(daemon.pid), kept: !!k.profile(id), state: (k.browserOf(id) || {}).state || null };
+  } finally { try { daemon.kill('SIGKILL'); } catch { /* gone */ } try { k.shutdown(); } catch { /* none */ } }
+};
+{
+  const d = await carriedRetire(K, false);
+  ok(d.answer && d.answer.kept === true && d.closes === 0 && d.running && d.kept && d.state === 'ready', `a DIRECT retire of a record its conversation still holds KEEPS it — the record and its browser (answer kept, ${d.closes} CLI close, the daemon ${d.running ? 'running' : 'ENDED'}, state ${d.state})`, d);
+  const r = await carriedRetire(K, true);
+  ok(r.answer && r.answer.removed === true && r.closes === 1 && !r.running && !r.kept, `the product's road — a detach, then the retire (it joins the detach's own) — ENDS it: removed, ${r.closes} CLI close, the daemon ${r.running ? 'LEFT RUNNING' : 'ended'}`, r);
 }
 
 console.log('— ④ L3: the lifecycle of a child record, as the code has it');
