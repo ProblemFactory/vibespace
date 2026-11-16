@@ -1486,7 +1486,12 @@ console.log('— ⑩ lane browser-login (r22): the real agent-browser on the FAK
     const SITE10 = 'https://shop.example.test';
     const PW10 = ['mc10', crypto.randomBytes(6).toString('hex'), 'Kx', String(crypto.randomInt(10, 99))].join('-');
     const eng10 = VE10.create({ dataDir: VD, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
-    const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => new Set([KEY10]), runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, tickMs: 3600e3, engines: REG10 });
+    // lane chrome-157 (2.369.404, the box's own run of this suite): a vault fill runs ONLY on a local MEDIATED profile (the channel law
+    // of vault-login r30, `login_channel_unmediated` otherwise) — ⑩'s world is ⑨'s plus the mediator the law names, as
+    // test-vault-login-chrome's world has it (the leg was written at r22–r29, before that law)
+    const med10 = MED.create({ log: quiet });
+    await med10.listen();
+    const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => new Set([KEY10]), runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, tickMs: 3600e3, engines: REG10, mediator: med10 });
     let srv10 = null, dw10 = null;
     try {
       await eng10.setup(['mc10', crypto.randomBytes(4).toString('hex'), 'second'].join(' '));
@@ -1551,6 +1556,7 @@ console.log('— ⑩ lane browser-login (r22): the real agent-browser on the FAK
     } finally {
       try { dw10 && dw10.shutdown(); } catch { }
       try { kk.shutdown(); } catch { }
+      try { await med10.shutdown(); } catch { }
       try { srv10 && srv10.close(); } catch { }
       try { LD10.shutdown(); } catch { }
       try { eng10.close(); } catch { }
