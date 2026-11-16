@@ -136,8 +136,8 @@ am2.setServeState(U, null);
 am2.setServeState(U, null);
 const EO = build(SLICE, { setting: 'off' });
 EO.noteMemberServeFailure(U, { message: PROD });
-ck('r2 ② under accounts.onDemandQuotaRefresh = off the item NAMES the setting and never says Re-check asks the CLI',
-  EO.todos.length === 1 && /usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly$/.test(EO.todos[0].text) && /On-demand quota refresh is Off in Settings/.test(EO.todos[0].detail) && !/asks the CLI once/.test(EO.todos[0].detail));
+ck('r2 ② under accounts.onDemandQuotaRefresh = off the item NAMES the setting — by its title in Settings, «Claude usage refresh» — and never says Re-check asks the CLI',
+  EO.todos.length === 1 && /usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly$/.test(EO.todos[0].text) && /Claude usage refresh is Off in Settings/.test(EO.todos[0].detail) && !/asks the CLI once/.test(EO.todos[0].detail));
 const OFFMUT = SLICE.replace("todos.add('webui:pool-serve', mode === 'off' ? {", "todos.add('webui:pool-serve', false ? {");
 am2.setServeState(U, null);
 const EOM = build(OFFMUT, { setting: 'off' }); EOM.noteMemberServeFailure(U, { message: PROD });
