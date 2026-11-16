@@ -12292,6 +12292,13 @@ export default {
   "what held it": "卡住它的是",
   "No hold of a second or more since this server started.": "本次启动以来没有一秒以上的卡住。",
   "The latest holds ({n})": "最近的卡住（{n}）",
+  // lane hub-loop-stalls «the number»: ⚙ Diagnostics «Main loop held» — the held seconds per day by cause (src/lib/setup-flows.js heldDaysTable)
+  "Held per day, by cause": "每天卡住的时间（按原因）",
+  "Seconds the main loop was held, and in brackets how many holds — from the telemetry this server keeps. The days are UTC days; today is {day}.": "主循环被卡住的秒数，括号里是卡住的次数——取自这台服务器保存的遥测记录。日期按 UTC 计算；今天是 {day}。",
+  "No hold of a second or more in the last seven days.": "最近七天没有一秒以上的卡住。",
+  "cause": "原因",
+  "today": "今天",
+  "all causes": "全部原因",
   "Profile the server for 10 minutes": "分析服务器 10 分钟",
   "Could not start the profile: {why}": "无法开始分析：{why}",
   "Profiling the server until {time} — then open ⚙ System → Diagnostics report…": "正在分析服务器，到 {time} 结束——之后打开 ⚙ 系统 → 诊断报告…",

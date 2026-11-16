@@ -702,6 +702,7 @@ export function installSetupFlows(App) {
       ${state ? `<p class="dim">${esc(state)}</p>` : ''}
       ${rows ? `<table><tr><td class="n dim">${esc(t('total held'))}</td><td class="n dim">${esc(t('times'))}</td><td class="n dim">${esc(t('worst'))}</td><td class="dim">${esc(t('what held it'))}</td></tr>${rows}</table>` : `<p class="dim">${esc(t('No hold of a second or more since this server started.'))}</p>`}
       ${(lh.holds || []).length ? `<details><summary>${esc(t('The latest holds ({n})', { n: lh.holds.length }))}</summary><pre>${(lh.holds || []).slice(0, 20).map((h) => esc(when(h.at, { seconds: true }) + ' · ' + h.line)).join('\n')}</pre></details>` : ''}
+      ${heldDaysTable(d.loopHeld, { t, esc })}
       ${(() => {
         const pf = lh.profile || {};
         if (pf.running) return `<p><b>${esc(t('A profile is running until {time}.', { time: clockOf(pf.running.until) }))}</b></p>`;
@@ -818,3 +819,20 @@ export function installSetupFlows(App) {
   },
   });
 }
+
+/** lane hub-loop-stalls («the number», the owner's hub 2026-11-16): ⚙ Diagnostics «Main loop held» — THE HELD SECONDS PER
+ *  DAY BY CAUSE, the telemetry summary's `loopHeld` (src/telemetry.js Telemetry.heldDays over the srv-loop-hold-ms rows,
+ *  the cause = the hold's verdict): one row per cause (the seven days' larger first), today / yesterday / the seven days,
+ *  then «all causes»; each cell the seconds and, in brackets, the holds. The days are the SERVER's UTC dates — nothing here
+ *  reads a clock or a zone. A server older than the field ⇒ nothing. */
+function heldDaysTable(held, { t, esc }) {
+  const ps = held && held.today && held.yesterday && held.week ? [held.today, held.yesterday, held.week] : null;
+  if (!ps) return '';
+  const head = `<h3>${esc(t('Held per day, by cause'))}</h3><p class="dim">${esc(t('Seconds the main loop was held, and in brackets how many holds — from the telemetry this server keeps. The days are UTC days; today is {day}.', { day: held.today.from }))}</p>`;
+  if (!held.week.count) return head + `<p class="dim">${esc(t('No hold of a second or more in the last seven days.'))}</p>`;
+  const cell = (c) => `<td class="n">${c && c.count ? `<b>${esc((c.ms / 1000).toFixed(1))} s</b> <span class="dim">(${esc(String(c.count))})</span>` : '—'}</td>`;
+  const row = (label, of) => `<tr><td>${label}</td>${ps.map((p) => cell(of(p))).join('')}</tr>`;
+  const rows = (held.week.causes || []).map((c) => row(esc(c.cause), (p) => (p.causes || []).find((x) => x.cause === c.cause))).join('');
+  return head + `<table><tr><td class="dim">${esc(t('cause'))}</td><td class="n dim">${esc(t('today'))}</td><td class="n dim">${esc(t('yesterday'))}</td><td class="n dim">${esc(t('7 days'))}</td></tr>${rows}${row(`<b>${esc(t('all causes'))}</b>`, (p) => p)}</table>`;
+}
+// end heldDaysTable

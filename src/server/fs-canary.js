@@ -26,6 +26,7 @@ const { SafeFs } = require('../safe-fs.js');
 const DEADLINE_MS = 5000;
 const SLOW_MS = 1000;
 const STRIKES = 3;
+const NO_SITE = '(not the hub\'s own code)';   // a held call no frame of src/ or server.js made (the witness's caller is null; its siteOf's words)
 
 function createFsCanary({ file, record = () => {}, log = (...a) => console.error(...a), onWedged = () => {}, onProbe = () => {},
   deadlineMs = DEADLINE_MS, slowMs = SLOW_MS, probe = null, now = () => Date.now(), blame = null, witness = null, onHeld = () => {}, episodeMs = null } = {}) {
@@ -51,7 +52,9 @@ function createFsCanary({ file, record = () => {}, log = (...a) => console.error
     counts.held++;
     const line = SW.heldLine(loopMs, e);
     log(line);
-    record({ kind: 'metric', name: 'srv-sync-fs-held-ms', value: Math.round(e.ms), detail: `fn=${e.fn} class=${e.class}` });
+    // the call SITE too (lane hub-loop-stalls, «the number»): the witness's src/ frame — file:line and the function
+    // («src/channel-store.js:275 writeJsonAtomic», a code location only) — so the rows count the holds by the call that held
+    record({ kind: 'metric', name: 'srv-sync-fs-held-ms', value: Math.round(e.ms), detail: `fn=${e.fn} class=${e.class} site=${e.caller || NO_SITE}` });
     if (e.mount && e.ms >= EPISODE) { counts.heldOnMount++; try { onHeld(e); } catch { } }
     return line;
   }
