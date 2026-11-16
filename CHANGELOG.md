@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.405 — 2026-11-16
+
+### Fixed
+- Website logins now work from a chat that runs on an Antigravity account; filling from the vault was refused there as "config unavailable".
+
 ## 2.369.404 — 2026-11-15
 
 ### Changed
