@@ -847,6 +847,7 @@ require('./src/server/account-usage-routes.js').create({
   getMounts: () => { try { return mounts; } catch { return null; } }, getModels: () => AVAILABLE_MODELS, refreshModels: () => refreshHarnessModels(), getIntegrations: () => { try { return integrationsWiring.store; } catch { return null; } }, // + the harness catalogs a built-in model provider lists (lane provider-record); + their mtime-guarded re-read and the Integrations store a provider's key is read from (lane models-at-session)
   getTelemetry: () => { try { return telemetry; } catch { return null; } },
   getUsageHistory: () => { try { return usageHistory; } catch { return null; } }, broadcastAll: (m) => bcastAll(m), getLoginExpiryWatch: () => { try { return loginExpiryWatch; } catch { return null; } }, getCliCmds: () => cliCmds, // + the CLI registry the on-demand usage reading checks (lane antigravity-card-fixes) ← constructed BELOW this stanza; lazy, like every other late singleton (拆分 P1). Sharing a line because server.js is AT the size ratchet — the wiring stanza may not grow.
+  harnessSetting: (...a) => harnessSetting(...a), // + the vendor's own row the on-demand usage door asks for an automatic read (lane usage-predict, one row per vendor)
 });
 // ── Session status (agent-set via vibespace-status CLI, user-overridable) ──
 // The user's override of an agent-set status is injected as a system-reminder

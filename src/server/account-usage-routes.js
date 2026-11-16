@@ -21,7 +21,7 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth, engine,
   serverSetting, recordUsageAttribution, liveAccountIdSet, broadcastActiveSessions = () => { }, broadcastAll = () => { },
   buildClaudeSubscriptionLoginCommand, getAccounts, getHosts, getMounts, getModels = () => ({}), refreshModels = () => { }, getIntegrations = () => null,
-  getTelemetry, getUsageHistory, getLoginExpiryWatch, getCliCmds = () => null }) {
+  getTelemetry, getUsageHistory, getLoginExpiryWatch, getCliCmds = () => null, harnessSetting = null }) {
   const { clearSealedOrders } = engine;
   // r4: a conversation whose cold restart is already in flight is never handed to
   // a client again (a second request resumes it twice) — the engine's ONE rule
@@ -989,7 +989,7 @@ const usageDoor = require('./cli-usage-door.js').createCliUsageDoor({
   accounts, harnessOf: (id) => { try { return require('../harnesses').get(id); } catch { return null; } },
   cliCmds: { check: (...a) => (getCliCmds() ? getCliCmds().check(...a) : Promise.resolve(null)) },
   cacheDir: path.join(rootDir, 'data', 'usage-cache'), agentEnv: () => require('../ws-handler').agentEnv(),
-  setting: (k) => serverSetting(k),
+  setting: (k) => serverSetting(k), harnessSetting,   // the vendor's own row (antigravity.autoUsageReads) — the typed per-harness read
 });
 // …and its SECOND caller (lane agy-wall-signal, the owner's ruling «A» 2026-11-02): a usage wall an account's conversation
 // names is written as a reading and fires ONE read of that account through this same door (src/server/stream-wall.js —

@@ -445,6 +445,21 @@ const HARNESS_SETTINGS = {
       apply: { kind: 'spawn', how: '--model', via: 'model' },
     },
     {
+      // THE VENDOR'S OWN ROW FOR ITS AUTOMATIC USAGE READS (lane usage-predict, 2026-11-16 — the owner looked at the quota row and
+      // asked «fable是antigravity吗？»: these two reads hung on Claude's row). src/server/cli-usage-door.js asks it for the two
+      // automatic callers only (the wall read, the after-turn read); a person's ⟳ asks no row. Migration
+      // 2026-11-agy-reads-follow-claude-off (src/server/migrations.js) keeps it off where the shared row was off.
+      key: "autoUsageReads",
+      type: "enum", default: "on",
+      options: [
+        { value: "on", label: t("Automatically") },
+        { value: "off", label: t("Only when I press ⟳") },
+      ],
+      label: t("Antigravity usage reads"),
+      description: t("Automatically: an account's usage is read once when a conversation hits a usage wall, and once when its stretch of work ends and 5 minutes pass with no new turn — at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press ⟳: nothing is read by itself; the ⟳ on the account's row still reads it."),
+      apply: { kind: 'server', how: 'the CLI usage door — the wall read and the after-turn read' },
+    },
+    {
       key: "defaultEffort",
       type: "enum", default: "",
       options: [

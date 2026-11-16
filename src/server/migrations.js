@@ -969,6 +969,15 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: AGY_READS_MIGRATION_ID,
+      note: "ONE ROW PER VENDOR (lane usage-predict; the owner looked at the quota row on 2026-11-16 and asked «fable是antigravity吗？»): Antigravity's two automatic usage reads (after a usage wall, after a stretch of work) leave Claude's row (accounts.onDemandQuotaRefresh) for their own, antigravity.autoUsageReads — and an instance whose shared row was Off keeps them off: nobody gets a read they turned off",
+      run() {
+        const rep = agyReadsFollowClaudeOff(path.join(dataDir, 'settings.json'));
+        console.log(`[migrate] ${AGY_READS_MIGRATION_ID}: ${rep.why}`);
+        return rep;
+      },
+    },
+    {
       id: CLOAK_MIGRATION_ID,
       note: "CLOAKBROWSER INSTALLS AS A PLUGIN (lane engine-spi-egress L3 + its acceptance rounds 2 and 3, design-desk cloak-plugin.md §4 + its addendum §3 — the owner 2026-11-01/02: 「把cloakbrowser也做成插件，默认不要包含」「cloakbrowser直接去掉吧」): the core keeps no CloakBrowser of its own, so what this instance holds of it moves to the plugin `vibespace.cloak-browser` ONCE — no shim, no auto-install, nothing deleted. READ first — its own archive, data/browser-profiles.json, data/settings.json, the plugin's seeds.json: a torn or unreadable one FAILS by name before any write (retried at the next boot). VibeSpace's earlier download is carried ONLY when its install proof says so (data/browser-tools/cloak-installed.json names the measured build and the file hashes to it — the hash STREAMED, the row then STEPPED and the keeper's boot waiting for it; never on a retry that already has its verdict); otherwise it is left out, said as unverified. ARCHIVE BEFORE STRIP: the archive is the FIRST write (pending until the notice is out) and holds everything the run displaces; a retry resumes that judgement — the same end state, one notice in the first run's words, its `via` too. Then, each step idempotent: the seeds merged into seeds.json (never over the plugin's own); the program path + the site list into the plugin's rows (never over a value they hold), both old keys stripped; THROUGH the live keeper: every CloakBrowser profile → chromium + the plugin as its build, a defaultBackend of CloakBrowser cleared everywhere, a running one marked endAtBoot (ended by identity before adoption — and a record a failed run leaves is ended by the keeper's unreadable-record rule), the old proxy / seat / major readings dropped, an open proposal re-judged unavailable, a site hint naming it kept as tier 2 (the plugin has a program row) or dropped and archived; ONE For-you notice — only when something moved.",
       run() { return migrateCloakToPlugin(); },
@@ -1529,4 +1538,20 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   return { runLocalMigrations, MIGRATIONS, grantsStoreBoot };
 }
 
-module.exports = { create, beforeBrowserBoot, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS, CLOAK_PLUGIN_ID, CLOAK_MIGRATION_ID, CLOAK_PLUGIN_WORDS };
+// ── ONE ROW PER VENDOR (lane usage-predict, 2026-11-16) ───────────────────────────────────────────────────────────────
+// Before it, Claude's row (accounts.onDemandQuotaRefresh) also governed Antigravity's two automatic usage reads, and its Off
+// stopped them. They have their own row now (antigravity.autoUsageReads, default on). An instance whose shared row was Off gets
+// the new row Off — written only where it holds no value of its own; anything else is left as it is. → { changed, why }.
+const AGY_READS_MIGRATION_ID = '2026-11-agy-reads-follow-claude-off';
+function agyReadsFollowClaudeOff(file) {
+  let doc; try { doc = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return { changed: false, why: 'no settings file — nothing was turned off' }; }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return { changed: false, why: 'the settings file holds no object — left as it is' };
+  if (doc['accounts.onDemandQuotaRefresh'] !== 'off') return { changed: false, why: `Claude's row is ${JSON.stringify(doc['accounts.onDemandQuotaRefresh'] || 'manual')} — Antigravity's automatic reads stay on (their default)` };
+  if (doc['antigravity.autoUsageReads'] !== undefined) return { changed: false, why: `antigravity.autoUsageReads already holds ${JSON.stringify(doc['antigravity.autoUsageReads'])} — left as it is` };
+  doc['antigravity.autoUsageReads'] = 'off';
+  fs.writeFileSync(file + '.tmp', JSON.stringify(doc, null, 2));
+  fs.renameSync(file + '.tmp', file);
+  return { changed: true, why: "Claude's row was Off — Antigravity's automatic usage reads are Off too (antigravity.autoUsageReads = off)" };
+}
+
+module.exports = { AGY_READS_MIGRATION_ID, agyReadsFollowClaudeOff, create, beforeBrowserBoot, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS, CLOAK_PLUGIN_ID, CLOAK_MIGRATION_ID, CLOAK_PLUGIN_WORDS };
