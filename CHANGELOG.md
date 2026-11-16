@@ -47,6 +47,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The default model choice in Settings says Default in your language, and the OpenCode background service plugin has its name in your language.
 - The Machines section's caption is no longer shown in capital letters.
 - A time in the hour that repeats when daylight saving ends says its offset, so the two are told apart.
+- The estimated cost under a chat was counted several times over in long conversations; it now shows the agent's own total, with thousands separators.
 
 ## 2.369.402 — 2026-11-14
 
