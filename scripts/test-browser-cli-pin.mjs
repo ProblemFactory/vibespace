@@ -256,8 +256,23 @@ async function slotBoundLeg(KK) {
 console.log('— ③ the agent\'s CLI reads the pin beside itself; browser-env\'s floor follows it');
 {
   const cli = read('data/bin/vibespace-browser');
-  ok(/return V\.resolveRealBinary\(\{[^\n]*pinned: pinned \? pinnedCli\(\) : null \}\);/.test(cli) && /\n  let bin = realBinary\(\);\n/.test(cli) && /const toolsDir = path\.join\(__dirname, '\.\.', 'browser-tools'\);/.test(cli) && /V\.cliPinVerdict\(JSON\.parse\(fs\.readFileSync\(path\.join\(toolsDir, 'cli-pin\.json'\)/.test(cli),
-    'data/bin/vibespace-browser resolves the real binary with the pin read BESIDE itself (data/browser-tools/cli-pin.json; a remote machine has none ⇒ PATH)');
+  // hotfix 2.369.405 (lane vault-login): the CLI decides first whether the command STARTS the browser program — a vault fill
+  // (the hub fills through its own socket) and a verb of our own (runOursPage) start nothing and get no program; EVERY OTHER
+  // command resolves the program through realBinary(), with the pin read beside the CLI. The law in that form:
+  const pinLaw = (src) => /return V\.resolveRealBinary\(\{[^\n]*pinned: pinned \? pinnedCli\(\) : null \}\);/.test(src)
+    && /\n  const startsNothing = Boolean\(\(isVaultFill && vaultFillArgs\) \|\| cls\.ours\);\n/.test(src)
+    && /\n  let bin = startsNothing \? \{ ok: true, path: '' \} : realBinary\(\);\n/.test(src)
+    && /const toolsDir = path\.join\(__dirname, '\.\.', 'browser-tools'\);/.test(src) && /V\.cliPinVerdict\(JSON\.parse\(fs\.readFileSync\(path\.join\(toolsDir, 'cli-pin\.json'\)/.test(src);
+  ok(pinLaw(cli), 'data/bin/vibespace-browser resolves the real binary with the pin read BESIDE itself (data/browser-tools/cli-pin.json; a remote machine has none ⇒ PATH) for every command that starts the program; only a vault fill and a verb of our own (they start nothing) get none');
+  // …and it CAN STILL FAIL: a copy that hands a program-starting verb an empty program, one that calls every command one
+  // that starts nothing, one that widens «starts nothing» past its two kinds, and one that drops the pin — each is red
+  const pinMutants = [
+    ['every command gets an empty program', cli.replace("  let bin = startsNothing ? { ok: true, path: '' } : realBinary();", "  let bin = { ok: true, path: '' };")],
+    ['every command «starts nothing»', cli.replace('  const startsNothing = Boolean((isVaultFill && vaultFillArgs) || cls.ours);', '  const startsNothing = true;')],
+    ['«starts nothing» widened to every fill', cli.replace('  const startsNothing = Boolean((isVaultFill && vaultFillArgs) || cls.ours);', "  const startsNothing = Boolean(cls.verb === 'fill' || cls.ours);")],
+    ['the pin dropped', cli.replace('pinned: pinned ? pinnedCli() : null', 'pinned: null')],
+  ];
+  ok(pinMutants.every(([, src]) => src !== cli && !pinLaw(src)), 'CONTROL: each mutant of that law is RED — an empty program for a verb that starts it, every command or every fill «starts nothing», the pin dropped', pinMutants.map(([n, src]) => ({ n, applied: src !== cli, law: pinLaw(src) })));
   const m = /\nfunction pinnedCli\(\) \{[\s\S]*?\n\}\n/.exec(cli);
   const fakeDir = path.join(ROOT, 'clihome', 'data', 'bin'); fs.mkdirSync(fakeDir, { recursive: true });
   const tools = path.join(ROOT, 'clihome', 'data', 'browser-tools'); fs.mkdirSync(tools, { recursive: true });
