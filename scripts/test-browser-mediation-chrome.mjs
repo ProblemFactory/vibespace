@@ -1259,6 +1259,10 @@ console.log('— ⑧b lane engine-args-string: a conversation\'s browser born on
         '⑧b the engine\'s switches HOLDING A COMMA reach the kernel whole through the REAL CLI (--window-size=1234,567, --disable-features=A,B — each the last of its name)', JSON.stringify(argvB.filter((a) => /^--(window-size|disable-features)=/.test(a))));
       if (urlB && B_isLoop(urlB)) { cB = cdpClient(urlB); await cB.open; const gv = await cB.call('VibeSpace.getVersion'); ok(gv.result && gv.result.protocol === 1, '⑧b our own CDP socket on the kernel\'s DevToolsActivePort: VibeSpace.getVersion answers — the KERNEL runs, never Chrome in its place', JSON.stringify(gv)); cB.ws.close(); cB = null; }
       else ok(false, '⑧b our own CDP socket on the kernel\'s DevToolsActivePort: VibeSpace.getVersion answers — the KERNEL runs, never Chrome in its place', `no DevToolsActivePort under ${udd || '(no --user-data-dir)'}`);
+      // keeper-sweep-yields (2.369.407): the conversation lets go FIRST — a detach, the road every product caller takes before a retire
+      // (detach, dropChild and the orphan sweep drop or check the lease); a retire of a record its conversation still holds keeps the
+      // record AND its browser now (nothing of a carried conversation is ended) — the retire then joins the detach's own (single flight)
+      try { kk.detach({ profileId: eph.profileId, browserKey: KEYB, by: 'user' }); } catch { }
       try { await kk.retireEphemeral(eph.profileId, 'test'); } catch { }
       LDB.shutdown();
       await sleep(600);
