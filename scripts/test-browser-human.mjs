@@ -1436,7 +1436,12 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const sites = siteCount(fnAtBy(true)), sites0 = siteCount(fnAtBy(false));
   // conversation-only: admission, caps, pins, the takeover's siblings, the re-judge, the ephemeral records, the timers, the
   // log lines that count conversations — each needs a CONVERSATION (his row has no session, no key an agent could hold)
-  const CONVERSATION = { ephEventFields: 1, ephemerals: 1, leasesFor: 1, leasesOn: 1, removeVerdict: 1, updateProfileNow: 1, knownKeysOf: 1, rejudgeLeases: 1, ceilingNow: 1, ownsLive: 1, ownLive: 1, ensureEphemeral: 2, retireEphemeral: 1,
+  const CONVERSATION = { ephEventFields: 1, ephemerals: 1, leasesFor: 1, leasesOn: 1, removeVerdict: 1, updateProfileNow: 1, knownKeysOf: 1, rejudgeLeases: 1, ceilingNow: 1, ownsLive: 1, ownLive: 1, ensureEphemeral: 2, retireEphemeral: 2,
+    // lane keeper-sweep-yields (2.369.407): retireEphemeral's second site reads «is this record's CONVERSATION carried again» once
+    // more after the reap's await, before any stop (a conversation resumed meanwhile keeps its browser); retireInSteps asks the same
+    // of each orphan before its step — an ephemeral record's lease is its conversation's, and the person's own row never holds one
+    // (browseYourselfVerdict: an ephemeral profile is not_attachable), so both are conversation questions, never «is it used»
+    retireInSteps: 1,
     keepRebound: 1, takeRebound: 1, // verify r3 (F4): the rebound note rides the CONVERSATION's lease until an answer carries it (his row binds no tab of ours)
     attach: 7 /* lane browser-resume C: + the rebind's new tab as its lease's root; verify r2 F2: the queued rebind re-asks for ITS OWN lease after the wait (conversation-only) */, detach: 3, stop: 1, releaseAll: 1, browse: 1, endHuman: 1, quitHuman: 1, navigateHuman: 1, mirrorLeaseInput: 1, takeover: 1, siblingLeases: 1, noteLeaseUrl: 1, inputSummaryFor: 1, handBackOnStop: 1, statusFor: 3 /* + lane jobs-browser: a job's window is its conversation's helper row (the 2.369.202 integration) */, liveHoldingFor: 1, setFor: 1, driveHolderFacts: 1, noteDrive: 1, dropChild: 3, switcherView: 1, switchBackend: 1, reconcile: 3, boot: 1, tick: 1, ensureTimer: 1, api: 1,
     requestLeaseHeld: 1, // lane browser-takeover-queue: does the conversation that asked still hold that browser (its own lease — his row is no request's)
