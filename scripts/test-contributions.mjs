@@ -960,8 +960,9 @@ console.log('contributions — D. wiring pins');
   const slErr = [...sl.matchAll(/msg\.type === 'error'\)?[^\n]*/g)].map((m) => m[0]);
   // ONE declared exception (lane phone-resume-keeps-layout r4 N2): an error naming NO request (an older hub's «Failed to spawn session» /
   // «Unknown host» — this hub names the request) only RELEASES the pending resume's wait (`settled()` — a next press creates again);
-  // it rescues, closes and binds nothing, and the request stays armed
-  const RELEASE = /^msg\.type === 'error' && !msg\.reqId && !msg\.sessionId\) settled\(\);$/;
+  // it rescues, closes and binds nothing, and the request stays armed; since lane resume-all-paced (L1) it names its end
+  // (`settled('error', msg)` — createSession's onCreateEnd tells a bulk resume the create ended, so the next one may go)
+  const RELEASE = /^msg\.type === 'error' && !msg\.reqId && !msg\.sessionId\) settled\('error', msg\);$/;
   ok(slErr.length >= 4 && slErr.every((l) => /msg\.(reqId|sessionId) === /.test(l) || RELEASE.test(l)) && slErr.filter((l) => RELEASE.test(l)).length <= 1, 'session-lifecycle error handlers are reqId/sessionId/viewId/virtualId-gated (one declared release of a pending resume\'s wait)', J(slErr));
   ok(/if \(d\.sessionId\) \[\.\.\.\(this\.handlers\.get\(d\.sessionId\)/.test(read('src/lib/ws.js')), 'ws.js routes session-scoped handlers by d.sessionId only');
   // plugin host API
