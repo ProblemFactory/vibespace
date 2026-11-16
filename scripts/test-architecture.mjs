@@ -3274,7 +3274,8 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
 {
   const ENGP = 'src/server/channels-engine.js';
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
-  const GATE = /\b(?:ACL\.canSee\(|reachFor\(ctx\b|stillSees\((?:ctx|\{)|agentProposalView\((?:ctx|by)\b|mayHear\(|stillInEffect\(|stillWatched\b|drafterSees\(|withdrawRefusal\(|F\.rowNames\(r, ctx\))/g;
+  // lane grants-read-is-a-lookup: `reachOf(rec, en)` is ONE walk's reader of the same reach (channels-access reachWalkOf(ctx)) — asked per conversation, as reachFor was
+  const GATE = /\b(?:ACL\.canSee\(|reachFor\(ctx\b|reachOf\(rec, en\)|stillSees\((?:ctx|\{)|agentProposalView\((?:ctx|by)\b|mayHear\(|stillInEffect\(|stillWatched\b|drafterSees\(|withdrawRefusal\(|F\.rowNames\(r, ctx\))/g;
   const DATA = /\b(?:store\.(?:readTail|readSide|search|findRecord)\(|withView\(|threadRead\(|reactionsFor\(|proposalView\b|deliver\.(?:stashFor|deliverToConversation)\()/;
   // lane channel-attach-read: an agent's attachment hands EVERY answer to agentAttachmentAnswer, which asks reach again
   const FOLLOW = { withdrawProposal: ['withdrawNow'], attachment: ['agentAttachmentAnswer'] };
@@ -6096,10 +6097,11 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   const badW = wFiles.flatMap(([f, s]) => judgeWords97(f, s));
   ok(!badW.length, `§97 (a) per function body: every reader function of the ${READERS97.length} readers names groups / taskIds / groupIds only in its parameters and the facts it hands to GM.admits (${Object.keys(WORDS_ALLOW97).length} allowed read, with its reason)${badW.length ? ' — ' + badW.slice(0, 6).join(' · ') : ''}`);
   const ACL97 = read('src/channel-acl.js');
-  const plantA = ACL97.replace("  const e = GM.fromChannelPrincipal(p);\n  if (!e) return false;", "  if (p.kind === 'group') return Array.isArray(ctx.groups) && ctx.groups.includes(p.id);\n  const e = GM.fromChannelPrincipal(p);\n  if (!e) return false;");
+  // lane grants-read-is-a-lookup: principalApplies' head asks the prepared one-entry row (preparedOf) — the plant goes before it
+  const plantA = ACL97.replace("  const n = preparedOf(grant, p);\n  if (!n) return false;", "  if (p.kind === 'group') return Array.isArray(ctx.groups) && ctx.groups.includes(p.id);\n  const n = preparedOf(grant, p);\n  if (!n) return false;");
   ok(plantA !== ACL97 && judgeA([['src/channel-acl.js', plantA]]).length === 1 && judgeWords97('src/channel-acl.js', plantA).length > 0, '§97 (a) CONTROL: the pre-unify `ctx.groups.includes(p.id)` planted back into channel-acl is RED (the line census and the body census)');
   // the verify's gates-plant4: the same test through an alias — the line census cannot see it, the body census must
-  const plantA2 = ACL97.replace("  const e = GM.fromChannelPrincipal(p);\n  if (!e) return false;", "  const gs = Array.isArray(ctx.groups) ? ctx.groups : []; if (p.kind === 'group' && gs.includes(p.id)) return true;\n  const e = GM.fromChannelPrincipal(p);\n  if (!e) return false;");
+  const plantA2 = ACL97.replace("  const n = preparedOf(grant, p);\n  if (!n) return false;", "  const gs = Array.isArray(ctx.groups) ? ctx.groups : []; if (p.kind === 'group' && gs.includes(p.id)) return true;\n  const n = preparedOf(grant, p);\n  if (!n) return false;");
   ok(plantA2 !== ACL97 && judgeA([['src/channel-acl.js', plantA2]]).length === 0 && judgeWords97('src/channel-acl.js', plantA2).some((l) => /principalApplies reads `groups`/.test(l)), '§97 (a) CONTROL (verify F3, gates-plant4): an ALIASED `const gs = ctx.groups; … gs.includes(p.id)` in principalApplies is RED by the body census (the line census alone stays green on it)');
   // (b)
   const OLD97 = [

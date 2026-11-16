@@ -1601,8 +1601,29 @@ function rowNames(row, ctx) {
   if (p.target && str(p.target) !== str(ctx.id)) return false;   // a fan-out item names its own conversation only
   // lane grants-unify: THE model over this row's principal, minus the row's `except` (a member left out of its group's
   // access / All agents is not named by it — its own row still is)
+  const n = namedRowOf(p, row.except);
+  return !!n && GM.admits([n], namedFactsOf(ctx)).ok;
+}
+// A CHECK IS A LOOKUP (lane grants-read-is-a-lookup — an agent's list asks this per listed row, per access row): the
+// principal's one-entry row is normalised ONCE per principal object (the channel door hands the same objects until its store
+// changes) and the asker's facts ONCE per ctx object, each re-made the moment a field it was made from is not the same value
+// (the same memo as channel-acl principalApplies; THE model judges both — GM.prepareRow / GM.prepareFacts / GM.admits).
+const _namedRows = new WeakMap();   // principal → { x, xn, kind, id, name, n }
+function namedRowOf(p, x) {
+  const xn = Array.isArray(x) ? x.length : -1, m = _namedRows.get(p);
+  if (m && m.x === x && m.xn === xn && m.kind === p.kind && m.id === p.id && m.name === p.name) return m.n;
   const e = GM.fromChannelPrincipal(p);
-  return !!e && GM.admits([{ door: 'channel-reach', resource: '-', to: [e], except: Array.isArray(row.except) ? row.except : [] }], { conversationKey: str(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : [] }).ok;
+  const n = e ? GM.prepareRow({ door: 'channel-reach', resource: '-', to: [e], except: Array.isArray(x) ? x : [] }) : null;
+  _namedRows.set(p, { x, xn, kind: p.kind, id: p.id, name: p.name, n });
+  return n;
+}
+const _namedFacts = new WeakMap();  // ctx → { id, groups, n, F }
+function namedFactsOf(ctx) {
+  const g = ctx.groups, gn = Array.isArray(g) ? g.length : -1, m = _namedFacts.get(ctx);
+  if (m && m.id === ctx.id && m.groups === g && m.n === gn) return m.F;
+  const F = GM.prepareFacts({ conversationKey: str(ctx.id), groupIds: Array.isArray(g) ? g : [] });
+  _namedFacts.set(ctx, { id: ctx.id, groups: g, n: gn, F });
+  return F;
 }
 // ── ALL AGENTS: the watcher FAN-OUT (lane everyone-principal) ────────────
 
