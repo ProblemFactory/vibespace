@@ -595,6 +595,9 @@ async function measure(o = {}) {
         if (a && M.mode.fail401.has(a)) { rec.status = 401; res.writeHead(401, { 'content-type': 'application/json', 'request-id': 'req_401' }); res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'OAuth token has expired. Please obtain a new token or refresh your existing token.' } })); return; }
         if (a && M.mode.reject429.has(a)) { rec.status = 429; res.writeHead(429, { 'content-type': 'application/json', ...rlHeaders(a, true) }); res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'Error' } })); return; }
         if (!a) { rec.status = 401; res.writeHead(401, { 'content-type': 'application/json' }); res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } })); return; }
+        // ONE stream answer, ONE error path (test-oat-measure-fake's census names each once): the plan's tool_use (on a timer,
+        // `holdMs` after the request lands) or the text
+        let answer = null, hold = null;
         // THE TURN PLAN (lane readings-attribution-2, P0 — when does a RUNNING claude follow a re-point INSIDE a turn?): a
         // main-thread request (it carries the Read tool) takes the plan's next step — a tool_use the CLI runs before its next
         // request of the SAME turn. `arrive` runs as the request lands (the pool's move, mid-turn); `holdMs` holds the answer,
@@ -603,10 +606,11 @@ async function measure(o = {}) {
         if (plan && j?.stream && Array.isArray(j.tools) && j.tools.some((x) => x && x.name === 'Read')) {
           const st = plan.steps[plan.n] || null; rec.planStep = plan.n++;
           if (st && typeof st.arrive === 'function') { try { st.arrive(rec); } catch (e) { event('plan arrive', e); } }
-          if (st && st.tool) { setTimeout(() => sseTool(res, j?.model || 'claude-x', st.tool, rlHeaders(a, false)).catch((e) => event('sse', e)), Number(st.holdMs) || 0); return; }
+          if (st && st.tool) { answer = () => sseTool(res, j?.model || 'claude-x', st.tool, rlHeaders(a, false)); hold = Number(st.holdMs) || 0; }
         }
         const text = `ok from ${a}`;
-        if (j?.stream) sse(res, j?.model || 'claude-x', text, rlHeaders(a, false)).catch((e) => event('sse', e));
+        if (!answer && j?.stream) answer = () => sse(res, j?.model || 'claude-x', text, rlHeaders(a, false));
+        if (answer) { const go = () => answer().catch((e) => event('sse', e)); if (hold != null) setTimeout(go, hold); else go(); }
         else { res.writeHead(200, { 'content-type': 'application/json', ...rlHeaders(a, false) }); res.end(JSON.stringify({ id: 'msg_x', type: 'message', role: 'assistant', model: j?.model || 'claude-x', content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 12, output_tokens: 3 } })); }
         return;
       }
