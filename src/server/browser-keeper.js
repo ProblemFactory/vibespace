@@ -117,6 +117,8 @@ function writeJsonAtomic(file, obj) {
   fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: FILE_MODE });
   fs.renameSync(tmp, file);
 }
+/** keeper-sweep-yields F5: a piece of the orphan walk — at most one registry write and one broadcast per this much of the REAL clock (and at its end). */
+const SWEEP_PIECE_MS = 250;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const namedError = (code, msg, extra = {}) => { const e = new Error(msg); e.code = code; Object.assign(e, extra); return e; };
 
@@ -4018,8 +4020,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** keeper-sweep-yields L1: THE ORPHAN SWEEP IN BOUNDED STEPS — one record per step, the main loop given back before each
    *  (setImmediate), so no loop turn holds more than one record's retire whatever the count (kb-design-lessons §19: no step
    *  holds the loop 250 ms); at boot and on the tick alike. A record whose conversation is carried again by the time its step
-   *  comes is kept (no stop, no removal). Each removal commits the registry (removeProfile), so a restart resumes the sweep
-   *  where the last process stopped. Its one reason is the conversation's end (test-architecture §54b reads every
+   *  comes is kept (no stop, no removal). The walk's removals reach the registry file once per piece and at its end (F5, below),
+   *  and at a stop (shutdown, K1), so a restart redoes at most one piece. Its one reason is the conversation's end (test-architecture §54b reads every
    *  retireEphemeral caller's reason as a literal). → the results in order. */
   const yieldLoop = () => new Promise((res) => setImmediate(res));
   // keeper-sweep-yields F5: ONE REGISTRY WRITE AND ONE BROADCAST PER PIECE OF THE WALK, NOT PER RECORD — a removal the walk
@@ -4027,7 +4029,6 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // REAL clock — never the injected now) and at its end. The keeper's batched() is synchronous (its finally runs when fn
   // returns), so around an async walk it would defer every other conversation's commit too; only the walk's own are deferred.
   // A restart redoes at most one piece (the file still names the records removed since the last write).
-  const SWEEP_PIECE_MS = 250;
   async function retireInSteps(ids) {
     const out = [];
     let pieceAt = Date.now();
@@ -7407,7 +7408,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { stopTimer(); disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty) save(); installs.shutdown(); /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
+  function shutdown() { stopTimer(); disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 
@@ -7841,4 +7842,4 @@ function browserIdentityOfRecord(rec, url = '') {
   return uuid || proc ? `${uuid}|${proc}` : null;
 }
 
-module.exports = { create, keeper, browserIdentityOfRecord, STORE_FILE, AUDIT_FILE, TICK_MS, STOP_GRACE_MS, ARM_WAIT_MS, RESOURCE_METRIC, EPHEMERAL_DETACH_NOTE };
+module.exports = { create, keeper, browserIdentityOfRecord, SWEEP_PIECE_MS, STORE_FILE, AUDIT_FILE, TICK_MS, STOP_GRACE_MS, ARM_WAIT_MS, RESOURCE_METRIC, EPHEMERAL_DETACH_NOTE };
