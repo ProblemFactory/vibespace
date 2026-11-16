@@ -111,7 +111,7 @@ const CLOAK_PLUGIN_WORDS = Object.freeze({
 // `tasks` (lane task-group-context) is the LIVE TaskGroupManager (or a getter): it holds data/task-groups.json in memory
 // and saves it whole, so the Context-table migration goes THROUGH it (`migrateContextRows`), the file only when there is
 // none (a suite).
-function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null, hosts = null, accounts = null, plugins = null, integrations = null, grants = null, note = null, tasks = null, usageHistory = null,
+function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null, hosts = null, accounts = null, plugins = null, integrations = null, grants = null, note = null, tasks = null, usageHistory = null, settings = null,
   // 2026-11-cloak-to-plugin's measured build (CLOAK_OLD.measured): a SEAM for the suites only — a suite cannot ship the 200 MB
   // Chromium whose SHA-256 the base install stamped, so it hands the facts of the small file it plants
   cloakMeasured = CLOAK_OLD.measured }) {
@@ -963,7 +963,10 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       id: AGY_READS_MIGRATION_ID,
       note: "ONE ROW PER VENDOR (lane usage-predict; the owner looked at the quota row on 2026-11-16 and asked «fable是antigravity吗？»): Antigravity's two automatic usage reads (after a usage wall, after a stretch of work) leave Claude's row (accounts.onDemandQuotaRefresh) for their own, antigravity.autoUsageReads — and an instance whose shared row was Off keeps them off: nobody gets a read they turned off",
       run() {
-        const rep = agyReadsFollowClaudeOff(path.join(dataDir, 'settings.json'));
+        const st = typeof settings === 'function' ? settings() : settings;
+        // no live store: nothing to do on disk ⇒ done; something to do ⇒ FAILS by name, runs at the next boot (the plugin moves' rule)
+        if (!st && !peek('settings.json', (d) => d['accounts.onDemandQuotaRefresh'] === 'off' && d['antigravity.autoUsageReads'] === undefined)) { console.log(`[migrate] ${AGY_READS_MIGRATION_ID}: nothing to do on disk (no live settings store was needed)`); return { changed: false, why: 'nothing to do' }; }
+        const rep = agyReadsFollowClaudeOff(st);
         console.log(`[migrate] ${AGY_READS_MIGRATION_ID}: ${rep.why}`);
         return rep;
       },
@@ -1043,15 +1046,17 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     return rep;
   }
 
+  /** What the DISK holds (read-only; an unreadable file counts as "may hold" — the run then needs the live store that owns it).
+   *  Hoisted from 2026-10-llm-rename unchanged (lane usage-predict: 2026-11-agy-reads-follow-claude-off asks it too). */
+  const peek = (name, test) => {
+    let doc;
+    try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, name), 'utf-8')); } catch (e) { return !(e && e.code === 'ENOENT'); }
+    try { return !!test(doc || {}); } catch { return true; }
+  };
   /** 2026-10-llm-rename: what the DISK holds under the old id (read-only; an unreadable file counts as "may hold" — the
    *  run then needs the live store that owns it), then the move through the live PluginManager + integration store. */
   function migrateLlmRename() {
     const FROM = 'decision-api', TO = 'llm';
-    const peek = (name, test) => {
-      let doc;
-      try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, name), 'utf-8')); } catch (e) { return !(e && e.code === 'ENOENT'); }
-      try { return !!test(doc || {}); } catch { return true; }
-    };
     const inSettings = peek('settings.json', (d) => Object.keys(d).some((k) => k.startsWith(`plugin.${FROM}.`)));
     const inPlugins = peek('plugins.json', (d) => d.plugins && d.plugins[FROM]);
     const inStore = peek('integrations.json', (d) => d.integrations && (d.integrations[FROM] || (d.integrations[TO] && d.integrations[TO].values && d.integrations[TO].values.model !== undefined)));
@@ -1532,16 +1537,16 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
 // ── ONE ROW PER VENDOR (lane usage-predict, 2026-11-16) ───────────────────────────────────────────────────────────────
 // Before it, Claude's row (accounts.onDemandQuotaRefresh) also governed Antigravity's two automatic usage reads, and its Off
 // stopped them. They have their own row now (antigravity.autoUsageReads, default on). An instance whose shared row was Off gets
-// the new row Off — written only where it holds no value of its own; anything else is left as it is. → { changed, why }.
+// the new row Off — only where it holds no value of its own; anything else is left as it is. It goes THROUGH the live settings
+// store (`settings`: { read, patch } — src/routes/persistence.js readSettings / patchSettings, the one writer of
+// data/settings.json); without one it FAILS by name and runs at the next boot. → { changed, why }.
 const AGY_READS_MIGRATION_ID = '2026-11-agy-reads-follow-claude-off';
-function agyReadsFollowClaudeOff(file) {
-  let doc; try { doc = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return { changed: false, why: 'no settings file — nothing was turned off' }; }
-  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return { changed: false, why: 'the settings file holds no object — left as it is' };
+function agyReadsFollowClaudeOff(store) {
+  if (!store || typeof store.read !== 'function' || typeof store.patch !== 'function') throw new Error('no live settings store was handed in — it runs at the next boot');
+  const doc = store.read() || {};
   if (doc['accounts.onDemandQuotaRefresh'] !== 'off') return { changed: false, why: `Claude's row is ${JSON.stringify(doc['accounts.onDemandQuotaRefresh'] || 'manual')} — Antigravity's automatic reads stay on (their default)` };
   if (doc['antigravity.autoUsageReads'] !== undefined) return { changed: false, why: `antigravity.autoUsageReads already holds ${JSON.stringify(doc['antigravity.autoUsageReads'])} — left as it is` };
-  doc['antigravity.autoUsageReads'] = 'off';
-  fs.writeFileSync(file + '.tmp', JSON.stringify(doc, null, 2));
-  fs.renameSync(file + '.tmp', file);
+  store.patch({ 'antigravity.autoUsageReads': 'off' });
   return { changed: true, why: "Claude's row was Off — Antigravity's automatic usage reads are Off too (antigravity.autoUsageReads = off)" };
 }
 
