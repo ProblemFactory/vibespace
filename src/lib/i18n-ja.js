@@ -12291,6 +12291,13 @@ export default {
   "what held it": "止めたもの",
   "No hold of a second or more since this server started.": "このサーバーの起動以来、1 秒以上の停止はありません。",
   "The latest holds ({n})": "最近の停止（{n}）",
+  // lane hub-loop-stalls «the number»: ⚙ Diagnostics «Main loop held» — the held seconds per day by cause (src/lib/setup-flows.js heldDaysTable)
+  "Held per day, by cause": "日ごとの停止（原因別）",
+  "Seconds the main loop was held, and in brackets how many holds — from the telemetry this server keeps. The days are UTC days; today is {day}.": "メインループが止まっていた秒数と、括弧内は停止の回数——このサーバーが保存しているテレメトリから。日付は UTC の日付で、今日は {day} です。",
+  "No hold of a second or more in the last seven days.": "直近 7 日間に 1 秒以上の停止はありません。",
+  "cause": "原因",
+  "today": "今日",
+  "all causes": "すべての原因",
   "Profile the server for 10 minutes": "サーバーを 10 分間プロファイル",
   "Could not start the profile: {why}": "プロファイルを開始できません：{why}",
   "Profiling the server until {time} — then open ⚙ System → Diagnostics report…": "{time} までサーバーをプロファイル中——その後 ⚙ システム → 診断レポート… を開いてください",

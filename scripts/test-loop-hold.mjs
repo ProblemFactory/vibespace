@@ -666,5 +666,117 @@ console.log('⑫ round 5 — the monotonic clock, by behaviour (a date step insi
     `⑫ a real ${truth.toFixed(0)} ms hold with the date stepped +1 h inside it, the witness with its default clock: ONE hold of ${h && h.ms}–${h && h.msHi} ms (the truth inside), «${h && h.verdict}»`, { holds: (rep.holds || []).map((x) => [x.ms, x.msHi, x.verdict, x.line]) });
 }
 
+// «THE NUMBER» (lane hub-loop-stalls, 2026-11-16 — the owner's hub: «725 holds and 2455 s in the kernel (blocked)», counted by
+// hand off the journal): THE HELD SECONDS PER DAY BY CAUSE, DERIVED from the rows the hub already keeps (src/telemetry.js
+// Telemetry.heldDays over kind 'metric' · name 'srv-loop-hold-ms', the cause = the verdict before « · »), cut by UTC days;
+// the summary gains them; ⚙ Diagnostics «Main loop held» draws today / yesterday / seven days; the sync-fs held row names
+// its call SITE. Fixture rows on the day edges (the first and the last ms of a UTC day) so a local-zone cut, an edge off by
+// one, a cause dropped or the site gone turn a line red.
+console.log('⑬ the number — the held seconds per day by cause, from the telemetry rows (UTC days), the summary, the table, the site');
+{
+  const { Telemetry } = require(path.join(REPO, 'src/telemetry.js'));
+  const HD = (rows, now) => (typeof Telemetry.heldDays === 'function' ? Telemetry.heldDays(rows, now) : null);   // a tree without it: each leg red by name
+  const DAY = 86400000;
+  const BLOCKED = LH.V.blocked, JS = LH.V.js, WAIT = LH.V.waiting;
+  const hold = (ts, value, detail, o = {}) => ({ ts, kind: 'metric', name: 'srv-loop-hold-ms', value, ...(detail === undefined ? {} : { detail }), version: 't', ...o });
+  // the rows around `now`'s UTC day: d0 = its first ms
+  const rowsAt = (now) => {
+    const d0 = Math.floor(now / DAY) * DAY;
+    return [
+      hold(d0, 4000, `${BLOCKED} · writeJsonAtomic (src/channel-store.js:275)`),        // today's FIRST ms
+      hold(now - 60000, 1500, `${JS} · foldPass (src/x.js:9) · then more`),             // today — a frame holding « · » too
+      hold(now - 30000, 1000, undefined),                                                // today — no detail ⇒ «(no cause recorded)»
+      hold(d0 - 1, 2000, `${BLOCKED} · peopleWrite (src/channel-store.js:1813)`),       // yesterday's LAST ms
+      hold(d0 - DAY, 1200, `${WAIT} · (none)`),                                          // yesterday's FIRST ms
+      hold(d0 - 6 * DAY, 3000, `${BLOCKED} · writeBuffersAtomic (src/channel-store.js:285)`), // the seven days' FIRST ms
+      hold(d0 - 6 * DAY - 1, 9000, `${BLOCKED} · (outside)`),                           // the day BEFORE the seven: counted nowhere
+      hold(d0 + DAY, 5000, `${BLOCKED} · (tomorrow)`),                                  // after today: counted nowhere
+      { ts: now - 1000, kind: 'metric', name: 'srv-loop-canary-ms', value: 7000 },       // another metric: not a hold row
+      { ts: now - 1000, kind: 'event', name: 'srv-loop-hold-ms', value: 7000, detail: `${BLOCKED} · x` },   // not a metric
+    ];
+  };
+  const c = (cause, ms, count) => ({ cause, ms, count });
+  const expect = (now) => {
+    const day = (ms) => new Date(ms).toISOString().slice(0, 10), d0 = Math.floor(now / DAY) * DAY;
+    return { cut: 'UTC',
+      today: { from: day(d0), to: day(d0), ms: 6500, count: 3, causes: [c(BLOCKED, 4000, 1), c(JS, 1500, 1), c('(no cause recorded)', 1000, 1)] },
+      yesterday: { from: day(d0 - DAY), to: day(d0 - DAY), ms: 3200, count: 2, causes: [c(BLOCKED, 2000, 1), c(WAIT, 1200, 1)] },
+      week: { from: day(d0 - 6 * DAY), to: day(d0), ms: 12700, count: 6, causes: [c(BLOCKED, 9000, 3), c(JS, 1500, 1), c(WAIT, 1200, 1), c('(no cause recorded)', 1000, 1)] } };
+  };
+  const J = (x) => JSON.stringify(x);
+  const NOW = Date.UTC(2026, 10, 16, 10, 0, 0);   // 2026-11-16T10:00:00Z
+  const got = HD(rowsAt(NOW), NOW);
+  ok(J(got) === J(expect(NOW)),
+    '(1) today 6.5 s in 3 (the blocked 4.0 at its first ms, JavaScript 1.5, no cause 1.0) · yesterday 3.2 s in 2 (its last and first ms) · the seven days 12.7 s in 6 — by cause, the larger first; the day before the seven, a row after today, another metric and a non-metric count nowhere', got);
+  ok(!!got && got.today.from === '2026-11-16' && got.yesterday.from === '2026-11-15' && got.week.from === '2026-11-10' && got.week.to === '2026-11-16'
+    && ['today', 'yesterday', 'week'].every((k) => got[k].ms === got[k].causes.reduce((s, x) => s + x.ms, 0) && got[k].count === got[k].causes.reduce((s, x) => s + x.count, 0)),
+    '(1) the periods are UTC dates (today = the date of now, yesterday the one before, the seven = today and the six before) and each total is the sum of its causes', got && [got.today.from, got.yesterday.from, got.week.from, got.week.to]);
+  // THE CUT IS UTC, WHATEVER THE PROCESS'S ZONE: the same rows under +08:00 and −08:00 — a local cut moves yesterday's last ms
+  // into today (+08) or today's first ms into yesterday (−08); this fixture tells them apart (the control below)
+  const tz0 = process.env.TZ, zoned = {}, localCut = {};
+  const localDay = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  try {
+    for (const tz of ['Asia/Shanghai', 'America/Los_Angeles']) {
+      process.env.TZ = tz;
+      zoned[tz] = J(HD(rowsAt(NOW), NOW));
+      localCut[tz] = rowsAt(NOW).slice(0, 8).filter((r) => localDay(r.ts) === localDay(NOW)).reduce((s, r) => s + r.value, 0);
+    }
+  } finally { if (tz0 === undefined) delete process.env.TZ; else process.env.TZ = tz0; }
+  ok(Object.values(zoned).every((z) => z === J(expect(NOW))) && localCut['Asia/Shanghai'] !== 6500 && localCut['America/Los_Angeles'] !== 6500,
+    `(2) the day cut is UTC under any process zone (+08:00 and −08:00 give the same numbers); CONTROL: a local-zone cut of these rows reads today ${localCut['Asia/Shanghai']} / ${localCut['America/Los_Angeles']} ms, not 6500`, { localCut });
+  // (3) THE SUMMARY GAINS THEM — the real Telemetry over a scratch data dir, the rows in their own monthly shards (a seven
+  // days across two months), with `days: 1` (the rail's ask): the number is never cut by the summary's window
+  const os = await import('node:os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lh-number-'));
+  try {
+    const tel = new Telemetry({ dataDir: tmp, version: 't' });
+    const NOW2 = Date.UTC(2026, 10, 2, 12, 0, 0);   // 2026-11-02T12:00Z — the seven days start 2026-10-27
+    const rows2 = rowsAt(NOW2);
+    for (const r of rows2) fs.appendFileSync(tel._shard(r.ts), JSON.stringify(r) + '\n');
+    const shards = fs.readdirSync(path.join(tmp, 'telemetry')).filter((f) => f.startsWith('events-')).sort();
+    const s1 = tel.summary({ days: 1, now: NOW2 }), s14 = tel.summary({ days: 14, now: NOW2 });
+    ok(J(s1.loopHeld) === J(expect(NOW2)) && J(s14.loopHeld) === J(expect(NOW2)) && J(shards) === J(['events-2026-10.ndjson', 'events-2026-11.ndjson']) && s1.loopHeld?.week?.from === '2026-10-27',
+      `(3) GET /api/telemetry/summary's loopHeld = the rows' number, read from ${shards.join(' + ')}, the same with days=1 and days=14 (the summary's own window never cuts the seven days)`, s1.loopHeld);
+    ok(s14.metrics['srv-loop-hold-ms'] && s14.metrics['srv-loop-hold-ms'].count === 8 && s14.byName['metric:srv-loop-hold-ms'] === 8 && s14.byName['event:srv-loop-hold-ms'] === 1,
+      '(3) the summary\'s other tables are unchanged by it (srv-loop-hold-ms still a metric with its percentiles)', s14.metrics['srv-loop-hold-ms']);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  // (4) THE SITE: the sync-fs held row says the call's site — the witness's src/ frame, file:line and the function
+  const { createFsCanary } = require(path.join(REPO, 'src/server/fs-canary.js'));
+  const recs = [];
+  const can = createFsCanary({ file: '/nonexistent', probe: { call: async () => ({}), close() {} }, record: (r) => recs.push(r), log: () => {} });
+  can.held({ fn: 'writeFileSync', path: '/srv/x/data/channels/adapters.json.tmp-1', ms: 4012, class: 'local', mount: null, caller: 'src/channel-store.js:275 writeJsonAtomic' });
+  can.held({ fn: 'openSync', path: '/srv/x/node_modules/y', ms: 1100, class: 'local', mount: null, caller: null });
+  const det = recs.filter((r) => r.name === 'srv-sync-fs-held-ms').map((r) => r.detail);
+  ok(J(det) === J(['fn=writeFileSync class=local site=src/channel-store.js:275 writeJsonAtomic', "fn=openSync class=local site=(not the hub's own code)"]),
+    '(4) srv-sync-fs-held-ms\'s detail carries the call SITE (file:line + function); a call no frame of the hub made says so', det);
+  // (5) THE TABLE BY ITS WORDS — the client's own drawing (src/lib/setup-flows.js heldDaysTable, extracted), en / zh / ja
+  const SF = fs.readFileSync(path.join(REPO, 'src/lib/setup-flows.js'), 'utf8');
+  const a = SF.indexOf('function heldDaysTable('), b = SF.indexOf('// end heldDaysTable');
+  const draw = a > 0 && b > a ? new Function(SF.slice(a, b) + '\nreturn heldDaysTable;')() : () => '';
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const tOf = (dict) => (k, p) => { let s = dict && Object.prototype.hasOwnProperty.call(dict, k) ? dict[k] : k; if (p) s = s.replace(/\{(\w+)\}/g, (m, x) => (p[x] !== undefined ? String(p[x]) : m)); return s; };
+  const words = (html) => html.replace(/<\/(td|p|h3)>/g, ' | ').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+  const en = words(draw(got, { t: tOf(null), esc }));
+  const WANT = `Held per day, by cause | Seconds the main loop was held, and in brackets how many holds — from the telemetry this server keeps. The days are UTC days; today is 2026-11-16. | `
+    + `cause | today | yesterday | 7 days | ${BLOCKED} | 4.0 s (1) | 2.0 s (1) | 9.0 s (3) | ${JS} | 1.5 s (1) | — | 1.5 s (1) | ${WAIT} | — | 1.2 s (1) | 1.2 s (1) | `
+    + `(no cause recorded) | 1.0 s (1) | — | 1.0 s (1) | all causes | 6.5 s (3) | 3.2 s (2) | 12.7 s (6) |`;
+  ok(en === WANT, `(5) the table's words (en): ${en}`, { want: WANT });
+  const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+  const keys = [...SF.slice(a, b).matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]);
+  const zhW = words(draw(got, { t: tOf(zh), esc })), jaW = words(draw(got, { t: tOf(ja), esc }));
+  ok(keys.length === 8 && keys.every((k) => typeof zh[k] === 'string' && typeof ja[k] === 'string' && zh[k] !== k && ja[k] !== k)
+    && zhW.startsWith('每天卡住的时间（按原因） | 主循环被卡住的秒数') && zhW.includes('今天是 2026-11-16') && zhW.includes('原因 | 今天 | 昨天 | 7 天 |') && zhW.includes('全部原因 | 6.5 s (3) | 3.2 s (2) | 12.7 s (6)')
+    && jaW.startsWith('日ごとの停止（原因別） | メインループが止まっていた秒数') && jaW.includes('今日は 2026-11-16') && jaW.includes('原因 | 今日 | 昨日 | 7日間 |') && jaW.includes('すべての原因 | 6.5 s (3)'),
+    `(5) every word it says has a zh and a ja row (${keys.length} keys) — zh: ${zhW.slice(0, 60)}… ja: ${jaW.slice(0, 60)}…`, { keys: keys.filter((k) => !(zh[k] && ja[k])), zhW, jaW });
+  const empty = words(draw(HD([], NOW), { t: tOf(null), esc }));
+  const evil = draw(HD([hold(NOW - 5, 1000, '<img src=x onerror=1> · y')], NOW), { t: tOf(null), esc });
+  let zonedDraw = ''; try { process.env.TZ = 'Asia/Shanghai'; zonedDraw = draw(got, { t: tOf(null), esc }); } finally { if (tz0 === undefined) delete process.env.TZ; else process.env.TZ = tz0; }
+  ok(empty.endsWith('| No hold of a second or more in the last seven days. |') && draw(undefined, { t: tOf(null), esc }) === '' && draw({}, { t: tOf(null), esc }) === ''
+    && !evil.includes('<img') && evil.includes('&lt;img src=x onerror=1&gt;') && words(zonedDraw) === en,
+    '(5) no hold in the seven days ⇒ the one sentence; a server older than the field ⇒ nothing; a cause is escaped; the drawing reads no zone (+08:00 draws the same words)', { empty });
+  ok(/\$\{heldDaysTable\(d\.loopHeld, \{ t, esc \}\)\}/.test(SF.slice(SF.indexOf("<h2>${esc(t('Main loop held'))}</h2>"), SF.indexOf("const pf = lh.profile || {};"))),
+    '(5) ⚙ Diagnostics «Main loop held» draws it from the summary it already fetched (d.loopHeld), inside its own section');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

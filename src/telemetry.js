@@ -181,8 +181,9 @@ class Telemetry {
   }
 
   // Aggregate for the report: totals by kind/name/version/day + recent errors.
-  summary({ days = 14 } = {}) {
-    const from = Date.now() - days * 86400000;
+  // `now` = the clock the window and the days are read against (a suite hands in its own).
+  summary({ days = 14, now = Date.now() } = {}) {
+    const from = now - days * 86400000;
     const byName = {}; const byDay = {}; const byVersion = {};
     const errors = [];
     const metricVals = {}; // name → number[] (kind:'metric')
@@ -193,6 +194,8 @@ class Telemetry {
     // table instead of fished out of byName.
     const drift = new Map(); // `${name}|${detail}` → {name, detail, count, firstTs, lastTs, versions:Set}
     let total = 0;
+    const held = [];   // the main loop's hold rows of the last seven UTC days, whatever `days` is (Telemetry.heldDays)
+    const heldFrom = Telemetry.heldDays([], now).week.from;
     let files = [];
     try { files = fs.readdirSync(this.dir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort().slice(-3); } catch {}
     for (const fn of files) {
@@ -201,6 +204,7 @@ class Telemetry {
       for (const line of data.split('\n')) {
         if (!line) continue;
         let r; try { r = JSON.parse(line); } catch { continue; }
+        if (r && r.name === HOLD_ROW && r.kind === 'metric' && Number.isFinite(r.ts) && new Date(r.ts).toISOString().slice(0, 10) >= heldFrom) held.push(r);
         if (r.ts < from) continue;
         total++;
         const key = `${r.kind}:${r.name}`;
@@ -252,10 +256,43 @@ class Telemetry {
       byDay, byVersion, metrics,
       errors: [...grouped.values()].sort((a, b) => b.lastTs - a.lastTs).slice(0, 50),
       drift: [...drift.values()].sort((a, b) => b.lastTs - a.lastTs).slice(0, 100).map((g) => ({ ...g, versions: [...g.versions].sort() })),
+      loopHeld: Telemetry.heldDays(held, now),   // ⚙ Diagnostics «Main loop held»: the held seconds per day by cause
       instance: this._instanceId(),
     };
   }
+
+  /** THE HELD SECONDS PER DAY BY CAUSE (lane hub-loop-stalls, «the number»: the owner's hub, 2026-11-16) — PURE, DERIVED
+   *  from the rows the hub already keeps; no file, no notice, no budget of its own. The rows: kind 'metric', name
+   *  'srv-loop-hold-ms' — ONE a hold of a second or more, written by src/server/loop-holds.js onHold as the loop turns again:
+   *  `value` = the hold's ms, `detail` = «verdict · frame». THE CAUSE = the verdict (the detail before « · »; none ⇒
+   *  NO_CAUSE). THE DAY CUT IS UTC: a row's day = the UTC date of its `ts` (as byDay and the monthly shards) — so a hold
+   *  across midnight counts on the day it ended; today = the UTC date of `now`, yesterday = the UTC date before it, the
+   *  seven days = today and the six UTC dates before it (a row dated after today counts nowhere). Each period:
+   *  {from, to, ms, count, causes: [{cause, ms, count}] — the larger ms first}; `ms` = the plain sum of the rows' values. */
+  static heldDays(rows, now = Date.now()) {
+    const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
+    const today = dayOf(now), yesterday = dayOf(now - 86400000), weekFrom = dayOf(now - 6 * 86400000);
+    const period = (from, to) => ({ from, to, ms: 0, count: 0, by: new Map() });
+    const out = { today: period(today, today), yesterday: period(yesterday, yesterday), week: period(weekFrom, today) };
+    for (const r of Array.isArray(rows) ? rows : []) {
+      if (!r || r.kind !== 'metric' || r.name !== HOLD_ROW || !Number.isFinite(r.ts) || !Number.isFinite(r.value) || r.value < 0) continue;
+      const day = dayOf(r.ts);
+      const cause = (typeof r.detail === 'string' ? r.detail.split(' · ')[0].trim() : '') || NO_CAUSE;
+      for (const p of Object.values(out)) {
+        if (day < p.from || day > p.to) continue;
+        p.ms += r.value; p.count++;
+        const c = p.by.get(cause) || { cause, ms: 0, count: 0 };
+        c.ms += r.value; c.count++;
+        p.by.set(cause, c);
+      }
+    }
+    const done = ({ by, ...p }) => ({ ...p, causes: [...by.values()].sort((a, b) => b.ms - a.ms || (a.cause < b.cause ? -1 : 1)) });
+    return { cut: 'UTC', today: done(out.today), yesterday: done(out.yesterday), week: done(out.week) };
+  }
 }
+/** the main loop's hold row (src/server/loop-holds.js) and the cause of one that names none */
+const HOLD_ROW = 'srv-loop-hold-ms';
+const NO_CAUSE = '(no cause recorded)';
 
 /** THE COLLECTOR'S VERDICT — the telemetry ingest door's, and (lane feedback-forward) the maintainer hub's two feedback
  *  doors': the shared Bearer token is both the on-switch and the whole gate. No token configured ⇒ 404 `collector disabled`;

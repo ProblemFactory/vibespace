@@ -323,7 +323,8 @@ console.log('§8 THE WITNESS NAMES THE HOLD — and the guard refuses a storage 
   const line = H.lines.find((l) => /the main loop was held/.test(l)) || '';
   ok(new RegExp(`^\\[canary\\] the main loop was held (\\d+) ms — the sync fs call that returned as it resumed: readFileSync\\(${p1.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\) \\d{3,} ms, under the network mount «${NAS.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}» \\(witnessed, never refused\\) ← src/row-reader\\.js:3 (Object\\.)?readRow$`).test(line),
     `a 300 ms hold on a MOUNT path: the canary names the call, its path, its ms, its mount and the caller — no probe in flight: ${line}`);
-  ok(H.recs.some((r) => r.name === 'srv-sync-fs-held-ms' && r.value >= 250 && /fn=readFileSync class=mount/.test(r.detail)), 'counted: srv-sync-fs-held-ms (fn + class)');
+  ok(H.recs.some((r) => r.name === 'srv-sync-fs-held-ms' && r.value >= 250 && /^fn=readFileSync class=mount site=src\/row-reader\.js:3 (Object\.)?readRow$/.test(r.detail)),
+    'counted: srv-sync-fs-held-ms (fn + class + the call SITE, file:line + function — lane hub-loop-stalls «the number»)', H.recs.filter((r) => r.name === 'srv-sync-fs-held-ms').map((r) => r.detail));
   ok(filed.length === 1 && filed[0].origin === 'server' && filed[0].k === MHW.INBOX_KEY && new RegExp(`waited \\d+ s on the folder .*NAS — readFileSync on .*pipe1 from src/row-reader\\.js:3`).test(filed[0].text)
     && /localsearch-3|1 process/.test(filed[0].detail) && /The call came from:/.test(filed[0].detail) && filed[0].i18n && filed[0].i18n.text.params.call === 'readFileSync',
     `the For-you fact (origin server, «This machine») carries the call site beside who presses the mount: ${filed[0] && filed[0].text}`, filed[0]);
