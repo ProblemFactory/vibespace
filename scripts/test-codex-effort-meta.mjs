@@ -1238,8 +1238,12 @@ console.log('— ⑪c WIRING: every resume/fork/restart entry point, and where t
   const cv = read('src/lib/chat-view.js');
   ok(/this\.app\.resumeSession\(backendSessionId, cwd, name, \{\n\s*mode: 'chat',\n\s*backend,/.test(cv),
     'the chat RESUME BAR sends no model/effort at all — the path the owner hit');
-  const lay = read('src/lib/layout.js');
-  ok(/this\.app\.resumeSession\(d\.sessionId, d\.cwd, d\.name, \{ \.\.\.\(d\.opts \|\| \{\}\), stay: true \}\)/.test(lay),
+  const lay = read('src/lib/layout.js'), pacer = read('src/lib/resume-pacer.js');
+  // lane resume-all-paced (L1): resume-all goes through the pacer (src/lib/resume-pacer.js) — layout.js hands it `extra: { stay: true }`,
+  // resumeAndWait spreads the row's own opts, then `extra`, then its ONE addition: the create's end it waits on (onCreateEnd)
+  ok(/resumePaced\(this\.app, stopped, \{ extra: \{ stay: true \} \}\)/.test(lay)
+    && /const opts = d\.opts \|\| \{\};/.test(pacer)
+    && /app\.resumeSession\(d\.sessionId, d\.cwd, d\.name, \{ \.\.\.opts, \.\.\.extra, onCreateEnd: \(how, msg\) => end\(how, msg, r && r\.row \? r\.row : null\) \}\)/.test(pacer),
     'resume-all replays the window\'s own opts and invents nothing (lane phone-resume-keeps-layout: + `stay` — each row re-opened where it is, no switch)');
   // (3) the server states WHICH FACT it used, everywhere a client can read it
   const wc = read('src/ws-create.js');
