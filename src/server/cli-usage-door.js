@@ -136,10 +136,10 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
         if (mode === 'off') return { ok: false, status: 403, code: 'refresh-off', error: 'on-demand usage refresh is turned off in Settings' };
       } else if (caller !== 'person') {
         const tbl = h.settings && Array.isArray(h.settings.rows) ? h.settings : null;
-        if (!tbl || !tbl.rows.some((r) => r && r.key === AUTO_READS_KEY)) return { ok: false, status: 403, code: 'no-auto-reads-row', error: `${h.label || be} has no row of its own for automatic usage reads in Settings — none runs without one` };
+        if (!tbl || !tbl.rows.some((r) => r && r.key === AUTO_READS_KEY)) return { ok: false, status: 403, code: 'no-auto-reads-row', error: `${harnessOf(be)?.label || be} has no row of its own for automatic usage reads in Settings — none runs without one` };
         let v = 'off';   // an unreadable row reads as off (fail closed)
         try { v = typeof harnessSetting === 'function' ? harnessSetting(be, AUTO_READS_KEY) : (setting(`${tbl.prefix}.${AUTO_READS_KEY}`) ?? (tbl.rows.find((r) => r.key === AUTO_READS_KEY) || {}).default); } catch { v = 'off'; }
-        if (v === 'off' || v === false) return { ok: false, status: 403, code: 'auto-reads-off', error: `${h.label || be}'s automatic usage reads are off in Settings (${tbl.prefix}.${AUTO_READS_KEY})` };
+        if (v === 'off' || v === false) return { ok: false, status: 403, code: 'auto-reads-off', error: `${harnessOf(be)?.label || be}'s automatic usage reads are off in Settings (${tbl.prefix}.${AUTO_READS_KEY})` };
       }
       if (inflight.has(id)) return inflight.get(id);
       const since = now() - (lastAt.get(id) || -Infinity);

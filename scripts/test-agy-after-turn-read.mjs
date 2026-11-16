@@ -534,19 +534,20 @@ console.log('⑭ ONE ROW PER VENDOR (the owner 2026-11-16: «fable是antigravity
   const DOORSRC = read('src/server/cli-usage-door.js').replace(/\/\/[^\n]*/g, '');
   const CLAUDE_READERS = ['src/lib/usage-meter.js', 'src/lib/manage-agents.js', 'src/usage-routes.js', 'src/server/auto-cli-loop.js', 'src/server/usage-pool-engine.js'];
   ok('law 3 by census: the door\'s code names no row key (it asks the vendor\'s: quota.readsRow, or its own table\'s autoUsageReads) and none of Claude\'s readers names Antigravity\'s row', !/accounts\.onDemandQuotaRefresh/.test(DOORSRC) && /h\.quota\.readsRow/.test(DOORSRC) && CLAUDE_READERS.every((f) => !/autoUsageReads/.test(read(f))), CLAUDE_READERS.filter((f) => /autoUsageReads/.test(read(f))));
-  // law 4: the migration
+  // law 4: the migration — THROUGH the live settings store (read / patch: src/routes/persistence.js, the one writer of settings.json)
   const MIG = require(path.join(REPO, 'src/server/migrations.js'));
-  let mi = 0;
-  const mf = (doc) => { const f = path.join(ROOT, 'mig-' + (++mi) + '.json'); if (doc !== null) fs.writeFileSync(f, JSON.stringify(doc)); return f; };
-  const rdj = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
-  const f1 = mf({ 'accounts.onDemandQuotaRefresh': 'off', 'chat.x': 1 }), r1 = MIG.agyReadsFollowClaudeOff(f1), r1b = MIG.agyReadsFollowClaudeOff(f1);
-  const f2 = mf({ 'accounts.onDemandQuotaRefresh': 'auto' }), r2 = MIG.agyReadsFollowClaudeOff(f2);
-  const f3 = mf({ 'accounts.onDemandQuotaRefresh': 'off', 'antigravity.autoUsageReads': 'on' }), r3 = MIG.agyReadsFollowClaudeOff(f3);
-  const f4 = mf(null), r4 = MIG.agyReadsFollowClaudeOff(f4);
-  ok('law 4, the migration: Claude\'s row Off ⇒ antigravity.autoUsageReads = off, nothing else touched; a second run changes nothing', r1.changed === true && rdj(f1)['antigravity.autoUsageReads'] === 'off' && rdj(f1)['chat.x'] === 1 && r1b.changed === false, JSON.stringify([r1, r1b]));
-  ok('…Claude\'s row not Off ⇒ left as it is (the default on stands); a value of its own is never overwritten; no settings file ⇒ nothing written', !r2.changed && rdj(f2)['antigravity.autoUsageReads'] === undefined && !r3.changed && rdj(f3)['antigravity.autoUsageReads'] === 'on' && !r4.changed && !fs.existsSync(f4), JSON.stringify([r2.why, r3.why, r4.why]));
-  const MIGSRC = read('src/server/migrations.js');
-  ok('…it is a row of the instance\'s one-shot registry (run once under the ledger; its note and its report are the journal lines)', MIG.AGY_READS_MIGRATION_ID === '2026-11-agy-reads-follow-claude-off' && /id: AGY_READS_MIGRATION_ID,\s*\n\s*note: "ONE ROW PER VENDOR/.test(MIGSRC) && MIGSRC.includes("const rep = agyReadsFollowClaudeOff(path.join(dataDir, 'settings.json'));"));
+  const store = (doc) => { const st = { doc: { ...doc }, patches: [] }; return { st, read: () => st.doc, patch: (q) => { st.patches.push(q); st.doc = { ...st.doc, ...q }; } }; };
+  const s1 = store({ 'accounts.onDemandQuotaRefresh': 'off', 'chat.x': 1 }), r1 = MIG.agyReadsFollowClaudeOff(s1), r1b = MIG.agyReadsFollowClaudeOff(s1);
+  const s2 = store({ 'accounts.onDemandQuotaRefresh': 'auto' }), r2 = MIG.agyReadsFollowClaudeOff(s2);
+  const s3 = store({ 'accounts.onDemandQuotaRefresh': 'off', 'antigravity.autoUsageReads': 'on' }), r3 = MIG.agyReadsFollowClaudeOff(s3);
+  const s5 = store({}), r5 = MIG.agyReadsFollowClaudeOff(s5);
+  let r4 = null; try { MIG.agyReadsFollowClaudeOff(null); } catch (e) { r4 = e.message; }
+  ok('law 4, the migration: Claude\'s row Off ⇒ ONE patch, antigravity.autoUsageReads = off, nothing else touched; a second run patches nothing', r1.changed === true && JSON.stringify(s1.st.patches) === '[{"antigravity.autoUsageReads":"off"}]' && s1.st.doc['chat.x'] === 1 && r1b.changed === false, JSON.stringify([r1, r1b, s1.st.patches]));
+  ok('…Claude\'s row not Off (or never set) ⇒ no patch (the default on stands); a value of its own is never overwritten; no live store ⇒ it FAILS by name (the runner retries at the next boot) — the registry row asks the disk first: nothing to do there ⇒ done, quietly', !r2.changed && !s2.st.patches.length && !r5.changed && !s5.st.patches.length && !r3.changed && !s3.st.patches.length && /no live settings store/.test(String(r4)), JSON.stringify([r2.why, r3.why, r5.why, r4]));
+  const MIGSRC = read('src/server/migrations.js'), SRV = read('server.js');
+  ok('…it is a row of the instance\'s one-shot registry (run once under the ledger; its note and its report are the journal lines), handed the live settings store by server.js',
+    MIG.AGY_READS_MIGRATION_ID === '2026-11-agy-reads-follow-claude-off' && /id: AGY_READS_MIGRATION_ID,\s*\n\s*note: "ONE ROW PER VENDOR/.test(MIGSRC) && MIGSRC.includes("const rep = agyReadsFollowClaudeOff(st);") && MIGSRC.includes("if (!st && !peek('settings.json', (d) => d['accounts.onDemandQuotaRefresh'] === 'off' && d['antigravity.autoUsageReads'] === undefined))")
+    && /usageHistory = null, settings = null,/.test(MIGSRC) && SRV.includes('settings: { read: () => persistenceRouter.readSettings(), patch: (p) => persistenceRouter.patchSettings(p) }'));
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });
