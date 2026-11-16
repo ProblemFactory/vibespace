@@ -28,7 +28,7 @@
 //                                adapter CAPABILITY, never by backend id)
 // Literal harness ids are FORBIDDEN in this tier (test-architecture's census):
 // every id here arrives from a session, an account or the registry.
-const { HARNESS_SETTINGS, settingPath, rowOf, rowsOfKind, coerce, refusedValue, buildConfigPlan } = require('../harness-settings');
+const { HARNESS_SETTINGS, settingPath, rowOf, rowsOfKind, coerce, readRow, refusedValue, buildConfigPlan } = require('../harness-settings');
 const { applyConfigPlan, readConfigPlan, encodePlan } = require('../harness-config');
 
 /** Descriptor facts → plan specs for buildConfigPlan (ONE spelling: the
@@ -66,7 +66,7 @@ function accessorsFor({ serverSetting, harnesses }) {
     const h = harnesses.get(id);
     const row = rowOf(h.settings, key);
     if (!row) throw new Error(`harness '${id}' declares no setting '${key}'`);
-    return coerce(row, serverSetting(settingPath(h.settings.prefix, key)));
+    return readRow(h.settings, row, serverSetting);   // coerce over the stored value; a row with no value that declares `unsetFollows` reads the followed answer
   }
   /** Every spawn row's typed value, keyed by row key — the `settings` field of
    *  buildSessionArgs. Rows with `via` are ALSO here (harmless; the adapter

@@ -964,7 +964,9 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       note: "ONE ROW PER VENDOR (lane usage-predict; the owner looked at the quota row on 2026-11-16 and asked «fable是antigravity吗？»): Antigravity's two automatic usage reads (after a usage wall, after a stretch of work) leave Claude's row (accounts.onDemandQuotaRefresh) for their own, antigravity.autoUsageReads — and an instance whose shared row was Off keeps them off: nobody gets a read they turned off",
       run() {
         const st = typeof settings === 'function' ? settings() : settings;
-        // no live store: nothing to do on disk ⇒ done; something to do ⇒ FAILS by name, runs at the next boot (the plugin moves' rule)
+        // no live store: nothing to do on disk ⇒ done; something to do ⇒ FAILS by name, runs at the next boot (the plugin moves' rule).
+        // A settings.json torn at boot reads as «nothing to do» and is recorded done — harmless: antigravity.autoUsageReads then holds
+        // no value, and a row holding none reads Off while Claude's row is Off, at every read (src/harness-settings.js readRow, U2)
         if (!st && !peek('settings.json', (d) => d['accounts.onDemandQuotaRefresh'] === 'off' && d['antigravity.autoUsageReads'] === undefined)) { console.log(`[migrate] ${AGY_READS_MIGRATION_ID}: nothing to do on disk (no live settings store was needed)`); return { changed: false, why: 'nothing to do' }; }
         const rep = agyReadsFollowClaudeOff(st);
         console.log(`[migrate] ${AGY_READS_MIGRATION_ID}: ${rep.why}`);
