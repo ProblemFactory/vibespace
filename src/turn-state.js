@@ -218,6 +218,18 @@ function noteRequestSent(session, now) {
   // reads the account that request went out on off the conversation's own re-point ledger (usage-pool-engine requestSlotFor)
   if (inFlight && Number(now) > 0) session._lastRequestOutAt = Number(now);
 }
+/** A SUB-AGENT'S REQUEST-OUT (lane readings-attribution-2, the closure look M1): a sub-agent's tool result sends ITS next request
+ *  on the credential the CLI reads at that moment, as the main thread's does (P0) — so the request's instant is kept, and only
+ *  that: `_turnStartedAt` is the conversation's own prompt cache, which a sub-agent's prefix is not. */
+function noteSubRequestSent(session, now) {
+  if (!session) return;
+  if (requestInFlight({ isStreaming: session._isStreaming, turnState: session._turnState }) && Number(now) > 0) session._lastRequestOutAt = Number(now);
+}
+/** A SUB-AGENT's user record that sends a request (its prompt or a tool result): sendsRequest's sidechain twin */
+function sendsSubRequest(msg) {
+  if (!msg || msg.type !== 'user' || !(msg.parent_tool_use_id || msg.isSidechain)) return false;
+  return sendsRequest({ ...msg, parent_tool_use_id: null, isSidechain: false });
+}
 /** A RECORD THAT SENDS A REQUEST — a main-thread user record that is no local-command echo («<local-command-stdout>Set
  *  model to …» has no turn behind it): the prompt's echo or a tool result, which the CLI sends to the model at once. The
  *  ONE predicate the parse's turn-start branch and the device feed both read. */
@@ -230,4 +242,4 @@ function sendsRequest(msg) {
 
 module.exports = { TURN_STATES, isTurnState, turnStateEffect, reconcileAttachStreaming, SIDECAR_SETTLE_MS, AUTHORITATIVE_SETTLE_MS,
   turnStateInRing, restoredTurnState, waitingOnUser, stallVerdict, STALL_SILENCE_MS, STALL_COOLDOWN_MS, STALL_MAX_REATTACH,
-  requestInFlight, noteTurnFlight, noteRequestSent, sendsRequest };
+  requestInFlight, noteTurnFlight, noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest };
