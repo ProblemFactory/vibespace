@@ -3340,7 +3340,8 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
   const ALLOW22 = {
     'account-wall-words.js': [["if (o.state === 'reset-seen') return t(", 'lane account-reset-door: an OUTCOME\'s words — the percents the hub\'s settle recorded from a READING newer than the claim (usage-reset-claim settle / noteResetSeen), never a stored bucket drawn'],
       ["if (o.state === 'contradicted') return t(", '…the contradicted claim: its reading\'s own percent, said once'],
-      ["if (o.state === 'confirmed') return t(", '…the confirmed claim: its reading\'s own percent, said once']],
+      ["if (o.state === 'confirmed') return t(", '…the confirmed claim: its reading\'s own percent, said once'],
+      ["if (o.state === 'fall-unconfirmed') return t(", '…an UNCONFIRMED FALL (lane readings-attribution-2 P3, law 3): the held reading\'s percent and the account\'s own, as the store recorded them at the hold (usage-reset-claim noteFallHeld) — never a stored bucket drawn']],
     'chat-renderers.js': [['const wallRoomLine = (r) =>', 'the usage wall\'s room sentence (lane agy-wall-signal): its percent is the hub\'s, taken through windowDisplay (src/server/stream-wall.js roomOf — only a weekly window the verdict READS)']],
     'chat-status-bar.js': [['chat-status-ctx-pie', 'the CONTEXT-window pie (a conversation\'s context use, not a quota bucket)'],
       ['has {rem}% left (under the {line}% floor', 'the wall line words the SERVER\'s pool verdict (bucketRemaining — the same 60-s inequality), never a stored bucket']],

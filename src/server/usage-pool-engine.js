@@ -3786,6 +3786,19 @@ function recordRateLimitEventNow(session, msg) {
       if (ev.modelCap) { postCheck(); return; }
       ev = { ...ev, windows: { ...ev.windows, modelCap: null }, modelCapLane: null, modelCapName: null, modelCapDisplay: null };
     }
+    // LAW 3 (P3): A FALL IS NOT A RESET UNTIL SOMETHING CONFIRMS IT — a lane of this record that fell 3 points or more under an
+    // unchanged reset, from a conversation the pool re-pointed inside the shadow time, is held: not written (the account keeps
+    // its number, the pool acts on that), said as an unconfirmed fall. A fall a producer that was not moved reads is its own
+    // confirmation; a panel read, a person's ⟳, the lane's next reading or the window's reset ends the hold (usage-reset-claim)
+    if (ev.status !== 'rejected') {
+      const held = heldFallOf(session, writeKey, ev);
+      if (held) {
+        try { resetClaimsStore().noteFallHeld(writeKey, held.falls, { name: nameOf(writeKey), movedAgoS: held.agoS }); } catch { }
+        global.__vsEvent?.('usage-reading-fall-held', `${writeKey}:${held.falls.map((f) => f.lane).join(',')}`);
+        if (held.whole) { postCheck(); return; }
+        ev = held.ev;
+      }
+    }
     const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: writeKey, identityIds: usageIdentityAccountIds(writeKey), ev, hint: capHint, producer: session._webuiId ? 'ev:' + session._webuiId : null });
     if (r.unknownType) { global.__vsEvent?.('rate-limit-event-unknown-type', r.unknownType); postCheck(); return; }
     // THE LANE DECISION IS SAID, like resolveTurnLane says its own: a model-cap
@@ -4277,6 +4290,36 @@ function noteTurnAsk(session, model) {
     const m = session._turnAsks || (session._turnAsks = {});
     const list = m[k] || (m[k] = []); if (!list.includes(fam)) list.push(fam);
   } catch { }
+}
+/** LAW 3's test (P3): the lanes of ONE parsed record that fell FALL_HOLD_MIN_DROP points or more under an unchanged, still-ahead
+ *  reset against the account's stored reading, IF the producing conversation was re-pointed inside the shadow time. → null (no
+ *  hold) | { falls, whole } (the representative fell: the record is held whole) | { falls, ev } (the rest of the record) */
+const FALL_HOLD_MIN_DROP = 3;
+function heldFallOf(session, key, ev, now = Date.now()) {
+  try {
+    const row = lastRepointRow(session, { at: now, minAt: now - readingLag.SHADOW_MS });
+    if (!row) return null;   // a producer that was not moved: its fall is its own confirmation
+    const stored = new Map(quotaModel.lanesOfReading(usageWrite.readCacheObject(USAGE_CACHE_DIR, key)).filter((l) => !l.mark).map((l) => [l.lane, l]));
+    const lanes = [];
+    const sd = ev.kind === 'sevenDay' ? { utilization: ev.utilization, resetsAt: ev.resetsAt } : (ev.windows && ev.windows.sevenDay);
+    if (sd && sd.utilization != null) lanes.push({ lane: 'plan:7d', u: sd.utilization, r: sd.resetsAt, rep: ev.kind === 'sevenDay', win: 'sevenDay' });
+    const cap = ev.modelCap ? { utilization: ev.utilization, resetsAt: ev.resetsAt } : (ev.windows && ev.windows.modelCap);
+    if (cap && cap.utilization != null && ev.modelCapName) lanes.push({ lane: 'model:' + ev.modelCapName, u: cap.utilization, r: cap.resetsAt, rep: !!ev.modelCap, win: 'modelCap' });
+    const falls = [];
+    for (const x of lanes) {
+      const s = stored.get(x.lane);
+      if (!s || s.usedPct == null || s.resetsAt == null || !(Number(x.r) > 0)) continue;
+      if (Math.abs(Number(x.r) - s.resetsAt) > 60 || !(Number(x.r) * 1000 > now)) continue;   // its window moved, or its reset passed: no fall
+      const after = Number(x.u) * 100;
+      if (!(s.usedPct - after >= FALL_HOLD_MIN_DROP)) continue;
+      falls.push({ lane: x.lane, before: s.usedPct, after, resetsAt: Number(x.r), readAt: now, rep: x.rep, win: x.win });
+    }
+    if (!falls.length) return null;
+    const agoS = Math.round((now - row.at) / 1000);
+    if (falls.some((f) => f.rep)) return { falls, whole: true, agoS };
+    const windows = { ...(ev.windows || {}) }; for (const f of falls) windows[f.win] = null;
+    return { falls, agoS, ev: { ...ev, windows, ...(falls.some((f) => f.win === 'modelCap') ? { modelCapLane: null, modelCapName: null, modelCapDisplay: null } : {}) } };
+  } catch { return null; }
 }
 /** Did THIS turn ask `key` for a `fam` request? The answered ones (noteTurnAsk), and the request in flight now: it asks the
  *  conversation's own model of the account it went out on (a response's quota record can precede its assistant record). */
