@@ -163,19 +163,20 @@ require('./src/server/frame-host.js').register(app); // lane design-frame-host (
 // a soft reload without revalidating, so users were stuck on a stale bundle
 // after an update until a hard refresh. Versioning the URL forces a fresh fetch
 // whenever the file changes — no hard refresh ever needed.
+// G1 (unit interface-trial): the versioned page from MEMORY — src/server/index-page.js builds it with fs.promises (warmed
+// here, refreshed off the loop); the request path makes no disk call (it read index.html and stated every asset per load)
+const indexPage = require('./src/server/index-page.js').create({ pubDir: path.join(__dirname, 'public') });
+indexPage.refresh();
 app.get(['/', '/index.html'], (req, res, next) => {
-  try {
-    const pub = path.join(__dirname, 'public');
-    let html = fs.readFileSync(path.join(pub, 'index.html'), 'utf-8');
-    html = html.replace(/(href|src)="\/([^"?]+\.(?:js|css))"/g, (m, attr, file) => {
-      try { return `${attr}="/${file}?v=${Math.floor(fs.statSync(path.join(pub, file)).mtimeMs)}"`; }
-      catch { return m; }
-    });
-    res.set('Cache-Control', 'no-cache'); res.set(...cspReports.header()); // the app page: Content-Security-Policy-Report-Only (never the enforcing header — a later lane's switch)
-    res.type('html').send(html);
-  } catch { next(); }
+  indexPage.get().then((html) => {
+    if (html == null) return next();
+    try {   // G1's cure A2: a throw while answering falls to the static files, as the base's one try did
+      res.set('Cache-Control', 'no-cache'); res.set(...cspReports.header()); // the app page: Content-Security-Policy-Report-Only (never the enforcing header — a later lane's switch)
+      res.type('html').send(html);
+    } catch { next(); }
+  }, () => next());
 });
-app.use(require('./src/server/static-public.js').create(path.join(__dirname, 'public'))); // lane vault-chip-zone-errors: public/ through express.static — every file but a source map (served to nobody; test-csp-report ⑨)
+app.use(require('./src/server/static-public.js').create(path.join(__dirname, 'public'), undefined, { stampOf: indexPage.stampOf })); // G1's cure A1: a script's ?v= checked against the page's copy (memory) · lane vault-chip-zone-errors: public/ through express.static — every file but a source map (served to nobody; test-csp-report ⑨)
 // WebDAV bridge — BEFORE the json body parser (PUT bodies stream to disk).
 // Auth = scoped Bearer mount tokens; see src/webdav.js for the security model.
 const { MountTokens, registerWebdav } = require('./src/webdav');

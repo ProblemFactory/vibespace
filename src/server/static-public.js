@@ -13,6 +13,9 @@
 //     browser that reports the query (Chrome 156 drops it from source-file — measured; the sink then reads the file on
 //     disk, which is what this serves). The stamp is the index route's (server.js: the file's mtime in whole ms). Every
 //     other file, and a script with no `?v=`, is served as before (test-csp-report ⑨).
+//     G1's cure (unit interface-trial, A1 — a page open makes NO synchronous file call): the stamp is asked of the page's
+//     copy in memory first (src/server/index-page.js `stampOf` — the files the page names: no disk call at all); one the
+//     copy does not know is stated with fs.promises, off the loop. Never fs.statSync on a request.
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
@@ -27,25 +30,36 @@ function buildOnly(reqPath) {
   return BUILD_ONLY_RE.test(p);
 }
 
-/** A served file's build stamp, as the index route writes it (`?v=`): its mtime in whole ms — or null (no such file). */
-function stampOf(file) {
-  try { return String(Math.floor(fs.statSync(file).mtimeMs)); } catch { return null; }
+/** A served file's build stamp, as the index route writes it (`?v=`): its mtime in whole ms — or null (no such file).
+ *  ASYNC (G1's cure A1): `known(rel)` — the page's copy in memory — answers first; else fs.promises.stat, off the loop. */
+async function stampOf(file, known = null, rel = null) {
+  const k = typeof known === 'function' && rel ? known(rel) : undefined;
+  if (k !== undefined && k !== null) return String(k);
+  try { return String(Math.floor((await fs.promises.stat(file)).mtimeMs)); } catch { return null; }
 }
 
-/** The address a request for a PARSE_SCRIPTS script should have had — its own stamp — when its `?v=` names another build;
- *  else null (serve it). */
-function ownStamp(publicDir, req) {
-  if ((req.method !== 'GET' && req.method !== 'HEAD') || !PARSE_SCRIPTS.includes(req.path)) return null;
-  const v = req.query && req.query.v;
-  if (typeof v !== 'string') return null;
-  const own = stampOf(path.join(publicDir, req.path.slice(1)));
-  return own && own !== v ? `${req.path}?v=${own}` : null;
+/** a request this layer checks the stamp of: GET / HEAD of a PARSE_SCRIPTS script with a `?v=` */
+const stampChecked = (req) => (req.method === 'GET' || req.method === 'HEAD') && PARSE_SCRIPTS.includes(req.path) && typeof (req.query && req.query.v) === 'string';
+
+/** → Promise: the address a request for a PARSE_SCRIPTS script should have had — its own stamp — when its `?v=` names
+ *  another build; else null (serve it). */
+async function ownStamp(publicDir, req, known = null) {
+  if (!stampChecked(req)) return null;
+  const own = await stampOf(path.join(publicDir, req.path.slice(1)), known, req.path.slice(1));
+  return own && own !== req.query.v ? `${req.path}?v=${own}` : null;
 }
 
-/** The middleware server.js mounts: express.static(publicDir) for every path but a source map's. */
-function create(publicDir, opts = { etag: true, lastModified: true, maxAge: 0 }) {
+/** The middleware server.js mounts: express.static(publicDir) for every path but a source map's. `stampOf` = the page's
+ *  copy (src/server/index-page.js) — the stamps a page open asks are answered from memory. */
+function create(publicDir, opts = { etag: true, lastModified: true, maxAge: 0 }, { stampOf: known = null } = {}) {
   const files = express.static(publicDir, opts);
-  const serve = (req, res, next) => { const to = ownStamp(publicDir, req); if (!to) return files(req, res, next); res.set('Cache-Control', 'no-store'); return res.redirect(302, to); };
+  const serve = (req, res, next) => {
+    if (!stampChecked(req)) return files(req, res, next);
+    ownStamp(publicDir, req, known).then((to) => {
+      if (!to) return files(req, res, next);
+      res.set('Cache-Control', 'no-store'); return res.redirect(302, to);
+    }, () => files(req, res, next));
+  };
   return (req, res, next) => (buildOnly(req.path) ? next() : serve(req, res, next));
 }
 

@@ -478,7 +478,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     // a STALE TAB (r2): its /mermaid.js address was stamped when its page loaded; the file on disk is newer — the import is
     // redirected to the file's own stamp (static-public ownStamp), the address a report then names ⇒ the sanitizer's
     const SP = require(path.join(REPO, 'src/server/static-public.js'));
-    const to = typeof SP.ownStamp === 'function' ? SP.ownStamp(PUB, { method: 'GET', path: '/mermaid.js', query: { v: '1' } }) : null;
+    const to = typeof SP.ownStamp === 'function' ? await SP.ownStamp(PUB, { method: 'GET', path: '/mermaid.js', query: { v: '1' } }) : null;   // async since G1's cure A1 (fs.promises — never a stat on the loop)
     CASES.push([`a stale tab's import of /mermaid.js?v=1 is redirected to the file's own stamp (${to}) — the stamp the sink reads — and the report from there ⇒ the sanitizer's`, handler(LABEL, mSite, { 'source-file': `${ORIGIN}${to}` }), (j) => to === `/mermaid.js?v=${VM}` && SANITIZER(j)]);
     // the shape Chrome 156 posts (measured, r2 — repro/r2/redirect-probe.mjs under the app's own policy): source-file with
     // NO query, for a classic script, a module and a redirected module alike ⇒ no stamp to read: the file on disk is judged
@@ -695,8 +695,11 @@ const SRV = readRepo('server.js');
 const sinkLine = SRV.split('\n').find((l) => l.startsWith('const cspReports = require('));
 const i0 = SRV.indexOf("app.get(['/', '/index.html'], (req, res, next) => {"), i1 = SRV.indexOf('\n});\n', i0) + 5;
 const indexRoute = i0 >= 0 ? SRV.slice(i0, i1) : '';
+// G1 (unit interface-trial): the route answers the page from memory — server.js's own two page-builder lines, verbatim, run ahead of it
+const pageLines = SRV.split('\n').filter((l) => l.startsWith("const indexPage = require('./src/server/index-page.js')") || l === 'indexPage.refresh();').join('\n');
 ok(!!sinkLine && /file: process\.env\.VIBESPACE_CSP_REPORTS_FILE/.test(sinkLine) && /cspReports\.register\(app\)/.test(sinkLine), 'server.js makes the sink with VIBESPACE_CSP_REPORTS_FILE and registers its route', sinkLine);
 ok(/res\.set\(\.\.\.cspReports\.header\(\)\)/.test(indexRoute), 'the index route sets the sink\'s header');
+ok(pageLines.split('\n').length === 2 && /indexPage\.get\(\)/.test(indexRoute), 'the index route answers server.js\'s own page builder (its two lines read verbatim)', pageLines);
 {
   const at = (needle) => SRV.indexOf(needle);
   ok(at('app.use(auth.middleware());') < at(sinkLine) && at(sinkLine) < at('const jsonBody = express.json('), 'the sink mounts AFTER the gate (its door is the gate\'s) and BEFORE the json body parser (it reads its own 32 KB)');
@@ -709,7 +712,7 @@ async function appPage({ env = null } = {}) {
   const req = (m) => require(m.startsWith('./') ? path.join(REPO, m) : m);
   const prev = process.env.VIBESPACE_CSP_REPORTS_FILE;
   if (env) process.env.VIBESPACE_CSP_REPORTS_FILE = env; else delete process.env.VIBESPACE_CSP_REPORTS_FILE;
-  try { new Function('app', 'require', 'path', 'fs', '__dirname', 'userTodos', 'console', `${sinkLine}\n${indexRoute}\nreturn cspReports;`)(app, req, path, fs, dir, null, { log() { }, warn() { } }); }
+  try { new Function('app', 'require', 'path', 'fs', '__dirname', 'userTodos', 'console', `${sinkLine}\n${pageLines}\n${indexRoute}\nreturn cspReports;`)(app, req, path, fs, dir, null, { log() { }, warn() { } }); }
   finally { if (prev === undefined) delete process.env.VIBESPACE_CSP_REPORTS_FILE; else process.env.VIBESPACE_CSP_REPORTS_FILE = prev; }
   const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   return { dir, port: srv.address().port, close: () => new Promise((c) => srv.close(c)) };
@@ -1105,7 +1108,7 @@ console.log('⑨ the source map beside the bundle is served to nobody (lane vaul
   const SP = require(SP_PATH);
   const staticLine = SRV.split('\n').find((l) => l.startsWith("app.use(require('./src/server/static-public.js').create("));
   const at = (needle) => SRV.indexOf(needle);
-  ok(!!staticLine && /\.create\(path\.join\(__dirname, 'public'\)\)\);/.test(staticLine) && at("app.get(['/', '/index.html']") < at(staticLine) && at(staticLine) < at('registerWebdav(app, { tokens: mountTokens });') && !/express\.static\(/.test(SRV), 'server.js serves public/ through static-public.js ONLY (no bare express.static), after the index route, before WebDAV', staticLine);
+  ok(!!staticLine && /\.create\(path\.join\(__dirname, 'public'\), undefined, \{ stampOf: indexPage\.stampOf \}\)\);/.test(staticLine) && at("app.get(['/', '/index.html']") < at(staticLine) && at(staticLine) < at('registerWebdav(app, { tokens: mountTokens });') && !/express\.static\(/.test(SRV), 'server.js serves public/ through static-public.js ONLY (no bare express.static), after the index route, before WebDAV', staticLine);
   ok(['/bundle.js.map', '/a/b.MAP', '/bundle.js%2Emap', '/bundle.js%2emap'].every(SP.buildOnly) && !['/bundle.js', '/map', '/x.map/y', '/style.css'].some(SP.buildOnly) && SP.buildOnly('/x%E0%A4%A.map') && !SP.buildOnly('/x%E0%A4%A'), 'buildOnly: a *.map path, judged decoded (%2E is a dot), any case; a malformed escape is judged as sent');
   const MAP_BYTES = '{"version":3,"sources":["../src/client.js"],"mappings":"SECRET-MAP-BYTES"}';
   const serve = async (mod) => {
@@ -1115,7 +1118,7 @@ console.log('⑨ the source map beside the bundle is served to nobody (lane vaul
     fs.writeFileSync(path.join(dir, 'public', 'bundle.js.map'), MAP_BYTES); fs.writeFileSync(path.join(dir, 'public', 'mermaid.js'), 'export default 1;');
     const app = express();
     const req = (m) => (m === './src/server/static-public.js' ? mod : require(m.startsWith('./') ? path.join(REPO, m) : m));
-    new Function('app', 'require', 'path', 'fs', '__dirname', 'cspReports', `${indexRoute}\n${staticLine}`)(app, req, path, fs, dir, { header: () => ['X-Probe', '1'] });
+    new Function('app', 'require', 'path', 'fs', '__dirname', 'cspReports', `${pageLines}\n${indexRoute}\n${staticLine}`)(app, req, path, fs, dir, { header: () => ['X-Probe', '1'] });
     app.get('/dav/notes.map', (q, r) => r.type('text').send('a later route keeps its own .map path'));
     const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
     return { port: srv.address().port, dir, close: () => new Promise((c) => srv.close(c)) };

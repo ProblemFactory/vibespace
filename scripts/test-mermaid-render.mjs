@@ -185,9 +185,23 @@ ok(/esbuild src\/mermaid-entry\.js --bundle --outfile=public\/mermaid\.js --form
 ok(/^public\/mermaid\.js$/m.test(read('.gitignore')), 'the built file is gitignored like public/novnc.js');
 const ix = read('public/index.html');
 ok(/<link rel="vs-lazy-bundle" href="\/mermaid\.js">/.test(ix), 'index.html names the lazy bundle by a link that fetches nothing (an unknown rel)');
-const srvRe = /html = html\.replace\((\/[^\n]+\/g), \(m, attr, file\) =>/.exec(read('server.js'));
+const srvRe = /const ASSET_RE = (\/[^\n]+\/g);/.exec(read('src/server/index-page.js'));   // G1 (unit interface-trial): the index route's page is built by src/server/index-page.js, its stamping regex there
 const stamped = srvRe ? ix.replace(eval(srvRe[1]), (m, a, f) => `${a}="/${f}?v=1792800000000"`) : '';
-ok(srvRe && /<link rel="vs-lazy-bundle" href="\/mermaid\.js\?v=1792800000000">/.test(stamped), 'the index route\'s own stamping regex (read off server.js) gives it ?v=<mtime> like bundle.js — a stale tab never runs an old copy', srvRe && srvRe[1]);
+ok(srvRe && /<link rel="vs-lazy-bundle" href="\/mermaid\.js\?v=1792800000000">/.test(stamped), 'the index route\'s own stamping regex (read off src/server/index-page.js, the page the route answers) gives it ?v=<mtime> like bundle.js — a stale tab never runs an old copy', srvRe && srvRe[1]);
+{
+  // G1's cure A4: the pin holds where the pattern is DECLARED (above) AND where it is USED — the page builder's own replace
+  // over that pattern, and the builder itself run over the real index.html (the copy the route answers, its mermaid link)
+  const ipSrc = read('src/server/index-page.js');
+  ok(/text\.replace\(ASSET_RE, \(m, attr, file\) =>/.test(ipSrc) && (ipSrc.match(/\b(?:text|html)\.replace\(/g) || []).length === 1, 'the page builder stamps with that same declared pattern — its ONE replace over the page is `text.replace(ASSET_RE, …)`');
+  const os = require('node:os');
+  const pub = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-mermaid-stamp-'));
+  try {
+    fs.writeFileSync(path.join(pub, 'index.html'), ix); fs.writeFileSync(path.join(pub, 'mermaid.js'), 'export default 1;');
+    const at = new Date(1792800000000); fs.utimesSync(path.join(pub, 'mermaid.js'), at, at);
+    const page = await require(path.join(REPO, 'src/server/index-page.js')).create({ pubDir: pub }).get();
+    ok(/<link rel="vs-lazy-bundle" href="\/mermaid\.js\?v=1792800000000">/.test(page || ''), 'the page the route answers (index-page.js over the real index.html) names the lazy bundle as /mermaid.js?v=<its mtime>', (page || '').match(/<link rel="vs-lazy-bundle"[^>]*>/));
+  } finally { fs.rmSync(pub, { recursive: true, force: true }); }
+}
 const mr = read('src/lib/mermaid-render.js');
 ok(mr.includes(`document.querySelector('link[rel="vs-lazy-bundle"][href^="/mermaid.js"]')`) && /import\(mermaidHref\(\)\)/.test(mr) && /new URL\(\(link && link\.getAttribute\('href'\)\) \|\| '\/mermaid\.js', location\.origin\)/.test(mr), 'the door imports the stamped address from THIS origin');
 const csp = require(path.join(REPO, 'src/app-csp.js'));

@@ -35,7 +35,7 @@ const ok = (c, n, detail) => { if (c) { pass++; console.log('  ✓ ' + n); } els
 const PROOFS = new Set(['local-only', 'via-safefs', 'guarded']);
 // [file, scope, n, proof, why, match?]
 const ROWS = [
-  ["server.js", "<module>", 6, "local-only", "GET / reads <checkout>/public/index.html + its asset stats; the 30 s boot sweep walks data/agentd, data/chat-frames (data/session-buffers' walk is src/server/wrapper-files.js sweepAgedWrapperFiles since ci358-reds round 2)."],
+  ["server.js", "<module>", 4, "local-only", "(G1, unit interface-trial: GET / answers from memory — src/server/index-page.js, fs.promises) the 30 s boot sweep walks data/agentd, data/chat-frames (data/session-buffers' walk is src/server/wrapper-files.js sweepAgedWrapperFiles since ci358-reds round 2)."],
   ["server.js", "migrateHomeRename", 7, "local-only", "marker <checkout>/data/.home-migrated-*; stores = data/{mounts,layouts,task-groups,machine-mounts}.json + data/session-meta/*."],
   ["server.js", "ensureDir", 2, "local-only", "callers pass only data dirs: USAGE_CACHE_FILE's dir (usage-routes), SOCKETS_DIR/BUFFERS_DIR (ws-create), AGENTD_DIR (spawn/ssh, spawn/dial)."],
   ["server.js", "refreshWebuiPids", 1, "local-only", "metaPath = BUFFERS_DIR/<session id>.json; BUFFERS_DIR = <checkout>/data/session-buffers."],
@@ -266,7 +266,6 @@ const ROWS = [
   ["src/server/cluster-presets.js", "*", 4, "local-only", "the presets directory the cluster projects (the reader's own; set by the deployment) — deploy config, never a person-named or storage-mount path"],
   ["src/server/conversation-deliver.js", "*", 1, "local-only", "retryFile = <dataDir>/msg-retry.json and its .corrupt- aside; dataDir = server.js <checkout>/data"],
   ["src/server/csp-reports.js", "*", 7, "local-only", "file = <checkout>/data/csp-reports.jsonl (+ .1) or VIBESPACE_CSP_REPORTS_FILE, a chrome suite's scratch file (server.js create); lane csp-mermaid-sites r2 +2: the boot's re-judge writes the same file's .rejudge beside it and renames it over (a line the sanitizer explains; its read is the boot's own textOf)"],
-  ["src/server/static-public.js", "stampOf", 1, "local-only", "<checkout>/public/<script> — the build stamp of the checkout's own served script (lane csp-mermaid-sites r2: a stale ?v= redirected to it)"],
   ["src/server/decision-engine.js", "*", 9, "local-only", "F.memo / F.usage / F.journal = <dataDir>/decision-memo.json, decision-usage.json, decision-journal.jsonl"],
   ["src/server/desktop-access.js", "*", 1, "local-only", "knownFile = <dataDir>/desktop-machines.json (server.js passes <checkout>/data)"],
   ["src/server/desktop-app-keeper.js", "*", 2, "local-only", "remoteFile = <dataDir>/desktop-apps-hosts.json (server.js passes <checkout>/data)"],
