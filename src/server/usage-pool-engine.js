@@ -4292,7 +4292,10 @@ function resetCreditsLeft(session, key) {
 function noteTurnAsk(session, model) {
   try {
     const fam = familyOfModel(model); if (!fam) return;
-    const k = (requestSlotFor(session) || wallSlotFor(session)).key; if (!k) return;
+    // an ask is recorded only under a KNOWN request's account, never a guessed one (主开发 2026-11-15T16:41Z): with no request of
+    // this hub's life known (a restart, before the stream's first stamp) the fresh slot would key it record by record to the link
+    // NOW — and law 2 is unjudged there anyway (turnAskedFamily)
+    const k = (requestSlotFor(session) || {}).key; if (!k) return;
     const m = session._turnAsks || (session._turnAsks = {});
     const list = m[k] || (m[k] = []); if (!list.includes(fam)) list.push(fam);
   } catch { }
