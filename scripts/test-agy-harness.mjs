@@ -78,6 +78,7 @@ const { HARNESS_SETTINGS } = require(path.join(REPO, 'src/harness-settings.js'))
 const { AgyAdapter, agyFlags, AGY_MODES, AGY_EFFORTS } = require(path.join(REPO, 'src/adapters/agy.js'));
 const { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.js'));
 const HE = require(path.join(REPO, 'src/harness-env.js'));
+const AS = require(path.join(REPO, 'src/agy-store.js'));   // the timing pair (2.369.405): the card a tail tick settles on, by the store's own cardOf
 
 console.log('— ① the descriptor, re-derived from what agy 1.4.3 measured');
 {
@@ -1080,9 +1081,19 @@ console.log('— ⑫ THE SUBAGENT CARD (lane agy-subagent-cards): the invoke_sub
       await w.until(() => w.all('sub').length >= 6, 8000, 'the sub\'s first steps');
       const first = w.all('sub');
       ok('…its own steps ride `sub` records under its id (the task bubble, a read, a command — ACP records the virtual session draws)', first.every((r) => r.subId === S && r.toolCallId === `${P}:6`) && subKind(first[0]) === 'user' && first.some((r) => r.rec.update?.title === 'run_command'), first.map(subKind));
+      // THE TIMING PAIR (2.369.405, lane artifacts-by-intent): the row's end rides the STREAM's subagent_info DONE (the stub prints it
+      // after ACTIVE), never the tail's records that the wait above counts (hosted: the tail's first tick beat the DONE under load) — the
+      // leg waits on that end record itself (a row that never ends throws: the leg is red), then reads it whole
+      await w.until(() => w.find('update', (r) => r.update?.sessionUpdate === 'tool_call_update' && r.update.toolCallId === `${P}:6`), 8000, 'the row\'s own end');
       ok('the row itself: a tool_call, then its OWN end on the subagent_info update (the owner\'s two rows never got one) — and no «started 1 subagent» line beside the card',
         w.find('update', (r) => r.update?.sessionUpdate === 'tool_call' && r.update.toolCallId === `${P}:6` && r.update.title === 'invoke_subagent') && w.find('update', (r) => r.update?.sessionUpdate === 'tool_call_update' && r.update.toolCallId === `${P}:6` && r.update.status === 'completed') && !w.find('notice', (r) => r.noticeKind === 'subagents'));
       ok('THE TAIL is on while the sub works', /subagent tail on \(every 200 ms\)/.test(wlog(w)) && !/subagent tail off/.test(wlog(w)), wlog(w).slice(-400));
+      // …the card's BASELINE at the watcher's SETTLED state (the timing pair): a tail tick writes its `sub` records and THEN its card, so a
+      // count right after the records could be taken MID-TICK (hosted: before 1, after 3) — it waits for the card that carries the first
+      // steps' last (its lastText, the store's own cardOf over that step); a card that never comes throws (the leg is red)
+      const firstSteps = fs.readFileSync(A.t, 'utf8').split('\n').filter(Boolean);
+      const settledText = AS.cardOf({ lastStep: AS.transcriptStepOf(firstSteps[firstSteps.length - 1]) }).lastText;
+      await w.until(() => { const c = w.all('subagent'); return c.length > 0 && c[c.length - 1].lastText === settledText; }, 8000, 'the card of the first steps');
       const cards = w.all('subagent').length;
       // the sub finishes: its last five steps + its answer land in the store
       fs.appendFileSync(A.t, A.rest.join('\n') + '\n');
