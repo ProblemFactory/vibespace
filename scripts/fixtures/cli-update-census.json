@@ -551,10 +551,10 @@
    "file": "src/backend-caps.js",
    "keyedOn": "version",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "the evidence's own label (cli: the build it was measured on) — nothing reads it as a gate",
+   "road": "the evidence's own labels (cli: the build each record was measured on — the 2.1.281 hot-switch record and its midTurn record, lane readings-attribution-2 P0) — nothing reads them as a gate",
    "suite": "test-claude-hot-switch",
    "match": "version-literal",
-   "sites": 1
+   "sites": 2
   },
   {
    "id": "acp-no-hot-switch",

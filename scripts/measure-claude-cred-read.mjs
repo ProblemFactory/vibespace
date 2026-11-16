@@ -40,6 +40,11 @@
 //                    turn must refresh — which refresh token is spent, which file is written
 //   slowstream       msg2's one text block streams for 25 s — does an assistant
 //                    record's `timestamp` name the block's start or its emission?
+//   midturn          msg1 is ONE turn of three requests (the mock answers requests 1 and 2 with a Read tool call); the
+//                    link moves to B (+utimes) as request 1 lands — which bearer do requests 2 and 3 carry? (P0 of lane
+//                    readings-attribution-2: 2.1.322 and 2.1.321 — the next request, inside the turn)
+//   midturn-late     the same, request 1's answer held 70 s (past any credential cache)
+//   symlink-quick    symlink with a 3 s gap
 //   gate429          msg1 answered 429 (five_hour rejected, resets +1 h); msg2
 //                    unchanged; then the link moves to B; msg3 — how many API
 //                    calls does the CLI make while its local gate holds?

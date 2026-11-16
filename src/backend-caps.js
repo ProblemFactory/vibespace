@@ -365,6 +365,12 @@ const BACKEND_CAPS = {
       gate: 'scripts/test-claude-hot-switch.mjs',
       mechanism: 'every turn the CLI statx()es $CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json THROUGH the per-session link and re-reads it when mtimeMs differs from the last it saw — the next request carries the member the link names',
       blindSpot: 'a replacement whose mtime EQUALS the previous one is not seen: repointPoolSymlink bumps the target creds mtime, and that bump is load-bearing',
+      // INSIDE A TURN TOO (lane readings-attribution-2, P0, 2026-11-15): the same harness on the real binary, rung loopback-real
+      midTurn: Object.freeze({
+        cli: '2.1.322', alsoMeasured: ['2.1.321'], measuredAt: '2026-11-15',
+        record: 'scripts/fixtures/claude-cred-read-midturn-2.1.322.json',
+        mechanism: 'a re-point reaches a RUNNING CLI on its NEXT REQUEST, inside a turn as well as between turns: the request in flight at the move carries the old member, every later one the new (65 ms or 70 s after the move)',
+      }),
     }),
     planC: true,          // per-session pool links (model-family projection)
     sealedOrders: true,   // device-side offline fallback switch
