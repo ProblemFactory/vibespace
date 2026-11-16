@@ -6,7 +6,7 @@ import { valueWord } from './value-words.js'; // lane ui-language: the board's s
 import { mergePendingBind, pendingBindVerdict, sweepPendingBinds } from './fork-groups.js';
 import { folderOf, insideFolder } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
 import { applyTasksDelta, applyStatusDelta, frameStep, fetchVerdict, metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): a broadcast is a DELTA in the hub's order
-import { resumeGroup } from './resume-pacer.js'; // lane resume-all-paced (L1): the group's button paces its resumes
+import { pressResumeGroup } from './resume-pacer.js'; // lane resume-all-paced (L1): the group's button paces its resumes
 
 /**
  * Sidebar tasks mixin — the task system's client (docs/design-task-system.md).
@@ -1002,8 +1002,9 @@ export function installSidebarTasks(SidebarClass) {
       resumeAllBtn.onclick = (e) => {
         e.stopPropagation();
         // lane resume-all-paced (L1): the live members attached and the tmux ones opened at once; the STOPPED ones resumed ONE AT A
-        // TIME, each when the previous one's create has ended — never every create in one synchronous loop (resume-pacer.js)
-        resumeGroup(this.app, taskSessions, { nameOf: (s) => this.getCustomName(s) || s.name });
+        // TIME, each when the previous one's create has ended — never every create in one synchronous loop (resume-pacer.js); the first as the
+        // press, every later one quiet (M2: it takes neither the focus nor the desktop on show)
+        pressResumeGroup(this.app, taskSessions, { nameOf: (s) => this.getCustomName(s) || s.name });   // a throw inside the pace is said, never an unhandled rejection
       };
       header.appendChild(resumeAllBtn);
 

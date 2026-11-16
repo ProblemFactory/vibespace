@@ -12831,8 +12831,16 @@ export default {
   "missing username": "ユーザー名がありません",
   "You submitted a password during takeover, but no save-login card could be created. Add or update the login manually in Vault → Web logins if you want VibeSpace to keep it.": "引き継ぎ中にパスワードを送信しましたが、ログイン保存カードを作成できませんでした。VibeSpace に保存させたい場合は、「保管庫 → Web ログイン」で手動で追加または更新してください。",
   // lane resume-all-paced (L1): the bulk resume's progress, its stop and its failures
+  "{name} ({why})": "{name}（{why}）",
+  "Stopping after the conversation now starting…": "停止しています：いま起動中の会話が終わったら止めます…",
+  "Stopped: {r} of {n} resumed, {x} not resumed, {left} not started.": "停止しました：{n} 件中 {r} 件を再開、{x} 件は再開できず、{left} 件は開始していません。",
+  "the connection dropped before the server answered": "サーバーが応答する前に接続が切れました",
+  "the server reported an error without a reason": "サーバーがエラーを返しましたが、理由は示されませんでした",
+  "the server refused it without a reason": "サーバーが拒否しましたが、理由は示されませんでした",
+  "it could not be started on this page": "このページでは開始できませんでした",
+  "it was not resumed": "再開されませんでした",
+  "Resuming the group stopped early because of an error on this page.": "このページでエラーが起きたため、グループの再開が途中で止まりました。",
   "Resuming {i} of {n}…": "{n} 件中 {i} 件目の会話を再開しています…",
   "Resuming {i} of {n} — {f} could not be resumed": "{n} 件中 {i} 件目の会話を再開しています — {f} 件は再開できませんでした",
   "{f} of {n} conversations could not be resumed: {list}": "{n} 件中 {f} 件の会話を再開できませんでした：{list}",
-  "Stopped: {done} of {n} resumed — the other {left} were not started.": "停止しました：{n} 件中 {done} 件を再開 — 残りの {left} 件は開始していません。",
 };

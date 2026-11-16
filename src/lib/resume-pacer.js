@@ -15,7 +15,7 @@ import { showToast } from './utils.js';
 import { t } from './i18n.js';
 
 const FOREVER_MS = 24 * 3600e3;   // the progress line stays until the bulk ends (a toast's timer must stay under 2^31 ms)
-const LIST_MAX = 5;               // the names a failure line lists before «and N more»
+const LIST_MAX = 3;               // the names a failure line lists before «and N more» (S3: one phone screen)
 
 /** One resume through the app's ONE door, and its create's END → Promise<{how, msg, row}>. `how`: 'created' | 'refused' |
  *  'error' | 'lost' | 'closed' (createSession's onCreateEnd), 'none' (no create was sent: the conversation runs live and its
@@ -37,21 +37,44 @@ export function resumeAndWait(app, d, extra = {}) {
   });
 }
 
+/** WHY ONE WAS NOT RESUMED, in the person's words (M4 of 主开发's look, 19:11Z): the hub's own text when it sent one; else a sentence of
+ *  ours for each end — never the pace's end word or a page's exception text */
+function whyNotResumed(r) {
+  const hub = r.how !== 'threw' && r.msg && (r.msg.error || r.msg.message);
+  if (hub) return String(hub);
+  switch (r.how) {
+    case 'lost': return t('the connection dropped before the server answered');
+    case 'error': return t('the server reported an error without a reason');
+    case 'refused': return t('the server refused it without a reason');
+    case 'threw': return t('it could not be started on this page');
+    default: return t('it was not resumed');
+  }
+}
+const NAME_MAX = 40, WHY_MAX = 60;   // S3: the failure line reads on one phone screen (3 names × (40 + 60) characters at most)
+const cut = (x, n) => { const v = String(x || ''); return v.length > n ? v.slice(0, n - 1) + '…' : v; };
+
 /** Resume `items` ({sessionId, cwd, name, opts}) ONE AT A TIME, each when the previous one's create has ended; the progress
- *  said as it goes, Stop at hand. → {total, resumed, rows, failed: [{name, why}], stopped} */
-export async function resumePaced(app, items, { extra = { stay: true } } = {}) {
+ *  said as it goes, Stop at hand. `extra` = the first resume's options, `later` = every later one's (M2: only the press acts as a
+ *  press — a group's later members start after the press's moment and take neither the focus nor the desktop on show).
+ *  → {total, resumed, rows, failed: [{name, why}], closed, stopped} */
+export async function resumePaced(app, items, { extra = { stay: true }, later = null } = {}) {
   const list = (items || []).filter(Boolean), n = list.length;
-  const out = { total: n, resumed: 0, rows: 0, failed: [], stopped: false };
+  const out = { total: n, resumed: 0, rows: 0, failed: [], closed: 0, stopped: false };
   if (!n) return out;
-  let el = null, body = null, stop = false;
+  let el = null, body = null, stopping = null, stop = false;
   const shown = (e) => !!e && e.isConnected !== false && !e.removed;   // a burst of toasts can push it out (showToast caps the stack): then a new one
   const words = (i) => (out.failed.length
     ? t('Resuming {i} of {n} — {f} could not be resumed', { i, n, f: out.failed.length })
     : t('Resuming {i} of {n}…', { i, n }));
+  // S1: Stop is answered where it was pressed, at once — the create now starting finishes (minutes on a slow hub), nothing follows
+  const onStop = () => {
+    stop = true;
+    if (!stopping) { stopping = showToast(t('Stopping after the conversation now starting…'), { type: 'info', duration: FOREVER_MS }); if (stopping && stopping.dataset) stopping.dataset.progress = 'resume-all-stopping'; }
+  };
   const say = (i) => {
-    if (n < 2) return;
+    if (n < 2 || stop) return;
     if (shown(el) && body) { body.textContent = words(i); return; }   // ONE line, updated in place
-    el = showToast(words(i), { type: 'info', duration: FOREVER_MS, actions: [{ label: t('Stop'), run: () => { stop = true; } }] });   // a click on Stop closes it (showToast's action)
+    el = showToast(words(i), { type: 'info', duration: FOREVER_MS, actions: [{ label: t('Stop'), run: onStop }] });   // a click on Stop closes it (showToast's action)
     body = el ? [...(el.children || [])].find((c) => /(^| )global-toast-body( |$)/.test(String(c.className || ''))) || null : null;
     if (el && el.dataset) el.dataset.progress = 'resume-all';
   };
@@ -59,27 +82,32 @@ export async function resumePaced(app, items, { extra = { stay: true } } = {}) {
     if (stop) { out.stopped = true; break; }
     say(i + 1);
     const d = list[i];
-    const r = await resumeAndWait(app, d, extra);
+    const r = await resumeAndWait(app, d, i > 0 && later ? later : extra);
     if (r.row) out.rows++;
     const code = r.msg && r.msg.code;
     if (r.how === 'created' || r.how === 'none' || (r.how === 'refused' && code === 'resume-already-live')) out.resumed++;
-    else if (r.how === 'closed') { /* the person closed its window while it started: theirs, not a failure */ }
-    else out.failed.push({ name: String(d.name || d.sessionId || '').slice(0, 80), why: String((r.msg && (r.msg.error || r.msg.message || r.msg.code)) || r.how).slice(0, 160) });
+    else if (r.how === 'closed') out.closed++;   // the person closed its window while it started: theirs, not a failure
+    else out.failed.push({ name: cut(d.name || d.sessionId, NAME_MAX), why: cut(whyNotResumed(r), WHY_MAX) });
   }
+  if (stop && !out.stopped && out.resumed + out.failed.length + out.closed < n) out.stopped = true;
   if (shown(el)) el.remove();
+  if (shown(stopping)) stopping.remove();
   if (out.failed.length) {
-    const names = out.failed.slice(0, LIST_MAX).map((f) => `${f.name} (${f.why})`).join('; ') + (out.failed.length > LIST_MAX ? ' ' + t('and {n} more', { n: out.failed.length - LIST_MAX }) : '');
+    const names = out.failed.slice(0, LIST_MAX).map((f) => t('{name} ({why})', { name: f.name, why: f.why })).join(t(', ')) + (out.failed.length > LIST_MAX ? ' ' + t('and {n} more', { n: out.failed.length - LIST_MAX }) : '');   // each language its own brackets and separator
     showToast(t('{f} of {n} conversations could not be resumed: {list}', { f: out.failed.length, n, list: names }), { type: 'error', duration: 15000 });
   }
   if (out.stopped) {
-    const done = out.resumed + out.failed.length;
-    showToast(t('Stopped: {done} of {n} resumed — the other {left} were not started.', { done: out.resumed, n, left: n - done }), { type: 'info', duration: 8000 });
+    // S2: the three numbers add up to the total — resumed, not resumed (refused, failed, or closed by the person), not started
+    const notResumed = out.failed.length + out.closed, left = n - out.resumed - notResumed;
+    showToast(t('Stopped: {r} of {n} resumed, {x} not resumed, {left} not started.', { r: out.resumed, n, x: notResumed, left }), { type: 'info', duration: 8000 });
   }
   return out;
 }
 
 /** THE SIDEBAR'S GROUP BUTTON («Resume all sessions in …», sidebar-tasks.js): a live member is attached and a tmux one opened
- *  at once (no create); every STOPPED member is resumed through the same pace. → resumePaced's answer */
+ *  at once (no create); every STOPPED member is resumed through the same pace — the FIRST in the press's own moment, as the press
+ *  (its window raised, its row's desktop shown, as one press of one member would); every later one QUIET (`stay`: drawn, never
+ *  focused, no desktop switch — it starts seconds or minutes after the press, while the person works elsewhere). → resumePaced's answer */
 export function resumeGroup(app, sessions, { nameOf = (s) => s.name } = {}) {
   const stopped = [];
   for (const s of sessions || []) {
@@ -94,5 +122,16 @@ export function resumeGroup(app, sessions, { nameOf = (s) => s.name } = {}) {
     else if (s.status === 'live' && s.webuiId) app.attachSession(s.webuiId, s.webuiName || s.name, s.cwd, { mode: s.webuiMode, ...agentOpts });
     else if (s.status === 'tmux') app.attachTmuxSession(s.tmuxTarget, s.name, s.cwd);
   }
-  return resumePaced(app, stopped, { extra: {} });   // a press on a group's button: each resume as a press would (no `stay`)
+  return resumePaced(app, stopped, { extra: {}, later: { stay: true } });
+}
+
+/** the group button's press: the pace started, and anything thrown inside it SAID (S3 — never an unhandled rejection) */
+export function pressResumeGroup(app, sessions, opts) {
+  let p;
+  try { p = resumeGroup(app, sessions, opts); } catch (e) { p = Promise.reject(e); }
+  return Promise.resolve(p).catch((e) => {
+    console.warn('[resume-all] the group\'s resume stopped early:', e);
+    showToast(t('Resuming the group stopped early because of an error on this page.'), { type: 'error', duration: 8000 });
+    return null;
+  });
 }

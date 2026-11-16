@@ -623,9 +623,9 @@ function prPage(H, install, { DM = RealDM, LM = RealLM, phone = true, on = 'desk
 }
 // the resume-all is PACED (lane resume-all-paced, L1): one create in flight, the next when the previous one's create has ended — so
 // the rig is a stand-in HUB that answers each create (`created`) a tick after it is sent; the 400 ms of a pre-pace copy runs at 0
-const prResumeAll = async (P, stopped) => {
+const prResumeAll = async (P, stopped, { answer = true } = {}) => {   // answer false: the leg answers each create itself (ONE answer per create)
   const st = globalThis.setTimeout; globalThis.setTimeout = (f, ms, ...a) => st(f, ms === 400 ? 0 : ms, ...a);
-  let answered = 0, on = true;
+  let answered = 0, on = answer;
   const hubLoop = (async () => { while (on) { while (answered < P.creates.length) { const i = answered++, m = P.creates[i]; await tick(0); P.answers[i]?.({ type: 'created', sessionId: 'pr-' + i, cwd: m && m.cwd, mode: 'chat', reqId: m && m.reqId }); } await tick(2); } })();
   try { return await (P.lm._resumeAll ? P.lm._resumeAll(stopped) : (async () => { for (const d of stopped) { P.app.resumeSession(d.sessionId, d.cwd, d.name, d.opts); await tick(0); } return null; })()); } finally { on = false; await hubLoop; globalThis.setTimeout = st; }
 };
@@ -1247,24 +1247,29 @@ async function pr4Legs({ DM = RealDM, LM = RealLM, install = null, WSH = null, C
   const door = resumeBarDoor(CV);
   if (want('owe') && install) {
     // (owe) N1 AN OWED RECIPE IS CARRIED ONCE — the phone's «Resume all» (V on show, X and Y never visited); the person switches to Y
-    // before the creates are answered; the answers come ⇒ ONE save carries the three live recipes (the owed windows' desktops, nothing
+    // while the bulk is IN FLIGHT (lane resume-all-paced M3: create 1 sent and unanswered — a bulk lasts minutes now); the hub then
+    // answers each create ONCE, as the pace sends it, every answer after the switch ⇒ ONE save carries the three live recipes (the owed windows' desktops, nothing
     // else); the person's input time and dirty bit untouched (no input fabricated); the phone idles and a desktop page writes Y ten
     // times ⇒ the phone writes NOTHING (the storm law: one act, one write)
     await fastClock(async () => {
       const H = hub(WSH || loadHandler(), DOC({ ...PR_RECS(), 'desk-y': [prRow('y-r3', 3), files('y-f', 4)] }), { alive: [S, T, 'new-1', 'new-2', 'new-3'] });
       const P = prPage(H, install, { DM, LM }), D = prPage(H, install, { DM, LM, phone: false, on: 'desk-y' });
       for (const X of [D, P]) for (const [d, v] of Object.entries(H.layouts().desktops)) X.dm.noteStamp(d, v.autoSave.updatedAt);
-      await prResumeAll(P, PR_STOPPED()); await tick(20);
+      const run = prResumeAll(P, PR_STOPPED(), { answer: false }); await tick(20);   // the bulk starts: create 1 in flight, unanswered
+      const inFlightAtSwitch = P.creates.length;
       await P.dm.switchTo('desk-y'); await tick(30);
       const idleAt = Date.now() - 120000; P.lm._userDirty = false; P.lm._lastUserInputAt = idleAt; // the person's last input: two minutes ago
       const from = P.syncs().length;
-      P.creates.forEach((c, k) => P.answers[k]?.({ type: 'created', sessionId: 'new-' + (k + 1), cwd: c.cwd, mode: 'chat', reqId: c.reqId }));
-      await tick(60);
+      for (let k = 0; k < 3; k++) {   // the hub answers each create ONCE, after the switch, as the pace sends it (one in flight)
+        for (let w = 0; w < 400 && P.creates.length <= k; w++) await tick(5);
+        const c = P.creates[k]; if (c) P.answers[k]?.({ type: 'created', sessionId: 'new-' + (k + 1), cwd: c.cwd, mode: 'chat', reqId: c.reqId });
+      }
+      await run; await tick(60);
       const saves = savesSince(P, from), desks = P.syncs().slice(from).map((m) => m.desktopId).sort();
       const names = [['desk-v', 'v-r1'], ['desk-x', 'x-r2'], ['desk-y', 'y-r3']].map(([d, id]) => hubName(H, d, id));
-      leg(P.creates.length === 3 && saves.length === 1 && J(desks) === J(['desk-v', 'desk-x', 'desk-y']) && J(names) === J(['new-1', 'new-2', 'new-3']) && P.lm._lastUserInputAt === idleAt && P.lm._userDirty === false && !P.lm._owedRecipes?.size,
-        '§PR4 (owe) N1 AN OWED RECIPE IS CARRIED ONCE: the phone\'s resume-all answered after the person switched to Y ⇒ ONE save carries the three live recipes (V, X — desktops not on show — and Y), the hub\'s rows name new-1/2/3; no input fabricated (the person\'s input time and dirty bit untouched), nothing owed after',
-        { creates: P.creates.length, saves: saves.length, desks, names, inputAge: Date.now() - P.lm._lastUserInputAt, dirty: P.lm._userDirty, owed: [...(P.lm._owedRecipes || [])] });
+      leg(inFlightAtSwitch === 1 && P.creates.length === 3 && saves.length >= 1 && J(desks) === J(['desk-v', 'desk-x', 'desk-y']) && J(names) === J(['new-1', 'new-2', 'new-3']) && P.lm._lastUserInputAt === idleAt && P.lm._userDirty === false && !P.lm._owedRecipes?.size,
+        '§PR4 (owe) N1 AN OWED RECIPE IS CARRIED ONCE: the phone\'s resume-all IN FLIGHT when the person switched to Y, each create answered once after it ⇒ the saves carry the three live recipes ONE record each (V, X — desktops not on show — and Y; paced answers come one at a time, so one save per answer that owed one), the hub\'s rows name new-1/2/3; no input fabricated (the person\'s input time and dirty bit untouched), nothing owed after',
+        { inFlightAtSwitch, creates: P.creates.length, saves: saves.length, desks, names, inputAge: Date.now() - P.lm._lastUserInputAt, dirty: P.lm._userDirty, owed: [...(P.lm._owedRecipes || [])] });
       const before = P.syncs().length;
       for (let k = 0; k < 10; k++) { const f = D.wins.get('y-f'); if (f) f.gridBounds = { ...GB(4), left: 0.01 * (k + 1) }; await saveNow(D); await tick(15); } // an echo leaves ~10 ms after its record at this clock
       const echoes = P.syncs().length - before;
