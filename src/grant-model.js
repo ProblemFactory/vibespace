@@ -394,9 +394,10 @@ function factsOf(f = {}) {
 const SPECIFIC = Object.freeze({ conversation: 2, group: 1, everyone: 0 });
 /** ONE row against the caller → `{state:'ok', hits}` | `{state:'excepted', entry}` | `{state:'unreadable'}` |
  *  `{state:'unknown', why}` | `{state:'no'}`. */
-function judgeRow(raw, F) {
-  const n = normRow(raw);
-  if (!n.ok) return { state: 'unknown', why: n.why };
+function judgeRow(raw, F) { return judgePrepared(normRow(raw), F); }
+/** ONE row ALREADY normalised (`normRow`'s answer, kept by its reader — lane grants-read-is-a-lookup) against the caller. */
+function judgePrepared(n, F) {
+  if (!n || !n.ok) return { state: 'unknown', why: n ? n.why : 'not a row' };
   const row = n.row;
   let exceptUndecided = false;
   for (const x of row.except) {
@@ -421,11 +422,21 @@ function judgeRow(raw, F) {
  * the exception that decided (the door names it and where it is lifted).
  */
 function admits(rows, facts = {}) {
-  const F = factsOf(facts);
+  const F = facts && facts[PREPARED] ? facts : factsOf(facts);
+  return verdictOf((Array.isArray(rows) ? rows : rows ? [rows] : []).map((raw) => (raw && raw[PREPARED] ? judgePrepared(raw, F) : judgeRow(raw, F))), F);
+}
+/** A READ IS A LOOKUP (lane grants-read-is-a-lookup — the hub's channel reach walk re-normalised every grant at every check,
+ *  2.5 M normalisations a walk): a reader that judges the same row again and again keeps `prepareRow(row)` (normRow's answer,
+ *  marked as the model's own) until its store changes, and the asker's `prepareFacts(facts)` for as long as the asker is the
+ *  same; `admits` takes either kind — a prepared one is judged as it stands, never normalised again. Same verdict, by
+ *  construction: `admits([prepareRow(r)], prepareFacts(f))` ≡ `admits([r], f)`. */
+const PREPARED = Symbol.for('vibespace.grant-model.prepared');   // REGISTERED: a patched copy of this model (a suite's red control) knows a prepared row too
+function prepareRow(raw) { const n = normRow(raw); n[PREPARED] = true; return n; }
+function prepareFacts(facts = {}) { const F = factsOf(facts); F[PREPARED] = true; return F; }
+function verdictOf(judged, F) {
   const hits = [];
   let excepted = null, unknown = null, unreadable = null;
-  for (const raw of Array.isArray(rows) ? rows : rows ? [rows] : []) {
-    const j = judgeRow(raw, F);
+  for (const j of judged) {
     if (j.state === 'ok') for (const e of j.hits) hits.push({ row: j.row, entry: e });
     else if (j.state === 'excepted') excepted = excepted || j;
     else if (j.state === 'unreadable') unreadable = unreadable || j;
@@ -805,7 +816,7 @@ const LEGACY = Object.freeze({
 
 module.exports = {
   DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, COMMANDS_MAX, commandListOf, commandKeyOf, scopeListOf,
-  principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, exceptUnnamed, EXCEPT_UNNAMED_WORDS, factsOf, admits, hitsOf, sharesGroup, names, namesNow,
+  principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, exceptUnnamed, EXCEPT_UNNAMED_WORDS, factsOf, admits, prepareRow, prepareFacts, hitsOf, sharesGroup, names, namesNow,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,
   fromSessionPrincipal, fromExitGrant, fromHostExit, browserKeyResolver, fromBrowserOwner, fromWindowRecord, fromSubject, fromAutomationGrant,
   fromAutomationReach, fromChannelPrincipal, toChannelPrincipal, fromChannelAccess, fromChannelRows, fromChannelApiRows,

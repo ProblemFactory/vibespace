@@ -513,7 +513,52 @@ function create(engineCtx) {
       return { level: ACL.fromMsgLevel(lv), via: 'msg-acl', grantId: null };
     }
     const target = { key: en.key, adapterId: en.adapterId };
+    const gen = CG.plainGeneration(en.key);   // ONE door call per conversation: -1 = a row of its own decides it
+    if (gen >= 0 || (gen === -2 && !CG.hasConversationRows(en.key) && !derivesFromRule(en))) return accountReachOf(ctx, en.adapterId, gen >= 0 ? gen : CG.generation());
     return ACL.effective(ctx, target, grantsOfConversation(en, target));
+  }
+  // A CONVERSATION'S REACH IS A LOOKUP (lane grants-read-is-a-lookup, 主开发 2026-11-16 — the prompt hook's reach count walked
+  // every conversation, each a grant read: 197 110 reads, 2.5 M normalisations a walk on the owner's hub). A conversation no
+  // reach row of its own names and no rule's row derives a grant on reaches EXACTLY what its ACCOUNT's rows reach — `effective`
+  // over the same grants (its own list and its derived list are empty) — so that answer is judged ONCE per (asker, account,
+  // generation of the rows: CG.generation moves at every channel row's change) and every such conversation reads it. A
+  // conversation a row of its own or a rule's row decides is judged the old way.
+  const _acctReach = new WeakMap();   // ctx → { gen, id, groups, n, by: Map(adapterId → {level, via, grantId}) }
+  function accountReachOf(ctx, adapterId, gen) {
+    const g = ctx.groups, n = Array.isArray(g) ? g.length : -1;
+    let m = _acctReach.get(ctx);
+    if (!m || m.gen !== gen || m.id !== ctx.id || m.groups !== g || m.n !== n) { m = { gen, id: ctx.id, groups: g, n, by: new Map() }; _acctReach.set(ctx, m); }
+    let v = m.by.get(adapterId);
+    if (!v) { const target = { key: '', adapterId }; v = ACL.effective(ctx, target, ACL.grantsForConversation(target, { accountGrants: accountScopeGrants(adapterId) })); m.by.set(adapterId, v); }
+    return { ...v };
+  }
+  /** L3 (lane grants-read-is-a-lookup, docs/kb-design-lessons.md §19's 250 ms): an ASYNC walk over the whole index gives the loop
+   *  back every WALK_STEP conversations scanned — a count, never a clock (≈ 75 ms of a search's scan at the owner's size). */
+  const WALK_STEP = 50000;
+  /** ONE WALK'S READER of reach (lane grants-read-is-a-lookup — L3: a walk over every conversation stays one bounded loop
+   *  turn at the owner's 197 110): what is the same for the whole walk is judged ONCE — the rows' generation, the
+   *  conversations a row of their own names, whether a rule holds a row, each account's own answer — so a conversation of
+   *  the walk costs a Set and a Map lookup; one a row decides (or an account whose module answers by msg-acl) is asked
+   *  reachFor, as before. The walk's callers read the answer, never change it (one object per account, shared). */
+  function reachWalkOf(ctx) {
+    if (!ctx || ctx.kind === 'user') return (rec, en) => reachFor(ctx, rec, en);
+    const gen = CG.generation(), own = CG.ownConversationKeys(), rules = CG.ruleIdsWithRows().size > 0;
+    const acct = new Map(), msgAcl = new Map();
+    return (rec, en) => {
+      let m = msgAcl.get(rec.id);
+      if (m === undefined) { m = msgAclAdapter(rec); msgAcl.set(rec.id, m); }
+      if (m || rules || own.has(en.key)) return reachFor(ctx, rec, en);
+      let v = acct.get(en.adapterId);
+      if (!v) { v = accountReachOf(ctx, en.adapterId, gen); acct.set(en.adapterId, v); }
+      return v;
+    };
+  }
+  /** Does a RULE whose access is a reach row match this conversation (its derived grant then decides it with the rest)? */
+  function derivesFromRule(en) {
+    const ids = CG.ruleIdsWithRows();
+    if (!ids.size) return false;
+    for (const pa of rawPatternsOf(en.adapterId)) if (pa && pa.pattern && ids.has(String(pa.id)) && F.matchConversation(pa.pattern, convFacts(en)).hit) return true;
+    return false;
   }
   /** EVERY grant that applies to ONE conversation (2026-09-26, §8): its own
    *  rows, the ACCOUNT-scope rows, and the rows a matching PATTERN's ACCESS
@@ -594,16 +639,18 @@ function create(engineCtx) {
     const blind = [], dead = [];
     const hidden = { match: false, capped: false };
     let truncated = false;
+    const reachOf = reachWalkOf(ctx);
     for (const rec of adapterRecords().adapters) {
       if (rec.enabled === false || (adapterId && rec.id !== adapterId)) continue;
       // REACH FIRST, per conversation: what it may read (`visible`, the title through the belt — verify r1 F2) and what it
       // may NOT (`kept`, for the existence answer) — an account it neither reads nor may request anything of is skipped
       const visible = new Map(), kept = new Map();
       const counts = !msgAclAdapter(rec);
-      let knows = false;
+      let knows = false, scanned = 0;
       for (const en of Object.values(store.index.live())) {
+        if (++scanned % WALK_STEP === 0) await new Promise((r) => setImmediate(r));   // L3: the loop given back in bounded steps
         if (!en || en.adapterId !== rec.id) continue;
-        const lv = reachFor(ctx, rec, en).level;
+        const lv = reachOf(rec, en).level;
         if (ACL.canSee(lv)) { visible.set(en.id, agentTitle(en, en.id)); knows = true; }
         else if (counts) { kept.set(en.id, lv); knows = knows || ACL.canRequest(lv) || directoryLists(rec, en); }
       }
@@ -656,10 +703,15 @@ function create(engineCtx) {
   async function searchFullFor(ctx, query, { adapterId = null, limit = 50, saved = null } = {}) {
     if (query.length > SR.QUERY_MAX) return { ok: false, code: 'bad-request', error: `a search is at most ${SR.QUERY_MAX} characters` };
     const cand = [];
+    const reachOf = reachWalkOf(ctx);
     for (const rec of adapterRecords().adapters) {
       if (rec.enabled === false || (adapterId && rec.id !== adapterId) || !searchRowOf(registry.capsOf(rec.kind))) continue;
       const visible = new Map();
-      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id && ACL.canSee(reachFor(ctx, rec, en).level)) visible.set(en.id, agentTitle(en, en.id));
+      let scanned = 0;
+      for (const en of Object.values(store.index.live())) {
+        if (++scanned % WALK_STEP === 0) await new Promise((r) => setImmediate(r));   // L3: the loop given back in bounded steps
+        if (en && en.adapterId === rec.id && ACL.canSee(reachOf(rec, en).level)) visible.set(en.id, agentTitle(en, en.id));
+      }
       if (visible.size) cand.push({ rec, visible });
     }
     if (!cand.length) return { ok: true, results: [], truncated: false, full: true, note: 'no account you can see offers its own search — the saved copy is all there is' };
@@ -916,7 +968,8 @@ function create(engineCtx) {
     const named = (effectiveForAccount(rec.id) || { access: [] }).access.some((x) => F.rowNames(x.row, ctx));
     if (!ACL.canSee(acctReach.level) && !named) {
       // the account is named in nothing this agent sees ⇒ the uniform not-found; else it is told what it lacks
-      const seesSome = Object.values(store.index.live()).some((en) => en && en.adapterId === rec.id && ACL.canSee(reachFor(ctx, rec, en).level));   // B-f32b: a scan reads live(), never a copy of the index (composed at the 2.369.202 integration)
+      const reachOf = reachWalkOf(ctx);
+      const seesSome = Object.values(store.index.live()).some((en) => en && en.adapterId === rec.id && ACL.canSee(reachOf(rec, en).level));   // B-f32b: a scan reads live(), never a copy of the index (composed at the 2.369.202 integration)
       return seesSome ? { ok: false, code: 'no-access', error: `you do not have access to the whole account ${rec.id} — watch one conversation you can read (<adapter>/<conversation id>), or ask the user for the account` } : ACL.notFound();
     }
     return { ok: true, adapterId: rec.id, rec, en: null, key: null, title: rec.label || rec.id, grain: { kind: 'account' }, grainNow: () => grainReadAt(rec.id, { kind: 'account' }) || { access: [], watchers: [] }, raw: () => { const g = accountGrainOf(rec.id) || {}; return { access: g.access || [], watchers: g.watchers || [] }; } };
@@ -1658,6 +1711,30 @@ function create(engineCtx) {
 
   // ── the agent-facing reads (§11) — reach FIRST, uniform not-found ────────
   const LIST_FOR_MAX = 200;   // design 008 S6: an agent's `list` names the newest 200 it may see; the rest is found by search
+  /** THE NEWEST `max` OF EACH KIND (readable / directory-listed), kept as the walk offers them — never every candidate in an array
+   *  and never a sort of all of them (lane grants-read-is-a-lookup L3: an agent granted the owner's largest account sorted 173 306
+   *  rows to list 200). The order is the full sort's — `lastAt` newest first, a tie in walk order (Array.prototype.sort is stable)
+   *  — and `dropped` counts what each kind left out, so listFor's `more` / `moreRequestable` are what they were. A heap per kind
+   *  whose root is the kept row listed last: O(n log max). */
+  function newestSelector(max) {
+    const at = (x) => x.c.en.lastAt || 0;
+    const before = (a, b) => (at(a) !== at(b) ? at(a) > at(b) : a.i < b.i);   // a is listed before b
+    const heaps = { visible: [], hidden: [] }, dropped = { visible: 0, hidden: 0 };
+    let n = 0;
+    const up = (h, k) => { while (k > 0) { const p = (k - 1) >> 1; if (!before(h[p], h[k])) break; [h[p], h[k]] = [h[k], h[p]]; k = p; } };
+    const down = (h, k) => { for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < h.length && before(h[m], h[l])) m = l; if (r < h.length && before(h[m], h[r])) m = r; if (m === k) break; [h[m], h[k]] = [h[k], h[m]]; k = m; } };
+    return {
+      offer(c) {
+        const kind = c.reach.level === 'hidden' ? 'hidden' : 'visible', h = heaps[kind], x = { c, i: n++ };
+        if (h.length < max) { h.push(x); up(h, h.length - 1); return; }
+        dropped[kind]++;
+        if (!before(x, h[0])) return;   // listed after every kept row: it is the one left out
+        h[0] = x; down(h, 0);           // the kept row listed last is left out instead
+      },
+      rows() { return [...heaps.visible, ...heaps.hidden].sort((a, b) => (before(a, b) ? -1 : 1)).map((x) => x.c); },
+      dropped,
+    };
+  }
   /** Every conversation this principal may SEE or REQUEST — hidden ones are
    *  simply absent (no oracle). Never a message body.
    *  design 008 S6 (lane channels-followups): BOUNDED — the newest LIST_FOR_MAX (by `lastAt`) of what the caller may see,
@@ -1668,18 +1745,18 @@ function create(engineCtx) {
     const t = now();
     const recs = adapterRecords().adapters;
     const byId = new Map(recs.map((r) => [r.id, r]));
-    const cand = [];
+    const sel = newestSelector(LIST_FOR_MAX);
+    const reachOf = reachWalkOf(ctx);
     for (const en of Object.values(store.index.live())) {   // B-f32b: read-only — the rows are read, never kept or changed
       const rec = byId.get(en.adapterId);
       if (!rec || rec.enabled === false) continue;
-      const reach = reachFor(ctx, rec, en);
+      const reach = reachOf(rec, en);
       if (reach.level === 'hidden' && !(all && directoryLists(rec, en))) continue;
-      cand.push({ en, rec, reach });
+      sel.offer({ en, rec, reach });
     }
-    cand.sort((a, b) => (b.en.lastAt || 0) - (a.en.lastAt || 0));
     const out = [];
     let more = 0, moreRequestable = 0, listed = 0, listedDir = 0;
-    for (const { en, rec, reach } of cand) {
+    for (const { en, rec, reach } of sel.rows()) {
       if (reach.level === 'hidden') {
         // lane channel-agent-watch W2: `list --all` — the account's directory names a conversation the agent may not
         // read: its TITLE (through the belt), kind, last activity and member COUNT, marked requestable; never a message,
@@ -1715,6 +1792,7 @@ function create(engineCtx) {
         awaiting: proposalsFor(en.key).filter((p) => p.state === 'awaiting-approval' && p.draftedBy && p.draftedBy.id === ctx.id).length,
       });
     }
+    more += sel.dropped.visible; moreRequestable += sel.dropped.hidden;
     const seen = new Set(out.map((c) => c.adapterId));
     const blind = adapterRecords().adapters.filter((r) => seen.has(r.id) && r.namesReadable && r.namesReadable.ok === false).map((r) => r.label || r.id);
     const dead = adapterRecords().adapters.filter((r) => seen.has(r.id) && signinDead(r)).map((r) => r.label || r.id);   // lane channel-reauth-visible
@@ -1739,12 +1817,13 @@ function create(engineCtx) {
     }
     if (!recs.size) return null;
     let request = false;
+    const reachOf = reachWalkOf(ctx);
     const live = store.index.live();   // B-f32b: read-only, as listFor; walked by key — the first readable row ends it
     for (const k in live) {
       const en = live[k];
       const rec = en && recs.get(en.adapterId);
       if (!rec) continue;
-      const lv = reachFor(ctx, rec, en).level;
+      const lv = reachOf(rec, en).level;
       if (ACL.canSee(lv)) return 'read';
       if (!request && (ACL.canRequest(lv) || directoryLists(rec, en))) request = true;
     }
@@ -1758,11 +1837,12 @@ function create(engineCtx) {
     if (!dead.length) return [];
     const out = [];
     const live = store.index.live();
+    const reachOf = reachWalkOf(ctx);
     for (const rec of dead) {
       for (const k in live) {
         const en = live[k];
         if (!en || en.adapterId !== rec.id || en.unlistedAt) continue;
-        if (ACL.canSee(reachFor(ctx, rec, en).level)) { out.push(String(rec.label || rec.id).slice(0, 60)); break; }
+        if (ACL.canSee(reachOf(rec, en).level)) { out.push(String(rec.label || rec.id).slice(0, 60)); break; }
       }
       if (out.length >= 3) break;
     }
