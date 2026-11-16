@@ -239,6 +239,93 @@ console.log('THE EPISODE ROWS (invented, each of a shape the owner\'s instance s
   W.out(); await sleep(3); W.reading(0.04, W.R7MC + 7 * 86400);   // the next request of the same turn: the new member's just-reset number (its NEW window)
   ok('ROW A (plan week): a move INSIDE a turn — the next request\'s reading lands on the member the request went out on, never on the one the turn began on', W.u7(W.MA) === 0.61 && W.u7(W.MC) === 0.04, J({ left: W.u7(W.MA), new: W.u7(W.MC) }));
 }
+console.log('THE CLOSURE LOOK (two verifiers, bounded by the owner\'s four musts) — each leg red on 6d5e94692');
+{
+  // M1 — a process that HOLDS its spawn login (a codex pool cannot hot-switch): the pool moved its link cold before the request
+  // and again after it; the request, and the reading that answers it, are the held login's — never the member the link named
+  const W = mkWorld(); const am = W.am;
+  process.env.CODEX_HOME = path.join(W.root, 'shared-codex');   // the codex seeder's shared home: the scratch one, never a real ~/.codex
+  const cxSub = (name) => { const { id } = am.createCodexSubscription({ name }); fs.writeFileSync(path.join(am.codexSubDir(id), 'auth.json'), J({ auth_mode: 'chatgpt', tokens: { access_token: 'tok-' + name } })); return id; };
+  const A = cxSub('Codex A'), B = cxSub('Codex B'), C = cxSub('Codex C');
+  const CP = am.createPool({ name: 'codex pool', backend: 'codex' }).id; am.setPoolTarget(CP, A);
+  const s = { backend: 'codex', mode: 'chat', host: null, _webuiId: 'sess-rt-codex', _accountId: CP, _heldPoolMember: A, _heldPoolOrigin: 'stamp', pty: { write() { } }, name: 'codex', createdAt: Date.now() };
+  let r = null, err = null;
+  try {
+    await sleep(3); am.setPoolTarget(CP, B); await sleep(3);   // a cold move of the pool's link (a codex pool has no per-conversation link): the process still holds A
+    s._isStreaming = true; s._turnState = 'running'; TS.noteRequestSent(s, Date.now()); await sleep(3);   // the request leaves — on A
+    am.setPoolTarget(CP, C); await sleep(3);
+    r = W.eng.requestSlotFor(s);
+  } catch (e) { err = e.message; }
+  ok('M1 (a held process): the request of a process that holds its spawn login is that login\'s — the link moved cold before it and again after it, and the answer is the held member, never the member the link named at the request (6d5e94692: that member)', !!r && r.key === A, J({ got: r && r.key, A, B, C, err }));
+}
+{
+  // M1 — a row that moved nothing (a re-link to the same member) is no move: the first REAL move after the request names its account
+  const W = mkWorld();
+  W.out(); await sleep(3);                                                    // the request leaves on MA
+  // a row MA → MA: the ledger keeps a same-member row a minute after the one before it (DEDUP_MS) — written here as it stores one
+  fs.appendFileSync(W.am.slotTransitions.file, J({ sessionId: W.session._webuiId, poolId: W.P, from: W.MA, to: W.MA, at: Date.now(), why: 'session-link' }) + '\n'); await sleep(3);
+  W.move(W.MB); await sleep(3);                                               // the real move, after the request
+  const r = W.eng.requestSlotFor(W.session);
+  ok('M1 (a same-member row): a re-link to the same member after the request is no move — the request is still MA\'s, not the member the link names now (6d5e94692: MB)', !!r && r.key === W.MA, J({ got: r && r.key, MA: W.MA, MB: W.MB }));
+}
+{
+  // M1 — a SUB-AGENT's request after a mid-turn move goes out on the new member (P0: the next request reads the new credential);
+  // its tool result is the record that says so, and its reading lands on the member that request went out on
+  const W = mkWorld();
+  W.out(); await sleep(3);                       // the main thread's request (MA) — it launches a sub-agent
+  W.move(W.MB); await sleep(3);                  // the pool moves the conversation mid-turn
+  const sub = { type: 'user', parent_tool_use_id: 'toolu_rt_sub', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_rt_s1', content: 'ok' }] } };
+  if (typeof TS.sendsSubRequest === 'function' && TS.sendsSubRequest(sub)) TS.noteSubRequestSent(W.session, Date.now());   // the parse's and the device feed's call
+  await sleep(3); W.reading(0.2);
+  const parse = read('src/server/stdout/claude-stream-json.js'), brain = read('src/server/session-brain.js');
+  const WIRE = /if \(sendsSubRequest\(msg\) && !recordIsLate\?\.\(session, msg\)\) noteSubRequestSent\(session, Date\.now\(\)\);/;
+  ok('M1 (a sub-agent\'s request): the sub-agent\'s tool result after a mid-turn move stamps its request-out — its reading lands on MB, the member it went out on; MA keeps its own (6d5e94692: stamped nothing, so the reading was MA\'s and its fall held) — both feeds make the call, and sendsRequest stays the main thread\'s',
+    W.u7(W.MB) === 0.2 && W.u7(W.MA) === FX.before.MA && WIRE.test(parse) && WIRE.test(brain) && TS.sendsRequest(sub) === false, J({ mb: W.u7(W.MB), ma: W.u7(W.MA), parse: WIRE.test(parse), brain: WIRE.test(brain) }));
+}
+{
+  // M2 — law 2 with the cap as the record's REPRESENTATIVE: a 2.1.274+ record states the plan 5-hour and week as well; they are a
+  // reading of their own and are written — only the cap is archived (6d5e94692: the whole record dropped)
+  const W = mkWorld(); const RCAP = W.R7 - 3600; W.stampCap(W.MA, W.R7, RCAP);
+  W.session._servedModel = 'claude-opus-5';
+  W.out(); W.answer('claude-opus-5'); await sleep(3);
+  const r5 = W.readCache(W.MA).fiveHour.resetsAt;
+  quiet(() => W.eng.recordRateLimitEvent(W.session, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day_overage_included', utilization: 0.03, resetsAt: RCAP,
+    unifiedWindows: { five_hour: { utilization: 0.27, resets_at: r5 }, seven_day: { utilization: 0.93, resets_at: W.R7 }, seven_day_overage_included: { utilization: 0.03, resets_at: RCAP } } } }));
+  const c = W.readCache(W.MA), a = W.archive();
+  ok('M2 (law 2, the cap the representative): the record\'s plan week and 5-hour are written (93 %, 27 %), its unasked Fable cap archived by name — never the whole record lost',
+    W.u7(W.MA) === 0.93 && c.fiveHour.utilization === 0.27 && W.capOf(W.MA) === null && a.some((x) => /a fable model cap on a turn that asked .* for no fable request/.test(x.reason)), J({ u7: W.u7(W.MA), u5: c.fiveHour.utilization, cap: W.capOf(W.MA), a: a.map((x) => x.reason) }));
+}
+{
+  // M2 — law 3 with the plan week as the representative that fell: the record's 5-hour did not fall and is written; only the week is held
+  const W = mkWorld(); W.move(W.MC); await sleep(3); W.move(W.MA); await sleep(3);
+  W.out(); await sleep(3);
+  const r5 = W.readCache(W.MA).fiveHour.resetsAt;
+  quiet(() => W.eng.recordRateLimitEvent(W.session, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.13, resetsAt: W.R7,
+    unifiedWindows: { five_hour: { utilization: 0.37, resets_at: r5 }, seven_day: { utilization: 0.13, resets_at: W.R7 } } } }));
+  const o = W.outcomesOf(W.MA).find((x) => x.lane === 'plan:7d');
+  ok('M2 (law 3, the representative fell): the week is held (91 % kept, an unconfirmed fall said) and the same record\'s 5-hour, which did not fall, is written (37 %) — never held with it',
+    W.u7(W.MA) === 0.91 && !!o && o.state === 'fall-unconfirmed' && W.readCache(W.MA).fiveHour.utilization === 0.37, J({ u7: W.u7(W.MA), u5: W.readCache(W.MA).fiveHour.utilization, o }));
+}
+{
+  // M2 — a hub restart inside a turn keeps neither the turn's asks nor its request's instant: law 2 cannot judge, so it refuses nothing
+  const W = mkWorld(); const RCAP = W.R7 - 3600; W.stampCap(W.MA, W.R7, RCAP);
+  W.session._isStreaming = true; W.session._turnState = 'running';   // restored running; no request of this hub's life is known
+  W.capReading(0.93, W.R7, 0.71, RCAP);
+  ok('M2 (a restart mid-turn): with no request and no asks known, the turn\'s Fable cap is written (71 %) and nothing archived — unjudged, never refused (6d5e94692: archived as «asked for no fable request», a false reason)',
+    W.capOf(W.MA) === 0.71 && W.archive().length === 0, J({ cap: W.capOf(W.MA), a: W.archive().map((x) => x.reason) }));
+}
+{
+  // M4 — a person claimed the week reset; the pool moved a conversation onto the account; its first reading shows the fall. The press
+  // IS law 3's confirmation: the fall is taken (and settles the claim), never held as «it counts as 91 %» while the pool reads it reset
+  const W = mkWorld();
+  const RC = require(path.join(REPO, 'src/usage-reset-claim.js')).at(path.join(W.root, 'data'));
+  const cl = RC.claim(W.MA, ['plan:7d'], W.readCache(W.MA));
+  W.move(W.MC); await sleep(3); W.move(W.MA); await sleep(3);
+  W.out(); await sleep(3); W.reading(0.05);
+  const outs = W.outcomesOf(W.MA).filter((x) => x.lane === 'plan:7d');
+  ok('M4 (a standing reset claim): the moved conversation\'s fall on a lane a person claimed reset is taken (5 %), the claim settled — no «not confirmed yet; it counts as 91 %» said',
+    !!cl && cl.ok && W.u7(W.MA) === 0.05 && !outs.some((x) => x.state === 'fall-unconfirmed') && !RC.get(W.MA), J({ cl, u7: W.u7(W.MA), outs, claim: RC.get(W.MA) }));
+}
 console.log('MUTANTS — law 1, each red by name');
 {
   const src = read(ENG);
