@@ -47,7 +47,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, vncEnv, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, vncEnv, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -140,7 +140,7 @@ wsc.on('message', (d) => { try { const m = JSON.parse(d); if (m && m.type === 'f
 await new Promise((r) => { wsc.once('open', r); wsc.once('error', r); });
 
 // ── chrome ──
-chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
+chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 const cdpTargets = async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json());
 async function page(tg) {
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
@@ -312,7 +312,7 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { retu
 // §4b's document: an .odt beside the .docx (LibreOffice converts it with a throwaway profile) — its Save writes at once
 // (a .docx would ask "Keep current format?" as a second question)
 const ODT = DOCX.replace(/\.docx$/, '.odt');
-try { execFileSync(office.path, ['--headless', `-env:UserInstallation=file://${path.join(docs, '.conv-profile')}`, '--convert-to', 'odt', '--outdir', docs, DOCX], { timeout: 60000, stdio: 'ignore' }); } catch { /* checked below */ }
+try { execFileSync(office.path, [...CHROME_STORE, '--headless', `-env:UserInstallation=file://${path.join(docs, '.conv-profile')}`, '--convert-to', 'odt', '--outdir', docs, DOCX], { timeout: 60000, stdio: 'ignore' }); } catch { /* checked below */ }
 try { fs.rmSync(path.join(docs, '.conv-profile'), { recursive: true, force: true }); } catch {}
 const odtText = (f) => { try { return execFileSync(PY, ['-c', 'import zipfile,sys,re\nprint(re.sub(r"<[^>]+>", " ", zipfile.ZipFile(sys.argv[1]).read("content.xml").decode()))', f], { encoding: 'utf8', timeout: 20000 }); } catch (e) { return `(unreadable: ${e.message})`; } };
 const docxText = (f) => { try { return execFileSync(PY, ['-c', 'import docx,sys\nprint("\\n".join(p.text for p in docx.Document(sys.argv[1]).paragraphs))', f], { encoding: 'utf8', timeout: 20000 }); } catch (e) { return `(unreadable: ${e.message})`; } };

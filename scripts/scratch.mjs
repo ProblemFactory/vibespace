@@ -43,6 +43,11 @@ export { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD };
  *  a literal of its own: the .314 mirror went red when the vault key joined and the relay census still knew only the first. */
 export const PRESET_KEYS = Object.freeze({ 'vs-onboarded': '1', 'vs-vault-later': '9999999999999', 'vs-rail-labels': 'done' });   // vs-rail-labels (lane door-day-one-landing): the first week's rail words, done
 export const ONBOARDED_SOURCE = `try { ${Object.entries(PRESET_KEYS).map(([k, v]) => `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join(' ')} } catch {}`;
+// lane setting-doors (主开发 2026-11-16): EVERY Chrome a suite launches keeps its own store — Chrome's basic store flag + the mock
+// keychain, the product's own src/browser-attach.js PROFILE_STORE (test-architecture pins the two equal) — so a suite never asks
+// the session bus's Secret Service: a LOCKED login keyring hung 14 heavy Chrome suites to their full budget on 2026-11-15.
+// scripts/chrome-store-census.mjs + test-architecture §47b: a Chrome launch without it is red.
+export const CHROME_STORE = Object.freeze(['--password-store=basic', '--use-mock-keychain']);
 
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */
 // B-d8e3: name → the path this PROCESS decided for it (below) — one map for every copy of this module in the process (a mutant)

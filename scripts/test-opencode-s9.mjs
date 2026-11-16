@@ -25,7 +25,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { startMockServe, createMockState, QUESTION_PART, emit } from './dev/mock-opencode-serve.mjs';
-import { ONBOARDED_SOURCE, withoutVendorKeys, vncEnv } from './scratch.mjs';
+import { ONBOARDED_SOURCE, withoutVendorKeys, vncEnv, CHROME_STORE } from './scratch.mjs';
 
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -2650,7 +2650,7 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
       }
       ok('…and the conversation reaches the session list the sidebar renders', !!listed, listed && { id: listed.backendSessionId, status: listed.status });
 
-      chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${udd}`, 'about:blank'], { stdio: 'ignore' });
+      chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${udd}`, 'about:blank'], { stdio: 'ignore' });
       let target = null;
       for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((x) => x.type === 'page'); } catch { } if (!target) await sleep(250); }
       if (!target) { ok('chrome exposed a CDP page target', false); }

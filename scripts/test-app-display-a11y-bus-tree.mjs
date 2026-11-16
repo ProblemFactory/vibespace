@@ -13,7 +13,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratchDir, gtkRow } from './scratch.mjs';
+import { scratchDir, gtkRow, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const M = require('../src/desktop-apps.js');
 const D = require('../src/desktop-display.js');
@@ -113,7 +113,7 @@ if (shot && process.env.VS_A11Y_PNG) {
   fs.writeFileSync(shot.html, fs.readFileSync(shot.html, 'utf8').replace('{RED}', String(shot.red || '?').replace(/</g, '&lt;')));
   const chrome = D.binOnPath('google-chrome', { env: process.env }) || D.binOnPath('chromium', { env: process.env });
   if (chrome) {
-    const c = spawnSync(chrome, ['--headless=new', '--no-sandbox', '--disable-gpu', `--user-data-dir=${path.join(S, 'chrome')}`, '--window-size=1100,560', `--screenshot=${process.env.VS_A11Y_PNG}`, `file://${shot.html}`], { env: { ...pod, HOME: S }, encoding: 'utf8', timeout: 30000 });
+    const c = spawnSync(chrome, [...CHROME_STORE, '--headless=new', '--no-sandbox', '--disable-gpu', `--user-data-dir=${path.join(S, 'chrome')}`, '--window-size=1100,560', `--screenshot=${process.env.VS_A11Y_PNG}`, `file://${shot.html}`], { env: { ...pod, HOME: S }, encoding: 'utf8', timeout: 30000 });
     ok(fs.existsSync(process.env.VS_A11Y_PNG), `PNG ${process.env.VS_A11Y_PNG} (chrome rc ${c.status})`);
   }
 }

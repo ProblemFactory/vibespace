@@ -37,7 +37,7 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 // the suite's own copy of its WHOLE output (VIBESPACE_XPIC_LOG=<file>): ci.mjs keeps a GREEN suite's output nowhere, and the hotfix's
 // step seven is READ by its lines at the cut — every console line is also appended there
@@ -94,7 +94,7 @@ if (!CHROME) { skip('no Google Chrome — the attach road and the viewer both ne
 if (!dtachOk) { skip('dtach is not installed — a local session cannot be created'); await done(); }
 if (!binOf('xpra') || !binOf('xauth')) { skip('xpra / xauth not on PATH — no display session, no X picture (the screencast stays, as before)'); await done(); }
 if (!REAL_AB || !verAtLeast(abVer, '0.38.2')) { skip(`the real agent-browser ≥ 0.38.2 is not resolvable (${REAL_AB || 'none'} ${abVer || ''}) — the attach road needs it`); await done(); }
-console.log(`box: ${abVer}, ${execFileSync(CHROME, ['--version'], { encoding: 'utf8' }).trim()}, ${execFileSync(binOf('xpra'), ['--version'], { encoding: 'utf8' }).trim()}`);
+console.log(`box: ${abVer}, ${execFileSync(CHROME, [...CHROME_STORE, '--version'], { encoding: 'utf8' }).trim()}, ${execFileSync(binOf('xpra'), ['--version'], { encoding: 'utf8' }).trim()}`);
 
 /** A throwaway headless Chrome (the VIEWER) with its own profile under ROOT; → { port, close }. */
 async function launchChrome(bin, { name, args = [], url = 'about:blank' } = {}) {

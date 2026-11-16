@@ -109,7 +109,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePort, scratch, endDaemonsOf, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePort, scratch, endDaemonsOf, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
 import { writeFakeFfmpeg, factsLine, calibrationFrame } from './fixtures/stream/screen-fakes.mjs';
 import { writeFakeWgc, writeFakeCsc } from './fixtures/stream/window-fakes.mjs';
 import { writeFakeMic, winFacts, toneRatio, writeFakeDecoder, pcmPages, realFfmpeg } from './fixtures/stream/mic-fakes.mjs'; // lane stream-mic-road ⑰: the machine's microphone, a fake sink
@@ -346,7 +346,7 @@ const cenv = { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun }; d
 // ⑰ (lane stream-mic-road): Chrome's fake microphone — 3 s of a 1 kHz tone at −20 dBFS, 48 kHz mono s16le (Chrome loops it)
 const MIC_WAV = path.join(root, 'mic-tone.wav');
 { const n = 48000 * 3, d = Buffer.alloc(n * 2); for (let i = 0; i < n; i++) d.writeInt16LE(Math.round(3277 * Math.sin(2 * Math.PI * 1000 * i / 48000)), i * 2); const h = Buffer.alloc(44); h.write('RIFF', 0); h.writeUInt32LE(36 + d.length, 4); h.write('WAVEfmt ', 8); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(48000, 24); h.writeUInt32LE(96000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(d.length, 40); fs.writeFileSync(MIC_WAV, Buffer.concat([h, d])); }
-chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'chrome-profile')}`, '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${MIC_WAV}`, 'about:blank'], { stdio: 'ignore', env: cenv, detached: true }); // ⑰: Chrome's fake microphone = a 1 kHz tone WAV. NEVER --use-fake-ui-for-media-stream: a page holding the microphone permission makes Chrome gather on every adapter, and a new stream to werift's ICE-lite agent then never connects on a multi-homed box (measured on base c1aba74c) — ⑰ grants it only once its stream plays, and resets it
+chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'chrome-profile')}`, '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${MIC_WAV}`, 'about:blank'], { stdio: 'ignore', env: cenv, detached: true }); // ⑰: Chrome's fake microphone = a 1 kHz tone WAV. NEVER --use-fake-ui-for-media-stream: a page holding the microphone permission makes Chrome gather on every adapter, and a new stream to werift's ICE-lite agent then never connects on a multi-homed box (measured on base c1aba74c) — ⑰ grants it only once its stream plays, and resets it
 const WebSocket = require(path.join(REPO, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 // ⑯ (lane stream-hdr-passthrough): a mocked HDR viewer — headless Chrome has no HDR screen; `screen` = (dynamic-range: high), switchable

@@ -39,7 +39,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE, withoutVendorKeys, VENDOR_KEY_ENV, vncEnv } from './scratch.mjs';
+import { ONBOARDED_SOURCE, withoutVendorKeys, VENDOR_KEY_ENV, vncEnv, CHROME_STORE } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -1543,7 +1543,7 @@ console.log('— ⑧ the Stop button is one-shot while an interrupt is in flight
     const html = `<!doctype html><meta charset="utf-8"><title>stop</title><style>${css}</style><body></body><script>${js}</script>`;
     const port = await freePort(), cdpPort = await freePort();
     const srv = http.createServer((_q, r) => { r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); r.end(html); }).listen(port, '127.0.0.1');
-    const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
+    const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
       '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${tmp}/chrome`, 'about:blank'], { stdio: 'ignore' });
     let ws = null;
     try {
@@ -1675,7 +1675,7 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
       `<body><div id="host" class="chat-view"><div id="list"></div></div><script>${js}</script>`;
     const port = await freePort(), cdpPort = await freePort();
     const srv = http.createServer((_q, r) => { r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); r.end(html); }).listen(port, '127.0.0.1');
-    const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
+    const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
       '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${tmp}/chrome`, 'about:blank'], { stdio: 'ignore' });
     let ws = null;
     try {
@@ -1965,7 +1965,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
     </style><body></body><script>${js}</script>`;
     const port = await freePort(), cdpPort = await freePort();
     const srv = http.createServer((_q, r) => { r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); r.end(html); }).listen(port, '127.0.0.1');
-    const chrome = spawn(CHROME2, ['--headless=new',  `--remote-debugging-port=${cdpPort}`,  '--no-first-run',  '--no-sandbox',  '--disable-gpu', 
+    const chrome = spawn(CHROME2, [...CHROME_STORE, '--headless=new',  `--remote-debugging-port=${cdpPort}`,  '--no-first-run',  '--no-sandbox',  '--disable-gpu', 
       '--disable-dev-shm-usage',  '--disable-background-timer-throttling',  `--user-data-dir=${tmp}/chrome`,  'about:blank'], { stdio: 'ignore' });
     let ws = null;
     try {
@@ -4235,7 +4235,7 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
       const html = `<!doctype html><meta charset="utf-8"><title>steer</title><style>${css}</style><body><div id="list"></div></body><script>${js}</script>`;
       const port = await freePort(), cdpPort = await freePort();
       const srv = http.createServer((_q, r) => { r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); r.end(html); }).listen(port, '127.0.0.1');
-      const chrome = spawn(CHROME9, ['--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
+      const chrome = spawn(CHROME9, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
         '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${tmp}/chrome`, 'about:blank'], { stdio: 'ignore' });
       let cws = null;
       try {
@@ -5717,7 +5717,7 @@ process.stdin.on('data', (d) => {
       ok('the built bundle carries this change (run `npm run build` — the DOM half tests the BUILT client, not the source)', false);
     } else if (b3?.up && A && B) {
       const profile = path.join(ROOT, 'chrome');
-      chrome = spawn(CHROME14, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
+      chrome = spawn(CHROME14, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
         '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
       let cws = null;
       try {

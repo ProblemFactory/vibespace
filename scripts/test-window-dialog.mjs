@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const D = require('../src/desktop-display.js'), WT = require('../src/window-targets.js'), R = require('../src/window-reach.js'), M = require('../src/desktop-apps.js');
 const HERE = path.dirname(new URL(import.meta.url).pathname);
@@ -193,7 +193,7 @@ const CHROME = ['/opt/google/chrome/chrome'].find((p) => fs.existsSync(p)) || bi
 const page = path.join(S, 'upload.html'); fs.writeFileSync(page, '<!doctype html><title>vs upload</title><input type="file" aria-label="Pick a file" style="position:fixed;inset:0;width:100%;height:100%">');
 async function chromeLeg(env, tag) {
   const av = M.browserArgv({ browser: 'chromium', exec: CHROME, args: ['--disable-features=ChromeWhatsNewUI'] }, { profileDir: path.join(S, `chrome-${tag}`), url: 'file://' + page });
-  const c = spawn(CHROME, av.argv, { env: { ...env, ...(av.env || {}) }, stdio: 'ignore', detached: true });
+  const c = spawn(CHROME, [...CHROME_STORE, ...av.argv], { env: { ...env, ...(av.env || {}) }, stdio: 'ignore', detached: true });
   kids.add(c);
   let input = null;
   let terms = false, last = null; // a fresh Chrome-stable profile opens its "Additional Terms of Service" window first: Accept it THROUGH THE TREE, as an agent would

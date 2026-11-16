@@ -114,7 +114,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -187,7 +187,7 @@ const bootServer = (extraEnv = {}) => spawn(process.execPath, ['server.js'], {
 });
 srv = bootServer();
 
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--window-size=375,667', '--disable-background-timer-throttling', '--force-device-scale-factor=1',
   '--host-resolver-rules=MAP pod-road.example.test 127.0.0.1, MAP other-name.example.test 127.0.0.1',   // lane gmail-connect-wall r3: + a page under ANOTHER name (state A from the page's own origin)   // ⑪: the page on a NAME (a browser that is not on the instance's loopback), served by this scratch server
   `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
