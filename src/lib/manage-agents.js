@@ -1844,7 +1844,7 @@ export function installManageAgents(App, ctx = {}) {
   // render inline on their row (静默失败零容忍 — never silent).
   async _refreshAllQuota(btn, bodyEl) {
     if ((this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') === 'off') {
-      showToast(t('On-demand quota refresh is disabled in Settings'), { type: 'error' });
+      showToast(t('Claude usage refresh is Off in Settings'), { type: 'error' });
       return;
     }
     // Same one-time explainer + ack key as the usage popup's ⟳.

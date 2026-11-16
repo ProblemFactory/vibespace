@@ -1510,7 +1510,7 @@ const SETTINGS_SCHEMA = {
     label: t('Claude usage refresh (model-scoped limits like Fable)'),
     // ONE VENDOR (lane usage-predict, 2026-11-16 — the owner's «fable是antigravity吗？»): this row governs Claude's reads only;
     // Antigravity's automatic reads have their own row (antigravity.autoUsageReads, src/harness-settings.js)
-    description: t('Reads each Claude account’s limits from Anthropic — the only source of model-scoped weekly limits like Fable, which the passive statusline feed does not carry. Manual: only when you press ⟳, at most once a minute per account. Auto on popup open: also once when you open the quota popup and its reading is over 30 minutes old. Auto via the CLI: the official claude CLI reads /usage in the background — sooner while an account burns quota, never for an idle one. Off: never contacts Anthropic, and the ⟳ button is hidden.'),
+    description: t('Reads each Claude account’s limits from Anthropic — the only source of model-scoped weekly limits like Fable, which the passive statusline feed does not carry. Manual: only when you press ⟳, at most once a minute per account. Auto on popup open: also once when you open the quota popup and its reading is over 30 minutes old. Auto via the CLI: the official claude CLI reads /usage in the background — sooner while an account burns quota, never for an idle one. Off: never contacts Anthropic; the popup hides its ⟳, and Refresh all says it is off.'),
     category: t('Session'), liveApply: true,
   },
   'usage.dashboard': {
