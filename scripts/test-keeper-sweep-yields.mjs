@@ -15,8 +15,21 @@
 //      browser reaped by identity), every record removed. CONTROL: a record whose daemon RUNS (a process of this test, its
 //      start time recorded) is still closed by the CLI — one start — and ended. MUTANT: the gone-daemon judgment removed ⇒
 //      one start per record, RED.
-//   ③ L4 PROGRESS PERSISTS: the registry file on disk loses one record per step; a keeper booted over a copy taken mid-sweep
-//      (a restart there) retires exactly the records that were left.
+//   ③ L4 PROGRESS PERSISTS: the registry file on disk loses a PIECE per write (F5); a keeper booted over a copy taken at a
+//      write mid-walk (a restart there) retires exactly the records that were left.
+//   ⑦ F4 THE WHOLE TURN THE CONVERSATION ENDS IN: a conversation with N leases, N child handles and N records ends at run time
+//      (the tick, past the grace): the one turn that drops its leases and reaps its handles is COUNTED — in-memory acts only
+//      (0 registry writes, 0 broadcasts, 0 child starts in it) — then its records retire one per turn.
+//   ⑧ F5 ONE REGISTRY WRITE AND ONE BROADCAST PER PIECE OF THE WALK: 300 removals ⇒ a handful of writes and of broadcasts
+//      (each counted: the rename onto the registry file, the keeper's own broadcast). MUTANT: the batching dropped ⇒ 300, RED.
+//   ⑤ F1 A CLAIMED LAW HAS A LEG: among 20 orphans, one whose lease comes back before its step is KEPT — its browser record
+//      untouched (nothing of it stopped), no CLI start — and the other 19 go.
+//   ⑥ F2 NOTHING OF A CARRIED CONVERSATION IS ENDED BY THE SWEEP: a stall PLACED in the reap's window (its scan by launch
+//      mark, held open); the conversation resumes there (its lease back, its browser started again — a process of this
+//      test); after the reap the retire reads the lease again: kept, its browser left running, no CLI start. MUTANT: the
+//      re-read removed ⇒ the browser the conversation just started is closed, RED.
+//   F3 THE FIELD'S SHAPE (in ②): 30 records left `ready` with a scratch DIRECTORY and a launch MARK each — each pays the
+//      reap's own road (the directory's lock read, the /proc walk by mark, counted) — still no child start, one per turn.
 //   ④ L3's lifecycle, pinned: a sub-agent's child handle — and its record — lives exactly as long as its parent conversation
 //      is carried (newChild; reconcile §3.7); only a job's handle is dropped earlier (dropChild). The pile is the parent's.
 import { createRequire } from 'node:module';
@@ -45,14 +58,17 @@ const kenv = { PATH: `${BIN}:/usr/bin:/bin`, HOME: ROOT };
 /** A scratch registry: N orphan ephemeral CHILD records of one parent key (the field's shape), each with its browser record —
  *  `stopped` (idled out), or `ready` with a daemon that is gone (`pid` names no process). → its dataDir. */
 let dirN = 0;
-function registry(N, { live = false, extra = [] } = {}) {
+function registry(N, { live = false, extra = [], dirMark = false } = {}) {
   const dataDir = path.join(ROOT, 'd' + (++dirN)); fs.mkdirSync(dataDir, { recursive: true });
   const profiles = [], browsers = {};
   for (let i = 1; i <= N; i++) {
     const id = 'bp-' + (0x10000000 + i).toString(16), key = `${PARENT}.${i}`;
-    profiles.push(B.newProfileRecord({ id, label: `(ephemeral) Chat child ${i}`, dir: null, ephemeral: true, owner: { kind: 'conversation', id: key }, now: 1790000000000 }));
+    const dir = dirMark ? path.join(dataDir, 'eph', 'vs-' + key) : null;   // the field's shape: a scratch directory under the suite's root
+    if (dir) fs.mkdirSync(dir, { recursive: true });
+    profiles.push(B.newProfileRecord({ id, label: `(ephemeral) Chat child ${i}`, dir, ephemeral: true, owner: { kind: 'conversation', id: key }, now: 1790000000000 }));
     browsers[id] = live ? { profileId: id, state: 'ready', pid: 4100000 + i, starttime: 1, cdpUrl: null, ns: 'vs-' + key, startedAt: 1790000000000 }
       : { profileId: id, state: 'stopped', pid: null, starttime: null, cdpUrl: null, ns: 'vs-' + key, startedAt: 1790000000000, endedAt: 1790000001000, stoppedBy: 'idle', lastError: null };
+    if (dirMark) browsers[id].mark = `vsk-sweep-${dirN}-${i}`;   // and its launch mark (the reap scans /proc for it)
   }
   for (const x of extra) { profiles.push(x.profile); browsers[x.profile.id] = x.browser; }
   fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles, leases: [], browsers, children: {}, told: {}, pins: {} }));
@@ -64,15 +80,21 @@ const onDisk = (dataDir) => JSON.parse(fs.readFileSync(path.join(dataDir, 'brows
  *  the sweep awaited) | 'tick' (keeper.tick() — the runtime half). A setImmediate ticker numbers the loop turns; each
  *  record's removal (its journal line) is stamped with the turn it ran in and stalls STALL_MS there. → the records per turn
  *  (max), the removals, the CLI `close` starts counted through the runtime's execFile seam, the lateness evidence. */
-async function sweep(Km, dataDir, { how = 'reconcile', onRemoved = null } = {}) {
+async function sweep(Km, dataDir, { how = 'reconcile', onRemoved = null, onWrite = null, stallMs = STALL_MS } = {}) {
   let turn = 0, running = true;
   const ticker = () => { turn++; if (running) setImmediate(ticker); };
   setImmediate(ticker);
   const perTurn = new Map(); const removed = [];
-  const line = (m) => { const s = String(m); if (/ephemeral browser record \S+ .* removed with its conversation/.test(s)) { removed.push(s); perTurn.set(turn, (perTurn.get(turn) || 0) + 1); stall(STALL_MS); if (onRemoved) onRemoved(removed.length); } };
+  let kref = null;
+  const line = (m) => { const s = String(m); if (/ephemeral browser record \S+ .* removed with its conversation/.test(s)) { removed.push(s); perTurn.set(turn, (perTurn.get(turn) || 0) + 1); stall(stallMs); if (onRemoved) onRemoved(removed.length, kref); } };
+  // F5's counters: every write of THIS registry file (the keeper's writeJsonAtomic renames onto it) and every broadcast of the list
+  const storeFile = path.join(dataDir, 'browser-profiles.json'), writes = [], bcasts = [];
+  const origRename = fs.renameSync;
+  fs.renameSync = function (a, b) { const r = origRename.apply(this, arguments); if (b === storeFile) { writes.push({ turn, left: onDisk(dataDir) }); if (onWrite) onWrite(writes.length, writes[writes.length - 1]); } return r; };
   const closes = [];
   const execFileImpl = (bin, args, opts, cb) => { if (Array.isArray(args) && args[0] === 'close') { closes.push(args.join(' ')); if (closeHook) closeHook(opts); } const c = typeof opts === 'function' ? opts : cb; setImmediate(() => c(null, '{"success":true,"data":{}}', '')); return { on() { }, kill() { } }; };
-  const k = Km.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv, execFileImpl }), liveKeys: () => new Set(), install: false, log: { log: line, warn: line, error: line, info: line }, tickMs: 3600e3 });
+  const k = Km.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv, execFileImpl }), liveKeys: () => new Set(), install: false, log: { log: line, warn: line, error: line, info: line }, broadcast: (m) => { if (m && m.type === 'browser-profiles-updated') bcasts.push(turn); }, tickMs: 3600e3 });
+  kref = k;
   let maxLate = 0, last = performance.now();
   const iv = setInterval(() => { const t = performance.now(); maxLate = Math.max(maxLate, t - last - 5); last = t; }, 5);
   try {
@@ -80,11 +102,12 @@ async function sweep(Km, dataDir, { how = 'reconcile', onRemoved = null } = {}) 
     else if (how === 'tick') await k.tick();
     else { const r = k.reconcile({ graceMs: 0 }); await r.retired; }
     await new Promise((res) => setTimeout(res, 12));   // the timer fires once more: a hold that ran to the end is read too
-  } finally { running = false; clearInterval(iv); try { k.shutdown(); } catch { /* none */ } }
-  return { perTurnMax: Math.max(0, ...perTurn.values()), turnsWithRemovals: perTurn.size, removed: removed.length, closes: closes.length, lateEvidenceMs: Math.round(maxLate), left: onDisk(dataDir), k };
+  } finally { running = false; clearInterval(iv); fs.renameSync = origRename; try { k.shutdown(); } catch { /* none */ } }
+  return { perTurnMax: Math.max(0, ...perTurn.values()), turnsWithRemovals: perTurn.size, removed: removed.length, closes: closes.length, lateEvidenceMs: Math.round(maxLate), left: onDisk(dataDir), writes: writes.length, writeLog: writes, broadcasts: bcasts.length, k };
 }
 let closeHook = null;
 
+let s300 = null;   // ①'s 300-record reconcile — ⑧ reads its writes and broadcasts
 const { mutantCopies } = await import('./mutant-copy.mjs');
 const M = mutantCopies('keeper-sweep-yields', REPO);
 const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
@@ -93,14 +116,15 @@ console.log('— ① L1: the orphan sweep takes ONE record per loop turn, whatev
 {
   for (const N of [50, 300]) {
     const s = await sweep(K, registry(N));
+    if (N === 300) s300 = s;
     ok(s.removed === N && s.left === 0 && s.perTurnMax === 1 && s.turnsWithRemovals === N, `reconcile, ${N} orphan records: all removed, ONE per loop turn (the most in one turn: ${s.perTurnMax}; the stall placed per record ${STALL_MS} ms — evidence, a 5 ms timer's worst lateness ${s.lateEvidenceMs} ms)`, { removed: s.removed, left: s.left, perTurnMax: s.perTurnMax, turns: s.turnsWithRemovals });
   }
-  const sb = await sweep(K, registry(300), { how: 'boot' });
+  const sb = await sweep(K, registry(300), { how: 'boot', stallMs: 0 });   // (the count is the claim; the placed stall's evidence is ①'s reconcile)
   ok(sb.removed === 300 && sb.left === 0 && sb.perTurnMax === 1, `boot, 300 orphan records: all removed, one per loop turn (most in one turn ${sb.perTurnMax}; lateness evidence ${sb.lateEvidenceMs} ms)`, { removed: sb.removed, perTurnMax: sb.perTurnMax });
-  const st = await sweep(K, registry(300), { how: 'tick' });
+  const st = await sweep(K, registry(300), { how: 'tick', stallMs: 0 });
   ok(st.removed === 300 && st.left === 0 && st.perTurnMax === 1, `the tick (the runtime half), 300 orphan records: all removed, one per loop turn (most in one turn ${st.perTurnMax}; lateness evidence ${st.lateEvidenceMs} ms)`, { removed: st.removed, perTurnMax: st.perTurnMax });
   // MUTANT: the yield removed (the steps run back to back inside one turn)
-  const noYield = ksrc.replace('      await yieldLoop();\n      if (reg.leases.some((l) => l.profileId === id))', '      if (reg.leases.some((l) => l.profileId === id))');
+  const noYield = ksrc.replace('        await yieldLoop();\n        if (reg.leases.some((l) => l.profileId === id))', '        if (reg.leases.some((l) => l.profileId === id))');
   ok(noYield !== ksrc, 'MUTANT (the yield removed): the patch applies');
   if (noYield !== ksrc) {
     const Kn = M.load('src/server/browser-keeper.js', noYield, 'no-yield');
@@ -111,8 +135,14 @@ console.log('— ① L1: the orphan sweep takes ONE record per loop turn, whatev
 
 console.log('— ② L2: a record whose daemon is GONE starts no browser-CLI child; a daemon that runs is still closed');
 {
-  const s = await sweep(K, registry(300, { live: true }));
+  const s = await sweep(K, registry(300, { live: true }), { stallMs: 0 });
   ok(s.removed === 300 && s.left === 0 && s.closes === 0, `300 records left \`ready\` whose daemon is gone: every one removed, browser-CLI \`close\` starts: ${s.closes} (one per record would fork the hub ${300} times)`, { removed: s.removed, closes: s.closes, left: s.left });
+  // F3: the field's shape — a scratch directory and a launch mark per record; each pays the reap's own road
+  const origMB = F.markedBrowsers; let walks = 0;
+  F.markedBrowsers = (...a) => { walks++; return origMB(...a); };
+  const s3 = await sweep(K, registry(30, { live: true, dirMark: true }), { stallMs: 0 });
+  F.markedBrowsers = origMB;
+  ok(s3.removed === 30 && s3.left === 0 && s3.closes === 0 && s3.perTurnMax === 1 && walks === 30, `F3 the field's shape — 30 records left \`ready\` with a scratch directory and a launch mark each: every one pays the reap's own road (${walks} /proc walks by mark, the directory's lock read), browser-CLI starts: ${s3.closes}, one record per loop turn (most ${s3.perTurnMax})`, { removed: s3.removed, closes: s3.closes, perTurnMax: s3.perTurnMax, walks });
   // CONTROL: a daemon that RUNS — a process of this test, its start time recorded as the keeper records one
   const proc = spawn('sleep', ['30'], { stdio: 'ignore' });
   await new Promise((r) => setTimeout(r, 50));
@@ -120,7 +150,7 @@ console.log('— ② L2: a record whose daemon is GONE starts no browser-CLI chi
   const id = 'bp-1fffffff', key = `${PARENT}.999`;
   const extra = [{ profile: B.newProfileRecord({ id, label: '(ephemeral) Chat child live', dir: null, ephemeral: true, owner: { kind: 'conversation', id: key }, now: 1790000000000 }), browser: { profileId: id, state: 'ready', pid: proc.pid, starttime: st, cdpUrl: null, ns: 'vs-' + key, startedAt: 1790000000000 } }];
   closeHook = () => { try { process.kill(proc.pid, 'SIGTERM'); } catch { /* gone */ } };   // the CLI's own close ends its daemon
-  const c = await sweep(K, registry(3, { live: true, extra }));
+  const c = await sweep(K, registry(3, { live: true, extra }), { stallMs: 0 });
   closeHook = null;
   const procGone = await new Promise((r) => { if (proc.exitCode !== null || proc.signalCode) return r(true); proc.once('exit', () => r(true)); setTimeout(() => r(false), 2000); });
   ok(st != null && c.removed === 4 && c.closes === 1 && procGone, `CONTROL: beside 3 gone daemons, ONE whose daemon runs (pid ${proc.pid}, its start time recorded) is still closed by the browser CLI — 1 start in all — and ended; all 4 records removed`, { st, removed: c.removed, closes: c.closes, procGone });
@@ -130,21 +160,120 @@ console.log('— ② L2: a record whose daemon is GONE starts no browser-CLI chi
   ok(noJudge !== ksrc, 'MUTANT (the gone-daemon judgment removed): the patch applies');
   if (noJudge !== ksrc) {
     const Kj = M.load('src/server/browser-keeper.js', noJudge, 'no-judge');
-    const sj = await sweep(Kj, registry(300, { live: true }));
+    const sj = await sweep(Kj, registry(300, { live: true }), { stallMs: 0 });
     ok(sj.closes === 300, `MUTANT (the gone-daemon judgment removed) is RED on the law: ${sj.closes} browser-CLI starts for 300 records whose daemons are gone`, { closes: sj.closes });
   }
 }
 
-console.log('— ③ L4: progress persists — a restart mid-sweep resumes with exactly the records left');
+console.log('— ③ L4: progress persists — the file loses a PIECE per write; a restart mid-walk resumes with exactly the records left');
 {
   const dataDir = registry(120);
   const mid = path.join(ROOT, 'mid'); fs.mkdirSync(mid, { recursive: true });
-  const seen = [];
-  const s = await sweep(K, dataDir, { onRemoved: (n) => { seen.push([n, onDisk(dataDir)]); if (n === 40) fs.copyFileSync(path.join(dataDir, 'browser-profiles.json'), path.join(mid, 'browser-profiles.json')); } });
-  ok(s.removed === 120 && seen.every(([n, d]) => d === 120 - n), 'each removal is on disk when its journal line is written (the file loses one record per step)', seen.filter(([n, d]) => d !== 120 - n).slice(0, 4));
-  const left = onDisk(mid);
-  const r = await sweep(K, mid, { how: 'boot' });
-  ok(left === 80 && r.removed === 80 && r.left === 0, `a keeper booted over the registry as it stood after 40 removals (a restart there): ${left} records left, and its boot sweep retires exactly those ${r.removed}`, { left, removed: r.removed });
+  let copied = null;
+  const s = await sweep(K, dataDir, { stallMs: 5, onWrite: (n, w) => { if (copied === null && w.left > 0) { copied = w.left; fs.copyFileSync(path.join(dataDir, 'browser-profiles.json'), path.join(mid, 'browser-profiles.json')); } } });
+  const lefts = s.writeLog.map((w) => w.left);
+  ok(s.removed === 120 && s.left === 0 && s.writes >= 2 && s.writes < 120 && lefts.every((x, i) => i === 0 || x < lefts[i - 1]) && lefts[lefts.length - 1] === 0, `the registry file loses a PIECE per write — ${s.writes} writes for 120 removals, the records left after each: ${lefts.join(' → ')}`, { writes: s.writes, lefts });
+  const left = copied == null ? -1 : onDisk(mid);
+  const r = copied == null ? { removed: -1, left: -1 } : await sweep(K, mid, { how: 'boot', stallMs: 0 });
+  ok(copied > 0 && left === copied && r.removed === left && r.left === 0, `a keeper booted over the registry as it stood at a write mid-walk (a restart there): ${left} records left, and its boot sweep retires exactly those ${r.removed}`, { copied, left, removed: r.removed });
+}
+
+console.log('— ⑤ F1: a record whose conversation is carried again before its step is KEPT, nothing of it stopped');
+{
+  const dataDir = registry(20, { live: true });
+  const KEEP = 'bp-' + (0x10000000 + 5).toString(16), KEEP_KEY = `${PARENT}.5`;
+  let backAt = 0;
+  const s = await sweep(K, dataDir, { stallMs: 0, onRemoved: (n, k) => { if (n === 1) { backAt = n; k._reg().leases.push({ profileId: KEEP, browserKey: KEEP_KEY, sessionId: 'sess-back', targetId: null, since: Date.now(), input: 'agent', viewers: 0, carrierLostAt: null, alias: 'ephemeral' }); } } });
+  const reg = s.k._reg(); const rec = reg.browsers[KEEP];
+  ok(backAt === 1 && s.removed === 19 && s.left === 1 && !!s.k.profile(KEEP) && rec && rec.state === 'ready' && rec.pid === 4100005 && s.closes === 0, 'among 20 orphans, the one whose lease came back after the first removal (before its own step) is KEPT — its browser record untouched (still `ready`, its pid), no CLI start — and the other 19 go', { removed: s.removed, left: s.left, state: rec && rec.state, closes: s.closes });
+}
+
+console.log('— ⑥ F2: nothing of a carried conversation is ended by the sweep — a stall placed in the reap\'s window');
+const f2 = async (Km) => {
+  const dataDir = registry(1, { live: true, dirMark: true });
+  const id = 'bp-' + (0x10000000 + 1).toString(16), key = `${PARENT}.1`;
+  const origMB = F.markedBrowsers; let entered, release;
+  const inWindow = new Promise((r) => { entered = r; }); const gate = new Promise((r) => { release = r; });
+  F.markedBrowsers = async (m) => { if (/^vsk-sweep-/.test(String(m))) { entered(); await gate; return []; } return origMB(m); };   // THE PLACED STALL: the reap's scan held open
+  const closes = [];
+  let proc = null;   // the browser the resumed conversation starts (below); the CLI's own close ends its daemon, as the real one does
+  const execFileImpl = (bin, args, opts, cb) => { if (Array.isArray(args) && args[0] === 'close') { closes.push(args.join(' ')); try { if (proc) process.kill(proc.pid, 'SIGTERM'); } catch { /* gone */ } } const c = typeof opts === 'function' ? opts : cb; setTimeout(() => c(null, '{"success":true,"data":{}}', ''), 30); return { on() { }, kill() { } }; };
+  const quiet = { log() { }, warn() { }, error() { }, info() { } };
+  const k = Km.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv, execFileImpl }), liveKeys: () => new Set(), install: false, log: quiet, tickMs: 3600e3 });
+  proc = spawn('sleep', ['30'], { stdio: 'ignore' });
+  try {
+    const r = k.reconcile({ graceMs: 0 });
+    await inWindow;   // the retire is inside the reap (the record already marked stopped by the gone-daemon judgment)
+    // the conversation resumes HERE: its lease is back and its browser started again (a process of this test, its start time recorded)
+    await new Promise((res) => setTimeout(res, 50));
+    k._reg().leases.push({ profileId: id, browserKey: key, sessionId: 'sess-back', targetId: null, since: Date.now(), input: 'agent', viewers: 0, carrierLostAt: null, alias: 'ephemeral' });
+    k._reg().browsers[id] = { profileId: id, state: 'ready', pid: proc.pid, starttime: F.procStart(proc.pid), cdpUrl: null, ns: 'vs-' + key, startedAt: Date.now() };
+    release();
+    const out = await r.retired;
+    const alive = proc.exitCode === null && !proc.signalCode && F.pidAlive(proc.pid);
+    const rec = k._reg().browsers[id];
+    return { out: out[0], kept: !!k.profile(id), state: rec && rec.state, alive, closes: closes.length };
+  } finally { F.markedBrowsers = origMB; try { proc.kill('SIGKILL'); } catch { /* gone */ } try { k.shutdown(); } catch { /* none */ } }
+};
+{
+  const g = await f2(K);
+  ok(g.kept && g.state === 'ready' && g.alive && g.closes === 0 && g.out && g.out.kept === true, 'the conversation resumed inside the reap\'s window: after the reap the retire reads the lease again — the record KEPT, the browser it just started left RUNNING, no CLI start', g);
+  const noReread = ksrc.replace("      if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };\n      try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); }", "      try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); }");
+  ok(noReread !== ksrc, 'MUTANT (the re-read after the reap removed): the patch applies');
+  if (noReread !== ksrc) {
+    const gm = await f2(M.load('src/server/browser-keeper.js', noReread, 'no-reread'));
+    ok(!(gm.state === 'ready' && gm.alive && gm.closes === 0), `MUTANT (the re-read removed) is RED on the law: the browser the resumed conversation had just started was closed (CLI starts ${gm.closes}, state ${gm.state}, its process ${gm.alive ? 'alive' : 'ended'})`, gm);
+  }
+}
+
+console.log('— ⑦ F4: the whole turn in which a conversation ends — its leases, child handles and records');
+{
+  const N = 300;
+  const dataDir = registry(N, { live: true });
+  const file = path.join(dataDir, 'browser-profiles.json'); const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (let i = 1; i <= N; i++) {
+    const key = `${PARENT}.${i}`, id = 'bp-' + (0x10000000 + i).toString(16);
+    doc.leases.push({ profileId: id, browserKey: key, sessionId: 'sess-p', targetId: null, since: 1790000000000, input: 'agent', viewers: 0, carrierLostAt: null, alias: 'ephemeral' });
+    doc.children[key] = { parent: PARENT, since: 1790000000000, sessionId: 'sess-p', carrierLostAt: null };
+  }
+  fs.writeFileSync(file, JSON.stringify(doc));
+  let clock = 1790000100000, live = new Set([PARENT]);
+  let turn = 0, running = true; const ticker = () => { turn++; if (running) setImmediate(ticker); }; setImmediate(ticker);
+  const perTurn = new Map(); const bump = (t, kind) => { const m = perTurn.get(t) || { lease: 0, handle: 0, record: 0, write: 0, broadcast: 0, start: 0 }; m[kind]++; perTurn.set(t, m); };
+  const span = { first: 0, last: 0 };   // evidence only: the drop loop's span on the clock (never asserted — test-ci-gate §2e)
+  const line = (m) => { const x = String(m); if (/\] dropped the lease of /.test(x) || /\] reaped child handle /.test(x)) { const t = performance.now(); if (!span.first) span.first = t; span.last = t; } if (/\] dropped the lease of /.test(x)) bump(turn, 'lease'); else if (/\] reaped child handle /.test(x)) bump(turn, 'handle'); else if (/ephemeral browser record \S+ .* removed with its conversation/.test(x)) bump(turn, 'record'); };
+  const origRename = fs.renameSync; fs.renameSync = function (a, b) { const r = origRename.apply(this, arguments); if (b === file) bump(turn, 'write'); return r; };
+  const execFileImpl = (bin, args, opts, cb) => { if (Array.isArray(args) && args[0] === 'close') bump(turn, 'start'); const cbk = typeof opts === 'function' ? opts : cb; setImmediate(() => cbk(null, '{"success":true,"data":{}}', '')); return { on() { }, kill() { } }; };
+  const k = K.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv, execFileImpl }), liveKeys: () => live, now: () => clock, install: false, log: { log: line, warn: line, error: line, info: line }, broadcast: (m) => { if (m && m.type === 'browser-profiles-updated') bump(turn, 'broadcast'); }, tickMs: 3600e3 });
+  let maxLate = 0, last = performance.now();
+  const iv = setInterval(() => { const t = performance.now(); maxLate = Math.max(maxLate, t - last - 5); last = t; }, 5);
+  try {
+    await k.tick();                       // carried: its leases and handles stand
+    live = new Set();                     // the conversation ends at run time
+    await k.tick();                       // the grace starts (each lease and handle stamped)
+    clock += B.LEASE_DROP_GRACE_MS + 1000;
+    await new Promise((res) => setTimeout(res, 20));   // the next tick in a turn of its own (the timer's), as the keeper's own timer runs it
+    await k.tick();                       // past the grace: in ONE reconcile its leases drop and its handles are reaped, then the walk
+    await new Promise((res) => setTimeout(res, 12));
+  } finally { running = false; clearInterval(iv); fs.renameSync = origRename; try { k.shutdown(); } catch { /* none */ } }
+  const turns = [...perTurn.values()];
+  const drop = turns.find((m) => m.lease > 0) || {};
+  const tot = turns.reduce((a, m) => { for (const kk of Object.keys(m)) a[kk] = (a[kk] || 0) + m[kk]; return a; }, {});
+  const recMax = Math.max(0, ...turns.map((m) => m.record));
+  ok(drop.lease === N && drop.handle === N && drop.write === 0 && drop.broadcast === 0 && drop.start === 0 && drop.record === 0, `the turn the conversation ends in drops its ${N} leases and reaps its ${N} child handles — in-memory acts only: in that turn ${drop.write} registry writes, ${drop.broadcast} broadcasts, ${drop.start} child starts, ${drop.record} records retired (the walk starts at the next turn; evidence: the drop loop spans ${Math.round(span.last - span.first)} ms, a 5 ms timer's worst lateness over the three ticks ${Math.round(maxLate)} ms)`, drop);
+  ok(tot.record === N && recMax === 1 && !tot.start && (tot.write || 0) <= 10 && (tot.broadcast || 0) <= 10, `…then its ${N} records retire ONE per loop turn (most ${recMax}), with ${tot.start || 0} child starts, ${tot.write || 0} registry writes and ${tot.broadcast || 0} broadcasts in all`, tot);
+}
+
+console.log('— ⑧ F5: one registry write and one broadcast per PIECE of the walk, not per record');
+{
+  const s = s300;   // ①'s 300-record reconcile, read for its writes and broadcasts
+  ok(s.removed === 300 && s.writes >= 1 && s.writes <= 10 && s.broadcasts >= 1 && s.broadcasts <= 10, `300 removals (①'s reconcile): ${s.writes} registry writes and ${s.broadcasts} broadcasts (one per piece of about a quarter second of walking, plus the last)`, { removed: s.removed, writes: s.writes, broadcasts: s.broadcasts });
+  const noBatch = ksrc.replace('    if (sweepIds.has(id)) sweepDirty = true; else commit();', '    commit();');
+  ok(noBatch !== ksrc, 'MUTANT (the batching dropped): the patch applies');
+  if (noBatch !== ksrc) {
+    const sm = await sweep(M.load('src/server/browser-keeper.js', noBatch, 'no-batch'), registry(300), { stallMs: 0 });
+    ok(sm.writes >= 300 && sm.broadcasts >= 300, `MUTANT (the batching dropped) is RED on the law: ${sm.writes} registry writes and ${sm.broadcasts} broadcasts for 300 removals`, { writes: sm.writes, broadcasts: sm.broadcasts });
+  }
 }
 
 console.log('— ④ L3: the lifecycle of a child record, as the code has it');
