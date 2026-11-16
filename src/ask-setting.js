@@ -22,9 +22,9 @@ const LINK = (key) => `vibespace://settings/${key}`;   // src/setting-links.js S
 // THE CLOSED LIST — mirrored from the schema rows marked `proposable: true` (src/lib/settings-schema.js; test-setting-holds pins them
 // equal: key, min, max, step, default); the hold store and the press judge against THIS table
 const PROPOSABLE = Object.freeze({   // + `label` = the row's schema label (an i18n key — the hub's notices name the row by it)
-  'spend.unattendedPerIdentityHour': Object.freeze({ min: 0, max: 200, step: 1, def: 30, label: 'Unattended turns per account per hour' }),
-  'spend.unattendedPerIdentityDay': Object.freeze({ min: 0, max: 2000, step: 5, def: 200, label: 'Unattended turns per account per day' }),
-  'spend.unattendedPerInstanceDay': Object.freeze({ min: 0, max: 10000, step: 10, def: 800, label: 'Unattended turns for this instance per day' }),
+  'spend.unattendedPerIdentityHour': Object.freeze({ min: 0, max: 200, step: 1, def: 30, label: 'Unattended turns per account per hour' }),   // ui-words: the row's schema label as an i18n KEY — the client says it through t() (the hold store's words param); zh / ja rows are the schema's
+  'spend.unattendedPerIdentityDay': Object.freeze({ min: 0, max: 2000, step: 5, def: 200, label: 'Unattended turns per account per day' }),   // ui-words: the row's schema label as an i18n KEY — the client says it through t() (the hold store's words param); zh / ja rows are the schema's
+  'spend.unattendedPerInstanceDay': Object.freeze({ min: 0, max: 10000, step: 10, def: 800, label: 'Unattended turns for this instance per day' }),   // ui-words: the row's schema label as an i18n KEY — the client says it through t() (the hold store's words param); zh / ja rows are the schema's
 });
 const MIN_MS = 5 * 60 * 1000, MAX_MS = 48 * 60 * 60 * 1000;
 const KEY_RE = /^[A-Za-z0-9_.-]{1,120}$/;
