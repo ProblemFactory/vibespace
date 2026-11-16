@@ -4,8 +4,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.406 — 2026-11-16
 
+### Added
+- While «Resume all» runs, a line shows «Resuming 12 of 68…» with Stop, and a conversation that cannot be resumed is named with its reason.
+
 ### Fixed
 - When a chat that used many helper browsers ends, VibeSpace stays responsive while it clears them; it could stop answering for minutes.
+- «Resume all» after a restart now resumes one conversation at a time, after the one before has started, so large conversations no longer overload the server.
+- A Task Group's resume-all button now resumes its stopped conversations one at a time too.
 
 ## 2.369.405 — 2026-11-16
 
