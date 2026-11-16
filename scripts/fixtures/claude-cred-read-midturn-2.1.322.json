@@ -1,0 +1,205 @@
+{
+ "measuredAt": "2026-11-15",
+ "cli": "2.1.322 (Claude Code)",
+ "script": "scripts/measure-claude-cred-read.mjs",
+ "rung": "loopback-real",
+ "netns": false,
+ "binarySha256": "bfb3703ad5380242328459bc62ada4bde8ae7ba57c6e1eeadb9c00e08874c478",
+ "setup": "the REAL claude named on purpose (--no-netns --loopback-real --claude ~/.local/share/claude/versions/<v>; the program file read in place, never changed — its sha256 before and after), a scratch HOME and config per variant, FAKE credentials written by the run (sk-ant-oat01-FAKE-A/B), a per-session link CLAUDE_SECURESTORAGE_CONFIG_DIR=<pool-links/pool-t/sess-1> -> subs/sub-A, every base + HTTPS_PROXY on a loopback mock that records the Authorization header of every /v1/messages request, the strace belt (SIGKILL at the first off-loopback connect); one fresh process per variant",
+ "question": "at which point after the pool moves a link does a RUNNING claude spend the new credential — the next request, the next turn, or never? (lane readings-attribution-2, P0; the tree said both: usage-pool-engine «a re-point does not reach a RUNNING CLI» and «reaches the running CLI on its NEXT request»)",
+ "answer": "THE NEXT REQUEST — inside a turn too. midturn: one turn of three requests, the link moved as request 1 landed: request 1 (in flight) A, requests 2 and 3 (65 / 100 ms later) B. midturn-late: request 1's answer held 70 s: requests 2 and 3 (70 076 / 70 112 ms after the move) B. Between turns (3 s and 65 s): the next turn B. baseline (no move): A throughout. 2.1.321 midturn: the same (A, B, B).",
+ "fences": {
+  "beltFired": 0,
+  "nonLoopbackConnects": 0,
+  "guardedReads": [],
+  "proxyConnectsRefused": 24,
+  "proxyConnectsWhat": [
+   "CONNECT api.anthropic.com:443"
+  ],
+  "foreignTokens": 0,
+  "note": "every CONNECT the CLI tried went to HTTPS_PROXY = the loopback mock, which refused it (403): nothing left the machine; the belt never fired; the trace lists no open under the person's home outside the program file"
+ },
+ "variants": {
+  "midturn": {
+   "change": "repointPoolSymlink(link→B)+utimes(B) as msg1's request 1 landed (mid-turn)",
+   "requests": {
+    "msg1": [
+     "A:200",
+     "B:200",
+     "B:200"
+    ],
+    "msg2": [
+     "B:200"
+    ]
+   },
+   "afterChangeMs": {
+    "msg1": [
+     -1,
+     65,
+     100
+    ],
+    "msg2": [
+     3133
+    ]
+   },
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 3,
+    "after-change:statx": 3,
+    "after-change:openat": 6
+   },
+   "guardedReads": [],
+   "nonLoopbackConnects": 0
+  },
+  "midturn-late": {
+   "change": "repointPoolSymlink(link→B)+utimes(B) as msg1's request 1 landed (mid-turn, its answer held 70 s)",
+   "requests": {
+    "msg1": [
+     "A:200",
+     "B:200",
+     "B:200"
+    ],
+    "msg2": [
+     "B:200"
+    ]
+   },
+   "afterChangeMs": {
+    "msg1": [
+     -1,
+     70076,
+     70112
+    ],
+    "msg2": [
+     73144
+    ]
+   },
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 3,
+    "after-change:openat": 6,
+    "after-change:statx": 3
+   },
+   "guardedReads": [],
+   "nonLoopbackConnects": 0
+  },
+  "symlink": {
+   "change": "repointPoolSymlink(link→B)+utimes(B)",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "B:200"
+    ]
+   },
+   "afterChangeMs": {
+    "msg1": [
+     -20
+    ],
+    "msg2": [
+     65039
+    ]
+   },
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 3,
+    "after-change:openat": 6,
+    "after-change:statx": 1
+   },
+   "guardedReads": [],
+   "nonLoopbackConnects": 0
+  },
+  "symlink-quick": {
+   "change": "repointPoolSymlink(link→B)+utimes(B)",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "B:200"
+    ]
+   },
+   "afterChangeMs": {
+    "msg1": [
+     -19
+    ],
+    "msg2": [
+     3027
+    ]
+   },
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 3,
+    "after-change:openat": 6,
+    "after-change:statx": 1
+   },
+   "guardedReads": [],
+   "nonLoopbackConnects": 0
+  },
+  "baseline": {
+   "change": "none",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "A:200"
+    ]
+   },
+   "afterChangeMs": {
+    "msg1": [
+     -18
+    ],
+    "msg2": [
+     65031
+    ]
+   },
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 3,
+    "after-change:openat": 4,
+    "after-change:statx": 1
+   },
+   "guardedReads": [],
+   "nonLoopbackConnects": 0
+  }
+ },
+ "alsoMeasured": {
+  "2.1.321 (Claude Code)": {
+   "binarySha256": "426c33815ca6645a772f722fbff10dbf2cbdb124a8aeab733c1365dbf8bbf61f",
+   "variants": {
+    "midturn": {
+     "change": "repointPoolSymlink(link→B)+utimes(B) as msg1's request 1 landed (mid-turn)",
+     "requests": {
+      "msg1": [
+       "A:200",
+       "B:200",
+       "B:200"
+      ],
+      "msg2": [
+       "B:200"
+      ]
+     },
+     "afterChangeMs": {
+      "msg1": [
+       -1,
+       69,
+       105
+      ],
+      "msg2": [
+       3137
+      ]
+     },
+     "credSyscalls": {
+      "before-change:openat": 6,
+      "before-change:statx": 3,
+      "after-change:statx": 3,
+      "after-change:openat": 6
+     },
+     "guardedReads": [],
+     "nonLoopbackConnects": 0
+    }
+   }
+  }
+ }
+}
