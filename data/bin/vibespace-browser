@@ -659,6 +659,13 @@ async function runPage(c) {
   const isVaultFill = cls.verb === 'fill' && typeof V.hasVaultFillFlag === 'function' && V.hasVaultFillFlag(cls.argv);
   const vaultFillArgs = isVaultFill && typeof V.parseFillVaultArgs === 'function' ? V.parseFillVaultArgs(cls.argv) : null;
   if (vaultFillArgs && !vaultFillArgs.ok) refuseLocally(vaultFillArgs, 2);
+  // hotfix 2.369.405 (lane vault-login): A VERB THAT STARTS NO BROWSER PROGRAM IS THE HUB'S OWN ACT — a vault fill (the hub
+  // fills through its own CDP socket) and a verb of our own (stop, site-reset, passkey, permission, answer, surfaces: answered
+  // by runOursPage, never handed to the binary). Nothing about the browser program is looked up, versioned, given a working
+  // directory, an environment or a config file for it, so none of those checks can refuse it: a conversation whose HOME the
+  // PRODUCT moved (an Antigravity account's own root, harnesses/antigravity spawnEnv) asks the hub like any other. A verb that
+  // DOES start the program keeps every one of them (the HOME fence of composeConfig included).
+  const startsNothing = Boolean((isVaultFill && vaultFillArgs) || cls.ours);
   // lane L r2: an upload from a credential store is refused HERE, by name — before the binary is looked up,
   // before /resolve (server-independent)
   if (cls.uploadFiles && cls.uploadFiles.length) {
@@ -681,14 +688,13 @@ async function runPage(c) {
   // and every rewritten word is judged (the over-named sets above already hold them; this is the proof, not a hope)
   let framed = inFrame(cls);
   { const wr = framed.writes.length ? writeRefusal(framed.writes) : null; if (wr) refuseLocally(wr); }
-  const runCwd = daemonCwd();
+  const runCwd = startsNothing ? { ok: true, dir: null } : daemonCwd();
   if (!runCwd.ok) refuseLocally(runCwd);
-  let bin = realBinary();
-  if (isVaultFill) bin = { ok: true, path: '' };
+  let bin = startsNothing ? { ok: true, path: '' } : realBinary();
   if (!bin.ok) refuseLocally(bin);
   // r4 (takeover finding 6): the flag table is a measurement of ONE version. Another build ⇒ every flag is
   // judged under both readings (and said once) — before /resolve, so a refused command starts no browser
-  const binVersionRaw = isVaultFill ? V.TABLE_VERSION : installedVersion(bin.path);
+  const binVersionRaw = startsNothing ? V.TABLE_VERSION : installedVersion(bin.path);
   const binVersion = (String(binVersionRaw).match(/(\d+\.\d+\.\d+)/) || [])[1] || null;
   const drift = V.versionDrift(binVersionRaw);
   if (drift) {
@@ -770,7 +776,7 @@ async function runPage(c) {
   // 0.38.0 ↔ 0.38.1). The answer names that version; this command runs a binary of exactly it, found on this machine
   // (VibeSpace's verified install of it beside this command, else PATH's), and a `browser.cli` switch applies at its next
   // launch. None here ⇒ refused by name — never a silent fall to another version.
-  const wantCli = !isVaultFill && r.browser && r.browser.cli && typeof r.browser.cli.version === 'string' ? r.browser.cli.version : null;
+  const wantCli = !startsNothing && r.browser && r.browser.cli && typeof r.browser.cli.version === 'string' ? r.browser.cli.version : null;
   if (wantCli && wantCli !== binVersion && typeof V.cliForBrowser === 'function') {
     const cands = [];
     const inst = installedCliFor(wantCli);
@@ -976,16 +982,16 @@ async function runPage(c) {
   // directory (lstat: never a symlink) this uid owns
   const ownDir = (d) => { try { const st = fs.lstatSync(d); return st.isDirectory() && !st.isSymbolicLink() && (typeof process.getuid !== 'function' || st.uid === process.getuid()); } catch { return false; } };
   // r4: rung H's host-decided scratch profile is under the ACCOUNT's home (never a $HOME the shell moved)
-  const built = V.childEnv(process.env, r, { home: HOMES.home, uid: typeof process.getuid === 'function' ? process.getuid() : null, ownDir });
-  const env = built.env;
-  if (built.needsConfig) {
+  const built = startsNothing ? null : V.childEnv(process.env, r, { home: HOMES.home, uid: typeof process.getuid === 'function' ? process.getuid() : null, ownDir });
+  const env = built ? built.env : null;
+  if (built && built.needsConfig) {
     const cc = composeConfig();
     if (cc.code) refuseLocally(cc);
     env[V.CONFIG_KEY] = cc.file;
     if (cc.dropped.project.length) console.error(`note: ${cc.projectPath} sets ${cc.dropped.project.join(', ')} — not applied: an agent-browser.json in your directory may only add a restriction (${V.PROJECT_CONFIG_KEYS.join(', ')}) this machine's own configuration does not already set [config_keys_dropped]`);
     if (cc.dropped.args.length || cc.dropped.keys.length) console.error(`note: ${[...cc.dropped.keys, ...cc.dropped.args].join(' ')} from ${cc.userPath} ${cc.dropped.keys.length + cc.dropped.args.length === 1 ? 'is' : 'are'} not applied — a raw debugging endpoint goes around the lease and the mediation [config_keys_dropped]`);
   }
-  if (built.dropped.length) console.error(`note: ${built.dropped.join(', ')} from your environment ${built.dropped.length === 1 ? 'was' : 'were'} not passed to the browser — which browser you drive and how it launches is VibeSpace's decision, not an environment variable's [env_twin_dropped]`);
+  if (built && built.dropped.length) console.error(`note: ${built.dropped.join(', ')} from your environment ${built.dropped.length === 1 ? 'was' : 'were'} not passed to the browser — which browser you drive and how it launches is VibeSpace's decision, not an environment variable's [env_twin_dropped]`);
   let profileId = null;
   let closeAllScoped = false; // lane H verify r2 L6: an attachment's `close --all` is ITS session's close, never the namespace's
   if (r.kind === 'ephemeral') {
