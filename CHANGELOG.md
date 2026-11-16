@@ -11,6 +11,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When a chat that used many helper browsers ends, VibeSpace stays responsive while it clears them; it could stop answering for minutes.
 - «Resume all» after a restart now resumes one conversation at a time, after the one before has started, so large conversations no longer overload the server.
 - A Task Group's resume-all button now resumes its stopped conversations one at a time too.
+- With many channel conversations, VibeSpace no longer pauses for seconds when an agent starts a turn or lists its channels.
 
 ## 2.369.405 — 2026-11-16
 
