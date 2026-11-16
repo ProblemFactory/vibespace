@@ -66,11 +66,17 @@ function mkWorld(engMod = realEng) {
   const session = { backend: 'claude', mode: 'chat', host: null, _webuiId: SID, claudeSessionId: 'cid-rt-1', _accountId: P, _servedModel: 'claude-fable-5', _servedModelAt: Date.now(), pty: { write() { } }, name: 'w' };
   sessions.set(SID, session);
   am.ensureSessionPoolLink(P, SID, MA, { why: 'spawn' });
+  // a SECOND conversation on MA that the pool never moved (its spawn row is no re-point): law 3's unmoved producer
+  const s2 = { backend: 'claude', mode: 'chat', host: null, _webuiId: 'sess-rt-2', claudeSessionId: 'cid-rt-2', _accountId: P, _servedModel: 'claude-fable-5', _servedModelAt: Date.now(), pty: { write() { } }, name: 'w2' };
+  sessions.set('sess-rt-2', s2); am.ensureSessionPoolLink(P, 'sess-rt-2', MA, { why: 'spawn' });
+  const RC = require(path.join(REPO, 'src/usage-reset-claim.js')).at(path.join(root, 'data'));   // the store the engine writes (its file is paced by the store writer)
   const archive = () => { try { return fs.readFileSync(path.join(root, 'data', 'archive', 'readings-window-mismatch.ndjson'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const u7 = (id) => readCache(id)?.sevenDay?.utilization;
   // the stream's own roads, driven as the parse drives them
   const W = {
-    root, am, eng, session, P, MA, MB, MC, R7, R7MC, readCache, u7, archive,
+    root, am, eng, session, P, MA, MB, MC, R7, R7MC, readCache, u7, archive, s2,
+    outcomesOf: (id) => RC.outcomesOf(id),
+    unmovedReading: (u, r7 = R7) => { s2._isStreaming = true; s2._turnState = 'running'; TS.noteRequestSent(s2, Date.now()); quiet(() => eng.recordRateLimitEvent(s2, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: u, resetsAt: r7 } })); },
     out: () => { session._isStreaming = true; session._turnState = 'running'; TS.noteRequestSent(session, Date.now()); },   // a request leaves (the prompt's echo or a tool result)
     reading: (u, r7 = R7) => quiet(() => eng.recordRateLimitEvent(session, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: u, resetsAt: r7 } })),
     result: () => quiet(() => eng.noteTurnEnd(session, { type: 'result' })),
@@ -176,6 +182,40 @@ console.log('LAW 2 — a model\'s cap is stated by that model\'s requests');
   W.capReading(0.902, W.R7, 0.71, RCAP);
   ok('…the same record on a turn that asked for Fable: its cap is the account\'s (written, nothing archived)', W.capOf(W.MA) === 0.71 && W.archive().length === 0, J({ cap: W.capOf(W.MA), a: W.archive().map((x) => x.reason) }));
 }
+console.log('LAW 3 — a fall is not a reset until something confirms it');
+const heldWorld = async () => {
+  // the account MA has its number under its reset; a conversation the pool moved onto it a moment ago reads a far lower one under the SAME reset
+  const W = mkWorld(); W.move(W.MC); await sleep(3); W.move(W.MA); await sleep(3);
+  W.out(); await sleep(3); W.reading(0.13);
+  return W;
+};
+{
+  const W = await heldWorld();
+  const o = W.outcomesOf(W.MA).find((x) => x.lane === 'plan:7d');
+  ok('LAW 3: a fall of 3 points or more under an unchanged reset, from a conversation the pool moved inside the shadow time, is HELD — the account keeps its 91 % (what the pool reads), an UNCONFIRMED FALL is said (its own state, never «reset»), until the window\'s own reset',
+    W.u7(W.MA) === 0.91 && !!o && o.state === 'fall-unconfirmed' && Math.round(o.before) === 91 && Math.round(o.usedPct) === 13 && o.until === W.R7 * 1000, J({ u7: W.u7(W.MA), o }));
+  W.unmovedReading(0.14);
+  const o2 = W.outcomesOf(W.MA).find((x) => x.lane === 'plan:7d');
+  ok('…CONFIRMED by a producer that was not moved: its 14 % is taken, and the fall becomes the reset a reading shows (91 → 14)', W.u7(W.MA) === 0.14 && !!o2 && o2.state === 'reset-seen' && Math.round(o2.before) === 91, J({ u7: W.u7(W.MA), o2 }));
+}
+{
+  const W = await heldWorld();
+  W.unmovedReading(0.92);
+  ok('…REFUTED by a reading back near the old value: the hold ends, nothing is called a reset', W.u7(W.MA) === 0.92 && !W.outcomesOf(W.MA).some((x) => x.lane === 'plan:7d'), J({ u7: W.u7(W.MA), o: W.outcomesOf(W.MA) }));
+}
+{
+  // a vendor's early reset read by a producer that was NOT moved (the shape of the two real ones: seen when the member was next
+  // used, or live in a running session) is its own confirmation — taken at once
+  const W = mkWorld();
+  W.out(); await sleep(3); W.reading(0.03);
+  const o = W.outcomesOf(W.MA).find((x) => x.lane === 'plan:7d');
+  ok('ROW R (a real early reset\'s shape): the fall read by a conversation the pool did not move is taken at once and said as a reset a reading shows', W.u7(W.MA) === 0.03 && !!o && o.state === 'reset-seen', J({ u7: W.u7(W.MA), o }));
+}
+{
+  const words = read('src/lib/account-wall-words.js');
+  ok('…the unconfirmed fall has its OWN words (not the «reset — unconfirmed» look), in en and in the zh / ja dictionaries', /o\.state === 'fall-unconfirmed'\) return t\('\{name\}: \{what\} fell from \{before\}% to \{after\}% in one reading — not confirmed yet/.test(words)
+    && /fell from \{before\}% to \{after\}% in one reading — not confirmed yet[^"]*": "[^"]+/.test(read('src/lib/i18n-zh.js')) && /fell from \{before\}% to \{after\}% in one reading — not confirmed yet[^"]*": "[^"]+/.test(read('src/lib/i18n-ja.js')));
+}
 console.log('THE CAP ROWS (invented, of the shape five of the six clear episodes had) — an answer IN FLIGHT across the pool\'s move');
 // each: conversations moved onto the account a few minutes before, and the account's cap lane showed
 // another member's number — the answer to a request that had left on the member the conversation was leaving. A cap names no
@@ -196,7 +236,7 @@ console.log('THE EPISODE ROWS (invented, each of a shape the owner\'s instance s
   fs.rmSync(path.join(W.root, 'data', 'usage-cache', readingLag.windowSidecarName(W.MA)), { force: true });   // no evidence on the left member
   W.out(); await sleep(3); W.reading(0.61);              // its own number, this turn
   W.move(W.MC); await sleep(3);                          // the hard move, mid-turn (the conversation still streams)
-  W.out(); await sleep(3); W.reading(0.04, W.R7MC);      // the next request of the same turn: the new member's just-reset number
+  W.out(); await sleep(3); W.reading(0.04, W.R7MC + 7 * 86400);   // the next request of the same turn: the new member's just-reset number (its NEW window)
   ok('ROW A (plan week): a move INSIDE a turn — the next request\'s reading lands on the member the request went out on, never on the one the turn began on', W.u7(W.MA) === 0.61 && W.u7(W.MC) === 0.04, J({ left: W.u7(W.MA), new: W.u7(W.MC) }));
 }
 console.log('MUTANTS — law 1, each red by name');
@@ -215,7 +255,7 @@ console.log('MUTANTS — law 1, each red by name');
   const mb = mut([[REQ, '  const req = null;\n'], [STOP, ''], [MOVE, '']], 'pin-only');
   const W = mb ? mkWorld(mb) : null;
   if (W) await replay(W, FX.steps);
-  ok('MUTANT (law 1, the pins): readings filed by a turn pin that a trailing reading re-made and no stop ended ⇒ the episode\'s replay files the second member\'s numbers on the first', !!W && W.u7(W.MA) === 0.15, J(W && { MA: W.u7(W.MA), MB: W.u7(W.MB) }));
+  ok('MUTANT (law 1, the pins): readings filed by a turn pin that a trailing reading re-made and no stop ended ⇒ the episode\'s replay files the second member\'s numbers on the first — the second member is never told its own (law 3 then holds the first one\'s fall)', !!W && W.u7(W.MB) === FX.before.MB && W.u7(W.MA) !== 0.11, J(W && { MA: W.u7(W.MA), MB: W.u7(W.MB) }));
 }
 {
   const src = read(ENG);
@@ -224,6 +264,14 @@ console.log('MUTANTS — law 1, each red by name');
   let got = null;
   if (m) { const W = mkWorld(m); const RCAP = W.R7 - 3600; W.stampCap(W.MA, W.R7, RCAP); W.session._servedModel = 'claude-opus-5'; W.out(); W.answer('claude-opus-5'); await sleep(3); W.capReading(0.902, W.R7, 0.03, RCAP); got = W.capOf(W.MA); }
   ok('MUTANT (law 2, red by name): a cap lane taken whatever the turn asked ⇒ the Opus turn\'s record writes its 3 % as the account\'s Fable cap', got === 0.03, J({ got }));
+}
+{
+  const src = read(ENG);
+  const L3 = "    if (!row) return null;   // a producer that was not moved: its fall is its own confirmation\n";
+  const m = src.includes(L3) ? require(MUT.write(ENG, src.split(L3).join('    return null;\n'), 'no-law3')) : null;
+  let got = null;
+  if (m) { const W = mkWorld(m); W.move(W.MC); await sleep(3); W.move(W.MA); await sleep(3); W.out(); await sleep(3); W.reading(0.13); got = W.u7(W.MA); }
+  ok('MUTANT (law 3, red by name): every fall taken at once ⇒ the moved conversation\'s 13 % becomes the account\'s number («the weekly limit was reset»)', got === 0.13, J({ got }));
 }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);
