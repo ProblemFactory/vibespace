@@ -953,7 +953,18 @@
 - (2026-11-13) HUB AUTO-LOGIN RETIRED FOR ONE PRIMITIVE (vault-login, .403): agent locates, hub fills (fill --vault) on local mediated named profiles only. 不变量 = 3 promises, ONE channel law (loginFillChannelVerdict), read refusal first, restart & post-lift fence (kb-bugfix-invariants)
 - (2026-11-16) THE HUB'S LOOP HELD SECONDS AT EVERY AGENT TURN: THE HOOK'S REACH COUNT RE-NORMALISED EVERY CHANNEL CONVERSATION'S GRANTS (grants-read-is-a-lookup) — 不变量 = a grant row is normalised once per store change, never per read; a conversation no own row decides reads its account's answer.
 - (2026-11-15) A FENCE'S NEED WRITTEN INTO A TAB'S NAME (vault-login, .404, the .403 prep mirror): a tab's url and title were set to the frame's address at a commit, for every reader. 不变量 = a tab is named as the browser names it; a fence keeps its own state apart. ⇒ kb-bugfix-invariants.md
+- (2026-11-15) A READING WAS FILED ON THE ACCOUNT A CONVERSATION HAD JUST LEFT (the owner's screen; lane readings-attribution-2) — 不变量 = a reading lands on the account its request went out on
 
+
+## A READING WAS FILED ON THE ACCOUNT A CONVERSATION HAD JUST LEFT (the owner, 2026-11-15; lane readings-attribution-2 P1)
+
+**Symptom.** The pool moved two conversations from one member to another. From the next turn on, the first member's plan week showed the second member's far lower numbers until a real reading put its own back minutes later, and its model-cap lane showed the second member's for hours. The hub's own log called it «the weekly limit was reset». In two weeks: a handful of clear episodes of another account's numbers on a member, about a day on screen in all.
+
+**Cause (read in code; replayed on d64075ba4).** A reading was filed on the turn's PIN (`_turnReadingSlot`), and only `noteTurnEnd` cleared it. A reading that trailed the turn's result re-made the pin on the member the conversation was still on. Neither the CLI's idle stop nor the attach reconcile ended it, the deferred move fired at that stop, and the next turn's readings — the new member's — were filed by the dead pin on the old one. The two members share one weekly reset instant, so the window guard saw «agree». A hard move inside a turn did the same with the turn pin itself (a foreign number for most of a day).
+
+**Fix.** Measured first (P0: a running claude 2.1.322 spends a re-pointed credential on its NEXT request, inside a turn too). A reading's account is the account its REQUEST went out on: `requestSlotFor` reads the link at the conversation's latest request-out (turn-state `_lastRequestOutAt`) off its own re-point ledger. A reading whose window contradicts that account is archived by name («the reading and its request disagree»), never re-filed. Every stop of a conversation no longer in a turn, and a move of one not in a turn, clears the old pin, which stays only as the road of a producer that knows no request.
+
+**Invariant / gates.** A reading lands only on the account its request was billed to. test-reading-truth (fast): an invented episode of the same shape replayed through the real engine (the first member never moves), the road with no turn end, the mid-turn shape, the disagreement archived, a row of the hard-move shape; two mutants red by name. No real id, instant or figure is committed.
 
 ## THE HUB'S LOOP HELD SECONDS AT EVERY AGENT TURN — THE PROMPT HOOK'S REACH COUNT READ EVERY CHANNEL CONVERSATION'S GRANTS (2026-11-16, lane grants-read-is-a-lookup; 主开发's field count)
 - **Seen:** the owner's hub, 24 h of its own «loop-hold» lines: 452 JavaScript holds of 1–3 s, ~420 s in ONE chain (normalizeString from forDir, grantsOf, cleanName, grantsForConversation, factsOf, normRow …), the sampled chains naming reachCountFor.
