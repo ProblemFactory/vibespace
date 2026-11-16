@@ -665,17 +665,19 @@ const hookCensus = (src) => {
   // fix r2 F-C: it runs AFTER the guard and the witness ring — at each of the three exits a reading with a window takes
   const runs = (src.match(/\bpostCheck\(\);/g) || []).length;
   const after = /\{ outcome: 'archived', producer: producer\(\) \}\);\n\s+postCheck\(\);\n\s+return;/.test(src) && /if \(r\.unknownType\) \{ global\.__vsEvent\?\.\('rate-limit-event-unknown-type', r\.unknownType\); postCheck\(\); return; \}/.test(src)
-    && /noteApiDerivedWindow\(writeKey, witnessEv, session, \{ outcome: 'write', producer: producer\(\) \}\);\n\s+postCheck\(\);/.test(src);
+    && /noteApiDerivedWindow\(writeKey, witnessEv, session, \{ outcome: 'write', producer: producer\(\) \}\);\n\s+postCheck\(\);/.test(src)
+    // + lane readings-attribution-2 P2: law 2's cap-only record (a cap the turn never asked of the account) — archived, the check run
+    && /if \(ev\.modelCap\) \{ postCheck\(\); return; \}/.test(src);
   return { calls: calls.length, rekey: rekey.length, shapeOk, handsOver, guardNext: /if \(win\) \{\n\s+const target = guardReadingTarget\(key, win, /.test(before), runs, after };
 };
 {
   const eng = read('src/server/usage-pool-engine.js');
   const c = hookCensus(eng);
-  ok(c.calls === 1 && c.shapeOk && c.handsOver && c.rekey === 0 && c.guardNext && c.runs === 3 && c.after, 'the engine hands the check ONE call: the slot + the window + whether / WHICH token + the witness eligibility; its answer unused; the guard and the write are unchanged — and it runs AFTER them and the witness ring, at each of the three exits (archived, unknown type, filed — fix r2 F-C)', c);
+  ok(c.calls === 1 && c.shapeOk && c.handsOver && c.rekey === 0 && c.guardNext && c.runs === 4 && c.after, 'the engine hands the check ONE call: the slot + the window + whether / WHICH token + the witness eligibility; its answer unused; the guard and the write are unchanged — and it runs AFTER them and the witness ring, at each of the three exits (archived, unknown type, filed — fix r2 F-C)', c);
   const planted = eng.replace(/    const postCheck = \(\) => \{ if \(win\) \{ try \{ oatIdentity\.onReading\(/, "    key = (oatIdentity.onReading(slotKey, { window: win }).others || [])[0] || key;\n    const postCheck = () => { if (win) { try { oatIdentity.onReading(");
   const early = eng.replace(/(    const postCheck = [^\n]*\n)/, '$1    postCheck();\n');
   const ce = hookCensus(early);
-  ok(early !== eng && ce.runs === 4, 'RED control (the check run BEFORE the guard again — the F-C order): a fourth call site is caught', { runs: ce.runs });
+  ok(early !== eng && ce.runs === hookCensus(eng).runs + 1, 'RED control (the check run BEFORE the guard again — the F-C order): one more call site than the exits is caught', { runs: ce.runs });   // relative (lane readings-attribution-2: the exits grew)
   const cp = hookCensus(planted);
   ok(planted !== eng && (cp.rekey > 0 || cp.calls !== 1), 'RED control (a reading re-attributed): a planted line filing the reading on the row the check named is caught', cp);
   ok(/const oatIdentity = require\('\.\/oat-identity\.js'\)\.create\(\{ accounts: \(\) => accounts, todos: \(\) => getUserTodos\(\), windows: \(\) => establishedWindows\(\),\n  groups: \(id\) => usageIdentityAccountIds\(id\), k: \(\) => API_WITNESS_K,/.test(eng) && /function tokenSpentBy\(session, key\) \{\n  if \(session && session\._accountId === key && session\._billingHow === 'oat'\) return true;\n  try \{ return !!accounts\.readSubCreds\(key\)\?\.oatFile; \}/.test(eng),

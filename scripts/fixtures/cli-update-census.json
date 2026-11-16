@@ -107,10 +107,10 @@
    "file": "src/server/usage-pool-engine.js",
    "keyedOn": "model",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "reads model-family (catalog families included)",
+   "road": "reads model-family (catalog families included); +2 lane readings-attribution-2 P2: law 2's request families — which model family a turn asked of which account (noteTurnAsk, turnAskedFamily), compared with a named cap lane, never a version",
    "suite": "test-claude-update-needs-nothing",
    "match": "family-of",
-   "sites": 7
+   "sites": 9
   },
   {
    "id": "pool-lock-alias",
