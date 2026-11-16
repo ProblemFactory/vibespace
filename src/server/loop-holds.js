@@ -91,6 +91,12 @@ function create({ log = console, record = () => {}, now = mono, wallNow = () => 
   }
 
   /** holds the main thread's ring dropped before the watchdog read them (round 4: counted, never silent) */
+  // loop-day-report (lane hub-loop-stalls): every hold booked here, handed as it is booked (the hour's tally — no walk over
+  // rows later), and the hours the report keeps, read by report() for ⚙ Diagnostics
+  const each = [];
+  let hourly = null;
+  function onEach(fn) { if (typeof fn === 'function') each.push(fn); }
+  function setHourly(fn) { hourly = typeof fn === 'function' ? fn : null; }
   function onLost(n) { if (Number.isInteger(n) && n > 0) counts.lost += n; }
   function onHold(facts) {
     if (!facts || !(facts.ms >= 0)) return null;
@@ -106,6 +112,7 @@ function create({ log = console, record = () => {}, now = mono, wallNow = () => 
     if (!h.boot) { holdTimes.push(now()); if (holdTimes.length > 1000) holdTimes.shift(); }   // commit 3: the trigger's hold rate
     try { log.warn?.(h.line); } catch { }
     try { record({ kind: 'metric', name: 'srv-loop-hold-ms', value: Math.round(h.ms), detail: `${h.fold.verdict} · ${h.fold.frame}` }); } catch { }
+    for (const f of each) { try { f({ ms: h.ms, verdict: h.fold.verdict, frame: h.fold.frame, boot: !!h.boot }); } catch { } }   // loop-day-report: the hour's tally
     return pub;
   }
 
@@ -261,6 +268,7 @@ function create({ log = console, record = () => {}, now = mono, wallNow = () => 
       law: { holdMs: LH.HOLD_MS, samplesPerHold: LH.SAMPLES_PER_HOLD, askBudgetMs: LH.ASK_BUDGET_MS, gcMinMs },
       profile: { running: profile.running ? { startedAt: profile.running.startedAt, until: profile.running.until } : null, last: profile.last, note: LH.PROFILE_NOTE },
       capture: (settleCapture(), captureReport()),
+      hourly: hourly ? (() => { try { return hourly(); } catch { return null; } })() : null,   // loop-day-report: the hours kept
     };
     return maxBytes > 0 ? LH.boundReport(rep, maxBytes) : rep;   // the incident bundle's share: an explicit byte bound
   }
@@ -294,7 +302,7 @@ function create({ log = console, record = () => {}, now = mono, wallNow = () => 
   }
   function stop() { try { obs && obs.disconnect(); } catch { } clearInterval(timer); clearInterval(trigT); stopGc(); }
 
-  const api = { onHold, onLost, startProfile, report, register, stop, eluNow, gcRing: () => gc.slice(), ring: () => ring.slice(), table: () => LH.tableRows(table),
+  const api = { onHold, onLost, onEach, setHourly, startProfile, report, register, stop, eluNow, gcRing: () => gc.slice(), ring: () => ring.slice(), table: () => LH.tableRows(table),
     startCapture, onCaptured, checkTrigger, captureReport };
   return api;
 }

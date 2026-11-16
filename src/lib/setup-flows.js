@@ -703,6 +703,7 @@ export function installSetupFlows(App) {
       ${rows ? `<table><tr><td class="n dim">${esc(t('total held'))}</td><td class="n dim">${esc(t('times'))}</td><td class="n dim">${esc(t('worst'))}</td><td class="dim">${esc(t('what held it'))}</td></tr>${rows}</table>` : `<p class="dim">${esc(t('No hold of a second or more since this server started.'))}</p>`}
       ${(lh.holds || []).length ? `<details><summary>${esc(t('The latest holds ({n})', { n: lh.holds.length }))}</summary><pre>${(lh.holds || []).slice(0, 20).map((h) => esc(when(h.at, { seconds: true }) + ' · ' + h.line)).join('\n')}</pre></details>` : ''}
       ${heldDaysTable(d.loopHeld, { t, esc })}
+      ${hourlyTable(lh.hourly, { t, esc })}
       ${(() => {
         const pf = lh.profile || {};
         if (pf.running) return `<p><b>${esc(t('A profile is running until {time}.', { time: clockOf(pf.running.until) }))}</b></p>`;
@@ -836,3 +837,28 @@ function heldDaysTable(held, { t, esc }) {
   return head + `<table><tr><td class="dim">${esc(t('cause'))}</td><td class="n dim">${esc(t('today'))}</td><td class="n dim">${esc(t('yesterday'))}</td><td class="n dim">${esc(t('7 days'))}</td></tr>${rows}${row(`<b>${esc(t('all causes'))}</b>`, (p) => p)}</table>`;
 }
 // end heldDaysTable
+/** lane hub-loop-stalls «loop-day-report»: THE MAIN LOOP, BY HOUR — the hours the server keeps (GET /api/loop-holds `hourly`,
+ *  src/server/loop-day-report.js: the last 24, newest first, until it restarts), each the same numbers as its [loop-hour]
+ *  journal line: held seconds and holds, the busy share, the top cause, the engines' shares of the busy time, memory (the
+ *  server's own, its processes by kind) and the sizes; the raw lines in a fold. A server older than the field ⇒ nothing. */
+function hourlyTable(hourly, { t, esc }) {
+  if (!hourly || !Array.isArray(hourly.hours)) return '';
+  const head = `<h3>${esc(t('The main loop, by hour'))}</h3><p class="dim">${esc(t('What the server writes to its journal once an hour, newest first — the last 24 hours, kept until it restarts. Engines are shares of the busy time; memory is the server’s own, then its processes by kind.'))}</p>`;
+  if (!hourly.hours.length) return head + `<p class="dim">${esc(t('No hour has ended since the server started.'))}</p>`;
+  const sec = (ms) => (Number.isFinite(ms) ? `${(ms / 1000).toFixed(1)} s` : '—');
+  const pc = (x) => (Number.isFinite(x) ? `${(x * 100).toFixed(1)} %` : '—');
+  const mbOf = (b) => (Number.isFinite(b) ? `${Math.round(b / 1048576)} MB` : '?');
+  const row = (h) => {
+    const top = (h.top || [])[0];
+    const eng = Array.isArray(h.engines) ? h.engines.filter((e) => e.share > 0).slice(0, 3).map((e) => `${e.family} ${(e.share * 100).toFixed(0)} %`).join(', ') : '?';
+    const k = (h.mem && h.mem.kids) || null, z = h.sizes || {};
+    const kids = k ? ['cli', 'browser', 'agentd', 'other'].filter((n) => k[n] && k[n].n).map((n) => `${n} ${k[n].n}·${mbOf(k[n].rss)}`).join(', ') : '?';
+    return `<tr><td>${esc(new Date(h.from).toISOString().slice(0, 13))}Z</td><td class="n"><b>${esc(sec(h.heldMs))}</b> <span class="dim">(${esc(String(h.holds))})</span></td><td class="n">${esc(pc(h.busy))}</td>`
+      + `<td>${esc(top ? `${top.cause} ${sec(top.ms)}` : '—')}</td><td>${esc(eng || '—')}</td>`
+      + `<td>${esc(`${mbOf(h.mem && h.mem.rss)}${kids ? ` · ${kids}` : ''}`)}</td>`
+      + `<td>${esc([z.conversations, z.pageSockets, z.wsIn, z.wsOut].map((v) => (Number.isFinite(v) ? String(v) : '?')).join(' / '))}</td></tr>`;
+  };
+  return head + `<table><tr><td class="dim">${esc(t('hour (UTC)'))}</td><td class="n dim">${esc(t('total held'))}</td><td class="n dim">${esc(t('busy share'))}</td><td class="dim">${esc(t('top cause'))}</td><td class="dim">${esc(t('engines'))}</td><td class="dim">${esc(t('memory in use'))}</td><td class="dim">${esc(t('conversations / pages / messages in / out'))}</td></tr>${hourly.hours.map(row).join('')}</table>`
+    + `<details><summary>${esc(t('The journal lines'))}</summary><pre>${hourly.hours.map((h) => esc(h.line || '')).join('\n')}</pre></details>`;
+}
+// end hourlyTable

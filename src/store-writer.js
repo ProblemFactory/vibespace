@@ -43,6 +43,7 @@
  *    keeps its time under the store's name.
  */
 const P = require('./store-pace.js');
+const LC = require('./server/loop-counts.js');   // loop-day-report M5: the hour's counts (a property add)
 
 const GRACE = P.stopGraceOf(process.env);   // what the service manager allows a stop (systemd 90 s, a pod 30 s, or stated) — round 6: the exit's only bound
 const SLOW_MS = 1000;           // a single write slower than this is said
@@ -195,6 +196,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const id = ++seq;
     inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append };
     posted++;
+    LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
     try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, parts: p.parts, append: p.append }, p.transfer); }
     catch (e) { inflight = null; posted--; fail(s, since, e); }
   }
@@ -220,6 +222,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function finish(s, err, ms, size, since, onMain = false, append = false, waitedBy = null) {
     if (err) { fail(s, since, err); return; }
     s.failures = 0; s.failedAt = null; s.lastEndAt = now(); if (!append) s.bytes = size; s.writes++; s.bytesWritten += size; s.lastMs = ms; s.maxMs = Math.max(s.maxMs, ms);
+    if (!onMain) LC.max('writeMaxMs', ms);   // loop-day-report M5: the hour's longest write on the writer thread
     if (Number.isFinite(since)) s.ageMaxMs = Math.max(s.ageMaxMs || 0, s.lastEndAt - since);   // round 3: the MEASURED age of its oldest change when it reached the disk
     settled(s, s.writingVersion);
     if (exiting) { exitWritten.push(s.name); publishExit(); }   // round 6: the keeper's line names what IS on disk
@@ -325,6 +328,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const id = ++seq, f0 = s.failures;
     inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append };
     posted++;
+    LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
     try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, parts: p.parts, append: p.append }, p.transfer); }
     catch (e) { inflight = null; posted--; fail(s, since, e); return 'failed'; }
     if (exiting) publishExit();   // round 6's amend: the keeper's line names this write as IN FLIGHT, not «still owed»

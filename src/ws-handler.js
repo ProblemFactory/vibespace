@@ -608,6 +608,8 @@ function registerWsHandler(wss, ctx) {
     try { ws._actBy = req ? require('./device-audit.js').byOfReq(req) : null; } catch { ws._actBy = null; }
     ws._isAlive = true;
     ws.on('pong', () => { ws._isAlive = true; });
+    // loop-day-report M5: the hour's page-socket messages out — every send to this page counted where it leaves (one add)
+    { const send0 = ws.send.bind(ws); const LC = require('./server/loop-counts.js'); ws.send = (d, ...rest) => { LC.inc('wsOut'); return send0(d, ...rest); }; }
     const attachedSessions = new Set();
     // A server notice nobody was connected to hear is re-asked for the client
     // that just arrived (agent-browser P0 r5; the hook is a no-op once it was
@@ -621,6 +623,7 @@ function registerWsHandler(wss, ctx) {
     ws.send(JSON.stringify({ type: 'active-sessions', sessions: activeSessionsPayload() }));
 
     ws.on('message', async (raw) => {
+      require('./server/loop-counts.js').inc('wsIn');   // loop-day-report M5: the hour's page-socket messages in
       let data;
       try { data = JSON.parse(raw); } catch { return; }
       try {
