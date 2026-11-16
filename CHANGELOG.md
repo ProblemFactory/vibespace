@@ -2,6 +2,52 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.403 — 2026-11-15
+
+### Fixed
+- In Chinese and Japanese, Customize mode and the Theme Editor are now shown in your language.
+- In Chinese and Japanese, adding a machine, its key and its set-up are shown in your language, and the set-up says what it will install.
+- The permission menu in a chat's status bar says what each mode does in your language and shows a mode that asks nothing in red.
+- The dialog that offers to resume interrupted sessions no longer shows raw formatting marks.
+- A conversation waiting for your permission is explained in your language in For you, and its title no longer shows backticks.
+- A Claude login warning in For you is in your language, and system items there name their source in your language.
+- The dialog for adding a machine has a Cancel button and its own button for picking a key file; a name already in use is said in your language.
+- A setting's description no longer shows a raw {n} or ** marks.
+- The model chip in a chat's status bar names the model as its menu does.
+- A message's details show its author, why it stopped and its service tier as reported, each with its meaning in your language.
+- A helper's status in a chat keeps its task's name instead of the command line tool's English activity line.
+- Background Work shows a job's state, who may see it, how a run ended and what started it in your language.
+- A conversation's card shows its board mark apart from its run status, in your language, and its resume settings say Default in your language.
+- The vault's automation key history says in words what you did with a key.
+- When a site blocks the agent's browser for a known reason, the reason is shown in your language.
+- A group's latest line in the Channels list says what happened in your language.
+- A channel account's push declaration says what each choice does, in your language, without the raw value.
+- An app's default launch entry, the app search's warning and the default desktop names are shown in your language.
+- Command mode's key hints and the session palette's prompt are in your language.
+- The permission rules list names each settings layer and its state in your language.
+- The browser limit chip says it counts browsers, and the theme names in layouts and settings are in your language.
+- The code editor's unsaved and saved marks, tooltips and messages, and an email's From, To and Date labels, are in your language.
+- The sidebar's «more» button and its manage bar's Clear and Done are in your language.
+- Dates follow your language: in a list, a table or a tooltip, Chinese and Japanese show «2026/11/12 19:27», today «19:27», this year «11/12 19:27».
+- Inside a sentence, Chinese and Japanese write a date in words, with the year, month and day characters, not slashes.
+- A span of two times says its date once: «11/12 19:27–19:40».
+- A duration inside a sentence is written in your language's units; short marks such as «3m» or «2h» are unchanged.
+- Counts and costs are written the way your device's language writes numbers.
+- The usage popup's reset times and countdowns, a message's time, job runs, file times and the vault's key history all use this format.
+- When VibeSpace's time zone is not this device's, a time says which zone it is in.
+- An email's date is shown in your format, and the layout history's Restore button matches its title.
+- The sign-in page is in your language.
+- The Settings sidebar and section titles keep their own capitals instead of shouting «HARNESS» and «CLAUDE».
+- An agent CLI setting's note says when it applies; its technical detail shows on hover, or in full with advanced settings on.
+- Built-in plugins' names and descriptions, and the voice input sheet's title, are in your language.
+- Spending settings, the task group window and the diagnostics report use your language's words where English had stayed.
+- The For you list's one-line preview drops a leading heading or quote mark and backticks; the detail still shows the text exactly as written.
+- The theme's name in the ⚙ menu's Appearance row, the Theme Editor's base list and a terminal's theme list is shown in your language.
+- A default desktop's name is shown in your language on the phone's desktop tabs, in the desktop switch's words and in the rename notice.
+- The default model choice in Settings says Default in your language, and the OpenCode background service plugin has its name in your language.
+- The Machines section's caption is no longer shown in capital letters.
+- A time in the hour that repeats when daylight saving ends says its offset, so the two are told apart.
+
 ## 2.369.402 — 2026-11-14
 
 ### Added

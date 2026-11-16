@@ -4,6 +4,194 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.403 — 2026-11-15
+
+### ui-language pick 1 — every sentence a person reads goes through t(), with zh AND ja rows (the UI walk's L1 list; 主开发's GO 07:02Z)
+- **The owner (2026-11-13):** «走查一下所有界面找到可优化的布局，提示文本等». The walk found 57 language findings (9 major) in about a dozen patterns. The law: fix by rule, not by surface; pin every rule with a census derived from the tree.
+- **THE CENSUS — scripts/test-ui-language.mjs (fast, PURE).**
+  - The universe: the src files the three browser entries reach (src/client.js, src/design-viewer-entry.js, src/doc-editor-entry.js), found by a relative-import walk. Worker threads parse it with acorn (15 MB; one thread took 1.4 s). The workers' PARSED imports check the walk (491 files, equal to the bundle's metafile set).
+  - ① Visible English outside t(): a literal that reads as English in a sink a person reads (textContent / title / placeholder / innerHTML / setAttribute / toast / dialog / label-like keys / HTML template text). Held by a shrink-only baseline, scripts/fixtures/ui-language-baseline.json: a NEW hit is red, a gone row is red until `--lower`. Seeded at **667** on 935960b7e; **508** after this pick.
+  - ② Every extracted key has a zh AND a ja row (i18n-check only warned). 7 were missing.
+  - ③ Every {param} in a literal key is filled by its call. A settings `[t(key), {params}]` pair is filled where drawn; an embedded-control marker says `// ui-words:`.
+  - ④ A key carrying markup never reaches a TEXT sink, and a dict value adds no markup its key lacks: 5 backticked settings descriptions, the resume dialog's <b>/<br>, 7 translator `**`.
+  - ⑤ No zh / ja row is English for a word key: baseline 50, plus a GLOSSARY_PENDING list (agent / harness / reset credit / token) held for the owner's glossary (lane L3).
+  - ⑥ The For-you heads: every literal `sessionName` a producer files is a row of src/foryou-actions.js FORYOU_HEADS, worded at display (65 producer lines, 20 heads).
+  - Every leg's negative control runs first on a planted source or row.
+- **Measured:** ~0.75 s in-process (three runs 636–750 ms). The fast row states 0.8 s; the .398 cap (1068 s) is raised by arithmetic at the train, as 主开发 ruled.
+- **Found on the way:** scripts/i18n-extract.mjs `dictEntries` skips every row with a trailing `// lane …` comment (~500 of 11 400), so i18n-check's duplicate and parity checks never see them. The census reads the dictionary MODULES instead. Not changed here.
+- **The fixes (one mechanism each):**
+  - customize-mode.js and theme-editor.js are worded through t(). Their tables are worded at definition; theme groups stay English keys and are worded where drawn. The extra row's hint moved from a CSS `content:` string to `attr(data-cz-empty)`.
+  - The machine dialogs in sidebar-mounts.js:
+    - hosts.js's duplicate name is refused with the code `host-name-taken`, and the page words it.
+    - BOOTSTRAP_STEPS labels are `i18nKey`.
+    - The private key is picked with a themed button (the native input spoke the browser's language); the passphrase is a checkbox.
+    - The public-key step's ✕ / Cancel now stops the add (its await hung for ever before).
+  - mounts-dialog.js: every form names its Cancel, which is the shell's guarded dismiss.
+  - utils.js showConfirmDialog: `message` may be a list of sentences, one paragraph each, drawn as TEXT. layout.js's resume-all offer uses it (the key lost its <b>/<br>).
+  - The status bar's lock chip and its menu go through permission-mode-labels.js, which adds `permissionModeShort` and `permissionModeDanger`.
+  - main-ask.js files `i18n.detail`: the request line plus the way out, as keys. The command row's key lost its backticks.
+  - login-expiry-watch.js files `i18n` — every branch's words as keys, instants as `{at}`, spans as unit keys — and `source`. Its stored English `text` is unchanged, because the store is idempotent by text.
+  - FORYOU_HEADS words the ~60 producers' literal heads at display.
+- **Not here:** the glossary (agent, harness, reset credit, the quote style) waits for the owner (L3). The buttons, layout and controls halves of these items went to L2 / L4 / L5 by message.
+
+### ui-language pick 2 — ONE door from a stored value to a word (src/lib/value-words.js)
+- **The rule:** a protocol or stored value stays EXACTLY what it is on the wire and in storage; the page words it at DISPLAY through `valueWord(set, value, t)`. A value the table does not know is shown as itself, never hidden.
+- **The sets:** msg-role · stop-reason · service-tier · effort · response-style · mcp-state / load-error · session-state / urgency · job-access / job-cause / job-trigger · vault-act · browser-claim · model-note.
+- **Delegated, never twinned:** `job-state` reads src/job-model.js STATE_WORDS; `perm-mode` reads permission-mode-labels.js. sidebar-tasks.js SESSION_STATE_META / SESSION_URGENCY_META now take their labels FROM the door.
+- **browser-switcher-model.js stays import-free:** its DOM halves inject `claimWord`.
+- **Census ⑥ grows:**
+  - (b) Every value the tree LISTS is worded: session-status STATES / URGENCIES (now exported), backend-caps response styles (codex none / friendly / pragmatic were missing), automation-engine `key.*` acts, jobs.js causes / triggers. Every delegated word has zh + ja rows. 40 listed values.
+  - (c) A code-named field (.state .status .role .urgency .stopReason .verb .trigger .cause .tier .theme …) put straight into a visible sink is red. Its own shrink-only baseline was seeded at **6**: none of them on this lane's list.
+  - A ternary's test and the left of `&&` count as not-drawn.
+- **The fixes:**
+  - The status bar's effort chip and menu, the style names, the model chip (agent-meta MODEL_CATALOG keeps each model's `label`; `modelLabelFor`), the model menu's alias notes and its default row, and the health rows («connection failed», «needs sign-in»).
+  - The message details: role, stop reason, service tier.
+  - The board mark's own label (`tc('session-card','Mark')`) and its words.
+  - The resume-settings default row, worded by the page.
+  - jobs-panel: state, access options, run cause / trigger, «exit code {n}».
+  - The vault audit's `key.*` acts.
+  - The browser claim codes.
+  - A task keeps its started name: message-manager no longer overwrites it with the CLI's `task_progress` activity line («Running …»).
+- **Left for pick 4:** the dates and durations of these surfaces (message details, jobs, the session card, the vault audit).
+
+### ui-language pick 3 — the remaining stored values and English blocks, through the same doors
+- **value-words.js grows:**
+  - `push-claim` and `pushClaimOptions(t)`. The account dialog and the channel options kept two copies of the English; the option no longer leads with the raw value.
+  - `theme` and `themeWord`, for the theme select and a layout preset's row.
+  - `storedNameWords(kind, name, t)`: «Desktop N» and the registered default variant «Open» are worded at DISPLAY; a person's own name is shown as written. A rename that comes back with the worded default unchanged leaves the stored name as it was.
+- **Census ⑥(b) holds two more lists:** channel-caps PUSH_CLAIMS and themes.js THEMES.
+- **A group's system line in the Channels list:** groups-engine keeps `lastRaw` (kind, the resolved names, from / archived) beside the agent-facing `lastText`. channel-words.js `groupSysWords` is now the ONE table: the group window's `groupSysText` and the panel's preview both read it.
+- **The app search's refusal has its own code,** `bad_search` (400); `appRefusalText` words it.
+- **permission-rules.js:** the layers' labels, scopes and notes are `i18nKey` and are worded by `renderRuleTree`'s own `t`. A label built around a name (MDM, a profile) is shown as built.
+- **Worded through t():** command-mode's strip; the session palette's prompt and command title; the workbench's «{n} more…», mark chips and Clear / Done (`tc('select','Done')`); code-editor's marks, tooltips and messages (the dirty mark is `Unsaved` — `t('Modified')` is the file list's column); the eml viewer's labels; the browser cap chip («Browsers {own}/{cap}», «at the limit»).
+- **Not here:** the dates of these surfaces (pick 4). The glyph-only buttons, the ● mark and the scopes fold are lane L3's.
+- **The baseline:** ① 508 → **482**.
+
+### ui-language pick 4 — ONE formatter of a time a person reads (src/lib/page-time.js)
+- **The shape (主开发's ruling):** zh / ja «2026/11/12 19:27», today «19:27», this year «11/12 19:27»; en = the device's own. The zone is said once when the page's zone (owner-facts pageZone, handed in at boot by app.js `setPageZone`) is not the device's. src/when-words.js stays the agents' clock, untouched.
+- **The API:** `stampAt` (imported as `when` — the export is named apart because test-bundle-globals reads every export name as a symbol and «when()» is a word in a log line), `dateOf`, `clockOf`, `span`, `ago`, `until`, `num`.
+- **The moves:**
+  - ~90 browser display sites moved: every `toLocale*String` / `Intl.DateTimeFormat` / hand-built «M/D/Y» and «MM-DD hh:mm».
+  - The English duration helpers: utils `agoText` (12 importers), jobs-panel `hum`, usage-meter `fmtDur`, the diagnostics and message-detail `dur`.
+  - The PURE usage-source module stays import-free: app.js hands it the formatter (`setStampFormatter`).
+- **Census ⑦:**
+  - ZERO tolerance outside page-time.js for a formatter call or a hand-built month.
+  - A machine format (`en-…`, `.resolvedOptions()`, a YYYY-MM-DD key) or a PURE shared module that takes its caller's locale says `// page-time: <why>`: collab-row, foryou-actions, stash-summary, usage-source's node fallback, cli-registration-words' default, the three day keys.
+  - English unit templates: a shrink-only `units` baseline seeded at **65**. They sit in PURE word modules shared with agent-facing text: reset-credit, browser-stuck, browser-surfaces, dial-facts, chat-status-bar's chips.
+- **Also:**
+  - usage-source `readingSource` words `statusline`.
+  - The layout history's Restore is `tc('layout','Restore')` (恢复, as its title).
+  - The eml viewer parses its Date header.
+- **The baseline:** ① **482** (no English literal moved in this pick).
+- **Found by this pick's own AFTER pictures:** a function-scope `when` shadowed the imported one in usage-meter's reset formatter (`let when; … when(d)`) and in jobs-panel's job detail (a later `const when`, a TDZ). The taskbar meter and the job detail did not draw. Both now call `stampAt`. Census ⑦ names any page-time import shadowed by a local where it is called.
+
+### ui-language pick 5 — the zh rows that kept English, the settings notes, the plugin labels, the sign-in page
+- **The sign-in page** (src/auth.js loginHtml) is served BEFORE sign-in: no bundle, no dictionary.
+  - Its words now live in the PURE src/login-words.js, whole in en / zh / ja (the consent-road LANDING pattern).
+  - The server renders the browser's asked language (consent-road landingLang); the page's own script re-applies this device's `vibespace.lang` (the app's per-device rule).
+  - /api/login's refusals carry codes (`wrong-password`, `too-many`) that the page words.
+  - Census ⑧: every row whole in its own script, and no English literal on the page outside the table. The ① scan now drops what a `<style>` / `<script>` block holds, so code is never read as words.
+- **cli-config-chips `applyHead`:** `apply.how` (CLI flags, an engine's rung in English) no longer joins the visible head unless advanced settings are on; it rides the head's tooltip. test-harness-settings pins both.
+- **Plugins:** a built-in plugin's label goes through t() (plugins-ui, the voice sheet's title — handed by ui-needs-a-button — and settings-schema's «Plugin: {name}»). The OpenCode description gets its rows.
+- **zh rows:** «turn» → 轮 (the spending rows), «Background Work» → 后台工作, “For you” → 「待你处理」, Find / GoTo / Backlog / Context table / «detail» in the reader's words. «agent» stays «agent» (the owner); harness / reset credit wait for their word.
+- **CSS:** `text-transform: uppercase` is dropped from the four label rules that carry translated words (session details, settings section / nav group, task details). It shouted the English left in them and changed brand names.
+- **The diagnostics metrics table's headers** are worded.
+- **for-you-6 (主开发's ruling: the pane stays never-markdown):** inbox-window-layout `rowPreview` — the LIST row drops the line's leading heading / quote mark and a backtick pair's backticks, never an underscore (`B __tests__/` stays). test-inbox-window-model's pins and its red control follow (the base strip now agrees on two rows, so ≥ 4 red).
+- **The baseline:** ① 482 → **480**.
+
+### ui-language follow-up — a theme id is worded, never capitalised by hand (L3 ui-plain-words' hand-off)
+- **The three theme menus** go through value-words `themeWord`: the ⚙ Appearance head row's caption (appearance-panel `appearanceCaption`), the Theme Editor's base list and a terminal's theme list. Before, each wrote `name.charAt(0).toUpperCase() + name.slice(1)`, which showed «Dark» in a Chinese interface.
+- **`themeWord(key, t, label)`:** a plugin theme (`plugin-<x>`) reads the label it was registered with (ThemeManager.getPluginThemes), never its key capitalised.
+- **test-ui-language ⑥(d), zero tolerance:** a value capitalised by hand (`x.charAt(0).toUpperCase()`, `x[0].toUpperCase()`) anywhere in the browser bundle is RED. The six first letters that are not a value's carry `// ui-words: <why>` on the line above: a worded sentence's, the agent's own sentence, a model family, a vendor slug, and a level the door has no word for. A planted control holds both spellings.
+
+### ui-language — the reader's round (主开发 13:41Z: 2 must-fix + 6 moderate, one commit at the tip)
+- **MUST (pick 4):** chat-status-bar render() declared a local string `when` and the pool lines called `when(ms)` inside a closure, which threw a TypeError whenever a pool auto-continue wait with a cause was drawn. The local is now `resetAt`, printed through stampAt, so a reset tomorrow carries its date.
+  - Census ⑦'s shadow leg resolves a call through EVERY enclosing function (params, any pattern, function / class declarations, catch params). The reader's M3c is a planted control.
+  - test-chat-status-bar-effort ④a draws the pool chip.
+- **MUST (pick 1):** a For-you instant (`{at}` and a clause's time) printed through stash-summary clockAt, a weekday with no date and in the device zone («已于 周六 05:00 过期» for an expiry 20 days back). user-todos-layout saidLine now prints through page-time stampAt: today the clock, beyond today with its date, in the page's zone.
+  - test-user-todos-layout drives login-expiry's real words on a zh page in a child process.
+  - Suites that pin a For-you clock set `process.env.TZ`.
+  - page-time's formatter cache keys on the device zone too.
+- **The phone permission menu:** the row wraps; the words take a min-width; the raw hint shrinks, then drops under the words.
+- **The Channels list's group system line:** groupListRows copies `lastRaw` onto the row. channel-words `groupLastLine(row)` is the one drawing; the pin draws a zh row.
+- **«Desktop N»:** DesktopManager `nameOf(desk)` is THE door. The door words (`_doorLabel` / `_doorRefused` params), the rename «meanwhile» line, the phone tabs and the Desktops button all go through it. test-desktop-switch reds a stored name drawn past it.
+- **Built-in plugin words:** census ⑥(e) reads src/plugins/index.js and reds a label / description with no zh / ja row («OpenCode background service» had none). The built-in rows' `{name}` params are worded.
+- **The ⚙ default-model select:** value-words `modelOptions(models, t)` (the server's default row is the page's «Default»); app.js reads it.
+- **Legacy key:** main-ask `LEGACY_KEYS` keeps the .398 command row's key with zh / ja rows (the current words) for one release. Items are keyed by requestId and never re-filed.
+- **Census holes planted as controls (the reader's M1c, M2c, M3b, M3c), each detector widened:**
+  - ① a `{param}` sentence filled by `.replace` outside t();
+  - ⑥(d) a regex capitalisation;
+  - ⑦ an hh:mm read off getHours / getMinutes. The 17 the tree holds today are a shrink-only `clocks` list; the ones this round touched were moved to page-time.
+- **Smaller fixes:**
+  - The explorer's Modified / Created columns use the near shape.
+  - page-time: «1 day»; units chosen after rounding (59:40 is «1 h»); until() of a past instant says when it was.
+  - hostStateChip's default words go through t().
+  - Three zh / ja rows.
+  - The Machines caption (`.mounts-sec-sub { text-transform: none }`, pinned in the census).
+
+### ui-language — the closure round (主开发 15:15Z: the verifier's must-fix + the smalls, one commit)
+- **MUST:** the F5 door left two dead receiver rows (`desktop-manager.js|now`, `|live`) in test-record-clear-census. Dropped: the rename «meanwhile» toast reads names through nameOf. test-approval-census's Stop-confirm anchor follows `{ name: t(p.label) }`.
+- **The desktop button's aria-label** goes through nameOf. The F5 sink census in test-desktop-switch reads `setAttribute('aria-label' | 'title' | …)` too.
+- **foryou-actions clockWords** (a person's clock) loses the waiver the round moved onto it. It is a row of the shrink-only `clocks` baseline (18), said as debt.
+- **page-time:**
+  - A wall clock the zone lives twice (the US fall-back 01:30) says its offset («GMT-7» / «GMT-8»).
+  - `until()` had no caller and is deleted. The census reds a page-time export with no reader in the bundle.
+  - browser-session-words whenText decides «today» in the zone it prints in.
+- **The generic one-word keys this lane added live under a context:** value-words `set::word` (theme, service-tier, msg-role), worded by `wordOf`, which drops the context when no row has it; `tc('diagnostics' | 'theme-color' | 'eml', …)` at their sites; «Base» dropped (no reader).
+- **The server half of lastRaw:** test-roster-per-pass pins the group view carrying it (the reader's M5a is red).
+- **Census §1b drives the one formatter in-process:** the DST pair, the page-zone «today», page-time's exports.
+
+### ui-language on 2.369.399 — meeting the released code
+- **The resume dialog (chat-cards-2):** 2.369.399 fixed it first (connection-notice-once addendum 1: one plain sentence, pinned by test-connection-notice ⑫). That version stands; pick 1's split lines and their two rows left in the rebase.
+- **The census meets the release:**
+  - ① 480 → **477**: 2.369.399 worded code-editor's «Edit» / «Preview».
+  - connection-notice's `clockWords` is a PURE module's fallback (the chat hands in the owner's clock, chat-view `timeOn`). It says so with `// page-time:`.
+- **The «in {span}» row** left the dictionaries: its only reader, page-time `until()`, was deleted in the closure round (§78 dead text).
+- **The reader's mutant battery, re-run:** two holes it showed now have pins. M4a: a stored default name returned unchanged from the Rename dialog keeps the store (test-desktop-switch). M4c: an unknown value shows as itself, never blank (test-ui-language).
+
+### ui-language — the closure verifier's four smalls (主开发 20:39Z, accepted on content)
+- **⑥(c) a stored value handed to t() as its KEY** (`t(st.state)`) is named: no extractor sees it and no row is promised. No such site today; a planted control.
+- **foryou-actions clockWords' date half** (`getMonth() + 1`) is no longer waived. A hand-built month is a hand clock: the shrink-only `clocks` list holds it as debt (19). A new one is red.
+- **⑥(d) the AST form:** an upper-cased first piece + the rest (`slice(0, 1)` / `substring` / `substr` / `at(0)`). A planted control.
+- **value-words:** valueWord's doc comment is back above it.
+
+### ui-language — the protocol values ruling and the compact marks (主开发 2026-11-14 01:45Z, ui-fix/ruling-protocol-values.md)
+- **A value a person picks or the CLI reports stays VERBATIM where it is chosen and where it is reported.**
+  - agent-meta effortLabel / responseStyleLabel / initHealthLabel are the release's text again (the value verbatim, its hint and frame through t).
+  - The effort chip and the perm chip print the value; the perm chip's words stay in its title.
+  - A perm menu row is the mode verbatim, with its words as the hint.
+  - The record-info fields (role, stop reason, service tier) read «end_turn — <its words>».
+  - test-codex-0153 / test-effort-extras are the release's lines again; test-harness-honesty and test-init-frame stand as they were.
+  - The init-health note is the release's sentence again (test-init-frame pins it).
+- **No NAMES for protocol values in this unit.** value-words loses the effort / response-style / mcp-state / load-error / perm-mode tables, and permission-mode-labels its permissionModeShort. The seven rows only they read leave (§78). If the status strip's lane names values, the names come from ONE table beside each harness's descriptor.
+- **The compact MARK (the owner, 2026-11-13: «不如还是继续用 h/d»):** page-time `durationMark(ms, { full, hoursFrom, daysFrom })` + `markAgo(at)` — «<1m», «4m», «2h», «3d», «2d23h59m»; the same letters in every language.
+  - A countdown (`full`) and the roster's / the cap ring's `fullEta` are ONE spelling: usage-eta `countdownMark` (the owner's 09-15 form, byte for byte — the module imports nothing, so it lives there). No drawn character changes; test-usage-eta and the census pin the two equal over every minute of 40 d.
+  - The jobs rows, group ages and run duration, the usage meter's countdown, and the host chip's age go back to marks.
+  - Census ⑦ declares the mark sinks (`MARK_SINKS`, 8) and reads which is called where: a sink calling span / ago is red, and so is an undeclared line calling mark.
+  - The hotfix 2.369.401's marks call page-time's `durationMark` (below).
+
+### ui-language on 2.369.401 — ONE mark function (主开发 05:47Z: this lane rebases onto the hotfix, the only one that does)
+- The stack is replayed onto d64075ba4: the hotfix's six product files are all this lane's too, and session-lifecycle's import line merged line by line.
+- **The hotfix's marks go through page-time's `durationMark`:**
+  - the roster row's age (manage-agents) and the account-switch menu's age (session-lifecycle): `durationMark(age, { hoursFrom: 100, daysFrom: Infinity })`;
+  - the rings' stale-lane mark (manage-agents, usage-meter): account-wall-words `staleLaneAge(…, { t: markT })` returns `durationMark(…, { hoursFrom: 120, daysFrom: 2880 })`. `markT` stays the token a caller hands in (test-account-reset-door pins it); a sentence keeps the interface's keys.
+- Census ⑦ MARK_SINKS: 8 → 11.
+- The function is named `durationMark`, never `mark`: test-bundle-globals reads every export name as a symbol, and «mark(» stands bare in two files' own helpers and in English prose («the vault's mark (…)»). The trap pick 4 met with `when`.
+- test-roster-live-usage hands `mark` to the usageHint it rebuilds from source.
+
+### ui-language on 2.369.402 — what the census caught in the release's own lines (主开发's ride-403: ui-language first, one rebase)
+- **The rebase:** 16 commits replayed onto 7e25f325e (ui-language/bin/rebase403.py). The meetings: the For-you heads beside the release's row buttons (both kept), the host set-up dialog (my hint + the release's hidden log fold + «Start installing»; the release's step words, a later step's own label through `tr`), the agent-meta import (both names), the auto-continue chip (the release's words with my renamed local `resetAt`).
+- **⑦ a hand-built clock in the release's new line:** machine-app.js `lockedText` (lane mac-locked-capture) built «HH:MM» from getHours / getMinutes. It is now page-time `clockOf`: «13:05» on a zh / ja page, the device's own on en, in the page's zone. Its comment's worry («the suites bundle this file over an i18n stub of `t` alone») no longer holds: page-time imports i18n as a namespace.
+- **① words the page never draws, by name:** census `NOT_DRAWN` rows. The first is stream-model.js `legVerdictOf` (lane stream-udp-leg-fallback). Its `words` are the hub log's line and the session record's `relay.leg.verdict`, and no page file reads them. A row whose function is gone goes red; a control proves the next function's words are still named.
+- **① a piece of an enclosing tag is markup:** a template inside an html template's `${…}` with no tag of its own (`` ` data-record-src="${…}"` ``, chat-attachments) had its attribute read as words. Its attributes are markup now, except a title / placeholder / aria-label / alt value. The baseline loses 10 such rows (467), and ⑤ loses «{shown} of {total}» (ui-controls reworded it).
+- **test-control-says-why:** its two source pins read `{ t: resetAt }`, the chip's local renamed from the shadowing `when` (the reader's round).
+
+### ui-language — the .403 prep mirror's reds (主开发 2026-11-15 18:14–18:47Z: eleven suites, one follow-up stack on 715848950)
+- **The chip** (test-decision-engine, test-sidebar-rail, test-voice-teach-chrome): a comment in the MIDDLE of plugins-ui.js's one-line `pluginRow({…})` swallowed `tone, chip, chipTitle, onChip,`, so every Plugins row drew an empty chip titled «undefined». The comment now has its own line. Census ⑨ reds a trailing `//` that leaves its code open and ends like code; run once over the whole tree (2 291 files), this was the only one.
+- **The redraw** (test-channels-panel-redraw: 600–1 450 ms against 40): page-time built an Intl.DateTimeFormat per call just to read the device's zone. The zone is now kept for a minute (the limit is in the kb row). Formatters are keyed by locale + printing zone + constant option objects. A quarter-hour's day, its repeated-hour check and the zone's name are memoised (bounded, 16 384). Node, 1 758 warm calls: stampAt 433 → 6.6 ms, and the output is identical over 744 366 calls.
+- **The date in a sentence** (test-resume-account-chrome): stampAt / dateOf `words: true` = the locale's own words («2026年11月12日»), for every page-time date that fills a {param} of a t() sentence (26 sites). Census ⑦ reds one without it. A cell or a title keeps the slashed near shape.
+- **The span** (test-machine-card-fold-ui): page-time `stampSpan(from, to)` says the date once (today none, one day at its start, two days both, the zone at its end). The machine run's head and label go through it (chat-run-summary `machineRunPart({ span })`). It is the bundle's only drawn span of two instants; the other «a–b» lines are configured hours, byte offsets or block numbers, not instants.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)
