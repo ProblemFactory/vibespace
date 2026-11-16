@@ -4,6 +4,7 @@
  */
 
 const { MessageManager } = require('./message-manager');
+const LC = require('./server/loop-counts.js');   // loop-day-report M5: the hour's counts — bound ONCE (a bump on a hot path is an add)
 const { createMessageManager, feedLive, feedPeerCard, rebuildHistory, seedHelperView, convertWithCards, browserCardsFor, artifactDeriveOpts } = require('./normalizers');
 const { chipAsksOf } = require('./helper-ask.js'); // PURE (lane S1): the pending asks, per harness — the ONE function the chip and the wait watch read
 const { createWsHeartbeat } = require('./server/ws-heartbeat');
@@ -609,7 +610,7 @@ function registerWsHandler(wss, ctx) {
     ws._isAlive = true;
     ws.on('pong', () => { ws._isAlive = true; });
     // loop-day-report M5: the hour's page-socket messages out — every send to this page counted where it leaves (one add)
-    { const send0 = ws.send.bind(ws); const LC = require('./server/loop-counts.js'); ws.send = (d, ...rest) => { LC.inc('wsOut'); return send0(d, ...rest); }; }
+    { const send0 = ws.send.bind(ws); ws.send = (d, ...rest) => { LC.inc('wsOut'); return send0(d, ...rest); }; }
     const attachedSessions = new Set();
     // A server notice nobody was connected to hear is re-asked for the client
     // that just arrived (agent-browser P0 r5; the hook is a no-op once it was
@@ -623,7 +624,7 @@ function registerWsHandler(wss, ctx) {
     ws.send(JSON.stringify({ type: 'active-sessions', sessions: activeSessionsPayload() }));
 
     ws.on('message', async (raw) => {
-      require('./server/loop-counts.js').inc('wsIn');   // loop-day-report M5: the hour's page-socket messages in
+      LC.inc('wsIn');   // loop-day-report M5: the hour's page-socket messages in (R2: the module bound once, at load)
       let data;
       try { data = JSON.parse(raw); } catch { return; }
       try {

@@ -264,22 +264,31 @@ class Telemetry {
   /** THE HELD SECONDS PER DAY BY CAUSE (lane hub-loop-stalls, «the number»: the owner's hub, 2026-11-16) — PURE, DERIVED
    *  from the rows the hub already keeps; no file, no notice, no budget of its own. The rows: kind 'metric', name
    *  'srv-loop-hold-ms' — ONE a hold of a second or more, written by src/server/loop-holds.js onHold as the loop turns again:
-   *  `value` = the hold's ms, `detail` = «verdict · frame». THE CAUSE = the verdict (the detail before « · »; none ⇒
-   *  NO_CAUSE). THE DAY CUT IS UTC: a row's day = the UTC date of its `ts` (as byDay and the monthly shards) — so a hold
+   *  `value` = the hold's ms, `detail` = «verdict · frame» (« · (the boot)» after a boot's own hold). THE CAUSE = the hourly
+   *  report's own key (src/loop-day-report.js causeOf — loop-day-report R5: the day and its hours key alike): the hub's code
+   *  location in the frame, else the verdict's fixed words (none ⇒ NO_CAUSE); a BOOT's hold is apart — `boot` {ms, count} of
+   *  each period, never in its ms, count or causes. THE DAY CUT IS UTC: a row's day = the UTC date of its `ts` (as byDay and the monthly shards) — so a hold
    *  across midnight counts on the day it ended; today = the UTC date of `now`, yesterday = the UTC date before it, the
    *  seven days = today and the six UTC dates before it (a row dated after today counts nowhere). Each period:
    *  {from, to, ms, count, causes: [{cause, ms, count}] — the larger ms first}; `ms` = the plain sum of the rows' values. */
   static heldDays(rows, now = Date.now()) {
     const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
     const today = dayOf(now), yesterday = dayOf(now - 86400000), weekFrom = dayOf(now - 6 * 86400000);
-    const period = (from, to) => ({ from, to, ms: 0, count: 0, by: new Map() });
+    const period = (from, to) => ({ from, to, ms: 0, count: 0, by: new Map(), boot: { ms: 0, count: 0 } });
+    const LDR = require('./loop-day-report.js');
     const out = { today: period(today, today), yesterday: period(yesterday, yesterday), week: period(weekFrom, today) };
     for (const r of Array.isArray(rows) ? rows : []) {
       if (!r || r.kind !== 'metric' || r.name !== HOLD_ROW || !Number.isFinite(r.ts) || !Number.isFinite(r.value) || r.value < 0) continue;
       const day = dayOf(r.ts);
-      const cause = (typeof r.detail === 'string' ? r.detail.split(' · ')[0].trim() : '') || NO_CAUSE;
+      let d = typeof r.detail === 'string' ? r.detail : '';
+      const boot = d.endsWith(' · (the boot)');
+      if (boot) d = d.slice(0, -' · (the boot)'.length);
+      const cut = d.indexOf(' · ');
+      const verdict = (cut < 0 ? d : d.slice(0, cut)).trim(), frame = cut < 0 ? null : d.slice(cut + 3);
+      const cause = verdict || frame ? LDR.causeOf({ verdict: verdict || null, frame }) : NO_CAUSE;
       for (const p of Object.values(out)) {
         if (day < p.from || day > p.to) continue;
+        if (boot) { p.boot.ms += r.value; p.boot.count++; continue; }
         p.ms += r.value; p.count++;
         const c = p.by.get(cause) || { cause, ms: 0, count: 0 };
         c.ms += r.value; c.count++;

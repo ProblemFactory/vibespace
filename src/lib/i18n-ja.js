@@ -12299,6 +12299,11 @@ export default {
   "engines": "エンジン",
   "conversations / pages / messages in / out": "会話 / ページ / 受信 / 送信メッセージ",
   "The journal lines": "ジャーナルの行",
+  "the boot (apart — not in all causes)": "起動時（別集計・「すべての原因」に含まない）",
+  "not watched": "監視なし",
+  "the census paid {s} s": "集計自体のコスト {s} 秒",
+  "conversations: running · waiting · idle under 1 h · 1–2 h · 2–4 h · over 4 h · unknown": "会話：実行中 · 待機 · アイドル 1 時間未満 · 1〜2 時間 · 2〜4 時間 · 4 時間超 · 不明",
+  "browsers ready / idle over 1 h": "準備済みのブラウザー / 1 時間以上アイドル",
   "busy share": "稼働率",
   "memory in use": "メモリ使用量",
   // lane hub-loop-stalls «the number»: ⚙ Diagnostics «Main loop held» — the held seconds per day by cause (src/lib/setup-flows.js heldDaysTable)

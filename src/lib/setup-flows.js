@@ -834,7 +834,8 @@ function heldDaysTable(held, { t, esc }) {
   const cell = (c) => `<td class="n">${c && c.count ? `<b>${esc((c.ms / 1000).toFixed(1))} s</b> <span class="dim">(${esc(String(c.count))})</span>` : '—'}</td>`;
   const row = (label, of) => `<tr><td>${label}</td>${ps.map((p) => cell(of(p))).join('')}</tr>`;
   const rows = (held.week.causes || []).map((c) => row(esc(c.cause), (p) => (p.causes || []).find((x) => x.cause === c.cause))).join('');
-  return head + `<table><tr><td class="dim">${esc(t('cause'))}</td><td class="n dim">${esc(t('today'))}</td><td class="n dim">${esc(t('yesterday'))}</td><td class="n dim">${esc(t('7 days'))}</td></tr>${rows}${row(`<b>${esc(t('all causes'))}</b>`, (p) => p)}</table>`;
+  const boot = ps.some((p) => p.boot && p.boot.count) ? row(`<span class="dim">${esc(t('the boot (apart — not in all causes)'))}</span>`, (p) => p.boot) : '';   // loop-day-report R5
+  return head + `<table><tr><td class="dim">${esc(t('cause'))}</td><td class="n dim">${esc(t('today'))}</td><td class="n dim">${esc(t('yesterday'))}</td><td class="n dim">${esc(t('7 days'))}</td></tr>${rows}${row(`<b>${esc(t('all causes'))}</b>`, (p) => p)}${boot}</table>`;
 }
 // end heldDaysTable
 /** lane hub-loop-stalls «loop-day-report»: THE MAIN LOOP, BY HOUR — the hours the server keeps (GET /api/loop-holds `hourly`,
@@ -850,15 +851,20 @@ function hourlyTable(hourly, { t, esc }) {
   const mbOf = (b) => (Number.isFinite(b) ? `${Math.round(b / 1048576)} MB` : '?');
   const row = (h) => {
     const top = (h.top || [])[0];
-    const eng = Array.isArray(h.engines) ? h.engines.filter((e) => e.share > 0).slice(0, 3).map((e) => `${e.family} ${(e.share * 100).toFixed(0)} %`).join(', ') : '?';
+    const sh = h.engines && Array.isArray(h.engines.shares) ? h.engines.shares : null;
+    const eng = sh ? [...sh, ...(h.engines.native ? [{ family: 'native', share: h.engines.native.share }] : [])].filter((e) => e.share > 0).sort((a, b) => b.share - a.share).slice(0, 3).map((e) => `${e.family} ${(e.share * 100).toFixed(0)} %`).join(', ') : '?';
     const k = (h.mem && h.mem.kids) || null, z = h.sizes || {};
     const kids = k ? ['cli', 'browser', 'agentd', 'other'].filter((n) => k[n] && k[n].n).map((n) => `${n} ${k[n].n}·${mbOf(k[n].rss)}`).join(', ') : '?';
-    return `<tr><td>${esc(new Date(h.from).toISOString().slice(0, 13))}Z</td><td class="n"><b>${esc(sec(h.heldMs))}</b> <span class="dim">(${esc(String(h.holds))})</span></td><td class="n">${esc(pc(h.busy))}</td>`
-      + `<td>${esc(top ? `${top.cause} ${sec(top.ms)}` : '—')}</td><td>${esc(eng || '—')}</td>`
+    const held = h.watched === false ? `<span class="dim">${esc(t('not watched'))}</span>` : `<b>${esc(sec(h.heldMs))}</b> <span class="dim">(${esc(String(h.holds))})</span>`;
+    const tu = h.turns || null, ages = tu ? `${tu.running} · ${tu.waiting} · ${tu['idle-under-1h']} · ${tu['idle-1-2h']} · ${tu['idle-2-4h']} · ${tu['idle-over-4h']} · ${tu['turn-unknown']}` : '?';
+    const br = h.browsers ? `${h.browsers.ready} / ${h.browsers.idle1h}` : '?';
+    const paid = h.engines && h.engines.cost && Number.isFinite(h.engines.cost.paidMs) ? t('the census paid {s} s', { s: (h.engines.cost.paidMs / 1000).toFixed(2) }) : '';
+    return `<tr><td>${esc(new Date(h.from).toISOString().slice(0, 13))}Z</td><td class="n">${held}</td><td class="n">${esc(pc(h.busy))}</td>`
+      + `<td>${esc(h.watched === false ? '?' : top ? `${top.cause} ${sec(top.ms)}` : '—')}</td><td>${esc(eng || '—')}${paid ? `<br><span class="dim">${esc(paid)}</span>` : ''}</td>`
       + `<td>${esc(`${mbOf(h.mem && h.mem.rss)}${kids ? ` · ${kids}` : ''}`)}</td>`
-      + `<td>${esc([z.conversations, z.pageSockets, z.wsIn, z.wsOut].map((v) => (Number.isFinite(v) ? String(v) : '?')).join(' / '))}</td></tr>`;
+      + `<td>${esc([z.conversations, z.pageSockets, z.wsIn, z.wsOut].map((v) => (Number.isFinite(v) ? String(v) : '?')).join(' / '))}</td><td>${esc(ages)}</td><td>${esc(br)}</td></tr>`;
   };
-  return head + `<table><tr><td class="dim">${esc(t('hour (UTC)'))}</td><td class="n dim">${esc(t('total held'))}</td><td class="n dim">${esc(t('busy share'))}</td><td class="dim">${esc(t('top cause'))}</td><td class="dim">${esc(t('engines'))}</td><td class="dim">${esc(t('memory in use'))}</td><td class="dim">${esc(t('conversations / pages / messages in / out'))}</td></tr>${hourly.hours.map(row).join('')}</table>`
+  return head + `<table><tr><td class="dim">${esc(t('hour (UTC)'))}</td><td class="n dim">${esc(t('total held'))}</td><td class="n dim">${esc(t('busy share'))}</td><td class="dim">${esc(t('top cause'))}</td><td class="dim">${esc(t('engines'))}</td><td class="dim">${esc(t('memory in use'))}</td><td class="dim">${esc(t('conversations / pages / messages in / out'))}</td><td class="dim">${esc(t('conversations: running · waiting · idle under 1 h · 1–2 h · 2–4 h · over 4 h · unknown'))}</td><td class="dim">${esc(t('browsers ready / idle over 1 h'))}</td></tr>${hourly.hours.map(row).join('')}</table>`
     + `<details><summary>${esc(t('The journal lines'))}</summary><pre>${hourly.hours.map((h) => esc(h.line || '')).join('\n')}</pre></details>`;
 }
 // end hourlyTable

@@ -28,7 +28,7 @@ const MAX_PROCS = 2000;
 const CENSUS_WAIT_MS = 3000;
 const PROCS_WAIT_MS = 20000;
 const CLI_RE = /^(claude|codex|opencode|agy|gemini|qwen|cursor-agent|amp|crush|kimi|aider)\b/i;
-const BROWSER_RE = /chrom|headless_shell|firefox|cloakbrowser/i;
+const BROWSER_RE = /chrom|headless_shell|firefox/i;
 const CLI_ARGS_RE = /(?:@anthropic-ai\/claude-code|\/claude(?:\.js)?\b|@openai\/codex|\/codex(?:\.js)?\b|opencode|\/agy\b|gemini-cli)/;
 
 /** a promise, or `fallback` after ms */
@@ -46,39 +46,105 @@ function kindOf(name, args = '') {
   }
   return 'other';
 }
-/** the hub's processes (not itself): its cgroup's members when it runs in a service / scope unit, else its process tree */
-async function membersOf(self = process.pid) {
-  let cg = '';
-  try { cg = await fs.promises.readFile('/proc/self/cgroup', 'utf8'); } catch { }
-  const m = /^0::(\/\S*\.(?:service|scope))$/m.exec(cg);
-  if (m) {
-    try { const t = await fs.promises.readFile(`/sys/fs/cgroup${m[1]}/cgroup.procs`, 'utf8'); return { how: 'cgroup', pids: t.split('\n').map(Number).filter((p) => p > 0 && p !== self).slice(0, MAX_PROCS) }; } catch { }
+/** a process listing's pids (a stand-in root in the suite) */
+async function pidsOf(procRoot) {
+  let names = []; try { names = await fs.promises.readdir(procRoot); } catch { return []; }
+  return names.filter((n) => /^\d+$/.test(n)).map(Number);
+}
+/** the processes under `roots` (each task's `children` file), breadth-first, at most `max` */
+async function treeOf(roots, procRoot, max = MAX_PROCS) {
+  const seen = new Set(), queue = roots.filter((p) => p > 0);
+  while (queue.length && seen.size < max) {
+    const pid = queue.shift();
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    let tids = []; try { tids = await fs.promises.readdir(`${procRoot}/${pid}/task`); } catch { continue; }
+    for (const tid of tids.slice(0, 32)) {
+      let kids = ''; try { kids = await fs.promises.readFile(`${procRoot}/${pid}/task/${tid}/children`, 'utf8'); } catch { continue; }
+      for (const k of kids.trim().split(/\s+/)) if (/^\d+$/.test(k)) queue.push(Number(k));
+    }
   }
-  const tree = await require('../proc-listen.js').pidTree(self, { max: MAX_PROCS });
-  return { how: 'tree', pids: tree.filter((p) => p !== self) };
+  return [...seen];
+}
+/** PURE: how the hub's processes are told apart, from its cgroup v2 path (`0::<path>` of /proc/self/cgroup):
+ *   · 'container' — the path is the root (a container's own cgroup namespace), or names a container runtime's cgroup: the
+ *     WHOLE container is the hub's — every process of its PID namespace (the conversations' dtach masters left the hub's
+ *     tree by design, and are still the hub's);
+ *   · 'service' — a systemd SERVICE unit: the unit's members are the hub's (dtach keeps a conversation's CLI there);
+ *   · 'tree' — anything else (a login shell's session scope, an app or run scope, no v2 cgroup): such a scope holds the
+ *     person's other programs too, so only the hub's own count — its process tree, and the dtach masters whose command
+ *     line names the hub's sockets folder with their trees. */
+const CONTAINER_RE = /\/(?:kubepods|docker|containerd|libpod|lxc)[/.\-]|(?:docker|cri-containerd|crio|libpod)-[0-9a-f]{12,}\.scope$/;
+function howOf(cgroupText) {
+  const m = /^0::(\S*)\s*$/m.exec(String(cgroupText || ''));
+  if (!m) return 'tree';
+  if (m[1] === '/' || CONTAINER_RE.test(m[1])) return 'container';
+  if (/\.service$/.test(m[1])) return 'service';
+  return 'tree';
+}
+/** the hub's processes (not itself), by howOf; `procRoot` / `cgroupRoot` are stand-ins in the suite */
+async function membersOf({ self = process.pid, procRoot = '/proc', cgroupRoot = '/sys/fs/cgroup', socketsDir = null } = {}) {
+  let cg = '';
+  try { cg = await fs.promises.readFile(`${procRoot}/self/cgroup`, 'utf8'); } catch { }
+  const how = howOf(cg);
+  if (how === 'container') return { how, pids: (await pidsOf(procRoot)).filter((p) => p !== self).slice(0, MAX_PROCS) };
+  if (how === 'service') {
+    const path0 = /^0::(\S*)\s*$/m.exec(cg)[1];
+    try { const t = await fs.promises.readFile(`${cgroupRoot}${path0}/cgroup.procs`, 'utf8'); return { how, pids: t.split('\n').map(Number).filter((p) => p > 0 && p !== self).slice(0, MAX_PROCS) }; } catch { }
+  }
+  const roots = [self];
+  if (socketsDir) {
+    for (const pid of await pidsOf(procRoot)) {
+      if (pid === self || roots.length > 512) continue;
+      let c = ''; try { c = (await fs.promises.readFile(`${procRoot}/${pid}/cmdline`, 'utf8')).split('\0'); } catch { continue; }
+      if (/(^|\/)dtach$/.test(c[0] || '') && c.some((a) => a.startsWith(`${socketsDir}/`))) roots.push(pid);
+    }
+  }
+  return { how: 'tree', pids: (await treeOf(roots, procRoot)).filter((p) => p !== self) };
 }
 /** M4: the hub's processes by kind → { cli: {n, rss}, browser, agentd, other, how } (rss in bytes; a process gone meanwhile is skipped) */
-async function procKids(self = process.pid) {
+async function procKids(opts = {}) {
+  const procRoot = opts.procRoot || '/proc';
   const out = { how: null }; for (const k of LDR.KIDS) out[k] = { n: 0, rss: 0 };
-  const mem = await membersOf(self);
+  const mem = await membersOf(opts);
   out.how = mem.how;
   for (const pid of mem.pids) {
     let st = '';
-    try { st = await fs.promises.readFile(`/proc/${pid}/status`, 'utf8'); } catch { continue; }
+    try { st = await fs.promises.readFile(`${procRoot}/${pid}/status`, 'utf8'); } catch { continue; }
     const name = (/^Name:\s*(.*)$/m.exec(st) || [])[1] || '';
     const rss = Number((/^VmRSS:\s*(\d+)\s*kB/m.exec(st) || [])[1] || 0) * 1024;
     let args = '';
-    if (/^(node|MainThread|nodejs)$/.test(name)) { try { args = (await fs.promises.readFile(`/proc/${pid}/cmdline`, 'utf8')).replace(/\0/g, ' ').slice(0, 2000); } catch { } }
+    if (/^(node|MainThread|nodejs)$/.test(name)) { try { args = (await fs.promises.readFile(`${procRoot}/${pid}/cmdline`, 'utf8')).replace(/\0/g, ' ').slice(0, 2000); } catch { } }
     const k = kindOf(name, args);
     out[k].n++; out[k].rss += rss;
   }
   return out;
 }
+/** M6 — PURE: the live conversations by turn and idle age, from the turn facts the hub holds (src/server/turn-facts.js:
+ *  turnOf / turnKnown) and the session's last output (`_lastPtyDataAt`): running, waiting on the person, idle under 1 h,
+ *  1–2 h, 2–4 h, over 4 h; a harness that publishes no turn facts (a terminal) or no output time is «turn-unknown» */
+function turnsOf(sessions, t) {
+  const TF = require('./turn-facts.js');
+  const out = Object.fromEntries(LDR.AGES.map((a) => [a, 0]));
+  for (const s of sessions || []) {
+    if (!TF.turnKnown(s)) { out['turn-unknown']++; continue; }
+    const st = TF.turnOf(s);
+    if (st === 'running') { out.running++; continue; }
+    if (st === 'waiting') { out.waiting++; continue; }
+    const at = Number(s && s._lastPtyDataAt);
+    if (!(at > 0)) { out['turn-unknown']++; continue; }
+    const age = t - at, H = LDR.HOUR_MS;
+    out[age < H ? 'idle-under-1h' : age < 2 * H ? 'idle-1-2h' : age < 4 * H ? 'idle-2-4h' : 'idle-over-4h']++;
+  }
+  return out;
+}
 
-function create({ log = console, census = async () => null, foldCensus = null, sizes = () => ({}), wallNow = () => Date.now(),
+function create({ log = console, census = async () => null, foldCensus = null, sizes = () => ({}), wallNow = () => Date.now(), watched = () => true,
+  sessions = () => [], browsers = () => null,
   elu = (a, b) => performance.eventLoopUtilization(a, b), kids = procKids, heap = () => { const s = v8.getHeapStatistics(); return { heapUsed: s.used_heap_size, heapLimit: s.heap_size_limit }; },
   rss = () => process.memoryUsage.rss(), keepHours = KEEP_HOURS } = {}) {
-  let cur = LDR.newHour(wallNow());
+  const watchedNow = () => { try { return watched() !== false; } catch { return false; } };
+  let cur = LDR.newHour(wallNow(), { watched: watchedNow() });
   let eluAt = (() => { try { return elu(); } catch { return null; } })();
   let lastKids = null, timer = null, stopped = false, exitSaid = false;
   const kept = [];
@@ -86,15 +152,18 @@ function create({ log = console, census = async () => null, foldCensus = null, s
   const busySince = (from) => { try { return from ? elu(elu(), from).utilization : null; } catch { return null; } };
   const memNow = (k) => { let h = {}; try { h = heap() || {}; } catch { } let r = null; try { r = rss(); } catch { } return { heapUsed: h.heapUsed, heapLimit: h.heapLimit, rss: r, kids: k }; };
   const sizesNow = () => { try { return sizes() || {}; } catch { return {}; } };
+  const turnsNow = (t) => { try { return turnsOf(sessions(), t); } catch { return null; } };
+  const browsersNow = (t) => { try { return browsers(t) || null; } catch { return null; } };
 
   /** a hold the watchdog booked (src/server/loop-holds.js onEach) into the current hour */
-  function onHold(f) { if (f && !f.boot) LDR.holdAdd(cur, { ms: f.ms, verdict: f.verdict, frame: f.frame }); }
+  function onHold(f) { if (f) LDR.holdAdd(cur, { ms: f.ms, verdict: f.verdict, frame: f.frame, boot: !!f.boot }); }   // the boot's own hold apart (R5)
 
   /** THE CUT: the hour so far is swapped out FIRST (a hold during the reads below counts in the next hour), then the census
    *  and the process table are read asynchronously, then ONE line */
   async function tick() {
     const toMs = wallNow(), h = cur, from = eluAt;
-    cur = LDR.newHour(toMs);
+    if (!watchedNow()) h.watched = false;   // R3: a watchdog gone at the cut ⇒ the hour was not (wholly) watched
+    cur = LDR.newHour(toMs, { watched: watchedNow() });
     eluAt = (() => { try { return elu(); } catch { return null; } })();
     let busy = null; try { busy = from && eluAt ? elu(eluAt, from).utilization : null; } catch { }
     const counts = LC.take();
@@ -102,7 +171,7 @@ function create({ log = console, census = async () => null, foldCensus = null, s
     const engines = take ? fold(take) : null;
     const k = await within(kids(), PROCS_WAIT_MS);
     if (k) lastKids = k;
-    const rep = { kind: 'hour', hour: h, toMs, busy, engines, mem: memNow(k), sizes: { ...sizesNow(), ...counts } };
+    const rep = { kind: 'hour', hour: h, toMs, busy, engines, mem: memNow(k), turns: turnsNow(toMs), browsers: browsersNow(toMs), sizes: { ...sizesNow(), ...counts } };
     rep.line = LDR.line(rep);
     kept.push(rep); if (kept.length > keepHours) kept.splice(0, kept.length - keepHours);
     try { log.log(rep.line); } catch { }
@@ -118,7 +187,9 @@ function create({ log = console, census = async () => null, foldCensus = null, s
   function exitLine() {
     if (exitSaid) return null;
     exitSaid = true;
-    const rep = { kind: 'exit', hour: cur, toMs: wallNow(), busy: busySince(eluAt), engines: null, mem: memNow(lastKids), sizes: { ...sizesNow(), ...LC.peek() } };
+    const t = wallNow();
+    if (!watchedNow()) cur.watched = false;
+    const rep = { kind: 'exit', hour: cur, toMs: t, busy: busySince(eluAt), engines: null, mem: memNow(lastKids), turns: turnsNow(t), browsers: browsersNow(t), sizes: { ...sizesNow(), ...LC.peek() } };
     rep.line = LDR.line(rep);
     try { log.log(rep.line); } catch { }
     return rep;
@@ -128,7 +199,7 @@ function create({ log = console, census = async () => null, foldCensus = null, s
   function stop() { stopped = true; clearTimeout(timer); process.removeListener('exit', onExit); }
   /** ⚙ Diagnostics: the hours kept (newest first) and their day */
   function hours() {
-    const rows = kept.slice().reverse().map((r) => ({ line: r.line, from: r.hour.fromMs, to: r.toMs, heldMs: r.hour.heldMs, holds: r.hour.holds, longestMs: r.hour.longestMs, busy: r.busy, top: LDR.topOf(r.hour.by), engines: r.engines ? r.engines.shares || null : null, mem: r.mem, sizes: r.sizes }));
+    const rows = kept.slice().reverse().map((r) => ({ line: r.line, from: r.hour.fromMs, to: r.toMs, watched: r.hour.watched !== false, heldMs: r.hour.heldMs, holds: r.hour.holds, longestMs: r.hour.longestMs, boot: r.hour.boot, busy: r.busy, top: LDR.topOf(r.hour.by), engines: r.engines ? { shares: r.engines.shares || null, native: r.engines.native || null, cost: r.engines.cost || null } : null, mem: r.mem, turns: r.turns, browsers: r.browsers, sizes: r.sizes }));
     return { hours: rows, day: LDR.dayFold(kept), now: { from: cur.fromMs, heldMs: cur.heldMs, holds: cur.holds, busy: busySince(eluAt) } };
   }
   const api = { onHold, tick, start, stop, exitLine, hours };
@@ -137,11 +208,15 @@ function create({ log = console, census = async () => null, foldCensus = null, s
 
 /** server.js's ONE line: the report started beside the watchdog (`witness` = src/server/sync-fs-witness.js's) — each hold its book
  *  books handed to the hour, its hours read by the book's report (⚙ Diagnostics), the census asked of its thread */
-function wire({ witness, sizes, log = console } = {}) {
+function wire({ witness, sizes, sessions = () => [], socketsDir = null, log = console } = {}) {
   const book = witness && typeof witness.holds === 'function' ? witness.holds() : null;
-  const r = create({ log, sizes, census: () => (witness && typeof witness.census === 'function' ? witness.census() : null) }).start();
+  const r = create({ log, sizes, sessions,
+    census: () => (witness && typeof witness.census === 'function' ? witness.census() : null),
+    watched: () => !!(book && (typeof book.watching !== 'function' || book.watching())),   // R3: no book / no watchdog ⇒ «?»
+    browsers: (t) => { try { return require('./browser-keeper.js').keeper()?.readyCounts?.(t) || null; } catch { return null; } },
+    kids: () => procKids({ socketsDir }) }).start();
   if (book) { book.onEach((h) => r.onHold(h)); book.setHourly(() => r.hours()); }
   return r;
 }
 
-module.exports = { create, wire, procKids, membersOf, kindOf, KEEP_HOURS };
+module.exports = { create, wire, procKids, membersOf, howOf, turnsOf, kindOf, KEEP_HOURS };

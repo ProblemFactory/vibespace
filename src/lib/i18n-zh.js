@@ -12300,6 +12300,11 @@ export default {
   "engines": "引擎",
   "conversations / pages / messages in / out": "对话 / 页面 / 收到 / 发出的消息",
   "The journal lines": "日志行",
+  "the boot (apart — not in all causes)": "启动时（单独计，不在「全部原因」里）",
+  "not watched": "未被监视",
+  "the census paid {s} s": "统计本身花了 {s} 秒",
+  "conversations: running · waiting · idle under 1 h · 1–2 h · 2–4 h · over 4 h · unknown": "对话：运行中 · 等你 · 空闲不到 1 小时 · 1–2 小时 · 2–4 小时 · 超过 4 小时 · 未知",
+  "browsers ready / idle over 1 h": "就绪的浏览器 / 空闲超过 1 小时",
   "busy share": "忙碌占比",
   "memory in use": "内存占用",
   // lane hub-loop-stalls «the number»: ⚙ Diagnostics «Main loop held» — the held seconds per day by cause (src/lib/setup-flows.js heldDaysTable)

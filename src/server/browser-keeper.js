@@ -7743,6 +7743,19 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
 
   const api = {
+    /** lane hub-loop-stalls «loop-day-report» M6: the browsers this keeper holds READY (a live record) and how many had no command for
+     *  over an hour (their profile's last verb) — counts only, read in memory; null before the registry was loaded (never a load) */
+    readyCounts: (t = now()) => {
+      if (!loaded) return null;
+      let ready = 0, idle1h = 0;
+      for (const r of Object.values(reg.browsers || {})) {
+        if (!B.isLiveBrowser(r)) continue;
+        ready++;
+        const p = (reg.profiles || []).find((x) => x && x.id === r.profileId) || null;
+        if (!(t - Number((p && p.lastVerbAt) || 0) < 3600000)) idle1h++;
+      }
+      return { ready, idle1h };
+    },
     /** lane chrome-157: the road an agent's lease of profile `id` takes ({mode, why}) — or, with no id, the road a NEW profile on `host`
      *  would take — the same verdict the leases use; the sharing dialogs word «each conversation in its own tab» only where it holds */
     onDownloadFolder: (fn) => { if (typeof fn !== 'function') return () => { }; folderListeners.add(fn); return () => folderListeners.delete(fn); },   // (lane chrome-157: THE WINDOW's notice road)

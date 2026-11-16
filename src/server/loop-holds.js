@@ -111,7 +111,7 @@ function create({ log = console, record = () => {}, now = mono, wallNow = () => 
     counts.holds++; if (h.fold.inside) counts.sampled++; if (h.boot) counts.boot++;
     if (!h.boot) { holdTimes.push(now()); if (holdTimes.length > 1000) holdTimes.shift(); }   // commit 3: the trigger's hold rate
     try { log.warn?.(h.line); } catch { }
-    try { record({ kind: 'metric', name: 'srv-loop-hold-ms', value: Math.round(h.ms), detail: `${h.fold.verdict} · ${h.fold.frame}` }); } catch { }
+    try { record({ kind: 'metric', name: 'srv-loop-hold-ms', value: Math.round(h.ms), detail: `${h.fold.verdict} · ${h.fold.frame}${h.boot ? ' · (the boot)' : ''}` }); } catch { }   // loop-day-report R5: the boot's own hold marked — apart in the day and in its hours
     for (const f of each) { try { f({ ms: h.ms, verdict: h.fold.verdict, frame: h.fold.frame, boot: !!h.boot }); } catch { } }   // loop-day-report: the hour's tally
     return pub;
   }
@@ -302,7 +302,7 @@ function create({ log = console, record = () => {}, now = mono, wallNow = () => 
   }
   function stop() { try { obs && obs.disconnect(); } catch { } clearInterval(timer); clearInterval(trigT); stopGc(); }
 
-  const api = { onHold, onLost, onEach, setHourly, startProfile, report, register, stop, eluNow, gcRing: () => gc.slice(), ring: () => ring.slice(), table: () => LH.tableRows(table),
+  const api = { onHold, onLost, onEach, setHourly, watching: () => watchdogAlive(), startProfile, report, register, stop, eluNow, gcRing: () => gc.slice(), ring: () => ring.slice(), table: () => LH.tableRows(table),
     startCapture, onCaptured, checkTrigger, captureReport };
   return api;
 }
