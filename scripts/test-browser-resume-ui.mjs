@@ -14,7 +14,8 @@
 //      (lane heavy3-flake-races, the rel276 flake now named: the view reconnects BY ITSELF the moment the relaunched browser
 //      holds again — MID-resume — so "connected with three tabs" is no sign the resume ended; the leg waits for the Resume's
 //      own answer (resumedHere, the POST answered after its last step); RED CONTROL: the switch back HELD in the fake — the
-//      old wait passes while the tab on show is still the last one opened)
+//      old wait passes while the Resume has not answered and the tab on show is NOT YET the one the Resume switches back to;
+//      which earlier reopened tab the fake shows then is the fake's own pace and is not asserted)
 //   ③ "Hand back with a note…" (until 2.369.367 "Hand back and continue…") is offered after the Resume; a REAL Take over,
 //      a REAL click on it: the note box takes the typed keys (not one reached the page); the dialog SAYS what the press does
 //      (its title: when the agent reads it, whole in the title bar; its label: nothing is sent now + how to continue right
@@ -242,9 +243,17 @@ else await (async () => {
     if (s2.btn) await click(centre(s2.btn.rect));
     // the OLD wait: connected with three tabs — the view reconnects by itself as soon as the relaunched browser holds again
     const oldSaid = await until(() => ev('const s = L().state(); return !!(s.connected && !s.stopped && s.frames >= 1 && s.tabs.length === 3);'), 20000, 150);
-    const mid = { view: await ev('const s = L().state(); return { resuming: s.resuming, resumedHere: s.resumedHere };'), onShow: ((tabsOf().find((t) => t.active)) || {}).url || null };
-    ok(oldSaid && mid.view.resuming && !mid.view.resumedHere && mid.onShow === 'https://c.test/',
-      'RED CONTROL (the old wait): with the switch back held, the view is already connected with three tabs while the Resume has not answered — the tab on show is still the last one opened (the mirror\'s red read here)', S(mid));
+    const midTabs = tabsOf();
+    const mid = { view: await ev('const s = L().state(); return { resuming: s.resuming, resumedHere: s.resumedHere };'), onShow: ((midTabs.find((t) => t.active)) || {}).url || null, fakeTabs: midTabs.length };
+    // what the old wait PROVES, and only that: the Resume has not answered and the switch back has not happened — the tab on
+    // show is not yet the kept one the Resume switches back to (b.test). In the fake a «tab new» makes its own tab active, so
+    // b.test is on show for a moment by its OWN reopen (two tabs); with all three reopened it is on show only by the switch
+    // back. WHICH earlier reopened tab the fake shows at the old wait's instant (a.test after its first open, b.test between
+    // its reopen and c.test's, c.test after the last «tab new», none before the relaunch writes its file) is the fake's own
+    // pace against the view's count of three, and is not asserted (2.369.405's release mirror read a.test).
+    const switchedBack = mid.fakeTabs === 3 && mid.onShow === 'https://b.test/';
+    ok(oldSaid && mid.view.resuming && !mid.view.resumedHere && !switchedBack,
+      'RED CONTROL (the old wait): with the switch back held, the view is already connected with three tabs while the Resume has not answered — the tab on show is not yet the one the Resume switches back to (the mirror\'s red read here)', S(mid));
     fs.unlinkSync(path.join(AB, 'hold-switch'));
     // the Resume's own answer: the POST came back after its last step (resumedHere, resuming over)
     const resumed = await until(() => ev('const s = L().state(); return !!(s.resumedHere && !s.resuming && s.connected && !s.stopped && s.frames >= 1 && s.tabs.length === 3);'), 20000, 150);
