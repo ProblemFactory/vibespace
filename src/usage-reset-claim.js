@@ -31,7 +31,9 @@ const SEEN_SAME_S = 60;
 const SEEN_KEEP = 64;                 // the said-once memory per account, newest kept
 const SEEN_SPAN_S = 8 * 86400;        // a reset instant outside now ± this is junk (the longest window is a week)
 const KEY_RE = /^(?:__global__|[\w-]{1,80})$/;
-const OUTCOME_STATES = new Set(['confirmed', 'contradicted', 'reset-seen']);
+// 'fall-unconfirmed' (lane readings-attribution-2 P3, law 3): a lane that fell under an unchanged reset in a reading from a
+// conversation the pool had just moved — shown, never taken as the account's number, until a reading confirms or refutes it
+const OUTCOME_STATES = new Set(['confirmed', 'contradicted', 'reset-seen', 'fall-unconfirmed']);
 const _byFile = new Map();
 
 /** The hub's one store for a data dir (the usage routes and the pool engine read the same claims). `known(key)` = is this
@@ -80,7 +82,7 @@ function sanitize(j, t) {
     if (!KEY_RE.test(k) || !Array.isArray(list)) { dropped.push(`outcomes ${String(k).slice(0, 40)}: not a list`); continue; }
     const keep = list.filter((o) => isObj(o) && quotaModel.isLaneKey(o.lane) && OUTCOME_STATES.has(o.state) && finite(o.readAt) > 0).map((o) => ({
       lane: o.lane, state: o.state, readAt: o.readAt, usedPct: finite(o.usedPct), ...(finite(o.before) != null ? { before: o.before } : {}),
-      ...(finite(o.claimedAt) ? { claimedAt: o.claimedAt } : {}), ...(o.refused === true ? { refused: true } : {}), ...(short(o.name) ? { name: short(o.name) } : {}) }));
+      ...(finite(o.claimedAt) ? { claimedAt: o.claimedAt } : {}), ...(o.refused === true ? { refused: true } : {}), ...(short(o.name) ? { name: short(o.name) } : {}), ...(finite(o.until) ? { until: o.until } : {}) }));
     if (keep.length < list.length) dropped.push(`outcomes ${k}: ${list.length - keep.length} not an outcome`);
     if (keep.length) state.outcomes[k] = keep;
   }
@@ -175,7 +177,15 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
   }
   /** THE LANES A WRITE MEASURED (usage-cache-write onLanesRead — a ⟳ that re-read a claimed cap at the same 97 % is the
    *  contradiction, though the carry rule keeps that window's older age in the file) */
-  function noteLanesRead(key, lanes) { const k = String(key || ''); if (state.claims[k] && Array.isArray(lanes) && lanes.length) settleLanes(k, lanes); }
+  function noteLanesRead(key, lanes) {
+    const k = String(key || '');
+    if (!Array.isArray(lanes) || !lanes.length) return;
+    // A HELD FALL ENDS AT THE LANE'S NEXT MEASUREMENT (law 3, P3): whatever it says — a reading that confirms the fall then
+    // shows the reset against the number the account kept (onVendorReset: 'reset-seen'), one back near it refutes the fall
+    const held = (state.outcomes[k] || []).filter((o) => o.state === 'fall-unconfirmed' && lanes.some((r) => r.lane === o.lane && Number(r.at) >= Number(o.readAt)));
+    if (held.length) { state.outcomes[k] = state.outcomes[k].filter((o) => !held.includes(o)); if (!state.outcomes[k].length) delete state.outcomes[k]; save(); changed(k); }
+    if (state.claims[k]) settleLanes(k, lanes);
+  }
   function settleLanes(key, lanes) {
     const k = String(key || '');
     const c = state.claims[k];
@@ -201,7 +211,7 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
   }
   function prune(t = now()) {
     for (const [k, list] of Object.entries(state.outcomes)) {
-      const keep = (Array.isArray(list) ? list : []).filter((o) => o && t - (Number(o.readAt) || 0) < OUTCOME_KEEP_MS);
+      const keep = (Array.isArray(list) ? list : []).filter((o) => o && (o.state === 'fall-unconfirmed' ? t < (Number(o.until) || 0) : t - (Number(o.readAt) || 0) < OUTCOME_KEEP_MS)); // a held fall lasts until its window's own reset (an idle member: nothing else will end it)
       if (keep.length) state.outcomes[k] = keep; else delete state.outcomes[k];
     }
     for (const [k, list] of Object.entries(state.seen)) {
@@ -241,6 +251,25 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
     if (n) { prune(); save(); changed(k); }
     return n;
   }
+  /** LAW 3 (P3): a FALL HELD UNCONFIRMED. `falls` = [{lane, before, after, resetsAt (s), readAt (ms)}] — said once per lane
+   *  and held fall; it ends at the lane's next measurement (noteLanesRead) or at the window's own reset (prune). */
+  function noteFallHeld(key, falls, { name = null, movedAgoS = null } = {}) {
+    const k = String(key || '');
+    if (!KEY_RE.test(k) || !Array.isArray(falls) || !falls.length) return 0;
+    let n = 0;
+    for (const f of falls) {
+      if (!f || !quotaModel.isLaneKey(f.lane) || !(Number(f.resetsAt) > 0)) continue;
+      const list = (state.outcomes[k] = state.outcomes[k] || []);
+      const same = list.find((o) => o.lane === f.lane && o.state === 'fall-unconfirmed');
+      if (same) { same.usedPct = Number(f.after); continue; }
+      state.outcomes[k] = list.filter((o) => o.lane !== f.lane);
+      state.outcomes[k].push({ lane: f.lane, state: 'fall-unconfirmed', readAt: Number(f.readAt) || now(), usedPct: Number(f.after), before: Number(f.before), until: Number(f.resetsAt) * 1000, ...(name ? { name: String(name).slice(0, 60) } : {}) });
+      n++;
+      log(`[usage] ${name || k}: ${quotaModel.laneText(f.lane)} fell ${Math.round(f.before)}% → ${Math.round(f.after)}% under an unchanged reset, in a reading from a conversation the pool moved ${movedAgoS != null ? movedAgoS + ' s' : 'just'} ago — not taken: an unconfirmed fall (the account keeps ${Math.round(f.before)}% until a reading confirms it)`);
+    }
+    if (n) { save(); changed(k); }
+    return n;
+  }
   /** The person read the note: its outcome goes (one lane, or every outcome of the account). */
   function dismiss(key, lane = null) {
     const k = String(key || '');
@@ -261,7 +290,7 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
   /** Is any of these accounts claimed now? (the pool asks before it weighs whether a claim decided a placement) */
   const anyClaimed = (ids) => (Array.isArray(ids) ? ids : []).some((id) => !!state.claims[String(id)]);
   return {
-    claim, viewOf, settle, noteLanesRead, dismiss, forClients, noteResetSeen, persisted, anyClaimed, file,
+    claim, viewOf, settle, noteLanesRead, dismiss, forClients, noteResetSeen, noteFallHeld, persisted, anyClaimed, file,
     get: (key) => state.claims[String(key)] || null,
     outcomesOf: (key) => (state.outcomes[String(key)] || []).slice(),
     onChange: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
