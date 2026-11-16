@@ -1,0 +1,70 @@
+{
+ "what": "an INVENTED episode with the shape of a real one (lane readings-attribution-2): two members, MA and MB, share one weekly reset instant; the pool moves the conversation from MA to MB at its stop; a reading that trailed the turn's result re-made the old pin; the next turn's readings are MB's numbers. `at` = seconds from an arbitrary origin; every figure is made up.",
+ "before": {
+  "MA": 0.91,
+  "MB": 0.12
+ },
+ "moveAt": 47,
+ "steps": [
+  {
+   "at": -80,
+   "kind": "out"
+  },
+  {
+   "at": -75,
+   "kind": "reading",
+   "u": 0.91
+  },
+  {
+   "at": 40,
+   "kind": "out"
+  },
+  {
+   "at": 41,
+   "kind": "reading",
+   "u": 0.91
+  },
+  {
+   "at": 42,
+   "kind": "result"
+  },
+  {
+   "at": 43,
+   "kind": "trailing",
+   "u": 0.91,
+   "note": "a reading that trails the turn's result: on d64075ba4 it RE-MADE the reading pin on MA (readingSlotFor pins whatever is current when no pin is set)"
+  },
+  {
+   "at": 43.5,
+   "kind": "idle"
+  },
+  {
+   "at": 47,
+   "kind": "move",
+   "to": "MB"
+  },
+  {
+   "at": 70,
+   "kind": "out"
+  },
+  {
+   "at": 81,
+   "kind": "reading",
+   "u": 0.13
+  },
+  {
+   "at": 140,
+   "kind": "out"
+  },
+  {
+   "at": 141,
+   "kind": "reading",
+   "u": 0.14
+  },
+  {
+   "at": 190,
+   "kind": "reading",
+   "u": 0.15
+  }
+ ]
+}

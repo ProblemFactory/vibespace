@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.405 — 2026-11-16
+
+### Fixed
+- After the pool moves a conversation, its usage readings land on the account it now runs on; the account it left no longer shows the other one's numbers.
+
 ## 2.369.404 — 2026-11-15
 
 ### Changed
