@@ -1279,14 +1279,43 @@ if (!probe) {
       return assigns.length === 1 && /^key\s*=\s*refile\.to$/.test(assigns[0].trim()) && /session\._turnWallRefile/.test(body) && /session\._turnWallRefuted/.test(body); // …and a REFUTED pin is never marked (lane-hot-switch): that branch archives and returns, it moves nothing
     })(), 'assignments between the pin and the write');
   ok('WIRING: the refuted resolver is GONE from executable code (comments keep the record)', !/\borgVerifiedKey\b/.test(engCode) && /REFUTED AND REMOVED: `orgVerifiedKey/.test(eng));
-  // wallSlotFor is the FRESH reading; it now has exactly THREE readers —
-  // wallKeyFor, the rejection pin's no-signal fallback, and the reading pin's
-  // (readingSlotFor, added 2026-09-07). A new producer that asks fresh, per
-  // record, goes red here. A FOURTH reader since lane oat-identity-fix (verify r1
-  // F1, int272): noteOatFileGen stamps the token FILE generation the NEXT turn
-  // starts on — once per turn, its only caller inside noteTurnEnd (pinned below).
+  // wallSlotFor is the FRESH reading. WHO MAY READ IT — each reader named by its function and its line's text; the count
+  // follows from the names (lane readings-attribution-2, 主开发 2026-11-15T16:41Z: the law is «nothing resolves the slot per
+  // RECORD», not a number):
+  //  · wallKeyFor;
+  //  · the rejection pin's no-signal fallback (rejectionSlotFor) and the reading pin's fresh rung (readingSlotFor, 2026-09-07);
+  //  · noteOatFileGen (lane oat-identity-fix, verify r1 F1, int272): the token FILE generation the NEXT turn starts on — once
+  //    per turn, its only caller inside noteTurnEnd (pinned below);
+  //  · requestSlotFor's three answers of an account that cannot have moved since the request they name: a conversation with no
+  //    pool (its fixed login), a held process (its held login), a hot conversation whose own rows show no move after its latest
+  //    request-out (the link the ledger proves it had at the request) — per request, not per record.
+  // A producer that asks fresh, per record, is a reader with no name here and goes red (noteTurnAsk's fallback was one).
   const turnEndBody = (() => { const i = eng.indexOf('function noteTurnEnd(session'); const j = i < 0 ? -1 : eng.indexOf('\nfunction ', i + 1); return i < 0 ? '' : eng.slice(i, j < 0 ? undefined : j); })();
-  ok('WIRING: NOTHING resolves the slot per RECORD any more — wallSlotFor has exactly four readers (wallKeyFor + the two turn pins\' fallbacks + the oat turn-end stamp noteOatFileGen, called only from noteTurnEnd)', (eng.match(/wallSlotFor\(session\)/g) || []).length === 5 && /function noteOatFileGen\(session\) \{[\s\S]{0,200}const key = wallSlotFor\(session\)\.key;/.test(eng) && (eng.match(/noteOatFileGen\(session\)/g) || []).length === 2 && /\bnoteOatFileGen\(session\)/.test(turnEndBody) && /function wallKeyFor\(session\) \{ return wallSlotFor\(session\)\.key; \}/.test(eng) && /if \(first\) return \{ key: first\.key, slotOk: !!first\.slot, slotReason: 'turn-pinned' \};[\s\S]{0,60}return wallSlotFor\(session\);/.test(eng) && /const fresh = wallSlotFor\(session\);/.test(eng), 'wallSlotFor(session) refs: ' + (eng.match(/wallSlotFor\(session\)/g) || []).length);
+  const fnBody = (src, name) => { const i = src.indexOf(`\nfunction ${name}(`); const j = i < 0 ? -1 : src.indexOf('\nfunction ', i + 1); return i < 0 ? '' : src.slice(i, j < 0 ? undefined : j); };
+  const WALL_READERS = [
+    ['wallKeyFor', /function wallKeyFor\(session\) \{ return wallSlotFor\(session\)\.key; \}/],
+    ['rejectionSlotFor', /if \(first\) return \{ key: first\.key, slotOk: !!first\.slot, slotReason: 'turn-pinned' \};[\s\S]{0,60}return wallSlotFor\(session\);/],
+    ['readingSlotFor', /const fresh = wallSlotFor\(session\);/],
+    ['noteOatFileGen', /const key = wallSlotFor\(session\)\.key;/],
+    ['requestSlotFor', /if \(!poolId \|\| accounts\.get\(poolId\)\?\.type !== 'pooled'\) \{ const w = wallSlotFor\(session\); return \{ key: w\.key, slotOk: !!w\.slotOk, reqAt: t \}; \}/],
+    ['requestSlotFor', /if \(heldPoolMemberFor\(session, poolId\)\) \{ const w = wallSlotFor\(session\); return \{ key: w\.key, slotOk: !!w\.slotOk, reqAt: t \}; \}/],
+    ['requestSlotFor', /\n    const w = wallSlotFor\(session\);\n    return \{ key: w\.key, slotOk: !!w\.slotOk, reqAt: t \};/],
+  ];
+  const wallReaders = (src) => {
+    const want = {}; for (const [n] of WALL_READERS) want[n] = (want[n] || 0) + 1;
+    const per = {}; for (const n of Object.keys(want)) per[n] = (fnBody(src, n).match(/wallSlotFor\(session\)/g) || []).length;
+    const named = WALL_READERS.filter(([n, re]) => !re.test(fnBody(src, n))).map(([n]) => n);
+    const total = (src.match(/wallSlotFor\(session\)/g) || []).length;   // the definition + its named readers, and nothing else
+    return { ok: !named.length && Object.keys(want).every((n) => per[n] === want[n]) && /\nfunction wallSlotFor\(session\) \{/.test(src) && total === 1 + WALL_READERS.length, per, total, unnamedMissing: named };
+  };
+  const WR = wallReaders(eng);
+  ok('WIRING: NOTHING resolves the slot per RECORD — the fresh slot\'s readers are NAMED (wallKeyFor; the two turn pins\' fresh rungs; noteOatFileGen, called only from noteTurnEnd; requestSlotFor\'s three answers fixed since the request) and nothing else reads it', WR.ok && (eng.match(/noteOatFileGen\(session\)/g) || []).length === 2 && /\bnoteOatFileGen\(session\)/.test(turnEndBody), JSON.stringify(WR));
+  {
+    // the CONTROL: a NINTH reader — a producer asking fresh, per record (noteTurnAsk's old fallback put back) — is red
+    const CURE = 'const k = (requestSlotFor(session) || {}).key; if (!k) return;';
+    const ninth = eng.includes(CURE) ? wallReaders(eng.split(CURE).join('const k = (requestSlotFor(session) || wallSlotFor(session)).key; if (!k) return;')) : null;
+    ok('CONTROL: a ninth reader of the fresh slot (noteTurnAsk\'s per-record fallback put back) ⇒ the census is red', !!ninth && !ninth.ok && ninth.total === 9, JSON.stringify(ninth));
+  }
   ok('WIRING: the READING pin dies with the turn, exactly like the rejection pin', /session\._turnWallSigs = \[\]; session\._turnWorkAfterSig = 0;[\s\S]{0,400}session\._turnReadingSlot = null;/.test(eng));
   // THE MECHANISM, NOT THE COUNT (r2). This used to require EXACTLY TWO call
   // sites carrying `slot:`, which froze HOW MANY claude rejection paths exist
