@@ -4,6 +4,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.403 — 2026-11-15
 
+### Changed
+- A chat's deliverables are grouped by kind: designs, published pages, documents, images, services and other files; press a kind to see only it.
+
 ### Fixed
 - In Chinese and Japanese, Customize mode and the Theme Editor are now shown in your language.
 - In Chinese and Japanese, adding a machine, its key and its set-up are shown in your language, and the set-up says what it will install.
@@ -48,6 +51,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The Machines section's caption is no longer shown in capital letters.
 - A time in the hour that repeats when daylight saving ends says its offset, so the two are told apart.
 - The estimated cost under a chat was counted several times over in long conversations; it now shows the agent's own total, with thousands separators.
+- A row's age in a chat's deliverables list is written like every other time on the page («1 h ago»); past a day it says «3 days ago» instead of the date.
+- On a phone, a deliverable's details line wraps onto a second line instead of being cut off.
 
 ## 2.369.402 — 2026-11-14
 
