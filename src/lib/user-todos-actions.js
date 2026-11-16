@@ -41,7 +41,8 @@ import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-
 import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
 import { noteHubClock, settingCardOf, noteSettingPresent, untilClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
 import { isPointer, clockWords, headWordOf, arrivalWords } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo; r4: an expired ask's end in words
-import { PROPOSABLE, isSettingChange } from '../ask-setting.js'; // PURE (CJS, lane setting-doors pick 2): a held row's default (a hold's `before` null)
+import { PROPOSABLE, isSettingChange } from '../ask-setting.js';
+import { clockOf } from './page-time.js'; // lane ui-language: THE one formatter of a time a person reads — the agent's reply says the owner's clock through it (lane setting-doors pick 2) // PURE (CJS, lane setting-doors pick 2): a held row's default (a hold's `before` null)
 import { askOptions } from '../ask-options.js'; // PURE (lane foryou-honest): an ask's chips — the explicit options, else its detail's «A …；B …» / «是 / 否» parsed
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
@@ -387,11 +388,10 @@ export function inboxModel(app) {
     }
     const value = num(r.value), untilAt = Number.isFinite(num(r.untilAt)) ? num(r.untilAt) : null;
     const back = Number.isFinite(num(r.before)) ? num(r.before) : PROPOSABLE[key] ? PROPOSABLE[key].def : null;   // `before` null = the row's default
-    const hhmm = (ms) => { const d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
     // the agent's words (the reply road — plain English, like a grant's): what the row holds now and, when timed, the moment (the
     // owner's clock, and the instant itself) and what it returns to by itself
     const text = untilAt != null
-      ? `${value > showed ? 'Set' : 'Lowered'} ${key} to ${value} until ${hhmm(untilAt)} (then ${back}; ${new Date(untilAt).toISOString().slice(0, 16)}Z)`
+      ? `${value > showed ? 'Set' : 'Lowered'} ${key} to ${value} until ${clockOf(untilAt)} (then ${back}; ${new Date(untilAt).toISOString().slice(0, 16)}Z)`
       : `${value > showed ? 'Set' : 'Lowered'} ${key} to ${value}`;
     return postReply(rec.id, text, {
       sentToast: untilAt != null ? t('{label}: {value} until {time}, then {back} — the agent was told', { label: card.label, value, time: untilClock(untilAt, t), back })
