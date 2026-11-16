@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - When a chat that used many helper browsers ends, VibeSpace stays responsive while it clears them; it could stop answering for minutes.
+- With many channel conversations, VibeSpace no longer pauses for seconds when an agent starts a turn or lists its channels.
 
 ## 2.369.405 — 2026-11-16
 
