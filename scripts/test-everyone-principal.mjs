@@ -632,9 +632,11 @@ console.log('⑦ the reach table: four principal sets × six actors × read / re
     const rec = wrMut ? wrMut.grant(wrMut.emptyRecord('w1'), ALL, { by: 'user', at: 1 }).record : null;
     ok(!!wrMut && wrMut.reachFor(rec, { sessionKeys: [`claude:${A9}`] }).level === 'hidden', 'CONTROL (7a): window-reach whose All row names nobody ⇒ the born-after cell reads hidden — RED');
     const cfSrc = read('src/channel-filter.js');
-    // lane grants-unify: rowNames hands THE model the row's principal — the mutant hands it a Task Group nobody is in for All
-    const CF_LINE = "  const e = GM.fromChannelPrincipal(p);\n  return !!e && GM.admits(";
-    const cfMut = cfSrc.includes(CF_LINE) ? M.load('src/channel-filter.js', cfSrc.replace(CF_LINE, "  const e = p.kind === 'everyone' ? { kind: 'group', id: 'nobody' } : GM.fromChannelPrincipal(p);\n  return !!e && GM.admits("), 'all-names-nobody', { esm: false }) : null;
+    // lane grants-unify: rowNames hands THE model the row's principal — the mutant hands it a Task Group nobody is in for All.
+    // lane grants-read-is-a-lookup: rowNames asks namedRowOf for the row it hands the model (the principal's one-entry row,
+    // prepared once) — the plant goes where the principal is now mapped, the same mutant
+    const CF_LINE = "  const e = GM.fromChannelPrincipal(p);\n  const n = e ? GM.prepareRow(";
+    const cfMut = cfSrc.includes(CF_LINE) ? M.load('src/channel-filter.js', cfSrc.replace(CF_LINE, "  const e = p.kind === 'everyone' ? { kind: 'group', id: 'nobody' } : GM.fromChannelPrincipal(p);\n  const n = e ? GM.prepareRow("), 'all-names-nobody', { esm: false }) : null;
     ok(!!cfMut && !cfMut.rowNames({ principal: ALL }, { kind: 'agent', id: A9 }), 'CONTROL (7b): channel-filter whose All row names nobody ⇒ the be-woken / act cells read false — RED');
     const aclSrc = read('src/channel-acl.js');
     // lane grants-unify: principalApplies hands THE model the grant's principal — the mutant turns All into the one conversation that existed
