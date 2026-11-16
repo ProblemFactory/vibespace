@@ -1348,6 +1348,9 @@ const R14_AT = { 'v-q1': ['desk-v', 1], 'x-q2': ['desk-x', 2], 'x-q4': ['desk-x'
 const r14Rows = (H) => ['desk-v', 'desk-x', 'desk-y'].map((d) => (H.layouts().desktops[d].autoSave.windows || []).map((w) => [w.winId, w.gridBounds ? J(w.gridBounds) : null]));
 const DATA14 = scratchDir('ldup-r14');
 let r14Runs = 0;
+// lane resume-all-paced (L1): the paced resume's progress line («Resuming i of n…», data-progress="resume-all") is the bulk's own,
+// not a word said about the result — the legs that count what a page SAID set it apart
+const saidNotProgress = (from) => toasts(from).filter((e) => !(e.dataset && /^resume-all/.test(e.dataset.progress || ''))).map(toastText);
 async function r14Legs({ install = null, DM = RealDM, LM = RealLM, quiet = false } = {}) {
   const failed = [];
   const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
@@ -1363,7 +1366,18 @@ async function r14Legs({ install = null, DM = RealDM, LM = RealLM, quiet = false
   class Life {} install(Life);
   for (const k of ['resumeSession', 'createSession', '_windowPending', '_snapshotWinBounds', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);
   Object.assign(P.app, { isMobile: true, _getBackendSessionDefaults: () => ({}) });
-  const creates = []; P.app.ws.request = (m) => { if (m && m.type === 'create') creates.push(m); return () => {}; };
+  // lane resume-all-paced (L1): «Resume all» is PACED — one create in flight, the next when the previous one's create has ENDED — so
+  // the hub here answers each create as the restarted hub does (`created`: the conversation its live list names, new-i), 60 ms after
+  // it is sent; a page that never heard an answer would wait for ever (the pace never moves on a clock)
+  const rowI14 = Object.fromEntries([1, 2, 3, 4].map((i) => [R14C(i), i]));
+  const creates = []; P.app.ws.request = (m, cb, o = {}) => {
+    if (m && m.type === 'create') {
+      creates.push(m);
+      const i = rowI14[m.resumeId];
+      setTimeout(() => { if (cb && !(o.isAlive && !o.isAlive())) cb({ type: 'created', sessionId: 'new-' + i, cwd: '/srv/q' + i, mode: 'chat', reqId: m.reqId }); }, 60); // ws.js's rule: a window gone takes no answer
+    }
+    return () => {};
+  };
   P.app.sidebar.getSessionConfig = () => ({}); P.app.sidebar._getSessionTasks = () => [];
   Object.assign(P.wins.get('v-q1'), { type: 'chat', gridBounds: { left: 0, top: 0, width: 1, height: 1 }, _attached: true, _openSpec: { action: 'attachSession', serverId: 'old-1', backend: 'claude', backendSessionId: R14C(1) } });
   // the collector's list (restoreState's read-only window on V; scanStoppedInDesktopStates' rows on X and Y — each names its row)
@@ -1373,7 +1387,7 @@ async function r14Legs({ install = null, DM = RealDM, LM = RealLM, quiet = false
   // the person accepts «Resume all» (the offer's dialog is the page's; its resumes run on the real 400 ms stagger)
   const kept = P.lm._resumeAll ? await P.lm._resumeAll(stopped) : await (async () => { for (const d of stopped) { P.app.resumeSession(d.sessionId, d.cwd, d.name, d.opts); await tick(400); } return null; })();
   await tick(1600); // the autosave's 500 ms debounce, its sends and acks
-  const phoneSaid = toasts(t0).map(toastText), phoneRefused = refusals(P.sock()).length, afterPhone = r14Rows(H2);
+  const phoneSaid = saidNotProgress(t0), phoneRefused = refusals(P.sock()).length, afterPhone = r14Rows(H2);
   leg(creates.length === 4 && J(afterPhone) === J(before) && !phoneRefused && Date.now() - s0 >= 1200,
     `§14 (the user's shape, real timing) THE PHONE first, after the restart: «Resume all» re-opens 4 conversations (V built read-only, X ×2 and Y never visited) — every desktop's rows on the hub keep their ids and boxes, 0 refusals`, { creates: creates.length, before, afterPhone, phoneRefused });
   leg(kept === 4 && J(phoneSaid) === J(['Resumed 4 conversations where they were']), '§14 …the phone says it ONCE: «Resumed 4 conversations where they were»', { kept, phoneSaid });
@@ -1454,6 +1468,10 @@ async function r14bLegs({ install = null, CV = read('src/lib/chat-view.js'), LM 
   await tick(30); // the phone's create of q1 is out; D's person presses «Resume this session» on v-q1 before the hub's answer
   resumeBarDoor14(CV).call({ winInfo: D.wins.get('v-q1'), app: D.app, _resumeBar: null, _getSessionIds: () => ({ backend: 'claude', backendSessionId: R14C(1), cwd: '/srv/q1' }) }, {});
   const kept = await all;
+  // lane resume-all-paced (L1): the paced resume ends at its LAST create's answer — here ~1.3 s sooner than the old 400 ms stagger's
+  // last send — so the leg waits for what it asserts: the phone's owed recipes carried (they leave on the phone's own save clock: the
+  // 500 ms debounce, deferred while a restore runs — measured, V's at ~3.9 s), at most 8 s; then the relays and D's apply
+  for (let w = 0; w < 160 && P.lm._owedDesks?.().size; w++) await tick(50);
   await tick(1800); // the autosaves' 500 ms debounce, the relays, D's apply
   const d1 = D.wins.get('v-q1'), d5 = D.wins.get('v-q5');
   const evOf = (X) => X.syncs().flatMap((m) => m.evidence || []).filter((e) => e.why === 'closed' || e.why === 'replaced' || e.why === 'dup');
@@ -1463,7 +1481,7 @@ async function r14bLegs({ install = null, CV = read('src/lib/chat-view.js'), LM 
     { kept, creates, rows: r14Rows(H2), before, d1: d1 && [d1._openSpec?.serverId, d1.gridBounds], d5: d5 && [d5._openSpec?.serverId, d5.gridBounds], ev: [evOf(D), evOf(P)], refused: [refusals(D.sock()).length, refusals(P.sock()).length], fence });
   const v = H2.layouts().desktops['desk-v'].autoSave.windows;
   leg(['v-q1', 'v-q5'].every((id, k) => v.find((w) => w.winId === id)?.openSpec?.serverId === 'new-' + [1, 5][k]), '§14b …the hub\'s V names the LIVE sessions for v-q1 and v-q5 — no page wrote a dead recipe back', v.map((w) => [w.winId, w.openSpec?.serverId || null]));
-  leg(J(toasts(t0).map(toastText)) === J(['Resumed 5 conversations where they were']), '§14b …one toast in all: the phone\'s «Resumed 5 conversations where they were»', toasts(t0).map(toastText));
+  leg(J(saidNotProgress(t0)) === J(['Resumed 5 conversations where they were']), '§14b …one toast in all: the phone\'s «Resumed 5 conversations where they were»', toasts(t0).map(toastText));
   if (r4 === true || r4 === 'owe') {
     // (r4 N1) THE OWED RECIPE IS CARRIED ONCE AND NEVER ECHOES, on the real timing (the r3 acceptance's shape): the hub answers the phone's
     // creates LATE — after the resume-all's saves were acked; the desktop tab stays open beside it ⇒ ONE phone save carries the five live
@@ -1474,20 +1492,26 @@ async function r14bLegs({ install = null, CV = read('src/lib/chat-view.js'), LM 
     for (const X of [D4, P4]) for (const [d, r] of Object.entries(H4.layouts().desktops)) X.dm.noteStamp(d, r.autoSave.updatedAt);
     const late = [];
     P4.app.ws.request = (m, cb, o = {}) => { if (m && m.type === 'create') late.push(() => { const [, i] = rowOf[m.resumeId] || []; if (!(o.isAlive && !o.isAlive())) cb({ type: 'created', sessionId: 'new-' + i, cwd: '/srv/q' + i, mode: 'chat', reqId: m.reqId }); }); return () => {}; };
-    await (P4.lm._resumeAll ? P4.lm._resumeAll(stopped) : (async () => { for (const s of stopped) { P4.app.resumeSession(s.sessionId, s.cwd, s.name, s.opts); await tick(400); } })());
+    // lane resume-all-paced (L1, as test-layout-dup-storm's owe leg): the bulk is PACED — create 1 goes out and the next waits for its
+    // answer — so the resume-all's saves leave and are acked with create 1 IN FLIGHT, unanswered; then the hub answers each create
+    // ONCE, late, as the pace sends it
+    const run4 = P4.lm._resumeAll ? P4.lm._resumeAll(stopped) : (async () => { for (const s of stopped) { P4.app.resumeSession(s.sessionId, s.cwd, s.name, s.opts); await tick(400); } })();
     await tick(1800); // the resume-all's saves leave and are acked
+    const inFlight4 = late.length;
     const idleAt = Date.now() - 120000; P4.lm._userDirty = false; P4.lm._lastUserInputAt = idleAt; // the person's last input on the phone: two minutes ago
     const from = P4.syncs().length;
-    for (const f of late.splice(0)) f(); // the hub's answers, late
+    if (P4.lm._resumeAll) { for (let k = 0; k < stopped.length; k++) { for (let w = 0; w < 400 && !late.length; w++) await tick(5); const f = late.shift(); if (f) f(); } } // the hub's answers, late, one per create as the pace sends it
+    else for (const f of late.splice(0)) f(); // a tree before the pace: every create out, all answered at once
+    await run4;
     await tick(2200);
     const saves = [...new Set(P4.syncs().slice(from).map((m) => m.sentAt))].length, v4 = H4.layouts().desktops;
     const names = Object.entries(R14B_AT).map(([id, [d]]) => (v4[d].autoSave.windows.find((w) => w.winId === id) || {}).openSpec?.serverId || null);
     const before4 = P4.syncs().length;
     for (let k = 0; k < 6; k++) { const f = D4.wins.get('v-f'); if (f) f.gridBounds = { ...(f.gridBounds || {}), left: k % 2 ? 0 : 0.02 }; D4.act(); await tick(1700); }
     const echoes = P4.syncs().length - before4;
-    leg(saves === 1 && names.every((s, k) => s === 'new-' + Object.values(R14B_AT)[k][1]) && echoes === 0 && P4.lm._lastUserInputAt === idleAt && !P4.lm._owedRecipes?.size,
-      '§14b (r4 N1) …THE OWED RECIPE IS CARRIED ONCE AND NEVER ECHOES: the phone\'s five creates answered after its saves were acked ⇒ ONE save carries the five live recipes (the hub names new-1…5); the phone then idles and D\'s person moves v-f six times ⇒ the phone writes 0 records — nothing owed, no input fabricated',
-      { saves, names, echoes, owed: [...(P4.lm._owedRecipes || [])], inputAge: Date.now() - P4.lm._lastUserInputAt });
+    leg((P4.lm._resumeAll ? inFlight4 === 1 && saves >= 1 : saves === 1) && names.every((s, k) => s === 'new-' + Object.values(R14B_AT)[k][1]) && echoes === 0 && P4.lm._lastUserInputAt === idleAt && !P4.lm._owedRecipes?.size,
+      '§14b (r4 N1) …THE OWED RECIPE IS CARRIED ONCE AND NEVER ECHOES: the phone\'s five creates answered after its saves were acked (paced: create 1 in flight at the ack, each answered once as the pace sends it) ⇒ the saves carry the five live recipes (the hub names new-1…5); the phone then idles and D\'s person moves v-f six times ⇒ the phone writes 0 records — nothing owed, no input fabricated',
+      { inFlight4, saves, names, echoes, owed: [...(P4.lm._owedRecipes || [])], inputAge: Date.now() - P4.lm._lastUserInputAt });
   }
   if (r4 === true || r4 === 'rel') {
     // (r4 N2) THE RELEASED PENDING, on the real timing: on a fresh desktop page the person presses Conv 1's Resume bar; the hub answers with
@@ -1548,7 +1572,8 @@ await section('§14b THE DESKTOP TAB OPEN ACROSS THE RESTART (lane phone-resume-
     for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: '§14b ' })) ok(r.pass, r.name, r.detail);
   }
   {
-    const LS = read('src/lib/session-lifecycle.js'), d = "      if (msg.type === 'error' && !msg.reqId && !msg.sessionId) settled();\n";
+    // lane resume-all-paced (L1): settled() says the create's END — this line hands it the error ('error', msg); the mutant cuts the same line
+    const LS = read('src/lib/session-lifecycle.js'), d = "      if (msg.type === 'error' && !msg.reqId && !msg.sessionId) settled('error', msg);\n";
     if (ok(LS.includes(d), 'mutant r14b-reqless-holds: the patched line exists in session-lifecycle.js')) {
       const f = await r14bLegs({ install: await loadLifecycle(LS.replace(d, '')), quiet: true, visits: false, r4: 'rel' });
       ok(f.some((n) => n.startsWith('§14b (r4 N2)')), `mutant r14b-reqless-holds (5033f0a06's request: an error naming no request ends nothing — the next press joins the dead wait): §14b (r4 N2) RED (${f.length})`, f);
