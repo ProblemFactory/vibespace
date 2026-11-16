@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - After the pool moves a conversation, its usage readings land on the account it now runs on; the account it left no longer shows the other one's numbers.
+- An account's Fable cap is read only from its own Fable requests, never from another model's request or one answered after a move.
 
 ## 2.369.404 — 2026-11-15
 
