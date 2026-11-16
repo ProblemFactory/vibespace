@@ -6060,7 +6060,11 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   const WORDS_ALLOW97 = { 'src/msg-acl.js levelFor': { reads: ['facts.groupIds'], why: 'a target\'s own groups NAME the resources judged (group-visibility/<g> rows, each asked GM.admits) — never a test of who is in them' } };
   const FN97 = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
   const kids97 = (n) => Object.entries(n).filter(([k]) => k !== 'loc').flatMap(([, v]) => (Array.isArray(v) ? v : [v])).filter((v) => v && typeof v.type === 'string');
-  const isAdmits97 = (n) => n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && !n.callee.computed && n.callee.object.type === 'Identifier' && n.callee.object.name === 'GM' && n.callee.property.name === 'admits';
+  // lane grants-read-is-a-lookup (主开发's G4): the model's PREPARE calls are readers too — a function that hands the model an
+  // asker's facts (GM.prepareFacts) or a row (GM.prepareRow) to judge later is judged like one that asks GM.admits; the
+  // argument each takes (admits: the facts, its 2nd; a prepare: its 1st) is the literal the asker's groups may ride in
+  const MODEL97 = { admits: 1, prepareFacts: 0, prepareRow: 0 };
+  const isAdmits97 = (n) => n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && !n.callee.computed && n.callee.object.type === 'Identifier' && n.callee.object.name === 'GM' && Object.prototype.hasOwnProperty.call(MODEL97, n.callee.property.name);
   const judgeWords97 = (f, src) => {
     let ast; try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'script', locations: true, allowHashBang: true }); } catch (e) { return [`${f}: cannot be parsed (${e.message})`]; }
     const bad = [];
@@ -6068,7 +6072,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       const exempt = new Set(), declared = new Map(), calls = [], allow = (WORDS_ALLOW97[`${f} ${name}`] || {}).reads || [];
       const scan = (n) => { if (isAdmits97(n)) calls.push(n); if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) declared.set(n.id.name, n.init); if (FN97.has(n.type)) n.params.forEach((x) => exempt.add(x)); kids97(n).forEach(scan); };
       scan(fn);
-      for (const c of calls) { const a = c.arguments[1]; if (a) exempt.add(a.type === 'Identifier' && declared.has(a.name) ? declared.get(a.name) : a); }
+      for (const c of calls) { const a = c.arguments[MODEL97[c.callee.property.name]]; if (a) exempt.add(a.type === 'Identifier' && declared.has(a.name) ? declared.get(a.name) : a); }
       const walk = (n) => {
         if (exempt.has(n)) return;
         if (n.type === 'MemberExpression' && !n.computed) {
@@ -6103,6 +6107,14 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   // the verify's gates-plant4: the same test through an alias — the line census cannot see it, the body census must
   const plantA2 = ACL97.replace("  const n = preparedOf(grant, p);\n  if (!n) return false;", "  const gs = Array.isArray(ctx.groups) ? ctx.groups : []; if (p.kind === 'group' && gs.includes(p.id)) return true;\n  const n = preparedOf(grant, p);\n  if (!n) return false;");
   ok(plantA2 !== ACL97 && judgeA([['src/channel-acl.js', plantA2]]).length === 0 && judgeWords97('src/channel-acl.js', plantA2).some((l) => /principalApplies reads `groups`/.test(l)), '§97 (a) CONTROL (verify F3, gates-plant4): an ALIASED `const gs = ctx.groups; … gs.includes(p.id)` in principalApplies is RED by the body census (the line census alone stays green on it)');
+  // lane grants-read-is-a-lookup (G4): the helper that prepares the asker's facts (channel-acl factsFor, channel-filter
+  // namedFactsOf) is judged as a reader — a membership test planted in it, through an alias, is RED by the body census
+  const FF97 = "function factsFor(ctx) {\n";
+  const plantA3 = ACL97.replace(FF97, FF97 + "  const gs = Array.isArray(ctx.groups) ? ctx.groups : []; if (gs.includes('G-planted')) return GM.prepareFacts({ conversationKey: String(ctx.id), groupIds: [] });\n");
+  const FLT97 = read('src/channel-filter.js'), NF97 = "function namedFactsOf(ctx) {\n";
+  const plantA4 = FLT97.replace(NF97, NF97 + "  const gs = ctx.groups; if (Array.isArray(gs) && gs.length > 3) return null;\n");
+  ok(plantA3 !== ACL97 && judgeWords97('src/channel-acl.js', plantA3).some((l) => /factsFor reads `groups`/.test(l)) && plantA4 !== FLT97 && judgeWords97('src/channel-filter.js', plantA4).some((l) => /namedFactsOf reads `groups`/.test(l)) && !judgeWords97('src/channel-acl.js', ACL97).length && !judgeWords97('src/channel-filter.js', FLT97).length,
+    '§97 (a) CONTROL (lane grants-read-is-a-lookup, G4): a membership test planted through an alias in the helpers that PREPARE the asker\'s facts (channel-acl factsFor, channel-filter namedFactsOf) is RED by the body census; the helpers as they stand are green');
   // (b)
   const OLD97 = [
     { field: 'the channel index\'s reach / account / API tables', re: /\.reachEntries\b|table\('accountGrants'\)|\.accountGrants\b(?!\s*\()|table\('apiGrants'\)|\.apiGrants\b(?!\s*(?:\(|===))/, allow: {

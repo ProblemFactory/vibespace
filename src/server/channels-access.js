@@ -536,15 +536,20 @@ function create(engineCtx) {
    *  back every WALK_STEP conversations scanned — a count, never a clock (≈ 75 ms of a search's scan at the owner's size). */
   const WALK_STEP = 50000;
   /** ONE WALK'S READER of reach (lane grants-read-is-a-lookup — L3: a walk over every conversation stays one bounded loop
-   *  turn at the owner's 197 110): what is the same for the whole walk is judged ONCE — the rows' generation, the
-   *  conversations a row of their own names, whether a rule holds a row, each account's own answer — so a conversation of
-   *  the walk costs a Set and a Map lookup; one a row decides (or an account whose module answers by msg-acl) is asked
-   *  reachFor, as before. The walk's callers read the answer, never change it (one object per account, shared). */
+   *  turn at the owner's 197 110): what is the same for the whole walk WHILE THE ROWS ARE — the conversations a row of their
+   *  own names, whether a rule holds a row, each account's own answer — is judged once per generation of the rows, asked at
+   *  every conversation (a walk that awaits reads a change at once), so a conversation costs the generation, a Set and a
+   *  Map lookup; one a row decides (or an account whose module answers by msg-acl) is asked reachFor, as before. The walk's
+   *  callers read the answer, never change it (one object per account, shared). */
   function reachWalkOf(ctx) {
     if (!ctx || ctx.kind === 'user') return (rec, en) => reachFor(ctx, rec, en);
-    const gen = CG.generation(), own = CG.ownConversationKeys(), rules = CG.ruleIdsWithRows().size > 0;
+    let gen = NaN, own = null, rules = false;
     const acct = new Map(), msgAcl = new Map();
     return (rec, en) => {
+      // A WALK KEEPS NOTHING ACROSS A CHANGE OF THE ROWS (主开发's G1 — a search awaits between accounts and gives the loop back
+      // every WALK_STEP): each conversation asks the rows' generation, and a moved one re-reads what the walk keeps
+      const g = CG.generation();
+      if (g !== gen) { gen = g; own = CG.ownConversationKeys(); rules = CG.ruleIdsWithRows().size > 0; acct.clear(); }
       let m = msgAcl.get(rec.id);
       if (m === undefined) { m = msgAclAdapter(rec); msgAcl.set(rec.id, m); }
       if (m || rules || own.has(en.key)) return reachFor(ctx, rec, en);

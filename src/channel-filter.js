@@ -1617,12 +1617,11 @@ function namedRowOf(p, x) {
   _namedRows.set(p, { x, xn, kind: p.kind, id: p.id, name: p.name, n });
   return n;
 }
-const _namedFacts = new WeakMap();  // ctx → { id, groups, n, F }
+const _namedFacts = new WeakMap();  // ctx → its facts as the model last prepared them (the model answers them again while they are the same)
+const NO_GROUPS = Object.freeze([]);
 function namedFactsOf(ctx) {
-  const g = ctx.groups, gn = Array.isArray(g) ? g.length : -1, m = _namedFacts.get(ctx);
-  if (m && m.id === ctx.id && m.groups === g && m.n === gn) return m.F;
-  const F = GM.prepareFacts({ conversationKey: str(ctx.id), groupIds: Array.isArray(g) ? g : [] });
-  _namedFacts.set(ctx, { id: ctx.id, groups: g, n: gn, F });
+  const F = GM.prepareFacts({ conversationKey: str(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS }, _namedFacts.get(ctx));
+  _namedFacts.set(ctx, F);
   return F;
 }
 // ── ALL AGENTS: the watcher FAN-OUT (lane everyone-principal) ────────────
