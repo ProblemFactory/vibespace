@@ -395,13 +395,14 @@ await leg('⑯', async () => {
   const { orch, broadcasts, getFake } = newOrch({ rawAfterMs: N, echo: true });
   orch.start({ accountId: 'acc-1' });
   const t0 = Date.now();
-  getFake().emit('A sign-in screen this VibeSpace has never seen\r\nGo to claude dot example and type what it shows\r\nYour answer: ');
-  // NEVER BEFORE N, ON THE TIMER'S OWN CLOCK (int403 — B-d24c's twelfth: the .402 release mirror's fast attempt 1 read «said after 149 ms
-  // against N = 150»). The product's timer counts from the event loop's clock as it was when this turn of the loop began — before
-  // orch.start() and t0 — so a Date.now() taken here starts from a later instant and «≥ N» held only by the 10 ms poll. A reference
-  // timer for N − 1 ms set in THIS same synchronous turn shares the product timer's clock and always runs before it (due order): when
-  // it runs, the cue must not be there yet.
+  // NEVER BEFORE N, ON THE TIMERS' OWN CLOCK (int403 — B-d24c's twelfth: the .402 release mirror's fast attempt 1 read «said after 149 ms
+  // against N = 150»: the leg measured with Date.now() while the product's timer runs on the event loop's monotonic clock). A reference
+  // timer for N − 1 ms is set BEFORE the CLI's first output arms the product's timer: Node's setTimeout reads a fresh loop time when it
+  // is set, so the reference starts no later than the product's and falls due first (due order) — when it runs, the cue must not be
+  // there yet. (The first cure set it AFTER the emit: on a loaded runner the gap between the two arms put the reference's due past the
+  // product's — the 2.369.403 second mirror's fast job, «found 'stalled'».)
   let atRef = null; setTimeout(() => { atRef = orch.get('acc-1')?.rawHint ?? 'gone'; }, N - 1);
+  getFake().emit('A sign-in screen this VibeSpace has never seen\r\nGo to claude dot example and type what it shows\r\nYour answer: ');
   ok(orch.get('acc-1').rawHint === 'unknown', '⑯ a complete line the reader cannot place → the cue at once (\'unknown\')', orch.get('acc-1'));
   while (Date.now() - t0 < 2000 && orch.get('acc-1').rawHint !== 'stalled') await sleep(10);
   const g = orch.get('acc-1');
