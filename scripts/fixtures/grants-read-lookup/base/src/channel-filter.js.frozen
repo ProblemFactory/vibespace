@@ -1,0 +1,1894 @@
+'use strict';
+/**
+ * THE FILTER, THE ASSIGNMENT MODEL, AND WHAT AN AGENT IS HANDED
+ * (docs/design-communication-panel.zh.md §7 — PURE; imports only the PURE
+ * record module for its frame neutering, the peer-text belt, and — lane
+ * grants-unify — src/grant-model.js: every "does this row name that member"
+ * question (`rowNames`, `memberVia`, `memberStill`, the fan-out) is its
+ * `admits`, a row's `except` honoured).
+ *
+ * Three things live here and nothing else, because everything after
+ * `store.append` is PURE except the two ORCH calls at the end (§6.1), so the
+ * whole money-adjacent decision chain is unit-testable without a server:
+ *
+ *  · `matchRecord(filter, record, ctx)` → `{ hit, why[] }`. The rule kinds are
+ *    a CLOSED set (`RULE_KINDS`); adding one is one row here and one truth
+ *    table in scripts/test-channel-filter.mjs. **`why` IS A CONTRACT, NOT
+ *    PROSE**: the wake an agent receives names the rule that fired and the
+ *    panel shows the same string — a wake that cannot say why is a wake
+ *    nobody can tune (the same law as the approval card's "why" and
+ *    auto-resume's named refusal).
+ *  · `estimate(filter, records, opts)` is HONEST ABOUT ITS WINDOW: when the
+ *    reader stopped at its cap before reaching the window's start it says
+ *    `sampled`; when the corpus is shorter than the window it says
+ *    `truncated` and rates over the span it actually saw. An estimate that
+ *    quietly read 200 of 2,000 records is worse than none, because the user
+ *    is about to authorize a PAID RATE on the strength of it (§7.1).
+ *  · ACCESS AND NOTIFICATION — TWO OPERATIONS, ACCESS FIRST (§7.3 R4, owner
+ *    2026-09-27: "你之前的交互的问题是把'让agent能访问对话'和'让agent会被通知'
+ *    耦合在一起了" / "这实际上应该是两种不同的操作，前者是后者的前提"). Every
+ *    grain (account / pattern / conversation) holds TWO lists:
+ *      ACCESS   `[{principal, authority}]` — who may SEE and ACT (list, read,
+ *               search, refresh, reply / compose through the outbox with
+ *               that authority). Access alone wakes nobody: no pace ledger,
+ *               no digest, nothing billed on its behalf.
+ *      WATCHERS `[{principal, notify, mode, filterId, digestMinutes,
+ *               dailyWakeCap, receiptWake}]` — who is WOKEN and on what.
+ *               A watcher REQUIRES an access row for the same principal at
+ *               the same grain (`validateWatchers` refuses one without it,
+ *               `watcher-needs-access`; removing the access removes it).
+ *    `authority:'send'` (on the ACCESS row) is capped by TWO things
+ *    separately — channel policy (review ⇒ not selectable, and a stored
+ *    value is CLAMPED AT READ TIME so a value the policy forbids can never
+ *    silently become a permission when the policy is later relaxed) and
+ *    capability (`offers(...)` false ⇒ the option is not drawn, with the
+ *    reason `caps` gives). Both only narrow, so their order is irrelevant.
+ *    The pre-split single ASSIGNMENT (`validateAssignment`) survives as the
+ *    compatibility write: `splitAssignment` turns it into one access row +
+ *    one watcher row, and `grainOf` reads a record written before the split
+ *    the same way (MERGED with any lists present, never a fallback).
+ *  · `renderWakeBlock` / `renderDigestBlock` (§7.5): the text an agent is
+ *    handed, BUDGETED (the injection channel wraps at 10 KiB and this product
+ *    has lost that fight once) and FRAME-INERT — a vendor string is neutered
+ *    through `inertFrames` before it is embedded, and every vendor line is
+ *    QUOTED so it can never start one of this block's own headings. An
+ *    outsider can type `<system-reminder>`; they must never forge a frame in
+ *    an agent's context. This is the XSS rule's prompt-injection twin and it
+ *    belongs in the PURE renderer, where a unit test can prove it.
+ *
+ * ALL AGENTS (lane everyone-principal, 2026-10-02 — the owner: "所有配置权限的
+ * 地方都加入"所有"这个选项"): `{kind:'everyone', id:'*'}` is a principal of
+ * both lists. An ACCESS row for it names every agent conversation (`rowNames`;
+ * a specific row beside it never narrows it — authority is the MAX over every
+ * row naming the agent; removing it leaves the specific rows untouched — they
+ * are their own rows). A WATCHER row for it is a FAN-OUT: every RUNNING agent
+ * conversation is woken — a billed turn each — and its pace is PER
+ * CONVERSATION: `fanOutWatchers` turns the one stored row into one item per
+ * running conversation (principal `{kind:'everyone', id:'*', target:<cid>}`,
+ * `principalKey` = `everyone:*><cid>`, the conversation's OWN ledger in the
+ * stored row's `stats.fan[<cid>]`), so a cap of N is N wakes per conversation
+ * per day — never N shared by everybody, never All × conversations uncapped.
+ *
+ * THREE LAYERS, THREE JOBS (§7.4, written here so nobody folds them): the
+ * per-watcher daily wake cap (`paceVerdict`, one ledger per (principal,
+ * scope)) is PACING; the delivery
+ * ladder's per-conversation floor is FLOOD CONTROL; the spend authorizer is
+ * THE MONEY BOUND. Only the last is per credential slot and only the last
+ * survives a restart. This module owns the first and knows nothing of the
+ * other two.
+ */
+const { inertFrames, isSystemRecord, isDraftRecord } = require('./channel-record.js');   // + isSystemRecord: lane lark-system-records; + isDraftRecord: lane gmail-draft-not-a-message
+const { toAgentText, cutText, foldHidden } = require('./peer-text.js');
+const GM = require('./grant-model.js');   // lane grants-unify: THE one admission — a row names a member only through `admits`   // lane peer-census: THE belt (bound → fold → the frame rule per line / piece) every agent-facing line takes
+
+/** The CLOSED rule set. A kind outside it is refused by `validateFilter`. */
+const RULE_KINDS = Object.freeze(['mention', 'keyword', 'regex', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me', 'reply-to-sent', 'fact', 'decision']);
+/** lane webhook-l1-server: the `fact` rule's key — a fact kind (`sender`, `subject`, `event`, …) or a webhook path's
+ *  declared field (the `fields` fact's entry of that id); matched ONLY over the record's facts, never its raw body. */
+const FACT_RULE_KEY_RE = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
+/** lane channel-threads (spec §5.4): the two rule kinds that read a record's PLACE — `reply-to-mine` and
+ *  `in-thread-with-me`. Both read `ctx.mine` (a Set of the vendor ids the OWNER wrote or THIS principal sent from here,
+ *  built by the engine per watcher from the conversation's log + the outbox's `sentBy`), `ctx.kindOf(record)` = THE
+ *  classifier (src/channel-thread.js `placeKindOf` over the engine's index: {kind, topic, quotes}) and
+ *  `ctx.threadOf(record)` (the vendor ids of the record's topic); without them they never hit (fail closed — a wake
+ *  is money).
+ *  OWNER DECISION A (2026-09-28, after the quote-vs-topic round): a reply CHAIN is quotes, not a thread —
+ *   · `in-thread-with-me` fires on a REAL TOPIC only (a `topic-*` kind whose topic holds one of mine), never on a quote
+ *     chain; and a QUOTE OF ONE OF MY MESSAGES still wakes (its `replyTo` is mine — "quoted your message");
+ *   · `reply-to-mine`: a message IN A TOPIC whose parent or the topic's root is mine ("a reply to a message of
+ *     yours"); a QUOTE (a `quote`, a `topic-quote`, a topic root that quotes) only when the message it quotes is mine
+ *     ("quoted your message") — never because the chain it hangs in started with me (a chain's `root` is not read).
+ *  `placeHit(rule, record, ctx)` = the ONE decision → the `why` string that fired, or null. */
+const PLACE_RULE_KINDS = Object.freeze(['reply-to-mine', 'in-thread-with-me', 'reply-to-sent']);
+/** lane reply-to-sent (owner 2026-10-07: "通知功能好像缺少'回复了这个 agent 之前发送的消息'的 trigger"): `reply-to-sent` fires
+ *  when a record ANSWERS a message THIS principal sent from here — judged by PLACE across every shape the channel has
+ *  (`sentHit`): a quote / reply naming a sent id; a topic or Slack-thread reply under a sent parent / root; a record in a
+ *  MAIL thread (`ctx.convKind === 'thread'`) newer than a sent mail. Lane channel-reply-real (owner 2026-10-08, B-a871:
+ *  「我说的回复你的消息是指真的"回复"，也就是lark里的引用/讨论串功能。其它源同理。」): EVERY shape is the vendor's own
+ *  quote / reply / thread marker — never a clock (a direct chat's "any message within 24 h" clause is gone: two unrelated
+ *  peer messages woke an agent, billed). The adapter census: scripts/test-channel-filter.mjs ⑯. It reads `ctx.sentByMe` ONLY (a Map
+ *  vendorId → {at, words, subject} the engine builds from the outbox's sent proposals of this drafter, the last
+ *  SENT_WINDOW_MS / SENT_MAX ids) — never the owner's own messages (`ctx.ownerMine`, which `reply-to-mine` reads). */
+const SENT_WINDOW_MS = 30 * 24 * 3600e3;
+const SENT_MAX = 500;
+/** lane dm-reply-infers (B-6b4b — userW: a plain 1:1 Lark answer two hours after an agent's send woke nobody; owner
+ *  2026-10-20: «用 decision api 判定一次就行了，也不一定非得对方下一条就是回复，错误 trigger 还是挺贵的»): `reply-to-sent` with
+ *  `infer: true` (opt-in per rule, default OFF — a rule without it is the marker road, byte for byte) ALSO hits an UNMARKED
+ *  peer message the decision API judged an answer to what THIS principal sent. THE SCOPE (`inferCandidate`, PURE): no
+ *  vendor marker at all (no quote, no reply id, no topic / thread root — a marker hit stays the marker road, unjudged; a
+ *  quote of ANOTHER message is never judged), not a mail thread (marker (c) covers it), not one of the principal's own
+ *  sends, and this principal (an agent, or a group member for its OWN sends — `ctx.sentByMe` is per member) SENT into the
+ *  same conversation within `ctx.inferHours` before it (the server setting `channels.replyInferHours`, INFER.hours.def =
+ *  24); the newest such send is the one asked about — never "the next message is the reply": every candidate is judged,
+ *  none is assumed. Outside the scope nothing is judged (no vendor call). THE JUDGMENT is the engine's
+ *  (src/server/channels-engine.js `preInfer` → decision-engine `judge('reply-infer')`: ONE fixed question, the memo =
+ *  the record's id + the sent message's id — never judged twice); its answers ride `ctx.inferred` keyed `inferKeyOf`; a
+ *  yes = probability ≥ INFER.threshold. No answer (a cap, no key, a switch off) ⇒ no hit: fail closed, a wake is money. */
+const INFER = Object.freeze({ hours: Object.freeze({ min: 1, max: 168, def: 24 }), threshold: 0.8, perHour: 20, between: 5 });
+const INFER_WHY = 'judged an answer to your message of {when}';
+/** lane reply-infer-owner-between (agent feedback fb-377439b167, a fleet instance on .334): a peer's plain two-word message
+ *  at 09:04Z was judged (0.90) an answer to an agent's send of 01:43Z — but the person who owns the chat had sent a voice
+ *  note ([audio], untranscribed) at 09:01Z, between the two, and the peer was answering THAT. THE TURNS BETWEEN are a fact
+ *  of the candidate (`inferBetween`): the engine's `ctx.turnsBetween(sentAt, at)` = the conversation's own records strictly
+ *  between the two instants, the newest ≤ INFER.between, each `{at, self, kind}` (`self` = the chat's owner wrote it — an
+ *  agent's send from here never is; `kind` = `turnKindOf`) → `between: {own, ownLast: {kind, minBefore} | null, others,
+ *  capped}`; no reader ⇒ null, as before. The judge is told in FIXED words (`inferBetweenLine` — counts, a kind, minutes;
+ *  never anybody's words) and a hit after the owner's own message says so to the agent (INFER_WHY_BETWEEN). */
+const INFER_WHY_BETWEEN = 'judged an answer to your message of {when}; the user also wrote in between';
+/** lane reply-to-sent (owner revision 21:50Z: "对组设置这个权限就等于对每个 agent 单独处理"): a GROUP row carrying the rule is
+ *  judged PER MEMBER — `fanOutWatchers` gives each live member its own item (its own key `group:<gid>><cid>`, ledger,
+ *  stash); the row's OTHER rules (match any) stay the group's one round-robin item. `splitFilter` = the two halves. */
+function hasSentRule(filter) { return !!filter && Array.isArray(filter.rules) && filter.rules.some((r) => r && r.kind === 'reply-to-sent'); }
+function splitFilter(filter, part) {
+  if (!hasSentRule(filter)) return part === 'rest' ? filter : null;
+  const every = filter.match === 'every';
+  if (part === 'sent') return every ? filter : { ...filter, rules: filter.rules.filter((r) => r && r.kind === 'reply-to-sent') };
+  const rest = filter.rules.filter((r) => r && r.kind !== 'reply-to-sent');
+  return every || !rest.length ? null : { ...filter, rules: rest };
+}
+const MATCH_MODES = Object.freeze(['any', 'every']);
+const PRINCIPAL_KINDS = Object.freeze(['agent', 'group', 'everyone']);
+/** THE everyone principal's ONE id (channel-acl's, the picker's). */
+const EVERYONE_ID = '*';
+/** The separator of a fan-out target's key (`everyone:*>cid`) — never inside a stored principal's key. */
+const FAN_SEP = '>';
+const ASSIGN_MODES = Object.freeze(['all', 'filtered']);
+const NOTIFY_MODES = Object.freeze(['wake', 'digest']);
+/**
+ * lane channel-agent-watch (the owner, 2026-10-01): WHEN a watcher's hit reaches its principal — `next-turn` (free: the
+ * hit rides the watcher's next turn, stashed; no billed turn, no cap spent) | `wake` (a billed turn now, under the
+ * per-(principal, scope) cap + the spend authorizer + the pacer; `notify` then says per batch or a digest). A row with
+ * no `delivery` (every row written before this lane) reads `wake` — today's behaviour, shown as such.
+ */
+const DELIVERY_MODES = Object.freeze(['next-turn', 'wake']);
+/** WHO wrote a watcher row: `user` (the owner's Notify…; every row before this lane) | `agent` (the agent's own
+ *  `vibespace-channels watch` — next-turn at once, or a `wake` the owner approved). */
+const WATCH_ORIGINS = Object.freeze(['user', 'agent']);
+const AUTHORITIES = Object.freeze(['draft', 'send']);
+/** THE THREE GRAINS (owner ruling 2026-09-26: a linked account is an
+ *  aggregated IM, and the owner gives the whole ACCOUNT, the conversations a
+ *  PATTERN matches, or ONE conversation). R4 (2026-09-27): each grain holds
+ *  an ACCESS list and a WATCHERS list; PER PRINCIPAL the finest grain that
+ *  names it decides (`effectiveGrants` below). */
+const ASSIGN_SCOPES = Object.freeze(['conversation', 'pattern', 'account']);
+/** The CLOSED `why` codes a `validateAssignment` refusal carries (hotfix
+ *  2026-09-26) — the client words each one (src/lib/channel-words.js), never
+ *  the English contract sentence. */
+const ASSIGN_REFUSALS = Object.freeze(['not-an-object', 'principal', 'mode', 'filter-missing', 'notify', 'digest', 'authority', 'wake-cap', 'scope', 'digest-cap-zero']);
+/** R4: the CLOSED route codes an access / watchers refusal carries (the
+ *  field inside rides `why`, from ASSIGN_REFUSALS) — channel-words says each. */
+/** At most this many rows per list per grain (a refusal names it). */
+const MAX_ACCESS_ROWS = 16;
+// verify r1 F2 (lane channel-agent-watch): what ONE agent may hold of its own — rows across every grain, and wake asks waiting
+const MAX_AGENT_WATCHES = 20;
+const MAX_OPEN_WATCH_REQUESTS = 2;
+// lane wake-approve-card r3 (主开发: «a wake ask has a lifetime»): an ask nobody answered for 7 days EXPIRES — the request
+// `expired` (nothing written; the agent can ask again), its item closed as expired, the bound above freed
+const WATCH_REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** A HELD DELIVERY SAYS ITS AGE OR ASKS (lane wake-approve-card r6 — 主开发: a boot on old data delivered every digest the old
+ *  reader had held — hits possibly MONTHS old — with no click, labelled «in the last 60 min»): hits a watcher's delivery
+ *  waited on longer than HELD_AGE_WINDOWS of its window (a digest's `digestMinutes`; a wake's 60 min ⇒ a day) are not
+ *  delivered at a boot by themselves — the owner decides (deliver / discard). */
+const HELD_AGE_WINDOWS = 24;
+const heldWindowMinutes = (w) => (w && w.notify === 'digest' && Number(w.digestMinutes) > 0 ? Number(w.digestMinutes) : 60);
+/** Too old to deliver by itself? `oldestAt` = the oldest held hit's parking time (no time ⇒ its age is unknown ⇒ too old). */
+function heldTooOld(w, oldestAt, t) {
+  const at = Number(oldestAt);
+  return !(Number.isFinite(at) && at > 0) || Number(t) - at > HELD_AGE_WINDOWS * heldWindowMinutes(w) * 60e3;
+}
+/** A block's span in words: «held since 2026-07-14 09:38 UTC» (the oldest hit's parking time) — an agent's text. */
+const heldSinceWords = (at) => { const d = new Date(Number(at)); return Number.isFinite(d.getTime()) ? `held since ${d.toISOString().slice(0, 16).replace('T', ' ')} UTC` : 'held for an unknown time'; };
+const MAX_WATCHER_ROWS = 16;
+/** The CONVERSATION-level rule set a pattern is made of — a closed set APART
+ *  from the message-level `RULE_KINDS` (a pattern chooses conversations, a
+ *  filter chooses messages inside them). `participant` covers "the chats X
+ *  is in" (the participants line or an author seen in the log), `from-address`
+ *  an author's address / id (`@domain` = the whole domain), `kind` dm | group
+ *  | thread, `title` a keyword in the title. */
+const CONV_RULE_KINDS = Object.freeze(['participant', 'title', 'from-address', 'kind']);
+const CONV_KINDS = Object.freeze(['dm', 'group', 'thread']);
+
+/** Defaults the model owns (the design's numbers, one home). */
+const DEFAULT_DIGEST_MINUTES = 30;
+const MIN_DIGEST_MINUTES = 5;
+const MAX_DIGEST_MINUTES = 24 * 60;
+const DEFAULT_DAILY_WAKE_CAP = 40;
+const MAX_DAILY_WAKE_CAP = 1000;
+const DAY_MS = 24 * 3600 * 1000;
+
+/** §7.5's budget: records per block, chars per record, and the whole block's
+ *  byte ceiling (comfortably under the hook channel's 10 KiB wrap, leaving
+ *  room for the task context that rides the same injection). */
+const BLOCK_MAX_RECORDS = 6;
+const BLOCK_MAX_CHARS = 400;
+const BLOCK_MAX_BYTES = 4096;
+
+const lower = (v) => String(v === null || v === undefined ? '' : v).toLowerCase();
+const str = (v) => (v === null || v === undefined ? '' : String(v));
+
+// ── rules ──────────────────────────────────────────────────────────────────
+
+/** `HH:MM` → minutes since midnight, or null. */
+function hhmm(v) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(str(v).trim());
+  if (!m) return null;
+  const h = Number(m[1]), mm = Number(m[2]);
+  if (h > 23 || mm > 59) return null;
+  return h * 60 + mm;
+}
+
+const MAX_RULES = 50;
+/** lane decision-rule (D3 of docs/design-decision-api.zh.md §2.5): THE `decision` RULE — the person's CONDITION in plain
+ *  words, judged by the LLM plugin (src/server/decision-engine.js, the ONE caller: its memo, its budget). `matchRecord`
+ *  stays SYNC and PURE: the channels engine PRE-JUDGES every fresh record a decision rule in scope could match (ONE
+ *  judgment per record carrying EVERY such rule's question — the same rule on two rows is one question) and hands the
+ *  answers in `ctx.decisions` keyed `decisionKeyOf(rule) + '|' + record.id` (a Map or an object) — the place rules'
+ *  road. No answer (no key, the day's budget, a backoff, a switch off, the rule's own hour cap) ⇒ NO hit: fail closed,
+ *  a wake is money. `question: 'predicate'` (the default) hits at p ≥ threshold; `'choice'` hits when the chosen option
+ *  (never `none`, which every choice question carries) has p ≥ threshold (an answer without a probability keeps its
+ *  choice). An option with `to` (a Task Group or an agent) is a ROUTE: it hits only for the watcher that IS that
+ *  principal (`ctx.principal` — an All-agents fan-out item counts as its agent), so the one rule on two groups' rows
+ *  hands each record to one of them, and `none` to nobody. The `why` names the condition and the verdict (p / value). */
+const DECISION = Object.freeze({
+  conditionMax: 500, choicesMax: 8, choiceChars: 120, none: 'none', questions: Object.freeze(['predicate', 'choice']),
+  threshold: Object.freeze({ min: 0.5, max: 0.9, def: 0.7 }), perHour: Object.freeze({ min: 1, max: 60, def: 20 }),
+});
+const DECISION_VALUE_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/i;
+const DECISION_WHY_CHARS = 120;
+/** A stable short key of what the judge is ASKED (question, condition, options + routes) — never the threshold or the
+ *  hour cap, which do not change the answer (a moved slider never re-bills). FNV-1a twice, 16 hex. */
+function decisionKeyOf(rule) {
+  const r = rule || {};
+  const c = JSON.stringify([str(r.question) || 'predicate', str(r.condition), (Array.isArray(r.choices) ? r.choices : []).map((o) => [str(o && o.value), str(o && o.description), o && o.to ? `${str(o.to.kind)}:${str(o.to.id)}` : ''])]);
+  let a = 0x811c9dc5, b = 0x9747b28c;
+  for (let i = 0; i < c.length; i++) { const k = c.charCodeAt(i); a = Math.imul(a ^ k, 16777619); b = Math.imul(b ^ k, 0x5bd1e995); b ^= b >>> 15; }
+  return 'd' + (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0');
+}
+const isDecisionRule = (r) => !!r && r.kind === 'decision';
+/** A ROUTE rule: a choice whose options name a Task Group / an agent (the plugin's `routing` switch gates it, not `rules`). */
+const isRouteRule = (r) => isDecisionRule(r) && r.question === 'choice' && Array.isArray(r.choices) && r.choices.some((o) => o && o.to);
+function decisionRulesOf(filter) { return filter && Array.isArray(filter.rules) ? filter.rules.filter(isDecisionRule) : []; }
+const decisionThreshold = (r) => (r && Number.isFinite(Number(r.threshold)) && r.threshold !== null && r.threshold !== '' ? Number(r.threshold) : DECISION.threshold.def);
+const decisionPerHour = (r) => (r && Number.isInteger(Number(r.perHour)) && Number(r.perHour) >= DECISION.perHour.min ? Math.min(DECISION.perHour.max, Number(r.perHour)) : DECISION.perHour.def);
+const conditionWords = (r) => { const c = str(r && r.condition).replace(/\s+/g, ' ').trim(); return c.length > DECISION_WHY_CHARS ? c.slice(0, DECISION_WHY_CHARS - 1) + '…' : c; };
+/** The judge's question for ONE rule (D1's question shape — decision-model.js `questionError` judges it): the
+ *  condition rides the question's instructions (the input carries the record once); a choice always offers `none`. */
+function decisionQuestion(rule, name) {
+  const cond = str(rule && rule.condition).trim();
+  if (!rule || rule.question !== 'choice') return { type: 'predicate', name, instructions: `Does the message match this condition? ${cond}`, whenTrue: 'Yes — the message matches the condition.', whenFalse: 'No — it does not match.' };
+  const opts = (Array.isArray(rule.choices) ? rule.choices : []).map((o) => ({ value: o.value, description: str(o.description) || (o.to ? `hand it to ${str(o.to.name) || str(o.to.id)}` : o.value) }));
+  return { type: 'choice', name, instructions: `${cond} — pick the option that fits the message, or "${DECISION.none}" when none does.`, choices: [...opts, { value: DECISION.none, description: 'none of the options fits' }] };
+}
+/** Does a route option name THIS watcher's principal (an All-agents fan-out item counts as the agent it targets). */
+function routeNames(to, p) {
+  if (!to || !p) return false;
+  if (to.kind === 'group') return p.kind === 'group' && str(p.id) === str(to.id);
+  if (to.kind === 'agent') return (p.kind === 'agent' && str(p.id) === str(to.id)) || (p.kind === 'everyone' && fanTargetOf(p) === str(to.id));
+  return false;
+}
+function decisionAnswerOf(rule, record, ctx) {
+  const d = ctx && ctx.decisions;
+  if (!d || !record || record.id === undefined || record.id === null) return null;
+  const k = `${decisionKeyOf(rule)}|${str(record.id)}`;
+  return (d instanceof Map ? d.get(k) : d[k]) || null;
+}
+/** THE DECISION RULE'S ONE VERDICT over the pre-judged answer → the `why` that fired, or null (no answer = no hit). */
+function decisionHit(rule, record, ctx) {
+  const a = decisionAnswerOf(rule, record, ctx);
+  if (!a || a.refused) return null;
+  const th = decisionThreshold(rule);
+  const pOf = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1 ? v : null);
+  if (rule.question !== 'choice') { const p = pOf(a.probability); return p !== null && p >= th ? `decision: ${conditionWords(rule)} → ${p.toFixed(2)}` : null; }
+  const v = str(a.choice);
+  if (!v || v === DECISION.none) return null;
+  const opt = (Array.isArray(rule.choices) ? rule.choices : []).find((o) => o && o.value === v);
+  if (!opt) return null;
+  const p = pOf(a.probabilities && a.probabilities[v]) !== null ? pOf(a.probabilities[v]) : pOf(a.confidence);
+  if (p !== null && p < th) return null;
+  if (opt.to && !routeNames(opt.to, ctx && ctx.principal)) return null;
+  return `decision: ${conditionWords(rule)} → ${opt.to ? str(opt.to.name) || str(opt.to.id) : v}${p !== null ? ' ' + p.toFixed(2) : ''}`;
+}
+/** The rule editor's COST LINE (design §2.5 — `estimate` never calls the vendor): the records a day the rule would judge
+ *  (bounded by its hour cap) × the use's token ceiling × the price; the hit rate is unknown until it runs. */
+function decisionCost({ recordsPerDay = 0, perHour = DECISION.perHour.def, tokensPerCall = 0, pricePerMtok = 0, budgetCents = 0 } = {}) {
+  const want = Math.max(0, Number(recordsPerDay) || 0);
+  const n = Math.min(want, Math.max(0, Number(perHour) || 0) * 24);
+  const usdPerDay = (n * Math.max(0, Number(tokensPerCall) || 0) * Math.max(0, Number(pricePerMtok) || 0)) / 1e6;
+  const budgetUsd = Math.max(0, Number(budgetCents) || 0) / 100;
+  return { judgmentsPerDay: Math.round(n * 10) / 10, usdPerDay, budgetUsd, within: usdPerDay <= budgetUsd, capped: n < want };
+}
+
+/** A refusal: the English `error` is the ROUTE'S CONTRACT (the agent CLI
+ *  prints it verbatim, test-channel-filter pins its words); the `code` (+
+ *  `kind` / `max`) is the same fact as STRUCTURE, which the editor words in
+ *  the device's language through `filterProblemText` (a3 i18n — the
+ *  validator's sentence used to reach a zh/ja screen on every "Add rule"). */
+const refuse = (code, error, extra) => ({ ok: false, code, error, ...(extra || {}) });
+
+// ── THE REGEX RULE (lane notify-rules-r2, owner inc-muxt96t5-pk42: "还有正则呢？") ───────────────────────────────
+// JUDGED AT SAVE, never discovered at match time: `regexVerdict` compiles the pattern with the ONE flag set (`iu`),
+// ≤ REGEX_MAX chars, and REFUSES BY NAME the shapes a backtracking engine pays for — a backreference, a lookahead /
+// lookbehind, a repeated piece inside a repeated group (`(a+)+`, an unbounded group over overlapping branches
+// `(a|ab)*`), two unbounded pieces that can eat the same text side by side (`\d+\d*`, `.*.*`, `\w+\s*\w+`), and a
+// pattern that matches the empty message (it would match everything). The match runs on the record's FOLDED text
+// (peer-text's fold — CRLF, hidden characters out) cut to REGEX_TEXT_MAX: the user's own pattern stays bounded by
+// that cap (scripts/test-channel-filter.mjs pins the cost; the refused shapes are its controls).
+const REGEX_MAX = 256;
+const REGEX_FLAGS = 'iu';
+const REGEX_TEXT_MAX = 8192;
+const REGEX_REFUSALS = Object.freeze(['regex-too-long', 'regex-invalid', 'regex-backreference', 'regex-lookaround', 'regex-nested-quantifier', 'regex-adjacent-quantifier', 'regex-leading-repeat', 'regex-empty-match']);
+// the probe alphabet two pieces' overlap is judged on: printable ASCII, the white space, a few letters past it — and
+// every character the pattern itself names (a literal `你` is judged against `\p{Script=Han}` by its own sample)
+const REGEX_PROBES = [...Array.from({ length: 95 }, (_, k) => String.fromCharCode(32 + k)), '\t', '\n', '\u00a0', 'é', 'ß', '中', 'あ', '😀'];
+function regexPieces(src) {
+  // ONE pass over the pattern's own syntax → a tree of pieces `{atom, min, max, inner?, branches?}` (u-mode grammar)
+  let i = 0;
+  const bad = (code, piece) => { const e = new Error(code); e.code = code; e.piece = piece; throw e; };
+  function quant(start) {
+    const c = src[i];
+    let min = 1, max = 1;
+    if (c === '*') { min = 0; max = Infinity; i++; } else if (c === '+') { min = 1; max = Infinity; i++; } else if (c === '?') { min = 0; max = 1; i++; } else if (c === '{') {
+      const m = /^\{(\d+)(,(\d*))?\}/.exec(src.slice(i));
+      if (m) { min = Number(m[1]); max = m[2] ? (m[3] === '' ? Infinity : Number(m[3])) : min; i += m[0].length; }
+    }
+    if ((min !== 1 || max !== 1) && src[i] === '?') i++;   // a lazy mark is the same work
+    return { min, max, text: src.slice(start, i) };
+  }
+  function seq(depth) {
+    const branches = [[]];
+    while (i < src.length) {
+      const c = src[i], start = i;
+      if (c === ')') { if (!depth) bad('regex-invalid', ')'); break; }
+      if (c === '|') { i++; branches.push([]); continue; }
+      let atom;
+      if (c === '(') {
+        i++;
+        if (src.startsWith('?=', i) || src.startsWith('?!', i) || src.startsWith('?<=', i) || src.startsWith('?<!', i)) bad('regex-lookaround', src.slice(start, start + (src[i + 1] === '<' ? 4 : 3)));
+        if (src.startsWith('?:', i)) i += 2; else if (src.startsWith('?<', i)) { const e = src.indexOf('>', i); i = e < 0 ? src.length : e + 1; }
+        const inner = seq(depth + 1);
+        i++;   // ')'
+        atom = { group: inner, text: src.slice(start, i) };
+      } else if (c === '[') {
+        i++;
+        if (src[i] === '^') i++;
+        if (src[i] === ']') i++;
+        while (i < src.length && src[i] !== ']') i += src[i] === '\\' ? 2 : 1;
+        i++;
+        atom = { text: src.slice(start, i) };
+      } else if (c === '\\') {
+        const d = src[i + 1] || '';
+        if (/[1-9]/.test(d) || (d === 'k' && src[i + 2] === '<')) bad('regex-backreference', src.slice(i, i + (d === 'k' ? src.indexOf('>', i) + 1 - i : 2)));
+        const m = /^\\(?:[pP]\{[^}]*\}|x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]+\}|u[0-9a-fA-F]{4}|c[A-Za-z]|0|[\s\S])/.exec(src.slice(i));
+        i += m ? m[0].length : 1;
+        atom = { text: src.slice(start, i), assertion: d === 'b' || d === 'B' };
+      } else if (c === '^' || c === '$') { i++; atom = { text: c, assertion: true }; }
+      else { i += src.codePointAt(i) > 0xffff ? 2 : 1; atom = { text: src.slice(start, i) }; }
+      const q = quant(i);
+      branches[branches.length - 1].push({ ...atom, min: q.min, max: q.max, piece: src.slice(start, i) });
+    }
+    return branches;
+  }
+  const top = seq(0);
+  return top;
+}
+/** What ONE piece can start with, as atoms `[{re, samples}]` (a group: its branches' first pieces, conservative). */
+function probeSet(piece) {
+  if (piece.assertion) return [];
+  if (piece.group) { const out = []; for (const br of piece.group) for (const p of br) { out.push(...probeSet(p)); if (p.min > 0 && !p.assertion) break; } return out; }
+  let re; try { re = new RegExp(`^(?:${piece.text})$`, REGEX_FLAGS); } catch { re = /^[\s\S]$/u; }
+  return [{ re, samples: [...new Set([...REGEX_PROBES, ...Array.from(piece.text)])].filter((c) => re.test(c)) }];
+}
+/** Can two pieces match the same character? (each one's samples against the other's own test) */
+const overlaps = (a, b) => a.some((x) => b.some((y) => x.samples.some((c) => y.re.test(c)) || y.samples.some((c) => x.re.test(c))));
+const hasQuantifier = (branches) => branches.some((br) => br.some((p) => p.max > 1 || (p.group && hasQuantifier(p.group))));
+/** Walk one sequence: `open` = the unbounded pieces still able to eat what comes next (a mandatory piece that does
+ *  not overlap them closes them). Throws the refusal. */
+function judgeSeq(branches, open0, top = false) {
+  let outs = [];
+  for (const br of branches) {
+    let open = open0.slice();
+    for (const [at, p] of br.entries()) {
+      if (p.group) {
+        if (p.max > 1) {
+          if (hasQuantifier(p.group)) { const e = new Error('regex-nested-quantifier'); e.code = e.message; e.piece = p.piece; throw e; }
+          const firsts = p.group.map((b) => probeSet({ group: [b] }));
+          for (let x = 0; x < firsts.length; x++) for (let y = x + 1; y < firsts.length; y++) if (overlaps(firsts[x], firsts[y])) { const e = new Error('regex-nested-quantifier'); e.code = e.message; e.piece = p.piece; throw e; }
+        } else { open = judgeSeq(p.group, open); continue; }
+      }
+      if (p.assertion) continue;
+      const set = probeSet(p);
+      if (p.max === Infinity) {
+        const hit = open.find((o) => overlaps(o.set, set));
+        // a head repeat that ENDS the pattern cannot fail once it matched: the first start answers (linear)
+        if (hit && hit.head && !(top && at === br.length - 1 && open.every((o) => o.head))) { const e = new Error('regex-leading-repeat'); e.code = e.message; e.piece = p.piece; throw e; }
+        if (hit && !hit.head) { const e = new Error('regex-adjacent-quantifier'); e.code = e.message; e.piece = `${hit.piece}…${p.piece}`; throw e; }
+        open = open.concat([{ set, piece: p.piece }]);
+      } else if (p.min > 0) open = open.filter((o) => overlaps(o.set, set));
+    }
+    outs = outs.concat(open);
+  }
+  return outs;
+}
+/**
+ * THE REGEX RULE'S JUDGE (PURE): `{ok:true, source}` or a refusal BY NAME with the offending `piece`.
+ */
+function regexVerdict(src0) {
+  const src = str(src0);
+  if (!src.trim()) return refuse('value-required', 'regex: a pattern is required', { kind: 'regex' });
+  if (src.length > REGEX_MAX) return refuse('regex-too-long', `regex: at most ${REGEX_MAX} characters (got ${src.length})`, { kind: 'regex', max: REGEX_MAX });
+  let re;
+  try { re = new RegExp(src, REGEX_FLAGS); } catch (err) { return refuse('regex-invalid', `regex: does not compile — ${String((err && err.message) || err).replace(/^Invalid regular expression: /, '').slice(0, 200)}`, { kind: 'regex' }); }
+  // THE SEARCH'S OWN LOOP is a repeated piece too: an unanchored match retries at every start, so a repeated piece that
+  // can run over the characters a match STARTS with (`\d+x`, `a.*b`, `\w+@` on a long run of them) re-reads the
+  // text once per start — the head's characters stay "open" until a fixed piece they cannot be closes them
+  try { const tree = regexPieces(src); judgeSeq(tree, tree.every((br) => br.length && br[0].text === '^') ? [] : tree.map((br) => ({ set: probeSet({ group: [br.filter((x) => !x.assertion)] }), piece: '', head: true })), true); } catch (err) {
+    const code = err && REGEX_REFUSALS.includes(err.code) ? err.code : 'regex-invalid';
+    const piece = String((err && err.piece) || '').slice(0, 80);
+    const words = { 'regex-backreference': 'a backreference is not allowed', 'regex-lookaround': 'a lookahead / lookbehind is not allowed', 'regex-nested-quantifier': 'a repeated piece inside a repeated group can take very long on one message', 'regex-adjacent-quantifier': 'two repeated pieces that can match the same text side by side can take very long on one message', 'regex-leading-repeat': 'a repeated piece that can re-read the start of the match (every start re-reads it) can take very long on one message — begin with a fixed word or ^', 'regex-invalid': 'an unbalanced group' }[code];
+    return refuse(code, `regex: refused — ${words} (${piece})`, { kind: 'regex', piece });
+  }
+  if (re.test('')) return refuse('regex-empty-match', 'regex: refused — it matches an empty message (it would match everything)', { kind: 'regex' });
+  return { ok: true, source: src };
+}
+const regexCache = new Map();
+/** A judged pattern, compiled once (≤ 256 kept — a rule set is ≤ 50 rules per filter). */
+function compiledRegex(src) {
+  let re = regexCache.get(src);
+  if (re === undefined) {
+    re = regexVerdict(src).ok ? new RegExp(src, REGEX_FLAGS) : null;   // a stored pattern the judge now refuses never runs
+    if (regexCache.size >= 256) regexCache.delete(regexCache.keys().next().value);
+    regexCache.set(src, re);
+  }
+  return re;
+}
+/** The text a regex rule is matched on: the record's text, cut to REGEX_TEXT_MAX, folded (peer-text's fold). */
+function regexText(text) { return foldHidden(cutText(text, REGEX_TEXT_MAX)); }
+/** The FIRST match span `[start, end]` of a judged pattern in the folded text (the preview marks it), or null. */
+function regexSpan(src, text) {
+  const re = compiledRegex(src);
+  if (!re) return null;
+  const m = re.exec(regexText(text));
+  return m ? [m.index, m.index + m[0].length] : null;
+}
+
+/**
+ * Validate ONE rule. Returns `{ok:true, rule}` (normalized) or `{ok:false,
+ * code, error, kind?}` naming the field — refused at the editor and at the
+ * route, never discovered at match time.
+ */
+function validateRule(rule) {
+  const r = rule && typeof rule === 'object' ? rule : null;
+  if (!r) return refuse('not-an-object', 'a rule must be an object');
+  if (!RULE_KINDS.includes(r.kind)) return refuse('bad-kind', `rule kind must be one of ${RULE_KINDS.join('|')} (got ${JSON.stringify(r.kind)})`, { kind: r.kind });
+  const out = { kind: r.kind };
+  switch (r.kind) {
+    case 'mention': {
+      // EVERY leading @ (verify round 3): one strip stored `@@x` as `@x`, which matched nothing, and the dialog's
+      // unchanged save then wrote `x` — a widening nobody asked for. A mention name never starts with @.
+      const v = str(r.value).trim().replace(/^@+/, '').slice(0, 200).trim();
+      if (!v) return refuse('value-required', 'mention: value (a name or id, with or without @) is required', { kind: r.kind });
+      out.value = v; break;
+    }
+    case 'keyword': case 'not-contains': case 'from-address': case 'subject': {
+      // slice THEN trim (verify round 3): trim-then-slice kept a trailing space at the bound, which the dialog's
+      // unchanged save then trimmed — the exact-match value changed under the person
+      const v = str(r.value).trim().slice(0, 500).trim();
+      if (!v) return refuse('value-required', `${r.kind}: value is required`, { kind: r.kind });
+      out.value = v; break;
+    }
+    case 'regex': {
+      const v = str(r.value).slice(0, REGEX_MAX + 1);
+      const rv = regexVerdict(v);
+      if (!rv.ok) return rv;
+      out.value = rv.source; break;
+    }
+    case 'sender-in-group': {
+      const members = (Array.isArray(r.members) ? r.members : str(r.value).split(',')).map((x) => str(x).trim()).filter(Boolean);
+      if (!members.length) return refuse('members-required', 'sender-in-group: members (ids or names) are required', { kind: r.kind });
+      out.members = members.slice(0, 200).map((m) => m.slice(0, 200));
+      out.label = str(r.label).trim().slice(0, 100) || null;
+      break;
+    }
+    case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': break;
+    case 'reply-to-sent': {
+      // lane dm-reply-infers: `infer` — opt-in (true); absent / false = the marker road (the stored rule stays `{kind}` alone)
+      if (r.infer !== undefined && r.infer !== null && typeof r.infer !== 'boolean') return refuse('infer-flag', 'reply-to-sent: infer is true or false', { kind: r.kind });
+      if (r.infer === true) out.infer = true;
+      break;
+    }
+    case 'fact': {
+      const key = str(r.key).trim();
+      if (!FACT_RULE_KEY_RE.test(key)) return refuse('key-required', 'fact: key (a fact kind or a declared field — letters, digits, - _) is required', { kind: r.kind });
+      const v = str(r.value).trim().slice(0, 200).trim();
+      if (!v) return refuse('value-required', 'fact: value is required', { kind: r.kind });
+      out.key = key; out.value = v; break;
+    }
+    case 'decision': {
+      // lane decision-rule: the condition in plain words (never rewritten), the question, the options (+ `none`, implicit),
+      // the threshold, the rule's own hour cap
+      const cond = str(r.condition).trim();
+      if (!cond) return refuse('condition-required', 'decision: condition (what to judge, in plain words) is required', { kind: r.kind });
+      if (cond.length > DECISION.conditionMax) return refuse('condition-too-long', `decision: the condition is longer than ${DECISION.conditionMax} characters`, { kind: r.kind, max: DECISION.conditionMax });
+      const q = r.question === undefined || r.question === null || r.question === '' ? 'predicate' : r.question;
+      if (!DECISION.questions.includes(q)) return refuse('question-kind', `decision: question must be ${DECISION.questions.join('|')}`, { kind: r.kind });
+      out.condition = cond; out.question = q;
+      if (q === 'choice') {
+        const list = (Array.isArray(r.choices) ? r.choices : []).map((o) => (o && typeof o === 'object' ? o : { value: o })).filter((o) => str(o.value).trim().toLowerCase() !== DECISION.none);
+        if (!list.length || list.length > DECISION.choicesMax) return refuse('choices-count', `decision: a choice names 1–${DECISION.choicesMax} options ("${DECISION.none}" is always added)`, { kind: r.kind, max: DECISION.choicesMax });
+        const choices = [];
+        for (const o of list) {
+          const value = str(o.value).trim();
+          if (!DECISION_VALUE_RE.test(value)) return refuse('choice-value', 'decision: an option value is a short word (letters, digits, - _; up to 40)', { kind: r.kind, value: value.slice(0, 60) });
+          if (choices.some((c) => c.value.toLowerCase() === value.toLowerCase())) return refuse('choice-duplicate', 'decision: two options have the same value', { kind: r.kind, value });
+          const description = str(o.description).trim();
+          if (description.length > DECISION.choiceChars) return refuse('choice-too-long', `decision: an option's description is longer than ${DECISION.choiceChars} characters`, { kind: r.kind, max: DECISION.choiceChars });
+          const c = { value, description };
+          if (o.to !== undefined && o.to !== null) {
+            const to = o.to;
+            if (!to || !['agent', 'group'].includes(to.kind) || !str(to.id).trim()) return refuse('route-principal', 'decision: a route names a Task Group or an agent ({kind:"group"|"agent", id})', { kind: r.kind, value });
+            c.to = { kind: to.kind, id: str(to.id).trim().slice(0, 200), name: str(to.name).trim().slice(0, 100) || null };
+          }
+          choices.push(c);
+        }
+        out.choices = choices;
+      }
+      const th = r.threshold === undefined || r.threshold === null || r.threshold === '' ? DECISION.threshold.def : Number(r.threshold);
+      if (!(th >= DECISION.threshold.min && th <= DECISION.threshold.max)) return refuse('threshold-range', `decision: threshold must be between ${DECISION.threshold.min} and ${DECISION.threshold.max}`, { kind: r.kind });
+      const ph = r.perHour === undefined || r.perHour === null || r.perHour === '' ? DECISION.perHour.def : Number(r.perHour);
+      if (!Number.isInteger(ph) || ph < DECISION.perHour.min || ph > DECISION.perHour.max) return refuse('per-hour-range', `decision: perHour must be a whole number from ${DECISION.perHour.min} to ${DECISION.perHour.max}`, { kind: r.kind, max: DECISION.perHour.max });
+      out.threshold = Math.round(th * 100) / 100; out.perHour = ph;
+      break;
+    }
+    case 'time-window': {
+      const from = hhmm(r.from), to = hhmm(r.to);
+      if (from === null || to === null) return refuse('time-format', 'time-window: from and to must be HH:MM', { kind: r.kind });
+      const off = r.tzOffsetMinutes === undefined || r.tzOffsetMinutes === null || r.tzOffsetMinutes === '' ? 0 : Number(r.tzOffsetMinutes);
+      if (!Number.isFinite(off) || Math.abs(off) > 14 * 60) return refuse('tz-range', 'time-window: tzOffsetMinutes must be a number within ±840', { kind: r.kind });
+      out.from = str(r.from).trim(); out.to = str(r.to).trim(); out.tzOffsetMinutes = off;
+      break;
+    }
+    default: return refuse('bad-kind', `unhandled rule kind ${r.kind}`, { kind: r.kind });
+  }
+  return { ok: true, rule: out };
+}
+
+/** Validate a whole filter `{name?, match, rules[]}`. */
+function validateFilter(filter) {
+  const f = filter && typeof filter === 'object' ? filter : null;
+  if (!f) return refuse('not-an-object', 'a filter must be an object');
+  const match = f.match === undefined ? 'any' : f.match;
+  if (!MATCH_MODES.includes(match)) return refuse('bad-match', `match must be ${MATCH_MODES.join('|')}`);
+  if (!Array.isArray(f.rules) || !f.rules.length) return refuse('no-rules', 'a filter needs at least one rule');
+  if (f.rules.length > MAX_RULES) return refuse('too-many-rules', `a filter may hold at most ${MAX_RULES} rules`, { max: MAX_RULES });
+  const rules = [];
+  for (const r of f.rules) {
+    const v = validateRule(r);
+    if (!v.ok) return v;
+    rules.push(v.rule);
+  }
+  return { ok: true, filter: { name: str(f.name).trim().slice(0, 100) || null, match, rules } };
+}
+
+/** A validateRule / validateFilter refusal in WORDS, with the device's `t`
+ *  (the a3 rule: the sentence stays the route's contract, the code is what a
+ *  screen says). `ruleLabel(kind)` is the editor's own label for a kind, so
+ *  the sentence names the rule the way the row does; a code the table does
+ *  not know falls back to the contract sentence rather than hiding it. */
+function filterProblemText(v, { t = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(s)), ruleLabel = (k) => String(k) } = {}) {
+  if (!v || v.ok) return '';
+  const kind = v.kind ? ruleLabel(v.kind) : '';
+  switch (String(v.code || '')) {
+    case 'value-required': return t('the rule "{kind}" needs a value', { kind });
+    case 'members-required': return t('the rule "{kind}" needs at least one member (ids or names)', { kind });
+    case 'time-format': return t('the time window needs both times as HH:MM');
+    case 'tz-range': return t('the time-zone offset must be within ±840 minutes');
+    case 'no-rules': return t('add at least one rule');
+    case 'kind-value': return t('the rule "{kind}" is one of: direct message, group, mail thread', { kind });
+    case 'too-many-rules': return t('a filter may hold at most {n} rules', { n: v.max || MAX_RULES });
+    case 'regex-too-long': return t('the regex is longer than {n} characters', { n: v.max || REGEX_MAX });
+    case 'regex-invalid': return t('the regex does not compile: {why}', { why: String(v.error || '').replace(/^regex: (does not compile — |refused — )?/, '') });
+    case 'regex-backreference': return t('the regex is refused: a backreference ({piece}) is not allowed', { piece: v.piece || '' });
+    case 'regex-lookaround': return t('the regex is refused: a lookahead or lookbehind ({piece}) is not allowed', { piece: v.piece || '' });
+    case 'regex-nested-quantifier': return t('the regex is refused: a repeated piece inside a repeated group ({piece}) can take very long', { piece: v.piece || '' });
+    case 'regex-adjacent-quantifier': return t('the regex is refused: two repeated pieces side by side can match the same text ({piece}) and take very long', { piece: v.piece || '' });
+    case 'regex-leading-repeat': return t('the regex is refused: the repeated piece {piece} can re-read where a match starts and take very long — begin with a fixed word or ^', { piece: v.piece || '' });
+    case 'regex-empty-match': return t('the regex is refused: it matches an empty message, so it would match everything');
+    case 'condition-required': return t('the decision rule needs a condition in plain words');
+    case 'condition-too-long': return t('the condition is longer than {n} characters', { n: v.max || DECISION.conditionMax });
+    case 'question-kind': return t('the decision is either yes / no or one of a list');
+    case 'choices-count': return t('a "one of" decision names 1 to {n} options (none is always added)', { n: v.max || DECISION.choicesMax });
+    case 'choice-value': return t('an option is a short word: letters, digits, - or _ (up to 40)');
+    case 'choice-duplicate': return t('two options have the same word');
+    case 'choice-too-long': return t('an option\'s description is longer than {n} characters', { n: v.max || DECISION.choiceChars });
+    case 'route-principal': return t('a route names a Task Group or an agent');
+    case 'threshold-range': return t('the threshold is between {min} and {max}', { min: DECISION.threshold.min, max: DECISION.threshold.max });
+    case 'per-hour-range': return t('the judgments per hour are a whole number from 1 to {n}', { n: v.max || DECISION.perHour.max });
+    case 'infer-flag': return t('judging plain replies is either on or off');
+    default: return String(v.error || v.code || '');
+  }
+}
+
+/** The `why` string ONE rule produces — the contract the wake and the panel share. */
+function ruleWhy(rule) {
+  switch (rule.kind) {
+    case 'mention': return `mention @${rule.value}`;
+    case 'keyword': return `keyword "${rule.value}"`;
+    case 'regex': return `regex /${rule.value}/`;
+    case 'sender-in-group': return `sender in ${rule.label || 'group'}`;
+    case 'from-address': return `from ${rule.value}`;
+    case 'subject': return `subject "${rule.value}"`;
+    case 'fact': return `fact ${rule.key} == "${rule.value}"`;
+    case 'has-attachment': return 'has attachment';
+    case 'not-contains': return `does not contain "${rule.value}"`;
+    case 'time-window': return `within ${rule.from}-${rule.to}`;
+    case 'reply-to-mine': return WHY_REPLY;
+    case 'in-thread-with-me': return WHY_THREAD;
+    case 'reply-to-sent': return rule.infer === true ? `${WHY_SENT} (plain messages judged)` : WHY_SENT;
+    case 'decision': return `decision "${conditionWords(rule)}"${rule.question === 'choice' && Array.isArray(rule.choices) ? ` (one of ${rule.choices.map((o) => (o.to ? `${o.value} → ${o.to.name || o.to.id}` : o.value)).join(' | ')} | ${DECISION.none})` : ''}`;
+    default: return rule.kind;
+  }
+}
+
+/** The place rules' `why` words (the wake's contract; the owner's window words them — src/lib/channel-words.js). */
+const WHY_REPLY = 'a reply to a message of yours';
+const WHY_THREAD = 'in a thread you are in';
+const WHY_QUOTED = 'quoted your message';
+const WHY_SENT = 'a reply to a message this agent sent';
+const PLACE_WHYS = Object.freeze([WHY_REPLY, WHY_THREAD, WHY_QUOTED]);
+/** lane reply-to-sent: the `reply-to-sent` whys — ONE per shape, a fixed template the client words (channel-words
+ *  wakeWhyText): {when} = the answered message's clock (UTC), {subject} = the sent mail's subject. */
+const SENT_WHYS = Object.freeze({ quote: 'quotes your message of {when}', thread: 'replies in the thread of your message of {when}', mail: 'in the thread of your mail "{subject}"' });
+const clockOf = (at) => { const d = new Date(Number(at)); return Number.isFinite(d.getTime()) ? `${d.toISOString().slice(11, 16)} UTC` : '?'; };
+/** The ids a `reply-to-mine` / `in-thread-with-me` rule calls mine: the owner's (`ownerMine`), what this principal sent
+ *  (`sentByMe` + the index ledger `sentIds`), and a caller's legacy `mine`. */
+function mineOf(ctx) {
+  const out = new Set();
+  for (const s of [ctx && ctx.mine, ctx && ctx.ownerMine, ctx && ctx.sentIds]) if (s instanceof Set) for (const v of s) out.add(str(v));
+  if (ctx && ctx.sentByMe instanceof Map) for (const v of ctx.sentByMe.keys()) out.add(str(v));
+  return out;
+}
+/**
+ * lane reply-to-sent: DOES THIS RECORD ANSWER A MESSAGE THIS PRINCIPAL SENT — `{why, sent}` (the shape's why and the
+ * answered sent entry `{at, words, subject}`) or null. Reads `ctx.sentByMe` only; a record that IS a sent one never.
+ */
+function sentHit(record, ctx) {
+  const rec = record || {};
+  if (isSystemRecord(rec) || isDraftRecord(rec)) return null;   // lane lark-system-records: a notice answers nothing (nor does an unsent draft)
+  const sent = ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : null;
+  if (!sent || !sent.size) return null;
+  const self = str(rec.vendorId);
+  if (self && sent.has(self)) return null;
+  const of = (x) => (x !== null && x !== undefined && str(x) !== '' && str(x) !== self ? sent.get(str(x)) || null : null);
+  const c = (typeof ctx.kindOf === 'function' && ctx.kindOf(rec)) || {};
+  const kind = String(c.kind || 'plain');
+  const topical = !!c.topic && /^topic-/.test(kind);   // the topic gate (placeHit's, read here for the sent ids)
+  const fill = (tpl, s) => tpl.replace('{when}', clockOf(s.at)).replace('{subject}', str(s.subject || s.words).slice(0, 60));
+  // (b′) a channel with NO quote at all (`ctx.threadOnly` — `threadOnlyCaps`: Slack): every reply sits under its thread's
+  // root (thread_ts), so a record naming a sent root IS a thread reply
+  if (ctx.threadOnly) {
+    const s = of(rec.root) || of(rec.threadKey) || of(rec.replyTo);
+    if (s) return { why: fill(SENT_WHYS.thread, s), sent: s };
+  }
+  // (a) a QUOTE / reply naming one of mine (a quote inside a topic, a topic head that quotes) — parent-exact
+  const q = kind !== 'topic-reply' ? (of(c.quotes) || (!topical ? of(rec.replyTo) : null)) : null;
+  if (q) return { why: fill(SENT_WHYS.quote, q), sent: q };
+  // (b) a TOPIC reply (the classifier's topic-* — Lark 讨论串, an indexed Slack thread) under a sent parent or root. A
+  // quote CHAIN's root_id / threadKey is NEVER read: C quoting B (B quoted my A) answers B, not A (owner ruling
+  // 2026-10-08 18:00Z, B-a871)
+  if (topical) {
+    const s = of(rec.replyTo) || of(rec.root) || of(rec.threadKey);
+    if (s) return { why: fill(SENT_WHYS.thread, s), sent: s };
+  }
+  const at = Number(rec.at);
+  if (!Number.isFinite(at)) return null;
+  let newest = null;
+  for (const s of sent.values()) if (s && Number.isFinite(Number(s.at)) && Number(s.at) < at && (!newest || Number(s.at) > Number(newest.at))) newest = s;
+  if (!newest) return null;
+  // (c) a MAIL thread IS the conversation (Gmail's own threading — `kind: 'thread'` only for a mail thread): a record
+  // newer than a mail this principal sent in it. A chat without a marker is NEVER a reply (owner 2026-10-08, B-a871)
+  if (ctx.convKind === 'thread') return { why: fill(SENT_WHYS.mail, newest), sent: newest };
+  return null;
+}
+/** lane channel-reply-real (owner ruling 2026-10-08 18:00Z): a channel whose replies are ALL thread replies — it reads
+ *  vendor threads and declares no 'quote' placement (Slack: thread_ts) — so a record's root / threadKey there IS a thread
+ *  marker. Everywhere else (Lark: root_id also roots a QUOTE CHAIN) only the classifier's topic says "thread". */
+function threadOnlyCaps(caps) {
+  const t = caps && typeof caps === 'object' ? caps.threads : null;
+  return !!(t && t.read === 'vendor' && Array.isArray(t.placements) && t.placements.length > 0 && !t.placements.includes('quote'));
+}
+/**
+ * THE PLACE RULES' ONE DECISION (owner decision A, 2026-09-28): the `why` string ONE place rule fires with for ONE
+ * record, or null. Reads THE classifier (`ctx.kindOf` — a quote chain is never a thread) and `ctx.mine`.
+ */
+function placeHit(rule, record, ctx) {
+  const rec = record || {};
+  if (isSystemRecord(rec) || isDraftRecord(rec)) return null;   // lane lark-system-records; lane gmail-draft-not-a-message
+  if (rule && rule.kind === 'reply-to-sent') { const s = sentHit(rec, ctx) || (rule.infer === true ? inferHit(rec, ctx) : null); return s ? s.why : null; }   // + the judged road (lane dm-reply-infers)
+  const mine = ctx ? mineOf(ctx) : null;
+  if (!mine || !mine.size || !ctx || typeof ctx.kindOf !== 'function') return null;
+  const self = str(rec.vendorId);
+  const isMine = (x) => x !== null && x !== undefined && str(x) !== '' && str(x) !== self && mine.has(str(x));
+  const c = ctx.kindOf(rec) || {};
+  const kind = String(c.kind || 'plain');
+  const inTopic = !!c.topic && /^topic-/.test(kind);
+  // a QUOTE of one of mine — the message it quotes is mine (a quote, a quote inside a topic, a topic head that quotes)
+  const quotesMine = kind !== 'topic-reply' && isMine(c.quotes);
+  if (rule.kind === 'reply-to-mine') {
+    if (quotesMine) return WHY_QUOTED;
+    if (inTopic && (isMine(rec.replyTo) || isMine(rec.root))) return WHY_REPLY;
+    return null;
+  }
+  if (rule.kind === 'in-thread-with-me') {
+    // a NEW message IN a topic (a reply — the topic's head starts it, nobody is "in" it before it exists)
+    if (inTopic && kind !== 'topic-root' && typeof ctx.threadOf === 'function') {
+      // the topic's messages, and its root as the member names it (a root older than the log — the agent's own sent
+      // message is never echoed into it)
+      const ids = ctx.threadOf(rec);
+      if ((Array.isArray(ids) ? ids : []).concat(rec.root ? [rec.root] : []).some(isMine)) return WHY_THREAD;
+    }
+    if (quotesMine) return WHY_QUOTED;
+    return null;
+  }
+  return null;
+}
+
+/** lane dm-reply-infers: the key a judged answer rides `ctx.inferred` under — the record's id + the sent message's id
+ *  (the memo's own material: one record, one send, one judgment). */
+const inferKeyOf = (record, sent) => `${str(record && record.id)}|${str(sent && sent.id)}`;
+const inferSpanMs = (ctx) => { const h = Number(ctx && ctx.inferHours); return (Number.isFinite(h) && h >= INFER.hours.min ? Math.min(INFER.hours.max, h) : INFER.hours.def) * 3600e3; };
+/** Does a filter ask for the judged road (a `reply-to-sent` rule with `infer: true`)? The engine's pre-pass reads it. */
+function inferRuleOf(filter) { return !!filter && Array.isArray(filter.rules) && filter.rules.some((r) => r && r.kind === 'reply-to-sent' && r.infer === true); }
+/** lane reply-infer-owner-between: the KIND of one message by what it carries — a voice note (an audio attachment, or the
+ *  vendor's `[audio]` token: never transcribed here), else words (text beyond the vendor's placeholder tokens), else a
+ *  picture (an image / sticker), else a file (any other attachment or token). PURE. */
+const TURN_KINDS = Object.freeze(['text', 'voice', 'image', 'file']);
+const TOKEN_RE = /\[[^\]\n]{1,200}\]/g;
+function turnKindOf(record) {
+  const r = record || {};
+  const mimes = (Array.isArray(r.attachments) ? r.attachments : []).map((a) => lower(a && a.mime));
+  const text = str(r.text).trim();
+  const tokens = text.match(TOKEN_RE) || [];
+  if (mimes.some((m) => m.startsWith('audio/')) || tokens.some((t) => /^\[(?:audio|voice)\b/i.test(t))) return 'voice';
+  if (text.replace(TOKEN_RE, '').trim()) return 'text';
+  if (mimes.some((m) => m.startsWith('image/')) || tokens.some((t) => /^\[(?:image|sticker)\b/i.test(t))) return 'image';
+  if (mimes.length || tokens.some((t) => /^\[(?:file|video|folder|media)\b/i.test(t))) return 'file';
+  return 'text';
+}
+/** lane reply-infer-owner-between: THE TURNS BETWEEN a send and a candidate (see INFER_WHY_BETWEEN) → `{own, ownLast,
+ *  others, capped}` or null (no reader — as before). `own` = the chat owner's own messages among the newest ≤ INFER.between
+ *  strictly between the two instants, `ownLast` = the newest of them `{kind, minBefore}` (minutes before the candidate),
+ *  `others` = the rest (a peer, another agent's send), `capped` = the bound was reached (older ones may exist). */
+function inferBetween(record, sent, ctx) {
+  if (!ctx || typeof ctx.turnsBetween !== 'function') return null;
+  const from = Number(sent && sent.at), to = Number(record && record.at);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || !(from < to)) return null;
+  const got = ctx.turnsBetween(from, to);
+  if (!Array.isArray(got)) return null;   // the reader could not read: no fact (the engine said why)
+  const turns = got.filter((x) => x && Number(x.at) > from && Number(x.at) < to).sort((a, b) => Number(a.at) - Number(b.at)).slice(-INFER.between);
+  const own = turns.filter((x) => x.self === true);
+  const last = own[own.length - 1];
+  return { own: own.length, ownLast: last ? { kind: TURN_KINDS.includes(last.kind) ? last.kind : 'text', minBefore: Math.max(0, Math.round((to - Number(last.at)) / 60000)) } : null, others: turns.length - own.length, capped: turns.length >= INFER.between };
+}
+/** lane reply-infer-owner-between: the judge's `between` line — FIXED words (counts, a kind, minutes), never anybody's
+ *  words; null = no fact (no line, as before). */
+const TURN_WORDS = Object.freeze({ text: 'a text message', voice: 'a voice note (not transcribed)', image: 'a picture', file: 'a file' });
+const nOf = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+function inferBetweenLine(b) {
+  if (!b || typeof b !== 'object') return null;
+  const own = Math.max(0, Math.floor(Number(b.own) || 0)), others = Math.max(0, Math.floor(Number(b.others) || 0));
+  if (!own && !others) return 'Nobody else wrote between sent and reply.';
+  const scope = b.capped ? `In the last ${own + others} messages before the reply` : 'Between sent and reply';
+  if (!own) return `${scope}, the person who owns this chat wrote nothing; ${nOf(others, 'message')} came from others.`;
+  const l = b.ownLast || {}, m = Math.max(0, Math.round(Number(l.minBefore) || 0));
+  return `${scope}, the person who owns this chat wrote ${nOf(own, 'message')} of their own; the last one, ${TURN_WORDS[l.kind] || TURN_WORDS.text}, ${m < 1 ? 'less than a minute' : nOf(m, 'minute')} before the reply.${others ? ` ${nOf(others, 'message')} from others came between too.` : ''}`;
+}
+/** lane dm-reply-infers: THE SCOPE — is this record a CANDIDATE to judge (see INFER)? → `{sent, key, gapMin, between}` (the
+ *  newest send of this principal before it, within the span; + the turns between — lane reply-infer-owner-between) or null
+ *  (never judged — no vendor call). */
+function inferCandidate(record, ctx) {
+  const rec = record || {};
+  if (isSystemRecord(rec) || isDraftRecord(rec)) return null;   // a vendor notice answers nothing, an unsent draft neither
+  const sends = ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : null;
+  if (!sends || !sends.size || ctx.convKind === 'thread') return null;   // a mail thread: marker (c) already reads it
+  const self = str(rec.vendorId);
+  if (self && sends.has(self)) return null;   // the send itself
+  if (sentHit(rec, ctx)) return null;        // a marker hit stays the marker road — never judged
+  // UNMARKED: no reply id, no root, no quote, no topic (THE classifier's); on a thread-only channel (Slack) no thread_ts
+  if (str(rec.replyTo) || str(rec.root)) return null;
+  const c = (typeof ctx.kindOf === 'function' && ctx.kindOf(rec)) || {};
+  if (String(c.kind || 'plain') !== 'plain' || c.quotes || c.topic) return null;
+  if (ctx.threadOnly && str(rec.threadKey) && str(rec.threadKey) !== self) return null;
+  if (!str(rec.text).trim()) return null;   // no words — nothing to judge (review r1)
+  const at = Number(rec.at);
+  if (!Number.isFinite(at)) return null;
+  const span = inferSpanMs(ctx);
+  let newest = null;
+  for (const s of sends.values()) { const t = Number(s && s.at); if (Number.isFinite(t) && t < at && at - t <= span && (!newest || t > Number(newest.at))) newest = s; }
+  if (!newest || !str(newest.id)) return null;
+  return { sent: newest, key: inferKeyOf(rec, newest), gapMin: Math.max(0, Math.round((at - Number(newest.at)) / 60000)), between: inferBetween(rec, newest, ctx) };
+}
+/** lane dm-reply-infers: THE JUDGED ROAD's verdict over the pre-judged answer (`ctx.inferred`) → `{why, sent, score}` or
+ *  null (no answer, a refusal, or p < INFER.threshold — no hit). */
+function inferHit(record, ctx) {
+  const d = ctx && ctx.inferred;
+  if (!d) return null;
+  const c = inferCandidate(record, ctx);
+  if (!c) return null;
+  const a = (d instanceof Map ? d.get(c.key) : d[c.key]) || null;
+  const p = a && !a.refused && typeof a.probability === 'number' && a.probability >= 0 && a.probability <= 1 ? a.probability : null;
+  if (p === null || p < INFER.threshold) return null;
+  const own = !!c.between && c.between.own > 0;   // lane reply-infer-owner-between: the owner also wrote in between — the agent weighs it
+  return { why: (own ? INFER_WHY_BETWEEN : INFER_WHY).replace('{when}', clockOf(c.sent.at)), sent: c.sent, score: Math.round(p * 100) / 100, ...(own ? { between: { own: c.between.own, ownLast: c.between.ownLast } } : {}) };
+}
+/** lane dm-reply-infers (review r1): can the judgment CHANGE this filter's answer for this record? `any` — not when another
+ *  rule already hits (the record notifies anyway); `every` — not when another rule misses (it never can). The other rules
+ *  are matched exactly as the matcher will (the caller's ctx: decisions, subjectOf, the principal), never with a judgment. */
+function inferWorth(filter, record, ctx) {
+  const rules = filter && Array.isArray(filter.rules) ? filter.rules : [];
+  const rest = rules.filter((r) => !(r && r.kind === 'reply-to-sent' && r.infer === true));
+  if (!rest.length) return true;
+  const m = matchRecord({ ...filter, rules: rest }, record, { ...(ctx || {}), inferred: null });
+  return filter.match === 'every' ? m.hit : !m.hit;
+}
+
+/** lane webhook-l1-server: the lower-cased values a record's FACTS hold for `key` — a fact kind's own value (a line, a
+ *  party's id and name, each party of a list), else the `fields` fact's entry of that id. Never the raw body. */
+function factValuesOf(rec, key) {
+  const facts = Array.isArray(rec && rec.facts) ? rec.facts : [];
+  const words = (v) => (v && typeof v === 'object' ? [v.id, v.name] : [v]).filter((x) => typeof x === 'string' && x).map(lower);
+  const own = facts.find((f) => f && f.k === key);
+  if (own) return Array.isArray(own.v) ? own.v.flatMap(words) : words(own.v);
+  const fl = facts.find((f) => f && f.k === 'fields');
+  return fl && Array.isArray(fl.v) ? fl.v.filter((p) => p && p.id === key).flatMap((p) => words(p.name)) : [];
+}
+/** Does ONE rule hit ONE record. `ctx.now` is unused today but every rule
+ *  takes the same signature so a new kind never grows a second one. */
+function ruleHits(rule, record, ctx) {
+  const rec = record || {};
+  if (isSystemRecord(rec)) return false;   // lane lark-system-records
+  if (isDraftRecord(rec)) return false;   // lane gmail-draft-not-a-message: an unsent draft went to nobody
+  const author = rec.author || {};
+  const text = lower(rec.text);
+  switch (rule.kind) {
+    case 'mention': {
+      const want = lower(rule.value);
+      const ms = Array.isArray(rec.mentions) ? rec.mentions : [];
+      if (ms.some((m) => m && (lower(m.id) === want || lower(m.name) === want))) return true;
+      // a self-mention the adapter resolved into the text (`@name`) counts too
+      const selfIds = Array.isArray(ctx && ctx.selfIds) ? ctx.selfIds.map(lower) : [];
+      if (selfIds.includes(want) && ms.some((m) => m && (selfIds.includes(lower(m.id)) || selfIds.includes(lower(m.name))))) return true;
+      return text.includes('@' + want);
+    }
+    case 'keyword': return text.includes(lower(rule.value));
+    // judged at save; matched on the FOLDED text cut to REGEX_TEXT_MAX (flags `iu` — no lower-casing needed)
+    case 'regex': { const re = compiledRegex(str(rule.value)); return !!re && re.test(regexText(rec.text)); }
+    case 'not-contains': return !text.includes(lower(rule.value));
+    case 'sender-in-group': {
+      const id = lower(author.id), name = lower(author.name);
+      return rule.members.some((m) => { const w = lower(m); return w && (w === id || w === name); });
+    }
+    case 'from-address': {
+      const want = lower(rule.value);
+      return !!want && (lower(author.id).includes(want) || lower(author.name).includes(want));
+    }
+    case 'subject': {
+      // lane dc-channels-blocks (C5): the subject is the ADAPTER's fact (`ctx.subjectOf` — its declared recordFacts)
+      const s = lower(ctx && typeof ctx.subjectOf === 'function' ? ctx.subjectOf(rec) : null);
+      return !!s && s.includes(lower(rule.value));
+    }
+    // lane channel-rich: a mail's formatted BODY (`role: 'body'`) is the message, never an attachment it carries
+    case 'has-attachment': return Array.isArray(rec.attachments) && rec.attachments.some((a) => a && a.role !== 'body');
+    case 'time-window': {
+      const at = Number(rec.at);
+      if (!Number.isFinite(at)) return false;
+      const local = at + (rule.tzOffsetMinutes || 0) * 60000;
+      const minutes = Math.floor((local % DAY_MS + DAY_MS) % DAY_MS / 60000);
+      const from = hhmm(rule.from), to = hhmm(rule.to);
+      if (from === null || to === null) return false;
+      return from <= to ? (minutes >= from && minutes < to) : (minutes >= from || minutes < to);   // a window past midnight wraps
+    }
+    case 'reply-to-mine': case 'in-thread-with-me': case 'reply-to-sent': return placeHit(rule, rec, ctx) !== null;
+    case 'fact': return factValuesOf(rec, rule.key).some((x) => x === lower(rule.value));
+    case 'decision': return decisionHit(rule, rec, ctx) !== null;   // lane decision-rule: the pre-judged answer only
+    default: return false;
+  }
+}
+
+/**
+ * THE MATCHER. `{ hit, why[] }` — `why` lists the rule strings that fired
+ * (for `every`, all of them; for `any`, the ones that hit). A filter that is
+ * null/invalid never hits: fail closed, a wake is money.
+ */
+function matchRecord(filter, record, ctx = {}) {
+  // lane lark-system-records (owner's DM 2026-10-08): a vendor SYSTEM notice (a recall, a join — src/channel-record.js) is nobody's
+  // message: no rule of any kind matches it, so no wake, no stash, no For-you
+  if (isSystemRecord(record)) return { hit: false, why: [] };
+  // lane gmail-draft-not-a-message (fb-9aa1d3bd1e): nor is the account's unsent DRAFT — nobody received it, nobody answers it
+  if (isDraftRecord(record)) return { hit: false, why: [] };
+  const f = filter && typeof filter === 'object' && Array.isArray(filter.rules) ? filter : null;
+  if (!f || !f.rules.length) return { hit: false, why: [] };
+  const match = MATCH_MODES.includes(f.match) ? f.match : 'any';
+  const why = [];
+  let hits = 0;
+  let sent = null;   // lane reply-to-sent: the sent message this record answers (the hand-over line names it)
+  let score = null;  // lane dm-reply-infers: a JUDGED answer's score (the hand-over line and the pending row keep it)
+  let between = null;   // lane reply-infer-owner-between: the owner's own messages between the send and this one (a judged hit)
+  for (const rule of f.rules) {
+    if (!rule || !RULE_KINDS.includes(rule.kind)) continue;
+    if (rule.kind === 'reply-to-sent' && !sent) { const s = sentHit(record, ctx) || (rule.infer === true ? inferHit(record, ctx) : null); if (s) { sent = s.sent; if (s.score !== undefined) score = s.score; if (s.between) between = s.between; } }
+    // a place rule names the clause that fired ("quoted your message" / "a reply to …" / "in a thread …")
+    const placeWhy = PLACE_RULE_KINDS.includes(rule.kind) ? placeHit(rule, record, ctx) : undefined;
+    const named = placeWhy !== undefined ? placeWhy : rule.kind === 'decision' ? decisionHit(rule, record, ctx) : undefined;   // lane decision-rule: the verdict's own words
+    if (named !== undefined ? named !== null : ruleHits(rule, record, ctx)) { hits++; why.push(named || ruleWhy(rule)); }
+    else if (match === 'every') return { hit: false, why: [] };
+  }
+  const hit = match === 'every' ? hits === f.rules.length && hits > 0 : hits > 0;
+  return { hit, why: hit ? why : [], ...(hit && sent ? { sent: { at: Number(sent.at) || null, words: str(sent.words).slice(0, 80), ...(score !== null ? { score } : {}), ...(between ? { between } : {}) } } : {}) };
+}
+
+// ── the estimate ───────────────────────────────────────────────────────────
+
+/**
+ * How many of `records` (the stored history the caller read, any order)
+ * the filter would have matched over the last `days`.
+ *
+ *   sampled    the caller's reader stopped at its cap BEFORE reaching the
+ *              window's start (`opts.capHit`) — older records exist unread
+ *   truncated  the corpus is shorter than the window: the oldest record is
+ *              younger than `now - days`, so the rate is over `windowDays`
+ *              (the span actually covered), never over a window we did not see
+ *
+ * A filter of `null` estimates `mode:'all'` — every record matches.
+ */
+function estimate(filter, records, { days = 7, now = Date.now(), capHit = false, ctx = {} } = {}) {
+  const win = Math.max(1, Number(days) || 7);
+  const since = now - win * DAY_MS;
+  const list = (Array.isArray(records) ? records : []).filter((r) => r && Number.isFinite(Number(r.at)) && Number(r.at) >= since && Number(r.at) <= now);
+  let oldest = null;
+  let matched = 0;
+  for (const r of list) {
+    const at = Number(r.at);
+    if (oldest === null || at < oldest) oldest = at;
+    if (!isSystemRecord(r) && !isDraftRecord(r) && (!filter || matchRecord(filter, r, ctx).hit)) matched++;   // lane lark-system-records: a notice is never counted
+  }
+  const total = list.length;
+  // Honest span: a corpus younger than the window rates over what it covers.
+  // `truncated` is a claim about the DATA, so it needs at least one record —
+  // an empty corpus is "no evidence", and the reader's `capHit` is what says
+  // whether more exists.
+  const spanDays = oldest === null ? win : Math.max(1 / 24, (now - oldest) / DAY_MS);
+  const truncated = oldest !== null && !capHit && spanDays < win * 0.98;
+  const windowDays = truncated ? Math.round(spanDays * 100) / 100 : win;
+  const per = (n) => Math.round((n / windowDays) * 10) / 10;
+  // lane decision-rule: a decision rule's hits are unknown until it runs (the estimate never calls the judge) — say how
+  // many records a day it would JUDGE (the editor's cost line), never a hit rate it cannot know
+  const dec = decisionRulesOf(filter).length;
+  const judged = dec ? list.filter((r) => !isSystemRecord(r) && !isDraftRecord(r)).length : 0;
+  return { matched, total, matchedPerDay: per(matched), totalPerDay: per(total), windowDays, sampled: !!capHit, truncated, ...(dec ? { decision: { rules: dec, judgedPerDay: per(judged), hitsUnknown: true } } : {}) };
+}
+
+// ── the assignment ─────────────────────────────────────────────────────────
+
+/**
+ * Validate + normalize an assignment. `caps` are the two READ-TIME facts the
+ * authority cap needs: `{ offersSend: boolean, sendWhy, policyRequiresReview:
+ * boolean }`. `authority:'send'` is REFUSED when either cap says no — the
+ * editor never drew it, so a request carrying it is a stale client or a
+ * hand-built call, and both get the named reason back.
+ *
+ * Every other refusal carries `why` — a code from the CLOSED `ASSIGN_REFUSALS`
+ * (hotfix 2026-09-26): the client words the code (channel-words), the English
+ * `error` stays the contract. `filter-missing` is a filtered assignment with
+ * no filter id — a caller that carries its filter INLINE threads the id it
+ * will store it under BEFORE calling this (channels-engine's scope grains).
+ */
+function validateAssignment(input, caps = {}) {
+  const no = (why, error) => ({ ok: false, error, why });
+  const a = input && typeof input === 'object' ? input : null;
+  if (!a) return no('not-an-object', 'an assignment must be an object');
+  const p = a.principal && typeof a.principal === 'object' ? a.principal : null;
+  if (!p || !PRINCIPAL_KINDS.includes(p.kind)) return no('principal', `principal.kind must be ${PRINCIPAL_KINDS.join('|')}`);
+  const pid = p.kind === 'everyone' ? EVERYONE_ID : str(p.id).trim();
+  if (!pid) return no('principal', 'principal.id is required');
+  const mode = a.mode === undefined ? 'all' : a.mode;
+  if (!ASSIGN_MODES.includes(mode)) return no('mode', `mode must be ${ASSIGN_MODES.join('|')}`);
+  const filterId = a.filterId === undefined || a.filterId === null ? null : str(a.filterId).trim() || null;
+  if (mode === 'filtered' && !filterId) return no('filter-missing', "mode 'filtered' needs a filterId");
+  const notify = a.notify === undefined ? 'wake' : a.notify;
+  if (!NOTIFY_MODES.includes(notify)) return no('notify', `notify must be ${NOTIFY_MODES.join('|')}`);
+  let digestMinutes = a.digestMinutes === undefined || a.digestMinutes === null || a.digestMinutes === '' ? DEFAULT_DIGEST_MINUTES : Number(a.digestMinutes);
+  if (!Number.isFinite(digestMinutes)) return no('digest', 'digestMinutes must be a number');
+  digestMinutes = Math.min(MAX_DIGEST_MINUTES, Math.max(MIN_DIGEST_MINUTES, Math.round(digestMinutes)));
+  const authority = a.authority === undefined ? 'draft' : a.authority;
+  if (!AUTHORITIES.includes(authority)) return no('authority', `authority must be ${AUTHORITIES.join('|')}`);
+  if (authority === 'send') {
+    const cap = authorityCap(caps);
+    if (cap) return { ok: false, error: `authority 'send' is not available here: ${cap}`, code: 'authority-capped', why: cap };
+  }
+  let dailyWakeCap = a.dailyWakeCap === undefined || a.dailyWakeCap === null || a.dailyWakeCap === '' ? DEFAULT_DAILY_WAKE_CAP : Number(a.dailyWakeCap);
+  if (!Number.isFinite(dailyWakeCap) || dailyWakeCap < 0) return no('wake-cap', 'dailyWakeCap must be a number ≥ 0');
+  dailyWakeCap = Math.min(MAX_DAILY_WAKE_CAP, Math.round(dailyWakeCap));
+  // R4 verify r5: a digest IS a paced wake — a cap of 0 would never deliver.
+  if (notify === 'digest' && dailyWakeCap === 0) return no('digest-cap-zero', 'a digest is a paced wake — set the daily cap to at least 1, or remove the notification');
+  // P3 (design §9.3, decision 8): an outbox RECEIPT never wakes the agent by
+  // default (it rides the next turn); an assignment may opt in — a billed
+  // turn per approval, said out loud in the editor.
+  const receiptWake = a.receiptWake === true;
+  // 2026-09-26: the GRAIN this assignment was written at (`{kind, id}` —
+  // conversation `<adapterId>/<convId>`, account `<adapterId>`, pattern `<id>`).
+  // Optional (a pre-grain conversation record has none); an unknown kind is refused.
+  let scope = null;
+  if (a.scope !== undefined && a.scope !== null) {
+    const sc = a.scope && typeof a.scope === 'object' ? a.scope : null;
+    if (!sc || !ASSIGN_SCOPES.includes(sc.kind)) return no('scope', `scope.kind must be ${ASSIGN_SCOPES.join('|')}`);
+    const sid = str(sc.id).trim();
+    if (!sid) return no('scope', 'scope.id is required');
+    scope = { kind: sc.kind, id: sid.slice(0, 512) };
+  }
+  return {
+    ok: true,
+    assignment: { principal: { kind: p.kind, id: pid.slice(0, 256), name: p.kind === 'everyone' ? null : (str(p.name).trim().slice(0, 200) || null) }, mode, filterId, notify, digestMinutes, authority, dailyWakeCap, receiptWake, ...(scope ? { scope } : {}) },
+  };
+}
+
+/** Why `authority:'send'` is capped RIGHT NOW (null = not capped). Policy is
+ *  checked first only because its sentence is the more actionable one; both
+ *  caps only narrow, so the order cannot change the answer. */
+function authorityCap({ offersSend = false, sendWhy = null, policyRequiresReview = true } = {}) {
+  const c = authorityCapCode({ offersSend, sendWhy, policyRequiresReview });
+  return c ? authorityCapText(c) : null;
+}
+/** The same cap as STRUCTURE (a3 i18n): `{code:'policy-review'}` or
+ *  `{code:'send-not-offered', sendWhy}` — the client words it with its own
+ *  `t` (+ channel-caps' `sendWhyText` for the reason); the route's `error`
+ *  and the stored `authorityWhy` keep the English sentence as the contract. */
+function authorityCapCode({ offersSend = false, sendWhy = null, policyRequiresReview = true } = {}) {
+  if (policyRequiresReview) return { code: 'policy-review', sendWhy: null };
+  if (!offersSend) return { code: 'send-not-offered', sendWhy: sendWhy || 'unknown' };
+  return null;
+}
+function authorityCapText(cap, { t = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(s)), sendWhyText = (w) => String(w || 'unknown') } = {}) {
+  if (!cap) return '';
+  if (cap.code === 'policy-review') return t('this channel requires review before anything is sent');
+  if (cap.code === 'send-not-offered') return t('sending is not offered on this conversation ({why})', { why: sendWhyText(cap.sendWhy || 'unknown', { t }) });
+  return String(cap.code || '');
+}
+
+/**
+ * THE READ-TIME CLAMP (§7.3 (a)). A stored `authority:'send'` the current
+ * policy or capability forbids reads as `draft` WITH the reason; the stored
+ * bytes are untouched, so relaxing the policy later does not silently mint a
+ * permission — the user re-chooses.
+ */
+function effectiveAuthority(assignment, caps = {}) {
+  const a = assignment && typeof assignment === 'object' ? assignment : null;
+  if (!a) return { authority: 'draft', clamped: false, why: null };
+  if (a.authority !== 'send') return { authority: 'draft', clamped: false, why: null };
+  const cap = authorityCapCode(caps);
+  if (cap) return { authority: 'draft', clamped: true, why: authorityCapText(cap), whyCap: cap };
+  return { authority: 'send', clamped: false, why: null };
+}
+
+// ── R4: ACCESS and WATCHERS — two lists per grain, access first ─────────
+
+/** `kind:id` — the ONE identity of a principal inside a grain's lists. The everyone principal is `everyone:*`
+ *  whatever id it carries; a FAN-OUT target (a principal `fanOutWatchers` made, never a stored one) is
+ *  `everyone:*><cid>` — its own pending hits, timers, scope chain and ledger. */
+function principalKey(p) {
+  if (!p || typeof p !== 'object' || !PRINCIPAL_KINDS.includes(p.kind)) return null;
+  if (p.kind === 'everyone') { const tg = str(p.target).trim(); return `everyone:${EVERYONE_ID}${tg ? FAN_SEP + tg : ''}`; }
+  // lane reply-to-sent: a GROUP row's per-member item (`fanOutWatchers`) is keyed by its member — never a stored row
+  if (p.kind === 'group' && str(p.target).trim() && str(p.id).trim()) return `group:${str(p.id).trim()}${FAN_SEP}${str(p.target).trim()}`;
+  return str(p.id).trim() ? `${p.kind}:${str(p.id).trim()}` : null;
+}
+function cleanPrincipal(p0) {
+  const p = p0 && typeof p0 === 'object' ? p0 : null;
+  if (!p || !PRINCIPAL_KINDS.includes(p.kind)) return refuse('bad-principal', `principal.kind must be ${PRINCIPAL_KINDS.join('|')}`);
+  // ALL AGENTS: ONE spelling on disk — `{kind:'everyone', id:'*'}`, no name (its words are the reader's), never a target
+  if (p.kind === 'everyone') return { ok: true, principal: { kind: 'everyone', id: EVERYONE_ID, name: null } };
+  const pid = str(p.id).trim();
+  if (!pid) return refuse('bad-principal', 'principal.id is required');
+  return { ok: true, principal: { kind: p.kind, id: pid.slice(0, 256), name: str(p.name).trim().slice(0, 200) || null } };
+}
+const principalWords = (p) => (p.kind === 'everyone' ? 'all agents' : `${p.kind} ${p.name || p.id}`);
+
+/**
+ * ONE ACCESS row `{principal, authority}` — who may see and act. `caps` are
+ * the authority cap's two facts (see `authorityCap`); `authority:'send'` is
+ * refused where they say no (`authority-capped`, the reason named).
+ */
+function validateAccessRow(input, caps = {}) {
+  const a = input && typeof input === 'object' ? input : null;
+  if (!a) return refuse('bad-access', 'an access row must be an object {principal, authority}', { why: 'not-an-object' });
+  const pv = cleanPrincipal(a.principal);
+  if (!pv.ok) return { ...pv, code: 'bad-access', why: 'principal' };
+  const authority = a.authority === undefined || a.authority === null ? 'draft' : a.authority;
+  if (!AUTHORITIES.includes(authority)) return refuse('bad-access', `authority must be ${AUTHORITIES.join('|')}`, { why: 'authority' });
+  if (authority === 'send') {
+    const cap = authorityCap(caps);
+    if (cap) return { ok: false, code: 'authority-capped', error: `authority 'send' is not available here: ${cap}`, why: cap, principal: pv.principal };
+  }
+  return { ok: true, row: { principal: pv.principal, authority } };
+}
+/** A grain's whole ACCESS list: one row per principal, at most MAX_ACCESS_ROWS. */
+function validateAccess(list, caps = {}) {
+  if (!Array.isArray(list)) return refuse('bad-access', 'access must be a list of {principal, authority}', { why: 'not-an-object' });
+  if (list.length > MAX_ACCESS_ROWS) return refuse('too-many-rows', `a grain holds at most ${MAX_ACCESS_ROWS} access rows`, { max: MAX_ACCESS_ROWS });
+  const rows = [];
+  const seen = new Set();
+  for (let i = 0; i < list.length; i++) {
+    const v = validateAccessRow(list[i], caps);
+    if (!v.ok) return { ...v, index: i };
+    const k = principalKey(v.row.principal);
+    if (seen.has(k)) return refuse('duplicate-principal', `${principalWords(v.row.principal)} is listed twice — one access row per agent or group`, { index: i, principal: v.row.principal });
+    seen.add(k);
+    rows.push(v.row);
+  }
+  return { ok: true, access: rows };
+}
+
+/**
+ * ONE WATCHER row — who is WOKEN and on what: `{principal, notify:'wake'|
+ * 'digest', mode:'all'|'filtered', filterId, digestMinutes, dailyWakeCap,
+ * receiptWake}`. It carries NO authority (that is the access row's). The
+ * defaults are the design's numbers.
+ */
+/** lane webhook-l1-server: `allNotify: 'digest'` = a conversation whose options declare a per-path wake budget
+ *  (`wakesPerHour`) — there a `mode: 'all'` row that names no notify DEFAULTS to a digest ("every call" is one paced
+ *  wake per window, never one per call); a row that names `wake` keeps it. */
+function validateWatcher(input, { allNotify = null } = {}) {
+  const a = input && typeof input === 'object' ? input : null;
+  if (!a) return refuse('bad-watcher', 'a watcher must be an object', { why: 'not-an-object' });
+  const pv = cleanPrincipal(a.principal);
+  if (!pv.ok) return { ...pv, code: 'bad-watcher', why: 'principal' };
+  const mode = a.mode === undefined ? 'all' : a.mode;
+  if (!ASSIGN_MODES.includes(mode)) return refuse('bad-watcher', `mode must be ${ASSIGN_MODES.join('|')}`, { why: 'mode' });
+  const filterId = a.filterId === undefined || a.filterId === null ? null : str(a.filterId).trim() || null;
+  if (mode === 'filtered' && !filterId) return refuse('bad-watcher', "mode 'filtered' needs a filterId", { why: 'filter-missing' });
+  const notify = a.notify === undefined ? (mode === 'all' && allNotify === 'digest' ? 'digest' : 'wake') : a.notify;
+  if (!NOTIFY_MODES.includes(notify)) return refuse('bad-watcher', `notify must be ${NOTIFY_MODES.join('|')}`, { why: 'notify' });
+  let digestMinutes = a.digestMinutes === undefined || a.digestMinutes === null || a.digestMinutes === '' ? DEFAULT_DIGEST_MINUTES : Number(a.digestMinutes);
+  if (!Number.isFinite(digestMinutes)) return refuse('bad-watcher', 'digestMinutes must be a number', { why: 'digest' });
+  digestMinutes = Math.min(MAX_DIGEST_MINUTES, Math.max(MIN_DIGEST_MINUTES, Math.round(digestMinutes)));
+  let dailyWakeCap = a.dailyWakeCap === undefined || a.dailyWakeCap === null || a.dailyWakeCap === '' ? DEFAULT_DAILY_WAKE_CAP : Number(a.dailyWakeCap);
+  if (!Number.isFinite(dailyWakeCap) || dailyWakeCap < 0) return refuse('bad-watcher', 'dailyWakeCap must be a number ≥ 0', { why: 'wake-cap' });
+  dailyWakeCap = Math.min(MAX_DAILY_WAKE_CAP, Math.round(dailyWakeCap));
+  // R4 verify r5: a digest IS a paced wake — a cap of 0 would never deliver.
+  if (notify === 'digest' && dailyWakeCap === 0) return refuse('bad-watcher', 'a digest is a paced wake — set the daily cap to at least 1, or remove the notification', { why: 'digest-cap-zero' });
+  // lane channel-agent-watch: `delivery` (absent = a legacy row = wake) and `origin` (absent = the owner's) are kept
+  // only when spelled right — a row never gains a field it did not ask for (the grain stamp of an old row is unchanged)
+  if (a.delivery !== undefined && a.delivery !== null && !DELIVERY_MODES.includes(a.delivery)) return refuse('bad-watcher', `delivery must be ${DELIVERY_MODES.join('|')}`, { why: 'delivery' });
+  if (a.origin !== undefined && a.origin !== null && !WATCH_ORIGINS.includes(a.origin)) return refuse('bad-watcher', `origin must be ${WATCH_ORIGINS.join('|')}`, { why: 'origin' });
+  return { ok: true, watcher: { principal: pv.principal, notify, mode, filterId, digestMinutes, dailyWakeCap, receiptWake: a.receiptWake === true,
+    ...(DELIVERY_MODES.includes(a.delivery) ? { delivery: a.delivery } : {}), ...(a.origin === 'agent' ? { origin: 'agent' } : {}),
+    ...(pv.principal.kind === 'agent' && str(a.via).trim() ? { via: str(a.via).trim().slice(0, 256) } : {}) } };
+}
+/** THE ONE READER of a watcher row's delivery (the engine's hit dispatch, the dialog's row, the agent's CLI, the
+ *  proposal's words): `next-turn` | `wake`; a row that never said (written before the choice existed) = `wake`. */
+function deliveryModeOf(row) { return row && DELIVERY_MODES.includes(row.delivery) ? row.delivery : 'wake'; }
+/** Who wrote a watcher row (`agent` = the agent's own watch — listed "set by the agent"; else the owner's). */
+function watchOriginOf(row) { return row && row.origin === 'agent' ? 'agent' : 'user'; }
+
+/**
+ * WHO MAY BE NOTIFIED AT A GRAIN (lane channel-agent-watch W3 — the owner, 2026-10-01: "针对某个聊天设置通知的时候，不会
+ * 检查是否有agent有整个channel的权限"). ONE rule: access is MAX over the grain AND ITS ANCESTORS — a principal holding
+ * access on the whole account (or through a rule matching this conversation, or a visible grant of any origin here: an
+ * approved request, a hand-written grant) may be notified on this conversation without a per-chat access row; an
+ * ALL AGENTS (`everyone`) access anywhere above covers every principal. `access` = the grain's own rows; `inherited`
+ * = principal keys (or rows / principals) granted above it. → a Set of principal keys (`everyone:*` = all).
+ */
+function eligibleKeys({ access = [], inherited = [] } = {}) {
+  const out = new Set();
+  const add = (x) => {
+    if (typeof x === 'string') { if (x) out.add(x.startsWith(`everyone:${EVERYONE_ID}`) ? `everyone:${EVERYONE_ID}` : x); return; }
+    const p = x && x.principal ? x.principal : x;
+    const k = principalKey(p && p.kind === 'everyone' ? { kind: 'everyone', id: EVERYONE_ID } : p);
+    if (k) out.add(k);
+  };
+  for (const r of Array.isArray(access) ? access : []) add(r);
+  for (const r of inherited instanceof Set ? [...inherited] : Array.isArray(inherited) ? inherited : []) add(r);
+  return out;
+}
+/** Does that set cover this principal (itself, or All agents)? An All-agents WATCHER needs an All-agents access.
+ *  lane notify-rules-r2 (owner inc-muxt96t5-pk42: "lark 授权给了'工作'组，为啥通知里不能选工作组里的成员"): a SESSION
+ *  watcher saved as a member of an access-holding group carries `via` (that group's id) — the group's access row
+ *  covers it at READ (PURE: no roster here); WHETHER IT IS STILL A MEMBER is judged at save (`validateWatchers`'
+ *  `members`) and on every wake (`memberStill`, the live roster) — a session that left the group is never woken. */
+function eligibleFor(keys, principal, row = null) {
+  const k = principalKey(principal);
+  if (!k || !keys) return false;
+  if (keys.has(k)) return true;
+  if (principal.kind === 'agent' && row && row.via && keys.has(principalKey({ kind: 'group', id: str(row.via) }))) return true;   // its group's access row covers it (membership: memberStill, at the wake)
+  return principal.kind !== 'everyone' && keys.has(`everyone:${EVERYONE_ID}`);
+}
+/** THE MEMBERSHIP CROSSWALK's one question: the access-holding groups (`keys`' `group:` rows) session `cid` is a
+ *  member of NOW — `members` = the live roster `[{cid, groups:[gid…]}]` (server: liveSessions, the same crosswalk the
+ *  group round-robin wakes over; the dialog: the sidebar roster). → the first such group id, or null. */
+function memberVia(keys, cid, members = []) {
+  const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(cid));
+  if (!s || !keys) return null;
+  // lane grants-unify: the access-holding groups as ONE row, judged by THE model with the member's facts
+  const to = [...keys].filter((k) => /^group:/.test(k) && !k.includes(FAN_SEP)).map((k) => ({ kind: 'group', id: k.slice(6) }));
+  const v = to.length ? GM.admits([{ door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [] }) : null;
+  return v && v.ok && v.entry.kind === 'group' ? v.entry.id : null;
+}
+/** Is a `via` watcher's session still a member of its group (the wake-time re-judge)? A row without `via` is not
+ *  this rule's to judge (true). */
+function memberStill(row, members = []) {
+  if (!row || !row.via || !row.principal || row.principal.kind !== 'agent') return true;
+  const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(row.principal.id));
+  return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [] }).ok;
+}
+/**
+ * A grain's whole WATCHERS list against ITS OWN access list: one row per
+ * principal, and EVERY watcher's principal must hold access at this grain —
+ * a watcher without access is refused BY NAME (`watcher-needs-access`):
+ * notification is the second operation, access is its prerequisite.
+ */
+function validateWatchers(list, access = [], { inherited = [], members = [], allNotify = null } = {}) {
+  if (!Array.isArray(list)) return refuse('bad-watcher', 'watchers must be a list', { why: 'not-an-object' });
+  if (list.length > MAX_WATCHER_ROWS) return refuse('too-many-rows', `a grain holds at most ${MAX_WATCHER_ROWS} watchers`, { max: MAX_WATCHER_ROWS });
+  // lane channel-agent-watch W3: access at THIS grain or ABOVE it (the account, a matching rule, a visible grant here)
+  const keys = eligibleKeys({ access, inherited });
+  const rows = [];
+  const seen = new Set();
+  for (let i = 0; i < list.length; i++) {
+    const v = validateWatcher(list[i], { allNotify });
+    if (!v.ok) return { ...v, index: i };
+    const k = principalKey(v.watcher.principal);
+    if (seen.has(k)) return refuse('duplicate-principal', `${principalWords(v.watcher.principal)} is listed twice — one notification per agent or group`, { index: i, principal: v.watcher.principal });
+    // a session in an access-holding group is eligible AS ITSELF (its own row, cap and ledger), `via` that group
+    const via = !keys.has(k) && v.watcher.principal.kind === 'agent' ? memberVia(keys, v.watcher.principal.id, members) : null;
+    if (via) v.watcher.via = via; else delete v.watcher.via;   // `via` is the server's finding, never the writer's claim
+    if (!eligibleFor(keys, v.watcher.principal, v.watcher)) return refuse('watcher-needs-access', `${principalWords(v.watcher.principal)} has no access here — grant access first (a notification needs access here or on the whole account)`, { index: i, principal: v.watcher.principal });
+    seen.add(k);
+    rows.push(v.watcher);
+  }
+  return { ok: true, watchers: rows };
+}
+
+/**
+ * THE COMPATIBILITY WRITE: a pre-split single assignment → ONE access row +
+ * ONE watcher row for its principal (the stored extras — timestamps, the
+ * estimate, the watcher's own pace ledger — ride along). PURE.
+ */
+function splitAssignment(a0) {
+  const a = a0 && typeof a0 === 'object' ? a0 : null;
+  if (!a || !principalKey(a.principal)) return null;
+  const principal = { kind: a.principal.kind, id: str(a.principal.id).trim(), name: a.principal.name || null };
+  const stamp = { ...(a.createdAt ? { createdAt: a.createdAt } : {}), ...(a.updatedAt ? { updatedAt: a.updatedAt } : {}), ...(a.createdBy ? { createdBy: a.createdBy } : {}) };
+  const access = { principal, authority: a.authority === 'send' ? 'send' : 'draft', ...stamp };
+  const watcher = {
+    principal, notify: NOTIFY_MODES.includes(a.notify) ? a.notify : 'wake', mode: ASSIGN_MODES.includes(a.mode) ? a.mode : 'all', filterId: a.filterId || null,
+    digestMinutes: Number.isFinite(Number(a.digestMinutes)) ? Number(a.digestMinutes) : DEFAULT_DIGEST_MINUTES,
+    dailyWakeCap: Number.isFinite(Number(a.dailyWakeCap)) ? Number(a.dailyWakeCap) : DEFAULT_DAILY_WAKE_CAP,
+    receiptWake: a.receiptWake === true, ...stamp,
+    ...(a.estimateAtSet ? { estimateAtSet: a.estimateAtSet } : {}),
+    stats: a.stats && typeof a.stats === 'object' ? a.stats : { wakes: [], hits: [] },
+  };
+  return { access, watcher };
+}
+
+/**
+ * THE ONE READER of a grain's two lists. A record written before the split
+ * (a top-level `principal` on an account / pattern record; `legacy` = a
+ * conversation's `assignment`) reads as one access row + one watcher row for
+ * its principal — MERGED with the lists already present (a principal the
+ * list names is never doubled), never a fallback that hides one of them.
+ * Rows without a valid principal are dropped.
+ */
+function grainOf(rec, legacy = undefined, { inherited = [] } = {}) {
+  const { access, watchers } = grainRowsOf(rec, legacy);
+  // R4 verify r2 (2026-09-27): THE INVARIANT HOLDS AT READ, NOT ONLY AT WRITE.
+  // A notification row whose principal holds no access row at this grain (a
+  // hand-edited store, a copy from another version — every product write
+  // keeps the two lists in ONE update) is INERT: never woken, never listed,
+  // never a ledger. `validateWatchers` refuses it by name at write time; the
+  // engine's boot census names the rows this drops.
+  // lane channel-agent-watch W3: "access" = this grain's rows OR the ones above it (`inherited`, the caller's: the
+  // account, a matching rule, a visible grant) — the same rule `validateWatchers` writes by
+  const keys = eligibleKeys({ access, inherited });
+  return { access, watchers: watchers.filter((w) => eligibleFor(keys, w.principal, w)) };
+}
+/** A grain's rows AS STORED (the legacy lift merged, rows without a valid principal dropped) — every notification row,
+ *  active or inert; `grainOf` judges them, `grainAsFired` keeps both halves. */
+function grainRowsOf(rec, legacy = undefined) {
+  const r = rec && typeof rec === 'object' ? rec : {};
+  const ok = (x) => x && typeof x === 'object' && !!principalKey(x.principal);
+  const access = Array.isArray(r.access) ? r.access.filter(ok) : [];
+  const watchers = Array.isArray(r.watchers) ? r.watchers.filter(ok) : [];
+  const old = legacy !== undefined ? legacy : (r.principal ? r : null);
+  const sp = old ? splitAssignment(old) : null;
+  if (sp) {
+    const k = principalKey(sp.access.principal);
+    if (!access.some((x) => principalKey(x.principal) === k)) access.push(sp.access);
+    if (!watchers.some((x) => principalKey(x.principal) === k)) watchers.push(sp.watcher);
+  }
+  return { access, watchers };
+}
+/**
+ * THE GRAIN AS THE ENGINE FIRES ON IT (lane wake-approve-card, acceptance round 5 — 主开发: «"held" is read by the SAME
+ * reader that fires; a stored wake row is held whether active or inert»). ONE reader for one grain, the one
+ * `effectiveGrants` walks: `kind` 'account' is read with the account-scope grants (`accountKeys`), 'pattern' (a rule) with
+ * the ACCOUNT's access rows + those grants (`account` = the account's record), 'conversation' with everything above it
+ * (`above`). → `{access, watchers, stored, inert}`: `watchers` = the rows in effect (a principal with access here or
+ * above), `stored` = EVERY notification row stored on the grain, `inert` = stored − in effect (never woken now — a write
+ * that gives its principal access again makes it live). The engine's «held» (wakeHeldAt), its grain writer (setGrain)
+ * and the dialogs' lists read a grain through this — never a narrower view that drops a row.
+ */
+function grainAsFired(kind, rec, { accountKeys = [], account = null, above = [] } = {}) {
+  const inherited = kind === 'account' ? accountKeys : kind === 'pattern' ? [...grainRowsOf(account).access, ...accountKeys] : above;
+  const { access, watchers: stored } = grainRowsOf(rec);
+  const keys = eligibleKeys({ access, inherited });
+  const watchers = stored.filter((w) => eligibleFor(keys, w.principal, w));
+  return { access, watchers, stored, inert: stored.filter((w) => !watchers.includes(w)) };
+}
+
+/**
+ * THE GRAIN'S STAMP (mirror-193, 2026-09-27) — what a dialog READ, spelled so
+ * its WHOLE-LIST write can prove the lists are still the ones it drew. The
+ * Grant access… / Notify… dialogs send a grain's whole access (or watchers)
+ * list; a list drawn from a copy the server has since moved on from (the
+ * panel's broadcast-fed digest a frame behind a route write; another window;
+ * an approval landing while the dialog was open) used to REPLACE the newer
+ * list — a principal granted meanwhile silently lost its access and its
+ * notification. Every access row: principal + STORED authority (a view row
+ * clamped by the caps carries `authorityStored`) + its `updatedAt`; every
+ * watcher row: principal + its `updatedAt` (every watchers write re-stamps
+ * its rows; a wake never does). Sorted: the order a list is drawn in is not
+ * a change. The same function reads the server's rows and the client's view.
+ */
+function grainStamp(g) {
+  const r0 = g && typeof g === 'object' ? g : {};
+  const at = (x) => Number(x && (x.updatedAt || x.createdAt)) || 0;
+  const pk = (x) => principalKey(x && x.principal) || '?';
+  // one JSON line per row: a principal id is free text (a `|` or a newline in it can never re-cut a line)
+  const a = (Array.isArray(r0.access) ? r0.access : []).map((x) => JSON.stringify(['a', pk(x), (x && (x.authorityStored || x.authority)) || '', at(x)])).sort();
+  const w = (Array.isArray(r0.watchers) ? r0.watchers : []).map((x) => JSON.stringify(['w', pk(x), at(x)])).sort();
+  // lane grants-unify: the members LEFT OUT («除了») of the access row (`except`) and of the watch row (`watchExcept`) are
+  // facts of the lists too — a line each, only when there are some (a grain with none stamps exactly as before)
+  const xk = (p) => GM.principalKey(GM.bareOf(p)) || '?';
+  const x = (Array.isArray(r0.except) ? r0.except : []).map((p) => JSON.stringify(['x', xk(p)])).sort();
+  const y = (Array.isArray(r0.watchExcept) ? r0.watchExcept : []).map((p) => JSON.stringify(['y', xk(p)])).sort();
+  return [...a, ...w, ...x, ...y].join('\n');
+}
+/**
+ * THE WRITE'S VERDICT on its base: `base` absent (an agent route, a script,
+ * a caller that predates the stamp) = unconditional, as before; `base` the
+ * stamp of the grain as it stands NOW = ok; anything else is refused BY NAME
+ * (`grain-changed`) — the writer re-reads and shows the user the list as it
+ * is, never overwrites it. The refusal names the principals that differ, so
+ * the words can say who arrived or left.
+ */
+function grainBaseVerdict(current, base) {
+  if (base === undefined || base === null) return { ok: true };
+  if (typeof base !== 'string') return refuse('bad-request', 'base must be the grain stamp the reader was given (a string)');
+  const now = grainStamp(current);
+  if (now === base) return { ok: true };
+  const keysOf = (stamp) => new Set(String(stamp).split('\n').map((l) => { try { const v = JSON.parse(l); return Array.isArray(v) ? v[1] : null; } catch { return null; } }).filter(Boolean));
+  const was = keysOf(base), is = keysOf(now);
+  return {
+    ok: false, code: 'grain-changed',
+    error: 'the access / notification lists changed since they were read — read them again and save again (nothing was written)',
+    added: [...is].filter((k) => !was.has(k)), removed: [...was].filter((k) => !is.has(k)),
+  };
+}
+
+/** The fields of a pre-split single assignment on an account / pattern
+ *  record — what `liftGrainRecord` moves into the two lists. */
+const LEGACY_ASSIGNMENT_FIELDS = Object.freeze(['principal', 'mode', 'filterId', 'notify', 'digestMinutes', 'authority', 'dailyWakeCap', 'receiptWake', 'stats', 'estimateAtSet', 'createdBy']);
+/**
+ * THE MIGRATION'S ROW TRANSFORM for an account / pattern record (PURE): a
+ * record carrying a top-level `principal` (the pre-split shape) becomes
+ * `{…the grain's own fields, access:[…], watchers:[…]}` — its principal as
+ * one access row + one watcher row (the pace ledger rides on the watcher).
+ * Anything else is returned unchanged (`changed:false`) — idempotent.
+ */
+function liftGrainRecord(rec) {
+  if (!rec || typeof rec !== 'object' || !rec.principal) return { changed: false, rec };
+  const g = grainOf(rec);
+  const out = {};
+  for (const [k, v] of Object.entries(rec)) if (!LEGACY_ASSIGNMENT_FIELDS.includes(k)) out[k] = v;
+  out.access = g.access;
+  out.watchers = g.watchers;
+  return { changed: true, rec: out };
+}
+
+/**
+ * Round-robin over a group's LIVE members. `cursor` is the index state kept
+ * in the index (§7.3); a member list that shrank wraps. No members ⇒ null:
+ * the caller STASHES for the next turn, never wakes everybody.
+ */
+function pickRoundRobin(members, cursor = 0) {
+  const list = (Array.isArray(members) ? members : []).filter(Boolean);
+  if (!list.length) return { id: null, cursor: Number.isFinite(cursor) ? cursor : 0 };
+  const i = ((Number.isFinite(cursor) ? Math.floor(cursor) : 0) % list.length + list.length) % list.length;
+  return { id: list[i], cursor: i + 1 };
+}
+
+/**
+ * PACING (§7.4, layer one): may this assignment wake again now? `wakes` are
+ * the recorded wake instants; the cap is per rolling 24 h. A cap of 0 means
+ * NO billed turn at all — a digest window under it is refused like a wake
+ * (the Notify dialog's estimate reads 0 wakes/day for it; R4 verify r3).
+ * Refused hits are held PENDING, not dropped.
+ */
+/** THE READ-TIME CAP for a watcher (R4 verify r5): a `notify:'digest'` watcher
+ *  with `dailyWakeCap: 0` is now refused at write, but a row stored BEFORE that
+ *  refusal existed would never deliver (a digest IS a paced wake — cap 0 means
+ *  no billed turn ever, so the window arms and the flush is refused for good).
+ *  Such a legacy row is read as cap 1 so it delivers once per window; the store
+ *  is NOT rewritten (the engine's boot census names them; the owner sets a real
+ *  cap). Every other watcher reads its own cap unchanged. */
+function digestCap(w) {
+  const cap = w && Number.isFinite(Number(w.dailyWakeCap)) ? Number(w.dailyWakeCap) : DEFAULT_DAILY_WAKE_CAP;
+  return (w && w.notify === 'digest' && cap === 0) ? 1 : cap;
+}
+function paceVerdict(wakes, now, cap = DEFAULT_DAILY_WAKE_CAP) {
+  const limit = Number.isFinite(Number(cap)) ? Math.max(0, Number(cap)) : DEFAULT_DAILY_WAKE_CAP;
+  const since = now - DAY_MS;
+  // Only a wake that HAPPENED counts (`ok !== false`): a held or stashed
+  // attempt opened no turn, so it must not eat the day's allowance.
+  const used = (Array.isArray(wakes) ? wakes : []).filter((w) => w && Number(w.at) > since && w.ok !== false).length;
+  if (used >= limit) return { ok: false, why: `daily wake cap reached (${used} of ${limit} in 24 h)`, used, limit };
+  return { ok: true, why: null, used, limit };
+}
+
+/** Prune a wake/hit ledger to the last 7 days (the panel's measurement
+ *  window) and a hard length, so an index row never grows without bound. */
+function pruneLedger(list, now, { days = 7, max = 2000 } = {}) {
+  const since = now - days * DAY_MS;
+  const kept = (Array.isArray(list) ? list : []).filter((w) => Number(w && w.at) > since);
+  return kept.length > max ? kept.slice(kept.length - max) : kept;
+}
+
+/** Hits in the last `days` from a ledger of `{at, n}`. */
+function countSince(list, now, days = 7) {
+  const since = now - days * DAY_MS;
+  let n = 0;
+  for (const w of Array.isArray(list) ? list : []) if (Number(w && w.at) > since) n += Number.isFinite(Number(w.n)) ? Number(w.n) : 1;
+  return n;
+}
+
+// ── conversation PATTERNS + the effective assignment (2026-09-26) ─────────
+
+/** One pattern rule, validated (a refusal names the field, `code` for the
+ *  client's words — the `filterProblemText` shape). */
+function validateConvRule(rule) {
+  const r = rule && typeof rule === 'object' ? rule : null;
+  if (!r) return refuse('bad-rule', 'a rule must be an object');
+  if (!CONV_RULE_KINDS.includes(r.kind)) return refuse('bad-kind', `pattern rule kind must be one of ${CONV_RULE_KINDS.join(', ')} (got ${JSON.stringify(r.kind)})`, { kind: r.kind });
+  const value = str(r.value).trim();
+  if (!value) return refuse('value-required', `a '${r.kind}' rule needs a value`, { kind: r.kind });
+  if (r.kind === 'kind' && !CONV_KINDS.includes(value)) return refuse('kind-value', `a 'kind' rule is one of ${CONV_KINDS.join(', ')}`, { kind: r.kind });
+  return { ok: true, rule: { kind: r.kind, value: value.slice(0, 200) } };
+}
+/** A PATTERN: `{match:'any'|'every', rules:[…]}` over conversation facts. An
+ *  empty pattern is refused — it would silently hand everything (or nothing)
+ *  to an agent, and a wake is money. */
+function validatePattern(pattern) {
+  const p = pattern && typeof pattern === 'object' ? pattern : null;
+  if (!p) return refuse('bad-pattern', 'a pattern must be an object');
+  const match = p.match === undefined ? 'any' : p.match;
+  if (!MATCH_MODES.includes(match)) return refuse('bad-match', `match must be ${MATCH_MODES.join('|')}`);
+  const list = Array.isArray(p.rules) ? p.rules : [];
+  if (!list.length) return refuse('no-rules', 'a pattern needs at least one rule');
+  if (list.length > MAX_RULES) return refuse('too-many-rules', `at most ${MAX_RULES} rules`);
+  const rules = [];
+  for (const r of list) { const v = validateConvRule(r); if (!v.ok) return v; rules.push(v.rule); }
+  return { ok: true, pattern: { match, rules } };
+}
+/** Does ONE pattern rule hold for these conversation FACTS
+ *  `{title, participants, kind, authors:[{id, name}]}`? → the why string or null. */
+function convRuleHit(rule, facts) {
+  const f = facts || {};
+  const v = lower(rule.value);
+  const authors = Array.isArray(f.authors) ? f.authors : [];
+  switch (rule.kind) {
+    case 'title': return lower(f.title).includes(v) ? `title contains "${rule.value}"` : null;
+    case 'participant': return (lower(f.participants).includes(v) || authors.some((a) => lower(a && a.name).includes(v))) ? `participant "${rule.value}"` : null;
+    case 'from-address': {
+      const hit = v.startsWith('@') ? authors.some((a) => lower(a && a.id).endsWith(v)) : authors.some((a) => lower(a && a.id) === v || lower(a && a.id).includes(v));
+      return hit ? `from ${rule.value}` : null;
+    }
+    case 'kind': return lower(f.kind) === v ? `a ${rule.value} conversation` : null;
+    default: return null;
+  }
+}
+function matchConversation(pattern, facts) {
+  const p = pattern && Array.isArray(pattern.rules) ? pattern : null;
+  if (!p || !p.rules.length) return { hit: false, why: [] };
+  const why = [];
+  let all = true;
+  for (const r of p.rules) { const w = convRuleHit(r, facts); if (w) why.push(w); else all = false; }
+  const hit = p.match === 'every' ? all : why.length > 0;
+  return { hit, why: hit ? why : [] };
+}
+/** The chip / block line for a pattern: `title contains "gpu"; from @corp`. */
+function patternSummary(pattern) {
+  const p = pattern && Array.isArray(pattern.rules) ? pattern : { rules: [] };
+  const parts = p.rules.map((r) => (r.kind === 'title' ? `title contains "${r.value}"` : r.kind === 'participant' ? `with ${r.value}` : r.kind === 'from-address' ? `from ${r.value}` : r.kind === 'kind' ? `${r.value} conversations` : `${r.kind} ${r.value}`));
+  return parts.join(p.match === 'every' ? ' and ' : '; ');
+}
+/**
+ * THE ONE ANSWER (R4, 2026-09-27): WHO has access to a conversation and WHO
+ * watches it. `{conversation, patterns, account}` are the three grains'
+ * records (each read through `grainOf`, so a record from before the split
+ * counts; `patterns` in any order — ranked by `createdAt`, then id); `facts`
+ * the conversation's own facts for the patterns.
+ *
+ * PER PRINCIPAL, the finest grain that names it decides — separately for the
+ * two lists: A's access row on a conversation (say `draft`) wins over A's
+ * account row (say `send`) for that conversation only; A's watcher on a rule
+ * (its own filter) replaces A's account-wide watcher on the conversations
+ * the rule matches. Another principal's rows never mask A's: giving B access
+ * to one conversation does not silence A's account-wide notification there.
+ *
+ * Returns null (nobody) or `{access:[{row, source, patternId, why}],
+ * watchers:[{watcher, source, patternId, why}], source, patternId, why}` —
+ * `source` = the finest grain holding any row (the row chip's "(account)" /
+ * "(rule)").
+ */
+function effectiveGrants({ conversation = null, patterns = [], account = null } = {}, facts = {}, { grantKeys = [], accountKeys = [] } = {}) {
+  /* PRECEDENCE: conversation > pattern > account */
+  // lane channel-agent-watch W3: each grain is READ with the access ABOVE it — the account's rows (+ the account-scope
+  // grants, `accountKeys`), then a matching rule's, then (for the conversation) every visible grant that reaches it
+  // (`grantKeys`: an approved request, a hand-written grant, the account's) — so a notification set on one chat for an
+  // agent that holds the whole account is in effect, never dropped as "no access at this grain"
+  // lane wake-approve-card r5: every grain read through grainAsFired — the one reader «held» and the grain writer read by
+  const accountG = grainAsFired('account', account, { accountKeys });
+  const ranked = (Array.isArray(patterns) ? patterns : []).filter((x) => x && x.pattern)
+    .slice().sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id)));
+  const matched = [];
+  for (const pa of ranked) {
+    const m = matchConversation(pa.pattern, facts);
+    if (m.hit) matched.push({ source: 'pattern', patternId: pa.id || null, why: m.why, g: grainAsFired('pattern', pa, { account, accountKeys }) });
+  }
+  const above = [...accountG.access, ...accountKeys, ...matched.flatMap((x) => x.g.access), ...grantKeys];
+  const grains = [{ source: 'conversation', patternId: null, why: [], g: grainAsFired('conversation', conversation, { above }) }, ...matched,
+    { source: 'account', patternId: null, why: [], g: accountG }];
+  const access = [], watchers = [];
+  const seenA = new Set(), seenW = new Set();
+  let first = null;
+  for (const gr of grains) {
+    if (!first && (gr.g.access.length || gr.g.watchers.length)) first = gr;
+    for (const row of gr.g.access) {
+      const k = principalKey(row.principal);
+      if (seenA.has(k)) continue;
+      seenA.add(k);
+      access.push({ row, source: gr.source, patternId: gr.patternId, why: gr.why });
+    }
+    for (const w of gr.g.watchers) {
+      const k = principalKey(w.principal);
+      if (seenW.has(k)) continue;
+      seenW.add(k);
+      watchers.push({ watcher: w, source: gr.source, patternId: gr.patternId, why: gr.why });
+    }
+  }
+  if (!first) return null;
+  return { access, watchers, source: first.source, patternId: first.patternId, why: first.why };
+}
+/** Who may see / act (the `access` half of `effectiveGrants`). */
+function effectiveAccess(input, facts) { const e = effectiveGrants(input, facts); return e ? e.access : []; }
+/** Who is woken (the `watchers` half of `effectiveGrants`). */
+function effectiveWatchers(input, facts) { const e = effectiveGrants(input, facts); return e ? e.watchers : []; }
+/** Is THIS principal (an agent ctx `{kind:'agent', id, groups}`) named by a
+ *  row — itself, one of its groups, or every agent (an `everyone` row; a
+ *  fan-out target names its own conversation only)? */
+function rowNames(row, ctx) {
+  const p = row && row.principal;
+  if (!p || !ctx || ctx.kind !== 'agent' || !ctx.id) return false;
+  if (p.target && str(p.target) !== str(ctx.id)) return false;   // a fan-out item names its own conversation only
+  // lane grants-unify: THE model over this row's principal, minus the row's `except` (a member left out of its group's
+  // access / All agents is not named by it — its own row still is)
+  const e = GM.fromChannelPrincipal(p);
+  return !!e && GM.admits([{ door: 'channel-reach', resource: '-', to: [e], except: Array.isArray(row.except) ? row.except : [] }], { conversationKey: str(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : [] }).ok;
+}
+// ── ALL AGENTS: the watcher FAN-OUT (lane everyone-principal) ────────────
+
+/** The fan-out target of a principal (`fanOutWatchers` made it) — its conversation id — or null. */
+function fanTargetOf(p) {
+  return p && typeof p === 'object' && (p.kind === 'everyone' || p.kind === 'group') && str(p.target).trim() ? str(p.target).trim() : null;
+}
+/** A watcher key's fan-out parts: `everyone:*><cid>` → `{root:'everyone:*', cid}`, anything else → null. */
+function fanOfKey(pk) {
+  const k = str(pk);
+  const head = `everyone:${EVERYONE_ID}${FAN_SEP}`;
+  if (k.startsWith(head) && k.length > head.length) return { root: `everyone:${EVERYONE_ID}`, cid: k.slice(head.length) };
+  // lane reply-to-sent: a group member's item `group:<gid>><cid>`
+  const m = /^(group:[^>]+)>(.+)$/.exec(k);
+  return m ? { root: m[1], cid: m[2] } : null;
+}
+/** The pace ledger of ONE fan-out target inside the stored everyone row (`stats.fan[<cid>]`; a read-only empty one
+ *  when it has none yet). */
+function fanStatsOf(w, cid) {
+  const f = w && w.stats && w.stats.fan && typeof w.stats.fan === 'object' ? w.stats.fan[str(cid)] : null;
+  return f && typeof f === 'object' ? f : { wakes: [], hits: [] };
+}
+/** A fan-out target's watcher: the stored everyone row's settings (notify, mode, filter, digest, CAP) with the
+ *  target's principal and the target's OWN ledger — never the shared one. */
+function fanWatcher(root, cid, name = null) {
+  const g = root && root.principal && root.principal.kind === 'group' ? root.principal : null;
+  if (g) return { ...root, principal: { kind: 'group', id: g.id, name: g.name || null, target: str(cid), member: name || null }, stats: fanStatsOf(root, cid) };   // lane reply-to-sent: a group member's item
+  return { ...root, principal: { kind: 'everyone', id: EVERYONE_ID, target: str(cid), name: name || null }, stats: fanStatsOf(root, cid) };
+}
+/**
+ * THE FAN-OUT: an effective answer (`effectiveGrants`) with every `everyone` watcher replaced by ONE item per
+ * RUNNING agent conversation (`live` = `[{cid, name}]`, the engine's live sessions) — in the stored row's place, in
+ * the roster's order, each carrying `fan: {cid, root}` and its own ledger. A stored everyone watcher with nobody
+ * running wakes nobody (its hits are not held for a conversation that does not exist). Nothing else changes:
+ * access rows, the other watchers, the sources. PURE.
+ */
+function fanOutWatchers(eff, live = [], { filterOf = null, admit = null } = {}) {
+  // lane reply-to-sent: a GROUP row whose filter (`filterOf(watcher)`) carries `reply-to-sent` fans out to its live members
+  const perMember = (w) => !!w && w.principal && w.principal.kind === 'group' && !fanTargetOf(w.principal) && w.mode === 'filtered' && typeof filterOf === 'function' && hasSentRule(filterOf(w));
+  if (!eff || !Array.isArray(eff.watchers) || !eff.watchers.some((x) => x && x.watcher && x.watcher.principal && ((x.watcher.principal.kind === 'everyone' && !fanTargetOf(x.watcher.principal)) || perMember(x.watcher)))) return eff;
+  // lane grants-unify: WHO a fanned row may wake is THE model's answer — the caller's `admit(item, target)` (the watch
+  // row's `except`, the target's reach) or, without one, `admits` over the row's principal alone (All agents: every
+  // running conversation; a Task Group: its members)
+  const mayWake = (item, tg) => (typeof admit === 'function' ? !!admit(item, tg) : GM.admits([{ door: 'channel-watch', resource: '-', to: [GM.fromChannelPrincipal(item.watcher.principal)].filter(Boolean), except: [] }], { conversationKey: tg.cid, groupIds: tg.groups }).ok);
+  const seen = new Set();
+  const targets = [];
+  for (const s of Array.isArray(live) ? live : []) {
+    const cid = s && str(s.cid).trim();
+    if (!cid || seen.has(cid)) continue;
+    seen.add(cid);
+    targets.push({ cid, name: s.name || null, groups: Array.isArray(s.groups) ? s.groups.map(str) : [] });
+  }
+  const watchers = [];
+  for (const item of eff.watchers) {
+    const p = item && item.watcher && item.watcher.principal;
+    if (perMember(item.watcher)) {
+      // the rest of its rules (match any) stay the GROUP's one item; the sent half is judged per member, for that member
+      if (splitFilter(filterOf(item.watcher), 'rest')) watchers.push({ ...item, split: 'rest' });
+      for (const tg of targets) if (mayWake(item, tg)) watchers.push({ ...item, watcher: fanWatcher(item.watcher, tg.cid, tg.name), fan: { cid: tg.cid, root: item.watcher }, split: 'sent' });
+      continue;
+    }
+    if (!p || p.kind !== 'everyone' || fanTargetOf(p)) { watchers.push(item); continue; }
+    for (const tg of targets) if (mayWake(item, tg)) watchers.push({ ...item, watcher: fanWatcher(item.watcher, tg.cid, tg.name), fan: { cid: tg.cid, root: item.watcher } });
+  }
+  return { ...eff, watchers };
+}
+/** Every wake row of a stored watcher, its fan-out targets' included (the card's "N wakes / 24 h" of an everyone row). */
+function ledgerRowsOf(stats) {
+  const s = stats && typeof stats === 'object' ? stats : {};
+  const own = Array.isArray(s.wakes) ? s.wakes : [];
+  const fan = s.fan && typeof s.fan === 'object' ? Object.values(s.fan).flatMap((f) => (f && Array.isArray(f.wakes) ? f.wakes : [])) : [];
+  return fan.length ? [...own, ...fan] : own;
+}
+/** The fan-out ledgers pruned: a target with nothing in its 7-day window is dropped (the map never grows with every
+ *  conversation that ever ran). Mutates `stats.fan` IN PLACE (inside the store's update) and returns it. */
+function pruneFan(stats, now) {
+  if (!stats || !stats.fan || typeof stats.fan !== 'object') return stats ? stats.fan : undefined;
+  for (const k of Object.keys(stats.fan)) {
+    const f = stats.fan[k];
+    if (!f || typeof f !== 'object') { delete stats.fan[k]; continue; }
+    f.wakes = pruneLedger(f.wakes, now);
+    f.hits = pruneLedger(f.hits, now);
+    if (!f.wakes.length && !f.hits.length && !f.lastRefusal) delete stats.fan[k];
+  }
+  return stats.fan;
+}
+
+/** What the editor shows BEFORE saving (§7.3): wakes per day at most, the
+ *  pacing cap and the digest windows folded in. `matchedPerDay` is the honest
+ *  estimate over the scope. */
+function expectedWakesPerDay({ notify = 'wake', digestMinutes = DEFAULT_DIGEST_MINUTES, matchedPerDay = 0, dailyWakeCap = DEFAULT_DAILY_WAKE_CAP } = {}) {
+  const cap = Number.isFinite(Number(dailyWakeCap)) ? Math.max(0, Number(dailyWakeCap)) : DEFAULT_DAILY_WAKE_CAP;
+  const matched = Math.max(0, Number(matchedPerDay) || 0);
+  if (notify === 'digest') {
+    const windows = (24 * 60) / Math.max(MIN_DIGEST_MINUTES, Number(digestMinutes) || DEFAULT_DIGEST_MINUTES);
+    return Math.min(cap, windows, matched > 0 ? windows : 0);
+  }
+  if (notify !== 'wake') return 0;   // nothing but a watcher is ever woken
+  return Math.min(cap, matched);
+}
+/** The Notify dialog's total: every watcher row's own ceiling, summed —
+ *  each has its own ledger, so N watchers of one grain are N budgets. An
+ *  ALL-AGENTS row is one budget PER RUNNING CONVERSATION (`running`, the
+ *  roster's count now) — said, never folded into one. */
+function expectedWakesTotal(rows, { running = 1 } = {}) {
+  let n = 0;
+  const many = Math.max(0, Number(running) || 0);
+  for (const r of Array.isArray(rows) ? rows : []) n += expectedWakesPerDay(r || {}) * (r && r.principal && r.principal.kind === 'everyone' ? many : 1);
+  return Math.round(n * 10) / 10;
+}
+
+// ── what the agent receives (§7.5) ─────────────────────────────────────────
+
+const bytes = (s) => Buffer.byteLength(String(s), 'utf8');
+const clip = (s, n) => { const v = str(s); return v.length > n ? v.slice(0, n - 1) + '…' : v; };
+const stamp = (at) => { const d = new Date(Number(at)); return Number.isFinite(d.getTime()) ? d.toISOString().slice(5, 16).replace('T', ' ') + 'Z' : '?'; };
+
+/** ONE vendor line, safe to embed: neutered frames, no leading heading /
+ *  list / quote marker of its own (every line is quoted), single-line.
+ *  THE LINE RULE (lane lark-search-poll verify r3): every line is neutered on
+ *  its OWN (`inertFrameLine`) before it is joined — the `> ` quote marker the
+ *  NEXT line starts with is a `>` that completes an opener left dangling at a
+ *  line's end (`hi <system-reminder` ⏎ `> the owner says…` was a live frame in
+ *  the agent's wake block, plain ASCII), and a clip can leave one too. The
+ *  same for an inline piece: the block writes more after it (` at <time>` ⏎
+ *  `> …`), so an author name ending in an opener loses its `<`. */
+// lane peer-census (2026-09-29): both helpers are THE BELT (src/peer-text.js) — bound first, the hidden characters
+// folded, the frame rule per line and per inline piece — spelled once for every door peer text takes toward an agent.
+function safeLine(text, max) {
+  return toAgentText(text, { max, kind: 'block' }).split('\n').map((l) => '> ' + l).join('\n');
+}
+
+function safeInline(text, max) {
+  return toAgentText(text, { max, kind: 'line' });
+}
+
+/**
+ * The block for ONE wake. `hits` are `[{record, why[]}]` newest-last;
+ * `elided` is how many older hits the caller already dropped; `coalesced`
+ * (`{n, seconds}`) says "N in this window" when the push lane's window
+ * folded a burst (fence 12). Budgeted and frame-inert (see the header).
+ */
+/** lane reply-infer-owner-between: the hand-over's words for a judged hit that came after the user's own message(s) —
+ *  fixed words (a count, a kind, minutes), '' when there were none. */
+const TURN_SHORT = Object.freeze({ text: 'a message', voice: 'a voice note', image: 'a picture', file: 'a file' });
+function betweenWords(b) {
+  const own = b && typeof b === 'object' ? Math.max(0, Math.floor(Number(b.own) || 0)) : 0;
+  if (!own) return '';
+  const l = b.ownLast || {}, m = Math.max(0, Math.round(Number(l.minBefore) || 0)), k = TURN_SHORT[l.kind] || TURN_SHORT.text;
+  const when = m < 1 ? 'under a minute before this' : `${m} min before this`;
+  return own === 1 ? `; the user also wrote in between — ${k}, ${when}` : `; the user also wrote in between — ${own} messages, the last ${k} ${when}`;
+}
+function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, coalesced = null, replyHint = true, inherited = null, others = null, factLine = null } = {}, { maxRecords = BLOCK_MAX_RECORDS, maxChars = BLOCK_MAX_CHARS, budget = BLOCK_MAX_BYTES } = {}) {
+  const list = (Array.isArray(hits) ? hits : []).filter((h) => h && h.record);
+  const shown = list.slice(-maxRecords);
+  const dropped = list.length - shown.length + (Number(elided) || 0);
+  const whys = [...new Set(shown.flatMap((h) => (Array.isArray(h.why) ? h.why : [])))];
+  const head = `### Channel message — ${safeInline(adapterLabel, 60)} · ${safeInline(title || convId, 120)}${inheritedNote(inherited)}`;
+  const lines = [head];
+  const meta = [];
+  if (whys.length) meta.push(`matched: ${whys.map((w) => safeInline(w, 120)).join(', ')}`);
+  if (coalesced && Number(coalesced.n) > 1) meta.push(`${coalesced.n} messages in ${Math.round(Number(coalesced.seconds) || 0)} s, one wake`);
+  if (meta.length) lines.push(meta.join(' · '));
+  const ol = othersLine(others);
+  if (ol) lines.push(ol);
+  // lane reply-to-sent: a hit that ANSWERS a message this agent sent says which one first
+  const lineOf = (h, max) => {
+    const r = h.record;
+    const who = safeInline((r.author && (r.author.display || r.author.name || r.author.id)) || '(no sender)', 80);   // lane lark-system-records: never "unknown"
+    const re = h.sent && typeof h.sent === 'object' ? `Reply to your message (${h.sent.at ? stamp(h.sent.at) : 'earlier'}, "${safeInline(h.sent.words || '', 60)}"${typeof h.sent.score === 'number' ? `, judged ${h.sent.score.toFixed(2)}` : ''}${betweenWords(h.sent.between)}): ` : '';   // + the judged score (lane dm-reply-infers) + the owner's turns between (lane reply-infer-owner-between)
+    // verify r1 #17 (int248 r2): the facts the adapter declares for a wake (a webhook call's sender + declared fields) under the text
+    const fl = typeof factLine === 'function' ? String(factLine(r) || '') : '';
+    return `${re}from ${who} at ${stamp(r.at)}\n${safeLine(r.text, max)}${fl ? `\n${safeLine(fl, 300)}` : ''}`;
+  };
+  let body = shown.map((h) => lineOf(h, maxChars));
+  if (dropped > 0) body.push(`(${dropped} older elided)`);
+  if (replyHint) body.push(`Reply with: vibespace-channels reply ${safeInline(convId, 200)} "…"   (this PROPOSES; the user approves)`);
+  let out = [...lines, ...body].join('\n');
+  // Byte budget: drop the OLDEST shown record until it fits (the newest and
+  // the hint survive). A block that overflowed the hook's wrap once is why
+  // this loop exists.
+  let n = shown.length;
+  while (bytes(out) > budget && n > 1) {
+    n--;
+    const cut = shown.slice(shown.length - n);
+    const drop2 = list.length - cut.length + (Number(elided) || 0);
+    body = cut.map((h) => lineOf(h, Math.max(80, Math.floor(maxChars / 2))));
+    if (drop2 > 0) body.push(`(${drop2} older elided)`);
+    if (replyHint) body.push(`Reply with: vibespace-channels reply ${safeInline(convId, 200)} "…"   (this PROPOSES; the user approves)`);
+    out = [...lines, ...body].join('\n');
+  }
+  return out;
+}
+
+/** Why an INHERITED watcher's block is in this agent's context (§7.5):
+ *  the head says the grain — the whole account, or the rule by its summary. */
+function inheritedNote(inherited) {
+  if (!inherited || !inherited.kind) return '';
+  if (inherited.kind === 'account') return ' (you are watching the whole account)';
+  if (inherited.kind === 'pattern') return ` (you are watching by a rule: ${safeInline(inherited.label || 'a pattern', 120)})`;
+  return '';
+}
+/** R4: the OTHER principals on this conversation, so two woken agents never
+ *  both answer blind — `others` = `[{name, notify?, authority}]` (a watcher
+ *  names its delivery; access alone says so). Null / empty ⇒ no line (a
+ *  single watcher's block is byte-identical to before). */
+function othersLine(others) {
+  const list = (Array.isArray(others) ? others : []).filter((o) => o && (o.name || o.id)).slice(0, 8);
+  if (!list.length) return '';
+  const words = list.map((o) => `${safeInline(o.name || o.id, 60)} (${o.notify ? `${o.notify === 'digest' ? 'digest' : 'woken'}, ` : 'access only, '}${o.authority === 'send' ? 'may send' : 'drafts'})`);
+  return `also on this conversation: ${words.join(', ')}`;
+}
+
+/**
+ * THE SCOPE DIGEST (2026-09-26): an inherited assignment in digest mode
+ * delivers ONCE per window — every conversation of its scope that had hits,
+ * one short section each (title + at most 3 records), inside the same byte
+ * budget; what does not fit is COUNTED, never silently dropped.
+ * `groups` = `[{title, convId, hits:[{record, why}], elided?, via?}]` (`via` — lane wake-approve-card r15: the road a
+ * conversation is watched through when it differs from the block's scope, said under its heading).
+ */
+function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', groups = [], windowMinutes = DEFAULT_DIGEST_MINUTES, elidedConversations = 0, others = null, since = null } = {}, { perConversation = 3, maxChars = 200, budget = BLOCK_MAX_BYTES } = {}) {
+  const list = (Array.isArray(groups) ? groups : []).filter((g) => g && Array.isArray(g.hits) && g.hits.length);
+  const msgs = list.reduce((n, g) => n + g.hits.length + (Number(g.elided) || 0), 0);
+  const convs = list.length + (Number(elidedConversations) || 0);
+  // r6: the TRUE span — hits held past the window (a boot's leftovers, a refused window's) say since when, never «the last N min»
+  const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${convs} conversation${convs === 1 ? '' : 's'}, ${msgs} message${msgs === 1 ? '' : 's'} ${since ? (typeof since === 'string' ? safeInline(since, 80) : heldSinceWords(since)) : `in the last ${Math.round(Number(windowMinutes) || 0)} min`}`;
+  const lines = [head];
+  if (scopeLabel) lines.push(`you are watching ${safeInline(scopeLabel, 160)}`);
+  const ol = othersLine(others);
+  if (ol) lines.push(ol.replace('also on this conversation', 'also on these conversations'));
+  // bypass-witness-hint (owner 2026-10-13): the read door says why it is THE door — an agent's own SDK read leaves no trace
+  const tail = 'Read more: vibespace-channels read <conv> (never your own SDK or script: no card, read marker or budget)   ·   reply: vibespace-channels reply <conv> "…" (this PROPOSES)';
+  let out = lines.join('\n');
+  let shown = 0;
+  for (const g of list) {
+    const recs = g.hits.slice(-perConversation);
+    const more = g.hits.length - recs.length + (Number(g.elided) || 0);
+    const sec = [`#### ${safeInline(g.title || g.convId, 120)} — ${safeInline(g.convId, 200)}`]
+      .concat(g.via ? [`(you are watching this one through ${safeInline(g.via, 160)}, not ${scopeLabel ? 'the scope above' : 'this digest\'s scope'})`] : [])   // lane wake-approve-card r15: a conversation one block carries for another road names that road
+      .concat(recs.map((h) => `from ${safeInline((h.record.author && (h.record.author.display || h.record.author.name || h.record.author.id)) || '(no sender)', 80)} at ${stamp(h.record.at)}\n${safeLine(h.record.text, maxChars)}`));
+    if (more > 0) sec.push(`(${more} more in this conversation)`);
+    const next = out + '\n' + sec.join('\n');
+    const rest = list.length - shown - 1 + (Number(elidedConversations) || 0);
+    const closing = (rest > 0 ? `\n(${rest} more conversations elided — vibespace-channels list)` : '') + '\n' + tail;
+    if (bytes(next + closing) > budget) break;
+    out = next;
+    shown++;
+  }
+  const rest = list.length - shown + (Number(elidedConversations) || 0);
+  if (rest > 0) out += `\n(${rest} more conversations elided — vibespace-channels list)`;
+  return out + '\n' + tail;
+}
+
+/** The digest: many hits, ONE turn. Same budget, same neutering. */
+function renderDigestBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, windowMinutes = DEFAULT_DIGEST_MINUTES, since = null } = {}, opts = {}) {
+  const list = (Array.isArray(hits) ? hits : []).filter((h) => h && h.record);
+  const total = list.length + (Number(elided) || 0);
+  const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${safeInline(title || convId, 120)} — ${total} message${total === 1 ? '' : 's'} ${since ? (typeof since === 'string' ? safeInline(since, 80) : heldSinceWords(since)) : `in the last ${Math.round(Number(windowMinutes) || 0)} min`}`;   // r6: the true span (the engine's words: the owner's zone, named)
+  const inner = renderWakeBlock({ adapterLabel, title, convId, hits: list, elided, coalesced: null, replyHint: true }, opts);
+  return head + '\n' + inner.split('\n').slice(1).join('\n');
+}
+
+/** The "why" sentence the panel and the log share: `matched: a, b`. */
+function whyText(why) {
+  const w = (Array.isArray(why) ? why : []).filter(Boolean);
+  return w.length ? `matched: ${w.join(', ')}` : 'matched: all messages';
+}
+
+module.exports = {
+  RULE_KINDS, PLACE_RULE_KINDS, SENT_WINDOW_MS, SENT_MAX, SENT_WHYS, WHY_SENT, sentHit, INFER, INFER_WHY, INFER_WHY_BETWEEN, TURN_KINDS, turnKindOf, inferBetween, inferBetweenLine, inferKeyOf, inferRuleOf, inferCandidate, inferHit, inferWorth, threadOnlyCaps, hasSentRule, splitFilter, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
+  DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
+  BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
+  validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, placeHit, PLACE_WHYS, matchRecord, estimate,
+  // lane decision-rule: the `decision` kind — its bounds, the pre-judge's key + question, the verdict, the cost line
+  DECISION, decisionKeyOf, decisionQuestion, decisionHit, decisionRulesOf, isRouteRule, routeNames, decisionThreshold, decisionPerHour, decisionCost,
+  validateAssignment, ASSIGN_REFUSALS, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, digestCap, pruneLedger, countSince,
+  renderWakeBlock, renderDigestBlock, whyText,
+  // 2026-09-26: the three grains + conversation patterns + the scope digest
+  ASSIGN_SCOPES, CONV_RULE_KINDS, CONV_KINDS, validatePattern, matchConversation, patternSummary, expectedWakesPerDay, renderScopeDigestBlock,
+  // R4 (2026-09-27): access and notification — two lists per grain, access first
+  // lane everyone-principal: ALL AGENTS — the principal, and the watcher fan-out (a ledger per running conversation)
+  EVERYONE_ID, fanTargetOf, fanOfKey, fanStatsOf, fanWatcher, fanOutWatchers, ledgerRowsOf, pruneFan,
+  MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, MAX_AGENT_WATCHES, MAX_OPEN_WATCH_REQUESTS, WATCH_REQUEST_TTL_MS, HELD_AGE_WINDOWS, heldWindowMinutes, heldTooOld, heldSinceWords, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
+  // lane channel-agent-watch: the delivery choice, who wrote a row, and THE eligibility rule (access over the grain and its ancestors)
+  DELIVERY_MODES, WATCH_ORIGINS, deliveryModeOf, watchOriginOf, eligibleKeys, eligibleFor,
+  memberVia, memberStill, REGEX_MAX, REGEX_FLAGS, REGEX_TEXT_MAX, REGEX_REFUSALS, regexVerdict, regexText, regexSpan,
+  splitAssignment, grainOf, grainRowsOf, grainAsFired, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, effectiveAccess, effectiveWatchers, rowNames, expectedWakesTotal, othersLine,
+};

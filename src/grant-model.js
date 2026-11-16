@@ -432,7 +432,18 @@ function admits(rows, facts = {}) {
  *  construction: `admits([prepareRow(r)], prepareFacts(f))` ≡ `admits([r], f)`. */
 const PREPARED = Symbol.for('vibespace.grant-model.prepared');   // REGISTERED: a patched copy of this model (a suite's red control) knows a prepared row too
 function prepareRow(raw) { const n = normRow(raw); n[PREPARED] = true; return n; }
-function prepareFacts(facts = {}) { const F = factsOf(facts); F[PREPARED] = true; return F; }
+/** `prev` (this asker's facts as last prepared) is answered again when `facts` is made of the SAME values — the key, the key
+ *  list and the group list as the same arrays of the same lengths, the two flags — else the facts are prepared afresh. The
+ *  sameness test lives HERE, with the model: a reader hands the asker's groups only inside the facts it gives the model. */
+const lenOf = (a) => (Array.isArray(a) ? a.length : -1);
+function prepareFacts(facts = {}, prev = null) {
+  const f = facts || {}, o = prev && prev[PREPARED] && prev[FACTS_OF];
+  if (o && o.k === f.conversationKey && o.ks === f.conversationKeys && o.ksn === lenOf(f.conversationKeys) && o.g === f.groupIds && o.gn === lenOf(f.groupIds) && o.u === f.groupsUnreadable && o.fp === f.forkPending) return prev;
+  const F = factsOf(f); F[PREPARED] = true;
+  F[FACTS_OF] = { k: f.conversationKey, ks: f.conversationKeys, ksn: lenOf(f.conversationKeys), g: f.groupIds, gn: lenOf(f.groupIds), u: f.groupsUnreadable, fp: f.forkPending };
+  return F;
+}
+const FACTS_OF = Symbol('grant-model.facts-of');
 function verdictOf(judged, F) {
   const hits = [];
   let excepted = null, unknown = null, unreadable = null;
