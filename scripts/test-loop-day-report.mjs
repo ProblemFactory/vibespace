@@ -44,16 +44,16 @@ const fixedHour = () => {
 };
 const TAKE = { fromM: 0, toM: 3600000, everyMs: 1000, ticks: { idle: 2000, held: 10, stopped: 0, notSampled: 30, paused: 0 }, families: { channels: 410, page: 200, parse: 120, rest: 220, native: 50 }, asks: 812, askOwnMs: 121.8, askMaxMs: 0.35, halved: null };
 const fixedRep = (h) => ({ kind: 'hour', hour: h, toMs: T0 + 3600000, busy: 0.3725,
-  engines: CEN.censusFold(TAKE),
-  mem: { heapUsed: 312 * 1048576, heapLimit: 4096 * 1048576, rss: 640 * 1048576, kids: { how: 'service', cli: { n: 2, rss: 1200 * 1048576 }, browser: { n: 3, rss: 900 * 1048576 }, agentd: { n: 1, rss: 80 * 1048576 }, other: { n: 4, rss: 40 * 1048576 } } },
-  turns: { running: 2, waiting: 1, 'idle-under-1h': 3, 'idle-1-2h': 1, 'idle-2-4h': 2, 'idle-over-4h': 4, 'turn-unknown': 1 }, browsers: { ready: 3, idle1h: 2 },
+  engines: { busyTicks: 1000, sampledTicks: 3010, shares: [{ family: 'interface', share: 0.2 }, { family: 'channels', share: 0.41 }, { family: 'conversation', share: 0.12 }, { family: 'money', share: 0.1 }], native: { ticks: 50, share: 0.05 }, outside: { ticks: 120, share: 0.12 }, held: { ticks: 10 }, idle: { ticks: 2000 }, stopped: { ticks: 0 }, notSampled: { ticks: 30, paused: 0 }, viaHelper: { ticks: 140 }, deep: { ticks: 7 }, cost: { asks: 812, paidMs: 365.4 } },
+  mem: { heapUsed: 312 * 1048576, heapLimit: 4096 * 1048576, rss: 640 * 1048576, kids: { how: 'service', cli: { n: 2, rss: 1200 * 1048576 }, wrapper: { n: 2, rss: 160 * 1048576 }, browser: { n: 3, rss: 900 * 1048576 }, agentd: { n: 1, rss: 80 * 1048576 }, other: { n: 4, rss: 40 * 1048576 } } },
+  upMs: 26.5 * 3600000, turns: { 'turn-running': 2, 'turn-waiting': 1, 'idle-under-1h': 3, 'idle-1-2h': 1, 'idle-2-4h': 2, 'idle-over-4h': 4, 'turn-unknown': 1 }, browsers: { ready: 3, idle1h: 2 },
   sizes: { conversations: 12, pageSockets: 3, deviceLinks: 1, wsIn: 1203, wsOut: 5402, parsedChars: 12345678, creates: 2, resumes: 1, writes: 350, writeMaxMs: 1234 } });
-const LINE = '[loop-hour] hour=2026-11-16T20Z span=3600s held=9.2s holds=4 longest=4.0s boot-held=0.0s boot-holds=0 busy=37.3% top="src/channel-store.js:275 5.5s; src/normalizers.js:812 2.5s; waiting for a CPU 1.2s" engines="channels 41%; pool 0%; parse 12%; browser 0%; jobs 0%; page 20%; hook 0%; rest 22%; native 5%" census-ticks=3040 busy-ticks=1000 not-sampled=30 census-asks=812 census-paid=0.37s hub-heap=312MB/4096MB hub-rss=640MB cli=2/1200MB browser=3/900MB agentd=1/80MB other=4/40MB procs-by=service conversations=12 running=2 waiting=1 idle-under-1h=3 idle-1-2h=1 idle-2-4h=2 idle-over-4h=4 turn-unknown=1 browsers-ready=3 browsers-idle-1h=2 page-sockets=3 device-links=1 ws-in=1203 ws-out=5402 parsed=12.3M creates=2 resumes=1 writes=350 write-max=1.2s';
-const got = L.line(fixedRep(fixedHour()));
+const LINE = '[loop-hour] hour=2026-11-16T20Z span=3600s held=9.2s holds=4 longest=4.0s boot-held=0.0s boot-holds=0 lost-holds=0 busy=37.3% top="src/channel-store.js:275 5.5s; src/normalizers.js:812 2.5s; waiting for a CPU 1.2s" engines="interface 20%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; native 5%; outside 12%" census-ticks=3040 busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 via-helper=140 deep=7 census-asks=812 census-paid=0.37s hub-up=26.5h hub-heap=312MB/4096MB hub-rss=640MB cli=2/1200MB wrapper=2/160MB browser=3/900MB agentd=1/80MB other=4/40MB procs-by=service conversations=12 turn-running=2 turn-waiting=1 idle-under-1h=3 idle-1-2h=1 idle-2-4h=2 idle-over-4h=4 turn-unknown=1 browsers-ready=3 browsers-idle-1h=2 page-sockets=3 device-links=1 ws-in=1203 ws-out=5402 parsed=12.3M creates=2 resumes=1 writes=350 write-max=1.2s';
+const got = L.line(fixedRep(Object.assign(fixedHour(), { lost: 0 })));
 ok(got === LINE, '① the fixed hour prints the fixed line (held 9.2 s over 4 holds, the top three by cause, the longest, busy, the engines in their order, memory by kind, the sizes)', { got, want: LINE });
 ok(L.LINE_RE.test(got) && L.causesOk(got) && (typeof L.enginesOk === 'function' && L.enginesOk(got)), '① the line passes its own shape check (LINE_RE) and names only causes and engines it may');
 const unread = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 3600000, busy: null, engines: null, mem: null, sizes: {} });
-ok(L.LINE_RE.test(unread) && /engines="\?" census-ticks=\? busy-ticks=\? not-sampled=\? census-asks=\? census-paid=\? /.test(unread) && /cli=\?\/\? /.test(unread) && / top="none" /.test(unread) && / writes=\? /.test(unread) && / running=\? /.test(unread) && / browsers-ready=\? /.test(unread), '① a value never read prints «?», never 0 (an hour whose census and process table did not answer)', unread);
+ok(L.LINE_RE.test(unread) && /engines="\?" census-ticks=\? busy-ticks=\? held-ticks=\? idle-ticks=\? stopped-ticks=\? not-sampled=\? via-helper=\? deep=\? census-asks=\? census-paid=\? hub-up=\? /.test(unread) && /cli=\?\/\? /.test(unread) && / top="none" /.test(unread) && / writes=\? /.test(unread) && / turn-running=\? /.test(unread) && / lost-holds=\? /.test(unread) && / browsers-ready=\? /.test(unread), '① a value never read prints «?», never 0 (an hour whose census and process table did not answer)', unread);
 
 console.log('② the shape is stable and names nothing');
 {
@@ -71,7 +71,7 @@ console.log('② the shape is stable and names nothing');
   ok(L.causeOf({ verdict: 'JavaScript', frame: 'fold (src/server/channels-engine.js:2580)' }) === 'src/server/channels-engine.js:2580' && L.causeOf({ verdict: 'JavaScript', frame: 'tick (server.js:973)' }) === 'server.js:973', '② a frame of the hub\'s own code is its code location (src/…:line, server.js:line)');
   // the census's family ids are the only words in engines="…": a fold that carried another word is not printed
   const odd = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 1, busy: 0, engines: { busyTicks: 10, sampledTicks: 10, notSampled: { ticks: 0 }, cost: {}, shares: [{ family: 'conv-of-alice', share: 1 }] }, mem: null, sizes: {} });
-  ok(!odd.includes('alice') && /engines="channels 0%; pool 0%; parse 0%; browser 0%; jobs 0%; page 0%; hook 0%; rest 0%; native 0%"/.test(odd), '② engines="…" prints the nine fixed fields in their order — a word the fold carried that is not one of them never prints', odd);
+  ok(!odd.includes('alice') && /engines="interface 0%; vault 0%; channels 0%; money 0%; workspace 0%; machines 0%; conversation 0%; native 0%; outside 0%"/.test(odd), '② engines="…" prints the seven owners + native + outside in their fixed order — a word the fold carried that is not one of them never prints', odd);
 }
 
 console.log('③ the verdict words are the hold book\'s own');
@@ -99,7 +99,7 @@ console.log('④ the ORCH: fold as they come, cut first, counts taken, census «
   wall = T0 + 3600000;
   const r1 = await R.tick();
   ok(now0.holds === 5002 && r1.hour.holds === 5002 && Object.keys(r1.hour.by).length === 2 && !Object.values(r1.hour).some(Array.isArray), '④ 5 002 holds folded AS THEY CAME into one entry per cause (2 entries — never a list of rows); a hold of the boot is apart (boot-held)', { holds: r1.hour.holds, by: r1.hour.by });
-  ok(/^\[loop-hour\] hour=2026-11-16T20Z span=3300s held=5005\.5s holds=5002 longest=4\.0s boot-held=9\.0s boot-holds=1 busy=25\.0% top="src\/normalizers\.js:812 5000\.0s; src\/channel-store\.js:275 5\.5s" engines="channels 41%;/.test(r1.line) && / ws-in=7 ws-out=9 parsed=0\.0M creates=1 resumes=0 writes=0 write-max=0\.8s$/.test(r1.line) && lines[0] === r1.line,
+  ok(/^\[loop-hour\] hour=2026-11-16T20Z span=3300s held=5005\.5s holds=5002 longest=4\.0s boot-held=9\.0s boot-holds=1 lost-holds=\? busy=25\.0% top="src\/normalizers\.js:812 5000\.0s; src\/channel-store\.js:275 5\.5s" engines="interface 20%;/.test(r1.line) && / ws-in=7 ws-out=9 parsed=0\.0M creates=1 resumes=0 writes=0 write-max=0\.8s$/.test(r1.line) && lines[0] === r1.line,
     '④ the cut prints ONE line: the hour from the start (20:05Z, 3300 s), the counts taken, the census folded, the busy share between the two cuts', r1.line);
   ok(R.hours().now.holds === 1 && R.hours().now.heldMs === 3000 && LC.peek().wsIn === 0, '④ the cut swapped the hour FIRST: a hold booked while the cut read the census counts in the NEXT hour, and the counts were taken', R.hours().now);
   R.onHold({ ms: 2000, verdict: 'waiting for a CPU', frame: null });
@@ -107,7 +107,7 @@ console.log('④ the ORCH: fold as they come, cut first, counts taken, census «
   const r2 = await R.tick();
   ok(/ engines="\?" census-ticks=\? /.test(r2.line) && / held=5\.0s holds=2 /.test(r2.line), '④ a census that did not answer prints «?» — never a guess', r2.line);
   const ex = R.exitLine(); const ex2 = R.exitLine();
-  ok(ex && ex.line.startsWith('[loop-exit] hour=2026-11-16T22Z span=0s held=0.0s holds=0 longest=0.0s boot-held=0.0s boot-holds=0 ') && ex2 === null && lines.length === 3, '④ the exit line: the same shape over the hour so far, said ONCE', ex && ex.line);
+  ok(ex && ex.line.startsWith('[loop-exit] hour=2026-11-16T22Z span=0s held=0.0s holds=0 longest=0.0s boot-held=0.0s boot-holds=0 lost-holds=? ') && ex2 === null && lines.length === 3, '④ the exit line: the same shape over the hour so far, said ONCE', ex && ex.line);
   const hs = R.hours();
   ok(hs.hours.length === 2 && hs.hours[0].from === T0 + 3600000 && hs.day.hours === 2 && hs.day.holds === 5004 && !!hs.day.boot && hs.day.boot.holds === 1 && hs.day.longestMs === 4000 && hs.day.top[0].cause === 'src/normalizers.js:812', '④ ⚙ Diagnostics reads the hours kept (newest first) and their day', { n: hs.hours.length, day: hs.day });
   const many = O.create({ log: quietLog([]), wallNow: () => wall, kids: async () => null, census: async () => null, keepHours: 24 });
@@ -123,7 +123,7 @@ console.log('⑤ the report holds nothing: a REAL cut makes zero synchronous fs 
   for (const k of names) { orig[k] = fs[k]; fs[k] = function (...a) { calls++; if (seen.length < 5) seen.push(k); return orig[k].apply(this, a); }; }
   let rep = null, kids = null;
   try {
-    const R = O.create({ log: quietLog([]), census: async () => null });   // the REAL process table (cgroup or tree), the real heap, the real loop
+    const R = O.create({ log: quietLog([]), census: async () => null, kids: (signal) => O.procKids({ signal, socketsDir: '/srv/no-such-hub/data/sockets' }) });   // the REAL process table WITH the sockets folder given (the dtach scan's command-line reads under the counter), the real heap, the real loop
     R.onHold({ ms: 1200, verdict: 'JavaScript', frame: 'x (src/a.js:1)' });
     rep = await R.tick();
     kids = rep.mem && rep.mem.kids;
@@ -135,14 +135,14 @@ console.log('⑤ the report holds nothing: a REAL cut makes zero synchronous fs 
 console.log('⑥ processes by kind; the counts wired where they leave');
 {
   ok(O.kindOf('claude') === 'cli' && O.kindOf('codex') === 'cli' && O.kindOf('chrome') === 'browser' && O.kindOf('headless_shell') === 'browser' && O.kindOf('node', 'node /x/data/bin/vibespace-agentd.js') === 'agentd' && O.kindOf('vibespace-devic') === 'agentd'
-    && O.kindOf('node', 'node /usr/lib/node_modules/@openai/codex/bin/codex.js') === 'cli' && O.kindOf('node', 'node /x/chat-wrapper.js') === 'other' && O.kindOf('dtach') === 'other', '⑥ a process\'s kind: agent CLIs, browsers, the device agent, the rest (a node process told apart by its command line — never kept)');
+    && O.kindOf('node', 'node /usr/lib/node_modules/@openai/codex/bin/codex.js') === 'cli' && O.kindOf('node', 'node /x/chat-wrapper.js') === 'wrapper' && O.kindOf('dtach') === 'other', '⑥ a process\'s kind: agent CLIs, browsers, the device agent, the rest (a node process told apart by its command line — never kept)');
   const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const ws = src('src/ws-handler.js'), sw = src('src/store-writer.js'), so = src('src/server/stdout/index.js'), wc = src('src/ws-create.js'), lh = src('src/server/loop-holds.js'), sv = src('server.js');
-  ok(/ws\.send = \(d, \.\.\.rest\) => \{ LC\.inc\('wsOut'\); return send0\(d, \.\.\.rest\); \};/.test(ws) && /ws\.on\('message', async \(raw\) => \{\n\s*LC\.inc\('wsIn'\);/.test(ws), '⑥ page-socket messages: in at the handler, out at the socket\'s own send');
+  ok(/ws\.send = \(d, o, cb\) => \{ LC\.inc\('wsOut'\); return send0\(d, o, cb\); \};/.test(ws) && /ws\.on\('message', async \(raw\) => \{\n\s*LC\.inc\('wsIn'\);/.test(ws), '⑥ page-socket messages: in at the handler, out at the socket\'s own send');
   ok(/^const LC = require\('\.\/server\/loop-counts\.js'\);/m.test(ws) && (ws.match(/loop-counts\.js/g) || []).length === 1, '⑫ R2: a bump on the hot path is an ADD — ws-handler binds the counter module ONCE at load (no require per message)');
   ok((sw.match(/LC\.inc\('writes'\);/g) || []).length === 2 && /if \(!onMain\) LC\.max\('writeMaxMs', ms\);/.test(sw), '⑥ store writes: counted at both posts to the writer thread, the longest at its finish');
   ok(/ptyProcess\.onData\(\(o\) => LC\.inc\('parsedChars'/.test(so) && /inc\(data && \(data\.resumeId \|\| data\.resume\) \? 'resumes' : 'creates'\)/.test(wc), '⑥ conversation output handed to a parser (the registry\'s attach) and creates / resumes (the create handler)');
-  ok(/for \(const f of each\) \{ try \{ f\(\{ ms: h\.ms, verdict: h\.fold\.verdict, frame: h\.fold\.frame, boot: !!h\.boot \}\); \} catch \{ \} \}/.test(lh) && /hourly: hourly \?/.test(lh) && /loop-day-report\.js'\)\.wire\(\{ witness: syncFs, sessions: \(\) => activeSessions\.values\(\), socketsDir: SOCKETS_DIR, sizes: /.test(sv) && /book\.onEach\(\(h\) => r\.onHold\(h\)\); book\.setHourly\(\(\) => r\.hours\(\)\);/.test(src('src/server/loop-day-report.js')), '⑥ the hold book hands each hold to the hour; server.js starts the report and Diagnostics reads its hours');
+  ok(/for \(const f of each\) \{ try \{ f\(\{ ms: h\.ms, verdict: h\.fold\.verdict, frame: h\.fold\.frame, boot: !!h\.boot \}\); \} catch \{ \} \}/.test(lh) && /hourly: hourly \?/.test(lh) && /loop-day-report\.js'\)\.wire\(\{ witness: syncFs, sessions: \(\) => activeSessions\.entries\(\), socketsDir: SOCKETS_DIR, buffersDir: BUFFERS_DIR, sizes: /.test(sv) && /book\.onEach\(\(h\) => r\.onHold\(h\)\); book\.setHourly\(\(\) => r\.hours\(\)\);/.test(src('src/server/loop-day-report.js')), '⑥ the hold book hands each hold to the hour; server.js starts the report and Diagnostics reads its hours');
 }
 
 console.log('⑦ R1 / R4: the census\'s paid cost printed; the engines and native add to 100 % of the busy ticks; each field counts what it says');
@@ -153,8 +153,8 @@ try {
   const pcts = (/engines="([^"]*)"/.exec(LINE)[1]).split('; ').map((p) => Number(p.split(' ')[1].replace('%', '')));
   ok(CEN.DISPATCH_MS === 0.3 && F.cost.paidMs === 121.8 + 812 * 0.3 && / census-asks=812 census-paid=0\.37s /.test(LINE),
     '⑦ R1: census-paid = each ask\'s own run, measured live (121.8 ms over 812 asks), + the inspector\'s dispatch of each ask at the MEASURED 0.3 ms ⇒ 0.37 s — the price the main thread pays, never the in-sample part alone', F.cost);
-  ok(Math.abs(sum - 1) < 1e-12 && pcts.length === 9 && Math.abs(pcts.reduce((a, b) => a + b, 0) - 100) <= 4 && / census-ticks=3040 busy-ticks=1000 not-sampled=30 /.test(LINE),
-    `⑦ R4: the nine engine fields (eight families + native) are shares of the busy ticks and add to 100 % (printed ${pcts.join('+')}); census-ticks = every tick (3 040 = 1 000 busy + 2 000 idle + 10 held + 30 not sampled), busy-ticks = booked on a family or native, not-sampled = not asked`, { sum, pcts });
+  ok(Math.abs(sum - 1) < 1e-12 && pcts.length === 9 && Math.abs(pcts.reduce((a, b) => a + b, 0) - 100) <= 4 && / census-ticks=3040 busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 /.test(LINE),
+    `⑦ R4: the nine engine fields (seven owners + native + outside) are shares of the busy ticks and add to 100 % (printed ${pcts.join('+')}); census-ticks = every tick (3 040 = 1 000 busy + 2 000 idle + 10 held + 30 not sampled), busy-ticks = booked on a family or native, not-sampled = not asked`, { sum, pcts });
 } catch (e) { ok(false, '⑦ R1 / R4: the leg threw on this tree', (e && e.message) || String(e)); }
 }
 
@@ -163,7 +163,7 @@ console.log('⑧ R3: an hour no watchdog watched prints «?» — never a clean 
 try {
   const h = L.newHour(T0, { watched: false }); L.holdAdd(h, { ms: 3000, verdict: 'JavaScript', frame: 'x (src/a.js:1)' });
   const ln = L.line({ kind: 'hour', hour: h, toMs: T0 + 3600000, busy: 0.2, engines: null, mem: null, sizes: {} });
-  ok(L.LINE_RE.test(ln) && / held=\? holds=\? longest=\? boot-held=\? boot-holds=\? busy=20\.0% top="\?" /.test(ln), '⑧ an unwatched hour: held, holds, longest, the boot\'s and top print «?» (busy is the loop\'s own reading and stays)', ln);
+  ok(L.LINE_RE.test(ln) && / held=\? holds=\? longest=\? boot-held=\? boot-holds=\? lost-holds=\? busy=20\.0% top="\?" /.test(ln), '⑧ an unwatched hour: held, holds, longest, the boot\'s and top print «?» (busy is the loop\'s own reading and stays)', ln);
   let alive = true;
   const R = O.create({ log: quietLog([]), wallNow: () => T0 + 7200000, census: async () => null, kids: async () => null, watched: () => alive });
   R.onHold({ ms: 1500, verdict: 'JavaScript', frame: 'x (src/a.js:1)' });
@@ -219,36 +219,119 @@ try {
     const a = await O.procKids({ self: 1000, ...A, socketsDir: SOCK });
     // (b) A LOGIN SHELL'S SCOPE: the scope holds the person's programs too — only the hub's own: its tree + the dtach masters of ITS sockets folder
     const B = world('login', '/user.slice/user-1000.slice/session-3.scope', [
-      [2000, { name: 'node', kids: [2001] }], [2001, { name: 'node', cmd: ['node', '/srv/hub/data/bin/chat-wrapper.js'], kids: [2002] }], [2002, { name: 'claude' }],
+      [2000, { name: 'node', kids: [2001] }], [2001, { name: 'node', cmd: ['node', '/srv/hub/data/bin/chat-wrapper.js', '--cli', '/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js'], kids: [2002] }], [2002, { name: 'claude' }],
       [2100, { name: 'dtach', cmd: ['dtach', '-c', `${SOCK}/cw-abc`, 'node', 'w.js'], kids: [2101] }], [2101, { name: 'claude' }],
       [2200, { name: 'firefox' }], [2300, { name: 'dtach', cmd: ['dtach', '-c', '/home/someone/other/sockets/cw-x', 'sh'], kids: [2301] }], [2301, { name: 'claude' }]]);
     const b = await O.procKids({ self: 2000, ...B, socketsDir: SOCK });
     // (c) A CONTAINER: the cgroup reads as the root — the WHOLE container is the hub's (the conversations' masters left the tree by design)
     const C = world('container', '/', [[1, { name: 'tini' }], [7, { name: 'node' }], [30, { name: 'claude' }], [31, { name: 'dtach' }], [40, { name: 'chrome' }]]);
-    const c = await O.procKids({ self: 7, ...C, socketsDir: SOCK });
-    const sum = (k) => ({ how: k.how, cli: k.cli.n, browser: k.browser.n, agentd: k.agentd.n, other: k.other.n });
-    ok(JSON.stringify(sum(a)) === '{"how":"service","cli":1,"browser":1,"agentd":0,"other":1}', '⑩ (a) a service unit: its members — the CLI, the browser, the dtach master — never the person\'s browser outside it', sum(a));
-    ok(JSON.stringify(sum(b)) === '{"how":"tree","cli":2,"browser":0,"agentd":0,"other":2}', '⑩ (b) R7 a login shell\'s scope: ONLY the hub\'s own — its tree (a wrapper and its CLI) and the dtach master of ITS sockets folder with its CLI; never the person\'s browser nor another folder\'s dtach', sum(b));
-    ok(JSON.stringify(sum(c)) === '{"how":"container","cli":1,"browser":1,"agentd":0,"other":2}', '⑩ (c) R8 a container: every process of it but the hub — the CLI whose master left the hub\'s tree is counted', sum(c));
-    ok(O.howOf('0::/kubepods/burstable/pod1/abc\n') === 'container' && O.howOf('0::/system.slice/docker-0123456789abcdef.scope\n') === 'container' && O.howOf('0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-p1-i2.scope\n') === 'tree' && O.howOf('') === 'tree',
+    fs.writeFileSync(path.join(ROOT, 'container', '.dockerenv'), '');   // the SECOND fact: a container's own marker file
+    const c = await O.procKids({ self: 7, ...C, rootFs: path.join(ROOT, 'container'), env: {}, socketsDir: SOCK });
+    // the root group on a machine with NO container (no marker, no orchestrator): the tree — fewer, never the person's own programs
+    const D = world('bare-root', '/', [[1, { name: 'systemd' }], [7, { name: 'node', kids: [70] }], [70, { name: 'claude' }], [80, { name: 'firefox' }], [81, { name: 'claude' }]]);
+    const d = await O.procKids({ self: 7, ...D, rootFs: path.join(ROOT, 'bare-root'), env: {}, socketsDir: SOCK });
+    const sum = (k) => ({ how: k.how, cli: k.cli.n, wrapper: k.wrapper.n, browser: k.browser.n, agentd: k.agentd.n, other: k.other.n });
+    ok(JSON.stringify(sum(a)) === '{"how":"service","cli":1,"wrapper":0,"browser":1,"agentd":0,"other":1}', '⑩ (a) a service unit: its members — the CLI, the browser, the dtach master — never the person\'s browser outside it', sum(a));
+    ok(JSON.stringify(sum(b)) === '{"how":"tree","cli":2,"wrapper":1,"browser":0,"agentd":0,"other":1}', '⑩ (b) R7 a login shell\'s scope: ONLY the hub\'s own — its tree (a WRAPPER whose arguments name the CLI is a wrapper, the CLI under it the CLI — S3) and the dtach master of ITS sockets folder with its CLI; never the person\'s browser nor another folder\'s dtach', sum(b));
+    ok(JSON.stringify(sum(c)) === '{"how":"container","cli":1,"wrapper":0,"browser":1,"agentd":0,"other":2}', '⑩ (c) R8 a container (the root group AND its marker file): every process of it but the hub — the CLI whose master left the hub\'s tree is counted', sum(c));
+    ok(JSON.stringify(sum(d)) === '{"how":"tree","cli":1,"wrapper":0,"browser":0,"agentd":0,"other":0}', '⑩ (d) the root group with NO second fact (a machine with no container) is NOT a container: the hub\'s tree only — never the person\'s browser or another CLI', sum(d));
+    ok(O.howOf('0::/\n') === 'tree' && O.howOf('0::/\n', { inContainer: true }) === 'container' && O.howOf('0::/kubepods/burstable/pod1/abc\n') === 'container' && O.howOf('0::/system.slice/docker-0123456789abcdef.scope\n') === 'container' && O.howOf('0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-p1-i2.scope\n') === 'tree' && O.howOf('') === 'tree',
       '⑩ howOf: a container runtime\'s cgroup is a container; a run / app scope is the tree (a scope holds more than the hub); no v2 line is the tree');
   } finally { fs.rmSync(ROOT, { recursive: true, force: true }); }
 } catch (e) { ok(false, '⑩ R7 / R8: the leg threw on this tree', (e && e.message) || String(e)); }
 }
 
-console.log('⑪ M6: the conversations by turn and idle age; the keeper\'s ready browsers');
-{
-try {
-  const t = T0 + 10 * 3600000, H = 3600000;
-  const S = [{ mode: 'chat', _isStreaming: true }, { mode: 'chat', _turnState: 'requires_action' }, { mode: 'chat', _lastPtyDataAt: t - H / 2 }, { mode: 'chat', _lastPtyDataAt: t - 1.5 * H },
-    { mode: 'chat', _lastPtyDataAt: t - 3 * H }, { mode: 'chat', _lastPtyDataAt: t - 5 * H }, { mode: 'chat', _lastPtyDataAt: t - 9 * H }, { mode: 'terminal', _lastPtyDataAt: t }, { mode: 'chat' }];
-  const tu = O.turnsOf(S, t);
-  ok(JSON.stringify(tu) === '{"running":1,"waiting":1,"idle-under-1h":1,"idle-1-2h":1,"idle-2-4h":1,"idle-over-4h":2,"turn-unknown":2}', '⑪ by turn and idle age: running, waiting on the person, idle under 1 h / 1–2 h / 2–4 h / over 4 h (its last output); a terminal (no turn facts) and a chat with no output time are «turn-unknown»', tu);
-  const R = O.create({ log: quietLog([]), wallNow: () => t, census: async () => null, kids: async () => null, sessions: () => S, browsers: () => ({ ready: 3, idle1h: 2 }) });
-  const r = await R.tick();
-  ok(/ running=1 waiting=1 idle-under-1h=1 idle-1-2h=1 idle-2-4h=1 idle-over-4h=2 turn-unknown=2 browsers-ready=3 browsers-idle-1h=2 /.test(r.line) && L.LINE_RE.test(r.line), '⑪ the hourly line prints them, and the keeper\'s ready browsers with those idle over an hour', r.line.slice(0, 400));
-} catch (e) { ok(false, '⑪ M6: the leg threw on this tree', (e && e.message) || String(e)); }
-}
+console.log('⑪ M6 + S4: the conversations by turn and idle age — the age read off the output file, so it survives a restart');
+{ try {
+  const t = Date.now(), H = 3600000;
+  const BUF = fs.mkdtempSync(path.join(fs.realpathSync(require('node:os').tmpdir()), 'ldr-buf-'));
+  try {
+    const S = [['run', { mode: 'chat', _isStreaming: true }], ['wait', { mode: 'chat', _turnState: 'requires_action' }], ['a', { mode: 'chat' }], ['b', { mode: 'chat' }],
+      ['c', { mode: 'chat' }], ['d', { mode: 'chat' }], ['e', { mode: 'chat' }], ['term', { mode: 'terminal' }], ['nofile', { mode: 'chat', _lastPtyDataAt: t }]];
+    const ages = { a: 0.5, b: 1.5, c: 3, d: 5, e: 9 };
+    for (const [id, h] of Object.entries(ages)) { const f = path.join(BUF, `${id}.buf`); fs.writeFileSync(f, 'x'); fs.utimesSync(f, (t - h * H) / 1000, (t - h * H) / 1000); }
+    const times = await O.outputTimes(S, BUF);
+    const tu = O.turnsOf(S, t, times);
+    ok(JSON.stringify(tu) === '{"turn-running":1,"turn-waiting":1,"idle-under-1h":1,"idle-1-2h":1,"idle-2-4h":1,"idle-over-4h":2,"turn-unknown":2}', '⑪ by turn and idle age: running, waiting on the person, idle under 1 h / 1–2 h / 2–4 h / over 4 h — the age = the OUTPUT FILE\'s time; a terminal (no turn facts) and a chat with no output file are «turn-unknown» (an in-memory last-output time is never read)', tu);
+    // S4: a RESTART of the hub — a new report, the same files: the ages are the same (the in-memory time is gone)
+    const mk = () => O.create({ log: quietLog([]), wallNow: () => t, census: async () => null, kids: async () => null, sessions: () => S, buffersDir: BUF, upMs: () => 0.2 * H, browsers: () => ({ ready: 3, idle1h: 2 }) });
+    const r1 = await mk().tick(), r2 = await mk().tick();
+    const want = / turn-running=1 turn-waiting=1 idle-under-1h=1 idle-1-2h=1 idle-2-4h=1 idle-over-4h=2 turn-unknown=2 browsers-ready=3 browsers-idle-1h=2 /;
+    ok(want.test(r1.line) && want.test(r2.line) && / hub-up=0\.2h /.test(r2.line) && L.LINE_RE.test(r2.line), '⑪ S4: a hub restarted 12 minutes ago still reads «idle over 4 h» = 2 (the files\' times survive it), and prints its own uptime (hub-up) beside them', r2.line.slice(0, 400));
+  } finally { fs.rmSync(BUF, { recursive: true, force: true }); }
+} catch (e) { ok(false, '⑪ M6: the leg threw on this tree', (e && e.message) || String(e)); } }
+
+console.log('⑫b S2: the line\'s engines from the REAL census fold — the future owners, native and outside, adding to 100 %');
+{ try {
+  const F = CEN.censusFold({ ...TAKE, families: { interface: 200, channels: 410, money: 100, conversation: 120, outside: 120, native: 50 }, viaHelper: 140, deep: 7 });
+  const ln = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 3600000, busy: 0.3, engines: F, mem: null, sizes: {} });
+  ok(/ engines="interface 20%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; native 5%; outside 12%" /.test(ln) && / busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 via-helper=140 deep=7 /.test(ln) && L.LINE_RE.test(ln) && L.enginesOk(ln),
+    '⑫b the real fold (src/loop-census.js) prints the seven OWNERS in their order with native and outside, and its helper / deep counts', ln.slice(0, 420));
+} catch (e) { ok(false, '⑫b S2: the leg threw on this tree', (e && e.message) || String(e)); } }
+
+console.log('⑬ S1: the census\'s ticks add up and say where held time went; a paused census prints «?»');
+{ try {
+  const k = (n) => Number(new RegExp(` ${n}=(\\d+)`).exec(LINE)[1]);
+  ok(k('busy-ticks') + k('held-ticks') + k('idle-ticks') + k('stopped-ticks') + k('not-sampled') === k('census-ticks') && /the shares|SHARES/.test(fs.readFileSync(path.join(REPO, 'src/loop-day-report.js'), 'utf8')) && /THEY LEAVE OUT\s*\n?\s*\*?\s*HELD TIME/.test(fs.readFileSync(path.join(REPO, 'src/loop-day-report.js'), 'utf8')),
+    '⑬ busy + held + idle + stopped + not-sampled = census-ticks (1 000 + 10 + 2 000 + 0 + 30 = 3 040); the words say the shares leave out held time and that the holds name it', { busy: k('busy-ticks'), held: k('held-ticks'), idle: k('idle-ticks'), total: k('census-ticks') });
+  const paused = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 3600000, busy: 0.1, engines: { busyTicks: 0, sampledTicks: 3000, shares: [], native: { ticks: 0, share: null }, held: { ticks: 0 }, idle: { ticks: 0 }, stopped: { ticks: 0 }, notSampled: { ticks: 3600, paused: 3600 }, cost: { asks: 0, paidMs: 0 } }, mem: null, sizes: {} });
+  ok(/ engines="\?" /.test(paused) && L.LINE_RE.test(paused), '⑬ an hour whose census was PAUSED prints engines «?» — never «none»', paused.slice(0, 260));
+} catch (e) { ok(false, '⑬ S1: the leg threw on this tree', (e && e.message) || String(e)); } }
+
+console.log('⑭ S3: a process is counted once, under its own kind — by its program and its script');
+{ try {
+  const K = O.kindOf;
+  const cases = [
+    ['node', ['node', '/srv/hub/data/bin/chat-wrapper.js', '--cli', '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js'], 'wrapper', 'a wrapper whose ARGUMENTS name the CLI is a wrapper'],
+    ['claude', ['/usr/local/bin/claude', '--print-nothing'], 'cli', 'the native CLI under it is the CLI'],
+    ['node', ['node', '--max-old-space-size=4096', '/usr/lib/node_modules/@openai/codex/bin/codex.js', 'proto'], 'cli', 'a node CLI is told by the SCRIPT it runs (node\'s options skipped)'],
+    ['node', ['node', '-r', '/srv/hub/x.js', '/srv/hub/tools/report.js', '--about', '/usr/bin/claude'], 'other', 'a CLI path among the arguments of another script is not a CLI'],
+    ['vibespace-devic', ['vibespace-device'], 'agentd', 'the device agent by its own title'],
+    ['node', ['node', '/home/u/.vibespace/agentd/current/agentd.js'], 'agentd', 'the device agent by its script'],
+    ['chrome', ['/opt/x/chrome'], 'browser', 'a browser by its program'],
+    ['dtach', ['dtach', '-c', '/srv/hub/data/sockets/cw-a', 'node', 'w.js'], 'other', 'a dtach master is the rest'],
+  ];
+  const bad = cases.filter(([n, a, want]) => K(n, a) !== want).map(([n, a, want, why]) => ({ why, want, got: K(n, a) }));
+  ok(!bad.length, `⑭ ${cases.map((c) => c[3]).join('; ')}`, bad);
+  // a keeper browser of ANY engine — its program named however the engine calls it — and the processes under it are browsers
+  const ROOT = fs.mkdtempSync(path.join(fs.realpathSync(require('node:os').tmpdir()), 'ldr-br-'));
+  try {
+    const P = path.join(ROOT, 'proc'); fs.mkdirSync(path.join(P, 'self'), { recursive: true }); fs.writeFileSync(path.join(P, 'self', 'cgroup'), '0::/user.slice/x.service\n');
+    const cgp = path.join(ROOT, 'cg', 'user.slice', 'x.service'); fs.mkdirSync(cgp, { recursive: true }); fs.writeFileSync(path.join(cgp, 'cgroup.procs'), '500\n600\n601\n602\n');
+    const mk = (pid, name, ppid) => { const d = path.join(P, String(pid)); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'status'), `Name:\t${name}\nPPid:\t${ppid}\nVmRSS:\t1024 kB\n`); fs.writeFileSync(path.join(d, 'cmdline'), name + '\0'); };
+    mk(600, 'kernel-x', 500); mk(601, 'kernel-x-gpu', 600); mk(602, 'zygote', 601);
+    const k = await O.procKids({ self: 500, procRoot: P, cgroupRoot: path.join(ROOT, 'cg'), browserPids: [600] });
+    ok(k && k.browser.n === 3 && k.other.n === 0, '⑭ a browser the keeper runs (its pid from the keeper\'s records — any engine, whatever its program is called) and every process under it are browsers', k && { browser: k.browser.n, other: k.other.n });
+  } finally { fs.rmSync(ROOT, { recursive: true, force: true }); }
+} catch (e) { ok(false, '⑭ S3: the leg threw on this tree', (e && e.message) || String(e)); } }
+
+console.log('⑮ the smalls: the day leaves out an unwatched hour; lost holds; the walk one at a time; the boot mark by the real writer');
+{ try {
+  const hw = L.newHour(T0); L.holdAdd(hw, { ms: 2000, verdict: 'JavaScript', frame: 'x (src/a.js:1)' });
+  const hu = L.newHour(T0 + 3600000, { watched: false }); L.holdAdd(hu, { ms: 7000, verdict: 'JavaScript', frame: 'y (src/b.js:2)' });
+  const day = L.dayFold([{ hour: hw, toMs: T0 + 3600000 }, { hour: hu, toMs: T0 + 7200000 }]);
+  ok(day.hours === 2 && day.unwatched === 1 && day.heldMs === 2000 && day.holds === 1 && !day.by['src/b.js:2'], '⑮ an hour nobody watched is LEFT OUT of the day\'s sums, and the day says how many hours that was (1)', day);
+  let lost = 5; const RL = O.create({ log: quietLog([]), wallNow: () => T0 + 3600000, census: async () => null, kids: async () => null, lost: () => lost });
+  lost = 8; const rl = await RL.tick();
+  ok(/ lost-holds=3 /.test(rl.line), '⑮ the holds the watchdog\'s ring dropped in the hour are said (lost-holds = 8 − 5)', rl.line.slice(0, 200));
+  // the walk: ONE at a time; its time-out ends it (cancelled) and no second walk starts while one runs
+  let calls = 0, sig = null, release = null;
+  const RW = O.create({ log: quietLog([]), wallNow: () => T0 + 3600000, census: async () => null, walkWaitMs: 60, kids: (signal) => { calls++; sig = signal; return new Promise((r) => { release = r; }); } });
+  const keep = setInterval(() => { }, 1000);   // the walk's time-out timer is unref'd (in the hub the loop is held by the server) — hold it here
+  const w1 = await RW.tick(); const w2 = await RW.tick();
+  clearInterval(keep);
+  ok(calls === 1 && sig && sig.cancelled === true && /procs-by=\?/.test(w1.line) && /procs-by=\?/.test(w2.line), '⑮ the process walk is ONE at a time: its time-out CANCELS it, and a cut while it still runs starts no second walk (both print «?»)', { calls, cancelled: sig && sig.cancelled });
+  if (release) release(null);
+  // THE BOOT MARK by the REAL hold book's writer (src/server/loop-holds.js), read back by the day
+  const LB = require(path.join(REPO, 'src/server/loop-holds.js')); const recs = [];
+  const book = LB.create({ log: { warn() { }, log() { } }, record: (r) => recs.push({ ...r, ts: T0 + 60000 }), samplingState: () => ({ known: true, on: true }), heap: () => ({ heapUsed: 1, heapLimit: 100, external: 0 }), eluEveryMs: 1e9 });
+  book.onHold({ ms: 2500, boot: true, fromM: 0, toM: 2500, samples: [] }); book.onHold({ ms: 1500, fromM: 3000, toM: 4500, samples: [] });
+  try { book.stop?.(); } catch { }
+  const Tel = TEL.Telemetry || TEL;
+  const dd = Tel.heldDays(recs.map((r) => ({ ...r, kind: 'metric', name: 'srv-loop-hold-ms' })), T0 + 3600000).today;
+  ok(recs.length === 2 && /· \(the boot\)$/.test(recs[0].detail) && !/\(the boot\)/.test(recs[1].detail) && dd.boot.count === 1 && dd.boot.ms === 2500 && dd.count === 1 && dd.ms === 1500,
+    '⑮ the boot mark is written by the REAL hold book (its row ends « · (the boot)») and the day reads it apart', { details: recs.map((r) => r.detail), today: dd });
+} catch (e) { ok(false, '⑮ the smalls: the leg threw on this tree', (e && e.message) || String(e)); } }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -610,7 +610,7 @@ function registerWsHandler(wss, ctx) {
     ws._isAlive = true;
     ws.on('pong', () => { ws._isAlive = true; });
     // loop-day-report M5: the hour's page-socket messages out — every send to this page counted where it leaves (one add)
-    { const send0 = ws.send.bind(ws); ws.send = (d, ...rest) => { LC.inc('wsOut'); return send0(d, ...rest); }; }
+    { const send0 = ws.send.bind(ws); ws.send = (d, o, cb) => { LC.inc('wsOut'); return send0(d, o, cb); }; }   // fixed arity: no array per frame
     const attachedSessions = new Set();
     // A server notice nobody was connected to hear is re-asked for the client
     // that just arrived (agent-browser P0 r5; the hook is a no-op once it was
