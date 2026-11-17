@@ -223,21 +223,35 @@ const PAYLOAD = (recs) => ({
     const mkDir = (tag) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), `vs-otel-slice-${tag}-`)); fs.mkdirSync(path.join(d, 'usage-history')); fs.writeFileSync(path.join(d, 'usage-history', 'otel-truth.ndjson'), body); return d; };
     const replayOn = async (mod, tag) => {
       const d = mkDir(tag), f = path.join(d, 'usage-history', 'otel-truth.ndjson'), ino = fs.statSync(f).ino;
-      let last = performance.now(), maxGap = 0; const iv = setInterval(() => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; }, 1);
-      const oi = mod.create({ dataDir: d, PORT: 0, getUsageHistory: () => fakeUH, identityGroups: () => groups, listAccounts: () => [], serverSetting: () => undefined });
-      await oi.replayed;
+      const realPerf = performance.now.bind(performance);
+      let last = realPerf(), maxGap = 0; const iv = setInterval(() => { const t = realPerf(); maxGap = Math.max(maxGap, t - last); last = t; }, 1);
+      // THE WORK LAW (B-0e1b): how many stash lines the replay PARSES in one loop turn — a count, never a clock (the old
+      // `S.maxGap * 2 < O.maxGap` missed by 1 ms at load 1.8, 31 vs 60): every JSON.parse of a stash row is tallied under
+      // the turn it ran in (a setImmediate chain counts the turns) — and THE SLICE CLOCK IS DRIVEN (the adversarial read: a
+      // time-sliced replay on the real clock spreads its rows by the CPU's speed): performance.now advances one ms per read
+      // while the replay runs (the replay reads it once per 256 rows), so every slice holds the same count on any box
+      let turn = 0, spin = true; const perTurn = new Map(), parse = JSON.parse, savedNow = performance.now;
+      let fake = realPerf(); performance.now = () => (fake += 1);
+      const step = () => { turn++; if (spin) setImmediate(step); }; setImmediate(step);
+      JSON.parse = function (t, ...a) { if (typeof t === 'string' && t.startsWith('{"rid":"req_slice')) perTurn.set(turn, (perTurn.get(turn) || 0) + 1); return parse.call(this, t, ...a); };
+      let oi = null;
+      try {
+        oi = mod.create({ dataDir: d, PORT: 0, getUsageHistory: () => fakeUH, identityGroups: () => groups, listAccounts: () => [], serverSetting: () => undefined });
+        await oi.replayed;
+      } finally { JSON.parse = parse; performance.now = savedNow; spin = false; }
       await new Promise((r) => setTimeout(r, 5));
       clearInterval(iv);
       for (let k = 0; k < 100 && fs.statSync(f).ino === ino; k++) await new Promise((r) => setTimeout(r, 50));   // the trim's rewrite, off the loop
       const map = []; for (let k = 0; k < 90000; k += 97) map.push(oi.observedOrgForRid(`req_slice${String(k).padStart(6, '0')}`));
-      const out = { stats: JSON.stringify(oi.stats()), map: JSON.stringify(map), bytes: fs.readFileSync(f, 'utf8'), rewritten: fs.statSync(f).ino !== ino, maxGap: Math.round(maxGap) };
+      const out = { stats: JSON.stringify(oi.stats()), map: JSON.stringify(map), bytes: fs.readFileSync(f, 'utf8'), rewritten: fs.statSync(f).ino !== ino, maxGap: Math.round(maxGap), turns: perTurn.size, perTurnMax: Math.max(0, ...perTurn.values()), parsed: [...perTurn.values()].reduce((x, y) => x + y, 0) };
       fs.rmSync(d, { recursive: true, force: true });
       return out;
     };
     const S = await replayOn(require(REPO + '/src/server/otel-ingest.js'), 's'), O = await replayOn(OnePass, 'o');
     ok(body.length > 12 * 1048576 && S.rewritten && O.rewritten && S.stats === O.stats && S.map === O.map && S.bytes === O.bytes && !S.bytes.includes('req_torn') && S.bytes.length < body.length,
       `SLICED REPLAY: the same observation map (${S.stats}), the same counts and the same trimmed stash, byte for byte (${(S.bytes.length / 1048576).toFixed(1)} of ${(body.length / 1048576).toFixed(1)} MB kept) as the one-pass replay`);
-    ok(S.maxGap * 2 < O.maxGap, `SLICED REPLAY: it hands the loop back — its longest loop gap ${S.maxGap} ms vs ${O.maxGap} ms for the one-pass replay of the same stash`);
+    ok(S.parsed === 90000 && S.turns >= 4 && S.perTurnMax * 4 <= S.parsed && O.parsed === 90000 && O.turns === 1 && O.perTurnMax === O.parsed,
+      `SLICED REPLAY: it hands the loop back — on the driven slice clock its 90 000 rows are parsed over ${S.turns} loop turns, at most ${S.perTurnMax} in one (≤ a quarter); the one-pass control parses all ${O.perTurnMax} in ONE turn (counted, not timed — the real loop gaps read ${S.maxGap} vs ${O.maxGap} ms)`, JSON.stringify({ S: { turns: S.turns, max: S.perTurnMax, parsed: S.parsed }, O: { turns: O.turns, max: O.perTurnMax, parsed: O.parsed } }));
   }
   srv.close();
 }
