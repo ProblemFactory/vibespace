@@ -27,8 +27,14 @@
 //      turn (never «立即唤醒»); a REAL click ⇒ «已添加表情回应», sent, the vendor holds the account's own reaction; a REAL
 //      Reject on the second ⇒ «已拒绝» (that road unchanged); the THIRD approved in the Outbox window (its row's 「批准…」
 //      opens the card) ⇒ «已添加表情回应», sent, the chat's copy says so too. RED on 90c995a3: the toast is the refusal.
-//      (A recall cannot be proposed on this fake hub — the fake vendor's messages are never the user's own; its road is
-//      test-channel-outbox's: the real card posts the digest, the real route + engine + fake vendor take it back.)
+//   ⑨ A RECALL IS APPROVED (B-bc21): the hub boots with the fake's NAMED seams VIBESPACE_CHANNELS_FAKE_SELF=1 (the
+//      account's own lines stored as the user's — as a real adapter marks the token's own id) and
+//      VIBESPACE_CHANNELS_FAKE_REVISIONS (the poll fake takes a message back by id). Turn 5: a recall of someone else's
+//      message is refused «not-yours» and files nothing (CONTROL: the seam marks only the account's own lines); ⑧'s reply
+//      is approved by a REAL click (the fake vendor lists back a reply that carried files — a plain one, like ③'s, it never
+//      does), and a recall of THAT sent message files ONE card in the chat quoting it; a REAL click on its Approve ⇒
+//      «消息已撤回», sent, and the fake vendor holds the message recalled. RED without the seam: the recall of the account's
+//      own message is refused «not-yours» too and nothing is filed. (test-channel-outbox proves the road in process.)
 //   ⑧ A DOOR IN THE CHAT DOES WHAT ITS ICON SAYS (lane card-door-in-chat — the owner, 2026-11-07: a mail card in his
 //      agent's chat, its PDF row's ⤓ pressed ⇒ the toast «已复制！» and no file: «这个按钮怎么是复制？！»). Turn 4 replies
 //      with `--attach` a real PDF; in the CHAT: a REAL press on the row's ⤓ ⇒ the browser's download lands with the
@@ -37,7 +43,7 @@
 //      CONTROL (the chat's own text unchanged): the path the agent wrote, pressed ⇒ copied + «已复制！». RED on c6ddc30e6.
 // PNGs: $CPC_SHOTS (default: the scratch dir) chat-card-zh.png, chat-card-sent-zh.png, chat-card-phone-zh.png,
 // chat-reaction-card-zh.png, chat-reaction-sent-zh.png, outbox-reaction-sent-zh.png, chat-door-card-zh.png,
-// chat-door-pressed-zh.png.
+// chat-door-pressed-zh.png, chat-recall-card-zh.png.
 // Requires google-chrome + dtach (SKIP without). Run: node scripts/test-chat-proposal-card.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -106,7 +112,17 @@ const TURNS = {
     { id: 'toolu_cpc4a', command: `vibespace-channels read ${CONV}`, argvs: [['read', CONV]] },
     { id: 'toolu_cpc4b', command: `vibespace-channels reply ${CONV} "The notes are attached" --attach ${NOTES}`, argvs: [['reply', CONV, 'The notes are attached', '--attach', NOTES]] },
   ] },
+  // ⑨ (B-bc21): a recall of someone else's message (refused — the CONTROL), then of ⑧'s reply once sent: its id is the store's,
+  // filled in at the call (the stub's @recall-target, written by the leg). A read before each (one touch per call)
+  'take back the reply': { k: 5, text: 'Proposed taking back the reply.', calls: [
+    { id: 'toolu_cpc5a', command: `vibespace-channels read ${CONV}`, argvs: [['read', CONV]] },
+    { id: 'toolu_cpc5b', command: `vibespace-channels recall ${CONV} fake-poll-ops-m1`, argvs: [['recall', CONV, 'fake-poll-ops-m1']] },
+    { id: 'toolu_cpc5c', command: `vibespace-channels read ${CONV}`, argvs: [['read', CONV]] },
+    { id: 'toolu_cpc5d', command: `vibespace-channels recall ${CONV} @recall-target`, argvs: [['recall', CONV, '@recall-target']] },
+  ] },
 };
+const RECALL_TARGET = path.join(stubDir, 'recall-target');   // ⑨: the message id the stub's @recall-target names
+const REVS = path.join(stubDir, 'fake-revisions.json');      // ⑨: the poll fake's revisions file (the vendor's recall lands here)
 const stubPath = path.join(stubDir, 'claude');
 const TRANSCRIPT = path.join(fakeHome, '.claude', 'projects', CWD.replace(/[/._]/g, '-'), SID + '.jsonl');
 fs.mkdirSync(path.dirname(TRANSCRIPT), { recursive: true });
@@ -124,6 +140,7 @@ const usage = { input_tokens: 1, output_tokens: 1 };
 const out = (o) => process.stdout.write(JSON.stringify({ ...o, session_id: SID }) + '\\n');
 const both = (o) => { const uuid = U(); const rec = { ...o, uuid, parentUuid: parent, timestamp: new Date().toISOString(), sessionId: SID, cwd: CWD, isSidechain: false, userType: 'external', version: '2.1.281' }; parent = uuid; fs.appendFileSync(TR, JSON.stringify(rec) + '\\n'); out({ ...o, uuid }); };
 const run = (argv) => new Promise((res) => execFile(process.execPath, [CLI, ...argv], { env: process.env, timeout: 20000 }, (e, so, se) => res(String(so || '') + String(se || ''))));
+const fill = (x) => (String(x).includes('@recall-target') ? String(x).split('@recall-target').join((() => { try { return fs.readFileSync(${JSON.stringify(RECALL_TARGET)}, 'utf8').trim(); } catch { return 'none'; } })()) : x);   // ⑨
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 out({ type: 'system', subtype: 'init', model: 'claude-fable-5', cwd: CWD, tools: ['Bash'], permissionMode: 'default', claude_code_version: '2.1.281', uuid: U() });
 async function turn(prompt, T) {
@@ -131,10 +148,10 @@ async function turn(prompt, T) {
   await wait(250);
   let i = 0;
   for (const c of T.calls) {
-    both({ type: 'assistant', message: { id: 'msg_cpc' + T.k + 'c' + (++i), type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: c.id, name: 'Bash', input: { command: c.command, description: 'channels' } }], stop_reason: 'tool_use', usage } });
+    both({ type: 'assistant', message: { id: 'msg_cpc' + T.k + 'c' + (++i), type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: c.id, name: 'Bash', input: { command: fill(c.command), description: 'channels' } }], stop_reason: 'tool_use', usage } });
     await wait(300);
     let log = c.argvs.length ? '' : 'notes.md';
-    for (const a of c.argvs) log += await run(a);
+    for (const a of c.argvs) log += await run(a.map(fill));
     await wait(300);
     both({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: c.id, content: log.slice(0, 4000) || '(no output)', is_error: false }] } });
     fs.appendFileSync(${JSON.stringify(stubDir)} + '/turns.log', c.id + ' ' + log.replace(/\\n/g, ' | ') + '\\n');
@@ -160,7 +177,7 @@ process.stdin.on('end', () => process.exit(0));
 
 let srv = null;
 const LOG = path.join(stubDir, 'server.log');
-const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_CHANNELS_FAKE_FILES: '1' /* ⑧: the poll fake takes an agent's files (lane composer-file-only-send's seam) */ }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
+const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_CHANNELS_FAKE_FILES: '1' /* ⑧: the poll fake takes an agent's files (lane composer-file-only-send's seam) */, VIBESPACE_CHANNELS_FAKE_SELF: '1', VIBESPACE_CHANNELS_FAKE_REVISIONS: REVS /* ⑨ B-bc21: the account's own lines are the user's; the poll fake takes one back */ }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
 const waitServer = async () => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
 startServer();
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
@@ -542,6 +559,38 @@ try {
   const pressedPath = seen5.shown && await realClick(`${LIST4} [data-cdc-own="1"]`);
   const p5 = await waitFor('window.__cdc.flashes.length ? JSON.parse(JSON.stringify(window.__cdc)) : null', 4000) || await probe();
   check('CONTROL: the chat\'s OWN path link (the agent\'s words) still copies — the path, «已复制！» — and opens nothing', pressedPath && p5.copied.includes(NOTES) && p5.flashes.includes('已复制！') && p5.opened.length === 0, { seen5, pressedPath, miss: lastMiss, p5 });
+
+  // ── ⑨ a recall approved in the chat (B-bc21) ──
+  console.log('⑨ the agent proposes taking back the reply ⑧ attached, once sent (someone else\'s message refused): approved in the chat, the vendor takes it back');
+  // the message to take back must be one the vendor LISTS as the account's: the fake echoes a sent reply that carried files
+  // (⑧'s), never a plain one (③'s) — so ⑧'s card, still on screen in THE list, is approved first by a person's press
+  await sleep(900);   // the card's arming (P.ARM_MS)
+  check('⑨ a REAL click on ⑧\'s card\'s Approve (the reply with the PDF)', await realClick(`${DCARD(pid4)} .chan-prop-actions button[data-approve]`), lastMiss);
+  const sent4 = await waitFor(`(async () => { const r = await fetch('/api/channels/outbox?ids=${pid4}').then((x) => x.json()); const p = (r.proposals || [])[0]; return p && p.state === 'sent' ? p.state : null; })()`, 20000);
+  const own9 = sent4 ? await waitFor(`(async () => { const r = await fetch('/api/channels/fake-poll/fake-poll-ops/messages?limit=200').then((x) => x.json()).catch(() => null); const m = r && (r.records || []).find((x) => x && x.text === 'The notes are attached' && x.author && x.author.id === 'u-me'); return m && m.vendorId ? m.vendorId : null; })()`, 30000) : null;
+  check('⑨ ⑧\'s reply is SENT and the vendor lists it back: in the conversation\'s store under its own id (the account\'s own line)', !!sent4 && !!own9, { sent4, own9, state: (await api('GET', `/api/channels/outbox?ids=${pid4}`)).body?.proposals?.[0]?.state });
+  fs.writeFileSync(RECALL_TARGET, String(own9 || 'none'));
+  await evalJs(`(() => { if (!window.__toasts) { window.__toasts = []; new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList.contains('global-toast')) window.__toasts.push(n); }).observe(document.body, { childList: true, subtree: true }); } window.__toasts.length = 0; app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(sid)}, text: 'take back the reply' }); return true; })()`);
+  const t9 = () => turnsLog().split('\n').filter((l) => l.startsWith('toolu_cpc5')).map((l) => l.slice(0, 400));
+  const rc9 = await waitFor(`(async () => { const r = await fetch('/api/channels/outbox?conv=${encodeURIComponent(CONV)}').then((x) => x.json()); const p = (r.proposals || []).find((q) => q.kind === 'recall' && q.recall && q.recall.msg === ${JSON.stringify(String(own9))} && q.state === 'awaiting-approval'); return p ? p.id : null; })()`, 30000);
+  const ob9 = (await api('GET', `/api/channels/outbox?conv=${encodeURIComponent(CONV)}`)).body?.proposals || [];
+  const ctl9 = t9().find((l) => l.startsWith('toolu_cpc5b ')) || '';
+  check('⑨ CONTROL: a recall of someone else\'s message (Ada\'s fake-poll-ops-m1) is refused «not-yours» and files nothing — the seam marks only the account\'s own lines', /not-yours/.test(ctl9) && !ob9.some((q) => q.kind === 'recall' && q.recall && q.recall.msg === 'fake-poll-ops-m1'), { ctl9, recalls: ob9.filter((q) => q.kind === 'recall').map((q) => [q.id, q.state, q.recall && q.recall.msg]) });
+  check('⑨ turn 5 filed ONE recall of ⑧\'s sent reply, awaiting approval (the store\'s) — without the seam it is refused «not-yours» too', !!rc9 && ob9.filter((q) => q.kind === 'recall' && q.recall && q.recall.msg === own9).length === 1, t9());
+  // the card ON SCREEN (a session's earlier views keep hidden lists holding the same card — ⑧): the visible one, marked
+  const card9 = await waitFor(`(() => { const v = [...document.querySelectorAll(${JSON.stringify(CHATP(String(rc9)))})].find((c) => c.getClientRects().length && c.getBoundingClientRect().height > 0 && c.querySelector('.chan-prop-actions button[data-approve]')); if (!v) return null; v.dataset.rc9Own = '1'; return { n: document.querySelectorAll(${JSON.stringify(CHATP(String(rc9)))}).length, text: v.textContent.slice(0, 300) }; })()`, 20000);
+  check('⑨ the recall\'s card is drawn in the chat, quoting the message it takes back («The notes are attached»)', !!card9 && /The notes are attached/.test(card9.text), card9);
+  await sleep(900);   // the card's arming (P.ARM_MS) — a recall's Approve is armed like every Approve
+  check('chat-recall-card-zh.png', await shot('chat-recall-card-zh.png', '.chat-msg:has([data-rc9-own="1"])', 10));
+  check('⑨ a REAL click on the recall card\'s Approve (in the chat)', !!card9 && await realClick('[data-rc9-own="1"] .chan-prop-actions button[data-approve]'), lastMiss);
+  const sent9 = await waitFor(`(async () => { const r = await fetch('/api/channels/outbox?ids=${rc9}').then((x) => x.json()); const p = (r.proposals || [])[0]; return p && p.state === 'sent'; })()`, 15000);
+  const toast9 = await waitFor(`window.__toasts.some((n) => n.textContent.startsWith('消息已撤回'))`, 15000);
+  const tt9 = await toasts();
+  const st9 = (await api('GET', `/api/channels/outbox?ids=${rc9}`)).body?.proposals?.[0];
+  const chat9 = await waitFor(`[...document.querySelectorAll(${JSON.stringify(CHATP(String(rc9)))})].some((c) => c.classList.contains('chan-prop-sent'))`, 10000);
+  check('⑨ APPROVED: «消息已撤回» once the approve\'s answer came (bound 15 s), no refusal — the store says sent and the chat card too', !!sent9 && !!toast9 && !tt9.some((x) => /请求被拒绝|shown/.test(x)) && !!st9 && st9.state === 'sent' && !!chat9, { toasts: tt9, state: st9 && st9.state, reason: st9 && st9.reason, chat9 });
+  const rv9 = (() => { try { return JSON.parse(fs.readFileSync(REVS, 'utf8')); } catch { return null; } })();
+  check('⑨ …the vendor took it back: the poll fake\'s revisions name that message recalled', !!rv9 && !!rv9.revisions && !!rv9.revisions[own9] && rv9.revisions[own9].state === 'recalled', rv9);
 
   check('no page exception', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) {

@@ -323,6 +323,11 @@ const FAKE_EMOJI = Object.freeze([
 ].map(([key, glyph, label, custom]) => Object.freeze({ key, glyph, label, custom: custom === true })));
 /** The fake account's own user id — `mine` is judged against it (the Lark adapter answers the token's open id). */
 const FAKE_SELF = 'u-me';
+/** B-bc21: the NAMED seam `VIBESPACE_CHANNELS_FAKE_SELF=1` (read at module load) stores what the fake account itself wrote
+ *  (author FAKE_SELF — a reply it sent, a direct chat's own lines) as the USER'S OWN (`author.isSelf`, as a real adapter marks
+ *  the token's own id), so a recall can be proposed and approved on a fake hub (test-chat-proposal-card ⑨). Off ⇒ every
+ *  record says isSelf false, as before. */
+const FAKE_SELF_OWN = String(process.env.VIBESPACE_CHANNELS_FAKE_SELF || '') === '1';
 const FAKE_REACTORS = ['u-ada', 'u-brook', 'u-cass', 'u-dee', 'u-eli', 'u-fox', 'u-gus', 'u-hal', 'u-ivy'];
 /** Seeded reactions on 25 % of messages: 2–4 keys, 1–9 reactors each; every fifth reacted message carries one of
  *  OURS. State = Map<vendorId, Map<key, [{actor, rid}]>> — `reactions()` serves it as a snapshot. */
@@ -361,7 +366,7 @@ function toRecord(adapterId, convId, m, { synthetic = false } = {}) {
     adapterId, convId,
     vendorId: synthetic ? syntheticKey(adapterId, convId, m) : m.vendorId,
     at: m.at,
-    author: { id: m.author.id, name: m.author.name, isSelf: false, isBot: !!m.author.isBot },
+    author: { id: m.author.id, name: m.author.name, isSelf: FAKE_SELF_OWN && m.author.id === FAKE_SELF, isBot: !!m.author.isBot },
     text: m.text,
     mentions: [], attachments: Array.isArray(m.attachments) ? m.attachments : [],
     // lane channel-threads: the seeded place (spec §7.2) — a reply's parent, its thread, its root
