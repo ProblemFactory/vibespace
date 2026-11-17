@@ -39,6 +39,9 @@ import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
 const require = createRequire(import.meta.url);
+// the suite's own copy of its WHOLE output (VIBESPACE_XPIC_LOG=<file>): ci.mjs keeps a GREEN suite's output nowhere, and the hotfix's
+// step seven is READ by its lines at the cut — every console line is also appended there
+if (process.env.VIBESPACE_XPIC_LOG) { const f = process.env.VIBESPACE_XPIC_LOG; const tee = (orig) => (...a) => { try { fs.appendFileSync(f, a.map(String).join(' ') + '\n'); } catch { } return orig(...a); }; console.log = tee(console.log.bind(console)); console.error = tee(console.error.bind(console)); }
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const F = require('../src/browser-facts.js');
 const PIC = require('../src/browser-picture.js');
@@ -148,7 +151,7 @@ const col = http.createServer((req, res) => {
   }
   if (u.pathname === '/blk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw page')); return; }
   if (u.pathname === '/blu') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw blu').replace(`background:rgb(${BLOCK.join(',')})`, `background:rgb(${BLU.join(',')})`)); return; } // ⑦: a tab in a window of its own
-  if (u.pathname === '/red') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw red').replace(`background:rgb(${BLOCK.join(',')})`, `background:rgb(${RED.join(',')})`)); return; } // ⑦ (hotfix 2026-11-17): the agent's SECOND tab, told apart by its block's colour
+  if (u.pathname === '/red') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw red', `<a id=pop href="#" style="position:absolute;left:60px;top:20px;color:#ddd" onclick="window.open('/blu?n=7','vsblu','popup,width=900,height=640');return false">pop</a>`).replace(`background:rgb(${BLOCK.join(',')})`, `background:rgb(${RED.join(',')})`)); return; } // ⑦ (hotfix 2026-11-17): the agent's SECOND tab, told apart by its block's colour
   if (u.pathname === '/ag') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw ag')); return; } // lane desktop-x-seat-browser r5: an agent's window over his
   // lane desktop-x-seat-browser: a page in a passkey ceremony (Chrome's OWN WebAuthn dialog — drawn by Chrome, not the page); its outcome on window.__pk
   if (u.pathname === '/pk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw pk', `<button id=pkb style="position:absolute;left:60px;top:20px">passkey</button><select id=sel style="position:absolute;left:60px;top:140px;font-size:28px;width:320px"><option>alpha<option>beta<option>gamma<option>delta</select><script>window.__pk='idle';document.getElementById('pkb').addEventListener('click',()=>{window.__pk='pending';const ch=new Uint8Array(32);crypto.getRandomValues(ch);navigator.credentials.get({publicKey:{challenge:ch,rpId:location.hostname,userVerification:'preferred',timeout:600000}}).then((c)=>{window.__pk='got '+(c&&c.type);},(e)=>{window.__pk='rejected '+(e&&e.name);});});</script>`)); return; }
@@ -577,25 +580,24 @@ console.log('— ⑦ the X picture shows the tab the view says it shows: a tab i
   ok(!!tn.ok && sameCdp && stA.mounted && stA.wid === wid1 && !!pxA, `A — the agent's tab new lands in its own lease's window (the same CDP window: ${sameCdp}): the X picture stays on window ${stA.wid} and DRAWS the new page there — its block ${JSON.stringify(pxA)} is rgb(${RED.join(',')})`, JSON.stringify({ tn: tn && { ok: tn.ok, out: String(tn.stdout || '').slice(0, 160) }, winA: winA && winA.result, winA0: winA0 && winA0.result, stA, server: serverLines(jA) }).slice(0, 1100));
   const redId = RA && RA.target ? String(RA.target.id) : null;
   if (RA) RA.close();
-  // B — a tab in ANOTHER window (a real second Chrome window, made through the browser's own CDP), the agent switched to it
+  // B — a tab in ANOTHER window: the agent's page opens a POPUP (window.open with features — a Chrome window of its own; the lease's
+  //     own page opened it, so the lease's session knows it), the agent clicks it open with its own verb and switches to it
   const jB = journal.length;
-  let bport = null; try { bport = Number(fs.readFileSync(path.join(DIR, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || null; } catch { }
-  let bluId = null;
-  if (bport) { const vr = await (await fetch(`http://127.0.0.1:${bport}/json/version`)).json(); const bw = new WebSocket(vr.webSocketDebuggerUrl); await new Promise((r, e) => { bw.on('open', r); bw.on('error', e); }); const r = await new Promise((res) => { bw.on('message', (d) => { const m = JSON.parse(d); if (m.id === 1) res(m); }); bw.send(JSON.stringify({ id: 1, method: 'Target.createTarget', params: { url: `${ORIGIN}/blu?n=7`, newWindow: true, focus: false } })); }); bluId = r && r.result ? String(r.result.targetId) : null; bw.close(); }
-  const list = await S1.vb(['tab'], 60000);
-  const line = String(list.stdout || '').split('\n').find((l) => /\/blu\?n=7/.test(l)) || '';
-  const tabRef = (line.match(/^\s*(t\d+)\b/) || [])[1] || null;
-  const sw = tabRef ? await S1.vb(['tab', tabRef], 60000) : { ok: false, stdout: 'the agent\'s tab list did not show the window\'s tab' };
+  const pop = await S1.vb(['click', '#pop'], 60000);
+  let tabRef = null, list = null, bluId = null;
+  for (let i = 0; i < 20 && !tabRef; i++) { list = await S1.vb(['tab'], 60000); const line = String(list.stdout || '').split('\n').find((l) => /\/blu\?n=7/.test(l)) || ''; tabRef = (line.match(/^\s*(t\d+)\b/) || [])[1] || null; if (!tabRef) await sleep(500); }
+  const sw = tabRef ? await S1.vb(['tab', tabRef], 60000) : { ok: false, stdout: `the agent's tab list never showed the popup (${String(list && list.stdout || '').replace(/\s+/g, ' ').slice(0, 200)})` };
+  { const RBq = DIR ? await agentPage(DIR, '/blu') : null; bluId = RBq && RBq.target ? String(RBq.target.id) : null; if (RBq) { const wB = await RBq.call('Browser.getWindowForTarget', { targetId: bluId }); const wA0 = A ? await A.call('Browser.getWindowForTarget', { targetId: String(A.target.id) }) : null; console.log(`  [measure] popup ${String(bluId || '?').slice(0, 8)} CDP window ${wB && wB.result && wB.result.windowId} (the first tab's ${wA0 && wA0.result && wA0.result.windowId}); the agent's click ${pop.ok ? 'ok' : 'failed'}, its tab ${tabRef}`); RBq.close(); } }
   const t0 = Date.now();
   const samples = []; let moved = null;
   while (Date.now() - t0 < 15000) { const q = await state(); samples.push({ at: Date.now() - t0, ...q }); if (q.mounted && q.status === 'connected' && q.wid != null && q.wid !== wid1) { moved = q; break; } await sleep(100); }
-  const lies = samples.filter((q) => q.at > 1500 && q.mounted && q.status === 'connected' && q.wid === wid1);
+  const lies = sw.ok ? samples.filter((q) => q.at > 1500 && q.mounted && q.status === 'connected' && q.wid === wid1) : samples; // no switch ⇒ the road was not walked (red by name below)
   const waited = samples.find((q) => /Waiting for this tab’s window/.test(q.words || ''));
   const RB = DIR ? await agentPage(DIR, '/blu') : null;
   const gB = RB ? await pageGeom(RB) : null;
   const pxB = moved && gB ? await until(async () => { const v = await P.xPixel(moved.wid, gB.left + gB.x, gB.top + gB.y); return v && near(v, BLU, 40) ? v : null; }, 15000, 250) : null;
   if (RB) RB.close();
-  ok(!lies.length, `B — after the agent's tab moved to ANOTHER window the page is NEVER «connected» on the old window ${wid1} (1.5 s grace; ${samples.length} samples, ${lies.length} that lie${waited ? `; the wait SAID at +${waited.at} ms: «${waited.words}»` : ''})`, JSON.stringify({ lies: lies.slice(0, 3), first: samples.slice(0, 5), server: serverLines(jB) }).slice(0, 1100));
+  ok(!!sw.ok && !lies.length, `B — after the agent's tab moved to ANOTHER window the page is NEVER «connected» on the old window ${wid1} (1.5 s grace; ${samples.length} samples, ${sw.ok ? lies.length : 'no switch: '} that lie${waited ? `; the wait SAID at +${waited.at} ms: «${waited.words}»` : ''})`, JSON.stringify({ lies: lies.slice(0, 3), first: samples.slice(0, 5), server: serverLines(jB) }).slice(0, 1100));
   ok(!!bluId && !!sw.ok && !!moved && !!pxB, `B — the agent's tab in ANOTHER window (${bluId && bluId.slice(0, 8)}, the agent's «tab ${tabRef}»): the X picture moves to window ${moved && moved.wid} (was ${wid1}) at +${moved ? samples[samples.length - 1].at : '–'} ms and draws its page — its block ${JSON.stringify(pxB)} is rgb(${BLU.join(',')}) — no new viewer, no strip switch`, JSON.stringify({ bluId, tabRef, sw: sw && { ok: sw.ok, out: String(sw.stdout || '').slice(0, 160), err: String(sw.stderr || '').slice(0, 160) }, last: samples.slice(-3), server: serverLines(jB) }).slice(0, 1100));
   // a PERSON's chip on the first tab (the view watches it) ⇒ that tab's window; then the chip of the agent's tab ⇒ following again
   const firstId = A && A.target ? String(A.target.id) : null;
