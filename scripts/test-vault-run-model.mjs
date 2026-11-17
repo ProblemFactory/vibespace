@@ -38,6 +38,9 @@
 //      it, a pending fork borrows its parent's id, a lookalike host passes, a seen shape passes the host; round 2: a known tool
 //      naming no host it can read passes, a cluster keeps a blind shape after one plain 允许, a scheme-less target / `host=` / an
 //      attached short flag / a URI's host list is not read, a client's shell escape (psql -c '\!', mysql -e 'system') is not seen
+//   ⑭ THE HOME CENSUS (B-f1d3, lane lg-vault-env) — every KNOWN_TOOLS row has ONE TOOL_HOME_SEAL entry (what its tool reads
+//      that the card cannot show + that tool's own «no user config» pin), no entry without a row, every pin a known token;
+//      gh's entry carries what its runSeal sets; RED controls: a dropped row, a home path as a pin, a new row with no entry
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -1607,6 +1610,44 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     if (!cleanLeg.has(leg)) cleanLeg.set(leg, leg(V));
     ok(hit && red.length > 0 && cleanLeg.get(leg).length === 0, `MUTANT «${name}»: the patch hits once and the leg goes RED (${red.length} escapes) — the shipped module passes the same leg`, { hit, sample: red.slice(0, 2) });
   }
+}
+
+// ⑭ THE HOME CENSUS (B-f1d3, lane lg-vault-env) — the table half. test-vault-run ⑬ drives every row through the door; here the
+// table itself: one entry per KNOWN_TOOLS row and none without one, each naming what it reads, each pin a token the door knows.
+console.log('⑭ THE HOME CENSUS (B-f1d3) — one TOOL_HOME_SEAL entry per KNOWN_TOOLS row, each pin a known token');
+{
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const PIN_VALUE = /^(?:\/dev\/null|<(?:nowhere|fresh)>(?:\/[a-z]+)?|<ssh>|[0-9])$/;
+  const censusGaps = (rows, table) => {
+    const out = [], names = rows.map((r) => r.name);
+    for (const n of names) if (!has(table, n)) out.push(`${n}: no census entry`);
+    for (const n of Object.keys(table)) if (!names.includes(n)) out.push(`${n}: an entry with no KNOWN_TOOLS row`);
+    for (const [n, e] of Object.entries(table)) {
+      if (!Array.isArray(e.reads) || !e.reads.length || e.reads.some((x) => typeof x !== 'string' || x.length < 12)) out.push(`${n}: reads must name each file and what it names`);
+      if (!Object.keys(e.env || {}).length && !(e.argv || []).length) out.push(`${n}: no pin at all`);
+      for (const [k, v] of Object.entries(e.env || {})) if (!/^[A-Z][A-Z0-9_]*$/.test(k) || typeof v !== 'string' || !PIN_VALUE.test(v)) out.push(`${n}: env pin ${k}=${v} is not a known token`);
+      if ((e.argvUnless || []).length && !(e.argv || []).length) out.push(`${n}: argvUnless without an argv pin`);
+      if ((e.argv || []).some((a) => typeof a !== 'string' || !a)) out.push(`${n}: an empty argv pin word`);
+    }
+    return out;
+  };
+  const T = V.TOOL_HOME_SEAL;
+  const gaps = censusGaps(V.KNOWN_TOOLS, T);
+  ok(!gaps.length && Object.keys(T).length === V.KNOWN_TOOLS.length && V.KNOWN_TOOLS.length === 19, `B-f1d3: THE HOME CENSUS covers every KNOWN_TOOLS row (${V.KNOWN_TOOLS.length}) — each names what its tool reads that the card cannot show, and that tool's own pin`, gaps);
+  const { curl: _dropped, ...noCurl } = T;
+  const badPin = { ...T, wget: { ...T.wget, env: { WGETRC: '/home/userL/.wgetrc' } } };
+  const g1 = censusGaps(V.KNOWN_TOOLS, noCurl), g2 = censusGaps(V.KNOWN_TOOLS, badPin), g3 = censusGaps([...V.KNOWN_TOOLS, { name: 'newtool' }], T);
+  ok(g1.length === 1 && /^curl: no census entry/.test(g1[0]) && g2.length === 1 && /^wget: env pin WGETRC=/.test(g2[0]) && g3.length === 1 && /^newtool: no census entry/.test(g3[0]),
+    'B-f1d3 RED controls: the same checker names a dropped row (curl), a pin that is a home path (wget WGETRC=~/.wgetrc) and a NEW tool row that came without its census entry', { g1, g2, g3 });
+  const gh = V.knownToolOf('gh'), ge = V.homeSealOf(gh);
+  ok(!!ge && ge.env[gh.runSeal.configDirEnv] === '<nowhere>' && Object.entries(gh.runSeal.childEnv).every(([k, v]) => k === 'GIT_TERMINAL_PROMPT' || ge.env[k] === v),
+    'B-f1d3: gh\'s census entry carries what its runSeal already sets (GH_CONFIG_DIR nowhere, its git child\'s GIT_CONFIG_GLOBAL / NOSYSTEM) — one truth, not two', { ge: ge && ge.env, runSeal: gh.runSeal.childEnv });
+  ok(V.homeSealOf(V.knownToolOf('httpie')) === T.http && V.homeSealOf(V.knownToolOf('curl8')) === T.curl && V.homeSealOf(null) === null && V.homeSealOf({ name: 'bash' }) === null && V.homeSealOf({ name: 'toString' }) === null,
+    'B-f1d3: homeSealOf follows a row\'s alias (httpie ⇒ http) and its version suffix (curl8 ⇒ curl); a shell / no row / a prototype name has no entry');
+  ok(JSON.stringify(V.SEAL_HOME_ENV) === JSON.stringify(['HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME']) && Object.isFrozen(T) && Object.values(T).every((e) => Object.isFrozen(e) && Object.isFrozen(e.env) && Object.isFrozen(e.argv)),
+    'B-f1d3: every row\'s home names are the five the gh seal moves; the table and each entry are frozen');
+  ok(['ssh', 'sftp', 'scp'].every((n) => JSON.stringify(T[n].argv) === '["-F","/dev/null"]') && T.curl.argv[0] === '-q' && T.mysql.argv[0] === '--no-defaults' && /passwd home/i.test(T.ssh.reads[0]) && /passwd home/i.test(T.curl.reads[0]),
+    'B-f1d3: the rows a HOME move cannot seal carry a WORD — ssh / sftp / scp read ~/.ssh from the passwd home (-F /dev/null), curl\'s manual searches the passwd home for .curlrc (-q first), mysql reads its option files under any HOME (--no-defaults first)');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed${ghPin})` : `\nALL PASS (${pass}${ghPin})`);

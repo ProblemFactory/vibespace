@@ -57,6 +57,9 @@
 //      conversations asking ⇒ the 33rd too_many_askers by name while one already asking still asks; more than 8 asking ⇒
 //      ONE Vault notice «N conversations are asking», re-worded in place, closed at 8 or fewer, quiet once the owner set it
 //      aside, closed by a lock and by a boot
+//   ⑬ THE HOME CENSUS (B-f1d3, lane lg-vault-env) — EVERY KNOWN_TOOLS row driven through the REAL door (a capturing spawn),
+//      the hub's env carrying every pin's variable at a PLANTED dir: the child's HOME / XDG_* / pins / argv read against the
+//      row's TOOL_HOME_SEAL entry; what is still OPEN is pinned BY ROW (a ratchet: a sealed row leaves the list)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1999,7 +2002,60 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
     await p.catch(() => {});
     ok(!!c && /^Hosts: github\.com$/m.test(d) && !/Mentions/.test(d), 'round 16 (MINOR): a plain gh card (a GHES-minted value routed to github.com) names Hosts: github.com and shows NO Mentions line — base leaked the row default api.github.com into «Mentions» (a row default is a route host, never a mention)', { hosts: (d.match(/^Hosts: .+$/m) || [])[0], mentions: (d.match(/^Mentions.+$/m) || [])[0] || 'none' });
   }
+
+  // ── ⑬ THE HOME CENSUS (B-f1d3, lane lg-vault-env): EVERY KNOWN_TOOLS row driven through the REAL door ──
+  // Each row's fake tool (never executed: a capturing spawn) runs with a stored own value; the hub's env carries every pin's
+  // variable pointed at a PLANTED dir (the inherited road) and a lower-case npm_config_userconfig (a hub started by npm). The
+  // child's env and argv are then read against the row's census entry. What is still OPEN is pinned BY ROW (RED_LIST: how many
+  // of its pins the child misses) — it only shrinks: a unit that seals a row takes it off, a new gap is red by name.
+  {
+    const CB = path.join(ROOT, 'census-bin'); fs.mkdirSync(CB, { recursive: true });
+    const PLANT = path.join(ROOT, 'planted-home'); fs.mkdirSync(PLANT, { recursive: true });
+    const ARGS = { curl: ['https://api.example.com/x'], wget: ['https://api.example.com/x'], http: ['https://api.example.com/x'], gh: ['issue', 'list'], git: ['ls-remote', 'https://api.example.com/r.git'], aws: ['s3', 'ls'], gcloud: ['compute', 'instances', 'list'], az: ['group', 'list'], npm: ['view', 'left-pad'], pip: ['download', 'left-pad'], docker: ['pull', 'alpine'], kubectl: ['get', 'pods', '-s', 'https://api.example.com'], psql: ['-h', 'api.example.com'], mysql: ['-h', 'api.example.com'], rclone: ['lsd', 'remote:'], ssh: ['api.example.com', 'true'], sftp: ['api.example.com'], scp: ['f.txt', 'api.example.com:/x'], rsync: ['f.txt', 'api.example.com:/x'] };
+    const pinNames = [...new Set(Object.values(VR.TOOL_HOME_SEAL).flatMap((e) => Object.keys(e.env)))];
+    const pinLower = new Set(pinNames.map((k) => k.toLowerCase()));
+    const quiet = Object.fromEntries(Object.entries(SUITE_ENV).filter(([k]) => !pinLower.has(k.toLowerCase()) && !/^npm_config_/i.test(k)));   // the runner's own npm_config_* never reach the count
+    const hubEnv = () => ({ ...quiet, HOME: SUITE_HOME, ...Object.fromEntries(pinNames.map((k) => [k, PLANT])), npm_config_userconfig: path.join(PLANT, '.npmrc'), PATH: [CB, GHREAL, '/usr/bin', '/bin'].join(':') });
+    const tokenOk = (v, got) => {
+      if (v === '<ssh>') return typeof got === 'string' && /^'?\/[^ ']+\/ssh'? -F \/dev\/null$/.test(got);
+      const t = /^<(nowhere|fresh)>(.*)$/.exec(v);
+      if (!t) return got === v;
+      if (typeof got !== 'string') return false;
+      return t[1] === 'nowhere' ? got === NOWHERE + t[2] : (got.startsWith(sw.runRoot + path.sep) && got.endsWith(t[2]) && !fs.existsSync(got));   // a fresh dir lives in THIS run's folder and is gone with it
+    };
+    const missingOf = (name, E, A) => {
+      const e = VR.TOOL_HOME_SEAL[name], out = [];
+      for (const k of VR.SEAL_HOME_ENV) if (E[k] !== NOWHERE) out.push(k);
+      for (const [k, v] of Object.entries(e.env)) { if (!tokenOk(v, E[k])) out.push(k); for (const x of Object.keys(E)) if (x !== k && x.toLowerCase() === k.toLowerCase()) out.push(x + ' (a case variant)'); }
+      if (e.argv.length && JSON.stringify(A.slice(0, e.argv.length)) !== JSON.stringify(e.argv)) out.push('argv ' + e.argv.join(' '));
+      return out;
+    };
+    const measured = {}, why = {};
+    for (const row of VR.KNOWN_TOOLS) {
+      let cap = null;
+      const spawn = (cmd, args, opts) => { cap = { cmd, args, env: opts.env }; const c = new EventEmitter(); c.pid = 99013; c.stdout = new EventEmitter(); c.stdout.destroy = () => {}; c.stderr = new EventEmitter(); c.stderr.destroy = () => {}; c.stdin = null; setImmediate(() => { c.emit('exit', 0, null); c.emit('close', 0, null); }); return c; };
+      const isGh = row.name === 'gh';
+      const tool = isGh ? GHREAL_GH : path.join(CB, row.name);
+      if (!isGh) fs.writeFileSync(tool, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const d = isGh ? mkGh({ spawnImpl: spawn, agentEnv: hubEnv }) : sw.mk(DOOR, { isRootOwned: REAL, spawnImpl: spawn, agentEnv: hubEnv });
+      const { r } = await runAnswered(sw, ['--env', (isGh ? 'GH_TOKEN' : 'SECRET_T') + '=vault://agent:conv-1/gh-token', '--', tool, ...ARGS[row.name]], { door: d });
+      if (!cap) { measured[row.name] = -1; why[row.name] = (r && (r.code || r.words)) || 'not spawned'; continue; }
+      const miss = missingOf(row.name, cap.env || {}, cap.args || []);
+      measured[row.name] = miss.length; if (miss.length) why[row.name] = miss;
+      console.log(`    census ${row.name}: ${miss.length ? 'OPEN — ' + miss.join(', ') : 'sealed'}`);
+    }
+    ok(Object.values(measured).every((n) => n >= 0), 'B-f1d3: every KNOWN_TOOLS row reached the spawn through the door (none refused before it — the census reads a real child env)', why);
+    // THE RED LIST — the rows still OPEN and how many of their pins the child misses (HOME + 4 XDG + the row's env pins + a case
+    // variant left beside one + the argv word). gh's 1 is its git child's ssh (GIT_SSH_COMMAND): its runSeal is the only seal today.
+    const RED_LIST = { curl: 7, wget: 7, http: 7, gh: 1, git: 8, aws: 8, gcloud: 7, az: 8, npm: 9, pip: 7, docker: 6, kubectl: 6, psql: 8, mysql: 8, rclone: 6, ssh: 6, sftp: 6, scp: 6, rsync: 6 };
+    const open = Object.fromEntries(Object.entries(measured).filter(([, n]) => n !== 0).sort(([a], [b]) => (a < b ? -1 : 1)));
+    const want = Object.fromEntries(Object.entries(RED_LIST).sort(([a], [b]) => (a < b ? -1 : 1)));
+    ok(JSON.stringify(open) === JSON.stringify(want), `B-f1d3 THE HOME CENSUS (a ratchet): the rows still OPEN and the pins each child misses equal the pinned red list (${Object.keys(want).length} rows open of ${VR.KNOWN_TOOLS.length})`, { measured: open, why });
+    ok(JSON.stringify(why.gh) === '["GIT_SSH_COMMAND"]' && why.git && why.git.includes('GIT_CONFIG_GLOBAL') && why.npm && why.npm.includes('npm_config_userconfig (a case variant)'),
+      'B-f1d3: the census READS the child — gh\'s sealed pins (HOME, XDG_*, GH_CONFIG_DIR, its git child\'s config) measure as present and only its ssh child is open; git\'s same pin is open; the hub\'s lower-case npm variable is seen', { gh: why.gh, git: why.git, npm: why.npm });
+  }
 }
 try { fs.chmodSync(BIN, 0o755); } catch { }   // the read-only bin given back (the scratch dir is removed)
+try { fs.chmodSync(GHBIN, 0o755); } catch { }   // B-f1d3: GHBIN too — left 0555 its gh could not be unlinked and the scratch dir outlived the suite (the test machine's LEFTOVERS)
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);
