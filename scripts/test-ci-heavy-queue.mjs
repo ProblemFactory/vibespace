@@ -70,7 +70,7 @@ async function lateSniper(ciUrl) {
   await until(() => has(log, 'W3', 'wait'));
   fs.writeFileSync(relH, 'go');
   await until(() => has(log, 'H', 'released'));
-  await until(() => has(log, 'W3', 'got'), 700);
+  await until(() => has(log, 'W3', 'got'), 600);   // an absence window ≥ 3× the mutant's positive (10–200 ms)
   const w3won = has(log, 'W3', 'got');
   for (const k of [W1, W3, H]) { try { process.kill(k.pid, 'SIGKILL'); } catch { } }
   return { w3won, log };
@@ -82,7 +82,7 @@ async function lateSniper(ciUrl) {
 // while the lock is FREE and W3 (alive, older ticket) is ahead ⇒ W1 must NOT take it: it rejoins at the BACK. Served H, W2, W3, W1 —
 // by ticket TIME (not pid: W1's is the lowest) and never a free try. Timed waits are 3× the worst case by construction (staleness +
 // one poll); a pass returns as soon as the event happens.
-const STALE = 600, POLL = 100, BOUND = 3 * (STALE + POLL);
+const STALE = 400, POLL = 60, BOUND = 3 * (STALE + POLL);
 async function frozenHead(ciUrl) {
   const d = scratch('frozen'), lock = path.join(d, 'lock'), log = path.join(d, 'log');
   const rel = (n) => path.join(d, 'rel' + n), o = { poll: POLL, headPoll: POLL, staleMs: STALE };
@@ -188,7 +188,7 @@ console.log('§3 the winner, and a timeout');
   const rec = JSON.parse(fs.readFileSync(lock, 'utf-8')), got = lines(log).find((l) => / W got /.test(l)).split(' ')[3];
   ok(rec.ticket === got && /^\d{15}-\d+$/.test(got) && tickets(lock).length === 0, `the holder's record names its ticket (${rec.ticket}) and the ticket is gone from the queue`);
   ok(rec.cmd === 'queue-child.mjs' && rec.pid === W.pid, `…the record's cmd is the holder's own script name, which pidStillRunning finds in its cmdline (${rec.cmd})`);
-  const T = waiter(CI_URL, lock, 'T', log, { waitMs: 600, poll: 100 });
+  const T = waiter(CI_URL, lock, 'T', log, { waitMs: 300, poll: 100 });
   ok(await until(() => has(log, 'T', 'timedout'), 5000) && tickets(lock).length === 0, 'a waiter that times out leaves no ticket behind');
   fs.writeFileSync(rel, 'go'); await until(() => exited(W.child) && exited(T.child)); }
 
@@ -250,6 +250,7 @@ const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
   fs.mkdirSync(ticketDirOf(lock));
   fs.writeFileSync(path.join(ticketDirOf(lock), `${String(Date.now() - 60000).padStart(15, '0')}-999999`), JSON.stringify({ pid: 999999, cmd: 'gone', startedAt: 1 }));
   const W = waiter(url, lock, 'W', log, { poll: 100 });
+  await until(() => has(log, 'W', 'wait'));   // the absence window starts once the waiter is in the line (round 3)
   const served = await until(() => has(log, 'W', 'got'), 600);
   try { process.kill(W.pid, 'SIGKILL'); } catch { }
   ok(!served, 'CONTROL: without the reaper a dead ticket blocks the line for good — §2\'s legs are the ones that red'); }

@@ -16,6 +16,8 @@
 //      mirror), a non-list one fails closed; a green on a SIBLING branch counts for nothing (real git).
 //   §4d pruning — by COMMITS: every file of a commit inside the window stays; an old unreadable file goes with its commit.
 //   §4e the other readers see what the gate sees — the writer's refusal (nine broken forms × red / green), «already green», --status.
+//   §4f the guard follow-ups — an AFFECTED run never overwrites a FULL / unreadable red; a marker's identity is its FILE NAME's commit;
+//      --status prints an unreadable row's file time; a marker dir the writer cannot read / write is a named «no verdict».
 //   §5 NEGATIVE CONTROLS — a mutant without the per-job check; a mutant writer of r1's shape (a FULL `<sha>.green`) clears what it
 //      must not; the shape-check line deleted (null / {} / [] greens fail §4b's legs BY NAME — never a crash; a reader that throws
 //      fails the leg that asked); the guard's catch turned back to «not blocking»; the writer's refusal asked of readable markers only.
@@ -33,7 +35,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW } from './ci.mjs';
+import { launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker } from './ci.mjs';
 import { REPO, ok, git, writeMarker, report } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
@@ -342,7 +344,7 @@ console.log('§4e the other readers see what the gate sees (r4)');
   fs.writeFileSync(path.join(dir, `${S}.red`), JSON.stringify(goodRec(S, 'red', { failed: ['test-x'] })));
   ok((safely(() => existingVerdictOf(dir, S)) || {}).kind === 'red', '…a readable FULL red is one');
   const SRC4 = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
-  ok(/else if \(partial\) \{\s*const existing = existingVerdictOf\(dir, sha\);\s*if \(existing\) noVerdict =/.test(SRC4) && /partial: !!\(only \|\| shard \|\| host\)/.test(SRC4), 'WIRING: the partial-run refusal (settleHeavyMarker) asks existingVerdictOf');
+  ok(/else if \(affected && !partial\) \{[\s\S]{0,900}m\.kind === 'red'[\s\S]{0,300}if \(reds\.length\) noVerdict =/.test(SRC4) && /else if \(partial\) \{[\s\S]{0,200}existing = existingVerdictOf\(dir, sha\);[\s\S]{0,200}if \(existing\) noVerdict =/.test(SRC4) && /partial: !!\(only \|\| shard \|\| host\), affected: scope === 'affected'/.test(SRC4), 'WIRING: the partial / affected refusal (settleHeavyMarker) asks existingVerdictOf');
   const now = Date.now();
   const g = { kind: 'green', sha: S, scope: 'full', failed: [], mtimeMs: now - 1000 }, u = { kind: 'red', sha: S, unreadable: 'not a JSON object (null)', file: `/m/${S}.red`, failed: [], mtimeMs: 1 };
   const a1 = heavyAlreadyGreen({ markers: [g], sha: S, full: S, commitTimeMs: now - 60000, scope: 'full', now });
@@ -352,6 +354,94 @@ console.log('§4e the other readers see what the gate sees (r4)');
   const sdir = scratch('status'); fs.writeFileSync(path.join(sdir, `${S}.red`), 'null');
   const st = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--status', `--markers=${sdir}`], { cwd: REPO, encoding: 'utf-8', timeout: 60000 });
   ok(/UNREADABLE/.test(st.stdout) && /BLOCKS until a FULL green/.test(st.stdout), `--status lists an unreadable red as UNREADABLE (${(st.stdout.split('\n').find((l) => /UNREADABLE/.test(l)) || st.stdout.slice(0, 120)).trim()})`); }
+
+console.log('§4f the guard follow-ups (on r4): the writer, identity by file name, status time, an unreadable dir');
+{ const S = 'd'.repeat(40), rec = { sha: S, result: 'green', failed: [], startedAt: 1, endedAt: 2, scope: 'affected', selected: ['test-x'] };
+  const d1 = scratch('fu-aff'); fs.writeFileSync(path.join(d1, `${S}.red`), JSON.stringify(goodRec(S, 'red', { failed: ['test-x'] })));
+  const r1 = settleHeavyMarker({ dir: d1, sha: S, rec, affected: true });
+  const d2 = scratch('fu-aff-u'); fs.writeFileSync(path.join(d2, `${S}.red`), 'null');
+  const r2 = settleHeavyMarker({ dir: d2, sha: S, rec, affected: true });
+  const d3 = scratch('fu-aff-none'), r3 = settleHeavyMarker({ dir: d3, sha: S, rec, affected: true });
+  ok(/affected run — keeping the existing RED/.test(r1.noVerdict) && fs.existsSync(path.join(d1, `${S}.red`)) && !fs.existsSync(path.join(d1, `${S}.green`)), `(i) an AFFECTED run at the red's own commit keeps its FULL red («${r1.noVerdict}»)`);
+  ok(/UNREADABLE RED/.test(r2.noVerdict) && fs.readFileSync(path.join(d2, `${S}.red`), 'utf-8') === 'null', '…and an UNREADABLE red');
+  { const dp = scratch('fu-aff-p'); fs.writeFileSync(path.join(dp, `${S}.red`), JSON.stringify(goodRec(S, 'red', { failed: ['test-x'], partial: ['test-x'] })));
+    const rp = settleHeavyMarker({ dir: dp, sha: S, rec, affected: true });
+    const dr = scratch('fu-aff-r'); fs.writeFileSync(path.join(dr, `${S}.red`), JSON.stringify(goodRec(S, 'red', { failed: ['test-x', 'test-y'] })));
+    const rr = settleHeavyMarker({ dir: dr, sha: S, rec: { ...rec, result: 'red', failed: ['test-x'] }, affected: true });
+    const dg = scratch('fu-aff-g'); fs.writeFileSync(path.join(dg, `${S}.green`), JSON.stringify(goodRec(S, 'green', { scope: 'affected', selected: ['test-z'], range: 'm..a' })));
+    const rg = settleHeavyMarker({ dir: dg, sha: S, rec: { ...rec, result: 'red', failed: ['test-x'] }, affected: true });
+    ok(/PARTIAL RED/.test(rp.noVerdict) && JSON.parse(fs.readFileSync(path.join(dp, `${S}.red`), 'utf-8')).partial
+      && /keeping the existing RED/.test(rr.noVerdict) && JSON.parse(fs.readFileSync(path.join(dr, `${S}.red`), 'utf-8')).failed.length === 2
+      && !rg.noVerdict && rg.file && fs.existsSync(path.join(dg, `${S}.red`)) && !fs.existsSync(path.join(dg, `${S}.green`)),
+      `(i) as B-e56e's read put it: an affected run keeps a PARTIAL red too, never shrinks a red's failed list with its own, and a GREEN never stops it — its red replaces an affected green (${[rp.noVerdict, rr.noVerdict, rg.noVerdict || 'written'].map((x) => x.slice(0, 40)).join(' · ')})`); }
+  ok(!r3.noVerdict && r3.file && fs.existsSync(r3.file), '…with no verdict there it writes its marker');
+  // (ii) a marker's identity is its FILE NAME's commit
+  const G = makeRepo('fu-ident'); const A = commit(G, 'a.txt', 'a\n', 'A'), X = commit(G, 'x.txt', 'x\n', 'X'); git(G, ['checkout', '-q', '-b', 'side', A]); const head = commit(G, 'h.txt', 'h\n', 'HEAD on side');
+  const d4 = scratch('fu-short'); fs.writeFileSync(path.join(d4, `${A}.red`), JSON.stringify(goodRec(A.slice(0, 12), 'red', { failed: ['test-x'] })));
+  const e4 = safely(() => existingVerdictOf(d4, A));
+  ok(e4 && e4.kind === 'red' && !e4.unreadable && blockedBy(d4, head, G) === A, `(ii) a readable red whose sha FIELD is a short prefix is an EXISTING verdict to the writer, as it blocks the gate (${e4 && e4.sha})`);
+  const d5 = scratch('fu-shortname'); fs.writeFileSync(path.join(d5, `${A.slice(0, 12)}.red`), 'null');
+  const e5 = safely(() => existingVerdictOf(d5, A)), now = Date.now();
+  const ag = heavyAlreadyGreen({ markers: [{ kind: 'green', sha: A, scope: 'full', failed: [], mtimeMs: now - 1000 }, { kind: 'red', sha: A.slice(0, 12), unreadable: 'not a JSON object (null)', file: `/m/${A.slice(0, 12)}.red`, failed: [], mtimeMs: 1 }], sha: A, full: A, commitTimeMs: now - 60000, scope: 'full', now });
+  ok(e5 && e5.unreadable && ag.skip === false && /UNREADABLE/.test(ag.why), '…a BROKEN marker whose FILE NAME is a short sha is that commit\'s: the writer keeps it, «already green» is not answered');
+  const d6 = scratch('fu-other'); fs.writeFileSync(path.join(d6, `${A}.red`), JSON.stringify(goodRec(X, 'red', { failed: ['test-x'] })));
+  const b6 = heavyBlocker({ dir: d6, head, repoRoot: G });
+  ok(b6 && b6.sha === A && b6.unreadable && /not the file's commit/.test(b6.unreadable), `…a red whose sha FIELD names another commit speaks for the commit its FILE NAME says — here A (an ancestor of HEAD), UNREADABLE, blocking (${b6 && b6.unreadable})`);
+  const d6b = scratch('fu-other2'); fs.writeFileSync(path.join(d6b, `${X}.red`), JSON.stringify(goodRec(A, 'red', { failed: ['test-x'] })));
+  const b6b = safely(() => heavyBlocker({ dir: d6b, head, repoRoot: G }));
+  ok(b6b && !b6b.threw && b6b.sha === X && b6b.commit === A && b6b.unreadable, `THE FINAL LAW (B-e56e): a red NAMED for a commit off HEAD's line (X) whose sha FIELD names A — an ancestor of HEAD — BLOCKS on A: a red speaks for every commit its name OR field names, as master read the field (${b6b && (b6b.commit || b6b.threw || '').slice(0, 12)})`);
+  { const d6c = scratch('fu-green-two'); fs.writeFileSync(path.join(d6c, `${A}.red`), JSON.stringify(goodRec(A, 'red', { failed: ['test-x'] }))); fs.writeFileSync(path.join(d6c, `${head}.green`), JSON.stringify(goodRec(X, 'green')));
+    ok(blockedBy(d6c, head, G) === A, '…and a GREEN whose name (HEAD) and field (X) name two commits covers NOTHING: the red on A still blocks (a green speaks for one commit, only when name and field agree)'); }
+  // (ii) round 2: a marker's COMMIT is the commit its file name RESOLVES to — compared as commits (主开发's skeptic: a short-named red
+  // and a full-named green of the SAME commit were taken for two commits, and the green on the red's own commit cleared it)
+  const R2 = makeRepo('fu-resolve'); const A2 = commit(R2, 'a.txt', 'a\n', 'A'), B2 = commit(R2, 'b.txt', 'b\n', 'B');
+  const blk = (files, head) => { const d = scratch('fu-res'); for (const [n, rec] of files) fs.writeFileSync(path.join(d, n), JSON.stringify(rec)); const b = safely(() => heavyBlocker({ dir: d, head, repoRoot: R2 })); return b && !b.threw ? b.commit : (b && b.threw) || null; };
+  const fullG = (n) => goodRec(n, 'green'), redT = (n) => goodRec(n, 'red', { failed: ['t1'] });
+  const v1 = blk([[`${A2.slice(0, 12)}.red`, redT(A2)], [`${A2}.green`, fullG(A2)]], B2);
+  const v2 = blk([[`${A2.slice(0, 12)}.red`, redT(A2)], [`${A2}.green`, fullG(A2)]], A2);
+  const v3 = blk([[`${A2}.red`, redT(A2)], [`${A2.slice(0, 12)}.green`, fullG(A2)]], B2);
+  const v4 = blk([[`${A2.slice(0, 7)}.red`, redT(A2)], [`${A2}.green`, { ...fullG(A2), scope: 'affected', selected: ['t1'] }]], B2);
+  const vc = blk([[`${A2.slice(0, 12)}.red`, redT(A2)], [`${B2}.green`, fullG(B2)]], B2);
+  ok(v1 === A2 && v2 === A2 && v3 === A2 && v4 === A2, `(ii) a short-named red and a full-named green of the SAME commit (or the reverse, at HEAD = B or A, or an affected green) are ONE commit: the green on the red's own commit clears nothing — BLOCKED ×4 (${[v1, v2, v3, v4].map((x) => (x || 'CLEAR').slice(0, 8)).join(' ')})`);
+  ok(vc === null, '…CONTROL: a short-named red and a FULL green on a strict DESCENDANT — CLEAR');
+  // the FINAL identity law (r3): a readable record's full sha FIELD wins over its name — the measured case: a short name git cannot
+  // resolve (an AMBIGUOUS prefix answers «missing»), driven here with a resolver that finds nothing for any short name
+  const none = () => new Map();
+  const blkR = (files, head) => { const d = scratch('fu-res3'); for (const [n, body] of files) fs.writeFileSync(path.join(d, n), typeof body === 'string' ? body : JSON.stringify(body)); const b = safely(() => heavyBlocker({ dir: d, head, repoRoot: R2, resolveShort: none })); return b && !b.threw ? b.commit : (b && b.threw) || null; };
+  const amb = blkR([[`${A2.slice(0, 7)}.red`, redT(A2)]], B2);
+  ok(amb === A2, `(ii) final: a readable red whose FILE NAME is a short prefix git cannot resolve (ambiguous ⇒ «missing») and whose sha FIELD is the full commit speaks for the FIELD — BLOCKED, as master (${String(amb).slice(0, 12)})`);
+  const lost = blkR([[`${A2.slice(0, 7)}.red`, 'null']], B2);
+  ok(lost === null, '…a short name that resolves to NO commit, with no readable field, speaks for no commit — ignored, as master');
+  const twin = blkR([[`${A2.slice(0, 7)}.red`, redT(A2)], [`${A2}.green`, fullG(A2)]], B2);
+  ok(twin === A2, '…and a green on the field\'s own commit does not clear it (one commit, not two)');
+  const dp = scratch('fu-prune'); const old = (n, t, k) => fs.writeFileSync(path.join(dp, `${n}.${k}`), JSON.stringify(goodRec(n.length === 40 ? n : A2, k, { endedAt: t })));
+  old(A2.slice(0, 12), 300, 'red'); old(A2, 100, 'green'); old(B2, 200, 'green');
+  safely(() => pruneMarkers(dp, 1, { repoRoot: R2 }));
+  const leftP = fs.readdirSync(dp).sort();
+  ok(leftP.length === 2 && leftP.includes(`${A2.slice(0, 12)}.red`) && leftP.includes(`${A2}.green`), `…prune groups by COMMIT: keep 1 keeps both files of the newest commit (a short and a full name of A), B goes (${leftP.map((f) => f.slice(0, 12)).join(' ')})`);
+  // THE FINAL LAW's small one: a full TAG-object name is peeled like a short one — both name the tagged commit
+  { const T = makeRepo('fu-tag'); const tA = commit(T, 'a.txt', 'a\n', 'A'), tB = commit(T, 'b.txt', 'b\n', 'B'); git(T, ['tag', '-a', '-m', 'an annotated tag on A', 'vA', tA]);
+    let tagObj = null; try { tagObj = git(T, ['rev-parse', 'vA']); } catch { }   // §75: an old-object read behind a guard
+    const dt = scratch('fu-tag-m'), dts = scratch('fu-tag-s');
+    fs.writeFileSync(path.join(dt, `${tagObj}.red`), JSON.stringify(goodRec(tagObj, 'red', { failed: ['t1'] }))); fs.writeFileSync(path.join(dt, `${tA}.green`), JSON.stringify(goodRec(tA, 'green')));
+    fs.writeFileSync(path.join(dts, `${tagObj.slice(0, 12)}.red`), JSON.stringify(goodRec(tagObj.slice(0, 12), 'red', { failed: ['t1'] }))); fs.writeFileSync(path.join(dts, `${tA}.green`), JSON.stringify(goodRec(tA, 'green')));
+    const bt = safely(() => heavyBlocker({ dir: dt, head: tB, repoRoot: T })), bts = safely(() => heavyBlocker({ dir: dts, head: tB, repoRoot: T }));
+    ok(tagObj !== tA && bt && bt.commit === tA && bts && bts.commit === tA, `a red named by a full TAG-object sha and one named by its short form both speak for the TAGGED commit — the green on that commit is the red's own and clears neither (${[bt, bts].map((b) => (b && (b.commit || b.threw)) || 'CLEAR').map((x) => String(x).slice(0, 10)).join(' ')})`); }
+  // (iii) --status prints an unreadable row's FILE time
+  const d7 = scratch('fu-status'); const f7 = path.join(d7, `${S}.red`); fs.writeFileSync(f7, 'null'); const t7 = Date.parse('2026-11-10T12:00:00Z') / 1000; fs.utimesSync(f7, t7, t7);
+  const st = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--status', `--markers=${d7}`], { cwd: REPO, encoding: 'utf-8', timeout: 60000 });
+  const row = (st.stdout.split('\n').find((l) => /UNREADABLE/.test(l)) || '');
+  ok(row && !/1969|1970/.test(row) && row.includes(new Date(t7 * 1000).toLocaleString()), `(iii) --status prints an unreadable row with its FILE's time, never 1969 (${row.trim().slice(0, 90)})`);
+  // (iv) a marker directory the writer cannot read, or write: a named «no verdict» line, never a crash
+  const notDir = path.join(scratch('fu-notdir'), 'markers'); fs.writeFileSync(notDir, 'x');
+  const r8 = safely(() => settleHeavyMarker({ dir: notDir, sha: S, rec, partial: true })), r9 = safely(() => settleHeavyMarker({ dir: notDir, sha: S, rec }));
+  ok(!r8.threw && /marker directory cannot be read/.test(r8.noVerdict) && r8.writeFailed === true && !r9.threw && /could not be written/.test(r9.noVerdict) && r9.writeFailed === true, `(iv) a marker directory it cannot read or write ends in a NAMED no-verdict line, not a crash («${r8.noVerdict}» · «${r9.noVerdict}»)`); }
+
+{ const SRCF = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  ok(/const \{ noVerdict, writeFailed \} = settleHeavyMarker\(/.test(SRCF) && /if \(writeFailed\) return 1;/.test(SRCF), 'a GREEN tier whose marker could not be written exits NON-ZERO (the run existed to write its verdict) — the gate reads writeFailed');
+  const notDir = path.join(scratch('fu-status-file'), 'markers'); fs.writeFileSync(notDir, 'x');
+  const st = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--status', `--markers=${notDir}`], { cwd: REPO, encoding: 'utf-8', timeout: 60000 });
+  ok(st.status === 1 && /marker directory .* cannot be read \(ENOTDIR\)/.test(st.stderr) && !/\n\s+at /.test(st.stderr), `--status on a marker path that is a FILE: a named line and exit 1, no stack trace (exit ${st.status}: ${st.stderr.trim().slice(0, 100)})`); }
 
 console.log('§5 NEGATIVE CONTROLS — the per-job check, and r1\'s FULL marker');
 const M = mutantCopies('ci-heavy-verdict', REPO);
@@ -366,7 +456,7 @@ const OLD_BLOCK = [
     "    if (!cleared) return red;",
     "  }",
   ].join('\n') + '\n';
-const UNION_AT = SRC.indexOf("  const greens = all.filter((m) => m.kind === 'green' && !m.unreadable && exists(m.sha));\n"), UNION_END = SRC.indexOf('  return null;\n}', UNION_AT);
+const UNION_AT = SRC.indexOf("  const greens = all.filter((m) => m.kind === 'green' && !m.unreadable && m.commit);\n"), UNION_END = SRC.indexOf('  return null;\n}', UNION_AT);
 const READ_ALL = '  const all = readMarkers(dir, { withMirror: true, withUnreadable: true });\n';
 ok(UNION_AT > 0 && UNION_END > UNION_AT && SRC.split(READ_ALL).length === 2, 'the union block and the reader\'s call are where the old-reader twin expects them (the twin swaps exactly them)');
 const OLD_READER_SRC = (SRC.slice(0, UNION_AT) + OLD_BLOCK + SRC.slice(UNION_END)).replace(READ_ALL, '  const all = readMarkers(dir);\n');
@@ -394,19 +484,21 @@ const OLD_READER_SRC = (SRC.slice(0, UNION_AT) + OLD_BLOCK + SRC.slice(UNION_END
   ok(SRC.split(SHAPE_CALL).length === 2, 'the shape check is ONE line in readMarkers (the mutant removes exactly it)');
   const mod = await import(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(SHAPE_CALL, ''), 'noshape')).href);
   const G = makeRepo('mut-shape'); const red = commit(G, 'r.txt', 'r\n', 'R'), rel = commit(G, 'd.txt', 'd\n', 'desc');
-  for (const body of ['null', '{}', '[]']) {
+  // (B-e56e: a {} or [] green has no sha field, so THE FINAL LAW alone makes it cover nothing — the shape check is the only guard for a
+  // green whose name and field agree but whose record is not a green's: a «red» result, a `failed` that is no list)
+  for (const body of ['null', JSON.stringify({ sha: rel, result: 'red', failed: [], endedAt: 2 }), JSON.stringify({ sha: rel, result: 'green', failed: 'test-x', endedAt: 2 })]) {
     const dir = scratch('mut-shape'); writeMarker(dir, red, 'red', ['test-x']); fs.writeFileSync(path.join(dir, `${rel}.green`), body);
     const b = blockedBy(dir, rel, G, mod.heavyBlocker);
-    ok(b !== red && blockedBy(dir, rel, G) === red, `CONTROL: with the shape-check line deleted, §4b's leg for a ${body} green fails BY NAME (${b === null ? 'the red is cleared' : b}) — never a crash`);
+    ok(b !== red && blockedBy(dir, rel, G) === red, `CONTROL: with the shape-check line deleted, §4b's leg for a ${body.slice(0, 40)} green fails BY NAME (${b === null ? 'the red is cleared' : String(b).slice(0, 60)}) — never a crash`);
   } }
 { const CATCH = "    console.error(`\\n[ci] PUSH BLOCKED — the heavy-gate markers cannot be read (${(e && e.message) || e}): a marker that cannot be read never opens the gate.`);\n    console.error('     Fix the marker directory, or — with a written word — VIBESPACE_SKIP_CI=1 git push\\n');\n    return 1;\n";
   ok(SRC.split(CATCH).length === 2, 'the guard\'s answer to a throw is ONE block (the mutant turns it back to «not blocking»)');
   const mod = await import(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(CATCH, "    console.error(`[ci] WARNING: could not read the heavy-gate markers (${e.message}) — not blocking`);\n    return 0;\n"), 'notblocking')).href);
   const notDir = path.join(scratch('mut-catch'), 'markers'); fs.writeFileSync(notDir, 'x');
   ok(mod.checkHeavy({ dir: notDir, head: 'HEAD' }) === 0 && checkHeavy({ dir: notDir, head: 'HEAD' }) === 1, 'CONTROL: the catch turned back to «not blocking» answers 0 on an unreadable marker path; the real guard answers 1 — §4b\'s leg is the one that reds'); }
-{ const REF = "  return readMarkers(dir, { withUnreadable: true }).find((m) => m.sha === sha && (m.kind === 'green' || m.kind === 'red') && (m.unreadable || !m.partial)) || null;\n";
+{ const REF = "  const all = readMarkers(dir, { withUnreadable: true }).filter((m) => m.kind === 'green' || m.kind === 'red');\n";
   ok(SRC.split(REF).length === 2, 'the writer\'s refusal question is ONE line (the mutant asks it of the readable markers only, as round 3 did)');
-  const mod = await import(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(REF, "  return readMarkers(dir).find((m) => m.sha === sha && (m.kind === 'green' || m.kind === 'red') && !m.partial) || null;\n"), 'refusal-r3')).href);
+  const mod = await import(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(REF, "  const all = readMarkers(dir).filter((m) => (m.kind === 'green' || m.kind === 'red') && !m.partial);\n"), 'refusal-r3')).href);
   const S = 'b'.repeat(40), dir = scratch('mut-refuse'); fs.writeFileSync(path.join(dir, `${S}.red`), 'null');
   const mv = safely(() => mod.existingVerdictOf(dir, S)), rv = safely(() => existingVerdictOf(dir, S));
   ok(mv === null && rv !== null && !rv.threw, 'CONTROL: round 3\'s question sees no verdict where a broken red sits (the partial run would erase it); the real one does — §4e\'s legs are the ones that red'); }
@@ -496,6 +588,121 @@ console.log('§7b THE LAUNCH PATH (B-e381 part 2) — never the pushing shell\'s
   const PRE = SRC.replace("env: born.env });", "env: GIT_ENV });");
   ok(wired(SRC) && PRE !== SRC && !wired(PRE), 'WIRING: heavyLaunch spawns its detached tier with launchEnvOf(GIT_ENV), guarded and said (CONTROL: the pre-fix spawn line, env: GIT_ENV, fails the pin)');
 }
+
+
+console.log('§7c THE DIFFERENTIAL (B-e56e) — seeded marker sets: every «master BLOCKED → new CLEAR» is an honest union of list-scoped greens');
+{ // MASTER'S READER, verbatim from 2056c98de (readMarkers + heavyBlocker's decision), its two git questions handed to the oracle
+  const masterBlocker = ({ dir, head, exists, isAncestor }) => {
+    const all = []; let files = [];
+    try { files = fs.readdirSync(dir); } catch { return null; }
+    for (const f of files) {
+      const m = /^([0-9a-f]{7,40})\.(green|red|pid|skipped)$/.exec(f);
+      if (!m) continue;
+      let rec = {};
+      try { rec = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch {}
+      all.push({ ...rec, sha: rec.sha || m[1], kind: m[2], file: path.join(dir, f) });
+    }
+    all.sort((a, b) => (b.endedAt || b.startedAt || 0) - (a.endedAt || a.startedAt || 0));
+    const reds = all.filter((m) => m.kind === 'red' && exists(m.sha));
+    const greens = all.filter((m) => m.kind === 'green' && !m.partial && exists(m.sha));
+    const coversRed = (g, red) => g.scope !== 'affected' || (red.failed || []).every((f) => Array.isArray(g.selected) && g.selected.includes(f));
+    for (const red of reds) {
+      if (!isAncestor(red.sha, head)) continue;
+      const cleared = greens.some((g) => g.sha !== red.sha && isAncestor(red.sha, g.sha) && isAncestor(g.sha, head) && coversRed(g, red));
+      if (!cleared) return red;
+    }
+    return null;
+  };
+  // THE NEW READER, the same oracle in place of its two git questions (and of the short-name / tag resolvers)
+  const EX = "  const exists = (sha) => gitIn(repoRoot, ['cat-file', '-e', sha + '^{commit}']) !== null;\n";
+  const IA = "  const isAncestor = (a, b) => spawnSync('git', ['-C', repoRoot, 'merge-base', '--is-ancestor', a, b], { env: GIT_ENV }).status === 0;\n";
+  ok(SRC.split(EX).length === 2 && SRC.split(IA).length === 2, 'the new reader asks git exactly two questions, each ONE line (the oracle swaps exactly them)');
+  const NEWR = await import(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(EX, '  const exists = (sha) => globalThis.__CIV_DIFF.exists(sha);\n').replace(IA, '  const isAncestor = (a, b) => globalThis.__CIV_DIFF.isAncestor(a, b);\n'), 'differential')).href);
+  let seed = 0x5eed389 >>> 0;
+  const rnd = () => { seed = (seed + 0x6D2B79F5) >>> 0; let t = seed; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const pick = (a) => a[Math.floor(rnd() * a.length)], hex = (n) => Array.from({ length: n }, () => pick([...'0123456789abcdef'])).join('');
+  const sub = (a) => a.filter(() => rnd() < 0.5);
+  const SUITES3 = ['t1', 't2', 't3'];
+  const CASES = 300, dirD = scratch('differential');
+  let mBlocked = 0, nBlocked = 0, loosened = 0, tightened = 0, judged = 0, masterThrew = 0;
+  const bad = [];
+  for (let c = 0; c < CASES && bad.length < 3; c++) {
+    // a linear history; half the cases put two commits on one 9-character prefix (an AMBIGUOUS short name)
+    const K = 4 + Math.floor(rnd() * 3), twin = rnd() < 0.5 ? hex(9) : null;
+    const hist = Array.from({ length: K }, (_, k) => (twin && k >= K - 2 ? twin + hex(31) : hex(40)));
+    const ord = new Map(hist.map((h, k) => [h, k]));
+    // git's view of a name, as both readers hand it over: coerced to text (master passed a number or an array straight to git)
+    const resolveO = (x0) => { if (x0 === null || x0 === undefined) return null; const x = String(x0); if (!/^[0-9a-f]{4,40}$/.test(x)) return null; const m = hist.filter((h) => h.startsWith(x)); return m.length === 1 ? m[0] : null; };
+    globalThis.__CIV_DIFF = { exists: (x) => resolveO(x) !== null, isAncestor: (a, b) => { const x = resolveO(a), y = resolveO(b); return x !== null && y !== null && ord.get(x) <= ord.get(y); } };
+    fs.rmSync(dirD, { recursive: true, force: true }); fs.mkdirSync(dirD, { recursive: true });
+    const files = [];
+    for (let i = 0, n = 1 + Math.floor(rnd() * 5); i < n; i++) {
+      const kind = rnd() < 0.55 ? 'red' : 'green', target = rnd() < 0.1 ? hex(40) : pick(hist);
+      const name = rnd() < 0.5 ? target : target.slice(0, 7 + Math.floor(rnd() * 5)), other = pick(hist);
+      const field = pick([name, target, target.slice(0, 7 + Math.floor(rnd() * 5)), other, other.slice(0, 8), undefined, 7, [target], target.slice(0, 10).toUpperCase(), Number.parseInt(target.slice(0, 7), 16), target.slice(0, 5)]);
+      const mirror = kind === 'green' && rnd() < 0.15, scope = mirror ? 'hosted' : pick(['full', 'full', 'affected', 'partial']);
+      const rec = { ...(field === undefined ? {} : { sha: field }), result: kind, failed: kind === 'red' ? (rnd() < 0.85 ? sub(SUITES3).concat(pick(SUITES3)) : []) : [], startedAt: i + 1, endedAt: i + 1,
+        ...(scope === 'partial' ? { scope: 'full', partial: sub(SUITES3).concat(pick(SUITES3)) } : scope === 'affected' ? { scope: 'affected', selected: sub(SUITES3).concat(pick(SUITES3)) } : { scope }),
+        ...(mirror ? { source: 'mirror', selected: sub(SUITES3).concat(pick(SUITES3)) } : {}), ...(rnd() < 0.1 ? { absent: sub(SUITES3) } : {}) };
+      if (mirror) rec.partial = rec.selected;
+      const body = rnd() < 0.08 ? pick(['null', '{"sha":', '[]']) : JSON.stringify(rec);
+      const fname = `${name}${mirror ? '.mirror' : ''}.${kind}`;
+      fs.writeFileSync(path.join(dirD, fname), body);
+      files.push({ fname, name, kind, mirror, body });
+    }
+    // …and in about a third of the sets a crafted UNION scene: a red failing t1 and t2, and two PARTIAL greens on later commits naming
+    // one each (master never counts a partial green, so it blocks; the new reader may clear by the union — the leg's other direction)
+    if (rnd() < 0.35 && K >= 3) {
+      const k = Math.floor(rnd() * (K - 2)), j1 = k + 1 + Math.floor(rnd() * (K - k - 1)), j2 = k + 1 + Math.floor(rnd() * (K - k - 1));
+      const put = (name, kind, rec) => { const body = JSON.stringify(rec), fname = `${name}.${kind}`; fs.writeFileSync(path.join(dirD, fname), body); files.push({ fname, name, kind, mirror: false, body }); };
+      put(hist[k], 'red', { sha: hist[k], result: 'red', failed: ['t1', 't2'], startedAt: 90, endedAt: 90 });
+      put(hist[j1], 'green', { sha: hist[j1], result: 'green', failed: [], scope: 'full', partial: ['t1'], startedAt: 91, endedAt: 91 });
+      put(j2 !== j1 ? hist[j2] : hist[j1].slice(0, 12), 'green', { sha: hist[j2], result: 'green', failed: [], scope: 'full', partial: ['t2'], startedAt: 92, endedAt: 92 });
+    }
+    // THE SPEC — the final law written out on its own: a red speaks for its name's AND its field's commit; a green for one, when
+    // readable and its name and field agree; a red clears when the union of list-scoped greens (or a FULL green) on strict
+    // descendants up to HEAD covers every failed name (a red with no readable list: a FULL green only)
+    const full40 = (x) => typeof x === 'string' && /^[0-9a-f]{40}$/.test(x);
+    const nameOf = (x) => (full40(x) ? x : resolveO(x));
+    const seen = new Map(); for (const f of files) seen.set(f.fname, f); // a later file of one name replaced the earlier
+    const marks = [...seen.values()].map((f) => { let rec = null; try { rec = JSON.parse(f.body); } catch { } const why = markerShapeWhy(rec, f.kind, f.name, f.mirror); return { ...f, rec, readable: !why }; });
+    const strL = (x) => Array.isArray(x) && x.every((v) => typeof v === 'string');
+    const greensS = marks.filter((m) => m.kind === 'green' && m.readable).map((m) => ({ m, c: nameOf(m.name) && nameOf(m.name) === nameOf(m.rec.sha) ? nameOf(m.name) : null })).filter((g) => g.c);
+    const fullG = (g) => !g.m.rec.partial && g.m.rec.scope !== 'affected' && g.m.rec.scope !== 'hosted' && g.m.rec.source !== 'mirror';
+    const listG = (g) => { const r = g.m.rec; if (r.absent !== undefined && !strL(r.absent)) return []; const ab = new Set(r.absent || []); return [].concat(strL(r.selected) ? r.selected : [], strL(r.partial) ? r.partial : []).filter((x) => !ab.has(x)); };
+    const redCommits = (m) => { const fld = m.rec && typeof m.rec === 'object' && !Array.isArray(m.rec) && m.rec.sha ? String(m.rec.sha) : null; return [...new Set([nameOf(m.name), fld === null ? null : nameOf(fld)].filter(Boolean))]; };
+    const specBlocks = (head, onlyRed = null) => {
+      for (const m of marks.filter((x) => x.kind === 'red' && (!onlyRed || x === onlyRed))) for (const c of redCommits(m)) {
+        if (!ord.has(c) || ord.get(c) > ord.get(head)) continue;
+        const failed = m.readable && strL(m.rec.failed) ? m.rec.failed : [];
+        const desc = greensS.filter((g) => ord.has(g.c) && ord.get(g.c) > ord.get(c) && ord.get(g.c) <= ord.get(head));
+        if (!(failed.length ? failed.every((f) => desc.some((g) => fullG(g) || listG(g).includes(f))) : desc.some(fullG))) return { m, c, desc };
+      }
+      return null;
+    };
+    for (const head of hist) {
+      judged++;
+      // master's reader THROWS on a `null` body (rec.sha of null); its guard answered «not blocking» (exit 0) — that answer is master's here
+      let mv = null; try { mv = masterBlocker({ dir: dirD, head, ...globalThis.__CIV_DIFF }); } catch { masterThrew++; mv = null; }
+      const nv = safely(() => NEWR.heavyBlocker({ dir: dirD, head, resolveShort: (names) => new Map(names.map((x) => [x, resolveO(x)])), peelFull: (names) => new Map(names.map((x) => [x, x])) }));
+      if (nv && nv.threw) { bad.push({ c, head: head.slice(0, 9), why: `the new reader threw: ${nv.threw}`, files }); break; }
+      const sv = specBlocks(head);
+      if (mv) mBlocked++; if (nv) nBlocked++;
+      if (!!nv !== !!sv) { bad.push({ c, head: head.slice(0, 9), why: `the new reader says ${nv ? 'BLOCKED' : 'CLEAR'}, the law says ${sv ? 'BLOCKED' : 'CLEAR'}`, files }); break; }
+      if (!mv && nv) tightened++;
+      if (mv && !nv) {   // LOOSER than master: must be an honest union — master's red, read by the law, is covered and a list-scoped green helps
+        loosened++;
+        const R = marks.find((x) => path.join(dirD, x.fname) === mv.file);
+        const cs = R ? redCommits(R).filter((c) => ord.has(c) && ord.get(c) <= ord.get(head)) : [];
+        const failedR = R && R.readable && strL(R.rec.failed) ? R.rec.failed : [];
+        const listHelps = cs.some((c) => failedR.some((f) => greensS.some((g) => !fullG(g) && listG(g).includes(f) && ord.get(g.c) > ord.get(c) && ord.get(g.c) <= ord.get(head))));
+        if (!R || !cs.length || specBlocks(head, R) || !listHelps) { bad.push({ c, head: head.slice(0, 9), why: `master BLOCKED on ${mv.file && path.basename(mv.file)}, the new reader CLEARS — not an honest union of list-scoped greens`, files }); break; }
+      }
+    }
+  }
+  for (const b of bad) console.log(`    CASE ${b.c} at HEAD ${b.head}: ${b.why}\n${b.files.map((f) => `      ${f.fname}  ${f.body}`).join('\n')}`);
+  ok(!bad.length && judged >= CASES * 4, `${CASES} seeded marker sets × every HEAD of their history (${judged} verdicts): the new reader IS the final law everywhere, and every «master BLOCKED → new CLEAR» (${loosened}) is an honest union of list-scoped greens covering every failed name — master blocked ${mBlocked}, the new reader ${nBlocked}, stricter than master ${tightened}; master's reader threw ${masterThrew}× (a null body — its guard's «not blocking»)`);
+  ok(loosened > 0 && tightened > 0, `the sets reach both directions (looser by an honest union: ${loosened} · stricter: ${tightened}) — the leg is not vacuous`); }
 
 console.log('§8 nothing left behind');
 fs.rmSync(ROOT, { recursive: true, force: true });

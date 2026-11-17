@@ -3219,16 +3219,19 @@ function readMarkers(dir, { withMirror = false, withUnreadable = false } = {}) {
     } catch (e) { why = `unparsable (${(e && (e.code || e.message)) || e})`; }
     if (kind === 'pid' || kind === 'skipped') {   // run records, not verdicts: read as before
       const r = rec && typeof rec === 'object' && !Array.isArray(rec) ? rec : {};
-      out.push({ ...r, sha: r.sha || m[1], kind, file });
+      out.push({ ...r, sha: m[1], kind, file });   // a marker's identity is its FILE NAME's commit, everywhere (guard follow-up ii)
       continue;
     }
     if (!why) why = markerShapeWhy(rec, kind, m[1], mirror);
     if (why) {   // an unreadable record carries its file's mtime (it has no times of its own) so the readers order it where it landed
       let mtimeMs = 0; try { mtimeMs = fs.lstatSync(file).mtimeMs; } catch { }
-      if (withUnreadable) out.push({ sha: m[1], kind, file, unreadable: why, failed: [], mtimeMs, ...(mirror ? { source: 'mirror' } : {}) });
+      // its sha FIELD rides along when the file is an object that has one: a RED speaks for that commit too (THE FINAL LAW, B-e56e —
+      // master read the field, so a red whose field names another commit than its name still blocks on the field's commit)
+      const field = rec && typeof rec === 'object' && !Array.isArray(rec) && rec.sha ? rec.sha : undefined;   // any truthy one: master coerced it for git
+      if (withUnreadable) out.push({ sha: m[1], kind, file, unreadable: why, failed: [], mtimeMs, ...(field !== undefined ? { field } : {}), ...(mirror ? { source: 'mirror' } : {}) });
       continue;
     }
-    out.push({ ...rec, sha: rec.sha || m[1], kind, file, ...(mirror ? { source: 'mirror' } : {}) });
+    out.push({ ...rec, field: rec.sha, sha: m[1], kind, file, ...(mirror ? { source: 'mirror' } : {}) });   // `sha` = the FILE NAME; `field` = the record's own sha
   }
   return out.sort((a, b) => (b.endedAt || b.startedAt || b.mtimeMs || 0) - (a.endedAt || a.startedAt || a.mtimeMs || 0));
 }
@@ -3406,6 +3409,57 @@ export function acquireMachineLock(lockPath, { waitMs, sha, onWait, headPollMs =
   } finally { drop(); }
 }
 
+/** WHICH COMMITS A MARKER SPEAKS FOR — THE FINAL LAW (B-e56e, 主开发's ruling 2026-11-10 08:26Z, followups-parked-390): the two
+ *  kinds are ASYMMETRIC, so the reader can never be looser than master by construction (the blocking reds only a superset of
+ *  master's, the clearing greens only a subset), without enumerating file shapes.
+ *  - A RED speaks for EVERY commit its file name OR its sha field names. A red that names two commits is two reds; each must be
+ *    cleared. (A red whose body cannot be read speaks for its name, and for its field when the body is an object that has one.)
+ *  - A GREEN speaks for ONE commit, and only when it is readable and its name and its field name the SAME commit; otherwise it
+ *    covers nothing.
+ *  A name or a field names the commit master's resolution gives it (`git cat-file -e <x>^{commit}`, then ancestry): a shorter
+ *  string counts only if git resolves it to exactly one commit (resolveShortNames — a tag peels to its commit); a full 40-hex sha
+ *  is itself with no git asked, unless the object is a TAG, which peels the same way (peelFullNames, ONE batched process) — so a
+ *  full tag-object name and a short one name the same commit. Anything else names none. Commits — never names — are compared
+ *  everywhere: the gate's same-commit test, the writer's existing verdict, «already green», prune's grouping. */
+export function resolveShortNames(repoRoot, names) {
+  const out = new Map();
+  for (const n of names) out.set(n, gitIn(repoRoot, ['rev-parse', '--verify', '-q', '--end-of-options', `${n}^{commit}`]) || null);   // one commit, or none (a record's text is never an option)
+  return out;
+}
+/** Full 40-hex names → the commit each names: itself, or a TAG's commit (one batch-check; a tag then one rev-parse). Unknown = itself. */
+export function peelFullNames(repoRoot, names) {
+  const out = new Map(names.map((n) => [n, n]));
+  if (!names.length) return out;
+  const r = spawnSync('git', ['-C', repoRoot, 'cat-file', '--batch-check=%(objectname) %(objecttype)'], { input: names.join('\n') + '\n', encoding: 'utf-8', env: GIT_ENV });
+  if (r.status !== 0) return out;
+  for (const line of String(r.stdout || '').split('\n')) {
+    const [sha, type] = line.split(' ');
+    if (type === 'tag' && out.has(sha)) out.set(sha, gitIn(repoRoot, ['rev-parse', '--verify', '-q', `${sha}^{commit}`]) || sha);
+  }
+  return out;
+}
+/** → Map(marker → [commit…]): a red's commits (its name's, its field's — 0, 1 or 2), a green's (exactly 1, or none). `.names`
+ *  (a second Map) is each marker's NAME commit alone — the writer's refusal and «already green» match an UNREADABLE file by it. */
+export function markerCommitsOf(repoRoot, markers, { resolveShort = (names) => resolveShortNames(repoRoot, names), peelFull = (names) => peelFullNames(repoRoot, names) } = {}) {
+  const FULL = /^[0-9a-f]{40}$/;
+  // a RED's field is read the way master read it — any truthy value, coerced to text and handed to git (a ref, a number, an array of
+  // one sha all resolve there); a GREEN's only when its record is readable (its shape makes the field a sha)
+  const fieldOf = (m) => (m.kind === 'red' ? (m.field ? String(m.field) : null) : (!m.unreadable && typeof m.field === 'string' ? m.field : null));
+  const fulls = new Set(), others = new Set();
+  for (const m of markers) for (const x of [m.sha, fieldOf(m)]) if (typeof x === 'string' && x) { if (FULL.test(x)) fulls.add(x); else others.add(x); }
+  const peeled = fulls.size ? peelFull([...fulls]) : new Map(), res = others.size ? resolveShort([...others]) : new Map();
+  const commitOf = (x) => (typeof x !== 'string' || !x ? null : FULL.test(x) ? (peeled.get(x) || x) : (res.get(x) || null));
+  const out = new Map(), names = new Map();
+  for (const m of markers) {
+    const byName = commitOf(m.sha), byField = commitOf(fieldOf(m));
+    names.set(m, byName);
+    if (m.kind === 'red') out.set(m, [...new Set([byName, byField].filter(Boolean))]);
+    else out.set(m, !m.unreadable && byName && byField && byName === byField ? [byName] : []);
+  }
+  out.names = names;
+  return out;
+}
+
 /**
  * THE BLOCK RULE. A red heavy marker blocks the next push when its commit is
  * an ancestor of HEAD (i.e. this branch is built ON TOP of a known-red commit)
@@ -3418,13 +3472,17 @@ export function acquireMachineLock(lockPath, { waitMs, sha, onWait, headPollMs =
  * asks it of a throwaway repo with real commits — a rule about git history has
  * to be tested against real git history).
  */
-export function heavyBlocker({ dir, head, repoRoot = repo } = {}) {
+export function heavyBlocker({ dir, head, repoRoot = repo, resolveShort, peelFull } = {}) {
   const HEAD = head || gitIn(repoRoot, ['rev-parse', 'HEAD']);
   if (!HEAD) return null;
   const exists = (sha) => gitIn(repoRoot, ['cat-file', '-e', sha + '^{commit}']) !== null;
   const isAncestor = (a, b) => spawnSync('git', ['-C', repoRoot, 'merge-base', '--is-ancestor', a, b], { env: GIT_ENV }).status === 0;
   const all = readMarkers(dir, { withMirror: true, withUnreadable: true });
-  const reds = all.filter((m) => m.kind === 'red' && exists(m.sha)); // an UNREADABLE red still blocks (LAW A)
+  // the commits each marker SPEAKS FOR (markerCommitsOf, THE FINAL LAW): a red for every commit its name OR field names (two = two
+  // reds, each to be cleared), a green for ONE commit when its name and field agree — a short and a full name of one commit are ONE
+  const commitOf = markerCommitsOf(repoRoot, all, { ...(resolveShort ? { resolveShort } : {}), ...(peelFull ? { peelFull } : {}) });
+  for (const m of all) { m.commits = commitOf.get(m) || []; m.commit = m.commits[0] || null; }
+  const reds = all.filter((m) => m.kind === 'red').flatMap((m) => m.commits.map((c) => ({ ...m, commit: c }))); // an UNREADABLE red still blocks (LAW A); a red naming no commit is ignored
   // A PARTIAL green (`--only=…`) is not evidence that the TIER passed: it vouches for its own list only, so re-running one suite
   // unlocks a red only when that suite was every one that failed in it (the union below). A partial RED still blocks: a suite
   // really did fail on that commit.
@@ -3441,7 +3499,7 @@ export function heavyBlocker({ dir, head, repoRoot = repo } = {}) {
   // list-less one, an unreadable one), exactly as 2056c98de does, whatever its `absent`. A list-scoped green whose `absent` is not a
   // list of names counts for nothing (fail closed, like failed / selected / partial). The gap this leaves (a FULL green from an OLDER
   // table never ran the suites added since) is said in the kb and B-479e, not built.
-  const greens = all.filter((m) => m.kind === 'green' && !m.unreadable && exists(m.sha));
+  const greens = all.filter((m) => m.kind === 'green' && !m.unreadable && m.commit);
   const fullOf = (g) => !g.partial && g.scope !== 'affected' && g.scope !== 'hosted' && g.source !== 'mirror';
   const listOf = (g) => {
     if (g.absent !== undefined && !strList(g.absent)) return [];
@@ -3450,8 +3508,8 @@ export function heavyBlocker({ dir, head, repoRoot = repo } = {}) {
   };
   const covers = (g, f) => fullOf(g) || listOf(g).includes(f);
   for (const red of reds) {
-    if (!isAncestor(red.sha, HEAD)) continue;
-    const desc = greens.filter((g) => g.sha !== red.sha && isAncestor(red.sha, g.sha) && isAncestor(g.sha, HEAD));
+    if (!isAncestor(red.commit, HEAD)) continue;
+    const desc = greens.filter((g) => g.commit !== red.commit && isAncestor(red.commit, g.commit) && isAncestor(g.commit, HEAD));   // COMMITS, never names
     const failed = !red.unreadable && strList(red.failed) ? red.failed : [];
     if (failed.length ? failed.every((f) => desc.some((g) => covers(g, f))) : desc.some(fullOf)) continue;
     return red;
@@ -3612,13 +3670,19 @@ export function heavyVerdict({ sha, runId, repoRoot = repo, dir, ghJson = ghApiJ
 /** THE WRITER'S REFUSAL (r4): the verdict a PARTIAL run (--only / --shard / --host) must not overwrite — a FULL green or red of this
  *  commit, OR any file of its verdict names (`<sha>.green` / `<sha>.red`) that cannot be read: LAW A says such a red blocks until a
  *  FULL green, so a partial run must never erase it (round 3 hid it from this question and the partial run unlinked it). */
-export function existingVerdictOf(dir, sha) {
-  return readMarkers(dir, { withUnreadable: true }).find((m) => m.sha === sha && (m.kind === 'green' || m.kind === 'red') && (m.unreadable || !m.partial)) || null;
+export function existingVerdictOf(dir, sha, { repoRoot = repo } = {}) {
+  const all = readMarkers(dir, { withUnreadable: true }).filter((m) => m.kind === 'green' || m.kind === 'red');
+  const commitOf = markerCommitsOf(repoRoot, all), want = /^[0-9a-f]{40}$/.test(sha) ? sha : resolveShortNames(repoRoot, [sha]).get(sha);
+  // COMMITS (the commit each marker speaks for); names by prefix only where `sha` names no commit here (a scratch dir)
+  const known = want && gitIn(repoRoot, ['cat-file', '-e', `${want}^{commit}`]) !== null;
+  // an UNREADABLE file is an existing verdict of the commit its NAME says (r4: «any <sha>.green / .red it cannot read»)
+  const same = (m) => (known ? ((commitOf.get(m) || []).includes(want) || (m.unreadable && commitOf.names.get(m) === want)) : m.sha === sha || sha.startsWith(m.sha) || m.sha.startsWith(sha));
+  return all.find((m) => same(m) && (m.unreadable || !m.partial)) || null;
 }
 /** THE VERDICT'S LAST STEP (lane ci-heavy-queue r2: a seam the suite drives with a failing build and a scratch marker dir). Decide
  *  whether this run may claim anything about `sha`, and write its marker only if so. → { noVerdict, file }. */
-export function settleHeavyMarker({ dir, sha, rec, abandonedWhy = '', buildOk = true, dirtyAtStart = false, allAbsent = false, partial = false } = {}) {
-  let noVerdict = '';
+export function settleHeavyMarker({ dir, sha, rec, abandonedWhy = '', buildOk = true, dirtyAtStart = false, allAbsent = false, partial = false, affected = false } = {}) {
+  let noVerdict = '', unreadableDir = false;
   if (abandonedWhy) noVerdict = abandonedWhy;
   // a RED BUILD is no verdict: no suite ran (2026-11-10: a build that ran out of heap wrote <sha>.red into a marker dir)
   else if (!buildOk) {
@@ -3632,36 +3696,55 @@ export function settleHeavyMarker({ dir, sha, rec, abandonedWhy = '', buildOk = 
   // old ref that predates them would otherwise earn a GREEN marker for a run
   // of zero suites — the vacuous green `--only` already refuses on a typo.
   else if (allAbsent) noVerdict = `every suite in this run is absent at ${shortSha(sha)} — nothing ran, so nothing is claimed`;
+  // an AFFECTED run (follow-up i, as B-e56e's adversarial read put it): it never overwrites a RED of its own commit — any red, a
+  // partial one too, and an unreadable one (an affected red would shrink the failed list the red must clear) — and a green never
+  // stops it (its result replaces a green; an affected green over another range is not a FULL green to keep)
+  else if (affected && !partial) {
+    let reds = [];
+    try { reds = readMarkers(dir, { withUnreadable: true }).filter((m) => m.kind === 'red' && (m.sha === sha || sha.startsWith(m.sha))); }
+    catch (e) { noVerdict = `the marker directory cannot be read (${(e && (e.code || e.message)) || e}) — no verdict written`; unreadableDir = true; }
+    if (reds.length) noVerdict = `affected run — keeping the existing ${reds[0].unreadable ? 'UNREADABLE ' : reds[0].partial ? 'PARTIAL ' : ''}RED marker for ${shortSha(sha)} (an affected green never clears its own commit's red)`;
+  }
+  // a PARTIAL run (--only / --shard / --host) never overwrites a FULL or unreadable verdict
   else if (partial) {
-    const existing = existingVerdictOf(dir, sha);
+    let existing = null;
+    try { existing = existingVerdictOf(dir, sha); } catch (e) { noVerdict = `the marker directory cannot be read (${(e && (e.code || e.message)) || e}) — no verdict written`; unreadableDir = true; }
     if (existing) noVerdict = `partial run — keeping the existing ${existing.unreadable ? 'UNREADABLE' : 'FULL'} ${existing.kind.toUpperCase()} marker for ${shortSha(sha)}${existing.unreadable ? ` (${existing.unreadable})` : ''}`;
   }
-  if (noVerdict) return { noVerdict, file: null };
+  if (noVerdict) return { noVerdict, file: null, writeFailed: unreadableDir };   // a verdict that could not be written at all: non-zero (r3 b)
   const d = markerDir(dir);
-  fs.mkdirSync(d, { recursive: true });
-  for (const ext of ['green', 'red', 'skipped']) { try { fs.unlinkSync(path.join(d, `${sha}.${ext}`)); } catch {} }
-  const file = path.join(d, `${sha}.${rec.result}`);
-  fs.writeFileSync(file, JSON.stringify(rec, null, 2) + '\n');
-  pruneMarkers(dir);
-  pruneFailLogs(path.join(d, 'fail-logs')); // B-c327: its fail logs are bounded like its markers
-  return { noVerdict: '', file };
+  try {
+    fs.mkdirSync(d, { recursive: true });
+    for (const ext of ['green', 'red', 'skipped']) { try { fs.unlinkSync(path.join(d, `${sha}.${ext}`)); } catch {} }
+    const file = path.join(d, `${sha}.${rec.result}`);
+    fs.writeFileSync(file, JSON.stringify(rec, null, 2) + '\n');
+    pruneMarkers(dir);
+    pruneFailLogs(path.join(d, 'fail-logs')); // B-c327: its fail logs are bounded like its markers
+    return { noVerdict: '', file };
+  } catch (e) { return { noVerdict: `the marker could not be written (${(e && (e.code || e.message)) || e}) — no verdict written`, file: null, writeFailed: true }; }
 }
 /** Keep the newest `keep` COMMITS — every file of a commit inside the window stays, whatever the age of one of them (a commit's
  *  time = its newest marker; an unreadable file's = its mtime); every file of a commit outside it goes, unreadable ones too (r4). */
-export function pruneMarkers(dir, keep = 30) {
+export function pruneMarkers(dir, keep = 30, { repoRoot = repo } = {}) {
   const d = markerDir(dir);
   const results = readMarkers(dir, { withMirror: true, withUnreadable: true }).filter((m) => m.kind !== 'pid');
-  const newest = new Map();
+  // grouped by COMMIT (a short-named and a full-named file of one commit are one commit; a name the repository does not know is its own)
+  const commitOf = markerCommitsOf(repoRoot, results), keyOf = (m) => (commitOf.get(m) || [])[0] || m.sha;
+  const newest = new Map(), names = new Map();
   for (const m of results) {
     let t = m.endedAt || m.startedAt || m.mtimeMs || 0;
     if (!t) { try { t = fs.lstatSync(m.file).mtimeMs; } catch { } }
-    newest.set(m.sha, Math.max(newest.get(m.sha) || 0, t || 0));
+    const k = keyOf(m);
+    newest.set(k, Math.max(newest.get(k) || 0, t || 0));
+    if (!names.has(k)) names.set(k, new Set()); names.get(k).add(m.sha);
   }
-  const order = [...newest.entries()].sort((a, b) => b[1] - a[1]).map(([sha]) => sha);
-  for (const sha of order.slice(keep)) {
-    for (const ext of ['green', 'red', 'skipped', 'log', 'pid', 'mirror.green']) {
-      const f = path.join(d, `${sha}.${ext}`);
-      try { if (fs.lstatSync(f).isDirectory()) fs.rmdirSync(f); else fs.unlinkSync(f); } catch {}
+  const order = [...newest.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
+  for (const k of order.slice(keep)) {
+    for (const sha of names.get(k)) {
+      for (const ext of ['green', 'red', 'skipped', 'log', 'pid', 'mirror.green']) {
+        const f = path.join(d, `${sha}.${ext}`);
+        try { if (fs.lstatSync(f).isDirectory()) fs.rmdirSync(f); else fs.unlinkSync(f); } catch {}
+      }
     }
   }
 }
@@ -4388,8 +4471,8 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // --dirty-ok), and a PARTIAL run trying to overwrite a full verdict (a
     // `--only` re-run must not erase what the whole tier said).
     if (!abandonedWhy) abandonedWhy = abandoned();
-    const { noVerdict } = settleHeavyMarker({ dir, sha, rec, abandonedWhy, buildOk: build.ok, dirtyAtStart,
-      allAbsent: !!(absent.length && absent.length === heavy.length), partial: !!(only || shard || host) });
+    const { noVerdict, writeFailed } = settleHeavyMarker({ dir, sha, rec, abandonedWhy, buildOk: build.ok, dirtyAtStart,
+      allAbsent: !!(absent.length && absent.length === heavy.length), partial: !!(only || shard || host), affected: scope === 'affected' });
     if (noVerdict) console.log('\n[ci:heavy] ' + noVerdict);
     // THE CLOSING LINE IS THE ONE PEOPLE READ. "HEAVY GATE GREEN" is a claim
     // about a commit; when no marker was written there is no such claim, and
@@ -4416,6 +4499,8 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // "never got the machine lock" (3). Every one of those non-zero codes means
     // "do not read this as a pass"; only 0 and 1 are verdicts.
     if (abandonedWhy) return 4;
+    // a GREEN tier whose marker could not be written did not do what it ran for (the run exists to write the verdict): non-zero
+    if (writeFailed) return 1;
     return failed.length ? 1 : 0;
   } finally {
     cleanup();
@@ -4463,7 +4548,7 @@ const reachableFromABranch = (sha) => {
 // PURE over its inputs (the marker records, their mtimes, the commit time) so
 // test-ci-heavy-launch drives every arm; heavyLaunch feeds it the disk.
 export function heavyAlreadyGreen({ markers = [], sha, full, commitTimeMs, scope, range, now = Date.now() } = {}) {
-  const mine = (m) => m.sha === sha || (full && m.sha === full);
+  const mine = (m) => (Array.isArray(m.commits) ? m.commits.includes(full) : m.commit ? m.commit === full : m.sha === sha || (full && (m.sha === full || full.startsWith(m.sha))));   // the COMMITS it speaks for (THE FINAL LAW)
   // r4: never «already green» while a marker of this commit cannot be read (an unreadable red blocks; we cannot tell what it says)
   const unread = markers.find((m) => m.unreadable && mine(m));
   if (unread) return { skip: false, why: `an UNREADABLE marker of this sha sits beside its green (${path.basename(unread.file || '')}: ${unread.unreadable})` };
@@ -4572,9 +4657,13 @@ function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   {
     const full = gitOut(['rev-parse', sha + '^{commit}']) || sha;
     const ct = Number(gitOut(['show', '-s', '--format=%ct', full]));
-    const markers = readMarkers(dir, { withUnreadable: true }).filter((m) => m.kind === 'green' || m.kind === 'red').map((m) => {
+    const marked = readMarkers(dir, { withUnreadable: true }).filter((m) => m.kind === 'green' || m.kind === 'red');
+    const commitOf = markerCommitsOf(repo, marked);
+    const markers = marked.map((m) => {
       let mtimeMs = 0; try { mtimeMs = fs.statSync(m.file).mtimeMs; } catch { }
-      return { ...m, mtimeMs };
+      const own = commitOf.get(m) || [], byName = commitOf.names.get(m);
+      const commits = m.unreadable && byName && !own.includes(byName) ? [...own, byName] : own;   // an unreadable file: its name's commit too
+      return { ...m, mtimeMs, commits, commit: commits[0] || null };
     });
     const g = heavyAlreadyGreen({ markers, sha, full, commitTimeMs: ct > 0 ? ct * 1000 : 0, scope, range });
     if (g.skip) {
@@ -4624,7 +4713,7 @@ export function checkHeavy({ dir, head } = {}) {
   }
   if (!blocker) return 0;
   const when = blocker.endedAt ? new Date(blocker.endedAt).toLocaleString() : '?';
-  console.error(`\n[ci] PUSH BLOCKED — the heavy tier went RED on ${shortSha(blocker.sha)} (${when}), which is an ancestor of HEAD.`);
+  console.error(`\n[ci] PUSH BLOCKED — the heavy tier went RED on ${shortSha(blocker.commit || blocker.sha)} (${when}), which is an ancestor of HEAD${blocker.commit && blocker.commit !== blocker.sha && !blocker.commit.startsWith(blocker.sha) ? ` (the marker ${path.basename(blocker.file || '')} names it in its sha field)` : ''}.`);
   console.error(`     failed: ${(blocker.failed || []).join(', ') || '(no suite names recorded)'}`);
   if (blocker.unreadable) console.error(`     its marker ${path.relative(repo, blocker.file)} is UNREADABLE (${blocker.unreadable}) — it blocks until a FULL green on a descendant`);
   console.error(`     log:    ${path.relative(repo, path.join(markerDir(dir), blocker.sha + '.log'))}`);
@@ -4636,13 +4725,14 @@ export function checkHeavy({ dir, head } = {}) {
   console.error('       npm run ci:heavy        (the whole tier in an isolated worktree at HEAD, ~17 min; writes the marker that clears this)');
   // …and by day the hub refuses that whole tier (hubFullRefusal): the AFFECTED tier clears the block too when it reruns
   // every suite that failed (coversRed) — said here, so the door this message names is one that opens now
-  if (hubFullRefusal({ full: true })) console.error(`       by day the hub runs no FULL tier — instead: node scripts/ci.mjs --heavy --isolate --affected --range=${shortSha(blocker.sha)}..HEAD\n         (clears it when it reruns ${(blocker.failed || []).join(', ') || 'the failed suites'}), or npm run ci:heavy -- --allow-hub-full`);
+  if (hubFullRefusal({ full: true })) console.error(`       by day the hub runs no FULL tier — instead: node scripts/ci.mjs --heavy --isolate --affected --range=${shortSha(blocker.commit || blocker.sha)}..HEAD\n         (clears it when it reruns ${(blocker.failed || []).join(', ') || 'the failed suites'}), or npm run ci:heavy -- --allow-hub-full`);
   console.error('     Emergency bypass: VIBESPACE_SKIP_CI=1 git push\n');
   return 1;
 }
 
 function status({ dir, head: wantHead } = {}) {
-  const all = readMarkers(dir, { withUnreadable: true });   // r4: an unreadable marker is listed as UNREADABLE — the gate blocks on it
+  let all;   // r4: an unreadable marker is listed as UNREADABLE — the gate blocks on it; a marker path that cannot be read is said, no stack
+  try { all = readMarkers(dir, { withUnreadable: true }); } catch (e) { console.error(`heavy gate results: the marker directory ${markerDir(dir)} cannot be read (${(e && (e.code || e.message)) || e})`); return 1; }
   const results = all.filter((m) => m.kind !== 'pid');
   const running = inFlight(dir);
   const lockPath = defaultLockPath();
@@ -4675,7 +4765,8 @@ function status({ dir, head: wantHead } = {}) {
       m.lanes ? `${m.lanes} lanes` : '',
       (m.absent || []).length ? `${m.absent.length} not present at that commit` : '',
       (m.flaky || []).length ? `flaky: ${m.flaky.join(',')}` : ''].filter(Boolean).join('  ');
-    console.log(`  ${shortSha(m.sha)}  ${label}  ${dur(m.ms || 0).padStart(6)}  ${new Date(m.endedAt || 0).toLocaleString()}  ${detail}${marks ? '  [' + marks + ']' : ''}`);
+    const when = m.endedAt || m.mtimeMs;   // an unreadable marker has no times of its own: its FILE's time (follow-up iii), never 1970
+    console.log(`  ${shortSha(m.sha)}  ${label}  ${dur(m.ms || 0).padStart(6)}  ${when ? new Date(when).toLocaleString() : '?'}  ${detail}${marks ? '  [' + marks + ']' : ''}`);
   }
   if (holder) console.log(`\nmachine lock: held by pid ${holder.pid} for ${shortSha(holder.sha)}${pidStillRunning(holder) ? '' : ' (DEAD — the next run steals it)'}  ${lockPath}`);
   // An affected green is green for ITS push only; a FULL green is owed once
@@ -4687,7 +4778,7 @@ function status({ dir, head: wantHead } = {}) {
     : '\nno FULL green heavy run on record — the next push launches a FULL tier');
   const blocker = heavyBlocker({ dir, head: wantHead });
   console.log(blocker
-    ? `\nHEAD ${shortSha(head)}: PUSH BLOCKED by the red run on ${shortSha(blocker.sha)} (${(blocker.failed || []).join(', ')})`
+    ? `\nHEAD ${shortSha(head)}: PUSH BLOCKED by the red run on ${shortSha(blocker.commit || blocker.sha)} (${(blocker.failed || []).join(', ')})`
     : `\nHEAD ${shortSha(head)}: not blocked`);
   return 0;
 }
