@@ -313,7 +313,7 @@ console.log('⑦ round 5 — a key names the subject a caller PREFILLS; every ro
 {
   const TD7 = read('src/lib/task-detail.js'), PF7 = read('src/lib/path-field.js');
   const mi = /const inUse = \(ae = document\.activeElement\) => (!st\.destroyed && !!\(inside\(ae\) \|\| st\.open \|\| input\.value\.trim\(\) \|\| picking\(\)\));/.exec(PF7);
-  ok(!!mi && /ensure, destroy, picking, inUse \};/.test(PF7) && /const addKept = addWas && addWas\.inUse\(_ae\) \? addWas : null;/.test(TD7) && TD7.indexOf("const _ae = document.activeElement;") < TD7.indexOf("body.innerHTML = '';\n    const host = document.createElement('div');\n    host.className = 'task-detail-settings';") && /at: rows\.length, key: '\+add', was: addKept \? was : null,/.test(TD7) && /addPf\.set\('', \{ commit: true \}\);/.test(TD7),
+  ok(!!mi && /ensure, destroy, picking, inUse \};/.test(PF7) && /const addKept = addWas && addWas\.inUse\(_ae\) \? addWas : null;/.test(TD7) && TD7.indexOf("const _ae = (!document.activeElement || document.activeElement === document.body) && to && body.contains(to) ? to : document.activeElement;") >= 0 && TD7.indexOf("const _ae = (!document.activeElement") < TD7.indexOf("body.innerHTML = '';\n    const host = document.createElement('div');\n    host.className = 'task-detail-settings';") && /at: rows\.length, key: '\+add', was: addKept \? was : null,/.test(TD7) && /addPf\.set\('', \{ commit: true \}\);/.test(TD7),
     'path-field: `inUse(ae)` — ONE predicate, the person is IN the field (focused or a press in its list / picker, its list open, typed, picking); Task Detail carries the add row over by it — the active element read BEFORE the body is emptied (emptying it moves the focus out) — and resets it only after a successful add');
   // the add field's state when a tasks-updated repaint lands → carried over (the same element, its list as it was)?
   const INUSE = [
@@ -345,6 +345,47 @@ console.log('⑦ round 5 — a key names the subject a caller PREFILLS; every ro
   ok(!!mo && runS(mkS(mo[1])).length === 0 && /old\._bind\.onEmpty = onEmpty;/.test(TD7) && /onEmpty: \(\) => \{ if \(addWarn\) \{ addWarn\.remove\(\); addWarn = null; \} \},/.test(TD7), `Task Detail: a box the person EMPTIED drops its «not applied» words (the 'empty' status) and the add row's «Not applied … was not found» line with them (${SEQ.length} sequences)`, mo && runS(mkS(mo[1])));
   const r6state = mkS("(v) => { if (v.status === 'unresolved') unresolved.set(input.dataset.rowKey || '', input.value); else if (v.status === 'ok') unresolved.delete(input.dataset.rowKey || ''); }");   // f2c3b9c2 task-detail.js:156, verbatim
   ok(J(runS(r6state)) === J([SEQ[0][3], SEQ[1][3]]), "MUTANT (f2c3b9c2's onState — 'empty' drops nothing): an emptied box's words come back on the next repaint — RED", runS(r6state));
+}
+
+// ── round 8 (B-292f — the r7 acceptance's minors): a ROW box the person is in survives another client's repaint (r7 read the
+// active element after the body was emptied); an emptied row drops its «Not applied» line; the keyboard road into «+ Add a path…» ──
+console.log('\n⑧b dialog-yield r8: Task Detail rows keep the box the person is in; an emptied row drops its stale line; Tab keeps the add box');
+{
+  const TD8 = read('src/lib/task-detail.js'), PF8 = read('src/lib/path-field.js');
+  const mi8 = /const inUse = \(ae = document\.activeElement\) => (!st\.destroyed && !!\(inside\(ae\) \|\| st\.open \|\| input\.value\.trim\(\) \|\| picking\(\)\));/.exec(PF8);
+  const md = /else if \((!kept\.inUse\(ae\) && input\.value !== want)\) kept\.set\(want, \{ commit: false \}\);/.exec(TD8);
+  // a kept ROW field when another client's repaint lands (want = the row's path) → overwrite the box with the row's path?
+  const ROWS8 = [
+    [{ focused: true, open: true, text: '' }, false, 'a row box the person EMPTIED, its list open (r7: refilled with the old path under the caret, the list closed — the next keys appended to it)'],
+    [{ focused: true, open: false, text: '' }, false, 'an emptied row box with the caret in it'],
+    [{ focused: false, open: false, text: '~/new' }, false, 'words typed and not yet committed, the focus gone on (a Tab, a press) while the repaint was held — they stay for the box\'s own commit (r7: overwritten by the row\'s path, the commit then saved the old one)'],
+    [{ focused: false, open: false, text: '', picking: true }, false, 'its picker open'],
+    [{ focused: false, open: false, text: '' }, true, 'an emptied box the person LEFT — the row keeps its path, the box says it again'],
+    [{ focused: false, open: false, text: '~/A' }, false, 'the box showing the row\'s own path — nothing to write'],
+  ];
+  const run8 = (inUse, decide) => ROWS8.filter(([x, want]) => { const st = { destroyed: false, open: x.open }, input = { value: x.text }; const iu = (ae) => inUse(st, input, (n) => n === 'IN', ae, () => !!x.picking); return !!decide({ inUse: iu }, x.focused ? 'IN' : 'OUT', input, '~/A') !== want; }).map(([, , w]) => w);
+  const real8 = mi8 && md ? run8(new Function('st', 'input', 'inside', 'ae', 'picking', `return ${mi8[1]};`), new Function('kept', 'ae', 'input', 'want', `return ${md[1]};`)) : ['(the product lines were not found)'];
+  ok(!!mi8 && !!md && real8.length === 0, `Task Detail: a kept ROW keeps its box while the person is in it — path-field's inUse, by the active element read before the body is emptied (${ROWS8.length} rows)`, real8);
+  const r7row = run8(() => false, new Function('kept', 'ae', 'input', 'want', 'return input.value !== want;'));   // r7 task-detail.js:184 `document.activeElement !== input && …`, read after the body was emptied (always <body>)
+  ok(J(r7row) === J([ROWS8[0][2], ROWS8[1][2], ROWS8[2][2], ROWS8[3][2]]), "MUTANT (r7's row rule, the active element read AFTER the body was emptied): the emptied box the person is in is refilled, uncommitted words are overwritten, a box picking is refilled — RED", r7row);
+  ok(!/document\.activeElement !== input && input\.value !== want/.test(TD8) && /pathRow\(table, r, i, keys\[i\], was, _ae\)/.test(TD8)
+    && TD8.indexOf('const _ae = (') < TD8.indexOf("body.innerHTML = '';\n    const host = document.createElement('div');"),
+    'Task Detail: a kept ROW keeps its box while the person is in it — by the active element read BEFORE the body is emptied, handed to every row');
+  // an emptied row's «Not applied: <their words>» line → the row's own words
+  const me = /\n\s*onEmpty: (\(\) => \{ if \(res\.classList\.contains\('ctx-warn'\)\) \{ res\.classList\.remove\('ctx-warn'\); res\.textContent = resWords\.join\(' · '\); \} \}),\n/.exec(TD8.slice(TD8.indexOf('const pathRow = ')));
+  const runE = (f) => { const out = []; for (const [warn, want, w] of [[true, '= ~/A', 'a row whose words did not apply, its box EMPTIED — the line names the row again, not the deleted words (r7: «Not applied: ~/nope …» under an empty box until another client\'s edit)'], [false, '= ~/A', 'a row with no stale line — untouched']]) { const cl = new Set(warn ? ['ctx-warn'] : []); const res = { classList: { contains: (c) => cl.has(c), remove: (c) => cl.delete(c) }, textContent: warn ? 'Not applied: ~/nope was not found — the row keeps ~/A' : '= ~/A' }; f(res, ['= ~/A'])(); if (res.textContent !== want || cl.has('ctx-warn')) out.push(w); } return out; };
+  ok(!!me && runE(new Function('res', 'resWords', `return ${me[1]};`)).length === 0, 'Task Detail: an emptied ROW box drops its «Not applied» line (the row\'s own words back) — the add row\'s rule, now every row\'s', me && runE(new Function('res', 'resWords', `return ${me[1]};`)));
+  ok(J(runE(() => () => {})) === J(['a row whose words did not apply, its box EMPTIED — the line names the row again, not the deleted words (r7: «Not applied: ~/nope …» under an empty box until another client\'s edit)']), 'MUTANT (r7: no onEmpty on a row): the line keeps naming the deleted words — RED');
+  // the keyboard road: a held-back repaint runs inside the focusout — the focus's target is the active element
+  const ma = /const _ae = (\(!document\.activeElement \|\| document\.activeElement === document\.body\) && to && body\.contains\(to\) \? to : document\.activeElement);/.exec(TD8);
+  const AE = [[{ ae: 'BODY', to: 'ADD' }, 'ADD', 'Tab from the Description into «+ Add a path…»: the focusout runs the held repaint while the focus is in transit — the add box is the active element (r7: <body>, the box rebuilt, the Tab lost)'],
+    [{ ae: 'BODY', to: null }, 'BODY', 'a focus that left for nowhere — <body>'],
+    [{ ae: 'BODY', to: 'ELSEWHERE' }, 'BODY', 'a focus going to another window — not this body\'s'],
+    [{ ae: 'DESC', to: 'ADD' }, 'DESC', 'the focus settled (the press\'s road, after its release) — the document says where it is']];
+  const runA = (f) => AE.filter(([x, want]) => f({ activeElement: x.ae, body: 'BODY' }, { contains: (n) => n === 'ADD' || n === 'DESC' }, x.to) !== want).map(([, , w]) => w);
+  ok(!!ma && runA(new Function('document', 'body', 'to', `return ${ma[1]};`)).length === 0 && /root\.addEventListener\('focusout', \(e\) => \{ if \(settingsDirty\) afterPointerUp\(\(\) => \{ if \(settingsDirty && state\.tab === 'settings'\) renderSettings\(e\.relatedTarget\); \}\); \}\);/.test(TD8) && /const renderSettings = \(to = null\) => \{/.test(TD8),
+    `Task Detail: the repaint a focusout releases reads the focus's TARGET while the focus is in transit (${AE.length} rows)`, ma && runA(new Function('document', 'body', 'to', `return ${ma[1]};`)));
+  ok(J(runA(new Function('document', 'body', 'to', 'return document.activeElement;'))) === J([AE[0][2]]), "MUTANT (r7's `document.activeElement`): the Tab into the add box reads <body> — RED");
 }
 
 // ── hotfix 2.369.368 — the «Install plugin…» dialog's credential option (the owner, 2026-10-31, installing the custom

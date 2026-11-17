@@ -6479,8 +6479,8 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
    *  OWN parameter, `field(label, value)` ⇒ `i.value = value`, and §103 r5 stayed green: a second Link ask raised the first form
    *  and Apply rewrote the first link). A SOURCE is a parameter (`p`) or one member of it (`p.m`). A local carries what its init
    *  reads; a destructured one the member it names (`const { label } = opts` ⇒ `opts.label`); an alias reads as what it aliases
-   *  (`const o = opts; o.label` ⇒ `opts.label`); a for-of variable its list. A guard (`p && p.id`, `p ? … : …`, `!p`) is no
-   *  read of `p`; a name a nested function binds is that function's own. `chain` = the call's enclosing functions (outermost
+   *  (`const o = opts; o.label` ⇒ `opts.label`); a for-of variable its list. A guard (`p && p.id`, `p ? … : …` — through its
+   *  negations, r8) is no read of `p`; a negation by itself is (r8: `c.checked = !!on`); a name a nested function binds is that function's own. `chain` = the call's enclosing functions (outermost
    *  first); `tops` = the module's own top-level functions (a helper may live there). */
   const ITER_RE = /^(forEach|map|flatMap|filter|some|every|find|findIndex)$/;   // r7: a callback's own first parameter carries the list it walks
   const iterCb = (n, parent) => !!parent && /Function/.test(n.type) && parent.type === 'CallExpression' && parent.arguments[0] === n && parent.callee.type === 'MemberExpression' && !parent.callee.computed && ITER_RE.test(parent.callee.property.name);
@@ -6511,12 +6511,15 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => collect(x, all, n)); else if (c && typeof c.type === 'string') collect(c, all, n); }
     };
     for (let i = chain.length - 1; i >= 0; i--) collect(chain[i].body, i === chain.length - 1, chain[i]);
-    const guard = (y, par) => !!par && ((par.type === 'LogicalExpression' && par.operator === '&&' && par.left === y) || (par.type === 'ConditionalExpression' && par.test === y) || (par.type === 'UnaryExpression' && par.operator === '!'));
-    const srcOf = (x, shadow = null) => { const o = new Set(); walkScoped(x, (y, par, sh) => {
+    // r8 (B-292f): a TEST guards (`on && x`, `on ? a : b`) — through its negations (`!on ? '' : label` reads label only); a
+    // negation by itself is a READ (r7 dropped `!p` everywhere: `c.checked = !!on` / `= !off` stayed green with the key dropping it)
+    const guard = (y, par) => !!par && ((par.type === 'LogicalExpression' && par.operator === '&&' && par.left === y) || (par.type === 'ConditionalExpression' && par.test === y));
+    const srcOf = (x, shadow = null) => { const o = new Set(), tests = new Set(); walkScoped(x, (y, par, sh) => {
+      if (guard(y, par) || (par && tests.has(par) && par.type === 'UnaryExpression' && par.operator === '!')) tests.add(y);
       if (y.type !== 'Identifier' || (par && par.type === 'MemberExpression' && par.property === y && !par.computed) || (par && par.type === 'Property' && par.key === y && !par.computed)) return;
       if ((shadow && shadow.has(y.name)) || sh.has(y.name)) return;
       const p = params.has(y.name) ? y.name : alias.get(y.name);
-      if (p) { if (par && par.type === 'MemberExpression' && par.object === y && !par.computed) o.add(`${p}.${par.property.name}`); else if (!guard(y, par)) o.add(p); return; }
+      if (p) { if (par && par.type === 'MemberExpression' && par.object === y && !par.computed) o.add(`${p}.${par.property.name}`); else if (!tests.has(y)) o.add(p); return; }
       for (const q of taint.get(y.name) || []) o.add(q);
     }); return o; };
     const unwrap = (x) => (x && x.type === 'LogicalExpression' && (x.operator === '||' || x.operator === '??') && x.right.type === 'ObjectExpression' ? x.left : x);
@@ -6544,6 +6547,9 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     ['another iteration', '`ps.reduce((a, v) => …)`, `Array.from(ps, (v) => …)` — only the first argument of forEach / map / flatMap / filter / some / every / find / findIndex is followed'],
     ['markup in pieces', '`[\'<input value="\', p, \'">\'].join(\'\')` — a value attribute assembled from an array or by a helper returning only its slot'],
     ['a field by another property', 'a contenteditable\'s `textContent`, `selectedIndex`, `valueAsNumber`, a custom element\'s own property — only value / checked / selected / defaultValue / defaultChecked (and a textarea\'s text) are a field'],
+    ['a choice by a statement', '`if (on) c.checked = true` — a field set under a test reads only what it is set to (control dependence is not followed; a test of literals in the value itself is: `c.checked = on ? true : false`)'],
+    ['a method from elsewhere', '`this.fill(p)` in a class / object with no `fill` of its own (inherited, mixed in) — `this.m` is then the first method of that name in the file, whatever `this` is'],
+    ['a guard that is also the value', '`c.checked = on && ok` — the left of `&&` is read as a guard, never as what the field shows'],
     ['a name a nested block declares', '`const k = (() => { const words = \'w\'; return `${host}:${words}`; })()` — a `const` that shadows a parameter reads as the parameter (names are tracked by function, not by block): the key seems to name `words`'],
   ];
   const opensForm = (h) => { let o = false; walkAll(h.body, (z) => { if (!o && z.type === 'CallExpression' && z.callee.type === 'Identifier' && /^(createModalShell|mountsDialog|_mountsDialog|showInputDialog)$/.test(z.callee.name)) o = true; }); return o; };
@@ -6562,6 +6568,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       if (y.type === 'AssignmentExpression' && y.left.type === 'MemberExpression' && !y.left.computed) {
         const p = y.left.property.name;
         if (FIELD_SET_RE.test(p)) add(y.right, SHOWS, sh);   // (r7: + .checked / .selected — Change build…'s `pick`)
+        if (FIELD_SET_RE.test(p) && y.right.type === 'ConditionalExpression' && y.right.consequent.type === 'Literal' && y.right.alternate.type === 'Literal') add(y.right.test, SHOWS, sh);   // r8: `c.checked = on ? true : false` — the test IS what it shows
         else if (/^(textContent|innerText)$/.test(p) && y.left.object.type === 'Identifier' && R.textarea(y.left.object.name)) add(y.right, SHOWS, sh);   // r7: a textarea's text IS its value
       }
       if (fieldProps && y.type === 'Property' && !y.computed && (y.key.name || y.key.value) === 'value') add(y.value, SHOWS, sh);
@@ -6570,7 +6577,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       if (y.type === 'ConditionalExpression' && [y.consequent, y.alternate].some((b) => b.type === 'Literal' && /^\s*(checked|selected)\s*$/.test(String(b.value)))) add(y.test, SHOWS, sh);   // r7: `${on ? 'checked' : ''}`
       if (y.type !== 'CallExpression') return;
       const c = y.callee;
-      if (c.type === 'MemberExpression' && !c.computed && c.property.name === 'setAttribute' && y.arguments[0] && y.arguments[0].type === 'Literal' && /^(value|checked|selected)$/.test(y.arguments[0].value)) { add(y.arguments[1], SHOWS, sh); return; }   // r7
+      if (c.type === 'MemberExpression' && !c.computed && /^(setAttribute|toggleAttribute)$/.test(c.property.name) && y.arguments[0] && y.arguments[0].type === 'Literal' && /^(value|checked|selected)$/.test(y.arguments[0].value)) { add(y.arguments[1], SHOWS, sh); return; }   // r7
       if (c.type === 'MemberExpression' && !c.computed && c.object.type === 'Identifier' && c.object.name === 'Object' && c.property.name === 'assign') {   // r7: Object.assign(el, { value: p })
         const t0 = y.arguments[0], ta = isTextarea(t0) || (!!t0 && t0.type === 'Identifier' && R.textarea(t0.name));
         for (const a of y.arguments.slice(1)) if (a.type === 'ObjectExpression') for (const q of a.properties) if (q.type === 'Property' && !q.computed && (FIELD_SET_RE.test(q.key.name || q.key.value) || (ta && /^(textContent|innerText)$/.test(q.key.name || q.key.value)))) add(q.value, SHOWS, sh);
@@ -6593,9 +6600,18 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   /** a helper's parameter positions that reach a field's value / a load: index → { keys (the members of an object argument it
    *  reads — `field(body, { label, value })` ⇒ value; null = the whole argument), why } */
   const reachMemo = new WeakMap();   // r7: helper → its reach (ANY depth — r6 stopped two deep; a helper in progress reads as none: a cycle once)
+  // r8 (B-292f): ONLY A COMPLETE reach is kept — r7 memoized a helper computed against an open one's empty placeholder, so in
+  // `ha ⇄ hb` the second form's reach depended on which form the file named first (Tarjan's low: the open helper's stack depth)
+  // …and the cycle's ROOT is computed again until its reach stops growing (a cycle that SWAPS its arguments — `ha(a, b)` ⇒
+  // `hb(b, a)` ⇒ `ha(b, a)` — reaches through the second pass only); an open helper reads as its reach so far
+  const reachOpen = [], reachLow = [], reachProv = new Map(), reachCycled = new Set();
+  const reachSig = (m) => JSON.stringify([...m].map(([i, v]) => [i, v.keys ? [...v.keys].sort() : null]));
   const helperReach = (h, tops, depth, skip, outer = null) => {
     if (reachMemo.has(h)) return reachMemo.get(h);
-    reachMemo.set(h, new Map());
+    const open = reachOpen.indexOf(h);
+    if (open >= 0) { reachCycled.add(h); reachLow[reachLow.length - 1] = Math.min(reachLow[reachLow.length - 1], open); return reachProv.get(h) || new Map(); }
+    for (let pass = 0; ; pass++) {
+    const me = reachOpen.push(h) - 1; reachLow.push(me);
     const hp = new Set(h.params.flatMap((q) => namesOf(q)));
     const got = [...inputsWith(roads([h], hp, tops, outer), [h.body], false, depth + 1, tops, skip)];
     const out = new Map();
@@ -6608,8 +6624,11 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       else keys = null;
       out.set(i, { keys, why: hit[0][1] });
     });
-    reachMemo.set(h, out);
-    return out;
+    reachOpen.pop(); const low = reachLow.pop();
+    if (low < me) { reachLow[reachLow.length - 1] = Math.min(reachLow[reachLow.length - 1], low); reachProv.set(h, out); return out; }   // inside a cycle rooted below: provisional
+    if (reachCycled.has(h) && pass < 8 && reachSig(out) !== reachSig(reachProv.get(h) || new Map())) { reachProv.set(h, out); continue; }   // the root: again, with its reach so far
+    reachMemo.set(h, out); reachProv.delete(h); reachCycled.delete(h); return out;
+    }
   };
   /** r5 + r6: the subject rules of one keyed call → its RED lines (the inputs named — through the same roads on both sides; no
    *  member of a LIST; no constant helper) */
@@ -6650,6 +6669,10 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
         const k = (y.type === 'MethodDefinition' || y.type === 'Property') && !y.computed && y.value && /Function/.test(y.value.type) ? (y.key.name || y.key.value) : null;
         if (k && !topFns.has('this.' + k)) topFns.set('this.' + k, y.value);
       });
+      // r8 (B-292f): …but a method of the class / object literal AROUND the form wins (r7's first-in-file let
+      // `export const noop = { fill() {} }` above a class stand for its own `fill`); a method from elsewhere keeps the file's order
+      const owners = [];
+      const topsHere = () => { if (!owners.length) return topFns; const m = new Map(topFns); for (const o of owners) for (const q of (o.type === 'ClassBody' ? o.body : o.properties)) { const k = (q.type === 'MethodDefinition' || q.type === 'Property') && !q.computed && q.value && /Function/.test(q.value.type) ? (q.key.name || q.key.value) : null; if (k) m.set('this.' + k, q.value); } return m; };
       const localFns = new Map();   // r5: name → its function (a key helper, a loader the body calls)
       walkAll(ast, (y) => { if (y.type === 'FunctionDeclaration' && y.id) localFns.set(y.id.name, y); if (y.type === 'VariableDeclarator' && y.id.type === 'Identifier' && y.init && /Function/.test(y.init.type)) localFns.set(y.id.name, y.init); });
       const fns = [];
@@ -6657,6 +6680,8 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
         if (!n || typeof n.type !== 'string') return;
         const isFn = /Function/.test(n.type);
         if (isFn) fns.push(n);
+        const isOwner = n.type === 'ClassBody' || n.type === 'ObjectExpression';
+        if (isOwner) owners.push(n);
         if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name === 'createModalShell') {
           const at = `${f}:${n.loc.start.line}`;
           const span = lines.slice(Math.max(0, n.loc.start.line - 2), n.loc.end.line).join('\n');   // the call and the line above it
@@ -6724,7 +6749,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
             const scanned = [kv, ...scannedInits];
             if (allLit(kv)) subjRed.push(`${at} — a literal key names no subject («${keyText}»)`);
             else if (idOption && !minted) subjRed.push(`${at} — the key «${keyText}» is a caller's id option: it names the field's KIND, not its instance (mint the instance's own)`);
-            if (fn && !minted) subjRed.push(...subjectRules({ at, keyText, kv, chain: [...fns], fn, params, scanned, span: saidAbove(n.loc.start.line) + '\n' + span, roots: [fn.body], fieldProps: false, tops: topFns }));
+            if (fn && !minted) subjRed.push(...subjectRules({ at, keyText, kv, chain: [...fns], fn, params, scanned, span: saidAbove(n.loc.start.line) + '\n' + span, roots: [fn.body], fieldProps: false, tops: topsHere() }));
             const helperAt = kv.type === 'Identifier' ? scannedInits.slice(0, 1) : [kv];   // the key itself (or the one local it names)
             if (!minted) for (const x of helperAt) walkAll(x, (y) => {   // a key HELPER that returns the same key whatever it is given (key: keyOf(m))
               if (y.type !== 'CallExpression' || y.callee.type !== 'Identifier' || !localFns.has(y.callee.name)) return;
@@ -6805,13 +6830,14 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
             const look = (x, depth) => walkAll(x, (y, par) => { if (y.type === 'Identifier' && !(par && par.type === 'MemberExpression' && par.property === y && !par.computed) && !(par && par.type === 'Property' && par.key === y && !par.computed)) { reach.add(y.name); if (depth < 3 && !params.has(y.name) && decls.has(y.name) && !seen.has(y.name)) { seen.add(y.name); for (const d of decls.get(y.name)) if (d.start >= fns[0].start && d.end <= fns[0].end) { scanned.push(d.init); look(d.init, depth + 1); } } } });
             look(kp.value, 0);
             const keyText = src.slice(kp.value.start, kp.value.end).replace(/\s+/g, ' ').slice(0, 70);
-            const red = subjectRules({ at, keyText, kv: kp.value, chain: [...fns], fn, params, scanned, span: saidAbove(n.loc.start.line) + '\n' + span, roots: [n.arguments[1], n.arguments[3]].filter(Boolean), fieldProps: true, tops: topFns });
+            const red = subjectRules({ at, keyText, kv: kp.value, chain: [...fns], fn, params, scanned, span: saidAbove(n.loc.start.line) + '\n' + span, roots: [n.arguments[1], n.arguments[3]].filter(Boolean), fieldProps: true, tops: topsHere() });
             subjRed.push(...red);
             wrapRows.push({ at, id: ip ? src.slice(ip.value.start, ip.value.end).replace(/\s+/g, ' ').slice(0, 40) : '—', key: keyText, subject: [...reach].filter((x) => params.has(x)).join(', ') || keyText, red: red.length });
           }
         }
         for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach(walk); else if (c && typeof c.type === 'string') walk(c); }
         if (isFn) fns.pop();
+        if (isOwner) owners.pop();
       };
       walk(ast);
     }
@@ -7030,7 +7056,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     ['src/lib/zz-r7t.js', "export function t1(app, host, label) { const { body, raised } = createModalShell({ id: 't1', key: JSON.stringify([host, label]), title: 'A', kind: 'form' }); if (raised) return; body.innerHTML = `<input class=\"x\" value=\"${label}\">`; }\nexport function t2(app, host, words) { const { body, raised } = createModalShell({ id: 't2', key: JSON.stringify([host, words]), title: 'B', kind: 'form' }); if (raised) return; const ta = document.createElement('textarea'); ta.textContent = words; body.append(ta); }\nexport function t5(app, spec) { const { body, raised } = createModalShell({ id: 't5', key: `${spec.path}:${spec.label}`, title: 'E', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = spec.label; body.append(i); }\nexport function t7(app, host, labels) { const { body, raised } = createModalShell({ id: 't7', key: `${host}:${labels.join()}`, title: 'G', kind: 'form' }); if (raised) return; labels.forEach((v) => { const i = document.createElement('input'); i.value = v; body.append(i); }); }\nexport function t8(app, host, on) { const { body, raised } = createModalShell({ id: 't8', key: `${host}:${on}`, title: 'H', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; c.checked = on; body.append(c); }\nexport function t12(app, host, on) { const { body, raised } = createModalShell({ id: 't12', key: host, title: 'L', kind: 'form' }); if (raised) return; body.innerHTML = `<input type=\"checkbox\" ${on ? 'checked' : ''}>`; }\nexport function t13(app, host, label) { const { body, raised } = createModalShell({ id: 't13', key: host, title: 'M', kind: 'form' }); if (raised) return; body.innerHTML = '<input value=\"' + label + '\">'; }\nexport function t14(app, host, label) { const { body, raised } = createModalShell({ id: 't14', key: host, title: 'N', kind: 'form' }); if (raised) return; const i = document.createElement('input'); this.fill(body, label); }\nexport function t15(app, host, bag = {}) { const { body, raised } = createModalShell({ id: 't15', key: bag.path, title: 'O', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = bag.label; body.append(i); }\nexport const methods = { fill(body, v) { const i = document.createElement('input'); i.value = v; body.append(i); } };"],
   ]);
   const ctl7b = census103([
-    ['src/lib/zz-r7b.js', "export function b1(app, host, label) { const { body, raised } = createModalShell({ id: 'b1', key: host, title: 'A', kind: 'form' }); if (raised) return; const i = document.createElement('input'); const k = 'value'; i[k] = label; body.append(i); }\nimport { field } from './zz-r7-other.js';\nexport function b2(app, host, label) { const { body, raised } = createModalShell({ id: 'b2', key: host, title: 'B', kind: 'form' }); if (raised) return; field(body, label); }\nexport function b3(app, host, label, on) { const a = (v) => { const i = document.createElement('input'); i.value = v; return i; }; const b = a; const f = on ? a : b; const { body, raised } = createModalShell({ id: 'b3', key: host, title: 'C', kind: 'form' }); if (raised) return; body.append(f(label)); }\nexport const store = {}; export function b4(app, host, label) { store.label = label; const { body, raised } = createModalShell({ id: 'b4', key: host, title: 'D', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = store.label; body.append(i); }\nexport function b5(app, bag) { const { body, raised } = createModalShell({ id: 'b5', key: bag.path, title: 'E', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = bag.label; body.append(i); }\nexport function b6(h, p) { mountsDialog('T', [{ key: 'x', ...p }], 'Go', async (v, { close }) => { close(); }, { id: 'b6', key: h.id }); }\nexport function b7(app, host, labels) { const { body, raised } = createModalShell({ id: 'b7', key: host, title: 'G', kind: 'form' }); if (raised) return; labels.reduce((a, v) => { const i = document.createElement('input'); i.value = v; body.append(i); return a; }, 0); }\nexport function b8(app, host, label) { const { body, raised } = createModalShell({ id: 'b8', key: host, title: 'H', kind: 'form' }); if (raised) return; body.innerHTML = ['<input value=\"', label, '\">'].join(''); }\nexport function b9(app, host, n) { const { body, raised } = createModalShell({ id: 'b9', key: host, title: 'I', kind: 'form' }); if (raised) return; const s = document.createElement('select'); s.selectedIndex = n; body.append(s); }\nexport function b10(app, host, words) { const k = (() => { const words = 'w'; return `${host}:${words}`; })(); const { body, raised } = createModalShell({ id: 'b10', key: k, title: 'J', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = words; body.append(i); }"],
+    ['src/lib/zz-r7b.js', "export function b1(app, host, label) { const { body, raised } = createModalShell({ id: 'b1', key: host, title: 'A', kind: 'form' }); if (raised) return; const i = document.createElement('input'); const k = 'value'; i[k] = label; body.append(i); }\nimport { field } from './zz-r7-other.js';\nexport function b2(app, host, label) { const { body, raised } = createModalShell({ id: 'b2', key: host, title: 'B', kind: 'form' }); if (raised) return; field(body, label); }\nexport function b3(app, host, label, on) { const a = (v) => { const i = document.createElement('input'); i.value = v; return i; }; const b = a; const f = on ? a : b; const { body, raised } = createModalShell({ id: 'b3', key: host, title: 'C', kind: 'form' }); if (raised) return; body.append(f(label)); }\nexport const store = {}; export function b4(app, host, label) { store.label = label; const { body, raised } = createModalShell({ id: 'b4', key: host, title: 'D', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = store.label; body.append(i); }\nexport function b5(app, bag) { const { body, raised } = createModalShell({ id: 'b5', key: bag.path, title: 'E', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = bag.label; body.append(i); }\nexport function b6(h, p) { mountsDialog('T', [{ key: 'x', ...p }], 'Go', async (v, { close }) => { close(); }, { id: 'b6', key: h.id }); }\nexport function b7(app, host, labels) { const { body, raised } = createModalShell({ id: 'b7', key: host, title: 'G', kind: 'form' }); if (raised) return; labels.reduce((a, v) => { const i = document.createElement('input'); i.value = v; body.append(i); return a; }, 0); }\nexport function b8(app, host, label) { const { body, raised } = createModalShell({ id: 'b8', key: host, title: 'H', kind: 'form' }); if (raised) return; body.innerHTML = ['<input value=\"', label, '\">'].join(''); }\nexport function b9(app, host, n) { const { body, raised } = createModalShell({ id: 'b9', key: host, title: 'I', kind: 'form' }); if (raised) return; const s = document.createElement('select'); s.selectedIndex = n; body.append(s); }\nexport function b10(app, host, words) { const k = (() => { const words = 'w'; return `${host}:${words}`; })(); const { body, raised } = createModalShell({ id: 'b10', key: k, title: 'J', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = words; body.append(i); }\nexport function b11(app, host, on) { const { body, raised } = createModalShell({ id: 'b11', key: host, title: 'K', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; if (on) c.checked = true; body.append(c); }\nexport const mixA = { fill() { } }; export const mixB = { fill(body, v) { const i = document.createElement('input'); i.value = v; body.append(i); } };\nexport class B12 { open(app, host, label) { const { body, raised } = createModalShell({ id: 'b12', key: host, title: 'L', kind: 'form' }); if (raised) return; this.fill(body, label); } }\nexport function b13(app, host, on, ok) { const { body, raised } = createModalShell({ id: 'b13', key: `${host}:${ok}`, title: 'M', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; c.checked = on && ok; body.append(c); }"],
     ['src/lib/zz-r7-other.js', "export const field = (body, v) => { const i = document.createElement('input'); i.value = v; body.append(i); };"],
   ]);
   const r7 = (k) => ctl7.subjRed.filter((b) => b.startsWith('src/lib/' + k + ' '));
@@ -7041,8 +7067,25 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(!miss7.length && !more7.length && !twin7.length && ctl7.subjRed.length === 15,
     `§103 r7 NEGATIVE CONTROLS (the acceptance's eleven shapes — nine GREEN on f2c3b9c2): markup value="${'$'}{p}", a textarea's text, Object.assign(el, { value }), a helper three deep, a bag named spec, ui.field(p), ps.forEach((v) => …), .checked = on, setAttribute('value', p), a destructured opts and a later set are RED by name; so are a tick in markup, '<input value="' + p, this.fill(p) and a bag by its = {} default — each twin naming the input is not (missed: ${JSON.stringify({ miss7, more7, twin7 })}; ${JSON.stringify(ctl7.subjRed.map((b) => b.split(' — ')[0]))})`);
   const seen7 = ctl7b.subjRed.map((b) => b.split(' — ')[0]);
-  ok(ctl7b.subjRed.length === 0 && BLIND_SPOTS.length === 10,
+  ok(ctl7b.subjRed.length === 0 && BLIND_SPOTS.length === 13,
     `§103 r7 THE BLIND SPOTS ARE TRUE — each of the ${BLIND_SPOTS.length} shapes the census says it cannot follow, planted with its key dropping the input, stays green (one that turns RED is followed now: take it off BLIND_SPOTS)${seen7.length ? ' — followed now: ' + seen7.join(', ') : ''}`);
+  // r8 (B-292f — the r7 acceptance's minors, repro/accept-r7/zz-skr7.js + zz-acc7-cycle.js): a negation into a tick (`!!on`,
+  // `!off`, `${!on ? '' : 'checked'}`), a tick chosen by a test of literals, toggleAttribute('checked', on), a class's own method
+  // under an object literal's of the same name, and a helper cycle (the second form's reach no longer depends on the first's order)
+  // are RED by name; each twin naming the input is not, and a test through its negation stays a guard (`!on ? '' : label`)
+  const ctl8 = census103([
+    ['src/lib/zz-r8a.js', "import { createModalShell } from './utils.js';\nexport function n1(app, host, on) { const { body, raised } = createModalShell({ id: 'n1', key: host, title: 'A', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !!on; body.append(c); }\nexport function n2(app, host, off) { const { body, raised } = createModalShell({ id: 'n2', key: host, title: 'B', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !off; body.append(c); }\nexport function n3(app, host, on) { const { body, raised } = createModalShell({ id: 'n3', key: host, title: 'C', kind: 'form' }); if (raised) return; body.innerHTML = `<input type=\"checkbox\" ${!on ? '' : 'checked'}>`; }\nexport function n4(app, host, on) { const { body, raised } = createModalShell({ id: 'n4', key: host, title: 'D', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; c.checked = on ? true : false; body.append(c); }\nexport function n5(app, host, on) { const { body, raised } = createModalShell({ id: 'n5', key: host, title: 'E', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; c.toggleAttribute('checked', on); body.append(c); }\nexport const noop = { fill() { } };\nexport class N6 { open(app, host, label) { const { body, raised } = createModalShell({ id: 'n6', key: host, title: 'F', kind: 'form' }); if (raised) return; this.fill(body, label); } fill(body, v) { const i = document.createElement('input'); i.value = v; body.append(i); } }\nexport function m1(app, host, on) { const { body, raised } = createModalShell({ id: 'm1', key: `${host}:${on}`, title: 'G', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !!on; body.append(c); }\nexport function m2(app, host, off) { const { body, raised } = createModalShell({ id: 'm2', key: `${host}:${off}`, title: 'H', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !off; body.append(c); }\nexport function m3(app, host, on) { const { body, raised } = createModalShell({ id: 'm3', key: `${host}:${on}`, title: 'I', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; c.checked = on ? true : false; body.append(c); }\nexport function m4(app, host, label, on) { const { body, raised } = createModalShell({ id: 'm4', key: `${host}:${label}`, title: 'J', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = !on ? '' : label; body.append(i); }"],
+    ['src/lib/zz-r8d.js', "import { createModalShell } from './utils.js';\nfunction ha(a, b, n) { if (n) hb(b, a, n - 1); const i = document.createElement('input'); i.value = a; return i; }\nfunction hb(x, y, n) { return ha(x, y, n); }\nexport function d1(app, host, label) { const { body, raised } = createModalShell({ id: 'zd1', key: host, title: 'A', kind: 'form' }); if (raised) return; body.append(ha(host, label, 1)); }"],
+    ['src/lib/zz-r8e.js', "import { createModalShell } from './utils.js';\nfunction ha(a, b, n) { if (n) hb(b, a, n - 1); const i = document.createElement('input'); i.value = a; return i; }\nfunction hb(x, y, n) { return ha(x, y, n); }\nexport function e0(app, host) { const { body, raised } = createModalShell({ id: 'ze0', key: host, title: 'A', kind: 'form' }); if (raised) return; body.append(hb(host, host, 0)); }\nexport function e1(app, host, label) { const { body, raised } = createModalShell({ id: 'ze1', key: host, title: 'B', kind: 'form' }); if (raised) return; body.append(ha(host, label, 1)); }"],
+    ['src/lib/zz-r8f.js', "export class Earlier { fill() { } }\nexport const methods = { fill(body, v) { const i = document.createElement('input'); i.value = v; body.append(i); }, open(app, host, label) { const { body, raised } = createModalShell({ id: 'zf1', key: host, title: 'A', kind: 'form' }); if (raised) return; this.fill(body, label); } };"],
+    ['src/lib/zz-r8c.js', "import { createModalShell } from './utils.js';\nfunction ha(v, n) { if (n) return hb(v, n - 1); const i = document.createElement('input'); i.value = v; return i; }\nfunction hb(v, n) { return ha(v, n); }\nexport function c1(app, host, label) { const { body, raised } = createModalShell({ id: 'zc1', key: host, title: 'A', kind: 'form' }); if (raised) return; body.append(ha(label, 1)); }\nexport function c2(app, host, label) { const { body, raised } = createModalShell({ id: 'zc2', key: host, title: 'B', kind: 'form' }); if (raised) return; body.append(hb(label, 1)); }"],
+  ]);
+  const r8 = (k) => ctl8.subjRed.filter((b) => b.startsWith('src/lib/' + k + ' '));
+  const want8 = [['zz-r8a.js:2', 'on'], ['zz-r8a.js:3', 'off'], ['zz-r8a.js:4', 'on'], ['zz-r8a.js:5', 'on'], ['zz-r8a.js:6', 'on'], ['zz-r8a.js:8', 'label'], ['zz-r8c.js:4', 'label'], ['zz-r8c.js:5', 'label'], ['zz-r8d.js:4', 'label'], ['zz-r8e.js:5', 'label'], ['zz-r8f.js:2', 'label']];
+  const miss8 = want8.filter(([k, x]) => !(r8(k).length === 1 && r8(k)[0].includes('drops `' + x + '`')));
+  const twin8 = ['zz-r8a.js:9', 'zz-r8a.js:10', 'zz-r8a.js:11', 'zz-r8a.js:12'].filter((k) => r8(k).length);
+  ok(!miss8.length && !twin8.length && ctl8.subjRed.length === want8.length,
+    `§103 r8 NEGATIVE CONTROLS (the r7 acceptance's minors — each GREEN on the base): !!on and !off into a tick, a tick in markup behind !on, a tick chosen by on ? true : false, toggleAttribute('checked', on), this.fill() under an object literal's fill, the second of two forms over a helper cycle, a cycle that swaps its arguments (alone and behind a form calling its other helper first) and this.fill() of the object literal around the form (an earlier class's fill aside) are RED by name; each twin naming the input is not, and a test through its negation stays a guard (missed: ${JSON.stringify({ miss8, twin8 })}; ${JSON.stringify(ctl8.subjRed.map((b) => b.split(' — ')[0]))})`);
   const rctl = readers103([
     ['src/lib/zz-r1.js', "const open = document.querySelectorAll('.dialog-overlay');"],
     ['src/lib/zz-r2.js', "if (el.classList.contains('dialog-form')) x();"],

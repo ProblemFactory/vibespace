@@ -58,6 +58,10 @@
 // Round 7 (acceptance r6): ㊾ «+ Add a path…» across a repaint from another client ⇒ the EMPTY box the person clicked into keeps its
 // list open (the same element) — and, its list closed by Escape, its caret; a box emptied after an add that did not apply stays
 // empty, no «Not applied» line. On f2c3b9c2 ㊾ is RED.
+// Round 8 (B-292f, the r7 acceptance's minors): ㊿ a Task Detail ROW box the person emptied (its list open) across another client's
+// edit ⇒ the same element, empty, its list open, the next keys alone in it; a row whose words did not apply, its box emptied and
+// left ⇒ its line no longer names the deleted words; Tab out of the Description while a broadcast's repaint waits ⇒ the focus in
+// «+ Add a path…». On the .407 release ㊿ is RED (the acceptance's probes rowtrap-probe R1 / tab-trap-probe T1 + T3).
 // On 6428c67e (the base — run the file on a `git archive` copy) ①–⑤ and ⑦ are RED; ⑥ and ⑧ hold on both. On da9545e8 (round 1)
 // the round-2 legs are RED (⑪–⑳, ⑨'s way back, ⑤'s system opener).
 // PNGs: DIALOG_YIELD_PNG_DIR (default: the scratch root) <prefix>-<leg>.png, prefix = DIALOG_YIELD_SHOT_PREFIX (default 'run').
@@ -1340,6 +1344,69 @@ await step('㊾', async () => {
   check('㊾ a box the person EMPTIED after an add that did not apply stays empty across a repaint, no «Not applied» line under it (f2c3b9c2: refilled with the deleted path, «Not applied … was not found»)', rpB && b1 && /dy-r7-nope/.test(b1.value) && b2 && b2.value === '' && b3 && b3.value === '' && !b3.warn, { b1, b2, b3 });
   await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.element.querySelector('.ctx-path-input')) app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
   await fetch(`${origin}/api/tasks/${tid}`, { method: 'DELETE' });
+});
+
+// ── ㊿ (r8, B-292f) a ROW box the person is in survives another client's repaint; an emptied row drops its stale line; the
+// keyboard road into «+ Add a path…» keeps its focus (r7 read the active element after the body was emptied, and inside a focusout) ──
+await step('㊿', async () => {
+  const dirA = path.join(home, 'dy-r8A'); fs.mkdirSync(dirA, { recursive: true });
+  const mk = await (await fetch(`${origin}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: J({ title: 'DY rows r8' }) })).json();
+  const tid = mk && mk.task && mk.task.id;
+  await (await fetch(`${origin}/api/tasks/${tid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: J({ ctx: [{ path: dirA, note: '', tell: null, tags: [], share: null }] }) })).json();
+  await waitFor(`!!app.sidebar._taskById(${J(tid)}) && (app.sidebar._taskById(${J(tid)}).ctx || []).length === 1`, 10000);
+  await evalJs(`(() => { app.openTaskDetail(${J(tid)}, { tab: 'settings' }); return true; })()`);
+  await waitFor(`document.querySelectorAll('.ctx-row[data-row] .ctx-path-input').length === 1 && !!document.querySelector('.ctx-add-input')`, 10000);
+  await sleep(900);
+  const ROW = '.ctx-row[data-row] .ctx-path-input';
+  const read = `(() => { const i = document.querySelector(${J(ROW)}); if (!i) return null; const row = i.closest('.ctx-row'), res = row && row.querySelector('.ctx-res'); const lists = [...document.querySelectorAll('.pf-list')].filter((l) => !l.hidden && l.getClientRects().length); return { value: i.value, focused: document.activeElement === i, expanded: i.getAttribute('aria-expanded'), lists: lists.length, same: i.dataset.dyOld === '1', res: res ? res.textContent : null, warn: !!(res && res.classList.contains('ctx-warn')) }; })()`;
+  const repaint = async (tag) => { await (await fetch(`${origin}/api/tasks/${tid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: J({ objective: tag }) })).json(); const ok = await waitFor(`(document.querySelector('.task-detail-objective') || {}).value === ${J(tag)}`, 10000); await sleep(900); return ok; };
+  const leave = async () => { await evalJs(`(() => { const l = [...document.querySelectorAll('.task-detail-label')].find((x) => x.getClientRects().length); l.dataset.dy = 'dy-label8'; return true; })()`); await realClick('[data-dy="dy-label8"]'); await sleep(1500); };
+  // (a) row A's box: pressed into, emptied (select all + Backspace — its list opens), then another client edits the description
+  await evalJs(`(() => { const i = document.querySelector(${J(ROW)}); i.dataset.dyOld = '1'; i.dataset.dy = 'dy-row8'; return true; })()`);
+  await realClick('[data-dy="dy-row8"]'); await sleep(600);
+  await evalJs(`(() => { const i = document.querySelector('[data-dy="dy-row8"]'); i.focus(); i.select(); return true; })()`);
+  await key('Backspace', 'Backspace', 8); await sleep(1200);
+  const a1 = await evalJs(read); const rpA = await repaint('dy r8 repaint a'); const a2 = await evalJs(read);
+  await shot('50a-row-emptied-after-repaint');
+  await typeText('zz'); await sleep(600);
+  const a3 = await evalJs(read);
+  await key('Escape', 'Escape', 27); await leave(); await repaint('dy r8 settle a'); await sleep(600);
+  // (b) row A: a path that does not apply (Enter), the box left (the held repaint draws «Not applied»), then emptied and left
+  await evalJs(`(() => { const i = document.querySelector(${J(ROW)}); i.dataset.dy = 'dy-row8b'; return true; })()`);
+  await realClick('[data-dy="dy-row8b"]');
+  await evalJs(`(() => { const i = document.querySelector('[data-dy="dy-row8b"]'); i.focus(); i.select(); return true; })()`);
+  await typeText(path.join(home, 'dy-r8-nope')); await sleep(1500);
+  await key('Enter', 'Enter', 13); await sleep(1800);
+  await (await fetch(`${origin}/api/tasks/${tid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: J({ objective: 'dy r8 held b0' }) })).json();
+  const rpB0 = await waitFor(`(app.sidebar._taskById(${J(tid)}) || {}).objective === 'dy r8 held b0'`, 10000); await sleep(600);   // the broadcast reached the page; its repaint HELD (the box is typed in)
+  await leave();
+  const b1 = await evalJs(read);
+  await evalJs(`(() => { const i = document.querySelector(${J(ROW)}); i.focus(); i.select(); return true; })()`);
+  await key('Backspace', 'Backspace', 8); await sleep(500);
+  await leave();
+  const b2 = await evalJs(read);
+  await shot('50b-row-emptied-line');
+  // (c) Tab out of the Description while a broadcast's repaint waits (a group with NO rows: the next stop is «+ Add a path…»)
+  await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.element.querySelector('.ctx-path-input, .ctx-add-input')) app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
+  const mk2 = await (await fetch(`${origin}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: J({ title: 'DY tab r8' }) })).json();
+  const tid2 = mk2 && mk2.task && mk2.task.id;
+  await waitFor(`!!app.sidebar._taskById(${J(tid2)})`, 10000);
+  await evalJs(`(() => { app.openTaskDetail(${J(tid2)}, { tab: 'settings' }); return true; })()`);
+  await waitFor(`!!document.querySelector('.ctx-add-input') && !!document.querySelector('.task-detail-objective')`, 10000); await sleep(900);
+  await evalJs(`(() => { document.querySelector('.task-detail-objective').dataset.dy = 'dy-obj8'; document.querySelector('.ctx-add-input').dataset.dyOld = '1'; return true; })()`);
+  await realClick('[data-dy="dy-obj8"]'); await sleep(300); await typeText('dy r8 words'); await sleep(300);
+  await (await fetch(`${origin}/api/tasks/${tid2}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: J({ title: 'DY tab r8 renamed elsewhere' }) })).json();
+  const landed = await waitFor(`(app.sidebar._taskById(${J(tid2)}) || {}).title === 'DY tab r8 renamed elsewhere'`, 10000);
+  await key('Tab', 'Tab', 9);
+  const readTab = `(() => { const ae = document.activeElement, add = document.querySelector('.ctx-add-input'); return { onAdd: !!add && ae === add, same: !!(add && add.dataset.dyOld === '1'), active: ae === document.body ? 'BODY' : (ae && (ae.className || ae.tagName)) }; })()`;
+  const c1 = await evalJs(readTab); await sleep(1500); const c2 = await evalJs(readTab);
+  console.log('  ㊿ ' + J({ a1, rpA, a2, a3, rpB0, b1, b2, landed, c1, c2 }));
+  check('㊿ a ROW box the person EMPTIED (the caret in it, its list open) is the same element across another client\'s edit — empty, focused, its list open (the release: refilled with the row\'s path, the list closed)', rpA && a1 && a1.value === '' && a1.focused && a2 && a2.same && a2.focused && a2.value === '' && a2.expanded === 'true', { a1, a2 });
+  check('㊿ …and what the person types next is what the box holds (the release: appended to the path the repaint wrote back)', !!a3 && a3.value === 'zz', a3);
+  check('㊿ a row whose words did not apply, its box EMPTIED and left — its line no longer names the deleted words (the release: «Not applied: …/dy-r8-nope …» under an empty box until another client\'s edit)', rpB0 && b1 && b1.warn && /dy-r8-nope/.test(b1.res || '') && b2 && b2.value === '' && !b2.warn && !/dy-r8-nope/.test(b2.res || ''), { b1, b2 });
+  check('㊿ Tab out of the Description while another client\'s repaint waits ⇒ the focus is in «+ Add a path…», the same element (the release: the repaint ran inside the focusout with <body> active — the box rebuilt, the Tab lost)', landed && c1 && c1.onAdd && c1.same && c2 && c2.onAdd, { c1, c2 });
+  await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.element.querySelector('.ctx-add-input')) app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
+  await fetch(`${origin}/api/tasks/${tid}`, { method: 'DELETE' }); await fetch(`${origin}/api/tasks/${tid2}`, { method: 'DELETE' });
 });
 
 // ── ⑲ the welcome never counts a form: the last chat closed with a form open, then the form — the empty desktop shows its welcome ──

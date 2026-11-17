@@ -168,7 +168,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
   const rowKeysOf = (rows) => { const n = new Map(); return rows.map((r) => { const k = rowKeyOf(r); const c = n.get(k) || 0; n.set(k, c + 1); return c ? `${k}#${c}` : k; }); };
 
   /** ONE path row of the table. `rk` = its key; `was` = the last paint's fields by key (its own is carried over) */
-  const pathRow = (table, r, i, rk = rowKeyOf(r), was = null) => {
+  const pathRow = (table, r, i, rk = rowKeyOf(r), was = null, ae = null) => {
     const x = resOf(i), kind = kindOf(i);
     const row = document.createElement('div');
     row.className = 'ctx-row';
@@ -181,7 +181,12 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     input.className = 'task-detail-input ctx-path-input';
     input.dataset.rowKey = rowKeyOf(r);
     const want = unresolved.has(rowKeyOf(r)) ? unresolved.get(rowKeyOf(r)) : r.path;
-    if (!kept) input.value = want; else if (document.activeElement !== input && input.value !== want) kept.set(want, { commit: false });
+    // B-292f (dialog-yield r8): a kept row's box is the person's while they are IN it (path-field's inUse: focused, its list
+    // open, typed, picking) — by `ae`, the active element renderSettings read BEFORE it emptied the body. r7 read
+    // document.activeElement here, after the empty (always <body>): a row box the person had emptied was refilled under the caret,
+    // and words typed and not yet committed were overwritten by the row's own path (a row is matched by its path, so a kept
+    // row's path never changed elsewhere — only the person's words differ from it)
+    if (!kept) input.value = want; else if (!kept.inUse(ae) && input.value !== want) kept.set(want, { commit: false });
     input.title = r.path;
     if (!kept) pc.appendChild(input);
     const res = document.createElement('div'); res.className = 'ctx-res';
@@ -198,6 +203,9 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     row.appendChild(pc);
     const pf = makePathField(input, {
       at: i, key: rk, was,
+      // B-292f: a box the person EMPTIED drops its «Not applied: <their words>» line — the row's own words come back (r7 did it
+      // for the add row only: an emptied row box kept naming the words that were deleted, until another client's edit)
+      onEmpty: () => { if (res.classList.contains('ctx-warn')) { res.classList.remove('ctx-warn'); res.textContent = resWords.join(' · '); } },
       onCommit: (info) => {
         const text = String(info.text || '').trim() || info.path;
         // the row AS IT IS NOW (a repaint may have moved it): found by its key — gone ⇒ said, never a silent drop (r5)
@@ -409,8 +417,10 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     }, 200);
   };
 
-  const renderSettings = () => {
-    const _ae = document.activeElement;
+  const renderSettings = (to = null) => {
+    // B-292f: `to` = where the focus is going (a focusout's relatedTarget) — a repaint the typing guard held back runs INSIDE the
+    // focusout when no press is down, while the document's focus is in transit (<body>): Tab into «+ Add a path…» rebuilt the box
+    const _ae = (!document.activeElement || document.activeElement === document.body) && to && body.contains(to) ? to : document.activeElement;
     const typing = body.contains(_ae) && /^(INPUT|TEXTAREA)$/.test(_ae.tagName) && _ae.value;
     if (typing) { settingsDirty = true; fetchPreview(); return; }   // never clobber a box being typed in — repainted when it is left
     settingsDirty = false;
@@ -450,7 +460,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     table.appendChild(headRow);
     const rows = task.ctx || [];
     const keys = rowKeysOf(rows);
-    rows.forEach((r, i) => (r.ref ? refRow(table, r, i) : pathRow(table, r, i, keys[i], was)));
+    rows.forEach((r, i) => (r.ref ? refRow(table, r, i) : pathRow(table, r, i, keys[i], was, _ae)));
     if (!rows.length) {
       const empty = document.createElement('div'); empty.className = 'empty-hint';
       empty.textContent = t('No rows yet — add the folders and files this group works in. A new conversation is told each one at the depth you choose.');
@@ -817,7 +827,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     else if (state.tab === 'members') renderMembers();
   };
   // a box being typed in held a repaint back — it comes the moment that box is left (after the click that left it)
-  root.addEventListener('focusout', () => { if (settingsDirty) afterPointerUp(() => { if (settingsDirty && state.tab === 'settings') renderSettings(); }); });
+  root.addEventListener('focusout', (e) => { if (settingsDirty) afterPointerUp(() => { if (settingsDirty && state.tab === 'settings') renderSettings(e.relatedTarget); }); });
 
   if (task) { paintTabs(); paintFooter(); mountTab(); } else render();
 
