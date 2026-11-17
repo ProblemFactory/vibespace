@@ -20,8 +20,16 @@ ok(block.length > 200, 'auto-graduate handler exists');
 ok(/serverSetting\('agentd\.autoGraduate'\) === false/.test(block), 'honours the off switch');
 ok(/h\.transport === 'dial' \|\| h\.deviceId/.test(block), 'skips machines already on ws');
 ok(/h\.autoGraduate === false/.test(block), 'honours a per-machine opt-out');
-ok(/agentdDeps\.publicUrl\?\.\(\)/.test(block) && !/viaRelay: true/.test(block),
-   'requires an operator-declared URL and never self-publishes to the relay');
+// 2.367.0's instance-url rules (the EXCLUDED package, 2026-11-17): the guard reads the OPERATOR-DECLARED address (instanceUrl.url())
+// and refuses the hub's own https address as one (effective().source === 'https') — the old `agentdDeps.publicUrl` binding was a
+// ghost since the split, which is why this suite sat red and excluded. RED CONTROL: the same pin over the block with the guard cut
+// out must fail, so the leg is not true of any block.
+const URL_GUARD = /if \(!instanceUrl\.url\(\) \|\| instanceUrl\.effective\(\)\.source === 'https'\) return;/;
+const urlRule = (b) => URL_GUARD.test(b) && !/viaRelay: true/.test(b);
+ok(urlRule(block), 'requires an operator-declared URL (instanceUrl.url(), never the hub\'s own https address) and never self-publishes to the relay');
+const cutBlock = block.replace(URL_GUARD, '');
+ok(cutBlock !== block && !urlRule(cutBlock), 'RED CONTROL: the handler with its URL guard cut out fails that leg');
+ok(!urlRule(block + '\n{ viaRelay: true }'), 'RED CONTROL: a handler that self-publishes to the relay fails it too');
 ok(/6 \* 60 \* 60 \* 1000/.test(block), 'at most one attempt per machine per 6h');
 ok(/catch \(e\)[\s\S]{0,200}serverNotice/.test(block), 'a failed attempt is reported, never silent');
 
