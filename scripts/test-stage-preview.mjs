@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, endRootedProcesses } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -40,17 +40,18 @@ fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
-const chrome = spawn(CHROME, [...CHROME_STORE, `--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
-  '--disable-background-timer-throttling', `--user-data-dir=${scratch('stage-smoke-chrome')}`, 'about:blank'], { stdio: 'ignore' });
+// the EXCLUDED package (2026-11-17): its old reason (PORT=3987 / CDP 9337 hard-coded) was cured long ago (freePorts above); what was left
+// is its cleanup — a `pkill -f <socket path>` per dtach socket, a kill BY PATTERN — now the tree's identity stop (endRootedProcesses
+// over the throwaway worktree), and its Chrome asks no keyring (--password-store=basic, no session bus)
+const { DBUS_SESSION_BUS_ADDRESS: _bus, ...chromeEnv } = process.env;
+const chrome = spawn(CHROME, [...CHROME_STORE, `--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
+  '--disable-background-timer-throttling', `--user-data-dir=${scratch('stage-smoke-chrome')}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
 
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
   try { srv.kill('SIGKILL'); } catch {}
-  // dtach sessions spawned by the throwaway (shell terminal) — kill by socket dir
-  try {
-    const socks = fs.readdirSync(path.join(wt, 'data', 'sockets'));
-    for (const s of socks) { try { execSync(`pkill -f ${JSON.stringify(path.join(wt, 'data', 'sockets', s))}`); } catch {} }
-  } catch {}
+  // dtach sessions spawned by the throwaway (shell terminal) — ended BY IDENTITY (every process rooted in the throwaway worktree)
+  try { endRootedProcesses(wt); } catch {}
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
   try { fs.rmSync(scratch('stage-smoke-chrome'), { recursive: true, force: true }); } catch {}
 };
