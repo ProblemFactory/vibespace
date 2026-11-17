@@ -2047,6 +2047,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')]) {
               try { watches.push(fs.watch(d, { recursive: true }, kick)); } catch { try { watches.push(fs.watch(d, kick)); } catch { } }
             }
+            watches.clearKick = () => { if (timer) { clearTimeout(timer); timer = null; } }; // its pending kick dies with the link (U1)
             this._discoWatch = watches;
           }
           mux.control({ op: 'discovery-watching', id: msg.id });
@@ -2149,6 +2150,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             const st = { cursorFile, running: false, again: false, seq: 0, pendingCursors: new Map(), watches: [] };
             this._usageEvWatch = st;
             const runWalk = () => {
+              if (st.dead) return; // its link died (U1): no walk, no push, no cursor written for a link nobody hears
               if (st.running) { st.again = true; return; }
               st.running = true;
               require('child_process').execFile(process.execPath, [__filename, '--usage-scan-child', cursorFile],
@@ -2180,12 +2182,13 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
                       }
                     }
                   } catch (e) { log('usage-events push failed: ' + e.message); }
-                  if (st.again) { st.again = false; setTimeout(runWalk, 200); }
+                  if (st.again && !st.dead) { st.again = false; setTimeout(runWalk, 200); }
                 });
             };
             let timer = null;
             const kick = () => { if (timer) return; timer = setTimeout(() => { timer = null; runWalk(); }, 1500); };
             st.kick = kick;
+            st.clearKick = () => { if (timer) { clearTimeout(timer); timer = null; } };
             for (const d of [path.join(home, '.claude', 'projects'),
               path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')]) {
               try { st.watches.push(fs.watch(d, { recursive: true }, kick)); } catch { try { st.watches.push(fs.watch(d, kick)); } catch { } }
@@ -2879,10 +2882,15 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       // close THIS connection's SOCKS egress servers — an open egress must not
       // outlive the server that asked for it (ExitManager re-creates on reconnect)
       for (const [port, s] of socksServers) { if (s.owner === mux) { try { s.server.close(); } catch { } socksServers.delete(port); } }
-      if (this._discoWatch) { for (const w of this._discoWatch) { try { w.close(); } catch { } } this._discoWatch = null; }
+      if (this._discoWatch) { for (const w of this._discoWatch) { try { w.close(); } catch { } } try { this._discoWatch.clearKick?.(); } catch { } this._discoWatch = null; }
       for (const rec of [...windowWatches.values()]) if (rec.owner === mux) rec.h.stop(); // lane machine-app-crop: a watch dies with its link (unpinned); the hub re-arms it
       if (streamHost) streamHost.linkDead(mux); // lane stream-p1a-transport: its streams become orphans (the media keeps flowing) until the hub re-arms them
-      if (this._usageEvWatch) { try { for (const w of this._usageEvWatch.watches) w.close(); } catch { } this._usageEvWatch = null; }
+      if (this._usageEvWatch) { const st = this._usageEvWatch; st.dead = true; try { st.clearKick?.(); } catch { } try { for (const w of st.watches) w.close(); } catch { } this._usageEvWatch = null; }
+      // THE SESSION-EVENTS WATCH ENDS WITH ITS LINK (lane soak-can-fail U1, 主开发 2026-11-16): its one-second tick and its tails
+      // (a normalizer per pipe session) were never cleared, so every dead link left one more tick reading the sessions folder
+      // and normalizing every session's output for a link nobody hears — in a daemon that outlives the hub. A re-arm on a new
+      // link is that link's own watch; nothing a connection armed outlives the connection.
+      if (this._sessEvWatch) { try { clearInterval(this._sessEvWatch.timer); } catch { } try { this._sessEvWatch.tails.clear(); } catch { } this._sessEvWatch = null; }
       pipeSessions.detachAll(mux);
     },
   });

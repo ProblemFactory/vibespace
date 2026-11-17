@@ -21,6 +21,7 @@ process.env.VIBESPACE_AGENTD_ROOT = path.join(home, 'agentd-root');
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-sb-data-'));
 const { DeviceManager } = require(REPO + '/src/agentd/client.js');
 const dm = new DeviceManager({ dataDir, bundlePath: path.join(REPO, 'data/bin/vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
+const DAEMON_AT = Date.now();   // the daemon starts here (U1's windows wait past its boot sweep)
 await dm.connect();
 
 // live pipe session = a script that emits stream-json records slowly
@@ -70,6 +71,34 @@ await new Promise((r) => setTimeout(r, 1500));
 const before = batches.length;
 await new Promise((r) => setTimeout(r, 1500));
 ok(batches.length === before, 'no batches after the session exits');
+
+// U1 — THE SESSION-EVENTS WATCH ENDS WITH ITS LINK (lane soak-can-fail U1, 主开发 2026-11-16): counted in the REAL daemon's reads
+// — /proc/<pid>/io rchar, a window with the link up and armed, then with NO link at all. Twelve padded session metas (exited, so
+// nothing else acts on them) make the tick's work large: every live tick reads each one once a second. The windows start after
+// the daemon's boot sweep (30 s), the only other reader of the metas. RED on 70efb5e10: a dead link's tick reads on, and a
+// re-arm on a new link adds a second one.
+{
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const ROOTD = process.env.VIBESPACE_AGENTD_ROOT, SESSD = path.join(ROOTD, 'state', 'sessions');
+  let pid = 0; try { pid = Number(fs.readFileSync(path.join(ROOTD, 'state', 'agentd.lock'), 'utf8').trim()) || 0; } catch { }
+  const rchar = () => { try { return Number((fs.readFileSync(`/proc/${pid}/io`, 'utf8').match(/^rchar:\s*(\d+)/m) || [])[1]) || 0; } catch { return -1; } };
+  const PAD = 'x'.repeat(64 * 1024), PER = 12 * PAD.length;
+  const fakes = [];
+  for (let i = 0; i < 12; i++) { const f = path.join(SESSD, `sb-teardown-${i}.json`); fs.writeFileSync(f, JSON.stringify({ exited: 0, exitedAt: Date.now(), backend: 'claude', pad: PAD })); fakes.push(f); }
+  await sleep(Math.max(0, 36000 - (Date.now() - DAEMON_AT)));
+  const rate = async (ms = 4000) => { const a = rchar(); await sleep(ms); const b = rchar(); return a < 0 || b < 0 ? -1 : Math.round((b - a) / (ms / 1000)); };   // bytes a second
+  const live = await rate();
+  dm.stop(); await sleep(1500);                       // the link dies; the daemon lives on
+  const dead = await rate();
+  const dm2 = new DeviceManager({ dataDir, bundlePath: path.join(REPO, 'data/bin/vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
+  await dm2.connect(); await dm2.watchSessionEvents(() => { });
+  const live2 = await rate();
+  dm2.stop(); await sleep(1500);
+  const dead2 = await rate();
+  for (const f of fakes) { try { fs.unlinkSync(f); } catch { } }
+  ok(pid > 0 && live >= PER * 0.75 && dead >= 0 && dead < PER * 0.25 && live2 >= PER * 0.75 && live2 < PER * 1.5 && dead2 >= 0 && dead2 < PER * 0.25,
+    `U1 — THE SESSION-EVENTS WATCH ENDS WITH ITS LINK, counted in the real daemon's reads (bytes a second; one live tick reads ${PER}): armed ${live} · its link dead ${dead} · re-armed on a new link ${live2} (one tick, not two) · that link dead ${dead2}`);
+}
 
 try { const lg = (await import('node:fs')).readdirSync(process.env.VIBESPACE_AGENTD_ROOT).filter(f=>/log|out/.test(f)); for (const f of lg) console.log('--- daemon ' + f + ' ---\n' + (await import('node:fs')).readFileSync(process.env.VIBESPACE_AGENTD_ROOT + '/' + f, 'utf8').split('\n').slice(-25).join('\n')); } catch (e) { console.log('log read:', e.message); }
 try { await dm.stop?.(); } catch { }
