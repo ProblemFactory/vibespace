@@ -18,6 +18,7 @@
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, gtkRow } from './scratch.mjs';
 import { bootXpraWindow } from './xpra-window-boot.mjs';
 
@@ -323,7 +324,17 @@ try {
             const s1 = await until(async () => { const v = await A.p.evalJs(S11(id1)); return v && v.status === 'Connected' && v.constraints && v.constraints['minimum-size'] ? v : null; }, 40000, 300);
             const in1 = inside(wt, r1);
             const min1 = (s1 && s1.constraints && s1.constraints['minimum-size']) || [0, 0];
-            const old = await (await fetch(`${O11}/api/desktop/apps/${id0}`)).json();
+            // B-dcca (the .389 after-push re-run: the old record read ONCE as {state:'ready', replacedBy:<successor>}): the
+            // relaunch names the successor and COMMITS it before the old session's stop (desktop-serve relaunch — the window
+            // follows its successor at once, A3), and the successor can be ready while that stop still runs — so the leg
+            // waits, bounded, for the stop it judges; a stop that never lands is red with the record it read
+            // r2 (the batch's adversarial read): the running states are the module's own (src/desktop-apps.js RUNNING_STATES),
+            // never a copy, and the wait is printed — a stop that slows is seen, never hidden behind a green
+            const RUNNING11 = createRequire(import.meta.url)(path.join(repo, 'src/desktop-apps.js')).RUNNING_STATES, tw11 = Date.now();
+            const old = (await until(async () => { const r = await (await fetch(`${O11}/api/desktop/apps/${id0}`)).json(); return r && !RUNNING11.includes(r.state) ? r : null; }, 20000, 150))
+              || await (await fetch(`${O11}/api/desktop/apps/${id0}`)).json();
+            const stopWaitMs11 = Date.now() - tw11;
+            console.log(`  §11 (4): the old session's stop was read ${stopWaitMs11} ms after the successor was ready (state ${old.state})`);
             const nB = await B.p.evalJs(S11(id1));
             console.log(`  §11 (4): relaunch → ready ${readyMs} ms; successor scale ${r1.scale} dpi ${r1.dpi} origin ${r1.scaleOrigin}; inside: GDK_SCALE=${in1.gdk}, Xft.dpi ${in1.xft}; minimum ${JSON.stringify(min1)}; chip ${JSON.stringify(s1 && s1.chip && s1.chip.text)}; old ${old.state} stoppedBy ${old.stoppedBy} replacedBy ${old.replacedBy}, its app pid ${r0.pids.app} alive ${D.pidAlive(r0.pids.app)}; desktop-app windows: A ${s1 && s1.n}, B ${nB && nB.n}`);
             check(`§11 (4): the successor runs at the CHOSEN 1.5× — the record (${r1.scale}×, ${r1.dpi} dpi, GDK_SCALE ${r1.gdkScale} × ${r1.pictureScale}, ${r1.scaleOrigin}) and MEASURED inside its display (GDK_SCALE=${in1.gdk}, Xft.dpi ${in1.xft}: lane D (a) — widgets AND text 1.5×)`, r1.scale === 1.5 && r1.dpi === 96 && r1.gdkScale === 2 && r1.pictureScale === 0.75 && r1.scaleOrigin === 'chosen' && in1.gdk === '2' && in1.xft === 96, { r1: { scale: r1.scale, dpi: r1.dpi, gdk: r1.gdkScale, pic: r1.pictureScale, origin: r1.scaleOrigin }, in1 });
