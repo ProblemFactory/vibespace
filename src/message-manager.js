@@ -14,6 +14,7 @@
  */
 
 const { rewoundByRecord, applyRewound, rewoundOp } = require('./rewind-ops.js');
+const { cutOf, isPersonPrompt, REWIND_REQUEST_PREFIX } = require('./rewind-cut.js'); // B-437e: the person's rewind, in record order (the cut only — the device bundles this file)
 const { workflowNameFromAck, shortWorkflowName } = require('./workflow-name.js');
 const { VIBESPACE_NOTICE_HEAD } = require('./notification-senders.js'); // PURE: the head our notifications open with (S3 verify F3: a peer record's PATH, peerOriginOf)
 const { offerOf, offerResolution } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5) + its resolution (lane reset-path R3)
@@ -779,6 +780,7 @@ class MessageManager extends MessageWindow {
       catch (e) { console.error('[normalizer] record skipped during history rebuild:', e.message); }
     }
     this._live = wasLive;
+    if (this._pendingRowCut) this._flushRowCut(false); // the transcript ended on a rewind's row: it stands
     // Finalize any trailing streaming text
     this._finalizeStreaming(false);
     return this.messages;
@@ -924,6 +926,8 @@ class MessageManager extends MessageWindow {
   }
 
   _processMessage(raw, emit) {
+    // a rewind's transcript row waits for the record after it: the CLI's heal row cancels it (_processLastPrompt)
+    if (this._pendingRowCut && raw && raw.type !== 'last-prompt') this._flushRowCut(emit);
     // Extract timestamp from raw message for _create
     this._currentTs = raw.timestamp ? new Date(raw.timestamp).getTime() : Date.now();
     this._currentLine = Number.isFinite(raw.__line) ? raw.__line : null; // source file line (gap loads only)
@@ -1008,6 +1012,9 @@ class MessageManager extends MessageWindow {
       // A previously-yielded message was RETRACTED upstream (§2.10). We render
       // AND persist the stream, so without this the orphan lived forever.
       case 'tombstone': return this._processTombstone(raw, emit);
+      // B-437e: the CLI's persisted rewind anchor (rewound:true) cuts on a reload; any other last-prompt row is bookkeeping
+      case 'last-prompt': return this._processLastPrompt(raw, emit);
+      case 'frame_stamp': return this._processFrameStamp(raw, emit); // the wrapper's stamp on a person's frame (B-437e)
       // the WRAPPER's own records (2.369.354 — the CLI never writes these): its mid-turn queue
       case 'queued_input': return this._processQueuedInput(raw, emit);
       case 'queue_changed': return this._processQueueChanged(raw, emit);
@@ -1050,6 +1057,73 @@ class MessageManager extends MessageWindow {
     if (emit) this._emit(rewoundOp({ harness: 'claude', toMessageId: ids[0], ids, kind: 'superseded', ts: this._currentTs }));
   }
 
+  // B-437e: the wrapper's frame_stamp — the CLI record uuid on that bubble, never re-pointed ⇒ kb-file-structure «rewind-door.js»
+  _processFrameStamp(raw, emit) {
+    // the field is `cli_uuid`, NOT `uuid`: a top-level uuid is a record's own key in the restart merge
+    const uuid = raw.cli_uuid, id = this.userMessageIds.get(String(raw.msg_id || ''));
+    const m = typeof uuid === 'string' && uuid && id ? this.messageIndex.get(id) : null;
+    if (!m || m.uuid) return;
+    m.uuid = uuid;
+    if (emit) this._emit({ op: 'edit', id: m.id, fields: { uuid } });
+  }
+
+  // B-437e: one rewind at a time (src/server/rewind-requests.js notes it; the answer or 30 s clears it)
+  noteRewindAsked(requestId) { this._rewindOut = { id: String(requestId), at: Date.now() }; }
+  rewindPending(now = Date.now()) { return !!this._rewindOut && now - this._rewindOut.at < 30000; }
+
+  // B-437e: the CLI's answer to OUR request (vsr-): the cut at its echo when held, ONE rewind-answer with the reply as it came ⇒ kb-file-structure «rewind-door.js»
+  _processRewindAnswer(resp, emit) {
+    const requestId = String((resp && resp.request_id) || '');
+    const body = resp && resp.subtype === 'error' ? { error: String(resp.error || 'error') } : (resp && resp.response) || null;
+    if (this._rewindOut && this._rewindOut.id === requestId) this._rewindOut = null;
+    const echo = body && body.rewound === true ? body.targetMessageUuid : null;
+    const cut = echo && this.messages.some((m) => m && m.uuid === echo) ? this._processRewindCut({ targetUuid: echo }, emit) : null;
+    if (emit) this._emit({ op: 'meta', subtype: 'rewind-answer', data: { requestId, answer: body, taken: cut ? cut.taken : 0 } });
+  }
+
+  // B-437e: a rewound:true row waits for the next record — the CLI's heal row (a plain explicit one) cancels it ⇒ kb-file-structure «rewind-door.js»
+  _processLastPrompt(raw, emit) {
+    if (this._pendingRowCut && raw.explicit === true && raw.rewound !== true && this._namesThePendingCut(raw.leafUuid)) { this._pendingRowCut = null; return; } // the CLI healed: no cut was made
+    if (this._pendingRowCut) this._flushRowCut(emit);
+    if (raw.rewound === true) this._pendingRowCut = { targetUuid: typeof raw.cutUuid === 'string' ? raw.cutUuid : null, leafUuid: 'leafUuid' in raw ? raw.leafUuid : undefined };
+  }
+  // B-437e: the heal row names the uncut tip — a message INSIDE the pending cut (other explicit rows — a leaf withdrawal, a
+  // fork hand-off — name none of it)
+  _namesThePendingCut(leafUuid) {
+    if (typeof leafUuid !== 'string' || !leafUuid) return false;
+    const c = cutOf(this.messages.filter((m) => m && m.noticeKind !== 'rewound'), this._pendingRowCut);
+    return c.ids.some((id) => { const m = this.messageIndex.get(id); return !!m && m.uuid === leafUuid; });
+  }
+  _flushRowCut(emit) {
+    const c = this._pendingRowCut;
+    this._pendingRowCut = null;
+    if (c) this._processRewindCut(c, emit);
+  }
+
+  // B-437e: the cut — struck in place (rollback), ONE notice; a twin record cuts nothing; an unheld anchor is said ⇒ kb-file-structure «rewind-door.js»
+  _processRewindCut({ targetUuid = null, leafUuid = undefined } = {}, emit) {
+    const live = this.messages.filter((m) => m && m.noticeKind !== 'rewound');
+    const c = cutOf(live, { targetUuid, leafUuid });
+    if (c.already) return { taken: 0 };
+    const prompts = c.ids.filter((id) => isPersonPrompt(this.messageIndex.get(id))).length;
+    const ids = applyRewound(this.messages, c.ids, 'rollback');
+    if (c.placed && !ids.length) return { taken: 0 };
+    const n = ids.length;
+    // English fallback + the numbers (the 2.227.4 noticeKind contract)
+    const text = c.placed
+      ? `Rewound to before your message — ${n} message${n === 1 ? '' : 's'} taken back (files unchanged)`
+      : 'The conversation was rewound here — what it took back is not in this view';
+    const msg = this._create({
+      role: 'system', status: 'complete', noticeKind: 'rewound',
+      content: [{ type: 'system_info', text, rewindData: { harness: 'claude', taken: n, prompts, placed: c.placed } }],
+    });
+    if (emit) {
+      this._emit({ op: 'create', message: msg });
+      if (n) this._emit(rewoundOp({ harness: 'claude', toMessageId: ids[0], ids, kind: 'rollback', ts: this._currentTs }));
+    }
+    return { taken: n };
+  }
+
   _processSystem(raw, emit) {
     // (see the unhandled-subtype breadcrumb at the tail of this method)
     if (raw.subtype === 'init') {
@@ -1057,6 +1131,14 @@ class MessageManager extends MessageWindow {
       // run together as ONE record are ALL named here, in their order (measured on 2.1.308 and 2.1.312: [C, D] for the one
       // record under D's uuid). The batch claim's FIRST witness (_claimWebuiCopy, r9); an init that names none clears them.
       this._turnUuids = Array.isArray(raw.user_message_uuids) && raw.user_message_uuids.length ? raw.user_message_uuids.map(String) : null;
+      // B-437e: frames the CLI ran as ONE record (its last uuid): the earlier members are no rewind point of their own
+      if (this._turnUuids && this._turnUuids.length > 1) {
+        const last = this._turnUuids[this._turnUuids.length - 1];
+        for (const u of this._turnUuids.slice(0, -1)) {
+          const m = this.messages.find((x) => x && x.role === 'user' && x.uuid === u && !x.batchOf);
+          if (m) { m.batchOf = last; if (emit) this._emit({ op: 'edit', id: m.id, fields: { batchOf: last } }); }
+        }
+      }
       const frame = initFrameFacts(raw);
       // ONE CARD PER *DISTINCT* FRAME (round 2). A conversation carries one
       // init record per spawn — every resume, every server restart, every
@@ -2571,6 +2653,7 @@ class MessageManager extends MessageWindow {
     // Match by request_id to resolve the pending permission
     const requestId = raw.response?.request_id;
     if (!requestId) return;
+    if (String(requestId).startsWith(REWIND_REQUEST_PREFIX)) return this._processRewindAnswer(raw.response, emit); // B-437e: ours
     const approved = raw.response?.response?.behavior === 'allow';
     // lane J r2: a deny that names browser_paused is the takeover's STALE answer — the
     // card says why (and keeps saying it after a restart: this record is replayed from the buffer)
@@ -2741,7 +2824,7 @@ const KNOWN_IGNORED_RECORD_TYPES = new Set([
   'tool_progress', 'set_in_progress_tool_use_ids', 'rate_limit_event', 'compact_progress', 'command_lifecycle', 'stream_event', 'keep_alive',
   '_stdin_ack', '_stdin_nack', '_remote_state',   // _stdin_nack: a torn stdin line's receipt (lane human-cli r2) — its warning is a system/informational record
   // transcript bookkeeping (JSONL-only rows the CLI writes beside the conversation)
-  'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', // (pr-link is ROUTED since 2026-09-21 — the same fact as system/code_change_published)
+  'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', // (pr-link is ROUTED since 2026-09-21 — the same fact as system/code_change_published; last-prompt since B-437e: a rewound:true row is the CLI's rewind anchor)
   'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress',
   // the CLI's REQUEST REPLAY rows (lane claude-steer-inject r5, read off the strings of 2.1.288–2.1.312 and MEASURED in every
   // 2.1.308 / 2.1.312 transcript of a loopback-mock run): each API request the CLI sends is written as `api-request` (its

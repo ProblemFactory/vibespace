@@ -293,6 +293,7 @@ module.exports = {
     form: 'message',
     deliver: (session, text, deps) => !!deps.sendChatInput(session, text),
   },
+  rewind: { request: (plan) => ClaudeCodeAdapter.rewindRequest(plan) }, // B-437e: THIS harness's road (rewind_conversation)
   // SPAWN FACTS (lane dc-ws-create): what src/ws-create.js used to ask as
   // `backend === 'claude'` — rows/hooks of the spawn contract (./index.js SPAWN_ROWS).
   spawn: {

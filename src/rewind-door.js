@@ -24,7 +24,10 @@
 // `last_seen_user_message_uuid` is the newest of the person's messages THIS page shows: the CLI refuses
 // (`unseen_later_turn`) when it holds a later one the person has not seen, so a press never cuts what nobody read.
 //
-// PURE: imports nothing, touches no I/O (the view's marking of what was taken back is src/rewind-ops.js applyRewound).
+// PURE: imports only src/rewind-cut.js (PURE → PURE: the person rule, the cut and the request prefix — the part the
+// normalizer, and so the device agent, carries); touches no I/O.
+
+const { REWIND_REQUEST_PREFIX, isPersonPrompt, cutOf } = require('./rewind-cut.js');
 
 // Our refusal reasons, each with its CLASS — the page words a class (busy: after the turn; resume: start the
 // conversation first; cannot: this point cannot be taken back; moved: the conversation changed under the press).
@@ -38,7 +41,14 @@ const REWIND_REFUSALS = Object.freeze({
   'turn-running': 'busy',      // a turn runs — stop it first (never a silent interrupt)
   'queued': 'busy',            // messages wait in the queue — they would run against a conversation that is no longer there
   'compacting': 'busy',        // a compaction rewrites the history while it runs
+  'pending': 'busy',           // a rewind of this conversation is out and not answered yet — one at a time
+  'rebuilding': 'busy',        // the server is rebuilding this conversation's history — its array is not whole yet
+  'page-behind': 'moved',      // the page that pressed has not seen the conversation's newest message
+  'not-the-person': 'cannot',  // only the person's own press (a conversation, a job or an automation key never rewinds)
+  'changed-since': 'moved',    // the conversation changed between the confirm's words and the press
 });
+// The door's own reasons (the server's, the plan's) — never a verdict over one message
+const DOOR_REASONS = Object.freeze(['target-not-found', 'pending', 'rebuilding', 'page-behind', 'not-the-person', 'changed-since']);
 
 // The 13 refusal reasons of 2.1.322's rewind_conversation (its `jv` table), with the binary's own «may be sent again»
 // (its `Kv` table) and our class. A reason missing here is answered as 'cli-other' with the CLI's own text — never
@@ -70,16 +80,6 @@ function targetIdOf(checkpoints, msg) {
   if (checkpoints.granularity === 'message') return typeof msg.uuid === 'string' && msg.uuid ? msg.uuid : null;
   if (checkpoints.granularity === 'turn') return typeof msg.turnId === 'string' && msg.turnId ? msg.turnId : null;
   return null;
-}
-
-/** Is this message one of the person's own turn-starting messages (a rewind point at all, whatever the state)?
- *  Notices (noticeKind), agent cards (role ≠ user), a message taken back already, one still afloat (the wrapper holds
- *  it — it reached no turn), a mid-turn steer (it entered a running turn: a cut before it splits that turn), the
- *  CLI's own companion lines (startsTurn === false / synthetic) and a user-role record somebody ELSE wrote (originKind:
- *  a task notification, a peer's message, VibeSpace's own auto-resume continue) are not. */
-function isPersonPrompt(msg) {
-  return !!msg && msg.role === 'user' && !msg.noticeKind && !msg.rewound && !msg.originKind && !msg.synthetic
-    && !msg.afloat && !msg.midTurn && msg.startsTurn !== false && typeof msg.id === 'string';
 }
 
 /** THE VERDICT — the first reason that holds, in this order (what the person can do nothing about first, then what
@@ -118,19 +118,25 @@ function rewindPlanOf(checkpoints, messages, targetId, state = {}) {
   const v = rewindVerdict(checkpoints, target, state);
   if (!v.ok) return v;
   const ids = [];
-  let prompts = 0;
+  let prompts = 0, turns = 0;
   for (let i = at; i < list.length; i++) {
     const m = list[i];
-    if (!m || m.rewound) continue;
+    if (!m || m.rewound || m.noticeKind === 'rewound') continue;
     ids.push(m.id);
     if (isPersonPrompt(m)) prompts++;
+    // EVERY turn that goes — the person's, and the ones somebody else opened (a task notification, a peer's message,
+    // the auto-resume continue): the confirm says how many turns the agent forgets
+    if (m.role === 'user' && !m.noticeKind && !m.afloat && !m.midTurn && !m.batchOf && m.startsTurn !== false) turns++;
   }
   let lastSeenUuid = null;
   if (checkpoints.granularity === 'message') {
     for (let i = list.length - 1; i >= 0; i--) {
       const m = list[i];
-      if (m && m.role === 'user' && !m.rewound && typeof m.uuid === 'string' && m.uuid) { lastSeenUuid = m.uuid; break; }
+      if (m && m.role === 'user' && !m.rewound && !m.afloat && m.queueState !== 'removed' && m.queueState !== 'stopped'
+        && typeof m.uuid === 'string' && m.uuid) { lastSeenUuid = m.uuid; break; }
     }
+    // the PAGE names the newest message IT shows; the server's newer one means the press would cut what it never drew
+    if (state.pageLastSeenUuid !== undefined && state.pageLastSeenUuid !== lastSeenUuid) return { ok: false, reason: 'page-behind', cls: REWIND_REFUSALS['page-behind'] };
   }
   return {
     ok: true, reason: null, cls: null,
@@ -139,6 +145,8 @@ function rewindPlanOf(checkpoints, messages, targetId, state = {}) {
     targetId: targetIdOf(checkpoints, target),
     lastSeenUuid,
     ids, count: ids.length, prompts,
+    turns,                                // what the confirm says goes: every turn from the target on (any opener)
+    files: checkpoints.files === true,    // the row's files fact: tier one never rolls files back, and the confirm says so
     prefillText: textOf(target),
   };
 }
@@ -181,4 +189,4 @@ function rewindAnswerOf(granularity, reply) {
   return { ok: false, reason: 'not-offered', cls: 'cannot', retry: false, text: null, prefillText: null };
 }
 
-module.exports = { REWIND_REFUSALS, CLAUDE_REWIND_REASONS, ANSWER_CLASSES, GRANULARITIES, targetIdOf, isPersonPrompt, rewindVerdict, rewindPointOf, rewindPlanOf, rewindAnswerOf, textOf };
+module.exports = { REWIND_REFUSALS, DOOR_REASONS, CLAUDE_REWIND_REASONS, ANSWER_CLASSES, GRANULARITIES, REWIND_REQUEST_PREFIX, targetIdOf, isPersonPrompt, rewindVerdict, rewindPointOf, rewindPlanOf, rewindAnswerOf, cutOf, textOf };

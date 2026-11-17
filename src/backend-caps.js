@@ -242,10 +242,11 @@ const CLAUDE_WORKTREE = Object.freeze({ supported: true, flag: '--worktree', nam
 // the same conversation and the same harness session, the chosen prompt of the person and everything after it taken
 // back. Not a fork: «Fork from here» (forkAtMessage) starts a NEW conversation and leaves this one as it was. Every
 // surface of the rewind (the per-message door, the ws verb, its refusal) gates on THIS row, never on a backend id; the
-// door's verdict, its plan and the harness's answer are PURE in src/rewind-door.js. A row enters ONLY in this shape:
-// a contributed harness's row goes through checkpointsRowOf (anything else is the off row), and no prober flips it.
-//   conversation — VibeSpace drives a programmatic in-place rewind of this harness. A row turns true in the SAME unit
-//                  that builds its road, never before (a declared door with no road is a dead control). The roads,
+// door's verdict, its plan and the harness's answer are PURE in src/rewind-door.js. A contributed harness's row stays OFF
+// until the page has a road for it (checkpointsRowOf is the shape it must have then), and no prober flips a row.
+//   conversation — VibeSpace drives a programmatic in-place rewind of this harness. A row turns true only with its road:
+//                  the harness descriptor's `rewind.request` (src/harnesses/index.js rewindRoad; validate() refuses a
+//                  true row without one) — the road is the descriptor's, never chosen by the granularity word. The roads,
 //                  as measured from the installed binaries (nothing run):
 //                  claude 2.1.322 — the control request `rewind_conversation {target_message_uuid,
 //                  last_seen_user_message_uuid}`: success {rewound:true, targetMessageUuid, prefillText, …}, a refusal
@@ -273,6 +274,10 @@ function checkpointsRowOf(row) {
       : r.conversation === false && r.granularity === null && r.verb === null);
   return shaped && r.conversation === true ? Object.freeze({ conversation: true, files: false, granularity: r.granularity, redo: false, verb: r.verb }) : NO_CHECKPOINTS;
 }
+// claude's road (B-437e U2): the adapter's formatRewind writes the control request, src/server/rewind-requests.js owns the
+// ws verb, the normalizer cuts from the CLI's answer and from its transcript row; every person frame carries the CLI
+// record uuid the request names (data/bin/chat-wrapper.js frame_stamp).
+const CLAUDE_CHECKPOINTS = Object.freeze({ conversation: true, files: false, granularity: 'message', redo: false, verb: 'rewind_conversation' });
 
 // toolAllowlist (lane new-session-form — the New Session form's 「可用工具」 row) names the HARNESS'S OWN per-session
 // tool switch: a flag on its command line, never a VibeSpace rule. null = this harness has none and the row is never
@@ -417,7 +422,7 @@ const BACKEND_CAPS = {
     scopedCapsOnDemand: true,     // a not-read model-scoped weekly cap (e.g. Fable) only the ⟳ read can answer — essay at scopedCapsOnDemand below
     fork: true,                   // --fork-session (+ --resume-session-at for a mid-conversation fork)
     forkAtMessage: true,          // --resume-session-at <uuid> --fork-session (the per-message boundary the CLI accepts)
-    checkpoints: NO_CHECKPOINTS,  // B-437e: turns true with its road — control_request rewind_conversation (essay at NO_CHECKPOINTS)
+    checkpoints: CLAUDE_CHECKPOINTS, // B-437e: rewind in place — control_request rewind_conversation (essay at NO_CHECKPOINTS)
     review: false,                // no review verb on the stream-json control protocol
     renameWriteback: false,       // the JSONL transcript has no title to write back
     titleRecord: 'session_title_changed', // 2.1.288: the CLI names the session itself (session-brain noteSessionTitle → cliTitle)
@@ -486,7 +491,7 @@ const BACKEND_CAPS = {
     scopedCapsOnDemand: false,    // its caps ride its pushes (a model-named limit such as Spark among them) — drawn as read, never a placeholder ring
     fork: true,                   // thread/fork (whole-thread fork; the wrapper sends it when CODEX_WEBUI_FORK=1)
     forkAtMessage: false,         // thread/fork takes no message boundary — a per-message button here would be a dead control
-    checkpoints: NO_CHECKPOINTS,  // B-437e: turns true with its road — thread/revert {beforeTurnId} (essay at NO_CHECKPOINTS)
+    checkpoints: NO_CHECKPOINTS,  // B-437e tier one SKIPS codex: thread/revert refuses non-paginated threads and ours are Legacy (the owner's call — essay at NO_CHECKPOINTS)
     review: true,                 // review/start: working tree / base branch / commit / custom, inline or detached
     renameWriteback: true,        // set-thread-name → the thread's own name in codex's store
     titleRecord: null,            // no title record (the thread name is OURS, written back) — the ladder's CLI-title rung is absent
@@ -645,7 +650,9 @@ function contributeCaps(id, row) {
   if (!row) { CONTRIBUTED_CAPS.delete(id); return null; }
   const merged = { ...NO_CAPS, ...row };
   merged.inputModes = deriveInputModes(row.inputModes || NO_CAPS.inputModes);
-  merged.checkpoints = checkpointsRowOf(row.checkpoints === undefined ? NO_CHECKPOINTS : row.checkpoints); // B-437e: the row enters only in its shape
+  // B-437e: a contributed harness's rewind row stays OFF — the page has no road for it yet (no answer reader, no words);
+  // checkpointsRowOf is the shape a row must have when one is opened for it
+  merged.checkpoints = NO_CHECKPOINTS;
   CONTRIBUTED_CAPS.set(id, merged);
   return merged;
 }
@@ -936,5 +943,5 @@ function doorCapsOf(inputModes, servedVerbs) {
 module.exports = { SEND_DOOR_TABLE, sendDoors, doorCapsOf, BACKEND_CAPS, capsOf, SUBAGENT_VIEWS, subagentView, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
   AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume,
   NO_WORKTREE, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite,
-  NO_CHECKPOINTS, checkpointsRowOf,
+  NO_CHECKPOINTS, checkpointsRowOf, CLAUDE_CHECKPOINTS,
   toolAllowlistCaps, toolAllowlistArgs };

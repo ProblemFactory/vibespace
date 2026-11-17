@@ -124,6 +124,7 @@ function validate(h, { full = true } = {}) {
   }
   assertQuotaContract(h.id, h.quota);
   assertResumeContract(h.id, h.resume);
+  assertRewindContract(h);
   assertSettingsContract(h, { full });
   assertSpawnContract(h);
   // THE AUTO-RESUME CAPS ROW IS DERIVED HERE, from what the descriptor really
@@ -199,5 +200,19 @@ function resumeVerb(id) {
   try { return get(id).resume || null; } catch { return null; }
 }
 
+/** THE REWIND ROAD (B-437e): the harness's own `rewind.request(plan) → {line, requestId}` — null when it has none. The
+ *  server's door (src/server/rewind-requests.js) asks THIS, never the row's granularity word: a contributed harness's
+ *  «message» row is never sent another vendor's request. */
+function rewindRoad(id) {
+  try { const r = get(id).rewind; return r && typeof r.request === 'function' ? r : null; } catch { return null; }
+}
+/** A harness whose `checkpoints` row says it rewinds the conversation names its road — a door with no road is refused. */
+function assertRewindContract(h) {
+  const row = h && h.caps && h.caps.checkpoints;
+  if (row && row.conversation === true && !(h.rewind && typeof h.rewind.request === 'function')) {
+    throw new Error(`harness "${h.id}" declares a conversation rewind (caps.checkpoints) but no rewind.request road`);
+  }
+}
+
 module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, validate, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, QUOTA_PROBE_RUNGS, NULL_QUOTA,
-  hasLimitSignal, assertResumeContract, resumeVerb, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };
+  hasLimitSignal, assertResumeContract, resumeVerb, rewindRoad, assertRewindContract, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };

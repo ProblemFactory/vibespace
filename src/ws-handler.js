@@ -607,6 +607,7 @@ function registerWsHandler(wss, ctx) {
     // lane device-act-audit: WHO this socket is (a browser sign-in's handle, never the cookie) — an act it starts on a
     // device (a session's setup, its teardown) names it (src/device-audit.js byOfReq)
     try { ws._actBy = req ? require('./device-audit.js').byOfReq(req) : null; } catch { ws._actBy = null; }
+    try { ws._personPage = require('./server/rewind-requests.js').personOfUpgrade(req); } catch { ws._personPage = false; } // B-437e: a person on this page, proven at the handshake
     ws._isAlive = true;
     ws.on('pong', () => { ws._isAlive = true; });
     // loop-day-report M5: the hour's page-socket messages out — every send to this page counted where it leaves (one add)
@@ -897,6 +898,15 @@ function registerWsHandler(wss, ctx) {
           } else {
             try { ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, code: 'not-codex-chat', message: 'This action needs a live Codex chat session.' })); } catch { }
           }
+          break;
+        }
+
+        // THE REWIND (B-437e): the person's «Rewind to here» on one of their own messages — the verdict, the plan and the
+        // harness's request in src/server/rewind-requests.js; the answer rides the conversation's stream (`rewind-answer`)
+        case 'rewind': {
+          const session = activeSessions.get(data.sessionId);
+          const r = require('./server/rewind-requests.js').requestRewind({ session, msgId: data.msgId, lastSeenUuid: data.lastSeenUuid, by: ws._personPage === true ? byOfWs(ws) : null, dryRun: data.dryRun === true, expectTaken: Number.isFinite(data.expectTaken) ? data.expectTaken : null });
+          try { ws.send(JSON.stringify({ type: 'rewind-result', sessionId: data.sessionId, reqId: data.reqId ?? null, msgId: data.msgId ?? null, ...r })); } catch { }
           break;
         }
 

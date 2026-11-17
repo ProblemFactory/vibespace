@@ -1,0 +1,165 @@
+{
+ "_note": "MEASURED by scripts/measure-claude-rewind.mjs — never edited by hand. Read from the program file as bytes; nothing was run.",
+ "cli": "2.1.322",
+ "programSha256": "bfb3703ad5380242328459bc62ada4bde8ae7ba57c6e1eeadb9c00e08874c478",
+ "programBytes": 341914128,
+ "how": "patterns over the minified bundle (each fact keeps its excerpt); the CLI was never started",
+ "request": {
+  "type": "control_request",
+  "subtype": "rewind_conversation",
+  "fields": [
+   "allow_assistant_target",
+   "allow_summarized_target",
+   "expires_at",
+   "interrupt_if_running",
+   "last_seen_user_message_uuid",
+   "next_turn_model",
+   "refuse_if_usage_limited",
+   "refuse_missing_target_if_usage_limited",
+   "target_message_uuid"
+  ]
+ },
+ "reply": {
+  "done": [
+   "rewound",
+   "targetMessageUuid",
+   "prefillText",
+   "precedingAssistantUuid",
+   "resolution"
+  ],
+  "refused": [
+   "rewound",
+   "prefillText",
+   "precedingAssistantUuid",
+   "error",
+   "reason",
+   "isolation_latch"
+  ]
+ },
+ "reasons": {
+  "commands_queued": {
+   "text": "commands queued",
+   "retry": true
+  },
+  "prompt_pending": {
+   "text": "prompt pending",
+   "retry": false
+  },
+  "turn_running": {
+   "text": "turn running",
+   "retry": true
+  },
+  "target_not_found": {
+   "text": "target not found",
+   "retry": true
+  },
+  "stale_target": {
+   "text": "stale target",
+   "retry": false
+  },
+  "unseen_later_turn": {
+   "text": "unseen later turn",
+   "retry": false
+  },
+  "poll_tool_result_target": {
+   "text": "poll tool_result target",
+   "retry": false
+  },
+  "target_splits_tool_call": {
+   "text": "target splits a tool call",
+   "retry": false
+  },
+  "delivered_poll_events_in_range": {
+   "text": "delivered poll events in range",
+   "retry": false
+  },
+  "persist_failed": {
+   "text": "failed to persist rewind anchor",
+   "retry": true
+  },
+  "state_changed": {
+   "text": "state changed",
+   "retry": true
+  },
+  "usage_limited": {
+   "text": "usage limited",
+   "retry": false
+  },
+  "expired": {
+   "text": "expired",
+   "retry": true
+  }
+ },
+ "persist": {
+  "row": "last-prompt",
+  "fields": [
+   "type",
+   "lastPrompt",
+   "leafUuid",
+   "explicit",
+   "sessionId"
+  ],
+  "anchorFields": [
+   "rewound",
+   "cutUuid"
+  ],
+  "cutUuidFlag": "tengu_foamy_spring",
+  "cutUuidFlagDefault": true,
+  "writtenBeforeTheLastCheck": true,
+  "healRow": {
+   "row": "last-prompt",
+   "explicit": true,
+   "rewound": false,
+   "leafUuid": "the uncut tip",
+   "writtenBy": "QL"
+  },
+  "writers": [
+   {
+    "explicit": false,
+    "leafUuid": "a uuid"
+   },
+   {
+    "explicit": true,
+    "leafUuid": "a uuid"
+   },
+   {
+    "explicit": true,
+    "leafUuid": "null"
+   },
+   {
+    "explicit": true,
+    "leafUuid": "a uuid"
+   },
+   {
+    "explicit": false,
+    "leafUuid": "none"
+   },
+   {
+    "explicit": true,
+    "leafUuid": "a uuid"
+   }
+  ],
+  "ordinaryRowExplicit": false
+ },
+ "excerpts": {
+  "handler": "nW,...oe})}else if(K.request.subtype===\"rewind_conversation\"){if(typeof K.request.target_message_uuid!==\"string\"){_t(K,\"rewind_conversation: target_message_uuid",
+  "done": "{rewound:!0,targetMessageUuid:kn,prefillText:Or,precedingAssistantUuid:Rr,...ho!==void 0&&{resolution:ho}})}}}}else if(K.request.subtype===\"fork_conversation\"){",
+  "order": "!await qL(Rn.cut,Ro,Lr))Zc(Rn,\"persist_failed\"),yn(\"persist_failed\");else if(jL(yi,Ro,Rn.cut)||!Eh(vt,Rn.cut,i_r()))await QL(Ro,Lr),Zc(Rn,\"state_changed\"),yn(\"state_changed\");else{let Yn={messages:vt,appendToConversation:gs,readFileState:bo",
+  "refused": "function ap(e,n){return{rewound:!1,prefillText:null,precedingAssistantUuid:null,error:jv[e],reason:e,...n!==void 0&&{isolation_latch:n}}}function NL(e,n){return{...ap(\"usage_limited\",n),...!e&&{target",
+  "words": "jv={commands_queued:\"commands queued\",prompt_pending:\"prompt pending\",turn_running:\"turn running\",target_not_found:\"target not found\",stale_target:\"stale target\",unseen_later_turn:\"unseen later turn\",",
+  "retry": "Kv={commands_queued:!0,prompt_pending:!1,turn_running:!0,target_not_found:!0,stale_target:!1,unseen_later_turn:!1,poll_tool_result_target:!1,target_splits_tool_call:!1,delivered_poll_events_in_range:!",
+  "row": "async function k7t(e,n,r){let s=_l();s.currentSessionLeafUuid=e??void 0,s.currentSessionLeafTs=new Date().toISOString(),await s.appendEntry({type:\"last-prompt\",...s.currentSessionLastPrompt&&{lastPrompt:s.currentSessionLastPrompt},leafUuid:",
+  "anchor": "{rewound:!0,...n!==void 0&&hu()&&{cutUuid:n.uuid}};try{await s.mirror(e,y),await s.flushInternalEvents(),await s.persistLocal(e,y)}catch(S){h=!1,s.logFailure(\"p",
+  "gate": "function hu(){return ID(\"tengu_foamy_spring\")}function Upe(e){let n=Dc.reader;if(!n)return!1;try{return n(e,!1)===!0}catch{return!1}}function ID(e){let n=Dc.rea",
+  "flagReaderDefaultOn": "function ID(e){let n=Dc.reader;if(!n)return!0;try{return n(e,!0)!==!1}catch{return!0}}var DD=\"tengu_swift_glade\";function Fc(){return Upe(DD",
+  "heal": "async function QL(e,n){try{for(let r=0;r<3;r++){let s=e.dequeueCount(),h=e.messages.length,y=e.messages.findLast((S)=>(S.type===\"user\"||S.type===\"assistant\")&&!oG(S.uuid));if(y===void 0)break;if(await n.persistLocal(y.uuid,void 0),await n.mirror(y.uuid,void 0)",
+  "writers": [
+   "id!==void 0)Y.push({type:\"last-prompt\",...this.currentSessionLastPrompt&&{lastPrompt:this.currentSessionLastPrompt},...this.currentSessionLeafUuid&&{leafUuid:this.currentSessionLeafUuid},sessionId:y})",
+   "wait s.appendEntry({type:\"last-prompt\",...s.currentSessionLastPrompt&&{lastPrompt:s.currentSessionLastPrompt},leafUuid:e,explicit:!0,...n,sessionId:G()},void 0,void 0,r)}function Hus(){_l().queueLeafC",
+   "eckpointWithdrawal({type:\"last-prompt\",leafUuid:null,explicit:!0,sessionId:G()})}async function Nus(e,n){let r=_l();await r.mirrorInternalEntry({type:\"last-prompt\",...r.currentSessionLastPrompt&&{last",
+   "irrorInternalEntry({type:\"last-prompt\",...r.currentSessionLastPrompt&&{lastPrompt:r.currentSessionLastPrompt},leafUuid:e,explicit:!0,...n,sessionId:G()})}function yRa(e,n){return _l().mirrorInternalEn",
+   "=void 0&&Co!==null?{type:\"last-prompt\",sessionId:Co,leafUuid:et,explicit:!0}:void 0;if(et!==void 0&&bn===void 0)return l(\"tengu_background_spawn_failed\",{via:f(Fe)}),{ok:!1,error:\"Couldn't fork \\u2014",
+   "this.#t=void 0,GXe({type:\"last-prompt\",leafUuid:czo,explicit:!0,sessionId:G()})}writeFailed(h){if(h.some((M)=>this.#o.has(M.uuid)))this.#o.clear()}}var NI=new Ye(()=>new T_t);import{randomUUID as pzo}"
+  ]
+ }
+}

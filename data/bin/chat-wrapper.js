@@ -556,6 +556,16 @@ function stampFrame(line, o) {
   // a frame that opens a turn has a `message` key, so the object is never empty: the stamp is its new first key
   return { line: t.startsWith('{') ? `{"uuid":${JSON.stringify(uuid)},${t.slice(1)}` : line, uuid };
 }
+/** Say a person's frame's stamp (B-437e) — only when the frame can reach the CLI: its pipe takes input, or the offset mode
+ *  queues it for the reconnect. A frame the wrapper must drop («dropped input») gets no uuid, so no door names it. */
+function sayStamp(msgId, uuid) {
+  if ((child && !childDead && child.stdin && child.stdin.writable) || OFFSET_MODE) record('frame_stamp', { msg_id: msgId, cli_uuid: uuid });
+}
+/** A frame the PERSON sent (B-437e): a turn-opening frame with a message id, not somebody else's (no origin), not a slash
+ *  command — the frames whose CLI record uuid «Rewind to here» names. */
+function isPersonFrame(o) {
+  return !!o && typeof o.webui_msg_id === 'string' && !!o.webui_msg_id && !(typeof o.webui_origin === 'string' && o.webui_origin) && !isCommandFrame(o);
+}
 /** An EDITED held frame: its copy says the latest words (one record of the message, never the original beside it). */
 function rewriteCopy(msgId, o) {
   const c = copies.get(msgId);
@@ -700,6 +710,15 @@ function settleStopCopies(why) {
  *  (`webui_steer` — plain Enter on a Claude conversation) AND this CLI has proven its state words AND no Stop is
  *  settling, else HELD (published + `queued_input` for its bubble) — a stamp is a request, never a bypass of the gate. */
 function submitUser(line, o, { buffered = false } = {}) {
+  // THE PERSON'S FRAME CARRIES ITS STAMP WHATEVER THE TURN (B-437e — rewind in place): the CLI keeps a frame's uuid as
+  // the uuid of its own user record of those words (measured on 2.1.312 — a mid-turn frame, a held frame drained into a
+  // turn of its own), and that record uuid is what `rewind_conversation` names. Only a MID-TURN frame used to be stamped,
+  // so a message sent while idle had no uuid on the page until a reload — no «Rewind to here» on the message a person
+  // most often takes back. `frame_stamp {msg_id, cli_uuid}` says it (stdout AND the buffer) as the frame REACHES the CLI
+  // (sent now, handed over, or a held one at its drain — one put back or removed never did). The field is NOT `uuid`: a
+  // top-level uuid is a record's own key in the restart merge (src/session-store.js). Every line of the base below stays
+  // byte for byte (suites pin them); the stamp lines sit beside them.
+  if (!(turnBusy || cliOwesTurn || stopping) && opensTurn(o) && isPersonFrame(o)) { const st = stampFrame(line, o); line = st.line; sayStamp(o.webui_msg_id, st.uuid); } // said as the next line sends it
   if (!(turnBusy || cliOwesTurn || stopping) || !opensTurn(o)) { forwardUser(line, o, buffered); return; }
   const msgId = typeof o.webui_msg_id === 'string' ? o.webui_msg_id : '';
   const origin = typeof o.webui_origin === 'string' && o.webui_origin ? o.webui_origin : null;
@@ -710,10 +729,13 @@ function submitUser(line, o, { buffered = false } = {}) {
     line = st.line;
     if (recordPersonFrame(o, msgId, st.uuid)) buffered = false;
   }
+  const stamped = isPersonFrame(o) && typeof o.uuid === 'string' ? o.uuid : null; // the stamp the block above put on it (B-437e)
+  if (stamped && o.webui_steer === true && !origin && !isCommandFrame(o) && stateProven && !stopping) sayStamp(msgId, stamped); // said as the next line hands it over
   if (o.webui_steer === true && !origin && !isCommandFrame(o) && stateProven && !stopping) { handOver(line, { buffered, msgId, via: 'enter' }); return; }
   promptQueue.push({ id: `q${++queueSeq}-${process.pid}`, ts: Date.now(), line, msgId, origin, text: frameText(o), preview: framePreview(o), attachments: frameAttachments(o), buffered });
   publishQueue();
   record('queued_input', { msg_id: msgId, turn_id: null });
+  if (stamped) promptQueue[promptQueue.length - 1].stamp = stamped; // said at its drain, when it reaches the CLI (B-437e)
   if (settleSaid.startsWith('settling')) settleSaid = ''; // a new chip: the settle state is said again for it
   saySettle();
   log(`held a mid-turn frame (${promptQueue.length} held${origin ? ', ' + origin : ''})`);
@@ -726,6 +748,7 @@ function drainPromptQueue() {
   publishQueue();
   let o = null; try { o = JSON.parse(next.line); } catch {}
   forwardUser(next.line, o, next.buffered);
+  if (next.stamp) sayStamp(next.msgId, next.stamp); // B-437e: it reached the CLI now
   log(`drained a held frame at the turn end (${promptQueue.length} still held)`);
 }
 
@@ -805,6 +828,7 @@ function steerHeld(entry, op) {
   }
   promptQueue.splice(promptQueue.indexOf(entry), 1);
   record('queue_op_result', { op, id: entry.id, ok: true, msg_id: entry.msgId });
+  if (entry.stamp) sayStamp(entry.msgId, entry.stamp); // B-437e: a held frame reaches the CLI here too (⚡ steer / steer-all)
   if (turnBusy || cliOwesTurn) handOver(entry.line, { buffered: entry.buffered, msgId: entry.msgId, id: entry.id, via: 'steer' });
   else forwardUser(entry.line, o, entry.buffered);
   return true;
