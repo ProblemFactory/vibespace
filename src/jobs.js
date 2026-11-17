@@ -228,6 +228,7 @@ class JobManager {
       }
       this._load();
       this._loadNotifs();
+      if (this._skeletonsOwed) { this._skeletonsOwed = false; this._save({ storeOnly: true }); }   // B-ef97: the recovered skeletons, on disk before anything else runs — jobs.json ALONE (a notifications file that did not load is not written over here)
       this._bootAt = now(); // this server generation's start: a run begun before it was an older generation's (update window)
       this._adoptAndReplay();
       // boot sweep (triage §13 rule 5): housekeeping happens as soon as the
@@ -275,11 +276,17 @@ class JobManager {
         bad = this._logsHeldFile(this.file, e, 'store', true);
         this.d.log('[jobs] store corrupt → preserved at', bad || (this.readOnly ? '(nowhere — a read-only engine writes nothing)' : '(nowhere — its note holds the job-logs clean-up)'), '— rebuilding skeletons; error:', e.message);
         try {
+          // B-ef97: an id the archive holds has its record there — a skeleton beside it would be a second, empty record of it
+          const archived = bad ? new Set(this._loadArchive().map((r) => r.id)) : new Set();
           for (const id of fs.readdirSync(this.logsDir)) {
-            if (!id.startsWith('jb-')) continue;
+            if (!id.startsWith('jb-') || archived.has(id)) continue;
             this.jobs.set(id, { id, kind: 'task', name: id, state: 'unverified', note: LS.RECOVERED_NOTE, owner: {}, access: { view: 'all', control: 'session' }, runs: [] });
           }
         } catch { }
+        // B-ef97: the skeletons are WRITTEN BACK (were: memory only — the next boot loaded an empty store), once the torn bytes are
+        // safe beside it (renamed or copied aside); with nothing set aside the live file is their only copy and is never written over.
+        // init writes them right after the notifications load (a write HERE would flush an empty notifications map over its file)
+        if (bad && this.jobs.size) this._skeletonsOwed = true;
         // r2: ONE item for the cause, the hold in it; r3 §6: it names the file that HOLDS the bytes (a name, never a path), never the live store
         if (bad) this._logsSay(path.basename(bad), 'store-corrupt', { file: path.basename(bad) });
       } else this._logsHeldFile(this.file, e, 'store', false);   // the read AND the stat failed: nothing to set aside — the note
@@ -370,7 +377,7 @@ class JobManager {
     const w = v && typeof v.written === 'function' ? v.written() : null;
     if (w && typeof w.then === 'function') w.then(() => this._logsMarkSaid(name), () => { }); else this._logsMarkSaid(name);
   }
-  _save() {
+  _save({ storeOnly = false } = {}) {
     // a READ-ONLY engine (second server against a live lock) must never flush
     // its stale in-memory copy over the live engine's store (2.344.1 review
     // catch: shutdown()'s dirty-flush had no guard, and drainNotifs marks
@@ -378,6 +385,7 @@ class JobManager {
     if (this.readOnly) { this._dirty = false; return; }
     try {
       timedSync('jobs.write', () => writeJsonAtomic(this.file, [...this.jobs.values()]));
+      if (storeOnly) return;
       timedSync('jobs-notifs.write', () => writeJsonAtomic(this.notifsFile, Object.fromEntries(this.pendingNotifs)));
       this._dirty = false;
     } catch (e) { this.d.log('[jobs] save failed:', e.message); }
@@ -407,6 +415,11 @@ class JobManager {
       const arr = JSON.parse(fs.readFileSync(this.archiveFile, 'utf-8'));
       if (!Array.isArray(arr)) throw Object.assign(new Error('the archive is not a list of records'), { code: 'ENOTLIST' });   // lane job-logs-sweep r2: a non-list was read as [] with no bytes kept
       this.archive = arr.filter((r) => r && typeof r === 'object' && r.id);
+      // B-ef97: a skeleton built while the archive could not answer may stand for an id the archive holds — that id has its record
+      // here, the skeleton goes (else a person's acknowledgement would one day archive it OVER the real record, replace-by-id)
+      let dropped = 0;
+      if (this.jobs.size) { const held = new Set(this.archive.map((r) => r.id)); for (const [id, j] of this.jobs) if (LS.isSkeleton(j) && held.has(id)) { this.jobs.delete(id); dropped++; } }
+      if (dropped) { this._dirty = true; this.d.log(`[jobs] ${dropped} recovered skeleton(s) dropped: the archive holds their records`); }
     } catch (e) {
       // lane job-logs-sweep r3 §1 / r4: as the store's — the bytes set aside before this load returns (renamed, else copied), else the
       // archive's note, THIS PROCESS HOLDING until it is on disk; ENOENT alone is «no records». The release's ONE existsSync (round 4 §3)
@@ -480,8 +493,18 @@ class JobManager {
     // store flush that fails AFTER a successful archive write brings the
     // record back at the next boot, so a re-archived id REPLACES its older
     // archive copy instead of duplicating it.
+    const arch = this._loadArchive();
+    // B-ef97: a recovered skeleton never moves OVER the archived record of its id (replace-by-id below) — it leaves the store instead
+    // (the archive's load drops such skeletons too; this holds for one loaded later — a store the release wrote, read again)
+    const archIds = new Set(arch.map((r) => r.id));
+    for (let i = moved.length - 1; i >= 0; i--) {
+      const id = moved[i].id;
+      if (LS.isSkeleton(moved[i]) && archIds.has(id)) { this.jobs.delete(id); this._dirty = true; moved.splice(i, 1); }
+      else if (!this.jobs.has(id)) moved.splice(i, 1);
+    }
+    if (!moved.length) return { archived: [] };
     const movedIds = new Set(moved.map((m) => m.id));
-    const next = [...moved, ...this._loadArchive().filter((r) => !movedIds.has(r.id))];
+    const next = [...moved, ...arch.filter((r) => !movedIds.has(r.id))];
     next.sort(archiveOrder);
     // the cap keeps the NEWEST; a record the cap drops is unreachable from
     // every surface once the archive that no longer names it is on disk, so

@@ -486,5 +486,76 @@ console.log('§11 B-dfb4: notifications dropped at the 30-entry stash cap are SA
   }
 }
 
+// ── §12 B-ef97: a torn jobs.json's recovered skeletons are WRITTEN BACK — they survive the next restart ──
+console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart keeps them');
+{
+  const LSm = require(path.join(ROOT, 'src/job-logs-sweep.js'));
+  const seedTorn = (d) => {
+    fs.writeFileSync(path.join(d, 'jobs.json'), '[{"id":"jb-5ke1e701","kind":"task","state":"done","runs":[{"startedAt":1');   // torn mid-record
+    fs.writeFileSync(path.join(d, 'jobs-archive.json'), JSON.stringify([{ id: 'jb-5ke1e7a2', kind: 'task', name: 'archived one', state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: T0 - 3 * D, endedAt: T0 - 3 * D + 1 }], archivedAt: T0 - 2 * D, archivedWhy: 'done' }]));
+    for (const id of ['jb-5ke1e701', 'jb-5ke1e703', 'jb-5ke1e7a2']) fs.mkdirSync(path.join(d, 'job-logs', id, String(T0 - D)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'job-notifications.json'), TORN_NOTIFS);   // a notifications file that does not load either
+  };
+  const TORN_NOTIFS = '{"conv-5ke1e7":[{"jobId":"jb-5ke1e701","text":"x"';
+  const skel = (jm) => [...jm.jobs.values()].filter((j) => LSm.isSkeleton(j)).map((j) => j.id).sort().join();
+  const onDisk = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, 'jobs.json'), 'utf-8')).filter((j) => LSm.isSkeleton(j)).map((j) => j.id).sort().join(); } catch (e) { return 'unreadable: ' + e.code; } };
+  const asideOf = (d) => fs.readdirSync(d).filter((n) => /^jobs\.json\.corrupt-\d+$/.test(n));
+  const d12 = mkDir('jobs-triage-torn');
+  seedTorn(d12);
+  const { jm: A } = boot(d12);
+  const at1 = onDisk(d12);
+  ok(skel(A) === 'jb-5ke1e701,jb-5ke1e703' && asideOf(d12).length === 1 && fs.readFileSync(path.join(d12, asideOf(d12)[0]), 'utf-8').startsWith('[{"id":"jb-5ke1e701"'), 'B-ef97: a torn store is set aside (its bytes kept) and rebuilt as skeletons from the log dirs — never one for an id the archive holds', skel(A));
+  ok(at1 === 'jb-5ke1e701,jb-5ke1e703', 'B-ef97: the skeletons are ON DISK when init returns (was: memory only)', at1);
+  A.shutdown();
+  ok(fs.readFileSync(path.join(d12, 'job-notifications.json'), 'utf-8') === TORN_NOTIFS, 'B-ef97: the write-back writes jobs.json ALONE — a notifications file that did not load is not written over by it (nor by the exit)');
+  const { jm: B } = boot(d12);
+  ok(skel(B) === 'jb-5ke1e701,jb-5ke1e703' && B.jobs.get('jb-5ke1e701').note === LSm.RECOVERED_NOTE, 'B-ef97: AFTER A RESTART the recovered skeletons are still listed (was: the store loaded empty, the jobs vanished)', skel(B));
+  B.shutdown();
+  // B-ef97: a skeleton the store holds for an ARCHIVED id (the release wrote one for every log dir) is dropped when the archive loads,
+  // and a skeleton never moves OVER the archived record of its id (the sweep's replace-by-id), however it got into the store
+  const skelRec = (id, extra = {}) => ({ id, kind: 'task', name: id, state: 'unverified', note: LSm.RECOVERED_NOTE, owner: {}, access: { view: 'session', control: 'session' }, runs: [], ...extra });
+  const realArch = (id) => ({ id, kind: 'task', name: 'the real one', state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: T0 - 9 * D, endedAt: T0 - 9 * D + 1 }], archivedAt: T0 - 8 * D, archivedWhy: 'done' });
+  const d12d = mkDir('jobs-triage-skel-drop');
+  fs.writeFileSync(path.join(d12d, 'jobs.json'), JSON.stringify([skelRec('jb-5ke1e7d1'), skelRec('jb-5ke1e7d2')]));
+  fs.writeFileSync(path.join(d12d, 'jobs-archive.json'), JSON.stringify([realArch('jb-5ke1e7d1')]));
+  const { jm: Dr } = boot(d12d);
+  ok(!Dr.jobs.has('jb-5ke1e7d1') && Dr.jobs.has('jb-5ke1e7d2') && Dr._loadArchive().find((r) => r.id === 'jb-5ke1e7d1').name === 'the real one', 'B-ef97: a skeleton for an id the archive holds is DROPPED when the archive loads — the archived record stays');
+  Dr.shutdown();
+  const sweepScene = (Mod, name) => {
+    const d = mkDir(name);
+    fs.writeFileSync(path.join(d, 'jobs-archive.json'), JSON.stringify([realArch('jb-5ke1e7s1')]));
+    const J = new Mod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); J.init();
+    J.jobs.set('jb-5ke1e7s1', skelRec('jb-5ke1e7s1', { ack: { by: 'user-opened', at: T0 - 10 * D } }));
+    const r = J.archiveSweep({ now: T0 });
+    const real = J._loadArchive().find((x) => x.id === 'jb-5ke1e7s1');
+    const out = { r, name: real && real.name, inStore: J.jobs.has('jb-5ke1e7s1') }; J.shutdown(); return out;
+  };
+  const sw = sweepScene({ JobManager }, 'jobs-triage-skel-sweep');
+  ok(!sw.r.archived.length && sw.name === 'the real one' && !sw.inStore, 'B-ef97: an acknowledged skeleton whose id the archive holds leaves the store — it never replaces the archived record', sw);
+  // CONTROL (scripts/mutant-copy.mjs): the release's engine — the skeletons never marked for a write ⇒ the restart loads an empty store
+  const MJ = mutantCopies('jobs-torn-ef97', ROOT);
+  const jsrc = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
+  const owedLine = '        if (bad && this.jobs.size) this._skeletonsOwed = true;\n';
+  ok(jsrc.split(owedLine).length === 2, 'B-ef97 control setup: the write-back is marked on one line');
+  const JMod = MJ.load('src/jobs.js', jsrc.replace(owedLine, '        // MUTANT: the release — skeletons in memory only\n'));
+  const d12c = mkDir('jobs-triage-torn-mut');
+  seedTorn(d12c);
+  const mk = () => { const J = new JMod.JobManager({ dataDir: d12c, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); J.init(); return J; };
+  const X1 = mk(); const x1 = skel(X1); X1.shutdown();
+  const X2 = mk(); const x2 = skel(X2); X2.shutdown();
+  ok(x1 === 'jb-5ke1e701,jb-5ke1e703' && x2 === '', 'B-ef97 CONTROL (the release, in a copy): the skeletons of boot 1 are GONE after a restart', { x1, x2 });
+  const guardLine = "      if (LS.isSkeleton(moved[i]) && archIds.has(id)) { this.jobs.delete(id); this._dirty = true; moved.splice(i, 1); }\n      else if (!this.jobs.has(id)) moved.splice(i, 1);\n", dropLine = "      if (this.jobs.size) { const held = new Set(this.archive.map((r) => r.id)); for (const [id, j] of this.jobs) if (LS.isSkeleton(j) && held.has(id)) { this.jobs.delete(id); dropped++; } }\n";
+  ok(jsrc.split(guardLine).length === 2 && jsrc.split(dropLine).length === 2, 'B-ef97 control setup: the archive load\'s drop and the sweep\'s guard are each written once');
+  const JG1 = MJ.load('src/jobs.js', jsrc.replace(guardLine, '      if (!this.jobs.has(id)) moved.splice(i, 1); // MUTANT: no guard\n').replace(dropLine, '      // MUTANT: no drop\n'), 'guard');
+  const swx = sweepScene(JG1, 'jobs-triage-skel-sweep-mut');
+  ok(swx.name === 'jb-5ke1e7s1', 'B-ef97 CONTROL (no guard, in a copy): the acknowledged skeleton is archived OVER the real record (its name is gone)', swx);
+  const d12dx = mkDir('jobs-triage-skel-drop-mut');
+  fs.writeFileSync(path.join(d12dx, 'jobs.json'), JSON.stringify([skelRec('jb-5ke1e7d1')])); fs.writeFileSync(path.join(d12dx, 'jobs-archive.json'), JSON.stringify([realArch('jb-5ke1e7d1')]));
+  const DX = new JG1.JobManager({ dataDir: d12dx, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); DX.init();
+  ok(DX.jobs.has('jb-5ke1e7d1'), 'B-ef97 CONTROL (no drop, in a copy): the skeleton of the archived id stays beside its record');
+  DX.shutdown();
+  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'B-ef97 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

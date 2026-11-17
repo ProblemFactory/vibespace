@@ -371,8 +371,9 @@ try {
     await sweepAt(JH3, Date.now()); const afterPass = has(h3Listed) && has(h3Orphan);
     await gcAt(JH3, Date.now());
     ok(afterPass && has(h3Listed) && has(h3Orphan) && setAsides(h3).length === 1, 'A PASS, THEN THE GC: the pass refuses the torn file, the gc sets it aside, and its pass removes nothing');
-    // H4 THE STORE, ACROSS A RESTART: a torn jobs.json (a live service listing a 20-day-old run) → skeletons at boot 1 (never
-    // written back) → boot 2 loads an EMPTY store; its boot pass removes nothing while the set-aside file is there; moved ⇒ resumes
+    // H4 THE STORE, ACROSS A RESTART: a torn jobs.json (a live service listing a 20-day-old run) → skeletons at boot 1, WRITTEN
+    // BACK (B-ef97; the release kept them in memory only and boot 2 loaded an empty store) → boot 2 lists them; its boot pass
+    // removes nothing while the set-aside file is there; moved ⇒ resumes (a skeleton's own dir stays: a record names it)
     const h4 = mkDir('h4'); const s4Ts = Date.now() - 20 * DAY;
     fs.writeFileSync(path.join(h4, 'jobs.json'), `[{"id":"jb-5e7f1ce4","kind":"service","state":"up","runs":[{"startedAt":${s4Ts}},{"startedAt":${Date.now()}`);
     const h4Run = seedRun(h4, 'jb-5e7f1ce4', s4Ts, { ageMs: 20 * DAY });
@@ -382,14 +383,15 @@ try {
     const scItems = IA4.filter((n) => n && n.fact === 'store-corrupt');
     ok(scItems.length === 1 && /old job logs are not cleaned up until that file is moved or deleted/.test(scItems[0].words.key) && /jobs\.json\.corrupt-\d+$/.test(scItems[0].words.params.file), 'ONE CAUSE, ONE ITEM: the torn store\'s own For-you item names the set-aside file and says the clean-up holds');
     A4.shutdown();
+    const h4Orphan = seedRun(h4, 'jb-0e1a0004', Date.now() - 30 * DAY, { ageMs: 30 * DAY });   // after boot 1: no skeleton names it
     const { jm: B4, logs: LB4, items: IB4 } = boot(h4, { bootDelayMs: 20 });
     await until(() => B4._logsState && B4._logsState.last || LB4.some((l) => /HELD/.test(l)), 5000, 10); await settle(B4);
-    ok(B4.jobs.size === 0 && has(h4Run) && LB4.some((l) => /job-logs clean-up HELD: jobs\.json\.corrupt-\d+/.test(l)), 'AFTER A RESTART the store loads empty (no skeletons) — and the boot pass removes NOTHING: the set-aside file is the fact, on disk', { jobs: B4.jobs.size, run: has(h4Run) });
+    ok(B4.jobs.size === 1 && !!(LS && LS.isSkeleton(B4.jobs.get('jb-5e7f1ce4'))) && has(h4Run) && has(h4Orphan) && LB4.some((l) => /job-logs clean-up HELD: jobs\.json\.corrupt-\d+/.test(l)), 'AFTER A RESTART the skeletons are still listed (B-ef97: written back at boot 1) — and the boot pass removes NOTHING: the set-aside file is the fact, on disk', { jobs: B4.jobs.size, run: has(h4Run) });
     ok(heldItems(IB4).length === 0 && IB4.filter((n) => n && n.fact === 'store-corrupt').length === 0, '…and nothing is said twice across the restart (the file\'s item is «said» in the record, written durably)');
     const moved = path.join(tmp, 'moved-by-a-person'); fs.mkdirSync(moved, { recursive: true });
     for (const f of setAsides(h4)) fs.renameSync(path.join(h4, f), path.join(moved, f));
     await sweepAt(B4, Date.now());
-    ok(!has(h4Run) && LB4.some((l) => /job-logs clean-up resumes/.test(l)), 'the file MOVED by a person lifts the hold by itself: the next pass removes what no record lists, and says it resumes');
+    ok(has(h4Run) && !has(h4Orphan) && LB4.some((l) => /job-logs clean-up resumes/.test(l)), 'the file MOVED by a person lifts the hold by itself: the next pass removes what no record lists, and says it resumes');
     // H5 A PARSED ARCHIVE THAT IS NOT A LIST: set aside like a torn one (the release read it as [] and kept no bytes) — held
     const h5 = mkDir('h5'); fs.writeFileSync(path.join(h5, 'jobs-archive.json'), '{"records":[]}');
     const h5Orphan = seedRun(h5, 'jb-0e1a0005', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
