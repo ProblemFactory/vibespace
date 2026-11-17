@@ -61,6 +61,8 @@
 import { t } from './i18n.js';
 import { escHtml, showToast } from './utils.js';
 import { pressVerdict } from './press-arm.js'; // round 4 (#1): what an open moved under the pointer answers nothing for ARM_MS
+/** B-16a9: a view shorter than this (a chat window under ~480 px) draws its strip as the phone's one row (_dockShort) */
+const SHORT_VIEW_PX = 450;
 import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
 import { agoText, boxInUse, endCodeOf, stripWithholds, tickDeadlines } from './user-todos-row.js';
@@ -158,6 +160,7 @@ export class NeedsCards {
     try { this._ctl?.abort(); } catch { }
     try { this._mo?.disconnect(); } catch { }
     try { this._dockRO?.disconnect(); } catch { }
+    try { this._shortRO?.disconnect(); } catch { }
     clearTimeout(this._dockMarkT); // r11: the dock's mark
     this._mo = null;
   }
@@ -520,9 +523,10 @@ export class NeedsCards {
     };
     // lane phone-dock-restore: THE PHONE'S STRIP — folded, a tap anywhere on it (the head, the question, its clock, «View») opens
     // the item; open, the head folds it. Capture: before the row's verbs, a link in the question and the question's landing.
-    // Round 3 (Q2 — the clock beside «View» was a dead zone: it is no row's child): folded, NOTHING on the row is skipped
+    // Round 3 (Q2 — the clock beside «View» was a dead zone: it is no row's child): folded, NOTHING on the row is skipped.
+    // B-16a9: a SHORT view's strip is that row too (`cad-short`, _dockShort) — the same press, the same arm
     dock.addEventListener('click', (ev) => {
-      if (!this.app.isMobile || ev.target.closest('.cad-all')) return;
+      if ((!this.app.isMobile && !dock.classList.contains('cad-short')) || ev.target.closest('.cad-all')) return;
       const open = dock.classList.contains('cad-open'), head = ev.target.closest('.cad-head');
       // round 2 (P1 — measured: «View»'s point was the first chip's, or ✕'s, 150 ms after the tap; only the Allows were armed):
       // what the open put under the finger answers nothing for ARM_MS — EVERY button of the opened item (its chips, ✓, ✕, Deny,
@@ -555,7 +559,7 @@ export class NeedsCards {
       if (ev.key === 'Escape' && dock.classList.contains('cad-open') && !imeOwnsKey(ev)) { ev.preventDefault(); ev.stopPropagation(); this._dockFold(dock, false); return; }
       const q = ev.target;
       if (!(enterSubmits(ev) || (ev.key === ' ' && !imeOwnsKey(ev)))) return;
-      if (this.app.isMobile && (q.classList?.contains('cad-head') || (q.classList?.contains('ut-text') && !dock.classList.contains('cad-open')))) { ev.preventDefault(); this._dockFold(dock, q.classList.contains('cad-head') ? !dock.classList.contains('cad-open') : true); return; } // (the phone's fold)
+      if ((this.app.isMobile || dock.classList.contains('cad-short')) && (q.classList?.contains('cad-head') || (q.classList?.contains('ut-text') && !dock.classList.contains('cad-open')))) { ev.preventDefault(); this._dockFold(dock, q.classList.contains('cad-head') ? !dock.classList.contains('cad-open') : true); return; } // (the phone's fold)
       if (!q.classList?.contains('ut-text') || q.getAttribute('role') !== 'button') return;
       if (!openIt(ev, q)) landIt(ev, q);
     }, { signal: own });
@@ -565,12 +569,19 @@ export class NeedsCards {
     // there): THE ONE ROAD of a strip that changes size — it grew, shrank, went, re-wrapped — is this observer: the announce's
     // stack and the toasts stand clear of it at once (foryouRows.chromeMoved — one move a frame, however many strips)
     if (typeof ResizeObserver === 'function') (this._dockRO = new ResizeObserver(() => { const v = this.view; if (v._pinned && !v._disposed) v._scrollToBottom?.(); this.app.foryouRows?.chromeMoved?.(); })).observe(dock);
+    // B-16a9 (int361 on the .373 cut, the duo's flat 951×585 boot under the runner's DejaVu: the one-column strip's two lines left ONE
+    // message in a 400-px window): A SHORT VIEW'S STRIP IS THE PHONE'S ONE ROW — the head and the newest item's question on one
+    // line, «View» and the door to all of them; a press opens THAT item in place (_dockFold, as on the phone). Read from the
+    // view's own box (its observer's — a pass reads no layout); the dock's own size never moves the view's
+    const host = dock.parentElement;
+    if (typeof ResizeObserver === 'function' && host) (this._shortRO = new ResizeObserver((es) => { const h = es[es.length - 1]?.contentRect?.height; if (h > 0) this._dockShort(dock, h); })).observe(host);
   }
 
   /** lane phone-dock-restore: THE PHONE'S ONE ROW's words and door, each pass (style.css draws the row; a desktop strip never
    *  folds) — the count alone («waiting for you · 3»), the door's short word («All»), the head the row's fold (a door on the
    *  phone only); the opened item gone — nothing waits, a newer one drawn — folds it. */
   _dockStrip(dock, d, entry) {
+    this._dockShort(dock); // B-16a9: a short view's row, asked again with the view's kept height (a box no longer in use folds now)
     if (dock.classList.contains('cad-open') && (!entry || this._dockOpenId !== entry.item.id)) this._dockFold(dock, false);
     // round 2 (P2 — the deadline law: a card with a deadline shows its time left everywhere it renders; the folded row hid it):
     // the row's clock — the item's line's own stamps, its short words («2 min left»; past the end, its state's), counted by THE
@@ -581,7 +592,7 @@ export class NeedsCards {
     if (!entry) return;
     const num = dock.querySelector(':scope > .cad-head > .cad-num'), all = dock.querySelector(':scope > .cad-all'), nw = d ? t('waiting for you · {what}', { what: String(d.n) }) : '';
     if (all.dataset.short !== t('All')) all.dataset.short = t('All');
-    const head = dock.querySelector(':scope > .cad-head'), phone = !!this.app.isMobile, open = String(dock.classList.contains('cad-open'));
+    const head = dock.querySelector(':scope > .cad-head'), phone = !!this.app.isMobile || dock.classList.contains('cad-short'), open = String(dock.classList.contains('cad-open')); // (B-16a9: a short view's row is the phone's)
     if (phone !== (head.getAttribute('role') === 'button')) {
       if (phone) { head.setAttribute('role', 'button'); head.tabIndex = 0; } else { head.removeAttribute('role'); head.removeAttribute('tabindex'); head.removeAttribute('aria-expanded'); }
     }
@@ -595,6 +606,20 @@ export class NeedsCards {
     const said = phone && clock && line && d ? String(d.n) : nw;
     if (num.textContent !== said) num.textContent = said;
     if (said !== nw) { if (head.getAttribute('aria-label') !== nw) head.setAttribute('aria-label', nw); } else if (head.hasAttribute('aria-label')) head.removeAttribute('aria-label');
+  }
+
+  /** B-16a9: a SHORT view (under SHORT_VIEW_PX) folds its strip to the phone's one row — style.css joins `.chat-attn-dock.cad-short`
+   *  to the phone's rules; a taller view, or a phone (its own rule, html[data-vc]), draws it as before. An open item stays open.
+   *  `h` = the view's height from its observer (kept: a pass asks again with it — never a layout read). A box being typed in
+   *  never folds away under the typist (the next pass asks again); a flip asks a pass, so the head's role, keys and words follow */
+  _dockShort(dock, h) {
+    if (h > 0) dock._viewH = h; else h = dock._viewH;
+    if (!(h > 0)) return;
+    const short = !this.app.isMobile && h < SHORT_VIEW_PX;
+    if (dock.classList.contains('cad-short') === short) return;
+    if (short && boxInUse(dock.querySelector(':scope > .cad-rows .ut-reply'))) return;
+    dock.classList.toggle('cad-short', short);
+    this.schedule();
   }
 
   /** lane phone-dock-restore (the owner 2026-11-02 on the iPhone, .373: «等你操作的那个橙色的菜单…占据的显示面积过大» — 390×844: a

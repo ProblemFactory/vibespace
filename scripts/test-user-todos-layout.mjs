@@ -2873,5 +2873,36 @@ console.log('lane mask-value-shape (the owner 2026-11-07, «URL被替换和redac
     }
   } finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }
+console.log('㊳ A SHORT VIEW\'S STRIP IS THE PHONE\'S ONE ROW (B-16a9 — int361 on the .373 cut: the duo\'s flat 951×585 boot under the runner\'s DejaVu, the one-column strip left ONE message in a 400-px window; measured in a standalone Chrome copy of the tree\'s CSS: the duo\'s question 109 px over three lines, 35 px on one)');
+{
+  const J = JSON.stringify, CARD = fs.readFileSync(path.join(ROOT, 'src/lib/chat-needs-card.js'), 'utf8'), ST = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
+  // A — the REAL _dockShort (its source sliced) over a fake dock: a view under the bound folds the strip, a taller one or a phone does not
+  const shortOf = (src) => { const i = src.indexOf('  _dockShort(dock, h) {'), j = src.indexOf('\n  }\n', i), px = Number((src.match(/const SHORT_VIEW_PX = (\d+);/) || [])[1]);
+    if (i < 0 || j < 0 || !(px > 0)) return null;
+    const fn = new Function('SHORT_VIEW_PX', 'boxInUse', `return function (dock, h) {${src.slice(src.indexOf('{', i) + 1, j)}\n};`)(px, (box) => !!(box && box.typing));
+    return (h, { mobile = false, typing = false, again = false } = {}) => { const cls = new Set(); let passes = 0; const box = { typing };
+      const dock = { classList: { contains: (c) => cls.has(c), toggle: (c, on) => (on ? cls.add(c) : cls.delete(c)) }, querySelector: () => box }; const me = { app: { isMobile: mobile }, schedule: () => { passes++; } };
+      fn.call(me, dock, 600); fn.call(me, dock, h); const first = cls.has('cad-short'); if (again) { box.typing = false; fn.call(me, dock); }
+      return again ? [first, cls.has('cad-short'), passes] : cls.has('cad-short'); }; };
+  const S = shortOf(CARD), got = S ? { v400: S(400), v449: S(449), v450: S(450), v600: S(600), phone400: S(400, { mobile: true }), typing: S(400, { typing: true }), after: S(400, { typing: true, again: true }), flips: S(400, { again: true }) } : null;
+  ok(!!got && J(got) === '{"v400":true,"v449":true,"v450":false,"v600":false,"phone400":false,"typing":false,"after":[false,true,1],"flips":[true,true,1]}', `RED-able (B-16a9 — b06f36e90: no short rule, the strip two lines at every height): a view under 450 px folds the strip to one row, 450 and taller do not, a phone keeps its own rule; a box being typed in never folds away — the next pass (the view's kept height, no layout read) folds it once the box is left; each flip asks one pass (the head's role and keys follow) (${J(got)})`, got);
+  const Sx = shortOf(CARD.replace('const short = !this.app.isMobile && h < SHORT_VIEW_PX;', 'const short = false;'));
+  ok(CARD.includes('const short = !this.app.isMobile && h < SHORT_VIEW_PX;') && !!Sx && Sx(400) === false, 'CONTROL (B-16a9): the mutant that never folds leaves a 400-px view\'s strip two lines — the leg goes red');
+  // B — THE WIRING: the view's own box (an observer on the strip's host — a pass reads no layout), let go at stop; the phone row's
+  // press and keys are a short view's too (the same open, the same arm)
+  const wire = { ro: /\(this\._shortRO = new ResizeObserver\(\(es\) => \{ const h = es\[es\.length - 1\]\?\.contentRect\?\.height; if \(h > 0\) this\._dockShort\(dock, h\); \}\)\)\.observe\(host\);/.test(CARD) && /const host = dock\.parentElement;\n\s+if \(typeof ResizeObserver === 'function' && host\) \(this\._shortRO/.test(CARD),
+    stop: /try \{ this\._shortRO\?\.disconnect\(\); \} catch \{ \}/.test(CARD), press: CARD.includes("if ((!this.app.isMobile && !dock.classList.contains('cad-short')) || ev.target.closest('.cad-all')) return;"),
+    keys: CARD.includes("if ((this.app.isMobile || dock.classList.contains('cad-short')) && (q.classList?.contains('cad-head')"), head: CARD.includes("phone = !!this.app.isMobile || dock.classList.contains('cad-short')"),
+    pass: /  _dockStrip\(dock, d, entry\) \{\n    this\._dockShort\(dock\);/.test(CARD) };
+  ok(Object.values(wire).every(Boolean), `the short rule is read from the view's own box and let go at stop; the folded row's press, its keys and its head are a short view's too (${J(wire)})`, wire);
+  // C — ONE ROW, ONE RULE SET: every structural rule of the phone's row (style.css, lane phone-dock-restore — outside the touch
+  // sizes) is JOINED with `.chat-attn-dock.cad-short`, never copied; the touch line height stays the phone's
+  const PRE = 'html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open)', JOIN = ':is(html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock, .chat-attn-dock.cad-short):not(.cad-open)';
+  const OPRE = 'html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open > .cad-head', OJOIN = ':is(html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock, .chat-attn-dock.cad-short).cad-open > .cad-head';
+  const cssOf = (st) => { const lines = st.split('\n'), has = (x) => lines.filter((l) => l.includes(x)).length; return { joined: has(JOIN), bare: has(PRE), touch: lines.filter((l) => l.startsWith('@media (hover: none) and (pointer: coarse) { ' + JOIN)).length, openHead: has(OJOIN), openBare: has(OPRE), openHeight: has('html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open {'), copies: (st.match(/\.chat-attn-dock\.cad-short/g) || []).length }; };
+  const c = cssOf(ST), cBase = cssOf(ST.split(JOIN).join(PRE).split(OJOIN).join(OPRE));
+  ok(c.joined === 19 && c.bare === 0 && c.touch === 1 && c.openHead === 2 && c.openBare === 0 && c.openHeight === 1 && c.copies === 22, `the phone row's 19 rules (its touch line too) and the open item's held head (sticky, its ▾) carry a short view's strip; the open's height stays the phone's (${J(c)})`, c);
+  ok(cBase.joined === 0 && cBase.bare === 19 && cBase.openHead === 0, `CONTROL (B-16a9): the base's rules (unjoined) leave a short view's strip unruled (${J(cBase)}) — the leg goes red`, cBase);
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
