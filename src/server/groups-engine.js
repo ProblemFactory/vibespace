@@ -89,6 +89,8 @@ const TURN_BUDGET = 4096;       // every group report on ONE user turn together
 const MIN_REPORT_ROOM = 320;    // below this a report waits for the next turn rather than arrive as a stub
 const TEXT_MAX = 16 * 1024;
 const LOG_READ = 2000;
+// B-b17f: the boot warm-up reads a group's log in windows this size, each parsed in its own turn of the loop
+const WARM_WINDOW_BYTES = 64 * 1024;
 const READ_MAX = 200;
 const LAST_TEXT_MAX = 160;
 const WAITING_NAMED = 3;        // the trailer names at most this many waiting groups, then counts
@@ -326,7 +328,7 @@ function create({
   const unreadMemo = new Map();   // `${gid}|${who}` → {since, lastAt, n}
   // B-a354: a `mention` member counts only what reaches it (B-a354's rule, read through reachFor) — its mode is part of the memo's facts
   const modeOf = (g, who) => { const m = who === G.OWNER ? null : G.memberOf(g, who); return m ? m.notify : null; };
-  function unreadFor(g, who, since) {
+  function unreadFor(g, who, since, log = null) {   // `log` (B-b17f, the boot warm-up): the group's records already read
     const key = g.id + '|' + who;
     const lastAt = Number(g.lastAt) || 0;
     const mode = modeOf(g, who);
@@ -335,9 +337,16 @@ function create({
     const m = unreadMemo.get(key);
     if (m && m.since === since && m.lastAt === lastAt && m.mode === mode && m.sig === sig) return m.n;
     const take = unreceivedFor(g, who);
-    const n = readLog(g.id).filter((r) => r.at > since && !(r.author && r.author.id === who) && take(r)).length;
+    const n = (log || readLog(g.id)).filter((r) => r.at > since && !(r.author && r.author.id === who) && take(r)).length;
     unreadMemo.set(key, { since, lastAt, mode, sig, n });
     return n;
+  }
+  /** B-b17f: would unreadFor read the log for (g, who, since)? — its own test (the memo's since, lastAt, mode and sig) */
+  function unreadOwed(g, who, since) {
+    const lastAt = Number(g.lastAt) || 0;
+    if (!(lastAt > since)) return false;
+    const mode = modeOf(g, who), sig = mode === 'mention' ? reachSig(g, who) : '', m = unreadMemo.get(g.id + '|' + who);
+    return !(m && m.since === since && m.lastAt === lastAt && m.mode === mode && m.sig === sig);
   }
   function bumpUnread(g, prevLastAt, at, author, rec = null) {
     for (const who of [G.OWNER, ...g.members.map((m) => m.member)]) {
@@ -1825,22 +1834,32 @@ function create({
     for (const mk of marks || []) await markReported(mk.groupId, cid, mk.upTo);
   }
 
-  // warm the unread memo off the boot path, a few groups per turn of the loop
+  // warm the unread memo off the boot path (B-b17f: at 300 groups × 2 000 records the old warm-up held the loop 80–100 ms
+  // per turn for 8 s at every start — four groups per turn, each log read in full once for the owner and once per member).
+  // Now ONE read per group, through the store's ASYNC tail (WARM_WINDOW_BYTES windows, each parsed in its own turn), shared
+  // by the owner and every member; a group is counted only if nothing landed in it during the read (its lastAt and its
+  // cleared index unchanged) — else the next reader counts it, as before the warm-up reached it. A turn between groups.
   (function warm() {
-    let ids = null, i = 0;
-    const step = () => {
-      try {
-        if (!ids) ids = Object.keys(all());
-        for (const end = Math.min(ids.length, i + 4); i < end; i++) {
-          const g = getGroup(ids[i]);
+    const turn = () => new Promise((r) => { const h = setImmediate(r); if (h && h.unref) h.unref(); });
+    const whos = (g) => [[G.OWNER, ownerReadOf(g.id)], ...g.members.map((m) => [m.member, memberSince(m)])];
+    const clearedN = (g) => (g.cleared && typeof g.cleared === 'object' ? Object.keys(g.cleared).length : 0);
+    (async () => {
+      await turn();
+      let ids; try { ids = Object.keys(all()); } catch { return; }
+      for (const id of ids) {
+        try {
+          const g = getGroup(id);
           if (!g) continue;
-          ownerUnread(g);
-          for (const m of g.members) unreadFor(g, m.member, memberSince(m));
-        }
-      } catch { return; }
-      if (i < ids.length) { const h = setImmediate(step); if (h && h.unref) h.unref(); }
-    };
-    const h = setImmediate(step); if (h && h.unref) h.unref();
+          const lastAt = Number(g.lastAt) || 0, cl = clearedN(g);
+          if (!whos(g).some(([who, since]) => unreadOwed(g, who, since))) continue;   // every count known: nothing to read
+          const { records } = await readFoldedAsync(id, { limit: LOG_READ, windowBytes: WARM_WINDOW_BYTES });
+          const now2 = getGroup(id);
+          if (!now2 || (Number(now2.lastAt) || 0) !== lastAt || clearedN(now2) !== cl) continue;
+          for (const [who, since] of whos(now2)) unreadFor(now2, who, since, records);
+        } catch { /* an unreadable log: the next reader counts it */ }
+        await turn();
+      }
+    })().catch(() => { });
   })();
 
   return {

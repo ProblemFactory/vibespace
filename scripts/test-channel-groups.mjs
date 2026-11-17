@@ -79,6 +79,25 @@ const C = 'cccccccc-3333-4000-8000-000000000003';
 const D = 'dddddddd-4444-4000-8000-000000000004';
 const E = 'eeeeeeee-5555-4000-8000-000000000005';
 const T0 = Date.UTC(2026, 8, 22, 10, 0, 0);
+// §3g2's control (B-b17f): the boot warm-up as 2.369.407 shipped it, verbatim
+const OLD_WARM_B17F = `  // warm the unread memo off the boot path, a few groups per turn of the loop
+  (function warm() {
+    let ids = null, i = 0;
+    const step = () => {
+      try {
+        if (!ids) ids = Object.keys(all());
+        for (const end = Math.min(ids.length, i + 4); i < end; i++) {
+          const g = getGroup(ids[i]);
+          if (!g) continue;
+          ownerUnread(g);
+          for (const m of g.members) unreadFor(g, m.member, memberSince(m));
+        }
+      } catch { return; }
+      if (i < ids.length) { const h = setImmediate(step); if (h && h.unref) h.unref(); }
+    };
+    const h = setImmediate(step); if (h && h.unref) h.unref();
+  })();
+`;
 const codeOk = (r) => r && r.ok === false && G.ERROR_CODES.includes(r.code);
 
 console.log('§1 channel-groups (PURE)');
@@ -795,6 +814,101 @@ console.log('§3g the owner\'s unread is NOT re-read from every log on every bro
   const after = f.eng.listFor(B).filter((g) => rep.marks.some((mk) => mk.groupId === g.id));
   ok(after.length > 0 && after.every((g) => g.unread === truth(g.id, B, f.store.groups.live().groups[g.id].members.find((x) => x.member === B).reportedUpTo)), 'after a report commits, the member\'s counts follow its marker');
   f.close();
+}
+
+console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the loop, in windows — nothing counted stale');
+{ // the hub's start over a store of groups with long logs (the row: 300 groups × 2 000 records held the loop 80–100 ms a
+  // turn for 8 s — four groups a turn, each log read in full for the owner and again per member). Judged by its MECHANISM
+  // (counts, never a clock): the sync reads, the async reads and their window, the counts against a from-scratch count,
+  // a record that lands while a group's log is read
+  const NG = 12, NR = 400, WIN = 64 * 1024;
+  const f = fixture('e7warm');
+  const ids = [];
+  for (let i = 0; i < NG; i++) { const g = await f.eng.create({ by: A, name: `warm ${i}`, members: [B, C], quiet: true }); ids.push(g.group.id); }
+  const AT = T0 + 1e9, authors = [A, B, C];
+  for (const gid of ids) f.store.appendRecords('groups', gid, Array.from({ length: NR }, (_, k) => ({ adapterId: 'groups', convId: gid, vendorId: `gm-w${k.toString(36)}`, at: AT + k, author: { id: authors[k % 3], name: 'm', isSelf: false, isBot: false }, text: `a warm-up record of an ordinary length, a path /srv/work/p and a sha 0123456789 — ${k}`, mentions: [], raw: { kind: 'message' } })));
+  await f.store.groups.update((gr) => { for (const gid of ids) gr.groups[gid].lastAt = AT + NR - 1; });
+  const dataDir = f.dataDir, roster = f.roster;
+  f.close();
+  const truth = (st, gid, who, since) => st.readTail('groups', gid, { limit: 5000 }).filter((r) => r.at > since && ((r.raw && r.raw.kind) || 'message') === 'message' && !(r.author && r.author.id === who)).length;
+  const sinceOf = (st, gid, who) => { const m = st.groups.live().groups[gid].members.find((x) => x.member === who); return Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : m.joinedAt - 1; };
+  const boot = (ge, midRead = null) => {
+    const st = createChannelStore({ dir: path.join(dataDir, 'channels') });
+    const seen = { sync: 0, async: [], done: 0 }, rt = st.readTail, rta = st.readTailAsync;
+    const b = { st, seen, eng: null, spyOff: () => { st.readTail = rt; } };
+    st.readTail = (...a) => { seen.sync++; return rt.apply(st, a); };
+    st.readTailAsync = async (ad, gid, o) => { seen.async.push({ gid, windowBytes: o && o.windowBytes }); try { const r = await rta.call(st, ad, gid, o); if (midRead) await midRead(b, gid); return r; } finally { seen.done++; } };
+    b.eng = ge.create({ store: st, deliver: null, broadcast() {}, now: () => Date.now(), roster: () => roster, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
+    return b;
+  };
+  // the warm-up has ENDED its reads: every async read FINISHED (its spy's finally), or the sync reads counted — then turns for its last count
+  const settle = async (b, want) => { for (let k = 0; k < 400 && b.seen.done + b.seen.sync < want; k++) await new Promise((r) => setTimeout(r, 5)); for (let k = 0; k < 5; k++) await new Promise((r) => setImmediate(r)); };
+  // (a) THE WARM-UP: no sync read; ONE async read per group (the owner and both members counted from it), in 64 KB windows
+  const b1 = boot(GE);
+  await settle(b1, NG);
+  const wins = [...new Set(b1.seen.async.map((x) => x.windowBytes))];
+  ok(b1.seen.sync === 0 && b1.seen.async.length === NG && new Set(b1.seen.async.map((x) => x.gid)).size === NG && wins.length === 1 && wins[0] === WIN,
+    `§3g2 the warm-up read ${NG} groups' logs (${NR} records each): ${b1.seen.async.length} async read(s), one per group, in ${wins.join(',')} B windows; ${b1.seen.sync} sync read(s)`);
+  // (b) after it, list() + listFor() read NO log, and every count is the from-scratch count
+  const lst = b1.eng.list(), lfB = b1.eng.listFor(B), reads = b1.seen.sync;
+  b1.spyOff();
+  const bad = [];
+  for (const g of lst) { const want = truth(b1.st, g.id, G.OWNER, 0); if (g.unread !== want) bad.push(`owner ${g.id}:${g.unread}≠${want}`); }
+  for (const g of lfB) { const want = truth(b1.st, g.id, B, sinceOf(b1.st, g.id, B)); if (g.unread !== want) bad.push(`B ${g.id}:${g.unread}≠${want}`); }
+  ok(reads === 0 && bad.length === 0 && lst.length === NG && lst.every((g) => g.unread > 0),
+    `§3g2 then list() + listFor() read ${reads} log(s); every count (the owner's and a member's) = the from-scratch count`, bad.slice(0, 4).join(' '));
+  b1.st.close();
+  // (c) A RECORD LANDS WHILE A GROUP'S LOG IS READ (after its bytes were read): that group is not counted from the read. The
+  // post's own broadcast recounts the OWNER's count; a MEMBER's is recounted by nobody — the warm-up would keep it stale
+  const late = ids[3];
+  const posted = [];
+  const landed = async (b, gid) => { if (gid === late) posted.push(await b.eng.post({ group: late, from: A, text: 'landed during the warm-up read' })); };
+  const memberCount = (b, who = B) => { const g = b.eng.listFor(who).find((x) => x.id === late); return { got: g && g.unread, want: truth(b.st, late, who, sinceOf(b.st, late, who)) }; };
+  const b2 = boot(GE, landed);
+  await settle(b2, NG);
+  const c2 = memberCount(b2), c2c = memberCount(b2, C);
+  ok(posted.length === 1 && posted[0] && posted[0].ok && c2.got === c2.want && c2c.got === c2c.want && c2.want > 0,
+    `§3g2 a post that lands during the group's read (posted: ${posted[0] && posted[0].ok}): the members' counts ${c2.got} / ${c2c.got} = the from-scratch ${c2.want} / ${c2c.want}`);
+  b2.st.close();
+  // CONTROLS (patched copies): the old warm-up; the new one without the «nothing landed» check
+  const MUTWU = mutantCopies('chan-groups-warm', REPO);
+  const geSrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf8');
+  const start = geSrc.indexOf('  // warm the unread memo off the boot path'), end = geSrc.indexOf('  })();\n', start) + '  })();\n'.length;
+  const b3 = boot(MUTWU.load('src/server/groups-engine.js', geSrc.slice(0, start) + OLD_WARM_B17F + geSrc.slice(end), 'oldwarm'));
+  await settle(b3, NG * 2);
+  ok(start > 0 && b3.seen.sync >= NG * 2 && b3.seen.async.length === 0, `CONTROL (the old warm-up): ${b3.seen.sync} SYNC reads of whole logs on the loop for ${NG} groups (the owner and each member apiece, four groups a turn) ⇒ RED`);
+  b3.st.close();
+  const noCheck = geSrc.replace("          if (!now2 || (Number(now2.lastAt) || 0) !== lastAt || clearedN(now2) !== cl) continue;\n", "          if (!now2) continue;\n");
+  const b4 = boot(MUTWU.load('src/server/groups-engine.js', noCheck, 'nolanded'), landed);
+  await settle(b4, NG);
+  const c4 = memberCount(b4), c4c = memberCount(b4, C);
+  ok(noCheck !== geSrc && posted.length === 2 && posted[1] && posted[1].ok && (c4.got === c4.want - 1 || c4c.got === c4c.want - 1),
+    `CONTROL (no «nothing landed» check): a member's count ${c4.got} / ${c4c.got} ≠ the from-scratch ${c4.want} / ${c4c.want} — the landed post missing from a kept count ⇒ RED`);
+  // (d) A MODE CHANGE WITH NO RECORD (setNotify, before the warm-up reaches the group): every count of the group memoised
+  // first, then a member's mode moves mention → next-turn. Its count is read from the log, never memoised 0 over an empty one
+  // (the first cure's freshness test read since + lastAt only). The group is the warm-up's LAST: it meets the change
+  const g5 = ids[NG - 1];
+  const modeTo = async (mode) => { const st = createChannelStore({ dir: path.join(dataDir, 'channels') }); await st.groups.update((gr) => { gr.groups[g5].members.find((x) => x.member === B).notify = mode; }); st.close(); };
+  const modeScene = async (ge) => {
+    await modeTo('mention');
+    const b5 = boot(ge);
+    b5.eng.list(); for (const who of [A, B, C]) b5.eng.listFor(who);   // every count memoised before the warm-up's first turn
+    // the state setNotify leaves (a mode moved, no record), set in the same turn — before the warm-up's first turn, so it
+    // meets every group with the change in place (an awaited setNotify would race the warm-up's turns)
+    const mB = b5.st.groups.live().groups[g5].members.find((x) => x.member === B);
+    const was = mB.notify; mB.notify = 'next-turn';
+    await settle(b5, 0);
+    for (let k = 0; k < NG * 3; k++) await new Promise((r) => setImmediate(r));   // the warm-up's turns, one per group
+    const got = (b5.eng.listFor(B).find((x) => x.id === g5) || {}).unread, want = truth(b5.st, g5, B, sinceOf(b5.st, g5, B));
+    b5.st.close();
+    return { ok: was === 'mention', got, want };
+  };
+  const d1 = await modeScene(GE);
+  ok(d1.ok && d1.want > 0 && d1.got === d1.want, `§3g2 a member's mode moved (mention → next-turn, no record) after its count was memoised, before the warm-up reached the group: its count ${d1.got} = the from-scratch ${d1.want}`);
+  const firstCure = geSrc.replace("          if (!whos(g).some(([who, since]) => unreadOwed(g, who, since))) continue;   // every count known: nothing to read\n",
+    "          if (!whos(g).some(([who, since]) => { const m = unreadMemo.get(g.id + '|' + who); return lastAt > since && !(m && m.since === since && m.lastAt === lastAt); })) { for (const [who, since] of whos(g)) unreadFor(g, who, since, []); continue; }\n");
+  const d2 = await modeScene(MUTWU.load('src/server/groups-engine.js', firstCure, 'firstcure'));
+  ok(firstCure !== geSrc && d2.ok && d2.got === 0 && d2.want > 0, `CONTROL (the first cure: fresh by since + lastAt, an empty log handed in): the count ${d2.got} ≠ the from-scratch ${d2.want} — a zero memoised ⇒ RED`);
 }
 
 console.log('§3h the owner routes: a consent echo, and paced when auth is OFF (r2 finding 2)');
