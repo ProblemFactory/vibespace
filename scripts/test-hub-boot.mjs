@@ -242,7 +242,9 @@ for (const bad of ['/tmp', os.homedir(), path.join('/tmp', String(undefined))]) 
   const { seen: seenE } = readsOf(() => {
     for (const [end, fn] of [['endRooted', () => HB.endRooted(bad, { kill: (p) => recE.push(p) })], ['endHub', () => HB.endHub({ pid: a1.hub.pid, starttime: a1.hub.starttime, root: bad, kill: (p) => recE.push(p) })], ['finishRoot', () => HB.finishRoot(bad)]]) {
       let msg = ''; try { fn(); } catch (e) { msg = String(e.message); }
-      ok(new RegExp(`^hub-boot: ${end} refuses root `).test(msg) && /it is (?:the temp folder|a home|inside a home|a folder holding|no root the helper mints)/.test(msg), `${end} refuses ${bad} by name — ${msg.replace(/^hub-boot: /, '').slice(0, 90)}`);
+      // the NAME is the start's own for THIS layout (in a checkout directly under /tmp, /tmp is the folder holding it, named first)
+      const want = HB.refusalOf(bad) || 'no root the helper mints';
+      ok(msg.startsWith(`hub-boot: ${end} refuses root ${JSON.stringify(bad)} — it is ${want}`), `${end} refuses ${bad} by name — ${msg.replace(/^hub-boot: /, '').slice(0, 90)}`, msg);
     }
   });
   ok(!recE.length && !seenE.some((f) => (f.includes('/proc') && f !== '/proc/self/mountinfo') || f.startsWith('rm ')), `…and for ${bad} no process was read (only the helper's own mount table, for the refusal), nothing removed, nothing signalled`, { recE, seen: seenE.slice(0, 5) });
