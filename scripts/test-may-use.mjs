@@ -18,6 +18,10 @@
 //   ⑥ THE COST (主开发's law): 200 000 channel conversation rows and a few hundred grants — the whole answer under BUDGET_MS of
 //      the loop, the time PRINTED; the channel part never walks the conversations (a counting index proves it)
 //   ⑦ the route: an agent's / a job's bearer is refused human_only (THE person verdict), the page's own request answered
+//   ⑨–⑬ CURE r1 (主开发 22:28Z): MUST 1 the door's per-entry rule (an everyone-except-its-group account it ticked is its OWN
+//      tick — RED: the whole-row rule), MUST 2 «may request» is its own answer (RED: a lister that drops the level), MUST 3 exits
+//      and windows never cut, SHOULD e a 「除了」 said behind three granted rows + sums of the granted only, SHOULD a a stopped
+//      conversation from the KEPT rows inside the budget (a sweep only when none; paused said), SHOULD b an untick says why
 //   ⑧ THE FORM'S ROWS BYTE FOR BYTE: src/lib/may-use-rows.js renders what the released form's closures rendered (a frozen copy of
 //      2.369.407's, scripts/fixtures/may-use/) over the same rows — the lift changed no byte
 import path from 'node:path';
@@ -54,7 +58,7 @@ console.log('— ① THE MODEL: the owner\'s order, by what, the two target door
   const keys = v.kinds.find((k) => k.kind === 'keys').rows;
   ok(keys.length === 1 && keys[0].state === 'excepted' && keys[0].except.kind === 'group', '① a 「除了」 is listed (and names the exception); a plain «not granted» is not', keys);
   ok(v.kinds.find((k) => k.kind === 'vault').use[0].state === 'unknown', '① its Task Groups unreadable ⇒ the row says UNKNOWN, never «none»');
-  const many = M.viewOf({ answers: Array.from({ length: 40 }, (_, i) => A('window', 'w' + String(i).padStart(2, '0'), { ok: true, via: 'everyone' })) }).kinds.find((k) => k.kind === 'windows');
+  const many = M.viewOf({ answers: Array.from({ length: 40 }, (_, i) => A('automation-key-use', 'k' + String(i).padStart(2, '0'), { ok: true, via: 'everyone' })) }).kinds.find((k) => k.kind === 'keys');   // (windows and exits are never cut — ⑪)
   ok(many.rows.length === M.NAMED_MAX && many.more === 40 - M.NAMED_MAX, `① a list that can run to hundreds: ${M.NAMED_MAX} by name and the COUNT of the rest (no «show more»)`, { n: many.rows.length, more: many.more });
   const sh = M.viewOf({ facts: { noAgent: true }, answers: [A('exit', 'h1:use', { ok: true, via: 'everyone' })] });
   ok(JSON.stringify(sh.kinds.map((k) => k.kind)) === '["sessions","builtins"]' && sh.facts.noAgent, '① a Terminal with no agent: no resource lists (the form\'s one sentence is the page\'s)', sh.kinds.map((k) => k.kind));
@@ -246,6 +250,88 @@ console.log('— ⑧ THE FORM\'S ROWS, BYTE FOR BYTE: the shared renderers draw 
   const form = fs.readFileSync(path.join(REPO, 'src/lib/new-session-form.js'), 'utf8');
   ok(/const prov = provRow;/.test(form) && /const acc = \(r\) => accLine\(r, !!this\._ns\.open\[r\.key\]\);/.test(form) && /grantedAccountHtml\(r, \{/.test(form) && /tickAccountHtml\(r, \{ ticked, words: \[t\('Written into the channel assignment at create/.test(form) && !/const doorBtn = \(door, label/.test(form),
     '⑧ the form draws through the shared module (no twin left in new-session-form.js)');
+}
+
+console.log('— ⑨ CURE r1 MUST 1 — THE DOOR\'S RULE, entry by entry: an account shared with every agent EXCEPT a Task Group, the conversation in that group, ticked for it by the owner');
+const ACL9 = require(path.join(REPO, 'src/channel-acl.js'));
+function sceneRig(accessMod = null) {
+  const store = GS.create({ memory: true });
+  const set = (door, res, to, except = []) => { const w = store.set(door, res, { to, except }, 'user'); if (!w.ok) throw new Error(`${door} ${res}: ${w.code} ${w.error || ''}`); };
+  set('channel-reach', 'account:a1', [{ kind: 'everyone', authority: 'draft' }, { kind: 'conversation', key: 'c1', authority: 'draft' }], [{ kind: 'group', id: 'gL' }]);
+  set('channel-reach', 'conversation:a1/r9#user', [{ kind: 'group', id: 'gL', level: 'requestable' }]);
+  const CG = ChannelsGrants.create({ grants: store });
+  const adapters = [{ id: 'a1', kind: 'gmail', label: 'Shared mail', enabled: true }];
+  const live = { 'a1/r9': { adapterId: 'a1', convId: 'r9', title: 'Board thread' } };
+  const ctx = { store: { index: { live: () => live, table: () => ({}), peek: (k) => live[k] } }, adapterRecords: () => ({ adapters }), registry: { get: () => ({ reach: 'grants' }) }, humanNameOf: (rec, en) => en.title, CG, log: () => { } };
+  return { CG, access: (accessMod || ChannelsAccess).create(ctx) };
+}
+const FACTS9 = { cid: 'c1', conversationKeys: ['c1'], groupIds: ['gL'], groupsUnreadable: false };
+{
+  const { CG, access } = sceneRig();
+  const r = access.mayUseFor(FACTS9);
+  const a1 = r.accounts.find((a) => a.id === 'a1');
+  const door = CG.accountGrants('a1').some((g) => ACL9.principalApplies({ kind: 'agent', id: 'c1', groups: ['gL'] }, g) && ACL9.canSee(g.level));
+  ok(door === true, '⑨ (the door itself — channel-acl over the account\'s grants, each entry its own 「除了」 — admits the conversation: its OWN entry carries no exception)');
+  ok(a1 && a1.state === 'own' && a1.own && !a1.granted, '⑨ the section agrees with the door: the account is its OWN tick (ticked — the everyone grant leaves its group out, its own entry does not)', a1);
+  const MC = mutantCopies('may-use-r1', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8');
+  const cut = "const accessNamed = (res) => (cid ? CG.accessOf(res).filter((r) => F.rowNames(r, ctx)) : []);";
+  ok(src.split(cut).length === 2, '⑨ (the door\'s per-entry check is there once)');
+  const whole = src.replace(cut, "const accessNamed = (res) => { const r = CG.rowOf(CG.DOORS.reach, res); const v = require('../grant-model.js').admits([{ door: 'channel-reach', resource: res, to: r.to, except: r.except }], RF); return v.ok ? CG.accessOf(res) : []; };");
+  const mod = require(MC.write('src/server/channels-access.js', whole, 'whole-row'));
+  const red = sceneRig(mod).access.mayUseFor(FACTS9).accounts.find((a) => a.id === 'a1');
+  ok(red && red.state === 'excepted', '⑨ RED CONTROL: the whole-row rule (the row\'s 「除了」 applied to the conversation\'s own entry — r0\'s) says «left out», against the door', red);
+  console.log('— ⑩ CURE r1 MUST 2 — «MAY REQUEST» IS NOT «MAY SEE»');
+  const r9 = r.answers.find((x) => x.resource === 'conversation:a1/r9');
+  const g9 = CG.conversationGrants('a1/r9').find((g) => ACL9.principalApplies({ kind: 'agent', id: 'c1', groups: ['gL'] }, g));
+  ok(g9 && !ACL9.canSee(g9.level) && ACL9.canRequest(g9.level), '⑩ (the door: its Task Group may only REQUEST «Board thread» — canSee false, canRequest true)');
+  ok(r9 && r9.ok && r9.request === true && r9.name === 'Board thread', '⑩ the lister answers it as a REQUEST (its own answer), never as a conversation it may see', r9);
+  const v9 = M.viewOf({ answers: r.answers, accounts: r.accounts }).kinds.find((k) => k.kind === 'channels').accounts[0].chats[0];
+  ok(v9 && v9.state === 'request', '⑩ the view keeps it apart: state «request» (the page words it «may ask for it»), never «ok»', v9);
+  const cutL = "const sees = hits.filter((x) => ACL.canSee(x.level)), asks = hits.filter((x) => ACL.canRequest(x.level));";
+  ok(src.split(cutL).length === 2, '⑩ (the level split is there once)');
+  const nolevel = require(MC.write('src/server/channels-access.js', src.replace(cutL, 'const sees = hits, asks = [];'), 'no-level'));
+  const red9 = sceneRig(nolevel).access.mayUseFor(FACTS9).answers.find((x) => x.resource === 'conversation:a1/r9');
+  ok(red9 && red9.ok && !red9.request, '⑩ RED CONTROL: a lister that drops the level lists it as one it may SEE (r0\'s false answer)', red9);
+  for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2, label: '⑨⑩ ' })) ok(c.pass, c.name, c.detail);
+}
+
+console.log('— ⑪ CURE r1 MUST 3 + SHOULD e — no count without a door; a 「除了」 is said even behind three granted rows');
+{
+  const wins = Array.from({ length: 40 }, (_, i) => A('window', 'w' + String(i).padStart(2, '0'), { ok: true, via: 'everyone' }));
+  const exits = Array.from({ length: 12 }, (_, i) => A('exit', `h${i}:use`, { ok: true, via: 'everyone' }));
+  const v = M.viewOf({ answers: [...wins, ...exits] });
+  const W = v.kinds.find((k) => k.kind === 'windows'), X = v.kinds.find((k) => k.kind === 'exits');
+  ok(W.rows.length === 40 && W.more === 0 && W.uncut && X.rows.length === 12 && X.more === 0 && JSON.stringify(M.UNCUT) === '["exits","windows"]',
+    '⑪ exits and windows have no window that lists them whole: they are NEVER cut (every row drawn, no «N more» that opens nothing)', { w: W.rows.length, x: X.rows.length });
+  const keys = [...Array.from({ length: 5 }, (_, i) => A('automation-key-use', 'k' + i, { ok: true, via: 'everyone' })), A('automation-key-use', 'kx1', { ok: false, code: 'excepted', except: { kind: 'group', id: 'g1' } }), A('automation-key-use', 'kx2', { ok: false, code: 'groups_unreadable' })];
+  const K = M.viewOf({ answers: keys }).kinds.find((k) => k.kind === 'keys');
+  ok(K.rows.length === 5 && K.rows.filter((r) => r.state === 'ok').length === 3 && K.rows.some((r) => r.resource === 'kx1' && r.state === 'excepted') && K.rows.some((r) => r.resource === 'kx2') && K.more === 2 && K.moreOut === 0,
+    '⑪ five granted keys and two left out: three granted by name + BOTH left-out rows said (each standing bounded on its own), the rest of the granted counted', K);
+  const sec = fs.readFileSync(path.join(REPO, 'src/lib/may-use-section.js'), 'utf8');
+  ok(/granted\(br\.profiles\) \+ br\.profilesMore/.test(sec) && /granted\(va\.use\) \+ va\.useMore/.test(sec) && /n: granted\(k\.rows\) \+ \(k\.more \|\| 0\)/.test(sec) && /k\.uncut \? '' : moreOf\(k, door\)/.test(sec),
+    '⑪ the sums count the GRANTED rows only (the browser, the vault, the keys — never a left-out or unknown one); an uncut kind draws no count');
+  ok(!/if \(!g\) return;|if \(!access\) return;/.test(sec) && /its access list could not be read/.test(sec) && /has no tick of this conversation’s own to take back/.test(sec), '⑬ SHOULD b: an untick that does nothing SAYS why (the access list unreadable; no tick of its own there) — no silent return');
+}
+
+console.log('— ⑫ CURE r1 SHOULD a — a STOPPED conversation: the rows the sessions route kept, inside the budget; a sweep only when none; paused said');
+{
+  const kept = Array.from({ length: 20000 }, (_, i) => ({ sessionKey: `claude:k${i}`, backend: 'claude', backendSessionId: `k${i}`, cwd: `/w/${i % 40}`, status: 'stopped' }));
+  let sweeps = 0;
+  const mk = (mode) => MU.create({ activeSessions: new Map(), sessionKeyOf: () => '', addressableId: () => null,
+    storedRow: (key) => (mode === 'kept' ? kept.find((r) => r.sessionKey === key) || null : mode === 'paused' ? { paused: true } : (sweeps++, Promise.resolve(kept.find((r) => r.sessionKey === key) || null))),
+    groupsOf: () => [], noAgentOf: () => false, doors: {}, log: () => { } });
+  const times = [];
+  for (let i = 0; i < 7; i++) { const r = await mk('kept').viewFor('claude:k19999'); times.push(r.ms.total); if (i === 0) ok(r.ok && !r.view.facts.live && r.ms.facts !== null && r.ms.swept === false, '⑫ a stopped conversation found in the KEPT rows (no sweep): its facts\' own lookup is timed into the answer', r.ms); }
+  times.sort((a, b) => a - b);
+  console.log(`    a stopped conversation, the last of 20 000 kept rows: median ${times[3].toFixed(2)} ms of the loop (the facts' lookup included)`);
+  ok(times[3] < MU.BUDGET_MS, `⑫ inside the budget (median ${times[3].toFixed(2)} ms < ${MU.BUDGET_MS})`, times);
+  const sw = await mk('none').viewFor('claude:k5');
+  ok(sw.ok && sweeps === 1 && sw.ms.swept === true, '⑫ a sweep runs ONLY when the route kept no rows (once, its wait not counted as the loop\'s)', { sweeps, ms: sw.ms });
+  const pa = await mk('paused').viewFor('claude:k5');
+  ok(!pa.ok && pa.code === 'list_paused' && /paused/.test(pa.error), '⑫ discovery paused and nothing kept ⇒ said by name (list_paused), never a sweep', pa);
+  const wiring = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  ok(/const k = S\.keptSessions\(\);/.test(wiring) && /if \(k\.rows\) return find\(k\.rows\); if \(k\.paused\) return \{ paused: true \};/.test(wiring), '⑫ the wiring reads the sessions route\'s keptSessions() first (routes/sessions)');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

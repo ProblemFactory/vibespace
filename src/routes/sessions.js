@@ -682,6 +682,7 @@ function setup(ctx) {
   // the boot phase's `sessions-index` step (src/server/boot-phase.js): the FIRST sweep runs at boot, not on the first
   // page's request — a page that reloads into a fresh server finds it cached (or joins it in flight)
   const discoveryPaused = () => { try { return !!(ctx.paused && ctx.paused('discovery')); } catch { return false; } };
+  _keptRead = () => ({ rows: _sessionsCache ? _sessionsCache.sessions : null, paused: discoveryPaused() });
   _warmSweep = () => {
     if (!_sweepInFlight) _sweepInFlight = _runSessionsSweep().finally(() => { _sweepInFlight = null; });
     return _sweepInFlight;
@@ -783,6 +784,7 @@ function warmthDiff(activeSessions, factsOf, now = Date.now()) {
 }
 
 let _warmSweep = null;
+let _keptRead = null;   // unit what-it-may-use (cure r1, SHOULD a): the rows the last sweep KEPT, and whether discovery is paused — read, never a new sweep
 let _heldRows = null;
 let _sweptStopped = null;   // B-a5a4 follow-up r2: the last sweep's stopped rows AS DISCOVERED (heldAccountOfNow merges the kept copies into them)
 /** B-a5a4 follow-up r3: the sweep's merge AND what it hands the seam — the stopped rows AS DISCOVERED (copies), then the kept
@@ -865,4 +867,4 @@ async function boundElsewhereOf(backend, id, accountId, opts = {}) {
 /** B-a5a4 (1): a resume whose stored account is gone → {refuse} for an account-bound harness, else null (degrade, said). */
 const acctGoneOf = (backend) => (accountBoundOf(backend) ? { refuse: ACCT_GONE_BOUND } : null);
 
-module.exports = { router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+module.exports = { router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

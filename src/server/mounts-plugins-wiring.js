@@ -1594,7 +1594,10 @@ function createSessionMessages(session, sessionId) {
     const later = () => { try { return (typeof mayUseDoors === 'function' ? mayUseDoors() : null) || {}; } catch { return {}; } };
     const mayUse = require('./may-use.js').create({
       activeSessions, sessionKeyOf: (s, id) => (sessionStatusKey ? sessionStatusKey(s, id) : ''), addressableId: (s) => require('../claude-lock-capture.js').addressableId(s),
-      storedRow: async (key) => (((await require('../routes/sessions').warmSessions()) || {}).sessions || []).find((x) => x && x.sessionKey === key) || null,
+      // a stopped conversation: the rows the sessions route already KEPT (no new sweep per read — cure r1, SHOULD a); a sweep only
+      // when it kept none, never while discovery is paused (then said by name)
+      storedRow: (key) => { const S = require('../routes/sessions'); const k = S.keptSessions(); const find = (rows) => (rows || []).find((x) => x && x.sessionKey === key) || null;
+        if (k.rows) return find(k.rows); if (k.paused) return { paused: true }; return S.warmSessions().then((r) => find(r && r.sessions)); },
       groupsOf: (q) => { const tasks = getTasks ? getTasks() : null; if (!tasks) throw new Error('the Task Group store is not ready'); return tasks.groupsForSession(q); },
       noAgentOf: (b) => !!require('../backend-caps.js').capsOf(b).terminalOnly,
       browserKeyOf: (cid) => { bindingsMemo = bindingsMemo || require('./browser-bindings.js').create({ dataDir: path.join(rootDir, 'data'), log: console }); return bindingsMemo.lookup(String(cid)) || ''; },

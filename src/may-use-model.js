@@ -13,7 +13,9 @@
  * vault-use-grant useVerdict, vault-job approvedBy) — answers ANSWER ROWS, and this module only orders, groups, bounds and
  * names them:
  *   answer = { door, resource, name, ok, via, groupId?, except?, code?, detail?, parent? }
- *     ok true  ⇒ `via` is the door's own word for how it admits (normalised by VIA — a spelling map, never a test)
+ *     ok true  ⇒ `via` is the door's own word for how it admits (normalised by VIA — a spelling map, never a test);
+ *                `request: true` ⇒ it may only ASK for it (a channel reach row at level «may request» — cure r1, MUST 2):
+ *                its own state, never «may use»
  *     ok false ⇒ `code` excepted (a 「除了」 took it out: `except` names it) | groups_unreadable (its Task Groups could not be
  *                read: UNKNOWN, never «none») | unknown_shape (the door cannot read the row) | vault_locked; any other refusal
  *                is «not granted» and is never listed
@@ -21,11 +23,14 @@
  * TWO DOORS ARE NOT SHOWN (NOT_SHOWN): automation-key-reach and group-visibility judge this conversation as a TARGET (which
  * conversations a key may act on; how far a group shows its members to outside agents) — «who may reach it», a later unit.
  *
- * viewOf({ facts, answers, accounts }) → { facts, kinds: [{ kind, rows, more, unknown }] } in THE OWNER'S ORDER (KINDS:
- * sessions, channels first among the resources, browser, vault, keys, exits, windows, the built-ins last). A kind that can
- * run to hundreds shows NAMED_MAX rows by name and the count of the rest (`more`) — the door to the resource's own window
- * is the page's; there is no «show more».
- * Gate: scripts/test-may-use-model.mjs (fast; its red control: a row the door admits and the view omits).
+ * viewOf({ facts, answers, accounts }) → { facts, kinds: [{ kind, rows, more, moreRequest, moreOut }] } in THE OWNER'S ORDER
+ * (KINDS: sessions, channels first among the resources, browser, vault, keys, exits, windows, the built-ins last). A list
+ * that can run to hundreds shows NAMED_MAX rows of each standing by name — what it may use, what it may ask for, what a
+ * 「除了」 takes out or cannot be judged (cure r1, SHOULD e: a row left out is SAID even when three granted rows come
+ * first) — and the COUNT of the rest of each (`more` / `moreRequest` / `moreOut`), the door to the resource's own window
+ * being the page's; there is no «show more». A kind with no window that lists it whole is never cut (UNCUT — cure r1,
+ * MUST 3: exits and windows — no window lists every machine's exit or every shared window).
+ * Gate: scripts/test-may-use.mjs (fast; its red control: a row the door admits and the view omits).
  */
 const KINDS = Object.freeze(['sessions', 'channels', 'browser', 'vault', 'keys', 'exits', 'windows', 'builtins']);
 const DOOR_KIND = Object.freeze({
@@ -40,6 +45,8 @@ const NOT_SHOWN = Object.freeze({
 });
 /** How many rows of one list are named before the rest is a count (single channel conversations, vault entries, windows…). */
 const NAMED_MAX = 3;
+/** The kinds no window lists whole — never cut (a count with no door opens nothing). */
+const UNCUT = Object.freeze(['exits', 'windows']);
 /** The doors' own words for HOW a row admits → one spelling (browser-profiles says own / conversation / task / all,
  *  exit-reach session / group / everyone, window-reach session / self-open / group / everyone, the model conversation /
  *  group / everyone). */
@@ -55,18 +62,25 @@ function rowOf(a) {
   if (a.ok === true) {
     const via = VIA[str(a.via)] || null;
     if (!via) return { ...base, state: 'unknown', code: 'unknown_shape' };   // a door word this release does not know is said, never guessed
-    return { ...base, state: 'ok', via, ...(via === 'group' && a.groupId ? { groupId: str(a.groupId) } : {}) };
+    return { ...base, state: a.request === true ? 'request' : 'ok', via, ...(via === 'group' && a.groupId ? { groupId: str(a.groupId) } : {}) };
   }
   if (!LISTED_REFUSALS.includes(a.code)) return null;
   if (a.code === 'excepted') return { ...base, state: 'excepted', ...(a.except && typeof a.except === 'object' ? { except: { kind: a.except.kind === 'group' ? 'group' : 'conversation', id: str(a.except.id || a.except.key) } } : {}) };
   return { ...base, state: 'unknown', code: a.code };
 }
-/** The order inside one list: its own, then a Task Group's, then everyone's; then the ones a 「除了」 takes out; the unknown
- *  last — each by name. */
-const rankOf = (r) => (r.state === 'ok' ? RANK[r.via] : r.state === 'excepted' ? 3 : 4);
+/** The order inside one list: its own, then a Task Group's, then everyone's; then what it may only ask for; then the ones a
+ *  「除了」 takes out; the unknown last — each by name. */
+const rankOf = (r) => (r.state === 'ok' ? RANK[r.via] : r.state === 'request' ? 3 : r.state === 'excepted' ? 4 : 5);
 function byRank(a, b) { return rankOf(a) - rankOf(b) || (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : 0) || (a.resource < b.resource ? -1 : a.resource > b.resource ? 1 : 0); }
-/** First NAMED_MAX by name, the rest counted. */
-function bounded(rows, max = NAMED_MAX) { const s = rows.slice().sort(byRank); return { rows: s.slice(0, max), more: Math.max(0, s.length - max) }; }
+/** Each standing bounded on its own — NAMED_MAX of what it may use, of what it may ask for, of what is left out or unknown —
+ *  the rest of each counted; `max` Infinity ⇒ never cut. */
+function bounded(rows, max = NAMED_MAX) {
+  const s = rows.slice().sort(byRank);
+  const ok = s.filter((r) => r.state === 'ok'), ask = s.filter((r) => r.state === 'request'), out = s.filter((r) => r.state !== 'ok' && r.state !== 'request');
+  const cut = (l) => (Number.isFinite(max) ? l.slice(0, max) : l);
+  const rest = (l) => (Number.isFinite(max) ? Math.max(0, l.length - max) : 0);
+  return { rows: [...cut(ok), ...cut(ask), ...cut(out)], more: rest(ok), moreRequest: rest(ask), moreOut: rest(out) };
+}
 
 /** The channel accounts (the form's 频道 tick rows, `accounts` in new-session-model accountRows' shape + `state`: granted |
  *  own | none | excepted | unknown) with, under each, its grains that admit this conversation (rules and single
@@ -81,7 +95,8 @@ function channelsOf(answers, accounts) {
     under.delete(`account:${a.id}`);
     const convs = bounded(kids.filter((k) => k.door === 'channel-reach' && /^conversation:/.test(k.resource)));
     const rules = bounded(kids.filter((k) => k.door === 'channel-reach' && /^rule:/.test(k.resource)));
-    out.push({ account: a, rules: rules.rows, rulesMore: rules.more, chats: convs.rows, chatsMore: convs.more,   // `chats`: one account's single channel conversations (never a digest's `conversations` — test-channel-rows)
+    out.push({ account: a, rules: rules.rows, rulesMore: rules.more, rulesMoreRequest: rules.moreRequest, rulesMoreOut: rules.moreOut,
+      chats: convs.rows, chatsMore: convs.more, chatsMoreRequest: convs.moreRequest, chatsMoreOut: convs.moreOut,   // `chats`: one account's single channel conversations (never a digest's `conversations` — test-channel-rows)
       watch: kids.filter((k) => k.door === 'channel-watch').sort(byRank), api: kids.filter((k) => k.door === 'channel-api').sort(byRank) });
   }
   // a grain whose account is not in the list (an account removed while its rows stay) is said by itself, never dropped
@@ -104,19 +119,19 @@ function viewOf({ facts = {}, answers = [], accounts = [] } = {}) {
     if (kind === 'browser') {
       const profiles = bounded(of('browser').filter((r) => r.door === 'browser-profile'));
       const logins = bounded(of('browser').filter((r) => r.door === 'browser-login'));
-      kinds.push({ kind, remote: f.remote, profiles: profiles.rows, profilesMore: profiles.more, logins: logins.rows, loginsMore: logins.more });
+      kinds.push({ kind, remote: f.remote, profiles: profiles.rows, profilesMore: profiles.more, profilesMoreOut: profiles.moreOut, logins: logins.rows, loginsMore: logins.more, loginsMoreOut: logins.moreOut });
       continue;
     }
     if (kind === 'vault') {
       const use = bounded(of('vault').filter((r) => r.door === 'vault-use'));
       const jobs = bounded(of('vault').filter((r) => r.door === 'vault-job'));
-      kinds.push({ kind, use: use.rows, useMore: use.more, jobs: jobs.rows, jobsMore: jobs.more, locked: of('vault').some((r) => r.code === 'vault_locked') });
+      kinds.push({ kind, use: use.rows, useMore: use.more, useMoreOut: use.moreOut, jobs: jobs.rows, jobsMore: jobs.more, jobsMoreOut: jobs.moreOut, locked: of('vault').some((r) => r.code === 'vault_locked') });
       continue;
     }
-    const b = bounded(of(kind));
-    kinds.push({ kind, rows: b.rows, more: b.more });
+    const b = bounded(of(kind), UNCUT.includes(kind) ? Infinity : NAMED_MAX);
+    kinds.push({ kind, rows: b.rows, more: b.more, moreOut: b.moreOut, ...(UNCUT.includes(kind) ? { uncut: true } : {}) });
   }
   return { facts: f, kinds };
 }
 
-module.exports = { KINDS, DOOR_KIND, NOT_SHOWN, NAMED_MAX, VIA, LISTED_REFUSALS, rowOf, byRank, bounded, viewOf };
+module.exports = { KINDS, DOOR_KIND, NOT_SHOWN, NAMED_MAX, UNCUT, VIA, LISTED_REFUSALS, rowOf, byRank, bounded, viewOf };

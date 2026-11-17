@@ -13567,6 +13567,11 @@ export default {
   "The split ended: one of its windows was minimized, closed or moved to another desktop": "分割を終了しました：一方のウィンドウが最小化されたか、閉じられたか、別のデスクトップに移されました",
   "Billing: {name}": "課金：{name}",
   // unit what-it-may-use (Session Properties «What it may use»)
+  "may ask for it — the request comes to you": "申請できます — 申請はあなたに届きます",
+  "{n} more it may ask for": "ほかに申請できるもの {n} 件",
+  "{n} more left out or unknown": "ほかに除外・不明 {n} 件",
+  "its access list could not be read": "アクセスリストを読み込めません",
+  "“{name}” has no tick of this conversation’s own to take back — it comes through a Task Group or every agent (the Channels window)": "「{name}」にはこの会話自身のチェックがありません — タスクグループかすべてのエージェント経由です（チャンネルウィンドウで変更）",
   "Could not read what it may use: {why}": "使えるものを読み込めませんでした：{why}",
   "Could not take “{name}” back from this conversation: {why}": "「{name}」をこの会話から外せませんでした：{why}",
   "Desktop app windows shared with it": "この会話に共有されたデスクトップアプリのウィンドウ",

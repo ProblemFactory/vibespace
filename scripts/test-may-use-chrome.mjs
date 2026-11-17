@@ -146,8 +146,10 @@ console.log('— ⑤ its own container decides; bounded at every width; no greye
 const winId = await evalJs(`(() => { for (const [id, w] of app.wm.windows) if (w._sessionPropsKey) return id; return null; })()`);
 for (const W of [280, 360, 440, 900, 1440]) {
   await evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(winId)}); w.element.style.width = '${W}px'; return true; })()`);
-  await sleep(400);
-  const m = await evalJs(`(() => { const s = document.querySelector(${JSON.stringify(SEC)}); if (!s) return null; return { w: Math.round(s.getBoundingClientRect().width), acc: !!s.querySelector('.ns-res-list'), cards: !!s.querySelector('.ns-card[data-card="vibespace"]'), over: s.scrollWidth - s.clientWidth, greyed: s.querySelectorAll('input[disabled]:not(:checked)').length }; })()`);
+  // wait on the SECTION'S OWN STATE (its shape follows its width — the ResizeObserver's repaint), never a fixed sleep
+  const shapeOf = `(() => { const s = document.querySelector(${JSON.stringify(SEC)}); if (!s) return null; return { w: Math.round(s.getBoundingClientRect().width), acc: !!s.querySelector('.ns-res-list'), cards: !!s.querySelector('.ns-card[data-card="vibespace"]'), over: s.scrollWidth - s.clientWidth, greyed: s.querySelectorAll('input[disabled]:not(:checked)').length }; })()`;
+  await until(`(() => { const m = ${shapeOf}; return !!m && (m.w < 400 ? m.acc && !m.cards : m.cards && !m.acc); })()`, 5000);
+  const m = await evalJs(shapeOf);
   const narrow = m && m.w < 400;
   check(`${W} px window (section ${m && m.w} px): ${narrow ? 'the accordion' : 'the cards'}, nothing overflows, no greyed control`, m && (narrow ? m.acc && !m.cards : m.cards && !m.acc) && m.over <= 1 && m.greyed === 0, m);
   await shot(`may-use-${W}.png`);

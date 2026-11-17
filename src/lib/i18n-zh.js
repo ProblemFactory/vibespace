@@ -13568,6 +13568,11 @@ export default {
   "The split ended: one of its windows was minimized, closed or moved to another desktop": "分屏已结束：其中一个窗口已最小化、关闭或移到了别的桌面",
   "Billing: {name}": "计费：{name}",
   // unit what-it-may-use (Session Properties «What it may use»)
+  "may ask for it — the request comes to you": "可以申请 —— 申请会送到你这里",
+  "{n} more it may ask for": "另有 {n} 个可以申请",
+  "{n} more left out or unknown": "另有 {n} 个被排除或未知",
+  "its access list could not be read": "读不到它的访问名单",
+  "“{name}” has no tick of this conversation’s own to take back — it comes through a Task Group or every agent (the Channels window)": "「{name}」没有这个对话自己的勾选可收回 —— 它经任务组或所有 agent 得来（在频道窗口里改）",
   "Could not read what it may use: {why}": "没能读取它能用什么：{why}",
   "Could not take “{name}” back from this conversation: {why}": "没能从这个对话收回「{name}」：{why}",
   "Desktop app windows shared with it": "共享给它的桌面应用窗口",

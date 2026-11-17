@@ -8,7 +8,8 @@
  * window-targets-engine mayUseFor, browser-logins mayUseFor, vault-use-grants mayUseFor; vault-job's PURE approvedBy over
  * the jobs it owns).
  *
- *  · ITS FACTS — LIVE: the keys the live doors build (its conversation id — claude-lock-capture addressableId —, webui:<id>,
+ *  · ITS FACTS (cure r1, SHOULD a: a stopped conversation is read from the rows the sessions route KEPT — no sweep per read; a
+ *    sweep only when it kept none, never while discovery is paused, then said: list_paused) — LIVE: the keys the live doors build (its conversation id — claude-lock-capture addressableId —, webui:<id>,
  *    its browser key), its groups by the Task Group store's groupsForSession({sessionKey, cwd, initialGroupIds}) (the
  *    crosswalk taskIdsFor uses). NOT LIVE: its STORED facts — the sessions list's own row for its key (its conversation id,
  *    folder, machine, mode), its browser key from the durable binding (data/browser-env/bindings.json), its groups by the
@@ -43,9 +44,14 @@ function create({
   async function factsOf(key, { webuiId = '' } = {}) {
     key = str(key);
     if (!key) return { ok: false, code: 'bad_key', error: 'which conversation? (key=<backend>:<id>)' };
+    const t0 = process.hrtime.bigint();
     const live = liveOf(key, str(webuiId));
-    let row = null;
-    if (!live) { try { row = await storedRow(key); } catch (e) { log(`[may-use] the sessions list could not be read for ${key}: ${e && e.message}`); } }
+    let row = null, swept = false;
+    if (!live) {
+      // the sessions route's KEPT rows (a read — no sweep per read); a promise only when it kept none (the one sweep it would run)
+      try { const r = storedRow(key); if (r && typeof r.then === 'function') { swept = true; row = await r; } else row = r; } catch (e) { log(`[may-use] the sessions list could not be read for ${key}: ${e && e.message}`); }
+      if (row && row.paused) return { ok: false, code: 'list_paused', error: 'the session list is paused (a storage mount does not answer) — what is stored for this conversation cannot be read now' };
+    }
     if (!live && !row) return { ok: false, code: 'not_found', error: 'no conversation with that key is live or listed' };
     const s = live ? live.s : row;
     const backend = str(s.backend) || str(key.split(':')[0]) || 'claude';
@@ -58,7 +64,7 @@ function create({
       groups = (groupsOf({ sessionKey: key, cwd: s.cwd || '', initialGroupId: live ? s._initialGroupId : undefined, initialGroupIds: live ? s._initialGroupIds : undefined }) || [])
         .filter((g) => g && g.id).map((g) => ({ id: str(g.id), name: groupName(g) }));
     } catch (e) { groupsUnreadable = true; log(`[may-use] ${key}: the Task Group list could not be read (${e && e.message}) — group grants said «unknown»`); }
-    return { ok: true, facts: { key, live: !!live, webuiId: live ? live.id : null, cid, browserKey: bk, conversationKeys, sessionKeys, groups, groupIds: groups.map((g) => g.id), groupsUnreadable,
+    return { ok: true, ms: swept ? null : ms(t0), swept, facts: { key, live: !!live, webuiId: live ? live.id : null, cid, browserKey: bk, conversationKeys, sessionKeys, groups, groupIds: groups.map((g) => g.id), groupsUnreadable,
       remote: !!(s.hostId || s.host), host: str(s.hostId || s.host) || null, noAgent: !!noAgentOf(backend), backend } };
   }
 
@@ -111,9 +117,10 @@ function create({
     const t0 = process.hrtime.bigint();
     const { answers, accounts, parts } = answersOf(fr.facts);
     const view = M.viewOf({ facts: fr.facts, answers, accounts });
-    const total = ms(t0);
+    // the loop's hold = the facts' own lookup (a sweep's wait is the sessions route's, not this answer's) + every part
+    const total = ms(t0) + (fr.ms || 0);
     if (total > BUDGET_MS) log(`[may-use] ${key}: the answer held the loop ${total.toFixed(1)} ms (budget ${BUDGET_MS}) — ${Object.entries(parts).map(([k, v]) => `${k} ${v.ms.toFixed(1)}`).join(', ')}`);
-    return { ok: true, view, ms: { total, parts: Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, Math.round(v.ms * 10) / 10])) } };
+    return { ok: true, view, ms: { total, facts: fr.ms == null ? null : Math.round(fr.ms * 10) / 10, swept: fr.swept, parts: Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, Math.round(v.ms * 10) / 10])) } };
   }
   function mount(app, { personVerdict }) {
     app.get('/api/may-use', async (req, res) => {
@@ -121,7 +128,7 @@ function create({
       if (!pv.ok) return res.status(403).json({ ok: false, code: pv.code, error: pv.code === 'human_only' ? 'only a person reads what a conversation may use — an agent lists what it may use with its own tools' : 'this answers this instance\'s own page only' });
       try {
         const r = await viewFor(str(req.query && req.query.key), { webuiId: str(req.query && req.query.webuiId) });
-        if (!r.ok) return res.status(r.code === 'not_found' ? 404 : 400).json(r);
+        if (!r.ok) return res.status(r.code === 'not_found' ? 404 : r.code === 'list_paused' ? 409 : 400).json(r);
         res.json(r);
       } catch (e) { log(`[may-use] failed: ${e && e.message}`); res.status(500).json({ ok: false, code: 'failed', error: 'what it may use could not be read — try again' }); }
     });
