@@ -690,17 +690,25 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       if (!Array.isArray(rows)) return { ok: false, code: 'not_ready', why: 'the browser keeper did not answer — nothing was stopped' };
       const row = rows.find((r) => r && r.id === args.id) || null;
       if (!row) return { ok: false, code: 'already_stopped', why: 'no running browser by that id — nothing was stopped', target: args.id };
+      // each holder: its conversation (the live session by its webui id) and the key's reach over it; a holder that is not
+      // running here is UNKNOWN (its own reason), never «outside your reach»
       const holders = (Array.isArray(row.holders) ? row.holders : []).map((h) => {
         const s = h && h.sessionId ? activeSessions.get(h.sessionId) || null : null;
+        if (!s) return { turn: null, granted: false, unknown: true };
         let granted = false;
-        if (s) { try { const v = ctx.reach({ conversationId: idOf(s), webuiId: h.sessionId, groups: groupsOfLive(s, h.sessionId) }); granted = !!(v && v.ok); } catch { granted = false; } }
+        try { const v = ctx.reach({ conversationId: idOf(s), webuiId: h.sessionId, groups: groupsOfLive(s, h.sessionId) }); granted = !!(v && v.ok); } catch { granted = false; }
         return { turn: h && h.turn !== undefined ? h.turn : null, granted };
       });
-      const v = require('../browser-profiles.js').stopVerdict({ live: true, takenOver: typeof row.takenOver === 'boolean' ? row.takenOver : null,
-        watched: Number.isInteger(row.viewers) ? row.viewers > 0 : null, personBrowsing: typeof row.personBrowsing === 'boolean' ? row.personBrowsing : null, holders });
+      const v = require('../browser-profiles.js').stopVerdict({ live: true, holders, kind: row.kind || null, takenOver: typeof row.takenOver === 'boolean' ? row.takenOver : null,
+        watched: Number.isInteger(row.viewers) ? row.viewers > 0 : null, personBrowsing: typeof row.personBrowsing === 'boolean' ? row.personBrowsing : null,
+        inFlight: row.inFlight || null, tabsKept: row.tabsKept === true, closeTabs: args.closeTabs === true });
       if (!v.stop) return { ok: false, code: v.code, why: v.why, target: row.name || row.id };
-      try { await browsers.stop(row.id); } catch (e) { return { ok: false, code: 'failed', why: `the keeper could not stop it — ${(e && e.message) || 'no reason given'}`, target: row.name || row.id }; }
-      return { ok: true, id: row.id, kind: row.kind, tabs: row.tabsKept ? 'Its tabs reopen at the next browser command.' : 'Its tabs close; its sign-ins stay.' };
+      let r = null;
+      try { r = await browsers.stop(row.id); } catch (e) { return { ok: false, code: 'not_freed', why: `the keeper could not stop it — ${(e && e.message) || 'no reason given'}; nothing was freed`, target: row.name || row.id }; }
+      // THE ANSWER TELLS THE TRUTH ABOUT WHAT WAS FREED: «not freed» is not ok
+      if (!r || r.freed !== true) return { ok: false, code: 'not_freed', why: `not freed — ${(r && r.why) || 'the keeper did not say it stopped'}`, target: row.name || row.id };
+      const tabs = row.kind === 'own' ? 'Its tabs reopen at the next browser command.' : row.kind === 'helper' ? 'A helper\'s browser keeps nothing: its tabs are closed.' : 'Its tabs closed; its sign-ins stay.';
+      return { ok: true, id: row.id, kind: row.kind, freed: true, tabs };
     },
     'groups.invite': async (args, ctx) => {
       const t = reached(args.target, ctx);

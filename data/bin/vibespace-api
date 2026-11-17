@@ -46,8 +46,8 @@ const USAGE = [
   '  vibespace-api list [--json] [--key <name|id>]   every conversation and browser the key reaches, sorted by memory: what runs in',
   '                each, whether it may be ended (busy + why), its desktop and its link; a fact the hub cannot know prints',
   '                «unknown» with its reason (never 0, never idle) — --json prints the hub\'s answer whole',
-  '  vibespace-api browsers stop <browser id>               stop a running browser nobody uses (refused, with why, while a person drives,',
-  '                watches or browses in it, or a conversation holding it is mid-turn); a conversation\'s own browser reopens its tabs at its next command',
+  '  vibespace-api browsers stop <bp-…> [--close-tabs]   stop a running browser nobody uses (its id: vibespace-browser profiles); refused, with why,',
+  '                while it is not yours, a person uses it, something is in flight or a holder is mid-turn; a helper\'s or a named profile\'s tabs close — only with --close-tabs',
   '  <target> = a conversation id, <backend>:<id> or a session id (sess-…); a conversation the key opened is within its reach',
   '  the grant\'s REACH (`keys` prints it): opened = only what the key opened (+ yourself) · groups: <T-…> = those Task Groups\' conversations too · instance = every conversation here; outside it ⇒ not_granted naming the reach (the user widens it on the key\'s row in the Vault window)',
   'no grant yet ⇒ the call asks the user in For you (≤ 60 s) and waits; a refusal is final for 10 minutes. Full manual: vibespace-docs api',
@@ -107,7 +107,7 @@ const TYPED = {
   'groups invite': { verb: 'groups.invite', pos: ['group', 'target'], flags: [] },
   // lane login-request-card (majordomo piece 3b): ONE positional — the targets, comma-separated (the verb splits them)
   'conversations propose': { verb: 'conversations.propose', pos: ['targets'], flags: ['why'], need: ['why'] },
-  'browsers stop': { verb: 'browsers.stop', pos: ['id'], flags: [] }, // lane browsers-stop (majordomo piece 6)
+  'browsers stop': { verb: 'browsers.stop', pos: ['id'], flags: [], bool: ['close-tabs'] }, // lane browsers-stop (majordomo piece 6): --close-tabs accepts the tab loss BEFORE
 };
 function typed(argv) {
   const [g, sub, ...rest] = argv;

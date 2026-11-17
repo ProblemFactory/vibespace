@@ -2483,32 +2483,42 @@ function idleReleaseVerdict({ live = false, turn = null, idleSince = null, now =
   return { release: true, idleSince: since, why: `the turn ended ${Math.round((t - since) / 60000)} min ago` };
 }
 /**
- * MAY AN AGENT STOP THIS BROWSER? (lane browsers-stop, majordomo piece 6 — `browsers.stop`) The facts the idle release above
- * refuses on (a turn that runs or is unknown, the user drives it, a live view watches it), plus the person's own browsing and
- * the key's reach over every holder. EVERY UNKNOWN REFUSES. → { stop, code, why } — `code` null when it may stop. Each
- * refusal names the person's door. A person's own Stop overrides all of it (it never comes through here).
- *   live           true | false | null      (null = not known whether it runs)
- *   takenOver      the person drives it, or a request is open to them
- *   watched        a live view is open on it
- *   personBrowsing the person browses in it themselves (a named profile)
- *   holders        [{ turn: 'idle'|'running'|'waiting'|null, granted: bool }] — the conversations that hold it
+ * MAY AN AGENT STOP THIS BROWSER? (lane browsers-stop, majordomo piece 6 — `browsers.stop`; the acceptance's musts 2026-11-17)
+ * REACH FIRST: a browser this key does not reach answers «not yours» before any live fact is said (whether a person drives,
+ * watches or browses in it is more than an existence). Then the facts the idle release refuses on (a turn that runs or is
+ * unknown, a person drives it, a live view watches it), a person browsing in it, a page dialog or passkey ceremony in flight,
+ * and a LOSS NOT ACCEPTED BEFORE: a browser whose tabs are not kept is stopped only when the call says it accepts that.
+ * EVERY UNKNOWN REFUSES. → { stop, code, why } — `code` null when it may stop. A person's own Stop overrides all of it.
+ *   live           true | false | null
+ *   holders        [{ turn, granted, unknown }] — the conversations holding it (`unknown`: not running here)
+ *   kind           'own' | 'helper' | 'profile' | 'external' | 'remote'
+ *   takenOver / watched / personBrowsing — true | false | null
+ *   inFlight       null | the in-flight thing the dialog watch reports (a page dialog, a passkey ceremony)
+ *   tabsKept       true only where the keeper really keeps the tabs (a conversation's own browser, the kept store wired)
+ *   closeTabs      the call accepts that the tabs close
  */
-const STOP_DOOR = 'A person can stop it from System → Conversations and browsers (Stop on its row).';
-function stopVerdict({ live = null, takenOver = null, watched = null, personBrowsing = null, holders = null } = {}) {
+const STOP_DOOR = 'A person can stop it from the Browser panel (Stop on its row).';
+function stopVerdict({ live = null, holders = null, kind = null, takenOver = null, watched = null, personBrowsing = null, inFlight = null, tabsKept = null, closeTabs = false } = {}) {
   const no = (code, why) => ({ stop: false, code, why: `not stopped — ${why}. ${STOP_DOOR}` });
   if (live === false) return { stop: false, code: 'already_stopped', why: 'it is not running — nothing to stop' };
   if (live !== true) return no('browser_unknown', 'whether it runs is unknown');
-  if (takenOver === true) return no('person_driving', 'a person drives it (a takeover, or a request open to them)');
+  // reach first — nothing below is said to a key that does not reach every holder
+  if (!Array.isArray(holders)) return no('holder_unknown', 'which conversations hold it is unknown');
+  if (holders.length === 0) return no('no_holder', 'no conversation holds it — its own idle clock stops it');
+  if (holders.some((h) => h && h.unknown)) return no('holder_unknown', 'a conversation holding it is not running here — whether it is yours to stop is unknown');
+  if (holders.some((h) => !h || h.granted !== true)) return no('not_granted', 'it is not yours: a conversation outside this key\'s reach holds it');
+  if (kind === 'external') return no('not_ours', 'it is an attached external browser — a stop only drops its forward; it keeps running');
+  if (takenOver === true) return no('person_driving', 'a person drives it (a takeover, or a request open to the person)');
   if (takenOver !== false) return no('person_driving', 'whether a person drives it is unknown');
   if (watched === true) return no('watched', 'a live view is open on it');
   if (watched !== false) return no('watched', 'whether a live view is open is unknown');
   if (personBrowsing === true) return no('person_browsing', 'a person browses in it');
   if (personBrowsing !== false) return no('person_browsing', 'whether a person browses in it is unknown');
-  if (!Array.isArray(holders)) return no('holder_busy', 'which conversations hold it is unknown');
-  if (holders.some((h) => !h || h.granted !== true)) return no('not_granted', 'a conversation outside this key\'s reach holds it');
+  if (inFlight) return no('in_flight', `${inFlight} is in progress on it — a stop would cut it`);
   const busy = holders.find((h) => h.turn !== 'idle');
   if (busy) return no('holder_busy', busy.turn === 'running' || busy.turn === 'waiting' ? `a holding conversation's turn is ${busy.turn} — it may be mid-command` : 'a holding conversation\'s turn is unknown — it may be mid-command');
-  return { stop: true, code: null, why: 'nobody uses it: every holder is idle, no person drives, watches or browses in it' };
+  if (tabsKept !== true && closeTabs !== true) return no('tabs_lost', `its tabs would close — ${kind === 'helper' ? 'a helper\'s browser keeps nothing' : kind === 'own' ? 'they are not kept here' : 'a named profile\'s tabs are not reopened (its sign-ins stay)'}; call again with closeTabs: true (vibespace-api browsers stop <id> --close-tabs) to accept that`); // ui-words: an agent-facing refusal — English, as the tree's rule keeps every verb answer
+  return { stop: true, code: null, why: 'nobody uses it: every holder is idle and within reach, no person drives, watches or browses in it, nothing is in flight' };
 }
 // NO RESOURCE VERDICT AND NO PARK HERE (2026-09-25): the per-provider
 // thresholds and the verdict live in src/runaway-guard.js, and for a browser a

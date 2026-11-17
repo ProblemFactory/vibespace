@@ -76,7 +76,7 @@ vibespace-api call conversations.rename --name "Worker 2" --target <conversation
 | `jobs.wakeGrant` | `job`, `grant` (`on` / `off`) — may this job or schedule resume its conversation after that conversation was ended on purpose (a person's Terminate or an agent's end); the job's owner conversation must be one the key reaches; the row records the key, and the resumed window names it — `vibespace-api call jobs.wakeGrant --job <jb-…> --grant on` | no |
 | `feedback.handled` | `id` (`fb-…`), `version` (the release that shipped the fix, `2.369.NNN`), `note?` (≤ 200 characters) | no |
 | `feedback.list` | — | no (a read) |
-| `browsers.stop` | `id` — a running browser's id (conversations.list's browser rows): stops it through the keeper's own stop; refused (`person_driving` / `watched` / `person_browsing` / `holder_busy` / `not_granted` / `already_stopped`) while anybody uses it or a fact is unknown; a conversation's own browser reopens its tabs at its next command, a named profile's tabs close and its sign-ins stay | no |
+| `browsers.stop` | `id` (a browser profile's id — `vibespace-browser profiles`), `closeTabs?` — stops it through the keeper's own stop; refused, reach first (`not_granted` / `no_holder` / `holder_unknown`), then `not_ours` / `person_driving` / `watched` / `person_browsing` / `in_flight` / `holder_busy` / `tabs_lost` (a helper's or a named profile's tabs close — only with closeTabs) / `already_stopped`; the answer says what was freed (`not_freed` is never ok); a person can stop it from the Browser panel | no |
 
 **Agent feedback — the maintainer's verbs.** The reports agents send with `vibespace-feedback` wait for someone to mark
 them handled. A conversation granted a key holding these verbs is that someone:

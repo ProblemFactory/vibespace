@@ -1147,9 +1147,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   /**
    * lane browsers-stop (majordomo piece 6): every RUNNING browser with the facts browsers.stop's verdict reads — a READ (no
    * file, no registry write; the leases through leasesOn, a CONVERSATION reader). A conversation's OWN browser has its owner
-   * as its one holder (tabsKept: its tabs reopen at that conversation's next command); a named profile's holders are its
-   * leases, and the person's own browsing is its human row. turn = the holder's turn as the idle release reads it (null =
-   * unknown). Nothing here judges: src/browser-profiles.js stopVerdict does, with the key's reach over the holders.
+   * as its one holder; a HELPER's browser (a child key) is its own kind and keeps nothing; a named profile's holders are its
+   * leases and the person's own browsing is its human row; an attached external browser is its own kind. tabsKept is true
+   * only where the keeper really keeps the tabs (a conversation's own browser, the kept store wired). inFlight = what the
+   * dialog watch reports open on it (a page dialog, a passkey ceremony — never new tracking). turn = the holder's turn as the
+   * idle release reads it (null = unknown). Nothing here judges: src/browser-profiles.js stopVerdict does.
    */
   function stopRows() {
     ensureLoaded();
@@ -1158,22 +1160,43 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       const rec = reg.browsers[p.id];
       if (!B.isLiveBrowser(rec) || stopping.has(p.id)) continue;
       const own = isEph(p);
+      const helper = own && !B.isBrowserKey(p.owner.id);
       const scope = own ? null : p.id;
-      const keys = own ? [p.owner.id] : [...new Set(leasesOn(p.id).map((l) => l.browserKey))];
-      const sessionOf = (bk) => { const l = leasesOn(p.id).find((x) => x.browserKey === bk); return l ? l.sessionId || null : null; };
+      const leases = leasesOn(p.id);
+      const keys = own ? [p.owner.id] : [...new Set(leases.map((l) => l.browserKey))];
+      const sessionOf = (bk) => { const l = leases.find((x) => x.browserKey === bk); return l ? l.sessionId || null : null; };
       const holders = keys.map((bk) => { const f = convFacts(bk); return { browserKey: bk, sessionId: sessionOf(bk), turn: f.turn === undefined ? null : f.turn }; });
       const takenOver = keys.some((bk) => inputStateFor(bk, scope).input === 'user' || !!openRequestFor(bk, scope));
       const human = own ? null : humanOf(p.id);
       const viewers = keys.reduce((n, bk) => n + (watchers.get(inputKey(bk, scope)) || 0), 0) + (human ? Number(human.viewers) || 0 : 0);
+      let inFlight = null;
+      for (const bk of keys) {
+        let st = null; try { st = stuckSource ? stuckSource(bk) || null : null; } catch { st = null; }
+        if (st && (!st.profileId || st.profileId === p.id) && st.state && st.state !== 'unresponsive') { inFlight = /passkey/i.test(String(st.state)) ? 'a passkey ceremony' : 'a page dialog'; break; }
+      }
       const u = live.get(p.id);
-      out.push({ id: p.id, kind: own ? 'own' : 'profile', name: p.label || null, running: true, memBytes: u && Number.isFinite(u.memBytes) ? u.memBytes : null,
-        lastCommandAt: Number.isFinite(p.lastVerbAt) ? p.lastVerbAt : null, holders, takenOver, viewers, personBrowsing: !!human, tabsKept: own });
+      out.push({ id: p.id, kind: rec.external ? 'external' : !isLocalRec(rec) ? 'remote' : helper ? 'helper' : own ? 'own' : 'profile', name: p.label || null, running: true,
+        memBytes: u && Number.isFinite(u.memBytes) ? u.memBytes : null, lastCommandAt: Number.isFinite(p.lastVerbAt) ? p.lastVerbAt : null,
+        holders, takenOver, viewers, personBrowsing: !!human, inFlight, tabsKept: own && !helper && !!keptStore() });
     }
     return out;
   }
-  /** lane browsers-stop: the manager's stop — the keeper's own stop under its own closed reason (`manager`: an automatic stop
-   *  for the kept tabs, never a deliberate one — a conversation's own browser reopens its tabs at its next command). */
-  function managerStop(profileId) { return stop(profileId, { why: 'manager' }); }
+  /** lane browsers-stop: the manager's stop — the keeper's own stop under its own closed reason (`manager`: automatic for the
+   *  kept tabs, never deliberate). → { freed, why } — the TRUTH of what was freed: a stop that left the browser running (a
+   *  daemon that survived, a machine that could not be asked) is NOT freed. Who stopped it is the record's `stoppedBy`
+   *  (the Browser panel words it), never the word in its error field. */
+  const NOT_CLEAN = /could not be asked|survived SIGKILL|not provably ours|NOT clean/;
+  async function managerStop(profileId) {
+    await stop(profileId, { why: 'manager' });
+    const rec = reg.browsers[profileId];
+    if (!rec) return { freed: false, why: 'its record is gone' };
+    let left = typeof rec.lastError === 'string' ? rec.lastError : '';
+    if (left === 'manager') left = ''; else if (left.startsWith('manager; ')) left = left.slice('manager; '.length);
+    rec.lastError = left || null;   // who stopped it is `stoppedBy: 'manager'` (the stop wrote it) — the panel says it; never the error field
+    commit();
+    const freed = !B.isLiveBrowser(rec) && !NOT_CLEAN.test(left);
+    return { freed, why: freed ? null : (left || 'it is still running') };
+  }
 
   // ── profiles ──
   function mintId() { for (;;) { const id = B.mintProfileId(crypto.randomBytes(4).toString('hex')); if (!reg.profiles.some((p) => p.id === id)) return id; } }

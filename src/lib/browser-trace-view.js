@@ -78,7 +78,7 @@ export function ephemeralStateText(e) {
   if (e.state === 'ready') return e.adopted ? t('running (adopted)') : t('running');
   if (e.state === 'starting') return t('starting');
   if (e.state === 'failed') return t('failed');
-  if (e.state === 'stopped') return e.endedEarly ? t('found gone early') : e.stoppedBy === 'idle' ? t('idled out') : t('stopped'); // B-346d law 2: a daemon gone before its idle timeout never reads «idled out»
+  if (e.state === 'stopped') return e.endedEarly ? t('found gone early') : e.stoppedBy === 'idle' ? t('idled out') : e.stoppedBy === 'manager' ? t('stopped by a conversation with a key') : t('stopped'); // B-346d law 2: a daemon gone before its idle timeout never reads «idled out»; lane browsers-stop: who stopped it
   return t('not started');
 }
 

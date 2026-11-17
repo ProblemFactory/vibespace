@@ -911,11 +911,18 @@ default with `*`.
 ---
 
 ### Freeing a browser another conversation holds — `vibespace-api browsers stop <id>`
-With a key that carries `browsers.stop` (the person grants it), you can stop a running browser to free memory. The id comes from `vibespace-api list` (conversations.list). It goes through the keeper's own stop, and is REFUSED, with the reason, while:
-- a person drives it, watches it, or browses in it;
-- a conversation holding it is mid-turn, or its turn is unknown;
-- a holder is outside your key's reach.
-A conversation's own browser keeps its tabs; they reopen at that conversation's next browser command. A named profile's tabs close, and its sign-ins stay. A person can always stop it from System → Conversations and browsers.
+With a key that carries `browsers.stop` (the person grants it), you can stop a running browser to free memory. The id is the browser profile's id: `vibespace-browser profiles` prints each as «label (bp-…)». It goes through the keeper's own stop.
+
+It is REFUSED, with the reason, and nothing is stopped:
+- when your key does not reach every conversation holding it (`not_granted`, asked before anything else is said);
+- when no conversation holds it (`no_holder` — its own idle clock stops it);
+- when a holder is not running here (`holder_unknown`);
+- when a person drives it, watches it or browses in it;
+- when a page dialog or a passkey ceremony is open on it (`in_flight`);
+- when a conversation holding it is mid-turn, or its turn is unknown (`holder_busy`) — your OWN browser is refused while your own turn runs;
+- when it is an attached external browser (`not_ours`).
+
+Only a conversation's own browser keeps its tabs: they reopen at that conversation's next browser command. A helper's browser keeps nothing, and a named profile's tabs close while its sign-ins stay. Either is refused (`tabs_lost`) unless the call accepts the loss BEFORE: `vibespace-api browsers stop <id> --close-tabs` (closeTabs: true). The answer says what was freed; a stop that left the browser running answers `not_freed`, never ok. A person can always stop it from the Browser panel (Stop on its row).
 
 ## 4. Rules
 

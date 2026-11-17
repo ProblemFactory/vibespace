@@ -190,7 +190,7 @@ const SCOPES = Object.freeze([
   // lane browsers-stop (majordomo piece 6): stop ONE running browser by the id conversations.list printed, through the keeper's
   // own stop — refused while anybody uses it (src/browser-profiles.js stopVerdict); a conversation's own browser keeps its tabs
   Object.freeze({ verb: 'browsers.stop', layer: 'act', billed: false, label: 'Stop a browser', // ui-words: a t() key — the Vault window words it (zh / ja rows)
-    args: (a) => argsOf(a, { id: (v) => idArg(v, 'id') }) }),
+    args: (a) => argsOf(a, { id: (v) => idArg(v, 'id'), closeTabs: (v) => boolArg(v, 'closeTabs') }) }),
   // lane feedback-handled-verb: the owner's «Mark handled» on an agent's feedback report, naming the release that shipped
   // the fix (+ a note); and the OPEN reports with their ids — a READ (another agent's words: belted at the hub)
   Object.freeze({ verb: 'feedback.handled', layer: 'act', billed: false, label: "Mark an agent's feedback handled",

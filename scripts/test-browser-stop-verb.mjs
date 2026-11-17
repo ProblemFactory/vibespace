@@ -93,117 +93,161 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { clean
 
 
 const OPS = require('../src/server/conversation-ops.js');
-const KEY_A = 'bk-0000a001';
-const CID_A = 'e2e00000-0000-4000-8000-0000000000a1';
-// ① the verdict table
+const KEY_A = 'bk-0000a001', KEY_B = 'bk-0000b002', KEY_A1 = 'bk-0000a001.1';
+const CID_A = 'e2e00000-0000-4000-8000-0000000000a1', CID_B = 'e2e00000-0000-4000-8000-0000000000b2';
+// ① THE VERDICT TABLE (the acceptance's order: reach FIRST, then the live facts, then a loss not accepted before)
 {
-  const idle = { live: true, takenOver: false, watched: false, personBrowsing: false, holders: [{ turn: 'idle', granted: true }] };
-  ok(B.stopVerdict(idle).stop === true && B.stopVerdict(idle).code === null, '① an idle browser nobody uses may stop');
-  const rows = [['person_driving', { takenOver: true }], ['person_driving', { takenOver: null }], ['watched', { watched: true }], ['watched', { watched: null }],
-    ['person_browsing', { personBrowsing: true }], ['person_browsing', { personBrowsing: null }], ['holder_busy', { holders: [{ turn: 'running', granted: true }] }],
-    ['holder_busy', { holders: [{ turn: 'waiting', granted: true }] }], ['holder_busy', { holders: [{ turn: null, granted: true }] }], ['holder_busy', { holders: null }],
-    ['not_granted', { holders: [{ turn: 'idle', granted: false }] }], ['already_stopped', { live: false }], ['browser_unknown', { live: null }]];
+  const idle = { live: true, holders: [{ turn: 'idle', granted: true }], kind: 'own', takenOver: false, watched: false, personBrowsing: false, inFlight: null, tabsKept: true };
+  ok(B.stopVerdict(idle).stop === true, '① an idle own browser nobody uses, within reach, may stop');
+  const rows = [['no_holder', { holders: [] }], ['holder_unknown', { holders: [{ unknown: true }] }], ['holder_unknown', { holders: null }],
+    ['not_granted', { holders: [{ turn: 'idle', granted: true }, { turn: 'idle', granted: false }] }], ['not_ours', { kind: 'external' }],
+    ['person_driving', { takenOver: true }], ['person_driving', { takenOver: null }], ['watched', { watched: true }], ['watched', { watched: null }],
+    ['person_browsing', { personBrowsing: true }], ['person_browsing', { personBrowsing: null }], ['in_flight', { inFlight: 'a page dialog' }],
+    ['holder_busy', { holders: [{ turn: 'running', granted: true }] }], ['holder_busy', { holders: [{ turn: null, granted: true }] }],
+    ['tabs_lost', { kind: 'profile', tabsKept: false }], ['tabs_lost', { kind: 'helper', tabsKept: false }], ['already_stopped', { live: false }], ['browser_unknown', { live: null }]];
   const bad = rows.map(([code, over]) => [code, B.stopVerdict({ ...idle, ...over })]).filter(([code, v]) => v.stop || v.code !== code);
   ok(bad.length === 0, `① each refusal alone, and each UNKNOWN, refuses with its code (${rows.length} rows)`, bad);
-  ok(rows.filter(([c]) => c !== 'already_stopped').every(([, over]) => B.stopVerdict({ ...idle, ...over }).why.includes(B.STOP_DOOR)), '① every refusal names the person\'s door');
+  const reachFirst = B.stopVerdict({ ...idle, holders: [{ turn: 'running', granted: false }], takenOver: true, watched: true, personBrowsing: true, inFlight: 'a page dialog' });
+  ok(reachFirst.code === 'not_granted' && !/drives|watch|browses|dialog|turn/.test(reachFirst.why), '① MUST 3 REACH FIRST: an unreached holder answers «not yours» and says NOTHING of the live facts behind it', reachFirst);
+  ok(B.stopVerdict({ ...idle, kind: 'profile', tabsKept: false, closeTabs: true }).stop === true && /--close-tabs/.test(B.stopVerdict({ ...idle, kind: 'profile', tabsKept: false }).why), '① MUST 5 a loss is accepted BEFORE: a named profile stops only with closeTabs, and the refusal names how to say so');
+  ok(rows.filter(([c]) => c !== 'already_stopped').every(([, over]) => B.stopVerdict({ ...idle, ...over }).why.includes(B.STOP_DOOR)) && /Browser panel/.test(B.STOP_DOOR), '① MUST 4 every refusal names the door that EXISTS today: the Browser panel\'s Stop');
 }
-// the world: the real keeper, a real browser-env, the real kept store; the conversation's turn as the hub reads it
+// the world: the real keeper, a real browser-env, the real kept store
 const K_DATA = path.join(ROOT, 'k-data'); fs.mkdirSync(K_DATA, { recursive: true });
 fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }));
 const settings = { 'browser.idleTimeoutMs': 600000 };
 const turns = new Map();
-const kLive = new Set([KEY_A]);
+const kLive = new Set([KEY_A, KEY_B]);
 const cdpTargets = new Map();
 const beK = BE.create({ dataDir: K_DATA, homeDir: HOME, serverSetting: (k) => settings[k], log: quiet, socketDirBase: path.join(ROOT, 'sock') });
 const rtEnv = { PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE };
 let keeper = null;
 const kept = KS.create({ dataDir: K_DATA, keeper: () => keeper, liveKeys: () => kLive, serverSetting: (k) => settings[k], log: quiet, sweepEveryMs: 0 });
 keeper = K.create({ dataDir: K_DATA, homeDir: HOME, env: () => rtEnv, serverSetting: (k) => settings[k], liveKeys: () => kLive, runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }),
-  limits: { ...LIMITS, CONCURRENT_CAP: 6 }, log: quiet, tickMs: 3600e3, install: false, kept, conversationFacts: (bk) => (turns.has(bk) ? { turn: turns.get(bk) } : {}),
+  limits: { ...LIMITS, CONCURRENT_CAP: 8 }, log: quiet, tickMs: 3600e3, install: false, kept, conversationFacts: (bk) => (turns.has(bk) ? { turn: turns.get(bk) } : {}),
   readTargets: async (url) => (cdpTargets.has(url) ? { ok: true, targets: cdpTargets.get(url) } : { ok: false, error: 'no fake target list for ' + url }) });
 keepers.push(keeper);
 const envA = beK.envFor({ browserKey: KEY_A, cwd: HOME });
 const start = () => keeper.ensureEphemeral({ browserKey: KEY_A, sessionId: 'sess-a', envPairs: envA.pairs, sessionName: 'Research', variant: envA.variant });
-const sessions = new Map([['sess-a', { backend: 'claude', mode: 'chat', backendSessionId: CID_A, name: 'Research' }]]);
+const sessions = new Map([['sess-a', { backend: 'claude', mode: 'chat', backendSessionId: CID_A, name: 'Research' }], ['sess-b', { backend: 'claude', mode: 'chat', backendSessionId: CID_B, name: 'Other' }]]);
 const verbs = OPS.automationVerbs({ activeSessions: sessions, browsers: { rows: () => keeper.stopRows(), stop: (id) => keeper.managerStop(id) } });
-const reachA = ({ conversationId }) => ({ ok: conversationId === CID_A });
-const call = (id, reach = reachA) => verbs['browsers.stop']({ id }, { caller: { conversationId: 'e2e00000-0000-4000-8000-0000000000ee' }, keyId: 'k1', reach });
-const liveA = () => { const e = keeper.ephemeralFor(KEY_A); return !!(e && e.live); };
+const KEY1 = ({ conversationId }) => ({ ok: conversationId === CID_A });          // reaches A only
+const KEY2 = ({ conversationId }) => ({ ok: conversationId === CID_B });          // a SECOND key: reaches B only
+const call = (id, reach = KEY1, extra = {}) => verbs['browsers.stop']({ id, ...extra }, { caller: { conversationId: 'e2e00000-0000-4000-8000-0000000000ee' }, keyId: 'k1', reach });
+const liveId = (id) => keeper.stopRows().some((r) => r.id === id);
+turns.set(KEY_A, 'idle'); turns.set(KEY_B, 'idle');
 await start();
 const pid = keeper.ephemeralFor(KEY_A).profileId;
 keeper.noteTabs({ kind: 'ephemeral', ns: 'vs-' + KEY_A, browserKey: KEY_A }, [{ tabId: 't1', targetId: 'AA01', url: 'https://mail.test/', title: 'Mail', active: true }]);
 cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId: 'AA01', type: 'page', url: 'https://mail.test/inbox', title: 'Inbox' }]);
 {
-  const rows = keeper.stopRows();
-  const r = rows.find((x) => x.id === pid);
-  ok(r && r.kind === 'own' && r.tabsKept === true && r.holders.length === 1 && r.holders[0].browserKey === KEY_A && r.holders[0].sessionId === 'sess-a' && r.takenOver === false && r.viewers === 0 && r.personBrowsing === false,
-    '② the keeper\'s rows: the conversation\'s own browser, its one holder, nobody drives or watches it', r);
+  const r = keeper.stopRows().find((x) => x.id === pid);
+  ok(r && r.kind === 'own' && r.tabsKept === true && r.holders.length === 1 && r.holders[0].sessionId === 'sess-a' && r.takenOver === false && r.viewers === 0 && r.inFlight === null, '② the keeper\'s rows: the conversation\'s own browser (kept store wired ⇒ tabs kept), its one holder, nothing in flight', r);
   turns.set(KEY_A, 'running');
   const a = await call(pid);
-  ok(!a.ok && a.code === 'holder_busy' && /turn is running/.test(a.why) && liveA(), '② the holder\'s turn RUNS: holder_busy, the browser still runs', a);
+  ok(!a.ok && a.code === 'holder_busy' && /running/.test(a.why) && liveId(pid), '② the holder\'s turn RUNS ⇒ holder_busy (your OWN browser too, while your own turn runs), it still runs', a);
   turns.delete(KEY_A);
   const b = await call(pid);
-  ok(!b.ok && b.code === 'holder_busy' && /unknown/.test(b.why) && liveA(), '② the holder\'s turn is UNKNOWN: holder_busy, the browser still runs', b);
+  ok(!b.ok && b.code === 'holder_busy' && /unknown/.test(b.why) && liveId(pid), '② the holder\'s turn UNKNOWN ⇒ holder_busy, it still runs', b);
   turns.set(KEY_A, 'idle');
   const t = keeper.takeover({ browserKey: KEY_A, viewerId: 'v1', sessionId: 'sess-a' });
   const c = await call(pid);
-  ok(t && t.ok !== false && !c.ok && c.code === 'person_driving' && liveA(), '② the person TOOK IT OVER: person_driving, it still runs', { t, c });
+  ok(t && t.ok !== false && !c.ok && c.code === 'person_driving' && liveId(pid), '② the person TOOK IT OVER ⇒ person_driving, it still runs', { t, c });
+  const unreached = await call(pid, KEY2);
+  ok(!unreached.ok && unreached.code === 'not_granted' && !/drives|takeover/.test(unreached.why), '② MUST 3 a SECOND key that does not reach it, while the takeover is on ⇒ not_granted — the takeover is never told', unreached);
   try { keeper.handback({ browserKey: KEY_A, viewerId: 'v1' }); } catch { }
-  try { keeper.release?.({ browserKey: KEY_A }); } catch { }
-  const stillDriven = keeper.inputStateFor(KEY_A, null).input === 'user';
-  if (stillDriven) console.log('  ○ (the takeover could not be handed back through this world — the next legs read it as still driven)');
+  ok(keeper.inputStateFor(KEY_A, null).input !== 'user', 'the takeover was HANDED BACK (a hand-back that fails fails the suite — never a silent skip)');
   keeper.noteViewers(KEY_A, null, 1);
   const d = await call(pid);
-  ok(!d.ok && (d.code === 'watched' || (stillDriven && d.code === 'person_driving')) && liveA(), '② a LIVE VIEW is open: watched, it still runs', d);
+  ok(!d.ok && d.code === 'watched' && liveId(pid), '② a LIVE VIEW is open ⇒ watched, it still runs', d);
   keeper.noteViewers(KEY_A, null, 0);
-  const e = await call(pid, () => ({ ok: false }));
-  ok(!e.ok && (e.code === 'not_granted' || (stillDriven && e.code === 'person_driving')) && liveA(), '② the holder is outside the key\'s reach: not_granted', e);
-  if (!stillDriven) {
-    const f = await call(pid);
-    const k1 = kept.get(KEY_A);
-    ok(f.ok && f.kind === 'own' && /reopen/.test(f.tabs) && !liveA() && k1.stoppedWhy === 'manager' && k1.restore && k1.restore.mode === 'auto' && k1.tabs[0].url === 'https://mail.test/inbox',
-      '③ admitted when idle: stopped under `manager`, the tabs read at the stop and kept, restore AUTO (not deliberate)', { f, kept: k1 && { why: k1.stoppedWhy, restore: k1.restore, tabs: k1.tabs } });
-    await start();
-    const k2 = kept.get(KEY_A);
-    const reopened = await until(() => fakeTabs('vs-' + KEY_A).some((t) => t.url === 'https://mail.test/inbox'), 5000);
-    ok(liveA() && k2.stoppedAt === null && !(k2.restore && k2.restore.mode === 'auto') && reopened, '③ the next command starts it again — and that start REOPENS the kept tab in the new browser (the restore consumed)', { kept: k2, tabs: fakeTabs('vs-' + KEY_A) });
-    // ④ CONTROL: a detach in the same world — the user's stop — is deliberate: kept, NOT reopened by themselves
-    await keeper.stop(keeper.ephemeralFor(KEY_A).profileId, { why: 'user' });
-    const k3 = kept.get(KEY_A);
-    await start();
-    await sleep(300);
-    const notReopened = !fakeTabs('vs-' + KEY_A).some((t) => t.url === 'https://mail.test/inbox');
-    ok(k3.stoppedWhy === 'user' && k3.restore === null && notReopened, '④ CONTROL the user\'s stop in the same world: deliberate — the tabs kept, and the next start does NOT reopen them (the probe tells the two apart)', { kept: k3, tabs: fakeTabs('vs-' + KEY_A) });
-  }
+  keeper.setStuckSource((bk) => (bk === KEY_A ? { state: 'dialog', profileId: pid } : null));
+  const f = await call(pid);
+  ok(!f.ok && f.code === 'in_flight' && /page dialog/.test(f.why) && liveId(pid), '② MUST 5 a page dialog open on it (the dialog watch\'s fact) ⇒ in_flight — a stop would cut it', f);
+  keeper.setStuckSource(null);
+  const lost = OPS.automationVerbs({ activeSessions: new Map([['sess-b', sessions.get('sess-b')]]), browsers: { rows: () => keeper.stopRows(), stop: (id) => keeper.managerStop(id) } });
+  const g = await lost['browsers.stop']({ id: pid }, { caller: { conversationId: 'x' }, keyId: 'k1', reach: KEY1 });
+  ok(!g.ok && g.code === 'holder_unknown' && liveId(pid), '② a holder MISSING from the session map ⇒ holder_unknown (its own reason, never «outside your reach»)', g);
+  const ok1 = await call(pid);
+  const k1 = kept.get(KEY_A);
+  ok(ok1.ok && ok1.freed === true && ok1.kind === 'own' && /reopen/.test(ok1.tabs) && !liveId(pid) && k1.stoppedWhy === 'manager' && k1.restore && k1.restore.mode === 'auto',
+    '③ admitted when idle and within reach: FREED (said), stopped under `manager`, the tabs read at the stop, restore AUTO', { ok1, kept: k1 && { why: k1.stoppedWhy, restore: k1.restore } });
+  const recA = keeper._reg().browsers[pid];
+  ok(recA.stoppedBy === 'manager' && recA.lastError !== 'manager', 'who stopped it is the record\'s stoppedBy (the Browser panel words it) — never the word in its error field', { stoppedBy: recA.stoppedBy, lastError: recA.lastError });
+  await start();
+  const reopened = await until(() => fakeTabs('vs-' + KEY_A).some((x) => x.url === 'https://mail.test/inbox'), 5000);
+  ok(liveId(keeper.ephemeralFor(KEY_A).profileId) && reopened, '③ the next command starts it again — and that start REOPENS the kept tab in the new browser');
+  await keeper.stop(keeper.ephemeralFor(KEY_A).profileId, { why: 'user' });
+  const k3 = kept.get(KEY_A);
+  await start(); await sleep(300);
+  ok(k3.stoppedWhy === 'user' && k3.restore === null && !fakeTabs('vs-' + KEY_A).some((x) => x.url === 'https://mail.test/inbox'), '④ CONTROL the user\'s stop in the same world is deliberate — the next start does NOT reopen the tab', k3);
 }
-// ⑥ A NAMED PROFILE: its holders are its leases; the person's own browsing refuses; an admitted stop says its tabs close
+// ⑥ A HELPER'S BROWSER (a child key) keeps nothing — the loss is accepted before, and the answer says so
 {
-  turns.set(KEY_A, 'idle');
+  const childPairs = B.childPairsOver(envA.pairs, B.childEnvFor({ childKey: KEY_A1, parentVariant: envA.variant }));   // a child's pairs = the parent's, overridden by its own
+  await keeper.ensureEphemeral({ browserKey: KEY_A1, sessionId: 'sess-a', envPairs: childPairs, sessionName: 'Research helper', variant: envA.variant });
+  const hid = keeper.ephemeralFor(KEY_A1).profileId;
+  const r = keeper.stopRows().find((x) => x.id === hid);
+  ok(r && r.kind === 'helper' && r.tabsKept === false, '⑥ MUST 1 a helper\'s browser (a child key) is its own kind and its tabs are NOT kept — never promised', r);
+  const a = await call(hid);
+  ok(!a.ok && a.code === 'tabs_lost' && /keeps nothing/.test(a.why) && liveId(hid), '⑥ MUST 1 refused unless the loss is accepted before (tabs_lost names --close-tabs)', a);
+  const b = await call(hid, KEY1, { closeTabs: true });
+  ok(b.ok && b.kind === 'helper' && /keeps nothing/.test(b.tabs) && !liveId(hid), '⑥ MUST 1 with closeTabs: stopped, and the answer says a helper\'s browser keeps nothing', b);
+}
+// ⑦ A NAMED PROFILE: its holders are its leases (reach over EVERY one), a person browsing refuses, no holder refuses, a loss accepted before
+{
   try { await keeper._facts?.probeVersion?.(); } catch { }
   const np = keeper.createProfile({ label: 'Work' }, { owner: { kind: 'instance', id: null } });
-  let attached = null; try { attached = await keeper.attach({ profileId: np.id, browserKey: KEY_A, sessionId: 'sess-a', by: 'user' }); } catch (e) { attached = { error: e && e.message }; }
-  await until(() => keeper.stopRows().some((r) => r.id === np.id), 5000);
-  const r0 = keeper.stopRows().find((r) => r.id === np.id);
-  ok(r0 && r0.kind === 'profile' && r0.tabsKept === false && r0.holders.length === 1 && r0.holders[0].browserKey === KEY_A && r0.personBrowsing === false, '⑥ a named profile\'s row: its holder is the conversation\'s lease, its tabs are not kept', { attached, r0 });
+  try { await keeper.attach({ profileId: np.id, browserKey: KEY_A, sessionId: 'sess-a', by: 'user' }); } catch { }
+  await until(() => liveId(np.id), 5000);
+  const r0 = keeper.stopRows().find((x) => x.id === np.id);
+  ok(r0 && r0.kind === 'profile' && r0.tabsKept === false && r0.holders.length === 1 && r0.personBrowsing === false, '⑦ a named profile\'s row: its holder is the conversation\'s lease; its tabs are not kept', r0);
+  const lossy = await call(np.id);
+  ok(!lossy.ok && lossy.code === 'tabs_lost' && /named profile/.test(lossy.why) && liveId(np.id), '⑦ MUST 5 a named profile\'s tabs would close: refused unless the call accepts it BEFORE', lossy);
+  keeper.noteViewers(KEY_A, np.id, 1);
+  const w = await call(np.id, KEY1, { closeTabs: true });
+  ok(!w.ok && w.code === 'watched' && liveId(np.id), '⑦ a WATCHED named profile ⇒ watched', w);
+  keeper.noteViewers(KEY_A, np.id, 0);
+  try { await keeper.attach({ profileId: np.id, browserKey: KEY_B, sessionId: 'sess-b', by: 'user' }); } catch { }
+  const two = await call(np.id, KEY1, { closeTabs: true });
+  ok(!two.ok && two.code === 'not_granted' && liveId(np.id), '⑦ MUST 3 one REACHED and one UNREACHED holder ⇒ not_granted (reach over every holder)', two);
+  keeper.reshapeStore((reg) => { reg.leases = reg.leases.filter((l) => l.profileId !== np.id); });
+  const none = await call(np.id, KEY1, { closeTabs: true });
+  ok(!none.ok && none.code === 'no_holder' && /idle clock/.test(none.why) && liveId(np.id), '⑦ MUST 2 a running named profile NOBODY holds ⇒ no_holder (its own idle clock stops it; a person can) — never «anybody\'s»', none);
+  try { await keeper.attach({ profileId: np.id, browserKey: KEY_A, sessionId: 'sess-a', by: 'user' }); } catch { }
   let browsed = null; try { browsed = await keeper.browse(np.id); } catch (e) { browsed = { error: e && e.message }; }
-  const r1 = keeper.stopRows().find((r) => r.id === np.id);
-  const g = await call(np.id);
-  ok(r1 && r1.personBrowsing === true && !g.ok && g.code === 'person_browsing' && keeper.stopRows().some((r) => r.id === np.id), '⑥ the PERSON browses in it: person_browsing, it still runs', { browsed: browsed && (browsed.error || 'ok'), g });
+  const pb = await call(np.id, KEY1, { closeTabs: true });
+  ok(!pb.ok && pb.code === 'person_browsing' && liveId(np.id), '⑦ the PERSON browses in it ⇒ person_browsing, it still runs', { browsed: browsed && (browsed.error || 'ok'), pb });
   const np2 = keeper.createProfile({ label: 'Shop' }, { owner: { kind: 'instance', id: null } });
   try { await keeper.attach({ profileId: np2.id, browserKey: KEY_A, sessionId: 'sess-a', by: 'user' }); } catch { }
-  await until(() => keeper.stopRows().some((r) => r.id === np2.id), 5000);
-  const h = await call(np2.id);
-  ok(h.ok && h.kind === 'profile' && h.tabs === 'Its tabs close; its sign-ins stay.' && !keeper.stopRows().some((r) => r.id === np2.id), '⑥ a named profile nobody uses: stopped, and the answer says its tabs close and its sign-ins stay (not reopened)', h);
+  await until(() => liveId(np2.id), 5000);
+  const h = await call(np2.id, KEY1, { closeTabs: true });
+  ok(h.ok && h.freed === true && h.kind === 'profile' && h.tabs === 'Its tabs closed; its sign-ins stay.' && !liveId(np2.id), '⑦ a named profile nobody uses, the loss accepted: FREED, and the answer says its tabs closed and its sign-ins stay', h);
 }
-// ⑤ RED: the verdict's unknown branch switched off
+// ⑧ THE ANSWER TELLS THE TRUTH ABOUT WHAT WAS FREED: a machine that could not be asked ⇒ not_freed, never ok
+{
+  const envB = beK.envFor({ browserKey: KEY_B, cwd: HOME });
+  await keeper.ensureEphemeral({ browserKey: KEY_B, sessionId: 'sess-b', envPairs: envB.pairs, sessionName: 'Other', variant: envB.variant });
+  const bid = keeper.ephemeralFor(KEY_B).profileId;
+  keeper.reshapeStore((reg) => { reg.browsers[bid].hostId = 'machine-unreachable'; });   // as if it ran on a paired machine nobody can ask now
+  const r = await call(bid, KEY2);
+  ok(!r.ok && r.code === 'not_freed' && /could not be asked/.test(r.why), '⑧ MUST 6 a paired machine that could not be asked: not_freed (said, with why) — never ok', r);
+}
+// ⑤ RED: a verdict that reads an UNKNOWN turn as idle would stop a mid-command browser
 {
   const MUT = mutantCopies('browser-stop-verb', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));
   const src = fs.readFileSync(new URL('../src/browser-profiles.js', import.meta.url), 'utf8');
-  const NEEDLE = "  if (busy) return no('holder_busy',";
+  const NEEDLE = "  const busy = holders.find((h) => h.turn !== 'idle');";
   ok(src.split(NEEDLE).length === 2, '⑤ the holder rule is in the verdict once (the mutation anchor)');
-  const M = MUT.load('src/browser-profiles.js', src.replace("  const busy = holders.find((h) => h.turn !== 'idle');", "  const busy = holders.find((h) => h.turn === 'running' || h.turn === 'waiting');"), 'unknown-turn-stops');
-  const v = M.stopVerdict({ live: true, takenOver: false, watched: false, personBrowsing: false, holders: [{ turn: null, granted: true }] });
+  const M = MUT.load('src/browser-profiles.js', src.replace(NEEDLE, "  const busy = holders.find((h) => h.turn === 'running' || h.turn === 'waiting');"), 'unknown-turn-stops');
+  const v = M.stopVerdict({ live: true, holders: [{ turn: null, granted: true }], kind: 'own', takenOver: false, watched: false, personBrowsing: false, tabsKept: true });
   ok(v.stop === true, '⑤ RED a verdict that reads an UNKNOWN turn as idle would stop it — the unknown leg above would be red', v);
+  const N2 = "  if (holders.some((h) => !h || h.granted !== true)) return no('not_granted'";
+  const M2 = MUT.load('src/browser-profiles.js', src.replace(N2, "  if (false) return no('not_granted'"), 'no-reach');
+  ok(src.split(N2).length === 2 && M2.stopVerdict({ live: true, holders: [{ turn: 'idle', granted: false }], kind: 'own', takenOver: false, watched: false, personBrowsing: false, tabsKept: true }).stop === true, '⑤ RED without the reach line an unreached holder\'s browser would stop');
+  const N3 = "  if (holders.length === 0) return no('no_holder'";
+  const M3 = MUT.load('src/browser-profiles.js', src.replace(N3, "  if (false) return no('no_holder'"), 'vacuous');
+  ok(src.split(N3).length === 2 && M3.stopVerdict({ live: true, holders: [], kind: 'profile', takenOver: false, watched: false, personBrowsing: false, tabsKept: false, closeTabs: true }).stop === true, '⑤ RED without the no-holder line a profile nobody holds would be anybody\'s (vacuous checks)');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
