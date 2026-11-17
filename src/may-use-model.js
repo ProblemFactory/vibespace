@@ -81,7 +81,7 @@ function channelsOf(answers, accounts) {
     under.delete(`account:${a.id}`);
     const convs = bounded(kids.filter((k) => k.door === 'channel-reach' && /^conversation:/.test(k.resource)));
     const rules = bounded(kids.filter((k) => k.door === 'channel-reach' && /^rule:/.test(k.resource)));
-    out.push({ account: a, rules: rules.rows, rulesMore: rules.more, conversations: convs.rows, conversationsMore: convs.more,
+    out.push({ account: a, rules: rules.rows, rulesMore: rules.more, chats: convs.rows, chatsMore: convs.more,   // `chats`: one account's single channel conversations (never a digest's `conversations` — test-channel-rows)
       watch: kids.filter((k) => k.door === 'channel-watch').sort(byRank), api: kids.filter((k) => k.door === 'channel-api').sort(byRank) });
   }
   // a grain whose account is not in the list (an account removed while its rows stay) is said by itself, never dropped

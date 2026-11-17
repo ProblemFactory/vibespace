@@ -417,6 +417,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     if ((s.backend || 'claude') === 'claude' || s.backend === 'codex') items.push({ label: tr('Switch billing…') });
     if (s.status === 'stopped' && !s.host) items.push({ label: tr('Rescue transcript…') });
     items.push({ label: tr('Properties…') });
+    items.push({ label: tr('What it may use…') });   // unit what-it-may-use: Properties at that section
     if (s.status !== 'stopped') items.push({ label: tr('Terminate'), style: 'color: var(--red, #e55)' });
     return items;
   };
@@ -445,6 +446,8 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   click('Focus window'); click('Star'); click('Switch billing…'); click('Rename…'); click('Set status…'); click('Copy path'); click('Open working directory'); click('Properties…'); click('Go to window'); click('View History');
   ok(J(calls) === J([['attachSession', 'sess-1', 'W', '/w', { mode: 'chat', backend: 'claude' }], ['toggleStar'], ['showBillingSwitcher', s, { x: 1, y: 2 }], ['rename', true, 'N'], ['status', true, true], ['openFileExplorer', '/w', { host: 'h1' }], ['openSessionProps', s], ['goToWindow', 'sess-1'], ['viewSession', 'abc', '/w', 'C', { backend: 'claude' }]]) && J(copyCalls) === J(['/w']),
     'session-card actions call the same app/state handlers with the same arguments', J(calls));
+  calls.length = 0; items.find((i) => i.label === 'What it may use…').action();
+  ok(J(calls) === J([['openSessionProps', s, { section: 'may-use' }]]), 'unit what-it-may-use: «What it may use…» opens Properties AT that section (openSessionProps(s, {section: \'may-use\'}))', J(calls));
   const stoppedItems = menuItems('session-card', { ...ctx, s: { ...s, status: 'stopped', webuiId: null } });
   calls.length = 0; stoppedItems.find((i) => i.label === 'Resume in Terminal').action();
   ok(J(calls) === J([['resumeSession', 'abc', '/w', 'C', { mode: 'terminal', accountId: 'acct-1', backend: 'claude' }]]), 'Resume in Terminal reads the per-session account config at click time (legacy cfgA)', J(calls));

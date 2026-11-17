@@ -13589,7 +13589,7 @@ export default {
   "Reading what it may use…": "正在读取它能用什么…",
   "Shared windows": "共享的窗口",
   "Share…": "共享…",
-  "The vault is locked — what it may use there is checked once it is unlocked": "保险库已锁 —— 解锁后才能核对它在保险库里能用什么",
+  "The vault is locked — unlock it in the Vault window to see what it may use there": "保险库已锁 —— 在保险库窗口解锁后，才能看到它在保险库里能用什么",
   "This conversation has no id of its own yet — try again in a moment": "这个对话还没有自己的 id —— 稍后再试",
   "What it may use…": "能用什么…",
   "cannot be read by this release": "当前版本读不了",

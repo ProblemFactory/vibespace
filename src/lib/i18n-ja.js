@@ -13588,7 +13588,7 @@ export default {
   "Reading what it may use…": "使えるものを読み込み中…",
   "Shared windows": "共有されたウィンドウ",
   "Share…": "共有…",
-  "The vault is locked — what it may use there is checked once it is unlocked": "保管庫はロック中 — ロック解除後に確認します",
+  "The vault is locked — unlock it in the Vault window to see what it may use there": "保管庫はロック中 — 保管庫ウィンドウでロックを解除すると、使えるものが見えます",
   "This conversation has no id of its own yet — try again in a moment": "この会話にはまだ自分の ID がありません — 少し待ってからもう一度",
   "What it may use…": "使えるもの…",
   "cannot be read by this release": "このリリースでは読めません",

@@ -175,7 +175,7 @@ console.log('— ⑤ THE CHANNEL DOOR, REAL: accounts in the form\'s rows, rules
   ok(w && w.ok && w.parent === 'account:a2' && api && api.ok && api.detail.tier === 'read' && api.via === 'group' && api.parent === 'account:a1', '⑤ the notification that wakes it (Team chat) and its raw-API tier (read, through its Task Group)', { w, api });
   const v = M.viewOf({ answers: r.answers, accounts: r.accounts });
   const ch = v.kinds.find((k) => k.kind === 'channels');
-  ok(ch.accounts.length === 2 && ch.accounts[0].account.id === 'a1' && ch.accounts[0].rules.length === 1 && ch.accounts[1].conversations.length === 1, '⑤ the view puts each grain under its account', ch.accounts.map((a) => ({ id: a.account.id, rules: a.rules.length, convs: a.conversations.length })));
+  ok(ch.accounts.length === 2 && ch.accounts[0].account.id === 'a1' && ch.accounts[0].rules.length === 1 && ch.accounts[1].chats.length === 1, '⑤ the view puts each grain under its account', ch.accounts.map((a) => ({ id: a.account.id, rules: a.rules.length, chats: a.chats.length })));
 }
 
 console.log('— ⑥ THE COST at the owner\'s size: 200 000 channel conversation rows, a few hundred grants — under BUDGET_MS, PRINTED');

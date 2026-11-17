@@ -109,7 +109,7 @@ export function mountMayUse(app, getRef) {
       const chanDoor = doorBtn('chan', t('Channels window'), `data-acc="${escHtml(a.id)}"`);
       const kids = [
         ...x.rules.map((r) => line(r, '', r.detail && r.detail.authority ? authWords(r.detail.authority) : '')), more(x.rulesMore, chanDoor),
-        ...x.conversations.map((r) => line(r, '', r.detail && r.detail.authority ? authWords(r.detail.authority) : '')), more(x.conversationsMore, chanDoor),
+        ...x.chats.map((r) => line(r, '', r.detail && r.detail.authority ? authWords(r.detail.authority) : '')), more(x.chatsMore, chanDoor),
         ...x.watch.map((r) => line({ ...r, name: t('Its notifications wake it — {name}', { name: r.name }) })),
         ...x.api.map((r) => line({ ...r, name: t('Raw API: {tier}', { tier: r.detail.tier }) }, '', r.detail.perDay ? t('{n} a day', { n: r.detail.perDay }) : '')),
       ].join('');
@@ -131,7 +131,7 @@ export function mountMayUse(app, getRef) {
     const va = kinds.vault;
     if (va) {
       const hostsOf = (r) => (r.detail && Array.isArray(r.detail.hosts) && r.detail.hosts.length ? t('hosts {list}', { list: r.detail.hosts.slice(0, 3).join(', ') + (r.detail.hosts.length > 3 ? ' …' : '') }) : '');
-      const lines = va.locked ? none(t('The vault is locked — what it may use there is checked once it is unlocked'))
+      const lines = va.locked ? `<div class="ns-pv-via dim mu-none">${escHtml(t('The vault is locked — unlock it in the Vault window to see what it may use there'))} ${doorBtn('vault', t('Vault'))}</div>`
         : [...va.use.map((r) => line(r, doorBtn('vault', t('Vault'), `data-focus="${escHtml(r.resource)}"`), hostsOf(r))), more(va.useMore, doorBtn('vault', t('Vault'))),
           ...va.jobs.map((r) => line({ ...r, name: t('Job {job} uses {entry} at every start', { job: r.detail.job, entry: r.name.split(' · ')[0] }) }, doorBtn('vault', t('Vault'), `data-focus="${escHtml(r.resource.split('|')[0])}"`))), more(va.jobsMore, doorBtn('vault', t('Vault')))].join('')
           || none(t('No vault entry is open to it'));
