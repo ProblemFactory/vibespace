@@ -645,8 +645,12 @@ function setup(ctx) {
     // most SWEEP_ANSWER_MAX_BYTES (the worker refuses past it, said); the held rows are a subset of the rows
     const rowsIn = kept.length + Object.values(others).reduce((n, a) => n + (Array.isArray(a) ? a.length : 0), 0);
     if (rowsIn > SWEEP_ROWS_IN_MAX) throw Object.assign(new Error(`the sweep's input is ${rowsIn} rows (the bound is ${SWEEP_ROWS_IN_MAX})`), { code: 'sweep-input-too-big' });
+    // the manager design's piece 7: an ENDED row with words waiting carries `waiting` {n, code, until} — read here for the few
+    // conversations a store names (as fresh as the sweep), merged into the stopped rows by the sweep's assembler
+    let waiting = null;
+    try { waiting = typeof ctx.waitingAll === 'function' ? ctx.waitingAll() : null; } catch (e) { console.warn('[sessions] the waiting notices:', e.message); }
     const payload = {
-      active, webuiPids: [...(webuiPids || [])], devSnap, order, offLoop, others, signInPids: [...signInPids], kept, bound, maxBytes: _sweepTest.answerMaxBytes || SWEEP_ANSWER_MAX_BYTES,
+      active, webuiPids: [...(webuiPids || [])], devSnap, order, offLoop, others, signInPids: [...signInPids], kept, waiting, bound, maxBytes: _sweepTest.answerMaxBytes || SWEEP_ANSWER_MAX_BYTES,
       facts: { roots: SP.snapshot(), blocked: DOOR.snapshot() },
     };
     let out;

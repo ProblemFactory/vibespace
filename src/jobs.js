@@ -19,6 +19,7 @@ const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('
 const { spawn, execFile } = require('child_process');
 const M = require('./job-model.js');
 const { priorityArgv } = require('./spawn/line.js'); // PURE (B-460d): a job's wrapper starts with `nice -n 5` — the words of a start's priority
+const DW = require('./delivery-wake.js');   // the manager design's piece 7: which deliveries owe an ENDED owner a wake (PURE)
 const VJ = require('./vault-job.js'); // PURE (lane vault-job-road): a job's --vault values — the grammar, the verdict at every spawn, the fd plan, the frame
 const JN = require('./job-notice.js'); // PURE (lane job-notice-dedupe): a published service's notice is a STATE CHANGE — the verdict over its down record
 const { credentialEnvNames } = require('./harness-env.js'); // PURE: B-6be2 — the job door's credential strip, derived from the descriptors
@@ -1128,6 +1129,7 @@ class JobManager {
         this.d.log(`[jobs] notify → parked for retry for ${cid} (${r.reason || 'timeout'}; phase ${r.phase || '?'}; target mid-turn: ${r.busy === true ? 'yes' : r.busy === false ? 'no' : 'unknown'}${Number(r.late) > 0 ? `; our loop was ${Number(r.late)} ms late` : ''}; next attempt ${r.retryAt ? new Date(r.retryAt).toISOString() : '?'} or at the turn end)`);
       } else {
         this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber, held: heldOf(r, (r && r.reason) || 'unreachable'), mark });
+        if (r && r.notRunning === true) this._oweWake(cid, job, ev, { subscriber });   // the manager design's piece 7: the words are stashed (durable) FIRST
       }
       this._dirty = true;
       try { this.d.broadcast('jobs-updated', { id: job.id }); } catch { }
@@ -1147,8 +1149,24 @@ class JobManager {
    *  the 30 s floor — the floor counts the SUCCESSFUL delivery (R5); `fell` stashes it in THIS store with the park's
    *  reason typed (`not-running` / `not-reachable` / `spend-cap` + the attempts' facts) and answers true = taken. A
    *  job record that is gone (archived, removed) is still booked by the meta the park kept. */
+  /** an owed wake's ANSWER, on ONE job's journal: the `wake` lane, carrying the conversation (a limit: until when) */
+  _wakeAnswered(cid, jobId, extra = {}) {
+    const wj = this.jobs.get(jobId) || null;
+    if (!wj) return;
+    const delivered = extra.outcome === 'delivered';
+    const i18n = DW.journalWords(delivered ? 'resuming' : 'refused', { why: extra.why || extra.outcome || '' });
+    this._notifyLogPush(wj, { lane: 'wake', ok: delivered, to: cid, outcome: extra.outcome || null, reason: delivered ? 'resumed its ended owner to deliver this' : `its owner is ended and was not resumed: ${extra.why || extra.outcome || 'unknown'}`, i18n: { key: i18n.key, params: i18n.params }, ...(extra.until ? { until: extra.until } : {}), ...(extra.sessionId ? { sessionId: extra.sessionId } : {}) });
+    if (delivered) wj.lastNotify = { ts: now(), lane: 'wake', ok: true, to: cid };
+    this._dirty = true;
+    try { this.d.broadcast('jobs-updated', { id: wj.id }); } catch { }
+  }
   _onRetryEvent(ev, cid, entry, extra = {}) {
+    // the manager design's piece 7: an owed wake's ANSWER reaches EVERY job it carries, whichever producer asked first (a
+    // peer's wake and a job's result ride ONE wake; each delivery's own facts are in `metas`)
+    if (ev === 'wake' && entry && Array.isArray(entry.metas)) { for (const id of new Set(entry.metas.filter((m) => m && m.jobId).map((m) => m.jobId))) this._wakeAnswered(cid, id, extra); return false; }
     if (!entry || entry.producer !== 'jobs' || !entry.meta || !entry.meta.jobId) return false;
+    if (ev === 'wake-owed') return false;   // _oweWake already journaled the owed wake
+    if (ev === 'wake') { this._wakeAnswered(cid, entry.meta.jobId, extra); return false; }   // an entry written before `metas`
     if ((ev === 'delivered' || ev === 'fell') && this._retryVerdicts) this._retryVerdicts.delete(entry.id);   // r6: the memo ends with its entry
     const meta = entry.meta;
     const job = this.jobs.get(meta.jobId) || null;
@@ -1206,6 +1224,21 @@ class JobManager {
   _notifyLogPush(job, e) {
     job.notifyLog = [...(job.notifyLog || []), { ts: now(), ...e }].slice(-12);
     this._dirty = true;
+  }
+  /** THE MANAGER DESIGN'S PIECE 7 — an ENDED owner is owed ONE wake for its job's result / a schedule's reminder / a missed one-time
+   *  run / a task a restart interrupted (src/delivery-wake.js owesWake: never a subscriber's copy). The
+   *  words are already in this engine's stash; the park's rung puts the conversation on the hub's resume line, whose answer comes
+   *  back as the park's `wake` event (_onRetryEvent → the journal's `wake` line). */
+  _oweWake(cid, job, ev, { subscriber = false } = {}) {
+    if (typeof this.d.parkEndedWake !== 'function') return null;
+    const v = DW.owesWake({ producer: 'jobs', kind: subscriber ? 'subscriber' : (ev && ev.wake) || null });
+    if (!v.owe) return null;
+    let r = null;
+    const label = this.labelOf(job);   // the ONE accessor (test-architecture §93), named once
+    try { r = this.d.parkEndedWake(cid, { producer: 'jobs', spendReason: v.reason, kind: 'notification', fromName: `Background Work · ${label}`, reason: (ev && ev.what) || job.state, meta: { jobId: job.id, jobName: label, wake: ev.wake } }); }
+    catch (e) { this.d.log(`[jobs] ${cid}: the owed wake could not be parked — ${e.message} (the words wait in the stash)`); return null; }
+    if (r && r.parked) this._notifyLogPush(job, { lane: 'wake', ok: null, owed: true, to: cid, reason: r.merged ? 'its owner is ended — this rides the wake it is already owed' : 'its owner is ended — owed a wake: it goes to the resume line' });
+    return r;
   }
   /** STASH = held, and every held entry says WHY (5b ①): `held` is
    *  {kind: spend-cap|rate-floor|not-reachable|off, why?, identity?, cap?,
@@ -1336,6 +1369,10 @@ class JobManager {
     };
   }
   /** The notifications waiting for a conversation (the SAME objects — `drainNotifs(cid, new Set(these))` takes them). */
+  /** the conversations a job notice waits for (piece 7: the ended row's count reads these few) */
+  notifCids() { return [...this.pendingNotifs.keys()].filter((cid) => (this.pendingNotifs.get(cid) || []).length > 0); }
+  /** how many notices wait for a conversation — a COUNT, never judged (no view re-judge, no write: the row's fact reads it on a GET) */
+  notifCount(cid) { return cid ? (this.pendingNotifs.get(cid) || []).length : 0; }
   peekNotifs(cid) {
     if (!cid) return [];
     this._judgeHeldView(cid);
@@ -2690,11 +2727,11 @@ class JobManager {
       if (job.kind === 'service') { job.state = 'down'; this._touch(job, { what: `down: ${said}`, alarm: true }); return; }
       job.state = 'failed';
       this._touch(job, { what: `failed: ${said}`, alarm: true });
-      this._notifyOwner(job, { what: `failed: ${said}` });
+      this._notifyOwner(job, { what: `failed: ${said}`, wake: 'result' });
       return;
     }
     if (job.kind === 'service') { job.state = 'down'; this._touch(job); }
-    else { job.state = 'interrupted'; this._touch(job, { what: 'interrupted (env-restart: the host/pod restarted)' }); }
+    else { job.state = 'interrupted'; this._touch(job, { what: 'interrupted (env-restart: the host/pod restarted)' }); this._notifyOwner(job, { what: 'interrupted (the machine restarted while it ran) — start it again if it still matters', wake: 'interrupted' }); }   // the manager design's piece 7: a task a restart interrupted is a RESULT to its owner (until now nobody was told)
   }
   /** a run's own record in its ctl dir — exit.json, and (lane jobs-memory-bound) bound.json / pressure.json the wrapper writes */
   _ctlJson(job, run, name) {
@@ -2765,7 +2802,7 @@ class JobManager {
     }
     this.d.log(`[jobs] ${job.id} ${M.MEMORY_PARK_TEXT} (${run.cause}; bound ${M.memoryWords(run.memoryMb)}${run.memoryBound ? ' · ' + run.memoryBound.by : ''})`);
     this._forYou(job, M.forYouCopy(job, 'parked-memory'));
-    this._notifyOwner(job, { what: `${what} (vibespace-job memory ${parent ? parent.id : job.id} <size>, then vibespace-job start ${parent ? parent.id : job.id})` });
+    this._notifyOwner(job, { what: `${what} (vibespace-job memory ${parent ? parent.id : job.id} <size>, then vibespace-job start ${parent ? parent.id : job.id})`, wake: 'result' });
   }
   /** Was a run's protocol mismatch the update's WINDOW (lane job-wrapper-update-window)? Yes when an older server generation
    *  started it (this one is the restart), or the wrapper changed on disk after this server booted and not long ago (the
@@ -2832,7 +2869,7 @@ class JobManager {
         this._teardownPublish(job);
         this._touch(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit})`, alarm: true });
         this._forYou(job, M.forYouCopy(job, 'parked'));
-        this._notifyOwner(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit}) — start it again once fixed` });
+        this._notifyOwner(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit}) — start it again once fixed`, wake: 'result' });
       } else if (dec.restartInMs) {
         job.state = 'down'; this._touch(job);
         const t = setTimeout(() => { try { this._startAfter(job, 'restart-policy', () => job.desiredUp && job.state === 'down'); } catch { } }, dec.restartInMs); // round 5: never beside what its last run left
@@ -2862,7 +2899,7 @@ class JobManager {
       // owner auto-notify honors the same quiet-success law: routine scheduled
       // success never messages anyone; agent-stopped ('interrupted') skips too
       // — the owner just did it and a message would echo their own action.
-      if (!routineCronOk && job.state !== 'interrupted') this._notifyOwner(job, { what: evText });
+      if (!routineCronOk && job.state !== 'interrupted') this._notifyOwner(job, { what: evText, wake: 'result' });
     }
     // round 5 (the ruling): a service keeps what its run left only while it runs — stopped or parked, they are stopped too
     if (job.kind === 'service' && left && left.kept && (!job.desiredUp || job.state === 'failed')) this._clearKept(job, run).then(() => this._cutSaid(job, run)).catch(() => { });
@@ -3048,7 +3085,7 @@ class JobManager {
             job.state = 'missed'; job.desiredUp = false; job.nextFireAt = null;
             this._touch(job, { what: 'missed its {at} time while the server was down', alarm: true });
             this._forYou(job, M.forYouCopy(job, 'missed'));
-            this._notifyOwner(job, { what: 'MISSED its scheduled {at} time (server was down) — reschedule if it still matters' });
+            this._notifyOwner(job, { what: 'MISSED its scheduled {at} time (server was down) — reschedule if it still matters', wake: 'missed' });
             continue;
           }
         }
@@ -3082,7 +3119,7 @@ class JobManager {
       // delivery rides the same toggles/rate-floor/stash as every job event.
       // the --text is the author's WORDS (whole to it, belted for a subscriber); with none the body is the job's LABEL — the same
       // belted name the header and the card carry (r4, claim r3-2 minor 6: the raw name rode the body beside a masked header)
-      this._notifyOwner(job, a.text ? { what: a.text, agentWhat: true } : { what: this.labelOf(job) });
+      this._notifyOwner(job, a.text ? { what: a.text, agentWhat: true, wake: 'reminder' } : { what: this.labelOf(job), wake: 'reminder' });
       this._event(job, 'cron fired: notify');
     } else if (a.type === 'spawn-task') {
       // ONE persistent child per cron (2.343.3, owner report: every fire used
@@ -3400,6 +3437,7 @@ class JobManager {
     if (!vet.ok) return { error: vet.error };
     // B-f276: while the records cannot be read nothing new is created (a record made now could not be written: it would end with this process)
     if (this._unread.store) return { error: this.unreadWords('no job is created until they are read'), code: 'records-unread' };
+    if (spec && spec[DW.GRANT_FIELD] !== undefined) return { error: DW.GRANT_REFUSAL, code: 'wake_grant_person_only' };   // piece 7: never through a create (the person's own included: one door each)
     if (spec.kind === 'cron') {
       const v = M.validateSchedule(spec.schedule, { agentCreated: !caller.isUser });
       if (!v.ok) return { error: v.error };
@@ -3552,6 +3590,37 @@ class JobManager {
   /** THE BOUND, CHANGED (lane jobs-memory-bound) — from the job's properties (the owner) or `vibespace-job memory` (its owner
    *  conversation): a per-job value, or null / 'inherit' = back to THE LADDER. It applies from the NEXT run (the running
    *  process keeps the bound it started under); a cron's lands on its task (and its child) — the fire runs that. */
+  /** THE GRANT (the manager design's piece 7, 主开发 2026-11-17 05:02Z / 05:13Z): «may wake its conversation when that
+   *  conversation was ended on purpose» — one field on the job or schedule row (DW.GRANT_FIELD), default no, said ONCE per job
+   *  and it holds, with `wakeGrantBy {by, at, kind, name}` beside it (who set it — the window's wake line names it). THREE
+   *  writers and no fourth: the PERSON (a press minted at the door — src/write-origin.js pressOf — or the proposal card's
+   *  press), a MANAGER KEY holding the verb jobs.wakeGrant (the person's delegation), and nobody else: a plain agent token is
+   *  refused BY NAME, the refusal naming the door it has (`vibespace-job propose-wake`). A cron's runs read their parent's.
+   *  `by` = { kind: 'person' | 'key', by: the actor, name? } */
+  setWakeGrant(job, grant, { by = null } = {}) {
+    if (this.readOnly || !this.ready) return { error: this.initError ? `jobs engine down: ${this.initError}` : 'jobs engine not ready — retry shortly' };   // as its sibling writers
+    if (!by || (by.kind !== 'person' && by.kind !== 'key')) return { error: DW.GRANT_REFUSAL, code: 'wake_grant_person_only' };
+    if (job.cronParent) return { error: `refused: ${job.id} is a run of the schedule ${job.cronParent} — the grant is the schedule's`, code: 'bad_args' };
+    const on = grant === true;
+    if ((job[DW.GRANT_FIELD] === true) === on) return { changed: false, [DW.GRANT_FIELD]: on, wakeGrantBy: job.wakeGrantBy || null };
+    if (on) { job[DW.GRANT_FIELD] = true; job.wakeGrantBy = { by: String(by.by || by.kind), at: now(), kind: by.kind, ...(by.name ? { name: String(by.name).slice(0, 80) } : {}) }; }
+    else { delete job[DW.GRANT_FIELD]; delete job.wakeGrantBy; }
+    const who = by.kind === 'person' ? 'the person' : `the key ${by.name ? '«' + String(by.name).slice(0, 80) + '»' : by.by}`;
+    this._touch(job, { what: on ? `may now wake its conversation after that conversation is ended on purpose (set by ${who})` : `no longer wakes its conversation after that conversation is ended on purpose (cleared by ${who})` });
+    this._save();
+    try { this.d.broadcast('jobs-updated', { id: job.id }); } catch { }
+    return { changed: true, [DW.GRANT_FIELD]: on, wakeGrantBy: job.wakeGrantBy || null };
+  }
+  /** the doors' rows for these jobs (piece 7): the facts each row needs, the NAME through the ONE accessor (labelOf); a CLEARED
+   *  job answers its id (the clear honoured at the read) */
+  wakeRowsOf(jobs) { return DW.wakeChoiceRows((jobs || []).filter(Boolean).map((j) => ({ id: j.id, label: j.clearedAt ? j.id : this.labelOf(j), schedule: j.kind === 'cron' ? (j.schedule || true) : null, nextFireAt: j.nextFireAt || null, grant: j[DW.GRANT_FIELD] === true, grantBy: j.wakeGrantBy || null }))); }
+  /** the grant a delivery's job carries — read AT THE LINE → {granted, by}. A cron's RUN carries none of its own: its grant is
+   *  its SCHEDULE's, read there only (主开发 12:46Z MUST 4 — a run's own field was a fourth writer no door could clear) */
+  wakeGrantOf(jobId) {
+    const j = this.jobs.get(jobId) || null;
+    const g = j && (j.cronParent ? this.jobs.get(j.cronParent) : j);
+    return g && g[DW.GRANT_FIELD] === true ? { granted: true, by: g.wakeGrantBy || null } : { granted: false, by: null };
+  }
   setMemory(job, raw, { byUser = false } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     let mb = null;
@@ -3680,7 +3749,7 @@ class JobManager {
       schedule: job.schedule, nextFireAt: job.nextFireAt || null, context: this._contextFor(job, author),
       owner: { createdBy: job.owner?.createdBy, groups: job.owner?.groupsSnapshot || [] },
       access: job.access, createdAt: job.createdAt, cronParent: job.cronParent || null,
-      notify: job.notify || 'inherit', lastNotify: job.lastNotify || null, subscribersCount: (job.subscribers || []).length,
+      notify: job.notify || 'inherit', lastNotify: job.lastNotify || null, subscribersCount: (job.subscribers || []).length, [DW.GRANT_FIELD]: job[DW.GRANT_FIELD] === true, wakeGrantBy: job.wakeGrantBy || null,   // piece 7: the grant + who set it
       notifyLog: (job.notifyLog || []).slice(-8),
       forYouLast: job.forYouLast || null,   // r4: each For-you copy's LAST verdict (past the journal's window; a cron's carries its run's)
       // full creation parameters (2.347.0, owner ask: agents must be able to

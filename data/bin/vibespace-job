@@ -191,6 +191,9 @@ control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibesp
          vibespace-job access <id> [--view session|group|all] [--control session|group|all]
          vibespace-job notify <id> on|off|inherit   (owner only — change auto-notify without recreating)
          vibespace-job memory <id> 8G|512M|inherit  (owner only — its memory bound from its next run; 0 is the user's call)
+         vibespace-job propose-wake <id> "why"  (not on this instance yet — it answers proposal_door_not_ready. Only the
+             person (the Terminate confirm, the job's row) or a manager key holding jobs.wakeGrant lets a job resume your
+             conversation after an end on purpose; a restart-ended conversation needs none)
          vibespace-job subscribe <id> [--filter "SpaceX|Starship"] · unsubscribe <id>   (any session that can VIEW
            the job gets its notifications; --filter = case-insensitive regex on the message text, re-subscribe updates it;
            the OWNER subscribing to its own job: the filter shapes its auto-notify too)
@@ -248,6 +251,8 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         // lane job-notify-user: the For-you copy is ONE top-level field for every shape — notify-cron never sent it (the
         // fire woke only the agent) and a scheduled run hid it inside action.task, where the cron's own record said false
         notifyUser: !!flags['notify-user'],
+        // piece 7: --propose-wake "why" files the proposal that this job may resume this conversation after an end on purpose
+        ...(flags['propose-wake'] !== undefined ? { proposeWake: String(flags['propose-wake'] === true ? '' : flags['propose-wake']) } : {}),
       };
       // REMINDER-INSTINCT SUPPORT (2.361.4, owner call): "scheduled run of a
       // bare echo" is a natural first way to build a reminder — but scheduled
@@ -322,6 +327,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         else console.log(`scheduled task: SUCCESSFUL fires are SILENT (failures/asks/parks notify) — add --notify-ok to be messaged on every fire; for pure reminders use notify-cron.`);
       }
       if (r.survivalNote) console.log('runtime note: ' + r.survivalNote);
+      if (r.wakeProposal) console.log(r.wakeProposal.error ? `the wake proposal was NOT filed: ${r.wakeProposal.error}` : `proposed to the person: ${j.id} may resume this conversation after it is ended on purpose — one press approves; the answer comes at your next turn`);
       break;
     }
     case 'docs': {
@@ -411,6 +417,14 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/memory`, { value: pos[2] });
       const rc = r.memoryCap && r.memoryCap.limitMb ? ` — capped by ${capWords(r.memoryCap)} (asked ${r.memoryAskedMb ? sizeWords(r.memoryAskedMb) : 'unbounded'})` : '';
       console.log(`memory bound: ${r.memoryMb ? sizeWords(r.memoryMb) : 'unbounded'}${rc} (${r.memorySource}) — from its next run; a parked job waits for vibespace-job start`);
+      break;
+    }
+    case 'propose-wake': {
+      // the manager design's piece 7: ask the PERSON to let this job (or schedule) resume this conversation after it is ended on
+      // purpose — a card, one press approves; free, wakes nobody; the answer comes at this conversation's next turn
+      if (!pos[1] || !pos[2]) { console.error('usage: vibespace-job propose-wake <id|name> "one sentence why"'); process.exit(1); }
+      const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/propose-wake`, { why: pos.slice(2).join(' ') });
+      console.log(r.already ? `${r.job} already may resume this conversation after an end on purpose — nothing was filed` : `proposed to the person: ${r.job} may resume this conversation after it is ended on purpose — one press approves; the answer comes at your next turn`);
       break;
     }
     case 'notify': {

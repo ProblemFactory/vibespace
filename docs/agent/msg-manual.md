@@ -128,6 +128,13 @@ Both at once = still ONE wake. A second reply, a reply after 2 h, a reply you we
 
 A message to a conversation that was archived (or is gone) is never "waiting": `read` says `not delivered — <name>'s conversation was archived`; a STOPPED one still waits (`<name> is stopped — delivered when it resumes`). A direct group whose other side ended is CLOSED (`group list` shows `(closed)`, `read` still works), and `send` to that agent is refused `ended`.
 
+A `--wake` that names ONE stopped conversation (`send <agent> --wake`, `dispatch`, an @name of one member) is OWED a resume:
+the wake line says `held (not billed yet) — <name>: the conversation was ended — if a restart ended it, it is resumed and gets
+this as a turn; if it was ended on purpose, this waits for its next turn`. Only a conversation a RESTART ended is resumed by a
+peer (one turn, through the hub's line, after the account's limit and the spend ceiling are asked); one ended on purpose — by a
+person or an agent — is never resumed by your message. A wake to several members (a whole group's `--wake`, «always», an
+invite) never resumes anyone: you are told `k member(s) are ended; this rides their next turn`.
+
 ## Hand over what you made (--artifact)
 
 `vibespace-msg send <agent> "the design is ready" --artifact /abs/designs/doc-ui /abs/path/report.md` (every path after

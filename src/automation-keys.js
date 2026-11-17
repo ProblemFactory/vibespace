@@ -110,6 +110,14 @@ const boolArg = (v, what) => {
   if (['false', 'no', '0', 'off'].includes(t)) return { ok: true, value: null };
   return bad(`${what} is yes or no`);
 };
+/** An on/off argument that must be SAID (no default): true / 'on' / 'yes' ⇒ true; false / 'off' / 'no' ⇒ false. */
+const onOffArg = (v, what) => {
+  if (v === true || v === false) return { ok: true, value: v };
+  const t = str(v == null ? '' : v).trim().toLowerCase();
+  if (['true', 'yes', '1', 'on'].includes(t)) return { ok: true, value: true };
+  if (['false', 'no', '0', 'off'].includes(t)) return { ok: true, value: false };
+  return bad(`${what} is required: on or off`);
+};
 /** Validate an args object against named fields: `spec` = { field: (v) => {ok, value} }; unknown fields are refused by name. */
 function argsOf(raw, spec) {
   const a = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
@@ -158,6 +166,11 @@ const SCOPES = Object.freeze([
   // precomputed (src/conversation-facts.js endVerdict) — a READ, not billed
   Object.freeze({ verb: 'conversations.list', layer: 'read', billed: false, label: 'List conversations and browsers', // ui-words: a t() key — the Vault window words it (zh / ja rows)
     args: (a) => argsOf(a, {}) }),
+  // the manager design's piece 7 (主开发 2026-11-17 05:13Z — the owner: «the manager agent can do it for the person»): set or clear
+  // a job's or schedule's GRANT to resume its conversation after that conversation was ended on purpose — on a job whose owner
+  // conversation the key reaches; the row records the key as who set it (the window's wake line names it). Nothing is billed.
+  Object.freeze({ verb: 'jobs.wakeGrant', layer: 'act', billed: false, label: 'Let a job resume its conversation after an end on purpose',   // ui-words: a t() key — the Vault window words it (zh / ja rows exist)
+    args: (a) => argsOf(a, { job: (v) => idArg(v, 'job'), grant: (v) => onOffArg(v, 'grant') }) }),
   // lane feedback-handled-verb: the owner's «Mark handled» on an agent's feedback report, naming the release that shipped
   // the fix (+ a note); and the OPEN reports with their ids — a READ (another agent's words: belted at the hub)
   Object.freeze({ verb: 'feedback.handled', layer: 'act', billed: false, label: "Mark an agent's feedback handled",
@@ -680,6 +693,8 @@ function permissionResolvedVerdict(limits, resolved) {
 const FAMILIES = Object.freeze([
   Object.freeze({ id: 'conversations', label: 'Conversations' }),
   Object.freeze({ id: 'groups', label: 'Agent groups' }),
+  // ui-words: a t() key — the popover's family head (zh / ja rows exist); the manager design's piece 7: jobs.wakeGrant
+  Object.freeze({ id: 'jobs', label: 'Background Work' }),
   Object.freeze({ id: 'feedback', label: 'Feedback' }),
 ]);
 const familyOf = (verb) => { const f = str(verb).split('.')[0]; return FAMILIES.some((x) => x.id === f) ? f : 'other'; };

@@ -73,6 +73,7 @@ const { isPress } = require('../write-origin.js');   // lane owner-press-attende
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const G = require('../channel-groups.js');
 const GC = require('../group-card.js');
+const DW = require('../delivery-wake.js');   // the manager design's piece 7: which wake of a stopped member is OWED a resume
 const { makeRecord, inertFrames } = require('../channel-record.js');
 const { toAgentText: agentText } = require('../peer-text.js');   // verify r1 F3: a group's name on its way out (view)
 const DM = require('../dispatch-model.js');   // lane worker-dispatch verify r1 ②: the dispatch ledger's windows (PURE)
@@ -669,7 +670,7 @@ function create({
     const lead = `${why === 'await' || why === 'both' ? G.awaitLead(awaitAt, why) : WAKE_LEAD[why] || 'You were woken'} — group messages (vibespace-msg):`;
     const rep = G.reportFor(g, readLog(gid), member, { budget: WAKE_BUDGET, lead, also: reachFor(g, member, awaitAt != null ? { from: awaitAt, to: rec.at } : null) });   // an awaited reply reaches the asker whatever its mode, on every road and whatever this wake is about (acceptance r4, P14; r7, P25)
     if (!rep || rep.fits === false) return { ok: false, reason: rep ? 'the report does not fit a wake' : 'nothing to deliver' };
-    let r;
+    let r, wcText = null;   // wcText: the wake card's text — a stopped member's owed wake carries the SAME card (piece 7)
     if (!deliver || typeof deliver.deliverToConversation !== 'function') r = { ok: false, reason: 'no delivery ladder wired' };
     else {
       try {
@@ -677,6 +678,7 @@ function create({
         // sender → the group, the message that woke it — keyed like a report's (a later re-report renders no second)
         const self = !!(rec.author && rec.author.id === G.OWNER);
         const wc = wakeCardOf(rep, rec);
+        wcText = wc.text;
         // lane owner-press-attended: the USER's own post (G.OWNER — only routes/channels.js's cookie-only owner routes
         // author it, the wake count echoed back first) is an ATTENDED turn; an agent's post stays peer-message. Both
         // literals spelled (the spend census reads them); ONE ladder site. r2: and only with its door's PRESS (`pressed`,
@@ -689,7 +691,26 @@ function create({
     if (r && r.ok && r.queued) { await markQueued(gid, member, rep.upTo, { since: r.since }); return { ok: true, queued: true, since: Number.isFinite(r.since) ? r.since : null, lane: r.lane || null }; }   // law 1: waiting, not woke
     if (r && r.ok) { await markReported(gid, member, rep.upTo); return { ok: true, lane: r.lane || null, ...(r.intoTurn ? { intoTurn: true } : {}) }; }
     (log.info || log.log || (() => {})).call(log, `[groups] wake of ${member.slice(0, 8)} in ${gid} (${why}) not delivered: ${(r && r.reason) || 'refused'} — it rides that member's next report`);
-    return { ok: false, reason: (r && r.reason) || 'undelivered', refused: (r && r.refused) || null };
+    return { ok: false, reason: (r && r.reason) || 'undelivered', refused: (r && r.refused) || null, ...(r && r.notRunning ? { notRunning: true, cardText: wcText } : {}) };
+  }
+  /** A WAKE OF A STOPPED MEMBER (the manager design's piece 7): the ladder answered «not running». A wake that names this
+   *  member ALONE (an agent's `send --wake` into a pair, an @name of one member, a dispatch) is OWED: the conversation goes
+   *  to the hub's one resume line (conversation-deliver `parkEndedWake`, producer 'groups', the pace's own reason
+   *  'peer-message') and the group report rides the turn its hand-over starts — the log stays the one store, the park holds
+   *  no words. A fan-out (a whole group's --wake, «always», an invite) only waits, said to the sender. The
+   *  OWNER's own post is never owed here: a person's page offers its own resume (a press never waits on the line).
+   *  → {parked, id} | {code} (it only waits: why) | null (not judged: the owner, or no park wired) */
+  function endedWakeOf(g, member, rec, why, cardText = null) {
+    const from = rec && rec.author && rec.author.id;
+    if (!from || from === G.OWNER) return null;
+    const named = (Array.isArray(rec.mentions) ? rec.mentions : []).filter((x) => x && x.id && x.id !== from).length;
+    const v = DW.owesWake({ producer: 'groups', wake: true, addressees: why === 'mention' || why === 'both' ? named : null });
+    if (!v.owe) return { code: v.code };
+    if (!deliver || typeof deliver.parkEndedWake !== 'function') return null;
+    try {
+      const p = deliver.parkEndedWake(member, { producer: OWED, spendReason: 'peer-message', kind: 'peer', fromName: `${displayName(g, rec.author.id)} · ${g.name}`, cardText: cardText || rec.text, sender: from, reason: 'a message with a wake', meta: { gid: g.id, at: rec.at, why } });
+      return p && p.parked ? p : null;
+    } catch (e) { (log.warn || log.log || (() => {})).call(log, `[groups] the wake owed to stopped ${String(member).slice(0, 8)} in ${g.id} could not be parked: ${(e && e.message) || e} — it rides that member's next report`); return null; }
   }
   /**
    * THE WAKE PACE for one sender (r2): `mayWake(member) → true | {reason}`
@@ -982,6 +1003,7 @@ function create({
    *  leaves the message to that member's next report. */
   async function wakeAll(gid, rec, candidates, mayWake = null, { pressed = null } = {}) {
     const woke = [], refused = [], later = [], queued = [];
+    const waitsWhy = new Map();   // a refused stopped member → why its wake only waits (piece 7)
     const g0 = getGroup(gid);
     for (const m of candidates) {
       const g = getGroup(gid) || g0;
@@ -1001,12 +1023,22 @@ function create({
       if (r.ok && r.queued) queued.push({ member: m, name, why: v.why, lane: r.lane, since: r.since });   // law 1: behind its running turn
       else if (r.ok) woke.push({ member: m, name, why: v.why, lane: r.lane, ...(r.intoTurn ? { intoTurn: true } : {}) });
       else {
+        // piece 7: a stopped member a wake names alone is OWED a resume — its pace slot is KEPT (the owed wake is the billed
+        // turn) and the sender holds «being resumed» (`parked`: the CLI's «held (not billed yet)» line)
+        const owe = r.notRunning ? endedWakeOf(g, m, rec, v.why, r.cardText) : null;
+        if (owe && owe.parked) { refused.push({ member: m, name, why: v.why, reason: DW.senderWords('owed'), refused: 'ended', parked: true, owed: true }); continue; }
         // not billed ⇒ the pace slot goes back (r2: a refused wake used to
         // floor the next legitimate one with words that said a turn was billed)
         if (typeof mayWake === 'function' && typeof mayWake.refund === 'function') { try { mayWake.refund(m); } catch { } }
-        refused.push({ member: m, name, why: v.why, reason: r.reason, refused: r.refused || null });
+        const x = { member: m, name, why: v.why, reason: r.reason, refused: r.refused || null };
+        if (owe && owe.code) waitsWhy.set(x, owe.code);
+        refused.push(x);
       }
     }
+    // …and the stopped members a wake did NOT resume are told why, after the ladder's own words (the design: «k members are
+    // ended; it rides their next turn»)
+    const fanned = [...waitsWhy].filter(([, c]) => c === 'fan_out').length;
+    for (const [x, c] of waitsWhy) if (c === 'fan_out') x.reason = `${x.reason} — ${DW.senderWords(c, { count: fanned })}`;
     return { woke, refused, later, queued };
   }
 

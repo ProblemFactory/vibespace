@@ -244,6 +244,7 @@ const CLASS = {
   '_finalizeRun#5': 'end', '_sweepPass#1': 'event', '_sweepPass#2': 'event', '_untilScan#1': 'event', '_cronTick#1': 'alarm',
   '_fireCron#1': 'event', 'setMemory#1': 'event', 'ask#1': 'event', 'answerPanel#1': 'event', 'withdrawAsk#1': 'event',   // B-8bd5: the filer withdraws its panel
   '_startAskedAtStop#1': 'alarm',   // B-cac2 (cure r1): a start asked during a stop that cannot be done — said in its events and to its owner
+  'setWakeGrant#1': 'event',   // the manager design's piece 7: the grant set / cleared (by the person or a key) — a fact on the job's own journal
 };
 for (const s of SITES) ok(CLASS[s.key], `census row: ${s.key} (src/jobs.js:${s.line}) has a class`, s.src);
 ok(Object.keys(CLASS).every((k) => SITES.some((s) => s.key === k)), 'every class row names a site that exists (a removed producer leaves no stale row)', Object.keys(CLASS).filter((k) => !SITES.some((s) => s.key === k)));
@@ -311,6 +312,7 @@ const DRIVERS = {
   '_cronTick#1': async () => { const j = mkJob(jm, { kind: 'cron', name: 'drv-missed', schedule: { at: Date.now() + 3600e3 }, catchUp: 'none', action: { type: 'notify', text: 'drv' } }); j.nextFireAt = Date.now() - 600000; const keep = new Map(jm.jobs); jm.jobs.clear(); jm.jobs.set(j.id, j); try { await jm._cronTick(); } catch { } for (const [k, v] of keep) jm.jobs.set(k, v); return j; },
   '_fireCron#1': async () => { const j = mkJob(jm, { kind: 'cron', name: 'drv-fire', schedule: { everyMs: 3600e3 }, action: { type: 'notify', text: 'post the digest' } }); jm._fireCron(j, 'cron'); return j; },
   'setMemory#1': async () => { const j = task('drv-memory'); jm.setMemory(j, '2G', { byUser: true }); return j; },
+  'setWakeGrant#1': async () => { const j = task('drv-wake-grant'); jm.setWakeGrant(j, true, { by: { kind: 'person', by: 'person' } }); return j; },
   'ask#1': async () => { const j = task('drv-ask'); j.state = 'up'; jm.ask(j, PANEL); return j; },
   'answerPanel#1': async () => { const j = task('drv-answer'); j.state = 'up'; const r = jm.ask(j, PANEL); jm.answerPanel(j, { version: r.version, c: 'a', button: 'OK' }); return j; },
   'withdrawAsk#1': async () => { const j = task('drv-withdraw'); j.state = 'up'; jm.ask(j, PANEL); jm.withdrawAsk(j); return j; },   // B-8bd5

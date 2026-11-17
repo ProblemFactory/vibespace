@@ -378,6 +378,7 @@ const ROUTES = {
   'POST /api/jobs/seen': 'meta',
   'POST /api/jobs/:id/:act': 'echo',
   'GET /api/jobs-escapes': 'meta',
+  'GET /api/jobs-wake-grants': 'exception: the manager design\'s piece 7 — the grant rows name each JOB through labelOf, read live off the jobs store at each GET (jobs.js wakeRowsOf); a cleared job (clearedAt) answers its id, so the clear is honoured at the read and nothing keeps a copy',
   'POST /api/channels/reach-requests/:id/:verdict': 'meta',
   'GET /api/channel-groups': 'reads',                   // lastText (the sentence when the newest record was cleared)
   'GET /api/channel-groups/roster': 'meta',

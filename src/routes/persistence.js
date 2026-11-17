@@ -605,6 +605,16 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return { ok: true, already: false };
   };
 
+  // the manager design (piece 4's verbs, piece 7's deliveries): ONE read of the archived list — the state in memory (the
+  // cache archiveSession writes through), never a file read per ask; an older entry is a bare id, so either form answers
+  router.isArchived = (key) => {
+    const k = String(key || '');
+    if (!k) return false;
+    const list = (_userStateCache || readUserState()).archivedSessions;
+    const bare = k.includes(':') ? k.slice(k.indexOf(':') + 1) : k;
+    return Array.isArray(list) && list.some((x) => String(x) === k || String(x) === bare);
+  };
+
   // ── Bookmarks ──
   const BOOKMARKS_FILE = path.join(dataDir, 'bookmarks.json');
   function readBookmarks() {

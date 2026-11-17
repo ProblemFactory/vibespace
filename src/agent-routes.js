@@ -1683,6 +1683,29 @@ function jobsCaller(s, id) {
     groups: new Set(tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id)),
   };
 }
+// THE MANAGER DESIGN'S PIECE 7 (主开发 2026-11-17 05:13Z — the owner: «the agent concerned can PROPOSE and wait for the person's
+// approval»): ANY agent that sees a job may PROPOSE its grant to resume its conversation after that conversation is ended on
+// purpose — a card for the person (lane login-request-card's proposal store: `proposeWakeGrant`, bound by the wiring onto the
+// jobs engine as `proposeWakeDoor`), one press approves. It costs nothing, wakes nobody, and the answer reaches the proposer at
+// its next turn. Judged HERE before the call: the job (a cron's run proposes its schedule), one sentence why, an owner conversation.
+async function proposeWake(a, job, why) {
+  const W = require('./delivery-wake.js');
+  const text = String(why == null ? '' : why).replace(/\s+/g, ' ').trim();
+  if (!text) return { status: 400, body: { error: 'one sentence why is required — the person reads it on the card', code: 'bad_args' } };
+  if (text.length > 300) return { status: 400, body: { error: 'the why is one sentence (300 characters at most)', code: 'bad_args' } };
+  const target = job.cronParent ? (a.jm.jobs.get(job.cronParent) || job) : job;
+  if (!(target.owner && target.owner.conversation && target.owner.conversation.id)) return { status: 400, body: { error: 'that job belongs to no conversation (a person made it) — there is nothing for it to resume', code: 'not_granted' } };
+  if (target[W.GRANT_FIELD] === true) return { status: 200, body: { success: true, already: true, job: target.id, note: 'it already has the grant — nothing was filed' } };
+  const door = a.jm.proposeWakeDoor;
+  if (typeof door !== 'function') return { status: 503, body: { error: 'the proposal card is not on this instance yet — ask the person to tick it in the job\'s row (Background Work)', code: 'proposal_door_not_ready' } };
+  const s = a.session || {};
+  const cid = (a.caller && a.caller.conversationId) || null;
+  let r = null;
+  try { r = await door({ sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, conversationId: cid, name: s.name || null }, { rows: a.jm.wakeRowsOf([target]), why: text }); }
+  catch (e) { r = { ok: false, code: 'failed', why: (e && e.message) || String(e) }; }
+  if (!r || r.ok === false || r.error) return { status: 400, body: { error: (r && (r.why || r.error)) || 'the proposal was not filed', code: (r && r.code) || 'failed' } };
+  return { status: 200, body: { success: true, job: target.id, proposed: true, ...(r.id ? { proposal: r.id } : {}), note: 'filed for the person — one press approves; the answer reaches this conversation at its next turn' } };
+}
 function jobAuth(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
   const jm = getJobs && getJobs();
@@ -2776,7 +2799,9 @@ app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req
   // DERIVED from the copy above (a field removed there is unknown here at once) + the body's bearer `token` + `notifyOk` (the CLI
   // sends it with every shape; only a cron's task reads it). An older hub meeting a newer CLI says so — it never starts a job
   // without what it was asked to carry (its --vault values)
-  const known = new Set([...Object.keys(spec).filter((k) => k !== 'owner'), 'token', 'notifyOk', 'stopWithOwner']);
+  // the manager design's piece 7: the person's grant to wake an ended conversation is never an agent's to write — refused BY NAME
+  if (b && b.wakesEndedOwner !== undefined) return res.status(403).json({ error: require('./delivery-wake.js').GRANT_REFUSAL, code: 'wake_grant_person_only' });
+  const known = new Set([...Object.keys(spec).filter((k) => k !== 'owner'), 'token', 'notifyOk', 'stopWithOwner', 'proposeWake']);   // proposeWake: piece 7's --propose-wake (filed once the job exists)
   // B-70f9 ②: the stored stop-with-conversation flag is RETIRED (0 of 2 950 stored jobs carried it) — an older CLI's `false` passes;
   // asked for, it is refused by name with its door: the notice where a person ends the conversation
   if (b.stopWithOwner === true) return res.status(400).json({ error: '--stop-with-owner was retired: when a person ends or archives a conversation, a notice names the jobs it still runs and «Stop these too» stops them in one press — nothing was created', code: 'retired-flag' });
@@ -2800,7 +2825,9 @@ app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req
   // resume / off, with the deciding layer named.
   let notify = null;
   try { notify = a.jm.notifyPreview(a.jm.jobs.get(r.job.id)); } catch { }
-  res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}) });   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values
+  // piece 7: --propose-wake "why" files the grant's proposal for the NEW job (its answer rides this one; the job exists either way)
+  Promise.resolve(b.proposeWake !== undefined ? proposeWake(a, a.jm.jobs.get(r.job.id), b.proposeWake) : null).catch((e) => ({ body: { error: (e && e.message) || String(e), code: 'failed' } })).then((pw) =>
+    res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(pw ? { wakeProposal: pw.body } : {}) }));   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values
 }));
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
@@ -2875,6 +2902,9 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   }
   const selfActs = ['progress', 'ask', 'withdraw', 'announce'];   // B-8bd5: a job withdraws ITS OWN panel
   if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress, ask (or withdraw its ask), or announce' });
+  // piece 7: the grant is never an agent token's to WRITE — refused by name, naming the door it has; the PROPOSAL is that door
+  if (act === 'wake-grant') return res.status(403).json({ error: require('./delivery-wake.js').GRANT_REFUSAL, code: 'wake_grant_person_only' });
+  if (act === 'propose-wake') return proposeWake(a, job, req.body?.why).then((pw) => res.status(pw.status).json(pw.body), (e) => res.status(500).json({ error: (e && e.message) || String(e) }));
   const needsControl = ['stop', 'start', 'restart', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
   // B-8bd5 (its adversarial read r1): the panel is withdrawn only by the one that FILED it — the job itself (its jbt_) or its owner
   // conversation's lineage; a control grant (--control all) never closes the person's question

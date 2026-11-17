@@ -72,7 +72,7 @@ const seamFieldsOf = (r) => ({ status: r.status, forkPending: r.forkPending, bac
 /** The route's merge, verbatim (src/routes/sessions.js before B-360d): `perHarness` = [{ id, entries }] in the registry's
  *  order; the first to name a session key wins; an entry whose pid is a sign-in's own process is never a row; then the
  *  kept metas; then the sort (newest startedAt first, stable). → the rows. */
-function assembleSweep({ perHarness = [], signInPids = [], kept = [], discovered = null } = {}) {
+function assembleSweep({ perHarness = [], signInPids = [], kept = [], discovered = null, waiting = null } = {}) {
   const sessions = [], seenSessionKeys = new Set(), signIn = new Set(signInPids);
   for (const h of perHarness) {
     for (const entry of h.entries || []) {
@@ -87,6 +87,9 @@ function assembleSweep({ perHarness = [], signInPids = [], kept = [], discovered
   // (a Map) takes the stopped rows BEFORE the merge, by the seam's key — the fields its merge and heldAccountOf read
   if (discovered) for (const r of sessions) if (r && r.status === 'stopped') { const k = `${r.backend || 'claude'}:${r.backendSessionId || r.sessionId}`; (discovered.get(k) || discovered.set(k, []).get(k)).push(seamFieldsOf(r)); }
   try { mergeKeptStopped(sessions, kept); } catch (e) { console.warn('[sessions] the kept stopped metas:', e.message); }
+  // the manager design's piece 7: an ENDED row with words waiting carries `waiting` {n, code, until} (the page words «n notices
+  // are waiting for it») — `waiting` = stash-handover's waitingAll() read on the main thread for the few conversations a store names
+  if (waiting && typeof waiting === 'object') for (const r of sessions) { const c = r && (r.backendSessionId || r.sessionId); if (r && r.status === 'stopped' && c && waiting[c]) r.waiting = waiting[c]; }
   sessions.sort((a, b) => b.startedAt - a.startedAt);
   return sessions;
 }

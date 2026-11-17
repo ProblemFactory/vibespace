@@ -79,7 +79,9 @@ const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — th
 // and the server's own answer (answerFromRecord, F6) withhold it by the same rule. helper-ask imports nothing.
 const { hiddenCharsOf } = require('./helper-ask.js');
 
-const JOB_VERBS = Object.freeze(['list', 'show', 'poll', 'answers', 'logs', 'progress', 'ask', 'withdraw', 'docs', 'stop', 'rm', 'notify', 'notify-cron', 'announce', 'subscribe', 'unsubscribe']);   // bl-jobs B-8bd5: + withdraw (a job's own panel)
+// propose-wake (the manager design's piece 7): files a card for the PERSON (one press approves the job's grant to resume its
+// conversation after an end on purpose) — like `ask`, it costs nothing, wakes nobody and decides nothing itself
+const JOB_VERBS = Object.freeze(['list', 'show', 'poll', 'answers', 'logs', 'progress', 'ask', 'withdraw', 'docs', 'stop', 'rm', 'notify', 'notify-cron', 'announce', 'subscribe', 'unsubscribe', 'propose-wake']);   // bl-jobs B-8bd5: + withdraw (a job's own panel)
 /** vibespace-page's pre-approved verbs (r2): `publish` is held AND an ask rule. */
 const PAGE_VERBS = Object.freeze(['list']);
 /** vibespace-design's pre-approved verbs (lane design-core): every verb but `publish`, which is held AND an ask rule

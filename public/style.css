@@ -1903,6 +1903,16 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 .dialog-hint.hidden { display: none; } /* no global .hidden in this project */
 .dialog-hint.dialog-error { color: var(--red); margin-top: 6px; } /* lane launch-picture-size: showInputDialog's inline refusal (validate) */
 .dialog-list { margin: 0; padding-left: 18px; max-height: 40vh; overflow-y: auto; font-size: 12px; line-height: 1.5; color: var(--text); } /* B-a67c: what a confirm ends (a group close's tab names) */
+/* the manager design's piece 7: the person's grant rows in the Terminate confirm (src/lib/wake-grant-rows.js) — a tick, the
+   job's name, its kind and next fire; the name wraps (an agent's words), never pushes the tick off */
+.wake-grant-rows { margin-top: 8px; max-height: 40vh; overflow-y: auto; }
+.wake-grant-row { display: flex; align-items: baseline; gap: 6px; font-size: 12px; line-height: 1.5; padding: 2px 0; }
+.wake-grant-row input { flex: none; }
+.wake-grant-name { min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.wake-grant-fact { flex: none; color: var(--text-secondary); }
+.wake-grant-by { flex: none; color: var(--text-secondary); font-size: 11px; }
+/* piece 7: an ended row's / window's «n notices are waiting» (the hub's `waiting` fact) */
+.session-card-waiting, .chat-resume-waiting { color: var(--text-secondary); overflow-wrap: anywhere; }
 .dialog-list li { overflow-wrap: anywhere; }
 /* A dialog's EXPLANATION is that dialog's body text (lane plugin-consent-layout — the owner on the plugin consent dialog, 2026-11-01:
    «布局问题»): the modal's base size (html, body 13 px) in the readable secondary tone, no margin of its own (the body's padding and
@@ -9358,20 +9368,20 @@ button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
 .search-win { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 10px 12px; gap: 8px; box-sizing: border-box; }
 .search-input { width: 100%; box-sizing: border-box; padding: 7px 10px; font-size: 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-input, transparent); color: var(--text); }
 .search-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.search-chip { padding: 3px 10px; border-radius: 12px; border: 1px solid var(--border); background: transparent; color: var(--text-dim, var(--text)); cursor: pointer; font-size: 12px; }
+.search-chip { padding: 3px 10px; border-radius: 12px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 12px; }
 .search-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.search-status { font-size: 12px; color: var(--text-dim, var(--text)); min-height: 16px; }
+.search-status { font-size: 12px; color: var(--text-secondary); min-height: 16px; }
 .search-list { flex: 1; min-height: 0; overflow-y: auto; }
 .search-group { margin: 0 0 10px; }
 .search-group-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; padding: 2px 0; }
 .search-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-hit { display: flex; gap: 8px; align-items: baseline; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 13px; min-width: 0; }
 .search-hit:hover, .search-hit.active { background: var(--bg-hover, rgba(127,127,127,.15)); }
-.search-hit-meta { flex: none; color: var(--text-dim, var(--text)); font-size: 11px; white-space: nowrap; }
+.search-hit-meta { flex: none; color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
 .search-snippet { min-width: 0; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
 .search-snippet mark { background: rgba(255, 196, 0, .35); color: inherit; border-radius: 2px; }
 .search-more { margin: 2px 6px; background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0; }
-.sys-search-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; padding: 8px 0; color: var(--text-dim, var(--text)); }
+.sys-search-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; padding: 8px 0; color: var(--text-secondary); }
 .sys-search-rebuild { font-size: 11px; padding: 2px 8px; }
 .palette-search-all .palette-name { color: var(--accent); }
 @media (max-width: 480px) { .search-hit { flex-direction: column; gap: 2px; } .search-group-name { white-space: normal; overflow-wrap: anywhere; } }

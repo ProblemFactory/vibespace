@@ -152,6 +152,27 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       return ((pv && Array.isArray(pv.pending)) ? pv.pending : []).map(GC.pendingEntry).filter(Boolean);
     } catch (e) { log.warn?.(`[stash] group preview failed: ${(e && e.message) || e}`); return []; }
   }
+  /** THE ENDED ROWS' WAITING FACT (the manager design's piece 7: «{n} notices are waiting for it», after a refused wake «—
+   *  not resumed: {why}»): one entry per conversation that is NOT running and has words waiting in either store, keyed by its
+   *  conversation id → {n, code, until} (the page words it; `code` = the owed wake's last refusal, null when none was asked).
+   *  Reads only the conversations a store names — never every row. */
+  function waitingAll() {
+    const d = getDeliver(), jm = jobsReady();
+    const cids = new Set([...((d && typeof d.stashCids === 'function') ? d.stashCids() : []), ...((jm && typeof jm.notifCids === 'function') ? jm.notifCids() : [])]);
+    if (!cids.size) return {};
+    const live = new Set(); for (const s of activeSessions.values()) { const c = cidOf(s); if (c) live.add(c); }
+    const out = {};
+    for (const cid of cids) {
+      if (live.has(cid)) continue;
+      // COUNTS only (主开发 12:46Z): this runs on GET /api/sessions — no gate pass, no view re-judge, nothing written
+      let n = 0;
+      try { n = ((d && typeof d.stashCount === 'function') ? d.stashCount(cid) : 0) + ((jm && typeof jm.notifCount === 'function') ? jm.notifCount(cid) : 0) + ((d && typeof d.retryWaitingCount === 'function') ? d.retryWaitingCount(cid) : 0); } catch { n = 0; }
+      if (!n) continue;
+      const a = d && typeof d.endedAnswerOf === 'function' ? d.endedAnswerOf(cid) : null;
+      out[cid] = { n, code: (a && a.code) || (a && a.outcome === 'failed' ? 'failed' : null), until: (a && a.until) || null };
+    }
+    return out;
+  }
   /** The `stash` session fact (null = nothing waits); `billed` = the strip's "starts a turn"; `inFlight` = a hand-over
    *  is on its way (another client's click); `held` = what one hand-over would leave; `reachable` = a hand-over exists
    *  AND has something to carry (lane group-report-card: group messages alone are not handed over — no button). */
@@ -306,7 +327,11 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     rec.p = handOverNow(s, cid, id, { auto, pressed });
     try { return await rec.p; } finally { if (inflight.get(cid) === rec) inflight.delete(cid); changed(); }
   }
-  async function handOverNow(s, cid, id, { auto = false, pressed = null } = {}) {
+  /** THE TWO HALVES OF A HAND-OVER (piece 7 split them so a resumed conversation's hand-over is the SAME road): PREPARE reads
+   *  both stores BY CONVERSATION (no live session needed), renders what a frame would carry and CLAIMS it — the `ho:<id>`
+   *  stamp on disk in both stores before anything else happens — and POST sends ONE frame through the ladder, drains exactly
+   *  what went out and releases the claims (also on a refusal). */
+  function prepareHandOver(cid, id) {
     const d = getDeliver();
     if (!d || typeof d.deliverToConversation !== 'function') return { ok: false, code: 'unavailable', error: 'the delivery ladder is not wired on this instance' };
     const jm = jobsReady();
@@ -332,20 +357,14 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     if (shownStashed.length && typeof d.claimStash === 'function') releases.push(d.claimStash(cid, shownStashed, id));
     if (shownParked.length && typeof d.claimRetry === 'function') releases.push(d.claimRetry(cid, shownParked, id));   // the park's timer skips a claimed entry
     if (jobsText && jm && typeof jm.claimNotifs === 'function') releases.push(jm.claimNotifs(cid, jobs, id));
-    try {
-      let r = null;
-      // R3 (lane notify-retry): the AUTO hand-over runs at a turn end for what that prompt's context could not carry —
-      // its own declared reason, spelled literally beside the user's (the spend census reads the literal)
-      const frame = auto
-        ? `VibeSpace delivers the ${n} notice(s) that did not fit your previous prompt's context (hand-over ${id}):\n\n${text}`
-        : `The user handed over the ${n} notice(s) that were waiting for your next turn (hand-over ${id}):\n\n${text}`;
-      const cardText = S.handoverCardText(n, text, { why });   // 2026-09-28: the card carries the notices behind an expander (handoverFacts), not the count alone; R4: its head says why they waited
-      // r2: the ATTENDED reason only on the door's press (write-origin isPress) — a hand-over nobody pressed is the gated twin
-      try {
-        r = !isPress(pressed)
-          ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-retry', fromName: FROM_NAME, cardText })
-          : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-handover', fromName: FROM_NAME, cardText });
-      } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
+    return { ok: true, d, jm, text, n, held, why, pm, shownStashed, shownParked, jobs, jobsText, releases };
+  }
+  /** The ladder answered `r` for `frame`: a refusal answers by name (the stash exactly as it was); a delivery drains exactly
+   *  what went out and remembers the frame. The CALLER spells its own ladder call — the reason literal on that very line (the
+   *  spend census pairs a site with the literal it reads there) — and releases the claims in its `finally`. */
+  function finishHandOver(cid, id, prep, frame, r) {
+    const { d, jm, held, shownStashed, shownParked, jobs, jobsText } = prep;
+    {
       if (!r || !r.ok) {
         if (r && r.refused === 'spend') return { ok: false, code: 'spend_refused', id, error: r.reason || 'the spend ceiling refused this turn', why: r.why || null, retryAfter: r.retryAfter || 0, identity: r.identity || null, cap: r.cap == null ? null : r.cap, ...(r.capUnset ? { capUnset: true } : {}) };
         if (r && (r.refused === 'wrapper-no-steer' || r.refused === 'no-wake')) return { ok: false, code: 'held_for_next_turn', id, error: r.reason || 'held for the conversation’s next prompt' };
@@ -377,9 +396,94 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       persistDelivered();
       changed();
       return { ok: true, id, delivered: tookMsg.length + tookJobs.length, held, lane: r.lane || null, steered: r.steered === true, remaining: S.summarize(entriesOf(cid)) };
-    } finally {
-      for (const rel of releases) { try { rel(); } catch { } }
     }
+  }
+
+  async function handOverNow(s, cid, id, { auto = false, pressed = null } = {}) {
+    const prep = prepareHandOver(cid, id);
+    if (!prep.ok) return prep;
+    const { text, n } = prep;
+    // R3 (lane notify-retry): the AUTO hand-over runs at a turn end for what that prompt's context could not carry —
+    // its own declared reason, spelled literally beside the user's (the spend census reads the literal)
+    const frame = auto
+      ? `VibeSpace delivers the ${n} notice(s) that did not fit your previous prompt's context (hand-over ${id}):\n\n${text}`
+      : `The user handed over the ${n} notice(s) that were waiting for your next turn (hand-over ${id}):\n\n${text}`;
+    // r2: the ATTENDED reason only on the door's press (write-origin isPress) — a hand-over nobody pressed is the gated twin
+    const { d } = prep;
+    try {
+      let r = null;
+      const cardText = S.handoverCardText(n, text, { why: prep.why });   // 2026-09-28: the card carries the notices behind an expander (handoverFacts), not the count alone; R4: its head says why they waited
+      try {
+        r = !isPress(pressed)
+          ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-retry', fromName: FROM_NAME, cardText })
+          : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-handover', fromName: FROM_NAME, cardText });
+      } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
+      return finishHandOver(cid, id, prep, frame, r);
+    } finally {
+      for (const rel of prep.releases) { try { rel(); } catch { } }
+    }
+  }
+  // ── THE HAND-OVER OF A RESUMED CONVERSATION (the manager design's piece 7, lane paced-wake-retry) ─────────────────────────
+  // A delivery found its addressee ENDED and the gate admitted its wake: the waiting entries are CLAIMED first (before the
+  // resume, so the resume's own start injection — SessionStart's drain — leaves them), then the conversation is resumed (it sends
+  // nothing), then ONE hand-over posts everything waiting as ONE message under the DELIVERY's own reason (the charging call
+  // holds: the ladder authorizes it as the turn it is), ending with the design's sentence. Exactly once across a hub restart by
+  // the claim's own construction (the stamp is released at boot; the park offers the wake to the line again).
+  /** → {ok:true, id, prep} — the claim taken | {ok:false, code, error} (nothing waiting, a hand-over in flight, restarting).
+   *  `bare`: a wake whose words live OUTSIDE the stash (a peer's message with a wake: the GROUP LOG holds it, and the groups
+   *  engine's report rides the prompt hook of whatever turn starts next — lane stash-any-turn): with nothing stashed the claim
+   *  is still taken, empty, so the hand-over posts the ONE frame that starts that turn (one turn, one charge — the report is
+   *  never copied into the frame: it would arrive twice). */
+  function claimForWake(cid, { bare = false } = {}) {
+    if (!cid) return { ok: false, code: 'no_conversation', error: 'no conversation' };
+    if (closed) return { ok: false, code: 'restarting', error: 'the server is restarting — the notices keep waiting' };
+    const cur = inflight.get(cid);
+    if (cur) return { ok: false, code: 'in_flight', error: `a hand-over for this conversation is already in progress (${cur.id})`, id: cur.id };
+    const id = mint();
+    let prep = prepareHandOver(cid, id);
+    if (!prep.ok && prep.code === 'nothing_waiting' && bare) prep = { ok: true, d: getDeliver(), jm: jobsReady(), text: '', n: 0, held: 0, why: null, pm: { text: '', shown: [], rest: [] }, shownStashed: [], shownParked: [], jobs: [], jobsText: '', releases: [], bare: true };
+    if (!prep.ok) return prep;
+    inflight.set(cid, { id, at: now(), p: null });
+    changed();
+    return { ok: true, id, prep };
+  }
+  /** After the resume: the claimed frame, under the delivery's reason ('job-notification' | 'peer-message' — each spelled as a
+   *  literal for the spend census), with the design's last sentence. → handOver's own answers. */
+  async function handOverWake(cid, claimed, { reason, tail = '', lead = '', from = null, card = null } = {}) {
+    if (!claimed || !claimed.ok) return { ok: false, code: 'no_claim', error: 'nothing was claimed' };
+    const { id, prep } = claimed;
+    let doneP = null;
+    const cur0 = inflight.get(cid);
+    if (cur0 && cur0.id === id) cur0.p = new Promise((res) => { doneP = res; });   // a graceful stop (settle) waits for this hand-over
+    // a BARE claim (nothing stashed: a peer's wake whose words are in the group log) says why it was resumed; the group
+    // messages themselves come in this turn's own report
+    const frame = prep.bare
+      ? `This conversation had been ended. VibeSpace resumed it (hand-over ${id}): ${agentText(String(lead || 'a message was sent to it with a wake'), { kind: 'line', max: 300 })} — the messages waiting for it are in this turn's group report.${tail ? '\n\n' + tail : ''}`   // the lead names a peer and a group: belted
+      : `This conversation had been ended. VibeSpace resumed it to hand you the ${prep.n} notice(s) that were waiting (hand-over ${id}):\n\n${prep.text}${tail ? '\n\n' + tail : ''}`;
+    const { d } = prep;
+    try {
+      let r = null;
+      const cardText = prep.bare ? String(card || lead || '') : S.handoverCardText(prep.n, prep.text, { why: prep.why });
+      const fromName = (prep.bare && from) || FROM_NAME;   // a bare wake's card is the message that woke it (the design: «shows the … message card that woke it»)
+      try {
+        r = reason === 'peer-message'
+          ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'peer-message', fromName, cardText })
+          : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'job-notification', fromName, cardText });
+      } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
+      return finishHandOver(cid, id, prep, frame, r);
+    } finally {
+      for (const rel of prep.releases) { try { rel(); } catch { } }
+      const cur = inflight.get(cid); if (cur && cur.id === id) inflight.delete(cid);
+      if (doneP) doneP();
+      changed();
+    }
+  }
+  /** A refused gate or a failed resume: the claim is given back untouched — the words keep waiting. */
+  function releaseWake(cid, claimed) {
+    if (!claimed || !claimed.ok) return;
+    for (const rel of claimed.prep.releases) { try { rel(); } catch { } }
+    const cur = inflight.get(cid); if (cur && cur.id === claimed.id) inflight.delete(cid);
+    changed();
   }
   /** A delivered frame came back undelivered (the wrapper's `ok:false`): if its text names a hand-over this hub
    *  remembers, put the ORIGINAL entries back in their own stores — returns how many; 0 = not ours (the caller stashes
@@ -600,7 +704,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     });
   }
 
-  return { summaryFor, billedFor, reachableFor, changed, handOver, handOverGroups, groupInFlight: (cid) => groupInflight.has(cid), refreshLive, register, entriesOf, restoreHandedOver, redactDelivered, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
+  return { waitingAll, summaryFor, billedFor, reachableFor, changed, handOver, claimForWake, handOverWake, releaseWake, handOverGroups, groupInFlight: (cid) => groupInflight.has(cid), refreshLive, register, entriesOf, restoreHandedOver, redactDelivered, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
 }
 
 module.exports = { create, STATUS, FROM_NAME, HANDOVER_MAX_ENTRIES, HANDOVER_MAX_BYTES, HANDOVER_TAG_RE, DELIVERED_TTL_MS, DELIVERED_MAX, DELIVERED_FILE, GROUP_HANDOVER_BYTES, GROUP_HANDED_WAIT_MS, GROUP_LATE_MS };

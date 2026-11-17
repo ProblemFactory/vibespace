@@ -21,7 +21,7 @@ const { mk } = require('./lazy.js');
 // `reader`: the follow's one log line a hold, per reader (groupIdsForGrant marks the first throw of a hold for each)
 const grantMemberIds = (tasks, a, reader) => (typeof tasks.isHeldUnread === 'function' && tasks.isHeldUnread() ? tasks.groupIdsForGrant(a, reader) : tasks.memberIds(a));
 
-function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
+function create({ deliveryWakeDeps = () => ({}), app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
   auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter, instanceUrl,
   hosts, agentdDials, agentdDialDevices = null, agentdHostToken, agentdMintDialPair, deviceForDial, lockOutDialHolder = () => false,
   ensureAgentdOnHost, getPortForwards, onMountsUpdated, activeSessions, getTelemetry = null, serverNotice = null, broadcastActiveSessions = null,
@@ -236,12 +236,54 @@ const vaultAttention = require('./vault-hooks.js').createVaultAttention({ userTo
 let adoptedNow = null;
 const resumeRoad = { reopen: null, kept: null, adopted: () => { if (adoptedNow) adoptedNow(); } };   // kept: boot-restore's keptRecordOf (server.js binds it)
 const RL = require('./resume-line.js'), RL_PURE = require('../resume-line.js');
-const resumeLine = RL.createResumeLine({ start: RL.startThrough(resumeRoad), ready: new Promise((r) => { adoptedNow = r; }), log: (m) => console.log(m) });
+// THE MANAGER DESIGN'S PIECE 7: a delivery's owed wake rides the SAME line with its own start in the payload (src/server/delivery-wake.js:
+// the gate — limit, spend probe — then the claim, this road's reopen and ONE hand-over); every other entry starts through the road
+const startResume = RL.startThrough(resumeRoad);
+const resumeLine = RL.createResumeLine({ start: (e) => (e.payload && typeof e.payload.run === 'function' ? e.payload.run(e) : startResume(e)), ready: new Promise((r) => { adoptedNow = r; }), log: (m) => console.log(m) });
 // an ENDED conversation's facts for the resume verb (src/server/resume-line.js factsReaderOver — the READER of the kept record; an end's
 // record is written by piece 3's writer, after the kill): its kept record and, for a boot's record, its wrapper's sidecar in
 // BUFFERS_DIR — small files in the own data dir, read async only when a key asks to resume
 const readDataJson = async (p) => JSON.parse(await fs.promises.readFile(p, 'utf8'));
 const resumeFactsOf = RL.factsReaderOver({ buffersDir: BUFFERS_DIR, road: resumeRoad, readJson: readDataJson });
+// an ENDED conversation's key and names from the stores that still name it — the sidebar's names, the Task Groups — else
+// claude:<id> (the resume verb's deadOf; piece 7's deliveries read the SAME, never a copy)
+function endedKeyOf(target) {
+  const t = String(target || '');
+  if (!t || /^sess-/.test(t)) return null;   // a dead webui id names nothing durable
+  const cid = t.includes(':') ? t.slice(t.indexOf(':') + 1) : t;
+  let backend = t.includes(':') ? t.slice(0, t.indexOf(':')) : null, name = null;
+  const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {};
+  const keyed = (o) => Object.keys(o || {}).find((k) => k.endsWith(`:${cid}`));
+  const known = keyed(st.customNames) || keyed(st.sessionConfigs) || keyed(st.sessionModes) || null;
+  if (!backend && known) backend = known.slice(0, known.indexOf(':'));
+  const tasks = getTasks && getTasks();
+  if (!backend && tasks) { try { for (const g of tasks.list()) { const hit = (g.sessions || []).map((x) => String((x && x.sessionKey) || x)).find((k) => k.endsWith(`:${cid}`)); if (hit) { backend = hit.slice(0, hit.indexOf(':')); break; } } } catch { } }
+  const sessionKey = `${backend || 'claude'}:${cid}`;
+  if (st.customNames && st.customNames[sessionKey]) name = String(st.customNames[sessionKey]);
+  let groups = [];
+  try { groups = tasks ? tasks.groupsForSession({ sessionKey }).map((g) => g.id) : []; } catch { groups = []; }
+  return { conversationId: cid, sessionKey, name, groups };
+}
+const isArchivedKey = (key) => !!(persistenceRouter && typeof persistenceRouter.isArchived === 'function' && persistenceRouter.isArchived(key));   // persistence's ONE reader (in memory; a bare-id entry answers too)
+const resumeRowOf = (backend) => RL_PURE.harnessRowOf(require('../backend-caps.js').capsOf(backend));
+// piece 7's seams: what a delivery's start reads of an ended conversation, through piece 4's own readers and road
+const deliveryWakeSeams = { keyOf: endedKeyOf, factsOf: (key) => resumeFactsOf(key), keptMetaOf: async (key) => { const k = typeof resumeRoad.kept === 'function' ? await resumeRoad.kept(key) : null; return (k && k.meta) || null; },
+  // which account the reopen will bill (主开发 12:46Z, the read): the conversation's STATED one (its saved settings — the
+  // reopen's own cfg, state key else the bare id); null ⇒ the account it is held on (the kept record's)
+  configAccountOf: (key) => { const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {}; const m = st.sessionConfigs || {}; const id = String(key).slice(String(key).indexOf(':') + 1); const c = Object.hasOwn(m, key) ? m[key] : Object.hasOwn(m, id) ? m[id] : null; return c && typeof c.account === 'string' && c.account ? c.account : null; },
+  // MUST 2: the kept record goes once a delivery resumed it (boot-restore dropKept — what the sessions sweep does at its next pass)
+  dropKept: (key) => (typeof resumeRoad.dropKept === 'function' ? resumeRoad.dropKept(key) : false),
+  // rule 3 (every wake is SEEN): the resumed session carries the line its window shows and the System panel's row repeats
+  noteResumed: (sid, line) => { const s = activeSessions && activeSessions.get(sid); if (!s) return; s._resumedBy = line; if (typeof broadcastActiveSessions === 'function') broadcastActiveSessions(); },
+  isArchived: isArchivedKey, rowOf: resumeRowOf, reopen: (item, o) => (typeof resumeRoad.reopen === 'function' ? resumeRoad.reopen(item, o) : Promise.resolve({ ok: false, why: 'this server cannot resume conversations yet (still booting) — try again in a moment' })) };
+// THE MANAGER DESIGN'S PIECE 7 — DELIVERIES RESUME THEIR ADDRESSEE (the owner, narrowed 2026-11-17: a conversation a RESTART ended;
+// one ended on purpose only for the jobs and schedules the person kept at the ending). A wake owed to an ENDED conversation is a rung of the ladder's retry park; the park hands it here, and this puts it on the
+// ONE LINE above with its own start: the account's limit, the spend guard as a probe (under the delivery's own reason and the kept
+// record's account, through the guard's own identity road), then the claim, the road's reopen and ONE hand-over (./delivery-wake.js).
+const deliveryWake = require('./delivery-wake.js').create({ resumeLine, seams: deliveryWakeSeams, ...deliveryWakeDeps(),
+  isPoolScope: (id) => { try { const a = getAccounts() && getAccounts().get(id); return !!(a && a.type === 'pooled'); } catch { return false; } },
+  log: (m) => console.log(m) });
+if (deliver && typeof deliver.registerEndedWake === 'function') deliver.registerEndedWake((cid, entry) => deliveryWake.onEndedWake(cid, entry));
 const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, log: (m) => console.log('[automation]', m),
   // lane feedback-handled-verb: + feedback.handled / feedback.list over THE feedback store (the owner's PATCH's own call)
   // lane conversations-archive-verb: the archive verb's seams on conversation-ops' automationVerbs — the sidebar's own archived-list
@@ -253,32 +295,18 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
     resolveAsks: (ids, by) => userTodos.setStatusMany(ids, 'dismissed', by),
     turnOf: require('./turn-facts.js').turnOf,
     resumeLine, resumeFactsOf,
-    isArchived: (key) => { const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {}; return Array.isArray(st.archivedSessions) && st.archivedSessions.includes(key); },
-    resumeRowOf: (backend) => RL_PURE.harnessRowOf(require('../backend-caps.js').capsOf(backend)),
+    isArchived: isArchivedKey,
+    resumeRowOf,
     // the desktop's NAME is a person's words reaching an agent: ONE call of the belt, as a line (the peer-text census row of vibespace-api)
     rowDesktopOf: (key) => { const d = RL_PURE.rowDesktopOf(persistenceRouter && typeof persistenceRouter.readLayouts === 'function' ? persistenceRouter.readLayouts() : null, key); return d ? { id: d.id, name: d.name == null ? null : require('../peer-text.js').toAgentText(d.name, { kind: 'line', max: 200 }) } : null; },
-    deadOf: (target) => {
-      const t = String(target || '');
-      if (!t || /^sess-/.test(t)) return null;   // a dead webui id names nothing durable
-      const cid = t.includes(':') ? t.slice(t.indexOf(':') + 1) : t;
-      let backend = t.includes(':') ? t.slice(0, t.indexOf(':')) : null, name = null;
-      const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {};
-      const keyed = (o) => Object.keys(o || {}).find((k) => k.endsWith(`:${cid}`));
-      const known = keyed(st.customNames) || keyed(st.sessionConfigs) || keyed(st.sessionModes) || null;
-      if (!backend && known) backend = known.slice(0, known.indexOf(':'));
-      const tasks = getTasks && getTasks();
-      if (!backend && tasks) { try { for (const g of tasks.list()) { const hit = (g.sessions || []).map((x) => String((x && x.sessionKey) || x)).find((k) => k.endsWith(`:${cid}`)); if (hit) { backend = hit.slice(0, hit.indexOf(':')); break; } } } catch { } }
-      const sessionKey = `${backend || 'claude'}:${cid}`;
-      if (st.customNames && st.customNames[sessionKey]) name = String(st.customNames[sessionKey]);
-      let groups = [];
-      try { groups = tasks ? tasks.groupsForSession({ sessionKey }).map((g) => g.id) : []; } catch { groups = []; }
-      return { conversationId: cid, sessionKey, name, groups };
-    },
+    deadOf: endedKeyOf,
     // lane conversation-facts (majordomo piece 2): conversations.list's ONE builder over the hub's in-memory facts
     listFacts: (() => { const CFX = require('./conversation-facts.js'); const src = () => listSources() || {}; return CFX.create({ activeSessions, groupsOf: automationGroupsOf, ...CFX.sourcesFrom({
       getJobs: () => (getJobs ? getJobs() : null), userTodos, persistenceRouter, keeper: () => browserKeeper, browserStream: () => browserStream,
       autoResume: () => src().autoResume || null, stashView: () => src().stashView || null, deliver: () => deliver, sysinfo: { history: (ms) => { const si = src().sysinfo; return si && typeof si.history === 'function' ? si.history(ms) : null; } },
-      stoppedSessions: () => { const f = src().stoppedSessions; return typeof f === 'function' ? f() : []; }, treeUsage: require('../browser-facts.js').treeUsage, buffersDir: BUFFERS_DIR }) }); })() }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
+      stoppedSessions: () => { const f = src().stoppedSessions; return typeof f === 'function' ? f() : []; }, treeUsage: require('../browser-facts.js').treeUsage, buffersDir: BUFFERS_DIR }) }); })() }),
+    // the manager design's piece 7: jobs.wakeGrant — a key holding it sets a job's grant to resume an on-purpose-ended conversation
+    ...require('./delivery-wake.js').automationVerbs({ jobs: () => (deliveryWakeDeps().jobs || (() => null))(), groupsOf: (cid) => { const k = endedKeyOf(cid); return (k && Array.isArray(k.groups)) ? k.groups : []; }, keyNameOf: (id) => { const L = automation.list(); const arr = Array.isArray(L) ? L : (L && L.keys) || []; const k = arr.find((x) => x && x.id === id); return (k && k.name) || null; } }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
   openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }),
     // lane automation-open-permission-resolve (q-049 M2): the CLI's own permission mode for the judged folder (its project layer follows it)
     permissionDefault: (cwd, backend) => require('./permission-rules.js').resolveDefaultMode({ backend, cwd }),
@@ -1680,7 +1708,7 @@ function createSessionMessages(session, sessionId) {
     });
     mayUse.mount(app, { personVerdict: require('../routes/vault.js').personVerdict });
   } catch (e) { console.warn('[may-use] the route could not be mounted — ' + (e && e.message)); }
-  return { resumeRoad, resumeLine, settingHolds, decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
+  return { resumeRoad, resumeLine, deliveryWakeSeams, settingHolds, decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
     // lane engine-distribution (P4, §5.4): THE FLEET'S ENGINE PLUGIN at boot — ONE job after the listen, never on the boot path
     bootEngineDistribution: () => { if (!engineDistribution) return; engineDistribution.bootFleet().then((r) => { const line = engineDistribution.bootLine(r); if (line) console.log(line); }, (e) => console.warn(`[plugins] the fleet's engine plugin boot job failed — ${e && e.message}`)); } };
 }

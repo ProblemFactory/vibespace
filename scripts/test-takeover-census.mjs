@@ -53,6 +53,7 @@ export const CENSUS = [
   ['app-install-dialog.js', 'details', 'control', 'the plan\'s package list fold (lane custom-app; joined at the 2.369.200 integration)'],
   ['ffmpeg-door.js', 'details', 'control', 'the 「取得 FFmpeg」 sheet\'s fold of the machine\'s raw line, under the worded reasons (lane machine-needs-at-pairing pick 3c)'],
   ['may-use-rows.js', 'input', 'control', 'lane new-session-form: the channel account ticks (type=checkbox) — drawn by the shared rows since unit what-it-may-use (the New Session form AND Session Properties\' «What it may use»)'],
+  ['wake-grant-rows.js', 'input', 'control', 'the manager design\'s piece 7: the Terminate confirm\'s grant ticks (type=checkbox in a <label> row — may this job resume the conversation after an end on purpose)'],
   ['new-session-form.js', 'combobox', 'widget', 'lane new-session-form: the Task Group menu (role=listbox, aria-multiselectable; a click picks / unpicks a group)'],
   ['artifact-card.js', 'input', 'text', 'the Artifacts popover\'s filter box (type=search; `/` focuses it, Esc clears — lane artifacts-list-scale)'],
   ['artifact-card.js', 'combobox', 'widget', 'the Artifacts popover\'s rows (role=listbox; ↑ ↓ Enter — lane artifacts-list-scale)'],

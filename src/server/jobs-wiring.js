@@ -3,6 +3,10 @@
 // REST surface (cookie-authed — the panel), and the deferred init/shutdown
 // hooks server.js calls. Engine failure NEVER blocks boot (§5).
 'use strict';
+const WO = require('../write-origin.js');   // piece 7: the person's door for the grant (the strict page verdict)
+/** a PERSON on THIS instance's own page: no bearer of any kind, and a browser that says it is on this page (src/routes/vault.js
+ *  personVerdict's rule — a browser-less local write is no person here) */
+const personHere = (req) => { const h = (req && req.headers) || {}; if (WO.pressBearer(h) || typeof (req.body && req.body.token) === 'string') return false; return WO.pageVerdict(h, WO.ownOriginOf(h, { encrypted: !!(req.socket && req.socket.encrypted) })).ok === true; };
 const { execFile } = require('child_process');
 const { JobManager } = require('../jobs.js');
 const M = require('../job-model.js');
@@ -149,6 +153,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // messaging via src/server/conversation-deliver.js.
     deliverToConversation: (cid, text, opts) => deliver.deliverToConversation(cid, text, opts),
     onRetry: (fn) => deliver.onRetry(fn),   // lane notify-retry: the park's parked / attempt / delivered / fell, booked by the engine
+    // the manager design's piece 7: a result / reminder for an ENDED owner owes it ONE wake (a rung of the same park); how it ended decides at the line (src/server/delivery-wake.js)
+    parkEndedWake: (cid, o) => (deliver && typeof deliver.parkEndedWake === 'function' ? deliver.parkEndedWake(cid, o) : { parked: false, why: 'no park' }),
     // "Clear content…" (verify r3): the ladder's own stash is a derived copy of a job's words too
     redactStash: (match, scope) => (deliver && typeof deliver.redactStash === 'function' ? deliver.redactStash(match, scope) : 0),
     // TRIAGE ARCHIVE policy (design §13 rule 5): the two settings rows, read
@@ -209,6 +215,16 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       held: jm.heldDigest(),
     });
   });
+  // the manager design's piece 7: the rows the person's doors list (the Terminate confirm, the proposal card) — each registered
+  // job or schedule the conversation OWNS that can still deliver (a cron's runs ride their parent's row; an ended one-shot
+  // delivers nothing more), with its next fire and its STORED grant (PURE src/delivery-wake.js wakeChoiceRows). Read-only.
+  app.get('/api/jobs-wake-grants', (req, res) => {
+    if (!jm.ready) return res.status(503).json({ error: 'jobs engine starting' });
+    const cid = String(req.query.conversation || '');
+    if (!cid) return res.status(400).json({ error: 'conversation required' });
+    const live = [...jm.jobs.values()].filter((j) => !j.cronParent && ownerOf(j).conversationId === cid && !M.isTerminal(j));
+    res.json({ conversation: cid, rows: jm.wakeRowsOf(live) });
+  });
   // user-side create (the panel's ＋New — no vsst_ token in the browser)
   app.post('/api/jobs', (req, res) => {
     if (!jm.ready) return res.status(503).json({ error: 'jobs engine starting' });
@@ -265,7 +281,11 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       else if (act === 'start') r = jm.start(job);
       else if (act === 'rm') r = jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
       else if (act === 'answer') r = jm.answerPanel(job, req.body?.answers || {});
-      else if (act === 'memory') r = jm.setMemory(job, req.body?.value ?? null, { byUser: true }); // lane jobs-memory-bound: the job's properties (0 = unbounded: the owner's call)
+      else if (act === 'memory') r = jm.setMemory(job, req.body?.value ?? null, { byUser: true });
+      // the manager design's piece 7: the person's grant «may wake its conversation when that conversation was ended on purpose» —
+      // a PERSON on this instance's own page only (no bearer, the strict page verdict — the vault doors' personVerdict rule; no
+      // press is minted: no turn starts here). An agent's token is refused by name (src/jobs.js setWakeGrant)
+      else if (act === 'wake-grant') { r = jm.setWakeGrant(job, req.body?.grant === true, { by: personHere(req) ? { kind: 'person', by: 'person' } : null }); if (r.error) return res.status(r.code === 'wake_grant_person_only' ? 403 : 400).json({ error: r.error, code: r.code }); } // lane jobs-memory-bound: the job's properties (0 = unbounded: the owner's call)
       // the user EXPANDED the row (triage §13 rule 1c): a terminal one-shot is
       // acknowledged by the person who opened it; anything else is a no-op
       else if (act === 'seen') { const changed = jm.markAck(job, 'user-opened'); if (changed) jm._save(); return res.json({ success: true, changed, ack: M.ackState(job) }); }
@@ -329,8 +349,15 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     } catch (e) { log('[jobs] accept catch-up failed:', e.message); }
   };
 
+  /** THE GRANT'S IN-PROCESS DOOR (piece 7 — the name lane login-request-card's proposal card calls on the person's press, 主开发
+   *  05:14Z): `by` = { kind: 'person' | 'key', by: the actor, name? } → setWakeGrant's answer | {error, code} */
+  const setWakeGrant = (jobId, yes, by) => { const job = jm.jobs.get(String(jobId || '')); return job ? jm.setWakeGrant(job, yes === true, { by }) : { error: 'no such job', code: 'not_found' }; };
   return {
     jm,
+    setWakeGrant,
+    // piece 7: lane login-request-card's proposal store binds its `proposeWakeGrant(caller, {rows, why})` here (the agent route's
+    // `vibespace-job propose-wake` / `--propose-wake` call it through the engine); none bound ⇒ proposal_door_not_ready by name
+    setProposalDoor: (fn) => { jm.proposeWakeDoor = typeof fn === 'function' ? fn : null; },
     getJobs: () => jm,
     initAfterListen: () => {
       try { jm.init(); } catch (e) { log('[jobs] init threw (isolated):', e.message); }

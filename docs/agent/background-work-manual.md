@@ -34,6 +34,24 @@ Three independent audiences:
    `--notify on|off` (later: `vibespace-job notify <id> on|off|inherit`) >
    Task-Group tri-state > global Settings→Integration (default ON). The create
    output tells you honestly which mode you'll get.
+   **When your conversation has ENDED** (the manager design's piece 7): a job's result
+   (done, failed, out of memory), a missed one-time time, a task a machine restart
+   interrupted, and a schedule's reminder RESUME your conversation for ONE turn that
+   hands over everything waiting — but only when how it ended allows it:
+   - **a restart ended it** (the machine or the hub went down) ⇒ it is resumed, no
+     grant needed;
+   - **it was ended on purpose** (a person's Terminate, an agent's end) ⇒ it is resumed
+     ONLY by a job or schedule carrying the person's GRANT («may resume its conversation
+     after that conversation was ended on purpose»); without it the result WAITS for the
+     next time it runs, and the job's journal says why and who ended it;
+   - **no record of how it ended** ⇒ it waits.
+   Before it resumes, the account's limit and the spend ceiling are asked for that one
+   turn; at most two conversations start at a time. The turn ends with «This conversation
+   had been ended and was resumed to hand you this. Background tasks and timers it had
+   before are gone.» — re-register what you still need. The grant is set by the PERSON
+   (the Terminate confirm lists your jobs and schedules; the job's row in Background Work)
+   or by a manager key holding `jobs.wakeGrant`. You cannot set it — ask the person in chat.
+   A subscriber's copy never resumes anyone — only the owner is resumed.
 2. **Subscribers** — any session that can VIEW the job may
    `vibespace-job subscribe <id> [--filter "regex"]`. The filter is a
    case-insensitive regex over the notification text — only matching messages

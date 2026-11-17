@@ -684,8 +684,11 @@ function spawnTaskOf(rec) {
 // 2.369.360 reads, building the child from `{...a.task}`) is dropped, so the store keeps ONE field (the top-level one)
 function storedAction(action) {
   if (!action || typeof action !== 'object') return null;
-  if (action.type !== 'spawn-task' || !action.task || typeof action.task !== 'object' || !('notifyUser' in action.task)) return action;
-  const { notifyUser, ...task } = action.task;
+  if (action.type !== 'spawn-task' || !action.task || typeof action.task !== 'object') return action;
+  // the manager design's piece 7: a run never carries a wake grant of its own (its grant is its schedule's) — the two grant
+  // fields leave a stored task, so a task body can never plant one in every run
+  if (!('notifyUser' in action.task) && !('wakesEndedOwner' in action.task) && !('wakeGrantBy' in action.task)) return action;
+  const { notifyUser, wakesEndedOwner, wakeGrantBy, ...task } = action.task;
   return { ...action, task };
 }
 

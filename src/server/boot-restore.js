@@ -487,6 +487,17 @@ async function keptRecordOf(key) {
   const e = keptStopped.get(String(key || ''));
   return e ? { sockFile: e.sockFile, meta: e.meta, id: e.id } : null;
 }
+/** THE KEPT RECORD GOES once its conversation runs again (the manager design's piece 7, 主开发 12:46Z MUST 2): a delivery that
+ *  resumed it drops it at once — as stoppedSessions does at its next sweep — so a later end on purpose is never read as «a
+ *  restart ended it». → true when a record was dropped. */
+async function dropKept(key) {
+  await loadKept();
+  const e = keptStopped.get(String(key || ''));
+  if (!e) return false;
+  keptStopped.delete(String(key || ''));
+  fs.unlink(keptFile(e.sockFile), () => { });
+  return true;
+}
 async function stoppedSessions() {
   await loadKept();
   const live = new Set(); // the conversations live sessions ADDRESS (addressableId: a pending fork addresses none — r2)
@@ -1204,7 +1215,7 @@ async function readoptOrphanKeeperSessions() {
     readoptOrphanKeeperSessions, probeSockets, probeFacts, reprobePending, probePending: () => new Map([...pendingProbes].map(([f, p]) => [f, [...p.q]])),
     stoppedSettled: () => Promise.all([...settling]), // the kept metas' transcript answers (settleStopped) — a test's wait
     keepEnded, endFactsBefore, consumeKept, // lane end-obeys-verdict: the ONE end record — its one read before the kill, its writer, its consume
-    stoppedSessions, keptRecordOf, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js); one conversation's record (the resume verb — piece 4 reads it)
+    stoppedSessions, keptRecordOf, dropKept, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js); one conversation's record (the resume verb — piece 4 reads it)
     consumeKeptOf }; // B-a5a4 (2): a turn ended on a live session — its conversation's kept copy goes at once (server.js noteTurnEnd)
 }
 /** THE ONE CREATE ROAD's consume (the one end record's contract): src/ws-create.js calls it the moment a create made a conversation

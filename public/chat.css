@@ -972,6 +972,9 @@
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-input));
 }
 .chat-stash-strip[hidden] { display: none; }
+/* the manager design's piece 7, rule 3: a conversation a DELIVERY resumed says what resumed it and when (one quiet line) */
+.chat-resumed-line { padding: 3px 10px; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.chat-resumed-line[hidden] { display: none; }
 .chat-stash-icon { display: inline-flex; flex-shrink: 0; color: var(--accent); }
 .chat-stash-icon svg { width: 12px; height: 12px; }
 .chat-stash-text { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* basis 0 (the .197 integration): the strip WRAPS for its details list, so an auto basis wrapped the button onto a 2nd line on a phone — the text yields and ellipsizes instead */

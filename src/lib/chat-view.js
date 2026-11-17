@@ -53,6 +53,7 @@ import { serviceHref, serviceOpenSpec, publishArtifacts } from './artifact-card.
 import { requestPhrases } from '../command-words.js'; // PURE (lane door-healthy-chat): the waiting line's plain question
 import { stallVerdict, waitingOnUser } from '../turn-state.js'; // PURE (lane parked-ask-stall): the delivery-stall verdict + "is the turn waiting on the user"
 import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
+import { endedWaitLine } from './wake-grant-rows.js'; // the manager design's piece 7: an ended window's «n notices are waiting»
 import { stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: the read-only window says why its session stopped
 import { fineScrollEntry, pushFine, FINE_SCROLL_MS } from './scroll-forensics.js'; // lane run-open-jump (B-a7a9): the FINE scroll trace after a run toggle / the ↓ (PURE)
 import { NeedsCards, hiddenRecord } from './chat-needs-card.js'; // lane chat-needs-you-card: this conversation's own For-you items as cards in its chat + the «waiting for you · N» chip
@@ -1132,6 +1133,7 @@ class ChatView {
     this._chatInput.popupContainer = container;
     // the `stash` fact read before the composer existed (the sidebar's last copy, at construction)
     if (this._stashFact) this._chatInput.setStash(this._stashFact.stash, { turn: this._stashFact.turn });
+    if (this._resumedFact) this._chatInput.setResumedBy(this._resumedFact);   // piece 7 rule 3: what resumed it, read before the composer existed
 
     // THE CHORD'S KEYBINDING. Per view (its `when` scopes it to this window,
     // and the binding leaves with the view), bound to the window's
@@ -5681,6 +5683,8 @@ class ChatView {
     // 2026-09-27: what waits for this agent's next turn — the strip above the composer (kept until the input exists)
     this._stashFact = { stash: row.stash || null, turn: row.turn || null };
     this._chatInput?.setStash?.(this._stashFact.stash, { turn: this._stashFact.turn });
+    this._resumedFact = row.resumedBy || null;   // piece 7 rule 3: a delivery resumed it — the line says what and when
+    this._chatInput?.setResumedBy?.(this._resumedFact);
     const fact = row.browserFact || null;
     if (!fact) { if (this._browserFacts) { this._browserFacts = null; this._statusBar?.setBrowserProfile?.(null); } return; }
     if (this._browserFacts && this._browserFacts.fact.digest === fact.digest) return;
@@ -7323,6 +7327,9 @@ class ChatView {
     const why = stoppedWhyFor(spec.backend, spec.backendSessionId, this.app?.sidebar?._allSessions);
     note.textContent = why ? `${why} ${t('Session is read-only.')}` : t('Session is read-only.');
     if (why) note.dataset.stopWhy = '1';
+    // the manager design's piece 7: what waits for it (and why a delivery did not resume it) — the same line as its row
+    const waits = endedWaitLine(spec.backend, spec.backendSessionId, this.app?.sidebar?._allSessions, when);
+    if (waits) { const wl = document.createElement('div'); wl.className = 'chat-resume-waiting'; wl.textContent = waits; note.appendChild(wl); }
 
     bar.append(note, btn);
     this.app?.layoutManager?.offerDoor?.(bar, { backend: spec.backend, id: spec.backendSessionId }); // «Resume all N» while the dismissed boot offer's conversations stay stopped (B-6352)

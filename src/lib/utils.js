@@ -468,6 +468,7 @@ export function showConfirmDialog(opts = {}, legacyMessage) {
   // A string first argument is read as that pair; the approval census (test-approval-census) also refuses the form
   if (typeof opts === 'string') opts = { title: opts, message: typeof legacyMessage === 'string' ? legacyMessage : '' };
   const { title = t('Confirm'), message = '', confirmText = t('OK'), danger = false, items = null } = opts || {};
+  const extra = opts && opts.extra && opts.extra.nodeType === 1 ? opts.extra : null;   // a node of the CALLER's under the list (the Terminate confirm's job rows — the manager design's piece 7)
   const list = Array.isArray(items) ? items.map((x) => String(x)) : []; // B-a67c: what the confirm ends, one row each (a group close names every tab)
   return new Promise((resolve) => {
     const { overlay, body, okBtn, cancelBtn, closeBtn } = _modalShell(title);
@@ -487,6 +488,7 @@ export function showConfirmDialog(opts = {}, legacyMessage) {
       for (const x of list) { const li = document.createElement('li'); li.textContent = x; ul.appendChild(li); }
       body.appendChild(ul);
     }
+    if (extra) body.appendChild(extra);
     const done = (result) => { overlay.remove(); resolve(result); };
     okBtn.onclick = () => done(true);
     cancelBtn.onclick = closeBtn.onclick = () => done(false);

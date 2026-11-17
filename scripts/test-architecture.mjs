@@ -6024,6 +6024,7 @@ await section(async () => {
     ['src/artifacts.js', 'serviceRows', 'the Artifacts list — every row is serviceRow\'s'],
     ['src/artifacts.js', 'serviceRow', 'the service row + its chat card — `name` = the holder\'s labelOf (M.labelVia), else the id'],
     ['src/jobs.js', '_lastLogLine', 'the log\'s last line, redacted — no name'],
+    ['src/delivery-wake.js', 'wakeChoiceRows', 'the manager design\'s piece 7: the grant rows of the person\'s doors — its facts are jobs.js wakeRowsOf\'s ({id, label: labelOf(job), schedule, nextFireAt, grant}), never a record'],
   ];
   const flow93 = makeFlow93(acorn);
   const nameFiles93 = [...srcFiles93.filter((f) => !f.startsWith('src/lib/')), 'server.js'];

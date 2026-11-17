@@ -555,6 +555,16 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // refusal is the spend gate's, the owner's own dial: the guard files it in For you, the sender hears it on its next turn.
   // A frame that cannot land (a conversation gone, a CLI that never accepts) falls at the bound, said (`paced-out`).
   const isOwed = (e) => !!(e && e.held && e.held.why === 'paced');
+  // THE WAKE OWED TO AN ENDED CONVERSATION (the manager design's piece 7, lane paced-wake-retry, 2026-11-17 — the owner: deliveries
+  // resume an ended conversation by default). A job's result / a schedule's reminder to its owner, or a wake an agent sent to ONE
+  // addressee, found the conversation ENDED: its words are stashed exactly as before (the producer's own store, durable) and the
+  // conversation is owed ONE wake — this entry, ONE per conversation however many deliveries wait. It is a RUNG of this park,
+  // never a second queue: it holds no words (the stashes do), asks no pace (THE ONE LINE and the spend guard are its pace), and its
+  // attempt does not post — it is handed to the hub's resume line (`registerEndedWake`), whose start asks the account's limit and
+  // the spend guard (a probe) BEFORE anything spawns, then claims the stashes, resumes, and hands everything over as ONE message.
+  // ANY answer ends the entry (delivered, refused, failed — said to the sender, the journal and the row): no timer retries; the
+  // next eligible delivery, a person's Resume or a granted resume asks again (the design: «No timer retries»).
+  const isEnded = (e) => !!(e && e.held && e.held.why === 'ended');
   const owedProducers = new Map();   // producer → {render(cid, e) → words|null, fell?(cid, e, extra) → true, cancelled?(cid, e)}
   let wakePacer = null;              // (sender) → mayWake — the groups engine's persisted pacer, ONE ledger
   const parkBootAt = clock.now();    // the instant this process's park came up (`unready`'s own bound)
@@ -567,6 +577,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     try { fs.writeFileSync(retryFile + '.tmp', JSON.stringify(retry)); fs.renameSync(retryFile + '.tmp', retryFile); return true; }
     catch (e) { log('[deliver] retry park persist failed:', e.message); return false; }
   };
+  // THE MERGES ARE COALESCED (the manager design's piece 7, 主开发 12:46Z: a storm of thirty results did thirty whole-file writes
+  // in a row on the main thread): a delivery that RIDES an owed wake is written once per 50 ms; the first park and the in-flight
+  // stamp stay synchronous (durable before anything acts on them), and a stop flushes (closeRetries)
+  let retryWriteTimer = null;
+  const writeRetrySoon = () => { if (retryWriteTimer) return; retryWriteTimer = setTimeout(() => { retryWriteTimer = null; writeRetryNow(); }, 50); if (retryWriteTimer.unref) retryWriteTimer.unref(); };
+  const flushRetryWrite = () => { if (!retryWriteTimer) return; clearTimeout(retryWriteTimer); retryWriteTimer = null; writeRetryNow(); };
   // BOOT: the previous process's holds are gone (the guard is in-memory) — every parked entry is re-judged at its
   // next attempt. An entry stamped `inflight` was being posted when that process stopped: its frame MAY HAVE LANDED
   // (a connect + write on a live socket completes in milliseconds; the stamp is cleared only after the post) — it is
@@ -584,6 +600,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         if (!e || typeof e !== 'object') continue;
         if (e.charged) e.charged.hold = null;
         if (isOwed(e)) { delete e.paceRefusals; waitedOut++; }   // its schedule starts again here (owedEnd)
+        if (e.inflight && isEnded(e)) { notes.push(`${cid}: ${e.id} (a wake owed to an ended conversation) was in the resume line when the previous server stopped — it posted nothing here (the hand-over is exactly-once by its own claim), so it is offered to the line again`); delete e.inflight; e.nextAt = 0; continue; }
         if (e.inflight) { notes.push(`${cid}: ${e.id} was being posted when the previous server stopped — its frame may have landed, so it is handed to the stash at the first sweep and never posted again`); delete e.inflight; e.maybeDelivered = true; e.nextAt = 0; }
         // A HAND-OVER'S CLAIM IS THE SAME STAMP (verify r2, reproduced): an entry stamped `ho:<id>` was riding a hand-over's
         // frame when the process died inside that post. The stash releases ITS claimed entries at boot (they wait again); a
@@ -668,9 +685,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     for (const e of dropped) { const threw = !!e._judgeThrew; delete e._judgeThrew; emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }); }   // r5: a judge that threw is said as such
     stashChanged(cid);
   }
+  /** how many parked notices a conversation's next hand-over would carry — a COUNT, never judged (the ended row's fact reads it on a GET) */
+  function retryWaitingCount(cid) { return (retry[cid] || []).filter((e) => e && !isEnded(e) && !e.inflight && !e.maybeDelivered && !isOwed(e) && !e.ho).length; }
   function retryEntries(cid) {
     judgeRetries(cid);
-    return (retry[cid] || []).filter((e) => e && !e.inflight && !e.maybeDelivered && !isOwed(e)).map((e) => ({ source: 'retry', kind: e.kind, fromName: e.fromName || null, text: e.text, ts: e.firstAt, held: { kind: 'retrying', nextAt: e.nextAt, attempts: e.attempts.length, phase: (e.attempts[e.attempts.length - 1] || {}).phase || null, busy: (e.attempts[e.attempts.length - 1] || {}).busy ?? null, producer: e.producer || null, meta: e.meta || null }, ho: e.ho || undefined, _retry: e }));
+    return (retry[cid] || []).filter((e) => e && !isEnded(e) && !e.inflight && !e.maybeDelivered && !isOwed(e)).map((e) => ({ source: 'retry', kind: e.kind, fromName: e.fromName || null, text: e.text, ts: e.firstAt, held: { kind: 'retrying', nextAt: e.nextAt, attempts: e.attempts.length, phase: (e.attempts[e.attempts.length - 1] || {}).phase || null, busy: (e.attempts[e.attempts.length - 1] || {}).busy ?? null, producer: e.producer || null, meta: e.meta || null }, ho: e.ho || undefined, _retry: e }));
   }
   function releaseHoldOf(e) {
     if (e && e.charged && e.charged.hold && releaseSpend) { try { releaseSpend({ reason: e.charged.reason, identity: e.charged.identity, hold: e.charged.hold }); } catch (err) { log('[deliver] releasing the parked hold failed:', err.message); } }
@@ -821,6 +840,93 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   }
   function registerOwedWake(producer, hooks) { if (producer && hooks && typeof hooks.render === 'function') { owedProducers.set(producer, hooks); scheduleRetry(); } }
   function registerWakePacer(fn) { if (typeof fn === 'function') wakePacer = fn; }
+  // ── THE WAKE OWED TO AN ENDED CONVERSATION (piece 7; see isEnded) ──────────────────────────────────────────────────────
+  let endedHook = null;   // (cid, entry) → Promise<{outcome: 'delivered' | 'refused' | 'failed', why?, code?, until?}> — the hub's resume line (server.js)
+  /** The hub wires its ONE LINE here; an entry parked before it (the boot) waits for it. */
+  function registerEndedWake(fn) { if (typeof fn === 'function') { endedHook = fn; scheduleRetry(); } }
+  /** The owed wakes of a conversation (COPIES): the row's «not resumed» line reads the last answer off the producers, not here. */
+  function endedEntries(cid) { return (retry[cid] || []).filter(isEnded).map((e) => ({ ...e })); }
+  /** A producer whose delivery found the conversation ENDED, after it stashed the words (they are durable before this): the
+   *  conversation is owed ONE wake. The caller has asked the PURE src/delivery-wake.js `owesWake` (only an eligible delivery,
+   *  never archived). A conversation that RUNS is never parked here (its own rungs carry the delivery). A second
+   *  delivery while one is owed rides it (`deliveries` counts them; the hand-over carries every word waiting; `producers` names
+   *  every producer that asked — a peer's wake keeps its words in the group log, so the hand-over may start the turn with no
+   *  stash; `cardText` = the message that woke it, for that card). → {parked, id, merged?, live?} */
+  function parkEndedWake(cid, { producer, spendReason, kind = 'notification', fromName = null, cardText = null, sender = null, reason = '', meta = null } = {}) {
+    if (!cid || !producer || !spendReason) return { parked: false, why: 'no conversation, producer or reason' };
+    if (peerReachable(cid) || localSessionFor(cid)) return { parked: false, live: true };
+    const same = (retry[cid] || []).find(isEnded);
+    if (same) {
+      if (sender && !same.senders.includes(sender)) same.senders.push(sender);
+      same.producers = mergeProducers(same, { producer });
+      if (meta) same.metas = [...metasOf(same), meta].slice(-ENDED_METAS);
+      if (!same.cardText && cardText) { same.cardText = String(cardText).slice(0, 2000); same.fromName = fromName || same.fromName; }
+      same.deliveries = (Number(same.deliveries) || 1) + 1;
+      writeRetrySoon();
+      log(`[deliver] ${cid}: another delivery for the ended conversation rides the wake it is already owed (${same.id}${same.inflight ? ', in the resume line' : ''})`);
+      return { parked: true, id: same.id, merged: true, inLine: !!same.inflight };
+    }
+    const now = clock.now();
+    const e = { id: `rt-${now.toString(36)}-${++retrySeq}`, cid, text: null, fromName, cardText: cardText ? String(cardText).slice(0, 2000) : null, kind, spendReason, producer, producers: [producer], key: null, meta, metas: meta ? [meta] : [], senders: sender ? [sender] : [], held: { why: 'ended', reason: String(reason || '').slice(0, 200) }, charged: null, firstAt: now, nextAt: now, attempts: [], deliveries: 1 };
+    retryQueue(cid).push(e);
+    writeRetryNow();
+    scheduleRetry();
+    stashChanged(cid);
+    emitRetry('wake-owed', cid, e, { producer, spendReason });
+    log(`[deliver] ${cid}: ended — owed ONE wake (${e.id}, ${producer} under ${spendReason}): it goes to the resume line`);
+    return { parked: true, id: e.id, merged: false };
+  }
+  /** every delivery's own facts an owed wake carries — each producer finds ITS deliveries in the answer (`wake`) whichever
+   *  producer asked first (a job's result and a peer's wake ride one wake); the newest ENDED_METAS are kept */
+  const ENDED_METAS = 50;
+  const metasOf = (x) => (Array.isArray(x.metas) ? x.metas : x.meta ? [x.meta] : []);
+  /** every producer an owed wake carries (an entry written before `producers` existed names its one `producer`) */
+  function mergeProducers(a, b) { const out = Array.isArray(a.producers) ? [...a.producers] : a.producer ? [a.producer] : []; for (const p of (Array.isArray(b.producers) ? b.producers : [b.producer])) if (p && !out.includes(p)) out.push(p); return out; }
+  /** The attempt's first rung: a conversation that runs again leaves its owed wake (the next turn carries the words); else the
+   *  oldest owed entry goes to the line (twins merge into it — ONE wake per conversation), marked in flight while there. */
+  function attemptEnded(cid) {
+    const ends = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho);
+    if (!ends.length) return;
+    if (peerReachable(cid) || localSessionFor(cid)) { for (const e of ends) endEnded(e, { outcome: 'running', why: 'it runs again — its next turn carries the words' }); return; }
+    if (!endedHook) return;   // the line is not wired yet (the boot): registerEndedWake schedules the attempt again
+    const [e, ...twins] = ends;
+    for (const t of twins) { for (const x of t.senders) if (!e.senders.includes(x)) e.senders.push(x); e.producers = mergeProducers(e, t); e.metas = [...metasOf(e), ...metasOf(t)].slice(-ENDED_METAS); if (!e.cardText && t.cardText) { e.cardText = t.cardText; e.fromName = t.fromName || e.fromName; } e.deliveries = (Number(e.deliveries) || 1) + (Number(t.deliveries) || 1); removeRetry(t); }
+    e.inflight = clock.now();
+    e.attempts.push({ at: e.inflight, reason: 'handed to the resume line', phase: 'line', busy: null, late: 0, why: 'ended' });
+    writeRetryNow();
+    let p;
+    try { p = Promise.resolve(endedHook(cid, e)); } catch (err) { p = Promise.resolve({ outcome: 'failed', why: (err && err.message) || String(err) }); }
+    const done = p.then((r) => r || { outcome: 'failed', why: 'the line gave no answer' }, (err) => ({ outcome: 'failed', why: (err && err.message) || String(err) }))
+      .then((r) => {
+        delete e.inflight;
+        // LOOK AGAIN (主开发 12:46Z): the wake joined a resume already in the line (a key's) — its answer was no delivery's; the
+        // next attempt finds it running (the words ride its next turn) or puts it on the line anew. Bounded: the third ends it.
+        if (r && r.outcome === 'again' && (e.agains = (Number(e.agains) || 0) + 1) < 3) { e.nextAt = clock.now(); writeRetryNow(); scheduleRetry(); return; }
+        endEnded(e, r && r.outcome === 'again' ? { outcome: 'failed', why: r.why } : r);
+      });
+    retryInFlight.add(done);
+    done.finally(() => retryInFlight.delete(done));
+  }
+  /** ANY answer ends an owed wake (no timer retries — the design): said once in the log and to the producers (`wake`). */
+  /** the LAST answer an owed wake got, per conversation, while it stays unresumed (the row's «— not resumed: {why}»; in memory:
+   *  a boot forgets it, the next delivery asks again). A delivery or a running conversation clears it. */
+  const endedAnswers = new Map();   // cid → {outcome, code, why, until, at}
+  function endedAnswerOf(cid) { return endedAnswers.get(cid) || null; }
+  /** the conversation runs again (a turn started, a delivery landed): its last refusal is history — never an old one after a later end */
+  function clearEndedAnswer(cid) { endedAnswers.delete(cid); }
+  /** the conversations a stash entry waits for (the ladder's own stash) — the row's count reads these few, never every row */
+  function stashCids() { return Object.keys(stash).filter((cid) => Array.isArray(stash[cid]) && stash[cid].length > 0); }
+  function endEnded(e, r = {}) {
+    if (!retry[e.cid] || !retry[e.cid].includes(e)) return;
+    if (r.outcome === 'refused' || r.outcome === 'failed') endedAnswers.set(e.cid, { outcome: r.outcome, code: r.code || null, why: r.why || null, until: r.until || null, at: clock.now() });
+    else endedAnswers.delete(e.cid);
+    removeRetry(e);
+    writeRetryNow();
+    log(`[deliver] ${e.cid}: the wake owed to the ended conversation (${e.id}, ${Number(e.deliveries) || 1} deliver${(Number(e.deliveries) || 1) === 1 ? 'y' : 'ies'}) — ${r.outcome || 'ended'}${r.why ? ': ' + r.why : ''}`);
+    emitRetry('wake', e.cid, e, { outcome: r.outcome || 'failed', why: r.why || null, code: r.code || null, until: r.until || null, sessionId: r.sessionId || null, attempts: e.attempts.length });
+    stashChanged(e.cid);
+    scheduleRetry();
+  }
   /** the owed entries of a producer for a conversation (the SAME objects — `retryTake` takes them) */
   function owedEntries(cid, producer) { return (retry[cid] || []).filter((e) => isOwed(e) && e.producer === producer && !e.inflight); }
   /** THE HARD BOUND (the owner's rule): this entry's wake is due NOW, whatever the pace says */
@@ -945,6 +1051,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** THE CAUSE OF A FALL, read from the target's state AT the fall (acceptance r6, P23, measured: parked while reachable, its session then a terminal: every road kept `not-running` and the owner read «its conversation is not running» about a running one). fellRetry is the door of every road (park, attempt, peer miss), so this is the one place: a wake that fell for want of a lane is said as what the session is. A transient entry falls as it always did (law 4). */
   function fallCause(e, kind) { return isOwed(e) && kind === 'not-running' ? liveStateOf(e.cid) : null; }
   function fellRetry(e, kind, reason, detail = {}) {
+    if (isEnded(e)) { endEnded(e, { outcome: 'dropped', why: reason, code: kind }); return; }   // piece 7: wordless — the stashes keep the words
     const state = fallCause(e, kind);
     if (state) { kind = state.cause; reason = state.why; }
     if (isOwed(e) && detail.expired) { reason = `paced-out — ${reason}`; detail = { ...detail, why: 'paced-out' }; }   // law 3: the schedule ran out on a wake the pace held
@@ -1013,6 +1120,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   async function attemptRetry(cid, why) {
     if (retryClosed) return;   // shutting down: no new post leaves (the ones in flight are waited for)
     judgeRetries(cid);   // lane jobs-addressed-push r4: the turn end's and the timer's attempt ask each entry's producer first
+    attemptEnded(cid);   // piece 7: a wake owed to an ENDED conversation goes to the resume line (or leaves: it runs again)
     // a producer that never came up in a whole hour of this process: nothing here can send it — said, like every owed entry's end (D4)
     for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && unready(x) && clock.now() - Math.max(Number(x.firstAt || 0), parkBootAt) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `nothing on this server can send it (its producer «${e.producer}» never came up)`, { expired: true });
     for (const e of (retry[cid] || []).filter((x) => x && x.maybeDelivered && !x.inflight && !x.ho && !unready(x))) fellRetry(e, 'not-reachable', 'it was being posted when the previous server stopped — its frame may have landed, so it is not posted again', { maybeDelivered: true });
@@ -1023,7 +1131,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // the second judge: the attempts themselves (a turn end attempts regardless of the backoff; a clock that lies cannot run them for ever)
     for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !isOwed(x) && x.attempts.length >= RETRY_MAX_ATTEMPTS)) fellRetry(e, 'not-reachable', `the agent did not accept the message in ${e.attempts.length} attempts (the schedule's ${RETRY_MAX_ATTEMPTS}-attempt bound) over ${Math.round((clock.now() - Number(e.firstAt || 0)) / 60000)} min`, { expired: true });
     foldOwedTwins(cid);
-    let all = (retry[cid] || []).filter((e) => e && !e.inflight && !e.ho && !unready(e));
+    let all = (retry[cid] || []).filter((e) => e && !isEnded(e) && !e.inflight && !e.ho && !unready(e));
     if (!all.length) return;
     const now = clock.now();
     const peer = peerMsg.findPeer(cid);
@@ -1224,7 +1332,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     retryInFlight.add(p);
     try { await p; } finally { retryInFlight.delete(p); if (attempting.get(cid) === p) attempting.delete(cid); }
   }
-  function closeRetries() { retryClosed = true; if (parkTimer) { clock.clearTimeout(parkTimer); parkTimer = null; } }
+  function closeRetries() { retryClosed = true; flushRetryWrite(); if (parkTimer) { clock.clearTimeout(parkTimer); parkTimer = null; } }
   function retryInFlightCount() { return retryInFlight.size; }
   /** resolves the number settled (negative: the deadline passed with that many still in flight — stamped on disk, the boot hands them to the stash) */
   function settleRetries(maxMs = 5000) {
@@ -1849,12 +1957,14 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer
     // lane queued-is-not-woke (law 1): the wrapper's queue and turn edges, and a queued frame handed back — read off its records
     // fresh: the wrapper's own dated listing (round 4) — the only queue listing that can prove a frame did not run
-    noteQueueItems: (cid, items, opts = {}) => { checkHolder(cid); queued.noteQueue(cid, items, holderOf(cid) || undefined, { fresh: !!(opts && opts.fresh) }); }, noteTurnStarted: (cid) => { checkHolder(cid); queued.noteTurnStarted(cid); for (const fn of turnStartListeners) { try { fn(cid); } catch (e) { log('[deliver] a turn-start listener threw:', e.message); } } },
+    noteQueueItems: (cid, items, opts = {}) => { checkHolder(cid); queued.noteQueue(cid, items, holderOf(cid) || undefined, { fresh: !!(opts && opts.fresh) }); }, noteTurnStarted: (cid) => { checkHolder(cid); queued.noteTurnStarted(cid); clearEndedAnswer(cid); for (const fn of turnStartListeners) { try { fn(cid); } catch (e) { log('[deliver] a turn-start listener threw:', e.message); } } },
     onTurnStarted: (fn) => { turnStartListeners.add(fn); return () => turnStartListeners.delete(fn); }, noteConversationEnded: (cid, why) => queued.dropConversation(cid, why), onQueuedDropped: (fn) => queued.onDropped(fn), noteTurnEnded: (cid) => queued.noteTurnEnded(cid),
     noteHandedBack: (cid, text, reason) => queued.noteHandedBack(cid, text, reason, heldBackStash(cid)), onCarried: (fn) => queued.onCarried(fn), onHandedBack: (fn) => queued.onHandedBack(fn), queuedEntries: (cid) => queued.entriesFor(cid),
     queuedFileState: () => queued.fileState(), onQueuedFileState: (fn) => queued.onFileState(fn), queuedSetAside: () => queued.setAside(),   // B-e3fe follow-up: an unread msg-queued.json is said in For you, with the person's «set it aside»
     noteProcessGone, noteAttached, sweepQueued,   // round 2: the wrapper gone ⇒ the HUB hands back; a (re)attach ⇒ the hub ASKS for the queue
-    parkOwedWake, registerOwedWake, registerWakePacer, owedEntries, wakeBlock, fellOwed, fellOwedPart,   // lane paced-wake-retry: a wake the pace refused is owed — parked for the window's end
+    parkOwedWake, registerOwedWake, registerWakePacer, owedEntries, wakeBlock, fellOwed, fellOwedPart,
+    parkEndedWake, registerEndedWake, endedEntries, endedAnswerOf, stashCids, retryWaitingCount,   // piece 7: a wake owed to an ENDED conversation — a rung of the park, handed to the hub's resume line
+      // lane paced-wake-retry: a wake the pace refused is owed — parked for the window's end
     onRetry, onTurnEnd, noteTurnEnd, retryPeek, retryEntries, retryTake, registerRetryJudge, claimRetry, retryCount, RETRY_STEPS_MS, RETRY_MAX_MS, RETRY_MAX_ATTEMPTS, RETRY_FLOOR_MS, RETRY_CAP, closeRetries, settleRetries, retryInFlightCount, armStashHandover, handoverArmed, takeArmedHandover, sincePost,   // R3: the hand-over a turn end runs for what the prompt could not carry   // THE RETRY PARK (lane notify-retry): a transient local miss on a live pid, retried at the turn end + on the backoff, ONE authorization
     _unsettledCount: (cid) => (unsettled.get(cid) || []).length,
     // exposed for the stash-drain sites: a drained message enters the agent's

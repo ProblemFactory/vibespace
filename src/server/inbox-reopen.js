@@ -43,7 +43,7 @@ function create({ getOpenConversation, activeSessions, discover = async () => nu
   taskFor = () => null, log = console.log } = {}) {
   const inflight = new Map(); // conversation key → the reopen in flight
 
-  async function run(item, by) {
+  async function run(item, by, accountId = null) {
     const key = String(item.sessionKey || '');
     if (!conversationOfKey(key)) return reopenCreate({ key }); // the PURE refusal by name
     const open = typeof getOpenConversation === 'function' ? getOpenConversation() : null;
@@ -75,6 +75,7 @@ function create({ getOpenConversation, activeSessions, discover = async () => nu
       try { held = await require('../routes/sessions').heldAccountOfNow(conv.backend, conv.id); } catch { held = null; }
       if (held && held.accountId) spec.data.accountId = held.accountId;
     }
+    if (accountId) spec.data.accountId = String(accountId);   // piece 7: the account the delivery's gate judged, and no other
     const sock = headlessCreator(by);
     // THE SEAM (src/server/conversation-ops.js openConversation): with a socket it runs the ws create case itself,
     // byte-identical — a person's reopen, so no spend gate and no spec judging (those are an automation's)
@@ -97,10 +98,12 @@ function create({ getOpenConversation, activeSessions, discover = async () => nu
     return { ok: false, why, ...(err && err.i18n && err.i18n.key ? { i18n: err.i18n } : {}) };   // B-a5a4 follow-up r2: a sentence with a name keeps its key + params
   }
 
-  function reopen(item, { by = null } = {}) {
+  /** `accountId` (the manager design's piece 7): the account a DELIVERY's gate judged — the reopen spawns on exactly that one
+   *  (never the pool's or the default's other pick: a limit on the paying account means wait, never a turn elsewhere). */
+  function reopen(item, { by = null, accountId = null } = {}) {
     const key = String((item && item.sessionKey) || '');
     if (inflight.has(key)) return inflight.get(key);
-    const p = run(item || {}, by).finally(() => inflight.delete(key));
+    const p = run(item || {}, by, accountId).finally(() => inflight.delete(key));
     inflight.set(key, p);
     return p;
   }

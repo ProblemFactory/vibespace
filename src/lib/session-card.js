@@ -14,6 +14,7 @@ import { stoppedWhyOf } from './stopped-why.js'; // lane dead-socket-keeps-chat-
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor, billingRow } from './agent-meta.js';
 import { badgeTail } from './account-tails.js'; // B-ba7d: the badge carries no key tail — the person's read does (by account id)
 const stopClock = (ms, now) => whenAt(ms, { now });   // the stop mark's time through the ONE formatter (page-time)
+import { wakeGrantDoor, waitingWords } from './wake-grant-rows.js'; // the manager design's piece 7: the person's grant rows in the Terminate confirm; an ended row's «n notices are waiting»
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
 const _s = (d, fill = false) => `<svg style="width:12px;height:12px;vertical-align:-2px" viewBox="0 0 16 16" fill="${fill ? 'currentColor' : 'none'}" stroke="${fill ? 'none' : 'currentColor'}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">${d}</svg>`;
@@ -145,8 +146,10 @@ export function registerSessionCardMenu() {
     id: 'session.terminate', title: () => tr('Terminate'),
     run: async (c) => {
       const s = c.s;
-      const ok = await showConfirmDialog({ title: tr('Terminate Session'), message: tr('Terminate session "{name}"? The running agent process will be killed.', { name: c.displayName }), confirmText: tr('Terminate'), danger: true });
+      const wg = await wakeGrantDoor(s);   // piece 7: the jobs and schedules it owns, each with the person's grant to resume it later (none owned ⇒ today's confirm)
+      const ok = await showConfirmDialog({ title: tr('Terminate Session'), message: tr('Terminate session "{name}"? The running agent process will be killed.', { name: c.displayName }), confirmText: tr('Terminate'), danger: true, extra: wg ? wg.node : null });
       if (!ok) return;
+      if (wg) await wg.save();   // the grants first: a schedule that fires right after the end reads them
       if (s.webuiId) c.app.endConversation(s.webuiId, undefined, { endTree: true });   // B-70f9 ②: a person's Terminate — the kill, then the notice of its running jobs · B-c134: it ends the background tree
       else if (s.pid) { c.app.killPid(s.pid, s.host); c.app.noticeOwnedJobs?.([s.sessionId]); }
     },
@@ -348,6 +351,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       </div>
       ${showCwd && cwdText ? `<div class="session-card-sub"><span class="session-card-cwd" data-tip="${escHtml(s.cwd)}">${cwdText}</span></div>` : ''}
       ${stoppedWhyOf(s) ? `<div class="session-card-sub session-card-why" data-stop-reason="${escHtml(s.stopReason)}">${escHtml(stoppedWhyOf(s))}</div>` : ''}
+      ${s.status === 'stopped' && s.waiting && waitingWords(s.waiting, when) ? `<div class="session-card-sub session-card-waiting">${escHtml(waitingWords(s.waiting, when))}</div>` : ''}
     </div>
   </div>`;
   const row = card.querySelector('.session-card-row');
@@ -1061,8 +1065,10 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     terminateBtn.innerHTML = ICON.terminate + ' ' + tr('Terminate');
     terminateBtn.onclick = async (e) => {
       e.stopPropagation();
-      const ok = await showConfirmDialog({ title: tr('Terminate Session'), message: tr('Terminate session "{name}"? The running agent process will be killed.', { name: displayName }), confirmText: tr('Terminate'), danger: true });
+      const wg = await wakeGrantDoor(s);   // piece 7 (see the menu's Terminate)
+      const ok = await showConfirmDialog({ title: tr('Terminate Session'), message: tr('Terminate session "{name}"? The running agent process will be killed.', { name: displayName }), confirmText: tr('Terminate'), danger: true, extra: wg ? wg.node : null });
       if (!ok) return;
+      if (wg) await wg.save();
       if (s.webuiId) app.endConversation(s.webuiId, undefined, { endTree: true });   // B-70f9 ②: a person's Terminate — the kill, then the notice of its running jobs · B-c134: it ends the background tree
       else if (s.pid) { app.killPid(s.pid, s.host); app.noticeOwnedJobs?.([s.sessionId]); }
     };

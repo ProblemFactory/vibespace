@@ -1110,6 +1110,8 @@ const PRINTS = {
     'r.access.control': `${V}:an enum`, 'r.access.view': `${V}:an enum`, 'r.job.logTail': 'judged:agentJobView — `logs` of a job another agent started (verify r5 F1)', 'r.job.logWithheld': `${V}:a flag`,
     'r.notify': `${V}:the notify setting`, 'r.notify.mode': `${V}:an enum`, 'r.notify.reason': `${V}:why auto-notify is off`, 'r.notify.source': `${V}:an enum`,
     'r.preview': `${V}:the preview`, 'r.preview.enabled': `${V}:a flag`, 'r.preview.mode': `${V}:an enum`, 'r.preview.reason': `${V}:the preview's reason`,
+    // the manager design's piece 7: --propose-wake's answer — the hub's own refusal sentence (src/agent-routes.js proposeWake: fixed words, or the proposal store's refusal)
+    'r.wakeProposal.error': `${V}:the proposal door's refusal sentence (src/agent-routes.js proposeWake)`,
     'r.renamed': `${V}:a flag`, 'r.survivalNote': `${V}:the runtime note`, 'r.text': `${V}:the manual text (docs)`, 'res._neterr': `${V}:node's fetch error text`,
     'run.cause': `${V}:the run's cause`, 'run.exit': `${V}:an exit code`,
     // lane jobs-memory-bound: memLine(j) — the job's memory bound, the rung its last run measured, the park; and the `memory` verb's echo
@@ -2500,6 +2502,7 @@ console.log('§6 the shared-store census (words another principal wrote into a s
     'REV_NOTE_FROM': 'a constant of ours (channels — lane channel-record-revisions\' recall note)',
     "'VibeSpace'": 'ours (auto-resume / the pool engine)', "'You · via Channels'": 'ours', "'Channels · Outbox'": 'ours', "'Channels · API'": 'ours (B-2198 part 2: the raw-API receipt)', "'Channels · judged rules'": 'ours (lane judged-watch-state: the once-a-day not-a-hit line, DM.judgedSkipLine)',
     "'Background Work · ' + this.labelOf(job)": 'a job name is a slug (resolveName) — belted on its own (lane job-notify-user r3, labelOf: a token-shaped name reached the chat card raw)',
+    "`Background Work · ${label}`": 'the manager design\'s piece 7 (jobs.js _oweWake): `label` = this.labelOf(job) named once on the line above — the same belted accessor (the §93 control patches the first literal site, so it is not repeated)',
     "'Background Work · ' + (e.jobName || e.jobId)": 'a client card of a slug',
     "'Background Work · ' + CLEARED_TEXT": 'ours (a cleared job)',
     '`Machines · ${machine}`': "a client card; the machine's name the user gave",

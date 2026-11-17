@@ -6,6 +6,7 @@ import { railRow } from './rail-row.js'; // lane ui-phone-and-fit M2: THE RAIL R
 import { escHtml, fetchJson, showConfirmDialog, showToast, createModalShell, showContextMenu } from './utils.js';
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a job's menu + the cleared sentence
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a family of cleared jobs is named by the stored key — worded here
+import { grantByWords } from './wake-grant-rows.js'; // the manager design's piece 7: who allowed a job's grant, and when
 import { t } from './i18n.js';
 import { stampAt as when, clockOf, ago, stampAt, durationMark, markAgo } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: a job's state / access / end / start in words (the walk's jobs-2 / jobs-6)
@@ -418,6 +419,22 @@ async function expandDetail(app, el, j, refresh) {
   memEff.textContent = memoryEffectiveWords(job, t);
   memRow.append(memLbl, memIn, memSet, memFact, memEff);
   d.appendChild(memRow);
+  // the manager design's piece 7: THE PERSON'S GRANT — this job or schedule may resume its conversation after that conversation
+  // was ended on purpose (default no; said once here and it holds). Written through the person's own door (a press on this
+  // page — an agent's token is refused by name); a cron's runs ride their parent's, so only the parent's row offers it.
+  if (!job.cronParent && job.owner?.createdBy !== 'user') {
+    const gr = document.createElement('label'); gr.className = 'jobs-access jobs-wake-grant';
+    const gcb = document.createElement('input'); gcb.type = 'checkbox'; gcb.checked = job.wakesEndedOwner === true;
+    const gl = document.createElement('span'); gl.textContent = t('May resume its conversation after that conversation was ended on purpose');
+    gcb.onchange = async () => {
+      const r2 = await fetchJson(`/api/jobs/${j.id}/wake-grant`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grant: gcb.checked }) });
+      if (!r2 || r2.error) { showToast((r2 && r2.error) || t('Save failed'), { error: true }); gcb.checked = !gcb.checked; }
+    };
+    gr.append(gcb, gl);
+    const gw = grantByWords(job.wakesEndedOwner === true ? job.wakeGrantBy : null);   // who allowed it, and when
+    if (gw) { const gws = document.createElement('span'); gws.className = 'jobs-memory-fact'; gws.textContent = gw; gr.appendChild(gws); }
+    d.appendChild(gr);
+  }
   // owner auto-notify state (2.344.0): which lane told (or will tell) the
   // owner conversation about this job, and when it last happened
   {

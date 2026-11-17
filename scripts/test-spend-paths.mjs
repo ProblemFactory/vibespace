@@ -4293,8 +4293,17 @@ console.log('\n§5e the two calls that must NOT consume the budget: the probe an
     // that holds nothing let it run uncounted (and a 3-minute window in which the wake was still unauthorized). The
     // dispatch now authorizes the compaction WITH a hold under its own reason (peer-compact) and notes it; its only
     // hold-free call is gone, so auto-resume's pre-gate question is again the ONE probe.
-    ok('§5e the ONLY probe in the tracked server source is auto-resume\'s pre-gate question (a dispatch\'s compaction is HELD + noted under peer-compact, never probed)',
-      probes.length === 1 && probes[0].startsWith('src/server/auto-resume.js:'), probes.join(', ') || 'none found');
+    // the manager design's piece 7 (2026-11-17, lane paced-wake-retry): the SECOND judged probe — a delivery's owed wake asks the
+    // guard BEFORE the resume, which sends nothing and bills nothing; the turn it then opens is the hand-over, authorized WITH a hold
+    // by the ladder under the same reason (stash-handover.js handOverWake's two literal sites) — nothing runs uncounted between the
+    // question and the charge, which is exactly what refuted the dispatch's probe above
+    const JUDGED_PROBES = ['src/server/auto-resume.js:', 'src/server/delivery-wake.js:'];
+    ok('§5e every probe in the tracked server source is a JUDGED pre-gate question — auto-resume\'s, and a delivery\'s wake before its resume (piece 7); a dispatch\'s compaction is HELD + noted under peer-compact, never probed',
+      probes.length === JUDGED_PROBES.length && JUDGED_PROBES.every((j) => probes.filter((x) => x.startsWith(j)).length === 1), probes.join(', ') || 'none found');
+    const sh = read('src/server/stash-handover.js');
+    const wakeBody = sh.slice(sh.indexOf('async function handOverWake('), sh.indexOf('function releaseWake('));
+    ok('§5e …and the turn a delivery\'s probe precedes is CHARGED: handOverWake posts through the ladder (its own authorize + hold) under the delivery\'s reason, both spelled as literals',
+      /d\.deliverToConversation\(cid, frame, \{ kind: 'notification', spendReason: 'peer-message'/.test(wakeBody) && /d\.deliverToConversation\(cid, frame, \{ kind: 'notification', spendReason: 'job-notification'/.test(wakeBody) && !/hold:\s*false/.test(wakeBody));
   }
 
   // EVERY CHARGE THAT BUILDS ITS OWN PAYLOAD MUST CARRY THE HOLD — a census,

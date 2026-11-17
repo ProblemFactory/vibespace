@@ -244,6 +244,7 @@
   "/api/integrations/:id",
   "/api/jobs",
   "/api/jobs-escapes",
+  "/api/jobs-wake-grants",
   "/api/jobs/:id",
   "/api/layout-history",
   "/api/layouts",

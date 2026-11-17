@@ -2,6 +2,8 @@ import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMen
 import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { composerSendModes, slashCompletionList } from './agent-meta.js';
 import { t } from './i18n.js';
+import { stampAt } from './page-time.js'; // piece 7 rule 3: the resumed line's time, in the viewer's zone
+import { refusalWords } from './wake-grant-rows.js'; // piece 7: a hand-over refused after the resume, in the person's words
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { isNotificationQueueItem } from '../notification-senders.js';
 import { keyboardOwned, keyboardYielded, onKeyboardChange } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down; lane takeover-keyboard: …unless the user pressed this box (the line above it says so)
@@ -540,6 +542,12 @@ export class ChatInput {
     // "Hand over now". Above the queue strip: those were sent by YOU; these wait FOR the agent. Keyed, patched in
     // place from the session's `stash` fact (ChatView _onActiveSessions → setStash); hidden when nothing waits.
     this._stashStrip = createStashStrip({ sessionId });
+    // the manager design's piece 7, RULE 3 — EVERY WAKE BY A DELIVERY IS SEEN: a conversation a delivery resumed says what
+    // resumed it and when (the session's `resumedBy` fact; the System panel's row reads the same) — one line, no For-you item
+    this._resumedLine = document.createElement('div');
+    this._resumedLine.className = 'chat-resumed-line';
+    this._resumedLine.hidden = true;
+    this._resumedLine.setAttribute('role', 'status');
     // THE AGENT'S CARDS (lane agent-window-no-pop, inc-mvhebl4n-rkvr): an agent's Design for a chat the person is not looking
     // at opens NO window — its card waits here (title + Open, the person's door); first in the input area, above the stash.
     this._agentCards = createAgentCards();
@@ -571,6 +579,7 @@ export class ChatInput {
     this._textarea.addEventListener('blur', renderKbdLine);
 
     inputArea.append(this._stashStrip.el, this._queueStrip, this._attachArea, this._todoDisplay, this._streamStatus, this._kbdLine, inputWrap, this._steerBtn, this._holdBtn, sendCol, this._sendHint, this._imeHint);
+    inputArea.prepend(this._resumedLine);   // piece 7 rule 3: what resumed it — above everything that waits
     inputArea.prepend(this._agentCards.el); // lane agent-window-no-pop: the agent's cards come first, above the stash strip
   }
 
@@ -1650,6 +1659,20 @@ export class ChatInput {
    *  `queueVerbs` is the table, `steer`/`queueOps` its derived view. */
   /** 2026-09-27: the session's `stash` fact ({count, items} | null) + its turn — the strip patches in place. */
   setStash(summary, opts = {}) { this._stashArgs = [summary, opts]; this._stashStrip?.set(summary || null, { ...opts, steers: this._sendModes().enterDoor === 'steer' }); }   // B-02a3: the group press follows this composer's own Enter door
+  /** piece 7 rule 3: `{key, params:{what}, at}` | null — «Resumed {when} to deliver: {what}», the time in the viewer's zone */
+  setResumedBy(line) {
+    const el = this._resumedLine;
+    if (!el) return;
+    const ok = !!(line && line.at && line.params && line.params.what);
+    el.hidden = !ok;
+    const p = ok ? { when: stampAt(line.at), what: String(line.params.what) } : null;
+    // who ALLOWED it, when the conversation had been ended on purpose (the job's grant — the person, or a manager key by name);
+    // a hand-over refused AFTER the resume says why (the words wait for its next turn)
+    el.textContent = !ok ? '' : line.refused ? t('Resumed {when} to deliver: {what} — but the hand-over was refused: {why}', { ...p, why: refusalWords(line.refused.code) })
+      : line.by && line.by.kind === 'person' ? t('Resumed {when} to deliver: {what} — you allowed it', p)
+      : line.by && line.by.kind === 'key' ? t('Resumed {when} to deliver: {what} — allowed by the key «{by}»', { ...p, by: String(line.params.by || '') })
+        : t('Resumed {when} to deliver: {what}', p);
+  }
   /** lane agent-window-no-pop: `{key, title, open}` — the card an agent's window leaves (src/lib/agent-card.js). */
   showAgentCard(card) { return this._agentCards?.show(card) || null; }
 
