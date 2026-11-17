@@ -11376,6 +11376,7 @@ export default {
   "token": "令牌",
   "deploy key": "部署密钥",
   "Plugin Git credential (not set — Set up…)": "插件 Git 凭据（未设置 — 设置…）",
+  "Plugin Git credential (the vault is locked — unlock it at the top of the page)": "插件 Git 凭据（保险库已锁 — 在页面顶部解锁）",
   "Plugin Git repository": "插件 Git 仓库",
   "Git host": "Git 主机",
   "The host of the private repository (no scheme, no path). The credential is handed to this host only — on github.com also to its API host api.github.com, for the plugin's own release assets.": "私有仓库所在的主机（不带协议、不带路径）。凭据只交给这台主机 — github.com 另含它的 API 主机 api.github.com，仅用于插件自己仓库的 Release 附件。",

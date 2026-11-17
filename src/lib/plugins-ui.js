@@ -499,8 +499,9 @@ export function installPluginsUI(App) {
   /** Install dialog (Plugin Ph4): path / git / .vsp upload / GitHub release →
    *  POST /api/plugins/install. Errors reach the user verbatim (inline + toast). */
   _pluginInstallDialog(onDone) {
+    let offCred = null;   // B-3b8e: the credential follows the store's broadcast while the dialog is open — ended at its close
     // one subject: one plugin being installed
-    const { body, close, raised } = createModalShell({ id: 'plugin-install-dialog', title: t('Install plugin'), minWidth: '460px', escapeToClose: true, kind: 'form' });
+    const { body, close, raised } = createModalShell({ id: 'plugin-install-dialog', title: t('Install plugin'), minWidth: '460px', escapeToClose: true, kind: 'form', onClose: () => { if (offCred) offCred(); offCred = null; } });
     if (raised) return null;   // raised: the same subject's form, as it was
     const SOURCES = [
       { value: 'path', label: t('Local folder path'), placeholder: '/path/to/plugin (holds vibespace-plugin.json)' },
@@ -522,16 +523,30 @@ export function installPluginsUI(App) {
     // lane engine-distribution: a git source names its ref and picks the credential (the integration row — never typed here)
     const refRow = body.querySelector('.plugin-install-ref-row'), refIn = body.querySelector('.plugin-install-ref'), credRow = body.querySelector('.plugin-install-cred-row'), credSel = body.querySelector('.plugin-install-cred'), credHint = body.querySelector('.plugin-install-cred-hint');
     body.querySelector('.plugin-install-cred-open').onclick = () => { this.openIntegration?.('plugin-git'); };
-    let credRead = false;
+    // hotfix 2.369.368: the route answers `{ integration: view }` — read the VIEW through the ONE pure reader (the
+    // dialog had read `c.values` off the envelope and so never saw a saved credential: «not set» on every instance)
+    const drawCred = (c) => {
+      const opt = credSel.querySelector('option[value="plugin-git"]');
+      if (!opt) return;
+      const st = pluginGitCredOf(c);
+      opt.textContent = st.ready ? t('Plugin Git credential — {host} ({kind})', { host: st.host, kind: st.kind === 'token' ? t('token') : t('deploy key') })
+        : st.locked ? t('Plugin Git credential (the vault is locked — unlock it at the top of the page)') : t('Plugin Git credential (not set — Set up…)');   // B-3b8e: the lock said, never «not set»
+      opt.disabled = !st.ready;
+      if (!st.ready && credSel.value === 'plugin-git') credSel.value = '';   // r1: a credential gone unready (the vault locked) is never left picked — Install would post it
+    };
+    // B-3b8e: read when the git source is picked, then LIVE — the store's `integrations-updated` carries `{ integration: view }`
+    // (the route's own shape), so a credential saved in Integrations beside the open dialog is seen at once (it was read ONCE
+    // per open); a focus of the picker reads again (a vault unlocked meanwhile)
+    let credRead = false, credSeq = 0;   // r1: a broadcast bumps credSeq — a fetch answer older than it is never drawn over it
+    const refetchCred = () => { const at = credSeq; return fetchJson('/api/integrations/plugin-git').catch(() => null).then((c) => { if (body.isConnected && at === credSeq) drawCred(c); }); };
     const readCred = async () => {
       if (credRead) return; credRead = true;
-      const c = await fetchJson('/api/integrations/plugin-git').catch(() => null);
-      const opt = credSel.querySelector('option[value="plugin-git"]');
-      // hotfix 2.369.368: the route answers `{ integration: view }` — read the VIEW through the ONE pure reader (the
-      // dialog had read `c.values` off the envelope and so never saw a saved credential: «not set» on every instance)
-      const st = pluginGitCredOf(c);
-      opt.textContent = st.ready ? t('Plugin Git credential — {host} ({kind})', { host: st.host, kind: st.kind === 'token' ? t('token') : t('deploy key') }) : t('Plugin Git credential (not set — Set up…)');
-      opt.disabled = !st.ready;
+      offCred = this.ws?.onGlobal?.((msg) => {
+        if (!body.isConnected) { if (offCred) offCred(); offCred = null; return; }
+        if (msg && msg.type === 'integrations-updated' && msg.id === 'plugin-git') { credSeq++; drawCred(msg); }
+      }) || null;
+      credSel.addEventListener('focus', refetchCred);
+      await refetchCred();
     };
     const sync = () => { const s = SOURCES.find((x) => x.value === srcSel.value); val.placeholder = s?.placeholder || ''; fileRow.classList.toggle('hidden', srcSel.value !== 'zip'); valRow.classList.toggle('hidden', srcSel.value === 'zip'); const git = srcSel.value === 'git'; refRow.classList.toggle('hidden', !git); credRow.classList.toggle('hidden', !git); credHint.classList.toggle('hidden', !git); if (git) readCred(); };
     srcSel.onchange = sync; sync();

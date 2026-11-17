@@ -394,19 +394,43 @@ console.log('\n⑧b dialog-yield r8: Task Detail rows keep the box the person is
 // (src/plugin-cred-state.js), the wiring pinned both ways.
 console.log('\n⑨ the Install plugin… dialog reads the Plugin Git credential through ONE pure reader (hotfix 2.369.368)');
 {
-  const PC = (await import(pathToFileURL(path.join(repo, 'src/plugin-cred-state.js')).href)).default;
+  // B-3b8e (1): a tree WITHOUT the reader is a NAMED red, never a throw that ends the suite (the shape legs then red by name
+  // over a stub that answers nothing)
+  const importReader = async (rel) => { try { return { PC: (await import(pathToFileURL(path.join(repo, rel)).href)).default, gone: null }; } catch (e) { return { PC: { pluginGitCredOf: () => ({}) }, gone: String((e && e.code) || e) }; } };
+  const { PC, gone } = await importReader('src/plugin-cred-state.js');
+  ok(!gone, 'the ONE reader exists (src/plugin-cred-state.js)', gone);
+  const ghost = await importReader('src/zz-no-such-reader.js');
+  ok(!!ghost.gone && typeof ghost.PC.pluginGitCredOf === 'function', 'CONTROL: a tree without the reader answers a named red and a stub (the suite goes on)', ghost.gone);
   const view = { id: 'plugin-git', values: { host: 'github.com', username: 'x-access-token' }, set: { host: true, username: true, token: true, deployKey: false }, masked: { token: '••••vpxB' } };
-  ok(J(PC.pluginGitCredOf({ integration: view })) === J({ ready: true, host: 'github.com', kind: 'token' }), "the route's envelope { integration: view } ⇒ ready · github.com · token", PC.pluginGitCredOf({ integration: view }));
-  ok(J(PC.pluginGitCredOf(view)) === J({ ready: true, host: 'github.com', kind: 'token' }), 'a bare view ⇒ the same (one shape, one reader)');
+  ok(J(PC.pluginGitCredOf({ integration: view })) === J({ ready: true, host: 'github.com', kind: 'token', locked: false }), "the route's envelope { integration: view } ⇒ ready · github.com · token", PC.pluginGitCredOf({ integration: view }));
+  ok(J(PC.pluginGitCredOf(view)) === J({ ready: true, host: 'github.com', kind: 'token', locked: false }), 'a bare view ⇒ the same (one shape, one reader)');
   ok(PC.pluginGitCredOf({ integration: { ...view, set: { host: true, token: false, deployKey: true } } }).kind === 'deployKey', 'a deploy key names its kind');
   ok(PC.pluginGitCredOf({ integration: { ...view, set: { host: true } } }).ready === false, 'a host with no sealed secret ⇒ not ready');
-  ok(PC.pluginGitCredOf({ integration: { ...view, values: {}, set: {} } }).ready === false, 'a locked vault (the view answers values {} / set {}) ⇒ not ready — never «ready» over a secret nobody can open');
+  // B-3b8e (3): the MEASURED locked shape (integration-store publicView under a locked vault: values {host:'', username:''},
+  // every set false, whyCode 'vault-locked') ⇒ not ready, and LOCKED — the dialog says the lock, never «not set — Set up…»
+  const lockedView = { ...view, values: { host: '', username: '' }, set: { host: false, username: false, token: false, deployKey: false }, masked: { token: null, deployKey: null }, whyCode: 'vault-locked', source: 'none' };
+  const lk = PC.pluginGitCredOf({ integration: lockedView });
+  ok(lk.ready === false && lk.locked === true && PC.pluginGitCredOf({ integration: { ...view, set: { host: true } } }).locked === false, 'a LOCKED vault (the measured shape) ⇒ not ready, locked — a host with no secret is not «locked»', lk);
+  const pre368 = (answer) => { const v = answer && answer.integration ? answer.integration : answer; const host = v && v.values ? String(v.values.host || '') : ''; const set = (v && v.set) || {}; const kind = set.token ? 'token' : set.deployKey ? 'deployKey' : null; return { ready: !!(host && kind), host, kind }; };
+  const lk0 = pre368({ integration: lockedView });
+  ok(!(lk0.ready === false && lk0.locked === true), 'CONTROL: the release\'s reader fails the locked leg above (no lock in its answer — the option said «not set — Set up…» over a saved credential)', lk0);
   ok(PC.pluginGitCredOf(null).ready === false && PC.pluginGitCredOf({ error: 'unauthorized' }).ready === false && PC.pluginGitCredOf('x').ready === false, 'no answer / a refusal / junk ⇒ not ready, never a throw');
   // the bug, reproduced: the shipped reading over the real envelope
   const pre = (c) => { const host = c && c.values ? String(c.values.host || '') : ''; return !!(c && host && c.set && (c.set.token || c.set.deployKey)); };
   ok(pre({ integration: view }) === false && pre(view) === true, 'CONTROL (the shipped reading, 2.369.3xx–.367): c.values off the ENVELOPE ⇒ never ready — the defect the owner hit');
   const PU9 = read('src/lib/plugins-ui.js'), IR9 = read('src/routes/integrations.js');
   ok(/const st = pluginGitCredOf\(c\);/.test(PU9) && /import \{ pluginGitCredOf \} from '\.\.\/plugin-cred-state\.js'/.test(PU9) && !/c\.values\s*\?\s*String\(c\.values\.host/.test(PU9), 'WIRING: readCred reads through pluginGitCredOf — the envelope reading is gone from plugins-ui.js');
+  // B-3b8e (2): the pin reads the call's USE — the option is disabled exactly when not ready (a mutant that disables it
+  // regardless survived 113 green) — and the lock's words; (4) the credential is LIVE: the broadcast redraws it, a focus
+  // reads it again, the listener ends with the dialog
+  ok(/opt\.disabled = !st\.ready;\n\s*if \(!st\.ready && credSel\.value === 'plugin-git'\) credSel\.value = '';/.test(PU9) && /: st\.locked \? t\('Plugin Git credential \(the vault is locked — unlock it at the top of the page\)'\) : t\('Plugin Git credential \(not set — Set up…\)'\)/.test(PU9) && !/opt\.disabled = true/.test(PU9),
+    'WIRING (B-3b8e): opt.disabled = !st.ready (never forced) and an unready credential is never left PICKED; a locked vault is SAID with where to unlock it, «not set» only when nothing is saved');
+  ok(/offCred = this\.ws\?\.onGlobal\?\.\(\(msg\) => \{/.test(PU9) && /if \(msg && msg\.type === 'integrations-updated' && msg\.id === 'plugin-git'\) \{ credSeq\+\+; drawCred\(msg\); \}/.test(PU9)
+    && /const refetchCred = \(\) => \{ const at = credSeq; return fetchJson\('\/api\/integrations\/plugin-git'\)/.test(PU9) && /if \(body\.isConnected && at === credSeq\) drawCred\(c\);/.test(PU9)
+    && /credSel\.addEventListener\('focus', refetchCred\);/.test(PU9) && /await refetchCred\(\);/.test(PU9) && /onClose: \(\) => \{ if \(offCred\) offCred\(\); offCred = null; \}/.test(PU9),
+    'WIRING (B-3b8e): LIVE — it SUBSCRIBES (ws onGlobal) and integrations-updated for plugin-git redraws the option (a broadcast newer than a fetch in flight wins: credSeq); the fetch reads the integration\'s own route, at the pick and at every focus; the listener ends at the dialog\'s close');
+  const IS9 = read('src/server/integration-store.js');
+  ok(/broadcast\(\{ type: 'integrations-updated', id, why, integration: view \}\)/.test(IS9), 'the store\'s broadcast still carries { integration: view } — the shape drawCred hands the reader (a change here changes the dialog)');
   ok(/res\.json\(\{ integration: store\(\)\.publicView\(req\.params\.id\) \}\)/.test(IR9), 'the route still answers { integration: view } — the shape the reader unwraps (a change here changes the reader)');
 }
 

@@ -11375,6 +11375,7 @@ export default {
   "token": "トークン",
   "deploy key": "デプロイキー",
   "Plugin Git credential (not set — Set up…)": "プラグイン Git 認証情報（未設定 — 設定…）",
+  "Plugin Git credential (the vault is locked — unlock it at the top of the page)": "プラグイン Git 認証情報（保管庫がロック中 — ページ上部で解除してください）",
   "Plugin Git repository": "プラグイン Git リポジトリ",
   "Git host": "Git ホスト",
   "The host of the private repository (no scheme, no path). The credential is handed to this host only — on github.com also to its API host api.github.com, for the plugin's own release assets.": "プライベートリポジトリのホスト（スキームもパスも付けない）。認証情報はこのホストにだけ渡されます — github.com の場合は、プラグイン自身のリポジトリの Release アセットに限り API ホスト api.github.com にも渡されます。",
