@@ -67,7 +67,7 @@ function pkPaint(pid, o, list) {
   for (const row of m.rows) { seen.add(row.id); pkRowPatch(pid, o, row); }
   for (const [id, x] of [...o.rows]) if (!seen.has(id)) { x.row.remove(); o.rows.delete(id); }
   if (!m.empty) { if (o.empty) { o.empty.remove(); o.empty = null; } }
-  else if (!o.empty) { o.empty = el('div', 'bprof-pk-empty chat-status-dim'); o.empty.append(el('span', '', m.empty.line), el('code', 'bprof-pk-hint', m.empty.hint)); o.body.appendChild(o.empty); }
+  else if (!o.empty) { o.empty = el('div', 'bprof-pk-empty chat-status-dim'); o.empty.append(el('span', '', m.empty.line)); o.body.appendChild(o.empty); }
 }
 function pkRowPatch(pid, o, row) {
   const sig = JSON.stringify(row);

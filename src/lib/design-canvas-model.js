@@ -381,6 +381,19 @@ export function quoteLine(pick) {
   return pickQuote({ file: p.file, path: p.path, tag: p.tag, text: cleanLine(p.text, PICK_LIMITS.text) });
 }
 
+/** THE FACE of that line (lane ui-plain-words design-doc-12): the page and the element in words — «Main › 按钮「Get started」».
+ *  The exact line (quoteLine) stays one fold away: the person can still read what the agent receives. `t` = the page's t(). */
+export function pickWords(pick, t) {
+  const p = isObj(pick) ? pick : {};
+  const tag = String(p.tag || '').toLowerCase();
+  const W = { a: () => t('a link'), button: () => t('a button'), img: () => t('a picture'), input: () => t('a field'), textarea: () => t('a field'), select: () => t('a choice'),
+    p: () => t('a paragraph'), li: () => t('a list item'), nav: () => t('the menu'), header: () => t('the header'), footer: () => t('the footer'), table: () => t('a table') };
+  const what = (/^h[1-6]$/.test(tag) ? t('a heading') : (W[tag] || (() => t('an element')))());
+  const file = String(p.file || '').split('/').pop().replace(/\.html?$/i, '');
+  const text = cleanLine(p.text, PICK_LIMITS.text);
+  return text ? t('{file} › {what} “{text}”', { file, what, text }) : t('{file} › {what}', { file, what });
+}
+
 // ── the frame documents ──────────────────────────────────────────────────────────────────────────────────────────────
 
 const HEAD_WINDOW = 64 * 1024;

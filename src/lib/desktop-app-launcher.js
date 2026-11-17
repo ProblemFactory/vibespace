@@ -78,6 +78,7 @@
 // interrupted install → Repair) is a slot at the top, fed by the apps section's state (PURE appsBannerModel).
 import { t, resolveLang } from './i18n.js';
 import { storedNameWords } from './value-words.js'; // lane ui-language: the registered default variant «Open» worded at display
+import { techFold } from './plain-words.js'; // lane ui-plain-words: the probes' findings fold under the one sentence
 import { copyText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale } from './utils.js';
 import { registerCommand, registerMenuItem, runCommand } from './contributions.js';
 import { pathField } from './path-field.js'; // lane path-field: THE path field
@@ -200,7 +201,7 @@ export const browserNote = () => t('This is your own browser window (an app); th
  *  own sentence — with its data-dir path — stays the card's tooltip). null ⇒ the card falls back to the sentence. */
 export function browserReasonShort(code) {
   if (code === 'snap-profile-unreachable') return t('Snap: cannot reach the data folder');
-  if (code === 'browser-absent') return t('not on PATH');
+  if (code === 'browser-absent') return t('not installed'); // lane ui-plain-words desktop-apps-4: a person's word, not «PATH»
   if (code === 'profile-is-users' || code === 'profile-not-owned') return t('No private profile folder here');
   return null;
 }
@@ -231,11 +232,19 @@ export function browserLaunchBody(row, { url = '', keepProfile = false } = {}) {
 export function availabilityText(av, machine = null) {
   if (!av) return t('Checking display backends…');
   if (machine) {
-    if (!av.backend) return t('No display backend on {machine} ({why})', { machine, why: av.fallbackWhy || '' });
+    if (!av.backend) return t('No display backend on {machine} yet — install one to show its apps', { machine });
     return av.fallbackWhy ? t('Windows on {machine} will use {backend} — {why}', { machine, backend: av.backend, why: av.fallbackWhy }) : t('Windows on {machine} will use {backend}', { machine, backend: av.backend });
   }
-  if (!av.backend) return t('No display backend on this machine ({why})', { why: av.fallbackWhy || '' });
+  if (!av.backend) return t('No display backend on this machine yet — install one to show its apps');
   return av.fallbackWhy ? t('Windows will use {backend} — {why}', { backend: av.backend, why: av.fallbackWhy }) : t('Windows will use {backend}', { backend: av.backend });
+}
+
+/** lane ui-plain-words desktop-apps-1: what each display backend's probe found — the fold under «No display backend…» (one
+ *  line a probe, each said once; an internal state id is dropped). [] when a backend works. */
+export function availabilityWhy(av) {
+  if (!av || av.backend || !av.fallbackWhy) return [];
+  const seen = new Set();
+  return String(av.fallbackWhy).split(/;\s*/).map((x) => x.trim()).filter((x) => x && !/^[\w-]+:[\w-]+\b/.test(x) && !seen.has(x) && seen.add(x));
 }
 
 /** lane C2: a machine picker row's name ("This machine" for the hub itself — a DISPLAY string, never a spawn input). */
@@ -1217,11 +1226,14 @@ export async function showLaunchDialog(app, opts = {}) {
     availEl.textContent = listError ? machineErrorText(listError.code, mName || machineName(null), listError.error) : availabilityText(data && data.availability, mName);
     if (!availDoor) { availDoor = document.createElement('div'); availDoor.className = 'desktop-launch-avail-door'; } // B-bd27 X1: the door's own slot, kept beside the words wherever they go
     availDoor.replaceChildren(...(listError && isAgentOld(listError.code) ? [agentUpdateDoor(machineOf(host), { app, before: close })] : []));
+    if (availEl._why) { availEl._why.remove(); availEl._why = null; }
+    const why = listError ? [] : availabilityWhy(data && data.availability);
     const availBad = !!listError || !!(data && data.availability && !data.availability.backend);
     availEl.classList.toggle('desktop-launch-avail-bad', availBad);
     // design 009 §B3: a backend that works is footer small print; one that is missing or fell back is said at the top
     if (availBad || !!(data && data.availability && data.availability.fallbackWhy)) { if (availEl.parentElement !== availHead) availHead.appendChild(availEl); }
     else { const shareEl = availFoot.querySelector('.desktop-launch-share-row'); if (availEl.previousElementSibling !== shareEl) shareEl.after(availEl); }
+    if (why.length) { availEl._why = techFold(why, { mono: true, className: 'desktop-launch-avail-why' }); availEl.after(availEl._why); } // under the sentence, wherever it sits
     if (availEl.nextElementSibling !== availDoor) availEl.after(availDoor);
     renderInstall();
     const dead = !!listError || !data?.availability?.backend;

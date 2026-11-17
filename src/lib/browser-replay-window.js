@@ -25,6 +25,23 @@ import { drawOverlay, positionKindText, statusText, showFitsPref, fitsToggle, fi
 import { frameUrl, timelineLabel, positionText, foldFits, fitCount, isFitEntry } from '../browser-trace.js'; // lane trace-fits: the page-size fold
 import { replayEmpty, frameState, replayKey, playTick, pickSession, pickIndex, PLAY_STEP_MS, isSessionId } from '../browser-sessions.js';
 import { whenText, sessionRowText, emptyText, replayTitle, retentionText, actionsText, durationText } from './browser-session-words.js';
+/** lane ui-plain-words browser-profiles-20: a step in a person's words — the verb by the traced action (src/browser-trace.js
+ *  TRACED_ACTIONS; scripts/test-plain-words.mjs: every one has a word) and where, «点击 (120, 90)»; the CLI's own line
+ *  (timelineLabel: «mouseclick 120,90») is the label's tooltip. */
+const ACTION_WORDS = {
+  click: () => t('Click'), dblclick: () => t('Double-click'), mouseclick: () => t('Click'), mousedown: () => t('Press the mouse'), mouseup: () => t('Release the mouse'),
+  focus: () => t('Focus'), fill: () => t('Type'), type: () => t('Type'), hover: () => t('Point at'), mousemove: () => t('Point at'),
+  check: () => t('Tick'), uncheck: () => t('Untick'), select: () => t('Choose'), scrollintoview: () => t('Scroll'), scroll: () => t('Scroll'), mousewheel: () => t('Scroll'),
+  upload: () => t('Upload'), drag: () => t('Drag'), press: () => t('Press keys'), keydown: () => t('Press keys'), keyup: () => t('Press keys'),
+  navigate: () => t('Open a page'), open: () => t('Open a page'), goto: () => t('Open a page'), back: () => t('Back'), forward: () => t('Forward'), reload: () => t('Reload'),
+  pushstate: () => t('The page address changed'), 'viewer-fit': () => t('Fit the page to the view'),
+};
+function actionWords(e) {
+  const x = e || {}, p = x.position || {};
+  const verb = (ACTION_WORDS[x.action] || (() => String(x.action || '?')))();
+  const where = p.kind === 'point' ? `(${p.x}, ${p.y})` : p.kind === 'keys' && p.keys ? String(p.keys) : p.kind === 'navigation' && p.url ? String(p.url).slice(0, 60) : '';
+  return (where ? verb + ' ' + where : verb) + (x.ok === false ? ' ✗' : '');
+}
 
 const TYPE = 'browser-replay';
 const NARROW_PX = 620;
@@ -73,9 +90,9 @@ export function openBrowserReplayWindow(app, opts = {}) {
   const root = el('div', 'brp');
   root.tabIndex = 0;
   const side = el('div', 'brp-side');
-  const sessHead = el('div', 'brp-head', t('Sessions'));
+  const sessHead = el('div', 'brp-head', t('Browsing records')); // lane ui-plain-words browser-profiles-20: not the chat's «sessions»
   const sessList = el('div', 'brp-sessions');
-  sessList.setAttribute('role', 'listbox'); sessList.setAttribute('aria-label', t('Sessions'));
+  sessList.setAttribute('role', 'listbox'); sessList.setAttribute('aria-label', t('Browsing records'));
   const actHead = el('div', 'brp-head brp-actions-head', t('Actions'));
   // lane trace-fits: the toggle (shown once the session has page-size changes) — the same per-device preference as the live view's
   const fitsBar = el('div', 'brp-fits-bar');
@@ -141,7 +158,7 @@ export function openBrowserReplayWindow(app, opts = {}) {
     for (let i = 0; i < out.length; i++) if (kids[i] !== out[i]) sessList.insertBefore(out[i], kids[i] || null);
     while (kids.length > out.length) sessList.removeChild(kids[kids.length - 1]);
     for (const k of [...sessRows.keys()]) if (!st.sessions.some((s) => s.id === k)) sessRows.delete(k);
-    sessHead.textContent = `${t('Sessions')} (${st.sessions.length})`;
+    sessHead.textContent = `${t('Browsing records')} (${st.sessions.length})`;
     revealChosen();
   }
   /** The chosen session's row stays in view of its own list (the naive-user verifier, 2026-09-28: on a phone the list opens
@@ -174,7 +191,7 @@ export function openBrowserReplayWindow(app, opts = {}) {
       if (fs) { const im = el('img', 'brp-action-img'); im.alt = ''; im.loading = 'lazy'; im.draggable = false; im.src = frameUrl(e.id, fs) + (isFitEntry(e) && e.n > 1 ? `?v=${e.n}` : ''); thumb.appendChild(im); }
       else thumb.appendChild(el('span', 'brp-action-noframe', e.framesRemoved ? t('removed') : t('no frame')));
       const text = el('span', 'brp-action-text');
-      text.append(el('span', 'brp-action-time', clock(e.at)), el('span', 'brp-action-label', timelineLabel(e) + (isFitEntry(e) && e.n > 1 ? ` ×${e.n}` : ''))); // a coalesced fit, expanded, says how many it stands for
+      text.append(el('span', 'brp-action-time', clock(e.at)), Object.assign(el('span', 'brp-action-label', actionWords(e) + (isFitEntry(e) && e.n > 1 ? ` ×${e.n}` : '')), { title: timelineLabel(e) })); // a coalesced fit, expanded, says how many it stands for
       r.replaceChildren(thumb, text);
       r.classList.toggle('failed', e.ok === false);
       r.classList.toggle('fits', isFitEntry(e));

@@ -9156,6 +9156,7 @@ button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
 .design-composer { position: absolute; z-index: 4; padding: 10px; border-radius: var(--radius); background: var(--bg-dialog); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
 .design-composer-body { display: flex; flex-direction: column; gap: 8px; }
 .design-quote { font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono, monospace); word-break: break-word; padding: 4px 6px; border-left: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: var(--radius-sm); }
+.design-quote-face { font-size: 12px; color: var(--text); padding: 2px 0; } /* lane ui-plain-words: the element in words; the exact line folds below */
 .design-comment-input { width: 100%; resize: vertical; min-height: 64px; padding: 6px 8px; font: inherit; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .design-comment-input:focus { outline: none; border-color: var(--accent); }
 .design-composer-foot { display: flex; justify-content: flex-end; gap: 8px; }
@@ -9381,7 +9382,6 @@ button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
 .bprof-pk-seg.on { background: var(--accent); color: var(--bg-dialog); }
 .bprof-pk-row[data-policy="no"] .bprof-pk-seg.on { background: var(--red); }
 .bprof-pk-empty { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 8px 0 2px; }
-.bprof-pk-hint { font-size: 11px; color: var(--text-secondary); }
 .bprof-pk-sheet { position: fixed; inset: 0; z-index: 1200; display: flex; flex-direction: column; justify-content: flex-end; }
 .bprof-pk-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.35); }
 .bprof-pk.bprof-pk-in-sheet { position: relative; margin: 0; max-height: 75vh; overflow: auto; border-radius: var(--radius) var(--radius) 0 0; background: var(--bg-dialog); padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }

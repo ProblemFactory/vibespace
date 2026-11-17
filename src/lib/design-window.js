@@ -35,7 +35,8 @@ import { createBarFold } from './bar-fold.js';
 import { onFileChanged, foldPath } from './file-changed.js';
 import { createDesignCanvas } from './design-canvas.js';
 import { pickerSource } from './design-pick.js';
-import { normalizeRead, quoteLine, printSrcdoc, zoomPercent, FRAME_HOST } from './design-canvas-model.js';
+import { normalizeRead, quoteLine, pickWords, printSrcdoc, zoomPercent, FRAME_HOST } from './design-canvas-model.js';
+import { techFold } from './plain-words.js'; // lane ui-plain-words design-doc-12: the exact line the agent receives, one fold away
 import { writeFrame } from './frame-host.js';
 import { mountDesignAsk } from './design-ask.js';
 import { mountDesignChanges } from './design-changes.js';
@@ -92,7 +93,9 @@ export function openDesignPublishDialog(app, { host = '', dir = '', title = '' }
   const state = mk('div', 'design-publish-state');
   state.textContent = t('Checking whether this design was published before…');
   const where = mk('div', 'design-publish-where');
-  where.textContent = (hostKey(host) ? hostKey(host) + ':' : '') + dir;
+  // lane ui-plain-words design-doc-10: the design's folder by its name; the whole path (and its machine) on hover
+  where.textContent = String(dir || '').replace(/\/+$/, '').split('/').slice(-2).join('/');
+  where.title = (hostKey(host) ? hostKey(host) + ':' : '') + dir;
   const foot = mk('div', 'dialog-footer');
   const cancel = mk('button', 'btn-cancel'); cancel.type = 'button'; cancel.textContent = t('Cancel');
   const go = mk('button', 'btn-create'); go.type = 'button'; go.textContent = t('Publish');
@@ -109,7 +112,7 @@ export function openDesignPublishDialog(app, { host = '', dir = '', title = '' }
     const row = rows && rows.find((x) => hostKey(x.host) === hostKey(host) && foldPath(String(x.dir || '')) === foldPath(dir));
     page = (row && row.page) || null;
     if (page) { pub.checked = !!page.public; state.textContent = page.public ? t('Published before as a public page — publishing again keeps its link and leaves it public unless you untick the box') : t('Published before as a private page — publishing again keeps its link and leaves it private unless you tick the box'); }
-    else state.textContent = known ? t('Not published yet — a new link, private unless you tick the box') : t('Could not check whether this design was published before — the box decides');
+    else state.textContent = known ? t('Not published yet. Publishing makes a new link; only people signed in to VibeSpace can see it unless you tick the box.') : t('Could not check whether this design was published before — the box decides');
   });
   let busy = false;
   go.onclick = async () => {
@@ -409,8 +412,11 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
   }
   function composerBody(pick) {
     const box = mk('div', 'design-composer-body');
-    const quote = mk('div', 'design-quote');
-    quote.textContent = quoteLine(pick); // the frame's facts — text, never markup
+    const face = mk('div', 'design-quote-face');
+    face.textContent = pickWords(pick, t); // the page and the element in words
+    const quoteFold = techFold([quoteLine(pick)], { mono: true, summary: t('The text the agent receives'), className: 'design-quote-fold' });
+    const quote = quoteFold.querySelector('.tech-fold-line');
+    quote.classList.add('design-quote'); // the frame's facts — text, never markup (the exact line, read before sending)
     const ta = mk('textarea', 'design-comment-input');
     ta.rows = 3;
     ta.placeholder = t('What should change?');
@@ -419,7 +425,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
     const cancel = mk('button', 'btn-cancel'); cancel.type = 'button'; cancel.textContent = t('Cancel');
     const send = mk('button', 'btn-create'); send.type = 'button'; send.textContent = t('Send');
     foot.append(cancel, send);
-    box.append(quote, voiceField(ta, attachDictation(ta)), foot);
+    box.append(face, quoteFold, voiceField(ta, attachDictation(ta)), foot);
     changes.composer(box, foot, ta); // "Add" beside Send + the Style row (src/lib/design-changes.js)
     cancel.onclick = () => closeComposer();
     send.onclick = () => sendComment();
@@ -427,10 +433,10 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeComposer(); }
       else if (enterSubmits(e) && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendComment(); }
     });
-    return { box, quote, ta, send };
+    return { box, quote, face, ta, send };
   }
   function openComposer(pick) {
-    if (composer) { composer.pick = pick; composer.quote.textContent = quoteLine(pick); composer.ta.focus(); return; } // a second pick re-points it; the words typed stay
+    if (composer) { composer.pick = pick; composer.quote.textContent = quoteLine(pick); composer.face.textContent = pickWords(pick, t); composer.ta.focus(); return; } // a second pick re-points it; the words typed stay
     const parts = composerBody(pick);
     if (phone) {
       const shell = createModalShell({ id: 'design-comment-sheet', key: `${host}:${dir}`, beside: true, title: t('Comment on this element'), escapeToClose: true, dialogClass: 'design-composer-sheet', onClose: () => { composer = null; }, kind: 'form' });

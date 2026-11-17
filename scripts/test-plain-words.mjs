@@ -232,5 +232,23 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   ok(users.length === 3, 'nameOrGone() is read by the jobs panel (a gone conversation / group), the path field (a machine) and the activity rows', users);
 }
 
+// ── pick 3: a browser replay's steps in words — every traced action (src/browser-trace.js TRACED_ACTIONS) has a verb in
+// src/lib/browser-replay-window.js ACTION_WORDS with zh and ja rows; the CLI's own line (timelineLabel) is the tooltip ──
+{
+  console.log('the replay steps in words');
+  const bt = fs.readFileSync(path.join(REPO, 'src/browser-trace.js'), 'utf8');
+  const ta = bt.slice(bt.indexOf('const TRACED_ACTIONS = Object.freeze({'), bt.indexOf('});', bt.indexOf('const TRACED_ACTIONS = Object.freeze({')));
+  const acts = [...ta.replace(/\/\/[^\n]*/g, '').matchAll(/'?([a-z][a-z-]*)'?\s*:\s*'(?:target|keys|point|scroll|navigation|viewport)'/g)].map((m) => m[1]);
+  const rw = fs.readFileSync(path.join(REPO, 'src/lib/browser-replay-window.js'), 'utf8');
+  const tbl = rw.slice(rw.indexOf('const ACTION_WORDS = {'), rw.indexOf('};', rw.indexOf('const ACTION_WORDS = {')));
+  const words = Object.fromEntries([...tbl.matchAll(/'?([a-z][a-z-]*)'?:\s*\(\)\s*=>\s*t\('([^']+)'\)/g)].map((m) => [m[1], m[2]]));
+  const missing = acts.filter((a) => !words[a]);
+  ok(acts.length >= 25 && !missing.length, `every traced action has a verb (${acts.length} actions, ${new Set(Object.values(words)).size} verbs)`, missing);
+  const Z = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, J = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+  const unrowed = [...new Set(Object.values(words))].filter((w) => typeof Z[w] !== 'string' || typeof J[w] !== 'string');
+  ok(!unrowed.length, 'every verb has its zh AND ja row', unrowed);
+  ok(/el\('span', 'brp-action-label', actionWords\(e\)/.test(rw) && /\{ title: timelineLabel\(e\) \}/.test(rw), 'the step label is the words; the CLI\'s line is its tooltip');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

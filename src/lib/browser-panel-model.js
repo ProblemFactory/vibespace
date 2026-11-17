@@ -236,7 +236,7 @@ export function passkeyTable(list, x = {}) {
     note: (list && Number(list.displaced) > 0 ? t('A page replaced the credentials API (taken back)') + ' · ' : '') + t('Keys live only in this VibeSpace; deleting the profile deletes them'),
     columns: [t('Site'), t('User'), t('Source'), t('Last used'), t('Policy'), ''],
     rows, refused: keys.length - rows.length,
-    empty: rows.length ? null : { line: t('No passkeys yet — when an agent asks to register one, its card appears in For you.'), hint: 'vibespace-browser passkey register <site>' },
+    empty: rows.length ? null : { line: t('No passkeys yet — when an agent asks to register one, its card appears in For you.') }, // lane ui-plain-words browser-profiles-16: the agent's command is the agent's, not the person's
   };
 }
 /** Delete…'s confirm words — the site and the user named. */

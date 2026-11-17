@@ -771,7 +771,7 @@ console.log('⑧ round 5 (final) — THE SHELL SAYS WHERE; THE SPAWN IS ALWAYS A
   // the words, in-process: the REAL src/lib/cli-missing-dialog.js bundled over stubbed utils / i18n + a lean DOM
   const esbuild = require('esbuild');
   const stubs = {
-    'utils.js': "export function createModalShell(o) { const d = document.createElement('div'), b = document.createElement('div'); d.appendChild(b); globalThis.__shell = { o, dialog: d, body: b }; return { dialog: d, body: b, close() { globalThis.__closed = true; } }; }",
+    'utils.js': "export const escHtml = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[c]); export function createModalShell(o) { const d = document.createElement('div'), b = document.createElement('div'); d.appendChild(b); globalThis.__shell = { o, dialog: d, body: b }; return { dialog: d, body: b, close() { globalThis.__closed = true; } }; }",
     'i18n.js': "export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));",
   };
   let mod = null, buildErr = null;
@@ -780,11 +780,15 @@ console.log('⑧ round 5 (final) — THE SHELL SAYS WHERE; THE SPAWN IS ALWAYS A
       plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(utils|i18n)\.js$/ }, (a) => ({ path: path.basename(a.path), namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: stubs[a.path], loader: 'js' })); } }] });
     const f = path.join(DIR, 'cli-missing-dialog.cjs'); fs.writeFileSync(f, out.outputFiles[0].text); mod = require(f);
   } catch (e) { buildErr = e.message; }
-  const el = () => ({ className: '', textContent: '', title: '', children: [], appendChild(c) { this.children.push(c); }, append(...cs) { this.children.push(...cs); } });
+  // lane ui-plain-words first-run-16: the dialog's shell / PATH lines fold (techFold) — the fake element carries dataset, classList and a
+  // class query, and the reader walks the fold's lines too
+  const el = () => { const e = { className: '', textContent: '', title: '', children: [], dataset: {}, appendChild(c) { this.children.push(c); }, append(...cs) { this.children.push(...cs); },
+    querySelectorAll(sel) { const cls = String(sel).replace(/^\./, ''), out = []; const walk = (n) => { for (const c of n.children || []) { if (String(c.className).split(/\s+/).includes(cls)) out.push(c); walk(c); } }; walk(this); return out; } };
+    e.classList = { add: (c) => { e.className = (e.className + ' ' + c).trim(); } }; return e; };
   globalThis.document = { createElement: el };
   const runs = await REAL8.runs;
   const pick = (start) => runs.find((r) => r.label.startsWith(start) && r.sn === 'bash') || runs.find((r) => r.label.startsWith(start));
-  const dom = (r) => { const e = r && r.got.err; if (!mod || !e) return ''; mod.openCliMissingDialog({ _showAgentsDialog() { } }, { cli: e.cli, shell: e.shell, answer: e.answer, wrapper: e.wrapper, envName: e.envName, notExecutable: e.notExecutable, dangling: e.dangling, via: e.via, looked: e.looked, hubPath: e.hubPath }); return globalThis.__shell.body.children.map((c) => c.textContent).join(' | '); };
+  const dom = (r) => { const e = r && r.got.err; if (!mod || !e) return ''; mod.openCliMissingDialog({ _showAgentsDialog() { } }, { cli: e.cli, shell: e.shell, answer: e.answer, wrapper: e.wrapper, envName: e.envName, notExecutable: e.notExecutable, dangling: e.dangling, via: e.via, looked: e.looked, hubPath: e.hubPath }); const flat = (c) => [c.textContent, ...(c.children || []).map(flat)].filter(Boolean).join(' | '); return globalThis.__shell.body.children.map(flat).join(' | '); };
   const line = (r, extra = {}) => (mod && r && r.cs ? (mod.cliWhereWords({ ...r.cs, ...extra }) || {}).text || '' : '');
   const fl = pick('a flags alias'), nn = pick('an npx alias with NO'), dg = pick('the DANGLING');
   const flLine = line(fl, { installed: true, cmdPath: fl && fl.got.cmd });

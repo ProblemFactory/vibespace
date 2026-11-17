@@ -182,7 +182,7 @@ console.log('— ⑦ lane passkey-ui: THE PASSKEYS TABLE (design-passkey-store �
   ok(tb.switchOn === false && M.passkeyTable({ keys: [], agentsOff: true }, xw).switchOn === true && tb.switchLabel === 'Agents never sign in with passkeys' && /deleting the profile deletes them/.test(tb.note), 'the head row: the agents-never switch + its one sentence');
   { const dn = M.passkeyTable({ keys: [], agentsOff: false, displaced: 1 }, xw).note; ok(dn.startsWith('A page replaced the credentials API (taken back) · ') && /deleting the profile deletes them/.test(dn) && !/replaced/.test(tb.note), 'lane passkey-prewrap-fix: a page that replaced the credentials API (the last hour) is said first on the Passkeys card\'s line; none ⇒ not said', dn); }
   const em = M.passkeyTable({ keys: [], agentsOff: false }, xw);
-  ok(!tb.empty && em.empty && /card appears in For you/.test(em.empty.line) && em.empty.hint === 'vibespace-browser passkey register <site>' && !em.rows.length, 'the empty state: one line + the agents\' CLI hint');
+  ok(!tb.empty && em.empty && /card appears in For you/.test(em.empty.line) && !('hint' in em.empty) && !em.rows.length, 'the empty state: one line + the agents\' CLI hint');
   const leak = M.passkeyTable({ keys: [pub({ keySealed: 'AAAA' }), pub({ id: 'zz', credentialId: 'zzzzzzzzzzzz' }), pub({ id: 'bad id!' })] }, xw);
   ok(leak.rows.length === 0 && leak.refused === 3, 'a row that carries a key field (or the whole credential id, or a bad id) is REFUSED — never drawn', leak);
   const keyCensus = (Mx) => { const t2 = Mx.passkeyTable({ keys: [pub({ keySealed: 'SECRET' })] }, xw); return JSON.stringify(t2).includes('SECRET'); };

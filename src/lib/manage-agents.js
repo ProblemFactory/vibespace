@@ -23,6 +23,7 @@ function cliConfigChipsHtml(cc, { where, remote = false }) {
 import { t } from './i18n.js';
 import { dateOf, stampAt as when, durationMark } from './page-time.js';
 import { needLine, pairDoor, needDoorButton, settingsDoor, sayOnLine } from './need-line.js'; // lane ui-needs-a-button (agents-accounts-6): a need + its doors
+import { techFold, techFoldHtml } from './plain-words.js'; // lane ui-plain-words: where a CLI was found folds when nothing is wrong
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { markLandedOnSave, carryUnsaved, agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { accountsWithTails } from './account-tails.js'; // B-ba7d: the roster's own read of the accounts, the person's tails laid on
@@ -1064,9 +1065,10 @@ export function installManageAgents(App, ctx = {}) {
         : `<div class="usage-note" id="oat-active">${t('Active — renews in {n} days.', { n: a.oatDaysLeft })}</div>`)
       : '';
     body.innerHTML = `
-      <div class="usage-note">${t('A long-lived token (Anthropic’s official `claude setup-token`, the same one the Claude Code GitHub Action uses) lets this subscription run on remote machines and paired devices WITHOUT shipping its interactive login: it lasts 1 year and never rotates, so nothing can get out of sync. This is the intended way to run your own subscription on your own remote/CI machines — safer than shipping the login. It still bills YOUR subscription and is tied to it, so treat it like the account itself; Anthropic recommends an API key instead when a credential is shared broadly across many contexts. Limits: quota refresh (⟳) does not work through it, and when it expires sessions fail until you re-mint.')}</div>
+      <ul class="usage-note oat-face"><li>${escHtml(t('Lets this subscription run on remote machines and paired devices, for 1 year.'))}</li><li>${escHtml(t('It still uses this subscription’s limits.'))}</li><li>${escHtml(t('When it expires, make a new one.'))}</li></ul>
       ${status}
       <div class="oat-mint" id="oat-mint"></div>
+      ${techFoldHtml([t('A long-lived token (Anthropic’s official `claude setup-token`, the same one the Claude Code GitHub Action uses) lets this subscription run on remote machines and paired devices WITHOUT shipping its interactive login: it lasts 1 year and never rotates, so nothing can get out of sync. This is the intended way to run your own subscription on your own remote/CI machines — safer than shipping the login. It still bills YOUR subscription and is tied to it, so treat it like the account itself; Anthropic recommends an API key instead when a credential is shared broadly across many contexts. Limits: quota refresh (⟳) does not work through it, and when it expires sessions fail until you re-mint.')], { summary: t('About this token'), className: 'oat-about' })}
       <details class="oat-manual"><summary>${t('Another way: paste a token')}</summary>
         <div class="usage-note">${t('Minted it yourself with `claude setup-token`? Paste the sk-ant-oat01-… value here.')}</div>
         <div class="oat-row"><input type="text" id="oat-paste" class="settings-input-text" placeholder="sk-ant-oat01-…" spellcheck="false" autocomplete="off" style="width:100%"></div>
@@ -2182,7 +2184,7 @@ export function installManageAgents(App, ctx = {}) {
       } else if (e.target.closest('.acct-menu')) {
         const r = e.target.closest('.acct-menu').getBoundingClientRect();
         const items = [
-          { label: t('Test'), action: doTest },
+          { label: t('Check this account works'), action: doTest }, // lane ui-plain-words agents-accounts-10: what «Test» tests
           { label: t('Rename account'), action: doRename },
         ];
         // pool: Switch target / Members… / Auto-switch / hot — the SAME block
@@ -2487,11 +2489,16 @@ export function installManageAgents(App, ctx = {}) {
         // B-69ec: a remote host's row says where THAT machine's login shell found it (its last create's answer)
         {
           const where = !selectedHost ? cliWhereWords(info) : remoteCliWhereWords(st.cliWhere && st.cliWhere[b.key], hostLabel);
-          if (where) {
+          if (where && where.tone === 'warn') {
             const el = document.createElement('div');
-            el.className = 'ob-cli-where' + (where.tone === 'warn' ? ' ob-cli-where-warn' : '');
+            el.className = 'ob-cli-where ob-cli-where-warn';
             el.textContent = where.text; // a path the shell printed is data
             left.appendChild(el);
+          } else if (where) {
+            // lane ui-plain-words agents-accounts-4: nothing is wrong ⇒ where it was found is a technical detail (folded)
+            const fold = techFold([where.text], { mono: true, className: 'ob-cli-where-fold' });
+            fold.querySelector('.tech-fold-line').classList.add('ob-cli-where');
+            left.appendChild(fold);
           }
         }
         const actions = document.createElement('div'); actions.className = 'agent-actions';
@@ -2574,7 +2581,8 @@ export function installManageAgents(App, ctx = {}) {
           if (info.install && !info.install.userLocal && b.installCmd) {
             const warnRow = document.createElement('div');
             warnRow.className = 'ob-cli-ephemeral btn-bar'; // the button-bar rule: «Install persistent copy» stays whole at the rail's 200 px
-            warnRow.innerHTML = `<span class="usage-warn">⚠ ${escHtml(t('Installed in a system location ({path}) — in containerized deployments, updates to it are lost when the container is rebuilt.', { path: info.install.binPath }))}</span>`;
+            // lane ui-plain-words agents-accounts-4: the risk in one line; the system path on hover
+            warnRow.innerHTML = `<span class="usage-warn" title="${escHtml(info.install.binPath || '')}">⚠ ${escHtml(t('This copy may be lost when the container is rebuilt.'))}</span>`;
             const persistBtn = document.createElement('button'); persistBtn.className = 'agent-btn'; persistBtn.textContent = t('Install persistent copy');
             persistBtn.title = b.installCmd + ' — ' + t('installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)');
             persistBtn.onclick = () => run(b.installCmd);
@@ -3795,7 +3803,7 @@ export function installManageAgents(App, ctx = {}) {
         // Redesign (2.178.0): Test/Rename/email/Remove live behind ⋯
         const r = e.target.closest('.acct-menu').getBoundingClientRect();
         const items = [
-          { label: t('Test'), action: doTest },
+          { label: t('Check this account works'), action: doTest }, // lane ui-plain-words agents-accounts-10: what «Test» tests
           { label: t('Rename account'), action: doRename },
         ];
         // pool: Switch target / Members / Auto-switch / Hot - ONE block shared

@@ -6,6 +6,7 @@
 // install) — and the one census line Manage agents shows under a CLI's version chip («found by your zsh at …»).
 // Every string the shell or the hub printed is DATA: it reaches the page through textContent only, never markup.
 import { t } from './i18n.js';
+import { techFold } from './plain-words.js';
 import { createModalShell } from './utils.js';
 
 /** The generic install page (no harness descriptor carries an install-doc link of its own). */
@@ -110,8 +111,13 @@ export function openCliMissingDialog(app, msg) {
   const w = cliMissingWords(msg || {});
   const { dialog, body, close } = createModalShell({ id: 'cli-missing-dialog', title: t('{cli} was not found', { cli: w.cli }), bodyClass: 'cli-missing-body', minWidth: 'min(480px, 92vw)', escapeToClose: true, kind: 'decision' }); // decision: a refused create — the person picks a door (Manage agents / How to install)
   const line = (cls, text) => { const el = document.createElement('div'); el.className = cls; el.textContent = text; body.appendChild(el); return el; };
-  line('cli-missing-asked', w.asked);
-  line('cli-missing-what', w.what);
+  // lane ui-plain-words first-run-16: ONE plain sentence first; who was asked and what each found (shells, paths, the PATH's
+  // folders) fold under it — the same lines, their classes kept; the hint (what to do) stays in view
+  line('cli-missing-face', t('VibeSpace could not find {cli} on this computer, so nothing was started.', { cli: w.cli }));
+  const fold = techFold([w.asked, w.what], { className: 'cli-missing-fold' });
+  const [askedEl, whatEl] = fold.querySelectorAll('.tech-fold-line');
+  askedEl.classList.add('cli-missing-asked'); whatEl.classList.add('cli-missing-what');
+  body.appendChild(fold);
   if (w.hint) line('cli-missing-hint', w.hint);
   const footer = document.createElement('div'); footer.className = 'dialog-footer';
   const docs = document.createElement('button'); docs.className = 'btn-cancel cli-missing-docs'; docs.textContent = t('How to install');

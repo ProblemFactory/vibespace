@@ -520,7 +520,7 @@ export function installPluginsUI(App) {
     const { body, close, raised } = createModalShell({ id: 'plugin-install-dialog', title: t('Install plugin'), minWidth: '460px', escapeToClose: true, kind: 'form', onClose: () => { if (offCred) offCred(); offCred = null; } });
     if (raised) return null;   // raised: the same subject's form, as it was
     const SOURCES = [
-      { value: 'path', label: t('Local folder path'), placeholder: '/path/to/plugin (holds vibespace-plugin.json)' },
+      { value: 'path', label: t('Local folder path'), placeholder: t('The plugin’s folder on this computer') }, // lane ui-plain-words plugins-integrations-8: translated
       { value: 'git', label: t('Git repository URL'), placeholder: 'https://github.com/owner/plugin.git#main' },
       { value: 'github-release', label: t('GitHub release (owner/repo[@tag])'), placeholder: 'owner/repo@v1.2.0' },
       { value: 'zip', label: t('Upload .vsp package'), placeholder: '' },
@@ -532,7 +532,7 @@ export function installPluginsUI(App) {
       <label class="plugin-install-row plugin-install-ref-row hidden"><span>${escHtml(t('Ref'))}</span><input type="text" class="plugin-install-ref" spellcheck="false" placeholder="${escHtml(t('a tag, a branch or a full commit sha (empty = the default branch)'))}"></label>
       <div class="plugin-install-row plugin-install-cred-row dialog-field-row hidden"><span>${escHtml(t('Credential'))}</span><div class="dialog-field-line"><select class="plugin-install-cred"><option value="">${escHtml(t('None (a public repository)'))}</option><option value="plugin-git" disabled>${escHtml(t('Plugin Git credential'))}</option></select><button type="button" class="mounts-btn plugin-install-cred-open">${escHtml(t('Set up…'))}</button></div></div>
       <div class="plugin-cfg-hint plugin-install-cred-hint hidden">${escHtml(t('A private repository is read with the Plugin Git credential kept in Integrations (sealed by the vault) — a token is never typed here.'))}</div>
-      <div class="plugin-cfg-hint">${escHtml(t('The package is validated before it is placed under data/plugins/<id>/. Plugins that ask for capabilities beyond the sandbox are enabled only after you review them.'))}</div>
+      <div class="plugin-cfg-hint">${escHtml(t('The plugin is checked before it is installed; one that asks for more than the sandbox allows waits for you to review it before it turns on.'))}</div>
       <div class="plugin-detail plugin-cfg-warn plugin-install-error hidden"></div>
       <div class="dialog-actions"><button class="mounts-btn plugin-install-cancel">${escHtml(t('Cancel'))}</button><button class="mounts-btn mounts-btn-primary plugin-install-go">${escHtml(t('Install'))}</button></div>`;
     const srcSel = body.querySelector('.plugin-install-source'), val = body.querySelector('.plugin-install-value'), fileRow = body.querySelector('.plugin-install-file-row'), valRow = body.querySelector('.plugin-install-value-row'), fileIn = body.querySelector('.plugin-install-file'), errEl = body.querySelector('.plugin-install-error'), go = body.querySelector('.plugin-install-go');
@@ -713,8 +713,8 @@ export function installPluginsUI(App) {
       body.innerHTML = `
         <div class="dialog-intro">${escHtml(t('{name} keeps its conversations in its own database rather than in files, so VibeSpace cannot read a STOPPED conversation without asking {name} itself.', { name: meta.label || meta.id }))}</div>
         <ul class="plugin-caps-list">
-          <li class="plugin-cap">${escHtml(t('Lists, opens, resumes and forks stopped {name} conversations in the sidebar', { name: meta.label || meta.id }))}</li>
-          <li class="plugin-cap">${escHtml(t('Runs `opencode serve` on 127.0.0.1 (loopback only) using your own installed CLI — nothing is downloaded and nothing is exposed'))}</li>
+          <li class="plugin-cap">${escHtml(t('Lists, opens, resumes and copies stopped {name} conversations in the sidebar', { name: meta.label || meta.id }))}</li>
+          <li class="plugin-cap">${escHtml(t('Runs a service only this computer can reach, with the {name} you installed — nothing is downloaded and nothing is opened to the network', { name: meta.label || meta.id }))}</li>
           <li class="plugin-cap">${escHtml(t('Stops as soon as you disable it in ⚙ → Plugins, and VibeSpace stops it by itself if it starts burning CPU or memory'))}</li>
         </ul>
         <div class="plugin-cfg-hint">${escHtml(t('Running sessions do not need it. You will only be asked once — ⚙ → Plugins can turn it on later.'))}</div>

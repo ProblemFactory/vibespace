@@ -4,7 +4,6 @@
   "cli": [
    "\"vibespace-channels refresh\" is refused, with the wait, when the conversation was fetched less than this long ago — an agent cannot turn itself into a polling loop. Every refresh counts against the account's vendor budget.",
    "A conversation granted the code gets the current code (vibespace-vault totp) — never the seed. A conversation's grant ends when that conversation ends.",
-   "A long-lived token (Anthropic’s official `claude setup-token`, the same one the Claude Code GitHub Action uses) lets this subscription run on remote machines and paired devices WITHOUT shipping its interactive login: it lasts 1 year and never rotates, so nothing can get out of sync. This is the intended way to run your own subscription on your own remote/CI machines — safer than shipping the login. It still bills YOUR subscription and is tied to it, so treat it like the account itself; Anthropic recommends an API key instead when a credential is shared broadly across many contexts. Limits: quota refresh (⟳) does not work through it, and when it expires sessions fail until you re-mint.",
    "Agents with \"Run commands on it\" on a paired machine can copy one file at a time between that machine and this one (vibespace-exit pull / push — sha256-checked, shown as a card and in the machine's command list). A bigger file is refused and nothing is copied. Default 1024 MB (1 GB).",
    "An agent may use it in vibespace-vault run without ever seeing it — each new command asks you first",
    "An agent points one command at this machine's network (vibespace-exit use / url) — the command runs here, only its traffic leaves from {machine}.",
@@ -17,7 +16,6 @@
    "No file window opens here — the agent uploads it with vibespace-browser upload",
    "No groups yet. \"New group\" starts one with live agent sessions; an agent can too (vibespace-msg group create). Every conversation of an account you connect below appears here as well.",
    "Nothing needs you right now. Agents file items here with vibespace-ask when they need a decision or input.",
-   "Runs `opencode serve` on 127.0.0.1 (loopback only) using your own installed CLI — nothing is downloaded and nothing is exposed",
    "The id or label of a browser profile (Browser panel / vibespace-browser profiles) that new sessions are pinned to when nothing more specific applies. Empty (default): sessions browse an ephemeral browser and keep no logins. A session's own choice, its conversation's earlier pin and its Task Group's default all outrank this.",
    "The nudge only fires when the session has not updated its board status for this long — and never after a turn that already reported its status or progress (vibespace-status / vibespace-task / vibespace-ask during that turn). Lower = agents are reminded more eagerly; higher = quieter. 0 = always considered stale (with cooldown 0 too, the nudge fires on every stop of a turn that did not report — at most one bookkeeping mini-turn per turn).",
    "The page tried to print — closed; the agent saves a PDF with vibespace-browser pdf",
@@ -52,7 +50,6 @@
    "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.",
    "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions using the machine’s own login bill via the helper key. Sessions where you explicitly pick a subscription account bypass the helper automatically (2.236.0); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.",
    "The cluster's repository holds another plugin («{got}»), not {plugin} — {plugin} is not installed from it and there is nothing to consent to; the cluster's admin corrects fleet.json",
-   "The package is validated before it is placed under data/plugins/<id>/. Plugins that ask for capabilities beyond the sandbox are enabled only after you review them.",
    "The personality new Codex chat sessions start with. Blank = leave it to your own ~/.codex/config.toml (this is the default; VibeSpace used to force \"pragmatic\" on every session). Unlike Claude, a running Codex session CAN be re-styled from the chat status bar — it applies from the next turn.",
    "The relay's shared secret. It stays on this instance (data/plugins.json) and is never shown again; empty = the cluster's.",
    "The update was pushed by {by}. A VibeSpace that sends an update without the release signature is misbuilt or compromised — check this VibeSpace's build (release/agentd/manifest.json, its log) before anything else. It will not send that update again.",
