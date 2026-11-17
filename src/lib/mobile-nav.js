@@ -137,6 +137,12 @@ export class MobileNav {
       if (pressedAside) { pressedAside = false; return; }
       if (head && !e.target.closest('button, input, textarea, select, .window-controls, .tab-bar-tabs')) this._showWindowSwitcher(head); // a tab in the head is its own (lane phone-six)
     });
+    // THE SEARCH'S HOME (lane mask-value-shape, the strip's step two — page §4 «search → the window's title bar»; the design's
+    // author 2026-11-17: search lives where the conversation's NAME lives, never on the strip): a ≥ 36 px magnifier at the bar's
+    // right end, before the ⋯ — shown while the window on show is a conversation with a search bar; it never folds (no row of
+    // NAV_FOLD_ORDER), the title gives up its room first
+    const searchBtn = document.getElementById('mobile-nav-search');
+    if (searchBtn) { searchBtn.innerHTML = UI_ICONS.search; searchBtn.title = t('Search this conversation'); searchBtn.setAttribute('aria-label', searchBtn.title); searchBtn.onclick = (e) => { e.stopPropagation(); this._shownChat()?._search?.open?.(); }; }
     this._setupGestures();
     this.split = installPhoneSplit(app); // lane phone-six: the switcher's «Split» — two windows side by side where they fit
     try { new ResizeObserver(() => this._paintHead()).observe(document.getElementById('mobile-nav')); } catch { } // the column's width moved (☰, a fold): the name re-fits
@@ -624,6 +630,7 @@ export class MobileNav {
     this._head = { win, count };
     this._paintHead();
     this._titleEl.classList.toggle('arrived', [...wm.windows.values()].some((w) => w.element.classList.contains('window-arrived'))); // an agent placed a window (never shown in front of this one)
+    { const sb = document.getElementById('mobile-nav-search'); if (sb) sb.classList.toggle('on', !this.app.phoneHome?.shown?.() && !!this._shownChat()?._search); }
     this.bar?.update?.();
     this.updateDesktopsDoor();
     this.split?.apply(); // lane phone-six: the side by side follows every window change (a pane gone, another window shown)
@@ -676,6 +683,14 @@ export class MobileNav {
     if (here(a)) return a;
     const s = this._shown[desk] && wm.windows.get(this._shown[desk]);
     return here(s) ? s : null;
+  }
+
+  /** The conversation on show (its chat view), or null — the search's door asks it. */
+  _shownChat() {
+    const id = this.app.wm?.activeWindowId;
+    if (id == null) return null;
+    for (const v of (this.app.sessions?.values?.() || [])) if (v && v.winInfo && v.winInfo.id === id && v._messageList) return v;
+    return null;
   }
 
   _showWindowSwitcher(anchor = this._titleEl) {

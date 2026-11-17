@@ -124,9 +124,9 @@ globalThis.document = { createElement: (t) => new FakeEl(t) };
   bar.applyStatus(firstStatus);
   const order0 = keys(bar);
   // lane agy-status-bar-facts: a claude bar says «not reported» (ONE chip) for the facts its row lacks — token total, turn time
-  // lane mask-value-shape: the strip's table order — row 1 (model door, permission, context door), row 2 (产出, «⚙ 对话设置»),
-  // then the search until its home in the title bar (P3); the rest are door rows
-  ok(order0.join(',') === 'model,perm,ctx,artifacts,settings,search', `first render draws the expected chip set in bar order (${order0.join(',')})`);
+  // lane mask-value-shape: the strip's table order — row 1 (model door, permission, context door), row 2 (产出, «⚙ 对话设置»);
+  // the rest are door rows, and the search lives in the window's title bar (no strip mark)
+  ok(order0.join(',') === 'model,perm,ctx,artifacts,settings', `first render draws the expected chip set in bar order (${order0.join(',')})`);
   ok(Object.keys(rowsOf(bar)).join(',') === 'goal,style,design,cache,cache-k,unreported,cost', `…and the marks the table puts inside a door are door rows, none on the strip (${Object.keys(rowsOf(bar)).join(',')})`);
   ok(bar.element.children.every((el) => el.tagName === 'SPAN' && el.getAttribute('data-chip')), 'every chip is a <span data-chip=…>');
   const v = driveTwenty(bar);
@@ -137,7 +137,7 @@ globalThis.document = { createElement: (t) => new FakeEl(t) };
   // cost joins the door's face only on an account billed per use (this fixture's account is not known)
   // the ctx door's face is its pie + word + ROUNDED percent (the [used/total] moved to its data-* and its panel): an unchanged
   // string is NOT written (that is the point), so more than once, fewer than 21
-  const warm = ['ctx'], cold = ['search', 'model', 'perm', 'artifacts', 'settings'];
+  const warm = ['ctx'], cold = ['model', 'perm', 'artifacts', 'settings'];
   ok(warm.every((k) => v.after[k].innerSets > 1 && v.after[k].innerSets < 21), `① the ctx door (${warm.join('/')}) re-wrote its inner markup only when its rounded percent changed (${warm.map((k) => v.after[k].innerSets).join('/')} of 21 ticks)`);
   ok(cold.every((k) => v.after[k].innerSets === 1), `① the cold chips (${cold.join('/')}) were written once and never again (${cold.map((k) => v.after[k].innerSets).join('/')})`);
   // tick 20: 21000 + 2500 + 20 = 23520 of 200000 → 12 %, "24k"
@@ -170,11 +170,16 @@ console.log('— ② chips appear at their place and leave again, neighbours unt
   bar.setTurnState('idle');
   ok(!keys(bar).includes('turnstate') && ['model', 'perm', 'ctx', 'settings'].every((x) => byKey(bar)[x] === base[x]), '② turn-state chip leaves on idle; neighbours keep identity across the removal');
 
+  // (lane mask-value-shape) a tool that did not start is no strip mark: its home is Session Properties, in words, told by an event
+  const told = []; const hadWin = 'window' in globalThis, prevWin = globalThis.window, prevCE = globalThis.CustomEvent;
+  globalThis.window = { dispatchEvent: (ev) => { told.push(ev.detail && ev.detail.sessionId); return true; } };
+  globalThis.CustomEvent = class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } };
   bar.setInitHealth([{ kind: 'mcp', name: 'srv', detail: 'failed' }]);
   k = keys(bar);
-  ok(k.indexOf('health') > k.indexOf('settings') && byKey(bar).health.textContent.includes('1 not working'), `② health chip appears at row 2's end, past «⚙ 对话设置», with its count — until its homes (Session Properties + ⚙ Diagnostics) are built (${k.join(',')})`);
+  ok(!k.includes('health') && bar.initHealthRows().length === 1 && /srv/.test(bar.initHealthRows()[0]) && told.join() === 'sid-chips', `② a tool that did not start draws NO strip mark — its words are Session Properties' (initHealthRows: ${JSON.stringify(bar.initHealthRows())}), the open Properties window told (${told.join()})`);
   bar.setInitHealth([]);
-  ok(!keys(bar).includes('health'), '② health chip clears on an empty (told-and-clean) answer');
+  ok(bar.initHealthRows().length === 0 && told.length === 2, '② …and an empty (told-and-clean) answer clears them, told again');
+  if (hadWin) globalThis.window = prevWin; else delete globalThis.window; if (prevCE) globalThis.CustomEvent = prevCE; else delete globalThis.CustomEvent;
 
   bar.setJobsHeld('3 notifications held — waiting for the turn');
   ok(!keys(bar).includes('held') && !!rowsOf(bar).held && rowsOf(bar).held.html.includes('3 notifications held'), '② the held notices are a row of «⚙ 对话设置» with their head (never a strip chip)');
@@ -271,9 +276,10 @@ console.log('— ⑤ wiring');
   bar.applyStatus(firstStatus);
   bar.setCostBasis({ source: 'subscription' });
   bar.setAddedKinds([{ kind: 'record', name: 'api-request-blob', cli: '2.1.309' }]);
-  const order = keys(bar), els = byKey(bar);
-  ok(order[order.length - 1] === 'kinds' && order.join(',').startsWith('model,perm,ctx,artifacts,settings,search'), `⑥ the kinds chip is LAST (until its home in ⚙ Diagnostics) — every other chip keeps its place (${order.join(',')})`);
-  ok(els.kinds.textContent === '1 record kind this version added — Diagnostics' && els.kinds.className === 'chat-status-kinds chat-status-clickable' && !els.kinds.getAttribute('style') && /api-request-blob: a new record \(2\.1\.309\)/.test(els.kinds.getAttribute('title')), '⑥ «1 record kind this version added — Diagnostics», quiet (no inline colour — the theme\'s dim), each kind in its title');
+  const order = keys(bar), els = byKey(bar), kw = bar.addedKindsWords();
+  // (lane mask-value-shape) the kinds are no strip mark: ⚙ Diagnostics holds their cause, Session Properties their names
+  ok(!order.includes('kinds') && order.join(',') === 'model,perm,ctx,artifacts,settings', `⑥ the record kinds draw NO strip mark — every chip keeps its place (${order.join(',')})`);
+  ok(!!kw && kw.text === '1 record kind this version added — Diagnostics' && /api-request-blob: a new record \(2\.1\.309\)/.test(kw.title), '⑥ «1 record kind this version added — Diagnostics», quiet (no inline colour — the theme\'s dim), each kind in its title');
   const cr = rowsOf(bar).cost;
   ok(cr.html === 'This chat ≈ $0.50 · included in your subscription' && cr.style === 'color:var(--text-dim)' && !/chat-status-cost/.test(els.ctx.innerHTML), `⑥ a subscription's cost is quiet (dim), never the tier colours — a row of the context door, never on its face (${cr.style})`);
   bar.setCostBasis({ source: 'api-key' });

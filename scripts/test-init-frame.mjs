@@ -897,20 +897,15 @@ if (!CHROME) {
       // the ChatView seam, verbatim: rows in from the ONE classifier
       if (frame) window.__bar.setInitHealth(VS.AM.initHealthIssues(frame));
       window.__bar.render();
-      const chip = document.querySelector('.chat-status-health');
-      const cs = chip ? getComputedStyle(chip) : null;
-      const barCs = getComputedStyle(document.querySelector('.chat-status-bar'));
+      // lane mask-value-shape (the strip's step two, page §4 — «the health mark gone»): the rows are held by the bar for their
+      // position-free home, Session Properties' «At its start» (initHealthRows); the strip draws no mark for them
+      const rows = window.__bar.initHealthRows();
       return {
         cards: list.querySelectorAll('.chat-msg-init').length,
         initRecordsInSlab: ${repeatSlabJson}.filter((m) => m.content && m.content[0] && m.content[0].initData).length,
         recordFrames,
-        chip: !!chip,
-        chipText: chip ? chip.textContent.replace(/\s+/g, ' ').trim() : '',
-        chipTitle: chip ? chip.getAttribute('title') : '',
-        chipVisible: !!(chip && cs.display !== 'none' && cs.visibility !== 'hidden' && chip.getBoundingClientRect().width > 0),
-        chipColor: cs ? cs.color : '', barColor: barCs.color,
-        chipSvg: !!(chip && chip.querySelector('svg')),
-        chipHtml: chip ? chip.innerHTML : '',
+        rows,
+        onStrip: !!document.querySelector('.chat-status-bar .chat-status-health'),
       };
     })()`);
     await setViewport(1280, 800);
@@ -920,17 +915,16 @@ if (!CHROME) {
       hBroken.cards === 0 && hBroken.initRecordsInSlab >= 1, hBroken);
     ok('…and those card-less RECORDS still carry the frame — initFrameOf reads it straight off the record, so the facts survive a suppressed card (round 5: the renderer is no longer in this path at all, because it also runs for replays)',
       hBroken.recordFrames >= 1, hBroken.recordFrames);
-    ok(`THE FIX, measured: the same window shows a VISIBLE "${hBroken.chipText}" chip in warning colour (computed ${hBroken.chipColor}, bar text ${hBroken.barColor}) with an inline SVG (never an emoji)`,
-      hBroken.chip && hBroken.chipVisible && /4/.test(hBroken.chipText) && hBroken.chipColor !== hBroken.barColor && hBroken.chipSvg
-      && !/[\u{1F300}-\u{1FAFF}]/u.test(hBroken.chipHtml), hBroken);
-    ok('…its tooltip names every row VERBATIM (the protocol status is never translated or mapped)',
-      /MCP github — failed/.test(hBroken.chipTitle) && /MCP drive — needs-auth/.test(hBroken.chipTitle)
-      && /MCP notes — url_missing_type/.test(hBroken.chipTitle) && /plugin old-helper — unsatisfied_dependency/.test(hBroken.chipTitle), hBroken.chipTitle);
+    ok(`THE FIX, held off the strip: the same window's bar HOLDS the ${hBroken.rows.length} rows for Session Properties' «At its start» (the position-free home — page §4), and draws no strip mark for them`,
+      hBroken.rows.length === 4 && !hBroken.onStrip, hBroken);
+    ok('…every row VERBATIM (the protocol status is never translated or mapped)',
+      /MCP github — failed/.test(hBroken.rows.join('\n')) && /MCP drive — needs-auth/.test(hBroken.rows.join('\n'))
+      && /MCP notes — url_missing_type/.test(hBroken.rows.join('\n')) && /plugin old-helper — unsatisfied_dependency/.test(hBroken.rows.join('\n')), hBroken.rows);
     const hClean = await chipProbe(cleanFrameJson);
-    ok('NEGATIVE CONTROL: an all-connected frame draws NO chip (a gauge that cannot fall is not a gauge) — same code path, same slab, only the frame changed',
-      !hClean.chip && hClean.cards === 0, hClean);
+    ok('NEGATIVE CONTROL: an all-connected frame holds NO row (a gauge that cannot fall is not a gauge) — same code path, same slab, only the frame changed',
+      hClean.rows.length === 0 && hClean.cards === 0, hClean);
     const hNone = await chipProbe('null');
-    ok('NEGATIVE CONTROL: never told (codex/ACP/older CLI — no frame at all) draws no chip either, so nothing ever claims "all healthy"', !hNone.chip, hNone);
+    ok('NEGATIVE CONTROL: never told (codex/ACP/older CLI — no frame at all) holds no row either, so nothing ever claims "all healthy"', hNone.rows.length === 0, hNone);
     // ABSENT ≠ CLEAN at the seam: a later status WITHOUT a frame must not
     // erase what a live init already reported.
     const hKeep = await evaljs(`(() => {
@@ -938,27 +932,25 @@ if (!CHROME) {
       ${mkBar};
       window.__bar.setInitHealth(VS.AM.initHealthIssues(frame));
       window.__bar.render();
-      const had = !!document.querySelector('.chat-status-health');
+      const had = window.__bar.initHealthRows().length > 0;
       // ChatView._applyInitHealth's guard, verbatim: a falsy frame returns
       // before touching the chip.
       const frame2 = null; if (frame2) window.__bar.setInitHealth(VS.AM.initHealthIssues(frame2));
       window.__bar.render();
-      return { had, still: !!document.querySelector('.chat-status-health') };
+      return { had, still: window.__bar.initHealthRows().length > 0 };
     })()`);
-    ok('a later status carrying NO frame leaves the chip standing (ABSENT ≠ CLEAN — an attach that cannot see the frame must not silently declare the session healthy)', hKeep.had && hKeep.still, hKeep);
-    // Touch has no hover: the rows must be reachable by CLICK.
+    ok('a later status carrying NO frame leaves the rows standing (ABSENT ≠ CLEAN — an attach that cannot see the frame must not silently declare the session healthy)', hKeep.had && hKeep.still, hKeep);
+    // Touch has no hover: the rows are READ in words where a person opens them — Session Properties, told by the bar's event
     const hClick = await evaljs(`(() => {
       const frame = ${frameJson};
       ${mkBar};
-      window.__bar.popupContainer = document.getElementById('host');
+      const told = []; const on = (e) => told.push(e.detail && e.detail.sessionId); window.addEventListener('vs-start-facts', on);
       window.__bar.setInitHealth(VS.AM.initHealthIssues(frame));
-      window.__bar.render();
-      document.querySelector('.chat-status-health').click();
-      const rows = [...document.querySelectorAll('.chat-status-health-row')].map((r) => r.textContent.replace(/\s+/g, ' ').trim());
-      return { rows, note: (document.querySelector('.chat-status-dropdown-note') || {}).textContent || '', esc: !!document.querySelector('.chat-status-dropdown[data-popover]') };
+      window.removeEventListener('vs-start-facts', on);
+      return { rows: window.__bar.initHealthRows(), told };
     })()`);
-    ok(`clicking the chip lists all 4 rows (touch has no hover — the tooltip alone would be unreadable on the surface where the card is hardest to reach) and joins the app-wide Escape protocol`,
-      hClick.rows.length === 4 && /MCP github — failed/.test(hClick.rows.join(' | ')) && hClick.esc && /start frame/.test(hClick.note), hClick);
+    ok(`the bar TELLS an open Properties window when its rows change ('vs-start-facts', this conversation's id) — touch has no hover, so the rows live where a person reads them in words`,
+      hClick.rows.length === 4 && /MCP github — failed/.test(hClick.rows.join(' | ')) && hClick.told.length === 1 && !!hClick.told[0], hClick);
 
     // ── ≤768px (375×667): the standing rule ──
     await setViewport(375, 667);
@@ -1004,10 +996,9 @@ if (!CHROME) {
       m.before.cardW <= m.vw + 1 && m.before.warnRight <= m.vw + 1 && m.before.listScrollW <= m.before.listClientW + 1, m);
     ok(`375×667: the summary is a WRAPPING row, and at this width it does not overflow its own box (flex-wrap ${m.before.sumWrap}, scrollWidth ${m.before.sumScrollW} ≤ ${m.before.sumClientW}, height ${Math.round(m.before.sumH)}px) — a longer style name or a bigger count wraps to a second line instead of clipping`,
       m.before.sumWrap === 'wrap' && m.before.sumScrollW <= m.before.sumClientW + 1, m.before);
-    ok(`375×667: the health chip keeps its FULL label on the narrow bar (${m.chip && Math.round(m.chip.w)}px, text "${m.chip && m.chip.text}", not clipped by its own box) and never shrinks away — the ≤768px bar is the strip's two WRAPPING rows (lane mask-value-shape; was one swiped nowrap row: flex-wrap ${m.chip && m.chip.barWrap}), the chip inside them on screen, nothing behind ⋯`,
-      !!m.chip && m.chip.w > 0 && !m.chip.clipped && m.chip.shrink === '0' && m.chip.barWrap === 'wrap' && !m.chip.fold && m.chip.onScreen && m.chip.inBar, m.chip);
-    ok(`375×667: it sits on row 2, the strip's always-findable row, until its homes off the strip (Session Properties + ⚙ Diagnostics — the table's place; was the FRONT of the one swiped row, where a warning past eight chips was one nobody swipes to) — seen without a swipe (child ${m.chip && m.chip.index} of ${m.chip && m.chip.children}, bar scrollable ${m.chip && m.chip.barScrollable})`,
-      !!m.chip && m.chip.row2 && !m.chip.barScrollable, m.chip);
+    // lane mask-value-shape (the strip's step two — page §4, «the health mark gone»): the strip carries NO health mark at 375;
+    // the start card's own strip says it (the legs above), Session Properties' «At its start» holds it position-free
+    ok(`375×667: the strip carries no health mark — the start card's strip above says it, Session Properties holds it (no chip: ${!m.chip})`, !m.chip, m.chip);
     ok(`375×667 expanded: the inventory wraps too — long verbatim lists break instead of pushing the transcript sideways (body right ${Math.round(m.after.bodyRight)} ≤ ${m.vw}, scrollWidth ${m.after.listScrollW} ≤ ${m.after.listClientW}, body ${Math.round(m.after.bodyH)}px tall)`,
       m.after.bodyRight <= m.vw + 1 && m.after.listScrollW <= m.after.listClientW + 1 && m.after.bodyH > 0, m.after);
 
@@ -1027,11 +1018,12 @@ if (!CHROME) {
     //      hanging off it could not be scrolled to by any gesture.
     // Both are measured here as CONSEQUENCES (computed style + geometry), each
     // with a same-run negative control that puts the pre-fix value back.
-    const ddProbe = async (sel, label) => evaljs(`(() => {
+    const ddProbe = async (sel, label, extra = '') => evaljs(`(() => {
       const frame = ${frameJson};
       ${mkBar};
       window.__bar.setInitHealth(VS.AM.initHealthIssues(frame));
       window.__bar.setModel('claude-fable-5');
+      ${extra}
       window.__bar.render();
       const anchor = document.querySelector(${JSON.stringify(sel)});
       if (!anchor) return { missing: true };
@@ -1064,8 +1056,11 @@ if (!CHROME) {
         overflow: getComputedStyle(dd).overflow, nRows: rows.length, wsAll, longest, after, unclamped, preFix, label: ${JSON.stringify(label)} };
     })()`);
 
-    const ddH = await ddProbe('.chat-status-health', 'health');
-    ok(`375×667: every health row computes white-space NORMAL and none of them clips (worst overflow ${ddH.after && ddH.after.worstOverflow}px over ${ddH.nRows} rows; longest "${ddH.longest && ddH.longest.t.slice(0, 60)}…" ${ddH.longest && ddH.longest.sw}/${ddH.longest && ddH.longest.cw}) — the panel is overflow:hidden, so a row that cannot fit must WRAP, never clip`,
+    // (lane mask-value-shape) the health panel is gone with its chip; the panel of LONG rows is the context door's now — the
+    // window line and each detail's own sentence (the cache's is ~110 characters)
+    const CTX_STATE = "window.__bar.applyStatus({ model: 'claude-fable-5', contextWindow: 200000, lastUsage: { input_tokens: 21000, cache_read_input_tokens: 2500 }, total_cost_usd: 0.5 });";
+    const ddH = await ddProbe('.chat-status-ctx', 'context', CTX_STATE);
+    ok(`375×667: every context-panel row computes white-space NORMAL and none of them clips (worst overflow ${ddH.after && ddH.after.worstOverflow}px over ${ddH.nRows} rows; longest "${ddH.longest && ddH.longest.t.slice(0, 60)}…" ${ddH.longest && ddH.longest.sw}/${ddH.longest && ddH.longest.cw}) — the panel is overflow:hidden, so a row that cannot fit must WRAP, never clip`,
       !!ddH.after && ddH.wsAll.length === 1 && ddH.wsAll[0] === 'normal' && ddH.after.worstOverflow <= 1, ddH);
     ok(`NEGATIVE CONTROL: forcing the rows back to the cascade's PRE-FIX value (white-space: nowrap) clips them again by ${ddH.preFix && ddH.preFix.worstOverflow}px inside the same overflow:hidden panel — so the assert above measures the cascade, not the text`,
       !!ddH.preFix && ddH.preFix.worstOverflow > 20, ddH.preFix);
@@ -1141,7 +1136,8 @@ if (!CHROME) {
       ['.chat-status-effort', 'effort', "bar.setEffort('xhigh', 'xhigh');"],
       ['.chat-status-perm', 'permission mode', ''],
       ['.chat-status-settings|style', 'response style', ''],
-      ['.chat-status-health', 'session health', ''],
+      ['.chat-status-ctx', 'context', "window.__bar.applyStatus({ model: 'claude-fable-5', contextWindow: 200000, lastUsage: { input_tokens: 21000, cache_read_input_tokens: 2500 }, total_cost_usd: 0.5 });"],   // lane mask-value-shape: the context door (the health panel is gone)
+      ['.chat-status-settings', 'conversation settings', ''],
       ['.chat-status-artifacts', 'design', ''],   // in 产出 (no file yet: its press is the design panel)
       ['.chat-status-settings|goal', 'set-a-goal', ''],
       ['.chat-status-settings|goal', 'active goal', "bar.setGoal('ship the release when every test in scripts/ passes', 5000); bar.setGoalStatus('active');"],

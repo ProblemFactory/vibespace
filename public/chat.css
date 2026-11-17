@@ -27,15 +27,6 @@
 .chat-status-goal { color: var(--accent); font-weight: 600; }
 .chat-status-goal-empty { opacity: 0.45; filter: grayscale(0.6); }
 .chat-status-remote { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); border-radius: 999px; padding: 0 6px; animation: chat-remote-pulse 1.6s ease-in-out infinite; }
-/* Session-health chip (§2.6 round 4): the init frame's non-working MCP
-   servers / plugins, on the ONE surface that survives the transcript
-   scrolling away. Warning colour, NO pulse — this is a standing condition,
-   not a transient like the reconnect chip. On ≤768px the status bar is a
-   single swipeable row whose children are flex-shrink:0, so this keeps its
-   full label there and is reachable by a horizontal swipe; it sits right
-   after the model/effort badges so it is the third chip, not the last. */
-.chat-status-health { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); border-radius: 999px; padding: 0 6px; display: inline-flex; align-items: center; gap: 3px; }
-.chat-status-health svg { width: 10px; height: 10px; flex-shrink: 0; }
 /* Browser chip (agent browser P2, §3.8 layer ③): neutral while the agent is on
    the pinned profile (or has not used one yet), AMBER when the profile it last
    used differs from the pin — a standing condition, no pulse. */
@@ -55,17 +46,6 @@
 .chat-status-channel-states { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
 .chat-status-channel-states:empty { display: none; }
 .chat-status-dropdown-item.chat-status-browser-nudge { color: var(--yellow, #e5c07b); }
-/* The row carries BOTH classes, and `.chat-status-dropdown-item` (declared
-   further down this file, same 0,1,0 specificity) sets `white-space: nowrap`
-   — so the plain `.chat-status-health-row { white-space: normal }` this used
-   to be was DEAD, and its `detail` (an unbounded upstream error message per
-   the 2.1.257 zod) hard-clipped inside the panel's `overflow: hidden`
-   (measured: scrollWidth 610 vs clientWidth 320, at 1280 AND at 375). The
-   sibling `.chat-status-dropdown-note` has no competing class and always did
-   wrap — which is what this row was written to do. Compound selector (0,2,0)
-   so the cascade cannot silently take it away again. */
-.chat-status-dropdown-item.chat-status-health-row { display: flex; align-items: center; gap: 5px; color: var(--yellow, #e5c07b); max-width: 320px; white-space: normal; overflow-wrap: anywhere; }
-.chat-status-health-row svg { width: 11px; height: 11px; flex-shrink: 0; }
 @keyframes chat-remote-pulse { 50% { opacity: 0.55; } }
 .chat-status-goal-empty:hover { opacity: 1; filter: none; }
 .chat-goal-timer { font-variant-numeric: tabular-nums; }
@@ -158,9 +138,6 @@
   box-shadow: 0 0 0 1px var(--border);
 }
 .chat-status-dim { color: var(--text-dim); margin-left: 1px; }
-/* lane door-healthy-chat: the record kinds the agent's CLI added — ONE quiet chip (never red), opens ⚙ Diagnostics */
-.chat-status-kinds { color: var(--text-dim); }
-.chat-status-kinds:hover { color: var(--text); }
 .chat-status-tasks { font-size: 10px; color: var(--yellow); padding: 0 4px; }
 .chat-task-detail { padding: 6px 12px; }
 .chat-task-title { font-weight: 500; margin-bottom: 2px; }
@@ -197,7 +174,10 @@
 .chat-status-bar .chat-status-door-sep { opacity: 0.6; }
 /* «⚙ 对话设置»'s panel: each row its name and its present value */
 .chat-status-dropdown .chat-status-settings-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-.chat-status-dropdown .chat-status-settings-row .chat-status-settings-value { color: var(--text-dim); text-align: end; }
+.chat-status-dropdown .chat-status-settings-row .chat-status-settings-value { color: var(--text-dim); text-align: end; min-width: 0; overflow-wrap: anywhere; }
+/* the doors' rows WRAP, never clip (the lesson of the old health rows, round 5: `.chat-status-dropdown-item`'s nowrap, declared
+   later at 0,1,0, hard-clipped a long value inside the panel's overflow: hidden) — a compound selector the cascade cannot take */
+.chat-status-dropdown-item.chat-status-settings-row, .chat-status-dropdown-item.chat-status-ctx-row { white-space: normal; overflow-wrap: anywhere; }
 .chat-view.chat-short .chat-input-area { padding-top: 6px; padding-bottom: 6px; }
 .chat-view.chat-short .chat-input { min-height: 34px; padding-top: 6px; padding-bottom: 6px; }
 .chat-view.chat-short .chat-shortcut-hint { display: none; }
@@ -1213,11 +1193,6 @@
 .chat-hold-btn:active { background: var(--bg-hover); color: var(--text); }
 .chat-hold-btn svg { width: 16px; height: 16px; display: block; }
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-hold-btn:not(.hidden) { display: inline-flex; } }
-/* Chat search, phone face (docs/design-mobile-gaps.md #4): the status bar's
-   magnifier is Ctrl+F's touch equivalent — same split as the steer bolt. */
-.chat-status-search { display: none; }
-.chat-status-search svg { width: 16px; height: 16px; display: block; }
-@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-view .chat-status-bar .chat-status-search { display: inline-flex; min-width: 36px; justify-content: center; } }
 
 .chat-input-wrap { flex: 1; position: relative; min-width: 0; display: flex; align-items: flex-end; gap: 6px; }
 .chat-attach-btn {

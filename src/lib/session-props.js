@@ -95,6 +95,14 @@ export function statusNowHtml(st) {
     : `<span style="color:var(--text-dim)">${escHtml(t('none declared'))}</span>`;
 }
 
+/** THIS conversation's open chat view's status bar — where its start facts (a tool that did not start, the record kinds
+ *  its CLI added) are held; null when no view of it is open (lane mask-value-shape). */
+function startBarOf(app, s) {
+  const ids = new Set([s && s.webuiId, s && s.sessionId].filter(Boolean));
+  for (const v of (app.sessions?.values?.() || [])) if (v && v._statusBar && ids.has(v.sessionId)) return v._statusBar;
+  return null;
+}
+
 export function openSessionProps(app, sessionRef, { syncId, section = null } = {}) {
   const sidebar = app.sidebar;
   const refKey = typeof sessionRef === 'string' ? sessionRef : sidebar._getSessionStateKey(sessionRef);
@@ -300,6 +308,21 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
     if (histHeld) histList.style.minHeight = histHeld + 'px';
     stSec.appendChild(histList);
     fillHistory(histList, s);
+
+    // ── AT ITS START (lane mask-value-shape, the strip's step two — page §4: the details' homes off the chat window's strip): a
+    // tool that did not start (the init frame's health rows, the start card's own words) and the kinds of record the agent's
+    // CLI added — read from this conversation's open chat view (its status bar holds them; absent ≠ clean: nothing said) ──
+    {
+      const bar = startBarOf(app, s);
+      const health = bar?.initHealthRows?.() || [], kinds = bar?.addedKindsWords?.() || null;
+      if (health.length || kinds) {
+        const startSec = section(t('At its start'));
+        startSec.classList.add('session-props-start');
+        for (const h of health) row(startSec, t('Not working'), escHtml(h), { wrap: true });
+        if (health.length) { const n = document.createElement('div'); n.className = 'empty-hint session-props-start-note'; n.textContent = t('Reported by the harness in this session\u2019s start frame.'); startSec.appendChild(n); }
+        if (kinds) { const kr = row(startSec, t('New records'), escHtml(kinds.text), { wrap: true }); kr.title = kinds.title; }
+      }
+    }
 
     // ── Billing ──
     const bilSec = section(t('Billing'));
@@ -958,6 +981,11 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
     renderTimer = setTimeout(() => { renderTimer = null; render(); }, 300);
   };
   app.ws.onGlobal(onMsg);
+  // a start fact of THIS conversation changed (its status bar's 'vs-start-facts'): the «At its start» section re-reads it
+  window.addEventListener('vs-start-facts', (e) => {
+    const s = findSession(); if (!s || !e.detail || (e.detail.sessionId !== s.webuiId && e.detail.sessionId !== s.sessionId)) return;
+    clearTimeout(renderTimer); renderTimer = setTimeout(() => { renderTimer = null; render(); }, 300);
+  }, { signal: winInfo._listenerCtl?.signal });
   // lane S2 (naive study 2, T5: "Esc does not close it"): Esc closes the Properties window when focus is inside it
   // and nothing of its own is open — a floating popover / an open <select> list takes the key first (the global
   // `data-popover` protocol in app.js runs on the same keydown and removes those; a composing IME keeps it)
