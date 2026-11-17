@@ -446,13 +446,18 @@ try {
       if (shown && which === 'gear') {
         // the Appearance head's flyout (desktop mode) — or the accordion (hover: none) — opened by hovering / clicking the head
         const head = await P.evalJs(`(() => { const h = [...document.querySelectorAll('.global-settings-popover .gs-menu-item.has-sub')][0]; if (!h) return null; const r = h.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-        if (head) { await P.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: head.x, y: head.y }); await sleep(300); }
-        extra = await P.evalJs(`({ flyout: !!document.querySelector('.gs-flyout.open'), accordion: !!document.querySelector('.global-settings-popover .gs-acc-open, .global-settings-popover .gs-sub.open') })`);
+        // B-91c8 (the .390 claim B, try 1 at 2 lanes / load 2.7→4: {flyout:false} read ONCE 300 ms after the hover): the leg
+        // waits (bounded) for the state the hover opens, never reads it once — a hover that opens nothing still reads false
+        const FLY = `({ flyout: !!document.querySelector('.gs-flyout.open'), accordion: !!document.querySelector('.global-settings-popover .gs-acc-open, .global-settings-popover .gs-sub.open') })`;
+        if (head) { await P.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: head.x, y: head.y }); await until(async () => { const f = await P.evalJs(FLY); return f.flyout || f.accordion ? f : null; }, 4000, 100); }
+        extra = await P.evalJs(FLY);
       }
       if (shown && which === 'scale') {
         const row = await P.evalJs(`(() => { const r = [...document.querySelectorAll('.context-menu > .context-menu-item')].find((e) => /^Scale/.test(e.textContent)); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.x + 20, y: b.y + b.height / 2 }; })()`);
-        if (row) { await P.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: row.x, y: row.y }); await sleep(250); }
-        extra = await P.evalJs(`({ scaleSub: [...document.querySelectorAll('.context-menu .context-menu')].some((s) => s.style.display !== 'none' && s.getBoundingClientRect().height > 0) })`);
+        // B-91c8's sibling (the same hover read once 250 ms after the move): waited for, bounded, by the state it opens
+        const SUB = `({ scaleSub: [...document.querySelectorAll('.context-menu .context-menu')].some((s) => s.style.display !== 'none' && s.getBoundingClientRect().height > 0) })`;
+        if (row) { await P.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: row.x, y: row.y }); await until(async () => { const f = await P.evalJs(SUB); return f.scaleSub ? f : null; }, 4000, 100); }
+        extra = await P.evalJs(SUB);
       }
       return { shown: !!shown, extra };
     };
