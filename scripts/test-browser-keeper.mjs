@@ -337,6 +337,25 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   const bad = AT.attachArgv({ profileDir: pE.dir, mark: B.keeperMarkArg(pE.id), quiet, extra: ['--user-data-dir=/elsewhere'] });
   ok(!bad.ok && bad.code === 'bad_argv', 'CONTROL: an engine argument naming another --user-data-dir fails the builder\'s census (bad_argv) — never spawned', bad);
   await ke.stop(pE.id, { why: 'user' });
+  // THE EXIT CHECK's HAND-OVER (the owner 2026-11-17): a profile's KEPT exit rides resolve-launch as `egress` — the names settled
+  // with the plugin's conversation {publicIp, country, timezone, checkedAt, source}; absent when none is kept; the launch makes NO
+  // request for it (the check's one request module counted across both launches)
+  {
+    const EXC = require('../src/server/browser-exit-check.js'), realRT = EXC.requestThrough;
+    let rtCalls = 0;
+    EXC.requestThrough = async (...a) => { rtCalls++; return realRT(...a); };
+    const seenX = [];
+    const REGX = { ...REG, launchOptions: async (id, x) => { seenX.push(x); return { ok: true, launch: { executablePath: KERN, args: ['--vibespace-engine=attach-leg'], env: {} } }; } };
+    const kx = mk({ dataDir: path.join(S, 'data-engine-exit'), engines: REGX });
+    const pX = kx.createProfile({ label: 'Engine exit', browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: fact });
+    setMode('ok'); await kx.start(pX.id, { why: 'test' }); await kx.stop(pX.id, { why: 'user' });
+    const kept = await kx.keepEgress(pX.id, { publicIp: '203.0.113.7', country: 'JP', timezone: 'Asia/Tokyo', source: 'measured' });
+    setMode('ok'); await kx.start(pX.id, { why: 'test' }); await kx.stop(pX.id, { why: 'user' });
+    EXC.requestThrough = realRT;
+    const e = seenX[1] && seenX[1].egress;
+    ok(seenX.length === 2 && !('egress' in seenX[0]) && kept.ok && e && JSON.stringify(Object.keys(e)) === '["publicIp","country","timezone","checkedAt","source"]' && e.publicIp === '203.0.113.7' && e.country === 'JP' && e.timezone === 'Asia/Tokyo' && e.source === 'measured' && e.checkedAt > 0 && rtCalls === 0,
+      'the exit check\'s hand-over: resolve-launch carries `egress` {publicIp, country, timezone, checkedAt, source} when the profile keeps one, nothing when it keeps none — and the launch makes NO request for it', { first: seenX[0] && Object.keys(seenX[0]), egress: e, rtCalls });
+  }
   // ①b lane hotfix-attach-engine-args: THE INCIDENT through the keeper — the engine's launch options carry --disable-sync ⇒ started on the
   // attach road WITHOUT it, ONE journal line names it, the record carries the fact the Agent browser panel's row words
   ok(!('engineDropped' in recE), 'an engine launch that dropped nothing carries no engineDropped fact', recE.engineDropped);

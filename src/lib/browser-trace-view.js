@@ -63,6 +63,7 @@ import { createTakeoverSection, takeoverWindowTitle } from './browser-takeover-q
 import { openProxyDialog } from './browser-proxy-dialog.js'; // B-8b87: a profile's proxy and its login (kept in the vault)
 import { proxyWords, proxyDoor, PROXY_REFUSALS } from './browser-proxy-model.js'; // B-8b87 cure: a proxy refusal in the page's words
 import { showUnlock, showSetup } from './vault-unlock.js';
+import { openExitDialog } from './browser-exit-dialog.js'; // the exit check (the owner 2026-11-17)
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const STRIP_MAX = 12;
@@ -976,6 +977,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     // B-8b87: Proxy… — the address alone and its login from the vault (applied at the next start); «Move the password to the
     // vault» — an address saved WITH its password (never used): one press, the vault entry made and the profile rewritten
     proxy: (r) => openProxyDialog(app, r, { onDone: () => load() }),
+    // the exit check (the owner 2026-11-17): a person's press, through this profile's own proxy; kept only on Keep
+    'exit-check': (r) => openExitDialog(app, r, { onDone: () => load() }),
     'proxy-move': async (r) => {
       const res = await fetchJson('/api/vault/proxy-logins/move', jsonInit('POST', { profileId: r.id }));
       if (!res || res.error || res.ok === false) { sayRefusal(res, t('Could not move the password'), 'move'); load(); return; }   // B-8b87 cure: the move's own words + press

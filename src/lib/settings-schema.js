@@ -636,6 +636,15 @@ const SETTINGS_SCHEMA = {
   // kill switch exists because every path in this feature falls back
   // structurally: OFF restores exactly today's behaviour (one shared profile,
   // one shared session) for sessions spawned after the change.
+  // the exit check (lane cli-update-needs-nothing; the owner 2026-11-17 «A就行»): THE ONE check address — asked only at a person's
+  // press, only through the profile's own proxy (src/server/browser-keeper.js exitCheck); empty by default, the tree names no
+  // address; a person's write only (src/routes/persistence.js refuseExitUrl — https only, no login, no private literal)
+  'browser.exitCheckUrl': {
+    type: 'text', default: '',
+    label: t('Exit check address'),
+    description: t('An https address that answers a browser profile\'s public address, country and time zone as JSON. It is asked only when you press «Check the exit…» on a profile, and only through that profile\'s own proxy. Empty: no check — type the exit by hand.'),
+    category: t('Agent browser'), liveApply: true, tier: 'advanced',
+  },
   'browser.isolateSessions': {
     type: 'boolean', default: true,
     label: t('Give each session its own agent browser'),

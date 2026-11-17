@@ -535,6 +535,12 @@ console.log('⑥ THE PERSON\'S DOORS — no bearer reaches a proxy login; an age
     'the four routes sit behind person() — every bearer (agent, job, automation key) and a cross-site request refused; the password taken from the body at once, also on a refusal');
   ok(/patch\.proxy !== undefined \|\| patch\.proxyCredential !== undefined\) && isAgentBearer\(req\)\) return res\.status\(403\)/.test(RT) && /input\.proxyCredential != null && input\.proxyCredential !== '' && refuseAgentBearer\(req, res,/.test(RB),
     'an agent\'s token never changes a profile\'s proxy or its login (PATCH), and never names a vault entry at a creation');
+  // an AGENT's view of a profile (the record's, and a keeper row's): the proxy's ADDRESS at most — never the login's name (it holds the
+  // user name), never the running road
+  const recA = B.newProfileRecord({ id: 'bp-0000abcd', label: 'Agent view', dir: '/x', provider: 'chromium', proxy: 'socks5://proxy.example.test:1080', proxyCredential: `proxy-login:socks5://proxy.example.test:1080#${USER}`, now: 1 });
+  const views = [B.agentProfileView(recA), B.agentProfileView({ ...recA, proxyLive: 'socks5://proxy.example.test:1080', proxyLiveLogin: recA.proxyCredential }, {}, { proxyCredential: recA.proxyCredential, proxyLive: 'x', proxyLiveLogin: 'y' })];
+  ok(views.every((v) => v.proxy === 'socks5://proxy.example.test:1080' && !('proxyCredential' in v) && !('proxyLive' in v) && !('proxyLiveLogin' in v) && !JSON.stringify(v).includes(USER)),
+    'an agent\'s view of a profile carries its proxy\'s ADDRESS at most — never the login\'s name (the user name), never the running browser\'s road', views.map((v) => Object.keys(v).filter((k) => /proxy/i.test(k))));
   const VK = require('../src/vault-kinds.js'), row = VK.FAMILIES.find((f) => f.id === 'proxy-login');
   ok(row && row.surfaces.cli && row.surfaces.cli.none && row.surfaces.use && row.surfaces.use.system && row.surfaces.request && row.surfaces.request.none && row.surfaces.reveal === true,
     'the vault kind «proxy-login»: no agent verb, no agent request, its use VibeSpace\'s own (the forwarder), revealable to the person (so the output belt masks it)', row && row.surfaces);

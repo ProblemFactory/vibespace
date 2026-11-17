@@ -71,6 +71,7 @@ export const CENSUS = [
   ['browser-live-window.js', 'select', 'choice', 'a browser kernel prompt\'s choice field in its answer sheet (a select-popup\'s options — lane browser-surfaces)'],
   ['browser-new-profile.js', 'input', 'text+control', 'New profile…: the name, the CDP port and a chrome file\'s path (text); the provider / machine / build radios (control) — lane browser-admin 1, classified at verify r2; its who radios became the one picker at the 2.369.202 integration'],
   ['browser-new-profile.js', 'inputmode', 'text', 'New profile…: the CDP port box (`inputMode=numeric` — the phone keyboard\'s hint on that text box)'],
+  ['browser-exit-dialog.js', 'input', 'text', 'the exit check: «Check the exit…» — the check address (when none is set), the public address, the country and the time zone read or typed (text: a person\'s, never driven by an agent)'],
   ['browser-proxy-field.js', 'input', 'text', 'B-8b87: a browser profile\'s proxy — its address, a new login\'s user name and password (text: typed, never driven by an agent; the password goes to the vault\'s own route at once)'],
   ['browser-proxy-field.js', 'select', 'choice', 'B-8b87: the proxy\'s login — No login / a saved login for THAT address / New login… (choice)'],
   ['browser-passkeys-view.js', 'input', 'control', 'the Passkeys table\'s agents-off switch (a checkbox — lane passkey-ui; composed at the 2.369.261 integration)'],

@@ -705,6 +705,29 @@ const { pressBearer, pressOf } = require('../write-origin.js');
 // hand-back, a takeover's Done, a proposal's Approve: presses the spend ceiling neither refuses nor counts) — so the refusal
 // covers EVERY bearer (vsst_, jbt_ and an automation key's vsak_; `pressBearer`), never only the two agent prefixes
 function refuseAgentBearer(req, res, error = OWN_BROWSING_IS_USERS) { if (!isAgentBearer(req) && !pressBearer(req.headers)) return false; res.status(403).json({ error, code: 'agent_forbidden' }); return true; }
+// THE EXIT CHECK (the owner 2026-11-17 «A就行»): a PERSON's press — the profile's proxy exit read through its own forwarder from the
+// owner's check address (nothing kept) — and the person's confirm (kept on the profile, handed to an engine plugin at its launch). No
+// agent's token, no CLI verb, no automation verb; the cookie write's same-origin verdict runs before these (src/auth.js).
+const EXIT_IS_USERS = 'checking a browser profile\'s exit and keeping it are the user\'s acts — an agent\'s token cannot press them';
+const EXIT_STATUS = Object.freeze({ 'not-found': 404, exit_no_proxy: 409, exit_url_unset: 409, exit_url_invalid: 409, exit_restart_first: 409, proxy_credential_unreadable: 423, proxy_password_in_profile: 409, proxy_scheme_unsupported: 409, proxy_off_machine: 409, bad_proxy_credential: 409, exit_check_timeout: 504, exit_check_failed: 502, exit_check_refused: 502, exit_check_too_big: 502, exit_answer_unreadable: 502, exit_timezone_invalid: 400, exit_ip_invalid: 400, exit_country_invalid: 400, exit_empty: 400 });
+router.post('/api/browser/profiles/:id/exit-check', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, EXIT_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (typeof k.exitCheck !== 'function') return res.status(503).json({ error: 'the exit check is not available on this server', code: 'unavailable' });
+  try { const r = await k.exitCheck(req.params.id); return res.status(r.ok ? 200 : EXIT_STATUS[r.code] || 422).json(r); }
+  catch (e) { return res.status(500).json({ error: String((e && e.message) || e), code: 'error' }); }
+});
+router.post('/api/browser/profiles/:id/egress', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, EXIT_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (typeof k.keepEgress !== 'function') return res.status(503).json({ error: 'the exit check is not available on this server', code: 'unavailable' });
+  try { const r = await k.keepEgress(req.params.id, req.body && typeof req.body === 'object' ? req.body : {}); return res.status(r.ok ? 200 : EXIT_STATUS[r.code] || 422).json(r); }
+  catch (e) { return res.status(500).json({ error: String((e && e.message) || e), code: 'error' }); }
+});
 router.post('/api/browser/profiles/:id/browse', async (req, res) => {
   if (refuseHost(req, res)) return;
   if (refuseAgentBearer(req, res)) return;

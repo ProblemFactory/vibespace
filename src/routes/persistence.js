@@ -1062,7 +1062,19 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const keys = new Set([...Object.keys(cur), ...Object.keys(nxt)].filter((k) => RE.test(k)));
     return [...keys].filter((k) => Object.hasOwn(cur, k) !== Object.hasOwn(nxt, k) || JSON.stringify(cur[k]) !== JSON.stringify(nxt[k]));
   };
-  const refuseEngineRows = (req, res, next) => { const hit = engineRowsTouched(req, next); if (!hit.length) return false; res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the program a browser engine runs and the sites it may reach are the owner's to set (Settings, signed in) — a bearer token (an agent, a job, an automation key) cannot set, change or drop them; nothing was written`, code: 'engine_row_owner_only' }); return true; };
+  // the exit check (the owner 2026-11-17): the check address is written by a PERSON only, with its own rules (https only, no login,
+  // no private literal — src/browser-exit.js checkUrlVerdict); an agent's refused write says who sets it and where (the recipe)
+  const EXIT = require('../browser-exit.js');
+  const refuseExitUrl = (req, res, next) => {
+    const cur = readSettings() || {}, nxt = next && typeof next === 'object' ? next : {};
+    const was = cur[EXIT.EXIT_URL_KEY], now = nxt[EXIT.EXIT_URL_KEY];
+    if (JSON.stringify(was) === JSON.stringify(now)) return false;
+    if (require('../write-origin.js').pressBearer(req.headers)) { res.status(403).json({ error: `${EXIT.EXIT_URL_KEY}: the exit check address is set by a person — in «Check the exit…» on a browser profile, or in Settings › Agent browser; an agent's token cannot set, change or drop it — nothing was written`, code: 'exit_url_owner_only' }); return true; }
+    const v = EXIT.checkUrlVerdict(now);
+    if (!v.ok) { res.status(400).json({ error: `${EXIT.EXIT_URL_KEY}: ${v.error}`, code: v.code }); return true; }
+    return false;
+  };
+  const refuseEngineRows = (req, res, next) => { if (refuseExitUrl(req, res, next)) return true; const hit = engineRowsTouched(req, next); if (!hit.length) return false; res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the program a browser engine runs and the sites it may reach are the owner's to set (Settings, signed in) — a bearer token (an agent, a job, an automation key) cannot set, change or drop them; nothing was written`, code: 'engine_row_owner_only' }); return true; };
 
   // lane setting-doors pick 0 (主开发 2026-11-14; MEASURED on a scratch hub with sign-in OFF: a conversation's shell wrote the day ceiling
   // by four roads — no header at all, forged browser headers, the whole-file POST, its own token). THE MODEL: the spending ceilings

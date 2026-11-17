@@ -1843,6 +1843,12 @@ function agentProfileView(p, facts = {}, extra = {}) {
   // BROWSE YOURSELF verify r1 (H1): `lastUsedAt` moves when the USER browses it (and when another conversation does — the
   // identity class) and `recordMine` is his own switch: neither is an agent's to read (the CLI prints neither)
   delete rest.lastUsedAt; delete rest.recordMine; delete ex.lastUsedAt; delete ex.recordMine;
+  // the exit check (the owner 2026-11-17): a profile's kept exit (public address, country, time zone) is the person's — and the
+  // engine plugin's at its launch — never an agent's to read
+  delete rest.egress; delete ex.egress;
+  // B-8b87 (主开发 13:47Z): an agent needs a profile's proxy ADDRESS at most — never the login's NAME (it holds the user name) nor the
+  // running browser's road (the person's card reads those)
+  for (const k of ['proxyCredential', 'proxyLive', 'proxyLiveLogin']) { delete rest[k]; delete ex[k]; }
   delete rest.grantUse; delete ex.grantUse;   // lane grants-unify: the list's mirror names other conversations — never an agent's to read
   // verify r1 (F5, lane browser-admin): a build's PATH never reaches an agent — a chrome file the user named is a fact by
   // KIND only (versions cross, paths do not); a vanished one is named by kind too (the rule browser-builds.agentChoiceView

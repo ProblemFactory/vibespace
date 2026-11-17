@@ -1341,7 +1341,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!v.ok && fetching && fetching.answered === false && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace has asked ${fetching.host} for it and has no answer yet; start the browser again in a moment`;
     else if (!v.ok && fetching && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace is downloading it now (${fetching.total || fetching.bytes ? `${Math.round(Number(fetching.total || fetching.bytes) / 1e6)} MB` : 'its kernel.json\'s archive'}); start the browser again when it is done`;
     if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id, ...(v.failed ? { failed: v.failed } : {}) }); }
-    const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}) });
+    // the exit check (the owner 2026-11-17): the profile's KEPT exit rides resolve-launch as `egress` {publicIp, country, timezone,
+    // checkedAt, source} — the names settled with the plugin's conversation; absent when none is kept. NO request is made here.
+    const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}), ...(p.egress && typeof p.egress === 'object' ? { egress: egressHandOf(p.egress) } : {}) });
     if (!lo.ok) { if (lo.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, lo, engine); throw namedError(lo.code, lo.error, { engine: c.id, ...(lo.failed ? { failed: lo.failed } : {}) }); }
     if (p.buildMissing) { delete p.buildMissing; dirty = true; log.log?.(`[browser] ${p.id} "${p.label}": ${BB.buildWords(c)} answers again`); } // the engine by its id (its label is the plugin's text)
     // lane engine-spi-egress: an engine that must stay inside a list is WRAPPED — THIS profile's allowlisting proxy (the keeper's,
@@ -6609,6 +6611,57 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** A record removed ⇒ its proxy closed (removeProfile). */
   function dropEgress(profileId) { const k0 = String(profileId || ''), e = egressProxies.get(k0); proxyCreds.delete(k0); if (!e) return; egressProxies.delete(k0); e.px.close().catch(() => {}); }   // B-8b87: its login leaves memory with it
+  // ── THE EXIT CHECK (the owner 2026-11-17 «A就行» — PURE rules src/browser-exit.js; its one request src/server/browser-exit-check.js).
+  // A person presses «Check the exit…»: the profile's proxy EXIT read through ITS OWN forwarder from the owner's check address
+  // (`browser.exitCheckUrl`), NOTHING kept until the person confirms (keepEgress); never a timer, never a launch.
+  const EXIT = require('../browser-exit.js');
+  const EXC = require('./browser-exit-check.js');
+  const egressHandOf = (e) => ({ publicIp: String(e.publicIp || ''), country: String(e.country || ''), timezone: String(e.timezone || ''), checkedAt: Number(e.checkedAt) || 0, source: e.source === 'measured' ? 'measured' : 'typed' });
+  /** → { ok: true, read: { publicIp, country, timezone } } | { ok: false, code, error, kind? }. Refused by name: no proxy of its own
+   *  (its browser may leave by another road — the person's own browser config, the launch's environment, the tailnet — so a direct
+   *  check could state an exit it does not use; a wrong exit handed to an engine is worse than none), no check address set (the dialog
+   *  shows the field), the proxy's own refusals (the same as a launch's — a locked vault included). */
+  async function exitCheck(profileId, { tlsConnect = null } = {}) {
+    ensureLoaded();
+    const p = profile(profileId);
+    if (!p || isEph(p)) return { ok: false, code: 'not-found', error: `no profile ${profileId}` };
+    if (!p.proxy) return { ok: false, code: 'exit_no_proxy', error: `"${p.label}" has no proxy of its own — its browser may leave by another road (your own browser config, the launch's environment, the tailnet), so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it` };
+    const url = EXIT.checkUrlVerdict(serverSetting(EXIT.EXIT_URL_KEY));
+    if (!url.ok) return { ok: false, code: url.code, error: url.error };
+    if (!url.value) return { ok: false, code: 'exit_url_unset', error: 'no exit check address is set — give one (an https address you trust) and check again, or type the exit by hand' };
+    let of;
+    try { of = await profileProxyFor(p, { why: 'user' }); } catch (e) { return { ok: false, code: e.code || 'exit_check_failed', error: e.message }; }
+    const k0 = String(p.id), have = egressProxies.get(k0);
+    // a running browser's forwarder carries ITS start's proxy: one that is not this proxy would measure another exit — said, not used
+    if (have && have.px.port() && (!have.of || !have.of.proxy || have.of.proxy.host !== of.proxy.host || have.of.proxy.port !== of.proxy.port || have.of.proxy.scheme !== of.proxy.scheme)) return { ok: false, code: 'exit_restart_first', error: `"${p.label}"'s browser runs without this proxy — restart it, then check the exit` };
+    let fwd;
+    try { fwd = have && have.px.port() ? have.px.url() : await egressUrlFor(p.id, of); } catch (e) { return { ok: false, code: e.code || 'exit_check_failed', error: e.message }; }
+    try {
+      const r = await EXC.requestThrough({ url: url.value, forwarder: fwd, ...(tlsConnect ? { tlsConnect } : {}) });
+      if (!r.ok) return r;
+      const v = EXIT.readExitAnswer(r);
+      return v.ok ? { ok: true, read: v.read } : { ok: false, code: 'exit_answer_unreadable', kind: v.kind, error: v.said };
+    } finally {
+      // a forwarder opened for this check alone (no browser running) closes with it; a running browser's stays
+      if (!have) { const rec = reg.browsers[k0]; if (!(rec && B.isLiveBrowser(rec))) dropEgress(p.id); }
+    }
+  }
+  /** The person's confirm (what was read, each field editable — or typed by hand) → kept on the profile under the hand-over's own
+   *  names; `{ clear: true }` forgets it. The zone is validated by the runtime's own formatter (an offset or an abbreviation refused). */
+  function keepEgress(profileId, input = {}) {
+    return batched(() => {
+      ensureLoaded();
+      const p = profile(profileId);
+      if (!p || isEph(p)) return { ok: false, code: 'not-found', error: `no profile ${profileId}` };
+      if (input && input.clear === true) { if (p.egress) { delete p.egress; commit(); } return { ok: true, profile: pview(p) }; }
+      const v = EXIT.egressRecordOf(input || {}, { now: now() });
+      if (!v.ok) return v;
+      p.egress = v.value;
+      commit();
+      log.log?.(`[browser] ${p.id}: its exit kept (${v.value.source})`);
+      return { ok: true, profile: pview(p) };
+    });
+  }
   // ── B-8b87 (lane cli-update-needs-nothing): A PROFILE'S PROXY REACHES ITS BROWSER — THE LAW: a field the form validates reaches the
   // process it names. ONE road for every profile proxy: this profile's forwarder above (src/server/egress-proxy.js), its upstream =
   // the profile's proxy, the browser handed only its loopback port (`rec.proxyRoad.arg` on the driver's derived config and the
@@ -8239,6 +8292,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     installDir, retiredInstall: () => installs.slot.retiredAtBoot(), egressFor, egressRefusals, egressEngineOf, // lane engine-spi-egress: a wrapped engine's proxy per profile (L3: the names lost the anti-bot backend's word); the install rows' api in ...installs.api
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields
     onLease, addDigest, updateProfile, moveProxyPassword, // + B-8b87: «Move the password to the vault»
+    exitCheck, keepEgress, // + the exit check (a person's press; the person's confirm)
     // P6 (§6.2 / §6.5): is `sharing:"instance"` a value here; the proxy (the routes ask it nothing directly)
     mediationOn, isMediated, mediator: () => (mediationOn() ? mediator : null),
     storeFile, STORE_FILE, uid, _reg: () => reg, _forwardersClose: () => Promise.all([...egressProxies.values()].map((e) => e.px.close({ cut: true }).catch(() => { }))).then(() => { egressProxies.clear(); }), /* B-8b87 cure: a suite's stand-in for this process's end (its forwarders' ports free for the next keeper's re-bind) */ _facts: bf, _runtime: rt,
