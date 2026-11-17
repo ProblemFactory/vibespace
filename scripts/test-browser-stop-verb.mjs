@@ -11,6 +11,7 @@
 //   ④ CONTROL: a detach (the user's stop) in the same world marks the stop deliberate — the tabs are NOT reopened (the probe
 //      tells the two apart)
 //   ⑤ RED: the verdict's unknown branch switched off (a scratch copy) — the unknown leg goes red
+//   ⑥ a named profile: refused while the person browses in it; an admitted stop answers that its tabs close, its sign-ins stay
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -174,6 +175,25 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
     const notReopened = !fakeTabs('vs-' + KEY_A).some((t) => t.url === 'https://mail.test/inbox');
     ok(k3.stoppedWhy === 'user' && k3.restore === null && notReopened, '④ CONTROL the user\'s stop in the same world: deliberate — the tabs kept, and the next start does NOT reopen them (the probe tells the two apart)', { kept: k3, tabs: fakeTabs('vs-' + KEY_A) });
   }
+}
+// ⑥ A NAMED PROFILE: its holders are its leases; the person's own browsing refuses; an admitted stop says its tabs close
+{
+  turns.set(KEY_A, 'idle');
+  try { await keeper._facts?.probeVersion?.(); } catch { }
+  const np = keeper.createProfile({ label: 'Work' }, { owner: { kind: 'instance', id: null } });
+  let attached = null; try { attached = await keeper.attach({ profileId: np.id, browserKey: KEY_A, sessionId: 'sess-a', by: 'user' }); } catch (e) { attached = { error: e && e.message }; }
+  await until(() => keeper.stopRows().some((r) => r.id === np.id), 5000);
+  const r0 = keeper.stopRows().find((r) => r.id === np.id);
+  ok(r0 && r0.kind === 'profile' && r0.tabsKept === false && r0.holders.length === 1 && r0.holders[0].browserKey === KEY_A && r0.personBrowsing === false, '⑥ a named profile\'s row: its holder is the conversation\'s lease, its tabs are not kept', { attached, r0 });
+  let browsed = null; try { browsed = await keeper.browse(np.id); } catch (e) { browsed = { error: e && e.message }; }
+  const r1 = keeper.stopRows().find((r) => r.id === np.id);
+  const g = await call(np.id);
+  ok(r1 && r1.personBrowsing === true && !g.ok && g.code === 'person_browsing' && keeper.stopRows().some((r) => r.id === np.id), '⑥ the PERSON browses in it: person_browsing, it still runs', { browsed: browsed && (browsed.error || 'ok'), g });
+  const np2 = keeper.createProfile({ label: 'Shop' }, { owner: { kind: 'instance', id: null } });
+  try { await keeper.attach({ profileId: np2.id, browserKey: KEY_A, sessionId: 'sess-a', by: 'user' }); } catch { }
+  await until(() => keeper.stopRows().some((r) => r.id === np2.id), 5000);
+  const h = await call(np2.id);
+  ok(h.ok && h.kind === 'profile' && h.tabs === 'Its tabs close; its sign-ins stay.' && !keeper.stopRows().some((r) => r.id === np2.id), '⑥ a named profile nobody uses: stopped, and the answer says its tabs close and its sign-ins stay (not reopened)', h);
 }
 // ⑤ RED: the verdict's unknown branch switched off
 {
