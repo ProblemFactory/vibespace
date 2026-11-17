@@ -1515,6 +1515,7 @@ function create({
       // (verify r3; the engine itself never stashes a wake, the wrapper's hand-back does)
       try { if (deliver && typeof deliver.redactStash === 'function') deliver.redactStash((e) => redactHeldReport(e, gid, out.cleared.map((vid) => found.get(vid)))); } catch (err) { log.warn && log.warn('[groups] ladder stash rewrite failed:', err && err.message); }
       announce([gid], null, out.records.map((record) => ({ groupId: gid, vendorId: record.vendorId, record })));
+      try { noteClearedNeedles(gid, out.cleared.map((vid) => found.get(vid)).filter(Boolean)); } catch { heldNeedles.delete(gid); }   // B-b291: the set grows without a read
       // the .197 integration: a member's chat card of a cleared message re-words (its ring copy lost the words too)
       try { onCleared(gid, out.cleared.map((vid) => found.get(vid)).filter(Boolean).map((r) => `${gid}:${Number(r.at)}`)); } catch (err) { log.warn && log.warn('[groups] the group cards were not re-worded:', err && err.message); }
     }
@@ -1533,6 +1534,14 @@ function create({
     }
     return new Map(want.map((v) => { const r = store.findRecord(A, gid, v); return [v, r && !RC.isReplacement(r) ? r : null]; }));
   }
+  /** originalsOf's ASYNC twin (B-b291, the reader's F4): the search index's set at a boot is read OFF THE LOOP — the
+   *  store's async tail in 64 KB windows; only the originals `vids` names are kept, and only until their forms are taken. */
+  async function originalsOfAsync(gid, vids) {
+    const want = new Set((Array.isArray(vids) ? vids : [vids]).map(String));
+    const raw = typeof store.readTailAsync === 'function' ? await store.readTailAsync(A, gid, { limit: 1e7, windowBytes: 64 * 1024 }) : { records: store.readTail(A, gid, { limit: 1e7 }) };
+    const byId = new Map((raw.records || []).filter((r) => r && want.has(String(r.vendorId)) && !RC.isReplacement(r)).map((r) => [String(r.vendorId), r]));
+    return new Map([...want].map((v) => [v, byId.get(v) || null]));
+  }
   /**
    * "CLEAR CONTENT…" — THE LADDER'S JUDGE (lane-redact verify r4, 2026-09-28, reproduced): the delivery ladder asks this
    * of EVERY entry it stashes (`deliver.registerStashJudge` below). The door's own rewrite takes the held reports queued
@@ -1543,16 +1552,50 @@ function create({
    * `redactHeldReport` replaces each line that repeats a cleared record's witness. Store-backed, never a memory of past
    * clears. null = nothing of a cleared record.
    */
-  const heldNeedles = new Map();   // gid → {n: the index's size when read, recs: the witnesses only ({text: first 40 code points}), never the records}
-  const witnessOf = (r) => ({ text: Array.from(String((r && r.text) || '').replace(/\s+/g, ' ').trim()).slice(0, 40).join('') });
+  // gid → {n: the index's size when read, recs: the witnesses only ({text: first 40 code points}, of every form a copy writes),
+  // keys: the cleared records' card keys, wholes: digests of each whole form ({h, n}) — never the records' words (B-b291)
+  const heldNeedles = new Map();
+  const PARTIAL_RETRY_MS = 10 * 60 * 1000;   // a set a log read could not complete is read again after this
+  const foldWs = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const wholeDigest = (f) => crypto.createHash('sha256').update(f).digest('base64').slice(0, 22);
+  /** B-b291 (+ the reader's F3): the forms a cleared record's words take in a copy — its own bytes, a report line's
+   *  (G.reportWords: folded, cut, belted — a control character is a space there, a format character gone) and a card's
+   *  (GC.normalizeCard: control characters out, TEXT_MAX) — each folded; their witnesses and whole digests. */
+  function clearedForms(gid, r) {
+    const raw = String((r && r.text) || '');
+    const card = GC.normalizeCard({ group: { id: gid, at: Number(r && r.at) || 1 }, text: raw });
+    const forms = [...new Set([raw, G.reportWords(raw), card ? card.text : ''].map(foldWs).filter(Boolean))];
+    return { w: [...new Set(forms.map((f) => RC.clearWitness(f)))], h: forms.map((f) => ({ h: wholeDigest(f), n: f.length })) };
+  }
+  function needlesOf(gid, recs, n, partial) {
+    const forms = recs.map((r) => clearedForms(gid, r));
+    return { n, partial, at: now(), recs: [...new Set(forms.flatMap((f) => f.w))].map((text) => ({ text })), keys: recs.map((r) => `${gid}:${Number(r.at)}`), wholes: forms.flatMap((f) => f.h) };
+  }
+  const clearedVids = (g) => (g && g.cleared && typeof g.cleared === 'object' ? Object.keys(g.cleared).slice(0, REPLACEMENT_READ_MAX) : []);
+  const needlesFresh = (c, vids) => !!c && c.n === vids.length && !(c.partial && now() - c.at > PARTIAL_RETRY_MS);
+  /** A group's cleared witnesses (+ the cards' keys `<group>:<record instant>` + the whole digests), read from the log once
+   *  per size of its index (a set missing a record — a read that failed — is read again after PARTIAL_RETRY_MS). */
+  function clearedNeedles(gid, vids) {
+    let c = heldNeedles.get(gid);
+    if (!needlesFresh(c, vids)) { const recs = [...originalsOf(gid, vids).values()].filter(Boolean); c = needlesOf(gid, recs, vids.length, recs.length < vids.length); heldNeedles.set(gid, c); }
+    return c;
+  }
+  /** THE CLEAR'S OWN RECORDS grow the set without a read (the reader's F4: a group past 8 clears read its whole log at
+   *  every later clear); a set that was not whole before is dropped (the next ask reads it). */
+  function noteClearedNeedles(gid, recs) {
+    const vids = clearedVids(all()[gid]);
+    const c = heldNeedles.get(gid) || (vids.length === recs.length ? { n: 0, partial: false, recs: [], keys: [], wholes: [] } : null);
+    if (!c || c.partial || c.n + recs.length !== vids.length) { heldNeedles.delete(gid); return; }
+    const add = needlesOf(gid, recs, vids.length, false);
+    heldNeedles.set(gid, { ...add, recs: [...new Map([...c.recs, ...add.recs].map((x) => [x.text, x])).values()], keys: [...c.keys, ...add.keys], wholes: [...c.wholes, ...add.wholes] });
+  }
   function judgeHeldEntry(e) {
     if (!e || typeof e.text !== 'string' || !e.text.includes('(')) return null;
     let out = null;
     for (const [gid, g] of Object.entries(all())) {
-      const vids = g && g.cleared && typeof g.cleared === 'object' ? Object.keys(g.cleared).slice(0, REPLACEMENT_READ_MAX) : [];
+      const vids = clearedVids(g);
       if (!vids.length || !e.text.includes(`(${gid})`)) continue;
-      let c = heldNeedles.get(gid);
-      if (!c || c.n !== vids.length) { c = { n: vids.length, recs: [...originalsOf(gid, vids).values()].filter(Boolean).map(witnessOf) }; heldNeedles.set(gid, c); }
+      const c = clearedNeedles(gid, vids);
       const r = redactHeldReport({ ...e, ...(out || {}) }, gid, c.recs);
       if (r) out = { ...(out || {}), ...r };
     }
@@ -1564,11 +1607,35 @@ function create({
    *  points of the collapsed text are the witness) becomes the sentence; null when nothing matched. */
   function redactHeldReport(e, gid, recs) {
     if (!e || typeof e.text !== 'string' || !e.text.includes(`(${gid})`)) return null;
-    const needles = recs.map((r) => Array.from(String((r && r.text) || '').replace(/\s+/g, ' ').trim()).slice(0, 40).join('')).filter((n) => n.length >= 4);
-    if (!needles.length) return null;
-    let hit = false;
-    const lines = e.text.split('\n').map((l) => { if (needles.some((n) => l.includes(n))) { hit = true; return `- ${RC.CLEARED_TEXT}`; } return l; });
-    return hit ? { text: lines.join('\n') } : null;
+    const text = RC.redactWitnessLines(e.text, recs.map((r) => RC.clearWitness(r && r.text)));
+    return text === null ? null : { text };
+  }
+  /** B-b291: WHAT THE SEARCH INDEX MAY NOT HOLD — per group whose cleared index is not empty (`gid`: that group only):
+   *  the cleared records' card keys and their witnesses (the ladder judge's, cached with it). Words leave this engine
+   *  only as witnesses, never as records; the index keeps them in memory, never on its disk. */
+  const copyOf = (c) => ({ keys: c.keys.slice(), witnesses: c.recs.map((r) => r.text), wholes: c.wholes.map((x) => ({ ...x })) });
+  function clearedCopies(gid = null, { cachedOnly = false } = {}) {
+    const out = {};
+    for (const [id, g] of Object.entries(all())) {
+      if (gid && id !== gid) continue;
+      const vids = clearedVids(g);
+      if (!vids.length) continue;
+      const c = cachedOnly ? (needlesFresh(heldNeedles.get(id), vids) ? heldNeedles.get(id) : null) : clearedNeedles(id, vids);
+      if (c) out[id] = copyOf(c);
+    }
+    return out;
+  }
+  /** The whole set with no synchronous log read — what a starting search worker is handed (one group at a time). */
+  async function clearedCopiesAsync() {
+    const out = {};
+    for (const [id, g] of Object.entries(all())) {
+      const vids = clearedVids(g);
+      if (!vids.length) continue;
+      let c = heldNeedles.get(id);
+      if (!needlesFresh(c, vids)) { const recs = [...(await originalsOfAsync(id, vids)).values()].filter(Boolean); c = needlesOf(id, recs, vids.length, recs.length < vids.length); heldNeedles.set(id, c); }
+      out[id] = copyOf(c);
+    }
+    return out;
   }
 
   /** The OWNER opened / touched a group's window (g3): its read mark moves to
@@ -1777,7 +1844,7 @@ function create({
     list, listFor, markRead, liveRoster, pacerFor, noteRoster, get: (id) => { const g = getGroup(id); return g ? view(g) : null; }, resolveGroup, resolveMember, resolveTarget, reach,
     sharesGroup, dispatchLedger,   // lane worker-dispatch verify r1 ④ / ②
     create: createGroup, invite, leave: (o) => remove({ ...o, kick: false }), kick: (o) => remove({ ...o, kick: true }),
-    rename: renameGroup, archive: archiveGroup, setNotify, post, sendToAgent, findPair, findOrCreatePair, read, clearMessages,
+    rename: renameGroup, archive: archiveGroup, setNotify, post, sendToAgent, findPair, findOrCreatePair, read, clearMessages, clearedCopies, clearedCopiesAsync,
     reportsForTurn, commitReports,
     WAKE_BUDGET, TURN_BUDGET, MIN_REPORT_ROOM,
   };

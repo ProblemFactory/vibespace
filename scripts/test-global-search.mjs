@@ -239,6 +239,159 @@ console.log('§9 the controls: trigram, the index under data/, a raw-shape branc
   const STORES = /\b(tasks|userTodos|sessionStatus|getJobs|getGroups|groupsEngine|recordClear|stashFor)\b/;
   ok(FILES.every((f) => !STORES.test(read(f).replace(/\/\/.*$/gm, ''))), 'the index reads none of the five "Clear content…" stores — a copy of transcripts + files (test-record-clear-census declares it)');
 }
+console.log('§10 a cleared group message is not found (B-b291): judged at every write, swept at the clear, handed to every worker');
+{
+  const { createChannelStore } = require(path.join(REPO, 'src/channel-store.js'));
+  const G = require(path.join(REPO, 'src/channel-groups.js'));
+  const RC = require(path.join(REPO, 'src/record-clear.js'));
+  const N = require(path.join(REPO, 'src/normalizers.js'));
+  const GE_REL = 'src/server/groups-engine.js';
+  const ME = 'a11ce000-0000-4000-8000-00000000a001', OTHER = 'b0b00000-0000-4000-8000-00000000b002';
+  const ROSTER = [{ cid: ME, name: 'me', groups: ['tg'], reachability: null }, { cid: OTHER, name: 'other', groups: ['tg'], reachability: null }];
+  // the PURE rule the ladder's judge and the index share (src/record-clear.js)
+  const W1 = RC.clearWitness('the  zirconquill\n ledger: totals attached and a great deal more words after them');
+  ok(W1 === 'the zirconquill ledger: totals attached ' && Array.from(W1).length === 40 && RC.clearWitness('好的') === '好的', 'the witness: the first 40 code points of the whitespace-folded words');
+  ok(RC.redactWitnessLines('- [11-17T22:50Z] me: the zirconquill ledger: totals attached\n- [11-17T22:51Z] me: and a plain line', [RC.clearWitness('the zirconquill ledger: totals attached')]) === `- ${RC.CLEARED_TEXT}\n- [11-17T22:51Z] me: and a plain line`
+    && RC.redactWitnessLines('好的\nme: 好的\n好的吗', [], ['好的']) === `- ${RC.CLEARED_TEXT}\n- ${RC.CLEARED_TEXT}\n好的吗` && RC.redactWitnessLines('好的 x', ['好的']) === null && RC.redactWitnessLines('nothing', [W1]) === null,
+    'the line rule: a line carrying a witness becomes the sentence line; a short message only as a whole line (or its «Name: » tail)');
+  const proj = path.join(home, '.claude/projects/-w-clr'); fs.mkdirSync(proj, { recursive: true });
+  let nSid = 0;
+  const sidNew = () => `0f5e1a00-0000-4000-8000-0000c1ea${String(++nSid).padStart(4, '0')}`;
+  const jsonl = (sid, texts) => { fs.writeFileSync(path.join(proj, sid + '.jsonl'), texts.map((t, i) => JSON.stringify({ type: 'user', uuid: `${sid.slice(-4)}-u${i}`, sessionId: sid, timestamp: new Date(2e12 + i * 1000).toISOString(), message: { role: 'user', content: t } })).join('\n') + '\n'); return { sid, backend: 'claude', cwd: '/w/clr' }; };
+  const LEDGER = 'the zirconquill ledger: totals attached\nsecond line of the ledger'; // two lines: a card keeps them, a report folds them
+  const F1MSG = 'Quarterly numbers for the marrowbank board are below\nRevenue 4.2M this quarter\nPlan: acquire Brightline in Q1'; // the reader's F1: the first line holds the whole witness
+  const F3MSG = 'the\u200b vellichor memo: plans for the quarter ahead and more'; // the reader's F3: a format character a report line drops
+  const wake = (report) => `Another Claude session sent a message:\n${report}\n\nThis came from another Claude session — not typed by your user.`;
+  async function scene(workerFile = null, GEmod = null, SIm = SI) {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-clr-'));
+    const store0 = createChannelStore({ dir: path.join(d, 'channels') });
+    const reads = { sync: 0, async: 0 }; // originalsOf's reads (a record looked up, a whole log) — the reader's F4
+    const store = new Proxy(store0, { get: (t, k) => (k === 'findRecord' ? (...a) => { reads.sync++; return t.findRecord(...a); }
+      : k === 'readTail' ? (a, b, o) => { if (o && o.limit >= 1e6) reads.sync++; return t.readTail(a, b, o); }
+      : k === 'readTailAsync' ? (a, b, o) => { if (o && o.limit >= 1e6) reads.async++; return t.readTailAsync(a, b, o); } : t[k]) });
+    let t = 2e12;
+    const mkGE = () => (GEmod || require(path.join(REPO, GE_REL))).create({ store, deliver: null, broadcast() { }, now: () => (t += 60000), roster: () => ROSTER, groupSetting: () => 'none', onCleared: (gid) => SIm.noteCleared(gid), log: quiet });
+    let ge = mkGE();
+    const wire = () => SIm.setClearedSource((gid, o) => ge.clearedCopies(gid, o), () => ge.clearedCopiesAsync()); // the channels wiring's seam
+    wire();
+    const g1 = (await ge.create({ by: G.OWNER, name: 'wake', members: [ME, OTHER], quiet: true, consent: () => ({ ok: true }) })).group.id;
+    const g2 = (await ge.create({ by: G.OWNER, name: 'other', members: [ME, OTHER], quiet: true, consent: () => ({ ok: true }) })).group.id;
+    const post = async (g, text) => (await ge.post({ group: g, from: ME, text })).message;
+    const p1 = await post(g1, LEDGER), p2 = await post(g1, 'and a plain line'), p4 = await post(g1, '好的');
+    const pF1 = await post(g1, F1MSG), pF3 = await post(g1, F3MSG), pDone = await post(g1, 'done!'); await post(g1, 'all done! thanks');
+    await post(g2, LEDGER); await post(g2, '好的');
+    const reportOf = (g) => G.reportFor(store.groups.live().groups[g], store.readTail('groups', g, { limit: 50 }), OTHER, { budget: 8192 }).text;
+    const R1 = reportOf(g1), R2 = reportOf(g2);
+    const make = () => SIm.use(SIm.create({ dataDir: d, homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9, liveDebounceMs: 20, ...(workerFile ? { workerFile } : {}) }));
+    let x = make(); x.start();
+    const C1 = jsonl(sidNew(), [wake(R1), `pasted for the record:\n${R1}`, wake(R2)]);
+    await x.call('indexConversation', C1);
+    // LIVE: a report card (the ring's, id …:gm:<group>:<instant>), a wake's card (the ladder's: its own id, peerGroup) of
+    // p1, a wake's card of F1MSG as written (several lines), and a card of F1MSG that names NO group (a harness whose
+    // card carries none — the reader's F2)
+    const s = { backend: 'claude', backendSessionId: sidNew(), host: '', _normEpoch: 1, _historyLoaded: true, _normalizer: N.createMessageManager('claude', 'w-clr') };
+    N.feedPeerCard(s, { fromName: 'me', text: p1.text, group: { id: g1, at: p1.at, name: 'wake' } });
+    N.feedPeerCard(s, { fromName: 'me', text: p1.text, group: { id: g1, at: p2.at, name: 'wake' }, recorded: wake(R1) });
+    N.feedPeerCard(s, { fromName: 'me', text: pF1.text, group: { id: g1, at: pF3.at, name: 'wake' }, recorded: wake(R1) });
+    s._normalizer.injectPeerCard({ fromName: 'me', text: pF1.text, kind: 'peer' });
+    SIm.noteLive(s); await new Promise((rr) => setTimeout(rr, 40)); await x.call('status', {}); // the debounce, then the FIFO
+    const find = async (w) => (await x.search({ q: w, scope: 'chats', limit: 50 })).hits;
+    const o = { g1, g2 };
+    o.before = (await find('zirconquill')).length;
+    o.f1before = (await find('Brightline')).length; o.f3before = (await find('vellichor')).length; o.thanks = (await find('thanks')).length;
+    // THE CLEAR (the engine's own door, the worker running): p1, the short p4, F1MSG, F3MSG and «done!» of g1
+    const rc = await ge.clearMessages({ group: g1, ids: [p1.vendorId, p4.vendorId, pF1.vendorId, pF3.vendorId], by: G.OWNER });
+    o.cleared = rc.cleared.length;
+    const r0 = reads.sync;
+    await ge.clearMessages({ group: g1, ids: [pDone.vendorId], by: G.OWNER });
+    o.readsAtClear = reads.sync - r0;                         // the clear's own lookup only — the set grew from its records
+    await x.call('status', {}); // the FIFO: the sweep is done
+    const hits = await find('zirconquill');
+    o.after = hits.length; o.afterOther = hits.filter((h) => h.sid === C1.sid).length;
+    o.plain = (await find('plain line')).length;           // the cleared record's neighbours keep their words
+    o.pasted = (await find('pasted record')).length;
+    o.short = (await find('好的')).length;                  // g2's short message stays; g1's is gone
+    o.liveRows = hits.filter((h) => h.sid === s.backendSessionId).length;
+    o.f1after = (await find('Brightline')).length;          // a later line of a card that holds the message as written (F1, F2)
+    o.f3after = (await find('vellichor')).length;           // a hidden character in the first 40 (F3)
+    o.thanksAfter = (await find('thanks')).length;          // «done!» cleared: a longer line holding it stays (F6)
+    // A RESTART: the next worker is handed the same set — nothing to sweep, nothing comes back
+    await x.close(); x = make(); x.start();
+    o.restart = (await find('zirconquill')).length;
+    // AFTER THE CLEAR, a conversation indexed for the first time (its transcript holds g1's report as delivered)
+    const C2 = jsonl(sidNew(), [wake(R1)]);
+    await x.call('indexConversation', C2);
+    o.lateRows = (await find('zirconquill')).filter((h) => h.sid === C2.sid).length + (await find('Brightline')).filter((h) => h.sid === C2.sid).length;
+    // A CLEAR WHILE NO WORKER RUNS: indexed before, cleared with the worker gone, swept when the next one starts
+    const p6 = await post(g1, 'the quartzfennel memo for the board');
+    const C3 = jsonl(sidNew(), [wake(reportOf(g1))]);
+    await x.call('indexConversation', C3);
+    o.p6before = (await find('quartzfennel')).length;
+    await x.close();
+    await ge.clearMessages({ group: g1, ids: [p6.vendorId], by: G.OWNER });
+    // …and A HUB BOOT: a fresh engine (its cache empty) — the worker's set is read off the loop, a search waits for it
+    ge = mkGE(); wire();
+    const r1 = reads.sync, a1 = reads.async;
+    x = make(); x.start();
+    o.p6after = (await find('quartzfennel')).length;
+    o.bootSync = reads.sync - r1; o.bootAsync = reads.async - a1;
+    // A REBUILD re-derives every row through the judge
+    await x.call('drop', {});
+    for (const c of [C1, C2, C3]) await x.call('indexConversation', c);
+    o.rebuilt = (await find('zirconquill')).length + (await find('quartzfennel')).length + (await find('vellichor')).length;
+    await x.close({ final: true }); store0.close();
+    SIm.setClearedSource(null);
+    return o;
+  }
+  const o = await scene();
+  ok(o.before === 5 && o.cleared === 4 && o.f1before >= 3 && o.f3before >= 2, `setup: before the clear the words are found — 5 rows of the ledger (a wake's card, a pasted report, the other group's card, a live report card, a live wake card), ${o.f1before} of a message written on several lines, ${o.f3before} of one with a hidden character`, o);
+  ok(o.after === 1 && o.afterOther === 1, `after the clear (the worker running) only the OTHER group's message with the same words is found (${o.after})`, o);
+  ok(o.plain === 2 && o.pasted === 1 && o.liveRows === 0, 'the rows keep every other line — the next message, a pasted report\'s own words; a live card of the message is the sentence', o);
+  ok(o.short === 1, `a SHORT message (2 characters, under the witness) is cleared as a whole line of its group's card only — the other group's stays (${o.short})`, o);
+  ok(o.f1after === 0, `a message written on several lines (its first line longer than the witness) is gone from a card that holds it as written, and from a card that names no group (${o.f1after})`, o);
+  ok(o.f3after === 0, `a message with a hidden character in its first 40 is gone from the copies that wrote it belted (${o.f3after})`, o);
+  ok(o.thanks === o.thanksAfter && o.thanks >= 1, `a short cleared message («done!») clears no longer line that holds it («all done! thanks» stays: ${o.thanksAfter})`, o);
+  ok(o.readsAtClear === 1, `a later clear reads only its own record — the set grows from it, never the group's log again (${o.readsAtClear} read)`, o);
+  ok(o.restart === 1 && o.lateRows === 0, 'a restart brings nothing back; a conversation first indexed after the clear is judged at its write', o);
+  ok(o.p6before === 1 && o.p6after === 0 && o.bootSync === 0 && o.bootAsync >= 1, `a clear made while no worker ran is swept by the next worker; at a boot the set is read off the loop (${o.bootSync} sync, ${o.bootAsync} async reads) and the first search waits for it`, o);
+  ok(o.rebuilt === 1, `a rebuild re-derives every row through the judge (${o.rebuilt})`, o);
+  // the schema: an index a release before this one wrote (schema 1, its rows unjudged) is rebuilt at the first start
+  {
+    const d5 = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-v1-'));
+    const dir5 = SI.indexDirFor(d5, home).dir; fs.mkdirSync(dir5, { recursive: true });
+    const { DatabaseSync } = require('node:sqlite');
+    const db1 = new DatabaseSync(path.join(dir5, 'search.db')); db1.exec('CREATE TABLE msg (id INTEGER PRIMARY KEY, body TEXT)'); db1.exec('PRAGMA user_version = 1'); db1.close();
+    const x5 = SI.create({ dataDir: d5, homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9 }); x5.start();
+    await x5.call('status', {});
+    const rb = x5.stats().ready && x5.stats().ready.rebuilt;
+    await x5.close({ final: true });
+    ok(rb === 'schema 1 → 2', `an index written before (schema 1: rows nobody judged) is dropped and rebuilt at the first start (${rb})`);
+  }
+  // the controls: the change removed ⇒ the legs go RED
+  const W2 = read('src/search-index-worker.js'), GE2 = read(GE_REL), O2 = read('src/server/search-index.js');
+  const pin = (src, s) => { const n = src.split(s).length - 1; if (n !== 1) ok(false, `the control's anchor is in its file once: ${s}`, n); return s; };
+  const wmut = (from, to, tag) => MUT.write('src/search-index-worker.js', W2.replace(pin(W2, from), to), tag);
+  const oj = await scene(wmut('const body = judgeRow(mid, M.textOf(m), grp);', 'const body = M.textOf(m);', 'nojudge'));
+  ok(oj.lateRows >= 1 && oj.rebuilt >= 2, `CONTROL (no judge at the write): a conversation indexed after the clear and a rebuild find the words again (${oj.lateRows}, ${oj.rebuilt})`, oj);
+  const os2 = await scene(wmut('  for (const [gid, f] of Object.entries(fresh)) {\n    if (!CL.has(gid)) continue;', '  for (const [gid, f] of []) {\n    if (!CL.has(gid)) continue;', 'nosweep'));
+  ok(os2.after >= 4 && os2.p6after === 1, `CONTROL (no sweep): the rows written before the clear still find the words (${os2.after}, ${os2.p6after})`, os2);
+  const og = await scene(wmut('if (grp !== gid && !out.includes(`(${gid})`)) continue;', 'if (false) continue;', 'nogate'));
+  ok(og.rebuilt === 0, `CONTROL (no group gate): the OTHER group's message with the same words is cleared too at a rebuild — the precision leg goes RED (${og.rebuilt})`, og);
+  const ow = await scene(wmut('  if (WHOLE_LENS.size) {', '  if (false) {', 'nowhole'));
+  ok(ow.f1after >= 1, `CONTROL (no whole-message digest): a later line of a message written on several lines is found again (${ow.f1after})`, ow);
+  const ofl = await scene(wmut('const SUBSTRING_FLOOR = 12;', 'const SUBSTRING_FLOOR = 4;', 'floor4'));
+  ok(ofl.thanksAfter < ofl.thanks, `CONTROL (a 4-unit substring floor): «all done! thanks» is cleared with «done!» (${ofl.thanks} → ${ofl.thanksAfter})`, ofl);
+  const ob = await scene(null, MUT.load(GE_REL, GE2.replace(pin(GE2, "const forms = [...new Set([raw, G.reportWords(raw), card ? card.text : ''].map(foldWs).filter(Boolean))];"), 'const forms = [foldWs(raw)].filter(Boolean);'), 'rawonly'));
+  ok(ob.f3after >= 1, `CONTROL (the record's own bytes only, no belted form): the message with a hidden character is found again (${ob.f3after})`, ob);
+  const on = await scene(null, MUT.load(GE_REL, GE2.replace(pin(GE2, '      try { noteClearedNeedles(gid, out.cleared.map((vid) => found.get(vid)).filter(Boolean)); } catch { heldNeedles.delete(gid); }'), ''), 'nogrow'));
+  ok(on.readsAtClear > 1, `CONTROL (the set not grown by the clear): a later clear reads the group's records again (${on.readsAtClear} reads)`, on);
+  const os3 = await scene(null, null, MUT.load('src/server/search-index.js', O2.replace(pin(O2, "    if (all && typeof all.then === 'function') {"), '    if (false) {'), 'syncboot'));
+  ok(os3.bootSync >= 1, `CONTROL (a boot reads the set on the loop): the start does a synchronous log read (${os3.bootSync})`, os3);
+  // the wiring (channels-wiring: the ONE place the engine and the index meet) + the device words the sentence
+  const CWT = read('src/server/channels-wiring.js');
+  ok(/try \{ SEARCH\.noteCleared\(gid\); \}/.test(CWT) && CWT.includes('SEARCH.setClearedSource((gid, o) => groups.clearedCopies(gid, o), () => groups.clearedCopiesAsync());'), 'the channels wiring tells the index of every clear and hands it the groups engine\'s clearedCopies (+ its async twin for a start)');
+  ok(/const words = \(x\) => \(x\.includes\(CLEARED_TEXT\) \? x\.split\(CLEARED_TEXT\)\.join\(clearedText\(\)\) : x\);/.test(read('src/lib/search-window.js')), 'a snippet holding the sentence words it in the device\'s language (the marks keep their offsets)');
+}
 await ix.close({ final: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

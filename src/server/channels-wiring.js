@@ -17,6 +17,7 @@ const { create: createTouches } = require('./channel-touches.js');
 const { create: createChannelApi } = require('./channel-api.js');
 const { create: createApiCards } = require('./channel-api-cards.js');
 const N = require('../normalizers.js');
+const SEARCH = require('./search-index.js');   // B-b291: the search index answers to a group message's clear
 
 // lane pair-group-fate (+ r2: `gone` needs EVIDENCE): THE liveness reader supplies FACTS only — the live roster, the
 // sidebar's archived list (user-state keys are `<backend>:<cid>`), a transcript on disk (Claude / codex), WHO OWNS the
@@ -134,6 +135,7 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   // conversation that carded it (the ring + the drawn card; a stopped session's ring is never drawn again — a resume
   // is a new session, a restart restores only the live ones, which are here)
   const onGroupCardsCleared = (gid, keys) => {
+    try { SEARCH.noteCleared(gid); } catch (e) { console.warn('[groups] the search index was not told of a clear:', e && e.message); }   // B-b291: its rows of that group are judged again
     const live = (() => { try { return sessions(); } catch { return null; } })();
     if (!live || !keys.length) return;
     const RCm = require('../record-clear.js');
@@ -141,6 +143,7 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   };
   const liveness = livenessReader({ liveSessions, readUserState, convIndex, metaDir: require('path').join(dataDir, 'session-meta'), transcriptIndex });   // transcriptIndex: a drill's own trees (null = the hub's)
   const groups = createGroups({ store: channels.store, dataDir, deliver, broadcast: (msg) => bcastAll(msg), now, roster: liveSessions, groupSetting, onPending: onGroupsPending, onCleared: onGroupCardsCleared, liveness, userTodos });
+  SEARCH.setClearedSource((gid, o) => groups.clearedCopies(gid, o), () => groups.clearedCopiesAsync());   // B-b291: what a starting index worker is handed (store-backed: the log + the cleared index; at a start, read off the loop)
   // the archive / boot door: ONE sweep at a time, a write during a sweep re-runs it once after — and (lane roster-per-pass)
   // WRITES DO NOT QUEUE SWEEPS: a sweep starts no sooner than `sweepGapMs` (5 s) after the last one ENDED. A write after a
   // quiet gap sweeps AT ONCE (the leading edge); a burst is answered by one sweep per gap, the last write always followed by

@@ -17,21 +17,32 @@
 // cursor in ONE transaction, so a kill anywhere loses at most that file. A file
 // is marked `trying` (committed) before its parse — a worker that dies on it
 // (its heap cap) finds the mark at the next start and skips that file by name.
+//
+// A CLEARED GROUP MESSAGE (B-b291): the owner hands the cleared records' card
+// keys and witnesses (setCleared — the FIRST op of every worker; addCleared at a
+// clear). They live in this thread's memory only. Every row is judged at its
+// write (judgeRow: a card of the cleared record is the sentence; a line that
+// carries its witness, in a card of that group or a report naming it, is the
+// sentence line); a clear rewrites the rows already written (sweepCleared).
+// Schema 2 keeps each row's group (`grp`, the card's peerGroup) for that sweep.
 const fs = require('fs');
 const path = require('path');
 const { parentPort, workerData, isMainThread } = require('worker_threads');
 const { answerMemory } = require('./worker-memory.js');
 const M = require('./search-model.js');
+const RC = require('./record-clear.js'); // PURE: the cleared sentence + the witness rule the ladder's judge uses (B-b291)
+const crypto = require('crypto');
 
 if (isMainThread) throw new Error('search-index-worker runs only in a worker thread — the main thread never opens the search index');
 
 const { dbDir, dataReal, buffersDir = null } = workerData;
 const ctl = new Int32Array(workerData.ctl); // [0] CLOSED (set here) · [1] CLOSE asked
 const DB_FILE = path.join(dbDir, 'search.db');
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2; // 2 (B-b291): msg.grp — a schema change drops and rebuilds the index, so the rows written before it are judged too
 const TOKENIZE = "tokenize = 'unicode61 remove_diacritics 2'";
 const SCHEMA = [
-  'CREATE TABLE msg (id INTEGER PRIMARY KEY, sid TEXT NOT NULL, host TEXT NOT NULL DEFAULT \'\', backend TEXT, mid TEXT NOT NULL, ts INTEGER, role TEXT, body TEXT NOT NULL, UNIQUE (host, sid, mid))',
+  'CREATE TABLE msg (id INTEGER PRIMARY KEY, sid TEXT NOT NULL, host TEXT NOT NULL DEFAULT \'\', backend TEXT, mid TEXT NOT NULL, ts INTEGER, role TEXT, body TEXT NOT NULL, grp TEXT, UNIQUE (host, sid, mid))',
+  'CREATE INDEX msg_grp ON msg (grp) WHERE grp IS NOT NULL',
   `CREATE VIRTUAL TABLE msg_fts USING fts5 (body, content = 'msg', content_rowid = 'id', ${TOKENIZE}, detail = full)`,
   'CREATE TABLE art (id INTEGER PRIMARY KEY, sessionId TEXT, host TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL, mtime INTEGER, kind TEXT, skipped TEXT, body TEXT NOT NULL DEFAULT \'\', UNIQUE (host, path))',
   `CREATE VIRTUAL TABLE art_fts USING fts5 (body, content = 'art', content_rowid = 'id', ${TOKENIZE}, detail = full)`,
@@ -60,6 +71,7 @@ function openOnce() {
   db.exec('PRAGMA locking_mode = EXCLUSIVE');
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA synchronous = NORMAL');
+  db.exec('PRAGMA secure_delete = ON'); // B-b291: a cleared message's rewritten row leaves no old bytes in the table's free pages (the FTS segments keep their tokens until they merge — declared)
   try { fs.chmodSync(DB_FILE, 0o600); } catch { }
   return db.prepare('PRAGMA user_version').get().user_version;
 }
@@ -84,7 +96,12 @@ function open() {
     db.exec('COMMIT');
   }
   S = {
-    insMsg: db.prepare('INSERT OR IGNORE INTO msg (sid, host, backend, mid, ts, role, body) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+    insMsg: db.prepare('INSERT OR IGNORE INTO msg (sid, host, backend, mid, ts, role, body, grp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+    setBody: db.prepare('UPDATE msg SET body = ? WHERE id = ?'),
+    ofGroup: db.prepare('SELECT id, mid, body, grp FROM msg WHERE grp = ?'),
+    namingFts: db.prepare('SELECT m.id, m.mid, m.body, m.grp FROM msg_fts JOIN msg m ON m.id = msg_fts.rowid WHERE msg_fts MATCH ? AND instr(m.body, ?) > 0'),
+    wordsFts: db.prepare('SELECT m.id, m.mid, m.body, m.grp FROM msg_fts JOIN msg m ON m.id = msg_fts.rowid WHERE msg_fts MATCH ?'),
+    wordsScan: db.prepare('SELECT id, mid, body, grp FROM msg WHERE instr(body, ?) > 0'),
     ftsMsg: db.prepare('INSERT INTO msg_fts (rowid, body) VALUES (?, ?)'),
     delMsgFts: db.prepare("INSERT INTO msg_fts (msg_fts, rowid, body) VALUES ('delete', ?, ?)"),
     msgsOf: db.prepare('SELECT id, body FROM msg WHERE sid = ? AND host = ?'),
@@ -106,14 +123,111 @@ function open() {
 const tx = (fn) => { db.exec('BEGIN'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { try { db.exec('ROLLBACK'); } catch { } throw e; } };
 const coreMid = (id) => { const s = String(id || ''); const i = s.indexOf(':'); return i >= 0 ? s.slice(i + 1) : s; }; // a card id is `<normalizer's session id>:<record key>` — the record key is the stable part
 
+// ── B-b291: THE CLEARED GROUP MESSAGES (this thread's memory only) ──
+// gid → {keys: Set('<gid>:<record instant>'), ws: witnesses ≥ SUBSTRING_FLOOR units (looked for inside a line), short: the
+// shorter ones (a whole line only), wholes: Map(digest of a whole folded form → its length)}
+let CL = new Map();
+let partial = false, insertedWhilePartial = 0; // a worker's first set may be the owner's cache only — the whole set follows (addCleared whole)
+const WHOLE_LENS = new Set();
+const SUBSTRING_FLOOR = 12; // the reader's F6: a 4-unit witness («done», «👍👍») inside every line of a group cleared too much
+const WHOLE_FLOOR = 12;     // a row that names no group is cleared whole only by a message at least this long
+const GID_RE = /^g-[0-9a-f]{8}$/;
+const groupOfCard = (m) => { const id = m && m.peerGroup && m.peerGroup.id; return typeof id === 'string' && GID_RE.test(id) ? id : null; };
+const fold = (s) => String(s).replace(/\s+/g, ' ').trim();
+const digest = (f) => crypto.createHash('sha256').update(f).digest('base64').slice(0, 22); // the groups engine's wholeDigest
+/** Merge the owner's copies into the set → {gid: the NEW facts of it} (what a sweep looks for). */
+function takeCleared(groups) {
+  const fresh = {};
+  for (const [gid, c] of Object.entries(groups && typeof groups === 'object' ? groups : {})) {
+    if (!GID_RE.test(gid) || !c) continue;
+    const ws = (Array.isArray(c.witnesses) ? c.witnesses : []).map((w) => RC.clearWitness(w)).filter(Boolean);
+    const prev = CL.get(gid) || { keys: new Set(), ws: [], short: [], wholes: new Map() };
+    const nw = ws.filter((w) => !prev.ws.includes(w) && !prev.short.includes(w));
+    const nh = (Array.isArray(c.wholes) ? c.wholes : []).filter((x) => x && typeof x.h === 'string' && Number(x.n) > 0 && !prev.wholes.has(x.h));
+    for (const x of nh) { prev.wholes.set(x.h, Number(x.n)); WHOLE_LENS.add(Number(x.n)); }
+    for (const k of Array.isArray(c.keys) ? c.keys : []) prev.keys.add(String(k));
+    prev.ws.push(...nw.filter((w) => w.length >= SUBSTRING_FLOOR)); prev.short.push(...nw.filter((w) => w.length < SUBSTRING_FLOOR));
+    CL.set(gid, prev);
+    fresh[gid] = { ws: nw, wholes: nh };
+  }
+  return fresh;
+}
+/** THE JUDGE every row passes before it is written: `body` as the index may hold it. */
+function judgeRow(mid, body, grp) {
+  if (!body || !CL.size) return body;
+  if (typeof mid === 'string' && mid.startsWith('gm:')) { const k = mid.slice(3), c = CL.get(k.slice(0, k.indexOf(':'))); if (c && c.keys.has(k)) return RC.CLEARED_TEXT; } // a group card IS its record (GC.cardId)
+  if (WHOLE_LENS.size) {
+    // a row that IS one cleared message (a card holding its words as written — several lines, a harness's card that
+    // names no group): whole; a row of another group never
+    const f = fold(body);
+    if (WHOLE_LENS.has(f.length)) { const h = digest(f); for (const [gid, c] of CL) if ((!grp || grp === gid) && c.wholes.get(h) === f.length && (grp === gid || f.length >= WHOLE_FLOOR)) return RC.CLEARED_TEXT; }
+  }
+  let out = body;
+  for (const [gid, c] of CL) {
+    if (grp !== gid && !out.includes(`(${gid})`)) continue; // a report names its group in its head; a card says it in peerGroup
+    const r = RC.redactWitnessLines(out, c.ws, c.short, { floor: SUBSTRING_FLOOR }); // a short one only as a whole line (or its «Name: » tail)
+    if (r !== null) out = r;
+  }
+  return out;
+}
+/** A witness's words as FTS terms (AND), a cut witness (40 code points) without its cut last word; '' = none. */
+function wordsQuery(w) {
+  const words = M.segment(w).toLowerCase().split(/[^\p{L}\p{N}\p{M}]+/u).filter(Boolean);
+  if (Array.from(w).length >= 40) words.pop();
+  return words.slice(0, 12).map((x) => '"' + x + '"').join(' ');
+}
+/** Rewrite the rows already written that hold a cleared message — `fresh` = {gid: the new facts} (in one transaction). */
+function sweepCleared(fresh) {
+  let n = 0;
+  const seen = new Set();
+  const judge = (r) => {
+    if (seen.has(r.id)) return;
+    seen.add(r.id);
+    const nb = judgeRow(r.mid, r.body, r.grp);
+    if (nb === r.body) return;
+    S.delMsgFts.run(r.id, M.segment(r.body)); S.setBody.run(nb, r.id); S.ftsMsg.run(r.id, M.segment(nb)); n++;
+  };
+  for (const [gid, f] of Object.entries(fresh)) {
+    if (!CL.has(gid)) continue;
+    for (const r of S.ofGroup.all(gid)) judge(r); // every card of the group (msg_grp)
+    for (const r of S.namingFts.all(`"g ${gid.slice(2)}"`, `(${gid})`)) judge(r); // every report naming it (its head's id, the reader's F5)
+    // a row of NO group that is one whole cleared message (a harness card that carries no group): found by the words
+    if (f.wholes.some((x) => x.n >= WHOLE_FLOOR)) for (const w of f.ws) { if (w.length < WHOLE_FLOOR) continue; const q = wordsQuery(w); for (const r of (q ? S.wordsFts.all(q) : S.wordsScan.all(w))) judge(r); }
+  }
+  return n;
+}
+const clearedSig = () => crypto.createHash('sha256').update([...CL].map(([g, c]) => g + ':' + [...c.keys].sort().join(',') + ':' + c.ws.length + ':' + c.short.length + ':' + c.wholes.size).sort().join('\n')).digest('hex').slice(0, 32);
+const everything = () => Object.fromEntries([...CL].map(([g, c]) => [g, { ws: [...c.ws, ...c.short], wholes: [...c.wholes].map(([h, n]) => ({ h, n })) }]));
+/** The owner's first op. `whole` = the whole set (swept unless it is the set last swept); else the owner's cache only —
+ *  the whole set follows as addCleared({whole: true}), and a row written in between is swept then. */
+function setCleared({ groups, whole = true } = {}) {
+  CL = new Map(); WHOLE_LENS.clear();
+  takeCleared(groups);
+  partial = !whole; insertedWhilePartial = 0;
+  return whole ? sweepIfMoved() : { groups: CL.size, partial: true };
+}
+function sweepIfMoved(force = false) {
+  const sig = clearedSig(), was = S.getMeta.get('clearedSig');
+  if (!force && was && was.v === sig) return { groups: CL.size, swept: 0, same: true };
+  return { groups: CL.size, swept: tx(() => { const n = sweepCleared(everything()); S.putMeta.run('clearedSig', sig); return n; }) };
+}
+/** A clear (that group's new facts swept), or the whole set after a cache-only start (`whole`). */
+function addCleared({ groups, whole = false } = {}) {
+  const fresh = takeCleared(groups);
+  if (whole) { const force = partial && insertedWhilePartial > 0; partial = false; insertedWhilePartial = 0; return sweepIfMoved(force); }
+  return { groups: Object.keys(fresh).length, swept: tx(() => { const n = sweepCleared(fresh); S.putMeta.run('clearedSig', clearedSig()); return n; }) };
+}
+
 /** Rows (normalized cards) → inserted rows; a mid already indexed is skipped (UNIQUE). */
 function insertMessages(sid, host, backend, msgs) {
   let n = 0;
   for (const m of msgs) {
-    const body = M.textOf(m);
     const mid = coreMid(m.mid || m.id);
+    const grp = groupOfCard(m);
+    const body = judgeRow(mid, M.textOf(m), grp);
     if (!body || !mid) continue;
-    const r = S.insMsg.run(sid, host || '', backend || null, mid, Number(m.ts) || 0, m.role, body);
+    if (partial) insertedWhilePartial++;
+    const r = S.insMsg.run(sid, host || '', backend || null, mid, Number(m.ts) || 0, m.role, body, grp);
     if (r.changes) { S.ftsMsg.run(r.lastInsertRowid, M.segment(body)); n++; }
   }
   return n;
@@ -276,7 +390,7 @@ if (!disabled) {
   try { const rebuilt = open(); state('ready', { rebuilt, ...status() }); } catch (e) { failed(e); }
 }
 
-const OPS = { appendMessages, clearConversation, indexConversation, indexArtifact, removeArtifact, sweepArtifacts, search, status, drop,
+const OPS = { appendMessages, clearConversation, indexConversation, indexArtifact, removeArtifact, sweepArtifacts, search, status, drop, setCleared, addCleared,
   noteBuild: ({ at } = {}) => { S.putMeta.run('lastBuild', String(Number(at) || Date.now())); return { ok: true }; } };
 
 // ONE FIFO: an async op (a parse) holds the queue until it is done.

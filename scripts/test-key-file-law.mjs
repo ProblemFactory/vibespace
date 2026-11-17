@@ -711,6 +711,7 @@ try {
     'src/agentd/stream-window-source.js', 'src/app-serve.js', 'src/auth.js', 'src/channel-outbox-files.js',
     'src/claude-oat-probe.js', 'src/ctx-sync.js', 'src/desktop-mic.js', 'src/exit-proxy.js', 'src/incident.js', 'src/jobs.js',
     'src/kept-copies.js', 'src/mounts.js', 'src/node-runtime.js', 'src/plugins/frp.js',
+    'src/search-index-worker.js', // B-b291: sha256 of a cleared group message's folded words (compared in memory, never written) + the cleared set's signature over card keys (no words, no secret) in the index's meta
     'src/server/automation-engine.js', 'src/server/browser-cloak-install.js', 'src/server/browser-logins.js', 'src/server/channel-api-cards.js',
     'src/server/channel-api.js', 'src/server/channels-attention.js', 'src/server/cli-self-measure.js', 'src/server/decision-engine.js',
     'src/server/desktop-access.js', 'src/server/dropline-oauth.js', 'src/server/engine-distribution.js',

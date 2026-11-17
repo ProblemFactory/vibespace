@@ -699,6 +699,9 @@ function mentionField(r, member, group) {
 function lineFor(r, member = null, group = null) {
   return linePrefix(r, member, group) + piece(clipLine(r.text)) + awaitNote(r, member, group);
 }
+/** The words lineFor writes for a record's text (whitespace folded, cut at LINE_MAX, belted) — B-b291: the search index's
+ *  witness of a cleared record is taken from these too, never only from the record's own bytes. */
+function reportWords(text) { return piece(clipLine(text)); }
 /** B-eba8 ①: a record whose author asked to be woken tells the member reading it so — the replier's half is the existing
  *  `--wake`, made visible (a plain reply wakes them once). '' for every other record / the author itself. */
 function awaitNote(r, member, group) {
@@ -1022,6 +1025,6 @@ module.exports = {
   NOTIFY_MODES, DEFAULT_NOTIFY, DELIVERY_STATES, QUEUED_MAX, queuedFor, OWNER, GROUP_ADAPTER_ID, ERROR_CODES, NAME_MAX, CONTEXT_MAX, MEMBER_MAX, REPORT_BUDGET, LINE_MAX,
   WAKE_CONFIRM_ABOVE, WAKE_FLOOR_MS, SENDER_WAKES, SENDER_WINDOW_MS, PACE_SKEW_MS,
   newGroupId, pairKey, cleanName, cleanText, isCid, isGroupId, memberOf, validateGroup, makeGroup,
-  addMember, removeMember, setNotify, rename, archive, mentionsIn, scanAts, atRefusal, codeSpans, foldCase, reachesReport, wakeVerdict, wakesPlanned, consentVerdict, reportFor, deliveryOf,
+  addMember, removeMember, setNotify, rename, archive, mentionsIn, scanAts, atRefusal, codeSpans, foldCase, reachesReport, wakeVerdict, wakesPlanned, consentVerdict, reportFor, deliveryOf, reportWords,
   emptyPace, prunePace, paceFuture, paceVerdict, paceGrant, paceRefund,
 };

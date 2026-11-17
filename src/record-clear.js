@@ -297,9 +297,35 @@ function wordlessTitleOf(openSpec, title) {
   return typeof a === 'string' && Object.prototype.hasOwnProperty.call(WORDLESS_TITLES, a) ? WORDLESS_TITLES[a] : title;
 }
 
+// THE WITNESS OF A CLEARED GROUP MESSAGE (lane-redact verify r4's ladder judge; moved here for its second reader, the
+// search index — B-b291). A report writes each record's text whitespace-collapsed and possibly cut, so the first 40 code
+// points of the collapsed text are what every copy of a report line still carries. A witness under 4 UTF-16 units is
+// too short to look for inside a line: only a line that IS the message (`whole`, a reader that knows the line is one of
+// that group's messages) is matched by it.
+const clearWitness = (text) => Array.from(String(text == null ? '' : text).replace(/\s+/g, ' ').trim()).slice(0, 40).join('');
+// a report line's await note (channel-groups awaitNote) after a record's words — not the record's words
+const AWAIT_TAIL_RE = / \([^()]{1,200} asked to be woken by your reply[^()]*\)$/;
+/** Every LINE of `text` that carries one of `witnesses` as a substring (`floor` units at least: the ladder's 4) — or
+ *  that IS one of `whole` (the line, or its «Name: » tail, a report line's await note set aside) — becomes
+ *  `- <the sentence>`. null when no line matched. The caller decides which group a text belongs to (the ladder: the
+ *  report's head names it). */
+function redactWitnessLines(text, witnesses, whole = null, { floor = 4 } = {}) {
+  if (typeof text !== 'string') return null;
+  const needles = (Array.isArray(witnesses) ? witnesses : []).filter((n) => typeof n === 'string' && n.length >= floor);
+  const exact = (Array.isArray(whole) ? whole : []).filter((n) => typeof n === 'string' && n);
+  if (!needles.length && !exact.length) return null;
+  let hit = false;
+  const lines = text.split('\n').map((l) => {
+    const t = exact.length ? l.trim().replace(AWAIT_TAIL_RE, '') : '';
+    if (needles.some((n) => l.includes(n)) || exact.some((n) => t === n || t.endsWith(': ' + n))) { hit = true; return `- ${CLEARED_TEXT}`; }
+    return l;
+  });
+  return hit ? lines.join('\n') : null;
+}
+
 module.exports = {
   RECORD_KINDS, CLEARED_TEXT, CLEARED_WORDS, clearedWords, SHAPES, clearedFields,
   applyClear, clearedRecord, clearVerdict, REFUSALS, refuse,
   recordAt, recordWords, previewWords, matchSnippet, MAX_ITEMS, chunked,
-  REPLACEMENT_KIND, isReplacement, foldClears, WORDLESS_TITLES, wordlessTitleOf,
+  REPLACEMENT_KIND, isReplacement, foldClears, WORDLESS_TITLES, wordlessTitleOf, clearWitness, redactWitnessLines,
 };

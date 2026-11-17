@@ -13,6 +13,8 @@ import { num, stampAt as when } from './page-time.js';
 import { registerWindowType } from './window-types.js';
 import { registerCommand, registerKeybinding, registerMenuItem } from './contributions.js';
 import { enterSubmits } from './chat-enter-keys.js';
+import { CLEARED_TEXT } from '../record-clear.js'; // PURE: the sentence a cleared group message's row holds (B-b291)
+import { clearedText } from './record-clear-ui.js';
 
 const SCOPES = [['all', 'All'], ['chats', 'Conversations'], ['artifacts', 'Files']];
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -24,8 +26,9 @@ export function snippetNode({ text = '', ranges = [], head, tail } = {}) {
   const s = el('span', 'search-snippet');
   let at = 0;
   if (head) s.append('…');
-  for (const [a, b] of ranges) { if (a < at || b > text.length) continue; s.append(text.slice(at, a)); s.append(el('mark', null, text.slice(a, b))); at = b; }
-  s.append(text.slice(at));
+  const words = (x) => (x.includes(CLEARED_TEXT) ? x.split(CLEARED_TEXT).join(clearedText()) : x); // B-b291: the index keeps the English key; the device words it
+  for (const [a, b] of ranges) { if (a < at || b > text.length) continue; s.append(words(text.slice(at, a))); s.append(el('mark', null, text.slice(a, b))); at = b; }
+  s.append(words(text.slice(at)));
   if (tail) s.append('…');
   return s;
 }

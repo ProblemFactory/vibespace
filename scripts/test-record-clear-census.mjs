@@ -152,7 +152,8 @@ function enclosing(lines, idx) {
 // (verify r4: shared by clearMessages and the held-entry judge the ladder asks at every stash write; neither SERVES an
 // original — the clear returns cleared copies, the judge only matches a held report's lines against the 40-code-point witness)
 // lane queued-is-not-woke laws 2 + 3 (shape C): + readFoldedAsync — the same fold over the store's async tail (the wait reading, off the loop)
-const GROUPS_RAW_OK = new Set(['readFolded', 'readFoldedAsync', 'originalsOf']);
+// B-b291: + originalsOfAsync — the clear's lookup off the loop (the search index's set at a boot: witnesses, card keys and whole digests only)
+const GROUPS_RAW_OK = new Set(['readFolded', 'readFoldedAsync', 'originalsOf', 'originalsOfAsync']);
 // channels-engine: every function that reads a store log, with the GATE that stands before the read (a
 // conversation this engine KNOWS = an adapter record + an index row — never the groups adapter)
 const CHANNELS_GATES = {
@@ -252,7 +253,7 @@ console.log('§B the group log: every read folded, the clear\'s own, or gated of
   ok(c.sites >= 15, `${c.sites} store-read call sites in the tree (the census saw the readers)`);
   ok(!c.outside.length, 'no store-log read outside channel-store / groups-engine / channels-engine', c.outside);
   ok(!c.groupsRaw.length, 'groups-engine reads the log raw ONLY inside readFolded (the fold) and originalsOf (the clear\'s own lookup, shared with the held-entry judge)', c.groupsRaw);
-  { const ge = read('src/server/groups-engine.js'); ok(/const found = originalsOf\(gid, want\);/.test(ge) && /originalsOf\(gid, vids\)\.values\(\)\]\.filter\(Boolean\)\.map\(witnessOf\)/.test(ge), 'originalsOf has exactly its two callers: clearMessages (cleared copies out) and judgeHeldEntry (witnesses only, never a record kept)'); }
+  { const ge = read('src/server/groups-engine.js'); const calls = (ge.match(/(?<!function )originalsOf\(/g) || []).length, acalls = (ge.match(/(?<!function )originalsOfAsync\(/g) || []).length; ok(/const found = originalsOf\(gid, want\);/.test(ge) && /const recs = \[\.\.\.originalsOf\(gid, vids\)\.values\(\)\]\.filter\(Boolean\); c = needlesOf\(gid, recs, vids\.length, recs\.length < vids\.length\);/.test(ge) && /const recs = \[\.\.\.\(await originalsOfAsync\(id, vids\)\)\.values\(\)\]\.filter\(Boolean\); c = needlesOf\(id, recs, vids\.length, recs\.length < vids\.length\);/.test(ge) && calls === 2 && acalls === 1, `originalsOf has exactly its two callers — clearMessages (cleared copies out) and clearedNeedles (the held-entry judge's and the search index's, B-b291) — and its async twin one (clearedCopiesAsync); needlesOf keeps witnesses, card keys and whole digests, never a record (${calls} + ${acalls} callers)`); }
   ok(!c.channelsUnknown.length, 'every channels-engine reader is a declared function with a declared gate', c.channelsUnknown);
   ok(!c.channelsUngated.length, 'every channels-engine reader\'s gate stands before its read', c.channelsUngated);
   // int228 CONTROLS for the helper-of-a-helper rule (channel-self-unread's countFresh → unreadSince): a stray caller, and a declared
@@ -615,6 +616,12 @@ const HOLDERS = [
   ['a published service\'s port-forward label (data/port-forwards.json, the Ports panel)', 'src/jobs.js', "label: 'service: ' + CLEARED_TEXT"],
   ['the group index + lastText', 'src/server/groups-engine.js', 'g.lastText = RC.CLEARED_TEXT; g.lastCleared = true;'],
   ['the group log fold every reader applies', 'src/record-clear.js', 'function foldClears('],
+  // B-b291: the SEARCH INDEX answers to a group message's clear — every row judged at its write, the rows already
+  // written rewritten at the clear, the cleared copies handed to every worker first (store-backed: the groups engine's)
+  ['the search index (search.db): every row is judged at its write — a card of the record, a line carrying its witness', 'src/search-index-worker.js', 'const body = judgeRow(mid, M.textOf(m), grp);'],
+  ['…the rows already written are rewritten when the clear lands', 'src/server/channels-wiring.js', 'try { SEARCH.noteCleared(gid); }'],
+  ['…a starting worker is handed every cleared copy first (the groups engine\'s clearedCopies)', 'src/server/channels-wiring.js', 'SEARCH.setClearedSource((gid, o) => groups.clearedCopies(gid, o), () => groups.clearedCopiesAsync());'],
+  ['…the witness rule the ladder\'s judge and the index share', 'src/record-clear.js', 'function redactWitnessLines('],
 ];
 // verify r7: the modules whose `error` / `why` sentences reach an owner's surface (a toast) — none may interpolate a record's text
 const SENTENCE_FILES = ['src/jobs.js', 'src/server/jobs-wiring.js', 'src/task-groups.js', 'src/user-todos.js', 'src/session-status.js', 'src/server/groups-engine.js', 'src/server/record-clear.js', 'src/routes/records-clear.js', 'src/routes/user-todos-reply.js', 'server.js', 'src/agent-routes.js'];
@@ -628,7 +635,7 @@ const EXCEPTIONS = [
   // words already delivered
   ['agent transcripts / the CLI\'s stdin', 'what a turn was injected with, a wake delivered, a reply quoted — delivered words are the harness\'s record, out of the clear\'s reach by design — and SAID where the owner decides: the confirm dialog\'s .rc-copies line (verify r4)'],
   ['peer cards in a session window (`msg` frames)', 'emitted at delivery time from the delivery ladder; the chat view is a transcript surface'],
-  ['the search index (~/.vibespace/db/<hash>/search.db — src/server/search-index.js, lane global-search)', 'a REBUILDABLE copy of conversation transcripts (user / assistant text) and of the files agents wrote — the transcript class above: delivered words stay in the transcript and the index re-derives from it; it reads none of the five stores (scripts/test-global-search.mjs censuses that) and serves the owner only (an agent token is refused)'],
+  ['the search index (~/.vibespace/db/<hash>/search.db — src/server/search-index.js, lane global-search)', 'a REBUILDABLE copy of conversation transcripts (user / assistant text) and of the files agents wrote — the transcript class above: delivered words stay in the transcript and the index re-derives from it; it reads none of the five stores (scripts/test-global-search.mjs censuses that) and serves the owner only (an agent token is refused). A CLEARED GROUP MESSAGE is the exception it answers to (B-b291, HOLDERS above): its cards, a card holding it whole (any harness) and the report lines carrying its witness read the sentence in the index; an agent quoting the words in its own reply is the transcript class, and a rewritten row\'s old tokens stay in the index file\'s FTS segments until they merge (never found: a search reads the rewritten row; the table\'s pages are overwritten, secure_delete)'],
   ['a conversation\'s Artifacts `service` rows (src/artifacts.js serviceRows via src/server/artifact-registry.js servicesOf — lane artifacts-services)', 'a DERIVED row, never stored: read off the live jobs registry at every list (the job\'s name, its port, its run instants — never its log, context or answers), so a clear of the job leaves nothing of its content here; the chat card it feeds is a transcript surface (the peer-card class above)'],
   ['incident bundles (data/incidents/*)', 'a frozen scene copies terminal / transcript tails verbatim (src/incident.js); the owner made the capture'],
   // the user's own files

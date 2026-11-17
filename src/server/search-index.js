@@ -12,6 +12,11 @@
 //       fire-and-forget, through a bounded queue (dropped and SAID past 10 000);
 //   (3) ARTIFACTS — the artifact registry's one writer (noteOp) and noteEdit
 //       call noteArtifact(); the file is (re)read in the worker.
+// A CLEARED GROUP MESSAGE IS NOT FOUND (B-b291): the groups engine's clear
+// calls noteCleared(group) and the worker rewrites that group's rows; a
+// starting worker is handed every group's cleared copies FIRST (the source the
+// channels wiring sets: card keys + witnesses, in the worker's memory only),
+// so every row is judged at its write — the live door, the backfill, a rebuild.
 // Total-cost rules: a query never reads a transcript (the index answers whole);
 // a backfill never blocks the loop (worker + yields); the index never lives on
 // data/ or on a network mount (refused by name). HARNESS-NEUTRAL: no harness
@@ -50,7 +55,8 @@ function localDiskVerdict(dir, dataReal, { statfs = fs.statfsSync } = {}) {
 
 function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirname, '..', 'search-index-worker.js'), buffersDir = null,
   listConversations = async () => [], activeSessions = () => new Map(), log = console, heapMb = 1536, idleExitMs = 10 * 60 * 1000,
-  bootDelayMs = 60 * 1000, backfillEveryMs = 30 * 60 * 1000, liveDebounceMs = 1500, closeBoundMs = 2000, exitHook = true, statfs, now = () => Date.now() } = {}) {
+  bootDelayMs = 60 * 1000, backfillEveryMs = 30 * 60 * 1000, liveDebounceMs = 1500, closeBoundMs = 2000, exitHook = true, statfs, now = () => Date.now(),
+  clearedCopies = (gid, o) => (clearedSource ? clearedSource(gid, o) : {}), clearedCopiesAll = () => (clearedSourceAll ? clearedSourceAll() : null) } = {}) {
   let worker = null, dir = null, dataReal = null, st = 'off', reason = REASON.OFF, code = null, ready = null;
   let seq = 1, idleTimer = null, lastCallAt = 0, backfillTimer = null, walking = null;
   const calls = new Map();
@@ -114,7 +120,23 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
     });
     if (exitHook) process.on('exit', onExit);
     armIdle();
+    // B-b291: the FIRST op of every worker (one FIFO): what no row may hold — before any row is written. With an async
+    // source (the hub's) that is the groups engine's cache, never a log read on this loop; the whole set follows
+    // (read off the loop) and a search waits for it (clearedReady).
+    const all = (() => { try { return clearedCopiesAll(); } catch { return null; } })();
+    if (all && typeof all.then === 'function') {
+      call('setCleared', { groups: copiesOf(null, { cachedOnly: true }), whole: false }).catch(() => { });
+      clearedReady = all.then((groups) => call('addCleared', { groups: groups || {}, whole: true }), (e) => { log.warn?.(`[search-index] the cleared group messages were not read: ${e && e.message}`); return call('addCleared', { groups: copiesOf(null), whole: true }); }).catch(() => { });
+    } else { call('setCleared', { groups: copiesOf(null), whole: true }).catch(() => { }); clearedReady = null; }
     return api;
+  }
+  let clearedReady = null;
+  const CLEARED_WAIT_MS = 5000;
+  const copiesOf = (gid, o) => { try { return clearedCopies(gid, o) || {}; } catch (e) { log.warn?.(`[search-index] the cleared group messages were not read: ${e && e.message}`); return {}; } };
+  /** A group message was cleared: its group's rows are judged again. No worker now ⇒ the next one is handed the whole set. */
+  function noteCleared(gid) {
+    if (!worker || !gid) return;
+    call('addCleared', { groups: copiesOf(String(gid)) }).catch(() => { });
   }
 
   function call(op, payload, { timeoutMs = 0 } = {}) {
@@ -160,7 +182,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
       for (const i of walk.send) {
         const m = msgs[i];
         const body = M.textOf(m);
-        if (body) out.push({ mid: m.id, ts: m.ts, role: m.role, content: [{ type: 'text', text: body }] });
+        if (body) out.push({ mid: m.id, ts: m.ts, role: m.role, content: [{ type: 'text', text: body }], ...(m.peerGroup ? { peerGroup: { id: m.peerGroup.id } } : {}) });   // B-b291: the group a card is of
         cur.sent.add(m.id);
       }
       cur.from = walk.from;
@@ -228,6 +250,8 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
   // ── READS ──
   async function search({ q, scope = 'all', limit = 20, offset = 0 } = {}) {
     const sc = ['all', 'chats', 'artifacts'].includes(scope) ? scope : 'all';
+    if (!worker) start();
+    if (clearedReady) { let t; await Promise.race([clearedReady, new Promise((r) => { t = setTimeout(r, CLEARED_WAIT_MS); t.unref?.(); })]); clearTimeout(t); } // B-b291: no answer before the worker holds the whole cleared set
     const r = await call('search', { q: String(q || '').slice(0, 500), scope: sc, limit, offset }, { timeoutMs: 15000 });
     for (const h of r.hits) { const n = names.get((h.host || '') + '|' + (h.kind === 'artifact' ? h.sessionId : h.sid)); h.name = (n && n.name) || null; if (h.kind === 'message' && n) h.cwd = n.cwd; }
     return r;
@@ -263,7 +287,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
     return r;
   }
 
-  const api = { start, schedule, backfill, noteLive, noteArtifact, search, status, rebuild, forget, close, call, stats: () => ({ state: st, reason, code, dir, ready, ...counts, backfill: { ...progress } }), get dir() { return dir; } };
+  const api = { start, schedule, backfill, noteLive, noteArtifact, noteCleared, search, status, rebuild, forget, close, call, stats: () => ({ state: st, reason, code, dir, ready, ...counts, backfill: { ...progress } }), get dir() { return dir; } };
   return api;
 }
 
@@ -323,5 +347,9 @@ const use = (ix) => { wired = ix; return ix; }; // a suite points the live / art
 // the live gate + the artifact registry call these; both are no-ops before wire()
 const noteLive = (session) => { if (wired) wired.noteLive(session); };
 const noteArtifact = (a) => { if (wired) wired.noteArtifact(a); };
+// B-b291: the channels wiring sets the source (the groups engine's clearedCopies) and tells every clear
+let clearedSource = null, clearedSourceAll = null;
+const setClearedSource = (fn, all = null) => { clearedSource = typeof fn === 'function' ? fn : null; clearedSourceAll = typeof all === 'function' ? all : null; };
+const noteCleared = (gid) => { if (wired && typeof wired.noteCleared === 'function') wired.noteCleared(gid); };
 
-module.exports = { create, mount, wire, get, use, noteLive, noteArtifact, indexDirFor, localDiskVerdict, REASON, LIVE_QUEUE_MAX };
+module.exports = { create, mount, wire, get, use, noteLive, noteArtifact, noteCleared, setClearedSource, indexDirFor, localDiskVerdict, REASON, LIVE_QUEUE_MAX };
