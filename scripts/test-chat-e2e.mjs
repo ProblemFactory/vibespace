@@ -115,8 +115,7 @@ fs.mkdirSync(cwd, { recursive: true });
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...withoutVendorKeys(process.env), ...VNC_ENV, HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 // UNCONDITIONAL cleanup (2026-09-09): the transcript, the home and the worktree went at the very END of the happy path, so every
 // early `process.exit(1)` — and every signal — left them behind. Since the one boot helper they all live in its root and go at
-// 'exit' with it; a signal 'exit' does not fire for becomes an exit.
-for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => process.exit(143));
+// 'exit' with it; the helper arms SIGTERM / SIGINT / SIGHUP itself (each an exit), so this suite carries no signal line.
 // BOOT WAIT sized for a LOADED box (2.369.75 gate: the fast tier runs beside
 // three implementer workflows on a 3,900-process machine; the worktree server
 // took longer than the old 15 s, the loop gave up SILENTLY and the WebSocket
