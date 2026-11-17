@@ -453,6 +453,34 @@ console.log('\n§9d the directory sweep (B-60d2)');
   }
   let refusedEnd = ''; try { SC.endScratchAtExit('/home/someone/data'); } catch (e) { refusedEnd = e.message; }
   ok(/not a \/tmp\/vs-\* scratch dir/.test(refusedEnd), 'endScratchAtExit refuses a path that is not a scratch dir');
+  // B-0d6d: THE ROOTS ARE REMOVED LAST — a suite's own exit hooks still read their roots (a fake's launches.log names the pids
+  // it kills): one added in the turn of the first mint, one a turn later in the SAME turn as the exit; by process.exit, by an
+  // uncaught throw, past a hook that throws and at the loop's end; two copies of the module in one process (the real one + a twin) end both roots.
+  // RED controls: the closer armed alone (the old order) runs first and the hooks read removed roots; without the emit's
+  // finally a throwing hook leaves the roots on disk
+  const SCRSRC = fs.readFileSync(path.join(REPO, 'scripts/scratch.mjs'), 'utf8');
+  const MOVE = "process.removeListener('exit', endAll); process.on('exit', endAll);\n", FIN = 'try { return emit.call(this, event, ...rest); } finally { endAll(); }';
+  ok(SCRSRC.includes(MOVE) && SCRSRC.includes(FIN), 'CONTROL B-0d6d: the patched lines are in scratch.mjs');
+  const orderBody = (urls) => `import fs from 'node:fs';\n${urls.map((u, i) => `import { scratchDir as m${i} } from ${JSON.stringify(u)};`).join('\n')}\nconst roots = [${urls.map((_, i) => `m${i}('cigate9d-order${i}')`).join(', ')}];\nfor (const r of roots) fs.writeFileSync(r + '/launches.log', '1');\nconst seen = [];\nconst read = (tag) => () => seen.push(tag + ':' + roots.every((r) => fs.existsSync(r + '/launches.log')));\nprocess.on('exit', read('same-turn'));\nawait new Promise((r) => setTimeout(r, 5));\nprocess.once('exit', read('later'));\nprocess.on('exit', () => console.log(JSON.stringify({ roots, seen })));\nif (process.argv[2] === 'hook-throws') process.on('exit', () => { throw new Error('a hook that throws'); });\nif (process.argv[2] === 'throw') throw new Error('a red suite'); else if (process.argv[2] !== 'natural') process.exit(0);\n`;
+  const twinUrl = pathToFileURL(M9d.write('scripts/scratch.mjs', SCRSRC, 'twin')).href;
+  const oldUrl = pathToFileURL(M9d.write('scripts/scratch.mjs', SCRSRC.replace(MOVE, ''), 'old-order')).href;
+  const noFinUrl = pathToFileURL(M9d.write('scripts/scratch.mjs', SCRSRC.replace(FIN, 'return emit.call(this, event, ...rest);'), 'no-finally')).href;   // the move kept, the finally gone (a copy that parses)
+  const runOrder = (file, urls, road) => new Promise((res) => {
+    const f = path.join(MUT, file); fs.writeFileSync(f, orderBody(urls));
+    const c = spawn(process.execPath, [f, road], { stdio: ['ignore', 'pipe', 'pipe'] }); let out = '';
+    const t = setTimeout(() => c.kill('SIGKILL'), 20000);
+    c.stdout.on('data', (d) => { out += d; }); c.on('close', (code) => { clearTimeout(t); let o = null; try { o = JSON.parse(out.trim().split('\n').pop()); } catch { } if (o) for (const d of o.roots) tmpDirs.push(d); res({ code, o }); });
+  });
+  const [ord, ordThrow, ordHook, ordOld, ordNoFin, ordNat] = await Promise.all([runOrder('test-fx9d-order.mjs', [scratchUrl, twinUrl], 'exit'), runOrder('test-fx9d-order-throw.mjs', [scratchUrl], 'throw'),
+    runOrder('test-fx9d-order-hook.mjs', [scratchUrl], 'hook-throws'), runOrder('test-fx9d-order-old.mjs', [oldUrl], 'exit'), runOrder('test-fx9d-order-nofin.mjs', [noFinUrl], 'hook-throws'),
+    runOrder('test-fx9d-order-natural.mjs', [scratchUrl], 'natural')]);
+  const readAll = (r, code) => r.code === code && r.o?.seen.join() === 'same-turn:true,later:true' && r.o.roots.every((d) => !fs.existsSync(d));
+  ok(readAll(ord, 0) && ord.o.roots.length === 2, `B-0d6d: by process.exit, a suite's exit hooks (the mint's turn; a later turn, the exit's own) read their roots, gone after the exit — two copies in one process too: ${JSON.stringify(ord)}`);
+  ok(readAll(ordThrow, 1), `B-0d6d: …and by an uncaught throw: ${JSON.stringify(ordThrow)}`);
+  ok(readAll(ordNat, 0), `B-0d6d: …and when the event loop runs out (no process.exit): ${JSON.stringify(ordNat)}`);
+  ok(readAll(ordHook, ordHook.code), `B-0d6d: …and past an exit hook that throws (the listeners after it never run — the emit's finally removes the roots; the exit code is Node's own): ${JSON.stringify(ordHook)}`);
+  ok(ordNoFin.o?.seen.join() === 'same-turn:true,later:true' && ordNoFin.o.roots.every((d) => fs.existsSync(d)), `CONTROL B-0d6d: without the emit's finally a throwing hook leaves the roots on disk (red): ${JSON.stringify(ordNoFin)}`);
+  ok(ordOld.o?.seen.join() === 'same-turn:false,later:false' && ordOld.o.roots.every((d) => !fs.existsSync(d)), `CONTROL B-0d6d: the closer armed alone (the old order) runs first — the hooks read removed roots (red): ${JSON.stringify(ordOld)}`);
   // THE EVIDENCE: a live process's cwd and XDG_RUNTIME_DIR are held paths (real /proc); a private session bus under a
   // record-less root is a suite's executable; a verify workspace's lane dir is its own root (item 4: dpi-measure)
   const hc = mktmp('sweep9d-heldcwd'), hx = mktmp('sweep9d-heldxdg');

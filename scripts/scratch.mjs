@@ -65,16 +65,34 @@ export function scratch(name) {
  *  newest write is a day old. */
 const IS_SUITE = /^test-[A-Za-z0-9._-]+\.mjs$/.test(path.basename(process.argv[1] || ''));
 const ENDS = new Set();
+/** B-0d6d (lane bl-scratch, 2026-11-17): THE ROOTS ARE REMOVED LAST. Exit listeners run in the order they were added, and a
+ *  suite's first scratch() came before its own exit hook — so a hook that reads its root at exit (a fake daemon's
+ *  launches.log, which names the pids to kill) read a root already removed, and the fakes outlived the suite (`sleep 600`
+ *  each, adopted by the user manager). So the closer is moved behind every other exit listener at the moment the exit is
+ *  emitted: every road out of a process that runs exit listeners at all (the loop's end, process.exit, an uncaught throw
+ *  or rejection — measured on Node 22 and 24) goes through process.emit('exit'), and emit copies its listener list only
+ *  after this move. A hook that THROWS stops the listeners after it, so the closer also runs in the emit's finally (it
+ *  was first before, and always ran). A second copy of this module (a mutant) wraps the wrapper; both run after the hooks. */
+function armCloser() {
+  process.on('exit', endAll);
+  const emit = process.emit;
+  process.emit = function emitRootsLast(event, ...rest) {
+    if (event !== 'exit') return emit.call(this, event, ...rest);
+    process.removeListener('exit', endAll); process.on('exit', endAll);
+    try { return emit.call(this, event, ...rest); } finally { endAll(); }
+  };
+}
+let closerArmed = false;
 /** The delete helper: `dir` is removed when this process exits (idempotent; a non-scratch path is refused). */
 export function endScratchAtExit(dir) {
   if (!String(dir).startsWith(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX))) throw new Error(`endScratchAtExit(): ${JSON.stringify(dir)} is not a ${TMP_ROOTS[0]}/${FIXTURE_CWD_PREFIX}* scratch dir`);
-  if (!ENDS.size) process.on('exit', endAll);
+  if (!closerArmed) { closerArmed = true; armCloser(); }
   ENDS.add(dir);
   return dir;
 }
 /** A root handed to a detached process: not removed at exit (the dir sweep judges it by its holders). */
 export function keepScratch(dir) { ENDS.delete(dir); return dir; }
-function endAll() { for (const d of ENDS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { } } }
+function endAll() { for (const d of ENDS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { } } ENDS.clear(); }
 
 /** lane app-page-csp (design q-043 D6, §5 P0-d): EVERY CHROME SUITE ENDS WITH ZERO CSP REPORTS — the ONE teardown check.
  *  A SUITE's hubs inherit `VIBESPACE_CSP_REPORTS_FILE` (set here at import; server.js hands it to src/server/csp-reports.js):
