@@ -14,6 +14,8 @@
 //     warm over
 //   ⑦ M the one-shot migration — a 3× fixture ⇒ ⅓ the size, the same totals before and after; a restart mid-way resumes
 //   ⑧ (r11) the usage fold worker requires only what it folds — never the hold road (src/usage-hold-road.js) nor the dedup
+//   ⑨ B-6ed4 (r18): a set's mark whose unlink FAILS stays known (this process's — never «twice») and is removed again; the
+//     next start finds no leftover; CONTROL the release's _unmark (memory first, the failure dropped) ⇒ RED
 // Sparse files only (fs.truncateSync — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -384,6 +386,79 @@ require(${JSON.stringify(path.join(REPO, 'src/usage-cold-worker.js'))});`;
   ok(R && rm.size > 50 && !both.length && !reachedRoad.length && rb && rb.ev === 'done' && fold && fold.ev === 'done' && rel.includes('src/usage-history.js') && !loadedRoad.length,
     `⑧ the usage fold worker (a rebuild ${rb && rb.ev}, a fold ${fold && fold.ev}) loads ${rel.length} src modules — usage-history.js, ${loadedRoad.length ? 'AND ' + loadedRoad.join(' + ') : 'not the hold road (' + rm.size + ' methods) nor the dedup'}; the two files define ${both.length} method(s) twice; the worker's reach (${seen.size} methods) holds ${reachedRoad.length} of the road's (3c8c0501: no road — the worker loads usage-ledger-dedup.js with the 3 006-line usage-history.js)`,
     { both, reachedRoad, rel, rb: rb && rb.ev, fold: fold && (fold.error || fold.ev) });
+});
+
+console.log('⑨ B-6ed4 — a set\'s mark whose unlink FAILS is kept and removed again (ledger-dedup-law r18)');
+await leg('⑨ B-6ed4', async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const EIO = () => Object.assign(new Error('EIO: injected'), { code: 'EIO' });
+  // the release's _unmark, planted back on one instance: memory first, the unlink's failure dropped
+  const RELEASE = async function (df) { if (!this._marked(df)) return; if (this._unreadMarks) this._unreadMarks.delete(df); if (this._marksMade) this._marksMade.delete(df); await this._heldUnlink(df + '.unread'); };
+  const scene = async (name, plant) => {
+    const d = dirOf(name), uh = newUh(d);
+    uh.holdListRetryMs = 30; uh.holdListRetryMaxMs = 60;
+    if (plant) uh._unmark = plant;
+    fs.mkdirSync(uh.heldDir, { recursive: true });
+    const df = uh._dropFile('events-2026-10~host-x', 1);
+    fs.writeFileSync(df, JSON.stringify({ gone: [] }) + '\n'); fs.writeFileSync(df + '.unread', JSON.stringify({ unread: 'EIO' }) + '\n');
+    uh._unreadMarks = new Set([df]);   // an earlier start's mark, as the boot listing reads it
+    const real = fs.promises.unlink; let deny = true, hits = 0;
+    fs.promises.unlink = function (f, ...a) { if (deny && String(f) === df + '.unread') { hits++; return Promise.reject(EIO()); } return real.call(this, f, ...a); };
+    let during, after, said;
+    try {
+      [, said] = await quietAsync(() => uh._unmark(df));   // the set READ: its mark goes — and the unlink fails
+      during = { disk: fs.existsSync(df + '.unread'), marked: uh._marked(df), earlier: !!(uh._unreadMarks && uh._unreadMarks.has(df)), twice: uh._setVerdict(df, EIO()).twice };
+      deny = false; await sleep(150); await settle();   // the disk settles: the retry runs
+      after = { disk: fs.existsSync(df + '.unread'), marked: uh._marked(df) };
+    } finally { fs.promises.unlink = real; }
+    const next = newUh(d); next._listHeldNow();   // the NEXT start's listing
+    return { during, after, hits, said: said.filter((l) => /could not be removed/.test(l)).length, nextEarlier: !!(next._unreadMarks && next._unreadMarks.has(df)) };
+  };
+  const g = await scene('b6ed4');
+  ok(g.during.disk && g.during.marked && !g.during.earlier && !g.during.twice && g.hits === 1 && g.said === 1 && !g.after.disk && !g.after.marked && !g.nextEarlier,
+    '⑨ the mark\'s unlink fails ⇒ kept and known (this process\'s: an EIO now is no «twice»), said once, removed again once the disk lets it; the next start finds nothing to take for its own', g);
+  const c = await scene('b6ed4-release', RELEASE);
+  ok(c.after.disk && !c.after.marked && c.nextEarlier, '⑨ CONTROL RED: the release\'s _unmark — memory forgets first, nobody removes it again, the next start takes the leftover for an earlier start\'s (its first EIO is «the disk\'s answer»)', c);
+  // r1 (the lane's read): the unlink refused for the start's WHOLE life — the start ends with the mark on disk; its READ NOTE
+  // tells the next start by name that the set read since (accept-r17's legA A1/A2 scene)
+  const life = async (name, dropNote) => {
+    const d = dirOf(name), uh = newUh(d);
+    uh.holdListRetryMs = 30; uh.holdListRetryMaxMs = 60;
+    fs.mkdirSync(uh.heldDir, { recursive: true });
+    const df = uh._dropFile('events-2026-10~host-x', 1);
+    fs.writeFileSync(df, JSON.stringify({ gone: [] }) + '\n'); fs.writeFileSync(df + '.unread', JSON.stringify({ unread: 'EIO' }) + '\n');
+    uh._unreadMarks = new Set([df]);
+    const real = fs.promises.unlink;
+    fs.promises.unlink = function (f, ...a) { if (String(f) === df + '.unread') return Promise.reject(EIO()); return real.call(this, f, ...a); };
+    try { await quietAsync(() => uh._unmark(df)); await sleep(120); } finally { fs.promises.unlink = real; for (const r of (uh._unmarkRetry || new Map()).values()) if (r.timer) clearTimeout(r.timer); uh._unmarkRetry = new Map(); }   // the start ENDS: its retries die with it
+    const left = { mark: fs.existsSync(df + '.unread'), note: fs.existsSync(df + '.unread.read') };
+    if (dropNote) fs.rmSync(df + '.unread.read', { force: true });   // CONTROL: the same leftover without its note
+    const next = newUh(d); next._listHeldNow(); await sleep(30); await settle();
+    return { left, nextEarlier: !!(next._unreadMarks && next._unreadMarks.has(df)), twice: next._setVerdict(df, EIO()).twice, swept: !fs.existsSync(df + '.unread') && !fs.existsSync(df + '.unread.read') };
+  };
+  const L1 = await life('b6ed4-life', false), L0 = await life('b6ed4-life-nonote', true);
+  ok(L1.left.mark && L1.left.note && !L1.nextEarlier && !L1.twice && L1.swept, '⑨ r1: the unlink refused for the start\'s whole life ⇒ the mark stays WITH its read note; the next start reads the note by name — no «twice», both swept', L1);
+  ok(L0.nextEarlier && L0.twice, '⑨ r1 CONTROL RED: the same leftover WITHOUT its note ⇒ the next start takes it for an earlier start\'s — the set\'s first EIO is «the disk\'s answer»', L0);
+  // r1: a retry IN FLIGHT when the set fails again never takes that failure's mark
+  {
+    const d = dirOf('b6ed4-race'), uh = newUh(d);
+    uh.holdListRetryMs = 30; uh.holdListRetryMaxMs = 60;
+    fs.mkdirSync(uh.heldDir, { recursive: true });
+    const df = uh._dropFile('events-2026-10~host-x', 1);
+    fs.writeFileSync(df, JSON.stringify({ gone: [] }) + '\n'); fs.writeFileSync(df + '.unread', JSON.stringify({ unread: 'EIO' }) + '\n');
+    uh._unreadMarks = new Set([df]);
+    const real = fs.promises.unlink; let release = null;
+    fs.promises.unlink = function (f, ...a) { if (String(f) === df + '.unread') return new Promise((res, rej) => { release = () => real.call(fs.promises, f, ...a).then(res, rej); }); return real.call(this, f, ...a); };
+    let after;
+    try {
+      const p = quietAsync(() => uh._unmark(df));
+      for (let i = 0; i < 50 && !release; i++) await sleep(5);
+      await quietAsync(() => uh._setUnread(df, EIO()));   // the set fails AGAIN while the unlink is in flight
+      release(); await p; await settle();
+      after = { disk: fs.existsSync(df + '.unread'), marked: uh._marked(df) };
+    } finally { fs.promises.unlink = real; }
+    ok(after.disk && after.marked, '⑨ r1: a retry in flight when the set fails again ⇒ that failure\'s mark stays (on disk and known) — the unlink that took it wrote it back', after);
+  }
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

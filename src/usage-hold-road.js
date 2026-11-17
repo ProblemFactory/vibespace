@@ -95,6 +95,7 @@ const SET_BAD_MAX = 8; // r12: bad lines named per file (the rest counted)
 const SET_READ_PASSES = new Set(['EMFILE', 'ENFILE', 'ENOMEM', 'ESTALE', 'ETIMEDOUT', 'EAGAIN', 'EBUSY']);
 const SET_READ_REFUSED = new Set(['EACCES', 'EISDIR', 'ENOTDIR', 'ENXIO']);
 const HOLD_UNREAD_RE = /^(events-\d{4}-\d{2})~([A-Za-z0-9_-]+)\.(\d+)\.dropped\.unread$/; // r14: a set whose read failed once (EIO …) — its mark
+const HOLD_READ_NOTE_RE = /^(events-\d{4}-\d{2})~([A-Za-z0-9_-]+)\.(\d+)\.dropped\.unread\.read$/; // B-6ed4: beside a mark whose unlink failed — the set READ since
 /** r14: a set file's read error → 'passes' (kept, read again) | 'refused' (the disk will not read it: set aside unread) |
  *  'once' (EIO, or a code neither list knows: kept and marked the first time — refused at a later start) (PURE). */
 const setReadClass = (code) => (SET_READ_REFUSED.has(code) ? 'refused' : SET_READ_PASSES.has(code) ? 'passes' : 'once');
@@ -484,6 +485,7 @@ class UsageHoldRoad {
       if (x) { const k = `${x[1]}~${x[2]}`; if (!m.has(k)) m.set(k, []); if (!this._dropFiles.has(k)) this._dropFiles.set(k, []); if (!this._dropFiles.get(k).includes(Number(x[3]))) this._dropFiles.get(k).push(Number(x[3])); this._holdGenSeen(k, Number(x[3])); continue; }
       if (HOLD_DROP_TMP_RE.test(n)) this._track(this._heldUnlink(path.join(this.heldDir, n)));
       else if (HOLD_UNREAD_RE.test(n)) marks.push(n);
+      else if (HOLD_READ_NOTE_RE.test(n) && !names.includes(n.slice(0, -'.read'.length))) this._track(this._heldUnlink(path.join(this.heldDir, n)));   // a note whose mark went
     }
     // r14: a set's mark of a read that failed once (EIO …) — kept while its set is listed: a start that still cannot read the
     // set takes the error for the disk's answer (`_setUnread`); one whose set is gone is swept. A mark this process made is
@@ -491,6 +493,9 @@ class UsageHoldRoad {
     for (const n of marks) {
       const set = n.slice(0, -'.unread'.length), p = path.join(this.heldDir, set);
       if (this._marksMade && this._marksMade.has(p)) continue;
+      // B-6ed4: a mark with its READ NOTE beside it is a leftover whose set read after the failure (its unlink failed for that
+      // start's whole life) — never an earlier start's failure: swept, both
+      if (names.includes(n + '.read')) { this._track(this._heldUnlink(p + '.unread')); this._track(this._heldUnlink(p + '.unread.read')); continue; }
       if (names.includes(set)) (this._unreadMarks || (this._unreadMarks = new Set())).add(p); else this._track(this._heldUnlink(p + '.unread'));
     }
     return m;
@@ -710,6 +715,9 @@ class UsageHoldRoad {
   async _setUnread(df, e) {
     const v = this._setVerdict(df, e);
     if (v.cls !== 'once' || v.aside) return v;
+    this._unmarkStop(df);   // B-6ed4: a mark a retry was removing is this failure's own now (it stays, written or not)
+    const G = this._markGen || (this._markGen = new Map()); G.set(df, (G.get(df) || 0) + 1);   // …and an unlink in flight hands it back
+    if (this._readNotes && this._readNotes.delete(df)) this._track(this._heldUnlink(df + '.unread.read'));   // its read note is no fact any more
     const made = this._marksMade || (this._marksMade = new Set());
     if (!made.has(df)) { try { await this._holdIO('mark', df, fs.promises.writeFile(df + '.unread', JSON.stringify({ unread: v.code, at: new Date().toISOString() }) + '\n')); made.add(df); } catch { } }
     return v;
@@ -724,12 +732,38 @@ class UsageHoldRoad {
   }
   /** r14: does a mark of a failed read name the set `df` (one an earlier start left, or this one's)? */
   _marked(df) { return !!((this._unreadMarks && this._unreadMarks.has(df)) || (this._marksMade && this._marksMade.has(df))); }
-  /** r14: the set `df` read or set aside — its mark of a failed read goes. */
+  /** r14: the set `df` read or set aside — its mark of a failed read goes. B-6ed4 (ledger-dedup-law r18): THE MARK'S TRUTH IS
+   *  THE DISK'S — memory lets it go only once its unlink succeeded. r17 cleared memory first and dropped a failed unlink: the
+   *  next start read the leftover mark as an earlier start's, the set's first EIO became «the disk's answer», the set went
+   *  aside unread and its count was lost. A failed unlink keeps the mark as THIS process's (`_marksMade`: never an earlier
+   *  start's, so no «twice» from it — the set did read) and is RETRIED, the list retry's backoff, unref'd, until it goes or
+   *  the set fails again (`_setUnread`: the mark is that failure's own once more). r1 (the lane's read): a start that ENDS
+   *  before a retry lands (the unlink refused its whole life) left the mark to the next start as an earlier start's — so a
+   *  failed unlink also writes the set's READ NOTE (`<set>.unread.read`), which the next start's listing reads by NAME (no
+   *  content read): a mark with its note is swept, never «twice». And a retry in flight when the set fails again (the
+   *  generation `_markGen` moved) never takes that failure's mark: an unlink that took it writes it back. */
   async _unmark(df) {
     if (!this._marked(df)) return;
-    if (this._unreadMarks) this._unreadMarks.delete(df); if (this._marksMade) this._marksMade.delete(df);
-    await this._heldUnlink(df + '.unread');
+    const G = this._markGen || (this._markGen = new Map()), gen = G.get(df) || 0;
+    if (this._unreadMarks) this._unreadMarks.delete(df);   // the set read (or went aside): no earlier start's failure stands
+    const code = await this._heldUnlinkCode(df + '.unread');
+    if ((G.get(df) || 0) !== gen) {   // the set failed AGAIN while the unlink ran: the mark is that failure's own
+      if (code === null) { try { await this._holdIO('mark', df, fs.promises.writeFile(df + '.unread', JSON.stringify({ unread: 'again', at: new Date().toISOString() }) + '\n')); } catch { } }
+      (this._marksMade || (this._marksMade = new Set())).add(df);
+      return;
+    }
+    if (code === null) { if (this._marksMade) this._marksMade.delete(df); this._unmarkStop(df); if (this._readNotes && this._readNotes.delete(df)) this._track(this._heldUnlink(df + '.unread.read')); return; }
+    (this._marksMade || (this._marksMade = new Set())).add(df);
+    if (!(this._readNotes || (this._readNotes = new Set())).has(df)) { try { await this._holdIO('mark', df, fs.promises.writeFile(df + '.unread.read', JSON.stringify({ read: true, at: new Date().toISOString() }) + '\n')); this._readNotes.add(df); } catch { } }
+    const R = this._unmarkRetry || (this._unmarkRetry = new Map()), r = R.get(df) || { tries: 0, timer: null };
+    R.set(df, r); r.tries++;
+    if (r.timer) clearTimeout(r.timer);
+    const wait = Math.min(this.holdListRetryMaxMs || HOLD_LIST_RETRY_MAX_MS, (this.holdListRetryMs || HOLD_LIST_RETRY_MS) * 2 ** (r.tries - 1));
+    r.timer = setTimeout(() => { r.timer = null; if (R.get(df) === r) this._track(this._unmark(df)); }, wait); r.timer.unref?.();
+    if (r.tries === 1) console.warn(`[usage] the mark of a failed read of ${path.basename(df)} could not be removed (${code}) — kept, removed again in ${wait} ms (never an earlier start's mark)`);
   }
+  /** B-6ed4: no more retries of `df`'s unlink (it went, or the set failed again and the mark is its own). */
+  _unmarkStop(df) { const R = this._unmarkRetry, r = R && R.get(df); if (!r) return; if (r.timer) clearTimeout(r.timer); R.delete(df); }
   /** r14: an older generation's set whose read failed with an error that passes — KEPT, said ONCE (a journal line per file ×
    *  error in a process; nothing waits on it: no notice), read again at the next start (its count said then). */
   _saidKept(h, g, df, { code, cls }) {
