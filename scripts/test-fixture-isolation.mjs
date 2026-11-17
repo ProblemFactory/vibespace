@@ -410,6 +410,56 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
       'CONTROL: a missing sentinel is a FAILURE, not an empty region that passes vacuously');
   }
 
+  // (a2) A PER-RUN NAME IN THE PERSON'S HOME (B-66d8, lane bl-scratch, 2026-11-17). test-group-admin named
+  //      ~/.vs-test-ctx-<Date.now()> as a group's context folder on every run — the product made it, nothing removed it —
+  //      and 205 of them sat in a person's home (2026-07..09). A path ROOTED at the real home (os.homedir(), a name bound
+  //      to it, `process.env.HOME || os.homedir()`) that carries a per-run part (Date.now(), process.pid, a random value,
+  //      hrtime), or a mkdtemp there, is a scratch folder in the wrong place, whoever writes it. A suite that sets HOME to a
+  //      scratch folder of its own first spells that folder, and a fixed name under the real home (a read: the installed
+  //      browsers, the corpus) is not a mint.
+  const PER_RUN = String.raw`(?:Date\.now\(\)|new Date\(\)|toISOString\(\)|process\.pid\b|Math\.random\(\)|randomUUID\(|randomBytes\(|hrtime)`;
+  const homeMints = (source) => {
+    const roots = new Set(['os.homedir()', 'homedir()']);
+    for (const m of source.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:process\.env\.HOME\s*\|\|\s*)?(?:os\.)?homedir\(\)/g)) roots.add(m[1]);
+    const word = (r) => (r.endsWith(')') ? ESC(r) : String.raw`(?<![\w$.])` + ESC(r) + String.raw`(?![\w$])`);
+    // THE FIXPOINT, as census (a) learned twice: a name derived from a name rooted at the real home is rooted there too
+    // (`const base = path.join(os.homedir(), '.x')`, then `path.join(base, 'run-' + Date.now())` on another line)
+    for (let pass = 0; pass < 8; pass++) {
+      const before = roots.size;
+      const alt = [...roots].map(word).join('|');
+      for (const m of source.matchAll(new RegExp(String.raw`\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:path\.(?:join|resolve)\(\s*(?:` + alt + String.raw`)|\`\$\{\s*(?:` + alt + String.raw`)\s*\}|(?:` + alt + String.raw`)\s*\+)`, 'g'))) roots.add(m[1]);
+      if (roots.size === before) break;
+    }
+    const alt = [...roots].map(word).join('|');
+    const shapes = [
+      new RegExp(String.raw`path\.(?:join|resolve)\(\s*(?:` + alt + String.raw`)[^;\n]*` + PER_RUN),
+      new RegExp(String.raw`(?:\$\{\s*(?:` + alt + String.raw`)\s*\}|(?:` + alt + String.raw`)\s*\+)[^;\n]*` + PER_RUN),
+      new RegExp(String.raw`mkdtempSync\(\s*(?:path\.(?:join|resolve)\(\s*)?(?:` + alt + ')'),
+      // B-66d8's own mechanism: a `~/…` string the PRODUCT expands (the group-admin roots resolve `~` against the home)
+      new RegExp(String.raw`(['"\x60])~\/[^'"\x60\n]*\1?[^;\n]*` + PER_RUN),
+    ];
+    return source.split('\n').filter((line) => !/^\s*(?:\/\/|\*|\/\*)/.test(line) && shapes.some((re) => re.test(line))).map((line) => line.trim().slice(0, 160));
+  };
+  {
+    const mints = suites.filter((f) => f !== CENSUS_SELF).map((f) => ({ f, hits: homeMints(src(f)) })).filter((x) => x.hits.length);
+    console.log(`  census (a2): walked ${suites.length - 1} suites (+ this one, whose controls carry the shape) for a per-run name minted under the real home`);
+    ok(mints.length === 0, 'no suite names a per-run folder under the REAL home (a suite mints its scratch in a temp dir — HOME pointed there first when the product resolves ~)', JSON.stringify(mints));
+    ok(homeMints("const ctxDir = path.join(os.homedir(), '.vs-test-ctx-' + Date.now());").length === 1,
+      'CONTROL (a2): the B-66d8 line itself, byte for byte (test-group-admin on 2.369.407), is caught (red)');
+    ok(homeMints("const base = path.join(os.homedir(), '.vs-x');\nconst run = path.join(base, 'run');\nconst d = path.join(run, 'r-' + new Date().toISOString());").length === 1
+      && homeMints("const r = call({ create: { contextDir: '~/.vs-test-ctx-' + Date.now() } });").length === 1,
+      'CONTROL (a2): two hops of aliasing (a fixpoint, as census (a) learned) with a date stamp, and a `~/…` string the product expands, are caught');
+    ok(homeMints("const home = process.env.HOME || os.homedir();\nconst d = path.join(home, `.vs-x-${process.pid}`);").length === 1
+      && homeMints('const d = `${os.homedir()}/.vs-x-${Math.random()}`;').length === 1 && homeMints("run(fs.mkdtempSync(path.join(os.homedir(), '.vs-x-')));").length === 1,
+      'CONTROL (a2): the indirect home, a template literal and a mkdtemp under the home are caught');
+    ok(homeMints("const BROWSERS = path.join(os.homedir(), '.agent-browser', 'browsers');").length === 0
+      && homeMints("const ctxDir = path.join(HOME, '.vs-test-ctx-' + Date.now());").length === 0
+      && homeMints("const d = path.join(os.tmpdir(), 'vs-x-' + Date.now()); const h = os.homedir();").length === 0
+      && homeMints("const myhome = scratchHome('x');\nconst d = path.join(myhome, 'x-' + process.pid);").length === 0
+      && homeMints("// a comment naming path.join(os.homedir(), '.x-' + Date.now())\nconst y = 1;").length === 0,
+      'CONTROL (a2): a fixed name under the home (a read), a per-run name under a scratch HOME, a temp-dir mint beside a home read, a name ending in «home» and a comment are not');
+  }
+
   // (b) THE ISOLATION CENSUS — THE DEFECT ITSELF, AS A PROPERTY OF THE SOURCE.
   //     Set = every suite that spawns `server.js` AND writes a transcript into
   //     a `.claude/projects` path. Such a server can only discover what lives

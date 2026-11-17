@@ -13,6 +13,13 @@ const { TaskGroupManager } = require('../src/task-groups.js');
 const { setupAgentRoutes } = require('../src/agent-routes.js');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-groupadmin-'));
+// B-66d8 (lane bl-scratch, 2026-11-17): THE SUITE'S OWN HOME. The roots default to '~' (os.homedir(), which reads $HOME) and
+// `create` makes the context folder, so on a person's home every run left ~/.vs-test-ctx-<ms> behind (205 by 2026-11-04).
+// HOME is a folder inside this suite's temp dir, set before the first call; the temp dir is removed at exit (a red or a throw too).
+process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } });
+const HOME = path.join(tmp, 'home');
+fs.mkdirSync(HOME);
+process.env.HOME = HOME;
 const tasks = new TaskGroupManager({ dataDir: tmp, onChange: () => {} });
 
 const routes = {};
@@ -61,7 +68,8 @@ userState = { sessionConfigs: { 'claude:abc-123': { groupManager: true } } };
 r = call({ list: true });
 check("list works when designated", r.code === 200 && Array.isArray(r.out.groups), JSON.stringify(r));
 
-const ctxDir = path.join(os.homedir(), '.vs-test-ctx-' + Date.now());
+const ctxDir = path.join(os.homedir(), '.vs-test-ctx');
+check("the context folder is minted under the suite's own home, never the person's", os.homedir() === HOME && ctxDir.startsWith(tmp + path.sep));
 r = call({ create: { title: 'War room', objective: 'Test initiative', contextDir: ctxDir, folders: [path.join(os.homedir(), 'work')] } });
 check('create returns the group', r.code === 200 && r.out.group?.title === 'War room');
 const gid = r.out.group.id;
