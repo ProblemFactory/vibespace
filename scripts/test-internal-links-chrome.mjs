@@ -106,8 +106,19 @@ const linkSel = (key) => `.chat-vs-link[data-vs-ref="claude:${key}"]`;
 let A_SID = null;
 /** the talker's window (A — the links are in its chat) in front on the desktop on show: a window a press opened (C, D's history) lands ON TOP of it
  *  (the first claim, 2026-11-17: five presses «covered» by C's window) */
-const frontA = async () => { await evalJs(`(() => { const w = [...app.sessions.keys()].find((k) => app.wm.windows.get(k)?._openSpec?.backendSessionId === ${JSON.stringify(A_SID)} && app.wm.windows.get(k)._desktopId === app.desktopManager.activeDesktopId); if (w) app.wm.focusWindow ? app.wm.focusWindow(w) : app.goToWinId(w); return !!w; })()`); await sleep(400); };
-const pressLink = async (sel) => { await frontA(); return press(sel); };
+const frontA = async () => {
+  // a menu left open by an earlier step closes the person's way (Escape); A's window — by its conversation, whatever its desktop tag — is
+  // REVEALED through the go-to door (goToWinId raises it; the second claim's try 1 found wm.focusWindow a no-op while the page still
+  // counted A as focused, C's window over A's chat)
+  await evalJs(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); const ws = [...app.sessions.keys()].filter((k) => app.wm.windows.get(k)?._openSpec?.backendSessionId === ${JSON.stringify(A_SID)}); const dm = app.desktopManager; const w = ws.find((k) => (app.wm.windows.get(k)._desktopId || dm.activeDesktopId) === dm.activeDesktopId) || ws[0]; if (w) app.goToWinId(w); return !!w; })()`);
+  await sleep(400);
+};
+/** a press on a link in A's chat: A in front, then the link ITSELF under the still door's point (the rect's centre) before the press */
+const pressLink = async (sel) => {
+  await frontA();
+  await until(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(sel)})].filter(${VISIBLE}).pop(); if (!e) return false; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const h = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return !!h && (h === e || e.contains(h)); })()`, { timeout: 4000 });
+  return press(sel);
+};
 const active = () => evalJs('app.desktopManager.activeDesktopId');
 const winsOf = (sid) => evalJs(`[...app.sessions.keys()].filter((w) => { const s = app.wm.windows.get(w)?._openSpec; return s && s.backendSessionId === ${JSON.stringify(sid)}; }).map((w) => ({ w, desk: app.wm.windows.get(w)._desktopId || null }))`);
 const toasts = () => evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((t) => t.textContent.trim())`);
