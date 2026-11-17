@@ -8,6 +8,10 @@
 // the readable side and a reply written after it goes out whole (RED control: the as-built socket that refused it); this
 // side's end still reads what the far side sends; a socket destroyed first credits and drops the far bytes until the far
 // CLOSE (RED control: no sink — the far window stalls).
+// §5 (主开发 2026-11-17): a destroyed paused socket credits the window it held unread, so the far side's queued bytes and its
+// CLOSE arrive (RED: a destroy that credits nothing); the link's death ends every socket — a held write released, the
+// response closed, the router empty (RED: no dead()); the router refuses a Mux built without closeAfterQueue. Every wait is
+// on its effect with a deadline.
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -19,6 +23,10 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// waits on an EFFECT with a deadline — never a fixed sleep (主开发 2026-11-17, must 6)
+const until = async (f, ms = 2000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (f()) return true; await sleep(2); } return !!f(); };
+const quiet = async (f, ms = 2000, n = 8) => { const t0 = Date.now(); let last, same = 0; while (Date.now() - t0 < ms) { const v = f(); if (v === last) { if (++same >= n) return v; } else { same = 0; last = v; } await sleep(3); } return f(); };
+const queuedOn = (mux, c) => (mux._sendQ.get(c) || []).reduce((n, b) => n + b.length, 0);
 const { Mux, INITIAL_WINDOW } = require(path.join(REPO, 'src/agentd/mux.js'));
 const SOCKF = 'src/agentd/chan-socket.js';
 const MUT = mutantCopies('chan-socket', REPO);
@@ -26,10 +34,11 @@ const pair = () => { const a = new EventEmitter(), b = new EventEmitter(); a.wri
 const world = (lib) => {
   const [ea, eb] = pair();
   let router = null;
-  const hub = new Mux(ea, { heartbeat: false, onData: (c, b) => router.onData(c, b), onWritable: (c) => router.onWritable(c), onClose: (c) => router.onClose(c) });
+  // the interface's link: both ends hold a CLOSE behind the channel's own queue (closeAfterQueue); the hub's onDead ends the router
+  const hub = new Mux(ea, { heartbeat: false, closeAfterQueue: true, onData: (c, b) => router.onData(c, b), onWritable: (c) => router.onWritable(c), onClose: (c) => router.onClose(c), onDead: () => router.dead?.() });
   router = lib.createChanSockets(hub);
   const got = new Map(), closed = new Set(); let manual = false;
-  const far = new Mux(eb, { heartbeat: false, onData: (c, b) => { got.set(c, Buffer.concat([got.get(c) || Buffer.alloc(0), b])); if (!manual) far.credit(c, b.length); }, onClose: (c) => closed.add(c) });
+  const far = new Mux(eb, { heartbeat: false, closeAfterQueue: true, onData: (c, b) => { got.set(c, Buffer.concat([got.get(c) || Buffer.alloc(0), b])); if (!manual) far.credit(c, b.length); }, onClose: (c) => closed.add(c) });
   const server = http.createServer((req, res) => {
     if (req.url === '/big') { res.writeHead(200, { 'content-type': 'application/octet-stream' }); let i = 0; const chunk = Buffer.alloc(65536, 5); const go = () => { while (i < 16) { i++; if (!res.write(chunk)) return res.once('drain', go); } res.end(); }; go(); return; }
     if (req.url === '/bye') { res.writeHead(200, { connection: 'close' }); res.end('bye'); return; }
@@ -54,7 +63,7 @@ console.log('§1 an http.Server takes a channel as a connection');
   ok('…and a second request on the SAME channel (keep-alive) is answered too', /hello \/b/.test(String(W.got.get(3) || '')));
   W.far.data(3, Buffer.from('GET /bye HTTP/1.1\r\nHost: x\r\n\r\n'));
   for (let t = 0; t < 100 && !W.closed.has(3); t++) await sleep(5);
-  W.far.closeChan(3); await sleep(20);                 // the far side's own CLOSE (the interface's, once its page has closed)
+  W.far.closeChan(3); await until(() => W.router.size === 0);   // the far side's own CLOSE (the interface's, once its page has closed)
   ok(`a server that ends the connection closes the channel AFTER its bytes (the far side read «bye», then the close), and once the far side has closed too the hub holds nothing (router ${W.router.size}, window entry ${W.hub._sendWin.has(3)})`, W.closed.has(3) && /bye(\r\n0\r\n\r\n)?$/.test(String(W.got.get(3) || '')) && W.router.size === 0 && !W.hub._sendWin.has(3), { closed: W.closed.has(3), tail: JSON.stringify(String(W.got.get(3) || '').slice(-40)) });
 }
 console.log('§2 a streamed response waits for the channel\'s credit');
@@ -63,8 +72,7 @@ for (const [name, lib, want] of [['the socket-shaped channel', real, true], ['RE
   const W = world(lib); W.setManual(true);              // the far side credits nothing until we say so
   const s = W.router.open(5, {}); W.server.emit('connection', s);
   W.far.data(5, Buffer.from('GET /big HTTP/1.1\r\nHost: x\r\n\r\n'));
-  await sleep(60);
-  const queued = (W.hub._sendQ.get(5) || []).reduce((n, b) => n + b.length, 0);
+  const queued = await quiet(() => queuedOn(W.hub, 5));   // the server has written all it could: the hub's queue stops moving
   // now the far reader takes and credits everything, a window at a time
   for (let t = 0; t < 200 && (W.got.get(5) || Buffer.alloc(0)).length < 16 * 65536; t++) { const have = (W.got.get(5) || Buffer.alloc(0)).length; W.far.credit(5, INITIAL_WINDOW); await sleep(5); if ((W.got.get(5) || Buffer.alloc(0)).length === have && t > 100) break; }
   const body = (W.got.get(5) || Buffer.alloc(0)).length;
@@ -78,12 +86,12 @@ console.log('§3 bytes are credited only as the reader takes them; a far close e
   const sent = []; let creditSeen = 0;
   const orig = W.hub.credit.bind(W.hub); W.hub.credit = (c, n) => { if (c === 9) creditSeen += n; return orig(c, n); };
   s.pause();                                            // the reader takes nothing yet
-  W.far.data(9, Buffer.alloc(100000, 1)); await sleep(30);
+  W.far.data(9, Buffer.alloc(100000, 1)); await until(() => s.readableLength >= 100000);
   const before = creditSeen;
-  const read = []; s.on('data', (d) => read.push(d.length)); s.resume(); await sleep(30);
+  const read = []; s.on('data', (d) => read.push(d.length)); s.resume(); await until(() => creditSeen >= 100000);
   ok(`a paused reader credits nothing (${before} B credited while 100000 B sat unread); reading credits what it took (${creditSeen} B)`, before === 0 && creditSeen === 100000, { before, creditSeen });
   let ended = false; s.on('end', () => { ended = true; });
-  W.far.closeChan(9); await sleep(30);
+  W.far.closeChan(9); await until(() => ended && W.router.size === 0);
   ok(`a far close ends the connection's readable side, the socket then ends its own (allowHalfOpen false, as a net.Socket) and the hub holds nothing (router ${W.router.size}, window entry ${W.hub._sendWin.has(9)})`, ended && W.router.size === 0 && !W.hub._sendWin.has(9));
 }
 console.log('§4 a CLOSE is a half-close (the interface relays a page\'s end as one)');
@@ -110,9 +118,9 @@ for (const [name, lib, want] of [['this side\'s end', real, true], ['RED CONTROL
   const s = W.router.open(13, {}); const got = []; s.on('data', (d) => got.push(d));
   let creditSeen = 0; const orig = W.hub.credit.bind(W.hub); W.hub.credit = (c, n) => { if (c === 13) creditSeen += n; return orig(c, n); };
   s.end('done'); for (let t = 0; t < 100 && !W.closed.has(13); t++) await sleep(5);
-  W.far.data(13, Buffer.alloc(50000, 3)); await sleep(30);
+  W.far.data(13, Buffer.alloc(50000, 3)); await until(() => got.reduce((a, b) => a + b.length, 0) >= 50000);
   const n = got.reduce((a, b) => a + b.length, 0);
-  W.far.closeChan(13); await sleep(30);
+  W.far.closeChan(13); await until(() => W.router.size === 0, want ? 2000 : 300);
   if (want) ok(`this side's end sends its CLOSE after «done» (${JSON.stringify(String(W.got.get(13) || ''))}), and the far side's later bytes are still read and credited (${n} B read, ${creditSeen} B credited); its CLOSE then leaves nothing held (router ${W.router.size}; the socket's own \`writable\` is ${s.writable})`, String(W.got.get(13) || '') === 'done' && W.closed.has(13) && n === 50000 && creditSeen === 50000 && W.router.size === 0 && s.writable === false);
   else ok(`${name}: a socket ended both ways is never destroyed and never leaves its router (router ${W.router.size}, destroyed ${s.destroyed})`, W.router.size === 1 && !s.destroyed);
 }
@@ -122,11 +130,46 @@ for (const [name, lib, want] of [['the sink', real, true], ['RED CONTROL (no sin
   const s = W.router.open(15, {}); s.on('error', () => { });
   s.destroy(); for (let t = 0; t < 100 && !W.closed.has(15); t++) await sleep(5);
   for (let i = 0; i < 3; i++) W.far.data(15, Buffer.alloc(INITIAL_WINDOW, 4));
-  await sleep(80);
-  const stalled = (W.far._sendQ.get(15) || []).reduce((n, b) => n + b.length, 0);
-  W.far.closeChan(15); await sleep(30);
+  await until(() => queuedOn(W.far, 15) === 0, want ? 2000 : 300);
+  const stalled = queuedOn(W.far, 15);
+  W.far.closeChan(15); await until(() => W.router.size === 0, want ? 2000 : 300);
   if (want) ok(`a socket destroyed before the far CLOSE leaves a sink: three far windows are credited and dropped (${stalled} B left waiting at the far side), and the far CLOSE ends it (router ${W.router.size})`, W.closed.has(15) && stalled === 0 && W.router.size === 0, { stalled });
   else ok(`${name}: the far side's bytes wait for a credit that never comes (${stalled} B stalled)`, stalled >= INITIAL_WINDOW, { stalled });
+}
+console.log('§5 a destroyed socket gives back its unread window; the link\'s death ends every socket (主开发 2026-11-17, musts 3 and 4)');
+const noDestroyCredit = (() => { const src = fs.readFileSync(path.join(REPO, SOCKF), 'utf8'); const A = '    if (owed > 0 && !this._farClosed) { this._credited += owed; try { this.mux.credit(this.chan, owed); } catch { } }\n'; return src.includes(A) ? require(MUT.write(SOCKF, src.split(A).join(''), 'no-destroy-credit')) : null; })();
+for (const [name, lib, want] of [['the destroy', real, true], ['RED CONTROL (a destroy that credits nothing unread)', noDestroyCredit, false]]) {
+  if (!lib) { ok(name + ': the mutant could be made', false); continue; }
+  const W = world(lib);
+  const s = W.router.open(17, {}); s.on('error', () => { }); s.pause();   // a paused keep-alive socket: nothing is read
+  W.far.data(17, Buffer.alloc(INITIAL_WINDOW, 5)); W.far.data(17, Buffer.alloc(INITIAL_WINDOW, 6));   // one window sits unread, the next waits at the far side
+  await until(() => s.readableLength >= INITIAL_WINDOW);
+  W.far.closeChan(17);                                     // the far CLOSE waits behind its own queued window
+  const before = { unread: s.readableLength, farQ: queuedOn(W.far, 17), held: W.far._closeAfter.has(17) };
+  s.destroy();
+  await until(() => W.router.size === 0 && queuedOn(W.far, 17) === 0, want ? 2000 : 300);
+  if (want) ok(`${name}: a paused socket holding a whole window unread (${before.unread} B, ${before.farQ} B more waiting far), destroyed — the unread bytes are credited, the far side's queued window and its CLOSE arrive (far queue ${queuedOn(W.far, 17)} B) and the router holds nothing (${W.router.size})`, before.unread === INITIAL_WINDOW && before.held && queuedOn(W.far, 17) === 0 && !W.far._closeAfter.has(17) && W.router.size === 0, before);
+  else ok(`${name}: the far side stalls for good — its window and its CLOSE wait (far queue ${queuedOn(W.far, 17)} B, close held ${W.far._closeAfter.has(17)}, router ${W.router.size})`, queuedOn(W.far, 17) > 0 && W.far._closeAfter.has(17) && W.router.size === 1, before);
+}
+const noDead = (() => { const src = fs.readFileSync(path.join(REPO, SOCKF), 'utf8'); const A = "    dead(reason = 'link lost') {"; return src.includes(A) ? require(MUT.write(SOCKF, src.split(A).join("    deadUnused(reason = 'link lost') {"), 'no-dead')) : null; })();
+for (const [name, lib, want] of [['the router', real, true], ['RED CONTROL (no road for the link\'s death)', noDead, false]]) {
+  if (!lib) { ok(name + ': the mutant could be made', false); continue; }
+  const W = world(lib); W.setManual(true);                 // the far side credits nothing: the response's write is held
+  let resClosed = false, sockClosed = false, sockErr = null;
+  W.server.on('request', (req, res) => res.on('close', () => { resClosed = true; }));
+  const s = W.router.open(19, {}); W.server.emit('connection', s);
+  s.on('close', () => { sockClosed = true; }); s.on('error', (e) => { sockErr = e.message; });
+  W.far.data(19, Buffer.from('GET /big HTTP/1.1\r\nHost: x\r\n\r\n'));   // keep-alive: a streamed response
+  await until(() => !!s._waitWrite);
+  const heldWrite = !!s._waitWrite;
+  W.hub.stream.emit('close');                              // the link dies under it
+  await until(() => sockClosed && resClosed && W.router.size === 0, want ? 2000 : 300);
+  if (want) ok(`${name}: the link killed under a keep-alive socket with a held write (${heldWrite}) — the socket is ended and destroyed («${sockErr}»), the response closes, the held write is released and the router holds nothing (${W.router.size})`, heldWrite && sockClosed && resClosed && sockErr === 'link lost' && !s._waitWrite && W.router.size === 0, { heldWrite, sockClosed, resClosed, sockErr });
+  else ok(`${name}: the socket, its held write and the response stay for ever (closed ${sockClosed}, router ${W.router.size})`, heldWrite && !sockClosed && W.router.size === 1, { sockClosed, resClosed });
+}
+{
+  let refused = null; try { real.createChanSockets(new Mux(new EventEmitter(), { heartbeat: false })); } catch (e) { refused = e.message; }
+  ok(`the router refuses a link built without closeAfterQueue — a socket's end would drop its queued reply («${String(refused).slice(0, 70)}…»)`, /closeAfterQueue/.test(String(refused)));
 }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
 process.exit(fail ? 1 : 0);

@@ -55,16 +55,22 @@ function encodeFrame(type, chan, payload = Buffer.alloc(0)) {
  * BOUNDS (an inner link's): `maxControl` — a chan-0 line longer than it is a protocol error (the link dies, named), and
  * control() refuses to send one; `maxFrame` — a longer frame is a protocol error. `heartbeat: false` — a link inside a link
  * takes its liveness from the outer one (an inner PING waits behind the outer channel's credit).
+ * THE CLOSE (`closeAfterQueue`, OPT-IN — 主开发 2026-11-17, the acceptance of piece 1): set ONLY by the interface's link and
+ * an inner link, where a CLOSE is a half-close that must leave after the channel's own queued bytes. Without it closeChan is
+ * the release's: the CLOSE at once, then the channel forgotten (the queue it drops is bytes the device agent throws away
+ * once its socket is gone) — today's device link never holds a close behind a credit its far socket may never send. NOT
+ * keyed on `emitsDrain`: the socket-shaped channel (chan-socket.js) rides a net-socket link and needs the queued close.
  */
 class Mux {
-  constructor(stream, { onControl, onData, onClose, onDead, onWritable, heartbeat = true, lineMax = LINE_MAX, overLong = null, maxControl = 0, maxFrame = FRAME_MAX } = {}) {
+  constructor(stream, { onControl, onData, onClose, onDead, onWritable, heartbeat = true, lineMax = LINE_MAX, overLong = null, maxControl = 0, maxFrame = FRAME_MAX, closeAfterQueue = false } = {}) {
     this.stream = stream;
     this._lineMax = Number(lineMax) > 0 ? Math.min(Number(lineMax), LINE_MAX) : LINE_MAX;   // a suite may lower it; never above the frame
     this._overLong = typeof overLong === 'function' ? overLong : null;
     this._maxControl = Number(maxControl) > 0 ? Number(maxControl) : 0;   // 0 = unbounded (the outer link, until every growable control payload rides a byte channel)
     this._maxFrame = Number(maxFrame) > 0 ? Math.min(Number(maxFrame), FRAME_MAX) : FRAME_MAX;   // an inner link's bound; never above the release's
     this._honorsDrain = stream.emitsDrain === true;   // only a stream that SAYS it emits 'drain' (the channel adapter): an outer link keeps today's socket buffer, bounded by its windows
-    this._closeAfter = new Set(); // channels whose CLOSE waits behind their own held data
+    this._closeAfterQueue = closeAfterQueue === true;   // opt-in: the interface's link and an inner link (see THE CLOSE above)
+    this._closeAfter = new Set(); // channels whose CLOSE waits behind their own held data (closeAfterQueue only)
     this._wireFull = false;   // the stream said write() === false; every frame waits for its 'drain'
     this._wireQ = [];         // encoded frames waiting for the drain, in order
     this._wireWaiters = new Set(); // channels whose producer was told false only because the wire was full
@@ -105,7 +111,7 @@ class Mux {
   /** the stream drained: the waiting frames go first, in order, then every channel the wire held; a channel whose
    *  queue is empty again hears onWritable */
   _drained() {
-    if (this._dead) return;
+    if (this._dead || !this._wireFull) return;   // a drain the wire did not ask for changes nothing (and never re-enters a flush)
     this._wireFull = false;
     while (this._wireQ.length && !this._wireFull) {
       const f = this._wireQ.shift();
@@ -186,7 +192,7 @@ class Mux {
     if (!q.length) {
       this._sendQ.delete(chan);
       if (this._closeAfter.delete(chan)) { this._raw(T.CLOSE, chan); this.forget(chan); return; }
-      if (this._wireFull) this._wireWaiters.add(chan); else this.onWritable(chan);
+      if (this._wireFull) this._wireWaiters.add(chan); else { this._wireWaiters.delete(chan); this.onWritable(chan); }   // told once
     }
   }
 
@@ -200,14 +206,18 @@ class Mux {
     this._raw(T.CREDIT, chan, p);
   }
 
-  /** A CHANNEL'S CLOSE LEAVES AFTER THAT CHANNEL'S QUEUE, and the side that drops a channel FORGETS it (cs M1, 主开发
-   *  2026-11-17 from the interface's acceptance): a close behind bytes still waiting for credit waits for them; once it
-   *  leaves, the channel's send state is dropped — a party that opens a channel per connection never grows for good. */
+  /** The side that drops a channel FORGETS it (cs M1, 主开发 2026-11-17 from the interface's acceptance): once its CLOSE
+   *  leaves, the channel's send state is dropped — a party that opens a channel per connection never grows for good.
+   *  WITH closeAfterQueue (the interface's link, an inner link) a close behind bytes still waiting for credit waits for
+   *  them; WITHOUT it (today's device link) the CLOSE goes at once, as the release's did, and the queue is dropped. */
   closeChan(chan) {
-    if (this._sendQ.get(chan)?.length) { this._closeAfter.add(chan); return; }   // behind its own queued data
+    if (this._closeAfterQueue && this._sendQ.get(chan)?.length) { this._closeAfter.add(chan); return; }   // behind its own queued data
     this._raw(T.CLOSE, chan);
     this.forget(chan);
   }
+
+  /** this link holds a channel's CLOSE behind its own queue (the option) — a socket-shaped channel needs it */
+  get closesAfterQueue() { return this._closeAfterQueue; }
 
   /** forget a channel's send state locally — NO frame on the wire (the side whose peer closed it calls this; B-beaf: a
    *  side done with a channel): its send window, anything still queued on it; a credit that arrives later re-creates nothing */

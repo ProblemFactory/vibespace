@@ -7,6 +7,10 @@
 //   write(buf)  = the outer data()'s answer — FALSE when the outer channel had to queue (its window or its wire is full), and
 //                 then 'drain' follows at the outer channel's onWritable, so an inner Mux holds its frames (mux.js honours a
 //                 stream that declares `emitsDrain`) and its producers pause: the outer queue stays within one window.
+//                 'drain' comes ONLY after a write that answered false (a socket's own contract — 主开发 2026-11-17): the
+//                 outer Mux says onWritable whenever a frame goes straight through, and an inner Mux that heard 'drain' for
+//                 each of those re-entered its own flush from inside it — a stack one deeper per frame, and a writable
+//                 told for a channel whose CLOSE had already left.
 //   push(buf)   emits 'data' to the inner Mux, which parses it synchronously; the outer credit for those bytes is the outer
 //                 owner's to return (today's owners credit as they deliver) — real flow control lives at the inner level.
 //   destroy()   closes the outer channel; 'close' is emitted once, whichever side ends it.
@@ -20,14 +24,16 @@ class ChanDuplex extends EventEmitter {
     this.chan = chan;
     this.emitsDrain = true;      // mux.js holds its frames on a false write and waits for 'drain'
     this.closedAt = 0;
+    this._needDrain = false;     // a write answered false: the next outer onWritable is a drain
   }
   write(buf) {
     if (this.closedAt) return false;
     let ok = false; try { ok = this.outer.data(this.chan, buf) !== false; } catch { ok = false; }
+    if (!ok) this._needDrain = true;
     return ok;
   }
   push(buf) { if (!this.closedAt) this.emit('data', buf); }
-  writable() { if (!this.closedAt) this.emit('drain'); }
+  writable() { if (this.closedAt || !this._needDrain) return; this._needDrain = false; this.emit('drain'); }
   closed() { if (this.closedAt) return; this.closedAt = Date.now(); this.emit('close'); }
   destroy() { if (this.closedAt) return; try { this.outer.closeChan(this.chan); } catch { } this.closed(); }
 }

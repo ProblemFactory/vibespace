@@ -15,7 +15,13 @@
 //              (allowHalfOpen false, as a net.Socket: the writable side ends by itself once the readable has ended).
 //   sink     — a socket destroyed before the far CLOSE leaves its channel as a SINK in the router: what the far side still
 //              sends is credited and dropped, never kept, until its CLOSE. There is no reset frame, so this keeps the far
-//              window from stalling on a reader that is gone.
+//              window from stalling on a reader that is gone. The destroy itself first credits what still sat UNREAD in
+//              the socket (a paused keep-alive socket can hold a whole window: else the far side stalls for good, its
+//              CLOSE never leaves and the sink is never removed — 主开发 2026-11-17).
+//   death    — the owner calls the router's dead() from the Mux's onDead: every socket is ended on its far side, then
+//              destroyed with «link lost» (a held write's callback gets the error), and both maps are cleared.
+//   the link — the owner's Mux MUST be built with `closeAfterQueue` (a CLOSE behind the channel's own queued bytes, the
+//              interface's link): without it end() would drop the reply still queued. createChanSockets refuses one.
 //   socket   — remoteAddress / remotePort / encrypted come from the open line's stamp; setNoDelay / setTimeout /
 //              setKeepAlive / ref / unref are accepted and do nothing (a channel has no TCP of its own).
 // The owner of the Mux routes its callbacks through createChanSockets(mux): onData / onWritable / onClose for a channel it
@@ -40,7 +46,11 @@ class ChanSocket extends Duplex {
     if (ok) cb(); else this._waitWrite = cb;   // resumed by drained()
   }
   _final(cb) { this._closeChan(); cb(); }   // THIS side's CLOSE after its queued bytes; the far side may still send (a half-close)
-  _destroy(err, cb) { this._closeChan(); const w = this._waitWrite; this._waitWrite = null; if (w) w(err || new Error('destroyed')); cb(err); }
+  _destroy(err, cb) {
+    const owed = this._pushed - this._credited;   // what the far side sent that no reader will take now — its window back
+    if (owed > 0 && !this._farClosed) { this._credited += owed; try { this.mux.credit(this.chan, owed); } catch { } }
+    this._closeChan(); const w = this._waitWrite; this._waitWrite = null; if (w) w(err || new Error('destroyed')); cb(err);
+  }
   _read() { this._settleCredit(); }
   // every reader takes bytes through read() — the flowing mode's own loop too — so the credit is settled right there
   read(n) { const r = super.read(n); this._settleCredit(); return r; }
@@ -66,6 +76,7 @@ class ChanSocket extends Duplex {
  *  the channel is one of its sockets or sinks (the owner then neither credits nor handles it itself). A socket stays routed
  *  until it has closed, so its writes still drain after a far CLOSE; `size` = sockets + sinks still held. */
 function createChanSockets(mux) {
+  if (!mux || mux.closesAfterQueue !== true) throw new Error('createChanSockets: the link\'s Mux must be built with closeAfterQueue (a socket\'s CLOSE leaves after its queued bytes)');
   const socks = new Map(), sinks = new Set();
   return {
     open(chan, stamp) {
@@ -81,6 +92,11 @@ function createChanSockets(mux) {
     },
     onWritable(chan) { const s = socks.get(chan); if (s) { s.drained(); return true; } return sinks.has(chan); },
     onClose(chan) { const s = socks.get(chan); if (s) { s.remoteClosed(); return true; } return sinks.delete(chan); },
+    /** the link died (the owner calls this from the Mux's onDead): each socket ends on its far side, then is destroyed */
+    dead(reason = 'link lost') {
+      const all = [...socks.values()]; socks.clear(); sinks.clear();
+      for (const s of all) { try { s.remoteClosed(); } catch { } try { s.destroy(new Error(reason)); } catch { } }
+    },
     get size() { return socks.size + sinks.size; },
   };
 }
