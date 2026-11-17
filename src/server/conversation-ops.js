@@ -370,7 +370,11 @@ function opsOver(getDeps) {
       if (a && a.ok) await keepEndedAfter(before, by);
       return a && a.ok ? { ok: true, sessionId: hit.id } : refusal('not_found', 'no live conversation by that id');
     }
-    const before = target && target.sessionId ? await beforeOf(String(target.sessionId)) : null;
+    // the session the kill body will end: the id as sent, else (a stale page id) the live session that ADDRESSES the conversation
+    const live = D().activeSessions;
+    let eid = target && target.sessionId && live && typeof live.has === 'function' && live.has(String(target.sessionId)) ? String(target.sessionId) : null;
+    if (!eid && target && target.backendSessionId && live && typeof live.entries === 'function') for (const [k, es] of live.entries()) if (require('../claude-lock-capture.js').addressableId(es) === target.backendSessionId) { eid = k; break; }
+    const before = eid ? await beforeOf(eid) : null;
     const r = await D().endSession(target, { reply: reply || (() => { }), actBy: SPEC.actByOf(by), endTree: endTree === true });
     await keepEndedAfter(before, by);
     return r;
@@ -454,7 +458,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
   const ENDED_DOOR = 'A person can terminate it from its card in the sidebar (Terminate in its menu).';
   const REACH_WORDS = { grant: 'through a grant of this key', instance: 'through the instance grant (every conversation here)', groups: 'through a Task Group grant' };
   const RECIPE = { opener: ' This key opened it: pass force (--force) to end it anyway.', self: ' It is this conversation itself: pass force (--force) to end it anyway.' };
-  function endGate(t, args, label) {
+  function endGate(t, args, label, { discountAsks = false } = {}) {
     const own = t.by === 'opener' || t.by === 'self';
     if (args.force) return own ? null : { ok: false, code: 'force_not_yours', why: `force is honoured only for a conversation this key opened (or the calling conversation itself); this one is reached ${REACH_WORDS[t.by] || 'by another rule'} — nothing was stopped. ${ENDED_DOOR}`, target: label };
     const teach = own ? RECIPE[t.by] : '';
@@ -466,7 +470,8 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
     const row = listFacts && typeof listFacts.rowOf === 'function' ? listFacts.rowOf(t.id) : null;
     if (!row) return { ok: false, code: 'not_ready', why: 'the conversation facts are not wired yet — nothing was stopped', target: label };
     const CF = require('../conversation-facts.js');   // THE end verdict (PURE) — required here: a suite's scratch copy of this file carries no sibling
-    const v = CF.endVerdict(row);
+    // the archive's own recipe (主开发 15:31Z): a call that RESOLVES the conversation's asks is judged with them discounted
+    const v = CF.endVerdict(discountAsks ? { ...row, asks: 0, asksWhy: undefined } : row);
     if (!v.endable) { const ref = CF.refusalOf(v); return { ...ref, why: ref.why + teach, target: label }; }
     return null;
   }
@@ -536,7 +541,9 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       const label = t.s.name || args.target || null;
       const gate = endGate(t, args, label);
       if (gate) return gate;
-      const r = await O().endConversation({ webuiId: t.id }, { ...byOf(ctx.caller, ctx.keyId), ...(args.force ? { forced: true } : {}) });
+      // «forced» only when the gate WOULD have refused it — an idle own worker ended with the force word is no «ended mid-task»
+      const cut = !!args.force && !!endGate(t, { ...args, force: false }, label);
+      const r = await O().endConversation({ webuiId: t.id }, { ...byOf(ctx.caller, ctx.keyId), ...(cut ? { forced: true } : {}) });
       const key = keyOf(t.s);
       return r && r.ok ? { ok: true, target: idOf(t.s) || t.id, ...(key ? { link: 'vibespace://conversation/' + key } : {}) } : r;
     },
@@ -558,12 +565,14 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v.reach ? { reach: v.reach } : {}) };
       const asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean);
       if (asks.length && !args.resolveAsks) return { ok: false, code: 'asks_open', why: `${asks.length} open For-you ask${asks.length === 1 ? '' : 's'} of that conversation (${asks.join(', ')}) — the owner answers them, or pass resolveAsks`, asks, target: label };
-      if (f.s) { const gate = endGate({ s: f.s, id: f.id, by: v.by }, args, label); if (gate) return gate; }   // the ONE end gate (lane end-obeys-verdict: must 1)
+      const discountAsks = !!args.resolveAsks;   // the archive's recipe: the asks it resolves are no reason to refuse
+      if (f.s) { const gate = endGate({ s: f.s, id: f.id, by: v.by }, args, label, { discountAsks }); if (gate) return gate; }   // the ONE end gate (lane end-obeys-verdict: must 1)
+      const cutA = !!(f.s && args.force && endGate({ s: f.s, id: f.id, by: v.by }, { ...args, force: false }, label, { discountAsks }));
       let resolved = [];
       if (asks.length) { try { resolved = (resolveAsks(asks, `automation:${keyId}`) || {}).changed || []; } catch { resolved = []; } }
       let ended = false;
       if (f.s) {
-        const r = await O().endConversation({ webuiId: f.id }, { ...byOf(caller, keyId), ...(args.force ? { forced: true } : {}) }, { endTree: true });   // B-c134 cure: an archive ends the background tree
+        const r = await O().endConversation({ webuiId: f.id }, { ...byOf(caller, keyId), ...(cutA ? { forced: true } : {}) }, { endTree: true });   // B-c134 cure: an archive ends the background tree
         if (!r || !r.ok) return { ok: false, code: (r && r.code) || 'failed', why: (r && r.why) || 'the conversation could not be ended', target: label };
         ended = true;
       }

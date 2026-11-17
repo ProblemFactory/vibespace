@@ -1980,7 +1980,7 @@ class LayoutManager {
     // ENDED on purpose is never in it, and the «process ended while the server was down» count reads the REASON, never any sentence
     const reasonOf = (d) => stoppedReasonFor(d.opts?.backend, d.opts?.backendSessionId || d.sessionId, this.app.sidebar?._allSessions);
     stopped = stopped.filter((d) => reasonOf(d) !== 'ended');
-    if (!stopped.length) return;
+    if (stopped.length < 2) return;   // nothing left, or one window: no offer — armed on the count AFTER the filter (the caller's ≥ 2 rule)
     // WHY (lane dead-socket-keeps-chat-meta): the ones a boot kept stopped because their process ended while it was down
     const ended = stopped.filter((d) => reasonOf(d) === 'dead-socket-at-boot').length;
     // B-864f: while the vault is LOCKED (every restart) a conversation whose folder is on a machine or a storage mount cannot

@@ -124,6 +124,25 @@ console.log('②b ONE GATE for the sibling verb, the recipe taught, the door tha
   const a2 = await A2.call({ target: CID, force: true });
   ok(!a1.ok && a1.code === 'subject_busy' && a1.busy.some((b) => b.code === 'background') && A1.sessions.has('sess-1') && !A1.archived.length && !a2.ok && a2.code === 'force_not_yours' && A2.sessions.has('sess-1') && !A2.ended.length,
     'MUST 1 the archive verb asks the ONE gate: a granted conversation with background work is refused and lives; force through a grant is refused by the force code', { a1: a1.code, a2: a2.code });
+  // 主开发 15:31Z must 1 — the archive's OWN recipe: --resolve-asks discounts the asks it resolves; without it, asks open
+  const archAsk = (by) => {
+    const sessions = new Map([['sess-1', session()], ['sess-me', { backend: 'claude', mode: 'chat', backendSessionId: CALLER, name: 'Manager', _convFacts: idleFacts() }]]);
+    const ended = [], archived = [], resolved = [];
+    const asksNow = new Map([[`claude:${CID}`, [{ id: 'q1', by: 'agent' }]]]);
+    const stubOps = { endConversation: async (target) => { ended.push(target); sessions.delete(target.webuiId); return { ok: true }; } };
+    const listFacts = COL.create({ activeSessions: sessions, ...srcs({ asksOf: (k) => asksNow.get(k) || [] }) });
+    const verbs = OPS.automationVerbs({ activeSessions: sessions, listFacts, ops: stubOps, archive: (k) => { archived.push(k); return { ok: true }; }, asksOf: (k) => asksNow.get(k) || [], resolveAsks: (ids) => { resolved.push(...ids); asksNow.clear(); return { changed: ids }; }, turnOf: () => 'idle' });
+    return { call: (args) => verbs['conversations.archive'](args, { caller: { conversationId: CALLER, sessionKey: `claude:${CALLER}` }, keyId: 'k1', reach: () => ({ ok: true, by }) }), ended, archived, resolved };
+  };
+  const AR = archAsk('grant'); const ar0 = await AR.call({ target: CID }); const ar1 = await AR.call({ target: CID, resolveAsks: true });
+  ok(ar0.code === 'asks_open' && ar1.ok && ar1.archived === true && AR.resolved.join() === 'q1' && AR.ended.length === 1,
+    'the archive\'s own recipe: an idle granted conversation with one open ask — without --resolve-asks «asks open»; WITH it the gate discounts those asks: archived, the ask resolved', { ar0: ar0.code, ar1 });
+  // «forced» only when the gate WOULD have refused: an idle own worker ended with the force word is no «ended mid-task»
+  const idleOwn = world(); await idleOwn.call({ target: CID, force: true }, 'opener');
+  const busyOwn = world({ s: session({ _turn: 'running' }) }); await busyOwn.call({ target: CID, force: true }, 'opener');
+  const grantedTerm = await world({ s: session({ mode: 'terminal' }) }).call({ target: CID }, 'grant');
+  ok(idleOwn.ended[0].by.forced === undefined && busyOwn.ended[0].by.forced === true && grantedTerm.code === 'person_only' && !/force/.test(grantedTerm.why),
+    '«forced» is recorded only when the gate would have refused (an idle own worker ended with --force is not «mid-task»); a granted key\'s «only a person» refusal never names force', { idle: idleOwn.ended[0].by, busy: busyOwn.ended[0].by });
   // MUST 2 — the refusals of the key's OWN conversation teach the force word; any other reach is never told; a conversation is its own
   const ow = world({ s: session({ _turn: 'running' }) });
   const o1 = await ow.call({ target: CID }, 'opener');
@@ -170,9 +189,11 @@ let duringKill = null;
 /** the kill body as the ws handler's: it answers `killed` and THEN leaves the live map (the same order) */
 const endSession = async (data, { reply = () => { } } = {}) => {
   if (duringKill) await duringKill();
-  const ok1 = active.has(data.sessionId);
-  try { reply({ type: 'killed', sessionId: data.sessionId, ok: ok1 }); } catch { }
-  active.delete(data.sessionId);
+  let sid = data.sessionId;
+  if (!active.has(sid) && data.backendSessionId) for (const [k, s0] of active) if (s0.backendSessionId === data.backendSessionId) { sid = k; break; }   // the kill body's stale-id fallback
+  const ok1 = active.has(sid);
+  try { reply({ type: 'killed', sessionId: sid, ok: ok1 }); } catch { }
+  active.delete(sid);
 };
 const KEYS = { k1: 'Lane dispatch' };
 const ops = (keepEnded = api.keepEnded, more = {}) => OPS.forDeps({ endSession, activeSessions: active, keepEnded, endFactsBefore: api.endFactsBefore, keyNameOf: (id) => KEYS[id] || null, ...more });
@@ -184,7 +205,7 @@ console.log('③ a person\'s Terminate ends a busy conversation');
   const t0 = Date.now();
   await ops().endConversation({ sessionId: 'sess-p' }, { kind: 'human', actBy: 'person@sign-in' });
   const row = await rowOf('e2e00000-0000-4000-8000-0000000000b2');
-  ok(!active.has('sess-p') && row && row.stopReason === 'ended' && row.endedBy && row.endedBy.kind === 'person' && row.endedBy.name === null && row.stoppedAt >= t0,
+  ok(!active.has('sess-p') && row && row.stopReason === 'ended' && row.endedBy && row.endedBy.kind === 'person' && row.endedBy.actorId === null && row.endedBy.name === null && row.stoppedAt >= t0,
     'the person\'s Terminate ends it (the verdict is the agent\'s door only) — its row: ended, by a person, when', row);
 }
 
@@ -224,7 +245,7 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   await ops(api.keepEnded, { endFactsBefore: (s, id) => api.endFactsBefore(s, id, { boundMs: 80, read: never }) }).endConversation({ sessionId: 'sess-n' }, { kind: 'human', actBy: 'person@sign-in' });
   const rn = JSON.parse(fs.readFileSync(path.join(META, 'cw-6-1794880000006.json.stopped'), 'utf8'));   // the record itself (the page's row carries who and when)
   const src = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
-  ok(!active.has('sess-n') && rn && rn.endFacts && rn.endFacts.goalStated === false && rn.endFacts.queueRead === false && /not read within 80 ms/.test(rn.endFacts.notStated) && rn.endFacts.folder === '/srv/w' && rn.endFacts.mode === 'chat' && src.includes('const END_READ_MS = 1000;'),
+  ok(!active.has('sess-n') && rn && rn.endedBy && rn.endedBy.actorId === null && rn.endFacts && rn.endFacts.goalStated === false && rn.endFacts.queueRead === false && /not read within 80 ms/.test(rn.endFacts.notStated) && rn.endFacts.folder === '/srv/w' && rn.endFacts.mode === 'chat' && src.includes('const END_READ_MS = 1000;'),
     'a read that NEVER settles: the Terminate returns at the bound (a second by default), the record is written from memory and its facts say «not stated»', { facts: rn && rn.endFacts });
   // the facts read from a real sidecar: the goal keys HELD, the claude wrapper's own queue
   fs.writeFileSync(path.join(BUF, 'sess-g.json'), JSON.stringify({ mode: 'chat', goal: 'Ship the release', queue: [{ id: 1 }, { id: 2 }], queueReadAt: 1794880000000 }));
@@ -232,7 +253,7 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   await ops().endConversation({ sessionId: 'sess-g' }, { kind: 'human', actBy: 'person@sign-in' });
   const g = JSON.parse(fs.readFileSync(path.join(META, 'cw-7-1794880000007.json.stopped'), 'utf8'));
   const f = g.endFacts || {};
-  ok(f.goalStated === true && f.goalStatus === 'active' && !('goal' in f) && f.queueRead === true && f.queueCount === 2 && f.mode === 'chat' && f.folder === '/srv/g' && f.machine === 'box-2' && !f.notStated,
+  ok(g.endedBy && g.endedBy.kind === 'person' && g.endedBy.actorId === null && f.goalStated === true && f.goalStatus === 'active' && !('goal' in f) && f.queueRead === true && f.queueCount === 2 && f.mode === 'chat' && f.folder === '/srv/g' && f.machine === 'box-2' && !f.notStated,
     'the facts as of the end, read once from its sidecar: goalStated (the goal keys HELD) and its status, queueRead (the wrapper\'s own mark) and the count, the mode, the folder, the machine', f);
   // the codex wrapper's queue: an empty list it began with is NOT a read; its `queueRead` mark is
   fs.writeFileSync(path.join(BUF, 'sess-c1.json'), JSON.stringify({ mode: 'chat', queue: [] }));
@@ -271,14 +292,37 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   active.set('sess-k', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000e8', sockName: 'cw-10-1794880000010', name: 'Consumed' }));
   await ops().endConversation({ sessionId: 'sess-k' }, { kind: 'human', actBy: 'person@sign-in' });
   const had = !!(await rowOf('e2e00000-0000-4000-8000-0000000000e8'));
-  const gone = api.consumeKept('claude:e2e00000-0000-4000-8000-0000000000e8');
+  const gone = await api.consumeKept('claude:e2e00000-0000-4000-8000-0000000000e8');
   await new Promise((r) => setTimeout(r, 50));
   const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
-  ok(had && gone === true && !(await rowOf('e2e00000-0000-4000-8000-0000000000e8')) && !fs.existsSync(path.join(META, 'cw-10-1794880000010.json.stopped')) && api.consumeKept('claude:none') === false
+  ok(had && gone === true && !(await rowOf('e2e00000-0000-4000-8000-0000000000e8')) && !fs.existsSync(path.join(META, 'cw-10-1794880000010.json.stopped')) && (await api.consumeKept('claude:none')) === false
     && /activeSessions\.set\(id, session\);\n(.*\n){2}.*if \(data\.resume && data\.resumeId && !data\.fork\) \{ try \{ require\('\.\/server\/boot-restore\.js'\)\.consumeEnded\(`\$\{backend\}:\$\{data\.resumeId\}`\); \} catch \{ \} \}/.test(wc) && typeof BR.consumeEnded === 'function',
     'CONSUMED at the ONE create road (ws-create, right where the create makes it live — a person\'s resume too): memory and file; nothing kept ⇒ false', { had, gone });
+  // 主开发 15:31Z must 2 — a PAIRED MACHINE's end: the row carries its machine (never a local row), the ageing leaves it alone
+  active.set('sess-h', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000eb', sockName: 'cw-13-1794880000013', name: 'Remote', cwd: '/home/far', host: 'box-9' }));
+  await ops().endConversation({ sessionId: 'sess-h' }, { kind: 'human', actBy: 'person@sign-in' });
+  const rh = (await rowOf('e2e00000-0000-4000-8000-0000000000eb')) || {};
+  const SR = require(path.join(REPO, 'src/routes/sessions.js'));
+  const merged = typeof SR.mergeKeptStopped === 'function' ? SR.mergeKeptStopped([], [rh]) : null;
+  ok(rh.host === 'box-9' && rh.cwd === '/home/far' && (!merged || (merged[0] && merged[0].host === 'box-9')) && src.includes("if (m.stopReason === STOP_ENDED && !m.host) {"),
+    'a paired machine\'s Terminate: the stopped row carries its machine (never a local row; a resume goes there) and the ageing never asks this machine for its transcript', { host: rh.host, merged: merged && merged[0] && merged[0].host });
+  // a Terminate sent with a STALE page id writes its record (the end's read uses the kill body's own fallback)
+  active.set('sess-live', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000ec', sockName: 'cw-14-1794880000014', name: 'Stale page' }));
+  await ops().endConversation({ sessionId: 'sess-stale', backendSessionId: 'e2e00000-0000-4000-8000-0000000000ec' }, { kind: 'human', actBy: 'person@sign-in' });
+  ok(!active.has('sess-live') && fs.existsSync(path.join(META, 'cw-14-1794880000014.json.stopped')), 'a Terminate sent with a STALE page id: the kill body\'s fallback ends the live session — and its record is written (the read used the same fallback)');
+  // the consume waits for the store's FIRST load: a resume in the first seconds after a boot leaves no old file to come back
+  const M4 = path.join(ROOT, 'meta4'); fs.mkdirSync(M4, { recursive: true });
+  fs.writeFileSync(path.join(M4, 'cw-15-1794880000015.json.stopped'), JSON.stringify({ backend: 'claude', backendSessionId: 'e2e00000-0000-4000-8000-0000000000ed', status: 'stopped', stoppedAt: 1, stopReason: 'ended' }));
+  const fresh = mk(BR, M4);
+  const c0 = await fresh.consumeKept('claude:e2e00000-0000-4000-8000-0000000000ed');
+  await new Promise((r) => setTimeout(r, 30));
+  ok(c0 === true && !fs.existsSync(path.join(M4, 'cw-15-1794880000015.json.stopped')) && src.includes('`${file}.${process.pid}.${++endTmpSeq}.tmp`'),
+    'the consume waits for the store\'s first load (an earlier boot\'s record is consumed, its file gone); the temp file\'s name is unique per write', { c0 });
+  const cwp = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
+  ok(cwp.includes("      if (listed.complete !== true && meta.queueReadAt !== undefined) { delete meta.queueReadAt; scheduleMeta(); }   // THE ONE END RECORD: a PARTIAL read is no read") && cwp.indexOf('delete meta.queueReadAt') < cwp.indexOf('publishQueue(items, { fresh: listed.complete === true });'),
+    '主开发 15:31Z must 3 — the codex wrapper: a PARTIAL list read drops the read mark before the queue is published, so «read» always means a complete read');
   // ITS AGE: an ended record a later boot finds is asked the transcript question, one at a time (a chain, off the loop)
-  ok(/if \(m\.stopReason === STOP_ENDED\) \{ const file = path\.join\(META_DIR, f\); endedSettle = endedSettle\.then\(\(\) => locateOrDrop\(sockFile, file, m, id\)\)\.catch\(\(\) => null\); \}/.test(src),
+  ok(/if \(m\.stopReason === STOP_ENDED && !m\.host\) \{ const file = path\.join\(META_DIR, f\); endedSettle = endedSettle\.then\(\(\) => locateOrDrop\(sockFile, file, m, id\)\)\.catch\(\(\) => null\); \}/.test(src),
     'ITS AGE: an ended record nothing resumed leaves like a restart\'s copy — superseded, consumed, or (asked once per boot, one at a time) gone with its transcript (source pin)');
 }
 
@@ -297,7 +341,7 @@ console.log('⑦ who ended it toward an agent; the Resume-all offer (主开发 1
   const rows = [{ backend: 'claude', backendSessionId: 'x1', status: 'stopped', stopReason: 'ended', stoppedAt: 5, endedBy: { kind: 'person' } }, { backend: 'claude', backendSessionId: 'x2', status: 'stopped', stopReason: 'dead-socket-at-boot', stoppedAt: 6 }];
   const lay = fs.readFileSync(path.join(REPO, 'src/lib/layout.js'), 'utf8');
   ok(SW.stoppedReasonFor('claude', 'x1', rows) === 'ended' && SW.stoppedReasonFor('claude', 'x2', rows) === 'dead-socket-at-boot' && !!SW.stoppedWhyFor('claude', 'x1', rows)
-    && lay.includes("    stopped = stopped.filter((d) => reasonOf(d) !== 'ended');") && lay.includes("const ended = stopped.filter((d) => reasonOf(d) === 'dead-socket-at-boot').length;"),
+    && lay.includes("    stopped = stopped.filter((d) => reasonOf(d) !== 'ended');") && lay.includes("    if (stopped.length < 2) return;   // nothing left, or one window: no offer") && lay.includes("const ended = stopped.filter((d) => reasonOf(d) === 'dead-socket-at-boot').length;"),
     'MUST 4 the Resume-all offer reads the REASON (stoppedReasonFor): an ended conversation is never offered, and «stopped because the process ended while the server was down» counts only a restart\'s — though both carry a sentence', null);
 }
 
@@ -323,13 +367,13 @@ console.log('⑤ the words and the census of stopReason readers');
   const SESSION_READERS = ['src/server/boot-restore.js', 'src/routes/sessions.js', 'src/lib/stopped-why.js', 'src/lib/session-card.js', 'src/lib/chat-view.js', 'src/server/conversation-facts.js', 'src/lib/layout.js'];
   const OTHER_MEANING = { 'src/opencode-serve.js': 'the model\'s stop reason', 'src/harnesses/antigravity-wall.js': 'the model\'s stop reason', 'src/record-shape.js': 'a record field\'s name',
     'src/message-manager.js': 'the model\'s stop reason', 'src/codex-message-manager.js': 'the model\'s stop reason', 'src/acp-message-manager.js': 'the model\'s stop reason' };
-  const files = [];
-  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js') && /\bstopReason\b|\bstopped(?:Why|Reason)For\b/.test(fs.readFileSync(path.join(REPO, r), 'utf8'))) files.push(r); } };   // + the readers that go THROUGH the stopped-why helper (the layout's tile and the offer's count)
-  walk('src');
+  const walkFrom = (root) => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(root, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js') && /\bstopReason\b|\bstopped(?:Why|Reason)For\b/.test(fs.readFileSync(path.join(root, r), 'utf8'))) out.push(r); } }; walk('src'); return out; };   // + the readers that go THROUGH the stopped-why helper (the layout's tile and the offer's count)
+  const files = walkFrom(REPO);
   const unlisted = files.filter((f) => !SESSION_READERS.includes(f) && !OTHER_MEANING[f]);
   const dead = [...SESSION_READERS, ...Object.keys(OTHER_MEANING)].filter((f) => !files.includes(f));
   ok(unlisted.length === 0 && dead.length === 0 && files.length >= 10, `the census of stopReason readers (the literal field AND the stopped-why helper's readers): ${SESSION_READERS.length} read a session's stop reason, ${Object.keys(OTHER_MEANING).length} another meaning — a new reader is RED until classified`, { unlisted, dead });
-  const planted = [...files, 'src/lib/planted.js'].filter((f) => !SESSION_READERS.includes(f) && !OTHER_MEANING[f]);
+  const tree = path.join(ROOT, 'census-tree'); fs.mkdirSync(path.join(tree, 'src/lib'), { recursive: true }); fs.writeFileSync(path.join(tree, 'src/lib/planted.js'), 'export const why = (r) => r.stopReason;\n');   // a REAL file in a walked tree
+  const planted = walkFrom(tree).filter((f) => !SESSION_READERS.includes(f) && !OTHER_MEANING[f]);
   ok(planted.length === 1, 'CONTROL a planted fifth reader is caught');
 }
 

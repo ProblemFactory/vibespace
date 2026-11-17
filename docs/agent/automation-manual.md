@@ -137,7 +137,8 @@ vibespace-api groups invite <g-…> <sess-…>                          the lane
 vibespace-api conversations end <sess-…>                             refused while it is busy (subject_busy, with why — and, for a
                                                                     conversation THIS key opened, the recipe):
 vibespace-api conversations end <sess-…> --force                     your OWN worker, busy or terminal: force ends it (a granted one: never)
-vibespace-api conversations archive <conversation id>                 when the lane is accepted: end + archive (the sidebar's 归档) — the same gate
+vibespace-api conversations archive <conversation id> --resolve-asks  when the lane is accepted: end + archive (the sidebar's 归档) — the same gate as end,
+                                                                    its open asks resolved and not counted as busy; --force only for your own
 ```
 
 ## Sending the person to a conversation or a desktop

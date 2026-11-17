@@ -2129,6 +2129,7 @@ async function refreshQueue({ timeoutMs = 15000 } = {}) {
         const live = new Set(rows.map((q) => asString(q?.clientUserMessageId)));
         for (const cid of [...queueMeta.keys()]) if (!live.has(cid)) queueMeta.delete(cid);
       }
+      if (listed.complete !== true && meta.queueReadAt !== undefined) { delete meta.queueReadAt; scheduleMeta(); }   // THE ONE END RECORD: a PARTIAL read is no read — «read» always means a complete read
       publishQueue(items, { fresh: listed.complete === true });   // a complete real read = fresh evidence (round 4)
     } while (queueRefreshAgain);
   } catch (e) {

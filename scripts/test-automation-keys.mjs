@@ -962,8 +962,8 @@ console.log('⑮ THE ARCHIVE VERB (lane conversations-archive-verb) — the row,
   const t1 = CLI.typed(['conversations', 'archive', 'c-1']), t2 = CLI.typed(['conversations', 'archive', 'c-1', '--force', '--resolve-asks']), t3 = CLI.typed(['conversations', 'archive', 'c-1', '--force', 'yes']), t4 = CLI.typed(['conversations', 'archive', '--force', 'c-1', '--force']);
   ok(t1.verb === 'conversations.archive' && JSON.stringify(t1.args) === '{"target":"c-1"}' && t2.args.target === 'c-1' && t2.args.force === true && t2.args.resolveAsks === true && Object.keys(t2.args).length === 3 && /stray word "yes"/.test(t3.error) && /given twice/.test(t4.error),
     'the CLI: `conversations archive <target> [--force] [--resolve-asks]` — the two flags take NO value (a value after one is a stray word; a flag twice is refused)', { t1, t2, t3, t4 });
-  ok(/vibespace-api conversations archive <target> \[--force\] \[--resolve-asks\]   end it if still live, then archive it as the sidebar's 归档 does/.test(CLI.USAGE) && /subject_busy unless --force; its open For-you asks ⇒ asks_open naming them, unless --resolve-asks dismisses them; archived already ⇒ already_archived/.test(CLI.USAGE),
-    'the usage line, by hand (vibespace-api ships alone): the verb, its two flags, the three refusals');
+  ok(/vibespace-api conversations archive <target> \[--force\] \[--resolve-asks\]   end it if still live, then archive it as the sidebar's 归档 does/.test(CLI.USAGE) && /the SAME gate as end: busy ⇒ subject_busy, a person's to end ⇒ person_only, --force only for your own; its open For-you asks ⇒ asks_open naming them, unless --resolve-asks dismisses them — then they are no reason; archived already ⇒ already_archived/.test(CLI.USAGE),
+    'the usage line, by hand (vibespace-api ships alone): the verb, its two flags, the refusals — the same gate as end (lane end-obeys-verdict)');
 }
 
 // B-3190: the rule (b) the release had — «a grant of this key names it», keyed to the KEY (with or without lane

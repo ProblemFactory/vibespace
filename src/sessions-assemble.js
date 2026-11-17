@@ -63,7 +63,7 @@ function mergeKeptStopped(rows, kept) {
     if (!r) { const n = withSessionKey(k); touched++; rows.push(n); byKey.set(keyOf(k), n); continue; }
     if (r.status !== 'stopped') continue;
     Object.assign(r, { stopReason: k.stopReason, stoppedAt: k.stoppedAt, kept: k.kept, name: k.name || r.name, accountId: r.accountId || k.accountId || null, mode: r.mode || k.mode,
-      ...(k.endedBy ? { endedBy: k.endedBy } : {}) }); // lane end-obeys-verdict: who ended it on purpose joins the merge
+      ...(k.endedBy ? { endedBy: k.endedBy } : {}), ...(k.host && !r.host ? { host: k.host } : {}) }); // lane end-obeys-verdict: who ended it on purpose, and its machine, join the merge
   }
   return rows;
 }
