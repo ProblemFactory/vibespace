@@ -15,6 +15,10 @@
 //      (Telemetry.heldDays over the rows) and its hours reconcile, one cause key, the boot apart in both; ⑩ R7 / R8 the hub's
 //      processes told apart by stand-in /proc and cgroup files — a service unit, a login shell's scope, a container; ⑪ M6 the
 //      conversations by turn and idle age, the keeper's ready browsers; ⑫ R2 the counter bound once.
+//   CURE r3: ⑯ T2 the age pass ONE at a time, ended at its time-out — the ages «?» with how many were read, never the last hour's;
+//      ⑭ a keeper browser counts only while its start time is still the record's, a CLI launcher and its native CLI are ONE;
+//      ⑤ the zero-sync cut also over stand-in trees of all three group shapes (the command-line and start-time reads);
+//      ⑰ a split file's own bucket in the line, and ⚙ Diagnostics' table: busy ticks, split buckets, unwatched hours, a short age read.
 // Run: node scripts/test-loop-day-report.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,6 +37,25 @@ const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const T0 = Date.UTC(2026, 10, 16, 20, 0, 0);   // 2026-11-16T20:00Z
 const quietLog = (lines) => ({ log: (x) => lines.push(String(x)), warn() { }, error() { } });
 
+/** STAND-IN /proc + cgroup trees (⑤, ⑩, ⑭): each process's status (Name, PPid — from its parent's `kids` — VmRSS), cmdline, children
+ *  and, when `start` is given, a stat whose field 22 is that start time */
+function standIn(ROOT) {
+  const mk = (root, pid, { name, kb = 1000, cmd = [name], kids = [], start = null }, ppid = 0) => {
+    const d = path.join(root, String(pid)); fs.mkdirSync(path.join(d, 'task', String(pid)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'status'), `Name:\t${name}\nPPid:\t${ppid}\nVmRSS:\t${kb} kB\n`);
+    fs.writeFileSync(path.join(d, 'cmdline'), cmd.join('\0') + '\0');
+    fs.writeFileSync(path.join(d, 'task', String(pid), 'children'), kids.join(' '));
+    if (start != null) fs.writeFileSync(path.join(d, 'stat'), `${pid} (${name}) S ${ppid} ${Array(17).fill(0).join(' ')} ${start} 0 0\n`);
+  };
+  const world = (tag, cg, procs) => {
+    const p = path.join(ROOT, tag, 'proc'), c = path.join(ROOT, tag, 'cg'); fs.mkdirSync(path.join(p, 'self'), { recursive: true }); fs.writeFileSync(path.join(p, 'self', 'cgroup'), `0::${cg}\n`);
+    const parent = new Map(); for (const [pid, o] of procs) for (const k of o.kids || []) parent.set(k, pid);
+    for (const [pid, o] of procs) mk(p, pid, o, parent.get(pid) || 0);
+    return { procRoot: p, cgroupRoot: c };
+  };
+  return { world };
+}
+
 console.log('① a fixed hour ⇒ a fixed line');
 const fixedHour = () => {
   const h = L.newHour(T0);
@@ -42,13 +65,13 @@ const fixedHour = () => {
   L.holdAdd(h, { ms: 1200, verdict: 'waiting for a CPU', frame: "(not the hub's own code)" });
   return h;
 };
-const TAKE = { fromM: 0, toM: 3600000, everyMs: 1000, ticks: { idle: 2000, held: 10, stopped: 0, notSampled: 30, paused: 0 }, families: { channels: 410, page: 200, parse: 120, rest: 220, native: 50 }, asks: 812, askOwnMs: 121.8, askMaxMs: 0.35, halved: null };
+const TAKE = { fromM: 0, toM: 3600000, everyMs: 1000, ticks: { idle: 2000, held: 10, stopped: 0, notSampled: 30, paused: 0 }, families: { interface: 200, channels: 410, money: 100, conversation: 120, outside: 120, native: 50 }, asks: 812, askOwnMs: 121.8, askMaxMs: 0.35, halved: null };
 const fixedRep = (h) => ({ kind: 'hour', hour: h, toMs: T0 + 3600000, busy: 0.3725,
   engines: { busyTicks: 1000, sampledTicks: 3010, shares: [{ family: 'interface', share: 0.2 }, { family: 'channels', share: 0.41 }, { family: 'conversation', share: 0.12 }, { family: 'money', share: 0.1 }], native: { ticks: 50, share: 0.05 }, outside: { ticks: 120, share: 0.12 }, held: { ticks: 10 }, idle: { ticks: 2000 }, stopped: { ticks: 0 }, notSampled: { ticks: 30, paused: 0 }, viaHelper: { ticks: 140 }, deep: { ticks: 7 }, cost: { asks: 812, paidMs: 365.4 } },
   mem: { heapUsed: 312 * 1048576, heapLimit: 4096 * 1048576, rss: 640 * 1048576, kids: { how: 'service', cli: { n: 2, rss: 1200 * 1048576 }, wrapper: { n: 2, rss: 160 * 1048576 }, browser: { n: 3, rss: 900 * 1048576 }, agentd: { n: 1, rss: 80 * 1048576 }, other: { n: 4, rss: 40 * 1048576 } } },
-  upMs: 26.5 * 3600000, turns: { 'turn-running': 2, 'turn-waiting': 1, 'idle-under-1h': 3, 'idle-1-2h': 1, 'idle-2-4h': 2, 'idle-over-4h': 4, 'turn-unknown': 1 }, browsers: { ready: 3, idle1h: 2 },
+  upMs: 26.5 * 3600000, agesRead: { read: 12, total: 12 }, turns: { 'turn-running': 2, 'turn-waiting': 1, 'idle-under-1h': 3, 'idle-1-2h': 1, 'idle-2-4h': 2, 'idle-over-4h': 4, 'turn-unknown': 1 }, browsers: { ready: 3, idle1h: 2 },
   sizes: { conversations: 12, pageSockets: 3, deviceLinks: 1, wsIn: 1203, wsOut: 5402, parsedChars: 12345678, creates: 2, resumes: 1, writes: 350, writeMaxMs: 1234 } });
-const LINE = '[loop-hour] hour=2026-11-16T20Z span=3600s held=9.2s holds=4 longest=4.0s boot-held=0.0s boot-holds=0 lost-holds=0 busy=37.3% top="src/channel-store.js:275 5.5s; src/normalizers.js:812 2.5s; waiting for a CPU 1.2s" engines="interface 20%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; native 5%; outside 12%" census-ticks=3040 busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 via-helper=140 deep=7 census-asks=812 census-paid=0.37s hub-up=26.5h hub-heap=312MB/4096MB hub-rss=640MB cli=2/1200MB wrapper=2/160MB browser=3/900MB agentd=1/80MB other=4/40MB procs-by=service conversations=12 turn-running=2 turn-waiting=1 idle-under-1h=3 idle-1-2h=1 idle-2-4h=2 idle-over-4h=4 turn-unknown=1 browsers-ready=3 browsers-idle-1h=2 page-sockets=3 device-links=1 ws-in=1203 ws-out=5402 parsed=12.3M creates=2 resumes=1 writes=350 write-max=1.2s';
+const LINE = '[loop-hour] hour=2026-11-16T20Z span=3600s held=9.2s holds=4 longest=4.0s boot-held=0.0s boot-holds=0 lost-holds=0 busy=37.3% top="src/channel-store.js:275 5.5s; src/normalizers.js:812 2.5s; waiting for a CPU 1.2s" engines="interface 20%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; native 5%; outside 12%" census-ticks=3040 busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 via-helper=140 deep=7 census-asks=812 census-paid=0.37s hub-up=26.5h hub-heap=312MB/4096MB hub-rss=640MB cli=2/1200MB wrapper=2/160MB browser=3/900MB agentd=1/80MB other=4/40MB procs-by=service conversations=12 turn-running=2 turn-waiting=1 idle-under-1h=3 idle-1-2h=1 idle-2-4h=2 idle-over-4h=4 turn-unknown=1 ages-read=12/12 browsers-ready=3 browsers-idle-1h=2 page-sockets=3 device-links=1 ws-in=1203 ws-out=5402 parsed=12.3M creates=2 resumes=1 writes=350 write-max=1.2s';
 const got = L.line(fixedRep(Object.assign(fixedHour(), { lost: 0 })));
 ok(got === LINE, '① the fixed hour prints the fixed line (held 9.2 s over 4 holds, the top three by cause, the longest, busy, the engines in their order, memory by kind, the sizes)', { got, want: LINE });
 ok(L.LINE_RE.test(got) && L.causesOk(got) && (typeof L.enginesOk === 'function' && L.enginesOk(got)), '① the line passes its own shape check (LINE_RE) and names only causes and engines it may');
@@ -120,15 +143,34 @@ console.log('⑤ the report holds nothing: a REAL cut makes zero synchronous fs 
 {
   const names = Object.keys(fs).filter((k) => /Sync$/.test(k) && typeof fs[k] === 'function');
   const orig = {}; let calls = 0; const seen = [];
+  let rep = null, kids = null, shapes = null;
+  // the three group shapes as stand-in trees (built BEFORE the counter): a service unit with a keeper browser (its start-time read),
+  // a login shell's scope (the tree + the dtach masters' command lines), a container (the root group + its marker file)
+  const SROOT = fs.mkdtempSync(path.join(fs.realpathSync(require('node:os').tmpdir()), 'ldr-sync-'));
+  const { world } = standIn(SROOT), SOCK5 = '/srv/hub/data/sockets';
+  const SA = world('service', '/user.slice/x.service', [[1000, { name: 'node' }], [101, { name: 'claude' }], [102, { name: 'kernel-x', start: 4242, kids: [103] }], [103, { name: 'kernel-x-gpu' }]]);
+  fs.mkdirSync(path.join(SA.cgroupRoot, 'user.slice/x.service'), { recursive: true }); fs.writeFileSync(path.join(SA.cgroupRoot, 'user.slice/x.service/cgroup.procs'), '1000\n101\n102\n103\n');
+  const SB = world('login', '/user.slice/user-1000.slice/session-3.scope', [[2000, { name: 'node', kids: [2001] }], [2001, { name: 'node', cmd: ['node', '/srv/hub/data/bin/chat-wrapper.js'], kids: [2002] }], [2002, { name: 'claude' }],
+    [2100, { name: 'dtach', cmd: ['dtach', '-c', `${SOCK5}/cw-abc`, 'node', 'w.js'], kids: [2101] }], [2101, { name: 'claude' }]]);
+  const SC = world('container', '/', [[1, { name: 'tini' }], [7, { name: 'node' }], [30, { name: 'claude' }]]); fs.writeFileSync(path.join(SROOT, 'container', '.dockerenv'), '');
+  try {
+    shapes = [];
+    for (const [o, self] of [[{ ...SA, browserPids: [{ pid: 102, starttime: 4242 }] }, 1000], [SB, 2000], [{ ...SC, rootFs: path.join(SROOT, 'container'), env: {} }, 7]]) {
+      // the counter wraps ONLY the walks (the trees are written above)
+      for (const k of names) { orig[k] = fs[k]; fs[k] = function (...a) { calls++; if (seen.length < 5) seen.push(k); return orig[k].apply(this, a); }; }
+      try { shapes.push(await O.procKids({ self, ...o, socketsDir: SOCK5 })); } finally { for (const k of names) fs[k] = orig[k]; }
+    }
+  } finally { fs.rmSync(SROOT, { recursive: true, force: true }); }
   for (const k of names) { orig[k] = fs[k]; fs[k] = function (...a) { calls++; if (seen.length < 5) seen.push(k); return orig[k].apply(this, a); }; }
-  let rep = null, kids = null;
   try {
     const R = O.create({ log: quietLog([]), census: async () => null, kids: (signal) => O.procKids({ signal, socketsDir: '/srv/no-such-hub/data/sockets' }) });   // the REAL process table WITH the sockets folder given (the dtach scan's command-line reads under the counter), the real heap, the real loop
     R.onHold({ ms: 1200, verdict: 'JavaScript', frame: 'x (src/a.js:1)' });
     rep = await R.tick();
     kids = rep.mem && rep.mem.kids;
   } finally { for (const k of names) fs[k] = orig[k]; }
-  ok(calls === 0, `⑤ a real cut — the census asked, the process table read (${kids ? kids.how : 'none'}: ${kids ? L.KIDS.map((k) => `${k} ${kids[k].n}`).join(', ') : '—'}), the line made — made ZERO synchronous fs calls (${calls})`, seen);
+  const shp = (shapes || []).map((k) => k && `${k.how}: ${L.KIDS.map((n) => `${n} ${k[n].n}`).join(', ')}`);
+  ok(calls === 0 && shp.length === 3 && shapes.every(Boolean) && shapes[0].how === 'service' && shapes[0].browser.n === 2 && shapes[1].how === 'tree' && shapes[1].cli.n === 2 && shapes[2].how === 'container',
+    `⑤ a real cut — the census asked, the process table read (${kids ? kids.how : 'none'}: ${kids ? L.KIDS.map((k) => `${k} ${kids[k].n}`).join(', ') : '—'}), the line made — AND the walk over stand-in trees of the three group shapes (${shp.join(' · ')}: the keeper browser's start time, the dtach masters' command lines, the container's marker) made ZERO synchronous fs calls (${calls})`, { seen, shp });
   ok(rep && L.LINE_RE.test(rep.line) && kids && Number.isFinite(rep.mem.rss), '⑤ …and its line is whole: memory read, the processes counted by kind', rep && rep.line);
 }
 
@@ -205,13 +247,7 @@ try {
   const ROOT = fs.mkdtempSync(path.join(fs.realpathSync(require('node:os').tmpdir()), 'ldr-proc-'));
   try {
     const SOCK = '/srv/hub/data/sockets';
-    const mk = (root, pid, { name, kb = 1000, cmd = [name], kids = [] }) => {
-      const d = path.join(root, String(pid)); fs.mkdirSync(path.join(d, 'task', String(pid)), { recursive: true });
-      fs.writeFileSync(path.join(d, 'status'), `Name:\t${name}\nVmRSS:\t${kb} kB\n`);
-      fs.writeFileSync(path.join(d, 'cmdline'), cmd.join('\0') + '\0');
-      fs.writeFileSync(path.join(d, 'task', String(pid), 'children'), kids.join(' '));
-    };
-    const world = (tag, cg, procs) => { const p = path.join(ROOT, tag, 'proc'), c = path.join(ROOT, tag, 'cg'); fs.mkdirSync(path.join(p, 'self'), { recursive: true }); fs.writeFileSync(path.join(p, 'self', 'cgroup'), `0::${cg}\n`); for (const [pid, o] of procs) mk(p, pid, o); return { procRoot: p, cgroupRoot: c }; };
+    const { world } = standIn(ROOT);
     // (a) A SERVICE UNIT: the unit's members are the hub's (a dtach'd CLI stays there); the person's browser outside it is not
     const A = world('service', '/user.slice/user-1000.slice/user@1000.service/app.slice/vibespace.service', [[1000, { name: 'node' }], [101, { name: 'claude' }], [102, { name: 'chrome' }], [103, { name: 'dtach' }], [104, { name: 'firefox' }]]);
     fs.mkdirSync(path.join(A.cgroupRoot, 'user.slice/user-1000.slice/user@1000.service/app.slice/vibespace.service'), { recursive: true });
@@ -256,7 +292,7 @@ console.log('⑪ M6 + S4: the conversations by turn and idle age — the age rea
     // S4: a RESTART of the hub — a new report, the same files: the ages are the same (the in-memory time is gone)
     const mk = () => O.create({ log: quietLog([]), wallNow: () => t, census: async () => null, kids: async () => null, sessions: () => S, buffersDir: BUF, upMs: () => 0.2 * H, browsers: () => ({ ready: 3, idle1h: 2 }) });
     const r1 = await mk().tick(), r2 = await mk().tick();
-    const want = / turn-running=1 turn-waiting=1 idle-under-1h=1 idle-1-2h=1 idle-2-4h=1 idle-over-4h=2 turn-unknown=2 browsers-ready=3 browsers-idle-1h=2 /;
+    const want = / turn-running=1 turn-waiting=1 idle-under-1h=1 idle-1-2h=1 idle-2-4h=1 idle-over-4h=2 turn-unknown=2 ages-read=9\/9 browsers-ready=3 browsers-idle-1h=2 /;
     ok(want.test(r1.line) && want.test(r2.line) && / hub-up=0\.2h /.test(r2.line) && L.LINE_RE.test(r2.line), '⑪ S4: a hub restarted 12 minutes ago still reads «idle over 4 h» = 2 (the files\' times survive it), and prints its own uptime (hub-up) beside them', r2.line.slice(0, 400));
   } finally { fs.rmSync(BUF, { recursive: true, force: true }); }
 } catch (e) { ok(false, '⑪ M6: the leg threw on this tree', (e && e.message) || String(e)); } }
@@ -265,8 +301,15 @@ console.log('⑫b S2: the line\'s engines from the REAL census fold — the futu
 { try {
   const F = CEN.censusFold({ ...TAKE, families: { interface: 200, channels: 410, money: 100, conversation: 120, outside: 120, native: 50 }, viaHelper: 140, deep: 7 });
   const ln = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 3600000, busy: 0.3, engines: F, mem: null, sizes: {} });
-  ok(/ engines="interface 20%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; native 5%; outside 12%" /.test(ln) && / busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 via-helper=140 deep=7 /.test(ln) && L.LINE_RE.test(ln) && L.enginesOk(ln),
-    '⑫b the real fold (src/loop-census.js) prints the seven OWNERS in their order with native and outside, and its helper / deep counts', ln.slice(0, 420));
+  const SPL = (CEN.SPLIT || []).map((x) => `${x.short}* 0%; `).join('');
+  ok(SPL.length > 0 && new RegExp(` engines="interface 20%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; ${SPL.replace(/\*/g, '\\*')}native 5%; outside 12%" `).test(ln) && / busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 via-helper=140 deep=7 /.test(ln) && L.LINE_RE.test(ln) && L.enginesOk(ln),
+    '⑫b the real fold (src/loop-census.js) prints the seven OWNERS in their order, then EVERY split file\'s own bucket in the census\'s list order (none booked here: 0 %), native and outside, and its helper / deep counts', ln.slice(0, 700));
+  // cure r3 (T1): a sample booked on a split file's bucket by the REAL fold prints under that file's short name, never on an owner
+  const F2 = CEN.censusFold({ ...TAKE, families: { interface: 100, 'split:ws-handler': 100, channels: 410, money: 100, conversation: 120, outside: 120, native: 50 } });
+  const ln2 = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 3600000, busy: 0.3, engines: F2, mem: null, sizes: {} });
+  const pcts = (/engines="([^"]*)"/.exec(ln2)[1]).split('; ').map((p) => Number(p.split(' ')[1].replace('%', '')));
+  ok(/ engines="interface 10%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; ws-handler\* 10%; server\* 0%; /.test(ln2) && L.enginesOk(ln2) && Math.abs(pcts.reduce((a, b) => a + b, 0) - 100) <= pcts.length / 2,
+    '⑫b cure r3: the real fold\'s split bucket (a tick inside the page handler\'s own body) prints as «ws-handler* 10%» after the seven owners — the interface keeps only its own 10 %; the fields add to 100 % up to rounding', ln2.slice(0, 700));
 } catch (e) { ok(false, '⑫b S2: the leg threw on this tree', (e && e.message) || String(e)); } }
 
 console.log('⑬ S1: the census\'s ticks add up and say where held time went; a paused census prints «?»');
@@ -297,12 +340,25 @@ console.log('⑭ S3: a process is counted once, under its own kind — by its pr
   const ROOT = fs.mkdtempSync(path.join(fs.realpathSync(require('node:os').tmpdir()), 'ldr-br-'));
   try {
     const P = path.join(ROOT, 'proc'); fs.mkdirSync(path.join(P, 'self'), { recursive: true }); fs.writeFileSync(path.join(P, 'self', 'cgroup'), '0::/user.slice/x.service\n');
-    const cgp = path.join(ROOT, 'cg', 'user.slice', 'x.service'); fs.mkdirSync(cgp, { recursive: true }); fs.writeFileSync(path.join(cgp, 'cgroup.procs'), '500\n600\n601\n602\n');
-    const mk = (pid, name, ppid) => { const d = path.join(P, String(pid)); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'status'), `Name:\t${name}\nPPid:\t${ppid}\nVmRSS:\t1024 kB\n`); fs.writeFileSync(path.join(d, 'cmdline'), name + '\0'); };
-    mk(600, 'kernel-x', 500); mk(601, 'kernel-x-gpu', 600); mk(602, 'zygote', 601);
-    const k = await O.procKids({ self: 500, procRoot: P, cgroupRoot: path.join(ROOT, 'cg'), browserPids: [600] });
-    ok(k && k.browser.n === 3 && k.other.n === 0, '⑭ a browser the keeper runs (its pid from the keeper\'s records — any engine, whatever its program is called) and every process under it are browsers', k && { browser: k.browser.n, other: k.other.n });
+    const cgp = path.join(ROOT, 'cg', 'user.slice', 'x.service'); fs.mkdirSync(cgp, { recursive: true }); fs.writeFileSync(path.join(cgp, 'cgroup.procs'), '500\n600\n601\n602\n700\n701\n');
+    const mk = (pid, name, ppid, start) => { const d = path.join(P, String(pid)); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'status'), `Name:\t${name}\nPPid:\t${ppid}\nVmRSS:\t1024 kB\n`); fs.writeFileSync(path.join(d, 'cmdline'), name + '\0'); if (start != null) fs.writeFileSync(path.join(d, 'stat'), `${pid} (${name}) S ${ppid} ${Array(17).fill(0).join(' ')} ${start} 0 0\n`); };
+    mk(600, 'kernel-x', 500, 1111); mk(601, 'kernel-x-gpu', 600); mk(602, 'zygote', 601);
+    mk(700, 'kernel-y', 500, 3333); mk(701, 'kernel-y-gpu', 700);   // the record says 700 started at 2222: the pid now names ANOTHER process
+    const k = await O.procKids({ self: 500, procRoot: P, cgroupRoot: path.join(ROOT, 'cg'), browserPids: [{ pid: 600, starttime: 1111 }, { pid: 700, starttime: 2222 }] });
+    ok(k && k.browser.n === 3 && k.other.n === 2, '⑭ a browser the keeper runs (its {pid, start time} from the keeper\'s records — any engine, whatever its program is called) and every process under it are browsers; cure r3: a recorded pid whose start time is NOT the record\'s (a reused pid) is not that browser — it and its child are the rest', k && { browser: k.browser.n, other: k.other.n });
+    // the keeper hands both the daemon's and the browser's identity (src/server/browser-keeper.js browserPids)
+    const kp = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    ok(/browserPids: \(\) => \{[^\n]*out\.push\(\{ pid: x\.pid, starttime: Number\(x\.starttime\) \}\)[^\n]*add\(r\); add\(r\.browser\);/.test(kp), '⑭ the keeper\'s browserPids hands {pid, starttime} for the daemon AND its browser, as its records hold them — never a bare pid');
   } finally { fs.rmSync(ROOT, { recursive: true, force: true }); }
+  // cure r3: a CLI is counted ONCE — a launcher (a node shim running the CLI's script) and the native CLI it starts are one CLI
+  const R2 = fs.mkdtempSync(path.join(fs.realpathSync(require('node:os').tmpdir()), 'ldr-cli-'));
+  try {
+    const { world } = standIn(R2);
+    const E = world('tree', '/user.slice/user-1000.slice/session-3.scope', [[3000, { name: 'node', kids: [3001, 3003] }],
+      [3001, { name: 'node', kb: 100, cmd: ['node', '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js'], kids: [3002] }], [3002, { name: 'claude', kb: 2000 }], [3003, { name: 'codex', kb: 500 }]]);
+    const k = await O.procKids({ self: 3000, ...E, socketsDir: '/srv/hub/data/sockets' });
+    ok(k && k.how === 'tree' && k.cli.n === 2 && k.cli.rss === (100 + 2000 + 500) * 1024, '⑭ cure r3: a launcher CLI and the native CLI it starts count as ONE CLI (its child adds memory, not a count) — two CLIs here, never three', k && { cli: k.cli });
+  } finally { fs.rmSync(R2, { recursive: true, force: true }); }
 } catch (e) { ok(false, '⑭ S3: the leg threw on this tree', (e && e.message) || String(e)); } }
 
 console.log('⑮ the smalls: the day leaves out an unwatched hour; lost holds; the walk one at a time; the boot mark by the real writer');
@@ -332,6 +388,67 @@ console.log('⑮ the smalls: the day leaves out an unwatched hour; lost holds; t
   ok(recs.length === 2 && /· \(the boot\)$/.test(recs[0].detail) && !/\(the boot\)/.test(recs[1].detail) && dd.boot.count === 1 && dd.boot.ms === 2500 && dd.count === 1 && dd.ms === 1500,
     '⑮ the boot mark is written by the REAL hold book (its row ends « · (the boot)») and the day reads it apart', { details: recs.map((r) => r.detail), today: dd });
 } catch (e) { ok(false, '⑮ the smalls: the leg threw on this tree', (e && e.message) || String(e)); } }
+
+console.log('⑯ T2: the age pass — ONE at a time, ended at its time-out; the ages «?» with how many were read, never the last hour\'s');
+{ try {
+  const t = T0 + 3600000, H = 3600000;
+  const S = [['a', { mode: 'chat' }], ['b', { mode: 'chat' }], ['c', { mode: 'chat' }], ['d', { mode: 'chat' }], ['run', { mode: 'chat', _isStreaming: true }]];
+  let calls = 0, sig = null; const hang = [];
+  // pass 1 answers at once (all five read: a,b idle under 1 h, c,d over 4 h); pass 2 reads TWO and then hangs (a slow storage)
+  const outputs = (entries, dir, { signal }) => {
+    calls++; sig = signal;
+    if (calls === 1) { signal.read = entries.length; return Promise.resolve(new Map([['a', t - 0.5 * H], ['b', t - 0.5 * H], ['c', t - 5 * H], ['d', t - 5 * H], ['run', t]])); }
+    signal.read = 2; return new Promise((r) => hang.push(r));
+  };
+  let wall = t; const lines = [];
+  const R = O.create({ log: quietLog(lines), wallNow: () => wall, census: async () => null, kids: async () => null, sessions: () => S, buffersDir: '/srv/no-such/buffers', outputs, walkWaitMs: 20 });
+  const keep = setInterval(() => { }, 1000);   // the time-out timer is unref'd (the hub's server holds the loop) — hold it here
+  const r1 = await R.tick(); wall += H; const r2 = await R.tick(); wall += H; const r3 = await R.tick();
+  clearInterval(keep);
+  ok(/ idle-under-1h=2 idle-1-2h=0 idle-2-4h=0 idle-over-4h=2 turn-unknown=0 ages-read=5\/5 /.test(r1.line) && L.LINE_RE.test(r1.line), '⑯ a pass that finished: the ages, and ages-read = 5 of 5', r1.line.slice(300, 560));
+  ok(/ turn-running=1 turn-waiting=0 idle-under-1h=\? idle-1-2h=\? idle-2-4h=\? idle-over-4h=\? turn-unknown=0 ages-read=2\/5 /.test(r2.line) && sig && sig.cancelled === true && L.LINE_RE.test(r2.line),
+    '⑯ a pass that ran out of time is CANCELLED and the hour prints the idle ages «?» with how many it read (2 of 5) — never the previous hour\'s times (2 / 0 / 0 / 2)', { line: r2.line.slice(300, 560), cancelled: sig && sig.cancelled });
+  ok(calls === 2 && / idle-under-1h=\? .* ages-read=0\/5 /.test(r3.line), '⑯ while that pass is still ending, the next hour starts NO second pass beside it: «?» and 0 read', { calls, line: r3.line.slice(300, 560) });
+  for (const r of hang) r(null);
+  const ex = R.exitLine();
+  ok(ex && / idle-under-1h=\? idle-1-2h=\? idle-2-4h=\? idle-over-4h=\? turn-unknown=0 ages-read=0\/5 /.test(ex.line) && L.LINE_RE.test(ex.line), '⑯ the exit line reads nothing: its idle ages are «?» (0 read)', ex && ex.line.slice(300, 560));
+  const real = await O.outputTimes([['x', {}], ['y', {}]], '/srv/no-such/buffers', { signal: { cancelled: true } });
+  ok(real === null, '⑯ the real pass, cancelled, answers null (it says it ran out) — never a partial map', real);
+} catch (e) { ok(false, '⑯ T2: the leg threw on this tree', (e && e.message) || String(e)); } }
+
+console.log('⑰ cure r3: a split file\'s own bucket in the line; ⚙ Diagnostics draws the busy ticks, the split buckets, the day\'s unwatched hours, a short age read');
+{ try {
+  const fold = { busyTicks: 1000, sampledTicks: 3010, shares: [{ family: 'interface', share: 0.2 }, { family: 'split:ws-handler', share: 0.3, order: 0 }, { family: 'split:server', share: 0.1, order: 1 }, { family: 'split:Not A Name', share: 0 }, { family: 'outside', share: 0.3 }],
+    native: { ticks: 100, share: 0.1 }, held: { ticks: 10 }, idle: { ticks: 2000 }, stopped: { ticks: 0 }, notSampled: { ticks: 30, paused: 0 }, viaHelper: { ticks: 0 }, deep: { ticks: 0 }, cost: { asks: 9, paidMs: 5 } };
+  const ln = L.line({ kind: 'hour', hour: L.newHour(T0), toMs: T0 + 3600000, busy: 0.3, engines: fold, mem: null, sizes: {} });
+  ok(/ engines="interface 20%; vault 0%; channels 0%; money 0%; workspace 0%; machines 0%; conversation 0%; ws-handler\* 30%; server\* 10%; native 10%; outside 30%" /.test(ln) && L.enginesOk(ln) && L.LINE_RE.test(ln) && !/Not A Name/.test(ln),
+    '⑰ a split file is a bucket of its own after the seven owners, by its short name marked «*», in the census\'s list order; a name not of the plain shape never prints', ln.slice(200, 480));
+  ok(!L.enginesOk('engines="interface 20%; vault 0%; channels 0%; money 0%; workspace 0%; machines 0%; ws-handler* 30%; conversation 0%; native 10%; outside 30%"') && !L.enginesOk('engines="interface 20%; vault 0%; channels 0%; money 0%; workspace 0%; machines 0%; conversation 0%; a b* 3%; native 10%; outside 30%"'),
+    '⑰ enginesOk: a split bucket only AFTER the seven owners, and only a plain short name');
+  // the Diagnostics table (src/lib/setup-flows.js hourlyTable, extracted) over a real report's hours
+  const S = [['a', { mode: 'chat' }], ['b', { mode: 'chat' }], ['c', { mode: 'chat' }], ['d', { mode: 'chat' }], ['e', { mode: 'chat' }]];
+  let wall = T0, alive = true; const hang = [];
+  const R = O.create({ log: quietLog([]), wallNow: () => wall, watched: () => alive, census: async () => ({ t: 1 }), foldCensus: () => fold, kids: async () => null, sessions: () => S, buffersDir: '/srv/no-such/buffers',
+    outputs: (entries, dir, { signal }) => { signal.read = 2; return new Promise((r) => hang.push(r)); }, walkWaitMs: 20 });
+  const keep = setInterval(() => { }, 1000);
+  R.onHold({ ms: 2000, verdict: 'JavaScript', frame: 'x (src/a.js:1)' }); wall += 3600000; await R.tick();
+  alive = false; wall += 3600000; await R.tick();
+  clearInterval(keep); for (const r of hang) r(null);
+  const SF = fs.readFileSync(path.join(REPO, 'src/lib/setup-flows.js'), 'utf8');
+  const a = SF.indexOf('function hourlyTable('), b = SF.indexOf('// end hourlyTable');
+  const draw = a > 0 && b > a ? new Function(SF.slice(a, b) + '\nreturn hourlyTable;')() : () => '';
+  const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const tOf = (dict) => (k, p) => { let x = dict && Object.prototype.hasOwnProperty.call(dict, k) ? dict[k] : k; if (p) x = x.replace(/\{(\w+)\}/g, (m, y) => (p[y] !== undefined ? String(p[y]) : m)); return x; };
+  const words = (html) => html.replace(/<\/(td|p|h3)>/g, ' | ').replace(/<br>/g, ' / ').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+  const en = words(draw(R.hours(), { t: tOf(null), esc }));
+  const has = ['busy 1000 · held 10 · idle 2000 ticks', 'ws-handler* 30 %', 'outside 30 %', '0 · 0 · ? · ? · ? · ? · 0 (read 2 of 5)', '0 · 0 · ? · ? · ? · ? · 0 (read 0 of 5)', 'The hours above: 2.0 s held in 1 holds; 1 of 2 hours not watched, left out of these sums.', 'not watched'];
+  const miss = has.filter((w) => !en.includes(w));
+  ok(!miss.length, '⑰ ⚙ Diagnostics draws the busy-tick count beside the shares, a split bucket by its short name «*», an age read that ran out of time («?» and how many it read), and the day\'s unwatched hours', { miss, en: en.slice(0, 1600) });
+  const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+  const keys = [...SF.slice(a, b).matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]);
+  const noZh = keys.filter((k) => !Object.prototype.hasOwnProperty.call(zh, k)), noJa = keys.filter((k) => !Object.prototype.hasOwnProperty.call(ja, k));
+  ok(keys.length >= 15 && !noZh.length && !noJa.length, `⑰ every one of the table's ${keys.length} words has its zh and ja`, { noZh, noJa });
+} catch (e) { ok(false, '⑰ the leg threw on this tree', (e && e.message) || String(e)); } }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

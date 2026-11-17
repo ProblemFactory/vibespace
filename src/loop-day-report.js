@@ -5,28 +5,34 @@
  * the journal is all there is. So once an hour (and once at exit) the ORCH half (src/server/loop-day-report.js) folds what
  * it kept in memory into ONE line of a fixed shape a grep can count:
  *   [loop-hour] hour=<UTC hour>Z span=<s> held=<s> holds=<n> longest=<s> boot-held=<s> boot-holds=<n> lost-holds=<n> busy=<%>
- *     top="<cause> <s>; …" engines="interface <%>; vault; channels; money; workspace; machines; conversation; native; outside"
+ *     top="<cause> <s>; …" engines="interface <%>; vault; channels; money; workspace; machines; conversation; <split>* <%>; …; native; outside"
  *     census-ticks=<n> busy-ticks=<n> held-ticks=<n> idle-ticks=<n> stopped-ticks=<n> not-sampled=<n> via-helper=<n> deep=<n>
  *     census-asks=<n> census-paid=<s> hub-up=<h> hub-heap=<MB>/<MB> hub-rss=<MB> cli=<n>/<MB> wrapper=<n>/<MB> browser=<n>/<MB>
  *     agentd=<n>/<MB> other=<n>/<MB> procs-by=<service|container|tree> conversations=<n> turn-running=<n> turn-waiting=<n>
- *     idle-under-1h=<n> idle-1-2h=<n> idle-2-4h=<n> idle-over-4h=<n> turn-unknown=<n> browsers-ready=<n> browsers-idle-1h=<n>
+ *     idle-under-1h=<n> idle-1-2h=<n> idle-2-4h=<n> idle-over-4h=<n> turn-unknown=<n> ages-read=<n>/<n> browsers-ready=<n> browsers-idle-1h=<n>
  *     page-sockets=<n> device-links=<n> ws-in=<n> ws-out=<n> parsed=<M chars> creates=<n> resumes=<n> writes=<n> write-max=<s>
  * EACH FIELD COUNTS WHAT ITS NAME SAYS: held / holds / longest / top = the hour's holds of a second or more AFTER the boot (an hour
  * no watchdog watched prints «?» — never a clean hour); boot-held / boot-holds = the boot's own, apart; lost-holds = holds the
- * watchdog's ring dropped before the hour's book read them; busy = the loop's utilization between the two cuts. ENGINES = each
- * FUTURE OWNER's share of the census's BUSY ticks (src/loop-census.js: the owner of the nearest frame of an owned file), «native»
- * the ticks with no JavaScript frame, «outside» the ticks whose stack holds no owned file — they add to 100 %; THEY LEAVE OUT
- * HELD TIME: a tick inside a hold is a held tick (the census does not ask then) and its seconds are named by the holds (held,
- * top). The census's ticks add up: census-ticks = busy + held + idle + stopped + not-sampled; via-helper = busy ticks booked on an
+ * watchdog's ring dropped before the hour's book read them; busy = the loop's utilization between the two cuts (the runtime's own
+ * event-loop measure — a DIFFERENT instrument from the census's busy-ticks below, so the two need not agree). ENGINES = each
+ * FUTURE OWNER's share of the census's BUSY ticks (src/loop-census.js: the owner of the nearest frame of an owned file), then each
+ * SPLIT file's own share («<short>*»: one file that holds two owners' work today — booked under its own name, never guessed onto
+ * one owner; src/loop-census.js SPLIT, in its order), «native»
+ * the ticks with no JavaScript frame, «outside» the ticks whose stack holds no owned file — they add to 100 % up to rounding (each
+ * share is rounded to a whole percent on its own); THEY LEAVE OUT HELD TIME: a tick inside a hold is a held tick (the census does
+ * not ask then) and its seconds are named by the holds (held, top — or boot-held / boot-holds for the boot's own hold). The census's ticks add up: census-ticks = busy + held + idle + stopped + not-sampled; via-helper = busy ticks booked on an
  * owner through a shared helper; deep = busy ticks whose sample's frame list was full (an owner may lie beyond it).
  * census-asks / census-paid = the census's own cost: its asks, and the main thread's time PAID for them — each ask's own run
  * (measured live) + the inspector's dispatch of the ask (DISPATCH_MS a piece, measured: src/loop-census.js). hub-up = the hub's
  * own uptime in hours (an idle age can never be older than the record it is read from — see below). procs-by = how the hub's
- * processes were told apart (src/server/loop-day-report.js howOf); turn-running … turn-unknown = the live conversations by their
- * turn and, idle, by the age of their OUTPUT FILE (its mtime — it survives a restart of the hub); browsers-ready /
+ * processes were told apart (src/server/loop-day-report.js howOf); conversations = the hub's live conversation records (a
+ * read-only view is one too — a record carries no mark that tells it apart); turn-running … turn-unknown = the live conversations
+ * by their turn and, idle, by the age of their OUTPUT FILE (its mtime — it survives a restart of the hub), read by ONE pass ended at
+ * its time-out: a pass that did not finish prints the four idle ages «?»; ages-read = how many conversations that pass read of how
+ * many (at exit nothing is read: the ages are «?»); browsers-ready /
  * browsers-idle-1h = the keeper's live browsers and those with no command for over an hour.
  * ([loop-exit] = the same shape over the part of the hour before the stop; nothing is read at exit — the engines print «?»
- * and the process table is the last one the hour read.) COUNTS AND CODE PATHS ONLY: a hold's cause is a
+ * and the process table is the last one the hour read; the idle ages print «?».) COUNTS AND CODE PATHS ONLY: a hold's cause is a
  * code location of the hub's own (`src/…:line`, `server.js:line`) or ONE of the hold verdict's fixed words — anything else
  * prints «(other)», so no path under a data directory, no account, no conversation name, no content can reach the line.
  * A value never read prints «?» (never 0): an hour whose census did not answer says `engines=? sampled=?`.
@@ -45,6 +51,7 @@ const KIDS = Object.freeze(['cli', 'wrapper', 'browser', 'agentd', 'other']);
 const ENGINES = Object.freeze(['interface', 'vault', 'channels', 'money', 'workspace', 'machines', 'conversation']);   // src/loop-census.js OWNERS, in its order
 const HOUR_MS = 3600000;
 const ENGINE_FIELDS = Object.freeze([...ENGINES, 'native', 'outside']);
+const SHORT_RE = /^[a-z][a-z0-9-]{0,39}$/;   // a split file's short name (src/loop-census.js SPLIT `short`)
 const AGES = Object.freeze(['turn-running', 'turn-waiting', 'idle-under-1h', 'idle-1-2h', 'idle-2-4h', 'idle-over-4h', 'turn-unknown']);
 
 /** a hold's CAUSE: the hub's own code location in its frame (`src/x.js:12`), else its verdict (one of the fixed words) */
@@ -84,7 +91,12 @@ function censusWords(c) {
   const extra = (k) => (c[k] && Number.isFinite(c[k].share) ? c[k].share : (by.get(k) || 0));
   const t = (k) => (c[k] && Number.isFinite(c[k].ticks) ? c[k].ticks : null);
   const ns = c.notSampled && Number.isFinite(c.notSampled.ticks) ? c.notSampled.ticks : null;
-  const words = c.busyTicks > 0 ? ENGINE_FIELDS.map((f) => `${f} ${((f === 'native' || f === 'outside' ? extra(f) : (by.get(f) || 0)) * 100).toFixed(0)}%`).join('; ') : '?';
+  const p0 = (x) => `${((x || 0) * 100).toFixed(0)}%`;
+  // cure r3 (T1): a SPLIT file — one file that holds two owners' work — is a bucket of its own, printed by its short name marked «*»
+  // after the seven owners, in the census's list order (src/loop-census.js SPLIT); a short name not of the plain shape never prints
+  const splits = c.shares.filter((x) => x && typeof x.family === 'string' && x.family.startsWith('split:') && SHORT_RE.test(x.family.slice(6)))
+    .map((x, i) => ({ short: x.family.slice(6), share: x.share, at: Number.isFinite(x.order) ? x.order : 1e6 + i })).sort((a, b) => a.at - b.at);
+  const words = c.busyTicks > 0 ? [...ENGINES.map((f) => `${f} ${p0(by.get(f))}`), ...splits.map((x) => `${x.short}* ${p0(x.share)}`), `native ${p0(extra('native'))}`, `outside ${p0(extra('outside'))}`].join('; ') : '?';
   const all = Number.isFinite(c.sampledTicks) && ns != null ? c.sampledTicks + ns : null;
   const cost = c.cost || {};
   return { words, ticks: all, busy: c.busyTicks, held: t('held'), idle: t('idle'), stopped: t('stopped'), notSampled: ns, viaHelper: t('viaHelper'), deep: t('deep'),
@@ -95,6 +107,7 @@ function censusWords(c) {
  * THE LINE. `rep` = { kind: 'hour' | 'exit', hour: newHour()+holdAdd (+ `lost`), toMs, busy (0..1 | null), engines (a census fold |
  * null), upMs, mem: { heapUsed, heapLimit, rss, kids: { cli: {n, rss}, wrapper, browser, agentd, other, how } | null } | null,
  * turns: { 'turn-running', 'turn-waiting', 'idle-under-1h', 'idle-1-2h', 'idle-2-4h', 'idle-over-4h', 'turn-unknown' } | null,
+ * agesRead: { read, total } | null (the age pass: how many conversations it read of how many),
  * browsers: { ready, idle1h } | null, sizes: { conversations, pageSockets, deviceLinks, wsIn, wsOut, parsedChars, creates, resumes,
  * writes, writeMaxMs } }
  */
@@ -103,7 +116,7 @@ function line(rep = {}) {
   const w = h.watched !== false;
   const top = w ? (topOf(h.by).map((t) => `${t.cause} ${s1(t.ms)}`).join('; ') || 'none') : '?';
   const e = censusWords(rep.engines);
-  const m = rep.mem || {}, k = m.kids || null, z = rep.sizes || {}, tu = rep.turns || null, br = rep.browsers || null;
+  const m = rep.mem || {}, k = m.kids || null, z = rep.sizes || {}, tu = rep.turns || null, br = rep.browsers || null, ar = rep.agesRead || null;
   const kid = (name) => (k && k[name] ? `${int(k[name].n)}/${mb(k[name].rss)}` : '?/?');
   const span = Number.isFinite(rep.toMs) && Number.isFinite(h.fromMs) ? Math.max(0, rep.toMs - h.fromMs) : null;
   const how = k && ['service', 'container', 'tree'].includes(k.how) ? k.how : '?';
@@ -115,7 +128,7 @@ function line(rep = {}) {
     `census-asks=${int(e.asks)}`, `census-paid=${Number.isFinite(e.paidMs) ? `${(e.paidMs / 1000).toFixed(2)}s` : '?'}`,
     `hub-up=${Number.isFinite(rep.upMs) ? `${(rep.upMs / 3600000).toFixed(1)}h` : '?'}`,
     `hub-heap=${mb(m.heapUsed)}/${mb(m.heapLimit)}`, `hub-rss=${mb(m.rss)}`, ...KIDS.map((n) => `${n}=${kid(n)}`), `procs-by=${how}`,
-    `conversations=${int(z.conversations)}`, ...AGES.map((a) => `${a}=${int(tu ? tu[a] : null)}`),
+    `conversations=${int(z.conversations)}`, ...AGES.map((a) => `${a}=${int(tu ? tu[a] : null)}`), `ages-read=${int(ar ? ar.read : null)}/${int(ar ? ar.total : null)}`,
     `browsers-ready=${int(br ? br.ready : null)}`, `browsers-idle-1h=${int(br ? br.idle1h : null)}`,
     `page-sockets=${int(z.pageSockets)}`, `device-links=${int(z.deviceLinks)}`,
     `ws-in=${int(z.wsIn)}`, `ws-out=${int(z.wsOut)}`, `parsed=${Number.isFinite(z.parsedChars) ? `${(z.parsedChars / 1e6).toFixed(1)}M` : '?'}`,
@@ -128,7 +141,7 @@ const LINE_RE = new RegExp('^\\[loop-(hour|exit)\\] hour=(\\d{4}-\\d\\d-\\d\\dT\
   + ` census-ticks=${N} busy-ticks=${N} held-ticks=${N} idle-ticks=${N} stopped-ticks=${N} not-sampled=${N} via-helper=${N} deep=${N}`
   + ` census-asks=${N} census-paid=(\\d+\\.\\d\\ds|\\?) hub-up=(\\d+\\.\\dh|\\?)`
   + ' hub-heap=(\\d+MB|\\?)\\/(\\d+MB|\\?) hub-rss=(\\d+MB|\\?)' + KIDS.map((n) => ` ${n}=${N}\\/(\\d+MB|\\?)`).join('') + ' procs-by=(service|container|tree|\\?)'
-  + ` conversations=${N}` + AGES.map((a) => ` ${a}=${N}`).join('') + ` browsers-ready=${N} browsers-idle-1h=${N}`
+  + ` conversations=${N}` + AGES.map((a) => ` ${a}=${N}`).join('') + ` ages-read=${N}\\/${N} browsers-ready=${N} browsers-idle-1h=${N}`
   + ` page-sockets=${N} device-links=${N} ws-in=${N} ws-out=${N} parsed=(\\d+\\.\\dM|\\?) creates=${N} resumes=${N} writes=${N} write-max=${S}$`);
 /** the causes a line may name: a code location of the hub's own, a verdict's fixed words, the two markers */
 function causesOk(text) {
@@ -138,13 +151,17 @@ function causesOk(text) {
   return m[1].split('; ').every((p) => { const c = p.replace(/ \d+\.\ds$/, ''); return /^(?:src\/[\w./-]+|server\.js):\d+$/.test(c) || VERDICTS.includes(c) || c === NO_CAUSE || c === OTHER; });
 }
 
-/** the engines a line may name: the nine fixed fields, each with a whole percent — or «?» / «none» */
+/** the engines a line may name: the seven owners in their order, then any split files' own buckets («<short>* <n>%»), then native
+ *  and outside — each with a whole percent — or «?» */
 function enginesOk(text) {
   const m = /engines="([^"]*)"/.exec(String(text || ''));
   if (!m) return false;
   if (m[1] === '?') return true;
   const parts = m[1].split('; ');
-  return parts.length === ENGINE_FIELDS.length && parts.every((p, i) => new RegExp(`^${ENGINE_FIELDS[i]} \\d+%$`).test(p));
+  const k = parts.length - ENGINE_FIELDS.length;
+  if (k < 0) return false;
+  const want = [...ENGINES.map((f) => new RegExp(`^${f} \\d+%$`)), ...Array(k).fill(/^[a-z][a-z0-9-]{0,39}\* \d+%$/), /^native \d+%$/, /^outside \d+%$/];
+  return parts.every((p, i) => want[i].test(p));
 }
 
 /** THE DAY (Diagnostics): the hours kept, folded — held, holds, the longest, the busy share weighted by span, the causes */

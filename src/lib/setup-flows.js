@@ -844,7 +844,7 @@ function heldDaysTable(held, { t, esc }) {
  *  server's own, its processes by kind) and the sizes; the raw lines in a fold. A server older than the field ⇒ nothing. */
 function hourlyTable(hourly, { t, esc }) {
   if (!hourly || !Array.isArray(hourly.hours)) return '';
-  const head = `<h3>${esc(t('The main loop, by hour'))}</h3><p class="dim">${esc(t('What the server writes to its journal once an hour, newest first — the last 24 hours, kept until it restarts. Engines are each future owner’s share of the busy time OUTSIDE holds — the held time is named by the holds, under «total held»; memory is the server’s own, then its processes by kind; an idle conversation’s age is read from its output file, so it survives a restart.'))}</p>`;
+  const head = `<h3>${esc(t('The main loop, by hour'))}</h3><p class="dim">${esc(t('What the server writes to its journal once an hour, newest first — the last 24 hours, kept until it restarts. Engines are each future owner’s share of the busy time OUTSIDE holds (a file that holds two owners’ work today is a bucket of its own, marked «*») — the held time is named by the holds, under «total held»; each share is rounded on its own, so they add to 100 % only up to rounding. The busy share is the runtime’s own measure and the busy ticks are the census’s: two instruments, which need not agree. Memory is the server’s own, then its processes by kind; an idle conversation’s age is read from its output file, so it survives a restart — a read that ran out of time shows «?» with how many it read.'))}</p>`;
   if (!hourly.hours.length) return head + `<p class="dim">${esc(t('No hour has ended since the server started.'))}</p>`;
   const sec = (ms) => (Number.isFinite(ms) ? `${(ms / 1000).toFixed(1)} s` : '—');
   const pc = (x) => (Number.isFinite(x) ? `${(x * 100).toFixed(1)} %` : '—');
@@ -853,12 +853,14 @@ function hourlyTable(hourly, { t, esc }) {
     const top = (h.top || [])[0];
     const sh = h.engines && Array.isArray(h.engines.shares) ? h.engines.shares : null;
     const extra = (k) => (h.engines && h.engines[k] && Number.isFinite(h.engines[k].share) ? [{ family: k, share: h.engines[k].share }] : []);
-    const eng = sh ? [...sh, ...extra('native'), ...extra('outside')].filter((e) => e.share > 0).sort((a, b) => b.share - a.share).slice(0, 3).map((e) => `${e.family} ${(e.share * 100).toFixed(0)} %`).join(', ') : '?';
-    const ticks = h.engines && h.engines.held && h.engines.idle ? t('held {h} · idle {i} ticks', { h: h.engines.held.ticks, i: h.engines.idle.ticks }) : '';
+    const eng = sh ? [...sh, ...extra('native'), ...extra('outside')].filter((e) => e.share > 0).sort((a, b) => b.share - a.share).slice(0, 3).map((e) => `${String(e.family).startsWith('split:') ? `${String(e.family).slice(6)}*` : e.family} ${(e.share * 100).toFixed(0)} %`).join(', ') : '?';   // a split file's own bucket by its short name, marked «*»
+    const ticks = h.engines && h.engines.held && h.engines.idle ? t('busy {b} · held {h} · idle {i} ticks', { b: Number.isFinite(h.engines.busyTicks) ? h.engines.busyTicks : '?', h: h.engines.held.ticks, i: h.engines.idle.ticks }) : '';
     const k = (h.mem && h.mem.kids) || null, z = h.sizes || {};
     const kids = k ? ['cli', 'wrapper', 'browser', 'agentd', 'other'].filter((n) => k[n] && k[n].n).map((n) => `${n} ${k[n].n}·${mbOf(k[n].rss)}`).join(', ') : '?';
     const held = h.watched === false ? `<span class="dim">${esc(t('not watched'))}</span>` : `<b>${esc(sec(h.heldMs))}</b> <span class="dim">(${esc(String(h.holds))})</span>${h.boot && h.boot.holds ? `<br><span class="dim">${esc(t('the boot {s}', { s: sec(h.boot.heldMs) }))}</span>` : ''}`;
-    const tu = h.turns || null, ages = tu ? `${tu['turn-running']} · ${tu['turn-waiting']} · ${tu['idle-under-1h']} · ${tu['idle-1-2h']} · ${tu['idle-2-4h']} · ${tu['idle-over-4h']} · ${tu['turn-unknown']}` : '?';
+    const tu = h.turns || null, nOr = (v) => (Number.isFinite(v) ? String(v) : '?');
+    const ar = h.agesRead && Number.isFinite(h.agesRead.read) && Number.isFinite(h.agesRead.total) && h.agesRead.read < h.agesRead.total ? ` (${t('read {r} of {n}', { r: h.agesRead.read, n: h.agesRead.total })})` : '';   // cure r3 (T2): a pass that ran out of time says how many it read
+    const ages = tu ? ['turn-running', 'turn-waiting', 'idle-under-1h', 'idle-1-2h', 'idle-2-4h', 'idle-over-4h', 'turn-unknown'].map((a) => nOr(tu[a])).join(' · ') + ar : '?';
     const br = h.browsers ? `${h.browsers.ready} / ${h.browsers.idle1h}` : '?';
     const paid = h.engines && h.engines.cost && Number.isFinite(h.engines.cost.paidMs) ? t('{n} asks — the census paid {s} s', { n: h.engines.cost.asks, s: (h.engines.cost.paidMs / 1000).toFixed(2) }) : '';
     return `<tr><td>${esc(new Date(h.from).toISOString().slice(0, 13))}Z</td><td class="n">${held}</td><td class="n">${esc(pc(h.busy))}</td>`
@@ -867,6 +869,7 @@ function hourlyTable(hourly, { t, esc }) {
       + `<td>${esc([z.conversations, z.pageSockets, z.wsIn, z.wsOut].map((v) => (Number.isFinite(v) ? String(v) : '?')).join(' / '))}</td><td>${esc(ages)}</td><td>${esc(br)}</td></tr>`;
   };
   return head + `<table><tr><td class="dim">${esc(t('hour (UTC)'))}</td><td class="n dim">${esc(t('total held'))}</td><td class="n dim">${esc(t('busy share'))}</td><td class="dim">${esc(t('top cause'))}</td><td class="dim">${esc(t('engines'))}</td><td class="dim">${esc(t('memory in use'))}</td><td class="dim">${esc(t('conversations / pages / messages in / out'))}</td><td class="dim">${esc(t('conversations: running · waiting · idle under 1 h · 1–2 h · 2–4 h · over 4 h · unknown'))}</td><td class="dim">${esc(t('browsers ready / idle over 1 h'))}</td></tr>${hourly.hours.map(row).join('')}</table>`
+    + (hourly.day && Number.isFinite(hourly.day.hours) && hourly.day.hours > 0 ? `<p class="dim">${esc(t('The hours above: {held} held in {holds} holds; {u} of {n} hours not watched, left out of these sums.', { held: sec(hourly.day.heldMs), holds: hourly.day.holds, u: hourly.day.unwatched || 0, n: hourly.day.hours }))}</p>` : '')   // cure r3: the day's unwatched hours drawn
     + `<details><summary>${esc(t('The journal lines'))}</summary><pre>${hourly.hours.map((h) => esc(h.line || '')).join('\n')}</pre></details>`;
 }
 // end hourlyTable
