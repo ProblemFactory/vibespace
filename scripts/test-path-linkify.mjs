@@ -86,7 +86,7 @@ const cr = fs.readFileSync(path.join(ROOT, 'src/lib/chat-renderers.js'), 'utf8')
 ok(/from '\.\.\/path-linkify\.js'/.test(cr), 'chat-renderers imports src/path-linkify.js');
 ok(/const pathRe = sharedPathRe\(\)/.test(cr) && /cleanPath\(p\) \{ return sharedCleanPath\(p\); \}/.test(cr), 'both the path regex and cleanPath delegate to it');
 ok(!/\[\^\\0<>\?\\s!`&\*\(\)'":;\\\\\]/.test(cr), 'no inline copy of the old character class survives in the renderer');
-ok(/linkifyPathsTagSafe\(this\.linkifySettingLinks\(this\.linkifyPagePaths\(this\.linkifyFileUrls\(this\.linkifyUrls\(text\)\)\)\)/.test(cr), 'ORDER pin: URLs, file: URLs, /p/<id> pages and (lane setting-doors pick 1) vibespace://settings/<key> links are linkified BEFORE paths (the path rule would match their path part)');
+ok(/linkifyPathsTagSafe\(this\.linkifySettingLinks\(this\.linkifyPagePaths\(this\.linkifyFileUrls\(this\.linkifyUrls\(text\)\)\), opts\)/.test(cr), 'ORDER pin: URLs, file: URLs, /p/<id> pages and (lane setting-doors pick 1) vibespace://settings/<key> links are linkified BEFORE paths (the path rule would match their path part); the setting pass is given the renderer\'s option');
 ok(/linkifyPagePaths\(text\) \{\n    return this\._linkifyBareText\(text,/.test(cr) && /linkifyFileUrls\(text\) \{\n    return this\._linkifyBareText\(text,/.test(cr) && /return this\._linkifyBareText\(html, \(txt\) => txt\.replace\(pathRe,/.test(cr),
   'SKIP pin (B-2dbc): the page, file: URL and path passes all run through _linkifyBareText, so none touches a tag or a link span an earlier pass made');
 
