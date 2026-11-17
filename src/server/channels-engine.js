@@ -8020,7 +8020,7 @@ function create(deps = {}) {
    *  a held decision's Deliver is ONE block, one billed turn): conversation keys that ride THIS block whatever grain wakes their
    *  watcher now (a held digest's conversation the account still wakes after its rule was narrowed); this scope's watcher
    *  paces, targets and books it. */
-  async function flushScopeNow(rec, source, patternId, pk, sKey, { startedAt = null, also = null, holds = null } = {}) {
+  async function flushScopeNow(rec, source, patternId, pk, sKey, { startedAt = null, also = null, holds = null, sending = null } = {}) {
     {
       if (stopped) return { ok: false, why: 'stopped', held: true };   // the hits are pending already; the next boot delivers them
       const t = now();
@@ -8068,7 +8068,8 @@ function create(deps = {}) {
       const resId = await reserveWake(rec, null, item0, wk0);
       if (!resId) { log.log(`[channels] scope digest ${sKey}: ${groups.length} conversation(s) held — the ledger could not take the row`); return { ok: false, why: 'ledger-unwritable', held: true }; }
       let r = null;
-      if (!deliver || typeof deliver.deliverToConversation !== 'function') r = { ok: false, reason: 'no delivery ladder wired', refused: 'unwired' };
+      if (typeof sending === 'function' && deliver && typeof deliver.deliverToConversation === 'function') { try { await sending(); } catch (err) { r = { ok: false, reason: `the press could not record its send: ${(err && err.message) || err}`, refused: 'error' }; } }   // lane bl-msg B-84b4: the held press's stamp, BEFORE the send (see wakeNow)
+      if (r) { /* held */ } else if (!deliver || typeof deliver.deliverToConversation !== 'function') r = { ok: false, reason: 'no delivery ladder wired', refused: 'unwired' };
       else {
         try { r = await deliver.deliverToConversation(target.cid, text, { kind: 'notification', spendReason: 'channel-message', fromName, cardText }); }
         catch (err) { r = { ok: false, reason: `ladder threw: ${(err && err.message) || err}`, refused: 'error' }; }
@@ -8110,7 +8111,7 @@ function create(deps = {}) {
    *  — or, without `pk`, for every watcher holding pending hits — as ONE
    *  wake each (a digest block for a digest window or a boot leftover; a
    *  wake block that says "N in this window" for a coalesced burst). */
-  async function flushPending(rec, convId, { kind = 'coalesce', startedAt = null, pk = null, settle = null } = {}) {
+  async function flushPending(rec, convId, { kind = 'coalesce', startedAt = null, pk = null, settle = null, sending = null } = {}) {
     if (stopped) return { ok: false, why: 'stopped' };
     // the read of `pending` happens INSIDE the conversation's serial section
     // (see serialWake): a flush queued behind a direct wake sees what that
@@ -8135,7 +8136,7 @@ function create(deps = {}) {
         const n = pend.hits.length + pend.elided;
         const seconds = startedAt ? (now() - startedAt) / 1000 : 0;
         results.push(await billedWake({ scopeOf: () => scopeFor(rec, convId, p), settle: once }, () => wakeNow(rec, convId, pend.hits, {
-          elided: pend.elided, fromPending: pend, pk: p,
+          elided: pend.elided, fromPending: pend, pk: p, sending,   // lane bl-msg B-84b4: the held press's stamp before its send
           digest: kind === 'digest' || kind === 'boot',
           windowMinutes: kind === 'digest' ? (item.watcher.digestMinutes || F.DEFAULT_DIGEST_MINUTES) : Math.max(1, Math.round(seconds / 60)),
           since: kind === 'boot' ? heldSpanOf(pend.oldest, null) : startedAt ? heldSpanOf(pend.oldest, startedAt) : null,   // r6: a boot's leftovers (no window) or hits older than this window say since when
@@ -8347,7 +8348,7 @@ function create(deps = {}) {
    * way. Reached ONLY through `wake()` / `flushPending()` (the serial
    * section — the conversation's, and for an inherited grain its scope's).
    */
-  async function wakeNow(rec, convId, freshHits, { origin = null, coalesced = null, elided = 0, digest = false, windowMinutes = null, since = null, fromPending = null, pk = null, batch = null } = {}) {
+  async function wakeNow(rec, convId, freshHits, { origin = null, coalesced = null, elided = 0, digest = false, windowMinutes = null, since = null, fromPending = null, pk = null, batch = null, sending = null } = {}) {
     const t = now();
     const en = store.index.peek(`${rec.id}/${convId}`);
     const eff = wakeEffOf(en);
@@ -8437,7 +8438,9 @@ function create(deps = {}) {
       return { ok: false, why: 'ledger-unwritable', held: true };
     }
     let r = null;
-    if (!deliver || typeof deliver.deliverToConversation !== 'function') {
+    // lane bl-msg B-84b4 (ruled B): `sending` = the held press's durable stamp, written BEFORE the send — a stop inside the send's await cannot tell sent from not sent, so the boot's re-held rows say «may already have reached» (channels-access reconcilePressIn); a stamp that cannot be written holds the send
+    if (typeof sending === 'function' && deliver && typeof deliver.deliverToConversation === 'function') { try { await sending(); } catch (err) { r = { ok: false, reason: `the press could not record its send: ${(err && err.message) || err}`, refused: 'error' }; } }
+    if (r) { /* held: the stamp is the send's precondition */ } else if (!deliver || typeof deliver.deliverToConversation !== 'function') {
       r = { ok: false, reason: 'no delivery ladder wired', refused: 'unwired' };
     } else {
       // THE ONE UNATTENDED-TURN DOOR (fence 2). The ladder asks the spend

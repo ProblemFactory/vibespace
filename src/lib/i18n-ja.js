@@ -11915,6 +11915,7 @@ export default {
   "Nothing was left to deliver — its conversations are gone": "配信するものが残っていません — その会話はもうありません",
   "Not delivered now ({why}) — they go with its next delivery": "今は配信されませんでした（{why}）— 次の配信と一緒に送られます",
   "{n} messages for {agent} held since {date} — deliver or discard": "{agent} 宛ての {n} 件のメッセージが {date} から保留中 — 配信するか破棄するか",
+  "{n} messages for {agent} held since {date} — {d} of them may already have reached {agent}: VibeSpace restarted while delivering them — deliver again or discard": "{agent} 宛ての {n} 件のメッセージが {date} から保留中 — うち {d} 件は配信中に VibeSpace が再起動したため、すでに {agent} に届いている可能性があります — もう一度配信するか破棄するか",
   "They were held for {agent} on {where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from {date}. A delivery that old is never sent by itself.": "{agent} を起こせなかった間（再起動・1 日の上限・実行中のセッションなし）、{where} で保留されていました — 最も古いものは {date}。これほど古い配信は自動では送られません。",
   "Deliver sends them to {agent} now, as one block (a billed turn). Discard drops them — nothing is sent.": "配信すると今すぐ 1 つのブロックとして {agent} に送ります（課金されるターン）。破棄すると削除し、何も送りません。",
   "Unanswered, it expires in {n} days — they are discarded then.": "回答がなければ {n} 日後に期限切れ — その時点で破棄されます。",

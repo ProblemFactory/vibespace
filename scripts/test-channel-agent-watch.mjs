@@ -2085,11 +2085,11 @@ async function stopLeg16(ENGM, name, { done = false } = {}) {
   if (done) await m2.eng.store.index.update(() => { for (const cv of [C, C2_13]) { const e2 = m2.eng.store.index.entry(A, cv, { create: false }); if (e2) e2.pending = []; } });   // the block HAD cleared what it carried (its finalize written, the re-hold not)
   m2.eng.start(); await new Promise((r) => setTimeout(r, 40)); if (m2.eng.settleWakes) await m2.eng.settleWakes();
   try {
-    const boot = { reqs: held16(m2).map((r) => ({ id: r.id, status: r.status, n: r.held && r.held.n, inFlight: !!(r.held && r.held.inFlight) })), cards: cards16(m2), card: st13(m2).card };
+    const boot = { reqs: held16(m2).map((r) => ({ id: r.id, status: r.status, n: r.held && r.held.n, inFlight: !!(r.held && r.held.inFlight), ...(r.held && r.held.inDoubt ? { doubt: r.held.inDoubt.n } : {}) })), cards: cards16(m2), card: st13(m2).card };   // lane bl-msg B-84b4: `doubt` = the rows a stop inside the SEND re-held
     const it0 = r0.todoId ? m2.userTodos.get(r0.todoId) : null;
     const d = done ? null : await m2.eng.decideRequest(r0.id, true, 'user', { person: true });
     if (m2.eng.settleWakes) await m2.eng.settleWakes();
-    return { r0: { id: r0.id, todoId: r0.todoId }, inFlight, boot, it0: it0 && { status: it0.status, resolvedBy: it0.resolvedBy || null, n: it0.resolvedFact ? it0.resolvedFact.n : null }, press: d && PRESS10(d), after: st13(m2), pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) } };
+    return { r0: { id: r0.id, todoId: r0.todoId }, inFlight, boot, pressDoubt: d ? d.inDoubt || 0 : null, it0: it0 && { status: it0.status, resolvedBy: it0.resolvedBy || null, n: it0.resolvedFact ? it0.resolvedFact.n : null }, press: d && PRESS10(d), after: st13(m2), pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) } };
   } finally { m2.eng.stop(); }
 }
 // THE MUTANT «no boot reconcile» (beb0cc795: a boot never looks at a press cut short)
@@ -2101,9 +2101,16 @@ function noReconcileMutant16() {
 try {
   const g = await stopLeg16(ENG, 'e16-stop');
   ok(J2s(g.inFlight) === J2s([{ id: g.r0.id, status: 'approved', inFlight: true }]) && g.boot.reqs.length === 1 && g.boot.reqs[0].id === g.r0.id && g.boot.reqs[0].status === 'open' && g.boot.reqs[0].n === 60 && !g.boot.reqs[0].inFlight
-    && J2s(g.boot.cards) === J2s([g.r0.todoId]) && /^60 messages for Worker held since .* — deliver or discard$/.test(g.boot.card || '')
+    && J2s(g.boot.cards) === J2s([g.r0.todoId]) && /^60 messages for Worker held since .* — 60 of them may already have reached Worker: VibeSpace restarted while delivering them — deliver again or discard$/.test(g.boot.card || '') && g.boot.reqs[0].doubt === 60 && g.pressDoubt === 60
     && g.press && g.press.ok && g.press.delivered === true && g.press.n === 60 && g.after.status === 'approved' && g.after.card === 'delivered' && J2s(g.pend) === J2s({ ops: 0, ann: 0 }),
     `(b) a stop inside the block (the request 'approved', its press record kept) ⇒ the boot finds ONE request (${g.boot.reqs.length}: the same, open, n ${g.boot.reqs[0] && g.boot.reqs[0].n}) and ONE card (its own «${(g.boot.card || '').replace(/since .* —/, 'since … —')}»); its Deliver sends ${g.press && g.press.n} and closes it «${g.after.card}» (beb0cc795: the old card a door-less 'approved', a twin request beside it)`, J2s(g));
+  // lane bl-msg B-84b4 (ruled B): the stop came INSIDE the send (the stamp written before it) ⇒ the card SAYS the 60 may already have
+  // reached Worker, the press answer says it once; CONTROL — the stamp removed ⇒ the boot's card is the plain «deliver or discard» again
+  const STAMP = 'if (r2 && r2.held && r2.held.inFlight && !r2.held.inFlight.sendingAt) r2.held.inFlight.sendingAt = now();';
+  const s0 = engineSource(REPO);
+  ok(s0.split(STAMP).length === 2, '(b) the stamp control finds its line');
+  const ns = await stopLeg16(MUT.load('src/server/channels-engine.js', s0.replace(STAMP, ''), 'held-no-stamp'), 'e16-stop-nostamp');
+  ok(/ — deliver or discard$/.test(ns.boot.card || '') && !ns.boot.reqs[0].doubt && !ns.pressDoubt, 'CONTROL «no stamp before the send»: the boot card says nothing of the doubt — the (b) leg goes red', J2s({ card: ns.boot.card, reqs: ns.boot.reqs }));
   const m = noReconcileMutant16();
   const r = await stopLeg16(MUT.load('src/server/channels-engine.js', m.cut, 'held-no-press-reconcile'), 'e16-stop-red');
   ok(m.cut !== m.src && r.boot.reqs.length === 2 && r.boot.reqs.some((x) => x.id === r.r0.id && x.status === 'approved') && r.press && !r.press.ok,

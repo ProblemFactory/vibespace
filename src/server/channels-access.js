@@ -1275,8 +1275,12 @@ function create(engineCtx) {
     return { n: gone.reduce((x, c) => x + (Number(c.dropped.n) || 0), 0), k: gone.length, of: all.length, why: String(last.dropped.why), agent: heldWho({ principal: r2.principal || {} }) };
   };
   const heldDropLine = (d) => (d.why === 'not-covered' ? `the rule no longer covers ${d.k} of ${d.of} conversations — ${d.n} held messages dropped` : `${d.k} of ${d.of} conversations no longer wake ${d.agent} — ${d.n} held messages dropped`);
-  const heldLine = (n, who, day, drop = null) => `${n} messages for ${who} held since ${day} — deliver or discard${drop ? ` · ${heldDropLine(drop)}` : ''}`;
-  const heldKey = (n, who, day, drop = null) => (!drop ? { key: i18nKey('{n} messages for {agent} held since {date} — deliver or discard'), params: { n, agent: who, date: day } }
+  // lane bl-msg B-84b4 (ruled B): rows a stop cut off INSIDE the send (the press's stamp was written) may already have reached the
+  // agent — the card SAYS it, and the person decides: Deliver sends them knowingly, Discard drops them (the drop clause yields to it)
+  const heldDoubtOf = (req) => { const d = req && req.held && req.held.inDoubt; return d && Number(d.n) > 0 ? Number(d.n) : 0; };
+  const heldLine = (n, who, day, drop = null, doubt = 0) => (doubt ? `${n} messages for ${who} held since ${day} — ${doubt} of them may already have reached ${who}: VibeSpace restarted while delivering them — deliver again or discard`
+    : `${n} messages for ${who} held since ${day} — deliver or discard${drop ? ` · ${heldDropLine(drop)}` : ''}`);
+  const heldKey = (n, who, day, drop = null, doubt = 0) => (doubt ? { key: i18nKey('{n} messages for {agent} held since {date} — {d} of them may already have reached {agent}: VibeSpace restarted while delivering them — deliver again or discard'), params: { n, agent: who, date: day, d: doubt } } : !drop ? { key: i18nKey('{n} messages for {agent} held since {date} — deliver or discard'), params: { n, agent: who, date: day } }
     : { key: drop.why === 'not-covered' ? i18nKey('{n} messages for {agent} held since {date} — deliver or discard · the rule no longer covers {k} of {m} conversations — {d} held messages dropped') : i18nKey('{n} messages for {agent} held since {date} — deliver or discard · {k} of {m} conversations no longer wake {agent} — {d} held messages dropped'), params: { n, agent: who, date: day, k: drop.k, m: drop.of, d: drop.n } });
   /** THE HELD CARD, from its REQUEST ROW (r9 — the acceptance: a truncated user-todos.json started For you empty and the held
    *  decision lost its card, said nowhere): holdAside files it when it sets the hits aside; the boot reconcile files it AGAIN
@@ -1293,11 +1297,11 @@ function create(engineCtx) {
     const drop = heldDroppedOf(req);   // r12: a card filed again from its request row says what part was dropped
     const it = userTodos.add(INBOX_KEY, {
       origin: 'channels', by: 'system', sessionName: 'Channels', urgency: 'normal', openCap: HELD_OPEN_CAP,
-      text: heldLine(n, who, day, drop),
+      text: heldLine(n, who, day, drop, heldDoubtOf(req)),
       detail: `They were held for ${who} on ${where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from ${day}. A delivery that old is never sent by itself.\nDeliver sends them to ${who} now, as one block (a billed turn). Discard drops them — nothing is sent.\nUnanswered, it expires in ${ttlDays} days — they are discarded then.`,
       action: { type: 'channel-held-digest', id: req.id }, expiresAt: req.expiresAt,
       i18n: {
-        text: heldKey(n, who, day, drop),
+        text: heldKey(n, who, day, drop, heldDoubtOf(req)),
         detail: [
           { key: i18nKey('They were held for {agent} on {where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from {date}. A delivery that old is never sent by itself.'), params: { agent: who, where, date: day } },
           { key: i18nKey('Deliver sends them to {agent} now, as one block (a billed turn). Discard drops them — nothing is sent.'), params: { agent: who } },
@@ -1442,7 +1446,7 @@ function create(engineCtx) {
     const plan = !approve ? null : rec ? deliverPlanOf(rec, req0) : { carry: heldConvsOf(req0).filter((c) => !heldSpent(c)), rest: [], via: null };
     const carryKeys = plan ? new Set(plan.carry.map((c) => c.key)) : null;
     const only = plan && plan.rest.length ? carryKeys : null;   // r15: a press that releases the WHOLE request releases it as before (releaseAside counts its unreadable entries then — test-channel-agent-watch ⑧ (c)); only a partial press narrows
-    let applied = false, touched = 0, skipped = 0, dropped = null, released = null;
+    let applied = false, touched = 0, skipped = 0, dropped = null, released = null, doubtWas = 0;
     await store.index.update((ix) => {
       const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
       if (!r2 || r2.status !== 'open') return;
@@ -1451,6 +1455,7 @@ function create(engineCtx) {
       touched = releaseAside(r2, !!approve, only);
       if (approve) for (const c of heldConvsOf(r2)) if (carryKeys.has(c.key)) c.sent = { at: t };
       if (approve && touched) r2.held.inFlight = pressRecordOf(released, t);   // r16: the press in flight — a stop inside its block leaves it, the next boot reconciles by it
+      if (r2.held.inDoubt) { doubtWas = heldDoubtOf(r2); delete r2.held.inDoubt; }   // lane bl-msg B-84b4: the person decided, knowing — the answer says it once
       r2.held.n = touched;   // the record keeps what the decision touched (r15: a Deliver's, what went — below)
       skipped = Number(r2.held.skipped) || 0;
       dropped = heldDroppedOf(r2);   // r12: the part dropped before it (its conversations' watcher no longer woken there) — said with it
@@ -1484,8 +1489,16 @@ function create(engineCtx) {
       }, { durable: true });
       settled = true;
     };
+    // lane bl-msg B-84b4 (ruled B): THE STAMP, durable, BEFORE the send (the engine calls it right before its ladder): a stop inside
+    // the send leaves it, and the boot's re-hold says those rows may already have reached the agent
+    const sending = async () => {
+      await store.index.update((ix) => {
+        const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
+        if (r2 && r2.held && r2.held.inFlight && !r2.held.inFlight.sendingAt) r2.held.inFlight.sendingAt = now();
+      }, { durable: true });
+    };
     let delivery = null;
-    if (approve && touched && rec) { try { delivery = await deliverHeld(rec, req0, plan, settle); } catch (e) { delivery = { ok: false, why: (e && e.message) || String(e) }; } }
+    if (approve && touched && rec) { try { delivery = await deliverHeld(rec, req0, plan, settle, sending); } catch (e) { delivery = { ok: false, why: (e && e.message) || String(e) }; } }
     if (approve && !settled) { try { await settle(delivery); } catch (e) { log.warn(`[channels] ${req0.id}: the press's re-hold could not be written (${(e && e.message) || e}) — the next boot reconciles it`); } }
     const went = touched - back;
     if (approve) {
@@ -1504,7 +1517,8 @@ function create(engineCtx) {
     if (!touched && !reopened) return { ...out, delivered: false, n: 0, why: 'nothing-left', note: 'nothing was left to deliver — its conversations are gone' };
     const carried = delivery && delivery.ok && Number(delivery.n) > went ? { carried: Number(delivery.n) } : {};   // the same block took the watcher's newer hits too — said, never folded into «n»
     const refused = !delivery || delivery.ok ? {} : delivery.stashed ? { why: String(delivery.why || 'refused'), stashed: true, note: 'not delivered now — kept for its next turn' } : { why: String(delivery.why || 'refused'), note: 'not delivered now — the messages stay held on the card' };
-    return { ...out, delivered: !!(delivery && delivery.ok) && went > 0, n: went, ...carried, ...refused, ...(reopened ? { stillHeld: still, stillHeldConvs: stillConvs } : {}) };
+    const doubtSaid = doubtWas ? { inDoubt: doubtWas, doubtNote: `${doubtWas} of them may already have reached ${heldWho({ principal: req0.principal || {} })} before VibeSpace restarted — sent again as you chose` } : {};   // lane bl-msg B-84b4
+    return { ...out, delivered: !!(delivery && delivery.ok) && went > 0, n: went, ...carried, ...refused, ...(reopened ? { stillHeld: still, stillHeldConvs: stillConvs } : {}), ...doubtSaid };
   }
   /** r16: THE PRESS IN FLIGHT, persisted on the request (`held.inFlight`) from the release until its re-hold is written under the
    *  block's hold — heldIdsOf's Map as rows (`{at, parts: [{key, ids, elided}]}`); `releasedOf` reads it back. A request 'approved'
@@ -1523,11 +1537,13 @@ function create(engineCtx) {
     const left = pressLeftOf(r2);
     const total = [...rel.values()].reduce((n, v) => n + v.ids.size + v.elided, 0);
     const back = reholdLeft(r2, rel, left);
+    const stampAt = Number(r2.held.inFlight.sendingAt) || 0;   // lane bl-msg B-84b4: the stop came INSIDE the send — what came back may have gone
     delete r2.held.inFlight;
     const still = heldCountOf(r2);
-    if (still > 0) { r2.status = 'open'; r2.decidedAt = null; delete r2.decidedBy; r2.held.n = still; }
+    const inDoubt = stampAt && back > 0 ? back : 0;
+    if (still > 0) { r2.status = 'open'; r2.decidedAt = null; delete r2.decidedBy; r2.held.n = still; if (inDoubt) r2.held.inDoubt = { n: inDoubt, at: stampAt }; }
     else r2.held.n = Math.max(0, total - back);
-    return { back, went: Math.max(0, total - back), still };
+    return { back, went: Math.max(0, total - back), still, ...(inDoubt && still > 0 ? { inDoubt } : {}) };
   }
   /** r15: the record ids (and elided counts) a press releases, per conversation key → `Map(key → {ids, elided})` — the request's
    *  own rows and its r6 in-place `aside` rows; read BEFORE releaseAside empties them. */
@@ -1588,11 +1604,11 @@ function create(engineCtx) {
     const k = items.findIndex(Boolean);   // r15: no scope road — ONE conversation per press, the rest stay on the card
     return k < 0 ? { carry: [], rest: convs, via: null } : { carry: [convs[k]], rest: convs.filter((_, i) => i !== k), via: null };
   }
-  async function deliverHeld(rec, r, plan, settle = null) {
+  async function deliverHeld(rec, r, plan, settle = null, sending = null) {
     const h = r.held || {};
     if (!plan || !plan.carry.length) return { ok: false, why: 'nothing-pending' };
-    if (plan.via) return flushScope(rec, plan.via.source, plan.via.patternId, h.pk, { also: new Set(plan.carry.map((c) => c.key)), settle });   // r15: the block holds every road it reads (the engine's billedWake `roads`); r16: `settle` runs under that hold
-    return flushPending(rec, plan.carry[0].id, { kind: 'boot', pk: h.pk, settle });
+    if (plan.via) return flushScope(rec, plan.via.source, plan.via.patternId, h.pk, { also: new Set(plan.carry.map((c) => c.key)), settle, sending });   // r15: the block holds every road it reads (the engine's billedWake `roads`); r16: `settle` runs under that hold; bl-msg B-84b4: `sending` = the stamp before its send
+    return flushPending(rec, plan.carry[0].id, { kind: 'boot', pk: h.pk, settle, sending });
   }
   // THE ITEM AND THE REQUEST ARE ONE STATE (lane wake-approve-card — exit-proxy verify-r2 ask-b's law, which the hub-act,
   // automation and vault asks keep). Acceptance round 2: a wake request's item is a DECISION ROW — the store lets it leave
@@ -1684,14 +1700,15 @@ function create(engineCtx) {
       let it = null; try { it = o.todoId && userTodos && typeof userTodos.get === 'function' ? userTodos.get(o.todoId) : null; } catch { }
       if (o.res) {
         n++;
-        try { store.audit({ kind: 'watch', op: 'held-press-reconciled', requestId: o.id, n: o.res.went, ...(o.res.still ? { stillHeld: o.res.still } : {}), at: t, by: 'system' }); } catch { }
+        try { store.audit({ kind: 'watch', op: 'held-press-reconciled', requestId: o.id, n: o.res.went, ...(o.res.still ? { stillHeld: o.res.still } : {}), ...(o.res.inDoubt ? { inDoubt: o.res.inDoubt } : {}), at: t, by: 'system' }); } catch { }
+        if (o.res.inDoubt) log.log(`[channels] ${o.id}: the stop came inside the delivery's send — ${o.res.inDoubt} of the held message(s) may already have reached the agent; the card says so and the person decides`);   // lane bl-msg B-84b4
         log.log(`[channels] ${o.id}: a Deliver press was cut short by a stop — ${o.res.still ? `${o.res.still} held message(s) back on its card (open again)` : `its delivery was found done (${o.res.went})`}`);
       }
       if (!it || it.status !== 'open') continue;
       if (o.status === 'open') {
         const rq = (store.index.table('watchRequests') || []).find((r) => r && r.id === o.id);
         if (!rq || !rq.held || !userTodos || typeof userTodos.reshapeItems !== 'function') continue;
-        const who = heldWho({ principal: rq.principal || {} }), day = rq.held.since ? OF.when(rq.held.since) : 'an unknown date', drop = heldDroppedOf(rq), line = heldLine(rq.held.n, who, day, drop), key = heldKey(rq.held.n, who, day, drop);
+        const who = heldWho({ principal: rq.principal || {} }), day = rq.held.since ? OF.when(rq.held.since) : 'an unknown date', drop = heldDroppedOf(rq), dbt = heldDoubtOf(rq), line = heldLine(rq.held.n, who, day, drop, dbt), key = heldKey(rq.held.n, who, day, drop, dbt);
         try { userTodos.reshapeItems((x) => { if (x.id !== rq.todoId || x.status !== 'open' || x.text === line) return false; x.text = line; if (x.i18n) x.i18n = { ...x.i18n, text: key }; return true; }); } catch { }
         continue;
       }

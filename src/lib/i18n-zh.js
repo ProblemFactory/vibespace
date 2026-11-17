@@ -11916,6 +11916,7 @@ export default {
   "Nothing was left to deliver — its conversations are gone": "没有可投递的了 — 它们所在的会话已不存在",
   "Not delivered now ({why}) — they go with its next delivery": "现在没有投递（{why}）— 它们会随下一次投递一起发送",
   "{n} messages for {agent} held since {date} — deliver or discard": "{n} 条给 {agent} 的消息自 {date} 起被搁置 — 投递还是丢弃",
+  "{n} messages for {agent} held since {date} — {d} of them may already have reached {agent}: VibeSpace restarted while delivering them — deliver again or discard": "{n} 条给 {agent} 的消息自 {date} 起被搁置 — 其中 {d} 条可能已送达 {agent}：投递途中 VibeSpace 重启了 — 再次投递还是丢弃",
   "They were held for {agent} on {where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from {date}. A delivery that old is never sent by itself.": "它们在 {where} 上为 {agent} 搁置，因为当时无法唤醒它（重启、每日上限、没有运行中的会话）— 最早的一条来自 {date}。这么旧的投递不会自动发送。",
   "Deliver sends them to {agent} now, as one block (a billed turn). Discard drops them — nothing is sent.": "投递会现在把它们作为一个消息块发给 {agent}（一次计费的回合）。丢弃会删除它们 — 不发送任何内容。",
   "Unanswered, it expires in {n} days — they are discarded then.": "无人回答时，{n} 天后过期 — 届时它们会被丢弃。",
