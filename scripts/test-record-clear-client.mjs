@@ -76,7 +76,6 @@ const JOB = { A: 'jb-cc00000a', B: 'jb-cc00000b' };
 const HIST_AT = { A: NOW - 3 * H, B: NOW - 2 * H };
 
 // ── the worktree (overlays the working src/, public/, data/bin/, docs/) ──
-try { execSync('git worktree prune', { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json', path.join('data', 'bin'), 'docs']) {
   fs.rmSync(path.join(wt, f), { recursive: true, force: true });
@@ -189,7 +188,6 @@ const cleanup = () => {
   if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch {}
   for (const d of [chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
-  try { execSync('git worktree prune', { cwd: repo, stdio: 'ignore' }); } catch {}
 };
 process.on('exit', cleanup);
 await hub.ready();

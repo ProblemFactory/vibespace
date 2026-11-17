@@ -72,7 +72,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { judgeHoverOpen } from './pen-hover-judge.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -88,7 +88,7 @@ const [PORT, CDP_PORT] = await freePorts(2);
 const root = mintRoot('taskbar-group-smoke'), wt = path.join(root, 't');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const PROFILE = scratch('taskbar-group-chrome');
-const HOME = scratchHome('taskbar-group-home', fs);
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true }); // the hub's HOME lies in its root (hub-boot.mjs)
 const SHOTS = scratch('taskbar-group-shots'); // kept for the human look, swept by the gate's reaper
 fs.mkdirSync(SHOTS, { recursive: true });
 let failed = 0, passed = 0;
@@ -105,8 +105,7 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 
-fs.mkdirSync(path.join(root, 'home'), { recursive: true }); // the hub's HOME lies in its root (hub-boot.mjs)
-const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', HOME: path.join(root, 'home') } });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 // a REAL mouse (headless linux chrome answers hover:none / pointer:none without these — test-gear-menu's measurement)
 const REAL_MOUSE = '--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4';
 const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
@@ -114,7 +113,7 @@ const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debug
   '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
-  for (const d of [PROFILE, HOME]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  try { fs.rmSync(PROFILE, { recursive: true, force: true }); } catch {}
 };
 process.on('exit', cleanup);
 

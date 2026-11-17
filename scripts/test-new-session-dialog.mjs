@@ -211,8 +211,6 @@ const cleanup = () => {
   if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch {}
   // the hub and every process it caused end with hub-boot.mjs's root (no pattern kill — rule five)
-  // …and what lives there only by cwd / HOME / daemon root — the server's device daemon is title-rewritten, so no argv
-  // names it (it outlived every run: the gate's reaper found it later)
 };
 process.on('exit', cleanup);
 await hub.ready();

@@ -510,6 +510,21 @@ console.log('\n§8 lanes, the serial table, the impact scope, the full-tier cloc
   const silent = realHeavy.filter((s) => !s.always && !(s.reads && s.reads.length) && inputless(s, REPO)).map((s) => s.name);
   ok(silent.length === 0, `every heavy row without always:/reads: has a PRODUCT input the affected tier can match (silent rows: ${silent.join(', ') || 'none'})`);
   ok(inputless({ name: 'test-d' }, root) && !inputless({ name: 'test-a' }, root), 'CONTROL: the census predicate flags a suite that reads no product file and passes one that does');
+  // THE SUITES' ONE HUB BOOT (lane boot-helper, 主开发 2026-11-17): a suite on scripts/hub-boot.mjs spawns no server.js itself —
+  // the BOOT INPUTS reach it through the helper's own text (BOOTS_THE_PRODUCT matches its 'server.js'), which sits in every helper
+  // suite's import closure. Pinned over the helper ALONE: a stub tree holding a suite that imports and calls startHub and the
+  // helper's real bytes (its own imports absent, so nothing else is walked); the control is the same helper no longer spelling
+  // the server's name — that suite then carries no boot input, the affected tier would never select it for a product change.
+  {
+    const hb = mktmp('helper-boot');
+    const hw = (rel, body) => { fs.mkdirSync(path.dirname(path.join(hb, rel)), { recursive: true }); fs.writeFileSync(path.join(hb, rel), body); };
+    const helperSrc = fs.readFileSync(path.join(REPO, 'scripts', 'hub-boot.mjs'), 'utf-8');
+    hw('scripts/test-on-helper.mjs', "import { mintRoot, startHub } from './hub-boot.mjs';\nconst hub = startHub({ root: mintRoot('x'), tree: 't', port: 1 });\nawait hub.ready();\n");
+    const bootOf = (helperText) => { hw('scripts/hub-boot.mjs', helperText); const { files, prefixes, via } = suiteInputs({ name: 'test-on-helper' }, { root: hb }); return { files: files.has('scripts/hub-boot.mjs'), boot: files.has('server.js') && ['src/', 'public/', 'data/bin/'].every((p) => prefixes.has(p)) && ['server.js', 'src/', 'public/', 'data/bin/'].every((p) => via.get(p) === 'boot') }; };
+    const real = bootOf(helperSrc), blind = bootOf(helperSrc.replace(/server\.js/g, 'the-hub'));
+    ok(real.files && real.boot && blind.files && !blind.boot,
+      'a suite on the boot helper carries the BOOT INPUTS (server.js, src/, public/, data/bin/ — «boots the product») through scripts/hub-boot.mjs alone; CONTROL: the same helper no longer spelling the server\'s name — the suite still loads it and carries none', { real, blind });
+  }
   // changedFiles over real history: a..b is the diff, a lone sha is its unpublished range.
   const repo = makeRepo('range');
   const A = commit(repo, 'src/one.js', '1\n', 'A');

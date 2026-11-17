@@ -84,7 +84,6 @@ const W = 'T-260928-work', W2 = 'T-260928-side', WX = 'T-260928-other';
 const PASSWORD = 'walk-pw-' + process.pid;
 
 // ── the worktree ──
-try { execSync('git worktree prune', { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json', path.join('data', 'bin'), 'docs']) {
   fs.rmSync(path.join(wt, f), { recursive: true, force: true });

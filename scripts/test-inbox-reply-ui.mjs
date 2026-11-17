@@ -225,8 +225,7 @@ let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch {}
-  // every process this suite caused: the dtach session, the wrapper, the stub,
-  // the worktree's device daemon — all carry one of these scratch paths
+  // the hub and every process it caused (the dtach session, the wrapper, the stub, the device daemon) end with hub-boot.mjs's root
 };
 process.on('exit', cleanup);
 await hub.ready();

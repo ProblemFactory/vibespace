@@ -308,6 +308,7 @@ const o = read(files.outsider);
 const b = read(files.browser);
 console.log(JSON.stringify({ root, ready, map, pids: Object.values(map), starttimes: Object.values(map).map((p) => (p ? st(p) : null)), outsider: { pid: o, starttime: o ? st(o) : null, marker: oMark }, browser: { pid: b, starttime: b ? st(b) : null, marker: bMark }, wt: listed, kept, hubPid: hub.pid }));
 if (process.env.HB_MODE === 'wait') setInterval(() => { if (!fs.existsSync(process.env.HB_OUT)) process.exit(4); }, 200);   // ended by the parent's signal; never a clock
+else if (process.env.HB_MODE === 'throw') throw new Error('a suite that throws after its boot');   // the THROWN road: an uncaught throw, no exit call
 else process.exit(3);   // a red: no stop, no cleanup of its own
 `;
 const childEnv = (mode, extra = {}) => ({ PATH: process.env.PATH, HOME: OUT, GIT_CONFIG_NOSYSTEM: '1', HB_STANDIN: STANDIN, HB_OUT: OUT, HB_GREPO: GREPO, HB_HEAD: git('-C', GREPO, 'rev-parse', 'HEAD').stdout.trim(), HB_KEEP: KEEP('PIDFILE', 'WATCH'), HB_MODE: mode, ...extra });
@@ -331,10 +332,11 @@ const exBo = report(exB.stdout);
 ok(exBo && exBo.browser.pid && alive(exBo.browser.pid, exBo.browser.starttime) && !fs.existsSync(exBo.root) && exB.stderr.includes(`hub-boot: left pid ${exBo.browser.pid} (`) && exB.stderr.includes(`its argv lies in ${exBo.root}`),
   'CONTROL (a real child) the same browser WITHOUT the root\'s HOME — RED: it is only near (its profile argv), said and LEFT running while the root is removed under it', exB.stderr.slice(0, 300));
 if (exBo) { if (exBo.browser.pid) endKeeper(exBo.browser); if (exBo.outsider.pid) endKeeper(exBo.outsider); }
-const exT = runChild(HB_URL, { HB_THROWER: '1' });   // a suite 'exit' listener registered BEFORE the mint throws on the EXIT road
+const exT = runChild(HB_URL, { HB_THROWER: '1', HB_MODE: 'throw' });   // the THROWN road (an uncaught throw after the boot), and a suite 'exit' listener registered BEFORE the mint throws too
 const exTo = report(exT.stdout);
-ok(exTo && !fs.existsSync(exTo.root) && await waitFor(() => exTo.pids.every((p) => !p || gone(p))) && exT.stderr.includes("hub-boot: a suite 'exit' listener threw (a suite exit listener that throws, registered before the mint) — the helper's end runs anyway"),
-  'the EXIT road: a suite \'exit\' listener registered before the mint throws — wrapped at the mint, the throw is said and the end still runs (no root, no process)', exT.stderr.slice(0, 300));
+ok(exTo && exT.status === 1 && exT.stderr.includes('a suite that throws after its boot') && !fs.existsSync(exTo.root) && await waitFor(() => exTo.pids.every((p) => !p || gone(p))) && exT.stderr.includes("hub-boot: a suite 'exit' listener threw (a suite exit listener that throws, registered before the mint) — the helper's end runs anyway"),
+  'the THROWN road: the suite throws after its boot (exit 1, its error said) and a suite \'exit\' listener registered before the mint throws too — wrapped at the mint, that throw is said and the end still runs (no root, no process)', { status: exT.status, err: exT.stderr.slice(0, 300) });
+ok(exTo && (() => { try { return fs.readFileSync(exTo.kept, 'utf8').includes(`stand-in hub ${exTo.hubPid} listening`); } catch { return false; } })(), 'keepLog on the THROWN road: the hub\'s log is kept outside the root', exTo && exTo.kept);
 if (exTo && exTo.outsider.pid) endKeeper(exTo.outsider);
 
 // ── ⑨ A SIGNAL ────────────────────────────────────────────────────────────────
@@ -351,6 +353,7 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
   const t9 = await signalRun(HB_URL, sig);
   ok(t9.rep && t9.rep.ready && t9.end.sig === sig && t9.end.code === null, `${sig}: the child died BY ${sig} — its parent reads the signal (code ${t9.end.code}, signal ${t9.end.sig}), so the gate reads «killed from outside», never a red`, t9.err.slice(0, 300));
   ok(t9.rep && !fs.existsSync(t9.rep.root) && await waitFor(() => t9.rep.pids.every((p) => !p || gone(p))), `${sig}: its root is gone and every process its hub started is gone`);
+  if (sig === 'SIGTERM') ok(t9.rep && (() => { try { return fs.readFileSync(t9.rep.kept, 'utf8').includes(`stand-in hub ${t9.rep.hubPid} listening`); } catch { return false; } })(), 'keepLog on the SIGNAL road: the hub\'s log is kept outside the root after a death by SIGTERM', t9.rep && t9.rep.kept);
   if (t9.rep && t9.rep.outsider.pid) endKeeper(t9.rep.outsider);
 }
 const t9t = await signalRun(HB_URL, 'SIGTERM', { HB_THROWER: '1' });
@@ -438,9 +441,9 @@ const t9c = await signalRun(pathToFileURL(mutantFile('exit-code', patch('    for
 ok(t9c.rep && t9c.end.code === 143 && t9c.end.sig === null, `CONTROL (a real child in its own fresh root) the exit-code form — RED: the parent reads code ${t9c.end.code} and no signal, so the gate would read a suite it ended as a product red`, t9c.end);
 if (t9c.rep && t9c.rep.outsider.pid) endKeeper(t9c.rep.outsider);
 const NOWRAP_SRC = patch("    for (const l of process.rawListeners('exit')) {\n      process.removeListener('exit', l);\n      process.on('exit', (...a) => { try { l(...a); } catch (e) { say(`a suite 'exit' listener threw (${e && e.message}) \u2014 the helper's end runs anyway`); } });\n    }\n", '');
-const exW = runChild(pathToFileURL(mutantFile('no-wrap', NOWRAP_SRC)).href, { HB_THROWER: '1' });
+const exW = runChild(pathToFileURL(mutantFile('no-wrap', NOWRAP_SRC)).href, { HB_THROWER: '1', HB_MODE: 'throw' });
 const exWo = report(exW.stdout);
-ok(exWo && fs.existsSync(exWo.root), 'CONTROL (a real child in its own fresh root) the exit listeners NOT wrapped — RED: on the exit road the throwing listener stops the emit, the end never runs, the root stays', exW.stderr.slice(0, 200));
+ok(exWo && fs.existsSync(exWo.root), 'CONTROL (a real child in its own fresh root) the exit listeners NOT wrapped — RED: on the thrown road the throwing listener stops the emit, the end never runs, the root stays', exW.stderr.slice(0, 200));
 if (exWo) {
   const leftW = exWo.pids.map((p, i) => ({ pid: p, starttime: exWo.starttimes[i] })).filter((x) => x.pid && alive(x.pid, x.starttime));
   if (exWo.browser.pid) leftW.push(exWo.browser);

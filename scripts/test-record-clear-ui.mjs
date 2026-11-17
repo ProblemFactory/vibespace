@@ -76,7 +76,6 @@ const W = 'T-260928-work';
 const HOSTILE = '<img src=x onerror=window.__xss=1>';
 
 // ── the worktree (overlays the working src/, public/, data/bin/, docs/) ──
-try { execSync(`git worktree prune`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json', path.join('data', 'bin'), 'docs']) {
   fs.rmSync(path.join(wt, f), { recursive: true, force: true });
@@ -185,9 +184,7 @@ let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch {}
-  // every process this suite caused, judged by /proc EVIDENCE (cwd, HOME or an argv token under one of this run's scratch roots), never by a name
   for (const d of [chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
-  try { execSync('git worktree prune', { cwd: repo, stdio: 'ignore' }); } catch {}
 };
 process.on('exit', cleanup);
 await hub.ready();

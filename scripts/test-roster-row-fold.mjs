@@ -232,8 +232,48 @@ const CLI_PRESENCE = {
 const hitOf = (code, alts) => alts.some((x) => Array.isArray(x) ? x.every((r) => r.test(code)) : x.test(code));
 const memo = (fn) => { const m = new Map(); return (src) => { let v = m.get(src); if (v === undefined) { v = fn(src); m.set(src, v); } return v; }; }; // the controls re-judge the same texts
 // a suite on THE SUITES' ONE HUB BOOT (lane boot-helper, 2026-11-17) spawns no server.js itself: it imports and CALLS startHub from
-// scripts/hub-boot.mjs — it boots a hub all the same
-const HELPER_HUB = (src) => /import\s*\{[^}]*\bstartHub\b[^}]*\}\s*from\s*'\.\/hub-boot\.mjs'/.test(src) && /\bstartHub\(/.test(src);
+// scripts/hub-boot.mjs — it boots a hub all the same. Read the way test-architecture §57d reads a suite on the helper: an import
+// STATEMENT outside a comment, a string, a template or a regex literal (the same scanner, dataRanges), the specifier
+// './hub-boot.mjs' in either quote; then a CALL, outside data, of the name that statement binds — `startHub`, `startHub as X`,
+// or `NS.startHub` under `import * as NS`. A comment or a string that spells `startHub(` calls nothing.
+const dataRanges = (t) => { // test-architecture's scanner, verbatim: offsets inside a comment, a string, a template's text or a regex literal
+  const out = [], tpl = []; let depth = 0;
+  const chunk = (j) => {
+    let k = j + 1;
+    while (k < t.length && t[k] !== '`' && !(t[k] === '$' && t[k + 1] === '{')) k += t[k] === '\\' ? 2 : 1;
+    out.push([j, k + 1]);
+    if (t[k] === '$') { tpl.push(depth); depth++; return k + 1; }
+    return k;
+  };
+  for (let j = 0; j < t.length; j++) {
+    const c = t[j], n = t[j + 1];
+    if (c === '/' && (n === '/' || n === '*')) { const e = n === '/' ? t.indexOf('\n', j) : t.indexOf('*/', j + 2); const end = e < 0 ? t.length : e + (n === '/' ? 0 : 2); out.push([j, end]); j = end - 1; continue; }
+    if (c === '"' || c === "'") { let k = j + 1; while (k < t.length && t[k] !== c && t[k] !== '\n') k += t[k] === '\\' ? 2 : 1; out.push([j, k + 1]); j = k; continue; }
+    if (c === '/' && /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\breturn|\btypeof)\s*$/.test(t.slice(Math.max(0, j - 12), j))) {
+      let k = j + 1, cls = false;
+      while (k < t.length && t[k] !== '\n' && (cls || t[k] !== '/')) { if (t[k] === '\\') k++; else if (t[k] === '[') cls = true; else if (t[k] === ']') cls = false; k++; }
+      out.push([j, k + 1]); j = k; continue;
+    }
+    if (c === '`') { j = chunk(j); continue; }
+    if (c === '}' && tpl.length && depth - 1 === tpl[tpl.length - 1]) { depth--; tpl.pop(); j = chunk(j); continue; }
+    if (c === '{') depth++; else if (c === '}') depth--;
+  }
+  return out;
+};
+const HELPER_HUB = (src) => {
+  if (!src.includes('hub-boot.mjs')) return false;
+  const data = dataRanges(src), code = (m) => !data.some(([x, y]) => m.index >= x && m.index < y);
+  const esc = (n) => n.replace(/\$/g, '\\$');
+  const calls = [];
+  for (const m of [...src.matchAll(/^import\s+([^;]*?)\s*\bfrom\s*(?=['"])/gm)].filter(code)) {
+    if (!/^(['"])\.\/hub-boot\.mjs\1/.test(src.slice(m.index + m[0].length))) continue;
+    const ns = /^\*\s*as\s+([A-Za-z_$][\w$]*)\s*$/.exec(m[1]);
+    if (ns) calls.push(new RegExp(`(?<![\\w$.])${esc(ns[1])}\\s*\\.\\s*startHub\\s*\\(`, 'g'));
+    const named = /\{([^}]*)\}/.exec(m[1]);
+    if (named) for (const part of named[1].split(',')) { const b = /^\s*startHub(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*$/.exec(part); if (b) calls.push(new RegExp(`(?<![\\w$.])${esc(b[1] || 'startHub')}\\s*\\(`, 'g')); }
+  }
+  return calls.some((re) => [...src.matchAll(re)].some(code));
+};
 const spawnsHub = memo((src) => SPAWN_HUB.test(src) || HELPER_HUB(src));
 const doorsMemo = new Map();
 function census(srcs, table, doors, { reach = null } = {}) {
@@ -274,8 +314,18 @@ ok(dc.bad.length === 0 && Object.keys(dc.sites).length >= 8, `every call of the 
   const comment = doorsCensus({ ...prod, 'src/lib/zz-planted.js': '// app._showAgentsDialog() — a comment names a door, it never opens one\n' }, DOORS);
   ok(planted.bad.some((b) => b.startsWith('src/lib/zz-planted.js: 1 call(s) of the Agents renderer, the census names 0 — a NEW door')) && twice.bad.some((b) => b.startsWith('src/lib/gear-menu.js: 2 call(s)')) && comment.bad.length === 0,
     'CONTROL: a new product door (a planted file) and a second call in a named door\'s file are each named; a comment that names the renderer is no door', { planted: planted.bad.slice(-1), twice: twice.bad.slice(-1), comment: comment.bad });
-ok(HELPER_HUB("import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';\nconst hub = startHub({ root });") && !HELPER_HUB("import { mintRoot, startHub } from './hub-boot.mjs';\nconst x = 1;") && !HELPER_HUB("const s = `startHub(`;"),
-  'CONTROL: a suite on the boot helper (startHub imported AND called) boots a hub for this census; an import never called, or a string, does not');
+{ const IMP = "import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';\n";
+  const counts = { named: IMP + 'const hub = startHub({ root });', renamed: "import { mintRoot, startHub as boot } from './hub-boot.mjs';\nconst hub = boot({ root });",
+    namespace: "import * as HB from './hub-boot.mjs';\nconst hub = HB.startHub({ root });", doubleQuoted: 'import { startHub } from "./hub-boot.mjs";\nconst hub = startHub({ root });',
+    multiLine: "import {\n  mintRoot,\n  startHub,\n} from './hub-boot.mjs';\nconst hub = startHub({ root });" };
+  const never = { neverCalled: IMP + 'const x = 1;', commentBeside: "import { startHub } from './hub-boot.mjs'; // startHub({ root }) boots the hub\nconst x = 1;",
+    stringCall: IMP + "const s = 'startHub(';", templateCall: IMP + 'const s = `startHub(${1})`;', aString: 'const s = `startHub(`;',
+    renamedButOldName: "import { startHub as boot } from './hub-boot.mjs';\n// boot() — a comment, never a call\nconst hub = startHub({ root });",
+    importInTemplate: "const FIX = `\nimport { startHub } from './hub-boot.mjs';\nstartHub({ root });\n`;", importInComment: "/*\nimport { startHub } from './hub-boot.mjs';\n*/\nstartHub({ root });",
+    otherModule: "import { startHub } from './hub-boot-old.mjs';\nstartHub({ root });" };
+  const wrongC = Object.entries(counts).filter(([, t]) => !HELPER_HUB(t)).map(([k]) => k), wrongN = Object.entries(never).filter(([, t]) => HELPER_HUB(t)).map(([k]) => k);
+  ok(wrongC.length === 0 && wrongN.length === 0,
+    `CONTROL: a suite on the boot helper boots a hub for this census when startHub is imported (named, renamed, a namespace, double quotes, over lines) AND called by its bound name; an import never called, a comment beside it, a string or a template that spells the call, the old name under a rename, an import inside a template or a comment, another module — none does (${Object.keys(counts).length} count, ${Object.keys(never).length} do not)`, { counted: wrongN, missed: wrongC }); }
 }
 // the suites that reach a door
 const SCRIPTS = path.join(repo, 'scripts');
