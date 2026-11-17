@@ -87,7 +87,7 @@ const req = (method, p, body, { bearer = null } = {}) => new Promise((resolve) =
   if (data) r.write(data); r.end();
 });
 const cli = (args, token) => new Promise((resolve) => {
-  const p = spawn(process.execPath, [path.join(wt, 'data/bin/vibespace-api'), ...args], { env: { PATH: process.env.PATH, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const p = spawn(process.execPath, [path.join(wt, 'data/bin/vibespace-api'), ...args], { env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] });   // rule nine: the root's HOME
   let out = '', err = '';
   p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; });
   p.on('close', (code) => { let json = null; try { json = JSON.parse(out); } catch { } resolve({ code, out, err, json }); });
@@ -256,7 +256,7 @@ try {
   const w2Stub = W2.claudeSessionId && stubs().find((x) => x.sid === W2.claudeSessionId);
   check('a second worker opened by the key (live, with its own token)', op2.code === 0 && !!W2.claudeSessionId && !!(w2Stub && w2Stub.token), op2);
   const askRun = w2Stub && await new Promise((resolve) => {
-    const p = spawn(process.execPath, [path.join(wt, 'data/bin/vibespace-ask'), 'May I delete the scratch folder?'], { env: { PATH: process.env.PATH, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: w2Stub.token }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(process.execPath, [path.join(wt, 'data/bin/vibespace-ask'), 'May I delete the scratch folder?'], { env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: w2Stub.token }, stdio: ['ignore', 'pipe', 'pipe'] });   // rule nine: the root's HOME
     let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.on('close', (code) => resolve({ code, out, err }));
   });
   const askItem = await until(async () => { const t = (await req('GET', '/api/user-todos')).json; return ((t && t.todos && t.todos.open) || []).find((i) => i.sessionKey === `claude:${W2.claudeSessionId}` && /scratch folder/.test(i.text)) || null; }, 8000);

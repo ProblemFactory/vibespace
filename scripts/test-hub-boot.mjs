@@ -224,9 +224,10 @@ const FAKE3 = scratchDir('hb-fake3'), fake3 = fakeIn(FAKE3);
 fake3(5101, { env: { HOME: path.join(R, 'h') }, cwd: path.join(R, 'in'), argv: ['x', path.join(R, 'in')], state: 'D' });
 fake3(5102, { cwd: OUT, env: { HOME: OUT }, argv: ['chrome', `--user-data-dir=${path.join(R, 'in', 'p')}`] });
 fake3(5103, { env: { HOME: path.join(R, 'h') }, threads: ['S', 'D', 'S'] });   // the leader runs; ONE of its threads is in D
-const readsOf = (fn) => { const seen = [], r0 = fs.readFileSync, l0 = fs.readlinkSync;
+const readsOf = (fn) => { const seen = [], r0 = fs.readFileSync, l0 = fs.readlinkSync, d0 = fs.readdirSync, m0 = fs.rmSync;
   fs.readFileSync = (f, ...a) => { seen.push(String(f)); return r0(f, ...a); }; fs.readlinkSync = (f, ...a) => { seen.push(String(f)); return l0(f, ...a); };
-  let out; try { out = fn(); } finally { fs.readFileSync = r0; fs.readlinkSync = l0; } return { out, seen }; };
+  fs.readdirSync = (f, ...a) => { seen.push('readdir ' + String(f)); return d0(f, ...a); }; fs.rmSync = (f, ...a) => { seen.push('rm ' + String(f)); return m0(f, ...a); };
+  let out; try { out = fn(); } finally { fs.readFileSync = r0; fs.readlinkSync = l0; fs.readdirSync = d0; fs.rmSync = m0; } return { out, seen }; };
 const rec8 = [];
 const { out: b8, seen: seen8 } = readsOf(() => saidDuring(() => HB.endRooted(R, { procRoot: FAKE3, kill: (pid) => rec8.push(pid) })));
 ok(!rec8.includes(5101) && b8.out.left.some((x) => x.pid === 5101 && x.why === 'in an uninterruptible wait') && !seen8.some((f) => /\/5101\/(environ|cwd|cmdline)$/.test(f)),
@@ -235,6 +236,17 @@ ok(b8.said.some((s) => s.startsWith('hub-boot: left pid 5101 (?) unjudged — it
 ok(!rec8.includes(5103) && b8.out.left.some((x) => x.pid === 5103 && x.why === 'in an uninterruptible wait') && !seen8.some((f) => /\/5103\/(environ|cwd|cmdline)$/.test(f)),
   'a process whose LEADER runs but ONE THREAD is in state D is stuck too (its task/<tid>/stat read, never its environ)', seen8.filter((f) => f.includes('/5103/')));
 ok(b8.said.some((s) => s === `hub-boot: left pid 5102 (?) alone — its argv lies in ${R}, but its environ carries no HOME or daemon root the helper handed out\n`), 'an argv-only match is said in those words', b8.said);
+// THE ENDS REFUSE A ROOT THE HELPER DID NOT MINT — handed the scratch area or a home by a mistake, nothing is read or signalled
+for (const bad of ['/tmp', os.homedir(), path.join('/tmp', String(undefined))]) {
+  const recE = [];
+  const { seen: seenE } = readsOf(() => {
+    for (const [end, fn] of [['endRooted', () => HB.endRooted(bad, { kill: (p) => recE.push(p) })], ['endHub', () => HB.endHub({ pid: a1.hub.pid, starttime: a1.hub.starttime, root: bad, kill: (p) => recE.push(p) })], ['finishRoot', () => HB.finishRoot(bad)]]) {
+      let msg = ''; try { fn(); } catch (e) { msg = String(e.message); }
+      ok(new RegExp(`^hub-boot: ${end} refuses root `).test(msg) && /it is (?:the temp folder|a home|inside a home|a folder holding|no root the helper mints)/.test(msg), `${end} refuses ${bad} by name — ${msg.replace(/^hub-boot: /, '').slice(0, 90)}`);
+    }
+  });
+  ok(!recE.length && !seenE.some((f) => (f.includes('/proc') && f !== '/proc/self/mountinfo') || f.startsWith('rm ')), `…and for ${bad} no process was read (only the helper's own mount table, for the refusal), nothing removed, nothing signalled`, { recE, seen: seenE.slice(0, 5) });
+}
 ok(HB.rootedProcesses(R, { procRoot: FAKE, uid: process.getuid() + 1 }).length === 0, 'another user\'s process is never read: the owner is read first (here every entry belongs to someone else, so none is listed)');
 
 // ── ⑦ THE RE-READ, THE RE-LIST, THE ANSWERS ───────────────────────────────────
@@ -314,6 +326,11 @@ const exBo = report(exB.stdout);
 ok(exBo && exBo.browser.pid && alive(exBo.browser.pid, exBo.browser.starttime) && !fs.existsSync(exBo.root) && exB.stderr.includes(`hub-boot: left pid ${exBo.browser.pid} (`) && exB.stderr.includes(`its argv lies in ${exBo.root}`),
   'CONTROL (a real child) the same browser WITHOUT the root\'s HOME — RED: it is only near (its profile argv), said and LEFT running while the root is removed under it', exB.stderr.slice(0, 300));
 if (exBo) { if (exBo.browser.pid) endKeeper(exBo.browser); if (exBo.outsider.pid) endKeeper(exBo.outsider); }
+const exT = runChild(HB_URL, { HB_THROWER: '1' });   // a suite 'exit' listener registered BEFORE the mint throws on the EXIT road
+const exTo = report(exT.stdout);
+ok(exTo && !fs.existsSync(exTo.root) && await waitFor(() => exTo.pids.every((p) => !p || gone(p))) && exT.stderr.includes("hub-boot: a suite 'exit' listener threw (a suite exit listener that throws, registered before the mint) — the helper's end runs anyway"),
+  'the EXIT road: a suite \'exit\' listener registered before the mint throws — wrapped at the mint, the throw is said and the end still runs (no root, no process)', exT.stderr.slice(0, 300));
+if (exTo && exTo.outsider.pid) endKeeper(exTo.outsider);
 
 // ── ⑨ A SIGNAL ────────────────────────────────────────────────────────────────
 console.log('⑨ a child suite ended by a signal leaves no process and no root — and DIES BY THAT SIGNAL (its parent reads it)');
@@ -346,7 +363,7 @@ s1.hub.stop(); endKeeper(P);
 
 // ── ⑪ A MOUNT INSIDE THE ROOT ─────────────────────────────────────────────────
 console.log('⑪ a mount inside the root (or an unreadable mount table) stops BOTH removals — the worktree\'s and the root\'s');
-const RM = scratchDir('hb-rm'); fs.mkdirSync(path.join(RM, 'mnt'), { recursive: true });
+const RM = HB.mintRoot('hb-rm'); fs.mkdirSync(path.join(RM, 'mnt'), { recursive: true });   // a minted root: the ends refuse any other
 const plantWt = (root) => {   // a linked worktree of the scratch repository, in git's own layout (no checkout)
   const meta = path.join(GREPO, '.git', 'worktrees', path.basename(root)); fs.mkdirSync(meta, { recursive: true }); fs.mkdirSync(path.join(root, 'wt'));
   fs.writeFileSync(path.join(root, 'wt', '.git'), `gitdir: ${meta}\n`); fs.writeFileSync(path.join(meta, 'gitdir'), `${path.join(root, 'wt', '.git')}\n`);
@@ -411,8 +428,18 @@ if (exNo && exNo.outsider.pid) endKeeper(exNo.outsider);
 const t9c = await signalRun(pathToFileURL(mutantFile('exit-code', patch('    for (const sig of SIGNALS) { OWN[sig] = () => endBySignal(sig); process.on(sig, OWN[sig]); }\n', '    for (const sig of SIGNALS) process.on(sig, () => process.exit(128 + os.constants.signals[sig]));\n'))).href);
 ok(t9c.rep && t9c.end.code === 143 && t9c.end.sig === null, `CONTROL (a real child in its own fresh root) the exit-code form — RED: the parent reads code ${t9c.end.code} and no signal, so the gate would read a suite it ended as a product red`, t9c.end);
 if (t9c.rep && t9c.rep.outsider.pid) endKeeper(t9c.rep.outsider);
-const t9e = await signalRun(pathToFileURL(mutantFile('no-second-end', patch("  try { endAll(); } catch { /* idempotent: a no-op when the emit already ran it */ }\n", ''))).href, 'SIGTERM', { HB_THROWER: '1' });
-ok(t9e.rep && fs.existsSync(t9e.rep.root), 'CONTROL (a real child in its own fresh root) no end after the emit — RED: a suite listener that throws first skips the end, the root stays', t9e.end);
+const NOWRAP_SRC = patch("    for (const l of process.rawListeners('exit')) {\n      process.removeListener('exit', l);\n      process.on('exit', (...a) => { try { l(...a); } catch (e) { say(`a suite 'exit' listener threw (${e && e.message}) \u2014 the helper's end runs anyway`); } });\n    }\n", '');
+const exW = runChild(pathToFileURL(mutantFile('no-wrap', NOWRAP_SRC)).href, { HB_THROWER: '1' });
+const exWo = report(exW.stdout);
+ok(exWo && fs.existsSync(exWo.root), 'CONTROL (a real child in its own fresh root) the exit listeners NOT wrapped — RED: on the exit road the throwing listener stops the emit, the end never runs, the root stays', exW.stderr.slice(0, 200));
+if (exWo) {
+  const leftW = exWo.pids.map((p, i) => ({ pid: p, starttime: exWo.starttimes[i] })).filter((x) => x.pid && alive(x.pid, x.starttime));
+  if (exWo.browser.pid) leftW.push(exWo.browser);
+  HB.endByIdentity(leftW); await waitFor(() => leftW.every((x) => gone(x.pid)));
+  saidDuring(() => HB.finishRoot(exWo.root)); if (exWo.outsider.pid) endKeeper(exWo.outsider); if (exWo.browser.pid) endKeeper(exWo.browser);
+}
+const t9e = await signalRun(pathToFileURL(mutantFile('no-wrap-no-second-end', NOWRAP_SRC.replace("  try { endAll(); } catch { /* idempotent: a no-op when the emit already ran it */ }\n", ''))).href, 'SIGTERM', { HB_THROWER: '1' });
+ok(t9e.rep && fs.existsSync(t9e.rep.root), 'CONTROL (a real child in its own fresh root) no wrap AND no end after the emit — RED: on the signal road a suite listener that throws first skips the end, the root stays', t9e.end);
 if (t9e.rep) {   // that control's leftovers: ended by their identity, then its root
   const leftE = t9e.rep.pids.map((p, i) => ({ pid: p, starttime: t9e.rep.starttimes[i] })).filter((x) => x.pid && alive(x.pid, x.starttime));
   if (t9e.rep.browser.pid) leftE.push(t9e.rep.browser);
