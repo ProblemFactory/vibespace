@@ -2,6 +2,20 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.411 — 2026-11-17
+
+### Added
+- An agent's reply or a For-you item can link to a conversation or a desktop; a press goes there, and an ended one offers «Resume here» or «Read its history».
+- A vibespace://settings/<setting> link in an agent's reply, a For-you item or a notice opens Settings on that one row; it never changes the value.
+- When VibeSpace refuses a turn nobody typed, or warns that a limit is close, its notice links to that limit's row in Settings.
+- An agent can propose a new value for a limit on turns nobody typed: For you shows the limit, its value now and the proposal, and one press changes it.
+- A raised limit always has an end time, when it goes back by itself unless you changed it meanwhile; until then its Settings row says so, with «End now».
+
+### Security
+- On browsers older than mid-2025, a chat link written with a crafted title can no longer run code.
+- An agent can no longer change the limits on turns nobody typed or the judge's daily spend cap: only your own page can; an agent that tries is told to ask you.
+- With sign-in off, Settings › Spending says that anything reaching VibeSpace could still change those limits, with a button to set a password.
+
 ## 2.369.407 — 2026-11-17
 
 ### Added

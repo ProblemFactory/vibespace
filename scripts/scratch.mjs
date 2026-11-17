@@ -222,7 +222,10 @@ export function stillLookSource(sel) {
   const target = sel.startsWith('JS:') ? sel.slice(3) : `document.querySelector(${JSON.stringify(sel)})`;
   return `(() => { const e = ${target}; if (!e || !e.isConnected) return { found: false };
     const desc = (n) => (n ? n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + (typeof n.className === 'string' && n.className.trim() ? '.' + n.className.trim().split(/\\s+/).slice(0, 2).join('.') : '') : null);
-    const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const h = document.elementFromPoint(x, y);
+    // a target that WRAPS (an inline link over two lines) is aimed at its FIRST line fragment: its bounding box's centre is its own
+    // paragraph, never the link (lane login-request-card — the UI train's hosted mirror: «covered, under its point: div.ut-text»)
+    const q = e.getBoundingClientRect(); const fr = typeof e.getClientRects === 'function' ? e.getClientRects() : null; const a = fr && fr.length > 1 && fr[0].width > 0 && fr[0].height > 0 ? fr[0] : q;
+    const x = a.left + a.width / 2, y = a.top + a.height / 2; const h = document.elementFromPoint(x, y);
     const MOV = ${STILL_MOVERS};
     const kebab = (p) => String(p).replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
     const movers = (typeof document.getAnimations === 'function' ? document.getAnimations() : []).filter((a) => a.playState === 'running' && a.effect && a.effect.target && typeof a.effect.target.contains === 'function' && a.effect.target.contains(e))

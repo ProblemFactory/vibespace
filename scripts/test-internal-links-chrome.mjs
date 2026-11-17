@@ -116,7 +116,10 @@ const frontA = async () => {
 /** a press on a link in A's chat: A in front, then the link ITSELF under the still door's point (the rect's centre) before the press */
 const pressLink = async (sel) => {
   await frontA();
-  await until(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(sel)})].filter(${VISIBLE}).pop(); if (!e) return false; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const h = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return !!h && (h === e || e.contains(h)); })()`, { timeout: 4000 });
+  // the state the page shows before the press: the link's FIRST line fragment under its press point — a link that wraps (its icon and
+  // label on one line, its real name on the next) has its bounding box's centre on the message list, never on the link (the UI train's
+  // hosted mirror, shard 6: «covered, under its point: div.chat-message-list»; scripts/scratch.mjs stillLookSource aims the same way)
+  await until(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(sel)})].filter(${VISIBLE}).pop(); if (!e) return false; e.scrollIntoView({ block: 'center' }); const r = e.getClientRects()[0]; if (!r || !(r.width > 0)) return false; const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!h && (h === e || e.contains(h)); })()`, { timeout: 4000 });
   return press(sel);
 };
 const active = () => evalJs('app.desktopManager.activeDesktopId');
@@ -195,6 +198,7 @@ try {
   await shot('zh-press-ended-menu');
   check('«查看历史记录»: the history opens read-only — still no process for D', (await press(`.context-menu .context-menu-item:last-child, .context-menu [role=menuitem]:last-child`)) === true && !!(await until(`[...app.sessions.keys()].some((w) => app.wm.windows.get(w)?._openSpec?.backendSessionId === ${JSON.stringify(SID_D)})`, { timeout: 10000 })) && !stubRuns().some((r) => (r.args || []).join(' ').includes(SID_D)),
     { wins: await winsOf(SID_D) });
+  check('RED CONTROL: a press on a conversation link no message draws presses nothing — the menu leg fails without its link', (await press(linkSel('5e551000-0000-4000-8000-0000000000ff'))) === false);
   const dWins = (await winsOf(SID_D)).length;
   check('D again (ENDED, with a window): the press lands on that window — one window, nothing started', (await pressLink(linkSel(SID_D))) === true && (await winsOf(SID_D)).length === dWins && !stubRuns().some((r) => (r.args || []).join(' ').includes(SID_D)));
   check('E (archived): a toast naming the archived list', (await pressLink(linkSel(SID_E))) === true && !!(await until(`[...document.querySelectorAll('.global-toast, .toast')].some((t) => t.textContent.includes('这个对话已归档——请从侧边栏的归档列表中打开。'))`, { timeout: 5000 })), await toasts());
