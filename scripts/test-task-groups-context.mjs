@@ -7,6 +7,7 @@
 // Run: node scripts/test-task-groups-context.mjs   (int346: renamed — lane open-task-binds's test-task-groups.mjs is the membership suite)
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import { mutantCopies } from './mutant-copy.mjs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -26,7 +27,7 @@ const home = path.join(root, 'home');
 const mk = (rel, body) => { const p = path.join(home, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); if (body !== undefined) fs.writeFileSync(p, body); return p; };
 const mkdir = (rel) => { const p = path.join(home, rel); fs.mkdirSync(p, { recursive: true }); return p; };
 let n = 0;
-const fresh = (extra = {}) => { const d = path.join(root, 'data-' + (++n)); fs.mkdirSync(d, { recursive: true }); return { dir: d, m: new TaskGroupManager({ dataDir: d, homeDir: home, ...extra }) }; };
+const fresh = ({ Manager = TaskGroupManager, ...extra } = {}) => { const d = path.join(root, 'data-' + (++n)); fs.mkdirSync(d, { recursive: true }); return { dir: d, m: new Manager({ dataDir: d, homeDir: home, ...extra }) }; };
 
 // ── a small world: an IR desk with key files, a shared-notes subfolder, a handbook, a big folder ──
 const IR = mkdir('work/ir');
@@ -203,6 +204,30 @@ console.log('— the 10 KiB law: tools / rules first, then the table, within the
   const t2 = m.create({ title: 'Law2', ctx: [{ path: IR, tell: 'contents', note: 'desk2' }] });
   const multi = m.renderMultiContext([t.id, t2.id], {});
   ok(`two groups: one layered block inside the cap (${B(multi)} B), both tables told`, B(multi) <= 9600 && multi.includes('### "Law"\n') && multi.includes('### "Law2"\n') && multi.includes('## Context tables'), B(multi));
+  // B-9ac8: a cap under which no log line fits (the preamble + other groups' contexts used the room) — the count says none
+  // fit, how many, and where (`show` prints the newest; `--group <id>` in a payload of several groups); never «last 0 of N»
+  const logHead = (s) => { const i = s.indexOf('## Activity log'); return i < 0 ? '' : s.slice(i, s.indexOf('\n', i)); };
+  const tight = m.renderContext(t.id, { cap: 1000 }), roomy = m.renderContext(t.id, {}), tightM = m.renderContext(t.id, { cap: 1000, multi: true });
+  ok('B-9ac8: no log line fits under the cap ⇒ «none fit inline — 30 lines; `vibespace-task show` prints the newest», never «last 0 of 30»; in a payload of several groups the door names the group; a roomy render still says «last N of 30»',
+    logHead(tight) === '## Activity log  _(none fit inline — 30 lines; `vibespace-task show` prints the newest)_' && !/last 0 of/.test(tight)
+    && logHead(tightM) === `## Activity log  _(none fit inline — 30 lines; \`vibespace-task --group ${t.id} show\` prints the newest)_` && /^## Activity log {2}_\(last [1-9]\d* of 30 — /.test(logHead(roomy)), { tight: logHead(tight), tightM: logHead(tightM), roomy: logHead(roomy) });
+  for (let i = 0; i < 30; i++) m.addProgress(t2.id, { note: 'two ' + i + ' ' + 'y'.repeat(150), session: 'claude:abc' });
+  const t3 = m.create({ title: 'Law3', objective: 'S'.repeat(1500) }); m.addProgress(t3.id, { note: 'only one', session: 'claude:abc' });
+  const multiTight = m.renderMultiContext([t.id, t2.id], { cap: 2000 }), one = m.renderContext(t3.id, { cap: 600 });
+  ok('B-9ac8: the payload of several groups under a cap — each group\'s count says none fit and names ITS group; one entry reads «1 line»',
+    multiTight.includes(`### "Law"  _(none fit inline — 30 lines; \`vibespace-task --group ${t.id} show\` prints the newest)_`) && multiTight.includes(`### "Law2"  _(none fit inline — 30 lines; \`vibespace-task --group ${t2.id} show\` prints the newest)_`) && !/last 0 of/.test(multiTight)
+    && logHead(one) === '## Activity log  _(none fit inline — 1 line; `vibespace-task show` prints the newest)_', { multi: (multiTight.match(/### "Law\d?".*/g) || []).slice(0, 2), one: logHead(one) });
+  const SRC9 = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/task-groups.js'), 'utf8');
+  const NONE9 = "const noneFitWords = (n, gid = '') => `none fit inline — ${n} line${n === 1 ? '' : 's'}; \\`vibespace-task ${gid}show\\` prints the newest`;";
+  ok('ANCHOR: the none-fit words, spelled once', SRC9.split(NONE9).length === 2);
+  if (SRC9.split(NONE9).length === 2) {
+    const MT = mutantCopies('task-groups-log-head', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));
+    const TG = MT.load('src/task-groups.js', SRC9.replace(NONE9, 'const noneFitWords = (n) => `last 0 of ${n}`;'), 'last-0');
+    const { m: m0 } = fresh({ Manager: TG.TaskGroupManager });
+    const a0 = m0.create({ title: 'Law', objective: 'R'.repeat(1500) }), b0 = m0.create({ title: 'Law2', objective: 'R'.repeat(1500) });
+    for (let i = 0; i < 30; i++) { m0.addProgress(a0.id, { note: 'entry ' + i + ' ' + 'x'.repeat(150), session: 'claude:abc' }); m0.addProgress(b0.id, { note: 'two ' + i + ' ' + 'y'.repeat(150), session: 'claude:abc' }); }
+    ok('…CONTROL RED: the release\'s words under the same caps say «last 0 of 30» — in one group\'s log and in the payload of several', /## Activity log {2}_\(last 0 of 30\)_/.test(m0.renderContext(a0.id, { cap: 1000 })) && /### "Law" {2}_\(last 0 of 30\)_/.test(m0.renderMultiContext([a0.id, b0.id], { cap: 2000 })));
+  }
 }
 
 console.log('— 引用任务组「X」的 Context 表 (ro / rw) —');

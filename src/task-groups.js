@@ -249,6 +249,10 @@ function sanitizeStrArray(arr, cap = 200) {
   return out;
 }
 
+// B-9ac8: the activity log's count when a cap's re-pick kept NO line — none fit, how many, where they are (`gid` = `--group <id> `
+// in a payload of several groups: the CLI refuses a bare `show` there; `show` prints the NEWEST entries, never all)
+const noneFitWords = (n, gid = '') => `none fit inline — ${n} line${n === 1 ? '' : 's'}; \`vibespace-task ${gid}show\` prints the newest`;
+
 class TaskGroupManager {
   constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed, mirrorFs, mirrorBoundMs, sigBoundMs, isLiveKey, grants = null, homeDir }) {
     // lane grants-unify: the group's outside visibility is a ROW of the ONE grants store (door group-visibility) — the store (or
@@ -1349,7 +1353,11 @@ class TaskGroupManager {
       const memo = new Map();   // a cap's re-picks reuse the rendered lines
       const logOf = (room, min) => {
         const { picked } = this._pickLogLines(t, room, now, min, memo);
-        return ['', '## Activity log' + (picked.length < totalLog ? `  _(last ${picked.length} of ${totalLog} — \`vibespace-task show\` prints more)_` : '') + (picked.some(l => l.includes(' †')) ? `  _(† = has detail — \`vibespace-task show --full\`)_` : ''), '', ...picked];
+        // B-9ac8: a re-pick under the cap can keep NO line (the preamble + other groups' contexts used the room) — the header
+        // then says so, how many there are and where they are; «last 0 of 500» was honest and useless
+        const head = !picked.length ? `  _(${noneFitWords(totalLog, multi ? `--group ${t.id} ` : '')})_`
+          : picked.length < totalLog ? `  _(last ${picked.length} of ${totalLog} — \`vibespace-task show\` prints more)_` : '';
+        return ['', '## Activity log' + head + (picked.some(l => l.includes(' †')) ? `  _(† = has detail — \`vibespace-task show --full\`)_` : ''), '', ...picked];
       };
       let room = Math.max(1200, logBudget - used);
       let log = logOf(room, 3);
@@ -1968,7 +1976,7 @@ class TaskGroupManager {
         parts.push('', `## Recent activity  _(newest last; \`vibespace-task --group <id> show --full\` prints more; † = has detail)_`);
         for (const id of withLog) {
           const { picked, total } = this._pickLogLines(ts[id], roomPer, now, min, memo);
-          parts.push('', `### "${agentLine(ts[id].title)}"` + (picked.length < total ? `  _(last ${picked.length} of ${total})_` : ''), ...picked);
+          parts.push('', `### "${agentLine(ts[id].title)}"` + (picked.length < total ? `  _(${picked.length ? `last ${picked.length} of ${total}` : noneFitWords(total, `--group ${id} `)})_` : ''), ...picked);   // B-9ac8: never «last 0 of N»
         }
       }
       parts.push(`</vibespace-task-context>`);
