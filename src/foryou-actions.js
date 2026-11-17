@@ -926,6 +926,7 @@ const RUN_ROWS = Object.freeze(['hosts', 'program', 'folder', 'secrets']);
 const RUN_LABEL = Object.freeze({ hosts: i18nKey('Sends to'), program: i18nKey('Program'), folder: i18nKey('Working folder'), secrets: i18nKey('Secrets') });
 function runCardOf(item, { t = fmt } = {}) {
   if (item && item.action && item.action.type === 'vault-grant-ask') return standingCardOf(item, { t });   // lane vault-standing-request r2: an agent's standing request, drawn the same way
+  if (item && item.action && item.action.type === 'vault-job-ask') return jobCardOf(item, { t });   // lane vault-job-approval (L2): a Background job's approval card, drawn from its facts the same way
   const f = item && item.action && item.action.type === 'vault-run-ask' && item.facts && typeof item.facts === 'object' && (item.facts.v === 1 || item.facts.v === 2) ? item.facts : null;   // r8: v 2 = vault-agent-own r23 (the chunked folds, env, the templates' text, the reason)
   if (!f) return null;
   const str = (x) => (typeof x === 'string' ? x : '');
@@ -1135,6 +1136,42 @@ function changeWords(c, t = fmt) {
 }
 const STANDING_SWITCH_WORDS = i18nKey('Allow also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.');   // = vault-run-door STANDING_SWITCH_LINE
 const STANDING_ENDS_WORDS = i18nKey('Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.');
+// lane vault-job-approval (design-vault-service-secret L2 — B-a08e): A BACKGROUND JOB'S APPROVAL CARD, drawn from its FACTS (the
+// door's closed codes and names — src/vault-job.js askCardOf; never a sentence from the server) in the viewer's language: who
+// asks for which job and what its kind means, the secret (its Vault name, the fd its program reads), the program's and the
+// script's real paths — «an agent can change it» a PLAIN line (design D1: a fact, never an alarm — no warn accent), the folder,
+// where it sends (unknown), what a lock does; the command in its mono box (`cmd`); the reference under the fold. No «Always»:
+// 允许 / 拒绝 are its two verbs (user-todos-row heldAnswers). A record without facts v1 draws its prose (null).
+const JOB_LABEL = Object.freeze({ job: i18nKey('Background job'), secret: i18nKey('Secret'), program: i18nKey('Program'), folder: i18nKey('Working folder'), hosts: i18nKey('Sends to'), lock: i18nKey('When the vault locks') });
+const JOB_KIND_WORDS = Object.freeze({
+  service: i18nKey('a service — it starts again by itself when it stops, and after a VibeSpace restart once the vault is unlocked; each start gets the secret'),
+  'service-on-failure': i18nKey('a service — it starts again by itself when it fails, and after a VibeSpace restart once the vault is unlocked; each start gets the secret'),   // the facts' restart policy (src/vault-job.js askCardOf)
+  'service-never': i18nKey('a service that is not restarted by itself — each start gets the secret'),
+  cron: i18nKey('a scheduled job — each run on its schedule gets the secret'),
+  task: i18nKey('a task — it runs once and gets the secret once'),
+});
+function jobCardOf(item, { t = fmt } = {}) {
+  const f = item && item.facts && typeof item.facts === 'object' && item.facts.v === 1 ? item.facts : null;
+  if (!f) return null;
+  const str = (x) => (typeof x === 'string' ? x : '');
+  const o = (x) => (x && typeof x === 'object' ? x : {});
+  // §93: the facts' job words are the door's — its name came through the engine's ONE accessor (labelOf) when the card was filed
+  const said = o(f.job), entry = o(f.entry), prog = o(f.program), script = f.script && typeof f.script === 'object' && str(f.script.path) ? f.script : null;
+  const kind0 = ['service', 'cron', 'task'].includes(said.kind) ? said.kind : 'task';
+  const kind = kind0 === 'service' && said.restart === 'never' ? 'service-never' : kind0 === 'service' && said.restart === 'on-failure' ? 'service-on-failure' : kind0;
+  const title = str(said.name) || str(said.id), who = str(f.who) || t('a conversation');
+  const rows = [
+    { key: 'job', lines: [[{ text: title }, ...(str(said.id) && str(said.id) !== title ? [{ text: ' ' }, { aside: `(${str(said.id)})` }] : [])], [{ text: t(JOB_KIND_WORDS[kind]) }]] },
+    { key: 'secret', lines: [[{ text: str(entry.label) || str(entry.ref) }], [{ text: t('its program reads it once from the descriptor ${var} names — never from its environment, its command line or a file', { var: str(entry.var) }) }]] },
+    { key: 'program', lines: [[{ mono: str(prog.path) }], ...(prog.writable === true ? [[{ text: t('An agent can change this program.') }]] : []),
+      ...(script ? [[{ mono: str(script.path) }], ...(script.writable === true ? [[{ text: t('An agent can change this script.') }]] : [])] : [])] },
+    { key: 'folder', lines: [[{ mono: str(f.folder) }]] },
+    { key: 'hosts', lines: [[{ text: t('unknown — VibeSpace cannot read where a program connects') }]] },
+    { key: 'lock', lines: [[{ text: t('it keeps running; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it') }]] },
+  ].map((r) => ({ key: r.key, label: t(JOB_LABEL[r.key]), lines: r.lines, warn: false }));
+  const fold = [...(str(entry.ref) ? [{ label: t('Reference'), lines: [[{ code: str(entry.ref) }]] }] : [])];   // a vault reference is never a link: code, under the fold
+  return { headline: t('{who} asks to let the Background job «{name}» use a stored secret', { who, name: title }), cmd: str(f.command), cut: null, again: null, rows, changes: null, always: { offered: false, hint: null }, fold };
+}
 function standingCardOf(item, { t = fmt } = {}) {
   const f = item && item.action && item.action.type === 'vault-grant-ask' && item.facts && typeof item.facts === 'object' && item.facts.v === 1 && item.facts.kind === 'standing' ? item.facts : null;
   if (!f) return null;
