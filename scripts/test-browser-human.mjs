@@ -904,7 +904,15 @@ let work, solo, shop;
 // re-attach answered `browser_stopped` and Browse yourself launched a second browser + a second tab (reproduced first:
 // verify/repro-f2). The holder is persisted now, restored AWAY; a browser that did not survive drops him `stopped`.
 {
-  const restartLeg = async (Kmod, dir) => {
+  // B-e5fe (the int380 mirror: the CONTROL red ×2 in one job, ~35 s vs ~21 s here, and no facts in the log): the tick DECIDES an
+  // idle stop and starts it without awaiting it (browser-keeper tick: `stop(…, { why: 'idle' }).catch()`), and the stop's own
+  // work — the CLI's close, then a 100 ms-step wait for the daemon's pid — outlasts a fixed 60 ms on a slow host. A leg that
+  // says the tick STOPS the browser (`stops`) waits for the stop's own end (its `browser-stopped` lease event, bounded), and
+  // the control's red prints what the keeper held. r2 (the batch's adversarial read: a fixed 60 ms left the SURVIVING leg a
+  // false green — a regressed keeper's late stop reads «ready» there, and a rejoin reuses a record still «ready» while its
+  // stop runs): the CONTROL runs FIRST, and its stop's own landing time is this host's measure — a leg that says the browser
+  // SURVIVES (`quietMs`) waits three times that (≥ 1 s) for a stop that must not come, and judges that none landed
+  const restartLeg = async (Kmod, dir, { stops = false, quietMs = 0 } = {}) => {
     const k1 = mkKeeper(Kmod, { dataDir: path.join(ROOT, dir), readTargets });
     const p = k1.createProfile({ label: 'Kept' }, { owner: { kind: 'instance', id: null } });
     const HK = HM.humanKeyFor(p.id);
@@ -915,8 +923,10 @@ let work, solo, shop;
     const k2 = mkKeeper(Kmod, { dataDir: path.join(ROOT, dir), readTargets });
     const ev = []; k2.onLease((e) => { ev.push(e); return null; });
     const boot = await k2.boot();
-    await k2.tick(); await sleep(60);
-    const out = { boot, browser: k2.browserOf(p.id).state, stoppedBy: k2.browserOf(p.id).stoppedBy || null, human: k2.humanOf(p.id), target: k2.humanTargetFor(HK) };
+    await k2.tick();
+    const stopEnded = () => ev.some((e) => e.kind === 'browser-stopped' && e.profileId === p.id);
+    const tw = Date.now(), stopLanded = stops ? await until(stopEnded, 10000) : quietMs ? await until(stopEnded, quietMs) : (await sleep(60), stopEnded());
+    const out = { boot, browser: k2.browserOf(p.id).state, stoppedBy: k2.browserOf(p.id).stoppedBy || null, human: k2.humanOf(p.id), target: k2.humanTargetFor(HK), stopLanded, waitedMs: Date.now() - tw, lastError: k2.browserOf(p.id).lastError || null, events: ev.map((e) => e.kind) };
     const t0 = cmdsOf('vs-' + HK).filter((c) => /tab new/.test(c)).length;
     let b = null; try { b = await k2.browse(p.id); } catch (e) { b = { code: e.code }; }
     out.browse = b && (b.how || b.code);
@@ -925,9 +935,16 @@ let work, solo, shop;
     out.k2 = k2; out.p = p;
     return out;
   };
-  const r = await restartLeg(K, 'data-rs');
-  ok(r.browser === 'ready' && r.human && r.human.state === 'away' && r.human.launched === true && r.human.keepMs === 12 * 3600e3 && r.boot.humans === 1 && r.target.ok === true,
-    'verify r1 (H4): a restart 40 min into his browsing — the browser is ADOPTED and SURVIVES the first tick (his holder row counts for the idle clock), he is restored AWAY with his 12 h keep, his window\'s re-attach finds his target', { browser: r.browser, stoppedBy: r.stoppedBy, human: r.human, target: r.target && r.target.code });
+  // the CONTROL's run (judged below, where it always stood): the keeper copy that restores nothing — its idle stop's landing time
+  const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const needle = '    for (const r of Object.values(reg.humans || {})) {';
+  const Kr = M.load('src/server/browser-keeper.js', src.replace(needle, '    for (const r of []) {'), 'memory-only-human');
+  const rc = await restartLeg(Kr, 'data-rc', { stops: true });
+  try { await rc.k2.stop(rc.p.id, { why: 'user' }); } catch { } rc.k2.shutdown();
+  const quietMs = Math.max(1000, 3 * (rc.stopLanded ? rc.waitedMs : 1000));
+  const r = await restartLeg(K, 'data-rs', { quietMs });
+  ok(!r.stopLanded && r.browser === 'ready' && r.human && r.human.state === 'away' && r.human.launched === true && r.human.keepMs === 12 * 3600e3 && r.boot.humans === 1 && r.target.ok === true,
+    `verify r1 (H4): a restart 40 min into the person's browsing — the browser is ADOPTED and SURVIVES the first tick (no stop landed in ${quietMs} ms, three times the control's own stop: the holder row counts for the idle clock), the holder is restored AWAY with the 12 h keep, the window's re-attach finds its target`, { stopLanded: r.stopLanded, quietMs, browser: r.browser, stoppedBy: r.stoppedBy, human: r.human, target: r.target && r.target.code });
   ok(r.browse === 'rejoin' && r.tabNews === 0 && r.reopened === 1, 'Browse yourself after the restart CONTINUES his tab (rejoin — no second `tab new`, nothing orphaned), and the first take re-opens his session marker (the old one ended `restart`)', { browse: r.browse, tabNews: r.tabNews, reopened: r.reopened });
   await r.k2.stop(r.p.id, { why: 'user' }); r.k2.shutdown();
   // a browser that did NOT survive the restart (its daemon gone) ⇒ he is dropped `stopped`, never a holder on a dead Chrome
@@ -942,13 +959,9 @@ let work, solo, shop;
   ok(bd.humans === 0 && !kd2.humanOf(pd.id) && !B.isLiveBrowser(kd2.browserOf(pd.id)) && !(kd2._reg().humans || {})[pd.id], 'a restart whose browser did NOT survive drops his holder `stopped` (disk too) — never a Continue on a dead Chrome', { humans: bd.humans, state: kd2.browserOf(pd.id).state });
   kd2.shutdown();
   // CONTROL: the keeper copy that restores nothing (the pre-fix memory-only holder) — the browser idles out at the first tick
-  const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const needle = '    for (const r of Object.values(reg.humans || {})) {';
+  // (run FIRST, above — B-e5fe r2 — judged here)
   ok(src.includes(needle), 'the restore needle (the control below removes it)');
-  const Kr = M.load('src/server/browser-keeper.js', src.replace(needle, '    for (const r of []) {'), 'memory-only-human');
-  const rc = await restartLeg(Kr, 'data-rc');
-  ok(rc.browser === 'stopped' && rc.stoppedBy === 'idle' && !rc.human, 'CONTROL: the memory-only keeper copy stops his browser at the first tick after the restart (`idle`) — the legs above can go red', { browser: rc.browser, stoppedBy: rc.stoppedBy });
-  try { await rc.k2.stop(rc.p.id, { why: 'user' }); } catch { } rc.k2.shutdown();
+  ok(rc.stopLanded && rc.browser === 'stopped' && rc.stoppedBy === 'idle' && !rc.human, 'CONTROL: the memory-only keeper copy stops the browser at the first tick after the restart (`idle`) — the legs above can go red', { stopLanded: rc.stopLanded, waitedMs: rc.waitedMs, browser: rc.browser, stoppedBy: rc.stoppedBy, lastError: rc.lastError, human: rc.human, boot: rc.boot, events: rc.events });
   // verify r2 (the revert table): two parts of the restore were unpinned — (a) a holder AWAY at the restart keeps the keep of
   // his ORIGINAL close (the brief: "the 12 h keep across a restart still 12 h from the ORIGINAL close, not from the
   // restart"); restoring `awaySince: now()` stayed green; (b) PURE normalizeRegistry drops a holder whose key does not name
