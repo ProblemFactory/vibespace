@@ -172,6 +172,9 @@
 .chat-status-bar.chat-status-short .chat-status-door-short { display: inline; }
 .chat-status-bar .chat-status-door-title { display: inline-block; max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .chat-status-bar .chat-status-door-sep { opacity: 0.6; }
+/* the table's bound (strip-table.js: browser / channels `title: { maxCh: 18 }`): on the two rows a long profile or conversation
+   title is cut at 18 characters INSIDE its chip, never pushing row 2 onto a third line (the one row keeps its wider caps) */
+.chat-status-bar.chat-status-two-rows :is(.chat-status-browser-text, .chat-status-channels-text) { max-width: 18ch; }
 /* «⚙ 对话设置»'s panel: each row its name and its present value */
 .chat-status-dropdown .chat-status-settings-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .chat-status-dropdown .chat-status-settings-row .chat-status-settings-value { color: var(--text-dim); text-align: end; min-width: 0; overflow-wrap: anywhere; }
