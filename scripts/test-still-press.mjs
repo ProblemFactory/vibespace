@@ -67,6 +67,23 @@ let compiles = true; try { new Function(src); new Function(srcJs); } catch (e) {
 ok(compiles === true, 'the look compiles — by selector and by a JS: expression', compiles);
 ok(src.includes('document.querySelector("#refresh-live-dialog .btn-create")') && srcJs.includes("[...document.querySelectorAll('.context-menu-item')]"), 'it names its target by the selector, or evaluates the JS: expression');
 ok(/a\.effect\.target\.contains\(e\)/.test(src) && /playState === 'running'/.test(src) && /elementFromPoint\(x, y\)/.test(src), 'a mover is any RUNNING animation whose effect target CONTAINS the target (an ancestor\'s slide counts); the point is read by elementFromPoint');
+// A WRAPPED TARGET (an inline link over two lines — the UI train's hosted mirror, test-setting-links-chrome: «covered, under its point:
+// div.ut-text»): the look aims at its FIRST line fragment, where the link is; its bounding box's centre is its paragraph
+{
+  const frag = (l, t, w, h) => ({ left: l, top: t, width: w, height: h, right: l + w, bottom: t + h });
+  const lookOn = (source) => {
+    const link = { tagName: 'SPAN', id: '', className: 'fy-link', isConnected: true, disabled: false, getAttribute: () => null,
+      getBoundingClientRect: () => frag(10, 100, 300, 40), getClientRects: () => [frag(200, 100, 110, 20), frag(10, 120, 120, 20)], contains: (n) => n === link };
+    const para = { tagName: 'DIV', id: '', className: 'ut-text', contains: (n) => n === para || n === link };
+    // the page: only a point inside the link's two fragments is the link; the rest of the box is its paragraph
+    const doc = { querySelector: () => link, getAnimations: () => [], elementFromPoint: (x, y) => ((x >= 200 && x <= 310 && y >= 100 && y <= 120) || (x >= 10 && x <= 130 && y >= 120 && y <= 140) ? link : para) };
+    return new Function('document', `return ${source};`)(doc);
+  };
+  const wrapped = lookOn(stillLookSource('.fy-link'));
+  ok(wrapped.found && wrapped.hits === true && wrapped.x === 255 && wrapped.y === 110, 'A WRAPPED TARGET is aimed at its FIRST line fragment — the point is on the link, so it is pressed, never «covered»', wrapped);
+  const centre = lookOn(stillLookSource('.fy-link').replace("fr && fr.length > 1 && fr[0].width > 0 && fr[0].height > 0 ? fr[0] : q", 'q'));
+  ok(centre.hits === false && centre.under === 'div.ut-text', 'RED CONTROL: aimed at its bounding box\'s centre (the look before) the wrapped link reads «covered» by its own paragraph', centre);
+}
 const MOVES = ['margin-left', 'left', 'top', 'transform', 'translate', 'width', 'height', 'padding-left', 'inset'], STAYS = ['opacity', 'color', 'background-color', 'box-shadow', 'outline-color', 'border-color', 'visibility'];
 ok(MOVES.every((p) => STILL_MOVERS.test(p)) && STAYS.every((p) => !STILL_MOVERS.test(p)), `STILL_MOVERS moves a box (${MOVES.join(', ')}) — a fade or a colour does not (${STAYS.join(', ')})`, { moves: MOVES.filter((p) => !STILL_MOVERS.test(p)), stays: STAYS.filter((p) => STILL_MOVERS.test(p)) });
 // the door's own loop over scripted looks: it waits out the slide, then presses once, and names a landing elsewhere

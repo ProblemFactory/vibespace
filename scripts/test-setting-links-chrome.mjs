@@ -184,11 +184,18 @@ try {
   await shot('zh-phone-tray');
   // the phone draws a row's question on one line until the row is tapped open (the product's touch rule) — the link is inside
   check('a tap opens the row (the question whole, its link on screen)', (await press(`#user-todos-popup .ut-item .ut-body`, { touch: true })) === true && !!(await until(`(() => { const l = [...document.querySelectorAll(${JSON.stringify(qLink)})].pop(); if (!l) return false; const r = l.getClientRects()[0]; const h = r && document.elementFromPoint(r.left + 8, r.top + r.height / 2); return !!h && (h === l || l.contains(h)); })()`, { timeout: 5000 })));
+  // the UI train's hosted mirror (prep408c, both tries): «NOT pressed — covered … under its point: div.ut-text» — this long link WRAPS
+  // on the phone, and the still presser aimed at its bounding box's centre (its paragraph). scripts/scratch.mjs stillLookSource now
+  // aims at a wrapped target's FIRST line fragment; the press waits for the state the page shows — that point on the link — never a sleep
+  const firstLine = (sel) => `(() => { const l = [...document.querySelectorAll(${JSON.stringify(sel)})].filter(${VISIBLE}).pop(); if (!l) return false; const r = l.getClientRects()[0]; if (!r || !(r.width > 0)) return false; const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!h && (h === l || l.contains(h)); })()`;
+  check('the link\'s first line is on screen and under its press point (the state the press waits for)', !!(await until(firstLine(qLink), { timeout: 8000 })), await evalJs(`(() => { const l = [...document.querySelectorAll(${JSON.stringify(qLink)})].pop(); return l ? { rects: l.getClientRects().length } : null; })()`));
   check('a tap on the link', (await press(qLink, { touch: true })) === true);
   const fo5 = await (async () => { for (let i = 0; i < 40; i++) { const f = await focusOf(K1); if (f.found && f.inView) return f; await sleep(150); } return focusOf(K1); })();
   check('on the phone: the row in view, marked, its section ALONE (the one-section view)', fo5.found && fo5.inView && fo5.marked && fo5.sections.length === 1 && fo5.sections[0] === fo5.section, fo5);
   await shot('zh-phone-settings-row');
   check('not a byte written, after every press', sameBytes(b0, settingsBytes()));
+  // RED CONTROL: the same press on a link that is truly absent (no row carries it) presses nothing — the leg above fails without its link
+  check('RED CONTROL: a tap on a link no row draws presses nothing (the leg would fail without the link)', (await press(`#user-todos-popup .ut-item .ut-text .fy-link[data-fy="setting"][data-ref="chat.nope"]`, { touch: true })) === false);
 
   console.log('⑥ f1 (主开发 2026-11-15, REQUIRED): the «Sign-in is off» line is true while shown — a password set through its own button and the line goes, Settings still open (LAST: the hub signs in from here on)');
   await cdp('Emulation.clearDeviceMetricsOverride'); await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
