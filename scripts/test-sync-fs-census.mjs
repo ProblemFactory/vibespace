@@ -267,7 +267,7 @@ const ROWS = [
   ["src/server/conversation-deliver.js", "*", 1, "local-only", "retryFile = <dataDir>/msg-retry.json and its .corrupt- aside; dataDir = server.js <checkout>/data"],
   ["src/server/csp-reports.js", "*", 7, "local-only", "file = <checkout>/data/csp-reports.jsonl (+ .1) or VIBESPACE_CSP_REPORTS_FILE, a chrome suite's scratch file (server.js create); lane csp-mermaid-sites r2 +2: the boot's re-judge writes the same file's .rejudge beside it and renames it over (a line the sanitizer explains; its read is the boot's own textOf)"],
   ["src/server/static-public.js", "stampOf", 1, "local-only", "<checkout>/public/<script> — the build stamp of the checkout's own served script (lane csp-mermaid-sites r2: a stale ?v= redirected to it)"],
-  ["src/server/decision-engine.js", "*", 9, "local-only", "F.memo / F.usage / F.journal = <dataDir>/decision-memo.json, decision-usage.json, decision-journal.jsonl"],
+  ["src/server/decision-engine.js", "*", 7, "local-only", "F.memo / F.usage / F.journal = <dataDir>/decision-memo.json, decision-usage.json, decision-journal.jsonl"],
   ["src/server/desktop-access.js", "*", 1, "local-only", "knownFile = <dataDir>/desktop-machines.json (server.js passes <checkout>/data)"],
   ["src/server/desktop-app-keeper.js", "*", 2, "local-only", "remoteFile = <dataDir>/desktop-apps-hosts.json (server.js passes <checkout>/data)"],
   ["src/server/desktop-webrtc.js", "pushMacHelper", 4, "local-only", "bin = helpersDir/vibespace-screen (+ .version, .identity.json — lane apple-signing); helpersDir = HELPERS_DIR = <checkout>/data/bin/helpers; manifestFile = MANIFEST_COPY = <checkout>/data/bin/vibespace-agentd.manifest.json (the release record beside the bundle). The prebuilt's digest is a stream, not a sync read."],

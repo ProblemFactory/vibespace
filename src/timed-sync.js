@@ -49,6 +49,8 @@ const STORES = Object.freeze({
   'channels-aliases.write': row('write', 'channels/aliases', 'src/channel-store.js', ['aliasesUpdate']),
   'channels-people.write': row('write', 'channels/<account>/people', 'src/channel-store.js', ['peopleWrite']),
   'channels-stamps.write': row('write', 'channels/poll-stamps', 'src/channel-store.js', ['oweStamps', 'stampsFlush']),
+  'decision-memo.write': row('write', 'decision-memo', 'src/server/decision-engine.js', ['saveMemo']),   // through the store writer (lane lg-store-writes, B-0248 U1: the judge's memo — paced, the hub's own cache)
+  'decision-usage.write': row('write', 'decision-usage', 'src/server/decision-engine.js', ['saveUsage']),   // through the store writer (lane lg-store-writes, B-0248 U1: the day's counter — money, an act)
   'usage-shards.write': row('write', 'usage-history/events-<month>', 'src/usage-history.js', ['_walkAndAppend', '_appendRemote']), // lane ledger-dedup-law r4: the remote append is `_appendRemote` (the ingest's and a drained hold's)
   'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),   // through the store writer (lane hub-loop-stalls commit 2)
   'usage-rates.write': row('write', 'usage-anchors/rates', 'src/usage-estimator.js', ['_persistRates']),   // through the store writer (lane hub-loop-stalls commit 2; was untimed)

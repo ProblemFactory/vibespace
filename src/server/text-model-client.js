@@ -113,7 +113,7 @@ function create({ integrations = null, ledger = null, fetchImpl = (...a) => glob
     } catch (e) { failed = sending ? M.fetchFailOf(e) : 'unsent'; } finally { clearTimeout(timer); }   // a refused redirect / nothing sent (the primitive threw before it returned) ⇒ released
     const u = json ? usageOf(json) : { inputTokens: 0, outputTokens: 0, costUsd: null };
     const usd = M.settleUsd({ status, usage: json ? u : null, reservedUsd: estUsd, pricePerMtok: tier.inPerMtok, failed });
-    ledger.settle(hold, use, u, usd, est);
+    await ledger.settle(hold, use, u, usd, est);   // lane lg-store-writes (B-0248 U1): the answer waits until the day's counter holding it is on disk (the loop never waits)
     const base = { use, model: tier.id, est, reserved: Math.round(estUsd * 1e8) / 1e8, status, zdr: true, keyFp: sha6(key) };
     const answer = json ? answerOf(json) : null;
     if (answer === null) {

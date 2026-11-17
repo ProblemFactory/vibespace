@@ -337,7 +337,9 @@ console.log('the ONE scrub on the QUESTIONS (lane decision-vendor-hygiene, B-d37
   const rel = (f) => f.slice(root.length + 1);
   const senders = files.filter((f) => !f.endsWith('/decision-model.js') && /\bbuildRequest\(/.test(fs.readFileSync(f, 'utf8'))).map(rel);
   const eng = fs.readFileSync(`${root}/src/server/decision-engine.js`, 'utf8');
-  const j0 = eng.indexOf('async function judge('), js = eng.slice(j0, eng.indexOf('\n  }\n', j0));
+  // lane lg-store-writes (B-0248 U1): judge() is a wrapper (the call waits for the day's counter it changed) — the ONE
+  // request is built in judgeCall()
+  const j0 = eng.indexOf('async function judgeCall('), js = eng.slice(j0, eng.indexOf('\n  }\n', j0));
   const sentVar = (/const (\w+) = M\.scrubQuestions\(qs\)/.exec(js) || [])[1];
   const br = /M\.buildRequest\([^;]*questions: (\w+) \}\)/.exec(js);
   // lane dm-reply-infers: the use names are THE plan table's (M.USES — + reply-infer), never a second list here

@@ -80,17 +80,22 @@ const TEST_QUESTION = Object.freeze({ type: 'predicate', name: 'deadline_or_mone
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } }
-function writeJsonAtomic(file, value) {
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 });
-  fs.renameSync(tmp, file);
-}
 
 function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis.fetch(...a), now = () => Date.now(),
-  tzOffset = (ms) => new Date(ms).getTimezoneOffset(), serverNotice = null, log = console, baseUrlFor = null, timeoutMs = 15000 } = {}) {
+  tzOffset = (ms) => new Date(ms).getTimezoneOffset(), serverNotice = null, log = console, baseUrlFor = null, timeoutMs = 15000, writer = null } = {}) {
   const file = (n) => path.join(dataDir, n);
   const fetch = fetchImpl;                             // the request primitive by its census name (tests hand in a fake)
   const F = { memo: file('decision-memo.json'), usage: file('decision-usage.json'), journal: file('decision-journal.jsonl') };
+  // lane lg-store-writes (B-0248 U1): THE MEMO AND THE DAY'S COUNTER GO THROUGH THE STORE WRITER (src/store-writer.js — its
+  // own thread): the main loop never waits on their rename (decision-memo.json held the owner's hub 1.3 s and 1.5 s in one
+  // calm hour on .396; a judged call wrote the counter up to three times). The memo is the hub's own cache — PACED (a lost
+  // last write re-asks the judge once); the counter is money — an ACT (rank 0, urgent: the writer's next write) and A CALL
+  // THAT CHANGED IT ANSWERS ONLY ONCE THE COUNTER HOLDING IT IS ON DISK (its own promise waits; the loop never does) —
+  // a kill after an answer never lowers the day's spend. The journal stays a named row (census debt).
+  const W = () => writer || require('../store-writer.js').storeWriter();
+  // A LOAD READS WHAT THIS PROCESS STILL OWES: an engine made again in the same process (a suite's restart) lands the
+  // write the last one handed the writer BEFORE it reads the files — a hub's boot owes nothing (no wait)
+  { const owed = [F.memo, F.usage].filter((f) => W().pending(f)); if (owed.length) W().flushSync(owed); }
   let plugin = null;                                   // {peek} — the plugin row's own record (enabled + config)
   const memo = new Map((readJson(F.memo, {}).entries || []).filter((e) => Array.isArray(e) && e.length === 2).slice(-M.MEMO_MAX));
   let usage = readJson(F.usage, null) || { day: null, byUse: {} };
@@ -164,14 +169,30 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     hourCalls.push(t);
     return { v, id, estUsd };
   }
-  /** SETTLE — the reservation leaves; what the call cost lands in the day's counter (a 0-cost error counts nothing). */
+  /** SETTLE — the reservation leaves; what the call cost lands in the day's counter (a 0-cost error counts nothing).
+   *  → the counter's durable() promise (true once on disk), or null when nothing changed */
   function settle(id, use, u, usd, est) {
     open.delete(id);
-    if (!(usd > 0) && !u.inputTokens) return;
+    if (!(usd > 0) && !u.inputTokens) return null;
     const d = today();
     const x = d.byUse[use] || (d.byUse[use] = { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0 });
     x.calls += 1; x.inputTokens += u.inputTokens || est; x.outputTokens += u.outputTokens; x.usd = Math.round((x.usd + usd) * 1e8) / 1e8;
-    try { writeJsonAtomic(F.usage, d); } catch (e) { log.warn?.(`[decision] usage not saved: ${e.message}`); }
+    return saveUsage();
+  }
+  /** THE DAY'S COUNTER, AN ACT through the store writer (lg-store-writes U1): the bytes are the counter as it is when the
+   *  write is due (a burst of calls is one write); a write that FAILED is said once (kept in memory, the writer retries)
+   *  and the next write that lands says so once — each write's own outcome (onWritten), not a caller's wait.
+   *  → its durable() promise (true once the counter holding this change is on disk; false: failed, or still queued) */
+  let usageOwedSaid = false;
+  function saveUsage() {
+    try {
+      W().dirty(F.usage, { name: 'decision-usage.write', rank: 0, mode: 0o600, produce: () => JSON.stringify(usage),
+        onWritten: (ok, e) => {
+          if (!ok && !usageOwedSaid) { usageOwedSaid = true; log.warn?.(`[decision] the day's counter is not on disk (its write failed: ${(e && (e.code || e.message)) || 'an error'}) — kept in memory, the store writer retries`); }
+          else if (ok && usageOwedSaid) { usageOwedSaid = false; log.warn?.('[decision] the day\'s counter is on disk again'); }
+        } });
+      return W().durable(F.usage).catch(() => false);
+    } catch (e) { log.warn?.(`[decision] usage not saved: ${e.message}`); return Promise.resolve(false); }
   }
   function journal(o) {
     const row = M.journalRow({ at: now(), rubric: M.RUBRIC.version, ...o });
@@ -193,7 +214,12 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   function memoPut(key, answers) {
     memo.delete(key); memo.set(key, answers);
     while (memo.size > M.MEMO_MAX) memo.delete(memo.keys().next().value);
-    try { writeJsonAtomic(F.memo, { entries: [...memo.entries()] }); } catch (e) { log.warn?.(`[decision] memo not saved: ${e.message}`); }
+    saveMemo();
+  }
+  /** THE MEMO, PACED through the store writer (lg-store-writes U1): the hub's own cache — a burst of answers is one write */
+  function saveMemo() {
+    try { W().dirty(F.memo, { name: 'decision-memo.write', mode: 0o600, produce: () => JSON.stringify({ entries: [...memo.entries()] }) }); }
+    catch (e) { log.warn?.(`[decision] memo not saved: ${e.message}`); }
   }
   // lane decision-vendor-hygiene: a row stop the owner must act on (the plan, the request shape) says ONE server notice — the
   // client words it from the i18n key, `text` stays the English; a notice no client received is said again at the next refusal
@@ -220,7 +246,15 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   }
 
   /** ONE judgment. → {ok:true, answers, memo:bool, usage?, usd?} | {ok:false, why, status?, retryAt?}. */
-  async function judge(use, parts, { questions, memo: memoParts = null, accountNever = false, perHour = Infinity, resolved = null } = {}) {
+  /** THE ONE JUDGE CALL — its answer waits until the day's counter it changed is on disk (lg-store-writes U1: money, an
+   *  answered act is on disk; the loop never waits — only this call's promise) */
+  async function judge(use, parts, opts = {}) {
+    const call = { counted: null };
+    const r = await judgeCall(use, parts, opts, call);
+    if (call.counted) await call.counted;
+    return r;
+  }
+  async function judgeCall(use, parts, { questions, memo: memoParts = null, accountNever = false, perHour = Infinity, resolved = null } = {}, call) {
     const n = Array.isArray(parts && parts.records) ? parts.records.length : 1;
     if (n > M.inputPlan(use).batch) throw new Error(`a ${use} judgment takes at most ${M.inputPlan(use).batch} record(s)`);
     const qs = n > 1 ? M.batchQuestions(questions, n) : questions;
@@ -254,7 +288,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     } catch (e) { failed = sending ? M.fetchFailOf(e) : 'unsent'; } finally { clearTimeout(timer); }   // a body that never parsed keeps its 2xx status (and its reservation); nothing sent / a refused redirect releases it (L3)
     const u = json ? M.usageOf(cred.provider, json) : { inputTokens: 0, outputTokens: 0, costUsd: null };
     const usd = M.settleUsd({ status, usage: json ? u : null, reservedUsd: estUsd, pricePerMtok: M.PRICE_PER_MTOK_USD[cred.provider], failed });
-    settle(id, use, u, usd, est);
+    call.counted = settle(id, use, u, usd, est);
     const spent = { inputTokens: u.inputTokens || undefined, usd };
     const halt = M.rowStopOf(status);   // B-2979: 401 / 403 the key, 402 the plan, 400 the shape — the ROW stops, not this record
     if (halt) {
@@ -288,7 +322,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       const d = today(); const rk = rateKey(cred);
       const r = (d.rate || (d.rate = {}))[rk] || (d.rate[rk] = { calls: 0, inputTokens: 0, usd: 0 });
       r.calls += 1; r.inputTokens += u.inputTokens; r.usd = Math.round((r.usd + u.costUsd) * 1e8) / 1e8;
-      try { writeJsonAtomic(F.usage, d); } catch (e) { log.warn?.(`[decision] usage not saved: ${e.message}`); }
+      call.counted = saveUsage();
     }
     const answers = M.normalizeAnswers(cred.provider, json, qs);
     if (key) memoPut(key, answers);
@@ -296,7 +330,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     if (hits) {   // the card's 「命中 m 条」: verdicts at or above the threshold today (a memo answer is not a new judgment)
       const d = today(); const x = d.byUse[use] || (d.byUse[use] = { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0 });
       x.hits = (x.hits || 0) + hits;
-      try { writeJsonAtomic(F.usage, d); } catch (e) { log.warn?.(`[decision] usage not saved: ${e.message}`); }
+      call.counted = saveUsage();
     }
     lastOutcome = { at: now(), use, outcome: 'ok' };
     // lane decision-attention-facts: an attention call's needs_now rides its journal line (`p`, 2 decimals); lane

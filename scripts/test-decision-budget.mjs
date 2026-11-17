@@ -17,6 +17,13 @@
 //     (M.fetchFailOf + settleUsd's `failed`): a primitive that throws before it returns, a refused / unresolvable
 //     connection (+ a REAL closed loopback port), a refused redirect ⇒ $0 for both; a timeout / a reset mid-answer
 //     (it may have been judged) keep the reservation — RED: settleUsd without `failed` charges all of them again.
+//   ⑩ THE LOOP NEVER WAITS ON THE DECISION FILES (lane lg-store-writes, B-0248 U1): over a writer stand-in that lands
+//     nothing until told, a call that changed the counter has not answered while the counter waits and neither file
+//     is on disk; the day's counter is an ACT (decision-usage.write, rank 0, 0600, durable() asked) — the CALL waits
+//     for it, never the loop —, the memo PACED (decision-memo.write); the bytes are the state when the write is due; a
+//     FAILED write is said ONCE and the next landing once; a new engine reads both back; an engine made again while a
+//     write is owed lands it first; a memo hit waits on nothing — RED (a mutant copy): the writes made on the main
+//     thread at the change ⇒ the files are there at once.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -33,7 +40,9 @@ let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
 const quiet = { log() { }, warn() { }, error() { } };
 const ROOT = scratch('decision-budget');
-process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
+// lane lg-store-writes (B-0248 U1): the engine's memo is the STORE WRITER's (paced) — its owed writes land before the scratch
+// dir goes (a write on the writer's thread never races the removal: no folder left behind)
+process.on('exit', () => { try { require(path.join(REPO, 'src/store-writer.js')).storeWriter().flushSync(); } catch { } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 
 const Q = [{ type: 'predicate', name: 'q1', instructions: 'Does the text ask the reader to pay something?' }];
 const BODY = 'Please pay the March invoice before Friday.';
@@ -43,7 +52,7 @@ const EST_USD = EST * M.rateOf(null, M.PRICE_PER_MTOK_USD.openai);
 /** A world: an engine over a fake fetch. `answer(n)` → {status, body?, headers?}; `hold` keeps every answer until release(). */
 // the judge's request body is a ONE-SHOT stream (lane judge-one-shot-body) — a fake reads it like the wire does
 const bodyText = (init) => (typeof init.body === 'string' ? init.body : new Response(init.body).text());
-function world(name, { Engine = DE, provider = 'openai', cents = 100, answer = () => ({ status: 200 }), hold = false } = {}) {
+function world(name, { Engine = DE, provider = 'openai', cents = 100, answer = () => ({ status: 200 }), hold = false, writer = null, log = quiet } = {}) {
   const dataDir = path.join(ROOT, name); fs.mkdirSync(dataDir, { recursive: true });
   const w = { fetches: 0, T: Date.UTC(2026, 9, 13, 12, 0), key: 'sk-dummy-KEY-one', cents, waiting: [] };
   w.release = () => { for (const r of w.waiting.splice(0)) r(); };
@@ -54,8 +63,9 @@ function world(name, { Engine = DE, provider = 'openai', cents = 100, answer = (
     const h = Object.fromEntries(Object.entries(a.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
     return { status: a.status, ok: a.status >= 200 && a.status < 300, headers: { get: (k) => h[String(k).toLowerCase()] ?? null }, json: async () => { if (a.body === undefined) throw new Error('no body'); return a.body; } };
   };
-  w.eng = Engine.create({ dataDir, fetchImpl: fakeFetch, now: () => w.T, tzOffset: () => 0, log: quiet,
+  w.mk = () => Engine.create({ dataDir, fetchImpl: fakeFetch, now: () => w.T, tzOffset: () => 0, log, ...(writer ? { writer } : {}),
     integrations: { resolveIntegration: () => ({ values: { provider, apiKey: w.key, model: '' }, source: 'user' }) } });
+  w.eng = w.mk();
   w.eng.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ rules: true, dailyBudgetCents: w.cents }) }); // lane plugin-settings-p0: the settings rows
   w.judge = (opts = {}) => w.eng.judge('rule', { body: BODY, thread: [] }, { questions: Q, ...opts });
   w.journal = () => fs.readFileSync(w.eng.files.journal, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
@@ -229,6 +239,75 @@ console.log('⑨ THE JUDGING MODEL ON THE WIRE (lane llm-plugin-rename): the LLM
   ok(a.seen.join() === 'openai/gpt-6-luna' && a.eng.status().model === 'openai/gpt-6-luna', `the plugin's judgeModel row is the model on the wire, over the preset's (${a.seen})`);
   ok(b.seen.join() === 'typesafe/jev-router', `no row ⇒ the cluster preset's model while the cluster's key is in use (${b.seen})`);
   ok(c.seen.join() === M.DEFAULT_MODEL.openrouter && d.seen.join() === M.DEFAULT_MODEL.openrouter, `the person's OWN key never borrows a model from its values (a card's old field) — the provider's default; a blank row is the default too (${c.seen} · ${d.seen})`);
+}
+
+console.log('⑩ the loop never waits on the decision files — the memo PACED, the day\'s counter an ACT whose call waits for it, both through the store writer (lane lg-store-writes, B-0248 U1)');
+{
+  /** a store writer stand-in: it lands NOTHING until told (land), fails a write when told (failNow), answers durable() then */
+  const standIn = () => {
+    const r = { dirties: [], durables: [], flushes: [], owed: new Map(), cbs: new Map(), waiters: [] };
+    r.dirty = (file, o) => { r.dirties.push({ file, name: o.name, rank: o.rank, mode: o.mode }); r.owed.set(file, o.produce); if (o.onWritten) r.cbs.set(file, o.onWritten); };
+    r.durable = (file) => { r.durables.push(file); return new Promise((res) => r.waiters.push({ file, res })); };
+    r.whyNotDurable = () => ({ why: 'failed' });
+    r.pending = (file) => r.owed.has(file);
+    r.answer = (file, v) => { r.waiters = r.waiters.filter((w) => (w.file === file ? (w.res(v), false) : true)); };
+    r.land = (files = [...r.owed.keys()]) => { for (const f of files) { const pr = r.owed.get(f); if (!pr) continue; fs.writeFileSync(f, pr()); r.owed.delete(f); const cb = r.cbs.get(f); if (cb) cb(true, null); r.answer(f, true); } };
+    r.failNow = (file) => { const cb = r.cbs.get(file); if (cb) cb(false, Object.assign(new Error('planted'), { code: 'EIO' })); r.answer(file, false); };
+    r.flushSync = (files) => { r.flushes.push(files.map((f) => path.basename(f)).sort()); r.land(files); return { written: files, left: [] }; };
+    return r;
+  };
+  const tick = () => new Promise((res) => setImmediate(res));
+  const until = async (fn) => { for (let k = 0; k < 200 && !fn(); k++) await tick(); return fn(); };
+  const cost = (n, b) => ({ status: 200, body: { model: b.model, answers: { q1: { type: 'noul', noul: 0.2 } }, usage: { input_tokens: 40, cost: 0.01 } } });
+  const mkW = (Engine, tag) => {
+    const rec = standIn(), warns = [];
+    const w = world('sw-' + tag, { Engine, writer: rec, provider: 'openrouter', answer: cost, log: { log() { }, warn: (l) => warns.push(String(l)), error() { } } });
+    return { w, rec, warns, F: w.eng.files };
+  };
+  /** one call, started: → {p, done(), wrote(n)} — `wrote(n)` waits until n durable() asks were made */
+  const start = (x, id) => { let done = false; const n0 = x.rec.durables.length; const p = x.w.judge({ memo: { id, rule: 'r' } }).then((r) => { done = true; return r; }); return { p, done: () => done, asked: () => until(() => x.rec.durables.length >= n0 + 2) }; };
+  const a = mkW(DE, 'moved');
+  const c1 = start(a, 'sw-1');
+  await c1.asked(); await tick(); await tick();
+  const onDisk = [a.F.usage, a.F.memo].filter((f) => fs.existsSync(f)).map((f) => path.basename(f));
+  ok(!c1.done() && onDisk.length === 0, 'a call that changed the counter has NOT answered while its counter waits for the disk — and neither decision-usage.json nor decision-memo.json was written on the main thread', { done: c1.done(), onDisk });
+  const u = a.rec.dirties.filter((d) => d.file === a.F.usage), m = a.rec.dirties.filter((d) => d.file === a.F.memo);
+  ok(u.length === 2 && u.every((d) => d.name === 'decision-usage.write' && d.rank === 0 && d.mode === 0o600) && a.rec.durables.filter((f) => f === a.F.usage).length === 2,
+    'the day\'s counter is an ACT: handed as decision-usage.write, rank 0, 0600, its durable() asked — at the settle and at the recorded rate', u);
+  ok(m.length === 1 && m[0].name === 'decision-memo.write' && m[0].rank === undefined && m[0].mode === 0o600 && !a.rec.durables.includes(a.F.memo), 'the memo is PACED: handed as decision-memo.write — no rank, no durable()', m);
+  const ub = JSON.parse(a.rec.owed.get(a.F.usage)()), mb = JSON.parse(a.rec.owed.get(a.F.memo)());
+  ok(ub.byUse.rule.calls === 1 && ub.byUse.rule.usd === 0.01 && mb.entries.length === 1, 'the bytes are the state when the write is due: the counter (1 call, 0.01 USD) and the memo (1 entry)', { ub, n: mb.entries.length });
+  a.rec.failNow(a.F.usage);
+  const r1 = await c1.p;
+  const c2 = start(a, 'sw-2'); await c2.asked(); a.rec.failNow(a.F.usage); await c2.p;
+  const owedSaid = a.warns.filter((l) => /the day's counter is not on disk \(its write failed: EIO\)/.test(l)).length;
+  const c3 = start(a, 'sw-3'); await c3.asked(); a.rec.land(); await c3.p;
+  const againSaid = a.warns.filter((l) => /the day's counter is on disk again/.test(l)).length;
+  ok(r1.ok && owedSaid === 1 && againSaid === 1 && a.warns.length === 2, `a counter write that FAILED is said ONCE over two failed writes (${owedSaid}), the next write that lands says so once (${againSaid}) — the call still answers (the change is kept in memory)`, a.warns);
+  const e2 = a.w.mk();
+  ok(e2.status().today.total.calls === 3 && e2.memoSize() === 3 && a.rec.flushes.length === 0, 'a new engine reads the landed counter (3 calls) and memo (3 entries) back — and waits on nothing (nothing owed)', { calls: e2.status().today.total.calls, memo: e2.memoSize(), flushes: a.rec.flushes });
+  e2.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ rules: true, dailyBudgetCents: a.w.cents }) });
+  a.w.eng = e2;
+  const c4 = start(a, 'sw-4'); await c4.asked();
+  const e3 = a.w.mk();
+  await c4.p;
+  ok(a.rec.flushes.length === 1 && a.rec.flushes[0].join() === 'decision-memo.json,decision-usage.json' && e3.status().today.total.calls === 4 && e3.memoSize() === 4,
+    'an engine made AGAIN while its writes are owed (a suite\'s restart) lands exactly those two first, then reads them (4 calls, 4 entries)', { flushes: a.rec.flushes, calls: e3.status().today.total.calls, memo: e3.memoSize() });
+  e3.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ rules: true, dailyBudgetCents: a.w.cents }) });
+  a.w.eng = e3;
+  const asks = a.rec.durables.length, fetches = a.w.fetches;
+  const hit = await Promise.race([a.w.judge({ memo: { id: 'sw-1', rule: 'r' } }), new Promise((res) => setTimeout(() => res('waited'), 500))]);
+  ok(hit && hit.ok && hit.memo === true && a.w.fetches === fetches && a.rec.durables.length === asks, 'a memo hit changes no counter and waits on nothing (no durable() asked, no fetch)', hit);
+  // RED CONTROL: the change removed — the writes made on the main thread at the change (the old writeJsonAtomic shape)
+  const engSrc = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
+  const a3 = "  const W = () => writer || require('../store-writer.js').storeWriter();\n";
+  ok(engSrc.split(a3).length === 2, 'ANCHOR: the engine\'s one writer line');
+  const syncShim = "  const W = () => ({ dirty: (f, o) => fs.writeFileSync(f, o.produce(), { mode: 0o600 }), durable: async () => true, whyNotDurable: () => null, pending: () => false, flushSync: () => ({ written: [], left: [] }) });\n";
+  const Sync = mutantCopies('decision-budget-sw', REPO).load('src/server/decision-engine.js', engSrc.replace(a3, syncShim), 'sync-writes');
+  const b = mkW(Sync, 'red');
+  const rb = await b.w.judge({ memo: { id: 'sw-red', rule: 'r' } });
+  const bDisk = [b.F.usage, b.F.memo].filter((f) => fs.existsSync(f)).map((f) => path.basename(f));
+  ok(rb.ok && bDisk.length === 2 && b.rec.dirties.length === 0, `CONTROL: the writes made on the main thread at the change ⇒ both files are on disk when the call returns (${bDisk.join(', ')}), the writer never asked — the leg's first checks would be red`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
