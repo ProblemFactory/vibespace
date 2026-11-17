@@ -39,6 +39,7 @@
 //      THE CHAIN RULE'S LIMITS, stated (round 6, smaller 3): an assignment to a property (`o.p = writeSessionMeta(…)`)
 //      counts as consumed whoever reads `o.p`; a binding is judged by its NAME read anywhere in its function — an inner
 //      declaration that shadows it reads as a use; a handler passed by name (`.then(onSaved)`) is trusted
+//   ⑧ THE STORE READ (B-f276): src/store-read.js's three answers + the census of every store's READ as a ratchet (debt only shrinks)
 // Run: node scripts/test-store-write-census.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -796,6 +797,168 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
   const SS = fs.readFileSync(path.join(REPO, 'src/agent-routes/status.js'), 'utf8');
   ok((SS.match(/sessionStatus\.persisted\(\)/g) || []).length === 2 && /persisted\(\) \{/.test(fs.readFileSync(path.join(REPO, 'src/session-status.js'), 'utf8')),
     'session-status: the person\'s override / clear and the agent\'s own report are on disk before their routes answer (persisted() — the writer\'s next write); notices, history and rekeys stay paced');
+}
+
+
+// ── ⑧ THE STORE READ (B-f276, lane bl-jobs 2026-11-17): src/store-read.js, PURE — one read's outcome → data | missing |
+// unreadable (bytes READ that do not parse are corrupt, and pass through afterSetAside); and THE CENSUS of every store's
+// read branch as a RATCHET over ①'s files: a file whose CODE holds a set-aside name (a `.corrupt-` string, never a comment) is
+// a row — `answer` (reads through storeAnswer), `right` (judged by hand), `names` (names those files, reads no store) or
+// `debt` (a failed read is set aside or read as empty: the next save writes over a file that was never read). Debt only
+// SHRINKS: a debt row whose old shape is gone is red until flipped to `answer` with READ_DEBT_CAP lowered; a new file with a
+// set-aside and no row is red. Its controls run the same census over patched copies of the texts, in memory.
+console.log('⑧ the store read (B-f276): three answers, and the census of every store\'s read as a ratchet');
+{
+const SR = require(path.join(REPO, 'src/store-read.js'));
+const err = (code) => Object.assign(new Error(code + ': stand-in'), { code });
+// §1 storeAnswer: three answers, and corrupt only for bytes that were READ
+{
+  const A = (read, o) => SR.storeAnswer(read, o);
+  const m = A({ error: err('ENOENT') });
+  ok(m.state === 'missing' && m.writable === true, 'ENOENT ⇒ missing (start empty, writable)', m);
+  for (const code of ['EIO', 'EACCES', 'ETIMEDOUT', 'ELOOP', 'EISDIR', 'EBUSY', 'EMFILE']) {
+    const u = A({ error: err(code) });
+    ok(u.state === 'unreadable' && u.code === code && u.writable === false && u.why === 'the read failed', `a read that FAILED (${code}) ⇒ unreadable, NOT writable — never corrupt, never empty`, u);
+  }
+  const nameless = A({ error: new TypeError('x') });
+  ok(nameless.state === 'unreadable' && nameless.code === 'TypeError', 'a thrown error with no code ⇒ unreadable by its name', nameless);
+  const d = A({ text: '[{"id":"a"}]' }, { valid: Array.isArray });
+  ok(d.state === 'data' && d.writable === true && d.value[0].id === 'a', 'bytes that parse to the shape ⇒ data', d);
+  const torn = A({ text: '[{"id":"a"' }, { valid: Array.isArray });
+  ok(torn.state === 'corrupt' && torn.why === 'did not parse' && torn.error instanceof SyntaxError && torn.writable === false, 'bytes READ that do not parse ⇒ corrupt (the caller sets them aside)', torn);
+  const shape = A({ text: '{"records":[]}' }, { valid: Array.isArray });
+  ok(shape.state === 'corrupt' && shape.why === 'not the expected shape' && shape.error === null, 'bytes that parse to the wrong shape ⇒ corrupt', shape);
+  ok(A({ text: '' }).state === 'corrupt', 'zero bytes ⇒ corrupt (a torn write, never «no records»)');
+  ok(A({ text: '[]' }, { valid: () => { throw new Error('x'); } }).state === 'corrupt', 'a shape check that throws ⇒ corrupt, never a throw');
+  ok(A(null).state === 'unreadable' && A({}).state === 'unreadable' && A(undefined).writable === false, 'no outcome at all ⇒ unreadable');
+  ok(A({ text: 'x' }, { parse: (t) => t.toUpperCase() }).value === 'X', 'the parse is the caller\'s (opts.parse)');
+}
+
+// ── §2 afterSetAside: torn bytes safe beside the store ⇒ missing; not safe ⇒ unreadable ──
+{
+  const c = SR.storeAnswer({ text: '[' });
+  const s = SR.afterSetAside(c, 'jobs.json.corrupt-17');
+  ok(s.state === 'missing' && s.setAside === 'jobs.json.corrupt-17' && s.writable === true && s.why === 'did not parse', 'set aside (a name) ⇒ missing: start empty, the name said', s);
+  const n = SR.afterSetAside(c, null);
+  ok(n.state === 'unreadable' && n.code === 'not set aside' && n.writable === false && /could not be set aside/.test(n.why), 'NOT set aside ⇒ unreadable: the live file is the bytes\' only copy — never written over', n);
+  const d = SR.storeAnswer({ text: '[]' });
+  ok(SR.afterSetAside(d, null) === d && SR.afterSetAside(SR.storeAnswer({ error: err('EIO') }), 'x').state === 'unreadable', 'any other answer passes through (a failed read is never «set aside»)');
+}
+
+// ── §3 retryDelay ──
+ok([1, 2, 3, 4, 5, 9, 1e9].map((n) => SR.retryDelay(n)).join() === '30000,60000,120000,240000,300000,300000,300000', 'the read again: 30 s doubling, never past 5 min');
+ok(SR.retryDelay(0) === 30000 && SR.retryDelay('x') === 30000 && SR.retryDelay(3, { firstMs: 40, maxMs: 100 }) === 100, 'a nonsense try is the first; the numbers are the caller\'s');
+
+// ── §3b PURE: the helper reaches nothing ──
+{
+  const t = fs.readFileSync(path.join(REPO, 'src/store-read.js'), 'utf8').replace(/\/\/.*$/gm, '');
+  ok(!/\brequire\(|\bimport\b|\bprocess\.|\bDate\.now|\bsetTimeout|\bfs\./.test(t), 'src/store-read.js is PURE: no require, no fs, no clock, no timer, no process');
+}
+
+// ── §4 THE CENSUS — every store's read branch, a ratchet ──
+// marks: the store's read as the row says it is (an `answer` row: its storeAnswer call; a `debt` row: the release's shape)
+const STORE_READS = [
+  // CONVERTED (B-f276): every read goes through src/store-read.js storeAnswer — a failed read is held, never set aside
+  { file: 'src/jobs.js', store: 'jobs.json', state: 'answer', mark: /this\._loadAnswer\(SR\.storeAnswer\(read, \{ valid: STORE_SHAPE \}\)\)/ },
+  { file: 'src/jobs.js', store: 'jobs-archive.json', state: 'answer', mark: /this\._archiveAnswer\(SR\.storeAnswer\(read, \{ valid: Array\.isArray \}\)\)/ },
+  // RIGHT WITHOUT THE HELPER (judged by hand, 2026-11-17): a failed read refuses or answers an error; only unparsable bytes are set aside
+  { file: 'src/server/integration-store.js', store: 'integrations.json', state: 'right', why: 'a failed read refuses (unreadable()); only a parse/shape failure is archived', mark: /return unreadable\('exists but cannot be read', e\);/ },
+  { file: 'src/app-serve.js', store: 'apps manifest.json', state: 'right', why: 'a failed read is an error; only an unparsable manifest is set aside, at the next write', mark: /catch \(e\) \{ if \(e\.code === 'ENOENT'\) return \{ manifest: A\.emptyManifest\(\), error: null \}; return \{/ },
+  { file: 'src/job-logs-sweep-worker.js', store: 'jobs-logs-sweep.json', state: 'right', why: 'a failed read makes the pass wait; only unparsable bytes are set aside', mark: /if \(!e \|\| e\.code !== 'ENOENT'\) return \{ error: `the catch-up record could not be read: / },
+  { file: 'src/server/writes-lost.js', store: 'writes-lost.json', state: 'right', why: 'a failed read is no answer (readFailed, read again); only bytes that are no store are set aside (`.unreadable-`)', mark: /if \(e\.code !== 'ENOENT'\) return readFailed\(`not read/ },
+  { file: 'src/job-logs-sweep.js', store: '(none)', state: 'names', why: 'names the set-aside and note files the clean-up honours; reads no store', mark: /const NOTE_SUFFIX = '\.corrupt-unread';/ },
+  // DEBT (B-f276's census, 2026-11-17) — each is converted by the lane that holds its file; then its row flips to `answer` and READ_DEBT_CAP drops
+  { file: 'src/channel-store.js', store: 'channels/*.json (loadJsonFamily)', state: 'debt', why: 'sets the LIVE file aside on a failed read', mark: /return setAside\(`unreadable \(\$\{\(e && e\.code\) \|\| \(e && e\.message\)\}\)`\);/ },
+  { file: 'src/user-todos.js', store: 'user-todos.json', state: 'debt', why: 'sets the live file aside on a failed read', mark: /if \(!\(e && e\.code === 'ENOENT'\)\) setAside = this\._setAside\(`unreadable/ },
+  { file: 'src/server/browser-kept.js', store: 'browser-kept.json', state: 'debt', why: 'sets the live file aside on any failure but ENOENT', mark: /if \(e && e\.code !== 'ENOENT'\) \{[\s\S]{0,600}?fs\.renameSync\(file, aside\)/ },
+  { file: 'src/hosts.js', store: 'hosts.json', state: 'debt', why: 'a failed read starts EMPTY (the copy aside cannot read it either) — the next save writes over hosts.json', mark: /try \{ this\._state = JSON\.parse\(fs\.readFileSync\(this\._file, 'utf-8'\)\); \}\s*catch \{/ },
+  { file: 'src/machine-mounts.js', store: 'machine-mounts.json', state: 'debt', why: 'a failed read starts EMPTY — the next save writes over machine-mounts.json', mark: /try \{ this\._state = JSON\.parse\(fs\.readFileSync\(this\._file, 'utf-8'\)\); \}\s*catch \{/ },
+  { file: 'src/server/conversation-deliver.js', store: 'msg-retry.json', state: 'debt', why: 'a failed read is «no file»: the park starts empty and its next write overwrites', mark: /try \{ rawText = fs\.readFileSync\(retryFile, 'utf-8'\); \} catch \{ rawText = null; \}/ },
+  { file: 'src/server/usage-pool-engine.js', store: 'reset-credit-tries.json', state: 'debt', why: 'a failed read is «no attempts»: the next write overwrites', mark: /try \{ raw = fs\.readFileSync\(RESET_CREDIT_TRIES_FILE, 'utf8'\); \} catch \{ return 0; \}/ },
+  // NAMED WITHOUT A SET-ASIDE (the scan cannot see a store that never sets bytes aside — known ones are rows here): torn or
+  // unreadable = empty, the next save overwrites → lane bl-jobs batch 12 (B-6721 holds that store)
+  { file: 'src/jobs.js', store: 'job-notifications.json', state: 'debt', why: '_loadNotifs: any failure is an empty map (catch { }) — the next save writes over it', mark: /_loadNotifs\(\) \{\s*try \{\s*const obj = JSON\.parse\(fs\.readFileSync\(this\.notifsFile, 'utf-8'\)\);/ },
+];
+const READ_DEBT_CAP = 8;     // lower it as each debt row flips to `answer` — never raise it
+const READ_DEBT_AT_BIRTH = 8;            // the census's first count (2026-11-17): DEBT_CAP never passes it
+const STATES = new Set(['answer', 'right', 'names', 'debt']);
+const USES_HELPER = /require\(['"](?:\.{1,2}\/)+(?:[\w-]+\/)*store-read(?:\.js)?['"]\)/;
+
+const treeTexts = () => new Map(censusFiles(REPO).map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]));   // the hub's main-process files (①'s list)
+/** the files whose CODE holds a set-aside name (a string or template piece with `.corrupt-` — never a comment) */
+const SET_ASIDE = /\.(corrupt|unreadable)-/, SET_ASIDE_G = /\.(corrupt|unreadable)-/g;   // the two names the tree sets bytes aside under
+// the set-aside names per file, EXACT — a second store with a set-aside in a file that already has a row is red by its count
+const SITES = { 'src/jobs.js': 3, 'src/app-serve.js': 1, 'src/channel-store.js': 1, 'src/hosts.js': 1, 'src/job-logs-sweep-worker.js': 1, 'src/job-logs-sweep.js': 1, 'src/machine-mounts.js': 1, 'src/server/browser-kept.js': 1, 'src/server/conversation-deliver.js': 1, 'src/server/integration-store.js': 1, 'src/server/usage-pool-engine.js': 1, 'src/server/writes-lost.js': 1, 'src/user-todos.js': 1 };
+const tokenHit = new Map();   // a text's verdict, once (the controls re-run the census over copies that differ in ONE file)
+function setAsideFiles(texts) {
+  const out = [];
+  for (const [f, src] of texts) {
+    if (!SET_ASIDE.test(src)) continue;
+    if (tokenHit.has(src)) { if (tokenHit.get(src)) out.push([f, tokenHit.get(src)]); continue; }
+    let hits = 0;
+    try {
+      for (const t of AC.tokenizer(src, { ecmaVersion: 'latest', sourceType: /\.mjs$/.test(f) || /^\s*(import|export)\s/m.test(src) ? 'module' : 'script', allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true })) {
+        if ((t.type.label === 'string' || t.type.label === 'template') && SET_ASIDE.test(String(t.value))) hits++;
+      }
+    } catch { hits = (src.match(SET_ASIDE_G) || []).length; }   // a file the tokenizer cannot read is judged by its text (the safe side: it needs a row)
+    tokenHit.set(src, hits);
+    if (hits) out.push([f, hits]);
+  }
+  return out.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+}
+/** THE CENSUS over a set of file texts → its problems (each a sentence naming the file) */
+function census(texts, rows = STORE_READS, cap = READ_DEBT_CAP) {
+  const problems = [];
+  const byFile = new Map();
+  for (const r of rows) (byFile.get(r.file) || byFile.set(r.file, []).get(r.file)).push(r);
+  for (const [f, n] of setAsideFiles(texts)) {
+    if (!byFile.has(f)) problems.push(`${f}: sets bytes aside (\`.corrupt-\` / \`.unreadable-\`) and has NO row — read its store through src/store-read.js storeAnswer (a failed read is held, never set aside or read as empty) and add an 'answer' row`);
+    else if (SITES[f] !== n) problems.push(`${f}: ${n} set-aside name(s) in its code, ${SITES[f] || 0} counted — a store read was added or removed: give it its row, then move the count`);
+  }
+  const seen = new Set();
+  for (const r of rows) {
+    const key = r.file + ' ' + r.store;
+    if (seen.has(key)) problems.push(`${key}: two rows`); seen.add(key);
+    if (!STATES.has(r.state)) { problems.push(`${key}: unknown state ${r.state}`); continue; }
+    const src = texts.get(r.file);
+    if (src == null) { problems.push(`${key}: the row's file is gone — remove the row (and lower READ_DEBT_CAP if it was debt)`); continue; }
+    if (!r.mark.test(src)) problems.push(r.state === 'debt' ? `${key}: its old read is gone — if it reads through storeAnswer now, flip the row to 'answer' (with its call as the mark) and lower READ_DEBT_CAP` : `${key}: its ${r.state === 'answer' ? 'storeAnswer call' : 'judged shape'} is no longer there — read the store again and fix the row`);
+    if (r.state === 'answer' && !USES_HELPER.test(src)) problems.push(`${key}: an 'answer' row whose file does not require src/store-read.js`);
+  }
+  const debt = rows.filter((r) => r.state === 'debt').length;
+  if (debt !== cap) problems.push(`DEBT: ${debt} debt rows against READ_DEBT_CAP ${cap} — the cap is the count (lower it when a row flips; a new debt row is refused)`);
+  if (cap > READ_DEBT_AT_BIRTH) problems.push(`READ_DEBT_CAP ${cap} is above the census's first count ${READ_DEBT_AT_BIRTH} — the ratchet only shrinks`);
+  return problems;
+}
+
+const T = treeTexts();
+const files = setAsideFiles(T).map(([f]) => f);
+console.log('  the table (' + STORE_READS.length + ' rows, ' + STORE_READS.filter((r) => r.state === 'debt').length + ' debt of cap ' + READ_DEBT_CAP + '):');
+for (const r of STORE_READS) console.log(`    ${r.state.padEnd(6)} ${r.file} · ${r.store}${r.why ? ' — ' + r.why : ''}`);
+ok(files.length === Object.keys(SITES).length && files.includes('src/jobs.js') && files.includes('src/server/writes-lost.js') && !files.includes('src/store-read.js'), `the scan sees the set-aside names in code (${files.length} files, \`.corrupt-\` and \`.unreadable-\`), never a comment`, files);
+const now = census(T);
+ok(now.length === 0, 'THE CENSUS over the tree: every store with a set-aside has its row, every row\'s mark holds, debt = its cap', now);
+// CONTROLS: the same census over patched copies of the texts (in memory)
+const withFile = new Map(T); withFile.set('src/server/new-store.js', "'use strict';\nconst fs = require('fs');\nfunction load(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { try { fs.renameSync(f, f + '.corrupt-' + 1); } catch { } return {}; } }\nmodule.exports = { load };\n");
+const c1 = census(withFile);
+ok(c1.length === 1 && /^src\/server\/new-store\.js: sets bytes aside/.test(c1[0]), 'CONTROL: a NEW store with the old shape (any failure set aside, then empty) is red by its name', c1);
+const second = new Map(T); second.set('src/jobs.js', T.get('src/jobs.js') + "\nfunction zzSecondStore(f) { try { return JSON.parse(require('fs').readFileSync(f, 'utf8')); } catch { require('fs').renameSync(f, f + '.corrupt-' + 1); return []; } }\n");
+const c0 = census(second);
+ok(c0.length === 1 && /^src\/jobs\.js: 4 set-aside name\(s\) in its code, 3 counted/.test(c0[0]), 'CONTROL: a SECOND store with the old shape in a file that already has rows is red by its count', c0);
+const commented = new Map(T); commented.set('src/server/notes.js', "// a store's bytes go to <name>.corrupt-<ts>\n/* '.corrupt-' */\nmodule.exports = {};\n");
+ok(census(commented).length === 0, 'CONTROL: a set-aside name in a COMMENT is no store');
+const converted = new Map(T); converted.set('src/hosts.js', T.get('src/hosts.js').replace(/try \{ this\._state = JSON\.parse\(fs\.readFileSync\(this\._file, 'utf-8'\)\); \}\s*catch \{/, "const a = SR.storeAnswer(read);\n    if (a.state === 'unreadable') {"));
+const c2 = census(converted);
+ok(c2.length === 1 && /^src\/hosts\.js hosts\.json: its old read is gone — .*flip the row to 'answer'.*lower READ_DEBT_CAP/.test(c2[0]), 'CONTROL: a debt row whose store was converted is red until the row flips and the cap drops', c2);
+const lost = new Map(T); lost.set('src/jobs.js', T.get('src/jobs.js').replace('this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));', 'this._loadAnswer(JSON.parse(read.text));'));
+const c3 = census(lost);
+ok(c3.length === 1 && /^src\/jobs\.js jobs\.json: its storeAnswer call is no longer there/.test(c3[0]), 'CONTROL: a converted store that stops reading through storeAnswer is red', c3);
+const more = [...STORE_READS, { file: 'src/hosts.js', store: 'hosts-extra.json', state: 'debt', why: 'x', mark: /./ }];
+const c4 = census(T, more);
+ok(c4.length === 1 && /^DEBT: 9 debt rows against READ_DEBT_CAP 8/.test(c4[0]) && census(T, more, 9).some((p) => /above the census's first count 8/.test(p)), 'CONTROL: a NEW debt row is refused, and so is raising the cap past its first count', c4);
+const noReq = new Map(T); noReq.set('src/jobs.js', T.get('src/jobs.js').replace(/require\('\.\/store-read\.js'\)/, "require('./store-reader.js')"));
+ok(census(noReq).some((p) => /^src\/jobs\.js jobs\.json: an 'answer' row whose file does not require src\/store-read\.js/.test(p)), 'CONTROL: an answer row\'s file must require the helper');
+
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -454,10 +454,11 @@ try {
     if (JH6._logsNoteP) await JH6._logsNoteP;
     const notes6 = () => fs.readdirSync(h6).filter((n) => /corrupt-unread/.test(n));
     ok(JH6._logsUnread && JH6._logsUnread.archive === 'EIO' && heldAtOnce6 && notes6().length === 1 && notes6()[0] === 'jobs-archive.json.corrupt-unread' && JH6.archive.length === 0, 'round 4 §1 + §2: an EIO read whose set-aside also failed HOLDS this process before the load returns, and the remover\'s child writes the archive\'s ONE note `jobs-archive.json.corrupt-unread`');
-    ok(calls6.map((c) => c[0]).join() === 'readFileSync,existsSync,renameSync', `round 4 §3: the failed load on the MAIN THREAD makes only the release's calls — its read, its one existsSync, its rename (here refused): no listing, no second existsSync, no note write (${calls6.map((c) => c[0]).join(', ')})`);
-    JH6._writeArchive([]);   // THE HUB'S OWN OVERWRITE (the boot sweep, any save): its empty list over the unread file
+    ok(calls6.map((c) => c[0]).join() === 'readFileSync', `round 4 §3 + B-f276: the failed load on the MAIN THREAD makes its read alone — no existsSync, no rename of bytes it could not read (the release set the live archive aside here), no listing, no note write (${calls6.map((c) => c[0]).join(', ')})`);
+    const w6 = JH6._writeArchive([]);   // THE HUB'S OWN OVERWRITE (the boot sweep, any save) — B-f276: refused while the archive is unread
+    ok(w6 && w6.ok === false && /could not be read \(EIO\) — it is not written over until a read answers/.test(w6.error) && fs.readFileSync(AF, 'utf8').includes('jb-a7c0ffee'), 'B-f276: the hub\'s own write over the unread archive is REFUSED — the file keeps its records', w6);
     await sweepAt(JH6, Date.now()); await sweepAt(JH6, Date.now());
-    ok(has(h6Listed) && has(h6Orphan), 'THE HOLD HAS A FILE: after the hub\'s own overwrite a read SUCCEEDS on its empty list — and the pass still removes NOTHING (the note holds it)');
+    ok(has(h6Listed) && has(h6Orphan), 'THE HOLD HAS A FILE: a read now SUCCEEDS — and the pass still removes NOTHING (the note holds it)');
     fs.writeFileSync(AF, JSON.stringify([{ id: 'jb-a7c0ffee', kind: 'task', state: 'done', runs: [{ startedAt: a6Ts, endedAt: a6Ts + 1 }] }]));   // a person restores the records…
     for (const n of notes6()) fs.renameSync(path.join(h6, n), path.join(tmp, n + '.h6'));   // …and moves the note
     await sweepAt(JH6, Date.now());
@@ -601,7 +602,8 @@ try {
       ok(has(svOld) && has(orphan), '…and after a restart (the store reads cleanly now — the hub wrote it) the note on disk holds the next engine\'s boot pass');
       J2.shutdown();
     }
-    // N2 THE ARCHIVE ROAD AT BOOT: the boot's own archive sweep writes over the unread archive INSIDE init — the FIRST boot pass holds
+    // N2 THE ARCHIVE ROAD AT BOOT: the boot's own archive sweep would write over the unread archive INSIDE init (the release did;
+    // B-f276 refuses it) — the FIRST boot pass holds
     {
       const n2 = mkDir('n2'); const AF = path.join(n2, 'jobs-archive.json'), arT = Date.now() - 20 * DAY, dT = Date.now() - 3 * DAY;
       fs.writeFileSync(AF, JSON.stringify([{ id: 'jb-a7c0ffb2', kind: 'task', name: 'old', state: 'done', owner, access: acc, runs: [{ startedAt: arT, endedAt: arT + 1, exit: 0 }], archivedAt: Date.now() - 10 * DAY, archivedWhy: 'done' }]));
@@ -611,7 +613,7 @@ try {
       const b2 = unreadDuring(AF, () => boot(n2, { bootDelayMs: 20, workerPath: noteRefuser }, { archivePolicy: () => ({ doneAfterHours: 24, failedAfterDays: 7 }) }), { noNote: true });
       await until(() => b2.logs.some((l) => /job-logs clean-up HELD/.test(l)), 5000, 10); await settle(b2.jm);
       let onDisk = null; try { onDisk = JSON.parse(fs.readFileSync(AF, 'utf8')); } catch { }
-      ok(Array.isArray(onDisk) && onDisk.some((r) => r.id === 'jb-d0e00b02') && !onDisk.some((r) => r.id === 'jb-a7c0ffb2') && has(arOld) && has(orphan2), 'round 4 §1 (the archive): the boot\'s own archive sweep wrote over the unread archive INSIDE init — and the FIRST boot pass removes nothing (not the run the unread archive listed, not an unnamed dir)', { onDisk: onDisk && onDisk.map((r) => r.id) });
+      ok(Array.isArray(onDisk) && onDisk.some((r) => r.id === 'jb-a7c0ffb2') && !onDisk.some((r) => r.id === 'jb-d0e00b02') && b2.jm.jobs.has('jb-d0e00b02') && has(arOld) && has(orphan2), 'round 4 §1 (the archive) + B-f276: the boot\'s own archive sweep does NOT write over the unread archive INSIDE init (its record stays in the store; the release wrote over it) — and the FIRST boot pass removes nothing (not the run the unread archive listed, not an unnamed dir)', { onDisk: onDisk && onDisk.map((r) => r.id) });
       await gcAt(b2.jm, Date.now());
       ok(has(arOld) && has(orphan2), '…nor does the hourly gc');
       fs.unlinkSync(noteGate); b2.jm.shutdown();

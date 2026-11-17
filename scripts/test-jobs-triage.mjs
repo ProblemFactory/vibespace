@@ -513,6 +513,7 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   // B-2204: a skeleton is the person's alone — owner-less, view 'session': no conversation lists it, the person does
   const sk = B.jobs.get('jb-5ke1e701'), agent = { conversationId: 'conv-any', sessionId: 'sess-any', sessionCreatedAt: 1, groups: new Set(['g-any']) };
   ok(sk.access.view === 'session' && sk.access.control === 'session' && Object.keys(sk.owner).length === 0 && !M.canView(sk, agent) && M.canView(sk, { isUser: true }) && !M.visibleJobs([...B.jobs.values()], agent).some((j) => LSm.isSkeleton(j)), 'B-2204: a recovered skeleton is owner-less with view \'session\' — no conversation can view it (was \'all\': every one), the person can', sk.access);
+  B.shutdown();
   // B-2204: a skeleton the RELEASE wrote (view 'all' — its _save wrote memory whenever anything dirtied the store) is read back the person's alone
   const d12m = mkDir('jobs-triage-skel-migrate');
   const oldSkel = (id) => ({ id, kind: 'task', name: id, state: 'unverified', note: LSm.RECOVERED_NOTE, owner: {}, access: { view: 'all', control: 'session' }, runs: [] });
@@ -522,61 +523,68 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   const mArch = Mg._loadArchive().find((r) => r.id === 'jb-5ke1e7m2');
   ok(Mg.jobs.get('jb-5ke1e7m1').access.view === 'session' && mArch && mArch.access.view === 'session' && !M.canView(Mg.jobs.get('jb-5ke1e7m1'), agent) && !M.canView(mArch, agent), 'B-2204: a skeleton the release wrote with view \'all\' (store and archive) is read back owner-less, view \'session\'');
   Mg.shutdown();
-  B.shutdown();
-  // B-ef97: a skeleton the store holds for an ARCHIVED id (the release wrote one for every log dir) is dropped when the archive loads,
-  // and a skeleton never moves OVER the archived record of its id (the sweep's replace-by-id), however it got into the store
-  const skelRec = (id, extra = {}) => ({ id, kind: 'task', name: id, state: 'unverified', note: LSm.RECOVERED_NOTE, owner: {}, access: { view: 'session', control: 'session' }, runs: [], ...extra });
-  const realArch = (id) => ({ id, kind: 'task', name: 'the real one', state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: T0 - 9 * D, endedAt: T0 - 9 * D + 1 }], archivedAt: T0 - 8 * D, archivedWhy: 'done' });
-  const d12d = mkDir('jobs-triage-skel-drop');
-  fs.writeFileSync(path.join(d12d, 'jobs.json'), JSON.stringify([skelRec('jb-5ke1e7d1'), skelRec('jb-5ke1e7d2')]));
-  fs.writeFileSync(path.join(d12d, 'jobs-archive.json'), JSON.stringify([realArch('jb-5ke1e7d1')]));
-  const { jm: Dr } = boot(d12d);
-  ok(!Dr.jobs.has('jb-5ke1e7d1') && Dr.jobs.has('jb-5ke1e7d2') && Dr._loadArchive().find((r) => r.id === 'jb-5ke1e7d1').name === 'the real one', 'B-ef97: a skeleton for an id the archive holds is DROPPED when the archive loads — the archived record stays');
-  Dr.shutdown();
-  const sweepScene = (Mod, name) => {
-    const d = mkDir(name);
-    fs.writeFileSync(path.join(d, 'jobs-archive.json'), JSON.stringify([realArch('jb-5ke1e7s1')]));
-    const J = new Mod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); J.init();
-    J.jobs.set('jb-5ke1e7s1', skelRec('jb-5ke1e7s1', { ack: { by: 'user-opened', at: T0 - 10 * D } }));
-    const r = J.archiveSweep({ now: T0 });
-    const real = J._loadArchive().find((x) => x.id === 'jb-5ke1e7s1');
-    const out = { r, name: real && real.name, inStore: J.jobs.has('jb-5ke1e7s1') }; J.shutdown(); return out;
-  };
-  const sw = sweepScene({ JobManager }, 'jobs-triage-skel-sweep');
-  ok(!sw.r.archived.length && sw.name === 'the real one' && !sw.inStore, 'B-ef97: an acknowledged skeleton whose id the archive holds leaves the store — it never replaces the archived record', sw);
+  // B-ef97: the ARCHIVE unread at the torn boot — a skeleton then stands for an archived id too; when the archive answers it goes
+  const d12r = mkDir('jobs-triage-skel-archive-late'), AFr = path.join(d12r, 'jobs-archive.json');
+  seedTorn(d12r);
+  const archBytes = fs.readFileSync(AFr, 'utf-8');
+  const rf12 = fs.readFileSync;
+  fs.readFileSync = function (f, ...a) { if (String(f) === AFr) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf12.call(this, f, ...a); };
+  let R12; try { R12 = new JobManager({ dataDir: d12r, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, unreadRetry: { firstMs: 5, maxMs: 10 } }); R12.init(); } finally { fs.readFileSync = rf12; }
+  const atBootR = skel(R12);
+  const t12 = Date.now(); while (R12._unread.archive && Date.now() - t12 < 3000) await new Promise((r) => setTimeout(r, 10));
+  ok(atBootR === 'jb-5ke1e701,jb-5ke1e703,jb-5ke1e7a2' && !R12._unread.archive && skel(R12) === 'jb-5ke1e701,jb-5ke1e703' && fs.readFileSync(AFr, 'utf-8') === archBytes, 'B-ef97: a skeleton built while the archive could not answer (one for an archived id) is DROPPED when the archive answers — the archived record stays', { atBootR, now: skel(R12) });
+  if (R12._logsNoteP) await R12._logsNoteP;
+  R12.shutdown();
+  // B-ef97: …and a skeleton never moves OVER the archived record of its id (the sweep's replace-by-id), however it got into the store
+  const d12s = mkDir('jobs-triage-skel-sweep');
+  fs.writeFileSync(path.join(d12s, 'jobs-archive.json'), JSON.stringify([{ id: 'jb-5ke1e7s1', kind: 'task', name: 'the real one', state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: T0 - 9 * D, endedAt: T0 - 9 * D + 1 }], archivedAt: T0 - 8 * D, archivedWhy: 'done' }]));
+  const { jm: Sw } = boot(d12s);
+  Sw.jobs.set('jb-5ke1e7s1', { ...oldSkel('jb-5ke1e7s1'), access: { view: 'session', control: 'session' }, ack: { by: 'user-opened', at: T0 - 10 * D } });
+  const swr = Sw.archiveSweep({ now: T0 });
+  const realOne = Sw._loadArchive().find((r) => r.id === 'jb-5ke1e7s1');
+  ok(!swr.archived.length && realOne && realOne.name === 'the real one' && !Sw.jobs.has('jb-5ke1e7s1'), 'B-ef97: an acknowledged skeleton whose id the archive holds leaves the store — it never replaces the archived record', { swr, name: realOne && realOne.name });
+  Sw.shutdown();
   // CONTROL (scripts/mutant-copy.mjs): the release's engine — the skeletons never marked for a write ⇒ the restart loads an empty store
   const MJ = mutantCopies('jobs-torn-ef97', ROOT);
   const jsrc = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
-  const owedLine = '        if (bad && this.jobs.size) this._skeletonsOwed = true;\n';
+  const owedLine = '    if (bad && this.jobs.size) this._skeletonsOwed = true;\n';
   ok(jsrc.split(owedLine).length === 2, 'B-ef97 control setup: the write-back is marked on one line');
   const viewLine = "access: { view: 'session', control: 'session' }, runs: [] });\n";
   ok(jsrc.split(viewLine).length === 2, 'B-2204 control setup: the skeleton\'s access is written on one line');
-  const JMod = MJ.load('src/jobs.js', jsrc.replace(owedLine, '        // MUTANT: the release — skeletons in memory only\n').replace(viewLine, "access: { view: 'all', control: 'session' }, runs: [] }); // MUTANT: the release\n"));
+  const accLine = "const skeletonAccess = (j) => { if (LS.isSkeleton(j)) { j.owner = {}; j.access = { view: 'session', control: 'session' }; } return j; };\n";
+  const dropLine = "      if (this.jobs.size) { const held = new Set(this.archive.map((r) => r.id)); for (const [id, j] of this.jobs) if (LS.isSkeleton(j) && held.has(id)) { this.jobs.delete(id); dropped++; } }\n";
+  const guardLine = "      if (LS.isSkeleton(moved[i]) && archIds.has(id)) { this.jobs.delete(id); this._dirty = true; moved.splice(i, 1); }\n      else if (!this.jobs.has(id)) moved.splice(i, 1);\n";
+  ok([accLine, dropLine, guardLine].every((x) => jsrc.split(x).length === 2), 'B-ef97 / B-2204 control setup: the read-back access, the archive\'s drop and the sweep\'s guard are each written once');
+  const JMod = MJ.load('src/jobs.js', jsrc.replace(owedLine, '    // MUTANT: the release — skeletons in memory only\n').replace(viewLine, "access: { view: 'all', control: 'session' }, runs: [] }); // MUTANT: the release\n")
+    .replace(accLine, 'const skeletonAccess = (j) => j; // MUTANT: no read-back\n').replace(dropLine, '      // MUTANT: no drop\n').replace(guardLine, '      if (!this.jobs.has(id)) moved.splice(i, 1); // MUTANT: no guard\n'));
   const d12c = mkDir('jobs-triage-torn-mut');
   seedTorn(d12c);
   const mk = () => { const J = new JMod.JobManager({ dataDir: d12c, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); J.init(); return J; };
   const X1 = mk(); const x1 = skel(X1); const xv = X1.jobs.get('jb-5ke1e701'); const xSeen = !!xv && M.canView(xv, { conversationId: 'conv-any', sessionId: 'sess-any', sessionCreatedAt: 1, groups: new Set() }); X1.shutdown();
   const X2 = mk(); const x2 = skel(X2); X2.shutdown();
   ok(x1 === 'jb-5ke1e701,jb-5ke1e703' && x2 === '', 'B-ef97 CONTROL (the release, in a copy): the skeletons of boot 1 are GONE after a restart', { x1, x2 });
-  const guardLine = "      if (LS.isSkeleton(moved[i]) && archIds.has(id)) { this.jobs.delete(id); this._dirty = true; moved.splice(i, 1); }\n      else if (!this.jobs.has(id)) moved.splice(i, 1);\n", dropLine = "      if (this.jobs.size) { const held = new Set(this.archive.map((r) => r.id)); for (const [id, j] of this.jobs) if (LS.isSkeleton(j) && held.has(id)) { this.jobs.delete(id); dropped++; } }\n";
-  ok(jsrc.split(guardLine).length === 2 && jsrc.split(dropLine).length === 2, 'B-ef97 control setup: the archive load\'s drop and the sweep\'s guard are each written once');
-  const JG1 = MJ.load('src/jobs.js', jsrc.replace(guardLine, '      if (!this.jobs.has(id)) moved.splice(i, 1); // MUTANT: no guard\n').replace(dropLine, '      // MUTANT: no drop\n'), 'guard');
-  const swx = sweepScene(JG1, 'jobs-triage-skel-sweep-mut');
-  ok(swx.name === 'jb-5ke1e7s1', 'B-ef97 CONTROL (no guard, in a copy): the acknowledged skeleton is archived OVER the real record (its name is gone)', swx);
-  const d12dx = mkDir('jobs-triage-skel-drop-mut');
-  fs.writeFileSync(path.join(d12dx, 'jobs.json'), JSON.stringify([skelRec('jb-5ke1e7d1')])); fs.writeFileSync(path.join(d12dx, 'jobs-archive.json'), JSON.stringify([realArch('jb-5ke1e7d1')]));
-  const DX = new JG1.JobManager({ dataDir: d12dx, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); DX.init();
-  ok(DX.jobs.has('jb-5ke1e7d1'), 'B-ef97 CONTROL (no drop, in a copy): the skeleton of the archived id stays beside its record');
-  DX.shutdown();
   ok(xSeen, 'B-2204 CONTROL (the release, in a copy): any conversation can view a recovered skeleton (view \'all\')');
-  const accLine = "const skeletonAccess = (j) => { if (LS.isSkeleton(j)) { j.owner = {}; j.access = { view: 'session', control: 'session' }; } return j; };\n";
-  ok(jsrc.split(accLine).length === 2, 'B-2204 control setup: the read-back access is one line');
-  const JA2 = MJ.load('src/jobs.js', jsrc.replace(accLine, 'const skeletonAccess = (j) => j; // MUTANT: no read-back\n'), 'acc');
   const dXm = mkDir('jobs-triage-skel-migrate-mut');
   fs.writeFileSync(path.join(dXm, 'jobs.json'), JSON.stringify([oldSkel('jb-5ke1e7m1')]));
-  const XM = new JA2.JobManager({ dataDir: dXm, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); XM.init();
+  const XM = new JMod.JobManager({ dataDir: dXm, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); XM.init();
   ok(XM.jobs.get('jb-5ke1e7m1').access.view === 'all', 'B-2204 CONTROL (no read-back, in a copy): a skeleton the release wrote stays view \'all\'');
   XM.shutdown();
+  const dXs = mkDir('jobs-triage-skel-sweep-mut');
+  fs.writeFileSync(path.join(dXs, 'jobs-archive.json'), JSON.stringify([{ id: 'jb-5ke1e7s1', kind: 'task', name: 'the real one', state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: T0 - 9 * D, endedAt: T0 - 9 * D + 1 }], archivedAt: T0 - 8 * D, archivedWhy: 'done' }]));
+  const XS = new JMod.JobManager({ dataDir: dXs, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); XS.init();
+  XS.jobs.set('jb-5ke1e7s1', { ...oldSkel('jb-5ke1e7s1'), ack: { by: 'user-opened', at: T0 - 10 * D } });
+  XS.archiveSweep({ now: T0 });
+  const xReal = XS._loadArchive().find((r) => r.id === 'jb-5ke1e7s1');
+  ok(xReal && xReal.name === 'jb-5ke1e7s1', 'B-ef97 CONTROL (no guard, in a copy): the acknowledged skeleton is archived OVER the real record (its name is gone)', xReal && xReal.name);
+  XS.shutdown();
+  const dXr = mkDir('jobs-triage-skel-archive-late-mut'), AFx = path.join(dXr, 'jobs-archive.json');
+  seedTorn(dXr);
+  fs.readFileSync = function (f, ...a) { if (String(f) === AFx) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf12.call(this, f, ...a); };
+  let XR; try { XR = new JMod.JobManager({ dataDir: dXr, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, unreadRetry: { firstMs: 5, maxMs: 10 } }); XR.init(); } finally { fs.readFileSync = rf12; }
+  const tx = Date.now(); while (XR._unread.archive && Date.now() - tx < 3000) await new Promise((r) => setTimeout(r, 10));
+  ok(!XR._unread.archive && skel(XR).includes('jb-5ke1e7a2'), 'B-ef97 CONTROL (no drop, in a copy): the skeleton of the archived id stays after the archive answers', skel(XR));
+  if (XR._logsNoteP) await XR._logsNoteP;
+  XR.shutdown();
   for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'B-ef97 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
@@ -623,6 +631,132 @@ console.log('§13 B-c17d: a monthly cron keeps its child (its run ring) between 
     XA.shutdown();
     for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 2, label: 'B-c17d ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
   } finally { policy.doneAfterHours = keep; }
+}
+
+// ── §14 B-f276: a read that FAILED is no answer — never set aside, never written over, read again ──
+console.log('§14 B-f276: an unreadable store is kept as it is, written by nothing, and read again');
+{
+  const acc = { view: 'session', control: 'session' };
+  const until = async (fn, ms = 3000) => { const t = Date.now(); while (Date.now() - t < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 10)); } return !!fn(); };
+  const asides = (d, base) => fs.readdirSync(d).filter((n) => n.startsWith(base + '.corrupt-') && n !== base + '.corrupt-unread');
+  const rec = (id, extra = {}) => ({ id, kind: 'task', name: 'kept ' + id.slice(-2), state: 'done', owner: {}, access: acc, runs: [{ startedAt: T0 - 3 * D, endedAt: T0 - 3 * D + 1000, exit: 0 }], createdAt: T0 - 3 * D, ...extra });
+  const engine = (Mod, d, logs) => { const J = new Mod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: (...a) => logs.push(a.join(' ')), archivePolicy: () => policy, unreadRetry: { firstMs: 5, maxMs: 10 } }); J.init(); return J; };
+  const spec = { kind: 'task', name: 'new one', cmd: { argv: ['true'] } };
+  // A. THE STORE, EACCES (a real mode: its stat answers, its read does not) — mode 000 refuses no root: under root the leg is skipped BY NAME
+  const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+  if (asRoot) console.log('  · SKIP §14 A under root: a mode-000 file does not refuse root (B and C stand in for the failed read)');
+  const dA = mkDir('jobs-triage-unread-store'), SF = path.join(dA, 'jobs.json');
+  const body = JSON.stringify([rec('jb-f2760a01'), rec('jb-f2760a02', { kind: 'cron', state: 'scheduled', desiredUp: true, schedule: { everyMs: 30 * D }, nextFireAt: T0 + 10 * D, runs: [] })]);
+  if (!asRoot) {
+  fs.writeFileSync(SF, body); fs.chmodSync(SF, 0o000);
+  let readable = true; try { fs.readFileSync(SF); } catch (e) { readable = e.code !== 'EACCES'; }
+  const lA = [];
+  const A = engine({ JobManager }, dA, lA);
+  const mt = fs.statSync(SF).mtimeMs;
+  const made = A.create(spec, { isUser: true });
+  A._dirty = true; A._save();
+  ok(!readable && A.ready && A._unread.store && A._unread.store.code === 'EACCES' && A.jobs.size === 0 && asides(dA, 'jobs.json').length === 0 && fs.statSync(SF).mtimeMs === mt, 'B-f276: a store whose READ fails (EACCES, its stat answers) is kept as it is — NOT set aside (the release renamed the live file), and a save writes nothing over it', { unread: A._unread.store, asides: asides(dA, 'jobs.json') });
+  ok(made.code === 'records-unread' && /could not read its records \(jobs\.json: EACCES\)/.test(made.error) && !made.job, 'B-f276: …and no job is created while the records are unread (it could not be written)', made);
+  await until(() => A._unreadTries.store >= 3);   // three reads again, each failed
+  ok(A._unreadTries.store >= 3 && A._logsUnread.store === 'EACCES' && lA.filter((l) => /jobs\.json could not be read \(EACCES: the read failed\) — kept as it is, never set aside/.test(l)).length === 1, 'B-f276: …the job-logs clean-up holds (its unread fact) and it is said ONCE — after three failed reads again too', { tries: A._unreadTries.store });
+  fs.chmodSync(SF, 0o644);   // the storage answers again
+  const back = await until(() => !A._unread.store && A.jobs.has('jb-f2760a01') && A.jobs.has('jb-f2760a02'));
+  const made2 = back ? A.create(spec, { isUser: true }) : null;
+  ok(back && made2 && made2.job && lA.some((l) => /jobs\.json read again after \d+ tr(y|ies): 2 record\(s\) — writes resume/.test(l)), 'B-f276: the store is READ AGAIN off the loop: its records are loaded, writes resume, a job can be created', { back, made2: made2 && (made2.error || 'ok') });
+  if (A._logsNoteP) await A._logsNoteP;
+  A.shutdown();
+  ok(JSON.parse(fs.readFileSync(SF, 'utf-8')).map((j) => j.id).filter((id) => id.startsWith('jb-f2760a')).sort().join() === 'jb-f2760a01,jb-f2760a02', 'B-f276: …and the store on disk still holds every record it held (none written over)');
+  }
+  // B. THE ARCHIVE, EISDIR (a real mode): the boot's sweep would write over it — it keeps its records in the store instead
+  const dB = mkDir('jobs-triage-unread-archive'), AF = path.join(dB, 'jobs-archive.json');
+  fs.writeFileSync(path.join(dB, 'jobs.json'), JSON.stringify([rec('jb-f2760b01')]));
+  fs.mkdirSync(AF);
+  const lB = [];
+  const Bj = engine({ JobManager }, dB, lB);
+  ok(Bj._unread.archive && Bj._unread.archive.code === 'EISDIR' && fs.statSync(AF).isDirectory() && asides(dB, 'jobs-archive.json').length === 0 && Bj.jobs.has('jb-f2760b01') && lB.some((l) => /NOT archived — the store keeps them/.test(l)), 'B-f276: an archive whose read fails (EISDIR) is not set aside and not written over — the boot sweep\'s record stays in the store', { unread: Bj._unread.archive, asides: asides(dB, 'jobs-archive.json') });
+  fs.rmdirSync(AF); fs.writeFileSync(AF, JSON.stringify([{ ...rec('jb-f2760b02'), archivedAt: T0 - D, archivedWhy: 'done' }]));
+  const backB = await until(() => !Bj._unread.archive && Bj.archive && Bj.archive.some((r) => r.id === 'jb-f2760b02'));
+  const sw = backB ? Bj.archiveSweep({ now: T0 }) : null;
+  const onDiskB = (() => { try { return JSON.parse(fs.readFileSync(AF, 'utf-8')).map((r) => r.id).sort().join(); } catch (e) { return e.code; } })();
+  ok(backB && sw && sw.archived.includes('jb-f2760b01') && onDiskB === 'jb-f2760b01,jb-f2760b02', 'B-f276: the archive is read again; the next sweep archives beside what it held (nothing lost)', { backB, onDiskB });
+  if (Bj._logsNoteP) await Bj._logsNoteP;
+  Bj.shutdown();
+  // B2. THE ARCHIVE'S WRITE GUARD (an EIO stand-in on its read — a real file, so only the guard keeps the sweep's write off it)
+  const guardScene = (Mod, name) => {
+    const d = mkDir(name), F = path.join(d, 'jobs-archive.json');
+    fs.writeFileSync(path.join(d, 'jobs.json'), JSON.stringify([rec('jb-f2760g01')]));
+    fs.writeFileSync(F, JSON.stringify([{ ...rec('jb-f2760g02'), archivedAt: T0 - D, archivedWhy: 'done' }]));
+    const before = fs.readFileSync(F, 'utf-8'), rfg = fs.readFileSync;
+    fs.readFileSync = function (f, ...a) { if (String(f) === F) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rfg.call(this, f, ...a); };
+    let J; try { J = engine(Mod, d, []); } finally { fs.readFileSync = rfg; }
+    J._unreadStopped = true;
+    return { J, kept: fs.readFileSync(F, 'utf-8') === before, inStore: J.jobs.has('jb-f2760g01') };
+  };
+  const g = guardScene({ JobManager }, 'jobs-triage-unread-archive-guard');
+  ok(g.kept && g.inStore && g.J._unread.archive && g.J._unread.archive.code === 'EIO', 'B-f276: the boot sweep NEVER writes over an archive whose read failed (EIO) — its bytes are as they were, the due record stays in the store', g.J._unread.archive);
+  if (g.J._logsNoteP) await g.J._logsNoteP;
+  g.J.shutdown();
+  // C. TORN BYTES THAT COULD NOT BE SET ASIDE (the rename AND the copy refused): the live file is their only copy — never written over
+  const dC = mkDir('jobs-triage-torn-kept'), CF = path.join(dC, 'jobs.json'), torn = '[{"id":"jb-f2760c01","kind":"task","runs":[{"startedAt":1';
+  fs.writeFileSync(CF, torn); fs.mkdirSync(path.join(dC, 'job-logs', 'jb-f2760c01'), { recursive: true });
+  const rn = fs.renameSync, cp = fs.copyFileSync, lC = [];
+  fs.renameSync = function (f, ...a) { if (String(f) === CF) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); return rn.call(this, f, ...a); };
+  fs.copyFileSync = function (f, ...a) { if (String(f) === CF) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); return cp.call(this, f, ...a); };
+  let C; try { C = engine({ JobManager }, dC, lC); } finally { fs.renameSync = rn; fs.copyFileSync = cp; }
+  C._unreadStopped = true;   // the scene holds still (no read again while it is judged)
+  C._dirty = true; C._save();
+  ok(C._unread.store && C._unread.store.code === 'not set aside' && fs.readFileSync(CF, 'utf-8') === torn && C.jobs.has('jb-f2760c01'), 'B-f276: torn bytes whose set-aside failed hold the store — a save never writes the skeletons over their only copy', C._unread.store);
+  if (C._logsNoteP) await C._logsNoteP;
+  C.shutdown();
+  ok(fs.readFileSync(CF, 'utf-8') === torn, 'B-f276: …nor does the exit');
+  // CONTROLS (scripts/mutant-copy.mjs): the release's classification (a failed read of a file that is there = corrupt) and its
+  // unguarded save, in a copy
+  const MJ = mutantCopies('jobs-unread-f276', ROOT);
+  const jsrc = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
+  const readLine = 'this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));';
+  const archLine = 'this._archiveAnswer(SR.storeAnswer(read, { valid: Array.isArray }));';
+  const saveLine = "if (!this._unread.store) timedSync('jobs.write'";
+  ok([readLine, archLine, saveLine].every((x) => jsrc.split(x).length === 2), 'B-f276 control setup: the two reads and the store\'s write hold are each one line');
+  const release = (r, f) => `((r) => (r.state === 'unreadable' && fs.existsSync(${f}) ? { ...r, state: 'corrupt' } : r))(${r})`;   // MUTANT: the release
+  const JMod = MJ.load('src/jobs.js', jsrc
+    .replace(readLine, `this._loadAnswer(${release('SR.storeAnswer(read, { valid: STORE_SHAPE })', 'this.file')});`)
+    .replace(archLine, `this._archiveAnswer(${release('SR.storeAnswer(read, { valid: Array.isArray })', 'this.archiveFile')});`)
+    .replace(saveLine, "if (true) timedSync('jobs.write'"));
+  if (!asRoot) {
+  const dX = mkDir('jobs-triage-unread-mut'), XF = path.join(dX, 'jobs.json');
+  fs.writeFileSync(XF, body); fs.chmodSync(XF, 0o000);
+  const X = engine(JMod, dX, []); X._unreadStopped = true;
+  const xAside = asides(dX, 'jobs.json');
+  if (X._logsNoteP) await X._logsNoteP;
+  X.shutdown();
+  ok(xAside.length === 1 && !fs.existsSync(XF) || (xAside.length === 1 && JSON.parse(fs.readFileSync(XF, 'utf-8')).length === 0), 'B-f276 CONTROL (the release\'s classification, in a copy): the EACCES store is SET ASIDE — the healthy records leave the live file', xAside);
+  try { for (const n of xAside) fs.chmodSync(path.join(dX, n), 0o644); } catch { }
+  }
+  const dY = mkDir('jobs-triage-unread-mut-arch'), YF = path.join(dY, 'jobs-archive.json');
+  fs.writeFileSync(path.join(dY, 'jobs.json'), JSON.stringify([rec('jb-f2760y01')])); fs.mkdirSync(YF);
+  const Y = engine(JMod, dY, []); Y._unreadStopped = true;
+  const yAside = asides(dY, 'jobs-archive.json');
+  if (Y._logsNoteP) await Y._logsNoteP;
+  Y.shutdown();
+  ok(yAside.length === 1, 'B-f276 CONTROL (the release, in a copy): the EISDIR archive is SET ASIDE by the boot sweep', yAside);
+  const dZ = mkDir('jobs-triage-torn-mut'), ZF = path.join(dZ, 'jobs.json');
+  fs.writeFileSync(ZF, torn); fs.mkdirSync(path.join(dZ, 'job-logs', 'jb-f2760c01'), { recursive: true });
+  fs.renameSync = function (f, ...a) { if (String(f) === ZF) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); return rn.call(this, f, ...a); };
+  fs.copyFileSync = function (f, ...a) { if (String(f) === ZF) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); return cp.call(this, f, ...a); };
+  let Z; try { Z = engine(JMod, dZ, []); } finally { fs.renameSync = rn; fs.copyFileSync = cp; }
+  Z._unreadStopped = true; Z._dirty = true; Z._save();
+  const zNow = fs.readFileSync(ZF, 'utf-8');
+  if (Z._logsNoteP) await Z._logsNoteP;
+  Z.shutdown();
+  ok(zNow !== torn, 'B-f276 CONTROL (the release\'s unguarded save, in a copy): the skeletons are written over the torn bytes\' only copy');
+  const guardW = "    if (this._unread.archive) return { ok: false, error: `${path.basename(this.archiveFile)} could not be read (${this._unread.archive.code}) — it is not written over until a read answers` };\n";
+  ok(jsrc.split(guardW).length === 2, 'B-f276 control setup: the archive\'s write guard is one line');
+  const JG = MJ.load('src/jobs.js', jsrc.replace(guardW, '    // MUTANT: no write guard\n'), 'guard');
+  const gx = guardScene(JG, 'jobs-triage-unread-archive-guard-mut');
+  ok(!gx.kept && !gx.inStore, 'B-f276 CONTROL (no write guard, in a copy): the boot sweep WRITES OVER the unread archive — its record is gone from the file', { kept: gx.kept });
+  if (gx.J._logsNoteP) await gx.J._logsNoteP;
+  gx.J.shutdown();
+  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 2, label: 'B-f276 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
