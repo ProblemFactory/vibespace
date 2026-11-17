@@ -8141,6 +8141,7 @@ export default {
   "Open API access and its log": "打开 API 访问及其日志",
   "API call {call}": "API 调用 {call}",
   "API call {call} · awaiting you": "API 调用 {call} · 等你批准",
+  "API call {call} · {status}": "API 调用 {call} · {status}",
   "Starting — rebuilding its cache index ({files} files), {elapsed} so far; it mounts by itself when the scan ends (waits up to {max} min)": "启动中 — 正在重建缓存索引（{files} 个文件），已用 {elapsed}；扫描结束后自动挂载（最多等 {max} 分钟）",
   "Cache kept on a network filesystem: {n} items still uploading — it moves to local disk at the next reconnect once they are done": "缓存仍在网络文件系统上：还有 {n} 项正在上传——上传完后，下次重连时移到本地磁盘",
   "Cache kept where it is: its state could not be read ({code}) — not moved until it reads clean": "缓存保持原位：无法读取它的状态（{code}）——读到干净之前不移动",

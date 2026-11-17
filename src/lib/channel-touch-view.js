@@ -59,7 +59,7 @@ import { icon, el } from './channel-chrome.js';
 import { agentCommandText } from '../agent-tool-rules.js';   // r3: THE unwrapper — codex's argv `["bash","-lc","…"]` is its script, never a re-joined string
 import * as T from '../channel-touch.js';
 import { showApiAccessDialog } from './channel-api-dialog.js';   // B-2198
-import { chatApiCards } from './channel-api-card-view.js';   // B-2198 part 2: the proposal's card at its call row
+import { chatApiCards, apiFateLookup, onApiCards } from './channel-api-card-view.js';   // B-2198 part 2: the proposal's card at its call row; B-d3d3: an API row's words say its proposal's fate
 import { chatProposalCards, refreshChatProposals, proposalWords } from './channel-outbox.js';   // lane chat-proposal-card: a reply / compose / react / recall's card at its call row — the Outbox's own card
 import { heldProposalLookup } from './outbox-feed.js';   // lane outbox-chip-door: the client's list by id — the row's state words, the proposal its press shows
 
@@ -96,6 +96,27 @@ export function rowProposalWords(row) {
   const seen = new Map();
   for (const p of recs) for (const w of proposalWords(p)) { const k = `${w.cls}|${w.text}`; if (seen.has(k)) seen.get(k).n += 1; else seen.set(k, { ...w, n: 1 }); }
   return [...seen.values()].map((w) => ({ cls: w.cls, text: w.n > 1 ? `${w.text} ×${w.n}` : w.text }));
+}
+
+/** B-d3d3: does a folded row carry a raw API call that FILED a proposal (its words follow the proposal's fate)? */
+const apiFiled = (r) => !!(r && r.ops && r.ops.api && r.proposalId);
+/** B-d3d3: re-word IN PLACE the raw-API rows that filed a proposal, in every box of `boxes` (a Set — a box no longer on the
+ *  page leaves it), by `apiFateOf` (channel-api-card-view apiFateLookup: the shared records now). Returns the boxes whose
+ *  words moved (the view fits their strip again). */
+export function rewordApiRows(boxes, apiFateOf) {
+  const moved = [];
+  for (const box of [...boxes]) {
+    if (!box.isConnected) { boxes.delete(box); continue; }
+    let m = false;
+    for (const rowEl of box.querySelectorAll(':scope > .chat-channel-touch')) {
+      const n = rowEl.querySelector('.cct-words');
+      if (!n || !apiFiled(rowEl._row)) continue;
+      const text = T.rowWords(rowEl._row, t, { apiFateOf });
+      if (n.textContent !== text) { n.textContent = text; m = true; }
+    }
+    if (m) moved.push(box);
+  }
+  return moved;
 }
 
 /** lane touch-chip-cause: what a card's call IS for the cause rule (PURE T.callKindOf): a `command` (a shell call), a
@@ -227,6 +248,7 @@ export function createChannelTouchView(view) {
     cardEl.classList.remove('chat-channel-touched');
     const box = boxOf(cardEl, false);
     if (box && !box.hidden) { box.hidden = true; box.replaceChildren(); }
+    if (box) apiBoxes.delete(box);
     chatApiCards(null, cardEl, []);
     chatProposalCards(null, cardEl, []);
   }
@@ -240,6 +262,7 @@ export function createChannelTouchView(view) {
     const expanded = box.dataset.expanded === '1';
     const { shown } = T.foldView(rows, { expanded });
     const recordOf = heldProposalLookup();   // lane outbox-chip-door: the tooltip says what the press will do (a reply gone from the list opens the conversation)
+    const apiFateOf = apiFateLookup();   // B-d3d3
     const have = new Map([...box.querySelectorAll(':scope > .chat-channel-touch')].map((e) => [e.dataset.key, e]));
     let i = 0;
     for (const r of shown) {
@@ -263,7 +286,7 @@ export function createChannelTouchView(view) {
       if (g.dataset.glyph !== glyph) { g.replaceChildren(icon(glyph, 12)); g.dataset.glyph = glyph; }
       const set = (sel, text) => { const n = rowEl.querySelector(sel); if (n.textContent !== text) n.textContent = text; };
       set('.cct-name', T.rowName(r));
-      set('.cct-words', T.rowWords(r, t));
+      set('.cct-words', T.rowWords(r, t, { apiFateOf }));
       set('.cct-time', clock(r.last));
       rowEl.classList.toggle('drafted', T.DRAFT_OPS.some((o) => r.ops[o] > 0));
       rowEl.classList.toggle('connect', verdict === 'connect');   // lane pod-oauth-callback: the Connect card wears the accent
@@ -277,9 +300,16 @@ export function createChannelTouchView(view) {
     fitStrip(box);
     watchBox(box);
     chatApiCards(view.app, cardEl, rows.filter((r) => r.ops && r.ops.api && r.proposalId).map((r) => r.proposalId));
+    if (rows.some(apiFiled)) { apiBoxes.add(box); if (!apiOff) apiOff = onApiCards(view.app, rewordApi); } else apiBoxes.delete(box);
     // lane chat-proposal-card: the proposals THIS call filed — the card after the rows, a chip on its row; a decision
     // moves the run fold's count («· 1 条提案待批准»), so the ChatView re-words its heads
     chatProposalCards(view.app, cardEl, T.filedProposals(touches), { onCount: () => { if (typeof view._updateRuns === 'function') view._updateRuns(); } });
+  }
+  /** B-d3d3: a decision writes no touch (no rebind comes) — the boxes holding a raw API row that filed a proposal re-word
+   *  those rows whenever the shared API records change (approve, reject, a run's end, the sweep). */
+  function rewordApi() {
+    if (st.disposed) { if (apiOff) { apiOff(); apiOff = null; } return; }   // a window closed without dispose lets go here
+    for (const box of rewordApiRows(apiBoxes, apiFateLookup())) fitStrip(box);
   }
   /** The box's ONE "+N more" / "Show less" control (created on demand, keyed by its class; its click reads the box). */
   function moreOf(box, create) {
@@ -412,6 +442,8 @@ export function createChannelTouchView(view) {
   // changes width — a resize, its run closing / opening, the box dropping under its head. Fitted in the next frame
   // (never inside the observer's own delivery); a box no longer in the document is let go at the next rebind.
   const watched = new Set(), fitDue = new Set();
+  const apiBoxes = new Set();   // B-d3d3: the boxes rewordApi patches
+  let apiOff = null;
   let fitFrame = 0;
   const ro = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => {
     if (st.disposed) return;
@@ -467,6 +499,8 @@ export function createChannelTouchView(view) {
     if (ro) ro.disconnect();
     if (fitFrame) cancelAnimationFrame(fitFrame);
     watched.clear(); fitDue.clear();
+    if (apiOff) { apiOff(); apiOff = null; }
+    apiBoxes.clear();
   }
   return { observe, onTouch, onAttached, noteTurn, dispose, rebind, state: () => ({ touches: st.touches.length, loaded: st.loaded, turnAt: turnAt(), chip: st.chipKey }) };
 }

@@ -3097,6 +3097,126 @@ async function chatReadLegs(ENGmod, name) {
           const red = await redOf(await feedBundle('dedupe', { 'channel-api-card-view.js': cardSrc.replace(DEDUPE, '  if (inflight) return inflight;\n') }));
           return [red.some((n) => /^N2 the raw-API rows:/.test(n)), red];
         });
+        // ── B-d3d3 (lane outbox-chip-door, through the real feed): THE CHAT'S API ROW SAYS ITS PROPOSAL'S FATE — a decision writes no
+        //    touch, so the row is re-worded from the shared API records: the REAL channel-api-card-view read (its last GOOD read —
+        //    the adversarial read r1: a failed read kept, an id filed after the read on its way), the REAL re-word pass of
+        //    channel-touch-view and the REAL Channels chip menu painter over this section's DOM; each variant a FRESH bundle ──
+        const fateBundle = async (name, swaps = {}, { view = true } = {}) => {
+          const out = path.join(dir, `osc-fate-${name}.mjs`);
+          const lib = (f) => JSON.stringify(path.join(REPO, 'src/lib', f));
+          const swap = { name: 'swap', setup(b) {
+            b.onLoad({ filter: /\/src\/lib\/i18n-(zh|ja)\.js$/ }, () => ({ contents: 'export default {};', loader: 'js' }));   // English words: the dictionaries stay out
+            for (const [f, src] of Object.entries(swaps)) b.onLoad({ filter: new RegExp(`/src/${f.replace('.', '\\.')}$`) }, () => ({ contents: src, loader: 'js', resolveDir: path.dirname(path.join(REPO, 'src', f)) }));
+          } };
+          const contents = `export { apiFateLookup, refreshApiCards } from ${lib('channel-api-card-view.js')};\nexport { rowWords } from ${JSON.stringify(path.join(REPO, 'src/channel-touch.js'))};\n`
+            + (view ? `export { rewordApiRows } from ${lib('channel-touch-view.js')};\nexport { ChatStatusBar } from ${lib('chat-status-bar.js')};\n` : '');
+          await esbuild.build({ stdin: { contents, resolveDir: path.join(REPO, 'src/lib'), sourcefile: `osc-fate-${name}.js`, loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: out, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion, swap] });
+          return import(out);
+        };
+        const ROW = { key: 'cred-1/~api/k1', ops: { api: 1 }, proposalId: 'pa', title: 'POST /v1/items' };
+        const tW = (k, p = {}) => String(k).replace(/\{(\w+)\}/g, (m, x) => (x in p ? String(p[x]) : m));
+        const WAIT = 'API call POST /v1/items · awaiting you', REJ = 'API call POST /v1/items · Rejected', BARE = 'API call POST /v1/items';
+        let apiCalls = 0;
+        const answer = (cards) => { const keep = globalThis.fetch; globalThis.fetch = (url) => { if (/\/api\/channels\/api$/.test(String(url))) apiCalls++; return Promise.resolve(reply(/\/api\/channels\/api$/.test(String(url)) ? cards : { proposals: [], at: 0 })); }; return () => { globalThis.fetch = keep; }; };
+        const readWith = async (F, cards) => { const back = answer(cards); try { await F.refreshApiCards({ changed: true }); await tick(); } finally { back(); } };
+        const said = (F, row = ROW) => F.rowWords(row, tW, { apiFateOf: F.apiFateLookup() });
+        // THE RECORDS (in order — one bundle's module state): no read · a decision · a failed read · an id on its way · one lookup
+        const recLegs = (F) => [
+          ['D3 no read landed (none yet, or one answered with an error): no lookup — the row says what its call filed', async () => {
+            const before = F.apiFateLookup();
+            await readWith(F, { error: 'down' });
+            return [before === null && F.apiFateLookup() === null && said(F) === WAIT, { before, after: F.apiFateLookup() }];
+          }],
+          ['D3 the person rejects: the next good read words the row «· Rejected»', async () => {
+            await readWith(F, { cards: [{ id: 'pa', status: 'pending', at: Date.now() }] });
+            const w0 = said(F);
+            await readWith(F, { cards: [{ id: 'pa', status: 'rejected', decidedBy: 'user', at: Date.now() }] });
+            return [w0 === WAIT && said(F) === REJ, { w0, w1: said(F) }];
+          }],
+          ['D3 a FAILED read after a good one keeps the fate (r1 finding 6: it emptied the records — the waiting row read like a call that ran unasked)', async () => {
+            await readWith(F, null);
+            const a = said(F);
+            await readWith(F, { error: 'down' });
+            return [a === REJ && said(F) === REJ, { a, b: said(F) }];
+          }],
+          ['D3 an id the good read does not hold, first asked AFTER that read began, is on its way: «awaiting you», ONE more read asked; once a read begun after it lands without it ⇒ the call alone (r1 finding 7)', async () => {
+            const fresh = { ...ROW, key: 'cred-1/~api/k9', proposalId: 'pz' };
+            const back = answer({ cards: [{ id: 'pa', status: 'rejected', decidedBy: 'user', at: Date.now() }] });
+            let w0, n0, n1;
+            try { n0 = apiCalls; w0 = said(F, fresh); await tick(); await tick(); n1 = apiCalls; } finally { back(); }
+            const w1 = said(F, fresh);
+            return [w0 === WAIT && n1 === n0 + 1 && w1 === BARE, { w0, asked: n1 - n0, w1 }];
+          }],
+          ['D3 an id a good read held that a later good read no longer holds is GONE: the call alone at once, no read asked', async () => {
+            await readWith(F, { cards: [] });
+            const n0 = apiCalls, w = said(F); await tick();
+            return [w === BARE && apiCalls === n0, { w, asked: apiCalls - n0 }];
+          }],
+          ['D3 ONE lookup serves every row until the next good read (r1 finding 8)', async () => {
+            const a = F.apiFateLookup(), b = F.apiFateLookup();
+            await readWith(F, { cards: [] });
+            return [!!a && a === b && F.apiFateLookup() !== a, null];
+          }],
+        ];
+        // THE VIEWS over the REAL DOM painters: the tool card's box (rewordApiRows) and the Channels chip's menu
+        const rowEl = (row, text) => { const r = new N('button'); r.className = 'chat-channel-touch'; r._row = row; const w = new N('span'); w.className = 'cct-words chat-status-dim'; w.textContent = text; r.append(w); return r; };
+        const boxOf = (...rows) => { const b = new N('div'); b.className = 'chat-channel-touches'; b.isConnected = true; b.append(...rows); return b; };
+        const words = (b) => b.children.map((r) => r.querySelector('.cct-words').textContent);
+        const menuOf = (row, text) => { const m = new N('div'); m.isConnected = true; const it = new N('div'); it.className = 'chat-status-dropdown-item chat-status-channel-row'; it._row = row; const sub = new N('div'); const w = new N('div'); w.className = 'chat-status-dim chat-status-channel-words'; w.textContent = text; const st = new N('div'); st.className = 'chat-status-channel-states'; st.dataset.said = '[]'; sub.append(w, st); it.append(sub); m.append(it); return m; };
+        const viewLegs = (F) => [
+          ['D3 the tool card\'s box: pending → rejected re-words the row in place, once; the read row beside it untouched; a held id gone ⇒ the call alone; a box gone from the page leaves the set', async () => {
+            const box = boxOf(rowEl(ROW, WAIT), rowEl({ key: 'gmail/c1', ops: { read: 2 }, title: 'x' }, 'read 2 messages'));
+            const gone = boxOf(rowEl(ROW, WAIT)); gone.isConnected = false;
+            const boxes = new Set([box, gone]);
+            await readWith(F, { cards: [{ id: 'pa', status: 'pending', at: Date.now() }] });
+            const m0 = F.rewordApiRows(boxes, F.apiFateLookup()).length, w0 = words(box)[0];
+            await readWith(F, { cards: [{ id: 'pa', status: 'rejected', decidedBy: 'user', at: Date.now() }] });
+            const m1 = F.rewordApiRows(boxes, F.apiFateLookup()).length, w1 = words(box), m2 = F.rewordApiRows(boxes, F.apiFateLookup()).length;
+            await readWith(F, { cards: [] });
+            F.rewordApiRows(boxes, F.apiFateLookup());
+            const w3 = words(box)[0];
+            return [m0 === 0 && w0 === WAIT && m1 === 1 && w1[0] === REJ && w1[1] === 'read 2 messages' && m2 === 0 && w3 === BARE && boxes.size === 1 && boxes.has(box), { m0, w0, m1, w1, m2, w3, size: boxes.size }];
+          }],
+          ['D3 the Channels chip\'s open menu: its API row is re-worded in place by the painter every feed change calls (_paintChannelRowStates)', async () => {
+            await readWith(F, { cards: [{ id: 'pa', status: 'rejected', decidedBy: 'user', at: Date.now() }] });
+            const menu = menuOf(ROW, WAIT);
+            F.ChatStatusBar.prototype._paintChannelRowStates.call({ _channelMenu: menu, _channelRowStateWords: () => [] });
+            const got = menu.querySelector('.chat-status-channel-words').textContent;
+            return [got === REJ, got];
+          }],
+        ];
+        let FATEMOD = null, fateModErr = null;
+        try { FATEMOD = await fateBundle('real'); } catch (e) { fateModErr = e; }
+        await legOSC('D3 the fate bundle builds (the API records, the row words, the re-word pass, the chip\'s menu painter)', () => [!!FATEMOD && typeof FATEMOD.rewordApiRows === 'function' && typeof FATEMOD.apiFateLookup === 'function' && typeof FATEMOD.ChatStatusBar === 'function', fateModErr && String(fateModErr.message || fateModErr).slice(0, 300)]);
+        for (const [n, fn] of [...recLegs(FATEMOD), ...viewLegs(FATEMOD)]) await legOSC(n, fn);
+        const redOfLegs = async (legs) => { const red = []; for (const [n, fn] of legs) { let r; try { r = await fn(); } catch { r = [false]; } if (!r[0]) red.push(n); } return red; };
+        // (the words' own control — the fate unread ⇒ «awaiting you» — is test-channel-touch ⑦'s PURE copy: no bundle spent here)
+        const recMutant = (name, from, to, legRe) => legOSC(`MUTANT B-d3d3 ${name} (channel-api-card-view.js) ⇒ RED by name on its leg`, async () => {
+          if (cardSrc.split(from).length !== 2) return [false, `the line is not spelled once: ${from.slice(0, 60)}`];
+          const red = await redOfLegs(recLegs(await fateBundle(name.replace(/\W+/g, '-'), { 'lib/channel-api-card-view.js': cardSrc.replace(from, to) }, { view: false })));
+          return [red.some((n) => legRe.test(n)), red];
+        });
+        await recMutant('the good read never kept', ' if (r && Array.isArray(r.cards)) { good = r.cards; goodSeq = seq; lookup = null; }', '', /^D3 the person rejects/);
+        await recMutant('a failed read taken as the records', 'if (r && Array.isArray(r.cards)) { good = r.cards;', '{ good = (r && r.cards) || [];', /^D3 a FAILED read/);
+        await recMutant('an id on its way read as gone', "      return firstSeen.get(k) >= at ? { fate: 'pending', status: null } : null;", '      return null;', /^D3 an id the good read does not hold/);
+        await legOSC('MUTANT B-d3d3 the chip\'s menu painter never re-wording an API row (chat-status-bar.js) ⇒ RED by name on the chip leg', async () => {
+          const sbSrc = srcOf('chat-status-bar.js');
+          const FROM = "      if (said && r && r.ops && r.ops.api && r.proposalId) { const text = channelRowWords(r, t, { apiFateOf }); if (said.textContent !== text) said.textContent = text; }\n";
+          if (sbSrc.split(FROM).length !== 2) return [false, 'the re-word line is not spelled once'];
+          const red = await redOfLegs(viewLegs(await fateBundle('chip-blind', { 'lib/chat-status-bar.js': sbSrc.replace(FROM, '') })));
+          return [red.some((n) => /^D3 the Channels chip/.test(n)), red];
+        });
+        await legOSC('D3 wiring: renderBox words every row through the records lookup; a box with a filed API row follows the records (onApiCards → rewordApi → rewordApiRows); dispose lets go; the Channels chip\'s menu words and re-words its API rows the same way', () => {
+          const tv = srcOf('channel-touch-view.js'), sb = srcOf('chat-status-bar.js');
+          const pins = {
+            words: tv.includes("set('.cct-words', T.rowWords(r, t, { apiFateOf }));") && tv.includes('const apiFateOf = apiFateLookup();   // B-d3d3'),
+            follow: tv.includes('if (rows.some(apiFiled)) { apiBoxes.add(box); if (!apiOff) apiOff = onApiCards(view.app, rewordApi); } else apiBoxes.delete(box);') && tv.includes('for (const box of rewordApiRows(apiBoxes, apiFateLookup())) fitStrip(box);'),
+            dispose: /function dispose\(\) \{[\s\S]*?if \(apiOff\) \{ apiOff\(\); apiOff = null; \}\n    apiBoxes\.clear\(\);\n  \}/.test(tv),
+            chipOpen: sb.includes('const apiFateOf = apiFateLookup();   // B-d3d3: one lookup for the menu') && sb.includes('words.textContent = channelRowWords(r, t, { apiFateOf });'),
+            chipFollow: /_paintChannelRowStates\(\) \{[\s\S]*?const apiFateOf = apiFateLookup\(\);[\s\S]*?channelRowWords\(r, t, \{ apiFateOf \}\)/.test(sb),
+          };
+          return [Object.values(pins).every(Boolean), pins];
+        });
         // ── N3 (acceptance r1): A FINGER'S TARGET — the rule (the heavy suite's ⑪ measures the render at 480 px) ──
         await legOSC('N3 the touch rule: under (max-width: 480px), (pointer: coarse) the filter\'s × and «replaced» are min 36 × 36 px, like their siblings', () => {
           const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf-8');

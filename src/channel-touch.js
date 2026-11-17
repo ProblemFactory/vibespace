@@ -599,8 +599,9 @@ function tailVerdict(rows, { max = FOLD_SHOWN } = {}) {
   const memos = [...new Set(same.map((v) => v.memo).filter(Boolean))];
   return { open: 'search-all', query: q, adapterIds, ...(memos.length === 1 && adapterIds.length === 1 ? { memo: memos[0], searchedAt: Math.max(0, ...same.map((v) => num(v.searchedAt))) } : {}) };
 }
-/** A row's words ("drafted a reply · read 12 messages"), in OPS order, through the injected `t`. */
-function rowWords(row, t) {
+/** A row's words ("drafted a reply · read 12 messages"), in OPS order, through the injected `t`. `apiFateOf` (B-d3d3) = the
+ *  client's raw-API records by id (apiCallWords). */
+function rowWords(row, t, { apiFateOf = null } = {}) {
   const o = (row && row.ops) || {};
   const out = [];
   if (o.reply) out.push(o.reply === 1 ? replyWords(row && row.placement, t) : t('drafted {n} replies', { n: o.reply }));
@@ -612,9 +613,23 @@ function rowWords(row, t) {
   if (o.refresh) out.push(t('refreshed'));
   if (o.request) out.push(t('asked for access'));
   if (o.status) out.push(t('checked its draft'));
-  if (o.api) out.push(row.proposalId ? t('API call {call} · awaiting you', { call: row.title }) : row.trust === 'write-all' ? t('API call {call} · Full trust · sensitive', { call: row.title }) : t('API call {call}', { call: row.title }));
+  if (o.api) out.push(apiCallWords(row, t, apiFateOf));
   if (o.connect) out.push(t('Connect {type} — sign in so the assistant can use it', { type: row.account || row.kind || row.adapterId }));   // lane pod-oauth-callback
   return out.join(' · ');
+}
+
+/** B-d3d3 (lane outbox-chip-door, through the real feed: the row said «awaiting you» after the person approved or rejected —
+ *  the touch is written once, at the call; a decision writes none): a raw API row that FILED a proposal says the proposal's
+ *  FATE in the Outbox row's own short status. `apiFateOf(id)` = `{fate, status: {key, params}}` of a record the client holds
+ *  (src/channel-api-card.js fateOf + statusOf), null for an id it no longer holds (the call alone — nothing guessed); no
+ *  `apiFateOf` (no records read yet) ⇒ what the call filed, «awaiting you». */
+function apiCallWords(row, t, apiFateOf) {
+  const call = row.title;
+  if (!row.proposalId) return row.trust === 'write-all' ? t('API call {call} · Full trust · sensitive', { call }) : t('API call {call}', { call });
+  const f = typeof apiFateOf === 'function' ? apiFateOf(String(row.proposalId)) : undefined;
+  if (f === undefined || (f && f.fate === 'pending')) return t('API call {call} · awaiting you', { call });
+  if (!f || !f.status || !f.status.key) return t('API call {call}', { call });
+  return t('API call {call} · {status}', { call, status: t(f.status.key, f.status.params || {}) });
 }
 
 /** ONE drafted reply, with where it lands (2026-09-28): a plain message, a quote, a reply in a thread (+ also in the

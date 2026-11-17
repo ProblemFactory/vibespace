@@ -140,14 +140,47 @@ export function placeApiCards(box, recs, opts = {}) {
 
 // ── THE SHARED RECORDS (one fetch, every mounted surface patched) ──
 let records = [], inflight = null, wired = false, again = false;
+// B-d3d3: THE LAST GOOD READ (an answer with a `cards` array) — the chat's API rows judge a proposal's fate by it, and a
+// failed read keeps it (the adversarial read r1: a failed read after a good one emptied the records, and every waiting
+// row read like a call that ran unasked); `started` counts the reads begun, `goodSeq` = the one the good read was
+let good = null, goodSeq = 0, started = 0, lookup = null, kicked = false;
+const firstSeen = new Map();   // an id a row named that the good read did not hold → `started` when it was first asked
+const known = new Set();       // ids a good read held — one no later good read holds is GONE (pruned), never on the way
+const SEEN_MAX = 500;
 const listeners = new Set();
 /** lane outbox-session-chip: a `channel-api-updated` that lands while a read is in flight (`changed`) reads ONCE more when it
  *  ends — that read may have been answered before the change (the chat's Outbox chip and every card stayed on it until the
  *  next change); a reader joining a read in flight shares it. */
 export function refreshApiCards({ changed = false } = {}) {
   if (inflight) { if (changed) again = true; return inflight; }
-  inflight = fetchJson('/api/channels/api').then((r) => { records = (r && r.cards) || []; for (const fn of listeners) { try { fn(records); } catch {} } }).catch(() => {}).finally(() => { inflight = null; if (again) { again = false; refreshApiCards(); } });
+  const seq = ++started;
+  inflight = fetchJson('/api/channels/api').then((r) => { records = (r && r.cards) || []; if (r && Array.isArray(r.cards)) { good = r.cards; goodSeq = seq; lookup = null; } for (const fn of listeners) { try { fn(records); } catch {} } }).catch(() => {}).finally(() => { inflight = null; if (again) { again = false; refreshApiCards(); } });
   return inflight;
+}
+/** B-d3d3: the good read's records by id → `{fate, status}` (the Outbox row's short status — C.fateOf / C.statusOf); the
+ *  lookup itself is null until a good read has landed (the chat's API row then says what its call filed), and ONE lookup
+ *  serves every row until the next good read. An id the good read did not hold: filed after that read began (its record is
+ *  on the way — r1 finding 7: the row read like a call that ran unasked until it came) ⇒ `{fate: 'pending'}`, and ONE more
+ *  read is asked; once a read begun after the id was first asked lands without it — or an id a good read held is no longer
+ *  held — ⇒ null (gone: the call alone). */
+export function apiFateLookup() {
+  if (!good) return null;
+  if (!lookup) {
+    const byId = new Map(good.filter(Boolean).map((p) => [String(p.id), p])), at = goodSeq;
+    for (const k of byId.keys()) { if (known.size >= SEEN_MAX) known.clear(); known.add(k); }
+    lookup = (id) => {
+      const k = String(id), p = byId.get(k);
+      if (p) { firstSeen.delete(k); return { fate: C.fateOf(p), status: C.statusOf(p) }; }
+      if (known.has(k)) return null;
+      if (!firstSeen.has(k)) {
+        if (firstSeen.size >= SEEN_MAX) firstSeen.clear();
+        firstSeen.set(k, started);
+        if (!kicked) { kicked = true; queueMicrotask(() => { kicked = false; refreshApiCards({ changed: true }); }); }
+      }
+      return firstSeen.get(k) >= at ? { fate: 'pending', status: null } : null;
+    };
+  }
+  return lookup;
 }
 /** Follow the records (fn(records) now and on every change); returns the unsubscribe. */
 export function onApiCards(app, fn) {

@@ -8140,6 +8140,7 @@ export default {
   "Open API access and its log": "API アクセスとログを開く",
   "API call {call}": "API 呼び出し {call}",
   "API call {call} · awaiting you": "API 呼び出し {call} · 承認待ち",
+  "API call {call} · {status}": "API 呼び出し {call} · {status}",
   "Starting — rebuilding its cache index ({files} files), {elapsed} so far; it mounts by itself when the scan ends (waits up to {max} min)": "起動中 — キャッシュ索引を再構築しています（{files} ファイル）、経過 {elapsed}。スキャンが終わると自動でマウントされます（最大 {max} 分待ちます）",
   "Cache kept on a network filesystem: {n} items still uploading — it moves to local disk at the next reconnect once they are done": "キャッシュはネットワークファイルシステム上のまま：{n} 件がアップロード中——終わったら次の再接続でローカルディスクへ移ります",
   "Cache kept where it is: its state could not be read ({code}) — not moved until it reads clean": "キャッシュはそのまま：状態を読めませんでした（{code}）——クリーンと読めるまで移しません",

@@ -2,6 +2,7 @@ import { pillMode, billingPillForms, billingPillHtml, phoneBarFold } from './tit
 import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress, followContent } from './utils.js';
 import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
 import { outboxChipFace } from './outbox-feed.js'; // lane outbox-session-chip: the Outbox chip's words (the PURE verdict's numbers)
+import { apiFateLookup } from './channel-api-card-view.js'; // B-d3d3: a raw API row's words say its proposal's fate
 import { UI_ICONS } from './icons.js';
 import { panelPlace } from './menu-place.js'; // PURE (lane ui-controls-and-bugs): a panel keeps its natural width and slides — the width sweep's rule 4
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
@@ -267,7 +268,10 @@ export class ChatStatusBar {
   _paintChannelRowStates() {
     const menu = this._channelMenu;
     if (!menu || !menu.isConnected) { this._channelMenu = null; return; }
+    const apiFateOf = apiFateLookup();   // B-d3d3: an API row's fate moves with the records (a decision writes no touch)
     for (const it of menu.querySelectorAll('.chat-status-channel-row')) {
+      const r = it._row, said = it.querySelector('.chat-status-channel-words');
+      if (said && r && r.ops && r.ops.api && r.proposalId) { const text = channelRowWords(r, t, { apiFateOf }); if (said.textContent !== text) said.textContent = text; }
       const box = it.querySelector('.chat-status-channel-states');
       const words = (this._channelRowStateWords && this._channelRowStateWords(it._row)) || [];
       const key = JSON.stringify(words);
@@ -1741,6 +1745,7 @@ export class ChatStatusBar {
       head.className = 'chat-status-dropdown-note';
       head.textContent = t('This turn read or drafted:');
       dropdown.appendChild(head);
+      const apiFateOf = apiFateLookup();   // B-d3d3: one lookup for the menu
       for (const r of rows) {
         const it = document.createElement('div');
         it.className = 'chat-status-dropdown-item chat-status-channel-row';
@@ -1750,7 +1755,7 @@ export class ChatStatusBar {
         name.textContent = channelRowName(r);
         const words = document.createElement('div');
         words.className = 'chat-status-dim chat-status-channel-words';
-        words.textContent = channelRowWords(r, t);
+        words.textContent = channelRowWords(r, t, { apiFateOf });
         const states = document.createElement('div');
         states.className = 'chat-status-channel-states';
         const sub = document.createElement('div');

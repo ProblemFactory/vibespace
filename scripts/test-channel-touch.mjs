@@ -498,6 +498,33 @@ await section('⑦', async () => {
   ok(src.split(B8).length === 2, 'CONTROL setup: the merge rule names the proposal id once (B-8aad)');
   const b8m = reacts(MUT.load('src/channel-touch.js', src.replace(B8, '&& t.at - last.at < mergeMs) {'), 'merge-proposal'));
   ok(JSON.stringify(b8m.merged) === '[false,true,true]' && JSON.stringify(b8m.filed) === '["p-1"]', 'CONTROL the B-8aad clause removed: the three reactions fold into the first — ONE card (filedProposals p-1 alone), the row\'s repro', b8m);
+  // B-d3d3 (lane outbox-chip-door, through the real feed): a raw API row that filed a proposal said «awaiting you» after the
+  // person approved or rejected it — the touch is written once, at the call. Its words now follow the proposal's FATE in the
+  // Outbox row's short status, read through the REAL card model (src/channel-api-card.js fateOf + statusOf)
+  const CA = require(path.join(REPO, 'src/channel-api-card.js'));
+  const apiRow = T.foldTouches([touch({ id: 'k1', op: 'api', adapterId: 'cred-1', convId: null, title: 'POST /v1/items', proposalId: 'pa', at: 1000 })])[0];
+  const fates = (recs) => (id) => { const p = recs.find((x) => x.id === id); return p ? { fate: CA.fateOf(p), status: CA.statusOf(p, { now: 2000 }) } : null; };
+  const rec = (status, more = {}) => ({ id: 'pa', status, at: 1000, ...more });
+  const D3 = [
+    [null, 'API call POST /v1/items · awaiting you', 'no records read yet: what the call filed'],
+    [fates([rec('pending')]), 'API call POST /v1/items · awaiting you', 'pending'],
+    [fates([rec('running')]), 'API call POST /v1/items · Running…', 'running'],
+    [fates([rec('ran', { result: { status: 200, bytes: 12 } })]), 'API call POST /v1/items · Ran', 'ran'],
+    [fates([rec('rejected', { decidedBy: 'user' })]), 'API call POST /v1/items · Rejected', 'rejected by the person'],
+    [fates([rec('rejected', { decidedBy: CA.SWEEP_BY.expired })]), 'API call POST /v1/items · Expired', 'expired (the sweep)'],
+    [fates([rec('rejected', { decidedBy: CA.SWEEP_BY.withdrawn, reason: 'x' })]), 'API call POST /v1/items · Withdrawn', 'withdrawn'],
+    [fates([rec('failed', { result: { error: 'boom' } })]), 'API call POST /v1/items · Not run', 'failed'],
+    [fates([]), 'API call POST /v1/items', 'an id the records no longer hold: the call alone, nothing guessed'],
+  ];
+  const d3 = D3.map(([f, want, why]) => [T.rowWords(apiRow, tEn, { apiFateOf: f }), want, why]);
+  ok(d3.every(([got, want]) => got === want), 'B-d3d3 TABLE: an API row that filed a proposal says its fate (pending / running / ran / rejected / expired / withdrawn / failed / gone / nothing read)', d3.filter(([g, w]) => g !== w));
+  const plain = T.foldTouches([touch({ id: 'k2', op: 'api', adapterId: 'cred-1', convId: null, title: 'GET /v1/items', at: 1000 }), touch({ id: 'k3', op: 'api', adapterId: 'cred-1', convId: null, title: 'DELETE /v1/x', trust: 'write-all', at: 1100 })]);
+  ok(plain.map((r) => T.rowWords(r, tEn, { apiFateOf: fates([rec('rejected')]) })).join(' | ') === 'API call DELETE /v1/x · Full trust · sensitive | API call GET /v1/items', 'B-d3d3: an API row that filed nothing keeps its words (the fate lookup is never asked; the newest row first)', plain.map((r) => T.rowWords(r, tEn)));
+  const d3src = src;
+  const D3FROM = "  const f = typeof apiFateOf === 'function' ? apiFateOf(String(row.proposalId)) : undefined;";
+  ok(d3src.split(D3FROM).length === 2, 'CONTROL setup: the API row reads the fate once (B-d3d3)');
+  const blind = MUT.load('src/channel-touch.js', d3src.replace(D3FROM, '  const f = undefined;'), 'api-fate-blind');
+  ok(blind.rowWords(apiRow, tEn, { apiFateOf: fates([rec('rejected', { decidedBy: 'user' })]) }) === 'API call POST /v1/items · awaiting you', 'CONTROL the fate unread: a rejected call\'s row says «awaiting you» again — the row\'s report (the table above goes red)');
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1, label: '⑦ ' })) ok(c.pass, c.name, c.detail);
   // the wiring: the card row draws them through the Outbox's ONE card module; a card with no touches clears them; a reattach re-reads
   const tv = read('src/lib/channel-touch-view.js');
