@@ -246,7 +246,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     return { tid, unknownSession: false, wrapped: false, innerMethod: null, innerParams: null, innerParamTid: null };
   }
   function wire(g, p, ws, up) {
-    const conn = { ws, up, kind: p.kind, targetId: p.targetId, pending: new Map(), openedAt: now(), browser: null, tracingActive: false, traceTainted: false, taintedStreams: null };
+    const conn = { ws, up, kind: p.kind, targetId: p.targetId, pending: new Map(), openedAt: now(), browser: null, tracingActive: false, traceTainted: false, taintedStreams: null, withheld: new Map(), send: null };   // B-70af: `withheld` = the announcements this connection was not shown, `send` its scrubbed writer (an out-of-band admission replays there)
     askVersion(g, conn);   // (lane chrome-157 r2: the browser of THIS connection — a restart / relaunch closes it, the reconnect reads the new one)
     g.conns.add(conn);
     g.lastUsedAt = now();
@@ -437,6 +437,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         : (loginFence && typeof loginFence.scrubText === 'function' ? loginFence.scrubText(g.profileId, str) : str);
       ws.send(out);
     };
+    conn.send = sendClient;
     up.on('message', (data) => {
       let msg = null;
       try { msg = JSON.parse(String(data)); } catch { msg = null; }
@@ -521,6 +522,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       }
       if (msg.id != null) return; // a reply to nothing we forwarded
       let ev = M.filterEvent(msg, g.scope);
+      M.withhold(conn.withheld, msg, { shown: !!ev });   // B-70af: what this connection was not shown is kept (replayed if the keeper admits it); shown or destroyed ends it
       if (!ev) { g.dropped = (g.dropped || 0) + 1; return; }
       if (loginFence) {
         const evSid = ev.sessionId == null ? null : String(ev.sessionId);
@@ -599,7 +601,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       grants.set(g.token, g); byKey.set(key, g.token);
       log.log?.(`[cdp-mediator] grant minted for ${g.browserKey} on ${g.profileId}`);
     }
-    for (const t of targetIds || []) M.admitTarget(g.scope, t);
+    for (const t of targetIds || []) admitInto(g, t);
     g.mode = mode === M.SCOPE_MODE ? M.SCOPE_MODE : M.MEDIATED_MODE; // lane browser-shared-profile-freeze: the road the keeper judged (leaseRoadVerdict)
     if (typeof paused === 'function') g.paused = paused;
     if (upstream !== undefined && upstream !== g.upstream) repointGrant(g, upstream);
@@ -903,7 +905,15 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     return { revoked: true, closing };
   }
   function revokeWhere(pred, opts = {}) { let n = 0; for (const g of [...grants.values()]) if (pred(view(g))) { revoke({ profileId: g.profileId, browserKey: g.browserKey, ...opts }); n++; } return n; }
-  function admitTarget(profileId, browserKey, targetId) { const t = byKey.get(M.grantKey(profileId, browserKey)); const g = t ? grants.get(t) : null; if (!g || !targetId) return false; M.admitTarget(g.scope, targetId); return true; }
+  function admitTarget(profileId, browserKey, targetId) { const t = byKey.get(M.grantKey(profileId, browserKey)); const g = t ? grants.get(t) : null; if (!g || !targetId) return false; admitInto(g, targetId); return true; }
+  /** B-70af: an admission OUTSIDE a connection's own reply (the keeper's tab, a grant's targetIds) — a target it brings INTO the
+   *  scope is announced to each live connection that dropped it, once (its driver learns a tab only from it: «No tab with target
+   *  id» before); one already in scope is never announced again (the entry only ends). */
+  function admitInto(g, targetId) {
+    const was = M.inScope(g.scope, targetId);
+    M.admitTarget(g.scope, targetId);
+    for (const c of g.conns) { const ev = M.replayOnAdmit(c.withheld, targetId, { wasInScope: was }); if (ev && c.send) { try { c.send(JSON.stringify(ev)); } catch { /* gone */ } } }
+  }
   function grantOf(profileId, browserKey) { const t = byKey.get(M.grantKey(profileId, browserKey)); return t ? grants.get(t) : null; }
   function urlFor(profileId, browserKey) { const g = grantOf(profileId, browserKey); return g && port ? M.mediatedBrowserUrl({ port, token: g.token }) : null; }
   function list() { return [...grants.values()].map(view); }

@@ -153,6 +153,30 @@ function admissible(scope, info) {
   return false;
 }
 function admitTarget(scope, targetId) { if (scope && targetId) scope.targets.add(String(targetId)); return scope; }
+/** B-70af (three fleet reports, 2026-11-01 … 11-07, one the owner's instance): a tab the KEEPER makes on its own socket (a lease's
+ *  new window after its last tab closed — no opener in the scope) is admitted only AFTER Chrome announced it, so every connection
+ *  of the lease had dropped that `Target.targetCreated` (filterEvent) and its driver never learned the tab — each `tab <id>` bind
+ *  answered «No tab with target id» for good (measured with the real driver 0.38.2 over this mediator, Chrome 154: 0 of 3 binds).
+ *  A CONNECTION keeps the announcements it was NOT shown (`withheld`, bounded like the scope's `recent`); an entry ends when the
+ *  connection is shown that target by any road (`shown` — a later announcement, a child's attach) or the target is destroyed
+ *  (shown or not). An admission that brings a target INTO the scope from outside the connection's own reply replays the entry
+ *  there once; a target ALREADY in scope (the lease's own createTarget reply replayed it; an attach by id; a grant's targetIds
+ *  asked again at every CLI call) only drops the entry — so a connection hears of a tab once, never twice, never a gone one. */
+function withhold(withheld, ev, { shown = false } = {}) {
+  if (!withheld || !ev || typeof ev.method !== 'string') return;
+  const p = ev.params && typeof ev.params === 'object' ? ev.params : {};
+  const id = p.targetInfo && p.targetInfo.targetId ? String(p.targetInfo.targetId) : null;
+  if (ev.method === 'Target.targetCreated' || ev.method === 'Target.targetInfoChanged') { if (shown) { if (id) withheld.delete(id); } else remember({ recent: withheld }, p.targetInfo); }
+  else if (ev.method === 'Target.attachedToTarget') { if (shown && id) withheld.delete(id); }
+  else if (ev.method === 'Target.targetDestroyed' && p.targetId) withheld.delete(String(p.targetId));
+}
+function replayOnAdmit(withheld, targetId, { wasInScope = false } = {}) {
+  const k = targetId ? String(targetId) : '';
+  const seen = withheld && k ? withheld.get(k) : null;
+  if (!seen) return null;
+  withheld.delete(k);
+  return wasInScope ? null : { method: 'Target.targetCreated', params: { targetInfo: seen } };
+}
 
 // ── the method tables — DERIVED from the census (verify S2 r4, 2026-09-26) ────
 // One source of truth: src/cdp-census.js classes EVERY method of the installed Chrome's protocol. The sets below are
@@ -1008,7 +1032,7 @@ function mediationSentence({ profileLabel = '', others = 0 } = {}) {
 
 module.exports = {
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
-  newScope, inScope, admissible, admitTarget, remember, RECENT_MAX,
+  newScope, inScope, admissible, admitTarget, remember, RECENT_MAX, withhold, replayOnAdmit, // B-70af: the out-of-band admission's replay
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
   CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, windowStep, windowToldText, NO_WINDOW_TOLD, OTHER_WINDOW_TOLD, PLACE_UNKNOWN_TOLD, OWN_CONTEXT_TOLD, isLeaseFrame, WINDOW_BOUND_MS, WINDOW_BUSY_TEXT, WINDOW_CLOSING_TEXT, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
