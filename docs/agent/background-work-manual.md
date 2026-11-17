@@ -302,8 +302,10 @@ it, a limit on the user slice does (`show` names which).
 
 ## 8. Permissions model (why you can't see some jobs)
 
-view/control scopes: `session` (owner conversation only) / `group` (sessions
-sharing a Task Group with the creator — the default view) / `all`. An id you
+view/control scopes: `session` (owner conversation only) / `group` (sessions in
+a Task Group the creator was in WHEN IT CREATED the job — the default view; never
+refreshed, so a job created outside any group is its owner's and the user's alone) /
+`all`. An id you
 can't view behaves as NONEXISTENT (uniform not-found — don't retry, it's not
 an error in your call). Owner = conversation lineage (survives resume).
 Mutations (access/notify/rm of others' jobs) need ownership; `announce` needs

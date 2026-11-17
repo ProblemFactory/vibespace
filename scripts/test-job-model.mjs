@@ -34,6 +34,35 @@ ok(!M.canEdit(jobs[1], groupmate) && M.canControl(mk(9, { access: { control: 'gr
 ok(M.canEdit(jobs[0], { isUser: true }), 'the user always passes');
 ok(M.isOwner(mk(9), { conversationId: 'zzz', sessionId: 'sess-A', sessionCreatedAt: 1, groups: new Set() }), 'sessionId+createdAt tuple is the secondary owner path');
 ok(!M.isOwner(mk(9), { conversationId: 'zzz', sessionId: 'sess-A', sessionCreatedAt: 2, groups: new Set() }), 'collided sessionId with different createdAt is NOT owner');
+// B-b461: what the design doc says is what is built — `group` reads the creator's groups AS SNAPSHOTTED AT CREATION, and a job
+// whose creator was in no group falls back to nobody (never to `all`): its owner and the user see it, any other conversation not.
+{
+  const ungrouped = mk(10, { name: 'ungrouped', owner: { conversation: { id: 'conv-U' }, sessionId: 'sU', sessionCreatedAt: 4, groupsSnapshot: [] } });
+  const loner = { conversationId: 'conv-L', sessionId: 'sL', sessionCreatedAt: 6, groups: new Set() };
+  const seen = (c) => M.visibleJobs([ungrouped], c).length === 1;
+  ok(!seen(stranger) && !seen(loner) && !seen(groupmate) && seen({ isUser: true }) && seen({ conversationId: 'conv-U', sessionId: 'sX', sessionCreatedAt: 0, groups: new Set() }),
+    'B-b461: an ungrouped creator\'s view=group job is seen by its owner (by lineage) and the user — no fallback to all');
+  // «never refreshed»: the snapshot has exactly two writers, both at creation — the agent's create (the caller's groups) and the
+  // user's (none); a cron's child carries its parent's owner whole. A writer anywhere else (a refresh on a mutation or a sweep)
+  // is a new site here. Over src/ and the agent CLIs (data/bin).
+  const SNAP = /groupsSnapshot\s*(?::(?!\s*\[\])|=(?!=))|groupsSnapshot\s*:\s*\[\]/;
+  const files = [], walk = (d) => { for (const e of fs.readdirSync(path.join(__dirname_jm, '..', d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (/\.(m?js|cjs)$/.test(e.name) || d === 'data/bin') files.push(r); } };
+  walk('src'); walk('data/bin');
+  const sites = files.flatMap((f) => fs.readFileSync(path.join(__dirname_jm, '..', f), 'utf8').split('\n').map((l, i) => [f, i + 1, l]).filter(([, , l]) => SNAP.test(l) && !/^\s*(\/\/|\*)/.test(l)));
+  const shape = sites.map(([f, , l]) => f + ': ' + (l.match(/groupsSnapshot\s*[:=][^,}\n]*/) || [''])[0].trim());
+  ok(shape.length === 2 && shape.includes('src/agent-routes.js: groupsSnapshot: [...a.caller.groups]') && shape.includes('src/server/jobs-wiring.js: groupsSnapshot: []')
+    && SNAP.test('    job.owner.groupsSnapshot = [...caller.groups];') && SNAP.test("  owner: { createdBy: 'agent', groupsSnapshot: groupsNow() },") && !SNAP.test('(job.owner && job.owner.groupsSnapshot || [])'),
+    `B-b461: owner.groupsSnapshot is written only at creation — ${shape.join(' · ')} (CONTROL: a planted refresh assignment and a recomputed create are caught, a read is not)`);
+  const doc = fs.readFileSync(path.join(__dirname_jm, '..', 'docs/design-background-work.md'), 'utf8');
+  // a promise may wrap across `//` comment lines inside the doc's code block: read it with the continuation markers folded
+  const promises = (t) => /fallback\s+`?all`?\s+when\s+ungrouped|refreshed eagerly|surfaced for re-owning/i.test(t.replace(/\n\s*(?:\/\/)?\s*/g, ' '));
+  ok(!promises(doc)
+    && promises('    "groupsSnapshot": ["T-…"]        // refreshed eagerly on every mutation + periodic sweep')
+    && promises('                                     // agent defaults: view=group (fallback all when\n                                     // ungrouped), control=session; user locks stick (§7)')
+    && promises('- `view`/`control` ∈ session|group|all; agent defaults view=group (fallback\n  `all` when ungrouped), control=session. Owner = conversation-lineage match,')
+    && promises('  verified on the fast path; mismatch ⇒ surfaced for re-owning in the panel.'),
+    'B-b461: docs/design-background-work.md promises no eager groupsSnapshot refresh, no fallback to all and no re-own in the panel (CONTROL: each of the four removed lines is caught)');
+}
 
 // ── vendor vet (negative controls) ──
 ok(M.vetSpec({ cmd: { argv: ['curl', 'https://api.anthropic.com/v1/messages', '-H', 'x-api-key: $ANTHROPIC_API_KEY'] } }).ok, 'an API call with your own key passes (owner decision, verify r3)');

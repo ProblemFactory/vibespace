@@ -134,11 +134,12 @@ broadcast `jobs-updated`), per-run logs `data/job-logs/<jobId>/<runTs>.log`.
     "conversation": { "backend": "claude", "id": "<backendSessionId>" },   // + fork-chain match
     "sessionId": "…", "sessionCreatedAt": 0,   // secondary, collision-proof tuple
     "createdBy": "agent|user",
-    "groupsSnapshot": ["T-…"]        // refreshed eagerly on every mutation + periodic sweep
+    "groupsSnapshot": ["T-…"]        // the creating session's Task Groups AT CREATION — never refreshed
   },
   "access": { "view": "group", "control": "session", "lockedBy": null },
-                                     // agent defaults: view=group (fallback all when
-                                     // ungrouped), control=session; user locks stick (§7)
+                                     // agent defaults: view=group (an ungrouped creator's
+                                     // job: its owner + the user only), control=session;
+                                     // user locks stick (§7)
   "stopWithOwner": false,
 
   "desiredUp": true,
@@ -322,9 +323,14 @@ same-origin, no cookies) with a tiny postMessage bridge (`vsui.submit(obj)`,
 
 ## 7. Permissions & secrets
 
-- `view`/`control` ∈ session|group|all; agent defaults view=group (fallback
-  `all` when ungrouped), control=session. Owner = conversation-lineage match,
-  verified on the fast path; mismatch ⇒ surfaced for re-owning in the panel.
+- `view`/`control` ∈ session|group|all; agent defaults view=group, control=session.
+  `group` reads `owner.groupsSnapshot` — the creating session's Task Groups at the
+  moment it created the job (src/agent-routes.js), never refreshed (a group the creator
+  joins later does not see the job; one it leaves still does); a job made by a user, or
+  by a session in no group, holds none, so `group` admits only its owner and the user
+  (src/job-model.js scopeAllows) — there is no fallback to `all`. Owner = conversation-
+  lineage match, verified on the fast path; a caller that does not match is not the
+  owner — no re-own action is built (the user can always act on any job).
 - **Mutation ≠ control**: editing cmd/env/action/schedule/panel = owner
   or user only; group/all control covers start/stop/kill/ack only (no
   cross-session prompt/argv injection).
