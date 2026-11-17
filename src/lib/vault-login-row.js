@@ -8,7 +8,8 @@
 // 添加 → 「网站登录…」: the owner's own login (the site's address, the user name, the password, an optional paired two-step entry).
 import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
-import { loadTotp } from './vault-totp-row.js';   // lane vault-totp-add: the two-step field lists the vault's own codes
+import { showTotpAddDialog } from './vault-totp-row.js';   // lane vault-2fa-pick: the add dialog's «Two-step code…» door (an empty vault's list offers it)
+import { otpField } from './vault-otp-field.js';   // lane vault-2fa-pick: the two-step field's OWN list (never the browser's native one)
 import { chipSiteOf } from './use-login-words.js';   // lane login-request-card: one login, several sites — a chip's site (the picker's own row: vault-login-grants.js)
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -112,9 +113,10 @@ export function loginExtras(row, data, { refresh, show, doors: open = {} } = {})
 /** THE ADD DOOR'S FIELDS — ONE form module (lane login-request-card, B-a681): the Vault window's 添加 ▸ 网站登录… dialog AND the
  *  login card an agent's ask files in For you (src/lib/vault-paste-box.js) draw THESE fields, and one validator stands behind both
  *  (src/server/browser-logins.js addOwn). `fixed` = the card's: the site the ask names, shown and not editable. → the inputs, the
- *  labelled `fields` in order, the add door's `hint`, the datalist, `values()` (the body the add door posts) and `field()`. */
-let otpListSeq = 0;
-export function loginFields({ site = '', fixed = false } = {}) {
+ *  labelled `fields` in order, the add door's `hint`, the two-step field's list (`otpList` — placed under the field's row;
+ *  `otpPick` its handle), `values()` (the body the add door posts) and `field()`. `addCode` = the caller's «Two-step code…»
+ *  door, which the list offers when the vault holds no code. */
+export function loginFields({ site = '', fixed = false, addCode = null } = {}) {
   const field = (label, control) => { const l = el('label', 'vault-secret-field'); l.append(el('span', 'vault-secret-label', label), control); return l; };
   const input = (cls, type, ph) => { const i = el('input', `vault-pw ${cls}`); i.type = type; i.autocomplete = 'off'; i.spellcheck = false; i.placeholder = ph; return i; };
   const s = input('vault-login-site', 'text', t('The site — e.g. https://example.com'));
@@ -123,15 +125,14 @@ export function loginFields({ site = '', fixed = false } = {}) {
   const pw = input('vault-login-pass', 'password', t('Its password'));
   pw.autocomplete = 'new-password';
   const otp = input('vault-login-otp', 'text', t('Optional — the name of its two-step code in this vault'));
-  // lane vault-totp-add: the field offers the two-step codes the vault holds (names only — GET /api/vault/totp; a code added in
-  // 添加… ▸ 两步验证… is listed at once)
-  const otpNames = el('datalist');
-  otpNames.id = fixed ? `vault-login-otp-names-${++otpListSeq}` : 'vault-login-otp-names';   // a card and the dialog may be open at once
-  otp.setAttribute('list', otpNames.id);
-  loadTotp().then((d) => { for (const e of (d && d.entries) || []) { const o = el('option'); o.value = e.name; otpNames.append(o); } }).catch(() => {});
+  // lane vault-totp-add: the field offers the two-step codes the vault holds (names only — GET /api/vault/totp). lane
+  // vault-2fa-pick (the owner: «只弹出了我截图里那个浏览器的推荐输入，没有vibespace自己的下拉框»): through THE PAGE's own list —
+  // headed, a row per code with its issuer / account — never the browser's native list, which every platform draws as its own
+  // suggestion (src/lib/vault-otp-field.js)
+  const otpPick = otpField(otp, { addCode });
   const hint = el('div', 'vw-ak-hint', t('Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.'));
   const values = () => ({ origin: s.value.trim(), username: user.value.trim(), loginPassword: pw.value, ...(otp.value.trim() ? { totpName: otp.value.trim() } : {}) });
-  return { site: s, user, pw, otp, otpNames, hint, field, values, fields: [field(t('Site'), s), field(t('User name'), user), field(t('Password'), pw), field(t('Two-step code'), otp)] };
+  return { site: s, user, pw, otp, otpPick, otpList: otpPick.el, hint, field, values, fields: [field(t('Site'), s), field(t('User name'), user), field(t('Password'), pw), field(t('Two-step code'), otpPick.wrap)] };
 }
 /** The add door's refusals in words — the dialog's and the card's (one map; the card's own codes too). */
 export function loginRefusalWords(code, r) {
@@ -149,14 +150,15 @@ export function showLoginAddDialog({ refresh = () => {} } = {}) {
   const { dialog, body, close, raised } = createModalShell({ id: 'vault-login-add', title: t('Add a website login'), dialogClass: 'vault-login-add-dialog', escapeToClose: true,
     unsaved: { isDirty: () => !!(f && (f.site.value || f.user.value || f.pw.value)), save: () => saveNow(), discard: () => { if (f) f.pw.value = ''; } }, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
-  f = loginFields();
+  // lane vault-2fa-pick: an empty vault's list offers THE 两步验证… dialog; the name it saves fills the field (the list re-read)
+  f = loginFields({ addCode: () => showTotpAddDialog({ refresh: (r) => { if (r && typeof r.name === 'string' && r.name) f.otpPick.added(r.name); } }) });
   const err = el('div', 'vault-secret-error'); err.setAttribute('role', 'status');
   const foot = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
   const save = el('button', 'btn-create', t('Save to vault'));
   cancel.type = save.type = 'button';
   foot.append(cancel, save);
-  body.append(...f.fields, f.hint, err, f.otpNames);
+  body.append(...f.fields, f.otpList, f.hint, err);
   dialog.append(foot);
   cancel.onclick = () => { f.pw.value = ''; close(); };
   save.onclick = saveNow = async () => {

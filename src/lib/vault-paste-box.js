@@ -145,13 +145,13 @@ function loginBoxEl(item) {
   box.dataset.req = String(item.action.requestId);
   box.dataset.target = 'login';
   const site = headParam(item, 'site') || String(item.action.hosts || ''), who = headParam(item, 'who') || t('The conversation that asked');
-  const f = loginFields({ site, fixed: true });
+  const f = loginFields({ site, fixed: true, addCode: () => addCode.click() });   // lane vault-2fa-pick: an empty vault's list offers THIS card's «Two-step code…» (it moves the box first)
   f.pw.classList.add('ut-secret-input');   // Enter in the password is Save (the tray's own key handler); the dialog's draft field
   const kept = mk('div', 'ut-secret-note ut-login-kept');
   const sayKept = () => { const typed = f.user.value.trim(), low = typed.toLowerCase(); kept.textContent = typed && low !== typed ? t('Saved as «{user}» — the vault keeps user names in lower case', { user: low }) : ''; kept.style.display = kept.textContent ? '' : 'none'; };
   f.user.addEventListener('input', sayKept); sayKept();
   const addCode = btn(t('Two-step code…'), 'ut-secret-totp');
-  addCode.addEventListener('click', () => { if (!box.closest('.vault-paste-dialog') && !detachLoginBox(box, item)) return; showTotpAddDialog({ refresh: (r) => { const n = r && typeof r.name === 'string' ? r.name : ''; if (!n) return; f.otp.value = n; const o = mk('option'); o.value = n; f.otpNames.append(o); } }); });
+  addCode.addEventListener('click', () => { if (!box.closest('.vault-paste-dialog') && !detachLoginBox(box, item)) return; showTotpAddDialog({ refresh: (r) => { const n = r && typeof r.name === 'string' ? r.name : ''; if (!n) return; f.otpPick.added(n); } }); });
   const otpRow = mk('div', 'ut-login-otp');
   otpRow.append(f.fields[3], addCode);
   const allow = mk('input', 'ut-login-allow-box'); allow.type = 'checkbox'; allow.checked = item.action.grant === true;
@@ -174,7 +174,7 @@ function loginBoxEl(item) {
   row.append(save, deny);
   const note = mk('div', 'ut-secret-note', t('Wrong site? Refuse — the agent can ask again with the right one.'));
   const use = useSavedLoginEl({ box, site, who, origin: String(item.action.hosts || ''), user: f.user, typed: [f.fields[2], otpRow, f.otpNames, f.hint], allowText, sayAllow });
-  box.append(f.fields[0], use.button, use.pane, f.fields[1], kept, f.fields[2], otpRow, f.otpNames, f.hint, allowLab, allowSays, allowFence, row, note, stateEl());
+  box.append(f.fields[0], use.button, use.pane, f.fields[1], kept, f.fields[2], otpRow, f.otpList, f.hint, allowLab, allowSays, allowFence, row, note, stateEl());
   applySecretBox(box);
   return box;
 }

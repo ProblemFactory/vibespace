@@ -388,7 +388,7 @@ let follow = null;               // the one shown: { el, d, host, holder, ctl, r
 let following = false;
 // what a microphone beside a field never sits on (besides the field): what the person presses or types into, and the
 // keyboard-yield strip (lane takeover-keyboard: "your keys come here")
-const KEEP_CLEAR = 'button, a[href], input, textarea, select, [role="button"], [contenteditable], .chat-kbd-yield';
+const KEEP_CLEAR = 'button, a[href], input, textarea, select, [role="button"], [contenteditable], .chat-kbd-yield, [data-keep-clear]:not([hidden])'; // lane vault-2fa-pick: [data-keep-clear] = a box that asks the microphone to keep clear of it while shown (the two-step field's own list — a list a person picks from)
 /** a node of the voice UI outside every box (the follower's microphone, a floating chip — src/voice-focus.js VOICE_UI): a press
  *  on it is the dictation's own (lane phone-tray-voice-done: the same selector keeps every outside-press closer off it) */
 export const voiceOwns = (n) => !!(n && n.closest && n.closest(VOICE_UI));

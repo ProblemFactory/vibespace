@@ -285,7 +285,8 @@ export const CENSUS = [
   ['vault-use-row.js', 'textarea', 'text', 'an entry\'s 「Who may use it…」 policy for the decision-API judge (R4, default off) — the owner\'s words, lane vault-use-grants'],
   ['vault-use-row.js', 'select', 'choice', 'an entry\'s 「Who may use it…」 end (none / 8 hours / 30 days / 90 days) — lane vault-use-grants'],
   ['vault-login-row.js', 'input', 'control', 'a web login\'s 「用于…」 picker (a radio per scope + a checkbox per conversation / Task Group / everyone) and 网站登录…\'s fields (site, user name, password, two-step name) — el(\'input\'), lane browser-login'],
-  ['vault-login-row.js', 'datalist', 'choice', '网站登录…\'s two-step field offers the vault\'s two-step code names (GET /api/vault/totp — names only) — lane vault-totp-add'],
+  ['vault-otp-field.js', 'tabindex', 'widget', 'lane vault-2fa-pick: the two-step list\'s rows and the field\'s ▾ mark (-1 — never a Tab stop: the focus stays in the field, its arrows / Enter / Esc move and pick)'],
+  ['vault-otp-field.js', 'combobox', 'widget', 'lane vault-2fa-pick: the two-step field of 网站登录… and the login card wears role=combobox over its OWN list (role=listbox: the vault\'s codes by name + issuer / account; ↑ ↓ Enter Esc heard at the window\'s capture) — it replaced the native <datalist> (lane vault-totp-add); the input itself is vault-login-row.js\'s text row'],
   // ── verify r4 (attack 5): the rows the r3 grep could not see — element helpers, conditional tags, index.html, the new kinds ──
   ['browser-replay-window.js', 'combobox', 'widget', 'the sessions / actions lists (role=listbox: ← → Home End Space)'],
   ['channel-filter-editor.js', 'select', 'choice', 'the filter\'s pickers (selectBox — el(\'select\') from channel-chrome.js)'],

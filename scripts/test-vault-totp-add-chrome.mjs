@@ -21,7 +21,10 @@
 //      asked; 预览 again ⇒ 10 MORE (a person's 预览 restarts the budget — the row's 看码 does). A CLICK WHILE AN ASK IS ON
 //      THE WIRE (an automatic re-ask HELD in the page): 预览 says «Previewing…» and joins it (no second ask); 保存 says
 //      «Saving…» and saves when it settles (one save — the dialog closes, the row, the toast) — never a silent nothing
-//   ⑥ 网站登录…'s two-step field lists the vault's codes (the three new ones); ⑥b a phone (375 × 812): the dialog fits the screen,
+//   ⑥ 网站登录…'s two-step field lists the vault's codes (the three new ones) — lane vault-2fa-pick: in ITS OWN list (no native
+//      <datalist>, which the owner read as the browser's suggestion): a press in the field opens it headed, a row per code by
+//      name; a press on a row (THE still door) and ↓ Enter each fill the field; Escape closes the list and the dialog stays;
+//      a typed name that lists nothing is said under the field at once; ⑥b a phone (375 × 812): the dialog fits the screen,
 //      every press target ≥ 36 px, the seed field 16 px
 //   ⑦ the zh words (the menu's 两步验证…, the dialog's title and ways, a refusal); no seed in the hub's log; the audit has
 //      the three adds (vault-totp-add, paste + manual + manual) and no seed
@@ -34,7 +37,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, stillPresser } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -292,8 +295,42 @@ console.log('⑥ 网站登录…\'s two-step field lists the codes');
 await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'vault') app.wm.closeWindow(w.id); true`);
 await openWindow();
 check('网站登录… opens', await openAdd('Website login…').then(() => until(visible('.vault-login-add-dialog'), { timeout: 5000 })));
-const offered = await until(`(() => { const l = document.getElementById('vault-login-otp-names'); const v = l ? [...l.options].map((o) => o.value).sort() : []; return v.length >= 3 ? v : null; })()`, { timeout: 5000 });
-check('its two-step field (the list) offers the codes: bank-login · github-owner · paced-code', !!offered && offered.join() === 'bank-login,github-owner,paced-code' && (await evalJs(`document.querySelector('.vault-login-otp').getAttribute('list')`)) === 'vault-login-otp-names', offered);
+// lane vault-2fa-pick: THE FIELD's OWN LIST (src/lib/vault-otp-field.js) — the browser offers nothing of its own here
+const OTP = '.vault-login-add-dialog input.vault-login-otp', OTPL = '.vault-login-add-dialog .vault-otp-list';
+const otpFacts = () => evalJs(`(() => { const i = document.querySelector(${JSON.stringify(OTP)}); const l = document.querySelector(${JSON.stringify(OTPL)}); const n = document.querySelector('.vault-login-add-dialog .vault-otp-note');
+  const shown = (e) => !!e && !e.hidden && e.getBoundingClientRect().height > 0;
+  return { value: i ? i.value : null, focused: document.activeElement === i, open: shown(l), head: l ? (l.querySelector('.vault-otp-head') || {}).textContent : null,
+    rows: l ? [...l.querySelectorAll('.vault-otp-row')].map((b) => [b.querySelector('.vault-otp-name').textContent, (b.querySelector('.vault-otp-sub') || {}).textContent || '']) : [],
+    note: shown(n) ? n.textContent : '', dialog: !!document.querySelector('.vault-login-add-dialog'), datalists: document.querySelectorAll('datalist').length,
+    attrs: i ? { list: i.getAttribute('list'), ac: i.getAttribute('autocomplete'), role: i.getAttribute('role'), lp: i.getAttribute('data-lpignore'), op: i.getAttribute('data-1p-ignore') } : null }; })()`);
+const otpPress = stillPresser({ evalJs, cdp });   // THE still door (scripts/scratch.mjs): measured, still, landed — never a press by raw coordinates
+const otpKey = async (key, code, keyCode) => { await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code, windowsVirtualKeyCode: keyCode }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: keyCode }); };
+const otpFieldPressed = await otpPress(OTP, { click: 'any' });
+const otpOpened = await until(`(() => { const l = document.querySelector(${JSON.stringify(OTPL)}); return !!l && !l.hidden && l.querySelectorAll('.vault-otp-row').length >= 3; })()`, { timeout: 5000 });
+const otpF1 = await otpFacts();
+check('a press in the two-step field OPENS ITS OWN LIST, headed «Two-step codes in this vault»: a row per code by name — bank-login · github-owner · paced-code',
+  otpFieldPressed && !!otpOpened && otpF1.focused && otpF1.head === 'Two-step codes in this vault' && otpF1.rows.map((r) => r[0]).join() === 'bank-login,github-owner,paced-code', { otpF1, last: otpPress.last });
+check('… and the browser offers nothing of its own: no <datalist> in the page, no `list` on the field, autocomplete off, the password managers\' ignore marks, a combobox',
+  otpF1.datalists === 0 && otpF1.attrs && otpF1.attrs.list === null && otpF1.attrs.ac === 'off' && otpF1.attrs.lp === 'true' && otpF1.attrs.op === 'true' && otpF1.attrs.role === 'combobox', otpF1);
+const otpRowPressed = await otpPress(`${OTPL} .vault-otp-row[data-name="github-owner"]`);
+const otpF2 = await until(`(() => { const i = document.querySelector(${JSON.stringify(OTP)}); return i && i.value === 'github-owner' ? true : null; })()`, { timeout: 3000 }) ? await otpFacts() : await otpFacts();
+check('a REAL press on the github-owner row (THE still door) fills the field with its name; the list closes, the focus stays in the field', otpRowPressed && otpF2.value === 'github-owner' && !otpF2.open && otpF2.focused, { last: otpPress.last, otpF2 });
+await evalJs(`(() => { const i = document.querySelector(${JSON.stringify(OTP)}); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); i.focus(); return true; })()`);
+await otpKey('Escape', 'Escape', 27);
+await otpKey('ArrowDown', 'ArrowDown', 40);
+await otpKey('Enter', 'Enter', 13);
+const otpF3 = await otpFacts();
+check('the keyboard: ↓ opens the list on its first row, Enter picks it (bank-login)', otpF3.value === 'bank-login' && !otpF3.open && otpF3.dialog, otpF3);
+await otpKey('ArrowDown', 'ArrowDown', 40);
+const otpF4a = await otpFacts();
+await otpKey('Escape', 'Escape', 27);
+const otpF4 = await otpFacts();
+check('Escape with the list open closes THE LIST — the dialog stays, the field keeps its text', otpF4a.open && !otpF4.open && otpF4.dialog && otpF4.value === 'bank-login', { otpF4a, otpF4 });
+await evalJs(`(() => { const i = document.querySelector(${JSON.stringify(OTP)}); i.focus(); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+await cdp('Input.insertText', { text: 'no-such-code' });
+const otpF5 = await until(`(() => { const n = document.querySelector('.vault-login-add-dialog .vault-otp-note'); return n && !n.hidden && n.textContent ? n.textContent : null; })()`, { timeout: 3000 });
+check('a typed name that lists nothing is said UNDER THE FIELD at once (before any Save)', /No two-step code of that name is in this vault/.test(String(otpF5 || '')), otpF5);
+await otpKey('Escape', 'Escape', 27);
 await click('.vault-login-add-dialog .btn-cancel');
 
 console.log('⑥b a phone (375 × 812): the dialog fits the screen, its press targets ≥ 36 px');

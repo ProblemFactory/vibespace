@@ -1,0 +1,79 @@
+// PURE (imports nothing, DOM-free) — THE TWO-STEP NAME FIELD's LIST (lane vault-2fa-pick, 2026-11-17 — the owner, from the
+// login card's own window: «这里下拉框怎么没用？», and then «只弹出了我截图里那个浏览器的推荐输入，没有vibespace自己的下拉框»).
+// The field named the vault's two-step codes through the browser's NATIVE list (<datalist> — the tree's only one): every
+// platform draws that list as its own suggestion popup, so the owner read it as the browser's history and looked for
+// VibeSpace's list — there was none. The field (src/lib/vault-login-row.js loginFields — the Vault's add dialog, the login card
+// in the tray and in its own window) now draws ITS OWN list, headed in plain words, a row per code by its NAME (the vault's
+// own, unique — GET /api/vault/totp answers names). This file decides what that list shows and what a key does; the DOM is
+// the field's (src/lib/vault-otp-field.js).
+//   · entriesOf(answer)         — the names the list can show (a malformed or repeated one dropped)
+//   · listState(facts)          — what the list is: 'loading' | 'failed' | 'empty' | 'rows'
+//   · rowsOf(names, query)      — the rows, in order: the typed text's matches first (the exact name, then a name it begins,
+//                                 then a name holding it — case-blind), the rest after: typing NEVER empties the list (a name
+//                                 typed by hand that matches nothing is said at the field)
+//   · typedVerdict(facts, text) — the typed name: 'none' (nothing typed) | 'listed' | 'unlisted' (said at the field at once)
+//                                 | 'unknown' (the list is not read: nothing is said — the add door's own check stands)
+//   · keyStep(state, key, n)    — the list's keys: ArrowDown opens / moves, ArrowUp moves, Enter picks the highlighted row,
+//                                 Escape closes an open list and is TAKEN (never the form's), Tab leaves
+
+/** The vault's answer → the names the list can show (in the vault's order; a malformed or repeated element dropped). */
+export function entriesOf(answer) {
+  const list = answer && Array.isArray(answer.entries) ? answer.entries : [];
+  const out = [];
+  for (const e of list) {
+    const name = e && typeof e.name === 'string' ? e.name : '';
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+/** What the list is now. facts = { loaded, failed, names }. */
+export function listState({ loaded = false, failed = false, names = [] } = {}) {
+  if (!loaded) return 'loading';
+  if (failed) return 'failed';
+  return names.length ? 'rows' : 'empty';
+}
+
+const fold = (s) => String(s == null ? '' : s).normalize('NFKC').toLowerCase().trim();
+
+/** The rows in order for what is typed: the exact name, a name it begins, a name holding it, then the rest (alphabetical
+ *  within each band); `match` marks the rows the text matched. Every name stays a row. */
+export function rowsOf(names, query = '') {
+  const q = fold(query);
+  const band = (n) => { if (!q) return 3; const f = fold(n); return f === q ? 0 : f.startsWith(q) ? 1 : f.includes(q) ? 2 : 3; };
+  return (names || []).map((name) => ({ name, band: band(name) }))
+    .sort((a, b) => a.band - b.band || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    .map(({ name, band: b }) => ({ name, match: !!q && b < 3 }));
+}
+
+/** The typed name against the list: the add door's own rule (src/server/vault-paste-door.js: the trimmed name, exactly). */
+export function typedVerdict({ loaded = false, failed = false, names = [] } = {}, text = '') {
+  const v = String(text == null ? '' : text).trim();
+  if (!v) return 'none';
+  if (!loaded || failed) return 'unknown';
+  return names.includes(v) ? 'listed' : 'unlisted';
+}
+
+/** One key in the field. state = { open, active (row index or -1) }, n = the rows shown. → { open, active, pick (index |
+ *  null), taken (the key is the list's — the field stops it) }. A composing key never reaches here (the field checks). */
+export function keyStep({ open = false, active = -1 } = {}, key, n = 0) {
+  const last = n - 1;
+  if (key === 'ArrowDown') {
+    if (!open) return { open: true, active: n ? 0 : -1, pick: null, taken: true };
+    return { open, active: n ? (active >= last ? 0 : active + 1) : -1, pick: null, taken: true };
+  }
+  if (key === 'ArrowUp') {
+    if (!open) return { open: true, active: n ? last : -1, pick: null, taken: true };
+    return { open, active: n ? (active <= 0 ? last : active - 1) : -1, pick: null, taken: true };
+  }
+  if (key === 'Enter') {
+    if (open && active >= 0 && active < n) return { open: false, active: -1, pick: active, taken: true };
+    return { open, active, pick: null, taken: false };   // no row highlighted: Enter is the form's
+  }
+  if (key === 'Escape') {
+    if (open) return { open: false, active: -1, pick: null, taken: true };   // the list closes; the form never hears it
+    return { open, active, pick: null, taken: false };
+  }
+  if (key === 'Tab') return { open: false, active: -1, pick: null, taken: false };
+  return { open, active, pick: null, taken: false };
+}
