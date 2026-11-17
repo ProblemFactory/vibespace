@@ -6671,6 +6671,7 @@ class ChatView {
   // Same-epoch reconnect: fetch just the messages we missed while offline
   _reattachCatchUp() {
     const missedStart = this._windowEnd;
+    const knownTotal = this._total; // B-4735: what lay past the window but under this was trimmed, never missed (the full extent has it)
     // same stagger rationale as the epoch reset above — N windows × 200
     // messages rendered in one tick is the non-restart reconnect freeze
     this._fetchMessages(missedStart, 200).then(msgs => new Promise((res) => setTimeout(() => res(msgs), Math.random() * 400))).then(msgs => {
@@ -6695,6 +6696,10 @@ class ChatView {
       for (let i = 0; i < msgs.length; i++) {
         const m = msgs[i];
         if (m.role === 'user' && !m.imageAttachment) this._chatMinimap.addTurn({ turnIndex: m.turnIndex, startIdx: missedStart + i, ts: m.ts, role: 'user', ...turnPreviewOf(m) }, this._total); // lane minimap-person-rows: the live append's facts (preview + the person-row verdict) — it listed «(empty)», as the person's
+        // B-4735: a huge session's (full-extent) minimap takes the missed turns too — addTurn is a no-op there, and the live
+        // append's own appendFullTurn never runs for them (the catch-up renders under _loadingHistory); only past knownTotal
+        // (a trimmed window's tail is re-fetched too — its turns are on the map already), once by instant
+        if (this._gapMinimapActive && missedStart + i >= knownTotal && m.role === 'user' && !m.imageAttachment) this._chatMinimap.appendFullTurn({ turnIndex: m.turnIndex, ts: m.ts, role: 'user', ...turnPreviewOf(m) }, { once: true });
       }
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
       if (this._pinned) this._scrollToBottom();

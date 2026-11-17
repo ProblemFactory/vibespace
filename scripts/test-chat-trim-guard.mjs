@@ -1362,5 +1362,50 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
   }
 }
 
+// B-4735: A CATCH-UP AFTER A RECONNECT hands a huge session's minimap (full extent, time coordinates) its missed user
+// turns — addTurn is a no-op there and the live append's appendFullTurn never ran for them (the catch-up renders under
+// _loadingHistory). FUNCTIONAL over the real _reattachCatchUp, with a RED control (the line removed).
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MUT = mutantCopies('chat-trim-guard-4735', REPO);
+  const missed = [{ id: 'u1', role: 'user', ts: 5000, turnIndex: 3, content: [{ type: 'text', text: 'missed while offline' }] },
+    { id: 'a1', role: 'assistant', ts: 5001, content: [{ type: 'text', text: 'the reply' }] },
+    { id: 'u2', role: 'user', ts: 5002, turnIndex: 4, originKind: 'peer-message', peerVia: 'peer', content: [{ type: 'text', text: 'a peer\'s words' }] }];
+  const catchUp = async (CV, gap, { windowEnd = 10, total = 10 } = {}) => {
+    const calls = { add: 0, full: [] };
+    const v = Object.assign(Object.create(CV.prototype), {
+      _windowEnd: windowEnd, _windowStart: 0, _total: total, _disposed: false, _pinned: false, _search: null, _gapMinimapActive: gap,
+      _fetchMessages: async () => missed, _onCreateMessage() { }, _updatePosIndicator() { }, _showHistoryStatus() { }, _trace() { },
+      _chatMinimap: { addTurn() { calls.add++; }, appendFullTurn(t, o) { calls.full.push({ t, o }); }, setViewport() { } },
+    });
+    CV.prototype._reattachCatchUp.call(v);
+    await new Promise((r) => setTimeout(r, 700)); // the catch-up's own stagger is ≤ 400 ms
+    return calls;
+  };
+  const on = await catchUp(ChatView, true), off = await catchUp(ChatView, false);
+  ok(`B-4735: the catch-up hands the full-extent minimap each missed USER turn once, with the live append's facts (${on.full.length} turns)`,
+    on.full.length === 2 && on.full[0].t.ts === 5000 && on.full[0].t.preview === 'missed while offline' && !on.full[0].t.other && on.full[1].t.other === 'peer' && on.full.every((c) => c.o && c.o.once === true));
+  ok('…a view with no full-extent minimap takes the turns through addTurn only, as before', off.full.length === 0 && off.add === 2);
+  // the reader's F1: a window TRIMMED at its bottom (paged up) re-fetches its own tail — those turns are on the map
+  const trimmed = await catchUp(ChatView, true, { windowEnd: 8, total: 10 }); // fetched from 8: indices 8, 9 known, 10 new
+  ok(`…a trimmed window's re-fetched tail is not handed again — only the turn past the total the view knew (${trimmed.full.length}: ${trimmed.full.map((c) => c.t.ts).join(', ')})`, trimmed.full.length === 1 && trimmed.full[0].t.ts === 5002);
+  const LINE = "        if (this._gapMinimapActive && missedStart + i >= knownTotal && m.role === 'user' && !m.imageAttachment) this._chatMinimap.appendFullTurn({ turnIndex: m.turnIndex, ts: m.ts, role: 'user', ...turnPreviewOf(m) }, { once: true });\n";
+  ok('…the control\'s anchor is in chat-view.js once', cv.split(LINE).length === 2);
+  const { pathToFileURL } = await import('node:url');
+  const pre = await import(pathToFileURL(MUT.write('src/lib/chat-view.js', cv.replace(LINE, ''), 'nofull', { esm: true })).href);
+  ok('CONTROL (the catch-up line removed): no missed turn reaches the full-extent minimap — the leg goes RED', (await catchUp(pre.ChatView, true)).full.length === 0);
+  // the minimap's own once: a turn it already holds (by instant) is not drawn twice; a live append is unchanged
+  const { ChatMinimap } = await import(path.join(REPO, 'src/lib/chat-minimap.js'));
+  const doc0 = globalThis.document;
+  globalThis.document = { createElement: () => ({ className: '', style: {} }) };
+  try {
+    const mm = Object.assign(Object.create(ChatMinimap.prototype), { _fullExtent: { fullTurns: [{ ts: 5000 }], firstTs: 1000, lastTs: 5000 }, _markerByTurn: new Map(), _minimap: { appendChild() { } }, updateThumb() { } });
+    ChatMinimap.prototype.appendFullTurn.call(mm, { ts: 5000, preview: 'x' }, { once: true });
+    ChatMinimap.prototype.appendFullTurn.call(mm, { ts: 6000, preview: 'y' }, { once: true });
+    ChatMinimap.prototype.appendFullTurn.call(mm, { ts: 6000, preview: 'y' });
+    ok('…the minimap\'s once: a turn it holds by instant is skipped, a new one is drawn; a live append (no once) is as before', mm._fullExtent.fullTurns.length === 3 && mm._markerByTurn.size === 2);
+  } finally { globalThis.document = doc0; }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

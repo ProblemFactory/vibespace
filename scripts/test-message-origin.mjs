@@ -272,12 +272,14 @@ console.log('§4 THE CENSUS — every role === \'user\' site in src/lib/ reads t
     ['src/lib/chat-view.js', "if (msg.role === 'user' && !msg.imageAttachment) {", true],
     ['src/lib/chat-view.js', "this._renderers?.resolveContextFullCards && isCompactSummaryText(", 'the compaction marks retire the "Prompt is too long" cards by the summary\'s own text rule (isCompactSummaryText — personRow asks it for a record nobody typed): a retirement of advice cards, not a list of who wrote what'],
     ['src/lib/chat-view.js', "if (m.role === 'user' && !m.imageAttachment) this._chatMinimap.addTurn(", true],
+    ['src/lib/chat-view.js', "if (this._gapMinimapActive && missedStart + i >= knownTotal && m.role === 'user' && !m.imageAttachment) this._chatMinimap.appendFullTurn(", true], // B-4735
     ['src/lib/search-window.js', "h.role === 'user' ? t('You') : t('Agent')", 'NAMED GAP (parked B-19bd): a global-search hit carries only the record\'s role from the server\'s index — no record to judge on the client, so a peer delivery is labelled «You» there until the search route stamps the verdict'],
   ];
   const READS = { "src/lib/chat-minimap.js|: this._turnMap.filter(t => t.role === 'user');": (s) => /const listed = showOther \? turns : turns\.filter\(\(tt\) => !tt\.other\);/.test(s),
     "src/lib/chat-run-summary.js|if (m.role === 'user') return userNoteOf(m);": (s) => /import \{ NOTE_MARKER, noteKindOfText, userNoteOf \} from '\.\.\/assistant-note\.js';/.test(s),
     "src/lib/chat-view.js|if (msg.role === 'user' && !msg.imageAttachment) {": (s) => /role: 'user', \.\.\.turnPreviewOf\(msg\) \};/.test(s),
-    "src/lib/chat-view.js|if (m.role === 'user' && !m.imageAttachment) this._chatMinimap.addTurn(": (s) => /\.\.\.turnPreviewOf\(m\) \}, this\._total\)/.test(s) };
+    "src/lib/chat-view.js|if (m.role === 'user' && !m.imageAttachment) this._chatMinimap.addTurn(": (s) => /\.\.\.turnPreviewOf\(m\) \}, this\._total\)/.test(s),
+    "src/lib/chat-view.js|if (this._gapMinimapActive && missedStart + i >= knownTotal && m.role === 'user' && !m.imageAttachment) this._chatMinimap.appendFullTurn(": (s) => /appendFullTurn\(\{ turnIndex: m\.turnIndex, ts: m\.ts, role: 'user', \.\.\.turnPreviewOf\(m\) \}, \{ once: true \}\);/.test(s) };
   const ROLE_RE = /\brole\s*[!=]==?\s*['"]user['"]/;
   const libDir = path.join(REPO, 'src/lib');
   const hits = [];

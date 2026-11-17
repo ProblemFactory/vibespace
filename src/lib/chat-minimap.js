@@ -252,9 +252,10 @@ export class ChatMinimap {
    * thumb pinned to 100% and marker positions compressed ever more wrongly as
    * the live session grew.
    */
-  appendFullTurn(turn) {
+  appendFullTurn(turn, { once = false } = {}) {
     if (!this._fullExtent || !turn?.ts) return;
     const ext = this._fullExtent;
+    if (once && ext.fullTurns.some((r) => r.ts === turn.ts)) return; // B-4735: a catch-up's turn the full extent already holds
     const rec = { ts: turn.ts, preview: turn.preview, isCompact: turn.isCompact, note: turn.note, line: turn.line, other: turn.other };
     ext.fullTurns.push(rec);
     if (turn.ts > ext.lastTs) ext.lastTs = turn.ts;
