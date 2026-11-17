@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch, deadPort } from './scratch.mjs';
-import { mutantCopies } from './mutant-copy.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const AT = require('../src/browser-attach.js');
@@ -54,7 +54,7 @@ ok(!AT.attachArgv({ profileDir: 'relative/dir' }).ok && AT.attachArgv({ profileD
 const codeOf = (t) => String(t).replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '').replace(/\s\/\/ .*$/, '')).join('\n');
 // an ARGV literal: a quoted token with no space whose comma / newline parts include the flag (a sentence that NAMES the
 // flag — the hidden-window words — is prose, not an argv); the one FORBIDDEN declaration is the rule itself
-const syncCensus = (text) => { const code = codeOf(text); const decl = /ATTACH_FORBIDDEN = Object\.freeze\(\['--disable-sync'\]\)/.test(code); return (code.match(/(['"`])((?:(?!\1)[^\n\s])*)\1/g) || []).filter((m) => m.slice(1, -1).split(/,|\\n/).some((x) => x === '--disable-sync' || x.startsWith('--disable-sync='))).filter((m, i, all) => !(decl && m === "'--disable-sync'" && all.indexOf(m) === i)); };
+const syncCensus = (text) => { const code = codeOf(text); const decl = /ATTACH_FORBIDDEN = Object\.freeze\(\['--disable-sync'\]\)/.test(code); return (code.match(/(['"`])((?:(?!\1)[^\n\s])*)\1/g) || []).filter((m) => m.slice(1, -1).split(/,|\\n/).some((x) => /^--?disable-sync(?:=|$)/.test(x))).filter((m, i, all) => !(decl && m === "'--disable-sync'" && all.indexOf(m) === i)); };
 const ATTACH_FILES = ['src/browser-attach.js', 'src/server/browser-attach-launch.js'];
 const hits = ATTACH_FILES.flatMap((f) => syncCensus(fs.readFileSync(path.join(REPO, f), 'utf8')).map((m) => `${f}: ${m}`));
 const ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
@@ -62,6 +62,7 @@ const attachFn = ks.slice(ks.indexOf('  async function attachStart('), ks.indexO
 ok(hits.length === 0 && attachFn.length > 2000 && syncCensus(attachFn).length === 0, `no literal --disable-sync on the attach road (${ATTACH_FILES.length} files + the keeper's attachStart, ${attachFn.length} chars) beyond the FORBIDDEN list`, hits);
 ok(/AT\.attachArgv\(\{ profileDir: p\.dir, mark: B\.keeperMarkArg\(p\.id\), quiet: BE\.QUIET_LOG_ARGS, extra: engineArgs \}\)/.test(attachFn) && /const engineArgs = engineLaunch && Array\.isArray\(engineLaunch\.args\) \? ENG\.engineArgs\(engineLaunch\) : \[\];/.test(attachFn) && /ATL\.spawnChrome\(\{ exe, argv: av\.argv,/.test(attachFn), 'the keeper spawns EXACTLY the builder\'s argv (no flag added beside it — lane engine-plugin: an engine\'s own arguments go IN through the builder, censused with the rest; lane engine-spi-egress: the keeper\'s proxy arguments of a wrapped engine with them, engineArgs)');
 ok(syncCensus("const ARGV = ['--remote-debugging-port=0', '--disable-sync'];").length === 1, 'CONTROL: a planted argv literal with --disable-sync is RED');
+ok(syncCensus("const ARGV = ['--remote-debugging-port=0', '-disable-sync'];").length === 1, 'CONTROL (B-0528): a planted single-dash -disable-sync literal is RED too');
 const noAC = mutant('src/browser-attach.js', "\n    '--disable-blink-features=AutomationControlled', '--disable-background-networking', ...PROFILE_STORE", "\n    '--disable-background-networking', ...PROFILE_STORE");
 ok(!noAC.attachArgv({ profileDir: '/p' }).ok && AT.argvVerdict(['--remote-debugging-port=0', '--user-data-dir=/p', '--no-first-run', '--no-default-browser-check', '--ozone-platform=x11', '--disable-background-networking']).missing.join() === '--disable-blink-features=AutomationControlled', 'CONTROL: a builder that drops AutomationControlled is RED (its census names the missing flag)');
 const withSync = mutant('src/browser-attach.js', "'--disable-background-networking', ...PROFILE_STORE", "'--disable-background-networking', '--disable-sync', ...PROFILE_STORE");
@@ -71,6 +72,12 @@ console.log('— ①b an engine\'s forbidden switch: dropped and said, never the
 {
   const sf = typeof AT.stripForbidden === 'function' ? AT.stripForbidden(['--vibespace-engine=x', '--disable-sync', '--disable-sync=1', '--disable-syncx']) : null;
   ok(sf && JSON.stringify(sf) === JSON.stringify({ kept: ['--vibespace-engine=x', '--disable-syncx'], dropped: ['--disable-sync', '--disable-sync=1'] }), 'stripForbidden (PURE): an engine\'s forbidden switch (bare or =value) is dropped, every other kept in its order (a longer name is another switch)', sf);
+  // B-0528 (1): the single-dash spelling is the same switch to Chromium (the engine walls' `^--?` rule) — dropped and said too
+  const sf1 = AT.stripForbidden(['-disable-sync', '-disable-sync=1', '-disable-syncx', '---disable-sync']);
+  ok(JSON.stringify(sf1) === JSON.stringify({ kept: ['-disable-syncx', '---disable-sync'], dropped: ['-disable-sync', '-disable-sync=1'] }) && AT.argvVerdict(['-disable-sync']).forbidden.join() === '-disable-sync', 'B-0528: a single-dash -disable-sync (bare or =value) is the forbidden switch too — dropped from an engine, red in the census; a longer name or a triple dash is another switch', sf1);
+  { const old = "const isForbiddenSwitch = (x) => { const s = /^-[^-]/.test(x) ? '-' + x : x; return ATTACH_FORBIDDEN.some((f) => s === f || s.startsWith(f + '=')); };";
+    const pre = mutant('src/browser-attach.js', old, "const isForbiddenSwitch = (x) => ATTACH_FORBIDDEN.some((f) => x === f || x.startsWith(f + '='));");
+    ok(pre.stripForbidden(['-disable-sync']).kept.join() === '-disable-sync', 'CONTROL (B-0528, the release\'s rule): an engine\'s -disable-sync is KEPT — it reached Chrome unsaid'); }
   const ae = AT.attachArgv({ profileDir: '/p', mark: B.keeperMarkArg('bp-0000000a'), quiet, extra: ['--vibespace-engine=x', '--disable-sync'] });
   const want = AT.attachArgv({ profileDir: '/p', mark: B.keeperMarkArg('bp-0000000a'), quiet, extra: ['--vibespace-engine=x'] });
   ok(ae.ok && JSON.stringify(ae.argv) === JSON.stringify(want.argv) && AT.argvVerdict(ae.argv).ok && JSON.stringify(ae.dropped) === JSON.stringify(['--disable-sync']), 'an ENGINE\'s --disable-sync: the launch is NOT refused — its argv is the one without it, and `dropped` names it for the caller to say', ae);
@@ -400,6 +407,51 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
     const iStop = jl.findIndex((l) => l.startsWith(`[browser] ${pU2.id}: its display session `) && l.endsWith('stopped — its launch was refused'));
     ok(rU.e && rU.e.code === 'browser_engine_protocol' && chromeLog().length === nU && iSaid >= 0 && iStop > iSaid, 'a sibling refusal on the road (an engine\'s bare --) is journaled with its code and the item BEFORE its display session is stopped; nothing spawned', { code: rU.e && rU.e.code, jl });
     await kU.stop(pU2.id, { why: 'user' }).catch(() => { });
+  }
+  // (3) B-0528 (2): the road's FOUR other «started nothing» branches — a profile lock held elsewhere, an unusable socket directory,
+  //     a spawn that failed, a pid gone before it was recorded — each journaled ONCE, by name. CONTROL per branch: a keeper copy that
+  //     drops the branch's line refuses the start as before, SILENT on the hub (the four were unpinned: a mutant kept this suite green)
+  {
+    const deadPid = require('node:child_process').spawnSync('true').pid; // exited already: /proc has no start time for it
+    const realEnsure = ATL.ensureSocketDir, realSpawn = ATL.spawnChrome;
+    const BRANCHES = [
+      { label: 'lock', code: 'profile_locked', words: /locked under another machine's name \(elsewhere, pid/, plant: (pr) => { fs.mkdirSync(pr.dir, { recursive: true }); fs.symlinkSync(`elsewhere-${deadPid}`, path.join(pr.dir, 'SingletonLock')); },
+        drop: ["if (!lk.ok) { const e = failed(lk.code, lk.error);", "if (!lk.ok) { const e = failed(lk.code, lk.error, {}, { said: true });"] },
+      { label: 'socket-dir', code: 'socket_dir_unavailable', words: /planted: the socket directory cannot be used/, plant: () => { ATL.ensureSocketDir = () => ({ ok: false, code: 'socket_dir_unavailable', error: 'planted: the socket directory cannot be used' }); },
+        drop: ['if (!so.ok) throw failed(so.code, so.error);', 'if (!so.ok) throw failed(so.code, so.error, {}, { said: true });'] },
+      { label: 'spawn', code: 'launch_failed', words: /planted: Chrome could not be started/, plant: () => { ATL.spawnChrome = async () => ({ ok: false, code: 'launch_failed', error: 'planted: Chrome could not be started' }); },
+        drop: ['      sayNotStarted(lr ? lr.code : r.code, lr ? lr.error : r.error);\n', '\n'] },
+      { label: 'unidentified', code: 'launch_failed', words: /was gone right after its launch/, plant: () => { ATL.spawnChrome = async () => ({ ok: true, pid: deadPid, port: 9, wsPath: '/devtools/browser/planted', child: { kill() { } } }); },
+        drop: ["sayNotStarted('launch_failed', unrecordedLaunch(r.pid)); await endDisplay(rec, 'its browser could not be identified');", "await endDisplay(rec, 'its browser could not be identified');"] },
+    ];
+    const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const MUTK = mutantCopies('browser-keeper-b0528', REPO);
+    const realCreate = K.create;
+    const runBranch = async (b, Kc, tag) => {
+      let r0 = null, jl = [], k4 = null, p4 = null;
+      try {
+        K.create = Kc; // mk() reads K.create at the call: a keeper COPY for a control, the real one otherwise
+        k4 = mk({ dataDir: path.join(S, `data-b0528-${b.label}-${tag}`), engines: REG });
+        p4 = k4.createProfile({ label: `B0528 ${b.label}`, browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: fact });
+        b.plant(p4);
+        setMode('ok');
+        const j0 = journal.length;
+        r0 = await k4.start(p4.id, { why: 'test' }).then((v) => ({ v }), (e) => ({ e }));
+        jl = journal.slice(j0);
+      } finally { K.create = realCreate; ATL.ensureSocketDir = realEnsure; ATL.spawnChrome = realSpawn; }
+      const said = jl.filter((l) => l.startsWith(`[browser] ${p4.id} "B0528 ${b.label}": NOT started on the attach road [${b.code}]`) && b.words.test(l));
+      try { await k4.stop(p4.id, { why: 'user' }); } catch { /* refused already */ }
+      return { refused: !!(r0 && r0.e && r0.e.code === b.code), said: said.length, r: r0 && (r0.e ? { code: r0.e.code, error: String(r0.e.message).slice(0, 200) } : { v: r0.v && r0.v.state }), jl };
+    };
+    for (const b of BRANCHES) {
+      const real = await runBranch(b, realCreate, 'real');
+      ok(real.refused && real.said === 1, `B-0528 ${b.label}: the start is refused ${b.code} AND journaled ONCE by name`, real);
+      ok(ksrc.split(b.drop[0]).length === 2, `B-0528 ${b.label} control setup: the branch's line is found once in src/server/browser-keeper.js`);
+      const Km = MUTK.load('src/server/browser-keeper.js', ksrc.replace(b.drop[0], b.drop[1]), `quiet-${b.label}`);
+      const quiet = await runBranch(b, Km.create, 'quiet');
+      ok(quiet.refused && quiet.said === 0, `CONTROL (B-0528 ${b.label}): a keeper copy without the line still refuses ${b.code} — and says NOTHING (so the pin above is what holds it)`, quiet);
+    }
+    for (const c of copiesCensus(MUTK.files, MUTK.dir, REPO, { label: 'B-0528 controls: ' })) ok(c.pass, c.name, c.detail);
   }
   // lane engine-spi-egress L1b r3: the ATTACH road's own census refuses a switch that starts ANOTHER program (the launch verdict refuses it
   // first; this registry hands it unjudged, as a stub can) — the start is refused by name and nothing is spawned

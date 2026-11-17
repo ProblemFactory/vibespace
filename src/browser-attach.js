@@ -58,8 +58,9 @@ const SOCKET_PATH_MAX = 103;
 const ATTACH_DROP_ENV = Object.freeze(['AGENT_BROWSER_PROFILE', 'AGENT_BROWSER_CDP', 'AGENT_BROWSER_AUTO_CONNECT', 'AGENT_BROWSER_HEADED', 'AGENT_BROWSER_EXECUTABLE_PATH', 'AGENT_BROWSER_ARGS', 'AGENT_BROWSER_PROVIDER', 'AGENT_BROWSER_SOCKET_DIR']);
 
 /** Is ONE argv item a switch the attach road forbids (the bare switch or its `=value` form)? The census and the engine's
- *  strip ask this one rule. */
-const isForbiddenSwitch = (x) => ATTACH_FORBIDDEN.some((f) => x === f || x.startsWith(f + '='));
+ *  strip ask this one rule. B-0528: in either spelling — Chromium reads `-x` as `--x` (the engine walls' `^--?` rule,
+ *  src/browser-engines.js), so an engine's single-dash `-disable-sync` reached Chrome unsaid before. */
+const isForbiddenSwitch = (x) => { const s = /^-[^-]/.test(x) ? '-' + x : x; return ATTACH_FORBIDDEN.some((f) => s === f || s.startsWith(f + '=')); };
 /** The census over ONE argv: `{ok, missing, forbidden, userDataDir}` — every required flag present, none forbidden, exactly
  *  one --user-data-dir. */
 function argvVerdict(argv) {
