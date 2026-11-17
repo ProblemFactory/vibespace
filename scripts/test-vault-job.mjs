@@ -95,6 +95,8 @@ async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir
   const owner = { conversation: { id: 'conv-a' }, sessionId: 'w-a', createdBy: 'agent', groupsSnapshot: [] };
   const create = (o) => jm.create({ kind: 'task', name: tag, cmd: { argv: [process.execPath, path.join(root, 'prog.js'), path.join(root, 'out')], cwd: root, env: o.env || {} }, owner, vault: ['TOK=vault://agent:conv-a/tok'], ...o, env: undefined }, { conversationId: 'conv-a', groups: new Set() });
   const until = async (pred, n = 400) => { for (let i = 0; i < n; i++) { try { await jm._sweep(); } catch { } if (pred()) return true; await nap(15); } return false; };
+  // a wait that SAYS its outcome, bounded in TIME against what it waits for (never a count of sweeps a slow runner exhausts): { ok, ms }
+  const untilMs = async (pred, ms) => { const t0 = Date.now(); for (;;) { try { await jm._sweep(); } catch { } if (pred()) return { ok: true, ms: Date.now() - t0 }; if (Date.now() - t0 >= ms) return { ok: false, ms: Date.now() - t0 }; await nap(15); } };
   // int374 (B-b1f5): only a whole got-<pid>.json is read; an empty one (an in-place write caught mid-way — the 2.369.373 master CI at load
   // 7.8) and a .tmp are skipped, never parsed
   const got = () => fs.readdirSync(path.join(root, 'out')).filter((f) => /^got-\d+\.json$/.test(f)).map((f) => fs.readFileSync(path.join(root, 'out', f), 'utf8')).filter((t) => t.length > 0).map((t) => JSON.parse(t));
@@ -103,7 +105,7 @@ async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir
   const uses = (id) => audit().split('\n').filter((l) => l.includes('"event":"vault-use"') && l.includes('"door":"service"') && (!id || l.includes(`Background job ${id}`))).map((l) => JSON.parse(l));
   const walk = (d, out = []) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p, out); else if (e.isFile()) out.push(fs.readFileSync(p, 'latin1')); } return out; };
   const end = () => { try { for (const t of jm._timers || []) clearInterval(t); jm.readOnly = true; jm.shutdown(); } catch { } };
-  return { root, dd, vault: v, grants, frames, journal, jm, built, create, until, got, release, audit, uses, walk, end, put: (s) => v.agentPut('agent:conv-a/tok', s) };
+  return { root, dd, vault: v, grants, frames, journal, jm, built, create, until, untilMs, got, release, audit, uses, walk, end, put: (s) => v.agentPut('agent:conv-a/tok', s) };
 }
 const procRead = (pid, f) => { try { return fs.readFileSync(`/proc/${pid}/${f}`, 'latin1'); } catch { return ''; } };
 // the wrapper's fd table: its fd 3 right after the spawn (the hub's channel — read before the wrapper's node has booted) and
@@ -167,8 +169,13 @@ async function legLocked() {
   for (let i = 0; i < 6; i++) W.jm._spawn(job, 'restart-policy');
   row(job.state === 'waiting' && job.runs.length === 0 && job.supervise.consecutiveFails === 0 && !job.supervise.parkedAt, 'six more locked starts: still waiting — never parked by a lock');
   await W.vault.unlock(PW);
-  await W.until(() => W.got().length === 1);
-  row(job.runs.length === 1 && (W.got()[0] || {}).v === S && W.uses(job.id).length === 1, 'the unlock starts it, with its value (one start, one use line)');
+  // the wait is for BOTH things the leg judges — the child's read of its value AND the hub's use line (written by the hub on its own, so it may
+  // land after the child's read) — bounded at 20 s: a child process's start and one read on a loaded runner, with the hub's audit write.
+  // The leg SAYS what it read (its three numbers and the wait's own outcome) whenever it is red (B-d24c, 2.369.406's hosted red said nothing).
+  const LOCK_WAIT_MS = 20000;
+  const w = await W.untilMs(() => W.got().length >= 1 && W.uses(job.id).length >= 1, LOCK_WAIT_MS);
+  const read = { starts: job.runs.length, valueMatches: (W.got()[0] || {}).v === S, valuesRead: W.got().length, useLines: W.uses(job.id).length, wait: w.ok ? `reached in ${w.ms} ms` : `GAVE UP after ${w.ms} ms (bound ${LOCK_WAIT_MS} ms)` };
+  row(w.ok && read.starts === 1 && read.valueMatches && read.useLines === 1, 'the unlock starts it, with its value (one start, one use line)', read);
   W.jm.stop(job); W.end();
   return rows;
 }
