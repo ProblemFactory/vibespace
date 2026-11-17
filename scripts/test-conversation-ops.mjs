@@ -207,7 +207,7 @@ for (const kind of [{ kind: 'human', actBy: 'human:abc' }, { kind: 'agent', cid:
 
 console.log('③ the wiring pins');
 {
-  const wh = read('src/ws-handler.js'), srv = read('server.js'), ar = read('src/agent-routes.js');
+  const wh = read('src/ws-handler.js'), srv = read('server.js'), ar = read('src/agent-routes.js'), tgw = read('src/server/task-groups-wiring.js'); // tgw: the Task Groups' routes, «make room» 2026-11-17: moved whole out of server.js
   ok(/case 'create': \{\n\s+await convOps\.openConversation\(data, byOfWs\(ws\), \{ ws, attachedSessions \}\);/.test(wh)
     && /case 'rename-session': \{\n\s+convOps\.renameConversation\(data, data\.name, byOfWs\(ws\)\);/.test(wh)
     && /case 'kill': \{\n\s+await convOps\.endConversation\(data, byOfWs\(ws\), \{ reply: \(m\) => ws\.send\(JSON\.stringify\(m\)\) \}\);/.test(wh), 'the three ws cases call the seams (create / rename-session / kill)');
@@ -220,7 +220,7 @@ console.log('③ the wiring pins');
   ok(kb.length > 5000 && !/\bws\./.test(kb) && /reply\(\{ type: 'killed', sessionId: requestedKillId, resolvedId: data\.sessionId, ok: true \}\)/.test(kb) && /by: actBy \|\| 'system:session-end'/.test(kb) && /data\.sessionId = eid; break/.test(kb),
     "the kill body: no requester socket left in it (reply / actBy), its stale-id fallback kept verbatim");
   ok(/ConversationOps\.provide\(convOpsOwn\);/.test(wh) && /const convOps = ConversationOps\.forDeps\(convOpsOwn\);/.test(wh) && (wh.match(/require\('\.\/server\/conversation-ops\.js'\)/g) || []).length === 1, 'ws-handler provides its create / rename / end to the shared seams (one require) and binds its own instance');
-  ok(/convOps\.provide\(\{ tasks, spendGuard \}\);/.test(srv) && /task: convOps\.bindConversation\(\{ sessionKey: req\.body\?\.sessionKey \}, req\.params\.id, /.test(srv) && !/tasks\.bind\(req\.params\.id/.test(srv), "server.js: the owner's bind route calls the seam; the task store and THE spend guard are provided");
+  ok(/convOps\.provide\(\{ tasks, spendGuard \}\);/.test(tgw) && /task: convOps\.bindConversation\(\{ sessionKey: req\.body\?\.sessionKey \}, req\.params\.id, /.test(tgw) && !/tasks\.bind\(req\.params\.id/.test(srv + tgw) && /task-groups-wiring\.js'\)\.mountRoutes\(\{[^}\n]*\bspendGuard \}\)/.test(srv), "server.js: the owner's bind route calls the seam; the task store and THE spend guard are provided (the routes are src/server/task-groups-wiring.js mountRoutes, server.js hands it spendGuard)");
   ok(/convOps\.forDeps\(\{ tasks \}\)\.bindConversation\(\{ sessionKey: sk \}, bind\.id,/.test(ar) && /r = await convOps\.inviteToGroup\(b\.group, members, \{ kind: 'agent', cid: c\.cid \}, \{ ge: c\.ge,/.test(ar) && /convOps\.provide\(\{ groupsEngine \}\);/.test(ar) && !/c\.ge\.invite\(/.test(ar), "agent-routes: the manager's bind and an agent's group invite call the seams; the groups engine is provided");
   ok((read('src/server/conversation-ops.js').match(/\bcreateHeadless\s*\(/g) || []).length === 1, 'conversation-ops holds ONE headless-create call (the spend census row `headless-open` — test-spend-paths)');
 }

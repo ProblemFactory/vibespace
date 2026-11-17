@@ -567,7 +567,7 @@ ok(!/\/\/ src\/ws-handler\.js|\/\/ src\/ws-create\.js|\/\/ src\/hosts\.js|\/\/ s
 //    commit that explains why.
 {
   const serverLines = read('server.js').split('\n').length;
-  ok(serverLines <= 1907, `server.js stays bootstrap-sized (${serverLines} ≤ 1907 lines — new mechanisms go in src/server/*; lowered from 2100 by lane dc-seams-server: the editor routes, the usage attribution log and the setup-token sweep moved out; 1905 on its base + the doc-engine and artifact-registry wiring lines of 2.369.215 at int217)`);
+  ok(serverLines <= 1907, `server.js stays bootstrap-sized (${serverLines} ≤ 1907 lines, ${1907 - serverLines} of headroom — new mechanisms go in src/server/*; lowered from 2100 by lane dc-seams-server: the editor routes, the usage attribution log and the setup-token sweep moved out; 1905 on its base + the doc-engine and artifact-registry wiring lines of 2.369.215 at int217)`);
   // §48 (2.369.134): CODE APPENDED AFTER A MID-LINE // IS A COMMENT. The mounts-plugins wiring call in server.js
   // carried three chunk notes mid-line; one chunk appended `getTelemetry: …` after them (never wired, the
   // default null hid it) and the r-fix moved `activeSessions,` after them too — every browser route answered
@@ -3734,7 +3734,7 @@ console.log('§71 a raw secret is compared only through sameToken');
   ok(files68.length > 300 && found68.length === 0, `§71 no compare of a raw secret outside sameToken in server.js + src (${files68.length} files)${found68.length ? ' — ' + found68.join(' | ') : ''}`);
   const pt = read('src/pairing-token.js');
   ok(/function sameToken\(presented, secret\) \{[^}]*tokenMatches\(presented, tokenHash\(secret\)\)/.test(pt) && /module\.exports = \{[^}]*\bsameToken\b/.test(pt), '§71 sameToken is tokenMatches over the secret\'s digest, exported from the one door');
-  const SITES68 = ['server.js', 'src/routes/editor.js', 'src/agent-routes.js', 'src/agent-routes/status.js', 'src/server/window-targets-engine.js', 'src/server/mounts-plugins-wiring.js', 'src/server/exit-routes.js', 'src/routes/browser.js', 'src/server/otel-ingest.js'];
+  const SITES68 = ['src/server/task-groups-wiring.js' /* «make room» 2026-11-17: server.js's one site (GET /api/tasks/:id/progress, a vsst_ bearer) moved there with the Task Groups' routes */, 'src/routes/editor.js', 'src/agent-routes.js', 'src/agent-routes/status.js', 'src/server/window-targets-engine.js', 'src/server/mounts-plugins-wiring.js', 'src/server/exit-routes.js', 'src/routes/browser.js', 'src/server/otel-ingest.js'];
   const noDoor = SITES68.filter((f) => !/\bsameToken\(/.test(strip68(read(f))));
   ok(noDoor.length === 0 && (strip68(read('src/agent-routes.js') + read('src/agent-routes/status.js')).match(/\bsameToken\(/g) || []).length >= 2, `§71 every lookup site compares through sameToken${noDoor.length ? ' — missing: ' + noDoor.join(' ') : ''}`);
   const { sameToken } = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/pairing-token.js'));
@@ -4692,7 +4692,7 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
   };
   const pointers82 = (md) => [...md.matchAll(/⇒\s*`?(?:docs\/)?(kb-[A-Za-z0-9-]+?)(?:\.md)?(?=[^A-Za-z0-9-]|$)/g)].map((m) => m[1]);
   const md = fs.readFileSync(path.join(REPO, 'CLAUDE.md'), 'utf8'), bytes = Buffer.byteLength(md);
-  ok(bytes <= CLAUDE_MD_MAX_BYTES, `§82 ① CLAUDE.md is ${bytes} bytes ≤ ${CLAUDE_MD_MAX_BYTES} (the ratchet; the law caps it at 100 000) — a per-file or per-incident line goes to its kb INDEX head`);
+  ok(bytes <= CLAUDE_MD_MAX_BYTES, `§82 ① CLAUDE.md is ${bytes} bytes ≤ ${CLAUDE_MD_MAX_BYTES}, ${CLAUDE_MD_MAX_BYTES - bytes} of headroom (the ratchet; the law caps it at 100 000) — a per-file or per-incident line goes to its kb INDEX head`);
   const ptrs = [...new Set(pointers82(md))], dangling = ptrs.filter((k) => !fs.existsSync(path.join(REPO, 'docs', k + '.md')));
   ok(ptrs.includes('kb-file-structure') && ptrs.includes('kb-bugfix-invariants') && dangling.length === 0, `§82 ② every ⇒ kb-… pointer in CLAUDE.md names a file in docs/ (${ptrs.length}: ${ptrs.join(' ')})${dangling.length ? ' — DANGLING: ' + dangling.join(' ') : ''}`);
   // the before-text is read only when some block has a retirement (its sha leg); a depth-1 checkout says SKIP by name

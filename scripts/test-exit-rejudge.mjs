@@ -60,7 +60,8 @@ function census(T) {
   const TASK_WRITE = /this\._state\.tasks\[[^\]]*\]\s*=(?!=)|delete\s+this\._state\.tasks\[|\.sessions\s*=(?!=)|\.sessions\.(?:push|splice|pop|shift)\(|\.folders\s*=(?!=)|\.archived\s*=(?!=)|this\._state\s*=(?!=)/;
   const TASK_EXEMPT = { constructor: 'boot', _load: 'boot', _migrateGroups: 'boot (the constructor\'s one-time migration)' };
   for (const m of methodsOf(T.tasks)) if (TASK_WRITE.test(m.body) && !TASK_EXEMPT[m.name] && !/this\._notify\([^)]*\)/.test(m.body)) v.push(`task-groups.js ${m.name}() moves membership without this._notify()`);   // lane task-group-fanout: _notify(ids) names the groups
-  if (!/const tasks = new TaskGroupManager\(\{[\s\S]{0,900}?onChange: \(ch\) => \{[\s\S]{0,400}?exitProxy\.rejudgeAll\(/.test(T.server)) v.push('server.js: the TaskGroupManager onChange does not call exitProxy.rejudgeAll');
+  // «make room» 2026-11-17: moved whole out of server.js: the store is built in src/server/task-groups-wiring.js createStore — server.js hands it the exitProxy getter
+  if (!/const tasks = new TaskGroupManager\(\{[\s\S]{0,900}?onChange: \(ch\) => \{[\s\S]{0,400}?exitProxy\(\)\.rejudgeAll\(/.test(T.tgw) || !/task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bexitProxy: \(\) => exitProxy\b/.test(T.server)) v.push('server.js: the TaskGroupManager onChange does not call exitProxy.rejudgeAll (src/server/task-groups-wiring.js createStore, or the getter server.js hands it)');
   if (!/\nhosts\.onReachChange = \(why\) => exitProxy\.rejudgeAll\(/.test(T.server)) v.push('server.js: hosts.onReachChange is not exitProxy.rejudgeAll');
   // C3 — the conversation's END: every removal from the live map tells the manager first
   for (const [file, src] of Object.entries(T.sessionFiles)) {
@@ -101,7 +102,7 @@ const sessionFileList = () => {
   return out;
 };
 const TEXTS = () => ({
-  hosts: read('src/hosts.js'), tasks: read('src/task-groups.js'), server: read('server.js'), exit: read('src/exit-proxy.js'),
+  hosts: read('src/hosts.js'), tasks: read('src/task-groups.js'), server: read('server.js'), tgw: read('src/server/task-groups-wiring.js'), exit: read('src/exit-proxy.js'),
   dialPairing: read('src/server/dial-pairing.js'), exitRoutes: read('src/server/exit-routes.js'),
   sessionFiles: Object.fromEntries(sessionFileList().map((f) => [f, read(f)])),
 });

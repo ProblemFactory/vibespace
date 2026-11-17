@@ -229,8 +229,8 @@ try {
     ex.rejudgeAll('task-groups'); await sleep(200);
     check('…the last holder judged out ⇒ the forward stops (the device SOCKS unserved)', !ex.list().find((m) => m.id === 'host-mac').active && unserved === u0 + 1 && oS.s.destroyed);
     // WIRING: the Task Group store's onChange (server.js) calls it on every change
-    const srvSrc = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-    check('WIRING (open): server.js\'s TaskGroupManager onChange calls exitProxy.rejudgeAll(\'task-groups\')', /onChange: \(ch\) => \{\n[^\n]*taskFanout\.note\(ch && ch\.ids\);[^\n]*\n\s*try \{ exitProxy\.rejudgeAll\('task-groups'\); \} catch \{ \}/.test(srvSrc));   // lane task-group-fanout: after the fan-out's note (the broadcast coalesces, the re-judge does not)
+    const srvSrc = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), tgwSrc = fs.readFileSync(path.join(REPO, 'src/server/task-groups-wiring.js'), 'utf8'); // tgwSrc: the store, «make room» 2026-11-17: moved whole out of server.js
+    check('WIRING (open): server.js\'s TaskGroupManager onChange calls exitProxy.rejudgeAll(\'task-groups\') — the store is built in src/server/task-groups-wiring.js, server.js hands it the exitProxy getter', /onChange: \(ch\) => \{\n[^\n]*taskFanout\.note\(ch && ch\.ids\);[^\n]*\n\s*try \{ exitProxy\(\)\.rejudgeAll\('task-groups'\); \} catch \{ \}/.test(tgwSrc) && /task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bexitProxy: \(\) => exitProxy\b/.test(srvSrc));   // lane task-group-fanout: after the fan-out's note (the broadcast coalesces, the re-judge does not)
     ex.groupsOf = null; ex.sessionsMap = () => new Map([['w1', S]]);
     await ex.setAccess('host-mac', { use: { mode: 'everyone' } });
   }

@@ -563,7 +563,7 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
     const wordVia = (src) => { const w = wireOf(src); let thunk = () => null; try { thunk = w ? new Function('hosts', `return (${w});`)(HOSTS) : thunk; } catch { /* no wiring */ } REG.configure({ ...regCfg([['sH', sH]]), hosts: thunk }); const v = REG.listFor('sH'); REG.configure(regCfg()); return (v.hostNames || {})[HID] || null; };
     ok(wireOf(srvSrc) === '() => hosts', 'census: server.js configures the registry with `hosts: () => hosts` — `hosts` the HostManager the host pickers read');
     ok(wordVia(srvSrc) === 'gpu1', 'through server.js\'s own wiring (its words over a stub hosts registry) ⇒ listFor names the machine «gpu1»', wordVia(srvSrc));
-    const noDep = srvSrc.replace(' hosts: () => hosts,', '');
+    const noDep = srvSrc.split('\n').map((l) => (l.startsWith("require('./src/server/artifact-registry.js').configure(") ? l.replace(' hosts: () => hosts,', '') : l)).join('\n');   // the registry's line only («make room» 2026-11-17: moved whole out of server.js, the Task Groups' context sync is handed `hosts: () => hosts` too, on an earlier line)
     ok(noDep !== srvSrc && wireOf(noDep) === null && wordVia(noDep) === null, 'CONTROL the dep removed from server.js ⇒ the census reds and listFor names no machine (the list reads «' + HID + ':») — RED', wordVia(noDep));
     // r6 (U2 + U3) → r7 (T1 · T2 · T5): THE ASK STORE AT THE REBUILD, read by the ask route's own answer to «whose ask is
     // this?» (src/agent-routes/status.js asksOf: the route's key — a pending fork's placeholder —, the route's own items,

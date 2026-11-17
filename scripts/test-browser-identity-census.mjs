@@ -842,15 +842,15 @@ console.log('— ⑦ A TASK GROUP CHANGE (r4): a conversation removed from the T
   groupsOf.set(KT, []); const rj3 = k.rejudgeAll('task-groups-changed');
   ok(rj3.profiles === 1 && rj3.detached.length === 1 && k.leasesOn(ps.id).some((l) => l.browserKey === KT), '⑦ a session-row list is not walked by a group change (T keeps p-session-only, loses p-group-med)', rj3);
   // THE WIRING: server.js's tasks onChange calls the ONE hook on the keeper singleton
-  const ssrc = stripComments(read('server.js'));
+  const ssrc = stripComments(read('src/server/task-groups-wiring.js')); // the store's onChange, «make room» 2026-11-17: moved whole out of server.js (server.js hands it the sessionStatus getter)
   // lane task-group-fanout: the broadcast is the fan-out's coalesced delta (taskFanout.note) — the re-judges stay synchronous
-  const hook = /onChange: \(ch\) => \{[\s\S]*?taskFanout\.note\(ch && ch\.ids\);[\s\S]*?const rj = require\('\.\/src\/server\/browser-keeper\.js'\)\.keeper\(\)\?\.rejudgeAll\?\.\('task-groups-changed'\);[\s\S]*?for \(const d of \(rj && rj\.detached\) \|\| \[\]\)[\s\S]*?sessionStatus\.pushNotice\(sessionStatusKey\(s, d\.sessionId\), \{ \.\.\.require\('\.\/src\/browser-profiles\.js'\)\.profileChangeNotice\(\{ was: label, now: '', by: 'user', handles: \[\] \}\), kind: 'browser-profile' \}\)[\s\S]*?\n  \},/;
-  ok(hook.test(ssrc), '⑦ server.js: the task store\'s onChange (after the tasks-updated broadcast) calls keeper().rejudgeAll(\'task-groups-changed\') and pushes each detached conversation the PATCH\'s own browser-profile notice (heard at its next message)');
+  const hook = /onChange: \(ch\) => \{[\s\S]*?taskFanout\.note\(ch && ch\.ids\);[\s\S]*?const rj = require\('\.\/browser-keeper\.js'\)\.keeper\(\)\?\.rejudgeAll\?\.\('task-groups-changed'\);[\s\S]*?for \(const d of \(rj && rj\.detached\) \|\| \[\]\)[\s\S]*?sessionStatus\(\)\.pushNotice\(sessionStatusKey\(s, d\.sessionId\), \{ \.\.\.require\('\.\.\/browser-profiles\.js'\)\.profileChangeNotice\(\{ was: label, now: '', by: 'user', handles: \[\] \}\), kind: 'browser-profile' \}\)[\s\S]*?\n    \},/;
+  ok(hook.test(ssrc) && /task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bsessionStatus: \(\) => sessionStatus\b/.test(read('server.js')), '⑦ server.js: the task store\'s onChange (built in src/server/task-groups-wiring.js) (after the tasks-updated broadcast) calls keeper().rejudgeAll(\'task-groups-changed\') and pushes each detached conversation the PATCH\'s own browser-profile notice (heard at its next message)');
   ok((stripComments(read('src/server/browser-keeper.js')).match(/function rejudgeAll\(/g) || []).length === 1 && /rejudgeLeases\(p\.id, why, \{ quietUndecided: true \}\)/.test(read('src/server/browser-keeper.js')), '⑦ the keeper: ONE rejudgeAll over rejudgeLeases (the §3.1 ONE re-judge), quiet on the undecided');
   // CONTROLS: (m) server.js without the hook line fails the wiring pin; (m′) a keeper copy that skips task-row lists leaves T's lease standing
-  const noHook = read('server.js').replace(/const rj = require\('\.\/src\/server\/browser-keeper\.js'\)\.keeper\(\)\?\.rejudgeAll\?\.\('task-groups-changed'\);/, 'const rj = null;');
-  const noHookPath = M.write('server.js', noHook, 'no-rejudge-hook');
-  ok(noHook !== read('server.js') && !hook.test(stripComments(fs.readFileSync(noHookPath, 'utf8'))), 'CONTROL (m): server.js with the hook line removed (a copy) fails the wiring pin — RED');
+  const noHook = read('src/server/task-groups-wiring.js').replace(/const rj = require\('\.\/browser-keeper\.js'\)\.keeper\(\)\?\.rejudgeAll\?\.\('task-groups-changed'\);/, 'const rj = null;');
+  const noHookPath = M.write('src/server/task-groups-wiring.js', noHook, 'no-rejudge-hook');
+  ok(noHook !== read('src/server/task-groups-wiring.js') && !hook.test(stripComments(fs.readFileSync(noHookPath, 'utf8'))), 'CONTROL (m): server.js\'s store wiring (src/server/task-groups-wiring.js) with the hook line removed (a copy) fails the wiring pin — RED');
   const ksrc = read('src/server/browser-keeper.js');
   const nk = "      if (!row || ![...row.to, ...row.except].some((e) => e.kind === 'group')) continue;";   // lane grants-unify: the walk's filter reads the store's row
   ok(ksrc.split(nk).length === 2, '⑦ control setup: the walk\'s one filter line is found once');

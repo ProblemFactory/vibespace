@@ -313,7 +313,8 @@ function routeCensus(src) {
     const regs = [];
     lines.forEach((l, i) => { const m = ROUTE_RE.exec(l); if (m) regs.push({ i, method: m[1].toUpperCase(), path: m[3] }); });
     // a routes MODULE's registration call (`….registerEditorRoutes(app, …)`, lane dc-seams-server) ends the handler above it too
-    const bounds = lines.map((l, i) => (ROUTE_RE.test(l) || /\.register\w*\(app\b/.test(l) ? i : -1)).filter((i) => i >= 0);
+    // «make room» 2026-11-17: moved whole out of server.js: the Task Groups' routes module call (task-groups-wiring.js mountRoutes) ends it as the block's first route did
+    const bounds = lines.map((l, i) => (ROUTE_RE.test(l) || /\.register\w*\(app\b/.test(l) || /\.mountRoutes\(\{ app\b/.test(l) ? i : -1)).filter((i) => i >= 0);
     const nextBound = (i) => { const b = bounds.find((x) => x > i); return b === undefined ? lines.length : b; };
     for (let k = 0; k < regs.length; k++) {
       // the handler = the text up to the next registration, PLUS every same-file function it calls (a bare `name(` —
@@ -1887,7 +1888,7 @@ const I_RECV = {
   'data/bin/codex-chat-wrapper.js|data': ['carrier', 'the task context the codex wrapper injects (Activity notes, a status) — its log prints the LENGTH'],
   'src/server/stdout/claude-stream-json.js|po': ['carrier', 'the sender name of a message the CLI received (a job\'s `Background Work · <name>`) — the live chat card'],
   // ── not a record: what each is ──
-  'src/harnesses/claude-oat-expiry.js|a': ['account', 'an account / pool name'], 'server.js|h': ['host', 'a machine name'],
+  'src/harnesses/claude-oat-expiry.js|a': ['account', 'an account / pool name'], 'server.js|h': ['host', 'a machine name'], 'src/server/task-groups-wiring.js|h': ['host', 'a machine name (the context sync\'s notices; «make room» 2026-11-17: moved whole out of server.js)'],
   'src/accounts.js|a': ['account', 'an account'], 'src/accounts.js|target': ['account', 'an account'],
   'src/server/account-usage-routes.js|row': ['account', 'a pool member\'s roster row (accounts.poolRoster) — its account name in the gather route\'s refusal (lane pool-silent-members acceptance r2)'],
   'src/lib/aes-fallback.js|key.algorithm': ['crypto key', 'the imported AES key\'s algorithm name (AES-CBC / AES-ECB) in a mismatch Error — a constant of the fallback, never a record (lane mac-ard-signin; int259 seam)'],
