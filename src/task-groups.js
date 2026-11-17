@@ -271,6 +271,8 @@ function slugify(title) {
 // sends the id; anything else is null (never a throw out of a patch).
 // lane lg-group-parents (B-91a7): at most this many parents a group names (the owner's rule ①: several = the union)
 const PARENTS_MAX = 8;
+// lane lg-group-parents U4: the parents' standing rules a child's injection tells — each at most, and in all at most (bytes)
+const INHERITED_RULE_MAX = 1500, INHERITED_RULES_MAX = 3000;
 // the U2 read (7): a parent WIDENS what a child may use — a bearer (an agent, a job, an automation key) never sets one, sign-in on or off
 const PARENTS_OWNER_ONLY = () => Object.assign(new Error("a Task Group's parents are the owner's to set (the group's settings, signed in) — a bearer never sets them"), { code: 'parents_owner_only' });
 function sanitizeBrowserProfileId(v) { const s = typeof v === 'string' ? v.trim() : ''; return /^bp-[0-9a-f]{8}$/.test(s) ? s : null; }
@@ -993,7 +995,7 @@ class TaskGroupManager {
 
   // the rows a group's injection tells, in order: its own path rows, then each referenced group's shareable rows
   // (read-only here unless shared 可写) — [{ row, x (resolution), from (null | the referenced group), refNote }]
-  _toldRows(t) {
+  _toldRows(t, { skipFrom = null } = {}) {
     const own = this._ctxRows(t), res = this._res(t);
     const out = [];
     own.forEach((r, i) => { if (!r.ref) out.push({ row: r, x: res[i], from: null, k: r.path }); });
@@ -1007,6 +1009,77 @@ class TaskGroupManager {
       out.push({ row: r, x: { ref: true }, from: g, head: true, n: shared.length, k: '@' + r.ref });
       out.push(...shared);
     }
+    // lane lg-group-parents U4: every ANCESTOR's rows marked 含子组 (TC.childRows) ride here READ-ONLY — nearest parent first,
+    // one head each («inherited from the parent Task Group X»); an ancestor that marked none adds nothing. A row that points
+    // where a row already told points (the group's own, a reference's, a nearer parent's) is told ONCE — the nearer one wins
+    // (the U4 read, 4: never «you may edit it» and «read-only» for one path); `skipFrom` = a multi-group injection's own groups
+    // (their rows are told as themselves — the U4 read, 5)
+    const where = (it) => (it.x && it.x.abs ? 'abs:' + it.x.abs : 'path:' + (it.row && it.row.path));
+    const told = new Set(out.filter((it) => !it.head && !it.gone && it.row && it.row.path).map(where));
+    for (const aid of this.ancestorsOf([t.id])) {
+      if (skipFrom && skipFrom.has(aid)) continue;
+      const a = this._state.tasks[aid], ar = this._ctxRows(a);
+      if (!ar.some((sr) => sr && !sr.ref && sr.children === true)) continue;
+      const ares = this._res(a), rows = [];
+      ar.forEach((sr, i) => {
+        if (!sr || sr.ref || sr.children !== true) return;
+        const it = { row: { ...TC.childRows([sr])[0], fromParent: true }, x: ares[i], from: a, k: `^${a.id}:${sr.path}` };
+        if (told.has(where(it))) return;
+        told.add(where(it)); rows.push(it);
+      });
+      if (!rows.length) continue;
+      out.push({ row: { parent: a.id }, x: { ref: true }, from: a, head: true, n: rows.length, k: '^' + a.id });
+      out.push(...rows);
+    }
+    return out;
+  }
+  /** lane lg-group-parents (the U4 read, BLOCKER 1): does this group's injection tell ANY Context row — its own, or one a parent
+   *  gives it (a child with no table of its own is still told its parents' 含子组 rows)? */
+  _hasTold(t) {
+    if (!t) return false;
+    if (this._ctxRows(t).length) return true;
+    return this.ancestorsOf([t.id]).some((aid) => this._ctxRows(this._state.tasks[aid]).some((r) => r && !r.ref && r.children === true));
+  }
+  /** lane lg-group-parents (the U4 read, MAJOR 2): every DESCENDANT of `id` (breadth-first, archived ones too) — a lineage move
+   *  (a parent added / dropped / archived / removed) changes what each is told, so each one's content instant moves. */
+  _descendantsOf(id) {
+    const seen = new Set([id]), out = [], queue = [id];
+    while (queue.length) for (const c of this.childrenOf(queue.shift())) if (!seen.has(c)) { seen.add(c); out.push(c); queue.push(c); }
+    return out;
+  }
+  _touchDescendants(id, at) { for (const d of this._descendantsOf(id)) { const g = this._state.tasks[d]; if (g) g.contentUpdatedAt = Math.max(g.contentUpdatedAt || 0, at); } }
+  /** lane lg-group-parents U4: the standing instructions of every ANCESTOR (nearest first) — [{ id, title, objective }], only
+   *  those that hold any (the owner's «继承自 X»). */
+  inheritedRulesOf(tOrId, { skip = null } = {}) {
+    const t = this._groupOf(tOrId);
+    if (!t) return [];
+    return this.ancestorsOf([t.id]).filter((aid) => !(skip && skip.has(aid))).map((aid) => this._state.tasks[aid]).filter((a) => a && String(a.objective || '').trim()).map((a) => ({ id: a.id, title: String(a.title || a.id), objective: String(a.objective).trim() }));
+  }
+  /** The inherited rules as the injection tells them: each ancestor's, bounded (INHERITED_RULE_MAX each, INHERITED_RULES_MAX in
+   *  all — a parent's long text never evicts the child's own table); one past the bound is NAMED, never dropped silently. */
+  _inheritedRuleLines(t, { skip = null, room = null, toldAbove = null } = {}) {
+    // `skip`: a multi-group injection's own groups and the parents already told · `room`: ONE byte budget for the WHOLE injection
+    // (the U4 read, 3 — a multi-group payload shares it; every heading and line counted) · `toldAbove`: the parents an earlier
+    // group of the same injection told (named, never repeated)
+    const R = room || { bytes: INHERITED_RULES_MAX };
+    const list = this.inheritedRulesOf(t, { skip });
+    const out = [], untold = [];
+    const B = (s) => Buffer.byteLength(s, 'utf-8') + 1;
+    const name = (a) => `"${agentLine(a.title)}" (${agentLine(a.id)})`;
+    const names = (xs) => xs.slice(0, 5).map(name).join(', ') + (xs.length > 5 ? ` and ${xs.length - 5} more` : '');
+    for (const a of list) {
+      const head = `## Standing rules inherited from the parent Task Group ${name(a)}`;
+      const body = agentBlock(a.objective);
+      const left = R.bytes - B('') - B(head);
+      if (left < 200) { untold.push(a); continue; }
+      const cap = Math.min(INHERITED_RULE_MAX, left - 80);
+      const bytes = Buffer.byteLength(body, 'utf-8');
+      const text = bytes > cap ? Buffer.from(body, 'utf-8').subarray(0, cap).toString('utf-8').replace(/\uFFFD+$/, '') + ` … (the rest — ${bytes - cap} bytes — is cut here)` : body;
+      out.push('', head, text);
+      R.bytes -= B('') + B(head) + B(text);
+    }
+    if (untold.length) { const l = `- also inherits the standing rules of ${names(untold)} — not told here (no room left)`; out.push('', l); R.bytes -= B('') + B(l); }
+    if (toldAbove && toldAbove.length) { const l = `- also inherits the standing rules of ${names(toldAbove)} (told above)`; out.push('', l); R.bytes -= B('') + B(l); }
     return out;
   }
 
@@ -1019,6 +1092,7 @@ class TaskGroupManager {
   /** ONE row's head line (verify r5 F2: a path, a note, a file name are a member's words — pieces through the belt). */
   _rowHead(r, x, { full = false, shown = null, from = null } = {}) {
     if (r.ref) return `- The Context table of another Task Group — "${agentLine(from ? from.title : r.ref)}" (${agentLine(r.ref)})${r.note ? ` — ${agentLine(r.note)}` : ''}`;
+    if (r.parent) return `- Inherited from the parent Task Group "${agentLine(from ? from.title : r.parent)}" (${agentLine(r.parent)})`;   // lane lg-group-parents U4
     const isDir = x && x.kind === 'dir';
     const where = x && x.abs ? agentLine(shown || x.abs) + (isDir ? '/' : '') : agentLine(r.path);
     const verbs = [];
@@ -1026,7 +1100,7 @@ class TaskGroupManager {
     if (tags.includes('discover')) verbs.push('conversations started here auto-join');
     if (tags.includes('notes')) verbs.push('agents keep the group\'s shared notes here');
     if (tags.includes('readonly')) verbs.push('read-only: never modify it');
-    if (from) verbs.push(`from the Task Group "${agentLine(from.title)}"${tags.includes('readonly') ? '' : ', you may edit it'}`);
+    if (from) verbs.push(r.fromParent ? `inherited from the parent Task Group "${agentLine(from.title)}"` : `from the Task Group "${agentLine(from.title)}"${tags.includes('readonly') ? '' : ', you may edit it'}`);
     let state = '';
     if (!x || (!x.abs && x.kind === 'missing')) state = ' — not there now';
     else if (x.kind === 'missing') state = ' — not there now';
@@ -1094,15 +1168,15 @@ class TaskGroupManager {
    * does not fit; a stepped row's line says what it needed and what it is told instead. → { lines, used, rows: [{ row,
    * x, from, level, chosen, need, left, files }] } — the preview and the injection read the same plan.
    */
-  _ctxPlan(t, budget, { ctxBase = null, gid = '', only = null } = {}) {
-    const told = this._toldRows(t).filter((it) => !only || only.has(it.k));
+  _ctxPlan(t, budget, { ctxBase = null, gid = '', only = null, skipFrom = null } = {}) {
+    const told = this._toldRows(t, { skipFrom }).filter((it) => !only || only.has(it.k));
     const notesAbs = this.contextDirOf(t);
     const kb = (n) => (n < 1024 ? n + ' B' : (n / 1024).toFixed(1).replace(/\.0$/, '') + ' KB');
     // each told row asks TC.planRows (THE step-down rule) through a lazy cost: a level is rendered only when the plan asks
     // it, at the bytes left then (a contents walk stops reading past them and answers what it WOULD need)
     const items = told.map((it) => {
       if (it.head || it.gone) {
-        const line = this._rowHead(it.row, null, { from: it.from }) + (it.gone ? ' — that group no longer exists' : it.n ? ` — ${it.n} row${it.n === 1 ? '' : 's'} it shares, below:` : ' — it shares no rows yet');
+        const line = this._rowHead(it.row, null, { from: it.from }) + (it.gone ? ' — that group no longer exists' : it.row.parent ? ` — ${it.n} row${it.n === 1 ? '' : 's'} it gives its child groups, below:` : it.n ? ` — ${it.n} row${it.n === 1 ? '' : 's'} it shares, below:` : ' — it shares no rows yet');
         return { it, kind: 'ref', chosen: 'note', shown: null, cache: new Map([['note', { lines: [line], bytes: Buffer.byteLength(line, 'utf-8') + 1 }]]) };
       }
       const shown = this._shown(it.x, ctxBase, notesAbs);
@@ -1145,7 +1219,7 @@ class TaskGroupManager {
 
   /** The Context block as the injection prints it (heading + plan lines), or [] (no rows). */
   _ctxBlock(t, budget, { ctxBase = null, gid = '', heading = '## Context' } = {}) {
-    if (!this._ctxRows(t).length) return { lines: [], plan: null };
+    if (!this._hasTold(t)) return { lines: [], plan: null };   // lane lg-group-parents (the U4 read, 1): a parent's rows count
     const plan = this._ctxPlan(t, budget, { ctxBase, gid });
     return { lines: ['', `${heading} (each row: path — note (what it is for); told at the depth the group chose, within ${(budget / 1024).toFixed(1).replace(/\.0$/, '')} KB)`, '', ...plan.lines], plan };
   }
@@ -1156,7 +1230,10 @@ class TaskGroupManager {
    *  it OFF the main thread first (readSignatures) and asks signatureFact; this string form is the same answer. */
   contextSignature(tOrId) { return this.signatureFact(tOrId).sig; }
 
-  _sigKey(t) { return 'ctx:' + t.id + ':' + JSON.stringify(this._ctxRows(t).map((r) => [r.path || '@' + r.ref, r.tell || ''])); }
+  _sigKey(t) {
+    const inh = this._toldRows(t).filter((it) => it.row && it.row.fromParent).map((it) => [it.k, it.row.tell || '']);   // lane lg-group-parents: a parent's rows are read too
+    return 'ctx:' + t.id + ':' + JSON.stringify(this._ctxRows(t).map((r) => [r.path || '@' + r.ref, r.tell || ''])) + (inh.length ? ':^' + JSON.stringify(inh) : '');
+  }
 
   /** the off-thread reader the signature walks through (SafeFs — the server's pool) or null (a suite, a CLI: the old
    *  synchronous walk, byte-identical — scripts/test-task-group-fanout.mjs replays it as the control) */
@@ -1200,7 +1277,7 @@ class TaskGroupManager {
    */
   signatureFact(tOrId, { after = null } = {}) {
     const t = this._groupOf(tOrId);
-    if (!t || !this._ctxRows(t).length) return { sig: '', stale: false };
+    if (!t || !this._hasTold(t)) return { sig: '', stale: false };
     const key = this._sigKey(t);
     const hit = this._sigCache && this._sigCache.get(key);
     const take = (h) => {
@@ -1265,7 +1342,7 @@ class TaskGroupManager {
     const list = [];
     for (const g of Array.isArray(groups) ? groups : []) {
       const t = this._groupOf(g && typeof g === 'object' ? g.id : g);
-      if (!t || !this._ctxRows(t).length) continue;
+      if (!t || !this._hasTold(t)) continue;
       const hit = this._sigCache && this._sigCache.get(this._sigKey(t));
       const mark = stale && Object.prototype.hasOwnProperty.call(stale, t.id) ? stale[t.id] : null;
       if (mark == null && hit && Date.now() - hit.at < 4000) continue;
@@ -1281,7 +1358,7 @@ class TaskGroupManager {
    *  files, the old answer's shape) and every row's files. Paths as the agent reads them (a remote session's synced copy). */
   contextIndexOf(id, ctxBase = null, { offLoop = false } = {}) {
     const t = this.get(id);
-    if (!t || !this._ctxRows(t).length) return null;
+    if (!t || !this._hasTold(t)) return null;
     const notesAbs = this.contextDirOf(t);
     const rows = [];
     // lane task-group-fanout: `offLoop` (the agent route, after readWalks) — a folder still being read is listed as last
@@ -1302,7 +1379,7 @@ class TaskGroupManager {
   readWalks(id, { boundMs = this._sigBoundMs } = {}) {
     const sf = this._sigReader();
     const t = this._state.tasks[id];
-    if (!sf || !t || !this._ctxRows(t).length) return null;
+    if (!sf || !t || !this._hasTold(t)) return null;
     const dirs = new Set(this._toldRows(t).filter((it) => !it.head && !it.gone && it.x && it.x.kind === 'dir' && it.x.abs).map((it) => it.x.abs));
     const notes = this.contextDirOf(t);
     if (notes) dirs.add(notes);
@@ -1574,11 +1651,12 @@ class TaskGroupManager {
     const rows = plan ? plan.rows.map((r) => ({
       i: r.from ? null : own.findIndex((o) => (r.ref ? o.ref === r.row.ref : !o.ref && o.path === r.row.path)),
       from: r.from ? { id: r.from.id, title: r.from.title } : null,
-      path: r.row.ref ? null : r.row.path, ref: r.row.ref || null, note: r.row.note || '',
+      path: r.row.ref || r.row.parent ? null : r.row.path, ref: r.row.ref || null, note: r.row.note || '',
+      ...(r.row.parent ? { parent: r.row.parent } : {}), ...(r.row.fromParent ? { inherited: true } : {}),   // lane lg-group-parents U4
       abs: r.x && r.x.abs ? r.x.abs : null, kind: r.x ? (r.x.ref ? 'ref' : r.x.kind) : null, via: r.x && r.x.via ? r.x.via : null,
       level: r.level, chosen: r.chosen, need: r.need, left: r.left, files: r.files, bytes: r.bytes || 0,
     })) : [];
-    const block = [this.renderTaskMd(t, 0, { now }).replace(/\n---\n[\s\S]*$/, '').trim(), ...lines].join('\n');
+    const block = [this.renderTaskMd(t, 0, { now }).replace(/\n---\n[\s\S]*$/, '').trim(), ...this._inheritedRuleLines(t), ...lines].join('\n');
     return { text, block, bytes: Buffer.byteLength(text, 'utf-8'), budget: { own: this.contextIndexBytes(), room, effective, cap: INJECT_ROOM }, used: plan ? plan.used : 0, rows };
   }
 
@@ -1591,6 +1669,7 @@ class TaskGroupManager {
       '',
       // cap=0: meta/objective only — the log is appended LAST below.
       this.renderTaskMd(t, 0, { now }).replace(/\n---\n[\s\S]*$/, '').trim(),
+      ...this._inheritedRuleLines(t),   // lane lg-group-parents U4: the parents' standing rules, «继承自 X»
       ...this._backlogNoteLines(t, { gid: multi ? `--group ${t.id} ` : '', sessionKey, tools, isLiveClaim }),
     ];
     // ── How to report back — self-documenting + scoped + enum-disambiguated ──
@@ -1660,9 +1739,13 @@ class TaskGroupManager {
   // the table's signature separately (_ctxSig) and passes old/new to the diff.
   // the table as told, row by row: { k (own: its path · a reference: @<group> · a shared row: @<group>:<path>), h, path }
   _ctxKeys(t) {
-    return this._toldRows(t).map((it) => ({ k: it.k, h: this._h(JSON.stringify([it.row, it.n == null ? null : it.n, it.gone ? 1 : 0])), path: it.row.ref ? '@' + it.row.ref : it.row.path }));
+    const shown = (r) => { if (!r || r.children !== true) return r; const { children, ...rest } = r; return rest; };   // the U4 read (7): 含子组 is never told to the group's own members
+    return this._toldRows(t).map((it) => ({ k: it.k, h: this._h(JSON.stringify([shown(it.row), it.n == null ? null : it.n, it.gone ? 1 : 0])), path: it.row.ref ? '@' + it.row.ref : it.row.parent ? '^' + it.row.parent : it.row.path }));
   }
   _ctxHash(t) { return this._h(JSON.stringify(this._ctxKeys(t).map((r) => [r.k, r.h]))); }
+  /** lane lg-group-parents U4: the inherited rules' hash — a group with no ancestor holding any hashes as [] (so a snapshot from
+   *  before this release, which has none, reads as «unchanged» for it). */
+  _inhHash(t) { return this._h(JSON.stringify(this.inheritedRulesOf(t).map((a) => [a.id, a.title, a.objective]))); }
 
   /** The instant agent-routes' injection gate compares: the group's own content instant, or a REFERENCED group's table
    *  instant when later (its shared rows are told here — an edit there must reach this group's members). */
@@ -1671,6 +1754,8 @@ class TaskGroupManager {
     if (!t) return 0;
     let at = t.contentUpdatedAt || t.updatedAt || 0;
     for (const r of this._ctxRows(t)) if (r.ref) { const g = this._state.tasks[r.ref]; if (g && (g.ctxUpdatedAt || 0) > at) at = g.ctxUpdatedAt; }
+    // lane lg-group-parents U4: an ANCESTOR's content (its standing rules, its 含子组 rows) is told here too
+    for (const aid of this.ancestorsOf([t.id])) { const a = this._state.tasks[aid]; const aat = Math.max(a.contentUpdatedAt || 0, a.ctxUpdatedAt || 0); if (aat > at) at = aat; }
     return at;
   }
 
@@ -1680,6 +1765,7 @@ class TaskGroupManager {
     return {
       title: t.title,
       objHash: this._h(t.objective || ''),
+      inhHash: this._inhHash(t),          // lane lg-group-parents U4: the parents' standing rules as told
       ctxHash: this._ctxHash(t),          // lane task-group-context: the table as told (own rows + the referenced shared rows)
       ctxRows: this._ctxKeys(t),          // …row by row, so the update can say which rows changed (in memory only — the LITE one keeps the hash)
       backlog: (t.backlog || []).map((b) => ({ id: b.id, text: b.text, status: b.status || 'open', p: normalizePriority(b.priority), d: b.detail ? this._h(b.detail) : '', addedBy: b.addedBy || null, claimedBy: [...(b.claimedBy || [])] })),
@@ -1715,6 +1801,14 @@ class TaskGroupManager {
     const ch = [];
     const bits = []; // summary fragments, same order as the sections
     if (snap.title !== t.title) { ch.push(`- Renamed: "${agentLine(snap.title)}" → "${agentLine(t.title)}"`); bits.push('renamed'); }
+    // lane lg-group-parents U4: the parents' standing rules changed (a parent's edit, a parent added / removed / archived) —
+    // told again whole (bounded as the full injection bounds them); a snapshot without the hash reads as «no inherited rules»
+    if ((typeof snap.inhHash === 'string' ? snap.inhHash : this._h('[]')) !== this._inhHash(t)) {
+      bits.push('inherited rules updated');
+      const inh = this._inheritedRuleLines(t);
+      ch.push(inh.length ? '- Standing rules inherited from parent groups, NOW:' : '- No standing rules are inherited from a parent group any more');
+      for (const l of inh) if (l) ch.push(l.startsWith('## ') ? '  ' + l.slice(3) + ':' : l.split('\n').map((x) => '  > ' + x).join('\n'));
+    }
     if (this._h(t.objective || '') !== snap.objHash) {
       bits.push('objective updated');
       const obj = agentBlock((t.objective || '').trim());
@@ -1803,7 +1897,13 @@ class TaskGroupManager {
       const keys = this._ctxKeys(t);
       const was = new Map(snap.ctxRows.map((r) => [r.k, r]));
       const now = new Set(keys.map((r) => r.k));
-      for (const r of snap.ctxRows) if (!now.has(r.k)) ch.push(`- Context row REMOVED: ${agentLine(r.path)}`);
+      for (const r of snap.ctxRows) if (!now.has(r.k)) {
+        // lane lg-group-parents (the U4 read, 6): an inherited row's removal says where it came from, never a raw key
+        const m = /^\^([^:]+)(?::(.*))?$/.exec(String(r.k || ''));
+        if (m && m[2] === undefined) ch.push(`- No Context rows are inherited from the parent Task Group ${agentLine(m[1])} any more`);
+        else if (m) ch.push(`- Context row REMOVED (it was inherited from the parent Task Group ${agentLine(m[1])}): ${agentLine(m[2])}`);
+        else ch.push(`- Context row REMOVED: ${agentLine(r.path)}`);
+      }
       const touched = keys.filter((r) => !was.has(r.k) || was.get(r.k).h !== r.h);
       if (touched.length) {
         const plan = this._ctxPlan(t, 2400, { ctxBase, gid, only: new Set(touched.map((r) => r.k)) });
@@ -1811,7 +1911,7 @@ class TaskGroupManager {
       }
       bits.push('context table changed');
     }
-    if (oldSig !== newSig && this._ctxRows(t).length) {
+    if (oldSig !== newSig && this._hasTold(t)) {
       // Signature format is path:size:mtime joined by | (contextSignature — absolute paths; a legacy
       // contextDirSignature's are relative to the notes folder; % and | escaped there) — peel size:mtime off the END
       // so paths containing ':' stay intact, then unescape the path.
@@ -2362,10 +2462,17 @@ class TaskGroupManager {
     // only — and ONE for every group's claimed-item lines (short clips past it)
     const highBudget = { bytes: HIGH_LINE_TEXT_BYTES };
     const mineBudget = { bytes: MINE_LINE_TEXT_BYTES };
+    const toldInh = new Set();   // lane lg-group-parents U4: the parents whose rules this injection already told
+    const inhRoom = { bytes: INHERITED_RULES_MAX };   // …and ONE room for all of them (the U4 read, 3)
     for (const id of ids) {
       // renderTaskMd's H1/H2 demoted one level so groups nest under the layer heading
       const md = this.renderTaskMd(ts[id], 0, { now }).replace(/\n---\n[\s\S]*$/, '').trim().replace(/^(#{1,2}) /gm, '#$1 ');
       head.push('', md);
+      // lane lg-group-parents U4: each group's parents' rules — a parent that is one of this session's own groups, or that an earlier
+      // group of it already told, is told ONCE
+      const above = this.inheritedRulesOf(ts[id]).filter((a) => toldInh.has(a.id) && !ids.includes(a.id));
+      head.push(...this._inheritedRuleLines(ts[id], { skip: new Set([...ids, ...toldInh]), room: inhRoom, toldAbove: above }).map((l) => l.replace(/^## /, '### ')));
+      for (const a of this.inheritedRulesOf(ts[id])) toldInh.add(a.id);
       // per-group backlog note (own-parked summary or a one-line pointer)
       const bl = this._backlogNoteLines(ts[id], { gid: `--group ${id} `, sessionKey, tools, isLiveClaim, highBudget, mineBudget, nudge: false })
         .map((l) => l.replace(/^### /, '#### '));
@@ -2377,7 +2484,8 @@ class TaskGroupManager {
     if (nudge) head.push('', nudge);
     // ── THE CONTEXT TABLES (lane task-group-context): each group's rows at their depths, the room shared — a group
     // takes at most its own budget and an even share of what is left, its unused bytes carried to the next
-    const withRows = ids.filter((id) => this._ctxRows(ts[id]).length);
+    const own = new Set(ids);   // lane lg-group-parents: a parent that is one of these groups is told as itself (its rows and rules once)
+    const withRows = ids.filter((id) => this._ctxRows(ts[id]).length || this._toldRows(ts[id], { skipFrom: own }).length);
     const withNotes = ids.filter((id) => this.contextDirOf(ts[id]));
     const teach = [];
     if (withNotes.length) {
@@ -2390,7 +2498,7 @@ class TaskGroupManager {
       withRows.forEach((id, i) => {
         // the logs keep ~600 B a group (≥ 3 lines each, _pickLogLines)
         const budget = this._budgetFor(head, teach, { share: withRows.length - i, reserve: Math.max(LOG_RESERVE, 600 * ids.filter((g) => (ts[g].progress || []).length).length) });
-        const plan = this._ctxPlan(ts[id], budget, { ctxBase: baseOf(id), gid: `--group ${id} ` });
+        const plan = this._ctxPlan(ts[id], budget, { ctxBase: baseOf(id), gid: `--group ${id} `, skipFrom: own });
         head.push('', `### "${agentLine(ts[id].title)}"`, ...plan.lines);   // its id is in the identities layer above
       });
     }
@@ -2822,9 +2930,13 @@ class TaskGroupManager {
     // updatedAt — they used to trigger a full "was UPDATED" re-injection to
     // every member agent. The table's own instant (ctxUpdatedAt) also reaches
     // every group that REFERENCES this one (contentAtOf).
-    if (['title', 'objective', 'backlog'].some((k) => patch[k] !== undefined) || ctxChanged) {
+    if (['title', 'objective', 'backlog', 'parents'].some((k) => patch[k] !== undefined) || ctxChanged) {
       t.contentUpdatedAt = t.updatedAt;
     }
+    // lane lg-group-parents U4 (the read, MAJOR 2): what every DESCENDANT is told moves with this group's lineage, its archive, its
+    // standing rules and its table — each one's own instant moves (an archived or removed parent is no longer an ancestor the
+    // child's gate could read)
+    if (parents !== undefined || patch.archived !== undefined || patch.objective !== undefined || patch.title !== undefined || ctxChanged) this._touchDescendants(t.id, t.updatedAt);
     if (ctxChanged) t.ctxUpdatedAt = t.updatedAt;
     this._save();
     this._notify(id);
@@ -2840,6 +2952,7 @@ class TaskGroupManager {
     // group made again under the same id would inherit.
     // its archived Activity log goes with it (first: a failed delete keeps the group, never orphaned words)
     if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });
+    this._touchDescendants(id, Date.now());   // lane lg-group-parents U4: the descendants are told without it
     delete this._state.tasks[id];
     for (const c of Object.values(this._state.tasks)) if (c && Array.isArray(c.parents) && c.parents.includes(id)) { const left = c.parents.filter((p) => p !== id); if (left.length) c.parents = left; else delete c.parents; }   // lane lg-group-parents: a gone parent leaves every child's list
     try { const g = this._grants(); if (g) g.remove('group-visibility', String(id), 'user'); } catch { /* the row of a gone group admits nobody */ }   // lane grants-unify

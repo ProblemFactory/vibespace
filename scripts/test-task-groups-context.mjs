@@ -285,6 +285,101 @@ console.log('— 引用任务组「X」的 Context 表 (ro / rw) —');
   ok('a referenced group that is gone is said', m.renderContext(ir.id, {}).includes('that group no longer exists'));
 }
 
+console.log('— lane lg-group-parents U4: a parent\'s 含子组 rows and standing rules ride to its descendants, read-only —');
+{
+  const { m } = fresh();
+  ok('PURE: a row keeps 含子组 only when on; childRows hands it on read-only (its discover / notes stay its own)', TC.sanitizeRow({ path: IR, children: true }).children === true && !('children' in TC.sanitizeRow({ path: IR, children: 'yes' })) && JSON.stringify(TC.childRows([{ path: IR, note: 'n', tell: 'names', tags: ['discover', 'notes'], share: 'rw', children: true }, { path: OTHER, note: 'x', tags: [] }])) === JSON.stringify([{ path: IR, note: 'n', tell: 'names', tags: ['readonly'], share: null }]));
+  const g = m.create({ title: '集团', objective: 'Grand rule: never push.', ctx: [{ path: OTHER, note: '合同库', children: true, tell: 'note' }] });
+  const p = m.create({ title: '公司', objective: 'Parent rule: speak plainly.', parents: [g.id], ctx: [{ path: IR, note: '人员', children: true, tell: 'note' }, { path: '~/work/ir/README.md', note: 'not for children' }] });
+  const c = m.create({ title: 'IR3', objective: 'Own rule.', parents: [p.id], ctx: [{ path: '~/work/ir/CLAUDE.md', note: 'own row' }] });
+  const out = m.renderContext(c.id, {});
+  const ctx = out.slice(out.indexOf('## Context'), out.indexOf('</vibespace-task-context>'));
+  ok('the parent\'s 含子组 rows come after the child\'s own, under «Inherited from the parent Task Group», nearest parent first', ctx.indexOf('own row') < ctx.indexOf('Inherited from the parent Task Group "公司"') && ctx.indexOf('"公司"') < ctx.indexOf('Inherited from the parent Task Group "集团"') && ctx.includes('— 1 row it gives its child groups, below:'), ctx);
+  ok('an inherited row is READ-ONLY and says where it comes from', ctx.includes('人员 (read-only: never modify it · inherited from the parent Task Group "公司")') && ctx.includes('合同库 (read-only: never modify it · inherited from the parent Task Group "集团")'), ctx);
+  ok('a parent row NOT marked 含子组 never travels', !ctx.includes('not for children'));
+  const head = out.slice(0, out.indexOf('## Context'));
+  ok('the parents\' standing rules are told as «inherited», after the child\'s own, nearest first', head.indexOf('Own rule.') < head.indexOf('## Standing rules inherited from the parent Task Group "公司"') && head.includes('Parent rule: speak plainly.') && head.indexOf('"公司"') < head.indexOf('## Standing rules inherited from the parent Task Group "集团"') && head.includes('Grand rule: never push.'), head);
+  ok('never the reverse: the parent is told nothing of its child', !m.renderContext(p.id, {}).includes('Own rule.') && !m.renderContext(p.id, {}).includes('own row'));
+  const pv = m.contextPreview(c.id);
+  ok('the window\'s preview carries them (rows marked `inherited`, the head names the parent; the block shows the rules)', pv.rows.some((r) => r.inherited && r.from && r.from.id === p.id && r.i === null) && pv.rows.some((r) => r.parent === p.id) && pv.block.includes('Parent rule: speak plainly.'), pv.rows);
+  // a long parent rule is bounded, never evicting the child's own table
+  const big = m.create({ title: 'Big', objective: 'x'.repeat(5000) });
+  const k = m.create({ title: 'Kid', parents: [big.id] });
+  const kh = m.renderContext(k.id, {});
+  ok('a long inherited rule is cut at its bound and says so', /… \(the rest — \d+ bytes — is cut here\)/.test(kh) && !kh.includes('x'.repeat(1600)));
+  // the gate and the diff
+  const snap = m.snapshotForDiff(c.id);
+  const until = Date.now() + 5; while (Date.now() < until) { /* a later ms */ }
+  m.update(p.id, { objective: 'Parent rule: speak plainly, and briefly.' });
+  ok('a parent\'s edit reaches the child\'s injection gate (contentAtOf — the child\'s own instant moves with it)', m.contentAtOf(c.id) >= m.get(p.id).contentUpdatedAt && m.get(c.id).contentUpdatedAt === m.get(p.id).contentUpdatedAt);
+  const d = m.diffChanges(c.id, snap, {});
+  ok('…and the child\'s diff re-tells the inherited rules', d && d.bits.includes('inherited rules updated') && d.lines.some((l) => l.includes('and briefly.')), d);
+  const snap2 = m.snapshotForDiff(c.id);
+  m.update(p.id, { ctx: [...m.get(p.id).ctx, { path: '~/work/ir/HANDOFF.md', note: 'new for children', children: true }] });
+  const d2 = m.diffChanges(c.id, snap2, {});
+  ok('a parent row newly marked 含子组 is re-told in the child\'s diff', d2 && d2.lines.some((l) => l.includes('new for children')), d2);
+  ok('a snapshot from before this release (no inherited hash) reads as «none inherited» — a group with no parent is not re-told', m.diffChanges(g.id, { ...m.snapshotForDiff(g.id), inhHash: undefined }, {}).lines.length === 0);
+  const c2 = m.snapshotForDiff(c.id);
+  m.update(c.id, { parents: [] });
+  const d3 = m.diffChanges(c.id, c2, {});
+  ok('dropping the parent re-tells the child: no inherited rules any more, the inherited rows removed', d3 && d3.lines.some((l) => l.includes('No standing rules are inherited')) && !m.renderContext(c.id, {}).includes('Inherited from the parent'), d3);
+  // a session in the child AND the parent: the parent's rules are told once, as itself
+  m.update(c.id, { parents: [p.id] });
+  const multi = m.renderMultiContext([c.id, p.id], {});
+  ok('a multi-group injection tells a parent that is one of the session\'s own groups ONCE (as itself, not again as «inherited»)', (multi.match(/Parent rule: speak plainly, and briefly\./g) || []).length === 1 && multi.includes('### Standing rules inherited from the parent Task Group "集团"'), multi.slice(0, 2500));
+}
+
+console.log('— lane lg-group-parents U4: the adversarial read\'s findings —');
+{
+  const { m } = fresh();
+  const P = m.create({ title: 'Par', objective: 'P rule.', ctx: [{ path: IR, note: 'PEOPLE', children: true, tell: 'note' }] });
+  const C = m.create({ title: 'Bare child', parents: [P.id] });   // no Context row of its own
+  const out = m.renderContext(C.id, {});
+  const pv = m.contextPreview(C.id);
+  ok('read 1 (BLOCKER): a child with NO table of its own is still told its parent\'s 含子组 rows (injection, preview, the file index)', out.includes('PEOPLE (read-only: never modify it · inherited from the parent Task Group "Par")') && pv.rows.some((r) => r.inherited) && m.contextIndexOf(C.id) !== null, out.slice(out.indexOf('## Context')));
+  const at0 = m.contentAtOf(C.id);
+  const until = Date.now() + 5; while (Date.now() < until) { /* a later ms */ }
+  const s0 = m.snapshotForDiff(C.id);
+  m.update(P.id, { archived: true });
+  ok('read 2 (MAJOR): ARCHIVING the parent reaches the child\'s gate, and its diff says the rules and rows left', m.contentAtOf(C.id) > at0 && (() => { const d = m.diffChanges(C.id, s0, {}); return d && d.bits.includes('inherited rules updated') && d.lines.some((l) => l.includes('No Context rows are inherited from the parent Task Group')); })());
+  m.update(P.id, { archived: false });
+  const at1 = m.contentAtOf(C.id);
+  const until2 = Date.now() + 5; while (Date.now() < until2) { /* a later ms */ }
+  m.remove(P.id);
+  ok('read 2: REMOVING the parent reaches the child\'s gate too', m.contentAtOf(C.id) > at1 && !m.renderContext(C.id, {}).includes('PEOPLE'));
+  // read 3: ONE room for the whole injection, every line counted; a long chain is named in one bounded line
+  let prev = null; const chain = [];
+  for (let i = 0; i < 30; i++) { const g = m.create({ title: `A${i}`, objective: `rule ${i} `.repeat(40), ...(prev ? { parents: [prev] } : {}) }); chain.push(g.id); prev = g.id; }
+  const leaf = m.create({ title: 'Leaf', parents: [prev] });
+  const lh = m.renderContext(leaf.id, {});
+  const ia = lh.indexOf('## Standing rules inherited'), ib = lh.indexOf('— not told here (no room left)');
+  const inhBytes = ia >= 0 && ib > ia ? B(lh.slice(ia, ib)) : Infinity;
+  ok('read 3 (MAJOR): thirty ancestors — the inherited rules stay inside ONE bound (headings counted) and the rest are NAMED in one line', inhBytes < 3400 && (lh.match(/also inherits the standing rules of .* and \d+ more — not told here/g) || []).length === 1, { inhBytes });
+  const q1 = m.create({ title: 'Q1', objective: 'x'.repeat(1500) }), q2 = m.create({ title: 'Q2', objective: 'y'.repeat(1500) });
+  const k1 = m.create({ title: 'K1', parents: [q1.id, q2.id] }), k2 = m.create({ title: 'K2', parents: [q1.id, q2.id] });
+  const mm = m.renderMultiContext([k1.id, k2.id], {});
+  ok('read 3: a multi-group injection SHARES the room — two children of the same two long parents tell each parent once, the second child names them «told above»', (mm.match(/x{200}/g) || []).length >= 1 && (mm.match(/### Standing rules inherited from the parent Task Group "Q1"/g) || []).length === 1 && mm.includes('(told above)'), mm.slice(0, 600));
+  // read 4: one path, one permission — the nearer row wins
+  const S = m.create({ title: 'Sharer', ctx: [{ path: OTHER, note: 'SHAREDROW', share: 'rw', children: true }] });
+  const R4 = m.create({ title: 'Both ways', parents: [S.id], ctx: [{ ref: S.id, note: 'ref' }] });
+  const r4 = m.renderContext(R4.id, {});
+  ok('read 4: a path told by a reference (you may edit it) is not told again as inherited (read-only) — once, the nearer row', (r4.match(/SHAREDROW/g) || []).length === 1 && r4.includes('SHAREDROW (from the Task Group "Sharer", you may edit it)'), r4.slice(r4.indexOf('## Context')));
+  // read 5: a multi injection of the child AND its parent tells the parent's rows once
+  const P5 = m.create({ title: 'P5', ctx: [{ path: IR, note: 'P5ROW', children: true }] });
+  const C5 = m.create({ title: 'C5', parents: [P5.id], ctx: [{ path: OTHER, note: 'C5ROW' }] });
+  ok('read 5: [child, parent] in one injection — the parent\'s row is told once (as the parent\'s own)', (m.renderMultiContext([C5.id, P5.id], {}).match(/P5ROW/g) || []).length === 1);
+  // read 7: switching 含子组 is not news to the group's own members
+  const sp = m.snapshotForDiff(P5.id);
+  m.update(P5.id, { ctx: [{ path: IR, note: 'P5ROW', children: false }] });
+  ok('read 7: switching 含子组 off re-tells the PARENT\'s own members nothing', m.diffChanges(P5.id, sp, {}).lines.length === 0, m.diffChanges(P5.id, sp, {}));
+  // read 8: the old write doors keep a row held only by 含子组
+  const L8 = m.create({ title: 'L8', ctx: [{ path: IR, tags: ['discover'], children: true }] });
+  m.update(L8.id, { folders: [] });
+  ok('read 8: the old folders[] door keeps a row that only 含子组 holds', m.get(L8.id).ctx.some((r) => r.children === true));
+  // read 9: the agent\'s show answer carries the parents\' rules whole
+  ok('read 9: `vibespace-task show` carries the inherited rules (the route and the CLI)', /task: taskShowAnswer\(t, openSorted\), inheritedRules: inheritedRulesAnswer\(tasks\.inheritedRulesOf\(gid\)\)/.test(fs.readFileSync(new URL('../src/agent-routes.js', import.meta.url), 'utf-8')) && /Standing rules inherited from the parent Task Group/.test(fs.readFileSync(new URL('../data/bin/vibespace-task', import.meta.url), 'utf-8')));
+}
+
 console.log('— the diff path diffs rows —');
 {
   const { m } = fresh();

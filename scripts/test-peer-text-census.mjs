@@ -137,6 +137,8 @@ const DOORS = ['deliverToConversation(', 'stashFor(', 'stashSlot(', 'pushNotice(
   // task routes' answers (`vibespace-task show / backlog / progress / group-*` print them), the hook's injection renders
   // (the full context, the multi-group context, the two delta blocks, the generated TASK.md) and the cleanup nudge
   'taskShowAnswer(', 'taskItemAnswer(', 'taskEntryAnswer(', 'taskGroupBrief(',
+  // lane lg-group-parents U4: `show`'s parent groups — each one's title and standing instructions (another member's words)
+  'inheritedRulesAnswer(',
   // lane hook-seen-marks (B-86d3): `show --full`'s WHOLE context-folder index (file names are any member's words) and the
   // first prompt after a restart's one line naming the unchanged groups (their titles)
   'contextIndexAnswer(', 'renderUnchangedNote(',
@@ -204,6 +206,8 @@ const TABLE = {
   // judged them (reproduced over the real store: a note with a complete tag was live in every member's context). The routes'
   // four doors + the renders' local belt (agentLine / agentBlock in src/task-groups.js) + the nudge's two cuts in backlog-select.
   'src/agent-routes.js :: taskShowAnswer(': { rules: BELT, pin: /task: taskShowAnswer\(t, openSorted\)/, why: 'GET /api/agent/task (`show` / `backlog`): the title and each open item\'s text as a piece, the objective / each detail / each of the last 10 progress notes as judged by the entry door' },
+  // lane lg-group-parents U4: `show` answers the parents' standing rules beside the task — each title a piece, each rule a block
+  'src/agent-routes.js :: inheritedRulesAnswer(': { rules: BELT, pin: /inheritedRules: inheritedRulesAnswer\(tasks\.inheritedRulesOf\(gid\)\)/, why: 'GET /api/agent/task (`show`): each parent group\'s title as a piece and its standing instructions as a block' },
   'src/agent-routes.js :: taskItemAnswer(': { rules: BELT, pin: /item: taskItemAnswer\(backlog\[r\]\)/, pin2: /backlog: sortBacklog\(updated\.backlog\.filter\(\(b\) => b\.status === 'open'\)\)\.map\(taskItemAnswer\)/, why: 'POST /api/agent/task-backlog: the shown / acted item and the open list — each item\'s text as a piece, its detail as a block' },
   'src/agent-routes.js :: taskEntryAnswer(': { rules: BELT, pin: /progress: t\.progress\.slice\(-3\)\.map\(taskEntryAnswer\), entry: taskEntryAnswer\(t\.progress\[t\.progress\.length - 1\] \|\| null\)/, why: 'POST /api/agent/task-progress: the last three entries (other sessions\' too) and the one written — the note as a piece, the detail as a block' },
   'src/agent-routes.js :: contextIndexAnswer(': { rules: BELT, pin: /contextIndex: contextIndexAnswer\(ix\)/, why: 'GET /api/agent/task?full=1 (`show --full`, lane hook-seen-marks): the shared folder path and every file path as a piece — a file name is any member\'s word' },
@@ -801,6 +805,8 @@ const JUDGED_DOORS = {   // door → [file, a pin on its belt call]
   taskItemAnswer: ['src/agent-routes.js', /const taskItemAnswer = \(b\) => \(b && typeof b === 'object' \? \{ \.\.\.b, text: taskLine\(b\.text\), \.\.\.\(typeof b\.detail === 'string' \? \{ detail: taskBlock\(b\.detail\) \} : \{\}\), \.\.\.whenWords\(b, \['addedAt', 'resolvedAt'\]\) \} : b\)/],   // + the instants as the hub's words (lane agent-context-owner-facts)
   taskEntryAnswer: ['src/agent-routes.js', /const taskEntryAnswer = \(p\) => \(p && typeof p === 'object' \? \{ \.\.\.p, note: taskLine\(p\.note\), \.\.\.\(typeof p\.detail === 'string' \? \{ detail: taskBlock\(p\.detail\) \} : \{\}\), \.\.\.whenWords\(p, \['at'\]\) \} : p\)/],
   taskGroupBrief: ['src/agent-routes.js', /const taskGroupBrief = \(t\) => \(\{ id: t\.id, title: taskLine\(t\.title\), archived: !!t\.archived/],
+  // lane lg-group-parents U4: the parent groups' rules `show` hands on — the title a piece, the instructions a block
+  inheritedRulesAnswer: ['src/agent-routes.js', /const inheritedRulesAnswer = \(rules\) => \(Array\.isArray\(rules\) \? rules : \[\]\)\.map\(\(a\) => \(\{ id: a\.id, title: taskLine\(a\.title\), objective: taskBlock\(a\.objective\) \}\)\);/],
   contextIndexAnswer: ['src/agent-routes.js', /const contextIndexAnswer = \(ix\) => \(\{ dir: ix\.dir == null \? null : taskLine\(ix\.dir\), files: \(ix\.files \|\| \[\]\)\.map\(\(f\) => \(\{ path: taskLine\(f\.path\), size: Number\(f\.size\) \|\| 0 \}\)\), rows: \(ix\.rows \|\| \[\]\)\.map\(\(r\) => \(\{ path: taskLine\(r\.path\), note: taskLine\(r\.note \|\| ''\), files: \(r\.files \|\| \[\]\)\.map\(\(f\) => \(\{ path: taskLine\(f\.path\), size: Number\(f\.size\) \|\| 0 \}\)\) \}\)\) \}\)/],
   taskLine: ['src/agent-routes.js', /const taskLine = \(v, max = 4096\) => agentText\(v == null \? '' : v, \{ kind: 'line', max \}\)/],
   // verify r5 F1: a job of ANOTHER lineage (view opened / subscribed) through the belt; `progress` (any viewer writes it) for everyone
@@ -1164,6 +1170,8 @@ const PRINTS = {
     'contextIndex.rows': 'judged:contextIndexAnswer — the Context table\'s rows (each row.*)', 'row.path': 'judged:contextIndexAnswer — a row\'s path (the user\'s or a manager agent\'s word) as a piece',
     'row.note': 'judged:contextIndexAnswer — a row\'s note (the user\'s word) as a piece', 'row.files': 'judged:contextIndexAnswer — the row\'s files (each f.*; its count)',
     'task.id': `${V}:a group id`, 'task.archived': `${V}:a flag`, 'task.title': 'judged:taskShowAnswer — the group\'s title as a piece', 'task.objective': 'judged:taskShowAnswer — the objective as a block',
+    // lane lg-group-parents U4: `show` prints each parent's standing rules (the route builds them through the same belt: taskLine / taskBlock)
+    'ir.title': 'judged:inheritedRulesAnswer — a parent group\'s title as a piece', 'ir.id': `${V}:a group id`, 'ir.objective': 'judged:inheritedRulesAnswer — a parent\'s standing instructions as a block',
     'b.id': `${V}:an item id we mint`, 'b.priority': `${V}:the priority enum`, 'b.status': `${V}:the status enum`, 'b.addedAt': `${V}:an instant`, 'b.resolvedAt': `${V}:an instant`,
     'b.addedBy': `${V}:the parker's session key (sessionStatusKey — ours)`, 'b.resolvedBy': `${V}:the resolver's session key`, 'b.claimedBy': `${V}:the claimants' session keys`, 'claimed': `${V}:the claimants' session keys (b.claimedBy)`, 'tail': `${V}:the claim words (you / claimed by N / unclaimed)`,
     'b.text': 'judged:taskItemAnswer — an item\'s text as a piece (show / backlog / the shown item)', 'b.detail': 'judged:taskItemAnswer — an item\'s detail as a block',

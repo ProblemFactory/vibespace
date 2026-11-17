@@ -59,7 +59,7 @@ function liteSnap(snap, key) {
   if (mine.length > SNAP_MAX_ITEMS) return null;
   // lane task-group-context: the Context table rides as its HASH only (the row-by-row list stays in memory) — a restored
   // snapshot whose table changed is re-sent whole; a pre-table one (no hash) the same
-  const out = { title: typeof snap.title === 'string' ? snap.title : '', objHash: snap.objHash, ...(typeof snap.ctxHash === 'string' ? { ctxHash: snap.ctxHash } : {}), backlog: mine, lastProgressAt: Number(snap.lastProgressAt) || 0, of: key };
+  const out = { title: typeof snap.title === 'string' ? snap.title : '', objHash: snap.objHash, ...(typeof snap.inhHash === 'string' ? { inhHash: snap.inhHash } : {}), ...(typeof snap.ctxHash === 'string' ? { ctxHash: snap.ctxHash } : {}), backlog: mine, lastProgressAt: Number(snap.lastProgressAt) || 0, of: key };
   return JSON.stringify(out).length <= SNAP_MAX_BYTES ? out : null;
 }
 const snapOk = (v) => !!v && typeof v === 'object' && typeof v.objHash === 'string' && typeof v.title === 'string' && Array.isArray(v.backlog) && v.backlog.length <= SNAP_MAX_ITEMS

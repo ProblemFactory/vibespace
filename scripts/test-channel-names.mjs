@@ -80,6 +80,7 @@ const JUDGED = [
   ['src/task-groups.js', 'raw.title || raw.id', 'not a channel (a task group)'],
   ['src/task-groups.js', 'existing?.title || id', 'not a channel (a task group)'],
   ['src/task-groups.js', 'String(t.title || id) : String(id)', 'not a channel (a task group) — lane lg-group-parents U2: `_titleOf`, a group named in the cycle refusal\'s words'],
+  ['src/task-groups.js', 'title: String(a.title || a.id)', 'not a channel (a task group) — lane lg-group-parents U4: a parent group\'s standing rules, told under its title'],
   ['src/server/task-groups-wiring.js', 'Context folder for "${g.title || g.id}" has more than', 'not a channel (a TASK GROUP\'s own name in the context-sync file-cap notice; «make room» 2026-11-17: moved whole out of server.js, where src/ did not reach it — the group store always holds a title)'],
   ['src/server/mounts-plugins-wiring.js', 'name: s.name || s.webuiName || cid', 'not a channel (design q-046: a live CONVERSATION\'s name in the automation key\'s grant picker — its id when it has none)'],
 ];

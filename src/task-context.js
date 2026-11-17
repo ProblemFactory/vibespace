@@ -15,6 +15,8 @@
 // `tags` — plain verbs: 'discover' (自动发现会话: conversations started here join — the old folders[], recursive),
 //   'notes' (agent 在这里记笔记: the old contextDir — ONE row, the .vibespace/TASK.md mirror lives there), 'readonly'
 //   (不许 agent 改; excludes 'notes'). `share` — 其他任务组可引用: null | 'ro' | 'rw' (a readonly row only 'ro').
+// `children` — 含子组 (lane lg-group-parents, B-91a7, the owner 2026-11-05): `true` ⇒ the row rides READ-ONLY to every
+//   descendant group (a child of a child too) — childRows(); absent = this group's own (the default, the release's behaviour).
 // Derived, never stored twice: discoverFolders() = the old folders[], notesDir() = the old contextDir.
 
 const TELL = ['note', 'names', 'index', 'contents'];
@@ -49,6 +51,7 @@ function sanitizeRow(raw, { selfId = null } = {}) {
   let share = SHARES.includes(raw.share) ? raw.share : null;
   if (share === 'rw' && tags.includes('readonly')) share = 'ro';   // a 不许改 row can only be shared read-only
   const row = { path: p, note, tell: TELL.includes(raw.tell) ? raw.tell : null, tags, share };
+  if (raw.children === true) row.children = true;   // lane lg-group-parents: 含子组 (stored only when on)
   if (Array.isArray(raw.keys)) {
     const keys = [];
     for (const k of raw.keys) {
@@ -197,6 +200,13 @@ function sharedRows(rows) {
     .map((r) => ({ path: r.path, note: r.note, tell: r.tell, tags: r.share === 'rw' ? [] : ['readonly'], share: null, ...(r.keys ? { keys: r.keys } : {}) }));
 }
 
+/** lane lg-group-parents: the rows a PARENT gives its descendant groups — those it marked 含子组 (`children`), always READ-ONLY
+ *  there (a child never writes its parent's folder); each keeps its own tell / keys; its discover / notes verbs stay its own. */
+function childRows(rows) {
+  return (rows || []).filter((r) => r && !r.ref && r.children === true)
+    .map((r) => ({ path: r.path, note: r.note, tell: r.tell, tags: ['readonly'], share: null, ...(r.keys ? { keys: r.keys } : {}) }));
+}
+
 /** ONE migration's rows from the old fields (2026-10-task-group-context-rows): every folders[] entry → {tell: 'names',
  *  tags: ['discover']}, contextDir → {tell: 'names', tags: ['notes']} (merged into the folder's row when it IS one of
  *  them). → { rows, folders, nonRecursive, notes, merged } */
@@ -227,7 +237,7 @@ function applyLegacyPatch(rows, res, { folders, contextDir } = {}) {
   let out = (rows || []).map((r) => (r.ref ? { ...r } : { ...r, tags: [...(r.tags || [])] }));
   const absOf = (i) => (res && res[i] && res[i].abs) || null;
   const idxOf = (p) => out.findIndex((r, i) => !r.ref && (trimSlash(r.path) === p || absOf(i) === p));
-  const keep = (r) => r.ref || r.tags.length || r.note;
+  const keep = (r) => r.ref || r.tags.length || r.note || r.children === true;   // lane lg-group-parents (the U4 read, 8): a row held only by 含子组 stays
   if (folders !== undefined) {
     const want = [];
     for (const f of Array.isArray(folders) ? folders : []) {
@@ -257,6 +267,6 @@ function applyLegacyPatch(rows, res, { folders, contextDir } = {}) {
 
 module.exports = {
   TELL, TAGS, SHARES, KEY_FILES, DEFAULT_BUDGET, MAX_ROWS, LIMITS, GROUP_ID_RE,
-  sanitizeRow, sanitizeRows, resolveRows, discoverFolders, notesDir, chosenTell, stepDown, planRows, sharedRows,
+  sanitizeRow, sanitizeRows, resolveRows, discoverFolders, notesDir, chosenTell, stepDown, planRows, sharedRows, childRows,
   rowsFromLegacy, applyLegacyPatch, isRemote, parentOf,
 };

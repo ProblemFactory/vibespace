@@ -127,6 +127,8 @@ const taskItemAnswer = (b) => (b && typeof b === 'object' ? { ...b, text: taskLi
 const taskEntryAnswer = (p) => (p && typeof p === 'object' ? { ...p, note: taskLine(p.note), ...(typeof p.detail === 'string' ? { detail: taskBlock(p.detail) } : {}), ...whenWords(p, ['at']) } : p);
 /** a job view + its instants as words (vibespace-job prints `when.<field>`) */
 const jobWhen = (v) => (v && typeof v === 'object' ? { ...v, ...whenWords({ ...v, runStartedAt: v.run && v.run.startedAt }, ['nextFireAt', 'archivedAt', 'publishSince', 'runStartedAt']) } : v);
+// lane lg-group-parents U4: the parents' standing rules beside the task answer — each title a piece, each rule a block (the belt)
+const inheritedRulesAnswer = (rules) => (Array.isArray(rules) ? rules : []).map((a) => ({ id: a.id, title: taskLine(a.title), objective: taskBlock(a.objective) }));
 const taskShowAnswer = (t, openSorted) => ({ id: t.id, title: taskLine(t.title), archived: !!t.archived, objective: t.objective == null ? t.objective : taskBlock(t.objective), backlog: (openSorted || []).map(taskItemAnswer), progress: (t.progress || []).slice(-10).map(taskEntryAnswer), contextDir: t.contextDir ? taskLine(t.contextDir) : null });   // lane task-group-context: t = the store's view (contextDir = the 记笔记 row, derived)
 // B-86d3 ② (lane hook-seen-marks): `vibespace-task show --full` lists the WHOLE context-folder index the injection's
 // budgeted one points at — a file name is any member's word, so each path leaves through the belt as a line piece
@@ -1385,7 +1387,7 @@ app.get('/api/agent/task', function taskShowRoute(req, res) {
     rememberBacklogListing(`${you}|${gid}`, openSorted.map((b) => b.id)); // the numbers this session now holds
     const ctxBaseOf = req.query && req.query.full === '1' ? remoteCtxBaseFor(hit[0]) : null;
     const ix = req.query && req.query.full === '1' ? tasks.contextIndexOf(gid, ctxBaseOf ? ctxBaseOf(gid) : null, { offLoop: true }) : null;   // B-86d3 ②: --full lists every file
-    res.json({ success: true, you, task: taskShowAnswer(t, openSorted), ...(ix ? { contextIndex: contextIndexAnswer(ix) } : {}) });   // verify r4 F1: every peer-written field through the belt
+    res.json({ success: true, you, task: taskShowAnswer(t, openSorted), inheritedRules: inheritedRulesAnswer(tasks.inheritedRulesOf(gid)), ...(ix ? { contextIndex: contextIndexAnswer(ix) } : {}) });   // lane lg-group-parents U4: + the parents' standing rules, whole (the injection bounds them), beside the task answer   // verify r4 F1: every peer-written field through the belt
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
 // lane lg-store-writes U5 (B-0248): an agent's Task Group verb (progress, backlog, the group admin) hands the store to the

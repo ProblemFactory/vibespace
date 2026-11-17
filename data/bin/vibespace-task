@@ -177,9 +177,10 @@ const priorityRecorded = (item) => priority === undefined || (!!item && (item.pr
 const printPriorityUnrecorded = (id) => console.log('note: the server did not record --priority ' + priority
   + ' (it predates backlog priority — restart VibeSpace after updating, then `vibespace-task backlog-edit ' + (id || '<id>') + ' --priority ' + priority + '`)');
 async function printShow() {
-  const { task, you, contextIndex } = await call('GET', '/api/agent/task' + (full ? '?full=1' : ''));   // B-86d3: --full lists the shared folder's files too
+  const { task, you, contextIndex, inheritedRules } = await call('GET', '/api/agent/task' + (full ? '?full=1' : ''));   // B-86d3: --full lists the shared folder's files too
   console.log('# ' + task.title + ' (' + task.id + ')' + (task.archived ? ' [archived]' : ''));
   if (task.objective) console.log('\nObjective: ' + task.objective);
+  for (const ir of Array.isArray(inheritedRules) ? inheritedRules : []) console.log(`\nStanding rules inherited from the parent Task Group "${ir.title}" (${ir.id}):\n${ir.objective}`);   // lane lg-group-parents U4
   if (task.backlog && task.backlog.length) {
     console.log('\nBacklog (parked, NOT immediate — never start one unasked):');
     fmtBacklog(task.backlog, full, you);
