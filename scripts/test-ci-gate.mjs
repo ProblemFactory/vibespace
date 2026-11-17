@@ -41,6 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings, FAST_SUM_CAP_MS } from './ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { callArgs } from './lib/check.mjs'; // B-1388: a helper's Nth argument (the swap census's argument scanner)
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 import { REPO, GIT_ENV, ok, tmpDirs, mktmp, git, makeRepo, commit, STUB_SLICE, stubGateRepo, writeMarker, report } from './ci-gate-kit.mjs'; // the shared kit (lane fast-tier-ratchet: the gate is seven ≤ 10 s parts)
 
@@ -794,28 +795,60 @@ console.log('\n§2j a suite reads no history master does not have');
     'a7321ff0e': ['test-ci-gate.mjs'], // §2e's own control: the wall-clock bound before the rule [B-874f]
     'f36369057': ['test-phone-desktop-sync.mjs'], // lane phone-arrangement-local 2026-10-12: ⑩–⑬'s base TREE (a worktree at it) — no master ancestor holds captureForViewport without captureBuilt [B-44c5]
   });
-  const HEX = '[0-9a-f]{7,40}', VERB = /['"`](?:show|cat-file|rev-parse|ls-tree)['"`]|\bgit (?:show|cat-file|rev-parse|ls-tree)\b/;
-  const LIT = new RegExp(`['"\`](${HEX})(?=[:'"\`^])`, 'g');
-  const CMD = new RegExp(`\\bgit (?:show|cat-file|rev-parse|ls-tree)(?:\\s+-[-\\w]+)*\\s+(${HEX})(?=[:^\\s\`'"]|$)`, 'g');   // a git command line in a string
+  // B-1388 (lane bl-tests-e, 2026-11-17 — the B-4291 r2 acceptance's six latent forms, each blind on a planted file while a plain
+  // show in the same file went red): a verb that READS a tree too (worktree add / archive / diff / log / checkout); `git -C <dir>
+  // show <sha>:` command strings (options before the verb); a binding judged by the NEAREST one above the read (a later block's
+  // const no longer takes over an earlier block's read); a sha handed to a helper as ANY argument its body gives git; an argument
+  // array split across lines (the statement is judged whole); and a blob / tree sha on master's history is ON master.
+  const HEX = '[0-9a-f]{7,40}', VERBS = 'show|cat-file|rev-parse|ls-tree|archive|diff|log|checkout';
+  const VERB = new RegExp(`['"\`](?:${VERBS})['"\`]|['"\`]worktree['"\`]\\s*,\\s*['"\`]add['"\`]|\\bgit(?:\\s+-C\\s+\\S+)?\\s+(?:${VERBS}|worktree\\s+add)\\b`);
+  const LIT = new RegExp(`['"\`](${HEX})(?=[:'"\`^])`, 'g'), ANY_VERB = new RegExp(`['"\`](?:${VERBS}|worktree)['"\`]|\\bgit\\s`);
+  // a git command line in a string: options and the -C dir before the verb, then options / paths / ${…} before the sha
+  const CMD = new RegExp(`\\bgit(?:\\s+-C\\s+\\S+|\\s+--?[\\w-]+(?:=\\S+)?)*\\s+(?:${VERBS}|worktree\\s+add)(?:\\s+(?:-\\S+|\\$\\{[^}]*\\}|[^\\s'"\`]*/[^\\s'"\`]*))*\\s+(${HEX})(?=[:^\\s\`'"]|$)`, 'g');
   const BIND = new RegExp(`\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:[^;\\n]*?(?:\\|\\||\\?\\?)\\s*)?['"\`](${HEX})['"\`]`);
-  const DEF = /\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(?\s*([A-Za-z_$][\w$]*)[^=\n]*=>|\bfunction\s+([A-Za-z_$][\w$]*)\s*\(\s*([A-Za-z_$][\w$]*)/;
+  const DEF = /\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\(([^)]*)\)|([A-Za-z_$][\w$]*))\s*=>|\bfunction\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/;
   const esc = (n) => n.replace(/\$/g, '\\$');
   const fedOn = (line, n) => line.includes('${' + n + '}') || new RegExp(`(?:^|[^\\w$.])${esc(n)}\\s*\\+|[,[(]\\s*${esc(n)}\\s*[,\\])+]`).test(line);
+  const STR = /'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g;
+  // a line CONTINUES an argument list when its code ends inside one — on `(`, `[` or `,` (a callback's `() => {` ends a line on
+  // `{`: a block, never an argument array — B-1388 reader: `it('x', () => {` opened 13-line «statements» 3 350 times)
+  const continues = (l) => /[([,]\s*$/.test(l.replace(STR, '""').replace(/\/\/.*$/, ''));
   /** the history reads of one script's text: [{ sha, line, form }] — comment lines are not reads */
   const historyReadsOf = (text) => {
-    if (!/show|cat-file|rev-parse|ls-tree/.test(text)) return [];   // most scripts read no history: one scan, not a line walk
-    const code = text.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l)), out = [], binds = new Map(), readers = new Set();
+    if (!ANY_VERB.test(text)) return [];   // most scripts read no history: one scan, not a line walk (a bare «log» is every console.log)
+    const code = text.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l)), out = [], readers = new Map();
+    const joined = code.join('\n'), lineAt = []; for (let i = 0, o = 0; i < code.length; i++) { lineAt.push(o); o += code[i].length + 1; }
+    const seen = (sha, line) => out.some((r) => r.line === line && r.sha === sha);
+    // the helpers whose body hands a parameter to git: name → the argument positions it reads
+    code.forEach((l, i) => {
+      const d = DEF.exec(l); if (!d) return;
+      const name = d[1] || d[4], params = String((d[1] ? (d[2] ?? d[3]) : d[5]) || '').split(',').map((p) => p.trim().replace(/\s*=.*$/, '')).filter(Boolean);
+      const body = code.slice(i, i + 8).join('\n');
+      if (!VERB.test(body)) return;
+      const at = params.map((p, k) => (/^[A-Za-z_$][\w$]*$/.test(p) && fedOn(body, p) ? k : -1)).filter((k) => k >= 0);
+      if (at.length) readers.set(name, at);
+    });
+    // the statements: a line that opens a ( or [ it does not close runs on (≤ 12 lines) — an argument array split over lines
+    const stmtOf = []; for (let i = 0; i < code.length;) { let j = i; while (continues(code[j]) && j + 1 < code.length && j - i < 12) j++; for (let k = i; k <= j; k++) stmtOf[k] = [i, j]; i = j + 1; }
+    // name → sha: the NEAREST binding above the read (a later block's const takes over only from its own line on); a read with
+    // none above takes the first one BELOW (a helper defined before the const it reads — legal JS, the old census saw it)
+    const allBinds = new Map(); code.forEach((l, i) => { const b = BIND.exec(l); if (b) { if (!allBinds.has(b[1])) allBinds.set(b[1], []); allBinds.get(b[1]).push([i, b[2]]); } });
+    const binds = new Map([...allBinds].map(([n, list]) => [n, list[0][1]]));
     code.forEach((l, i) => {
       const b = BIND.exec(l); if (b) binds.set(b[1], b[2]);
-      const d = DEF.exec(l); if (d) { const [name, p] = d[1] ? [d[1], d[2]] : [d[3], d[4]]; const body = code.slice(i, i + 8).join('\n'); if (VERB.test(body) && fedOn(body, p)) readers.add(name); }
-    });
-    code.forEach((l, i) => {
-      if (VERB.test(l)) {
-        for (const m of l.matchAll(LIT)) out.push({ sha: m[1], line: i + 1, form: 'literal' });
-        for (const m of l.matchAll(CMD)) if (!out.some((r) => r.line === i + 1 && r.sha === m[1])) out.push({ sha: m[1], line: i + 1, form: 'command string' });
-        for (const [n, sha] of binds) if (fedOn(l, n)) out.push({ sha, line: i + 1, form: 'binding ' + n });
+      const [s0, s1] = stmtOf[i], stmt = s0 === s1 ? l : code.slice(s0, s1 + 1).join('\n');
+      if (VERB.test(stmt)) {
+        for (const m of l.matchAll(LIT)) if (!seen(m[1], i + 1)) out.push({ sha: m[1], line: i + 1, form: VERB.test(l) ? 'literal' : 'literal (a split argument array)' });
+        if (i === s0) for (const m of stmt.matchAll(CMD)) { const ln = s0 + stmt.slice(0, m.index).split('\n').length; if (!seen(m[1], ln)) out.push({ sha: m[1], line: ln, form: 'command string' }); }
+        for (const [n, sha] of binds) if (fedOn(l, n) && !seen(sha, i + 1)) out.push({ sha, line: i + 1, form: 'binding ' + n });
       }
-      for (const f of readers) for (const m of l.matchAll(new RegExp(`(?:^|[^\\w$.])${esc(f)}\\(\\s*['"\`](${HEX})['"\`]`, 'g'))) out.push({ sha: m[1], line: i + 1, form: 'argument of ' + f });
+      for (const [f, at] of readers) {
+        if (!l.includes(f + '(')) continue;   // the cheap test first (B-1388 reader: a RegExp per line per reader was ~170 ms)
+        for (const m of l.matchAll(new RegExp(`(?:^|[^\\w$.])${esc(f)}\\(`, 'g'))) {
+          const as = callArgs(joined, lineAt[i] + m.index + m[0].length, Math.max(...at) + 1) || [];
+          for (const k of at) { const a = (as[k] || '').match(new RegExp(`^['"\`](${HEX})['"\`]$`)); if (a && !seen(a[1], i + 1)) out.push({ sha: a[1], line: i + 1, form: `argument ${k + 1} of ${f}` }); }
+        }
+      }
     });
     return out;
   };
@@ -828,6 +861,7 @@ console.log('\n§2j a suite reads no history master does not have');
   };
   // THE FORMS, each planted (built by concatenation: this file must not read history itself) — each one seen, by name
   const sh = 'sh' + 'ow', cf = 'cat' + '-file', rp = 'rev' + '-parse', lt = 'ls' + '-tree', S1 = ['abc', '1234'].join('');
+  const wt = 'work' + 'tree', ar = 'arch' + 'ive', df = 'di' + 'ff', lg = 'l' + 'og', co = 'check' + 'out';
   const FORMS = {
     'show <sha>:path': `execFileSync('git', ['-C', REPO, '${sh}', '${S1}:src/a.js'])`,
     'double quotes': `execFileSync("git", ["${sh}", "${S1}:src/a.js"])`,
@@ -840,10 +874,26 @@ console.log('\n§2j a suite reads no history master does not have');
     'a const fed to ${NAME}^{commit}': `const BASE = '${S1}';\nexecFileSync('git', ['-C', REPO, '${cf}', '-e', \`\${BASE}^{commit}\`])`,
     'an env-defaulted const': `const PRE = process.env.X_REF || '${S1}';\nconst t = execFileSync('git', ['${sh}', \`\${PRE}:server.js\`]);`,
     'a function argument': `const shaped = (ref) => { const t = execFileSync('git', ['-C', repo, '${sh}', \`\${ref}:src/a.js\`]); return t; };\nconst r = shaped('${S1}') ? 1 : 0;`,
+    // B-1388's six (each blind before it):
+    'worktree add <dir> <sha>': `git(['${wt}', 'add', '--detach', dir, '${S1}'])`,
+    'archive <sha>': `execFileSync('git', ['-C', REPO, '${ar}', '${S1}', 'scripts'])`,
+    'diff / log / checkout <sha>': `git(['${df}', '${S1}', 'HEAD']); git(['${lg}', '-1', '${S1}']); git(['${co}', '${S1}', '--', 'src'])`,
+    'git -C <dir> show <sha>: in a command string': `execSync(\`git -C \${REPO} ${sh} ${S1}:src/a.js\`)`,
+    'a helper\'s SECOND argument': `const at = (file, ref) => execFileSync('git', ['${sh}', \`\${ref}:\${file}\`]);\nconst t = at('src/a.js', '${S1}');`,
+    'an argument array split across lines': `const t = execFileSync('git', [\n  '-C', REPO,\n  '${sh}',\n  '${S1}:src/a.js',\n]);`,
   };
   const blind = Object.entries(FORMS).filter(([, t]) => !historyReadsOf(t).some((r) => r.sha === S1)).map(([k]) => k);
   ok(!blind.length && !historyReadsOf(`// git ${sh} ${S1}:src/a.js — a comment names a sha, it reads nothing`).length && !historyReadsOf(`const id = '${S1}'; console.log(id);`).length,
     `the read forms are seen (${Object.keys(FORMS).join(' · ')}); a comment, a hex id never handed to git: not reads` + (blind.length ? ` — BLIND to: ${blind.join(' · ')}` : ''));
+  const S4 = ['bbb', '2222'].join('');
+  const blocks = historyReadsOf(`{\n  const BASE = '${S1}';\n  git(['${cf}', '-e', \`\${BASE}^{commit}\`]);\n}\n{\n  const BASE = '${S4}';\n  git(['${sh}', \`\${BASE}:a.js\`]);\n}`);
+  ok(blocks.some((r) => r.sha === S1 && r.line === 3) && blocks.some((r) => r.sha === S4 && r.line === 7) && !blocks.some((r) => r.sha === S4 && r.line === 3),
+    'B-1388: a binding is judged by the NEAREST one above the read — two blocks each binding BASE: the first block\'s read is its own sha, never the later block\'s', blocks);
+  ok(!historyReadsOf(`const pal = { log: 'x', tint: '${S1}' };`).length && !historyReadsOf(`console.log('${S1}');`).length && !historyReadsOf(`const t = git(['${sh}', 'HEAD:a.js']);\nconst id = '${S1}';`).length,
+    'B-1388: …and the wider net catches no hex that is not handed to git (a palette beside the word log, a console.log of an id, an id on the line after a read)');
+  ok(!historyReadsOf(`{\n  const t = git(['${lg}', '-1']);\n  fs.writeFileSync(f, '${S1}'.repeat(4));\n}`).length && !historyReadsOf(`it('x', () => {\n  git(['${lg}', '-1']);\n  fs.writeFileSync(f, '${S1}'.repeat(4));\n});`).length,
+    'B-1388: …nor a hex in the same { block } as a read, a callback\'s block included (`it(\'x\', () => {` is no argument array)');
+  ok(historyReadsOf(`const readBase = (f) => git(['${sh}', \`\${BASE}:\${f}\`]);\nconst BASE = '${S1}';`).some((r) => r.sha === S1 && r.form === 'binding BASE'), 'B-1388: a binding BELOW the helper that reads it is still read (none above ⇒ the first below)');
   // the verdict, on a planted oracle: a new off-master read is red; an ambiguous one is red; a ratchet row no longer read, or whose sha reached master, is red
   const S2 = ['def', '5678'].join(''), S3 = ['fed', '0987'].join(''), V = { [S1]: 'off', [S2]: 'on', [S3]: 'ambiguous' }, oracle = (sha) => V[sha] || 'off';
   const v1 = judgeReads([{ file: 't.mjs', sha: S1, line: 3 }, { file: 't.mjs', sha: S2, line: 4 }], oracle, {});
@@ -863,11 +913,18 @@ console.log('\n§2j a suite reads no history master does not have');
       if (!memo.has(sha)) {
         const c = run(['rev-parse', '--verify', '--quiet', sha + '^{commit}']);
         if (c.status === 0) memo.set(sha, run(['merge-base', '--is-ancestor', c.stdout.trim(), 'HEAD']).status === 0 ? 'on' : 'off');
-        else memo.set(sha, (run(['rev-parse', '--disambiguate=' + sha]).stdout || '').trim().split('\n').filter(Boolean).length > 1 ? 'ambiguous' : 'off');
+        else if ((run(['rev-parse', '--disambiguate=' + sha]).stdout || '').trim().split('\n').filter(Boolean).length > 1) memo.set(sha, 'ambiguous');
+        else {
+          // B-1388: a BLOB or TREE sha is on master when master's history holds it (a commit of HEAD's that adds or drops it)
+          const o = run(['rev-parse', '--verify', '--quiet', sha + '^{object}']), t = o.status === 0 ? (run(['cat-file', '-t', o.stdout.trim()]).stdout || '').trim() : '';
+          memo.set(sha, (t === 'blob' || t === 'tree') && (run(['log', '-1', '--format=%H', '--find-object=' + o.stdout.trim(), 'HEAD']).stdout || '').trim() ? 'on' : 'off');
+        }
       }
       return memo.get(sha);
     };
     ok(verdictOf(git(REPO, ['rev-parse', 'HEAD'])) === 'on' && verdictOf('0'.repeat(40)) === 'off', 'the oracle: HEAD is on master; an absent object is off master (a full clone holds every ancestor)');
+    const blob = git(REPO, ['rev-parse', 'HEAD:package.json']), tree = git(REPO, ['rev-parse', 'HEAD:scripts/lib']);
+    ok(verdictOf(blob) === 'on' && verdictOf(tree) === 'on', `B-1388: a blob (HEAD:package.json ${blob.slice(0, 9)}) and a tree (HEAD:scripts/lib ${tree.slice(0, 9)}) master's history holds are ON master — never the false «off-master» of a commit-only oracle`);
     const ENV_SITES = ['test-discovery-spawn.mjs 9516bd8d', 'test-fixture-isolation.mjs e87d9893', 'test-mount-providers.mjs b48b26ae4'];
     const envSeen = ENV_SITES.filter((x) => { const [f, sha] = x.split(' '); return reads.some((r) => r.file === f && r.sha === sha && r.form.startsWith('binding') && verdictOf(sha) === 'on'); });
     ok(envSeen.length === ENV_SITES.length, `the env-defaulted bindings (process.env.X || '<sha>') are READ and JUDGED on master: ${envSeen.join(' · ')}` + (envSeen.length < ENV_SITES.length ? ` — NOT seen: ${ENV_SITES.filter((x) => !envSeen.includes(x)).join(' · ')}` : ''));

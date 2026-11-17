@@ -1528,7 +1528,8 @@ await (async () => {
   if (!master && pre.why === 'shallow') skipPreFix('member: ', 'b970f16d');
   else ck(`member: the master copy (b970f16d) loaded for the byte-identity sweep${pre.why ? ` — ${pre.why}` : ''}`, !!master && typeof master.decidePoolSwitch === 'function');
   // CONTROL (mirror-197): a ref that is NOT here is a skip only on a SHALLOW clone — on a full clone it is a failure by name
-  { const gone = await preFixCopy(M, '0123456789abcdef0123456789abcdef01234567', 'src/account-pool-auto.js', 'gone'); ck(`preFixCopy CONTROL: an absent ref answers ${master ? '"NOT shallow" (a failure, never a skip) on this full clone' : "'shallow' on this shallow clone"} — the helper tells the two worlds apart`, gone.mod === null && (master ? /NOT shallow/.test(gone.why) : gone.why === 'shallow')); }
+  // an ABSENT ref on purpose, built at runtime: test-ci-gate §2j reads every literal sha handed to git, a helper's second argument too (B-1388)
+  { const gone = await preFixCopy(M, ['0123456789abcdef', '0123456789abcdef', '01234567'].join(''), 'src/account-pool-auto.js', 'gone'); ck(`preFixCopy CONTROL: an absent ref answers ${master ? '"NOT shallow" (a failure, never a skip) on this full clone' : "'shallow' on this shallow clone"} — the helper tells the two worlds apart`, gone.mod === null && (master ? /NOT shallow/.test(gone.why) : gone.why === 'shallow')); }
   {
     let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
     const ids = ['a', 'b', 'c', 'd'];
