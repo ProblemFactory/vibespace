@@ -1,6 +1,8 @@
 import { ThemeManager, THEMES, BUILTIN_THEMES } from './themes.js';
 import { waitServerReady, reasonOf } from './boot-ladder.js';
 import { staleLook, staleNotice, heldWords, TYPING_QUIET_MS } from './stale-watch.js'; // lane think-tools-phone: a stale page that gave up checks again
+import { registerInternalLinks } from './internal-link-door.js'; // lane login-request-card piece 1: the renderers' door
+import { targetOf as linkTargetOfPage, pressLink, linkMenu } from './internal-link-ui.js'; // lane login-request-card piece 1: THE press of a link of the scheme (the page's own doors)
 import { awaitBootReady, bootDeps, startingLine, retryLine } from './boot-splash.js';
 import { installPluginClient } from './plugin-client.js';
 import { installKeybindings, registerKeybinding, runCommand } from './contributions.js';
@@ -227,6 +229,8 @@ class App {
     // lane setting-doors pick 1: a toast's words (a server notice, a refusal) draw a `vibespace://settings/<key>` naming a known
     // row as a link to it — THE door, openSettingAt; every other word stays text
     registerSettingLinks({ has: isSettingKey, open: (key) => this.openSettingAt(key) });
+    // lane login-request-card piece 1: THE door a renderer asks for a link to a conversation / desktop (what the page has, the press, Go · Copy link)
+    registerInternalLinks({ targetOf: (kind, ref) => linkTargetOfPage(this, kind, ref), press: (kind, ref, at) => pressLink(this, kind, ref, at), menu: (kind, ref, at, flash) => linkMenu(this, kind, ref, at, flash) });
     // lane setting-doors pick 2: THE LIVE FACTS an agent's proposed change is drawn against (user-todos-row.js registerSettingFacts) —
     // the row's value NOW (this settings store; a hub's «moved» answer to a press is noted until the store hears the row move) and its
     // standing HOLD (GET /api/setting-holds at boot and every reconnect, then every `setting-holds` broadcast). A change of either

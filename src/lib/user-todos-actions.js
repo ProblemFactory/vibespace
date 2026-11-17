@@ -28,6 +28,7 @@ import { appRefusalText } from './app-install-dialog.js'; // a refusal code → 
 import { shownDigest, openRowOf } from './app-card-model.js'; // design 009: the digest of the card pressed; the row an Installed card opens // Layer 0 apps: THE install dialog an agent's install proposal opens (the same component as "Install xpra on {machine}…")
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one reset-credit confirm dialog (design-reset-credits p2): the ask-mode item's button
 import { showReauthAccountDialog } from './channel-account-dialogs.js'; // lane channel-names-readable: a `channel-reauth` item's verb = THE account's Re-authorize dialog
+import { pressInternalLink } from './internal-link-door.js'; // lane login-request-card piece 1: THE press of a link of the scheme (the page's door)
 import { askArtifactRow, askArtifactProbe, linkTarget } from './foryou-links.js'; // PURE (lane foryou-attachments): an ask's chip → its artifact row + the open-time probe; a link in the words → its target
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
 import { revealLeftMs, revealHeaders, askRevealPassword, forgetReveal } from './vault-reveal.js'; // lane vault-run-door: a held run's «always» asks 验证是你 FIRST, in the press's own task
@@ -58,6 +59,17 @@ export function tierCounts(action) {
  *  a loud one adds «· 18 more, none pressing». */
 export function actionWords(action, total = action.length) { return badgeWords(action, total, t); } // the sentence is PURE (user-todos-layout.js badgeWords)
 
+/** THE SIDEBAR ROW a conversation key names — exported ONCE (lane login-request-card piece 1: a link of the scheme names its
+ *  conversation by the same key): the sidebar's OWN canonical key derivation (the one the status chips use) — an ad-hoc
+ *  reimplementation would drift from it. webui:<serverId> covers items filed before the backend id existed. */
+export function sessionRowOf(app, key) {
+  return (app?.sidebar?._allSessions || []).find((s) => {
+    if (s.webuiId && `webui:${s.webuiId}` === key) return true;
+    try { return app.sidebar._getSessionStateKey(s) === key; }
+    catch { return `${s.backend || 'claude'}:${s.sessionId}` === key; }
+  }) || null;
+}
+
 export function inboxModel(app) {
   if (app._inboxModel) return app._inboxModel;
   let todos = { open: [], resolved: [] };
@@ -65,15 +77,7 @@ export function inboxModel(app) {
   const listeners = { todos: new Set(), live: new Set(), status: new Set() };
   const emit = (kind, arg) => { for (const fn of [...listeners[kind]]) { try { fn(arg); } catch (e) { console.warn('[inbox] listener failed:', e); } } };
 
-  // Match items to sidebar sessions with the sidebar's OWN canonical key
-  // derivation (same one the status chips use) — an ad-hoc reimplementation
-  // here would drift from it. webui:<serverId> covers items filed before the
-  // backend id existed.
-  const sessionFor = (key) => (app.sidebar?._allSessions || []).find((s) => {
-    if (s.webuiId && `webui:${s.webuiId}` === key) return true;
-    try { return app.sidebar._getSessionStateKey(s) === key; }
-    catch { return `${s.backend || 'claude'}:${s.sessionId}` === key; }
-  });
+  const sessionFor = (key) => sessionRowOf(app, key);
   const displayName = (s) => {
     try { return app.sidebar?.getCustomName?.(s) || s.name; } catch { return s.name; }
   };
@@ -215,12 +219,13 @@ export function inboxModel(app) {
   /** A link in the words (src/lib/foryou-links.js): a URL / mail address / page per the chat's link convention (a new
    *  tab); a path probed on the ASKER's host against its cwd (the chat's candidates) — a folder opens the explorer there,
    *  nothing found ⇒ a toast that says so. */
-  const openLink = async (item, kind, ref) => {
+  const openLink = async (item, kind, ref, at = {}) => {   // `at` = the press's point (an ENDED conversation's two-item menu opens there)
     const tg = linkTarget(kind, ref, { cwd: (item && item.cwd) || '', host: (item && item.hostId) || '' });
     if (!tg) return false;
     if (tg.open === 'url' || tg.open === 'mail') { window.open(tg.href, '_blank', 'noopener'); return true; }
     if (tg.open === 'page') { window.open(new URL(tg.path, location.origin).href, '_blank', 'noopener'); return true; }
     if (tg.open === 'setting') { app.openSettingAt?.(tg.key); return true; }   // lane setting-doors pick 1: THE door — Settings on that row; it opens, never writes
+    if (tg.open === 'conversation' || tg.open === 'desktop') { pressInternalLink(tg.open, tg.key || tg.id, at); return true; }   // lane login-request-card piece 1: the page's door — it only navigates
     const host = tg.host || undefined;
     for (const c of tg.cands) {
       const info = await fetchJson(`/api/file/info?path=${encodeURIComponent(c)}${host ? '&host=' + encodeURIComponent(host) : ''}`);

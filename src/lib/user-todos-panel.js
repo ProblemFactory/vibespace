@@ -35,6 +35,7 @@ import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toa
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf, reachFor, pickReach, forgetReachPicks } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
 import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale, chromeAvoidRects, frontRects, seenAt, toastDeskSpot, placeToastsSoon, MODAL_OPEN_EVENT, markTyped } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { fyLinkMenu } from './internal-link-door.js'; // lane login-request-card piece 1: a link of the scheme in an item's words — «Go» · «Copy link»
 import { announceWords, newestFirst } from '../foryou-actions.js'; // PURE (lane needs-card-tail r10 addendum, r11): the announce card's words + clock, its stack's newest-first order (WHICH arrival announces: toastWorthy — one policy)
 import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文件 card under the phone page's bands
 import { navOneBadge } from './title-chips.js'; // lane phone-titlebar-title: the phone bar's ONE-badge form
@@ -148,7 +149,7 @@ export function installUserTodos(app) {
     if (!it) return true;
     close();
     if (fy.classList.contains('ut-art')) model.openArtifact(it, Number(fy.dataset.ai));
-    else model.openLink(it, fy.dataset.fy, fy.dataset.ref);
+    else model.openLink(it, fy.dataset.fy, fy.dataset.ref, { x: e.clientX, y: e.clientY });
     return true;
   };
   const setStatus = (id, status) => model.setStatus(id, status);
@@ -948,6 +949,7 @@ export function installUserTodos(app) {
   // A reply box is a place to type — its own native menu stays.
   function rowMenu(e) {
     if (e.target.closest('.ut-reply')) return;
+    if (fyLinkMenu(e)) return;   // a link of the scheme in the words: its own menu
     const row = e.target.closest('.ut-item');
     const items = row ? model.menuFor(row.dataset.id) : [];
     if (!items.length) return;

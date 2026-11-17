@@ -3,6 +3,15 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  // lane login-request-card piece 1 (the design's «Internal links» — the words on screen, LINKS): a link to a conversation or a desktop
+  "Go": "前往",
+  "Go to this desktop": "前往这个桌面",
+  "unknown conversation": "未知对话",
+  "unknown desktop": "未知桌面",
+  "link::Resume here": "在这里恢复",
+  "Read its history": "查看历史记录",
+  "Opened on {desktop} — it had no window.": "已在 {desktop} 打开——它之前没有窗口。",
+  "This conversation is archived — open it from the archived list in the sidebar.": "这个对话已归档——请从侧边栏的归档列表中打开。",
   // lane sidebar-echo-order (inc-mwbn2xp8-ks0b, round 9): the page speaks only when it takes something back on the screen
   "The server refused a change ({reason}), so it was undone here": "服务器拒绝了一项改动（{reason}），已在此撤销",
   "The server refused a change, so it was undone here.": "服务器拒绝了一项改动，已在此撤销。",
