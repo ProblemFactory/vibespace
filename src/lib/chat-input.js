@@ -11,6 +11,7 @@ import { createStashStrip } from './stash-strip.js'; // 2026-09-27: what waits f
 import { landDraft, PUTBACK_SEP } from '../queue-putback.js'; // PURE (lane stop-refills-composer): a Stop put-back lands as a prefix over the live box; lane draft-focus-guard: landDraft = THE verdict for every draft another client saved
 import { createAgentCards } from './agent-card.js'; // lane agent-window-no-pop: the card an agent's window leaves where nothing opened
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
+import { createImageDoor, refusalText, heldOf } from './image-attach.js'; // B-c9ed: THE picture door — every picture judged by THE rule when it is handed
 
 /** THE CAMERA DOOR (lane phone-take-photo, owner 2026-11-09 «为啥我在手机上添加图片的时候不能拍照»): Android Chrome opens an
  *  image-only file input in its system PHOTO PICKER — a gallery with no camera in it — so a phone sheet that offers
@@ -410,7 +411,7 @@ export class ChatInput {
     // the microphone (desk + phone): click to record, click to stop — the text lands at the cursor (src/lib/voice-input.js)
     this._voice = createVoiceInput({ textarea: this._textarea, getFacts: () => this._getVoiceFacts(), getCwd: () => this._getCwd(), openPlugins: () => this._openPlugins() });
     attachInput.onchange = () => {
-      for (const file of attachInput.files) this._addImageAttachment(file);
+      this._addImageAttachment([...attachInput.files]);   // ONE hand-over: the refused files said in one toast
       attachInput.value = '';
     };
 
@@ -1578,18 +1579,18 @@ export class ChatInput {
     return msgId;
   }
 
-  _addImageAttachment(file) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result;
-      const base64 = dataUrl.split(',')[1];
-      const mediaType = file.type || 'image/png';
-      const attachment = { base64, mediaType, dataUrl, name: file.name || 'image' };
-      this._attachments.push(attachment);
-      this._renderAttachments();
-      this._textarea.focus();
-    };
-    reader.readAsDataURL(file);
+  /** THE ONE ROAD of a picture into this message (the paste, the gallery, the camera's shot): a File or a list of them,
+   *  each judged by THE rule (B-c9ed, src/image-attach-rule.js) when it is handed — an empty file, a HEIC, a file that
+   *  is not PNG / JPEG / GIF / WebP by its bytes, a picture over the model API's size or side, one that takes the
+   *  message's pictures past the API's request size becomes no chip, and ONE toast names each refused file and why; a
+   *  taken picture carries the type its bytes say */
+  _addImageAttachment(files) {
+    if (!this._imageDoor) this._imageDoor = createImageDoor({
+      held: () => heldOf(this._attachments),
+      onAdd: (attachment) => { this._attachments.push(attachment); this._renderAttachments(); this._textarea.focus(); },
+      onRefused: (list) => showToast(refusalText(list, t), { type: 'error' }),
+    });
+    return this._imageDoor.add(files && typeof files.length === 'number' ? files : [files]);
   }
 
   _renderAttachments() {

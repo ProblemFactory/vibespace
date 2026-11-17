@@ -53,6 +53,8 @@ export const noticeKeyTables = () => {
     { name: 'src/settings-file-words.js SETTINGS_FILE_WORDS', keys: Object.values(req('../src/settings-file-words.js').SETTINGS_FILE_WORDS) },
     // B-6c55: a locked conversation's resume that cannot keep its 1M ask — the hub's notice, worded by t() on the page
     { name: 'src/lock-context.js NO_LONG_CONTEXT', keys: [req('../src/lock-context.js').NO_LONG_CONTEXT] },
+    // B-c9ed: THE picture rule's refusal words — a table of keys, worded by t() at the picture door (src/lib/image-attach.js)
+    { name: 'src/image-attach-rule.js REFUSAL_WORDS', keys: Object.values(req('../src/image-attach-rule.js').REFUSAL_WORDS) },
     // lane browser-login r23 (M2): every For-you notice template in src/browser-login.js NOTICE
     { name: 'src/browser-login.js NOTICE', keys: Object.values(BL.NOTICE || {}).flatMap((v) => [v.text, v.detail]) },
   ];
