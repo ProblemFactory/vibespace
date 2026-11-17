@@ -30,7 +30,7 @@ function requestThrough({ url, forwarder, deadlineMs = X.DEADLINE_MS, capBytes =
     const secs = () => (deadlineMs >= 1000 ? `${Math.round(deadlineMs / 1000)} s` : `${deadlineMs} ms`);
     const timer = setTimeout(() => finish(tunneled ? { ok: false, code: 'exit_check_timeout', error: `the exit check address did not answer in ${secs()}` } : { ok: false, code: 'exit_proxy_timeout', error: `the profile's proxy did not open the way in ${secs()}` }), deadlineMs);
     sock = net.connect({ host: fw.hostname, port: Number(fw.port) });
-    sock.once('error', (e) => finish({ ok: false, code: 'exit_check_failed', error: `the profile's proxy forwarder failed — ${e.message}` }));
+    sock.once('error', (e) => finish({ ok: false, code: 'exit_check_failed', detail: String(e.message || '').slice(0, 160), error: `the profile's proxy forwarder failed — ${e.message}` }));
     sock.once('connect', () => sock.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`));
     sock.once('close', () => { if (!tunneled) finish({ ok: false, code: 'exit_proxy_hung_up', error: 'the profile\'s proxy closed the connection before the way to the check address was open' }); });
     let head = '';
@@ -40,21 +40,21 @@ function requestThrough({ url, forwarder, deadlineMs = X.DEADLINE_MS, capBytes =
       if (i < 0) { if (head.length > 16384) finish({ ok: false, code: 'exit_check_failed', error: 'the forwarder answered too much before the tunnel' }); return; }
       sock.removeListener('data', onData);   // the TLS layer / the request take the socket in this same turn — nothing is read in between
       const code = Number((/^HTTP\/1\.[01] (\d{3})/.exec(head) || [])[1] || 0);
-      if (code !== 200) { const why = head.slice(i + 4).trim(); tunneled = true; finish({ ok: false, code: 'exit_check_refused', error: `the profile's proxy did not open the way to the check address (${code || 'no answer'})${why ? ` — ${why.slice(0, 240)}` : ''}` }); return; }
+      if (code !== 200) { const why = head.slice(i + 4).trim(); tunneled = true; finish({ ok: false, code: 'exit_check_refused', detail: `${code || 'no answer'}${why ? ` — ${why.slice(0, 160)}` : ''}`, error: `the profile's proxy did not open the way to the check address (${code || 'no answer'})${why ? ` — ${why.slice(0, 240)}` : ''}` }); return; }   // detail = the proxy's own line (data after the page's sentence)
       tunneled = true;
       const rest = Buffer.from(head.slice(i + 4), 'latin1');
       if (rest.length) sock.unshift(rest);
-      try { t = tlsConnect({ socket: sock, host, servername: net.isIP(host) ? undefined : host }); } /* `host`: the identity a literal is checked as (not the forwarder's loopback) */ catch (e) { finish({ ok: false, code: 'exit_check_failed', error: `TLS to the check address failed — ${e.message}` }); return; }
-      t.once('error', (e) => finish({ ok: false, code: 'exit_check_failed', error: `TLS to the check address failed — ${e.message}` }));
+      try { t = tlsConnect({ socket: sock, host, servername: net.isIP(host) ? undefined : host }); } /* `host`: the identity a literal is checked as (not the forwarder's loopback) */ catch (e) { finish({ ok: false, code: 'exit_check_failed', detail: String(e.message || '').slice(0, 160), error: `TLS to the check address failed — ${e.message}` }); return; }
+      t.once('error', (e) => finish({ ok: false, code: 'exit_check_failed', detail: String(e.message || '').slice(0, 160), error: `TLS to the check address failed — ${e.message}` }));
       const req = https.request({ host, port, path: (u.pathname || '/') + (u.search || ''), method: 'GET', headers: { Host: u.host, ...X.REQUEST_HEADERS }, createConnection: () => t });   // NO agent: with one, Node ignores createConnection and looks the name up itself
-      req.once('error', (e) => finish({ ok: false, code: 'exit_check_failed', error: `the exit check request failed — ${e.message}` }));
+      req.once('error', (e) => finish({ ok: false, code: 'exit_check_failed', detail: String(e.message || '').slice(0, 160), error: `the exit check request failed — ${e.message}` }));
       req.once('response', (res) => {
         const status = res.statusCode || 0, contentType = String(res.headers['content-type'] || '');
         if (status >= 300 && status < 400) { finish({ ok: true, status, contentType, body: Buffer.alloc(0) }); return; }   // never followed
         const chunks = []; let n = 0;
         res.on('data', (c) => { n += c.length; if (n > capBytes) { finish({ ok: false, code: 'exit_check_too_big', error: `the check address answered more than ${Math.round(capBytes / 1024)} KiB` }); return; } chunks.push(c); });
         res.once('end', () => finish({ ok: true, status, contentType, body: Buffer.concat(chunks) }));
-        res.once('error', (e) => finish({ ok: false, code: 'exit_check_failed', error: `the exit check answer broke off — ${e.message}` }));
+        res.once('error', (e) => finish({ ok: false, code: 'exit_check_failed', detail: String(e.message || '').slice(0, 160), error: `the exit check answer broke off — ${e.message}` }));
       });
       req.end();
     };

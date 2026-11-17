@@ -13626,7 +13626,6 @@ export default {
   "Proxy…": "代理…", // B-8b87: a browser profile's proxy and its login
   "This profile's proxy and its login (kept in the vault)": "这个配置的代理及其登录信息（存在保险库里）", // B-8b87: a browser profile's proxy and its login
   "Proxy of {label}": "{label} 的代理", // B-8b87: a browser profile's proxy and its login
-  "Its saved proxy address carries its password, which is never used. «Move the password to the vault» in ⋯ keeps it in one press — or give the address here and choose its login.": "已保存的代理地址里带着密码，这个密码从不使用。在 ⋯ 里点「把密码移入保险库」，一下就能存好——也可以在这里重新填地址，再选它的登录信息。", // B-8b87: a browser profile's proxy and its login
   "Applied at the browser's next start.": "浏览器下次启动时生效。", // B-8b87: a browser profile's proxy and its login
   "{label} goes through its proxy from its next start": "{label} 从下次启动起经它的代理上网", // B-8b87: a browser profile's proxy and its login
   "{label} has no proxy from its next start": "{label} 从下次启动起不再使用代理", // B-8b87: a browser profile's proxy and its login
@@ -13677,11 +13676,8 @@ export default {
   "The proxy's login is in the vault, which is locked — a person unlocks it on this instance's page (Unlock…), then checks again.": "代理的登录信息在保险库里，而保险库已锁定——请在本实例的页面上解锁（解锁…），然后再检查。", // the exit check (the owner 2026-11-17)
   "That is not a time zone — give a zone name like Asia/Shanghai.": "这不是一个时区——请填写像 Asia/Shanghai 这样的时区名。", // the exit check (the owner 2026-11-17)
   "Give at least one of the public address, the country or the time zone.": "请至少填写公网地址、国家或时区中的一项。", // the exit check (主开发 17:04Z cure)
-  "The exit check address did not answer in 8 seconds.": "出口检查地址 8 秒内没有回应。", // the exit check (the owner 2026-11-17)
-  "The exit could not be checked.": "没能检查出口。", // the exit check (the owner 2026-11-17)
   "The exit of {label}": "{label} 的出口", // the exit check (the owner 2026-11-17)
   "Checked only when you press Check — through this profile's own proxy, at the exit check address. Nothing is kept until you press Keep; an engine plugin reads what you keep when the browser starts.": "只在你按「检查」时检查——经这个配置自己的代理，访问出口检查地址。按「保留」之前什么都不会保存；浏览器启动时，引擎插件会读取你保留的内容。", // the exit check (the owner 2026-11-17)
-  "Kept: {ip} · {country} · {timezone} ({how})": "已保留：{ip} · {country} · {timezone}（{how}）", // the exit check (the owner 2026-11-17)
   "Proxy exit": "代理出口", // the exit check (the owner 2026-11-17)
   "{ip} · {where} — {how}, checked {age}": "{ip} · {where}——{how}，{age}检查", // the exit check (the owner 2026-11-17)
   "This profile attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.": "这个配置连接的是一个不由 VibeSpace 启动的浏览器——那个浏览器按它自己的设置出网，所以在这里检查可能说出一个它并不使用的出口。如果插件需要，请手动填写出口。", // the exit check (主开发 17:04Z cure)
@@ -13692,6 +13688,28 @@ export default {
   "its kept exit is forgotten (it belonged to the old proxy); check it again": "它保留的出口已忘掉（那是旧代理的）；请重新检查", // the exit check (主开发 17:04Z cure)
   "Not saved — the exit check address must be a public https address with no user name or password in it; the stored one is kept": "未保存——出口检查地址必须是公开的 https 地址，且不含用户名或密码；保留原来的地址", // the exit check (主开发 17:04Z cure)
   "Not saved — the server refused this value ({code}); the stored one is kept": "未保存——服务器拒绝了这个值（{code}）；保留原来的值", // the exit check (主开发 17:04Z cure)
+  "Kept: {ip} · {country} · {timezone} ({how}, checked {age})": "已保留：{ip} · {country} · {timezone}（{how}，{age}检查）", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered with a redirect — a redirect is never followed.": "检查地址回应了一个重定向——重定向从不跟随。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered with an error status.": "检查地址回应了一个错误状态。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered nothing.": "检查地址什么都没有回应。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered a web page, not JSON.": "检查地址回应的是一个网页，不是 JSON。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered plain text, not JSON.": "检查地址回应的是纯文本，不是 JSON。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered JSON without an address, a country or a time zone in it.": "检查地址回应的 JSON 里没有地址、国家或时区。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered something that could not be read.": "检查地址回应的内容无法读懂。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The profile's proxy did not open the way to the check address.": "配置的代理没有打开通往检查地址的路。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check address did not answer in time.": "出口检查地址没有及时回应。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check address answered more than this check reads (64 KiB).": "出口检查地址回应的内容超过了这次检查读取的上限（64 KiB）。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check could not reach the check address through the profile's proxy.": "出口检查无法经配置的代理到达检查地址。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Type the exit by hand, or give another check address in the field above and press Check.": "请手动填写出口，或在上面的输入框里换一个检查地址，再按「检查」。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The country is at most 64 characters.": "国家最多 64 个字符。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "This profile is gone — close the dialog and reload the list.": "这个配置已不存在——请关闭对话框并重新加载列表。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Only a person checks a profile's exit — an agent's token cannot.": "只有人才能检查配置的出口——代理的令牌不能。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check runs for browsers on this machine only.": "出口检查只用于这台机器上的浏览器。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The request was not understood — reload the page and try again.": "请求没有被理解——请重新加载页面再试。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check is not available on this server.": "这台服务器上没有出口检查。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit could not be checked — the server failed; try again.": "无法检查出口——服务器出错了，请再试一次。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit could not be checked ({code}).": "无法检查出口（{code}）。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Its saved proxy address carries its password, which is never used. The press below moves that password into the vault in one step — the profile keeps the address and that login. Or give the address here and choose its login.": "它保存的代理地址里带着密码，这个密码从不使用。按下面的按钮，一步就把这个密码移入保险库——配置保留地址和这份登录。也可以在这里填写地址并选择它的登录。", // the exit check (主开发 18:36Z: every sentence the page's)
   "measured": "实测", // the exit check (the owner 2026-11-17)
   "typed": "手动填写", // the exit check (the owner 2026-11-17)
   "Exit check address": "出口检查地址", // the exit check (the owner 2026-11-17)
@@ -13702,7 +13720,6 @@ export default {
   "Check": "检查", // the exit check (the owner 2026-11-17)
   "Keep": "保留", // the exit check (the owner 2026-11-17)
   "Checking through this profile's proxy…": "正在经这个配置的代理检查…", // the exit check (the owner 2026-11-17)
-  "The answer could not be read: {what}. Type the exit by hand, or give another check address in the field above and press Check.": "无法读懂回应：{what}。请手动填写出口，或在上面的输入框里换一个检查地址，再按「检查」。", // the exit check (主开发 17:04Z cure)
   "Read — check each field, then Keep.": "已读到——请核对每一项，然后点「保留」。", // the exit check (the owner 2026-11-17)
   "{label}'s exit is kept — an engine plugin reads it when the browser starts": "已保留 {label} 的出口——浏览器启动时引擎插件会读取它", // the exit check (the owner 2026-11-17)
   "exit {where}": "出口 {where}", // the exit check (the owner 2026-11-17)

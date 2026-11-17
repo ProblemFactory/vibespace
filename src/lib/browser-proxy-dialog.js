@@ -14,7 +14,12 @@ export function openProxyDialog(app, r, { onDone = null } = {}) {
   const shell = createModalShell({ id: 'browser-proxy-dialog', key: String(r.id), opener: 'person', title: t('Proxy of {label}', { label }), dialogClass: 'bwho-dialog bproxy-dialog', onClose: () => { },
     unsaved: { isDirty: () => !!field && field.isDirty(), save: () => doSave() }, kind: 'form' });
   if (shell.raised) return shell;
-  if (r.proxyPasswordInProfile) shell.body.appendChild(noteLine('bnew-hint bproxy-legacy', t('Its saved proxy address carries its password, which is never used. «Move the password to the vault» in ⋯ keeps it in one press — or give the address here and choose its login.'), { warn: true }));
+  // 主开发 18:36Z: ANSWERABLE WHERE IT APPEARS — the note offers the move itself (one press; the row's menu item stays)
+  if (r.proxyPasswordInProfile) {
+    const legacy = noteLine('bnew-hint bproxy-legacy', t('Its saved proxy address carries its password, which is never used. The press below moves that password into the vault in one step — the profile keeps the address and that login. Or give the address here and choose its login.'), { warn: true });
+    const movePress = btn(t('Move the password to the vault'), () => doMove(), 'bproxy-move');
+    shell.body.append(legacy, movePress);
+  }
   field = mountProxyField(shell.body, { proxy: r.proxyPasswordInProfile ? '' : String(r.proxy || ''), credential: String(r.proxyCredential || ''), fetchJson });
   shell.body.appendChild(el('div', 'bnew-hint', t('Applied at the browser\'s next start.')));
   const refusal = noteLine('bwho-refusal bnew-refusal', '', { warn: true });
@@ -30,6 +35,17 @@ export function openProxyDialog(app, r, { onDone = null } = {}) {
   footer.append(cancel, save);
   shell.dialog.append(notes, footer);
   let busy = false;
+  async function doMove() {
+    if (busy) return;
+    busy = true; save.disabled = true;
+    try {
+      const res = await fetchJson('/api/vault/proxy-logins/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: r.id }) });
+      if (!res || res.error || res.ok === false) { say(proxyWords(res && res.code, t, '', { act: 'move', word: res && res.word }), proxyDoor(res && res.code, res && res.word)); return; }
+      showToast(t('{label}\'s proxy password is in the vault now — the profile keeps the address alone', { label }), { duration: 6000 });
+      shell.close();
+      try { onDone?.(); } catch { /* the panel reloads on its own */ }
+    } finally { busy = false; save.disabled = false; }
+  }
   async function doSave() {
     if (busy) return;
     busy = true; save.disabled = true;

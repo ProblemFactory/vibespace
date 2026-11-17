@@ -5,26 +5,13 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
+import { exitSay, exitAgeText } from './browser-exit-words.js';
 
 const KEY = 'browser.exitCheckUrl';
 const post = (url, body) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-const WORDS = (code, error) => {
-  switch (code) {
-    case 'exit_no_proxy': return t('This profile has no proxy of its own — its browser may leave by another road, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.');
-    case 'exit_url_unset': return t('No exit check address is set — give one below (an https address you trust), or type the exit by hand.');
-    case 'exit_url_invalid': return t('The exit check address must be a public https address with no user name or password in it.');
-    case 'exit_restart_first': return t('This browser runs on another road than its proxy now names (the address or its login changed since it started) — restart it, then check the exit.');
-    case 'exit_external_browser': return t('This profile attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.');
-    case 'exit_proxy_timeout': return t('The profile\'s proxy did not open the way to the check address in time.');
-    case 'exit_proxy_hung_up': return t('The profile\'s proxy closed the connection before the way to the check address was open.');
-    case 'exit_ip_invalid': return t('The public address is one IP address, like 203.0.113.7 or 2001:db8::1.');
-    case 'proxy_credential_unreadable': return t('The proxy\'s login is in the vault, which is locked — a person unlocks it on this instance\'s page (Unlock…), then checks again.');
-    case 'exit_timezone_invalid': return t('That is not a time zone — give a zone name like Asia/Shanghai.');
-    case 'exit_empty': return t('Give at least one of the public address, the country or the time zone.');
-    case 'exit_check_timeout': return t('The exit check address did not answer in 8 seconds.');
-    default: return error ? String(error) : t('The exit could not be checked.');
-  }
-};
+// 主开发 18:36Z: every sentence a person reads here is the PAGE's, chosen by code or kind (src/lib/browser-exit-words.js); what the far
+// side said rides after it as data, never as the sentence
+const WORDS = (code, extra = {}) => exitSay(code, t, extra);
 
 export function openExitDialog(app, r, { onDone = null } = {}) {
   const label = String((r && (r.label || r.id)) || '');
@@ -35,7 +22,7 @@ export function openExitDialog(app, r, { onDone = null } = {}) {
   const body = shell.body;
   body.appendChild(el('div', 'bnew-hint', t('Checked only when you press Check — through this profile\'s own proxy, at the exit check address. Nothing is kept until you press Keep; an engine plugin reads what you keep when the browser starts.')));
   const kept = r.egress && typeof r.egress === 'object' ? r.egress : null;
-  if (kept) body.appendChild(el('div', 'bnew-hint bexit-kept', t('Kept: {ip} · {country} · {timezone} ({how})', { ip: kept.publicIp || '—', country: kept.country || '—', timezone: kept.timezone || '—', how: kept.source === 'measured' ? t('measured') : t('typed') })));
+  if (kept) body.appendChild(el('div', 'bnew-hint bexit-kept', t('Kept: {ip} · {country} · {timezone} ({how}, checked {age})', { ip: kept.publicIp || '—', country: kept.country || '—', timezone: kept.timezone || '—', how: kept.source === 'measured' ? t('measured') : t('typed'), age: kept.checkedAt ? exitAgeText(Date.now() - Number(kept.checkedAt), t) : '—' })));
   // the check address — shown here when none is set (the person at this dialog may set it)
   const urlRow = el('label', 'bnew-field bexit-url-row');
   urlRow.appendChild(el('span', 'bnew-field-head', t('Exit check address')));
@@ -77,14 +64,14 @@ export function openExitDialog(app, r, { onDone = null } = {}) {
         if (!u) { say(WORDS('exit_url_unset')); urlIn.focus(); return; }
         const w = await fetchJson('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [KEY]: u }) });
         const refusedHere = w && w.refused && w.refused[KEY];   // the server sets a refused address aside and says why (the rest of a save lands)
-        if (!w || w.error || refusedHere) { say(WORDS((refusedHere && refusedHere.code) || (w && w.code) || 'exit_url_invalid', w && w.error)); urlIn.focus(); return; }
+        if (!w || w.error || refusedHere) { say(WORDS((refusedHere && refusedHere.code) || (w && w.code) || 'exit_url_invalid')); urlIn.focus(); return; }
         urlRow.style.display = 'none';
       }
       const res = await post(`/api/browser/profiles/${encodeURIComponent(r.id)}/exit-check`);
       if (!res || !res.ok) {
         if (res && res.code === 'exit_url_unset') urlRow.style.display = '';
         if (res && res.code === 'exit_answer_unreadable') { if (!urlIn.value) urlIn.value = current; urlRow.style.display = ''; }   // the door to change it: the field, here
-        say(res && res.code === 'exit_answer_unreadable' ? t('The answer could not be read: {what}. Type the exit by hand, or give another check address in the field above and press Check.', { what: String(res.error || res.kind || '') }) : WORDS(res && res.code, res && res.error));
+        say(WORDS(res && res.code, { kind: res && res.kind, status: res && res.status, detail: res && res.detail }));
         return;
       }
       read = res.read; source = 'measured';
@@ -96,7 +83,7 @@ export function openExitDialog(app, r, { onDone = null } = {}) {
   async function doForget() {
     if (busy) return;
     const res = await post(`/api/browser/profiles/${encodeURIComponent(r.id)}/egress`, { clear: true });
-    if (!res || !res.ok) { say(WORDS(res && res.code, res && res.error)); return; }
+    if (!res || !res.ok) { say(WORDS(res && res.code)); return; }
     dirty = false;
     showToast(t('{label}\'s kept exit is forgotten — an engine plugin gets none at the next start', { label }), { duration: 6000 });
     shell.close();
@@ -106,7 +93,7 @@ export function openExitDialog(app, r, { onDone = null } = {}) {
     if (busy) return;
     const edited = read && (ipInput.value.trim() !== (read.publicIp || '') || countryInput.value.trim() !== (read.country || '') || zoneInput.value.trim() !== (read.timezone || ''));
     const res = await post(`/api/browser/profiles/${encodeURIComponent(r.id)}/egress`, { publicIp: ipInput.value.trim(), country: countryInput.value.trim(), timezone: zoneInput.value.trim(), source: source === 'measured' && !edited ? 'measured' : 'typed' });
-    if (!res || !res.ok) { say(WORDS(res && res.code, res && res.error)); if (res && res.code === 'exit_timezone_invalid') zoneInput.focus(); return; }
+    if (!res || !res.ok) { say(WORDS(res && res.code)); if (res && res.code === 'exit_timezone_invalid') zoneInput.focus(); return; }
     dirty = false;
     showToast(t('{label}\'s exit is kept — an engine plugin reads it when the browser starts', { label }), { duration: 6000 });
     shell.close();

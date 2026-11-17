@@ -6665,7 +6665,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const r = await EXC.requestThrough({ url: url.value, forwarder: `http://127.0.0.1:${port}`, ...(tlsConnect ? { tlsConnect } : {}), ...(Number(deadlineMs) > 0 ? { deadlineMs: Number(deadlineMs) } : {}) });
       if (!r.ok) return r;
       const a = EXIT.readExitAnswer(r);
-      return a.ok ? { ok: true, read: a.read } : { ok: false, code: 'exit_answer_unreadable', kind: a.kind, error: a.said };
+      return a.ok ? { ok: true, read: a.read } : { ok: false, code: 'exit_answer_unreadable', kind: a.kind, ...(a.kind === 'status' ? { status: r.status } : {}), error: a.said };
     } catch (e) { return { ok: false, code: e.code || 'exit_check_failed', error: String((e && e.message) || e) }; }
     finally { auth = null; await px.close({ cut: true }).catch(() => { }); }
   }

@@ -1818,6 +1818,7 @@ src/lib/browser-proxy-field.js — B-8b87 the proxy field (New profile, the card
 src/lib/browser-proxy-dialog.js — B-8b87 the card's «Proxy…» dialog: the field, Save = PATCH (applied at the next start), a refusal in the page's words with its vault press (Unlock… / Set up the vault…) ⇒ kb-features.md
 src/lib/browser-proxy-model.js — B-8b87 PURE: the typed address (normalizeProxy's mirror), a login's name read back, the logins for one address, every proxy refusal's words by code and act + its vault press ⇒ kb-features.md
 src/lib/browser-exit-dialog.js — «Check the exit…»: the press, what was read (editable), Keep; the check address field when none is set; Type it by hand ⇒ kb-features.md
+src/lib/browser-exit-words.js — PURE the exit check's page words: every code / unreadable kind the routes answer ⇒ the page's sentence; a server's or proxy's own words only as data after it; the kept exit's age ⇒ kb-features.md
 src/browser-exit.js — PURE the exit check's rules: checkUrlVerdict (https, no login, no private literal), readExitAnswer (the short key list), zoneVerdict (IANA via Intl), egressRecordOf (the hand-over's names) ⇒ kb-features.md
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 

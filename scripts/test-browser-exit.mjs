@@ -328,5 +328,45 @@ console.log('④ THE PERSON\'S DOORS — the setting\'s write, the routes, the a
   const withExit = { id: 'bp-000000aa', label: 'X', egress: { publicIp: '203.0.113.9', country: 'JP', timezone: 'Asia/Tokyo', checkedAt: 1, source: 'measured' } };
   ok(B.publicProfileView(withExit).egress && !('egress' in B.agentProfileView(withExit)), 'the person\'s view carries the kept exit; the agent\'s view never does');
 }
+console.log('⑤ THE PAGE\'S WORDS — every sentence in the dialog the page\'s, by code or kind; the far side\'s words only as data after it');
+{
+  const W = await import(new URL('../src/lib/browser-exit-words.js', import.meta.url).href);
+  const used = new Set(), T = (k, v) => { used.add(k); return String(k).replace(/\{(\w+)\}/g, (_, n) => (v && v[n] !== undefined ? String(v[n]) : `{${n}}`)); };
+  // EVERY code the two routes can answer: their status table, the route's own refusals, and every code the keeper's press / keep, the
+  // request, the pure rules and the launch's verdict can return — read from the files themselves (a new code without a row goes red)
+  const RB = read('src/routes/browser.js'), KS = read('src/server/browser-keeper.js');
+  const table = (/const EXIT_STATUS = Object\.freeze\(\{([^}]*)\}\)/.exec(RB) || [])[1] || '';
+  const codesIn = (txt) => [...txt.matchAll(/code: '([a-z_-]+)'/g)].map((m) => m[1]);
+  const fnOf = (src, head, end = '\n  }\n') => { const i = src.indexOf(head); if (i < 0) return ''; const j = src.indexOf(end, i); return src.slice(i, j < 0 ? i + 6000 : j); };   // a keeper method ends at two spaces, a top-level function at none
+  const codes = new Set([
+    ...[...table.matchAll(/'?([a-z_-]+)'?: \d{3}/g)].map((m) => m[1]),
+    'agent_forbidden', 'unsupported-host', 'bad-request', 'unavailable', 'error',
+    ...codesIn(read('src/server/browser-exit-check.js')), ...codesIn(read('src/browser-exit.js')),
+    ...codesIn(fnOf(KS, '  async function exitCheck(')), ...codesIn(fnOf(KS, '  function keepEgress(')),
+    ...codesIn(fnOf(read('src/browser-profiles.js'), 'function proxyLaunchVerdict(', '\n}\n')),
+  ]);
+  const SERVER = 'the server\'s own English words';
+  const rows = [...codes].map((c) => ({ c, w: W.exitWords(c, T, { kind: 'html', status: 418, detail: SERVER }) }));
+  const missing = rows.filter((r) => !r.w.known).map((r) => r.c), leaked = rows.filter((r) => r.w.text.includes(SERVER)).map((r) => r.c);
+  ok(codes.size >= 25 && missing.length === 0 && leaked.length === 0, `every one of the ${codes.size} codes the routes can answer has the PAGE's sentence (none falls to «named by its code»), and no server words in any sentence`, { missing, leaked });
+  const kindsInRules = [...new Set([...read('src/browser-exit.js').matchAll(/kind: (?:html \? 'html' : 'text'|'([a-z]+)')/g)].flatMap((m) => (m[1] ? [m[1]] : ['html', 'text'])))].sort();
+  const kindTexts = W.EXIT_KINDS.map((k) => W.exitKindWords(k, T));
+  ok(JSON.stringify(kindsInRules) === JSON.stringify([...W.EXIT_KINDS].sort()) && new Set(kindTexts).size === W.EXIT_KINDS.length && !kindTexts.includes(W.exitKindWords('?', T)),
+    'every KIND of an unreadable answer the rules can give has its OWN page sentence (the six, read from src/browser-exit.js)', { kindsInRules });
+  const refused = W.exitSay('exit_check_refused', T, { detail: '407 — Proxy Authentication Required' }), st = W.exitSay('exit_answer_unreadable', T, { kind: 'status', status: 503 });
+  ok(/^The profile's proxy did not open the way to the check address\. \(407 — Proxy Authentication Required\)$/.test(refused) && /error status\..*\(503\)$/.test(st),
+    'what the far side said rides AFTER the page\'s sentence as data — a proxy\'s own line, a status number — never as the sentence', [refused, st]);
+  const DLG = read('src/lib/browser-exit-dialog.js'), PD = read('src/lib/browser-proxy-dialog.js'), CSS = read('public/style.css');
+  ok(!/say\([^;]*\.error/.test(DLG) && !/String\(error\)/.test(DLG) && /exitSay\(code, t, extra\)/.test(DLG),
+    'the dialog says nothing from a server\'s `error` — every sentence through the page\'s words');
+  ok(W.exitAgeText(3 * 3600e3, T) === '3 h ago' && /\(\{how\}, checked \{age\}\)/.test(DLG) && /exitAgeText\(Date\.now\(\) - Number\(kept\.checkedAt\), t\)/.test(DLG),
+    'the KEPT line says its age (measured or typed, and when it was checked) in the card\'s own words — where the Check press is');
+  ok(/const movePress = btn\(t\('Move the password to the vault'\), \(\) => doMove\(\), 'bproxy-move'\);/.test(PD) && /fetchJson\('\/api\/vault\/proxy-logins\/move'/.test(PD) && /The press below moves that password into the vault in one step/.test(PD)
+     && /\.bwho-lose, \.bwho-refusal, \.bproxy-legacy \{ display: flex; align-items: flex-start; gap: 4px;/.test(CSS),
+    'the legacy note is answerable where it appears — the move\'s press IN the note (its sentence says what the press does; the menu item stays); ONE rule spaces every dialog note\'s mark');
+  const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js'), miss = [...used].filter((k) => !ZH.includes(JSON.stringify(k) + ':') || !JA.includes(JSON.stringify(k) + ':'));
+  ok(miss.length === 0, `every one of those ${used.size} sentences is in the zh and ja dictionaries`, miss);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

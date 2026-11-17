@@ -8573,9 +8573,9 @@ label.chan-cap-row { cursor: default; }
    body and the footer, always on screen; every body part keeps its height and the body scrolls instead of squeezing */
 .bwho-body > * { flex-shrink: 0; }
 .bwho-notes { flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; padding: 0 14px 8px; }
-.bwho-lose, .bwho-refusal { display: flex; align-items: flex-start; gap: 4px; font-size: 11px; line-height: 1.4; }
-.bwho-lose > .chan-ic, .bwho-refusal > .chan-ic { margin-top: 2px; }
-.bwho-lose > span:not(.chan-ic), .bwho-refusal > span:not(.chan-ic) { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.bwho-lose, .bwho-refusal, .bproxy-legacy { display: flex; align-items: flex-start; gap: 4px; font-size: 11px; line-height: 1.4; }   /* ONE rule for a dialog note's mark (主开发 18:36Z: the legacy note too) */
+.bwho-lose > .chan-ic, .bwho-refusal > .chan-ic, .bproxy-legacy > .chan-ic { margin-top: 2px; }
+.bwho-lose > span:not(.chan-ic), .bwho-refusal > span:not(.chan-ic), .bproxy-legacy > span:not(.chan-ic) { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .bwho-footer { display: flex; justify-content: flex-end; gap: 8px; }
 .bwho-footer .mounts-btn { min-height: 28px; padding: 4px 14px; font-size: 12px; }
 /* lane browser-admin: THE New profile… dialog (src/lib/browser-new-profile.js) — the who dialog's shell + answer rows,

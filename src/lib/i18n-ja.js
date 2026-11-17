@@ -13625,7 +13625,6 @@ export default {
   "Proxy…": "プロキシ…", // B-8b87: a browser profile's proxy and its login
   "This profile's proxy and its login (kept in the vault)": "このプロファイルのプロキシとそのログイン情報（保管庫に保存）", // B-8b87: a browser profile's proxy and its login
   "Proxy of {label}": "{label} のプロキシ", // B-8b87: a browser profile's proxy and its login
-  "Its saved proxy address carries its password, which is never used. «Move the password to the vault» in ⋯ keeps it in one press — or give the address here and choose its login.": "保存されたプロキシのアドレスにはパスワードが含まれていますが、使われることはありません。⋯ の「パスワードを保管庫へ移す」ならワンタップで保存できます——またはここでアドレスを入力し、ログイン情報を選んでください。", // B-8b87: a browser profile's proxy and its login
   "Applied at the browser's next start.": "ブラウザの次回起動時に反映されます。", // B-8b87: a browser profile's proxy and its login
   "{label} goes through its proxy from its next start": "{label} は次回の起動からプロキシ経由になります", // B-8b87: a browser profile's proxy and its login
   "{label} has no proxy from its next start": "{label} は次回の起動からプロキシを使いません", // B-8b87: a browser profile's proxy and its login
@@ -13676,11 +13675,8 @@ export default {
   "The proxy's login is in the vault, which is locked — a person unlocks it on this instance's page (Unlock…), then checks again.": "プロキシのログイン情報は保管庫にあり、保管庫はロックされています——このインスタンスのページでロックを解除（ロック解除…）してから、もう一度確認してください。", // the exit check (the owner 2026-11-17)
   "That is not a time zone — give a zone name like Asia/Shanghai.": "これはタイムゾーンではありません——Asia/Shanghai のようなゾーン名を入力してください。", // the exit check (the owner 2026-11-17)
   "Give at least one of the public address, the country or the time zone.": "公開アドレス・国・タイムゾーンのいずれか 1 つ以上を入力してください。", // the exit check (主开发 17:04Z cure)
-  "The exit check address did not answer in 8 seconds.": "出口チェックのアドレスが 8 秒以内に応答しませんでした。", // the exit check (the owner 2026-11-17)
-  "The exit could not be checked.": "出口を確認できませんでした。", // the exit check (the owner 2026-11-17)
   "The exit of {label}": "{label} の出口", // the exit check (the owner 2026-11-17)
   "Checked only when you press Check — through this profile's own proxy, at the exit check address. Nothing is kept until you press Keep; an engine plugin reads what you keep when the browser starts.": "「確認」を押したときだけ確認します——このプロファイル自身のプロキシ経由で、出口チェックのアドレスに問い合わせます。「保持」を押すまで何も保存されません。ブラウザの起動時に、エンジンのプラグインが保持した内容を読み取ります。", // the exit check (the owner 2026-11-17)
-  "Kept: {ip} · {country} · {timezone} ({how})": "保持中：{ip} · {country} · {timezone}（{how}）", // the exit check (the owner 2026-11-17)
   "Proxy exit": "プロキシの出口", // the exit check (the owner 2026-11-17)
   "{ip} · {where} — {how}, checked {age}": "{ip} · {where}——{how}、{age}に確認", // the exit check (the owner 2026-11-17)
   "This profile attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.": "このプロファイルは VibeSpace が起動しないブラウザに接続します——そのブラウザは自身の設定で外に出るため、ここで確認すると使われない出口を示すおそれがあります。プラグインが必要とするなら出口を手入力してください。", // the exit check (主开发 17:04Z cure)
@@ -13691,6 +13687,28 @@ export default {
   "its kept exit is forgotten (it belonged to the old proxy); check it again": "保持していた出口は忘れました（古いプロキシのものでした）。もう一度確認してください", // the exit check (主开发 17:04Z cure)
   "Not saved — the exit check address must be a public https address with no user name or password in it; the stored one is kept": "保存されていません——出口チェックのアドレスは、ユーザー名やパスワードを含まない公開の https アドレスである必要があります。保存済みのものを維持します", // the exit check (主开发 17:04Z cure)
   "Not saved — the server refused this value ({code}); the stored one is kept": "保存されていません——サーバーがこの値を拒否しました（{code}）。保存済みの値を維持します", // the exit check (主开发 17:04Z cure)
+  "Kept: {ip} · {country} · {timezone} ({how}, checked {age})": "保持中：{ip} · {country} · {timezone}（{how}、{age}に確認）", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered with a redirect — a redirect is never followed.": "確認アドレスはリダイレクトで応答しました——リダイレクトは追いません。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered with an error status.": "確認アドレスはエラーのステータスで応答しました。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered nothing.": "確認アドレスは何も返しませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered a web page, not JSON.": "確認アドレスが返したのは JSON ではなくウェブページでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered plain text, not JSON.": "確認アドレスが返したのは JSON ではなくプレーンテキストでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered JSON without an address, a country or a time zone in it.": "確認アドレスが返した JSON には、アドレス・国・タイムゾーンがありませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The check address answered something that could not be read.": "確認アドレスの応答を読み取れませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The profile's proxy did not open the way to the check address.": "プロファイルのプロキシが確認アドレスへの経路を開きませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check address did not answer in time.": "出口チェックのアドレスが時間内に応答しませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check address answered more than this check reads (64 KiB).": "出口チェックのアドレスの応答が、この確認で読む上限（64 KiB）を超えました。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check could not reach the check address through the profile's proxy.": "出口チェックは、プロファイルのプロキシ経由で確認アドレスに届きませんでした。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Type the exit by hand, or give another check address in the field above and press Check.": "出口を手入力するか、上の欄に別の確認アドレスを入れて「確認」を押してください。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The country is at most 64 characters.": "国は最大 64 文字です。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "This profile is gone — close the dialog and reload the list.": "このプロファイルはもうありません——ダイアログを閉じて一覧を再読み込みしてください。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Only a person checks a profile's exit — an agent's token cannot.": "プロファイルの出口を確認できるのは人だけです——エージェントのトークンではできません。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check runs for browsers on this machine only.": "出口チェックはこのマシンのブラウザにだけ使えます。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The request was not understood — reload the page and try again.": "リクエストを理解できませんでした——ページを再読み込みしてもう一度お試しください。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit check is not available on this server.": "このサーバーでは出口チェックを使えません。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit could not be checked — the server failed; try again.": "出口を確認できませんでした——サーバーでエラーが起きました。もう一度お試しください。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "The exit could not be checked ({code}).": "出口を確認できませんでした（{code}）。", // the exit check (主开发 18:36Z: every sentence the page's)
+  "Its saved proxy address carries its password, which is never used. The press below moves that password into the vault in one step — the profile keeps the address and that login. Or give the address here and choose its login.": "保存されたプロキシのアドレスにパスワードが含まれており、そのパスワードは使われません。下のボタンを押すと、そのパスワードを一度で保管庫へ移します——プロファイルはアドレスとそのログインを残します。または、ここでアドレスを入力してログインを選んでください。", // the exit check (主开发 18:36Z: every sentence the page's)
   "measured": "測定", // the exit check (the owner 2026-11-17)
   "typed": "手入力", // the exit check (the owner 2026-11-17)
   "Exit check address": "出口チェックのアドレス", // the exit check (the owner 2026-11-17)
@@ -13701,7 +13719,6 @@ export default {
   "Check": "確認", // the exit check (the owner 2026-11-17)
   "Keep": "保持", // the exit check (the owner 2026-11-17)
   "Checking through this profile's proxy…": "このプロファイルのプロキシ経由で確認しています…", // the exit check (the owner 2026-11-17)
-  "The answer could not be read: {what}. Type the exit by hand, or give another check address in the field above and press Check.": "応答を読み取れませんでした：{what}。出口を手入力するか、上の欄に別の確認アドレスを入れて「確認」を押してください。", // the exit check (主开发 17:04Z cure)
   "Read — check each field, then Keep.": "読み取りました——各項目を確認してから「保持」を押してください。", // the exit check (the owner 2026-11-17)
   "{label}'s exit is kept — an engine plugin reads it when the browser starts": "{label} の出口を保持しました——ブラウザの起動時にエンジンのプラグインが読み取ります", // the exit check (the owner 2026-11-17)
   "exit {where}": "出口 {where}", // the exit check (the owner 2026-11-17)
