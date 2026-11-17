@@ -623,8 +623,13 @@ export function toastDeskSpot({ rect = null, avoid = [], topY = 0, vh = 0, scale
  *  the r13 acceptance: the For-you announce's first card over Session 10's Send, the toasts above it clear of the composer):
  *  every composer, every attention strip (chat-view's `.chat-attn-dock`), a window's title-bar buttons. The global toasts
  *  (_toastAvoid) and the For-you announce (user-todos-panel.js annPlace) both stand clear of it through toastDeskSpot.
+ *  B-9a64 (needs-card-tail r16's shot: an expired announce card stood over a chat's run card and its «Always…»): A TRANSCRIPT'S
+ *  PRESS POINTS ARE CHROME TOO — the buttons of a permission card or a helper's ask (.chat-permission-inline: an answered one
+ *  has none), the buttons of a needs card that still waits (chat-needs-card.js .cn-card.cn-open — never an answered line) and
+ *  a needs card's box (its reply, kept while in use) — each press point, never the whole card (a tall card would leave no
+ *  room); chromeAvoidRects takes the part of one its list's scrolled box shows, and SOFT.
  *  (The selector stays INSIDE its DOM query: test-oat-identity's census reads a `.window-` literal anywhere else as a path.) */
-export const chromeAvoidEls = () => document.querySelectorAll('.chat-input-area, .chat-attn-dock, .window-controls');
+export const chromeAvoidEls = () => document.querySelectorAll('.chat-input-area, .chat-attn-dock, .window-controls, .chat-permission-inline button, .cn-card.cn-open button, .cn-card textarea');
 /** the viewport rects of the elements `els` that show on this desktop (a window on another one is visibility:hidden); `skip(el)` ⇒ not counted */
 export function avoidRects(els, skip = null) {
   const out = [];
@@ -668,16 +673,26 @@ export function seenAt(l, t, r, b, fronts, nine = true) {
  *  stacked above its window, the open floats; the overlays `over(el)` passed over) — a covered window's controls are no control
  *  to keep clear of; outside the column nothing meets. NO hit test (lane window-close-stall: it was nine a control). */
 export function chromeAvoidRects(x0, x1, over = () => false) {
-  const out = [], fronts = new Map(); // (the boxes in front of one window, read once a call)
+  const out = [], fronts = new Map(), boxes = new Map(); // (the boxes in front of one window, read once a call; a list's / a message's own box, once)
+  const boxOf = (e) => { if (!boxes.has(e)) boxes.set(e, e.getBoundingClientRect()); return boxes.get(e); };
   for (const el of chromeAvoidEls()) {
     if (!showsHere(el)) continue;
-    const r = el.getBoundingClientRect();
+    // B-9a64: a transcript's press point is seen only inside its list's scrolled box (a card scrolled out of it is no obstacle);
+    // its MESSAGE's box is read first — a message outside the list's box is skipped before a rect inside it is asked for
+    // (chat.css: a .chat-msg is content-visibility: auto — a rect read inside an off-screen one would lay it out)
+    const list = typeof el.closest === 'function' ? el.closest('.chat-message-list') : null, c = list ? boxOf(list) : null;
+    const msg = list ? el.closest('.chat-msg') : null, m = msg ? boxOf(msg) : null;
+    if (m && c && (m.bottom <= c.top || m.top >= c.bottom || m.right <= x0 || m.left >= x1)) continue;
+    const b = el.getBoundingClientRect(), cb = c || b;
+    const r = { left: Math.max(b.left, cb.left), right: Math.min(b.right, cb.right), top: Math.max(b.top, cb.top), bottom: Math.min(b.bottom, cb.bottom) };
+    r.width = r.right - r.left; r.height = r.bottom - r.top;
     if (!(r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) || r.right <= x0 || r.left >= x1) continue;
     const win = typeof el.closest === 'function' ? el.closest('.window') : null;
     if (!fronts.has(win)) fronts.set(win, frontRects(el, over));
     if (!seenAt(Math.max(r.left, x0), r.top, Math.min(r.right, x1), r.bottom, fronts.get(win))) continue;
-    // a title bar's buttons are SOFT: they give way first when there is no room clear of everything (toastDeskSpot)
-    out.push({ left: r.left, right: r.right, top: r.top, bottom: r.bottom, soft: !!el.classList?.contains('window-controls') });
+    // a title bar's buttons are SOFT: they give way first when there is no room clear of everything (toastDeskSpot); B-9a64: so
+    // is a transcript's press point (the transcript scrolls — never the composer or the strip given up for it)
+    out.push({ left: r.left, right: r.right, top: r.top, bottom: r.bottom, soft: !!el.classList?.contains('window-controls') || !!list });
   }
   return out;
 }
