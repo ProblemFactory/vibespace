@@ -1,6 +1,6 @@
 'use strict';
-// SESSION-BRAIN CORE (decomposition #8): the dark parity comparator (step 2)
-// and the device/server dual-feed side-effect gate (step 3) — sbSeenFirst's
+// SESSION-BRAIN CORE (decomposition #8): the device/server dual-feed side-effect gate (step 3; the step-2 parity
+// soak was removed in 2.369.407) — sbSeenFirst's
 // first-writer-wins record gate + claudeSideEffects (the ONE implementation of
 // the six live-stdout consumer families). The hosts.onSessionEvents /
 // onUsageEvents WIRING stays in server.js (orchestration); this module is the
@@ -109,51 +109,13 @@ function notePublishedChange(session, sid, msg) {
   persistMeta(session, { prLinks: session._prLinks });
   try { broadcastActiveSessions?.(); } catch { }
 }
-// ── Session-brain step 2: the DARK comparator ───────────────────────────────
-// The daemon streams its own normalizer's ops for its pipe sessions; the
-// server compares mids against ITS parse of the same relayed stdout and does
-// NOTHING else with them. Content-derived mids (R0) make equality meaningful.
-// Metrics tell us when parity has earned step 3: sb-parity-hit / sb-parity-
-// miss per batch, plus a throttled divergence log naming the first differing
-// mid. Rings are bounded and per-sid; a session's ring dies with it.
-const _sbRings = new Map(); // key `<hostId>:<sid>` → { device:[], server:[], lastWarnAt }
-const SB_RING_MAX = 400;
-function _sbRing(key) {
-  let r = _sbRings.get(key);
-  if (!r) { r = { device: [], server: [], lastWarnAt: 0 }; _sbRings.set(key, r); if (_sbRings.size > 512) _sbRings.delete(_sbRings.keys().next().value); }
-  return r;
-}
-// mids are PREFIXED with the emitting normalizer's session id (`<id>:m:…`) —
-// device uses ITS sid (keeperSid), the server uses the webui id, so parity
-// compares the SUFFIX after the first ':' (the content-derived half).
-const _sbMidCore = (id) => { const s2 = String(id); const i = s2.indexOf(':'); return i >= 0 ? s2.slice(i + 1) : s2; };
-function sbNoteServerOp(hostId, sid, op) {
-  try {
-    if (!hostId || !op || op.op !== 'create' || !op.msg?.id) return;
-    const r = _sbRing(hostId + ':' + sid);
-    r.server.push(_sbMidCore(op.msg.id));
-    if (r.server.length > SB_RING_MAX) r.server.splice(0, r.server.length - SB_RING_MAX);
-    sbCompare(hostId, sid, r);
-  } catch { }
-}
-function sbCompare(hostId, sid, r) {
-  // parity = every device-seen create mid eventually appears in the server
-  // ring (and vice versa within the window). Order-insensitive set compare
-  // over the overlap — the two taps run at different cadences by design.
-  const dev = new Set(r.device), srv = new Set(r.server);
-  let hit = 0, miss = 0, firstMiss = null;
-  for (const m of dev) { if (srv.has(m)) hit++; else if (r.server.length >= 5) { miss++; if (!firstMiss) firstMiss = m; } }
-  if (hit) global.__vsMetric?.('sb-parity-hit', hit);
-  if (miss) {
-    global.__vsMetric?.('sb-parity-miss', miss);
-    const now = Date.now();
-    if (now - r.lastWarnAt > 300000) {
-      r.lastWarnAt = now;
-      console.warn(`[session-brain] parity divergence ${hostId}:${sid} — ${miss} device mid(s) unseen by the server parse (first: ${String(firstMiss).slice(0, 60)}) — step 3 stays gated until this is zero`);
-      global.__vsEvent?.('sb-parity-diverged', { detail: `${hostId}:${sid} miss=${miss}` });
-    }
-  }
-}
+// ── Session-brain step 2 — THE PARITY SOAK IS REMOVED (2.369.407, lane session-events-ends U2) ─────────────
+// The dark comparator (two rings, sb-parity-hit / sb-parity-miss, sb-parity-diverged) could not fail from the day it was
+// written: both taps read `op.msg`, while every create carries `message`. It gated three activation switches for three
+// months. A live comparison of two feeds measures the transport between two copies of ONE bundled normalizer, not the
+// normalizer — parity is a deterministic leg now (test-session-brain-dark: the same lines through the daemon's normalizer
+// and the server's, by id and content) plus a fast pin of the create's field. The device feed itself (step 3 below) is
+// untouched.
 // ── Session-brain STEP 3 (2.317.0): consumers go DEVICE-FIRST ──────────────
 // The six side-effect families (served model, usage odometer, rate-limit
 // events, limit banners, fallback belts, task/todo state) now run from the
@@ -259,6 +221,6 @@ function claudeSideEffects(session, sid, msg) {
     }
   } catch (e) { console.warn('[session-brain] device side-effects failed:', e.message); }
 }
-  return { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing, _sbMidCore, SB_RING_MAX, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost };
+  return { sbSeenFirst, claudeSideEffects, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost };
 }
 module.exports = { create };
