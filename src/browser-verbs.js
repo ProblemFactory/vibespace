@@ -1468,13 +1468,13 @@ function parseSnapshotRefs(outText) {
 // A `press` of a key's CODE (Digit0, KeyA) types nothing (the driver sends the code as the key, with no text): refused before
 // it runs, with the key's name.
 const FIELD_FORMS = Object.freeze({
-  date: Object.freeze({ re: /^\d{4,}-\d{2}-\d{2}$/, example: '2027-01-07', words: 'year-month-day' }),
-  time: Object.freeze({ re: /^\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/, example: '09:05', words: 'hours:minutes, 24-hour clock' }),
-  'datetime-local': Object.freeze({ re: /^\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/, example: '2027-01-07T09:05', words: 'year-month-dayThours:minutes' }),
-  month: Object.freeze({ re: /^\d{4,}-\d{2}$/, example: '2027-01', words: 'year-month' }),
-  week: Object.freeze({ re: /^\d{4,}-W\d{2}$/, example: '2027-W01', words: 'year-Wweek' }),
-  color: Object.freeze({ re: /^#[0-9a-fA-F]{6}$/, example: '#3366cc', words: 'a # and six hex digits' }),
-  range: Object.freeze({ re: /^-?(?:\d+\.?\d*|\.\d+)$/, example: '50', words: 'a number inside the control\'s range' }),
+  date: Object.freeze({ re: /^\d{4,}-\d{2}-\d{2}$/, example: '2027-01-07', words: 'year-month-day' }), // ui-words: agent-facing CLI words (the wrapper's refusal to an agent), never chrome
+  time: Object.freeze({ re: /^\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/, example: '09:05', words: 'hours:minutes, 24-hour clock' }), // ui-words: agent-facing CLI words (the wrapper's refusal to an agent), never chrome
+  'datetime-local': Object.freeze({ re: /^\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/, example: '2027-01-07T09:05', words: 'year-month-dayThours:minutes' }), // ui-words: agent-facing CLI words (the wrapper's refusal to an agent), never chrome
+  month: Object.freeze({ re: /^\d{4,}-\d{2}$/, example: '2027-01', words: 'year-month' }), // ui-words: agent-facing CLI words (the wrapper's refusal to an agent), never chrome
+  week: Object.freeze({ re: /^\d{4,}-W\d{2}$/, example: '2027-W01', words: 'year-Wweek' }), // ui-words: agent-facing CLI words (the wrapper's refusal to an agent), never chrome
+  color: Object.freeze({ re: /^#[0-9a-fA-F]{6}$/, example: '#3366cc', words: 'a # and six hex digits' }), // ui-words: agent-facing CLI words (the wrapper's refusal to an agent), never chrome
+  range: Object.freeze({ re: /^-?(?:\d+\.?\d*|\.\d+)$/, example: '50', words: 'a number inside the control\'s range' }), // ui-words: agent-facing CLI words (the wrapper's refusal to an agent), never chrome
 });
 const READ_BACK_TEXT_MAX = 120;
 /** What one command reads back — `fill <sel> <text>`, `type <sel> <text>`, `keyboard type|inserttext <text>` with exactly
@@ -1539,6 +1539,7 @@ async function readBack({ plan, run, json = false }) {
     : { code, as, out: text + '\n', err: code === 0 ? `[${as}]\n` : `[${as}]\n` });
   let f = null;
   try { f = evalAnswer(await run(['eval', fieldProbeJs(plan.asked)])); } catch { f = null; }
+  // ui-words: agent-facing CLI words (a note under the driver's answer to an agent), never chrome
   if (!f) return { note: `note: your ${what} ran, but the field could not be read back afterwards — check it (vibespace-browser get value ${target}) before you go on [read_back_unavailable]` };
   if (!f.tag) return null; // nothing focused that holds a value (a page, a rich editor): not judged
   const form = f.tag === 'input' ? FIELD_FORMS[f.kind] : null;
