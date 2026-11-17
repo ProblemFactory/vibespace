@@ -4726,6 +4726,8 @@ export default {
   "Could not open the conversation: {why}": "无法打开这个对话：{why}",
   "this item was filed before its conversation had an id — open the conversation from the sidebar, then reply": "这条事项是在它的对话还没有 ID 时提交的 — 请先从侧边栏打开这个对话，再回复",
   "no transcript of this conversation was found on this machine — it cannot be reopened here": "在这台机器上找不到这个对话的记录 — 无法在这里重新打开",
+  "the account this conversation lived in was deleted — its conversation stays in that account's own store, so it cannot be resumed on another login": "这个对话所在的账号已被删除 — 对话仍在那个账号自己的存储里，所以无法在别的登录上恢复",
+  "this conversation lives in another account's own store — it can be resumed only on that account": "这个对话在另一个账号自己的存储里 — 只能在那个账号上恢复",
   "the folder this conversation ran in is not known — open it from the sidebar, then reply": "不知道这个对话运行在哪个文件夹 — 请先从侧边栏打开它，再回复",
   "this server cannot start conversations yet (still booting) — try again in a moment": "服务器还在启动，暂时无法开始对话 — 请稍后再试",
   "Terminal session — reply in its window": "终端会话 — 请在它的窗口里回复",

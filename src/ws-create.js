@@ -346,9 +346,14 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // store does not hold it (acceptance r1: a For-you reply started agy on the default and adopted a NEW conversation).
           if (data.resume && data.resumeId && !data.hostId && !data.accountId && !data.fork) {
             let held = null;
-            try { held = require('./routes/sessions').heldAccountOf(backend, data.resumeId); } catch { held = null; }
+            try { held = await require('./routes/sessions').heldAccountOfNow(backend, data.resumeId); } catch { held = null; }   // B-a5a4 (3): before the first sweep too
             if (held && held.refuse) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: 'resume-account-unknown', resumeId: data.resumeId, message: held.refuse })); break; }
             if (held && held.accountId) data.accountId = held.accountId;
+          } else if (data.resume && data.resumeId && !data.hostId && data.accountId && !data.fork) {
+            // B-a5a4 r1 (1): an account-bound harness resumes ONLY on the account its conversation's row names
+            let wrong = null;
+            try { wrong = await require('./routes/sessions').boundElsewhereOf(backend, data.resumeId, data.accountId); } catch { wrong = null; }
+            if (wrong && wrong.refuse) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: 'resume-account-bound', resumeId: data.resumeId, message: wrong.refuse })); break; }
           }
           // ONE counter value for BOTH the id and the socket name (a fleet user's
           // 2026-08-11 incident, proven in production data): sockName re-read
@@ -843,6 +848,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // the global login and SAY so; a fresh create keeps the throw
               // (the user just picked that account — failing loud is right).
               if (data.resumeId && /unknown account/.test(String(e.message))) {
+                // B-a5a4 (1): a harness whose conversation lives in its account's OWN store never degrades — refused by name
+                const gone = (() => { try { return require('./routes/sessions').acctGoneOf(backend); } catch { return null; } })();
+                if (gone && gone.refuse) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: 'resume-account-gone', resumeId: data.resumeId, message: gone.refuse })); return; }
                 try { serverNotice?.(`resume-acct-gone-${id}`, `The billing account this conversation used was deleted — it resumed on the default login instead. Pick a new account in its billing switcher if needed.`, { level: 'warn' }); } catch { }
                 console.warn(`[session] resume ${id}: stored account ${String(data.accountId).slice(0, 16)} no longer exists — degrading to global login`);
                 rescued = { id: null, kind: null, _acctGone: true };

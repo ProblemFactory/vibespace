@@ -4725,6 +4725,8 @@ export default {
   "Could not open the conversation: {why}": "会話を開けませんでした：{why}",
   "this item was filed before its conversation had an id — open the conversation from the sidebar, then reply": "この項目は会話に ID が付く前に登録されました — サイドバーから会話を開いてから返信してください",
   "no transcript of this conversation was found on this machine — it cannot be reopened here": "このマシンにこの会話の記録が見つかりません — ここでは再開できません",
+  "the account this conversation lived in was deleted — its conversation stays in that account's own store, so it cannot be resumed on another login": "この会話のアカウントは削除されました — 会話はそのアカウント自身の保存先にあるため、別のログインでは再開できません",
+  "this conversation lives in another account's own store — it can be resumed only on that account": "この会話は別のアカウント自身の保存先にあります — そのアカウントでのみ再開できます",
   "the folder this conversation ran in is not known — open it from the sidebar, then reply": "この会話が実行されていたフォルダーが分かりません — サイドバーから開いてから返信してください",
   "this server cannot start conversations yet (still booting) — try again in a moment": "サーバーはまだ起動中のため会話を開始できません — 少し待ってからもう一度お試しください",
   "Terminal session — reply in its window": "ターミナルセッション — そのウィンドウで返信してください",

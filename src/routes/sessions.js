@@ -79,6 +79,7 @@ function mergeKeptStopped(rows, kept) {
 /** Setup session routes. Requires ctx object with dependencies. */
 function setup(ctx) {
   const { activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, hosts, serverSetting } = ctx;
+  if (typeof ctx.stoppedSessions === 'function') _stoppedOf = ctx.stoppedSessions;   // B-a5a4 (3): the seam's kept rows
   // R3 (three-tier): the transcript read composite lives in ONE service —
   // this interface is the future `transcript.*` device op schema.
   const { createTranscriptService } = require('../transcript-service');
@@ -775,20 +776,49 @@ function warmthDiff(activeSessions, factsOf, now = Date.now()) {
 
 let _warmSweep = null;
 let _heldRows = null;
-const NO_TRANSCRIPT_HERE = 'no transcript of this conversation was found on this machine — it cannot be reopened here';
+let _stoppedOf = null;   // B-a5a4: boot-restore's stoppedSessions (set at setup)
+const { NO_TRANSCRIPT_HERE } = require('../inbox-reopen.js');   // B-a5a4 (6): ONE sentence (it was spelled twice)
+// B-a5a4 (1): a RESUME whose billing account was deleted degrades to the default login (ws-create) — never for a harness that
+// keeps a conversation in its account's OWN store (`store.accountBound`): the default's store does not hold it
+const ACCT_GONE_BOUND = 'the account this conversation lived in was deleted — its conversation stays in that account\'s own store, so it cannot be resumed on another login';
 /** THE ACCOUNT A RESUME THAT STATES NONE GOES TO (lane dead-socket-keeps-chat-meta r2 — src/ws-create.js's ONE seam, so
  *  every door: the page's Resume, the For-you reply reopen, an automation's open) → {accountId} | {refuse} | null, over the
  *  last sweep's rows: the conversation's STOPPED row names its account (a kept meta's; the account root whose index lists
  *  it) ⇒ that account, never the harness default by accident; a harness that keeps a conversation in its account's own
  *  store (`store.accountBound` — antigravity) whose row names none ⇒ refused by name (the default's store does not hold
  *  it); no stopped row (a live one, a sweep not run yet) ⇒ null — nothing said, as before. */
+const accountBoundOf = (backend) => { try { return require('../harnesses').get(backend || 'claude')?.store?.accountBound === true; } catch { return false; } };
 function heldAccountOf(backend, id, rows = _heldRows) {
   const k = `${backend || 'claude'}:${id}`;
   const r = (rows || []).find((x) => x && x.status === 'stopped' && !x.forkPending && `${x.backend || 'claude'}:${x.backendSessionId || x.sessionId}` === k);
   if (!r) return null;
   if (typeof r.accountId === 'string' && r.accountId) return { accountId: r.accountId };
-  let bound = false;
-  try { bound = require('../harnesses').get(backend || 'claude')?.store?.accountBound === true; } catch { bound = false; }
-  return bound ? { refuse: NO_TRANSCRIPT_HERE } : null;
+  // B-a5a4 (4): a kept meta of an account-bound harness that named no account carries 'subscription' on its row (the machine's
+  // own login — boot-restore stoppedSessions, as agy-discover's rows say it), so this seam AND the page's verdict read one account
+  return accountBoundOf(backend) ? { refuse: NO_TRANSCRIPT_HERE } : null;
 }
-module.exports = { router, setup, mergeKeptStopped, heldAccountOf, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; }, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+/** B-a5a4 (3): the seam's question before the first /api/sessions sweep (an automation's create at boot): the kept copies
+ *  themselves (boot-restore stoppedSessions) — never «no row» because no page asked yet. */
+async function heldAccountOfNow(backend, id, { rows = _heldRows, stopped = _stoppedOf, boundMs = 2000 } = {}) {
+  // r1 (the lane's read): ALWAYS the kept copies as they stand now, over the last sweep's rows — a hub no page asks keeps its
+  // boot sweep's rows for hours (a copy the re-probe kept later, a conversation stopped since, unseen); bounded, never a hang
+  let kept = [];
+  if (typeof stopped === 'function') {
+    let timer = null;
+    try { kept = await Promise.race([Promise.resolve().then(() => stopped()), new Promise((r) => { timer = setTimeout(() => r([]), boundMs); timer.unref?.(); })]); } catch { kept = []; } finally { clearTimeout(timer); }
+  }
+  return heldAccountOf(backend, id, [...(Array.isArray(kept) ? kept : []), ...(rows || [])]);
+}
+// B-a5a4 r1 (1): an account-bound harness's conversation lives in ONE account's store — an account the door STATES that is not
+// the one its row names is refused by name (the Resume bar's switch door offered every other account: agy started on a store
+// that does not hold the conversation)
+const BOUND_ELSEWHERE = 'this conversation lives in another account\'s own store — it can be resumed only on that account';
+async function boundElsewhereOf(backend, id, accountId, opts = {}) {
+  if (!accountBoundOf(backend) || !accountId) return null;
+  const held = await heldAccountOfNow(backend, id, opts);
+  return held && held.accountId && held.accountId !== accountId ? { refuse: BOUND_ELSEWHERE } : null;
+}
+/** B-a5a4 (1): a resume whose stored account is gone → {refuse} for an account-bound harness, else null (degrade, said). */
+const acctGoneOf = (backend) => (accountBoundOf(backend) ? { refuse: ACCT_GONE_BOUND } : null);
+
+module.exports = { router, setup, mergeKeptStopped, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; }, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

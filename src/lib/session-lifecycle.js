@@ -268,7 +268,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           return true;
         }
         if (msg.code === 'vault_locked') { try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } }   // lane vault-e2e-password-fix-r2: a machine's session waits for the vault — its door
-        const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || msg.message || t('Session create failed');
+        const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || (msg.message ? t(msg.message) : '') || t('Session create failed');   // B-a5a4 r1: a server sentence in the reader's words (t() answers an unknown one as it is)
         // Failed RESUME rescue (2.219.0, real window-loss class): resumeSession
         // CLOSES the old read-only window before creating, so a failed create
         // used to leave only a spec-less "Create failed" shell — which
@@ -367,7 +367,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // looked, the two doors) — never a toast alone; the failed-RESUME rescue below stays exactly as it is
         if (msg.code === 'cli-missing') { try { openCliMissingDialog(this, msg); } catch { showToast(text, { type: 'error' }); } }
         else showToast(text, { type: 'error' });
-        if (sessionMode === 'chat' && resumeId && !/^sess-\d/.test(resumeId) && backend === 'claude') {
+        if (sessionMode === 'chat' && resumeId && !/^sess-\d/.test(resumeId)) {   // B-a5a4 (5): every chat harness (it was claude's alone — viewSession reads any backend)
           rescueViewOnly();
           // an account the create refused (a resume that never asked — the sidebar card, resume-all; lane
           // resume-account-door): the rescued window's bar says it with its doors, on fresh facts

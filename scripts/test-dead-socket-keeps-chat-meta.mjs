@@ -22,8 +22,13 @@
 //      one is live; the index read by a child ≤ once per root per CHECK_MS and again when it changed; never its preview
 //   §7 THE DOORS (client): the sentence in zh + ja; the card, the resume bar, the tile and the resume-all offer say it; a
 //      resume nobody gave an account goes to the account its row names
+//   §8 THE BORROWED ID (r2) — a pending fork's copy never supersedes, nor is consumed through, its parent's (on ONE boot)
+//   §9 THE HELD ACCOUNT (r2) — a resume that states no account goes to its row's, server-side, from every door (B-a5a4: a
+//      kept agy meta naming none ran on the machine's own login — resumed there)
+//   §10 B-a5a4 (the r2 reviewer's nine follow-ups): a deleted account on an account-bound harness refused; the seam before
+//      the first sweep; the copy consumed at the resume; ONE refusal sentence; a pending fork's copy swept by the next boot
 // RED on 43d0f8d2d (2.369.364) and on d5b99bade (the 2.369.365 cut): every section by name (no hook, no reason, no
-// read-back, no facts line, no agy discover, no words).
+// read-back, no facts line, no agy discover, no words). No count is pinned here — the suite prints its own.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -284,8 +289,9 @@ await section('§8 THE BORROWED ID (r2, major 1) — a pending fork\'s copy neve
   const fork = W.add(12, { name: 'Fork of parent', cwd: '/srv/u/fork', backend: 'claude', mode: 'chat', claudeSessionId: CID(2), forkRequested: true, forkSourceId: CID(2), accountId: 'acct-fork' });
   const dupOld = W.add(13, { ...AGY_META, backendSessionId: UUID(7), name: 'Second window', createdAt: 1793300000200 });
   const dupNew = W.add(14, { ...AGY_META, backendSessionId: UUID(7), name: 'First window', createdAt: 1793300000100 });
-  const notes = [];
-  const A = api(W, { notes });
+  const notes = [], live8 = new Map();   // B-a5a4 (9): the legs below ask THIS boot (a next boot sweeps the pending fork's copy)
+  const A = api(W, { notes, active: live8 });
+  const liveAs = (m) => { live8.clear(); for (const [k, v] of m) live8.set(k, v); };
   await withPath(W, () => quiet(async () => { await A.probeSockets(); A.restoreSessions(); await A.stoppedSettled(); }));
   ok(W.json(parent + '.json.stopped')?.name === 'Parent' && W.json(fork + '.json.stopped')?.name === 'Fork of parent',
     '§8 a parent and its PENDING fork both dead: BOTH copies stay (acceptance r1: the fork\'s superseded the parent\'s — one copy, the fork\'s name and account)');
@@ -298,12 +304,12 @@ await section('§8 THE BORROWED ID (r2, major 1) — a pending fork\'s copy neve
   ok(listed.length === 1 && listed[0].name === 'Parent' && listed[0].accountId === 'acct-parent',
     '§8 …and the sidebar\'s row of that conversation is the PARENT\'s, its name and its account (a pending fork names no conversation of its own)', listed);
   const pendingLive = new Map([['sess-fork', { backend: 'claude', claudeSessionId: CID(2), _forkRequested: true, _forkSourceId: CID(2), name: 'Fork of parent' }]]);
-  const rowsP = await api(W, { active: pendingLive }).stoppedSessions();
+  liveAs(pendingLive); const rowsP = await A.stoppedSessions();
   await tick(50);
   ok(rowsP.some((x) => x.backendSessionId === CID(2) && x.name === 'Parent') && fs.existsSync(path.join(W.META, parent + '.json.stopped')),
     '§8 a LIVE pending fork does not consume its stopped parent\'s copy (addressableId: a borrowed id is nobody\'s address)', rowsP.map((x) => x.name));
   const owner = new Map([['sess-p', { backend: 'claude', claudeSessionId: CID(2), name: 'Parent' }]]);
-  const rowsO = await api(W, { active: owner }).stoppedSessions();
+  liveAs(owner); const rowsO = await A.stoppedSessions();
   await tick(50);
   ok(!rowsO.some((x) => x.name === 'Parent') && !fs.existsSync(path.join(W.META, parent + '.json.stopped')) && fs.existsSync(path.join(W.META, fork + '.json.stopped')),
     '§8 the PARENT running again consumes its own copy — never the fork\'s (keyed by its socket)', rowsO.map((x) => x.name));
@@ -321,7 +327,7 @@ await section('§9 THE HELD ACCOUNT (r2, major 2) — a resume that states no ac
   const kept = (accountId, backend = 'antigravity', id = UUID(1)) => ({ backend, sessionId: id, backendSessionId: id, status: 'stopped', stopReason: 'dead-socket-at-boot', name: 'Kiln notes', cwd: '/srv/u/kiln-study', mode: 'chat', accountId, kept: 'cw-1-x' });
   const rowsOf = (...k) => RS.mergeKeptStopped([], k);
   ok(J(RS.heldAccountOf('antigravity', UUID(1), rowsOf(kept('agy-e0e0e0e0e0e0')))) === J({ accountId: 'agy-e0e0e0e0e0e0' }), '§9 heldAccountOf: a kept agy row names its account ⇒ that account');
-  ok(/no transcript of this conversation was found on this machine/.test((RS.heldAccountOf('antigravity', UUID(1), rowsOf(kept(null))) || {}).refuse || ''), '§9 …an agy row naming none ⇒ REFUSED by name (store.accountBound — the default\'s store does not hold it)');
+  ok(/no transcript of this conversation was found on this machine/.test((RS.heldAccountOf('antigravity', UUID(1), rowsOf(kept(null))) || {}).refuse || ''), '§9 …an agy row naming none ⇒ REFUSED by name (a KEPT meta\'s row names \'subscription\' since B-a5a4 — §10 (4)) (store.accountBound — the default\'s store does not hold it)');
   ok(RS.heldAccountOf('claude', CID(1), rowsOf(kept(null, 'claude', CID(1)))) === null && RS.heldAccountOf('antigravity', UUID(1), [{ ...kept('agy-e0e0e0e0e0e0'), status: 'live' }]) === null && RS.heldAccountOf('antigravity', UUID(1), []) === null,
     '§9 …a claude row naming none, a live row, no row ⇒ nothing said (the default, as before)');
   ok(HARN.get('antigravity').store.accountBound === true && HARN.list().filter((h) => h.store && h.store.accountBound).map((h) => h.id).join() === 'antigravity',
@@ -347,17 +353,81 @@ await section('§9 THE HELD ACCOUNT (r2, major 2) — a resume that states no ac
   asked.length = 0;
   r = null; await quiet(async () => { r = await reopenOf(rowsOf(withCwd(kept(null)))).reopen(item); });
   ok(r && r.ok === false && r.why === 'no transcript of this conversation was found on this machine — it cannot be reopened here' && asked.length === 0,
-    '§9 …a kept agy row naming no account is refused with the OLD words — and nothing is spawned', { r, asked });
+    '§9 …an agy row naming no account is refused with the OLD words — and nothing is spawned', { r, asked });
   asked.length = 0;
   const sent = [];
   RS._noteSweptRows(rowsOf(withCwd(kept('agy-e0e0e0e0e0e0'))));
   await quiet(async () => { await handleCreate({ readyState: 1, send: (t) => sent.push(JSON.parse(t)) }, { type: 'create', backend: 'antigravity', mode: 'chat', cwd: d, resume: true, resumeId: UUID(1), reqId: 'r-auto' }, new Set()); });
   ok(J(asked) === J([['agy-e0e0e0e0e0e0', 'antigravity']]), '§9 …and every other door that states none (an automation\'s open, a page\'s plain create) — the ONE seam is the create itself', asked);
   asked.length = 0;
-  await quiet(async () => { await handleCreate({ readyState: 1, send: () => { } }, { type: 'create', backend: 'antigravity', mode: 'chat', cwd: d, resume: true, resumeId: UUID(1), accountId: 'agy-ffffffffffff', reqId: 'r-pick' }, new Set()); });
-  ok(J(asked) === J([['agy-ffffffffffff', 'antigravity']]), '§9 an account the door STATES is never overridden (the resume bar\'s switch, the billing switcher)', asked);
+  const sentPick = [];
+  await quiet(async () => { await handleCreate({ readyState: 1, send: (t) => sentPick.push(JSON.parse(t)) }, { type: 'create', backend: 'antigravity', mode: 'chat', cwd: d, resume: true, resumeId: UUID(1), accountId: 'agy-ffffffffffff', reqId: 'r-pick' }, new Set()); });
+  ok(asked.length === 0 && sentPick.some((m) => m.type === 'error' && m.code === 'resume-account-bound' && m.message === RS0.BOUND_ELSEWHERE),
+    '§9 B-a5a4 r1 (1): an account the door STATES that is not the one the agy row names is REFUSED by name (the store of agy-ffff… does not hold it; the Resume bar\'s switch offered it) — nothing spawned', { asked, sentPick });
+  asked.length = 0;
+  await quiet(async () => { await handleCreate({ readyState: 1, send: () => { } }, { type: 'create', backend: 'antigravity', mode: 'chat', cwd: d, resume: true, resumeId: UUID(1), accountId: 'agy-e0e0e0e0e0e0', reqId: 'r-same' }, new Set()); });
+  ok(J(asked) === J([['agy-e0e0e0e0e0e0', 'antigravity']]), '§9 …the account its row names, stated, goes as stated', asked);
   RS._noteSweptRows(null);
   try { fs.rmSync(d, { recursive: true, force: true }); } catch { }
+});
+
+await section('§10 B-a5a4 — the r2 reviewer\'s follow-ups: a deleted account on an account-bound harness, the seam before the first sweep, the copy consumed at the resume, one sentence, a pending fork\'s copy swept', async () => {
+  const RS = require(path.join(REPO, 'src/routes/sessions.js'));
+  const IR = require(path.join(REPO, 'src/inbox-reopen.js'));
+  // (6) ONE sentence: the PURE reopen module owns it, the seam reads it
+  const RSRC = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
+  ok(IR.NO_TRANSCRIPT_HERE === 'no transcript of this conversation was found on this machine — it cannot be reopened here' && /const \{ NO_TRANSCRIPT_HERE \} = require\('\.\.\/inbox-reopen\.js'\);/.test(RSRC) && !RSRC.includes("'no transcript of this conversation was found"),
+    '§10 (6) the refusal is ONE constant (src/inbox-reopen.js) — routes/sessions reads it, spells it nowhere');
+  // (1) a deleted account on a harness whose conversation lives in its account's own store is REFUSED, never degraded
+  ok(RS.acctGoneOf('antigravity') && RS.acctGoneOf('antigravity').refuse === RS.ACCT_GONE_BOUND && RS.acctGoneOf('claude') === null,
+    '§10 (1) acctGoneOf: an account-bound harness (antigravity) ⇒ refused by name; claude ⇒ the degrade to the default login, said, as before');
+  const WSRC = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
+  ok(/const gone = \(\(\) => \{ try \{ return require\('\.\/routes\/sessions'\)\.acctGoneOf\(backend\); \} catch \{ return null; \} \}\)\(\);\n\s*if \(gone && gone\.refuse\) \{ ws\.send\(JSON\.stringify\(\{ type: 'error', reqId: data\.reqId, code: 'resume-account-gone'/.test(WSRC),
+    '§10 (1) WIRING: the deleted-account branch asks acctGoneOf BEFORE it degrades');
+  // (3) the seam before the first sweep reads the kept copies themselves
+  const keptRow = { backend: 'antigravity', sessionId: UUID(5), backendSessionId: UUID(5), status: 'stopped', accountId: 'agy-e0e0e0e0e0e0', kept: 'cw-5-x' };
+  const h3 = await RS.heldAccountOfNow('antigravity', UUID(5), { rows: null, stopped: async () => [keptRow] });
+  const h3b = await RS.heldAccountOfNow('antigravity', UUID(5), { rows: [], stopped: async () => [keptRow] });
+  const h3c = await RS.heldAccountOfNow('antigravity', UUID(5), { rows: [{ ...keptRow, accountId: 'agy-0123456789ab' }], stopped: async () => [keptRow] });
+  const h3d = await RS.heldAccountOfNow('antigravity', UUID(5), { rows: [keptRow], stopped: () => new Promise(() => { }), boundMs: 30 });
+  ok(J(h3) === J({ accountId: 'agy-e0e0e0e0e0e0' }) && J(h3b) === J(h3) && J(h3c) === J(h3) && J(h3d) === J(h3) && /held = await require\('\.\/routes\/sessions'\)\.heldAccountOfNow\(backend, data\.resumeId\);/.test(WSRC),
+    '§10 (3) the seam reads the kept copies AS THEY STAND first, over the last sweep\'s rows (none yet, an empty one, a stale one); a read-back that hangs is bounded — the sweep\'s rows then', { h3, h3b, h3c, h3d });
+  ok(!/consumeKeptSoon/.test(WSRC + RSRC), '§10 (2) NOT built: a resume never consumes its kept copy before it is proven (r1: at registration it lost a failed resume\'s copy)');
+  // (1) r1: an account the door STATES on an account-bound harness, not the row's, is refused (the seam's helper)
+  const be = await RS.boundElsewhereOf('antigravity', UUID(5), 'agy-ffffffffffff', { rows: [], stopped: async () => [keptRow] });
+  const be2 = await RS.boundElsewhereOf('antigravity', UUID(5), 'agy-e0e0e0e0e0e0', { rows: [], stopped: async () => [keptRow] });
+  const be3 = await RS.boundElsewhereOf('claude', CID(5), 'sub-ffffffffffff', { rows: [{ ...keptRow, backend: 'claude', sessionId: CID(5), backendSessionId: CID(5), accountId: 'sub-aaaaaaaaaaaa' }], stopped: async () => [] });
+  ok(be && be.refuse === RS.BOUND_ELSEWHERE && be2 === null && be3 === null, '§10 (1) boundElsewhereOf: agy, another account stated ⇒ refused; the row\'s own ⇒ goes; claude (not account-bound) ⇒ never overridden', { be, be2, be3 });
+  // (4) r1: the KEPT row of an agy meta that named no account says 'subscription' (one account for the seam AND the page's verdict)
+  {
+    const W4 = world('acct4');
+    fs.writeFileSync(path.join(W4.META, 'cw-4-1.json.stopped'), J({ webuiSessionId: 'sess-4-1', backend: 'antigravity', mode: 'chat', name: 'Own login', cwd: '/srv/u/own', backendSessionId: UUID(6), accountId: null, status: 'stopped', stoppedAt: 1793300000600, stopReason: 'dead-socket-at-boot' }));
+    fs.writeFileSync(path.join(W4.META, 'cw-4-2.json.stopped'), J({ webuiSessionId: 'sess-4-2', backend: 'claude', mode: 'chat', name: 'Claude own', cwd: '/srv/u/own', claudeSessionId: CID(6), status: 'stopped', stoppedAt: 1793300000600, stopReason: 'dead-socket-at-boot' }));
+    let rows4 = [];
+    await quiet(async () => { rows4 = await api(W4).stoppedSessions(); });
+    const agy = rows4.find((x) => x.name === 'Own login'), cl = rows4.find((x) => x.name === 'Claude own');
+    ok(agy && agy.accountId === 'subscription' && cl && cl.accountId === null && J(RS.heldAccountOf('antigravity', UUID(6), rows4)) === J({ accountId: 'subscription' }),
+      '§10 (4) a kept agy meta that named no account: its ROW says \'subscription\' (the machine\'s own login) — the seam and the page\'s verdict read ONE account; a claude meta\'s null stays null', { agy: agy && agy.accountId, cl: cl && cl.accountId });
+    try { fs.rmSync(W4.d, { recursive: true, force: true }); } catch { }
+  }
+  // (5) + the words: the create-failure rescue serves every chat harness; a server sentence is said in the reader's words
+  const LSRC = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
+  ok(/if \(sessionMode === 'chat' && resumeId && !\/\^sess-\\d\/\.test\(resumeId\)\) \{/.test(LSRC) && /\(msg\.message \? t\(msg\.message\) : ''\)/.test(LSRC),
+    '§10 (5) the failed-resume rescue (and its account re-check) is no longer claude\'s alone; (1) the refusal reaches the page translated (t(msg.message))');
+  // (9) a pending fork's copy an earlier boot kept is swept by the next boot; the parent's stays
+  const W = world('fork9');
+  const pf = { webuiSessionId: 'sess-9-1', backend: 'claude', mode: 'chat', name: 'Fork never named', cwd: '/srv/u/fork', claudeSessionId: CID(4), forkRequested: true, forkSourceId: CID(4), status: 'stopped', stoppedAt: 1793300000500, stopReason: 'dead-socket-at-boot' };
+  const pp = { webuiSessionId: 'sess-9-2', backend: 'claude', mode: 'chat', name: 'Its parent', cwd: '/srv/u/fork', claudeSessionId: CID(4), status: 'stopped', stoppedAt: 1793300000400, stopReason: 'dead-socket-at-boot' };
+  fs.writeFileSync(path.join(W.META, 'cw-9-1.json.stopped'), J(pf)); fs.writeFileSync(path.join(W.META, 'cw-9-2.json.stopped'), J(pp));
+  const notes = [];
+  let rows9 = [];
+  await quiet(async () => { rows9 = await api(W, { notes }).stoppedSessions(); await tick(30); });
+  ok(!rows9.some((x) => x.name === 'Fork never named') && rows9.some((x) => x.name === 'Its parent') && !fs.existsSync(path.join(W.META, 'cw-9-1.json.stopped')) && fs.existsSync(path.join(W.META, 'cw-9-2.json.stopped')) && notes.some((l) => /^kept copies: a pending fork's copy swept \(nothing to resume: cw-9-1\)/.test(l)) && !notes.some((l) => /^dead sockets: /.test(l)),
+    '§10 (9) the NEXT boot sweeps a pending fork\'s kept copy (its own id never arrived — nothing resumes it, nothing consumed it), says so; its parent\'s copy stays', { rows: rows9.map((x) => x.name), notes });
+  const BSRC = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
+  const SWEEP = "      if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch(() => { }); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }\n";
+  ok(BSRC.split(SWEEP).length === 2, '§10 (9) ANCHOR: the sweep, spelled once');
+  try { fs.rmSync(W.d, { recursive: true, force: true }); } catch { }
 });
 
 for (const p of [W2 && W2.d]) if (p) try { fs.rmSync(p, { recursive: true, force: true }); } catch {}

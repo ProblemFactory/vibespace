@@ -23,6 +23,9 @@
  * conversation — the reply that follows is the PERSON's typed turn (the route says so at its call).
  */
 const { resumeSpawnPick } = require('./resume-continuity.js');
+/** B-a5a4 (6): THE refusal of a conversation this machine holds no transcript of — ONE sentence for the For-you reopen and the
+ *  resume seam (src/routes/sessions.js heldAccountOf); the i18n row translates it once. */
+const NO_TRANSCRIPT_HERE = 'no transcript of this conversation was found on this machine — it cannot be reopened here';
 
 /** The fields of a conversation's config a resume carries (session-lifecycle resumeSession's `savedCfg.*` reads). */
 const REOPEN_CFG_KEYS = Object.freeze(['model', 'permission', 'effort', 'outputStyle', 'worktree', 'autoResume', 'account', 'modelLock', 'lockModel', 'poolPin', 'tools']);
@@ -48,7 +51,7 @@ function reopenCreate({ key, entry = null, item = null, cfg = null, defaults = n
   const e = entry && typeof entry === 'object' ? entry : null;
   const hostId = (e ? str(e.hostId || e.host) : str(it.hostId)) || '';
   const cwd = realCwd(e ? e.cwd : it.cwd);
-  if (!e && !hostId) return { ok: false, why: 'no transcript of this conversation was found on this machine — it cannot be reopened here' };
+  if (!e && !hostId) return { ok: false, why: NO_TRANSCRIPT_HERE };
   if (!cwd) return { ok: false, why: 'the folder this conversation ran in is not known — open it from the sidebar, then reply' };
   const c = cfg && typeof cfg === 'object' ? cfg : {};
   const d = defaults && typeof defaults === 'object' ? defaults : {};
@@ -73,4 +76,4 @@ function reopenCreate({ key, entry = null, item = null, cfg = null, defaults = n
   return { ok: true, data, conversation: { backend: conv.backend, backendSessionId: conv.id, cwd, hostId: hostId || null, name: str(name) || null } };
 }
 
-module.exports = { REOPEN_CFG_KEYS, conversationOfKey, reopenCreate };
+module.exports = { REOPEN_CFG_KEYS, conversationOfKey, reopenCreate, NO_TRANSCRIPT_HERE };

@@ -322,6 +322,9 @@ function retireDeadSocket(sockFile, socketPath) {
 // keyed by its conversation; a pending fork still carrying its SOURCE's id is keyed by its own socket — it never supersedes
 // its parent's copy, is never superseded by it, and no live session consumes it through the id it borrowed (acceptance r1:
 // a parent and its pending fork both dead left ONE copy, the fork's name and account on the parent's row).
+// B-a5a4 (4): a kept meta of a harness whose conversation lives in its account's OWN store (`store.accountBound`) that named no
+// account ran on the machine's own login — its row says 'subscription' (agy-discover's word for that root), never null
+const accountBoundOf = (backend) => { try { return require('../harnesses').get(backend || 'claude')?.store?.accountBound === true; } catch { return false; } };
 const keptStopped = new Map();
 let keptLoaded = null;
 const keptFile = (sockFile) => path.join(META_DIR, sockFile + '.json.stopped');
@@ -351,6 +354,9 @@ function loadKept() {
       if ([...keptStopped.values()].some((e) => e.sockFile === sockFile)) continue; // this boot's own — already here
       let m = null;
       try { m = JSON.parse(await fs.promises.readFile(path.join(META_DIR, f), 'utf-8')); } catch { continue; }
+      // B-a5a4 (9): a PENDING FORK's copy an earlier boot kept is swept — its own id never arrived, so nothing can ever resume
+      // it (its id is its parent's) and nothing consumed it (keyed by its socket): kept and listed for the boot that made it
+      if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch(() => { }); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }
       const id = resumeIdOf(m);
       if (id) keepStopped(sockFile, m, id);
     }
@@ -368,7 +374,7 @@ async function stoppedSessions() {
     if (live.has(k)) { keptStopped.delete(k); fs.unlink(keptFile(e.sockFile), () => { }); continue; } // resumed: the live session is the record now
     const m = e.meta;
     rows.push({ backend: m.backend || 'claude', sessionId: e.id, backendSessionId: e.id, cwd: m.cwd || '', name: m.name || '', mode: m.mode || 'terminal', status: 'stopped',
-      startedAt: m.stoppedAt || m.createdAt || 0, stoppedAt: m.stoppedAt || null, stopReason: m.stopReason || STOP_DEAD_SOCKET, accountId: m.accountId || null, kept: e.sockFile,
+      startedAt: m.stoppedAt || m.createdAt || 0, stoppedAt: m.stoppedAt || null, stopReason: m.stopReason || STOP_DEAD_SOCKET, accountId: m.accountId || (accountBoundOf(m.backend) ? 'subscription' : null), kept: e.sockFile,
       ...(k.startsWith('sock:') ? { forkPending: true } : {}) }); // a pending fork's copy: kept and listed here, but `id` is its PARENT's — no sidebar row (routes/sessions)
   }
   return rows;
