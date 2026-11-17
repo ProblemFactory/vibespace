@@ -52,6 +52,11 @@ const daemon = spawn(process.execPath, [path.join(AGENTD_ROOT, 'current', 'agent
   detached: true, stdio: 'ignore', env: { ...process.env, HOME: fakeHome },
 });
 daemon.unref();
+// the EXCLUDED package's adversarial read: a first connect that fails under load makes connect() start a SECOND daemon with
+// daemonEnv(process.env) — so THIS process's HOME is the fake one from here (that daemon reads the fixture too, never the
+// user's ~/.claude), and every daemon of this root is ended at ANY exit, not only after the last leg
+process.env.HOME = fakeHome;
+process.on('exit', () => { try { endDaemonsAndWait(AGENTD_ROOT); } catch { } });
 await sleep(700);
 await dm.connect();
 
