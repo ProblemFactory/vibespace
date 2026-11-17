@@ -157,8 +157,9 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
   value in its own form and VibeSpace sets it through the field's own setter, then reads it back:
   `vibespace-browser fill @ref 2027-01-07` (date) · `fill @ref 09:05` (time, 24-hour clock) · `fill @ref 2027-01-07T09:05`
   (date and time) · `fill @ref 2027-01` (month) · `fill @ref 2027-W01` (week) · `fill @ref '#3366cc'` (colour) · `fill @ref 50`
-  (range). Any other form (`01/07/2027`, `01072027`, `9:05 AM`) is refused `[field_form]` with the form the field wants. A
-  person's way works too: click the field and `press` each digit in the order the field shows it (`press 0`, `press 1`, …).
+  (range); `fill @ref ''` clears it. Any other form (`01/07/2027`, `01072027`, `9:05 AM`) is refused `[field_form]` with the
+  form the field wants (a bare `keyboard type` into a focused field says it instead of refusing). A person's way works too:
+  click the field and `press` each digit in the order the field shows it (`press 0`, `press 1`, …).
 * `press` takes a key's **name** — `press 0`, `press a`, `press Enter`, `press Control+a`. A key's code (`Digit0`, `KeyA`)
   types nothing and is refused `[key_code_name]` with the name to use.
 * **A file input inside a frame:** `upload` by a selector does not reach into a frame. Enter the frame by ITS selector, upload

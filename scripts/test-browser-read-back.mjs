@@ -15,8 +15,12 @@
 //     not judged, an unreadable field said under the driver's answer, the --json answer
 //   ⑥ WIRING in data/bin/vibespace-browser: the key's-code refusal before anything runs; the read-back after a 0 answer and
 //     BEFORE the audit, never for a vault fill / a batch / a read-fenced tab, its driver call bounded
+//   r2 (主开发 23:28Z, THE MUST): the verb's TARGET is judged, never what holds the focus after it — a one-time-code box that
+//   moves the focus on, a card number that jumps to the expiry, an earlier date field; an empty fill clears; each kind compared
+//   in its normal form; a failed run is never the field's refusal; the answer read whole; ONE 10 s bound; the cost counted.
 //   RED CONTROLS (patched copies, the tree untouched): a readBack that trusts the driver (the release's behaviour — Done over
-//   an empty date field) fails ⑤; a wrapper without the read-back hook fails ⑥.
+//   an empty date field) fails ⑤; the read-back that judges the FOCUSED field (68da75fa2) fails the three scenes; a wrapper
+//   without the read-back hook fails ⑥.
 // The REAL road (the real keeper + mediator + a headed Chrome + the real driver) is test-browser-live ⑫, heavy.
 // Zero vendor calls; no browser; no spawn.
 import fs from 'node:fs';
@@ -77,98 +81,164 @@ console.log('③ FIELD_FORMS — each kind holds its value in ONE form');
 }
 
 console.log('④ the page-side JS over a fake DOM');
-/** A fake page: one focused element (optionally inside a same-origin frame); the setter goes through the element's OWN window. */
-function fakePage(el, { inFrame = false } = {}) {
+/** A fake page of fields by id (one may hold the focus, optionally inside a same-origin frame); a field's value setter takes
+ *  what it accepts in its normal form (`norm`), else '' — or keeps its old value (`keep`) — like a browser's sanitizer. */
+function fakePage(fields, { focused = null, inFrame = false } = {}) {
   const events = [];
   const mkWin = () => {
     const proto = {};
-    Object.defineProperty(proto, 'value', { get() { return this._v; }, set(v) { this._v = this._accept(String(v)) ? String(v) : ''; }, configurable: true });
+    Object.defineProperty(proto, 'value', { get() { return this._v; }, set(v) { const s = String(v); if (s === '' || this._accept(s)) this._v = s === '' ? '' : this._norm(s); else if (!this._keep) this._v = ''; }, configurable: true });
     function Event(type, init) { this.type = type; this.bubbles = !!(init && init.bubbles); }
     return { HTMLInputElement: { prototype: proto }, Event };
   };
-  const win = mkWin(), frameWin = mkWin();
-  const node = { tagName: el.tag.toUpperCase(), type: el.kind, readOnly: !!el.readOnly, disabled: !!el.disabled, _v: el.value, _accept: el.accept || (() => true), ownerDocument: { defaultView: inFrame ? frameWin : win }, dispatchEvent(e) { events.push(e.type); return true; } };
-  Object.setPrototypeOf(node, (inFrame ? frameWin : win).HTMLInputElement.prototype);
-  const top = inFrame ? { tagName: 'IFRAME', contentDocument: { activeElement: node } } : node;
-  const ctx = vm.createContext({ document: { activeElement: top }, window: win, JSON });
-  return { run: (js) => vm.runInContext(js, ctx), node, events };
+  const win = mkWin();
+  const nodes = {};
+  for (const [id, f] of Object.entries(fields)) {
+    const node = { id, tagName: (f.tag || 'input').toUpperCase(), type: f.kind, readOnly: !!f.readOnly, disabled: !!f.disabled, _v: f.value ?? '', _accept: f.accept || (() => true), _norm: f.norm || ((x) => x), _keep: !!f.keep, ownerDocument: { defaultView: win }, dispatchEvent(e) { events.push(`${id}:${e.type}`); return true; } };
+    Object.setPrototypeOf(node, win.HTMLInputElement.prototype);
+    nodes[id] = node;
+  }
+  const doc = { activeElement: null, querySelector(sel) { if (/^#[\w-]+$/.test(sel)) return nodes[sel.slice(1)] || null; if (/^[a-z]+$/i.test(sel)) return null; throw new Error('not a selector: ' + sel); } };
+  const focus = (id) => { const n = nodes[id] || null; doc.activeElement = inFrame && n ? { tagName: 'IFRAME', contentDocument: { activeElement: n } } : n; };
+  if (focused) focus(focused);
+  const ctx = vm.createContext({ document: doc, window: win, JSON });
+  return { run: (js) => vm.runInContext(js, ctx), nodes, doc, events, focus };
 }
+const probe = (p, asked, target) => JSON.parse(p.run(V.fieldProbeJs(asked, target)));
 {
-  const p = fakePage({ tag: 'input', kind: 'date', value: '' });
-  const a = p.run(V.fieldProbeJs('01072027'));
-  ok(a.tag === 'input' && a.kind === 'date' && a.has === true && a.equal === false && a.len === 0 && a.locked === false && a.value === '', 'the probe answers the focused field\'s tag, kind, value and length, compared IN the page with what was asked', a);
-  const pw = fakePage({ tag: 'input', kind: 'password', value: 'hunter2-secret' });
-  const b = pw.run(V.fieldProbeJs('hunter2-secret'));
+  const p = fakePage({ d: { kind: 'date' } }, { focused: 'd' });
+  const a = probe(p, '01072027');
+  ok(a.tag === 'input' && a.kind === 'date' && a.has === true && a.equal === false && a.len === 0 && a.locked === false && a.value === '', 'the probe answers the field\'s tag, kind, value and length as a JSON string (the driver prints a string on one line), compared IN the page', a);
+  const pw = fakePage({ p: { kind: 'password', value: 'hunter2-secret' } }, { focused: 'p' });
+  const b = probe(pw, 'hunter2-secret');
   ok(b.kind === 'password' && b.value === null && b.equal === true && b.len === 14 && !JSON.stringify(b).includes('hunter2'), 'a password field\'s value never leaves the page — only equal / includes / its length', b);
-  const fr = fakePage({ tag: 'input', kind: 'time', value: '' }, { inFrame: true });
-  const c = fr.run(V.fieldProbeJs('09:05'));
-  ok(c.kind === 'time' && c.tag === 'input', 'the probe reaches the field focused inside a same-origin frame', c);
-  const s = fr.run(V.fieldSetJs('09:05'));
-  ok(s.set === true && s.value === '09:05' && fr.node._v === '09:05' && fr.events.join() === 'input,change', 'the setter goes through the field\'s OWN window\'s native value setter, then fires input and change (a person\'s edit)', { s, events: fr.events });
-  const rej = fakePage({ tag: 'input', kind: 'date', value: '', accept: (v) => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v) });
-  const r2 = rej.run(V.fieldSetJs('2027-13-40'));
-  ok(r2.set === true && r2.value === '', 'a value the field refuses is read back as what it holds (empty) — the field is the judge', r2);
-  const none = vm.runInContext(V.fieldProbeJs('x'), vm.createContext({ document: { activeElement: null }, JSON }));
+  const two = fakePage({ otp1: { kind: 'text', value: '4' }, otp2: { kind: 'text', value: '' } }, { focused: 'otp2' });
+  const t = probe(two, '4', { css: '#otp1' });
+  ok(t.equal === true && t.value === '4', 'with a CSS target the probe reads THAT field (#otp1 holds the 4), not the focused one (#otp2, empty)', t);
+  const bad = probe(two, '4', { css: 'text=Email' }), gone = probe(two, '4', { css: '#nope' });
+  ok(bad.tag === null && bad.why === 'selector' && gone.tag === null && gone.why === 'missing', 'a selector the page cannot read answers why «selector», one it cannot find «missing» — never another field', { bad, gone });
+  const fr = fakePage({ tm: { kind: 'time' } }, { focused: 'tm', inFrame: true });
+  ok(probe(fr, '09:05').kind === 'time', 'the focused probe reaches a field focused inside a same-origin frame');
+  const s = JSON.parse(fr.run(V.fieldSetJs('09:05')));
+  ok(s.set === true && s.value === '09:05' && s.before === '' && fr.nodes.tm._v === '09:05' && fr.events.join() === 'tm:input,tm:change', 'the setter goes through the field\'s OWN window\'s native value setter, fires input and change, answers before and after', { s, events: fr.events });
+  const ex = fakePage({ d1: { kind: 'date', value: '2026-01-01' } }, { focused: 'd1' });
+  const n = JSON.parse(ex.run(V.fieldSetJs('2027-01-07', null, { kind: 'date', value: '' })));
+  ok(n.set === false && n.why === 'not-target' && ex.nodes.d1._v === '2026-01-01', 'a setter told which field it must be (kind + value) sets nothing in another field — not-target', n);
+  const lk = fakePage({ d: { kind: 'date', readOnly: true } }, { focused: 'd' });
+  const l = JSON.parse(lk.run(V.fieldSetJs('2027-01-07')));
+  ok(l.set === false && l.locked === true && lk.nodes.d._v === '', 'a read-only field: the setter sets nothing and says locked', l);
+  const none = JSON.parse(vm.runInContext(V.fieldProbeJs('x'), vm.createContext({ document: { activeElement: null }, JSON })));
   ok(none.tag === null, 'nothing focused ⇒ the probe says so (tag null)', none);
-  const area = fakePage({ tag: 'textarea', kind: 'textarea', value: 'ab0' }).run(V.fieldProbeJs('0'));
-  ok(area.kind === 'textarea' && area.includes === true, 'a textarea is a field too', area);
+  ok(V.evalAnswer({ code: 0, out: JSON.stringify({ a: 1 }, null, 2) + '\n' }).a === 1 && V.evalAnswer({ code: 0, out: 'noise\n' + JSON.stringify(JSON.stringify({ a: 2 })) + '\n' }).a === 2 && V.evalAnswer({ code: 1, out: '{}' }) === null,
+    'evalAnswer parses the WHOLE answer first (an object printed over several lines), then its last line; a failed run answers null');
+  ok(V.driverRead({ code: 0, out: '{"success":true,"data":{"value":"4"}}' }) === '4' && V.driverRead({ code: 0, out: '{"success":true,"data":"4"}' }) === '4' && V.driverRead({ code: 0, out: '✓ 4' }) === null && V.driverRead({ code: 0, out: '{"success":true,"data":{"value":null}}' }) === null && V.driverRead({ code: 0, out: '{"success":true,"data":{"value":null}}' }, { absentIsEmpty: true }) === '',
+    'driverRead takes only the driver\'s JSON answer — any other shape is UNREADABLE (null), never an empty field; an absent attribute is empty only when asked');
 }
 
-console.log('⑤ readBack over a fake page, kind by kind');
-const realDate = (v) => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v) && !Number.isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) === v;
-/** The driver's `eval` over a fake page: the probe and the setter run for real (④'s fake DOM); `fails` = the eval refuses. */
-function fakeDriver(el, { fails = false } = {}) {
-  const page = fakePage(el); const calls = [];
-  const run = async (args) => { calls.push(args); if (fails) return { code: 1, out: '', err: '✗ CDP command timed out' }; if (args[0] !== 'eval') return { code: 9, out: '', err: 'not an eval' }; return { code: 0, out: JSON.stringify(page.run(args[1])) + '\n', err: '' }; };
-  return { run, calls, page };
+console.log('⑤ readBack over a fake page — the TARGET judged, kind by kind');
+const realDate = (v) => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v) && new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) === v;
+/** The driver over a fake page: `eval` runs the page-side JS for real (④'s fake DOM) and prints its string; `focus` /
+ *  `get value` / `get attr type` resolve a CSS id or an @ref (`refs`); `redirect` moves a focus elsewhere (a page's focus
+ *  handler); `fail` = the run numbers that fail; `pretty` prints an eval's object over several lines; `clock` + `cost` advance
+ *  a fake clock per run. */
+function fakeDriver(page, { refs = {}, redirect = {}, fail = [], pretty = false, clock = null, cost = 0 } = {}) {
+  const calls = [];
+  const idOf = (sel) => refs[sel] || (/^#[\w-]+$/.test(sel) ? sel.slice(1) : null);
+  const run = async (args, o) => {
+    calls.push({ args, ms: o && o.ms });
+    if (clock) clock.t += cost;
+    if (fail.includes(calls.length)) return { code: 1, out: '', err: '✗ CDP command timed out' };
+    if (args[0] === 'eval') { const v = page.run(args[1]); return { code: 0, out: (pretty ? JSON.stringify(JSON.parse(v), null, 2) : JSON.stringify(v)) + '\n', err: '' }; }
+    if (args[0] === 'focus') { const id = idOf(args[1]); if (!id || !page.nodes[id]) return { code: 1, out: '', err: '✗ element not found' }; page.focus(redirect[id] || id); return { code: 0, out: '✓ Done\n', err: '' }; }
+    if (args[0] === 'get' && args[1] === 'value') { const id = idOf(args[2]); if (!id) return { code: 1, out: '', err: '✗ element not found' }; return { code: 0, out: JSON.stringify({ success: true, data: { value: page.nodes[id]._v } }) + '\n', err: '' }; }
+    if (args[0] === 'get' && args[1] === 'attr') { const id = idOf(args[3]); if (!id) return { code: 1, out: '', err: '✗ element not found' }; return { code: 0, out: JSON.stringify({ success: true, data: { value: page.nodes[id].type || null } }) + '\n', err: '' }; }
+    return { code: 9, out: '', err: 'not faked: ' + args.join(' ') };
+  };
+  return { run, calls };
 }
-async function judge(readBack, plan, el, opts = {}) { const d = fakeDriver(el, opts); const r = await readBack({ plan, run: d.run, json: !!opts.json }); return { r, d }; }
+async function judge(readBack, plan, page, opts = {}) { const d = fakeDriver(page, opts); const r = await readBack({ plan, run: d.run, json: !!opts.json, ...(opts.clock ? { now: () => opts.clock.t } : {}) }); return { r, d, page }; }
+const DATE = (extra = {}) => ({ kind: 'date', accept: realDate, ...extra });
 async function readBackCensus(readBack) {
-  const bad = [];
-  const say = (n, c, x) => { if (!c) bad.push(`${n}: ${JSON.stringify(x).slice(0, 300)}`); };
-  let t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, { tag: 'input', kind: 'date', value: '', accept: realDate });
-  say('date fill ISO ⇒ the setter, read back, Done', t.r && t.r.code === 0 && t.r.as === 'field_setter' && /^✓ Done — the date field holds 2027-01-07, set through the field's own setter/.test(t.r.out) && t.d.page.node._v === '2027-01-07' && t.d.page.events.join() === 'input,change', t.r);
-  t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: '01072027' }, { tag: 'input', kind: 'date', value: '', accept: realDate });
-  say('the owner\'s act: keyboard type 01072027 into a date field ⇒ refused by name with the form, nothing set', t.r && t.r.code === 1 && t.r.as === 'field_form' && t.r.out.includes('a date field takes no typed text and holds its value as 2027-01-07 (year-month-day)') && t.r.out.includes('press each digit') && t.d.calls.length === 1 && t.d.page.node._v === '', t.r);
-  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '01/07/2027' }, { tag: 'input', kind: 'date', value: '', accept: realDate });
-  say('date fill 01/07/2027 ⇒ field_form naming `fill #d 2027-01-07`', t.r && t.r.code === 1 && t.r.as === 'field_form' && t.r.out.includes('vibespace-browser fill #d 2027-01-07'), t.r);
-  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-02-31' }, { tag: 'input', kind: 'date', value: '', accept: realDate });
-  say('date fill 2027-02-31 ⇒ the field refuses it: field_refused, what it holds said', t.r && t.r.code === 1 && t.r.as === 'field_refused' && t.r.out.includes('did not take "2027-02-31" (it holds "")'), t.r);
-  t = await judge(readBack, { verb: 'fill', sel: '#tm', asked: '09:05' }, { tag: 'input', kind: 'time', value: '' });
-  say('time fill 09:05 ⇒ the setter, Done', t.r && t.r.code === 0 && t.r.as === 'field_setter' && t.d.page.node._v === '09:05', t.r);
-  t = await judge(readBack, { verb: 'type', sel: '#tm', asked: '0905' }, { tag: 'input', kind: 'time', value: '' });
-  say('time type 0905 ⇒ field_form with 09:05', t.r && t.r.code === 1 && t.r.as === 'field_form' && t.r.out.includes('09:05 (hours:minutes, 24-hour clock)'), t.r);
-  for (const [kind, v] of [['datetime-local', '2027-01-07T09:05'], ['month', '2027-01'], ['week', '2027-W01'], ['color', '#3366cc'], ['range', '50']]) {
-    t = await judge(readBack, { verb: 'fill', sel: '#x', asked: v }, { tag: 'input', kind, value: '' });
-    say(`${kind} fill ${v} ⇒ the setter`, t.r && t.r.code === 0 && t.r.as === 'field_setter' && t.d.page.node._v === v, t.r);
+  const bad = []; const cost = {};
+  const say = (n, c, x) => { if (!c) bad.push(`${n}: ${JSON.stringify(x).slice(0, 360)}`); };
+  let t;
+  // ── the must: the TARGET, never what holds the focus after the verb ──
+  t = await judge(readBack, { verb: 'fill', sel: '#otp1', asked: '4' }, fakePage({ otp1: { kind: 'text', value: '4' }, otp2: { kind: 'text' } }, { focused: 'otp2' }));
+  say('scene 1: a one-time-code box that moved the focus to the empty next box — the fill LANDED: the driver\'s answer stands', t.r === null, t.r); cost['a CSS text fill'] = t.d.calls.length;
+  t = await judge(readBack, { verb: 'fill', sel: '@e1', asked: '4' }, fakePage({ otp1: { kind: 'text', value: '4' }, otp2: { kind: 'text' } }, { focused: 'otp2' }), { refs: { '@e1': 'otp1' } });
+  say('scene 1 by @ref: the driver\'s own value read of the target (4) — the answer stands', t.r === null && t.d.calls[0].args.join(' ') === 'get value @e1 --json', t.r); cost['an @ref text fill'] = t.d.calls.length;
+  t = await judge(readBack, { verb: 'fill', sel: '#cc', asked: '4242424242424242' }, fakePage({ cc: { kind: 'text', value: '4242424242424242' }, exp: { kind: 'month' } }, { focused: 'exp' }));
+  say('scene 2: a card number that jumped to the expiry (a month field) — never «a month field takes no typed text»', t.r === null, t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '#d2', asked: '2027-03-04' }, fakePage({ d1: DATE({ value: '2026-01-01' }), d2: DATE() }, { focused: 'd1' }));
+  say('scene 3: the focus on an EARLIER date field — the setter writes the field the agent NAMED, the other is untouched', t.r && t.r.code === 0 && t.r.as === 'field_setter' && t.page.nodes.d2._v === '2027-03-04' && t.page.nodes.d1._v === '2026-01-01', t.r);
+  // ── the date road ──
+  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, fakePage({ d: DATE() }, { focused: 'd' }));
+  say('a date fill ISO ⇒ the setter, read back, Done', t.r && t.r.code === 0 && t.r.as === 'field_setter' && /^✓ Done — the date field holds 2027-01-07, set through the field's own setter/.test(t.r.out) && t.page.nodes.d._v === '2027-01-07' && t.page.events.join() === 'd:input,d:change', t.r); cost['a CSS date fill'] = t.d.calls.length;
+  t = await judge(readBack, { verb: 'fill', sel: '@e5', asked: '2027-01-07' }, fakePage({ d: DATE() }), { refs: { '@e5': 'd' } });
+  say('a date fill by @ref ⇒ read through the driver (value, then its kind), focused, the setter checks it IS the target, Done', t.r && t.r.code === 0 && t.r.as === 'field_setter' && t.page.nodes.d._v === '2027-01-07' && t.d.calls.map((c) => c.args[0] + (c.args[1] && c.args[0] === 'get' ? ' ' + c.args[1] : '')).join(',') === 'get value,get attr,focus,eval', t.r); cost['an @ref date fill'] = t.d.calls.length;
+  t = await judge(readBack, { verb: 'fill', sel: '@e5', asked: '2027-01-07' }, fakePage({ d: DATE(), d1: DATE({ value: '2026-01-01' }) }), { refs: { '@e5': 'd' }, redirect: { d: 'd1' } });
+  say('a page that REDIRECTS the focus to another date field ⇒ the setter sees it is not the target: a note, nothing set anywhere', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note) && /not its target/.test(t.r.note) && t.page.nodes.d1._v === '2026-01-01' && t.page.nodes.d._v === '', t.r);
+  t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: '01072027' }, fakePage({ d: DATE() }, { focused: 'd' }));
+  say('the owner\'s act: keyboard type 01072027 into the focused date field ⇒ SAID (exit 0, never «Done»): its form and the press recipe', t.r && t.r.code === 0 && t.r.as === 'field_form' && /^note: keyboard type ran, but a date field takes no typed text and holds its value as 2027-01-07/.test(t.r.out) && t.r.out.includes('press each digit') && !/Done/.test(t.r.out) && t.page.nodes.d._v === '', t.r); cost['a keyboard type into a date field (wrong form)'] = t.d.calls.length;
+  t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: '2027-01-07' }, fakePage({ d: DATE() }, { focused: 'd' }));
+  say('keyboard type 2027-01-07 into the focused date field ⇒ the setter, Done', t.r && t.r.code === 0 && t.r.as === 'field_setter' && t.page.nodes.d._v === '2027-01-07', t.r); cost['a keyboard type into a date field (its form)'] = t.d.calls.length;
+  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '01/07/2027' }, fakePage({ d: DATE() }));
+  say('a date fill of 01/07/2027 (the target read) ⇒ refused field_form naming fill #d 2027-01-07', t.r && t.r.code === 1 && t.r.as === 'field_form' && t.r.out.includes('vibespace-browser fill #d 2027-01-07'), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-02-31' }, fakePage({ d: DATE() }));
+  say('a date the field refuses (2027-02-31) ⇒ field_refused, what it holds said', t.r && t.r.code === 1 && t.r.as === 'field_refused' && t.r.out.includes('did not take "2027-02-31" (it holds "")'), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-02-31' }, fakePage({ d: DATE({ value: '2027-01-01', keep: true }) }));
+  say('a field that KEPT its old value ⇒ field_refused', t.r && t.r.code === 1 && t.r.as === 'field_refused' && t.r.out.includes('it holds "2027-01-01"'), t.r);
+  // (a) an empty fill clears
+  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '' }, fakePage({ d: DATE({ value: '2027-01-07' }) }));
+  say('(a) an EMPTY fill of a date field CLEARS it ⇒ Done, said cleared', t.r && t.r.code === 0 && t.r.as === 'field_cleared' && /is cleared/.test(t.r.out) && t.page.nodes.d._v === '', t.r);
+  // (b) the kind's own normal form
+  for (const [kind, asked, norm, accept] of [['time', '09:05:00', (v) => v.replace(/:00$/, ''), () => true], ['datetime-local', '2027-01-07T09:05:00', (v) => v.replace(/:00$/, ''), () => true], ['color', '#A0B1C2', (v) => v.toLowerCase(), () => true], ['range', '50.0', (v) => String(Number(v)), () => true]]) {
+    t = await judge(readBack, { verb: 'fill', sel: '#x', asked }, fakePage({ x: { kind, norm, accept, value: kind === 'range' ? '20' : '' } }));
+    say(`(b) ${kind} ${asked} stored as ${norm(asked)} ⇒ the same value in the kind's normal form: Done`, t.r && t.r.code === 0 && t.r.as === 'field_setter' && t.page.nodes.x._v === norm(asked), t.r);
   }
-  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, { tag: 'input', kind: 'date', value: '', readOnly: true });
+  t = await judge(readBack, { verb: 'fill', sel: '#r', asked: '55' }, fakePage({ r: { kind: 'range', value: '20', norm: () => '50' } }));
+  say('(b) a range the control adjusted (55 → 50, not its old 20) ⇒ field_differs SAID, exit 0', t.r && t.r.code === 0 && t.r.as === 'field_differs' && t.r.out.includes('holds "50"'), t.r);
+  for (const [kind, v] of [['month', '2027-01'], ['week', '2027-W01']]) { t = await judge(readBack, { verb: 'fill', sel: '#x', asked: v }, fakePage({ x: { kind } })); say(`${kind} fill ${v} ⇒ the setter`, t.r && t.r.as === 'field_setter' && t.page.nodes.x._v === v, t.r); }
+  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, fakePage({ d: DATE({ readOnly: true }) }));
   say('a read-only date field ⇒ field_locked, the setter never runs', t.r && t.r.code === 1 && t.r.as === 'field_locked' && t.d.calls.length === 1, t.r);
-  t = await judge(readBack, { verb: 'fill', sel: '#t', asked: '0123456789' }, { tag: 'input', kind: 'text', value: '0123456789' });
-  say('a text fill that landed ⇒ null (the driver\'s own answer stands)', t.r === null, t.r);
-  t = await judge(readBack, { verb: 'fill', sel: '#t', asked: '0123456789' }, { tag: 'input', kind: 'text', value: '' });
-  say('a text fill that landed NOTHING ⇒ nothing_landed, exit 1', t.r && t.r.code === 1 && t.r.as === 'nothing_landed' && t.r.out.includes('empty after your fill of "0123456789"'), t.r);
-  t = await judge(readBack, { verb: 'fill', sel: '#t', asked: '0123456789' }, { tag: 'input', kind: 'text', value: '01234' });
-  say('a text fill the page cut ⇒ field_differs said (exit 0), never Done', t.r && t.r.code === 0 && t.r.as === 'field_differs' && /^filled — but the text field holds "01234", not exactly "0123456789"/.test(t.r.out) && !/Done/.test(t.r.out), t.r);
-  t = await judge(readBack, { verb: 'fill', sel: '#p', asked: 'correct-horse-0' }, { tag: 'input', kind: 'password', value: 'correct-horse' });
+  // (c) a run that fails is never the field's refusal
+  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, fakePage({ d: DATE() }), { fail: [2] });
+  say('(c) the setter\'s OWN run fails ⇒ read_back_unavailable (exit 0, the check to run) — never «refused by the field»', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note) && /own setter could not be run/.test(t.r.note) && !t.r.code, t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '#t', asked: '0' }, fakePage({ t: { kind: 'text' } }), { fail: [1] });
+  say('(c) the probe fails ⇒ a note under the driver\'s answer', t.r && t.r.note && t.r.note.includes('vibespace-browser get value #t'), t.r);
+  // (d) the whole answer
+  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, fakePage({ d: DATE() }), { pretty: true });
+  say('(d) an eval answer printed over several lines is read whole ⇒ Done', t.r && t.r.as === 'field_setter', t.r);
+  // (e) one bound for all the runs together
+  { const clock = { t: 0 };
+    t = await judge(readBack, { verb: 'fill', sel: '@e5', asked: '2027-01-07' }, fakePage({ d: DATE() }), { refs: { '@e5': 'd' }, clock, cost: 6000 });
+    const ms = t.d.calls.map((c) => c.ms);
+    say('(e) ONE 10 s bound over all the runs: each run is handed what is left (10 s, then 4 s), none starts past it, the answer is the note', t.r && t.r.note && ms[0] === 10000 && ms[1] === 4000 && t.d.calls.length === 2, { r: t.r, ms }); }
+  // ── another field ──
+  t = await judge(readBack, { verb: 'fill', sel: '#t', asked: '0123456789' }, fakePage({ t: { kind: 'text', value: '0123456789' } }));
+  say('a text fill that landed ⇒ null', t.r === null, t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '#t', asked: '0123456789' }, fakePage({ t: { kind: 'text' } }));
+  say('a text fill that landed NOTHING in its target ⇒ nothing_landed, exit 1', t.r && t.r.code === 1 && t.r.as === 'nothing_landed', t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e2', asked: '0123' }, fakePage({ t: { kind: 'text' } }), { refs: { '@e2': 't' } });
+  say('an @ref text fill that landed nothing (the driver read it empty, its kind text) ⇒ nothing_landed, exit 1', t.r && t.r.code === 1 && t.r.as === 'nothing_landed' && t.d.calls.length === 2, t.r); cost['an @ref text fill that missed'] = t.d.calls.length;
+  t = await judge(readBack, { verb: 'fill', sel: '#t', asked: '0123456789' }, fakePage({ t: { kind: 'text', value: '01234' } }));
+  say('a text fill the page cut ⇒ field_differs said, exit 0, never Done', t.r && t.r.code === 0 && t.r.as === 'field_differs' && !/Done/.test(t.r.out), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '#p', asked: 'correct-horse-0' }, fakePage({ p: { kind: 'password', value: 'correct-horse' } }));
   say('a password the page cut ⇒ said by its LENGTHS, never its characters', t.r && t.r.as === 'field_differs' && t.r.out.includes('13 characters') && !t.r.out.includes('correct-horse'), t.r);
-  t = await judge(readBack, { verb: 'type', sel: '#t', asked: '07' }, { tag: 'input', kind: 'text', value: 'x07y' });
-  say('a type whose text the field contains ⇒ null', t.r === null, t.r);
-  t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: 'hello\n' }, { tag: 'input', kind: 'text', value: '' });
+  t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: '0123' }, fakePage({ n: { kind: 'number' } }, { focused: 'n' }));
+  say('a keyboard type that left the FOCUSED field empty ⇒ SAID (exit 0), never refused', t.r && t.r.code === 0 && t.r.as === 'nothing_landed' && /^note: keyboard type ran, but/.test(t.r.out), t.r); cost['a keyboard type'] = t.d.calls.length;
+  t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: 'hello\n' }, fakePage({ t: { kind: 'text' } }, { focused: 't' }));
   say('a keyboard type holding a line break (it may submit the form) ⇒ not judged', t.r === null, t.r);
-  t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: '0123' }, { tag: 'input', kind: 'number', value: '' });
-  say('a keyboard type that landed nothing in a number field ⇒ nothing_landed', t.r && t.r.code === 1 && t.r.as === 'nothing_landed', t.r);
-  t = await judge(readBack, { verb: 'fill', sel: '#t', asked: '0' }, { tag: 'input', kind: 'text', value: '' }, { fails: true });
-  say('a field that cannot be read back ⇒ a note under the driver\'s answer (read_back_unavailable)', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note) && t.r.note.includes('vibespace-browser get value #t'), t.r);
-  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, { tag: 'input', kind: 'date', value: '', accept: realDate }, { json: true });
+  t = await judge(readBack, { verb: 'fill', sel: 'text=Email', asked: 'a@b.c' }, fakePage({ e: { kind: 'email', value: 'a@b.c' } }), { refs: { 'text=Email': 'e' } });
+  say('a selector the page cannot read (the driver\'s own form) ⇒ read through the driver — the answer stands', t.r === null && t.d.calls.some((c) => c.args[0] === 'get'), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, fakePage({ d: DATE() }), { json: true });
   { let j = null; try { j = JSON.parse(t.r.out); } catch { /* */ } say('--json ⇒ ONE JSON object: success, the value, via the setter', t.r && t.r.code === 0 && j && j.success === true && j.data.value === '2027-01-07' && j.data.via === 'setter' && t.r.out.trim().split('\n').length === 1, t.r); }
-  t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: '01072027' }, { tag: 'input', kind: 'date', value: '' }, { json: true });
-  { let j = null; try { j = JSON.parse(t.r.out); } catch { /* */ } say('--json refusal ⇒ success false, code field_form', t.r && t.r.code === 1 && j && j.success === false && j.code === 'field_form', t.r); }
-  return bad;
+  return { bad, cost };
 }
 {
-  const bad = await readBackCensus(V.readBack);
-  ok(bad.length === 0, 'readBack: a date / time / datetime-local / month / week / colour / range field gets its value through its own setter, read back; the wrong form refused by name; nothing landed refused; a difference said (a password by length); unreadable said', bad);
+  const { bad, cost } = await readBackCensus(V.readBack);
+  ok(bad.length === 0, `readBack judges the verb's TARGET (a CSS selector in the page, an @ref through the driver), sets a date / time / … field through its own setter in the kind's normal form, clears on an empty fill, never blames the field for a failed run, reads the answer whole, keeps ONE 10 s bound — a bare keyboard type's findings said, never refused`, bad);
+  ok(Object.keys(cost).length >= 7, `(e) THE COST, measured on the fake — driver runs per read-back: ${Object.entries(cost).map(([k, n]) => `${k} ${n}`).join(' · ')}`, cost);
 }
 
 console.log('⑥ WIRING in the shipped CLI');
@@ -184,9 +254,10 @@ function wiringFindings(src) {
   if (!/if \(code === 0 && readPlan && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit\)/.test(src)) bad.push('the read-back is not limited to a 0 answer with no dialog / loop / passkey / prompt');
   if (!/else if \(rb\) \{ outText = rb\.out; errText = rb\.err; code = rb\.code; \}/.test(src)) bad.push('the read-back\'s answer does not replace the driver\'s');
   if (!/function runBinQuiet\(bin, args, \{ env, cwd, ms = 10000 \}\)/.test(src) || !/setTimeout\(\(\) => \{ try \{ c\.kill\('SIGKILL'\); \} catch \{ \/\* ended \*\/ \} resolve\(\{ code: 124/.test(src)) bad.push('the read-back\'s driver call is not bounded');
+  if (!/run: \(args, o\) => runBinQuiet\(bin\.path, .*?, \{ env, cwd: runCwd\.dir, ms: o && o\.ms > 0 \? Math\.min\(o\.ms, 10000\) : 10000 \}\)/.test(src)) bad.push('each read-back run is not handed what is left of the ONE bound');
   return bad;
 }
-{ const bad = wiringFindings(CLI_SRC); ok(bad.length === 0, 'the CLI: the key\'s code refused before anything runs; the read-back after a 0 answer, before the audit, never a vault fill / batch / fenced tab; its eval bounded (10 s)', bad); }
+{ const bad = wiringFindings(CLI_SRC); ok(bad.length === 0, 'the CLI: the key\'s code refused before anything runs; the read-back after a 0 answer, before the audit, never a vault fill / batch / fenced tab; every run handed what is left of ONE 10 s bound', bad); }
 
 console.log('⑦ RED CONTROLS (patched copies, the tree untouched)');
 const MUT = mutantCopies('read-back', REPO);
@@ -196,8 +267,17 @@ const MUT = mutantCopies('read-back', REPO);
   const from = '  const form = f.tag === \'input\' ? FIELD_FORMS[f.kind] : null;\n';
   const f = MUT.write('src/browser-verbs.js', SRC.replace(from, '  const form = null; // CONTROL: the driver is trusted\n'), 'trust');
   const VM = require(f);
-  const bad = await readBackCensus(VM.readBack);
-  ok(SRC.includes(from) && bad.some((b) => b.startsWith('date fill ISO ⇒ the setter')) && bad.some((b) => b.startsWith('the owner\'s act')), 'CONTROL: a readBack that trusts the driver (the release\'s «Done» over an empty date field) FAILS ⑤', bad.slice(0, 3));
+  const { bad } = await readBackCensus(VM.readBack);
+  ok(SRC.includes(from) && bad.some((b) => b.startsWith('a date fill ISO ⇒ the setter')) && bad.some((b) => b.startsWith('the owner\'s act')), 'CONTROL: a readBack that trusts the driver (the release\'s «Done» over an empty date field) FAILS ⑤', bad.slice(0, 3));
+}
+{
+  // 68da75fa2's read-back (the must): whatever holds the FOCUS after the verb is judged, the target named only in the words
+  const SRC = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
+  const from = '  if (plan.sel == null) {\n    f = evalAnswer(await call([\'eval\', fieldProbeJs(plan.asked)]));';
+  const f = MUT.write('src/browser-verbs.js', SRC.replace(from, '  if (true) { // CONTROL: the focused field, whatever the verb named\n    f = evalAnswer(await call([\'eval\', fieldProbeJs(plan.asked)]));'), 'focused');
+  const VM = require(f);
+  const { bad } = await readBackCensus(VM.readBack);
+  ok(SRC.includes(from) && bad.some((b) => b.startsWith('scene 1:')) && bad.some((b) => b.startsWith('scene 2:')) && bad.some((b) => b.startsWith('scene 3:')), 'CONTROL: the read-back that judges the FOCUSED field (68da75fa2) FAILS the three scenes — a one-time-code box, a card number, an earlier date field', bad.filter((b) => b.startsWith('scene')).map((b) => b.slice(0, 120)));
 }
 {
   const from = "    if (code === 0 && readPlan && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit) {";

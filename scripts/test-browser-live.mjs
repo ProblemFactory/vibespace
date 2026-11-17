@@ -589,12 +589,16 @@ async function legPasskeyRoads() {
 //   d  press Digit0 refused [key_code_name] before anything runs (the page sees no key)
 //   e  a file into a frame's file input: `frame <the frame's selector>` → `upload <the input>` → `frame main` puts it there;
 //      `upload` of a selector inside a frame, from the main frame, does not reach it (the manual's recipe, both halves)
+//   r2 (主开发 23:28Z): the verb's TARGET is judged — a code box that moves the focus to the next, empty box keeps its answer;
+//   the date field by its @ref is read through the driver's own value and kind; an empty fill clears; 09:05:00 is 09:05; the
+//   owner's keyboard type into a date field is SAID (exit 0); (e) the cost of the read-back measured against the control.
 //   RED CONTROL: the same CLI without its read-back (a copy beside its modules) answers «✓ Done» over the EMPTY date field —
 //   the release's road.
 // SKIPs by name without the driver / Xvfb. Zero vendor calls; ends every daemon it started (by their session names).
-const TYPED_FORM = '<!doctype html><meta charset=utf-8><title>TYPED</title><input id=t type=text><input id=n type=number><input id=d type=date><input id=tm type=time>'
+const TYPED_FORM = '<!doctype html><meta charset=utf-8><title>TYPED</title><input id=t type=text><input id=n type=number><input id=d type=date aria-label="Due date"><input id=tm type=time>'
+  + '<input id=a1 maxlength=1 aria-label="Code one"><input id=a2 maxlength=1 aria-label="Code two">'
   + '<iframe id=f srcdoc="<!doctype html><input id=up type=file>"></iframe><iframe id=f2 srcdoc="<!doctype html><input id=up2 type=file>"></iframe>'
-  + '<script>window.__log=[];for(const ev of ["keydown","input","change"])document.addEventListener(ev,(e)=>{window.__log.push([ev,e.target&&e.target.id,e.key===undefined?null:e.key])},true);</script>';
+  + '<script>window.__log=[];for(const ev of ["keydown","input","change"])document.addEventListener(ev,(e)=>{window.__log.push([ev,e.target&&e.target.id,e.key===undefined?null:e.key])},true);document.getElementById("a1").addEventListener("input",()=>document.getElementById("a2").focus());</script>';
 async function legTypedKinds() {
   console.log('— ⑫ lane digit-zero: what an agent types arrives; a fill that cannot set a field says so — the real keeper, mediator and driver, headed');
   const envBase = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_') && !k.startsWith('VIBESPACE_') && !['DISPLAY', 'WAYLAND_DISPLAY', 'XDG_SESSION_TYPE', 'DBUS_SESSION_BUS_ADDRESS', 'XAUTHORITY'].includes(k)) envBase[k] = v;
@@ -638,7 +642,7 @@ async function legTypedKinds() {
   fs.writeFileSync(path.join(CTL, 'vibespace-browser'), CLI_SRC.replace(HOOK, '    if (false) { // CONTROL: no read-back'), { mode: 0o755 });
   for (const [from, to] of [['src/browser-verbs.js', 'vibespace-browser-verbs.js'], ['src/cli-call.js', 'cli-call.js'], ['src/browser-stuck.js', 'vibespace-browser-stuck.js'], ['src/browser-passkey.js', 'vibespace-browser-passkey.js']]) fs.copyFileSync(path.join(repo, from), path.join(CTL, to));
   const Ctl = cliAt(path.join(CTL, 'vibespace-browser'));
-  const page = async () => { const r = await A(['eval', 'JSON.stringify({ t: document.querySelector("#t").value, n: document.querySelector("#n").value, d: document.querySelector("#d").value, tm: document.querySelector("#tm").value, up: document.querySelector("#f").contentDocument.querySelector("#up").files.length, up2: document.querySelector("#f2").contentDocument.querySelector("#up2").files.length, log: window.__log })']); try { let v = JSON.parse(String(r.out).trim().split('\n').filter(Boolean).pop()); if (typeof v === 'string') v = JSON.parse(v); return v; } catch { return { raw: r.out + r.err }; } };
+  const page = async () => { const r = await A(['eval', 'JSON.stringify({ t: document.querySelector("#t").value, n: document.querySelector("#n").value, d: document.querySelector("#d").value, tm: document.querySelector("#tm").value, a1: document.querySelector("#a1").value, focused: document.activeElement && document.activeElement.id, up: document.querySelector("#f").contentDocument.querySelector("#up").files.length, up2: document.querySelector("#f2").contentDocument.querySelector("#up2").files.length, log: window.__log })']); try { let v = JSON.parse(String(r.out).trim().split('\n').filter(Boolean).pop()); if (typeof v === 'string') v = JSON.parse(v); return v; } catch { return { raw: r.out + r.err }; } };
   const reset = () => A(['eval', 'for (const e of document.querySelectorAll("input")) e.value = ""; window.__log = []; document.activeElement && document.activeElement.blur(); "reset"']);
   const keysOf = (p, id) => (p.log || []).filter((l) => l[0] === 'keydown' && l[1] === id).map((l) => l[2]);
   try {
@@ -655,7 +659,7 @@ async function legTypedKinds() {
     ok(p.n === DIG && keysOf(p, 'n').join('') === DIG, `⑫ a: a press of each digit into a number field — ten keys the page saw, the zero first (${JSON.stringify(keysOf(p, 'n'))} → ${JSON.stringify(p.n)})`, JSON.stringify(p));
     // b
     await reset(); await A(['focus', '#d']); k = await A(['keyboard', 'type', '01072027']); p = await page();
-    ok(k.code === 1 && /\[field_form\]/.test(k.err) && k.out.includes('a date field takes no typed text and holds its value as 2027-01-07') && p.d === '', `⑫ b: the owner's act — keyboard type 01072027 into a native date field is REFUSED [field_form] with the form, nothing set (never «Done»)`, JSON.stringify({ k, d: p.d }));
+    ok(k.code === 0 && /\[field_form\]/.test(k.err) && /^note: keyboard type ran, but a date field takes no typed text and holds its value as 2027-01-07/.test(k.out) && !/Done/.test(k.out) && p.d === '', `⑫ b: the owner's act — keyboard type 01072027 into the focused native date field is SAID [field_form] (exit 0: a bare keyboard type is never refused) with the form — never «Done», nothing set`, JSON.stringify({ k, d: p.d }));
     await reset(); k = await A(['fill', '#d', '2027-01-07']); p = await page();
     ok(k.code === 0 && k.out.includes('✓ Done — the date field holds 2027-01-07, set through the field\'s own setter') && p.d === '2027-01-07' && (p.log || []).some((l) => l[0] === 'input' && l[1] === 'd') && (p.log || []).some((l) => l[0] === 'change' && l[1] === 'd'), `⑫ b: fill 2027-01-07 sets the date field through its own setter, read back — the page saw input and change (value ${JSON.stringify(p.d)})`, JSON.stringify({ k, p }));
     await reset(); await A(['focus', '#d']); for (const d of '01072027') await A(['press', d]); p = await page();
@@ -665,6 +669,21 @@ async function legTypedKinds() {
     ok(k.code === 0 && p.tm === '09:05' && /set through the field's own setter/.test(k.out), `⑫ c: fill 09:05 sets the time field the same way (${JSON.stringify(p.tm)})`, k.out + k.err);
     await reset(); k = await A(['fill', '#tm', '0905']); p = await page();
     ok(k.code === 1 && /\[field_form\]/.test(k.err) && k.out.includes('09:05') && p.tm === '', '⑫ c: fill 0905 into the time field is refused [field_form] with its form', k.out + k.err);
+    await reset(); k = await A(['fill', '#tm', '09:05:00']); p = await page();
+    ok(k.code === 0 && p.tm === '09:05' && /set through the field's own setter/.test(k.out), `⑫ c: fill 09:05:00 — the field keeps 09:05 (its normal form): the same value, Done (${JSON.stringify(p.tm)})`, k.out + k.err);
+    await reset(); await A(['fill', '#d', '2027-01-07']); k = await A(['fill', '#d', '']); p = await page();
+    ok(k.code === 0 && /\[field_cleared\]/.test(k.err) && p.d === '', '⑫ c: an EMPTY fill clears the date field, said cleared', k.out + k.err);
+    // the must (r2): the TARGET is judged, never what holds the focus after the verb
+    await reset(); k = await A(['fill', '#a1', '4']); p = await page();
+    ok(k.code === 0 && !/nothing_landed|field_differs/.test(k.err) && p.a1 === '4' && p.focused === 'a2', `⑫ r2: a code box that moves the focus to the next, EMPTY box — the fill landed (#a1 holds 4, the focus on #${p.focused}): the answer stands, never a refusal`, JSON.stringify({ k, p }));
+    const snap = await A(['snapshot', '-i']);
+    const dueRef = (require('../src/browser-verbs.js').parseSnapshotRefs(snap.out) || []).find((x) => x.name === 'Due date');
+    await reset(); k = dueRef ? await A(['fill', dueRef.ref, '2027-01-07']) : { code: -1, out: snap.out.slice(0, 400), err: 'no ref named Due date' }; p = await page();
+    ok(k.code === 0 && /set through the field's own setter/.test(k.out) && p.d === '2027-01-07', `⑫ r2: fill ${dueRef ? dueRef.ref : '@?'} (the date field by its @ref) — read through the driver's own value and kind, set through its own setter, read back (${JSON.stringify(p.d)})`, JSON.stringify({ k, d: p.d }));
+    // (e) the cost: the same fill with and without the read-back (one more driver run on a text field, two on a date field)
+    { const t0 = Date.now(); await A(['fill', '#t', '0123456789']); const withRb = Date.now() - t0; const t1 = Date.now(); await Ctl(['fill', '#t', '0123456789']); const without = Date.now() - t1;
+      const t2 = Date.now(); await A(['fill', '#d', '2027-01-07']); const dateRb = Date.now() - t2; const t3 = Date.now(); await Ctl(['fill', '#d', '2027-01-07']); const dateNo = Date.now() - t3;
+      ok(withRb > 0 && without > 0, `⑫ (e) the cost, measured: a text fill ${withRb} ms with the read-back, ${without} ms without; a date fill ${dateRb} ms with it (the setter), ${dateNo} ms without (Done over empty)`, { withRb, without, dateRb, dateNo }); }
     // d
     await reset(); await A(['focus', '#t']); k = await A(['press', 'Digit0']); p = await page();
     ok(k.code === 1 && /\[key_code_name\]/.test(k.err) && k.err.includes('vibespace-browser press 0') && p.t === '' && keysOf(p, 't').length === 0, '⑫ d: press Digit0 (a key\'s code) is refused [key_code_name] with `press 0` — before anything runs: the page saw no key', k.out + k.err);
