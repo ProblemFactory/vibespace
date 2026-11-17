@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { versionsBefore } from './lib/oat-fixture.mjs'; // B-5e52
 const require = createRequire(import.meta.url);
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-verdicts-'));
@@ -140,7 +141,7 @@ console.log('── the pool verdict names every member of its roster (R2) ─�
   const APA = require('../src/account-pool-auto.js');
   const { decidePoolSwitch, poolBlockedNotice } = APA;
   const FX = JSON.parse(fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'oat-in-file.json'), 'utf-8'));
-  const { '2.1.312': _r312, '2.1.314': _r314, '2.1.319': _r319d1, ...upTo308 } = FX.versions;
+  const upTo308 = versionsBefore(FX.versions, '2.1.312'); // B-5e52: the fixture before 2.1.312 was measured
   const dirR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-verdicts-roster-'));
   const fxF = path.join(dirR, 'fx-to-2.1.308.json'); fs.writeFileSync(fxF, JSON.stringify({ versions: upTo308 }));
   const am = new AM({ dataDir: dirR, onChange: () => {}, oatFixture: fxF });

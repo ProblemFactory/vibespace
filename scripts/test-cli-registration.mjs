@@ -167,9 +167,11 @@ console.log('③ THE DRAFT ROAD — over a FIXTURE binary (0644, built from the 
   const mtime = fs.statSync(file).mtimeMs;
   const r2 = await reg.draft();
   ok('a second press keeps the draft already taken (the box saw this build before) — not rewritten', r2.ok === true && r2.wrote === false && r2.changes === 2 && fs.statSync(file).mtimeMs === mtime, r2);
-  // RED CONTROL: the recipe's own road (`dumpBinary` without a version — it asks `--version`) on the SAME 0644 file cannot run it
-  let ctl = null; try { D.dumpBinary(bin, []); ctl = 'ran'; } catch (e) { ctl = e.code || e.message; }
-  ok('RED CONTROL: the recipe\'s own road on the same file (`--version`, the pre-lane dumpBinary) fails EACCES — so the auto road that succeeded never executed it', ctl === 'EACCES', ctl);
+  // B-5e52 (lane bl-tests-e): the recipe's own road (`dumpBinary` without a version) once ASKED `--version` — on this 0644 file it
+  // failed EACCES. It READS the build off the file now, like the auto road: the same 0644 file dumps, and nothing ran it.
+  let ctl = null, ctlS = null; try { ctl = D.dumpBinary(bin, []).version; } catch (e) { ctl = e.code || e.message; }
+  try { ctlS = D.dumpBinary(stamped, []).version; } catch (e) { ctlS = e.code || e.message; }
+  ok('the recipe\'s own road (no version given) READS the build off a 0644 file, where it once ran `--version` and failed EACCES — the versions-dir name (2.1.399) and, off any other name, the bundle\'s VERSION stamp (2.1.398)', ctl === '2.1.399' && ctlS === '2.1.398', { ctl, ctlS });
   // the CLI entry by hand: one JSON line, exit 0; a registered build ⇒ nothing written
   const out = execFileSync(process.execPath, [path.join(REPO, 'scripts/claude-cli-dump.mjs'), '--auto', '--bin', bin, '--data', path.join(tmp, 'data-cli')], { encoding: 'utf8' });
   const o = JSON.parse(out.trim());

@@ -208,10 +208,13 @@ export function nestedOf(text, helpers) {
 }
 
 /** The dump of one binary: {version, method, helpers, union, sentences, nested, zod:{key: literal}} (zod only for `newKeys`).
- *  `opts.text` (its strings, already read) and `opts.version` (already known) spare the second read and the `--version` run. */
+ *  `opts.text` (its strings, already read) spares the second read; `opts.version` names the build. B-5e52 (lane bl-tests-e): the
+ *  binary is READ, never run — the build is `opts.version`, else versionOfBinary (the versions-dir name, else the bundle's own
+ *  VERSION stamp); a binary that says neither is refused by name (a 0644 copy of the binary dumps the same). */
 export function dumpBinary(bin, newKeys = [], opts = {}) {
   const text = opts.text || stringsOf(bin);
-  const version = opts.version || (execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }).match(/\d+\.\d+\.\d+/) || [path.basename(bin)])[0];
+  const version = opts.version || versionOfBinary(bin, text);
+  if (!version) throw new Error(`${bin} names no build (neither a versions-dir name nor one most frequent VERSION:"x.y.z" stamp) — copy it as …/versions/<x.y.z> (0644 is enough: it is only read), or pass opts.version`);
   const { union, helpers, error, unclosed } = extractZodUnion(text);
   if (error) throw new Error(error);
   const cen = extractPermissionSentences(text);

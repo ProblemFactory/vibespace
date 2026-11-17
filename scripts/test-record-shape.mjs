@@ -352,6 +352,18 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   const both2 = [...IGNT].filter((t) => cases.has(t) || t in UNSEEN.types).concat([...cases].filter((t) => t in UNSEEN.types));
   ok('no top-level type is both routed and ignored/unseen', both2.length === 0, both2);
 
+  // B-5e52 (lane bl-tests-e, 2026-11-10 cli-records review): the oracle READ the binary but also RAN it — `claude --version` twice
+  // here and once in claude-cli-dump's dumpBinary, on whatever binary it found (on a developer box the real CLI). The build is read
+  // off the file now (versionOfBinary: the versions-dir name, else the bundle's VERSION stamp); a 0644 copy dumps the same.
+  {
+    const runsBin = (src) => /\bexecFileSync\(\s*(?:bin|real|claude)\s*,|\bspawnSync\(\s*(?:bin|real|claude)\s*,/.test(src);
+    const OLD_CALL = ['let ver = \'?\'; try { ver = execFile', 'Sync(bin, [\'--version\'], { encoding: \'utf8\' }); } catch { }'].join('');   // spelled in two pieces: this file is censused too
+    ok('§4 B-5e52: no claude binary is RUN by this suite or by scripts/claude-cli-dump.mjs (no exec of the binary — the build is read off the file)', !runsBin(read('scripts/test-record-shape.mjs')) && !runsBin(read('scripts/claude-cli-dump.mjs')));
+    ok('§4 B-5e52 NEG: the census sees the old call', runsBin(OLD_CALL));
+    let said = null; try { DUMP.dumpBinary(path.join(os.tmpdir(), 'vs-record-shape-no-such', 'claude'), [], { text: 'strings with no stamp' }); } catch (e) { said = e.message; }
+    ok('§4 B-5e52: dumpBinary over a binary that names no build REFUSES by name — it never runs the file to ask (a missing file proves no run was tried)', /names no build/.test(String(said)), said);
+    ok('§4 B-5e52: …and reads the build off a 0644 copy\'s stamp, or its versions-dir name', DUMP.versionOfBinary('/x/claude-copy', 'a VERSION:"2.1.322" b VERSION:"2.1.322"') === '2.1.322' && DUMP.versionOfBinary('/x/claude/versions/2.1.322', '') === '2.1.322');
+  }
   const findBinary = () => {
     // VIBESPACE_ORACLE_BINARY pins the file the oracle reads (an older build under
     // ~/.local/share/claude/versions/, or a scratch dump with a planted field — the drift-alarm proof).
@@ -368,7 +380,11 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   // npm serves today (2.1.278 on 2026-09-21 vs the pinned 2.1.274) — a newer build's drift is PRINTED and
   // skipped, so the mirror stays readable and the developer box stays the place that goes red on a CLI update.
   const pinned = process.env.VIBESPACE_ORACLE_PINNED || R.SCHEMA_CLI_VERSION;
-  const installed = (() => { if (!bin) return null; const m = path.basename(bin).match(/^\d+\.\d+\.\d+$/); if (m) return m[0]; try { return (execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }).match(/\d+\.\d+\.\d+/) || [null])[0]; } catch { return null; } })();
+  // B-5e52 (lane bl-tests-e): the oracle READS the binary, never runs it — the build is the versions-dir name, else the bundle's
+  // own VERSION stamp (scripts/claude-cli-dump.mjs versionOfBinary); its strings are read ONCE, here and for §4 below
+  let binText = null;
+  const binTextOf = () => { if (binText === null) { try { binText = execFileSync('strings', ['-n', '8', bin], { maxBuffer: 1024 * 1024 * 1024, encoding: 'latin1' }); } catch { try { binText = fs.readFileSync(bin, 'latin1'); } catch { binText = ''; } } } return binText; };
+  const installed = !bin ? null : (DUMP.versionOfBinary(bin, null) || (size >= 4 * 1024 * 1024 ? DUMP.versionOfBinary(bin, binTextOf()) : null));
   // pinned PER CLI VERSION (lane cli-2-1-288-records): any build in R.SCHEMA_CLI_VERSIONS is strict everywhere
   const lenient = !!process.env.GITHUB_ACTIONS && installed !== pinned && !R.SCHEMA_CLI_VERSIONS.includes(installed);
   console.log(`  installed claude ${installed || '(unknown)'} vs pinned schema ${pinned} — ${lenient ? 'INFORMATIONAL (mirror, newer build): drift is printed, not red' : 'STRICT'}`);
@@ -378,8 +394,7 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   } else {
     // THE EXTRACTOR (§4a): the helper names read off the anchor, never spelled. `strings` keeps memory
     // sane on a 230 MB ELF; the raw latin1 read is the fallback.
-    let text = '';
-    try { text = execFileSync('strings', ['-n', '8', bin], { maxBuffer: 1024 * 1024 * 1024, encoding: 'latin1' }); } catch { try { text = fs.readFileSync(bin, 'latin1'); } catch { } }
+    let text = binTextOf(); binText = ''; // the read above (B-5e52), held once
     const { union, helpers, error: exErr, unclosed: liveUnclosed } = extractZodUnion(text);
     // lane cli-2-1-319-records r2 (round-1 acceptance, D2): the gate a new CLI hits FIRST. A literal the walker cannot read is a shape no leg below can judge — its
     // fields would pass unseen (a mutant with the bound at 50 000 and a FIELDS_319 row removed left every live leg green on 2.1.319)
@@ -467,7 +482,7 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
     const EXPLICIT = new Set(['user', 'transcript_mirror', 'control_request', 'control_response', 'control_cancel_request', 'keep_alive', 'update_environment_variables', 'result', 'result/success']);
     const recs = keys.filter((k) => !k.startsWith('system/') && ((union[k].includes('uuid') && union[k].includes('session_id')) || EXPLICIT.has(k)));
     const types = [...new Set(recs.map((k) => k.replace(/\/.*$/, '')))];
-    let ver = '?'; try { ver = execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 15000 }).trim().slice(0, 40); } catch { }
+    const ver = installed || '?'; // B-5e52: read off the binary, never `--version`
     console.log(`    binary ${bin} (${(size / 1048576).toFixed(0)} MB, ${ver}) · helpers ${helpers.map((h) => h.obj + '/' + h.lit + ' @' + h.anchor).join(', ') || '(none)'} · union ${keys.length} shapes · ${sys.length} system subtypes · ${types.length} stream record types`);
     oracleOk('the extractor read a plausible union (≥ 40 system subtypes, ≥ 25 stream types — the design\'s 2.1.274 census said 51 / 34; this extractor reads 51 / 35 on 2.1.274 and 2.1.280, 52 / 35 on 2.1.281)', sys.length >= 40 && types.length >= 25, { sys: sys.length, types: types.length });
     const missSys = sys.filter((s) => !HANDLED.has(s) && !IGN.has(s) && !(s in UNSEEN.system));

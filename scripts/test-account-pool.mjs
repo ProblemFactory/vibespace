@@ -5,6 +5,7 @@
 // through the pool land in the canonical account dir.
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os';
 import { createRequire } from 'node:module';
+import { versionsBefore } from './lib/oat-fixture.mjs'; // B-5e52
 const require = createRequire(import.meta.url);
 const { AccountManager } = require(path.resolve('src/accounts.js'));
 
@@ -235,7 +236,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
 {
   // RED CONTROL (lane cli-2-1-307-records, the .340 base): over the two-version fixture (2.1.296 + 2.1.306) the same member on 2.1.307 is escaped
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.307': _measured307, '2.1.308': _measured308, '2.1.312': _m312a, '2.1.314': _m314a, '2.1.319': _r319d1, '2.1.321': _r321p1, ...two } = FX.versions;
+  const _measured307 = FX.versions['2.1.307'], two = versionsBefore(FX.versions, '2.1.307'); // B-5e52: the fixture before 2.1.307 was measured (its record: the leg below asserts it exists)
   const twoF = path.join(DATA, 'fx-2.1.296-2.1.306.json'); fs.writeFileSync(twoF, JSON.stringify({ versions: two }));
   const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-base-307'), oatFixture: twoF });
   const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -252,7 +253,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
 {
   // RED CONTROL (lane cli-2-1-308-records, the .341 base): over the three-version fixture (2.1.296 + 2.1.306 + 2.1.307) the same member on 2.1.308 is escaped
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.308': _measured308, '2.1.312': _m312b, '2.1.314': _m314b, '2.1.319': _r319d2, '2.1.321': _r321p2, ...three } = FX.versions;
+  const _measured308 = FX.versions['2.1.308'], three = versionsBefore(FX.versions, '2.1.308'); // B-5e52: the fixture before 2.1.308 was measured (its record: the leg below asserts it exists)
   const threeF = path.join(DATA, 'fx-2.1.296-2.1.306-2.1.307.json'); fs.writeFileSync(threeF, JSON.stringify({ versions: three }));
   const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-base-308'), oatFixture: threeF });
   const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -270,7 +271,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   // lane pool-silent-members R1: 2.1.312 measured 2026-10-28 (the loopback rung) ⇒ no escape on it; over the .360 base's
   // four-version fixture (2.1.296 – 2.1.308) the same member on 2.1.312 is out of the pool — and, since R1, NAMED for it
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.312': measured312, '2.1.314': _m314c, '2.1.319': _r319d3, '2.1.321': _r321p3, ...four } = FX.versions;
+  const measured312 = FX.versions['2.1.312'], four = versionsBefore(FX.versions, '2.1.312'); // B-5e52: the fixture before 2.1.312 was measured
   const run = async (tag, fxPath) => {
     const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-312-' + tag), ...(fxPath ? { oatFixture: fxPath } : {}) });
     const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -295,7 +296,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   // lane oat-in-file-2-1-314: 2.1.314 measured 2026-10-30 (the same loopback rung) ⇒ no escape on it; over the .364 base's
   // five-version fixture (2.1.296 – 2.1.312) the same member on 2.1.314 is out of the pool, NAMED for it (the 10-30 hub)
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.314': measured314, '2.1.319': _r319d4, '2.1.321': _r321p4, ...five } = FX.versions;
+  const measured314 = FX.versions['2.1.314'], five = versionsBefore(FX.versions, '2.1.314'); // B-5e52: the fixture before 2.1.314 was measured
   const run = async (tag, fxPath) => {
     const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-314-' + tag), ...(fxPath ? { oatFixture: fxPath } : {}) });
     const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -320,7 +321,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   // lane cli-2-1-319-records: the SWEEP'S VERDICT over a stub member set — 2.1.319 measured 2026-11-07 (the same loopback rung) ⇒ placed; over the .383
   // base's six-version fixture (2.1.296 – 2.1.314) the same member on 2.1.319 is kept but unplaced, NAMED for it (the 11-06 hub's journal: 11 of them)
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.319': measured319, '2.1.321': _r321p5, ...six } = FX.versions;
+  const measured319 = FX.versions['2.1.319'], six = versionsBefore(FX.versions, '2.1.319'); // B-5e52: the fixture before 2.1.319 was measured
   const run = async (tag, fxPath) => {
     const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-319-' + tag), ...(fxPath ? { oatFixture: fxPath } : {}) });
     const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -345,7 +346,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   // lane fable-52-cli-321: the same verdict for 2.1.321 — measured 2026-11-09 (the same loopback rung) before the owner's install that day ⇒ placed; over the
   // .386 base's seven-version fixture (2.1.296 – 2.1.319) the same member on 2.1.321 is kept but unplaced, NAMED for it (what the owner's update would do)
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.321': measured321, ...seven } = FX.versions;
+  const measured321 = FX.versions['2.1.321'], seven = versionsBefore(FX.versions, '2.1.321'); // B-5e52: the fixture before 2.1.321 was measured
   const run = async (tag, fxPath) => {
     const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-321-' + tag), ...(fxPath ? { oatFixture: fxPath } : {}) });
     const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -372,7 +373,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   // row (a restart over the same data dir) ⇒ the next tick places them, with nothing rewritten and no re-login
   const OFS = require(path.resolve('src/server/oat-file-sync.js'));
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.319': rec319, '2.1.321': _r321p6, ...six } = FX.versions;
+  const rec319 = FX.versions['2.1.319'], six = versionsBefore(FX.versions, '2.1.319'); // B-5e52: the fixture before 2.1.319 was measured
   const dir = path.join(DATA, 'sweep-319'); fs.mkdirSync(dir, { recursive: true });
   const sixF = path.join(DATA, 'fx-sweep-to-2.1.314.json'); fs.writeFileSync(sixF, JSON.stringify({ versions: six }));
   const sweep = async (am, v) => { const lines = []; const t = OFS.start({ accounts: am, machineProbes: { cliVersion: async () => v }, claudeCmd: 'claude', log: (...a) => lines.push(a.join(' ')), bootDelayMs: 36e5, recheckMs: 36e5 }); const caps = await t.tick(); t.stop(); return { caps, lines }; };
