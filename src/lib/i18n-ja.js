@@ -10363,6 +10363,7 @@ export default {
   "Only a self-hosted provider says which interface it speaks": "どのインターフェースを話すかを指定するのはセルフホストのプロバイダーだけです", // lane lg-providers
   "Model provider key": "モデルプロバイダーのキー", // lane lg-providers
   "VibeSpace hands it to the agent CLI it starts for this provider": "VibeSpace はこのプロバイダー用に起動するエージェント CLI にこれを渡します", // lane lg-providers
+  "Put the key in the key field — not in the address": "キーはキーの欄に入れてください——アドレスには入れないでください", // lane lg-providers
   "Remove the model provider \"{name}\"?": "モデルプロバイダー「{name}」を削除しますか？", // lane lg-providers
   "Its key leaves the vault and the provider leaves every agent's account list. Conversations already running on it keep working until they restart.": "キーは保管庫から消え、プロバイダーはすべてのエージェントのアカウント一覧から外れます。すでに使っている会話は再起動するまで動き続けます。", // lane lg-providers
   "Always for this pool": "常に（このプール）",

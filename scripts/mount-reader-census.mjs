@@ -160,6 +160,7 @@ export const ROWS = [
   ['src/server/feedback-store.js', 'own-tree', 1, null, `${DATA}; lane agent-feedback: data/feedback.json read once at create`],
   ['src/server/feedback-forward.js', 'own-tree', 1, null, `${DATA}; lane feedback-forward: data/feedback-outbox.json read once at create`],
   ['src/server/provider-store.js', 'own-tree', 1, null, `${DATA}; lane provider-record (q-053 P0a): data/providers.json read once at create`],
+  ['src/server/provider-spawn.js', 'own-tree', 1, null, `${DATA}; lane lg-providers U2: a provider home's sessions entry (data/provider-homes/<id>/<harness>/sessions) looked at once per spawn — seeded only when absent`],
   ['src/server/fs-canary-worker.js', 'exempt', 1, null, 'the canary probes the server’s own tree in its own worker'],
   ['src/server/goal-sync.js', 'own-tree', 3, null, CLI],
   ['src/server/grants-store.js', 'own-tree', 3, null, 'lane grants-unify: THE grants store reads data/grants.json once at create (the server\'s own store), stats its own data/grants-audit.jsonl before rotating it, and asks whether data/grants.json is on disk (the boot\'s rollback check — verify F2)'],

@@ -49,7 +49,9 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   // THE ACCOUNT'S MODELS (design q-053 r1 §3, lane provider-record): data/providers.json + the account dialog's model
   // section's two routes (src/routes/account-models.js); a built-in provider's rows are its harness's catalog NOW
   const providers = require('./provider-store.js').create({ dataDir: path.join(rootDir, 'data'), catalogOf: (h) => { const m = getModels(); return m && Array.isArray(m[h]) ? m[h] : null; } });
-  if (typeof accounts.setProviderLookup === 'function') accounts.setProviderLookup((acct) => providers.forAccount(acct)); // SEAM (int329): wire P0a's provider store into P0b/latents' pool decisions when the account manager supports it (a usage-only route stub passes getAccounts:()=>({})) — accounts.memberProviderOf then reads each account's provider record (q-053 P0b / q-055 M1-M2)
+  if (typeof accounts.setProviderLookup === 'function') accounts.setProviderLookup((acct) => providers.forAccount(acct));
+  // lane lg-providers U2: a `pv-<id>` account spawns through the provider's own road (its key from the vault, its own empty home)
+  if (typeof accounts.setProviderSpawn === 'function') accounts.setProviderSpawn(require('./provider-spawn.js').create({ providers, dataDir: path.join(rootDir, 'data') }), (id, be, model) => require('./provider-spawn.js').modelFor(providers, id, model)); // SEAM (int329): wire P0a's provider store into P0b/latents' pool decisions when the account manager supports it (a usage-only route stub passes getAccounts:()=>({})) — accounts.memberProviderOf then reads each account's provider record (q-053 P0b / q-055 M1-M2)
   require('../routes/account-models.js').registerAccountModelRoutes(app, { accounts, providers });
   // THE THIRD-PARTY PROVIDERS (lane lg-providers, B-d578 U1): the wizard's doors — add from a shipped preset (the key sealed
   // in the vault first), a new key, rename / address / default, remove; each write re-announces the account lists

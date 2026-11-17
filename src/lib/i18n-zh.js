@@ -10364,6 +10364,7 @@ export default {
   "Only a self-hosted provider says which interface it speaks": "只有自建的提供方才需要说明它用哪种接口", // lane lg-providers
   "Model provider key": "模型提供方密钥", // lane lg-providers
   "VibeSpace hands it to the agent CLI it starts for this provider": "VibeSpace 把它交给为这个提供方启动的 agent CLI", // lane lg-providers
+  "Put the key in the key field — not in the address": "请把密钥填在密钥框里——不要写进地址", // lane lg-providers
   "Remove the model provider \"{name}\"?": "移除模型提供方「{name}」？", // lane lg-providers
   "Its key leaves the vault and the provider leaves every agent's account list. Conversations already running on it keep working until they restart.": "它的密钥会离开保险库，这个提供方也会从每个 agent 的账号列表里消失。已经在用它的对话会继续工作，直到重启。", // lane lg-providers
   "Always for this pool": "一直（这个池）",

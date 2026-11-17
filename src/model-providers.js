@@ -224,6 +224,10 @@ function validateProvider(raw) {
   if (k && !k.auths.includes(p.auth)) errors.push({ field: 'auth', code: 'auth-kind' });
   if (p.keyRef !== null && !KEY_REF.test(p.keyRef)) errors.push({ field: 'keyRef', code: 'key-ref' });
   if (p.baseUrl !== null && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(p.baseUrl)) errors.push({ field: 'baseUrl', code: 'base-url' });
+  // a user:password@ in the address would ride the command line (codex's -c table) and every log — the key has its own place
+  else if (p.baseUrl !== null && /^https?:\/\/[^/]*@/.test(p.baseUrl)) errors.push({ field: 'baseUrl', code: 'base-url-credentials' });   // lane lg-providers U2
+  // …nor a query or a fragment on a keyed record's address (a `?api-key=` would ride the command line too — r1)
+  else if (p.baseUrl !== null && p.keyRef !== null && /[?#]/.test(p.baseUrl)) errors.push({ field: 'baseUrl', code: 'base-url-credentials' });
   // a record that names a KEY never sends it in clear past the person's own network (lane lg-providers U1)
   else if (p.baseUrl !== null && p.keyRef !== null && /^http:\/\//i.test(p.baseUrl) && !ownNetworkHost(hostOf(p.baseUrl))) errors.push({ field: 'baseUrl', code: 'base-url-plain' });
   // a provider's own sealed key is ITS OWN: a reference to another record's entry would hand that key to this address
@@ -536,6 +540,7 @@ const KEY_ERRORS = Object.freeze({
   'key-ref-foreign': i18nKey('This provider names another provider’s key'),
   'wire-kind': i18nKey('Only a self-hosted provider says which interface it speaks'),
   'base-url': i18nKey('An address starts with https:// (or http:// on your own network)'),
+  'base-url-credentials': i18nKey('Put the key in the key field — not in the address'),
   'preset-unknown': i18nKey('Unknown provider'),
 });
 

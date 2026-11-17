@@ -716,6 +716,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: effortNo.code, effort: effortNo.effort, levels: effortNo.levels, message: effortNo.message }));
             break;
           }
+          // A THIRD-PARTY PROVIDER serves only ITS OWN rows (lane lg-providers U2 r1): the model this session starts with is
+          // re-resolved against them — an alias onto its row, nothing ⇒ its default; one it does not serve is REFUSED by name
+          const pvModel = accounts && typeof accounts.providerModelFor === 'function' ? accounts.providerModelFor(data.accountId, backend, data.model) : null;
+          if (pvModel && !pvModel.ok) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: pvModel.code, message: pvModel.message })); break; }
+          if (pvModel) data.model = pvModel.model;
           // B-6c55: A LOCKED CONVERSATION'S CONTEXT ASK rides the spawn — the saved fact (the person's, src/lock-context.js), else the
           // spawn's own model when it names [1m]. The TARGET (data.model, the lock, _spawnModel, the pool's request model) stays as it
           // was (law b): only the --model the CLI is COMMANDED with gains [1m]. A CLI whose own catalog says the model has no long
@@ -736,6 +741,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           const sessionSpec = adapter.buildSessionArgs({
             cwd,
             model: commandModel,
+            neutralizeKeyHelper: !!pvModel,   // a machine-wide apiKeyHelper outranks the provider's key — neutralized (claude: --settings apiKeyHelper:"")
             permissionMode: data.permissionMode,
             resumeId: data.resume && data.resumeId ? data.resumeId : null,
             fork: data.fork || false,
@@ -924,6 +930,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               }
               if (!rescued) {
                 // the last resort (lane resume-account-door): a refusal the resume bar's verdict did not foresee names the doors too
+                // a THIRD-PARTY provider's refusal says itself, with its code (an unlock door for vault_locked — lane lg-providers r1)
+                if (/^(provider-|vault_|key-unreadable|no-key)/.test(String(e && e.code || ''))) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: e.code, message: e.message })); return; }
                 ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: ' + e.message + ' — log it in again in Manage agents, or pick another account in Session Properties.' }));
                 return;
               }
@@ -1055,7 +1063,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // account — keep its identity (2.241.0)
             _accountId: spawnAccount?.id || linkedAccountId || null,
             _heldPoolMember: heldPoolMember, // the pool member this (non-hot) process bills for its life — src/server/usage-pool-engine.js heldPoolMemberFor
-            _oatRoad: oatEnvRoad ? 'env' : (spawnAccount && !data.hostId ? 'file' : null), // src/server/usage-pool-engine.js tokenGenOf
+            _oatRoad: oatEnvRoad ? 'env' : (spawnAccount && !data.hostId ? 'file' : null), // src/server/usage-pool-engine.js tokenGenOf // src/server/usage-pool-engine.js tokenGenOf
             _oatGen: oatEnvRoad && Number(spawnAccount.oatGen) > 0 ? Number(spawnAccount.oatGen) : null,
             _poolPin: (data._poolPin && spawnAccount && spawnAccount.id === data._poolPinPool) ? data._poolPin : null, // THE CONVERSATION'S PIN (2026-09-28): carried by a resume, never by a fork — for the pool the spawn bills (resumePoolPin)
             // HOW the billing resolved (B-f531): rides the created reply so
@@ -1155,6 +1163,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // network drop doesn't kill the agent; reattach = re-ssh.
           let spawnCmd = sessionSpec.cmd || cliCmds?.current?.('claude') || CLAUDE_CMD; // ONE CLI, ONE BINARY (lane cli-shell-truth r2)
           let spawnArgs = sessionSpec.args || [];
+          // a THIRD-PARTY PROVIDER's command-line items (lane lg-providers U2 — codex's `-c model_providers…` table): the
+          // descriptor's PURE plan, NON-secret by construction (the key rides localEnv / the 0600 file), ahead of the subcommand
+          if (spawnAccount && Array.isArray(spawnAccount.argv) && spawnAccount.argv.length) spawnArgs = [...spawnAccount.argv, ...spawnArgs];
           let spawnEnvPairs = Object.entries(sessionSpec.env || {}).map(([k, v]) => `${k}=${v == null ? '' : String(v)}`);
           // B-0f13: REMOTE claude terminal sessions get the SAME passive
           // statusline capture local ones have had since 2.60.0 — the script

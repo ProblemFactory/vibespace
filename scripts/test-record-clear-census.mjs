@@ -2021,6 +2021,7 @@ const I_RECV = {
   'data/bin/codex-chat-wrapper.js|r': ['harness', 'an app-server answer\'s reason / detail (an RPC refusal)'], 'data/bin/codex-chat-wrapper.js|st': ['harness', 'a steer answer\'s reason / detail (an RPC refusal)'],
   'src/accounts.js|to': ['account', 'a pool member (the deleted default\'s re-point target — lane pool-pin)'], 'src/accounts.js|pool': ['account', 'a pool'],
   // lane pool-provider-latents (q-055 M2): a pool default a deletion left UNPLACED — its deleted member's name and provider label (the store's own refusal of a spawn that would read it)
+  'src/server/provider-spawn.js|p': ['account', 'a third-party model provider\'s own label (the owner named it in the wizard) in the spawn road\'s refusal sentences — lane lg-providers U2'],
   'src/accounts.js|ud': ['account', 'a pool default\'s UNPLACED mark (the deleted member\'s name)'], 'src/accounts.js|ud.provider': ['account', 'the UNPLACED mark\'s provider (its label)'],
   // lane vault-e2e-password: a key file the vault seals — its NAME is a STORE_KEYS constant (.accounts-key …), never a record's words
   'src/server/vault-engine.js|it': ['migration', 'a key file the vault seals (its constant name)'], 'src/server/vault-engine.js|k': ['migration', 'a STORE_KEYS row (a key file\'s constant name)'],
