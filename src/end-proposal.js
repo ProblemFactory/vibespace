@@ -109,12 +109,13 @@ function answerText({ terminated = [], kept = [], changed = [], ended = [] } = {
 }
 
 /** The wake card's answer to its proposer (agent-facing English). */
-function wakeAnswerText({ granted = [], withdrawn = [], unchanged = [] } = {}) {
+function wakeAnswerText({ granted = [], withdrawn = [], unchanged = [], gone = [] } = {}) {
   const list = (a) => a.map((r) => `${r.name || r.id} (${r.id})`).join(', ');
   const parts = [];
   if (granted.length) parts.push(`may now wake their conversation after it is ended: ${list(granted)}`);
   if (withdrawn.length) parts.push(`may no longer wake it: ${list(withdrawn)}`);
   if (unchanged.length) parts.push(`kept as they were: ${list(unchanged)}`);
+  if (gone.length) parts.push(`no longer exist (removed since the card was drawn): ${list(gone)}`);
   return `The person answered your proposal about waking jobs — ${parts.join('; ') || 'nothing to do'}.`;
 }
 

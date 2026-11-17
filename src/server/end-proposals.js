@@ -10,6 +10,7 @@
 'use strict';
 
 const EP = require('../end-proposal.js');
+const PT = require('../peer-text.js');   // THE belt toward an agent (the answer names conversations and jobs — words an agent may have written)
 
 const TYPE = 'end-proposal';   // = src/end-proposal.js TYPE (the census reads the literal where it is filed); its kinds: action.kind 'end' | 'wake' (the SECOND kind — 主开发 05:13Z, the owner's widened wake grant: may a job or schedule wake its conversation after an end on purpose)
 const WAKE = 'wake';
@@ -69,12 +70,12 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
 
   /** THE PRESS — the person's own Terminate over the selected rows (`terminate` = keys; the rest are kept). `by` = the person's
    *  act ({kind:'human', actBy}). → { ok, terminated, kept, changed, ended, open } (open: the card stays, redrawn with what changed). */
-  async function answer(id, body = {}, by, { pressed = null } = {}) {
+  async function answer(id, body = {}, by) {
     const { terminate = [], wakeTicks = null, grant = null } = body || {};
     const it = userTodos.get(id);
     if (!it || !EP.isProposal(it.action)) return { ok: false, code: 'not_found', why: 'no proposal card by that id' };
     if (it.status !== 'open') return { ok: false, code: 'answered', why: 'that card was answered already' };
-    if (kindOf(it) === WAKE) return answerWake(it, { grant }, by, { pressed });
+    if (kindOf(it) === WAKE) return answerWake(it, { grant }, by);
     const card = it.card || {};
     const rows = Array.isArray(card.rows) ? card.rows : [];
     const pick = new Set((Array.isArray(terminate) ? terminate : []).map(String));
@@ -95,7 +96,7 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
       out.terminated.push(d);
     }
     if (still.length) { try { userTodos.setCard(id, { ...card, rows: still }); } catch { } }
-    else { try { answering.add(id); userTodos.setStatus(id, 'done', 'user', { pressed }); } catch { } finally { answering.delete(id); } }   // the person's own decision (the press)
+    else { try { answering.add(id); userTodos.setStatus(id, 'done', 'user'); } catch { } finally { answering.delete(id); } }   // the person's own decision (the press)
     tell(it, out);
     return { ok: true, ...out, open: still.length > 0 };
   }
@@ -133,20 +134,21 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
 
   /** The wake card's press: `grant` = the ids the person left ticked (the card draws each proposed job ticked — the press IS the
    *  approval); a row whose tick differs from the grant it was drawn with is written through piece 7's in-process person door
-   *  (setWakeGrant(jobId, yes, {kind:'person'})); «Keep all as they are» (NO grant sent) writes nothing. A refused write is said
-   *  and the card stays open. */
-  async function answerWake(it, { grant = null } = {}, by, { pressed = null } = {}) {
+   *  (setWakeGrant(jobId, yes, {kind:'person'})); «Keep all as they are» (NO grant sent) writes nothing. A job removed since the
+   *  drawing is said (gone) and the rest still land; any other refused write is said and the card stays open. */
+  async function answerWake(it, { grant = null } = {}, by) {
     const rows = it.card && Array.isArray(it.card.rows) ? it.card.rows : [];
     const yes = new Set((Array.isArray(grant) ? grant : []).map(String));
     const changes = Array.isArray(grant) ? rows.filter((r) => (r.grant === true) !== yes.has(r.id)) : [];   // no grant sent = «Keep all as they are»
     if (changes.length && typeof setWakeGrant !== 'function') return { ok: false, code: 'not_ready', why: 'the jobs engine is not wired — nothing was written' };
-    const out = { granted: [], withdrawn: [], unchanged: rows.filter((r) => !changes.includes(r)) };
+    const out = { granted: [], withdrawn: [], unchanged: rows.filter((r) => !changes.includes(r)), gone: [] };
     for (const r of changes) {
       const w = await setWakeGrant(r.id, yes.has(r.id), personBy(by));
+      if (w && w.code === 'not_found') { out.gone.push(r); continue; }   // removed since the card drew it — said, never a card stuck open on it
       if (w && w.error) return { ok: false, code: w.code || 'failed', why: w.error, ...out };
       (yes.has(r.id) ? out.granted : out.withdrawn).push(r);
     }
-    try { answering.add(it.id); userTodos.setStatus(it.id, 'done', 'user', { pressed }); } catch { } finally { answering.delete(it.id); }
+    try { answering.add(it.id); userTodos.setStatus(it.id, 'done', 'user'); } catch { } finally { answering.delete(it.id); }
     tellText(it, EP.wakeAnswerText(out));
     return { ok: true, ...out };
   }
@@ -156,7 +158,7 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     const proposer = (it.action && it.action.proposer) || it.sessionKey;
     const cid = String(proposer || '').slice(String(proposer || '').indexOf(':') + 1);
     if (!cid || !deliver || typeof deliver.stashFor !== 'function') return;
-    try { deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: `${it.id}:${Date.now().toString(36)}`, text }); }
+    try { deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: `${it.id}:${Date.now().toString(36)}`, text: PT.toAgentText(String(text || '')) }); }   // THE belt: a conversation's or a job's name on it may be an agent's words
     catch (e) { log(`answer not stashed for ${proposer}: ${e && e.message || e}`); }
   }
   function tell(it, out) {

@@ -240,7 +240,21 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
   const yes = await w.store.answer(cards[0], { grant: [A.id, B.id] }, { kind: 'human', actBy: 'human:local' });
   ok(yes.ok && A[DW.GRANT_FIELD] === true && B[DW.GRANT_FIELD] === true && A.wakeGrantBy.kind === 'person' && jm.wakeGrantOf(A.id).granted === true && w.todos.get(cards[0]).status === 'done' && w.deliver.wakes === 0 && /may now wake their conversation after it is ended/.test(w.deliver.stashed.at(-1).text),
     'THE APPROVAL IS THE PERSON\'S PRESS through the jobs wiring\'s own door: both jobs carry the person\'s grant (the engine records the person); the card answered; the proposer reads it at its next turn, free', { yes, A: [A[DW.GRANT_FIELD], A.wakeGrantBy] });
-  for (const x of [w, dup.w, dupRows.w]) x.stop();
+  // a job removed between the drawing and the press: the rest still land, the gone one is said — never a card stuck open on it
+  const goneRun = async (mutate) => {
+    const Cj = mk('c digest ' + (mutate ? 'red' : 'live')), Dj = mk('d report ' + (mutate ? 'red' : 'live'));
+    const gw = world({ setWakeGrant: wiringDoor }, mutate);
+    const p = gw.store.proposeWakeGrant({ sessionKey: 'claude:g0g0', conversationId: 'g0g0', name: 'Gone test' }, { rows: jm.wakeRowsOf([Cj, Dj]), why: 'both' });
+    hush(() => jm.rm(Dj, { stop: true }));
+    const r = await gw.store.answer(p.id, { grant: [Cj.id, Dj.id] }, { kind: 'human', actBy: 'human:local' });
+    return { r, gw, Cj, Dj, status: gw.todos.get(p.id).status, said: (gw.deliver.stashed.at(-1) || {}).text || '' };
+  };
+  const g1 = await goneRun();
+  ok(g1.r.ok && g1.Cj[DW.GRANT_FIELD] === true && g1.r.gone.length === 1 && g1.r.gone[0].id === g1.Dj.id && g1.status === 'done' && /no longer exist \(removed since the card was drawn\)/.test(g1.said),
+    'A JOB REMOVED between the drawing and the press: the rest still land, the gone one is said to the proposer — the card is answered', { r: g1.r, said: g1.said });
+  const g2 = await goneRun((src) => src.replace("      if (w && w.code === 'not_found') { out.gone.push(r); continue; }", ''));
+  ok(g2.r.ok === false && g2.status === 'open', 'RED CONTROL: a store that stops at the first refusal leaves the card open on a job that no longer exists — the leg above would read it', g2.r);
+  for (const x of [w, dup.w, dupRows.w, g1.gw, g2.gw]) x.stop();
   try { jm.shutdown(); } catch { }
 }
 
@@ -258,12 +272,12 @@ console.log('⑤ THE PERSON-ONLY DOOR (src/routes/end-proposals.js)');
   await routes['/api/end-proposals/:id/answer']({ headers: { host: 'hub.test' }, params: { id: 'ut-1' }, body: { terminate: [] } }, r2);
   const r3 = res();
   let pressedSeen = null;
-  require(path.join(REPO, 'src/routes/end-proposals.js')).registerEndProposalRoutes(app, { proposals: { answer: async (id, body, by, o) => { asked++; pressedSeen = { by, pressed: !!(o && o.pressed) }; return { ok: true }; } } });
+  require(path.join(REPO, 'src/routes/end-proposals.js')).registerEndProposalRoutes(app, { proposals: { answer: async (id, body, by, o) => { asked++; pressedSeen = { by, minted: o !== undefined }; return { ok: true }; } } });
   await routes['/api/end-proposals/:id/answer']({ headers: { host: 'hub.test', 'sec-fetch-site': 'same-origin' }, params: { id: 'ut-1' }, body: { terminate: [] }, socket: {} }, r3);
-  ok(r2.code === 403 && r2.body.code === 'person_only' && /no mark of this page/.test(r2.body.why) && r3.code === 200 && asked === 1 && pressedSeen.pressed === true && pressedSeen.by.kind === 'human',
-    'a request with no mark of this page is refused too; the person\'s press on the page reaches the store carrying a minted press, as the person (RED CONTROL for both refusals)', { r2: r2.body, r3: r3.body, pressedSeen });
+  ok(r2.code === 403 && r2.body.code === 'person_only' && /no mark of this page/.test(r2.body.why) && r3.code === 200 && asked === 1 && pressedSeen.minted === false && pressedSeen.by.kind === 'human',
+    'a request with no mark of this page is refused too; the person\'s press on the page reaches the store as the person, no press minted (nothing here starts a turn — RED CONTROL for both refusals)', { r2: r2.body, r3: r3.body, pressedSeen });
   const src = read('src/routes/end-proposals.js');
-  ok(/const pressed = bearer \? null : WO\(\)\.pressOf\(req\);/.test(src) && /kind: 'human', actBy: require\('\.\.\/device-audit\.js'\)\.byOfReq\(req\)/.test(src), 'the door asks the strict press verdict (piece 7\'s person rule) and answers as the person (the person\'s own Terminate)');
+  ok(/const onPage = !bearer && WO\(\)\.pageVerdict\(h, WO\(\)\.ownOriginOf\(h, \{ encrypted: !!\(req\.socket && req\.socket\.encrypted\) \}\)\)\.ok === true;/.test(src) && !/pressOf\(/.test(src) && /kind: 'human', actBy: require\('\.\.\/device-audit\.js'\)\.byOfReq\(req\)/.test(src), 'the door asks the strict page verdict with no bearer (piece 7\'s person rule; no press minted) and answers as the person (the person\'s own Terminate)');
 }
 
 console.log('⑥ THE CARD (user-todos-row proposalCardHtml — the tray, the mini inbox, the chat\'s needs card), esbuild over a DOM shim');
