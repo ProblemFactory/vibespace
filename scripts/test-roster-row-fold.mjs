@@ -231,10 +231,10 @@ const CLI_PRESENCE = {
 };
 const hitOf = (code, alts) => alts.some((x) => Array.isArray(x) ? x.every((r) => r.test(code)) : x.test(code));
 const memo = (fn) => { const m = new Map(); return (src) => { let v = m.get(src); if (v === undefined) { v = fn(src); m.set(src, v); } return v; }; }; // the controls re-judge the same texts
-// test-architecture §57c's ONE boot: a suite that starts its hub through scripts/hub-boot.mjs (mintRoot + startHub) boots one too —
-// it never spells the spawn itself (test-ui-fit-chrome since pick 1's cure on 8386298f8, test-chat-e2e since piece 1)
-const STARTS_HUB = /\bstartHub\s*\(/, VIA_HELPER = /from\s+['"]\.\/hub-boot\.mjs['"]/;
-const spawnsHub = memo((src) => SPAWN_HUB.test(src) || (STARTS_HUB.test(src) && VIA_HELPER.test(src)));
+// a suite on THE SUITES' ONE HUB BOOT (lane boot-helper, 2026-11-17) spawns no server.js itself: it imports and CALLS startHub from
+// scripts/hub-boot.mjs — it boots a hub all the same
+const HELPER_HUB = (src) => /import\s*\{[^}]*\bstartHub\b[^}]*\}\s*from\s*'\.\/hub-boot\.mjs'/.test(src) && /\bstartHub\(/.test(src);
+const spawnsHub = memo((src) => SPAWN_HUB.test(src) || HELPER_HUB(src));
 const doorsMemo = new Map();
 function census(srcs, table, doors, { reach = null } = {}) {
   const names = Object.keys(srcs);
@@ -274,6 +274,8 @@ ok(dc.bad.length === 0 && Object.keys(dc.sites).length >= 8, `every call of the 
   const comment = doorsCensus({ ...prod, 'src/lib/zz-planted.js': '// app._showAgentsDialog() — a comment names a door, it never opens one\n' }, DOORS);
   ok(planted.bad.some((b) => b.startsWith('src/lib/zz-planted.js: 1 call(s) of the Agents renderer, the census names 0 — a NEW door')) && twice.bad.some((b) => b.startsWith('src/lib/gear-menu.js: 2 call(s)')) && comment.bad.length === 0,
     'CONTROL: a new product door (a planted file) and a second call in a named door\'s file are each named; a comment that names the renderer is no door', { planted: planted.bad.slice(-1), twice: twice.bad.slice(-1), comment: comment.bad });
+ok(HELPER_HUB("import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';\nconst hub = startHub({ root });") && !HELPER_HUB("import { mintRoot, startHub } from './hub-boot.mjs';\nconst x = 1;") && !HELPER_HUB("const s = `startHub(`;"),
+  'CONTROL: a suite on the boot helper (startHub imported AND called) boots a hub for this census; an import never called, or a string, does not');
 }
 // the suites that reach a door
 const SCRIPTS = path.join(repo, 'scripts');
