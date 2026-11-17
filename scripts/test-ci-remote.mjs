@@ -91,6 +91,11 @@ try {
   const by = spawn('sleep', ['303'], { env: { PATH: process.env.PATH }, detached: true, stdio: 'ignore' });
   await new Promise((r) => setTimeout(r, 300));
   const alive = (p) => { try { return !/^\d+ \([^)]*\) Z/.test(fs.readFileSync(`/proc/${p}/stat`, 'utf-8')); } catch { return false; } };
+  // B-b403 (lane bl-scratch, 2026-11-17): the bash fixture's own `sleep 302` carries no mark of the run (env PATH only, its own
+  // argv), so the teardown rightly leaves it — and a pid kill of bash left it to the user manager for five minutes, every run
+  const childrenOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf-8').trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
+  { const end = Date.now() + 5000; while (!childrenOf(kids[2].pid).length && Date.now() < end) await new Promise((r) => setTimeout(r, 20)); }   // the condition, not a clock
+  const sub = childrenOf(kids[2].pid);
   const ctl = spawnSync('bash', ['-s'], { input: R.teardownScript(path.join(D, 'other'), 'RID-OTHER'), encoding: 'utf-8' });
   ok(kids.every((k) => alive(k.pid)) && /no process of the run left/.test(ctl.stdout), 'CONTROL ⑥ a teardown for another run id + snap kills none of these');
   const td = spawnSync('bash', ['-s'], { input: R.teardownScript(snap, 'RID-T', { graceS: 0.3 }), encoding: 'utf-8' });
@@ -98,7 +103,9 @@ try {
   ok(kids.every((k) => !alive(k.pid)), '⑥ the run\'s processes are gone (by env, by cwd, by argv)', td.stdout.trim().slice(0, 300));
   ok(['env', 'cwd', 'argv'].every((w) => td.stdout.includes(`(by ${w})`)) && /3 process\(es\) TERMed/.test(td.stdout), '⑥ each one named with what tied it to the run');
   ok(alive(by.pid), '⑥ the bystander survives');
-  for (const k of [...kids, by]) { try { process.kill(k.pid, 'SIGKILL'); } catch { } }
+  for (const k of [...kids, by]) { try { if (Number.isInteger(k.pid) && k.pid > 1) process.kill(-k.pid, 'SIGKILL'); } catch { } }   // each leads its group (detached)
+  { const end = Date.now() + 5000; while (sub.some(alive) && Date.now() < end) await new Promise((r) => setTimeout(r, 50)); }
+  ok(sub.length === 1 && !sub.some(alive), `⑥ B-b403: the fixtures end with their groups — the bash fixture's own sleep too (${sub.length} child, ${sub.filter(alive).length} alive)`);
   // ⑦ the desktop batch
   const b = R.parseArgs(['--host', 'aidev', '--snapshot', '/t', '--batch', 'desktop', '--lanes', '8', '--range', 'a..b']);
   ok(b.batch === 'desktop' && b.lanes === '8' && b.range === 'a..b', '⑦ parseArgs: --batch desktop (with --lanes and an affected --range)');

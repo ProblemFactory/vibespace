@@ -242,6 +242,7 @@ fs.writeFileSync(path.join(pdir('acme.stubborn'), 'server.js'), HANG);
 await post('/api/plugins/manifests/reload', {});
 await post('/api/plugins/manifests/acme.stubborn/enabled', { enabled: true });
 ok(await waitFor(async () => (await row('acme.stubborn')).state === 'running'), 'the stubborn plugin runs');
+const stubborn = loader.get('acme.stubborn')?.child || null;   // B-b403: its handle — the suite ends it below
 await post('/api/plugins/manifests/acme.stubborn/enabled', { enabled: false }); // old child ignores SIGTERM → alive for ~3s
 fs.writeFileSync(path.join(pdir('acme.stubborn'), 'server.js'), "process.exit(7);\n");
 await post('/api/plugins/manifests/acme.stubborn/enabled', { enabled: true });   // fresh child crashes at once, while the old one still exits
@@ -251,6 +252,14 @@ ok(['crashed', 'starting', 'stopped'].includes(st.state) && /code 7|exited/.test
 await post('/api/plugins/manifests/acme.stubborn/enabled', { enabled: false });
 
 loader.shutdown(); srv.close();
+// B-b403 (lane bl-scratch, 2026-11-17): the stubborn child ignores SIGTERM, and the loader's SIGKILL waits 3 s on an unref'd
+// timer — the suite ended first and left it to the user manager on every run. Ended here, through its own handle.
+if (stubborn && stubborn.exitCode === null && stubborn.signalCode === null) {
+  const gone = new Promise((r) => stubborn.once('exit', r));
+  try { stubborn.kill('SIGKILL'); } catch { }
+  await Promise.race([gone, new Promise((r) => setTimeout(r, 5000))]);
+}
+ok(!!stubborn && (stubborn.exitCode !== null || stubborn.signalCode !== null), `B-b403: the stubborn child (it ignores SIGTERM) is ended before the suite ends (${stubborn ? stubborn.signalCode || stubborn.exitCode : 'no handle'})`);
 
 // ── ⑤ installer: uploaded file cleanup + async by law ──
 console.log('— installer');

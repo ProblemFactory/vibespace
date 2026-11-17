@@ -119,6 +119,8 @@ if (!ident.hasProcfs()) {
 
 // ── §1 THE PROCESS-TREE READS (the /proc rungs, on live pids of our own)
 const kids = [];
+// B-b403: the fixtures that FORK (a shell with children of its own) lead a process group each; the teardown ends the group
+const groupKids = new Set();
 {
   const child = spawn('/bin/sleep', ['300'], { stdio: 'ignore' });
   kids.push(child);
@@ -233,10 +235,13 @@ const armSessions = [];
   }
 }
 const cleanup = () => {
-  for (const k of kids) { try { k.kill('SIGKILL'); } catch { } }
+  for (const k of kids) { try { if (groupKids.has(k) && Number.isInteger(k.pid) && k.pid > 1) { groupKids.delete(k); process.kill(-k.pid, 'SIGKILL'); } else k.kill('SIGKILL'); } catch { } }   // a group is ended once (cleanup runs again at exit)
   try { fs.rmSync(HOME, { recursive: true, force: true }); } catch { }
 };
 process.on('exit', cleanup);
+// B-b403: the forking fixtures lead groups of their own, so a signal to THIS group (a timeout, Ctrl-C) no longer reaches them —
+// the teardown runs on a signal too, and the signal is raised again so the parent reads it
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.once(sig, () => { cleanup(); process.kill(process.pid, sig); });
 
 const noTmuxDir = scratch('disc-spawn-nopath');
 fs.mkdirSync(noTmuxDir, { recursive: true });
@@ -411,8 +416,8 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
   // assert under this would be vacuous, so the child count is asserted.
   const webuiSessions = new Map();
   for (let i = 0; i < WEBUI_N; i++) {
-    const k = spawn('/bin/sh', ['-c', 'sleep 300 & sleep 300 & read x'], { stdio: ['pipe', 'ignore', 'ignore'] });
-    kids.push(k);
+    const k = spawn('/bin/sh', ['-c', 'sleep 300 & sleep 300 & read x'], { stdio: ['pipe', 'ignore', 'ignore'], detached: true });
+    kids.push(k); groupKids.add(k);
     const id = `cw-${i}-webui`;
     webuiSessions.set(id, {});
     fs.writeFileSync(path.join(BUFS, id + '.json'), JSON.stringify({ pid: 900000 + i, childPid: k.pid }));
@@ -551,8 +556,8 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
   for (let i = 0; i < 3; i++) {
     // argv = ['sh','-c','sleep 300', NEEDLE] — the needle is $0, so it is in
     // the command line exactly the way a dtach master carries its socket path.
-    const k = spawn('/bin/sh', ['-c', 'sleep 300', NEEDLE], { stdio: 'ignore' });
-    killKids.push(k); kids.push(k);
+    const k = spawn('/bin/sh', ['-c', 'sleep 300', NEEDLE], { stdio: 'ignore', detached: true });
+    killKids.push(k); kids.push(k); groupKids.add(k);
   }
   // WAIT FOR THE CONDITION, NOT FOR A CLOCK: this box hosts ~160 checkouts and
   // a detached heavy tier, so a fixed settle is a gate that goes red for a
@@ -692,6 +697,28 @@ console.log('\n§10 the pre-fix copy never touches the tree');
 // shallow one writes none and says so.
 ok((controlsRan > 0) === (MUTS.files.length > 0), `§10 copies exist exactly when a negative control ran (${controlsRan} ran, ${MUTS.files.length} written)`);
 for (const r of copiesCensus(MUTS.files, MUTS.dir, REPO, { minCopies: controlsRan ? 1 : 0, label: controlsRan ? '' : '(every negative control was SKIPPED — no git history for the pre-fix ref on this checkout, so nothing was written) ' })) ok(r.pass, '§10 ' + r.name, r.pass ? undefined : r.detail);
+
+// ── §11 A FIXTURE ENDS WITH ITS CHILDREN (B-b403, lane bl-scratch, 2026-11-17) ──────
+// §5's webui stand-ins and §6's kill fixtures are shells that FORK (`sleep 300 & sleep 300 & read x`, `sh -c 'sleep 300'`).
+// The teardown SIGKILLed each shell through its handle, so every run left their 43 `sleep 300` behind — adopted by the user
+// manager, alive five minutes (int361's per-suite measure at .390). Each such fixture now leads a process group of its own
+// (detached) and the teardown ends the GROUP. RED CONTROL: one more forking shell ended the old way, by its own pid.
+console.log('\n§11 a fixture ends with its children');
+{
+  const alive = (pid) => { try { return !/^\d+ \([^)]*\) [ZX]/.test(fs.readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+  const until = async (pred) => { const end = Date.now() + 10000; while (!pred() && Date.now() < end) await new Promise((r) => setTimeout(r, 50)); return pred(); };
+  const grand = [...groupKids].flatMap((k) => ident.readChildPids(k.pid)), shells = groupKids.size;
+  const ctl = spawn('/bin/sh', ['-c', 'sleep 300 & sleep 300 & read x'], { stdio: ['pipe', 'ignore', 'ignore'], detached: true });
+  await until(() => ident.readChildPids(ctl.pid).length === 2);
+  const ctlKids = ident.readChildPids(ctl.pid);
+  ctl.kill('SIGKILL');
+  await until(() => !alive(ctl.pid));
+  ok(ctlKids.length === 2 && !alive(ctl.pid) && ctlKids.every(alive), `§11 CONTROL: a forking shell ended by its own pid (the old teardown) leaves its children alive (red: ${ctlKids.filter(alive).length} of ${ctlKids.length})`);
+  try { if (Number.isInteger(ctl.pid) && ctl.pid > 1) process.kill(-ctl.pid, 'SIGKILL'); } catch { }
+  cleanup();
+  const gone = await until(() => !grand.some(alive) && !ctlKids.some(alive));
+  ok(grand.length >= Number(process.env.VS_WEBUI_N || 20) * 2 && gone, `§11 the teardown ends every forking fixture's group: ${grand.length} children of ${shells} shells gone (${grand.filter(alive).length} alive), the control's 2 by its group`);
+}
 
 cleanup();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

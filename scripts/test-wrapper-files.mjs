@@ -34,10 +34,23 @@ try {
   // argv[0] must literally contain 'dtach' and the args '-c <sock> … chat-wrapper.js … <buf>'
   const decoyPath = path.join(tmp, 'dtach');
   fs.writeFileSync(decoyPath, '#!/bin/bash\nsleep 15\n'); fs.chmodSync(decoyPath, 0o755);
-  const decoy = spawn(decoyPath, ['-c', sock, 'x', 'node', 'chat-wrapper.js', buf, buf.replace(/\.buf$/, '.json')], { stdio: 'ignore' });
+  const decoy = spawn(decoyPath, ['-c', sock, 'x', 'node', 'chat-wrapper.js', buf, buf.replace(/\.buf$/, '.json')], { stdio: 'ignore', detached: true });
+  // B-b403: the decoy leads its own group, so it is ended ONCE through it — below, else at exit, else on a signal (raised again after)
+  let decoyEnded = false;
+  const endDecoy = () => { if (decoyEnded) return; decoyEnded = true; try { if (Number.isInteger(decoy.pid) && decoy.pid > 1) process.kill(-decoy.pid, 'SIGKILL'); } catch { } };
+  process.once('exit', endDecoy);
+  for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.once(sig, () => { endDecoy(); process.kill(process.pid, sig); });
   await new Promise((r) => setTimeout(r, 300));
   const r3 = resolveWrapperFiles(tmp, 'sess-5-555', sock);
-  decoy.kill('SIGKILL');
+  // B-b403 (lane bl-scratch, 2026-11-17): the decoy is a bash script whose `sleep 15` is a child of its own — a pid kill of the
+  // script left the sleep behind every run; the decoy leads its own group (detached) and the GROUP ends
+  const childrenOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
+  { const end = Date.now() + 5000; while (!childrenOf(decoy.pid).length && Date.now() < end) await new Promise((r) => setTimeout(r, 20)); }   // the condition, not a clock
+  const decoyKids = childrenOf(decoy.pid);
+  endDecoy();
+  const aliveW = (p) => { try { return !/^\d+ \([^)]*\) [ZX]/.test(fs.readFileSync(`/proc/${p}/stat`, 'utf8')); } catch { return false; } };
+  { const end = Date.now() + 5000; while (decoyKids.some(aliveW) && Date.now() < end) await new Promise((r) => setTimeout(r, 50)); }
+  ok(decoyKids.length === 1 && !decoyKids.some(aliveW), `B-b403: the decoy ends with its group — its own sleep too (${decoyKids.length} child, ${decoyKids.filter(aliveW).length} alive)`);
   ok(r3.buf === buf && r3.sidecar === buf.replace(/\.buf$/, '.json'),
     'counter-collision shape: wrapper files resolved from the socket process argv', JSON.stringify(r3));
 } finally {

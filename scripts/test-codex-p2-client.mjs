@@ -10,6 +10,11 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { stopWrapper } from './scratch.mjs';
+// B-b403 (lane bl-scratch, 2026-11-17): a stub app-server keeps itself alive (setInterval) and used to outlive its wrapper —
+// adopted by the user manager after every run. Each stub now ends when its stdin closes (the wrapper's pipe), as the real
+// app-server over stdio does; a leg reads the wrapper's child before the stop and asks that it is gone after.
+const stubOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
+const stubGone = async (pids) => { const live = (p) => { try { return !/^\d+ \([^)]*\) [ZX]/.test(fs.readFileSync(`/proc/${p}/stat`, 'utf8')); } catch { return false; } }; const end = Date.now() + 5000; while (pids.some(live) && Date.now() < end) await new Promise((r) => setTimeout(r, 50)); return pids.length > 0 && !pids.some(live); };
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -22,7 +27,7 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxfork-'));
   const SID = 'sess-3-1700000000003';
   const buf = path.join(dir, SID + '.buf'), meta = path.join(dir, SID + '.json'), rpcLog = path.join(dir, 'rpc.jsonl');
-  const STUB = `const fs=require('fs');let b='';process.stdin.setEncoding('utf8');process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))!==-1){const line=b.slice(0,i);b=b.slice(i+1);if(!line.trim())continue;let m;try{m=JSON.parse(line)}catch{continue}if(m.id!==undefined&&m.method){fs.appendFileSync(${JSON.stringify(rpcLog)},line+'\\n');const result=m.method==='thread/fork'?{thread:{id:'th-forked'}}:m.method==='thread/start'?{thread:{id:'th-new'}}:{};process.stdout.write(JSON.stringify({id:m.id,result})+'\\n');}}});setInterval(()=>{},1e3);`;
+  const STUB = `const fs=require('fs');let b='';process.stdin.setEncoding('utf8');process.stdin.on('end',()=>process.exit(0));process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))!==-1){const line=b.slice(0,i);b=b.slice(i+1);if(!line.trim())continue;let m;try{m=JSON.parse(line)}catch{continue}if(m.id!==undefined&&m.method){fs.appendFileSync(${JSON.stringify(rpcLog)},line+'\\n');const result=m.method==='thread/fork'?{thread:{id:'th-forked'}}:m.method==='thread/start'?{thread:{id:'th-new'}}:{};process.stdout.write(JSON.stringify({id:m.id,result})+'\\n');}}});setInterval(()=>{},1e3);`;
   const w = spawn(process.execPath, [path.join(REPO, 'data/bin/codex-chat-wrapper.js'), buf, meta, process.execPath, '-e', STUB], {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, CODEX_WEBUI_CWD: dir, CODEX_WEBUI_RESUME_ID: 'th-old', CODEX_WEBUI_FORK: '1', VIBESPACE_API: '', VIBESPACE_SESSION_TOKEN: '', VIBESPACE_SKIP_AGENT_HOOKS: '1' },
@@ -37,7 +42,9 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   ok(!rpcAbs().some((m) => m.method === 'thread/resume' || m.method === 'thread/start'), 'no resume/start alongside the fork (one writer, a NEW thread id comes back)');
   t0 = Date.now(); while (Date.now() - t0 < 5000 && (() => { try { return JSON.parse(readAbs(meta)).threadId !== 'th-forked'; } catch { return true; } })()) await sleep(100);
   ok((() => { try { return JSON.parse(readAbs(meta)).threadId === 'th-forked'; } catch { return false; } })(), 'the forked thread id is adopted into the sidecar (discovery/forkedFrom chain sees the child)');
+  const stubs = stubOf(w.pid);
   await stopWrapper(w, { dir });
+  ok(await stubGone(stubs), `B-b403: the stub app-server ends with its wrapper (${stubs.length} child)`);
 }
 
 // ── wiring pins ──

@@ -17,6 +17,11 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { stopWrapper } from './scratch.mjs';
+// B-b403 (lane bl-scratch, 2026-11-17): a stub app-server keeps itself alive (setInterval) and used to outlive its wrapper —
+// adopted by the user manager after every run. Each stub now ends when its stdin closes (the wrapper's pipe), as the real
+// app-server over stdio does; a leg reads the wrapper's child before the stop and asks that it is gone after.
+const stubOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
+const stubGone = async (pids) => { const live = (p) => { try { return !/^\d+ \([^)]*\) [ZX]/.test(fs.readFileSync(`/proc/${p}/stat`, 'utf8')); } catch { return false; } }; const end = Date.now() + 5000; while (pids.some(live) && Date.now() < end) await new Promise((r) => setTimeout(r, 50)); return pids.length > 0 && !pids.some(live); };
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -113,7 +118,7 @@ ok(eC && eC.forkedFromId === P && eC.forkedFromOrdinal === 5 && eC.historyMode =
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cx0153-w-'));
   const SID = 'sess-1-1700000000001';
   const buf = path.join(dir, SID + '.buf'), meta = path.join(dir, SID + '.json');
-  const STUB = `const fs=require('fs');let b='';process.stdin.setEncoding('utf8');process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))!==-1){const l=b.slice(0,i);b=b.slice(i+1);if(!l.trim())continue;let m;try{m=JSON.parse(l)}catch{continue}if(m.id!==undefined&&m.method){const r=m.method==='thread/fork'?{thread:{id:'th-forked',forkedFromId:'th-old',model:'gpt-6-astra'},model:'gpt-6-astra',reasoningEffort:'high'}:{};process.stdout.write(JSON.stringify({id:m.id,result:r})+'\\n');}}});setInterval(()=>{},1e3);`;
+  const STUB = `const fs=require('fs');let b='';process.stdin.setEncoding('utf8');process.stdin.on('end',()=>process.exit(0));process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))!==-1){const l=b.slice(0,i);b=b.slice(i+1);if(!l.trim())continue;let m;try{m=JSON.parse(l)}catch{continue}if(m.id!==undefined&&m.method){const r=m.method==='thread/fork'?{thread:{id:'th-forked',forkedFromId:'th-old',model:'gpt-6-astra'},model:'gpt-6-astra',reasoningEffort:'high'}:{};process.stdout.write(JSON.stringify({id:m.id,result:r})+'\\n');}}});setInterval(()=>{},1e3);`;
   const w = spawn(process.execPath, [path.join(REPO, 'data/bin/codex-chat-wrapper.js'), buf, meta, process.execPath, '-e', STUB], {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, CODEX_WEBUI_CWD: dir, CODEX_WEBUI_RESUME_ID: 'th-old', CODEX_WEBUI_FORK: '1', CODEX_WEBUI_FORKED_FROM: 'th-older,th-old,th-old', VIBESPACE_API: '', VIBESPACE_SESSION_TOKEN: '', VIBESPACE_SKIP_AGENT_HOOKS: '1' },
@@ -124,7 +129,9 @@ ok(eC && eC.forkedFromId === P && eC.forkedFromOrdinal === 5 && eC.historyMode =
   const sm = recs().find((r) => r.type === 'session_meta');
   ok(sm && sm.payload.id === 'th-forked' && sm.payload.forked_from_id === 'th-old', 'wrapper session_meta echoes codex\'s forked_from_id from the thread/fork response', sm?.payload);
   ok(sm && JSON.stringify(sm.payload.forked_from) === JSON.stringify(['th-older', 'th-old']), 'CODEX_WEBUI_FORKED_FROM is deduped (each superseded id once, own id dropped)', sm?.payload?.forked_from);
+  const stubs = stubOf(w.pid);
   await stopWrapper(w, { dir });
+  ok(await stubGone(stubs), `B-b403: the stub app-server ends with its wrapper (${stubs.length} child)`);
 }
 
 console.log('— ② 0.153 record tolerance: known skips, agent chatter, sub-agent cards, unknowns → telemetry once');
@@ -228,7 +235,7 @@ console.log('— ④ explicit model + effort on EVERY turn/start (resume continu
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cx0153-e-'));
     const SID = 'sess-4-1700000000004';
     const buf = path.join(dir, SID + '.buf'), meta = path.join(dir, SID + '.json'), rpcLog = path.join(dir, 'rpc.jsonl');
-    const STUB = `const fs=require('fs');let b='';let n=0;const send=(o)=>process.stdout.write(JSON.stringify(o)+'\\n');process.stdin.setEncoding('utf8');process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))!==-1){const l=b.slice(0,i);b=b.slice(i+1);if(!l.trim())continue;let m;try{m=JSON.parse(l)}catch{continue}if(m.id===undefined||!m.method)continue;fs.appendFileSync(${JSON.stringify(rpcLog)},l+'\\n');if(m.method==='thread/resume'){send({id:m.id,result:{thread:{id:'th-r',model:'gpt-6-astra',reasoningEffort:'high'},model:'gpt-6-astra',reasoningEffort:'high'}});continue;}if(m.method==='turn/start'){n++;const t='turn-'+n;send({id:m.id,result:{turn:{id:t}}});send({method:'turn/completed',params:{turn:{id:t},status:'completed'}});continue;}send({id:m.id,result:{}});}});setInterval(()=>{},1e3);`;
+    const STUB = `const fs=require('fs');let b='';let n=0;const send=(o)=>process.stdout.write(JSON.stringify(o)+'\\n');process.stdin.setEncoding('utf8');process.stdin.on('end',()=>process.exit(0));process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))!==-1){const l=b.slice(0,i);b=b.slice(i+1);if(!l.trim())continue;let m;try{m=JSON.parse(l)}catch{continue}if(m.id===undefined||!m.method)continue;fs.appendFileSync(${JSON.stringify(rpcLog)},l+'\\n');if(m.method==='thread/resume'){send({id:m.id,result:{thread:{id:'th-r',model:'gpt-6-astra',reasoningEffort:'high'},model:'gpt-6-astra',reasoningEffort:'high'}});continue;}if(m.method==='turn/start'){n++;const t='turn-'+n;send({id:m.id,result:{turn:{id:t}}});send({method:'turn/completed',params:{turn:{id:t},status:'completed'}});continue;}send({id:m.id,result:{}});}});setInterval(()=>{},1e3);`;
     const w = spawn(process.execPath, [path.join(REPO, 'data/bin/codex-chat-wrapper.js'), buf, meta, process.execPath, '-e', STUB], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, CODEX_WEBUI_CWD: dir, CODEX_WEBUI_RESUME_ID: 'th-r', CODEX_WEBUI_MODEL: '', CODEX_WEBUI_EFFORT: '', VIBESPACE_API: '', VIBESPACE_SESSION_TOKEN: '', VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env },
@@ -246,7 +253,9 @@ console.log('— ④ explicit model + effort on EVERY turn/start (resume continu
     send({ type: 'chat-input', text: 'second', msgId: 'm2' });
     t0 = Date.now(); while (Date.now() - t0 < 8000 && rpc().filter((m) => m.method === 'turn/start').length < 2) await sleep(100);
     const t2 = rpc().filter((m) => m.method === 'turn/start')[1];
+    const stubs = stubOf(w.pid);
     await stopWrapper(w, { dir });
+    ok(await stubGone(stubs), `B-b403: the stub app-server ends with its wrapper — ${label} (${stubs.length} child)`);
     return { t1: t1?.params, t2: t2?.params, meta: readMeta() };
   };
   const a = await run({}, 'no commanded effort');
@@ -308,7 +317,7 @@ console.log('— ⑤ thread/read fallback for a thread with NO rollout (0.153 pa
   // (b) the REAL fetch path against a stub app-server (a shell shim standing in for `codex`)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cx0153-tr-'));
   const rpcLog = path.join(dir, 'rpc.jsonl');
-  fs.writeFileSync(path.join(dir, 'stub.js'), `const fs=require('fs');const THREAD=${JSON.stringify(THREAD)};let b='';process.stdin.setEncoding('utf8');process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))!==-1){const l=b.slice(0,i);b=b.slice(i+1);if(!l.trim())continue;let m;try{m=JSON.parse(l)}catch{continue}fs.appendFileSync(${JSON.stringify(rpcLog)},l+'\\n');if(m.id===undefined||!m.method)continue;if(m.method==='initialize'){process.stdout.write(JSON.stringify({id:m.id,result:{}})+'\\n');continue;}if(m.method==='thread/read'){if(m.params.threadId===THREAD.id&&m.params.includeTurns===true)process.stdout.write(JSON.stringify({id:m.id,result:{thread:THREAD}})+'\\n');else process.stdout.write(JSON.stringify({id:m.id,error:{code:-32600,message:'thread not loaded: '+m.params.threadId}})+'\\n');continue;}process.stdout.write(JSON.stringify({id:m.id,result:{}})+'\\n');}});setInterval(()=>{},1e3);`);
+  fs.writeFileSync(path.join(dir, 'stub.js'), `const fs=require('fs');const THREAD=${JSON.stringify(THREAD)};let b='';process.stdin.setEncoding('utf8');process.stdin.on('end',()=>process.exit(0));process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))!==-1){const l=b.slice(0,i);b=b.slice(i+1);if(!l.trim())continue;let m;try{m=JSON.parse(l)}catch{continue}fs.appendFileSync(${JSON.stringify(rpcLog)},l+'\\n');if(m.id===undefined||!m.method)continue;if(m.method==='initialize'){process.stdout.write(JSON.stringify({id:m.id,result:{}})+'\\n');continue;}if(m.method==='thread/read'){if(m.params.threadId===THREAD.id&&m.params.includeTurns===true)process.stdout.write(JSON.stringify({id:m.id,result:{thread:THREAD}})+'\\n');else process.stdout.write(JSON.stringify({id:m.id,error:{code:-32600,message:'thread not loaded: '+m.params.threadId}})+'\\n');continue;}process.stdout.write(JSON.stringify({id:m.id,result:{}})+'\\n');}});setInterval(()=>{},1e3);`);
   const fake = path.join(dir, 'fake-codex');
   fs.writeFileSync(fake, `#!/bin/sh\n[ "$1" = "app-server" ] || { echo "expected app-server, got $1" >&2; exit 2; }\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(dir, 'stub.js'))}\n`, { mode: 0o755 });
   const rpc = () => { try { return fs.readFileSync(rpcLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };

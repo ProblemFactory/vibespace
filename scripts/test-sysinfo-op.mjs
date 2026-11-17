@@ -7,6 +7,7 @@
 // working set). Pins: (1) the op returns the module's own shape byte-
 // compatible with the local read; (2) the capability gates an old daemon;
 // (3) the ssh-script fallback's parse still yields the same field names.
+import { endDaemonsAndWait } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +27,9 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-sysop-data-'));
 const { DeviceManager } = require(REPO + '/src/agentd/client.js');
 const dm = new DeviceManager({ dataDir, bundlePath: path.join(REPO, 'data/bin/vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
 await dm.connect();
+// B-b403: the daemon is ended ONCE — by the leg after the ops, else at exit (a red, a throw)
+let daemonEnded = false;
+process.on('exit', () => { if (!daemonEnded) try { daemonEnded = true; endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch { } });
 
 // 1. capability advertised + op works against a REAL daemon
 const conn = await dm.connect();
@@ -191,6 +195,12 @@ console.log(JSON.stringify({ procs: (r.procs || []).length, ok: (r.procs || []).
 }
 
 try { await dm.stop?.(); } catch { }
+// B-b403 (lane bl-scratch, 2026-11-17): the daemon is setsid-detached by design (it outlives a hub), and dm.stop() drops the link
+// only — so it outlived every run, adopted by the user manager. The suite ends the daemon of its own root, and waits.
+{
+  let e = null; daemonEnded = true; try { e = endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch (err) { e = { error: err.message }; }
+  ok(!!e && e.pids?.length >= 1 && e.gone === true, `B-b403: the suite ends its device daemon before it ends (${JSON.stringify(e)})`);
+}
 // ── 2.369.68: `ps` output past 4 MiB must not empty the top-procs list ──
 {
   const os = await import('node:os'); const fs = await import('node:fs'); const path = await import('node:path');
