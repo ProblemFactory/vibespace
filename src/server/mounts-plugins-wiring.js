@@ -260,7 +260,7 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
     listFacts: (() => { const CFX = require('./conversation-facts.js'); const src = () => listSources() || {}; return CFX.create({ activeSessions, groupsOf: automationGroupsOf, ...CFX.sourcesFrom({
       getJobs: () => (getJobs ? getJobs() : null), userTodos, persistenceRouter, keeper: () => browserKeeper, browserStream: () => browserStream,
       autoResume: () => src().autoResume || null, stashView: () => src().stashView || null, deliver: () => deliver, sysinfo: { history: (ms) => { const si = src().sysinfo; return si && typeof si.history === 'function' ? si.history(ms) : null; } },
-      stoppedSessions: () => { const f = src().stoppedSessions; return typeof f === 'function' ? f() : []; }, treeUsage: require('../browser-facts.js').treeUsage }) }); })() }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
+      stoppedSessions: () => { const f = src().stoppedSessions; return typeof f === 'function' ? f() : []; }, treeUsage: require('../browser-facts.js').treeUsage, buffersDir: BUFFERS_DIR }) }); })() }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
   openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }),
     // lane automation-open-permission-resolve (q-049 M2): the CLI's own permission mode for the judged folder (its project layer follows it)
     permissionDefault: (cwd, backend) => require('./permission-rules.js').resolveDefaultMode({ backend, cwd }),

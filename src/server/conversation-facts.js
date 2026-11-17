@@ -16,6 +16,8 @@
  */
 const CF = require('../conversation-facts.js');
 const { WHY } = CF;
+// the output files' own times: lane hub-loop-stalls' age pass (src/server/loop-day-report.js outputTimes) — called, never copied
+const LDR = require('./loop-day-report.js');
 
 const LINK_CONVERSATION = 'vibespace://conversation/';   // the design's grammar (piece 1): the row's key, exactly as listed
 const LINK_DESKTOP = 'vibespace://desktop/';
@@ -54,6 +56,7 @@ function create({
   memOf = null,                 // (session, webuiId) → Promise<number bytes | {why}>   (one process tree at a time — the pass)
   agesOf = null,                // ([[webuiId, session]…], signal) → Promise<Map webuiId → mtime ms | null> — the output files' own
                                 // times (lane hub-loop-stalls' outputTimes: one stat per file; it answers null once signal.cancelled)
+  prepare = null,               // → Promise: what must be in memory before the rows are read (the stored layout, read ONCE off the loop)
   passMs = 3000,
   yieldEvery = 50,
   now = Date.now,
@@ -108,6 +111,7 @@ function create({
   async function build() {
     const at = now();
     const deadline = at + passMs;
+    if (typeof prepare === 'function') await within(call(prepare), Math.max(1, deadline - now()));   // bounded: a read that ran out leaves its facts unknown
     const live = [];
     let n = 0;
     for (const [id, s] of activeSessions || []) {
@@ -172,7 +176,7 @@ function create({
  * and its ephemerals() rows (a stat per kept store), the first layouts read, the machine memory reader).
  */
 function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter = null, keeper = () => null, browserStream = () => null,
-  autoResume = () => null, stashView = () => null, deliver = () => null, sysinfo = null, stoppedSessions = null, treeUsage = null, agesOf = null } = {}) {
+  autoResume = () => null, stashView = () => null, deliver = () => null, sysinfo = null, stoppedSessions = null, treeUsage = null, buffersDir = null } = {}) {
   const idOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const memo = (ms, build) => { let at = 0, v = null; return () => { const t = Date.now(); if (!v || t - at > ms) { v = build(); at = t; } return v; }; };
   // jobs by the OWNER conversation (its bare id): running = starting / up / awaiting-user / waiting; schedules = cron + scheduled
@@ -201,6 +205,7 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
     }
     return { desktops: meta.map((d) => ({ id: String(d.id), name: d.name || null })), win };
   });
+  const NO_LAYOUT = 'the stored layout is still being read — ask again';
   const cidOfKey = (key) => (key ? String(key).slice(String(key).indexOf(':') + 1) : null);
   return {
     capsOf: (b) => require('../backend-caps.js').capsOf(b),
@@ -226,8 +231,9 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
       return { browserKey: bk, drivenBy: sum.input === 'user' ? 'person' : null, viewers, personBrowsing, ...(Number.isInteger(viewers) && personBrowsing !== null ? {} : { known: false, why: WHY.notCollected }) };
     },
     browsers: () => ({ why: 'every running browser is listed by the keeper\'s rows (majordomo piece 6)' }),
-    desktopOf: (key) => { const L = layoutIndex(); if (!L) return { why: 'the stored layout is read when a page first opens; none has opened since the hub started' }; const d = L.win.get(String(cidOfKey(key))); return { desktop: d || null, window: !!d }; },
-    desktops: () => { const L = layoutIndex(); return L ? L.desktops : { why: 'the stored layout is read when a page first opens; none has opened since the hub started' }; },
+    prepare: () => (persistenceRouter && typeof persistenceRouter.layoutsAsync === 'function' ? persistenceRouter.layoutsAsync() : null),
+    desktopOf: (key) => { const L = layoutIndex(); if (!L) return { why: NO_LAYOUT }; const d = L.win.get(String(cidOfKey(key))); return { desktop: d || null, window: !!d }; },
+    desktops: () => { const L = layoutIndex(); return L ? L.desktops : { why: NO_LAYOUT }; },
     endedRows: async () => {
       const kept = typeof stoppedSessions === 'function' ? await stoppedSessions() : [];
       return (Array.isArray(kept) ? kept : []).filter((r) => r && (r.backendSessionId || r.sessionId)).map((r) => ({
@@ -236,7 +242,8 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
     },
     machineMem: async () => { const h = sysinfo && typeof sysinfo.history === 'function' ? sysinfo.history(5 * 60 * 1000) : null; const p = Array.isArray(h) && h.length ? h[h.length - 1] : null; return p && Number.isFinite(p.l) ? { memTotal: p.l, memAvailable: Number.isFinite(p.m) ? Math.max(0, p.l - p.m) : null } : { why: WHY.measuring }; },
     memOf: treeUsage ? async (s) => { const pid = s && s._childPid; if (!pid) return { why: WHY.noProcess }; const u = await treeUsage(pid); return u && Number.isFinite(u.memBytes) && u.memBytes > 0 ? u.memBytes : { why: WHY.noProcess }; } : null,
-    agesOf,
+    // the age pass of the day-report unit itself (no copy, no stand-in): one fs.promises.stat per output file, null once cancelled
+    agesOf: (entries, signal) => LDR.outputTimes(entries, buffersDir, { signal }),
   };
 }
 

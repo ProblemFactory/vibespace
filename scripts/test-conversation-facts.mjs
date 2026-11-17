@@ -10,6 +10,7 @@
 //      off fails the unknown legs.
 //   The wrapper that keeps them is proven on the REAL data/bin/chat-wrapper.js in scripts/test-conversation-facts-wrapper.mjs.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -17,6 +18,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CF = require(path.join(REPO, 'src/conversation-facts.js'));
 let pass = 0, fail = 0;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 
 /** A row with every verdict fact known and nothing busy. */
@@ -241,6 +243,74 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8').replace(/^\s*(\/\/|\*|\/\*\*).*$/gm, '');
   const named = ['summaryFor(', 'stashFactOf(', 'ephemerals(', 'factFor(', 'factView(', 'readLayouts(', 'memInfo', 'snapshot(', 'peekNotifs(', 'openRequestFor('].filter((n) => src.includes(n));
   ok(named.length === 0, 'the sources call none of the readers the map found writing or reading a file (the stash summary, the keeper\'s fact and rows, the first layouts read, the memory reader, a job snapshot)', named);
+}
+{
+  // THE DESKTOPS AFTER A RESTART WITH NO PAGE (主开发 2026-11-17 (d)): the layout read ONCE, asynchronously, when the cache is empty
+  const P = require(path.join(REPO, 'src/routes/persistence.js'));
+  const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cfx-lay-'));
+  fs.writeFileSync(path.join(dd, 'layouts.json'), JSON.stringify({ current: null, autoSave: null, saved: {}, customGrids: [], desktopMeta: [{ id: 'd1', name: 'Main' }], desktops: { d1: { autoSave: { windows: [{ openSpec: { backendSessionId: 'e2e00000-0000-4000-8000-0000000000a1' } }] } } } }));
+  P.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+  const R = P.router;
+  ok(R.layoutsCached() === null, 'PREMISE a hub just booted, no page: nothing has read the layout');
+  const realSync = fs.readFileSync; let syncLayoutReads = 0;
+  fs.readFileSync = function (f, ...rest) { if (String(f).endsWith('layouts.json')) syncLayoutReads++; return realSync.call(this, f, ...rest); };
+  let r;
+  try { r = await COL.create({ activeSessions: new Map([['sess-1', fakeChat('A')]]), keyOf: () => KEY_A, ...known, ...(() => { const S = COL.sourcesFrom({ persistenceRouter: R }); return { prepare: S.prepare, desktopOf: S.desktopOf, desktops: S.desktops }; })() }).list(); }
+  finally { fs.readFileSync = realSync; }
+  const row = r.conversations[0];
+  ok(syncLayoutReads === 0 && r.desktops && r.desktops[0].name === 'Main' && row.desktop && row.desktop.id === 'd1' && row.window === true, 'after a restart with no page the list reads the layout itself — asynchronously (0 synchronous reads) — and knows the desktops and the window', { syncLayoutReads, desktops: r.desktops, row: row.desktop });
+  ok(R.layoutsCached() !== null && R.readLayouts() === R.layoutsCached(), 'it filled readLayouts\' own cache: the page\'s first read finds it there (no second read, no sync read)');
+  const slow = await COL.create({ activeSessions: new Map([['sess-1', fakeChat('A')]]), keyOf: () => KEY_A, ...known, passMs: 200, ...(() => { const S = COL.sourcesFrom({ persistenceRouter: { layoutsCached: () => null, layoutsAsync: () => new Promise(() => {}) } }); return { prepare: S.prepare, desktopOf: S.desktopOf, desktops: S.desktops }; })() }).list();
+  ok(slow.desktops === null && /still being read/.test(slow.desktopsWhy) && slow.conversations[0].window === null && /still being read/.test(slow.conversations[0].windowWhy), 'a layout read that runs out of time: desktops and window unknown, said so — the pass is not held', { why: slow.desktopsWhy, ms: slow.pass.ms });
+  fs.rmSync(dd, { recursive: true, force: true });
+}
+{
+  // THE IDLE AGE: the day-report unit's own age pass (no copy) — the output file's time, null once cancelled
+  const bd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cfx-buf-'));
+  fs.writeFileSync(path.join(bd, 'sess-1.buf'), 'x'); fs.utimesSync(path.join(bd, 'sess-1.buf'), new Date(1794870000000), new Date(1794870000000));
+  const S = COL.sourcesFrom({ buffersDir: bd });
+  const m = await S.agesOf([['sess-1', {}], ['sess-none', {}]], { cancelled: false, read: 0 });
+  ok(m instanceof Map && m.get('sess-1') === 1794870000000 && !m.has('sess-none'), 'agesOf IS the day-report unit\'s outputTimes: the output file\'s own time; a conversation with no file is absent (unknown)', m && [...m]);
+  ok((await S.agesOf([['sess-1', {}]], { cancelled: true, read: 0 })) === null, 'a cancelled pass answers null — never a partial map');
+  const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
+  ok(/require\('\.\/loop-day-report\.js'\)/.test(src) && /LDR\.outputTimes\(entries, buffersDir, \{ signal \}\)/.test(src) && !/fs\.promises\.stat|\.stat\(/.test(src.replace(/^\s*(\/\/|\*).*$/gm, '')), 'no second reader: the builder calls the day-report unit\'s function and stats nothing itself', null);
+  fs.rmSync(bd, { recursive: true, force: true });
+}
+{
+  // THE CHILD WALK (主开发 2026-11-17 (b)): treeUsage still reads the process table synchronously — accepted while NO single
+  // synchronous stretch of the list holds the loop for 50 ms, at 84 conversations with trees of fifteen processes (a stand-in table)
+  const { monitorEventLoopDelay } = await import('node:perf_hooks');
+  const BF = require(path.join(REPO, 'src/browser-facts.js')), CI = require(path.join(REPO, 'src/cli-identity.js'));
+  const FAKE = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cfx-proc-'));
+  fs.mkdirSync(path.join(FAKE, 'self'));
+  const selfStat = fs.readFileSync('/proc/self/stat', 'utf8'), selfStatus = fs.readFileSync('/proc/self/status', 'utf8');
+  let selfSmaps = ''; try { selfSmaps = fs.readFileSync('/proc/self/smaps_rollup', 'utf8'); } catch { }
+  const put = (pid, kids) => {
+    const d = path.join(FAKE, String(pid)); fs.mkdirSync(path.join(d, 'task', String(pid)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'task', String(pid), 'children'), kids.join(' ') + (kids.length ? ' ' : ''));
+    fs.writeFileSync(path.join(d, 'stat'), selfStat.replace(/^\d+/, String(pid))); fs.writeFileSync(path.join(d, 'status'), selfStatus);
+    fs.writeFileSync(path.join(d, 'smaps_rollup'), selfSmaps); fs.writeFileSync(path.join(d, 'cmdline'), 'node\0stand-in\0');
+  };
+  const sessions = new Map(), keys = new Map();
+  for (let t = 0; t < 84; t++) {
+    const r0 = 200000 + t * 100;   // root → 2 children → 6 grandchildren each = 15 processes
+    put(r0, [r0 + 1, r0 + 2]); put(r0 + 1, [3, 4, 5, 6, 7, 8].map((k) => r0 + k)); put(r0 + 2, [9, 10, 11, 12, 13, 14].map((k) => r0 + k));
+    for (let k = 3; k <= 14; k++) put(r0 + k, []);
+    const s = { ...fakeChat('T' + t), _childPid: r0 }; sessions.set('sess-' + t, s); keys.set(s, 'claude:e2e00000-0000-4000-8000-' + String(t).padStart(12, '0'));
+  }
+  const tree = (block = null) => (pid) => BF.treeUsage(pid, { readChildren: (p) => { if (block && p === block) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60); return CI.readChildPids(p, { procRoot: FAKE }); }, procRoot: FAKE });
+  const longest = async (treeUsage) => {
+    const S = COL.sourcesFrom({ treeUsage });
+    const h = monitorEventLoopDelay({ resolution: 1 }); h.enable();
+    const r = await COL.create({ activeSessions: sessions, keyOf: (s) => keys.get(s), ...known, memOf: S.memOf, passMs: 60000 }).list();
+    await sleep(5); h.disable();
+    return { ms: Math.round(h.max / 1e5) / 10, known: r.conversations.filter((c) => Number.isFinite(c.memBytes)).length, pids: 0, pass: r.pass.ms };
+  };
+  const m1 = await longest(tree());
+  ok(m1.known === 84 && m1.ms < 50, `84 conversations × 15 processes: every tree measured, and the longest synchronous stretch of the list is ${m1.ms} ms (< 50; the pass took ${m1.pass} ms)`, m1);
+  const m2 = await longest(tree(200500));
+  ok(m2.ms >= 50, `CONTROL a tree whose walk blocks 60 ms in one stretch: the same instrument reads ${m2.ms} ms — the leg above would be red`, m2);
+  fs.rmSync(FAKE, { recursive: true, force: true });
 }
 {
   // nothing on the hub loop: no synchronous file call and no child process in the builder (source census)
