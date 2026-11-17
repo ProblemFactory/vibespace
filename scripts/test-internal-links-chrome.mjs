@@ -103,6 +103,11 @@ const press = async (sel) => {
 };
 const shot = async (name) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, `${name}.png`), Buffer.from(r.data, 'base64')); console.log(`    · picture ${name}.png`); };
 const linkSel = (key) => `.chat-vs-link[data-vs-ref="claude:${key}"]`;
+let A_SID = null;
+/** the talker's window (A — the links are in its chat) in front on the desktop on show: a window a press opened (C, D's history) lands ON TOP of it
+ *  (the first claim, 2026-11-17: five presses «covered» by C's window) */
+const frontA = async () => { await evalJs(`(() => { const w = [...app.sessions.keys()].find((k) => app.wm.windows.get(k)?._openSpec?.backendSessionId === ${JSON.stringify(A_SID)} && app.wm.windows.get(k)._desktopId === app.desktopManager.activeDesktopId); if (w) app.wm.focusWindow ? app.wm.focusWindow(w) : app.goToWinId(w); return !!w; })()`); await sleep(400); };
+const pressLink = async (sel) => { await frontA(); return press(sel); };
 const active = () => evalJs('app.desktopManager.activeDesktopId');
 const winsOf = (sid) => evalJs(`[...app.sessions.keys()].filter((w) => { const s = app.wm.windows.get(w)?._openSpec; return s && s.backendSessionId === ${JSON.stringify(sid)}; }).map((w) => ({ w, desk: app.wm.windows.get(w)._desktopId || null }))`);
 const toasts = () => evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((t) => t.textContent.trim())`);
@@ -128,6 +133,7 @@ try {
     return { sid: run && run.sid, srv: (frames0.find((m) => m && m.type === 'created' && m.reqId === reqId) || {}).sessionId };
   };
   const B = await create('Links B', 'b'), C = await create('Links C', 'c'), A = await create('Links A', 'a');
+  A_SID = A.sid;
   check('three live conversations through the real spawn path, each with its own id', !!(B.sid && C.sid && A.sid && B.srv && C.srv && A.srv) && new Set([B.sid, C.sid, A.sid]).size === 3, { B, C, A });
   const D1 = await active();
   const D2 = await evalJs(`(async () => { const id = app.desktopManager.createDesktop('Desktop 2'); return typeof id === 'string' ? id : (app.desktopManager.desktops.at(-1) || {}).id; })()`);
@@ -162,27 +168,28 @@ try {
 
   console.log('③ the presses — each only navigates');
   const runs0 = stubRuns().length;
-  check('a desktop link: a real press switches to it', (await press(`.chat-vs-link[data-vs-kind=desktop]`)) === true && (await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D2)}`, { timeout: 8000 })) === true);
+  check('a desktop link: a real press switches to it', (await pressLink(`.chat-vs-link[data-vs-kind=desktop]`)) === true && (await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D2)}`, { timeout: 8000 })) === true);
   await evalJs(`app.desktopManager.switchTo(${JSON.stringify(D1)})`); await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D1)}`);
-  check('B (a built window on Desktop 2): the press switches there and flashes B\'s window', (await press(linkSel(B.sid))) === true
+  check('B (a built window on Desktop 2): the press switches there and flashes B\'s window', (await pressLink(linkSel(B.sid))) === true
     && !!(await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D2)} && [...app.sessions.keys()].some((w) => { const win = app.wm.windows.get(w); return win?._openSpec?.backendSessionId === ${JSON.stringify(B.sid)} && (win.element.classList.contains('window-find-flash') || (win._tabChain && app.wm.windows.get(win._tabChain.tabs[0])?.element.classList.contains('window-find-flash'))); })`, { timeout: 8000 })));
   await shot('zh-press-built-window');
   await evalJs(`app.desktopManager.switchTo(${JSON.stringify(D1)})`); await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D1)}`);
-  check('C (running, no window): the press opens it on the desktop on show', (await press(linkSel(C.sid))) === true && !!(await until(`[...app.sessions.keys()].some((w) => app.wm.windows.get(w)?._openSpec?.backendSessionId === ${JSON.stringify(C.sid)} || app.sessions.get(w)?.sessionId === ${JSON.stringify(C.srv)})`, { timeout: 10000 })) && (await active()) === D1);
+  check('C (running, no window): the press opens it on the desktop on show', (await pressLink(linkSel(C.sid))) === true && !!(await until(`[...app.sessions.keys()].some((w) => app.wm.windows.get(w)?._openSpec?.backendSessionId === ${JSON.stringify(C.sid)} || app.sessions.get(w)?.sessionId === ${JSON.stringify(C.srv)})`, { timeout: 10000 })) && (await active()) === D1);
   check('…and a toast says which desktop', !!(await until(`[...document.querySelectorAll('.global-toast, .toast')].some((t) => /已在 .+ 打开——它之前没有窗口。/.test(t.textContent))`, { timeout: 5000 })), await toasts());
   await shot('zh-press-opened-toast');
-  check('D (ended, no window): the press opens «在这里恢复» · «查看历史记录» at the link — nothing started', (await press(linkSel(SID_D))) === true && JSON.stringify(await (async () => { for (let i = 0; i < 30; i++) { const l = await menuLabels(); if (l.length) return l; await sleep(100); } return menuLabels(); })()) === JSON.stringify(['在这里恢复', '查看历史记录']) && stubRuns().length === runs0,
+  check('D (ended, no window): the press opens «在这里恢复» · «查看历史记录» at the link — nothing started', (await pressLink(linkSel(SID_D))) === true && JSON.stringify(await (async () => { for (let i = 0; i < 30; i++) { const l = await menuLabels(); if (l.length) return l; await sleep(100); } return menuLabels(); })()) === JSON.stringify(['在这里恢复', '查看历史记录']) && stubRuns().length === runs0,
     { menu: await menuLabels(), runs: stubRuns().length - runs0 });
   await shot('zh-press-ended-menu');
   check('«查看历史记录»: the history opens read-only — still no process for D', (await press(`.context-menu .context-menu-item:last-child, .context-menu [role=menuitem]:last-child`)) === true && !!(await until(`[...app.sessions.keys()].some((w) => app.wm.windows.get(w)?._openSpec?.backendSessionId === ${JSON.stringify(SID_D)})`, { timeout: 10000 })) && !stubRuns().some((r) => (r.args || []).join(' ').includes(SID_D)),
     { wins: await winsOf(SID_D) });
   const dWins = (await winsOf(SID_D)).length;
-  check('D again (ENDED, with a window): the press lands on that window — one window, nothing started', (await press(linkSel(SID_D))) === true && (await winsOf(SID_D)).length === dWins && !stubRuns().some((r) => (r.args || []).join(' ').includes(SID_D)));
-  check('E (archived): a toast naming the archived list', (await press(linkSel(SID_E))) === true && !!(await until(`[...document.querySelectorAll('.global-toast, .toast')].some((t) => t.textContent.includes('这个对话已归档——请从侧边栏的归档列表中打开。'))`, { timeout: 5000 })), await toasts());
+  check('D again (ENDED, with a window): the press lands on that window — one window, nothing started', (await pressLink(linkSel(SID_D))) === true && (await winsOf(SID_D)).length === dWins && !stubRuns().some((r) => (r.args || []).join(' ').includes(SID_D)));
+  check('E (archived): a toast naming the archived list', (await pressLink(linkSel(SID_E))) === true && !!(await until(`[...document.querySelectorAll('.global-toast, .toast')].some((t) => t.textContent.includes('这个对话已归档——请从侧边栏的归档列表中打开。'))`, { timeout: 5000 })), await toasts());
 
   console.log('④ right-click / long-press: «前往» · «复制链接»');
   await evalJs(`app.desktopManager.switchTo(${JSON.stringify(D1)})`); await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D1)}`);
-  await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(linkSel(B.sid))}); const r = e.getBoundingClientRect(); e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 4, clientY: r.top + 4, button: 2 })); return true; })()`);
+  await frontA();
+  await evalJs(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(linkSel(B.sid))})].pop(); const r = e.getBoundingClientRect(); e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 4, clientY: r.top + 4, button: 2 })); return true; })()`);
   check('the menu says «前往» · «复制链接»', JSON.stringify(await (async () => { for (let i = 0; i < 30; i++) { const l = await menuLabels(); if (l.length) return l; await sleep(100); } return menuLabels(); })()) === JSON.stringify(['前往', '复制链接']), await menuLabels());
   check('«前往» goes (Desktop 2, B)', (await press(`.context-menu .context-menu-item:first-child, .context-menu [role=menuitem]:first-child`)) === true && (await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D2)}`, { timeout: 8000 })) === true);
 
@@ -193,7 +200,7 @@ try {
   check('the page again, on Desktop 1', !!(await until(`!!(window.app && app.desktopManager && app.desktopManager.activeDesktopId === ${JSON.stringify(D1)} && document.querySelector(${JSON.stringify(linkSel(B.sid))}))`, { timeout: 40000 })));
   const builtBefore = (await winsOf(B.sid)).length;
   check('B has no window on this page yet (Desktop 2 not built)', builtBefore === 0, await winsOf(B.sid));
-  check('the press switches to Desktop 2 and B\'s window is built there', (await press(linkSel(B.sid))) === true && !!(await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D2)} && [...app.sessions.keys()].some((w) => app.wm.windows.get(w)?._openSpec?.backendSessionId === ${JSON.stringify(B.sid)})`, { timeout: 15000 })));
+  check('the press switches to Desktop 2 and B\'s window is built there', (await pressLink(linkSel(B.sid))) === true && !!(await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D2)} && [...app.sessions.keys()].some((w) => app.wm.windows.get(w)?._openSpec?.backendSessionId === ${JSON.stringify(B.sid)})`, { timeout: 15000 })));
   check('no press started a process (only the three conversations the suite opened ran)', stubRuns().length === runs0, { runs: stubRuns().length, runs0 });
   check('the page threw nothing', PAGE_ERRORS.length === 0, PAGE_ERRORS.slice(-3));
 } catch (e) { failed++; console.error('  ✗ threw:', e && e.stack || e); }
