@@ -38,7 +38,7 @@ function census(src) {
       const pre = ln.slice(0, m.index);
       const site = { line: i + 1, kind: 'unknown', cls: '', ok: false };
       if (/^\s*(\/\/|\/\*|\*)/.test(ln) || /(^|[^:])\/\/\s/.test(pre)) continue;   // a comment names it, no call
-      if (/^\s*renderMarkdown\s*\(\w*(?:, \{ vsLinks = false \} = \{\})?\)\s*\{/.test(ln)) Object.assign(site, { kind: 'def', ok: true });   // (lane setting-doors cure: the scheme's links are an option of the renderer)
+      if (/^\s*renderMarkdown\s*\(\w*(?:, \{ vsLinks = false(?:, streaming = false)? \} = \{\})?\)\s*\{/.test(ln)) Object.assign(site, { kind: 'def', ok: true });   // (lane setting-doors cure: the scheme's links are an option of the renderer)
       else if (/renderMarkdown:\s*\(\w*\)\s*=>\s*this\.$/.test(pre)) Object.assign(site, { kind: 'delegate', ok: true });
       else if (/(\w+)\.innerHTML\s*=\s*this\._renderers\.$/.test(pre)) {
         const v = /(\w+)\.innerHTML\s*=\s*this\._renderers\.$/.exec(pre)[1];

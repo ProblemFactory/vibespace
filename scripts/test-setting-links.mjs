@@ -304,14 +304,23 @@ console.log('⑧ ONE RULE FOR WHERE THE SCHEME\'S LINKS RENDER (主开发 2026-1
   ok(doors(L.peer) === 0 && !pathy(L.peer), 'a PEER\'s body (_peerBodyHtml — peer and group messages) draws none', L.peer);
   ok(L.job.includes('Background work finished') && doors(L.job) === 0 && !pathy(L.job), 'a JOB\'s record (a VibeSpace notice shown in chat) draws none', L.job);
   ok(doors(L.tool) === 0 && !pathy(L.tool), 'a TOOL\'s input or output (linkifyText) draws none', L.tool);
-  // THE CENSUS: every place the option is switched on, by the method it sits in — exactly the conversation's own words
-  const ON = ['chat-renderers.js:_renderCollabMsg', 'chat-renderers.js:renderAssistantMsg', 'chat-renderers.js:renderToolMsg', 'chat-view.js:_renderStreamingText'];
+  // THE CENSUS (主开发 12:21Z c: every file under the page's lib folder, ANY spelling): every place the option is switched ON — any
+  // assignment of a value that is not `false` to vsLinks (`vsLinks: true`, `'vsLinks': 1`, `opts.vsLinks = …`), by the method it sits
+  // in; a default of `false`, a pass-through and a test of it are plumbing — exactly the conversation's own words (+ the brief channel's
+  // message, the fifth site by 主开发's ruling 12:21Z b)
+  const ON = ['chat-renderers.js:_renderCollabMsg', 'chat-renderers.js:_renderUserChannelMsg', 'chat-renderers.js:renderAssistantMsg', 'chat-renderers.js:renderToolMsg', 'chat-view.js:_renderStreamingText'];
+  const ON_RE = /['"]?\bvsLinks['"]?\]?\s*(?::|=(?!=))\s*(?![\s]|false\b)/;
+  const METHOD_RE = /^\s*(?:async\s+)?(?:function\s+)?(?!(?:if|for|while|switch|catch|with|return)\b)([_A-Za-z$][\w$]*)\s*\([^)]*\)\s*\{\s*(?:\/\/.*)?$/;
   const sitesOf = (file, src) => { const out = []; const lines = src.split('\n');
-    lines.forEach((ln, i) => { if (!/vsLinks: true/.test(ln)) return; let j = i; while (j >= 0 && !/^  (?:async )?([_A-Za-z]\w*)\([^)]*\) \{$/.test(lines[j])) j--; out.push(`${file}:${j >= 0 ? /^  (?:async )?([_A-Za-z]\w*)/.exec(lines[j])[1] : '?'}`); });
+    lines.forEach((ln, i) => { if (!ON_RE.test(ln.replace(/\/\/.*$/, ''))) return; let j = i; while (j >= 0 && !METHOD_RE.test(lines[j])) j--; out.push(`${file}:${j >= 0 ? METHOD_RE.exec(lines[j])[1] : '?'}`); });
     return out; };
-  const census = (crSrc) => [...sitesOf('chat-renderers.js', crSrc), ...sitesOf('chat-view.js', read('src/lib/chat-view.js'))].sort();
+  const libFiles = (dir = path.join(REPO, 'src/lib'), rel = '') => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? libFiles(path.join(dir, d.name), `${rel}${d.name}/`) : d.name.endsWith('.js') ? [`${rel}${d.name}`] : []));
+  const LIB = Object.fromEntries(libFiles().map((f) => [f, read(`src/lib/${f}`)]));
+  const census = (crSrc, extra = {}) => Object.entries({ ...LIB, 'chat-renderers.js': crSrc, ...extra }).flatMap(([f, src]) => sitesOf(f, src)).sort();
   const crSrc = read('src/lib/chat-renderers.js');
-  ok(JSON.stringify(census(crSrc)) === JSON.stringify(ON), 'THE CENSUS: the option is on at the assistant text block, its streaming frame, the sub-agent report and the sub-agent card (its answer) — nowhere else', census(crSrc));
+  ok(Object.keys(LIB).length > 250 && JSON.stringify(census(crSrc)) === JSON.stringify(ON), `THE CENSUS over every file under src/lib (${Object.keys(LIB).length}), any spelling: the option is on at the assistant text block, its streaming frame, the sub-agent report, the sub-agent card (its answer) and the brief channel's message — nowhere else`, census(crSrc));
+  ok(JSON.stringify(census(crSrc, { 'zz-planted.js': "function plant(t) {\n  return renderer.renderMarkdown(t, { 'vsLinks': 1 });\n}\n" })) !== JSON.stringify(ON) && sitesOf('x.js', "  f() {\n    opts.vsLinks = on;\n  }\n").length === 1 && sitesOf('x.js', "  f(a, { vsLinks = false } = {}) {\n    g({ vsLinks }); if (vsLinks === true) h();\n  }\n").length === 0,
+    'RED CONTROL (census): a quoted spelling in ANOTHER lib file turns it red; `opts.vsLinks = …` is a site; a default of false, a pass-through and a test are not');
   const rcSub = (crSrc.match(/renderMarkdown: \(s\) => this\.renderMarkdown\(s, \{ vsLinks: true \}\)/g) || []).length;
   ok(rcSub === 1 && !/linkifyText: \(s\) => this\.linkifyText\(s, \{/.test(crSrc), 'the sub-agent card: its answer (renderMarkdown) has the option, its task (linkifyText — the parent\'s tool input) does not');
   const fyHasSites = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).flatMap((f) => (read(`src/lib/${f}`).match(/(?:linkedHtml|segmentText)\([^\n]*has: isSettingKey/g) || []).map(() => f));

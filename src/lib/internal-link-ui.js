@@ -56,11 +56,13 @@ export function pressFacts(app, kind, ref) {
   const heldDesk = held && held.desk && held.desk !== dm.activeDesktopId ? held.desk : null;
   let archived = false;
   try { archived = !!(s && app.sidebar?.isArchived?.(s)); } catch { }
-  const row = s ? { live: !!s.webuiId, ended: s.status === 'stopped', archived } : null;
+  const row = s ? { live: !!s.webuiId, ended: s.status === 'stopped', archived, tmux: s.status === 'tmux' && !!s.tmuxTarget } : null;
   return { win, heldDesk, held, row, s };
 }
 
-const IO = { toast: showToast, menu: showContextMenu, copy: copyText };   // the page's own toast / menu / clipboard (a suite passes its recorders)
+const IO = { toast: showToast, menu: showContextMenu, copy: copyText };
+/** Where a menu opens: the press's point — or, a keyboard Enter (a click with no point), under the link itself (`at.el`). */
+const pointOf = (at = {}) => { if (at.x || at.y) return { x: at.x || 0, y: at.y || 0 }; const r = at.el && typeof at.el.getBoundingClientRect === 'function' ? at.el.getBoundingClientRect() : null; return r ? { x: r.left, y: r.bottom } : { x: 0, y: 0 }; };   // the page's own toast / menu / clipboard (a suite passes its recorders)
 
 /** THE PRESS. `at` = {x, y} of the press (the ENDED-no-window menu opens there). → the plan's name (for the caller's log). */
 export function pressLink(app, kind, ref, at = {}, io = IO) {
@@ -75,12 +77,13 @@ export function pressLink(app, kind, ref, at = {}, io = IO) {
     const desk = (dm?.desktops || []).find((d) => d && d.id === dm.activeDesktopId);
     io.toast(t('Opened on {desktop} — it had no window.', { desktop: desk?.name || '' }));
   } else if (plan === 'menu') {
-    const name = nameOfRow(app, s), opts = agentOptsOf(s);
-    io.menu(at.x || 0, at.y || 0, [
+    const name = nameOfRow(app, s), opts = agentOptsOf(s), pt = pointOf(at);
+    io.menu(pt.x, pt.y, [
       { label: tc('link', 'Resume here'), action: () => app.resumeSession(s.sessionId, s.cwd, name, opts) },
       { label: t('Read its history'), action: () => app.viewSession(s.sessionId, s.cwd, name, opts) },
     ]);
   } else if (plan === 'archived') io.toast(t('This conversation is archived — open it from the archived list in the sidebar.'));
+  else if (plan === 'tmux') app.attachTmuxSession(s.tmuxTarget, nameOfRow(app, s), s.cwd);   // the sidebar's own road for a tmux pane
   else if (plan === 'outside') io.toast(t('This session is running outside VibeSpace'), { type: 'error' });
   else if (plan === 'switch') dm.switchTo(ref);
   else if (plan === 'settings') app.openSettingAt?.(ref);
@@ -90,7 +93,8 @@ export function pressLink(app, kind, ref, at = {}, io = IO) {
 
 /** Right-click / long-press: «Go» · «Copy link». `flash(words)` = the caller's own «Copied!». */
 export function linkMenu(app, kind, ref, at = {}, flash = null, io = IO) {
-  io.menu(at.x || 0, at.y || 0, [
+  const pt = pointOf(at);
+  io.menu(pt.x, pt.y, [
     { label: t('Go'), action: () => pressLink(app, kind, ref, at, io) },
     { label: t('Copy link'), action: () => Promise.resolve(io.copy(linkOf(kind, ref))).then(() => { if (flash) flash(t('Copied!')); }) },
   ]);

@@ -843,7 +843,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     if (fy && st.cur && st.cur.el.contains(fy)) {
       e.preventDefault();
       const it = model.byId(st.cur.id);
-      if (it) { if (fy.classList.contains('ut-art')) model.openArtifact(it, Number(fy.dataset.ai)); else model.openLink(it, fy.dataset.fy, fy.dataset.ref, { x: e.clientX, y: e.clientY }); }
+      if (it) { if (fy.classList.contains('ut-art')) model.openArtifact(it, Number(fy.dataset.ai)); else model.openLink(it, fy.dataset.fy, fy.dataset.ref, { x: e.clientX, y: e.clientY, el: fy }); }
       return;
     }
     // A NAVIGATION IS A NEW VIEW (verify round): a tab or scope switch re-sorts the list like an open
