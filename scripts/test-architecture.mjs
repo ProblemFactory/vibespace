@@ -2099,6 +2099,14 @@ await section(async () => {
   const staleRow = CS.census(process.cwd(), { acorn, rows: { ...CS.ROWS, 'scripts/test-planted-nomark.mjs': 'a row whose file holds no marker' }, extra: { 'scripts/test-planted-nomark.mjs': 'export const X = 1;\n' } });
   ok(alias.launches.length === 1 && !alias.launches[0].carried && prom.launches.length === 1 && !prom.launches[0].carried && markerOnly.uncovered.includes('scripts/test-planted-marker.mjs') && staleRow.stale.includes('scripts/test-planted-nomark.mjs'),
     '§47b CONTROLS (the check\'s): a spawn imported under another name is a launch, RED without the store; a promisified execFile of Chrome is a launch, RED; a file whose text names a marker with no launch and no row is UNCOVERED, red; a row whose file holds no marker is STALE, red');
+  // 主开发's verdict (12:21Z): the census put the store flags in front of NODE's own options (three fake-Chrome holders) and into a LibreOffice
+  // conversion — a spawn of the runtime itself is never a Chrome launch; an office conversion's bare --headless is not one either
+  const nodeHolder = L("const h = spawn(process.execPath, ['-e', SRC, '--', '--user-data-dir=/x', '--headless=new', '--remote-debugging-port=0']);\n");
+  const nodeLit = L("execFileSync('node', ['-e', SRC, '--headless']);\n");
+  const office = L("execFileSync(office.path, ['--headless', '-env:UserInstallation=file:///x', '--convert-to', 'odt', 'a.docx']);\n");
+  const officeCdp = L("spawn(office.path, ['--headless', '--remote-debugging-port=0']);\n");
+  ok(nodeHolder.launches.length === 0 && nodeHolder.unread.length === 0 && nodeLit.launches.length === 0 && office.launches.length === 0 && officeCdp.launches.length === 1,
+    '§47b CONTROLS (主开发 12:21Z): a node holder with a headless / debugging-port flag is NOT a launch (the runtime itself); an office conversion\'s bare --headless is NOT a launch — while an office-named program with a debugging port still is (the census stays eyes-open)');
   const one = 'scripts/test-chat-hygiene-ui.mjs', pc = CS.census(process.cwd(), { acorn, patch: { [one]: fs.readFileSync(one, 'utf8').replace('...CHROME_STORE, ', '') } });
   ok(planted.launches.length === 1 && !planted.launches[0].carried && carried.launches[0].carried && viaVar.launches.length === 1 && !viaVar.launches[0].carried && unread.unread.length === 1 && pc.bad.some((b) => b.file === one),
     '§47b CONTROLS: a planted launch without the store is RED, with it green; an argv named by a variable is read; a Chrome program whose argv cannot be read is UNREAD (red); a real suite with its spread removed is red by file');
