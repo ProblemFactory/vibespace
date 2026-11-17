@@ -2795,7 +2795,7 @@ router.post('/api/agent/browser/backend', async (req, res) => {
     const r = await k.switchBackend({ profileId: p.id, target: req.body?.provider, by: { kind: 'agent' }, browserKey: f.browserKey, sessionId: f.sessionId, confirmDowngrade: req.body?.confirmDowngrade === true, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
     if (r.mode === 'proposal') return res.json({ ...r, filed: fileProposal(f, r, { by: 'agent' }) });
     k.tell(f.browserKey);
-    res.json(r);
+    res.json({ ...r, ...(r && r.profile ? { profile: require('../browser-profiles.js').agentProfileView(r.profile, agentFactsOf(f)) } : {}) });   // the exit check (主开发 17:04Z): the switch's record as an AGENT may read it — no kept exit, no login name
   } catch (e) { fail(res, e); }
 });
 /**

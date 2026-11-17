@@ -27,6 +27,7 @@ class SettingsManager {
     this._inflight = new Map();
     this._saveSeq = 0;
     this._failed = new Set();
+    this._refused = new Map();   // the exit check (主开发 17:04Z): path → { code } the server set aside (the stored value kept) — said at the row
     this._saved = new Set();
     this._saveListeners = new Set();
     this._server = {};
@@ -39,10 +40,13 @@ class SettingsManager {
   saveStateOf(path) {
     if (this._dirty.has(path)) return 'pending';
     if (this._inflight.has(path)) return 'saving';
+    if (this._refused.has(path)) return 'refused';
     if (this._failed.has(path)) return 'failed';
     if (this._saved.has(path)) return 'saved';
     return 'idle';
   }
+  /** A row the server set aside at its last save → { code } (its words: settings-view saveMarkWords), else null. */
+  refusedOf(path) { return this._refused.get(path) || null; }
   /** Subscribe to save-state changes: fn(path, state). Returns the unsubscribe. */
   onSaveState(fn) { if (typeof fn !== 'function') return () => {}; this._saveListeners.add(fn); return () => this._saveListeners.delete(fn); }
   _emitSave(paths) { for (const p of paths) { const st = this.saveStateOf(p); for (const fn of [...this._saveListeners]) { try { fn(p, st); } catch (e) { console.error(`Settings save listener error [${p}]:`, e); } } } }
@@ -136,7 +140,7 @@ class SettingsManager {
       this._notify(path, now, old);
     }
     for (const [p, was] of followers) { const is = this.get(p); if (JSON.stringify(was) !== JSON.stringify(is)) this._notify(p, is, was); }
-    this._dirty.add(path); this._failed.delete(path); this._saved.delete(path);
+    this._dirty.add(path); this._failed.delete(path); this._saved.delete(path); this._refused.delete(path);
     this._scheduleSave();
     this._emitSave([path]);
   }
@@ -261,10 +265,13 @@ class SettingsManager {
       });
       landed = !!(res && res.ok);
       if (landed) {
+        const before = this._server || {};
         this._server = { ...data };
         let j = null;
         try { j = await res.json(); } catch { j = null; }
         if (j && j.spend && typeof j.spend === 'object') this._live = { spend: j.spend };
+        // a row the server SET ASIDE keeps its stored value there (the server's copy says so); its words wait at the row
+        for (const [p, why] of Object.entries((j && j.refused && typeof j.refused === 'object') ? j.refused : {})) { this._server[p] = before[p]; this._refused.set(p, { code: String((why && why.code) || '') }); }
       }
     } catch {} finally {
       if (this._saveTimer === myTimer) this._saveTimer = null;
@@ -272,7 +279,7 @@ class SettingsManager {
       for (const p of carried) {
         if (this._inflight.get(p) !== mySeq) continue;
         this._inflight.delete(p);
-        if (landed) { this._failed.delete(p); this._saved.add(p); } else { this._saved.delete(p); this._failed.add(p); }
+        if (landed && this._refused.has(p)) { this._failed.delete(p); this._saved.delete(p); } else if (landed) { this._failed.delete(p); this._saved.add(p); } else { this._saved.delete(p); this._failed.add(p); }
       }
       this._emitSave(carried);
     }

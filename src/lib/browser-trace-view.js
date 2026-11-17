@@ -778,7 +778,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   // lane browser-admin: the row's AGE enters the signature as the words it prints (rowWhyText — minutes / hours), never the
   // raw `ageMs`, which moves every millisecond and rebuilt every row on every load (the keyed reuse never held: a click
   // across a load hit a detached node; the heavy UI suite caught it keeping the row a New profile… create must leave alone)
-  const rowSig = (r, v) => { const { use, ageMs, disk, ...rest } = r || {}; /* lane browser-disk-sample: `disk` is patched in place (patchDisk) */ return JSON.stringify([rest, rowWhyText(r), app.browserChipFor ? app.browserChipFor(r.id) : null, v?.limits?.recordingFloor || null, st.busy, pageStuckOf(r.id), autoDialogsOf(r), runningBuildOf(r.id)]); }; // lane browser-admin 2a: + the build its browser reports // lane browser-stuck: the page's state is part of what the row prints (+ verify r1 A6: its dialog mode)
+  const rowSig = (r, v) => { const { use, ageMs, disk, ...rest } = r || {}; /* lane browser-disk-sample: `disk` is patched in place (patchDisk) */ return JSON.stringify([rest, rowWhyText(r), r && r.egress && r.egress.checkedAt ? agoText(Date.now() - Number(r.egress.checkedAt)) : null, app.browserChipFor ? app.browserChipFor(r.id) : null, v?.limits?.recordingFloor || null, st.busy, pageStuckOf(r.id), autoDialogsOf(r), runningBuildOf(r.id)]); }; // lane browser-admin 2a: + the build its browser reports // lane browser-stuck: the page's state is part of what the row prints (+ verify r1 A6: its dialog mode)
   const root = el('div', 'bprof');
   const bar = el('div', 'bprof-bar');
   const summary = el('span', 'bprof-summary', t('Loading…'));

@@ -644,6 +644,7 @@ const SETTINGS_SCHEMA = {
     label: t('Exit check address'),
     description: t('An https address that answers a browser profile\'s public address, country and time zone as JSON. It is asked only when you press «Check the exit…» on a profile, and only through that profile\'s own proxy. Empty: no check — type the exit by hand.'),
     category: t('Agent browser'), liveApply: true, tier: 'advanced',
+    serverVerdict: true,   // the server judges it (https, no login, no private literal): a refused value is said at the row, never blocks another row
   },
   'browser.isolateSessions': {
     type: 'boolean', default: true,

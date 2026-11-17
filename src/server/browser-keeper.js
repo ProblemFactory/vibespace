@@ -1597,6 +1597,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (np.value && B.isCloudProfile(p)) throw namedError('proxy_cloud_browser', `"${p.label}": ${B.PROXY_CLOUD_WHY}`);   // B-8b87 cure
       const nc = B.normalizeProxyCredential(keys.includes('proxyCredential') ? patch.proxyCredential : (np.value === p.proxy ? p.proxyCredential : null), np.value);
       if (!nc.ok) throw namedError(nc.code, nc.error);
+      // the exit check (主开发 17:04Z): a KEPT EXIT belongs to the road it was kept for — any change of the proxy (its address, its removal,
+      // its adding, its login) forgets it, measured or typed alike, said in this answer (changed.exitForgotten)
+      if ((np.value !== (p.proxy || null) || nc.value !== (p.proxyCredential || null)) && p.egress) { delete p.egress; changed.exitForgotten = true; }
       if (np.value !== (p.proxy || null) || nc.value !== (p.proxyCredential || null)) { changed.proxy = { was: B.proxyPublicView(p.proxy), now: np.value, credential: nc.value, applies: 'at the next start' }; p.proxy = np.value; p.proxyCredential = nc.value; }
     }
     if (keys.includes('record')) { const v = patch.record === true || patch.record === 'true' || patch.record === 1; if (v !== !!p.record) { changed.record = { was: !!p.record, now: v }; p.record = v; } }
@@ -6629,22 +6632,30 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const url = EXIT.checkUrlVerdict(serverSetting(EXIT.EXIT_URL_KEY));
     if (!url.ok) return { ok: false, code: url.code, error: url.error };
     if (!url.value) return { ok: false, code: 'exit_url_unset', error: 'no exit check address is set — give one (an https address you trust) and check again, or type the exit by hand' };
+    // a profile whose browser the hub does NOT start: that browser leaves by its own settings — refused like no proxy
+    const prow = rowOf(p.provider);
+    if (prow && !prow.starts) return { ok: false, code: 'exit_external_browser', error: `"${p.label}" attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it` };
     let of;
     try { of = await profileProxyFor(p, { why: 'user' }); } catch (e) { return { ok: false, code: e.code || 'exit_check_failed', error: e.message }; }
-    const k0 = String(p.id), have = egressProxies.get(k0);
-    // a running browser's forwarder carries ITS start's proxy: one that is not this proxy would measure another exit — said, not used
-    if (have && have.px.port() && (!have.of || !have.of.proxy || have.of.proxy.host !== of.proxy.host || have.of.proxy.port !== of.proxy.port || have.of.proxy.scheme !== of.proxy.scheme)) return { ok: false, code: 'exit_restart_first', error: `"${p.label}"'s browser runs without this proxy — restart it, then check the exit` };
-    let fwd;
-    try { fwd = have && have.px.port() ? have.px.url() : await egressUrlFor(p.id, of); } catch (e) { return { ok: false, code: e.code || 'exit_check_failed', error: e.message }; }
+    const k0 = String(p.id), have = egressProxies.get(k0), rec = reg.browsers[k0];
+    // 主开发 17:04Z: a RUNNING browser is measured only through the road it runs on — its own forwarder is THIS proxy WITH THIS login;
+    // any other running state (another proxy, another login, no forwarder at all: started before the proxy) is restart-first
+    if (rec && B.isLiveBrowser(rec)) {
+      const hp = have && have.px.port() && have.of && have.of.proxy;
+      if (!hp || hp.scheme !== of.proxy.scheme || hp.host !== of.proxy.host || hp.port !== of.proxy.port || String(hp.credential || '') !== String(of.proxy.credential || '')) return { ok: false, code: 'exit_restart_first', error: `"${p.label}"'s browser runs on another road than its proxy now names (the address or its login changed since it started, or it started without it) — restart it, then check the exit` };
+    }
+    // the check's OWN forwarder (one per press, never registered): the same upstream — this proxy with this login — but the person's
+    // request, not the browser's traffic: no engine's site list judges it or records its host, and what it opens it closes on every
+    // path — it never touches a forwarder a starting browser just took, and two presses never share one
+    const px = EgressProxy.create({ allow: () => ({ allow: true }), upstream: () => proxyUpstreamOf(k0, of), tag: 'exit-check', log: { log() { }, warn() { } } });
     try {
-      const r = await EXC.requestThrough({ url: url.value, forwarder: fwd, ...(tlsConnect ? { tlsConnect } : {}) });
+      const port = await px.listen();
+      const r = await EXC.requestThrough({ url: url.value, forwarder: `http://127.0.0.1:${port}`, ...(tlsConnect ? { tlsConnect } : {}) });
       if (!r.ok) return r;
       const v = EXIT.readExitAnswer(r);
       return v.ok ? { ok: true, read: v.read } : { ok: false, code: 'exit_answer_unreadable', kind: v.kind, error: v.said };
-    } finally {
-      // a forwarder opened for this check alone (no browser running) closes with it; a running browser's stays
-      if (!have) { const rec = reg.browsers[k0]; if (!(rec && B.isLiveBrowser(rec))) dropEgress(p.id); }
-    }
+    } catch (e) { return { ok: false, code: e.code || 'exit_check_failed', error: String((e && e.message) || e) }; }
+    finally { await px.close({ cut: true }).catch(() => { }); }
   }
   /** The person's confirm (what was read, each field editable — or typed by hand) → kept on the profile under the hand-over's own
    *  names; `{ clear: true }` forgets it. The zone is validated by the runtime's own formatter (an offset or an abbreviation refused). */

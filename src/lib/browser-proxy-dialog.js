@@ -38,7 +38,9 @@ export function openProxyDialog(app, r, { onDone = null } = {}) {
       if (!v.ok) { say(proxyWords(v.code, t, v.error, { act: 'save', word: v.word }), proxyDoor(v.code, v.word)); if (v.focus) v.focus.focus(); return; }
       const res = await fetchJson(`/api/browser/profiles/${encodeURIComponent(r.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proxy: v.proxy || '', proxyCredential: v.proxyCredential || '' }) });
       if (!res || res.error) { say(proxyWords(res && res.code, t, res && res.error, { act: 'save', word: res && res.word }), proxyDoor(res && res.code, res && res.word)); return; }
-      showToast(v.proxy ? t('{label} goes through its proxy from its next start', { label }) : t('{label} has no proxy from its next start', { label }), { duration: 6000 });
+      // the exit check (主开发 17:04Z): a kept exit belongs to the road it was kept for — this change forgot it, said in place
+      const forgot = !!(res.changed && res.changed.exitForgotten);
+      showToast((v.proxy ? t('{label} goes through its proxy from its next start', { label }) : t('{label} has no proxy from its next start', { label })) + (forgot ? ' — ' + t('its kept exit is forgotten (it belonged to the old proxy); check it again') : ''), { duration: 8000 });
       shell.close();
       try { onDone?.(); } catch { /* the panel reloads on its own */ }
     } finally { busy = false; save.disabled = false; }

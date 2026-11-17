@@ -1065,6 +1065,17 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // the exit check (the owner 2026-11-17): the check address is written by a PERSON only, with its own rules (https only, no login,
   // no private literal — src/browser-exit.js checkUrlVerdict); an agent's refused write says who sets it and where (the recipe)
   const EXIT = require('../browser-exit.js');
+  // 主开发 17:04Z: a PERSON's address the verdict refuses is SET ASIDE (the stored one kept) and said in the answer (`refused`, by key) —
+  // the rest of the save lands: one refused row never blocks another row's save. An agent's write is refused whole (below).
+  const setAsideExitUrl = (req, next) => {
+    if (!next || typeof next !== 'object' || require('../write-origin.js').pressBearer(req.headers)) return null;
+    const cur = readSettings() || {}, was = cur[EXIT.EXIT_URL_KEY], now = next[EXIT.EXIT_URL_KEY];
+    if (JSON.stringify(was) === JSON.stringify(now)) return null;
+    const v = EXIT.checkUrlVerdict(now);
+    if (v.ok) return null;
+    if (was === undefined) delete next[EXIT.EXIT_URL_KEY]; else next[EXIT.EXIT_URL_KEY] = was;
+    return { [EXIT.EXIT_URL_KEY]: { code: v.code, error: v.error } };
+  };
   const refuseExitUrl = (req, res, next) => {
     const cur = readSettings() || {}, nxt = next && typeof next === 'object' ? next : {};
     const was = cur[EXIT.EXIT_URL_KEY], now = nxt[EXIT.EXIT_URL_KEY];
@@ -1110,13 +1121,14 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.post('/api/settings', (req, res) => {
     const data = req.body;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
+    const refused = setAsideExitUrl(req, data); // the exit check: a person's refused address set aside, said — the rest lands
     if (refuseEngineRows(req, res, data)) return; // lane engine-spi-egress L1b (V3) — r2: the whole file it would leave (an omitted row = dropped)
     if (refuseSpendRows(req, res, data)) return; // lane setting-doors pick 0: the spending rows are the owner's press
     // lane owner-press-attended: the save ECHOES what the server now USES for the spend ceiling — the spend guard reads
     // `budgetLimits(serverSetting)` over this very cache on its next check (a clamp at CAP_MAX included), so the Settings
     // row says the live number, not the typed one; r2: the broadcast carries the same `spend` (writeSettings)
     const spend = writeSettings(data);
-    res.json({ success: true, ...(spend ? { spend } : {}) });
+    res.json({ success: true, ...(spend ? { spend } : {}), ...(refused ? { refused } : {}) });
   });
 
   router.patch('/api/settings', (req, res) => {
@@ -1125,10 +1137,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (!patch || typeof patch !== 'object') return res.status(400).json({ error: 'Expected object' });
     const merged = { ...current, ...patch };
     for (const [k, v] of Object.entries(merged)) { if (v === null) delete merged[k]; }
+    const refused = setAsideExitUrl(req, merged); // the exit check: a person's refused address set aside, said — the rest lands
     if (refuseEngineRows(req, res, merged)) return; // lane engine-spi-egress L1b (V3) — r2: the file the patch would leave
     if (refuseSpendRows(req, res, merged)) return; // lane setting-doors pick 0: the spending rows are the owner's press
     writeSettings(merged);
-    res.json({ success: true });
+    res.json({ success: true, ...(refused ? { refused } : {}) });
   });
 
   // ── Config export / import (whole-instance transfer) ──

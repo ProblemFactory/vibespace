@@ -501,7 +501,7 @@ class SettingsUI {
 
     const control = this._createControl(path, schema, row);
     controlWrap.appendChild(control);
-    if (schema.type === 'number' && !schema.slider && !schema.store) controlWrap.appendChild(this._saveMark(path));   // lane owner-press-attended
+    if ((schema.type === 'number' && !schema.slider && !schema.store) || schema.serverVerdict) controlWrap.appendChild(this._saveMark(path));   // lane owner-press-attended (+ a row the server may refuse: its words wait here)
     // lane think-tools-phone: a text box's save says its outcome too — «Saving…» → «Saved», or «Not saved — the server did not answer…»
     // (a failed save keeps the words holding a stale page's reload; the person must be told they are not on the server)
     if ((schema.type === 'json' || (schema.type === 'text' && schema.multiline)) && !schema.store) controlWrap.appendChild(this._saveMark(path));
@@ -587,7 +587,7 @@ class SettingsUI {
     const S = this.settings;
     const st = this._typed && this._typed.has(path) ? 'typed' : typeof S.saveStateOf === 'function' ? S.saveStateOf(path) : 'idle';
     const inForce = inForceOf(path, { live: typeof S.liveEcho === 'function' ? S.liveEcho() : null, server: (k) => (typeof S.serverValue === 'function' ? S.serverValue(k) : S.get(k)), budgetLimits });
-    const text = saveMarkWords(st, t, { inForce });
+    const text = saveMarkWords(st, t, { inForce, refused: typeof S.refusedOf === 'function' ? S.refusedOf(path) : null });
     if (mark.textContent !== text) mark.textContent = text;
     if (mark.dataset.state !== st) mark.dataset.state = st;
     mark.hidden = !text;

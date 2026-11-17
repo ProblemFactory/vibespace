@@ -13,10 +13,14 @@ const WORDS = (code, error) => {
     case 'exit_no_proxy': return t('This profile has no proxy of its own — its browser may leave by another road, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.');
     case 'exit_url_unset': return t('No exit check address is set — give one below (an https address you trust), or type the exit by hand.');
     case 'exit_url_invalid': return t('The exit check address must be a public https address with no user name or password in it.');
-    case 'exit_restart_first': return t('This browser runs without this proxy — restart it, then check the exit.');
+    case 'exit_restart_first': return t('This browser runs on another road than its proxy now names (the address or its login changed since it started) — restart it, then check the exit.');
+    case 'exit_external_browser': return t('This profile attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.');
+    case 'exit_proxy_timeout': return t('The profile\'s proxy did not open the way to the check address in time.');
+    case 'exit_proxy_hung_up': return t('The profile\'s proxy closed the connection before the way to the check address was open.');
+    case 'exit_ip_invalid': return t('The public address is one IP address, like 203.0.113.7 or 2001:db8::1.');
     case 'proxy_credential_unreadable': return t('The proxy\'s login is in the vault, which is locked — a person unlocks it on this instance\'s page (Unlock…), then checks again.');
     case 'exit_timezone_invalid': return t('That is not a time zone — give a zone name like Asia/Shanghai.');
-    case 'exit_empty': return t('Give at least a country or a time zone.');
+    case 'exit_empty': return t('Give at least one of the public address, the country or the time zone.');
     case 'exit_check_timeout': return t('The exit check address did not answer in 8 seconds.');
     default: return error ? String(error) : t('The exit could not be checked.');
   }
@@ -57,7 +61,10 @@ export function openExitDialog(app, r, { onDone = null } = {}) {
   const check = btn(t('Check'), () => doCheck(), 'mounts-btn-primary bexit-check');
   const keep = btn(t('Keep'), () => doKeep(), 'mounts-btn-primary bexit-keep');
   keep.style.display = 'none';
-  footer.append(cancel, byHand, check, keep);
+  // 主开发 17:04Z: a kept exit can be FORGOTTEN here (the keeper's clear) — never only by deleting the profile
+  const forget = btn(t('Forget'), () => doForget(), 'bexit-forget');
+  forget.style.display = kept ? '' : 'none';
+  footer.append(cancel, forget, byHand, check, keep);
   shell.dialog.append(notes, footer);
   let source = 'typed', read = null, busy = false;
   async function doCheck() {
@@ -68,13 +75,15 @@ export function openExitDialog(app, r, { onDone = null } = {}) {
         const u = urlIn.value.trim();
         if (!u) { say(WORDS('exit_url_unset')); urlIn.focus(); return; }
         const w = await fetchJson('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [KEY]: u }) });
-        if (!w || w.error) { say(WORDS((w && w.code) || 'exit_url_invalid', w && w.error)); urlIn.focus(); return; }
+        const refusedHere = w && w.refused && w.refused[KEY];   // the server sets a refused address aside and says why (the rest of a save lands)
+        if (!w || w.error || refusedHere) { say(WORDS((refusedHere && refusedHere.code) || (w && w.code) || 'exit_url_invalid', w && w.error)); urlIn.focus(); return; }
         urlRow.style.display = 'none';
       }
       const res = await post(`/api/browser/profiles/${encodeURIComponent(r.id)}/exit-check`);
       if (!res || !res.ok) {
         if (res && res.code === 'exit_url_unset') urlRow.style.display = '';
-        say(res && res.code === 'exit_answer_unreadable' ? t('The answer could not be read: {what}. Type the exit by hand, or set another address.', { what: String(res.error || res.kind || '') }) : WORDS(res && res.code, res && res.error));
+        if (res && res.code === 'exit_answer_unreadable') { if (!urlIn.value) urlIn.value = current; urlRow.style.display = ''; }   // the door to change it: the field, here
+        say(res && res.code === 'exit_answer_unreadable' ? t('The answer could not be read: {what}. Type the exit by hand, or give another check address in the field above and press Check.', { what: String(res.error || res.kind || '') }) : WORDS(res && res.code, res && res.error));
         return;
       }
       read = res.read; source = 'measured';
@@ -82,6 +91,15 @@ export function openExitDialog(app, r, { onDone = null } = {}) {
       fields.style.display = ''; keep.style.display = '';
       say(t('Read — check each field, then Keep.'));
     } finally { busy = false; check.disabled = false; }
+  }
+  async function doForget() {
+    if (busy) return;
+    const res = await post(`/api/browser/profiles/${encodeURIComponent(r.id)}/egress`, { clear: true });
+    if (!res || !res.ok) { say(WORDS(res && res.code, res && res.error)); return; }
+    dirty = false;
+    showToast(t('{label}\'s kept exit is forgotten — an engine plugin gets none at the next start', { label }), { duration: 6000 });
+    shell.close();
+    try { onDone?.(); } catch { /* the panel reloads on its own */ }
   }
   async function doKeep() {
     if (busy) return;
