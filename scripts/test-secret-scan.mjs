@@ -260,7 +260,7 @@ ok(scanAt > 0, 'caller 1, the pre-push hook: `node scripts/secret-scan.mjs --ran
 ok(scanAt < hook.indexOf('[ "${VIBESPACE_SKIP_CI:-}" = "1" ]') && scanAt < hook.indexOf('--check-heavy') && scanAt < hook.indexOf('node scripts/ci.mjs ||'), '…before the bypass, the heavy verdict and the fast tier');
 const fastGate = ci.slice(ci.indexOf('async function fastGate('), ci.indexOf('async function heavyGate('));
 ok(ci.includes("const script = path.join(cwd, 'scripts', 'secret-scan.mjs');") && ci.includes("[script, '--tree', '--quiet']"), 'caller 2, scripts/ci.mjs: runSecretScan spawns scripts/secret-scan.mjs --tree');
-ok(fastGate.includes('runSecretScan({ cwd: runRoot, sha })') && fastGate.indexOf('runSecretScan(') < fastGate.indexOf('laneWorker('), '…in the FAST tier, after the build and before the first suite (the Actions fast job runs `node scripts/ci.mjs` too)');
+ok(fastGate.includes('runSecretScan({ cwd: runRoot, sha })') && fastGate.indexOf('await runFastLanes(plan, {') > 0 && fastGate.indexOf('runSecretScan(') < fastGate.indexOf('await runFastLanes(plan, {'), '…in the FAST tier, after the build and before the first suite (the Actions fast job runs `node scripts/ci.mjs` too)');
 ok(/^\s*if ! node scripts\/secret-scan\.mjs --tree; then$/m.test(wf) && !wf.includes('git ls-files'), 'caller 3, the Actions secret-scan workflow: `node scripts/secret-scan.mjs --tree` (no per-file loop of its own)');
 ok(/node scripts\/ci\.mjs\s*$/m.test(ciYml), '…and ci.yml\'s fast job runs scripts/ci.mjs (caller 2 on the runner)');
 const OWN_PATTERN = /xox\[|gh\[pousr\]|github_pat_|sk-ant-|AKIA|AIza|GOCSPX|glpat-|PRIVATE KEY|T3Blbk|npm_\[|hf_\[|SG\\\./;

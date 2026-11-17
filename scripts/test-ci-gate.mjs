@@ -716,7 +716,8 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
   okd(f === path.join(dir, 'c0ffee01.test-planted-legs.1.log') && fs.readFileSync(f, 'utf-8') === legs.full && legs.full.includes('leg one') && said.join('\n') === `  [ci] the whole output of test-planted-legs (try 1): ${f}` && CI.writeFailLog(dir, sha, { name: 'test-planted-green' }, { ok: true }, 1, { log: () => {} }) === null,
     `its whole output is kept: ${CI.FAST_FAIL_LOGS}/<sha8>.<suite>.<try>.log, said on its own line (a green suite keeps none)`, f);
   const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
-  ok(/const hangDir = fastFailDir\(\);/.test(SRC) && /\n {10}red = s\.name;\n {10}writeFailLog\(hangDir, sha, s, r, 1\);/.test(SRC),
+  // B-6e71: the loop is runFastLanes now (keep-going) — fastGate hands it the dir, the loop keeps every red's output
+  ok(/const hangDir = fastFailDir\(\);/.test(SRC) && /\n {6}lanes, keepGoing, inflight, failDir: hangDir, sha,/.test(SRC) && /\n {6}if \(r\.ok\) \{[^\n]*\n {6}if \(failDir\) writeFailLog\(failDir, sha, s, r, 1\);/.test(SRC),
     'WIRING: the fast tier keeps its red suite\'s whole output in FAST_FAIL_LOGS (its hang reports beside it)');
   // ci.yml: the fast job uploads FAST_FAIL_LOGS on a red, as the heavy shards upload theirs
   const uploadOf = (yml) => {

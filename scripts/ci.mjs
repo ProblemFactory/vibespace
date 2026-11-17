@@ -12,7 +12,8 @@
 //   FAST   (`npm run ci`, the pre-push gate) — build + every suite that costs
 //          less than ~10 s, PLUS the one real haiku chat turn. Target ≤2 min,
 //          over N parallel lanes + one serial lane (FAST LANES, 2026-10-04).
-//          Fail-fast: the first red stops the run and blocks the push.
+//          Fail-fast: the first red stops the run and blocks the push
+//          (`--keep-going`, B-6e71: every suite runs and every red is listed).
 //   HEAVY  (`npm run ci:heavy`) — headless chrome, real worktree servers, real
 //          agent CLIs, the real opencode binary, and anything over ~10 s. The
 //          pre-push hook launches it DETACHED after the fast tier is green, in
@@ -3491,7 +3492,8 @@ function removeScratchWorktree(wt) {
 // sequential tier). Longest first, by each row's own measured `· N s`.
 // FAIL-FAST stays: the first red starts nothing new, SIGTERMs the suites in
 // flight and blocks the push. Each suite's output is buffered and printed
-// whole when it ends, tagged with its lane.
+// whole when it ends, tagged with its lane. KEEP-GOING (`--keep-going`,
+// B-6e71) runs every row instead and lists every red by name — runFastLanes.
 //
 // THE VERDICT MAY NOT DEPEND ON LOAD — the pre-push hook runs this tier on a
 // developer's busy box. A suite that judges WALL-CLOCK time (a bound of 1 s or
@@ -3569,6 +3571,53 @@ export function fastTimingReport(timings, { top = 10, maxMs = FAST_MAX_MS } = {}
 }
 
 /**
+ * THE FAST TIER'S LANES — fastGate's loop, exported so test-ci-gate-tiers §8e drives it over planted suites (B-6e71).
+ * `plan` = scheduleFastLanes' { parallel, serial }; `run(s, { lane })` → runSuiteAsync's answer; `after(r)` prints the
+ * row and sweeps behind it (fastGate's reaper, dir pace and usage-index sweep); `skip(s)` → why a row is not started,
+ * or ''; `failDir` keeps a red suite's whole output (writeFailLog). FAIL-FAST (the default — the push gate): the first
+ * red starts nothing new and SIGTERMs `inflight`; a suite that dies of it is said «stopped», never judged (one that ended
+ * on its own is judged, even if the stop landed during its sweep). KEEP-GOING
+ * (`--keep-going`): every row runs — the serial lane too — and every red is listed by name; nothing is SIGTERMed (the
+ * 2026-11-06 .382 cut: one standing date red stopped the tier and hid three lane reds behind it, a re-cut each).
+ * → { reds, absent, skipped, timings, parMs, serMs, stoppedBy }
+ */
+export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, after = async () => {}, skip = () => '', inflight = new Set(), failDir = null, sha = '', log = console.log } = {}) {
+  const reds = [], absent = [], skipped = [], timings = [];
+  let stoppedBy = null; // fail-fast only: the red that stopped the tier
+  const laneWorker = async (queue, lane) => {
+    for (;;) {
+      if (stoppedBy) break;
+      const s = queue.shift();
+      if (!s) break;
+      const why = skip(s);
+      if (why) { skipped.push(s.name); log(`  ○ SKIPPED ${s.name} — ${why}`); continue; }
+      const r = await run(s, { lane });
+      const cut = stoppedBy; // the tier stopped while it ran: SIGTERMed by another lane's red — not a verdict
+      if (cut) r.lines = [`  · ${s.name} stopped [lane ${lane}] — ${cut} is red`];
+      await after(r);
+      if (cut) break;
+      // a row that ENDED on its own is judged, even when another lane's stop landed during its sweep (never dropped)
+      if (r.absent) { absent.push(s.name); continue; }
+      if (r.ok) { timings.push({ name: s.name, ms: r.ms, lane: String(lane) }); continue; }
+      if (failDir) writeFailLog(failDir, sha, s, r, 1); // its whole output — ci.yml's fast job uploads it (test-ci-gate §2i)
+      reds.push(s.name);
+      if (!keepGoing && !stoppedBy) {
+        stoppedBy = s.name;
+        const others = [...inflight];
+        for (const c of others) { try { c.kill('SIGTERM'); } catch { } }
+        if (others.length) log(`[ci] stopping: ${s.name} is red — ${others.length} suite(s) in flight on the other lanes SIGTERMed, nothing new starts`);
+      }
+    }
+  };
+  const tPar = Date.now();
+  const parallelQ = [...plan.parallel];
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(lanes, parallelQ.length)) }, (_, i) => laneWorker(parallelQ, i + 1)));
+  const parMs = Date.now() - tPar, tSer = Date.now();
+  if (!stoppedBy && plan.serial.length) await laneWorker([...plan.serial], 'S');
+  return { reds, absent, skipped, timings, parMs, serMs: Date.now() - tSer, stoppedBy };
+}
+
+/**
  * THE FAST TIER. `isolate` runs it in a scratch worktree at `sha` instead of
  * against this working tree — INVARIANT ⑭ ("the verdict is about the refs
  * being PUSHED") reaching the last place in the hook that had not heard it.
@@ -3577,7 +3626,7 @@ export function fastTimingReport(timings, { top = 10, maxMs = FAST_MAX_MS } = {}
  * and printed ALL GREEN. The closing line now NAMES its subject either way, so
  * "ALL GREEN" can never again be a sentence about a tree nobody is publishing.
  */
-async function fastGate({ sha: wantSha, isolate } = {}) {
+async function fastGate({ sha: wantSha, isolate, keepGoing = false } = {}) {
   const t0 = Date.now();
   markCiRun('fast');
   const fast = SUITES.filter((s) => s.tier === 'fast');
@@ -3605,47 +3654,28 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
     if (!runBuild({ cwd: runRoot }).ok) { console.error('\n✗ build FAILED — release gate is RED, do not push\n'); return 1; }
     if (!runSecretScan({ cwd: runRoot, sha }).ok) { console.error('\n✗ secret-scan RED — release gate is RED, do not push (GitHub push protection refuses these shapes: build token shapes at runtime by concatenation)\n'); return 1; }
     console.log(`[ci] ${lanes} parallel lane(s) over ${plan.parallel.length} suites (longest first), then 1 serial lane over ${plan.serial.length}: ${plan.serial.map((s) => s.name).join(', ')}`);
-    const absent = [], timings = [], skippedByName = [];
-    let red = null;
+    if (keepGoing) console.log('[ci] --keep-going: every suite runs and every red is listed by name (B-6e71) — nothing is stopped by a red');
     const dirPace = dirSweepPacer();
     const hangDir = fastFailDir(); // the fast tier's fail-log dir: a timed-out suite's hang report (ci-hang-report) + a red suite's whole output (ci-mirror-hygiene)
-    const laneWorker = async (queue, lane) => {
-      for (;;) {
-        if (red) break;
-        const s = queue.shift();
-        if (!s) break;
-        // VS_NO_REAL_CLI=1 (r6, §ban-safety): the real-turn row is not started at all — SKIPPED by name (the wire leg skips inside its suite).
-        // Only a suite PRESENT in the tree being gated (r7c): an absent one stays ABSENT, so a commit that contains none of
-        // the suites still gets NO VERDICT (the .363 train: under VS_NO_REAL_CLI=1 an all-absent stub counted one skip and
-        // claimed ALL GREEN). A by-name skip ran nothing either: it never counts as a suite that ran.
-        if (s.name === 'test-chat-e2e' && process.env.VS_NO_REAL_CLI === '1' && fs.existsSync(path.join(runRoot, 'scripts', s.name + '.mjs'))) { skippedByName.push(s.name); console.log(`  ○ SKIPPED ${s.name} — VS_NO_REAL_CLI=1 (the one real turn)`); continue; }
-        const r = await runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: { dir: hangDir, attempt: 1 } });
-        if (red) r.lines = [`  · ${s.name} stopped [lane ${lane}] — ${red} is red`];   // SIGTERMed by another lane's red: not a verdict
+    const { reds, absent, skipped: skippedByName, timings, parMs, serMs } = await runFastLanes(plan, {
+      lanes, keepGoing, inflight, failDir: hangDir, sha,
+      // VS_NO_REAL_CLI=1 (r6, §ban-safety): the real-turn row is not started at all — SKIPPED by name (the wire leg skips inside its suite).
+      // Only a suite PRESENT in the tree being gated (r7c): an absent one stays ABSENT, so a commit that contains none of
+      // the suites still gets NO VERDICT (the .363 train: under VS_NO_REAL_CLI=1 an all-absent stub counted one skip and
+      // claimed ALL GREEN). A by-name skip ran nothing either: it never counts as a suite that ran.
+      skip: (s) => (s.name === 'test-chat-e2e' && process.env.VS_NO_REAL_CLI === '1' && fs.existsSync(path.join(runRoot, 'scripts', s.name + '.mjs')) ? 'VS_NO_REAL_CLI=1 (the one real turn)' : ''),
+      run: (s, { lane }) => runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: { dir: hangDir, attempt: 1 } }),
+      after: async (r) => {
         console.log(r.lines.join('\n'));
         // a suite may not leave a daemon behind (2.369.104) — swept after every suite, as the heavy lanes do
         try { await reapScratchOrphansAsync({}); } catch (e) { console.log(`  · scratch reaper skipped: ${e && e.message}`); }
         dirPace.afterRow(r); // …nor its scratch dir, once nothing holds it (B-60d2) — on the tier's pace (B-9ec9)
         sweepUsageIndexDirs(); // …nor a usage index of a data/ it removed (design 011 lane 3)
-        if (red) break;
-        if (r.absent) { absent.push(s.name); continue; }
-        if (!r.ok) {
-          red = s.name;
-          writeFailLog(hangDir, sha, s, r, 1); // its whole output — ci.yml's fast job uploads it (test-ci-gate §2i)
-          const others = [...inflight];
-          for (const c of others) { try { c.kill('SIGTERM'); } catch { } }
-          if (others.length) console.log(`[ci] stopping: ${s.name} is red — ${others.length} suite(s) in flight on the other lanes SIGTERMed, nothing new starts`);
-          break;
-        }
-        timings.push({ name: s.name, ms: r.ms, lane: String(lane) });
-      }
-    };
-    const tPar = Date.now();
-    const parallelQ = [...plan.parallel];
-    await Promise.all(Array.from({ length: Math.max(1, Math.min(lanes, parallelQ.length)) }, (_, i) => laneWorker(parallelQ, i + 1)));
-    const parMs = Date.now() - tPar;
-    if (!red && plan.serial.length) await laneWorker([...plan.serial], 'S');
+      },
+    });
     dirPace.boundary("the fast tier's end"); // B-9ec9: whatever the pace left since its last sweep
-    if (red) { console.error(`\n✗ ${red} — release gate is RED, do not push\n`); return 1; }
+    if (keepGoing && reds.length) console.error(`\n[ci] --keep-going: ${reds.length} red of ${fast.length - absent.length - skippedByName.length} suites that ran — ${reds.join(', ')} (each one's whole output: ${hangDir})`);
+    if (reds.length) { console.error(`\n✗ ${reds.join(', ')} — release gate is RED, do not push\n`); return 1; }
     // NOTHING RAN IS NOT A PASS. An old tag or a commit that predates the gate
     // contains none of these suites (measured: v2.30.0 ⇒ 73 of 73 absent), and
     // "ALL GREEN" for a run of zero suites is the vacuous green the `--only`
@@ -3661,7 +3691,7 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
       return 0;
     }
     const sum = timings.reduce((n, t) => n + t.ms, 0);
-    console.log(`[ci] lanes: ${lanes} parallel (${Math.round(parMs / 1000)}s) + serial (${Math.round((Date.now() - tPar - parMs) / 1000)}s); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
+    console.log(`[ci] lanes: ${lanes} parallel (${Math.round(parMs / 1000)}s) + serial (${Math.round(serMs / 1000)}s); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
     for (const line of fastTimingReport(timings)) console.log(line);
     const ran = fast.length - absent.length - skippedByName.length;
     const subject = isolate ? `for ${shortSha(sha)} (isolated worktree at the commit being pushed)` : '(this working tree)';
@@ -4433,9 +4463,9 @@ export function exitFlushed(code) {
 // THE FLAGS ci.mjs KNOWS (lane claude-steer-inject r6, the acceptance's «node scripts/ci.mjs --help»: ci.mjs ignored an unknown
 // flag and ran the WHOLE fast tier — test-chat-e2e billed a real turn on the CI OAT in a shared scratch). Anything else —
 // --help included — prints the usage and exits 2 before a suite starts.
-const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'why']);
+const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'keep-going', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'why']);
 const CI_USAGE = `usage: node scripts/ci.mjs [mode] [options]
-  (no mode)            the FAST tier on this working tree (--isolate [--sha=<x>]: on a commit)
+  (no mode)            the FAST tier on this working tree (--isolate [--sha=<x>]: on a commit · --keep-going: every red listed, not the first)
   --heavy              the heavy tier (--only=a,b · --affected --range=<old>..<new> · --shard=<i>/<n> · --host=<name> · --why)
   --heavy-launch <x>   a heavy run handed to a background child · --check-heavy / --status: the markers' verdict
   --heavy-verdict <sha> --gh-run <id> --markers=<dir>   the CI mirror's green run of exactly <sha>, verified through gh, as the HOSTED half's listed green (B-e381)
@@ -4511,7 +4541,7 @@ function main(argv) {
   }
   // `--isolate [--sha=<x>]` gates the COMMIT rather than this working tree —
   // the hook uses it when a pushed ref's tip is not HEAD.
-  fastGate({ sha: str('sha'), isolate: !!arg('isolate') })
+  fastGate({ sha: str('sha'), isolate: !!arg('isolate'), keepGoing: !!arg('keep-going') })
     .then((code) => exitFlushed(code), (e) => { console.error('[ci] crashed: ' + (e && e.stack || e)); exitFlushed(1); });
 }
 

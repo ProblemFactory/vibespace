@@ -575,6 +575,62 @@ console.log('\n§8d the xpra window family — parts ≤ 8 min on one boot, ever
       'CONTROLS: a § in two parts, a part launching its own chrome, a part without the helper, a part over 8 min, a budget not 2×, a lost part\'s §§, a helper that ends nothing — each named');
   }
 }
+
+// ── §8e THE FAST TIER LISTS EVERY RED WITH --keep-going (B-6e71) ──
+// The 2026-11-06 .382 cut: the fast tier stopped at one standing red (a date fixture) and three lane reds behind it were
+// never reached — a re-cut each. runFastLanes is fastGate's loop; driven here over PLANTED suites through the REAL
+// runSuiteAsync (real children, two lanes + the serial lane). A slow row waits on a FILE, never a clock: keep-going
+// releases it when the first red is seen (it must finish, not be killed); fail-fast never releases it (it is SIGTERMed).
+// The control is a patched copy of ci.mjs without the keep-going branch: its keep-going run lists ONE red.
+console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
+{
+  const ci = await import('./ci.mjs');
+  const root = mktmp('keepgoing');
+  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  const plant = (name, body) => fs.writeFileSync(path.join(root, 'scripts', name + '.mjs'), body);
+  const release = path.join(root, 'release'); // ONE path (the runner's env is fixed at its import): each drive starts without it
+  plant('test-kg-slow', `import fs from 'node:fs';\nconst t = setInterval(() => { if (fs.existsSync(${JSON.stringify(release)})) { clearInterval(t); console.log('ALL PASS (1)'); } }, 20);\n`);
+  for (const n of ['test-kg-red1', 'test-kg-red2']) plant(n, `console.log('  ✗ planted ${n}');\nconsole.log('1 FAILED');\nprocess.exit(1);\n`);
+  for (const n of ['test-kg-green1', 'test-kg-green2', 'test-kg-last']) plant(n, `console.log('ALL PASS (1)');\n`);
+  const row = (name) => ({ name, tier: 'fast', budgetMs: 8000 });
+  const plan = () => ({ parallel: ['test-kg-slow', 'test-kg-red1', 'test-kg-green1', 'test-kg-red2', 'test-kg-green2'].map(row), serial: [row('test-kg-last')] });
+  const drive = async (M, tag, keepGoing) => {
+    const failDir = path.join(root, `fail-${tag}`), rows = [], said = [], inflight = new Set();
+    fs.rmSync(release, { force: true });
+    const res = await M.runFastLanes(plan(), {
+      lanes: 2, keepGoing, inflight, failDir, sha: 'kee9601e0000', log: (l) => said.push(l),
+      run: (s, { lane }) => M.runSuiteAsync(s, { root, sha: 'kee9601e0000', lane, inflight }),
+      after: async (r) => { rows.push(r.lines.join('\n')); if (keepGoing && /✗ test-kg-red1 FAILED/.test(r.lines[0])) fs.writeFileSync(release, '1'); },
+    });
+    return { ...res, rows, said, fails: fs.existsSync(failDir) ? fs.readdirSync(failDir).sort() : [] };
+  };
+  const kg = await drive(ci, 'kg', true);
+  const names = (xs) => xs.map((t) => t.name).sort().join(',');
+  ok(kg.reds.slice().sort().join(',') === 'test-kg-red1,test-kg-red2' && !kg.stoppedBy,
+    `--keep-going: BOTH planted reds are listed by name (${kg.reds.join(', ')}), nothing stopped the tier`);
+  ok(names(kg.timings) === 'test-kg-green1,test-kg-green2,test-kg-last,test-kg-slow' && !kg.rows.some((l) => /stopped \[lane/.test(l)) && !kg.said.some((l) => /\[ci\] stopping:/.test(l)),
+    `…every green row ran — the slow one in flight at the first red FINISHED (not SIGTERMed), and the serial lane ran (${names(kg.timings)})`);
+  ok(kg.fails.join(',') === 'kee9601e.test-kg-red1.1.log,kee9601e.test-kg-red2.1.log',
+    `…and each red keeps its whole output in the fail-log dir (${kg.fails.join(', ')})`);
+  const ff = await drive(ci, 'ff', false);
+  ok(ff.reds.join(',') === 'test-kg-red1' && ff.stoppedBy === 'test-kg-red1' && ff.rows.some((l) => /test-kg-slow stopped \[lane 1\] — test-kg-red1 is red/.test(l))
+    && !ff.rows.some((l) => /test-kg-red2|test-kg-last/.test(l)) && ff.said.some((l) => /\[ci\] stopping: test-kg-red1 is red — 1 suite\(s\) in flight/.test(l)),
+    'FAIL-FAST stays the default (the push gate): the first red SIGTERMs the slow row («stopped», not judged), red2 and the serial lane never start');
+  // the CONTROL: ci.mjs without the keep-going branch — the same keep-going run lists one red and stops
+  const M = mutantCopies('ci-keepgoing', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8'), CUT = '      if (!keepGoing && !stoppedBy) {\n';
+  const mut = await import(pathToFileURL(M.write('scripts/ci.mjs', src.replace(CUT, '      if (!stoppedBy) {\n'), 'no-keep-going', { esm: true })).href);
+  const kgMut = src.includes(CUT) ? await drive(mut, 'mut', true) : null;
+  ok(!!kgMut && kgMut.reds.length === 1 && kgMut.stoppedBy === 'test-kg-red1',
+    `CONTROL: a copy of ci.mjs without the keep-going branch lists ONE red under --keep-going (${kgMut ? kgMut.reds.join(', ') : 'the cut line is gone'}) — the legs above are red without the change`);
+  // the flag reaches the tier: ci.mjs knows it (an unknown flag runs nothing) and main() hands it to fastGate
+  const cli = (flag) => spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), flag, '--help'], { encoding: 'utf-8', env: { ...GIT_ENV, VS_NO_REAL_CLI: '1' }, timeout: 60000 });
+  const known = cli('--keep-going'), typo = cli('--keep-goin');
+  ok(known.status === 2 && !/does not know --keep-going/.test(known.stderr) && /--keep-going: every red listed/.test(known.stderr) && typo.status === 2 && /does not know --keep-goin /.test(typo.stderr),
+    'ci.mjs KNOWS --keep-going (the usage says it; a typo of it is refused by name and runs nothing)');
+  ok(/\n {2}fastGate\(\{ sha: str\('sha'\), isolate: !!arg\('isolate'\), keepGoing: !!arg\('keep-going'\) \}\)/.test(src),
+    'WIRING: main() hands --keep-going to fastGate (and fastGate to runFastLanes — test-ci-gate §2i pins that line)');
+}
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }
