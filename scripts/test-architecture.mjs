@@ -1980,6 +1980,9 @@ for (const [edge] of EXCEPTIONS) {
     if (!REAL_CLI.test(s)) return null;
     const decl = /\/\/ real-cli-env: (.{10,})/.exec(s);
     if (decl) return null;
+    // the suites' one hub boot (lane boot-helper, 2026-11-17): hub-boot.mjs strippedEnv() = withoutVendorKeys + no inherited
+    // daemon root — imported AND called is the same strip (pinned below)
+    if (/import\s*\{[^}]*\bstrippedEnv\b[^}]*\}\s*from\s*'\.\/hub-boot\.mjs'/.test(s) && /\bstrippedEnv\(/.test(s)) return null;
     if (!/import\s*\{[^}]*\bwithoutVendorKeys\b[^}]*\}\s*from\s*'\.\/scratch\.mjs'/.test(s)) return 'resolves a real agent CLI but imports no withoutVendorKeys from ./scratch.mjs (and declares no `// real-cli-env:` reason)';
     if ((s.match(/withoutVendorKeys\(/g) || []).length < 1) return 'imports withoutVendorKeys but never calls it';
     return null;
@@ -1991,12 +1994,18 @@ for (const [edge] of EXCEPTIONS) {
   ok(judge("const srv = spawn('codex', ['app-server'], { env: { ...process.env, CODEX_HOME: home } });") !== null
     && judge("import { withoutVendorKeys } from './scratch.mjs';\nconst srv = spawn('codex', ['app-server'], { env: { ...withoutVendorKeys(process.env), CODEX_HOME: home } });") === null
     && judge("// real-cli-env: the child env is {PATH, HOME} only\nexecSync('command -v codex');") === null
-    && judge("// real-cli-env: x\nexecSync('command -v codex');") !== null,
-  '§50 NEGATIVE CONTROL: a bare real-codex spawn is caught, the shared strip passes, a reasoned declaration passes, a reason-less one does not');
+    && judge("// real-cli-env: x\nexecSync('command -v codex');") !== null
+    && judge("import { strippedEnv } from './hub-boot.mjs';\nexecSync('command -v claude');\nstartHub({ env: { ...strippedEnv(), HOME } });") === null
+    && judge("import { strippedEnv } from './hub-boot.mjs';\nexecSync('command -v claude');\nstartHub({ env: { ...process.env, HOME } });") !== null,
+  '§50 NEGATIVE CONTROL: a bare real-codex spawn is caught, the shared strip passes (scratch.mjs withoutVendorKeys or hub-boot.mjs strippedEnv, called), a reasoned declaration passes, a reason-less one does not, an imported strippedEnv never called does not');
   const { VENDOR_KEY_ENV, withoutVendorKeys } = await import(path.resolve('scripts/scratch.mjs'));
   const planted = withoutVendorKeys({ PATH: '/bin', OPENAI_API_KEY: 'a', CODEX_API_KEY: 'b', ANTHROPIC_API_KEY: 'c', ANTHROPIC_AUTH_TOKEN: 'd' });
   ok(['OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].every((k) => VENDOR_KEY_ENV.includes(k) && !(k in planted)) && planted.PATH === '/bin',
     '§50 withoutVendorKeys strips all four ambient credentials and keeps everything else');
+  const { strippedEnv, DAEMON_ROOT_ENV: HB_DAEMON } = await import(path.resolve('scripts/hub-boot.mjs'));
+  const planted2 = strippedEnv({ PATH: '/bin', OPENAI_API_KEY: 'a', CODEX_API_KEY: 'b', ANTHROPIC_API_KEY: 'c', ANTHROPIC_AUTH_TOKEN: 'd', VIBESPACE_DEVICE_ROOT: '/x', VIBESPACE_AGENTD_ROOT: '/y' });
+  ok(VENDOR_KEY_ENV.every((k) => !(k in planted2)) && HB_DAEMON.every((k) => !(k in planted2)) && planted2.PATH === '/bin',
+    '§50 hub-boot.mjs strippedEnv strips every vendor key withoutVendorKeys strips AND both daemon roots, and keeps everything else');
 }
 
 // §50b THE REAL-CODEX HOME CENSUS (lane hook-root-guard, B-c77a, 2026-10-02).
