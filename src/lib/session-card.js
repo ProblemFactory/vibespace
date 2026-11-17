@@ -30,6 +30,22 @@ const ICON = {
   fork:      _s('<path d="M8 2v6M8 8c-3 0-4 2-4 4M8 8c3 0 4 2 4 4"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="13" r="1.5"/><circle cx="8" cy="2" r="1.5"/>'),
 };
 
+/** A ROW's resume / view options — ONE definition (the card's menu, and a link of the scheme's «Resume here» / «Read its history»,
+ *  lane login-request-card piece 1): remote rows resume and view ON their host; a live keeper session is ADOPTED (B-4058). */
+export function agentOptsOf(s) {
+  return {
+    backend: s.backend || 'claude',
+    backendSessionId: s.backendSessionId || s.sessionId,
+    hostId: s.host || undefined, // remote sessions resume/view ON their host
+    keeperSid: s.keeperSid || undefined, // live remote keeper session — resume ADOPTS it (B-4058)
+    agentKind: s.agentKind || 'primary',
+    agentRole: s.agentRole || '',
+    agentNickname: s.agentNickname || '',
+    sourceKind: s.sourceKind || '',
+    parentThreadId: s.parentThreadId || null,
+  };
+}
+
 /**
  * Render the detail groups section inside a session card.
  * @param {HTMLElement} container - DOM container for groups
@@ -49,6 +65,7 @@ const ICON = {
 //    Keep this block self-contained (the gate suite extracts + replays it):
 //    it closes over registerCommand, registerMenuItem, tr, backendFeatureCaps,
 //    copyText, showConfirmDialog only. ──
+
 export function registerSessionCardMenu() {
   const M = 'session-card';
   const live = (c) => c.s.status === 'live' && !!c.s.webuiId;
@@ -260,17 +277,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   const agentRoleLabel = getAgentRoleLabel(s.agentRole);
   const agentRoleShort = getAgentRoleShortLabel(s.agentRole);
   const showAgentKind = (s.agentKind || 'primary') !== 'primary';
-  const agentOpts = {
-    backend: s.backend || 'claude',
-    backendSessionId: s.backendSessionId || s.sessionId,
-    hostId: s.host || undefined, // remote sessions resume/view ON their host
-    keeperSid: s.keeperSid || undefined, // live remote keeper session — resume ADOPTS it (B-4058)
-    agentKind: s.agentKind || 'primary',
-    agentRole: s.agentRole || '',
-    agentNickname: s.agentNickname || '',
-    sourceKind: s.sourceKind || '',
-    parentThreadId: s.parentThreadId || null,
-  };
+  const agentOpts = agentOptsOf(s);
 
   const badgeMap = {
     live:     { cls: 'badge-live', text: tr('LIVE') },

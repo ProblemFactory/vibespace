@@ -135,6 +135,10 @@ vibespace-api conversations end <sess-…>
 vibespace-api conversations archive <conversation id>                 when the lane is accepted: end + archive (the sidebar's 归档)
 ```
 
+## Sending the person to a conversation or a desktop
+
+To send the person to a conversation or a desktop, put the row's link in your reply — [its name](vibespace://conversation/<key>) or [Desktop 2](vibespace://desktop/<id>); the chat makes it a button that takes the person there. `<key>` is the conversation's key exactly as the list prints it (`<backend>:<conversation id>`, e.g. `claude:<id>` from `sessionKey` above); `<id>` is the desktop's stored id (names are not unique). Copy a link, never compose one. A press only navigates — nothing is sent, ended, archived or granted; a conversation that has ended offers «Resume here» and «Read its history» to the person. The link works in your own replies and in For-you items; written in a message to another agent it stays plain text.
+
 ## The answers
 
 | code | means |

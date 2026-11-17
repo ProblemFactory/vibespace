@@ -9,7 +9,7 @@ import { arrivalVerdict } from '../sync-arrival.js'; // PURE: StateSync's arriva
 import { VOICE_UI } from '../voice-focus.js'; // PURE: the voice UI outside every box — never an outside press (lane phone-tray-voice-done)
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 import { DIALOG_ROOTS, SHEET_ROOTS, reopenVerdict, undismissableVerdict, escapeVerdict, typedVerdict, ownFloat } from './form-yield.js'; // PURE (lane dialog-yield r2/r3): the ONE dialog predicate set + the shell's verdicts
-import { splitSettingLinks, hasScheme as hasSettingScheme } from '../setting-links.js'; // PURE (CJS, lane setting-doors pick 1): THE grammar of a link to one setting row
+import { splitSettingLinks, hasScheme as hasSettingScheme } from '../internal-link.js'; // PURE (CJS): THE scheme's ONE grammar (lane setting-doors pick 1's settings row; a toast — the product's own words — draws only that row)
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 

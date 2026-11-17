@@ -798,8 +798,8 @@ const DOOR_WORDS = Object.freeze({
   wiring: 'This is VibeSpace failing closed, not a limit: the Usage window lists the accounts and the hub log’s [spend] lines name the conversation — the limits in Settings → Spending cannot help here.',
 });
 // lane setting-doors pick 1 (2026-11-14): a refusal that names a value names where to change it — THE ROW, as its link
-// (src/setting-links.js `vibespace://settings/<key>`; the owner's page draws it as a door to that one row)
-// PURE, imports nothing: the link's spelling is src/setting-links.js SCHEME (test-setting-links pins the two equal)
+// (src/internal-link.js `vibespace://settings/<key>`; the owner's page draws it as a door to that one row)
+// PURE, imports nothing: the link's spelling is src/internal-link.js SCHEME (test-setting-links pins the two equal)
 const SL = Object.freeze({ settingLink: (key) => `vibespace://settings/${key}` });
 const SPEND_ROW_KEYS = Object.freeze({ perIdentityHour: 'spend.unattendedPerIdentityHour', perIdentityDay: 'spend.unattendedPerIdentityDay', perInstanceDay: 'spend.unattendedPerInstanceDay', noticePct: 'spend.budgetNoticePct', allowOverage: 'spend.allowOverageTurns' });
 const DOOR_LINK_WORDS = Object.freeze({

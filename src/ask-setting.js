@@ -18,7 +18,7 @@
 // THE ACTION TYPE, spelled ONCE (its row in src/foryou-actions.js names this file as builtIn): every surface asks isSettingChange,
 // never compares the string (test-architecture §78's foryou family)
 const TYPE = 'setting-change';
-const LINK = (key) => `vibespace://settings/${key}`;   // src/setting-links.js SCHEME (test-setting-holds pins the two equal)
+const LINK = (key) => `vibespace://settings/${key}`;   // src/internal-link.js settingLink (test-setting-holds pins the two equal)
 // THE CLOSED LIST — mirrored from the schema rows marked `proposable: true` (src/lib/settings-schema.js; test-setting-holds pins them
 // equal: key, min, max, step, default); the hold store and the press judge against THIS table
 const PROPOSABLE = Object.freeze({   // + `label` = the row's schema label (an i18n key — the hub's notices name the row by it)
