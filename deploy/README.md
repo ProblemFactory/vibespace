@@ -422,6 +422,13 @@ The plugin repository's credential is the `plugin-git` entry of the same
 Secret's `integrations.json` (`{"id": "plugin-git", "key": "default", "values":
 {"host": "<git host>", "token": "<read-only token>"}}`). The fleet admin
 (vibespace-admin) writes `fleet.json`; it is the other half of this road.
+An ssh source (`git@<host>:…`) takes `"deployKey"` instead of the token. Add
+`"knownHosts"` beside it: the host's published public keys, one
+`<host> <type> <key>` line each (as `ssh-keyscan` prints them; compare them
+with the fingerprints the host publishes), as ONE JSON string with the lines
+joined by `\n` (an array is not read). A pod has no known_hosts of its own,
+so without them its first clone trusts whatever key it meets; with them a
+different key refuses the clone as `plugin_git_hostkey`.
 
 **A kernel bump is a Secret patch: every running pod follows — no helm
 upgrade, no restart** (app ≥ 2.369.383):

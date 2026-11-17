@@ -3,7 +3,9 @@
 // a `git` wrapper the installer is handed as `gitBin` that RECORDS each call (argv, every env value, what GIT_ASKPASS answers,
 // the credential files' modes, a hard-link WITNESS of the value file — after a shred its inode holds other bytes) and runs
 // the real git with the test host (`https://repo.test/…`, `git@repo.test:…`) mapped to the bare repository. `mode.json`
-// beside it bends a network call: {fail: 'auth'} (git's own refusal words) · {fail: 'hang'} (no answer for 3 s).
+// beside it bends a network call: {fail: 'auth'} (git's own refusal words) · {fail: 'hang'} (no answer for 3 s) · {fail:
+// 'hostkey'} (ssh's words for a key it will not trust — lane lg-remote-hardening). A pinned ssh clone's known_hosts file is
+// recorded like the key (`kh`: its text, mode, folder, witness).
 // Used by test-plugin-trust ③b and test-plugin-loader ④.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,10 +50,13 @@ const witness = (f) => { const w = path.join(D, 'witness-' + process.pid + '-' +
 if (env.GIT_ASKPASS) { const a = env.GIT_ASKPASS, d = path.dirname(a); rec.ask = { path: a, dir: d, dirMode: stat(d), mode: stat(a), script: fs.readFileSync(a, 'utf8'), user: execFileSync(a, ["Username for 'https://${HOST}': "], { encoding: 'utf8' }), pass: execFileSync(a, ["Password for 'https://x@${HOST}': "], { encoding: 'utf8' }), files: fs.readdirSync(d).map((n) => [n, stat(path.join(d, n))]), witness: witness(path.join(d, 'token')) }; }
 const m = /-i '([^']+)'/.exec(env.GIT_SSH_COMMAND || '');
 if (m) rec.key = { path: m[1], dir: path.dirname(m[1]), mode: stat(m[1]), dirMode: stat(path.dirname(m[1])), text: fs.readFileSync(m[1], 'utf8'), witness: witness(m[1]) };
+const kh = /UserKnownHostsFile="([^"]+)"/.exec(env.GIT_SSH_COMMAND || '');
+if (kh) rec.kh = { path: kh[1], dir: path.dirname(kh[1]), mode: stat(kh[1]), text: fs.readFileSync(kh[1], 'utf8'), witness: witness(kh[1]) };
 fs.appendFileSync(path.join(D, 'calls.jsonl'), JSON.stringify(rec) + '\\n');
 let mode = {}; try { mode = JSON.parse(fs.readFileSync(path.join(D, 'mode.json'), 'utf8')); } catch {}
 const net = argv.includes('fetch') || argv.includes('ls-remote');
 if (net && mode.fail === 'auth') { process.stderr.write("fatal: Authentication failed for '${URL_HTTPS}/'\\n"); process.exit(128); }
+if (net && mode.fail === 'hostkey') { process.stderr.write('No ED25519 host key is known for ${HOST} and you have requested strict checking.\\nHost key verification failed.\\nfatal: Could not read from remote repository.\\n\\nPlease make sure you have the correct access rights\\nand the repository exists.\\n'); process.exit(128); }
 if (net && mode.fail === 'hang') { const t = Date.now(); while (Date.now() - t < 3000) {} process.exit(1); }
 const mapped = argv.map((a) => (a.startsWith('https://${HOST}/') || a.startsWith('git@${HOST}:') ? 'file://' + path.join(D, 'bare.git') : a));
 const r = spawnSync(${JSON.stringify(realGit)}, mapped, { stdio: 'inherit' });

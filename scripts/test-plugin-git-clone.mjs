@@ -12,7 +12,9 @@
 // GIT_CONFIG_GLOBAL hands it the token — RED. Round 3: git trusts the fixture CA the way a pod behind a TLS-inspecting egress
 // does — the hub's GIT_SSL_CAINFO through the egress door (src/agent-env.js EGRESS_ENV); the same CA named only in the HOME
 // config (`http.sslCAInfo`) is NOT read (the clone fails on the certificate), and a copy whose door lacks the name fails the
-// same way — RED. SKIPs with evidence without git / git-http-backend / openssl.
+// same way — RED. SKIPs with evidence without git / git-http-backend / openssl. ⑨ (lane lg-remote-hardening, B-7f0b): the
+// ssh HOST-KEY PIN over real git + real ssh against a private sshd on loopback (no login ever) — a wrong pin refused by name
+// with the fingerprint shown, the right one passes the check; an accept-new copy trusts the swapped key — RED.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -183,6 +185,68 @@ try {
 } finally {
   srv.close(); evil.close();
   fs.rmSync(ROOT, { recursive: true, force: true });
+}
+// ── ⑨ lane lg-remote-hardening (B-7f0b — q-042 D6, merged B-4ff5): THE SSH HOST-KEY PIN over the REAL road. A private sshd
+// on loopback as this user (scratch host keys; AuthorizedKeysFile /dev/null — no login ever happens: ssh checks the host key
+// BEFORE any), run in the foreground (-D) as THIS process's child and ended on every way out; real git + real ssh through a
+// routing shim (-F /dev/null, Hostname / Port only). ssh reads `~` from the PASSWD entry, never $HOME — the shim hands any
+// ssh that names no UserKnownHostsFile a scratch file, so the RED copy cannot write the box user's own ~/.ssh/known_hosts.
+console.log('— ⑨ the ssh host-key pin over real ssh (lane lg-remote-hardening)');
+{
+  const SSHD = '/usr/sbin/sshd', SSH = which('ssh'), KEYGEN = which('ssh-keygen');
+  if (!GIT || !SSH || !KEYGEN || !fs.existsSync(SSHD)) console.log(`  - SKIP ⑨: ${!GIT ? 'no git' : !SSH ? 'no ssh' : !KEYGEN ? 'no ssh-keygen' : 'no ' + SSHD} on this machine`);
+  else {
+    const net = await import('node:net');
+    const R = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pgc-ssh-'));
+    let sshd = null;
+    const endSshd = () => { if (sshd && sshd.exitCode === null) { try { sshd.kill('SIGTERM'); } catch { } } };
+    process.on('exit', endSshd);
+    try {
+      fs.mkdirSync(path.join(R, 'shim')); fs.mkdirSync(path.join(R, 'home'));
+      for (const n of ['hostA', 'hostB', 'user']) execFileSync(KEYGEN, ['-q', '-t', 'ed25519', '-N', '', '-C', 'fixture', '-f', path.join(R, n)], { stdio: 'ignore' });
+      const pub = (n) => fs.readFileSync(path.join(R, n + '.pub'), 'utf8').trim().split(/\s+/).slice(0, 2).join(' ');
+      const fpA = execFileSync(KEYGEN, ['-l', '-E', 'sha256', '-f', path.join(R, 'hostA.pub')], { encoding: 'utf8' }).split(/\s+/)[1];
+      const port = await new Promise((res) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+      fs.writeFileSync(path.join(R, 'sshd_config'), `Port ${port}\nListenAddress 127.0.0.1\nHostKey ${R}/hostA\nPidFile none\nAuthorizedKeysFile /dev/null\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nStrictModes no\n`);
+      sshd = spawn(SSHD, ['-D', '-f', path.join(R, 'sshd_config'), '-E', path.join(R, 'sshd.log')], { stdio: 'ignore' });
+      // ready = the port answers (sshd binds before its accept loop); a start that fails is a SKIP with its evidence
+      let up = false;
+      for (let i = 0; i < 100 && !up && sshd.exitCode === null; i++) { up = await new Promise((res) => { const c = net.connect(port, '127.0.0.1', () => { c.destroy(); res(true); }).once('error', () => res(false)); }); if (!up) await new Promise((r) => setTimeout(r, 50)); }
+      if (!up) console.log(`  - SKIP ⑨: the stand-in sshd did not listen (exit ${sshd.exitCode}; ${(() => { try { return fs.readFileSync(path.join(R, 'sshd.log'), 'utf8').trim().split('\n').pop(); } catch { return 'no log'; } })()})`);
+      else {
+        const homeKh = path.join(R, 'home', 'known_hosts');
+        fs.writeFileSync(path.join(R, 'shim', 'ssh'), `#!/bin/sh\nset -- -F /dev/null -o Hostname=127.0.0.1 -p ${port} "$@"\ncase "$*" in *UserKnownHostsFile=*) ;; *) set -- -o UserKnownHostsFile=${homeKh} -o GlobalKnownHostsFile=/dev/null "$@" ;; esac\nexec ${SSH} "$@"\n`, { mode: 0o755 });
+        const URL_S = 'git@repo.test:acme/private.git';
+        let values = null;
+        const store9 = { resolveIntegration: () => (values ? { source: 'user', values: { ...values }, whyCode: null, why: null } : { source: 'none', values: {}, whyCode: 'no-values', why: 'none' }) };
+        const GR = path.join(R, 'root with space'); fs.mkdirSync(path.join(GR, 'data', 'plugins'), { recursive: true });
+        const quiet = { log() {}, warn() {} };
+        const saved = { PATH: process.env.PATH, HOME: process.env.HOME };
+        const install = async (mod) => { try { await mod.create({ rootDir: GR, log: quiet, integrations: () => store9, gitBin: GIT, gitTimeoutMs: 15000 }).install({ source: 'git', value: URL_S, ref: 'v1', credential: 'plugin-git' }); return null; } catch (e) { return e; } };
+        try {
+          Object.assign(process.env, { PATH: path.join(R, 'shim') + ':' + saved.PATH, HOME: path.join(R, 'home') });
+          const deployKey = fs.readFileSync(path.join(R, 'user'), 'utf8');
+          const PI = require(path.join(REPO, 'src/server/plugin-install.js'));
+          values = { host: 'repo.test', deployKey, knownHosts: `repo.test ${pub('hostB')}\n` };
+          const eA = await install(PI);
+          values = { host: 'repo.test', deployKey, knownHosts: `repo.test ${pub('hostA')}\n` };
+          const eB = await install(PI);
+          ok(eA && eA.code === 'plugin_git_hostkey' && eA.message.includes(`it showed ${fpA}`) && eB && eB.code === 'plugin_git_auth',
+            '⑨ REAL ssh: the pin names another key ⇒ plugin_git_hostkey with the fingerprint the stand-in really showed; the pin names its key ⇒ past the host-key check (the stand-in then refuses every login: plugin_git_auth) — the quoted file under a root with a space was read', [eA, eB].map((e) => e && `${e.code}: ${String(e.message).slice(0, 160)}`));
+          // RED CONTROL: the copy that still trusts the first key (the road before the pin) meets the same wrong pin and goes on
+          const SRC9 = fs.readFileSync(path.join(REPO, 'src/server/plugin-install.js'), 'utf8');
+          const from = "StrictHostKeyChecking=yes -o ${shq(`HostKeyAlias=${cred.alias}`)} -o ${shq(`UserKnownHostsFile=\"${kh}\"`)} -o GlobalKnownHostsFile=/dev/null";
+          ok(SRC9.includes(from), '⑨ control: the pinned GIT_SSH_COMMAND is in plugin-install.js', from);
+          const M9 = mutantCopies('plugin-git-clone-hostkey', REPO);
+          values = { host: 'repo.test', deployKey, knownHosts: `repo.test ${pub('hostB')}\n` };
+          const eM = await install(M9.load('src/server/plugin-install.js', SRC9.replace(from, 'StrictHostKeyChecking=accept-new'), 'accept-new'));
+          const learned = (() => { try { return fs.readFileSync(homeKh, 'utf8'); } catch { return ''; } })();
+          ok(eM && eM.code === 'plugin_git_auth' && learned.includes(pub('hostA').split(' ')[1]), '⑨ RED CONTROL: a copy with accept-new (no pin file) meets the same wrong pin, TRUSTS the stand-in\'s key (it lands in the scratch file standing in for the hub user\'s known_hosts) and goes on to the login — the leg above refuses that', eM && `${eM.code}: ${String(eM.message).slice(0, 120)}`);
+          ok(!/Accepted /.test(fs.readFileSync(path.join(R, 'sshd.log'), 'utf8')), '⑨ the stand-in sshd accepted no login at all (AuthorizedKeysFile /dev/null)');
+        } finally { Object.assign(process.env, saved); }
+      }
+    } finally { endSshd(); fs.rmSync(R, { recursive: true, force: true }); }
+  }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

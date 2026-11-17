@@ -124,6 +124,7 @@ function maskValue(v) {
 
 const VendorList = require('./channels/registry-list.js');   // lane dc-channels-manifest: the channel vendors' rows (PURE manifests)
 const PluginSettings = require('./plugin-settings.js');      // lane integrations-menu-home: which built-in plugin names a row (PURE, imports nothing)
+const SKF = require('./ssh-key-format.js');                  // lane lg-remote-hardening (B-7f0b): the known_hosts lines of a pinned ssh host key (PURE)
 const okV = Object.freeze({ ok: true });
 const bad = (why) => ({ ok: false, why });
 const V = {
@@ -157,6 +158,8 @@ const V = {
   accessToken: (v) => (String(v).length < 8 ? bad('at least 8 characters') : /^[\x21-\x7e]+$/.test(String(v)) ? (String(v).length > 4096 ? bad('at most 4096 characters') : okV) : bad('one printable line — no spaces, line breaks or control characters')),
   gitHost: (v) => (/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::\d{1,5})?$/i.test(String(v)) ? okV : bad('a host name such as github.com (no scheme, no path)')),
   /** an ssh PRIVATE key in its PEM / OpenSSH text form (several lines; the store trims the ends) */
+  // lane lg-remote-hardening (B-7f0b, q-042 D6): ssh host keys as ssh-keyscan prints them / a git host publishes them
+  knownHosts: (v) => { const p = SKF.parseKnownHosts(v); return !p.ok ? bad(p.line ? `line ${p.line}: ${p.why}` : p.why) : p.keys.length ? okV : bad('no key in it — one line per key, as ssh-keyscan prints it'); },
   sshPrivateKey: (v) => (/^-----BEGIN (?:OPENSSH|RSA|EC|DSA)? ?PRIVATE KEY-----[\s\S]{20,}-----END (?:OPENSSH|RSA|EC|DSA)? ?PRIVATE KEY-----$/.test(String(v)) ? (/ENCRYPTED/.test(String(v)) ? bad('a passphrase-protected key cannot be used unattended — make a deploy key without a passphrase') : okV) : bad('an ssh private key: the whole text from -----BEGIN … PRIVATE KEY----- to -----END … PRIVATE KEY-----')),
 };
 
@@ -505,6 +508,12 @@ const ROWS = Object.freeze([
         help: i18nKey("A read-only access token for https://<host>/… repositories (on GitHub: Contents read, which also reads the repository's release assets). Git receives it through a file VibeSpace removes after the clone, a kernel download in one Authorization header to that host — never in a URL or on a command line."), validate: V.accessToken },
       { key: 'deployKey', label: i18nKey('Deploy key (ssh)'), secret: true, required: false, placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----', multiline: true,
         help: i18nKey('A read-only ssh deploy key without a passphrase, for git@<host>:… repositories. Paste the whole private key.'), validate: V.sshPrivateKey },
+      // lane lg-remote-hardening (B-7f0b — q-042 D6, merged B-4ff5): THE PIN of the ssh road. Set ⇒ the clone checks the host's
+      // key against these (StrictHostKeyChecking=yes over a 0600 known_hosts shredded with the key) and refuses any other by name
+      // (plugin_git_hostkey); unset ⇒ the first key seen is trusted, as before. Public keys: not a secret.
+      // ui-words: the placeholder is a sample known_hosts line (ssh syntax: a host, a key type, a key) — nothing to translate
+      { key: 'knownHosts', label: i18nKey('Host keys (ssh)'), secret: false, required: false, placeholder: 'github.com ssh-ed25519 AAAA…', multiline: true,
+        help: i18nKey("The host's public ssh keys, one per line, as ssh-keyscan prints them or as the host publishes them. When set, an ssh clone refuses a host whose key is not one of these; empty = the first key the host shows is trusted."), validate: V.knownHosts },
     ],
     clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_PLUGIN_GIT_' },
     setup: null,

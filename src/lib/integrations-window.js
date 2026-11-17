@@ -314,7 +314,12 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
           btn.onclick = () => { staticEl.remove(); staticEl = null; editor(); };
           staticEl.append(m, btn);
         } else {
-          const val = el('span', 'integ-plain', isSet ? v.values[f.key] : t('Not set'));
+          // lane lg-remote-hardening: a several-line value that is not a secret (the plugin-git row's host keys — public keys,
+          // ~300 characters a line) shows its first line and how many more; the whole text is the tooltip and the editor's
+          const lines = isSet && f.multiline ? String(v.values[f.key]).split('\n').map((x) => x.trim()).filter(Boolean) : null;
+          const shown = lines ? (lines[0].length > 64 ? lines[0].slice(0, 64) + '…' : lines[0]) + (lines.length > 1 ? ` (+${lines.length - 1})` : '') : null;
+          const val = el('span', 'integ-plain', isSet ? (shown != null ? shown : v.values[f.key]) : t('Not set'));
+          if (shown != null) val.title = String(v.values[f.key]);
           const btn = el('button', 'mounts-btn integ-replace', isSet ? t('Edit') : t('Set'));
           btn.onclick = () => { staticEl.remove(); staticEl = null; editor(); };
           staticEl.append(val, btn);

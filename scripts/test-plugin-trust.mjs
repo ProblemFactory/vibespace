@@ -364,6 +364,95 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
   ok(c12m.length >= 1 && c12m.every((c) => !('GIT_SSL_CAINFO' in c.env) && !('GIT_SSL_CAPATH' in c.env) && caOf(c.env) === ''), 'control (g): a copy whose egress door lacks GIT_SSL_CAINFO / GIT_SSL_CAPATH hands git NO trust root at all (the HOME one is not read either) — behind a TLS-inspecting egress every clone fails: RED', { v: r12m.version, env: c12m.map((c) => c.env.GIT_SSL_CAINFO || null) });
 }
 
+// ── ③d lane lg-remote-hardening (B-7f0b — design q-042 D6, merged B-4ff5): THE HOST-KEY PIN of the ssh road. A pod has no
+// known_hosts, so accept-new trusted whatever key the first credential-bearing clone met. The row's optional knownHosts →
+// its keys for THIS host, a 0600 known_hosts in the same shredded folder, StrictHostKeyChecking=yes over that file alone,
+// another key refused BY NAME (plugin_git_hostkey). Recorded legs over the fixture's wrapper (no real program: THE TIER RULE);
+// the REAL road — a private sshd on loopback, real git + real ssh, an accept-new copy as the RED control — is the heavy
+// test-plugin-git-clone ⑨.
+console.log('— the ssh host-key pin of the Plugin Git credential (lane lg-remote-hardening)');
+{
+  const crypto = require('node:crypto');
+  const SKF = require(path.join(REPO, 'src/ssh-key-format.js'));
+  const IR = require(path.join(REPO, 'src/integration-registry.js'));
+  const PI = require(path.join(REPO, 'src/server/plugin-install.js'));
+  const G = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-trust-hostkey-'));
+  process.on('exit', () => { try { fs.rmSync(G, { recursive: true, force: true }); } catch { /* gone */ } });
+  const { gitRepoFixture, URL_SSH } = await import('./fixtures/git-repo.mjs');
+  const FX = gitRepoFixture(G, [{ files: { 'vibespace-plugin.json': { id: 'acme.pinned', version: '1.0.0', engines: { vibespace: '2.369.24' }, label: 'Pinned' } }, tag: 'v1' }]);
+  const KEYTEXT = ['-----BEGIN OPENSSH ', 'PRIVATE KEY-----\n', 'Zml4dHVyZS1waW5uZWQta2V5LW5vdC1hLWtleQ'.repeat(2), '\n-----END OPENSSH ', 'PRIVATE KEY-----'].join('');
+  // a public-key blob in ssh's wire form (uint32 length + the type, uint32 length + 32 bytes) — built here, no ssh-keygen
+  const blob = (type, fill) => { const t = Buffer.from(type), b = Buffer.alloc(8 + t.length + 32, fill); b.writeUInt32BE(t.length, 0); t.copy(b, 4); b.writeUInt32BE(32, 4 + t.length); return b.toString('base64'); };
+  const KA = blob('ssh-ed25519', 1), KB = blob('ssh-ed25519', 2), KC = blob('ecdsa-sha2-nistp256', 3);
+  const hashed = (name, salt) => `|1|${salt.toString('base64')}|${crypto.createHmac('sha1', salt).update(name).digest('base64')}`;
+  let credValues = null;
+  const store = { resolveIntegration: (id) => { if (id !== 'plugin-git') throw new Error('unknown integration'); return credValues ? { source: 'user', values: { ...credValues }, whyCode: null, why: null } : { source: 'none', values: {}, whyCode: 'no-values', why: 'none' }; } };
+  const GR = path.join(G, 'root'); fs.mkdirSync(path.join(GR, 'data', 'plugins'), { recursive: true });
+  const quiet = { log() {}, warn() {} };
+  const thr = async (p) => { try { await p; return null; } catch (e) { return e; } };
+  const fetchOf = (cs) => cs.find((c) => c.argv.includes('fetch')) || null;
+  const held = (w, v) => { try { return fs.readFileSync(w, 'utf8').includes(v); } catch { return false; } };
+  const PLx = PI.create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: FX.WRAP });
+
+  // ① PURE: the lines a pin is written in (ssh-key-format.js parseKnownHosts) + the ssh lookup name + the row's validator
+  const p1 = SKF.parseKnownHosts(`# ssh-keyscan repo.test\n\nrepo.test,10.0.0.9 ssh-ed25519 ${KA} comment here\r\nssh-ed25519 ${KB}\n${hashed('repo.test', Buffer.alloc(20, 7))} ecdsa-sha2-nistp256 ${KC}\n`);
+  const refusals = [`@cert-authority *.test ssh-ed25519 ${KA}`, 'repo.test ssh-ed25519 not*base64*at-all', `repo.test ecdsa-sha2-nistp256 ${KA}`, 'repo.test ssh-dss AAAAB3NzaC1kc3MAAACBAP', 'just words'].map((l) => SKF.parseKnownHosts(`# x\n${l}\n`));
+  const many = SKF.parseKnownHosts(Array.from({ length: 65 }, () => `repo.test ssh-ed25519 ${KA}`).join('\n')), big = SKF.parseKnownHosts('#'.repeat(33 * 1024));
+  ok(p1.ok && p1.keys.length === 3 && p1.keys[0].names.join() === 'repo.test,10.0.0.9' && p1.keys[0].type === 'ssh-ed25519' && p1.keys[1].names === null && p1.keys[2].hashed.length === 1 && p1.keys[2].type === 'ecdsa-sha2-nistp256'
+    && refusals.every((r) => !r.ok && r.line === 2) && /marker/.test(refusals[0].why) && /base64/.test(refusals[1].why) && /own bytes/.test(refusals[2].why) && !many.ok && /64 keys/.test(many.why) && !big.ok,
+    'PURE parseKnownHosts: ssh-keyscan\'s lines (a name list, a bare `type key`, a hashed name, a comment, CRLF) read; a marker line, a non-base64 key, a key whose own bytes name another type, an unknown type, no type — each refused WITH its line; > 64 keys / > 32 KiB refused', refusals.map((r) => r.why));
+  ok(SKF.knownHostName('Repo.Test') === 'repo.test' && SKF.knownHostName('git.example.test:2222') === '[git.example.test]:2222' && SKF.knownHostName('git.example.test:22') === 'git.example.test',
+    'the ssh lookup name: the host on port 22, [host]:port on another (what a known_hosts line must name)');
+  const vGood = IR.validateValues('plugin-git', { knownHosts: `repo.test ssh-ed25519 ${KA}` }), vBad = IR.validateValues('plugin-git', { knownHosts: 'repo.test ssh-ed25519 short' }), vNone = IR.validateValues('plugin-git', { knownHosts: '# only a comment' });
+  const fld = IR.rowById('plugin-git').fields.find((f) => f.key === 'knownHosts');
+  ok(vGood.ok && !vBad.ok && /line 1/.test(vBad.errors.knownHosts) && !vNone.ok && fld && fld.multiline === true && fld.secret === false && fld.required === false,
+    'the plugin-git row has an OPTIONAL multiline knownHosts (public keys: not a secret); its validator is parseKnownHosts (the line named) and wants at least one key', { vBad: vBad.errors, vNone: vNone.errors });
+
+  // ② a pinned clone (recorded): ONLY this host's keys, under its own name, in a 0600 file beside the key; strict over it alone; shredded
+  credValues = { host: 'repo.test', deployKey: KEYTEXT, knownHosts: `repo.test,10.0.0.9 ssh-ed25519 ${KA}\nother.test ssh-ed25519 ${KB}\n${hashed('repo.test', Buffer.alloc(20, 9))} ecdsa-sha2-nistp256 ${KC}\n${hashed('other.test', Buffer.alloc(20, 9))} ssh-ed25519 ${KB}\n` };
+  FX.resetCalls();
+  const r2 = await PLx.install({ source: 'git', value: URL_SSH, ref: 'v1', credential: 'plugin-git' });
+  const f2 = fetchOf(FX.calls());
+  const cmd2 = (f2 && f2.env.GIT_SSH_COMMAND) || '';
+  ok(r2 && r2.sha === FX.shas[0] && f2 && f2.kh && f2.kh.text === `repo.test ssh-ed25519 ${KA}\nrepo.test ecdsa-sha2-nistp256 ${KC}\n` && f2.kh.mode === '600' && f2.key && f2.kh.dir === f2.key.dir,
+    'a pinned ssh clone: the known_hosts holds THIS host\'s keys only (a plain name and a hashed one; other.test\'s two dropped), under its own name, 0600, in the key\'s own folder', f2 && f2.kh && { text: f2.kh.text, mode: f2.kh.mode });
+  ok(/StrictHostKeyChecking=yes/.test(cmd2) && !/accept-new/.test(cmd2) && cmd2.includes("'HostKeyAlias=repo.test'") && cmd2.includes(`'UserKnownHostsFile="${f2 && f2.kh && f2.kh.path}"'`) && /GlobalKnownHostsFile=\/dev\/null/.test(cmd2) && /IdentitiesOnly=yes/.test(cmd2) && /BatchMode=yes/.test(cmd2),
+    'ssh runs strict over that file ALONE (UserKnownHostsFile quoted for a path with a space, no /etc file, no HOME file) under HostKeyAlias = the name the lines carry (no ssh config can move the lookup), never accept-new', cmd2);
+  // a host with a port: a paste names it plain or as [host]:port (ssh tries both) — every such key is kept, written under the alias
+  const pp = PI.pinnedHostsText({ host: 'git.example.test:2222' }, `[git.example.test]:2222 ssh-ed25519 ${KA}\ngit.example.test ssh-ed25519 ${KB}\nother.test ecdsa-sha2-nistp256 ${KC}\n`);
+  ok(pp === `git.example.test ssh-ed25519 ${KA}\ngit.example.test ssh-ed25519 ${KB}\n`, 'a git host with a port: its [host]:port and plain lines are both kept and written under the alias (the host alone); another host\'s dropped', pp);
+  ok(f2 && !fs.existsSync(f2.kh.dir) && f2.kh.witness && !held(f2.kh.witness, KA) && !held(f2.key.witness, 'Zml4dHVyZS1waW5uZWQta2V5'),
+    'after the clone the pin\'s file is SHREDDED with the key (its inode — a hard-link witness — holds other bytes) and the folder gone');
+  // ③ no pin ⇒ the road as it was (the first key is trusted)
+  credValues = { host: 'repo.test', deployKey: KEYTEXT }; FX.resetCalls();
+  await PLx.install({ source: 'git', value: URL_SSH, ref: 'v1', credential: 'plugin-git' });
+  const f3 = fetchOf(FX.calls());
+  ok(f3 && !f3.kh && /StrictHostKeyChecking=accept-new/.test(f3.env.GIT_SSH_COMMAND) && !/UserKnownHostsFile/.test(f3.env.GIT_SSH_COMMAND), 'no knownHosts ⇒ the ssh road is unchanged (accept-new, no file of ours)', f3 && f3.env.GIT_SSH_COMMAND);
+  // ④ a pin that names no key for this host / cannot be read ⇒ refused BY NAME before git runs — in 'auto' too (no unpinned clone in its place)
+  const n4 = FX.calls().length;
+  credValues = { host: 'repo.test', deployKey: KEYTEXT, knownHosts: `other.test ssh-ed25519 ${KB}\n` }; const e4a = await thr(PLx.install({ source: 'git', value: URL_SSH, credential: 'plugin-git' }));
+  const e4b = await thr(PLx.install({ source: 'git', value: URL_SSH, credential: 'auto' }));
+  credValues = { host: 'repo.test', deployKey: KEYTEXT, knownHosts: `repo.test ssh-ed25519 ${KA}\nrepo.test ssh-ed25519 cut` }; const e4c = await thr(PLx.install({ source: 'git', value: URL_SSH, credential: 'plugin-git' }));
+  ok([e4a, e4b, e4c].every((e) => e && e.code === 'plugin_git_hostkey') && FX.calls().length === n4 && /hold none for repo\.test/.test(e4a.message) && /line 2/.test(e4c.message) && PI.GIT_CODES.includes('plugin_git_hostkey'),
+    'plugin_git_hostkey BY NAME before git runs: a pin with no key for this host (strict and \'auto\' alike), a pin that cannot be read (a preset skips the form) — git never ran', [e4a, e4b, e4c].map((e) => e && `${e.code}: ${String(e.message).slice(0, 90)}`));
+  // ⑤ ssh's own refusal words ⇒ plugin_git_hostkey (they used to read as plugin_git_auth); the files shredded on that way out too
+  credValues = { host: 'repo.test', deployKey: KEYTEXT, knownHosts: `repo.test ssh-ed25519 ${KA}` };
+  FX.setMode({ fail: 'hostkey' }); FX.resetCalls();
+  const e5 = await thr(PLx.install({ source: 'git', value: URL_SSH, ref: 'v1', credential: 'plugin-git' }));
+  const f5 = fetchOf(FX.calls()); FX.setMode(null);
+  const banner = ['@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@', '@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @', 'The fingerprint for the ED25519 key sent by the remote host is', 'SHA256:QgibyDN+7rw3QB56CaUdSmTUKuvnkFmSuWz1AmqpfwY.', 'Host key for repo.test has changed and you have requested strict checking.', 'Host key verification failed.'].join('\n');
+  const g5 = PI.gitFailure(new Error(banner), { url: URL_SSH, ref: null, cred: { kind: 'key', host: 'repo.test', knownHosts: 'x' } });
+  const g5b = PI.gitFailure(new Error('git@repo.test: Permission denied (publickey).\nfatal: Could not read from remote repository.'), { url: URL_SSH, ref: null, cred: { kind: 'key', host: 'repo.test' } });
+  // the anonymous / first clone on a fresh pod: BatchMode cannot ask about an unknown key — that is the auth words, as before; only the PINNED road reads it as the pin's refusal
+  const bare = 'Host key verification failed.\nfatal: Could not read from remote repository.';
+  const g5c = PI.gitFailure(new Error(bare), { url: URL_SSH, ref: null, cred: null }), g5d = PI.gitFailure(new Error(bare), { url: URL_SSH, ref: null, cred: { kind: 'key', host: 'repo.test', knownHosts: 'x' } });
+  ok(g5c.code === 'plugin_git_auth' && /anonymous clone/.test(g5c.message) && g5d.code === 'plugin_git_hostkey' && /no ssh host key the Plugin Git credential pins/.test(g5d.message), 'a bare «Host key verification failed» unpinned stays plugin_git_auth (a first clone that could not ask); pinned it is plugin_git_hostkey', [g5c, g5d].map((e) => `${e.code}: ${String(e.message).slice(0, 100)}`));
+  ok(e5 && e5.code === 'plugin_git_hostkey' && /No ED25519 host key is known for repo\.test/.test(e5.message) && f5 && !fs.existsSync(f5.kh.dir) && g5.code === 'plugin_git_hostkey' && /it showed SHA256:QgibyDN\+7rw3QB56CaUdSmTUKuvnkFmSuWz1AmqpfwY/.test(g5.message) && /Host key for repo\.test has changed/.test(g5.message) && /pins/.test(g5.message) && g5b.code === 'plugin_git_auth',
+    'ssh\'s refusal of a key ⇒ plugin_git_hostkey with ssh\'s own line and the fingerprint the host showed (never plugin_git_auth); a refused deploy key stays plugin_git_auth; the files shredded on that way out', [e5, g5, g5b].map((e) => e && `${e.code}: ${String(e.message).slice(0, 140)}`));
+
+  // ⑥ the REAL road (a private sshd on loopback, real git + real ssh, the accept-new RED copy) is HEAVY: test-plugin-git-clone ⑨
+}
+
 // ── ③c lane kernel-asset-credential: THE KERNEL'S DOWNLOAD with the Plugin Git credential — the git road's census for the new
 // road: the token rides ONE header (Authorization: Bearer) on the FIRST hop only (the plugin repository's own release asset),
 // never in a URL, a log line, an error, the engine record, a fact or an env. A RECORDING fetch (no server); patched copies of

@@ -33,6 +33,11 @@
 // written shreds the ones already there. The clone fetches ONE ref at depth 1 (a tag, a branch or
 // a full sha — the trust anchor of a fleet install is the sha) and records `{ref, sha}`; every failure is a NAMED code
 // (GIT_CODES) that reaches the owner (the Plugins panel; a boot install's For-you notice).
+// THE HOST-KEY PIN (lane lg-remote-hardening, B-7f0b — design q-042 D6, merged B-4ff5): a pod has no known_hosts, so an ssh
+// clone that trusts the first key it sees (accept-new) is a man-in-the-middle window at the first credential-bearing clone of
+// every fresh hub. The row's optional `knownHosts` closes it: its keys FOR THIS HOST (pinnedHostsText) are written as a 0600
+// known_hosts in the same shredded folder, ssh runs with StrictHostKeyChecking=yes over that file alone (no HOME, no /etc
+// file), and another key is refused by name: plugin_git_hostkey. Without it the ssh road is what it was.
 const fs = require('fs');
 const { safeFetch } = require('../safe-fetch');
 const fsp = require('fs/promises');
@@ -45,6 +50,7 @@ const { serviceEnv } = require('../agent-env.js');
 const { shredFile } = require('../secret-file.js');
 const IR = require('../integration-registry.js'); // PURE: the credential's `why` in words (a locked vault, none set)
 const EK = require('../engine-kernel.js'); // PURE: THE ONE git-source grammar (gitSourceVerdict / gitRepoOf) — the kernel's credential verdict reads the same
+const SKF = require('../ssh-key-format.js'); // PURE: the known_hosts lines of the pin (lane lg-remote-hardening)
 
 const MANIFEST = 'vibespace-plugin.json';
 const MAX_ZIP_BYTES = 50 * 1024 * 1024;       // upload / release asset cap
@@ -59,7 +65,7 @@ const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 /** The ONE integration row a private repository's credential is kept in (src/integration-registry.js). */
 const GIT_CREDENTIAL_ROW = 'plugin-git';
 /** Every named refusal of a git install (the route answers `{error, code}`; the panel and the boot notice say them). */
-const GIT_CODES = Object.freeze(['plugin_git_spec', 'plugin_git_auth', 'plugin_git_ref_missing', 'plugin_git_timeout', 'plugin_git_credential', 'plugin_git_failed', 'plugin_tree_rejected']);
+const GIT_CODES = Object.freeze(['plugin_git_spec', 'plugin_git_auth', 'plugin_git_ref_missing', 'plugin_git_timeout', 'plugin_git_credential', 'plugin_git_failed', 'plugin_tree_rejected', 'plugin_git_hostkey']);
 const codedErr = (status, code, msg) => Object.assign(httpErr(status, msg), { code, payload: { code } });
 
 const run = (cmd, args, opts = {}) => new Promise((resolve, reject) => {
@@ -164,6 +170,23 @@ function gitSpecOf(value, refIn = null) {
   if (ref && !GIT_REF_RE.test(ref)) throw codedErr(400, 'plugin_git_spec', 'git: invalid ref (a tag, a branch or a full 40-character sha)');
   return { url: src.url, ref, https: src.https, host: src.host };
 }
+/** THE PIN of one ssh clone (lane lg-remote-hardening, B-7f0b): the row's `knownHosts` → the known_hosts text for THIS host
+ *  only — every key whose names hold the host (plain, or `[host]:port` off port 22; a hashed name checked by its HMAC), or
+ *  that names no host at all — each written under the clone's HostKeyAlias (pinAliasOf: the host's name alone), which the
+ *  clone's ssh is handed: no ssh config (a HostName / Port rewrite, a config alias) can move the lookup off these lines.
+ *  A paste for several hosts pins only this one's. → text | throws plugin_git_hostkey (unreadable, or no key for this host:
+ *  there would be nothing to check its key against). */
+const pinAliasOf = (spec) => String(spec.host).trim().toLowerCase().replace(/:\d+$/, '');
+function pinnedHostsText(spec, knownHosts) {
+  const alias = pinAliasOf(spec);
+  const names = [...new Set([alias, SKF.knownHostName(spec.host)])];
+  const p = SKF.parseKnownHosts(knownHosts);
+  if (!p.ok) throw codedErr(400, 'plugin_git_hostkey', `git: the host keys of the Plugin Git credential cannot be read — ${p.line ? `line ${p.line}: ` : ''}${p.why}`);
+  const hmac = (salt, n) => { try { return crypto.createHmac('sha1', Buffer.from(salt, 'base64')).update(n).digest('base64'); } catch { return null; } };
+  const keys = p.keys.filter((k) => k.names === null || names.some((n) => k.names.includes(n)) || k.hashed.some((h) => names.some((n) => hmac(h.salt, n) === h.hash)));
+  if (!keys.length) throw codedErr(400, 'plugin_git_hostkey', `git: the host keys of the Plugin Git credential hold none for ${names.join(' / ')} — nothing to check its key against (Integrations → Plugins → Plugin Git repository → Host keys)`);
+  return keys.map((k) => `${alias} ${k.type} ${k.key}\n`).join('');
+}
 /** POSIX single-quoting for the askpass script's file paths (the stage path is ours; quoted anyway). */
 const shq = (p) => `'${String(p).replace(/'/g, `'\\''`)}'`;
 /** ONE git child: serviceEnv + the named git switches (the egress door: a pod reaches its git host through the operator's
@@ -184,6 +207,21 @@ function gitRun(gitBin, args, { add = {}, timeout = GIT_TIMEOUT_MS } = {}) {
 function gitFailure(e, { url, ref, cred, timeout = GIT_TIMEOUT_MS }) {
   const t = String((e && e.message) || '');
   const line = t.split('\n').map((x) => x.replace(/^(?:fatal|error|remote):\s*/i, '').trim()).filter(Boolean).slice(-1)[0] || 'git failed';
+  // lane lg-remote-hardening: ssh's own words for a key it will not trust. A CHANGED key (ssh's banner) is that on any road;
+  // «Host key verification failed» / «No … host key is known» alone is that only on the PINNED road — unpinned, it is the
+  // anonymous / first clone that BatchMode could not ask about (a fresh pod knows no key): the auth words below, as before.
+  const changed = /REMOTE HOST IDENTIFICATION HAS CHANGED|Host key for \S+ has changed/i, strict = /Host key verification failed|No \S+ host key is known for/i;
+  const pinnedRoad = !!(cred && cred.knownHosts);
+  if (!(e && e.killed) && (changed.test(t) || (pinnedRoad && strict.test(t)))) {
+    const lines = t.split('\n').map((x) => x.trim());
+    const said = lines.find((x) => /^(?:Host key for|No \S+ host key is known for)/.test(x)) || lines.find((x) => changed.test(x) || strict.test(x)) || 'Host key verification failed';
+    const fp = /key sent by the remote host is\s+(SHA256:[A-Za-z0-9+/=]{20,64})/.exec(t); // the fingerprint it showed (only a changed key's banner says it)
+    const host = gitHostOf(url) || 'the host';
+    const what = changed.test(t)
+      ? `showed an ssh host key that is not ${pinnedRoad ? 'one of the host keys the Plugin Git credential pins' : 'the one this instance\'s ssh knows for it'}`
+      : 'showed no ssh host key the Plugin Git credential pins';
+    return codedErr(400, 'plugin_git_hostkey', `git: ${host} ${what} — nothing was fetched; compare the keys the host publishes${fp ? ` (it showed ${fp[1]})` : ''} (${said.slice(0, 160)})`);
+  }
   if (e && e.killed) return codedErr(504, 'plugin_git_timeout', `git: ${gitHostOf(url) || 'the host'} did not finish within ${+(timeout / 1000).toFixed(1)} s (its limit) — nothing was installed`);
   if (/could not read (?:Username|Password)|Authentication failed|terminal prompts disabled|Permission denied \(publickey|HTTP Basic: Access denied|Invalid username or password|\b40[13]\b|not authorized|access denied|Repository not found|repository '.*' not found|Host key verification failed/i.test(t))
     return codedErr(400, 'plugin_git_auth', `git: ${gitHostOf(url) || 'the host'} refused ${cred ? `the ${cred.kind === 'key' ? 'deploy key' : 'token'} of the Plugin Git credential (${cred.host})` : 'an anonymous clone'} — ${cred ? 'check that it can read this repository' : 'a private repository needs the Plugin Git credential (Integrations → Plugins, or the cluster\'s preset)'} (${line.slice(0, 160)})`);
@@ -208,7 +246,11 @@ async function credentialFiles(stage, cred, { writeFile = fsp.writeFile } = {}) 
       return { dir, files, add: { GIT_ASKPASS: ask } };
     }
     const key = await put('key', cred.key.endsWith('\n') ? cred.key : cred.key + '\n', 0o600);
-    return { dir, files, add: { GIT_SSH_COMMAND: `ssh -i ${shq(key)} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new` } };
+    if (!cred.knownHosts) return { dir, files, add: { GIT_SSH_COMMAND: `ssh -i ${shq(key)} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new` } };
+    // THE PIN (B-7f0b): this file ALONE says which keys the host may show (no HOME / no /etc known_hosts); ssh's option parser
+    // splits a value on spaces, so the path rides in double quotes inside the shell-quoted word (a root dir with a space)
+    const kh = await put('known_hosts', cred.knownHosts, 0o600);
+    return { dir, files, add: { GIT_SSH_COMMAND: `ssh -i ${shq(key)} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ${shq(`HostKeyAlias=${cred.alias}`)} -o ${shq(`UserKnownHostsFile="${kh}"`)} -o GlobalKnownHostsFile=/dev/null` } };
   } catch (e) { await shredCredentials({ dir, files }); throw e; } // a name never written is a no-op for shredFile
 }
 /** Every credential file overwritten, then unlinked, then the folder — on every way out of a clone. → true when gone. */
@@ -352,7 +394,11 @@ function create({ rootDir, hostVersion = null, forbiddenRoots = [], log = consol
     const host = String(v.host || '').trim().toLowerCase();
     if (!host || host !== spec.host) return no(`it is for ${host || 'no host'}, the repository is on ${spec.host}`);
     if (spec.https) return v.token ? { kind: 'token', host, username: String(v.username || '').trim() || 'x-access-token', token: String(v.token) } : no('it holds no token for an https repository');
-    return v.deployKey ? { kind: 'key', host, key: String(v.deployKey).replace(/\r\n/g, '\n') } : no('it holds no deploy key for an ssh repository');
+    // lane lg-remote-hardening: a pin that is set but unreadable / names no key for this host is refused even for 'auto' — an
+    // unpinned clone in its place is exactly the first-key trust the pin was set to end
+    if (!v.deployKey) return no('it holds no deploy key for an ssh repository');
+    const knownHosts = String(v.knownHosts || '').trim() ? pinnedHostsText(spec, String(v.knownHosts)) : null;
+    return { kind: 'key', host, key: String(v.deployKey).replace(/\r\n/g, '\n'), knownHosts, ...(knownHosts ? { alias: pinAliasOf(spec) } : {}) };
   }
   /** The row's Test (registered by the loader with a repository it knows on that host): ls-remote with the credential. */
   async function testCredential(url) {
@@ -435,4 +481,4 @@ function create({ rootDir, hostVersion = null, forbiddenRoots = [], log = consol
 }
 
 module.exports = { create, auditTree, findPackageRoot, stageFromZip, GH_SPEC_RE, MAX_ZIP_BYTES, MANIFEST,
-  GIT_REF_RE, GIT_SHA_RE, GIT_CODES, GIT_CREDENTIAL_ROW, gitHostOf, gitSpecOf, credentialFiles, shredCredentials }; // lane engine-distribution
+  GIT_REF_RE, GIT_SHA_RE, GIT_CODES, GIT_CREDENTIAL_ROW, gitHostOf, gitSpecOf, credentialFiles, shredCredentials, pinnedHostsText, gitFailure }; // lane engine-distribution

@@ -11467,6 +11467,8 @@ export default {
   "A read-only access token for https://<host>/… repositories (on GitHub: Contents read, which also reads the repository's release assets). Git receives it through a file VibeSpace removes after the clone, a kernel download in one Authorization header to that host — never in a URL or on a command line.": "用于 https://<host>/… 仓库的只读访问令牌（GitHub 上：Contents 只读，也能读该仓库的 Release 附件）。Git 通过一个文件拿到它，克隆后 VibeSpace 即删除该文件；下载内核时它只放在发给该主机的一个 Authorization 头里 — 从不放进 URL 或命令行。",
   "Deploy key (ssh)": "部署密钥（ssh）",
   "A read-only ssh deploy key without a passphrase, for git@<host>:… repositories. Paste the whole private key.": "用于 git@<host>:… 仓库的只读 ssh 部署密钥，不能带口令。粘贴完整的私钥。",
+  "Host keys (ssh)": "主机密钥（ssh）",
+  "The host's public ssh keys, one per line, as ssh-keyscan prints them or as the host publishes them. When set, an ssh clone refuses a host whose key is not one of these; empty = the first key the host shows is trusted.": "该主机的 ssh 公钥，每行一把，按 ssh-keyscan 输出的样子或主机公布的样子粘贴。填写后，ssh 克隆遇到不在其中的主机密钥会拒绝；留空 = 信任主机第一次出示的密钥。",
   "Runs git ls-remote with this credential against a repository this instance knows on that host (the cluster's plugin source, or one you installed from). Reads the branch list only.": "用这个凭据对本实例在该主机上已知的一个仓库（集群的插件来源，或你安装过的仓库）运行 git ls-remote。只读取分支列表。",
   "Proves the host accepts the credential for that repository — not that every repository on the host is readable, nor that its plugin is valid.": "证明主机对那个仓库接受这个凭据 — 不证明该主机上的每个仓库都可读，也不证明其中的插件有效。",
   "Used by Install plugin… for a private Git repository, and by the download of its custom kernel when that is a release asset of the same repository": "「安装插件…」从私有 Git 仓库安装时使用；自研内核是同一仓库的 Release 附件时，下载内核也用它",

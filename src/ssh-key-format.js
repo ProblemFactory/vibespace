@@ -1,6 +1,7 @@
 /**
  * Private-key FORMAT classifier — shared by the server (import path) and the
- * browser (Add-machine dialog affordances). Pure, dependency-free, CJS like
+ * browser (Add-machine dialog affordances) — and, at the end, the known_hosts
+ * lines of a PINNED host key (parseKnownHosts, lane lg-remote-hardening). Pure, dependency-free, CJS like
  * src/task-color-seq.js (esbuild pulls it into the bundle).
  *
  * WHY a real decoder and not a regex: a modern `openssh-key-v1` key's PEM
@@ -115,4 +116,64 @@ function classifyPrivateKey(text) {
   return { format: 'unknown', encrypted: false, usable: false };
 }
 
-module.exports = { classifyPrivateKey, opensshV1Info };
+// ── KNOWN HOSTS (lane lg-remote-hardening, B-7f0b — design q-042 D6): the lines a PINNED ssh host key is written in ──
+// A pin is the owner's statement «these are that host's public keys»; ssh then refuses any other (StrictHostKeyChecking=yes
+// over a known_hosts file of ours) instead of trusting the first key it meets (accept-new = a MITM window at the first
+// connection). Read here, PURE, for the form (a paste judged as it is typed) and for the server (the file it writes).
+const HOST_KEY_TYPES = Object.freeze(['ssh-ed25519', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521', 'ssh-rsa', 'sk-ssh-ed25519@openssh.com', 'sk-ecdsa-sha2-nistp256@openssh.com']);
+const KNOWN_HOSTS_MAX = Object.freeze({ keys: 64, bytes: 32 * 1024 });
+
+/** The key type a public-key blob names in its own first string (ssh wire form: uint32 length + the name) | null. */
+function blobType(b64) {
+  const b = b64Head(b64);
+  if (!b || b.length < 5) return null;
+  const n = ((b[0] << 24) >>> 0) + (b[1] << 16) + (b[2] << 8) + b[3];
+  if (n < 1 || n > 64 || n > b.length - 4) return null;
+  let s = '';
+  for (let i = 0; i < n; i++) s += String.fromCharCode(b[4 + i]);
+  return s;
+}
+
+/** The name ssh looks a host up by in known_hosts: `host` on port 22, `[host]:port` on another (a git host's `host:port`). */
+function knownHostName(host) {
+  const m = /^(.*?)(?::(\d{1,5}))?$/.exec(String(host == null ? '' : host).trim().toLowerCase());
+  return m[2] && m[2] !== '22' ? `[${m[1]}]:${m[2]}` : m[1];
+}
+
+/**
+ * parseKnownHosts(text) → {ok: true, keys: [{names, hashed, type, key}]} | {ok: false, line, why}. Never throws.
+ *   A line is `[names] type base64 [comment]` — what ssh-keyscan prints and what a git host publishes. `names` = a comma
+ *   list (plain names, `[host]:port`, hashed `|1|salt|hash`); a line of `type base64` alone names no host (names: null).
+ *   Blank lines and `#` comments are skipped. REFUSED, with the line: a marker line (@cert-authority / @revoked is no pin),
+ *   no known key type, a key that is not base64, a key whose own bytes name another type (a cut or mixed-up paste).
+ */
+function parseKnownHosts(text) {
+  const s = String(text == null ? '' : text).replace(/\r\n/g, '\n');
+  if (s.length > KNOWN_HOSTS_MAX.bytes) return { ok: false, line: 0, why: `at most ${KNOWN_HOSTS_MAX.bytes / 1024} KiB` };
+  const keys = [];
+  const lines = s.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t || t.startsWith('#')) continue;
+    const no = (why) => ({ ok: false, line: i + 1, why });
+    if (t.startsWith('@')) return no('a marker line (@cert-authority, @revoked) is not a pinned key');
+    const f = t.split(/\s+/);
+    const at = HOST_KEY_TYPES.includes(f[0]) ? 0 : HOST_KEY_TYPES.includes(f[1]) ? 1 : -1;
+    if (at < 0) return no(`no ssh key type (${HOST_KEY_TYPES.slice(0, 3).join(', ')} …) — one key per line, as ssh-keyscan prints it`);
+    const type = f[at], key = f[at + 1] || '';
+    if (!/^[A-Za-z0-9+/]{16,}={0,3}$/.test(key)) return no('the key is not base64');
+    if (blobType(key) !== type) return no(`the key's own bytes are not a ${type} key — a cut or mixed-up paste`);
+    const names = [], hashed = [];
+    if (at === 1) {
+      for (const n of f[0].split(',')) {
+        const h = /^\|1\|([A-Za-z0-9+/=]+)\|([A-Za-z0-9+/=]+)$/.exec(n);
+        if (h) hashed.push({ salt: h[1], hash: h[2] }); else if (n) names.push(n.toLowerCase());
+      }
+    }
+    keys.push({ names: at === 1 ? names : null, hashed, type, key });
+    if (keys.length > KNOWN_HOSTS_MAX.keys) return no(`at most ${KNOWN_HOSTS_MAX.keys} keys`);
+  }
+  return { ok: true, keys };
+}
+
+module.exports = { classifyPrivateKey, opensshV1Info, parseKnownHosts, knownHostName, blobType, HOST_KEY_TYPES, KNOWN_HOSTS_MAX };
