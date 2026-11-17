@@ -26,9 +26,9 @@ ok(/h\.autoGraduate === false/.test(block), 'honours a per-machine opt-out');
 // out must fail, so the leg is not true of any block.
 const URL_GUARD = /if \(!instanceUrl\.url\(\) \|\| instanceUrl\.effective\(\)\.source === 'https'\) return;/;
 const urlRule = (b) => URL_GUARD.test(b) && !/viaRelay: true/.test(b);
-ok(urlRule(block), 'requires an operator-declared URL (instanceUrl.url(), never the hub\'s own https address) and never self-publishes to the relay');
+ok(urlRule(block), 'the guard refuses an instance with no operator-set address and the hub\'s own https address (instanceUrl.url() / effective().source === \'https\'), and the handler never self-publishes to the relay');
 const cutBlock = block.replace(URL_GUARD, '');
-ok(cutBlock !== block && !urlRule(cutBlock), 'RED CONTROL: the handler with its URL guard cut out fails that leg');
+ok(cutBlock !== block && !urlRule(cutBlock), 'RED CONTROL (a source pin\'s): the handler with its URL guard cut out fails that leg — the pin names that guard, nothing wider');
 ok(!urlRule(block + '\n{ viaRelay: true }'), 'RED CONTROL: a handler that self-publishes to the relay fails it too');
 ok(/6 \* 60 \* 60 \* 1000/.test(block), 'at most one attempt per machine per 6h');
 ok(/catch \(e\)[\s\S]{0,200}serverNotice/.test(block), 'a failed attempt is reported, never silent');
