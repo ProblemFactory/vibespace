@@ -27,7 +27,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const srv=spawn('node',[path.join(wt,'server.js')],{cwd:wt,env:{...env, ...VNC_ENV,PORT:String(PORT),VIBESPACE_SKIP_AGENT_HOOKS:'1'},stdio:'ignore'});
 const chrome=spawn(CHROME,[...CHROME_STORE, '--headless=new',`--remote-debugging-port=${CDP_PORT}`,'--no-sandbox','--disable-gpu','--password-store=basic',`--user-data-dir=${chromeDir}`,'about:blank'],{stdio:'ignore',env:chromeEnv});
 let cleaned=false;
-const cleanup=()=>{ if(cleaned) return; cleaned=true; try{chrome.kill('SIGKILL');}catch{} try{srv.kill('SIGKILL');}catch{} for(const r of [wt, home]){ try{endRootedProcesses(r);}catch{} }
+const cleanup=()=>{ if(cleaned) return; cleaned=true; try{chrome.kill('SIGKILL');}catch{} try{srv.kill('SIGKILL');}catch{} for(const r of [wt, home, chromeDir]){ try{endRootedProcesses(r);}catch{} }
   try{execSync(`git worktree remove --force ${wt}`,{cwd:repo,stdio:'ignore'});}catch{} for(const d of [chromeDir, home]){ try{fs.rmSync(d,{recursive:true,force:true});}catch{} } };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT','SIGTERM']) process.on(sig, ()=>{ cleanup(); process.exit(1); });

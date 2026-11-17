@@ -2844,7 +2844,7 @@ await section(async () => {
     'test-browser-live-ui.mjs', 'test-browser-live.mjs', 'test-browser-multiview.mjs', 'test-browser-propose-chrome.mjs', 'test-browser-resume-ui.mjs', 'test-channel-jump.mjs',
     'test-channel-threads-ui.mjs', 'test-channel-window-render.mjs', 'test-channels-aggregate-ui.mjs', 'test-channels-e2e.mjs', 'test-channels-groups-e2e.mjs', 'test-channels-panel-redraw.mjs',
     'test-chat-hygiene-ui.mjs', 'test-chat-paging.mjs', 'test-cli-cmd-refresh.mjs', 'test-client-boot.mjs', 'test-collab-live-counter.mjs',
-    'test-cwd-recreate.mjs', 'test-desktop-app-snap.mjs', 'test-desktop-app-window.mjs', 'test-desktop-drop.mjs', 'test-desktop-reorder.mjs', 'test-desktop-resume-paging.mjs',
+    'test-cwd-recreate.mjs', 'test-desktop-app-snap.mjs', 'test-desktop-app-window.mjs', 'test-desktop-drop.mjs', 'test-desktop-resume-paging.mjs',
     'test-desktop-vnc-fit.mjs', 'test-desktop-xpra.mjs', 'test-fork-restore.mjs', 'test-gear-menu.mjs',
     'test-ghost-host-heal.mjs', 'test-graduate-dial.mjs', 'test-group-report-card.mjs', 'test-harness-honesty.mjs', 'test-helper-ask-ui.mjs', 'test-inbox-reply-ui.mjs',
     'test-incident.mjs', 'test-integration-toggle.mjs', 'test-integrations-ui.mjs', 'test-jobs-panel.mjs', 'test-minimap-jump.mjs', 'test-mobile-gaps.mjs',
