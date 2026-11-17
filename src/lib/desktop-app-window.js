@@ -960,7 +960,10 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   const scaleItems = () => {
     const m = scaleModel();
     const why = scaleWhyText(m.why);
-    const rows = m.rows.map((r) => ({ label: scaleRowLabel(r), disabled: r.disabled, action: () => { relaunchAt(r.choice, r.scale); } }));
+    // B-b659 (the menu grammar): the present choice is a live ✓ row — pressing it keeps it (the model's `disabled` there =
+    // nothing to relaunch: no confirm, no relaunch); a window that cannot relaunch draws no choice row — its caption says why,
+    // the scale it runs at stays said in words (an automatic scale has no chip: «✓ Auto (2.5×)» is the one place it is read)
+    const rows = m.why ? m.rows.filter((r) => r.current).map((r) => ({ caption: scaleRowLabel(r) })) : m.rows.map((r) => ({ label: scaleRowLabel(r), action: () => { if (!r.disabled) relaunchAt(r.choice, r.scale); } }));
     // lane D: the app's default scale — stored under the same per-app key as the frame choice, heard by every client
     const tail = appDefaultItems(appDefaultModel(rec, appPrefs(SCALE_PREF_KEY)), (choice) => saveScaleDefault(frameKey(), choice));
     return why ? [{ caption: why }, ...rows, ...tail] : [...rows, ...tail];
@@ -1228,7 +1231,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   const frameItems = () => {
     const m = frameMenuModel(frameChoice());
     const head = frameStatusText(seamless);
-    const rows = m.map((r) => ({ label: frameRowLabel(r), disabled: r.disabled, action: () => { saveFrameChoice(frameKey(), r.choice); } }));
+    const rows = m.map((r) => ({ label: frameRowLabel(r), action: () => { if (!r.current) saveFrameChoice(frameKey(), r.choice); } })); // B-b659: the ✓ row is live, pressing it keeps it
     return head ? [{ caption: head }, ...rows] : rows;
   };
   const canKeep = () => !!rec && rec.state === 'ready' && rec.idleTimeoutMs > 0;

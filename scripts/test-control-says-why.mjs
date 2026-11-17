@@ -71,7 +71,7 @@ function disabledRows(src, file) {
 }
 // THE FROZEN LEDGER of computed `disabled:` menu rows (2026-11-13, pick 2): still drawn the old way (greyed, a tooltip) — each
 // moves onto caption / off with ITS OWN why and lowers its row (the ledger only shrinks)
-const MENU_LEDGER = { 'src/lib/browser-live-window.js': 3, 'src/lib/contributions.js': 1, 'src/lib/desktop-app-launcher.js': 1, 'src/lib/desktop-app-window.js': 3, 'src/lib/file-explorer.js': 1,
+const MENU_LEDGER = { 'src/lib/browser-live-window.js': 3, 'src/lib/contributions.js': 1, 'src/lib/desktop-app-launcher.js': 1, 'src/lib/desktop-app-window.js': 1, 'src/lib/file-explorer.js': 1,
   'src/lib/machine-desktop.js': 1, 'src/lib/manage-agents.js': 1, 'src/lib/plugins-ui.js': 3, 'src/lib/session-card.js': 1, 'src/lib/sidebar-render.js': 1, 'src/lib/taskbar.js': 1 };
 console.log('① A MENU ROW WORKS, OR IT IS A CAPTION, OR IT SAYS WHY');
 const litRows = [], compPer = {};
@@ -81,6 +81,10 @@ const compGrown = Object.entries(compPer).filter(([f, n]) => n > (MENU_LEDGER[f]
 const compShrunk = Object.entries(MENU_LEDGER).filter(([f, n]) => (compPer[f] || 0) < n).map(([f, n]) => `${f}: ${compPer[f] || 0} < ledger ${n}`);
 ok(compGrown.length === 0, 'no NEW computed `disabled:` menu row (a new one is `off` with its why, or not drawn)', compGrown.join(' ; '));
 ok(compShrunk.length === 0, 'the computed ledger is exact (a site that moved onto caption / off lowers its row)', compShrunk.join(' ; '));
+{ const DAW = read('src/lib/desktop-app-window.js'), DSM = read('src/lib/desktop-seamless.js');
+  ok(/const rows = m\.why \? m\.rows\.filter\(\(r\) => r\.current\)\.map\(\(r\) => \(\{ caption: scaleRowLabel\(r\) \}\)\) : m\.rows\.map\(\(r\) => \(\{ label: scaleRowLabel\(r\), action: \(\) => \{ if \(!r\.disabled\) relaunchAt\(r\.choice, r\.scale\); \} \}\)\);/.test(DAW)
+    && /\{ label: frameRowLabel\(r\), action: \(\) => \{ if \(!r\.current\) saveFrameChoice\(frameKey\(\), r\.choice\); \} \}/.test(DAW) && !/disabled: choice === cur/.test(DSM),
+    'B-b659: the desktop app window\'s Scale ▸ and Show window frame ▸ draw the present choice as a live ✓ row — pressing it keeps it (no relaunch, no write); a window that cannot relaunch draws no choice row — its caption says why, the running scale stays said as a caption'); }
 const UT = read('src/lib/utils.js');
 const scm = UT.slice(UT.indexOf('export function showContextMenu('), UT.indexOf('/** What the DOM says about a press'));
 ok(!/off: item\.title/.test(scm)

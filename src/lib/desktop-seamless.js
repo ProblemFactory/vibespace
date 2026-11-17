@@ -162,8 +162,9 @@ export function setFrameChoice(map, key, choice) {
   if (c === 'auto') delete next[key]; else next[key] = c;
   return next;
 }
-/** The "Show window frame ▸" rows: Auto / On / Off (FRAME words), the current one checked and not offered again. */
+/** The "Show window frame ▸" rows: Auto / On / Off (FRAME words), the current one checked — a live row like the others,
+ *  never greyed (B-b659, the menu grammar: pressing the present choice keeps it). */
 export function frameMenuModel(current) {
   const cur = normToggle(current);
-  return FRAME_TOGGLES.map((choice) => ({ choice, current: choice === cur, disabled: choice === cur }));
+  return FRAME_TOGGLES.map((choice) => ({ choice, current: choice === cur }));
 }
