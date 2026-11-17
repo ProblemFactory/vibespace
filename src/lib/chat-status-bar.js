@@ -9,7 +9,8 @@ import { systemSelect } from './design-home.js'; // lane design-systems-home: th
 import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (lane pages-chip-groups): the Pages chip's two groups
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, modelLabelFor, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, declaresModelFacts, billingRow, statusBarRow } from './agent-meta.js';
 import { windowOf, unreportedRows } from '../status-bar-facts.js'; // PURE (lane agy-status-bar-facts): the facts row's window table + what it lacks
-import { t } from './i18n.js';
+import { t, tc } from './i18n.js';
+import { modelFace, effortFace, permissionModeFace } from './strip-faces.js'; // PURE (lane mask-value-shape): a value's FACE on the strip — the value stays the protocol's
 import { stampAt as when, num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { permissionModeWords, permissionModeDanger } from './permission-mode-labels.js';
 import { modelLabelWords } from './value-words.js'; // lane ui-language pick 2: the effort / model chips and the model menu in words // lane ui-language: the lock chip and its menu in words, never the protocol value
@@ -86,7 +87,7 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, channelRowWords: rowStateWords = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null, onOpenOutbox = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, channelRowWords: rowStateWords = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null, onOpenOutbox = null, outbox = true }) {
     this._ws = ws;
     // §26 (B-099e): the conversations THIS TURN read or drafted (PURE chipView over the witness's ring — the
     // view hands it over) and the one door that opens one; null = the turn touched nothing (no chip)
@@ -132,6 +133,9 @@ export class ChatStatusBar {
     this._servedModel = null; // actual serving model (per-turn) — fallback detection
     this._refusalFallback = null; // B-c643: the last safety-classifier reroute {from, to, category} — the ⚠ chip names it while `to` serves
     this._allowReview = allowReview;
+    // (lane mask-value-shape) a conversation of its own HAS an Outbox: «Outbox · 0» from the first render; a subagent's viewer
+    // (outbox: false) drafts under its parent's id and wears none (chat-view _wireOutboxChip)
+    this._hasOutbox = outbox !== false;
     this._reviewEnabled = !allowReview;
     this._getToolMsg = getToolMsg;
     this._openSubagentViewer = openSubagentViewer;
@@ -193,6 +197,17 @@ export class ChatStatusBar {
     if (typeof ResizeObserver !== 'undefined') { this._sizeRO = new ResizeObserver(() => this._onSize()); this._sizeRO.observe(this._element); }
   }
 
+  /** THE LAYOUT VERDICT — ONE place, read by render (the «后台» face), _arranged and _onSize: ONE row when the chat WINDOW is
+   *  ONE_ROW_PX wide or more (the page's widths are window widths — the cure of 644a67ec2: the bar's own width is a few px
+   *  narrower), else the two rows; the short forms at SHORT_FORM_PX or narrower. Outside a window (a test page, a detached
+   *  bar) the bar's own width stands for it; an unmeasured bar is one row and decides nothing — its first size re-draws it. */
+  _layout() {
+    const bar = this._element;
+    const win = typeof bar.closest === 'function' ? bar.closest('.window') : null;
+    const w = (win ? win.offsetWidth : 0) || bar.clientWidth || 0;
+    const one = !(w > 0) || w >= ONE_ROW_PX, short = w > 0 && w <= SHORT_FORM_PX;
+    return { w, one, short, key: `${one ? 1 : 2}${short ? 's' : ''}` };
+  }
   /** A size change of the bar or its window: re-drawn when the arrangement's layout flips (one row ↔ the two rows, the
    *  short forms — strip-table.js); a desk window under SHORT_WINDOW_PX marks its view `chat-short` (the composer starts at
    *  one line — chat.css), so its messages keep ≥ 45 % of the window. */
@@ -200,9 +215,7 @@ export class ChatStatusBar {
     if (this._disposed || typeof this._element.closest !== 'function') return;
     const win = this._element.closest('.window');
     if (win && this._sizeRO && this._watchedWin !== win) { this._watchedWin = win; this._sizeRO.observe(win); }
-    const bw = this._element.clientWidth || (win ? win.offsetWidth : 0) || 0;
-    const lay = `${!(bw > 0) || bw >= ONE_ROW_PX ? 1 : 2}${bw > 0 && bw <= SHORT_FORM_PX ? 's' : ''}`;   // the same verdict as _arranged
-    if (lay !== this._layoutKey) this.render();
+    if (this._layout().key !== this._layoutKey) this.render();
     const view = this._element.closest('.chat-view');
     const short = !!win && !PHONE_MQ?.matches && win.offsetHeight > 0 && win.offsetHeight < SHORT_WINDOW_PX;
     if (view && view.classList.contains('chat-short') !== short) view.classList.toggle('chat-short', short);
@@ -743,6 +756,23 @@ export class ChatStatusBar {
   _healthLabel(issue) { return initHealthLabel(issue); }
   /** THE HOMES OFF THE STRIP read these (lane mask-value-shape, page §4): Session Properties says them in words. */
   initHealthRows() { return (this._initHealth || []).map((i) => this._healthLabel(i)); }
+  /** …in PLAIN words (page §1: «The GitHub tool isn't connected: it failed when this conversation started, so the agent can't
+   *  use it.» — the tool's own name, never «MCP plugin:x:y»; the cure of 644a67ec2): {words, row} — the protocol row (verbatim,
+   *  initHealthRows) one hover away. */
+  initHealthWords() {
+    const nameOf = (i) => { const n = String((i && i.name) || ''); const k = n.split(':').filter(Boolean); return k.length ? k[k.length - 1] : n; };
+    const wordsOf = (i) => {
+      const name = nameOf(i), d = String((i && i.detail) || '');
+      if (i && i.kind === 'plugin') return t('The {name} plugin isn\u2019t working: it failed to load when this conversation started.', { name: name || '?' });
+      if (i && i.kind === 'mcp-config') return name ? t('The {name} tool\u2019s settings could not be read, so the agent can\u2019t use it.', { name }) : t('A tool\u2019s settings could not be read, so the agent can\u2019t use it.');
+      if (d === 'needs-auth') return t('The {name} tool needs you to sign in before the agent can use it.', { name: name || '?' });
+      if (d === 'pending') return t('The {name} tool was still connecting when this conversation started.', { name: name || '?' });
+      if (d === 'failed' || !d) return t('The {name} tool isn\u2019t connected: it failed when this conversation started, so the agent can\u2019t use it.', { name: name || '?' });
+      // the status vocabulary is OPEN (initHealthIssues): a state this table does not know is said as its own word, never as «failed»
+      return t('The {name} tool wasn\u2019t connected when this conversation started (its state: {status}), so the agent can\u2019t use it.', { name: name || '?', status: d });
+    };
+    return (this._initHealth || []).map((i) => ({ kind: i && i.kind, words: wordsOf(i), row: this._healthLabel(i) }));
+  }
   addedKindsWords() { return addedKindsChipWords(this._addedKinds, t); }
   /** A start fact changed: an open Properties window of this conversation re-reads it. */
   _tellStartFacts() { if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') window.dispatchEvent(new CustomEvent('vs-start-facts', { detail: { sessionId: this._sessionId } })); }
@@ -825,7 +855,7 @@ export class ChatStatusBar {
     const chip = (key, cls, title, html, extra) => chips.push({ key, cls, title, html, style: extra?.style || '', attrs: extra?.attrs || null });
     // a mark the table puts INSIDE a door (lane mask-value-shape, the strip's step two): its descriptor, kept for that door's panel
     const doorRows = [];
-    const inDoor = (key, cls, title, html, extra) => doorRows.push({ key, cls, title, html, style: extra?.style || '', attrs: extra?.attrs || null, value: extra?.value ?? null });
+    const inDoor = (key, cls, title, html, extra) => doorRows.push({ key, cls, title, html, style: extra?.style || '', attrs: extra?.attrs || null, value: extra?.value ?? null, live: extra?.live !== false });
 
     // Chat search, phone face (design-mobile-gaps #4): a keyboard shortcut has
     // no touch equivalent; the chip is display:none above 768px.
@@ -852,7 +882,8 @@ export class ChatStatusBar {
       const label = locked
         ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : escHtml((target && (this._servedModel || target)) || this._statusModel || '?'))
         : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : (known ? escHtml(modelLabelFor(this._backend, this._statusModel) || this._statusModel) : t('model: ?')));
-      chip('model', `chat-status-model chat-status-clickable${known || target ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}`, title + lockTip, `<span class="chat-status-model-label">${label}</span>`);   // the label its own part: the model door also holds the thinking level (lane mask-value-shape)
+      const rawAttr = label.replace(/<[^>]*>/g, '').replace(/"/g, '&quot;'), faced = modelFace(label);   // the raw spelling: one hover on the label away
+      chip('model', `chat-status-model chat-status-clickable${known || target ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}`, title + lockTip, `<span class="chat-status-model-label" data-raw="${rawAttr}"${faced !== label ? ` title="${rawAttr}"` : ''}>${faced}</span>`);   // the FACE (page §4: «Fable 1M»), the raw label in data-raw, on the label's own hover and in the door's menu (the cure of 644a67ec2, MUST 4)   // the label its own part: the model door also holds the thinking level (lane mask-value-shape)
       // NO effort menu ⇒ NO effort chip (lane effort-menu-per-harness): a harness whose CLI takes no effort
       // (ui.effortLevels null — opencode) shows nothing, never a «?» that opens another harness's ladder.
       if (hasEffortMenu(this._backend)) {
@@ -898,9 +929,9 @@ export class ChatStatusBar {
         // THE MODEL DOOR (lane mask-value-shape, the strip's step two — the owner: «切换模型/思考…需要时刻看到»): the thinking level is
         // drawn INSIDE the model chip, its own part with its own class (a press on it opens its own menu; the rest of the chip
         // opens the models) — one door on the strip, both values read on its face. The table: effort = in:model.
-        const effortPart = `<span class="chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}" data-door-part="effort" title="${escHtml(eFull)}">${eKnown ? escHtml(this._statusEffort) : escHtml(t('effort: not reported'))}</span>`;
+        const effortPart = `<span class="chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}" data-door-part="effort" data-raw="${eKnown ? escHtml(this._statusEffort) : ''}" title="${escHtml((eKnown ? this._statusEffort + ' — ' : '') + eFull)}">${eKnown ? escHtml(effortFace(this._statusEffort, tc)) : escHtml(t('effort: not reported'))}</span>`;   // its FACE (page §4: «超强推理»), the raw value first in its title and in data-raw
         const mc = chips.find((c) => c.key === 'model');
-        if (mc) mc.html += ` <span class="chat-status-door-sep" aria-hidden="true">\u00b7</span> ${effortPart}`;   // the level VERBATIM (protocol values ruling, 主开发 2026-11-14)
+        if (mc) mc.html += ` <span class="chat-status-door-sep" aria-hidden="true">\u00b7</span> ${effortPart}`;
       }
     }
 
@@ -1089,13 +1120,15 @@ export class ChatStatusBar {
     {
       const v = this._artifacts;
       const n = v ? v.count || 0 : 0;
-      chip('artifacts', 'chat-status-artifacts chat-status-clickable', t('Files the agent made in this conversation — click for the list'), `${UI_ICONS.memo || ''} <span class="chat-status-artifacts-text">${escHtml(t('Artifacts · {n}', { n }))}</span>`);
+      const viewOnly = !v && !this._onDesignRequest;   // a view-only window (history, a viewer) never loads the files: no number it cannot know
+      chip('artifacts', 'chat-status-artifacts chat-status-clickable', t('Files the agent made in this conversation — click for the list'), `${UI_ICONS.memo || ''} <span class="chat-status-artifacts-text">${escHtml(viewOnly ? tc('strip', 'Artifacts') : t('Artifacts · {n}', { n }))}</span>`);
     }
 
     // lane outbox-session-chip: the Outbox chip (keyed) BESIDE Artifacts — «Outbox · N» = every proposal this conversation drafted (its messages and its API calls);
     // the accent + «M waiting» while M await the owner; a click opens the Outbox filtered to this conversation
-    if (this._outbox) {
-      const o = this._outbox;
+    // (lane mask-value-shape — the cure of 644a67ec2: the table's place is «always findable»: before any draft it reads «Outbox · 0»)
+    if (this._outbox || this._hasOutbox) {
+      const o = this._outbox || { cls: 'chat-status-outbox chat-status-clickable', tip: t('Outbox — what this conversation drafted for you to send; nothing yet'), text: t('Outbox · {n}', { n: 0 }), waiting: '' };
       chip('outbox', o.cls, o.tip, `${UI_ICONS.outbox || ''} <span class="chat-status-outbox-text">${escHtml(o.text)}</span>${o.waiting ? ` <span class="chat-status-outbox-wait">${escHtml(o.waiting)}</span>` : ''}`);
     }
 
@@ -1145,10 +1178,12 @@ export class ChatStatusBar {
 
     // Permission mode (always show, click to change; Codex sandbox policy in tooltip)
     const permMode = this._statusPermMode || 'default';
-    const permLabel = permMode;   // the mode VERBATIM where it is reported (protocol values ruling); its words go to the title below
+    // the mode's FACE (page §4: «全部放行»; 主开发's ruling 23:41Z: a label drawn for a value is chrome — the VALUE stays the
+    // protocol's), its sentence and the raw value in the title
+    const permLabel = permissionModeFace(BACKEND_META[this._backend]?.permissionModeFaces, permMode, tc, t);
     const permWords = permissionModeWords(this._backend, permMode, t);
-    const permTitle = (permWords ? permWords + ' — ' : '') + (this._statusSandbox ? t('Click to change permission mode \u00B7 sandbox: {sandbox}', { sandbox: this._statusSandbox }) : t('Click to change permission mode'));
-    chip('perm', `chat-status-perm chat-status-clickable${permissionModeDanger(this._backend, permMode) ? ' danger' : ''}`, permTitle, `${UI_ICONS.lock} ${escHtml(permLabel)}`);
+    const permTitle = (permWords ? permWords + (permMode ? ' · ' + permMode : '') + ' — ' : (permMode ? permMode + ' — ' : '')) + (this._statusSandbox ? t('Click to change permission mode \u00B7 sandbox: {sandbox}', { sandbox: this._statusSandbox }) : t('Click to change permission mode'));
+    chip('perm', `chat-status-perm chat-status-clickable${permissionModeDanger(this._backend, permMode) ? ' danger' : ''}`, permTitle, `${UI_ICONS.lock} ${escHtml(permLabel)}`, { attrs: { 'data-raw': permMode } });
 
     // THE «后台» DOOR (lane mask-value-shape, the strip's step two — page.md §4): background tasks AND running workflows
     // behind ONE door on row 2 (the table: tasks = the door, wf = in:tasks). Its face says the ONE item's own sentence at the
@@ -1165,7 +1200,7 @@ export class ChatStatusBar {
         const one = n === 1 ? (tasks.length ? (shortWorkflowName(tasks[0].description) || tasks[0].description || '') : String(wfRows[0].name || '')) : '';
         const tip = [...tasks.map((x) => x.description), ...wfRows.map((w) => (w.summary ? `${w.name} — ${w.summary}` : w.name))].filter(Boolean).join('\n');
         const word = `<span class="chat-status-door-word">${escHtml(t('Background work'))}</span>`;
-        const face = one && !!this._element.classList?.contains('chat-status-one-row')
+        const face = one && this._layout().one   // the verdict itself, never the class the last render wrote
           ? `${word}<span class="chat-status-door-sep">:</span> <span class="chat-status-door-title">${escHtml(one)}</span>`
           : `${word} <span class="chat-status-door-count">${num(n)}</span>`;
         chip('tasks', 'chat-status-tasks chat-status-clickable', tip, `${UI_ICONS.refresh} ${face}`, { attrs: { 'data-door': 'background' } });
@@ -1177,7 +1212,7 @@ export class ChatStatusBar {
       const reviewTitle = this._reviewEnabled
         ? t('Start Codex review')
         : t('Review becomes available after the first completed assistant turn');
-      inDoor('review', `chat-status-review ${reviewClass}`, reviewTitle, `\u2713 ${escHtml(t('Review'))}`);
+      inDoor('review', `chat-status-review ${reviewClass}`, reviewTitle, `\u2713 ${escHtml(t('Review'))}`, this._reviewEnabled ? undefined : { value: t('After the first reply'), live: false });   // not yet: its value says so, a press is no silent nothing
     }
 
     // THE FACTS ROW (lane agy-status-bar-facts): context / cache / odometer / model / turn time are drawn for what this
@@ -1208,6 +1243,13 @@ export class ChatStatusBar {
         });
       }
       chip('ctx', 'chat-status-ctx chat-status-clickable', ctxTitle, `<span class="chat-status-ctx-pie" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"></span> <span class="chat-status-door-word">${escHtml(t('Context'))}</span> <span style="color:${color}">${pct}%</span>`, { attrs: { 'data-door': 'context', 'data-used': usedK, 'data-total': totalK } });   // lane mask-value-shape: the bracket lives in the door's panel
+    }
+
+    // THE CONTEXT DOOR IS ALWAYS THERE (the cure of 644a67ec2, MUST 5): before the first usage reading — a fresh conversation, a
+    // restore with a spend and no reading — its face says so, and its panel holds what it holds («not reported», the spend)
+    if (!chips.some((c) => c.key === 'ctx' || c.key === 'ctx-unknown')) {
+      chip('ctx-unknown', 'chat-status-ctx chat-status-clickable chat-status-dim', facts.context ? t('No context reading yet — it is said after the first reply') : t('This agent does not report its context'),
+        `<span class="chat-status-ctx-pie" style="background:var(--bg-input)"></span> <span class="chat-status-door-word">${escHtml(t('Context'))}</span> ?`, { attrs: { 'data-door': 'context' } });
     }
 
     // Cache ratio
@@ -1248,7 +1290,9 @@ export class ChatStatusBar {
     if (this._statusCost > 0) {
       const cw = costChipWords(this._statusCost, this._costBasis ?? null, t, (v) => num(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })); // the page's number formatter (ui-language page-time)
       const costColor = cw.tone === 'quiet' ? 'var(--text-dim)' : this._statusCost > 5 ? tierRed : this._statusCost > 1 ? tierOrange : tierGreen;
-      inDoor('cost', 'chat-status-cost', cw.title, escHtml(cw.text), { style: `color:${costColor}`, value: cw.text });   // its context-panel row says the FIGURE (its title has none)
+      // its context-panel row says the FIGURE (its title has none); an account whose basis nobody knows is SAID as unknown there
+      // (主开发's ruling 23:41Z: only per-use billing puts the spend on the door's face)
+      inDoor('cost', 'chat-status-cost', cw.title, escHtml(cw.text), { style: `color:${costColor}`, value: (this._costBasis ?? null) === null ? t('{text} · whether it is billed is not known', { text: cw.text }) : cw.text });
       // the table's place (strip-table.js `onDoorWhen: 'billedPerUse'`): on the context door's face ONLY on an account known to be
       // billed per use (an API key) — a subscription's figure, and one whose account nobody knows, are the context panel's
       if ((this._costBasis ?? null) === 'api') { const cx = chips.find((c) => c.key === 'ctx' || c.key === 'ctx-unknown'); if (cx) cx.html += ` <span class="chat-status-cost" style="color:${costColor}">${escHtml(cw.text)}</span>`; }
@@ -1281,9 +1325,7 @@ export class ChatStatusBar {
    *  its door / home is built (never lost on the way). Writes the bar's layout classes (one row / two rows / short forms). */
   _arranged(chips) {
     const bar = this._element;
-    const win = typeof bar.closest === 'function' ? bar.closest('.window') : null;
-    const w = bar.clientWidth || (win ? win.offsetWidth : 0) || 0;
-    const one = !(w > 0) || w >= ONE_ROW_PX;   // an unmeasured bar (detached, hidden) decides nothing: its first measured size re-draws it (_onSize)
+    const { w, one } = this._layout();
     const rank = (key) => {
       const r = ROW_OF[key];
       if (!r) return [2, 2000];
@@ -1301,7 +1343,7 @@ export class ChatStatusBar {
       if (iSet > 0) ordered.splice(iSet, 0, mark('class-line-iii', 'chat-status-classline'));
       if (firstRow2 > 0 && (iSet < 0 || firstRow2 < iSet)) ordered.splice(firstRow2, 0, mark('class-line-ii', 'chat-status-classline'));
     }
-    const lay = { 'chat-status-one-row': one, 'chat-status-two-rows': !one, 'chat-status-short': w > 0 && w <= SHORT_FORM_PX };
+    const lay = { 'chat-status-one-row': one, 'chat-status-two-rows': !one, 'chat-status-short': this._layout().short };
     if (bar.classList) for (const [c, on] of Object.entries(lay)) if (bar.classList.contains(c) !== on) bar.classList[on ? 'add' : 'remove'](c);   // (a host with no classList — a fake DOM — draws the same order)
     this._layoutKey = `${one ? 1 : 2}${lay['chat-status-short'] ? 's' : ''}`;
     return ordered;
@@ -1523,58 +1565,8 @@ export class ChatStatusBar {
   }
 
   _onClick(e) {
-    // THE CONTEXT DOOR (lane mask-value-shape): its panel says the window used, then each detail as its own sentence
-    { const ctxEl = e.target.closest('.chat-status-ctx');
-      if (ctxEl) {
-        e.stopPropagation();
-        const dropdown = showDropdown(ctxEl, { minWidth: 260, maxWidth: 420 });
-        if (!dropdown) return;
-        const add = (cls, text, tip) => { const d = document.createElement('div'); d.className = `chat-status-dropdown-item chat-status-ctx-row ${cls}`; d.textContent = text; if (tip && tip !== text) d.title = tip; dropdown.appendChild(d); };
-        if (ctxEl.dataset.used) add('chat-status-ctx-window', t('Context: {used} of {total} tokens', { used: ctxEl.dataset.used, total: ctxEl.dataset.total }));
-        else if (ctxEl.title) add('chat-status-ctx-window', ctxEl.title);
-        const order = (k) => (ROW_OF[k] ? ROW_OF[k].order : 99);
-        for (const r of [...(this._doorRows || [])].filter((x) => ROW_OF[x.key] && ROW_OF[x.key].place === 'in:ctx' && x.key !== 'cache-k').sort((x, y) => order(x.key) - order(y.key))) add(`chat-status-ctx-${r.key}`, r.value ?? r.title ?? '', r.title);   // moved, not lost: each detail's own sentence, the spend its figure
-        return;
-      }
-    }
-    // «⚙ 对话设置» (lane mask-value-shape, the strip's step two): ONE door for the low-frequency things — each row its
-    // present value; a press runs THAT member's own menu, opened at the door (its handler below is given the door as its
-    // element: `closest` answers only the member's own selector)
-    { const setEl = e.target.closest('.chat-status-settings');
-      if (setEl) {
-        e.stopPropagation();
-        const dropdown = showDropdown(setEl, { minWidth: 260, maxWidth: 380 });
-        if (!dropdown) return;
-        const LABEL = { style: t('Output style'), autoresume: t('Continue after a usage limit'), goal: t('Goal'), review: t('Review'), held: t('Held notifications'), billing: t('Who pays') };
-        const textOf = (html) => { const d = document.createElement('div'); d.innerHTML = html; return d.textContent.replace(/\s+/g, ' ').trim(); };
-        const order = (k) => (ROW_OF[k] ? ROW_OF[k].order : 99);
-        const mine = (k) => !!ROW_OF[k] && (ROW_OF[k].place === `in:${DOORS.settings}` || ROW_OF[k].alsoIn === DOORS.settings);
-        for (const r of [...(this._doorRows || [])].filter((x) => mine(x.key)).sort((x, y) => order(x.key) - order(y.key))) {
-          const item = document.createElement('div');
-          const live = r.key !== 'held';   // the held notices are a state, never a door
-          item.className = `chat-status-dropdown-item chat-status-settings-row${live ? ' chat-status-clickable' : ''}`;
-          item.dataset.row = r.key;
-          if (r.title) item.title = r.title;
-          const lab = document.createElement('span'); lab.className = 'chat-status-settings-label'; lab.textContent = LABEL[r.key] || r.key;
-          const val = document.createElement('span'); val.className = 'chat-status-settings-value'; val.textContent = (r.value ?? textOf(r.html)) + (live ? ' ›' : '');
-          item.append(lab, val);
-          if (live) item.onclick = (ev) => {
-            ev.stopPropagation(); dropdown.remove();
-            const sel = `.chat-status-${r.key}`;
-            this._onClick({ target: { closest: (q) => (q === sel ? setEl : null) }, stopPropagation() {}, preventDefault() {} });
-          };
-          dropdown.appendChild(item);
-        }
-        return;
-      }
-    }
     if (e.target.closest('.chat-status-vault-wait')) { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); return; }   // r2: the vault's door
     if (e.target.closest('.chat-status-turnstate.chat-status-clickable')) { e.stopPropagation(); this._onJumpToAsk?.(); return; } // lane S1: go to the card that waits
-    const wfChip = e.target.closest('.chat-status-wf');
-    if (wfChip && this._onOpenWorkflow && wfChip.dataset.wfRun) {
-      this._onOpenWorkflow(wfChip.dataset.wfRun, wfChip.dataset.wfName);
-      return;
-    }
     const bChip = e.target.closest('.chat-status-billing');
     if (bChip && this._onBillingSwitch) {
       e.stopPropagation();
@@ -1667,23 +1659,55 @@ export class ChatStatusBar {
       }
       return dropdown;
     };
-
-    // Collapsed multi-workflow chip → dropdown, one row per run
-    const wfMulti = e.target.closest('.chat-status-wf-multi');
-    if (wfMulti && this._runningWorkflows().length) {
-      e.stopPropagation();
-      const dropdown = showDropdown(wfMulti);
-      if (!dropdown) return;
-      for (const wf of this._runningWorkflows()) {
-        const item = document.createElement('div');
-        item.className = 'chat-status-dropdown-item chat-task-detail';
-        const prog = wf.probed && wf.agents ? ` <span class="chat-status-dim">${wf.done}/${wf.agents}</span>` : '';
-        item.innerHTML = `<div class="chat-task-title">⛭ ${escHtml(String(wf.name).slice(0, 48))}${prog}</div>`;
-        item.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); this._onOpenWorkflow?.(wf.runId, wf.name); };
-        dropdown.appendChild(item);
+    // THE DOORS (lane mask-value-shape): below `container` and `showDropdown` — they open panels with them (the cure of
+    // 644a67ec2: placed above, both presses threw in the const's temporal dead zone)
+    // THE CONTEXT DOOR (lane mask-value-shape): its panel says the window used, then each detail as its own sentence
+    { const ctxEl = e.target.closest('.chat-status-ctx');
+      if (ctxEl) {
+        e.stopPropagation();
+        const dropdown = showDropdown(ctxEl, { minWidth: 260, maxWidth: 420 });
+        if (!dropdown) return;
+        const add = (cls, text, tip) => { const d = document.createElement('div'); d.className = `chat-status-dropdown-item chat-status-ctx-row ${cls}`; d.textContent = text; if (tip && tip !== text) d.title = tip; dropdown.appendChild(d); };
+        if (ctxEl.dataset.used) add('chat-status-ctx-window', t('Context: {used} of {total} tokens', { used: ctxEl.dataset.used, total: ctxEl.dataset.total }));
+        else if (ctxEl.title) add('chat-status-ctx-window', ctxEl.title);
+        const order = (k) => (ROW_OF[k] ? ROW_OF[k].order : 99);
+        for (const r of [...(this._doorRows || [])].filter((x) => ROW_OF[x.key] && ROW_OF[x.key].place === 'in:ctx' && x.key !== 'cache-k').sort((x, y) => order(x.key) - order(y.key))) add(`chat-status-ctx-${r.key}`, r.value ?? r.title ?? '', r.title);   // moved, not lost: each detail's own sentence, the spend its figure
+        return;
       }
-      return;
     }
+    // «⚙ 对话设置» (lane mask-value-shape, the strip's step two): ONE door for the low-frequency things — each row its
+    // present value; a press runs THAT member's own menu, opened at the door (its handler below is given the door as its
+    // element: `closest` answers only the member's own selector)
+    { const setEl = e.target.closest('.chat-status-settings');
+      if (setEl) {
+        e.stopPropagation();
+        const dropdown = showDropdown(setEl, { minWidth: 260, maxWidth: 380 });
+        if (!dropdown) return;
+        const LABEL = { style: t('Output style'), autoresume: t('Continue after a usage limit'), goal: t('Goal'), review: t('Review'), held: t('Held notifications'), billing: t('Who pays') };
+        const textOf = (html) => { const d = document.createElement('div'); d.innerHTML = html; return d.textContent.replace(/\s+/g, ' ').trim(); };
+        const order = (k) => (ROW_OF[k] ? ROW_OF[k].order : 99);
+        const mine = (k) => !!ROW_OF[k] && (ROW_OF[k].place === `in:${DOORS.settings}` || ROW_OF[k].alsoIn === DOORS.settings);
+        for (const r of [...(this._doorRows || [])].filter((x) => mine(x.key)).sort((x, y) => order(x.key) - order(y.key))) {
+          const item = document.createElement('div');
+          const live = r.key !== 'held' && r.live !== false;   // the held notices are a state, never a door; a row not available yet says so
+          item.className = `chat-status-dropdown-item chat-status-settings-row${live ? ' chat-status-clickable' : ''}`;
+          item.dataset.row = r.key;
+          if (r.title) item.title = r.title;
+          const lab = document.createElement('span'); lab.className = 'chat-status-settings-label'; lab.textContent = LABEL[r.key] || r.key;
+          const val = document.createElement('span'); val.className = 'chat-status-settings-value'; val.textContent = (r.value ?? textOf(r.html)) + (live ? ' ›' : '');
+          item.append(lab, val);
+          if (live) item.onclick = (ev) => {
+            ev.stopPropagation(); dropdown.remove();
+            const sel = `.chat-status-${r.key}`;
+            this._onClick({ target: { closest: (q) => (q === sel ? setEl : null) }, stopPropagation() {}, preventDefault() {} });
+          };
+          dropdown.appendChild(item);
+        }
+        return;
+      }
+    }
+
+    // ── the doors end ── (lane mask-value-shape: the old ⛭ workflow chips are gone — the «后台» door's panel lists the runs)
     // Browser chip (§3.8 ③) -> both facts as a row + the one-click nudge
     // (zero-spend: the reminder rides the user's next message), the live
     // view, and the pin picker. The nudge row exists only when they differ.
@@ -1720,6 +1744,14 @@ export class ChatStatusBar {
       this._renderDesignPopover(dropdown);
       return;
     }
+    if (afEl && !this._artifacts && !this._onDesignRequest) {   // (the cure of 644a67ec2) a view-only window at zero: the door says so
+      e.stopPropagation();
+      const dropdown = showDropdown(afEl);
+      if (!dropdown) return;
+      const note = document.createElement('div'); note.className = 'chat-status-dropdown-note chat-status-artifacts-none'; note.textContent = t('This window shows the record only — it does not load the files the conversation made');
+      dropdown.appendChild(note);
+      return;
+    }
     if (afEl && this._artifacts) {
       e.stopPropagation();
       const dropdown = showDropdown(afEl, { minWidth: 300, maxWidth: 420 });
@@ -1734,7 +1766,7 @@ export class ChatStatusBar {
     }
     // lane outbox-session-chip: Outbox chip -> the Outbox window, filtered to this conversation (the window's own view state)
     const obEl = e.target.closest('.chat-status-outbox');
-    if (obEl && this._outbox) {
+    if (obEl && (this._outbox || this._hasOutbox)) {   // (lane mask-value-shape) at zero too: the Outbox window filtered to this conversation says it holds nothing
       e.stopPropagation();
       this._onOpenOutbox?.();
       return;

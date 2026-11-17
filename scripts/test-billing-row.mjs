@@ -100,8 +100,8 @@ const chipText = (K, backend, auth) => {
   const bar = mkBar(K, backend);
   bar.applyStatus({ model: 'm-1', permissionMode: 'default' });
   bar.setBilling(auth, () => {});
-  const el = bar.element.children.find((e) => e.getAttribute('data-chip') === 'billing');
-  return el ? el.textContent : '';
+  const r = (bar._doorRows || []).find((e) => e.key === 'billing');   // (lane mask-value-shape) a row of «⚙ 对话设置» now
+  return r ? String(r.html).replace(/<[^>]*>/g, '') : '';
 };
 const local = chipText(ChatStatusBar, 'acme', { source: 'subscription' }), onHost = chipText(ChatStatusBar, 'acme', { source: 'subscription', hostName: 'box' });
 ok(local.includes('Acme login') && !local.includes('CLI login'), 'the billing chip names the fake harness\'s CLI login', local);

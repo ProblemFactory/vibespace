@@ -124,7 +124,8 @@ globalThis.document = { createElement: (t) => new FakeEl(t) };
   // lane agy-status-bar-facts: a claude bar says «not reported» (ONE chip) for the facts its row lacks — token total, turn time
   // lane mask-value-shape: the strip's table order — row 1 (model door, permission, context door), row 2 (产出, «⚙ 对话设置»);
   // the rest are door rows, and the search lives in the window's title bar (no strip mark)
-  ok(order0.join(',') === 'model,perm,ctx,artifacts,settings', `first render draws the expected chip set in bar order (${order0.join(',')})`);
+  // (the cure of 644a67ec2) the outbox is ALWAYS findable — «Outbox · 0» before any draft (the table's place)
+  ok(order0.join(',') === 'model,perm,ctx,artifacts,outbox,settings', `first render draws the expected chip set in bar order (${order0.join(',')})`);
   ok(Object.keys(rowsOf(bar)).join(',') === 'goal,style,design,cache,cache-k,unreported,cost', `…and the marks the table puts inside a door are door rows, none on the strip (${Object.keys(rowsOf(bar)).join(',')})`);
   ok(bar.element.children.every((el) => el.tagName === 'SPAN' && el.getAttribute('data-chip')), 'every chip is a <span data-chip=…>');
   const v = driveTwenty(bar);
@@ -135,7 +136,7 @@ globalThis.document = { createElement: (t) => new FakeEl(t) };
   // cost joins the door's face only on an account billed per use (this fixture's account is not known)
   // the ctx door's face is its pie + word + ROUNDED percent (the [used/total] moved to its data-* and its panel): an unchanged
   // string is NOT written (that is the point), so more than once, fewer than 21
-  const warm = ['ctx'], cold = ['model', 'perm', 'artifacts', 'settings'];
+  const warm = ['ctx'], cold = ['model', 'perm', 'artifacts', 'outbox', 'settings'];
   ok(warm.every((k) => v.after[k].innerSets > 1 && v.after[k].innerSets < 21), `① the ctx door (${warm.join('/')}) re-wrote its inner markup only when its rounded percent changed (${warm.map((k) => v.after[k].innerSets).join('/')} of 21 ticks)`);
   ok(cold.every((k) => v.after[k].innerSets === 1), `① the cold chips (${cold.join('/')}) were written once and never again (${cold.map((k) => v.after[k].innerSets).join('/')})`);
   // tick 20: 21000 + 2500 + 20 = 23520 of 200000 → 12 %, "24k"
@@ -217,11 +218,11 @@ console.log('— ③ attributes land as raw strings; classless chips carry no cl
   // 500 of 1500 cached = 33 % → the orange tier (a color-mix of the two theme vars), never a literal colour
   ok(/^color:color-mix\(in srgb, var\(--red, #e55\) 50%, var\(--yellow, #e5c07b\)\)$/.test(rws.cache.style) && /^color:var\(--green, #3fb950\)$/.test(rws.cost.style), `③ their colour rides the style attribute, theme vars only (${rws.cache.style} / ${rws.cost.style})`);
   ok(/^<span class="chat-status-ctx-pie" style="background:conic-gradient\(.*\)"><\/span> <span class="chat-status-door-word">[^<]+<\/span> <span style="color:.*">\d+%<\/span>$/.test(els.ctx.innerHTML) && /^\d+k$/.test(els.ctx.getAttribute('data-used')) && /^\d+k$/.test(els.ctx.getAttribute('data-total')), '③ the ctx door keeps its pie + its word + percent markup shape, the [used/total] in its data-* (its panel says it)');
-  ok(els.perm.getAttribute('title') === 'Ask before acting — Click to change permission mode' && els.perm.textContent.endsWith(' default'), '③ the permission chip: the mode VERBATIM on the chip, its words in the title (protocol values ruling, 主开发 2026-11-14)');
+  ok(els.perm.getAttribute('title') === 'Ask before acting · default — Click to change permission mode' && els.perm.textContent.endsWith(' Ask each time') && els.perm.getAttribute('data-raw') === 'default', '③ the permission chip: its FACE on the chip (page §4 — 主开发 23:41Z: a label drawn for a value is chrome), the raw mode in its title and data-raw; (was: the mode VERBATIM on the chip, its words in the title (protocol values ruling, 主开发 2026-11-14)');
   // the "?" chips when nothing was reported
   const bare = mkBar(ChatStatusBar, { onSearch: null, onDesignRequest: null });
   bare.render();
-  ok(keys(bare).join(',') === 'model,perm,artifacts,settings' && byKey(bare).model.textContent.startsWith('model: ?') && /chat-status-effort[^"]*chat-status-dim/.test(byKey(bare).model.innerHTML) && byKey(bare).model.className.includes('chat-status-dim') && !rowsOf(bare).design, `③ a never-reported session draws model: ? / its thinking level dim inside the model door, no search chip nor design row when the view offers none (${keys(bare).join(',')})`);
+  ok(keys(bare).join(',') === 'model,perm,ctx-unknown,artifacts,outbox,settings' && /^<span class="chat-status-ctx-pie"[^>]*><\/span> <span class="chat-status-door-word">[^<]+<\/span> \?$/.test(byKey(bare)['ctx-unknown'].innerHTML) && byKey(bare).model.textContent.startsWith('model: ?') && /chat-status-effort[^"]*chat-status-dim/.test(byKey(bare).model.innerHTML) && byKey(bare).model.className.includes('chat-status-dim') && !rowsOf(bare).design, `③ a never-reported session draws model: ? / its thinking level dim inside the model door, no search chip nor design row when the view offers none (${keys(bare).join(',')})`);
   bar.dispose(); bare.dispose();
 }
 
@@ -276,7 +277,7 @@ console.log('— ⑤ wiring');
   bar.setAddedKinds([{ kind: 'record', name: 'api-request-blob', cli: '2.1.309' }]);
   const order = keys(bar), els = byKey(bar), kw = bar.addedKindsWords();
   // (lane mask-value-shape) the kinds are no strip mark: ⚙ Diagnostics holds their cause, Session Properties their names
-  ok(!order.includes('kinds') && order.join(',') === 'model,perm,ctx,artifacts,settings', `⑥ the record kinds draw NO strip mark — every chip keeps its place (${order.join(',')})`);
+  ok(!order.includes('kinds') && order.join(',') === 'model,perm,ctx,artifacts,outbox,settings', `⑥ the record kinds draw NO strip mark — every chip keeps its place (${order.join(',')})`);
   ok(!!kw && kw.text === '1 record kind this version added — Diagnostics' && /api-request-blob: a new record \(2\.1\.309\)/.test(kw.title), '⑥ «1 record kind this version added — Diagnostics», quiet (no inline colour — the theme\'s dim), each kind in its title');
   const cr = rowsOf(bar).cost;
   ok(cr.html === 'This chat ≈ $0.50 · included in your subscription' && cr.style === 'color:var(--text-dim)' && !/chat-status-cost/.test(els.ctx.innerHTML), `⑥ a subscription's cost is quiet (dim), never the tier colours — a row of the context door, never on its face (${cr.style})`);
@@ -298,7 +299,8 @@ console.log('— ⑤ wiring');
 console.log('— ⑦ a locked chip holds the served model against the lock target (the owner\'s 🔒 fable[1m] scene)');
 {
   // (lane mask-value-shape) the model door's face is the model, then « · » and its thinking level — the label is what precedes it
-  const chipOf = (bar) => { const el = byKey(bar).model; return { text: el.innerHTML.split(' <span class="chat-status-door-sep"')[0].replace(/<[^>]*>/g, '').trim(), amber: /chat-status-model-fallback/.test(el.className), locked: /chat-status-model-locked/.test(el.className), dim: /chat-status-dim/.test(el.className), title: el.getAttribute('title') || '' }; };
+  // (the cure of 644a67ec2, MUST 4) the model door's FACE is worded («Fable 5.2»); the raw label it shows is its data-raw
+  const chipOf = (bar) => { const el = byKey(bar).model; return { text: (((el.innerHTML.match(/class="chat-status-model-label" data-raw="([^"]*)"/) || [])[1]) || '').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&amp;/g, '&').trim(), amber: /chat-status-model-fallback/.test(el.className), locked: /chat-status-model-locked/.test(el.className), dim: /chat-status-dim/.test(el.className), title: el.getAttribute('title') || '' }; };
   const plain = (c, text) => c.locked && !c.amber && c.text === text;
   const lockedOn = (target, model = 'claude-fable-5-2') => { const b = mkBar(ChatStatusBar); b.applyStatus({ ...firstStatus, model, modelLocked: true, lockedModel: target }); return b; };
   // (the scene) attached, a live turn served by 5-2, then the scroll up draws an older turn's init (5-1) and a /model echo of
@@ -499,7 +501,7 @@ console.log('— ⑦ a locked chip holds the served model against the lock targe
 // and keeps the two numbers only to drop a stale frame. Master's mismatch over those fields IS the order judgement. The facts here
 // are the REAL modelFacts over a session's fields.
 console.log('— ⑧ one bar (round 13): a live session\'s numbered facts write master\'s own fields; a press is master\'s; a refusal undoes its own press');
-const chipOf = (bar) => { const el = byKey(bar).model; return { amber: /chat-status-model-fallback/.test(el.getAttribute('class') || ''), locked: /chat-status-model-locked/.test(el.getAttribute('class') || ''), warn: el.innerHTML.includes('⚠'), text: el.innerHTML.split(' <span class="chat-status-door-sep"')[0].replace(/<[^>]*>/g, ''), title: el.getAttribute('title') || '' }; };
+const chipOf = (bar) => { const el = byKey(bar).model; return { amber: /chat-status-model-fallback/.test(el.getAttribute('class') || ''), locked: /chat-status-model-locked/.test(el.getAttribute('class') || ''), warn: el.innerHTML.includes('⚠'), text: (((el.innerHTML.match(/class="chat-status-model-label" data-raw="([^"]*)"/) || [])[1]) || '').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&amp;/g, '&'), title: el.getAttribute('title') || '' }; };
 const { createRequire: createRequire8 } = await import('node:module');
 const MA8 = createRequire8(path.join(repo, 'src/server/model-ask.js'))('./model-ask.js');
 const MP8 = await import(pathToFileURL(path.join(repo, 'src/model-providers.js')).href);
@@ -1483,6 +1485,158 @@ console.log('— ⑨ the seeded walk: Stop, ✕, a sticky fallback, d7, old / re
     if (fails.length) console.error(`    ${backend}: first failing seed ${fails[0].seed}: ${fails[0].violation}\n      ${fails[0].log.slice(-14).join('\n      ')}`);
     ok(fails.length === 0, `⑨ THE SEEDED WALK (${backend}): ${summary[backend].seeds} seeds × 24 steps over the real modules — every REST point holds (i) the bars' facts and lock = the server's, (ii) amber exactly when a newer served record is not held, (iii) the saved config a resume reads is what the person last pressed and nothing but a press wrote it (round 15: a typed /model writes nothing) (the named residual of a save at the press, as on master: a Lock pressed on a stale view of the ask ${staleLocks.n}×, a pick saved on a view without the lock the hub held ${staleLocks.pick}×, a press whose frame died with the hub ${staleLocks.lost}×, presses taken in another order than pressed ${staleLocks.order}×), (iv) a lock has a way off, (v) ≤ 1 repin per turn end, (vi) the ask = the person's last pick, (viii) the served fact = what the CLI served, (ix) a drifted lock was repinned${fails.length ? ' — FAILING by invariant: ' + JSON.stringify(byInv) : ''}`);
   }
+}
+
+// ── ⑫ THE DOORS, PRESSED (lane mask-value-shape — the cure of 644a67ec2's MUST 1: both new doors threw on every press, their
+// blocks above `showDropdown`'s const) — the context door and «⚙ 对话设置» are PRESSED through the bar's own click handler over a
+// DOM stand-in rich enough for a panel (closest / querySelector / dataset / style); each opens its panel with its rows, and a
+// settings row's press runs THAT member's own menu at the door. RED CONTROL: the same source with the door blocks put back above
+// the declaration — the press throws.
+console.log('— ⑫ the doors, pressed: the context door and «⚙ 对话设置» open their panels; a row runs its member\'s own menu');
+{
+  let ROOT = null;
+  const dk = (k) => 'data-' + String(k).replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+  const matchCompound = (el, c) => {
+    const tag = /^[a-z]+/i.exec(c); if (tag && el.tagName !== tag[0].toUpperCase()) return false;
+    for (const m of c.matchAll(/\.([\w-]+)/g)) if (!el.classList.contains(m[1])) return false;
+    for (const m of c.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)) { const v = el.getAttribute(m[1]); if (v == null || (m[2] !== undefined && v !== m[2])) return false; }
+    return true;
+  };
+  const matchSel = (el, sel) => {
+    const parts = sel.replace(/:scope\s*>\s*/g, '').trim().split(/\s+/);
+    if (!matchCompound(el, parts[parts.length - 1])) return false;
+    let e = el.parentNode;
+    for (let i = parts.length - 2; i >= 0; i--) { while (e && !(e instanceof DomEl && matchCompound(e, parts[i]))) e = e.parentNode; if (!e) return false; e = e.parentNode; }
+    return true;
+  };
+  class DomEl {
+    constructor(tag) { this.tagName = String(tag).toUpperCase(); this.attrs = new Map(); this.childNodes = []; this.parentNode = null; this._text = ''; this._html = null; this.onclick = null; this.nodeType = 1;
+      this.style = { setProperty() {}, getPropertyValue() { return ''; } };
+      const el = this; this.dataset = new Proxy({}, { get: (o, k) => (typeof k === 'string' ? el.getAttribute(dk(k)) ?? undefined : undefined), set: (o, k, v) => { el.setAttribute(dk(k), v); return true; }, deleteProperty: (o, k) => { el.removeAttribute(dk(k)); return true; } }); }
+    setAttribute(k, v) { this.attrs.set(k, String(v)); } getAttribute(k) { return this.attrs.has(k) ? this.attrs.get(k) : null; } hasAttribute(k) { return this.attrs.has(k); } removeAttribute(k) { this.attrs.delete(k); }
+    get className() { return this.getAttribute('class') || ''; } set className(v) { this.setAttribute('class', v); }
+    get title() { return this.getAttribute('title') || ''; } set title(v) { this.setAttribute('title', v); }
+    get id() { return this.getAttribute('id') || ''; } set id(v) { this.setAttribute('id', v); }
+    get classList() { const el = this, list = () => el.className.split(/\s+/).filter(Boolean); return { contains: (c) => list().includes(c), add: (...cs) => { el.className = [...new Set([...list(), ...cs])].join(' '); }, remove: (...cs) => { el.className = list().filter((x) => !cs.includes(x)).join(' '); }, toggle: (c, on) => { const want = on === undefined ? !list().includes(c) : !!on; if (want) el.classList.add(c); else el.classList.remove(c); return want; } }; }
+    get children() { return this.childNodes.filter((n) => n instanceof DomEl && n.tagName !== '#TEXT'); }
+    get firstElementChild() { return this.children[0] || null; } get lastElementChild() { const c = this.children; return c[c.length - 1] || null; }
+    appendChild(n) { if (n.parentNode) n.parentNode.removeChild(n); this.childNodes.push(n); n.parentNode = this; return n; }
+    append(...ns) { for (const n of ns) { if (typeof n === 'string') { const tx = new DomEl('#text'); tx._text = n; this.appendChild(tx); } else this.appendChild(n); } }
+    insertBefore(n, ref) { if (!ref) return this.appendChild(n); if (n.parentNode) n.parentNode.removeChild(n); this.childNodes.splice(this.childNodes.indexOf(ref), 0, n); n.parentNode = this; return n; }
+    removeChild(n) { const i = this.childNodes.indexOf(n); if (i >= 0) this.childNodes.splice(i, 1); n.parentNode = null; return n; }
+    remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+    replaceChildren(...ns) { for (const c of [...this.childNodes]) this.removeChild(c); this.append(...ns); }
+    get isConnected() { let e = this; while (e.parentNode) e = e.parentNode; return e === ROOT; }
+    set textContent(v) { this.replaceChildren(); this._html = null; this._text = String(v); }
+    get textContent() { if (this._html != null) return this._html.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'); return this._text + this.childNodes.map((c) => c.textContent).join(''); }
+    set innerHTML(h) { this.replaceChildren(); this._text = ''; this._html = String(h); }
+    get innerHTML() { return this._html ?? ''; }
+    matches(sel) { return sel.split(',').some((s) => matchSel(this, s.trim())); }
+    closest(sel) { for (let e = this; e; e = e.parentNode) if (e instanceof DomEl && e.matches(sel)) return e; return null; }
+    querySelectorAll(sel) { const out = []; const walk = (e) => { for (const c of e.children) { if (c.matches(sel)) out.push(c); walk(c); } }; walk(this); return out; }
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+    getBoundingClientRect() { return { left: 0, top: 0, right: 300, bottom: 24, width: 300, height: 24 }; }
+    getClientRects() { return [this.getBoundingClientRect()]; }
+    get offsetWidth() { return 300; } get clientWidth() { return 0; }
+    addEventListener() {} removeEventListener() {} focus() {} blur() {}
+  }
+  const doc0 = globalThis.document, gcs0 = globalThis.getComputedStyle, win0 = globalThis.window;
+  ROOT = new DomEl('html');
+  globalThis.document = { createElement: (t) => new DomEl(t), getElementById: () => null, addEventListener() {}, removeEventListener() {}, body: ROOT, documentElement: ROOT, querySelector: (s) => ROOT.querySelector(s), querySelectorAll: (s) => ROOT.querySelectorAll(s) };
+  globalThis.getComputedStyle = () => ({ position: 'relative', minWidth: '0px', getPropertyValue: () => '' });
+  globalThis.window = { dispatchEvent: () => true, addEventListener() {}, removeEventListener() {}, innerWidth: 1200, innerHeight: 800 };
+  const press = (el) => { let threw = null; try { el._bar._onClick({ target: el, stopPropagation() {}, preventDefault() {} }); } catch (e) { threw = e; } return threw; };
+  const drive = (Klass) => {
+    const host = new DomEl('div'); ROOT.appendChild(host);
+    const switched = [];
+    const bar = new Klass({ send() {} }, 'sid-doors', { backend: 'claude', getToolMsg: () => null, openSubagentViewer() {}, openInTempEditor() {} });
+    host.appendChild(bar.element); bar.popupContainer = host;
+    bar.applyStatus({ ...firstStatus });
+    bar.setBilling({ source: 'pooled', name: '全部', poolTarget: 'Beta Max' }, (anchor) => switched.push(anchor));
+    bar.setJobsHeld('3 notifications held — waiting for the turn');
+    bar.render();
+    const door = (cls) => { const d = bar.element.querySelector(cls); if (d) d._bar = bar; return d; };
+    const out = { switched };
+    // the context door
+    const ctx = door('.chat-status-ctx');
+    out.ctxThrew = ctx ? press(ctx) : 'no door';
+    const ddc = host.querySelector('.chat-status-dropdown');
+    out.ctxRows = ddc ? ddc.querySelectorAll('.chat-status-ctx-row').map((r) => r.className.replace(/.*chat-status-ctx-row ?/, '') + '=' + r.textContent) : null;
+    ddc?.remove();
+    // «⚙ 对话设置»
+    const set = door('.chat-status-settings');
+    out.setThrew = set ? press(set) : 'no door';
+    const dds = host.querySelector('.chat-status-dropdown');
+    out.setRows = dds ? dds.querySelectorAll('.chat-status-settings-row').map((r) => ({ row: r.dataset.row, live: typeof r.onclick === 'function', text: r.textContent })) : null;
+    // a row's press runs its member's own menu, at the door: the output style
+    const sr = dds && dds.querySelector('.chat-status-settings-row[data-row="style"]');
+    let styleThrew = null; try { sr && sr.onclick({ stopPropagation() {} }); } catch (e) { styleThrew = e; }
+    const ddStyle = host.querySelector('.chat-status-dropdown');
+    out.style = { threw: styleThrew, open: !!ddStyle, settingsGone: !ddStyle || !ddStyle.querySelector('.chat-status-settings-row'), items: ddStyle ? ddStyle.querySelectorAll('.chat-status-dropdown-item').map((x) => x.textContent) : [] };
+    ddStyle?.remove();
+    // …and the phone's account: its row hands the DOOR to the billing switcher
+    set && press(set);
+    const br = host.querySelector('.chat-status-dropdown .chat-status-settings-row[data-row="billing"]');
+    try { br && br.onclick({ stopPropagation() {} }); } catch (e) { out.billThrew = e; }
+    out.billedAtDoor = switched.length === 1 && switched[0] === set;
+    host.querySelector('.chat-status-dropdown')?.remove();
+    bar.dispose(); host.remove();
+    return out;
+  };
+  try {
+    const v = drive(ChatStatusBar);
+    ok(!v.ctxThrew && !!v.ctxRows && /^chat-status-ctx-window=/.test(v.ctxRows[0] || '') && ['cache', 'unreported', 'cost'].every((k) => v.ctxRows.some((x) => x.startsWith('chat-status-ctx-' + k + '=') && x.length > ('chat-status-ctx-' + k + '=').length)),
+      `⑫ a press on the context door opens its panel — the window, then the cache, «not reported» and the spend, each its own sentence (${JSON.stringify(v.ctxRows)})`, String(v.ctxThrew));
+    ok(!v.setThrew && !!v.setRows && v.setRows.map((r) => r.row).join(',') === 'style,goal,held,billing' && v.setRows.find((r) => r.row === 'held').live === false && v.setRows.filter((r) => r.row !== 'held').every((r) => r.live) && /⣿ 全部 → Beta Max/.test(v.setRows.find((r) => r.row === 'billing').text),
+      `⑫ a press on «⚙ 对话设置» opens its rows in the table's order, each with its value — the held notices a state, the rest live (${JSON.stringify(v.setRows)})`, String(v.setThrew));
+    ok(!v.style.threw && v.style.open && v.style.settingsGone && v.style.items.length >= 2, `⑫ the output style's row runs the style's OWN menu at the door (${v.style.items.length} items: ${v.style.items.join(' / ')})`, String(v.style.threw));
+    ok(!v.billThrew && v.billedAtDoor, '⑫ the phone\'s account row hands the DOOR to the billing switcher as its anchor', String(v.billThrew));
+  } catch (e) { ok(false, '⑫ the doors leg ran to its end', String(e && e.stack || e).slice(0, 500)); }
+  { // RED CONTROL: the door blocks put back above `const container` / `const showDropdown` — the press throws (the 644a67ec2 state)
+    const dir = scratch('sbdoors'); fs.mkdirSync(dir, { recursive: true });
+    try {
+      const src = read('src/lib/chat-status-bar.js');
+      const a = src.indexOf('    // THE DOORS (lane mask-value-shape): below `container` and `showDropdown`'), b = src.indexOf('    // ── the doors end ──', a);
+      const blocks = a > 0 && b > a ? src.slice(a, b) : '';
+      const head = '  _onClick(e) {\n';
+      let red = blocks ? src.slice(0, a) + src.slice(b) : src;
+      red = red.replace(head, head + blocks)
+        .replace(/from '\.\//g, `from '${pathToFileURL(path.join(repo, 'src/lib')).href}/`).replace(/from '\.\.\//g, `from '${pathToFileURL(path.join(repo, 'src')).href}/`);
+      const f = path.join(dir, 'chat-status-bar.doors-red.js'); fs.writeFileSync(f, red);
+      const { ChatStatusBar: Red } = await import(pathToFileURL(f).href);
+      const r = drive(Red);
+      ok(!!blocks && r.ctxThrew instanceof ReferenceError && r.setThrew instanceof ReferenceError, `⑫ RED CONTROL: the door blocks above the declaration — both presses throw (${r.ctxThrew && r.ctxThrew.message})`);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }
+  // ⑬ THE SMALL ONES, read over the same stand-in (the cure's adversarial read: the outbox «always», 产出 at zero in a view-only
+  // window, a tool that did not start said by what it IS)
+  try {
+    const mk13 = (o) => { const host = new DomEl('div'); ROOT.appendChild(host); const bar = new ChatStatusBar({ send() {} }, 'sid-small', { backend: 'claude', getToolMsg: () => null, openSubagentViewer() {}, openInTempEditor() {}, ...o }); host.appendChild(bar.element); bar.popupContainer = host; bar.applyStatus({ ...firstStatus }); bar.render(); return { bar, host }; };
+    const chipKeys = (bar) => bar.element.children.map((el) => el.getAttribute('data-chip'));
+    // the outbox: a conversation of its own wears «Outbox · 0»; a subagent's viewer (it drafts under its parent) none — until a row of its own is fed
+    const own = mk13({}), sub = mk13({ outbox: false });
+    // the model's face: its label worded, the raw id on the label's OWN hover (title) and in data-raw — one hover away
+    const mh = own.bar.element.querySelector('.chat-status-model').innerHTML;
+    ok(/<span class="chat-status-model-label" data-raw="claude-fable-5-1" title="claude-fable-5-1">Fable 5\.1<\/span>/.test(mh), `⑬ the model door's face «Fable 5.1», its raw id one hover away on the label (${mh.slice(0, 140)})`);
+    const ownOb = own.bar.element.querySelector('.chat-status-outbox');
+    ok(!!ownOb && /\b0\b/.test(ownOb.textContent) && !chipKeys(sub.bar).includes('outbox'), `⑬ the outbox: «${ownOb && ownOb.textContent}» in a conversation of its own, NONE on a subagent's viewer (${chipKeys(sub.bar).join(',')})`);
+    sub.bar.setOutbox({ total: 2, waiting: 1 });
+    ok(chipKeys(sub.bar).includes('outbox'), '⑬ …and a viewer fed rows of its own draws them (the face is the verdict\'s, never hidden)');
+    // 产出 in a view-only window: no number it cannot know, and its press says why
+    const vo = mk13({ onDesignRequest: null }), live = mk13({ onDesignRequest: () => {} });
+    const voAf = vo.bar.element.querySelector('.chat-status-artifacts'), liveAf = live.bar.element.querySelector('.chat-status-artifacts');
+    voAf._bar = vo.bar; const voThrew = press(voAf);
+    const note = vo.host.querySelector('.chat-status-artifacts-none');
+    ok(!voThrew && !/\d/.test(voAf.textContent) && /\b0\b/.test(liveAf.textContent) && !!note && /does not load the files/.test(note.textContent),
+      `⑬ 产出 at zero: «${voAf.textContent.trim()}» in a view-only window (no count — it never loads the files) and its press says so («${note && note.textContent}»); «${liveAf.textContent.trim()}» where the files are read`, String(voThrew));
+    // a tool that did not start, by what it is (the status vocabulary is open: an unknown state is its own word, never «failed»)
+    own.bar.setInitHealth([{ kind: 'mcp-server', name: 'plugin:x:github', detail: 'failed' }, { kind: 'mcp-server', name: 'docs', detail: 'needs-auth' }, { kind: 'mcp-server', name: 'slow', detail: 'pending' }, { kind: 'mcp-server', name: 'odd', detail: 'disabled' }, { kind: 'mcp-config', name: '', detail: 'parse: bad json' }, { kind: 'plugin', name: 'lint', detail: 'load: missing' }]);
+    const hw = own.bar.initHealthWords().map((h) => h.words);
+    ok(/github tool isn.t connected: it failed/.test(hw[0]) && /docs tool needs you to sign in/.test(hw[1]) && /slow tool was still connecting/.test(hw[2]) && /odd tool wasn.t connected .*its state: disabled/.test(hw[3]) && !/failed/.test(hw[3]) && /^A tool.s settings could not be read/.test(hw[4]) && /^The lint plugin isn.t working/.test(hw[5]) && own.bar.initHealthWords()[5].kind === 'plugin',
+      `⑬ each tool that did not start is said by what it is (${JSON.stringify(hw)})`);
+    for (const x of [own, sub, vo, live]) { x.bar.dispose(); x.host.remove(); }
+  } catch (e) { ok(false, '⑬ the small ones ran to their end', String(e && e.stack || e).slice(0, 500)); }
+  globalThis.document = doc0; if (gcs0) globalThis.getComputedStyle = gcs0; else delete globalThis.getComputedStyle; if (win0) globalThis.window = win0; else delete globalThis.window;
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

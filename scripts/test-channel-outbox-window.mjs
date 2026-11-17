@@ -322,7 +322,7 @@ const fa = await chipFace(SID_A), fb = await chipFace(SID_B), fc = await chipFac
 ok(fa && fa.chip && fa.text === '发件箱 · 5' && fa.wait === '2 条在等' && fa.waiting && fa.color === fa.accent && fa.oneBar && fa.svg && /2 个 API 调用/.test(fa.tip),
   '⑦ the chat that drafted wears «发件箱 · 5» + «2 条在等» (3 proposals + 2 API calls, 1 + 1 waiting) in the accent colour, an SVG icon, in its ONE chip bar (on row 2, after row 1\'s permission mode — the strip\'s table, lane mask-value-shape)', fa);
 ok(fc && fc.chip && fc.text === '发件箱 · 1' && fc.wait === '1 条在等' && fc.waiting, '⑦ N1 the chat whose ONLY Outbox row is a waiting API call wears «发件箱 · 1» + «1 条在等»', fc);
-ok(fb && fb.view && fb.chip === false, '⑦ the chat that drafted nothing wears no Outbox chip', fb);
+ok(fb && fb.view && fb.chip && fb.text === '发件箱 · 0' && !fb.waiting, '⑦ the chat that drafted nothing wears «发件箱 · 0» — the outbox is ALWAYS findable (the strip\'s table; the cure of 644a67ec2), nothing waiting', fb);
 const shotOf = async (file, expr) => {
   const box = await p3.evaljs(`(() => { const e = ${expr}; if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.max(0, r.x), y: Math.max(0, r.y), width: Math.min(r.width, innerWidth), height: Math.min(r.height, innerHeight) }; })()`);
   const r = await p3.cdp('Page.captureScreenshot', { format: 'png', ...(box && box.width > 0 ? { clip: { ...box, scale: 1 } } : {}) });

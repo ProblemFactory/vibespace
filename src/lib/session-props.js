@@ -4,7 +4,7 @@ import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // 
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow, hasEffortMenu } from './agent-meta.js';
 import { loadInto, renderInto } from './permission-rules-view.js';
-import { t, deviceLocale } from './i18n.js';
+import { t, tc, deviceLocale } from './i18n.js';
 import { stampAt as when, stampAt as whenAt } from './page-time.js';
 import { valueWord } from './value-words.js'; // lane ui-language: an unknown board state is shown through the door too
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
@@ -92,8 +92,8 @@ export function statusNowHtml(st) {
 /** THIS conversation's open chat view's status bar — where its start facts (a tool that did not start, the record kinds
  *  its CLI added) are held; null when no view of it is open (lane mask-value-shape). */
 function startBarOf(app, s) {
-  const ids = new Set([s && s.webuiId, s && s.sessionId].filter(Boolean));
-  for (const v of (app.sessions?.values?.() || [])) if (v && v._statusBar && ids.has(v.sessionId)) return v._statusBar;
+  const ids = [s && s.webuiId, s && s.sessionId].filter(Boolean);
+  for (const v of (app.sessions?.values?.() || [])) if (v && v._statusBar && ids.includes(v.sessionId)) return v._statusBar;
   return null;
 }
 
@@ -290,11 +290,11 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     // CLI added — read from this conversation's open chat view (its status bar holds them; absent ≠ clean: nothing said) ──
     {
       const bar = startBarOf(app, s);
-      const health = bar?.initHealthRows?.() || [], kinds = bar?.addedKindsWords?.() || null;
+      const health = bar?.initHealthWords?.() || [], kinds = bar?.addedKindsWords?.() || null;
       if (health.length || kinds) {
         const startSec = section(t('At its start'));
         startSec.classList.add('session-props-start');
-        for (const h of health) row(startSec, t('Not working'), escHtml(h), { wrap: true });
+        for (const h of health) { const hr = row(startSec, h.kind === 'plugin' ? tc('session-props', 'Plugin') : tc('session-props', 'Tool'), escHtml(h.words), { wrap: true }); hr.title = h.row; }   // the page's plain words; the protocol row one hover away
         if (health.length) { const n = document.createElement('div'); n.className = 'empty-hint session-props-start-note'; n.textContent = t('Reported by the harness in this session\u2019s start frame.'); startSec.appendChild(n); }
         if (kinds) { const kr = row(startSec, t('New records'), escHtml(kinds.text), { wrap: true }); kr.title = kinds.title; }
       }

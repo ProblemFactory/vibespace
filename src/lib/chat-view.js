@@ -398,6 +398,7 @@ class ChatView {
     this._statusBar = new ChatStatusBar(wsManager, sessionId, {
       backend: winInfo.backend || winInfo.titleMeta?.backend || 'claude',
       allowReview: !readOnly,
+      outbox: !(typeof sessionId === 'string' && sessionId.startsWith('sub-')),   // lane mask-value-shape: «Outbox · 0» at zero; a subagent's viewer has none
       getToolMsg: (toolCallId) => this._messages.find(m => m.toolCallId === toolCallId),
       openSubagentViewer: (opts) => this._openSubagentViewer(opts),
       openInTempEditor: (text) => this._renderers.openInTempEditor(text),

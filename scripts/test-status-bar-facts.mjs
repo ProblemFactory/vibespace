@@ -124,15 +124,18 @@ async function barOf(file) {
     const bar = new ChatStatusBar({ send() {} }, 'sid-facts', { backend, getToolMsg: () => null, openSubagentViewer() {}, openInTempEditor() {} });
     if (status) bar.applyStatus(status);
     for (const u of [].concat(usage || [])) bar.updateUsage(u);
-    const chips = Object.fromEntries(bar.element.children.map((c) => [c.getAttribute('data-chip'), { text: c.textContent, title: c.title }]));
+    const chips = Object.fromEntries(bar.element.children.map((c) => [c.getAttribute('data-chip'), { text: c.textContent, title: c.title, used: c.getAttribute('data-used'), total: c.getAttribute('data-total') }]));
+    // lane mask-value-shape (the strip's step two): the details are ROWS of the context door now (its panel) — read with the
+    // same words and titles from the bar's door rows
+    for (const r of bar._doorRows || []) if (!chips[r.key]) chips[r.key] = { text: String(r.html).replace(/<[^>]*>/g, ''), title: r.title };
     return chips;
   };
 }
 const bar = await barOf(path.join(REPO, 'src/lib/chat-status-bar.js'));
 {
   const a = bar('antigravity', { model: 'gemini-4-argon-high' }, um.data);
-  ok(a.ctx && /^9%\[90k\/1\.0m\]$/.test(a.ctx.text.replace(/\s+/g, '')) && /Context: 90k of 1\.0m tokens/.test(a.ctx.title) && /documented window/.test(a.ctx.title),
-    'antigravity: context % against the model\'s DOCUMENTED window (9 % [90k/1.0m]) — the title names the table as the window\'s source', a.ctx);
+  ok(a.ctx && /9%$/.test(a.ctx.text.replace(/\s+/g, '')) && a.ctx.used === '90k' && a.ctx.total === '1.0m' && /Context: 90k of 1\.0m tokens/.test(a.ctx.title) && /documented window/.test(a.ctx.title),
+    'antigravity: context % against the model\'s DOCUMENTED window (9 % of 90k/1.0m — the door\'s face the %, its [used/total] in data-* and its panel) — the title names the table as the window\'s source', a.ctx);
   ok(a.cache && /97%/.test(a.cache.text) && /\(88k of 90k\)/.test(a.cache.title), 'antigravity: ⚡ the last call\'s cache hit rate (97 %), claude\'s rule', a.cache);
   ok(a.odometer && a.odometer.text === 'Σ717k' && /in 545k, cached 6\.6m, out 172k, thinking 70k = 10% of the total/.test(a.odometer.title),
     'antigravity: Σ the odometer = agy\'s running total (717k), its title the split and the THINKING SHARE (10 % of the total)', a.odometer);

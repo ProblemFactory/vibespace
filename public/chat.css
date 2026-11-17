@@ -1798,9 +1798,6 @@ body.hide-stop-hook-notice .chat-stop-hook-notice { display: none; } /* the CLI'
 body.hide-empty-thinking .chat-msg.chat-empty-thinking,
 body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: none; }
 
-/* Running-workflow status chip */
-.chat-status-wf { color: var(--accent); }
-
 /* ── Consecutive thinking/Bash run collapse (chat.collapseRuns, 2.106.0) ── */
 .chat-run-header {
   font-size: 11px; color: var(--text-dim); cursor: pointer; user-select: none;

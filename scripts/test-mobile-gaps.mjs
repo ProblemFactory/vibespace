@@ -734,7 +734,7 @@ try {
       // the phone page, its Lock row tapped for real. The frames the phone's bar sends are recorded at its socket.
       const B = `(${VIEW})._statusBar`;
       await evalJs(`(() => { const b = ${B}; const send = b._ws.send.bind(b._ws); window.__f52sent = []; b._ws.send = (f) => { window.__f52sent.push(JSON.parse(JSON.stringify(f))); return send(f); }; return true; })()`);
-      const facts = () => evalJs(`(() => { const b = ${B}; const el = b.element.querySelector('[data-chip="model"]'); const lab = el.querySelector('.chat-status-model-label') || el; return { text: lab.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), ask: b._statusModel, locked: !!b._modelLocked, lockedModel: b._lockedModel, askSeq: b._askSeq, servedSeq: b._servedSeq, served: b._servedModel }; })()`);
+      const facts = () => evalJs(`(() => { const b = ${B}; const el = b.element.querySelector('[data-chip="model"]'); const lab = el.querySelector('.chat-status-model-label') || el; return { text: (lab.dataset.raw ?? lab.textContent).trim(),   /* the raw label (its face is worded — the cure of 644a67ec2) */ amber: /chat-status-model-fallback/.test(el.className), ask: b._statusModel, locked: !!b._modelLocked, lockedModel: b._lockedModel, askSeq: b._askSeq, servedSeq: b._servedSeq, served: b._servedModel }; })()`);
       const tapLock = async () => {
         await evalJs(`(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); return true; })()`);
         await tap('.window-active .chat-view .chat-status-model .chat-status-model-label'); await sleep(300);   // the model's own label (lane mask-value-shape: the door also holds the thinking level)

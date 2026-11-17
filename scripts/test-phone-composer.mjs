@@ -50,7 +50,7 @@ function judgeBar(src) {
     // lane mask-value-shape (the strip's step two): no ⋯ and no fold at any width — below ONE_ROW_PX the row break between
     // row 1 and row 2 (strip-table.js), the same on a phone and a narrow desk window
     noMore: !/chip\('more', /.test(src) && !/_oneRow\(\)/.test(src) && !/classList\.add\('chat-status-folded'\)/.test(src),
-    rowBreak: /const one = !\(w > 0\) \|\| w >= ONE_ROW_PX;/.test(src) && /if \(!one && firstRow2 > 0\) ordered\.splice\(firstRow2, 0, mark\('row-break', 'chat-status-rowbreak'\)\);/.test(src),
+    rowBreak: /const one = !\(w > 0\) \|\| w >= ONE_ROW_PX, short = w > 0 && w <= SHORT_FORM_PX;/.test(src) && /if \(!one && firstRow2 > 0\) ordered\.splice\(firstRow2, 0, mark\('row-break', 'chat-status-rowbreak'\)\);/.test(src),
     // the thinking level is a part of the model door; the output style a row of «⚙ 对话设置» (the phone's old sheet rows)
     doors: /data-door-part="effort"/.test(src) && /inDoor\('style', `chat-status-style chat-status-clickable/.test(src),
   };

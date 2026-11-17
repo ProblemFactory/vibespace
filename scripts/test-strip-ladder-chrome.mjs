@@ -13,6 +13,8 @@
 //   ④ the height: one row ≤ 30 px, two rows ≤ 60 px
 //   RED CONTROL: the base's ONE row put back (nowrap) at 500 px ⇒ ① and ② go red; taken back, the same case is green.
 // The faces: the laws are judged on the dark face; the light face is pictured (the geometry is the stylesheet's, not the colours).
+// The widths are WINDOW widths (page §4): the bar judges them on its .window (_layout); this page has no window, so its host —
+// the bar's own box — stands for the window, the same number in the page and the ladder.
 // PNGs: STRIP_LADDER_PNG_DIR (default: the scratch dir) <lang>-<face>-<fixture>-<width>.png — the pictures for the owner.
 // SKIPs with evidence without chrome. Scratch: the suite's own scratch root only. No server, no network, no sign-in.
 import fs from 'node:fs';

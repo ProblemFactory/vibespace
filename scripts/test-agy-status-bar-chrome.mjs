@@ -290,7 +290,7 @@ try {
   // the chip as a person meets it: its window raised, its box on screen; a REAL press opens the menu
   const permChip = (sidVar) => evalJs(`(() => { const v = ${viewOf(sidVar)}; const el = v && v._statusBar && v._statusBar.element; const c = el && el.querySelector('[data-chip="perm"]'); if (!c) return null;
     for (const [id, w] of app.wm.windows) if (w.element && w.element.contains(v._messageList)) { app.wm.focusWindow(id); break; }
-    c.scrollIntoView({ block: 'nearest' }); const r = c.getBoundingClientRect(); return { text: c.textContent.replace(/\\s+/g, ' ').trim(), x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width }; })()`);
+    c.scrollIntoView({ block: 'nearest' }); const r = c.getBoundingClientRect(); return { text: c.textContent.replace(/\\s+/g, ' ').trim(), raw: c.getAttribute('data-raw'), x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width }; })()`);   // raw = the mode (its face is worded — the cure of 644a67ec2)
   const openMenu = async (sidVar) => {
     await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); true`);
     const c = await permChip(sidVar);
@@ -299,7 +299,7 @@ try {
     await waitFor(`!!document.querySelector('.chat-status-dropdown')`, 3000);
     return { chip: c, items: await evalJs(`(() => { const d = document.querySelector('.chat-status-dropdown'); return d ? [...d.querySelectorAll('.chat-status-dropdown-item')].map((i) => (i.querySelector('.chat-status-perm-value') || i).textContent.trim()) : null; })()`) };
   };
-  const chipSays = (sidVar, re) => waitFor(`(() => { const v = ${viewOf(sidVar)}; const c = v && v._statusBar && v._statusBar.element && v._statusBar.element.querySelector('[data-chip="perm"]'); return !!c && ${re}.test(c.textContent); })()`, 20000);
+  const chipSays = (sidVar, re) => waitFor(`(() => { const v = ${viewOf(sidVar)}; const c = v && v._statusBar && v._statusBar.element && v._statusBar.element.querySelector('[data-chip="perm"]'); return !!c && ${re}.test(c.getAttribute('data-raw') || c.textContent); })()`, 20000);
   const mSid = await createChat('__agym', { cwd: CWD, name: 'agy-mode', mode: 'chat', backend: 'antigravity', model: 'gemini-4-argon-high' });
   check('an Antigravity chat for the mode (the fake agy behind the real agy-wrapper)', !!mSid);
   await waitFor(`(() => { const v = ${viewOf('__agym')}; return !!v && !!v._statusBar?.element?.querySelector('[data-chip="perm"]') && !!${JSON.stringify(mSid)} && true; })()`, 15000);
@@ -321,7 +321,7 @@ try {
   await evalJs(`window.__agym = ${JSON.stringify(mSid)}; if (!${viewOf('__agym')}) app.attachSession(${JSON.stringify(mSid)}, 'agy-mode', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'antigravity' }); true`);
   await chipSays('__agym', '/bypassPermissions/');
   const m2 = await openMenu('__agym');
-  check(`after a RELOAD over the cut journal: the chip says «${m2.chip && m2.chip.text}» and a real press opens the four (the attach's chatStatus reads the sidecar)`, /bypassPermissions/.test(m2.chip?.text || '') && JSON.stringify(m2.items) === JSON.stringify(FOUR), m2);
+  check(`after a RELOAD over the cut journal: the chip says «${m2.chip && m2.chip.text}» and a real press opens the four (the attach's chatStatus reads the sidecar)`, /bypassPermissions/.test(m2.chip?.raw || m2.chip?.text || '') && JSON.stringify(m2.items) === JSON.stringify(FOUR), m2);
   await evalJs(`(() => { const v = ${viewOf('__agym')}; v._statusBar.applyStatus({ permissionModes: [] }); v._statusBar.render(); return true; })()`);
   const m3 = await openMenu('__agym');
   check('a status saying permissionModes: [] (what a cut journal used to send) leaves the declared list: a real press still opens the four', JSON.stringify(m3.items) === JSON.stringify(FOUR), m3);
@@ -342,8 +342,8 @@ try {
   check('…a NEW session (its own sidecar, another wid) whose sidecar says bypassPermissions — read from the conversation\'s mode file {mode: bypassPermissions}, never from the old session', rSid !== mSid && sideOf(rSid)?.agentMode === 'bypassPermissions' && sideOf(rSid)?.sessionId === cid && fact?.mode === 'bypassPermissions', { resumed: sideOf(rSid) && { agentMode: sideOf(rSid).agentMode, sessionId: sideOf(rSid).sessionId }, fact, oldSidecarOnDisk: fs.existsSync(path.join(BUFS, mSid + '.json')) });
   await chipSays('__agyr', '/bypassPermissions/');
   const rc = await permChip('__agyr');
-  const said = /bypassPermissions/.test(rc?.text || '') ? null : await evalJs(`fetch('/api/session-messages?backend=antigravity&backendSessionId=' + encodeURIComponent(${JSON.stringify(cid)}) + '&cwd=' + encodeURIComponent(${JSON.stringify(CWD)}) + '&withStatus=1').then((r) => r.json()).then((j) => ({ status: j.chatStatus, n: (j.messages || []).length, bar: (() => { const v = ${viewOf('__agyr')}; return v ? { perm: v._statusBar._statusPermMode, list: v._statusBar._permissionModes } : null; })() })).catch((e) => String(e))`);
-  check(`the resumed chat's chip says «${rc && rc.text}» — its own mode, never «default»`, /bypassPermissions/.test(rc?.text || ''), { rc, said, sidecars: fs.readdirSync(BUFS).filter((f) => f.endsWith('.json')).map((f) => [f, sideOf(f.slice(0, -5))?.agentMode, sideOf(f.slice(0, -5))?.sessionId === cid]) });
+  const said = /bypassPermissions/.test(rc?.raw || rc?.text || '') ? null : await evalJs(`fetch('/api/session-messages?backend=antigravity&backendSessionId=' + encodeURIComponent(${JSON.stringify(cid)}) + '&cwd=' + encodeURIComponent(${JSON.stringify(CWD)}) + '&withStatus=1').then((r) => r.json()).then((j) => ({ status: j.chatStatus, n: (j.messages || []).length, bar: (() => { const v = ${viewOf('__agyr')}; return v ? { perm: v._statusBar._statusPermMode, list: v._statusBar._permissionModes } : null; })() })).catch((e) => String(e))`);
+  check(`the resumed chat's chip says «${rc && rc.text}» — its own mode, never «default»`, /bypassPermissions/.test(rc?.raw || rc?.text || ''), { rc, said, sidecars: fs.readdirSync(BUFS).filter((f) => f.endsWith('.json')).map((f) => [f, sideOf(f.slice(0, -5))?.agentMode, sideOf(f.slice(0, -5))?.sessionId === cid]) });
   check('…and agy really runs with every tool approved: the next reply comes under always-proceed (--dangerously-skip-permissions)', await turn(rSid, '__agyr', 'after the resume', /always-proceed\): [\s\S]*after the resume/));
   check('…and the chat says why, ONE line: «Resumed in this conversation\'s own mode: bypassPermissions»', await waitFor(`(() => { const v = ${viewOf('__agyr')}; return !!v && (v._messageList.textContent.match(/Resumed in this conversation's own mode: bypassPermissions/g) || []).length === 1; })()`, 8000));
   console.log('⑥ the models Antigravity reported (the New Session field + a chat\'s model menu)');
