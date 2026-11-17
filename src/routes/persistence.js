@@ -564,7 +564,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.layoutsAsync = () => {
     if (_layoutsCache) return Promise.resolve(_layoutsCache);
     if (!_layoutsLoading) {
-      _layoutsLoading = fs.promises.readFile(LAYOUTS_FILE, 'utf-8').then((t) => t, () => '')
+      // ONLY «no such file» is the empty layout; any other error leaves the cache UNTOUCHED (a page opened later must never receive
+      // an empty layout its autosave would write over the person's desktops) and rejects — the list says «still being read»
+      _layoutsLoading = fs.promises.readFile(LAYOUTS_FILE, 'utf-8').then((t) => t, (e) => { if (e && e.code === 'ENOENT') return ''; throw e; })
         .then((t) => readLayouts(t))   // readLayouts' own parse and checks, fed the text read off the loop
         .finally(() => { _layoutsLoading = null; });
     }

@@ -5,7 +5,9 @@
  * reach; the person's cookie route (piece 5) will read the same rows whole. One builder, two doors — an unknown is «unknown»
  * at both, with its reason (src/conversation-facts.js shapeRow).
  *
- * NOTHING ON THE HUB LOOP: every fact below is an in-memory read per session (no synchronous file call, no child started),
+ * THE HUB LOOP: every fact below is an in-memory read per session (no child started) — but for the memory pass: treeUsage walks
+ * the process table with synchronous /proc reads (readdirSync / readFileSync per pid; accepted while one list's longest
+ * synchronous stretch stays under 50 ms at 84 × 15 — test-conversation-facts-wrapper; the day-report unit's async walker replaces it),
  * the walk yields every `yieldEvery` rows, and the two facts that WAIT — the memory of a conversation's process tree and the
  * output file's own time (the idle age where no wrapper kept one) — go through ONE bounded pass: one at a time, ended at its
  * time-out, and every row it did not reach prints unknown «the facts pass ran out of time — ask again» (question marks,
@@ -182,16 +184,25 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
   wakeGrantOf = () => null } = {}) {
   const idOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const memo = (ms, build) => { let at = 0, v = null; return () => { const t = Date.now(); if (!v || t - at > ms) { v = build(); at = t; } return v; }; };
-  // jobs by the OWNER conversation (its bare id): running = starting / up / awaiting-user / waiting; schedules = cron + scheduled
+  // jobs by the OWNER conversation (its bare id). OWNED = every job whose next run can happen without a person (主开发's must 4):
+  // wanted up (desiredUp — a crashed service its restart policy starts again), or in any state but the terminal ones; a run left
+  // UNVERIFIED after a restart is owned with its grant unknown. schedules = the crons among them; running = the rest.
+  const TERMINAL_STATES = new Set(['done', 'failed', 'interrupted', 'missed']);
   const jobsIndex = memo(1000, () => {
     const jm = getJobs(); if (!jm || !jm.ready || !(jm.jobs instanceof Map)) return null;
     const by = new Map();
     for (const j of jm.jobs.values()) {
       const cid = j && j.owner && j.owner.conversation && j.owner.conversation.id; if (!cid) continue;
+      const unverified = j.state === 'unverified';
+      if (!(unverified || j.desiredUp === true || !TERMINAL_STATES.has(j.state))) continue;
       const e = by.get(cid) || { running: 0, schedules: 0, nextFireAt: null, items: [] };
-      const item = (kind) => { let g = null; try { const v = wakeGrantOf(j); g = v === true || v === false ? v : null; } catch { g = null; } return { id: String(j.id || ''), kind, ...(kind === 'schedule' && Number.isFinite(j.nextFireAt) ? { nextFireAt: j.nextFireAt } : {}), wakeGrant: g, ...(g === null ? { wakeGrantWhy: WHY.noWakeGrant } : {}) }; };
-      if (['starting', 'up', 'awaiting-user', 'waiting'].includes(j.state)) { e.running++; e.items.push(item('job')); }
-      if (j.kind === 'cron' && j.state === 'scheduled') { e.schedules++; e.items.push(item('schedule')); if (Number.isFinite(j.nextFireAt) && (e.nextFireAt === null || j.nextFireAt < e.nextFireAt)) e.nextFireAt = j.nextFireAt; }
+      const kind = j.kind === 'cron' ? 'schedule' : 'job';
+      let g = null;
+      if (!unverified) { try { const v = wakeGrantOf(j); g = v === true || v === false ? v : null; } catch { g = null; } }
+      e.items.push({ id: String(j.id || ''), kind, state: String(j.state || ''), ...(kind === 'schedule' && Number.isFinite(j.nextFireAt) ? { nextFireAt: j.nextFireAt } : {}), wakeGrant: g,
+        ...(g === null ? { wakeGrantWhy: unverified ? 'it was left unverified after a restart — whether it runs again is unknown' : WHY.noWakeGrant } : {}) });
+      if (kind === 'schedule') { e.schedules++; if (Number.isFinite(j.nextFireAt) && (e.nextFireAt === null || j.nextFireAt < e.nextFireAt)) e.nextFireAt = j.nextFireAt; }
+      else e.running++;
       by.set(cid, e);
     }
     return by;

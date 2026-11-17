@@ -679,10 +679,10 @@
    "file": "src/conversation-facts.js",
    "keyedOn": "version",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "LEVEL_SINCE — the first CLI build the tree records the background level signal on (2.1.274): a CLI below it reads its background set unknown (never known-empty); an update only raises the build, never needs a release",
+   "road": "LEVEL_MEASURED_FROM / LEVEL_MEASURED_TO — the span of the tracked dumps that declare the background level signal: the HUB reads a never-published set as empty only for a stated build inside it; a newer build reads unknown (the safe side) until a measurement moves the bound — an ordinary update never needs a release",
    "suite": "test-conversation-facts",
    "match": "version-literal",
-   "sites": 1
+   "sites": 2
   }
  ]
 }

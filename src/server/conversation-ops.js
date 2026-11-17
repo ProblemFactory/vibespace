@@ -391,6 +391,15 @@ function forDeps(own) { return opsOver(() => ({ ...shared, ...(own || {}) })); }
  * The opener's reach is the ENGINE's fact (the store's `opened` rows — persisted, so it survives a hub restart; the Map this
  * module kept in memory lost it at .331: the owner's hub refused `end` on workers its key had opened).
  */
+/** lane conversation-facts (主开发's must 5): ANOTHER conversation's agent-written words toward the calling agent pass the ONE
+ *  belt (src/peer-text.js) at this door — its name, its folder, its background tasks' descriptions; the caller's own row is its
+ *  own words. The person's panel (piece 5) reads the builder whole, unbelted. */
+function beltRow(r) {
+  const PT = require('../peer-text.js');
+  const piece = (v, max) => (v == null || v === '' ? v : PT.toAgentText(String(v), { kind: 'line', max }));
+  return { ...r, name: piece(r.name, 200), cwd: piece(r.cwd, 400),
+    ...(Array.isArray(r.background) ? { background: r.background.map((t) => ({ ...t, description: piece(t && t.description, 200) })) } : {}) };
+}
 const OPEN_ID_WAIT_MS = 20 * 1000;     // a claude CLI reports its conversation id within seconds of the spawn
 const BUSY_TURNS = ['running', 'waiting'];   // turn-facts' non-idle states: mid-turn, or paused on the user (requires_action)
 function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, waitMs = OPEN_ID_WAIT_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -510,7 +519,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
         const cid = r.key ? r.key.slice(r.key.indexOf(':') + 1) : null;
         let v = null;
         if (!self) { try { v = reach({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [] }); } catch { v = null; } }
-        if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : r); else beyond++;
+        if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : beltRow(r)); else beyond++;
       }
       const keys = new Set(rows.map((r) => r.key).filter(Boolean));
       const browsers = Array.isArray(snap.browsers) ? snap.browsers.filter((b) => !Array.isArray(b.holders) || !b.holders.length || b.holders.some((k) => keys.has(k))) : null;

@@ -15826,7 +15826,7 @@ Lane conversation-facts (majordomo piece 2, 2026-11-17).
 - WHY sentences; shapeRow never leaves a fact blank; cellOf.
 - THE end verdict `endVerdict(row)`: the ten reasons, UNKNOWN IS BUSY, VERDICT_FIELDS with no idle and no memory field.
 - refusalOf: piece 3's one call.
-- factsStep: the ONE per-record step the claude chat wrapper (data/bin/chat-wrapper.js — its sidecar `facts`, `caps.facts`) and the hub's claude-stream-json share. It keeps the last background set, the one-way CLI-timer mark and the last record time.
+- factsStep: the ONE per-record step the claude chat wrapper (data/bin/chat-wrapper.js — its sidecar `facts`, `caps.facts`) and the hub (session-brain noteConvFacts) share. It records OBSERVATIONS only (the stated CLI version, the background set seen, the tool names, the wakeup mark, the last record time); `trackedFacts` on the hub judges them (known-empty only inside the MEASURED span LEVEL_MEASURED_FROM–TO; the timer tools list; a timer-like unknown tool ⇒ unknown); factsAtAdoption accepts a sidecar only from the adopted wrapper's pid.
 - factsFresh / factsFromSidecar / factsAdopted / trackedFacts. backend-caps `sidecarFacts` names which facts a harness's wrapper keeps.
 
 **src/server/conversation-facts.js (ORCH).** conversations.list's ONE builder:

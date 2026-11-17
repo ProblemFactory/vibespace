@@ -67,20 +67,37 @@ async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
 {
   const h = await boot('facts');
   const m0 = h.meta();
-  ok(m0 && m0.caps && m0.caps.facts === CF.FACTS_VERSION && m0.facts && m0.facts.fromStart === true && m0.facts.bg === null, 'at its start the sidecar advertises caps.facts and holds a tracker read from the CLI\'s first line', m0 && { caps: m0.caps, facts: m0.facts });
+  ok(m0 && m0.caps && m0.caps.facts === CF.FACTS_VERSION && m0.facts && m0.facts.fromStart === true && m0.facts.bg === null && m0.facts.cli === null && Array.isArray(m0.facts.tools), 'at its start the sidecar advertises caps.facts and holds a tracker read from the CLI\'s first line', m0 && { caps: m0.caps, facts: m0.facts });
   ok(await h.turn('hello'), 'a plain turn answers');
-  ok(await until(() => { const f = h.meta()?.facts; return f && Array.isArray(f.bg) && f.bg.length === 0 && f.cli; }, 3000), 'after a plain turn the sidecar says the empty set (the CLI\'s init named a level-publishing version)', h.meta()?.facts);
+  ok(await until(() => { const f = h.meta()?.facts; return f && f.bg === null && f.cli === '2.1.312'; }, 3000) && Array.isArray(CF.trackedFacts(CF.factsFromSidecar(h.meta().facts), { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' }).background), 'after a plain turn the sidecar RECORDS the version the CLI stated and no set seen (observations only) — the HUB judges the measured build\'s silence as known-empty (the empty set (the CLI\'s init named a level-publishing version)', h.meta()?.facts);
   const lastRec = h.recs.filter((r) => r.type !== '_stdin_ack').at(-1).__at;
   ok(await until(() => { const f = h.meta()?.facts; return f && Math.abs(f.at - lastRec) < 400; }, 3000), 'the sidecar\'s record time is the turn\'s last record (written with the turn-end write)', { at: h.meta()?.facts?.at, lastRec });
   await h.turn('BGSET- start it');
   ok(await until(() => h.meta()?.facts?.bg?.length === 1 && h.meta().facts.bg[0].description === 'a dev server', 3000), 'a background set: the sidecar holds it (id, type, description)', h.meta()?.facts);
   await h.turn('BGEMPTY- it ended');
   ok(await until(() => Array.isArray(h.meta()?.facts?.bg) && h.meta().facts.bg.length === 0, 3000), 'the set went empty: the sidecar says so', h.meta()?.facts);
-  ok(h.meta()?.facts?.timer === false, 'no timer seen yet');
+  ok(h.meta()?.facts?.wake === false, 'no wakeup recorded yet');
   await h.turn('WAKE- a fired loop wakeup');
-  ok(await until(() => h.meta()?.facts?.timer === true, 3000), 'a fired wakeup: the one-way mark is in the sidecar', h.meta()?.facts);
+  ok(await until(() => h.meta()?.facts?.wake === true, 3000), 'a fired wakeup: the one-way mark the record states is in the sidecar', h.meta()?.facts);
   const back = CF.trackedFacts(CF.factsFromSidecar(h.meta().facts), { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' });
   ok(Array.isArray(back.background) && back.timersWhy === CF.WHY.timerSet && Number.isFinite(back.idleSince), 'what a restarted hub reads from this sidecar: the set known, timers «it set a CLI timer», an idle age', back);
+  await h.stop();
+}
+{
+  // THE HUB'S BOOT reads the observations ONLY from the wrapper it adopts (src/server/boot-restore.js: the pid the sidecar names,
+  // its command line naming THIS sidecar — the same two reads here, on the REAL wrapper process)
+  const h = await boot('adopt');
+  await h.turn('hello');
+  await until(() => h.meta()?.facts?.cli === '2.1.312', 3000);
+  const sidecar = path.join(h.dir, 's.json'), meta = h.meta();
+  const adoptedPid = (m) => { const p = m && Number.isInteger(m.pid) ? m.pid : 0; if (!(p > 0)) return -1; try { return fs.readFileSync(`/proc/${p}/cmdline`, 'utf8').split('\0').includes(sidecar) ? p : -1; } catch { return -1; } };
+  const got = CF.factsAtAdoption(meta, adoptedPid(meta));
+  ok(meta.pid === h.w.pid && adoptedPid(meta) === h.w.pid && got.fromStart === true && got.cli === '2.1.312', 'a hub booting over this sidecar ADOPTS its observations: the pid it names is the live wrapper and that wrapper\'s command line names this sidecar', { pid: meta.pid, wrapper: h.w.pid, got });
+  const noObs = { ...meta }; delete noObs.facts;
+  ok(CF.factsAtAdoption(noObs, adoptedPid(noObs)).old === true && CF.factsAtAdoption({ ...meta, pid: process.pid }, adoptedPid({ ...meta, pid: process.pid })).old === true,
+    'CONTROL a sidecar without observations reads «old wrapper»; one naming ANOTHER process (this suite) is not adopted either');
+  const br = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
+  ok(/fs\.readFileSync\(`\/proc\/\$\{p\}\/cmdline`, 'utf8'\)\.split\('\\0'\)\.includes\(wrapperFiles\.sidecar\)/.test(br) && /session\._convFacts = CF\.factsAtAdoption\(wrapperObs, adoptedPid\);/.test(br), 'the boot itself makes these two reads and hands them to factsAtAdoption (source pin)');
   await h.stop();
 }
 {
@@ -118,18 +135,27 @@ async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
   await h.stop();
 }
 {
-  // a failed sidecar write never stops the wrapper
-  const h = await boot('rofs');
-  await h.turn('hello');
-  await sleep(700);
-  fs.chmodSync(h.dir, 0o555);
-  const answered = await h.turn('BGSET- while the folder refuses writes');
-  await sleep(800);
-  const alive = h.w.exitCode === null && h.w.signalCode === null;
-  const answered2 = await h.turn('hello again');
-  fs.chmodSync(h.dir, 0o755);
-  ok(answered && answered2 && alive, 'with its sidecar folder refusing writes, the wrapper keeps answering turns (a failed write is caught)', { answered, answered2, alive });
-  await h.stop();
+  // a failed sidecar write never stops the wrapper — and the PREMISE that a write really failed is checked
+  if (typeof process.getuid === 'function' && process.getuid() === 0) console.log('  ○ SKIP the refused-write leg — running as root, a 0555 folder refuses nothing');
+  else {
+    const h = await boot('rofs');
+    await h.turn('hello');
+    await sleep(700);
+    const w0 = h.writes().length, m0 = JSON.stringify(h.meta());
+    let answered = false, answered2 = false, alive = false, w1 = w0, unchanged = false;
+    fs.chmodSync(h.dir, 0o555);
+    try {
+      answered = await h.turn('BGSET- while the folder refuses writes');
+      await sleep(800);
+      alive = h.w.exitCode === null && h.w.signalCode === null;
+      answered2 = await h.turn('hello again');
+      await sleep(800);
+      w1 = h.writes().length; unchanged = JSON.stringify(h.meta()) === m0;
+    } finally { fs.chmodSync(h.dir, 0o755); }
+    ok(w1 === w0 && unchanged, 'PREMISE the folder really refused: no sidecar write landed (the rename counter and the file unchanged) though the set changed', { w0, w1, unchanged });
+    ok(answered && answered2 && alive, 'with its sidecar folder refusing writes, the wrapper keeps answering turns (a failed write is caught)', { answered, answered2, alive });
+    await h.stop();
+  }
 }
 
 // ── C · THE LIST'S LONGEST SYNCHRONOUS STRETCH (moved here from the fast suite: a fast suite holds no wall-clock bound) ──
@@ -172,7 +198,7 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
     return { ms: Math.round(h.max / 1e5) / 10, known: r.conversations.filter((c) => Number.isFinite(c.memBytes)).length, pids: 0, pass: r.pass.ms };
   };
   const m1 = await longest(tree());
-  ok(m1.known === 84 && m1.ms < 50, `84 conversations × 15 processes: every tree measured, and the longest synchronous stretch of the list is ${m1.ms} ms (< 50; the pass took ${m1.pass} ms)`, m1);
+  ok(m1.known === 84 && m1.ms < 50, `EVIDENCE (a wall-clock reading, the heavy suite only): 84 conversations × 15 processes — every tree measured, and the longest synchronous stretch of the list is ${m1.ms} ms (< 50; the pass took ${m1.pass} ms)`, m1);
   const m2 = await longest(tree(200500));
   ok(m2.ms >= 50, `CONTROL a tree whose walk blocks 60 ms in one stretch: the same instrument reads ${m2.ms} ms — the leg above would be red`, m2);
   fs.rmSync(FAKE, { recursive: true, force: true });

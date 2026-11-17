@@ -127,10 +127,10 @@ function listWords(d, now = Date.now()) {
   const out = [];
   const m = d.machine || {};
   out.push(`machine: ${GB(m.memAvailable) || 'unknown'} free of ${GB(m.memTotal) || 'unknown'}${m.why ? ' (' + m.why + ')' : ''}`);
-  if (Array.isArray(d.desktops)) out.push('desktops: ' + (d.desktops.map((x) => `${x.name || x.id} ${x.link}`).join(' · ') || 'none'));
+  out.push('desktops: ' + (Array.isArray(d.desktops) ? (d.desktops.map((x) => `${x.name || x.id} ${x.link}`).join(' · ') || 'none') : `unknown (${d.desktopsWhy || 'the hub did not say why'})`));
   const rows = [...(d.conversations || [])].sort((a, b) => (b.memBytes || 0) - (a.memBytes || 0));
   for (const r of rows) {
-    const where = r.desktop ? `on ${r.desktop.name || r.desktop.id}` : r.window === false ? 'no window' : r.window === null ? 'window unknown' : 'no desktop';
+    const where = r.desktop ? `on ${r.desktop.name || r.desktop.id}` : r.window === false ? 'no window' : (r.window === null || r.window === undefined) ? `window unknown (${r.windowWhy || 'the hub did not say why'})` : 'no desktop';
     out.push('');
     out.push(`${r.name || r.key || r.id}${r.self ? ' (this conversation)' : ''} — ${r.state === 'ended' ? 'ended' + (r.ended && r.ended.by ? ' by ' + r.ended.by : '') : 'turn ' + factWords(r, 'turn', (v) => v)} · ${where} · memory ${factWords(r, 'memBytes', (v) => GB(v) || String(v))}`);
     if (r.state !== 'ended') {
@@ -142,6 +142,7 @@ function listWords(d, now = Date.now()) {
   }
   if (!rows.length) out.push('', 'no conversation within this key\'s reach');
   if (d.beyondReach) out.push('', `${d.beyondReach} more beyond this key's reach`);
+  if (!Array.isArray(d.browsers)) out.push(`browsers: unknown (${d.browsersWhy || 'the hub did not say why'})`);
   for (const b of d.browsers || []) out.push(`browser ${b.name || b.id}: ${b.running ? 'running' : 'stopped'}${GB(b.memBytes) ? ' · ' + GB(b.memBytes) : ''}${Array.isArray(b.holders) && b.holders.length ? ' · held by ' + b.holders.join(', ') : ''}`);
   if (d.pass && d.pass.ranOut) out.push('', `the facts pass ran out of time after ${d.pass.reached} of ${d.pass.of} — the rows after it print unknown; ask again`);
   return out.join('\n');

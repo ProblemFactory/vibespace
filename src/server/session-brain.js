@@ -259,8 +259,17 @@ function sbSeenFirst(session, rec) {
 // The side-effect families, ONE implementation fed by either stream. Kept
 // deliberately to the granular consumer functions — inline duplication of the
 // parse block is the drift the CS rules ban.
+// lane conversation-facts (majordomo piece 2): the conversation's OBSERVATIONS — src/conversation-facts.js factsStep, the step the
+// wrapper also runs — fed by the parse AND the device stream (claudeSideEffects below). The wrapper's own synthesized records
+// (`_stdin_ack`, `_remote_exit`, …: a type starting with «_») are not the CLI's and move nothing.
+const CONV_FACTS = require('../conversation-facts.js');
+function noteConvFacts(session, msg) {
+  if (!session || !session._convFacts || !msg || typeof msg.type !== 'string' || msg.type.startsWith('_')) return;
+  try { CONV_FACTS.factsStep(session._convFacts, msg, Date.now()); } catch { }
+}
 function claudeSideEffects(session, sid, msg) {
   try {
+    noteConvFacts(session, msg); // lane conversation-facts: the device stream's records count too (first writer wins)
     // the stream clock sees every record of THIS feed too (lane-hot-switch):
     // the device stream fills the parse's gaps, and a gap is exactly where a
     // stalled bridge's backlog comes from
@@ -341,6 +350,6 @@ function claudeSideEffects(session, sid, msg) {
     }
   } catch (e) { console.warn('[session-brain] device side-effects failed:', e.message); }
 }
-  return { sbSeenFirst, claudeSideEffects, noteTurnFeed, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost };
+  return { sbSeenFirst, claudeSideEffects, noteTurnFeed, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost, noteConvFacts };
 }
 module.exports = { create, noteTurnOpener, noteTurnCmdRecord, noteTurnAttach, noteTurnFeed };
