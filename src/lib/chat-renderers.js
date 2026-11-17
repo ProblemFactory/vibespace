@@ -1459,7 +1459,7 @@ class ChatRenderers {
       if (!thinkTxt.trim()) el.classList.add('chat-empty-thinking');
       html = `<details class="chat-thinking"${msg.status === 'streaming' ? ' open' : ''}><summary><span class="chat-thinking-label">${t('Thinking')}</span></summary><pre>${escHtml(thinkTxt)}</pre></details>`;
     } else if (block.type === 'text') {
-      html = `<div class="chat-text">${this.renderMarkdown(stripAnsi(block.text || ''))}</div>`;
+      html = `<div class="chat-text">${this.renderMarkdown(stripAnsi(block.text || ''), { vsLinks: true })}</div>`;   // the conversation's own words: the scheme's links (the option)
     } else {
       return null;
     }
@@ -1497,7 +1497,7 @@ class ChatRenderers {
         + `${COLLAB_ICONS.in}<span class="chat-collab-name" role="link" tabindex="0"${nameAttrs}>${escHtml(collab.agentName || collab.agentPath || t('sub-agent'))}</span>`
         + `${collab.msgType ? `<span class="chat-collab-type">${escHtml(collab.msgType)}</span>` : ''}`
         + `<span class="chat-agent-report-tag">${escHtml(t('sub-agent report'))}</span></div>`
-        + `<div class="chat-text chat-agent-report-body">${this.renderMarkdown(stripAnsi(body))}</div>`;
+        + `<div class="chat-text chat-agent-report-body">${this.renderMarkdown(stripAnsi(body), { vsLinks: true })}</div>`;   // a sub-agent's report: the option on
       return el;
     }
     // LIVE PROGRESS (2026-09-07): a coalesced card on a streaming turn renders
@@ -1603,7 +1603,7 @@ class ChatRenderers {
     if (msg.taskInfo && msg.taskInfo.subId) {
       // lane agy-subagent-cards: a subagent's CARD (an Antigravity invoke_subagent row read from agy's store) — role,
       // task, state, elapsed time, answer, the files it wrote; its button opens the sub's timeline (sub-<subId>)
-      html = subagentCardHtml(msg, { t, escHtml, linkifyText: (s) => this.linkifyText(s), renderMarkdown: (s) => this.renderMarkdown(s), clickablePath: (p) => this.clickablePath(p), statusChip: this.renderTaskChip(msg.taskInfo), icon: UI_ICONS.robot, now: Date.now() });
+      html = subagentCardHtml(msg, { t, escHtml, linkifyText: (s) => this.linkifyText(s), renderMarkdown: (s) => this.renderMarkdown(s, { vsLinks: true }), clickablePath: (p) => this.clickablePath(p), statusChip: this.renderTaskChip(msg.taskInfo), icon: UI_ICONS.robot, now: Date.now() });
     } else if (block.type === 'tool_call') {
       // Tool call — pending (spinner) or interrupted (error, no result ever came)
       const isAgent = block.toolName === 'Agent';
@@ -2597,7 +2597,12 @@ class ChatRenderers {
     }).join('');
   }
 
-  renderMarkdown(text) {
+  /** THE OPTION `vsLinks` (lane setting-doors pick 1 cure, 主开发 2026-11-17 — ONE rule for where the scheme's links render):
+   *  off by default; on ONLY where the words are the conversation's own — the assistant text block and its streaming
+   *  frame, the sub-agent report, the sub-agent card's answer. Off ⇒ a `vibespace://` run is words: text a PEER wrote
+   *  (peer and group bodies, a VibeSpace notice — a job's record — the person's own text, a tool's input or output) never
+   *  draws a door, and a hand-written `#vs-setting-` anchor there is its label alone. */
+  renderMarkdown(text, { vsLinks = false } = {}) {
     try {
       // marked passes raw HTML through — sanitize before injecting into the
       // DOM (message content is model/tool-controlled and may echo hostile
@@ -2611,7 +2616,7 @@ class ChatRenderers {
       html = conversationLinksHtml(html, { known: (id) => (this._subagentKnown ? this._subagentKnown(id) : true), t, escHtml }); // lane agy-subagent-cards: [x](conversation://<id>) opens that subagent
       html = this._wrapTables(html);
       html = this._markOpenFences(text, html); // lane chat-mermaid: a fence still being streamed stays code
-      html = this._settingAnchors(this.linkify(html));   // lane setting-doors pick 1: [x](vibespace://settings/<key>) → the setting span (after linkify: its words are never re-linked)
+      html = this._settingAnchors(this.linkify(html, { vsLinks }), { vsLinks });   // lane setting-doors pick 1 (+ the option): [x](vibespace://settings/<key>) → the setting span (after linkify: its words are never re-linked)
       return notesAfterBlocks(html);   // lane mask-value-shape r6 (m7): a code block / span reads as written — the note follows it
     } catch {
       return escHtml(text || '');
@@ -2881,8 +2886,9 @@ class ChatRenderers {
   }
   /** lane setting-doors pick 1: the sanitized, linkified HTML → each `<a href="#vs-setting-<key>">` naming a known row becomes
    *  THE setting span (its inner HTML the sanitizer's own output). */
-  _settingAnchors(html) {
+  _settingAnchors(html, { vsLinks = false } = {}) {
     if (html.indexOf(SETTING_ANCHOR) < 0) return html;
+    if (!vsLinks) return html.replace(SETTING_ANCHOR_RE, (m, href, inner) => inner);   // the option off: the mark is its label, words — never a door
     return html.replace(SETTING_ANCHOR_RE, (m, href, inner) => { const key = keyOfAnchor(href); return key && isSettingKey(key) ? this._settingSpan(key, inner) : m; });
   }
   /** THE setting span (lane setting-doors pick 1): `.chat-link.chat-setting-link` + data-setting — no href, no value; a click
@@ -3060,9 +3066,9 @@ class ChatRenderers {
    * (`chat-link-words`: every later pass skips it, the click handler never sees a .chat-link), so the path pass — whose rule
    * linked its `//settings/…` tail — never makes half a link of it. Skips a link span an earlier pass made (a URL's).
    */
-  linkifySettingLinks(text) {
+  linkifySettingLinks(text, { vsLinks = false } = {}) {
     if (!hasSettingScheme(text)) return text;   // l1: the scheme in any case
-    const html = this._linkifyBareText(text, (txt) => splitSettingLinks(txt, isSettingKey).map((g) => (g.key ? this._settingSpan(g.key, g.text) : g.text)).join(''));
+    const html = !vsLinks ? text : this._linkifyBareText(text, (txt) => splitSettingLinks(txt, isSettingKey).map((g) => (g.key ? this._settingSpan(g.key, g.text) : g.text)).join(''));
     return this._linkifyBareText(html, (txt) => txt.replace(settingRunRe(), (run) => {   // l1: EVERY run that is no door — glued to a word or a path too — so the path pass never links its tail
       let end = run.length; while (end > SETTING_SCHEME.length && isTrailing(run[end - 1])) end--;
       return `<span class="chat-link-words">${run.slice(0, end)}</span>${run.slice(end)}`;
@@ -3070,22 +3076,22 @@ class ChatRenderers {
   }
 
   /** Combined URL + path linkification on a text segment. */
-  linkifySegment(text, esc) {
-    return this.linkifyPathsTagSafe(this.linkifySettingLinks(this.linkifyPagePaths(this.linkifyFileUrls(this.linkifyUrls(text)))), esc);
+  linkifySegment(text, esc, opts = {}) {   // opts.vsLinks — renderMarkdown's option (off: a run of the scheme is words)
+    return this.linkifyPathsTagSafe(this.linkifySettingLinks(this.linkifyPagePaths(this.linkifyFileUrls(this.linkifyUrls(text))), opts), esc);
   }
 
   /**
    * Auto-detect URLs and file paths in rendered HTML, make them interactive.
    * Click = copy, Ctrl+Click = open.
    */
-  linkify(html) {
+  linkify(html, opts = {}) {
     return html.replace(/(<a[\s>][\s\S]*?<\/a>)|(<code[\s>][\s\S]*?<\/code>)|(<[^>]*>)|([^<]+)/gi, (match, anchor, code, tag, text) => {
       if (anchor) { const masked = this._maskedAnchor(match); if (masked) return masked; } // lane mask-value-shape: a link a belt masked inside is words + the note
       if (anchor) return this._pathAnchor(match); // a path anchor is a path span; any other <a>...</a> untouched
       if (code) {
         // Linkify paths/URLs inside <code> blocks while preserving the <code> wrapper
         return code.replace(/^(<code[^>]*>)([\s\S]*?)(<\/code>)$/i, (_, open, inner, close) => {
-          const linked = this.linkifySegment(inner, true);
+          const linked = this.linkifySegment(inner, true, opts);
           if (linked === inner) {
             // No absolute match — but a code span that IS a relative path or
             // bare filename (`B2BTasks/x/final/`, `SCRIPTS.md`, `generate.py`)
@@ -3103,13 +3109,13 @@ class ChatRenderers {
       }
       if (tag) return tag;
       if (!text) return match;
-      return this.linkifySegment(text, true);
+      return this.linkifySegment(text, true, opts);
     });
   }
 
   /** Linkify plain text (for tool output, user messages that don't go through markdown) */
-  linkifyText(text) {
-    return this.linkifySegment(escHtml(text), false);
+  linkifyText(text, opts = {}) {   // a tool's words: never given the option (lane setting-doors cure)
+    return this.linkifySegment(escHtml(text), false, opts);
   }
 
   // Resolve a clicked link into {url, fp, rel}. A local filesystem path — our
