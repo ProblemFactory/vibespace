@@ -31,8 +31,9 @@ const rec = (i) => [JSON.stringify({
   type: 'assistant', timestamp: new Date().toISOString(),
   message: { id: 'msg_sb_' + i, model: 'claude-fable-5', role: 'assistant', content: [{ type: 'text', text: 'hello ' + i }], usage: { input_tokens: 10, output_tokens: 5 } },
 }), JSON.stringify({ type: 'result', subtype: 'success', timestamp: new Date().toISOString() })].join('\n');
+const RECS = [1, 2, 3].map(rec);   // ONE recording (lane session-events-ends U3): the emitter writes these lines, the server's normalizer reads the same ones
 fs.writeFileSync(emitter, `
-const recs = ${JSON.stringify([1, 2, 3].map(rec))};
+const recs = ${JSON.stringify(RECS)};
 let i = 0;
 // wait past the daemon tailer's first tick (1s cadence) so start-at-NOW
 // registers BEFORE any record is written — production attaches replay
@@ -48,7 +49,7 @@ await dm.openPipeSession({ sid: SID, cmd: process.execPath, args: [emitter], cwd
 await new Promise((r) => setTimeout(r, 9000));
 
 const events = batches.filter((b) => b.sid === SID).flatMap((b) => b.batch.map((x) => JSON.parse(x)));
-console.log('EVENT SAMPLE:', JSON.stringify(events.slice(0, 6).map((e) => ({ op: e.op, id: e.msg?.id || e.id, role: e.msg?.role }))));
+console.log('EVENT SAMPLE:', JSON.stringify(events.slice(0, 6).map((e) => ({ op: e.op, id: e.message?.id || e.id, role: e.message?.role }))));
 const creates = events.filter((e) => e.op === 'create');
 ok(batches.length > 0, `device stream delivered batches (${batches.length})`);
 ok(creates.length >= 3, `normalized create ops for all 3 records (${creates.length})`);
@@ -58,12 +59,25 @@ const { createMessageManager } = require(REPO + '/src/normalizers.js');
 const mm = createMessageManager('claude', SID);
 const serverOps = [];
 mm.onOp((op) => serverOps.push(op));
-for (let i = 1; i <= 3; i++) for (const ln of rec(i).split('\n')) mm.processLive(JSON.parse(ln));
-const core = (id) => { const x = String(id); const i2 = x.indexOf(':'); return i2 >= 0 ? x.slice(i2 + 1) : x; };
-const devMids = creates.map((e) => core(e.msg?.id)).filter(Boolean).sort();
-const srvMids = serverOps.filter((o) => o.op === 'create').map((o) => core(o.msg?.id)).filter(Boolean).sort();
-ok(devMids.length >= 3 && devMids.length === srvMids.length && devMids.every((m, i) => m === srvMids[i]),
-  `PARITY: device mids === server mids over the same bytes (${devMids.length} each)`);
+for (const r of RECS) for (const ln of r.split('\n')) mm.processLive(JSON.parse(ln));   // the SAME recorded lines the emitter wrote
+// PARITY AS A DETERMINISTIC LEG (lane session-events-ends U3, 主开发 2026-11-16 — in place of the removed soak): the same
+// recorded lines through the daemon's REAL normalizer (its session-events stream, above) and through the server's; the
+// creates compared by id AND by content, in stream order. CURED: this leg read `e.msg?.id`, a field no create carries — it
+// compared the text «undefined» with itself and could not fail.
+const canon = (v) => Array.isArray(v) ? '[' + v.map(canon).join(',') + ']' : (v && typeof v === 'object') ? '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}' : JSON.stringify(v === undefined ? null : v);
+const createsOf = (ops) => ops.filter((o) => o && o.op === 'create').map((o) => (o.message && o.message.id ? canon(o.message) : null));
+const sameCreates = (a, b) => a.length === b.length && a.every((x, k) => !!x && x === b[k]);
+const firstDiff = (a, b) => { for (let k = 0; k < Math.max(a.length, b.length); k++) if (a[k] !== b[k]) return { at: k, device: String(a[k]).slice(0, 300), server: String(b[k]).slice(0, 300) }; return null; };
+const devC = createsOf(events), srvC = createsOf(serverOps);
+ok(devC.length >= 3 && sameCreates(devC, srvC), `PARITY (deterministic): the daemon's normalizer and the server's make the SAME creates from the same recorded lines — ${devC.length} / ${srvC.length}, by id AND content${sameCreates(devC, srvC) ? '' : ' — first difference ' + JSON.stringify(firstDiff(devC, srvC))}`);
+{
+  // the CONTROL: an injected divergence turns it red — a create's text changed, an id changed, a create missing, one extra
+  const edit = (k, f) => srvC.map((x, n) => (n === k ? canon(f(JSON.parse(x))) : x));
+  const text = edit(1, (m) => ({ ...m, content: [{ type: 'text', text: 'not what the device read' }] }));
+  const id = edit(1, (m) => ({ ...m, id: m.id + '-other' }));
+  ok(devC.length >= 3 && !sameCreates(devC, text) && !sameCreates(devC, id) && !sameCreates(devC, srvC.slice(1)) && !sameCreates(devC, [...srvC, srvC[0]]),
+    'PARITY\'s control: one create\'s content changed, one id changed, a create missing, one extra — each turns the comparison red');
+}
 
 // dead sessions are dropped from the tail set (no leak): kill and wait a tick
 try { await dm.killPipeSession(SID); } catch { }
