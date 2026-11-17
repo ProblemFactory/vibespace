@@ -4695,7 +4695,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     commit();
     const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? ENG.engineArgs(engineLaunch) : []; // lane engine-plugin: the engine's own arguments, censused by the builder (lane engine-spi-egress: + the keeper's proxy arguments when wrapped)
     if (rec.tailnet && rec.tailnet.arg) engineArgs.push(rec.tailnet.arg);
-    if (rec.proxyRoad && rec.proxyRoad.arg) engineArgs.push(rec.proxyRoad.arg); // B-8b87: the profile's proxy — its forwarder's loopback port, IN through the builder // lane tailnet-names: the keeper's tailnet PAC (never on an engine's launch) — IN through the builder
+    if (rec.proxyRoad && rec.proxyRoad.arg) engineArgs.push(rec.proxyRoad.arg, ENG.PROXY_UDP_ARG); // B-8b87 (+ 14:25Z: the WebRTC policy beside it — UDP only through a proxy): the profile's proxy — its forwarder's loopback port, IN through the builder // lane tailnet-names: the keeper's tailnet PAC (never on an engine's launch) — IN through the builder
     // lane engine-spi-egress L1b r3: the second wall on THIS road (the launch verdict refused them first) — an engine argument that starts
     // another program (src/browser-engines.js LAUNCHER_SWITCHES) never reaches an argv
     // r4: on the argument's TRIMMED form (src/browser-engines.js switchFormOf — Chromium's own reading), and a padded argument refused too

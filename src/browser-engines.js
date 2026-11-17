@@ -110,6 +110,13 @@ const LAUNCHER_ARG_RE = new RegExp(`^--?(?:${LAUNCHER_SWITCHES.map((r) => r.name
 function launcherArgsOf(list) { return [...new Set((Array.isArray(list) ? list.map(String) : []).map(switchFormOf).filter((a) => LAUNCHER_ARG_RE.test(a)).map((a) => clip(a.split('=')[0], 40)))]; }
 /** The proxy half of OWN_ARG_RE (refused in its own words; dropped from the keeper's own list on a wrapped launch). */
 const PROXY_ARG_RE = /^--?(?:proxy-server|proxy-bypass-list|proxy-pac-url|winhttp-proxy-resolver|no-proxy-server|proxy-auto-detect)(?:=|$)/;
+/** B-8b87 (主开发 2026-11-17 14:25Z — «never direct» by the UDP road too): a browser launched with a PROFILE'S proxy also carries
+ *  Chromium's WebRTC policy that lets UDP out only through a proxy that carries it (content_switches.cc kForceWebRtcIPHandlingPolicy;
+ *  the value from blink webrtc_ip_handling_policy.cc) — the keeper's forwarder carries none, so a call goes over TCP through the
+ *  proxy or does not connect. The person's own setting of that switch is replaced (PROXY_UDP_RE). The core's two roads only (the
+ *  driver's derived config, the attach argv); an engine's egress pair is not changed here. */
+const PROXY_UDP_ARG = '--force-webrtc-ip-handling-policy=disable_non_proxied_udp';
+const PROXY_UDP_RE = /^--?force-webrtc-ip-handling-policy(?:=|$)/;
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const strList = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
 const clip = (s, n = 160) => String(s == null ? '' : s).replace(/[\0-\x1f\x7f]/g, ' ').slice(0, n);
@@ -386,7 +393,7 @@ function defaultEngineOf({ own = undefined, fleet = null } = {}) {
 
 module.exports = { ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE, OWN_ARG_RE, ENGINE_FEATURES, EGRESS_FEATURE, EGRESS_ROW_KEY,
   platformOf, engineWords, engineAnswerVerdict, kernelLiveVerdict, KERNEL_FEATURES, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineArgs, engineLaunchEnv, engineWrapperText, choiceOfDefault, isDefaultEngineValue, defaultEngineOf,
-  egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs,
+  egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs, PROXY_UDP_ARG, PROXY_UDP_RE,
   BINARY_ROW_KEY, binaryRowOf, binaryRowPath, ENGINE_OWNER_ROW_RE, engineSourceOf, programMagicOk, userBinaryVerdict, // lane engine-spi-egress L1b
   LAUNCHER_SWITCHES, LAUNCHER_ARG_RE, launcherArgsOf, // lane engine-spi-egress L1b r3
   switchFormOf, paddedArgsOf, // lane engine-spi-egress L1b r4

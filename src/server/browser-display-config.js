@@ -161,7 +161,7 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
     const base = readCfg(baseFile);
     if (!base) { say(`pread:${baseFile}`, `the profile proxy's road could not read ${baseFile} — its calls are refused (never run without the proxy)`); throw proxyMissing(`${baseFile} could not be read`); }
     const { proxy: _own, ...rest } = base;
-    const cfg = { ...rest, args: [...ENG.withoutProxyArgs(V.driverArgsList(base.args)), arg] };
+    const cfg = { ...rest, args: [...ENG.withoutProxyArgs(V.driverArgsList(base.args)).filter((a) => !ENG.PROXY_UDP_RE.test(a.trim())), arg, ENG.PROXY_UDP_ARG] };   // + the WebRTC policy beside the switch (B-8b87, UDP only through a proxy)
     const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + arg).digest('hex').slice(0, 10);
     const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-proxy-${tag}.json`);
     const got = derived(file, cfg, baseFile, 'the profile proxy\'s config');

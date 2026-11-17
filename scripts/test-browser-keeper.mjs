@@ -731,6 +731,32 @@ console.log('— B-346d: the child url cache key follows the browser\'s run');
   ok(!judgeKey(Bx), 'CONTROL (B-346d, the release\'s cache: one key per conversation) ⇒ a relaunched daemon is answered with the OLD run\'s port — RED');
 }
 
+console.log('— B-8b87: the attach road carries the WebRTC policy beside a profile\'s proxy');
+setMode('ok');
+// B-8b87 (主开发 2026-11-17 14:25Z): a profile WITH a proxy — its ATTACH argv carries the forwarder's switch AND the WebRTC policy that
+// lets UDP out only through a proxy (the forwarder carries none: a call goes over TCP through it, or does not connect); without: neither
+{
+  const UDP = require('../src/browser-engines.js').PROXY_UDP_ARG;
+  const attachProxied = async (kk, label) => { const pp = kk.createProfile({ label, proxy: 'http://proxy.example.test:3128' }, { owner: { kind: 'instance', id: null } }); const n = chromeLog().length; await kk.start(pp.id, { why: 'test' }); const c = chromeLog().slice(n).pop() || { args: [] }; try { await kk.stop(pp.id, { why: 'user' }); } catch { } return { args: c.args || [], launch: (kk._reg().browsers[pp.id] || {}).launch }; };
+  const DATA_P = path.join(S, 'data-udp'); fs.mkdirSync(DATA_P, { recursive: true });
+  const kP2 = mk({ dataDir: DATA_P });
+  const plain0 = await (async () => { const pp = kP2.createProfile({ label: 'No proxy attach' }, { owner: { kind: 'instance', id: null } }); const n = chromeLog().length; await kP2.start(pp.id, { why: 'test' }); const c = chromeLog().slice(n).pop() || { args: [] }; try { await kP2.stop(pp.id, { why: 'user' }); } catch { } return c.args || []; })();
+  const aP = await attachProxied(kP2, 'Proxied attach');
+  ok(aP.launch === 'attach' && aP.args.some((a) => /^--proxy-server=http:\/\/127\.0\.0\.1:\d+$/.test(a)) && aP.args.includes(UDP) && aP.args.indexOf(UDP) === aP.args.findIndex((a) => /^--proxy-server=/.test(a)) + 1 && plain0.length > 0 && !plain0.some((a) => /^--proxy-server=/.test(a)) && !plain0.includes(UDP),
+    'the attach road: a profile WITH a proxy runs Chrome with the forwarder\'s switch and, beside it, --force-webrtc-ip-handling-policy=disable_non_proxied_udp; the profile with none carries neither', aP.args.filter((a) => /proxy|webrtc/.test(a)));
+  // compiled in memory under the keeper's own path (its relative requires resolve beside it; the suite's file mutant is for pure modules)
+  const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), kFrom = 'engineArgs.push(rec.proxyRoad.arg, ENG.PROXY_UDP_ARG);';
+  if (kSrc.split(kFrom).length !== 2) throw new Error('the UDP mutant\'s anchor must occur exactly once');
+  const Mod = require('node:module'), kFile = path.join(REPO, 'src/server/browser-keeper.js'), kMod = new Mod(kFile, null);
+  kMod.filename = kFile; kMod.paths = Mod._nodeModulePaths(path.dirname(kFile)); kMod._compile(kSrc.split(kFrom).join('engineArgs.push(rec.proxyRoad.arg);'), kFile);
+  const KU = kMod.exports;
+  const DATA_U = path.join(S, 'data-udp-red'); fs.mkdirSync(DATA_U, { recursive: true });
+  const kU = KU.create({ dataDir: DATA_U, homeDir: HOME, env: () => rtEnv, serverSetting: (x) => settings[x], serverNotice: () => 1, liveKeys: () => new Set(), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: jlog, install: false, tickMs: 3600e3, displaySessions: DK, attachSocketBase: SOCKBASE });
+  const aU = await attachProxied(kU, 'Proxied attach red');
+  ok(aU.args.some((a) => /^--proxy-server=/.test(a)) && !aU.args.includes(UDP), 'RED: an attach road that pushes the switch alone — the policy is missing (the leg above goes red on it)', aU.args.filter((a) => /proxy|webrtc/.test(a)));
+  kU.shutdown?.(); kP2.shutdown?.();
+}
+
 fs.rmSync(S, { recursive: true, force: true });
 console.log(`\n${fail ? '✗' : '✓'} test-browser-keeper: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

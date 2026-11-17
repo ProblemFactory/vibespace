@@ -293,6 +293,7 @@ let NOT_SET_UP = null;   // round 3: the server's own answers for a vault never 
   const port = Number((/^--proxy-server=http:\/\/127\.0\.0\.1:(\d+)$/.exec(sw) || [])[1] || 0);
   const store = fs.readFileSync(path.join(D1, 'browser-profiles.json'), 'utf8');
   const recEg = (JSON.parse(store).browsers || {})[p.id]?.egress || null;
+  ok(args.includes(require('../src/browser-engines.js').PROXY_UDP_ARG), 'the driver\'s road: the launch\'s config also carries the WebRTC policy (UDP only through a proxy) beside the switch', args.filter((a) => /proxy|webrtc/.test(a)));
   ok(fake.launches().length === n0 + 1 && port > 0 && recEg && recEg.port === port && recEg.proxy && recEg.proxy.credential === ref,
     'the driver\'s road: the launch\'s config carries ONE --proxy-server=http://127.0.0.1:<port> — the forwarder\'s, whose port the record keeps (the boot re-binds THAT port) with the profile\'s proxy and the entry\'s NAME', { sw, recEg });
   seen.length = 0;
@@ -407,10 +408,17 @@ let NOT_SET_UP = null;   // round 3: the server's own answers for a vault never 
   const DC = require('../src/server/browser-display-config.js');
   const mkDc = (name, mod = DC) => { const d = path.join(ROOT, name); fs.mkdirSync(d, { recursive: true }); return mod.create({ dir: d, writeJson: (file, o) => fs.writeFileSync(file, JSON.stringify(o, null, 2)), log: { log() { }, warn() { } } }); };
   const ARG = `--proxy-server=http://127.0.0.1:${HTTP_UP}`, base = path.join(ROOT, 'base.json');
-  fs.writeFileSync(base, JSON.stringify({ args: ['--lang=en', '--proxy-auto-detect', '--winhttp-proxy-resolver', '--proxy-server=http://other.example.test:1'] }));
+  fs.writeFileSync(base, JSON.stringify({ args: ['--lang=en', '--proxy-auto-detect', '--winhttp-proxy-resolver', '--proxy-server=http://other.example.test:1', '--force-webrtc-ip-handling-policy=default'] }));
+  const ENGP = require('../src/browser-engines.js'), UDP = ENGP.PROXY_UDP_ARG;
   const argsOf = (file) => { const c = JSON.parse(fs.readFileSync(file, 'utf8')); return Array.isArray(c.args) ? c.args : String(c.args || '').split(','); };
   const out1 = argsOf(mkDc('dc-1').proxyFileFor(base, { arg: ARG }));
-  ok(out1.includes('--lang=en') && out1.at(-1) === ARG && !out1.some((a) => /auto-detect|winhttp|other\.example/.test(a)), 'the person\'s own proxy switches leave by the tree\'s ONE rule (src/browser-engines.js PROXY_ARG_RE — auto-detect and the resolver switch too): the forwarder\'s switch is the only one', out1);
+  ok(out1.includes('--lang=en') && out1.at(-2) === ARG && !out1.some((a) => /auto-detect|winhttp|other\.example/.test(a)), 'the person\'s own proxy switches leave by the tree\'s ONE rule (src/browser-engines.js PROXY_ARG_RE — auto-detect and the resolver switch too): the forwarder\'s switch is the only one', out1);
+  // 主开发 14:25Z — the UDP road: the WebRTC policy that lets UDP out only through a proxy rides beside the switch; the person's own
+  // setting of it replaced; a launch with no proxy stamp names the base file untouched
+  ok(out1.at(-1) === UDP && out1.filter((a) => /webrtc-ip-handling/.test(a)).length === 1 && mkDc('dc-0').proxyFileFor(base, { arg: '' }) === base,
+    'a profile WITH a proxy: the derived config carries --force-webrtc-ip-handling-policy=disable_non_proxied_udp right after the forwarder\'s switch (the person\'s own «=default» replaced); with no proxy the base file is untouched', out1);
+  const DCu = mutant('src/server/browser-display-config.js', ', arg, ENG.PROXY_UDP_ARG] };', ', arg] };');
+  ok(!argsOf(mkDc('dc-u', DCu).proxyFileFor(base, { arg: ARG })).includes(UDP), 'RED: a derived config without the policy — the leg above goes red on it');
   const DCr = mutant('src/server/browser-display-config.js', 'ENG.withoutProxyArgs(V.driverArgsList(base.args))', "V.driverArgsList(base.args).filter((a) => !/^--?(?:proxy-server|proxy-pac-url|proxy-bypass-list|no-proxy-server)(?:=|$)/.test(a))");
   ok(argsOf(mkDc('dc-r', DCr).proxyFileFor(base, { arg: ARG })).includes('--proxy-auto-detect'), 'RED: the four-switch filter before the cure — auto-detect survives beside the forwarder\'s switch');
   const nulCfg = path.join(ROOT, 'nul.json'); fs.writeFileSync(nulCfg, JSON.stringify({ args: ['--lang=en', '--x=a\u0000b'] }));   // a NUL inside a switch: the driver's one line cannot carry it
