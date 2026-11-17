@@ -2,6 +2,22 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.408 — 2026-11-17
+
+### Added
+- An Antigravity account’s usage is read once after a stretch of work (5 quiet minutes, at most every 30 minutes); its own Settings row can turn that off.
+- An Antigravity account’s row says how many times its usage was read today; hover it to see who asked.
+
+### Changed
+- Settings: Claude’s usage refresh row now covers Claude only; Antigravity’s automatic usage reads have their own row, Off if Claude’s was Off.
+- Re-check on an Antigravity account now reads its usage even while Claude usage refresh is Off (that press was refused before).
+- The usage popup draws an estimate between readings only where this hub’s own record shows it lands closer than the last reading, as “about Y%”.
+- Elsewhere the popup shows the reading and how many requests ran here since, and the account pool reads an estimate only where it has proven itself.
+- Codex and Antigravity usage estimates learn only from their own readings, never from Claude’s quota sizes.
+
+### Fixed
+- A usage wall seen again after a restart no longer reads the Antigravity account a second time.
+
 ## 2.369.407 — 2026-11-17
 
 ### Added
