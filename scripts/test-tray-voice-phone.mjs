@@ -35,7 +35,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -44,8 +45,8 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('tray-voice-wt');
-const fakeHome = scratchHome('tray-voice-home', fs);
+const root = mintRoot('tray-voice-wt'), wt = path.join(root, 't');
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeDir = scratch('tray-voice-chrome'); // its own registered scratch root (test-mobile-back-chrome's lesson)
 const SHOTS = process.env.VIBESPACE_TRAY_VOICE_PNG_DIR || scratch('tray-voice-png');
 fs.mkdirSync(SHOTS, { recursive: true });
@@ -56,7 +57,6 @@ const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree (no rebuild: overlays the built public/) ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -65,23 +65,20 @@ const T0 = Date.now();
 fs.writeFileSync(path.join(wt, 'data', 'user-todos.json'), JSON.stringify({ items: [1, 2].map((k) => ({ id: 'ut-trayvoice' + k, sessionKey: 'claude:tray-voice-' + k, sessionName: 'tray voice', text: `Which bucket should the nightly export use? (${k})`, detail: null, urgency: 'normal', kind: 'action', origin: 'agent', status: 'open', by: 'agent', createdAt: T0 - k * 60e3, resolvedAt: null, resolvedBy: null, jobId: null })) }, null, 2));
 const stubPath = `${wt}-claude-stub`; // never a vendor CLI: the boot probes get a version and nothing else
 fs.writeFileSync(stubPath, '#!/bin/sh\nfor a in "$@"; do case "$a" in --version) echo "2.1.288 (Claude Code) stub"; exit 0;; esac; done\nexit 0\n', { mode: 0o755 });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  for (const root of [wt, fakeHome, chromeDir]) { try { endRootedProcesses(root); } catch { } } // whatever the server / Chrome started under its roots (§57b)
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [chromeDir, fakeHome, stubPath]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }
+  try { endRootedProcesses(chromeDir); } catch { } // whatever Chrome started under its own root (§57b); the hub's are hub-boot.mjs's
+  for (const d of [chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 // a leg that throws is a RED with Chrome torn down — never an orphaned browser (lane voice-follows-focus)
 for (const ev of ['uncaughtException', 'unhandledRejection']) process.on(ev, (e) => { fail++; console.log(`  ✗ the suite threw — ${String((e && e.stack) || e).slice(0, 900)}`); console.log(`\n${fail} FAILED (${pass} passed)`); process.exit(1); });
 const PENDS = new Map();
 armWatchdog({ capMs: 240e3, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
-for (let i = 0; i < 80; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 // ── raw CDP ──
 const WebSocket = require('ws');

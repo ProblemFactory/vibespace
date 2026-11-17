@@ -29,7 +29,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -38,8 +39,8 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT, AUX_PORT] = await freePorts(3);
-const wt = scratch('exit-hop-wt');
-const fakeHome = scratchHome('exit-hop-home', fs);
+const root = mintRoot('exit-hop-wt'), wt = path.join(root, 't');
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeRoot = scratch('exit-hop-chrome');
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const AUX = `http://localhost:${AUX_PORT}`; // another site
@@ -48,14 +49,13 @@ const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── throwaway server in a worktree (no rebuild: overlays the built public/) ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const stubPath = `${wt}-claude-stub`; // never a vendor CLI: the boot probes get a version and nothing else
 fs.writeFileSync(stubPath, '#!/bin/sh\nfor a in "$@"; do case "$a" in --version) echo "2.1.288 (Claude Code) stub"; exit 0;; esac; done\nexit 0\n', { mode: 0o755 });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 // the other site: /link — one link (the older document's embedded page); /p204-<n> — a page the first time, then 204;
 // /slow-<n> — a page the first time, then one 8 s late; both no-store AND with an unload listener, so a back asks the
 // site again (measured on Chrome 154 with the cache on: a no-store page left for a VibeSpace page was KEPT and shown again
@@ -75,20 +75,17 @@ const aux = spawn(process.execPath, ['-e', `const hits = {}; require('http').cre
 let chrome = null;
 const cleanup = () => {
   try { chrome?.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
   try { aux.kill('SIGKILL'); } catch {}
-  for (const root of [wt, fakeHome, chromeRoot]) { try { endRootedProcesses(root); } catch { } } // whatever the server / Chrome started under its roots (§57b)
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [chromeRoot, fakeHome, stubPath]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }
+  try { endRootedProcesses(chromeRoot); } catch { } // whatever Chrome started under its own root (§57b); the hub's are hub-boot.mjs's
+  for (const d of [chromeRoot]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 const PENDS = new Map();
 // run bare (no gate) the suite assumes its ci.mjs row's budget (budgetFor: a chrome heavy row, 900 s) and says so
 const BARE = !process.env.VIBESPACE_SUITE_BUDGET_MS;
 const WD = armWatchdog({ capMs: 600e3, env: BARE ? { ...process.env, VIBESPACE_SUITE_BUDGET_MS: '900000' } : process.env, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
 console.log(`watchdog: ${Math.round(WD.deadline.ms / 1000)} s (${WD.deadline.capped ? "the suite's own ceiling" : 'the budget − 30 s'}; the budget ${Math.round(WD.deadline.budgetMs / 1000)} s — ${BARE ? "a bare run: its ci.mjs row's" : "the gate's"})`);
-for (let i = 0; i < 80; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 // ── raw CDP onto the Chrome of the moment ──
 const WebSocket = require('ws');

@@ -32,7 +32,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, takeCspReports, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, takeCspReports } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 
 const T0 = Date.now();
@@ -43,7 +44,7 @@ const VNC_ENV = await vncEnv(); // never the machine-global :7/5901 (test-archit
 const [PORT, CDP_PORT] = await freePorts(2);
 const BASE = `http://127.0.0.1:${PORT}`;
 const PW = 'pw-fhv-' + Math.random().toString(36).slice(2, 10);
-const wt = scratch('fhview-smoke');
+const root = mintRoot('fhview-smoke'), wt = path.join(root, 't');
 const prof = scratch('fhview-chrome');
 const FX = scratch('fhview-fx');
 const OUT = scratch('fhview-out');
@@ -89,26 +90,21 @@ fs.writeFileSync(path.join(FX, 'mail', 'hostile.eml'), ['From: Member A <a@examp
 const GIF = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64').toString('base64');
 
 // ── a worktree server of THIS tree, signed in ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: PW }, stdio: 'ignore' });
+fs.mkdirSync(path.join(root, 'home'), { recursive: true }); // the hub's HOME lies in its root (hub-boot.mjs)
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: PW, HOME: path.join(root, 'home') } });
 const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1400,950',
   '--disable-background-timer-throttling', `--user-data-dir=${prof}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }
-  try { srv.kill('SIGKILL'); } catch { }
-  try { endRootedProcesses(wt); } catch { }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
   for (const d of [prof, FX, OUT]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 };
 process.on('exit', cleanup);
-process.on('SIGINT', () => process.exit(130));
-process.on('SIGTERM', () => process.exit(143));
 
-for (let i = 0; i < 120; i++) { try { await fetch(`${BASE}/login`); break; } catch { await sleep(250); } }
+await hub.ready({ path: '/login' });
 const WebSocket = require('ws');
 let target = null;
 for (let i = 0; i < 40 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(250); } }

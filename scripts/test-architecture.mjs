@@ -2854,20 +2854,20 @@ await section(async () => {
     'test-browser-live-ui.mjs', 'test-browser-live.mjs', 'test-browser-multiview.mjs', 'test-browser-propose-chrome.mjs', 'test-browser-resume-ui.mjs', 'test-channel-jump.mjs',
     'test-channel-threads-ui.mjs', 'test-channel-window-render.mjs', 'test-channels-aggregate-ui.mjs', 'test-channels-e2e.mjs', 'test-channels-groups-e2e.mjs', 'test-channels-panel-redraw.mjs',
     'test-chat-hygiene-ui.mjs', 'test-chat-paging.mjs', 'test-cli-cmd-refresh.mjs', 'test-client-boot.mjs', 'test-collab-live-counter.mjs',
-    'test-cwd-recreate.mjs', 'test-desktop-app-snap.mjs', 'test-desktop-app-window.mjs', 'test-desktop-drop.mjs', 'test-desktop-resume-paging.mjs',
+    'test-desktop-app-snap.mjs', 'test-desktop-app-window.mjs', 'test-desktop-reorder.mjs', 'test-desktop-resume-paging.mjs',
     'test-desktop-vnc-fit.mjs', 'test-desktop-xpra.mjs', 'test-fork-restore.mjs', 'test-gear-menu.mjs',
-    'test-ghost-host-heal.mjs', 'test-graduate-dial.mjs', 'test-group-report-card.mjs', 'test-harness-honesty.mjs', 'test-helper-ask-ui.mjs', 'test-inbox-reply-ui.mjs',
-    'test-incident.mjs', 'test-integrations-ui.mjs', 'test-jobs-panel.mjs', 'test-minimap-jump.mjs', 'test-mobile-gaps.mjs',
+    'test-graduate-dial.mjs', 'test-group-report-card.mjs', 'test-harness-honesty.mjs', 'test-helper-ask-ui.mjs', 'test-inbox-reply-ui.mjs',
+    'test-incident.mjs', 'test-integration-toggle.mjs', 'test-integrations-ui.mjs', 'test-jobs-panel.mjs', 'test-mobile-gaps.mjs',
     'test-office-desktop.mjs', 'test-opencode-plugin.mjs', 'test-opencode-s9.mjs', 'test-permission-rules.mjs', 'test-profile-blindness-chip.mjs',
     'test-queue-steer.mjs', 'test-readings-attribution.mjs', 'test-reattach-stagger-ui.mjs', 'test-reconnect-storm.mjs', 'test-restore-smoke.mjs', 'test-resume-breaker.mjs',
-    'test-roster-reset-eta.mjs', 'test-run-collapse-fold.mjs', 'test-sidebar-empty-remote.mjs', 'test-sidebar-rail.mjs', 'test-sidebar-scroll.mjs', 'test-split-close-resurrect.mjs',
+    'test-roster-reset-eta.mjs', 'test-run-collapse-fold.mjs', 'test-sidebar-empty-remote.mjs', 'test-sidebar-rail.mjs', 'test-split-close-resurrect.mjs',
     'test-split-ux.mjs', 'test-stage-overlap.mjs', 'test-sys-panel.mjs', 'test-taskbar-group-ui.mjs', 'test-tasks-mirror-race.mjs',
-    'test-title-chips-ui.mjs', 'test-toolbar-resize.mjs', 'test-turn-truth-ui.mjs', 'test-ui-scale.mjs', 'test-update-dialog.mjs', 'test-window-binding.mjs',
+    'test-title-chips-ui.mjs', 'test-turn-truth-ui.mjs', 'test-window-binding.mjs',
     'test-worktree-userchan-ui.mjs',
     // the 2.369.202 integration: server-booting suites the OTHER lanes of this release (and .200) added beside lane
     // runaway-daemon's rule — the same debt, named; each leaves this list when it calls endRootedProcesses
     'test-apps-ui.mjs', 'test-channel-lark-threads-ui.mjs', 'test-channel-names-ui.mjs', 'test-chat-send-landing.mjs', 'test-desktop-keepalive-chrome.mjs',
-    'test-mobile-select.mjs', 'test-page-link-ui.mjs', 'test-peer-card-fold-ui.mjs']);
+    'test-mobile-select.mjs', 'test-page-link-ui.mjs']);
   const endsIn = (t) => { const data = dataRanges(t); return [...t.matchAll(/\bendRootedProcesses\s*\(/g)].some((m) => !data.some(([a, b]) => m.index >= a && m.index < b)); };
   const harnesses = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.mjs$/.test(f) && !/^test-/.test(f) && f !== 'scratch.mjs' && endsIn(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')));
   const endsVia = (t) => endsIn(t) || harnesses.some((h) => new RegExp(`from\\s+['"]\\./${h.replace('.', '\\.')}['"]`).test(t));
@@ -2915,12 +2915,7 @@ await section(async () => {
   // not read; hub-boot.mjs is the helper). A RATCHET that
   // only falls: a re-pointed batch lowers BOOTS_OUTSIDE_HELPER in the same commit, a new boot outside the helper is red, and
   // at 0 it is the law. RED CONTROL: a re-pointed suite with its own spawn line restored counts one more.
-  const BOOTS_OUTSIDE_HELPER = 220;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e ⇒ 217 in 2.369.407.
-  // 220 on the links unit with setting-doors restacked on the release (lane login-request-card, 2026-11-17) — the UI train's
-  // assembly rule BY THE COORDINATOR'S WORD (18:50Z / 21:12Z: 221 there for four suites), here for the unit's three: written before
-  // this rule shipped, they board with their unit — test-internal-links-chrome, test-setting-links-chrome and
-  // test-setting-propose-chrome. Their re-point onto hub-boot.mjs startHub is OWED (lane chrome-157's batch); the ratchet comes
-  // down by three with it.
+  const BOOTS_OUTSIDE_HELPER = 197;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e (217), heavy batch 1 twenty suites (197)
   const bootFiles = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.mjs$/.test(f) && !/^dbg-/.test(f) && f !== 'hub-boot.mjs').sort();
   const BOOT = /\b(?:spawn|fork)\(\s*(?:(?:process\.execPath|'node'|"node")\s*,\s*\[|[A-Za-z_$][\w$.]*\s*,\s*\[[^\]]*?(?:process\.execPath|'node'|"node")\s*,)[^\]]*?['"`]server\.js['"`]/g;
   const bootsOf = (t) => { const data = dataRanges(t); return [...t.matchAll(BOOT)].filter((m) => !data.some(([x, y]) => m.index >= x && m.index < y)).length; };
