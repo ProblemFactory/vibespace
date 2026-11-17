@@ -3140,15 +3140,21 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         fs.writeFileSync(path.join(w.dataDir, 'browser-tools', 'cloak-installed.json'), JSON.stringify({ chromium: MEAS, sha256: sha, path: 'cloak-cache/x/chrome', at: 1 }));
         // the loop-lag sampler: one setImmediate per loop turn, the longest gap between two turns = the longest hold (running
         // BEFORE the row starts, so a hold in the row's own first tick is seen too)
-        let maxGap = 0, last = process.hrtime.bigint(), on = true;
-        const tick = () => { const n = process.hrtime.bigint(); const g = Number(n - last) / 1e6; if (g > maxGap) maxGap = g; last = n; if (on) setImmediate(tick); };
+        let maxGap = 0, last = process.hrtime.bigint(), on = true, turn = 0;
+        const tick = () => { const n = process.hrtime.bigint(); const g = Number(n - last) / 1e6; if (g > maxGap) maxGap = g; last = n; turn++; if (on) setImmediate(tick); };
         await new Promise((res) => setImmediate(() => { last = process.hrtime.bigint(); setImmediate(tick); res(); }));
+        // THE WORK LAW (B-9662): the bytes the row HASHES in one loop turn — a count, never a clock (a loaded runner read the
+        // stepped hold 43 ms against a 38 ms bar, and 57 ms of a 162 ms run): every Hash#update is tallied under the turn it ran in
+        const H = Object.getPrototypeOf(crypto.createHash('sha256')), update = H.update, perTurn = new Map(); // a real Hash's prototype (crypto.Hash itself is a deprecated export)
+        H.update = function (d, enc) { perTurn.set(turn, (perTurn.get(turn) || 0) + (typeof d === 'string' ? Buffer.byteLength(d, enc) : d.byteLength)); return update.call(this, d, enc); };
         const t0 = Date.now();
-        const r = await bootA(w, { userTodos: { add: () => ({ id: 'x' }), flush() { } }, cloakMeasured: { chromium: MEAS, sha256: sha } }, mod);
+        let r = null;
+        try { r = await bootA(w, { userTodos: { add: () => ({ id: 'x' }), flush() { } }, cloakMeasured: { chromium: MEAS, sha256: sha } }, mod); } finally { H.update = update; }
         await new Promise((res) => setTimeout(res, 10)); // the turn after the end is sampled too
         on = false; const ms = Date.now() - t0;
-        return { stepped: !!(r && r.stepped), status: r && r.status, ms, maxLag: Math.round(maxGap), carried: (w.J('settings.json') || {})[EXE] === w.dl };
+        return { stepped: !!(r && r.stepped), status: r && r.status, ms, maxLag: Math.round(maxGap), carried: (w.J('settings.json') || {})[EXE] === w.dl, turnBytes: Math.max(0, ...perTurn.values()), hashed: [...perTurn.values()].reduce((a, b) => a + b, 0) };
       };
+      const BIG = 64 * 1024 * 1024, MB = (n) => `${(n / 1048576).toFixed(1)} MB`;
       // the 250 ms boot clause (§19) is test-boot-loop-hold's (a real boot, its literal law); a fast suite judges a hold against a
       // CONTROL MEASURED IN THE RUN (test-ci-gate's wall-clock law): the same row with the sync spelling planted back
       let lgS = null;
@@ -3160,9 +3166,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         lgS = await lagRun(syncHash, 'sync');
       } catch (e) { ok(false, `A′: the negative control could not run on this tree (${(e && e.message) || e})`); }
       const lg = await lagRun(MIGM, 'stream');
-      ok(lg.stepped && lg.status === 'ran' && lg.carried && !!lgS && lg.maxLag * 3 < lg.ms && lg.maxLag * 2 < lgS.maxLag,
-        `A′ a 64 MB stand-in, its stamp naming it: the row runs STEPPED (the keeper's boot waits on its gate), carries the file, and the loop's longest hold is ${lg.maxLag} ms of a ${lg.ms} ms run — under a third of the run and under half the sync spelling's ${lgS ? lgS.maxLag : '?'} ms one-tick hold`, { lg, lgS });
-      ok(!!lgS && lgS.carried && !(lgS.maxLag * 3 < lgS.ms), `A′ NEGATIVE CONTROL: the sync spelling (readFileSync → createHash) holds the loop ${lgS ? lgS.maxLag : '?'} ms of its ${lgS ? lgS.ms : '?'} ms run in one tick — the leg above goes red with it planted back`, lgS);
+      ok(lg.stepped && lg.status === 'ran' && lg.carried && lg.hashed >= BIG && lg.turnBytes * 8 <= BIG,
+        `A′ a 64 MB stand-in, its stamp naming it: the row runs STEPPED (the keeper's boot waits on its gate), carries the file, and hashes its ${MB(lg.hashed)} over many loop turns — at most ${MB(lg.turnBytes)} in one (≤ 1/8; counted, not timed — its longest hold read ${lg.maxLag} ms of a ${lg.ms} ms run)`, { lg, lgS });
+      ok(!!lgS && lgS.carried && lgS.turnBytes >= BIG, `A′ NEGATIVE CONTROL: the sync spelling (readFileSync → createHash) hashes ${lgS ? MB(lgS.turnBytes) : '?'} in ONE loop turn (its hold read ${lgS ? lgS.maxLag : '?'} ms) — the leg above goes red with it planted back`, lgS);
     }
     // B — ARCHIVE BEFORE STRIP: a crash after EACH write (an env-gated throw the suite plants — never a patched copy), then the retry:
     // it converges to the uncrashed run's end state with ONE notice whose words are the first run's truth; the archive holds the old
