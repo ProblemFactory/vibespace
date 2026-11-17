@@ -618,7 +618,7 @@ const SETTINGS_SCHEMA = {
   'agents.vibespaceIntegration': {
     type: 'boolean', default: true,
     label: t('VibeSpace agent integration (master switch)'),
-    description: t('On: agents get VibeSpace’s context, reminders and tools. Off: Claude Code and Codex run plain, with no VibeSpace hooks or tools — the next sessions, and the running ones stop being nudged.'),
+    description: t('On: agents get VibeSpace’s context, reminders and tools. Off: Claude Code and Codex run plain, with no VibeSpace hooks or tools — new sessions start that way, and running ones stop being nudged.'),
     details: [t('Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every option below only applies while this is ON.')], // lane ui-plain-words settings-19: the whole rule (its files, what keeps working) under «详情»
     category: t('Integration'), liveApply: true,
   },
@@ -753,7 +753,7 @@ const SETTINGS_SCHEMA = {
   // the browser keeper (src/server/browser-keeper.js cliPin) on every resolve of the CLI.
   'browser.cli': {
     type: 'string', default: 'path',
-    label: t('Browser CLI version'),
+    label: t('Browser driver version'),
     description: t('Which agent-browser VibeSpace drives: "path" = the one on this computer\'s PATH; "pinned" = the version VibeSpace was tested with, installed by VibeSpace (Agent browser panel → Install the measured version…); or a version number such as 0.39.2, installed the same way.'),
     tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
@@ -768,7 +768,7 @@ const SETTINGS_SCHEMA = {
   // chart `customBrowser`) › 'default' — the row's fact line says where it came from («由集群预设»). Phase B (D1) flips the default.
   'browser.defaultEngine': {
     type: 'enum', default: 'default', options: [
-      { value: 'default', label: t('Chrome (the browser CLI\'s build)') },
+      { value: 'default', label: t('Chrome (the automatic choice)') },
     ],
     label: t('Default browser engine'),
     description: t('Which browser program NEW agent browsers run: Chrome as the browser CLI installs it (default), or the browser of a browser engine plugin enabled on this computer (the choices list them). Read when a profile is created and when a conversation\'s browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.'),
@@ -1091,7 +1091,8 @@ const SETTINGS_SCHEMA = {
       { value: 'files', label: t('My own certificate files') },
       { value: 'off', label: t('Off (http only)') },
     ], label: t('Secure address (https)'),
-    description: t('VibeSpace also answers https on its own port. Automatic: on a Tailscale network with HTTPS Certificates on, it fetches and renews a certificate for <machine>.<tailnet>.ts.net itself. My own certificate files: VIBESPACE_TLS_CERT + VIBESPACE_TLS_KEY. The microphone, a Mac\'s sign-in and other secure-only features need this address on every device but this one.'),
+    description: t('VibeSpace also answers https on its own port — the microphone, a Mac\'s sign-in and other secure-only features need this address on every device but this one. Automatic: on a Tailscale network it fetches and renews its own certificate.'),
+    details: [t('Automatic: on a Tailscale network with HTTPS Certificates on, it fetches and renews a certificate for <machine>.<tailnet>.ts.net itself. My own certificate files: VIBESPACE_TLS_CERT + VIBESPACE_TLS_KEY.')], // lane ui-plain-words closure F19 / A3: the env names fold
     category: t('Session'), liveApply: true, fact: 'https-address',
   },
   'agentd.publicUrl': {

@@ -414,7 +414,7 @@ export function pathField(input, opts = {}) {
     if (hk() && world(hk()).unreachable) return h + `<div class="pf-res pf-err pf-unreachable"><span class="pf-hint">${escHtml(unreachableWords(hk()))}</span></div>`;
     if (x.empty) {
       const h2 = hk();
-      h += `<div class="pf-res"><span class="pf-hint one" title="${escHtml(baseOrderTip())}">${h2 ? escHtml(t('On {host}:', { host: hostName(h2) })) + ' ' : ''}${escHtml(t('An absolute path, ~/…, a relative path or a few letters'))} ${UI_ICONS.info}</span></div>`;
+      h += `<div class="pf-res"><span class="pf-hint one" title="${escHtml(baseOrderTip())}">${h2 ? escHtml(h2 === 'none' ? t('On the machine you pick above:') : t('On {host}:', { host: hostName(h2) })) + ' ' : ''}${escHtml(t('An absolute path, ~/…, a relative path or a few letters'))} ${UI_ICONS.info}</span></div>`;
     } else if (x.ok) {
       const r = x.r;
       const facts = r.file ? t('File') : dirWords(L, r.path);

@@ -419,8 +419,8 @@ console.log('— ④ the client words (en / zh / ja) + wiring');
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const mkT = (d) => (k, p) => { let s = (d && d[k]) || k; if (p) s = s.replace(/\{(\w+)\}/g, (m, x) => (p[x] !== undefined ? String(p[x]) : m)); return s; };
   const t = mkT(null);
-  ok(W.cardBuildLine({ choice: { kind: 'build', version: '151.0.7922.34' } }, t).text === 'Chrome 151.0.7922.34 (pinned)' && W.cardBuildLine({ choice: null }, t).text === "The browser CLI's default build"
-    && W.cardBuildLine({ choice: { kind: 'path', path: '/opt/c/chrome' } }, t).text === 'The chrome at /opt/c/chrome (pinned)' && W.cardBuildLine({ choice: null, live: true, running: '149.0.1.1' }, t).text === "The browser CLI's default build · running Chrome 149.0.1.1"
+  ok(W.cardBuildLine({ choice: { kind: 'build', version: '151.0.7922.34' } }, t).text === 'Chrome 151.0.7922.34 (pinned)' && W.cardBuildLine({ choice: null }, t).text === "The automatic choice — usually the newest Chrome the browser driver installed"
+    && W.cardBuildLine({ choice: { kind: 'path', path: '/opt/c/chrome' } }, t).text === 'The chrome at /opt/c/chrome (pinned)' && W.cardBuildLine({ choice: null, live: true, running: '149.0.1.1' }, t).text === "The automatic choice — usually the newest Chrome the browser driver installed · running Chrome 149.0.1.1"
     && W.cardBuildLine({ buildChoice: false }, t) === null && W.cardBuildLine({ choice: { kind: 'build', version: '151.0.7922.34' }, missing: { what: '151.0.7922.34' } }, t).warn === true,
   'the profile card: "Chrome 151.0.7922.34 (pinned)" / the CLI\'s default build / a path; the build its browser RUNS while live; a missing one amber; nothing for CloakBrowser');
   const rows = W.buildRows({ ok: true, builds: [{ version: '152.0.1.2', usable: true }, { version: '146.0.7680.153', usable: true }, { version: '139.0.1.1', usable: false, why: 'not-executable' }] }, { choice: { kind: 'build', version: '151.0.7922.34' }, lastChromiumMajor: 151, local: true, t });

@@ -227,7 +227,7 @@ function renderTaskSection(app, root, list, { compact, refresh, archivedCount })
     sh.setAttribute('aria-expanded', sess.expanded ? 'true' : 'false');
     sh.dataset.session = sess.key;
     const schev = document.createElement('span'); schev.className = 'jobs-group-chev'; schev.textContent = sess.expanded ? '▾' : '▸';
-    const sname = document.createElement('span'); sname.className = 'jobs-sess-name'; sname.textContent = sess.label.kind === 'manual' ? t('created by you') : sess.label.kind === 'short' ? nameOrGone('conversation', sess.label.text, '') : sess.label.text;
+    const sname = document.createElement('span'); sname.className = 'jobs-sess-name' + (sess.label.kind === 'short' ? ' jobs-sess-gone' : ''); sname.textContent = sess.label.kind === 'manual' ? t('created by you') : sess.label.kind === 'short' ? goneWords(sess) : sess.label.text; // closure F14: short words + what tells two apart (its last activity), wrapped, never cut
     if (sess.label.kind === 'short') sh.title = t('session {id} (no longer listed)', { id: sess.label.text });
     const scnt = document.createElement('span'); scnt.className = 'jobs-group-count'; scnt.textContent = `×${sess.count}`;
     sh.append(schev, sname, scnt);
@@ -296,6 +296,13 @@ function renderArchivedRow(app, root, n, { compact, refresh }) {
 }
 
 /** ONE card — the renderer every row shares. An ARCHIVED row keeps ✕ only. */
+/** closure F14: a gone conversation's group header — «已结束的对话 · 11/13 14:02» (its last job's time tells two apart); the id is the tooltip. */
+function goneWords(sess) {
+  let when = '';
+  try { when = sess.latestAt ? stampAt(sess.latestAt) : ''; } catch { when = ''; } // closure 2 (item 4): ui-language's ONE time formatter (page-time.js)
+  return when ? t('Ended conversation · {when}', { when }) : t('Ended conversation');
+}
+
 function renderCard(app, root, j, { compact, refresh, archived = false }) {
   const el = document.createElement('div');
   el.className = 'jobs-card jobs-sev-' + (SEV[j.state] || 'idle') + (archived ? ' jobs-card-archived' : '');

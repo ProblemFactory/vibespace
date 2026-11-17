@@ -310,14 +310,14 @@ function cardOf({ who, words, purpose, target, replaces = false, grant = null, s
         : { key: i18nKey('If you paste it, the conversation that asked may use it, but every command still shows you its card (it named no hosts); a vault lock ends it. To let it be used without a card, turn on «Usable by agent runs» on its row in the Vault window.') })
       : { key: i18nKey('The conversation that asked is not allowed to use it in runs until you turn on «Usable by agent runs» on its row in the Vault window.') }] : []),
   ];
-  // lane ui-plain-words (vault-8): how the box works (paste, Save, what the agent hears) is the box's own labelled field now —
-  // the line rides the item's ONE fold; the record (`detail`, Copy) still says every line
-  const fold = [{ key: i18nKey('Paste it below and press Save to vault — it goes straight into the vault. The agent is told only that it is stored and where, never the value.') }];
+  // lane ui-plain-words closure (B2 / law A): what the agent is told — never the value — is a DECIDING fact, said on every surface
+  // that draws the card (the row, its chat card, the paste dialog, the vault band, the For-you window): it stays in `detail`, no fold
+  const said = [{ key: i18nKey('Paste it below and press Save to vault — it goes straight into the vault. The agent is told only that it is stored and where, never the value.') }];
   const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => { const v = l.params && l.params[k]; return v == null ? m : typeof v === 'object' ? String(v.key) : String(v); });
   return {
     text: `${who} asks you for a secret: ${words}`,
-    detail: [...lines, ...fold].map(fill).join('\n'),
-    i18n: { text: { key: i18nKey('{who} asks you for a secret: {words}'), params: { who, words } }, detail: lines, fold },
+    detail: [...lines, ...said].map(fill).join('\n'),
+    i18n: { text: { key: i18nKey('{who} asks you for a secret: {words}'), params: { who, words } }, detail: [...lines, ...said] },
   };
 }
 

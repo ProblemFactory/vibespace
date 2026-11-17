@@ -18,13 +18,13 @@ const normalize = (c) => {
   return { kind: 'default' };
 };
 
-/** A choice in a sentence: "Chrome 151.0.7922.34" / "the browser CLI's default build" / "the chrome at /opt/x/chrome". */
+/** A choice in a sentence: "Chrome 151.0.7922.34" / "the automatic choice — usually the newest Chrome the browser driver installed" / "the chrome at /opt/x/chrome". */
 export function choiceWords(choice, t) {
   const c = normalize(choice);
   if (c.kind === 'build') return t(i18nKey('Chrome {version}'), { version: c.version });
   if (c.kind === 'path') return t(i18nKey('the chrome at {path}'), { path: c.path });
   if (c.kind === 'plugin') return t(i18nKey('the custom kernel ({id})'), { id: c.id });
-  return t(i18nKey("the browser CLI's default build"));
+  return t(i18nKey("the automatic choice — usually the newest Chrome the browser driver installed"));
 }
 
 /** B-a470: an engine plugin that answered its probe with ITS OWN error (`failed` = src/browser-engines.js pluginErrorOf) — quoted
@@ -245,7 +245,7 @@ export function engineFactText(r, t) {
   const engines = Array.isArray(r.engines) ? r.engines : [];
   const pid = String(d.value || 'default').startsWith('plugin:') ? String(d.value).slice(7) : null;
   const row = pid ? engines.find((e) => e && e.id === pid) : null;
-  const value = pid ? (row && row.label ? String(row.label) : choiceWords({ kind: 'plugin', id: pid }, t)) : t(i18nKey("the browser CLI's default build"));
+  const value = pid ? (row && row.label ? String(row.label) : choiceWords({ kind: 'plugin', id: pid }, t)) : t(i18nKey("the automatic choice — usually the newest Chrome the browser driver installed"));
   const parts = [d.source === 'fleet' ? t(i18nKey('Set by the cluster preset: {value}.'), { value }) : d.source === 'user' ? t(i18nKey('Your choice: {value}.'), { value }) : t(i18nKey('Default: {value}.'), { value })];
   // lane engine-spi-egress: an engine the value names that is not in the table is a FACT said here — never a refusal of the value
   if (pid && !row) parts.push(t(i18nKey('That browser engine plugin is not running on this computer.')));
@@ -277,7 +277,7 @@ export function fillEngineSelect(sel, r, value, t, doc) {
  *  no engine id is named anywhere: Chrome, one option per engine here (its label), then the stored value and the value in
  *  effect when no row names them (an engine whose plugin is not running — a fact, kept selectable). → [{value, label}] */
 export function engineOptions(r, stored, t) {
-  const out = [{ value: 'default', label: t(i18nKey("Chrome (the browser CLI's build)")) }];
+  const out = [{ value: 'default', label: t(i18nKey("Chrome (the automatic choice)")) }];
   for (const e of Array.isArray(r && r.engines) ? r.engines : []) if (e && ENGINE_ID_RE.test(String(e.id || '')) && !out.some((o) => o.value === 'plugin:' + e.id)) out.push({ value: 'plugin:' + e.id, label: t(i18nKey('{engine} (browser engine plugin)'), { engine: String(e.label || e.id) }) });
   for (const v of [stored, r && r.defaultEngine && r.defaultEngine.value]) {
     const s = String(v == null ? '' : v);
@@ -317,7 +317,7 @@ export function cardBuildLine({ buildChoice = true, choice = null, running = nul
  */
 export function buildRows(listing, { choice = null, lastChromiumMajor = null, local = true, machine = '', t, download = null, engines = null } = {}) {
   const cur = normalize(choice);
-  const rows = [{ key: 'default', kind: 'default', label: t(i18nKey("The browser CLI's default build")), pickable: true, note: t(i18nKey('Whatever the browser CLI picks — usually the newest Chrome it installed.')), current: cur.kind === 'default' }];
+  const rows = [{ key: 'default', kind: 'default', label: t(i18nKey("Automatic — usually the newest Chrome the browser driver installed")), pickable: true, note: t(i18nKey('Usually the newest Chrome the browser driver installed.')), current: cur.kind === 'default' }];
   const l = listing && typeof listing === 'object' ? listing : null;
   // ASKED, NOT YET ANSWERED (lane mirror-green-ui, 2.369.205): `{pending:true}` — the dialog drew its build section
   // before the list came back and said "could not be read" about a list it had not even asked for yet (a paired
@@ -477,7 +477,7 @@ export function verdictLines(v, t) {
     else if (c.kind === 'census' && c.relation === 'older') out.push({ text: t(i18nKey('Older than the census: a few methods it lacks are listed harmlessly')), warn: false });
     else if (c.kind === 'profile') out.push({ text: t(i18nKey("Older than the Chrome that last opened {label} ({wrote}) — can't be picked for it; fine for a new profile"), { label: String(c.label || ''), wrote: c.wrote }), warn: true });
     // verify r1 (H1): newer than every build here = the browser CLI's next default (it launches its newest build)
-    else if (c.kind === 'default') out.push({ text: (c.users || []).length ? t(i18nKey("Becomes the browser CLI's default build (now {from}): {who} and every conversation's browser start with it next time — after that they can't go back to an older Chrome"), { from: String(c.from || '—'), who: c.users.join(', ') }) : t(i18nKey("Becomes the browser CLI's default build (now {from}): every conversation's browser starts with it next time — after that it can't go back to an older Chrome"), { from: String(c.from || '—') }), warn: true });
+    else if (c.kind === 'default') out.push({ text: (c.users || []).length ? t(i18nKey("Becomes the browser CLI\'s default build (now {from}): {who} and every conversation's browser start with it next time — after that they can't go back to an older Chrome"), { from: String(c.from || '—'), who: c.users.join(', ') }) : t(i18nKey("Becomes the browser CLI\'s default build (now {from}): every conversation's browser starts with it next time — after that it can't go back to an older Chrome"), { from: String(c.from || '—') }), warn: true });
   }
   return out;
 }
@@ -485,7 +485,7 @@ export function verdictLines(v, t) {
  *  what happens after. ONE button: Download. */
 export function downloadConfirmWords({ version = '', host = '', bytes = null, root = '', becomesDefault = false } = {}, t) {
   const where = Number(bytes) > 0 ? t(i18nKey('About {size} MB comes from {host} and unpacks to about {unpacked} MB in {root}.'), { size: mb(bytes), host, unpacked: mb(Number(bytes) * 2), root }) : t(i18nKey('It comes from {host} and unpacks into {root}.'), { host, root });
-  return { title: t(i18nKey('Download Chrome {version}?'), { version }), message: where + ' ' + t(i18nKey("It is checked against the server's own length and checksum — Google publishes no separate one. Nothing restarts; it becomes a build you can pick. Chrome for Testing never auto-updates.")) + (becomesDefault ? ' ' + t(i18nKey("It also becomes the browser CLI's default build: profiles on the default and every conversation's browser start with it next time.")) : ''), confirmText: t(i18nKey('Download')), danger: false };
+  return { title: t(i18nKey('Download Chrome {version}?'), { version }), message: where + ' ' + t(i18nKey("It is checked against the server's own length and checksum — Google publishes no separate one. Nothing restarts; it becomes a build you can pick. Chrome for Testing never auto-updates.")) + (becomesDefault ? ' ' + t(i18nKey("It also becomes the browser CLI\'s default build: profiles on the default and every conversation's browser start with it next time.")) : ''), confirmText: t(i18nKey('Download')), danger: false };
 }
 /** A refused download / removal / list read, by its CODE. null = the caller adds the server's sentence. */
 export function downloadRefusalWords(r, t) {

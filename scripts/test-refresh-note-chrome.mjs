@@ -175,7 +175,7 @@ try {
   await press(D.S, D.ev, MENU_ITEM);
   const dlg = await until(() => D.ev(dialogFacts), 5000, 100);
   check(`desk: the confirm — 「${dlg?.count}」`, !!dlg && dlg.title === '刷新所有活着的会话' && dlg.count === '将提醒 2 个活着的会话（下一轮生效，不唤醒、不计费）', dlg);
-  check(`desk: …the stopped one named — 「${dlg?.skip}」; the note pre-filled in Chinese, editable (${dlg?.chars})`, !!dlg && dlg.skip === '打开着的 1 个已停止 / 只读的会话会跳过' && dlg.note === NOTE_ZH && dlg.chars === `${[...NOTE_ZH].length} / 2000` && dlg.btns.map((b) => b.text).join('|') === '取消|确定' && !dlg.btns[1].disabled, dlg);
+  check(`desk: …the stopped one named — 「${dlg?.skip}」; the note pre-filled in Chinese, editable (${dlg?.chars})`, !!dlg && dlg.skip === '打开着的 1 个已停止 / 只读的会话会跳过' && dlg.note === NOTE_ZH && dlg.chars === `${[...NOTE_ZH].length} / 2000` && dlg.btns.map((b) => b.text).join('|') === '取消|提醒活着的会话（下一轮）' /* lane ui-plain-words sidebar-sessions-14: the press says what it does */ && !dlg.btns[1].disabled, dlg);
   const pDialog = await shot(D.S, 'desk-dialog.png', dlg && { x: Math.max(0, dlg.rect.x - 16), y: Math.max(0, dlg.rect.y - 16), width: Math.min(1100, dlg.rect.width + 32), height: Math.min(800, dlg.rect.height + 32) });
   // an emptied note cannot be confirmed (said inline); the words back ⇒ 确定
   await D.ev(`(() => { const t = document.querySelector('#refresh-live-dialog textarea'); t.value = '  '; t.dispatchEvent(new Event('input')); return true; })()`);

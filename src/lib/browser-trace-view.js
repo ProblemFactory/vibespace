@@ -1224,7 +1224,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
       if (v.orphansBase) orph.appendChild(el('div', 'bprof-empty chat-status-dim', t('under {base} — a Chromium profile no record names; adopt the ones worth keeping, set the rest aside', { base: String(v.orphansBase) })));
       for (const o of ol) orph.appendChild(orphanRow(o));
     }
-    const fg = section(t('Deleted profiles (kept aside)'), t('moved beside themselves, never deleted by a sweep — only by your click'));
+    const fg = section(t('Deleted profiles (kept aside)'), t('never deleted by themselves — only «Delete permanently» deletes one'));
     if (!(v.forgotten || []).length) fg.appendChild(el('div', 'bprof-empty chat-status-dim', t('Nothing set aside.')));
     for (const f of v.forgotten || []) fg.appendChild(forgottenRow(f));
     // design 015 (c): MAINTENANCE — the Browser CLI row, the last sweep + Sweep now, the retention text in full

@@ -317,7 +317,12 @@ ok([...censusTypes].every((t) => regTypes.includes(t)), `every createWindow type
   const unrowed = words.filter((w) => w.words && (typeof zhD[w.words] !== 'string' || typeof jaD[w.words] !== 'string'));
   ok(!unrowed.length, `every kind's words have their zh AND ja row (${words.length - bare.length} labels)`, 'missing: ' + unrowed.map((w) => `${w.type} «${w.words}»`).join(', '));
   // no naming fallback onto the raw kind or id: «title || type», «title || id», «parts[1] || type», a literal 'Window'
-  const FALLBACK = [/\b(?:win|w|frame|winInfo)\.title\b[^;\n]{0,12}\|\|\s*(?:[A-Za-z_$][\w$]*\.(?:type|id)\b|'Window')/g, /\bparts\[1\]\s*\|\|\s*[A-Za-z_$][\w$]*\.type\b/g, /String\(\s*(?:w|win)\s*&&\s*(?:w|win)\.id\s*\)/g];
+  // closure F13: an optional chain and a bare `|| id` / `|| type` escape no more; nor a label set straight from a raw `.title`
+  const FALLBACK = [/\b(?:win|w|frame|winInfo)\??\.title\b[^;\n]{0,12}\|\|\s*(?:[A-Za-z_$][\w$]*\??\.(?:type|id)\b|'Window')/g, /\bparts\[1\]\s*\|\|\s*[A-Za-z_$][\w$]*\.type\b/g, /String\(\s*(?:w|win)\s*&&\s*(?:w|win)\.id\s*\)/g,
+    /\.get\(\s*id\s*\)\?\.title\s*\|\|\s*id\b/g, /\??\.title\s*\|\|\s*(?:id|type)\s*\)/g];
+  const READERS = ['taskbar.js', 'window.js', 'mobile-nav.js', 'tab-group.js'];
+  const raw = READERS.flatMap((f) => [...(src[f] || '').matchAll(/(?:label|title)\.textContent\s*=\s*[^;\n]*\b(?:win|w|activeTab\.win)\??\.title\b(?!\.split)/g)].map((m) => `${f}: ${m[0].slice(0, 80)}`));
+  ok(!raw.length, 'no window list / bar sets its label from a raw title (a title-less window is named by its kind\'s words)', raw.join(' | '));
   const leaks = [];
   for (const [file, s] of Object.entries(src)) {
     if (file === 'window-types.js') continue;

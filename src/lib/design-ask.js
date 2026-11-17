@@ -204,7 +204,7 @@ export function mountDesignAsk({ app, win, stage, host = '', dir = '', signal, p
   // ⋯ "Copy hand-off prompt" (the window's ⋯ builder reads `_designMoreRows`)
   if (win) (win._designMoreRows = win._designMoreRows || []).push(() => ({
     label: t('Copy the brief for a design agent'), // lane ui-plain-words design-doc-6: what it copies, for whom
-    action: () => { copyText(handoffPrompt({ host: h, dir: d })); showToast(t('Hand-off prompt copied — paste it to the agent that builds the design')); },
+    action: () => { copyText(handoffPrompt({ host: h, dir: d })); showToast(t('Brief copied — paste it to the agent that builds the design')); },
   }));
   refresh();
   return { refresh, send, fold, state: () => ({ ask, folded, open: !!ask && !folded, body: ask ? body(false) : null }) };

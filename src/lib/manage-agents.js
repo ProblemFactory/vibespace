@@ -1065,7 +1065,7 @@ export function installManageAgents(App, ctx = {}) {
         : `<div class="usage-note" id="oat-active">${t('Active — renews in {n} days.', { n: a.oatDaysLeft })}</div>`)
       : '';
     body.innerHTML = `
-      <ul class="usage-note oat-face"><li>${escHtml(t('Lets this subscription run on remote machines and paired devices, for 1 year.'))}</li><li>${escHtml(t('It still uses this subscription’s limits.'))}</li><li>${escHtml(t('When it expires, make a new one.'))}</li></ul>
+      <ul class="usage-note oat-face"><li>${escHtml(t('Lets this subscription run on remote machines and paired devices, for 1 year.'))}</li><li>${escHtml(t('It still uses this subscription’s limits.'))}</li><li>${escHtml(t('When it expires, sessions on it fail until you make a new one.'))}</li><li>${escHtml(t('Quota refresh (⟳) does not work through it.'))}</li></ul>
       ${status}
       <div class="oat-mint" id="oat-mint"></div>
       ${techFoldHtml([t('A long-lived token (Anthropic’s official `claude setup-token`, the same one the Claude Code GitHub Action uses) lets this subscription run on remote machines and paired devices WITHOUT shipping its interactive login: it lasts 1 year and never rotates, so nothing can get out of sync. This is the intended way to run your own subscription on your own remote/CI machines — safer than shipping the login. It still bills YOUR subscription and is tied to it, so treat it like the account itself; Anthropic recommends an API key instead when a credential is shared broadly across many contexts. Limits: quota refresh (⟳) does not work through it, and when it expires sessions fail until you re-mint.')], { summary: t('About this token'), className: 'oat-about' })}
@@ -2582,7 +2582,7 @@ export function installManageAgents(App, ctx = {}) {
             const warnRow = document.createElement('div');
             warnRow.className = 'ob-cli-ephemeral btn-bar'; // the button-bar rule: «Install persistent copy» stays whole at the rail's 200 px
             // lane ui-plain-words agents-accounts-4: the risk in one line; the system path on hover
-            warnRow.innerHTML = `<span class="usage-warn" title="${escHtml(info.install.binPath || '')}">⚠ ${escHtml(t('This copy may be lost when the container is rebuilt.'))}</span>`;
+            warnRow.innerHTML = `<span class="usage-warn" title="${escHtml(info.install.binPath || '')}">⚠ ${escHtml(t('If this runs in a container, this copy is lost when the container is rebuilt.'))}</span>`;
             const persistBtn = document.createElement('button'); persistBtn.className = 'agent-btn'; persistBtn.textContent = t('Install persistent copy');
             persistBtn.title = b.installCmd + ' — ' + t('installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)');
             persistBtn.onclick = () => run(b.installCmd);
@@ -3541,12 +3541,12 @@ export function installManageAgents(App, ctx = {}) {
       } else {
         // lane ui-plain-words agents-accounts-13: the usual way first, named so; the others after a line, each saying what it adds
         items.push({ label: t('Sign in with Claude (recommended)…'), action: () => { done(); this._openSignInCard(); } }, { separator: true });
-        items.push({ label: t('Add another subscription…'), action: () => { done(); this._addSubscription(); } });
+        items.push({ label: t('Sign in to another subscription in a terminal…'), action: () => { done(); this._addSubscription(); } });
         // Add a subscription straight as a LONG-LIVED TOKEN (B-211a) — no local
         // login needed, usable on any machine. Mints the account record then
         // opens the mint dialog directly (real request: 'why can only add oat
         // to an existing account').
-        items.push({ label: t('Paste a long-lived token…'), action: () => { done(); this._addSubscriptionViaOat(); } });
+        items.push({ label: t('Add with a long-lived token (sign in or paste)…'), action: () => { done(); this._addSubscriptionViaOat(); } });
       }
       items.push(
         { label: t('Add Console account…'), action: () => { done(); this._addConsoleAccount(); } },
@@ -3670,7 +3670,7 @@ export function installManageAgents(App, ctx = {}) {
         // with a host selected the server resolves against live host facts
         // and errors honestly, so the client must not veto on stale data.
         if (isSub && !a.loggedIn && !a.oat && !selectedHost && !keyRow.dataset.hostsub && !linkedHere) {
-          showToast(t('This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.'), { type: 'error' });
+          showToast(t('This subscription isn’t signed in yet — use “Sign in with Claude (recommended)…” to finish the login first.'), { type: 'error' });
           return;
         }
         // §ban-safety: a subscription can't run on a remote host by default.

@@ -187,7 +187,7 @@ function panelRows(data, panel) {
     return [{ key: t('Total'), raw: totals, value: valueOf(totals, first), values: mkeys.map((k) => valueOf(totals, k)) }];
   }
   let rows = (data.groups?.[panel.dim] || []).map((r) => ({
-    key: r.name || r.key, raw: r, value: valueOf(r, first), values: mkeys.map((k) => valueOf(r, k)),
+    key: rowName(panel.dim, r.key, r.name), raw: r, value: valueOf(r, first), values: mkeys.map((k) => valueOf(r, k)), // closure F28: one namer for every renderer
   }));
   const mode = effectiveSort(panel, dim);
   if (!dim.seq) {
@@ -420,6 +420,15 @@ function chartPie(body, rows, mlist) {
 // many tokens did each account burn per day". Data = the server's 2-D pivot
 // (same finalized cell shape as group rows). Single-metric by nature (the
 // first selected metric); bars stack, lines overlay.
+/** closure F28: ONE namer for a row of any renderer (the chart, the split legend, the table): its name; an unnamed conversation is
+ *  «未命名的对话 · 8 位»; an origin by its words; else the key. */
+function rowName(dim, key, name) {
+  if (name) return String(name);
+  if (dim === 'session') return t('Unnamed conversation · {id}', { id: String(key).slice(0, 8) });
+  if (dim === 'origin') return originLabel(key);
+  return String(key);
+}
+
 function chartSplit(body, data, panel, mlist) {
   const m = mlist[0];
   const pv = data.pivots?.[`${panel.dim}:${panel.splitBy}`];
@@ -428,7 +437,7 @@ function chartSplit(body, data, panel, mlist) {
   const numericKeys = panel.dim === 'hour' || panel.dim === 'weekday';
   // lane ui-plain-words usage-3: a row is NAMED like the unsplit chart's (the groups' own names) — never a raw session id
   const dimNames = new Map((data.groups?.[panel.dim] || []).map((g) => [g.key, g.name || (panel.dim === 'origin' ? originLabel(g.key) : '')]));
-  const labelOf = (k) => dimNames.get(k) || (panel.dim === 'session' ? t('Unnamed conversation · {id}', { id: String(k).slice(0, 8) }) : String(k));
+  const labelOf = (k) => dimNames.get(k) || rowName(panel.dim, k, '');
   let rows = pv.map((r) => ({
     key: r.key, label: labelOf(r.key), cells: r.cells,
     total: Object.values(r.cells).reduce((s2, c) => s2 + valueOf(c, m.key), 0),
@@ -442,7 +451,7 @@ function chartSplit(body, data, panel, mlist) {
   for (const r of rows) for (const [k, c] of Object.entries(r.cells)) totalsByS[k] = (totalsByS[k] || 0) + valueOf(c, m.key);
   const sorted = Object.keys(totalsByS).sort((a, b) => totalsByS[b] - totalsByS[a]);
   const kept = sorted.slice(0, 6), rest = sorted.slice(6);
-  const labMap = new Map((data.groups?.[panel.splitBy] || []).map((g) => [g.key, g.name || (panel.splitBy === 'origin' ? originLabel(g.key) : g.key)]));
+  const labMap = new Map((data.groups?.[panel.splitBy] || []).map((g) => [g.key, rowName(panel.splitBy, g.key, g.name)]));
   const horizontal = panel.chart === 'bars' && !dimMeta?.seq;
   const canvas = chartHolder(body, rows.length > 20);
   const colors = themeColors(canvas);

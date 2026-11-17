@@ -266,7 +266,7 @@ function showHiddenTiles(app, chip) {
     icon.appendChild(windowListMark(win, { className: 'window-backend-icon' })); // its harness's mark (lane phone-take-photo)
     icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
     const label = document.createElement('span');
-    label.textContent = (win.isMinimized ? '\u229E ' : '') + win.title;
+    label.textContent = (win.isMinimized ? '\u229E ' : '') + windowWords(win);
     item.append(icon, label);
     item.onclick = () => {
       pop.remove();
@@ -631,7 +631,7 @@ function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
   const textCol = document.createElement('div'); textCol.className = 'taskbar-text';
   const title = document.createElement('div'); title.className = 'taskbar-title';
   const parts = activeTab.win.title.split(' \u2014 ');
-  title.textContent = starPrefix + (parts[0] || activeTab.win.title);
+  title.textContent = starPrefix + windowWords(activeTab.win);
   const subtitle = document.createElement('div'); subtitle.className = 'taskbar-subtitle';
   subtitle.textContent = t('{n} windows grouped', { n: group.tabWins.length });
   textCol.append(title, subtitle);
@@ -791,7 +791,7 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
     icon.style.cssText = 'flex-shrink:0;display:inline-flex;align-items:center';
     icon.appendChild(_cloneTabIcon(win));
     const label = document.createElement('span');
-    label.textContent = win.title;
+    label.textContent = windowWords(win);
     item.append(icon, label);
     paintTile(app, item); // lane cache-warmth-band: the row's own ring (its tab's conversation)
     item.onclick = () => {
@@ -950,7 +950,7 @@ export function showWindowList(app, anchor, opts = {}) {
       icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
       if (win.isMinimized) icon.style.opacity = '0.4';
       const label = document.createElement('span');
-      label.textContent = (win.isMinimized ? '\u229E ' : '') + win.title;
+      label.textContent = (win.isMinimized ? '\u229E ' : '') + windowWords(win);
       item.append(icon, label);
       if (warm) { item.dataset.winId = id; paintListRow(app, item, { ids: tabIds }, label); rows.push(item); } // a host row: its tabs' worst
       item.onclick = () => {

@@ -839,6 +839,12 @@ console.log('⑧ round 5 (final) — THE SHELL SAYS WHERE; THE SPAWN IS ALWAYS A
     /_showAgentsFor\(hostId = null, opts = \{\}\) \{[\s\S]{0,200}setItem\('vibespace\.agentsTab', hostId \? 'machines' : 'accounts'\)[\s\S]{0,400}open\.add\(String\(hostId\)\)[\s\S]{0,200}this\._agentsFocusHost = String\(hostId\);/.test(MA)
     && /if \(this\._agentsFocusHost === h\.id\) \{ this\._agentsFocusHost = null; det\.open = true; setTimeout\(\(\) => \{ try \{ det\.scrollIntoView\(\{ block: 'nearest' \}\); \} catch \{ \} \}, 0\); \}/.test(MA)
     && /const shown = [^\n]*this\.sidebar\?\._activeTab === 'agents';\n\s*const r = this\._showAgentsDialog\(opts\);\n\s*if \(shown\) \{ try \{ this\._agentsRefreshHook\?\.\(\); \} catch \{ \} \}/.test(MA));
+  // lane ui-plain-words closure (A1): what is IN VIEW (not the fold) — the face follows the state, and the cause + recipe line stays
+  // on the face when it names a variable to set or a path to fix (mutant: delete the face line, or fold the what line ⇒ red)
+  const inView = (r) => { dom(r); return globalThis.__shell.body.children.filter((c) => !/\btech-fold\b/.test(c.className)).map((c) => `${c.className}=${c.textContent}`).join(' | '); };
+  const nnView = inView(nn), dgView = inView(dg);
+  ok(`A1: a wrapper's face says it is WRAPPED, and the recipe line is in view («${nnView.slice(0, 200)}»)`, /cli-missing-face=Your shell wraps vsreal\d+ in an alias or a function VibeSpace does not run/.test(nnView) && /cli-missing-what=.*Set CLAUDE_CMD|cli-missing-what=.*set [A-Z_]+/i.test(nnView) && !/could not find/.test(nnView), nnView);
+  ok(`A1: a dangling alias's face says the shell names something that cannot run, and its cause is in view («${dgView.slice(0, 200)}»)`, /cli-missing-face=Your shell names a vsreal\d+ that cannot run/.test(dgView) && /cli-missing-what=.*which is missing\./.test(dgView) && !/could not find/.test(dgView), dgView);
   delete globalThis.document;
 }
 {

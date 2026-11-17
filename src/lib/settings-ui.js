@@ -967,8 +967,8 @@ class SettingsUI {
       if (!r || !r.i18n) { text.textContent = r && r.words ? r.words : t('checking…'); return; }
       text.textContent = t(r.i18n.key, r.i18n.params || {});
       if (line._fold) { line._fold.remove(); line._fold = null; }
-      line._fold = techFold((r.i18n.fold || []).map((f) => t(f.key, f.params || {})), { mono: true, className: 'settings-https-fold' }); // lane ui-plain-words settings-5
-      if (line._fold) line.after(line._fold);
+      line._fold = techFold((r.i18n.fold || []).map((f) => t(f.key, f.params || {})), { mono: true, className: 'settings-https-fold', summary: t('Use your own certificate') }); // lane ui-plain-words settings-5; closure F19: the summary names the option
+      if (line._fold) line.appendChild(line._fold); // inside the fact line (a full-width row of it), never a column of the settings row
       line.classList.toggle('is-live', !!r.serving);
       if (copy) { copy.remove(); copy = null; }
       if (r.serving && r.url) {

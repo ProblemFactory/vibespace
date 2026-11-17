@@ -280,7 +280,7 @@ const h0 = await until(`(() => { const v = window.__vt; return v.held.length ===
 check('预览 ⇒ the code; the next step\'s re-ask is on the wire (held in the page)', h0 === 24 && (await vt()).code, await vt());
 await click(`${D} .vt-preview-b`);
 const j1 = await vt();
-check('预览 while that re-ask is on the wire ⇒ «Previewing…» on the button, and it JOINS the ask (no second one)', j1.prevB === 'Previewing…' && j1.previews === 24 && j1.held === 1, j1);
+check('检查验证码 while that re-ask is on the wire ⇒ «Checking the code…» on the button, and it JOINS the ask (no second one)', j1.prevB === 'Checking the code…' /* lane ui-plain-words closure F40: the button's own words */ && j1.previews === 24 && j1.held === 1, j1);
 await click(`${D} .vt-save`);
 const q1 = await vt();
 check('保存 while it is on the wire ⇒ «Saving…» on the button — it waits (no save sent yet), the dialog open: never a silent nothing', q1.saveB === 'Saving…' && q1.saves === 0 && q1.open, q1);

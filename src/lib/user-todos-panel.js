@@ -44,6 +44,10 @@ import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: 
 import { replyPictures, backendOfKey, releaseBoxesIn, sweepBoxes } from './reply-pictures.js'; // B-51dd: a reply box takes a picture (button · paste · drop) through THE picture door
 import { applySecretBox, submitSecretBox } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its paste box's presses + state
 import { onVaultFacts, showUnlock, showSetup } from './vault-unlock.js'; // … the box says a locked vault by name (live), its 解锁… is THE unlock dialog
+import { TECH_FOLD_SELECTOR } from './plain-words.js';
+/** A press on a fold opens THAT fold and nothing else (closure B1): the detail expander, and every «技术细节» fold the door draws —
+ *  never the row's toggle, its jump or its close. */
+const FOLD_PRESS = '.ut-detail-exp, ' + TECH_FOLD_SELECTOR;
 
 const URG_RANK = { low: 0, normal: 1, high: 2, urgent: 3 };
 
@@ -768,7 +772,7 @@ export function installUserTodos(app) {
   function wireMiniRows(root, { close = () => {} } = {}) {
     root.addEventListener('click', (e) => {
       if (fyPress(e, close)) return; // lane foryou-attachments: a chip / a link in the words
-      if (e.target.closest('.ut-detail-exp')) return;
+      if (e.target.closest(FOLD_PRESS)) return;
       const item = e.target.closest('.ut-item');
       if (item && root.contains(item)) rowClick(e, item, { mini: true });
     });
@@ -1019,7 +1023,7 @@ export function installUserTodos(app) {
     if (sa) { markAllSeen(sa); return; }
     // A click on the detail expander is a toggle, not a jump — without this
     // guard opening the detail would bubble into the row's jump-and-close.
-    if (e.target.closest('.ut-detail-exp')) return;
+    if (e.target.closest(FOLD_PRESS)) return;
     const item = e.target.closest('.ut-item');
     if (!item) return;
     rowClick(e, item, { expand: true });
@@ -1283,7 +1287,7 @@ export function installUserTodos(app) {
       if (ra) { readAllNotices(ra); return; }
       const sa = e.target.closest('.ut-seen-all');
       if (sa) { markAllSeen(sa); return; }
-      if (e.target.closest('.ut-detail-exp')) return;
+      if (e.target.closest(FOLD_PRESS)) return;
       const item = e.target.closest('.ut-item');
       if (item) rowClick(e, item, { expand: isTouchDevice() }); // the row's verbs; its body opens the conversation (jump ⇒ the page steps aside) — on a touch screen the sheet's accordion (lane foryou-honest)
     });

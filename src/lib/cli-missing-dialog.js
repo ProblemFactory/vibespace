@@ -106,17 +106,40 @@ export function cliMissingWords(msg) {
   return { cli, asked, what, hint };
 }
 
+/** The refusal's STATE (closure A1): configured (a set path that is not a program) · broken (the shell named something that is
+ *  missing or not executable) · wrapped (an alias / function VibeSpace does not run) · unanswered (the shell could not be asked) ·
+ *  none (nothing found anywhere). */
+export function cliMissingState(msg) {
+  if (msg.answer === 'configured') return 'configured';
+  if (msg.notExecutable) return 'broken';
+  if (msg.wrapper) return 'wrapped';
+  if (msg.answer === 'unanswered') return 'unanswered';
+  return 'none';
+}
+/** The face sentence by state — «not found» is said only when nothing was found. */
+export function cliMissingFace(st, cli) {
+  if (st === 'configured') return t('The path set for {cli} is not a program it can run, so nothing was started.', { cli });
+  if (st === 'broken') return t('Your shell names a {cli} that cannot run, so nothing was started.', { cli });
+  if (st === 'wrapped') return t('Your shell wraps {cli} in an alias or a function VibeSpace does not run, so nothing was started.', { cli });
+  if (st === 'unanswered') return t('Your shell could not be asked where {cli} is, and the hub has none, so nothing was started.', { cli });
+  return t('VibeSpace could not find {cli} on this computer, so nothing was started.', { cli });
+}
+
 /** THE DIALOG for a refused create (`app` = the App: its Manage agents door). Never a toast alone; no native dialog. */
 export function openCliMissingDialog(app, msg) {
   const w = cliMissingWords(msg || {});
   const { dialog, body, close } = createModalShell({ id: 'cli-missing-dialog', title: t('{cli} was not found', { cli: w.cli }), bodyClass: 'cli-missing-body', minWidth: 'min(480px, 92vw)', escapeToClose: true, kind: 'decision' }); // decision: a refused create — the person picks a door (Manage agents / How to install)
   const line = (cls, text) => { const el = document.createElement('div'); el.className = cls; el.textContent = text; body.appendChild(el); return el; };
-  // lane ui-plain-words first-run-16: ONE plain sentence first; who was asked and what each found (shells, paths, the PATH's
-  // folders) fold under it — the same lines, their classes kept; the hint (what to do) stays in view
-  line('cli-missing-face', t('VibeSpace could not find {cli} on this computer, so nothing was started.', { cli: w.cli }));
-  const fold = techFold([w.asked, w.what], { className: 'cli-missing-fold' });
+  // lane ui-plain-words first-run-16 (closure, the readers' A1): the face sentence follows the STATE — «not found» only when nothing
+  // was found; a line that names a path to fix or a variable to set (the cause + the recipe) stays IN VIEW; only who was asked and
+  // the folders searched fold
+  const st = cliMissingState(msg || {});
+  line('cli-missing-face', cliMissingFace(st, w.cli));
+  const whatInView = st === 'configured' || st === 'broken' || st === 'wrapped';
+  if (whatInView) line('cli-missing-what', w.what);
+  const fold = techFold(whatInView ? [w.asked] : [w.asked, w.what], { className: 'cli-missing-fold' });
   const [askedEl, whatEl] = fold.querySelectorAll('.tech-fold-line');
-  askedEl.classList.add('cli-missing-asked'); whatEl.classList.add('cli-missing-what');
+  askedEl.classList.add('cli-missing-asked'); if (whatEl) whatEl.classList.add('cli-missing-what');
   body.appendChild(fold);
   if (w.hint) line('cli-missing-hint', w.hint);
   const footer = document.createElement('div'); footer.className = 'dialog-footer';

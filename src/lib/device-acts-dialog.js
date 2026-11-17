@@ -23,42 +23,57 @@ export function whoText(by, nameOf = () => '') {
   if (!k) return t('nobody named');
   const id = by.slice(k.length + 1);
   if (k === 'human') return id === 'local' ? t('You') : id || t('a person');
-  if (k === 'agent') { const n = nameOrGone('conversation', id, nameOf(id)); return n === nameOrGone('conversation', id, '') ? n : t('conversation “{name}”', { name: n }); }
+  if (k === 'agent') { const n = nameOrGone('conversation', id, nameOf(id)); return n === nameOrGone('conversation', id, '') ? n : t('conversation “{name}”', { name: n }); } // id = '<backend>:<sid>' | 'webui:<id>' (sessionNameOf parses it)
   return k === 'job' ? t('a job') : t('VibeSpace, by itself');
 }
-/** WHAT was done, in a person's words: one word per op FAMILY (scripts/test-plain-words.mjs: every op of device-acts.js's
- *  TABLE has one); the raw op stays in the row's opened line. */
+/** WHAT was done, in a person's words (closure C2): ONE exact word per op / op:action of device-acts.js's TABLE (and link-token) —
+ *  no prefix fallback, and an act never reads as a read word (scripts/test-plain-words.mjs: every key has its row; an act or code
+ *  row never names a read word); the raw op stays in the row's opened line. */
 const ACT_WORDS = {
-  'fs-op:stat': 'Read files', 'fs-op:list': 'Read files', 'fs-op:read-range': 'Read files', 'fs-op:home': 'Read files', 'fs-op:du': 'Read files',
-  'design-fs:read': 'Read files', 'design-fs:meta': 'Read files', 'design-fs:tokens': 'Read files',
-  'fs-op:write': 'Write a file', 'fs-op:write-stream': 'Write a file', 'design-fs:write-user': 'Write a file',
-  'fs-op:rm': 'Delete a file', 'fs-op:rename': 'Move a file', 'fs-op:move': 'Move a file', 'fs-op:copy': 'Copy a file', 'fs-op:mkdir': 'Make a folder',
-  'run-cmd': 'Run a command', 'run-stream': 'Run a command',
   'sysinfo': 'Read system information', 'display-facts': 'Read system information', 'stream-facts': 'Read system information', 'remoteapp-facts': 'Read system information',
-  'proc-list': 'Read system information', 'dial-status': 'Read system information', 'probe-cli': 'Read system information', 'probe-creds': 'Read system information',
-  'ping-info': 'Read system information', 'ok': 'Read system information', 'stream-mic:facts': 'Read system information',
-  'desktop-apps-list': 'List its apps',
-  'discovery-snapshot': 'Read its conversations', 'discovery-claims': 'Read its conversations', 'discovery-watch': 'Read its conversations', 'session-events-watch': 'Read its conversations', 'transcript-op': 'Read its conversations',
-  'usage-scan': 'Read usage', 'usage-events-watch': 'Read usage', 'usage-events-ack': 'Read usage', 'pool-orders-log-ack': 'Read usage', 'quota-refresh': 'Read usage',
+  'desktop-apps-list': 'List its apps', 'discovery-snapshot': 'Read its conversations', 'discovery-claims': 'Read its conversations', 'discovery-watch': 'Read its conversations',
+  'session-events-watch': 'Read its conversations', 'usage-scan': 'Read usage', 'usage-events-watch': 'Read usage', 'usage-events-ack': 'Read usage', 'pool-orders-log-ack': 'Read usage',
   'stream-offer': 'Stream its screen', 'stream-answer': 'Stream its screen', 'stream-stop': 'Stream its screen', 'stream-stats': 'Stream its screen', 'stream-windows': 'Stream its screen',
-  'stream-audio': 'Stream its screen', 'window-track': 'Stream its screen', 'window-untrack': 'Stream its screen',
-  'tcp-connect': 'Connect to a port', 'tcp-connect:loopback': 'Connect to a port',
-  'tcp-listen': 'Forward a port', 'tcp-unlisten': 'Forward a port', 'serve-socks': 'Forward a port', 'unserve-socks': 'Forward a port',
-  'serve-folder': 'Share a folder', 'unserve-folder': 'Share a folder',
-  'hello': 'Run a terminal session', 'open-session': 'Run a terminal session', 'resize-session': 'Run a terminal session', 'kill-session': 'Run a terminal session',
-  'open-pipe-session': 'Run a terminal session', 'attach-pipe-session': 'Run a terminal session', 'kill-pipe-session': 'Run a terminal session', 'opencode-serve': 'Run a terminal session',
-  'desktop-serve': 'Remote Desktop', 'browser-serve': 'Run a browser', 'stream-mic:default': 'Change the default microphone',
-  'place-secret': 'Place a secret', 'input-events': 'Type and click', 'desktop-input': 'Type and click', 'desktop-grab': 'Type and click',
-  'peer-post': 'Send to another VibeSpace', 'pool-orders': 'Manage accounts', 'settings-open': 'Open settings', 'window-pin': 'Pin a window',
-  'upgrade': 'Update VibeSpace on it',
+  'stream-audio': 'Stream its screen', 'window-track': 'Stream its screen', 'window-untrack': 'Stream its screen', 'proc-list': 'Read system information',
+  'dial-status': 'Read system information', 'probe-cli': 'Read system information', 'probe-creds': 'Read system information', 'ping-info': 'Read system information',
+  'ok': 'Read system information', 'transcript-op': 'Read its conversations', 'quota-refresh': 'Read usage', 'tcp-connect:loopback': 'Connect to a port', 'fs-op:stat': 'Read files',
+  'fs-op:list': 'Read files', 'fs-op:read-range': 'Read files', 'fs-op:home': 'Read files', 'fs-op:du': 'Read files', 'design-fs:read': 'Read files', 'design-fs:meta': 'Read files',
+  'design-fs:tokens': 'Read files', 'desktop-serve:facts': 'Read system information', 'desktop-serve:status': 'Read system information', 'desktop-serve:list': 'Read system information',
+  'desktop-serve:windows': 'Read system information', 'desktop-serve:app-status': 'Read system information', 'desktop-serve:app-plan': 'Read system information',
+  'desktop-serve:app-refresh': 'Read system information', 'browser-serve:version': 'Read system information', 'browser-serve:status': 'Read system information',
+  'browser-serve:cdp-url': 'Read system information', 'browser-serve:builds': 'Read system information', 'stream-mic:facts': 'Read system information', 'hello': 'Run a terminal session',
+  'open-session': 'Run a terminal session', 'resize-session': 'Run a terminal session', 'kill-session': 'Run a terminal session', 'open-pipe-session': 'Run a terminal session',
+  'attach-pipe-session': 'Run a terminal session', 'kill-pipe-session': 'Run a terminal session', 'opencode-serve': 'Run a terminal session', 'tcp-listen': 'Forward a port',
+  'tcp-unlisten': 'Forward a port', 'unserve-folder': 'Share a folder', 'unserve-socks': 'Forward a port', 'desktop-serve:launch': 'Start its desktop', 'desktop-serve:relaunch': 'Start its desktop',
+  'desktop-serve:stop': 'Stop its desktop', 'desktop-serve:close-asked': 'Stop its desktop', 'desktop-serve:fit': 'Use its desktop', 'desktop-serve:keep-alive': 'Use its desktop',
+  'desktop-serve:pin': 'Use its desktop', 'desktop-serve:app-unstage': 'Use its desktop', 'desktop-serve:app-forget': 'Use its desktop', 'desktop-serve:app-adopt-drift': 'Use its desktop',
+  'browser-serve:stop': 'Stop a browser', 'browser-serve:end-daemon': 'Stop a browser', 'run-cmd': 'Run a command', 'run-stream': 'Run a command', 'place-secret': 'Place a secret',
+  'input-events': 'Type and click', 'tcp-connect': 'Connect to a port', 'serve-socks': 'Forward a port', 'serve-folder': 'Share a folder', 'fs-op:write': 'Write a file',
+  'fs-op:rm': 'Delete a file', 'fs-op:rename': 'Move a file', 'fs-op:mkdir': 'Make a folder', 'fs-op:copy': 'Copy a file', 'fs-op:move': 'Move a file', 'fs-op:write-stream': 'Write a file',
+  'design-fs:write-user': 'Write a file', 'desktop-serve:app-install': 'Install an app', 'desktop-serve:app-remove': 'Remove an app', 'desktop-serve:app-fetch': 'Download an app',
+  'browser-serve:start': 'Start a browser', 'browser-serve:remove': 'Remove a browser', 'peer-post': 'Send to another VibeSpace', 'pool-orders': 'Manage accounts',
+  'settings-open': 'Open settings', 'window-pin': 'Pin a window', 'desktop-grab': 'Take a screenshot', 'desktop-input': 'Type and click', 'stream-mic:default': 'Change the default microphone',
+  'upgrade': 'Update VibeSpace on it', 'link-token': 'Give a conversation access to it',
 };
 export function actWords(op) {
-  const o = String(op || ''), w = ACT_WORDS[o] || ACT_WORDS[o.split(':')[0]];
-  return w ? t(w) : t('an act');
+  const w = Object.prototype.hasOwnProperty.call(ACT_WORDS, String(op || '')) ? ACT_WORDS[String(op)] : null;
+  return w ? t(w) : t('an act'); // an op this table does not know is «an act» — never a family's word
 }
 /** The sidebar's name for a conversation id (a rename first) — '' when it is not listed. */
+/** closure C1: the hub's agent subjects are `agent:<backend>:<sid>` and `agent:webui:<id>` (exit-proxy keyOf / window-reach
+ *  sessionKeyOf) — the prefix is parsed, then the sidebar is asked by the matching id; «gone» only when that misses. */
+export function agentSubjectOf(id) {
+  const s = String(id || ''), i = s.indexOf(':');
+  if (i < 0) return { kind: 'any', id: s };
+  return s.slice(0, i) === 'webui' ? { kind: 'webui', id: s.slice(i + 1) } : { kind: 'backend', id: s.slice(i + 1) };
+}
+export const sessionNameIn = (sessions, getCustomName) => (id) => {
+  const a = agentSubjectOf(id);
+  const s0 = (sessions || []).find((x) => (a.kind !== 'backend' && x.webuiId === a.id) || (a.kind !== 'webui' && (x.claudeSessionId === a.id || x.backendSessionId === a.id)));
+  return s0 ? ((getCustomName && getCustomName(s0)) || s0.webuiName || s0.name || '') : '';
+};
 const sessionNameOf = (app) => (id) => {
-  try { const s0 = (app?.sidebar?._allSessions || []).find((x) => x.webuiId === id || x.claudeSessionId === id || x.backendSessionId === id); return s0 ? ((app.sidebar.getCustomName && app.sidebar.getCustomName(s0)) || s0.webuiName || s0.name || '') : ''; } catch { return ''; }
+  try { return sessionNameIn(app?.sidebar?._allSessions || [], app?.sidebar?.getCustomName ? (x) => app.sidebar.getCustomName(x) : null)(id); } catch { return ''; }
 };
 /** The verdict of an act in the device's words. */
 export function actVerdictText(r) {

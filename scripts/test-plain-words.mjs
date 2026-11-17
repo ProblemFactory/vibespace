@@ -38,7 +38,7 @@ const SHAPES = {
   env: /\b[A-Z][A-Z0-9]*_[A-Z0-9_]{2,}\b/,
   cli: new RegExp(`\\b(?:claude|codex|opencode|agy)\\s+(?:-p\\b|setup-token\\b|serve\\b|auth\\s+\\w|agents\\b|mcp\\s+\\w)|\\b(?:${binNames.map((n) => n.replace(/-/g, '\\-')).join('|')})\\s+[a-z][a-z-]*\\b`),
   flag: /(?:^|[\s(«“"'`])--[a-z][a-z0-9-]{2,}/,
-  path: /(?:^|[\s(«“"'`])(?:~\/|data\/[\w.-]+\/|docs\/[\w.-]+|\/(?:usr|opt|var|etc|home)\/)|\b[\w-]+\.json\b/,
+  path: /(?:^|[\s(«“"'`])(?:~\/|data\/[\w.-]+\/|docs\/[\w.-]+|\/(?:usr|opt|var|etc|home|srv|tmp|root|mnt)\/)|\b[\w-]+\.json\b/,
   id: /vault:\/\/|\bbk-[0-9a-f]{6,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/,
 };
 let settingKeys = [];
@@ -93,7 +93,9 @@ function srcFiles() {
   return out;
 }
 const zh = new Map(dictEntries(read('src/lib/i18n-zh.js')).map((e) => [e.key, e.value]));
-const DOOR_RE = /t\('Technical details'\)|dataset\.fold\s*=\s*'tech'|data-fold="tech"/g;
+// closure E / F7: EVERY hand-built fold counts — a «Technical details» summary, the door's data-fold, and any <details> element
+const DOOR_RE = /t\('Technical details'\)|dataset\.fold\s*=\s*'tech'|data-fold="tech"|createElement\('details'\)|<details\b/g;
+const MAX_DEBT_ROWS = 122; // closure E: the printed debt's row count can only fall — a row added to the JSON by hand is red here (121 + ui-language 251d14387's add-machine key line: a path a person must follow)
 
 async function measure() {
   const S = await import(path.join(REPO, 'src/lib/settings-schema.js'));
@@ -111,10 +113,11 @@ async function measure() {
 
 const M = await measure();
 if (process.argv.includes('--print-baseline')) {
-  const base = { about: 'scripts/test-plain-words.mjs — the PRINTED, SHRINK-ONLY debt of the face / fold law (lane ui-plain-words). Remove a row when it is cured; never add one.', shapes: {}, wall: M.wall, doors: M.doors };
+  const base = { about: 'scripts/test-plain-words.mjs — the PRINTED, SHRINK-ONLY debt of the face / fold law (lane ui-plain-words). Remove a row when it is cured; never add one.', shapes: {}, sites: {}, wall: M.wall, doors: M.doors };
   for (const [sh, ks] of Object.entries(M.hits)) {
     const debt = ks.filter((k) => { const occ = occurrences(M.files, k); return !(occ.length && occ.every((o) => o.fold)); }).sort();
     if (debt.length) base.shapes[sh] = debt;
+    for (const k of debt) base.sites[k] = occurrences(M.files, k).filter((o) => !o.fold).length; // closure F25: a debt sentence's unfolded sites
   }
   console.log(JSON.stringify(base, null, 1));
   process.exit(0);
@@ -137,6 +140,10 @@ console.log('① the shapes: every visible key that shows an internal name is fo
   console.log(`    (the debt printed: ${Object.entries(B.shapes || {}).map(([s, l]) => `${s} ${l.length}`).join(' · ')}; ${debtN} rows)`);
   ok(fresh.length === 0, 'no NEW visible key shows an env variable, a CLI command, a --flag, a path, a setting key or an id outside a fold', fresh.slice(0, 12));
   ok(shrank.length === 0, 'every baseline row still holds (a row that was cured or folded is removed from scripts/fixtures/plain-words-baseline.json — the debt only shrinks)', shrank.slice(0, 12));
+  // closure F25 / E: a debt sentence reused in ONE more place is red (its unfolded sites only fall), and the row count only falls
+  const grew = Object.entries(B.sites || {}).filter(([k, n]) => occurrences(M.files, k).filter((o) => !o.fold).length > n).map(([k]) => k.slice(0, 80));
+  ok(B.sites && !grew.length, 'no debt sentence gained a new unfolded site (debt is keyed by its places, not only its words)', grew);
+  ok(debtN <= MAX_DEBT_ROWS, `the printed debt has at most ${MAX_DEBT_ROWS} rows (${debtN})`);
 }
 
 console.log('② the wall: a settings description past ' + WALL_CHARS + ' characters has a `details:` fold, or is a printed debt row');
@@ -181,7 +188,14 @@ console.log('④ the carriers: a settings row\'s `details:` and a For-you item\'
     try { m.add('s1', { origin: 'channels', text: 'y', i18n: { text: { key: 'B' }, fold: 'not lines' } }); ok(false, 'CONTROL: a fold that is not an array of lines is refused'); } catch (e) { ok(/i18n\.fold must be an array/.test(e.message), 'CONTROL: a fold that is not an array of lines is refused by name', e.message); }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   const ca = read('src/server/channels-access.js');
-  ok(/fold: \[\n\s*\.\.\.\(own \|\| waiting\.length \?/.test(ca) && /Deny changes nothing/.test(ca.slice(ca.indexOf('fold: ['), ca.indexOf('fold: [') + 900)), 'chat-cards-5: the wake ask\'s mechanics ride `i18n.fold` (the zero count said only when non-zero)');
+  // closure A3 / F5: Deny's effect and the expiry are on the FACE (detail), beside Approve's; only the counts fold, and only when non-zero
+  const det = ca.slice(ca.indexOf("{agent} asks to be woken by {where}"), ca.indexOf('source: INBOX_SOURCE', ca.indexOf("{agent} asks to be woken by {where}")));
+  const detailPart = det.slice(det.indexOf('detail: ['), det.indexOf('// lane ui-plain-words (chat-cards-5): only the counts fold'));
+  ok(/Deny changes nothing/.test(detailPart) && /Unanswered, it expires in \{n\} days/.test(detailPart) && /\.\.\.\(own \|\| waiting\.length \? \{ fold: \[\{ key: i18nKey\('It already has \{n\} notifications/.test(det) && !/fold: \[[^\]]*Deny changes nothing/.test(det),
+    'chat-cards-5: what Deny does and when the ask ends sit on the card\'s face; only the counts ride `i18n.fold`, said only when non-zero');
+  // closure B3: the store's secret belt reaches the fold's params (an agent's or a job's item)
+  const ut = read('src/user-todos.js');
+  ok(/\.\.\.\(x\.fold \? \{ fold: x\.fold\.map\(line\) \} : \{\}\)/.test(ut.slice(ut.indexOf('function maskI18nParams'), ut.indexOf('function maskI18nParams') + 600)), 'the secret belt (maskI18nParams) masks the fold\'s params as it masks the detail\'s');
 }
 
 console.log('⑤ the base link colour: a link no surface styles reads in the theme\'s accent, never the browser\'s blue');
@@ -204,44 +218,55 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   ok((planted2.match(DOOR_RE) || []).length === 2, 'CONTROL: a hand-built fold (dataset.fold + the summary) is counted by the door leg');
 }
 
-// ── pick 2 (M2a): names, not ids — what the machine's activity says ──
-// every op of src/device-acts.js's TABLE (and its family) has a WORD in src/lib/device-acts-dialog.js ACT_WORDS, each word with
-// its zh AND ja row (the walk's «tcp-connect» / «fs-op:read» / «sysinfo» drawn raw); who asked is a name, never «某人 · local»
+// ── pick 2 (M2a) + closure C1 / C2 / E: names, not ids — what the machine's activity says ──
+// every op of src/device-acts.js's TABLE (and link-token) has its EXACT word in src/lib/device-acts-dialog.js ACT_WORDS (no prefix
+// row, no family fallback), each with zh AND ja; an act / code op never reads as a read word; who asked is a name — over the
+// hub's REAL subject shapes (agent:<backend>:<sid>, agent:webui:<id>) — and «gone» only when the sidebar has no such conversation
 {
   console.log('names, not ids (the device activity, nameOrGone())');
   const DA = require(path.join(REPO, 'src/device-acts.js'));
   const dlg = fs.readFileSync(path.join(REPO, 'src/lib/device-acts-dialog.js'), 'utf8');
   const tbl = dlg.slice(dlg.indexOf('const ACT_WORDS = {'), dlg.indexOf('};', dlg.indexOf('const ACT_WORDS = {')) + 2);
   const words = Object.fromEntries([...tbl.matchAll(/'([a-z][\w:-]*)':\s*'([^']+)'/g)].map((m) => [m[1], m[2]]));
-  const unworded = Object.keys(DA.TABLE).filter((op) => !words[op] && !words[op.split(':')[0]]);
-  ok(Object.keys(words).length >= 40 && !unworded.length, `every device op has a word (${Object.keys(DA.TABLE).length} ops in the TABLE, ${new Set(Object.values(words)).size} words)`, unworded);
+  const keys = [...Object.keys(DA.TABLE), 'link-token'];
+  const unworded = keys.filter((op) => !words[op]);
+  ok(!unworded.length, `every device op has its EXACT word (${keys.length} ops, ${new Set(Object.values(words)).size} words) — no prefix row stands in`, unworded);
+  ok(!/ACT_WORDS\[o\.split\(':'\)\[0\]\]/.test(dlg) && /hasOwnProperty\.call\(ACT_WORDS, String\(op \|\| ''\)\)/.test(dlg), 'actWords looks an op up EXACTLY (no family fallback)');
+  const READ = new Set(['Read files', 'Read system information', 'List its apps', 'Read its conversations', 'Read usage', 'Stream its screen']);
+  const soft = Object.entries(DA.TABLE).filter(([op, layer]) => (layer === 'act' || layer === 'code') && READ.has(words[op]));
+  ok(!soft.length, 'an act or a code op never reads as a read word (the owner\'s audit does not soften)', soft);
   const Z = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, J = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   const unrowed = [...new Set(Object.values(words))].filter((w) => typeof Z[w] !== 'string' || typeof J[w] !== 'string');
   ok(!unrowed.length, 'every op word has its zh AND ja row', unrowed);
-  ok(/el\('span', 'device-acts-op', actWords\(r\.op\)\)/.test(dlg) && /whoText\(r\.by, nameOf\)/.test(dlg) && !/\$\{name\} · \$\{id\}/.test(dlg),
-    'the row draws the op\'s word and who asked by name (the raw op and subject stay in the opened line)');
-  ok(/\$\{r\.by \|\| t\('nobody named'\)\} · \$\{r\.op \|\| ''\}/.test(dlg), 'the opened line keeps the raw subject and op (an engineer reads them there)');
-  // RED control: the old row — `${kind word} · ${raw id}` and the raw op
-  const oldWho = (by) => { const k = by.split(':')[0]; return `${k === 'human' ? 'a person' : 'a conversation'} · ${by.slice(k.length + 1)}`; };
-  ok(oldWho('human:local') === 'a person · local' && oldWho('agent:walk-sess-1').endsWith('walk-sess-1'), 'RED control: the old who-asked text prints the raw subject id');
-  // nameOrGone(): a name, else the kind's words — never the id (the source: plain-words.js)
+  // RED controls (the readers' mutants): a new act under a family's name, and an act turned into a read word
+  const T2 = { ...DA.TABLE, 'desktop-serve:wipe-disk': 'act' }, W2 = { ...words, 'fs-op:rm': 'Read files' };
+  ok(Object.keys(T2).some((op) => !words[op]) && Object.entries(DA.TABLE).some(([op, l]) => l === 'act' && READ.has(W2[op])), 'RED control: a new act op with no row, and fs-op:rm worded as a read, are both seen');
+  // who asked, played over the real subject shapes (the functions are the dialog's own, sliced out of its source)
+  const slice = (src, head) => { const a = src.indexOf(head); return src.slice(a, src.indexOf('\n};\n', a) > 0 && head.startsWith('export const') ? src.indexOf('\n};\n', a) + 3 : src.indexOf('\n}\n', a) + 2); };
+  const code = [slice(dlg, 'export function agentSubjectOf('), slice(dlg, 'export const sessionNameIn =')].join('\n').replace(/export /g, '');
+  let sessionNameIn = null; try { ({ sessionNameIn } = new Function(code + '; return { agentSubjectOf, sessionNameIn };')()); } catch { sessionNameIn = null; } // a tree without them is RED here, never a crash
+  const side = [{ webuiId: 'w1', claudeSessionId: 'c-uuid-1', webuiName: 'Fix the build' }];
+  const nameOf = sessionNameIn ? sessionNameIn(side, null) : () => '';
+  ok(!!sessionNameIn && nameOf('claude:c-uuid-1') === 'Fix the build' && nameOf('webui:w1') === 'Fix the build' && nameOf('c-uuid-1') === 'Fix the build' && nameOf('claude:gone-9') === '' && nameOf('webui:c-uuid-1') === '',
+    'who asked: agent:claude:<sid> and agent:webui:<id> are named; a session not in the sidebar is «gone»; a webui key never matches a backend id', [nameOf('claude:c-uuid-1'), nameOf('webui:w1')]);
+  // nameOrGone: the name, else the kind's words — NEVER the id (sliced out of plain-words.js, t = the identity)
   const pw = fs.readFileSync(path.join(REPO, 'src/lib/plain-words.js'), 'utf8');
-  ok(/export function nameOrGone\(kind, id, name\)/.test(pw) && /if \(n && n !== String\(id \?\? ''\)\.trim\(\)\) return n;/.test(pw) && /return \(GONE\[kind\] \|\| GONE\.conversation\)\(\);/.test(pw),
-    'nameOrGone(kind, id, name): the name, else generic words — a name equal to the id is no name, and the id is never returned');
-  const users = ['src/lib/jobs-panel.js', 'src/lib/path-field.js', 'src/lib/device-acts-dialog.js'].filter((f) => /\bnameOrGone\(/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
-  ok(users.length === 3, 'nameOrGone() is read by the jobs panel (a gone conversation / group), the path field (a machine) and the activity rows', users);
+  let ng = null; try { ng = new Function('t', pw.slice(pw.indexOf('const GONE = {'), pw.indexOf('\n}\n', pw.indexOf('export function nameOrGone(')) + 2).replace(/export /g, '') + '; return nameOrGone;')((x) => x); } catch { ng = null; }
+  ok(!!ng && ng('conversation', 'c-uuid-1', 'Fix the build') === 'Fix the build' && ng('conversation', 'c-uuid-1', 'c-uuid-1') === 'a conversation that is no longer listed' && ng('machine', 'host-dial-x', '') === 'a machine that is no longer listed' && !['c-uuid-1', 'host-dial-x'].includes(ng('job', 'c-uuid-1', '')),
+    'nameOrGone: the name; a name equal to the id is no name; never the id');
+  ok(/el\('span', 'device-acts-op', actWords\(r\.op\)\)/.test(dlg) && /whoText\(r\.by, nameOf\)/.test(dlg) && /\$\{r\.by \|\| t\('nobody named'\)\} · \$\{r\.op \|\| ''\}/.test(dlg), 'the row draws the op\'s word and who asked by name; the raw subject and op stay in the opened line');
 }
 
 // ── pick 3: a browser replay's steps in words — every traced action (src/browser-trace.js TRACED_ACTIONS) has a verb in
 // src/lib/browser-replay-window.js ACTION_WORDS with zh and ja rows; the CLI's own line (timelineLabel) is the tooltip ──
 {
   console.log('the replay steps in words');
-  const bt = fs.readFileSync(path.join(REPO, 'src/browser-trace.js'), 'utf8');
-  const ta = bt.slice(bt.indexOf('const TRACED_ACTIONS = Object.freeze({'), bt.indexOf('});', bt.indexOf('const TRACED_ACTIONS = Object.freeze({')));
-  const acts = [...ta.replace(/\/\/[^\n]*/g, '').matchAll(/'?([a-z][a-z-]*)'?\s*:\s*'(?:target|keys|point|scroll|navigation|viewport)'/g)].map((m) => m[1]);
+  // closure C4: the REAL module's actions (computed keys included), not a regex over its text
+  const acts = Object.keys(require(path.join(REPO, 'src/browser-trace.js')).TRACED_ACTIONS);
   const rw = fs.readFileSync(path.join(REPO, 'src/lib/browser-replay-window.js'), 'utf8');
   const tbl = rw.slice(rw.indexOf('const ACTION_WORDS = {'), rw.indexOf('};', rw.indexOf('const ACTION_WORDS = {')));
-  const words = Object.fromEntries([...tbl.matchAll(/'?([a-z][a-z-]*)'?:\s*\(\)\s*=>\s*t\('([^']+)'\)/g)].map((m) => [m[1], m[2]]));
+  // a verb is t('…') or tc('replay', '…') — a word with another meaning elsewhere (Type, Forward) is said in its context
+  const words = Object.fromEntries([...tbl.matchAll(/'?([a-z][a-z-]*)'?:\s*\(\)\s*=>\s*(?:t\('([^']+)'\)|tc\('([^']+)',\s*'([^']+)'\))/g)].map((m) => [m[1], m[2] || `${m[3]}::${m[4]}`]));
   const missing = acts.filter((a) => !words[a]);
   ok(acts.length >= 25 && !missing.length, `every traced action has a verb (${acts.length} actions, ${new Set(Object.values(words)).size} verbs)`, missing);
   const Z = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, J = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
@@ -261,18 +286,76 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
         if (c === "'" || c === '"' || c === '`') q = c; else if ('({['.includes(c)) d++; else if (')}]'.includes(c)) d--; }
       out.push({ at: src.slice(0, m.index).split('\n').length, call: src.slice(m.index, i) }); }
     return out; };
+  const BUILDERS = { 'src/lib/browser-build-model.js': ['downloadConfirmWords', 'removeConfirmWords'], 'src/lib/browser-cli-model.js': ['cliConfirmWords'], 'src/lib/pool-priority-model.js': ['gatherConfirmWords'] };
   const files = execFileSync('git', ['-C', REPO, 'ls-files', 'src']).toString().split('\n').filter((f) => f.endsWith('.js') && !/i18n-|utils\.js$/.test(f));
   const bare = [];
   for (const f of files) { const src = fs.readFileSync(path.join(REPO, f), 'utf8'); if (!/show(?:Confirm|Input)Dialog\(/.test(src)) continue;
-    for (const c of callsOf(src)) if (!/confirmText\s*:/.test(c.call) && !/\.\.\./.test(c.call) && !/^show\w+Dialog\(\s*\)$/.test(c.call)) bare.push(`${f}:${c.at}`); }
-  ok(!bare.length, 'every confirm / input dialog names its button (confirmText) — none falls back to «OK»', bare);
-  const BUILDERS = { 'src/lib/browser-build-model.js': ['downloadConfirmWords', 'removeConfirmWords'], 'src/lib/browser-cli-model.js': ['cliConfirmWords'], 'src/lib/pool-priority-model.js': ['gatherConfirmWords'] };
+    for (const c of callsOf(src)) {
+      if (/confirmText\s*:\s*(?:t\('OK'\)|'OK'|undefined|null|'')/.test(c.call)) { bare.push(`${f}:${c.at} (an explicit OK / empty word)`); continue; }
+      if (/confirmText\s*:/.test(c.call)) continue;
+      const spread = (c.call.match(/\.\.\.\s*([\w$.]+)(\()?/) || []);
+      if (!spread[1]) { bare.push(`${f}:${c.at}`); continue; }
+      // closure E / F41: a spread is accepted only from a PINNED source — a builder of BUILDERS (called here, or held in a const
+      // that one built), or the switcher's `.confirm` objects (each literal pinned below); a parameter or anything else is bare
+      const name = spread[2] ? spread[1] : (src.match(new RegExp(`const ${spread[1].replace(/[.$]/g, '\\$&')} = ([\\w$]+)\\(`)) || [])[1];
+      const pinned = Object.values(BUILDERS).flat().includes(name) || /\.confirm$/.test(spread[1]);
+      if (!pinned) bare.push(`${f}:${c.at} (spreads ${spread[1]}, not a pinned builder)`);
+    } }
+  ok(!bare.length, 'every confirm / input dialog names its button (confirmText) — none falls back to «OK», none passes an explicit OK or an empty word, a spread only from a pinned builder', bare);
   const loose = [];
   for (const [f, names] of Object.entries(BUILDERS)) { const src = fs.readFileSync(path.join(REPO, f), 'utf8');
     for (const n of names) { const i = src.indexOf(`export function ${n}(`); const body = i < 0 ? '' : src.slice(i, src.indexOf('\n}\n', i)); if (!/confirmText\s*:/.test(body)) loose.push(`${f} ${n}`); } }
   ok(!loose.length, `the spread words builders name their button (${Object.values(BUILDERS).flat().length})`, loose);
+  // the switcher's `.confirm` objects: every `confirm: {` literal names its button
+  const sw = fs.readFileSync(path.join(REPO, 'src/lib/browser-switcher-model.js'), 'utf8');
+  const confs = [...sw.matchAll(/confirm: \{([^\n]*)/g)].map((m) => m[1]); // the literal runs to the line's end (its params have braces)
+  ok(confs.length >= 1 && confs.every((c) => /confirmText\s*:/.test(c)), `every .confirm object of the switcher names its button (${confs.length})`, confs.filter((c) => !/confirmText/.test(c)).map((c) => c.slice(0, 80)));
   const planted = "showConfirmDialog({ title: t('Remove account'), message: msg })";
   ok(callsOf(planted).length === 1 && !/confirmText\s*:/.test(callsOf(planted)[0].call), 'CONTROL: a planted call without confirmText is seen as bare');
+}
+
+// ── closure B1: a press on a For-you row's «技术细节» opens THAT fold, never the row — the three click guards use ONE selector that
+// names the door's fold, and a repaint keeps an open fold open. The press is played on a small element tree with the guard's own
+// selector (a mutant that drops `[data-fold="tech"]` from it lets the press reach the row ⇒ red) ──
+{
+  console.log('a press on a row\'s fold opens the fold');
+  const panel = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-panel.js'), 'utf8'), row = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-row.js'), 'utf8');
+  const pw = fs.readFileSync(path.join(REPO, 'src/lib/plain-words.js'), 'utf8');
+  const sel = /const FOLD_PRESS = '\.ut-detail-exp, ' \+ TECH_FOLD_SELECTOR;/.test(panel) ? '.ut-detail-exp, ' + ((pw.match(/export const TECH_FOLD_SELECTOR = '([^']+)';/) || [])[1] || '') : '';
+  ok((panel.match(/if \(e\.target\.closest\(FOLD_PRESS\)\) return;/g) || []).length === 3 && !/closest\('\.ut-detail-exp'\)\) return;/.test(panel), 'the tray, the phone home and the mini rows guard a press with FOLD_PRESS (no guard names the detail expander alone)');
+  // the press, played: element trees and a closest() that reads the guard's selector list (class or [attr="v"])
+  const el = (cls, attrs = {}, parent = null) => ({ cls: cls.split(' '), attrs, parent });
+  const matches = (n, one) => { const a = one.match(/^\[([\w-]+)="([^"]*)"\]$/); return a ? n.attrs[a[1]] === a[2] : n.cls.includes(one.replace(/^\./, '')); };
+  const closest = (n, list) => { for (let x = n; x; x = x.parent) if (list.split(',').map((q) => q.trim()).some((q) => matches(x, q))) return x; return null; };
+  const item = el('ut-item ut-open'), body = el('ut-body', {}, item), fold = el('tech-fold ut-tech-fold', { 'data-fold': 'tech' }, body), summary = el('', {}, fold), text = el('ut-text', {}, body);
+  ok(!!closest(summary, sel) && !closest(text, sel), 'a press on the fold\'s summary stops at the guard; a press on the row\'s words goes on to the row', sel);
+  ok(!closest(summary, '.ut-detail-exp'), 'RED control: the old guard (the detail expander alone) lets a press on the door\'s fold reach the row');
+  ok(/const techOpen = !!el\.querySelector\('\.ut-tech-fold\[open\]'\)/.test(row) && /if \(techOpen\) \{ const d = body\.querySelector\('\.ut-tech-fold'\); if \(d\) d\.open = true; \}/.test(row), 'a repaint keeps an open «技术细节» fold open (patchRow)');
+}
+
+// ── closure E / F24: a pin that bites for every rule picks 1, 3 and 4 add (each line red when its rule is undone in one place) ──
+{
+  console.log('the picks\' own rules, pinned');
+  const pw = read('src/lib/plain-words.js');
+  // the door escapes: techFoldHtml run with the real escaping (sliced; t = the identity)
+  const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const body = pw.slice(pw.indexOf('const summaryOf ='), pw.indexOf('\n}\n', pw.indexOf('export function techFoldHtml(')) + 2).replace(/export /g, '');
+  let tfh = () => ''; try { tfh = new Function('t', 'escHtml', 'document', body + '; return techFoldHtml;')((x) => x, esc, null); } catch { /* red below */ }
+  const out = tfh(['<b>x</b>'], { summary: '<i>s</i>', className: 'a"b' });
+  ok(/&lt;b&gt;x&lt;\/b&gt;/.test(out) && /&lt;i&gt;s&lt;\/i&gt;/.test(out) && !/<b>|<i>/.test(out) && /class="tech-fold a&quot;b"/.test(out), 'techFoldHtml escapes every line, its summary and its class (run, not read)', out.slice(0, 160));
+  const su = read('src/lib/settings-ui.js'), tp = read('src/tls-plan.js'), css = read('public/style.css');
+  ok(/if \(line\._fold\) line\.appendChild\(line\._fold\)/.test(su) && /summary: t\('Use your own certificate'\)/.test(su) && /const FOLDS = \{ noTailscale: \['ownCert'\] \}/.test(tp) && /\.settings-https-fact \.settings-https-fold \{ flex: 1 1 100%/.test(css),
+    'settings-5: the own-certificate recipe folds INSIDE the fact line (a full-width line, its summary names the option), carried by tls-plan FOLDS');
+  const pf = read('src/lib/path-field.js');
+  ok(/if \(hk === 'none'\) return t\('the machine you pick above'\)/.test(pf) && /h2 === 'none' \? t\('On the machine you pick above:'\)/.test(pf) && /return HOSTS\.names \? nameOrGone\('machine', hk, ''\) : t\('the machine'\)/.test(pf), 'storage-3 / storage-4: a machine in words — never «none», never its id');
+  const ud = read('src/lib/usage-dashboard.js');
+  ok(/const labelOf = \(k\) => dimNames\.get\(k\)/.test(ud) && /labels: rows\.map\(\(r\) => String\(r\.label\)\)/.test(ud), 'usage-3: the split chart names its rows (labelOf), never a raw session id');
+  const ma = read('src/lib/manage-agents.js');
+  ok(/When it expires, sessions on it fail until you make a new one\./.test(ma) && /Quota refresh \(⟳\) does not work through it\./.test(ma) && /oat-face/.test(ma), 'agents-accounts-17: the token dialog\'s face keeps its two deciding facts');
+  const dc = read('src/lib/design-canvas-model.js');
+  ok(/if \(!file\) return text \? t\('\{what\} “\{text\}”', \{ what, text \}\) : what;/.test(dc) && /export function pickWords\(pick, t\)/.test(dc), 'design-doc-12: the element in words, no leading separator without a file; the exact line stays one fold away');
+  const ir = read('src/lib/incident-recorder.js');
+  ok(/never text you typed/.test(ir), 'gear-and-system-16: the capture\'s reach — and that it never takes typed text — is on the face');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

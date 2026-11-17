@@ -11,7 +11,7 @@ const i18nKey = (s) => s;
  *  number on the button and drifts on the row exactly as PATH's does). */
 export function cliRowWords(f, t) {
   if (!f || typeof f !== 'object' || !f.table) return null;
-  const parts = [t(i18nKey('agent-browser: {version} (measured)'), { version: f.table })];
+  const parts = [t(i18nKey('Browser driver: {version}, tested with VibeSpace'), { version: f.table })];
   const choice = f.choice || { mode: 'path' };
   const pinned = f.pinned || null;
   const onPath = f.onPath && f.onPath.version ? String(f.onPath.version) : null;
@@ -20,17 +20,17 @@ export function cliRowWords(f, t) {
   if (choice.mode === 'path') {
     if (onPath) {
       const drifts = onPath !== f.table;
-      parts.push(drifts ? t(i18nKey('on PATH: {version} — drifts'), { version: onPath }) : t(i18nKey('on PATH: {version}'), { version: onPath }));
+      parts.push(drifts ? t(i18nKey('Installed: {version} — not the tested one'), { version: onPath }) : t(i18nKey('Installed: {version}'), { version: onPath }));
       if (drifts) { warn = true; offer = 'install'; }
     } else { parts.push(t(i18nKey('none on PATH'))); warn = true; offer = 'install'; }
   } else if (pinned && pinned.installed) {
     if (pinned.version === f.table) parts.push(t(i18nKey("in use: VibeSpace's own copy")));
     else { parts.push(t(i18nKey("in use: VibeSpace's own {version} (your choice) — drifts"), { version: pinned.version })); warn = true; } // verify r1 (F10): the drift word with every mode
-    if (onPath && onPath !== pinned.version) parts.push(t(i18nKey('on PATH: {version}'), { version: onPath }));
+    if (onPath && onPath !== pinned.version) parts.push(t(i18nKey('Installed: {version}'), { version: onPath }));
     offer = 'use-path';
   } else {
     parts.push(t(i18nKey('{version} chosen, not installed yet — the one on PATH is used'), { version: (pinned && pinned.version) || f.table }));
-    if (onPath) parts.push(t(i18nKey('on PATH: {version}'), { version: onPath }));
+    if (onPath) parts.push(t(i18nKey('Installed: {version}'), { version: onPath }));
     warn = true; offer = 'install';
   }
   // verify r2 (H1, the coordinator's ruling): a switch never restarts a running browser — each keeps the CLI it started with

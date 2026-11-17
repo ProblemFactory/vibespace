@@ -97,7 +97,7 @@ const MORE_LINES_MAX = 24;
  *  r3: each param ON ITS OWN (a field), never the sentence the key is */
 function maskI18nParams(x, mask) {
   const line = (l) => (l && l.params ? { ...l, params: Object.fromEntries(Object.entries(l.params).map(([k, v]) => [k, typeof v === 'string' ? mask(v) : v])) } : l);
-  return { ...x, text: line(x.text), ...(x.detail ? { detail: x.detail.map(line) } : {}) };
+  return { ...x, text: line(x.text), ...(x.detail ? { detail: x.detail.map(line) } : {}), ...(x.fold ? { fold: x.fold.map(line) } : {}) }; // closure B3: the fold's params are belted too
 }
 /** lane job-notify-user r3: a `{key, params}` line filled the way the client's t() fills it (src/lib/i18n.js — `{name}`
  *  ⇒ the param, an unknown one kept) — the English text of an AGENT_FIELDS item is its template filled with its fields */

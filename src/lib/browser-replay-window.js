@@ -30,16 +30,18 @@ import { whenText, sessionRowText, emptyText, replayTitle, retentionText, action
  *  (timelineLabel: «mouseclick 120,90») is the label's tooltip. */
 const ACTION_WORDS = {
   click: () => t('Click'), dblclick: () => t('Double-click'), mouseclick: () => t('Click'), mousedown: () => t('Press the mouse'), mouseup: () => t('Release the mouse'),
-  focus: () => t('Focus'), fill: () => t('Type'), type: () => t('Type'), hover: () => t('Point at'), mousemove: () => t('Point at'),
+  focus: () => t('Focus'), fill: () => tc('replay', 'Type'), type: () => tc('replay', 'Type'), hover: () => t('Point at'), mousemove: () => t('Point at'),
   check: () => t('Tick'), uncheck: () => t('Untick'), select: () => t('Choose'), scrollintoview: () => t('Scroll'), scroll: () => t('Scroll'), mousewheel: () => t('Scroll'),
   upload: () => t('Upload'), drag: () => t('Drag'), press: () => t('Press keys'), keydown: () => t('Press keys'), keyup: () => t('Press keys'),
-  navigate: () => t('Open a page'), open: () => t('Open a page'), goto: () => t('Open a page'), back: () => t('Back'), forward: () => t('Forward'), reload: () => t('Reload'),
+  navigate: () => t('Open a page'), open: () => t('Open a page'), goto: () => t('Open a page'), back: () => t('Back'), forward: () => tc('replay', 'Forward'), reload: () => t('Reload'),
   pushstate: () => t('The page address changed'), 'viewer-fit': () => t('Fit the page to the view'),
+  'agent-viewport': () => t('The agent resized the page'), permission: () => t('Answer a permission prompt'), // closure C4: the two the census could not see
 };
 function actionWords(e) {
   const x = e || {}, p = x.position || {};
   const verb = (ACTION_WORDS[x.action] || (() => String(x.action || '?')))();
-  const where = p.kind === 'point' ? `(${p.x}, ${p.y})` : p.kind === 'keys' && p.keys ? String(p.keys) : p.kind === 'navigation' && p.url ? String(p.url).slice(0, 60) : '';
+  const where = p.kind === 'point' ? `(${p.x}, ${p.y})` : p.kind === 'keys' && p.keys ? String(p.keys) : p.kind === 'navigation' && p.url ? String(p.url).slice(0, 60)
+    : p.kind === 'scroll' ? `${p.direction || ''} ${p.amount || ''}`.trim() : p.kind === 'viewport' && p.width && p.height ? `${p.width}×${p.height}` : ''; // closure F30: where, on the face
   return (where ? verb + ' ' + where : verb) + (x.ok === false ? ' ✗' : '');
 }
 

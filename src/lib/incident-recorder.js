@@ -277,7 +277,7 @@ export function installIncidentRecorder(app) {
     if (shell.raised) return;   // raised: the same subject's form, as it was // (Escape from inside: the note typed is asked about, never dropped — lane dialog-yield r2)
     const body = shell.body;
     body.innerHTML = `
-      <div class="usage-note" style="margin-bottom:6px">${escHtml(t('Press Capture now before you fix anything — fixing it erases what went wrong.'))}</div>
+      <div class="usage-note" style="margin-bottom:6px">${escHtml(t('Press Capture now before you fix anything — fixing it erases what went wrong.'))} ${escHtml(t('It captures the state of this machine and of the machines your conversations use — never text you typed.'))}</div>
       ${techFoldHtml([t('This freezes the whole scene — the last few minutes of UI activity (clicks, window events, errors; never any text you typed or message content), plus the live environment on this instance AND on every machine your sessions use: process tables, session state, lock files, transcript fingerprints. Capture this BEFORE you try to fix things yourself — afterwards the evidence is gone.')], { summary: t('What it captures') })}
       <textarea class="dialog-input" rows="5" style="width:100%;box-sizing:border-box" placeholder="${escHtml(t('What went wrong? (optional but helpful)'))}"></textarea>`;
     const ta = body.querySelector('textarea');

@@ -2470,7 +2470,7 @@ class WindowManager {
       icon.appendChild(windowListMark(w, { className: 'window-backend-icon' })); // its harness's mark (lane phone-take-photo)
       icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
       const label = document.createElement('span');
-      label.textContent = w.title;
+      label.textContent = windowWords(w);
       item.append(icon, label);
       item.onclick = () => { this.revealWindow(w.id); pop.remove(); }; // the row names the host (its title) — show THAT tab
       pop.appendChild(item);

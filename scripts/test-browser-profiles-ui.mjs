@@ -414,7 +414,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
       await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-more')`), 10000, 100);
       await menuAct(VP, 'bprof-build-btn');
       const b = await until(() => ev(`(() => { const d = document.querySelector('#browser-build-dialog'); return d ? { title: d.querySelector('.dialog-header h3').textContent, def: (d.querySelector('.bbuild-row[data-key=default] .bwho-answer-head') || {}).textContent || '' } : null; })()`), 15000, 100);
-      ok(b && b.title === tr(lang, 'Chrome build for {label}', { label: 'Vendor portal' }) && b.def === tr(lang, "The browser CLI's default build"), `${lang}: Change build… speaks it too`, b);
+      ok(b && b.title === tr(lang, 'Chrome build for {label}', { label: 'Vendor portal' }) && b.def === tr(lang, "Automatic — usually the newest Chrome the browser driver installed"), `${lang}: Change build… speaks it too`, b);
       await shot(`3-change-build-${lang}`);
       await ev("document.querySelector('#browser-build-dialog .bbuild-cancel').click()");
     }

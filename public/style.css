@@ -2040,6 +2040,7 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 .settings-row.has-wide-fact { flex-wrap: wrap; row-gap: 0; } /* lane https-tailscale: the Secure address line spans the row (wraps on a phone) */
 .settings-https-fact { order: 3; flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .settings-https-fact .settings-https-text { flex: 1 1 220px; min-width: 0; overflow-wrap: break-word; }
+.settings-https-fact .settings-https-fold { flex: 1 1 100%; min-width: 0; } /* lane ui-plain-words closure F19: the own-certificate fold is a full-width line of the fact */
 .settings-https-fact.is-live { border-left-color: var(--accent); color: var(--text); }
 /* lane auto-resume-bulk: the auto-resume row's bulk acts span the row (the counts, three buttons, the passive cost line) */
 .auto-resume-bulk { order: 3; flex: 1 1 100%; display: flex; flex-direction: column; gap: 4px; }
@@ -6592,6 +6593,7 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 .jobs-sess-head:hover { background: var(--bg-hover, var(--bg-panel)); }
 .jobs-sess-head.jobs-sess-attn .jobs-sess-name { color: var(--text); }
 .jobs-sess-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.jobs-sess-name.jobs-sess-gone { white-space: normal; overflow-wrap: anywhere; } /* lane ui-plain-words closure F14: a gone conversation's words wrap, never «一个...» */
 .jobs-seen-all { font-weight: 500; white-space: nowrap; }
 .jobs-seen-slot:empty { display: none; }
 .jobs-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; row-gap: 2px; width: 100%; box-sizing: border-box; text-align: left; padding: 5px 8px; margin-bottom: 4px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
@@ -8441,7 +8443,7 @@ label.chan-cap-row { cursor: default; }
 .brp-action-noframe { font-size: 9px; color: var(--text-dim); text-align: center; }
 .brp-action-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .brp-action-time { color: var(--text-dim); font-family: var(--font-mono, monospace); font-size: 10px; }
-.brp-action-label { font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brp-action-label { overflow-wrap: anywhere; white-space: normal; } /* lane ui-plain-words closure F30: a step in words wraps (hover is not on a phone) */
 .brp-main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .brp-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 .brp-bar .mounts-btn { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -10070,3 +10072,4 @@ button.vw-chip { cursor: pointer; }
   /* the list column's ☰ stands over the left pane's head (as over the single head): its 52 px */
   html.vs-split[data-vc="regular"] .window.phone-pane[data-pane="left"] > .window-titlebar { padding-left: 52px; }
 }
+.learn-evidence > summary { list-style: none; cursor: pointer; } .learn-evidence > summary::before { content: '▸ ' / ""; } .learn-evidence[open] > summary::before { content: '▾ ' / ""; } /* lane ui-plain-words closure F8: the chip shows it opens */

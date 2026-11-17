@@ -81,7 +81,7 @@ export function openRefreshLive(app) {
     const footer = document.createElement('div');
     footer.className = 'dialog-footer';
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'btn-cancel'; cancel.textContent = t('Cancel');
-    const ok = document.createElement('button'); ok.type = 'button'; ok.className = 'btn-create'; ok.textContent = n ? t('Remind {n} session(s) (next turn)', { n }) : t('Remind'); // lane ui-plain-words sidebar-sessions-14: the press says what it does
+    const ok = document.createElement('button'); ok.type = 'button'; ok.className = 'btn-create'; ok.textContent = t('Remind the live sessions (next turn)'); // closure F47: no count frozen at open (the submit re-reads the sessions) // lane ui-plain-words sidebar-sessions-14: the press says what it does
     footer.append(cancel, ok);
     dialog.append(footer);
     const judge = () => {

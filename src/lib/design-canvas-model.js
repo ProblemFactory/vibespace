@@ -391,6 +391,7 @@ export function pickWords(pick, t) {
   const what = (/^h[1-6]$/.test(tag) ? t('a heading') : (W[tag] || (() => t('an element')))());
   const file = String(p.file || '').split('/').pop().replace(/\.html?$/i, '');
   const text = cleanLine(p.text, PICK_LIMITS.text);
+  if (!file) return text ? t('{what} “{text}”', { what, text }) : what; // closure F34: no file ⇒ no leading separator
   return text ? t('{file} › {what} “{text}”', { file, what, text }) : t('{file} › {what}', { file, what });
 }
 

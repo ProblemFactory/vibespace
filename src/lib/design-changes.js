@@ -155,7 +155,7 @@ export function mountDesignChanges(ctx) {
     const n = list.length;
     strip.style.display = n || (picking && !phone) ? '' : 'none'; // the phone: the strip appears with a chip (the hint would cover the page)
     strip.classList.toggle('design-changes-empty', !n);
-    count.textContent = n ? (n === 1 ? t('1 change') : t('{n} changes', { n })) : t('Double-click a text to edit it · Add collects comments');
+    count.textContent = n ? (n === 1 ? t('1 change') : t('{n} changes', { n })) : t('Double-click a text to edit it · «Add to the changes» collects comments');
     send.style.display = n ? '' : 'none';
     chips.replaceChildren(...list.map((c) => {
       const el = mk('span', 'design-change-chip design-change-' + c.edit);

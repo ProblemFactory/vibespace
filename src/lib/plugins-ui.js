@@ -713,7 +713,7 @@ export function installPluginsUI(App) {
       body.innerHTML = `
         <div class="dialog-intro">${escHtml(t('{name} keeps its conversations in its own database rather than in files, so VibeSpace cannot read a STOPPED conversation without asking {name} itself.', { name: meta.label || meta.id }))}</div>
         <ul class="plugin-caps-list">
-          <li class="plugin-cap">${escHtml(t('Lists, opens, resumes and copies stopped {name} conversations in the sidebar', { name: meta.label || meta.id }))}</li>
+          <li class="plugin-cap">${escHtml(t('Lists, opens, resumes and forks (branches) stopped {name} conversations in the sidebar', { name: meta.label || meta.id }))}</li>
           <li class="plugin-cap">${escHtml(t('Runs a service only this computer can reach, with the {name} you installed — nothing is downloaded and nothing is opened to the network', { name: meta.label || meta.id }))}</li>
           <li class="plugin-cap">${escHtml(t('Stops as soon as you disable it in ⚙ → Plugins, and VibeSpace stops it by itself if it starts burning CPU or memory'))}</li>
         </ul>

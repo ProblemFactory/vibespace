@@ -831,7 +831,7 @@ try {
     const rows = await until(() => ev(`for (const v of app.sessions.values()) { if (v.sessionId !== ${S(SIDW)} || !v._statusBar) continue; const sb = v._statusBar; if (!sb._pages.length || !sb._designs.length) return null; const dd = document.createElement('div'); document.body.appendChild(dd); sb._renderDesignPopover(dd); const out = [...dd.querySelectorAll('.chat-design-page')].filter((r) => !r.parentElement.classList.contains('hidden')).map((r) => ({ name: r.querySelector('.chat-design-page-name').textContent, btns: [...r.querySelectorAll('button')].map((b) => b.textContent) })); dd.remove(); return out; } return null;`), 10000);
     evidence.acfF2 = rows;
     const mine = (rows || []).filter((r) => r.name === 'Design window');
-    ok(mine.length === 1 && ['Open', 'Publish…', 'Copy link', 'Unpublish'].every((b) => mine[0].btns.includes(b)) && mine[0].btns.some((b) => b === 'Public' || b === 'Private'), 'F2: the published design is ONE row — Open · Publish… · Copy link · Public/Private · Unpublish (no second row with the same title)', rows);
+    ok(mine.length === 1 && ['Open', 'Publish…', 'Copy link', 'Unpublish'].every((b) => mine[0].btns.includes(b)) && mine[0].btns.some((b) => b === 'Public · make private' || b === 'Private · make public') /* lane ui-plain-words design-doc-2: the state, then the act */, 'F2: the published design is ONE row — Open · Publish… · Copy link · Public/Private · Unpublish (no second row with the same title)', rows);
   }
 
   // ── B① XSS: the hostile artboard ──

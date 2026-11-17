@@ -244,7 +244,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const v1 = await look();
     const r1 = v1.rows.find((r) => r.id === R1.id), r2 = v1.rows.find((r) => r.id === R2.id);
     ok(v1.firstIsQueue && v1.title === tr('zh', 'takeover::Waiting for you') && v1.title === '等你接管', '① the Agent browser window\'s FIRST section is «等你接管» (above Profiles)', v1);
-    ok(r1 && r2 && r1.conv === 'Bank reconcile' && r2.conv === 'Mail sweep' && r1.words === 'agent 请你：' + W1 && /^在等你 · /.test(r1.state) && JSON.stringify(r1.acts) === JSON.stringify(['接管', '已完成', '回复']), '① one row per request: the conversation, «agent 请你：<words>», «在等你 · …», 接管 / 已完成 / 回复', v1.rows);
+    ok(r1 && r2 && r1.conv === 'Bank reconcile' && r2.conv === 'Mail sweep' && r1.words === 'agent 请你：' + W1 && /^在等你 · /.test(r1.state) && JSON.stringify(r1.acts) === JSON.stringify(['接管', '已处理好 · 告诉 agent', '回复 agent…']) /* lane ui-plain-words browser-live-15 */, '① one row per request: the conversation, «agent 请你：<words>», «在等你 · …», 接管 / 已完成 / 回复', v1.rows);
     ok(r1 && r1.prof === '它自己的浏览器', '① …and which browser (the conversation\'s own one here)', r1);
     ok(v1.winTitle === 'Agent 浏览器 · 2 等你接管' && v1.badge === '2', '① the window title and the rail\'s Browser badge say the count (2)', { title: v1.winTitle, badge: v1.badge });
     // the For-you tray: the SAME two requests as urgent items with the takeover button

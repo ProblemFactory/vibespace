@@ -198,7 +198,7 @@ const ADD_WORDS = {
   exists: (x) => t('A two-step code named “{name}” is in the vault already — pick another name, or delete that one first', { name: x.name }),
   vault_locked: () => t('The vault is locked — unlock it first, then preview again'),
   vault_not_set_up: () => t('The vault is not set up yet — set the second password first'),
-  preview_first: () => t('Preview it first — the code it shows is the one your authenticator should show'),
+  preview_first: () => t('Check the code first — the code it shows is the one your authenticator should show'),
 };
 const addWords = (r, x = {}) => (ADD_WORDS[r && r.code] ? ADD_WORDS[r.code](x) : failWords(r));
 
@@ -340,7 +340,7 @@ export function totpFields({ name: proposed = '', autofocus = true, onReady = ()
     if (!again) st.auto = 0;   // a person's 预览 starts the step budget again — as the row's 看码 does (acceptance r2)
     if (st.inflight) {
       if (again) return;
-      prevB.textContent = t('Previewing…');   // the click waits for the ask on the wire — said on its button
+      prevB.textContent = t('Checking the code…');   // the click waits for the ask on the wire — said on its button
       while (st.inflight) {
         const w = st.inflight, p0 = planNow();
         if (w.kind === 'preview' && p0.ok && JSON.stringify(p0.body) === w.body) return w.done;   // the ask on the wire IS this preview
@@ -351,7 +351,7 @@ export function totpFields({ name: proposed = '', autofocus = true, onReady = ()
     const p = planNow();
     if (!p.ok) { prevB.textContent = t('Check the code (save next)'); stale(); drawFacts(st.way === 'link' ? p : null); say(p); return; }
     const body = JSON.stringify(p.body);
-    if (!again) prevB.textContent = t('Previewing…');   // every vault wait is said (lane vault-slow-load)
+    if (!again) prevB.textContent = t('Checking the code…');   // every vault wait is said (lane vault-slow-load)
     return onWire('preview', body, async () => {
       const r = await post('/api/vault/totp', { ...p.body, preview: true }).catch(() => null);
       prevB.textContent = t('Check the code (save next)');

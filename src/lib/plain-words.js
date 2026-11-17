@@ -24,8 +24,11 @@ const GONE = {
 export function nameOrGone(kind, id, name) {
   const n = String(name ?? '').trim();
   if (n && n !== String(id ?? '').trim()) return n;
-  return (GONE[kind] || GONE.conversation)();
+  return (GONE[kind] || (() => t('something that is no longer listed')))(); // closure F17: an unknown kind is never «a conversation»
 }
+
+/** The selector of every fold this door draws — a click guard names it (a press on the fold opens the fold, never its row). */
+export const TECH_FOLD_SELECTOR = '[data-fold="tech"]';
 
 /** The fold's summary words. `details` = the settings form's «详情» (a row's long explanation), else «技术细节». */
 const summaryOf = (summary) => (summary === 'details' ? t('Details') : summary || t('Technical details'));

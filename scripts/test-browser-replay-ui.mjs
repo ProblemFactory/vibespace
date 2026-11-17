@@ -362,7 +362,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     const rows = await p1.ev(`[...document.querySelectorAll('${RP} .brp-session')].map((e) => ({ s: e.dataset.session, active: e.classList.contains('active'), text: e.textContent }))`);
     ok(rows.map((r) => r.s).join() === [S1, S3, S2].join() && rows.find((r) => r.s === S2).active && /6 步操作/.test(rows.find((r) => r.s === S2).text) && /帮手|自己的临时浏览器|work/.test(rows[0].text), `③ the session list, NEWEST first, the chosen one marked (${rows.map((r) => r.text).join(' | ')})`);
     const acts = await p1.ev(`[...document.querySelectorAll('${RP} .brp-action')].map((e) => ({ id: e.dataset.traceId, img: !!e.querySelector('img'), text: e.textContent }))`);
-    ok(acts.length === 6 && acts.every((a) => a.img) && /mouseclick 120,90/.test(acts[0].text), `③ its actions: time · verb · where · the after-frame's thumbnail (${acts.length})`);
+    ok(acts.length === 6 && acts.every((a) => a.img) && /(Click|点击|クリック) \(120, 90\)/.test(acts[0].text) /* lane ui-plain-words browser-profiles-20: the step in words (the CLI line is its title) */, `③ its actions: time · verb · where · the after-frame's thumbnail (${acts.length})`);
     // lane trace-fits (the owner 2026-10-01): the session's 5 page-size changes (2 runs) are thin TICKS between the 6 steps,
     // never steps of their own; the toggle (one per-device preference) makes each run's entry a step, and off again
     const ticks = await p1.ev(`[...document.querySelectorAll('${RP} .brp-tick')].map((e) => ({ id: e.dataset.fitsId, n: e.dataset.fits, text: e.textContent, title: e.title }))`);

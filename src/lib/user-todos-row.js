@@ -907,6 +907,7 @@ export function patchRow(el, entry, ctx) {
   if (el.dataset.sig !== p.sig) {
     const detailOpen = !!el.querySelector(':scope > .ut-body > .ut-detail-exp[open]');
     const runOpen = !!el.querySelector('.ut-run-fold[open]'); // r7: an open «Technical details» stays open through a repaint
+    const techOpen = !!el.querySelector('.ut-tech-fold[open]'); // closure B1: the door's fold too
     let body = el.querySelector(':scope > .ut-body');
     const box = body && body.querySelector(':scope > .ut-reply');
     // an open row keeps its box; a resolved row keeps it only while in use
@@ -934,6 +935,7 @@ export function patchRow(el, entry, ctx) {
     if (!keepS && !entry.resolved && isSecretAsk(entry.item)) body.append(secretBoxEl(entry.item));
     if (detailOpen) { const d = body.querySelector(':scope > .ut-detail-exp'); if (d) d.open = true; }
     if (runOpen) { const d = body.querySelector('.ut-run-fold'); if (d) d.open = true; }
+    if (techOpen) { const d = body.querySelector('.ut-tech-fold'); if (d) d.open = true; }
     // (lane key-instance-scope: a re-render keeps the owner's pick — r11: drawn from the item's pick, reachPickOf, never re-read off this copy)
     el.dataset.sig = p.sig;
   } else patchVolatile(el, p); // r14: the same row a minute on — its words in place, its buttons the same nodes (their press arm kept)

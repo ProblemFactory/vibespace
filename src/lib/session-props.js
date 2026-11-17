@@ -857,7 +857,7 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
             : lane === 'cli-inbox' ? t('Delivery goes through the CLI\u2019s own inbox: it queues a mid-turn notification itself and opens a turn when the session is idle. Same for messages from other agents.')
               : t('This harness has no live delivery lane, so notifications and agent messages are stashed and injected at the session\u2019s next turn.');
         // lane ui-plain-words (task-groups-16): how a notification is delivered is mechanics — under ONE fold, never a paragraph
-        const laneFold = techFold([laneHint.textContent]);
+        const laneFold = techFold([laneHint.textContent], { summary: t('How it is delivered') }); // closure F6: its own title beside the other fold
         if (laneFold) bwSec.appendChild(laneFold);
       }
     }
