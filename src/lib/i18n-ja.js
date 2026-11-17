@@ -11444,6 +11444,8 @@ export default {
   "{n} min left": "残り {n} 分",
   "{n} more waiting — open For you": "ほかに {n} 件が待っています — 「あなた宛て」を開く",
   "{n} more waiting": "ほかに {n} 件が待っています",
+  // B-be8f: the held «N more» line once nothing is folded
+  "Open For you": "「あなた宛て」を開く",
   "Open it": "開く",
   "Open everything this conversation is waiting on in the For-you window": "この会話があなたを待っている項目をすべて「あなた宛て」ウィンドウで開く",
   "Show it in the conversation": "会話の中で表示",

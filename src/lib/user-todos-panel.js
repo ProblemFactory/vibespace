@@ -1497,9 +1497,18 @@ export function installUserTodos(app) {
    *  probe: the pointer on a maximized chat's last card, the strip grown — the line folded first and the folded card went
    *  UNCOUNTED): THE COUNT IS ALWAYS SAID — `off` = the line cannot stand (a held stack folded it) ⇒ the READ card's own head
    *  row carries it (.uta-more-in, beside who asks — the card's rectangle unchanged) */
+  // B-be8f (the r18 acceptance, needs-card-tail r19: the pointer resting on the line, the FOLDED card itself gone — its 20 s up,
+  // answered elsewhere, out of the policy — the count fell to 0 and the line hid from under the pointer; the stack ended above
+  // it, Chrome's next hover pass left the stack and the free placement put the oldest card there: a press opened it): A HELD
+  // LINE NEVER HIDES — with nothing folded it reads «Open For you» (its press does just that) in the rectangle it was read in
+  // (its size kept: `_zero`), until the pointer leaves
   const annMore = (off = false) => {
     const more = annStack.querySelector(':scope > .uta-more'), cards = [...annStack.querySelectorAll(':scope > .uta-card')], n = cards.filter((e) => e.hidden).length;
-    more.hidden = n <= 0 || off;
+    const zero = !off && n <= 0 && !more.hidden && annHeld() && annPin.el === more;
+    if (zero && !more._zero) { const r = more.getBoundingClientRect(), Z = uiScale(); more._zero = true; more.style.minWidth = (r.width / Z) + 'px'; more.style.minHeight = (r.height / Z) + 'px'; }
+    else if (!zero && more._zero) { more._zero = false; more.style.minWidth = ''; more.style.minHeight = ''; }
+    if (zero) { const w = t('Open For you'); if (more.textContent !== w) more.textContent = w; }
+    more.hidden = !zero && (n <= 0 || off);
     if (n > 0) { const w = t('{n} more waiting — open For you', { n }); if (more.textContent !== w) more.textContent = w; }
     const on = off && n > 0 && annPin && annPin.el.parentNode === annStack ? annPin.el : null;
     for (const e of cards) {

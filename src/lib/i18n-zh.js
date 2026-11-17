@@ -11445,6 +11445,8 @@ export default {
   "{n} min left": "还剩 {n} 分钟",
   "{n} more waiting — open For you": "还有 {n} 个在等你 — 打开「待你处理」",
   "{n} more waiting": "还有 {n} 个在等你",
+  // B-be8f: the held «N more» line once nothing is folded
+  "Open For you": "打开「待你处理」",
   "Open it": "打开它",
   "Open everything this conversation is waiting on in the For-you window": "在「待你处理」窗口里打开这个对话在等你的全部事项",
   "Show it in the conversation": "在对话里找到它",

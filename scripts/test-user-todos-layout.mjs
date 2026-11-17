@@ -2433,7 +2433,7 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
   const LAYOUT = slice('  const annLayout = () => {', '  const annPaint = ');
   const hold = ({ vh = 800, avoid = () => [] } = {}) => {
     const H = 66, G = 6, MH = 26, had = { document: globalThis.document, window: globalThis.window };
-    const cards = [], more = { cls: 'more', hidden: true, textContent: '', parentNode: null };
+    const cards = [], more = { cls: 'more', hidden: true, textContent: '', parentNode: null, style: {} };
     const st = { isConnected: true, style: {}, hover: false, remove() { this.isConnected = false; } };
     more.parentNode = st;
     more.getBoundingClientRect = () => { const y = yOf(more); return box(0, y, 380, y + MH); }; // (r16: the «N more» line folds too)
@@ -2690,7 +2690,7 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
   ok(!ln.threw && J(ln.at) === '[728,754]' && J(ln.x1) === '[["C2",584,650],["C1",656,722],["more",728,754]]' && J(ln.x1t) === J(ln.x1) && /^1 more waiting — open For you/.test(ln.said || '') && ln.under === 'more' && J(ln.x2) === '[["C2",544,610],["C1",616,682],["C0",688,754]]',
     `RED-able (r18 — 34ebfcb93: [C2 512–578, C1 584–650, C0 656–722], nothing under the pointer, then C0 there): the pointer resting on «N more waiting» (${J(ln.at)}), C3 answered elsewhere ⇒ the line stays where it was read with «${ln.said}» (${J(ln.x1)}; a tick later the same) — the folded card waits; the pointer leaves ⇒ the free placement refills (${J(ln.x2)})`, ln);
   const lnx = lineOf(PL16 + LY16.replace('c.el.hidden = k >= ANN_SHOWN || (line && was);', 'c.el.hidden = k >= ANN_SHOWN;'));
-  ok(LY16.includes('c.el.hidden = k >= ANN_SHOWN || (line && was);') && !lnx.threw && J(lnx.x1) !== J(ln.x1) && lnx.under !== 'more', `CONTROL (r18): the mutant whose refill hides the pinned line leaves ${lnx.under || 'nothing'} under the pointer (${J(lnx.x1)}) — the leg goes red`, lnx);
+  ok(LY16.includes('c.el.hidden = k >= ANN_SHOWN || (line && was);') && !lnx.threw && J(lnx.x1) !== J(ln.x1) && !/^1 more waiting/.test(lnx.said || ''), `CONTROL (r18): the mutant whose refill unfolds the card under a read line moves the cards (${J(lnx.x1)}) and loses the count («${lnx.said}»; since B-be8f a held line never hides itself — ${lnx.under || 'nothing'} under the pointer) — the leg goes red`, lnx);
   // B — the pointer on C2, C3 above it grows by its «expired» clock line (66 → 88; the 1 s tick's annPaint → annLayout) ⇒ the
   // stack moves up, the read card kept; a growth past the screen's top (66 → 590) ⇒ the fold, as before
   const growOf = (src, to) => { const h = hold(), bad = srcOf(h, src); if (bad || h.A.threw) return { threw: bad || h.A.threw };
@@ -2703,6 +2703,21 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     `r18: a growth that would cross the screen's top (C3 → 590 px) ⇒ the fold rung as before (${J(gw2.x1)}, «${gw2.said}»), the read card where it was`, gw2);
   const mExt = PL16.replace('const inExt = (j) => !!ext && (j > at ? kids.slice(at + 1, j + 1) : kids.slice(j, at)).some((e) => fresh.includes(e));', 'const inExt = () => !!ext;'), gwx = growOf(mExt + LY16, 88);
   ok(mExt !== PL16 && !gwx.threw && J(gwx.x1) !== J(gw.x1), `CONTROL (r18): the mutant whose extent bounds every held placement folds the grown card (${J(gwx.x1)}) — the leg goes red`, gwx);
+  // C — B-be8f (the r18 acceptance, needs-card-tail r19): the pointer RESTING on «1 more waiting», the FOLDED card itself gone
+  // (C0: its 20 s up, answered elsewhere, out of the policy) ⇒ the count is 0, yet the held line keeps its rectangle and reads
+  // «Open For you» (a tick later the same); the pointer leaves ⇒ it hides, its kept size goes, the free placement re-anchors
+  const zeroOf = (src) => { const h = hold(), bad = srcOf(h, src); if (bad || h.A.threw) return { threw: bad || h.A.threw };
+    [0, 1, 2, 3].forEach((k) => h.add('C' + k, 1000 * (k + 1))); h.A.annLayout(); const at = [h.more.getBoundingClientRect().top, h.more.getBoundingClientRect().bottom];
+    h.st.hover = true; h.S.annPin = { el: h.more, top: at[0] };
+    h.drop('C0'); h.A.annLayout(); const x1 = vis17(h), said = h.more.hidden ? null : h.more.textContent, kept = [h.more.style.minWidth, h.more.style.minHeight]; h.A.annLayout(); const x1t = vis17(h);
+    const under = x1.find((r) => r[1] <= 741 && r[2] >= 741);
+    h.leave(); h.A.annLayout(); return { at, x1, x1t, said, kept, under: under ? under[0] : null, x2: vis17(h), freed: [h.more.style.minWidth, h.more.style.minHeight] }; };
+  const zr = zeroOf(null);
+  ok(!zr.threw && J(zr.at) === '[728,754]' && J(zr.x1) === '[["C3",512,578],["C2",584,650],["C1",656,722],["more",728,754]]' && J(zr.x1t) === J(zr.x1) && zr.said === 'Open For you' && J(zr.kept) === '["380px","26px"]' && zr.under === 'more'
+    && J(zr.x2) === '[["C3",544,610],["C2",616,682],["C1",688,754]]' && J(zr.freed) === '["",""]',
+    `RED-able (B-be8f — b06f36e90: [C3 512–578, C2 584–650, C1 656–722], nothing under the pointer, then C1 there): the pointer resting on «1 more waiting» (${J(zr.at)}), the folded card itself gone ⇒ the line stays where it was read with «${zr.said}» (${J(zr.x1)}, its size kept ${J(zr.kept)}; a tick later the same); the pointer leaves ⇒ it hides and the free placement re-anchors (${J(zr.x2)})`, zr);
+  const zrx = zeroOf(PL16 + LY16.replace('more.hidden = !zero && (n <= 0 || off);', 'more.hidden = n <= 0 || off;'));
+  ok(LY16.includes('more.hidden = !zero && (n <= 0 || off);') && !zrx.threw && J(zrx.x1) !== J(zr.x1) && zrx.under !== 'more', `CONTROL (B-be8f): the mutant whose line hides at a count of 0 leaves ${zrx.under || 'nothing'} under the pointer (${J(zrx.x1)}) — the leg goes red`, zrx);
   console.log('㊲ THE WINDOW LAYER ASKS THE STACK AT ONCE (lane needs-card-tail r19 — .367: test-automation-keys-chrome ⑫ ALL AGENTS red on the train tip, ④\'s class: the open\'s own ask measured a form window before its host sized and placed it; the window sized to its filled body, its picker list opened, a form window moved or RAISED under the stack asked nothing until the 1 s tick — a press inside that second landed on an announce card)');
   // A — THE WIRING: the REAL annWatch / annSoon over a stub MutationObserver and a window layer (`#workspace`) holding one window
   const WATCH19 = slice('  let annMO = null', '  const annDrop = (id) =>') || '';
