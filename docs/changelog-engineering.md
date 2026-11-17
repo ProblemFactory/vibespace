@@ -43,6 +43,7 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The exit road.** An 'exit' listener registered before the mint is wrapped at the mint: one that throws is said and the helper's end still runs — on a normal exit too (a leg in exit mode; controls: no wrap on the exit road, and no wrap with no second end on the signal road — the root stays in both).
 - **Words and small ones:** at an exit the helper's end runs first and the suite's handle kill after; a failed or timed-out worktree removal is said; a signal's road gives the whole end ONE five-second budget; a root removed while a pid left in an uninterruptible wait still lived is said; rule two says a child suite's HOME lies outside its parent's root; test-viewer-download-chrome creates its browser's HOME as its siblings do; test-automation-verbs' two CLI children carry the root's HOME (rule nine to the letter).
 - **test-hub-boot** 85 → 99 checks, 17 → 19 red controls, 7.3 → 8.2 s; the fast cap 1119 → 1120 by arithmetic (1110.989 + 8.2 = 1119.189 s over 592).
+- **Its gate's one red, cured in the leg (test-only):** the run from a checkout directly under /tmp (MUST 3's layout) was red on the refusal legs' expected WORDS — there /tmp is also the folder holding the checkout, named first, while the leg knew only «the temp folder». The helper refused rightly; the leg now expects the start's own name for the layout (`refusalOf(root)`), green in both layouts.
 
 ## 2.369.406 — 2026-11-16
 
