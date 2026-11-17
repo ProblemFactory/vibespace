@@ -38,11 +38,27 @@ export function engineFailedWords(f, plugin, t) {
   }
   return t(i18nKey('{plugin} · its plugin failed: {what}'), { plugin, what });
 }
+/** B-cf42: what an engine profile's RUNNING kernel answers when it is not what its plugin's probe says (`kl` = the profile's
+ *  `kernelLive` mark / the engine row's `live`: {why: 'standard' | 'features', probe, live}) — the live answer, in words. */
+const KERNEL_FEATURE_WORDS = Object.freeze({ surfaces: i18nKey('page prompts'), webauthn: i18nKey('passkeys'), credentials: i18nKey('sign-in notes') });
+export function liveKernelWords(kl, t) {
+  if (!kl || typeof kl !== 'object' || !kl.why) return '';
+  if (kl.why === 'standard') return t(i18nKey('its running browser answers as standard Chrome, not as this kernel'));
+  if (kl.why === 'protocol') return t(i18nKey('its running kernel speaks another VibeSpace kernel protocol'));
+  const words = (a) => (Array.isArray(a) && a.length ? a.map((f) => (KERNEL_FEATURE_WORDS[f] ? t(KERNEL_FEATURE_WORDS[f]) : String(f))).join(', ') : t(i18nKey('none')));
+  return t(i18nKey('its running kernel offers {live}; its plugin says {probe}'), { live: words(kl.live), probe: words(kl.probe) });
+}
 /** lane engine-plugin: one engine row's sub-line — its plugin and the kernel's version (the probe's fact; never a path), or
  *  why it cannot be picked (the refusal by its code, the kernel's state). Lane engine-distribution: the kernel's download as
  *  it runs / why it failed; the version VibeSpace MEASURED («measured x») beats the plugin's word, which beats the declared
- *  one («declared x (not measured)»); a verified receipt says so. */
+ *  one («declared x (not measured)»); a verified receipt says so. B-cf42: + what its running browsers answer when that is not
+ *  what its probe says (`e.live`). */
 export function engineNote(e, t) {
+  const base = engineNoteOf(e, t);
+  const lw = base && e && !e.code && e.live && Number(e.live.n) > 0 ? liveKernelWords(e.live, t) : '';
+  return lw ? base + ' · ' + t(i18nKey('{n} browser(s) on it: {live}'), { n: Number(e.live.n), live: lw }) : base;
+}
+function engineNoteOf(e, t) {
   if (!e || typeof e !== 'object') return '';
   const plugin = String(e.label || e.id || '');
   if (e.code) return engineFailedWords(e.failed, plugin, t) || buildRefusalWords({ code: e.code }, t) || t(i18nKey('{plugin} does not answer as a browser engine.'), { plugin });
@@ -210,15 +226,18 @@ export function engineOptions(r, stored, t) {
  * whose provider runs no build of ours (a connected / cloud browser) — its row's `buildChoice` cell is false
  * (lane dc-browser-providers: the server stamps the cell on the profile view; never the provider's id here).
  */
-export function cardBuildLine({ buildChoice = true, choice = null, running = null, missing = null, live = false } = {}, t) {
+export function cardBuildLine({ buildChoice = true, choice = null, running = null, missing = null, live = false, kernelLive = null } = {}, t) {
   if (!buildChoice) return null;
   const c = normalize(choice);
   if (missing && c.kind !== 'default') return { text: t(i18nKey("{build} is no longer on this computer — it won't start until you choose another build (Change build…)."), { build: choiceWords(c, t) }), warn: true };
   const base = c.kind === 'default' ? choiceWords(c, t) : t(i18nKey('{build} (pinned)'), { build: choiceWords(c, t) });
   const r = typeof running === 'string' && running ? running : null;
-  const text = live && r ? t(i18nKey('{choice} · running Chrome {version}'), { choice: base, version: r }) : base;
+  const text0 = live && r ? t(i18nKey('{choice} · running Chrome {version}'), { choice: base, version: r }) : base;
+  // B-cf42: an engine profile whose RUNNING kernel answers otherwise than its plugin's probe — the live answer, on its row
+  const lw = c.kind === 'plugin' && kernelLive && typeof kernelLive === 'object' && kernelLive.engine === c.id ? liveKernelWords(kernelLive, t) : '';
+  const text = lw ? text0 + ' · ' + lw : text0;
   // ui-words: the first letter of a sentence t() already worded (it may start with a build's name)
-  return { text: text.charAt(0).toUpperCase() + text.slice(1), warn: false };
+  return { text: text.charAt(0).toUpperCase() + text.slice(1), warn: !!lw };
 }
 
 /**
@@ -316,8 +335,8 @@ export function changedWords({ label = '', to = null, restarted = false, told = 
 
 /** A refused change / create, in the device's words by the server's CODE. null = the caller adds the server's sentence. */
 export function buildRefusalWords(r, t) {
-  switch (String((r && r.code) || '')) {
   if (r && r.failed) { const fw = engineFailedWords(r.failed, String(r.failed.label || ''), t); if (fw) return fw; } // B-a470: an engine plugin's OWN error, quoted at every door
+  switch (String((r && r.code) || '')) {
     case 'browser_build_missing': return t(i18nKey('That Chrome build is not installed there any more — pick another.'));
     case 'browser_build_not_executable': return t(i18nKey("That Chrome build's program can't be run."));
     case 'browser_path_missing': return t(i18nKey('There is no file at that path.'));

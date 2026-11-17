@@ -1749,6 +1749,7 @@ function agentProfileView(p, facts = {}, extra = {}) {
   // spells; kept inline here so this file stays import-free)
   if (rest.browser && rest.browser.kind === 'path') rest.browser = { kind: 'path' };
   if (rest.buildMissing && rest.buildMissing.kind === 'path') rest.buildMissing = { ...rest.buildMissing, what: null };
+  if (rest.kernelLive) rest.kernelLive = { engine: rest.kernelLive.engine, version: rest.kernelLive.version, why: rest.kernelLive.why, probe: rest.kernelLive.probe, live: rest.kernelLive.live }; // B-cf42: the fact, never the keeper's own bookkeeping (filed, at)
   return { ...rest, ...ex, scope: scopeOf(p), use: agentUseOf(p, facts) };
 }
 /**

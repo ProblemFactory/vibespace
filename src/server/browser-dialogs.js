@@ -2519,18 +2519,26 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const feats = r && Array.isArray(r.features) ? r.features.map((x) => String(x).slice(0, 40)).slice(0, 16) : [];
     if (r && Number(r.protocol) === 1 && feats.includes('surfaces')) {
       w.kernel = { protocol: 1, kinds: Array.isArray(r.kinds) ? r.kinds.map((x) => String(x).slice(0, 40)).slice(0, 64) : [], features: feats };
+      w.kernelWhy = null;
       say('kernel:' + w.profileId, `${w.profileId}: a browser kernel with VibeSpace surfaces (protocol 1, ${feats.join(' + ')}) — its page prompts are read from its surfaces`);
       const unknown = w.kernel.kinds.filter((k) => !SF().SURFACE_KINDS.includes(k));
       if (unknown.length) say('kinds:' + w.profileId, `${w.profileId}: the kernel names ${unknown.length} surface kind(s) VibeSpace does not know (${unknown.slice(0, 4).join(', ')}) — each is a generic card`);
     } else {
       w.kernel = false;
+      // B-cf42: WHY it is today's road — «not a method» ONLY by CDP's own code (-32601: standard Chrome); any other error (the watch
+      // not connected, a send that failed) is no answer about the kernel; `kernelSaid` = what a kernel that DID answer offers
+      w.kernelWhy = v && v.error ? (Number(v.error.code) === -32601 ? 'no-method' : 'error') : v && v.timeout ? 'timeout' : r && Number(r.protocol) !== 1 ? 'protocol' : 'no-surfaces';
+      w.kernelSaid = r && Number(r.protocol) === 1 ? feats : [];
       say('kernel:' + w.profileId, `${w.profileId}: no VibeSpace surfaces on this browser (${v && v.error ? 'VibeSpace.getVersion is not a method here' : v && v.timeout ? 'VibeSpace.getVersion did not answer' : r && Number(r.protocol) !== 1 ? `protocol ${String(r.protocol).slice(0, 8)}` : 'no surfaces feature'}) — today's dialog road`);
     }
     if (!(v && v.timeout)) kernelOf.set(w.profileId, w.kernel); // never asked again for this browser (a silent socket is asked on the next one)
     crossCheckEngine(w);
   }
   /** P0's hand-over (design §1.2): a profile whose browser is an ENGINE plugin has TWO answers about its kernel — the engine's own
-   *  probe (the registry) and the live `VibeSpace.getVersion` — a disagreement is ONE journal line; the live answer rules. */
+   *  probe (the registry) and the live `VibeSpace.getVersion` — a disagreement is ONE journal line; the live answer rules.
+   *  B-cf42: and said where the owner looks — every answer is handed to the keeper (`noteEngineLive`: a disagreement marks the
+   *  profile — its Agent browser panel row, its engine's card — and files ONE For-you item per engine version; an agreeing
+   *  answer clears the mark). A socket that never answered is no answer (nothing handed). */
   function crossCheckEngine(w) {
     let choice = null; try { const b = keeper && typeof keeper.browserOf === 'function' ? keeper.browserOf(w.profileId) : null; choice = b && b.browserChoice && b.browserChoice.kind === 'plugin' ? b.browserChoice : null; } catch { choice = null; }
     if (!choice || typeof keeper.engineFactOf !== 'function') return;
@@ -2539,6 +2547,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const pf = Array.isArray(fact.features) ? fact.features.map((x) => String(x).slice(0, 40)).sort() : [], lf = w.kernel ? [...w.kernel.features].sort() : [];
       const pk = Array.isArray(fact.kinds) ? fact.kinds.length : 0, lk = w.kernel ? w.kernel.kinds.length : 0;
       if (JSON.stringify(pf) !== JSON.stringify(lf) || pk !== lk) say('engine-x:' + w.profileId, `${w.profileId}: the engine ${String(choice.id).slice(0, 80)}'s probe says features [${pf.join(', ')}] and ${pk} kinds, its live kernel [${lf.join(', ')}] and ${lk} — the live answer rules`);
+      if (w.kernelWhy !== 'timeout' && w.kernelWhy !== 'error' && typeof keeper.noteEngineLive === 'function') keeper.noteEngineLive(w.profileId, { engine: String(choice.id || ''), version: fact.measuredVersion || fact.version || null, label: fact.label || null, why: w.kernel ? null : w.kernelWhy || null, probe: pf, live: w.kernel ? lf : [...(w.kernelSaid || [])].sort() });
     }).catch(() => { /* the probe's own refusal is the keeper's to say */ });
   }
   /** THE THREE-TOUCH RULE on one page session (every attach, every re-ask of a held tab): ① `VibeSpace.enable {surfaces:true}`

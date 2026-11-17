@@ -325,6 +325,8 @@ router.get('/api/browser/housekeeping', async (req, res) => {
       // lane browser-profile-clone (B-9669): where a copy's logins came from (the row's fold: "copied from {label} on {date}")
       r.clonedFrom = p && p.clonedFrom ? { label: String(p.clonedFrom.label || ''), at: Number(p.clonedFrom.at) || 0 } : null;
       r.buildMissing = p && p.buildMissing ? { what: p.buildMissing.what, kind: p.buildMissing.kind, at: p.buildMissing.at } : null;
+      // B-cf42: an engine profile whose RUNNING kernel answers otherwise than its plugin's probe (the keeper's mark — the row's build line)
+      r.kernelLive = p && p.kernelLive ? { engine: p.kernelLive.engine, version: p.kernelLive.version, why: p.kernelLive.why, probe: p.kernelLive.probe, live: p.kernelLive.live } : null;
     }
     h.kept = keptRowsFor(req, h.kept); // lane browser-resume (§3.9)
     res.json({ ...h, conversations: convs.map(({ pinned, lastActive, ...c }) => c) });

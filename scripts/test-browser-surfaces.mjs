@@ -478,6 +478,30 @@ const tidOf = (k) => k.targets()[0].targetId;
   };
   const same = await cross({ installed: true, features: ['surfaces', 'webauthn', 'credentials'], kinds: [...FAKE_KINDS] });
   const diff = await cross({ installed: true, features: ['surfaces'], kinds: FAKE_KINDS.slice(0, 19) });
+  // B-cf42: …and every answer is HANDED to the keeper (noteEngineLive) — the owner's case (13 of 13 «not a method») reproduced with
+  // the fake kernel's standard-Chrome mode; a socket that never answered hands nothing
+  const handed = async (Dmod, probeFact, mode = {}) => {
+    const k = await startFakeKernel({ firstUrl: 'https://example.test/', mode });
+    const notes = [];
+    const keeper = { cdpEndpointFor: async () => ({ ok: true, url: k.wsUrl }), onLease: () => () => { }, browserOf: () => ({ browserChoice: { kind: 'plugin', id: 'vibespace.custom-browser', version: '150' } }), engineFactOf: async () => probeFact, noteEngineLive: (pid, f) => notes.push({ pid, ...f }) };
+    const w = Dmod.create({ keeper, log: { warn() { }, log() { } }, enableTimeoutMs: 300, holdersOf: () => [], leaseCountOf: () => 1 });
+    await w.arm(PID, { budgetMs: 3000 }); await sleep(50);
+    w.shutdown(); await k.close();
+    return notes;
+  };
+  const ALL3 = { installed: true, features: ['surfaces', 'webauthn', 'credentials'], kinds: [...FAKE_KINDS], version: 'Chromium 150 fake', label: 'Kernel' };
+  const hSame = await handed(D, ALL3), hStd = await handed(D, ALL3, { standard: true });
+  const BEk = require('../src/browser-engines.js');
+  ok(hSame.length === 1 && hSame[0].pid === PID && hSame[0].engine === 'vibespace.custom-browser' && hSame[0].why === null && BEk.kernelLiveVerdict(hSame[0]) === null
+    && hStd.length === 1 && hStd[0].why === 'no-method' && hStd[0].live.length === 0 && hStd[0].version === 'Chromium 150 fake' && BEk.kernelLiveVerdict(hStd[0]).why === 'standard',
+    'B-cf42: the watch HANDS each engine profile\'s answer to the keeper — an agreeing kernel (verdict null, the mark cleared) and a standard-Chrome answer («not a method» while the probe claims three ⇒ standard)', { hSame, hStd });
+  const hNs = await handed(D, ALL3, { features: ['webauthn', 'credentials'] });
+  ok(hNs.length === 1 && hNs[0].why === 'no-surfaces' && JSON.stringify(hNs[0].live) === JSON.stringify(['credentials', 'webauthn']) && BEk.kernelLiveVerdict(hNs[0]).why === 'features',
+    'B-cf42 (the review): a kernel that answered WITHOUT `surfaces` hands what it DID offer (never «none», never «standard Chrome»)', hNs);
+  const hNeedle = "      if (w.kernelWhy !== 'timeout' && w.kernelWhy !== 'error' && typeof keeper.noteEngineLive === 'function') keeper.noteEngineLive(";
+  const Dh = DSRC.includes(hNeedle) ? MUT.load('src/server/browser-dialogs.js', DSRC.replace(hNeedle, '      if (false) keeper.noteEngineLive('), 'no-hand') : null;
+  const hBad = Dh ? await handed(Dh, ALL3, { standard: true }) : null;
+  ok(hBad && hBad.length === 0, 'CONTROL (B-cf42): a watch copy that keeps the answer to its journal hands nothing — the owner\'s case stays a journal line (RED on the leg above)', hBad);
   ok(same.length === 0 && diff.length === 1 && /probe says features \[surfaces\] and 19 kinds, its live kernel \[credentials, surfaces, webauthn\] and 20 — the live answer rules/.test(diff[0]), 'an ENGINE profile: the engine\'s own probe and the live VibeSpace.getVersion are compared — ONE journal line when they differ (the live answer rules), none when they agree', diff);
 }
 {

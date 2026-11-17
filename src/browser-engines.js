@@ -211,6 +211,20 @@ function pluginErrorWords(pe, verbWord, denied) {
   return `${head} — the plugin was ${d}; a plugin that reads outside its own folder has a bug, unless its manifest declares the path`;
 }
 
+/** B-cf42: what an ENGINE profile's two answers about its kernel say — its plugin's probe (`probe` = the probe's features) and the
+ *  running browser's own `VibeSpace.getVersion` (`live` = the features it ANSWERED; `why` = the watch's reason for today's road: 'no-method'
+ *  (CDP's -32601) | 'protocol' | 'no-surfaces' | null). Only the KERNEL'S features are compared (`egress-allowlist` is VibeSpace's
+ *  own proxy, never the kernel's answer). → null (they agree) | `{why: 'standard' (the running browser answers as standard Chrome) |
+ *  'protocol' (another kernel protocol: VibeSpace uses none of it) | 'features', probe, live}` (sorted lists). */
+const KERNEL_FEATURES = Object.freeze(ENGINE_FEATURES.filter((f) => f !== EGRESS_FEATURE));
+function kernelLiveVerdict({ probe = [], live = [], why = null } = {}) {
+  const side = (a) => [...new Set((Array.isArray(a) ? a : []).map(String).filter((f) => KERNEL_FEATURES.includes(f)))].sort();
+  const p = side(probe), l = side(live);
+  if (why === 'protocol') return p.length ? { why: 'protocol', probe: p, live: [] } : null;
+  if (JSON.stringify(p) === JSON.stringify(l)) return null;
+  return { why: !l.length && why === 'no-method' ? 'standard' : 'features', probe: p, live: l };
+}
+
 /** THE ANSWER VERDICT of one verb. `reply` = the loader's route reply `{status, body}`; `settings` = the plugin's manifest
  *  `contributes.settings` (where the egress row is looked for). →
  *  probe: `{ok:true, fact:{id, installed, executable, binaryPath, version, protocol, kinds, features, egress}}` (`egress` =
@@ -371,7 +385,7 @@ function defaultEngineOf({ own = undefined, fleet = null } = {}) {
 }
 
 module.exports = { ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE, OWN_ARG_RE, ENGINE_FEATURES, EGRESS_FEATURE, EGRESS_ROW_KEY,
-  platformOf, engineWords, engineAnswerVerdict, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineArgs, engineLaunchEnv, engineWrapperText, choiceOfDefault, isDefaultEngineValue, defaultEngineOf,
+  platformOf, engineWords, engineAnswerVerdict, kernelLiveVerdict, KERNEL_FEATURES, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineArgs, engineLaunchEnv, engineWrapperText, choiceOfDefault, isDefaultEngineValue, defaultEngineOf,
   egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs,
   BINARY_ROW_KEY, binaryRowOf, binaryRowPath, ENGINE_OWNER_ROW_RE, engineSourceOf, programMagicOk, userBinaryVerdict, // lane engine-spi-egress L1b
   LAUNCHER_SWITCHES, LAUNCHER_ARG_RE, launcherArgsOf, // lane engine-spi-egress L1b r3

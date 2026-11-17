@@ -1199,6 +1199,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // the engines view, Change build… and New profile… (a hand-copied list dropped `landing`: the card's words never showed)
     return { ...f, measuredVersion: f.installed ? k.measuredVersion : null, measuredAt: f.installed ? k.measuredAt : null, measureFailed: !!(f.installed && k.measureError), kernel: { ...k } };
   }
+  /** B-cf42: the RUNNING browsers on an engine whose kernel answers otherwise than its probe (their profiles' `kernelLive` marks, the
+   *  profile still on that engine) — the card's count and the first one's answer; null = none. */
+  const liveOfEngine = (id) => { const ms = reg.profiles.filter((p) => p && p.kernelLive && p.kernelLive.engine === id && p.browser && p.browser.kind === 'plugin' && p.browser.id === id && B.isLiveBrowser(reg.browsers[p.id])); return ms.length ? { n: ms.length, why: ms[0].kernelLive.why, probe: ms[0].kernelLive.probe, live: ms[0].kernelLive.live } : null; };
   /** The engine table as the USER's surfaces read it (Change build…, New profile…, Settings): each row's probe FACT, never its
    *  path (the kernel's place stays here). A paired machine's dialog has none. */
   async function engineRowsView({ host = null } = {}) {
@@ -1211,7 +1214,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // lane engine-distribution: 实测 / 声明 — the measured version beats the declared one; the receipt's read; the download
         declaredVersion: f.declaredVersion || null, measuredVersion: f.measuredVersion || null, measuredAt: f.measuredAt || null, integrity: f.integrity || null, kernel: f.kernel || null,
         // lane engine-spi-egress L1b: the kernel's SOURCE ('download' | 'user'), and the core's verdict on the owner's program (never its path)
-        source: f.source || 'download', binary: f.userBinary ? { code: f.userBinary.code, why: f.userBinary.why } : null, measureFailed: !!f.measureFailed }) });
+        source: f.source || 'download', binary: f.userBinary ? { code: f.userBinary.code, why: f.userBinary.why } : null, measureFailed: !!f.measureFailed, live: liveOfEngine(row.id) }) });
     }
     return out;
   }
@@ -1334,6 +1337,29 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser', ...(n.i18n ? { i18n: n.i18n } : {}) }); p.buildMissing.filed = true; commit(); }
     catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": the missing-build notice was not filed (${e && e.message}) — tried again at the next launch`); }
     log.warn?.(`[browser] ${p.id} "${p.label}": its Chrome build ${what} is missing — ${v.error}`);
+  }
+  /** B-cf42: an ENGINE profile's two answers about its kernel — its plugin's probe and the running browser's own
+   *  VibeSpace.getVersion (handed in by the dialog watch, src/server/browser-dialogs.js crossCheckEngine) — said where the owner
+   *  looks: a disagreement is a MARK on the profile (`kernelLive` — its Agent browser panel row, its engine's card) and ONE For-you
+   *  item per engine version (a profile on the same engine and version already filed ⇒ none); an agreeing answer clears the mark.
+   *  The live answer rules — the watch already follows it; this only says it. */
+  function noteEngineLive(profileId, f = {}) {
+    const p = reg.profiles.find((x) => x && x.id === String(profileId || '')); // a conversation's own browser on the default engine too
+    const engine = String((f && f.engine) || '');
+    if (!p) return null;
+    if (!p.browser || p.browser.kind !== 'plugin' || p.browser.id !== engine) { if (p.kernelLive) { delete p.kernelLive; commit(); } return null; } // it left that engine: its mark goes
+    const v = ENG.kernelLiveVerdict(f);
+    if (!v) { if (p.kernelLive) { delete p.kernelLive; commit(); log.log?.(`[browser] ${p.id} "${p.label}": its running kernel answers as its engine's probe says again`); } return null; }
+    const version = f.version ? String(f.version).replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 120) : null;
+    const was = p.kernelLive && p.kernelLive.engine === engine && p.kernelLive.version === version ? p.kernelLive : null;
+    if (!was || was.why !== v.why || JSON.stringify(was.live) !== JSON.stringify(v.live) || JSON.stringify(was.probe) !== JSON.stringify(v.probe)) { p.kernelLive = { engine, version, why: v.why, probe: v.probe, live: v.live, at: now(), filed: !!(was && was.filed) }; commit(); }
+    if (p.kernelLive.filed) return p.kernelLive;
+    if (reg.profiles.some((x) => x && x !== p && x.kernelLive && x.kernelLive.filed && x.kernelLive.engine === engine && x.kernelLive.version === version)) { p.kernelLive.filed = true; commit(); return p.kernelLive; }
+    if (!userTodos || typeof userTodos.add !== 'function') return p.kernelLive;
+    const n = BB.liveKernelNotice({ engineLabel: f.label || '', id: engine, version, verdict: v });
+    try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser', i18n: n.i18n }); p.kernelLive.filed = true; commit(); }
+    catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": the running-kernel notice was not filed (${e && e.message}) — tried again at its next answer`); }
+    return p.kernelLive;
   }
   /** lane browser-admin: the owner a NEW record is born with from the dialog's `use` (rows already resolved to keys by the
    *  route) — THE write's verdict over an empty record, so a create says the same refusals a PATCH says. Throws by name. */
@@ -7928,7 +7954,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     agentRoadFor: (id, { host = null } = {}) => (id ? dialogRoadOf(named().find((p) => p.id === String(id)) || null) : M.leaseRoadVerdict({ mediated: false, proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: false, remote: !!host, agent: true })),
     list, profile, profileByRef, browserOf, browserIdentityOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
-    engineFactOf, engineRowsView, defaultEngineNow, // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy
+    engineFactOf, engineRowsView, defaultEngineNow, noteEngineLive, // B-cf42: the dialog watch hands each engine profile's live kernel answer in // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy
     installEngineKernel: (id) => { const d = eds(); if (!d) throw namedError('browser_engine_missing', 'this instance does not download browser engine kernels'); return d.installKernel(id, { by: 'user' }); }, // lane engine-distribution: a person's «Download kernel»
     restartProfile, askAnswer: (id, by) => { ensureLoaded(); const rec = reg.browsers[id]; return askAnswer(rec, profile(id), by); }, // lane browser-unresponsive: THE recovery + one ask (the gate's seam)
     cliPin, cliFactReady, rejudgeClis /* B-7a30: the CLI judge's pass (the gate awaits it) */, _cliNow: () => cliNow() /* B-7a30: the launch's bounded stamp (the gate places a stall in it) */, _reattached: () => reattached, // cliFacts + installCli: the CLI row, in ...installs.api

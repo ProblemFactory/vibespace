@@ -448,7 +448,8 @@ console.log('— ④ the client words (en / zh / ja) + wiring');
   const noZh = [...said].filter((k) => !(k in zh)), noJa = [...said].filter((k) => !(k in ja));
   ok(said.size > 25 && !noZh.length && !noJa.length, `every sentence the build model says (${said.size}) has a zh and a ja entry`, { noZh, noJa });
   const tv = read('src/lib/browser-trace-view.js');
-  ok(/cardBuildLine\(\{ buildChoice: r\.buildChoice, choice: r\.browser, running: runningBuildOf\(r\.id\), missing: r\.buildMissing, live: !!r\.live \}, t\)/.test(tv) && /build: \(r\) => openBuildDialog\(app, r\.id,/.test(tv) && /id: 'build', label: t\('Change build…'\)/.test(read('src/lib/browser-panel-model.js')) /* design 015: the ⋯ menu's act */ && /runningBuildOf\(r\.id\)\]\); \};/.test(tv),
+  ok(/cardBuildLine\(\{ buildChoice: r\.buildChoice, choice: r\.browser, running: runningBuildOf\(r\.id\), missing: r\.buildMissing, live: !!r\.live, kernelLive: r\.kernelLive \|\| null \}, t\)/.test(tv)
+    && /r\.kernelLive = p && p\.kernelLive \? \{ engine: p\.kernelLive\.engine, version: p\.kernelLive\.version, why: p\.kernelLive\.why, probe: p\.kernelLive\.probe, live: p\.kernelLive\.live \} : null;/.test(read('src/routes/browser-trace.js')) /* B-cf42: the panel's rows carry the mark (the pictures found it missing) */ && /build: \(r\) => openBuildDialog\(app, r\.id,/.test(tv) && /id: 'build', label: t\('Change build…'\)/.test(read('src/lib/browser-panel-model.js')) /* design 015: the ⋯ menu's act */ && /runningBuildOf\(r\.id\)\]\); \};/.test(tv),
     'the Agent browser panel row: the build line (its fact in the row\'s signature) + Change build… opening THE dialog');
   const sw = read('src/lib/browser-switcher.js');
   ok(/st\.view\.build \? cardBuildLine\(/.test(sw) && /a\.kind === 'build'\) \{ close\(\); openBuildDialog\(app, profileId,/.test(sw), 'the switch dialog gains the build row and its ONE act');
@@ -719,6 +720,51 @@ const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platfor
     const qa = fv(EQ, 500, { ...DEN, permission: 'FileSystemRead', resource: '/usr/bin/python3' });
     ok(!qa.failed && !qa.error.includes('ERR_ACCESS_DENIED') && /does not speak this VibeSpace's engine protocol/.test(qa.error), 'CONTROL (B-a470): without the quote the 500 says the generic sentence — no code, no resource (RED for the legs above)', qa.error);
   }
+  // B-cf42: an ENGINE profile's two answers about its kernel (the probe vs the running browser's VibeSpace.getVersion) — THE verdict,
+  // the one For-you notice's words, the row's and the card's words (the owner's hub 2026-11-10: 13 of 13 answered «not a method»)
+  {
+    const KV = ENGN.kernelLiveVerdict, ALL3 = ['credentials', 'surfaces', 'webauthn'];
+    const rowsK = [
+      [{ probe: ['webauthn', 'surfaces', 'credentials'], live: ALL3, why: null }, null, 'the same features (any order) ⇒ they agree'],
+      [{ probe: ALL3, live: [], why: 'no-method' }, 'standard', 'no VibeSpace.getVersion while the probe claims three ⇒ standard Chrome'],
+      [{ probe: ['surfaces'], live: ALL3, why: null }, 'features', 'another feature list ⇒ features'],
+      [{ probe: ALL3, live: [], why: 'no-surfaces' }, 'features', 'a kernel without `surfaces` (today\'s road, not «not a method») ⇒ features, never «standard Chrome»'],
+      [{ probe: ['egress-allowlist'], live: [], why: 'no-surfaces' }, null, 'an egress-only engine (VibeSpace\'s own proxy, no kernel feature) ⇒ nothing to say'],
+      [{ probe: [], live: [], why: 'no-method' }, null, 'a probe that claims no kernel feature ⇒ nothing to say'],
+      [{ probe: ['surfaces', 'anti-bot'], live: ['surfaces'], why: null }, null, 'a word outside the kernel features is not compared'],
+      [{ probe: ALL3, live: ['webauthn', 'credentials'], why: 'no-surfaces' }, 'features', 'a kernel that answered without `surfaces` says what it DID offer (the review: never «none»)'],
+      [{ probe: ALL3, live: [], why: 'protocol' }, 'protocol', 'another kernel protocol ⇒ protocol'],
+      [{ probe: ['egress-allowlist'], live: [], why: 'protocol' }, null, '…but not for an engine that claims no kernel feature'],
+    ];
+    const badK = rowsK.filter(([f, want]) => { const v = KV(f); return want === null ? v !== null : !v || v.why !== want; });
+    ok(!badK.length && JSON.stringify(KV(rowsK[2][0])) === JSON.stringify({ why: 'features', probe: ['surfaces'], live: ALL3 }), 'B-cf42 THE VERDICT: ' + rowsK.map((r) => r[2]).join('; '), badK);
+    const LW = BB.LIVE_KERNEL_WORDS || {};
+    const ns = BB.liveKernelNotice({ engineLabel: 'Custom Browser Kernel', id: EID, version: '150.0.7871.186', verdict: KV(rowsK[1][0]) });
+    const nf = BB.liveKernelNotice({ engineLabel: '', id: EID, version: null, verdict: KV(rowsK[3][0]) });
+    ok(ns && ns.text === 'Custom Browser Kernel 150.0.7871.186 runs as standard Chrome: its browser does not answer as a VibeSpace kernel' && ns.detail.includes('offers credentials, surfaces, webauthn, but the running browser does not answer VibeSpace.getVersion') && ns.i18n.text.key === LW.standard && ns.i18n.detail[0].key === LW.standardDetail
+      && nf.text === `${EID}: its running kernel offers none, but its plugin says credentials, surfaces, webauthn` && nf.i18n.text.params.live.key === LW.none && BB.liveKernelNotice({ verdict: null }) === null
+      && BB.liveKernelNotice({ engineLabel: 'K', id: EID, verdict: KV(rowsK[8][0]) }).text === 'K: its running kernel speaks another VibeSpace kernel protocol, so VibeSpace uses none of what its plugin says it offers (credentials, surfaces, webauthn)',
+      'B-cf42 THE NOTICE: «<engine> <version> runs as standard Chrome…» (its detail names what the plugin claims and that VibeSpace follows the running browser); another answer says both lists; its i18n keys are the table\'s («none» said in the client\'s language)', { ns, nf: nf.text });
+    const BMk = await import('../src/lib/browser-build-model.js');
+    const zhK = (await import('../src/lib/i18n-zh.js')).default, jaK = (await import('../src/lib/i18n-ja.js')).default;
+    const tK = (d) => (s, p) => String((d && d[s]) || s).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
+    const KL = { engine: EID, version: '150', ...KV(rowsK[1][0]) }, KF = { engine: EID, version: '150', ...KV(rowsK[2][0]) };
+    const cl = BMk.cardBuildLine({ choice: { kind: 'plugin', id: EID }, kernelLive: KL }, tK(null)), clZ = BMk.cardBuildLine({ choice: { kind: 'plugin', id: EID }, kernelLive: KF }, tK(zhK));
+    const clOther = BMk.cardBuildLine({ choice: { kind: 'plugin', id: 'other.engine' }, kernelLive: KL }, tK(null)), clNone = BMk.cardBuildLine({ choice: { kind: 'plugin', id: EID } }, tK(null));
+    ok(cl.warn === true && cl.text === `The custom kernel (${EID}) (pinned) · its running browser answers as standard Chrome, not as this kernel` && clZ.warn && clZ.text.includes('登录记录, 网页提示, 通行密钥') && clZ.text.includes('它的插件声称提供 网页提示')
+      && !clOther.warn && !/standard Chrome/.test(clOther.text) && !clNone.warn, 'B-cf42 THE PANEL ROW: the profile\'s build line says its running kernel\'s answer (en; zh in its words) and warns; a mark for another engine / no mark says nothing', { cl, clZ: clZ.text });
+    const eRow = { id: EID, label: 'Kernel', installed: true, executable: true, version: '150', features: ALL3, live: { n: 13, ...KV(rowsK[1][0]) } };
+    const en = BMk.engineNote(eRow, tK(null)), ej = BMk.engineNote(eRow, tK(jaK)), e0 = BMk.engineNote({ ...eRow, live: null }, tK(null));
+    ok(en === `${e0} · 13 browser(s) on it: its running browser answers as standard Chrome, not as this kernel` && ej.includes('これを使うブラウザ 13 個') && ej.includes('標準の Chrome') && !/standard Chrome/.test(e0) && BMk.engineNote({ ...eRow, code: 'browser_engine_missing' }, tK(null)).indexOf('browser(s) on it') < 0,
+      'B-cf42 THE ENGINE CARD: its note adds how many of its browsers answer otherwise and how (en; ja) — none without marks, none on a refused row', { en, ej });
+    // CONTROL: a verdict that compares every feature word (egress-allowlist too) speaks for an egress-only engine — the table goes red
+    const kAnchor = "  const side = (a) => [...new Set((Array.isArray(a) ? a : []).map(String).filter((f) => KERNEL_FEATURES.includes(f)))].sort();";
+    const esK = read('src/browser-engines.js');
+    ok(esK.includes(kAnchor), 'control setup (B-cf42): the verdict\'s kernel-feature filter is where the control cuts');
+    const MK = mutantCopies('badm-cf42', REPO);
+    const EK = MK.load('src/browser-engines.js', esK.replace(kAnchor, "  const side = (a) => [...new Set((Array.isArray(a) ? a : []).map(String))].sort();"), 'all-words');
+    ok(EK.kernelLiveVerdict(rowsK[4][0]) !== null, 'CONTROL (B-cf42): a verdict comparing every word says an egress-only engine runs otherwise (RED for the table above)');
+  }
   // lane engine-spi-egress: the features are a CLOSED set; `egress-allowlist` needs the manifest's RESERVED row (a string)
   const PE = { ...P0, features: ['egress-allowlist', 'anti-bot'] }, ROWS = [{ key: 'egressAllowlist', type: 'string', default: 'a.test', label: 'Sites' }];
   const pvS = (settings, body = PE) => ENGN.engineAnswerVerdict('probe', { status: 200, body }, { id: 'acme.engine', label: 'Acme', settings });
@@ -972,6 +1018,41 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
     'B-a470 over the real loader: the fixture\'s probe answering 500 {error, code, permission, resource} ⇒ the registry quotes it (deniedWords), the keeper\'s fact and the engines view carry `failed`, a start is refused naming ERR_ACCESS_DENIED', { prF: prF.error, esF: esF && esF.message });
   setMode(null);
   if (ke.profile(pe.id).buildMissing) { await ke.start(pe.id, { why: 'test' }); await ke.stop(pe.id, { why: 'user' }); } // clear the mark the two refusals above left
+  // B-cf42 THE REAL KEEPER: the dialog watch's answer (noteEngineLive) marks the profile, files ONE For-you item per engine version,
+  // the engines view counts the marks; an agreeing answer clears it
+  {
+    const ALL3 = ['credentials', 'surfaces', 'webauthn'], STD = { engine: EID, version: KVER, label: 'Fixture Browser Engine', why: 'no-method', probe: ALL3, live: [] };
+    const tL = todos.length;
+    const m1 = ke.noteEngineLive(pe.id, STD), m1b = ke.noteEngineLive(pe.id, STD);
+    const pe2 = ke.createProfile({ label: 'Kernel two', browser: { kind: 'plugin', id: EID } }, { engine: await ke.engineFactOf(EID) });
+    const m2 = ke.noteEngineLive(pe2.id, STD);
+    await ke.stop(pe.id, { why: 'user' }).catch(() => { }); await ke.stop(pe2.id, { why: 'user' }).catch(() => { });   // none running: the card counts none
+    const rv0 = (await ke.engineRowsView()).find((r) => r.id === EID);
+    await ke.start(pe.id, { why: 'test' }); await ke.start(pe2.id, { why: 'test' }); // the card counts RUNNING browsers
+    const rv2 = (await ke.engineRowsView()).find((r) => r.id === EID);
+    const items = todos.slice(tL);
+    ok(m1 && m1.why === 'standard' && m1.filed && ke.profile(pe.id).kernelLive && ke.profile(pe.id).kernelLive.why === 'standard' && m2 && m2.filed && items.length === 1 && /^Fixture Browser Engine Chromium 150\.0\.7871\.186 vibespace-fake-kernel runs as standard Chrome/.test(items[0].text) && items[0].i18n && items[0].i18n.text.key === BB.LIVE_KERNEL_WORDS.standard && items[0].origin === 'browser'
+      && rv2 && rv2.live && rv2.live.n === 2 && rv2.live.why === 'standard' && rv0 && !rv0.live,
+      'B-cf42: the answer marks the profile (kernelLive), ONE For-you item for the engine version — a second answer and a SECOND profile on the same version file none; the engines view counts both marks while their browsers run (none while stopped)', { items: items.map((x) => x.text), live: rv2 && rv2.live });
+    const tV = todos.length;
+    ke.noteEngineLive(pe2.id, { ...STD, version: KVER + '.1' });
+    ok(todos.length === tV + 1 && ke.profile(pe2.id).kernelLive.version === KVER + '.1', '…another engine version is its own item', todos.slice(tV).map((x) => x.text));
+    const agree = ke.noteEngineLive(pe.id, { ...STD, why: null, live: ALL3 });
+    const rv1 = (await ke.engineRowsView()).find((r) => r.id === EID);
+    const offE = ke.noteEngineLive(pe.id, { ...STD, engine: 'other.engine' });
+    ok(agree === null && !ke.profile(pe.id).kernelLive && rv1.live && rv1.live.n === 1 && offE === null && !ke.profile(pe.id).kernelLive && ke.noteEngineLive('bp-nosuch00', STD) === null,
+      '…an agreeing answer clears the mark (the view counts one); an answer for another engine than the profile runs, or no such profile, marks nothing', { rv1: rv1.live });
+    // the review: a profile that LEFT the engine (Change build… to Chrome) is counted no more, and its next answer drops the mark
+    ke.noteEngineLive(pe.id, STD);
+    const rec2 = ke._reg().profiles.find((x) => x.id === pe2.id); const was2 = rec2.browser; rec2.browser = { kind: 'default' };
+    const rvL = (await ke.engineRowsView()).find((r) => r.id === EID);
+    const gone = ke.noteEngineLive(pe2.id, STD);
+    ok(rvL.live && rvL.live.n === 1 && gone === null && !ke.profile(pe2.id).kernelLive && ke.profile(pe.id).kernelLive, '…a profile that left the engine is not counted, and its next answer drops its mark (the other\'s stays)', { live: rvL.live });
+    rec2.browser = was2;
+    ke.noteEngineLive(pe.id, { ...STD, why: null, live: ALL3 });
+    await ke.stop(pe.id, { why: 'user' }).catch(() => { }); await ke.stop(pe2.id, { why: 'user' }).catch(() => { });
+    await ke.removeProfile(pe2.id);
+  }
   // the PLUGIN turned off ⇒ the table loses it at once ⇒ refused browser_engine_missing (marked, ONE item)
   LDR.setEnabled(EID, false);
   const t3 = todos.length;

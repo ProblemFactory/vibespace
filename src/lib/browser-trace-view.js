@@ -880,7 +880,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const psw = ps ? stuckWords(ps, t) : null;
     const autoText = autoDialogsOf(r) ? t('Accepts leave-page dialogs by itself (typed input is lost) until its next start') : null;
     // lane browser-admin 2a: WHICH CHROME BUILD — the choice and, while it runs, the build the browser itself reports (the fold)
-    const buildLine = cardBuildLine({ buildChoice: r.buildChoice, choice: r.browser, running: runningBuildOf(r.id), missing: r.buildMissing, live: !!r.live }, t);
+    const buildLine = cardBuildLine({ buildChoice: r.buildChoice, choice: r.browser, running: runningBuildOf(r.id), missing: r.buildMissing, live: !!r.live, kernelLive: r.kernelLive || null }, t); // B-cf42: + its running kernel's answer
     // lane browser-unresponsive: the keeper's verdict, in the viewer's clock ("Not answering since 16:34")
     const uw = r.unresponsive && Number.isFinite(r.unresponsive.since) ? unresponsiveWords({ since: r.unresponsive.since, cause: r.unresponsive.cause || null, label: String(r.label || r.id), clock: clockOf(r.unresponsive.since) }, t) : null;
     const x = { unresponsive: uw, w: WORDS, chip: app.browserChipFor ? app.browserChipFor(r.id) : null, mine: app._browserProfiles && app._browserProfiles.machine ? String(app._browserProfiles.machine.host || '') : '', stuck: psw, autoDialogs: !!autoText, autoText, buildLine, limits: v?.limits || null, now: Date.now() };

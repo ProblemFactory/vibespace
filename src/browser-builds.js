@@ -214,6 +214,27 @@ const PROGRAM_WHY_WORDS = Object.freeze({
 });
 /** `{key}` filled with `params` the way the client's t() fills it (a `{name}` with no param is kept). */
 const fillKey = (key, params) => String(key).replace(/\{(\w+)\}/g, (m, k) => (params[k] === undefined ? m : String(params[k])));
+/** B-cf42: the ONE For-you notice per engine version whose RUNNING kernel answers otherwise than its plugin's probe
+ *  (src/browser-engines.js kernelLiveVerdict) — the live answer rules; {probe} / {live} = the kernel's feature names. */
+const LIVE_KERNEL_WORDS = Object.freeze({
+  standard: '{plugin} runs as standard Chrome: its browser does not answer as a VibeSpace kernel',
+  standardDetail: 'Its plugin says it offers {probe}, but the running browser does not answer VibeSpace.getVersion. VibeSpace follows the running browser, so page prompts, passkeys and sign-in notes work there as on standard Chrome. Update the plugin or its kernel; the Agent browser panel shows which profiles.',
+  features: '{plugin}: its running kernel offers {live}, but its plugin says {probe}',
+  featuresDetail: 'VibeSpace follows the running kernel and uses only what it offers. Update the plugin or its kernel; the Agent browser panel shows which profiles.',
+  protocol: '{plugin}: its running kernel speaks another VibeSpace kernel protocol, so VibeSpace uses none of what its plugin says it offers ({probe})',
+  none: 'none',
+});
+function liveKernelNotice({ engineLabel = '', id = '', version = null, verdict = null } = {}) {
+  if (!verdict || typeof verdict !== 'object') return null;
+  const clean = (s, n) => String(s == null ? '' : s).replace(/[\0-\x1f\x7f]/g, ' ').trim().slice(0, n);
+  const plugin = [clean(engineLabel || id, 80), clean(version, 60)].filter(Boolean).join(' ');
+  const list = (a) => (Array.isArray(a) && a.length ? a.map((f) => clean(f, 40)).join(', ') : LIVE_KERNEL_WORDS.none);
+  const key = verdict.why === 'standard' ? LIVE_KERNEL_WORDS.standard : verdict.why === 'protocol' ? LIVE_KERNEL_WORDS.protocol : LIVE_KERNEL_WORDS.features, dkey = verdict.why === 'standard' ? LIVE_KERNEL_WORDS.standardDetail : LIVE_KERNEL_WORDS.featuresDetail;
+  const params = { plugin, probe: list(verdict.probe), live: list(verdict.live) };
+  const listI = (a) => (Array.isArray(a) && a.length ? list(a) : { key: LIVE_KERNEL_WORDS.none }); // the client says «none» in its language
+  const iparams = { plugin, probe: listI(verdict.probe), live: listI(verdict.live) };
+  return { text: fillKey(key, params), detail: fillKey(dkey, params), i18n: { text: { key, params: iparams }, detail: [{ key: dkey, params: iparams }] } };
+}
 /** The ONE For-you notice of a chosen build that is gone (the keeper files it once per profile and choice): plain words,
  *  what to do — the English is the inbox's own (its items are stored strings, never re-translated); an owner's program's notice
  *  carries its `i18n` too (the client says it in its language). `source` / `why` = the engine's kernel source and the core's verdict
@@ -421,7 +442,7 @@ function versionSays(out, version) {
   return { ok: !!m && m[1] === String(version), says: m ? m[1] : null };
 }
 
-module.exports = { buildWords, missingNotice, PROGRAM_NOTICE_WORDS, PROGRAM_WHY_WORDS, BUILDS_REL, BUILD_DIR_RE, BUILDS_MAX, BUILD_CODES, parseBuildDir, compareVersions, buildExecutable, fileFact, listBuilds, normalizeBrowserChoice, sameChoice, browserChoiceVerdict, runningBuildOf, choiceView, agentChoiceView, agentMissingView, buildsView,
+module.exports = { buildWords, missingNotice, PROGRAM_NOTICE_WORDS, PROGRAM_WHY_WORDS, LIVE_KERNEL_WORDS, liveKernelNotice, BUILDS_REL, BUILD_DIR_RE, BUILDS_MAX, BUILD_CODES, parseBuildDir, compareVersions, buildExecutable, fileFact, listBuilds, normalizeBrowserChoice, sameChoice, browserChoiceVerdict, runningBuildOf, choiceView, agentChoiceView, agentMissingView, buildsView,
   // lane chrome-builds-download (design 004)
   CFT_CHANNELS, DOWNLOAD_PLATFORM, DISK_FACTOR, WITNESS_FILE, VERSION_RE, downloadUrlVerdict, parseLastKnownGood, parseKnownGood, majorsOf, buildCompatVerdict, downloadPlan, parseZipListing, zipShapeVerdict, versionSays,
   downloadHardRows }; // lane engine-distribution: the two hard rows, shared with a browser engine's kernel download
