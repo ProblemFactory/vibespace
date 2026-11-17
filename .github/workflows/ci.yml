@@ -156,7 +156,12 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7]
-    timeout-minutes: 45
+    # 60 (2026-11-17, the UI train's seam, the coordinator's word). Green shards on 2.369.407's release mirror took 2006 to
+    # 2396 s of suites — 33 to 40 min before setup — so 45 left no room for one red suite retried in place: on the UI train's
+    # prep mirror heavy 3/7 was cancelled by this limit at 45 min 16 s, its suite step at 43 min 53 s with two red tries of
+    # 111 s inside it, and a cancelled shard hides every suite it had not yet run. 60 holds the slowest green shard (40 min)
+    # plus a retried red of about 8 min plus setup. The structural cure (an eighth shard, or a trimmed tier) is a parked row.
+    timeout-minutes: 60
     # every setup step bounded — the fast job's rule and numbers
     steps:
       - uses: actions/checkout@v4
