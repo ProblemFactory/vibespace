@@ -7264,6 +7264,17 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   const size107 = r107.outputFiles[0].contents.length;
   ok(/--external:xlsx\b/.test(flags107) && !got107.includes('xlsx') && extra107.length === 0, `§107 the device bundle's input list (build:agentd's own esbuild flags: ${ext107.join(', ')}) names no hub-only library — every node_modules package is a DEVICE_LIBS row (${got107.length} packages)`, extra107.length ? extra107 : got107.includes('xlsx') ? 'node_modules/xlsx' : flags107);
   ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of the .398 release's ${RELEASE_BUNDLE_BYTES} bytes (${size107})`, size107);
+  // 主开发 2026-11-17 (usage-predict, moved onto 2.369.406): THE DEVICE AGENT CARRIES NO CODE IT NEVER RUNS — the prediction core
+  // and its adapters are hub-only: a descriptor NAMES its adapter (`quota.predict: 'claude'`), src/harnesses/predict-adapters.js
+  // resolves it on the hub, and the registry checks only the name's shape (src/harnesses/index.js predictShapeErrs)
+  const PREDICT107 = /(^|\/)(usage-predict|predict-adapters|[a-z-]+-predict)\.js$/;
+  const pred107 = (r) => Object.keys(r.metafile.inputs).filter((k) => PREDICT107.test(k));
+  ok(pred107(r107).length === 0, `§107 the device bundle's inputs hold no prediction module (src/usage-predict.js, src/harnesses/predict-adapters.js, *-predict.js) — ${Object.keys(r107.metafile.inputs).length} inputs`, pred107(r107));
+  // its RED: the descriptor's shape before this law (claude-quota.js REQUIRING its adapter), an in-memory copy through the same build
+  const CQ107 = path.join(REPO, 'src/harnesses/claude-quota.js'), cqSrc107 = read('src/harnesses/claude-quota.js'), NAME107 = "predict: 'claude',";
+  const before107 = { name: 'before-107', setup(b) { b.onLoad({ filter: /claude-quota\.js$/ }, (a) => (a.path === CQ107 ? { contents: cqSrc107.split(NAME107).join("predict: require('./claude-predict.js'),"), loader: 'js' } : undefined)); } };
+  const rp107 = await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107, preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent', plugins: [before107] });
+  ok(cqSrc107.includes(NAME107) && pred107(rp107).length > 0, `§107 CONTROL: claude-quota.js requiring its adapter (the shape before) carries prediction code into the device bundle (${pred107(rp107).join(', ')}) — the leg above goes red on it`);
   const rc107 = await build107(ext107.filter((x) => x !== 'xlsx'));
   ok(libs107(rc107).includes('xlsx') && rc107.outputFiles[0].contents.length > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same build with xlsx NOT external inlines node_modules/xlsx (${rc107.outputFiles[0].contents.length} bytes) — both legs above go red on it`);
   ok(/try \{ XLSX = require\('xlsx'\); \} catch \{ throw Object\.assign\(new Error\('[^']*'\), \{ code: 'xlsx_hub_only' \}\); \}/.test(read('src/safe-fs-worker.js')), '§107 asked on a paired machine (no spreadsheet library there), the xlsxSheets op refuses by name — xlsx_hub_only');
