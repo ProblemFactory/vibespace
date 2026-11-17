@@ -136,5 +136,33 @@ console.log('⑦ the manual names every flag');
   const missing = [...WS.RULE_FLAGS.map((x) => x.flag), ...WS.OTHER_FLAGS, '--show'].filter((f) => !man.includes(f));
   ok(!missing.length && /vibespace-channels watches/.test(man), `docs/agent/channels-manual.md names every watch flag + watches${missing.length ? ' — missing ' + missing.join(' ') : ''}`); }
 
+console.log('⑧ B-5740: a word list keeps a number whole (4,995 is ONE keyword); a near-everything keyword is said');
+{
+  const T = [['4,995', ['4,995']], ['1, 2', ['1', '2']], ['deploy,incident', ['deploy', 'incident']], ['a\\,b', ['a,b']], ['4,995,ops', ['4,995', 'ops']], [',,x,', ['x']], ['1,2', ['1,2']], ['v1.2,v1.3', ['v1.2', 'v1.3']]];
+  const bad = T.filter(([v, want]) => J(WS.splitWords(v)) !== J(want)).map(([v]) => `${v} → ${J(WS.splitWords(v))}`);
+  ok(!bad.length, `splitWords: ${T.length} shapes — a comma between two digits stays in its word, «\\,» is a comma, every other comma separates`, bad.join('; '));
+  const kw = WS.watchSpecFromArgs(['--keyword', '4,995']);
+  ok(kw.ok && J(kw.spec.filter.rules) === J([{ kind: 'keyword', value: '4,995' }]) && kw.warnings && kw.warnings.length === 1 && /digits only/.test(kw.warnings[0]), 'the incident: `--keyword 4,995` is ONE keyword «4,995», and the answer says it is digits only', J(kw));
+  const sh = WS.watchSpecFromArgs(['--keyword', 'ok,deploy']), plain = WS.watchSpecFromArgs(['--keyword', 'deploy']), nc = WS.watchSpecFromArgs(['--not-contains', '1,000']);
+  ok(sh.ok && sh.warnings.length === 1 && /«ok» is 2 characters/.test(sh.warnings[0]) && plain.ok && plain.warnings === undefined && nc.ok && J(nc.spec.filter.rules) === J([{ kind: 'not-contains', value: '1,000' }]), 'a keyword of 2 characters is said; a plain keyword says nothing; --not-contains keeps 1,000 whole too', J({ sh: sh.warnings, plain: plain.warnings, nc: nc.spec && nc.spec.filter }));
+  ok(F.validateRule({ kind: 'keyword', value: '4,995' }).ok, 'the dialog\'s own judge takes the whole keyword (one schema)');
+  ok(/one keyword — the comma between digits keeps it whole/.test(kw.warnings[0]) && /inside longer numbers too/.test(kw.warnings[0]), 'the note says the comma kept ONE keyword and that a number matches inside longer ones', kw.warnings[0]);
+  const nc2 = WS.watchSpecFromArgs(['--not-contains', 'ok']), cjk = WS.watchSpecFromArgs(['--keyword', '发票']);
+  ok(nc2.ok && /«ok» is 2 characters — it leaves out almost every message/.test((nc2.warnings || [])[0] || '') && cjk.ok && cjk.warnings === undefined, '--not-contains says it LEAVES OUT (never «matches»); a two-character CJK word (发票) is a real word — no note', J({ nc: nc2.warnings, cjk: cjk.warnings }));
+  const viaSpec = WS.watchSpecOfBody({ spec: { mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'keyword', value: 'ok' }] } } });
+  const oldCli = WS.watchSpecOfBody({ keywords: ['4', '995'], delivery: 'next-turn' });
+  ok(viaSpec.ok && (viaSpec.warnings || []).length === 1 && oldCli.ok && (oldCli.warnings || []).length === 2 && /«4» is 1 character/.test(oldCli.warnings[0]), 'EVERY road of the server door says it: a --spec row, and an OLDER CLI\'s keywords[] (which still split «4,995» itself — the incident, now said)', J({ spec: viaSpec.warnings, old: oldCli.warnings }));
+  // CONTROL: the release's splitter (every comma) — 4,995 became «4» and «995»
+  const SRC = fs.readFileSync(path.join(REPO, 'src/channel-watch-spec.js'), 'utf8');
+  const KW = "rules: (v) => (splitWords(v).length ? splitWords(v) : ['']).map((value) => ({ kind: 'keyword', value })) },";
+  ok(SRC.split(KW).length === 2, 'control setup: the keyword flag line is present once');
+  const Pre = MUT.load('src/channel-watch-spec.js', SRC.replace(KW, "rules: (v) => (split(v).length ? split(v) : ['']).map((value) => ({ kind: 'keyword', value })) },"), 'b5740-pre');   // stale-pins: kept (the release's line, restored by the red control)
+  const pre = Pre.watchSpecFromArgs(['--keyword', '4,995']);
+  ok(pre.ok && J(pre.spec.filter.rules.map((r) => r.value)) === J(['4', '995']), 'RED CONTROL: the release\'s splitter makes «4» and «995» (the keyword «4» matched almost every message) — the incident leg is red on it', J(pre.spec && pre.spec.filter));
+  // wiring: the door carries the warnings; the CLI prints them; the help says the rule
+  const ACC = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8'), CLI = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8');
+  ok(/const filed = r0 && r0\.ok !== false && !r0\.already;/.test(ACC) && /Array\.isArray\(sp\.warnings\) && sp\.warnings\.length \? \{ warnings: sp\.warnings \}/.test(ACC) && /r0\.what \? \{\} : \{ what: WS\.watchWhatWords\(row\) \}/.test(ACC) && CLI.includes("for (const kwNote of Array.isArray(r.warnings) ? r.warnings : []) console.log(`note: ${kwNote}`);") && CLI.includes("if (r.proposed && r.what && !r.already) console.log(`asked for: ${r.what}`);") && CLI.includes('a comma between two digits stays in its word'), 'the watch door carries the notes and the rule\'s words into every answer that filed it (never the already-waiting one); the CLI prints «note:» and «asked for:»; its help says the word-list rule');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

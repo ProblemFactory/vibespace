@@ -297,7 +297,10 @@ The user gives you two DIFFERENT things, in this order:
     for wake/digest ONLY when the user asked to be told at once (or to act on
     those messages immediately); otherwise next-turn.
   - what (no rule = every new message; several rules = any of them, or all of
-    them with `--match every`): `--keyword w[,w]` · `--regex "pattern"` (judged
+    them with `--match every`): `--keyword w[,w]` (a comma between two digits
+    stays in its word — `4,995` is one keyword; `\,` is a comma; a keyword of
+    2 characters or less, or digits only, is said in the answer as a note) ·
+    `--regex "pattern"` (judged
     at save: ≤ 256 characters, no backreference / lookaround / nested or
     side-by-side repeats, never matching an empty message — refused by name
     with the piece; matched case-insensitively) · `--mention name[,name]` ·

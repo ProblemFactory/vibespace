@@ -1018,7 +1018,8 @@ function create(engineCtx) {
     // lane judged-watch-state (B-f42e): THE AGENT IS TOLD AT THE DOOR — a judged rule (`--kind decision`, `--reply-to-sent
     // --infer`) is saved either way; the answer's last line names its road («live» or «will NOT run: why — starts when …»)
     const road = judgedRoadFor(fl.filter, { cid: ctx.id });
-    const withRoad = (r) => (road && r && r.ok !== false ? { ...r, judged: road.line, road: road.state } : r);
+    // B-5740: a near-everything keyword is said, and the rule's words ride every answer that FILED it (a wake request too)
+    const withRoad = (r0) => { const filed = r0 && r0.ok !== false && !r0.already; const r = filed ? { ...r0, ...(Array.isArray(sp.warnings) && sp.warnings.length ? { warnings: sp.warnings } : {}), ...(r0.what ? {} : { what: WS.watchWhatWords(row) }) } : r0; return road && r && r.ok !== false ? { ...r, judged: road.line, road: road.state } : r; };
     if (d === 'wake') return withRoad(await fileWatchRequest(ctx, tg, row, S.why));
     // the grain AS READ (the legacy lift + the access rule applied) minus this agent's row, plus the new one
     const r = await setGrain(tg.adapterId, tg.grain, { watchers: [...cur.watchers.filter((w) => w && pkOf(w.principal) !== pk), row] }, { by: `agent:${ctx.id}` });

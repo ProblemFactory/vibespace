@@ -12,19 +12,54 @@
 const F = require('./channel-filter.js');
 
 const split = (v) => String(v === null || v === undefined ? '' : v).split(',').map((x) => x.trim()).filter(Boolean);
+/** B-5740 (fb-1a174fe34a: `--keyword 4,995` became the keywords «4» and «995» and matched almost every message): A WORD
+ *  LIST — a comma BETWEEN TWO DIGITS stays inside its word (a number's thousands), `\,` is a literal comma, every other
+ *  comma separates («1, 2» is two words, «4,995» one). */
+function splitWords(v) {
+  const s = String(v === null || v === undefined ? '' : v);
+  const out = [];
+  let cur = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '\\' && s[i + 1] === ',') { cur += ','; i++; continue; }
+    if (c === ',' && /\d/.test(s[i - 1] || '') && /\d/.test(s[i + 1] || '')) { cur += c; continue; }
+    if (c === ',') { out.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  out.push(cur);
+  return out.map((x) => x.trim()).filter(Boolean);
+}
+/** B-5740: a word that matches nearly everything is SAID (never refused — it may be what you mean): a Latin word of 2
+ *  characters or fewer (a CJK word of two is a real word — 发票, 合同 — never flagged), or digits only (a match is a
+ *  substring: «995» also hits «1995»). `--keyword` matches it, `--not-contains` LEAVES OUT what holds it; a number kept
+ *  whole by its comma is named one keyword. */
+const KEYWORD_SHORT = 2;
+function keywordWarnings(rules) {
+  const out = [];
+  for (const r of rules || []) {
+    if (!r || (r.kind !== 'keyword' && r.kind !== 'not-contains') || typeof r.value !== 'string' || !r.value) continue;
+    const v = r.value, n = [...v].length, keep = r.kind === 'keyword';
+    const one = /\d,\d/.test(v) ? ' (one keyword — the comma between digits keeps it whole)' : '';
+    if (n <= KEYWORD_SHORT && /^[\x20-\x7e]+$/.test(v)) out.push(`${r.kind} «${v}» is ${n} character${n === 1 ? '' : 's'} — it ${keep ? 'matches' : 'leaves out'} almost every message (a longer word, or --regex)`);
+    else if (/^[\d.,]+$/.test(v)) out.push(`${r.kind} «${v}»${one} is digits only — it ${keep ? 'matches' : 'leaves out'} any message holding those digits, inside longer numbers too`);
+  }
+  return out;
+}
+/** …on EVERY road of the server's door (the flags, a --spec row, an older CLI's keywords[] — which split «4,995» itself). */
+const withWarnings = (v) => { if (!v || !v.ok || v.warnings) return v; const w = keywordWarnings((v.spec && v.spec.filter && v.spec.filter.rules) || []); return w.length ? { ...v, warnings: w } : v; };
 const refuse = (code, error, extra) => ({ ok: false, code, error, ...(extra || {}) });
 
 /** THE FLAG TABLE — one row per message rule kind the CLI offers: `flag`, whether it takes a value, and the rule(s) it
  *  makes (the validator judges them). `since` = a kind that may not be on this server yet (refused by name until it is). */
 const RULE_FLAGS = Object.freeze([
   { kind: 'mention', flag: '--mention', value: 'name[,name]', rules: (v) => (split(v).length ? split(v) : ['']).map((value) => ({ kind: 'mention', value })) },
-  { kind: 'keyword', flag: '--keyword', value: 'word[,word]', rules: (v) => (split(v).length ? split(v) : ['']).map((value) => ({ kind: 'keyword', value })) },
+  { kind: 'keyword', flag: '--keyword', value: 'word[,word]', rules: (v) => (splitWords(v).length ? splitWords(v) : ['']).map((value) => ({ kind: 'keyword', value })) },   // B-5740: 4,995 is one word
   { kind: 'regex', flag: '--regex', value: 'pattern', rules: (v) => [{ kind: 'regex', value: String(v === null || v === undefined ? '' : v) }] },
   { kind: 'sender-in-group', flag: '--sender-in-group', value: 'id[,id]', rules: (v) => [{ kind: 'sender-in-group', members: split(v) }] },
   { kind: 'from-address', flag: '--from', value: 'address[,address]', rules: (v) => (split(v).length ? split(v) : ['']).map((value) => ({ kind: 'from-address', value })) },
   { kind: 'subject', flag: '--subject', value: 'words', rules: (v) => [{ kind: 'subject', value: String(v === null || v === undefined ? '' : v) }] },
   { kind: 'has-attachment', flag: '--has-attachment', value: null, rules: () => [{ kind: 'has-attachment' }] },
-  { kind: 'not-contains', flag: '--not-contains', value: 'word[,word]', rules: (v) => (split(v).length ? split(v) : ['']).map((value) => ({ kind: 'not-contains', value })) },
+  { kind: 'not-contains', flag: '--not-contains', value: 'word[,word]', rules: (v) => (splitWords(v).length ? splitWords(v) : ['']).map((value) => ({ kind: 'not-contains', value })) },
   { kind: 'time-window', flag: '--time-window', value: 'HH:MM-HH:MM', rules: (v) => { const [from, to] = String(v || '').split('-'); return [{ kind: 'time-window', from: from || '', to: to || '' }]; } },
   { kind: 'reply-to-mine', flag: '--reply-to-mine', value: null, rules: () => [{ kind: 'reply-to-mine' }] },
   { kind: 'in-thread-with-me', flag: '--in-thread-with-me', value: null, rules: () => [{ kind: 'in-thread-with-me' }] },
@@ -129,13 +164,15 @@ function watchSpecFromArgs(argv) {
   }
   if (one['--match'] !== undefined && !rules.length) return refuse('match-without-rules', '--match says how the rules combine — give at least one rule flag', { flag: '--match' });
   const num = (v) => (v === undefined ? undefined : v === '' ? NaN : Number(v));
-  return specVerdict({
+  const warnings = keywordWarnings(rules);   // B-5740
+  const verdict = specVerdict({
     notify: m === 'digest' ? 'digest' : 'wake', delivery: m === 'digest' ? 'wake' : (m || 'next-turn'),
     ...(rules.length ? { filter: { match: one['--match'] === undefined ? 'any' : one['--match'], rules } } : {}),
     ...(one['--digest-minutes'] !== undefined ? { digestMinutes: num(one['--digest-minutes']) } : {}),
     ...(one['--cap'] !== undefined ? { dailyWakeCap: num(one['--cap']) } : {}),
     why: one['--why'],
   }, { flagOf });
+  return verdict.ok && warnings.length ? { ...verdict, warnings } : verdict;
 }
 
 /** THE SERVER'S DOOR: a watch body → the judged row. `args` = the CLI's raw flags; `spec` = a row as JSON; else the
@@ -143,12 +180,12 @@ function watchSpecFromArgs(argv) {
  *  through `specVerdict`. */
 function watchSpecOfBody(b0) {
   const b = b0 && typeof b0 === 'object' ? b0 : {};
-  if (Array.isArray(b.args)) return watchSpecFromArgs(b.args);
-  if (b.spec && typeof b.spec === 'object') return specVerdict(b.why !== undefined ? { ...b.spec, why: b.why } : b.spec);
+  if (Array.isArray(b.args)) return withWarnings(watchSpecFromArgs(b.args));
+  if (b.spec && typeof b.spec === 'object') return withWarnings(specVerdict(b.why !== undefined ? { ...b.spec, why: b.why } : b.spec));
   const kws = (Array.isArray(b.keywords) ? b.keywords : []).map((x) => String(x === null || x === undefined ? '' : x).trim()).filter(Boolean);
   if (b.delivery !== undefined && b.delivery !== null && b.delivery !== '' && !MODES.includes(b.delivery)) return refuse('bad-mode', MODE_WORDS, { flag: '--mode' });
   const digest = b.delivery === 'digest';
-  return specVerdict({ notify: digest ? 'digest' : 'wake', delivery: digest ? 'wake' : (b.delivery || 'next-turn'), ...(kws.length ? { filter: { match: 'any', rules: kws.map((value) => ({ kind: 'keyword', value })) } } : {}), dailyWakeCap: b.dailyWakeCap, why: b.why });
+  return withWarnings(specVerdict({ notify: digest ? 'digest' : 'wake', delivery: digest ? 'wake' : (b.delivery || 'next-turn'), ...(kws.length ? { filter: { match: 'any', rules: kws.map((value) => ({ kind: 'keyword', value })) } } : {}), dailyWakeCap: b.dailyWakeCap, why: b.why }));
 }
 
 /** A watch row in WORDS (the CLI's --show / watches, the For-you item): how it notifies, on what, the cap. */
@@ -163,4 +200,4 @@ function watchWhatWords(w, filter = null) {
   return (f.match === 'every' ? 'messages matching all of: ' : 'messages matching any of: ') + f.rules.map((r) => F.ruleWhy(r)).join(f.match === 'every' ? ' and ' : ', ');
 }
 
-module.exports = { RULE_FLAGS, NOT_OFFERED, OTHER_FLAGS, BOOL_FLAGS, DECISION_FLAGS, MODES, MODE_WORDS, specVerdict, watchSpecFromArgs, watchSpecOfBody, watchHowWords, watchWhatWords };
+module.exports = { splitWords, keywordWarnings, KEYWORD_SHORT, RULE_FLAGS, NOT_OFFERED, OTHER_FLAGS, BOOL_FLAGS, DECISION_FLAGS, MODES, MODE_WORDS, specVerdict, watchSpecFromArgs, watchSpecOfBody, watchHowWords, watchWhatWords };

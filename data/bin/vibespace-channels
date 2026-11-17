@@ -316,6 +316,7 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
                                                      --regex "pat" --mention name --from addr --subject "w" --sender-in-group id[,id]
                                                      --has-attachment --not-contains w --time-window HH:MM-HH:MM [--tz-offset ±min]
                                                      --reply-to-mine --in-thread-with-me --reply-to-sent [--infer]
+                                                     (a word list: a comma between two digits stays in its word — 4,995 — and \\, is a comma)
                                                      (--infer: a plain message after your send, no quote / thread, is judged once
                                                      by the LLM plugin — is it an answer? — the user's plugin + daily budget)
                                                      --kind decision --condition "words" [--choice a,b] [--threshold 0.7] [--per-hour 20]
@@ -867,6 +868,8 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     else if (r.proposed && r.filed) { console.log(`requested — a wake or a digest is a billed turn, so the user approves it (at most ${r.dailyWakeCap} wakes a day); until then nothing wakes you.${r.expiresAt ? ` Unanswered, it expires ${new Date(r.expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC — then you can ask again.` : ''}`); console.log(r.filed); }   // lane wake-approve-card r3: its lifetime
     else if (r.proposed) console.log(`requested — a wake or a digest is a billed turn, so the user approves it: their For-you tray shows what Approve writes (at most ${r.dailyWakeCap} wakes a day). Until then nothing wakes you (request ${r.request.id}).`);
     else console.log(`watching ${r.target}${r.title ? ` (${r.title})` : ''} — ${on} rides your NEXT turn (free; nothing wakes you)${r.replaced ? '; your earlier watch here was replaced' : ''}. Read back: vibespace-channels watch --show ${r.target} · undo: vibespace-channels unwatch ${r.target}`);
+    if (r.proposed && r.what && !r.already) console.log(`asked for: ${r.what}`);   // B-5740: the rule's words on the billed road too
+    for (const kwNote of Array.isArray(r.warnings) ? r.warnings : []) console.log(`note: ${kwNote}`);   // B-5740: a keyword that matches nearly everything, said
     if (r.judged) console.log(r.judged);   // lane judged-watch-state: the answer's LAST line — the judged rule's road (saved either way; exit 0)
     return;
   }

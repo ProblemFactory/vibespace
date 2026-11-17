@@ -994,11 +994,12 @@ console.log('\n㉓ lane judged-watch-state (B-f42e): a judged rule\'s `watch` an
   ok(vendor === 0, `zero vendor calls (${vendor})`);
   eng.stop();
   // RED CONTROL = the base: an answer without the road — the agent armed a rule that cannot run and is told nothing
-  const ANCH = '    const withRoad = (r) => (road && r && r.ok !== false ? { ...r, judged: road.line, road: road.state } : r);';
+  // B-5740: withRoad also carries the keyword warnings and the «what» words — the control drops ONLY the road
+  const ANCH = '    const withRoad = (r0) => { const filed = r0 && r0.ok !== false && !r0.already; const r = filed ? { ...r0, ...(Array.isArray(sp.warnings) && sp.warnings.length ? { warnings: sp.warnings } : {}), ...(r0.what ? {} : { what: WS.watchWhatWords(row) }) } : r0; return road && r && r.ok !== false ? { ...r, judged: road.line, road: road.state } : r; };';
   if (esrc.split(ANCH).length !== 2) ok(false, 'control anchor moved: withRoad');
   else {
     cfg.rules = false;
-    const e2 = await mk(MUTE.load(ENGP, esrc.replace(ANCH, '    const withRoad = (r) => r;'), 'noroad'), 'base');
+    const e2 = await mk(MUTE.load(ENGP, esrc.replace(ANCH, ANCH.replace('return road && r && r.ok !== false ? { ...r, judged: road.line, road: road.state } : r;', 'return r;')), 'noroad'), 'base');
     const c1 = await run(['watch', KEY, '--kind', 'decision', '--condition', 'the sender asks me to pay an invoice']);
     ok(c1.code === 0 && !/judged rules/.test(c1.out), 'RED CONTROL (the base): without the road the switch-off answer is a plain «watching …» — the door leg above is RED on it', c1.out);
     e2.stop();
