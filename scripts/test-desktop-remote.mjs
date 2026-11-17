@@ -530,16 +530,18 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   dmPre2.stop(); killDaemon(home4);
   // (verify r3) the two new controls — pre-fix bundles written through scripts/mutant-copy.mjs (`selfPath`: the daemon
   // copy keeps its own __filename; only `require` resolves beside the real bundle)
-  const m2Err = '      out.on("error", () => {\n        out = null;\n        resumeChild();\n      });\n';
-  const m2Arm = '      w.on("error", go);\n      w.on("close", go);\n';
-  const l6Seed = '      try {\n        const st0 = fs.statSync(file);\n        if (st0.isFile()) written = st0.size;\n      } catch {\n      }\n';
+  // (B-e55c) the shipped bundle has no left margin — build:agentd strips it (scripts/agentd-bundle-strip.mjs) — so each anchor
+  // starts at a line's first character
+  const m2Err = '\nout.on("error", () => {\nout = null;\nresumeChild();\n});\n';
+  const m2Arm = '\nw.on("error", go);\nw.on("close", go);\n';
+  const l6Seed = '\ntry {\nconst st0 = fs.statSync(file);\nif (st0.isFile()) written = st0.size;\n} catch {\n}\n';
   ok([m2Err, m2Arm, l6Seed].every((x) => bText.split(x).length === 2), 'CONTROL setup: the bundle spells the errored-log resume, the drain/error/close arming and the per-file seed once each');
-  const preM2 = MUT.write('data/bin/vibespace-agentd.js', bText.replace(m2Err, '      out.on("error", () => {\n        out = null;\n      });\n').replace(m2Arm, ''), 'prem2', { selfPath: true });
+  const preM2 = MUT.write('data/bin/vibespace-agentd.js', bText.replace(m2Err, '\nout.on("error", () => {\nout = null;\n});\n').replace(m2Arm, '\n'), 'prem2', { selfPath: true });
   const dmPre5 = deviceOn(home5, preM2);
   const c2 = await orphanLeg(dmPre5, home5, 'pre-enospc', { stall: true, plant: devFull, lines: 4000, fast: true, waitMs: 6000 });
   ok(!c2.landed && c2.alive && c2.line != null && c2.line < 4000, `CONTROL: the pre-fix bundle (resume on 'drain' only, an errored log never resumes) leaves the child FROZEN — alive, marker absent 6 s after the cut, stuck at line ${c2.line} of 4000`, { landed: c2.landed, alive: c2.alive, line: c2.line });
   dmPre5.stop(); killDaemon(home5);
-  const preL6 = MUT.write('data/bin/vibespace-agentd.js', bText.replace(l6Seed, ''), 'prel6', { selfPath: true });
+  const preL6 = MUT.write('data/bin/vibespace-agentd.js', bText.replace(l6Seed, '\n'), 'prel6', { selfPath: true });
   const dmPre6 = deviceOn(home6, preL6);
   const c6 = await orphanLeg(dmPre6, home6, 'pre-full', { plant: fullLog, lines: 2000, waitMs: 10000 });
   ok(c6.landed && c6.logBytes - plantedBytes > 1024 * 1024, `CONTROL: the pre-fix bundle (the cap per orphan event) appends up to another 8 MiB to a full <pid>.log (+${c6.logBytes - plantedBytes} bytes on ${plantedBytes})`, { landed: c6.landed, logBytes: c6.logBytes });

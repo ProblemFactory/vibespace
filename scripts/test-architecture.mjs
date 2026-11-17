@@ -7307,14 +7307,54 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     'dns-packet': 'the stream\'s mDNS candidates (multicast-dns)', '@leichtgewicht/ip-codec': 'the stream\'s mDNS candidates (multicast-dns)', thunky: 'the stream\'s mDNS candidates (multicast-dns)', 'multicast-dns': 'the stream\'s mDNS candidates',
     tweetnacl: 'the device verifies the signed release before it re-execs (src/agentd-signature.js)',
   });
-  const RELEASE_BUNDLE_BYTES = 6037978, DEVICE_BUNDLE_MARGIN = 0.02;   // the .398 release's data/bin/vibespace-agentd.js (主开发's merged read), + 2 % for this tree's own code
+  // B-e55c: what a device downloads is esbuild's output THROUGH scripts/agentd-bundle-strip.mjs (comments and the left margin
+  // gone, the token stream checked equal — 6 145 073 ⇒ 4 866 886 bytes on the 2.369.407 sources); the cap is that size + 2 %
+  // (it was the .398 release's unstripped 6 037 978 + 2 %, and left a unit 14 KB). The strip runs right after esbuild writes the
+  // bundle and BEFORE agentd-release.mjs hashes it (the signed release names the stripped bytes).
+  const { stripBundle: strip107, tokenPrint: print107, bannersOf: banners107 } = await import('./agentd-bundle-strip.mjs');
+  const strips107 = /--outfile=data\/bin\/vibespace-agentd\.js && node scripts\/agentd-bundle-strip\.mjs data\/bin\/vibespace-agentd\.js && /.test(script107)
+    && script107.indexOf('agentd-bundle-strip.mjs') < script107.indexOf('scripts/agentd-release.mjs');
+  const shipped107 = (r) => (strips107 ? strip107(r.outputFiles[0].text, undefined, { check: false }) : r.outputFiles[0].text);   // a size reading (the build's own step checks)
+  const RELEASE_BUNDLE_BYTES = 4866886, DEVICE_BUNDLE_MARGIN = 0.02;   // the 2.369.407 sources' device bundle as build:agentd ships it (stripped), + 2 % for this tree's own code
+  ok(strips107, '§107 build:agentd strips the device bundle (scripts/agentd-bundle-strip.mjs) right after esbuild writes it and before agentd-release.mjs hashes it', script107);
   const r107 = await build107(ext107);
   const got107 = libs107(r107), extra107 = got107.filter((l) => !Object.hasOwn(DEVICE_LIBS, l));
-  const size107 = r107.outputFiles[0].contents.length;
+  const plain107 = r107.outputFiles[0].text, text107 = shipped107(r107), size107 = Buffer.byteLength(text107);
   ok(/--external:xlsx\b/.test(flags107) && !got107.includes('xlsx') && extra107.length === 0, `§107 the device bundle's input list (build:agentd's own esbuild flags: ${ext107.join(', ')}) names no hub-only library — every node_modules package is a DEVICE_LIBS row (${got107.length} packages)`, extra107.length ? extra107 : got107.includes('xlsx') ? 'node_modules/xlsx' : flags107);
-  ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of the .398 release's ${RELEASE_BUNDLE_BYTES} bytes (${size107})`, size107);
+  ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of the 2.369.407 sources' ${RELEASE_BUNDLE_BYTES} bytes, as shipped (${size107})`, size107);
+  ok(Buffer.byteLength(plain107) > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same bundle NOT stripped (${Buffer.byteLength(plain107)} bytes) is over the cap — the size leg goes red without the strip step`);
+  // the strip removes comments and margins ONLY: esbuild's column-0 module banners (whose code a line is — §5 reads them) and the
+  // libraries' legal notices stay, every line keeps its own spacing, a second pass changes nothing
+  const legal107 = (t) => t.slice(t.lastIndexOf('/*! Bundled license information'));
+  const margin107 = text107.split('\n').filter((l) => /^[ \t]/.test(l)).length;
+  ok(banners107(plain107).length > 100 && banners107(text107).join('\n') === banners107(plain107).join('\n') && plain107.includes('/*! Bundled license information') && legal107(text107) === legal107(plain107),
+    `§107 the strip keeps every module banner (${banners107(text107).length}, in order) and the libraries' licence block byte for byte; ${margin107} line(s) still open with a margin — each inside a template literal, a string or a kept comment`);
+  ok(/(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/.test(text107) && /createInjector\(\{\s*platform: process\.platform,/.test(text107) && /capabilities: \[[^\]]*"desktop-serve"/.test(text107),
+    '§107 a line keeps its own spacing — the anchors the heavy suites patch a win32/mac copy of the real bundle by (HELLO, INJ, capabilities) still match the shipped text');
+  // the bundle ON DISK is the stripped one (a build road that skipped the step — a hand esbuild, a CLI that did not run as
+  // itself — exits 0 and ships the unstripped bytes, which the signed release does not name): a stripped bundle opens a few
+  // hundred lines with a margin (template literals, strings, the licence block), an unstripped one ~90 % of its lines
+  {
+    const onDisk107 = path.join(REPO, 'data/bin/vibespace-agentd.js');
+    if (!fs.existsSync(onDisk107)) console.log('  - §107 the agent bundle is not built in this tree (npm run build:agentd) — the on-disk leg is not judged');
+    else {
+      const d107 = fs.readFileSync(onDisk107, 'utf8').split('\n'), m107 = d107.filter((l) => /^[ \t]/.test(l)).length;
+      const p107 = plain107.split('\n'), pm107 = p107.filter((l) => /^[ \t]/.test(l)).length;
+      ok(m107 < d107.length * 0.01 && pm107 > p107.length * 0.5, `§107 data/bin/vibespace-agentd.js is the STRIPPED bundle: ${m107} of ${d107.length} lines open with a margin (CONTROL: esbuild's own output, ${pm107} of ${p107.length})`);
+    }
+  }
+  // THE CHECK BITES: a strip that also took a template literal's margin (its VALUE) is refused by name, and the print sees the
+  // two differences that matter — a token's text and a line break before a token (what semicolon insertion reads)
+  const tpl107 = 'function f() {\n  // a note\n  return `a\n  b`;\n}\n';
+  let bit107 = null; try { strip107(tpl107, undefined, { protect: new Set() }); } catch (e) { bit107 = e.code; }
+  const tplOut107 = strip107(tpl107), root107 = '// server.js\nvar a = 1;\n// package.json\nvar p = {};\n  // a note: see x.js\nvar b = 2;\n';
+  ok(tplOut107 === 'function f() {\nreturn `a\n  b`;\n}\n' && strip107(tplOut107) === tplOut107 && bit107 === 'strip_changed_program'
+    && strip107(root107) === '// server.js\nvar a = 1;\n// package.json\nvar p = {};\nvar b = 2;\n'
+    && print107('x = `a\n  b`;').sha256 !== print107('x = `a\nb`;').sha256 && print107('a\n(b)').sha256 !== print107('a (b)').sha256,
+    `§107 CONTROL: a template literal keeps its inner margin (a second pass changes nothing); a root module's banner (// server.js — what §5 refuses) stays; a strip that took a template's margin is refused (${bit107}); the print tells a token's text and a line break apart`);
   const rc107 = await build107(ext107.filter((x) => x !== 'xlsx'));
-  ok(libs107(rc107).includes('xlsx') && rc107.outputFiles[0].contents.length > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same build with xlsx NOT external inlines node_modules/xlsx (${rc107.outputFiles[0].contents.length} bytes) — both legs above go red on it`);
+  const rcSize107 = Buffer.byteLength(shipped107(rc107));
+  ok(libs107(rc107).includes('xlsx') && rcSize107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same build with xlsx NOT external inlines node_modules/xlsx (${rcSize107} bytes as shipped) — both legs above go red on it`);
   ok(/try \{ XLSX = require\('xlsx'\); \} catch \{ throw Object\.assign\(new Error\('[^']*'\), \{ code: 'xlsx_hub_only' \}\); \}/.test(read('src/safe-fs-worker.js')), '§107 asked on a paired machine (no spreadsheet library there), the xlsxSheets op refuses by name — xlsx_hub_only');
   const code107 = (s) => s.replace(/\/\/[^\n]*/g, '');   // the CODE, never a comment that names the old words
   const files107 = read('src/routes/files.js'), sent107 = code107((files107.match(/function syncRefusedBody[\s\S]*?\n\}/) || [''])[0]);
