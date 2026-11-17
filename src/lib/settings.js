@@ -189,8 +189,12 @@ class SettingsManager {
     // the authoritative state; skip the echo while dirty.
     if (this._saveTimer) return;
     const old = { ...this._values };
+    // the exit check (主开发 17:56Z): a refused row's mark drops once the STORED value changes from another page
+    const stale = [...this._refused.keys()].filter((p) => JSON.stringify((data || {})[p]) !== JSON.stringify((this._server || {})[p]));
     this._values = data;
     this._server = { ...(data || {}) };
+    for (const p of stale) this._refused.delete(p);
+    if (stale.length) this._emitSave(stale);
     this._live = spend && typeof spend === 'object' ? { spend } : null;
     this._emitAllMarks();
     // localStorage backup

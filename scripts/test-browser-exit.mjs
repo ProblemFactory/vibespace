@@ -105,7 +105,7 @@ console.log('② THE ONE REQUEST — through the forwarder to the set address, t
   const drips = []; const drip = await standin((c) => afterConnect(c, (cc) => onGet(cc, (g) => { g.write('HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 200\r\n\r\n{'); const iv = setInterval(() => { try { g.write(' '); } catch { clearInterval(iv); } }, 50); drips.push(iv); })));
   const big = await standin((c) => afterConnect(c, (cc) => onGet(cc, (g) => { const body = JSON.stringify({ ip: '203.0.113.9', pad: 'x'.repeat(4096) }); g.end(`HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\n\r\n${body}`); })));
   const via = (s, o = {}) => EC.requestThrough({ url: CHECK_URL, forwarder: `http://127.0.0.1:${s.address().port}`, tlsConnect: PLAIN, deadlineMs: 400, ...o });
-  const [b1, b2, b3, b4, b5] = await Promise.all([via(silentProxy), via(hangUp), via(silentHost), via(drip), via(big, { capBytes: 1024 })]);   // independent stand-ins: side by side
+  const [b1, b2, b3, b4, b5] = await Promise.all([via(silentProxy), via(hangUp), via(silentHost), via(drip), via(big, { capBytes: 1024, deadlineMs: 3000 })]);   // the cap leg has its OWN longer deadline — it is not a deadline leg   // independent stand-ins: side by side
   for (const iv of drips) clearInterval(iv);
   ok(b1.code === 'exit_proxy_timeout' && b2.code === 'exit_proxy_hung_up' && b3.code === 'exit_check_timeout' && b4.code === 'exit_check_timeout' && b5.code === 'exit_check_too_big',
     'the bounds and the TRUE reason: silence before the tunnel ⇒ the profile\'s proxy did not open the way; a hang-up there ⇒ its own name; silence after it ⇒ the check address; a body that DRIPS past the deadline ⇒ the deadline holds over everything; a body over the cap ⇒ stopped as it arrives', [b1.code, b2.code, b3.code, b4.code, b5.code]);
@@ -212,7 +212,7 @@ const k = mkK();
   const rBefore = await k.exitCheck(pB.id, { tlsConnect: PLAIN });
   ok(rLogin.code === 'exit_restart_first' && rBefore.code === 'exit_restart_first' && seen.connects.length === 0,
     'a running browser whose LOGIN changed since its start, and one started BEFORE the profile had a proxy ⇒ restart-first by name — never measured through a road it does not use; no request', [rLogin.code, rBefore.code]);
-  const KM = mutant('src/server/browser-keeper.js', " || String(hp.credential || '') !== String(of.proxy.credential || '')) return { ok: false, code: 'exit_restart_first'", ") return { ok: false, code: 'exit_restart_first'");
+  const KM = mutant('src/server/browser-keeper.js', " || String(hp.credential || '') !== String(px0.credential || '')) return { ok: false, code: 'exit_restart_first'", ") return { ok: false, code: 'exit_restart_first'");
   const kM = KM.create({ dataDir: path.join(ROOT, 'data-road-red'), homeDir: path.join(ROOT, 'home'), env: () => ({ PATH: PATH_ENV, HOME: path.join(ROOT, 'home'), FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: (x) => settings[x], liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: { add: () => ({ id: 'u1' }) }, proxyLogins: pl });
   const pMr = kM.createProfile({ label: 'Red road', proxy: proxyUrl }); await kM.start(pMr.id, { why: 'user' }); kM.updateProfile(pMr.id, { proxyCredential: ref });
   const rRed = await kM.exitCheck(pMr.id, { tlsConnect: PLAIN });
@@ -223,10 +223,66 @@ const k = mkK();
   let rX = null;
   try { const pX = k.createProfile({ label: 'Attached', provider: 'cdp', cdpPort: 9 }); k.updateProfile(pX.id, { proxy: proxyUrl }); rX = await k.exitCheck(pX.id, { tlsConnect: PLAIN }); } catch (e) { rX = { code: 'setup:' + (e.code || e.message) }; }
   ok(rX && rX.code === 'exit_external_browser', 'a profile whose browser VibeSpace does not start (cdp) ⇒ refused by name like no proxy — that browser leaves by its own settings', rX);
-  // (6) a check with no browser running leaves no forwarder registered behind it
-  const pQ = k.createProfile({ label: 'Quiet', proxy: proxyUrl }); reset();
-  const rQ = await k.exitCheck(pQ.id, { tlsConnect: PLAIN });
-  ok(rQ.ok && k.egressFor(pQ.id).url === null, 'a check with no browser running opens its own forwarder and closes it — nothing registered stays behind');
+  // 主开发 17:56Z (2) — THE CLOSE ITSELF: the check's own forwarder no longer listens after an answer, an unreadable answer and a time-out
+  const fwds = []; const origReq = EC.requestThrough;
+  const conn = (port, line) => new Promise((res) => { const s = net.connect(port, '127.0.0.1'); let b = ''; s.on('connect', () => { if (line) s.write(line); else { s.destroy(); res('open'); } }); s.on('data', (d) => { b += d; if (b.includes('\r\n\r\n')) { s.destroy(); res(b.split('\r\n')[0]); } }); s.on('error', (e) => res(e.code || 'error')); setTimeout(() => { s.destroy(); res('timeout'); }, 2000); });
+  EC.requestThrough = async (o) => { const port = Number(new URL(o.forwarder).port); fwds.push({ port, other: await conn(port, 'CONNECT other.example.test:443 HTTP/1.1\r\nHost: other.example.test:443\r\n\r\n') }); return origReq(o); };
+  const html = net.createServer((c) => { c.on('error', () => { }); let b = ''; c.on('data', function f(d) { b += d.toString('latin1'); if (!b.includes('\r\n\r\n')) return; c.removeListener('data', f); c.write('HTTP/1.1 200 OK\r\n\r\n'); let g = ''; c.on('data', function h(x) { g += x.toString('latin1'); if (!g.includes('\r\n\r\n')) return; c.removeListener('data', h); c.end('HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 13\r\n\r\n<html></html>'); }); }); });
+  const quiet = net.createServer((c) => { c.on('error', () => { }); c.once('data', () => c.write('HTTP/1.1 200 OK\r\n\r\n')); });
+  for (const s of [html, quiet]) await new Promise((r) => s.listen(0, '127.0.0.1', r));
+  const closes = async (kk) => {
+    const out = [];
+    for (const [label, proxy, o] of [['an answer', proxyUrl, {}], ['an unreadable answer', `http://127.0.0.1:${html.address().port}`, {}], ['a time-out', `http://127.0.0.1:${quiet.address().port}`, { deadlineMs: 300 }]]) {
+      const pp = kk.createProfile({ label: `Close ${label} ${out.length}`, proxy }); fwds.length = 0;
+      const r = await kk.exitCheck(pp.id, { tlsConnect: PLAIN, ...o });
+      out.push({ label, code: r.ok ? 'ok' : r.code, other: fwds[0] && fwds[0].other, after: fwds[0] ? await conn(fwds[0].port) : 'no forwarder' });
+    }
+    return out;
+  };
+  const cl = await closes(k);
+  ok(cl[0].code === 'ok' && cl[1].code === 'exit_answer_unreadable' && cl[2].code === 'exit_check_timeout' && cl.every((x) => x.after === 'ECONNREFUSED') && cl.every((x) => /^HTTP\/1\.1 403/.test(String(x.other))),
+    'the check\'s OWN forwarder is CLOSED after an answer, an unreadable answer and a time-out (its port refuses a connection); while it stood it admitted its ONE host only (another name ⇒ 403)', cl);
+  const KC = mutant('src/server/browser-keeper.js', '    finally { auth = null; await px.close({ cut: true }).catch(() => { }); }', '    finally { auth = null; }');
+  const kC = KC.create({ dataDir: path.join(ROOT, 'data-close-red'), homeDir: path.join(ROOT, 'home'), env: () => ({ PATH: PATH_ENV, HOME: path.join(ROOT, 'home') }), serverSetting: (x) => settings[x], liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: { add: () => ({ id: 'u1' }) }, proxyLogins: pl });
+  const clR = await closes(kC);
+  ok(clR.every((x) => x.after === 'open'), 'RED: a check without its close — its forwarder still listens after each of the three (the leg above goes red on it)', clR.map((x) => x.after));
+  kC.shutdown?.();
+  EC.requestThrough = origReq;
+  for (const s of [html, quiet]) { try { s.close(); } catch { } }
+  // 主开发 17:56Z (1) — THE LOGIN THE CHECK READS IS THE CHECK'S OWN: never the forwarders' entry, gone with the check
+  const pO = k.createProfile({ label: 'Own login', proxy: proxyUrl, proxyCredential: ref });
+  const rO = await k.exitCheck(pO.id, { tlsConnect: PLAIN });
+  ok(rO.ok && k._proxyCredHeld(pO.id) === false, '(a) a check with no browser running reads the login for itself — after it, the forwarders\' login entry holds NOTHING for the profile (no user name, no secret left in memory)', { ok: rO.ok, held: k._proxyCredHeld(pO.id) });
+  const pW = k.createProfile({ label: 'Running login', proxy: proxyUrl, proxyCredential: ref });
+  await k.start(pW.id, { why: 'user' });
+  const bfw = Number(new URL(k.egressFor(pW.id).url).port);
+  vault.locked = true;
+  const rW = await k.exitCheck(pW.id, { tlsConnect: PLAIN });
+  const road = await conn(bfw, `CONNECT ${CHECK_HOST}:443 HTTP/1.1\r\nHost: ${CHECK_HOST}:443\r\n\r\n`);
+  vault.locked = false;
+  ok(rW.code === 'proxy_credential_unreadable' && /^HTTP\/1\.1 200/.test(road), '(b) the vault locked, a press on a RUNNING browser: refused by name — and the running browser\'s road still carries its login (not the locked page)', [rW.code, road]);
+  const reads = { n: 0 }; const origRead = pl.read; pl.read = (...x) => { reads.n++; return origRead.apply(pl, x); };
+  k.updateProfile(pW.id, { proxyCredential: '' }); vault.locked = true;
+  const rWs = await k.exitCheck(pW.id, { tlsConnect: PLAIN });
+  vault.locked = false; pl.read = origRead;
+  ok(rWs.code === 'exit_restart_first' && reads.n === 0, 'the comparison with the running browser\'s road comes BEFORE any vault read: its login changed + the vault locked ⇒ restart-first, the vault not asked', [rWs.code, reads.n]);
+  try { await k.stop(pW.id, { why: 'user' }); } catch { }
+  const KO = mutant('src/server/browser-keeper.js', '      auth = { user: r.user, pass: r.pass };\n', '      auth = { user: r.user, pass: r.pass }; proxyCreds.set(k0, { ref: px0.credential, user: r.user, pass: r.pass });\n');
+  const KL = mutant('src/server/browser-keeper.js', "      if (!r.ok) return { ok: false, code: 'proxy_credential_unreadable', error: `\"${p.label}\"'s exit was not checked — ${r.error}`, word: r.word || null };", "      if (!r.ok) { proxyCreds.set(k0, { ref: px0.credential, refused: { code: 'proxy_credential_unreadable', sentence: r.error, word: r.word || null }, at: now() }); return { ok: false, code: 'proxy_credential_unreadable', error: r.error }; }");
+  const mk2 = (mod, dir) => mod.create({ dataDir: path.join(ROOT, dir), homeDir: path.join(ROOT, 'home'), env: () => ({ PATH: PATH_ENV, HOME: path.join(ROOT, 'home'), FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: (x) => settings[x], liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: { add: () => ({ id: 'u1' }) }, proxyLogins: pl });
+  const kO = mk2(KO, 'data-own-red'), pOr = kO.createProfile({ label: 'Own red', proxy: proxyUrl, proxyCredential: ref }); await kO.exitCheck(pOr.id, { tlsConnect: PLAIN });
+  const kL = mk2(KL, 'data-locked-red'), pLr = kL.createProfile({ label: 'Locked red', proxy: proxyUrl, proxyCredential: ref }); await kL.start(pLr.id, { why: 'user' });
+  const bfwR = Number(new URL(kL.egressFor(pLr.id).url).port); vault.locked = true; await kL.exitCheck(pLr.id, { tlsConnect: PLAIN });
+  const roadR = await conn(bfwR, `CONNECT ${CHECK_HOST}:443 HTTP/1.1\r\nHost: ${CHECK_HOST}:443\r\n\r\n`); vault.locked = false;
+  ok(kO._proxyCredHeld(pOr.id) === true && /^HTTP\/1\.1 502/.test(roadR), 'REDs: a check that reads into the forwarders\' entry leaves the login in memory; one that writes its locked refusal there turns the RUNNING browser\'s road into the locked page', [kO._proxyCredHeld(pOr.id), roadR]);
+  try { await kL.stop(pLr.id, { why: 'user' }); } catch { }
+  kO.shutdown?.(); kL.shutdown?.();
+  // a profile whose browser the hub does not start is refused BEFORE it is asked for an address; the three new codes' statuses
+  const saved = settings[X.EXIT_URL_KEY]; delete settings[X.EXIT_URL_KEY];
+  let rX0 = null; try { const pX0 = k.createProfile({ label: 'Attached first', provider: 'cdp', cdpPort: 9 }); k.updateProfile(pX0.id, { proxy: proxyUrl }); rX0 = await k.exitCheck(pX0.id, { tlsConnect: PLAIN }); } catch (e) { rX0 = { code: 'setup:' + (e.code || e.message) }; }
+  settings[X.EXIT_URL_KEY] = saved;
+  ok(rX0 && rX0.code === 'exit_external_browser' && /exit_check_timeout: 504, exit_proxy_timeout: 504, exit_proxy_hung_up: 502, exit_external_browser: 409,/.test(read('src/routes/browser.js')),
+    'a browser the hub does not start is refused BEFORE the address is asked (no check address set — still exit_external_browser); the three new codes have their statuses in the route\'s table', rX0);
 }
 
 console.log('④ THE PERSON\'S DOORS — the setting\'s write, the routes, the agent views');
@@ -264,6 +320,8 @@ console.log('④ THE PERSON\'S DOORS — the setting\'s write, the routes, the a
   const TV = read('src/lib/browser-trace-view.js'), DLG = read('src/lib/browser-exit-dialog.js');
   ok(/rowWhyText\(r\), r && r\.egress && r\.egress\.checkedAt \? agoText\(Date\.now\(\) - Number\(r\.egress\.checkedAt\)\) : null,/.test(TV) && /res\.code === 'exit_answer_unreadable'\) \{ if \(!urlIn\.value\) urlIn\.value = current; urlRow\.style\.display = ''; \}/.test(DLG) && /const forget = btn\(t\('Forget'\), \(\) => doForget\(\), 'bexit-forget'\);/.test(DLG) && /\{ clear: true \}/.test(DLG),
     'the card\'s fold age moves (the age\'s words ride the row\'s signature); an unreadable answer opens the address field — the door to change it; the dialog\'s Forget press sends the keeper\'s clear');
+  ok(/const stale = \[\.\.\.this\._refused\.keys\(\)\]\.filter\(\(p\) => JSON\.stringify\(\(data \|\| \{\}\)\[p\]\) !== JSON\.stringify\(\(this\._server \|\| \{\}\)\[p\]\)\);/.test(SS) && /for \(const p of stale\) this\._refused\.delete\(p\);/.test(SS) && /typeof S\.serverValue === 'function' \? S\.serverValue\(KEY\)/.test(DLG),
+    'the row\'s refused mark drops once the STORED value changes from another page; the dialog\'s address in use is the stored one, never a value this page typed and the server set aside');
   const RB = read('src/routes/browser.js');
   ok(/router\.post\('\/api\/browser\/profiles\/:id\/exit-check', async \(req, res\) => \{\n  if \(refuseHost\(req, res\)\) return;\n  if \(refuseAgentBearer\(req, res, EXIT_IS_USERS\)\) return;/.test(RB) && /router\.post\('\/api\/browser\/profiles\/:id\/egress', async \(req, res\) => \{\n  if \(refuseHost\(req, res\)\) return;\n  if \(refuseAgentBearer\(req, res, EXIT_IS_USERS\)\) return;/.test(RB),
     'both routes (the press, the confirm) refuse an agent\'s token before anything — a person\'s cookie door only, no CLI verb, no automation verb');

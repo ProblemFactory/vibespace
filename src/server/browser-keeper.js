@@ -6624,38 +6624,50 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  (its browser may leave by another road — the person's own browser config, the launch's environment, the tailnet — so a direct
    *  check could state an exit it does not use; a wrong exit handed to an engine is worse than none), no check address set (the dialog
    *  shows the field), the proxy's own refusals (the same as a launch's — a locked vault included). */
-  async function exitCheck(profileId, { tlsConnect = null } = {}) {
+  async function exitCheck(profileId, { tlsConnect = null, deadlineMs = null } = {}) {
     ensureLoaded();
     const p = profile(profileId);
     if (!p || isEph(p)) return { ok: false, code: 'not-found', error: `no profile ${profileId}` };
+    // a profile whose browser the hub does NOT start: that browser leaves by its own settings — refused like no proxy, before anything
+    // else is asked (no check address, no vault)
+    const prow = rowOf(p.provider);
+    if (prow && !prow.starts) return { ok: false, code: 'exit_external_browser', error: `"${p.label}" attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it` };
     if (!p.proxy) return { ok: false, code: 'exit_no_proxy', error: `"${p.label}" has no proxy of its own — its browser may leave by another road (your own browser config, the launch's environment, the tailnet), so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it` };
     const url = EXIT.checkUrlVerdict(serverSetting(EXIT.EXIT_URL_KEY));
     if (!url.ok) return { ok: false, code: url.code, error: url.error };
     if (!url.value) return { ok: false, code: 'exit_url_unset', error: 'no exit check address is set — give one (an https address you trust) and check again, or type the exit by hand' };
-    // a profile whose browser the hub does NOT start: that browser leaves by its own settings — refused like no proxy
-    const prow = rowOf(p.provider);
-    if (prow && !prow.starts) return { ok: false, code: 'exit_external_browser', error: `"${p.label}" attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it` };
-    let of;
-    try { of = await profileProxyFor(p, { why: 'user' }); } catch (e) { return { ok: false, code: e.code || 'exit_check_failed', error: e.message }; }
+    // the launch's own verdict on the stored proxy (a password in the address, socks4, a paired machine, a login saved for another proxy)
+    const v = B.proxyLaunchVerdict(p);
+    if (!v.ok) return { ok: false, code: v.code, error: v.error };
+    const px0 = v.proxy;
     const k0 = String(p.id), have = egressProxies.get(k0), rec = reg.browsers[k0];
     // 主开发 17:04Z: a RUNNING browser is measured only through the road it runs on — its own forwarder is THIS proxy WITH THIS login;
-    // any other running state (another proxy, another login, no forwarder at all: started before the proxy) is restart-first
+    // any other running state is restart-first. 17:56Z: this comparison comes BEFORE any vault read.
     if (rec && B.isLiveBrowser(rec)) {
       const hp = have && have.px.port() && have.of && have.of.proxy;
-      if (!hp || hp.scheme !== of.proxy.scheme || hp.host !== of.proxy.host || hp.port !== of.proxy.port || String(hp.credential || '') !== String(of.proxy.credential || '')) return { ok: false, code: 'exit_restart_first', error: `"${p.label}"'s browser runs on another road than its proxy now names (the address or its login changed since it started, or it started without it) — restart it, then check the exit` };
+      if (!hp || hp.scheme !== px0.scheme || hp.host !== px0.host || hp.port !== px0.port || String(hp.credential || '') !== String(px0.credential || '')) return { ok: false, code: 'exit_restart_first', error: `"${p.label}"'s browser runs on another road than its proxy now names (the address or its login changed since it started, or it started without it) — restart it, then check the exit` };
     }
-    // the check's OWN forwarder (one per press, never registered): the same upstream — this proxy with this login — but the person's
-    // request, not the browser's traffic: no engine's site list judges it or records its host, and what it opens it closes on every
-    // path — it never touches a forwarder a starting browser just took, and two presses never share one
-    const px = EgressProxy.create({ allow: () => ({ allow: true }), upstream: () => proxyUpstreamOf(k0, of), tag: 'exit-check', log: { log() { }, warn() { } } });
+    // 主开发 17:56Z: THE LOGIN THE CHECK READS IS THE CHECK'S OWN — read into this call alone (the person's press, a use noted), never into
+    // the entry a running browser's forwarder asks per request; it leaves memory with the check
+    let auth = null;
+    if (px0.credential) {
+      const r = proxyLogins && typeof proxyLogins.read === 'function' ? proxyLogins.read(px0.credential, { by: 'human', purpose: `the exit check of browser profile ${k0}` })
+        : { ok: false, error: 'this server has no vault for browser proxy logins', word: 'vault_not_set_up' };
+      if (!r.ok) return { ok: false, code: 'proxy_credential_unreadable', error: `"${p.label}"'s exit was not checked — ${r.error}`, word: r.word || null };
+      auth = { user: r.user, pass: r.pass };
+    }
+    // the check's OWN forwarder (one per press, never registered): the same upstream — this proxy with this login — admitting its ONE host
+    // only (the check address's name); no engine's site list judges it or records its host; what it opens it closes on every path
+    const checkHost = new URL(url.value).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    const px = EgressProxy.create({ allow: (h) => (String(h || '').toLowerCase() === checkHost ? { allow: true } : { allow: false, why: 'the exit check reaches its one address only' }), upstream: () => ({ scheme: px0.scheme, host: px0.host, port: px0.port, ...(auth ? { auth } : {}) }), tag: 'exit-check', log: { log() { }, warn() { } } });
     try {
       const port = await px.listen();
-      const r = await EXC.requestThrough({ url: url.value, forwarder: `http://127.0.0.1:${port}`, ...(tlsConnect ? { tlsConnect } : {}) });
+      const r = await EXC.requestThrough({ url: url.value, forwarder: `http://127.0.0.1:${port}`, ...(tlsConnect ? { tlsConnect } : {}), ...(Number(deadlineMs) > 0 ? { deadlineMs: Number(deadlineMs) } : {}) });
       if (!r.ok) return r;
-      const v = EXIT.readExitAnswer(r);
-      return v.ok ? { ok: true, read: v.read } : { ok: false, code: 'exit_answer_unreadable', kind: v.kind, error: v.said };
+      const a = EXIT.readExitAnswer(r);
+      return a.ok ? { ok: true, read: a.read } : { ok: false, code: 'exit_answer_unreadable', kind: a.kind, error: a.said };
     } catch (e) { return { ok: false, code: e.code || 'exit_check_failed', error: String((e && e.message) || e) }; }
-    finally { await px.close({ cut: true }).catch(() => { }); }
+    finally { auth = null; await px.close({ cut: true }).catch(() => { }); }
   }
   /** The person's confirm (what was read, each field editable — or typed by hand) → kept on the profile under the hand-over's own
    *  names; `{ clear: true }` forgets it. The zone is validated by the runtime's own formatter (an offset or an abbreviation refused). */
@@ -8306,7 +8318,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     exitCheck, keepEgress, // + the exit check (a person's press; the person's confirm)
     // P6 (§6.2 / §6.5): is `sharing:"instance"` a value here; the proxy (the routes ask it nothing directly)
     mediationOn, isMediated, mediator: () => (mediationOn() ? mediator : null),
-    storeFile, STORE_FILE, uid, _reg: () => reg, _forwardersClose: () => Promise.all([...egressProxies.values()].map((e) => e.px.close({ cut: true }).catch(() => { }))).then(() => { egressProxies.clear(); }), /* B-8b87 cure: a suite's stand-in for this process's end (its forwarders' ports free for the next keeper's re-bind) */ _facts: bf, _runtime: rt,
+    storeFile, STORE_FILE, uid, _reg: () => reg, _proxyCredHeld: (id) => proxyCreds.has(String(id || '')), /* a suite's seam: whether the forwarders' login entry holds this profile (a yes/no — no secret crosses) */ _forwardersClose: () => Promise.all([...egressProxies.values()].map((e) => e.px.close({ cut: true }).catch(() => { }))).then(() => { egressProxies.clear(); }), /* B-8b87 cure: a suite's stand-in for this process's end (its forwarders' ports free for the next keeper's re-bind) */ _facts: bf, _runtime: rt,
     floorFacts, checkFloorNow, // B-0b8c (lane browser-probe-transient): the facts API + the For-you notice's Check again
     lineageKeyOf, moveDirLineage, // verify r8 (T2 ②): the product's own move of a directory (a Forget) carries its lineage
 

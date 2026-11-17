@@ -42,7 +42,8 @@ export function openExitDialog(app, r, { onDone = null } = {}) {
   const urlIn = document.createElement('input');
   urlIn.type = 'text'; urlIn.className = 'bexit-url'; urlIn.placeholder = 'https://…'; urlIn.autocomplete = 'off'; urlIn.spellcheck = false; urlIn.setAttribute('aria-label', t('Exit check address'));
   urlRow.appendChild(urlIn);
-  const current = (() => { try { return String((app && app.settings && app.settings.get && app.settings.get(KEY)) || ''); } catch { return ''; } })();
+  // the address IN USE is the STORED one (a value this page typed and the server set aside is not in use) — 主开发 17:56Z
+  const current = (() => { try { const S = app && app.settings; return String((S && (typeof S.serverValue === 'function' ? S.serverValue(KEY) : S.get && S.get(KEY))) || ''); } catch { return ''; } })();
   urlRow.style.display = current ? 'none' : '';
   body.appendChild(urlRow);
   // the three facts — what was read (editable) or typed by hand
