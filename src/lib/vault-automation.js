@@ -548,7 +548,7 @@ export function showReachDialog(key, g, data, { refresh } = {}) {
   const { body, close, raised } = createModalShell({ id: 'vault-ak-reach', key: `${key.id}:${g.subject}`, title: t('Reach of "{name}" for {subject}', { name: key.name, subject: subjectName(g.subject, data) }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
     unsaved: { isDirty: () => JSON.stringify(rows.value()) !== base, save: () => doSave() }, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
-  body.append(el('div', 'vw-ak-hint', t('Which other conversations that conversation may rename, end or archive with this key. What it opened, what a grant names and itself are always within reach.')));
+  body.append(el('div', 'vw-ak-hint', t('Which other conversations that conversation may rename, end or archive with this key. What it opened and itself are always within reach.')));
   const rows = reachRows(g.reach, data, { id: g.id });
   body.append(rows.node);
   const base = JSON.stringify(rows.value());

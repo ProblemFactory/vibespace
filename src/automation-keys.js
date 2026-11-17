@@ -21,11 +21,13 @@
  *     whether anything may happen at all — an agent never holds a value (q-043's 「用而不见」 holds by construction).
  *   · `identityOf(keyId)` = `automation:<keyId>` — the spend identity a billed verb (conversations.open, L2) is charged to.
  *   · REACH (lane conversations-archive-verb, the owner 2026-10-20 「这些不用 archive 吗」): a verb that names ANOTHER conversation
- *     is judged by ONE rule, `reachVerdict` — the key OPENED it (the store's `opened` rows), a grant of the key names it (the
- *     conversation or one of its Task Groups), or it is the caller itself. The opener's lifecycle (rename / bind / end /
- *     archive / status) covers what it opened, across a hub restart — the fact is persisted, never a Map in memory.
+ *     is judged by ONE rule, `reachVerdict` — the key OPENED it (the store's `opened` rows), or it is the caller itself, or
+ *     the grant's REACH below names it. The opener's lifecycle (rename / bind / end / archive / status) covers what it
+ *     opened, across a hub restart — the fact is persisted, never a Map in memory. A grant that NAMES the target is no reach
+ *     of its own (B-3190, 2026-11-17: it was keyed to the KEY — any holder at 只有它开的会话 ended what ANOTHER grant of the
+ *     key names; the words a person reads decide, and they say «only the conversations it opens (and itself)»).
  *   · THE GRANT'S REACH (lane key-instance-scope — the owner 2026-10-20 23:2xZ 「key 应该可以被授权在整个 vibe space 上工作」): a grant
- *     row carries `reach` — 'opened' (the default and the NARROWEST: what the key opened, what a grant names, the caller),
+ *     row carries `reach` — 'opened' (the default and the NARROWEST: what the key opened and the caller — nothing else),
  *     {taskGroups: [ids]} (every conversation of those Task Groups too) or 'instance' (EVERY conversation of this instance,
  *     present and later — the owner's choice, red-tinted wherever it is offered). ONE more row of reachVerdict's table; the
  *     verbs' own refusals (subject_busy / asks_open / already_archived) stay whatever the reach. A missing field reads
@@ -293,34 +295,36 @@ function openedOf(raw) {
  * `target`? ONE rule for rename / bind / end / archive / status / invite (design q-046: a grant is key × conversation, and
  * the OPENER is the natural holder of the lifecycle of what it opened): the target is within reach when
  *   (a) THE KEY OPENED IT — an `opened` row of this key names its webui id or its conversation id, or
- *   (b) a grant of this key names it — the target conversation itself, or one of its Task Groups (a grant to ALL AGENTS
- *       names nobody — lane key-grant-everyone: every conversation would be in reach whatever the grant's reach says), or
+ *   (b) — none (B-3190, 主开发's ruling 2026-11-17: THE WORDS A PERSON READS DECIDE). It read «a grant of this key names it»,
+ *       keyed to the KEY, not to the grant this use rides: a holder at 只有它开的会话 ended / renamed / archived whatever
+ *       ANOTHER grant of the key names (a conversation, every member of a Task Group). That reach says the caller and what
+ *       the key opened, nothing else; a Task Group's members are reached only by a reach that names them — (d)'s groups —
  *   (c) the target IS the caller, or
  *   (d) THE GRANT'S REACH says so (lane key-instance-scope): `reach` = the reach of the grant this use rides — 'instance'
  *       reaches EVERY conversation; {taskGroups} reaches one in those Task Groups; 'opened' (the default) adds nothing.
- * `target` = { conversationId, webuiId?, groups? }. → { ok: true, by: 'self' | 'opener' | 'grant' | 'instance' | 'groups' }
+ * `target` = { conversationId, webuiId?, groups? }. → { ok: true, by: 'self' | 'opener' | 'instance' | 'groups' }
  * | { ok: false, code, why, reach? } (the refusal names the reach the grant has, and the door that widens it).
  */
-function reachVerdict({ keyId = '', caller = '', target = {}, grants = [], opened = [], reach = 'opened', reachRows = null } = {}) {
+function reachVerdict({ keyId = '', caller = '', target = {}, opened = [], reach = 'opened', reachRows = null } = {}) {
   const t = target && typeof target === 'object' ? target : {};
   const cid = str(t.conversationId) || null, wid = str(t.webuiId) || null;
   if (!cid && !wid) return { ok: false, code: 'not_found', why: 'no conversation named' };
   if (cid && caller && cid === str(caller)) return { ok: true, by: 'self' };
   const rows = (Array.isArray(opened) ? opened : []).map(openedOf).filter((o) => o && o.keyId === keyId);
   if (rows.some((o) => (cid && o.conversationId && o.conversationId === cid) || (wid && o.webuiId && o.webuiId === wid))) return { ok: true, by: 'opener' };
-  // THE ONE ADMISSION (lane grants-unify — src/grant-model.js admits): the target as the caller a grant / a reach would name
+  // THE ONE ADMISSION (lane grants-unify — src/grant-model.js admits): the target as the caller the grant's REACH would name
+  // (B-3190: no grant row is a reach of its own — the `grants` a caller passes are not read)
   const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds: (Array.isArray(t.groups) ? t.groups : []).filter(Boolean).map(String) };
-  if ((Array.isArray(grants) ? grants : []).map(grantOf).some((g) => { if (!g || g.keyId !== keyId || g.subject === 'external') return false; const v = GM.admits([useRowOf(g)].filter(Boolean), facts); return v.ok && v.via !== 'everyone'; })) return { ok: true, by: 'grant' };
   const r = reachOf(reach) || 'opened';   // an unknown reach reads as the narrowest
   // the reach this use rides (`reachRows`, the riding grants' rows — useVerdict's), else the summary mapped
   const rrows = (Array.isArray(reachRows) ? reachRows : [reachRowOf({ reach: r })]).filter(Boolean);
   const rv = GM.admits(rrows, facts);
   if (rv.ok) return { ok: true, by: rv.via === 'everyone' ? 'instance' : 'groups' };
-  if (rv.code === 'excepted') return { ok: false, code: 'excepted', reach: reachKind(r), why: 'the owner left that conversation out of this grant\'s reach (an exception on the key\'s row in the Vault window) — ask the owner to lift it, or to grant the key to that conversation' };
+  if (rv.code === 'excepted') return { ok: false, code: 'excepted', reach: reachKind(r), why: 'the owner left that conversation out of this grant\'s reach (an exception on the key\'s row in the Vault window) — ask the owner to lift it' };
   const kind = reachKind(r);
   return { ok: false, code: 'not_granted', reach: kind, why: kind === 'groups'
-    ? `that conversation is not in the Task Groups this grant reaches (${r.taskGroups.join(', ')}), the key did not open it and is not granted to it — widen the grant's reach on the key's row in the Vault window (整个 VibeSpace), or grant the key to that conversation`
-    : 'the key did not open that conversation and is not granted to it (nor to one of its Task Groups) — this grant reaches only what the key opened; widen its reach on the key\'s row in the Vault window (这些岗位的会话 / 整个 VibeSpace), or grant the key to that conversation' };
+    ? `that conversation is not in the Task Groups this grant reaches (${r.taskGroups.join(', ')}) and the key did not open it — widen the grant's reach on the key's row in the Vault window (整个 VibeSpace)`
+    : 'the key did not open that conversation — this grant reaches only what the key opened and the caller itself; widen its reach on the key\'s row in the Vault window (这些岗位的会话 / 整个 VibeSpace)' };
 }
 
 /**
@@ -329,9 +333,10 @@ function reachVerdict({ keyId = '', caller = '', target = {}, grants = [], opene
  * caller belongs to (a session), `subjectGroupsUnreadable` = those could not be read (lane key-grant-everyone r2: a grant
  * a Task Group decides — in `to` or in «除了» — is then `groups_unreadable`, never judged against []; any other grant that
  * admits still counts), `subjectLive` = the caller's conversation still runs, `vaultState` = the vault's state.
- * → { ok: true, grant, spend, reach } (`spend` = a once-grant this use consumes; `reach` = the reach this use rides — the
- * widest of the caller's always-grants, else the once-grant's — lane key-instance-scope) | { ok: false, code } — in this
- * order: the vault (everything stops while it is locked), the key, its scope, the caller, the grant.
+ * → { ok: true, grant, via, spend, reach } (`spend` = a once-grant this use consumes; `reach` = the reach this use rides — the
+ * widest of the caller's always-grants, else the once-grant's — lane key-instance-scope; `via` = how specific the admitting
+ * grant is: 'conversation' › 'group' › 'everyone', B-3190) | { ok: false, code } — in this order: the vault (everything stops
+ * while it is locked), the key, its scope, the caller, the grant.
  */
 function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [], subjectGroupsUnreadable = false, subjectLive = true, verb = '', vaultState = 'locked' } = {}) {
   if (vaultState !== 'unlocked') return { ok: false, code: 'vault_locked' };
@@ -346,27 +351,47 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
   // (lane grants-unify: its own conversation, one of its Task Groups, All agents — minus the members the owner left out) — never the other's
   const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], groupsUnreadable: !!subjectGroupsUnreadable };
   const cands = [];
-  let excepted = false, unreadable = false;
+  let excepted = false, could = null;
   for (const g of (Array.isArray(grants) ? grants : []).map(grantOf)) {
     if (!g || g.keyId !== k.id) continue;
-    if (external) { if (g.subject === 'external') cands.push(g); continue; }
+    if (external) { if (g.subject === 'external') cands.push({ g, via: 'external' }); continue; }
     if (g.subject === 'external') continue;
     const v = GM.admits([useRowOf(g)].filter(Boolean), facts);
-    if (v.ok) cands.push(g); else if (v.code === 'excepted') excepted = true; else if (v.code === 'groups_unreadable') unreadable = true;
+    if (v.ok) cands.push({ g, via: v.via }); else if (v.code === 'excepted') excepted = true;
+    // B-3190 r1: a grant a Task Group decides, not judged (the groups unreadable), counts only when it COULD be used — a spent
+    // once-grant could not, read or not; `could` = the best of them (how specific it could be, its mode) — pickKey's question
+    else if (v.code === 'groups_unreadable' && !(g.mode === 'once' && g.spentAt)) { const c = { spec: viaRank(undecidedVia(g)), always: g.mode === 'always' }; if (!could || c.spec > could.spec || (c.spec === could.spec && c.always && !could.always)) could = c; }
   }
-  if (!cands.length) return { ok: false, code: unreadable ? 'groups_unreadable' : excepted ? 'excepted' : 'not_granted' };
-  const always = cands.filter((g) => g.mode === 'always');
-  if (always.length) return { ok: true, grant: always[0], spend: false, reach: widestReach(always.map((g) => g.reach)), reachRows: always.map(reachRowOf).filter(Boolean) };
-  const once = cands.find((g) => g.mode === 'once' && !g.spentAt);
-  if (once) return { ok: true, grant: once, spend: true, reach: once.reach, reachRows: [reachRowOf(once)].filter(Boolean) };
-  return { ok: false, code: 'once_spent' };
+  const unreadable = !!could, cx = could ? { could } : {};
+  if (!cands.length) return { ok: false, code: unreadable ? 'groups_unreadable' : excepted ? 'excepted' : 'not_granted', ...cx };
+  // B-3190: the MOST SPECIFIC grant is the one this use rides — the caller's own › a Task Group's › All agents' (a stable sort:
+  // the store's order breaks a tie). A released once-grant to All agents is no longer spent by the call the owner's «Allow once»
+  // answered (key-grant-everyone r2's minor: the grant the answer wrote stayed unspent, the next open ran with no card)
+  const bySpec = cands.slice().sort((a, b) => viaRank(b.via) - viaRank(a.via));
+  // `spec` = the KEY's claim on this caller: its most specific grant that can be used (any mode — the caller's own once-grant
+  // makes the key the caller's own even while an «Always» to All agents is the one ridden; r1: ranking by the ridden one was
+  // not monotonic — adding an All-agents «Always» to a key made it lose to a Task Group's key)
+  const usable = bySpec.filter((c) => c.g.mode === 'always' || !c.g.spentAt), spec = usable.length ? viaRank(usable[0].via) : -1;
+  const always = bySpec.filter((c) => c.g.mode === 'always');
+  if (always.length) return { ok: true, grant: always[0].g, via: always[0].via, spec, spend: false, reach: widestReach(always.map((c) => c.g.reach)), reachRows: always.map((c) => reachRowOf(c.g)).filter(Boolean), ...cx };
+  const once = bySpec.find((c) => c.g.mode === 'once' && !c.g.spentAt);
+  if (once) return { ok: true, grant: once.g, via: once.via, spec, spend: true, reach: once.g.reach, reachRows: [reachRowOf(once.g)].filter(Boolean), ...cx };
+  // B-3190 (r2's minor): every grant that admits is a SPENT once-grant and a grant a Task Group decides could not be judged ⇒
+  // groups_unreadable by name (that grant may admit the moment the groups read) — never a first-use card
+  return { ok: false, code: unreadable ? 'groups_unreadable' : 'once_spent', ...cx };
 }
+/** How SPECIFIC an admission is (grant-model's order — its own › a Task Group's › All agents'); anything else ranks last. */
+const viaRank = (via) => (via === 'conversation' ? 2 : via === 'group' ? 1 : via === 'everyone' ? 0 : -1);
+/** An undecided grant (a Task Group decides it, the groups unreadable) at best: a Task Group's when its row names one, else All agents'. */
+const undecidedVia = (g) => { const n = GM.normRow(useRowOf(g)); return n && n.ok && n.row.to.some((e) => e.kind === 'group') ? 'group' : 'everyone'; };
 
 /**
  * WHICH KEY a use names: `want` = the caller's `--key` (an id or a name; null = let the hub choose). → { ok: true, key, ask }
  * (`ask` = no grant covers the caller yet — the first-use card may ask for this key) | { ok: false, code }.
- * Without `want`: a key that already lets this caller use the verb wins (an `always` grant first, then the oldest key);
- * else the ONE live key whose scope holds the verb is asked for; none ⇒ not_granted; several ⇒ key_ambiguous (`names`).
+ * Without `want`: a key that already lets this caller use the verb wins — the MOST SPECIFIC grant first (the caller's own ›
+ * a Task Group's › All agents', B-3190), then an `always` grant, then the oldest key; else the ONE live key whose scope holds
+ * the verb is asked for; none ⇒ not_granted; several ⇒ key_ambiguous (`names`). The caller's Task Groups unreadable and a key
+ * they decide in the running ⇒ groups_unreadable (`names`), unless the caller's own grant wins whatever they read.
  */
 function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGroups = [], subjectGroupsUnreadable = false, verb = '' } = {}) {
   const all = (Array.isArray(keys) ? keys : []).map(keyOf).filter(Boolean);
@@ -376,12 +401,23 @@ function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGro
     const k = all.find((x) => x.id === w) || all.filter((x) => x.name === w).sort((a, b) => (a.revokedAt ? 1 : 0) - (b.revokedAt ? 1 : 0))[0] || null;
     return k ? { ok: true, key: k, ask: false } : { ok: false, code: 'not_found' };
   }
-  const v = (k) => useVerdict({ key: k, grants, subject, subjectGroups, subjectGroupsUnreadable, verb, vaultState: 'unlocked' });
-  const granted = live.filter((k) => v(k).ok);
+  const judged = live.map((k) => ({ k, v: useVerdict({ key: k, grants, subject, subjectGroups, subjectGroupsUnreadable, verb, vaultState: 'unlocked' }) }));
+  const granted = judged.filter((x) => x.v.ok);
+  // a key a Task Group decides, not judged (the caller's groups could not be read)
+  const unread = judged.filter((x) => !x.v.ok && x.v.code === 'groups_unreadable').map((x) => x.k.name).slice(0, 20);
   if (granted.length) {
-    const always = granted.filter((k) => v(k).grant.mode === 'always');
-    const pick = (always.length ? always : granted).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))[0];
-    return { ok: true, key: pick, ask: false };
+    // B-3190 (key-grant-everyone's acceptance): it ranked by key age alone — an older All-agents / Task Group key overrode a
+    // conversation's own key, with that key's reach and limits, on every call without --key. A key's rank = [how specific
+    // its claim is (`spec`), «Always» ridden, older]
+    const rank = (spec, always, k) => [spec, always ? 1 : 0, -(k.createdAt || 0)];
+    const above = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+    const rk = (x) => rank(x.v.spec, x.v.grant.mode === 'always', x.k);
+    const pick = granted.sort((a, b) => above(rk(b), rk(a)))[0];
+    // an undecided grant that would OUTRANK the pick once the groups read ⇒ said by name — never a quiet pick of another
+    // key's reach and limits (r1: one that could not outrank it — spent, or below it — refuses nothing)
+    const over = judged.filter((x) => x !== pick && x.v.could && above(rank(x.v.could.spec, x.v.could.always, x.k), rk(pick)) > 0).map((x) => x.k.name);
+    if (over.length) return { ok: false, code: 'groups_unreadable', names: over.slice(0, 20) };
+    return { ok: true, key: pick.k, ask: false };
   }
   if (live.length === 1) return { ok: true, key: live[0], ask: true };
   if (!live.length) {
@@ -390,6 +426,9 @@ function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGro
     const held = all.filter((k) => !k.revokedAt && useVerdict({ key: k, grants, subject, subjectGroups, subjectGroupsUnreadable, verb: k.scopes[0], vaultState: 'unlocked' }).ok);
     return held.length ? { ok: false, code: 'verb_not_in_scope', names: held.map((k) => k.name).slice(0, 20) } : { ok: false, code: 'not_granted' };
   }
+  // B-3190 (r2's minor): several keys hold the verb, one a Task Group decides could not be judged ⇒ said by name — key_ambiguous
+  // steered the caller to --key a key the owner never granted (a first-use card) when the undecided one may admit it
+  if (unread.length) return { ok: false, code: 'groups_unreadable', names: unread };
   return { ok: false, code: 'key_ambiguous', names: live.map((k) => k.name).slice(0, 20) };
 }
 
@@ -702,7 +741,7 @@ function auditLine({ at, keyId = null, subject = '', verb = '', args = null, ok 
 
 module.exports = {
   KEY_ID_RE, VALUE_PREFIX, VALUE_RE, ENTRY_PREFIX, NAME_MAX, SUBJECT_RE, EVERYONE_SUBJECT, MODES, REACHES, ASK_TTL_MS, ASK_QUIET_MS, AUDIT_FILE, STORE_FILE, FEEDBACK_ID_RE, RELEASE_RE, NOTE_MAX,
-  SCOPES, VERBS, scopeOf, CODES, keyOf, publicKey, grantOf, reachOf, reachKind, widestReach, isSubject, callerSubjects, openedOf, reachVerdict,
+  SCOPES, VERBS, scopeOf, CODES, keyOf, publicKey, grantOf, reachOf, reachKind, widestReach, viaRank, isSubject, callerSubjects, openedOf, reachVerdict,
   subjectOfRow, reachOfRow, useRowOf, reachRowOf, useRowForSubject, reachRowFor,   // lane grants-unify
   useVerdict, pickKey, mintPlan, scopesPlan, editPlan, scopesChangeWords, entryOf, keyIdOfEntry, identityOf, argsSummary, auditLine,
   LIMIT_FIELDS, LIMIT_CODES, OPEN_MODES, HARNESS_DEFAULT, SUBSCRIPTION, DEFAULT_LIMITS, ALL_PATHS, allPaths, normPath, limitsOf, limitsPlan, limitsWords, openLimitsVerdict, permissionResolvedVerdict,

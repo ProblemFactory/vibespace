@@ -10255,7 +10255,7 @@ export default {
   "Rename, end or archive only the conversations it opens with this key (and itself)": "このキーで自分が開いた会話（と自分自身）だけを改名・終了・アーカイブできます", // lane key-instance-scope: a grant's reach
   "Change the reach…": "対象範囲を変える…", // lane key-instance-scope: a grant's reach
   "Reach of \"{name}\" for {subject}": "{subject} における「{name}」の対象範囲", // lane key-instance-scope: a grant's reach
-  "Which other conversations that conversation may rename, end or archive with this key. What it opened, what a grant names and itself are always within reach.": "その会話がこのキーで改名・終了・アーカイブできる他の会話。自分が開いた会話、許可で名指しされた会話、自分自身は常に範囲内です。", // lane key-instance-scope: a grant's reach
+  "Which other conversations that conversation may rename, end or archive with this key. What it opened and itself are always within reach.": "その会話がこのキーで改名・終了・アーカイブできる他の会話。自分が開いた会話と自分自身は常に範囲内です。", // lane key-instance-scope: a grant's reach
   "Pick at least one Task Group": "タスクグループを少なくとも 1 つ選んでください", // lane key-instance-scope: a grant's reach
   "Reach of the grants you add": "追加する許可の対象範囲", // lane key-instance-scope: a grant's reach
   "Granted — the key now reaches every conversation here from that conversation (the Vault window lists it)": "許可しました——その会話はこのキーでここにあるすべての会話に届きます（保管庫ウィンドウに載っています）", // lane key-instance-scope: a grant's reach
@@ -10284,8 +10284,8 @@ export default {
   "The calling conversation is not running any more — nothing to do": "呼び出した会話はもう動いていません——対応は不要です", // lane vault-key-row-compact
   "Nobody answered its card in 60 s — answer the card next time, or grant the key in the Vault window": "カードに 60 秒以内の回答がありませんでした——次回はカードに答えるか、保管庫ウィンドウでこのキーを許可してください", // lane vault-key-row-compact
   "{target} still has open For-you asks — answer its cards, or let the caller pass --resolve-asks": "{target} にはまだ未回答の「あなた宛て」の質問があります——先にそのカードに答えるか、呼び出し側に --resolve-asks を付けさせてください", // lane vault-key-row-compact
-  "The key did not open {target} and its grant reaches only what it opened — widen the reach on the key's row in the Vault window (这些岗位的会话 / 整个 VibeSpace), or grant the key to that conversation": "このキーは {target} を開いておらず、許可の対象範囲は自分が開いた会話だけです——保管庫ウィンドウのキーの行で対象範囲を広げる（这些岗位的会话 / 整个 VibeSpace）か、その会話にキーを許可してください", // lane vault-key-row-compact
-  "{target} is not in the Task Groups the grant reaches — widen the reach on the key's row in the Vault window (整个 VibeSpace), or grant the key to that conversation": "{target} は許可の対象タスクグループにありません——保管庫ウィンドウのキーの行で対象範囲を広げる（整个 VibeSpace）か、その会話にキーを許可してください", // lane vault-key-row-compact
+  "The key did not open {target} and its grant reaches only what it opened — widen the reach on the key's row in the Vault window (这些岗位的会话 / 整个 VibeSpace)": "このキーは {target} を開いておらず、許可の対象範囲は自分が開いた会話だけです——保管庫ウィンドウのキーの行で対象範囲を広げてください（这些岗位的会话 / 整个 VibeSpace）", // lane vault-key-row-compact
+  "{target} is not in the Task Groups the grant reaches — widen the reach on the key's row in the Vault window (整个 VibeSpace)": "{target} は許可の対象タスクグループにありません——保管庫ウィンドウのキーの行で対象範囲を広げてください（整个 VibeSpace）", // lane vault-key-row-compact
   "No key is granted to {target} — grant one in the Vault window (授权给…), or answer the card next time": "{target} に許可されたキーがありません——保管庫ウィンドウで許可する（授权给…）か、次回カードに答えてください", // lane vault-key-row-compact
   "1 thing it may do": "1 件の操作", // lane vault-key-row-compact
   "{n} things it may do": "{n} 件の操作", // lane vault-key-row-compact

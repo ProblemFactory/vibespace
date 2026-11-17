@@ -10256,7 +10256,7 @@ export default {
   "Rename, end or archive only the conversations it opens with this key (and itself)": "只能改名、结束或归档它用这把 key 开的会话（以及它自己）", // lane key-instance-scope: a grant's reach
   "Change the reach…": "改作用范围…", // lane key-instance-scope: a grant's reach
   "Reach of \"{name}\" for {subject}": "「{name}」对 {subject} 的作用范围", // lane key-instance-scope: a grant's reach
-  "Which other conversations that conversation may rename, end or archive with this key. What it opened, what a grant names and itself are always within reach.": "那个会话能用这把 key 改名、结束或归档哪些别的会话。它开的、授权点名的和它自己，始终在范围内。", // lane key-instance-scope: a grant's reach
+  "Which other conversations that conversation may rename, end or archive with this key. What it opened and itself are always within reach.": "那个会话能用这把 key 改名、结束或归档哪些别的会话。它开的和它自己，始终在范围内。", // lane key-instance-scope: a grant's reach
   "Pick at least one Task Group": "至少选一个岗位", // lane key-instance-scope: a grant's reach
   "Reach of the grants you add": "新加授权的作用范围", // lane key-instance-scope: a grant's reach
   "Granted — the key now reaches every conversation here from that conversation (the Vault window lists it)": "已授权——那个会话现在能用这把 key 触及这里的每一个会话（保险库窗口里列着）", // lane key-instance-scope: a grant's reach
@@ -10285,8 +10285,8 @@ export default {
   "The calling conversation is not running any more — nothing to do": "发起的会话已经不在运行——无需处理", // lane vault-key-row-compact
   "Nobody answered its card in 60 s — answer the card next time, or grant the key in the Vault window": "卡片 60 秒内没人回答——下次回答卡片，或在保险库窗口授权这把 key", // lane vault-key-row-compact
   "{target} still has open For-you asks — answer its cards, or let the caller pass --resolve-asks": "{target} 还有未处理的「待你处理」提问——先回答它的卡片，或让调用方加 --resolve-asks", // lane vault-key-row-compact
-  "The key did not open {target} and its grant reaches only what it opened — widen the reach on the key's row in the Vault window (这些岗位的会话 / 整个 VibeSpace), or grant the key to that conversation": "这把 key 没有开过 {target}，而授权只触及它开的会话——在保险库窗口该 key 的行里扩大作用范围（这些岗位的会话 / 整个 VibeSpace），或把 key 授权给那个会话", // lane vault-key-row-compact
-  "{target} is not in the Task Groups the grant reaches — widen the reach on the key's row in the Vault window (整个 VibeSpace), or grant the key to that conversation": "{target} 不在授权触及的岗位里——在保险库窗口该 key 的行里扩大作用范围（整个 VibeSpace），或把 key 授权给那个会话", // lane vault-key-row-compact
+  "The key did not open {target} and its grant reaches only what it opened — widen the reach on the key's row in the Vault window (这些岗位的会话 / 整个 VibeSpace)": "这把 key 没有开过 {target}，而授权只触及它开的会话——在保险库窗口该 key 的行里扩大作用范围（这些岗位的会话 / 整个 VibeSpace）", // lane vault-key-row-compact
+  "{target} is not in the Task Groups the grant reaches — widen the reach on the key's row in the Vault window (整个 VibeSpace)": "{target} 不在授权触及的岗位里——在保险库窗口该 key 的行里扩大作用范围（整个 VibeSpace）", // lane vault-key-row-compact
   "No key is granted to {target} — grant one in the Vault window (授权给…), or answer the card next time": "没有任何 key 授权给 {target}——在保险库窗口授权一把（授权给…），或者下次回答卡片", // lane vault-key-row-compact
   "1 thing it may do": "1 个动作", // lane vault-key-row-compact
   "{n} things it may do": "{n} 个动作", // lane vault-key-row-compact

@@ -38,7 +38,7 @@ const USAGE = [
   '                (a running turn ⇒ subject_busy unless --force; its open For-you asks ⇒ asks_open naming them, unless --resolve-asks dismisses them; archived already ⇒ already_archived)',
   '  vibespace-api groups invite <g-…|group name> <target>    into an agent group you are in (no wake)',
   '  <target> = a conversation id, <backend>:<id> or a session id (sess-…); a conversation the key opened is within its reach',
-  '  the grant\'s REACH (`keys` prints it): opened = only what the key opened (+ what a grant names, yourself) · groups: <T-…> = those Task Groups\' conversations too · instance = every conversation here; outside it ⇒ not_granted naming the reach (the user widens it on the key\'s row in the Vault window)',
+  '  the grant\'s REACH (`keys` prints it): opened = only what the key opened (+ yourself) · groups: <T-…> = those Task Groups\' conversations too · instance = every conversation here; outside it ⇒ not_granted naming the reach (the user widens it on the key\'s row in the Vault window)',
   'no grant yet ⇒ the call asks the user in For you (≤ 60 s) and waits; a refusal is final for 10 minutes. Full manual: vibespace-docs api',
   'the vault locked ⇒ every call answers vault_locked (exit 3): the user has already been told and a person unlocks it on this instance\'s page — never ask them to unlock; wait, or do other work',
   'an open stays inside its key\'s LIMITS (folders · accounts · permission modes · models · modes — `keys` prints them); outside ⇒ refused by name',
@@ -58,7 +58,7 @@ function limitsWords(l) {
 function reachWords(r) {
   if (r === 'instance') return 'instance (every conversation here)';
   if (r && typeof r === 'object' && Array.isArray(r.taskGroups)) return `groups: ${r.taskGroups.join(', ')} (their conversations, and what the key opened)`;
-  return 'opened (only what the key opened, what a grant names, and yourself)';
+  return 'opened (only what the key opened, and yourself)';
 }
 async function call(method, route, body) {
   const res = await CC.call(API + route, { ...(/conversations\.open/.test(route) ? { cls: 'wake' } : {}), method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });

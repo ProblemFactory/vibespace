@@ -46,13 +46,14 @@ vibespace-api call conversations.rename --name "Worker 2" --target <conversation
 
 - **Arguments.** Pass them as `--<name> <value>` pairs or as one JSON object with `--json`. An unknown argument is refused
   by name (`bad_args`).
-- **Another conversation (`--target`).** It must be one the same key is granted to, directly or through one of its Task
-  Groups. Otherwise the call is refused `not_granted`, and nothing happens.
+- **Another conversation (`--target`).** It must be one the key opened, or yourself, or one the grant's reach (below) names.
+  A grant of the same key to that conversation, or to its Task Group, does not put it in reach. Otherwise the call is
+  refused `not_granted`, and nothing happens.
 - **Another conversation the key opened** is within its reach too: the worker you open is yours to name, bind, invite, end
   and archive — across a hub restart (the hub remembers which key opened what).
 - **The grant's reach** (`keys` prints it as `reach: …`) says how far beyond that your calls go. The user picks it when they
   answer the first-use card (beside Allow once / Always) or on the key's row in the Vault window:
-  - `opened` (the default): only what the key opened, what a grant names, and yourself;
+  - `opened` (the default): only what the key opened, and yourself (a grant of the key to another conversation does not put it in reach);
   - `groups: <T-…>`: the conversations of those Task Groups too;
   - `instance`: every conversation on this VibeSpace, present and later.
   A target outside the reach answers `not_granted`, naming the reach the grant has and where the user widens it. The verbs'

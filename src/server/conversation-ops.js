@@ -366,7 +366,7 @@ function forDeps(own) { return opsOver(() => ({ ...shared, ...(own || {}) })); }
 /**
  * THE WIRED AUTOMATION VERBS (src/server/automation-engine.js `verbs`). Each resolves its TARGET conversation and asks the
  * engine's `reach` — ONE PURE rule (src/automation-keys.js reachVerdict, lane conversations-archive-verb): the key OPENED
- * it, a grant of the key names it (the conversation or one of its Task Groups), or it is the caller itself — before it
+ * it, or it is the caller itself, or the grant's reach names it (B-3190: a grant naming it is no reach) — before it
  * acts. `groupsOf(session, id)` = the Task Group ids a live session belongs to. L1 wired conversations.rename; lane
  * automation-verbs (L2) wires the rest through THE seams above, the caller named as `by` = {kind: 'automation', key,
  * subject: session:<caller>, cid, sessionKey}:
@@ -408,7 +408,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
     const hit = findSession(target || caller.conversationId);
     if (!hit) return { ok: false, code: 'not_found', why: 'no live conversation by that id', target: target || null };
     const [s, id] = hit;
-    const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id) });   // ONE rule: opener / grant / self
+    const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id) });   // ONE rule: opener / self / the grant's reach (B-3190)
     if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // lane key-instance-scope: the refusal names the grant's reach
     return { ok: true, s, id };
   }

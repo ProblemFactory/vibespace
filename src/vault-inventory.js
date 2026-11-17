@@ -439,8 +439,8 @@ const USE_FAIL_LINES = Object.freeze({
 });
 // lane key-instance-scope: a reach refusal names the REACH the grant has (opened / its Task Groups) and the door that widens it
 const USE_FAIL_REACH_LINES = Object.freeze({
-  opened: i18nKey('The key did not open {target} and its grant reaches only what it opened — widen the reach on the key\'s row in the Vault window (这些岗位的会话 / 整个 VibeSpace), or grant the key to that conversation'),
-  groups: i18nKey('{target} is not in the Task Groups the grant reaches — widen the reach on the key\'s row in the Vault window (整个 VibeSpace), or grant the key to that conversation'),
+  opened: i18nKey('The key did not open {target} and its grant reaches only what it opened — widen the reach on the key\'s row in the Vault window (这些岗位的会话 / 整个 VibeSpace)'),
+  groups: i18nKey('{target} is not in the Task Groups the grant reaches — widen the reach on the key\'s row in the Vault window (整个 VibeSpace)'),
 });
 /** The refusals a use can meet BEFORE a key is picked (no name to say): the vault locked (the same line), no key granted at
  *  all, no granted key holding the verb (pickKey names the held keys to the caller). Any other code says the named line. */

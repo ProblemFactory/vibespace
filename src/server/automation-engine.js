@@ -573,9 +573,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     // lane key-grant-everyone r2: the caller's Task Groups could not be read (the wiring says so) ⇒ a group «除了» is never
     // judged against [] — that admitted the very conversation the owner left out of All agents (groups_unreadable instead)
     const groupsUnreadable = !!caller.groupsUnreadable;
-    const pick = A.pickKey({ keys: db.keys, grants: db.grants, want, subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, verb });
+    const pick = A.pickKey({ keys: db.keys, grants: liveGrants(), want, subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, verb });   // B-3190 r1: the grants the verdict below judges (a once-grant dead since a lock or a restart ranks nothing)
     // lane key-folder-picker-all: the keys this conversation holds lack the verb (the owner took it off, or never gave it) ⇒ said by name
-    if (!pick.ok) return done({ ...named(pick.code, pick.code === 'key_ambiguous' ? `several keys hold ${verb} — name one with --key (${pick.names.join(', ')})` : pick.code === 'verb_not_in_scope' ? `the key${pick.names.length > 1 ? 's' : ''} granted to this conversation (${pick.names.join(', ')}) do${pick.names.length > 1 ? '' : 'es'} not hold ${verb} — the owner adds it with Edit… in the Vault window` : null), args: v0.args });
+    if (!pick.ok) return done({ ...named(pick.code, pick.code === 'key_ambiguous' ? `several keys hold ${verb} — name one with --key (${pick.names.join(', ')})` : pick.code === 'verb_not_in_scope' ? `the key${pick.names.length > 1 ? 's' : ''} granted to this conversation (${pick.names.join(', ')}) do${pick.names.length > 1 ? '' : 'es'} not hold ${verb} — the owner adds it with Edit… in the Vault window` : pick.code === 'groups_unreadable' ? `this conversation's Task Groups could not be read just now, so which key it may use for ${verb} could not be judged (${pick.names.join(', ')}) — nothing ran; call again in a moment` : null), args: v0.args });
     const key = pick.key;
     let verdict = A.useVerdict({ key, grants: liveGrants(), subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
     let asked = null;
@@ -595,7 +595,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     }
     // lane grants-unify: a conversation the owner LEFT OUT of the key's Task Group grant is refused BY NAME — never a first-use card
     // asking the owner again about the very conversation he excluded
-    if (!verdict.ok) return done({ ...named(verdict.code, verdict.code === 'verb_not_in_scope' ? `the key "${key.name}" does not hold ${verb} — the owner adds it with Edit… in the Vault window` : verdict.code === 'excepted' ? `the owner left this conversation out of the key "${key.name}"'s grant to a Task Group or to all agents (an exception on the key's row in the Vault window) — ask the owner to lift it, or to grant the key to this conversation` : verdict.code === 'groups_unreadable' ? `this conversation's Task Groups could not be read just now, so whether the owner left it out of the key "${key.name}"'s grant could not be judged — nothing ran (never «in no Task Group»); call again in a moment` : null), args: v0.args }, key.id, asked ? { ask: asked } : {});
+    if (!verdict.ok) return done({ ...named(verdict.code, verdict.code === 'verb_not_in_scope' ? `the key "${key.name}" does not hold ${verb} — the owner adds it with Edit… in the Vault window` : verdict.code === 'excepted' ? `the owner left this conversation out of the key "${key.name}"'s grant to a Task Group or to all agents (an exception on the key's row in the Vault window) — ask the owner to lift it, or to grant the key to this conversation` : verdict.code === 'groups_unreadable' ? `this conversation's Task Groups could not be read just now, so the key "${key.name}"'s grant to a Task Group or to all agents could not be judged — nothing ran (never «in no Task Group»); call again in a moment` : null), args: v0.args }, key.id, asked ? { ask: asked } : {});
     // THE ONCE RESERVATION (lane key-grant-everyone r2 — a check-then-write across an await is a race: three conversations
     // opening at once on ONE once-grant to All agents all ran, and two parallel opens on a conversation's once-grant did on
     // the base): a once-grant the verdict admits is SPENT HERE, in the verdict's own turn — before the limits' await — so a
@@ -629,10 +629,10 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     } catch (e) { return done({ ...named('failed', `the key list could not be written (${e.code || e.message}) — nothing ran`), args: v0.args }, key.id); }
     let result;
     // REACH (lane conversations-archive-verb): a verb that names ANOTHER conversation may touch it by ONE PURE rule — the key
-    // OPENED it (the store's rows), a grant of the key names it (the conversation or one of its Task Groups), or it is the
-    // caller itself (A.reachVerdict) — the owner's grants and the key's own opens bound what it reaches, never the caller's say-so
+    // OPENED it (the store's rows) or it is the caller itself (A.reachVerdict; B-3190: a grant NAMING the target is no reach of
+    // its own) — the key's own opens and the grant's reach bound what it reaches, never the caller's say-so
     // + the GRANT'S REACH this use rides (lane key-instance-scope: the widest of the caller's always-grants, else the once-grant's — useVerdict)
-    const reach = (target) => { const v = A.reachVerdict({ keyId: key.id, caller: caller.conversationId, target, grants: db.grants, opened: db.opened, reach: verdict.reach, reachRows: verdict.reachRows }); if (v.ok && v.by === 'opener' && target && target.webuiId && target.conversationId) noteOpened({ keyId: key.id, webuiId: target.webuiId, conversationId: target.conversationId }); return v; };
+    const reach = (target) => { const v = A.reachVerdict({ keyId: key.id, caller: caller.conversationId, target, opened: db.opened, reach: verdict.reach, reachRows: verdict.reachRows }); if (v.ok && v.by === 'opener' && target && target.webuiId && target.conversationId) noteOpened({ keyId: key.id, webuiId: target.webuiId, conversationId: target.conversationId }); return v; };
     try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); }
     catch (e) { return done({ ...named('failed', String((e && e.message) || e).slice(0, 200)), args: v0.args }, key.id, asked ? { ask: asked } : {}); }
     // THE OPENER'S ROW: a successful open is remembered by the key that made it (the webui id now, the conversation id when known)
@@ -678,7 +678,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       const gs = db.grants.filter((g) => g.keyId === k.id && g.subject !== 'external' && GM.admits([A.useRowOf(g)].filter(Boolean), facts).ok && !(g.mode === 'once' && g.spentAt));
       const always = gs.filter((g) => g.mode === 'always');
       return gs.length ? { id: k.id, name: k.name, scopes: k.scopes.slice(), via: gs.map((g) => ({ subject: g.subject, mode: g.mode, reach: g.reach })), limits: k.limits,
-        reach: always.length ? A.widestReach(always.map((g) => g.reach)) : gs[0].reach } : null;   // lane key-instance-scope: the reach a use would ride (useVerdict's)
+        reach: always.length ? A.widestReach(always.map((g) => g.reach)) : gs.slice().sort((a, b) => A.viaRank(GM.admits([A.useRowOf(b)].filter(Boolean), facts).via) - A.viaRank(GM.admits([A.useRowOf(a)].filter(Boolean), facts).via))[0].reach } : null;   // lane key-instance-scope: the reach a use would ride (useVerdict's — B-3190 r1: its most specific once-grant)
     }).filter(Boolean);
   }
   /** THIS caller's audit lines (its own conversation's), newest last — names and ids only. */
