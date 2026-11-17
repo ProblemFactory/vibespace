@@ -177,7 +177,9 @@ const latestOf = (list) => list.reduce((a, s) => (s.at && (!a || s.at > a.at) ? 
  *  a boot is locked); scopes with their own ends / writers → the per-scope canon (`vault-use-v2`: every scope's identity, end,
  *  tool, writer and time). */
 function canonOf(id, e, xc, gen) {
-  const pk = GM.principalKey(GM.bareOf(e)) || '', name = typeof (e && e.name) === 'string' ? e.name : null, x = Array.isArray(xc) ? xc : [], g = Number(gen) || 0;
+  // lane lg-group-parents: a «仅本组» member's principal is spelled with `#only` in the canon (a member without the flag keeps its
+  // bytes, so every stored mac holds) — a flag deleted on disk breaks the mark and the member is dropped (narrower, never wider)
+  const pk = (GM.principalKey(GM.bareOf(e)) || '') + (e && e.only === true ? '#only' : ''), name = typeof (e && e.name) === 'string' ? e.name : null, x = Array.isArray(xc) ? xc : [], g = Number(gen) || 0;
   if (!Array.isArray(e && e.scopes)) {
     const cs = Array.isArray(e.commands) ? e.commands.map((c) => GM.commandKeyOf(c)).sort() : [];
     const extra = cs.length || e.source ? [{ c: cs, s: e.source || null, a: e.source && Number(e.at) > 0 ? Math.floor(Number(e.at)) : null }] : [];

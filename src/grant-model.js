@@ -24,8 +24,8 @@
  * (`keyFromSessionKey`), automation `session:<cid>` → `<cid>` (`keyFromSubject`), a browser `bk-…` key → the
  * conversation it is bound to, else itself (`browserKeyResolver` — the caller hands the binding lookup).
  *
- * THE VERDICT `admits(rows, facts)` — facts = {conversationKey | conversationKeys, groupIds, groupsUnreadable?,
- * forkPending?}. A row admits the caller when (everyone ∨ one of its keys ∨ one of its groupIds is in `to`) ∧ none of
+ * THE VERDICT `admits(rows, facts)` — facts = {conversationKey | conversationKeys, groupIds, inheritedGroupIds?,
+ * groupsUnreadable?, forkPending?}. A row admits the caller when (everyone ∨ one of its keys ∨ one of its groupIds is in `to`) ∧ none of
  * its keys / groups is in `except`. ROWS ADD: any admitting row admits; an exception subtracts ONLY its own row's
  * contribution (a member's own direct row elsewhere still counts — the owner's default 2). Fail CLOSED, by NAME:
  *   · a malformed `to` ENTRY is dropped (dropping NARROWS); a malformed `except` entry VOIDS the whole row (dropping an
@@ -37,6 +37,19 @@
  *     (the door words it: the exception, and where the owner lifts it);
  *   · a pending fork nothing reached ⇒ `fork_pending`; else `not_granted`.
  * Precedence when no row admits: groups_unreadable › unknown_shape › excepted › fork_pending › not_granted.
+ *
+ * THE LINEAGE (lane lg-group-parents, B-91a7 — Task Group parents, the owner's four rules of 2026-11-05, 「没问题」): a group
+ * may name several parents (a DAG; the ONE writer refuses a cycle, src/task-groups.js) and a child MAY USE what its
+ * parents are granted. It is a FACT fed to this verdict, never a second rule beside it: `inheritedGroupIds` = the
+ * ancestors of the caller's own groups (its own never among them — `groupIds` stays its own), from the ONE reader
+ * (TaskGroupManager.grantGroupsOf). Grants are additive SETS, so there is no order, no override:
+ *   · a `to` group entry admits its own members AND its descendants' (rule ②, «含子组» — the default); an entry marked
+ *     `only: true` («仅本组») admits its own members only;
+ *   · an `except` group entry ALWAYS covers the descendants too (rule ③ — no opt-out: a new subgroup never escapes an
+ *     exclusion; `only` on an exception is refused at the write, ignored at the read — narrower);
+ *   · rule ④ (what a child may USE, never who may SEE it): the group-visibility door and the same-group message rule
+ *     (`sharesGroup`) read own groups only — their readers never pass `inheritedGroupIds`;
+ *   · an unreadable Task Group store (`groupsUnreadable`) leaves the ancestors undecided as well — the same refusal.
  *
  * LEGACY. Every shape the census found on disk maps to rows here (`fromExitGrant`, `fromBrowserOwner`,
  * `fromWindowRecord`, `fromAutomationGrant`, `fromAutomationReach`, `fromChannelAccess`, `fromChannelRow`,
@@ -269,6 +282,13 @@ function normEntry(e, door) {
   const out = { ...b };
   const name = cleanName(e.name);
   if (name && b.kind !== 'everyone') out.name = name;
+  // lane lg-group-parents (rule ②): «仅本组» — a group entry that reaches its own members only, never its child groups'. Any
+  // other value, or the flag on an entry that is not a group, cannot be read: refused at the write, the entry dropped at the
+  // read (narrowing — never read as «含子组»); `false` is the default and is not stored
+  if (e.only !== undefined && e.only !== null && e.only !== false) {
+    if (e.only !== true || b.kind !== 'group' || door === 'group-visibility') return null;   // rule ④: the visibility door never inherits — a flag there would draw «仅本组» on nothing
+    out.only = true;
+  }
   if (Number.isFinite(Number(e.at)) && e.at !== null && e.at !== undefined && e.at !== '') out.at = Number(e.at);
   if (typeof e.by === 'string' && e.by) out.by = e.by.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 64);
   const fields = ENTRY_FIELDS[door] || {};
@@ -291,12 +311,21 @@ function normEntry(e, door) {
   if (door === 'vault-use' && out.scopes && ['hosts', 'commands', 'until', 'tool', 'toolFor', 'source'].some((f) => out[f] !== undefined)) return null;
   return out;
 }
-/** An `except` entry: a conversation or a Task Group — never everyone, never annotated beyond a display name. */
+/** An `except` entry: a conversation or a Task Group — never everyone, never annotated beyond a display name (a group
+ *  exception always covers its child groups, rule ③: an `only` flag here is never read — validateWrite refuses it). */
 function normExcept(e) {
   const b = bareOf(e);
   if (!b || b.kind === 'everyone') return null;
   const name = cleanName(e && e.name);
   return name ? { ...b, name } : b;
+}
+
+/** lane lg-group-parents (the U1 read, 3): the same group named twice, once «仅本组» and once not — the union is the WIDER one
+ *  (rows and entries add; no order decides): the kept entry loses its `only`. */
+function widerOf(list, n) {
+  if (n.only) return;
+  const k = list.find((x) => principalKey(x) === principalKey(n));
+  if (k && k.only) delete k.only;
 }
 
 // ── the row ─────────────────────────────────────────────────────────────────
@@ -313,7 +342,8 @@ function normRow(r) {
   const to = [], seen = new Set();
   for (const e of r.to || []) {
     const n = normEntry(e, r.door);
-    if (!n || seen.has(principalKey(n))) continue;
+    if (n && seen.has(principalKey(n))) { widerOf(to, n); continue; }
+    if (!n) continue;
     seen.add(principalKey(n)); to.push(n);
     if (to.length >= LIST_MAX) break;
   }
@@ -349,13 +379,14 @@ function validateWrite(door, resource, { to = [], except = [] } = {}, { at = nul
   for (const e of to) {
     const n = normEntry(e, door);
     if (!n) return no('bad_principal', `${JSON.stringify(e).slice(0, 80)} is not one of: everyone, a Task Group {kind:'group', id}, a conversation {kind:'conversation', key}${ENTRY_FIELDS[door] ? ` (with ${Object.keys(ENTRY_FIELDS[door]).join(' / ')} as this door allows)` : ''}`);
-    if (seen.has(principalKey(n))) continue;
+    if (seen.has(principalKey(n))) { widerOf(outTo, n); continue; }
     seen.add(principalKey(n)); outTo.push(n);
   }
   const outX = [], seenX = new Set();
   for (const e of except) {
     const n = normExcept(e);
     if (!n) return no('bad_except', `${JSON.stringify(e).slice(0, 80)} cannot be an exception — an exception names a conversation or a Task Group`);
+    if (e && e.only !== undefined && e.only !== null && e.only !== false) return no('bad_except', `${principalKey(n)} cannot be left out for itself only — an exception always covers the group's child groups too`);   // lane lg-group-parents (rule ③)
     if (seenX.has(principalKey(n))) continue;
     if (seen.has(principalKey(n))) return no('except_conflicts', `${principalKey(n)} is both given and excepted — a member with its own grant here cannot also be left out of it`);
     seenX.add(principalKey(n)); outX.push(n);
@@ -382,14 +413,41 @@ function exceptUnnamed(was, except, removeExcept) {
   return null;
 }
 const EXCEPT_UNNAMED_WORDS = 'this Save leaves out a conversation or Task Group you excluded (除了) without naming it — nothing was written; open the dialog again to see who is left out';
+/**
+ * «仅本组» LEAVES BY NAME ONLY (lane lg-group-parents — the U1 read, MAJOR 2: a dialog or a verb that never knew the flag would
+ * re-save a «仅本组» entry as «含子组», WIDER, with no word). The ONE writer asks this before it validates: a group entry the
+ * stored row `was` marks `only: true`, written again with NO `only` at all, KEEPS it (carried); only an explicit `only: false`
+ * widens it. An entry carrying the vault's mark (`mac` — its canon covers the flag) cannot be carried here: → `{refused: key}`
+ * (the door that marks it must say the flag itself). → `{to}` (the same list when nothing is carried) | `{refused}`.
+ */
+function onlyCarried(was, to) {
+  const held = new Set((was && Array.isArray(was.to) ? was.to : []).filter((e) => e && e.kind === 'group' && e.only === true).map((e) => String(e.id)));
+  if (!held.size || !Array.isArray(to)) return { to };
+  let moved = false;
+  const out = [];
+  for (const e of to) {
+    if (e && typeof e === 'object' && e.kind === 'group' && e.only === undefined && held.has(String(e.id))) {
+      if (e.mac !== undefined) return { refused: `group:${e.id}` };
+      out.push({ ...e, only: true }); moved = true;
+    } else out.push(e);
+  }
+  return { to: moved ? out : to };
+}
+const ONLY_UNNAMED_WORDS = 'this Save would let the child groups of a Task Group marked «only this group» in — nothing was written; open the dialog again and say it with the switch';
 
 // ── the verdict ─────────────────────────────────────────────────────────────
-/** The caller's facts, normalized: its keys (a Set), its groups (a Set), the two fault flags. */
+/** The caller's facts, normalized: its keys (a Set), its groups (a Set), the ancestors of its groups (a Set — never one of
+ *  its own: an id in both is its own), the two fault flags. */
 function factsOf(f = {}) {
   const keys = new Set();
   for (const k of [f.conversationKey, ...(Array.isArray(f.conversationKeys) ? f.conversationKeys : [])]) if (k !== undefined && k !== null && k !== '') keys.add(String(k));
-  const groups = new Set((Array.isArray(f.groupIds) ? f.groupIds : []).filter((g) => g !== undefined && g !== null && g !== '').map(String));
-  return { keys, groups, unreadable: !!f.groupsUnreadable, forkPending: !!f.forkPending };
+  const idsOf = (a) => (Array.isArray(a) ? a : []).filter((g) => g !== undefined && g !== null && g !== '').map(String);
+  const groups = new Set(idsOf(f.groupIds));
+  const inherited = new Set(idsOf(f.inheritedGroupIds).filter((g) => !groups.has(g)));
+  // the U1 read (4): a lineage handed in a shape the model cannot read is UNREADABLE (an exception over a parent must never be
+  // read as «no ancestors» — fail closed, groups_unreadable)
+  const badLineage = f.inheritedGroupIds !== undefined && f.inheritedGroupIds !== null && !Array.isArray(f.inheritedGroupIds);
+  return { keys, groups, inherited, unreadable: !!f.groupsUnreadable || badLineage, forkPending: !!f.forkPending };
 }
 const SPECIFIC = Object.freeze({ conversation: 2, group: 1, everyone: 0 });
 /** ONE row against the caller → `{state:'ok', hits}` | `{state:'excepted', entry}` | `{state:'unreadable'}` |
@@ -401,6 +459,7 @@ function judgePrepared(n, F) {
   const row = n.row;
   let exceptUndecided = false;
   for (const x of row.except) {
+    if (x.kind === 'group' && F.inherited && F.inherited.has(x.id)) return { state: 'excepted', row, entry: x };   // lane lg-group-parents rule ③: a group's exception covers its descendants, always
     if (x.kind === 'conversation' && F.keys.has(x.key)) return { state: 'excepted', row, entry: x };
     if (x.kind === 'group') { if (F.groups.has(x.id)) return { state: 'excepted', row, entry: x }; if (F.unreadable) exceptUndecided = true; }
   }
@@ -409,7 +468,7 @@ function judgePrepared(n, F) {
   for (const e of row.to) {
     if (e.kind === 'everyone') { if (F.keys.size) hits.push(e); }
     else if (e.kind === 'conversation') { if (F.keys.has(e.key)) hits.push(e); }
-    else if (e.kind === 'group') { if (F.groups.has(e.id)) hits.push(e); else if (F.unreadable) groupUndecided = true; }
+    else if (e.kind === 'group') { if (F.groups.has(e.id) || (!e.only && F.inherited && F.inherited.has(e.id))) hits.push(e); else if (F.unreadable) groupUndecided = true; }   // lane lg-group-parents rule ②: «含子组» unless «仅本组»
   }
   if (hits.length) return exceptUndecided ? { state: 'unreadable', row } : { state: 'ok', row, hits: hits.sort((a, b) => SPECIFIC[b.kind] - SPECIFIC[a.kind]) };
   if (groupUndecided) return { state: 'unreadable', row };
@@ -433,14 +492,14 @@ function admits(rows, facts = {}) {
 const PREPARED = Symbol.for('vibespace.grant-model.prepared');   // REGISTERED: a patched copy of this model (a suite's red control) knows a prepared row too
 function prepareRow(raw) { const n = normRow(raw); n[PREPARED] = true; return n; }
 /** `prev` (this asker's facts as last prepared) is answered again when `facts` is made of the SAME values — the key, the key
- *  list and the group list as the same arrays of the same lengths, the two flags — else the facts are prepared afresh. The
+ *  list, the group list and the inherited group list as the same arrays of the same lengths, the two flags — else the facts are prepared afresh. The
  *  sameness test lives HERE, with the model: a reader hands the asker's groups only inside the facts it gives the model. */
 const lenOf = (a) => (Array.isArray(a) ? a.length : -1);
 function prepareFacts(facts = {}, prev = null) {
   const f = facts || {}, o = prev && prev[PREPARED] && prev[FACTS_OF];
-  if (o && o.k === f.conversationKey && o.ks === f.conversationKeys && o.ksn === lenOf(f.conversationKeys) && o.g === f.groupIds && o.gn === lenOf(f.groupIds) && o.u === f.groupsUnreadable && o.fp === f.forkPending) return prev;
+  if (o && o.k === f.conversationKey && o.ks === f.conversationKeys && o.ksn === lenOf(f.conversationKeys) && o.g === f.groupIds && o.gn === lenOf(f.groupIds) && o.ig === f.inheritedGroupIds && o.ign === lenOf(f.inheritedGroupIds) && o.u === f.groupsUnreadable && o.fp === f.forkPending) return prev;
   const F = factsOf(f); F[PREPARED] = true;
-  F[FACTS_OF] = { k: f.conversationKey, ks: f.conversationKeys, ksn: lenOf(f.conversationKeys), g: f.groupIds, gn: lenOf(f.groupIds), u: f.groupsUnreadable, fp: f.forkPending };
+  F[FACTS_OF] = { k: f.conversationKey, ks: f.conversationKeys, ksn: lenOf(f.conversationKeys), g: f.groupIds, gn: lenOf(f.groupIds), ig: f.inheritedGroupIds, ign: lenOf(f.inheritedGroupIds), u: f.groupsUnreadable, fp: f.forkPending };
   return F;
 }
 const FACTS_OF = Symbol('grant-model.facts-of');
@@ -454,8 +513,11 @@ function verdictOf(judged, F) {
     else if (j.state === 'unknown') unknown = unknown || j;
   }
   if (hits.length) {
-    hits.sort((a, b) => SPECIFIC[b.entry.kind] - SPECIFIC[a.entry.kind]);
-    return { ok: true, via: hits[0].entry.kind, row: hits[0].row, entry: hits[0].entry, hits };
+    // lane lg-group-parents (the U1 read, 8): among group hits the caller's OWN group is named before a parent's; a verdict
+    // decided by a parent's entry says so (`inherited: true` — the door's words: «through its parent group …»)
+    const viaParent = (e) => (e.kind === 'group' && !F.groups.has(e.id) ? 1 : 0);
+    hits.sort((a, b) => SPECIFIC[b.entry.kind] - SPECIFIC[a.entry.kind] || viaParent(a.entry) - viaParent(b.entry));
+    return { ok: true, via: hits[0].entry.kind, row: hits[0].row, entry: hits[0].entry, hits, ...(viaParent(hits[0].entry) ? { inherited: true } : {}) };
   }
   if (unreadable) return { ok: false, code: 'groups_unreadable', row: unreadable.row };
   if (unknown) return { ok: false, code: 'unknown_shape', why: unknown.why };
@@ -654,7 +716,7 @@ function fromAutomationReach(r) {
 function fromChannelPrincipal(p) {
   if (!p || typeof p !== 'object') return null;
   if (p.kind === 'everyone') return { kind: 'everyone' };
-  if (p.kind === 'group') return withName(bareOf({ kind: 'group', id: p.id }), p.name);
+  if (p.kind === 'group') { const g = withName(bareOf({ kind: 'group', id: p.id }), p.name); return g && p.only === true ? { ...g, only: true } : g; }   // lane lg-group-parents (the U1 read, MAJOR 1): «仅本组» rides the channel spelling both ways
   if (p.kind === 'agent') return withName(bareOf({ kind: 'conversation', key: p.id }), p.name);
   return null;
 }
@@ -662,7 +724,7 @@ function fromChannelPrincipal(p) {
 function toChannelPrincipal(p) {
   if (!p) return null;
   if (p.kind === 'everyone') return { kind: 'everyone', id: '*', name: null };
-  if (p.kind === 'group') return { kind: 'group', id: p.id, name: p.name || null };
+  if (p.kind === 'group') return { kind: 'group', id: p.id, name: p.name || null, ...(p.only === true ? { only: true } : {}) };
   if (p.kind === 'conversation') return { kind: 'agent', id: p.key, name: p.name || null };
   return null;
 }
@@ -827,7 +889,7 @@ const LEGACY = Object.freeze({
 
 module.exports = {
   DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, COMMANDS_MAX, commandListOf, commandKeyOf, scopeListOf,
-  principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, exceptUnnamed, EXCEPT_UNNAMED_WORDS, factsOf, admits, prepareRow, prepareFacts, hitsOf, sharesGroup, names, namesNow,
+  principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, exceptUnnamed, EXCEPT_UNNAMED_WORDS, onlyCarried, ONLY_UNNAMED_WORDS, factsOf, admits, prepareRow, prepareFacts, hitsOf, sharesGroup, names, namesNow,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,
   fromSessionPrincipal, fromExitGrant, fromHostExit, browserKeyResolver, fromBrowserOwner, fromWindowRecord, fromSubject, fromAutomationGrant,
   fromAutomationReach, fromChannelPrincipal, toChannelPrincipal, fromChannelAccess, fromChannelRows, fromChannelApiRows,

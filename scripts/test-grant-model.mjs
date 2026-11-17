@@ -11,6 +11,11 @@
 //   ④ CONTROLS — patched copies (an admits that ignores `except`; a reader that drops a malformed exception) turn ② red.
 //   ⑤ lane browser-login: the `browser-login` door and its RESOURCE SHAPE (<origin>#<user> · <origin>#* · *) — the write refuses any
 //     other (bad_resource), a stored row of another shape reads as unknown_shape (fail closed), the three scopes' rows ADD.
+//   ⑥ lane lg-group-parents (B-91a7, the owner's four rules of 2026-11-05): THE LINEAGE — a parent's group entry admits its
+//     descendants' conversations (`inheritedGroupIds`), an entry marked «仅本组» (`only:true`) its own members only, a group
+//     exception ALWAYS covers the descendants (`only` refused there), own beats inherited, the facts' sameness test,
+//     prepared ≡ unprepared; CONTROLS — patched copies (no inherited hit · `only` ignored · an exception over own groups
+//     only) turn ⑥ red.
 // Fast (PURE, in-process).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -206,6 +211,78 @@ console.log('⑤ lane browser-login: the browser-login door — its resource sha
   const rows = [{ door: 'browser-login', resource: 'https://shop.example.test#alice', to: [C1], except: [] }, { door: 'browser-login', resource: 'https://shop.example.test#*', to: [G], except: [{ kind: 'conversation', key: 'c2' }] }, { door: 'browser-login', resource: '*', to: [{ kind: 'everyone' }], except: [{ kind: 'conversation', key: 'c3' }] }];
   const v = (cid) => GM.admits(rows, { conversationKeys: [cid], groupIds: cid === 'c2' ? ['g1'] : [] });
   ok(v('c1').ok && v('c1').via === 'conversation' && v('c2').ok && v('c2').via === 'everyone' && !v('c3').ok && v('c3').code === 'excepted' && v('c4').ok && v('c4').via === 'everyone', 'the three scopes ADD: c1 by its account row, c2 left out of the site\'s wildcard but admitted by «any site», c3 left out of «any site» and in nothing else ⇒ excepted', ['c1', 'c2', 'c3', 'c4'].map((c) => [c, v(c).ok, v(c).via || v(c).code]));
+}
+
+// ═══ ⑥ lane lg-group-parents: THE LINEAGE (Task Group parents) ══════════════════
+console.log('⑥ lane lg-group-parents: a child group uses what its parents are granted — «仅本组» narrows, an exception always covers descendants');
+{
+  // P = the parent, C = its child (facts: own [C], inherited [P]); G = the grandparent above P
+  const P = { kind: 'group', id: 'tg-p' }, PONLY = { kind: 'group', id: 'tg-p', only: true }, Cg = { kind: 'group', id: 'tg-c' };
+  const child = { conversationKey: 'k-child', groupIds: ['tg-c'], inheritedGroupIds: ['tg-p', 'tg-g'] };
+  const parentOwn = { conversationKey: 'k-par', groupIds: ['tg-p'], inheritedGroupIds: ['tg-g'] };
+  const legacy = { conversationKey: 'k-child', groupIds: ['tg-c'] };   // a door that passes no lineage (before its wiring, or rule ④'s doors)
+  const L = (rows, facts) => GM.admits(rows, facts);
+  const v1 = L([row([P])], child);
+  ok(v1.ok && v1.via === 'group' && v1.entry.id === 'tg-p', 'rule ②: a row naming the PARENT admits a conversation of its CHILD (inherited, «含子组» is the default)', v1);
+  ok(L([row([{ kind: 'group', id: 'tg-g' }])], child).ok, '…and of a grandchild (every ancestor the reader hands — a DAG, the union)');
+  ok(!L([row([P])], legacy).ok && L([row([P])], legacy).code === 'not_granted', '…never without the fact: a facts builder that passes no inheritedGroupIds judges exactly as before (no ancestor guessed)');
+  const v2 = L([row([PONLY])], child);
+  ok(!v2.ok && v2.code === 'not_granted' && L([row([PONLY])], parentOwn).ok, '«仅本组» (`only:true`): the parent\'s own member is admitted, the child\'s conversation is not', [v2, L([row([PONLY])], parentOwn)]);
+  const both = { conversationKey: 'k-both', groupIds: ['tg-c', 'tg-p'], inheritedGroupIds: ['tg-p'] };
+  ok(L([row([PONLY])], both).ok, 'OWN beats inherited: a conversation directly in the parent too passes a «仅本组» entry (an id both own and inherited is own)');
+  const v3 = L([row([{ kind: 'everyone' }], [P])], child);
+  ok(!v3.ok && v3.code === 'excepted' && v3.entry.id === 'tg-p', 'rule ③: «everyone except the PARENT» leaves the CHILD\'s conversation out too (an exception covers descendants, always)', v3);
+  ok(!L([row([Cg], [P])], child).ok && L([row([Cg], [P])], child).code === 'excepted', '…even when the row names the child itself in `to` (fail closed — a new subgroup never escapes an exclusion)');
+  ok(L([row([P], [Cg])], parentOwn).ok && !L([row([P], [Cg])], child).ok, '«the parent except its child»: the parent\'s own member admitted, the child\'s conversation left out');
+  ok(L([row([P], [Cg]), row([{ kind: 'conversation', key: 'k-child' }])], child).ok, 'ROWS ADD with the lineage too: the child\'s own direct row elsewhere still counts');
+  ok(GM.validateWrite('exit', 'h:use', { to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'tg-p', only: true }] }).code === 'bad_except', 'the write refuses «仅本组» on an exception by name (bad_except — rule ③ has no opt-out)');
+  const rx = GM.normRow(row([{ kind: 'everyone' }], [{ kind: 'group', id: 'tg-p', only: true }]));
+  ok(rx.ok && rx.row.except[0].only === undefined && !L([rx.row], child).ok, '…and a stored exception carrying it reads WITHOUT it — it still covers the child (narrower, never wider)', rx);
+  const w1 = GM.validateWrite('browser-profile', 'bp-1', { to: [PONLY, { kind: 'group', id: 'tg-x', only: false }] });
+  ok(w1.ok && w1.row.to[0].only === true && !('only' in w1.row.to[1]), 'the write keeps `only:true` on a group entry; `false` is the default and is not stored', w1);
+  ok(GM.validateWrite('exit', 'h:use', { to: [{ kind: 'group', id: 'tg-p', only: 'yes' }] }).code === 'bad_principal' && GM.validateWrite('exit', 'h:use', { to: [{ kind: 'conversation', key: 'k1', only: true }] }).code === 'bad_principal' && GM.validateWrite('exit', 'h:use', { to: [{ kind: 'everyone', only: true }] }).code === 'bad_principal', 'a flag the model cannot read (a non-boolean, or on a conversation / everyone) refuses the entry by name at the write');
+  const rd = GM.normRow(row([{ kind: 'group', id: 'tg-p', only: 'yes' }, { kind: 'group', id: 'tg-q' }]));
+  ok(rd.ok && J(rd.row.to) === J([{ kind: 'group', id: 'tg-q' }]), '…and at the read such an entry is DROPPED (never read as «含子组» — narrowing)', rd);
+  ok(GM.publicRow(row([PONLY])).to[0].only === true, 'publicRow carries the flag (a page draws «仅本组» from the row itself)');
+  const un = L([row([{ kind: 'group', id: 'tg-z' }])], { ...child, groupsUnreadable: true });
+  ok(!un.ok && un.code === 'groups_unreadable', 'an unreadable Task Group store leaves the lineage undecided too — groups_unreadable, never not_granted');
+  // the prepared road: same verdict, and the sameness test sees the new list
+  const rowsL = [row([P]), row([PONLY], [], 'window', 'w-1'), row([{ kind: 'everyone' }], [P], 'exit', 'h:run')];
+  const same = [child, parentOwn, legacy, both].every((f) => J(GM.admits(rowsL.map(GM.prepareRow), GM.prepareFacts(f))) === J(GM.admits(rowsL, f)));
+  ok(same, 'prepared ≡ unprepared over the lineage cases (a kept row and kept facts judge exactly as fresh ones)');
+  const inh = ['tg-p'], grp = ['tg-c'];
+  const F1 = GM.prepareFacts({ conversationKey: 'k', groupIds: grp, inheritedGroupIds: inh });
+  ok(GM.prepareFacts({ conversationKey: 'k', groupIds: grp, inheritedGroupIds: inh }, F1) === F1, 'prepareFacts answers the kept facts for the same arrays');
+  const F2 = GM.prepareFacts({ conversationKey: 'k', groupIds: grp, inheritedGroupIds: ['tg-p', 'tg-g'] }, F1);
+  ok(F2 !== F1 && F2.inherited.has('tg-g'), '…and fresh facts when the inherited list is another one (a parent added is never judged with the old lineage)');
+  inh.push('tg-n');
+  ok(GM.prepareFacts({ conversationKey: 'k', groupIds: grp, inheritedGroupIds: inh }, F1) !== F1, '…or the same array grown in place (its length is in the test)');
+  ok(GM.sharesGroup(['tg-c'], ['tg-p']) === false, 'rule ④: «the same group» stays own groups only — a child and its parent are not one group (sharesGroup takes no lineage)');
+  // the U1 adversarial read's findings, each a leg
+  const rt = GM.fromChannelPrincipal(GM.toChannelPrincipal(PONLY));
+  ok(rt && rt.only === true && !L([row([rt], [], 'channel-reach', 'account:a')], child).ok, 'read 1: «仅本组» rides the channel spelling both ways (toChannelPrincipal → fromChannelPrincipal keeps it; the child stays out)', rt);
+  ok(L([row([PONLY, P])], child).ok && L([row([P, PONLY])], child).ok && GM.validateWrite('exit', 'h:use', { to: [PONLY, P] }).row.to[0].only === undefined && GM.normRow(row([PONLY, P])).row.to[0].only === undefined, 'read 3: the same group twice, «仅本组» and not — the union is the WIDER one in either order (no order decides)');
+  const bad = L([row([{ kind: 'everyone' }], [P])], { conversationKey: 'k-child', groupIds: ['tg-c'], inheritedGroupIds: new Set(['tg-p']) });
+  ok(!bad.ok && bad.code === 'groups_unreadable' && L([row([{ kind: 'everyone' }], [P])], { conversationKey: 'k-child', groupIds: ['tg-c'], inheritedGroupIds: 'tg-p' }).code === 'groups_unreadable', 'read 4: a lineage in a shape the model cannot read is UNREADABLE — «everyone except the parent» never reads it as «no ancestors»', bad);
+  ok(GM.validateWrite('group-visibility', 'tg-x', { to: [{ kind: 'group', id: 'tg-x', level: 'visible', only: true }] }).code === 'bad_principal', 'read 7: the group-visibility door (rule ④, it never inherits) refuses the flag by name');
+  const own1 = L([row([P, Cg])], child), par1 = L([row([P])], child);
+  ok(own1.entry.id === 'tg-c' && !own1.inherited && par1.inherited === true && par1.entry.id === 'tg-p', 'read 8: the verdict names the caller\'s OWN group before a parent\'s, and says `inherited` when a parent\'s entry decided', [own1.entry, par1.inherited]);
+  const wasRow = { to: [PONLY] };
+  ok(GM.onlyCarried(wasRow, [P]).to[0].only === true && GM.onlyCarried(wasRow, [{ ...P, only: false }]).to[0].only === false && GM.onlyCarried(wasRow, [{ ...P, mac: 'f'.repeat(64) }]).refused === 'group:tg-p' && GM.onlyCarried({ to: [P] }, [P]).to[0].only === undefined, 'read 2: onlyCarried — a write silent on the flag keeps it; only:false widens; a marked entry is refused; a row without the flag carries nothing');
+  // CONTROLS — the change removed turns the legs above red
+  const MZ = mutantCopies('grant-model', REPO);
+  try {
+    const src = fs.readFileSync(path.join(REPO, 'src/grant-model.js'), 'utf-8');
+    const HIT = "(F.groups.has(e.id) || (!e.only && F.inherited && F.inherited.has(e.id)))";
+    const EXC = "    if (x.kind === 'group' && F.inherited && F.inherited.has(x.id)) return { state: 'excepted', row, entry: x };";
+    ok(src.split(HIT).length === 2 && src.split(EXC).length === 2, 'CONTROL setup: the inherited hit and the inherited exception are each found exactly once');
+    const M1 = MZ.load('src/grant-model.js', src.replace(HIT, '(F.groups.has(e.id))'), 'no-inherited-hit');
+    ok(!M1.admits([row([P])], child).ok, 'CONTROL (c): a model with no inherited hit refuses the child — ⑥ rule ② would be red');
+    const M2 = MZ.load('src/grant-model.js', src.replace(HIT, '(F.groups.has(e.id) || (F.inherited && F.inherited.has(e.id)))'), 'ignores-only');
+    ok(M2.admits([row([PONLY])], child).ok, 'CONTROL (d): a model that ignores «仅本组» admits the child — ⑥ «仅本组» would be red');
+    const M3 = MZ.load('src/grant-model.js', src.replace(EXC, ''), 'except-own-only');
+    ok(M3.admits([row([{ kind: 'everyone' }], [P])], child).ok, 'CONTROL (e): an exception judged over own groups only lets the child escape «everyone except the parent» — ⑥ rule ③ would be red');
+  } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
 }
 
 console.log(fail ? `FAILED (${pass} passed, ${fail} failed)` : `ALL PASS (${pass})`);

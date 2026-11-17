@@ -1343,5 +1343,14 @@ console.log('㊵ ROUND 10 (lane vault-standing-request — 主开发\'s acceptan
   ok(ad.ok && sv2.code === 'hosts_required' && sv2.principal === 'conversation:cid-d' && dNow && (dNow.scopes || []).some((sc) => sc.host === 'd.example'), 'a member the hub holds OTHER scopes for (written since the dialog opened), sent with none: refused by name (hosts_required) — never dropped unseen; its d.example kept', { sv2, d: dNow && dNow.scopes });
 }
 
+// lane lg-group-parents (B-91a7): the vault's mark covers «仅本组» — a flag deleted on disk breaks the mark (the member is dropped,
+// narrower), and a member without the flag keeps its canon bytes (every stored mac holds)
+console.log('lane lg-group-parents: the canon spells a «仅本组» member as its own');
+{
+  const m = { kind: 'group', id: 'tg-p', hosts: ['api.example.com'] };
+  const c0 = U.canonOf(RES, m, [], 2), c1 = U.canonOf(RES, { ...m, only: true }, [], 2);
+  ok(c0 !== c1 && c1.includes('group:tg-p#only') && !c0.includes('#only') && c0.includes('"group:tg-p"'), 'a «仅本组» member\'s canon differs from the same member without it; without it, the canon is the principal key as before', [c0, c1]);
+}
+
 console.log(fail ? `\n${pass} passed, ${fail} failed` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

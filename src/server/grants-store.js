@@ -39,7 +39,7 @@ const { redactSecrets, secretName, REDACTED } = require('../secret-shapes.js'); 
 const { SyncStore } = require('../sync-store.js');
 
 const AUDIT_ROTATE_BYTES = 4 * 1024 * 1024;
-const STORE_REFUSALS = Object.freeze(['not_written', 'store_unreadable', 'except_unnamed']);
+const STORE_REFUSALS = Object.freeze(['not_written', 'store_unreadable', 'except_unnamed', 'only_unnamed']);   // lane lg-group-parents: + only_unnamed (a marked «仅本组» entry written silent on the flag)
 
 function writeJsonAtomic(file, obj) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -55,7 +55,8 @@ class GrantsSync extends SyncStore {
 }
 
 const keyOf = (door, resource) => GM.rowKey(door, resource);
-const keysOf = (list) => (Array.isArray(list) ? list.map(GM.principalKey).filter(Boolean) : []);
+// lane lg-group-parents: a «仅本组» entry is its own word in the audit (`group:X (only)`) — a flip of the flag is an added + a removed
+const keysOf = (list) => (Array.isArray(list) ? list.map((e) => { const k = GM.principalKey(e); return k && e && e.only === true ? `${k} (only)` : k; }).filter(Boolean) : []);
 const diff = (was, now) => ({ added: now.filter((k) => !was.includes(k)), removed: was.filter((k) => !now.includes(k)) });
 
 function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(), log = () => { }, memory = false } = {}) {
@@ -148,10 +149,14 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
   /** The change one `{door, resource, to, except, removeExcept?}` asks for → `{ok:true, change|null (nothing to do), row, was}` |
    *  a refusal (lane held-except-doors: an exception `was` holds that `except` leaves out unnamed ⇒ `except_unnamed`). */
   function plan(door, resource, { to = [], except = [], removeExcept = [] } = {}, by, at, { named = true } = {}) {
-    const v = GM.validateWrite(door, resource, { to, except }, { at, by });
+    let v = GM.validateWrite(door, resource, { to, except }, { at, by });
     if (!v.ok) return v;
     const k = keyOf(door, v.row.resource);
     const was = rows.get(k) || null;
+    // lane lg-group-parents: «仅本组» leaves by name only (GM.onlyCarried) — a write silent on the flag keeps it; a marked entry ⇒ only_unnamed
+    const co = GM.onlyCarried(was, to);
+    if (co.refused) return { ok: false, code: 'only_unnamed', error: GM.ONLY_UNNAMED_WORDS, principal: co.refused };
+    if (co.to !== to) { v = GM.validateWrite(door, resource, { to: co.to, except }, { at, by }); if (!v.ok) return v; }
     // lane held-except-doors r4 (主开发's acceptance of r3, MAJOR): a row this release cannot read (kept «judged as it is» at load)
     // holds NO exception a door could have shown (GM.publicRow publishes none for it) — so none can be named, and the Save
     // that replaces it is a REPAIR (the dialogs promise it: «save it again»). The writer accepts it and names what it drops

@@ -73,7 +73,7 @@ console.log('① the ONE writer: atomic, all or nothing, every refusal by name')
   const s3 = GS.create({ dataDir: d3 });
   const rr = s3.rowsFor('exit', 'h:use');
   ok(!s3.health().readable && rr.length === 1 && GM.admits(rr, { conversationKey: 'x' }).code === 'unknown_shape' && s3.set('exit', 'h:use', { to: [G1] }).code === 'store_unreadable' && fs.readFileSync(path.join(d3, 'grants.json'), 'utf-8') === '{"v":1,"rows":[{"door":"exit"', 'an unreadable grants.json: every row is refused BY NAME (unknown_shape — never «nothing granted» silently, never everyone), every write store_unreadable, the file untouched');
-  ok(J([...GS.STORE_REFUSALS].sort()) === J(['except_unnamed', 'not_written', 'store_unreadable']), 'STORE_REFUSALS names the store\'s own three (lane held-except-doors: + except_unnamed)');
+  ok(J([...GS.STORE_REFUSALS].sort()) === J(['except_unnamed', 'not_written', 'only_unnamed', 'store_unreadable']), 'STORE_REFUSALS names the store\'s own three (lane held-except-doors: + except_unnamed)');
 }
 
 // ═══ ② the audit ═══════════════════════════════════════════════════════════
@@ -444,6 +444,36 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
   // CONTROL: a row this release CAN read still refuses an exception left out unnamed
   st.set('exit', 'h5:use', { to: [G1], except: [CEE] });
   ok(st.set('exit', 'h5:use', { to: [G1], except: [] }).code === 'except_unnamed', 'CONTROL: over a readable row an exception left out unnamed is still refused except_unnamed');
+}
+
+// ═══ ⑩ lane lg-group-parents: «仅本组» leaves by name only ═══════════════════════
+console.log('⑩ lane lg-group-parents: «仅本组» (only:true) leaves by name only — a write silent on the flag keeps it; the audit names a flip');
+{
+  const d = dirOf('only');
+  const st = GS.create({ dataDir: d, now: () => 77 });
+  const PO = { kind: 'group', id: 'g1', only: true };
+  ok(st.set('browser-profile', 'p9', { to: [PO] }, 'user').ok && st.rowsFor('browser-profile', 'p9')[0].to[0].only === true, 'a «仅本组» entry is written with its flag');
+  const r2 = st.set('browser-profile', 'p9', { to: [G1, M1] }, 'user');   // a dialog / verb that never knew the flag
+  const back = st.rowsFor('browser-profile', 'p9')[0].to;
+  ok(r2.ok && back.find((e) => e.id === 'g1').only === true && back.some((e) => e.key === 'm1'), 'a later write that names the group WITHOUT the flag KEEPS it (carried — never re-read wider)', back);
+  const r3 = st.set('browser-profile', 'p9', { to: [{ ...G1, only: false }, M1] }, 'user');
+  ok(r3.ok && st.rowsFor('browser-profile', 'p9')[0].to.find((e) => e.id === 'g1').only === undefined, 'only an explicit only:false widens it');
+  const lines = fs.readFileSync(st.auditFile, 'utf-8').trim().split('\n').map((l) => JSON.parse(l)).filter((l) => l.resource === 'p9');
+  ok(lines.length === 3 && J(lines[0].to.added) === J(['group:g1 (only)']) && J(lines[2].to.removed) === J(['group:g1 (only)']) && J(lines[2].to.added) === J(['group:g1']), 'the audit names the flag: «group:g1 (only)» added, then removed for «group:g1» (a widening is never a silent line)', lines.map((l) => l.to));
+  const MAC = 'a'.repeat(64), RES = 'pw:e1#password';
+  ok(st.set('vault-use', RES, { to: [{ ...PO, mac: MAC }] }, 'user').ok, 'a vault-use «仅本组» member with the vault\'s mark is written');
+  const r5 = st.set('vault-use', RES, { to: [{ ...G1, mac: MAC }] }, 'user');
+  ok(!r5.ok && r5.code === 'only_unnamed' && st.rowsFor('vault-use', RES)[0].to[0].only === true, 'a MARKED entry written silent on the flag is refused only_unnamed, nothing written (its mark is over the flag — the vault door must say it)', r5);
+  // CONTROL: the writer without the carry re-reads the entry wider
+  const MZ = mutantCopies('grants-store-only', REPO);
+  try {
+    const gsrc = fs.readFileSync(path.join(REPO, 'src/grant-model.js'), 'utf-8');
+    const CARRY = "      out.push({ ...e, only: true }); moved = true;\n";
+    ok(gsrc.split(CARRY).length === 2, 'CONTROL setup: the carry line is found exactly once');
+    const MG = MZ.load('src/grant-model.js', gsrc.replace(CARRY, '      out.push(e);\n'), 'no-carry');
+    const was = { to: [PO] };
+    ok(MG.onlyCarried(was, [G1]).to[0].only === undefined && GM.onlyCarried(was, [G1]).to[0].only === true, 'CONTROL: a model without the carry hands the silent write on WIDER — ⑩ «KEEPS it» would be red');
+  } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
 }
 
 console.log(fail ? `FAILED (${pass} passed, ${fail} failed)` : `ALL PASS (${pass})`);
