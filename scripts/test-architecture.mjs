@@ -2851,7 +2851,7 @@ await section(async () => {
     'test-office-desktop.mjs', 'test-opencode-plugin.mjs', 'test-opencode-s9.mjs', 'test-permission-rules.mjs', 'test-profile-blindness-chip.mjs',
     'test-queue-steer.mjs', 'test-readings-attribution.mjs', 'test-reattach-stagger-ui.mjs', 'test-reconnect-storm.mjs', 'test-restore-smoke.mjs', 'test-resume-breaker.mjs',
     'test-roster-reset-eta.mjs', 'test-run-collapse-fold.mjs', 'test-sidebar-empty-remote.mjs', 'test-sidebar-rail.mjs', 'test-sidebar-scroll.mjs', 'test-split-close-resurrect.mjs',
-    'test-split-ux.mjs', 'test-stage-overlap.mjs', 'test-stage-preview.mjs', 'test-sys-panel.mjs', 'test-taskbar-group-ui.mjs', 'test-tasks-mirror-race.mjs',
+    'test-split-ux.mjs', 'test-stage-overlap.mjs', 'test-sys-panel.mjs', 'test-taskbar-group-ui.mjs', 'test-tasks-mirror-race.mjs',
     'test-title-chips-ui.mjs', 'test-toolbar-resize.mjs', 'test-turn-truth-ui.mjs', 'test-ui-scale.mjs', 'test-update-dialog.mjs', 'test-window-binding.mjs',
     'test-window-menu.mjs', 'test-worktree-userchan-ui.mjs',
     // the 2.369.202 integration: server-booting suites the OTHER lanes of this release (and .200) added beside lane

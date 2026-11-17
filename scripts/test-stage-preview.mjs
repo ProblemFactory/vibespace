@@ -39,7 +39,8 @@ for (const f of ['src', 'public', 'server.js']) {
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+const home = scratch('stage-smoke-home'); fs.mkdirSync(home, { recursive: true });   // the throwaway hub's own HOME (never the user's — its device daemon root lives under it)
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, HOME: home, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
 // the EXCLUDED package (2026-11-17): its old reason (PORT=3987 / CDP 9337 hard-coded) was cured long ago (freePorts above); what was left
 // is its cleanup — a `pkill -f <socket path>` per dtach socket, a kill BY PATTERN — now the tree's identity stop (endRootedProcesses
 // over the throwaway worktree), and its Chrome asks no keyring (--password-store=basic, no session bus)
@@ -51,7 +52,8 @@ const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
   try { srv.kill('SIGKILL'); } catch {}
   // dtach sessions spawned by the throwaway (shell terminal) — ended BY IDENTITY (every process rooted in the throwaway worktree)
-  try { endRootedProcesses(wt); } catch {}
+  for (const r of [wt, home]) { try { endRootedProcesses(r); } catch {} }
+  try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
   try { fs.rmSync(scratch('stage-smoke-chrome'), { recursive: true, force: true }); } catch {}
 };
