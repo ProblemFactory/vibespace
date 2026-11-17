@@ -47,6 +47,7 @@ export function paintActRow(node, r) {
   const outcome = el('div', 'exit-runs-outcome');
   outcome.append(el('span', 'device-acts-op', r.op), ' · ', el('span', 'exit-runs-verdict', actVerdictText(r)));
   if (r.ms != null) outcome.append(' · ', el('span', 'exit-runs-ms', durationText(r.ms)));
+  if (r.repeats) outcome.append(' · ', el('span', 'device-acts-repeats', t('{n} more since {time}', { n: r.repeats, time: whenText(r.since || r.at) })));   // B-c632: this line stands for N more refusals of the same act since the line before
   main.append(el('code', 'exit-runs-cmd device-acts-what', r.summary || ''), outcome);
   sum.append(main);
   let body = node.querySelector(':scope > .exit-runs-out');

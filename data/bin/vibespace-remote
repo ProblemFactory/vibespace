@@ -61,7 +61,8 @@ async function main() {
     const when = new Date(r.at).toISOString().replace('T', ' ').slice(0, 19);
     const verdict = r.code === 'act_without_by' ? 'refused (no "by" — never sent)' : r.ok === false ? (typeof r.code === 'number' ? `exit ${r.code}` : `failed (${one(r.code || '?', 30)})`) : (typeof r.code === 'number' ? `exit ${r.code}` : 'ok');
     const secs = r.ms == null ? '' : ` · ${(Math.max(0, Number(r.ms) || 0) / 1000).toFixed(1)} s`;
-    console.log(`  ${when}  ${one(r.machine || r.hostId || '?', 40)}  ${one(r.op, 30)}  ${one(r.summary, 140)}  ${verdict}${secs}  (by ${one(r.by || 'nobody', 80)})`);
+    const rep = Number(r.repeats) > 0 ? ` · ${Number(r.repeats)} more time(s) since ${new Date(Number(r.since) || r.at).toISOString().replace('T', ' ').slice(0, 19)}` : '';   // B-c632: one line for a refusal's repeats
+    console.log(`  ${when}  ${one(r.machine || r.hostId || '?', 40)}  ${one(r.op, 30)}  ${one(r.summary, 140)}  ${verdict}${rep}${secs}  (by ${one(r.by || 'nobody', 80)})`);
     if (r.outHead) console.log(`      out: ${one(r.outHead, 200)}`);
   }
 }

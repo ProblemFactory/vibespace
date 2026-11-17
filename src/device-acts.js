@@ -236,6 +236,7 @@ function rowOf(l) {
     op, layer, by: validBy(l.by) ? l.by : null, summary: clean(l.summary),
     ok: l.ok == null ? null : !!l.ok, code: codeOf(l.code), outHead: l.outHead ? cutBytes(redactSecrets(fold(String(l.outHead))).text, OUT_HEAD_BYTES) : '', ms: l.ms == null ? null : Math.max(0, Number(l.ms) || 0),
     ...(askOf(l.ask) ? { ask: l.ask, ...(validBy(l.answeredBy) ? { answeredBy: l.answeredBy } : {}) } : {}),
+    ...(Number(l.repeats) >= 1 ? { repeats: Math.min(1e9, Math.floor(Number(l.repeats))), since: Number(l.since) || null } : {}),   // B-c632: one line for N repeats
   };
 }
 

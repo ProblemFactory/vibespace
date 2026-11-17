@@ -10079,6 +10079,7 @@ export default {
   "Activity…": "活动…", // lane device-act-audit
   "Activity on {machine}": "{machine} 上的活动", // lane device-act-audit
   "The last 50 things this VibeSpace did on {machine}, newest first, each with who asked; a row opens its output head.": "这个 VibeSpace 在 {machine} 上做的最近 50 件事，最新的在前，每件都写明是谁要的；点开一行可看它的输出开头。", // lane device-act-audit
+  "{n} more since {time}": "此后又 {n} 次（自 {time} 起）",
   "Who asked": "谁要的", // lane device-act-audit
   "Everyone": "全部", // lane device-act-audit
   "People": "人", // lane device-act-audit

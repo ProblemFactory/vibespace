@@ -10078,6 +10078,7 @@ export default {
   "Activity…": "アクティビティ…", // lane device-act-audit
   "Activity on {machine}": "{machine} でのアクティビティ", // lane device-act-audit
   "The last 50 things this VibeSpace did on {machine}, newest first, each with who asked; a row opens its output head.": "この VibeSpace が {machine} で行った直近 50 件（新しい順、それぞれ誰の依頼か付き）。行を開くと出力の先頭が見られます。", // lane device-act-audit
+  "{n} more since {time}": "{time} 以降さらに {n} 回",
   "Who asked": "依頼元", // lane device-act-audit
   "Everyone": "すべて", // lane device-act-audit
   "People": "人", // lane device-act-audit
