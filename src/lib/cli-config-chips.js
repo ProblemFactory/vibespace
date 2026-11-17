@@ -83,10 +83,14 @@ export function offLine({ t, rel, path }) {
 // lane ui-language (the walk's settings-8 / -9): `apply.how` is the engineer's line — CLI flags, an engine's rung in English
 // («pool engine — the codex reset-credit rung …»). The head a person reads says only WHEN the value applies; `how` rides the
 // head's tooltip, and joins the head in advanced mode.
+// 主开发 2026-11-17 03:25Z: every word a person reads under a setting is in that person's language — a `how` in prose goes
+// through the dictionary (t() here and on the tooltip, src/lib/settings-ui.js); a flag, an env name or a file's name has no
+// entry and stays literal. A name we gave a module never reaches the screen.
 export function applyHead(apply, { t, advanced = false } = {}) {
   if (!apply) return null;
-  if (apply.kind === 'spawn') return `${t('Applies to new sessions')}${apply.mode === 'terminal' ? ` (${t('terminal mode')})` : ''}${advanced && apply.how ? ` · ${apply.how}` : ''}${apply.live ? ` · ${t('running chat sessions follow from their next turn')}` : ''}`;
-  if (apply.kind === 'server') return `${t('Read by VibeSpace')}${advanced && apply.how ? ` · ${apply.how}` : ''}`;
+  const how = apply.how ? t(apply.how) : '';
+  if (apply.kind === 'spawn') return `${t('Applies to new sessions')}${apply.mode === 'terminal' ? ` (${t('terminal mode')})` : ''}${advanced && how ? ` · ${how}` : ''}${apply.live ? ` · ${t('running chat sessions follow from their next turn')}` : ''}`;
+  if (apply.kind === 'server') return `${t('Read by VibeSpace')}${advanced && how ? ` · ${how}` : ''}`;
   if (apply.kind === 'cli-config') return t('Written into the CLI config');
   return null;
 }

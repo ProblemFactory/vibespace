@@ -458,6 +458,26 @@ console.log('⑨b THE TWO ROWS SAY THE TRUTH — one vendor each (the owner 2026
     ja: '自動：会話が使用量の上限に達した時に 1 回、作業の区切りが来て 5 分間新しいターンがない時に 1 回読み取ります——アカウントごとに 30 分に最大 1 回、ターン中は読まず、アイドルのアカウントも読みません。「再チェック」を押した時だけ：自動では読みません。アカウントのメニューの「再チェック」ではいつでも読めます。',
   };
   ok('CONTROL (U3): the words before this round fail that leg in every language — the leg goes RED on a clause that bounds both reads', ['en', 'zh', 'ja'].every((l) => !bounds(BEFORE_U3[l], U3[l])) && !zh[BEFORE_U3.en] && !ja[BEFORE_U3.en], JSON.stringify(Object.fromEntries(['en', 'zh', 'ja'].map((l) => [l, bounds(BEFORE_U3[l], U3[l])]))));
+  // 主开发 2026-11-17 03:25Z: THE NOTE UNDER THE ROW IS IN THE PERSON'S LANGUAGE — the apply note (advanced mode, and the head's
+  // tooltip) said engineers' English on a Chinese screen («the CLI usage door — the wall read and the after-turn read»). It now says
+  // WHO and WHEN in the description's own words, through the dictionary; a module's name never reaches the screen
+  const { applyHead } = await import(path.join(REPO, 'src/lib/cli-config-chips.js'));
+  const trOf = (d) => (k) => (Object.prototype.hasOwnProperty.call(d, k) ? d[k] : k);
+  const MODULE_WORDS = /door|wall read|after-turn|engine|wrapper|rung/i;
+  const noteOf = (apply, head) => {
+    const en = head(apply, { t: (k) => k, advanced: true }), zhH = head(apply, { t: trOf(zh), advanced: true }), jaH = head(apply, { t: trOf(ja), advanced: true });
+    return { en, zh: zhH, ja: jaH, ok: !MODULE_WORDS.test(en) && /usage wall/.test(en) && /stretch of work/.test(en) && [zhH, jaH].every((h) => !/[A-Za-z]{3,}/.test(String(h).replace(/VibeSpace/g, ''))) };
+  };
+  const note1 = noteOf(A.apply, applyHead);
+  ok('the note under Antigravity\'s row (advanced mode, and the head\'s tooltip) says who reads and when in the description\'s own words — «Read by VibeSpace · when a conversation hits a usage wall, and after a stretch of work» — and on a Chinese or Japanese screen it is that language alone (no English word but VibeSpace), no module\'s name',
+    note1.ok && !!zh[A.apply.how] && !!ja[A.apply.how] && /head\.title = t\(schema\.apply\.how\)/.test(read('src/lib/settings-ui.js')), JSON.stringify(note1));
+  // its REDs: the words before this fix; the chip that draws the note without the dictionary (an in-memory copy of cli-config-chips.js)
+  const note2 = noteOf({ ...A.apply, how: 'the CLI usage door — the wall read and the after-turn read' }, applyHead);
+  const CHIPS = read('src/lib/cli-config-chips.js'), DICT_LINE = "const how = apply.how ? t(apply.how) : '';";
+  const headNoDict = (await import('data:text/javascript;base64,' + Buffer.from(CHIPS.split(DICT_LINE).join("const how = apply.how || '';")).toString('base64'))).applyHead;
+  const note3 = noteOf(A.apply, headNoDict);
+  ok('RED (the note): the words before this fix fail that leg (a module\'s name; English on the zh and ja screens), and so does the chip that draws the note without the dictionary',
+    CHIPS.includes(DICT_LINE) && !note2.ok && !note3.ok && /when a conversation hits a usage wall/.test(note3.zh), JSON.stringify({ before: note2, noDict: note3.zh }));
   // law 6: the words — what each choice DOES, one sentence each, a few lines
   ok('law 6: each description opens a sentence per choice with the choice\'s own words, and stays a few lines (≤ 560 characters)',
     ['Manual:', 'Auto on popup open:', 'Auto via the CLI:', 'Off:'].every((c) => C.description.includes(c)) && ['Automatically:', 'Only when I press Re-check:'].every((c) => A.description.includes(c)) && C.description.length <= 560 && A.description.length <= 560, JSON.stringify([C.description.length, A.description.length]));
