@@ -46,17 +46,24 @@
 //   1. ONE root per suite, minted before anything of the suite exists; ONE git worktree per root (its removal can outlast the gate's
 //      ten seconds between terminate and kill, and a removal cut short leaves a record in the real repository).
 //   2. Everything the suite wants ended inherits the HOME or the daemon root startHub checked. A process started with a scrubbed
-//      env (no such HOME) is only near — said and left — and the suite ends it itself, by its pid and start time.
+//      env (no such HOME) is only near — said and left — and the suite ends it itself, by its pid and start time. A CHILD SUITE (a
+//      suite this suite runs, with its own mints) carries a HOME OUTSIDE its parent's root: its own end is its own.
 //   3. No signal line of a suite's own after its first mint: work that must happen at a signal is registered BEFORE the mint and
-//      is synchronous (the helper's listener ends the process in the middle of the emit).
+//      is synchronous (the helper's listener ends the process in the middle of the emit). An 'exit' listener registered before
+//      the mint is WRAPPED at the mint: if it throws, the throw is said and the helper's end still runs.
 //   4. A suite that mounts anything under its root unmounts it itself (the end never removes over a mount).
 //   5. No pattern, parent-id, group or pid-zero kill, anywhere.
 //   6. Every wait is a bounded poll on a named effect.
 //   7. Two hubs that must outlive each other's stop take a root each.
 //   8. The env handed to startHub starts from strippedEnv() — no inherited daemon root, no vendor keys.
 //   9. A browser or ANY other process a suite starts itself carries a HOME inside the root (主开发 10:04Z): the helper then ends it
-//      by its environ and start time BEFORE the root is removed. The suite's own kill by its handle stays the first try; a suite
-//      on the helper calls no rooted end of its own (scratch.mjs endRootedProcesses / endDaemonsOf) — the helper IS the rooted end.
+//      by its environ and start time BEFORE the root is removed. At an exit the helper's end runs FIRST (it was registered at the
+//      mint) and the suite's own kill by its handle runs after it (a no-op by then); a suite on the helper calls no rooted end of
+//      its own and imports none (scratch.mjs endRootedProcesses / endDaemonsOf / endDaemonsAndWait) — the helper IS the rooted end.
+//   THE ENDS REFUSE A ROOT THE HELPER DID NOT MINT: endRooted, endHub and finishRoot judge their root first — it must pass the
+//   start's own refusals AND have the minted shape directly under the scratch root (/tmp/vs-<name>-h??????, a child suite's
+//   reported root included); anything else (the scratch area itself, a home, an undefined joined into a path) is refused BY NAME
+//   before a single read or signal.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -133,11 +140,23 @@ export function strippedEnv(env = process.env) {
   return out;
 }
 
+/** THE MINTED SHAPE: /tmp/vs-<name>-h?????? directly under the scratch root (mkdtemp's six characters). */
+const MINTED_SHAPE = new RegExp(`^${TMP_ROOTS[0].replace(/[/.]/g, '\\$&')}/${FIXTURE_CWD_PREFIX}[a-z0-9][a-z0-9-]{0,39}-h[A-Za-z0-9]{6}$`);
+/** An end's root, judged before any read or signal: the start's own refusals, and the minted shape. → the resolved root, or a throw. */
+function endsRoot(root, end) {
+  const why = refusalOf(root);
+  if (why) throw new Error(`hub-boot: ${end} refuses root ${JSON.stringify(root)} — it is ${why}`);
+  const r = real(String(root || ''));
+  if (!MINTED_SHAPE.test(r)) throw new Error(`hub-boot: ${end} refuses root ${JSON.stringify(root)} — it is no root the helper mints (${TMP_ROOTS[0]}/${FIXTURE_CWD_PREFIX}<name>-h??????)`);
+  return r;
+}
+
 const MINTED = new Map();   // resolved root → { hubs: [] } — this process's mints only
 let armed = false;
 const SIGNALS = ['SIGTERM', 'SIGINT', 'SIGHUP'];
 const OWN = {};   // the helper's own listener per signal — the only one it ever removes
 let bySignal = false;   // the end runs on a signal's road: the gate's TERM → KILL window is ten seconds
+let budgetEnd = 0;      // …and the WHOLE end shares ONE five-second budget on that road
 
 /** A fresh root for one suite's hub(s): `/tmp/vs-<name>-h??????`, created here (mkdtemp), stamped with this run's record. The
  *  first mint arms the end: the exit event, and each of SIGTERM / SIGINT / SIGHUP — the same end, then the same signal raised on
@@ -151,6 +170,12 @@ export function mintRoot(name) {
   MINTED.set(root, { hubs: [], since: bootTicks() - 2 });   // processes started before the mint cannot carry this root (rule 1)
   if (!armed) {
     armed = true;
+    // the 'exit' listeners registered BEFORE the mint run before the helper's end: wrap each, so one that throws is SAID and the
+    // emit goes on to the end (rule 3)
+    for (const l of process.rawListeners('exit')) {
+      process.removeListener('exit', l);
+      process.on('exit', (...a) => { try { l(...a); } catch (e) { say(`a suite 'exit' listener threw (${e && e.message}) — the helper's end runs anyway`); } });
+    }
     process.on('exit', endAll);
     for (const sig of SIGNALS) { OWN[sig] = () => endBySignal(sig); process.on(sig, OWN[sig]); }
   }
@@ -162,7 +187,7 @@ export function mintRoot(name) {
  *  process, so it dies by it and its parent reads the signal (a suite's own listener left in place answers it instead: the code). */
 function endBySignal(sig) {
   const code = 128 + os.constants.signals[sig];
-  process.exitCode = code; bySignal = true;
+  process.exitCode = code; bySignal = true; budgetEnd = Date.now() + 5000;
   try { process.emit('exit', code); } catch { /* a suite's 'exit' listener threw — the end still runs, below */ }
   try { endAll(); } catch { /* idempotent: a no-op when the emit already ran it */ }
   process.removeListener(sig, OWN[sig]);   // only the helper's own listener (a suite's, registered before the mint, stays)
@@ -273,6 +298,7 @@ const settle = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer
  *  between a list and its signals shows in the next. `done` = the identities already ended (pid:starttime). A cwd-only or
  *  argv-only match is SAID once and left. */
 export function endRooted(root, { signal = 'SIGKILL', procRoot = '/proc', kill, done = new Set(), uid } = {}) {
+  root = endsRoot(root, 'endRooted');   // before a single read or signal
   const signalled = [], left = [], said = new Set();
   let stuck = [];
   for (let pass = 0; pass < 3; pass++) {
@@ -300,6 +326,7 @@ export function endRooted(root, { signal = 'SIGKILL', procRoot = '/proc', kill, 
 /** THE STOP, pure over `procRoot` / `kill`: the hub by the identity recorded at its spawn, then (unless hubOnly) everything
  *  rooted in its root. → { signalled: [{pid, via}], left: [{pid, why}] } */
 export function endHub({ pid, starttime, root, hubOnly = false, signal = 'SIGKILL', procRoot = '/proc', kill } = {}) {
+  root = endsRoot(root, 'endHub');   // before a single read or signal — the hub's own too
   const own = starttime == null ? { signalled: [], left: [{ pid, why: 'no start time recorded at its spawn' }] }
     : endByIdentity([{ pid, starttime, via: 'the hub' }], { signal, procRoot, kill });
   if (hubOnly) return own;
@@ -309,7 +336,7 @@ export function endHub({ pid, starttime, root, hubOnly = false, signal = 'SIGKIL
 
 /** Every git worktree directly in `root` (a `.git` FILE naming its gitdir) removed through git — its record in the checkout's
  *  .git/worktrees goes with it. Synchronous (the exit hook). → the dirs removed. */
-export function removeWorktrees(root, { timeout = bySignal ? 5000 : 60000 } = {}) {   // under the gate's 10 s TERM → KILL window on a signal's road
+export function removeWorktrees(root, { timeout = bySignal ? Math.max(250, budgetEnd - Date.now()) : 60000 } = {}) {   // on a signal's road: what is left of the end's one 5 s budget
   const gone = [];
   let ents = []; try { ents = fs.readdirSync(root, { withFileTypes: true }); } catch { return gone; }
   for (const e of ents) {
@@ -319,18 +346,21 @@ export function removeWorktrees(root, { timeout = bySignal ? 5000 : 60000 } = {}
     if (!gitdir) continue;
     const r = spawnSync('git', ['--git-dir', path.resolve(dir, gitdir), 'worktree', 'remove', '--force', dir], { stdio: 'ignore', timeout, env: { PATH: process.env.PATH, HOME: process.env.HOME || os.homedir(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } });   // a scrubbed env: no GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR of an enclosing hook
     if (r.status === 0) gone.push(dir);
+    else say(`could not remove the worktree ${dir} through git (${r.error && r.error.code === 'ETIMEDOUT' ? `timed out after ${timeout} ms` : `status ${r.status}`}) — its record may remain in the repository`);
   }
   return gone;
 }
 
 /** The end of a root's files: ONE mount check first — a mount point inside the root, or a mount table that cannot be read, stops
  *  BOTH removals and is said — then its git worktrees (through git), then the root. → true when removed. */
-export function finishRoot(root, { mountinfo } = {}) {
+export function finishRoot(root, { mountinfo, stuck = [] } = {}) {
+  root = endsRoot(root, 'finishRoot');   // before a single read or removal
   const inside = mountsInside(root, mountinfo);
   if (inside === null) { say(`left ${root} in place, its worktrees too — the mount table cannot be read, so a mount inside it cannot be ruled out`); return false; }
   if (inside.length) { say(`left ${root} in place, its worktrees too — ${inside[0]} is mounted inside it`); return false; }
   removeWorktrees(root);
   fs.rmSync(root, { recursive: true, force: true });
+  for (const x of stuck) if (starttimeOf(x.pid) === x.starttime) say(`removed ${root} while pid ${x.pid} (left unjudged in an uninterruptible wait) still lived`);
   return true;
 }
 
@@ -338,8 +368,9 @@ export function finishRoot(root, { mountinfo } = {}) {
 function endAll() {
   for (const [root, m] of MINTED) {
     for (const h of m.hubs) try { if (!h.stopped) h.stop({ hubOnly: true }); } catch { /* best effort at exit */ }
-    try { endRooted(root); } catch { /* best effort at exit */ }
-    try { finishRoot(root); } catch { /* best effort at exit */ }
+    let stuck = [];
+    try { stuck = endRooted(root).left.filter((x) => x.why === 'in an uninterruptible wait').map((x) => ({ pid: x.pid, starttime: starttimeOf(x.pid) })); } catch { /* best effort at exit */ }
+    try { finishRoot(root, { stuck }); } catch { /* best effort at exit */ }
   }
   MINTED.clear();
 }

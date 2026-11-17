@@ -29,6 +29,7 @@ const prof = scratch('vdl-chrome');
 const FX = scratch('vdl-fx');
 const DL = scratch('vdl-dl');
 const CH_HOME = path.join(root, 'chrome-home'), CH_RUN = scratch('vdl-run'); // chrome's own HOME — IN the root (rule nine: the helper ends it before the root goes) — + a PRIVATE XDG_RUNTIME_DIR (never the owner's /run/user)
+fs.mkdirSync(CH_HOME, { recursive: true });   // created as its siblings create their browser's HOME
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };

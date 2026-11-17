@@ -2988,14 +2988,22 @@ await section(async () => {
   // end (it ends a process by the HOME / daemon root it handed out, by start time, never reading one in an uninterruptible wait);
   // scratch.mjs endRootedProcesses / endDaemonsOf pick by a cwd or an argv token and kill a bare pid. A suite's own browser carries
   // the root's HOME instead (hub-boot.mjs rule 9). Counted outside comments and strings.
-  const onHelperSrc = (t) => /\bfrom\s*['"]\.\/hub-boot\.mjs['"]/.test(t);
-  const callsOldEnd = (t) => { const data = dataRanges(t); return [...t.matchAll(/\b(?:endRootedProcesses|endDaemonsOf)\s*\(/g)].some((m) => !data.some(([x, y]) => m.index >= x && m.index < y)); };
+  // on the helper = an IMPORT STATEMENT of ./hub-boot.mjs outside comments and strings (a fixture string naming it is not)
+  const outsideData = (t, re) => { const data = dataRanges(t); return [...t.matchAll(re)].filter((m) => !data.some(([x, y]) => m.index >= x && m.index < y)); };
+  const onHelperSrc = (t) => outsideData(t, /^import\b[^;]*?\bfrom\s*/gm).some((m) => /^\s*['"]\.\/hub-boot\.mjs['"]/.test(t.slice(m.index + m[0].length)));
+  // the three OLD rooted ends — called, OR imported at all from the scratch module (an alias `{ endRootedProcesses as e }` is caught)
+  const OLD_ENDS = /\b(?:endRootedProcesses|endDaemonsOf|endDaemonsAndWait)\b/;
+  const callsOldEnd = (t) => outsideData(t, /\b(?:endRootedProcesses|endDaemonsOf|endDaemonsAndWait)\s*\(/g).length > 0
+    || outsideData(t, /^import\s*\{([^}]*)\}\s*from\s*['"]\.\/scratch\.mjs['"]/gm).some((m) => OLD_ENDS.test(m[1]));
   const bothEnds = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f)).filter((f) => { const t = fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'); return onHelperSrc(t) && callsOldEnd(t); });
   const onHelperN = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && onHelperSrc(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'))).length;
-  ok(onHelperN >= 2 && bothEnds.length === 0, `§57d no suite on the boot helper (${onHelperN}) also calls an old rooted end (endRootedProcesses / endDaemonsOf) — the helper IS the rooted end${bothEnds.length ? ' — ' + bothEnds.join(', ') : ''}`);
+  ok(onHelperN >= 22 && bothEnds.length === 0, `§57d no suite on the boot helper (${onHelperN}; the floor 22 = test-chat-e2e, test-hub-boot and batch 1's twenty) calls or imports an old rooted end (endRootedProcesses / endDaemonsOf / endDaemonsAndWait) — the helper IS the rooted end${bothEnds.length ? ' — ' + bothEnds.join(', ') : ''}`);
   const hbImp = "import { mintRoot, startHub } from './hub-boot.mjs';\n";
-  ok(callsOldEnd(hbImp + 'try { endRootedProcesses(chromeDir); } catch {}') && callsOldEnd(hbImp + 'endDaemonsOf(dev);') && !callsOldEnd(hbImp + '// endRootedProcesses(chromeDir)') && !callsOldEnd(hbImp + "const s = 'endRootedProcesses(x)';") && !onHelperSrc("import { endRootedProcesses } from './scratch.mjs';"),
-    '§57d CONTROLS: a call on the helper\'s suite is caught (either old end), one in a comment or a string is not, and a suite not on the helper is not judged');
+  ok(callsOldEnd(hbImp + 'try { endRootedProcesses(chromeDir); } catch {}') && callsOldEnd(hbImp + 'endDaemonsOf(dev);') && callsOldEnd(hbImp + 'await endDaemonsAndWait(dev);')
+    && callsOldEnd(hbImp + "import { freePorts, endRootedProcesses as endAllOf } from './scratch.mjs';\nendAllOf(dir);")
+    && !callsOldEnd(hbImp + '// endRootedProcesses(chromeDir)') && !callsOldEnd(hbImp + "const s = 'endRootedProcesses(x)';") && !callsOldEnd(hbImp + "import { freePorts, vncEnv } from './scratch.mjs';")
+    && onHelperSrc(hbImp) && !onHelperSrc("const FIX = `import { mintRoot } from './hub-boot.mjs';`;") && !onHelperSrc("import { endRootedProcesses } from './scratch.mjs';"),
+    '§57d CONTROLS: a call of any of the three old ends is caught, and so is an IMPORT of one under an alias (the planted `endRootedProcesses as endAllOf`); one in a comment or a string is not, a scratch import of other names is not, and a fixture string naming the helper is no suite on it');
 });
 
 // §58 EVERY ICON A MODULE NAMES EXISTS (lane I, 2026-09-25 — the owner's live-view screenshot printed the word
