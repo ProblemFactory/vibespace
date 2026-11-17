@@ -6,6 +6,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Added
 - Diagnostics → Main loop held shows how long VibeSpace was held each day, by cause: today, yesterday and the last seven days.
+- Diagnostics → Main loop held shows how long VibeSpace was held each day, by cause: today, yesterday and the last seven days.
+- Diagnostics → Main loop held also shows the last 24 hours, hour by hour: held time, how busy VibeSpace was, what kept it busy and memory.
 
 ### Fixed
 - On slow storage, saving a Channels account, its groups, aliases or outbox no longer freezes VibeSpace for seconds; your own changes still wait until saved.
