@@ -77,7 +77,7 @@ const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta'], 'src/jobs
 // the true count on 2.369.404 (d7f42cc21) with these rows is 904 (516 + 388 newly seen; the poll-stamps journal's two calls
 // named a durable exception); the moved doors' 11 sites (adapters, the outbox, groups, aliases, people ×2, the stamps
 // snapshot's call, its truncate and writeBuffersAtomic's own three) go to zero ⇒ 893
-const DEBT_MAX = 887;   // lane lg-store-writes U1 (B-0248): −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516
+const DEBT_MAX = 885;   // lane lg-store-writes U2 (B-0248): −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516
 // [file, scope, n, class, other readers, what a lost last write costs, why]
 const ROWS = [
   ["src/agy-store-fs.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
@@ -111,7 +111,6 @@ const ROWS = [
   ["src/server/dropline-oauth.js","*",4,"durable","—","NOT idempotent: an OAuth token — a lost write is a sign-in lost","round 2 (newly seen: a helper-local write): the voice provider's token file — must be on disk before the answer"],
   ["src/spawn/dial.js","*",2,"debt","—","—","round 2 (newly scanned): a spawn's launch script for a dialled host — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/spawn/ssh.js","*",3,"debt","—","—","round 2 (newly scanned): a spawn's launch script over ssh — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/turn-carry.js","*",2,"debt","—","—","2.369.390 (report-mark-on-ack): the outstanding deliveries' table, written whole (tmp + rename) at each mark / clear — a lost write costs the restart line for those conversations; small — onto the store writer when its store is next touched"],
   ["src/server/cli-model-catalog.js","*",4,"debt","—","—","2.369.390 (cli-update-needs-nothing): the model catalog's ledger, written whole (tmp + rename) — re-read from the installed binary; small — onto the store writer when its store is next touched"],
   ["server.js","*",8,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/account-material.js","*",7,"durable","—","NOT idempotent: money / authority / a credential","an account's credential files — must be on disk before the answer"],
@@ -434,8 +433,15 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
       && /return W\(\)\.durable\(F\.usage\)/.test(t) && /if \(call\.counted\) await call\.counted;/.test(t) && !/writeJsonAtomic\(/.test(t) && w.length === 3 && w.every((l) => /F\.journal|keep\.join/.test(l)); };
   ok(deMoved(de), 'the decision memo (paced) and the day\'s counter (an act: rank 0 — the CALL that changed it waits for its durable(), the loop never) through the writer — the file\'s only synchronous writes left are the journal\'s three');
   ok(!deMoved(de.replace("W().dirty(F.memo, { name: 'decision-memo.write'", "fs.writeFileSync(F.memo, { name: 'decision-memo.write'")), 'NEGATIVE CONTROL (lg-store-writes U1): the memo written synchronously again is red');
+  // lane lg-store-writes U2 (B-0248): the outstanding-deliveries table (src/turn-carry.js) — a mark an act (rank 0 +
+  // durable()), the rest paced — hands its bytes to the writer by name; no synchronous write of it is left
+  const tc = src('src/turn-carry.js');
+  const tcMoved = (t) => /W\(\)\.dirty\(file, \{ name: 'turn-carry-outstanding\.write', \.\.\.\(act \? \{ rank: 0 \} : \{\}\)/.test(t) && /if \(act\) W\(\)\.durable\(file\)/.test(t)
+    && /mark\(key, info\) \{ if \(!key\) return true; rows\[key\] = info; return save\(\{ act: true \}\); \}/.test(t) && !/fs\.(writeFileSync|renameSync)\(/.test(t);
+  ok(tcMoved(tc), 'the outstanding-deliveries table through the writer (a mark an act, rank 0 + durable(); a clear paced) — no writeFileSync / renameSync left in src/turn-carry.js');
+  ok(!tcMoved(tc.replace("return JSON.stringify(rows); },", "return JSON.stringify(rows); }, x: fs.writeFileSync(file + '.tmp', ''),")), 'NEGATIVE CONTROL (lg-store-writes U2): a synchronous write of the table put back is red');
   const TS = require(path.join(REPO, 'src/timed-sync.js'));
-  ok(['channels-index.write', 'session-meta.write', 'usage-cursors.write', 'usage-rates.write', 'jobs-logs-sweep.write', 'decision-memo.write', 'decision-usage.write'].every((n) => TS.STORES[n] && TS.STORES[n].kind === 'write'), 'each moved store keeps its store-timing row (the writer records its write\'s own time under it)');
+  ok(['channels-index.write', 'session-meta.write', 'usage-cursors.write', 'usage-rates.write', 'jobs-logs-sweep.write', 'decision-memo.write', 'decision-usage.write', 'turn-carry-outstanding.write'].every((n) => TS.STORES[n] && TS.STORES[n].kind === 'write'), 'each moved store keeps its store-timing row (the writer records its write\'s own time under it)');
 }
 
 // ── ROUND 4 (item 7): THE WAITS THAT REMAIN — every synchronous FLUSH the main thread waits on while the writer's thread
@@ -450,6 +456,7 @@ console.log('② the synchronous flushes the main thread waits on — named debt
     ['src/usage-estimator.js', 1, 'flushRates() / settleRates() — the learned rates on disk before the boot\'s migrations step and a ledger backfill\'s pass completes'],
     ['src/session-status.js', 1, 'flush() — the session-status map before the shutdown hands over and the set routes answer (persisted())'],
     ['src/server/session-stdout.js', 1, 'writeSessionMeta {sync: true} — a meta its caller renames next (boot-restore retireDeadSocket): the write in flight lands, then this one'],
+    ['src/turn-carry.js', 1, 'createOutstanding() — a table made AGAIN in the same process (a suite\'s new hub on the same data dir) lands the write the last one still owed before it reads the file; a hub\'s boot owes nothing (pending() is false: no wait) — lane lg-store-writes U2'],
     ['src/server/decision-engine.js', 1, 'create() — an engine made AGAIN in the same process (a suite\'s restart) lands the memo / counter write the last one still owed before it reads the files; a hub\'s boot owes nothing (pending() is false: no wait) — lane lg-store-writes U1'],
   ];
   const got = new Map();

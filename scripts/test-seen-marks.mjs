@@ -27,6 +27,10 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const SEEN = require('../src/seen-marks.js');
 const { TaskGroupManager } = require('../src/task-groups.js');
 const ROUTES = require('../src/agent-routes.js');
+// lane lg-store-writes (B-0248 U2): the outstanding table goes through THE STORE WRITER — a read of its FILE here first lands
+// what the process's writer still owes for it (the hub's own exit does the same for every store)
+const SW = require('../src/store-writer.js');
+const landed = (f) => { try { SW.storeWriter().flushSync([f]); } catch { } return f; };
 const VERSION = require('../package.json').version;
 
 let pass = 0, fail = 0;
@@ -728,7 +732,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
   const o1 = askOn(oldHub, P, 'NS');                         // told, handed out — and the hub dies before its confirm
   confirmOn(oldHub, 'NC', askOn(oldHub, P, 'NC').delivery);  // confirmed before the restart: nothing outstanding
   askOn(oldHub, P, 'NL');                                    // outstanding — the new hub's caller of it is a LEGACY one
-  ok((o1.context || '').includes('OLD-NS') && o1.delivery && fs.existsSync(path.join(carryDir, 'turn-carry-outstanding.json')), 'the old hub: a notice told, its delivery outstanding, written by conversation (data/turn-carry-outstanding.json)');
+  ok((o1.context || '').includes('OLD-NS') && o1.delivery && fs.existsSync(landed(path.join(carryDir, 'turn-carry-outstanding.json'))), 'the old hub: a notice told, its delivery outstanding, written by conversation (data/turn-carry-outstanding.json)');
   await new Promise((r) => setTimeout(r, TC.LIMITS.clearAfterMs + 50));   // NC's row retired once its stores are durable (r4 item 4)
   TC._newProcess();                                          // the hub dies: nothing of the old process stays in memory
   const newHub = mk2({ carryDir });                          // a NEW process on the same data dir
@@ -826,6 +830,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     routeLog.length = 0;
     TC._fault.at = 'write';
     let w1, w2; try { w1 = askOn(F, P, 'NFW'); confirmOn(F, 'NFW', w1.delivery); ssm.pushNotice('claude:NFW', { kind: 'browser-proposal', text: 'FAULT-write-2' }); w2 = askOn(F, P, 'NFW'); } finally { TC._fault.at = null; }
+    hush(() => landed(path.join(wDir, 'turn-carry-outstanding.json')));   // U2: the table's write is the writer's — landed (and failed, once) here, its said line heard as the answers' were
     const said = routeLog.filter((l) => /could not be written/.test(l));
     ok((w1.context || '').includes('FAULT-write') && w1.delivery && (w2.context || '').includes('FAULT-write-2') && said.length === 1,
       'r4 items 2b + 3: a throw planted at the FILE\'s write — the answer is whole AND keeps its confirm law (a delivery id): the file only serves the restart line, whose loss is said ONCE (not per answer)', said);
@@ -893,7 +898,7 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     const dDir = fs.mkdtempSync(path.join(tmp, 'carry-d-'));
     const F = mk2({ carryDir: dDir });
     add(F, 'ND', quiet); ssm.pushNotice('claude:ND', { kind: 'browser-proposal', text: 'DURABLE' });
-    const read = () => { try { return JSON.parse(fs.readFileSync(path.join(dDir, 'turn-carry-outstanding.json'), 'utf8')); } catch { return {}; } };
+    const read = () => { try { return JSON.parse(fs.readFileSync(landed(path.join(dDir, 'turn-carry-outstanding.json')), 'utf8')); } catch { return {}; } };
     const d1 = askOn(F, P, 'ND'); confirmOn(F, 'ND', d1.delivery);
     const rightAfter = 'claude:ND' in read();
     await new Promise((r) => setTimeout(r, TC.LIMITS.clearAfterMs + 40));
@@ -912,13 +917,56 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     const cid = 'claude:' + KR.claudeSessionId;
     ssm.pushNotice(cid, { kind: 'browser-proposal', text: 'DRIFT-2' });
     askOn(Kr, T, 'NR2');                                         // the next answer of this conversation (another route): the row follows
-    const rows = JSON.parse(fs.readFileSync(path.join(rDir, 'turn-carry-outstanding.json'), 'utf8'));
+    const rows = JSON.parse(fs.readFileSync(landed(path.join(rDir, 'turn-carry-outstanding.json')), 'utf8'));
     ok(cid in rows && !('webui:NR2' in rows), 'the unverified drift: a row written under the PAGE key follows the conversation key at its next answer (rekey) — a later process can match it', Object.keys(rows));
+  }
+  {
+    // lane lg-store-writes (B-0248 U2): THE PROMPT HOOK NEVER WAITS ON THIS FILE — over a writer stand-in that lands nothing
+    // until told: a MARK is an act handed to the writer (turn-carry-outstanding.write, rank 0, durable() asked), a clear is
+    // PACED, nothing is on disk at the change; the bytes are the rows when the write is due; a table made again while its
+    // write is owed lands it first. RED (a mutant copy): the old synchronous save ⇒ the file is there at the mark.
+    const standIn = () => {
+      const r = { dirties: [], durables: [], flushes: 0, owed: new Map() };
+      r.dirty = (file, o) => { r.dirties.push({ file, name: o.name, rank: o.rank }); r.owed.set(file, o.produce); };
+      r.durable = (file) => { r.durables.push(file); return Promise.resolve(true); };
+      r.pending = (file) => r.owed.has(file);
+      r.flushSync = (files) => { r.flushes++; for (const f of files) { const pr = r.owed.get(f); if (pr) { fs.writeFileSync(f, pr()); r.owed.delete(f); } } return { written: files, left: [] }; };
+      return r;
+    };
+    const leg = (Mod, tag) => {
+      const uDir = fs.mkdtempSync(path.join(tmp, 'carry-u' + tag + '-')), f = path.join(uDir, 'turn-carry-outstanding.json');
+      const rec = standIn(), st = Mod.createOutstanding(uDir, { writer: rec, log: () => { } });
+      st.mark('claude:NU', { at: Date.now(), route: 'UserPromptSubmit', kinds: ['notices'] });
+      const atMark = fs.existsSync(f);
+      st.mark('claude:NV', { at: Date.now(), route: 'UserPromptSubmit', kinds: ['notices'] });
+      st.clear('claude:NU');
+      return { rec, f, uDir, atMark };
+    };
+    const u = leg(TC, 'm');
+    const [d1, d2, d3] = u.rec.dirties;
+    ok(!u.atMark && u.rec.dirties.length === 3 && u.rec.dirties.every((d) => d.name === 'turn-carry-outstanding.write') && d1.rank === 0 && d2.rank === 0 && d3.rank === undefined && u.rec.durables.length === 2,
+      'U2 (B-0248): a MARK is an act handed to the store writer (turn-carry-outstanding.write, rank 0, durable() asked), a clear is PACED — nothing is written on the main thread at the change', { atMark: u.atMark, dirties: u.rec.dirties, durables: u.rec.durables.length });
+    u.rec.flushSync([u.f]);
+    const onDisk = JSON.parse(fs.readFileSync(u.f, 'utf8'));
+    ok(Object.keys(onDisk).join() === 'claude:NV', 'U2: the bytes are the rows when the write is due — two marks and a clear are ONE write holding the one row left', onDisk);
+    const st2 = TC.createOutstanding(u.uDir, { writer: u.rec, log: () => { } });
+    st2.mark('claude:NW', { at: Date.now(), route: 'UserPromptSubmit', kinds: ['notices'] });
+    const before = u.rec.flushes;
+    const st3 = TC.createOutstanding(u.uDir, { writer: u.rec, log: () => { } });
+    ok(u.rec.flushes === before + 1 && st3.fromBefore('claude:NW') && st3.fromBefore('claude:NV'), 'U2: a table made AGAIN in the same process while its write is owed lands it first, then reads it (both rows from before)', { flushes: u.rec.flushes - before });
+    const tcSrc = fs.readFileSync(path.join(REPO, 'src/turn-carry.js'), 'utf8');
+    const aW = "  const W = () => writer || require('./store-writer.js').storeWriter();\n";
+    ok(tcSrc.split(aW).length === 2, 'ANCHOR: the table\'s one writer line');
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const Sync = mutantCopies('seen-marks-u2', REPO).load('src/turn-carry.js', tcSrc.replace(aW, "  const W = () => ({ dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) });\n"), 'sync-save');
+    const r = leg(Sync, 's');
+    ok(r.atMark && r.rec.dirties.length === 0, 'CONTROL (U2): the old synchronous save ⇒ the file is on disk at the mark — the leg\'s first check would be red');
   }
   TC.LIMITS.clearAfterMs = clearAfter0;
 
 }
 
+try { SW.storeWriter().flushSync(); } catch { }   // lane lg-store-writes U2: the writer's owed writes land before the scratch dir goes (no race, no folder left)
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

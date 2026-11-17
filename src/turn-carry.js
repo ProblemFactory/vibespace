@@ -76,8 +76,14 @@ const OUTSTANDING_MAX_AGE_MS = 48 * 3600 * 1000;
 /** the tidy after acceptance r4 (item 3): the writer keeps the file near 170 KB (1 000 rows) — a file beyond this is not this
  *  writer's, and is REFUSED BY NAME before it is read (a 56 MB planted file held route setup 1.2 s while it was parsed) */
 const OUTSTANDING_MAX_BYTES = 1024 * 1024;
-function createOutstanding(dir = null, { log = (...a) => console.log(...a), now = Date.now } = {}) {   // log resolved at each line (a store outlives the call that made it)
+function createOutstanding(dir = null, { log = (...a) => console.log(...a), now = Date.now, writer = null } = {}) {   // log resolved at each line (a store outlives the call that made it)
   const file = dir ? path.join(dir, 'turn-carry-outstanding.json') : null;
+  // lane lg-store-writes (B-0248 U2): THE TABLE GOES THROUGH THE STORE WRITER (src/store-writer.js — its own thread): every
+  // prompt hook's delivery marked a row and its confirm cleared one, each a whole-file temp + rename ON THE MAIN THREAD
+  // (≤ 170 KB) — the hook's answer waited on the storage twice a turn. A MARK is an act (urgent: on disk within the writer's
+  // 2K + 1 writes — the row is what a crash's restart line is said from); a clear / said / rekey is paced (a lost one is a
+  // row the bound retires, or one restart line said once more)
+  const W = () => writer || require('./store-writer.js').storeWriter();
   const saidOnce = new Set();
   const sayOnce = (cause, words) => { if (saidOnce.has(cause)) return; saidOnce.add(cause); try { log(`[inject] the outstanding-deliveries file ${file || '(memory)'}: ${words}`); } catch { } };
   const isRow = (r) => !!r && typeof r === 'object' && !Array.isArray(r) && Number.isFinite(Number(r.at));
@@ -88,6 +94,9 @@ function createOutstanding(dir = null, { log = (...a) => console.log(...a), now 
   };
   let rows = {};
   if (file) {
+    // A LOAD READS WHAT THIS PROCESS STILL OWES: a table made again in the same process (a suite's new hub on the same data
+    // dir) lands the write the last one handed the writer BEFORE it reads the file — a hub's boot owes nothing (no wait)
+    try { if (W().pending(file)) W().flushSync([file]); } catch { }
     let raw = null, fd = null;
     try {
       fd = fs.openSync(file, 'r');
@@ -108,19 +117,26 @@ function createOutstanding(dir = null, { log = (...a) => console.log(...a), now 
     }
   }
   const before = new Set(Object.keys(rows));   // what previous processes left outstanding
-  const save = () => {
+  const unsaved = (e) => sayOnce('write', `could not be written (${(e && (e.code || e.message)) || e}) — a restart before a confirm will not be said for the conversations it should hold`);
+  /** the table handed to the writer: its bytes are the rows as they are when the write is due (a burst is one write); a
+   *  write that failed is SAID once (the writer keeps it owed and retries) and never thrown. The planted fault (a suite's)
+   *  is taken at the change and fails that write once. → true (the change is held; its file follows) */
+  function save({ act = false } = {}) {
     if (!file) return true;
+    let planted = FAULT.at === 'write';
     try {
-      if (FAULT.at === 'write') throw new Error('planted at the file write');
       rows = bound(rows);
-      fs.writeFileSync(file + '.tmp', JSON.stringify(rows)); fs.renameSync(file + '.tmp', file);
+      W().dirty(file, { name: 'turn-carry-outstanding.write', ...(act ? { rank: 0 } : {}),
+        produce: () => { if (planted) { planted = false; throw new Error('planted at the file write'); } return JSON.stringify(rows); },
+        onWritten: (ok, e) => { if (!ok) unsaved(e); } });
+      if (act) W().durable(file).catch(() => { });   // urgent: the writer's next write; a failure is said by onWritten
       return true;
-    } catch (e) { sayOnce('write', `could not be written (${(e && (e.code || e.message)) || e}) — a restart before a confirm will not be said for the conversations it should hold`); return false; }
-  };
+    } catch (e) { unsaved(e); return false; }
+  }
   return {
     file,
     fromBefore: (key) => !!key && before.has(key),
-    mark(key, info) { if (!key) return true; rows[key] = info; return save(); },
+    mark(key, info) { if (!key) return true; rows[key] = info; return save({ act: true }); },
     /** retire the row only if it is still the one `at` wrote (a newer delivery may have marked it since) */
     clearIf(key, at) { if (!key || !rows[key] || (at != null && Number(rows[key].at) !== Number(at))) return; delete rows[key]; before.delete(key); save(); },
     clear(key) { if (!key || !(key in rows)) return; delete rows[key]; before.delete(key); save(); },
