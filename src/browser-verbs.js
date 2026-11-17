@@ -1155,7 +1155,7 @@ const RAW_ARG_RE = /^--(?:remote-debugging-[a-z-]+|remote-allow-origins|user-dat
 /** lane engine-spi-egress r2: names only the KEEPER sets on an engine launch (never an engine's): the display platform (the
  *  keeper's display plan pins it — an engine naming wayland must not undo the hidden window's x11) and every proxy switch (the
  *  keeper's egress proxy; the engine verdict refuses them by name first). Matched on a dash-normalised name (splitLaunchArgs). */
-const KEEPER_ONLY_RE = /^--(?:ozone-platform|proxy-server|proxy-bypass-list|proxy-pac-url|winhttp-proxy-resolver|no-proxy-server|proxy-auto-detect)$/;
+const KEEPER_ONLY_RE = /^--(?:ozone-platform|proxy-server|proxy-bypass-list|proxy-pac-url|winhttp-proxy-resolver|no-proxy-server|proxy-auto-detect|force-webrtc-ip-handling-policy)$/;   // B-8b87 14:28Z: + the WebRTC policy (the egress pair carries the core's)
 /** `args` as the binary reads it (a string, comma or newline separated — or a
  *  list), minus the raw-debugging / user-data-dir switches. Untouched (the
  *  same value, byte for byte) when nothing is dropped. */

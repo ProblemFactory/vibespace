@@ -419,6 +419,19 @@ let NOT_SET_UP = null;   // round 3: the server's own answers for a vault never 
     'a profile WITH a proxy: the derived config carries --force-webrtc-ip-handling-policy=disable_non_proxied_udp right after the forwarder\'s switch (the person\'s own «=default» replaced); with no proxy the base file is untouched', out1);
   const DCu = mutant('src/server/browser-display-config.js', ', arg, ENG.PROXY_UDP_ARG] };', ', arg] };');
   ok(!argsOf(mkDc('dc-u', DCu).proxyFileFor(base, { arg: ARG })).includes(UDP), 'RED: a derived config without the policy — the leg above goes red on it');
+  // 14:28Z — THE THIRD ROAD: an engine's egress pair (a profile's proxy, or the allowlist alone) carries the policy; an engine's own copy is
+  // dropped, so the kernel gets exactly one, the core's; no forwarder ⇒ nothing added
+  {
+    const V = require('../src/browser-verbs.js'), FW = 'http://127.0.0.1:' + HTTP_UP, OWN = '--force-webrtc-ip-handling-policy=default_public_interface_only';
+    const pair = ENGP.egressArgs(FW), one = ENGP.engineArgs({ args: ['--lang=en', OWN], egress: FW }), none = ENGP.engineArgs({ args: ['--lang=en', OWN] });
+    const count = (l) => l.filter((x) => /webrtc-ip-handling/.test(x)).length;
+    ok(pair.at(-1) === UDP && pair[0] === `--proxy-server=${FW}` && ENGP.egressArgs(null).length === 0 && count(one) === 1 && one.at(-1) === UDP && count(none) === 0 && !ENGP.wrappedOwnArgs(['--lang=en', OWN]).args.includes(OWN),
+      'the engine\'s egress pair carries the policy after its bypass; an engine answer that names the switch yields exactly ONE, the core\'s; with no forwarder nothing is added; the person\'s own on a wrapped launch is dropped', { pair, one, none });
+    const ENGr = mutant('src/browser-engines.js', "'--proxy-bypass-list=<-loopback>', PROXY_UDP_ARG] : []; }", "'--proxy-bypass-list=<-loopback>'] : []; }");
+    const Vr = mutant('src/browser-verbs.js', '|proxy-auto-detect|force-webrtc-ip-handling-policy)$/;', '|proxy-auto-detect)$/;');
+    ok(!ENGr.egressArgs(FW).includes(UDP) && count([...Vr.splitLaunchArgs([], ['--lang=en', OWN]).engine, ...ENGP.egressArgs(FW)]) === 2 && count([...V.splitLaunchArgs([], ['--lang=en', OWN]).engine, ...ENGP.egressArgs(FW)]) === 1,
+      'REDs: an egress pair without the policy (the pair leg goes red); the reserved names without the switch — the engine\'s copy and the core\'s both reach the kernel (two)');
+  }
   const DCr = mutant('src/server/browser-display-config.js', 'ENG.withoutProxyArgs(V.driverArgsList(base.args))', "V.driverArgsList(base.args).filter((a) => !/^--?(?:proxy-server|proxy-pac-url|proxy-bypass-list|no-proxy-server)(?:=|$)/.test(a))");
   ok(argsOf(mkDc('dc-r', DCr).proxyFileFor(base, { arg: ARG })).includes('--proxy-auto-detect'), 'RED: the four-switch filter before the cure — auto-detect survives beside the forwarder\'s switch');
   const nulCfg = path.join(ROOT, 'nul.json'); fs.writeFileSync(nulCfg, JSON.stringify({ args: ['--lang=en', '--x=a\u0000b'] }));   // a NUL inside a switch: the driver's one line cannot carry it
