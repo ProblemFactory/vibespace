@@ -175,8 +175,10 @@ const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {},
 meta.caps.receipts = true;   // lane human-cli: the receipts road (an ack by id, a torn line's nack — <id>.receipts beside the buffer)
 // THE CONVERSATION'S FACTS, KEPT WHERE THEY ARE BORN (lane conversation-facts, majordomo piece 2 — 主开发's ruling, road A):
 // this process reads every record from the CLI's first line and outlives every hub restart, so it keeps what a restarted hub
-// cannot read back — the last background set (or the empty set from the start), the one-way CLI-timer mark, the last
-// record's time (src/conversation-facts.js factsStep: memory only, per record). They ride the sidecar writes this file
+// cannot read back — OBSERVATIONS only (it never updates; the hub judges them at read time): whether it saw the CLI's first
+// line, the CLI's version as stated (or that it stated none), the last background set SEEN, the names of the tools used, the
+// wakeup mark the records state, the last record's time (src/conversation-facts.js factsStep: memory only, per record). They
+// ride the sidecar writes this file
 // already makes: a CHANGE of the set or the mark through scheduleMeta (the debounced write task_started takes), the record
 // time with whatever write comes next — or, when nothing wrote for a minute, ONE write then (never a write per record).
 // A failed write is persistMeta's (caught, logged at boot only): it never stops this process. `caps.facts` = the shape
