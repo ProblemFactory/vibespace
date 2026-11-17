@@ -14218,4 +14218,6 @@ export default {
   "allowed by the key «{name}», {when}": "キー「{name}」が許可、{when}",
   "allowed by the key «{name}»": "キー「{name}」が許可",
   "allowed by you, {when}": "あなたが許可、{when}",
+  "it may run prompts still queued for it by itself — resume it yourself": "キューに残っているプロンプトを自動で実行する可能性があります — ご自身で再開してください",
+  "what its resume starts by itself is not known — resume it yourself": "再開時に自動で何が始まるか分かりません — ご自身で再開してください",
 };

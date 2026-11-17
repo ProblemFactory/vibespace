@@ -93,6 +93,8 @@ export function refusalWords(code) {
             : code === 'goal_active' ? t('its goal would carry on by itself — resume it yourself')
               : code === 'timer_marked' ? t('it set a timer that would carry on by itself — resume it yourself')
                 : code === 'goal_unknown' ? t('it may carry on a goal by itself — resume it yourself')
+              : code === 'queue_unknown' || code === 'queue_kept' ? t('it may run prompts still queued for it by itself — resume it yourself')
+                : code === 'harness_unread' ? t('what its resume starts by itself is not known — resume it yourself')
                   : code === 'needs_a_page' || code === 'cannot_resume' ? t('it resumes only in a window')
                     : code === 'archived' ? t('it is archived')
                       : code === 'handover_failed' ? t('the hand-over did not land')

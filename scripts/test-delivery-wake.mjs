@@ -77,10 +77,10 @@ console.log('①b how it ended decides (the owner\'s narrowed rule; the grant on
 console.log('② the resume verb\'s rules, as a delivery reads them (piece 4\'s, unchanged)');
 {
   const chat = { headless: true, resumeContinues: 'goal' };
-  const goal = D.deliveryResumeVerdict({ goal: 'active', mode: 'chat' }, chat);
-  const timer = D.deliveryResumeVerdict({ goal: 'none', timerMark: true, mode: 'chat' }, chat);
-  const unknown = D.deliveryResumeVerdict({ goal: 'unknown', mode: 'chat' }, chat);
-  const plain = D.deliveryResumeVerdict({ goal: 'none', mode: 'chat' }, chat);
+  const goal = D.deliveryResumeVerdict({ goal: 'active', queue: 0, mode: 'chat' }, chat);
+  const timer = D.deliveryResumeVerdict({ goal: 'none', queue: 0, timerMark: true, mode: 'chat' }, chat);
+  const unknown = D.deliveryResumeVerdict({ goal: 'unknown', queue: 0, mode: 'chat' }, chat);
+  const plain = D.deliveryResumeVerdict({ goal: 'none', queue: 0, mode: 'chat' }, chat);
   ok(!goal.ok && goal.code === 'goal_active' && !timer.ok && timer.code === 'timer_marked' && !unknown.ok && unknown.code === 'goal_unknown' && plain.ok === true && !('continues' in plain),
     'an active goal, a CLI timer mark and an unknown goal (on a harness that continues one by itself) each WAIT, by code — one counted turn could restart a goal loop nobody counts', { goal, timer, unknown, plain });
   const archived = D.deliveryResumeVerdict({ archived: true, goal: 'none', mode: 'chat' }, chat);
@@ -89,7 +89,7 @@ console.log('② the resume verb\'s rules, as a delivery reads them (piece 4\'s,
   const g0 = D.gate({ verdict: goal, ended: { ok: true, rule: 'restart', jobs: [] }, identity: { key: 'k' }, limit: { usable: true }, probe: { ok: true } });
   ok(g0.go === false && g0.code === 'goal_active', '…and the gate answers with that code (the ended row words it: a person resumes it)', g0);
   const m = mutant("return v.ok ? { ok: true } : { ok: false, code: v.code, why: v.why };", "return v.ok || v.code === 'goal_active' ? { ok: true } : { ok: false, code: v.code, why: v.why };", 'goal-admitted');
-  ok(!!m && m.deliveryResumeVerdict({ goal: 'active', mode: 'chat' }, chat).ok === true, '② RED CONTROL: a copy that admits the goal conversation resumes it — the kept refusal is what holds it', m && m.deliveryResumeVerdict({ goal: 'active', mode: 'chat' }, chat));
+  ok(!!m && m.deliveryResumeVerdict({ goal: 'active', queue: 0, mode: 'chat' }, chat).ok === true, '② RED CONTROL: a copy that admits the goal conversation resumes it — the kept refusal is what holds it', m && m.deliveryResumeVerdict({ goal: 'active', queue: 0, mode: 'chat' }, chat));
 }
 
 console.log('③ THE GATE, in order, before anything spawns');

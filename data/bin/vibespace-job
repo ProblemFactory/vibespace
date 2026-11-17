@@ -421,7 +421,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
     }
     case 'propose-wake': {
       // the manager design's piece 7: ask the PERSON to let this job (or schedule) resume this conversation after it is ended on
-      // purpose — a card, one press approves; free, wakes nobody; the answer comes at this conversation's next turn
+      // purpose — the card arrives with lane login-request-card's unit; until then the hub answers proposal_door_not_ready
       if (!pos[1] || !pos[2]) { console.error('usage: vibespace-job propose-wake <id|name> "one sentence why"'); process.exit(1); }
       const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/propose-wake`, { why: pos.slice(2).join(' ') });
       console.log(r.already ? `${r.job} already may resume this conversation after an end on purpose — nothing was filed` : `proposed to the person: ${r.job} may resume this conversation after it is ended on purpose — one press approves; the answer comes at your next turn`);

@@ -355,8 +355,9 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   return {
     jm,
     setWakeGrant,
-    // piece 7: lane login-request-card's proposal store binds its `proposeWakeGrant(caller, {rows, why})` here (the agent route's
-    // `vibespace-job propose-wake` / `--propose-wake` call it through the engine); none bound ⇒ proposal_door_not_ready by name
+    // piece 7: lane login-request-card's OWN unit binds its proposal store's `proposeWakeGrant(caller, {rows, why})` here (the agent
+    // route's `vibespace-job propose-wake` / `--propose-wake` call it through the engine); nothing binds it in this unit ⇒
+    // proposal_door_not_ready by name
     setProposalDoor: (fn) => { jm.proposeWakeDoor = typeof fn === 'function' ? fn : null; },
     getJobs: () => jm,
     initAfterListen: () => {

@@ -62,7 +62,13 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     const ended = D.endedRule(how, deliveries);
     let stated = null;
     try { stated = typeof seams.configAccountOf === 'function' ? seams.configAccountOf(key) : null; } catch { stated = null; }
-    const payer = payerOf(meta, backend, stated);
+    // NO account stated and NONE kept (主开发 14:26Z): the create would pick the account whose index lists the conversation
+    // (ws-create's held-account rule — routes/sessions heldAccountOf, the SAME lookup) — resolved HERE and judged, so the limit
+    // judged and the account the turn runs on are one; a harness that keeps its conversations per account and names none refuses
+    let held = null;
+    if (!stated && !(meta && meta.accountId)) { try { held = typeof seams.heldAccountOf === 'function' ? seams.heldAccountOf(key) : null; } catch { held = null; } }
+    if (held && held.refuse) return { ok: false, outcome: 'refused', code: 'account_unknown', why: String(held.refuse).slice(0, 300) };
+    const payer = payerOf(meta, backend, stated || (held && held.accountId) || null);
     let identity = null;
     try { identity = typeof identityOf === 'function' ? identityOf(payer) : null; } catch { identity = null; }   // the guard's OWN identity road (the pool engine's fireIdentityFor)
     let limit = null;
@@ -95,6 +101,8 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     if (r.already === true) { sh.releaseWake(cid, claim); return { ok: true, outcome: 'running', sessionId: r.sessionId, already: true, why: 'it was already running — the words ride its next turn' }; }
     // MUST 2: the kept record GOES now it runs (a later end on purpose must never read «a restart ended it»)
     try { if (typeof seams.dropKept === 'function') await seams.dropKept(key); } catch (e) { log(`[delivery-wake] ${cid}: its kept record could not be dropped — ${(e && e.message) || e}`); }
+    // the POSTING mark goes on the entry, durably, before the frame can land (a hard kill now ⇒ «maybe delivered» at the boot)
+    try { if (typeof seams.markPosting === 'function') seams.markPosting(cid); } catch (e) { log(`[delivery-wake] ${cid}: the posting mark could not be written — ${(e && e.message) || e}`); }
     const ho = await sh.handOverWake(cid, claim, { reason: entry.spendReason, tail: D.FRAME_TAIL, lead: peer ? D.peerLead(entry.fromName) : '', from: entry.fromName || null, card: entry.cardText || null });
     if (ho && ho.ok) {
       // RULE 3: the wake is SEEN — the window's line and the System panel's row read this fact (no For-you item per wake)

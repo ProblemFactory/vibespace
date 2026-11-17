@@ -271,6 +271,10 @@ const deliveryWakeSeams = { keyOf: endedKeyOf, factsOf: (key) => resumeFactsOf(k
   // which account the reopen will bill (主开发 12:46Z, the read): the conversation's STATED one (its saved settings — the
   // reopen's own cfg, state key else the bare id); null ⇒ the account it is held on (the kept record's)
   configAccountOf: (key) => { const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {}; const m = st.sessionConfigs || {}; const id = String(key).slice(String(key).indexOf(':') + 1); const c = Object.hasOwn(m, key) ? m[key] : Object.hasOwn(m, id) ? m[id] : null; return c && typeof c.account === 'string' && c.account ? c.account : null; },
+  // …and with none stated and none kept: the account whose index lists the conversation — the create's OWN lookup (14:26Z)
+  heldAccountOf: (key) => { const k = String(key); try { return require('../routes/sessions').heldAccountOf(k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)); } catch { return null; } },
+  // the wake entry's POSTING mark, durable before its hand-over can land (conversation-deliver markEndedPosting — 14:26Z)
+  markPosting: (cid) => (deliver && typeof deliver.markEndedPosting === 'function' ? deliver.markEndedPosting(cid) : false),
   // MUST 2: the kept record goes once a delivery resumed it (boot-restore dropKept — what the sessions sweep does at its next pass)
   dropKept: (key) => (typeof resumeRoad.dropKept === 'function' ? resumeRoad.dropKept(key) : false),
   // rule 3 (every wake is SEEN): the resumed session carries the line its window shows and the System panel's row repeats

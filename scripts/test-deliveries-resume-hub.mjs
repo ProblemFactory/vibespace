@@ -194,7 +194,7 @@ try {
   await sleep(400);
   for (const root of [wt, CWD, fakeHome]) { try { endRootedProcesses(root); } catch { } }
   await sleep(600);
-  const kept = [endOnPurpose(P.sid, { kind: 'person', by: 'person' }), endOnPurpose(A.sid, { kind: 'agent', by: `agent:${C.sid}`, name: 'coordinator' }), endOnPurpose(K.sid, { kind: 'person', by: 'person' })];
+  const kept = [endOnPurpose(P.sid, { kind: 'person', actorId: 'person', name: null }), endOnPurpose(A.sid, { kind: 'agent', actorId: `agent:${C.sid}`, name: 'coordinator' }), endOnPurpose(K.sid, { kind: 'person', actorId: 'person', name: null })];   // piece 3's endedBy {kind, actorId, name}
   check('the kept records of the three ended on purpose (stand-in for piece 3\'s writer)', kept.every(Boolean), kept);
   const booted = await boot();
   await connect();

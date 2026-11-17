@@ -596,10 +596,15 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     let waitedOut = 0;
     for (const [cid, q] of Object.entries(retry)) {
       if (!Array.isArray(q)) { delete retry[cid]; continue; }
-      for (const e of q) {
+      for (const e of q.slice()) {   // a copy: a posting wake leaves `q` inside the loop
         if (!e || typeof e !== 'object') continue;
         if (e.charged) e.charged.hold = null;
         if (isOwed(e)) { delete e.paceRefusals; waitedOut++; }   // its schedule starts again here (owedEnd)
+        // A WAKE WHOSE FRAME WAS BEING POSTED (主开发 14:26Z — a hard kill between the post and the entry's end): its frame MAY have
+        // landed — said, NEVER offered to the line again (a second resume and a second frame = two billed turns for one delivery);
+        // the words the hand-over had claimed are released by the stash's own boot and ride the next turn (the park's own rule
+        // for its in-flight entries)
+        if (isEnded(e) && e.posting) { notes.push(`${cid}: ${e.id} (a wake owed to an ended conversation) was POSTING its hand-over when the previous server stopped — its frame may have landed: it is not offered again (the words left waiting ride the conversation's next turn)`); q.splice(q.indexOf(e), 1); continue; }
         if (e.inflight && isEnded(e)) { notes.push(`${cid}: ${e.id} (a wake owed to an ended conversation) was in the resume line when the previous server stopped — it posted nothing here (the hand-over is exactly-once by its own claim), so it is offered to the line again`); delete e.inflight; e.nextAt = 0; continue; }
         if (e.inflight) { notes.push(`${cid}: ${e.id} was being posted when the previous server stopped — its frame may have landed, so it is handed to the stash at the first sweep and never posted again`); delete e.inflight; e.maybeDelivered = true; e.nextAt = 0; }
         // A HAND-OVER'S CLAIM IS THE SAME STAMP (verify r2, reproduced): an entry stamped `ho:<id>` was riding a hand-over's
@@ -912,6 +917,15 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  a boot forgets it, the next delivery asks again). A delivery or a running conversation clears it. */
   const endedAnswers = new Map();   // cid → {outcome, code, why, until, at}
   function endedAnswerOf(cid) { return endedAnswers.get(cid) || null; }
+  /** THE POSTING MARK (主开发 14:26Z): the start is about to post the wake's hand-over — the entry is stamped durably, NOW, so a hard kill
+   *  before its end leaves «maybe delivered» at the next boot, never a second resume. → true when the entry was marked. */
+  function markEndedPosting(cid) {
+    const e = (retry[cid] || []).find((x) => isEnded(x) && x.inflight);
+    if (!e) return false;
+    e.posting = clock.now();
+    writeRetryNow();
+    return true;
+  }
   /** the conversation runs again (a turn started, a delivery landed): its last refusal is history — never an old one after a later end */
   function clearEndedAnswer(cid) { endedAnswers.delete(cid); }
   /** the conversations a stash entry waits for (the ladder's own stash) — the row's count reads these few, never every row */
@@ -1963,7 +1977,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     queuedFileState: () => queued.fileState(), onQueuedFileState: (fn) => queued.onFileState(fn), queuedSetAside: () => queued.setAside(),   // B-e3fe follow-up: an unread msg-queued.json is said in For you, with the person's «set it aside»
     noteProcessGone, noteAttached, sweepQueued,   // round 2: the wrapper gone ⇒ the HUB hands back; a (re)attach ⇒ the hub ASKS for the queue
     parkOwedWake, registerOwedWake, registerWakePacer, owedEntries, wakeBlock, fellOwed, fellOwedPart,
-    parkEndedWake, registerEndedWake, endedEntries, endedAnswerOf, stashCids, retryWaitingCount,   // piece 7: a wake owed to an ENDED conversation — a rung of the park, handed to the hub's resume line
+    parkEndedWake, registerEndedWake, endedEntries, endedAnswerOf, stashCids, retryWaitingCount, markEndedPosting,   // piece 7: a wake owed to an ENDED conversation — a rung of the park, handed to the hub's resume line
       // lane paced-wake-retry: a wake the pace refused is owed — parked for the window's end
     onRetry, onTurnEnd, noteTurnEnd, retryPeek, retryEntries, retryTake, registerRetryJudge, claimRetry, retryCount, RETRY_STEPS_MS, RETRY_MAX_MS, RETRY_MAX_ATTEMPTS, RETRY_FLOOR_MS, RETRY_CAP, closeRetries, settleRetries, retryInFlightCount, armStashHandover, handoverArmed, takeArmedHandover, sincePost,   // R3: the hand-over a turn end runs for what the prompt could not carry   // THE RETRY PARK (lane notify-retry): a transient local miss on a live pid, retried at the turn end + on the backoff, ONE authorization
     _unsettledCount: (cid) => (unsettled.get(cid) || []).length,

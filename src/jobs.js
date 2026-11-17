@@ -3593,9 +3593,10 @@ class JobManager {
   /** THE GRANT (the manager design's piece 7, 主开发 2026-11-17 05:02Z / 05:13Z): «may wake its conversation when that
    *  conversation was ended on purpose» — one field on the job or schedule row (DW.GRANT_FIELD), default no, said ONCE per job
    *  and it holds, with `wakeGrantBy {by, at, kind, name}` beside it (who set it — the window's wake line names it). THREE
-   *  writers and no fourth: the PERSON (a press minted at the door — src/write-origin.js pressOf — or the proposal card's
-   *  press), a MANAGER KEY holding the verb jobs.wakeGrant (the person's delegation), and nobody else: a plain agent token is
-   *  refused BY NAME, the refusal naming the door it has (`vibespace-job propose-wake`). A cron's runs read their parent's.
+   *  writers and no fourth: the PERSON (on the page — no bearer + the page verdict; in process the jobs wiring's setWakeGrant,
+   *  which the proposal card's press will call once lane login-request-card's unit binds it), a MANAGER KEY holding the verb
+   *  jobs.wakeGrant (the person's delegation), and nobody else: a plain agent token is refused BY NAME (GRANT_REFUSAL names the
+   *  doors that exist today). A cron's RUN carries none — its schedule's is read.
    *  `by` = { kind: 'person' | 'key', by: the actor, name? } */
   setWakeGrant(job, grant, { by = null } = {}) {
     if (this.readOnly || !this.ready) return { error: this.initError ? `jobs engine down: ${this.initError}` : 'jobs engine not ready — retry shortly' };   // as its sibling writers

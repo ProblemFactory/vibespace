@@ -52,7 +52,7 @@ const AGENT = { stopReason: 'ended', stoppedAt: T0 - 60e3, endedBy: { kind: 'age
 let seq = 0;
 
 /** the rig: the REAL ladder + park + hand-over + line + start; ONE manual clock for the park; `live` = the conversations running */
-function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), cap = null, limit = null, reopenHold = null, facts = {}, stated = {}, limitOf = null, refuseHandOver = false, already = new Set(), jobs = null, noDrop = false } = {}) {
+function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), cap = null, limit = null, reopenHold = null, facts = {}, stated = {}, limitOf = null, refuseHandOver = false, already = new Set(), jobs = null, noDrop = false, postHook = null, backendOf = {}, rows = null, held = {} } = {}) {
   const dataDir = dir || path.join(ROOT, name + '-' + (++seq));
   fs.mkdirSync(dataDir, { recursive: true });
   const c = { now: T0, timers: [] };
@@ -64,7 +64,7 @@ function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), c
     dataDir, activeSessions: sessions, serverSetting: () => undefined, retryClock, log, renderBatch: AR.renderMsgStash,
     peerMsg: {
       findPeer: (cid) => (live.has(cid) ? { name: cid, socketPath: '/dev/null' } : null),
-      postToPeer: async (peer, text) => { R.posts.push({ cid: peer.name, text }); return { ok: true, phase: 'written' }; },
+      postToPeer: async (peer, text) => { R.posts.push({ cid: peer.name, text }); if (postHook) return postHook(peer.name, text); return { ok: true, phase: 'written' }; },
       postChannelEvent: async () => ({ ok: false }),
     },
     getHosts: () => null, getConvIndex: () => null, emitPeerCard: () => true,
@@ -78,13 +78,14 @@ function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), c
   R.orch = DWO.create({
     resumeLine: R.line, getStashHandover: () => R.view, now: () => c.now,
     seams: {
-      keyOf: (cid) => ({ sessionKey: `claude:${cid}` }),
-      factsOf: async (key) => ({ goal: 'none', timerMark: null, mode: 'chat', cwd: '/w', hostId: null, kept: true, ...(facts[key.slice(key.indexOf(':') + 1)] || {}) }),
+      keyOf: (cid) => ({ sessionKey: `${backendOf[cid] || 'claude'}:${cid}` }),
+      factsOf: async (key) => ({ goal: 'none', timerMark: null, queue: 0, mode: 'chat', cwd: '/w', hostId: null, kept: true, ...(facts[key.slice(key.indexOf(':') + 1)] || {}) }),
+      heldAccountOf: (key) => held[key.slice(key.indexOf(':') + 1)] || null,
       configAccountOf: (key) => stated[key.slice(key.indexOf(':') + 1)] || null,
       dropKept: noDrop ? undefined : async (key) => { const c = key.slice(key.indexOf(':') + 1); R.calls.push('dropKept'); const had = c in R.kept; delete R.kept[c]; return had; },
       keptMetaOf: async (key) => { R.calls.push('kept'); return R.kept[key.slice(key.indexOf(':') + 1)] || null; },
       isArchived: (key) => R.archived.has(key.slice(key.indexOf(':') + 1)),
-      rowOf: () => ({ headless: true, resumeContinues: 'goal' }),
+      rowOf: (backend) => (rows && Object.hasOwn(rows, backend) ? rows[backend] : { headless: true, resumeContinues: 'goal' }),
       reopen: async (item, o) => {
         const cid = item.sessionKey.slice(item.sessionKey.indexOf(':') + 1);
         R.calls.push('reopen'); R.reopens.push({ cid, by: o && o.by, accountId: (o && o.accountId) || null });
@@ -96,6 +97,7 @@ function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), c
         return { ok: true, sessionId: 'w-' + cid };
       },
       noteResumed: (sid, line) => R.lines.push({ sid, line }),
+      markPosting: (cid) => R.deliver.markEndedPosting(cid),
     },
     spendGuard: { authorize: (q) => { R.calls.push('probe'); R.probes.push({ reason: q.reason, hold: q.hold, identity: q.identity && q.identity.key }); return cap ? { ok: false, why: 'per-identity-hour', detail: cap } : { ok: true }; } },
     identityOf: () => { R.calls.push('identity'); return { key: 'slot-1', name: 'Personal' }; },
@@ -315,8 +317,8 @@ console.log('⑨ a wake into a conversation that already runs');
   const R = rig('already', { kept: { [X]: RESTART }, already: new Set([X]) });
   R.result(X, 'jb-a', 'nightly report', 'nightly report finished');
   await R.at(10);
-  ok(R.reopens.length === 1 && R.posts.length === 0 && R.lines.length === 0 && R.deliver.stashCount(X) === 1 && R.wakes.some((w) => w.cid === X && w.outcome === 'running'),
-    'the reopen answers «already» ⇒ the claim goes back, NO hand-over («had been ended» never reaches a live agent), no resumed mark — the words ride its next turn', { posts: R.posts.length, lines: R.lines, stash: R.deliver.stashCount(X), wakes: R.wakes });
+  ok(R.reopens.length === 1 && R.posts.length === 0 && R.notes.length === 0 && R.lines.length === 0 && !(R.view.waitingAll()[X] || {}).code && R.deliver.stashCount(X) === 1 && R.wakes.some((w) => w.cid === X && w.outcome === 'running'),
+    'the reopen answers «already» ⇒ the claim goes back, NO hand-over («had been ended» never reaches a live agent), no charge, no resumed mark and no refusal note — the words ride its next turn', { posts: R.posts.length, lines: R.lines, stash: R.deliver.stashCount(X), wakes: R.wakes });
 }
 
 console.log('⑩ which account bills: the stated one is judged, and handed to the reopen');
@@ -416,6 +418,61 @@ console.log('⑮ the key\'s verb: reach first, with the owner conversation\'s Ta
     'out of reach ⇒ refused by name — the SAME words for a schedule and for a run (no more than an existence), the reach asked of the owner WITH its Task Groups, nothing written', { a1, a2, asked });
   const a3 = V({ job: cron.id, grant: true }, { caller: {}, keyId: 'ak-1', identity: 'automation:ak-1', reach: () => ({ ok: true, by: 'grant' }) });
   ok(a3.ok && a3.grant === true && a3.by.kind === 'key' && a3.by.name === 'dispatch' && jm.wakeGrantOf(cron.id).granted === true, 'in reach ⇒ the key sets the grant; the row records the key by name', a3);
+}
+
+console.log('⑯ an unknown goal: a harness whose resume continues nothing goes; an undeclared row waits');
+{
+  const A = cidOf(80), B = cidOf(81);
+  const R = rig('unknown-rows', { kept: { [A]: RESTART, [B]: RESTART }, facts: { [A]: { goal: 'unknown' }, [B]: { goal: 'unknown' } }, backendOf: { [A]: 'claude', [B]: 'newcli' }, rows: { claude: { headless: true, resumeContinues: 'nothing' }, newcli: { headless: true } } });
+  R.result(A, 'jb-a', 'a', 'a done'); R.result(B, 'jb-b', 'b', 'b done');
+  await R.at(10);
+  ok(R.reopens.some((r) => r.cid === A) && !R.reopens.some((r) => r.cid === B) && R.wakes.some((w) => w.cid === B && (w.code === 'harness_unread' || w.code === 'goal_unknown')),
+    'an unknown goal on a harness whose resume continues NOTHING resumes; on a row that declares nothing it WAITS (piece 4\'s own code, harness_unread)', { reopens: R.reopens, wakes: R.wakes.filter((w) => w.cid === B) });
+}
+
+console.log('⑰ no account stated or kept: the account the create would pick is the one judged');
+{
+  const X = cidOf(82), Y = cidOf(83);
+  const R = rig('held-account', { kept: { [X]: RESTART, [Y]: RESTART }, held: { [X]: { accountId: 'acct-H' }, [Y]: { refuse: 'no transcript of this conversation is kept by an account root here' } }, limitOf: (scope) => (scope === 'acct-H' ? { usable: false, blockedUntil: T0 + 3600e3 } : { usable: true }) });
+  R.result(X, 'jb-x', 'x', 'x done'); R.result(Y, 'jb-y', 'y', 'y done');
+  await R.at(10);
+  ok(R.calls.includes('limit:acct-H') && R.reopens.length === 0 && R.wakes.some((w) => w.cid === X && w.code === 'limit') && R.wakes.some((w) => w.cid === Y && w.code === 'account_unknown'),
+    'the record names no account and none is stated: the account whose index lists it (the create\'s own lookup) is judged — at its limit it WAITS, said; a harness that cannot name one refuses by name', { calls: R.calls, wakes: R.wakes });
+}
+
+console.log('⑱ a hard kill between the frame\'s post and the entry\'s end delivers once');
+{
+  const X = cidOf(84);
+  const dir = path.join(ROOT, 'kill-mid-post');
+  let posted = false;
+  const R1 = rig('kill1', { dir, kept: { [X]: RESTART }, postHook: () => { posted = true; return new Promise(() => { }); } });
+  R1.result(X, 'jb-k', 'nightly report', 'the nightly report is ready');
+  R1.c.now = T0 + 10; for (const t of R1.c.timers.splice(0)) t.fn();
+  for (let i = 0; i < 100 && !posted; i++) await sleep(5);
+  const file = JSON.parse(fs.readFileSync(path.join(dir, fs.readdirSync(dir).find((f) => /retry/.test(f) && f.endsWith('.json')) || 'x'), 'utf8'));
+  const marked = Object.values(file).flat().find((e) => e && e.held && e.held.why === 'ended');
+  ok(posted && R1.posts.length === 1 && !!marked && Number(marked.posting) > 0, 'the frame was posted and the hub died before the entry ended — the entry carries its POSTING mark on disk', { posted, marked });
+  const R2 = rig('kill2', { dir, kept: { [X]: RESTART } });
+  await R2.at(20);
+  ok(R2.reopens.length === 0 && R2.posts.length === 0 && R2.deliver.endedEntries(X).length === 0 && R2.logs.some((l) => /POSTING its hand-over when the previous server stopped/.test(l)),
+    'the next boot SAYS «maybe delivered» and never offers it again — no second resume, no second frame (one billed turn for one delivery)', { reopens: R2.reopens.length, posts: R2.posts.length, logs: R2.logs.filter((l) => /POSTING/.test(l)) });
+}
+
+console.log('⑲ a graceful stop waits for a wake hand-over in flight');
+{
+  const X = cidOf(85);
+  let release; const gate = new Promise((r) => { release = r; });
+  const R = rig('graceful', { kept: { [X]: RESTART }, postHook: async () => { await gate; return { ok: true, phase: 'written' }; } });
+  R.result(X, 'jb-g', 'nightly report', 'done');
+  R.c.now = T0 + 10; for (const t of R.c.timers.splice(0)) t.fn();
+  for (let i = 0; i < 100 && !R.posts.length; i++) await sleep(5);
+  let settled = null;
+  const st = R.view.settle(5000).then((n) => { settled = n; });
+  await sleep(40);
+  const before = settled;
+  release();
+  await st;
+  ok(R.posts.length === 1 && before === null && settled === 1, 'the stash hand-over\'s settle (a graceful stop) waits for the wake\'s hand-over in flight — it answers only once that post ended', { before, settled });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

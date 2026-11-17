@@ -94,7 +94,7 @@ function endedHow(m = null) {
   const at = Number(m.stoppedAt) || null;
   if (reason === RESTART_REASON) return { kind: 'restart', at, by: null, name: null };
   const e = m.endedBy && typeof m.endedBy === 'object' ? m.endedBy : null;
-  if (reason === ENDED_REASON) return { kind: e && e.kind === 'agent' ? 'agent' : e && e.kind === 'person' ? 'person' : 'on_purpose', at, by: e && e.by ? String(e.by) : null, name: e && e.name ? String(e.name) : null };
+  if (reason === ENDED_REASON) return { kind: e && e.kind === 'agent' ? 'agent' : e && e.kind === 'person' ? 'person' : 'on_purpose', at, by: e && (e.actorId || e.by) ? String(e.actorId || e.by) : null, name: e && e.name ? String(e.name) : null };   // piece 3's endedBy {kind, actorId, name}
   return { kind: 'unknown', at, by: null, name: null, why: `its record says «${reason}», not a restart` };
 }
 

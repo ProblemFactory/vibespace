@@ -14219,4 +14219,6 @@ export default {
   "allowed by the key «{name}», {when}": "由密钥「{name}」允许，{when}",
   "allowed by the key «{name}»": "由密钥「{name}」允许",
   "allowed by you, {when}": "由你允许，{when}",
+  "it may run prompts still queued for it by itself — resume it yourself": "它可能会自行运行仍在排队的提示——请你自己恢复它",
+  "what its resume starts by itself is not known — resume it yourself": "不知道它恢复时会自行开始什么——请你自己恢复它",
 };

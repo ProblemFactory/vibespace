@@ -1685,9 +1685,9 @@ function jobsCaller(s, id) {
 }
 // THE MANAGER DESIGN'S PIECE 7 (主开发 2026-11-17 05:13Z — the owner: «the agent concerned can PROPOSE and wait for the person's
 // approval»): ANY agent that sees a job may PROPOSE its grant to resume its conversation after that conversation is ended on
-// purpose — a card for the person (lane login-request-card's proposal store: `proposeWakeGrant`, bound by the wiring onto the
-// jobs engine as `proposeWakeDoor`), one press approves. It costs nothing, wakes nobody, and the answer reaches the proposer at
-// its next turn. Judged HERE before the call: the job (a cron's run proposes its schedule), one sentence why, an owner conversation.
+// purpose. NOT LIVE in this unit: the door (`jm.proposeWakeDoor`) is bound by lane login-request-card's own unit (its proposal
+// store's `proposeWakeGrant`, the same train); until then every proposal answers proposal_door_not_ready by name. Judged HERE
+// before the call: the job (a cron's run proposes its schedule), one sentence why, an owner conversation.
 async function proposeWake(a, job, why) {
   const W = require('./delivery-wake.js');
   const text = String(why == null ? '' : why).replace(/\s+/g, ' ').trim();
@@ -2902,7 +2902,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   }
   const selfActs = ['progress', 'ask', 'withdraw', 'announce'];   // B-8bd5: a job withdraws ITS OWN panel
   if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress, ask (or withdraw its ask), or announce' });
-  // piece 7: the grant is never an agent token's to WRITE — refused by name, naming the door it has; the PROPOSAL is that door
+  // piece 7: the grant is never an agent token's to WRITE — refused by name, naming the doors that exist (the person's, a key's)
   if (act === 'wake-grant') return res.status(403).json({ error: require('./delivery-wake.js').GRANT_REFUSAL, code: 'wake_grant_person_only' });
   if (act === 'propose-wake') return proposeWake(a, job, req.body?.why).then((pw) => res.status(pw.status).json(pw.body), (e) => res.status(500).json({ error: (e && e.message) || String(e) }));
   const needsControl = ['stop', 'start', 'restart', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
