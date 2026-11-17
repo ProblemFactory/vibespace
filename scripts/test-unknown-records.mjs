@@ -517,5 +517,22 @@ console.log('§12 lane record-oracle-2-1-296 + lane drift-card-restore: claude 2
   ok('the Diagnostics words: zh + ja carry the heading, the explanation and the new column names', ['Records that grew a field', 'conversation', 'harness record', 'new fields'].every((k) => sf.includes("t('" + k + "')") && ['zh', 'ja'].every((l) => read(`src/lib/i18n-${l}.js`).includes(JSON.stringify(k) + ':'))) && ['zh', 'ja'].every((l) => read(`src/lib/i18n-${l}.js`).includes('"Records VibeSpace knows that arrived carrying fields it does not declare.')) && !sf.includes('so the chat shows no card') && sf.includes('the sign that the CLI may have updated'));
 }
 
+console.log('§THE CREATE\'S FIELD (lane session-events-ends U3, 主开发 2026-11-16): the field a create carries, as the normalizer emits it (the device\'s bundle and the hub run this one normalizer) and as the hub reads it — `message`. A rename on either side is red here, in the fast tier (the parity soak read `msg` for three months and nobody saw it)');
+{
+  const mm = createMessageManager('claude', 'test-create-field');
+  const ops = []; mm.listeners.push((e) => ops.push(e));
+  const t = new Date().toISOString();
+  mm.processLive({ type: 'user', timestamp: t, message: { role: 'user', content: 'a prompt' } });
+  mm.processLive({ type: 'assistant', timestamp: t, message: { id: 'msg_field_1', model: 'claude-x', role: 'assistant', content: [{ type: 'text', text: 'an answer' }], usage: { input_tokens: 1, output_tokens: 1 } } });
+  mm.processLive({ type: 'zz_record_no_normalizer_knows', timestamp: t });
+  const creates = ops.filter((o) => o && o.op === 'create');
+  const shipped = creates.map((o) => JSON.parse(JSON.stringify(o)));   // as the daemon ships an op on its stream
+  ok(`every create the claude normalizer emits carries «message» with an id, and none carries «msg» (${creates.length} creates: a prompt, an answer, an unknown-record card) — also after the JSON round trip the device stream makes`,
+    creates.length >= 3 && shipped.every((o) => o.message && typeof o.message.id === 'string' && o.message.id && !('msg' in o)), shipped.map((o) => Object.keys(o)));
+  const cv = read('src/lib/chat-view.js'), mw = read('src/message-window.js');
+  ok('…and the hub reads that field: the chat view draws a create\'s `op.message` (_onCreateMessage), the message window keys its float on `op.message`',
+    /if \(op\.op === 'create'\) \{[\s\S]{0,300}this\._onCreateMessage\(op\.message, /.test(cv) && /op\.op === 'create' && op\.message && this\._afloat\.length/.test(mw));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
