@@ -373,12 +373,43 @@ function atNames(text) {
   return out;
 }
 const BROADCAST_WORDS = Object.freeze(['here', 'channel', 'everyone']);
+/** B-a0ae (fb-c3d847cfc8: «@First Last» notified nobody): each `@Name` with the word right after it — `{one, two}`, `two` =
+ *  «First Last» when one space and a name word follow (null otherwise); prepareSend tries the TWO-word name first. */
+const NEXT_WORD_RE = /^ ([\p{L}\p{N}][\p{L}\p{N}._'-]{0,39})/u;
+function atNamePairs(text) {
+  const s = String(text == null ? '' : text).slice(0, SEND_MAX * 2);
+  const out = [];
+  let m;
+  AT_RE.lastIndex = 0;
+  while ((m = AT_RE.exec(s)) && out.length < 50) {
+    const one = m[2].replace(/[.'-]+$/, '');
+    if (!one || out.some((x) => x.one === one)) continue;
+    const w = m[2] === one ? NEXT_WORD_RE.exec(s.slice(m.index + m[0].length)) : null;
+    const next = w ? w[1].replace(/[.'-]+$/, '') : '';
+    out.push({ one, two: next ? `${one} ${next}` : null });
+  }
+  return out;
+}
+/** B-a0ae (fb-c0c6292765: a raw `<@U…>` went out escaped as literal `&lt;@…&gt;`): the `<@ID>` / `<@ID|label>` tokens a text
+ *  carries as typed — prepareSend keeps one of a conversation MEMBER as its mention (toMrkdwn's `raw`); any other stays words. */
+const RAW_MENTION_RE = /<@([A-Z0-9][A-Z0-9_]{1,40})(?:\|[^<>\n]{0,80})?>/g;
+function rawMentions(text) {
+  const s = String(text == null ? '' : text).slice(0, SEND_MAX * 2);
+  const out = [];
+  for (const m of s.matchAll(RAW_MENTION_RE)) { if (out.length >= 50) break; if (!out.some((x) => x.token === m[0])) out.push({ token: m[0], id: m[1] }); }
+  return out;
+}
 /** Slack's three escapes, then each RESOLVED `@Name` → `<@U…>` (longest name first; a name never matched inside a
- *  longer word). `mentions` = [{name, id}] decided at propose time; anything else stays words. */
+ *  longer word). `mentions` = [{name, id}] decided at propose time; anything else stays words. B-a0ae: a `raw` mention is
+ *  a typed `<@ID…>` token (its `name`) of a member — its escaped form goes back to `<@ID>`; one of no member stays words. */
 function toMrkdwn(text, mentions = []) {
   let s = String(text == null ? '' : text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const list = (Array.isArray(mentions) ? mentions : []).filter((x) => x && typeof x.name === 'string' && x.name && typeof x.id === 'string' && ID_RE.test(x.id)).sort((a, b) => b.name.length - a.name.length).slice(0, 50);
-  for (const x of list) {
+  for (const x of list.filter((m) => m.raw === true)) {
+    const esc = x.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (x.name.startsWith(`<@${x.id}`)) s = s.split(esc).join(`<@${x.id}>`);
+  }
+  for (const x of list.filter((m) => m.raw !== true)) {
     const esc = x.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     s = s.replace(new RegExp(`(^|[\\s(\\[{,;:!?"'“‘（「])@${esc}(?![\\p{L}\\p{N}_])`, 'gu'), (all, pre) => `${pre}<@${x.id}>`);
   }
@@ -391,5 +422,5 @@ const EGRESS = Object.freeze([]);
 module.exports = {
   EGRESS,
   TEXT_MAX, SEND_MAX, BLOCKS_MAX, ELEMENTS_MAX, ATTACHMENTS_MAX, FILES_MAX, SLACK_EMOJI, SLACK_QUICK, SUBTYPE_SYS, EKM_TEXT, BROADCAST_WORDS,
-  emojiText, readEntity, mrkdwnText, mrkdwnRuns, mrkdwnBlocks, blockKitBlocks, legacyCards, filesOf, messageParts, slackStoredBlocks, atNames, toMrkdwn,
+  emojiText, readEntity, mrkdwnText, mrkdwnRuns, mrkdwnBlocks, blockKitBlocks, legacyCards, filesOf, messageParts, slackStoredBlocks, atNames, atNamePairs, rawMentions, toMrkdwn,
 };

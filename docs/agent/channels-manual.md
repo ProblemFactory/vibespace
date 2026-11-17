@@ -774,7 +774,8 @@ Without a workspace app, the person makes their own app with a one-time setup to
   own kind, never "mentions you".
 - "Reply to Bob in Slack" → `vibespace-channels propose <conv> --text "…"`. EVERY Slack proposal waits for the person's
   approval on the Outbox card — there is no "send directly" on Slack, whatever a policy says.
-- @mentions: write `@Name` (a handle like `@alice.c`, a display name, `@AliceChen`, or a first name). The proposal
+- @mentions: write `@Name` (a handle like `@alice.c`, a display name, the full name as Slack shows it — `@Alice Chen` or
+  `@AliceChen` —, or a first name), or a member's Slack id as `<@U0ABC123>` (kept as their mention). The proposal
   RESOLVES each name against the conversation's members when you propose and stores the result: one person ⇒ they are
   notified (the card says "Notifies …"); two people answering one name ⇒ the proposal is REFUSED
   (`mention-ambiguous`, the names listed) — write the handle or the full name; nobody ⇒ the words go out as plain text

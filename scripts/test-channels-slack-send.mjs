@@ -232,6 +232,53 @@ console.log('③ the proposal decides who is notified');
   }
 }
 
+// ── ③b B-a0ae (fb-c0c6292765 + fb-c3d847cfc8, userW's instance): a typed `<@U…>` went out escaped as literal
+// `&lt;@…&gt;`, and «@First Last» notified nobody — the person fixed both by hand in the panel ──
+console.log('③b mentions as an agent writes them: «@First Last», a typed <@U…>, a member past the first lookups');
+async function mentionLeg(name, registry = undefined) {
+  const M = await connected(name, registry ? { registry } : {});
+  const { eng, v } = M;
+  await eng.setReach('slack', 'C0GENERAL', { principal: { kind: 'agent', id: AGENT.id, name: AGENT.name }, level: 'visible' });
+  const R = {};
+  const sendOf = async (text) => {
+    const r = await eng.propose(AGENT, 'slack', 'C0GENERAL', { text });
+    if (!r.ok) return { refused: r.why || r.code };
+    const q = eng.store.outbox.snapshot().proposals[r.proposal.id];
+    clock += 2000;
+    await eng.approve(r.proposal.id, {});
+    const sent = v.state.posted[v.state.posted.length - 1];
+    return { sent: sent && sent.text, notifies: (q.prepared && q.prepared.notifies) || [], plain: (q.prepared && q.prepared.plain) || [] };
+  };
+  R.two = await sendOf('@Alice Chen can you check?');
+  R.raw = await sendOf('<@U0BOB0001> and <@U0OUTSIDE1> see the note');
+  // a member past the first page of lookups: fourteen new members (Zed last), the directory read paced at 6 h
+  const added = Array.from({ length: 14 }, (_, i) => ({ id: `U0MEMB${String(i + 1).padStart(3, '0')}`, team_id: 'T0ACME001', name: `m${i + 1}`, real_name: i === 13 ? 'Zed Late' : `Member ${i + 1}`, profile: { display_name: i === 13 ? 'Zed' : `M${i + 1}`, real_name: i === 13 ? 'Zed Late' : `Member ${i + 1}` } }));
+  const mem = FX['conversations.members'].C0GENERAL.members, ul = FX['users.list'].members;
+  const keep = { mem: mem.length, ul: ul.length };
+  try {
+    for (const u of added) { FX.users[u.id] = u; mem.push(u.id); ul.push(u); }
+    clock += 7 * 3600e3;   // past the members cache (30 min) and the directory's pace (6 h)
+    R.late = await sendOf('@Zed Late the numbers are in');
+  } finally { mem.length = keep.mem; ul.length = keep.ul; for (const u of added) delete FX.users[u.id]; }
+  return R;
+}
+{
+  const R = await mentionLeg('mentions');
+  ok(R.two.sent === '<@U0ALICE01> can you check?' && R.two.notifies.join() === 'Alice', `B-a0ae «@Alice Chen» (two Alices in the channel): the two-word name resolves ONE person — sent as that person's mention, the card says who is notified (${JSON.stringify(R.two)})`);
+  ok(R.raw.sent === '<@U0BOB0001> and &lt;@U0OUTSIDE1&gt; see the note' && R.raw.notifies.join() === 'Bob' && R.raw.plain.join() === '<@U0OUTSIDE1>', `B-a0ae a typed <@U0BOB0001> of a member is KEPT as that member's mention (never escaped); one of nobody in the channel stays escaped words and notifies nobody (${JSON.stringify(R.raw)})`);
+  ok(R.late.sent === '<@U0MEMB014> the numbers are in' && R.late.notifies.join() === 'Zed', `B-a0ae a member past the first ten lookups (19 in the channel) is matched through the directory (users.list, paced at 6 h) — «@Zed Late» notifies that member (${JSON.stringify(R.late)})`);
+  // CONTROLS: a copy of slack.js without each part turns its own leg red
+  const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8');
+  const cut = (from, to, tag) => { if (ssrc.split(from).length !== 2) return null; const reg = CH.createChannelRegistry(); reg.register(require(MC.write('src/channels/slack.js', ssrc.replace(from, to), tag)).adapter); return reg; };
+  const noTwo = cut('        const both = two ? match(two) : [];', '        const both = [];', 'a0ae-two');
+  const noRaw = cut('        if (ids.includes(r.id) && !(p && p.deleted)) {', '        if (false) {', 'a0ae-raw');
+  const noDir = cut('      if (names.length && ids.some((id) => !people.has(id))) await listPeople();', '', 'a0ae-dir');
+  ok(!!noTwo && !!noRaw && !!noDir, 'the three patch sites of the B-a0ae controls are in slack.js (once each)');
+  const C2 = noTwo ? await mentionLeg('a0ae-two', noTwo) : null, CR = noRaw ? await mentionLeg('a0ae-raw', noRaw) : null, CD = noDir ? await mentionLeg('a0ae-dir', noDir) : null;
+  ok(C2 && C2.two.refused === 'mention-ambiguous' && CR && /^&lt;@U0BOB0001&gt;/.test(CR.raw.sent || '') && CD && CD.late.sent === '@Zed Late the numbers are in',
+    `CONTROLS B-a0ae: without the two-word name «@Alice Chen» is refused as ambiguous (${C2 && JSON.stringify(C2.two)}); without the member check a typed <@U…> is escaped (${CR && CR.raw.sent}); without the directory read the late member notifies nobody (${CD && CD.late.sent})`);
+}
+
 // ── ④ the policy ──
 console.log('④ no "send directly" on Slack');
 {

@@ -702,19 +702,34 @@ function create(record = {}, deps = {}) {
   async function prepareSendImpl(convId, { text = '' } = {}) {
     const t = String(text == null ? '' : text);
     const tooLong = [...t].length > Text.SEND_MAX;
-    const names = Text.atNames(t).filter((n) => !Text.BROADCAST_WORDS.includes(n.toLowerCase()));
+    const names = Text.atNamePairs(t).filter((n) => !Text.BROADCAST_WORDS.includes(n.one.toLowerCase()));
+    const raws = Text.rawMentions(t);   // B-a0ae: a typed `<@U…>`
     const out = { notifies: [], unresolved: [], plain: [], mentions: [], tooLong, sendMax: Text.SEND_MAX, at: now() };
-    if (names.length) {
+    if (names.length || raws.length) {
       const ids = await membersOf(convId);
       await namePeople(ids.filter((id) => !people.has(id)).slice(0, 20));
+      // B-a0ae: a channel holding members the bounded lookups did not name reads the directory (users.list, Tier 2 —
+      // listPeople's own 6 h pace): a person past the first lookups was never matched and their @Name notified nobody
+      if (names.length && ids.some((id) => !people.has(id))) await listPeople();
       const candidates = ids.map((id) => [id, people.get(id)]).filter(([, p]) => p && !p.deleted);
-      for (const n of names) {
+      const match = (n) => {
         const want = fold(n);
         let distinct = [];
         for (const tier of NAME_TIERS) {
           distinct = [...new Set(candidates.filter(([, p]) => tier(p).filter(Boolean).includes(want)).map(([id]) => id))];
           if (distinct.length) break;
         }
+        return distinct;
+      };
+      for (const r of raws) {
+        const p = people.get(r.id);
+        if (ids.includes(r.id) && !(p && p.deleted)) { out.mentions.push({ name: r.token, id: r.id, raw: true }); out.notifies.push((p && p.name) || r.id); }
+        else out.plain.push(r.token);
+      }
+      for (const { one, two } of names) {
+        // B-a0ae: «@First Last» — the two-word name first (the full name with its space: `@Alice Chen`); else the one word
+        const both = two ? match(two) : [];
+        const [n, distinct] = both.length === 1 ? [two, both] : [one, match(one)];
         if (distinct.length === 1) { const p = people.get(distinct[0]); out.mentions.push({ name: n, id: distinct[0] }); out.notifies.push(p.name || n); }
         else if (distinct.length > 1) out.unresolved.push(n);
         else out.plain.push(n);
