@@ -215,6 +215,10 @@ function redactKv(text, { message = false, say = null } = {}) {
   KV_HEAD.lastIndex = 0;
   while ((m = KV_HEAD.exec(text))) {
     const headEnd = KV_HEAD.lastIndex;
+    // lane bl-msg B-be02: a PUBLIC head gives back its trailing BLANKS — the NEXT name's opener — so «A prose line: API_KEY=…»
+    // and «set it so: DB_PASSWORD=…» judge the second name (its opener was eaten as the first one's separator: 0 redactions on the
+    // release). Never its `:`: a vault mark `[vault:apikey:k]` would open `apikey:` and lose its entry; every holder path sets lastIndex itself
+    KV_HEAD.lastIndex = headEnd - (m[5].length - m[5].trimEnd().length);
     if (!holderName(m[4])) continue;                       // the next key may start right after this head; lane mask-value-shape: THE NAME GRAMMAR
     const q = text[headEnd] === '"' || text[headEnd] === "'" ? text[headEnd] : '';
     const flagEnd = knownFlagEnd(text, m[4], headEnd, q);           // lane bl-msg B-3e61: a known flag's closed-list value is public — walk on past it

@@ -502,5 +502,35 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
 }
 function fnOf2(x) { return x && typeof x.get === 'function' ? x : null; }
 
+console.log('lane bl-msg B-be02: a secret NAME=value INSIDE a prose line — the head before it no longer eats its opener');
+{
+  const SS = r('src/secret-shapes.js'), J = JSON.stringify;
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const SRC = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
+  const V = crypto.randomBytes(8).toString('hex'), N = String(10000000 + crypto.randomInt(89999999));
+  // the row's measured cases (0 redactions on the release) + a public head before a holder mid-line
+  const PROSE = [`A prose line: API_KEY=${V} should be hidden.`, `set it so: DB_PASSWORD=${N}`, `status: token=${V} rest`, `name: build, path: /x, secret: ${V} rest`];
+  const judge = (SSx, o) => PROSE.map((t) => ({ t, out: SSx.redactSecrets(t, o).text }));
+  const leaks = (rows) => rows.filter((x) => x.out.includes(V) || x.out.includes(N));
+  for (const [mode, o] of [['line', {}], ['message', { message: true }]]) {
+    const rows = judge(SS, o), bad = leaks(rows);
+    ok(bad.length === 0, `${mode.toUpperCase()} MODE: a secret-named NAME=value after a public «word:» head is redacted — all ${rows.length} prose lines${bad.length ? ' — leaked: ' + bad.map((x) => J(x.out)).join(' · ') : ''}`);
+  }
+  ok(SS.redactSecrets(`A prose line: API_KEY=${V} should be hidden.`, { message: true }).text === `A prose line: API_KEY=${REDACTED} should be hidden.`, 'MESSAGE MODE: the name stays, the value is one token, the rest of the sentence arrives');
+  ok(SS.redactSecrets('user: alice').text === 'user: alice' && SS.redactSecrets(`{"user": "x", "token": "${V}"}`).text === `{"user": "x", "token": "${REDACTED}"}` && SS.redactSecrets(`TOKEN_TTL=3600 API_KEY=${V} tail`, { message: true }).text === `TOKEN_TTL=3600 API_KEY=${REDACTED} tail`,
+    'a public head alone stays, a JSON neighbour and a descriptor head before a holder are judged as before');
+  // a vault mark (the live-value masker's placeholder) is never re-opened: the give-back is the blanks only, never the head's `:`
+  const MARK = 'see «<[vault:apikey:k]>» and [vault:agent:ops/deploy] here';
+  ok(SS.redactSecrets(MARK).text === MARK && SS.redactSecrets(MARK, { message: true }).text === MARK, 'a vault mark stays whole in both modes (its `vault:` head gives back no colon)');
+  const COLON = SRC.replace("    KV_HEAD.lastIndex = headEnd - (m[5].length - m[5].trimEnd().length);\n", "    KV_HEAD.lastIndex = headEnd - ((m[5].length - m[5].trimEnd().length) || (m[5].endsWith(':') ? 1 : 0));\n");
+  ok(COLON !== SRC && mutantCopies('blmbe2', REPO).load('src/secret-shapes.js', COLON, 'colon-back').redactSecrets(MARK).text !== MARK, 'RED CONTROL (the colon given back too — the first cut): the vault mark is re-masked — the leg above goes red');
+  ok(SS.redactSecrets(SS.redactSecrets(PROSE[0]).text).text === SS.redactSecrets(PROSE[0]).text, 'idempotent');
+  // RED CONTROL: the give-back removed — the row's two sentences leak again in both modes
+  const GIVE = "    KV_HEAD.lastIndex = headEnd - (m[5].length - m[5].trimEnd().length);\n";
+  ok(SRC.split(GIVE).length === 2, 'the control finds its line (the give-back)');
+  const noBack = mutantCopies('blmbe', REPO).load('src/secret-shapes.js', SRC.replace(GIVE, ''), 'no-give-back');
+  ok(leaks(judge(noBack, {})).length >= 3 && leaks(judge(noBack, { message: true })).length >= 3, `RED CONTROL (the head keeps its trailing blank): the prose lines leak again (${leaks(judge(noBack, {})).length}/${PROSE.length}) — the legs above go red`);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
