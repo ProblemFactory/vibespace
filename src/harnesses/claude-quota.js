@@ -405,7 +405,7 @@ function classifyServeFailure(info = {}) {
 }
 module.exports = { projectReset, WEEK_SEC, unscopedWeeklyTypes: UNSCOPED_WEEKLY_TYPES,
   normalize,
-  predict: require('./claude-predict.js'), // the prediction adapter (usage-predict pick 3): Claude's priors, its unit
+  predict: 'claude', // its prediction adapter, by name (src/harnesses/predict-adapters.js)
   signalFromStream,
   // THE ROW ITS READS ANSWER TO (lane usage-predict, 2026-11-16 — one row per vendor): every Claude usage read (the ⟳, the popup's
   // refresh, the CLI's background refresh) answers to this instance row; its «off» («never contact Anthropic») refuses them all,
