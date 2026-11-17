@@ -22,6 +22,7 @@ export function stoppedWhyText(reason, row = null) {
   if (reason === 'ended') {
     const by = row && row.endedBy && typeof row.endedBy === 'object' ? row.endedBy : null;
     const time = row && row.stoppedAt ? stampAt(Number(row.stoppedAt)) : '';
+    if (by && by.kind === 'agent' && by.forced === true) return t('Ended mid-task by «{name}» at {time}.', { name: String(by.name || '?'), time });   // a forced end: the worker was cut
     if (by && by.kind === 'agent' && by.name) return t('Terminated by «{name}» at {time}.', { name: String(by.name), time });
     return t('Terminated by hand at {time}.', { time });
   }
@@ -33,6 +34,16 @@ export function stoppedWhyOf(row) {
 }
 /** The sentence for a conversation (a window's resume bar, its tile, the resume-all offer): its row in `rows`, else what a
  *  door saw listed. */
+/** The stop REASON itself (lane end-obeys-verdict, 主开发's must 4): what a reader that COUNTS must ask — the Resume-all offer counts
+ *  only what a restart ended (`dead-socket-at-boot`), never an end on purpose (`ended`). Same rule as stoppedWhyFor: the row's own
+ *  reason, else the remembered one only for THAT stop. → the reason string, or null. */
+export function stoppedReasonFor(backend, id, rows) {
+  if (!id) return null;
+  const k = keyOf(backend, id), r = rowFor(rows, backend, id), was = seen.get(k);
+  if (r && r.status !== 'stopped') return null;
+  if (r) return r.stopReason || (was && was.at && r.stoppedAt === was.at ? was.reason : null) || null;
+  return was ? was.reason || null : null;
+}
 export function stoppedWhyFor(backend, id, rows) {
   if (!id) return '';
   const k = keyOf(backend, id), r = rowFor(rows, backend, id), was = seen.get(k);

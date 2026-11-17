@@ -348,15 +348,17 @@ console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `
     archive: (k) => { const already = archived.includes(k); if (!already) archived.push(k); return { ok: true, already }; },
     asksOf: (k) => asks.get(k) || [], resolveAsks: (ids, by) => { dismissed.push([ids, by]); asks.delete('claude:dd44'); return { changed: ids, unknown: [] }; },
     turnOf: (s) => s._turn || 'idle',
+    // lane end-obeys-verdict: an archive of a LIVE conversation asks the ONE end gate — the list's own row (its turn from the session)
+    listFacts: { rowOf: (wid) => { const s = W.activeSessions.get(wid); return require(path.join(ROOT, 'src/conversation-facts.js')).shapeRow({ ...{ state: 'running', turn: 'idle', background: [], heldPrompts: 0, asks: 0, goal: 'none', continue: { armed: false }, timers: 'none-seen', browser: null, handover: false, jobs: { running: 0, schedules: 0, nextFireAt: null, items: [] } }, turn: s && s._turn === 'running' ? 'running' : 'idle' }); } },
     deadOf: (t) => (/^(claude:)?gone1$/.test(t) ? { conversationId: 'gone1', sessionKey: 'claude:gone1', name: 'old worker', groups: ['T-1-x'] } : /^(claude:)?dd44$/.test(t) ? { conversationId: 'dd44', sessionKey: 'claude:dd44', name: 'stranger', groups: [] } : null) });
   const any = { ...ctx, reach: (t) => (t.conversationId === 'nope' ? { ok: false, code: 'not_granted' } : { ok: true, by: 'grant' }) };
-  W.activeSessions.get('sess-0-8')._turn = 'running';
+  W.activeSessions.get('sess-0-8')._turn = 'running'; W.activeSessions.get('sess-0-8').mode = 'chat';   // a chat conversation (a terminal one is the person's to end)
   const openAsks = await V2['conversations.archive']({ target: 'dd44' }, any);
   ok(openAsks.code === 'asks_open' && JSON.stringify(openAsks.asks) === '["ut-1","ut-2"]' && /ut-1, ut-2/.test(openAsks.why) && openAsks.target === 'stranger' && !dismissed.length && !W.ends.some((e) => e.d.sessionId === 'sess-0-8'),
     'archive: the target\'s OPEN For-you asks refuse it by their ids (asks_open — the memory law) before anything is touched; the refusal names the target', openAsks);
   const busy = await V2['conversations.archive']({ target: 'dd44', resolveAsks: true }, any);
-  ok(busy.code === 'subject_busy' && busy.turn === 'running' && asks.has('claude:dd44') && !dismissed.length, 'a running turn ⇒ subject_busy (judged before the asks are dismissed — a refusal changes nothing)', busy);
-  const done = await V2['conversations.archive']({ target: 'dd44', resolveAsks: true, force: true }, any);
+  ok(busy.code === 'subject_busy' && busy.busy.some((b) => b.code === 'turn') && asks.has('claude:dd44') && !dismissed.length, 'a running turn ⇒ subject_busy — the ONE end gate, judged before the asks are dismissed (a refusal changes nothing)', busy);
+  const done = await V2['conversations.archive']({ target: 'dd44', resolveAsks: true, force: true }, { ...any, reach: () => ({ ok: true, by: 'opener' }) });   // force: only for a conversation this key opened (the ONE gate)
   ok(done.ok && done.ended === true && done.archived === true && done.already === false && done.sessionKey === 'claude:dd44' && JSON.stringify(done.resolvedAsks) === '["ut-1","ut-2"]' && dismissed[0][1] === 'automation:ak-000000000001' && W.ends.at(-1).d.sessionId === 'sess-0-8' && W.ends.at(-1).actBy === 'agent:claude:c0ffee' && archived.includes('claude:dd44'),
     'archive --resolve-asks --force: the asks dismissed by the key, the conversation ended (its teardown names the caller), then archived — the sidebar\'s own store write, once', done);
   W.activeSessions.delete('sess-0-8');

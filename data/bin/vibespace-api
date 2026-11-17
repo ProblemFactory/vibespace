@@ -34,7 +34,7 @@ const USAGE = [
   '      a billed open (the spend ceiling decides first); answers sessionId + the conversation id, or pending',
   '  vibespace-api conversations status <target>              its ids (pending until its CLI reported one)',
   '  vibespace-api conversations rename <target> "<name>"     ·  bind <target> <T-…>  ·  end <target> [--force]',
-  '                (end: refused while it is busy or a fact is unknown — subject_busy with the reasons; --force only for a conversation this key opened)',
+  '                (end / archive: refused while it is busy or a fact is unknown — subject_busy with the reasons; a terminal or too-quiet one is person_only; --force only for a conversation this key opened, or the caller itself)',
   '  vibespace-api conversations archive <target> [--force] [--resolve-asks]   end it if still live, then archive it as the sidebar\'s 归档 does',
   '                (a running turn ⇒ subject_busy unless --force; its open For-you asks ⇒ asks_open naming them, unless --resolve-asks dismisses them; archived already ⇒ already_archived)',
   '  vibespace-api groups invite <g-…|group name> <target>    into an agent group you are in (no wake)',

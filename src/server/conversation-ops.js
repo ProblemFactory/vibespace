@@ -339,9 +339,9 @@ function opsOver(getDeps) {
     claudeSessionId: s.claudeSessionId || null, name: s.name || '', cwd: s.cwd || '', mode: s.mode || 'terminal', accountId: s._accountId || null,
     createdAt: s.createdAt || null, host: s.host || null });
   const endedByOf = (by) => {
-    if (!(by && by.kind === 'automation')) return { kind: 'person', actorId: (by && by.actBy) || null, name: null };
+    if (!(by && by.kind === 'automation')) return { kind: 'person', actorId: null, name: null };   // a person's sign-in handle is never stored as the actor's id (must 5)
     let name = null; try { name = typeof D().keyNameOf === 'function' ? D().keyNameOf(by.key) || null : null; } catch { name = null; }
-    return { kind: 'agent', actorId: by.key || null, name };
+    return { kind: 'agent', actorId: by.key || null, name, ...(by.forced === true ? { forced: true } : {}) };   // forced: «ended mid-task by …»
   };
   async function keepEndedAfter(before, by) {
     if (!before || typeof D().keepEnded !== 'function') return null;
@@ -446,6 +446,37 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
     return null;
   }
   const byOf = (caller, keyId) => ({ kind: 'automation', key: keyId, subject: `session:${caller.conversationId}`, cid: caller.conversationId, sessionKey: caller.sessionKey || `claude:${caller.conversationId}`, name: caller.name || null });
+  // ONE GATE for every verb that ends a LIVE conversation — conversations.end and conversations.archive (lane end-obeys-verdict,
+  // majordomo piece 3; 主开发's must 1): force only for a conversation the key OPENED, or the caller itself (a conversation is its own);
+  // then a conversation the hub cannot judge is a person's to end; then THE verdict over the list builder's own row. The two
+  // refusals a key's OWN conversation can get teach the force word (must 2); no other reach is ever told of it. → null (it may end)
+  // or the refusal.
+  const ENDED_DOOR = 'A person can terminate it from its card in the sidebar (Terminate in its menu).';
+  const REACH_WORDS = { grant: 'through a grant of this key', instance: 'through the instance grant (every conversation here)', groups: 'through a Task Group grant' };
+  const RECIPE = { opener: ' This key opened it: pass force (--force) to end it anyway.', self: ' It is this conversation itself: pass force (--force) to end it anyway.' };
+  function endGate(t, args, label) {
+    const own = t.by === 'opener' || t.by === 'self';
+    if (args.force) return own ? null : { ok: false, code: 'force_not_yours', why: `force is honoured only for a conversation this key opened (or the calling conversation itself); this one is reached ${REACH_WORDS[t.by] || 'by another rule'} — nothing was stopped. ${ENDED_DOOR}`, target: label };
+    const teach = own ? RECIPE[t.by] : '';
+    // only a chat conversation whose harness row keeps every sidecar fact can ever be judged idle by the hub — the SAME caps the
+    // list builder reads (listFacts.capsOf): anything else is the person's to end, said, so a manager does not retry
+    const caps = listFacts && typeof listFacts.capsOf === 'function' ? listFacts.capsOf(t.s.backend || 'claude') : (() => { try { return require('../backend-caps.js').capsOf(t.s.backend || 'claude'); } catch { return null; } })();   // a list that hands none: the builder's own default source (sourcesFrom capsOf)
+    const keeps = (caps && caps.sidecarFacts) || {};
+    if (t.s.mode !== 'chat' || !(keeps.background && keeps.timers && keeps.lastRecordAt)) return { ok: false, code: 'person_only', why: `not ended — only a person can end it: ${t.s.mode !== 'chat' ? 'a terminal conversation' : 'its harness'} reports too little of what an agent's end must know. Nothing was stopped. ${ENDED_DOOR}${teach}`, target: label };
+    const row = listFacts && typeof listFacts.rowOf === 'function' ? listFacts.rowOf(t.id) : null;
+    if (!row) return { ok: false, code: 'not_ready', why: 'the conversation facts are not wired yet — nothing was stopped', target: label };
+    const CF = require('../conversation-facts.js');   // THE end verdict (PURE) — required here: a suite's scratch copy of this file carries no sibling
+    const v = CF.endVerdict(row);
+    if (!v.endable) { const ref = CF.refusalOf(v); return { ...ref, why: ref.why + teach, target: label }; }
+    return null;
+  }
+  // WHO ENDED IT, toward an agent (must 5): the kind only — the ending key's id and its belted name only when it is the CALLING key
+  const endedByFor = (r, keyId) => {
+    const by = r && r.ended && r.ended.by;
+    if (!by || typeof by !== 'object') return r;
+    const mine = by.kind === 'agent' && by.actorId && keyId && by.actorId === keyId;
+    return { ...r, ended: { ...r.ended, by: mine ? { kind: 'agent', actorId: by.actorId, name: by.name ? beltRow({ name: by.name }).name : null, ...(by.forced ? { forced: true } : {}) } : { kind: by.kind === 'agent' ? 'agent' : 'person' } } };
+  };
   const groupsOfLive = (s, id) => { try { return groupsOf(s, id) || []; } catch { return []; } };
   /** The target, if the key reaches it → [s, id] | a named refusal (carrying the target's name for the owner's notice). */
   function reached(target, { caller, reach }) {
@@ -503,20 +534,9 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       const t = reached(args.target, ctx);
       if (!t.ok) return t;
       const label = t.s.name || args.target || null;
-      if (args.force) {
-        if (t.by !== 'opener') return { ok: false, code: 'force_not_yours', why: 'force is honoured only for a conversation this key opened; this one is reached through a grant — nothing was stopped. A person can terminate it from System → Conversations and browsers.', target: label };
-      } else {
-        const CF = require('../conversation-facts.js');   // THE end verdict (PURE) — required here: a suite's scratch copy of this file carries no sibling
-        // only a chat conversation whose harness row keeps every sidecar fact can ever be judged idle by the hub (on top of piece 2):
-        // anything else is the person's to end — said, so a manager does not retry
-        const keeps = (() => { try { return require('../backend-caps.js').capsOf(t.s.backend || 'claude').sidecarFacts || {}; } catch { return {}; } })();
-        if (t.s.mode !== 'chat' || !(keeps.background && keeps.timers && keeps.lastRecordAt)) return { ok: false, code: 'person_only', why: `not ended — only a person can end it: ${t.s.mode !== 'chat' ? 'a terminal conversation' : 'its harness'} reports none of what an agent's end must know. Nothing was stopped. A person can terminate it from System → Conversations and browsers.`, target: label };
-        const row = listFacts && typeof listFacts.rowOf === 'function' ? listFacts.rowOf(t.id) : null;
-        if (!row) return { ok: false, code: 'not_ready', why: 'the conversation facts are not wired yet — nothing was stopped', target: label };
-        const v = CF.endVerdict(row);
-        if (!v.endable) return { ...CF.refusalOf(v), target: label };
-      }
-      const r = await O().endConversation({ webuiId: t.id }, byOf(ctx.caller, ctx.keyId));
+      const gate = endGate(t, args, label);
+      if (gate) return gate;
+      const r = await O().endConversation({ webuiId: t.id }, { ...byOf(ctx.caller, ctx.keyId), ...(args.force ? { forced: true } : {}) });
       const key = keyOf(t.s);
       return r && r.ok ? { ok: true, target: idOf(t.s) || t.id, ...(key ? { link: 'vibespace://conversation/' + key } : {}) } : r;
     },
@@ -538,12 +558,12 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v.reach ? { reach: v.reach } : {}) };
       const asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean);
       if (asks.length && !args.resolveAsks) return { ok: false, code: 'asks_open', why: `${asks.length} open For-you ask${asks.length === 1 ? '' : 's'} of that conversation (${asks.join(', ')}) — the owner answers them, or pass resolveAsks`, asks, target: label };
-      if (f.s && !args.force) { const turn = turnOf(f.s); if (BUSY_TURNS.includes(turn)) return { ok: false, code: 'subject_busy', why: `that conversation has a turn ${turn} — wait for it, or pass force`, turn, target: label }; }
+      if (f.s) { const gate = endGate({ s: f.s, id: f.id, by: v.by }, args, label); if (gate) return gate; }   // the ONE end gate (lane end-obeys-verdict: must 1)
       let resolved = [];
       if (asks.length) { try { resolved = (resolveAsks(asks, `automation:${keyId}`) || {}).changed || []; } catch { resolved = []; } }
       let ended = false;
       if (f.s) {
-        const r = await O().endConversation({ webuiId: f.id }, byOf(caller, keyId), { endTree: true });   // B-c134 cure: an archive ends the background tree
+        const r = await O().endConversation({ webuiId: f.id }, { ...byOf(caller, keyId), ...(args.force ? { forced: true } : {}) }, { endTree: true });   // B-c134 cure: an archive ends the background tree
         if (!r || !r.ok) return { ok: false, code: (r && r.code) || 'failed', why: (r && r.why) || 'the conversation could not be ended', target: label };
         ended = true;
       }
@@ -569,6 +589,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
         if (!self) { try { v = reach({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [] }); } catch { v = null; } }
         if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : beltRow(r)); else beyond++;
       }
+      for (let i = 0; i < rows.length; i++) rows[i] = endedByFor(rows[i], ctx.keyId);   // who ended it, toward an agent (lane end-obeys-verdict: must 5)
       const keys = new Set(rows.map((r) => r.key).filter(Boolean));
       const browsers = Array.isArray(snap.browsers) ? snap.browsers.filter((b) => !Array.isArray(b.holders) || !b.holders.length || b.holders.some((k) => keys.has(k))) : null;
       return { ok: true, at: snap.at, machine: snap.machine, desktops: snap.desktops, ...(snap.desktopsWhy ? { desktopsWhy: snap.desktopsWhy } : {}), conversations: rows, browsers, ...(browsers ? {} : { browsersWhy: snap.browsersWhy || 'not collected' }), beyondReach: beyond, pass: snap.pass };

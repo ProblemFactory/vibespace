@@ -1046,6 +1046,8 @@ console.log('⑰ THE OPENER\'S LIFECYCLE on the real engine — the store\'s ope
   let ticks = 0;
   const verbs = OPS.automationVerbs({ activeSessions: sessions, groupsOf: () => [], ops: fakeOps, waitMs: 2000, sleep: async () => { ticks++; if (ticks === 2) { const s = sessions.get('sess-5-2'); s.backendSessionId = s.claudeSessionId = 'worker-5'; } },
     archive: (k) => { const already = archived.includes(k); if (!already) archived.push(k); return { ok: true, already }; }, asksOf: () => [], resolveAsks: () => ({ changed: [] }), turnOf: () => 'idle',
+    // lane end-obeys-verdict: an archive of a LIVE conversation asks the ONE end gate — the list's own row (here: idle, every fact known)
+    listFacts: { rowOf: () => require(path.join(ROOT, 'src/conversation-facts.js')).shapeRow({ state: 'running', turn: 'idle', background: [], heldPrompts: 0, asks: 0, goal: 'none', continue: { armed: false }, timers: 'none-seen', browser: null, handover: false, jobs: { running: 0, schedules: 0, nextFireAt: null, items: [] } }) },
     deadOf: (t) => (/worker-5$/.test(String(t)) ? { conversationId: 'worker-5', sessionKey: 'claude:worker-5', name: 'worker five', groups: [] } : null) });
   const w = await mkWorld('opener', { verbs });
   const m = w.engine.mint({ name: 'dispatch5', scopes: ['conversations.open', 'conversations.end', 'conversations.archive', 'conversations.status'], limits: OPEN_LIMITS, by: 'user' });

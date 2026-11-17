@@ -178,7 +178,7 @@ function create({
     const s = activeSessions && typeof activeSessions.get === 'function' ? activeSessions.get(id) : null;
     return s && !s.isTmuxView ? CF.shapeRow(liveRow(id, s)) : null;
   }
-  return { list, build, rowOf };
+  return { list, build, rowOf, capsOf: (b) => call(capsOf, b) };   // capsOf: the end gate reads the SAME caps source the rows are built from
 }
 
 /**

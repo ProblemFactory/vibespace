@@ -94,7 +94,7 @@ function unknownLegs(M) {
   const ended = CF.shapeRow({ key: 'claude:e', state: 'ended' });
   ok(ended.ended === null && ended.endedWhy === CF.WHY.noRecord && ended.turnWhy === CF.WHY.notLive && ended.endable, 'an ended row with no kept record says «no record kept»; its live facts say it is not running', ended);
   const ref = CF.refusalOf(CF.endVerdict({ ...IDLE, background: [{ id: 'a' }, { id: 'b' }] }));
-  ok(ref.ok === false && ref.code === 'subject_busy' && ref.why === 'not ended — 2 background tasks are running. Nothing was stopped. A person can terminate it from System → Conversations and browsers.', 'the refusal says why, that nothing was stopped, and names the person\'s door (the design\'s sentence)', ref.why);
+  ok(ref.ok === false && ref.code === 'subject_busy' && ref.why === 'not ended — 2 background tasks are running. Nothing was stopped. A person can terminate it from its card in the sidebar (Terminate in its menu).', 'the refusal says why, that nothing was stopped, and names the person\'s door (the design\'s sentence)', ref.why);
 }
 {
   // THE WRAPPER RECORDS, THE HUB JUDGES (主开发's must 1): the step records OBSERVATIONS only; trackedFacts judges them
@@ -496,7 +496,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   const br = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
   ok(!/\/cmdline/.test(br) && br.includes('const proof = CF.adoptionProof(wrapperObs, p > 1 ? { state: PI.stateOf(p), ticks: PI.starttimeOf(p), selfTicks: PI.starttimeOf(process.pid), selfStartMs: performance.timeOrigin } : null);')
     && br.includes('session._convFacts = CF.factsAtAdoption(wrapperObs, proof.pid, proof.why);'), 'MUST 1 the boot reads only the stat file through proc-identity and hands the proof to factsAtAdoption — no command-line read left in boot-restore (source pin)');
-  ok(/\['src\/server\/boot-restore\.js', 'own-tree', 16, null, DATA\]/.test(fs.readFileSync(path.join(REPO, 'scripts/mount-reader-census.mjs'), 'utf8')), 'MUST 1 the reader census count for boot-restore is back to 16');
+  ok(/\['src\/server\/boot-restore\.js', 'own-tree', 17, null, DATA\], \/\/ lane end-obeys-verdict \+1: the end record's ONE read before the kill/.test(fs.readFileSync(path.join(REPO, 'scripts/mount-reader-census.mjs'), 'utf8')), 'MUST 1 the reader census count for boot-restore: 16 with no command-line read — 17 with piece 3\'s one bounded read before a kill, named');
   const ND = "  if (x.state === 'D') return no('the process its file names is stuck in an uninterruptible wait');\n";
   const NS = "  if (x.selfStartMs + (x.ticks - x.selfTicks) * (1000 / USER_HZ) > m.startedAt + ADOPT_SLOP_MS) return no('its pid now names a process that started after the file was written');\n";
   if (srcCF.split(ND).length !== 2 || srcCF.split(NS).length !== 2) throw new Error('anchor missing: the proof lines');

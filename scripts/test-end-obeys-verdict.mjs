@@ -66,18 +66,30 @@ console.log('① the end obeys the verdict');
   for (const [label, w, code] of cases) {
     const W = world(w);
     const r = await W.call({ target: CID });
-    ok(!r.ok && r.code === 'subject_busy' && r.busy.some((b) => b.code === code) && W.ended.length === 0 && W.sessions.has('sess-1') && /Nothing was stopped/.test(r.why) && /System → Conversations and browsers/.test(r.why),
-      `${label} ⇒ subject_busy (${code}), the session still live, nothing ended, the person's door named`, { code: r.code, busy: r.busy && r.busy.map((b) => b.code) });
+    ok(!r.ok && r.code === 'subject_busy' && r.busy.some((b) => b.code === code) && W.ended.length === 0 && W.sessions.has('sess-1') && /Nothing was stopped/.test(r.why) && /its card in the sidebar \(Terminate in its menu\)/.test(r.why) && !/pass force/.test(r.why),
+      `${label} ⇒ subject_busy (${code}), the session still live, nothing ended, the person's door named (the one that exists) — a granted key is never told of force`, { code: r.code, busy: r.busy && r.busy.map((b) => b.code) });
   }
   // on top of piece 2: only a chat conversation whose harness row keeps every sidecar fact can ever be judged idle by the hub —
   // a terminal one, or a harness that keeps none, is «only a person can end it» (so a manager does not retry)
+  const realCaps = (b) => require(path.join(REPO, 'src/backend-caps.js')).capsOf(b);   // the gate reads the caps the rows are built from — here the real rows
   for (const [label, s0] of [['a terminal conversation', session({ mode: 'terminal' })], ['a chat on a harness whose row keeps no sidecar facts (codex)', session({ backend: 'codex' })]]) {
-    const W = world({ s: s0 });
+    const W = world({ s: s0, over: { capsOf: realCaps } });
     const r = await W.call({ target: CID });
     ok(!r.ok && r.code === 'person_only' && /only a person can end it/.test(r.why) && W.ended.length === 0 && W.sessions.has('sess-1'), `${label} ⇒ person_only («only a person can end it»), nothing ended`, r);
   }
   const forcedTerm = world({ s: session({ mode: 'terminal' }) });
   const ft = await forcedTerm.call({ target: CID, force: true }, 'opener');
+  // the legs the readers missed: the browser reason; each unknown; a harness whose row keeps SOME facts — the gate reads the SAME caps
+  // the rows are built from (listFacts.capsOf)
+  const browsed = world({ over: { browserOf: () => ({ drivenBy: 'person', viewers: 0, personBrowsing: false }) } });
+  const rb = await browsed.call({ target: CID });
+  const unknowns = [['heldPrompts', { heldOf: () => undefined }], ['asks', { asksOf: () => undefined }], ['goal', { goalOf: () => undefined }], ['continue', { continueOf: () => undefined }], ['handover', { handoverOf: () => undefined }], ['jobs', { jobsOf: () => undefined }]];
+  const uk = [];
+  for (const [fact, over] of unknowns) { const W = world({ over }); const r0 = await W.call({ target: CID }); uk.push([fact, r0.code, (r0.busy || []).map((b) => b.code).join()]); }
+  const partial = world({ over: { capsOf: () => ({ sidecarFacts: { background: true, timers: false, lastRecordAt: true } }) } });
+  const rp = await partial.call({ target: CID });
+  ok(!rb.ok && rb.busy.some((b) => b.code === 'browser') && uk.every(([, c, b]) => c === 'subject_busy' && /_unknown/.test(b)) && rp.code === 'person_only' && /its harness/.test(rp.why),
+    'the browser reason refuses; EACH unknown refuses with its _unknown code; a harness row that keeps only SOME sidecar facts (read from the same caps the rows use) is person_only', { browser: rb.code, uk, partial: rp.code });
   ok(ft.ok && forcedTerm.ended.length === 1, 'force on a terminal conversation THIS key opened ends it (the coordinator\'s own terminal worker — the changelog says so)', ft);
   const idle = world();
   const r = await idle.call({ target: CID });
@@ -85,12 +97,53 @@ console.log('① the end obeys the verdict');
   // RED CONTROL: the verdict switched off
   const MUT = mutantCopies('end-obeys-verdict', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
-  const NEEDLE = '        if (!v.endable) return { ...CF.refusalOf(v), target: label };';
+  const NEEDLE = '    if (!v.endable) { const ref = CF.refusalOf(v); return { ...ref, why: ref.why + teach, target: label }; }';
   ok(src.split(NEEDLE).length === 2, 'the verdict\'s refusal is in the end verb once (the mutation anchor)');
-  const M = MUT.load('src/server/conversation-ops.js', src.replace(NEEDLE, '        void v;'), 'verdict-cleared');
+  const M = MUT.load('src/server/conversation-ops.js', src.replace(NEEDLE, '    void v;'), 'verdict-cleared');
   const red = world({ s: session({ _turn: 'running' }), ops: M });
   const rr = await red.call({ target: CID });
   ok(rr.ok && red.ended.length === 1, 'RED CONTROL the verdict switched off: the mid-turn end goes THROUGH — the legs above would be red', rr);
+}
+
+console.log('②b ONE GATE for the sibling verb, the recipe taught, the door that exists (主开发 15:0xZ musts 1–3)');
+{
+  // MUST 1 — conversations.archive asks the SAME gate before anything is resolved
+  const archW = (s0, by) => {
+    const sessions = new Map([['sess-1', s0], ['sess-me', { backend: 'claude', mode: 'chat', backendSessionId: CALLER, name: 'Manager', _convFacts: idleFacts() }]]);
+    const ended = [], archived = [];
+    const stubOps = { endConversation: async (target) => { ended.push(target); sessions.delete(target.webuiId); return { ok: true }; } };
+    const listFacts = COL.create({ activeSessions: sessions, ...srcs() });
+    const verbs = OPS.automationVerbs({ activeSessions: sessions, listFacts, ops: stubOps, archive: (k) => { archived.push(k); return { ok: true }; }, asksOf: () => [], resolveAsks: () => ({ changed: [] }), turnOf: (x) => x._turn || 'idle' });
+    const call = (args) => verbs['conversations.archive'](args, { caller: { conversationId: CALLER, sessionKey: `claude:${CALLER}` }, keyId: 'k1', reach: () => ({ ok: true, by }) });
+    return { sessions, ended, archived, call };
+  };
+  const bg = () => session({ _convFacts: (() => { const st = idleFacts(); CF.factsStep(st, { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'a server' }] }, 2); return st; })() });
+  const A1 = archW(bg(), 'grant');
+  const a1 = await A1.call({ target: CID });
+  const A2 = archW(session({ _turn: 'running' }), 'grant');
+  const a2 = await A2.call({ target: CID, force: true });
+  ok(!a1.ok && a1.code === 'subject_busy' && a1.busy.some((b) => b.code === 'background') && A1.sessions.has('sess-1') && !A1.archived.length && !a2.ok && a2.code === 'force_not_yours' && A2.sessions.has('sess-1') && !A2.ended.length,
+    'MUST 1 the archive verb asks the ONE gate: a granted conversation with background work is refused and lives; force through a grant is refused by the force code', { a1: a1.code, a2: a2.code });
+  // MUST 2 — the refusals of the key's OWN conversation teach the force word; any other reach is never told; a conversation is its own
+  const ow = world({ s: session({ _turn: 'running' }) });
+  const o1 = await ow.call({ target: CID }, 'opener');
+  const ot = world({ s: session({ mode: 'terminal' }) });
+  const o2 = await ot.call({ target: CID }, 'opener');
+  const gr = await world({ s: session({ _turn: 'running' }) }).call({ target: CID }, 'grant');
+  ok(o1.code === 'subject_busy' && /This key opened it: pass force \(--force\) to end it anyway\./.test(o1.why) && o2.code === 'person_only' && /This key opened it: pass force/.test(o2.why) && !/force/.test(gr.why),
+    'MUST 2 the key that OPENED it is taught the recipe on both refusals (busy, person-only); a granted key never hears of force', { o1: o1.why, o2: o2.why });
+  const selfW = world({ s: session({ _turn: 'running', backendSessionId: CALLER }) });
+  const s1 = await selfW.call({ target: CALLER });
+  const s2 = await selfW.call({ target: CALLER, force: true });
+  ok(s1.code === 'subject_busy' && /It is this conversation itself: pass force \(--force\)/.test(s1.why) && s2.ok && selfW.ended.length === 1,
+    'MUST 2 a conversation ending ITSELF: its own turn runs, so it is refused — and taught; with force it ends (a conversation is its own: self counts as its opener)', { s1: s1.why, s2 });
+  const inst = await world({ s: session({ _turn: 'running' }) }).call({ target: CID, force: true }, 'instance');
+  const grp = await world({ s: session({ _turn: 'running' }) }).call({ target: CID, force: true }, 'groups');
+  ok(/through the instance grant/.test(inst.why) && /through a Task Group grant/.test(grp.why) && inst.code === 'force_not_yours', 'the force refusal is worded by HOW the key reaches it (instance / Task Group / grant), not always «through a grant»', { inst: inst.why, grp: grp.why });
+  // MUST 3 — the door that exists today: the conversation's card in the sidebar, Terminate in its menu
+  const card = fs.readFileSync(path.join(REPO, 'src/lib/session-card.js'), 'utf8'), cfsrc = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8'), opsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
+  ok(/id: 'session\.terminate', title: \(\) => tr\('Terminate'\)/.test(card) && cfsrc.includes('A person can terminate it from its card in the sidebar (Terminate in its menu).') && !/Conversations and browsers/.test(cfsrc + opsrc),
+    'MUST 3 every refusal names the door that EXISTS (the sidebar card\'s Terminate — pinned in session-card), never the unbuilt System screen');
 }
 
 console.log('② force — only for a conversation this key opened');
@@ -174,21 +227,30 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   ok(!active.has('sess-n') && rn && rn.endFacts && rn.endFacts.goalStated === false && rn.endFacts.queueRead === false && /not read within 80 ms/.test(rn.endFacts.notStated) && rn.endFacts.folder === '/srv/w' && rn.endFacts.mode === 'chat' && src.includes('const END_READ_MS = 1000;'),
     'a read that NEVER settles: the Terminate returns at the bound (a second by default), the record is written from memory and its facts say «not stated»', { facts: rn && rn.endFacts });
   // the facts read from a real sidecar: the goal keys HELD, the claude wrapper's own queue
-  fs.writeFileSync(path.join(BUF, 'sess-g.json'), JSON.stringify({ mode: 'chat', goal: 'Ship the release', goalStatus: 'active', queue: [{ id: 1 }, { id: 2 }], queueRead: true }));
+  fs.writeFileSync(path.join(BUF, 'sess-g.json'), JSON.stringify({ mode: 'chat', goal: 'Ship the release', queue: [{ id: 1 }, { id: 2 }], queueReadAt: 1794880000000 }));
   active.set('sess-g', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000e6', sockName: 'cw-7-1794880000007', name: 'Goal', cwd: '/srv/g', host: 'box-2' }));
   await ops().endConversation({ sessionId: 'sess-g' }, { kind: 'human', actBy: 'person@sign-in' });
   const g = JSON.parse(fs.readFileSync(path.join(META, 'cw-7-1794880000007.json.stopped'), 'utf8'));
   const f = g.endFacts || {};
-  ok(f.goalStated === true && f.goalStatus === 'active' && f.goal === 'Ship the release' && f.queueRead === true && f.queueCount === 2 && f.mode === 'chat' && f.folder === '/srv/g' && f.machine === 'box-2' && !f.notStated,
+  ok(f.goalStated === true && f.goalStatus === 'active' && !('goal' in f) && f.queueRead === true && f.queueCount === 2 && f.mode === 'chat' && f.folder === '/srv/g' && f.machine === 'box-2' && !f.notStated,
     'the facts as of the end, read once from its sidecar: goalStated (the goal keys HELD) and its status, queueRead (the wrapper\'s own mark) and the count, the mode, the folder, the machine', f);
   // the codex wrapper's queue: an empty list it began with is NOT a read; its `queueRead` mark is
   fs.writeFileSync(path.join(BUF, 'sess-c1.json'), JSON.stringify({ mode: 'chat', queue: [] }));
-  fs.writeFileSync(path.join(BUF, 'sess-c2.json'), JSON.stringify({ mode: 'chat', queue: [], queueRead: true }));
+  fs.writeFileSync(path.join(BUF, 'sess-c2.json'), JSON.stringify({ mode: 'chat', queue: [], queueReadAt: 1794880000000 }));
   const c1 = await api.endFactsBefore({ backend: 'codex', mode: 'chat' }, 'sess-c1'), c2 = await api.endFactsBefore({ backend: 'codex', mode: 'chat' }, 'sess-c2');
   const cw = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
-  ok(c1.queueRead === false && c1.queueCount === undefined && c2.queueRead === true && c2.queueCount === 0 && c1.goalStated === false
-    && /if \(fresh && meta\.queueRead !== true\) \{ meta\.queueRead = true; scheduleMeta\(\); \}\n  const fp = /.test(cw),
-    'the codex wrapper: the empty list it begins with states NO read; its one-way `queueRead` mark (a fresh list answered — set before the unchanged-answer return) does', { c1, c2 });
+  ok(c1.queueRead === false && c1.queueCount === null && c2.queueRead === true && c2.queueCount === 0 && c1.goalStated === false && c1.goalStatus === null
+    && /if \(fresh\) \{ const first = !Number\.isFinite\(meta\.queueReadAt\); meta\.queueReadAt = Date\.now\(\); if \(first\) scheduleMeta\(\); \}\n  const fp = /.test(cw),
+    'the codex wrapper: the empty list it begins with states NO read; its `queueReadAt` mark (piece 4\'s reader\'s name: when a fresh list answered — set before the unchanged-answer return) does', { c1, c2 });
+  // a forced end says so on the stopped row; a record write that THROWS never fails the end
+  active.set('sess-f', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000e9', sockName: 'cw-11-1794880000011', name: 'Cut' }));
+  await ops().endConversation({ webuiId: 'sess-f' }, { kind: 'automation', key: 'k1', forced: true });
+  const SW = await import(path.join(REPO, 'src/lib/stopped-why.js'));
+  const cut = (await rowOf('e2e00000-0000-4000-8000-0000000000e9')) || {};
+  active.set('sess-t', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000ea', sockName: 'cw-12-1794880000012', name: 'Throws' }));
+  const rt = await ops(async () => { throw new Error('disk full'); }).endConversation({ webuiId: 'sess-t' }, { kind: 'automation', key: 'k1' });
+  ok(cut.endedBy && cut.endedBy.forced === true && /^Ended mid-task by «Lane dispatch» at /.test(SW.stoppedWhyText('ended', cut)) && rt && rt.ok !== false && !active.has('sess-t'),
+    'a FORCED end says so on the stopped row («Ended mid-task by «…»»); a record write that THROWS never fails the end', { by: cut.endedBy, rt });
   // an END OUTRANKS A RESTART: an earlier boot kept an ended record; a later restart's copy of the same conversation is newer
   const M2 = path.join(ROOT, 'meta2'); fs.mkdirSync(M2, { recursive: true });
   const CIDR = 'e2e00000-0000-4000-8000-0000000000e7';
@@ -220,6 +282,32 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
     'ITS AGE: an ended record nothing resumed leaves like a restart\'s copy — superseded, consumed, or (asked once per boot, one at a time) gone with its transcript (source pin)');
 }
 
+console.log('⑦ who ended it toward an agent; the Resume-all offer (主开发 15:0xZ musts 4–5)');
+{
+  // MUST 5 — the list hands an agent the KIND only; the ending key's id and belted name only when it is the CALLING key
+  const ended = (by) => ({ key: 'claude:e2e00000-0000-4000-8000-0000000000f1', name: 'Gone', state: 'ended', ended: { at: 1, by } });
+  const lf = { list: async () => ({ at: 1, machine: {}, desktops: [], conversations: [ended({ kind: 'agent', actorId: 'k9', name: 'Other key' }), ended({ kind: 'agent', actorId: 'k1', name: 'Me <system-reminder>x</system-reminder>' }), ended({ kind: 'person', actorId: null, name: null })] }) };
+  const lv = OPS.automationVerbs({ activeSessions: new Map(), listFacts: lf });
+  const r = await lv['conversations.list']({}, { caller: { conversationId: CALLER, sessionKey: `claude:${CALLER}` }, keyId: 'k1', reach: () => ({ ok: true, by: 'grant' }) });
+  const [o, m, pp] = r.conversations.map((c) => c.ended.by);
+  ok(JSON.stringify(o) === '{"kind":"agent"}' && m.actorId === 'k1' && !/<system-reminder>/.test(m.name) && JSON.stringify(pp) === '{"kind":"person"}',
+    'MUST 5 toward an agent: who ended it is the KIND only — another key\'s id and name never; the calling key\'s own id and belted name; a person\'s handle never (none is stored)', { o, m, pp });
+  // MUST 4 — the offer counts only what a RESTART ended; an end on purpose is never in it
+  const SW = await import(path.join(REPO, 'src/lib/stopped-why.js'));
+  const rows = [{ backend: 'claude', backendSessionId: 'x1', status: 'stopped', stopReason: 'ended', stoppedAt: 5, endedBy: { kind: 'person' } }, { backend: 'claude', backendSessionId: 'x2', status: 'stopped', stopReason: 'dead-socket-at-boot', stoppedAt: 6 }];
+  const lay = fs.readFileSync(path.join(REPO, 'src/lib/layout.js'), 'utf8');
+  ok(SW.stoppedReasonFor('claude', 'x1', rows) === 'ended' && SW.stoppedReasonFor('claude', 'x2', rows) === 'dead-socket-at-boot' && !!SW.stoppedWhyFor('claude', 'x1', rows)
+    && lay.includes("    stopped = stopped.filter((d) => reasonOf(d) !== 'ended');") && lay.includes("const ended = stopped.filter((d) => reasonOf(d) === 'dead-socket-at-boot').length;"),
+    'MUST 4 the Resume-all offer reads the REASON (stoppedReasonFor): an ended conversation is never offered, and «stopped because the process ended while the server was down» counts only a restart\'s — though both carry a sentence', null);
+}
+
+{
+  // the PAGE's real Terminate road: ws-handler's kill case goes through the same end seam as a person (kind human ⇒ the record says
+  // «by a person», no handle stored) — source pins on the road itself
+  const wsh = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+  ok(wsh.includes("await convOps.endConversation(data, byOfWs(ws), { reply: (m) => ws.send(JSON.stringify(m)) });") && /const byOfWs = \(ws\) => \(\{ kind: 'human',/.test(wsh),
+    'the page\'s real Terminate road (ws-handler\'s kill case) goes through the same end seam with kind human — its record says «by a person», no handle stored');
+}
 console.log('⑤ the words and the census of stopReason readers');
 {
   const SW = await import(path.join(REPO, 'src/lib/stopped-why.js'));
@@ -227,19 +315,20 @@ console.log('⑤ the words and the census of stopReason readers');
   const p = SW.stoppedWhyOf({ status: 'stopped', stopReason: 'ended', stoppedAt: Date.now(), endedBy: { kind: 'person', name: null } });
   ok(/^Terminated by «Manager» at .+\.$/.test(a) && /^Terminated by hand at .+\.$/.test(p), 'the window\'s sentence names who ended it: «Terminated by «Manager» at …» / «Terminated by hand at …»', [a, p]);
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
-  ok(zh.includes('"Terminated by «{name}» at {time}.": "{time} 由「{name}」终止。"') && ja.includes('"Terminated by hand at {time}.": "{time} に手動で終了しました。"'), 'both sentences in three languages (the design\'s words)');
+  ok(zh.includes('"Terminated by «{name}» at {time}.": "{time} 由「{name}」终止。"') && zh.includes('"Terminated by hand at {time}.": "{time} 手动终止。"') && ja.includes('"Terminated by «{name}» at {time}.": "{time} に「{name}」が終了しました。"') && ja.includes('"Terminated by hand at {time}.": "{time} に手動で終了しました。"')
+    && zh.includes('"Ended mid-task by «{name}» at {time}.": "{time} 由「{name}」在任务中途结束。"') && ja.includes('"Ended mid-task by «{name}» at {time}.": "{time} に「{name}」が作業の途中で終了しました。"'), 'all the sentences in three languages — the four dictionary entries asserted, and the forced pair');
   const BAN = /\b(sleep|asleep|hibernat\w*|suspend\w*|paus\w*)\b|睡眠|休眠|挂起|暂停|スリープ|休止/i;
   ok(![a, p, '{time} 由「{name}」终止。', '{time} 手动终止。', '{time} に「{name}」が終了しました。', '{time} に手動で終了しました。'].some((w) => BAN.test(w)), 'the words never say sleep');
   // the census: every src file that reads a SESSION's stopReason is a row; the model's own stop reason is another meaning
-  const SESSION_READERS = ['src/server/boot-restore.js', 'src/routes/sessions.js', 'src/lib/stopped-why.js', 'src/lib/session-card.js', 'src/lib/chat-view.js', 'src/server/conversation-facts.js'];
+  const SESSION_READERS = ['src/server/boot-restore.js', 'src/routes/sessions.js', 'src/lib/stopped-why.js', 'src/lib/session-card.js', 'src/lib/chat-view.js', 'src/server/conversation-facts.js', 'src/lib/layout.js'];
   const OTHER_MEANING = { 'src/opencode-serve.js': 'the model\'s stop reason', 'src/harnesses/antigravity-wall.js': 'the model\'s stop reason', 'src/record-shape.js': 'a record field\'s name',
     'src/message-manager.js': 'the model\'s stop reason', 'src/codex-message-manager.js': 'the model\'s stop reason', 'src/acp-message-manager.js': 'the model\'s stop reason' };
   const files = [];
-  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js') && /\bstopReason\b/.test(fs.readFileSync(path.join(REPO, r), 'utf8'))) files.push(r); } };
+  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js') && /\bstopReason\b|\bstopped(?:Why|Reason)For\b/.test(fs.readFileSync(path.join(REPO, r), 'utf8'))) files.push(r); } };   // + the readers that go THROUGH the stopped-why helper (the layout's tile and the offer's count)
   walk('src');
   const unlisted = files.filter((f) => !SESSION_READERS.includes(f) && !OTHER_MEANING[f]);
   const dead = [...SESSION_READERS, ...Object.keys(OTHER_MEANING)].filter((f) => !files.includes(f));
-  ok(unlisted.length === 0 && dead.length === 0 && files.length >= 10, `the census of stopReason readers: ${SESSION_READERS.length} read a session's stop reason, ${Object.keys(OTHER_MEANING).length} another meaning — a new reader is RED until classified`, { unlisted, dead });
+  ok(unlisted.length === 0 && dead.length === 0 && files.length >= 10, `the census of stopReason readers (the literal field AND the stopped-why helper's readers): ${SESSION_READERS.length} read a session's stop reason, ${Object.keys(OTHER_MEANING).length} another meaning — a new reader is RED until classified`, { unlisted, dead });
   const planted = [...files, 'src/lib/planted.js'].filter((f) => !SESSION_READERS.includes(f) && !OTHER_MEANING[f]);
   ok(planted.length === 1, 'CONTROL a planted fifth reader is caught');
 }

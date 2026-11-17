@@ -425,7 +425,7 @@ let endedSettle = Promise.resolve();
 async function keepEnded(sockFile, meta, endedBy, endFacts = null) {
   const id = resumeIdOf(meta);
   if (!sockFile || !id) return null;
-  const by = endedBy && typeof endedBy === 'object' ? { kind: endedBy.kind === 'agent' ? 'agent' : 'person', actorId: endedBy.actorId ? String(endedBy.actorId).slice(0, 200) : null, name: endedBy.name ? String(endedBy.name).slice(0, 120) : null } : { kind: 'person', actorId: null, name: null };
+  const by = endedBy && typeof endedBy === 'object' ? { kind: endedBy.kind === 'agent' ? 'agent' : 'person', actorId: endedBy.actorId ? String(endedBy.actorId).slice(0, 200) : null, name: endedBy.name ? String(endedBy.name).slice(0, 120) : null, ...(endedBy.forced === true ? { forced: true } : {}) } : { kind: 'person', actorId: null, name: null };
   const facts = endFacts && typeof endFacts === 'object' ? endFacts : { goalStated: false, queueRead: false, notStated: 'nothing was read before the end' };
   const kept = { ...meta, status: 'stopped', stoppedAt: Date.now(), stopReason: STOP_ENDED, endedBy: by, endFacts: facts };
   const file = keptFile(sockFile), tmp = `${file}.${process.pid}.tmp`;
@@ -438,17 +438,18 @@ async function keepEnded(sockFile, meta, endedBy, endFacts = null) {
  * THE ONE READ BEFORE THE KILL (the contract): the kill body removes the session's meta and its wrapper's sidecar, so the facts a
  * resume needs are read from the sidecar NOW — ONE async read, BOUNDED (END_READ_MS, a second); past it, or failed, the record is
  * written from what the hub holds in memory and its facts say «not stated» with why. A Terminate never waits longer than the bound,
- * whatever a mount does. → endFacts: { goalStated (true only when the sidecar HELD the goal keys) + goal / goalStatus; queueRead
- * (true only when the wrapper STATES it really read the thread's queue — its one-way `queueRead` mark: the codex wrapper sets it when a
- * fresh list answered; a wrapper that states none reads «not read», whatever list it holds) + queueCount; mode; folder; machine;
- * notStated? }. No harness id is branched on here. `read` is a test's seam.
+ * whatever a mount does. → endFacts — piece 4's reader's words (int359/majordomo/piece4-reader-expects.md): { goalStated (true only
+ * when the sidecar HELD `goal` or `goalStatus`), goalStatus (the wrapper's effective status: its goalStatus, else «active» when it
+ * holds a goal, else null; null when not stated), queueRead (true only when the wrapper STATES it really read the thread's queue —
+ * its `queueReadAt` mark beside `queue`: the codex wrapper's, when a fresh list answered), queueCount (a whole number when read, else
+ * null), mode, folder, machine, notStated? }. No harness id is branched on here. `read` is a test's seam.
  */
 const END_READ_MS = 1000;
 async function endFactsBefore(session, webuiId, { boundMs = END_READ_MS, read = null } = {}) {
   const s = session || {};
   const base = { mode: s.mode || 'terminal', folder: s.cwd || null, machine: s.host || null };
   const name = typeof webuiId === 'string' && /^[A-Za-z0-9._-]+$/.test(webuiId) && !webuiId.includes('..') ? webuiId : null;
-  const none = (why) => ({ ...base, goalStated: false, queueRead: false, notStated: why });
+  const none = (why) => ({ ...base, goalStated: false, goalStatus: null, queueRead: false, queueCount: null, notStated: why });
   if (!name) return none('its wrapper file has no plain name');
   let timer = null;
   const got = await Promise.race([
@@ -460,10 +461,10 @@ async function endFactsBefore(session, webuiId, { boundMs = END_READ_MS, read = 
   if (got.err) return none(`its wrapper's file could not be read (${got.err})`);
   const wm = got.wm && typeof got.wm === 'object' && !Array.isArray(got.wm) ? got.wm : {};
   const goalStated = Object.hasOwn(wm, 'goal') || Object.hasOwn(wm, 'goalStatus');
-  const queueRead = Array.isArray(wm.queue) && wm.queueRead === true;
+  const queueRead = Array.isArray(wm.queue) && Number.isFinite(wm.queueReadAt);
   return { ...base, mode: wm.mode === 'chat' ? 'chat' : base.mode, goalStated,
-    ...(goalStated ? { goal: wm.goal == null ? null : String(wm.goal).slice(0, 200), goalStatus: wm.goalStatus == null ? null : String(wm.goalStatus).slice(0, 40) } : {}),
-    queueRead, ...(queueRead ? { queueCount: wm.queue.length } : {}) };
+    goalStatus: goalStated ? (wm.goalStatus ? String(wm.goalStatus).slice(0, 40) : wm.goal ? 'active' : null) : null,
+    queueRead, queueCount: queueRead ? wm.queue.length : null };
 }
 /** CONSUMED AT THE ONE CREATE ROAD (the contract): the moment a create made the conversation live again (a person's resume too) its
  *  kept record leaves — memory and file. `key` = `<backend>:<resumable id>`. → true | false (none kept) */

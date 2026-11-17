@@ -8,7 +8,7 @@ import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layou
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, restoreVerdict } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
 import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
 import { conversationOf, hostOf, sessionOf, liveSessionOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
-import { noteStoppedRows, stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a kept stopped session says why — the tile, the resume-all offer
+import { noteStoppedRows, stoppedWhyFor, stoppedReasonFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a kept stopped session says why — the tile, the resume-all offer
 import { resumePaced, unknownRowOf } from './resume-pacer.js'; // lane resume-all-paced (L1): a bulk resume never floods the hub — one create in flight
 import { applyForViewport, arrangementFor } from './desktop-record.js'; // THE LAYER LAW's read half (design q-039 P0, §6b item 10): every read site of a record takes this page's subsets of it here (PURE)
 
@@ -1976,8 +1976,13 @@ class LayoutManager {
   // already replaces the matching read-only window; the resumes go ONE AT A TIME,
   // each when the previous one's create has ended (resume-pacer.js — never a clock).
   async _offerResumeAll(stopped) {
+    // lane end-obeys-verdict (主开发's must 4): the offer is for what a RESTART interrupted — a conversation a person or an agent
+    // ENDED on purpose is never in it, and the «process ended while the server was down» count reads the REASON, never any sentence
+    const reasonOf = (d) => stoppedReasonFor(d.opts?.backend, d.opts?.backendSessionId || d.sessionId, this.app.sidebar?._allSessions);
+    stopped = stopped.filter((d) => reasonOf(d) !== 'ended');
+    if (!stopped.length) return;
     // WHY (lane dead-socket-keeps-chat-meta): the ones a boot kept stopped because their process ended while it was down
-    const ended = stopped.filter((d) => stoppedWhyFor(d.opts?.backend, d.opts?.backendSessionId || d.sessionId, this.app.sidebar?._allSessions)).length;
+    const ended = stopped.filter((d) => reasonOf(d) === 'dead-socket-at-boot').length;
     // B-864f: while the vault is LOCKED (every restart) a conversation whose folder is on a machine or a storage mount cannot
     // start yet — the offer says so and unlocks FIRST; the resumes begin at the unlock or when the unlock dialog closes, whichever first (unlocked, or 「稍后」:
     // then such a conversation waits in its window and resumes once the vault is unlocked)
