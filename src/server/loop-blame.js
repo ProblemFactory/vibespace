@@ -9,11 +9,17 @@
 // 18 calls wrapped here): the wrapper now covers EVERY synchronous call of the fs module (`*Sync`, fs.watch — its
 // inotify_add_watch walks the path on the main thread — Dir#readSync and realpathSync.native), times a call that THROWS
 // too (a mount answering ENOTCONN after minutes is a hold), and carries ONE hook (setHook) the sync fs witness owns
-// (src/server/sync-fs-witness.js): before(fn, args, self) may refuse the call before any syscall; after(…) sees its time.
+// (src/server/sync-fs-witness.js): before(fn, args, self, t0) may refuse the call before any syscall; after(…) sees its time.
+// B-9169 (THE WRAPPER'S OWN COST, measured on Node 22 + 24: ~0.25 µs here + ~0.85 µs in the hook per wrapped call): an
+// OUTER call reads the clock twice — performance.now at its start and its end (the start handed to the hook: the
+// witness's live slot needs no clock of its own) — and the wall clock only for a call of AT_MS or longer (its start =
+// its end less its length; no reader keeps a shorter call). A call another wrapped call makes reads no clock at all.
 const fs = require('fs');
 const path = require('path');
+const { performance } = require('perf_hooks');
 
 const SLOW_CALL_MS = 20;
+const AT_MS = 1;   // a call this long or longer is dated on the wall clock (SLOW_CALL_MS and the witness's RING_MS are above it)
 const KEPT = 60;
 // every synchronous call the fs module has (Node 24: ~50) + fs.watch, never a hand list (the hand list of 18 missed the hold)
 const SYNC_FNS = Object.freeze([...Object.keys(fs).filter((k) => /^[a-z][A-Za-z]*Sync$/.test(k) && typeof fs[k] === 'function'), 'watch']);
@@ -42,31 +48,38 @@ function callerOf(stack, root) {
   return null;
 }
 const pathOf = (a) => (typeof a === 'string' ? a : Buffer.isBuffer(a) ? a.toString() : a instanceof URL ? a.pathname : typeof a === 'number' ? `fd ${a}` : '?');
-/** THE hook (one, the sync fs witness's): { before(fn, args, self) — may throw to refuse; after(fn, args, ms, at, result, failed, self) }. */
+/** THE hook (one, the sync fs witness's): { before(fn, args, self, t0) — may throw to refuse; after(fn, args, ms, at, result, failed, self) }.
+ *  `t0` = the call's start on the performance clock (performance.now) when the wrapper reads that clock, else undefined;
+ *  `at` = the call's wall-clock start for a call of AT_MS or longer, else NaN. */
 function setHook(h) { hook = h && typeof h.before === 'function' && typeof h.after === 'function' ? h : null; return !!hook; }
 /** One slow call into the ring (the wrapper's, and a suite's seam). */
 function note(rec) { ring.push(rec); if (ring.length > KEPT) ring.splice(0, ring.length - KEPT); return rec; }
 
-/** Wrap the sync fs calls of THIS process's main thread (server.js, at its top — before the modules that destructure fs). */
-function install({ root = null, fsMod = fs, slowMs = SLOW_CALL_MS, now = () => Date.now(), hr = () => process.hrtime.bigint() } = {}) {
+/** Wrap the sync fs calls of THIS process's main thread (server.js, at its top — before the modules that destructure fs).
+ *  `hr` = a MILLISECOND clock (B-9169: performance.now — never process.hrtime.bigint's nanoseconds); the hook is handed
+ *  the call's start only from that default. The start is read before the hook's `before`: a call's ms holds the hook's
+ *  own work too (sub-microsecond on the hot path). */
+const perfNow = () => performance.now();
+function install({ root = null, fsMod = fs, slowMs = SLOW_CALL_MS, now = () => Date.now(), hr = perfNow } = {}) {
   let isMain = true;
   try { isMain = require('worker_threads').isMainThread; } catch { }
   if (!isMain || (installed && fsMod === fs)) return false;
   if (fsMod === fs) { installed = true; rootDir = root; }
   let depth = 0;   // a call another wrapped call makes (readFileSync's own openSync) is the outer one's, never a second row
+  const perfT0 = hr === perfNow;   // the start the hook is handed is on the performance clock only when this clock is it
+  const datedFrom = Math.min(AT_MS, slowMs);   // the shortest call that is dated (a ring kept below AT_MS dates its own)
   const wrap = (orig, fn) => {
     const wrapped = function (...args) {
-      const outer = depth === 0;
-      if (outer && hook) hook.before(fn, args, this);   // the mount guard: a refusal throws HERE, before any syscall
-      const t0 = hr(), at = now();
+      if (depth !== 0) { depth++; try { return orig.apply(this, args); } finally { depth--; } }   // an inner call: no clock, no hook
+      const t0 = hr();
+      if (hook) hook.before(fn, args, this, perfT0 ? t0 : undefined);   // the mount guard: a refusal throws HERE, before any syscall
       let r, failed = false, err;
       depth++;
       try { r = orig.apply(this, args); } catch (e) { failed = true; err = e; } finally { depth--; }
-      if (outer) {
-        const ms = Number(hr() - t0) / 1e6;
-        if (ms >= slowMs) { try { note({ at, ms: Math.round(ms), fn, path: fn.startsWith('Dir.') ? String(this && this.path) : pathOf(args[0]), bytes: failed ? null : bytesOf(fn, args, r), caller: callerOf(new Error().stack, root) }); } catch { } }
-        if (hook) { try { hook.after(fn, args, ms, at, r, failed, this); } catch { } }
-      }
+      const ms = hr() - t0;
+      const at = ms >= datedFrom ? Math.round(now() - ms) : NaN;
+      if (ms >= slowMs) { try { note({ at, ms: Math.round(ms), fn, path: fn.startsWith('Dir.') ? String(this && this.path) : pathOf(args[0]), bytes: failed ? null : bytesOf(fn, args, r), caller: callerOf(new Error().stack, root) }); } catch { } }
+      if (hook) { try { hook.after(fn, args, ms, at, r, failed, this); } catch { } }
       if (failed) throw err;
       return r;
     };
@@ -107,4 +120,4 @@ function blameWords(entries, root = rootDir) {
 /** Is `fn` one of this module's wrappers. */
 const isWrapped = (fn) => WRAPPED.has(fn);
 
-module.exports = { install, setHook, blame, blameWords, note, bytesOf, callerOf, pathOf, isWrapped, SLOW_CALL_MS, KEPT, SYNC_FNS };
+module.exports = { install, setHook, blame, blameWords, note, bytesOf, callerOf, pathOf, isWrapped, SLOW_CALL_MS, KEPT, SYNC_FNS, AT_MS };

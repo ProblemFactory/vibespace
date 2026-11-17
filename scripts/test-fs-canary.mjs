@@ -507,5 +507,109 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
   fs.rmSync(S, { recursive: true, force: true });
 }
 
+console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads, path judgements and path encodes per wrapped call');
+{ // B-9169 (measured by lane hub-loop-stalls on Node 22 + 24): loop-blame's wrapper + the witness's hook cost ~1.1 µs a
+  // wrapped call — two hrtime.bigint reads + a Date.now in the wrapper, a process.hrtime array for the live slot, the path
+  // classified (MPC.rootOf) and encoded into the slot on EVERY call; 13 112 wrapped calls in the busiest second of 38
+  // sessions restoring. THE CENSUS COUNTS what one call does, never its time: every clock is patched to count
+  // (performance.now to a fake that steps a set length per read, so a call's length is the census's choice), MPC.rootOf,
+  // the own-tree test (its `indexOf('/..')`) and TextEncoder#encodeInto to count; a fake fs module object carries the calls
+  // (no syscall). Nothing is said while the clocks count (a line to a file stdout is a wrapped fs.writeSync).
+  const LB = require(path.join(REPO, 'src/server/loop-blame.js'));
+  const SW = require(path.join(REPO, 'src/server/sync-fs-witness.js'));
+  const MPC = require(path.join(REPO, 'src/mount-path-class.js'));
+  const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'fscan-cost-'));
+  const NFS = '/srv/fscan-cost-nfs', OUT = `${NFS}/a/b.json`, IN = path.join(ROOT, 'src', 'x.json');   // the fixture's mount: never reached
+  const MI = `900 42 0:73 / ${NFS} rw,relatime - nfs4 192.0.2.10:/v rw\n`;
+  const quiet = { warn() {}, log() {} };
+  const fakeFs = () => { const F = { statSync: (p) => ({ p }), existsSync: () => true, openSync: () => 7, closeSync: () => {}, renameSync: () => {} };
+    F.readFileSync = (p) => { F.closeSync(F.openSync(p)); return 'x'; };   // two INNER wrapped calls
+    return F; };
+  const PERF = globalThis.performance, perfOwn = Object.getOwnPropertyDescriptor(PERF, 'now');
+  const count = (step, run) => {
+    const n = { hrtime: 0, bigint: 0, perf: 0, date: 0, rootOf: 0, own: 0, encode: 0 };
+    const keep = { hr: process.hrtime, date: Date.now, rootOf: MPC.rootOf, enc: TextEncoder.prototype.encodeInto, idx: String.prototype.indexOf };
+    let fake = 1e6;
+    process.hrtime = Object.assign(function (...a) { n.hrtime++; return keep.hr.apply(this, a); }, { bigint: () => { n.bigint++; return keep.hr.bigint(); } });
+    PERF.now = () => { n.perf++; return (fake += step); };
+    Date.now = () => { n.date++; return 5e12; };
+    MPC.rootOf = function (...a) { n.rootOf++; return keep.rootOf.apply(this, a); };
+    TextEncoder.prototype.encodeInto = function (...a) { n.encode++; return keep.enc.apply(this, a); };
+    String.prototype.indexOf = function (x, ...a) { if (x === '/..') n.own++; return keep.idx.call(this, x, ...a); };   // eslint-disable-line no-extend-native
+    try { run(); } finally {
+      process.hrtime = keep.hr; Date.now = keep.date; MPC.rootOf = keep.rootOf; TextEncoder.prototype.encodeInto = keep.enc; String.prototype.indexOf = keep.idx;   // eslint-disable-line no-extend-native
+      if (perfOwn) Object.defineProperty(PERF, 'now', perfOwn); else delete PERF.now;
+    }
+    return n;
+  };
+  const K = 50, times = (k, f) => { for (let i = 0; i < k; i++) f(i); };
+  const rig = (W = SW, L = LB) => { const F = fakeFs(); L.install({ fsMod: F, root: ROOT });
+    const w = W.create({ rootDir: ROOT, dataDir: path.join(ROOT, 'data'), fresh: true, armed: false, live: false, log: quiet, readMountinfo: () => MI });
+    w.refresh(); L.setHook(w.hook); return { F, w }; };
+  const { F, w } = rig();
+  const out = count(0.001, () => times(K, () => F.statSync(OUT)));
+  const inTree = count(0.001, () => times(K, () => F.statSync(IN)));
+  const nested = count(0.001, () => times(K, () => F.readFileSync(OUT)));
+  const two = count(0.001, () => times(K, () => F.renameSync(OUT, IN)));
+  w.refresh();
+  const refreshed = count(0.001, () => times(K, () => F.statSync(OUT)));
+  const per = (n) => `${n.perf / K} performance.now, ${n.hrtime / K} hrtime, ${n.bigint / K} hrtime.bigint, ${n.date / K} Date.now a call; ${n.rootOf} classed by mount, ${n.own} own-tree tests, ${n.encode} encoded over ${K}`;
+  ok(out.perf === 2 * K && out.hrtime === 0 && out.bigint === 0 && out.date === 0,
+    `CENSUS: a wrapped call shorter than ${LB.AT_MS} ms reads TWO clocks — performance.now at its start and its end — no hrtime, no hrtime.bigint, no wall clock (${per(out)})`, out);
+  ok(out.rootOf === 1 && out.own === 1 && out.encode === 1 && w.roots().length === 1,
+    `CENSUS: ${K} calls on ONE path outside the tree judge it once (its verdict kept per path until the roots refresh) and encode it into the live slot once (${per(out)})`, out);
+  ok(inTree.rootOf === 0 && inTree.own === 1 && inTree.encode === 1 && inTree.perf === 2 * K, `CENSUS: a path in the instance's own tree is tested once (its verdict kept too), never classed by mount; encoded once (${per(inTree)})`, inTree);
+  ok(nested.perf === 2 * K && nested.date === 0 && nested.hrtime + nested.bigint === 0 && nested.rootOf === 0 && nested.encode === 1,
+    `CENSUS: the two calls a wrapped call makes inside it (readFileSync's openSync + closeSync) read no clock and reach no hook (${per(nested)})`, nested);
+  ok(two.perf === 2 * K && two.rootOf === 0 && two.encode === 0,
+    `CENSUS: a call of two paths judges each from the kept answers (the own-tree one never) and shows the one under the mount — the path the slot already holds, never encoded again (${per(two)})`, two);
+  ok(refreshed.rootOf === 1, `CENSUS: a roots refresh drops the kept answers — the path is judged once more (${refreshed.rootOf})`, refreshed);
+  { // the kept answers are BOUNDED (the oldest leaves first)
+    const P = (i) => `${NFS}/many/${i}`;
+    const fill = count(0.001, () => times(SW.ROOT_MEMO_MAX + 1, (i) => F.statSync(P(i))));
+    const again = count(0.001, () => { F.statSync(P(SW.ROOT_MEMO_MAX)); F.statSync(P(0)); });
+    ok(fill.rootOf === SW.ROOT_MEMO_MAX + 1 && again.rootOf === 1, `the kept answers are bounded at ${SW.ROOT_MEMO_MAX} paths: the newest is still kept, the oldest was dropped and is judged again (${again.rootOf})`, { fill: fill.rootOf, again: again.rootOf });
+  }
+  { // a call of AT_MS or longer is dated on the wall clock: its end less its length (the fake wall clock reads 5e12)
+    const slow = count(60, () => times(5, () => F.statSync(OUT)));
+    const e = w.ring().at(-1), b = LB.blame(0, Infinity, { k: Infinity }).find((x) => x.fn === 'statSync' && x.path === OUT);
+    ok(slow.date === 5 && slow.perf === 10 && slow.hrtime + slow.bigint === 0 && e && e.at === 5e12 - 60 && e.ms === 60 && b && b.at === 5e12 - 60 && b.ms === 60,
+      `a 60 ms call reads the wall clock ONCE, after it — its start is its end less its length, in the witness's ring and in loop-blame's (${slow.date} for 5 calls; at ${e && e.at})`, { slow, e, b });
+  }
+  { // the live slot's start is the wrapper's own start put on the monotonic clock (the watchdog's): read DURING a call
+    const T = new Float64Array(w.slot, SW.SLOT_INTS * 4, SW.SLOT_FLOATS);
+    const mono = () => { const t = process.hrtime(); return t[0] * 1e3 + t[1] / 1e6; };
+    let seen = null;
+    F.lstatSync = (p) => { seen = { start: T[0], inside: mono(), inflight: w.inflight() }; return { p }; };
+    LB.install({ fsMod: F, root: ROOT });
+    F.lstatSync(OUT);
+    ok(seen && seen.start <= seen.inside && seen.inside - seen.start < SW.LIVE_MS && seen.inflight && seen.inflight.fn === 'lstatSync' && seen.inflight.path === OUT && seen.inflight.root === NFS && seen.inflight.store === null && w.inflight() === null,
+      `the live slot's start is on the monotonic clock, before the call's own first line (the wrapper's start + one offset read at load); inflight() names fn, path, root and store from the hook's fields`, seen);
+  }
+  // THE RED CONTROLS — each cut put back alone (scripts/mutant-copy.mjs, never src/): its own count is red
+  const LSRC = fs.readFileSync(path.join(REPO, 'src/server/loop-blame.js'), 'utf8'), WSRC = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness.js'), 'utf8');
+  const cut = (src, from, to) => (src.split(from).length === 2 ? src.replace(from, to) : null);
+  const noKept = cut(WSRC, "if (typeof p !== 'string') return MPC.rootOf(p, CTX);", 'return judged(p);');
+  const muts = {
+    'every call dated': [cut(LSRC, 'const at = ms >= datedFrom ? Math.round(now() - ms) : NaN;', 'const at = now();'), null, 'date', OUT],
+    'the slot reads its own clock': [null, cut(WSRC, 'T[0] = typeof t0 === \'number\' && now === mono ? t0 + PERF_TO_MONO : now();', 'T[0] = now();'), 'hrtime', OUT],
+    'no kept verdicts (outside the tree)': [null, noKept, 'rootOf', OUT],
+    'no kept verdicts (the own tree)': [null, noKept, 'own', IN],
+    'the path encoded every call': [null, cut(WSRC, 'if (p !== encP) { encLen = enc.encodeInto(p, P).written; encP = p; }', '{ encLen = enc.encodeInto(p, P).written; encP = p; }'), 'encode', OUT],
+    // an inner call (readFileSync's openSync + closeSync) taken through the outer road again: it reads the clock and the hook
+    'inner calls read the clock': [cut(LSRC, '      if (depth !== 0) { depth++; try { return orig.apply(this, args); } finally { depth--; } }   // an inner call: no clock, no hook\n', ''), null, 'perf', OUT, 'readFileSync', 2 * K],
+  };
+  const reds = Object.entries(muts).map(([tag, [l, ws, key, at, fn = 'statSync', over = 0]]) => {
+    if ((l === null) === (ws === null)) return [tag, null];
+    const r = rig(ws ? M.load('src/server/sync-fs-witness.js', ws, tag.replace(/\W+/g, '-')) : SW, l ? M.load('src/server/loop-blame.js', l, tag.replace(/\W+/g, '-')) : LB);
+    const n = count(0.001, () => times(K, () => r.F[fn](at)));
+    r.w.stop();
+    return [tag, n[key] >= K && n[key] > over ? n[key] : null];
+  });
+  ok(reds.every(([, v]) => v !== null), `RED CONTROLS: each cut put back alone reads its count per call again — ${reds.map(([t, v]) => `${t}: ${v === null ? 'NOT RED' : v + ' over ' + K}`).join('; ')}`, reds);
+  LB.setHook(null);
+  fs.rmSync(ROOT, { recursive: true, force: true });
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

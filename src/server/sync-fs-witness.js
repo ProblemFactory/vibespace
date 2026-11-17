@@ -52,6 +52,7 @@ const EPISODE_MS = 5000;
 const LIVE_MS = 10000;
 const ROOTS_EVERY_MS = 30000;
 const FD_PATHS_MAX = 4096;
+const ROOT_MEMO_MAX = 4096;   // B-9169: the paths whose class is kept until the roots refresh (the oldest leaves first)
 const STACK_FRAMES = 6;
 const SETTING = 'mounts.mainThreadSyncGuard';
 const TWO_PATH = new Set(['renameSync', 'copyFileSync', 'cpSync', 'linkSync', 'symlinkSync']);
@@ -70,6 +71,10 @@ const NOTE_BYTES = 16 * 1024, PROFILE_BYTES = 64 * 1024, GAPS = 16;
  *  thread); the wall clock only dates a hold when it is said (lane hub-loop-stalls round 3: a +2 s step of the date with an
  *  idle loop was a 2 s «hold»). */
 const mono = () => { const t = process.hrtime(); return t[0] * 1e3 + t[1] / 1e6; };
+/** B-9169: a wrapped call's start is loop-blame's own performance.now read (the same uv_hrtime clock, counted from the
+ *  process's start); ONE offset read here puts it on `mono` (src/server/loop-holds.js's perfToMono, for a gc entry) — the
+ *  live slot reads no clock of its own per call. */
+const PERF_TO_MONO = mono() - require('perf_hooks').performance.now();
 const slotBytes = () => SLOT_INTS * 4 + SLOT_FLOATS * 8 + SLOT_PATH;
 const SAMPLING_SETTING = 'telemetry.loopHoldSampling';
 /** a debugger port this process opened (--inspect, SIGUSR1) — the sampler never interrupts a person's debugger */
@@ -111,7 +116,8 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   beatMs = LH.BEAT_MS, holdMs = LH.HOLD_MS, noAnswerMs = LH.NO_ANSWER_MS, askBudgetMs = LH.ASK_BUDGET_MS, samplesPerHold = LH.SAMPLES_PER_HOLD,
   samplingOn = () => true, holdsOptions = {}, profileEveryMs = LH.PROFILE_EVERY_MS, heapStats = () => { const v8 = require('v8'), f = LH.heapFillOf({ stats: v8.getHeapStatistics(), spaces: v8.getHeapSpaceStatistics(), argv: LH.nodeArgv(), nodeMajor: Number(process.versions.node.split('.')[0]) }); return { used_heap_size: f.used, heap_size_limit: f.limit }; }, procRoot = '/proc', censusEveryMs = LC.CENSUS_EVERY_MS } = {}) {
   if (one && !fresh) return one;
-  let roots = [], busy = false, cur = null, isArmed = armed === null ? false : !!armed, ownMount = null;
+  // the call in flight, as the hook's own fields (B-9169: never an object per call) — curFn null = none
+  let roots = [], busy = false, curFn = null, curPath = null, curRoot = null, curStore = null, isArmed = armed === null ? false : !!armed, ownMount = null, ownHit = null;
   const ring = [], fdPaths = new Map(), saidSites = new Map();
   const counts = { refused: 0, allowed: 0, held: 0, heldOnMount: 0, slow: 0, rootsRead: 0 };
   let onHeld = (e) => { try { log.warn?.(heldLine(e.ms, e)); } catch { } };
@@ -119,14 +125,35 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   // THE HOT CASE in one compare: a path in the instance's own tree (its stores, its checkout) is never a mount path
   const OWN = [rootDir, dataDir].filter((d) => typeof d === 'string' && d[0] === '/' && d.length > 1).map((d) => d.replace(/\/+$/, '') + '/');
   const ownPath = (p) => typeof p === 'string' && p.indexOf('/..') < 0 && OWN.some((o) => p.startsWith(o));
+  const DATA_SLASH = dataDir ? String(dataDir).replace(/\/+$/, '') + '/' : null;
+  // B-9169: A PATH'S VERDICT IS KEPT per path string until the roots refresh (a new CTX), bounded — both parts are PURE
+  // over the path and what the refresh set: outside the instance's own tree, MPC.rootOf's root row (or null); inside it,
+  // the data dir's own network / FUSE mount (ownHit) for a path under the data dir, else null (never refused). A path
+  // that is not a string (a Buffer, a URL) is judged every time.
+  const rootMemo = new Map();
+  let memoCtx = null;
+  const judged = (p) => (ownPath(p) ? (ownHit && p.startsWith(DATA_SLASH) ? ownHit : null) : MPC.rootOf(p, CTX));
+  const verdictOf = (p) => {
+    if (typeof p !== 'string') return MPC.rootOf(p, CTX);
+    if (memoCtx !== CTX) { rootMemo.clear(); memoCtx = CTX; }
+    let r = rootMemo.get(p);
+    if (r === undefined) {
+      r = judged(p);
+      if (rootMemo.size >= ROOT_MEMO_MAX) rootMemo.delete(rootMemo.keys().next().value);
+      rootMemo.set(p, r);   // null (under no root, or the own tree) is kept too
+    }
+    return r;
+  };
 
   function refresh() {
     let mounts = [], reg = [], mi = '';
     try { mi = readMountinfo(); mounts = MPC.parseMountinfo(mi); } catch { }
     try { ownMount = dataDir ? require('../local-index.js').netMountOf(path.resolve(dataDir), mi) : null; } catch { ownMount = null; }
+    ownHit = ownMount ? { kind: 'home', root: ownMount.target, fstype: ownMount.fstype } : null;   // the data dir's own mount, as a hit
     try { reg = registry() || []; } catch { }
     roots = MPC.rootsOf({ mounts, registry: reg, rootDir, dataDir });
     CTX = { mountRoots: roots, rootDir, dataDir, home, cwd };
+    rootMemo.clear(); memoCtx = CTX;
     SP.setRoots(roots, { rootDir, dataDir, home, cwd });   // every module's answer (src/storage-path.js)
     counts.rootsRead++;
     return roots;
@@ -138,14 +165,18 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   const FNS = [...LB.SYNC_FNS, 'realpathSync.native', 'Dir.readSync'];
   const fnIndex = new Map(FNS.map((f, i) => [f, i]));
   const enc = new TextEncoder();
+  let encP = null, encLen = 0;   // B-9169: the path the slot holds — the same path is never encoded again (only liveBegin writes P)
   const bump = (k) => Atomics.store(I, k, I[k] + 1);   // this thread is the slot's ONE writer (a seqlock: odd = being written)
   const storeIndex = new Map(TS.NAMES.map((n, i) => [n, i]));
-  const liveBegin = (fn, p, store) => {
+  // `t0` = the wrapper's start on the performance clock (B-9169) — the slot's start without a clock read here
+  const liveBegin = (fn, p, store, t0) => {
     bump(0);
-    I[1] = fnIndex.has(fn) ? fnIndex.get(fn) : -1;
-    I[2] = typeof p === 'string' ? enc.encodeInto(p, P).written : 0;
+    const k = fnIndex.get(fn);
+    I[1] = k === undefined ? -1 : k;
+    if (typeof p !== 'string') I[2] = 0;
+    else { if (p !== encP) { encLen = enc.encodeInto(p, P).written; encP = p; } I[2] = encLen; }
     I[5] = store && storeIndex.has(store) ? storeIndex.get(store) + 1 : 0;
-    T[0] = now();
+    T[0] = typeof t0 === 'number' && now === mono ? t0 + PERF_TO_MONO : now();
     bump(0);
     Atomics.store(I, 4, 1);
   };
@@ -158,26 +189,33 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     return TWO_PATH.has(fn) ? [a0, args[1]] : [a0];
   };
   const shown = (p) => (typeof p === 'string' ? p : LB.pathOf(p));
+  // the calls of ONE path argument (nearly every call — B-9169: judged without a list); an fd, a Dir and two paths take pathsOf
+  const ONE_PATH = new Set(FNS.filter((f) => !f.startsWith('Dir.') && !FD_FNS.has(f) && !TWO_PATH.has(f)));
   const siteOf = () => LB.callerOf(new Error().stack, rootDir) || '(not the hub\'s own code)';
   const sayOnce = (key, line) => { const n = saidSites.get(key) || 0; saidSites.set(key, n + 1); if (!n) { try { log.warn?.(line); } catch { } } };
 
   const hook = {
-    before(fn, args, self) {
+    before(fn, args, self, t0) {
       if (busy) return;
       busy = true;
       let refusal = null;
       try {   // nothing here may break an fs call: only the deliberate refusal leaves this hook
-        let hit = null, hp = null;
-        for (const p of pathsOf(fn, args, self)) {
-          // the instance's own tree is never refused — but on a network / FUSE data dir its words say that mount, never
-          // «not under a mount» (the data dir's OWN file system decides: src/local-index.js netMountOf, [local-index]'s verdict)
-          if (ownPath(p)) { if (ownMount && !hit && dataDir && p.startsWith(String(dataDir).replace(/\/+$/, '') + '/')) { hit = { kind: 'home', root: ownMount.target, fstype: ownMount.fstype }; hp = p; } continue; }
-          const r = MPC.rootOf(p, CTX);
-          if (r && (!hit || (r.kind === 'storage' && hit.kind !== 'storage'))) { hit = r; hp = p; }
+        let hit = null, p0;
+        // the instance's own tree is never refused — but on a network / FUSE data dir its words say that mount, never
+        // «not under a mount» (the data dir's OWN file system decides: src/local-index.js netMountOf, [local-index]'s verdict)
+        if (ONE_PATH.has(fn) && typeof args[0] !== 'number') { p0 = args[0]; hit = verdictOf(p0); }
+        else {
+          const ps = pathsOf(fn, args, self);
+          let hp = null;
+          for (const p of ps) {
+            if (ownPath(p)) { if (ownHit && !hit && p.startsWith(DATA_SLASH)) { hit = ownHit; hp = p; } continue; }
+            const r = verdictOf(p);
+            if (r && (!hit || (r.kind === 'storage' && hit.kind !== 'storage'))) { hit = r; hp = p; }
+          }
+          p0 = hp !== null ? hp : ps[0];
         }
-        const p0 = hp !== null ? hp : pathsOf(fn, args, self)[0];
-        cur = { fn, path: shown(p0), root: hit, store: TS.armed() };
-        liveBegin(fn, cur.path, cur.store);
+        curFn = fn; curPath = shown(p0); curRoot = hit; curStore = TS.armed();
+        liveBegin(fn, curPath, curStore, t0);
         if (!hit || hit.kind !== 'storage' || !isArmed) return;
         const site = siteOf();
         const mount = hit.root;   // the mount point names the storage (never a record's own name in a journal line)
@@ -186,14 +224,14 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
         if (on) {
           counts.refused++;
           try { record({ kind: 'event', name: 'srv-mount-guard-refused', detail: fn }); } catch { }
-          sayOnce(`refused ${site}`, `[mount-guard] ${fn}(${cur.path}) from ${site} refused — use SafeFs/async; the mount «${mount}»${MPC.viewWords(hit)}`);
-          liveEnd(); cur = null;
+          sayOnce(`refused ${site}`, `[mount-guard] ${fn}(${curPath}) from ${site} refused — use SafeFs/async; the mount «${mount}»${MPC.viewWords(hit)}`);
+          liveEnd(); curFn = null; curPath = null; curRoot = null; curStore = null;
           refusal = guardError(fn, p0, hit);
           return;
         }
         counts.allowed++;
         try { record({ kind: 'event', name: 'srv-mount-guard-allowed', detail: fn }); } catch { }
-        sayOnce(`allowed ${site}`, `[mount-guard] ${fn}(${cur.path}) from ${site} ran on the mount «${mount}»${MPC.viewWords(hit)} — ${SETTING} is off (log only); use SafeFs/async`);
+        sayOnce(`allowed ${site}`, `[mount-guard] ${fn}(${curPath}) from ${site} ran on the mount «${mount}»${MPC.viewWords(hit)} — ${SETTING} is off (log only); use SafeFs/async`);
       } catch { /* a witness fault never reaches the caller: the call runs unwitnessed */ }
       finally {
         busy = false;
@@ -205,16 +243,18 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
       busy = true;
       try {
         liveEnd();
-        const c = cur; cur = null;
-        if (fn === 'openSync' && !failed && typeof r === 'number' && c && typeof c.path === 'string') {
+        const had = curFn !== null, cPath = curPath, cRoot = curRoot, cStore = curStore;
+        curFn = null; curPath = null; curRoot = null; curStore = null;
+        if (fn === 'openSync' && !failed && typeof r === 'number' && had && typeof cPath === 'string') {
           if (fdPaths.size >= FD_PATHS_MAX) fdPaths.delete(fdPaths.keys().next().value);
-          fdPaths.set(r, c.path);
+          fdPaths.set(r, cPath);
         } else if (fn === 'closeSync') fdPaths.delete(args[0]);
         if (ms < ringMs) return;
         counts.slow++;
         const stack = new Error().stack;
-        const mount = c && c.root ? { root: c.root.root, name: c.root.name || null, kind: c.root.kind, id: c.root.id || null, ...(c.root.fstype ? { fstype: c.root.fstype } : {}), ...(c.root.shows !== undefined ? { shows: c.root.shows } : {}), ...(c.root.through ? { through: c.root.through } : {}) } : null;
-        const e = { fn, path: c ? c.path : shown(args[0]), ...(c && c.store ? { store: c.store } : {}), ms: Math.round(ms), at, failed: !!failed, class: mount ? 'mount' : 'local', mount,
+        const mount = had && cRoot ? { root: cRoot.root, name: cRoot.name || null, kind: cRoot.kind, id: cRoot.id || null, ...(cRoot.fstype ? { fstype: cRoot.fstype } : {}), ...(cRoot.shows !== undefined ? { shows: cRoot.shows } : {}), ...(cRoot.through ? { through: cRoot.through } : {}) } : null;
+        // the wrapper dates only a call of LB.AT_MS or longer; a ring held below that (a suite's ringMs) dates it here
+        const e = { fn, path: had ? cPath : shown(args[0]), ...(had && cStore ? { store: cStore } : {}), ms: Math.round(ms), at: Number.isFinite(at) ? at : Math.round(Date.now() - ms), failed: !!failed, class: mount ? 'mount' : 'local', mount,
           caller: LB.callerOf(stack, rootDir), stack: mount ? hubFrames(stack, rootDir) : null, said: false };
         ring.push(e); if (ring.length > RING_KEEP) ring.splice(0, ring.length - RING_KEEP);
         if (ms >= heldMs) {
@@ -360,7 +400,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     setRegistry: (f) => { if (typeof f === 'function') { registry = f; refresh(); } },
     setGuard: (f) => { if (typeof f === 'function') guardOn = f; },
     ring: () => ring.slice(),
-    inflight: () => (cur ? { ...cur, root: cur.root ? cur.root.root : null } : null),
+    inflight: () => (curFn !== null ? { fn: curFn, path: curPath, root: curRoot ? curRoot.root : null, store: curStore } : null),
     sites: () => Object.fromEntries(saidSites),
     slot: sab,
     /** the book of holds (src/server/loop-holds.js) — null without the watchdog thread */
@@ -414,4 +454,4 @@ function bootSetting(dataDir, readFile = (p) => fs.readFileSync(p, 'utf8')) {
   try { const v = JSON.parse(text)[SAMPLING_SETTING]; return v === false ? false : true; } catch { return null; }
 }
 
-module.exports = { create, bootSetting, heldWithin, loopHeldMs, callWords, heldLine, guardError, REFUSAL, SETTING, SAMPLING_SETTING, RING_KEEP, RING_MS, HELD_MS, EPISODE_MS, LIVE_MS, ROOTS_EVERY_MS, SLOT_INTS, SLOT_FLOATS, SLOT_PATH, FLAG_SAMPLING, FLAG_DEBUGGER, FLAG_HEAP_HIGH, FLAG_KNOWN };
+module.exports = { create, bootSetting, heldWithin, loopHeldMs, callWords, heldLine, guardError, REFUSAL, SETTING, SAMPLING_SETTING, RING_KEEP, RING_MS, HELD_MS, EPISODE_MS, LIVE_MS, ROOTS_EVERY_MS, ROOT_MEMO_MAX, SLOT_INTS, SLOT_FLOATS, SLOT_PATH, FLAG_SAMPLING, FLAG_DEBUGGER, FLAG_HEAP_HIGH, FLAG_KNOWN };
