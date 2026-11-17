@@ -14,6 +14,7 @@ const { spawn } = require('child_process');
 const { serviceEnv, RCLONE_ENV_KEEP } = require('./agent-env.js');
 const { rcloneMountArgs } = require('./mount-argv.js');   // THE mount argv — the hub's builder (lane mount-argv-dir-cache)
 const { deviceCacheVerdict, NETWORK_FS_MAGIC } = require('./vfs-cache-place.js');   // lane vfs-cache-local: the device twin's cache verdict
+const PI = require('./proc-identity.js');   // B-1ea6: a stale mount daemon is signalled only as the process the scan proved
 
 // B-35e3 (2.369.202): a file rewritten IN PLACE on the device keeps its size
 // (a SQLite DB), and a reader that keeps it open read the old bytes for days.
@@ -68,6 +69,44 @@ const PULL_ROW = Object.freeze({ id: 'device-pull', pull: true, dirCache: Object
 /** rclone argv of a pull mount (read-only webdav). Pinned by test-pull-refresh. */
 function pullMountArgs(mountpoint, cacheDir = null) {
   return rcloneMountArgs({ row: PULL_ROW, remote: 'vsdev:', mountpoint, cacheDir });
+}
+
+/** B-1ea6: is `argv` (a /proc cmdline split on NUL) an rclone MOUNT daemon of exactly `mountpoint`? By ELEMENTS, never a
+ *  substring: the program's name holds «rclone», one element is `mount` and one element IS the mount point — so a mount
+ *  point that is a prefix of another (…/mac against …/macbook, an instance's folder under another) never names the other's
+ *  daemon. PURE. */
+function isMountDaemonOf(argv, mountpoint) {
+  if (!Array.isArray(argv) || typeof mountpoint !== 'string' || !mountpoint) return false;
+  return /rclone/.test(path.basename(String(argv[0] || ''))) && argv.includes('mount') && argv.includes(mountpoint);
+}
+/** B-1ea6: the rclone daemons still serving `mountpoint` — a FRESH /proc pass OFF the loop (fs.promises, one process at a
+ *  time as scanProc: the shared threadpool is never flooded), each with the identity read in the same pass ({pid,
+ *  starttime}: /proc/<pid>/stat field 22, counted from the last ')'). Never this process. [] where there is no /proc. */
+async function mountDaemonsOf(mountpoint, { procRoot = '/proc' } = {}) {
+  const out = [];
+  let pids = [];
+  try { pids = (await fs.promises.readdir(procRoot)).filter((n) => /^\d+$/.test(n) && Number(n) !== process.pid); } catch { return out; }
+  for (const pid of pids) {
+    let argv; try { argv = (await fs.promises.readFile(`${procRoot}/${pid}/cmdline`, 'utf8')).split('\0'); } catch { continue; }
+    if (!isMountDaemonOf(argv, mountpoint)) continue;
+    let st; try { st = await fs.promises.readFile(`${procRoot}/${pid}/stat`, 'utf8'); } catch { continue; }
+    const start = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[19]);
+    if (Number.isFinite(start)) out.push({ pid: Number(pid), starttime: start });
+  }
+  return out;
+}
+/** B-1ea6: the pre-clean's kill — each daemon the scan proved, RE-CHECKED at the signal: its command line read again (still
+ *  a mount daemon of exactly this mount point) and then PI.signalIdentity (the start time judged in the same tick as the
+ *  kill: a pid that now names another process is never signalled). → the pids signalled. */
+async function killMountDaemons(mountpoint, { procRoot = '/proc', kill = null, say = null } = {}) {
+  const hit = [];
+  for (const id of await mountDaemonsOf(mountpoint, { procRoot })) {
+    let argv; try { argv = (await fs.promises.readFile(`${procRoot}/${id.pid}/cmdline`, 'utf8')).split('\0'); } catch { continue; }
+    if (!isMountDaemonOf(argv, mountpoint)) continue;
+    const r = PI.signalIdentity(id, 'SIGKILL', { procRoot, what: 'the stale daemon of a pull mount point', ...(kill ? { kill } : {}), ...(say ? { say } : {}) });
+    if (r.ok) { hit.push(id.pid); if (say) say(`pull mount ${mountpoint}: ended its stale daemon ${id.pid} (start ${id.starttime})`); }
+  }
+  return hit;
 }
 
 /**
@@ -254,17 +293,11 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   // server restart while its bridge dies with us — the mountpoint stays
   // claimed by an orphan whose every IO fails, and the dial-in heal's fresh
   // mount then fails forever (real report: device online, mount row stuck
-  // offline with no way back). Lazy-unmount + kill the exact orphan by
-  // /proc cmdline (the mounts.js _killMountDaemon lesson).
+  // offline with no way back). Lazy-unmount + kill the exact orphan (B-1ea6:
+  // argv ELEMENTS, never a substring — a prefix mount point named another
+  // mount's daemon; the /proc pass off the loop; the kill re-checked at the signal).
   await new Promise((r) => { const c = spawn('fusermount', ['-uz', mountpoint], { stdio: 'ignore' }); c.on('exit', r); c.on('error', r); });
-  try {
-    for (const pidS of fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n))) {
-      try {
-        const cmd = fs.readFileSync(`/proc/${pidS}/cmdline`, 'utf8').replace(/\0/g, ' ');
-        if (cmd.includes('rclone') && cmd.includes(' mount ') && cmd.includes(mountpoint)) process.kill(Number(pidS), 'SIGKILL');
-      } catch { }
-    }
-  } catch { } // non-Linux: the fusermount pass alone
+  await killMountDaemons(mountpoint, { say: log }); // non-Linux: no /proc — the fusermount pass alone
   await fs.promises.mkdir(mountpoint, { recursive: true }); // lane hub-fuse-sync-guard: a stale FUSE mount point right after the lazy unmount — never a sync call from the loop
   // /proc fd links name the REAL path; resolve it before the mount covers it
   let realMp = mountpoint; try { realMp = await fs.promises.realpath(mountpoint); } catch { }
@@ -357,4 +390,4 @@ function waitMounted(mp, timeoutMs) {
   });
 }
 
-module.exports = { deviceFolderMount, heldRefresher, pullMountArgs, PULL_ROW };
+module.exports = { deviceFolderMount, heldRefresher, pullMountArgs, PULL_ROW, isMountDaemonOf, mountDaemonsOf, killMountDaemons };

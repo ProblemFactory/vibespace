@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const { heldRefresher, pullMountArgs } = require('../src/device-mount.js');
+const { heldRefresher, pullMountArgs, isMountDaemonOf, mountDaemonsOf, killMountDaemons } = require('../src/device-mount.js');
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -173,6 +173,91 @@ try {
   const src = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
   check('rclone exiting stops the refresher and says so', /rc\.on\('exit'[\s\S]{0,200}refresher\.stop\(\)[\s\S]{0,40}log\(/.test(src));
   check('the mountpoint is resolved asynchronously (never realpathSync on a mountpoint)', !/realpathSync\(mountpoint\)/.test(src) && /await fs\.promises\.realpath\(mountpoint\)/.test(src));
+
+  console.log('§14 B-1ea6: the pre-clean finds a stale daemon by its argv ELEMENTS, off the loop, re-checked at the signal');
+  {
+    const P = path.join(tmp, 'proc-b1ea6'), M = path.join(tmp, 'mounts');
+    const mac = path.join(M, 'mac'), macbook = path.join(M, 'macbook'), inner = path.join(mac, 'inner');
+    const fake = (pid, argv, start) => {
+      fs.mkdirSync(path.join(P, String(pid)), { recursive: true });
+      fs.writeFileSync(path.join(P, String(pid), 'cmdline'), argv.join('\0') + '\0');
+      fs.writeFileSync(path.join(P, String(pid), 'stat'), `${pid} (${path.basename(argv[0])}) S 1 ${pid} ${pid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 ${start} 0 0`);
+    };
+    fs.mkdirSync(path.join(P, 'self'), { recursive: true }); fs.writeFileSync(path.join(P, 'self', 'stat'), '1 (node) S');
+    fake(301, ['/usr/bin/rclone', ...pullMountArgs(mac)], 1000);       // THE stale daemon of …/mac
+    fake(302, ['/usr/bin/rclone', ...pullMountArgs(macbook)], 2000);   // a sibling whose path merely starts with …/mac
+    fake(303, ['/usr/bin/rclone', ...pullMountArgs(inner)], 3000);     // another mount UNDER …/mac
+    fake(304, ['/usr/bin/vim', mac + '/notes.txt', 'mount'], 4000);    // not rclone
+    fake(305, ['/usr/bin/rclone', 'lsf', mac], 5000);                  // rclone, not a mount
+    check('isMountDaemonOf: the exact element only — the prefix sibling, the mount under it, another program and a non-mount rclone are not it',
+      isMountDaemonOf(['/usr/bin/rclone', ...pullMountArgs(mac)], mac) && !isMountDaemonOf(['/usr/bin/rclone', ...pullMountArgs(macbook)], mac)
+      && !isMountDaemonOf(['/usr/bin/rclone', ...pullMountArgs(inner)], mac) && !isMountDaemonOf(['/usr/bin/vim', mac, 'mount'], mac)
+      && !isMountDaemonOf(['/usr/bin/rclone', 'lsf', mac], mac) && !isMountDaemonOf(null, mac) && !isMountDaemonOf(['rclone', 'mount', ''], ''));
+    let syncProc = 0;
+    const rds = fs.readdirSync, rfs = fs.readFileSync;
+    fs.readdirSync = function (q, ...a) { if (String(q).startsWith(P)) syncProc++; return rds.call(this, q, ...a); };
+    fs.readFileSync = function (q, ...a) { if (String(q).startsWith(P)) syncProc++; return rfs.call(this, q, ...a); };
+    let found; try { found = await mountDaemonsOf(mac, { procRoot: P }); } finally { fs.readdirSync = rds; fs.readFileSync = rfs; }
+    check('the scan names …/mac\'s daemon alone, with its start time', JSON.stringify(found) === JSON.stringify([{ pid: 301, starttime: 1000 }]), JSON.stringify(found));
+    check('the scan reads /proc off the loop (no sync read under the proc root)', syncProc === 0, `sync reads ${syncProc}`);
+    const sig = [];
+    const hit = await killMountDaemons(mac, { procRoot: P, kill: (p, s) => sig.push([p, s]), say: () => {} });
+    check('healing …/mac signals ITS daemon only — never …/macbook\'s, never the mount under it', JSON.stringify(sig) === JSON.stringify([[301, 'SIGKILL']]) && JSON.stringify(hit) === JSON.stringify([301]), JSON.stringify(sig));
+    const sig2 = [];
+    await killMountDaemons(macbook, { procRoot: P, kill: (p, s) => sig2.push([p, s]), say: () => {} });
+    check('healing …/macbook signals ITS daemon only', JSON.stringify(sig2) === JSON.stringify([[302, 'SIGKILL']]), JSON.stringify(sig2));
+    // a STALL placed in the window between the scan and the signal: the pid is recycled (a new start time) — not signalled
+    const rp = fs.promises.readFile; let seen = 0;
+    fs.promises.readFile = async function (q, ...a) {
+      if (q === path.join(P, '301', 'cmdline') && ++seen === 2) fake(301, ['/usr/bin/rclone', ...pullMountArgs(mac)], 1001);
+      return rp.call(this, q, ...a);
+    };
+    const sig3 = [], said = [];
+    try { await killMountDaemons(mac, { procRoot: P, kill: (p, s) => sig3.push([p, s]), say: (l) => said.push(l) }); } finally { fs.promises.readFile = rp; }
+    check('a pid recycled between the scan and the signal is never signalled (and said once)', sig3.length === 0 && said.length === 1 && /pid-recycled/.test(said[0]), JSON.stringify({ sig3, said }));
+    fake(301, ['/usr/bin/rclone', ...pullMountArgs(mac)], 1000);
+    // the command line changed in the window (the same start, another program now): not signalled
+    seen = 0;
+    fs.promises.readFile = async function (q, ...a) {
+      if (q === path.join(P, '301', 'cmdline') && ++seen === 2) fs.writeFileSync(path.join(P, '301', 'cmdline'), ['/usr/bin/rclone', 'lsf', mac].join('\0'));
+      return rp.call(this, q, ...a);
+    };
+    const sig4 = [];
+    try { await killMountDaemons(mac, { procRoot: P, kill: (p, s) => sig4.push([p, s]), say: () => {} }); } finally { fs.promises.readFile = rp; }
+    check('a command line that no longer names the mount at the signal is never signalled', sig4.length === 0, JSON.stringify(sig4));
+    fake(301, ['/usr/bin/rclone', ...pullMountArgs(mac)], 1000);
+    check('no /proc ⇒ nothing found, nothing signalled (the fusermount pass alone)', (await mountDaemonsOf(mac, { procRoot: path.join(tmp, 'no-proc') })).length === 0);
+    const dsrc = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
+    check('the pre-clean goes through killMountDaemons; no sync /proc walk and no substring match is left in the file',
+      /fusermount', \['-uz', mountpoint\][\s\S]{0,200}await killMountDaemons\(mountpoint/.test(dsrc) && !/readdirSync\('\/proc'\)/.test(dsrc) && !/cmd\.includes\(mountpoint\)/.test(dsrc));
+    // RED CONTROL: the release's predicate (a substring of the joined command line) in a patched copy — the leg goes red
+    const SRC = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src');
+    const body = /function isMountDaemonOf\(argv, mountpoint\) \{\n[\s\S]*?\n\}\n/;
+    if (!body.test(dsrc)) check('CONTROL: the isMountDaemonOf body was found in src/device-mount.js', false);
+    else {
+      const rel = 'function isMountDaemonOf(argv, mountpoint) {\n  const cmd = (argv || []).join(\' \');\n  return cmd.includes(\'rclone\') && cmd.includes(\' mount \') && cmd.includes(mountpoint);\n}\n';
+      const cp = path.join(tmp, 'device-mount-release-predicate.js');
+      fs.writeFileSync(cp, dsrc.replace(body, rel).replace(/require\('\.\//g, `require('${SRC}/`));
+      const R = require(cp);
+      const sigC = [];
+      await R.killMountDaemons(mac, { procRoot: P, kill: (p, s) => sigC.push([p, s]), say: () => {} });
+      const pids = sigC.map((x) => x[0]).sort();
+      check('CONTROL (the release\'s substring rule): healing …/mac ALSO signals …/macbook\'s daemon and the mount under it (red)', pids.includes(302) && pids.includes(303) && pids.includes(301), JSON.stringify(pids));
+    }
+    // RED CONTROL 2: the signal NOT re-checked (the scan's pid killed as read) — the recycled pid is signalled
+    const reck = /    let argv; try \{ argv = \(await fs\.promises\.readFile\(`\$\{procRoot\}\/\$\{id\.pid\}\/cmdline`[^\n]*\n    if \(!isMountDaemonOf\(argv, mountpoint\)\) continue;\n    const r = PI\.signalIdentity\(id, 'SIGKILL'[^\n]*\n/;
+    if (!reck.test(dsrc)) check('CONTROL 2: the re-check lines were found in killMountDaemons', false);
+    else {
+      const cp2 = path.join(tmp, 'device-mount-no-recheck.js');
+      fs.writeFileSync(cp2, dsrc.replace(reck, "    const r = { ok: true }; (kill || process.kill)(id.pid, 'SIGKILL');\n").replace(/require\('\.\//g, `require('${SRC}/`));
+      const R2 = require(cp2);
+      let n = 0; const sigR = [];
+      fs.promises.readFile = async function (q, ...a) { if (q === path.join(P, '301', 'stat') && ++n === 1) { const v = await rp.call(this, q, ...a); fake(301, ['/usr/bin/rclone', ...pullMountArgs(mac)], 1001); return v; } return rp.call(this, q, ...a); };
+      try { await R2.killMountDaemons(mac, { procRoot: P, kill: (p, s) => sigR.push([p, s]), say: () => {} }); } finally { fs.promises.readFile = rp; }
+      check('CONTROL 2 (no re-check at the signal): the pid recycled after the scan IS signalled (red)', sigR.length === 1 && sigR[0][0] === 301, JSON.stringify(sigR));
+      fake(301, ['/usr/bin/rclone', ...pullMountArgs(mac)], 1000);
+    }
+  }
 } finally {
   fs.promises.readdir = realReaddir;
   fs.rmSync(tmp, { recursive: true, force: true });

@@ -68,7 +68,6 @@ export const ROWS = [
   ['src/desktop-serve.js', 'const signalAll = (pids, sig) => { for (const p of pids) { try { process.kill(p, sig)', 'starttime', 'partIsOurs|display\\.sameProcess', 'a desktop session\'s proven parts', 16],
   ['src/desktop-serve.js', "if (leaderPid) { try { process.kill(-leaderPid, 'SIGTERM')", 'starttime', 'partIsOurs|leaderPid = ', 'the proven leader\'s group', 24],
   ['src/desktop-serve.js', "if (leaderPid) { try { process.kill(-leaderPid, 'SIGKILL')", 'starttime', 'partIsOurs|leaderPid = ', 'the proven leader\'s group', 28],
-  ['src/device-mount.js', "process.kill(Number(pidS), 'SIGKILL')", 'scan', "cmd\\.includes\\('rclone'\\)", 'a stale rclone mount of this mountpoint (ps scan, same pass)'],
   ['src/device-mount.js', "process.kill(-rc.pid, 'SIGKILL')", 'handle', '-rc.pid', 'its own rclone'],
   ['src/device-mount.js', "process.kill(rc.pid, 'SIGTERM')", 'handle', 'rc.pid', 'its own rclone'],
   ['src/harnesses/claude.js', 'kill -TERM "$1" 2>/dev/null && echo "SWEPT:$1"', 'scan', 'vs_is_cli "\\$1"', 'a transcript writer (fd scan + vs_is_cli, same pass)', 3],
