@@ -79,12 +79,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, endDaemonsOf } from './scratch.mjs';
 import { flvBytes } from './fixtures/stream/screen-fakes.mjs';
 import { writeFakeMacHelper, helperLog, MAC_FACTS, writeFakeCodesign } from './fixtures/stream/mac-fakes.mjs';
 import * as CS from './fixtures/stream/codesign-outputs.mjs'; // lane apple-signing
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -649,6 +650,30 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4b THE WINDOW L
   const st = await sL.starts([kid.pid, dead.pid, process.pid, kid.pid]);
   ok(st.size === 2 && st.has(process.pid) && !st.has(dead.pid) && st.get(kid.pid) >= before - 2000 && st.get(kid.pid) <= before + 1000, 'starts(): REAL `ps -o pid= -o lstart=` (C locale) — a running pid\'s start (second precision), an ended one absent', { st: [...st], before });
   try { kid.kill(); } catch { }
+  {
+    // THE ZONE (主开发 2026-11-17): ps prints a start in ITS env's zone, psStarts reads it in this process's — the suite's zone set
+    // AWAY from the machine's own, the real read still lands within the bound; RED CONTROL: the release's call (no zone to ps)
+    const boxZ = execFileSync('date', ['+%z'], { env: { PATH: process.env.PATH }, encoding: 'utf8' }).trim();
+    const away = boxZ === '+0545' ? 'America/St_Johns' : 'Asia/Kathmandu';
+    const rel = 'src/agentd/stream-mac.js', src = fs.readFileSync(path.join(REPO, rel), 'utf8');
+    const CURE = "{ LC_ALL: 'C', LANG: 'C', TZ: process.env.TZ }";
+    const red = src.includes(CURE) ? require(mutantCopies('stream-mac-zone', REPO).write(rel, src.split(CURE).join("{ LC_ALL: 'C', LANG: 'C' }"), 'no-zone')) : null;
+    const was = process.env.TZ;
+    process.env.TZ = away;
+    try {
+      for (const [name, M, want] of [['the cure', MAC, true], ['RED CONTROL (the release: no zone handed to ps)', red, false]]) {
+        if (!M) { ok(false, name + ': the mutant could be made'); continue; }
+        const sZ = M.createMacScreen({ spawn, execFile, env: { HOME: hL, PATH: process.env.PATH }, fs });   // the helper's env names no zone
+        const b0 = Date.now();
+        const kz = spawn('sleep', ['30']); cleanups.push(() => { try { kz.kill(); } catch { } });
+        const got = (await sZ.starts([kz.pid])).get(kz.pid);
+        try { kz.kill(); } catch { }
+        const off = Number.isFinite(got) ? got - b0 : null;
+        if (want) ok(off !== null && off >= -2000 && off <= 1000, `starts() with the suite's zone ${away} away from the machine's ${boxZ}: the real read lands (${off} ms from the spawn)`, { off });
+        else ok(off !== null && Math.abs(off) >= 30 * 60 * 1000, `${name}: the start is off by the two zones' offset (${off === null ? '?' : Math.round(off / 60000)} min)`, { off });
+      }
+    } finally { if (was === undefined) delete process.env.TZ; else process.env.TZ = was; }
+  }
   const nh = await MAC.createMacScreen({ spawn, execFile: fakeExec({}).ef, env: { HOME: home('smac-look-none'), PATH: process.env.PATH }, fs }).look();
   ok(nh.ok === false && nh.code === 'no_helper', 'no helper (and no compiler) ⇒ no_helper by name', nh);
 }

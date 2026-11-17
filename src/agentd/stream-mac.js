@@ -310,7 +310,10 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
   async function starts(pids) {
     const list = [...new Set((pids || []).map(Number).filter((p) => Number.isInteger(p) && p > 0))].slice(0, 200);
     if (!list.length) return new Map();
-    const r = await H.run('/bin/ps', ['-o', 'pid=', '-o', 'lstart=', '-p', list.join(',')], 5000, { LC_ALL: 'C', LANG: 'C' });
+    // ps prints the start in ITS env's zone and psStarts reads it in THIS process's zone (主开发 2026-11-17): the zone the parser
+    // reads in goes to ps — this process's TZ, or none when it has none (an undefined entry leaves a child's env, so ps falls back
+    // to the machine's own zone, as the parse does). Else a start is off by the two zones' offset against the launch time.
+    const r = await H.run('/bin/ps', ['-o', 'pid=', '-o', 'lstart=', '-p', list.join(',')], 5000, { LC_ALL: 'C', LANG: 'C', TZ: process.env.TZ });
     return MW.psStarts(r.stdout); // ps exits 1 when one pid is gone and still prints the others
   }
   /** 「打开系统设置」 ON the Mac (lane stream-mac-stall — the agent's `settings-open` op): `/usr/bin/open <the pane's deep link>`,
