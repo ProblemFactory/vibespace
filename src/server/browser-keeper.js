@@ -4593,8 +4593,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const VP = require('./browser-viewport.js');
     const l = browserKey ? B.findLease(reg.leases, profileId, String(browserKey)) : null;
     const own = l && WIN.hasOwnWindow(l, WIN.instanceOf(rec)) ? WIN.windowIdOf(l.windowId) : null;
-    if (own != null) { const b = await VP.windowBoundsOf(rec.cdpUrl, { windowId: own }); if (b) return b; }
-    for (const tid of [targetId, ...(browserKey ? holderTabs(profileId, browserKey) : [])].filter(Boolean)) { const b = await VP.windowBoundsOf(rec.cdpUrl, { targetId: tid }); if (b) return b; }
+    // hotfix 2026-11-17: the window of the tab on show FIRST (PIC.xWindowLookups) — every tab opens in a window of its own, so the
+    // lease's own window is the tab's only when no tab is named
+    for (const q of PIC.xWindowLookups({ targetId, own, holderTabs: browserKey ? holderTabs(profileId, browserKey) : [] })) { const b = await VP.windowBoundsOf(rec.cdpUrl, q); if (b) return b; }
     return null;
   }
   /** THE HOLDER'S X WINDOW — the wid its live view draws: its CDP window's bounds matched against the display's rows (PURE

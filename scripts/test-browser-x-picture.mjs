@@ -130,7 +130,8 @@ const near = (a, b, tol = 18) => !!a && !!b && a.length >= 3 && [0, 1, 2].every(
 // ═══ THE WORLD ═══════════════════════════════════════════════════════════════
 const VNC = await vncEnv();
 const PNG0 = process.env.VIBESPACE_XPIC_PNG_DIR || null; if (PNG0) fs.mkdirSync(PNG0, { recursive: true });
-const BLOCK = [30, 150, 90]; // the page element whose colour is compared (a green block on a DARK page — the sheet's white stands out)
+const BLOCK = [30, 150, 90];
+const RED = [190, 40, 40]; // ⑦: the second tab's block // the page element whose colour is compared (a green block on a DARK page — the sheet's white stands out)
 const DARK = [40, 40, 48];
 const pageHtml = (title, body = '') => `<!doctype html><meta charset=utf-8><title>${title}</title><style>html,body{margin:0;height:100%;background:rgb(${DARK.join(',')});font:16px sans-serif;color:#ddd}
 #blk{position:absolute;left:60px;top:60px;width:360px;height:240px;background:rgb(${BLOCK.join(',')})}
@@ -145,6 +146,7 @@ const col = http.createServer((req, res) => {
     res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="bxw realm"', 'Content-Type': 'text/html' }); res.end(pageHtml('401 needs a sign-in')); return; // DARK like the page: the RED control's region must have no white of its own
   }
   if (u.pathname === '/blk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw page')); return; }
+  if (u.pathname === '/red') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw red').replace(`background:rgb(${BLOCK.join(',')})`, `background:rgb(${RED.join(',')})`)); return; } // ⑦ (hotfix 2026-11-17): the agent's SECOND tab, told apart by its block's colour
   if (u.pathname === '/ag') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw ag')); return; } // lane desktop-x-seat-browser r5: an agent's window over his
   // lane desktop-x-seat-browser: a page in a passkey ceremony (Chrome's OWN WebAuthn dialog — drawn by Chrome, not the page); its outcome on window.__pk
   if (u.pathname === '/pk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw pk', `<button id=pkb style="position:absolute;left:60px;top:20px">passkey</button><select id=sel style="position:absolute;left:60px;top:140px;font-size:28px;width:320px"><option>alpha<option>beta<option>gamma<option>delta</select><script>window.__pk='idle';document.getElementById('pkb').addEventListener('click',()=>{window.__pk='pending';const ch=new Uint8Array(32);crypto.getRandomValues(ch);navigator.credentials.get({publicKey:{challenge:ch,rpId:location.hostname,userVerification:'preferred',timeout:600000}}).then((c)=>{window.__pk='got '+(c&&c.type);},(e)=>{window.__pk='rejected '+(e&&e.name);});});</script>`)); return; }
@@ -545,4 +547,32 @@ console.log('— ⑥ one person, one seat: the desktop window on the browser dis
   await P.ev(`(() => { for (const w of [...window.app.wm.windows.values()]) if (w._desktopAppId === ${JSON.stringify(DS)} || (w._browserLive && w._browserLive.isHuman && w._browserLive.isHuman())) window.app.wm.closeWindow(w.id); return true; })()`);
   await until(async () => P.ev(`![...window.app.wm.windows.values()].some((w) => w._desktopAppId === ${JSON.stringify(DS)} || (w._browserLive && w._browserLive.isHuman && w._browserLive.isHuman()))`), 10000, 200);
 }
+// ═══ ⑦ THE PICTURE SHOWS THE TAB THE VIEW SAYS IT SHOWS (HOTFIX 2026-11-17, the owner's inc-mwl4yeom: «我那个 agent 现在操作两个标签页
+//     我却只能看到一个，上面显示有俩，但我切换去 form 那边还是只显示 gmail 页面») ═══
+// Every tab VibeSpace opens for a holder opens in a window of its own (src/browser-windows.js). The release drew the window its ticket
+// named when minted (the lease's own window first) and nothing re-issued it: the agent's new tab stayed off the picture until a new
+// viewer attached. Measured here through the product's own surfaces: the agent's `tab new`, a person's tab chip, following again.
+console.log('— ⑦ the X picture follows the tab on show: the agent\'s new tab (its own window), a chip back to the first tab, following again');
+{
+  const before = await P.l('return L.x();');
+  const wid1 = before && before.wid;
+  const tn = await S1.vb(['tab', 'new', `${ORIGIN}/red?n=7`], 60000);
+  const moved = await until(async () => { const x = await P.l('return L.x();'); return x && x.mounted && x.status === 'connected' && x.wid != null && x.wid !== wid1 ? x : null; }, 20000, 250);
+  const R = DIR ? await agentPage(DIR, '/red') : null;
+  const g = R ? await R.ev(`(() => { const b = document.getElementById('blk').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, top: outerHeight - innerHeight, left: Math.max(0, Math.round((outerWidth - innerWidth) / 2)) }; })()`) : null;
+  const px = moved && g ? await until(async () => { const v = await P.xPixel(moved.wid, g.left + g.x, g.top + g.y); return v && near(v, RED, 40) ? v : null; }, 15000, 250) : null;
+  ok(!!tn.ok && !!moved && !!px, `the agent's NEW TAB (a window of its own) while the viewer watches: the X picture moves to window ${moved && moved.wid} (was ${wid1}) and draws the new page — its block ${JSON.stringify(px)} is rgb(${RED.join(',')}) — no new viewer, no strip switch`, JSON.stringify({ tn: tn && { ok: tn.ok, out: String(tn.stdout || '').slice(0, 200), err: String(tn.stderr || '').slice(0, 200) }, moved, g }).slice(0, 900));
+  const redId = R && R.target ? String(R.target.id) : null;
+  if (R) R.close();
+  // a PERSON's chip on the first tab (the view watches it) ⇒ that tab's window; then the chip of the agent's tab ⇒ following again
+  const firstId = A && A.target ? String(A.target.id) : null;
+  const chip = (id) => P.l(`const c = L.el().querySelector('.browser-live-tabchip[data-target="${id}"]'); if (c) c.click(); return !!c;`);
+  const c1 = firstId ? await chip(firstId) : false;
+  const back = c1 ? await until(async () => { const x = await P.l('return L.x();'); return x && x.wid === wid1 && x.status === 'connected' ? x : null; }, 15000, 250) : null;
+  ok(!!back, `a person's chip on the first tab ⇒ the X picture shows its window ${wid1} again (chip found: ${c1})`, JSON.stringify(await P.l('return L.x();')).slice(0, 400));
+  const c2 = redId ? await chip(redId) : false;
+  const again = c2 && moved ? await until(async () => { const x = await P.l('return L.x();'); return x && x.wid === moved.wid && x.status === 'connected' ? x : null; }, 15000, 250) : null;
+  ok(!!again, `the chip of the agent's tab ⇒ following the agent again: the X picture shows the new tab's window ${moved && moved.wid} (chip found: ${c2})`, JSON.stringify(await P.l('return L.x();')).slice(0, 400));
+}
+
 await done();

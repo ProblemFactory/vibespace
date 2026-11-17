@@ -203,6 +203,24 @@ const DESK_DOOR_WORDS = Object.freeze({ line: "Open this browser's display in De
 function deskDoorStuck({ passkey = null, stuck = null } = {}) {
   return passkey && passkey.state === 'passkey' && passkey.passkey && passkey.passkey.state !== 'unknown' ? passkey : stuck || null;
 }
+/** HOTFIX 2026-11-17 (the owner's inc-mwl4yeom and «我那个 agent 现在操作两个标签页我却只能看到一个»): THE PICTURE SHOWS THE TAB THE
+ *  VIEW SAYS IT SHOWS. Every tab VibeSpace opens for a holder opens in a NEW window of its own (src/browser-windows.js), so «the
+ *  holder's window» is not one window: the X picture draws the window of the tab on show —
+ *  · xShownTarget — the tab a viewer WATCHES (its chip), else the agent's active tab;
+ *  · xWindowLookups — the order the keeper reads a holder's window in: THAT tab's window first, then the lease's own window, then
+ *    its other tabs' (the release read the lease's own window first: a tab in another window was never drawn);
+ *  · xTicketMoved — a viewer's ticket is re-issued when the window of the tab it shows is known and is not the ticket's (an
+ *    untold window keeps the picture it has). */
+function xShownTarget({ watch = null, activeTarget = null } = {}) { return (watch && watch.targetId) || activeTarget || null; }
+function xWindowLookups({ targetId = null, own = null, holderTabs = [] } = {}) {
+  const out = [];
+  if (targetId) out.push({ targetId: String(targetId) });
+  if (own != null) out.push({ windowId: own });
+  for (const t of holderTabs || []) if (t && String(t) !== String(targetId || '')) out.push({ targetId: String(t) });
+  return out;
+}
+function xTicketMoved({ ticketWid = null, wid = null } = {}) { return wid != null && Number(wid) !== Number(ticketWid); }
+
 function deskDoorOf({ source = null, xShown = false, stuck = null, human = false } = {}) {
   if (!human || !source || source.source !== PICTURE_X || !source.displaySession || xShown || !stuck) return null;
   const native = (stuck.state === 'passkey' && stuck.headed === true) || (stuck.state === 'prompt' && !!stuck.prompt && stuck.prompt.native === true);
@@ -212,4 +230,5 @@ function deskDoorOf({ source = null, xShown = false, stuck = null, human = false
 module.exports = {
   PICTURE_X, PICTURE_SCREENCAST, NO_XPRA_WHY_HEAD, SOURCE_WORDS, DIALOG_MIN_W, DIALOG_MIN_H, X_TICKET_RE, DESK_DOOR_WORDS,
   pictureSourceOf, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xSeatRootOf, xScopeOf, deskDoorAct, deskDoorOf, deskDoorStuck,
+  xShownTarget, xWindowLookups, xTicketMoved, // hotfix 2026-11-17: the picture shows the tab the view says it shows
 };

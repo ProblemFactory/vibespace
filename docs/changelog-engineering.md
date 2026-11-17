@@ -4,6 +4,21 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.408 — 2026-11-17
+
+### hub-loop-stalls — HOTFIX: the live view's picture shows the tab it says it shows (the owner's inc-mwl4yeom)
+- THE OWNER, 2026-11-17: the agent's browser view stopped changing; later, «two tabs in the row, I switch to the form one and it still shows the gmail page».
+- THE CAUSE: every tab VibeSpace opens for a holder opens in a window of its own (src/browser-windows.js), but a viewer's X ticket named ONE window. The keeper read the lease's own window first, and nothing re-issued the ticket when the tab on show moved. The agent's new tab, a person's chip and a tab opened while the page was hidden all left the first window on screen until a new viewer attached.
+- THE CURE: PURE `xShownTarget` / `xWindowLookups` / `xTicketMoved` in src/browser-picture.js:
+  - the keeper reads the window of the tab on show first;
+  - the relay's `xFollow` re-issues a viewer's ticket when that window moved — on an active-tab change, a watch, a return to following, or a failed watch;
+  - the page re-mounts its X view on the new ticket.
+- PROOF:
+  - test-browser-picture §8b (fast, 3.6 s). On the release's relay, placed on the scene, the viewer stayed on the first window for the agent's new tab, a chip, following again and a tab opened while hidden. On the hotfix it follows each. The release's order and ticket rule are the red controls;
+  - test-browser-x-picture ⑦ (heavy, the integrator's run).
+- NOT HERE (unit two): the view's own watch when a picture stops while its source moves (a held hub loop, a return from hidden).
+- Fast sum: test-browser-picture restated 1.5 → 3.6 s, so 1151.939 s over 599 rows and cap 1152 by arithmetic. The release's own number is the integrator's at the cut.
+
 ## 2.369.407 — 2026-11-17
 
 ### hub-loop-stalls — channel-store off the loop (the owner's root ask: the hub's main process stops being held)

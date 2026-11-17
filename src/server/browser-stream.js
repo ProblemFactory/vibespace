@@ -678,7 +678,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
       const act = msg.tabs.find((x) => x && x.active);
       const u = act && typeof act.url === 'string' ? act.url : '';
-      { const prevAct = relay.activeTarget; relay.activeTarget = act && act.targetId ? String(act.targetId) : null; if (relay.bg.state && relay.activeTarget !== prevAct) clearBackground(relay, 'another tab is on show'); } // verify r2: every `tabs` record re-says which tab the user is looking at; lane browser-windows: a background verdict is of ONE tab
+      { const prevAct = relay.activeTarget; relay.activeTarget = act && act.targetId ? String(act.targetId) : null; if (relay.bg.state && relay.activeTarget !== prevAct) clearBackground(relay, 'another tab is on show'); if (relay.activeTarget !== prevAct) xFollow(relay); } // verify r2: every `tabs` record re-says which tab the user is looking at; lane browser-windows: a background verdict is of ONE tab
       if (relay.mode === 'takeover' && relay.viewers.has(relay.holder) && relay.activeTarget && (!relay.copyWatch || relay.copyWatch.targetId !== relay.activeTarget)) armCopyWatch(relay); // lane live-input: the copy watch follows the tab on show
       if (relay.anchor) { // verify r3: …and the takeover's anchor judges it (an agent's switch while the user drives ⇒ `switched`, inputs refused tab_switched)
         const next = S.takeoverAnchorStep(relay.anchor, { activeTarget: relay.activeTarget, now: now() });
@@ -1316,6 +1316,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const w = viewer.watch;
     if (!w) return;
     viewer.watch = null; viewer.watchSeq++;
+    xFollow(relay, viewer); // hotfix 2026-11-17: back on the agent's tab — the X picture shows ITS window
     if (w.timer) clearTimeout(w.timer);
     if (typeof w.stop === 'function') { try { w.stop(); } catch { /* ended */ } }
     send(viewer.ws, { type: 'watching', targetId: null, ...(why ? { ended: why } : {}) });
@@ -1337,6 +1338,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const seq = ++viewer.watchSeq;
     const w = { targetId: id, mode: 'screencast', stop: null, lastAt: 0, pending: null, timer: null };
     viewer.watch = w;
+    xFollow(relay, viewer); // hotfix 2026-11-17: the watched tab's window is the X picture
     const live = () => viewer.watch === w && relay.viewers.has(viewer.id) && relays.get(relay.key) === relay;
     const push = (text) => {
       const t = now();
@@ -1354,7 +1356,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       onMode: (m) => { if (live()) { w.mode = m; say({ targetId: id, mode: m }); } },
       onEnd: (why) => { if (live() && why !== 'closed') stopViewerWatch(relay, viewer, why); },
     })).catch((e) => ({ ok: false, error: String(e && e.message) })).then((r) => {
-      if (!r || !r.ok) { if (live()) { viewer.watch = null; say({ targetId: null, refused: 'unreadable', ...(r && r.code ? { why: String(r.code) } : {}), error: String((r && r.error) || 'the tab could not be shown') }); } return; } // live-watch-polish G5: `why` = the capture's code
+      if (!r || !r.ok) { if (live()) { viewer.watch = null; xFollow(relay, viewer); say({ targetId: null, refused: 'unreadable', ...(r && r.code ? { why: String(r.code) } : {}), error: String((r && r.error) || 'the tab could not be shown') }); } return; } // live-watch-polish G5: `why` = the capture's code
       if (live() && seq === viewer.watchSeq) w.stop = r.close; else { try { r.close(); } catch { /* ended */ } }
     });
   }
@@ -1368,22 +1370,35 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   const xSeatListeners = new Set();
   const xRoadOf = (relay) => { try { const pid = relay && relay.target && relay.target.profileId; return !!(pid && keeper && typeof keeper.pictureSourceFor === 'function' && keeper.pictureSourceFor(pid).source === 'x'); } catch { return false; } };
   const holderKeyOf = (relay) => (isHuman(relay) ? String(relay.target.key || '') : String(relay.browserKey || ''));
-  async function xTicketFor(relay, viewer) {
+  async function xTicketFor(relay, viewer, { follow = false } = {}) {
     const say = (m) => { if (relay.viewers.get(viewer.id) === viewer) send(viewer.ws, { type: 'x-ticket', ...m }); };
     if (viewer.agent) return say({ ok: false, code: 'not_yours', error: 'an agent never draws the browser window — its verbs are its own' });
     const pid = relay.target && relay.target.profileId;
     if (!pid || !keeper || typeof keeper.xWindowFor !== 'function') return say({ ok: false, code: 'screencast', why: 'not-running' });
-    let x = null; try { x = await keeper.xWindowFor(pid, { browserKey: holderKeyOf(relay), targetId: relay.activeTarget || null }); } catch (e) { x = { wid: null, why: 'unreadable', error: String(e && e.message) }; }
+    // hotfix 2026-11-17: the window of the tab THIS viewer shows (its watched tab, else the agent's) — asked again when that tab moves
+    const tid = PIC.xShownTarget({ watch: viewer.watch, activeTarget: relay.activeTarget });
+    const seq = viewer.xSeq = (viewer.xSeq || 0) + 1;
+    let x = null; try { x = await keeper.xWindowFor(pid, { browserKey: holderKeyOf(relay), targetId: tid }); } catch (e) { x = { wid: null, why: 'unreadable', error: String(e && e.message) }; }
+    if (seq !== viewer.xSeq || relay.viewers.get(viewer.id) !== viewer) return; // a later ask answers this viewer
+    if (follow) { // only a MOVED window re-issues the ticket (the same window keeps the picture it has; an untold one keeps it too)
+      const cur = xTicketOf(relay, viewer);
+      if (!cur || !x || !x.source || x.source.source !== 'x' || !PIC.xTicketMoved({ ticketWid: cur.wid, wid: x.wid })) return;
+      log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id}'s X picture follows the tab on show ${String(tid || '?').slice(0, 8)} — window ${x.wid} (was ${cur.wid})`);
+    }
     const src = x && x.source;
     if (!src || src.source !== 'x') return say({ ok: false, code: 'screencast', why: (src && src.why) || (x && x.why) || 'not-running', source: src || null });
     if (x.wid == null) { log.log?.(`[browser-live] ${relay.key}: its window on display session ${src.displaySession} could not be told (${x.why}) — the page's picture`); return say({ ok: false, code: 'screencast', why: x.why || 'no-window', source: src }); }
     dropXTickets(relay, viewer, { quiet: true }); // ONE ticket per viewer: a new ask replaces its old one
     const ticket = 'xt-' + crypto.randomBytes(18).toString('hex');
     if (xTickets.size > 256) { const oldest = xTickets.keys().next().value; xTickets.delete(oldest); }
-    xTickets.set(ticket, { relayKey: relay.key, viewerId: viewer.id, profileId: String(pid), dsId: String(src.displaySession), at: now() });
+    xTickets.set(ticket, { relayKey: relay.key, viewerId: viewer.id, profileId: String(pid), dsId: String(src.displaySession), wid: x.wid, at: now() });
     say({ ok: true, ticket, displaySession: src.displaySession, wid: x.wid, source: src, seat: xSeatOf(relay, viewer.id) });
     noteXSeats(relay); // the bridge (re)judges its sockets; every viewer of this relay hears its seat
   }
+  /** this viewer's live ticket row (one per viewer) — null when it holds none */
+  function xTicketOf(relay, viewer) { for (const t of xTickets.values()) if (t.relayKey === relay.key && t.viewerId === viewer.id) return t; return null; }
+  /** hotfix 2026-11-17: every viewer holding a ticket asks again for the window of the tab it shows (re-issued only when it moved) */
+  function xFollow(relay, only = null) { for (const v of (only ? [only] : [...relay.viewers.values()])) if (xTicketOf(relay, v)) xTicketFor(relay, v, { follow: true }); }
   function dropXTickets(relay, viewer, { quiet = false } = {}) {
     let n = 0; for (const [k, t] of xTickets) if (t.relayKey === relay.key && t.viewerId === viewer.id) { xTickets.delete(k); n++; }
     if (n && !quiet) noteXSeats(relay);

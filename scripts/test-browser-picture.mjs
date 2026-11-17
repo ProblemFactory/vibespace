@@ -277,6 +277,87 @@ console.log("§8 the relay's ticket — the REAL live-view bridge over a fake up
   bridge.shutdown(); srv.close(); up.close();
 }
 
+// ═══ §8b THE PICTURE SHOWS THE TAB THE VIEW SAYS IT SHOWS (HOTFIX 2026-11-17, the owner's inc-mwl4yeom: «我那个 agent 现在操作两个标签页
+//     我却只能看到一个，上面显示有俩，但我切换去 form 那边还是只显示 gmail 页面») ═══
+// Every tab VibeSpace opens for a holder opens in a NEW window of its own (src/browser-windows.js). The release's X picture drew ONE
+// window chosen when the ticket was minted — the lease's own window first (the keeper) — and nothing re-issued it: the agent's new
+// tab, a person's chip, a return from hidden all left the FIRST window on screen until a new viewer attached.
+console.log("§8b the picture shows the tab the view says it shows — across windows, without a new viewer (hotfix 2026-11-17)");
+{
+  const T1 = 'A1'.repeat(16), T2 = 'B2'.repeat(16), T3 = 'C3'.repeat(16); // CDP target ids (32 hex)
+  const W = { [T1]: 4194311, [T2]: 4194599, [T3]: 4194887 }; // each tab's OWN X window (the product's rule: a new tab, a new window)
+  // ── PURE ──
+  const pureRows = (P) => ({
+    shown: P.xShownTarget({ watch: { targetId: T1 }, activeTarget: T2 }) === T1 && P.xShownTarget({ watch: null, activeTarget: T2 }) === T2 && P.xShownTarget({}) === null,
+    order: JSON.stringify(P.xWindowLookups({ targetId: T2, own: 7, holderTabs: [T1, T2] })) === JSON.stringify([{ targetId: T2 }, { windowId: 7 }, { targetId: T1 }])
+      && JSON.stringify(P.xWindowLookups({ own: 7, holderTabs: [T1] })) === JSON.stringify([{ windowId: 7 }, { targetId: T1 }]),
+    moved: P.xTicketMoved({ ticketWid: 1, wid: 2 }) && !P.xTicketMoved({ ticketWid: 2, wid: 2 }) && !P.xTicketMoved({ ticketWid: 2, wid: null }),
+  });
+  const pr = pureRows(PIC);
+  ok(pr.shown && pr.order && pr.moved, 'PURE: the tab on show = the watched tab, else the agent\'s (xShownTarget); the keeper reads THAT tab\'s window first, then the lease\'s own window, then its other tabs — no tab named ⇒ the own window first, as before (xWindowLookups); a known, different window re-issues the ticket, the same or an untold one keeps it (xTicketMoved)', pr);
+  // ── the RELEASE's rules as the mutants (each the same file with the release's lines) ──
+  const Module = require('node:module');
+  const compileAt = (rel, from, to) => { const file = path.join(REPO, rel), src = fs.readFileSync(file, 'utf8'); if (src.split(from).length !== 2) throw new Error(`the mutant's anchor moved in ${rel} — update this suite`); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src.replace(from, to), file); return m.exports; };
+  const PICrel = compileAt('src/browser-picture.js', "  if (targetId) out.push({ targetId: String(targetId) });\n  if (own != null) out.push({ windowId: own });\n", "  if (own != null) out.push({ windowId: own });\n  if (targetId) out.push({ targetId: String(targetId) });\n");
+  ok(!pureRows(PICrel).order, 'RED CONTROL — the release\'s order (the lease\'s own window first): the window of the tab on show is not read first');
+  // ── THE REAL LIVE-VIEW BRIDGE over a fake keeper (each tab its own window) and a fake upstream that moves the agent's tab ──
+  async function scene(B, { firstOnly = false } = {}) { // firstOnly: the control ends at step (1) — the release never gets past it
+    const upPort = await freePort();
+    const up = new WebSocketServer({ port: upPort, host: '127.0.0.1' }); await new Promise((r) => up.on('listening', r));
+    let upWs = null; up.on('connection', (ws) => { upWs = ws; ws.send(JSON.stringify({ type: 'status', connected: true, screencasting: true, viewportWidth: 1280, viewportHeight: 720 })); });
+    const tabs = (list, active) => upWs.send(JSON.stringify({ type: 'tabs', tabs: list.map((t, i) => ({ targetId: t, tabId: 't' + i, url: `http://127.0.0.1/p${i}`, title: 'p' + i, active: t === active })) }));
+    const keeper = {
+      setFor: () => ({ attachments: [{ profileId: 'bp-x1', alias: 'xwork', label: 'X', isDefault: true }] }), list: () => ({ profiles: [{ id: 'bp-x1', label: 'X', dir: '/tmp/x' }] }),
+      streamPortFor: async () => ({ ok: true, port: upPort }), setViewportFor: async () => ({ ok: true }), inputStateFor: () => ({ input: 'agent' }),
+      pictureSourceFor: () => ({ source: 'x', why: 'attach', displaySession: 'da-x1' }),
+      // the keeper's answer for the tab named (its own window); no tab named ⇒ the lease's own window (the first tab's)
+      xWindowFor: async (pid, o) => ({ wid: W[o && o.targetId] || W[T1], why: 'bounds', source: { source: 'x', why: 'attach', displaySession: 'da-x1' } }),
+      tabOwnersFor: async () => ({ ok: true, owners: { [T1]: 'agent', [T2]: 'agent', [T3]: 'agent' } }),
+      watchTabFor: async () => ({ ok: true, close() { } }),
+    };
+    const activeSessions = new Map([['sess-1', { _browserKey: 'bk-0000000a', name: 'one' }]]);
+    const bridge = B.create({ keeper, activeSessions, requestAuthed: (req) => /(^|; )vs=1/.test(String(req.headers.cookie || '')), log: { warn() { }, log() { } } });
+    const srv = http.createServer((_q, r) => { r.statusCode = 404; r.end(); });
+    srv.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head));
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const ws = new WebSocket(`ws://127.0.0.1:${srv.address().port}/api/browser/stream?session=sess-1&profile=bp-x1`, { headers: { Cookie: 'vs=1' } });
+    const v = { msgs: [] }; ws.on('message', (d) => { try { v.msgs.push(JSON.parse(d)); } catch { } }); ws.on('error', () => { });
+    const tickets = () => v.msgs.filter((m) => m.type === 'x-ticket' && m.ok);
+    const send = (o) => ws.send(JSON.stringify(o));
+    await new Promise((r) => ws.on('open', r)); await until(() => v.msgs.find((m) => m.type === 'hello')); await until(() => upWs);
+    const f = {};
+    tabs([T1], T1); await sleep(150);
+    send({ type: 'x-ticket' }); const t0 = await until(() => tickets()[0]); f.first = t0 && t0.wid;
+    send({ type: 'fit', width: 1298, height: 814, dpr: 1, visible: true });
+    // (1) THE AGENT'S NEW TAB (its own window) while this viewer watches — the picture follows it, no new viewer
+    tabs([T1, T2], T2); const t1 = await until(() => (tickets().length >= 2 ? tickets().at(-1) : null), firstOnly ? 800 : 1500); f.agentTab = t1 ? t1.wid : null;
+    if (firstOnly) { ws.close(); bridge.shutdown(); srv.close(); up.close(); return f; }
+    // (2) THE PERSON's CHIP: watch the first tab — its window; back to following the agent — the agent's window again
+    await until(() => v.msgs.find((m) => m.type === 'tab-owners'), 1500);
+    send({ type: 'watch-tab', targetId: T1 }); const t2 = await until(() => (tickets().length >= 3 ? tickets().at(-1) : null), 1500); f.chip = t2 ? t2.wid : null;
+    send({ type: 'watch-tab', targetId: null }); const t3 = await until(() => (tickets().length >= 4 ? tickets().at(-1) : null), 1500); f.follow = t3 ? t3.wid : null;
+    // (3) A TAB OPENED WHILE THE PAGE IS HIDDEN: the pane reports itself hidden, the agent opens a third tab; on the return the
+    //     ticket the page holds already names that tab's window (the socket stays open while hidden)
+    send({ type: 'fit', width: 1298, height: 814, dpr: 1, visible: false }); await sleep(100);
+    tabs([T1, T2, T3], T3); const t4 = await until(() => (tickets().length >= 5 ? tickets().at(-1) : null), 1500); f.hidden = t4 ? t4.wid : null;
+    send({ type: 'fit', width: 1298, height: 814, dpr: 1, visible: true }); await sleep(150);
+    // (4) the SAME window keeps its ticket (no re-mount): a tabs record that does not move the active tab issues nothing
+    const n = tickets().length; tabs([T1, T2, T3], T3); await sleep(300); f.quiet = tickets().length === n;
+    f.held = bridge.xSeat('da-x1', tickets().at(-1) && tickets().at(-1).ticket);
+    ws.close(); bridge.shutdown(); srv.close(); up.close();
+    return f;
+  }
+  const real = await scene(BS);
+  ok(real.first === W[T1], `the first ticket names the agent's tab's window (${real.first})`, real);
+  ok(real.agentTab === W[T2], `(1) THE AGENT'S NEW TAB in its own window, while the viewer watches: a NEW ticket names THAT window (${real.agentTab}) — the picture follows the tab the view says it shows, without a new viewer`, real);
+  ok(real.chip === W[T1] && real.follow === W[T2], `(2) A PERSON'S CHIP: watching the first tab ⇒ its window (${real.chip}); following the agent again ⇒ the agent's window (${real.follow})`, real);
+  ok(real.hidden === W[T3], `(3) A TAB OPENED WHILE THE PAGE IS HIDDEN: the ticket the page holds on its return names that tab's window (${real.hidden})`, real);
+  ok(real.quiet === true && real.held === 'size', `(4) a tabs record that moves nothing issues no ticket (no re-mount of a picture that is right); the last ticket rules the window (${real.held})`, real);
+  const BSrel = compileAt('src/server/browser-stream.js', " if (relay.activeTarget !== prevAct) xFollow(relay); }", " }");
+  const rel = await scene(BSrel, { firstOnly: true });
+  ok(rel.agentTab === null && rel.first === W[T1], `RED CONTROL — the release's ticket rule (no ticket when the agent's tab moves): the agent's new tab leaves the viewer on the FIRST window (${rel.first}; no ticket in 0.8 s)`, rel);
+}
+
 // ═══ §9 THE WIRING ═══
 console.log('§9 the wiring (source pins)');
 {

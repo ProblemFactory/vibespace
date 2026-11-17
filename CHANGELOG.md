@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.408 — 2026-11-17
+
+### Fixed
+- When the agent opens a new tab, the browser window now shows that tab instead of the first one; choosing a tab in its tab row shows it too.
+
 ## 2.369.407 — 2026-11-17
 
 ### Added
