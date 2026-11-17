@@ -270,7 +270,7 @@ await section('④', async () => {
   ok(T.foldTouches(tt)[0].convId === 'a' && draft.foldTouches(tt)[0].convId === 'b', 'CONTROL drafted-first removed: the drafted conversation is no longer the first row');
   const fold = copy('fold', 'if (expanded || list.length <= max) return', 'if (true) return');
   ok(T.foldView([1, 2, 3, 4]).hidden === 1 && fold.foldView([1, 2, 3, 4]).hidden === 0, 'CONTROL the fold removed: four rows show four, no "+N more"');
-  const merge = copy('merge', 'if (last && last.op === t.op && touchKey(last) === touchKey(t) && causeOf(last) === causeOf(t) && t.at >= last.at && t.at - last.at < mergeMs) {', 'if (false) {');
+  const merge = copy('merge', 'if (last && last.op === t.op && touchKey(last) === touchKey(t) && causeOf(last) === causeOf(t) && t.at >= last.at && t.at - last.at < mergeMs && (!t.proposalId || t.proposalId === last.proposalId || !FILED_OPS.includes(t.op))) {', 'if (false) {');
   const r1 = [], r2 = [];
   for (let i = 0; i < 50; i++) { T.appendTouch(r1, touch({ id: 'm' + i, at: 1000 + i * 10 })); merge.appendTouch(r2, touch({ id: 'm' + i, at: 1000 + i * 10 })); }
   ok(r1.length === 1 && r2.length === 50, 'CONTROL the merge window removed: an agent\'s read loop is 50 touches, not one');
@@ -481,6 +481,23 @@ await section('⑦', async () => {
   ok(src.split(FROM).length === 2, 'CONTROL setup: FILED_OPS is declared once');
   const st = MUT.load('src/channel-touch.js', src.replace(FROM, "const FILED_OPS = Object.freeze(['reply', 'compose', 'react', 'recall', 'status']);"), 'status-files');
   ok(st.filedProposals(ts).some((x) => x.id === 'p-9') && !f.some((x) => x.id === 'p-9'), 'CONTROL: with `status` among the filing verbs a status check\'s proposal id joins the list (the table above would go red)');
+  // B-8aad (lane reaction-approve-shown's PURE repro): three reactions 900 ms apart on ONE conversation were ONE touch — the
+  // merge window folded each into the first and kept its proposal id alone (the chat drew ONE card). A repeat that files no
+  // NEW proposal (the same id again, or none) still folds: the window keeps its job for an agent's loops
+  const B8 = '&& t.at - last.at < mergeMs && (!t.proposalId || t.proposalId === last.proposalId || !FILED_OPS.includes(t.op))) {';
+  const reacts = (M) => { const ring = []; const merged = ['p-1', 'p-2', 'p-3'].map((pid, i) => M.appendTouch(ring, touch({ id: 'r' + i, op: 'react', convId: 'c1', proposalId: pid, at: 1000 + i * 900 })).merged); return { merged, n: ring.length, filed: M.filedProposals(ring).map((x) => x.id), row: M.foldTouches(ring)[0] }; };
+  const b8 = reacts(T);
+  ok(JSON.stringify(b8.merged) === '[false,false,false]' && b8.n === 3 && JSON.stringify(b8.filed) === '["p-1","p-2","p-3"]' && b8.row.ops.react === 3 && JSON.stringify(b8.row.proposalIds) === '["p-1","p-2","p-3"]',
+    'B-8aad: three reactions 900 ms apart on one conversation stay three touches — each proposal its own card (filedProposals p-1 p-2 p-3), ONE row of three reactions naming all three', b8);
+  { const ring = []; T.appendTouch(ring, touch({ id: 's1', op: 'reply', convId: 'c1', proposalId: 'p-5', at: 1000 })); const again = T.appendTouch(ring, touch({ id: 's2', op: 'reply', convId: 'c1', proposalId: 'p-5', at: 1500 })); const bare = T.appendTouch(ring, touch({ id: 's3', op: 'reply', convId: 'c1', at: 1900 }));
+    ok(again.merged && bare.merged && ring.length === 1 && ring[0].proposalId === 'p-5' && ring[0].id === 's1', 'B-8aad: a repeat that files no NEW proposal (the same id again, or none) still folds inside the window — its id kept', ring); }
+  // the adversarial read (r1, finding 9): a `status` check names a proposal and files nothing — an agent polling two of
+  // its proposals on one conversation still folds (no fresh ring entry and broadcast per call)
+  { const ring = []; T.appendTouch(ring, touch({ id: 'q1', op: 'status', convId: 'c1', proposalId: 'p-1', at: 1000 })); const polled = T.appendTouch(ring, touch({ id: 'q2', op: 'status', convId: 'c1', proposalId: 'p-2', at: 1400 }));
+    ok(polled.merged && ring.length === 1, 'B-8aad: a `status` check naming another proposal (it files nothing) still folds inside the window', ring); }
+  ok(src.split(B8).length === 2, 'CONTROL setup: the merge rule names the proposal id once (B-8aad)');
+  const b8m = reacts(MUT.load('src/channel-touch.js', src.replace(B8, '&& t.at - last.at < mergeMs) {'), 'merge-proposal'));
+  ok(JSON.stringify(b8m.merged) === '[false,true,true]' && JSON.stringify(b8m.filed) === '["p-1"]', 'CONTROL the B-8aad clause removed: the three reactions fold into the first — ONE card (filedProposals p-1 alone), the row\'s repro', b8m);
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1, label: '⑦ ' })) ok(c.pass, c.name, c.detail);
   // the wiring: the card row draws them through the Outbox's ONE card module; a card with no touches clears them; a reattach re-reads
   const tv = read('src/lib/channel-touch-view.js');

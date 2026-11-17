@@ -220,11 +220,13 @@ function normalizeTouch(x) {
 }
 
 /** Append to a ring IN PLACE: a repeat of the newest touch's op + conversation inside MERGE_MS folds into it
- *  (counts summed, its instant moved, its id kept); the ring keeps the newest RING_MAX.
+ *  (counts summed, its instant moved, its id kept); the ring keeps the newest RING_MAX. B-8aad: a touch that FILED a
+ *  proposal (FILED_OPS) the newest does not carry never folds — the fold kept only the first id, and back-to-back
+ *  reactions or replies drew ONE chat card; a `status` check naming a proposal files nothing and still folds.
  *  @returns {{touch, merged}} — the touch as stored (the one to broadcast). */
 function appendTouch(ring, t, { mergeMs = MERGE_MS, max = RING_MAX } = {}) {
   const last = ring.length ? ring[ring.length - 1] : null;
-  if (last && last.op === t.op && touchKey(last) === touchKey(t) && causeOf(last) === causeOf(t) && t.at >= last.at && t.at - last.at < mergeMs) {
+  if (last && last.op === t.op && touchKey(last) === touchKey(t) && causeOf(last) === causeOf(t) && t.at >= last.at && t.at - last.at < mergeMs && (!t.proposalId || t.proposalId === last.proposalId || !FILED_OPS.includes(t.op))) {
     last.count = num(last.count) + num(t.count);
     last.at = t.at;
     if (t.title) last.title = t.title;

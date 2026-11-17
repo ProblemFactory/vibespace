@@ -97,8 +97,8 @@ const TURNS = {
     { id: 'toolu_cpc2a', command: `vibespace-channels reply ${CONV} "A second draft"`, argvs: [['reply', CONV, 'A second draft']] },
   ] },
   // ⑦ three reactions, each after a read (fake-poll-ops m1–m3 carry none of the account's own: the seed is fixed). Each
-  // react follows a read: two touches of one op on one conversation within MERGE_MS are ONE touch (channel-touch
-  // appendTouch) and keep the FIRST proposalId — back-to-back reacts would file one card (reported, not this lane's)
+  // react follows a read — written while two touches of one op on one conversation within MERGE_MS were ONE touch with the
+  // FIRST proposalId; since B-8aad a touch with a new proposal never folds (test-channel-touch ⑦), the reads stay harmless
   'react to three': { k: 3, text: 'Proposed three reactions.', calls: [
     { id: 'toolu_cpc3a', command: `vibespace-channels read ${CONV}`, argvs: [['read', CONV]] },
     { id: 'toolu_cpc3b', command: `vibespace-channels react ${CONV} fake-poll-ops-m1 thumbsup`, argvs: [['react', CONV, 'fake-poll-ops-m1', 'thumbsup']] },
