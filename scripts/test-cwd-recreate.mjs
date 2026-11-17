@@ -1,19 +1,19 @@
-import { execSync, spawn } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { freePort, scratch, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(new URL('../server.js', import.meta.url));
 const repo = process.cwd();
 const PORT = await freePort(); // per-process (scripts/scratch.mjs) — fixed ports collided across concurrent gates
-const wt = scratch('cwdre-smoke'), fakeHome = scratch('cwdre-home');
+const root = mintRoot('cwdre-smoke'), wt = path.join(root, 't'), fakeHome = path.join(root, 'home');
 const MISSING_CWD = scratch('cwdre-workdir') + '/deleted-project';
 const SID = '77770000-1111-2222-3333-444455556666';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
 const check = (n, c, extra) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${extra ? ' — ' + extra : ''}`); } };
-try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -47,9 +47,9 @@ const SID = at('--session-id') || rid || ('0e1a0000-0000-4000-8000-' + String(pr
 process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: '2.1.281' }) + '\\n');
 process.stdin.on('data', () => {}); process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: STUB }, stdio: 'ignore' });
-process.on('exit', () => { try { srv.kill('SIGKILL'); } catch {}; try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}; try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {}; try { fs.rmSync(scratch('cwdre-workdir'), { recursive: true, force: true }); } catch {} });
-for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: STUB } });
+process.on('exit', () => { try { fs.rmSync(scratch('cwdre-workdir'), { recursive: true, force: true }); } catch {} });
+await hub.ready();
 const WebSocket = require('ws');
 const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 await new Promise((r) => ws.on('open', r));

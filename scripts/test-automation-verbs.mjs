@@ -38,13 +38,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VNC_ENV = await vncEnv();
 const [PORT] = await freePorts(1);
 const BASE = `http://127.0.0.1:${PORT}`;
-const wt = scratch('av-wt'), stubDir = scratch('av-stub'), fakeHome = scratch('av-home'), CWD = scratch('av-cwd');
+const root = mintRoot('av-wt'), wt = path.join(root, 't'), stubDir = path.join(root, 'stub'), fakeHome = path.join(root, 'home'), CWD = path.join(root, 'cwd');
 for (const d of [stubDir, fakeHome, CWD]) fs.mkdirSync(d, { recursive: true });
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
@@ -52,7 +53,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SECOND = 'automation verbs leg second password';
 
 // ── a throwaway hub: the committed tree + this tree's src / public / data/bin (the CLI ships there) ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 execSync(`rm -rf ${wt}/data/bin && mkdir -p ${wt}/data && cp -r ${repo}/data/bin ${wt}/data/bin`);
@@ -70,18 +70,13 @@ process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_i
 process.stdin.on('data', () => {});
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
-  try { srv.kill('SIGKILL'); } catch {}
-  for (const root of [wt, fakeHome, stubDir, CWD]) { try { endRootedProcesses(root); } catch {} }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [wt, fakeHome, stubDir, CWD]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5 }); } catch {} }
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-for (let i = 0; i < 80; i++) { try { await fetch(`${BASE}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 /** ONE request — a PERSON on the page (Sec-Fetch-Site same-origin: the person doors' rule) or an agent's Bearer. */
 const req = (method, p, body, { bearer = null } = {}) => new Promise((resolve) => {

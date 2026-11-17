@@ -14,7 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 
 const T0 = Date.now();
@@ -23,7 +24,7 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const VNC_ENV = await vncEnv(); // never the machine-global :7/5901 (test-architecture §57)
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('vdl-smoke');
+const root = mintRoot('vdl-smoke'), wt = path.join(root, 't');
 const prof = scratch('vdl-chrome');
 const FX = scratch('vdl-fx');
 const DL = scratch('vdl-dl');
@@ -45,27 +46,22 @@ function png(w, h) {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 // ── a worktree server of THIS tree ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+fs.mkdirSync(path.join(root, 'home'), { recursive: true }); // the hub's HOME lies in its root (hub-boot.mjs)
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, VIBESPACE_SKIP_AGENT_HOOKS: '1', HOME: path.join(root, 'home') } });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1400,950',
   '--disable-background-timer-throttling', `--user-data-dir=${prof}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: CH_HOME, XDG_RUNTIME_DIR: CH_RUN, DBUS_SESSION_BUS_ADDRESS: '' } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }
-  try { srv.kill('SIGKILL'); } catch { }
-  try { endRootedProcesses(wt); } catch { }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
   for (const d of [prof, FX, DL, CH_HOME, CH_RUN]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 };
 process.on('exit', cleanup);
-process.on('SIGINT', () => process.exit(130));
-process.on('SIGTERM', () => process.exit(143));
 
 let up = false;
-for (let i = 0; i < 120 && !up; i++) { try { up = (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok; } catch { await sleep(250); } }
+up = await hub.ready();
 if (!up) { console.error('✗ the worktree server never answered'); process.exit(1); }
 const WebSocket = require('ws');
 let target = null, version = null;

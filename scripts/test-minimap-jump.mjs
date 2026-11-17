@@ -22,7 +22,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, fixtureSid, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter } = require('../src/fixture-guard.js');
@@ -32,7 +33,7 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs) — fixed ports collided across concurrent gates
-const wt = scratch('mmjump-smoke');
+const root = mintRoot('mmjump-smoke'), wt = path.join(root, 't');
 const CWD = scratch('mmjump-test');
 const SID = fixtureSid('2');
 // ISOLATED $HOME (2026-09-09) — see the essay in test-chat-paging.mjs and
@@ -41,7 +42,7 @@ const SID = fixtureSid('2');
 // can only discover what lives under its own home), where the machine's
 // PRODUCTION instance listed it as a conversation and ingested its fabricated
 // usage: 3,600 permanent ledger rows for this session id (of the instance's 79,533 fabricated rows as of 2026-09-09).
-const fakeHome = scratchHome('mmjump-home', fs);
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const PROJ = path.join(fakeHome, '.claude', 'projects', CWD.replace(/[/._]/g, '-'));
 const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
@@ -106,27 +107,23 @@ const PR = { person: 6, other: 14 };
 }
 
 // ── 2. throwaway server + chrome ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) {
   execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 }
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' } });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1400,1000',
   '--disable-background-timer-throttling', `--user-data-dir=${scratch('mmjump-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [scratch('mmjump-chrome'), fakeHome, CWD]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  for (const d of [scratch('mmjump-chrome'), CWD]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
 process.on('exit', cleanup);
 // SIGNALS TOO: 'exit' does not fire for a default-terminated SIGINT/SIGTERM,
 // which is how a Ctrl-C or a runner timeout ends this suite.
-for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
-for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 
 const WebSocket = require('ws');
 let target = null;

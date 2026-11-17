@@ -14,7 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -24,13 +25,12 @@ const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/googl
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('ueo-chrome');
-const fakeHome = scratch('ueo-chrome-home');
+const root = mintRoot('ueo-chrome'), wt = path.join(root, 't');
+const fakeHome = path.join(root, 'home');
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -39,22 +39,15 @@ fs.rmSync(fakeHome, { recursive: true, force: true });
 fs.mkdirSync(path.join(fakeHome, '.claude'), { recursive: true });
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome }, stdio: 'ignore' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome } });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', ...(process.env.VS_CHROME ? ['--no-sandbox'] : []), `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });   // (VS_CHROME: a Chrome for Testing unpacked from its zip has no setuid sandbox helper — as the other suites run it)
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  // what the server started (its sessions run detached under dtach — killing the server ends none of them): every process rooted
-  // in this suite's scratch dirs (scratch.mjs; test-architecture §57b)
-  try { endRootedProcesses(wt); } catch { }
-  try { endRootedProcesses(fakeHome); } catch { }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
   try { fs.rmSync(`${wt}-chrome`, { recursive: true, force: true }); } catch {}
-  try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {}
 };
 process.on('exit', cleanup);
 const BASE = `http://127.0.0.1:${PORT}`;
-for (let i = 0; i < 60; i++) { try { await fetch(`${BASE}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 const userState = async () => (await (await fetch(`${BASE}/api/user-state`)).json());
 // EACH ONCE, BY THE HUB'S OWN RECORD (the .397 master CI, Chrome 157: every act landed, the revision moved 4 not 5). A page's request
 // carries EVERY batch it has not seen confirmed, oldest first, and the hub writes once per request that changes something — so a
