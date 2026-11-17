@@ -88,14 +88,26 @@ export async function bootXpraWindow(part) {
   // stderr in a ring of their last COPY_RING_LINES lines, named by the copy — a copy used to run with `stdio: 'ignore'`, so its boot
   // red under an 8-lane heavy load said only "did not boot"; a miss now prints what the copy itself last said, and the elapsed ms
   const COPY_RING_LINES = 60;
+  // B-92aa (scope-leftovers named test-desktop-xpra-window-scale a B-b403 spawner: after its runs the job scope held a
+  // vibespace-device and a `sleep 600` whose cwd was /tmp/vs-deskxpra-dctl-<pid> / -lanedctl-<pid>, deleted): a server COPY's
+  // tree and HOME are its ROOTS — the exit sweep ends what is rooted in them (a copy's HOME was never swept), and endCopy()
+  // ends a copy WHEN ITS CONTROL IS DONE (a part killed at its budget never reaches the exit sweep)
+  const copyRoots = new Set();
   const spawnCopy = (name, cwd, env) => {
     const child = spawn(process.execPath, ['server.js'], { cwd, env: { ...VNC_ENV, ...env, HOME: env.HOME || fakeHome }, stdio: ['ignore', 'pipe', 'pipe'] }); // the per-run Desktop names (§57) under the copy's own; a scratch HOME always
+    child.roots = [cwd, env.HOME || fakeHome].map((r) => path.resolve(r)).filter((r) => r !== path.resolve(wt) && r !== path.resolve(fakeHome));
+    for (const r of child.roots) copyRoots.add(r);
     const ring = { name, lines: [], part: { out: '', err: '' } };
     const take = (k) => (d) => { const ls = (ring.part[k] + String(d)).split('\n'); ring.part[k] = ls.pop(); for (const l of ls) { ring.lines.push(l); if (ring.lines.length > COPY_RING_LINES) ring.lines.shift(); } };
     child.stdout.on('data', take('out')); child.stderr.on('data', take('err'));
     child.ring = ring;
     return child;
   };
+  /** B-92aa: end a server copy NOW — the server, then every process rooted in its tree or HOME (its setsid-detached device
+   *  daemon and the apps it launched outlive the server's SIGKILL) → the pids ended */
+  const endCopy = (child) => { try { child.kill('SIGKILL'); } catch {} const hit = []; for (const r of (child && child.roots) || []) { try { hit.push(...endRootedProcesses(r)); } catch {} } return hit; };
+  /** …and what is still alive under its roots (a probe: signal 0 asks, never ends) */
+  const copyLeft = (child) => { const left = []; for (const r of (child && child.roots) || []) { try { left.push(...endRootedProcesses(r, { signal: 0 })); } catch {} } return left; };
   const ringTail = (child, n = 5) => { const r = child.ring; return r ? [...r.lines, r.part.out, r.part.err].filter(Boolean).slice(-n) : []; };
   /** a scratch server copy is up: /api/home answers (true), or the copy exited (false, at once), or BOOT_DEADLINE_MS passed (false);
    *  a miss leaves its evidence on `child.bootWhy` for the check to print: the copy's name, the elapsed ms, how it ended, its last 5 lines */
@@ -186,7 +198,7 @@ export async function bootXpraWindow(part) {
     }
     // §57b (B-442c): what this part's servers started ends with them — every process whose cwd / HOME / daemon root / argv
     // lies in one of its scratch trees or HOMEs (a server's setsid-detached device daemon outlives the server's SIGKILL)
-    for (const r of [...worktrees, fakeHome, ...devHomes]) { try { endRootedProcesses(r); } catch {} }
+    for (const r of [...worktrees, fakeHome, ...devHomes, ...copyRoots]) { try { endRootedProcesses(r); } catch {} }
     for (const w of worktrees) { try { execSync(`git worktree remove --force ${w}`, { cwd: repo, stdio: 'ignore' }); } catch {} }
     try { fs.rmSync(scratch('deskxpra-chrome'), { recursive: true, force: true }); } catch {}
     try { fs.rmSync(scratch('deskxpra-x5ctl-home'), { recursive: true, force: true }); } catch {}
@@ -409,7 +421,7 @@ export async function bootXpraWindow(part) {
   }
 
   return { agentTokens, allDigits7, appsOf, bin, BOOT_DEADLINE_MS, bootedCopy, bootServer, CALC6, CDP_PORT, cdpTargets, check, chordC7, CHROME,
-  chrome, COPY_RING_LINES, copyBack7, crashed, ctlServers, D, devHomes, devProcs, DIGITS7, dropPage, ensureActive, FAKE_BIN, FAKE_CLAUDE, fakeHome,
+  chrome, COPY_RING_LINES, copyBack7, copyLeft, crashed, ctlServers, D, endCopy, devHomes, devProcs, DIGITS7, dropPage, ensureActive, FAKE_BIN, FAKE_CLAUDE, fakeHome,
   finish, fixtureLitter, HIT7, HOSTNAME, hostResolves, identity7, KEY_DEADLINE_MS, keyOf, keySeen7, LAST7, launchOn, markerSweep, measurePane, mkPage,
   newPage, openPage, page, PORT, R2, REACH_DEADLINE_MS, reach7, readyOn, REAL_PROJECTS, realBefore, rebaseline, recordedApps, recordedPids, repo,
   revealBars, ringTail, RUNTIME, SEAT, SETTLE_DEADLINE_MS, sizeWinOn, skip, sleep, spawnCopy, srvEnv, srvLog, target, threw, TITLE_DEADLINE_MS,

@@ -35,7 +35,7 @@ import { freePorts, scratch, scratchHome, gtkRow } from './scratch.mjs';
 import { bootXpraWindow } from './xpra-window-boot.mjs';
 
 const require = createRequire(import.meta.url);
-const { bin, bootedCopy, check, crashed, ctlServers, dropPage, ensureActive, finish, launchOn, mkPage, openPage, page, PORT, readyOn, rebaseline,
+const { bin, bootedCopy, check, copyLeft, crashed, ctlServers, dropPage, endCopy, ensureActive, finish, launchOn, mkPage, openPage, page, PORT, readyOn, rebaseline,
   repo, sizeWinOn, skip, sleep, spawnCopy, srvEnv, target, threw, trustedClickAt, until, worktrees, wt, xenvFor, xq } = await bootXpraWindow('test-desktop-xpra-window-scale');
 let p1 = await page(target);
 try {
@@ -229,9 +229,15 @@ try {
           for (const id of [idC, idK].filter(Boolean)) await fetch(`http://127.0.0.1:${PORTD}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
         }
       }
-      try { sd.kill('SIGKILL'); } catch {}
+      // B-92aa: the copy ENDS with its control — the server and everything rooted in its tree or HOME (its device daemon,
+      // its apps); nothing of it is left for the job scope (before: they outlived the part — B-b403's orphans)
+      // r2 (the batch's adversarial read): the wait kills again on every pass — a child forked while the first pass ran (a
+      // daemon's re-exec) is ended too, never counted as «left» (endDaemonsOf's two passes, the same window)
+      const ended14 = endCopy(sd), left14 = await until(() => { endCopy(sd); return copyLeft(sd).length ? null : 'none'; }, 5000, 100);
+      check(`§14 CONTROL's copy ends with its control: ${ended14.length} process(es) rooted in its tree or HOME ended, none left`, left14 === 'none', { ended: ended14, left: copyLeft(sd), roots: sd.roots });
     } catch (e) { threw('§14', e); }
     finally {
+      for (const c of ctlServers) endCopy(c);   // B-92aa r2: a throw in (6) still ends its copy here, never at the exit sweep
       for (const id of ids14) await fetch(`${O14}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
       await fetch(`${O14}/api/user-state`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ desktopAppScale: {} }) }).catch(() => {});
       await dropPage(A); await dropPage(B);
@@ -279,7 +285,7 @@ try {
   // size-constraints each new-window / window-metadata packet carries (B-4260: an app that RE-ANNOUNCES them after the map)
   const TAP14 = `(() => { const R = window.Worker; if (!R || R.__d14) return; window.__d14 = []; const nm = (x) => (typeof x === 'string' ? x : x instanceof Uint8Array ? new TextDecoder().decode(x) : String(x));
     class W extends R { postMessage(m, t) { try { if (m && m.c === 's' && Array.isArray(m.p)) { const ty = nm(m.p[0]); if (ty === 'map-window' || ty === 'configure-window' || ty === 'display-configure') window.__d14.push({ at: Math.round(performance.now()), d: 'out', ty, g: ty === 'display-configure' ? m.p[1]['desktop-size'] : m.p.slice(1, 6) }); } } catch {} return super.postMessage(m, t); }
-      set onmessage(fn) { super.onmessage = (e) => { try { const m = e.data; if (m && m.c === 'p' && Array.isArray(m.p)) { const ty = nm(m.p[0]); const md = ty === 'new-window' ? m.p[6] : ty === 'window-metadata' ? m.p[2] : null; const sc = md && (md['size-constraints'] || md['size-hints']) ? JSON.stringify(md['size-constraints'] || md['size-hints']) : null; if (ty === 'new-window') window.__d14.push({ at: Math.round(performance.now()), d: 'in', ty, g: m.p.slice(1, 6), sc }); else if (ty === 'window-metadata' && sc) window.__d14.push({ at: Math.round(performance.now()), d: 'in', ty, g: [m.p[1]], sc }); } } catch {} return fn(e); }; } get onmessage() { return super.onmessage; } }
+      set onmessage(fn) { super.onmessage = (e) => { try { const m = e.data; if (m && m.c === 'p' && Array.isArray(m.p)) { const ty = nm(m.p[0]); const md = ty === 'new-window' ? m.p[6] : ty === 'window-metadata' ? m.p[2] : null; const sc = md && (md['size-constraints'] || md['size-hints']) ? JSON.stringify(md['size-constraints'] || md['size-hints']) : null; if (ty === 'new-window' || ty === 'window-move-resize') window.__d14.push({ at: Math.round(performance.now()), d: 'in', ty, g: m.p.slice(1, 6), sc }); else if (ty === 'window-resized') window.__d14.push({ at: Math.round(performance.now()), d: 'in', ty, g: [m.p[1], null, null, m.p[2], m.p[3]], sc: null }); else if (ty === 'window-metadata' && sc) window.__d14.push({ at: Math.round(performance.now()), d: 'in', ty, g: [m.p[1]], sc }); } } catch {} return fn(e); }; } get onmessage() { return super.onmessage; } }
     W.__d14 = true; window.Worker = W; })();`;
   const pick14 = async (P, id, choice) => {
     const r = await P.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); const items = w._desktopAppScaleItems(); const want = ${JSON.stringify(choice)}; const row = items.find((it) => { const l = String(it.label).replace(/^(✓ |\\u2003)/, ''); return want === 'auto' ? /^Auto/.test(l) : l === want + '×'; }); if (!row) return { none: items.map((x) => x.label) }; if (row.disabled) return { disabled: row.label }; row.action(); return { ok: row.label }; })()`);
@@ -379,7 +385,10 @@ try {
           const map = (nw && s.tap.find((e) => e.ty === 'map-window' && e.g[0] === nw.g[0])) || firstMap;
           console.log(`    §15 DPR ${dpr} F3 ${s.label}: new-window wid ${nw && nw.g[0]} at ${nw && nw.at}; first map-window wid ${firstMap && firstMap.g[0]} ${firstMap && firstMap.g.slice(3, 5)} at ${firstMap && firstMap.at}; its own map ${map && map.g.slice(3, 5)}; tap ${s.tap.map((e) => `${e.ty}:${e.g[0]}@${e.at}`).join(' ')}`.slice(0, 900));
           const later = map && nw ? s.tap.filter((e) => e.ty === 'window-metadata' && e.g[0] === nw.g[0] && e.at > map.at && e.sc && e.sc !== nw.sc) : [];
-          return { label: s.label, map: map && map.g.slice(3, 5), main: s.g.main && [s.g.main.w, s.g.main.h], reannounced: later.length ? `${nw.sc} → ${later[later.length - 1].sc}` : null };
+          // B-92aa: what names the stale map on a red (~1 in 3 here: a 1.5× map 1634×1232 where the main settled 1818×1232) —
+          // the constraints the new window carried, then what the client and the app did to THAT window after the map
+          const after = map && nw ? s.tap.filter((e) => e.g && e.g[0] === nw.g[0] && e.at >= map.at && e !== map).slice(0, 6).map((e) => [e.ty, e.at - map.at, e.g.slice(1, 5), e.sc || null]) : [];
+          return { label: s.label, map: map && map.g.slice(3, 5), main: s.g.main && [s.g.main.w, s.g.main.h], reannounced: later.length ? `${nw.sc} → ${later[later.length - 1].sc}` : null, carried: nw ? nw.sc || null : null, after };
         });
         const f3ok = (x) => x.map && x.main && ((x.map[0] === x.main[0] && x.map[1] === x.main[1]) || !!x.reannounced);
         check(`§15 DPR ${dpr} F3: every connect maps the main window at its FINAL size (the fold happens before the fit): ${f3.map((x) => `${x.label} map ${x.map} = main ${x.main}${x.reannounced && (x.map[0] !== x.main[0] || x.map[1] !== x.main[1]) ? ` (the app re-announced ${x.reannounced} after the map — the refit follows it)` : ''}`).join('; ')}`, f3.length >= 5 && f3.every(f3ok), f3);
@@ -568,7 +577,8 @@ try {
       } catch (e) { threw('§15/§16 CONTROL', e); }
       finally { for (const [o, id] of ids14.splice(0)) await fetch(`${o}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {}); await sleep(1500); }
     }
-    try { sd.kill('SIGKILL'); } catch {}
+    const ended15 = endCopy(sd), left15 = await until(() => { endCopy(sd); return copyLeft(sd).length ? null : 'none'; }, 5000, 100);   // B-92aa, as §14's
+    check(`§15/§16 CONTROL's copy ends with its control: ${ended15.length} process(es) rooted in its tree or HOME ended, none left`, left15 === 'none', { ended: ended15, left: copyLeft(sd), roots: sd.roots });
   }
 } catch (e) {
   crashed(e, p1);
