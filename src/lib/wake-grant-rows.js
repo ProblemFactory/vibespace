@@ -107,7 +107,7 @@ export function grantByWords(by) {
   if (by.kind === 'key') return when ? t('allowed by the key «{name}», {when}', { name: String(by.name || '—'), when }) : t('allowed by the key «{name}»', { name: String(by.name || '—') });
   return when ? t('allowed by you, {when}', { when }) : t('allowed by you');
 }
-/** the same line for an ended WINDOW: its conversation's stopped row in the sidebar's list (the same rows stoppedWhyFor reads) */
+/** the same line for an ended WINDOW: its conversation's stopped row in the sidebar's list (the rows the window's read-only bar reads) */
 export function endedWaitLine(backend, id, rows, fmt) {
   if (!id || !Array.isArray(rows)) return '';
   const r = rows.find((x) => x && (x.backendSessionId === id || x.sessionId === id) && (x.backend || 'claude') === (backend || 'claude'));

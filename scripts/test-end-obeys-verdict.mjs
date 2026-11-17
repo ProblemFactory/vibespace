@@ -364,7 +364,9 @@ console.log('⑤ the words and the census of stopReason readers');
   const BAN = /\b(sleep|asleep|hibernat\w*|suspend\w*|paus\w*)\b|睡眠|休眠|挂起|暂停|スリープ|休止/i;
   ok(![a, p, '{time} 由「{name}」终止。', '{time} 手动终止。', '{time} に「{name}」が終了しました。', '{time} に手動で終了しました。'].some((w) => BAN.test(w)), 'the words never say sleep');
   // the census: every src file that reads a SESSION's stopReason is a row; the model's own stop reason is another meaning
-  const SESSION_READERS = ['src/server/boot-restore.js', 'src/routes/sessions.js', 'src/lib/stopped-why.js', 'src/lib/session-card.js', 'src/lib/chat-view.js', 'src/server/conversation-facts.js', 'src/lib/layout.js'];
+  const SESSION_READERS = ['src/server/boot-restore.js', 'src/routes/sessions.js', 'src/lib/stopped-why.js', 'src/lib/session-card.js', 'src/lib/chat-view.js', 'src/server/conversation-facts.js', 'src/lib/layout.js',
+    // the manager design's piece 7: how an ENDED conversation ended, read through piece 4's reader (resume-line keptFacts hands it) by the delivery's gate
+    'src/server/resume-line.js', 'src/delivery-wake.js', 'src/server/delivery-wake.js'];
   const OTHER_MEANING = { 'src/opencode-serve.js': 'the model\'s stop reason', 'src/harnesses/antigravity-wall.js': 'the model\'s stop reason', 'src/record-shape.js': 'a record field\'s name',
     'src/message-manager.js': 'the model\'s stop reason', 'src/codex-message-manager.js': 'the model\'s stop reason', 'src/acp-message-manager.js': 'the model\'s stop reason' };
   const walkFrom = (root) => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(root, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js') && /\bstopReason\b|\bstopped(?:Why|Reason)For\b/.test(fs.readFileSync(path.join(root, r), 'utf8'))) out.push(r); } }; walk('src'); return out; };   // + the readers that go THROUGH the stopped-why helper (the layout's tile and the offer's count)
