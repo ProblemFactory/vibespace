@@ -149,7 +149,7 @@ export function installUserTodos(app) {
     if (!it) return true;
     close();
     if (fy.classList.contains('ut-art')) model.openArtifact(it, Number(fy.dataset.ai));
-    else model.openLink(it, fy.dataset.fy, fy.dataset.ref, { x: e.clientX, y: e.clientY });
+    else model.openLink(it, fy.dataset.fy, fy.dataset.ref, { x: e.clientX, y: e.clientY, el: fy });
     return true;
   };
   const setStatus = (id, status) => model.setStatus(id, status);

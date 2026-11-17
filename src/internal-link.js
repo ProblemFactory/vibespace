@@ -131,7 +131,8 @@ function keyOfAnchor(href) { const t = targetOfMark(href); return t && t.kind ==
  *  `win` (a window of it built on this page, live or history — its desktop, its tab, the flash; an ENDED one lands on its history,
  *  its bar and Resume are there, nothing starts) · `desk` (its row on a desktop this page has not built — switch there; it builds and
  *  is revealed) · `archived` (a toast naming the door) · `attach` (running, no window anywhere — it opens on the desktop on show and
- *  a toast says which) · `outside` (running outside VibeSpace — the page's own sentence) · `menu` (ENDED, no window — «Resume here» ·
+ *  a toast says which) · `tmux` (running in a tmux pane — attached as the sidebar attaches it) · `outside` (running outside VibeSpace,
+ *  nothing to attach — the page's own sentence) · `menu` (ENDED, no window — «Resume here» ·
  *  «Read its history» at the link) · `unknown` (the page has no row for it). Facts: `win` = a built window's id, `heldDesk` = the
  *  desktop (≠ the one on show) whose record holds its row, `row` = its sidebar row {live, ended, archived} or null. */
 function conversationPlan({ win = null, heldDesk = null, row = null } = {}) {
@@ -141,6 +142,7 @@ function conversationPlan({ win = null, heldDesk = null, row = null } = {}) {
   if (row.archived) return 'archived';
   if (row.live) return 'attach';
   if (row.ended) return 'menu';
+  if (row.tmux) return 'tmux';   // running in a tmux pane VibeSpace can attach (the sidebar's own road — 主开发 12:21Z h)
   return 'outside';
 }
 /** THE TABLE of presses: a target's kind + the page's facts → the plan. A desktop the page has → `switch`; a setting → `settings`
@@ -152,7 +154,7 @@ function pressPlan(kind, facts = {}) {
   if (kind === 'setting') return 'settings';
   return 'unknown';
 }
-const PLANS = Object.freeze(['win', 'desk', 'archived', 'attach', 'outside', 'menu', 'unknown', 'switch', 'settings']);
+const PLANS = Object.freeze(['win', 'desk', 'archived', 'attach', 'tmux', 'outside', 'menu', 'unknown', 'switch', 'settings']);
 
 module.exports = {
   conversationPlan, pressPlan, PLANS,

@@ -62,7 +62,8 @@ console.log('② THE TABLE OF PRESSES (PURE pressPlan): a press only navigates')
     [{ row: { live: true } }, 'attach', 'running with no window — open on the desktop on show'],
     [{ row: { ended: true } }, 'menu', 'ENDED with no window — the two-item menu'],
     [{ row: { ended: true, archived: true } }, 'archived', 'archived — a toast naming the door'],
-    [{ row: {} }, 'outside', 'running outside VibeSpace'],
+    [{ row: { tmux: true } }, 'tmux', 'running in a tmux pane — attached as the sidebar attaches it'],
+    [{ row: {} }, 'outside', 'running outside VibeSpace with nothing to attach'],
     [{}, 'unknown', 'a key the page has no row for'],
   ];
   for (const [f, want, name] of T) ok(P(f) === want, `conversation: ${name}`, P(f));
@@ -130,6 +131,14 @@ const [CR, DOOR] = await bundle(['src/lib/chat-renderers.js', 'src/lib/internal-
   ok(/the report<span class="vs-link-name">Research<\/span><\/span>/.test(on), 'a LABELLED link: the real name follows in muted text when the label lacks it', on);
   ok(/data-vs-kind="desktop" data-vs-ref="desk-mh3k2-a1b" title="Go to this desktop"><span class="vs-link-icon" aria-hidden="true"><svg[\s\S]*?<\/svg><\/span>Desktop 2<\/span>\./.test(on) && !showsAddress(on),
     'A PERSON NEVER READS AN ADDRESS: a BARE link is drawn as the target\'s real name with its icon (the full stop outside); no drawn link shows an address', on.slice(Math.max(0, on.indexOf('data-vs-kind="desktop"') - 10)).replace(/<svg[\s\S]*?<\/svg>/g, '<svg/>'));
+  // THE STREAMING FRAME (主开发 12:21Z a): a bare door still being written stays words until a character follows it
+  const half = r.renderMarkdown(`still writing ${D}`, { vsLinks: true, streaming: true }), done = r.renderMarkdown(`still writing ${D} `, { vsLinks: true, streaming: true }), dot = r.renderMarkdown(`still writing ${D}.`, { vsLinks: true, streaming: true });
+  ok(vsDoors(half) === 0 && !/vs-link-unknown/.test(half) && /<span class="chat-link-words">vibespace:\/\/desktop\/desk-mh3k2-a1b<\/span>/.test(half) && vsDoors(done) === 1 && vsDoors(dot) === 1 && vsDoors(r.renderMarkdown(`still writing ${D}`, { vsLinks: true })) === 1,
+    'STREAMING: a bare door at the very end stays words (no half-written address beside an «unknown» chip); a space or a full stop after it ⇒ drawn; the final render draws it', { half, done });
+  const [SM, SD] = await bundle(['src/lib/chat-renderers.js', 'src/lib/internal-link-door.js'], (src) => src.replace('      if (vsLinks && streaming) html = streamTailWords(html, text);', ''));
+  SD.registerInternalLinks(doorOf([]));
+  const halfMut = mkR(SM).renderMarkdown(`still writing vibespace://conversation/claude:0e0e`, { vsLinks: true, streaming: true });
+  ok(/vs-link-unknown/.test(halfMut) && /vibespace:\/\/conversation\/claude:0e0e/.test(halfMut), 'RED CONTROL: without the tail rule a half-written key shows its address beside «unknown conversation»', halfMut);
   const unsure = r.renderMarkdown('see vibespace://conversation/claude:unsure now', { vsLinks: true });
   ok(/data-vs-ref="claude:unsure"[^>]*><span class="vs-link-icon"[\s\S]*?<\/span>conversation<\/span> now/.test(unsure) && !/>vibespace:/.test(unsure), 'a bare link to a target the page has not read yet: what it is («conversation»), never its address', unsure);
   ok(/<span class="vs-link-unknown">.*?vibespace:\/\/conversation\/claude:gone <span class="vs-link-chip">unknown conversation<\/span><\/span>/.test(on) && !/data-vs-ref="claude:gone"/.test(on),
@@ -202,7 +211,7 @@ console.log('⑤ FOR YOU: the same grammar — its option (`has`), its drawing, 
   ok(JSON.stringify(FY.linkTarget('conversation', KEY)) === JSON.stringify({ open: 'conversation', key: KEY }) && JSON.stringify(FY.linkTarget('desktop', DESK)) === JSON.stringify({ open: 'desktop', id: DESK }) && FY.linkTarget('conversation', 'nope') === null,
     'its target: the key / the id (a misshapen one is no target)');
   const act = read('src/lib/user-todos-actions.js');
-  ok(/if \(tg\.open === 'conversation' \|\| tg\.open === 'desktop'\) \{ pressInternalLink\(tg\.open, tg\.key \|\| tg\.id, at\); return true; \}/.test(act) && /model\.openLink\(it, fy\.dataset\.fy, fy\.dataset\.ref, \{ x: e\.clientX, y: e\.clientY \}\)/.test(read('src/lib/user-todos-panel.js')),
+  ok(/if \(tg\.open === 'conversation' \|\| tg\.open === 'desktop'\) \{ pressInternalLink\(tg\.open, tg\.key \|\| tg\.id, at\); return true; \}/.test(act) && /model\.openLink\(it, fy\.dataset\.fy, fy\.dataset\.ref, \{ x: e\.clientX, y: e\.clientY, el: fy \}\)/.test(read('src/lib/user-todos-panel.js')),
     'a press in the tray goes through the SAME door (the point of the press rides along for the menu)');
   const fyEl = { dataset: { fy: 'desktop', ref: DESK } };
   const handled = DOOR.fyLinkMenu({ target: { closest: () => fyEl }, clientX: 3, clientY: 4, preventDefault() { }, stopPropagation() { } });
@@ -222,10 +231,10 @@ console.log('⑥ THE PRESS (src/lib/internal-link-ui.js) over a recorded page �
       sessions, wm: { windows },
       sidebar: { _allSessions: rows, _getSessionStateKey: (s) => `${s.backend || 'claude'}:${s.sessionId}`, getCustomName: () => '', isArchived: (s) => !!s.archived },
       desktopManager: { desktops: desks, activeDesktopId: 'd1', heldRowOf: () => held, switchTo: (id) => { log.push(['switchTo', id]); return Promise.resolve(); } },
-      goToWinId: rec('goToWinId'), attachSession: rec('attachSession'), resumeSession: rec('resumeSession'), viewSession: rec('viewSession'), openSettingAt: rec('openSettingAt'),
+      goToWinId: rec('goToWinId'), attachSession: rec('attachSession'), attachTmuxSession: rec('attachTmuxSession'), resumeSession: rec('resumeSession'), viewSession: rec('viewSession'), openSettingAt: rec('openSettingAt'),
     };
     const trap = new Proxy(app, { get: (o, k) => { if (!(k in o)) log.push(['UNEXPECTED', String(k)]); return o[k]; } });
-    const io = { toast: (w) => log.push(['toast', w]), menu: (x, y, items) => { log.push(['menu', items.map((i) => i.label)]); io.items = items; }, copy: (s) => { log.push(['copy', s]); return Promise.resolve(); } };
+    const io = { toast: (w) => log.push(['toast', w]), menu: (x, y, items) => { log.push(['menu', items.map((i) => i.label)]); io.items = items; io.at = [x, y]; }, copy: (s) => { log.push(['copy', s]); return Promise.resolve(); } };
     LOGS.push(log);
     return { app: trap, log, io };
   };
@@ -251,8 +260,13 @@ console.log('⑥ THE PRESS (src/lib/internal-link-ui.js) over a recorded page �
     '«Resume here» = the page\'s own resume with the row\'s options and NO first message; «Read its history» = the read-only view', p.log);
   p = page({ rows: [row({ status: 'stopped', archived: true })] });
   ok(JSON.stringify(go(p)) === JSON.stringify([['toast', 'This conversation is archived — open it from the archived list in the sidebar.']]), 'archived ⇒ a toast naming the door', p.log);
-  p = page({ rows: [row({ status: 'tmux' })] });
-  ok(JSON.stringify(go(p)) === JSON.stringify([['toast', 'This session is running outside VibeSpace']]), 'running outside VibeSpace ⇒ the page\'s own sentence', p.log);
+  p = page({ rows: [row({ status: 'tmux', tmuxTarget: 'main:2' })] });
+  ok(JSON.stringify(go(p)) === JSON.stringify([['attachTmuxSession', 'main:2', 'Research', '/w/p']]), 'running in a tmux pane ⇒ attached the sidebar\'s way (主开发 12:21Z h — never an error toast while the sidebar attaches it)', p.log);
+  p = page({ rows: [row({ status: 'external' })] });
+  ok(JSON.stringify(go(p)) === JSON.stringify([['toast', 'This session is running outside VibeSpace']]), 'running outside VibeSpace with nothing to attach ⇒ the page\'s own sentence', p.log);
+  p = page({ rows: [row({ status: 'stopped' })] });
+  UI.pressLink(p.app, 'conversation', KEY, { x: 0, y: 0, el: { getBoundingClientRect: () => ({ left: 40, bottom: 60 }) } }, p.io);
+  ok(JSON.stringify(p.io.at) === '[40,60]', 'Enter on an ENDED conversation\'s link (a click with no point) opens the menu AT THE LINK, never the page\'s corner (主开发 12:21Z e)', p.io.at);
   p = page({ rows: [] });
   ok(JSON.stringify(go(p)) === JSON.stringify([['toast', 'unknown conversation']]), 'a key the page has no row for ⇒ «unknown conversation»', p.log);
   p = page(); ok(JSON.stringify(go(p, 'desktop', DESK)) === JSON.stringify([['switchTo', DESK]]), 'a desktop ⇒ switch to it', p.log);
