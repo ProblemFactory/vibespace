@@ -463,6 +463,7 @@ const ROUTES = {
   // the same way (use-law's bearerOf → jobByToken), so each reaches the jobs stash to name who it refused; no record of the five kinds
   'GET /api/vault/totp': 'meta', 'POST /api/vault/totp': 'meta', 'GET /api/vault/totp/:name': 'meta', 'DELETE /api/vault/totp/:name': 'meta', 'POST /api/vault/totp/:name/grants': 'meta', 'DELETE /api/vault/totp/grants/:id': 'meta',
   // lane browser-login: the Vault window's web logins (names, provenance words and grant rows — never a password; a person's doors)
+  'GET /api/vault/web-logins/site-words': 'meta', 'POST /api/vault/web-logins/sites': 'meta', 'POST /api/vault/web-logins/sites/remove': 'meta', 'POST /api/vault/web-logins/merge': 'meta',   // lane login-request-card: one login, several sites — a login's sites, the grant rows' principals as the list carries them (no record text)
   'GET /api/vault/web-logins': 'meta', 'POST /api/vault/web-logins': 'meta', 'DELETE /api/vault/web-logins/:name': 'meta', 'POST /api/vault/web-logins/grants': 'meta', 'POST /api/vault/web-logins/ungrant': 'meta', 'POST /api/vault/web-logins/confirm': 'meta', 'POST /api/vault/web-logins/discard': 'meta', 'POST /api/vault/web-logins/totp': 'meta', 'POST /api/vault/use-grants': 'meta', 'POST /api/vault/use-grants/revoke': 'meta', 'POST /api/vault/use-grants/resume': 'meta', 'POST /api/vault/use-policy': 'meta', 'POST /api/vault/use-policy/revoke': 'meta',   // lane vault-use-grants: a vault-use grant row (ids, hosts, an end — no record text); round 6: /resume un-pauses one member
   // the run door's two person doors (lane vault-run-door) ride the same person() wrapper — the bearer it refuses is named the same way
   'POST /api/vault/runnable': 'meta', 'POST /api/vault/run/asks/:askId': 'meta',
@@ -2167,6 +2168,11 @@ const I_RECV = {
   'src/lib/voice-teach-ui.js|skip': ['vendor code', 'Dropline\'s skip reason for ONE dictionary word (review / refused mapped to fixed words, else the vendor\'s own short code) — never a record\'s text'],
   // lane vault-login: an existing web-login summary's pending kind ('register' | 'change' | null), compared to pick a fixed refusal
   'src/browser-login.js|dup': ['vault entry', 'an existing web-login entry summary\'s `pending` kind (\'register\' | \'change\' | null) compared to choose one of two fixed login_exists sentences — never a record\'s words'],
+  // lane login-request-card: one login, several sites — another login's CLEAR name (the vault's names) in login_exists, and the person's own request
+  'src/browser-login.js|other': ['vault entry', 'another web-login entry\'s clear name (web-login:<origin>#<user>, the vault\'s names) named in login_exists so the person can merge the two — never a record\'s words'],
+  'src/browser-login.js|third.e': ['vault entry', 'a third web-login entry\'s clear name named in the merge\'s login_exists — never a record\'s words'],
+  'src/routes/vault.js|req.query': ['caller', 'the person\'s own ?name= / ?site= / ?user= — the login and the site an add is asked about, handed to the web-login store'],
+  'src/routes/vault.js|b': ['caller', 'the request body — the person\'s own login name, site and the name it signs in under there, or the two logins to merge, handed to the web-login store'],
 };
 // the per-site class of every record / carrier read: `file|sink|read` → [class, why]
 const I_SITES = {

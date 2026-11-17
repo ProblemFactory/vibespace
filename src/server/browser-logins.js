@@ -94,6 +94,18 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
   function metaOf(name) {
     return names().find((e) => e.name === name) || null;
   }
+  /** ONE LOGIN, SEVERAL SITES: the names, each with the sites its sealed record keeps (`origins`, `siteUsers`) — the vault's clear
+   *  names hold only the first site and user, so each login is opened (unlocked only; a record that cannot be read keeps its first
+   *  site alone). Used by the fill and by the writes' one-pair-one-login rule. */
+  function namesWithSites() {
+    const list = names();
+    if (vstate() !== 'unlocked') return list;
+    return list.map((e) => {
+      const o = open(e.name);
+      if (!o.ok || !o.rec) return e;
+      return { ...e, ...(o.rec.origins ? { origins: o.rec.origins.slice() } : {}), ...(o.rec.siteUsers ? { siteUsers: { ...o.rec.siteUsers } } : {}) };
+    });
+  }
 
   /** THE ONE WRITER of a web-login entry (`vault.secretPut`). */
   function writeEntry(name, rec, { actor = undefined, owner = undefined } = {}) {
@@ -334,7 +346,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
       blocked(actor, parsed.origin || tabOrigin || '');
       return named('vault_locked', BL.LOCKED);
     }
-    const allEntries = names();
+    const allEntries = namesWithSites();   // one login, several sites: each login with the sites it keeps
     if (skipOrigin && !tabOrigin && typeof parsed.origin === 'string' && parsed.origin.startsWith('https://')) {
       const specBody = str(rawSpec).trim().replace(/^new:/i, '');
       if (!BL.hasExplicitScheme(specBody)) {
@@ -554,7 +566,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
       };
     }
 
-    const sv = BL.resolveSlotValue(o.rec, v.field);
+    const sv = BL.resolveSlotValue(o.rec, v.field, { origin: v.origin });   // the user name THIS site signs in under
     if (!sv.ok) return sv;
     if (checkOnly) {
       return { ok: true, checkOnly: true, name: v.name, origin: v.origin, user: v.user, field: v.field, slot: sv.slot, generated: false, pending: o.rec.pending ? o.rec.pending.kind : null };
@@ -811,6 +823,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
               ...(pub.pendingCreatedAt != null ? { pendingCreatedAt: pub.pendingCreatedAt } : {}),
               ...(pub.previousReplacedAt != null ? { previousReplacedAt: pub.previousReplacedAt } : {}),
               ...(pub.totpName ? { totpName: pub.totpName } : {}),
+              ...(BL.sitesOf(o.rec).length > 1 ? { sites: BL.sitesOf(o.rec).slice(1) } : {}),   // one login, several sites: its added sites, each with the name it signs in under
             } : {}),
             grants: [...rowsAt(`${e.origin}#${e.user}`), ...rowsAt(`${e.origin}#*`), ...wild],
             ...(byWhatSubjects ? { byWhat: BL.byWhatOf({ rows: { thisAccount: rawAt(`${e.origin}#${e.user}`), anyAccount: rawAt(`${e.origin}#*`), anySite: rawAt('*') }, subjects: byWhatSubjects }) } : {}),
@@ -923,9 +936,85 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     const r = vault.secretDrop(name);
     if (r && r.ok === false) return named(r.code || 'not_written', r.error || 'not removed');
     resolvePendingItemsForName(name, prevPendingItemId);
-    try { const g = store(); if (g && g.rowsFor(BL.DOOR, `${p.origin}#${p.user}`).length) g.remove(BL.DOOR, `${p.origin}#${p.user}`, 'user'); } catch (e) { say(`[browser-login] ${name}: its grant row was not removed — ${e && e.message}`); }
+    const own = [`${p.origin}#${p.user}`, ...(ex && ex.ok && ex.rec ? BL.sitesOf(ex.rec).slice(1).map((x) => `${x.origin}#${BL.userOf(x.user)}`) : [])];   // + its added sites' own rows (one login, several sites)
+    for (const res of own) { try { const g = store(); if (g && g.rowsFor(BL.DOOR, res).length) g.remove(BL.DOOR, res, 'user'); } catch (e) { say(`[browser-login] ${name}: its grant row ${res} was not removed — ${e && e.message}`); } }
     try { vault.audit?.('vault-web-login-removed', { why: name, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
     return { ok: true, name };
+  }
+
+  // ── ONE LOGIN, SEVERAL SITES (lane login-request-card, the owner 2026-11-17; 主开发 20:05Z): the person's add and remove at the
+  //    login's row, the merge of two logins that are one account — THIS store's writes (writeEntry), each audited, never a secret
+  //    shown, logged or compared. THE GRANT FOLLOWS THE LOGIN: `siteWordsFor` says BY NAME, before the press, who may then have it
+  //    filled on the new site (the login's own row, and by their own rows «any account on that site» / «any site»).
+  const principalsAt = (resource) => { const [row] = rowsOf(resource); const pub = row ? GM.publicRow(row) : null; return pub && !pub.unknown ? (pub.to || []) : []; };
+  function siteWordsFor(name, site, { user = '' } = {}) {
+    const p = BL.parseName(name);
+    if (!p) return named('not_found', 'no such web login');
+    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then add the site');
+    const o = open(name);
+    if (!o.ok) return o;
+    if (!o.rec) return named('not_found', 'no such web login');
+    const w = BL.siteWords(o.rec, site, { decode: (h) => { try { return require('node:url').domainToUnicode(h); } catch { return null; } } });
+    if (!w) return named('login_bad_origin', 'a website address (https://host[:port]) — exactly the site');
+    return { ok: true, name, ...w, user: str(user).trim() || o.rec.username,
+      widens: { login: principalsAt(`${p.origin}#${p.user}`), anyAccount: principalsAt(`${w.site}#*`), anySite: principalsAt('*') } };
+  }
+  function addSite(name, { site, user = '' } = {}, { who = null } = {}) {
+    if (!BL.parseName(name)) return named('not_found', 'no such web login');
+    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then add the site');
+    const o = open(name);
+    if (!o.ok) return o;
+    if (!o.rec) return named('not_found', 'no such web login');
+    const v = BL.addSiteVerdict({ rec: o.rec, name, site, user, entries: namesWithSites() });
+    if (!v.ok) return v;
+    const w = writeEntry(name, { ...v.record, rev: v.record.rev + 1 });
+    if (!w.ok) return w;
+    try { vault.audit?.('vault-web-login-site-added', { why: name, site: v.origin, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
+    return { ok: true, name, site: v.origin, user: v.user };
+  }
+  function removeSite(name, site, { who = null } = {}) {
+    if (!BL.parseName(name)) return named('not_found', 'no such web login');
+    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then remove the site');
+    const o = open(name);
+    if (!o.ok) return o;
+    if (!o.rec) return named('not_found', 'no such web login');
+    const there = BL.userOnSite(o.rec, BL.originOf(site));
+    const v = BL.removeSiteVerdict(o.rec, site);
+    if (!v.ok) return v;
+    const w = writeEntry(name, { ...v.record, rev: v.record.rev + 1 });
+    if (!w.ok) return w;
+    // the site's own row (a merged login's grants named it) goes with the site — a later login holding that pair must not inherit it
+    const res = `${v.origin}#${BL.userOf(there)}`;
+    let rowGone = false;
+    try { const g = store(); if (g && g.rowsFor(BL.DOOR, res).length) { g.remove(BL.DOOR, res, 'user'); rowGone = true; } } catch (e) { say(`[browser-login] ${name}: the grant row ${res} was not removed — ${e && e.message}`); }
+    try { vault.audit?.('vault-web-login-site-removed', { why: name, site: v.origin, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
+    return { ok: true, name, site: v.origin, ...(rowGone ? { grantRemoved: res } : {}) };
+  }
+  function merge(keepName, otherName, { who = null } = {}) {
+    if (!BL.parseName(keepName) || !BL.parseName(otherName)) return named('not_found', 'two web logins by name');
+    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then merge');
+    const k = open(keepName), x = open(otherName);
+    if (!k.ok) return k;
+    if (!x.ok) return x;
+    if (!k.rec || !x.rec) return named('not_found', 'no such web login');
+    const v = BL.mergeVerdict({ keep: k.rec, keepName, other: x.rec, otherName, entries: namesWithSites() });
+    if (!v.ok) return v;
+    const xPending = x.rec.pending ? x.rec.pending.itemId : null;
+    let out = null;
+    try {
+      batchWrite(() => {
+        const w = writeEntry(keepName, { ...v.record, rev: v.record.rev + 1 });
+        if (!w.ok) throw Object.assign(new Error(w.error || w.code), { code: w.code });
+        const d = vault.secretDrop(otherName);
+        if (d && d.ok === false) throw Object.assign(new Error(d.error || d.code), { code: d.code || 'not_written' });
+        out = { ok: true, name: keepName, merged: otherName, joined: v.joined.map((s) => ({ origin: s.origin, user: s.user })) };
+      });
+    } catch (e) { return named(str(e && e.code) === 'vault_locked' ? 'vault_locked' : 'not_written', `the merge was not written (${(e && e.message) || 'not written'}) — both logins are as they were`); }
+    resolvePendingItemsForName(otherName, xPending);
+    // its grant rows STAY: each names <site>#<user> of a site now on the kept login, admitted there (and only there) by the fill's
+    // second row — none lost, none widened
+    try { vault.audit?.('vault-web-login-merged', { why: keepName, merged: otherName, sites: v.joined.map((s) => s.origin), by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
+    return out;
   }
 
   function resourceFor(name, scope) { const p = BL.parseName(name); if (scope === 'any-site') return '*'; if (!p) return null; return scope === 'any-account' ? `${p.origin}#*` : `${p.origin}#${p.user}`; }
@@ -1015,6 +1104,10 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     bindTotp,
     addAgent,
     drop,
+    siteWordsFor,
+    addSite,
+    removeSite,
+    merge,
     grant,
     ungrant,
     scrubSecretsOf,

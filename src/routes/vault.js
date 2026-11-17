@@ -56,6 +56,7 @@ const STATUS = Object.freeze({
   login_exists: 409, login_bad_origin: 400, login_bad_user: 400, bad_totp: 400,   // lane vault-agent-own: `vibespace-vault login add`
   login_no_door: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_words: 400, login_password_lines: 400,   // lane login-request-card: a website login asked for (src/server/vault-paste-door.js)
   login_no_entry: 404, login_not_pending: 409, login_pending_exists: 409, card_changed: 409, // lane vault-login r22/r23: human-only Confirm / Discard of pending web-login slots
+  login_site_exists: 409, login_sites_full: 409, login_site_first: 400, login_site_absent: 404, login_merge_same: 400, login_merge_clash: 409,   // lane login-request-card: one login, several sites (the person's add / remove, the merge)
 });
 const WORDS = Object.freeze({
   ...UGC.WORDS,
@@ -128,6 +129,12 @@ const WORDS = Object.freeze({
   login_no_entry: 'that website login is not in the vault any more',
   login_not_pending: 'that website login has no pending password waiting for your confirmation',
   login_pending_exists: 'that website login already has a pending password — confirm or discard it first',
+  login_site_exists: 'that site is on this login already',   // lane login-request-card: one login, several sites — the answer's `why` says which
+  login_sites_full: 'a login keeps at most nine sites — remove one first',
+  login_site_first: 'the first site is the login itself — delete the login instead',
+  login_site_absent: 'that site is not on this login',
+  login_merge_same: 'pick two different logins',
+  login_merge_clash: 'a site is on both logins under two names — remove it from one first',
   card_changed: 'that website login changed after it was shown — nothing was changed; read it again',
 });
 const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
@@ -291,6 +298,15 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     app.delete('/api/vault/web-logins/:name', noStoreL(person((req) => logins.drop(String(req.params.name || ''), { who: whoL(req) }))));
     app.post('/api/vault/web-logins/grants', noStoreL(person((req) => { const b = bodyL(req); return logins.grant(String(b.name || ''), String(b.scope || ''), String(b.subject || ''), { by: `user:${whoL(req).slice(0, 24)}`, ...(Array.isArray(b.except) ? { except: b.except.map(String) } : {}) }); })));   // + «除了» for a group / Everyone
     app.post('/api/vault/web-logins/ungrant', noStoreL(person((req) => { const b = bodyL(req); return logins.ungrant(String(b.resource || ''), String(b.principal || ''), { by: `user:${whoL(req).slice(0, 24)}` }); })));
+    // lane login-request-card — ONE LOGIN, SEVERAL SITES (the owner 2026-11-17; 主开发 20:05Z): the person adds a site to a login (exactly
+    // the site, an optional name it signs in under there) and removes one where it shows; two logins that are one account merge in
+    // ONE act (the secret never shown). The words before an add say the exact address, its ASCII form, a look-alike, and BY NAME
+    // who may then have it filled there. A refusal keeps its own sentence in `why` (which login, which site).
+    const whyL = (r) => (r && r.ok === false && r.error && !r.why ? { ...r, why: r.error } : r);
+    app.get('/api/vault/web-logins/site-words', noStoreL(person((req) => whyL(logins.siteWordsFor(String(req.query.name || ''), String(req.query.site || ''), { user: String(req.query.user || '') })))));
+    app.post('/api/vault/web-logins/sites', noStoreL(person((req) => { const b = bodyL(req); return whyL(logins.addSite(String(b.name || ''), { site: String(b.site || ''), user: String(b.user || '') }, { who: whoL(req) })); })));
+    app.post('/api/vault/web-logins/sites/remove', noStoreL(person((req) => { const b = bodyL(req); return whyL(logins.removeSite(String(b.name || ''), String(b.site || ''), { who: whoL(req) })); })));
+    app.post('/api/vault/web-logins/merge', noStoreL(person((req) => { const b = bodyL(req); return whyL(logins.merge(String(b.keep || ''), String(b.other || ''), { who: whoL(req) })); })));
     // lane vault-agent-own: AN AGENT stores a login it holds itself (`vibespace-vault login add <origin> --user <name> --from-file |
     // --stdin [--totp <name>]`) — the password taken OFF the body (never the URL); a `web-login:` entry, provenance agent-typed,
     // owned by the storing conversation (its fill there needs no grant). The answer names the entry — never the password.
