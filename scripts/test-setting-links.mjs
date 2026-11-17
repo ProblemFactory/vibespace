@@ -138,7 +138,7 @@ console.log('④ every place the owner reads words draws it — the REAL chat re
   const opened = [], list = mkEl();
   const r = new ChatRenderers({ ws: null, sessionId: 's', app: { openSettingAt: (k) => opened.push(k) }, backend: 'claude', compact: false, messageList: list });
   const span = (key, label) => `<span class="chat-link chat-setting-link" data-setting="${key}" title="Open in Settings">${label}</span>`;
-  const md = (s) => r.renderMarkdown(s).trim();
+  const md = (s) => r.renderMarkdown(s, { vsLinks: true }).trim();   // the conversation's own words (the option on — ⑧ holds where)
   ok(md(`raise it here: vibespace://settings/${K}.`) === `<p>raise it here: ${span(K, `vibespace://settings/${K}`)}.</p>`, 'chat: a bare link in an agent\'s message is ONE setting link; the sentence\'s full stop stays outside', md(`raise it here: vibespace://settings/${K}.`));
   ok(md(`[the ceiling](vibespace://settings/${K})`) === `<p>${span(K, 'the ceiling')}</p>` && md(`<vibespace://settings/${K}>`) === `<p>${span(K, `vibespace://settings/${K}`)}</p>`, 'chat: a markdown link and an autolink carry their label (the sanitizer never sees the scheme)');
   const mdUnk = md('[x](vibespace://settings/spend.nope) and [y](#vs-setting-spend.nope)');
@@ -151,7 +151,7 @@ console.log('④ every place the owner reads words draws it — the REAL chat re
   const inUrl = md(`https://example.com/a?u=vibespace://settings/${K}`);
   ok(!/chat-setting-link/.test(inUrl) && /<a href="https:\/\/example\.com\/a\?u=vibespace:\/\/settings\/spend\.unattendedPerInstanceDay">/.test(inUrl), 'chat: inside another URL it is that URL\'s text, not a door', inUrl);
   ok(md(`see «vibespace://settings/${K}»，然后`) === `<p>see «${span(K, `vibespace://settings/${K}`)}»，然后</p>`, 'chat: CJK quotes and a fullwidth comma around it stay outside');
-  ok(r.linkifyText(`tool said vibespace://settings/${K}, done`) === `tool said ${span(K, `vibespace://settings/${K}`)}, done`, 'chat: tool output (linkifyText) draws it too');
+  ok(r.linkifyText(`tool said vibespace://settings/${K}, done`) === `tool said <span class="chat-link-words">vibespace://settings/${K}</span>, done`, 'chat: a TOOL\'s output (linkifyText) never draws it — words, and never a path (⑧ the cure)');
   // l1 (主开发 2026-11-15): after a half-width colon it IS a door; the scheme in capitals too; glued to a word it is words — and the path
   // pass never underlines its tail («//settings/<key>» answered «Not found» as a FILE)
   const L1 = { cjkColon: `上限在这里:vibespace://settings/${K}`, enColon: `Raise it here:vibespace://settings/${K}`, caps: `VIBESPACE://SETTINGS/${K}`, glued: `herevibespace://settings/${K}` };
@@ -252,7 +252,7 @@ console.log('⑦ THE EXACT-TAG LAW (主开发 2026-11-15, the verifier\'s F4): a
   const convRaw = `<p><a href="#vs-conversation-${UUID}" title="${EVIL}">x</a></p>`, convOk = `<p><a href="#vs-conversation-${UUID}">x</a></p>`;
   const maskRaw = `<p><a href="https://x.example/?token=«redacted»" title="${EVIL}" target="_blank" rel="noopener noreferrer">label</a></p>`, maskOk = `<p><a href="https://x.example/?token=«redacted»" target="_blank" rel="noopener noreferrer">label</a></p>`;
   const legs = (R, S) => { const rr = mk(R);
-    return { set: rr._settingAnchors(setRaw), setOk: rr._settingAnchors(setOk), conv: S.conversationLinksHtml(convRaw), convOk: S.conversationLinksHtml(convOk), mask: rr.linkify(maskRaw), maskOk: rr.linkify(maskOk) }; };
+    return { set: rr._settingAnchors(setRaw, { vsLinks: true }), setOk: rr._settingAnchors(setOk, { vsLinks: true }), conv: S.conversationLinksHtml(convRaw), convOk: S.conversationLinksHtml(convOk), mask: rr.linkify(maskRaw), maskOk: rr.linkify(maskOk) }; };
   const L = legs(CR, SC);
   ok(!tagsOutside(L.set).includes('img') && L.set === setRaw && /chat-setting-link/.test(L.setOk), 'the setting pass: an anchor carrying more than its href stays the sanitizer\'s own (no tag opens outside an attribute); the ordinary one is the door', L.set);
   ok(!tagsOutside(L.conv).includes('img') && L.conv === convRaw && /chat-sub-link/.test(L.convOk), 'the conversation-link pass (subagent-card): the same — only `<a href="#vs-conversation-<id>">` is rewritten', L.conv);
@@ -265,6 +265,67 @@ console.log('⑦ THE EXACT-TAG LAW (主开发 2026-11-15, the verifier\'s F4): a
   ok(crOld(crSrc) !== crSrc && scOld(scSrc) !== scSrc && crOld(crSrc).split('[^>]*').length - crSrc.split('[^>]*').length >= 2, 'the mutants\' needles are in this tree (the old patterns can be put back)');
   const M = legs(await bundle('src/lib/chat-renderers.js', 'chat-renderers.js', crOld), await bundle('src/lib/subagent-card.js', 'subagent-card.js', scOld));
   ok(tagsOutside(M.set).includes('img') && tagsOutside(M.conv).includes('img') && tagsOutside(M.mask).includes('img'), 'RED CONTROL: each pass with its old «[^>]*>» run writes an <img onerror> OUTSIDE an attribute — the setting pass, the conversation pass, the masked pass', { set: M.set, conv: M.conv, mask: M.mask });
+}
+
+console.log('⑧ ONE RULE FOR WHERE THE SCHEME\'S LINKS RENDER (主开发 2026-11-17, the finding against pick 1): the renderer\'s option `vsLinks`, off by default, on only at the conversation\'s own words — three red controls');
+{
+  const os = await import('node:os');
+  const esbuild = createRequire(path.join(REPO, 'package.json'))('esbuild');
+  const SCR = fs.mkdtempSync(path.join(os.default.tmpdir(), 'vs-onerule-'));
+  process.on('exit', () => { try { fs.rmSync(SCR, { recursive: true, force: true }); } catch { } });
+  const URI_RULE = String.raw`^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))`;
+  const STUB = `const OK = new RegExp(${JSON.stringify(URI_RULE)}, 'i');\nexport const sanitizeHtml = (h) => h.replace(/(<a\\b[^>]*?)\\shref="([^"]*)"/gi, (m, pre, v) => (OK.test(v.replace(/[\\u0000-\\u0020]/g, '')) ? m : pre));\nexport const sanitizeDiagramSvg = () => '';`;
+  let n = 0;
+  const bundle = async (patch = null) => {
+    const out = path.join(SCR, `r${n++}.mjs`);
+    const plug = { name: 'or', setup(b) {
+      b.onResolve({ filter: /(build-version|safe-html)\.js$/ }, (a) => ({ path: path.basename(a.path), namespace: 'or-stub' }));
+      b.onLoad({ filter: /.*/, namespace: 'or-stub' }, (a) => ({ contents: a.path === 'safe-html.js' ? STUB : "export const BUILD_VERSION = 'test';", loader: 'js' }));
+      if (patch) b.onLoad({ filter: /chat-renderers\.js$/ }, (a) => ({ contents: patch(fs.readFileSync(a.path, 'utf8')), loader: 'js', resolveDir: path.dirname(a.path) }));
+    } };
+    await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/chat-renderers.js')], bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: out, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [plug] });
+    return import(out);
+  };
+  const K = 'spend.unattendedPerInstanceDay';
+  const TXT = `raise it: vibespace://settings/${K} — or [the ceiling](vibespace://settings/${K}) — or [y](#vs-setting-${K})`;
+  const doors = (h) => (String(h).match(/data-setting="/g) || []).length;
+  const pathy = (h) => /chat-link-path|data-path=/.test(String(h));
+  const ce0 = document.createElement;   // ④'s element stub + what the assistant block's backend icon asks of an element
+  document.createElement = (tag) => { const e = ce0(tag); e.style.setProperty = () => {}; if (!('outerHTML' in e)) Object.defineProperty(e, 'outerHTML', { get() { return `<${String(tag)}></${String(tag)}>`; } }); return e; };
+  const legs = (R) => { const r = new R.ChatRenderers({ ws: null, sessionId: 's', app: {}, backend: 'claude', compact: false, messageList: { addEventListener() { } } });
+    const job = r._renderVibespaceNotice({ id: 'm-job', peerFrom: 'VibeSpace' }, `Background work finished.\n${TXT}`);
+    const own = r.renderAssistantMsg({ id: 'm-own', role: 'assistant', status: 'complete', content: [{ type: 'text', text: TXT }] });
+    return { off: r.renderMarkdown(TXT), on: r.renderMarkdown(TXT, { vsLinks: true }), peer: r._peerBodyHtml({ id: 'm-peer' }, TXT, 'a peer').html,
+      job: job ? job.innerHTML : '', tool: r.linkifyText(TXT), own: own ? own.innerHTML : '' }; };
+  const L = legs(await bundle());
+  ok(doors(L.off) === 0 && !pathy(L.off) && !L.off.includes('#vs-setting-') && /<span class="chat-link-words">vibespace:\/\/settings\/spend\.unattendedPerInstanceDay<\/span>/.test(L.off) && /— or the ceiling — or y<\/p>/.test(L.off),
+    'OFF BY DEFAULT: a bare run is words (never a path), a labelled link is its label, a hand-written #vs-setting- anchor is its label — no door', L.off);
+  ok(doors(L.on) === 3 && doors(L.own) === 3, 'the option on (renderMarkdown, and the REAL assistant-text block): the same words carry three doors', { on: L.on, own: L.own });
+  ok(doors(L.peer) === 0 && !pathy(L.peer), 'a PEER\'s body (_peerBodyHtml — peer and group messages) draws none', L.peer);
+  ok(L.job.includes('Background work finished') && doors(L.job) === 0 && !pathy(L.job), 'a JOB\'s record (a VibeSpace notice shown in chat) draws none', L.job);
+  ok(doors(L.tool) === 0 && !pathy(L.tool), 'a TOOL\'s input or output (linkifyText) draws none', L.tool);
+  // THE CENSUS: every place the option is switched on, by the method it sits in — exactly the conversation's own words
+  const ON = ['chat-renderers.js:_renderCollabMsg', 'chat-renderers.js:renderAssistantMsg', 'chat-renderers.js:renderToolMsg', 'chat-view.js:_renderStreamingText'];
+  const sitesOf = (file, src) => { const out = []; const lines = src.split('\n');
+    lines.forEach((ln, i) => { if (!/vsLinks: true/.test(ln)) return; let j = i; while (j >= 0 && !/^  (?:async )?([_A-Za-z]\w*)\([^)]*\) \{$/.test(lines[j])) j--; out.push(`${file}:${j >= 0 ? /^  (?:async )?([_A-Za-z]\w*)/.exec(lines[j])[1] : '?'}`); });
+    return out; };
+  const census = (crSrc) => [...sitesOf('chat-renderers.js', crSrc), ...sitesOf('chat-view.js', read('src/lib/chat-view.js'))].sort();
+  const crSrc = read('src/lib/chat-renderers.js');
+  ok(JSON.stringify(census(crSrc)) === JSON.stringify(ON), 'THE CENSUS: the option is on at the assistant text block, its streaming frame, the sub-agent report and the sub-agent card (its answer) — nowhere else', census(crSrc));
+  const rcSub = (crSrc.match(/renderMarkdown: \(s\) => this\.renderMarkdown\(s, \{ vsLinks: true \}\)/g) || []).length;
+  ok(rcSub === 1 && !/linkifyText: \(s\) => this\.linkifyText\(s, \{/.test(crSrc), 'the sub-agent card: its answer (renderMarkdown) has the option, its task (linkifyText — the parent\'s tool input) does not');
+  const fyHasSites = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).flatMap((f) => (read(`src/lib/${f}`).match(/(?:linkedHtml|segmentText)\([^\n]*has: isSettingKey/g) || []).map(() => f));
+  ok(fyHasSites.length === 3 && fyHasSites.every((f) => f === 'user-todos-row.js'), 'For you: the key test (its renderer\'s option) is given only by user-todos-row.js — wordsHtml + linkifyInto\'s two reads, the item\'s words; the vault plan never', fyHasSites);
+  // THE RED CONTROLS — the option flipped on where a peer, a job or a tool wrote: each makes its leg AND the census red
+  const MUT = {
+    peer: (src) => src.replace("demoteHeadings(this.renderMarkdown(String(text || '').trim()))", "demoteHeadings(this.renderMarkdown(String(text || '').trim(), { vsLinks: true }))"),
+    job: (src) => src.replace('<div class="chat-text">${this.renderMarkdown(view.body)}</div></details>', '<div class="chat-text">${this.renderMarkdown(view.body, { vsLinks: true })}</div></details>'),
+    tool: (src) => src.replace('  linkifyText(text, opts = {}) {', '  linkifyText(text, opts = { vsLinks: true }) {'),
+  };
+  ok(Object.values(MUT).every((m) => m(crSrc) !== crSrc), 'the mutants\' needles are in this tree');
+  const Mp = legs(await bundle((src) => MUT.tool(MUT.peer(src)))), Mt = Mp;   // ONE mutant bundle carries both (each leg reads its own surface)
+  ok(doors(Mp.peer) > 0 && doors(Mp.job) > 0 && doors(Mt.tool) > 0, 'RED CONTROL (legs): the option on at the peer body ⇒ a peer\'s words and a job\'s record shown whole draw doors; on at linkifyText ⇒ a tool\'s output does', { peer: Mp.peer, job: Mp.job, tool: Mt.tool });
+  ok(Object.entries(MUT).every(([k, m]) => JSON.stringify(census(m(crSrc))) !== JSON.stringify(ON)), 'RED CONTROL (census): each of the three — the peer body, the job record\'s folded body, a tool\'s words — turns the census red');
 }
 
 console.log(fail ? `✗ test-setting-links: ${pass} passed, ${fail} failed` : `ALL PASS (${pass})`);

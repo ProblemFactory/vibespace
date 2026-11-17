@@ -4782,7 +4782,7 @@ class ChatView {
     if (!msg || !oldEl || msg.status !== 'streaming') return;
     const textDiv = oldEl.querySelector('.chat-text');
     if (textDiv && msg.content[0]?.type === 'text') {
-      textDiv.innerHTML = this._renderers.renderMarkdown(stripAnsi(msg.content[0].text));
+      textDiv.innerHTML = this._renderers.renderMarkdown(stripAnsi(msg.content[0].text), { vsLinks: true });   // the assistant text's streaming frame: the option on, as its block
       this._renderers.addDiagrams(textDiv); // lane chat-mermaid: a fence closed mid-stream draws (from the cache on every later frame)
     } else if (msg.content[0]?.type === 'thinking') {
       const summaryEl = oldEl.querySelector('.chat-thinking summary');
