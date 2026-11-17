@@ -910,6 +910,13 @@ default with `*`.
 
 ---
 
+### Freeing a browser another conversation holds — `vibespace-api browsers stop <id>`
+With a key that carries `browsers.stop` (the person grants it), you can stop a running browser to free memory. The id comes from `vibespace-api list` (conversations.list). It goes through the keeper's own stop, and is REFUSED, with the reason, while:
+- a person drives it, watches it, or browses in it;
+- a conversation holding it is mid-turn, or its turn is unknown;
+- a holder is outside your key's reach.
+A conversation's own browser keeps its tabs; they reopen at that conversation's next browser command. A named profile's tabs close, and its sign-ins stay. A person can always stop it from System → Conversations and browsers.
+
 ## 4. Rules
 
 * **Never start your own Chrome for browsing.** A Chrome you launch with `--remote-debugging-port` outside

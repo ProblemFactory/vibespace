@@ -1076,7 +1076,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     return row;
   }
   /** lane browser-resume (§3.9): why a kept browser stopped, in the device's words (the store's closed vocabulary). */
-  const keptWhyText = (w) => ({ 'turn-idle': t('released after its turn'), idle: t('idled out'), ended: t('it was found gone before its idle timeout'), heal: t('its browser was restarted'), restart: t('VibeSpace restarted'), 'conversation-gone': t('its session ended'), user: t('stopped by you'), agent: t('closed by the agent') }[w] || '');
+  const keptWhyText = (w) => ({ 'turn-idle': t('released after its turn'), idle: t('idled out'), ended: t('it was found gone before its idle timeout'), heal: t('its browser was restarted'), restart: t('VibeSpace restarted'), 'conversation-gone': t('its session ended'), manager: t('stopped by a conversation with a key'), user: t('stopped by you'), agent: t('closed by the agent') }[w] || '');
   /** lane browser-resume (§3.9): ONE kept browser — a conversation's own browser's logins + tabs after it stopped. KEYED
    *  (by its browser key, rebuilt only when what it prints moved); Forget only on a stopped one (a running one says so). */
   const keptRows = new Map(); // browserKey → { row, sig }

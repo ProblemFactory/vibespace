@@ -359,7 +359,9 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
     rowDesktopOf: (key) => { let lay = null; try { lay = persistenceRouter && typeof persistenceRouter.readLayouts === 'function' ? persistenceRouter.readLayouts() : null; } catch (e) { if (!(e && e.code === 'store_unread')) throw e; }   /* B-225b: the desktops held ⇒ no desktop named */ const d = RL_PURE.rowDesktopOf(lay, key); return d ? { id: d.id, name: d.name == null ? null : require('../peer-text.js').toAgentText(d.name, { kind: 'line', max: 200 }) } : null; },
     deadOf: endedKeyOf,
     // lane conversation-facts (majordomo piece 2): conversations.list's ONE builder over the hub's in-memory facts
-    listFacts, proposals: endProposals }),
+    listFacts, proposals: endProposals,
+    // lane browsers-stop (majordomo piece 6): the keeper's running rows and its manager stop (the keeper is built later — read at call time)
+    browsers: { rows: () => (browserKeeper && typeof browserKeeper.stopRows === 'function' ? browserKeeper.stopRows() : null), stop: (id) => browserKeeper.managerStop(id) } }),
     // the manager design's piece 7: jobs.wakeGrant — a key holding it sets a job's grant to resume an on-purpose-ended conversation
     ...require('./delivery-wake.js').automationVerbs({ jobs: () => (deliveryWakeDeps().jobs || (() => null))(), ownerFactsOf: (cid) => { const k = endedKeyOf(cid); return k ? { groups: Array.isArray(k.groups) ? k.groups : [], inherited: k.inherited, ...(k.inherited === null ? { groupsUnreadable: true } : {}) } : null; }, keyNameOf: (id) => { const L = automation.list(); const arr = Array.isArray(L) ? L : (L && L.keys) || []; const k = arr.find((x) => x && x.id === id); return (k && k.name) || null; } }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
   openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }),

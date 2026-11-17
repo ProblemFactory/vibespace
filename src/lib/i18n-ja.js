@@ -7405,6 +7405,7 @@ export default {
   "Stop this browser now — its tabs are kept, a login in it is not; the conversation's next command starts it again": "このブラウザを今すぐ停止します — タブは保持されますが中のログインは保持されません。会話の次のコマンドで再び起動します",
   "Stop this browser now — the conversation's next command starts it again (what it keeps is still being checked)": "このブラウザを今すぐ停止します — 会話の次のコマンドで再び起動します（保持している内容はまだ確認中です）",
   "released after its turn": "ターン終了後に解放",
+  "stopped by a conversation with a key": "キーを持つ会話が停止", // lane browsers-stop (majordomo piece 6)
   "its browser was restarted": "ブラウザが再起動された",
   "it was found gone before its idle timeout": "アイドル時間切れの前に停止しているのが見つかった",
   "its session ended": "セッションが終了した",

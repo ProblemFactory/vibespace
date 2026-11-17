@@ -70,9 +70,11 @@ const isParentKey = (k) => KEY_RE.test(String(k || ''));
 const RESTORE_ID_RE = /^bres-[0-9a-f]{8,16}$/;
 
 /** The closed vocabulary of why a kept browser stopped. */
-const STOP_WHYS = Object.freeze(['turn-idle', 'idle', 'ended', 'heal', 'restart', 'conversation-gone', 'user', 'agent']); // B-346d: + 'ended' — its daemon was found gone before its idle timeout (why not known)
+const STOP_WHYS = Object.freeze(['turn-idle', 'idle', 'ended', 'heal', 'restart', 'conversation-gone', 'manager', 'user', 'agent']); // B-346d: + 'ended' — its daemon was found gone before its idle timeout (why not known)
 /** D2: the automatic stops — their next start reopens the kept tabs by itself. */
-const AUTO_RESTORE_WHYS = Object.freeze(['turn-idle', 'idle', 'ended', 'heal', 'restart', 'conversation-gone']); // 'ended' reopens as 'idle' does (B-346d: only its words differ)
+// 'manager' (lane browsers-stop, majordomo piece 6): a conversation holding a key stopped it to free memory — automatic for the
+// tabs (they reopen at the owner's next command), never the user's or the agent's own deliberate close
+const AUTO_RESTORE_WHYS = Object.freeze(['turn-idle', 'idle', 'ended', 'heal', 'restart', 'conversation-gone', 'manager']); // 'ended' reopens as 'idle' does (B-346d: only its words differ)
 /** The keeper's own `why` strings (its stop() allow-list + the idle-out) → the closed vocabulary. An unknown why is the
  *  keeper's own act (a heal, a failed launch) — AUTOMATIC, never the user's. */
 function stopWhyOf(raw) {

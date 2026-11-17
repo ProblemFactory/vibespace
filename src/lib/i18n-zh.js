@@ -7406,6 +7406,7 @@ export default {
   "Stop this browser now — its tabs are kept, a login in it is not; the conversation's next command starts it again": "立即停止这个浏览器——它的标签页会保留，其中的登录不会；该对话的下一条命令会重新启动它",
   "Stop this browser now — the conversation's next command starts it again (what it keeps is still being checked)": "立即停止这个浏览器——该对话的下一条命令会重新启动它（它保留的内容还在检查中）",
   "released after its turn": "回合结束后已释放",
+  "stopped by a conversation with a key": "由持有密钥的对话停止", // lane browsers-stop (majordomo piece 6)
   "its browser was restarted": "它的浏览器被重启过",
   "it was found gone before its idle timeout": "在空闲超时之前就发现它已停止",
   "its session ended": "它的会话已结束",

@@ -447,7 +447,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
   // the manager design's piece 4 (conversations.resume): the hub's one line of resumes nobody pressed (src/server/resume-line.js), an
   // ended conversation's kept facts ({goal, timerMark, mode, cwd, hostId}), the archived list, its harness's row (src/resume-line.js
   // harnessRowOf: {resumeContinues, headless}), and the desktop of the row that shows it (or null — the hub never picks one)
-  resumeLine = null, resumeFactsOf = () => null, isArchived = () => false, resumeRowOf = () => ({ resumeContinues: 'unread', headless: false }), rowDesktopOf = () => null, proposals = null } = {}) {
+  resumeLine = null, resumeFactsOf = () => null, isArchived = () => false, resumeRowOf = () => ({ resumeContinues: 'unread', headless: false }), rowDesktopOf = () => null, proposals = null, browsers = null } = {}) {
   const O = () => ops || sharedOps;
   const idOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const keyOf = (s) => { const cid = idOf(s); return cid ? `${(s && s.backend) || 'claude'}:${cid}` : null; };
@@ -679,6 +679,28 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       if (!proposals || typeof proposals.propose !== 'function') return { ok: false, code: 'not_ready', why: 'the proposal card is not wired yet' };
       // B-44f3 (its second read's should): For you held unread refuses the card BY NAME — its code reaches the agent (never «failed»)
       try { return await proposals.propose({ targets: args.targets, why: args.why }, ctx); } catch (e) { if (e && e.code === 'todos-unread') return { ok: false, code: 'todos-unread', why: e.message }; throw e; }
+    },
+    // lane browsers-stop (majordomo piece 6): stop ONE running browser by its id, through the keeper's own stop (reason
+    // `manager`: automatic for the kept tabs, never deliberate). ONE PURE verdict decides (src/browser-profiles.js stopVerdict):
+    // refused while a person drives, watches or browses in it, while a holder's turn runs or is unknown, while a holder is
+    // outside the key's reach — every unknown refuses. The rows come from the keeper (stopRows: a read, no file).
+    'browsers.stop': async (args, ctx) => {
+      if (!browsers || typeof browsers.rows !== 'function' || typeof browsers.stop !== 'function') return { ok: false, code: 'not_ready', why: 'the browser keeper is not wired yet' };
+      let rows = null; try { rows = browsers.rows(); } catch { rows = null; }
+      if (!Array.isArray(rows)) return { ok: false, code: 'not_ready', why: 'the browser keeper did not answer — nothing was stopped' };
+      const row = rows.find((r) => r && r.id === args.id) || null;
+      if (!row) return { ok: false, code: 'already_stopped', why: 'no running browser by that id — nothing was stopped', target: args.id };
+      const holders = (Array.isArray(row.holders) ? row.holders : []).map((h) => {
+        const s = h && h.sessionId ? activeSessions.get(h.sessionId) || null : null;
+        let granted = false;
+        if (s) { try { const v = ctx.reach({ conversationId: idOf(s), webuiId: h.sessionId, groups: groupsOfLive(s, h.sessionId) }); granted = !!(v && v.ok); } catch { granted = false; } }
+        return { turn: h && h.turn !== undefined ? h.turn : null, granted };
+      });
+      const v = require('../browser-profiles.js').stopVerdict({ live: true, takenOver: typeof row.takenOver === 'boolean' ? row.takenOver : null,
+        watched: Number.isInteger(row.viewers) ? row.viewers > 0 : null, personBrowsing: typeof row.personBrowsing === 'boolean' ? row.personBrowsing : null, holders });
+      if (!v.stop) return { ok: false, code: v.code, why: v.why, target: row.name || row.id };
+      try { await browsers.stop(row.id); } catch (e) { return { ok: false, code: 'failed', why: `the keeper could not stop it — ${(e && e.message) || 'no reason given'}`, target: row.name || row.id }; }
+      return { ok: true, id: row.id, kind: row.kind, tabs: row.tabsKept ? 'Its tabs reopen at the next browser command.' : 'Its tabs close; its sign-ins stay.' };
     },
     'groups.invite': async (args, ctx) => {
       const t = reached(args.target, ctx);

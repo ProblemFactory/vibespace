@@ -187,6 +187,10 @@ const SCOPES = Object.freeze([
   // the door the end verb's refusal names (src/server/end-proposals.js)
   Object.freeze({ verb: 'conversations.propose', layer: 'act', billed: false, label: 'Propose ending conversations to the person',   // ui-words: a verb's label, worded through t() by the key's window
     args: (a) => argsOf(a, { targets: (v) => idListArg(v, 'targets', { max: 20 }), why: (v) => textArg(v, 'why', { max: 200 }) }) }),
+  // lane browsers-stop (majordomo piece 6): stop ONE running browser by the id conversations.list printed, through the keeper's
+  // own stop — refused while anybody uses it (src/browser-profiles.js stopVerdict); a conversation's own browser keeps its tabs
+  Object.freeze({ verb: 'browsers.stop', layer: 'act', billed: false, label: 'Stop a browser',
+    args: (a) => argsOf(a, { id: (v) => idArg(v, 'id') }) }),
   // lane feedback-handled-verb: the owner's «Mark handled» on an agent's feedback report, naming the release that shipped
   // the fix (+ a note); and the OPEN reports with their ids — a READ (another agent's words: belted at the hub)
   Object.freeze({ verb: 'feedback.handled', layer: 'act', billed: false, label: "Mark an agent's feedback handled",
@@ -716,6 +720,7 @@ const FAMILIES = Object.freeze([
   // ui-words: a t() key — the popover's family head (zh / ja rows exist); the manager design's piece 7: jobs.wakeGrant
   Object.freeze({ id: 'jobs', label: 'Background Work' }),
   Object.freeze({ id: 'feedback', label: 'Feedback' }),
+  Object.freeze({ id: 'browsers', label: 'Browsers' }), // lane browsers-stop (majordomo piece 6)
 ]);
 const familyOf = (verb) => { const f = str(verb).split('.')[0]; return FAMILIES.some((x) => x.id === f) ? f : 'other'; };
 /** A key's verbs grouped by family, in the table's order → [{ id, label, verbs: [verb…] }] (a family it holds none of is absent). */

@@ -1144,6 +1144,36 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function browserIdentityOf(profileId, { url = '' } = {}) { ensureLoaded(); return browserIdentityOfRecord(reg.browsers[String(profileId || '')] || null, url); }
   function leasesFor(browserKey, opts) { ensureLoaded(); return B.leasesOf(reg.leases, browserKey, opts).map(leaseView); }
   function leasesOn(profileId) { ensureLoaded(); return reg.leases.filter((l) => l.profileId === profileId).map(leaseView); }
+  /**
+   * lane browsers-stop (majordomo piece 6): every RUNNING browser with the facts browsers.stop's verdict reads — a READ (no
+   * file, no registry write; the leases through leasesOn, a CONVERSATION reader). A conversation's OWN browser has its owner
+   * as its one holder (tabsKept: its tabs reopen at that conversation's next command); a named profile's holders are its
+   * leases, and the person's own browsing is its human row. turn = the holder's turn as the idle release reads it (null =
+   * unknown). Nothing here judges: src/browser-profiles.js stopVerdict does, with the key's reach over the holders.
+   */
+  function stopRows() {
+    ensureLoaded();
+    const out = [];
+    for (const p of reg.profiles) {
+      const rec = reg.browsers[p.id];
+      if (!B.isLiveBrowser(rec) || stopping.has(p.id)) continue;
+      const own = isEph(p);
+      const scope = own ? null : p.id;
+      const keys = own ? [p.owner.id] : [...new Set(leasesOn(p.id).map((l) => l.browserKey))];
+      const sessionOf = (bk) => { const l = leasesOn(p.id).find((x) => x.browserKey === bk); return l ? l.sessionId || null : null; };
+      const holders = keys.map((bk) => { const f = convFacts(bk); return { browserKey: bk, sessionId: sessionOf(bk), turn: f.turn === undefined ? null : f.turn }; });
+      const takenOver = keys.some((bk) => inputStateFor(bk, scope).input === 'user' || !!openRequestFor(bk, scope));
+      const human = own ? null : humanOf(p.id);
+      const viewers = keys.reduce((n, bk) => n + (watchers.get(inputKey(bk, scope)) || 0), 0) + (human ? Number(human.viewers) || 0 : 0);
+      const u = live.get(p.id);
+      out.push({ id: p.id, kind: own ? 'own' : 'profile', name: p.label || null, running: true, memBytes: u && Number.isFinite(u.memBytes) ? u.memBytes : null,
+        lastCommandAt: Number.isFinite(p.lastVerbAt) ? p.lastVerbAt : null, holders, takenOver, viewers, personBrowsing: !!human, tabsKept: own });
+    }
+    return out;
+  }
+  /** lane browsers-stop: the manager's stop — the keeper's own stop under its own closed reason (`manager`: an automatic stop
+   *  for the kept tabs, never a deliberate one — a conversation's own browser reopens its tabs at its next command). */
+  function managerStop(profileId) { return stop(profileId, { why: 'manager' }); }
 
   // ── profiles ──
   function mintId() { for (;;) { const id = B.mintProfileId(crypto.randomBytes(4).toString('hex')); if (!reg.profiles.some((p) => p.id === id)) return id; } }
@@ -8851,6 +8881,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     machineDisplay, machineDisplayCached, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
     reshapeStore: (fn) => { ensureLoaded(); refuseIfHeld('a migration of the profile registry'); const r = fn(reg); commit(); landedOrThrow(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save — ON DISK before it returns, else it THROWS by name (lane lg-store-writes U5b: the boot's next migration may read the file)
     diskOf: (id) => { ensureLoaded(); return disk.diskOf(profile(id)); }, _disk: disk, // lane browser-disk-sample: THE disk fact (the panel row, GET /api/browser/profiles)
+    stopRows, managerStop, // lane browsers-stop (majordomo piece 6)
     usageOf: (id) => { const l = live.get(id); return l ? { ...l } : null; }, // 2026-09-25: the Browser panel's memory cell (memBytes + memMetric, over)
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam
     ensureEphemeral, retireEphemeral, ephemerals, ephemeralFor, isEphemeral: (id) => isEph(profile(id)), nsOf,

@@ -2723,7 +2723,8 @@ await section(async () => {
   //  (3) outside the sampled block the file never reads the verdict's facts (`.over`, `.overKind`, `.report`).
   // + 'turn-idle' (MULTIVIEW B-325a, docs/design-browser-multiview.zh.md §4): the release of a conversation's ephemeral
   //   browser a few minutes after its TURN ended — a lifecycle why, never a resource one (the verdict is not read there)
-  const STOP_WHYS = ['user', 'idle', 'relaunch', 'switch', 'conversation gone', 'child handle dropped', 'turn-idle'];
+  // + 'manager' (lane browsers-stop, majordomo piece 6): browsers.stop — a lifecycle why (the stop verdict reads no resource fact)
+  const STOP_WHYS = ['user', 'idle', 'relaunch', 'switch', 'conversation gone', 'child handle dropped', 'turn-idle', 'manager'];
   const argsAt = (t, i) => { let d = 0, j = i; for (; j < t.length; j++) { const c = t[j]; if (c === '(') d++; else if (c === ')' && --d === 0) break; } return t.slice(i + 1, j); };
   const sampledBlock = (t) => {
     const m = /const (\w+) = RG\.resourceVerdict\(/.exec(t); if (!m) return null;

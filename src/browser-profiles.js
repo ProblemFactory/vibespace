@@ -2482,6 +2482,34 @@ function idleReleaseVerdict({ live = false, turn = null, idleSince = null, now =
   if (t - since < Number(releaseMs)) return { release: false, idleSince: since, why: 'turn ended ' + Math.round((t - since) / 1000) + ' s ago' };
   return { release: true, idleSince: since, why: `the turn ended ${Math.round((t - since) / 60000)} min ago` };
 }
+/**
+ * MAY AN AGENT STOP THIS BROWSER? (lane browsers-stop, majordomo piece 6 — `browsers.stop`) The facts the idle release above
+ * refuses on (a turn that runs or is unknown, the user drives it, a live view watches it), plus the person's own browsing and
+ * the key's reach over every holder. EVERY UNKNOWN REFUSES. → { stop, code, why } — `code` null when it may stop. Each
+ * refusal names the person's door. A person's own Stop overrides all of it (it never comes through here).
+ *   live           true | false | null      (null = not known whether it runs)
+ *   takenOver      the person drives it, or a request is open to them
+ *   watched        a live view is open on it
+ *   personBrowsing the person browses in it themselves (a named profile)
+ *   holders        [{ turn: 'idle'|'running'|'waiting'|null, granted: bool }] — the conversations that hold it
+ */
+const STOP_DOOR = 'A person can stop it from System → Conversations and browsers (Stop on its row).';
+function stopVerdict({ live = null, takenOver = null, watched = null, personBrowsing = null, holders = null } = {}) {
+  const no = (code, why) => ({ stop: false, code, why: `not stopped — ${why}. ${STOP_DOOR}` });
+  if (live === false) return { stop: false, code: 'already_stopped', why: 'it is not running — nothing to stop' };
+  if (live !== true) return no('browser_unknown', 'whether it runs is unknown');
+  if (takenOver === true) return no('person_driving', 'a person drives it (a takeover, or a request open to them)');
+  if (takenOver !== false) return no('person_driving', 'whether a person drives it is unknown');
+  if (watched === true) return no('watched', 'a live view is open on it');
+  if (watched !== false) return no('watched', 'whether a live view is open is unknown');
+  if (personBrowsing === true) return no('person_browsing', 'a person browses in it');
+  if (personBrowsing !== false) return no('person_browsing', 'whether a person browses in it is unknown');
+  if (!Array.isArray(holders)) return no('holder_busy', 'which conversations hold it is unknown');
+  if (holders.some((h) => !h || h.granted !== true)) return no('not_granted', 'a conversation outside this key\'s reach holds it');
+  const busy = holders.find((h) => h.turn !== 'idle');
+  if (busy) return no('holder_busy', busy.turn === 'running' || busy.turn === 'waiting' ? `a holding conversation's turn is ${busy.turn} — it may be mid-command` : 'a holding conversation\'s turn is unknown — it may be mid-command');
+  return { stop: true, code: null, why: 'nobody uses it: every holder is idle, no person drives, watches or browses in it' };
+}
 // NO RESOURCE VERDICT AND NO PARK HERE (2026-09-25): the per-provider
 // thresholds and the verdict live in src/runaway-guard.js, and for a browser a
 // person or an agent is using they only REPORT (the owner's ruling) — this
@@ -3639,7 +3667,7 @@ module.exports = {
   LEASE_DROP_GRACE_MS, reconcileLeases,
   LIVE_BROWSER_STATES, isLiveBrowser, browserIdle, ceilingVerdict,
   // MULTIVIEW D4 / B-325a: the per-conversation cap + the release after the turn
-  CONVERSATION_CAP_DEFAULT, CONVERSATION_CAP_MIN, CONVERSATION_CAP_MAX, clampConversationCap, conversationCapFor, conversationCapVerdict, DEFAULT_IDLE_RELEASE_MS, idleReleaseMs, idleReleaseVerdict,
+  CONVERSATION_CAP_DEFAULT, CONVERSATION_CAP_MIN, CONVERSATION_CAP_MAX, clampConversationCap, conversationCapFor, conversationCapVerdict, DEFAULT_IDLE_RELEASE_MS, idleReleaseMs, idleReleaseVerdict, stopVerdict, STOP_DOOR,
   pidVerdict, adoptVerdict, attachedEnvFor, isLoopbackCdpUrl,
   pidLiveness, userDataDirsOf, sameDir, profileLockVerdict, profileLockedRefusal, // lane H verify r2: liveness vs signalling, the orphaned-browser lock
   launchHostsOf, withLaunchHost, renamedFromFact, RENAMED_SHOWN_MS, cleanHost, HOST_MAX, // lane profile-lock-roll: the launch-host lineage, the takeover a profile shows for a day
