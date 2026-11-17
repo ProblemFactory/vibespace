@@ -47,6 +47,8 @@ const STORES = Object.freeze({
   'channels-outbox.write': row('write', 'channels/outbox', 'src/channel-store.js', ['outboxUpdate']),
   'channels-groups.write': row('write', 'channels/groups', 'src/channel-store.js', ['groupsUpdate']),
   'channels-aliases.write': row('write', 'channels/aliases', 'src/channel-store.js', ['aliasesUpdate']),
+  'channels-wake-pace.write': row('write', 'channels/wake-pace', 'src/channel-store.js', ['paceSet']),   // lane lg-store-writes (B-0248 U3): the groups' wake-pace ledger — paced
+  'channels-dispatch.write': row('write', 'channels/dispatch-ledger', 'src/channel-store.js', ['dispatchSet']),   // lane lg-store-writes (B-0248 U3): the dispatch ledger — an act
   'channels-people.write': row('write', 'channels/<account>/people', 'src/channel-store.js', ['peopleWrite']),
   'channels-stamps.write': row('write', 'channels/poll-stamps', 'src/channel-store.js', ['oweStamps', 'stampsFlush']),
   'decision-memo.write': row('write', 'decision-memo', 'src/server/decision-engine.js', ['saveMemo']),   // through the store writer (lane lg-store-writes, B-0248 U1: the judge's memo — paced, the hub's own cache)

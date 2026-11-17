@@ -8,7 +8,8 @@
 //       main thread STALL_MS in EVERY synchronous write-family fs call under the store's dir (the doors this unit LISTS,
 //       not moves, are counted by name and not stalled; the poll-stamps journal is the named exception). The drive is one
 //       real pass of the fake adapter (append, stamp, journal) plus the doors' own calls (a group verb, an alias, an
-//       outbox attempt, a new account's people, wake pace, dispatch, audit, the stamps' flush). The measure: a 10 ms
+//       outbox attempt, a new account's people, wake pace, dispatch, audit, the stamps' flush — wake pace and dispatch MOVED
+//       doors since lg-store-writes U3). The measure: a 10 ms
 //       timer's lateness and the stalled calls by name. RED on d7f42cc21 (2.369.404): the moved doors' calls stall it.
 //   (b) A SLOW WRITER (a stand-in thread that holds a write): a PACED stamp resolves at once (its bytes not on disk yet);
 //       a DURABLE act resolves only when its bytes are on disk; «queued» at the writer's bound never rejects; a FAILED
@@ -48,7 +49,7 @@ const STALL_MS = 400, TICK_MS = 10;
 /** the worst lateness of a TICK_MS interval timer between start and stop */
 function lateMeter() { let last = performance.now(), worst = 0; const t = setInterval(() => { const n = performance.now(); worst = Math.max(worst, n - last - TICK_MS); last = n; }, TICK_MS); return { stop() { clearInterval(t); return Math.round(worst); } }; }
 // THE ROWS THIS UNIT LISTS (not moved — scripts/test-store-write-census.mjs names each) and the named exception, by path
-const LISTED = [[/^msgs\//, 'message logs'], [/^audit\.ndjson$|^archive\//, 'audit'], [/^wake-pace\.json/, 'wake pace'], [/^dispatch-ledger\.json/, 'dispatch ledger'],
+const LISTED = [[/^msgs\//, 'message logs'], [/^audit\.ndjson$|^archive\//, 'audit'],
   [/^attachments\//, 'lru / attachment metas'], [/\/search-memo\.json/, 'search memo'], [/\/feed-misses\.json/, 'feed miss'], [/^outbox-files\//, 'outbox files'], [/^poll-stamps\.log$/, 'THE JOURNAL (the named exception)']];
 const rowOf = (dir) => (p) => { const r = path.relative(dir, p); const hit = LISTED.find(([re]) => re.test(r)); return hit ? hit[1] : null; };
 
@@ -75,6 +76,9 @@ const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
     st.peopleWrite('fake-new-acct', { self: 'me', people: { u1: { name: 'One' } } });
     st.pace.set({ v: 1, pairs: { a: 1 }, senders: {} }); st.pace.flush();
     st.dispatch.set({ v: 1, entries: { d: { at: 1 } } }); st.dispatch.flush();
+    // lane lg-store-writes (B-0248 U3): the wake-pace and dispatch ledgers are MOVED doors now (no longer listed): their
+    // flush lands through the writer's thread — the stall above would see any main-thread call of theirs
+    r.paceOnFlush = readJson(path.join(dir, 'wake-pace.json')); r.dispatchOnFlush = readJson(path.join(dir, 'dispatch-ledger.json'));
     st.audit({ at: Date.now(), kind: 'loop-free', who: 'suite' });
     st.stamps.set('fake-poll/fake-poll-ops', { lastPollAt: 1234 }); st.stamps.flush();
     await sleep(300);   // the writer's paced writes (people, the pass stamp) land on its thread while the meter runs
@@ -85,7 +89,9 @@ const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
   info(`the timer's worst lateness ${r.late} ms (a stall is ${STALL_MS} ms); ${S.calls.filter((c) => c.kind === 'write').length} write-family calls under the dir — stalled ${stalled.length}, listed ${listed.length} ${JSON.stringify(byRow)}; ${S.calls.filter((c) => c.kind === 'read').length} reads counted`);
   ok(stalled.length === 0, `(a) NO main-thread synchronous call of a moved door under the store's dir (adapters, groups, the outbox, the aliases, a new account's people + its directory, the poll-stamps snapshot)${stalled.length ? ` — STALLED: ${names.slice(0, 12).join(' · ')}` : ''}`, names);
   ok(r.late < STALL_MS, `(a) the timer was never held a stall's length: worst lateness ${r.late} ms < ${STALL_MS} ms (one stall)`, { late: r.late });
-  ok(byRow['message logs'] > 0 && byRow['THE JOURNAL (the named exception)'] > 0 && byRow['wake pace'] > 0 && byRow['dispatch ledger'] > 0 && byRow.audit > 0, '(a) the drive was real: the pass appended records, its stamps reached the journal, wake pace / dispatch / audit wrote — each a LISTED row, counted by name', byRow);
+  ok(byRow['message logs'] > 0 && byRow['THE JOURNAL (the named exception)'] > 0 && byRow.audit > 0, '(a) the drive was real: the pass appended records, its stamps reached the journal, wake pace / dispatch / audit wrote — each a LISTED row, counted by name', byRow);
+  ok(!!(r.paceOnFlush && r.paceOnFlush.pairs && r.paceOnFlush.pairs.a === 1 && r.dispatchOnFlush && r.dispatchOnFlush.entries && r.dispatchOnFlush.entries.d),
+    '(a) U3 (B-0248): the wake-pace and dispatch ledgers are MOVED doors — no main-thread call of theirs under the stall, and each file holds its bytes once its flush() returns (through the writer)', { pace: r.paceOnFlush, dispatch: r.dispatchOnFlush });
   const gOk = r.groupsOnResolve && r.groupsOnResolve.groups && r.groupsOnResolve.groups['g-loop'], oOk = r.outboxOnResolve && r.outboxOnResolve.proposals && r.outboxOnResolve.proposals['p-loop-1'] && r.outboxOnResolve.proposals['p-loop-1'].attemptAt === 77;
   const aOk = r.adaptersOnResolve && (r.adaptersOnResolve.adapters || []).some((x) => x.id === 'fake-poll' && x.label === 'loop-free');
   ok(!!(gOk && oOk && aOk), '(a) each awaited DURABLE update\'s file holds its change when its promise resolves (a group verb, an outbox attempt, an adapter record)', { gOk: !!gOk, oOk: !!oOk, aOk: !!aOk });
