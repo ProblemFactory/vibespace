@@ -586,12 +586,12 @@ function parseVaultFillSpec(rawSpec, { user = null, generate = false, tabOrigin 
 }
 
 function grantWords(code, origin, isNew = false, targetUser = '') {
-  if (code === 'excepted') return `the owner left this conversation out of the logins it may use on ${origin} — only they lift that, in the Vault window (Web logins → Use for…)`;
+  if (code === 'excepted') return `the owner left this conversation out of the logins it may use on ${origin} — only they lift that, in the Vault window: Web logins → the login's «Use for…», or the header's «Any account on a site…» / «Any site…», where it was left out`;
   if (code === 'groups_unreadable') return 'the Task Group list could not be read just now, so no login is filled (never «not in any group») — try again in a moment';
   if (code === 'unknown_shape') return 'a permission row for web logins could not be read, so none is filled — the owner sees it in the Vault window';
   return isNew
-    ? `this conversation is not granted «Any account on ${origin}» (or «Any site») to register ${targetUser} — ask the owner under Vault → Web logins → Use for…`
-    : `this conversation may not use a saved login on ${origin} — the owner grants it in the Vault window (Web logins → Use for…: this account, any account on this site, or any site)`;
+    ? `this conversation is not granted «Any account on ${origin}» (or «Any site») to register ${targetUser} — ask the owner: Vault → Web logins, the header's «Any account on a site…» (or «Any site…»)`
+    : `this conversation may not use a saved login on ${origin} — the owner grants it in the Vault window: Web logins → the login's «Use for…» for that account, or the header's «Any account on a site…» / «Any site…»`;
 }
 
 /** Pure security verdict for `fill --vault` (gate order M1: vault lock -> entry & grant -> browser origin -> frame/element). */
@@ -985,24 +985,37 @@ function noticeWords(state, { origin = '', username = '', conversation = '', tar
 function byWhatOf({ rows = {}, subjects = [] } = {}) {
   const order = [['this-account', rows.thisAccount], ['any-account', rows.anyAccount], ['any-site', rows.anySite]];
   const out = {};
-  for (const s of Array.isArray(subjects) ? subjects : []) {
+  // a conversation a row NAMES that is not running (not among the subjects) is a subject too — the dialog draws it «not running
+  // now», ticked by the row that holds it (its Task Groups are not known here: it is probed by its own key)
+  const all = Array.isArray(subjects) ? [...subjects] : [];
+  const have = new Set(all.map((s) => s && s.key));
+  for (const [, rs] of order) for (const r of Array.isArray(rs) ? rs : []) for (const e of (r && Array.isArray(r.to) ? r.to : [])) {
+    const k = e && e.kind === 'conversation' && e.key ? `conversation:${e.key}` : null;
+    if (k && !have.has(k)) { have.add(k); all.push({ key: k, facts: { conversationKey: String(e.key) } }); }
+  }
+  for (const s of all) {
     if (!s || !s.key) continue;
     const by = order.filter(([, rs]) => Array.isArray(rs) && rs.length && GM.admits(rs, s.facts || {}).ok).map(([scope]) => scope);
     if (by.length) out[String(s.key)] = by;
   }
   return out;
 }
+/** A conversation key NO row can hold (GM's CONVERSATION_KEY_RE starts with a letter or a digit): the probe of a Task Group and of
+ *  Everyone. The grant model counts an Everyone entry only for a caller that HAS a key (主开发 22:41Z, MUST 1: probed with empty facts,
+ *  «by what» never named Everyone, so a login's dialog drew Everyone unticked while the star row held it). */
+const BY_WHAT_PROBE = '#by-what';
 /** The subjects of the Vault's grant dialogs (the hub's `subjects()`: sessions with their Task Groups, the groups) → [{ key, facts }] for
- *  byWhatOf — a conversation by its own key and groups, a group as a member of it, Everyone as nobody in particular. */
+ *  byWhatOf — a conversation by its own key and groups; a group as a member of it that no row names; Everyone as such a caller in no
+ *  group. The verdict is still the grant model's own. */
 function byWhatSubjects(subjects = {}) {
   const out = [];
   for (const s of (subjects && subjects.sessions) || []) { const k = GM.keyFromSubject(s && s.subject); if (k) out.push({ key: `conversation:${k}`, facts: { conversationKey: k, groupIds: Array.isArray(s.groupIds) ? s.groupIds : [] } }); }
-  for (const g of (subjects && subjects.groups) || []) { const m = /^group:(.+)$/.exec(str(g && g.subject)); if (m) out.push({ key: `group:${m[1]}`, facts: { groupIds: [m[1]] } }); }
-  out.push({ key: 'everyone', facts: {} });
+  for (const g of (subjects && subjects.groups) || []) { const m = /^group:(.+)$/.exec(str(g && g.subject)); if (m) out.push({ key: `group:${m[1]}`, facts: { conversationKey: BY_WHAT_PROBE, groupIds: [m[1]] } }); }
+  out.push({ key: 'everyone', facts: { conversationKey: BY_WHAT_PROBE } });
   return out;
 }
 module.exports = {
-  byWhatOf, byWhatSubjects,
+  byWhatOf, byWhatSubjects, BY_WHAT_PROBE,
   PREFIX, DOOR, USER_MAX, GENERATED_LEN, TEXT_MAX, NOTES_MAX, PENDING_REMIND_MS,
   VAULT_FIELDS, TYPED_SLOTS, BY, SOURCES, STRENGTHS, PENDING_KINDS, REFUSALS, LIVE_FILL_ALLOW_VERBS,
   NAME_RE, ORIGIN_RE, ENTRY_GEN_RE, CLASSES, NOTICE,

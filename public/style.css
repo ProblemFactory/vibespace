@@ -9438,6 +9438,9 @@ button.vw-chip { cursor: pointer; }
 .vw-login-site-n, .vw-login-site-held { flex: 0 0 auto; font-size: 11px; color: var(--text-dim); }
 .vw-login-consequence { margin-bottom: 6px; }
 .vw-login-refusal { color: var(--warn-text); }
+/* the grant dialogs are form windows of their own, outside the Vault window's `.vw [hidden]`: a hidden press stays hidden (.vw-btn sets display) */
+.vw-login-grant-dialog [hidden], .vw-login-site-pick [hidden], .vw-login-totp-dialog [hidden] { display: none; }
+.pp-lock-door { margin-left: auto; flex: 0 0 auto; }
 /* lane vault-use-grants: «Who may use it» — the members as the key / login chips, the door under them (the door column keeps its width) */
 .vw-use-host { display: flex; flex-direction: column; gap: 3px; }
 .vw-use .vw-use-grant { align-self: flex-start; }

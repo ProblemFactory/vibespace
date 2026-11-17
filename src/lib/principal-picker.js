@@ -239,6 +239,11 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     n.classList.toggle('pp-disabled', !!r.disabled || !!lk);
     if (r.disabled || lk) n.setAttribute('aria-disabled', 'true'); else n.removeAttribute('aria-disabled');
     { const w = n.querySelector(':scope > .pp-lock-why'); if (lk && lk.why && !w) n.appendChild(el('span', 'pp-hint pp-lock-why', lk.why)); else if (!lk && w) w.remove(); }
+    { // a locked row names its door as its chip does — the press opens the wider grant's own dialog
+      const d = n.querySelector(':scope > .pp-lock-door');
+      if (lk && lk.door && !d) { const b = document.createElement('button'); b.type = 'button'; b.className = 'pp-chip-door pp-lock-door'; b.textContent = lk.door.label; b.addEventListener('mousedown', (ev) => ev.preventDefault()); b.onclick = (ev) => { ev.stopPropagation(); try { lk.door.run(); } catch { /* the door's own */ } }; n.appendChild(b); }
+      else if (!lk && d) d.remove();
+    }
     n.classList.toggle('pp-active', active === String(r.key));
     return n;
   }
@@ -258,7 +263,8 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     const { recent, rest } = PM.rankRecent(shown, recentAtOpen.map((idn) => { const r = rows.find((x) => PM.identityOf(x) === idn); return r ? r.key : null; }).filter((k) => k != null));
     const out = [];
     visibleKeys = [];
-    const add = (r) => { out.push(rowNode(r)); if (!r.disabled) visibleKeys.push(String(r.key)); };
+    const lkNow = lockedNow();
+    const add = (r) => { out.push(rowNode(r)); if (!r.disabled && !lkNow.has(String(r.key))) visibleKeys.push(String(r.key)); };   // ↑/↓ and Enter skip a locked row (its door is its own press)
     const secs = PM.groupPrincipals(rest);
     // ALL AGENTS first — above Recent, whatever the query
     for (const s of secs) if (s.kind === 'everyone') s.rows.forEach(add);

@@ -15,7 +15,7 @@ import { principalPicker } from './principal-picker.js';
 import { rowToPick, pickToRow } from './principal-picker-model.js';
 import { showUnlock } from './vault-unlock.js';
 import { loadTotp } from './vault-totp-row.js';
-import { EVERYONE_KEY, rosterFromSubjects, lockedFor, rowAt, savePlan, sitesOf, wideSummary, principalKeyOf, heldFacts } from './login-grant-model.js';
+import { EVERYONE_KEY, rosterFromSubjects, lockedPlan, rowAt, savePlan, sitesOf, wideSummary, principalKeyOf, heldFacts } from './login-grant-model.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const post = (url, body = {}) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -50,13 +50,24 @@ function grantDialog({ id, scope, resource, name, title, head = null, consequenc
   // not the subject: data — the vault's catalog (its entries and subjects), the same for every dialog
   // not the subject: data.entries — the vault's logins (where the stored row is read)
   // not the subject: data.subjects — the conversations and groups the picker offers
+  // not the subject: byWhat — the hub's verdict for the resource's logins: what is drawn locked, never what the key chooses
   const { body, close, raised } = createModalShell({ id, kind: 'form', key: resource, title, dialogClass: 'vault-dialog-box vw-ak-dialog vw-login-grant-dialog', escapeToClose: true,
     unsaved: { isDirty: () => start !== null && stateOf() !== start, save: () => doSave() } });
   if (raised) return null;
   if (head) body.append(head);
   body.append(el('div', 'vw-ak-hint vw-login-consequence', consequence));
-  const locked = lockedFor(byWhat || {}, scope, EVERYONE_KEY).map((l) => ({ key: l.key, why: throughWords(l.through), door: { label: doorWords(l.through), run: () => openWider && openWider(l.through) } }));
-  picker = principalPicker({ items: () => [...roster, ...extra.filter((x) => !roster.some((r) => r.key === x.key))], multi: true, selected: drawn.selected,
+  // what «by what» says, drawn (主开发 22:41Z): a subject only a wider row admits — locked «through» it, with its door; one that also
+  // holds THIS row — ticked and removable, «also through» beside it; Everyone held wider — ONE line, not one chip per conversation
+  const plan = lockedPlan(byWhat || {}, scope, EVERYONE_KEY);
+  const locked = plan.locked.map((l) => ({ key: l.key, why: throughWords(l.through), door: { label: doorWords(l.through), run: () => openWider && openWider(l.through) } }));
+  const alsoHint = new Map(plan.also.map((l) => [l.key, l.through === 'any-site' ? t('also through: any site') : t('also through: any account on this site')]));
+  // a conversation a wider row holds that is not running has its row too — «not running now» (its name as the row stored it)
+  const nameIn = (pk) => { for (const g of grants) for (const p of g.to || []) if (p && p.kind === 'conversation' && `conversation:${p.key}` === pk && p.name) return String(p.name); return null; };
+  const own = [...roster, ...extra.filter((x) => !roster.some((r) => r.key === x.key))];
+  const stopped = [...plan.locked, ...plan.also].filter((l) => l.principal.startsWith('conversation:') && !own.some((r) => r.key === l.key))
+    .map((l) => { const id = l.principal.slice(13); return { key: l.key, kind: 'agent', id, name: nameIn(l.principal) || id.slice(0, 8), hint: words.notRunning, groupIds: [], groupNames: [] }; });
+  const items = [...own, ...stopped].map((r) => (alsoHint.has(r.key) ? { ...r, hint: [r.hint, alsoHint.get(r.key)].filter(Boolean).join(' · ') } : r));
+  picker = principalPicker({ items: () => items, multi: true, selected: drawn.selected,
     placeholder: t('Search conversations and groups…'), label: t('Who may have it filled'), emptyText: t('No conversation is running'),
     everyone: { key: EVERYONE_KEY, name: t('Everyone'), hint: t('every conversation on this instance, now and later') }, except: { selected: held, extra }, locked });
   body.append(el('div', 'vw-ak-sec', t('Who')), picker.el);

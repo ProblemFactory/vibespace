@@ -62,6 +62,21 @@ export function lockedFor(byWhat = {}, scope = 'this-account', everyoneKey = EVE
   return out;
 }
 
+/** WHAT THE DIALOG FOR `scope` DRAWS from «by what» (主开发 22:41Z, shoulds a and d) → { locked, also, covered }:
+ *  · `also` — a subject that holds its OWN grant at this row AND a wider one: ticked and REMOVABLE here (its own grant is this row's,
+ *    and it stays in force once the wider one goes), the «through» note beside it;
+ *  · `locked` — a subject only a WIDER row admits: ticked and locked «through» it, with its door;
+ *  · with Everyone held by a wider row, ONE line for Everyone — the subjects it covers through that same row are not drawn one by one
+ *    (`covered` = how many); a subject through a narrower wider row keeps its own line. */
+export function lockedPlan(byWhat = {}, scope = 'this-account', everyoneKey = EVERYONE_KEY) {
+  const own = (p) => (Array.isArray((byWhat || {})[p]) ? byWhat[p] : []).includes(scope);
+  const all = lockedFor(byWhat, scope, everyoneKey);
+  const also = all.filter((l) => own(l.principal)), wide = all.filter((l) => !own(l.principal));
+  const ev = wide.find((l) => l.principal === 'everyone');
+  const locked = ev ? wide.filter((l) => l === ev || l.through !== ev.through) : wide;
+  return { locked, also, covered: wide.length - locked.length };
+}
+
 /** The stored row of one resource among a login's reaching grants (`entry.grants`: {resource, scope, to, except}) → {to, except}. */
 export function rowAt(grants = [], resource) {
   const g = (Array.isArray(grants) ? grants : []).find((x) => x && !x.unknown && x.resource === resource);

@@ -11281,6 +11281,8 @@ export default {
   "Dismissed": "無視しました",
   "through: any site": "経由：任意のサイト", // the owner 2026-11-17: who may have a web login filled
   "through: any account on this site": "経由：このサイトの任意のアカウント", // the owner 2026-11-17: who may have a web login filled
+  "also through: any site": "任意のサイト経由でも", // the owner 2026-11-17: who may have a web login filled
+  "also through: any account on this site": "このサイトの任意のアカウント経由でも", // the owner 2026-11-17: who may have a web login filled
   "Any site…": "任意のサイト…", // the owner 2026-11-17: who may have a web login filled
   "Any account on this site…": "このサイトの任意のアカウント…", // the owner 2026-11-17: who may have a web login filled
   "VibeSpace never hands them the password and types it only on the matching site into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls.": "VibeSpace はパスワードを渡さず、一致するサイトのパスワード欄またはコード欄にだけ入力します。誤った読み取りや違うサイトは防ぎますが、自分が操作するページを意図的に調べるエージェントまで防ぐとは約束しません。", // the owner 2026-11-17: who may have a web login filled

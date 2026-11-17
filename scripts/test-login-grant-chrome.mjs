@@ -3,9 +3,10 @@
 // 选项会影响下面的表格内容，容易引起困惑。另外这里配置apply之后似乎会直接对所有网站login生效？» and «这里也无法显示除了密码之外的信息，
 // 比如绑定了哪个两步验证码»). HEAVY (chrome). The REAL modules (src/lib/vault-login-grants.js, vault-login-row.js loginExtras, the house
 // picker, the real createModalShell) bundled by esbuild, the REAL public/style.css, loopback stand-in routes that record what Save posts
-// — in zh (the owner's language), at 280 / 390 / 768 / 1440:
+// — in zh (the owner's language), at 280 / 360 / 768 / 960 / 1440. Every step waits on the PAGE's state, never a sleep:
 //   ① a login's 用于… is about THAT login: no radio, its title, the picker; a conversation the star row admits is a LOCKED chip
-//      «经由：任何网站» with its door and no ✕, its list row ticked and inert (a press changes nothing); the dialog fits each width;
+//      «经由：任何网站» with its door and no ✕, its list row ticked, inert and carrying the same door; nothing overflows INSIDE the
+//      dialog; the refusal line and its door are not drawn before a refusal (主开发 22:41Z MUST 2);
 //   ② the locked row's door opens «任何网站…» as its own dialog, with its own consequence;
 //   ③ Save posts THIS login's row only (scope this-account) — the ticked conversation, nothing at a wider scope;
 //   ④ the unsaved guard: a tick then the ✕ asks in place, nothing posted;
@@ -14,8 +15,10 @@
 //   ⑥ a login's row: what it holds FIRST — the bound two-step code by name with its door (a login without one says «无» with «绑定…»),
 //      the kept previous password with when; a wider grant «经由» with NO ✕ and its door; its own grant keeps its ✕;
 //   ⑦ the top of the login's dialog — user name, site, the two-step code with its door; the door's dialog lists the vault's codes by
-//      name, «无» unbinds: POST /api/vault/web-logins/totp {name, totpName: null}, and the head then says «无».
-// LGD_SHOTS_DIR=<dir> also writes the pictures (390 and the desk) for the owner's look.
+//      name, «无» unbinds: POST /api/vault/web-logins/totp {name, totpName: null}, and the head then says «无»;
+//   ⑧ EVERYONE ON THE STAR ROW (MUST 1 + should d): a login's dialog draws ONE locked line «全部 · 经由：任何网站» with its door — not a
+//      chip per conversation — and a conversation that ALSO holds this login's own row stays ticked and removable, «也经由» beside it.
+// LGD_SHOTS_DIR=<dir> also writes the pictures (360 and 960) for the owner's look.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -44,21 +47,25 @@ const conv = (key) => ({ kind: 'conversation', key });
 const DAY = 86400000;
 const STAR = { resource: '*', scope: 'any-site', to: [conv('conv-b')], except: [] };
 const SITE = { resource: `${ORIGIN}#*`, scope: 'any-account', to: [{ kind: 'group', id: 'g1' }], except: [] };
+const OWN = { resource: `${ORIGIN}#alice`, scope: 'this-account', to: [conv('conv-a')], except: [] };
+const SUBJECTS = { sessions: [{ subject: 'session:conv-a', name: '采购助手', groupIds: [] }, { subject: 'session:conv-b', name: '全站代理', groupIds: [] }, { subject: 'session:conv-d', name: '新对话', groupIds: [] }], groups: [{ subject: 'group:g1', name: '商店组' }] };
+const alice = (grants, byWhat) => ({ name: `web-login:${ORIGIN}#alice`, origin: ORIGIN, user: 'alice', hasCurrent: true, hasPrevious: true, previousReplacedAt: Date.now() - 3 * DAY, totpName: 'shop-2fa', grants, byWhat });
 const DATA = {
-  ok: true, state: 'unlocked',
-  subjects: { sessions: [{ subject: 'session:conv-a', name: '采购助手', groupIds: [] }, { subject: 'session:conv-b', name: '全站代理', groupIds: [] }, { subject: 'session:conv-d', name: '新对话', groupIds: [] }], groups: [{ subject: 'group:g1', name: '商店组' }] },
+  ok: true, state: 'unlocked', subjects: SUBJECTS,
   entries: [
-    { name: `web-login:${ORIGIN}#alice`, origin: ORIGIN, user: 'alice', hasCurrent: true, hasPrevious: true, previousReplacedAt: Date.now() - 3 * DAY, totpName: 'shop-2fa',
-      grants: [{ resource: `${ORIGIN}#alice`, scope: 'this-account', to: [conv('conv-a')], except: [] }, SITE, STAR],
-      byWhat: { 'conversation:conv-a': ['this-account'], 'conversation:conv-b': ['any-site'], 'group:g1': ['any-account'] } },
+    alice([OWN, SITE, STAR], { 'conversation:conv-a': ['this-account'], 'conversation:conv-b': ['any-site'], 'group:g1': ['any-account'] }),
     { name: `web-login:${ORIGIN}#bob`, origin: ORIGIN, user: 'bob', hasCurrent: true, grants: [SITE, STAR], byWhat: { 'conversation:conv-b': ['any-site'], 'group:g1': ['any-account'] } },
     { name: `web-login:${MAIL}#me`, origin: MAIL, user: 'me', hasCurrent: true, grants: [STAR], byWhat: { 'conversation:conv-b': ['any-site'] } },
   ],
 };
+// EVERYONE ON THE STAR ROW — «by what» as the hub now answers it (Everyone, the group and every conversation through «any site»; A also
+// by this login's own row)
+const STAR_ALL = { resource: '*', scope: 'any-site', to: [{ kind: 'everyone' }], except: [] };
+const DATA_ALL = { ...DATA, entries: [alice([OWN, STAR_ALL], { everyone: ['any-site'], 'group:g1': ['any-site'], 'conversation:conv-a': ['this-account', 'any-site'], 'conversation:conv-b': ['any-site'], 'conversation:conv-d': ['any-site'] }), ...DATA.entries.slice(1)] };
 const entry = `import { showLoginGrantPicker, showAnySiteDialog, showAnyAccountDialog, wideHeaderDoors, loginHeld } from ${J('src/lib/vault-login-grants.js')};
 import { loginExtras } from ${J('src/lib/vault-login-row.js')};
-const DATA = ${JSON.stringify(DATA)};
 const q = new URLSearchParams(location.search), mode = q.get('mode') || 'login';
+const DATA = q.get('star') === 'everyone' ? ${JSON.stringify(DATA_ALL)} : ${JSON.stringify(DATA)};
 const doors = { held: loginHeld, grant: showLoginGrantPicker, anySite: showAnySiteDialog, anyAccount: showAnyAccountDialog };
 const rowOf = (e) => { const w = document.createElement('div'); w.className = 'vw-row'; w.style.margin = '12px'; w.dataset.login = e.name; const n = document.createElement('div'); n.className = 'vw-row-name'; n.textContent = e.user + ' · ' + e.origin.replace('https://', ''); const x = loginExtras({ entry: e.name }, DATA, { refresh: () => {}, doors }); w.append(n, x.box, ...x.doors); return w; };
 if (mode === 'login') showLoginGrantPicker(DATA.entries[0], DATA, { refresh: () => {} });
@@ -100,86 +107,98 @@ async function page({ vw, vh, mobile = false, query = '', sel }) {
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); } catch {}` });
   await cdp('Emulation.setDeviceMetricsOverride', { width: vw, height: vh, deviceScaleFactor: 2, mobile });
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
+  // WAIT ON THE PAGE's STATE (主开发 22:41Z, should e): an expression polled until truthy, a bounded number of looks — never a sleep standing for a state
+  const until = async (expr, looks = 160) => { let v = null; for (let i = 0; i < looks; i++) { v = await ev(expr).catch(() => null); if (v) return v; await sleep(50); } return v; };
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?${query}` });
-  for (let i = 0; i < 200 && !(await ev(`window.__ready === true && !!document.querySelector(${JSON.stringify(sel)})`).catch(() => false)); i++) await sleep(50);
+  await until(`window.__ready === true && !!document.querySelector(${JSON.stringify(sel)})`, 200);
   await ev('document.fonts.ready.then(() => true)');
-  await sleep(300);
   const box = (s) => ev(`(() => { const d = document.querySelector(${JSON.stringify(s)}); if (!d) return null; const r = d.getBoundingClientRect(); return { x: Math.max(0, r.left - 6), y: Math.max(0, r.top - 6), width: Math.ceil(Math.min(innerWidth, r.width + 12)), height: Math.ceil(Math.min(innerHeight, r.height + 12)), left: r.left, right: r.right, vw: innerWidth }; })()`);
+  // FIT INSIDE the dialog: the dialog in the window, no part of it wider than it, nothing scrolling sideways
+  const fit = (s) => ev(`(() => { const d = document.querySelector(${JSON.stringify(s)}); if (!d) return null; const r = d.getBoundingClientRect(); const over = [...d.querySelectorAll('*')].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && (b.right > r.right + 0.5 || b.left < r.left - 0.5); }).map((e) => e.className || e.tagName).slice(0, 6); const sideways = [d, ...d.querySelectorAll('*')].filter((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible').map((e) => e.className || e.tagName).slice(0, 6); return { inWindow: r.left >= -0.5 && r.right <= innerWidth + 0.5, over, sideways }; })()`);
+  // MUST 2: the refusal line and its door are not drawn before a refusal — in every dialog open
+  const noRefusal = () => ev(`[...document.querySelectorAll('.vw-login-refusal, .vw-login-refusal-door')].every((e) => getComputedStyle(e).display === 'none' && e.getBoundingClientRect().width === 0)`);
   const shot = async (s, file) => { const b = await box(s); if (SHOTS && b) { fs.mkdirSync(SHOTS, { recursive: true }); const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: b.x, y: b.y, width: b.width, height: b.height, scale: 1 } }); fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r.result.data, 'base64')); } return b; };
-  return { ev, box, shot, close: () => { try { ws.close(); } catch { } } };
+  return { ev, until, box, fit, noRefusal, shot, close: () => { try { ws.close(); } catch { } } };
 }
 const LOGIN = '.vw-login-grant-dialog', Q = (s) => JSON.stringify(s);
 const textOf = (sel) => `(() => [...document.querySelectorAll(${Q(sel)})].map((d) => d.textContent || '').join(' | '))()`;
-console.log('① a login\'s 用于… — that login only; the star row\'s admit LOCKED «经由»; it fits 280–1440');
-for (const [w, h, mobile] of [[280, 700, true], [390, 844, true], [768, 900, false], [1440, 900, false]]) {
-  const p = await page({ vw: w, vh: h, mobile, query: 'mode=login', sel: LOGIN });
+const dialogs = (n) => `document.querySelectorAll(${Q(LOGIN)}).length >= ${n}`;
+const fits = (f) => !!f && f.inWindow && !f.over.length && !f.sideways.length;
+console.log('① a login\'s 用于… — that login only; the star row\'s admit LOCKED «经由»; it fits 280–1440 inside; no refusal drawn');
+for (const [w, h, mobile] of [[280, 700, true], [360, 780, true], [768, 900, false], [960, 900, false], [1440, 900, false]]) {
+  const p = await page({ vw: w, vh: h, mobile, query: 'mode=login', sel: LOGIN + ' .pp-chip-locked' });
   const f = await p.ev(`(() => { const d = document.querySelector(${Q(LOGIN)}); const lockedChip = [...d.querySelectorAll('.pp-chip-locked')].find((c) => /全站代理/.test(c.textContent)); return {
     radios: d.querySelectorAll('input[type=radio]').length, title: (d.textContent || '').includes('alice · shop.example.test'), picker: !!d.querySelector('.pp'),
     locked: lockedChip ? lockedChip.textContent : '', lockedX: lockedChip ? lockedChip.querySelectorAll('.pp-chip-x').length : -1, door: lockedChip && lockedChip.querySelector('.pp-chip-door') ? lockedChip.querySelector('.pp-chip-door').textContent : '',
     consequence: (d.querySelector('.vw-login-consequence') || {}).textContent || '' }; })()`);
   ok(f.radios === 0 && f.title && f.picker && /经由：任何网站/.test(f.locked) && f.lockedX === 0 && f.door === '任何网站…' && /只在这个网站上/.test(f.consequence),
     `${w}: no radio; its title names THIS login; the house picker; the star row's admit a LOCKED chip «经由：任何网站» with its door and NO ✕; the consequence speaks of this site only`, f);
-  const b = await p.box(LOGIN);
-  ok(b && b.left >= -0.5 && b.right <= b.vw + 0.5, `${w}: the dialog fits the window`, b);
-  if (w === 390 || w === 1440) await p.shot(LOGIN, `login-dialog-${w === 390 ? '390' : 'desk'}-zh.png`);
-  if (w === 390) {
+  const fi = await p.fit(LOGIN);
+  ok(fits(fi), `${w}: the dialog is in the window and nothing inside it is wider than it or scrolls sideways`, fi);
+  ok(await p.noRefusal(), `${w}: no refusal line and no refusal door are drawn before a refusal`);
+  if (w === 360 || w === 960) await p.shot(LOGIN, `login-dialog-${w}-zh.png`);
+  if (w === 360) {
+    const ROW_B = LOGIN + ' .pp-row[data-key="agent:conv-b"]';
     const before = await p.ev(`document.querySelectorAll(${Q(LOGIN + ' .pp-chip')}).length`);
-    const row = await p.ev(`(() => { const r = document.querySelector(${Q(LOGIN + ' .pp-row[data-key="agent:conv-b"]')}); if (!r) return null; r.click(); return { locked: r.classList.contains('pp-locked'), sel: r.getAttribute('aria-selected'), dis: r.getAttribute('aria-disabled') }; })()`);
-    await sleep(100);
-    const after = await p.ev(`(() => ({ chips: document.querySelectorAll(${Q(LOGIN + ' .pp-chip')}).length, sel: (document.querySelector(${Q(LOGIN + ' .pp-row[data-key="agent:conv-b"]')}) || { getAttribute: () => '' }).getAttribute('aria-selected') }))()`);
-    ok(row && row.locked && row.sel === 'true' && row.dis === 'true' && before === after.chips && after.sel === 'true', 'the locked row is ticked and inert — a press on it changes nothing', { row, before, after });
+    const row = await p.ev(`(() => { const r = document.querySelector(${Q(ROW_B)}); if (!r) return null; r.click(); return { locked: r.classList.contains('pp-locked'), sel: r.getAttribute('aria-selected'), dis: r.getAttribute('aria-disabled'), door: (r.querySelector('.pp-lock-door') || {}).textContent || '' }; })()`);
+    const after = await p.ev(`(() => ({ chips: document.querySelectorAll(${Q(LOGIN + ' .pp-chip')}).length, sel: (document.querySelector(${Q(ROW_B)}) || { getAttribute: () => '' }).getAttribute('aria-selected') }))()`);
+    ok(row && row.locked && row.sel === 'true' && row.dis === 'true' && row.door === '任何网站…' && before === after.chips && after.sel === 'true', 'the locked list row is ticked, inert, and names its door as its chip does — a press on the row changes nothing', { row, before, after });
     console.log('② the locked row\'s door opens «任何网站…» as its own dialog');
-    await p.ev(`(document.querySelector(${Q(LOGIN + ' .pp-chip-locked .pp-chip-door')}).click(), true)`); await sleep(400);
-    const star = await p.ev(textOf(LOGIN));
-    ok(/在每个网站上/.test(star) && /以后添加的也算/.test(star), 'the door opens «任何网站…» as its own dialog, with its own consequence (every login on every site, the ones added later too)', star.slice(0, 300));
+    await p.ev(`(document.querySelector(${Q(LOGIN + ' .pp-chip-locked .pp-chip-door')}).click(), true)`);
+    const star = await p.until(`(() => { const t = ${textOf(LOGIN)}; return /在每个网站上/.test(t) ? t : null; })()`);
+    ok(!!star && /以后添加的也算/.test(star), 'the door opens «任何网站…» as its own dialog, with its own consequence (every login on every site, the ones added later too)', String(star).slice(0, 300));
+    ok(await p.noRefusal(), 'the «任何网站…» dialog draws no refusal line and no refusal door before a refusal');
   }
   p.close();
 }
 console.log('③ Save posts THIS login\'s row only · ④ the unsaved guard asks in place');
 {
-  const p = await page({ vw: 1440, vh: 900, query: 'mode=login', sel: LOGIN });
+  const ROW_D = LOGIN + ' .pp-row[data-key="agent:conv-d"]';
+  const p = await page({ vw: 1440, vh: 900, query: 'mode=login', sel: ROW_D });
   posted.length = 0;
-  ok(await p.ev(`(() => { const r = document.querySelector(${Q(LOGIN + ' .pp-row[data-key="agent:conv-d"]')}); if (r) r.click(); return !!r; })()`), 'conversation D is in the list');
-  await sleep(150);
-  await p.ev(`(document.querySelector(${Q(LOGIN + ' .dialog-close')}).click(), true)`); await sleep(300);
-  const asked = await p.ev(`(() => { const s = document.querySelector(${Q(LOGIN + ' .dialog-unsaved')}); return { asked: !!s && s.offsetParent !== null, open: !!document.querySelector(${Q(LOGIN)}) }; })()`);
-  ok(asked.asked && asked.open && posted.length === 0, 'a tick then the ✕: the shell asks IN PLACE «unsaved changes» — the dialog stays, nothing posted', asked);
-  await p.shot(LOGIN, 'login-unsaved-desk-zh.png');
+  await p.ev(`(document.querySelector(${Q(ROW_D)}).click(), true)`);
+  ok(await p.until(`document.querySelector(${Q(ROW_D)}).getAttribute('aria-selected') === 'true'`), 'conversation D is ticked');
+  await p.ev(`(document.querySelector(${Q(LOGIN + ' .dialog-close')}).click(), true)`);
+  const asked = await p.until(`(() => { const s = document.querySelector(${Q(LOGIN + ' .dialog-unsaved')}); return s && s.offsetParent !== null ? { open: !!document.querySelector(${Q(LOGIN)}) } : null; })()`);
+  ok(!!asked && asked.open && posted.length === 0, 'a tick then the ✕: the shell asks IN PLACE «unsaved changes» — the dialog stays, nothing posted', asked);
+  await p.shot(LOGIN, 'login-unsaved-960-zh.png');
   p.close();
-  const p2 = await page({ vw: 1440, vh: 900, query: 'mode=login', sel: LOGIN });
+  const p2 = await page({ vw: 1440, vh: 900, query: 'mode=login', sel: ROW_D });
   posted.length = 0;
-  await p2.ev(`(() => { const r = document.querySelector(${Q(LOGIN + ' .pp-row[data-key="agent:conv-d"]')}); if (r) r.click(); return !!r; })()`);
-  await sleep(150);
+  await p2.ev(`(document.querySelector(${Q(ROW_D)}).click(), true)`);
+  await p2.until(`document.querySelector(${Q(ROW_D)}).getAttribute('aria-selected') === 'true'`);
   await p2.ev(`(document.querySelector(${Q(LOGIN + ' .vw-login-save')}).click(), true)`);
-  await sleep(600);
+  await p2.until(`!document.querySelector(${Q(LOGIN)})`);
   ok(posted.length === 1 && posted[0].url === '/api/vault/web-logins/grants' && posted[0].body.scope === 'this-account' && posted[0].body.subject === 'session:conv-d' && posted[0].body.name === `web-login:${ORIGIN}#alice`,
-    'ticking a conversation and Save posts ONE grant — THIS login, scope this-account; nothing at a wider scope, nothing for the locked ones', posted);
+    'ticking a conversation and Save posts ONE grant — THIS login, scope this-account; nothing at a wider scope, nothing for the locked ones — and the dialog closes', posted);
   p2.close();
 }
 console.log('⑤ the «网站登录» head — «任何网站…» and «某个网站的任何账号…» (the site first)');
-for (const [tag, o] of [['390', { vw: 390, vh: 844, mobile: true }], ['desk', { vw: 1200, vh: 900 }]]) {
+for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { vw: 960, vh: 900 }]]) {
   const p = await page({ ...o, query: 'mode=head', sel: '.vw-login-wide' });
   const line = await p.ev(`(document.querySelector('.vw-login-wide-line') || {}).textContent || ''`);
   ok(/任何网站：全站代理/.test(line) && /任何账号：shop\.example\.test/.test(line), `${tag}: the head's one line names what the wider rows hold — the star row's who, the site rows' sites`, line);
   await p.shot('.vw-group', `head-${tag}-zh.png`);
-  await p.ev(`(document.querySelector('.vw-login-wide-any-site').click(), true)`); await sleep(400);
-  const star = await p.ev(textOf(LOGIN));
-  ok(/在每个网站上/.test(star), `${tag}: «任何网站…» opens the star row's own dialog`, star.slice(0, 200));
+  await p.ev(`(document.querySelector('.vw-login-wide-any-site').click(), true)`);
+  const star = await p.until(`(() => { const t = ${textOf(LOGIN)}; return /在每个网站上/.test(t) ? t : null; })()`);
+  ok(!!star, `${tag}: «任何网站…» opens the star row's own dialog`);
+  ok(fits(await p.fit(LOGIN)) && await p.noRefusal(), `${tag}: it fits inside and draws no refusal before one`);
   await p.shot(LOGIN, `any-site-${tag}-zh.png`);
   p.close();
   const p2 = await page({ ...o, query: 'mode=head', sel: '.vw-login-wide' });
-  await p2.ev(`(document.querySelector('.vw-login-wide-any-account').click(), true)`); await sleep(400);
-  const sites = await p2.ev(`[...document.querySelectorAll('.vw-login-site-name')].map((x) => x.textContent)`);
-  ok(JSON.stringify(sites) === JSON.stringify(['mail.example.test', 'shop.example.test']), `${tag}: «某个网站的任何账号…» asks the SITE first — the vault's sites`, sites);
+  await p2.ev(`(document.querySelector('.vw-login-wide-any-account').click(), true)`);
+  const sites = await p2.until(`(() => { const s = [...document.querySelectorAll('.vw-login-site-name')].map((x) => x.textContent); return s.length ? s : null; })()`);
+  ok(JSON.stringify(sites) === JSON.stringify(['mail.example.test', 'shop.example.test']) && await p2.noRefusal(), `${tag}: «某个网站的任何账号…» asks the SITE first — the vault's sites; no refusal drawn`, sites);
   await p2.shot('.vw-login-site-pick', `site-pick-${tag}-zh.png`);
-  await p2.ev(`([...document.querySelectorAll('.vw-login-site')].find((b) => /shop/.test(b.textContent)).click(), true)`); await sleep(400);
-  const title = await p2.ev(textOf(LOGIN));
-  ok(/shop\.example\.test 的任何账号/.test(title) && /注册「新」账号/.test(title), `${tag}: the site's own dialog — its title names the site, its consequence says an agent may register a NEW account there`, title.slice(0, 260));
+  await p2.ev(`([...document.querySelectorAll('.vw-login-site')].find((b) => /shop/.test(b.textContent)).click(), true)`);
+  const title = await p2.until(`(() => { const t = ${textOf(LOGIN)}; return /的任何账号/.test(t) ? t : null; })()`);
+  ok(/shop\.example\.test 的任何账号/.test(title || '') && /注册「新」账号/.test(title || ''), `${tag}: the site's own dialog — its title names the site, its consequence says an agent may register a NEW account there`, String(title).slice(0, 260));
+  ok(fits(await p2.fit(LOGIN)) && await p2.noRefusal(), `${tag}: the site's dialog fits inside and draws no refusal before one`);
   await p2.shot(LOGIN, `any-account-${tag}-zh.png`);
   p2.close();
 }
 console.log('⑥ a login\'s row — what it holds FIRST; a wider grant «经由» with NO ✕; its own keeps its ✕');
-for (const [tag, o] of [['390', { vw: 390, vh: 844, mobile: true }], ['desk', { vw: 1200, vh: 900 }]]) {
+for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { vw: 960, vh: 900 }]]) {
   const p = await page({ ...o, query: 'mode=row', sel: '.vw-login-held' });
   const r = await p.ev(`(() => { const row = (u) => document.querySelector('.vw-row[data-login$="#' + u + '"]'); const a = row('alice'), b = row('bob');
     const t = [...a.querySelectorAll('.vw-ak-chip-through')]; const own = [...a.querySelectorAll('.vw-ak-chip')].filter((c) => !c.classList.contains('vw-ak-chip-through'));
@@ -196,24 +215,37 @@ for (const [tag, o] of [['390', { vw: 390, vh: 844, mobile: true }], ['desk', { 
   p.close();
 }
 console.log('⑦ the top of the login\'s dialog — user, site, what it holds; the two-step door binds or unbinds by name');
-for (const [tag, o] of [['390', { vw: 390, vh: 844, mobile: true }], ['desk', { vw: 1440, vh: 900 }]]) {
+for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { vw: 960, vh: 900 }]]) {
   const p = await page({ ...o, query: 'mode=login', sel: LOGIN + ' .vw-login-head' });
   const head = await p.ev(`(() => { const h = document.querySelector(${Q(LOGIN + ' .vw-login-head')}); const d = document.querySelector(${Q(LOGIN)}); const pp = d.querySelector('.pp'); return { ids: [...h.querySelectorAll('.vw-login-head-id')].map((x) => x.textContent), otp: (h.querySelector('.vw-login-held-otp-name') || {}).textContent || '', door: (h.querySelector('.vw-login-held-otp-door') || {}).textContent || '', kept: (h.querySelector('.vw-login-held-kept') || {}).textContent || '', abovePicker: !!pp && !!(h.compareDocumentPosition(pp) & Node.DOCUMENT_POSITION_FOLLOWING) }; })()`);
   ok(JSON.stringify(head.ids) === JSON.stringify(['用户名：alice', '网站：shop.example.test']) && head.otp === '两步验证码：shop-2fa' && head.door === '更改…' && /3 天前/.test(head.kept) && head.abovePicker,
     `${tag}: the dialog's top names the login — its user name, its site, its two-step code with «更改…», the kept password with when — above the picker`, head);
   await p.shot(LOGIN, `login-head-${tag}-zh.png`);
-  if (tag === 'desk') {
+  if (tag === '960') {
     posted.length = 0;
-    await p.ev(`(document.querySelector(${Q(LOGIN + ' .vw-login-held-otp-door')}).click(), true)`); await sleep(500);
-    const dlg = await p.ev(`(() => { const s = document.querySelector('.vw-login-totp-dialog select'); return s ? { opts: [...s.options].map((o) => o.value + '=' + o.textContent), value: s.value } : null; })()`);
+    await p.ev(`(document.querySelector(${Q(LOGIN + ' .vw-login-held-otp-door')}).click(), true)`);
+    const dlg = await p.until(`(() => { const s = document.querySelector('.vw-login-totp-dialog select'); return s && s.options.length >= 3 && !document.querySelector('.vw-login-totp-save').disabled ? { opts: [...s.options].map((o) => o.value + '=' + o.textContent), value: s.value } : null; })()`);
     ok(dlg && JSON.stringify(dlg.opts) === JSON.stringify(['=无——不使用两步验证码', 'mail-2fa=mail-2fa', 'shop-2fa=shop-2fa']) && dlg.value === 'shop-2fa', 'the door\'s dialog lists the vault\'s two-step codes BY NAME (and «无»), starting at the bound one', dlg);
-    await p.shot('.vw-login-totp-dialog', 'totp-dialog-desk-zh.png');
+    ok(await p.noRefusal() && fits(await p.fit('.vw-login-totp-dialog')), 'the two-step dialog fits inside and draws no refusal line or door before a refusal');
+    await p.shot('.vw-login-totp-dialog', 'totp-dialog-960-zh.png');
     await p.ev(`(() => { const s = document.querySelector('.vw-login-totp-dialog select'); s.value = ''; s.dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('.vw-login-totp-save').click(); return true; })()`);
-    await sleep(600);
-    const after = await p.ev(`(document.querySelector(${Q(LOGIN + ' .vw-login-head .vw-login-held-otp-name')}) || {}).textContent || ''`);
+    const after = await p.until(`(() => { const t = (document.querySelector(${Q(LOGIN + ' .vw-login-head .vw-login-held-otp-name')}) || {}).textContent || ''; return t === '两步验证码：无' ? t : null; })()`);
     ok(posted.length === 1 && posted[0].url === '/api/vault/web-logins/totp' && posted[0].body.name === `web-login:${ORIGIN}#alice` && posted[0].body.totpName === null && after === '两步验证码：无',
       '«无» + Save UNBINDS it: ONE POST /api/vault/web-logins/totp {name, totpName: null} — and the dialog\'s top then says «无»', { posted, after });
   }
+  p.close();
+}
+console.log('⑧ Everyone on the star row — ONE locked line for Everyone; a conversation with its own grant stays removable');
+for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { vw: 960, vh: 900 }]]) {
+  const p = await page({ ...o, query: 'mode=login&star=everyone', sel: LOGIN + ' .pp-chip-locked' });
+  const r = await p.ev(`(() => { const d = document.querySelector(${Q(LOGIN)}); const locked = [...d.querySelectorAll('.pp-chip-locked')]; const ownA = [...d.querySelectorAll('.pp-chip')].find((c) => !c.classList.contains('pp-chip-locked') && /采购助手/.test(c.textContent)); const rowA = d.querySelector('.pp-row[data-key="agent:conv-a"]'); const rowB = d.querySelector('.pp-row[data-key="agent:conv-b"]');
+    return { locked: locked.map((c) => c.textContent), lockedDoors: locked.filter((c) => c.querySelector('.pp-chip-door')).length, ownAx: ownA ? ownA.querySelectorAll('.pp-chip-x').length : -1, rowAhint: rowA ? rowA.textContent : '', rowAlocked: rowA ? rowA.classList.contains('pp-locked') : null, rowBlocked: rowB ? rowB.classList.contains('pp-locked') : null }; })()`);
+  ok(r.locked.length === 1 && /全部/.test(r.locked[0]) && /经由：任何网站/.test(r.locked[0]) && r.lockedDoors === 1 && r.rowBlocked === false,
+    `${tag}: ONE locked line «全部 · 经由：任何网站» with its door — not a chip per conversation (B, covered by it, has no chip of its own)`, r);
+  ok(r.ownAx === 1 && r.rowAlocked === false && /也经由：任何网站/.test(r.rowAhint),
+    `${tag}: A holds this login's own row too — its chip keeps its ✕, its row is removable, «也经由：任何网站» beside it`, r);
+  ok(fits(await p.fit(LOGIN)) && await p.noRefusal(), `${tag}: it fits inside and draws no refusal before one`);
+  await p.shot(LOGIN, `login-everyone-${tag}-zh.png`);
   p.close();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);

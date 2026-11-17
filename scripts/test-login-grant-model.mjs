@@ -12,6 +12,9 @@
 //   ⑤ WHAT THE LOGIN HOLDS (主开发 20:28Z — the bound two-step code first, with a door to change or unbind it): BL.totpBoundRecord and
 //      the store's bindTotp over the real vault — the password, its slots and `rev` untouched; refusals by name. RED: the only road
 //      before was the add door, which cannot change the binding without the password. The row module still imports no dialog.
+//   ⑥ THE CURE (主开发 22:41Z, three musts + shoulds): «by what» names Everyone and its Task Groups (RED: the empty-facts probe); the
+//      dialog's plan — Everyone as ONE line, its own grant removable beside a wider one, a stopped conversation a wider row holds;
+//      the agent's three refusals name the header's doors; the picker skips a locked row; a hidden press in the dialogs stays hidden.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -163,6 +166,47 @@ console.log('⑤ WHAT THE LOGIN HOLDS — its two-step code bound or unbound by 
   const imports = ROW.split('\n').filter((l) => /^import /.test(l)).map((l) => (/from '([^']+)'/.exec(l) || [])[1]).sort();
   ok(JSON.stringify(imports) === JSON.stringify(['./i18n.js', './utils.js', './vault-totp-row.js']) && !/agoText/.test(ROW.split('\n').filter((l) => /^import /.test(l)).join('\n')),
     'the row module imports no dialog and nothing new (the paste box and the login card bundle it with a stubbed utils.js) — the window hands it `held` and the openers', imports);
+}
+
+console.log('⑥ THE CURE (主开发 22:41Z): Everyone and its groups by «by what»; one dialog draws what holds; the agent sent to the doors that exist');
+{
+  // MUST 1 — the star row holds Everyone: «by what» names Everyone and every Task Group (the probe has a key no row can hold)
+  const star = { thisAccount: [row(LOGIN, [conv('conv-a')])], anyAccount: [], anySite: [row('*', [everyone], [conv('conv-d')])] };
+  const bw = BL.byWhatOf({ rows: star, subjects: BL.byWhatSubjects(subjects) });
+  ok(JSON.stringify(bw.everyone) === '["any-site"]' && JSON.stringify(bw['group:g1']) === '["any-site"]' && JSON.stringify(bw['conversation:conv-b']) === '["any-site"]' && JSON.stringify(bw['conversation:conv-a']) === '["this-account","any-site"]' && !('conversation:conv-d' in bw),
+    'the star row holds Everyone (except D): «by what» names Everyone, the Task Group and every conversation through «any site» — D, left out, nowhere', bw);
+  const probe = BL.byWhatSubjects(subjects).find((x) => x.key === 'everyone');
+  ok(!GM.admits(star.anySite, {}).ok && GM.admits(star.anySite, probe.facts).ok && !/^[A-Za-z0-9]/.test(BL.BY_WHAT_PROBE),
+    'RED CONTROL (the probe as it was): Everyone probed with EMPTY facts is admitted by no row — the grant model counts an Everyone entry only for a caller with a key; the probe key starts with no letter or digit, so no row can hold it');
+  // should (d): ONE line for Everyone — the subjects it covers through the same row are not drawn one by one
+  const plan = M.lockedPlan(bw, 'this-account');
+  ok(plan.locked.length === 1 && plan.locked[0].key === M.EVERYONE_KEY && plan.locked[0].through === 'any-site' && plan.covered === 3,
+    'in a login\'s dialog the star row\'s Everyone is ONE locked line «through: any site» — not a chip per conversation (B, C and the group are covered by it)', plan);
+  // should (a): a subject with its OWN grant here AND a wider one is drawn ticked and removable, «also through» beside it
+  ok(plan.also.length === 1 && plan.also[0].key === 'agent:conv-a' && !plan.locked.some((l) => l.key === 'agent:conv-a'),
+    'A holds this login\'s own row AND the star row: removable here (its own grant stays once the wider one goes), not locked', plan.also);
+  const mixed = M.lockedPlan({ everyone: ['any-site'], 'group:g1': ['any-account'], 'conversation:conv-b': ['any-site'] }, 'this-account');
+  ok(mixed.locked.map((l) => `${l.key}>${l.through}`).sort().join() === 'everyone:*>any-site,group:g1>any-account' && mixed.covered === 1,
+    'a subject through a NARROWER wider row (the group through «any account») keeps its own line beside Everyone\'s', mixed);
+  // should (b): a conversation a wider row holds that is not running is a subject too
+  const stoppedRows = { thisAccount: [], anyAccount: [row(`${ORIGIN}#*`, [conv('conv-gone')])], anySite: [] };
+  ok(JSON.stringify(BL.byWhatOf({ rows: stoppedRows, subjects: BL.byWhatSubjects(subjects) })['conversation:conv-gone']) === '["any-account"]',
+    'a conversation the any-account row names that is not running is probed by its own key — the dialog draws it «not running now», locked');
+  // MUST 3: the agent's refusals name the doors that exist — «Use for…» only for that account, the header's two for the wider grants
+  const entries = [{ name: `web-login:${LOGIN}`, origin: ORIGIN, user: 'alice', owner: null }];
+  const words = (spec, grantRows, keys = ['conv-x']) => (BL.fillVerdict({ tabOrigin: ORIGIN, spec, entries, grantRows, facts: { conversationKeys: keys }, vaultState: 'unlocked' }) || {}).error || '';
+  const notGranted = words(BL.parseVaultFillSpec('shop.example.test#alice/password'), () => []);
+  const register = words(BL.parseVaultFillSpec('new:shop.example.test#bob/password', { generate: true }), () => []);
+  const excepted = words(BL.parseVaultFillSpec('shop.example.test#alice/password'), (r) => (r === '*' ? [row('*', [everyone], [conv('conv-x')])] : []));
+  const header = (w) => /«Any account on a site…»/.test(w) && /«Any site…»/.test(w);
+  ok(header(notGranted) && /the login's «Use for…» for that account/.test(notGranted) && header(register) && !/Use for…/.test(register) && header(excepted),
+    'the three refusals send the agent to the doors that exist — the login\'s «Use for…» for that account only, the Web logins header\'s «Any account on a site…» / «Any site…» for the wider grants', { notGranted, register, excepted });
+  const PP = fs.readFileSync(path.join(REPO, 'src/lib/principal-picker.js'), 'utf8');
+  ok(/if \(!r\.disabled && !lkNow\.has\(String\(r\.key\)\)\) visibleKeys\.push/.test(PP) && /pp-lock-door/.test(PP),
+    'should (c): ↑/↓ and Enter skip a locked row; a locked list row carries its door as its chip does');
+  const CSS = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
+  ok(/\.vw-login-grant-dialog \[hidden\], \.vw-login-site-pick \[hidden\], \.vw-login-totp-dialog \[hidden\] \{ display: none; \}/.test(CSS),
+    'MUST 2: the dialogs are form windows outside the Vault window\'s `.vw [hidden]` — their own rule keeps a hidden press hidden (.vw-btn sets display)');
 }
 
 console.log(fail ? `\nFAIL (${fail} failed, ${pass} passed)` : `\nALL PASS (${pass})`);

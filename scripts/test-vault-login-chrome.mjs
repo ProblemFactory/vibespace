@@ -90,6 +90,8 @@ if (!ver) {
 const VAULT_UI_BUNDLE = esbuild.buildSync({
   stdin: {
     contents: `import { loadLogins, loginExtras } from './src/lib/vault-login-row.js';
+import { loginHeld, showLoginGrantPicker, showAnySiteDialog, showAnyAccountDialog } from './src/lib/vault-login-grants.js';
+const DOORS = { held: loginHeld, grant: showLoginGrantPicker, anySite: showAnySiteDialog, anyAccount: showAnyAccountDialog };   // the Vault window's (its «Use for…» opens)
 window.__mountVaultRows = async () => {
   const root = document.getElementById('rows');
   root.textContent = '';
@@ -99,7 +101,7 @@ window.__mountVaultRows = async () => {
     const rowDiv = document.createElement('div');
     rowDiv.dataset.entry = e.name;
     rowDiv.dataset.user = e.user || '';
-    const { box, doors } = loginExtras({ entry: e.name }, data, { refresh: () => window.__mountVaultRows() });
+    const { box, doors } = loginExtras({ entry: e.name }, data, { refresh: () => window.__mountVaultRows(), doors: DOORS });
     rowDiv.append(box, ...doors);
     root.append(rowDiv);
   }
