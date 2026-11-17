@@ -600,7 +600,7 @@ class DeviceManager {
    * ready } — onData/onExit are set by the caller before/after; ready resolves
    * with {pid} on session-open or rejects on session-error.
    */
-  async openSession({ cmd, args, cols, rows, cwd, env }) {
+  async openSession({ cmd, args, cols, rows, cwd, env, manualCredit = false }) {
     const conn = await this.connect();
     const noShell = posixShellRefusal(conn.info, cmd); if (noShell) throw noShell; // lane windows-device-fs: THE DOOR
     const noFlag = this._policyError(conn, { op: 'open-session' }, true); if (noFlag) throw noFlag; // lane device-allow-flags
@@ -612,6 +612,10 @@ class DeviceManager {
       rejectReady = (e) => { readySettled = true; rej(e); };
     });
     conn.sessions.set(chan, {
+      // MANUAL CREDIT (opt-in — the dial bridge, 主开发 2026-11-17): the caller credits the device with handle.credit(n) as
+      // its consumer truly takes the bytes, so a stalled reader stops the device instead of piling its output in the hub
+      manualCredit: manualCredit === true,
+      onWritable: () => handle.onWritable?.(),
       onOpen: (m) => { handle.pid = m.pid; resolveReady({ pid: m.pid }); },
       onError: (e) => rejectReady(new Error(e)),
       onData: (buf) => handle.onData?.(buf),
@@ -620,7 +624,8 @@ class DeviceManager {
       onExit: (code) => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); else handle.onExit?.(code); },
       onClose: () => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); },
     });
-    handle.write = (str) => conn.mux.data(chan, Buffer.from(str, 'utf-8'));
+    handle.write = (str) => conn.mux.data(chan, Buffer.from(str, 'utf-8'));   // false = queued for the device's credit (onWritable follows)
+    handle.credit = (n) => conn.mux.credit(chan, n);
     handle.resize = (c, r) => conn.mux.control({ op: 'resize-session', chan, cols: c, rows: r });
     handle.kill = () => conn.mux.control({ op: 'kill-session', chan });
     conn.mux.control({ op: 'open-session', chan, cmd, args, cols, rows, cwd, env });
@@ -633,7 +638,7 @@ class DeviceManager {
    * a byte offset; the {type:'_remote_exit'} sentinel line in the byte stream
    * means the child really ended. Omit cmd to attach-only.
    */
-  async openPipeSession({ sid, cmd, args, cwd, env, offset = 0 }) {
+  async openPipeSession({ sid, cmd, args, cwd, env, offset = 0, manualCredit = false }) {
     const conn = await this.connect();
     const noShell = cmd === undefined ? null : posixShellRefusal(conn.info, cmd); if (noShell) throw noShell; // lane windows-device-fs: THE DOOR (an attach names no cmd)
     const noFlag = this._policyError(conn, { op: cmd === undefined ? 'attach-pipe-session' : 'open-pipe-session', sid }, true); if (noFlag) throw noFlag; // lane device-allow-flags
@@ -645,6 +650,8 @@ class DeviceManager {
       rejectReady = (e) => { readySettled = true; rej(e); };
     });
     conn.sessions.set(chan, {
+      manualCredit: manualCredit === true,   // opt-in, as openSession's (the dial bridge)
+      onWritable: () => handle.onWritable?.(),
       onOpen: (m) => { handle.pid = m.pid; resolveReady({ pid: m.pid, existing: !!m.existing, exited: m.exited }); },
       onError: (e) => rejectReady(new Error(e)),
       onData: (buf) => handle.onData?.(buf),
@@ -656,7 +663,8 @@ class DeviceManager {
       onExit: (code) => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); else handle.onExit?.(code); },
       onClose: () => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); },
     });
-    handle.write = (str) => conn.mux.data(chan, Buffer.from(str, 'utf-8'));
+    handle.write = (str) => conn.mux.data(chan, Buffer.from(str, 'utf-8'));   // false = queued for the device's credit (onWritable follows)
+    handle.credit = (n) => conn.mux.credit(chan, n);
     handle.kill = () => conn.mux.control({ op: 'kill-pipe-session', sid });
     conn.mux.control(cmd
       ? { op: 'open-pipe-session', chan, sid, cmd, args, cwd, env, offset }
