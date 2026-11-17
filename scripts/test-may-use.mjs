@@ -311,6 +311,10 @@ console.log('— ⑪ CURE r1 MUST 3 + SHOULD e — no count without a door; a �
   const sec = fs.readFileSync(path.join(REPO, 'src/lib/may-use-section.js'), 'utf8');
   ok(/granted\(br\.profiles\) \+ br\.profilesMore/.test(sec) && /granted\(va\.use\) \+ va\.useMore/.test(sec) && /n: granted\(k\.rows\) \+ \(k\.more \|\| 0\)/.test(sec) && /k\.uncut \? '' : moreOf\(k, door\)/.test(sec),
     '⑪ the sums count the GRANTED rows only (the browser, the vault, the keys — never a left-out or unknown one); an uncut kind draws no count');
+  // a deleted account's rows (its grains left): five left out ⇒ three named + «2 more left out or unknown» — the same three-way count
+  const orph = M.viewOf({ answers: Array.from({ length: 5 }, (_, i) => A('channel-reach', `conversation:gone/c${i}`, { ok: false, code: 'excepted', parent: 'account:gone' })), accounts: [] }).kinds.find((k) => k.kind === 'channels').orphans;
+  ok(orph.rows.length === 3 && orph.moreOut === 2 && orph.more === 0 && /ch\.orphans\.rows\.map\(\(r\) => line\(r\)\)\.join\(''\) \+ moreOf\(ch\.orphans, /.test(sec),
+    '⑪ (cure r1 follow-up) an account removed with five left-out rows: three named and the other two COUNTED — the orphans use the same three-way count (moreOf), never the granted-only one', orph);
   ok(!/if \(!g\) return;|if \(!access\) return;/.test(sec) && /its access list could not be read/.test(sec) && /has no tick of this conversation’s own to take back/.test(sec), '⑬ SHOULD b: an untick that does nothing SAYS why (the access list unreadable; no tick of its own there) — no silent return');
 }
 

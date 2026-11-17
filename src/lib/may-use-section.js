@@ -118,7 +118,7 @@ export function mountMayUse(app, getRef) {
         ...x.api.map((r) => line({ ...r, name: t('Raw API: {tier}', { tier: r.detail.tier }) }, '', r.detail.perDay ? t('{n} a day', { n: r.detail.perDay }) : '')),
       ].join('');
       return top + (kids ? `<div class="mu-kids">${kids}</div>` : '');
-    }).join('') + ch.orphans.rows.map((r) => line(r)).join('') + more(ch.orphans.more, doorBtn('chan', t('Channels window')));
+    }).join('') + ch.orphans.rows.map((r) => line(r)).join('') + moreOf(ch.orphans, doorBtn('chan', t('Channels window')));   // the rows of an account no longer listed: the same three-way count as every kind
     const chanCount = ch.accounts.filter((x) => x.account.state === 'granted' || x.account.state === 'own').length;
     res.push({ key: 'chan', data: 'data-row="chan"', icon: ic('chat'), name: t('Channels'), what: t('Inbox: read, search, draft — one tick per account'), end: doorBtn('chan', t('Channels window')),
       sub: accRows || none(t('No account connected yet')), sum: t('{n} of {m} account(s)', { n: chanCount, m: ch.accounts.length }) });
