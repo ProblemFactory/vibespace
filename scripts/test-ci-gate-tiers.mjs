@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // test-ci-gate-tiers — a PART of THE RELEASE GATE'S OWN GATE (scripts/test-ci-gate.mjs: its head says what the gate guards and why).
 // lane fast-tier-ratchet (2026-10-20) split the one 37 s process into seven ≤ 10 s suites, every section's text unchanged;
-// the shared kit is scripts/ci-gate-kit.mjs. This part: §6 no fast suite claims a machine-global fixture + no-verdict honesty · §7 no literal date · §8 lanes / the serial table / the impact scope / the full-tier clock · §8d the xpra window family's parts.
+// the shared kit is scripts/ci-gate-kit.mjs. This part: §6 no fast suite claims a machine-global fixture + no-verdict honesty · §7 no literal date · §7b a leg never passes by its name · §8 lanes / the serial table / the impact scope / the full-tier clock · §8d the xpra window family's parts.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -303,6 +303,75 @@ console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
   ok(LITERAL.test(codeOnly('const WIRE = "… or try again at Sep 13th, 2026 8:36 PM.";')), 'NEG: a literal in code is flagged');
   ok(!LITERAL.test(codeOnly('  // said "try again at Sep 13th, 2026 8:36 PM", which was')), 'NEG: the same sentence in a whole-line comment is not');
   ok(!LITERAL.test(codeOnly('const WIRE = "… https://chatgpt.com/x or try again at " + WHEN + ".";')), 'NEG: the derived shape (with its https:// intact) is not');
+}
+
+// ── §7b A LEG NEVER PASSES BY ITS NAME (B-1747, lane bl-tests-e, 2026-11-17) ──
+// Lane fable-52-cli-321 r5 (2026-11-10): thirteen new legs of test-status-bar-chips called ok(name, condition) against a
+// helper defined ok(condition, name) — a non-empty string is truthy, so the suite read ALL PASS (67) and four census plants
+// stayed green. Both orders live in the tree, every suite with its own copy. This census reads every script's OWN ok /
+// check helper (its order = the parameter its body tests, scripts/lib/check.mjs helperDefs) and fails a call whose
+// CONDITION slot holds a string literal while its name slot does not: on 2.369.407 eight such legs, in test-record-shape,
+// test-queue-steer (the catch of ⑪'s browser leg: a THROWING leg passed), test-voice-follow-chrome and
+// test-path-field-chrome. The one helper (scripts/lib/check.mjs checker) THROWS on a non-boolean condition and a
+// non-string name; the inline helpers without such a guard only FALL — a new suite imports the lib, the rest follow by
+// attrition. This file exempts ITSELF by name (its plants below spell helpers inside strings).
+console.log('\n§7b a leg never passes by its name: no swapped call anywhere, one guarded helper, the unguarded only fall');
+{
+  const C = await import('./lib/check.mjs');
+  // The inline ok / check helpers without the swap guard on the tree, counted by C.helperDefs (order known, guarded
+  // false) — pinned EXACT so it only falls: a suite that takes the lib (or guards its own helper) lowers this number in
+  // the same commit; a new suite takes `import { checker } from './lib/check.mjs'`; raising it is a reviewed choice.
+  const UNGUARDED_CAP = 1020;
+  const self = path.basename(fileURLToPath(import.meta.url));
+  const dir = path.join(REPO, 'scripts');
+  const files = [...fs.readdirSync(dir).filter((f) => f.endsWith('.mjs') && f !== self), ...fs.readdirSync(path.join(dir, 'lib')).filter((f) => f.endsWith('.mjs')).map((f) => 'lib/' + f)];
+  let defs = 0; const unguarded = [], swapped = [];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(dir, f), 'utf-8'), d = C.helperDefs(src);
+    defs += d.length;
+    for (const x of d) if (x.order !== 'unknown' && !x.guarded) unguarded.push(`${f}:${x.line}`);
+    for (const c of C.swappedCalls(src, d)) swapped.push(`${f}:${c.line} (a ${c.order} helper, :${c.defLine}) ${c.text.slice(0, 90)}`);
+  }
+  ok(files.length > 1000 && defs > 900, `${files.length} scripts read, ${defs} inline ok / check helpers found (non-vacuous; this file exempts itself)`);
+  ok(swapped.length === 0, `no call hands its own helper a string where the condition goes${swapped.length ? ' — ' + swapped.slice(0, 12).join(' · ') : ''}`);
+  ok(unguarded.length === UNGUARDED_CAP, `the inline helpers without the swap guard only fall: ${unguarded.length} = ${UNGUARDED_CAP}${unguarded.length > UNGUARDED_CAP ? ' — a NEW one: a new suite imports { checker } from \'./lib/check.mjs\'' : unguarded.length < UNGUARDED_CAP ? ' — it FELL: lower UNGUARDED_CAP to ' + unguarded.length : ''}`);
+
+  // the census over planted texts (a helper spelled in pieces so no scanner reads THIS file's strings as one)
+  const K = 'const', NF = `${K} ok = (n, c, e) => { if (c) { pass++; } else { fail++; } };\n`, CF = `${K} ok = (c, n, e) => { if (c) { pass++; } else { fail++; } };\n`;
+  const kinds = (s) => C.helperDefs(s).map((x) => `${x.order}${x.guarded ? '+guard' : ''}`).join();
+  ok(kinds(NF) === 'name-first' && kinds(CF) === 'cond-first', 'the order is the parameter the body tests: (n, c) testing c = name-first, (c, n) testing c = cond-first');
+  ok(kinds(`${K} check = (name, cond, extra) => {\n  if (cond) { passed++; }\n  else { failed++; }\n};\nconst z = !name;\n`) === 'name-first', 'a multi-line body is read to its own closing brace — a later `!name` in the file is not its test');
+  ok(kinds(`${K} ok = (c, n) => { if (typeof c !== 'boolean') throw new TypeError('x'); if (c) pass++; };\n`) === 'cond-first+guard' && kinds(`${K} ok = (c, n) => { if (typeof n !== 'string') throw new Error('x'); if (c) pass++; };\n`) === 'cond-first+guard',
+    'a guard is a typeof refusal of the condition (≠ boolean) or of the name (≠ string)');
+  ok(kinds(`${K} check = (s, act, pv) => { const present = new Set(s.requests); for (const a of act) step(a); };\n`) === 'unknown', 'a non-assertion check (no parameter tested as a condition) is unknown, never judged');
+  ok(kinds(`${K} ok = (c, n) => { if (typeof n !== 'string') n = String(n); if (c) pass++; };\n`) === 'cond-first', 'a typeof test that COERCES is no guard (the swap still passes) — a guard throws or counts a fail');
+  const sw = (s) => C.swappedCalls(s).map((c) => c.line).join();
+  ok(sw(NF + "ok(x === 1, 'the leg');\n") === '2' && sw(CF + "ok('the leg', x === 1);\n") === '2', 'NEG: the swap is found both ways (a name-first helper handed (cond, \'name\'), a condition-first one handed (\'name\', cond))');
+  ok(sw(NF + "ok(false,'the leg ran',  String(e));\n") === '2' && sw(NF + 'ok(a && b,\n  `every row ${rows.map((r) => `${r.k}`).join()} is judged`);\n') === '2', 'NEG: the shapes the release carried — a literal false in a catch, a multi-line template name with nested ${…}');
+  ok(sw(NF + "ok('the leg', x === 1);\n" + "ok(`leg ${n}`, y > 2, 'detail');\n") === '' && sw(CF + "ok(x === 1, 'the leg');\nok(/a'b\\(/.test(s), 'regex');\nok(s === \"it's\", `t ${f({ a: 1 })}`);\n") === '',
+    'the right orders pass — a regex holding a quote and a paren, a template with an object in its ${…}, a string compared in the condition');
+  ok(sw(CF + "ok(c, name);\nok(f('x'), 'leg');\n") === '', 'a variable or a call in the condition slot is not a swap (the runtime guard owns those)');
+  ok(sw(NF + "ok('a' === x, 'the leg');\n") === '2' && sw(CF + "ok('the leg', 'a' === x);\n") === '2', 'NEG: a condition that OPENS with a quote is still found in the name\'s place — the slot is judged as one whole literal, not by its first character');
+  ok(sw(CF + "ok('k' in o, label);\n// never write ok('the leg', cond)\n * ok('in a doc block', x)\n") === '' && sw(CF + "ok(f(() => { return /a'b(/.test(s); }), 'leg');\nok('swapped', y);\n") === '3',
+    'a condition that only opens with a quote is no swap, a call quoted in a whole-line comment is skipped, and a regex after `return` holding a quote and a paren does not end the scan early');
+
+  // the one helper's guard, behaviourally — and its RED control: the same file with the guard lines removed lets the swap pass
+  const lines = [], codes = [];
+  const H = C.checker({ log: (l) => lines.push(l), err: (l) => lines.push(l), exit: (c) => { codes.push(c); return c; } });
+  H.ok(true, 'a'); H.ok(false, 'b', { why: 1 });
+  const throws = (f) => { try { f(); return false; } catch (e) { return e instanceof TypeError; } };
+  ok(H.counts.pass === 1 && H.counts.fail === 1 && lines.join('|') === '  ✓ a|  ✗ b — {"why":1}', 'checker(): «  ✓ name» / «  ✗ name — detail», one count each');
+  ok(throws(() => H.ok('the leg', true)) && throws(() => H.ok(1, 'n')) && throws(() => H.ok({}, 'n')) && throws(() => H.ok(undefined, 'n')) && throws(() => H.ok(true, '')) && throws(() => H.ok(true, 5)),
+    'the swap THROWS (a name where the condition goes, a value where a comparison belongs, an empty or missing name) — a crash with a stack, never a green leg');
+  H.report();
+  ok(codes.join() === '1' && /^\n1 FAILED \(1 passed\)$/.test(lines[lines.length - 1]), 'report(): «n FAILED (m passed)» and exit 1 on a red');
+  const MC = mutantCopies('cigate7b-check', REPO), libSrc = fs.readFileSync(path.join(dir, 'lib/check.mjs'), 'utf-8');
+  const unguardedSrc = libSrc.split('\n').filter((l) => !/^\s*if \(typeof (cond|name) !== /.test(l)).join('\n');
+  ok(unguardedSrc.split('\n').length === libSrc.split('\n').length - 2, 'RED control: the copy without the two guard lines is the lib minus exactly two lines');
+  const U = await import(pathToFileURL(MC.write('scripts/lib/check.mjs', unguardedSrc, 'unguarded')).href);
+  const H2 = U.checker({ log: () => { }, err: () => { }, exit: () => { } });
+  ok(!throws(() => H2.ok('the leg', true)) && H2.counts.pass === 1, 'RED control: without the guard the swapped call PASSES — the throw above is the guard\'s, not luck');
+  ok(kinds(libSrc) === 'cond-first+guard' && kinds(unguardedSrc) === 'cond-first', 'the census reads the lib\'s own ok as a guarded condition-first helper, and the copy without the guard as an unguarded one');
 }
 
 // ── §8 LANES, THE SERIAL TABLE, THE IMPACT SCOPE, THE FULL-TIER CLOCK (2026-09-15) ──

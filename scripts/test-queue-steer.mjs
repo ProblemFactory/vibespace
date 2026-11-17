@@ -3927,7 +3927,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         await evaljs(`(() => { window.__ci.setQueue(window.__items, ${CODEX_VERBS}); document.querySelector('textarea').value = ''; document.getElementById('global-toasts')?.replaceChildren(); })()`);
       }
     } catch (e) {
-      ok(false,'the browser leg of ⑪ ran',  String(e.message || e).slice(0, 400));
+      ok('the browser leg of ⑪ ran', false, String(e.message || e).slice(0, 400));
     } finally {
       try { ws?.close(); } catch { }
       try { chrome.kill('SIGKILL'); } catch { }
@@ -4504,8 +4504,8 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
     {
       const cw = read('data/bin/codex-chat-wrapper.js');
       const producers = cw.match(/record\('response_item',[\s\S]{0,300}?role: 'user'/g) || [];
-      ok(producers.length === 3, `every wrapper producer of a user record is accounted for: chat-input (early), the inherited-queue bubble (steer early / drain late), the peer copy (queued early / idle late) — found ${producers.length}`, producers.length);
-      ok(/webui_after_commit/.test(cw) && (cw.match(/webui_after_commit: true/g) || []).length === 2, 'and exactly the two LATE ones declare it', (cw.match(/webui_after_commit: true/g) || []).length);
+      ok(`every wrapper producer of a user record is accounted for: chat-input (early), the inherited-queue bubble (steer early / drain late), the peer copy (queued early / idle late) — found ${producers.length}`, producers.length === 3, producers.length);
+      ok('and exactly the two LATE ones declare it', /webui_after_commit/.test(cw) && (cw.match(/webui_after_commit: true/g) || []).length === 2, (cw.match(/webui_after_commit: true/g) || []).length);
     }
 
     // (j8) ROUND 3 — THE TWIN THAT COULD NEVER COLLAPSE: an ATTACHMENT. The

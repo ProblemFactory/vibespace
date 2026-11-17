@@ -739,7 +739,7 @@ console.log('⑥ THE CENSUS (scripts/test-voice-focus.mjs, grep-derived) — and
     const rows = C.filter((r) => r.file === file && r.name === name && (name !== 'input' || r.tag === 'input'));
     return { k, runtime: rt && rt.why, census: [...new Set(rows.map((r) => r.verdict.why))].join('|') || 'NO SITE' };
   });
-  ok(pairs.length >= 8 && pairs.every((x) => x.runtime === x.census), `every box rendered here is judged at run time as the census judged its site (${pairs.map((x) => `${x.k}: ${x.runtime}`).join(' · ')})`, pairs);
+  ok(`every box rendered here is judged at run time as the census judged its site (${pairs.map((x) => `${x.k}: ${x.runtime}`).join(' · ')})`, pairs.length >= 8 && pairs.every((x) => x.runtime === x.census), pairs);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

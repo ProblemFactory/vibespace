@@ -119,7 +119,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.__l
 window.__ready = true;
 `);
 try { execFileSync(path.join(REPO, 'node_modules/.bin/esbuild'), [path.join(TMP, 'entry.js'), '--bundle', `--outfile=${path.join(D, 'b.js')}`, '--format=iife', '--platform=browser', '--target=es2020', '--log-level=error'], { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] }); }
-catch (e) { ok(false, 'the harness bundle builds (a fresh worktree: `npm run build` once — src/lib/build-version.js is generated)', String(e.stderr || e.message).slice(0, 600)); process.exit(1); }
+catch (e) { ok('the harness bundle builds (a fresh worktree: `npm run build` once — src/lib/build-version.js is generated)', false, String(e.stderr || e.message).slice(0, 600)); process.exit(1); }
 fs.writeFileSync(path.join(D, 't.html'), '<!doctype html><html data-theme="dark" lang="zh"><head><meta charset="utf-8"><link rel="stylesheet" href="/style.css"></head><body><script src="/static/b.js"></script></body></html>');
 
 /* ── chrome ── */
@@ -128,7 +128,7 @@ chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`,
 const WebSocket = require('ws');
 let target = null;
 for (let i = 0; i < 80 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
-if (!target) { ok(false, 'chrome answered on its debugging port'); process.exit(1); }
+if (!target) { ok('chrome answered on its debugging port', false); process.exit(1); }
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 << 20 });
 await new Promise((r) => ws.on('open', r));
 let seq = 0; const pend = new Map(); const errors = [];
