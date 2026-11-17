@@ -10,6 +10,10 @@
  * money · workspace · machines · conversation, the machine side). Every file the hub can load matches EXACTLY ONE owner by
  * a rule on its install-relative path, or sits on the ONE short list of SHARED HELPERS — modules that hold no state and
  * belong to nobody (scripts/test-loop-census.mjs ② counts it over the tree: unowned 0, a new file with no row is red by name).
+ * CURE r3 (T1): A FILE WHOSE OWN CODE DOES TWO OWNERS' WORK IS BOOKED UNDER ITS OWN NAME, NEVER ON ONE OF THEM — the
+ * SPLIT list (short, explicit, one line of why each: which owners), each its own bucket `split:<short>` outside the seven;
+ * no owner's rule matches a split file, so the seven hold only files that are one owner's. Never a function or line table:
+ * the file's name is the honest answer, and it is what the refactor has to cut.
  *
  * THE CENSUS — commit 1's sampler at a LOW rate over the whole hour, never a profiler: Runtime.evaluate of the one
  * constant SAMPLE_EXPR (src/loop-hold.js) from the watchdog THREAD, nothing enabled, no .cpuprofile, no file, no journal
@@ -18,9 +22,10 @@
  * (src/cpu-capture.js tickOf — the main thread's kernel state first: asleep in its own loop's poll with the beat fresh is
  * IDLE and never asked; a hold open is HELD; stopped; another ask out, a capture or a profile running is NOT SAMPLED);
  * else ONE ask, or booked on the census's own ask in flight. An answer books its ticks (bookOf) on the OWNER of the first
- * OWNED frame walking OUTWARD from the innermost — the walk passes Node's internals, built-ins, node_modules, eval'd code
- * and install files with no row (data/plugins/…), and passes a SHARED HELPER's frame counting it (`viaHelper`); it never
- * passes an owned frame. The instrument's own frames are trimmed (src/loop-hold.js instrumentTrim), and time inside a native
+ * OWNED frame walking OUTWARD from the innermost — or, when that first frame is a SPLIT file's, on that file's own bucket
+ * (`split:<short>`) — the walk passes Node's internals, built-ins, node_modules, eval'd code and install files with no
+ * row (data/plugins/…), and passes a SHARED HELPER's frame counting it (`viaHelper`); it never passes an owned or a split
+ * frame. The instrument's own frames are trimmed (src/loop-hold.js instrumentTrim), and time inside a native
  * call, a parse, a synchronous system call is its JavaScript caller's (an ask lands at the first JavaScript). 'outside'
  * when no frame of the stack is owned (Node's internals or a library alone, or helpers alone); 'native' when the stack has
  * no JavaScript frame; `deep` when the sample's frame list was FULL (FRAME_LIMIT) with no owned frame in it — booked
@@ -54,45 +59,49 @@ const FRAME_LIMIT = 31;
 // counts the matches, never an order). `name`: the file's whole name; `lead`: its name begins with one of these words (a
 // whole dash-word); `but`: a family of names minus the ones another owner holds — each for a file directly in src/,
 // src/server/, src/routes/ or src/lib/ (one name = one engine: its model, its engine, its route, its page half); `dir`: a
-// folder of src/ whose files are all one owner's. Where a file serves two, its owner is the owner of its STATE.
+// folder of src/ whose files are all one owner's. A file whose OWN code does two owners' work matches NO rule: it is a
+// SPLIT row below (cure r3, T1). Where a file holds one owner's work and only CALLS another's, it is the first's.
 const F = '^src/(?:server/|routes/|lib/)?';
 const name = (w) => new RegExp(`${F}(?:${w})\\.[cm]?js$`);
 const lead = (w) => new RegExp(`${F}(?:${w})(?:-[\\w.-]*)?\\.[cm]?js$`);
 const but = (head, not) => new RegExp(`${F}${head}(?!(?:${not})\\.[cm]?js$)[\\w.-]+\\.[cm]?js$`);
 const dir = (d) => new RegExp(`^src/(?:${d})/`);
 // the families two owners share, each spelled ONCE (the owner's rule and the other's `but` read the same words)
-const BROWSER_ROWS = 'profiles|kept|passkey-store|engines|builds|builds-keeper|installs|cli-install|clone|clone-run|bindings|key|takeover|takeover-request|stale|tabs|human|handback|propose|job-principal|keeper';
+const BROWSER_ROWS = 'profiles|kept|passkey-store|engines|builds|builds-keeper|installs|cli-install|clone|clone-run|bindings|key|takeover|takeover-request|stale|tabs|human|handback|propose|job-principal';
 const BROWSER_VAULT = 'login|logins';
+const BROWSER_SPLIT = 'keeper';   // src/server/browser-keeper.js — a SPLIT row (the registry AND the keeper of running browsers)
 const QUOTA_HARNESS = 'claude-quota|codex-quota|null-quota|antigravity-usage|antigravity-wall';
 const CODEX_MONEY = 'reset-helper|fork-ledger-purge';
 const OWNERS = Object.freeze([
   { id: 'interface', words: 'the interface: the page protocol and its fan-out, sign-in, the page-written stores — and the hub process’s own (the listener, boot and exit, the store writer, the loop’s instrument)',
-    rules: [/^server\.js$/, /^src\/agentd\/mux\.js$/,
-      name('ws-handler|ws-heartbeat|ws-keepalive|session-broadcast|sync-store|op-seq|static-public|app-csp|csp-reports|frame-host|auth|clerk-auth|write-origin|tls|tls-plan|login-words|persistence|user-state-ops|editor|custom-theme-normalize|retired-settings|desktop-record|day-one|phone-doors|changelog-style|instance-url'),
-      name('runtime-boot|runtime-floor|node-runtime|boot-phase|boot-trace|migrations|migration-runner|ops-routes|exit-hook|exit-settle|store-writer|store-writer-worker|store-exit-keeper|telemetry|opslog|timed-sync|fd-budget|fd-gauge|memory-census|memory-sampler|worker-memory|cpu-capture|sync-fs-witness|sync-fs-witness-worker'),
+    rules: [/^src\/agentd\/mux\.js$/,
+      name('ws-heartbeat|ws-keepalive|session-broadcast|sync-store|op-seq|static-public|app-csp|csp-reports|frame-host|auth|clerk-auth|write-origin|tls|tls-plan|login-words|persistence|user-state-ops|editor|custom-theme-normalize|retired-settings|desktop-record|day-one|phone-doors|changelog-style|instance-url'),
+      name('runtime-boot|runtime-floor|node-runtime|boot-phase|boot-trace|migration-runner|ops-routes|exit-hook|exit-settle|store-writer|store-writer-worker|store-exit-keeper|telemetry|opslog|timed-sync|fd-budget|fd-gauge|memory-census|memory-sampler|worker-memory|cpu-capture|sync-fs-witness|sync-fs-witness-worker'),
       lead('loop|incident')] },
   { id: 'vault', words: 'the vault: the key and every sealed entry, the mask and its belt, the integration credentials, web logins',
     rules: [lead('vault|secret|key-file|sealed-json|totp|integrations?|app-secrets|cluster-presets|preset-layers|ssh-key|credential-words|agent-output-belt|webauthn-sign|login-hold-words'),
       name(`browser-(?:${BROWSER_VAULT})`)] },
   { id: 'channels', words: 'the channels: mail and chat sign-ins, the index and message logs, the scheduler, vendor calls, the outbox, webhooks, the OAuth landing',
     rules: [dir('channels'), lead('channels'), but('channel-', 'groups(?:-[\\w.-]*)?'),
-      lead('webhook|gmail-sync|mail-frame|msg-acl|oauth-loopback|oauth-doors|consent-road|roster-pass|api-call-words'), name('api-call-words\\.generated')] },
+      lead('webhook|gmail-sync|mail-frame|oauth-loopback|oauth-doors|consent-road|roster-pass|api-call-words'), name('api-call-words\\.generated'),
+      name('peer-text')] },   // cure r3: the channel record's belt — it requires src/channel-record.js and runs its frame rule at every call
   { id: 'money', words: 'accounts and money: the pool, usage and readings, the spend guard, auto-resume, the delivery ladder (stash, retry, wakes)',
-    rules: [name('accounts|account-(?:pool-auto|usage-routes|models)'), but('usage-', 'walker'),
-      lead('quota|spend|auto-resume|auto-cli|reset-credit|reading|ledger|stash|provider|model-providers|model-family|wait|park-step|record-lateness|slot-transitions|sealed-orders|window-stamp|weekly-lanes-unfold|plan-names|claude-plan-catalog|login-expiry|cost-segments|catalog-pricing|rate-limit-capture|otel-truth|stream-wall|queued-wakes|conversation-deliver|refresh-note|backend-caps|fixture-ledger-purge|agy-turn-usage|cli-usage-door'),
+    rules: [name('account-(?:pool-auto|usage-routes|models)'), but('usage-', 'walker'),
+      lead('quota|spend|auto-resume|auto-cli|reset-credit|reading|ledger|stash|provider|model-providers|model-family|wait|park-step|record-lateness|slot-transitions|sealed-orders|window-stamp|weekly-lanes-unfold|plan-names|claude-plan-catalog|login-expiry|cost-segments|catalog-pricing|rate-limit-capture|otel-truth|stream-wall|queued-wakes|conversation-deliver|refresh-note|fixture-ledger-purge|agy-turn-usage|cli-usage-door'),
       name(`codex-(?:${CODEX_MONEY})|oat-(?:file-sync|identity|identity-model|shape-routes)`), new RegExp(`^src/harnesses/(?:${QUOTA_HARNESS})\\.js$`)] },
   { id: 'workspace', words: 'the workspace: tasks, agent groups, For you, grants, automation, artifact rows, the design and doc registries, the decision engine, voice, feedback',
-    rules: [lead('task|backlog-select|groups-engine|channel-groups|group-card|foryou|inbox|user-todos|main-asks?|helper-asks?|attention-model|grant-model|grants|ask-grant|automation|artifacts|artifact-registry|doc|published-pages|decision|rule-learning|text-model-client|voice|dropline|feedback|conversation-index|conversation-spec|search-index|search-model|records?-clear|assistant-note|notification-senders|session-status'),
+    rules: [lead('task|backlog-select|groups-engine|channel-groups|group-card|msg-acl|worker-dispatch|dispatch-model|foryou|inbox|user-todos|main-asks?|helper-asks?|attention-model|grant-model|grants|ask-grant|automation|artifacts|artifact-registry|doc|published-pages|decision|rule-learning|text-model-client|voice|dropline|feedback|conversation-index|conversation-spec|search-index|search-model|records?-clear|assistant-note|notification-senders|session-status'),
       name('design'), but('design-', 'fs')] },
   { id: 'machines', words: 'the machines registry: hosts and pairing, browser records and leases, jobs records, mounts, desktop apps and windows, plugins, exits',
-    rules: [dir('app-kinds|mount-providers|plugins|browser-backends'), /^src\/agentd\/client\.js$/,
-      lead('hosts|host-tokens|pairing-token|dial-pairing|dial-health|dial-facts|agentd-signature|device|engine-kernel|engine-distribution|apps|install-slot|installs|ffmpeg-install|mic-install|machine-needs|machine-mounts|mounts?|path-mounts|vfs-cache-place|rclone-obscure|storage-path|storage-facts|fs-canary|port-forward|plugins?|relay-token|tailnet|tailscale-dns|jobs?|hub-act|desktop-apps|desktop-app-keeper|desktop-browser-app|desktop-handover|desktop-machines-cache|encoded-command|modifier-map'),
+    rules: [dir('app-kinds|mount-providers|plugins|browser-backends'),
+      lead('host-tokens|pairing-token|dial-pairing|dial-health|dial-facts|agentd-signature|device|engine-kernel|engine-distribution|apps|install-slot|installs|ffmpeg-install|mic-install|machine-needs|machine-mounts|mount|path-mounts|vfs-cache-place|rclone-obscure|storage-path|storage-facts|fs-canary|relay-token|tailnet|tailscale-dns|hub-act|desktop-apps|desktop-app-keeper|desktop-browser-app|desktop-handover|desktop-machines-cache|encoded-command|modifier-map'),
+      name('mounts-plugins-wiring|plugins'), but('plugin-', 'loader'), but('jobs?-', 'logs-sweep(?:-worker)?'),   // cure r3: hosts, mounts, port-forward, plugin-loader, jobs are SPLIT rows
       name('app-card|app-manifest|app-recipes|app-system|window-(?:reach|request|targets|targets-engine|desktop)|exit-(?:proxy|reach|routes|shell)'),
       name(`browser|browser-(?:${BROWSER_ROWS})`)] },
   { id: 'conversation', words: 'the conversation, the machine side: create and spawn, the stream parse and its side effects, the hook’s door, files, the keepers’ processes, machine facts',
     rules: [dir('spawn|adapters|agent-routes|server/stdout'), new RegExp(`^src/harnesses/(?!(?:${QUOTA_HARNESS})\\.js$)[\\w.-]+\\.js$`),
-      but('browser-', `${BROWSER_ROWS}|${BROWSER_VAULT}`), but('stream-', 'wall'), but('cli-', 'usage-door'), but('agy-', 'turn-usage'), but('codex-', CODEX_MONEY),
-      lead('ws-create|agent-routes|agent-env|agent-cli|agent-tool|hooks-late|hook-root-watch|seen-marks|turn|message|acp|opencode|normalizers|transcript|user-input|user-channel|permission|bypass-auto-allow|queue|goal-sync|compaction-watch|bridge|dial-session-bridge|discovery-facts|sysinfo|machine-probes|ctx-sync|writer-sweep|remote-shell|remote-fs|webdav|files|chat-attachments|dir-slice|cdp|vnc|rfb-signin|novnc-patch|pty-duck|wrapper-files|kept-copies|writes-lost|local-index|local-oracles|resume|rewind-ops|workflow|new-session-spec|path-candidates|boot-restore|keeper-limits|runaway-guard|memory-pressure|office-open|remoteapp|proc|safe-fs|git-identity|harness|owner-facts|tray-words|server-root|safety-stop|record-shape|search-card|collab-row|text-window|worker-dispatch|dispatch-model|peer-messaging|otel-ingest|signin-model|claude-signin|claude-subscription-login|claude-lock-capture|claude-model-catalog|claude-oat|oat-mint|backend-status-route|stop-nudge|model-ask|model-echo|egress-proxy|machine-desktop-model|machine-window|machine-app|mic-model|sound-model|installed-apps|app-serve|app-system-serve|app-squashfs|app-witness'),
+      but('browser-', `${BROWSER_ROWS}|${BROWSER_VAULT}|${BROWSER_SPLIT}`), but('stream-', 'wall'), but('cli-', 'usage-door'), but('agy-', 'turn-usage'), but('codex-', CODEX_MONEY),
+      lead('ws-create|job-logs-sweep|backend-caps|agent-env|agent-cli|agent-tool|hooks-late|hook-root-watch|seen-marks|turn|message|acp|opencode|normalizers|transcript|user-input|user-channel|permission|bypass-auto-allow|queue|goal-sync|compaction-watch|bridge|dial-session-bridge|discovery-facts|sysinfo|machine-probes|ctx-sync|writer-sweep|remote-shell|remote-fs|webdav|files|chat-attachments|dir-slice|cdp|vnc|rfb-signin|novnc-patch|pty-duck|wrapper-files|kept-copies|writes-lost|local-index|local-oracles|resume|rewind-ops|workflow|new-session-spec|path-candidates|boot-restore|keeper-limits|runaway-guard|memory-pressure|office-open|remoteapp|proc|safe-fs|git-identity|harness|owner-facts|tray-words|server-root|safety-stop|record-shape|search-card|collab-row|text-window|peer-messaging|otel-ingest|signin-model|claude-signin|claude-subscription-login|claude-lock-capture|claude-model-catalog|claude-oat|oat-mint|backend-status-route|stop-nudge|model-ask|model-echo|egress-proxy|machine-desktop-model|machine-window|machine-app|mic-model|sound-model|installed-apps|app-serve|app-system-serve|app-squashfs|app-witness'),
       name('usage-walker|design-fs|window-live-wiring|exit-call|exit-facts|unexpected-exit|account-material|login-shell|login-state|conversation-ops|sessions|session-(?:brain|stdout|store|schema)|desktop-(?:access|backends|display|fit|pin|serve|stream|viewers|webrtc)')] },
 ].map((o) => Object.freeze({ ...o, rules: Object.freeze(o.rules) })));
 // THE SHARED HELPERS — ONE short list: modules that hold NO state and belong to nobody. The walk passes a helper's frame
@@ -109,33 +118,61 @@ const HELPERS = Object.freeze([
   ['src/sock-path.js', 'a path helper: where a unix socket may live (fs and crypto handed in, nothing kept)'],
   ['src/safe-fetch.js', 'one request to a non-vendor URL with its decoding belt; nothing kept between calls'],
   ['src/egress-fence.js', 'the address verdict and one fenced request to an owner-configured address; nothing kept between calls'],
-  ['src/peer-text.js', 'PURE: the one belt on peer text toward an agent, run at every door by the door’s owner'],
   ['src/cache-bounds.js', 'PURE: no fs, no clock, nothing at module level — the ceilings, and eviction and slab classes acting on the map or slab their CALLER owns'],
   ['src/fixture-guard.js', 'PURE: the one declaration of what a test fixture looks like'],
 ].map(([path, why]) => Object.freeze({ path, why })));
 const HELPER = 'helper';
 const HELPER_SET = new Set(HELPERS.map((h) => h.path));
-const OUTSIDE = Object.freeze({ id: 'outside', words: 'outside the hub’s owned code: no owned frame on the stack (Node’s internals or a library alone, or shared helpers alone)' });
+// THE SPLIT FILES (cure r3, T1) — a file whose OWN code does the work of two (or more) owners, by the design's «split» rows
+// or as a door whose inline bodies do another owner's work: booked under its OWN name, bucket `split:<short>`, outside the
+// seven. `owners` in the table's order; `why` = one line of which owners and where. This list's ORDER is the order the hourly
+// line prints the buckets. No owner's rule matches a split file (test-loop-census ②); a file that only CALLS another owner's
+// engine is not split (its call books the engine's frame). A file the tree already cut (desktop-app-keeper → desktop-serve,
+// window-targets-engine → window-targets, design-engine → design-fs) is one owner's and stays off this list.
+const SPLIT_PREFIX = 'split:';
+const SPLIT = Object.freeze([
+  ['src/ws-handler.js', 'ws-handler', ['interface', 'conversation'], 'the page protocol (state-set, layout-sync, the desktops) AND, inline, the machine’s verbs: attach reads the transcript, input, interrupt, queue-op, permission-response, set-model / set-effort / set-goal'],
+  ['server.js', 'server', ['interface', 'workspace', 'machines', 'conversation'], 'the listener, the app and the page sockets AND inline bodies of other owners: the tasks and to-dos routes (workspace), the port-forward and machine-mount routes (machines), the machine’s sysinfo routes, the device stream’s records parsed into the live consumers (hosts.onSessionEvents), the resize to the smallest client (conversation)'],
+  ['src/agent-routes.js', 'agent-routes', ['channels', 'workspace', 'machines', 'conversation'], 'the agent’s door (prompt-context, task-context, stop-check) AND, inline, the channels verbs, the message, task, backlog and page verbs (workspace) and the jobs verbs (machines)'],
+  ['src/hosts.js', 'hosts', ['machines', 'conversation'], 'the host registry, pairing and the ssh install (machines) AND the machine facts read over ssh: session discovery, the transcript mirror and its cache, the usage harvest (the machine side)'],
+  ['src/agentd/client.js', 'agentd-client', ['interface', 'machines'], 'install, the token mint and the signed self-upgrade (machines) AND the device link itself: connect, the handshake, every op’s request and answer (the interface terminates every link)'],
+  ['src/server/browser-keeper.js', 'browser-keeper', ['machines', 'conversation'], 'the profile registry, leases and pins (machines) AND the keeper of running browsers: spawn, adoption by pid + starttime, the /proc resource sample, the stop (the machine’s keepers child)'],
+  ['src/jobs.js', 'jobs', ['machines', 'conversation'], 'the job record, schedule and approvals (machines) AND the process: the wrapper’s spawn, its pid + starttime + boot-id identity at every act, logs, the lock, the cgroup read (the machine agent)'],
+  ['src/mounts.js', 'mounts', ['machines', 'conversation'], 'mount definitions, share minting and sealed credentials (machines) AND the rclone children started detached, adoption from /proc/mounts, the remount and the fusermount ladder (the machine agent)'],
+  ['src/port-forward.js', 'port-forward', ['machines', 'conversation'], 'forward records and publishing (machines) AND the hub machine’s own port scan (ss, the sockets’ owners in /proc) and the orphan kill (the machine agent)'],
+  ['src/server/plugin-loader.js', 'plugin-loader', ['machines', 'conversation'], 'the plugin registry, consent and tool shims (machines) AND each plugin server’s child: the fork under --permission, its restarts, its IPC (the machine’s starter)'],
+  ['src/accounts.js', 'accounts', ['money', 'conversation'], 'the account catalog and its policy (money) AND the login files under data/subs and codex-subs, their merge and removal, the pool links read and swept (the machine agent — the design’s Account and Pool rows)'],
+  ['src/server/migrations.js', 'migrations', ['interface', 'vault', 'channels', 'money', 'workspace', 'machines'], 'the design’s own split row (each service migrates its own stores): one registry reshapes readings and the ledger, channel credentials, task groups and grants, browser profiles and desktop apps, the vault’s grants, the settings'],
+].map(([path, short, owners, why]) => Object.freeze({ path, short, owners: Object.freeze(owners), why })));
+const splitIdOf = (short) => `${SPLIT_PREFIX}${short}`;
+const SPLIT_BY_PATH = new Map(SPLIT.map((s) => [s.path, splitIdOf(s.short)]));
+const OUTSIDE = Object.freeze({ id: 'outside', words: 'outside the hub’s owned code: no owned or split frame on the stack (Node’s internals or a library alone, or shared helpers alone)' });
 const NATIVE_WORDS = 'on the CPU outside JavaScript (no JavaScript frame on the stack)';
-const TICK_WORDS = `a tick every ${CENSUS_EVERY_MS / 1000} s on average from the watchdog thread, classed by the main thread's kernel state first (asleep in its own loop's poll = idle, never asked); a busy tick is booked on the OWNER of the first owned frame walking outward from the innermost, passing only shared helpers, libraries and Node's internals (viaHelper = booked on an owner through a helper; outside = no owned frame; deep = a full ${FRAME_LIMIT}-frame list with no owned frame, the owner may lie beyond it) (${CC.NATIVE_NOTE})`;
-const IDS = Object.freeze([...OWNERS.map((o) => o.id), OUTSIDE.id]);
+const TICK_WORDS = `a tick every ${CENSUS_EVERY_MS / 1000} s on average from the watchdog thread, classed by the main thread's kernel state first (asleep in its own loop's poll = idle, never asked); a busy tick is booked on the OWNER of the first owned frame walking outward from the innermost — a file that holds two owners' work is its own bucket (split:<short>), never one of them — passing only shared helpers, libraries and Node's internals (viaHelper = booked through a helper; outside = no owned frame; deep = a full ${FRAME_LIMIT}-frame list with no owned frame, the owner may lie beyond it) (${CC.NATIVE_NOTE})`;
+// THE FOLD'S IDS, in the order of its shares: the seven owners, the split buckets (the SPLIT list's order), outside
+const IDS = Object.freeze([...OWNERS.map((o) => o.id), ...SPLIT.map((s) => splitIdOf(s.short)), OUTSIDE.id]);
 
-/** PURE: an install-relative path → its owner id, HELPER ('helper') for a shared helper, or null (no row: outside src/ and
- *  server.js, or a file only the page or the device agent loads that no rule names). The FIRST owner whose rule matches —
- *  the census leg proves no hub-side file matches two. */
+/** PURE: an install-relative path → its BUCKET: an owner id, `split:<short>` for a file on the SPLIT list, HELPER ('helper')
+ *  for a shared helper, or null (no row: outside src/ and server.js, or a file only the page or the device agent loads that
+ *  no rule names). The FIRST owner whose rule matches — the census leg proves no hub-side file matches two, and no rule
+ *  matches a split file or a helper. */
 function ownerOf(rel) {
   const p = String(rel || '');
   if (HELPER_SET.has(p)) return HELPER;
+  const split = SPLIT_BY_PATH.get(p);
+  if (split) return split;
   for (const o of OWNERS) if (o.rules.some((re) => re.test(p))) return o.id;
   return null;
 }
 const NATIVE_BOOK = Object.freeze({ owner: 'native', viaHelper: false, deep: false });
 /** PURE: an answered ask's text (the sample's own encoding, src/loop-hold.js SAMPLE_EXPR) → where its ticks go:
- *  {owner: <an owner id> | 'outside' | 'native', viaHelper, deep}, or null — NOT SAMPLED (a debugger's or an accessor's
- *  stand-down, frames unreadable). The walk goes OUTWARD from the innermost frame and stops at the first OWNED one; it
- *  passes Node's internals, built-ins, node_modules, eval'd frames and install files with no row, and a shared helper's
- *  frame (viaHelper: the owner was reached through ≥ 1 helper). No owned frame ⇒ 'outside' (deep: the sample's list was
- *  full — FRAME_LIMIT frames before the instrument's trim — so an owner may lie beyond it). */
+ *  {owner: <an owner id> | 'split:<short>' | 'outside' | 'native', viaHelper, deep}, or null — NOT SAMPLED (a debugger's or
+ *  an accessor's stand-down, frames unreadable). The walk goes OUTWARD from the innermost frame and stops at the first frame
+ *  of an OWNED or a SPLIT file — a split file's frame is booked on its own bucket, never on an owner of its (cure r3, T1: a
+ *  sample inside a door's own inline body is that door file's, not the interface's); it passes Node's internals, built-ins,
+ *  node_modules, eval'd frames and install files with no row, and a shared helper's frame (viaHelper: the bucket was reached
+ *  through ≥ 1 helper). No owned or split frame ⇒ 'outside' (deep: the sample's list was full — FRAME_LIMIT frames before
+ *  the instrument's trim — so an owner may lie beyond it). */
 function bookOf(text, root) {
   const r = CC.rawFramesOf(text);
   if (r.form !== 'calls' && r.form !== 'string') return null;
@@ -161,12 +198,14 @@ function slowerAfter(everyMs, askMs, { boundMs = ASK_BOUND_MS, floorMs = CENSUS_
 const emptyTicks = () => ({ idle: 0, held: 0, stopped: 0, notSampled: 0, paused: 0 });
 
 /** PURE: ONE take (the watchdog's {fromM, toM, everyMs, ticks, pausedBy, families, viaHelper, deep, asks, askOwnMs, askMaxMs,
- *  halved}) → {sampledTicks, busyTicks, busyShare (of the sampled), shares [{family, words, ticks, share}] — the SEVEN owners
- *  and outside, each a share of the BUSY ticks, larger first (ties in the table's order), native {ticks, share of the busy},
- *  viaHelper {ticks} and deep {ticks} (busy ticks among the booked: reached through a helper; a full list with no owned
- *  frame), idle / held / stopped {ticks, share of the sampled}, notSampled {ticks, paused, pausedBy}, cost {asks, ownMs,
- *  meanMs, maxMs, halved, dispatchMs, paidMs}, words}. The shares and native sum to 1 (busy = the owners' and outside's
- *  ticks + native's); an id the table does not know is outside's. */
+ *  halved}) → {sampledTicks, busyTicks, busyShare (of the sampled), shares — in THIS order (IDS): the SEVEN owners
+ *  [{family, words, ticks, share}], then one row per SPLIT bucket in the list's order [{family: 'split:<short>', short, why,
+ *  ticks, share}], then outside [{family, words, ticks, share}] — each a share of the BUSY ticks; native {ticks, share of the
+ *  busy}, viaHelper {ticks} and deep {ticks} (busy ticks among the booked: reached through a helper; a full list with no
+ *  owned frame), idle / held / stopped {ticks, share of the sampled}, notSampled {ticks, paused, pausedBy}, cost {asks,
+ *  ownMs, meanMs, maxMs, halved, dispatchMs, paidMs}, words}. The shares and native sum to 1 (busy = the owners', the split
+ *  buckets' and outside's ticks + native's); an id the table does not know (a retired owner, a split file no longer on the
+ *  list) is outside's. */
 function censusFold(take) {
   const t = take && typeof take === 'object' ? take : {};
   const n = (x) => (Number.isFinite(x) && x > 0 ? x : 0);
@@ -178,9 +217,11 @@ function censusFold(take) {
   const idle = n(tk.idle), held = n(tk.held), stopped = n(tk.stopped);
   const sampled = busy + idle + held + stopped;
   const of = (x, total) => (total > 0 ? x / total : null);
-  const order = new Map(IDS.map((id, i) => [id, i]));
-  const shares = IDS.map((id) => ({ family: id, words: id === OUTSIDE.id ? OUTSIDE.words : OWNERS[order.get(id)].words, ticks: by[id], share: of(by[id], busy) }))
-    .sort((a, b) => b.ticks - a.ticks || order.get(a.family) - order.get(b.family));
+  const shares = [
+    ...OWNERS.map((o) => ({ family: o.id, words: o.words, ticks: by[o.id], share: of(by[o.id], busy) })),
+    ...SPLIT.map((s) => { const id = splitIdOf(s.short); return { family: id, short: s.short, why: s.why, ticks: by[id], share: of(by[id], busy) }; }),
+    { family: OUTSIDE.id, words: OUTSIDE.words, ticks: by[OUTSIDE.id], share: of(by[OUTSIDE.id], busy) },
+  ];
   const asks = n(t.asks), ownMs = n(t.askOwnMs);
   return {
     fromM: Number.isFinite(t.fromM) ? t.fromM : null, toM: Number.isFinite(t.toM) ? t.toM : null, everyMs: Number.isFinite(t.everyMs) ? t.everyMs : null,
@@ -194,4 +235,4 @@ function censusFold(take) {
   };
 }
 
-module.exports = { OWNERS, HELPERS, HELPER, OUTSIDE, IDS, NATIVE_WORDS, TICK_WORDS, FRAME_LIMIT, NATIVE_BOOK, ownerOf, bookOf, slowerAfter, emptyTicks, censusFold, CENSUS_EVERY_MS, CENSUS_FLOOR_MS, ASK_BOUND_MS, TAKE_WAIT_MS, DISPATCH_MS };
+module.exports = { OWNERS, HELPERS, HELPER, SPLIT, SPLIT_PREFIX, splitIdOf, OUTSIDE, IDS,NATIVE_WORDS, TICK_WORDS, FRAME_LIMIT, NATIVE_BOOK, ownerOf, bookOf, slowerAfter, emptyTicks, censusFold, CENSUS_EVERY_MS, CENSUS_FLOOR_MS, ASK_BOUND_MS, TAKE_WAIT_MS, DISPATCH_MS };

@@ -619,8 +619,8 @@ async function finishCapture(c) {
 // Over the WHOLE hour, never a profiler: a tick every everyMs (1 s) on average, each interval drawn between half and one and
 // a half of it (as the capture's), classed EXACTLY as a capture's tick (CC.tickOf: the kernel state first — idle is never
 // asked; a hold open = held; stopped; another ask out, a capture or a profile running = not sampled); else ONE ask (commit
-// 1's road, the one in flight) or booked on its own ask in flight. An answer books its ticks on LC.bookOf — the OWNER of
-// the first owned frame walking outward from the innermost, passing only shared helpers, libraries and Node's internals
+// 1's road, the one in flight) or booked on its own ask in flight. An answer books its ticks on LC.bookOf — the OWNER (or a
+// SPLIT file's own bucket, `split:<short>` — cure r3) of the first owned frame walking outward from the innermost, passing only shared helpers, libraries and Node's internals
 // (native time on its JavaScript caller; 'outside'; 'native') — into families[owner], and counts the same ticks in
 // viaHelper (reached through a helper) and deep (a full frame list with no owned frame). COUNTS ONLY: a tick is a count,
 // an answer's text is read and dropped. ITS PRIORITY IS THE LOWEST: it posts only when no ask is in flight,

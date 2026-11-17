@@ -7747,7 +7747,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
      *  over an hour (their profile's last verb) — counts only, read in memory; null before the registry was loaded (never a load) */
     /** loop-day-report (cure r2, S3): the main pids of the live browsers this keeper runs — every engine, whatever its program is
      *  called — so the hour counts them (and the processes under them) as browsers by what they are; in memory, null before a load */
-    browserPids: () => { if (!loaded) return []; const out = []; for (const r of Object.values(reg.browsers || {})) if (B.isLiveBrowser(r) && Number.isInteger(r.pid)) out.push(r.pid); return out; },
+    browserPids: () => { if (!loaded) return []; const out = []; const add = (x) => { if (x && Number.isInteger(x.pid) && x.starttime != null) out.push({ pid: x.pid, starttime: Number(x.starttime) }); }; for (const r of Object.values(reg.browsers || {})) if (B.isLiveBrowser(r)) { add(r); add(r.browser); } return out; },   // loop-day-report cure r3: the daemon's and the browser's {pid, starttime} as the record holds them — a pid counts only while its start time is still the record's
     readyCounts: (t = now()) => {
       if (!loaded) return null;
       let ready = 0, idle1h = 0;

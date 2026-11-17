@@ -127,9 +127,15 @@ async function membersOf({ self = process.pid, procRoot = '/proc', cgroupRoot = 
   return { how: 'tree', pids: (await treeOf(roots, procRoot, signal)).filter((p) => p !== self) };
 }
 /** M4: the hub's processes by kind → { cli: {n, rss}, wrapper, browser, agentd, other, how } (rss in bytes; a process gone meanwhile
- *  is skipped; a cancelled walk answers null). `browserPids` = the keeper's live browsers' pids (any engine). */
+ *  is skipped; a cancelled walk answers null). `browserPids` = the keeper's live browsers as {pid, starttime} (any engine; the
+ *  daemon and its browser) — a pid counts as one only while /proc/<pid>/stat's start time is still the record's (cure r3). A CLI
+ *  is counted ONCE: a CLI process whose parent is a CLI (a launcher script or a node shim and the native CLI it starts) adds its
+ *  memory to the CLI, not a second count. */
 async function procKids(opts = {}) {
-  const procRoot = opts.procRoot || '/proc', signal = opts.signal || null, bp = opts.browserPids instanceof Set ? opts.browserPids : new Set(opts.browserPids || []);
+  const procRoot = opts.procRoot || '/proc', signal = opts.signal || null;
+  // the keeper's browsers as {pid, starttime}: a root counts only while /proc/<pid>/stat's start time is still that record's (a reused pid is not it)
+  const want = new Map(); for (const b of opts.browserPids || []) if (b && Number.isInteger(b.pid) && b.starttime != null) want.set(b.pid, Number(b.starttime));
+  const bp = new Set();
   const out = { how: null }; for (const k of LDR.KIDS) out[k] = { n: 0, rss: 0 };
   const mem = await membersOf(opts);
   out.how = mem.how;
@@ -145,11 +151,15 @@ async function procKids(opts = {}) {
     if (/^(node|MainThread|nodejs)$/.test(name)) { try { argv = (await fs.promises.readFile(`${procRoot}/${pid}/cmdline`, 'utf8')).split('\0').filter(Boolean).slice(0, 64); } catch { } }
     rows.set(pid, { name, ppid, rss, argv });
   }
+  for (const [pid, st0] of want) { if (signal && signal.cancelled) return null; if (!rows.has(pid)) continue; try { const st = await fs.promises.readFile(`${procRoot}/${pid}/stat`, 'utf8'); const f = st.slice(st.lastIndexOf(')') + 2).split(' '); if (Number(f[19]) === st0) bp.add(pid); } catch { } }
   // a keeper browser and every process under it is a browser (an engine's own helpers, whatever their names)
   const underBrowser = (pid) => { for (let p = pid, i = 0; p > 0 && i < 64; i++) { if (bp.has(p)) return true; const r = rows.get(p); if (!r) return false; p = r.ppid; } return false; };
+  const kinds = new Map(); for (const [pid, r] of rows) kinds.set(pid, kindOf(r.name, r.argv, { browserPid: underBrowser(pid) }));
   for (const [pid, r] of rows) {
-    const k = kindOf(r.name, r.argv, { browserPid: underBrowser(pid) });
-    out[k].n++; out[k].rss += r.rss;
+    const k = kinds.get(pid);
+    // a CLI is counted ONCE: a launcher (a shell script, a node shim) and the native CLI it starts are one CLI — the child adds its memory, not a count
+    if (!(k === 'cli' && kinds.get(r.ppid) === 'cli')) out[k].n++;
+    out[k].rss += r.rss;
   }
   return signal && signal.cancelled ? null : out;
 }
@@ -160,10 +170,12 @@ async function outputTimes(entries, buffersDir, { max = 2000, signal = null } = 
   if (!buffersDir) return out;
   let n = 0;
   for (const [id] of entries || []) {
-    if ((signal && signal.cancelled) || ++n > max) break;
+    if (signal && signal.cancelled) return null;   // ended at its time-out: says so (null), never a partial or a previous hour's map
+    if (++n > max) break;
     try { const st = await fs.promises.stat(`${buffersDir}/${id}.buf`); out.set(String(id), st.mtimeMs); } catch { }
+    if (signal) signal.read = n;   // how many it has read — the hour says it when the pass runs out of time
   }
-  return out;
+  return signal && signal.cancelled ? null : out;
 }
 /** M6 — PURE: the live conversations by turn and idle age, from the turn facts the hub holds (src/server/turn-facts.js: turnOf /
  *  turnKnown) and, idle, the age of the conversation's OUTPUT FILE (`times`: id → mtime ms — survives a restart): running, waiting
@@ -172,12 +184,15 @@ async function outputTimes(entries, buffersDir, { max = 2000, signal = null } = 
 function turnsOf(entries, t, times = new Map()) {
   const TF = require('./turn-facts.js');
   const out = Object.fromEntries(LDR.AGES.map((a) => [a, 0]));
+  const aged = times instanceof Map;   // cure r3 (T2): no pass this hour (it ran out of time, or none ran) ⇒ the idle ages are «?»
+  if (!aged) for (const a of ['idle-under-1h', 'idle-1-2h', 'idle-2-4h', 'idle-over-4h']) out[a] = null;
   for (const e of entries || []) {
     const [id, s] = Array.isArray(e) ? e : [null, e];
     if (!TF.turnKnown(s)) { out['turn-unknown']++; continue; }
     const st = TF.turnOf(s);
     if (st === 'running') { out['turn-running']++; continue; }
     if (st === 'waiting') { out['turn-waiting']++; continue; }
+    if (!aged) continue;
     const at = times.get(String(id));
     if (!(at > 0)) { out['turn-unknown']++; continue; }
     const age = t - at, H = LDR.HOUR_MS;
@@ -193,7 +208,7 @@ function create({ log = console, census = async () => null, foldCensus = null, s
   const watchedNow = () => { try { return watched() !== false; } catch { return false; } };
   let cur = LDR.newHour(wallNow(), { watched: watchedNow() });
   let eluAt = (() => { try { return elu(); } catch { return null; } })();
-  let lastKids = null, timer = null, stopped = false, exitSaid = false, walking = null, lastTimes = new Map();
+  let lastKids = null, timer = null, stopped = false, exitSaid = false, walking = null, aging = null;
   let lost0 = (() => { try { const n = lost(); return Number.isFinite(n) ? n : null; } catch { return null; } })();
   const kept = [];
   const fold = foldCensus || ((t) => { try { return require('../loop-census.js').censusFold(t); } catch { return null; } });
@@ -201,7 +216,19 @@ function create({ log = console, census = async () => null, foldCensus = null, s
   const memNow = (k) => { let h = {}; try { h = heap() || {}; } catch { } let r = null; try { r = rss(); } catch { } return { heapUsed: h.heapUsed, heapLimit: h.heapLimit, rss: r, kids: k }; };
   const sizesNow = () => { try { return sizes() || {}; } catch { return {}; } };
   const entriesNow = () => { try { return [...(sessions() || [])]; } catch { return []; } };
-  const turnsNow = (t, entries = entriesNow()) => { try { return turnsOf(entries, t, lastTimes); } catch { return null; } };
+  const turnsNow = (t, entries = entriesNow(), times = null) => { try { return turnsOf(entries, t, times); } catch { return null; } };
+  /** THE AGE PASS (cure r3, T2): ONE at a time, ended at its time-out (cancelled) — then the hour's idle ages are «?» and the line says
+   *  how many conversations were read; never a previous hour's times */
+  async function agesOnce(entries) {
+    if (aging) return { times: null, read: 0, total: entries.length };   // the last pass is still ending: this hour reads none
+    const signal = { cancelled: false, read: 0 };
+    aging = Promise.resolve().then(() => outputs(entries, buffersDir, { signal }));
+    const times = await within(aging, walkWaitMs);
+    if (times === null) signal.cancelled = true;
+    aging.finally(() => { aging = null; }).catch(() => { });
+    const ok = times instanceof Map;
+    return { times: ok ? times : null, read: signal.read > 0 ? signal.read : (ok ? times.size : 0), total: entries.length };
+  }
   const upNow = () => { try { const v = upMs(); return Number.isFinite(v) ? v : null; } catch { return null; } };
   /** the hour's holds the watchdog's ring dropped (a count since the last cut; null when the book cannot say) */
   const lostSince = () => { let n = null; try { n = lost(); } catch { } if (!Number.isFinite(n) || !Number.isFinite(lost0)) { lost0 = Number.isFinite(n) ? n : null; return null; } const d = n - lost0; lost0 = n; return d; };
@@ -236,8 +263,8 @@ function create({ log = console, census = async () => null, foldCensus = null, s
     const k = await walkOnce();
     if (k) lastKids = k;
     const entries = entriesNow();
-    try { lastTimes = await within(outputs(entries, buffersDir), PROCS_WAIT_MS, lastTimes) || lastTimes; } catch { }
-    const rep = { kind: 'hour', hour: h, toMs, busy, engines, upMs: upNow(), mem: memNow(k), turns: turnsNow(toMs, entries), browsers: browsersNow(toMs), sizes: { ...sizesNow(), ...counts } };
+    const ag = await agesOnce(entries);
+    const rep = { kind: 'hour', hour: h, toMs, busy, engines, upMs: upNow(), mem: memNow(k), turns: turnsNow(toMs, entries, ag.times), agesRead: ag, browsers: browsersNow(toMs), sizes: { ...sizesNow(), ...counts } };
     rep.line = LDR.line(rep);
     kept.push(rep); if (kept.length > keepHours) kept.splice(0, kept.length - keepHours);
     try { log.log(rep.line); } catch { }
@@ -249,14 +276,14 @@ function create({ log = console, census = async () => null, foldCensus = null, s
     timer = setTimeout(() => { tick().catch(() => { }).finally(schedule); }, ms);
     if (timer.unref) timer.unref();
   }
-  /** the exit line: the hour so far, the counts so far, the last process table and output times read (no read now). A hub KILLED
+  /** the exit line: the hour so far, the counts so far, the last process table read (no read now — the idle ages print «?»). A hub KILLED
    *  outright (SIGKILL, the OOM killer) writes none — its journal's hours can then add to less than the stored day */
   function exitLine() {
     if (exitSaid) return null;
     exitSaid = true;
     const t = wallNow();
     if (!watchedNow()) cur.watched = false;
-    const rep = { kind: 'exit', hour: cur, toMs: t, busy: busySince(eluAt), engines: null, upMs: upNow(), mem: memNow(lastKids), turns: turnsNow(t), browsers: browsersNow(t), sizes: { ...sizesNow(), ...LC.peek() } };;
+    const rep = { kind: 'exit', hour: cur, toMs: t, busy: busySince(eluAt), engines: null, upMs: upNow(), mem: memNow(lastKids), turns: turnsNow(t, entriesNow(), null), agesRead: { read: 0, total: entriesNow().length }, browsers: browsersNow(t), sizes: { ...sizesNow(), ...LC.peek() } };
     rep.line = LDR.line(rep);
     try { log.log(rep.line); } catch { }
     return rep;
@@ -266,7 +293,7 @@ function create({ log = console, census = async () => null, foldCensus = null, s
   function stop() { stopped = true; clearTimeout(timer); process.removeListener('exit', onExit); }
   /** ⚙ Diagnostics: the hours kept (newest first) and their day */
   function hours() {
-    const rows = kept.slice().reverse().map((r) => ({ line: r.line, from: r.hour.fromMs, to: r.toMs, watched: r.hour.watched !== false, lost: r.hour.lost, upMs: r.upMs, heldMs: r.hour.heldMs, holds: r.hour.holds, longestMs: r.hour.longestMs, boot: r.hour.boot, busy: r.busy, top: LDR.topOf(r.hour.by), engines: r.engines ? { shares: r.engines.shares || null, native: r.engines.native || null, outside: r.engines.outside || null, viaHelper: r.engines.viaHelper || null, deep: r.engines.deep || null, held: r.engines.held || null, idle: r.engines.idle || null, cost: r.engines.cost || null } : null, mem: r.mem, turns: r.turns, browsers: r.browsers, sizes: r.sizes }));
+    const rows = kept.slice().reverse().map((r) => ({ line: r.line, from: r.hour.fromMs, to: r.toMs, watched: r.hour.watched !== false, lost: r.hour.lost, upMs: r.upMs, heldMs: r.hour.heldMs, holds: r.hour.holds, longestMs: r.hour.longestMs, boot: r.hour.boot, busy: r.busy, top: LDR.topOf(r.hour.by), engines: r.engines ? { busyTicks: Number.isFinite(r.engines.busyTicks) ? r.engines.busyTicks : null, shares: r.engines.shares || null, native: r.engines.native || null, outside: r.engines.outside || null, viaHelper: r.engines.viaHelper || null, deep: r.engines.deep || null, held: r.engines.held || null, idle: r.engines.idle || null, cost: r.engines.cost || null } : null, mem: r.mem, turns: r.turns, agesRead: r.agesRead || null, browsers: r.browsers, sizes: r.sizes }));
     return { hours: rows, day: LDR.dayFold(kept), now: { from: cur.fromMs, heldMs: cur.heldMs, holds: cur.holds, busy: busySince(eluAt) } };
   }
   const api = { onHold, tick, start, stop, exitLine, hours };

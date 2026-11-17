@@ -21,6 +21,15 @@
 // rule (①b ②), the helper not counted (①b ③a2), deep never said (①b ③a3), two owners' rules swapped (①a), a rule dropped
 // (② by name), a new file with no row (② by name), the priority rule — the hold does not take the census's ask (③c) / the
 // census asks while a capture runs (③d) — the reset at take (③e).
+// CURE r3 (T1, «A FILE THAT HOLDS TWO OWNERS' WORK IS BOOKED UNDER ITS OWN NAME»): ① a sample inside a door file's OWN inline
+// body (the page handler's, the agent routes') books `split:<short>`, never the interface; the walk stops at a split frame as
+// at an owned one; the two real shapes read off the REAL route files (a create under the page handler — its case, the ops
+// seam, the create handler — books the conversation; the vault engine under the VAULT's own route file, where every
+// /api/agent/vault/* route lives, books the vault); the census smalls' owners; the fold's split rows. ② THE SPLIT LIST: each
+// a real hub-side file with its short name, two or more known owners and its why, NO owner's rule matching it; the counts
+// per owner printed again with the split files and the helpers. Mutants: the walk passing split frames (①b), ownerOf blind
+// to the list (①), the fold folding split ids into outside (①), a split file back on an owner's rule (②), a split row with
+// one owner (②), peer-text back on the helpers' list (①s), each small back on its old owner (①s).
 // Run: TZ=UTC node scripts/test-loop-census.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -37,27 +46,45 @@ const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-loop-census-'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ORDER = 'interface,vault,channels,money,workspace,machines,conversation';
-// on a tree without the owners (d22a7b717) every new leg is RED by itself, never a throw that hides the others
-const OWNERS = LC.OWNERS || [], HELPERS = LC.HELPERS || [], ownerOf = LC.ownerOf || (() => undefined);
+// on a tree without the owners (d22a7b717) or without the split list (e1d9b088b) every new leg is RED by itself, never a
+// throw that hides the others
+const OWNERS = LC.OWNERS || [], HELPERS = LC.HELPERS || [], SPLIT = LC.SPLIT || [], ownerOf = LC.ownerOf || (() => undefined);
+const SPLIT_IDS = SPLIT.map((s) => `split:${s.short}`);
 
 // ── ① PURE ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('① PURE — the owners, one answer booked, the rate, one take folded');
 {
   const FIX = [
-    ['server.js', 'interface'], ['src/ws-handler.js', 'interface'], ['src/server/session-broadcast.js', 'interface'], ['src/auth.js', 'interface'], ['src/server/sync-fs-witness.js', 'interface'], ['src/store-writer.js', 'interface'],
-    ['src/server/vault-engine.js', 'vault'], ['src/server/integration-store.js', 'vault'], ['src/browser-login.js', 'vault'], ['src/secret-box.js', 'vault'],
-    ['src/server/channels-engine.js', 'channels'], ['src/channels/slack.js', 'channels'], ['src/channel-store.js', 'channels'], ['src/routes/channels.js', 'channels'],
-    ['src/server/usage-pool-engine.js', 'money'], ['src/harnesses/claude-quota.js', 'money'], ['src/server/spend-guard.js', 'money'], ['src/server/conversation-deliver.js', 'money'], ['src/server/stream-wall.js', 'money'],
+    ['src/server/session-broadcast.js', 'interface'], ['src/auth.js', 'interface'], ['src/server/sync-fs-witness.js', 'interface'], ['src/store-writer.js', 'interface'], ['src/agentd/mux.js', 'interface'],
+    ['src/server/vault-engine.js', 'vault'], ['src/routes/vault.js', 'vault'], ['src/server/integration-store.js', 'vault'], ['src/browser-login.js', 'vault'], ['src/secret-box.js', 'vault'],
+    ['src/server/channels-engine.js', 'channels'], ['src/channels/slack.js', 'channels'], ['src/channel-store.js', 'channels'], ['src/channel-record.js', 'channels'], ['src/routes/channels.js', 'channels'],
+    ['src/server/usage-pool-engine.js', 'money'], ['src/harnesses/claude-quota.js', 'money'], ['src/server/spend-guard.js', 'money'], ['src/server/conversation-deliver.js', 'money'], ['src/server/stream-wall.js', 'money'], ['src/account-pool-auto.js', 'money'],
     ['src/server/task-fanout.js', 'workspace'], ['src/server/groups-engine.js', 'workspace'], ['src/channel-groups.js', 'workspace'], ['src/server/grants-store.js', 'workspace'], ['src/server/design-engine.js', 'workspace'],
-    ['src/jobs.js', 'machines'], ['src/server/browser-keeper.js', 'machines'], ['src/browser-profiles.js', 'machines'], ['src/mounts.js', 'machines'], ['src/agentd/client.js', 'machines'], ['src/server/window-targets-engine.js', 'machines'],
-    ['src/ws-create.js', 'conversation'], ['src/server/stdout/claude-stream-json.js', 'conversation'], ['src/agent-routes.js', 'conversation'], ['src/server/session-brain.js', 'conversation'], ['src/server/browser-stream.js', 'conversation'],
-    ['src/harnesses/claude-transport.js', 'conversation'], ['src/usage-walker.js', 'conversation'], ['src/design-fs.js', 'conversation'], ['src/server/browser-login-fill.js', 'conversation'], ['src/server/stream-relays.js', 'conversation'],
+    ['src/browser-profiles.js', 'machines'], ['src/server/window-targets-engine.js', 'machines'], ['src/job-model.js', 'machines'], ['src/server/jobs-wiring.js', 'machines'], ['src/mount-argv.js', 'machines'], ['src/plugins.js', 'machines'], ['src/server/plugin-install.js', 'machines'], ['src/server/mounts-plugins-wiring.js', 'machines'],
+    ['src/ws-create.js', 'conversation'], ['src/server/conversation-ops.js', 'conversation'], ['src/server/stdout/claude-stream-json.js', 'conversation'], ['src/agent-routes/status.js', 'conversation'], ['src/server/session-brain.js', 'conversation'], ['src/server/browser-stream.js', 'conversation'],
+    ['src/harnesses/claude-transport.js', 'conversation'], ['src/usage-walker.js', 'conversation'], ['src/design-fs.js', 'conversation'], ['src/server/browser-login-fill.js', 'conversation'], ['src/server/stream-relays.js', 'conversation'], ['src/account-material.js', 'conversation'],
+    // cure r3 (T1): the files that hold two owners' work are each their OWN bucket
+    ['src/ws-handler.js', 'split:ws-handler'], ['server.js', 'split:server'], ['src/agent-routes.js', 'split:agent-routes'], ['src/hosts.js', 'split:hosts'], ['src/agentd/client.js', 'split:agentd-client'],
+    ['src/server/browser-keeper.js', 'split:browser-keeper'], ['src/jobs.js', 'split:jobs'], ['src/mounts.js', 'split:mounts'], ['src/accounts.js', 'split:accounts'], ['src/server/migrations.js', 'split:migrations'],
     ['src/server/lazy.js', LC.HELPER], ['src/hidden-chars.js', LC.HELPER], ['src/store-pace.js', LC.HELPER],
     ['node_modules/ws/lib/websocket.js', null], ['data/plugins/x/index.js', null], ['src/agentd/agentd.js', null], ['', null],
   ];
   const wrong = FIX.map(([p, id]) => [p, id, ownerOf(p)]).filter(([, id, got]) => got !== id);
-  ok(!wrong.length && LC.IDS.join() === `${ORDER},outside` && OWNERS.length === 7 && OWNERS.every((o) => FIX.some(([, id]) => id === o.id)) && FIX.every(([p]) => !p.startsWith('src/') || fs.existsSync(path.join(REPO, p))) && fs.existsSync(path.join(REPO, 'server.js')),
-    `ownerOf: a real file of the tree per owner (${LC.IDS.join(', ')} — that order), the families two owners share (browser, harnesses, usage, stream, exit, session), the helpers, and no row for node_modules / data / the device agent / nothing`, wrong);
+  ok(!wrong.length && (LC.IDS || []).join() === [ORDER, ...SPLIT_IDS, 'outside'].join() && SPLIT.length && OWNERS.length === 7 && OWNERS.every((o) => FIX.some(([, id]) => id === o.id)) && FIX.every(([p]) => !p.startsWith('src/') || fs.existsSync(path.join(REPO, p))) && fs.existsSync(path.join(REPO, 'server.js')),
+    `ownerOf: a real file of the tree per owner (${(LC.IDS || []).join(', ')} — that order: the seven, the split buckets, outside), the families two owners share (browser, harnesses, usage, stream, exit, session, jobs, mounts, plugins), the split files' own buckets, the helpers, and no row for node_modules / data / the device agent / nothing`, wrong);
+  // THE CENSUS SMALLS (cure r3): each misfile the verifier named, with its owner now — or why it stays
+  const SMALLS = [
+    ['src/peer-text.js', 'channels'],   // not ownerless: it requires src/channel-record.js and runs its frame rule (carriesFrame, inertFrameLine) at every call — the channel record's belt
+    ['src/msg-acl.js', 'workspace'],    // the reach between agents' conversations by task group and the grants' admission: agent-to-agent messages are the workspace's (the design's row)
+    ['src/server/worker-dispatch.js', 'workspace'], ['src/dispatch-model.js', 'workspace'],   // a brief to a worker = a groups-engine send with the groups store's ledger and pacer
+    ['src/job-logs-sweep.js', 'conversation'], ['src/job-logs-sweep-worker.js', 'conversation'],   // a job's logs on its machine, judged against the wrapper's pid stamp in /proc (the design: the machine agent's)
+    ['src/backend-caps.js', 'conversation'],   // the harness capability table — each harness descriptor's caps ARE its row; the pool reads one field through capsOf
+    ['src/server/migrations.js', 'split:migrations'],   // the design's own split row: each service migrates its own stores — one registry holds six owners' reshapes
+    ['src/telemetry.js', 'interface'], ['src/migration-runner.js', 'interface'],   // STAY: telemetry's stringify runs at its own flush (a 2 s timer, the summary route, exit) and in the collector's door, never inside an engine's call; the runner holds no owner's store
+  ];
+  const smallsWrong = SMALLS.map(([p, id]) => [p, id, ownerOf(p)]).filter(([, id, got]) => got !== id);
+  ok(!smallsWrong.length && !HELPERS.some((h) => h.path === 'src/peer-text.js') && SMALLS.every(([p]) => fs.existsSync(path.join(REPO, p))),
+    'the census smalls: peer-text is channels\' (off the helpers\' list), msg-acl and the worker dispatch pair workspace\'s, the job-log sweep and the harness capability table the conversation\'s (the machine side), migrations a split file of its own; telemetry and the migration runner stay the interface\'s', smallsWrong);
   // the sample's own encoding (src/loop-hold.js SAMPLE_EXPR): 'C' + <n>:<name><n>:<file><line>,<own line><e|n> each
   const C = (frames) => 'C' + frames.map(({ fn = 'f', file, ev = false }) => `${fn.length}:${fn}${file.length}:${file}3,1${ev ? 'e' : 'n'}`).join('');
   const R = '/srv/hub';
@@ -66,56 +93,86 @@ console.log('① PURE — the owners, one answer booked, the rate, one take fold
   const lib = (i) => ({ file: `${R}/node_modules/lib${i}/index.js` });
   const helper20 = Array.from({ length: 20 }, () => at('src/hidden-chars.js'));
   const B = (owner, viaHelper = false, deep = false) => ({ owner, viaHelper, deep });
+  // the libraries a real request or page message arrives through (their install-relative paths are node_modules': passed)
+  const WS = [{ file: `${R}/node_modules/ws/lib/event-target.js` }, { file: `${R}/node_modules/ws/lib/websocket.js` }, { file: 'node:events' }];
+  const HTTP = [{ file: `${R}/node_modules/express/lib/router/layer.js` }, { file: `${R}/node_modules/express/lib/router/route.js` }, { file: 'node:_http_server' }];
   const cases = [
-    // THE REAL SHAPES (the coordinator's): a create that arrives as a page message is the conversation's, not the page protocol's
-    [C([at('src/ws-create.js'), at('src/ws-handler.js'), at('server.js')]), B('conversation'), 'a session\'s creation (src/ws-create.js) under the page handler (src/ws-handler.js) books the conversation'],
-    [C([lib(1), { file: 'node:internal/fs/utils' }, at('src/ws-create.js'), at('src/ws-handler.js')]), B('conversation'), 'a library and Node\'s internals under the create are passed: the conversation'],
-    [C([{ file: 'node:crypto' }, at('src/server/vault-engine.js'), at('src/agent-routes.js'), at('server.js')]), B('vault'), 'the vault engine under an agent route books the vault'],
-    [C([at('src/hidden-chars.js'), at('src/peer-text.js'), at('src/server/channels-engine.js'), at('src/ws-handler.js')]), B('channels', true), 'two helpers between the channels engine and its caller are passed and counted: channels, viaHelper'],
+    // THE REAL SHAPES (the coordinator's), read off the REAL route files (pinned beside): a create that arrives as a page message
+    // runs the page handler's `case 'create'` → the ops seam (conversation-ops openConversation) → the create handler (ws-create)
+    [C([at('src/ws-create.js'), at('src/server/conversation-ops.js'), at('src/ws-handler.js'), ...WS]), B('conversation'), 'a session\'s creation (src/ws-create.js, through the ops seam) under the page handler\'s case (src/ws-handler.js) books the conversation'],
+    [C([lib(1), { file: 'node:internal/fs/utils' }, at('src/ws-create.js'), at('src/server/conversation-ops.js'), at('src/ws-handler.js'), ...WS]), B('conversation'), 'a library and Node\'s internals under the create are passed: the conversation'],
+    //   …and an agent's vault ask runs the VAULT's own route file (src/routes/vault.js holds every /api/agent/vault/* route)
+    [C([{ file: 'node:crypto' }, at('src/server/vault-engine.js'), at('src/routes/vault.js'), ...HTTP]), B('vault'), 'the vault engine under the vault\'s own route file (an /api/agent/vault/* request) books the vault'],
+    // THE SHAPE THAT WENT WRONG (cure r3, T1): a sample inside a door file's OWN inline body is that file's bucket — never the interface
+    [C([at('src/ws-handler.js'), ...WS]), B('split:ws-handler'), 'a sample inside the page handler\'s OWN inline body (attach\'s transcript parse — native time on its JavaScript caller) books split:ws-handler, never interface'],
+    [C([{ file: 'node:internal/fs/utils' }, { file: 'node:fs' }, at('src/ws-handler.js'), ...WS]), B('split:ws-handler'), 'a synchronous read inside the page handler\'s own body: split:ws-handler'],
+    [C([at('src/hidden-chars.js'), at('src/ws-handler.js'), ...WS]), B('split:ws-handler', true), 'a helper inside the page handler\'s own body is passed and counted: split:ws-handler, viaHelper'],
+    [C([{ file: 'node:internal/streams/writable' }, at('src/agent-routes.js'), ...HTTP]), B('split:agent-routes'), 'a channels verb\'s answer written inline in the agent routes: split:agent-routes, never the conversation'],
+    [C([at('src/server/channels-engine.js'), at('src/agent-routes.js'), ...HTTP]), B('channels'), 'an engine a split door CALLS is the engine\'s: the walk stops at the first owned frame, before the door'],
+    [C([at('src/jobs.js'), at('src/server/jobs-wiring.js'), at('server.js')]), B('split:jobs'), 'the walk never passes a split frame: the jobs file\'s own work, not the machines wiring that called it'],
+    [C([at('src/hidden-chars.js'), at('src/argv-words.js'), at('src/server/channels-engine.js'), at('src/ws-handler.js')]), B('channels', true), 'two helpers between the channels engine and its caller are passed and counted: channels, viaHelper'],
+    // peer-text is the channel record's belt (cure r3): booked channels — never passed as a helper onto the door that called it
+    [C([at('src/channel-record.js'), at('src/peer-text.js'), at('src/server/groups-engine.js')]), B('channels'), 'the belt\'s call into the channel record\'s frame rule books channels'],
+    [C([at('src/hidden-chars.js'), at('src/peer-text.js'), at('src/server/groups-engine.js')]), B('channels', true), 'a sample inside the belt (peer-text) books channels, not the workspace door that called it'],
     [C([at('src/server/session-brain.js'), at('src/ws-handler.js')]), B('conversation'), 'the walk never passes an owned frame: the live-output consumer, not the page handler that called it'],
     [C([at('src/hidden-chars.js'), at('src/server/lazy.js')]), B('outside'), 'helpers alone: outside (nothing booked onto a caller, so no viaHelper)'],
     [C([lib(1), { file: 'node:internal/timers' }]), B('outside'), 'a library and Node\'s internals alone: outside'],
     [C([{ fn: 'hr', file: `${R}/src/server/loop-blame.js` }, at('src/server/sync-fs-witness.js'), { file: 'node:fs' }, at('src/usage-history.js')]), B('money'), 'the instrument\'s own frames after a wrapped sync call trimmed: its caller'],
     [C([{ fn: 'hr', file: `${R}/src/server/loop-blame.js` }, at('src/server/sync-fs-witness.js')]), B('interface'), 'a stack that is the instrument\'s alone stays the instrument\'s: the hub process\'s own (interface)'],
-    [C([{ file: `${R}/src/jobs.js`, ev: true }, at('src/ws-handler.js')]), B('interface'), 'an eval\'d frame is never the install\'s'],
-    [C([at('data/plugins/x/index.js'), at('src/server/plugin-loader.js')]), B('machines'), 'an install file with no row (a plugin\'s own code) is passed: its loader'],
+    [C([{ file: `${R}/src/jobs.js`, ev: true }, at('src/server/session-broadcast.js')]), B('interface'), 'an eval\'d frame is never the install\'s'],
+    [C([at('data/plugins/x/index.js'), at('src/server/plugin-loader.js')]), B('split:plugin-loader'), 'an install file with no row (a plugin\'s own code) is passed: its loader (a split file: the registry and the child\'s supervision)'],
     [C([{ file: '' }, { file: 'node:internal/timers' }, { file: '/elsewhere/plugin.js' }]), B('outside'), 'no frame of the install: outside'],
     [C([]), B('native'), 'no JavaScript frame: native'],
     // THE FRAME LIMIT: a full list with no owned frame is deep — the owner may lie beyond it; under the limit, or an owner in it, is not
     [C([...helper20, ...Array.from({ length: LC.FRAME_LIMIT - 20 }, (_, i) => lib(i))]), B('outside', false, true), `a full list (${LC.FRAME_LIMIT} frames, the sample\'s limit) of helpers and libraries: outside, deep`],
     [C([...helper20, ...Array.from({ length: LC.FRAME_LIMIT - 21 }, (_, i) => lib(i))]), B('outside'), `${LC.FRAME_LIMIT - 1} frames, no owner: outside, not deep (nothing was cut)`],
-    [C([...helper20, ...Array.from({ length: LC.FRAME_LIMIT - 21 }, (_, i) => lib(i)), at('src/jobs.js')]), B('machines', true), `a full list whose last frame is owned: the owner (through the helpers), not deep`],
-    [S(['    at f0 (/srv/hub/src/x.js:1:1)', '    at f (/srv/hub/src/jobs.js:3:4)', '    at g (/srv/hub/src/ws-handler.js:5:6)']), B('machines'), 'the string form (locations only) books the same way'],
+    [C([...helper20, ...Array.from({ length: LC.FRAME_LIMIT - 21 }, (_, i) => lib(i)), at('src/browser-profiles.js')]), B('machines', true), `a full list whose last frame is owned: the owner (through the helpers), not deep`],
+    [S(['    at f0 (/srv/hub/src/x.js:1:1)', '    at f (/srv/hub/src/browser-profiles.js:3:4)', '    at g (/srv/hub/src/ws-handler.js:5:6)']), B('machines'), 'the string form (locations only) books the same way'],
+    [S(['    at f0 (/srv/hub/src/x.js:1:1)', '    at f (/srv/hub/src/server/browser-keeper.js:3:4)', '    at g (/srv/hub/src/browser-profiles.js:5:6)']), B('split:browser-keeper'), 'the string form books a split file\'s own bucket the same way'],
     [S(['    at f0 (/srv/hub/src/x.js:1:1)', ...Array.from({ length: LC.FRAME_LIMIT + 4 }, (_, i) => `    at g${i} (/srv/hub/node_modules/l/i.js:${i + 1}:1)`)]), B('outside', false, true), 'the string form cut at its limit with no owned frame: outside, deep'],
     ['D', null, 'a debugger\'s stand-down: not sampled'], ['A', null, 'an accessor\'s stand-down: not sampled'], [S(['garbage']), null, 'frames unreadable: not sampled'], [null, null, 'no text: not sampled'],
   ];
   const bad = cases.map(([t, want, why]) => [why, want, LC.bookOf(t, R)]).filter(([, want, got]) => JSON.stringify(got) !== JSON.stringify(want));
   ok(!bad.length, `bookOf: ${cases.map(([, , why]) => why).join('; ')}`, bad);
+  // THE REAL SHAPES' ROUTES, read off the tree: the stacks above are the roads the real files take
+  const src = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
+  const WSH = src('src/ws-handler.js'), OPS = src('src/server/conversation-ops.js'), RV = src('src/routes/vault.js'), AR = src('src/agent-routes.js');
+  const vaultRoutes = [...RV.matchAll(/app\.(?:get|post|put|delete)\('\/api\/agent\/vault\//g)].length;
+  ok(/case 'create': \{\s*await convOps\.openConversation\(data,/.test(WSH) && /if \(ws\) return D\(\)\.handleCreate\(ws, spec/.test(OPS)
+    && /const \{ createWsCreateHandler \} = require\('\.\/ws-create'\);/.test(WSH) && /const handleCreate = createWsCreateHandler\(\{/.test(WSH)
+    && vaultRoutes >= 5 && !/\/api\/agent\/vault/.test(AR) && ownerOf('src/routes/vault.js') === 'vault',
+    `the real shapes' roads: the page handler's case 'create' → conversation-ops openConversation → the create handler from src/ws-create.js; every /api/agent/vault/* route (${vaultRoutes}) in the vault's own route file (src/routes/vault.js, the vault's), none in src/agent-routes.js`);
   ok(/E\.stackTraceLimit = 32;/.test(LH.SAMPLE_EXPR) && /for \(let i = 1; i < cs\.length; i\+\+\)/.test(LH.SAMPLE_EXPR) && LC.FRAME_LIMIT === 32 - 1,
     `FRAME_LIMIT ${LC.FRAME_LIMIT} = the sample's own expression: 32 frames asked of V8, its own skipped`);
   const sl = [LC.slowerAfter(1000, 4.5), LC.slowerAfter(1000, LC.ASK_BOUND_MS), LC.slowerAfter(4000, 9), LC.slowerAfter(8000, 50), LC.slowerAfter(1000, NaN), LC.slowerAfter(1000, 0.2)];
   ok(JSON.stringify(sl) === '[2000,null,8000,null,null,null]' && LC.ASK_BOUND_MS === 4 && LC.CENSUS_FLOOR_MS === 8000 && LC.CENSUS_EVERY_MS === 1000,
     `slowerAfter: an ask past 4 ms halves the rate (1 s → 2 s, 4 s → 8 s), never slower than one per 8 s; at the bound or under, unchanged — so the bound's worst hour is 3 600 asks × (4 + ${LC.DISPATCH_MS}) ms = ${(3600 * (LC.ASK_BOUND_MS + LC.DISPATCH_MS) / 1000).toFixed(1)} s`, sl);
+  // the families of a take: owners, split buckets, outside, native — and two ids the table does not know: a retired owner's
+  // and a split file no longer on the list (both are outside's)
   const TAKE = { ev: 'census', id: 7, fromM: 1000, toM: 3601000, everyMs: 1000, ticks: { idle: 1500, held: 30, stopped: 0, notSampled: 12, paused: 8 }, pausedBy: { heap: 8 },
-    families: { channels: 600, money: 300, conversation: 150, interface: 150, outside: 90, native: 60, vault: 0, renamed: 10 }, viaHelper: 120, deep: 7, asks: 1290, askOwnMs: 258, askMaxMs: 1.75, halved: null };
+    families: { channels: 600, money: 300, conversation: 150, interface: 150, 'split:ws-handler': 200, 'split:jobs': 40, outside: 90, native: 60, vault: 0, renamed: 6, 'split:gone': 4 }, viaHelper: 120, deep: 7, asks: 1290, askOwnMs: 258, askMaxMs: 1.75, halved: null };
+  const BUSY = 1600;
   const w = (id) => (id === 'outside' ? (LC.OUTSIDE || {}).words : (OWNERS.find((o) => o.id === id) || {}).words);
-  const row = (id, n) => ({ family: id, words: w(id), ticks: n, share: n / 1360 });
-  const WANT = { fromM: 1000, toM: 3601000, everyMs: 1000, sampledTicks: 2890, busyTicks: 1360, busyShare: 1360 / 2890,
-    shares: [row('channels', 600), row('money', 300), row('interface', 150), row('conversation', 150), row('outside', 100), row('vault', 0), row('workspace', 0), row('machines', 0)],
-    native: { ticks: 60, share: 60 / 1360, words: LC.NATIVE_WORDS }, viaHelper: { ticks: 120 }, deep: { ticks: 7 },
-    idle: { ticks: 1500, share: 1500 / 2890 }, held: { ticks: 30, share: 30 / 2890 }, stopped: { ticks: 0, share: 0 },
+  const row = (id, n) => ({ family: id, words: w(id), ticks: n, share: n / BUSY });
+  const splitRow = (s, n) => ({ family: `split:${s.short}`, short: s.short, why: s.why, ticks: n, share: n / BUSY });
+  const tk = { 'split:ws-handler': 200, 'split:jobs': 40 };
+  const WANT = { fromM: 1000, toM: 3601000, everyMs: 1000, sampledTicks: 3130, busyTicks: BUSY, busyShare: BUSY / 3130,
+    shares: [row('interface', 150), row('vault', 0), row('channels', 600), row('money', 300), row('workspace', 0), row('machines', 0), row('conversation', 150),
+      ...SPLIT.map((s) => splitRow(s, tk[`split:${s.short}`] || 0)), row('outside', 100)],
+    native: { ticks: 60, share: 60 / BUSY, words: LC.NATIVE_WORDS }, viaHelper: { ticks: 120 }, deep: { ticks: 7 },
+    idle: { ticks: 1500, share: 1500 / 3130 }, held: { ticks: 30, share: 30 / 3130 }, stopped: { ticks: 0, share: 0 },
     notSampled: { ticks: 20, paused: 8, pausedBy: { heap: 8 } }, cost: { asks: 1290, ownMs: 258, meanMs: 0.2, maxMs: 1.75, halved: null, dispatchMs: 1290 * LC.DISPATCH_MS, paidMs: 258 + 1290 * LC.DISPATCH_MS }, words: LC.TICK_WORDS };
   const F = LC.censusFold(TAKE);
-  ok(JSON.stringify(F) === JSON.stringify(WANT) && Math.abs(F.shares.reduce((s, x) => s + x.share, 0) + F.native.share - 1) < 1e-12,
-    'censusFold of a FIXED take ⇒ a FIXED result: the seven owners and outside each a share of the BUSY ticks (larger first, a tie in the table\'s order, an id it does not know is outside\'s), native beside them — together 1; viaHelper and deep as ticks; idle / held of the sampled; paused counted not sampled; the asks\' cost', F);
+  ok(SPLIT.length && JSON.stringify(F) === JSON.stringify(WANT) && Math.abs(F.shares.reduce((s, x) => s + x.share, 0) + F.native.share - 1) < 1e-12,
+    'censusFold of a FIXED take ⇒ a FIXED result: shares = the seven owners, then one row per split bucket (family split:<short>, its short and why, the list\'s order), then outside — each a share of the BUSY ticks (an id the table does not know, a retired owner\'s or a split file off the list, is outside\'s), native beside them — together 1; viaHelper and deep as ticks; idle / held of the sampled; paused counted not sampled; the asks\' cost', F);
   const E = LC.censusFold(null);
-  ok(E.busyTicks === 0 && E.busyShare === null && E.shares.length === 8 && E.shares.every((x) => x.share === null) && E.viaHelper?.ticks === 0 && E.deep?.ticks === 0 && E.cost.meanMs === null, 'an empty take folds to nothing claimed (no share without a tick)', E);
-  ok(/OWNER of the first owned frame walking outward/.test(LC.TICK_WORDS) && !/innermost frame of/.test(LC.TICK_WORDS) && /outside/.test(LC.TICK_WORDS) && /deep/.test(LC.TICK_WORDS),
-    'the tick words say the outward walk to the first owned frame, outside and deep — never «the innermost frame»', LC.TICK_WORDS);
+  ok(E.busyTicks === 0 && E.busyShare === null && E.shares.length === 8 + SPLIT.length && E.shares.every((x) => x.share === null) && E.viaHelper?.ticks === 0 && E.deep?.ticks === 0 && E.cost.meanMs === null, 'an empty take folds to nothing claimed (no share without a tick)', E);
+  ok(/OWNER of the first owned frame walking outward/.test(LC.TICK_WORDS) && /split:<short>/.test(LC.TICK_WORDS) && !/innermost frame of/.test(LC.TICK_WORDS) && /outside/.test(LC.TICK_WORDS) && /deep/.test(LC.TICK_WORDS),
+    'the tick words say the outward walk to the first owned frame, a two-owner file\'s own bucket, outside and deep — never «the innermost frame»', LC.TICK_WORDS);
 }
 
 // ── ② THE OWNERS COVER THE HUB ────────────────────────────────────────────────────────────────────────────────────────
-console.log('② the owners cover the hub — every file the hub can load in exactly one owner, or on the helpers\' list');
+console.log('② the owners cover the hub — every file the hub can load in exactly one owner, on the split list, or on the helpers\' list');
 {
   // THE RULE for «the hub can load it»: server.js + every src/**/*.{js,mjs,cjs}, LESS the files that ONLY a page bundle or
   // ONLY a device bundle reaches — each bundle's closure walked from its entries (read off package.json's esbuild lines:
@@ -146,26 +203,36 @@ console.log('② the owners cover the hub — every file the hub can load in exa
   const HUB = closure(['server.js']), PAGE = closure(entries.browser), DEVICE = closure(entries.node);
   const pageOnly = [...PAGE].filter((f) => !HUB.has(f)), deviceOnly = [...DEVICE].filter((f) => !HUB.has(f));
   const hubSide = files.filter((f) => !(PAGE.has(f) && !HUB.has(f)) && !(DEVICE.has(f) && !HUB.has(f)));
-  const by = Object.fromEntries(OWNERS.map((o) => [o.id, 0])), unowned = [], twice = [], helperRuled = [];
-  const helperSet = new Set(HELPERS.map((h) => h.path));
+  const by = Object.fromEntries(OWNERS.map((o) => [o.id, 0])), unowned = [], twice = [], helperRuled = [], splitRuled = [];
+  const helperSet = new Set(HELPERS.map((h) => h.path)), splitSet = new Set(SPLIT.map((s) => s.path));
   for (const f of hubSide) {
     const hits = OWNERS.filter((o) => o.rules.some((re) => re.test(f))).map((o) => o.id);
     if (helperSet.has(f)) { if (hits.length) helperRuled.push(`${f} → ${hits.join(', ')}`); continue; }
+    if (splitSet.has(f)) { if (hits.length) splitRuled.push(`${f} → ${hits.join(', ')}`); continue; }   // cure r3: a split file matches NO owner's rule
     if (!hits.length) unowned.push(f); else if (hits.length > 1) twice.push(`${f} → ${hits.join(' and ')}`); else by[hits[0]]++;
   }
   const dead = OWNERS.flatMap((o) => o.rules.map((re, i) => [o.id, i, re]).filter(([, , re]) => !hubSide.some((f) => re.test(f))).map(([id, i]) => `${id} rule ${i}`));
   const strayHelpers = HELPERS.filter((h) => !hubSide.includes(h.path)).map((h) => h.path);
   console.log(`    the page bundles (${entries.browser.join(', ')}) reach ${PAGE.size} files, ${pageOnly.length} of them only theirs; the device bundles (${entries.node.join(', ')}) ${DEVICE.size}, ${deviceOnly.length} only theirs`);
-  console.log(`    THE HUB LOADS ${hubSide.length} files — ${OWNERS.map((o) => `${o.id} ${by[o.id]}`).join(' · ')} · helpers ${HELPERS.length} · unowned ${unowned.length}`);
+  console.log(`    THE HUB LOADS ${hubSide.length} files — ${OWNERS.map((o) => `${o.id} ${by[o.id]}`).join(' · ')} · split ${SPLIT.length} · helpers ${HELPERS.length} · unowned ${unowned.length}`);
+  for (const s of SPLIT) console.log(`      split:${s.short} ${s.path} (${(s.owners || []).join(' + ')}) — ${s.why}`);
   for (const h of HELPERS) console.log(`      helper ${h.path} — ${h.why}`);
   if (unowned.length) console.log(`    UNOWNED (each needs an owner's rule or, holding no state, a helper's row): ${unowned.join(', ')}`);
   ok(entries.browser.includes('src/client.js') && entries.node.includes('src/agentd/agentd.js') && HUB.has('src/ws-handler.js') && pageOnly.length > 100 && hubSide.length > 600,
     `the bundles' entries read off package.json (${entries.browser.length} page, ${entries.node.length} device) and server.js's closure walked`, { entries, hub: HUB.size });
-  ok(!unowned.length, `UNOWNED = 0 — every one of the ${hubSide.length} files the hub can load has an owner or is a helper`, unowned);
+  ok(!unowned.length, `UNOWNED = 0 — every one of the ${hubSide.length} files the hub can load has an owner, is a split file or a helper`, unowned);
   ok(OWNERS.length === 7 && !twice.length && !helperRuled.length, 'EXACTLY ONE owner per file — no file matches two owners\' rules, no helper matches an owner\'s', { twice, helperRuled });
   ok(OWNERS.map((o) => o.id).join() === ORDER && OWNERS.every((o) => by[o.id] > 0) && !dead.length && !strayHelpers.length && HELPERS.length && HELPERS.length <= 16 && HELPERS.every((h) => h.why && fs.existsSync(path.join(REPO, h.path))),
     `the seven owners in their order, each takes files; no rule matches nothing; the helpers' list is short (${HELPERS.length}), each a real hub-side file with its why`, { by, dead, strayHelpers });
-  ok(OWNERS.length && OWNERS.reduce((s, o) => s + by[o.id], 0) + HELPERS.length === hubSide.length, 'the owners\' counts and the helpers add up to the files the hub loads', by);
+  ok(OWNERS.length && OWNERS.reduce((s, o) => s + by[o.id], 0) + SPLIT.length + HELPERS.length === hubSide.length, 'the owners\' counts, the split files and the helpers add up to the files the hub loads', { by, split: SPLIT.length, helpers: HELPERS.length });
+  // THE SPLIT LIST (cure r3, T1): short, explicit, each a real hub-side file with its OWN short name, two or more owners of the
+  // table (in its order) and one line of why; NO owner's rule matches a split file (it would be booked on that owner)
+  const ids = OWNERS.map((o) => o.id);
+  const shortOk = (s) => /^[a-z][a-z0-9-]*$/.test(s.short) && [path.posix.basename(s.path).replace(/\.[cm]?js$/, ''), `${path.posix.basename(path.posix.dirname(s.path))}-${path.posix.basename(s.path).replace(/\.[cm]?js$/, '')}`].includes(s.short);
+  const badSplit = SPLIT.filter((s) => !hubSide.includes(s.path) || helperSet.has(s.path) || !shortOk(s) || !Array.isArray(s.owners) || s.owners.length < 2 || new Set(s.owners).size !== s.owners.length
+    || s.owners.some((o) => !ids.includes(o)) || s.owners.join() !== ids.filter((o) => s.owners.includes(o)).join() || !(typeof s.why === 'string' && s.why.length > 40)).map((s) => s.path);
+  ok(SPLIT.length >= 1 && SPLIT.length <= 16 && !splitRuled.length && !badSplit.length && new Set(SPLIT.map((s) => s.short)).size === SPLIT.length && new Set(SPLIT.map((s) => s.path)).size === SPLIT.length,
+    `THE SPLIT LIST (${SPLIT.length}): each a real hub-side file under its own short name, two or more owners (the table's order) and its why — NO owner's rule matches one: ${SPLIT.map((s) => `split:${s.short}`).join(', ')}`, { splitRuled, badSplit });
 }
 
 // ── ③ LIVE ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -193,8 +260,8 @@ try {
   // (a) half busy inside the channels owner, half idle
   for (let i = 0; i < 4; i++) { B.burn(140); await sleep(1); }
   await sleep(400);
-  const a = await W.census(), fa = LC.censusFold(a);
-  ok(a && a.families.channels >= 5 && fa.shares[0].family === 'channels' && fa.shares[0].share > 0.5 && a.ticks.idle >= 5 && a.asks >= 5 && a.askMaxMs > 0 && a.everyMs === 50 && a.viaHelper === 0 && a.deep === 0,
+  const a = await W.census(), fa = LC.censusFold(a), faCh = fa.shares.find((s) => s.family === 'channels') || {};
+  ok(a && a.families.channels >= 5 && faCh.share > 0.5 && fa.shares.every((s) => s === faCh || !(s.share > faCh.share)) &&a.ticks.idle >= 5 && a.asks >= 5 && a.askMaxMs > 0 && a.everyMs === 50 && a.viaHelper === 0 && a.deep === 0,
     `(a) a burn inside src/server/channels-burn.js: «channels» books ${a && a.families.channels} of ${fa.busyTicks} busy ticks, the idle half ${a && a.ticks.idle} idle ticks; ${a && a.asks} asks, their own run ${a && a.askOwnMs.toFixed(2)} ms (largest ${a && a.askMaxMs.toFixed(3)} ms); none through a helper, none deep`, a);
   // (a2) the same burn inside a HELPER the channels file calls: booked on channels, counted through a helper
   for (let i = 0; i < 4; i++) { B.viaHelper(100); await sleep(1); }
