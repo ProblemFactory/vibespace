@@ -138,6 +138,7 @@ const PIC = require('../browser-picture.js'); // lane desktop-x-seat-browser: th
 function create({ keeper = null, activeSessions, requestAuthed, log = console, now = Date.now, limits = S.BACKPRESSURE,
   WebSocketImpl = WebSocket, connectTimeoutMs = 20000, getTelemetry = () => null, platform = process.platform, inputWindow = INPUT_WINDOW,
   dialogs = null, keepaliveMs = KA.PING_MS, // lane stream-ping: the viewers' keepalive cadence (src/ws-keepalive.js; the fast gate runs on short ones)
+  xFollowRetryMs = null, // hotfix cure r1: the follow's fresh looks (the shipped [250, 600, 1100] ms; a suite runs on short ones)
   // lane browser-windows (U0b): the background check's clocks — the shipped values are the PURE constants (2 s of silence,
   // a 1 s tick, a 500 ms poll); injectable so the fast gate runs on short ones
   bgSilenceMs = WIN.BACKGROUND_SILENCE_MS, bgTickMs = 1000, bgPollMs = WIN.WATCH_POLL_MS, bgHungMs = WIN.UNRESPONSIVE_MS } = {}) { // lane browser-stuck: the page-dialog watch (src/server/browser-dialogs.js) — its records reach the viewers
@@ -1370,20 +1371,50 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   const xSeatListeners = new Set();
   const xRoadOf = (relay) => { try { const pid = relay && relay.target && relay.target.profileId; return !!(pid && keeper && typeof keeper.pictureSourceFor === 'function' && keeper.pictureSourceFor(pid).source === 'x'); } catch { return false; } };
   const holderKeyOf = (relay) => (isHuman(relay) ? String(relay.target.key || '') : String(relay.browserKey || ''));
-  async function xTicketFor(relay, viewer, { follow = false } = {}) {
-    const say = (m) => { if (relay.viewers.get(viewer.id) === viewer) send(viewer.ws, { type: 'x-ticket', ...m }); };
+  /** hotfix cure r1 (主开发 21:14Z, law 1): a follow's answer may be STALE — the keeper's display rows are cached 750 ms and the
+   *  verb that opens a tab fills that cache a moment before its window exists — so another tab than the ticket's answered with the
+   *  same window or none is looked at again with FRESH rows, up to three times inside about two seconds (under the sequence guard,
+   *  never a loop); still untold ⇒ SAID, the page's own picture of the tab — never another tab's window as this one in silence.
+   *  The follows of a burst of tab flips are coalesced: one keeper ask per viewer per X_FOLLOW_COALESCE_MS. */
+  const X_FOLLOW_RETRY_MS = Object.freeze(Array.isArray(xFollowRetryMs) && xFollowRetryMs.length ? xFollowRetryMs.map(Number) : [250, 600, 1100]);
+  const X_FOLLOW_COALESCE_MS = 80;
+  /** law 2: a ticket minted for a tab that is NOT this holder's (a person's chip on another conversation's tab) draws that window
+   *  and never sizes it — its seat is 'watch' whatever pane rules (the other holder keeps its window's size) */
+  function foreignOf(relay, viewer, tid) {
+    if (!viewer.watch || !tid) return false;
+    let owners = {}; try { owners = (JSON.parse(relay.lastOwners || '{}') || {}).owners || {}; } catch { owners = {}; }
+    return owners[String(tid).toUpperCase()] !== (isHuman(relay) ? 'you' : 'agent');
+  }
+  async function xTicketFor(relay, viewer, { follow = false, tries = 0, fresh = false } = {}) {
+    // law 3: an ask the page made is ALWAYS answered — every answer clears it (`xOwed`, set by the page's own `x-ticket`)
+    const say = (m) => { if (relay.viewers.get(viewer.id) === viewer) { viewer.xOwed = false; send(viewer.ws, { type: 'x-ticket', ...m }); } };
     if (viewer.agent) return say({ ok: false, code: 'not_yours', error: 'an agent never draws the browser window — its verbs are its own' });
     const pid = relay.target && relay.target.profileId;
     if (!pid || !keeper || typeof keeper.xWindowFor !== 'function') return say({ ok: false, code: 'screencast', why: 'not-running' });
     // hotfix 2026-11-17: the window of the tab THIS viewer shows (its watched tab, else the agent's) — asked again when that tab moves
     const tid = PIC.xShownTarget({ watch: viewer.watch, activeTarget: relay.activeTarget });
     const seq = viewer.xSeq = (viewer.xSeq || 0) + 1;
-    let x = null; try { x = await keeper.xWindowFor(pid, { browserKey: holderKeyOf(relay), targetId: tid }); } catch (e) { x = { wid: null, why: 'unreadable', error: String(e && e.message) }; }
+    let x = null; try { x = await keeper.xWindowFor(pid, { browserKey: holderKeyOf(relay), targetId: tid, fresh }); } catch (e) { x = { wid: null, why: 'unreadable', error: String(e && e.message) }; }
     if (seq !== viewer.xSeq || relay.viewers.get(viewer.id) !== viewer) return; // a later ask answers this viewer
-    if (follow) { // only a MOVED window re-issues the ticket (the same window keeps the picture it has; an untold one keeps it too)
+    if (follow && viewer.xOwed) follow = false; // law 3: a follow that superseded the page's own ask answers it as the ask would
+    if (follow) {
       const cur = xTicketOf(relay, viewer);
-      if (!cur || !x || !x.source || x.source.source !== 'x' || !PIC.xTicketMoved({ ticketWid: cur.wid, wid: x.wid })) return;
-      log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id}'s X picture follows the tab on show ${String(tid || '?').slice(0, 8)} — window ${x.wid} (was ${cur.wid})`);
+      const told = !!(x && x.source && x.source.source === 'x' && x.wid != null);
+      if (!(cur && told && PIC.xTicketMoved({ ticketWid: cur.wid, wid: x.wid }))) {
+        if (cur && String(cur.targetId || '') === String(tid || '')) return; // the tab its ticket was minted for — the picture is right
+        if (tries < X_FOLLOW_RETRY_MS.length) { // law 1: the same window or none for ANOTHER tab — a stale look? look again, fresh
+          const t = setTimeout(() => { if (seq === viewer.xSeq && relay.viewers.get(viewer.id) === viewer) xTicketFor(relay, viewer, { follow: true, tries: tries + 1, fresh: true }); }, X_FOLLOW_RETRY_MS[tries]);
+          if (t.unref) t.unref();
+          return;
+        }
+        if (told && cur) { cur.targetId = tid; cur.foreign = foreignOf(relay, viewer, tid); noteXSeats(relay); return; } // fresh rows: ONE window holds both tabs
+        if (!told) { // untold after the fresh looks: SAID — the page shows its own picture of the tab
+          if (cur) dropXTickets(relay, viewer);
+          log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id}: the window of the tab on show ${String(tid || '?').slice(0, 8)} could not be told on the display after ${tries} fresh looks (${(x && x.why) || 'no answer'}) — the page's picture, said`);
+          return say({ ok: false, code: 'screencast', why: 'untold-tab', source: (x && x.source) || null });
+        }
+        // no ticket held (a viewer that was told «untold») and its window told now — minted below
+      } else log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id}'s X picture follows the tab on show ${String(tid || '?').slice(0, 8)} — window ${x.wid} (was ${cur.wid})`);
     }
     const src = x && x.source;
     if (!src || src.source !== 'x') return say({ ok: false, code: 'screencast', why: (src && src.why) || (x && x.why) || 'not-running', source: src || null });
@@ -1391,14 +1422,23 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     dropXTickets(relay, viewer, { quiet: true }); // ONE ticket per viewer: a new ask replaces its old one
     const ticket = 'xt-' + crypto.randomBytes(18).toString('hex');
     if (xTickets.size > 256) { const oldest = xTickets.keys().next().value; xTickets.delete(oldest); }
-    xTickets.set(ticket, { relayKey: relay.key, viewerId: viewer.id, profileId: String(pid), dsId: String(src.displaySession), wid: x.wid, at: now() });
-    say({ ok: true, ticket, displaySession: src.displaySession, wid: x.wid, source: src, seat: xSeatOf(relay, viewer.id) });
+    xTickets.set(ticket, { relayKey: relay.key, viewerId: viewer.id, profileId: String(pid), dsId: String(src.displaySession), wid: x.wid, targetId: tid, foreign: foreignOf(relay, viewer, tid), at: now() });
+    say({ ok: true, ticket, displaySession: src.displaySession, wid: x.wid, source: src, seat: xSeatFor(relay, viewer.id) });
     noteXSeats(relay); // the bridge (re)judges its sockets; every viewer of this relay hears its seat
   }
   /** this viewer's live ticket row (one per viewer) — null when it holds none */
   function xTicketOf(relay, viewer) { for (const t of xTickets.values()) if (t.relayKey === relay.key && t.viewerId === viewer.id) return t; return null; }
-  /** hotfix 2026-11-17: every viewer holding a ticket asks again for the window of the tab it shows (re-issued only when it moved) */
-  function xFollow(relay, only = null) { for (const v of (only ? [only] : [...relay.viewers.values()])) if (xTicketOf(relay, v)) xTicketFor(relay, v, { follow: true }); }
+  /** a viewer's seat with law 2: a FOREIGN ticket (another holder's tab) watches, whatever pane rules */
+  function xSeatFor(relay, viewerId) { for (const t of xTickets.values()) if (t.relayKey === relay.key && t.viewerId === viewerId && t.foreign) return 'watch'; return xSeatOf(relay, viewerId); }
+  /** hotfix 2026-11-17: every viewer that asked for the X picture asks again for the window of the tab it shows (re-issued only when
+   *  it moved) — a viewer that left or never asked is skipped; a burst of tab flips is ONE keeper ask per viewer (coalesced) */
+  function xFollow(relay, only = null) {
+    for (const v of (only ? [only] : [...relay.viewers.values()])) {
+      if (!v || v.agent || !v.xWanted || relay.viewers.get(v.id) !== v || v.xFollowTimer) continue;
+      v.xFollowTimer = setTimeout(() => { v.xFollowTimer = null; if (relay.viewers.get(v.id) === v) xTicketFor(relay, v, { follow: true }); }, X_FOLLOW_COALESCE_MS);
+      if (v.xFollowTimer.unref) v.xFollowTimer.unref();
+    }
+  }
   function dropXTickets(relay, viewer, { quiet = false } = {}) {
     let n = 0; for (const [k, t] of xTickets) if (t.relayKey === relay.key && t.viewerId === viewer.id) { xTickets.delete(k); n++; }
     if (n && !quiet) noteXSeats(relay);
@@ -1419,7 +1459,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (t.dsId !== String(dsId || '')) return 'watch';
     const relay = relays.get(t.relayKey);
     if (!relay || !relay.viewers.has(t.viewerId)) return 'watch';
-    return xSeatOf(relay, t.viewerId);
+    return t.foreign ? 'watch' : xSeatOf(relay, t.viewerId); // hotfix cure r1, law 2: another holder's tab is drawn, never sized
   }
   /** r2 (never silent): WHY a ticketless socket watches (PURE PIC.deskSeatWhy — 'other-window' / 'not-browsing' / 'watch-mode';
    *  null = seated); a ticket's viewer: null (the live view tells its own). */
@@ -1471,7 +1511,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   /** Every display session a relay's tickets draw re-applies its seats (a takeover, a handback, a view gone, a new ruling pane) —
    *  and each ticket's viewer is told ITS seat (its X view sizes the window only as the ruler). */
   function noteXSeats(relay) {
-    const ds = new Set(); for (const t of xTickets.values()) if (t.relayKey === relay.key) { ds.add(t.dsId); const v = relay.viewers.get(t.viewerId); if (v) send(v.ws, { type: 'x-seat', seat: xSeatOf(relay, t.viewerId) }); }
+    const ds = new Set(); for (const t of xTickets.values()) if (t.relayKey === relay.key) { ds.add(t.dsId); const v = relay.viewers.get(t.viewerId); if (v) send(v.ws, { type: 'x-seat', seat: t.foreign ? 'watch' : xSeatOf(relay, t.viewerId) }); }
     for (const id of ds) for (const fn of [...xSeatListeners]) { try { fn(id); } catch (e) { log.warn?.(`[browser-live] the X seat listener threw — ${e && e.message}`); } }
   }
   /** THE WINDOW'S FIT on the X road: the ruling pane's OWN X view sizes Chrome's window with xpra's configure-window (the desktop
@@ -1488,7 +1528,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (msg && msg.type === 'passkey-cancel') { cancelPasskeyFor(relay, viewer); return; } // lane browser-passkey: the banner's ONE button
     if (msg && msg.type === 'passkey-retry') { armDialogs(relay); return; } // acceptance r2 of lane passkey-browse-yourself: the gave-up line's Retry — a fresh arm (the tries start over), then the current fact
     if (msg && msg.type === 'prompt-answer') { answerPromptFor(relay, viewer, msg); return; } // lane browser-ui-prompts: the sign-in boxes / Dismiss — the message is never kept, traced or logged
-    if (msg && msg.type === 'x-ticket') { xTicketFor(relay, viewer); return; } // lane browser-x-in-window (B2): the X picture's ticket for THIS viewer
+    if (msg && msg.type === 'x-ticket') { viewer.xWanted = true; viewer.xOwed = true; xTicketFor(relay, viewer); return; } // lane browser-x-in-window (B2): the X picture's ticket for THIS viewer
     if (msg && msg.type === 'dialog-answer') { answerDialog(relay, viewer, msg); return; } // lane browser-stuck: the user's Accept / Dismiss on a page dialog (any viewer — the user's own chrome, not a forwarded page input)
     const v = S.viewerMessageVerdict(msg, { holder: relay.holder, viewerId: viewer.id, mode: relay.mode });
     if (v.kind === 'config') { if (v.maxFps !== undefined) { viewer.maxFps = v.maxFps; pushMaxFps(relay); armTrail(relay, viewer); } send(viewer.ws, { type: 'config-ack', maxFps: viewer.maxFps, upstreamMaxFps: relay.upstreamMaxFps }); return; } // lane S4: a viewer back from 2 fps (a hidden tab) catches up on the latest frame

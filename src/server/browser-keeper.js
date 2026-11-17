@@ -4601,12 +4601,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** THE HOLDER'S X WINDOW — the wid its live view draws: its CDP window's bounds matched against the display's rows (PURE
    *  PIC.xWindowOf — measured: CDP bounds ARE the X geometry); two rows with those very bounds ⇒ its window is moved one pixel
    *  right and asked once more. Off the X road ⇒ {wid: null, why: <the source's why>}. */
-  async function xWindowFor(profileId, { browserKey = null, targetId = null } = {}) {
+  async function xWindowFor(profileId, { browserKey = null, targetId = null, fresh = false } = {}) {
     const v = pictureSourceFor(profileId);
     if (!PIC.isX(v)) return { wid: null, why: v.why, windowId: null, source: v };
     const pid = String(profileId), rec = reg.browsers[pid], p = profile(pid);
     const win = await holderWindowOf(rec, pid, browserKey, targetId);
-    let m = PIC.xWindowOf({ bounds: win && win.bounds, rows: await xRowsOf(v.displaySession), profileDir: p && p.dir });
+    let m = PIC.xWindowOf({ bounds: win && win.bounds, rows: await xRowsOf(v.displaySession, { fresh }), profileDir: p && p.dir }); // hotfix cure r1: a follow's second look reads the rows FRESH
     if (m.why === 'ambiguous' && win && win.bounds) {
       const VP = require('./browser-viewport.js');
       await VP.setWindowBounds(rec.cdpUrl, win.windowId, { left: Number(win.bounds.left) + 1, top: Number(win.bounds.top) });

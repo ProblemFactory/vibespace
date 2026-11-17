@@ -720,7 +720,12 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   }
   function onXTicket(m) {
     xp.asking = false;
-    if (!m || !m.ok) { xp.failed = { why: (m && m.why) || 'refused', ds: st.pictureSource && st.pictureSource.displaySession, at: Date.now() }; xp.ticket = null; unmountX(); renderMode(); return; }
+    if (!m || !m.ok) {
+      xp.failed = { why: (m && m.why) || 'refused', ds: st.pictureSource && st.pictureSource.displaySession, at: Date.now() }; xp.ticket = null; unmountX(); renderMode();
+      if (m && m.why === 'untold-tab') { xp.untoldSaid = true; setStatus(SOURCE_T.untold()); } // hotfix cure r1, law 1: the window of the tab on show could not be told — SAID, never another tab's window in silence
+      return;
+    }
+    if (xp.untoldSaid) { xp.untoldSaid = false; setStatus('', { hide: true }); } // its window told now: the words go
     if (xp.view && xp.ticket !== m.ticket) unmountX();
     xp.failed = null; xp.ticket = String(m.ticket); xp.ds = String(m.displaySession); xp.wid = Number(m.wid); xp.seat = m.seat === 'size' || m.seat === 'active' ? m.seat : 'watch';
     mountX();

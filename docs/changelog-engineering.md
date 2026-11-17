@@ -16,8 +16,13 @@ This file is the engineers' record of every release: the lanes, the verification
 - PROOF:
   - test-browser-picture §8b (fast, 3.6 s). On the release's relay, placed on the scene, the viewer stayed on the first window for the agent's new tab, a chip, following again and a tab opened while hidden. On the hotfix it follows each. The release's order and ticket rule are the red controls;
   - test-browser-x-picture ⑦ (heavy, the integrator's run).
-- NOT HERE (unit two): the view's own watch when a picture stops while its source moves (a held hub loop, a return from hidden).
-- Fast sum: test-browser-picture restated 1.5 → 3.6 s, so 1151.939 s over 599 rows and cap 1152 by arithmetic. The release's own number is the integrator's at the cut.
+- ITS CURE ROUND (主开发 21:14Z, three readers, one refuter), each law with a leg and a red control (test-browser-picture §8c):
+  - (1) a stale first look (the keeper's 750 ms row cache) is looked at again with FRESH rows, up to three times inside about two seconds; still untold ⇒ SAID, and the page shows its own picture of the tab;
+  - (2) another holder's tab, watched through a chip, is drawn with the WATCH seat and never sized;
+  - (3) the page's own ask is always answered, even when a follow supersedes it;
+  - a burst of tab flips is one keeper ask per viewer, and a viewer that left is skipped.
+- NOT HERE (unit two): the view's own watch when a picture stops while its source moves (a held hub loop, a return from hidden), and a watch of a background tab that shares ONE window.
+- Fast sum: test-browser-picture restated 1.5 → 9.4 s, so 1157.739 s over 599 rows and cap 1158 by arithmetic. The release's own number is the integrator's at the cut.
 
 ## 2.369.407 — 2026-11-17
 
