@@ -8,6 +8,11 @@
 // hides after 2 s; Enter ⇒ sent. Then: the same with a 150 ms gap (a human's second press) ⇒ sent; chat.enterSends off ⇒ Enter is a newline and Ctrl+Enter
 // sends; and PATCHED COPIES bundled from mutated sources — r1's "an Enter ended it" exemption restored, or the window
 // check removed ⇒ the owner's sequence SENDS — the leg can see red.
+// THE BURST ON THE PAGE'S CLOCK (B-4d28 — master's run for 160045063: the gap measured 62 / 52 ms on a loaded runner, the
+// product's window then SENT and the three legs after it went red on a precondition): the replay page's Date.now (the
+// guard's clock, EnterGuard's `now`) stands still through each sequence and steps by exactly the leg's gap before the plain
+// Enter, so the guard sees the burst the leg means — 20 ms inside IME_COMMIT_BURST_MS (read from the module, no literal),
+// 150 ms past it — however late the runner delivers the CDP calls; the real gap (performance.now) is told, never judged.
 // Scratch profile, private HOME + XDG_RUNTIME_DIR, headless (no DISPLAY). SKIPs without chrome.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,6 +32,9 @@ const freePort = () => new Promise((res, rej) => { const s = net.createServer();
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('  SKIP: no chrome/chromium on this box'); process.exit(0); }
 const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+const KEYS_SRC = fs.readFileSync(path.join(REPO, 'src/lib/chat-enter-keys.js'), 'utf8');
+const BURST = Number((/^export const IME_COMMIT_BURST_MS = (\d+);/m.exec(KEYS_SRC) || [])[1]);   // B-4d28: the window, the module's own
+const GUARD_ON_DATE_NOW = /constructor\(\{ now = \(\) => Date\.now\(\)/.test(KEYS_SRC);   // …and the clock the replay drives
 const WebSocket = require('ws');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `vs-cei-chrome-${process.pid}-`));
 for (const d of ['home', 'xdg']) fs.mkdirSync(path.join(tmp, d), { mode: 0o700 });
@@ -93,28 +101,38 @@ try {
       const ci = new VS.ChatInput({ send: (m) => window.__sent.push(typeof m.text === 'string' ? m.text : typeof m.data === 'string' ? m.data : JSON.stringify(m).slice(0, 160)) }, 'sess-ime', { onSend(){}, getEnterSends: () => ${enterSends} });
       document.body.appendChild(ci.element); window.__ci = ci;
       const ta = ci.element.querySelector('textarea');
-      for (const ty of ['keydown', 'compositionstart', 'compositionend']) ta.addEventListener(ty, (e) => { window.__ev.push(ty + (e.key ? ':' + e.key : '') + (e.isComposing ? ':c' : '')); if (ty === 'compositionend') window.__ce = performance.now(); if (ty === 'keydown' && e.keyCode === 13) window.__gap = Math.round(performance.now() - window.__ce); }, true);
+      for (const ty of ['keydown', 'compositionstart', 'compositionend']) ta.addEventListener(ty, (e) => { window.__ev.push(ty + (e.key ? ':' + e.key : '') + (e.isComposing ? ':c' : '')); if (ty === 'compositionend') { window.__ce = performance.now(); window.__ceClk = Date.now(); } if (ty === 'keydown' && e.keyCode === 13) { window.__gap = Math.round(performance.now() - window.__ce); window.__clkGap = Date.now() - window.__ceClk; } }, true);
       ta.focus(); return document.activeElement === ta;
     })()`);
   };
-  const state = () => evaljs(`(() => { const h = document.querySelector('.chat-ime-hint'); return { sent: window.__sent.slice(), value: document.querySelector('textarea').value, hint: !!h && !h.hidden && h.getBoundingClientRect().height > 0, hintText: h ? h.textContent : null, ev: window.__ev.slice(), gap: window.__gap }; })()`);
+  const state = () => evaljs(`(() => { const h = document.querySelector('.chat-ime-hint'); return { sent: window.__sent.slice(), value: document.querySelector('textarea').value, hint: !!h && !h.hidden && h.getBoundingClientRect().height > 0, hintText: h ? h.textContent : null, ev: window.__ev.slice(), gap: window.__gap, clkGap: window.__clkGap }; })()`);
   // THE OWNER'S SEQUENCE, in the IME's own path: a composition, the IME's Enter (229), the commit (insertText), then the
-  // commit's Enter arriving PLAIN gapMs later
-  const commit = async (gapMs) => {
-    await cdp('Input.imeSetComposition', { text: 'hello', selectionStart: 5, selectionEnd: 5 });
-    await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229 });
-    await cdp('Input.insertText', { text: 'hello' });
-    await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229 });
-    await sleep(gapMs);
-    await key('Enter');
+  // commit's Enter arriving PLAIN gapMs later — on the page's clock (B-4d28: Date.now held still, stepped by gapMs before the
+  // plain Enter); `lateMs` = how much later than gapMs the runner delivers it in real time (the loaded runner made wide)
+  const commit = async (gapMs, { lateMs = 0 } = {}) => {
+    await evaljs(`(() => { const real = window.__realNow || (window.__realNow = Date.now); window.__clk = real.call(Date); Date.now = () => window.__clk; return 1; })()`);
+    try {
+      await cdp('Input.imeSetComposition', { text: 'hello', selectionStart: 5, selectionEnd: 5 });
+      await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229 });
+      await cdp('Input.insertText', { text: 'hello' });
+      await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229 });
+      await sleep(gapMs + lateMs);
+      await evaljs(`(() => { window.__clk += ${gapMs}; return 1; })()`);
+      await key('Enter');
+    } finally {
+      await evaljs(`(() => { if (window.__realNow) Date.now = window.__realNow; return 1; })()`);
+    }
     await sleep(60);
     return state();
   };
 
+  // B-4d28 r2 (the adversarial read): the replay steps Date.now — if the guard's clock moves (performance.now, the event's
+  // timeStamp), the replay must move with it; said here by name, never as a send the legs below would misread
+  ok(`the guard's clock is Date.now (EnterGuard's default \`now\`) and its window is IME_COMMIT_BURST_MS = ${BURST} ms — the clock and the window this replay drives`, GUARD_ON_DATE_NOW && BURST > 20 && BURST < 150, { GUARD_ON_DATE_NOW, BURST });
   ok('a real ChatInput mounts and its textarea holds the focus', await mount('/real') === true);
   let s = await commit(20);
   ok('the replay went through the IME path: compositionstart → the IME\'s Enter keydown → compositionend → a plain Enter keydown', /compositionstart.*keydown:Enter.*compositionend.*keydown:Enter$/.test(s.ev.join(' ')), s.ev);
-  ok(`the plain Enter reached the page inside the 50 ms burst (compositionend → keydown measured ${s.gap} ms)`, s.gap < 50, s.gap);
+  ok(`the replay's precondition: on the page's own clock the plain Enter came ${s.clkGap} ms after compositionend — the leg's 20 ms, inside IME_COMMIT_BURST_MS = ${BURST} ms (the runner's real gap ${s.gap} ms is told, not judged)`, BURST > 20 && s.clkGap === 20, { clkGap: s.clkGap, burst: BURST, realGap: s.gap });
   ok('THE OWNER\'S SEQUENCE: a plain Enter 20 ms after an Enter-committed word does NOT send', s.sent.length === 0, s);
   ok('…and adds no newline (the committing Enter does nothing visible)', s.value === 'hello', s.value);
   ok('…and the line under the composer says so', s.hint && /Input method just ended/.test(s.hintText), s);
@@ -126,8 +144,12 @@ try {
   ok('the next Enter SENDS', s.sent.length === 1 && s.sent[0] === 'hello', s.sent);
 
   await mount('/real');
+  s = await commit(20, { lateMs: 120 });
+  ok(`B-4d28 the same 20 ms burst delivered 120 ms late in real time (a loaded runner's CDP; real gap ${s.gap} ms) ⇒ still NOT sent, the line shown — the guard judges the page's clock (${s.clkGap} ms), so the replay cannot be raced`, s.clkGap === 20 && s.gap >= BURST && s.sent.length === 0 && s.value === 'hello' && s.hint, s);
+
+  await mount('/real');
   s = await commit(150);
-  ok('the same sequence with a 150 ms gap (a human\'s second press, past the 50 ms burst) sends, no line', s.sent.length === 1 && !s.hint, s);
+  ok(`the same sequence with a 150 ms gap (a human's second press, past the ${BURST} ms burst) sends, no line`, s.clkGap === 150 && 150 > BURST && s.sent.length === 1 && !s.hint, s);
 
   await mount('/real', { enterSends: false });
   await cdp('Input.insertText', { text: 'draft' });
