@@ -1976,7 +1976,7 @@ export function clampToSchema(schema, num) {
 }
 
 /** A DOOR TO ONE SETTING (lane setting-doors pick 1): THE CLIENT'S SCHEMA TEST a `vibespace://settings/<key>` link is
- *  judged by (src/setting-links.js `has` — the chat, a For-you item's words, a toast): is `key` a row of the schema NOW?
+ *  judged by (src/internal-link.js `has` — the chat, a For-you item's words, a toast): is `key` a row of the schema NOW?
  *  A derived harness / channel / plugin row counts from the moment it is registered; an own key only, never a prototype
  *  name. An unknown key stays plain text. */
 export function isSettingKey(key) { return typeof key === 'string' && key !== '' && Object.hasOwn(SETTINGS_SCHEMA, key); }
