@@ -15838,4 +15838,4 @@ Lane conversation-facts (majordomo piece 2, 2026-11-17).
   - memory per process tree: browser-facts treeUsage.
 - Single-flight.
 
-FOLLOW-UP (主开发 2026-11-17): treeUsage's child walk still reads /proc synchronously. It is accepted while the list's longest synchronous stretch stays under 50 ms at 84 conversations × 15 processes (test-conversation-facts). The day-report unit's asynchronous walker (loop-day-report procKids) replaces it once that unit is on master.
+FOLLOW-UP (主开发 2026-11-17): treeUsage's child walk still reads /proc synchronously. It is accepted while the list's longest synchronous stretch stays under 50 ms at 84 conversations × 15 processes (test-conversation-facts-wrapper, a heavy suite: a fast suite holds no wall-clock bound). The day-report unit's asynchronous walker (loop-day-report procKids) replaces it once that unit is on master.

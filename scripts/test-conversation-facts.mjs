@@ -188,7 +188,8 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   const second = await C.list();
   const ms = Date.now() - t0;
   const after = second.conversations.filter((c) => ['S2', 'S3', 'S4', 'S5'].includes(c.name));
-  ok(second.pass.ranOut && ms < 1500 && after.every((c) => c.memBytes === null && c.memBytesWhy === CF.WHY.timedOut), `a tree that never answers: the pass ENDS at its time-out (${ms} ms) and every row it did not finish says «${CF.WHY.timedOut}» — not the first pass's numbers`, after.map((c) => [c.name, c.memBytes]));
+  console.log(`  · (evidence, not a bound: the pass with a tree that never answers returned after ${ms} ms; its time-out is 400 ms)`);
+  ok(second.pass.ranOut && after.every((c) => c.memBytes === null && c.memBytesWhy === CF.WHY.timedOut), 'a tree that never answers: the pass ENDS at its time-out (list() resolves — a pass that waited would never return) and every row it did not finish says «' + CF.WHY.timedOut + '» — not the first pass\'s numbers', after.map((c) => [c.name, c.memBytes]));
   ok(second.conversations.filter((c) => ['S0', 'S1'].includes(c.name)).every((c) => Number.isFinite(c.memBytes)), 'the rows it finished before the slow one keep what it measured this time');
   slow = false;
   let calls = 0;
@@ -280,42 +281,6 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
   ok(/require\('\.\/loop-day-report\.js'\)/.test(src) && /LDR\.outputTimes\(entries, buffersDir, \{ signal \}\)/.test(src) && !/fs\.promises\.stat|\.stat\(/.test(src.replace(/^\s*(\/\/|\*).*$/gm, '')), 'no second reader: the builder calls the day-report unit\'s function and stats nothing itself', null);
   fs.rmSync(bd, { recursive: true, force: true });
-}
-{
-  // THE CHILD WALK (主开发 2026-11-17 (b)): treeUsage still reads the process table synchronously — accepted while NO single
-  // synchronous stretch of the list holds the loop for 50 ms, at 84 conversations with trees of fifteen processes (a stand-in table)
-  const { monitorEventLoopDelay } = await import('node:perf_hooks');
-  const BF = require(path.join(REPO, 'src/browser-facts.js')), CI = require(path.join(REPO, 'src/cli-identity.js'));
-  const FAKE = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cfx-proc-'));
-  fs.mkdirSync(path.join(FAKE, 'self'));
-  const selfStat = fs.readFileSync('/proc/self/stat', 'utf8'), selfStatus = fs.readFileSync('/proc/self/status', 'utf8');
-  let selfSmaps = ''; try { selfSmaps = fs.readFileSync('/proc/self/smaps_rollup', 'utf8'); } catch { }
-  const put = (pid, kids) => {
-    const d = path.join(FAKE, String(pid)); fs.mkdirSync(path.join(d, 'task', String(pid)), { recursive: true });
-    fs.writeFileSync(path.join(d, 'task', String(pid), 'children'), kids.join(' ') + (kids.length ? ' ' : ''));
-    fs.writeFileSync(path.join(d, 'stat'), selfStat.replace(/^\d+/, String(pid))); fs.writeFileSync(path.join(d, 'status'), selfStatus);
-    fs.writeFileSync(path.join(d, 'smaps_rollup'), selfSmaps); fs.writeFileSync(path.join(d, 'cmdline'), 'node\0stand-in\0');
-  };
-  const sessions = new Map(), keys = new Map();
-  for (let t = 0; t < 84; t++) {
-    const r0 = 200000 + t * 100;   // root → 2 children → 6 grandchildren each = 15 processes
-    put(r0, [r0 + 1, r0 + 2]); put(r0 + 1, [3, 4, 5, 6, 7, 8].map((k) => r0 + k)); put(r0 + 2, [9, 10, 11, 12, 13, 14].map((k) => r0 + k));
-    for (let k = 3; k <= 14; k++) put(r0 + k, []);
-    const s = { ...fakeChat('T' + t), _childPid: r0 }; sessions.set('sess-' + t, s); keys.set(s, 'claude:e2e00000-0000-4000-8000-' + String(t).padStart(12, '0'));
-  }
-  const tree = (block = null) => (pid) => BF.treeUsage(pid, { readChildren: (p) => { if (block && p === block) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60); return CI.readChildPids(p, { procRoot: FAKE }); }, procRoot: FAKE });
-  const longest = async (treeUsage) => {
-    const S = COL.sourcesFrom({ treeUsage });
-    const h = monitorEventLoopDelay({ resolution: 1 }); h.enable();
-    const r = await COL.create({ activeSessions: sessions, keyOf: (s) => keys.get(s), ...known, memOf: S.memOf, passMs: 60000 }).list();
-    await sleep(5); h.disable();
-    return { ms: Math.round(h.max / 1e5) / 10, known: r.conversations.filter((c) => Number.isFinite(c.memBytes)).length, pids: 0, pass: r.pass.ms };
-  };
-  const m1 = await longest(tree());
-  ok(m1.known === 84 && m1.ms < 50, `84 conversations × 15 processes: every tree measured, and the longest synchronous stretch of the list is ${m1.ms} ms (< 50; the pass took ${m1.pass} ms)`, m1);
-  const m2 = await longest(tree(200500));
-  ok(m2.ms >= 50, `CONTROL a tree whose walk blocks 60 ms in one stretch: the same instrument reads ${m2.ms} ms — the leg above would be red`, m2);
-  fs.rmSync(FAKE, { recursive: true, force: true });
 }
 {
   // nothing on the hub loop: no synchronous file call and no child process in the builder (source census)

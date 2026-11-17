@@ -147,7 +147,7 @@ const SCOPES = Object.freeze([
   // lane conversation-facts (majordomo piece 2): ONE snapshot — the machine's memory, the desktops, every conversation and
   // running browser the key reaches (the caller marked self), each fact a value or «unknown» with its reason, the busy verdict
   // precomputed (src/conversation-facts.js endVerdict) — a READ, not billed
-  Object.freeze({ verb: 'conversations.list', layer: 'read', billed: false, label: 'List conversations and browsers',
+  Object.freeze({ verb: 'conversations.list', layer: 'read', billed: false, label: 'List conversations and browsers', // ui-words: a t() key — the Vault window words it (zh / ja rows)
     args: (a) => argsOf(a, {}) }),
   // lane feedback-handled-verb: the owner's «Mark handled» on an agent's feedback report, naming the release that shipped
   // the fix (+ a note); and the OPEN reports with their ids — a READ (another agent's words: belted at the hub)

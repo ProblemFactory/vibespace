@@ -8,6 +8,8 @@
 // WAKE- / BURST-): the sidecar's facts after a plain turn, a background set, an emptied set, a fired wakeup; the writes
 // counted over a burst of 2000 records (RED CONTROL: a copy that writes per record); the minute flush under a scaled clock
 // (scripts/fixtures/clock-scale.cjs); a failed sidecar write never stops it.
+//   C  主开发's condition on treeUsage's synchronous child walk: no single synchronous stretch of conversations.list holds the loop for
+//      50 ms at 84 conversations × 15 processes (a stand-in process table), RED at a 60 ms block.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -128,6 +130,52 @@ async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
   fs.chmodSync(h.dir, 0o755);
   ok(answered && answered2 && alive, 'with its sidecar folder refusing writes, the wrapper keeps answering turns (a failed write is caught)', { answered, answered2, alive });
   await h.stop();
+}
+
+// ── C · THE LIST'S LONGEST SYNCHRONOUS STRETCH (moved here from the fast suite: a fast suite holds no wall-clock bound) ──
+console.log('C · the list\'s longest synchronous stretch over a stand-in process table');
+const COL = require(path.join(REPO, 'src/server/conversation-facts.js'));
+const KEEPS = { sidecarFacts: { background: true, timers: true, lastRecordAt: true } };
+const KEY_A0 = 'claude:e2e00000-0000-4000-8000-0000000000a1', KEY_B = 'claude:e2e00000-0000-4000-8000-0000000000b2', KEY_T = 'claude:e2e00000-0000-4000-8000-0000000000c3';
+function fakeChat(name, step = []) { const st = CF.factsFresh(); for (const [rec, at] of step) CF.factsStep(st, rec, at); return { backend: 'claude', mode: 'chat', name, cwd: '/tmp', _convFacts: st }; }
+const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.mode === 'chat', heldOf: () => 0, asksOf: () => [], goalOf: () => 'none', continueOf: () => ({ armed: false }),
+  jobsOf: () => ({ running: 0, schedules: 0, nextFireAt: null, items: [] }), waitingOf: () => ({ notices: 0 }), handoverOf: () => false, browserOf: () => null,
+  desktopOf: () => ({ desktop: { id: 'd1', name: 'Main' }, window: true }), desktops: () => [{ id: 'd1', name: 'Main' }], machineMem: async () => ({ memTotal: 64e9, memAvailable: 20e9 }), memOf: async () => 2e9 };
+{
+  // THE CHILD WALK (主开发 2026-11-17 (b)): treeUsage still reads the process table synchronously — accepted while NO single
+  // synchronous stretch of the list holds the loop for 50 ms, at 84 conversations with trees of fifteen processes (a stand-in table)
+  const { monitorEventLoopDelay } = await import('node:perf_hooks');
+  const BF = require(path.join(REPO, 'src/browser-facts.js')), CI = require(path.join(REPO, 'src/cli-identity.js'));
+  const FAKE = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cfx-proc-'));
+  fs.mkdirSync(path.join(FAKE, 'self'));
+  const selfStat = fs.readFileSync('/proc/self/stat', 'utf8'), selfStatus = fs.readFileSync('/proc/self/status', 'utf8');
+  let selfSmaps = ''; try { selfSmaps = fs.readFileSync('/proc/self/smaps_rollup', 'utf8'); } catch { }
+  const put = (pid, kids) => {
+    const d = path.join(FAKE, String(pid)); fs.mkdirSync(path.join(d, 'task', String(pid)), { recursive: true });
+    fs.writeFileSync(path.join(d, 'task', String(pid), 'children'), kids.join(' ') + (kids.length ? ' ' : ''));
+    fs.writeFileSync(path.join(d, 'stat'), selfStat.replace(/^\d+/, String(pid))); fs.writeFileSync(path.join(d, 'status'), selfStatus);
+    fs.writeFileSync(path.join(d, 'smaps_rollup'), selfSmaps); fs.writeFileSync(path.join(d, 'cmdline'), 'node\0stand-in\0');
+  };
+  const sessions = new Map(), keys = new Map();
+  for (let t = 0; t < 84; t++) {
+    const r0 = 200000 + t * 100;   // root → 2 children → 6 grandchildren each = 15 processes
+    put(r0, [r0 + 1, r0 + 2]); put(r0 + 1, [3, 4, 5, 6, 7, 8].map((k) => r0 + k)); put(r0 + 2, [9, 10, 11, 12, 13, 14].map((k) => r0 + k));
+    for (let k = 3; k <= 14; k++) put(r0 + k, []);
+    const s = { ...fakeChat('T' + t), _childPid: r0 }; sessions.set('sess-' + t, s); keys.set(s, 'claude:e2e00000-0000-4000-8000-' + String(t).padStart(12, '0'));
+  }
+  const tree = (block = null) => (pid) => BF.treeUsage(pid, { readChildren: (p) => { if (block && p === block) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60); return CI.readChildPids(p, { procRoot: FAKE }); }, procRoot: FAKE });
+  const longest = async (treeUsage) => {
+    const S = COL.sourcesFrom({ treeUsage });
+    const h = monitorEventLoopDelay({ resolution: 1 }); h.enable();
+    const r = await COL.create({ activeSessions: sessions, keyOf: (s) => keys.get(s), ...known, memOf: S.memOf, passMs: 60000 }).list();
+    await sleep(5); h.disable();
+    return { ms: Math.round(h.max / 1e5) / 10, known: r.conversations.filter((c) => Number.isFinite(c.memBytes)).length, pids: 0, pass: r.pass.ms };
+  };
+  const m1 = await longest(tree());
+  ok(m1.known === 84 && m1.ms < 50, `84 conversations × 15 processes: every tree measured, and the longest synchronous stretch of the list is ${m1.ms} ms (< 50; the pass took ${m1.pass} ms)`, m1);
+  const m2 = await longest(tree(200500));
+  ok(m2.ms >= 50, `CONTROL a tree whose walk blocks 60 ms in one stretch: the same instrument reads ${m2.ms} ms — the leg above would be red`, m2);
+  fs.rmSync(FAKE, { recursive: true, force: true });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

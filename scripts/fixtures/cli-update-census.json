@@ -673,6 +673,16 @@
    "needsReleaseOnOrdinaryUpdate": false,
    "road": "the version clock (--version + the binary sha256): it gates nothing itself; a changed binary drops the hub's own PASS for the old bytes (law B)",
    "suite": "test-oat-materialize"
+  },
+  {
+   "id": "facts-level-since",
+   "file": "src/conversation-facts.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "LEVEL_SINCE — the first CLI build the tree records the background level signal on (2.1.274): a CLI below it reads its background set unknown (never known-empty); an update only raises the build, never needs a release",
+   "suite": "test-conversation-facts",
+   "match": "version-literal",
+   "sites": 1
   }
  ]
 }

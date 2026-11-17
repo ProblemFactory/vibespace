@@ -123,15 +123,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   const LAYOUTS_FILE = path.join(dataDir, 'layouts.json');
   let _layoutsCache = null;
 
-  function readLayouts() {
+  // lane conversation-facts: `preread` = the file's text the list read OFF the loop (layoutsAsync) — the same parse and checks,
+  // no sync read and no mkdir; '' (a file that could not be read) parses to the empty record as before
+  function readLayouts(preread) {
     if (_layoutsCache) return _layoutsCache;
-    ensureDir(dataDir);
-    try { _layoutsCache = JSON.parse(fs.readFileSync(LAYOUTS_FILE, 'utf-8')); }
+    if (preread === undefined) ensureDir(dataDir);
+    try { _layoutsCache = JSON.parse(preread !== undefined ? preread : fs.readFileSync(LAYOUTS_FILE, 'utf-8')); }
     catch { _layoutsCache = { current: null, autoSave: null, saved: {}, customGrids: [] }; }
-    return adoptLayouts();
-  }
-  /** What every first read of the layout does once it holds the parsed record (the sync read above, the async one below). */
-  function adoptLayouts() {
     // what an older build wrote: a Job input window's title naming its job (the next flush writes the generic title)
     if (wordlessTitles(_layoutsCache)) { if (_layoutsSaveTimer) clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = setTimeout(flushLayouts, 500); }
     // …and a dedup trace naming a window its desktop's record lists (r4 K — tracesTrue below)
@@ -561,13 +559,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.readLayouts = readLayouts;
   router.layoutsCached = () => _layoutsCache; // lane conversation-facts: the in-memory copy only (null before the first read) — the list never reads the file
   // lane conversation-facts (主开发 2026-11-17): before any page has opened since the boot (the fleet's normal case) the list reads
-  // the layout ONCE, asynchronously, off the loop; it fills readLayouts' own cache (adoptLayouts), so no later read is sync
+  // the layout ONCE, asynchronously, off the loop; readLayouts fills its own cache from that text, so no later read is sync
   let _layoutsLoading = null;
   router.layoutsAsync = () => {
     if (_layoutsCache) return Promise.resolve(_layoutsCache);
     if (!_layoutsLoading) {
-      _layoutsLoading = fs.promises.readFile(LAYOUTS_FILE, 'utf-8').then((t) => { let parsed; try { parsed = JSON.parse(t); } catch { parsed = null; } return parsed; }, () => null)
-        .then((parsed) => { if (!_layoutsCache) { _layoutsCache = parsed && typeof parsed === 'object' ? parsed : { current: null, autoSave: null, saved: {}, customGrids: [] }; adoptLayouts(); } return _layoutsCache; })
+      _layoutsLoading = fs.promises.readFile(LAYOUTS_FILE, 'utf-8').then((t) => t, () => '')
+        .then((t) => readLayouts(t))   // readLayouts' own parse and checks, fed the text read off the loop
         .finally(() => { _layoutsLoading = null; });
     }
     return _layoutsLoading;
