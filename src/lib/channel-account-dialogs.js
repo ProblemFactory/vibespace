@@ -597,7 +597,7 @@ function authWatcher(app, id, base) {
 // ── CONNECT AN ACCOUNT (§2.5, §8.1 #11: type-first, one dialog for every type) ──
 /** The panel's one entry: `Connect an account`. The record is created by
  *  Connect from a finished sign-in — a dialog closed half-way leaves nothing. */
-export async function showConnectAccountDialog(app, kinds, { kind = null } = {}) {
+export async function showConnectAccountDialog(app, kinds, { kind = null, flowId: askedFlow = null } = {}) {
   const found = (kinds || []).filter((k) => k && k.kind);
   if (!found.length) { showToast(tr('No account type can be connected on this instance'), { type: 'error' }); return null; }
   // each type's borrowable storage clients, read BEFORE the dialog draws (this file builds no option itself)
@@ -691,7 +691,9 @@ export async function showConnectAccountDialog(app, kinds, { kind = null } = {})
         },
         attach: async () => {
           let st = null;
-          try { st = await capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?kind=${enc(k.kind)}`); } catch { return null; }
+          // B-8edd: a For-you item's «Finish connecting» names ITS sign-in — shown when it still waits, else the type's newest
+          if (askedFlow && k.kind === kind) { try { st = await capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?flowId=${enc(askedFlow)}`); } catch { st = null; } }
+          if (!st) { try { st = await capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?kind=${enc(k.kind)}`); } catch { return null; } }
           // r4 (the tidy): a reopened dialog shows WHAT THE HUB RUNS for the kind — a sign-in that comes back by itself (R5) or one
           // another open dialog of this browser started (its paste box works here too); a close ends a loopback before this reads
           if (!st || !st.flow || !(st.running || (st.done && st.ok))) return null;

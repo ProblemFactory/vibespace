@@ -10979,6 +10979,11 @@ export default {
   "{account} ({kind}): sign-in expired — re-authorize": "{account}（{kind}）のサインインが切れました — 再認証してください",
   "{account}: sign-in expired — re-authorize ({cause})": "{account} のサインインが切れました — 再認証してください（{cause}）",
   "{account}: sign-in expired — re-authorize": "{account} のサインインが切れました — 再認証してください",
+  // B-8edd: a sign-in landed and nobody pressed Connect
+  "{kind}: signed in as {user} — finish connecting": "{kind}：{user} としてログイン済み — 接続を完了してください",
+  "{kind}: signed in — finish connecting": "{kind}：ログイン済み — 接続を完了してください",
+  "Finish connecting": "接続を完了",
+  "Open Connect an account with this sign-in": "このログインで「アカウントを接続」を開く",
   "the vendor refused the refresh token": "サービス側が更新トークンを拒否しました",
   "your account signed in to this app from another VibeSpace": "あなたのアカウントが別の VibeSpace からこのアプリにサインインしました",
   // lane lark-refresh-stall: a refresh whose answer was lost — the true cause, with the stall it waited through (r2: the length

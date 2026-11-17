@@ -322,7 +322,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
   };
   /** a row's DECLARED button (foryou-actions buttonsOf) as a window action `btn:<answer>` — its label and title are the row's */
   const btnOf = (it, a) => ((it && it.action && buttonsOf(it.action.type)) || []).find((b) => 'btn:' + b.answer === a) || null;
-  const btnAct = (a, it) => { const b = btnOf(it, a); return actBtn(a, null, b ? t(b.label) : a, b ? t(b.title) : a, b && b.door === 'jump' ? 'iw-act-primary' : ''); };
+  const btnAct = (a, it) => { const b = btnOf(it, a); return actBtn(a, null, b ? t(b.label) : a, b ? t(b.title) : a, b && (b.door === 'jump' || b.door === 'connect') ? 'iw-act-primary' : ''); };
   const actBtn = (id, icon, label, title, cls = '') => {
     const b = mk('button', 'iw-act' + (cls ? ' ' + cls : ''));
     b.type = 'button';
@@ -776,7 +776,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       if (await model.runAction(it, 'grant')) advance(id);
       return;
     }
-    if (a.startsWith('btn:')) { const b = btnOf(it, a); if (b && await model.runAction(it, b.answer) && b.door !== 'jump') advance(id); return; }   // a row's declared button (lane queued-is-not-woke)
+    if (a.startsWith('btn:')) { const b = btnOf(it, a); if (b && await model.runAction(it, b.answer) && b.door !== 'jump' && b.door !== 'connect') advance(id); return; }   // B-8edd: a door that opens a dialog keeps the item selected   // a row's declared button (lane queued-is-not-woke)
     if (a === 'browser-restart') { if (await model.runAction(it)) advance(id); return; } // lane browser-unresponsive: THE model's verb (the server resolves the item)
     if (CHECK_AGAIN_TYPES.includes(a)) { if (await model.runAction(it)) advance(id); return; } // B-0b8c + lane cli-self-measure: one check now — an answer withdraws the item server-side
     if (a === 'app-reject') { if (await model.runAction(it, 'reject')) advance(id); return; }

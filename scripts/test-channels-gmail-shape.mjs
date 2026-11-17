@@ -1997,6 +1997,124 @@ console.log('\n㉔ B-2f6c: a Disconnect keeps the mailbox cursor — the re-auth
   for (const e2 of HRIGS) { try { e2.stop(); } catch {} }
 }
 
+// ── ㉕ B-8edd (lane gmail-connect-wall r2's edge): a relay / route sign-in keeps running after its Connect dialog closed;
+//    one that LANDED while nobody pressed Connect ended 30 min later without a word. Now: no Connect for a minute ⇒ ONE
+//    For-you item («Gmail: signed in as … — finish connecting», its verb the Connect dialog on the type), resolved by
+//    Connect or by a newer landing of the type, ended by the store when the sign-in's own time ends. Over the REAL engine
+//    and the REAL For-you store; the minute is compressed for the one timer whose callback asks. CONTROL: the arming line
+//    removed in a copy of channels-auth (an engine copy requires it) — the old silence.
+console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-you item');
+{
+  const J = JSON.stringify;
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const realST = globalThis.setTimeout;
+  const fastAsk = (on, to = 5) => { globalThis.setTimeout = on ? ((fn, ms, ...a) => realST(fn, ms === 60e3 && /askLanded/.test(String(fn)) ? to : ms, ...a)) : realST; };
+  const CRIGS = [];
+  async function landedRig(tag, E = ENG) {
+    const dir = path.join(ROOT, `landed-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const v2 = mkVendor();
+    const todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0, now });
+    const e2 = E.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations, fetch: v2.fetchFn, log: quiet, userTodos: todos, ...FAST_PACE });
+    CRIGS.push(e2);
+    const signIn = async ({ wait = 40, to = 5 } = {}) => {
+      const r = await e2.startOAuth({ kind: 'gmail' });
+      fastAsk(true, to);
+      try { await get(`${r.flow.redirectUri}/?state=${new URL(r.url).searchParams.get('state')}&code=auth-code-landed`); await sleep(wait); } finally { fastAsk(false); }
+      return { flowId: r.flowId, startedAt: clock };
+    };
+    const asks = () => todos.openItems().filter((i) => i.action && i.action.type === 'channel-connect');
+    return { e2, todos, signIn, asks, dir, v2 };
+  }
+  const L = await landedRig('fix');
+  const s1 = await L.signIn();
+  const a1 = L.asks();
+  const it = a1[0] || {};
+  ok(a1.length === 1 && it.sessionKey === 'channels' && it.text === 'Gmail: signed in as member.a@example.com — finish connecting' && it.action.kind === 'gmail' && it.action.flowId === s1.flowId,
+    'a sign-in that landed with no Connect for the minute files ONE For-you item, the type and the login named, its action the type + the sign-in', J(a1));
+  ok(it.i18n && it.i18n.text && it.i18n.text.key === '{kind}: signed in as {user} — finish connecting' && J(it.i18n.text.params) === J({ kind: 'Gmail', user: 'member.a@example.com' }) && it.urgency === 'normal' && it.expiresAt === s1.startedAt + ENG.PENDING_FLOW_TTL_MS,
+    'its words are keyed for the person\'s language, and it ends when the sign-in\'s own time does (the start + 30 min)', J({ i18n: it.i18n, expiresAt: it.expiresAt, want: s1.startedAt + ENG.PENDING_FLOW_TTL_MS }));
+  const st1 = L.e2.oauthStatus(null, { kind: 'gmail' });
+  ok(st1.done && st1.ok && st1.flowId === s1.flowId && st1.token === s1.flowId, 'the Connect dialog the verb opens finds this sign-in by its type (what the dialog\'s attach reads)', J(st1));
+  // a newer landing of the same type: ONE item, the newest
+  clock += 5e3;
+  const s2 = await L.signIn();
+  const a2 = L.asks();
+  ok(a2.length === 1 && a2[0].action.flowId === s2.flowId && L.todos.get(it.id).status === 'done' && L.todos.get(it.id).resolvedBy === 'system', 'a newer landing of the type resolves the older item — one item, the newest sign-in', J(a2.map((x) => x.action)));
+  // Connect resolves it
+  await L.e2.connect('gmail', { flowId: s2.flowId });
+  ok(L.asks().length === 0 && L.todos.get(a2[0].id).status === 'done', 'Connect resolves the item (the account is made)', J(L.asks()));
+  // a Connect inside the minute files nothing (the minute compressed to 300 ms; Connect at once)
+  const quickRun = async (E, tag) => {
+    const Q = await landedRig(tag, E);
+    const q1 = await Q.signIn({ wait: 0, to: 300 });
+    await Q.e2.connect('gmail', { flowId: q1.flowId });
+    await sleep(450);
+    return Q.asks().length;
+  };
+  ok(await quickRun(ENG, 'quick') === 0, 'a Connect inside the minute files nothing (the person was there)');
+  // the person signs in AGAIN (the wrong account) inside the minute: ONE item, for the NEWER sign-in; and a newer one
+  // CONNECTED inside the minute leaves no item for the one it replaced
+  const twoRun = async (E, tag, { connect = false } = {}) => {
+    const T = await landedRig(tag, E);
+    const a = await T.signIn({ wait: 0, to: 300 });
+    clock += 1000;
+    const b = await T.signIn({ wait: 0, to: 300 });
+    if (connect) await T.e2.connect('gmail', { flowId: b.flowId });
+    await sleep(450);
+    return { asks: T.asks().map((x) => x.action.flowId), a: a.flowId, b: b.flowId };
+  };
+  const two = await twoRun(ENG, 'two'), twoC = await twoRun(ENG, 'two-connected', { connect: true });
+  ok(J(two.asks) === J([two.b]), 'two landings inside the minute: ONE item, for the newer sign-in (the older one\'s timer ends at the newer landing)', J(two));
+  ok(twoC.asks.length === 0, 'the newer one CONNECTED inside the minute: no item for the sign-in it replaced', J(twoC));
+  // the sign-in's own end: the store ends the item as expired
+  const X = await landedRig('expiry');
+  const s4 = await X.signIn();
+  const id4 = (X.asks()[0] || {}).id;
+  clock = s4.startedAt + ENG.PENDING_FLOW_TTL_MS + 1;
+  X.todos.expireDue(clock);
+  ok(id4 && X.todos.get(id4).status !== 'open' && X.todos.get(id4).resolvedBy === 'expired', 'past the sign-in\'s own end the store ends the item as expired — never an open item for a sign-in that is gone', J(id4 && X.todos.get(id4)));
+  // CONTROL: the arming line removed — the old silence
+  const ASRC2 = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf-8');
+  const ARM = "    if (p.ok) { for (const q of landedBefore(p)) endLandedAsk(q, 'a newer sign-in of its type landed'); landedAskLater(p); }   // B-8edd: the newest landing is the one asked about\n";
+  ok(ASRC2.split(ARM).length === 2, 'control setup: the arming line is present once');
+  const ML = mutantCopies('chan-gmail-landed', REPO);
+  const authNoAsk = ML.write('src/server/channels-auth.js', ASRC2.replace(ARM, ''), 'no-ask');
+  const ESRC2 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const engNoAsk = ML.load('src/server/channels-engine.js', ESRC2.replace("require('./channels-auth.js')", `require(${JSON.stringify(authNoAsk)})`), 'no-ask');
+  const C = await landedRig('control', engNoAsk);
+  await C.signIn({ wait: 60 });
+  ok(C.asks().length === 0 && C.e2.oauthStatus(null, { kind: 'gmail' }).done === true, 'RED CONTROL: without the arming line the landed sign-in waits unsaid (the release\'s silence) — the leg above is red on it', J(C.todos.openItems()));
+  const BAIL = '    if (landedAfter(p).length) return;   // a NEWER landed sign-in of its type owns the item (the one the person made last)\n';
+  const ENDOLD = "    if (p.ok) { for (const q of landedBefore(p)) endLandedAsk(q, 'a newer sign-in of its type landed'); landedAskLater(p); }   // B-8edd: the newest landing is the one asked about\n";
+  const GUARD = ' || pendingFlows.get(p.flowId) !== p || ';
+  const SWEEP = "  try { if (userTodos && typeof userTodos.idsWhere === 'function') for (const id of userTodos.idsWhere(";
+  const CONNOLD = "    for (const q of landedBefore(p)) endLandedAsk(q, 'a newer sign-in of its type was connected');\n";
+  ok([BAIL, ENDOLD, GUARD, SWEEP, CONNOLD].every((x) => ASRC2.split(x).length === 2), 'control setup: the bail, the landing\'s and Connect\'s ends of the older asks, the pending guard and the restart sweep are present once each');
+  const engOf = (src, tag) => ML.load('src/server/channels-engine.js', ESRC2.replace("require('./channels-auth.js')", `require(${JSON.stringify(ML.write('src/server/channels-auth.js', src, tag))})`), tag);
+  const engFan = engOf(ASRC2.replace(BAIL, "    for (const q of pendingFlows.values()) if (q !== p && q.kind === p.kind) endLandedAsk(q, 'a newer sign-in of its type landed');\n").replace(ENDOLD, '    if (p.ok) landedAskLater(p);\n').replace(CONNOLD, ''), 'fan-out');
+  const twoF = await twoRun(engFan, 'two-fan', { connect: true });
+  ok(J(twoF.asks) === J([twoF.a]), 'RED CONTROL (the row\'s first commit): its fan-out let the OLDER timer file «finish connecting» for the sign-in the person replaced and connected over', J(twoF));
+  const CONNOWN = "    endLandedAsk(p, 'it was connected');   // B-8edd: and every older landed sign-in of its type — the person chose this one\n";
+  ok(ASRC2.split(CONNOWN).length === 2, 'control setup: Connect\'s end of its own ask is present once');
+  const q1 = await quickRun(engOf(ASRC2.replace(GUARD, ' || '), 'no-guard'), 'quick-noguard'), q2 = await quickRun(engOf(ASRC2.replace(CONNOWN, ''), 'no-connect-end'), 'quick-noconnend'), q3 = await quickRun(engOf(ASRC2.replace(GUARD, ' || ').replace(CONNOWN, ''), 'neither'), 'quick-neither');
+  ok(q1 === 0 && q2 === 0 && q3 === 1, 'DEFENCE IN DEPTH (a red control): Connect ending its own ask OR the pending guard alone keeps the quick leg green; with both removed an item follows a Connect for an account already made — the quick leg is red on it', JSON.stringify({ noGuard: q1, noConnectEnd: q2, neither: q3 }));
+  // a RESTART: the pending sign-ins (memory) are gone — their open items are resolved at the next start
+  const rs = async (E, tag) => {
+    const B = await landedRig(tag, E);
+    await B.signIn();
+    const id = (B.asks()[0] || {}).id;
+    B.e2.stop();
+    const reg2 = CH.createChannelRegistry(); reg2.register(gmail.adapter);
+    const e3 = E.create({ dataDir: B.dir, env: {}, now, broadcast: () => {}, integrations, fetch: B.v2.fetchFn, log: quiet, userTodos: B.todos, ...FAST_PACE });
+    CRIGS.push(e3);
+    return { id, status: id && B.todos.get(id).status };
+  };
+  const rsFix = await rs(ENG, 'restart'), rsPre = await rs(engOf(ASRC2.replace(SWEEP, '  try { if (false) for (const id of userTodos.idsWhere('), 'no-sweep'), 'restart-pre');
+  ok(rsFix.id && rsFix.status === 'done' && rsPre.id && rsPre.status === 'open', 'a restart resolves the open «finish connecting» items (the sign-ins did not survive it); RED CONTROL: without the sweep the item stayed, its button opening an empty dialog', J({ fix: rsFix, pre: rsPre }));
+  for (const x of copiesCensus(ML.files, ML.dir, REPO, { minCopies: 10, label: '㉕ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  for (const e2 of CRIGS) { try { e2.stop(); } catch {} }
+}
+
 eng.stop();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

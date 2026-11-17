@@ -403,7 +403,9 @@ export function inboxModel(app) {
     // A ROW'S DECLARED BUTTON (foryou-actions buttonsOf — lane queued-is-not-woke's messages-waiting): 'jump' = the item's
     // conversation, its only door
     { const btn = rec && rec.action ? (buttonsOf(rec.action.type) || []).find((b) => b.answer === answer) : null;
-      if (btn && btn.door === 'jump') { jump(rec.sessionKey || null, rec); return true; } }
+      if (btn && btn.door === 'jump') { jump(rec.sessionKey || null, rec); return true; }
+      if (btn && btn.door === 'connect') return !!(await app.openChannelConnect(String(rec.action.kind || ''), { flowId: typeof rec.action.flowId === 'string' ? rec.action.flowId : null }));   // B-8edd: the Connect dialog on the item's type, showing ITS sign-in
+    }
     if (rec && rec.action && rec.action.type === 'exit-run-ask') {
       // lane-pairing ⑥: THE person's answer to an agent's command on a machine (cookie route; an agent's bearer is
       // refused human_only). The server resolves the item; a failure is said, never swallowed.

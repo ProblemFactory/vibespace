@@ -159,6 +159,13 @@ const ROWS = Object.freeze([
   { type: 'open-channel', identity: 'key', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'request', 'filed'), scope: 'about', decide: 'person', closer: 'hide' },
   { type: 'channel-api-proposal', identity: 'id', producer: 'src/server/channel-api-cards.js', builtIn: 'src/channel-api-card.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the raw-API card the chat draws where it was proposed (B-2198) — src/lib/channel-api-card-view.js', on: 'the API card in this conversation', scope: 'group' },
   { type: 'channel-reauth', identity: null, producer: 'src/server/channels-engine.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'check', scope: 'group' },
+  // B-8edd: a sign-in landed and nobody pressed Connect — its ONE button opens the Connect dialog on its type (`door`
+  // 'connect': the item's `action.kind`), which shows the landed sign-in; one item per SIGN-IN (a newer landing of the same
+  // login is its own item, never the older one reopened)
+  { type: 'channel-connect', identity: 'flowId', producer: 'src/server/channels-auth.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'check', scope: 'group',
+    buttons: Object.freeze([
+      Object.freeze({ answer: 'connect', label: i18nKey('Finish connecting'), title: i18nKey('Open Connect an account with this sign-in'), door: 'connect' }),
+    ]) },
   // ── an app on the desktop ──
   { type: 'desktop-app-notify', identity: null, producer: 'src/server/desktop-app-keeper.js', waits: false, answer: 'reply', card: 'inbox-window', handled: true, chat: true, kind: 'check', scope: 'group' },
 ].map((r) => Object.freeze(r)));

@@ -10980,6 +10980,11 @@ export default {
   "{account} ({kind}): sign-in expired — re-authorize": "{account}（{kind}）登录失效，需要重新授权",
   "{account}: sign-in expired — re-authorize ({cause})": "{account} 登录失效，需要重新授权（{cause}）",
   "{account}: sign-in expired — re-authorize": "{account} 登录失效，需要重新授权",
+  // B-8edd: a sign-in landed and nobody pressed Connect
+  "{kind}: signed in as {user} — finish connecting": "{kind}：已以 {user} 登录 — 请完成连接",
+  "{kind}: signed in — finish connecting": "{kind}：已登录 — 请完成连接",
+  "Finish connecting": "完成连接",
+  "Open Connect an account with this sign-in": "用这次登录打开「连接账号」",
   "the vendor refused the refresh token": "服务方拒绝了刷新令牌",
   "your account signed in to this app from another VibeSpace": "你的账号在另一个 VibeSpace 上登录了这个应用",
   // lane lark-refresh-stall: a refresh whose answer was lost — the true cause, with the stall it waited through (r2: the length

@@ -36,6 +36,7 @@ function create(engineCtx) {
     speakSignin, retractSignin, landSignin,   // lane channel-reauth-visible: an unfinished consent re-asserts the dead sign-in's item; a removal / a disconnect ends it; lane lark-refresh-stall r2: a landing verifies
     accountGrainOf, patternsOf, convGrainOf, honestyLineFor, notifyOutbox,
     CG,   // lane grants-unify: the channel doors' rows in THE grants store (src/server/channels-grants.js)
+    userTodos, INBOX_KEY, INBOX_SOURCE, RESOLVED_BY, i18nKey,   // B-8edd: a landed sign-in nobody connected is a For-you item
   } = engineCtx;
   /** THIS ACCOUNT'S CLIENT, as the resolver shape every adapter already
    *  reads (`{source, values, missing, why, whyCode, credentialKey, …}`):
@@ -447,8 +448,63 @@ function create(engineCtx) {
   const startChain = new Map();     // lane gmail-connect-wall r2: kind -> {link, me} the last start of that kind — one sign-in per kind
   function sweepPending() {
     const t = now();
-    for (const [id, p] of pendingFlows) if (t - p.startedAt > PENDING_FLOW_TTL_MS) { try { flows.cancel(id, 'expired'); } catch {} pendingFlows.delete(id); }
+    for (const [id, p] of pendingFlows) if (t - p.startedAt > PENDING_FLOW_TTL_MS) { try { flows.cancel(id, 'expired'); } catch {} pendingFlows.delete(id); clearLandedAsk(p); }   // B-8edd: its item ends at its own expiresAt
     for (const [id] of chainPending) { const s = flows.status(id); if (!s || s.cancelled || s.done) chainPending.delete(id); }   // lane lark-consent-chain
+  }
+  // ── B-8edd: A SIGN-IN THAT LANDED AND NOBODY CONNECTED ──────────────────
+  // A relay / route sign-in keeps running after its dialog closed; one that lands with no Connect for LANDED_ASK_MS files
+  // ONE For-you item («Gmail: signed in as X — finish connecting»): its verb opens the Connect dialog on the type, which
+  // shows THAT sign-in (the item's flowId rides the button to the dialog's attach). ONE item per type: the newest landing is
+  // asked about — a newer landing or a Connect ends the older ones' asks, an older timer never files over a newer landing;
+  // a dialog's cancel of a LANDED sign-in ends nothing on the hub, so it resolves nothing; a restart resolves them all (the
+  // sign-ins live in memory); the store ends it as expired when the sign-in's own time does (`expiresAt` = the start +
+  // PENDING_FLOW_TTL_MS — it used to end without a word).
+  const LANDED_ASK_MS = 60 * 1000;
+  const LANDED_KEYS = Object.freeze({ u: i18nKey('{kind}: signed in as {user} — finish connecting'), n: i18nKey('{kind}: signed in — finish connecting') });
+  function clearLandedAsk(p) { if (p && p.askTimer) { clearTimeout(p.askTimer); p.askTimer = null; } }
+  /** The landed, unconnected sign-ins of p's type started AFTER / BEFORE it — by the pending map's order (the starts'
+   *  order) while p is in it, by the start times once it left (Connect takes it first). */
+  const sameKindLanded = (p) => [...pendingFlows.values()].filter((q) => q !== p && q.kind === p.kind && !q.targetId && q.done && q.ok);
+  const startOrder = (q) => [...pendingFlows.values()].indexOf(q);
+  const landedAfter = (p) => sameKindLanded(p).filter((q) => (startOrder(p) >= 0 ? startOrder(q) > startOrder(p) : Number(q.startedAt) > Number(p.startedAt)));
+  const landedBefore = (p) => sameKindLanded(p).filter((q) => !landedAfter(p).includes(q));
+  function landedAskLater(p) {
+    clearLandedAsk(p);
+    p.askTimer = setTimeout(() => { p.askTimer = null; askLanded(p); }, LANDED_ASK_MS);
+    if (p.askTimer.unref) p.askTimer.unref();
+  }
+  function askLanded(p) {
+    if (engineCtx.stopped || !p.ok || p.targetId || pendingFlows.get(p.flowId) !== p || !(userTodos && typeof userTodos.add === 'function')) return;
+    if (landedAfter(p).length) return;   // a NEWER landed sign-in of its type owns the item (the one the person made last)
+    const kind = cleanLabel(p.rec.label || p.kind), user = p.user ? cleanLabel(p.user) : '';
+    const text = user ? `${kind}: signed in as ${user} — finish connecting` : `${kind}: signed in — finish connecting`;
+    const until = p.startedAt + PENDING_FLOW_TTL_MS;
+    try {
+      const it = userTodos.add(INBOX_KEY, {
+        origin: 'channels', kind: 'action', text,
+        detail: `The sign-in landed but the account was not connected — open «Connect an account» to finish; the sign-in waits until ${new Date(until).toISOString()}.`,
+        urgency: 'normal', by: 'agent', sessionName: 'Channels', expiresAt: until,
+        action: { type: 'channel-connect', kind: p.kind, flowId: p.flowId },
+        openCap: Math.max(20, 4 * (adapterRecords().adapters.length + 1)),
+        i18n: { text: { key: user ? LANDED_KEYS.u : LANDED_KEYS.n, params: { kind, ...(user ? { user } : {}) } }, source: INBOX_SOURCE },
+      });
+      if (it && it.id) { p.askItem = { id: it.id, text }; log.log(`[channels] ${p.kind}: a sign-in landed and nobody pressed Connect in ${Math.round(LANDED_ASK_MS / 1000)} s — a "For you" item asks to finish connecting`); }
+    } catch (e) { log.warn(`[channels] ${p.kind}: could not file the landed sign-in in the inbox: ${(e && e.message) || e}`); }
+  }
+  // a RESTART ends every pending sign-in (they live in memory, their states are signed per boot): the items they filed go too
+  const LANDED_TYPE = 'channel-connect';
+  try { if (userTodos && typeof userTodos.idsWhere === 'function') for (const id of userTodos.idsWhere((i) => i.status === 'open' && i.sessionKey === INBOX_KEY && i.action && i.action.type === LANDED_TYPE)) userTodos.setStatus(id, 'done', RESOLVED_BY); }
+  catch (e) { log.warn(`[channels] the «finish connecting» items of the last run could not be resolved: ${(e && e.message) || e}`); }
+  /** The retraction: ONLY the item this sign-in filed (same id, same text), only while it is still open. */
+  function endLandedAsk(p, why) {
+    clearLandedAsk(p);
+    const a = p.askItem;
+    p.askItem = null;
+    if (!(a && userTodos && typeof userTodos.get === 'function')) return;
+    try {
+      const it = userTodos.get(a.id);
+      if (it && it.status === 'open' && it.sessionKey === INBOX_KEY && it.text === a.text) { userTodos.setStatus(a.id, 'done', RESOLVED_BY); log.log(`[channels] ${p.kind}: ${why} — the «finish connecting» item is resolved`); }
+    } catch (e) { log.warn(`[channels] ${p.kind}: could not resolve the «finish connecting» item: ${(e && e.message) || e}`); }
   }
   /** lane pod-oauth-callback: the option values a company PRESET names (its `facts` — the Lark app's brand): each a
    *  declared option of the type whose value is one of its choices; {} for a custom / mount / paste choice. */
@@ -577,6 +633,7 @@ function create(engineCtx) {
     // lane lark-consent-chain: a rebind that landed goes on with its next page under the account's (new) client
     if (p.targetId) { const made = await applyRebind(p); return made ? chainNext(r, (o) => adapterFor(made).adapter.auth.begin(o)) : null; }
     if (p.ok) log.log(`[channels] ${p.kind}: signed in${p.user ? ` as ${p.user}` : ''} (${p.choice.credentialKey}) — waiting for Connect`);
+    if (p.ok) { for (const q of landedBefore(p)) endLandedAsk(q, 'a newer sign-in of its type landed'); landedAskLater(p); }   // B-8edd: the newest landing is the one asked about
     else log.warn(`[channels] ${p.kind}: consent flow failed: ${p.error}`);
     // lane lark-consent-chain: a Connect's first page landed — its next page begins on the pending's own adapter (the account
     // is made by Connect, whenever the person presses it — before or after the later pages land)
@@ -871,6 +928,8 @@ function create(engineCtx) {
       throw mismatch(named.fromMount ? `the client of storage mount "${named.fromMount.name}"` : named.credentialKey);
     }
     pendingFlows.delete(p.flowId);   // taken ONCE — after every refusal above
+    endLandedAsk(p, 'it was connected');   // B-8edd: and every older landed sign-in of its type — the person chose this one
+    for (const q of landedBefore(p)) endLandedAsk(q, 'a newer sign-in of its type was connected');
     const recs = adapterRecords();
     const rec = newRecord(mod, { id: mintAdapterId(mod.kind, recs), credentialKey: p.choice.credentialKey });
     if (p.choice.credential) rec.credential = p.choice.credential;

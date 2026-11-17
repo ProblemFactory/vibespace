@@ -3332,6 +3332,7 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
     speakNames: 'the owner\'s For-you item when an account\'s sign-in cannot read people\'s profiles, once per sign-in (lane channel-names-readable)',
     speakUnsaved: 'the owner\'s For-you item for an unsaved token',
     speakSignin: 'the owner\'s ONE urgent For-you item for a dead sign-in, standing until a pass of the account goes through (lane channel-reauth-visible)',
+    askLanded: 'the owner\'s ONE For-you item for a sign-in that landed and nobody connected — «finish connecting», ended by Connect, a newer landing or the sign-in\'s own expiry (B-8edd)',
     request: 'files the OWNER\'s For-you item for an agent\'s access request (the owner decides it)',
     fileWatchRequest: 'files the OWNER\'s For-you item for an agent\'s WAKE watch request (lane channel-agent-watch: the owner approves the billed notification)',
   };
