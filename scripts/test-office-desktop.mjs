@@ -312,7 +312,7 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { retu
 // §4b's document: an .odt beside the .docx (LibreOffice converts it with a throwaway profile) — its Save writes at once
 // (a .docx would ask "Keep current format?" as a second question)
 const ODT = DOCX.replace(/\.docx$/, '.odt');
-try { execFileSync(office.path, [...CHROME_STORE, '--headless', `-env:UserInstallation=file://${path.join(docs, '.conv-profile')}`, '--convert-to', 'odt', '--outdir', docs, DOCX], { timeout: 60000, stdio: 'ignore' }); } catch { /* checked below */ }
+try { execFileSync(office.path, ['--headless', `-env:UserInstallation=file://${path.join(docs, '.conv-profile')}`, '--convert-to', 'odt', '--outdir', docs, DOCX], { timeout: 60000, stdio: 'ignore' }); } catch { /* checked below */ }
 try { fs.rmSync(path.join(docs, '.conv-profile'), { recursive: true, force: true }); } catch {}
 const odtText = (f) => { try { return execFileSync(PY, ['-c', 'import zipfile,sys,re\nprint(re.sub(r"<[^>]+>", " ", zipfile.ZipFile(sys.argv[1]).read("content.xml").decode()))', f], { encoding: 'utf8', timeout: 20000 }); } catch (e) { return `(unreadable: ${e.message})`; } };
 const docxText = (f) => { try { return execFileSync(PY, ['-c', 'import docx,sys\nprint("\\n".join(p.text for p in docx.Document(sys.argv[1]).paragraphs))', f], { encoding: 'utf8', timeout: 20000 }); } catch (e) { return `(unreadable: ${e.message})`; } };

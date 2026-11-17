@@ -22,12 +22,21 @@ const SPAWNERS = new Set(['spawn', 'spawnSync', 'execFile', 'execFileSync']);
 const CHROMEISH = /chrom/i;
 const strOf = (n) => (!n ? null : n.type === 'Literal' && typeof n.value === 'string' ? n.value : n.type === 'TemplateLiteral' ? n.quasis.map((q) => q.value.cooked).join('${}') : null);
 const isArgv = (a) => !!a && a.type === 'ArrayExpression' && a.elements.some((e) => e && MARK.test(strOf(e) || ''));
-/** the array carries the store: a spread of CHROME_STORE, or Chrome's basic store flag as a literal */
+/** the array carries the store: a spread of CHROME_STORE, or Chrome's basic store flag as a literal — THE TREE DOES BOTH (主开发 12:21Z):
+ *  most launches spread scripts/scratch.mjs CHROME_STORE; some suites write the basic store flag alone (no mock keychain) — accepted
+ *  here because that flag is what keeps Chrome off the session bus's Secret Service; «every launch carries the constant» is not true */
 export const carries = (a) => a.elements.some((e) => e && ((e.type === 'SpreadElement' && e.argument.type === 'Identifier' && e.argument.name === 'CHROME_STORE') || /^--password-store=basic$/.test(strOf(e) || '')));
 function walk(n, f, up = null) { if (!n || typeof n.type !== 'string') return; f(n, up); for (const k of Object.keys(n)) { if (k === 'start' || k === 'end' || k === 'loc') continue; const v = n[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') walk(x, f, n); } else if (v && typeof v.type === 'string') walk(v, f, n); } }
 const nameOf = (c) => (!c ? null : c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && !c.computed && c.property.type === 'Identifier' ? c.property.name : null);
 const progName = (x) => (!x ? '' : x.type === 'Identifier' ? x.name : x.type === 'MemberExpression' ? (nameOf(x) || '') + ' ' + progName(x.object) : '');
 const CHROME_PATH = /\/(google-)?chrom(e|ium)(-stable|-browser)?$/i;
+// NOT A BROWSER (主开发's verdict 2026-11-17 12:21Z — the census put the store flags in front of NODE's own options in three fake-Chrome
+// holders, and into a LibreOffice conversion): a spawn of the RUNTIME ITSELF (process.execPath, `node`) is never a Chrome launch, whatever
+// its argv says (a holder that only LOOKS like Chrome to the code under test); a program named as a non-browser (an office suite) whose
+// only mark is a bare headless flag is a conversion, not a Chrome.
+const isRuntime = (p) => !!p && ((p.type === 'MemberExpression' && nameOf(p) === 'execPath' && p.object.type === 'Identifier' && p.object.name === 'process') || (p.type === 'Literal' && /^(node|nodejs)$/.test(String(p.value))));
+const NOT_BROWSER = /office|soffice|libreoffice/i;
+const onlyHeadless = (arr) => arr.elements.every((e) => !e || !MARK.test(strOf(e) || '') || /^--?headless\b/.test(strOf(e) || ''));
 
 /** one file's source → { launches: [{ line, carried, open }], unread: [{ line, argv }], parsed } — `open` = just after the argv's `[` */
 export function launchesOf(src, { acorn }) {
@@ -61,6 +70,8 @@ export function launchesOf(src, { acorn }) {
     const a = n.arguments[1];
     const cand = !a ? [] : a.type === 'Identifier' ? [arrays.get(a.name)] : a.type === 'ArrayExpression' ? [a, ...a.elements.filter((e) => e && e.type === 'SpreadElement' && e.argument.type === 'Identifier').map((e) => arrays.get(e.argument.name))] : [];
     const argvs = cand.filter(isArgv);
+    if (!chromeProg && isRuntime(p0)) return;   // the runtime itself: a holder, never a Chrome
+    if (!chromeProg && argvs.length && NOT_BROWSER.test(`${progName(p0)} ${strOf(p0) || ''}`) && argvs.every(onlyHeadless)) return;   // an office conversion's bare --headless
     if (argvs.length) { for (const x of argvs) take(x); return; }
     if (!chromeProg) return;   // a spawner whose argv holds no marker: no Chrome
     const arr = a && a.type === 'ArrayExpression' ? a : a && a.type === 'Identifier' ? arrays.get(a.name) : null;
@@ -90,6 +101,8 @@ export const ROWS = Object.freeze({
   'scripts/test-browser-display-chrome.mjs': 'its markers are COMMENTS; its Chrome is launched by the REAL agent-browser CLI it drives (the vendor\'s own launch, with the owner\'s config args) — not a launch of this suite',
   'scripts/test-browser-orphans.mjs': 'process-table FIXTURES: rows whose argv names a Chrome (pid, ppid, starttime) for the orphan judge — its children are /bin/sleep and node, never Chrome',
   'scripts/test-browser-profiles.mjs': 'a config FIXTURE: an agent-browser.json / config.json whose `args` STRING names the debugging port, written to disk for the reader under test',
+  'scripts/test-browser-ephemeral.mjs': 'FAKE Chromes: node processes (process.execPath -e CHROME_SRC) that a test starts with Chrome-shaped argv (--user-data-dir, --headless=new) as a person\'s hand-started browser for the keeper to judge — node, never Chrome; the store flags are NOT node options (主开发 12:21Z: node answers «bad option» and exits 9)',
+  'scripts/test-browser-share-model.mjs': 'a FAKE Chrome: a node process (process.execPath -e …) with a hand-launched CLI Chrome\'s argv (--remote-debugging-port=0, no mark) on a kept directory — node, never Chrome; the store flags are NOT node options',
   'scripts/test-browser-providers.mjs': 'an ERROR-TEXT assertion: a regex over the provider\'s cdp_unreachable message naming the debugging port',
   'scripts/test-browser-rejudge.mjs': 'a FAKE Chrome: a node process (process.execPath -e FAKE_CHROME_SRC) carrying Chrome-like argv inside a fake daemon\'s SOURCE STRING',
   'scripts/test-browser-switch.mjs': 'a fake engine plugin\'s SOURCE STRING (FAKE_FILE) whose launchArgs name the debugging port — a fixture, never run as Chrome',
