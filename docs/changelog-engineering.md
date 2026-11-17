@@ -83,6 +83,9 @@ This file is the engineers' record of every release: the lanes, the verification
   - One leg runs the same hold with the census at 50 ms: 4 evaluates against 2 with it off, so the extra asks are the census's own.
   - A taken census ask keeps its own post and its kernel state, and is judged by the same law. test-loop-census (c) proves the take live.
 
+### int407 seam — the hosted fast job's limit
+- The fast job's limit in .github/workflows/ci.yml goes from 15 to 25 minutes: the 599-suite tier's gate step took 837 s on a runner at 1.48× on 2.369.407's prep mirror, and the job was cancelled by its 15-minute limit in the second it finished; 25 minutes holds a runner of about 2.5×.
+
 ## 2.369.406 — 2026-11-16
 
 ### grants-read-is-a-lookup (主开发 2026-11-16 18:33Z — part of the root fix of the hub's held main loop): a channel grant read is a lookup

@@ -22,15 +22,17 @@ on:
 jobs:
   fast:
     runs-on: ubuntu-24.04
-    # 15 (B-f4cb). It was CANCELLED at 15 on .202/.203/.205: the tier had
-    # grown back to 269 suites run one after another (792 s summed locally,
-    # 1.3× that here). Lane fast-budget (2026-10-04) fixed or moved every
-    # suite over 10 s and runs the tier over min(4, cpus) lanes + a serial
-    # lane for the clock judges (scripts/ci.mjs FAST LANES). Measured in this
-    # runner's shape (depth-1 clone, node 22, taskset 0-3): 165 s for build +
-    # suites (was ≈ 845 s), ≈ 215 s at this runner's 1.3× plus ~35 s of
-    # setup — about 4 min, under a third of this budget.
-    timeout-minutes: 15
+    # 25 (2026-11-17, the int407 seam). The whole fast tier runs in this one job. On 2026-10-04 it took about
+    # 4 min here, and 15 was a wide bound. It is 599 suites now: the gate step took 550 s at this runner's 0.97×
+    # (2.369.406's release mirror), 645 s at 1.15×, and 837 s at 1.48× (2.369.407's prep mirror, job
+    # 134022738541: every step green, cancelled by the 15-minute limit in the second it finished). 837 s plus
+    # about a minute of setup IS the old limit. 25 min less a minute of setup leaves 1440 s, which holds a
+    # runner of about 2.5× (the tier is ≈ 566 s at 1.0×). The structural cure, two hosted jobs or a smaller
+    # tier, is a parked row, not this bound.
+    # Before (B-f4cb): it was CANCELLED at 15 on .202/.203/.205, when the tier had grown back to 269 suites run
+    # one after another; lane fast-budget (2026-10-04) moved every suite over 10 s and runs the tier over
+    # min(4, cpus) lanes + a serial lane for the clock judges (scripts/ci.mjs FAST LANES).
+    timeout-minutes: 25
     # EVERY SETUP STEP IS BOUNDED (lane ci-cjk-fonts, 2.369.346): a stall is a red that names its step in minutes, never
     # a silence until the job's limit (.345's heavy 4/6 sat 21 min in one apt fetch). Each bound is a few times the
     # step's measured worst (2026-10-23, 13 jobs: checkout 6–10 s, setup-node 0–3 s, dtach 7–67 s, claude CLI 3–6 s,
