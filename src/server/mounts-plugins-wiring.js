@@ -32,6 +32,8 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
   getJobs = null,
   // unit what-it-may-use: the doors built AFTER this wiring (server.js — the channels engine, the exit manager, the window engine), asked at each read
   mayUseDoors = null,
+  // lane conversation-facts (majordomo piece 2): the hub's own instances the list's sources read (in memory) — {autoResume, stashView, sysinfo, stoppedSessions}
+  listSources = () => ({}),
   // B-f7ab: the late browser key reads the record it extends (never a partial one) and asks THE integration switch
   readSessionMetaOf = null, integrationEnabled = null,
   // agent browser P3 (§4.3.1): the ONE delivery ladder the handback announcer forwards to, and the "For you" inbox
@@ -253,7 +255,12 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
       let groups = [];
       try { groups = tasks ? tasks.groupsForSession({ sessionKey }).map((g) => g.id) : []; } catch { groups = []; }
       return { conversationId: cid, sessionKey, name, groups };
-    } }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
+    },
+    // lane conversation-facts (majordomo piece 2): conversations.list's ONE builder over the hub's in-memory facts
+    listFacts: (() => { const CFX = require('./conversation-facts.js'); const src = () => listSources() || {}; return CFX.create({ activeSessions, groupsOf: automationGroupsOf, ...CFX.sourcesFrom({
+      getJobs: () => (getJobs ? getJobs() : null), userTodos, persistenceRouter, keeper: () => browserKeeper, browserStream: () => browserStream,
+      autoResume: () => src().autoResume || null, stashView: () => src().stashView || null, deliver: () => deliver, sysinfo: { history: (ms) => { const si = src().sysinfo; return si && typeof si.history === 'function' ? si.history(ms) : null; } },
+      stoppedSessions: () => { const f = src().stoppedSessions; return typeof f === 'function' ? f() : []; }, treeUsage: require('../browser-facts.js').treeUsage }) }); })() }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
   openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }),
     // lane automation-open-permission-resolve (q-049 M2): the CLI's own permission mode for the judged folder (its project layer follows it)
     permissionDefault: (cwd, backend) => require('./permission-rules.js').resolveDefaultMode({ backend, cwd }),

@@ -37,6 +37,9 @@ const USAGE = [
   '  vibespace-api conversations archive <target> [--force] [--resolve-asks]   end it if still live, then archive it as the sidebar\'s 归档 does',
   '                (a running turn ⇒ subject_busy unless --force; its open For-you asks ⇒ asks_open naming them, unless --resolve-asks dismisses them; archived already ⇒ already_archived)',
   '  vibespace-api groups invite <g-…|group name> <target>    into an agent group you are in (no wake)',
+  '  vibespace-api list [--json] [--key <name|id>]   every conversation and browser the key reaches, sorted by memory: what runs in',
+  '                each, whether it may be ended (busy + why), its desktop and its link; a fact the hub cannot know prints',
+  '                «unknown» with its reason (never 0, never idle) — --json prints the hub\'s answer whole',
   '  <target> = a conversation id, <backend>:<id> or a session id (sess-…); a conversation the key opened is within its reach',
   '  the grant\'s REACH (`keys` prints it): opened = only what the key opened (+ yourself) · groups: <T-…> = those Task Groups\' conversations too · instance = every conversation here; outside it ⇒ not_granted naming the reach (the user widens it on the key\'s row in the Vault window)',
   'no grant yet ⇒ the call asks the user in For you (≤ 60 s) and waits; a refusal is final for 10 minutes. Full manual: vibespace-docs api',
@@ -115,8 +118,46 @@ function typed(argv) {
   return { verb: row.verb, args, key };
 }
 
+const GB = (n) => (Number.isFinite(n) ? (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.round(n / 1e6) + ' MB') : null);
+const agoWords = (at, now) => { const s = Math.max(0, Math.round((now - at) / 1000)); return s < 90 ? s + ' s' : s < 5400 ? Math.round(s / 60) + ' min' : s < 172800 ? Math.round(s / 3600) + ' h' : Math.round(s / 86400) + ' d'; };
+/** One fact in words: its value, or «unknown (<why>)» — never blank (lane conversation-facts: the hub sends `<fact>Why`). */
+const factWords = (r, f, words) => (r[f] === null || r[f] === undefined ? `unknown (${r[f + 'Why'] || 'the hub did not say why'})` : words(r[f]));
+/** conversations.list's answer as the table an agent reads (lane conversation-facts, majordomo piece 2): rows by memory. */
+function listWords(d, now = Date.now()) {
+  const out = [];
+  const m = d.machine || {};
+  out.push(`machine: ${GB(m.memAvailable) || 'unknown'} free of ${GB(m.memTotal) || 'unknown'}${m.why ? ' (' + m.why + ')' : ''}`);
+  if (Array.isArray(d.desktops)) out.push('desktops: ' + (d.desktops.map((x) => `${x.name || x.id} ${x.link}`).join(' · ') || 'none'));
+  const rows = [...(d.conversations || [])].sort((a, b) => (b.memBytes || 0) - (a.memBytes || 0));
+  for (const r of rows) {
+    const where = r.desktop ? `on ${r.desktop.name || r.desktop.id}` : r.window === false ? 'no window' : r.window === null ? 'window unknown' : 'no desktop';
+    out.push('');
+    out.push(`${r.name || r.key || r.id}${r.self ? ' (this conversation)' : ''} — ${r.state === 'ended' ? 'ended' + (r.ended && r.ended.by ? ' by ' + r.ended.by : '') : 'turn ' + factWords(r, 'turn', (v) => v)} · ${where} · memory ${factWords(r, 'memBytes', (v) => GB(v) || String(v))}`);
+    if (r.state !== 'ended') {
+      out.push(`  background ${factWords(r, 'background', (v) => (v.length ? v.length + ': ' + v.map((t) => t.description || t.id).join('; ') : 'none'))} · held prompts ${factWords(r, 'heldPrompts', String)} · CLI timers ${factWords(r, 'timers', (v) => (v === 'none-seen' ? 'none seen' : String(v)))}`);
+      out.push(`  open asks ${factWords(r, 'asks', String)} · goal ${factWords(r, 'goal', String)} · continue ${factWords(r, 'continue', (v) => (v.armed ? 'armed' : 'none'))} · jobs ${factWords(r, 'jobs', (v) => `${v.running} running, ${v.schedules} scheduled`)} · idle ${factWords(r, 'idleSince', (v) => 'for ' + agoWords(v, now))}`);
+    }
+    out.push(r.endable ? '  may be ended' : '  busy — ' + (r.busy || []).map((b) => `${b.code}: ${b.why}`).join(' · '));
+    if (r.link) out.push('  ' + r.link);
+  }
+  if (!rows.length) out.push('', 'no conversation within this key\'s reach');
+  if (d.beyondReach) out.push('', `${d.beyondReach} more beyond this key's reach`);
+  for (const b of d.browsers || []) out.push(`browser ${b.name || b.id}: ${b.running ? 'running' : 'stopped'}${GB(b.memBytes) ? ' · ' + GB(b.memBytes) : ''}${Array.isArray(b.holders) && b.holders.length ? ' · held by ' + b.holders.join(', ') : ''}`);
+  if (d.pass && d.pass.ranOut) out.push('', `the facts pass ran out of time after ${d.pass.reached} of ${d.pass.of} — the rows after it print unknown; ask again`);
+  return out.join('\n');
+}
+
 async function main() {
   const [cmd, ...more] = process.argv.slice(2);
+  if (cmd === 'list') {   // lane conversation-facts (majordomo piece 2): conversations.list — a READ, not billed
+    const json = more.includes('--json');
+    const { flags, rest } = parse(more.filter((a) => a !== '--json'));
+    if (rest.length || Object.keys(flags).some((k) => k !== 'key')) { console.error(USAGE); process.exit(2); }
+    const d = await call('POST', '/api/agent/automation/conversations.list' + q({ key: flags.key }), {});
+    const r = d.result || {};
+    console.log(json ? JSON.stringify(r, null, 2) : listWords(r));
+    return;
+  }
   if (cmd === 'conversations' || cmd === 'groups') {
     const t = typed([cmd, ...more]);
     if (t.error) { console.error(`vibespace-api: ${t.error} — nothing was sent\n` + USAGE); process.exit(2); }
@@ -161,4 +202,4 @@ async function main() {
   process.exit(2);
 }
 if (require.main === module) main().catch((e) => { console.error('vibespace-api:', e.message); process.exit(1); });
-module.exports = { typed, TYPED, USAGE, limitsWords, reachWords };
+module.exports = { typed, TYPED, USAGE, limitsWords, reachWords, listWords };

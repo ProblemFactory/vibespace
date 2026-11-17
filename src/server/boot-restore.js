@@ -683,6 +683,7 @@ function restoreSessions() {
     let restoredRemote = null;
     let wrapperAgentTasks = null;
     let wrapperFacts = null; // lane conversation-facts: what the wrapper kept from its CLI's first line (null = none read: an older wrapper)
+    let wrapperHeld = null;
     const wrapperFiles = require('./wrapper-files.js').resolveWrapperFiles(BUFFERS_DIR, id, path.join(SOCKETS_DIR, sockFile));
     restoredSidecars.set(id, wrapperFiles.sidecar); // the lock capture's pid witness (the wrapper's own pid)
     try {
@@ -690,6 +691,7 @@ function restoreSessions() {
       if (wrapperMeta.mode === 'chat') sessionMode = 'chat';
       if (wrapperMeta.streaming != null) wrapperStreaming = !!wrapperMeta.streaming;
       wrapperFacts = wrapperMeta.facts || null;
+      wrapperHeld = Array.isArray(wrapperMeta.queue) ? wrapperMeta.queue.length : null; // the prompts its queue holds, as its sidecar last said
       if (wrapperMeta.goal) { wrapperGoal = wrapperMeta.goal; wrapperGoalStatus = wrapperMeta.goalStatus || null; wrapperGoalElapsed = wrapperMeta.goalElapsed || 0; wrapperGoalTokens = wrapperMeta.goalTokensUsed || 0; }
       // Agent's live todo list survives the restart (2.219.0 audit — the
       // card's progress pill/Steps went blank until the next TodoWrite)
@@ -787,7 +789,7 @@ function restoreSessions() {
       session._normEpoch = Date.now();
       // lane conversation-facts (majordomo piece 2): the facts a restart cannot read back come from the wrapper that kept them
       // (src/conversation-facts.js); a sidecar without them = an older wrapper — unknown with its reason, never guessed
-      { const CF = require('../conversation-facts.js'); session._convFacts = CF.factsFromSidecar(wrapperFacts) || CF.factsAdopted(); }
+      { const CF = require('../conversation-facts.js'); session._convFacts = CF.factsFromSidecar(wrapperFacts) || CF.factsAdopted(); if (Number.isInteger(wrapperHeld)) session._convFacts.heldAtBoot = wrapperHeld; }
       // 2.369.402: the conversation's cost fold — the kept fact (meta.costKept) resumed over the results the buffer still holds
       // (a trimmed head lost the earlier processes; the kept fact did not) — src/cost-segments.js
       if (typeof session._normalizer.seedCost === 'function') { try { session._normalizer.seedCost(costSeedOf(meta.costKept, savedBuffer)); } catch { } }

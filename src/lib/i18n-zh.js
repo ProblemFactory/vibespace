@@ -10251,6 +10251,7 @@ export default {
   "Look up a conversation's ids": "查看对话的 id", // design q-046 (lane automation-verbs)
   "Mark an agent's feedback handled": "把 agent 的反馈标为已处理", // lane feedback-handled-verb
   "Read the agents' open feedback": "读 agent 未处理的反馈", // lane feedback-handled-verb
+  "List conversations and browsers": "列出对话与浏览器", // lane conversation-facts (majordomo piece 2)
   "Archive a conversation": "归档一个对话", // lane conversations-archive-verb
   "(starts a billed turn)": "（会开始一个计费回合）", // design q-046 (lane automation-keys-core)
   "The key's value is sealed in the vault — nobody sees it. Grant it to a conversation or a task group next.": "这把 key 的值封存在保险库里——谁都看不到。接下来把它授权给一个会话或一个任务组。", // design q-046 (lane automation-keys-core)

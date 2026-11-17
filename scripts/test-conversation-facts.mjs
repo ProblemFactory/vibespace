@@ -142,5 +142,147 @@ function unknownLegs(M) {
   ok(red.length >= 10, `CONTROL with unknown-is-busy switched off, ${red.length} of the unknown legs go red (an unknown would read endable)`, red.map((l) => l.name));
 }
 
+// ── C · the ONE builder and the list verb (in-process over fake sessions) ───────────────────────────────────────────
+console.log('C · the builder (src/server/conversation-facts.js), the verb, the CLI words');
+const COL = require(path.join(REPO, 'src/server/conversation-facts.js'));
+const KEEPS = { sidecarFacts: { background: true, timers: true, lastRecordAt: true } };
+const KEY_A = 'claude:e2e00000-0000-4000-8000-0000000000a1', KEY_B = 'claude:e2e00000-0000-4000-8000-0000000000b2', KEY_T = 'claude:e2e00000-0000-4000-8000-0000000000c3';
+function fakeChat(name, step = []) { const st = CF.factsFresh(); for (const [rec, at] of step) CF.factsStep(st, rec, at); return { backend: 'claude', mode: 'chat', name, cwd: '/tmp', _convFacts: st }; }
+const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.mode === 'chat', heldOf: () => 0, asksOf: () => [], goalOf: () => 'none', continueOf: () => ({ armed: false }),
+  jobsOf: () => ({ running: 0, schedules: 0, nextFireAt: null }), waitingOf: () => ({ notices: 0 }), handoverOf: () => false, browserOf: () => null,
+  desktopOf: () => ({ desktop: { id: 'd1', name: 'Main' }, window: true }), desktops: () => [{ id: 'd1', name: 'Main' }], machineMem: async () => ({ memTotal: 64e9, memAvailable: 20e9 }), memOf: async () => 2e9 };
+{
+  const A = fakeChat('Alpha', [[{ type: 'system', subtype: 'init', claude_code_version: '2.1.312' }, 1794880000000]]);
+  const T = { backend: 'claude', mode: 'terminal', name: 'Term' };
+  const keys = new Map([[A, KEY_A], [T, KEY_T]]);
+  const sessions = new Map([['sess-1', A], ['sess-2', T]]);
+  const r = await COL.create({ activeSessions: sessions, keyOf: (s) => keys.get(s), ...known }).list();
+  const a = r.conversations.find((c) => c.key === KEY_A), t = r.conversations.find((c) => c.key === KEY_T);
+  ok(a && a.endable && a.busy.length === 0 && Array.isArray(a.background) && a.timers === 'none-seen' && a.idleSince === 1794880000000 && a.memBytes === 2e9 && a.link === 'vibespace://conversation/' + KEY_A && a.desktop.link === 'vibespace://desktop/d1',
+    'every fact KNOWN: an idle chat row is endable — its set, timers, idle age (the wrapper\'s record time), memory, desktop and ready link', a);
+  ok(t && !t.endable && t.turn === null && t.turnWhy === CF.WHY.terminal && t.backgroundWhy === CF.WHY.terminalNone && t.busy.some((b) => b.code === 'turn_unknown'), 'a terminal row: turn and its facts unknown with their reasons, busy — never «idle»', t && { turn: t.turnWhy, busy: t.busy.map((b) => b.code) });
+  ok(r.machine.memTotal === 64e9 && r.desktops[0].link === 'vibespace://desktop/d1' && r.pass.ranOut === false, 'the machine\'s memory and the desktops (with their links) ride the same snapshot', r.machine);
+  // every fact × unknown: each source answers nothing, or throws
+  for (const [label, over] of [['answers nothing', Object.fromEntries(Object.keys(known).map((k) => [k, () => undefined]))], ['throws', Object.fromEntries(Object.keys(known).map((k) => [k, () => { throw new Error('boom'); }]))]]) {
+    const r2 = await COL.create({ activeSessions: new Map([['sess-1', A]]), keyOf: () => KEY_A, ...over, turnKnown: () => true, turnOf: () => 'idle' }).list();
+    const row = r2.conversations[0];
+    const blank = CF.ROW_FACTS.filter((f) => row[f] === null && !row[f + 'Why']);
+    const unk = ['heldPrompts', 'asks', 'goal', 'continue', 'jobs', 'handover'].filter((f) => row[f] !== null);
+    ok(row && !row.endable && blank.length === 0 && unk.length === 0 && row.browser && row.browser.known === false, `every source ${label}: each fact unknown WITH a reason (never blank, never 0), the row busy — the builder never throws`, { blank, unk, busy: row && row.busy.map((b) => b.code) });
+  }
+}
+{
+  // THE BOUNDED PASS: one at a time, ended at its time-out, question marks — never last time's values
+  const many = new Map(); const keyOf = new Map();
+  for (let i = 0; i < 6; i++) { const s = fakeChat('S' + i, [[{ type: 'system', subtype: 'init', claude_code_version: '2.1.312' }, 1]]); many.set('sess-' + i, s); keyOf.set(s, 'claude:e2e00000-0000-4000-8000-00000000000' + i); }
+  let inFlight = 0, maxInFlight = 0, slow = false;
+  const memOf = (s) => new Promise((res) => { inFlight++; maxInFlight = Math.max(maxInFlight, inFlight); if (slow && s.name === 'S2') return; /* never answers */ setTimeout(() => { inFlight--; res(1e9 + Number(s.name.slice(1))); }, 5); });
+  const C = COL.create({ activeSessions: many, keyOf: (s) => keyOf.get(s), ...known, memOf, passMs: 400 });
+  const first = await C.list();
+  ok(first.pass.ranOut === false && first.conversations.every((c) => Number.isFinite(c.memBytes)) && maxInFlight === 1, `the pass walks the trees one at a time (at most ${maxInFlight} in flight) and fills every row`, first.pass);
+  slow = true;
+  const t0 = Date.now();
+  const second = await C.list();
+  const ms = Date.now() - t0;
+  const after = second.conversations.filter((c) => ['S2', 'S3', 'S4', 'S5'].includes(c.name));
+  ok(second.pass.ranOut && ms < 1500 && after.every((c) => c.memBytes === null && c.memBytesWhy === CF.WHY.timedOut), `a tree that never answers: the pass ENDS at its time-out (${ms} ms) and every row it did not finish says «${CF.WHY.timedOut}» — not the first pass's numbers`, after.map((c) => [c.name, c.memBytes]));
+  ok(second.conversations.filter((c) => ['S0', 'S1'].includes(c.name)).every((c) => Number.isFinite(c.memBytes)), 'the rows it finished before the slow one keep what it measured this time');
+  slow = false;
+  let calls = 0;
+  const C2 = COL.create({ activeSessions: many, keyOf: (s) => keyOf.get(s), ...known, memOf: async () => { calls++; await sleep(20); return 1e9; } });
+  const [p1, p2] = [C2.list(), C2.list()];
+  const [x1, x2] = await Promise.all([p1, p2]);
+  ok(p1 === p2 && x1 === x2 && calls === 6, `single-flight: two callers at once share ONE pass (${calls} tree reads for 6 rows)`);
+  const gone = await COL.create({ activeSessions: new Map([['sess-1', fakeChat('G')]]), keyOf: () => KEY_A, ...known, memOf: async () => ({ why: CF.WHY.noProcess }) }).list();
+  ok(gone.conversations[0].memBytes === null && gone.conversations[0].memBytesWhy === CF.WHY.noProcess, 'a tree whose root is gone prints «no process found» — never 0', gone.conversations[0].memBytes);
+  const zero = await COL.create({ activeSessions: new Map([['sess-1', fakeChat('Z')]]), keyOf: () => KEY_A, ...known, memOf: async () => 0 }).list();
+  ok(zero.conversations[0].memBytes === null && zero.conversations[0].memBytesWhy === CF.WHY.noProcess, 'a sampler that answers 0 bytes is read as «no process found», never printed as 0');
+  // RED CONTROL: a copy that takes a gone tree as 0
+  const MUT = mutantCopies('conversation-facts-col', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
+  const NEEDLE = "        if (Number.isFinite(m.value) && m.value > 0) row.memBytes = m.value;\n        else { row.memBytes = null; row.memBytesWhy = (m.value && typeof m.value.why === 'string' && m.value.why) || WHY.noProcess; }";
+  ok(src.split(NEEDLE).length === 2, 'the gone-tree rule is in the builder once (the mutation anchor)');
+  const M = MUT.load('src/server/conversation-facts.js', src.replace(NEEDLE, '        row.memBytes = Number.isFinite(m.value) ? m.value : 0;'), 'gone-is-zero');
+  const red = await M.create({ activeSessions: new Map([['sess-1', fakeChat('G')]]), keyOf: () => KEY_A, ...known, memOf: async () => ({ why: CF.WHY.noProcess }) }).list();
+  ok(red.conversations[0].memBytes === 0, 'CONTROL a builder that takes a gone tree as 0 prints 0 — the leg above would be red', red.conversations[0].memBytes);
+  const remote = await COL.create({ activeSessions: new Map([['sess-1', { ...fakeChat('R'), host: 'mac' }]]), keyOf: () => KEY_A, ...known }).list();
+  ok(remote.conversations[0].memBytesWhy === CF.WHY.otherMachine, 'a conversation on another machine: «on another machine — not measured there yet»');
+  const idleOld = await COL.create({ activeSessions: new Map([['sess-1', { backend: 'claude', mode: 'chat', name: 'Old', _convFacts: CF.factsAdopted() }]]), keyOf: () => KEY_A, ...known, agesOf: async (entries, signal) => new Map(entries.map(([id]) => [id, 1794870000000])) }).list();
+  const io = idleOld.conversations[0];
+  let sig = null;
+  const hung = await COL.create({ activeSessions: new Map([['sess-1', { backend: 'claude', mode: 'chat', name: 'Old', _convFacts: CF.factsAdopted() }]]), keyOf: () => KEY_A, ...known, passMs: 300, agesOf: (entries, signal) => { sig = signal; return new Promise(() => {}); } }).list();
+  ok(hung.pass.ranOut && hung.conversations[0].idleSince === null && hung.conversations[0].idleSinceWhy === CF.WHY.timedOut && sig && sig.cancelled === true, 'an age pass that never answers: ended at the time-out, its signal CANCELLED (the walk stops), the idle age «ran out of time»', { why: hung.conversations[0].idleSinceWhy, cancelled: sig && sig.cancelled });
+  ok(io.idleSince === 1794870000000 && io.idleSinceSource === 'output file' && io.backgroundWhy === CF.WHY.oldWrapper && !io.endable, 'an OLDER wrapper: its idle age from the output file\'s own time (the pass); its set and timers «its wrapper is older than this record» — busy', { idle: io.idleSince, bg: io.backgroundWhy });
+}
+{
+  // THE SOURCES (sourcesFrom): the hub's instances, shaped as the 2026-11-17 map read them, each an in-memory read
+  const jobs = new Map([['j1', { owner: { conversation: { id: 'e2e00000-0000-4000-8000-0000000000a1' } }, state: 'up' }], ['j2', { owner: { conversation: { id: 'e2e00000-0000-4000-8000-0000000000a1' } }, kind: 'cron', state: 'scheduled', nextFireAt: 1794890000000 }],
+    ['j3', { owner: { conversation: { id: 'e2e00000-0000-4000-8000-0000000000a1' } }, kind: 'cron', state: 'scheduled', nextFireAt: 1794880000000 }], ['j4', { owner: { conversation: { id: 'other' } }, state: 'done' }]]);
+  const lay = { desktopMeta: [{ id: 'd1', name: 'Main' }, { id: '__stage__', name: 'x' }], desktops: { d1: { autoSave: { windows: [{ openSpec: { backendSessionId: 'e2e00000-0000-4000-8000-0000000000a1' } }] } } } };
+  const S = COL.sourcesFrom({ getJobs: () => ({ ready: true, jobs }), persistenceRouter: { layoutsCached: () => lay }, userTodos: { forSession: () => [{ by: 'agent', kind: 'ask' }, { by: 'agent', kind: 'notice' }] },
+    autoResume: () => ({ statusFor: () => ({ armed: true, resetsAt: 5 }) }), stashView: () => ({ inFlight: () => false }), deliver: () => ({ handoverArmed: () => true }),
+    sysinfo: { history: () => [{ t: 1, m: 40e9, l: 64e9 }] }, stoppedSessions: async () => [{ backend: 'claude', backendSessionId: 'e2e00000-0000-4000-8000-0000000000d4', name: 'Gone', stoppedAt: 7, stopReason: 'dead-socket-at-boot' }],
+    keeper: () => ({ inputSummaryFor: () => ({ input: 'user' }), inputsFor: () => [] }), browserStream: () => ({ viewerCount: () => 0 }), treeUsage: async () => ({ memBytes: 3e9 }) });
+  const s = { backend: 'claude', backendSessionId: 'e2e00000-0000-4000-8000-0000000000a1', _goal: 'ship it', _goalStatus: 'active', _browserKey: 'bk1', _childPid: 4242, _convFacts: { heldAtBoot: 2 },
+    _normalizer: { queuePublished: () => false, queueState: () => [] } };
+  ok(JSON.stringify(S.jobsOf(KEY_A)) === JSON.stringify({ running: 1, schedules: 2, nextFireAt: 1794880000000 }), 'jobs by the OWNER conversation: 1 running, 2 schedules, the soonest next fire', S.jobsOf(KEY_A));
+  ok(S.heldOf(s) === 2 && S.heldOf({ ...s, _normalizer: { queuePublished: () => true, queueState: () => [1] } }) === 1 && S.heldOf({}) === undefined, 'held prompts: the wrapper\'s live publication, else its sidecar queue read at the adoption, else unknown');
+  ok(S.goalOf(s) === 'active' && S.goalOf({ _goal: 'x', _goalStatus: 'complete' }) === 'none' && S.goalOf({ _goal: 'x' }) === undefined && S.goalOf({}) === 'none', 'goal: active · complete = none · a goal with no status = unknown · no goal = none');
+  ok(S.asksOf(KEY_A).length === 1 && JSON.stringify(S.continueOf(s, 'sess-1')) === '{"armed":true,"resetsAt":5}' && S.handoverOf(s) === true, 'asks (its own, never a notice), the armed continue, a hand-over armed for the turn end');
+  const b = S.browserOf(s, 'sess-1');
+  ok(b && b.drivenBy === 'person' && b.viewers === 0 && b.personBrowsing === false && CF.endVerdict({ ...IDLE, browser: b }).busy[0].code === 'browser', 'a browser the person took over: drivenBy person — busy (browser)', b);
+  ok(S.browserOf({}, 'x') === null && S.browsers().why.includes('piece 6'), 'no browser key = no browser (a known answer); the list of every browser waits for the keeper\'s rows (piece 6), said so');
+  ok(JSON.stringify(S.desktopOf(KEY_A)) === '{"desktop":{"id":"d1","name":"Main"},"window":true}' && S.desktopOf(KEY_B).window === false && S.desktops().length === 1, 'the stored layout (in memory): its desktop and window; another conversation has no window; the stage is not a desktop');
+  const S0 = COL.sourcesFrom({ persistenceRouter: { layoutsCached: () => null }, sysinfo: { history: () => [] } });
+  ok(S0.desktopOf(KEY_A).why && S0.desktops().why && (await S0.machineMem()).why === CF.WHY.measuring, 'no layout read since the boot, no memory sample yet: unknown with their reasons (never a guess)');
+  ok(JSON.stringify(await S.machineMem()) === '{"memTotal":64000000000,"memAvailable":24000000000}' && (await S.memOf(s)) === 3e9 && JSON.stringify(await S.memOf({})) === JSON.stringify({ why: CF.WHY.noProcess }), 'the machine\'s memory from the sampler\'s last point; a tree\'s memory from its root pid; no pid = «no process found»');
+  const ended = await S.endedRows();
+  ok(ended.length === 1 && ended[0].key === 'claude:e2e00000-0000-4000-8000-0000000000d4' && ended[0].ended.by === 'restart', 'an ended conversation with a kept record: its key, and «ended by a restart»', ended);
+  const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8').replace(/^\s*(\/\/|\*|\/\*\*).*$/gm, '');
+  const named = ['summaryFor(', 'stashFactOf(', 'ephemerals(', 'factFor(', 'factView(', 'readLayouts(', 'memInfo', 'snapshot(', 'peekNotifs(', 'openRequestFor('].filter((n) => src.includes(n));
+  ok(named.length === 0, 'the sources call none of the readers the map found writing or reading a file (the stash summary, the keeper\'s fact and rows, the first layouts read, the memory reader, a job snapshot)', named);
+}
+{
+  // nothing on the hub loop: no synchronous file call and no child process in the builder (source census)
+  const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8').replace(/^\s*(\/\/|\*|\/\*\*).*$/gm, '');
+  ok(!/\b\w+Sync\s*\(/.test(src) && !/child_process|require\(['"]fs['"]\)|require\(['"]node:fs['"]\)/.test(src), 'the builder makes no synchronous call and starts no child (it reads memory and asks its sources)');
+}
+{
+  // THE VERB: the reach filter, self, beyondReach — a key with reach «opened» lists only its own; the instance key lists all
+  const OPS = require(path.join(REPO, 'src/server/conversation-ops.js'));
+  const A = fakeChat('Alpha'), B = fakeChat('Bravo'), ME = fakeChat('Me');
+  const keys = new Map([[A, KEY_A], [B, KEY_B], [ME, 'claude:e2e00000-0000-4000-8000-0000000000ee']]);
+  const sessions = new Map([['sess-a', A], ['sess-b', B], ['sess-me', ME]]);
+  const listFacts = COL.create({ activeSessions: sessions, keyOf: (s) => keys.get(s), ...known });
+  const verbs = OPS.automationVerbs({ activeSessions: sessions, listFacts });
+  const caller = { conversationId: 'e2e00000-0000-4000-8000-0000000000ee', sessionKey: 'claude:e2e00000-0000-4000-8000-0000000000ee' };
+  const opened = await verbs['conversations.list']({}, { caller, keyId: 'k1', reach: ({ conversationId }) => ({ ok: conversationId === 'e2e00000-0000-4000-8000-0000000000a1' }) });
+  ok(opened.ok && opened.conversations.length === 2 && opened.conversations.some((c) => c.key === KEY_A) && opened.conversations.find((c) => c.self)?.name === 'Me' && opened.beyondReach === 1,
+    'reach «opened»: only what the key opened, plus the caller marked self; the rest only counted (beyondReach 1)', opened.conversations.map((c) => [c.name, !!c.self]));
+  const all = await verbs['conversations.list']({}, { caller, keyId: 'k1', reach: () => ({ ok: true }) });
+  ok(all.ok && all.conversations.length === 3 && all.beyondReach === 0, 'the instance key lists all three');
+  const MUT = mutantCopies('conversation-facts-ops', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
+  const NEEDLE = '        if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : r); else beyond++;';
+  ok(src.split(NEEDLE).length === 2, 'the list\'s reach filter is in the handler once (the mutation anchor)');
+  const RED = MUT.load('src/server/conversation-ops.js', src.replace(NEEDLE, '        rows.push(self ? { ...r, self: true } : r);'), 'no-reach-filter');
+  const leak = await RED.automationVerbs({ activeSessions: sessions, listFacts })['conversations.list']({}, { caller, keyId: 'k1', reach: ({ conversationId }) => ({ ok: conversationId === 'e2e00000-0000-4000-8000-0000000000a1' }) });
+  ok(leak.conversations.length === 3, 'CONTROL a handler without the reach filter hands an «opened» key all three — the leg above would be red', leak.conversations.length);
+  const AK = require(path.join(REPO, 'src/automation-keys.js'));
+  const row = AK.SCOPES.find((x) => x.verb === 'conversations.list');
+  ok(row && row.layer === 'read' && row.billed === false && row.args({}).ok && !row.args({ x: 1 }).ok, 'the closed table: conversations.list is a READ, not billed, and takes no argument');
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  ok(zh.includes(`"${row.label}": "列出对话与浏览器"`) && ja.includes(`"${row.label}": "会話とブラウザーを一覧表示"`), 'its label is worded in three languages (en key, zh, ja)');
+}
+{
+  // the CLI's words: «unknown (why)», never blank / 0 / idle for a thing the hub does not know
+  const API = require(path.join(REPO, 'data/bin/vibespace-api'));
+  const term = CF.shapeRow({ key: KEY_T, name: 'Term', mode: 'terminal', turn: null, turnWhy: CF.WHY.terminal, background: null, backgroundWhy: CF.WHY.terminalNone, memBytes: null, memBytesWhy: CF.WHY.noProcess });
+  const words = API.listWords({ machine: { memTotal: 64e9, memAvailable: 20e9 }, desktops: [], conversations: [term], browsers: [], beyondReach: 2 }, 1794880000000);
+  ok(words.includes(`turn unknown (${CF.WHY.terminal})`) && words.includes(`memory unknown (${CF.WHY.noProcess})`) && !/turn idle|memory 0\b/.test(words) && words.includes('busy — turn_unknown') && words.includes('2 more beyond'), 'the table prints «unknown (<why>)» for every fact the hub does not know, the busy codes, and the count beyond reach', words);
+  const BAN = /\b(sleep|asleep|hibernat\w*|suspend\w*|paus\w*)\b|睡眠|休眠|挂起|暂停|スリープ|休止/i;
+  ok(!BAN.test(words) && !BAN.test(String(API.USAGE).split('vibespace-api list')[1] || '') && !BAN.test('List conversations and browsers 列出对话与浏览器 会話とブラウザーを一覧表示'), 'the list\'s words (table, usage, label in three languages) never say sleep');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

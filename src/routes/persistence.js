@@ -555,6 +555,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // Expose for server.js to use directly
   router.listLayoutHistory = listLayoutHistory;
   router.readLayouts = readLayouts;
+  router.layoutsCached = () => _layoutsCache; // lane conversation-facts: the in-memory copy only (null before the first read) — the list never reads the file
   router.writeLayouts = writeLayouts;
   writeLayouts.note = noteLayout; // the ws handler's notes for the ring (a property: the ws ctx contract hands writeLayouts alone)
   router.flushLayouts = flushLayouts;

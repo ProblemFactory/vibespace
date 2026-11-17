@@ -10250,6 +10250,7 @@ export default {
   "Look up a conversation's ids": "会話の ID を確かめる", // design q-046 (lane automation-verbs)
   "Mark an agent's feedback handled": "エージェントのフィードバックを対応済みにする", // lane feedback-handled-verb
   "Read the agents' open feedback": "エージェントの未対応フィードバックを読む", // lane feedback-handled-verb
+  "List conversations and browsers": "会話とブラウザーを一覧表示", // lane conversation-facts (majordomo piece 2)
   "Archive a conversation": "会話をアーカイブする", // lane conversations-archive-verb
   "(starts a billed turn)": "（課金されるターンを開始します）", // design q-046 (lane automation-keys-core)
   "The key's value is sealed in the vault — nobody sees it. Grant it to a conversation or a task group next.": "キーの値は保管庫に封印され、誰にも見えません。次に会話かタスクグループに付与してください。", // design q-046 (lane automation-keys-core)

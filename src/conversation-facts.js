@@ -16,6 +16,7 @@
 /** The reason sentences of an unknown fact (agent-facing: English, as the tree's rule says for verb answers). */
 const WHY = Object.freeze({
   terminal: 'a terminal conversation publishes no turn',
+  terminalNone: 'a terminal conversation publishes none of these facts',
   notRead: 'not read since the hub restarted',
   noHarnessBg: 'this harness does not report background tasks',
   noWrapper: 'no wrapper file',

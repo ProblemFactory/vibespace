@@ -69,6 +69,7 @@ vibespace-api call conversations.rename --name "Worker 2" --target <conversation
 | `conversations.bind` | `target`, `task` (a Task Group this conversation is in) | no |
 | `conversations.end` | `target` | no |
 | `conversations.archive` | `target`, `force?`, `resolveAsks?` — ends it if still live, then archives it exactly as the sidebar's 归档 does (the owner's list no longer shows it); a running turn ⇒ `subject_busy` unless `force`; its open For-you asks ⇒ `asks_open` (their ids) unless `resolveAsks` dismisses them; archived already ⇒ `already_archived` | no |
+| `conversations.list` | none — one snapshot: the machine's memory, the desktops, every conversation and running browser the key reaches (this conversation marked `self`; the rest only counted, `beyondReach`). Each row: `key`, state, turn, background tasks, held prompts, CLI timers, open asks, goal, armed continue, jobs, waiting notices, browser, desktop, idle age, memory, `busy` + `endable` (the end verdict), `link`. A fact the hub cannot know is `null` with a `<fact>Why` sentence — never 0, never idle; an unknown fact counts as busy | no (a read) |
 | `groups.invite` | `group`, `target` (an agent group this conversation is in; added without a wake) | no |
 | `feedback.handled` | `id` (`fb-…`), `version` (the release that shipped the fix, `2.369.NNN`), `note?` (≤ 200 characters) | no |
 | `feedback.list` | — | no (a read) |
@@ -98,6 +99,7 @@ vibespace-api conversations bind <target> <T-…>
 vibespace-api conversations end <target>
 vibespace-api conversations archive <target> [--force] [--resolve-asks]
 vibespace-api groups invite <g-…|group name> <target>
+vibespace-api list [--json]          conversations.list as a table sorted by memory («unknown (<why>)» where the hub cannot know)
 ```
 
 `<target>` is a conversation id, `<backend>:<id>` or a session id (`sess-…`); `--key <name|id>` picks a key.

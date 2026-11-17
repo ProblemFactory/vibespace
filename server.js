@@ -1235,7 +1235,8 @@ const integrationsWiring = require('./src/server/integrations-wiring.js').create
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
 const { settingHolds, decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, bootEngineDistribution, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
-  app, server: hub, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, getJobs: () => jobsWiring.getJobs(), // + lane jobs-browser: a job browses as its owner conversation // + agent browser P4 second half (§7.5): the key consumer's store
+  app, server: hub, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, getJobs: () => jobsWiring.getJobs(),
+  listSources: () => ({ autoResume, stashView, sysinfo, stoppedSessions }), // lane conversation-facts: conversations.list's in-memory sources // + lane jobs-browser: a job browses as its owner conversation // + agent browser P4 second half (§7.5): the key consumer's store
   auth, wss, WS_OPEN, syncStores, agentdDialDevices, getAccounts: () => accounts, getChannels: () => channelsWiring.channels, // + lane vault-contents-window: the Vault window lists these two stores
   bcastAll: (...a) => bcastAll(...a), serverNotice: (...a) => serverNotice(...a), // + agent browser P1: the keeper's runaway/ceiling notices
   serverSetting: (...a) => serverSetting(...a),

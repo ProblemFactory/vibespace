@@ -394,7 +394,7 @@ function forDeps(own) { return opsOver(() => ({ ...shared, ...(own || {}) })); }
 const OPEN_ID_WAIT_MS = 20 * 1000;     // a claude CLI reports its conversation id within seconds of the spawn
 const BUSY_TURNS = ['running', 'waiting'];   // turn-facts' non-idle states: mid-turn, or paused on the user (requires_action)
 function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, waitMs = OPEN_ID_WAIT_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
-  archive = null, asksOf = () => [], resolveAsks = () => ({ changed: [], unknown: [] }), turnOf = () => 'idle', deadOf = () => null } = {}) {
+  archive = null, asksOf = () => [], resolveAsks = () => ({ changed: [], unknown: [] }), turnOf = () => 'idle', deadOf = () => null, listFacts = null } = {}) {
   const O = () => ops || sharedOps;
   const idOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const keyOf = (s) => { const cid = idOf(s); return cid ? `${(s && s.backend) || 'claude'}:${cid}` : null; };
@@ -494,6 +494,27 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       if (!a || !a.ok) return { ok: false, code: (a && a.code) || 'failed', why: (a && a.why) || 'the archived list could not be written', target: label };
       if (a.already && !ended) return { ok: false, code: 'already_archived', why: 'that conversation is already in the archived list', target: label };
       return { ok: true, target: f.conversationId, sessionKey: f.sessionKey, ended, archived: true, already: !!a.already, resolvedAsks: resolved };
+    },
+    // lane conversation-facts (majordomo piece 2): ONE snapshot of what the key reaches. The builder (src/server/conversation-facts.js)
+    // knows nothing of reach; each row is judged HERE by the one rule every verb asks (opener / grant / self), the caller marked
+    // `self`, the rest only counted (beyondReach). A browser is listed when a reached conversation holds it, or nobody does.
+    'conversations.list': async (args, ctx) => {
+      if (!listFacts || typeof listFacts.list !== 'function') return { ok: false, code: 'not_ready', why: 'the conversation list is not wired yet' };
+      const { caller, reach } = ctx;
+      const snap = await listFacts.list();
+      const selfKey = caller.sessionKey || `claude:${caller.conversationId}`;
+      const rows = [];
+      let beyond = 0;
+      for (const r of snap.conversations || []) {
+        const self = !!r.key && r.key === selfKey;
+        const cid = r.key ? r.key.slice(r.key.indexOf(':') + 1) : null;
+        let v = null;
+        if (!self) { try { v = reach({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [] }); } catch { v = null; } }
+        if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : r); else beyond++;
+      }
+      const keys = new Set(rows.map((r) => r.key).filter(Boolean));
+      const browsers = Array.isArray(snap.browsers) ? snap.browsers.filter((b) => !Array.isArray(b.holders) || !b.holders.length || b.holders.some((k) => keys.has(k))) : null;
+      return { ok: true, at: snap.at, machine: snap.machine, desktops: snap.desktops, ...(snap.desktopsWhy ? { desktopsWhy: snap.desktopsWhy } : {}), conversations: rows, browsers, ...(browsers ? {} : { browsersWhy: snap.browsersWhy || 'not collected' }), beyondReach: beyond, pass: snap.pass };
     },
     'groups.invite': async (args, ctx) => {
       const t = reached(args.target, ctx);

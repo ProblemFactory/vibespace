@@ -1,0 +1,243 @@
+'use strict';
+/**
+ * conversations.list's ONE BUILDER — ORCH (lane conversation-facts, majordomo piece 2; the design's «conversations.list»).
+ * Free of the reach rule: the list verb (src/server/conversation-ops.js automationVerbs) filters these rows through the key's
+ * reach; the person's cookie route (piece 5) will read the same rows whole. One builder, two doors — an unknown is «unknown»
+ * at both, with its reason (src/conversation-facts.js shapeRow).
+ *
+ * NOTHING ON THE HUB LOOP: every fact below is an in-memory read per session (no synchronous file call, no child started),
+ * the walk yields every `yieldEvery` rows, and the two facts that WAIT — the memory of a conversation's process tree and the
+ * output file's own time (the idle age where no wrapper kept one) — go through ONE bounded pass: one at a time, ended at its
+ * time-out, and every row it did not reach prints unknown «the facts pass ran out of time — ask again» (question marks,
+ * never last time's values). Single-flight: callers that arrive while a pass runs share it.
+ *
+ * Every source is a dependency (the wiring in src/server/mounts-plugins-wiring.js passes the real ones; the suite passes
+ * fakes). A source that throws, or answers nothing, leaves its fact unknown with WHY.notCollected — never a guess.
+ */
+const CF = require('../conversation-facts.js');
+const { WHY } = CF;
+
+const LINK_CONVERSATION = 'vibespace://conversation/';   // the design's grammar (piece 1): the row's key, exactly as listed
+const LINK_DESKTOP = 'vibespace://desktop/';
+
+const isCount = (n) => Number.isInteger(n) && n >= 0;
+const call = (fn, ...a) => { if (typeof fn !== 'function') return undefined; try { return fn(...a); } catch { return undefined; } };
+/** A waited fact within the pass's remaining time: its answer, or {timedOut:true}. Never longer than `ms`. */
+function within(promiseLike, ms) {
+  if (!(ms > 0)) return Promise.resolve({ timedOut: true });
+  let t = null;
+  return Promise.race([
+    Promise.resolve(promiseLike).then((v) => ({ value: v }), () => ({ value: undefined })),
+    new Promise((res) => { t = setTimeout(() => res({ timedOut: true }), ms); }),
+  ]).finally(() => clearTimeout(t));
+}
+
+function create({
+  activeSessions,
+  capsOf = () => ({}),          // backend → its caps row (src/backend-caps.js capsOf): `sidecarFacts` decides, never a harness id
+  keyOf = () => null,           // session → `<backend>:<conversation id>` | null (the id not reported yet)
+  turnOf = () => null, turnKnown = () => false,   // src/server/turn-facts.js
+  groupsOf = () => [],          // (session, webuiId) → Task Group ids
+  heldOf = () => undefined,     // session → n held in the wrapper's queue | undefined (no wrapper fact)
+  asksOf = () => undefined,     // key → the open For-you asks it asked | undefined
+  goalOf = () => undefined,     // session → 'active' | 'none'
+  continueOf = () => undefined, // session → {armed, resetsAt}
+  jobsOf = () => undefined,     // key → {running, schedules, nextFireAt}
+  waitingOf = () => undefined,  // session → {notices, notResumedWhy}
+  handoverOf = () => undefined, // session → true | false (a hand-over to it in flight)
+  browserOf = () => null,       // session → null | {id, kind, name, running, drivenBy, viewers, personBrowsing, …} | {known:false, why}
+  browsers = () => [],          // → every running browser the keeper knows (rows; holders = keys)
+  desktopOf = () => undefined,  // key → {desktop:{id,name}|null, window:bool}
+  desktops = () => undefined,   // → [{id, name}]
+  endedRows = () => [],         // → ended conversations that still have a window or a kept record: [{key, name, cwd, backend, ended:{at,by}|null, desktop…}]
+  machineMem = () => undefined, // → Promise<{memTotal, memAvailable}>
+  memOf = null,                 // (session, webuiId) → Promise<number bytes | {why}>   (one process tree at a time — the pass)
+  agesOf = null,                // ([[webuiId, session]…], signal) → Promise<Map webuiId → mtime ms | null> — the output files' own
+                                // times (lane hub-loop-stalls' outputTimes: one stat per file; it answers null once signal.cancelled)
+  passMs = 3000,
+  yieldEvery = 50,
+  now = Date.now,
+} = {}) {
+  /** The live row's in-memory facts (the waited ones are filled by the pass). */
+  function liveRow(id, s) {
+    const backend = s.backend || 'claude';
+    const key = call(keyOf, s) || null;
+    const chat = !!call(turnKnown, s);
+    const turn = chat ? (call(turnOf, s) || null) : null;
+    const caps = call(capsOf, backend) || {};
+    const r = {
+      key, ...(key ? {} : { keyWhy: 'the conversation has not reported its id yet' }),
+      id, name: s.name || null, cwd: s.cwd || null, host: s.host || null, backend, mode: s.mode || 'terminal',
+      groups: (() => { const g = call(groupsOf, s, id); return Array.isArray(g) ? g : []; })(),
+      state: 'running',
+      turn, ...(chat ? (turn ? {} : { turnWhy: WHY.notCollected }) : { turnWhy: WHY.terminal }),
+    };
+    if (chat) Object.assign(r, CF.trackedFacts(s._convFacts || null, { keeps: caps.sidecarFacts, turn }));
+    else Object.assign(r, { background: null, backgroundWhy: WHY.terminalNone, timers: null, timersWhy: WHY.terminalNone, idleSince: null, idleSinceWhy: WHY.terminalNone });
+    const held = call(heldOf, s, id);
+    if (isCount(held)) r.heldPrompts = held; else { r.heldPrompts = null; r.heldPromptsWhy = WHY.noWrapper; }
+    const asks = key ? call(asksOf, key) : undefined;
+    if (Array.isArray(asks)) r.asks = asks.length; else { r.asks = null; r.asksWhy = key ? WHY.notCollected : 'the conversation has not reported its id yet'; }
+    const goal = call(goalOf, s, id); if (goal === 'active' || goal === 'none') r.goal = goal;
+    const cont = call(continueOf, s, id); if (cont && typeof cont === 'object' && typeof cont.armed === 'boolean') r.continue = { armed: cont.armed, resetsAt: cont.resetsAt || null };
+    const jobs = key ? call(jobsOf, key) : undefined;
+    if (jobs && isCount(jobs.running) && isCount(jobs.schedules)) r.jobs = { running: jobs.running, schedules: jobs.schedules, nextFireAt: jobs.nextFireAt || null, wakeable: false };   // wakeable: false until piece 7
+    const waiting = call(waitingOf, s, id); if (waiting && typeof waiting === 'object') r.waiting = waiting;
+    const ho = call(handoverOf, s, id); if (ho === true || ho === false) r.handover = ho;
+    const b = call(browserOf, s, id); r.browser = b === undefined ? { known: false, why: WHY.notCollected } : b;
+    const d = key ? call(desktopOf, key) : undefined;
+    if (d && typeof d === 'object' && !d.why) { r.desktop = d.desktop ? { id: d.desktop.id, name: d.desktop.name || null, link: LINK_DESKTOP + d.desktop.id } : null; r.window = !!d.window; }
+    else { r.desktop = null; r.window = null; r.windowWhy = (d && typeof d.why === 'string' && d.why) || WHY.notCollected; }
+    r.link = key ? LINK_CONVERSATION + key : null; if (!key) r.linkWhy = 'the conversation has not reported its id yet';
+    return r;
+  }
+  function endedRow(e) {
+    const key = e && e.key ? String(e.key) : null;
+    const r = { key, name: (e && e.name) || null, cwd: (e && e.cwd) || null, backend: (e && e.backend) || (key ? key.slice(0, key.indexOf(':')) : null), mode: (e && e.mode) || null,
+      state: 'ended', ended: e && e.ended && typeof e.ended === 'object' ? e.ended : null, memBytes: 0, browser: null };
+    if (!r.ended) r.endedWhy = WHY.noRecord;
+    const d = key ? call(desktopOf, key) : undefined;
+    if (d && typeof d === 'object' && !d.why) { r.desktop = d.desktop ? { id: d.desktop.id, name: d.desktop.name || null, link: LINK_DESKTOP + d.desktop.id } : null; r.window = !!d.window; }
+    else { r.desktop = null; r.window = null; r.windowWhy = (d && typeof d.why === 'string' && d.why) || WHY.notCollected; }
+    const waiting = e && e.waiting; if (waiting && typeof waiting === 'object') r.waiting = waiting;
+    const jobs = key ? call(jobsOf, key) : undefined;
+    if (jobs && isCount(jobs.running) && isCount(jobs.schedules)) r.jobs = { running: jobs.running, schedules: jobs.schedules, nextFireAt: jobs.nextFireAt || null, wakeable: false };
+    r.link = key ? LINK_CONVERSATION + key : null;
+    return r;
+  }
+  async function build() {
+    const at = now();
+    const deadline = at + passMs;
+    const live = [];
+    let n = 0;
+    for (const [id, s] of activeSessions || []) {
+      if (!s || s.isTmuxView) continue;
+      live.push({ s, row: liveRow(id, s) });
+      if (++n % yieldEvery === 0) await new Promise((r) => setImmediate(r));
+    }
+    const endedAnswer = await within(call(endedRows), Math.max(1, deadline - now()));
+    const ended = (Array.isArray(endedAnswer.value) ? endedAnswer.value : []).map(endedRow);
+    // THE BOUNDED PASS. First the output files' own times, for the idle rows whose wrapper kept no record time (ONE batch, one
+    // stat per file), then memory per process tree, one at a time. Both are ended at the pass's time-out.
+    let ranOut = false, reached = 0;
+    const needAge = live.filter(({ row }) => row.idleSince === null && row.idleSinceWhy === WHY.noTurnSeen && row.turn === 'idle');
+    if (needAge.length && typeof agesOf === 'function') {
+      const signal = { cancelled: false, read: 0 };
+      const a = await within(call(agesOf, needAge.map(({ row, s }) => [row.id, s]), signal), deadline - now());
+      if (a.timedOut) { signal.cancelled = true; ranOut = true; for (const { row } of needAge) row.idleSinceWhy = WHY.timedOut; }
+      else if (a.value instanceof Map) for (const { row } of needAge) { const t = a.value.get(row.id); if (Number.isFinite(t)) { row.idleSince = t; row.idleSinceSource = 'output file'; } }
+    }
+    for (const { s, row } of live) {
+      if (ranOut || now() >= deadline) { ranOut = true; break; }
+      if (typeof memOf === 'function' && !row.host) {
+        const m = await within(call(memOf, s, row.id), deadline - now());
+        if (m.timedOut) { ranOut = true; row.memBytes = null; row.memBytesWhy = WHY.timedOut; break; }
+        if (Number.isFinite(m.value) && m.value > 0) row.memBytes = m.value;
+        else { row.memBytes = null; row.memBytesWhy = (m.value && typeof m.value.why === 'string' && m.value.why) || WHY.noProcess; }
+      } else if (row.host) { row.memBytes = null; row.memBytesWhy = WHY.otherMachine; }
+      reached++;
+    }
+    if (ranOut) {   // question marks for every row the pass did not finish — never last time's values
+      for (const { row } of live.slice(reached)) {
+        if (row.memBytes === undefined || row.memBytesWhy === WHY.timedOut) { row.memBytes = null; row.memBytesWhy = WHY.timedOut; }
+      }
+    }
+    for (const { row } of live) if (row.memBytes === undefined) { row.memBytes = null; row.memBytesWhy = typeof memOf === 'function' ? WHY.measuring : WHY.notCollected; }
+    const mem = await within(call(machineMem), Math.max(1, deadline - now()));
+    const machine = mem.value && Number.isFinite(mem.value.memTotal) ? { memTotal: mem.value.memTotal, memAvailable: Number.isFinite(mem.value.memAvailable) ? mem.value.memAvailable : null }
+      : { memTotal: null, memAvailable: null, why: mem.timedOut ? WHY.timedOut : (mem.value && typeof mem.value.why === 'string' && mem.value.why) || WHY.notCollected };
+    const ds = call(desktops);
+    return {
+      at,
+      machine,
+      desktops: Array.isArray(ds) ? ds.map((d) => ({ id: d.id, name: d.name || null, link: LINK_DESKTOP + d.id })) : null,
+      ...(Array.isArray(ds) ? {} : { desktopsWhy: (ds && typeof ds.why === 'string' && ds.why) || WHY.notCollected }),
+      conversations: [...live.map((x) => CF.shapeRow(x.row)), ...ended.map((r) => CF.shapeRow(r))],
+      ...(() => { const b = call(browsers); return Array.isArray(b) ? { browsers: b } : { browsers: null, browsersWhy: (b && typeof b.why === 'string' && b.why) || WHY.notCollected }; })(),
+      pass: { ranOut, reached, of: live.length, ms: now() - at },
+    };
+  }
+  let inflight = null;
+  /** ONE snapshot; a caller that arrives while a pass runs shares it (single-flight). */
+  function list() {
+    if (!inflight) inflight = build().finally(() => { inflight = null; });
+    return inflight;
+  }
+  return { list, build };
+}
+
+/**
+ * The hub's own instances → the builder's sources, each an IN-MEMORY read (the map of 2026-11-17 named the readers that write
+ * or read a file and they are NOT called here: the stash summary (its gate may write), the keeper's published browser fact
+ * and its ephemerals() rows (a stat per kept store), the first layouts read, the machine memory reader).
+ */
+function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter = null, keeper = () => null, browserStream = () => null,
+  autoResume = () => null, stashView = () => null, deliver = () => null, sysinfo = null, stoppedSessions = null, treeUsage = null, agesOf = null } = {}) {
+  const idOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
+  const memo = (ms, build) => { let at = 0, v = null; return () => { const t = Date.now(); if (!v || t - at > ms) { v = build(); at = t; } return v; }; };
+  // jobs by the OWNER conversation (its bare id): running = starting / up / awaiting-user / waiting; schedules = cron + scheduled
+  const jobsIndex = memo(1000, () => {
+    const jm = getJobs(); if (!jm || !jm.ready || !(jm.jobs instanceof Map)) return null;
+    const by = new Map();
+    for (const j of jm.jobs.values()) {
+      const cid = j && j.owner && j.owner.conversation && j.owner.conversation.id; if (!cid) continue;
+      const e = by.get(cid) || { running: 0, schedules: 0, nextFireAt: null };
+      if (['starting', 'up', 'awaiting-user', 'waiting'].includes(j.state)) e.running++;
+      if (j.kind === 'cron' && j.state === 'scheduled') { e.schedules++; if (Number.isFinite(j.nextFireAt) && (e.nextFireAt === null || j.nextFireAt < e.nextFireAt)) e.nextFireAt = j.nextFireAt; }
+      by.set(cid, e);
+    }
+    return by;
+  });
+  // the stored layout (in memory only): the desktops, and which desktop shows which conversation's window
+  const layoutIndex = memo(1000, () => {
+    const lay = persistenceRouter && typeof persistenceRouter.layoutsCached === 'function' ? persistenceRouter.layoutsCached() : null;
+    if (!lay || typeof lay !== 'object') return null;
+    const meta = Array.isArray(lay.desktopMeta) ? lay.desktopMeta.filter((d) => d && d.id && d.id !== '__stage__') : [];
+    const names = new Map(meta.map((d) => [String(d.id), d.name || null]));
+    const win = new Map();
+    for (const [dk, d] of Object.entries(lay.desktops || {})) {
+      if (dk === '__stage__') continue;
+      for (const w of ((d && d.autoSave && d.autoSave.windows) || [])) { const sid = w && w.openSpec && (w.openSpec.backendSessionId || w.openSpec.serverId); if (sid && !win.has(String(sid))) win.set(String(sid), { id: dk, name: names.get(dk) || null }); }
+    }
+    return { desktops: meta.map((d) => ({ id: String(d.id), name: d.name || null })), win };
+  });
+  const cidOfKey = (key) => (key ? String(key).slice(String(key).indexOf(':') + 1) : null);
+  return {
+    capsOf: (b) => require('../backend-caps.js').capsOf(b),
+    keyOf: (s) => { const cid = idOf(s); return cid ? `${s.backend || 'claude'}:${cid}` : null; },
+    turnOf: require('./turn-facts.js').turnOf, turnKnown: require('./turn-facts.js').turnKnown,
+    heldOf: (s) => {
+      const mm = s && s._normalizer;
+      if (mm && typeof mm.queuePublished === 'function' && mm.queuePublished() && typeof mm.queueState === 'function') { const q = mm.queueState(); return Array.isArray(q) ? q.length : undefined; }
+      return s && s._convFacts && Number.isInteger(s._convFacts.heldAtBoot) ? s._convFacts.heldAtBoot : undefined;   // the wrapper's sidecar queue, read at the adoption
+    },
+    asksOf: (key) => { if (!userTodos) return undefined; const all = userTodos.forSession([key]); return Array.isArray(all) ? all.filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page') : undefined; },
+    goalOf: (s) => { if (!s) return undefined; if (!s._goal) return 'none'; const st = String(s._goalStatus || '').toLowerCase(); return st === 'complete' ? 'none' : st ? 'active' : undefined; },
+    continueOf: (s, id) => { const ar = autoResume(); if (!ar || typeof ar.statusFor !== 'function') return undefined; const st = ar.statusFor(id); return st ? { armed: !!st.armed, resetsAt: st.resetsAt || null } : undefined; },
+    jobsOf: (key) => { const by = jobsIndex(); if (!by) return undefined; return by.get(cidOfKey(key)) || { running: 0, schedules: 0, nextFireAt: null }; },
+    handoverOf: (s) => { const cid = idOf(s); const sv = stashView(), dv = deliver(); if (!cid || !sv || typeof sv.inFlight !== 'function') return undefined; return !!(sv.inFlight(cid) || (dv && typeof dv.handoverArmed === 'function' && dv.handoverArmed(cid))); },
+    browserOf: (s, id) => {
+      const k = keeper(); if (!k || typeof k.inputSummaryFor !== 'function') return { known: false, why: WHY.notCollected };
+      const bk = s && s._browserKey; if (!bk) return null;
+      const sum = k.inputSummaryFor(bk); if (!sum || sum.has === false) return null;
+      const bs = browserStream(); const viewers = bs && typeof bs.viewerCount === 'function' ? bs.viewerCount(id) : null;
+      let personBrowsing = false;
+      try { for (const st of (k.inputsFor ? k.inputsFor(bk) : [])) { if (st.profileId && k.humanOf) { const h = k.humanOf(st.profileId); if (h && h.state === 'driving') personBrowsing = true; } } } catch { personBrowsing = null; }
+      return { browserKey: bk, drivenBy: sum.input === 'user' ? 'person' : null, viewers, personBrowsing, ...(Number.isInteger(viewers) && personBrowsing !== null ? {} : { known: false, why: WHY.notCollected }) };
+    },
+    browsers: () => ({ why: 'every running browser is listed by the keeper\'s rows (majordomo piece 6)' }),
+    desktopOf: (key) => { const L = layoutIndex(); if (!L) return { why: 'the stored layout is read when a page first opens; none has opened since the hub started' }; const d = L.win.get(String(cidOfKey(key))); return { desktop: d || null, window: !!d }; },
+    desktops: () => { const L = layoutIndex(); return L ? L.desktops : { why: 'the stored layout is read when a page first opens; none has opened since the hub started' }; },
+    endedRows: async () => {
+      const kept = typeof stoppedSessions === 'function' ? await stoppedSessions() : [];
+      return (Array.isArray(kept) ? kept : []).filter((r) => r && (r.backendSessionId || r.sessionId)).map((r) => ({
+        key: `${r.backend || 'claude'}:${r.backendSessionId || r.sessionId}`, name: r.name || null, cwd: r.cwd || null, backend: r.backend || 'claude', mode: r.mode || null,
+        ended: { at: r.stoppedAt || null, by: r.stopReason === 'dead-socket-at-boot' ? 'restart' : (r.stopReason || null) } }));
+    },
+    machineMem: async () => { const h = sysinfo && typeof sysinfo.history === 'function' ? sysinfo.history(5 * 60 * 1000) : null; const p = Array.isArray(h) && h.length ? h[h.length - 1] : null; return p && Number.isFinite(p.l) ? { memTotal: p.l, memAvailable: Number.isFinite(p.m) ? Math.max(0, p.l - p.m) : null } : { why: WHY.measuring }; },
+    memOf: treeUsage ? async (s) => { const pid = s && s._childPid; if (!pid) return { why: WHY.noProcess }; const u = await treeUsage(pid); return u && Number.isFinite(u.memBytes) && u.memBytes > 0 ? u.memBytes : { why: WHY.noProcess }; } : null,
+    agesOf,
+  };
+}
+
+module.exports = { create, sourcesFrom, LINK_CONVERSATION, LINK_DESKTOP };
