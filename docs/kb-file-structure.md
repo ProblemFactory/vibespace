@@ -15828,6 +15828,8 @@ Lane conversation-facts (majordomo piece 2, 2026-11-17).
 - refusalOf: piece 3's one call.
 - factsStep: the ONE per-record step the claude chat wrapper (data/bin/chat-wrapper.js — its sidecar `facts`, `caps.facts`) and the hub (session-brain noteConvFacts) share. It records OBSERVATIONS only (the stated CLI version, the background set seen, the tool names, the wakeup mark, the last record time); `trackedFacts` on the hub judges them (known-empty only inside the MEASURED span LEVEL_MEASURED_FROM–TO; the timer tools list; a timer-like unknown tool ⇒ unknown); factsAtAdoption accepts a sidecar only from the adopted wrapper's pid.
 - factsFresh / factsFromSidecar / factsAdopted / trackedFacts. backend-caps `sidecarFacts` names which facts a harness's wrapper keeps.
+- The set is recorded AS SEEN (`bgRaw` beside it, an id-less element kept as `id: null`); trackedFacts reads an id-less element or a kept count under the raw count as unknown.
+- adoptionProof: the boot's proof that a sidecar's writer is the adopted wrapper, from /proc/<pid>/stat alone (state and start time against the sidecar's pid and startedAt); a stuck, dead, gone or later-born process is not adopted.
 
 **src/server/conversation-facts.js (ORCH).** conversations.list's ONE builder:
 - Free of reach: the verb in conversation-ops filters it; the person's cookie route will read it whole.

@@ -33,6 +33,8 @@ const WHY = Object.freeze({
   oldCli: 'its CLI stated no version (an older CLI): whether it reports background tasks is unknown',
   turnRunning: 'a turn is running',
   noWakeGrant: 'this release reads no wake grant on a job yet',
+  bgNoRaw: 'its wrapper did not record how many background tasks its CLI listed — whether work runs is unknown',
+  bgIdless: 'its CLI listed a background task without a task id — a shape the hub has not measured, so whether work runs is unknown',
 });
 
 // ── THE FACTS KEPT WHERE THEY ARE BORN (主开发's ruling 2026-11-17 02:26Z, road A; acceptance 10:50Z: THE WRAPPER RECORDS, THE HUB
@@ -55,7 +57,13 @@ const LEVEL_MEASURED_TO = '2.1.321';
 const TIMER_TOOLS = Object.freeze(['ScheduleWakeup', 'CronCreate']);
 /** A tool the hub does not know whose name looks like a timer reads unknown, never «none seen». */
 const TIMERISH = /cron|schedul|wake|remind/i;
-const BG_MAX = 100, TOOLS_MAX = 64;
+/** The CLI's own cron tools that set NOTHING (the same recording names CronList and CronDelete beside CronCreate): the look-alike
+ *  test skips them, and it reads only a tool's OWN last name part (`mcp__<server>__<tool>` → `<tool>`), never a server's name. */
+const NON_TIMER_TOOLS = Object.freeze(['CronList', 'CronDelete']);
+const ownToolName = (n) => { const i = n.lastIndexOf('__'); return n.startsWith('mcp__') && i > 4 ? n.slice(i + 2) : n; };
+/** BG_MAX: the set elements kept (the cap aside, a kept count under the raw count = elements not understood). TOOLS_MAX: the
+ *  tool names kept (each ≤ 64 chars, written only when the set changes) — 256, because the wrapper can never raise it later. */
+const BG_MAX = 100, TOOLS_MAX = 256;
 
 function versionCmp(a, b) {
   const x = String(a).split(/[^\d]+/).filter(Boolean).map(Number), y = String(b).split(/[^\d]+/).filter(Boolean).map(Number);
@@ -67,9 +75,12 @@ function levelMeasured(v) {
   return typeof v === 'string' && /^\d+(\.\d+)*/.test(v) && versionCmp(v, LEVEL_MEASURED_FROM) >= 0 && versionCmp(v, LEVEL_MEASURED_TO) <= 0;
 }
 /** Observations of a CLI process read from its first line. */
-function factsFresh() { return { v: FACTS_VERSION, fromStart: true, cli: null, bg: null, tools: [], wake: false, at: null }; }
-const bgOf = (tasks) => tasks.filter((t) => t && typeof t === 'object' && t.task_id != null).slice(0, BG_MAX)
-  .map((t) => ({ id: String(t.task_id).slice(0, 64), type: typeof t.task_type === 'string' ? t.task_type.slice(0, 32) : null, description: typeof t.description === 'string' ? t.description.slice(0, 200) : '' }));
+function factsFresh() { return { v: FACTS_VERSION, fromStart: true, cli: null, bg: null, bgRaw: null, tools: [], wake: false, at: null }; }
+/** The set AS SEEN (acceptance round 2, must 2 — the wrapper records, never understands): every object element is kept, one
+ *  without a task id as `id: null` (a CLI that renames the key must not read as an empty set); `bgRaw` beside it = the raw
+ *  element count, so the hub can tell a set it was handed whole from one with elements not kept. */
+const bgOf = (tasks) => tasks.filter((t) => t && typeof t === 'object').slice(0, BG_MAX)
+  .map((t) => ({ id: t.task_id != null ? String(t.task_id).slice(0, 64) : null, type: typeof t.task_type === 'string' ? t.task_type.slice(0, 32) : null, description: typeof t.description === 'string' ? t.description.slice(0, 200) : '' }));
 const sameBg = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x.id === b[i].id && x.type === b[i].type && x.description === b[i].description);
 /**
  * One record → the observations, in memory. NO JUDGMENT here (it runs in a wrapper that never updates). Returns true when an
@@ -86,8 +97,8 @@ function factsStep(st, rec, now) {
     if (st.cli !== v) { st.cli = v; changed = true; }
   }
   if (rec.type === 'system' && rec.subtype === 'background_tasks_changed' && Array.isArray(rec.tasks) && !rec.parent_tool_use_id) {
-    const next = bgOf(rec.tasks);
-    if (!sameBg(st.bg, next)) { st.bg = next; changed = true; }
+    const next = bgOf(rec.tasks), raw = rec.tasks.length;
+    if (!sameBg(st.bg, next) || st.bgRaw !== raw) { st.bg = next; st.bgRaw = raw; changed = true; }
   }
   if (((rec.wakeup_source != null && rec.wakeup_source !== '') || (rec.scheduled_for != null && rec.scheduled_for !== '')) && !st.wake) { st.wake = true; changed = true; }
   if (rec.type === 'assistant' && rec.message && Array.isArray(rec.message.content)) {
@@ -106,18 +117,46 @@ function factsFromSidecar(f) {
   if (!f || typeof f !== 'object' || f.v !== FACTS_VERSION) return null;
   return { v: FACTS_VERSION, fromStart: f.fromStart === true, cli: typeof f.cli === 'string' ? f.cli.slice(0, 32) : null,
     bg: Array.isArray(f.bg) ? bgOf(f.bg.map((t) => ({ task_id: t && t.id, task_type: t && t.type, description: t && t.description }))) : null,
+    bgRaw: Number.isInteger(f.bgRaw) && f.bgRaw >= 0 ? f.bgRaw : null,
     tools: Array.isArray(f.tools) ? f.tools.filter((n) => typeof n === 'string').map((n) => n.slice(0, 64)).slice(0, TOOLS_MAX) : [], toolsFull: f.toolsFull === true,
     wake: f.wake === true, at: Number.isFinite(f.at) ? f.at : null };
 }
-/** At the hub's boot: the sidecar's observations are accepted only from the wrapper the boot adopted (its pid); anything else
- *  — no observations, another shape, another process's file — reads as a process not read from its start. */
-function factsAtAdoption(wrapperMeta, adoptedPid) {
+/** THE ADOPTION PROOF (acceptance round 2, must 1): is the process a sidecar names the wrapper that wrote it? Judged from
+ *  /proc/<pid>/stat ALONE (the boot reads it through proc-identity's stateOf / starttimeOf) — never that process's command
+ *  line, which a wrapper stuck in the uninterruptible state on a sick mount can hold for ever. The sidecar's own `pid` and
+ *  `startedAt` (the wrapper writes both at its start) against that pid's state and start time: a process in the
+ *  uninterruptible ('D') or a dead state ('Z', 'X', gone) is NOT adopted; one that started after the sidecar was born is
+ *  another process on a recycled pid. The start time is put on the wall clock through the hub's own (its stat ticks and its
+ *  start moment, USER_HZ 100 as the tree's other /proc readers); a wall clock stepped forward since then reads «not adopted»
+ *  — the safe side. `r` = { state, ticks, selfTicks, selfStartMs } → { pid: the adopted pid or -1, why: null or the reason }. */
+const ADOPT_SLOP_MS = 2000, USER_HZ = 100;
+function adoptionProof(meta, r) {
+  const m = meta && typeof meta === 'object' ? meta : {};
+  const no = (why) => ({ pid: -1, why });
+  const pid = Number.isInteger(m.pid) && m.pid > 1 ? m.pid : 0;
+  if (!pid) return no('its file names no wrapper process');
+  if (!Number.isFinite(m.startedAt)) return no('its file names no start moment');
+  const x = r && typeof r === 'object' ? r : {};
+  if (x.state == null) return no('the process its file names is gone');
+  if (x.state === 'D') return no('the process its file names is stuck in an uninterruptible wait');
+  if (x.state === 'Z' || x.state === 'X' || x.state === 'x') return no('the process its file names is dead');
+  if (![x.ticks, x.selfTicks, x.selfStartMs].every(Number.isFinite)) return no('the start time of the process its file names could not be read');
+  if (x.selfStartMs + (x.ticks - x.selfTicks) * (1000 / USER_HZ) > m.startedAt + ADOPT_SLOP_MS) return no('its pid now names a process that started after the file was written');
+  return { pid, why: null };
+}
+/** At the hub's boot: the sidecar's observations are accepted only from the wrapper the boot adopted (its pid, proven by
+ *  adoptionProof); anything else — no observations, another shape, a process not proven — reads as a process not read from
+ *  its start, with the proof's reason when the sidecar had observations. */
+function factsAtAdoption(wrapperMeta, adoptedPid, notWhy = null) {
   const m = wrapperMeta && typeof wrapperMeta === 'object' ? wrapperMeta : null;
   const pidOk = !!m && Number.isInteger(m.pid) && m.pid > 0 && (adoptedPid == null || m.pid === adoptedPid);
-  return (pidOk && factsFromSidecar(m.facts)) || factsAdopted();
+  const f = pidOk ? factsFromSidecar(m.facts) : null;
+  if (f) return f;
+  return factsAdopted(!pidOk && m && factsFromSidecar(m.facts) && typeof notWhy === 'string' && notWhy ? `its wrapper was not adopted at the hub's start: ${notWhy}` : null);
 }
-/** An adopted process whose wrapper kept NO observations: not read from its start, so neither the empty set nor «none seen». */
-function factsAdopted() { return { v: FACTS_VERSION, fromStart: false, cli: null, bg: null, tools: [], wake: false, at: null, old: true }; }
+/** An adopted process whose wrapper kept NO observations (or was not proven): not read from its start, so neither the empty
+ *  set nor «none seen». `why` replaces the older-wrapper sentence when the reason is another. */
+function factsAdopted(why = null) { return { v: FACTS_VERSION, fromStart: false, cli: null, bg: null, bgRaw: null, tools: [], wake: false, at: null, old: true, ...(why ? { oldWhy: why } : {}) }; }
 /**
  * THE HUB'S JUDGMENT of the observations → the row's three facts. `keeps` = the harness row's `sidecarFacts` ({background,
  * timers, lastRecordAt}); a harness whose wrapper keeps none of them says so (never a harness id here). `turn` decides idleSince.
@@ -126,8 +165,13 @@ function trackedFacts(st, { keeps = null, turn = null } = {}) {
   const k = keeps && typeof keeps === 'object' ? keeps : {};
   const out = {};
   if (!k.background) { out.background = null; out.backgroundWhy = WHY.noHarnessBg; }
-  else if (st && Array.isArray(st.bg)) out.background = st.bg;                       // a set SEEN is the set, on any build
-  else if (!st || st.old) { out.background = null; out.backgroundWhy = WHY.oldWrapper; }
+  else if (st && Array.isArray(st.bg)) {                                             // a set SEEN is the set, on any build —
+    if (!Number.isInteger(st.bgRaw)) { out.background = null; out.backgroundWhy = WHY.bgNoRaw; }   // when it was kept WHOLE
+    else if (st.bg.some((t) => !t || t.id == null)) { out.background = null; out.backgroundWhy = WHY.bgIdless; }
+    else if (st.bg.length < st.bgRaw && st.bg.length < BG_MAX) { out.background = null; out.backgroundWhy = `its CLI listed ${st.bgRaw} background tasks and its wrapper understood ${st.bg.length} — whether work runs is unknown`; }
+    else out.background = st.bg;
+  }
+  else if (!st || st.old) { out.background = null; out.backgroundWhy = (st && st.oldWhy) || WHY.oldWrapper; }
   else if (!st.fromStart) { out.background = null; out.backgroundWhy = WHY.notRead; }
   else if (st.cli === null) out.background = [];                                     // the CLI has run nothing yet: no task can exist
   else if (st.cli === '') { out.background = null; out.backgroundWhy = WHY.oldCli; }
@@ -135,10 +179,10 @@ function trackedFacts(st, { keeps = null, turn = null } = {}) {
   else { out.background = null; out.backgroundWhy = `its CLI version ${st.cli} is not measured for background tasks (measured ${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO})`; }
   const tools = st && Array.isArray(st.tools) ? st.tools : [];
   const timerTool = tools.find((n) => TIMER_TOOLS.includes(n));
-  const timerish = tools.find((n) => !TIMER_TOOLS.includes(n) && TIMERISH.test(n));
+  const timerish = tools.find((n) => !TIMER_TOOLS.includes(n) && !NON_TIMER_TOOLS.includes(n) && TIMERISH.test(ownToolName(n)));
   if (!k.timers) { out.timers = null; out.timersWhy = WHY.notCollected; }
   else if (st && (st.wake || timerTool)) { out.timers = null; out.timersWhy = WHY.timerSet; }
-  else if (!st || st.old) { out.timers = null; out.timersWhy = WHY.oldWrapper; }
+  else if (!st || st.old) { out.timers = null; out.timersWhy = (st && st.oldWhy) || WHY.oldWrapper; }
   else if (!st.fromStart) { out.timers = null; out.timersWhy = WHY.notRead; }
   else if (timerish) { out.timers = null; out.timersWhy = `it used a tool the hub does not know («${timerish}»), which may set a timer`; }
   else if (st.toolsFull) { out.timers = null; out.timersWhy = 'it used more tools than the hub keeps names of'; }
@@ -282,4 +326,5 @@ function cellOf(row, fact) {
 }
 
 module.exports = { WHY, ROW_FACTS, VERDICT_FIELDS, REASONS, verdictInput, endVerdict, refusalOf, shapeRow, cellOf,
-  FACTS_VERSION, LEVEL_MEASURED_FROM, LEVEL_MEASURED_TO, TIMER_TOOLS, TIMERISH, levelMeasured, factsFresh, factsStep, factsFromSidecar, factsAtAdoption, factsAdopted, trackedFacts };
+  FACTS_VERSION, LEVEL_MEASURED_FROM, LEVEL_MEASURED_TO, TIMER_TOOLS, NON_TIMER_TOOLS, TIMERISH, BG_MAX, TOOLS_MAX, levelMeasured, factsFresh, factsStep, factsFromSidecar,
+  adoptionProof, factsAtAdoption, factsAdopted, trackedFacts };

@@ -560,14 +560,15 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.layoutsCached = () => _layoutsCache; // lane conversation-facts: the in-memory copy only (null before the first read) — the list never reads the file
   // lane conversation-facts (主开发 2026-11-17): before any page has opened since the boot (the fleet's normal case) the list reads
   // the layout ONCE, asynchronously, off the loop; readLayouts fills its own cache from that text, so no later read is sync
-  let _layoutsLoading = null;
+  let _layoutsLoading = null, _layoutsErr = null;
+  router.layoutsError = () => (_layoutsCache ? null : _layoutsErr); // the last failed read's error code (cleared by a read that lands)
   router.layoutsAsync = () => {
     if (_layoutsCache) return Promise.resolve(_layoutsCache);
     if (!_layoutsLoading) {
       // ONLY «no such file» is the empty layout; any other error leaves the cache UNTOUCHED (a page opened later must never receive
-      // an empty layout its autosave would write over the person's desktops) and rejects — the list says «still being read»
-      _layoutsLoading = fs.promises.readFile(LAYOUTS_FILE, 'utf-8').then((t) => t, (e) => { if (e && e.code === 'ENOENT') return ''; throw e; })
-        .then((t) => readLayouts(t))   // readLayouts' own parse and checks, fed the text read off the loop
+      // an empty layout its autosave would write over the person's desktops) and rejects — the list says it could not be read, with the code
+      _layoutsLoading = fs.promises.readFile(LAYOUTS_FILE, 'utf-8').then((t) => t, (e) => { if (e && e.code === 'ENOENT') return ''; _layoutsErr = (e && e.code) || 'unreadable'; throw e; })
+        .then((t) => { _layoutsErr = null; return readLayouts(t); })   // readLayouts' own parse and checks, fed the text read off the loop
         .finally(() => { _layoutsLoading = null; });
     }
     return _layoutsLoading;

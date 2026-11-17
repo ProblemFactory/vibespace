@@ -121,7 +121,7 @@ export const ROWS = [
   ['src/server/auto-cli-loop.js', 'own-tree', 2, null, CLI],
   ['src/server/auto-resume-workflow.js', 'own-tree', 7, null, `${CLI}; lg-recovery U3 cure +1: ONE lstat helper asks the conversation's workflows/ and the snapshot file before it is read (a link is never read through; only «no such file» is «no snapshot»); lg-recovery U3 (B-3437): ONE conversation's Workflow run folders (the run its launch ack named, the folder listed bounded), every file through one O_NOFOLLOW handle`],
   ['src/server/auto-resume.js', 'own-tree', 1, null, CLI],
-  ['src/server/boot-restore.js', 'own-tree', 17, null, DATA], // lane conversation-facts +1: /proc/<the sidecar's pid>/cmdline at adoption — is it the adopted wrapper (the process table, not a mount; boot only); B-1319: +1 = probeSockets' readdir of the sockets folder (the restore's probes, before listen); lane dead-socket-keeps-chat-meta +2: the read-back of the kept stopped metas — one async readdir of data/session-meta + a readFile per <sock>.json.stopped, once per boot
+  ['src/server/boot-restore.js', 'own-tree', 16, null, DATA], // B-1319: +1 = probeSockets' readdir of the sockets folder (the restore's probes, before listen); lane dead-socket-keeps-chat-meta +2: the read-back of the kept stopped metas — one async readdir of data/session-meta + a readFile per <sock>.json.stopped, once per boot
   ['src/server/bridge-watch.js', 'own-tree', 6, null, PROC],
   ['src/server/browser-attach-launch.js', 'own-tree', 8, null, DATA], // lane one-browser-b1: the attach launch — Chrome on PATH (access/stat), the per-config socket dirs (lstat), the profile's DevToolsActivePort (stat/read) + its log tail
   ['src/server/browser-bindings.js', 'own-tree', 2, null, DATA],

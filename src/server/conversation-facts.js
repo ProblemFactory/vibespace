@@ -46,7 +46,7 @@ function create({
   asksOf = () => undefined,     // key → the open For-you asks it asked | undefined
   goalOf = () => undefined,     // session → 'active' | 'none'
   continueOf = () => undefined, // session → {armed, resetsAt}
-  jobsOf = () => undefined,     // key → {running, schedules, nextFireAt}
+  jobsOf = () => undefined,     // key → {running, schedules, nextFireAt, items} · {why} (unknown, said) · undefined
   waitingOf = () => undefined,  // session → {notices, notResumedWhy}
   handoverOf = () => undefined, // session → true | false (a hand-over to it in flight)
   browserOf = () => null,       // session → null | {id, kind, name, running, drivenBy, viewers, personBrowsing, …} | {known:false, why}
@@ -87,6 +87,7 @@ function create({
     const cont = call(continueOf, s, id); if (cont && typeof cont === 'object' && typeof cont.armed === 'boolean') r.continue = { armed: cont.armed, resetsAt: cont.resetsAt || null };
     const jobs = key ? call(jobsOf, key) : undefined;
     if (jobs && isCount(jobs.running) && isCount(jobs.schedules)) r.jobs = { running: jobs.running, schedules: jobs.schedules, nextFireAt: jobs.nextFireAt || null, items: Array.isArray(jobs.items) ? jobs.items : null };
+    else if (jobs && typeof jobs.why === 'string' && jobs.why) { r.jobs = null; r.jobsWhy = jobs.why; }
     const waiting = call(waitingOf, s, id); if (waiting && typeof waiting === 'object') r.waiting = waiting;
     const ho = call(handoverOf, s, id); if (ho === true || ho === false) r.handover = ho;
     const b = call(browserOf, s, id); r.browser = b === undefined ? { known: false, why: WHY.notCollected } : b;
@@ -107,6 +108,7 @@ function create({
     const waiting = e && e.waiting; if (waiting && typeof waiting === 'object') r.waiting = waiting;
     const jobs = key ? call(jobsOf, key) : undefined;
     if (jobs && isCount(jobs.running) && isCount(jobs.schedules)) r.jobs = { running: jobs.running, schedules: jobs.schedules, nextFireAt: jobs.nextFireAt || null, items: Array.isArray(jobs.items) ? jobs.items : null };
+    else if (jobs && typeof jobs.why === 'string' && jobs.why) { r.jobs = null; r.jobsWhy = jobs.why; }
     r.link = key ? LINK_CONVERSATION + key : null;
     return r;
   }
@@ -184,17 +186,23 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
   wakeGrantOf = () => null } = {}) {
   const idOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const memo = (ms, build) => { let at = 0, v = null; return () => { const t = Date.now(); if (!v || t - at > ms) { v = build(); at = t; } return v; }; };
-  // jobs by the OWNER conversation (its bare id). OWNED = every job whose next run can happen without a person (主开发's must 4):
-  // wanted up (desiredUp — a crashed service its restart policy starts again), or in any state but the terminal ones; a run left
-  // UNVERIFIED after a restart is owned with its grant unknown. schedules = the crons among them; running = the rest.
+  // jobs by the OWNER conversation (its bare id). OWNED = every job whose next run can happen without a person (主开发's must 4,
+  // narrowed in round 2): a run left UNVERIFIED after a restart (owned, its grant unknown); one sitting DOWN while it is WANTED
+  // UP (a crashed service its restart policy starts again, a cron between fires); one in any state that is not terminal. A job
+  // a person stopped (down, not wanted up) and a FAILED one (parked at its crash cap or for memory — wanted up or not) cannot run
+  // again without a person: never owned. schedules = the crons among them; running = the rest. While an OWNER-LESS run from a
+  // store recovery exists, nobody's job count is known (it may be anyone's).
   const TERMINAL_STATES = new Set(['done', 'failed', 'interrupted', 'missed']);
+  const ownedJob = (j) => j.state === 'unverified' || (j.state === 'down' ? j.desiredUp === true : !TERMINAL_STATES.has(j.state));
   const jobsIndex = memo(1000, () => {
     const jm = getJobs(); if (!jm || !jm.ready || !(jm.jobs instanceof Map)) return null;
     const by = new Map();
+    by.ownerless = 0;
     for (const j of jm.jobs.values()) {
-      const cid = j && j.owner && j.owner.conversation && j.owner.conversation.id; if (!cid) continue;
+      const cid = j && j.owner && j.owner.conversation && j.owner.conversation.id;
+      if (!cid) { if (j && j.state === 'unverified') by.ownerless++; continue; }
       const unverified = j.state === 'unverified';
-      if (!(unverified || j.desiredUp === true || !TERMINAL_STATES.has(j.state))) continue;
+      if (!ownedJob(j)) continue;
       const e = by.get(cid) || { running: 0, schedules: 0, nextFireAt: null, items: [] };
       const kind = j.kind === 'cron' ? 'schedule' : 'job';
       let g = null;
@@ -220,7 +228,8 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
     }
     return { desktops: meta.map((d) => ({ id: String(d.id), name: d.name || null })), win };
   });
-  const NO_LAYOUT = 'the stored layout is still being read — ask again';
+  // the layout not in memory: still being read — or a read that FAILED, said with its error's code (never «ask again» for ever)
+  const noLayout = () => { const c = persistenceRouter && typeof persistenceRouter.layoutsError === 'function' ? persistenceRouter.layoutsError() : null; return c ? `the stored layout could not be read (${c})` : 'the stored layout is still being read — ask again'; };
   const cidOfKey = (key) => (key ? String(key).slice(String(key).indexOf(':') + 1) : null);
   return {
     capsOf: (b) => require('../backend-caps.js').capsOf(b),
@@ -234,7 +243,7 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
     asksOf: (key) => { if (!userTodos) return undefined; const all = userTodos.forSession([key]); return Array.isArray(all) ? all.filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page') : undefined; },
     goalOf: (s) => { if (!s) return undefined; if (!s._goal) return 'none'; const st = String(s._goalStatus || '').toLowerCase(); return st === 'complete' ? 'none' : st ? 'active' : undefined; },
     continueOf: (s, id) => { const ar = autoResume(); if (!ar || typeof ar.statusFor !== 'function') return undefined; const st = ar.statusFor(id); return st ? { armed: !!st.armed, resetsAt: st.resetsAt || null } : undefined; },
-    jobsOf: (key) => { const by = jobsIndex(); if (!by) return undefined; return by.get(cidOfKey(key)) || { running: 0, schedules: 0, nextFireAt: null, items: [] }; },
+    jobsOf: (key) => { const by = jobsIndex(); if (!by) return undefined; if (by.ownerless) return { why: `${by.ownerless} job${by.ownerless === 1 ? '' : 's'} recovered from the store with no owner — whose they are is unknown` }; return by.get(cidOfKey(key)) || { running: 0, schedules: 0, nextFireAt: null, items: [] }; },
     handoverOf: (s) => { const cid = idOf(s); const sv = stashView(), dv = deliver(); if (!cid || !sv || typeof sv.inFlight !== 'function') return undefined; return !!(sv.inFlight(cid) || (dv && typeof dv.handoverArmed === 'function' && dv.handoverArmed(cid))); },
     browserOf: (s, id) => {
       const k = keeper(); if (!k || typeof k.inputSummaryFor !== 'function') return { known: false, why: WHY.notCollected };
@@ -247,8 +256,8 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
     },
     browsers: () => ({ why: 'every running browser is listed by the keeper\'s rows (majordomo piece 6)' }),
     prepare: () => (persistenceRouter && typeof persistenceRouter.layoutsAsync === 'function' ? persistenceRouter.layoutsAsync() : null),
-    desktopOf: (key) => { const L = layoutIndex(); if (!L) return { why: NO_LAYOUT }; const d = L.win.get(String(cidOfKey(key))); return { desktop: d || null, window: !!d }; },
-    desktops: () => { const L = layoutIndex(); return L ? L.desktops : { why: NO_LAYOUT }; },
+    desktopOf: (key) => { const L = layoutIndex(); if (!L) return { why: noLayout() }; const d = L.win.get(String(cidOfKey(key))); return { desktop: d || null, window: !!d }; },
+    desktops: () => { const L = layoutIndex(); return L ? L.desktops : { why: noLayout() }; },
     endedRows: async () => {
       const kept = typeof stoppedSessions === 'function' ? await stoppedSessions() : [];
       return (Array.isArray(kept) ? kept : []).filter((r) => r && (r.backendSessionId || r.sessionId)).map((r) => ({

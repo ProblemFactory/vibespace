@@ -84,20 +84,29 @@ async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
   await h.stop();
 }
 {
-  // THE HUB'S BOOT reads the observations ONLY from the wrapper it adopts (src/server/boot-restore.js: the pid the sidecar names,
-  // its command line naming THIS sidecar — the same two reads here, on the REAL wrapper process)
+  // THE HUB'S BOOT reads the observations ONLY from the wrapper it adopts, PROVEN FROM /proc/<pid>/stat ALONE (round two,
+  // must 1 — src/server/boot-restore.js → CF.adoptionProof: the sidecar's pid + startedAt against that process's state and start
+  // time through proc-identity; the same reads here, on the REAL wrapper process)
   const h = await boot('adopt');
   await h.turn('hello');
   await until(() => h.meta()?.facts?.cli === '2.1.312', 3000);
-  const sidecar = path.join(h.dir, 's.json'), meta = h.meta();
-  const adoptedPid = (m) => { const p = m && Number.isInteger(m.pid) ? m.pid : 0; if (!(p > 0)) return -1; try { return fs.readFileSync(`/proc/${p}/cmdline`, 'utf8').split('\0').includes(sidecar) ? p : -1; } catch { return -1; } };
-  const got = CF.factsAtAdoption(meta, adoptedPid(meta));
-  ok(meta.pid === h.w.pid && adoptedPid(meta) === h.w.pid && got.fromStart === true && got.cli === '2.1.312', 'a hub booting over this sidecar ADOPTS its observations: the pid it names is the live wrapper and that wrapper\'s command line names this sidecar', { pid: meta.pid, wrapper: h.w.pid, got });
+  const meta = h.meta();
+  const PI = require(path.join(REPO, 'src/proc-identity.js'));
+  const proofOf = (m) => { const p = m && Number.isInteger(m.pid) ? m.pid : 0; return CF.adoptionProof(m, p > 1 ? { state: PI.stateOf(p), ticks: PI.starttimeOf(p), selfTicks: PI.starttimeOf(process.pid), selfStartMs: performance.timeOrigin } : null); };
+  const proof = proofOf(meta);
+  const got = CF.factsAtAdoption(meta, proof.pid, proof.why);
+  ok(meta.pid === h.w.pid && proof.pid === h.w.pid && got.fromStart === true && got.cli === '2.1.312', 'a hub booting over this sidecar ADOPTS its observations: the pid it names is the live wrapper, alive and born before its file', { pid: meta.pid, wrapper: h.w.pid, proof, got });
   const noObs = { ...meta }; delete noObs.facts;
-  ok(CF.factsAtAdoption(noObs, adoptedPid(noObs)).old === true && CF.factsAtAdoption({ ...meta, pid: process.pid }, adoptedPid({ ...meta, pid: process.pid })).old === true,
-    'CONTROL a sidecar without observations reads «old wrapper»; one naming ANOTHER process (this suite) is not adopted either');
+  const young = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { stdio: 'ignore' });
+  await sleep(100);
+  const recycled = { ...meta, pid: young.pid, startedAt: Date.now() - 30000 };   // a file born 30 s BEFORE the process its pid names: a recycled pid's shape
+  const pr = proofOf(recycled);
+  const gone = new Promise((r) => young.once('exit', r)); young.kill(); await gone;
+  ok(CF.factsAtAdoption(noObs, proofOf(noObs).pid).old === true && pr.pid === -1 && /started after/.test(pr.why) && CF.factsAtAdoption(recycled, pr.pid, pr.why).old === true,
+    'CONTROL a sidecar without observations reads «old wrapper»; one whose pid names a process born after the file is not adopted either', pr);
   const br = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
-  ok(/fs\.readFileSync\(`\/proc\/\$\{p\}\/cmdline`, 'utf8'\)\.split\('\\0'\)\.includes\(wrapperFiles\.sidecar\)/.test(br) && /session\._convFacts = CF\.factsAtAdoption\(wrapperObs, adoptedPid\);/.test(br), 'the boot itself makes these two reads and hands them to factsAtAdoption (source pin)');
+  ok(!/\/cmdline/.test(br) && br.includes('const proof = CF.adoptionProof(wrapperObs, p > 1 ? { state: PI.stateOf(p), ticks: PI.starttimeOf(p), selfTicks: PI.starttimeOf(process.pid), selfStartMs: performance.timeOrigin } : null);')
+    && br.includes('session._convFacts = CF.factsAtAdoption(wrapperObs, proof.pid, proof.why);'), 'the boot itself reads the stat file alone and hands the proof to factsAtAdoption (source pin)');
   await h.stop();
 }
 {

@@ -124,8 +124,8 @@ function unknownLegs(M) {
   ok(remind.t.timers === null && /RemindMeLater/.test(remind.t.timersWhy) && /may set a timer/.test(remind.t.timersWhy), 'MUST 2 a tool the hub does not know that LOOKS like a timer (cron / schedule / wake / remind): unknown, never «none seen»', remind.t);
   const bash = obs([init('2.1.312'), tool('Bash'), tool('Bash')]);
   ok(bash.ch[1] === true && bash.ch[2] === false && bash.t.timers === 'none-seen', 'an ordinary tool: its name recorded once (a second call is no change); timers none seen');
-  const many = obs([init('2.1.312'), ...Array.from({ length: 70 }, (_, i) => tool('T' + i))]);
-  ok(many.st.tools.length === 64 && many.st.toolsFull === true && many.t.timers === null, 'more tool names than kept: said (toolsFull), timers unknown — never «none seen» over names it dropped', many.st.tools.length);
+  const many = obs([init('2.1.312'), ...Array.from({ length: CF.TOOLS_MAX + 6 }, (_, i) => tool('T' + i))]);
+  ok(many.st.tools.length === CF.TOOLS_MAX && many.st.toolsFull === true && many.t.timers === null, 'more tool names than kept: said (toolsFull), timers unknown — never «none seen» over names it dropped', many.st.tools.length);
   const wake = obs([init('2.1.312'), { type: 'command_lifecycle', state: 'started', wakeup_source: 'loop_wakeup', scheduled_for: 5 }, { type: 'command_lifecycle', state: 'completed' }]);
   ok(wake.ch[1] === true && wake.ch[2] === false && wake.st.wake === true && wake.t.timersWhy === CF.WHY.timerSet, 'a fired wakeup the record states: the one-way mark (it never clears)');
   // the sidecar round trip, an older shape, an adopted process, the boot's pid rule
@@ -397,7 +397,7 @@ console.log('D · the musts of the acceptance, each with its red control');
   ok(ids === 's1,u1' && jo.items.find((x) => x.id === 's1').wakeGrant === false && u.wakeGrant === null && /unverified/.test(u.wakeGrantWhy) && CF.endVerdict({ ...IDLE, jobs: jo }).busy.some((b) => b.code === 'job_unknown'),
     'MUST 4 a crashed service its restart policy starts again is owned (with its grant); a run left unverified is owned with the grant unknown; done / failed-and-off are not', jo.items);
   const srcCol = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
-  const N4 = "      if (!(unverified || j.desiredUp === true || !TERMINAL_STATES.has(j.state))) continue;";
+  const N4 = "      if (!ownedJob(j)) continue;";
   ok(srcCol.split(N4).length === 2, 'MUST 4 the owned rule is in the index once (the mutation anchor)');
   const M4 = mutantCopies('conversation-facts-m4', REPO).load('src/server/conversation-facts.js', srcCol.replace(N4, "      if (!['starting', 'up', 'awaiting-user', 'waiting', 'scheduled'].includes(j.state)) continue;"), 'running-only');
   const jr = M4.sourcesFrom({ getJobs: () => ({ ready: true, jobs }), wakeGrantOf: () => false }).jobsOf(KEY_A);
@@ -434,7 +434,7 @@ console.log('D · the musts of the acceptance, each with its red control');
   if (old) {
     const MO = mutantCopies('conversation-facts-m6', REPO).load('data/bin/vibespace-api', old.replace(/^#!.*\n/, ''), 'old-cli');
     const wo = MO.listWords(d, 1794880000000);
-    ok(!/desktops: unknown|browsers: unknown/.test(wo), 'MUST 6 RED: today\'s CLI (370570f37) prints no line for the unknown desktops and browsers', wo);
+    ok(!/desktops: unknown|browsers: unknown/.test(wo) && /window unknown/.test(wo) && !/window unknown \(/.test(wo), 'MUST 6 RED: today\'s CLI (370570f37) prints no line for the unknown desktops and browsers, and «window unknown» with no why', wo);
   } else console.log('  ○ SKIP MUST 6 RED — 370570f37 is not in this checkout (a shallow clone); the leg above still ran');
 }
 {
@@ -447,15 +447,222 @@ console.log('D · the musts of the acceptance, each with its red control');
   P7.setup({ dataDir: dd7, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
   const S7 = COL.sourcesFrom({ persistenceRouter: P7.router });
   const r7 = await COL.create({ activeSessions: new Map([['sess-1', fakeChat('A')]]), keyOf: () => KEY_A, ...known, prepare: S7.prepare, desktopOf: S7.desktopOf, desktops: S7.desktops }).list();
-  ok(r7.desktops === null && /still being read/.test(r7.desktopsWhy) && P7.router.layoutsCached() === null, 'MUST 7 a placed read error: the desktops say «still being read — ask again» and the cache stays EMPTY (no page can receive an empty layout)', { why: r7.desktopsWhy, cached: P7.router.layoutsCached() });
+  ok(r7.desktops === null && /could not be read \(EISDIR\)/.test(r7.desktopsWhy) && P7.router.layoutsCached() === null, 'MUST 7 a placed read error: the desktops say it could not be read (its code) and the cache stays EMPTY (no page can receive an empty layout)', { why: r7.desktopsWhy, cached: P7.router.layoutsCached() });
   const srcP = fs.readFileSync(PFILE, 'utf8');
-  const N7 = "(e) => { if (e && e.code === 'ENOENT') return ''; throw e; }";
+  const N7 = "(e) => { if (e && e.code === 'ENOENT') return ''; _layoutsErr = (e && e.code) || 'unreadable'; throw e; }";
   ok(srcP.split(N7).length === 2, 'MUST 7 the «no such file only» rule is in the read once (the mutation anchor)');
   const PM = mutantCopies('conversation-facts-m7', REPO).load('src/routes/persistence.js', srcP.replace(N7, "() => ''"), 'any-error-empty');
   PM.setup({ dataDir: dd7, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
   await PM.router.layoutsAsync().catch(() => null);
   ok(PM.router.layoutsCached() && Array.isArray(PM.router.layoutsCached().customGrids), 'MUST 7 RED: today\'s read turns the error into the empty layout AND caches it (a page opened later would receive it)');
   fs.rmSync(dd7, { recursive: true, force: true });
+  fresh();
+}
+
+// ── E · THE ACCEPTANCE'S ROUND TWO (主开发 2026-11-17 12:33Z) — each must by its leg and its red control ──────────────────────
+console.log('E · round two: the boot proof, the set as seen, owned jobs, the first-seen step, the small items');
+{
+  // MUST 1 — the boot proves the adoption from /proc/<pid>/stat ALONE: the sidecar's pid + start moment against that process's
+  // state and start time (proc-identity); a stuck (D) or dead process is not adopted; no command-line read is left on the boot
+  const PI = require(path.join(REPO, 'src/proc-identity.js'));
+  const MUTE = mutantCopies('conversation-facts-r2-proof', REPO);
+  const srcCF = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
+  const BIRTH = 1794880000000, SELF0 = 1794870000000;
+  const meta = { pid: 4242, startedAt: BIRTH };
+  const reading = (startMs, state = 'S') => ({ state, ticks: 500000 + (startMs - SELF0) / 10, selfTicks: 500000, selfStartMs: SELF0 });
+  const P = (Mx, m, r) => Mx.adoptionProof(m, r);
+  ok(P(CF, meta, reading(BIRTH - 400)).pid === 4242 && P(CF, meta, reading(BIRTH - 400)).why === null, 'MUST 1 a live wrapper that started just before its file was born is ADOPTED (its pid and start time, nothing else read)');
+  const stuck = P(CF, meta, reading(BIRTH - 400, 'D'));
+  ok(stuck.pid === -1 && /uninterruptible/.test(stuck.why), 'MUST 1 a process in the UNINTERRUPTIBLE state is not adopted (facts unknown — the safe side)', stuck);
+  ok(['Z', 'X'].every((z) => P(CF, meta, reading(BIRTH - 400, z)).pid === -1 && /dead/.test(P(CF, meta, reading(BIRTH - 400, z)).why)) && /gone/.test(P(CF, meta, { state: null }).why),
+    'MUST 1 a dead process (zombie, dead) or a gone one is not adopted, each said');
+  const recycled = P(CF, meta, reading(BIRTH + 60000));
+  ok(recycled.pid === -1 && /started after the file was written/.test(recycled.why), 'MUST 1 a process that started AFTER the file was born (a recycled pid) is not adopted', recycled);
+  ok(P(CF, { pid: 4242 }, reading(BIRTH - 400)).pid === -1 && P(CF, meta, { state: 'S', ticks: null, selfTicks: 1, selfStartMs: 1 }).pid === -1 && P(CF, { startedAt: BIRTH }, reading(BIRTH)).pid === -1,
+    'MUST 1 a file with no start moment, an unreadable start time, or no pid: not adopted');
+  const obs = CF.factsFresh(); CF.factsStep(obs, { type: 'system', subtype: 'init', claude_code_version: '2.1.312' }, 1);
+  const K = { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' };
+  const notAd = CF.trackedFacts(CF.factsAtAdoption({ ...meta, facts: JSON.parse(JSON.stringify(obs)) }, stuck.pid, stuck.why), K);
+  ok(notAd.background === null && /not adopted at the hub's start: .*uninterruptible/.test(notAd.backgroundWhy) && /not adopted/.test(notAd.timersWhy), 'MUST 1 the proof\'s reason reaches the facts: background and timers unknown, «not adopted … uninterruptible»', notAd);
+  // the REAL helper on REAL processes: this suite (adopted), and a child born AFTER a recorded birth (a recycled pid's shape)
+  const read = (p) => ({ state: PI.stateOf(p), ticks: PI.starttimeOf(p), selfTicks: PI.starttimeOf(process.pid), selfStartMs: performance.timeOrigin });
+  const child = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { stdio: 'ignore' });
+  await sleep(100);
+  const self = P(CF, { pid: process.pid, startedAt: Date.now() }, read(process.pid));
+  const young = P(CF, { pid: child.pid, startedAt: Date.now() - 30000 }, read(child.pid));
+  const fair = P(CF, { pid: child.pid, startedAt: Date.now() }, read(child.pid));
+  const gone = new Promise((r) => child.once('exit', r)); child.kill(); await gone;   // this suite's own child, ended before the next leg
+  ok(self.pid === process.pid && young.pid === -1 && /started after/.test(young.why) && fair.pid === child.pid, 'MUST 1 on real processes through proc-identity: this process is adopted; a child born 30 s after the file\'s birth is NOT; the same child against a birth after its start is', { self, young, fair });
+  const br = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
+  ok(!/\/cmdline/.test(br) && br.includes('const proof = CF.adoptionProof(wrapperObs, p > 1 ? { state: PI.stateOf(p), ticks: PI.starttimeOf(p), selfTicks: PI.starttimeOf(process.pid), selfStartMs: performance.timeOrigin } : null);')
+    && br.includes('session._convFacts = CF.factsAtAdoption(wrapperObs, proof.pid, proof.why);'), 'MUST 1 the boot reads only the stat file through proc-identity and hands the proof to factsAtAdoption — no command-line read left in boot-restore (source pin)');
+  ok(/\['src\/server\/boot-restore\.js', 'own-tree', 16, null, DATA\]/.test(fs.readFileSync(path.join(REPO, 'scripts/mount-reader-census.mjs'), 'utf8')), 'MUST 1 the reader census count for boot-restore is back to 16');
+  const ND = "  if (x.state === 'D') return no('the process its file names is stuck in an uninterruptible wait');\n";
+  const NS = "  if (x.selfStartMs + (x.ticks - x.selfTicks) * (1000 / USER_HZ) > m.startedAt + ADOPT_SLOP_MS) return no('its pid now names a process that started after the file was written');\n";
+  if (srcCF.split(ND).length !== 2 || srcCF.split(NS).length !== 2) throw new Error('anchor missing: the proof lines');
+  const mD = MUTE.load('src/conversation-facts.js', srcCF.replace(ND, ''), 'no-state-look'), mS = MUTE.load('src/conversation-facts.js', srcCF.replace(NS, ''), 'no-start-look');
+  ok(P(mD, meta, reading(BIRTH - 400, 'D')).pid === 4242 && P(mS, meta, reading(BIRTH + 60000)).pid === 4242, 'MUST 1 RED: without the state look a stuck process is adopted; without the start look a recycled pid is');
+}
+{
+  // MUST 2 — the wrapper records the set AS SEEN: the raw count beside it, an element without a task id kept as such; the hub
+  // reads a set whose kept count is under its raw count (the cap aside), or that holds an id-less element, as UNKNOWN
+  const K = { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' };
+  const judge = (Mx, recs) => { const st = Mx.factsFresh(); for (const r of recs) Mx.factsStep(st, r, 1); return { st, t: Mx.trackedFacts(st, K) }; };
+  const init = { type: 'system', subtype: 'init', claude_code_version: '2.1.312' };
+  const bgc = (tasks) => ({ type: 'system', subtype: 'background_tasks_changed', tasks });
+  const row = (t) => ({ ...IDLE, background: t.background, backgroundWhy: t.backgroundWhy });
+  const whole = judge(CF, [init, bgc([{ task_id: 'b1', task_type: 'local_bash', description: 'a dev server' }])]);
+  ok(whole.st.bgRaw === 1 && Array.isArray(whole.t.background) && whole.t.background.length === 1, 'MUST 2 the recorded shape (task_id — 2.1.312-frames): kept whole, raw 1 — the set is known');
+  const renamed = judge(CF, [init, bgc([{ id: 'b1', type: 'local_bash', description: 'a dev server' }])]);
+  ok(renamed.st.bg.length === 1 && renamed.st.bg[0].id === null && renamed.st.bgRaw === 1 && renamed.t.background === null && renamed.t.backgroundWhy === CF.WHY.bgIdless && !CF.endVerdict(row(renamed.t)).endable,
+    'MUST 2 a CLI that RENAMES the task key: the wrapper keeps the element (id null); the hub reads background UNKNOWN — not endable', renamed);
+  const odd = judge(CF, [init, bgc([{ task_id: 'b1' }, 'b2'])]);
+  ok(odd.st.bgRaw === 2 && odd.st.bg.length === 1 && odd.t.background === null && /listed 2 background tasks and its wrapper understood 1/.test(odd.t.backgroundWhy), 'MUST 2 an element the wrapper cannot keep: kept 1 of raw 2 — unknown, said', odd.t);
+  const capped = judge(CF, [init, bgc(Array.from({ length: 150 }, (_, i) => ({ task_id: 't' + i })))]);
+  ok(capped.st.bg.length === CF.BG_MAX && capped.st.bgRaw === 150 && Array.isArray(capped.t.background) && capped.t.background.length === CF.BG_MAX, 'MUST 2 the cap aside: 150 tasks keep 100 — the set reads known (busy), not unknown');
+  const noRaw = CF.trackedFacts({ ...whole.st, bgRaw: null }, K);
+  ok(noRaw.background === null && noRaw.backgroundWhy === CF.WHY.bgNoRaw, 'MUST 2 a set with no raw count beside it reads unknown, said');
+  const back = CF.factsFromSidecar(JSON.parse(JSON.stringify(renamed.st)));
+  ok(back && back.bgRaw === 1 && back.bg[0].id === null && CF.trackedFacts(back, K).background === null, 'MUST 2 the sidecar round trip keeps the raw count and the id-less element — a restarted hub reads it unknown too', back);
+  const st2 = CF.factsFresh(); CF.factsStep(st2, init, 1); CF.factsStep(st2, bgc([{ task_id: 'a' }]), 2);
+  ok(CF.factsStep(st2, bgc([{ task_id: 'a' }, 7]), 3) === true && st2.bgRaw === 2, 'MUST 2 a raw count that moved is a change the wrapper writes (the kept set alone did not move)');
+  const tools = judge(CF, [init, ...Array.from({ length: 200 }, (_, i) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__srv__tool_' + i, input: {} }] } }))]);
+  ok(CF.TOOLS_MAX === 256 && tools.st.tools.length === 200 && !tools.st.toolsFull && tools.t.timers === 'none-seen', 'MUST 2 the tool-name cap is 256: a conversation with 200 tool names keeps them all and reads timers «none seen»', tools.st.tools.length);
+  // RED: round one — the wrapper drops an element without task_id AND the hub trusts any set seen ⇒ the renamed key reads «none»
+  const srcCF = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
+  const NB = "const bgOf = (tasks) => tasks.filter((t) => t && typeof t === 'object').slice(0, BG_MAX)\n  .map((t) => ({ id: t.task_id != null ? String(t.task_id).slice(0, 64) : null, type:";
+  const OB = "const bgOf = (tasks) => tasks.filter((t) => t && typeof t === 'object' && t.task_id != null).slice(0, BG_MAX)\n  .map((t) => ({ id: String(t.task_id).slice(0, 64), type:";
+  const J0 = '  else if (st && Array.isArray(st.bg)) {', J1 = '    else out.background = st.bg;\n  }\n';
+  const i0 = srcCF.indexOf(J0), i1 = srcCF.indexOf(J1);
+  if (srcCF.split(NB).length !== 2 || i0 < 0 || i1 < i0) throw new Error('anchor missing: the set as seen');
+  const oldSrc = (srcCF.slice(0, i0) + '  else if (st && Array.isArray(st.bg)) out.background = st.bg;\n' + srcCF.slice(i1 + J1.length)).replace(NB, OB);
+  const m2 = mutantCopies('conversation-facts-r2-set', REPO).load('src/conversation-facts.js', oldSrc, 'round-one-set');
+  const r2 = judge(m2, [init, bgc([{ id: 'b1', type: 'local_bash', description: 'a dev server' }])]);
+  ok(Array.isArray(r2.t.background) && r2.t.background.length === 0 && CF.endVerdict(row(r2.t)).endable, 'MUST 2 RED: round one\'s wrapper and judgment read the renamed key as «no background work» — endable while the work runs', r2.t);
+}
+{
+  // MUST 3 — owned = unverified, or down AND wanted up, or a state that is not terminal; a failed one is never owned
+  const C1 = KEY_A.slice(7), C2 = KEY_B.slice(7);
+  const own = (id) => ({ conversation: { id } });
+  const jobs = new Map([
+    ['cs', { id: 'cs', kind: 'cron', owner: own(C1), state: 'down', desiredUp: false }],        // a cron a person STOPPED
+    ['ps', { id: 'ps', kind: 'service', owner: own(C1), state: 'failed', desiredUp: true }],     // parked at its crash cap or for memory
+    ['ws', { id: 'ws', kind: 'service', owner: own(C1), state: 'down', desiredUp: true }],       // waiting for its restart
+    ['oc', { id: 'oc', kind: 'service', owner: own(C2), state: 'up', desiredUp: true }]]);       // another conversation's
+  const S = COL.sourcesFrom({ getJobs: () => ({ ready: true, jobs }), wakeGrantOf: () => false });
+  const a = S.jobsOf(KEY_A), b = S.jobsOf(KEY_B);
+  ok(a.items.map((x) => x.id).join() === 'ws' && b.items.map((x) => x.id).join() === 'oc', 'MUST 3 a stopped cron and a parked service are NOT owned; a service waiting for its restart is; another conversation\'s job is ITS own', { a: a.items, b: b.items });
+  const parkedOnly = new Map([...jobs].filter(([k]) => k === 'cs' || k === 'ps'));
+  const jp = COL.sourcesFrom({ getJobs: () => ({ ready: true, jobs: parkedOnly }), wakeGrantOf: () => false }).jobsOf(KEY_A);
+  ok(jp.items.length === 0 && CF.endVerdict({ ...IDLE, jobs: jp }).endable, 'MUST 3 a conversation holding only a stopped cron and a parked service can be ended (neither runs again without a person)');
+  const srcCol = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
+  const N3 = "  const ownedJob = (j) => j.state === 'unverified' || (j.state === 'down' ? j.desiredUp === true : !TERMINAL_STATES.has(j.state));";
+  if (srcCol.split(N3).length !== 2) throw new Error('anchor missing: the owned rule');
+  const M3 = mutantCopies('conversation-facts-r2-owned', REPO).load('src/server/conversation-facts.js', srcCol.replace(N3, "  const ownedJob = (j) => j.state === 'unverified' || j.desiredUp === true || !TERMINAL_STATES.has(j.state);"), 'round-one-owned');
+  const j3 = M3.sourcesFrom({ getJobs: () => ({ ready: true, jobs: parkedOnly }), wakeGrantOf: () => false }).jobsOf(KEY_A);
+  ok(j3.items.map((x) => x.id).sort().join() === 'cs,ps' && !CF.endVerdict({ ...IDLE, jobs: j3 }).endable, 'MUST 3 RED: round one\'s rule counts the stopped cron and the parked service — the conversation could never be ended', j3.items);
+  // small: an OWNER-LESS run from a store recovery makes every job count unknown (it may be anyone's)
+  const skel = new Map([['rec', { id: 'rec', kind: 'task', name: 'rec', state: 'unverified', owner: {} }]]);
+  const S4 = COL.sourcesFrom({ getJobs: () => ({ ready: true, jobs: skel }), wakeGrantOf: () => false });
+  const r4 = await COL.create({ activeSessions: new Map([['sess-1', fakeChat('A')]]), keyOf: () => KEY_A, ...known, jobsOf: S4.jobsOf }).list();
+  const c4 = r4.conversations[0];
+  ok(c4.jobs === null && /recovered from the store with no owner/.test(c4.jobsWhy) && c4.busy.some((x) => x.code === 'job_unknown'), 'an owner-less job skeleton from a store recovery: the job fact is UNKNOWN (said), never a known zero', { jobs: c4.jobs, why: c4.jobsWhy, busy: c4.busy });
+  const NO = "      if (!cid) { if (j && j.state === 'unverified') by.ownerless++; continue; }";
+  if (srcCol.split(NO).length !== 2) throw new Error('anchor missing: the owner-less count');
+  const MO = mutantCopies('conversation-facts-r2-ownerless', REPO).load('src/server/conversation-facts.js', srcCol.replace(NO, '      if (!cid) continue;'), 'ownerless-skipped');
+  const jo = MO.sourcesFrom({ getJobs: () => ({ ready: true, jobs: skel }), wakeGrantOf: () => false }).jobsOf(KEY_A);
+  ok(jo && jo.items && jo.items.length === 0 && CF.endVerdict({ ...IDLE, jobs: jo }).endable, 'RED: skipping the owner-less run reads a KNOWN zero — endable');
+}
+{
+  // MUST 4 — the parse steps the observations only on a record the first-seen rule lets through: the REAL parse
+  // (claude-stream-json attach over a fake pty) and the REAL device-feed gate (session-brain sbSeenFirst + claudeSideEffects),
+  // the device stream AHEAD: it delivers «empty» then «one task»; the lagging parse then reaches «empty»
+  const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
+  const SB = require(path.join(REPO, 'src/server/session-brain.js'));
+  const SID = 'e2e00000-0000-4000-8000-0000000000f4';
+  const two = async (consumer) => {
+    const brain = SB.create({ engine: {}, applyTaskToolUpdate() {}, updateSessionTodos() {}, getUsageHistory: () => null });
+    const csSrc = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8');
+    const engine = { _vsuPending: new Map(), resolveUsageKey: () => '__global__', usageEstimator: { noteLive() {} }, modelsMatch: () => false, servedDefinesModel: () => false, rerouteAnnouncedBy: () => null };
+    for (const part of (/const \{([^}]*)\} = engine;/.exec(csSrc) || ['', ''])[1].split(',')) {
+      const name = part.split(':')[0].replace(/\/\/.*$/, '').trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(name) && !(name in engine)) engine[name] = () => {};
+    }
+    const activeSessions = new Map();
+    const { attach } = consumer.create({ activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result']), _seenStreamTypes: new Set(),
+      USAGE_SCANNER_PATH: path.join(os.tmpdir(), 'vs-cfx-none'), checkClaudeGoalStatus() {}, noteModelSeen() {}, sbSeenFirst: brain.sbSeenFirst, hosts: null, usageHistory: null, pagesRef: { current: null }, brainRef: brain });
+    const helpers = { feedLive: (x, m) => { x._normalizer?.processLive(m); }, broadcastToSession() {}, broadcastActiveSessions() {}, readSessionMeta: () => ({}), writeSessionMeta() {},
+      updateSessionTodos() {}, applyTaskToolUpdate() {}, emitTaskListTodos() {} };
+    const s = { mode: 'chat', backend: 'claude', name: 'ff', cwd: os.tmpdir(), host: null, claudeSessionId: SID, backendSessionId: SID, sockName: 'cw-ff', buffer: '', createdAt: Date.now(), _convFacts: CF.factsFresh() };
+    s._normalizer = createMessageManager('claude', 'w-ff');
+    activeSessions.set('w-ff', s);
+    const h = { data: null, onData(cb) { h.data = cb; }, onExit() {} };
+    const warn = console.warn, log = console.log; console.warn = () => {}; console.log = () => {};
+    const seen = {};
+    try {
+      attach(s, 'w-ff', h, helpers);
+      const rec = (o) => JSON.stringify({ session_id: SID, ...o }) + '\n';
+      const init = { type: 'system', subtype: 'init', cwd: os.tmpdir(), model: 'fake', tools: [], claude_code_version: '2.1.312', uuid: 'u-init' };
+      const empty = { type: 'system', subtype: 'background_tasks_changed', tasks: [], uuid: 'u-empty' };
+      const one = { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 't1', task_type: 'local_bash', description: 'a dev server' }], uuid: 'u-one' };
+      h.data(rec(init)); await sleep(20);
+      for (const r of [empty, one]) { const m = { session_id: SID, ...r }; if (brain.sbSeenFirst(s, m)) brain.claudeSideEffects(s, 'w-ff', m); }   // the device stream, AHEAD
+      seen.device = s._convFacts.bg && s._convFacts.bg.map((t) => t.id).join();
+      h.data(rec(empty)); await sleep(20);                                                                                                  // the lagging parse reaches «empty»
+      seen.window = s._convFacts.bg && s._convFacts.bg.map((t) => t.id).join();
+      h.data(rec(one)); await sleep(20);
+      seen.after = s._convFacts.bg && s._convFacts.bg.map((t) => t.id).join();
+    } finally { console.warn = warn; console.log = log; }
+    return seen;
+  };
+  const real = await two(require(path.join(REPO, 'src/server/stdout/claude-stream-json.js')));
+  ok(real.device === 't1' && real.window === 't1' && real.after === 't1', 'MUST 4 the two feeds out of step (the device stream ahead): the lagging parse does NOT replay the older empty set — the running task stays known through the window', real);
+  const srcCS = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8');
+  const N4 = '          if (firstSeen) try { brainRef?.noteConvFacts?.(session, msg); } catch';
+  if (srcCS.split(N4).length !== 2) throw new Error('anchor missing: the first-seen step');
+  const today = await two(mutantCopies('conversation-facts-r2-seen', REPO).load('src/server/stdout/claude-stream-json.js', srcCS.replace(N4, '          try { brainRef?.noteConvFacts?.(session, msg); } catch'), 'every-record'));
+  ok(today.device === 't1' && today.window === '', 'MUST 4 RED: today\'s parse steps every record — the lagging «empty» overwrites the running task (a wrong «owns nothing» for that window)', today);
+}
+{
+  // SMALL — the timer look-alike test skips the CLI's own cron tools that set nothing and reads only a tool's own last name part
+  const K = { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' };
+  const tl = (Mx, ...names) => { const st = Mx.factsFresh(); Mx.factsStep(st, { type: 'system', subtype: 'init', claude_code_version: '2.1.312' }, 1); for (const n of names) Mx.factsStep(st, { type: 'assistant', message: { content: [{ type: 'tool_use', name: n, input: {} }] } }, 2); return Mx.trackedFacts(st, K); };
+  ok(tl(CF, 'CronList', 'CronDelete').timers === 'none-seen', 'a conversation that only LISTED (and deleted) its crons: timers «none seen» — those tools set nothing');
+  ok(tl(CF, 'mcp__scheduler__list_items').timers === 'none-seen' && tl(CF, 'mcp__cal__schedule_meeting').timers === null && /schedule_meeting/.test(tl(CF, 'mcp__cal__schedule_meeting').timersWhy),
+    'the look-alike reads the tool\'s OWN last name part: a server named «scheduler» is not a timer; a tool named schedule_meeting may be (unknown, said)');
+  const srcCF = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
+  const NT = '  const timerish = tools.find((n) => !TIMER_TOOLS.includes(n) && !NON_TIMER_TOOLS.includes(n) && TIMERISH.test(ownToolName(n)));';
+  const NR = 'const TIMERISH = /cron|schedul|wake|remind/i;';
+  if (srcCF.split(NT).length !== 2 || srcCF.split(NR).length !== 2) throw new Error('anchor missing: the look-alike');
+  const mt = mutantCopies('conversation-facts-r2-like', REPO).load('src/conversation-facts.js', srcCF.replace(NT, '  const timerish = tools.find((n) => !TIMER_TOOLS.includes(n) && TIMERISH.test(n));'), 'round-one-like');
+  ok(tl(mt, 'CronList').timers === null && tl(mt, 'mcp__scheduler__list_items').timers === null, 'RED: round one\'s look-alike reads a cron LIST, and a server\'s name, as «may set a timer» — unknown for good');
+  const mr = mutantCopies('conversation-facts-r2-remind', REPO).load('src/conversation-facts.js', srcCF.replace(NR, 'const TIMERISH = /$^/;'), 'no-look-alike');
+  ok(tl(CF, 'RemindMeLater').timers === null && tl(mr, 'RemindMeLater').timers === 'none-seen', 'the look-alike leg\'s own RED: with no look-alike rule an unknown RemindMeLater reads «none seen»');
+}
+{
+  // SMALL — a layout file that cannot be read says its real reason with the error's code; a read that lands clears it
+  const PFILE = path.join(REPO, 'src/routes/persistence.js');
+  const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cfx-layE-'));
+  fs.mkdirSync(path.join(dd, 'layouts.json'));   // a PLACED read error that lasts: the path is a directory (EISDIR)
+  const fresh = () => { delete require.cache[require.resolve(PFILE)]; return require(PFILE); };
+  const run = async (PX) => {
+    PX.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    const SX = COL.sourcesFrom({ persistenceRouter: PX.router });
+    return { r: await COL.create({ activeSessions: new Map([['sess-1', fakeChat('A')]]), keyOf: () => KEY_A, ...known, prepare: SX.prepare, desktopOf: SX.desktopOf, desktops: SX.desktops }).list(), SX, PX };
+  };
+  const { r, SX, PX } = await run(fresh());
+  ok(r.desktops === null && r.desktopsWhy === 'the stored layout could not be read (EISDIR)' && r.conversations[0].windowWhy === 'the stored layout could not be read (EISDIR)' && PX.router.layoutsCached() === null,
+    'a layout read that FAILS says so with its code (desktops and the window line) — never «still being read — ask again» for ever; the cache stays empty', { why: r.desktopsWhy, w: r.conversations[0].windowWhy });
+  fs.rmdirSync(path.join(dd, 'layouts.json')); fs.writeFileSync(path.join(dd, 'layouts.json'), JSON.stringify({ desktops: {}, desktopMeta: [{ id: 'd1', name: 'Main' }] }));
+  await SX.prepare().catch(() => null);
+  ok(PX.router.layoutsError() === null && Array.isArray(SX.desktops()), 'a read that lands clears the reason', SX.desktops());
+  fs.rmSync(path.join(dd, 'layouts.json'), { force: true }); fs.mkdirSync(path.join(dd, 'layouts.json'));
+  const srcP = fs.readFileSync(PFILE, 'utf8');
+  const NE = " _layoutsErr = (e && e.code) || 'unreadable'; throw e; }";
+  if (srcP.split(NE).length !== 2) throw new Error('anchor missing: the kept error code');
+  const { r: rm } = await run(mutantCopies('conversation-facts-r2-lay', REPO).load('src/routes/persistence.js', srcP.replace(NE, ' throw e; }'), 'code-lost'));
+  ok(/still being read — ask again/.test(rm.desktopsWhy), 'RED: without the kept code the list says «still being read — ask again» for an error that lasts', rm.desktopsWhy);
+  fs.rmSync(dd, { recursive: true, force: true });
   fresh();
 }
 

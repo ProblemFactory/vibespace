@@ -772,7 +772,8 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // fills its gaps and beats its latency, never double-fires. Every
           // family is idempotent by design regardless (stdout re-emits the
           // same msg.id up to 3×), so the gate is belt, not the only guard.
-          sbSeenFirst(session, msg);
+          // lane conversation-facts: the answer is kept — the observations step only on a record this parse saw FIRST (round two, must 4)
+          const firstSeen = sbSeenFirst(session, msg);
           if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain
               && msg.message?.model && !String(msg.message.model).startsWith('<')) {
             // main-thread work ⇒ not limit-blocked ⇒ stale armed waits drop
@@ -1352,7 +1353,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           if (msg.type === 'system' && msg.subtype === 'vcs_state_changed') { try { brainRef?.noteVcsState?.(session, id, msg); } catch (e) { console.warn('[claude] vcs consumer failed:', e.message); } }
           if (msg.type === 'system' && msg.subtype === 'code_change_published') { try { brainRef?.notePublishedChange?.(session, id, msg); } catch (e) { console.warn('[claude] code-change consumer failed:', e.message); } }
           if (msg.type === 'system' && msg.subtype === 'session_title_changed') { try { brainRef?.noteSessionTitle?.(session, id, msg); } catch (e) { console.warn('[claude] session-title consumer failed:', e.message); } } // lane session-title-record: the CLI's own title → cliTitle
-          try { brainRef?.noteConvFacts?.(session, msg); } catch (e) { console.warn('[claude] conversation-facts consumer failed:', e.message); } // lane conversation-facts: the observations (session-brain, fed by the device stream too)
+          if (firstSeen) try { brainRef?.noteConvFacts?.(session, msg); } catch (e) { console.warn('[claude] conversation-facts consumer failed:', e.message); } // lane conversation-facts: the observations (session-brain, fed by the device stream too)
           if (msg.type === 'system' && msg.subtype === 'session_writes_lost') { try { brainRef?.noteWritesLost?.(session, id, msg); } catch (e) { console.warn('[claude] writes-lost consumer failed:', e.message); } } // lane cli-2-1-319-records r2
           // Event-driven remote ledger harvest (owner question "为什么15分钟
           // 不实时"): a remote session's turn just ENDED — its usage now
