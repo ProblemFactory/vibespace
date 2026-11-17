@@ -842,7 +842,8 @@ console.log('⑧ round 5 (final) — THE SHELL SAYS WHERE; THE SPAWN IS ALWAYS A
   // lane ui-plain-words closure (A1): what is IN VIEW (not the fold) — the face follows the state, and the cause + recipe line stays
   // on the face when it names a variable to set or a path to fix (mutant: delete the face line, or fold the what line ⇒ red)
   const inView = (r) => { dom(r); return globalThis.__shell.body.children.filter((c) => !/\btech-fold\b/.test(c.className)).map((c) => `${c.className}=${c.textContent}`).join(' | '); };
-  const nnView = inView(nn), dgView = inView(dg);
+  const nnView = inView(nn), nnTitle = globalThis.__shell && globalThis.__shell.o && globalThis.__shell.o.title, dgView = inView(dg), dgTitle = globalThis.__shell && globalThis.__shell.o && globalThis.__shell.o.title;
+  ok(`6a: the dialog's OWN title follows the state — wrapped «${nnTitle}», dangling «${dgTitle}»`, /^vsreal\d+ is wrapped in an alias or a function$/.test(nnTitle || '') && /^vsreal\d+ cannot run$/.test(dgTitle || ''), { nnTitle, dgTitle });
   ok(`A1: a wrapper's face says it is WRAPPED, and the recipe line is in view («${nnView.slice(0, 200)}»)`, /cli-missing-face=Your shell wraps vsreal\d+ in an alias or a function VibeSpace does not run/.test(nnView) && /cli-missing-what=.*Set CLAUDE_CMD|cli-missing-what=.*set [A-Z_]+/i.test(nnView) && !/could not find/.test(nnView), nnView);
   ok(`A1: a dangling alias's face says the shell names something that cannot run, and its cause is in view («${dgView.slice(0, 200)}»)`, /cli-missing-face=Your shell names a vsreal\d+ that cannot run/.test(dgView) && /cli-missing-what=.*which is missing\./.test(dgView) && !/could not find/.test(dgView), dgView);
   // closure 2 (5d / 6a): every STATE's face and title, run through the module — configured, broken, wrapped, unanswered, none

@@ -375,7 +375,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     ok(await p1.click(`${RP} .brp-fits-bar .browser-trace-fits-toggle input`), '③ the toggle on (a real mouse)');
     const onS = await until(async () => { const s = await rs(); return s && s.showFits && s.n === 8 && s.ticks === 0 ? s : null; }, 4000, 80);
     const fitRows = await p1.ev(`[...document.querySelectorAll('${RP} .brp-action.fits')].map((e) => e.textContent)`);
-    ok(onS && fitRows.length === 2 && /viewer-fit 1072×907 ×3/.test(fitRows[0]) && /×2/.test(fitRows[1]), `③ on: each run's entry is a step of its own saying how many it stands for (8 steps, 0 ticks; "${fitRows[0]}")`, { onS, fitRows });
+    ok(onS && fitRows.length === 2 && /(Fit the page to the view|让页面适应视图|ページを表示に合わせる) 1072×907 ×3/.test(fitRows[0]) /* lane ui-plain-words browser-profiles-20: the op in words, never «viewer-fit» */ && /×2/.test(fitRows[1]), `③ on: each run's entry is a step of its own saying how many it stands for (8 steps, 0 ticks; "${fitRows[0]}")`, { onS, fitRows });
     ok(await p1.click(`${RP} .brp-fits-bar .browser-trace-fits-toggle input`), '③ …and off again');
     const offS = await until(async () => { const s = await rs(); return s && !s.showFits && s.n === 6 && s.ticks === 2 && s.index === 0 ? s : null; }, 4000, 80);
     ok(!!offS, '③ off: 6 steps and 2 ticks again, the first step still showing (the preference is the device\'s — every surface reads it)', offS);

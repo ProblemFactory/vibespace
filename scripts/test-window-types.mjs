@@ -335,6 +335,22 @@ ok([...censusTypes].every((t) => regTypes.includes(t)), `every createWindow type
   ok(/title\.textContent = starPrefix \+ windowWords\(win\)/.test(tb) && /subtitle\.textContent = parts\[1\] \|\| \(kindWords !== windowWords\(win\) \? kindWords : ''\)/.test(tb) && /label: windowTitle\(w\)/.test(tb) && /const nameOfWin = \(w\) => windowWords\(w\)/.test(tb)
     && /\{ window: windowTitle\(win\), desktop: desk \}/.test(wj) && /label\.textContent = windowTitle\(win\)/.test(mn) && /label\.textContent = windowTitle\(w\)/.test(wj) && /const nameOf = \(id\) => windowTitle\(this\.windows\.get\(id\)\)/.test(src['tab-group.js']),
     'the readers: the title line by windowWords; every list, the «is on» toast, the phone list and the split toasts by windowTitle (the folder kept)');
+  // closure 2 (主开发's re-run: the leg named five of nine sites): the SITES are grep-derived — every file of src/ that imports from
+  // window-types.js, every call of windowWords( / windowTitle( in it, counted per file. A site swapped to the short name changes two
+  // counts; a tenth reader changes one — either is red until it is classified here (the title line = windowWords; a list, a toast,
+  // the phone list and compact bar, a split toast = windowTitle).
+  const SITES = { 'src/lib/taskbar.js': { words: 4, title: 4 }, 'src/lib/mobile-nav.js': { words: 1, title: 2 }, 'src/lib/tab-group.js': { words: 0, title: 2 }, 'src/lib/window.js': { words: 0, title: 2 } };
+  const sitesNow = {};
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
+  for (const abs of walk(path.join(repo, 'src'))) {
+    const rel = path.relative(repo, abs).split(path.sep).join('/'); if (rel === 'src/lib/window-types.js') continue;
+    const s = fs.readFileSync(abs, 'utf8'); if (!/from '\.\/window-types\.js'|from '\.\.\/lib\/window-types\.js'|from '\.\/lib\/window-types\.js'/.test(s)) continue;
+    const body = s.split('\n').filter((l) => !/^\s*import\b/.test(l)).join('\n');
+    const words = (body.match(/\bwindowWords\(/g) || []).length, title = (body.match(/\bwindowTitle\(/g) || []).length;
+    if (words || title) sitesNow[rel] = { words, title };
+  }
+  const sortK = (o) => JSON.stringify(Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]])));
+  ok(sortK(sitesNow) === sortK(SITES), `the window-name sites, grep-derived: ${Object.entries(sitesNow).map(([f, c]) => `${f.replace('src/lib/', '')} ${c.words}+${c.title}`).join(' · ')} — four title-line readers by windowWords, ten list / toast / phone readers by windowTitle; a new or swapped site is red until classified`, sortK(sitesNow));
   // FUNCTIONAL (en, no DOM ⇒ t() is the identity): the words, the fallbacks, and the RED control on the old expression
   const wt2 = await import('../src/lib/window-types.js');
   wt2.registerWindowType({ type: 'fake-kind-words', label: 'Machine app' });

@@ -238,9 +238,10 @@ try {
     const o1 = await slideOpen();
     const look0 = await D.ev(stillLookSource(OK_SEL));
     check(`still: the form stands in a SLIDING workspace — 确定 under its point, moving: ${(look0?.movers || []).join(', ')}`, !!o1 && !!look0 && look0.found && look0.hits && (look0.movers || []).some((m) => /^margin-left@div#main-wrapper/.test(m)), { o1, look0 });
-    // ② RED CONTROL — a press aimed where 确定 WAS (it pressed once 确定 had slid ≥ 60 px past that point): a named miss
-    const red1 = await DOOR(OK_SEL, { gate: false, aim: async (look) => { await until(() => D.ev(`(() => { const e = document.querySelector(${JSON.stringify(OK_SEL)}); if (!e) return null; const q = e.getBoundingClientRect(); return q.left + q.width / 2 - ${look.x} >= 60 ? true : null; })()`), 4000, 20); return { x: look.x, y: look.y }; } });
-    check(`still: RED CONTROL — a press aimed where 确定 WAS (it slid ≥ 60 px since) is a named miss: «${DOOR.last?.landed?.why}»`, red1 === false && !!DOOR.last?.landed && !DOOR.last.landed.ok, DOOR.last);
+    // ② RED CONTROL — a press aimed where 确定 WAS (it presses once the button's LEFT edge has slid 20 px past that point — whatever its
+    //   label's width; lane ui-plain-words pick 5 gave it a doing word, «提醒 N 个会话（下一轮）», wider than 2 × 60 px): a named miss
+    const red1 = await DOOR(OK_SEL, { gate: false, aim: async (look) => { await until(() => D.ev(`(() => { const e = document.querySelector(${JSON.stringify(OK_SEL)}); if (!e) return null; const q = e.getBoundingClientRect(); return q.left - ${look.x} >= 20 ? true : null; })()`), 4000, 20); return { x: look.x, y: look.y }; } });
+    check(`still: RED CONTROL — a press aimed where 确定 WAS (it slid wholly past that point since) is a named miss: «${DOOR.last?.landed?.why}»`, red1 === false && !!DOOR.last?.landed && !DOOR.last.landed.ok, DOOR.last);
     await leaveAsFound('RED CONTROL ②');
     // ③ RED CONTROL — the door WITHOUT its still gate presses while the workspace still moves (the gate is what waits)
     await slideOpen();

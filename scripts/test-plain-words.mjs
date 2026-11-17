@@ -155,8 +155,8 @@ console.log('② the wall: a settings description past ' + WALL_CHARS + ' charac
   ok(shrank.length === 0, 'every wall row in the baseline is still a wall (a cured one leaves the baseline)', shrank);
   const S = await import(path.join(REPO, 'src/lib/settings-schema.js'));
   const q = S.SETTINGS_SCHEMA['accounts.onDemandQuotaRefresh'];
-  ok(q && Array.isArray(q.details) && q.details.length === 1 && /claude -p \/usage/.test(q.details[0]) && q.description.length <= WALL_CHARS && !/claude -p|statusline|dead-reckoner/.test(q.description) && q.options.length === 4,
-    'settings-4: the quota refresh row\'s face is plain (no command, no statusline, no dead-reckoner), the mechanics are its `details:`, the four choices kept', q && { d: q.description.length, opts: q.options.length });
+  ok(q && Array.isArray(q.details) && q.details.length === 1 && /claude -p \/usage/.test(q.details[0]) && q.description.length <= WALL_CHARS && !/claude -p|statusline|dead-reckoner/.test(q.description) && /each read asks Anthropic with this account’s sign-in/.test(q.description) && q.options.length === 4,
+    'settings-4: the quota refresh row\'s face is plain (no command, no statusline, no dead-reckoner) and says each read asks Anthropic with this account\'s sign-in, the mechanics are its `details:`, the four choices kept', q && { d: q.description.length, opts: q.options.length });
 }
 
 console.log('③ the one door: a «Technical details» fold is built by src/lib/plain-words.js');
@@ -233,6 +233,10 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   const unworded = keys.filter((op) => !words[op]);
   ok(!unworded.length, `every device op has its EXACT word (${keys.length} ops, ${new Set(Object.values(words)).size} words) — no prefix row stands in`, unworded);
   ok(!/ACT_WORDS\[o\.split\(':'\)\[0\]\]/.test(dlg) && /hasOwnProperty\.call\(ACT_WORDS, String\(op \|\| ''\)\)/.test(dlg), 'actWords looks an op up EXACTLY (no family fallback)');
+  let aw = null; try { aw = new Function('t', tbl + '\n' + dlg.slice(dlg.indexOf('export function actWords('), dlg.indexOf('\n}\n', dlg.indexOf('export function actWords(')) + 2).replace(/export /g, '') + '; return actWords;')((x) => x); } catch { aw = null; }
+  const fams = [...new Set(Object.keys(words).filter((k) => k.includes(':')).map((k) => k.split(':')[0]))].filter((f) => words[f]);
+  ok(!!aw && fams.length >= 1 && fams.every((f) => aw(f + ':no-such-action') === 'an act') && aw('desktop-grab') === 'Take a screenshot' && words['desktop-grab'] === 'Take a screenshot',
+    `actWords (run): an unknown action of a family that has its own word is «an act», in any spelling of a fallback (${fams.join(', ')}); desktop-grab is «Take a screenshot» (closure 2)`);
   const READ = new Set(['Read files', 'Read system information', 'List its apps', 'Read its conversations', 'Read usage', 'Stream its screen']);
   const soft = Object.entries(DA.TABLE).filter(([op, layer]) => (layer === 'act' || layer === 'code') && READ.has(words[op]));
   ok(!soft.length, 'an act or a code op never reads as a read word (the owner\'s audit does not soften)', soft);
@@ -285,7 +289,7 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
     while ((m = re.exec(src))) { let i = m.index + m[0].length, d = 1, q = null;
       for (; i < src.length && d > 0; i++) { const c = src[i]; if (q) { if (c === '\\') { i++; continue; } if (c === q) q = null; continue; }
         if (c === "'" || c === '"' || c === '`') q = c; else if ('({['.includes(c)) d++; else if (')}]'.includes(c)) d--; }
-      out.push({ at: src.slice(0, m.index).split('\n').length, call: src.slice(m.index, i) }); }
+      out.push({ at: src.slice(0, m.index).split('\n').length, idx: m.index, call: src.slice(m.index, i) }); }
     return out; };
   const BUILDERS = { 'src/lib/browser-build-model.js': ['downloadConfirmWords', 'removeConfirmWords'], 'src/lib/browser-cli-model.js': ['cliConfirmWords'], 'src/lib/pool-priority-model.js': ['gatherConfirmWords'] };
   const files = execFileSync('git', ['-C', REPO, 'ls-files', 'src']).toString().split('\n').filter((f) => f.endsWith('.js') && !/i18n-|utils\.js$/.test(f));
@@ -294,7 +298,10 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
     for (const c of callsOf(src)) {
       if (/confirmText\s*:\s*(?:t\((?:i18nKey\()?'OK'\)?\)|'OK'|undefined|null|'')/.test(c.call)) { bare.push(`${f}:${c.at} (an explicit OK / empty word)`); continue; }
       const idw = (c.call.match(/confirmText\s*:\s*([A-Za-z_$][\w$]*)\s*[,}]/) || [])[1];
-      if (idw && !new RegExp(`(?:const|let|var|function)\\s+${idw}\\b|[(,]\\s*${idw}\\s*[,)=]`).test(src)) { bare.push(`${f}:${c.at} (confirmText is ${idw}, defined nowhere in the file)`); continue; }
+      // 主开发's ruling (closure 2): a parameter is a word only when its SIGNATURE gives a default word — `w = t('…')`; a bare parameter is not a definition
+      // …and only INSIDE the call's own top-level declaration (a `const w =` elsewhere in the file is another w — P5-C2 survived the file-wide read)
+      const own = src.slice(Math.max(0, ...[...src.slice(0, c.idx).matchAll(/\n(?=(?:export |async |function |const |let |var |class )\S)/g)].map((m) => m.index)), c.idx);
+      if (idw && !new RegExp(`(?:const|let|var)\\s+${idw}\\s*=|[(,]\\s*${idw}\\s*=\\s*(?:t|tc)\\(`).test(own)) { bare.push(`${f}:${c.at} (confirmText is ${idw}: no word assigned in its own function, no default word in its signature)`); continue; }
       if (/confirmText\s*:/.test(c.call)) continue;
       const spread = (c.call.match(/\.\.\.\s*([\w$.]+)(\()?/) || []);
       if (!spread[1]) { bare.push(`${f}:${c.at}`); continue; }
@@ -349,10 +356,11 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   const body = pw.slice(pw.indexOf('const summaryOf ='), pw.indexOf('\n}\n', pw.indexOf('export function techFoldHtml(')) + 2).replace(/export /g, '');
   let tfh = () => ''; try { tfh = new Function('t', 'escHtml', 'document', body + '; return techFoldHtml;')((x) => x, esc, null); } catch { /* red below */ }
   const out = tfh(['<b>x</b>'], { summary: '<i>s</i>', className: 'a"b' });
-  ok(/&lt;b&gt;x&lt;\/b&gt;/.test(out) && /&lt;i&gt;s&lt;\/i&gt;/.test(out) && !/<b>|<i>/.test(out) && /class="tech-fold a&quot;b"/.test(out), 'techFoldHtml escapes every line, its summary and its class (run, not read)', out.slice(0, 160));
+  ok(/ data-fold="tech"/.test(out) && /d\.dataset\.fold = 'tech';/.test(pw) && /&lt;b&gt;x&lt;\/b&gt;/.test(out) && /&lt;i&gt;s&lt;\/i&gt;/.test(out) && !/<b>|<i>/.test(out) && /class="tech-fold a&quot;b"/.test(out), 'techFoldHtml escapes every line, its summary and its class (run, not read)', out.slice(0, 160));
   const su = read('src/lib/settings-ui.js'), tp = read('src/tls-plan.js'), css = read('public/style.css');
-  ok(/if \(line\._fold\) line\.appendChild\(line\._fold\)/.test(su) && /summary: t\('Use your own certificate'\)/.test(su) && /const FOLDS = \{ noTailscale: \['ownCert'\] \}/.test(tp) && /\.settings-https-fact \.settings-https-fold, \.settings-https-fact \.settings-https-probe-fold \{ flex: 1 1 100%/.test(css) && /probeFold\.querySelector\('\.tech-fold-body'\)\.replaceChildren\(probe\)/.test(su) && /const probeFold = techFold\(\['…'\], \{ mono: true, className: 'settings-https-probe-fold' \}\)/.test(su),
-    'settings-5: the own-certificate recipe folds INSIDE the fact line (a full-width line, its summary names the option), carried by tls-plan FOLDS; the raw last-check line folds under the door\'s «Technical details» (it says «Last check:» itself) (closure 2)');
+  ok(/if \(line\._fold\) line\.appendChild\(line\._fold\)/.test(su) && /summary: t\('Use your own certificate'\)/.test(su) && /const FOLDS = \{ noTailscale: \['ownCert'\] \}/.test(tp) && /\.settings-https-fact \.settings-https-fold, \.settings-https-fact \.settings-https-probe-fold \{ flex: 1 1 100%/.test(css) && /probeFold\.querySelector\('\.tech-fold-body'\)\.replaceChildren\(probe\)/.test(su) && /const probeFold = techFold\(\['…'\], \{ mono: true, className: 'settings-https-probe-fold' \}\)/.test(su)
+    && /line\.append\(text, again, probeFold\);/.test(su) && !/line\.append\([^)]*\bprobe\)/.test(su) && /probe\.hidden = !p; probeFold\.hidden = !p;/.test(su) && /probe\.hidden = true; probeFold\.hidden = true;/.test(su),
+    'settings-5: the own-certificate recipe folds INSIDE the fact line (a full-width line, its summary names the option), carried by tls-plan FOLDS; the raw last-check line sits ONLY in its fold (never appended on the face), the fold hidden with it (closure 2)');
   const pf = read('src/lib/path-field.js');
   ok(/if \(hk === 'none'\) return t\('the machine you pick above'\)/.test(pf) && /h2 === 'none' \? t\('On the machine you pick above:'\)/.test(pf) && /return HOSTS\.names \? nameOrGone\('machine', hk, ''\) : t\('the machine'\)/.test(pf), 'storage-3 / storage-4: a machine in words — never «none», never its id');
   const ud = read('src/lib/usage-dashboard.js');
@@ -363,6 +371,10 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   ok(/if \(!file\) return text \? t\('\{what\} “\{text\}”', \{ what, text \}\) : what;/.test(dc) && /export function pickWords\(pick, t\)/.test(dc), 'design-doc-12: the element in words, no leading separator without a file; the exact line stays one fold away');
   const cc = read('public/chat.css');
   ok(/\.chat-design-page \{ display: flex; flex-wrap: wrap;/.test(cc) && /\.chat-design-page-name \{ flex: 1 1 10em; min-width: 10em;/.test(cc) && /t\('Private · make public'\)/.test(read('src/lib/chat-status-bar.js')), 'design-doc-2: the published row says the state, then the act — and wraps its buttons before the name collapses (closure 2: at 390 the name had 8 px, a published design 0)');
+  const DET = { 'src/lib/settings-schema.js': 3, 'src/harness-settings.js': 1, 'src/channel-caps.js': 1, 'src/lib/app-card-model.js': 1 }; // the carriers whose `details: [` a surface draws (closure 2)
+  const detNow = {}; for (const f of execFileSync('git', ['-C', REPO, 'ls-files', 'src']).toString().split('\n').filter((x) => x.endsWith('.js'))) { const n = (fs.readFileSync(path.join(REPO, f), 'utf8').match(/details: \[/g) || []).length; if (n) detNow[f] = n; }
+  ok(JSON.stringify(detNow, Object.keys(detNow).sort()) === JSON.stringify(DET, Object.keys(DET).sort()), '`details: [` stands only on the carriers that draw it (a settings row, the harness and channel rows, an app card) — a new one is a decision, not a habit', detNow);
+  ok(/title: cliMissingTitle\(cliMissingState\(msg \|\| \{\}\), w\.cli\)/.test(read('src/lib/cli-missing-dialog.js')), 'the CLI-missing dialog draws its title by the state (cliMissingTitle), never a hard-wired «was not found» (closure 2)');
   const ir = read('src/lib/incident-recorder.js');
   ok(/never text you typed/.test(ir), 'gear-and-system-16: the capture\'s reach — and that it never takes typed text — is on the face');
 }
@@ -382,6 +394,27 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   const tt = (x, p) => (p ? String(x).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : x);
   ok(typeof DC.pickWords === 'function' && DC.pickWords({ file: 'Main.html', tag: 'button', text: 'Go' }, tt) === 'Main › a button “Go”' && DC.pickWords({ tag: 'a', text: 'Home' }, tt) === 'a link “Home”' && DC.pickWords({ file: 'x/Main.html', tag: 'h2' }, tt) === 'Main › a heading',
     'design-doc-12: the face is the page and the element in words (run), no leading separator without a file');
+  const dw = read('src/lib/design-window.js');
+  ok(/face\.textContent = pickWords\(pick, t\); \/\/ the page/.test(dw) && /composer\.face\.textContent = pickWords\(pick, t\);/.test(dw) && !/face\.textContent = quoteLine\(/.test(dw),
+    'design-doc-12: the window\'s face and the composer\'s face both draw pickWords — neither back to the raw quoteLine (closure 2: two surviving mutants)');
+  ok(/\(\{ up: tc\('scroll', 'up'\), down: tc\('scroll', 'down'\), left: tc\('scroll', 'left'\), right: tc\('scroll', 'right'\) \}\)\[p\.direction\]/.test(rw) && !/`\$\{p\.direction/.test(rw) && ['up', 'down', 'left', 'right'].every((d) => Z['scroll::' + d] && J['scroll::' + d]),
+    'replay: a scroll\'s direction is said in words (tc scroll::up…), never the raw value — zh / ja rows (closure 2)');
+  // ONE word for one thing (主开发 01:15Z, «自动 turn»): a common English word the zh dictionary has its OWN word for never stays Latin
+  // inside a zh value whose English key says it. The general form (any lowercase Latin word of the key inside its zh value) hits 231
+  // words over 1665 rows — mostly the glossary's kept words («agent», «token»), protocols and program names — so it reads a LIST:
+  // a word joins it with the dictionary's own word, and its rows are cured in the same commit.
+  const MIXED = { turn: '回合' };
+  const mixed = [];
+  for (const [k, v] of Object.entries(Z)) {
+    if (typeof v !== 'string') continue; const vv = v.replace(/\{[^}]*\}/g, '').replace(/`[^`]*`/g, '');
+    for (const w of Object.keys(MIXED)) if (new RegExp(`\\b${w}s?\\b`, 'i').test(k) && new RegExp(`(?<![A-Za-z0-9_./-])${w}s?(?![A-Za-z0-9_./-])`, 'i').test(vv)) mixed.push(`${w}: ${k.slice(0, 70)}`);
+  }
+  ok(!mixed.length && Object.values(MIXED).every((zw) => Object.values(Z).filter((v) => typeof v === 'string' && v.includes(zw)).length >= 3),
+    `zh keeps no common English word the dictionary has its own word for (${Object.entries(MIXED).map(([w, z]) => `${w} → ${z}`).join(', ')}) — one word for one thing`, mixed);
+  const BD = ['src/lib/browser-build-model.js', 'src/server/browser-cli-install.js'].flatMap((f) => [...read(f).matchAll(/(?:\bt|\bi18nKey)\(\s*(['"])((?:(?!\1)[^\\]|\\.)+)\1/g)].map((m) => m[2].replace(/\\(['"])/g, '$1')));
+  const bdBad = BD.filter((k) => /浏览器 CLI/.test(Z[k] || '') || /ブラウザー CLI/.test(J[k] || ''));
+  ok(BD.length > 20 && !bdBad.length && Z['the browser driver'] === '浏览器驱动' && J['the browser driver'] === 'ブラウザ操作ツール' && !BD.some((k) => /浏览器驱动 /.test(Z[k] || '')),
+    `the build dialog says ONE word for the browser driver in zh / ja (${BD.length} keys read) — never «浏览器 CLI» / «ブラウザー CLI» (closure 2)`, bdBad);
   // whoText never shows a subject id (run: sliced out of the dialog with the real nameOrGone and the hub's kinds)
   const dlg = read('src/lib/device-acts-dialog.js'), pw = read('src/lib/plain-words.js');
   let who = null;
@@ -392,9 +425,11 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
     who = new Function('t', 'nameOrGone', 'kindOf', body + '; return whoText;')(tt, ng, kindOf);
   } catch { who = null; }
   const ids = ['agent:claude:c-uuid-77', 'agent:webui:w-77', 'job:j-77', 'system:hub-77', 'agent:unknown'];
-  const named = () => 'Fix the login'; // closure 2: a NAMED conversation too — adding the id beside a name was a surviving mutant
+  const named = (k) => (k === 'claude:c-uuid-77' || k === 'webui:w-77' ? 'Fix the login' : ''); // closure 2: a NAMED conversation, asked by the id the parser gives (backend:sid) — never the full key
   ok(!!who && ids.every((by) => !String(who(by, () => '')).includes(by.split(':').pop()) && !String(who(by, named)).includes(by.split(':').pop())) && who('agent:claude:c-uuid-77', named) === 'conversation “Fix the login”' && who('agent:unknown', () => '') === 'an agent VibeSpace could not identify' && who('human:local') === 'You',
     'whoText (run): never shows the subject\'s id — a named conversation is its name, a gone one, a job, VibeSpace, an unidentified agent are words', ids.map((by) => who && [who(by, () => ''), who(by, named)]));
+  ok(/try \{ return sessionNameIn\(app\?\.sidebar\?\._allSessions \|\| \[\], app\?\.sidebar\?\.getCustomName \? \(x\) => app\.sidebar\.getCustomName\(x\) : null\)\(id\); \} catch \{ return ''; \}/.test(dlg) && /nameOrGone\('conversation', id, nameOf\(id\)\)/.test(dlg),
+    'who asked: the dialog asks the sidebar through sessionNameIn (the parser of agent:<backend>:<sid> / agent:webui:<id>), whoText asks by that id (closure 2: two surviving mutants)');
   ok(!/\$\{\w+\} · \$\{id\}|\+ ' · ' \+ id\b/.test(dlg), 'the old «kind · id» literal is gone from the activity rows, in any spelling (the guard the closure had dropped, back)');
 }
 
