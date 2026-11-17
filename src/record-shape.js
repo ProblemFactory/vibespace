@@ -797,12 +797,14 @@ function unknownFieldsSample(record) {
 // self-updated: one new subtype (session_writes_lost, HANDLED, a warning line), 19 fields + one nested key: FIELDS_319; two zod non-records,
 // file_unchanged gone (no row ever named it); one more sentence, OU — an Agent call its process died under) + 2.1.321 (2026-11-09 —
 // npm's newest that day, and the box's claude from 12:54 PT (the owner installed it; the hotfix .387): two new subtypes (ui_notify, ui_notify_cancel, the plugin
-// UI host's, card-less), 2 fields on result: FIELDS_321; one field off a stream shape: FIELDS_321_ELSEWHERE; the 16 sentences renamed). Each
+// UI host's, card-less), 2 fields on result: FIELDS_321; one field off a stream shape: FIELDS_321_ELSEWHERE; the 16 sentences renamed) + 2.1.322
+// (the box's claude by 2026-11-13, B-9ff2; dumped 2026-11-17 by lane bl-tests-e, the file READ, never run: its dump equals 2.1.321's in
+// every key, field, nested object and sentence text — only the minified names moved — so nothing is declared for it, no FIELDS_322). Each
 // pinned build has its TRACKED dump in scripts/fixtures/claude-cli/<version>.json, judged with no binary at all;
 // test-record-shape's binary oracle runs on whichever claude is installed and expects the rows of THAT build
 // (SHAPE_SINCE excuses a newer row on an older build). STRICT on any developer box; on the Actions mirror (which
 // installs whatever npm serves today) an UNPINNED build's drift is printed and skipped, never a red gate nobody reads.
-const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308', '2.1.312', '2.1.314', '2.1.319', '2.1.321']);
+const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308', '2.1.312', '2.1.314', '2.1.319', '2.1.321', '2.1.322']);
 const SCHEMA_CLI_VERSION = SCHEMA_CLI_VERSIONS[SCHEMA_CLI_VERSIONS.length - 1];
 
 module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, FIELDS_312, FIELDS_319, FIELDS_319_ELSEWHERE, FIELDS_321, FIELDS_321_ELSEWHERE, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, ZOD_NON_RECORDS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, INIT_UUIDS_MEASURED, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };

@@ -100,7 +100,7 @@ console.log('②b THE LINE STOPS (lane cli-2-1-319-records): this release regist
   const on = REG.create({ dataDir: path.join(tmp, 'data-319'), rootDir: REPO, log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   const r = on.note('2.1.319 (Claude Code)', 'hub');
   ok('2.1.319 is registered: no journal line, no telemetry event, nothing for ⚙ Diagnostics to list — the hub\'s «[cli-registration] claude 2.1.319 is not registered» stops', R.SCHEMA_CLI_VERSIONS.includes('2.1.319') && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
-  ok('…and its tracked dump stays beside the newer pinned build (2.1.321, lane fable-52-cli-321 — the road the registry\'s draft diffs against next)', fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.319.json')) && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.319') === R.SCHEMA_CLI_VERSIONS.length - 2);
+  ok('…and its tracked dump stays beside the newer pinned builds (2.1.321, lane fable-52-cli-321; 2.1.322, B-9ff2 — the road the registry\'s draft diffs against next)', fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.319.json')) && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.319') >= 0 && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.319') < R.SCHEMA_CLI_VERSIONS.indexOf('2.1.321'));
   const off = REG.create({ dataDir: path.join(tmp, 'data-319-base'), rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS.filter((v) => v !== '2.1.319'), log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   off.note('2.1.319 (Claude Code)', 'hub');
   ok('RED CONTROL: over the .383 list (8b3fdb6ab) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.319 is newer than this release's record table/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.319', { lines });
@@ -112,10 +112,22 @@ console.log('②c MEASURED BEFORE THE BOX RUNS IT (lane fable-52-cli-321): this 
   const on = REG.create({ dataDir: path.join(tmp, 'data-321'), rootDir: REPO, log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   const r = on.note('2.1.321 (Claude Code)', 'hub');
   ok('2.1.321 is registered: the owner\'s update to it says nothing — no journal line, no telemetry event, nothing for ⚙ Diagnostics', R.SCHEMA_CLI_VERSIONS.includes('2.1.321') && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
-  ok('…its tracked dump is the newest pinned build, the road the registry\'s draft diffs against next', fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.321.json')) && R.SCHEMA_CLI_VERSION === '2.1.321');
+  ok('…its tracked dump stays pinned beside the newer 2.1.322 (B-9ff2)', fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.321.json')) && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.321') >= 0 && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.321') < R.SCHEMA_CLI_VERSIONS.indexOf('2.1.322'));
   const off = REG.create({ dataDir: path.join(tmp, 'data-321-base'), rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS.filter((v) => v !== '2.1.321'), log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   off.note('2.1.321 (Claude Code)', 'hub');
   ok('RED CONTROL: over the .386 list (f5e087bb5) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.321 is newer than this release's record table/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.321', { lines });
+}
+
+console.log('②d THE BOX\'S 2.1.322 (B-9ff2, lane bl-tests-e): this release registers it — the box\'s claude by 2026-11-13, read as a static dump');
+{
+  const lines = [], events = [];
+  const on = REG.create({ dataDir: path.join(tmp, 'data-322'), rootDir: REPO, log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
+  const r = on.note('2.1.322 (Claude Code)', 'hub');
+  ok('2.1.322 is registered: the box\'s build says nothing — no journal line, no telemetry event, nothing for ⚙ Diagnostics', R.SCHEMA_CLI_VERSIONS.includes('2.1.322') && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
+  ok('…its tracked dump is the newest pinned build, the road the registry\'s draft diffs against next', fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.322.json')) && R.SCHEMA_CLI_VERSION === '2.1.322');
+  const off = REG.create({ dataDir: path.join(tmp, 'data-322-base'), rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS.filter((v) => v !== '2.1.322'), log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
+  off.note('2.1.322 (Claude Code)', 'hub');
+  ok('RED CONTROL: over the .407 list (b06f36e90) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.322 is newer than this release's record table/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.322', { lines });
 }
 
 console.log('③ THE DRAFT ROAD — over a FIXTURE binary (0644, built from the tracked dump); the binary is never run');
