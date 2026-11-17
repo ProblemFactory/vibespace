@@ -13616,4 +13616,37 @@ export default {
   "{n} granted": "已授权 {n} 个",
   "{n} of {m} account(s)": "{m} 个账号中 {n} 个",
   "{n} profile(s) · {m} saved login(s)": "{n} 个配置 · {m} 个已存登录",
+  "proxy password not in the vault": "代理密码不在保险库", // B-8b87: a browser profile's proxy and its login
+  "Its proxy address carries its password, which is never used — «Move the password to the vault» in ⋯": "它的代理地址里带着密码，这个密码从不使用——在 ⋯ 里点「把密码移入保险库」", // B-8b87: a browser profile's proxy and its login
+  "proxy": "代理", // B-8b87: a browser profile's proxy and its login
+  "Through its proxy {address}, with its login from the vault": "经它的代理 {address}，登录信息来自保险库", // B-8b87: a browser profile's proxy and its login
+  "Through its proxy {address}": "经它的代理 {address}", // B-8b87: a browser profile's proxy and its login
+  "Move the password to the vault": "把密码移入保险库", // B-8b87: a browser profile's proxy and its login
+  "Its proxy address carries its password, which is never used — one press keeps it in the vault as this proxy's login and removes it from the profile": "它的代理地址里带着密码，这个密码从不使用——点一下就把它作为这个代理的登录信息存进保险库，并从配置里删掉", // B-8b87: a browser profile's proxy and its login
+  "Proxy…": "代理…", // B-8b87: a browser profile's proxy and its login
+  "This profile's proxy and its login (kept in the vault)": "这个配置的代理及其登录信息（存在保险库里）", // B-8b87: a browser profile's proxy and its login
+  "Proxy of {label}": "{label} 的代理", // B-8b87: a browser profile's proxy and its login
+  "Its saved proxy address carries its password, which is never used. «Move the password to the vault» in ⋯ keeps it in one press — or give the address here and choose its login.": "已保存的代理地址里带着密码，这个密码从不使用。在 ⋯ 里点「把密码移入保险库」，一下就能存好——也可以在这里重新填地址，再选它的登录信息。", // B-8b87: a browser profile's proxy and its login
+  "Applied at the browser's next start.": "浏览器下次启动时生效。", // B-8b87: a browser profile's proxy and its login
+  "{label} goes through its proxy from its next start": "{label} 从下次启动起经它的代理上网", // B-8b87: a browser profile's proxy and its login
+  "{label} has no proxy from its next start": "{label} 从下次启动起不再使用代理", // B-8b87: a browser profile's proxy and its login
+  "Proxy": "代理", // B-8b87: a browser profile's proxy and its login
+  "http, https or socks5 — the address alone; its login is kept in the vault. Empty: no proxy.": "http、https 或 socks5——只填地址；登录信息存在保险库里。留空：不用代理。", // B-8b87: a browser profile's proxy and its login
+  "Proxy login": "代理登录", // B-8b87: a browser profile's proxy and its login
+  "Saved in the vault as this proxy's login — the browser never sees it.": "作为这个代理的登录信息存进保险库——浏览器永远看不到它。", // B-8b87: a browser profile's proxy and its login
+  "No login": "无需登录", // B-8b87: a browser profile's proxy and its login
+  "New login…": "新的登录信息…", // B-8b87: a browser profile's proxy and its login
+  "The proxy must be http://host:port, https://host:port or socks5://host:port.": "代理必须是 http://主机:端口、https://主机:端口 或 socks5://主机:端口。", // B-8b87: a browser profile's proxy and its login
+  "A proxy's user name and password go in the vault — give the address alone, then choose its login below.": "代理的用户名和密码要放进保险库——只填地址，再在下面选它的登录信息。", // B-8b87: a browser profile's proxy and its login
+  "That login was saved for another proxy — choose this proxy's login, or make a new one.": "这个登录信息是为另一个代理保存的——请选这个代理的登录信息，或新建一个。", // B-8b87: a browser profile's proxy and its login
+  "The vault is locked — unlock it in the Vault window, then save.": "保险库已锁定——请在保险库窗口里解锁，然后保存。", // B-8b87: a browser profile's proxy and its login
+  "A browser profile's proxy works for browsers on this machine only, for now.": "目前浏览器配置的代理只对这台机器上的浏览器生效。", // B-8b87: a browser profile's proxy and its login
+  "A new login needs its user name and its password.": "新的登录信息需要用户名和密码。", // B-8b87: a browser profile's proxy and its login
+  "This profile's proxy carries no password.": "这个配置的代理里没有密码。", // B-8b87: a browser profile's proxy and its login
+  "The proxy could not be saved.": "代理没能保存。", // B-8b87: a browser profile's proxy and its login
+  "Could not move the password": "没能移动密码", // B-8b87: a browser profile's proxy and its login
+  "{label}'s proxy password is in the vault now — the profile keeps the address alone": "{label} 的代理密码现在在保险库里了——配置里只留地址", // B-8b87: a browser profile's proxy and its login
+  "Delete the proxy login \"{name}\"?": "删除代理登录信息「{name}」？", // B-8b87: a browser profile's proxy and its login
+  "Its password leaves the vault. A browser profile whose proxy uses it is refused at its next start until you choose a login again.": "它的密码会离开保险库。用到它的浏览器配置在下次启动时会被拒绝，直到你重新选择登录信息。", // B-8b87: a browser profile's proxy and its login
+  "A browser proxy's login — VibeSpace hands it to the proxy for the browser profile that names it; the browser never sees it": "浏览器代理的登录信息——VibeSpace 替指定它的浏览器配置交给代理；浏览器永远看不到它", // B-8b87: a browser profile's proxy and its login
 };

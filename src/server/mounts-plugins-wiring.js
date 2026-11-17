@@ -158,6 +158,7 @@ const totpRunOf = (cid) => { const s = totpSessionOf(cid); return s ? require('.
 // src/browser-login.js; ONE writer src/server/browser-logins.js): Hub types them over CDP, VibeSpace never hands an agent a value; the
 // `browser-login` grant (the ONE grants store) decides who may, and covers the login's paired two-step code (D3); an account
 // an agent registers is saved automatically, with its provenance, and ONE For-you notice tells the owner (D5 as reversed)
+const browserProxyLogins = require('./browser-proxy-logins.js').create({ vault });   // B-8b87: a browser proxy's login — the ONE writer and reader (its reader: the keeper's forwarder)
 const browserLogins = require('./browser-logins.js').create({ vault, grants: () => require('./grants-store.js').store(), totpCode: (name, o) => vaultTotp.codeForLogin(name, o),
   forYou: { add: (profileId, item) => { if (!userTodos) return null; const r = userTodos.add('browser', { origin: 'browser', by: 'agent', sessionName: 'Agent browser', ...item }); return r && (r.id || (typeof r === 'string' ? r : null)); },
     resolve: (id) => { if (userTodos && userTodos.get(id)?.status === 'open') userTodos.setStatus(id, 'done', 'browser'); } },
@@ -194,6 +195,7 @@ require('../routes/setting-holds.js').registerSettingHoldRoutes(app, { holds: se
 app.locals.settingHolds = settingHolds;   // the agent's ask route judges a lasting change against a live hold (law A)
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
+  proxyLogins: browserProxyLogins, proxyMove: (id) => { const k = require('./browser-keeper.js').keeper(); return k && typeof k.moveProxyPassword === 'function' ? k.moveProxyPassword(id) : { ok: false, code: 'unavailable', error: 'the browser keeper is not running on this server' }; },   // B-8b87
   logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)
   jobSecrets: vaultJobSecrets,   // B-ef1b: the retired job-secrets notice's buttons (a person's door)
   linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
@@ -1081,6 +1083,7 @@ function createSessionMessages(session, sessionId) {
       // (a real host is never in the map), its url fetched over plain http on loopback at the url's own port
       ...(testEgressMap.size ? { chromeBuildsResolve: (u) => { try { const x = new URL(u); const ip = testEgressMap.get(x.hostname.toLowerCase()); return ip ? `http://${ip}:${x.port || 80}${x.pathname}${x.search}` : u; } catch { return u; } } } : {}),
       kept: browserKept, // lane browser-resume (§3.9)
+      proxyLogins: browserProxyLogins, // B-8b87: a profile proxy's login — read by the forwarder alone, a use noted
       // lane engine-plugin: THE ENGINE REGISTRY (a manifest plugin with contributes.browserEngine, enabled + trusted + running;
       // a built-in one providing 'browser-engine') + the fleet facts `browser.defaultEngine` reads (presets fleet.json)
       engines: browserEngines,

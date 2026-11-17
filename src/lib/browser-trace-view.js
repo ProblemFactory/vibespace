@@ -60,6 +60,7 @@ import { rowLine, rowFold, rowMenu, gridNeed, orphanOrder, usageLine as usageCel
 import { createPasskeysSection, isPhoneWidth } from './browser-passkeys-view.js'; // lane passkey-ui: a profile's Passkeys table
 import { barLayout } from './live-bar-layout.js'; // design 015 §2b: a cell's line never wraps — what does not fit folds by width (the bar-fold rule) // lane headless-fallback: a browser that runs headless because the machine has no desktop session says so
 import { createTakeoverSection, takeoverWindowTitle } from './browser-takeover-queue.js'; // lane browser-takeover-queue: «Waiting for you» — the takeover requests, above Profiles
+import { openProxyDialog } from './browser-proxy-dialog.js'; // B-8b87: a profile's proxy and its login (kept in the vault)
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const STRIP_MAX = 12;
@@ -960,6 +961,14 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     // lane browser-admin 2a: Change build… — a Chromium profile's Chrome build (a running browser restarts; its
     // conversations are told; the dialog says so before the button)
     build: (r) => openBuildDialog(app, r.id, { label: String(r.label || r.id), onDone: () => load() }),
+    // B-8b87: Proxy… — the address alone and its login from the vault (applied at the next start); «Move the password to the
+    // vault» — an address saved WITH its password (never used): one press, the vault entry made and the profile rewritten
+    proxy: (r) => openProxyDialog(app, r, { onDone: () => load() }),
+    'proxy-move': async (r) => {
+      const res = await act('/api/vault/proxy-logins/move', jsonInit('POST', { profileId: r.id }), t('Could not move the password'));
+      if (res) showToast(t('{label}\'s proxy password is in the vault now — the profile keeps the address alone', { label: String(r.label || r.id) }), { duration: 6000 });
+      load();
+    },
     // Rename… — validated like a new profile's name (unique, a human name, never a path)
     rename: async (r) => {
       const name = await showInputDialog({ title: t('Rename {label}', { label: String(r.label || r.id) }), label: t('Name'), value: String(r.label || ''), confirmText: t('Rename') });

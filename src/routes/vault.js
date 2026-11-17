@@ -167,7 +167,7 @@ function slowLineOf(req, ms) {
 }
 
 function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null, paste = null, jobSecrets = null,
-  totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }), logins = null, log = (line) => console.log(line), slowMs = VAULT_SLOW_MS }) {
+  totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }), logins = null, proxyLogins = null /* B-8b87: src/server/browser-proxy-logins.js */, proxyMove = null /* B-8b87: the keeper's moveProxyPassword(profileId) */, log = (line) => console.log(line), slowMs = VAULT_SLOW_MS }) {
   app.use(['/api/vault', '/api/agent/vault'], (req, res, next) => {
     const t0 = process.hrtime.bigint();
     res.once('finish', () => { const ms = Number(process.hrtime.bigint() - t0) / 1e6; if (ms > slowMs) { try { log(slowLineOf(req, ms)); } catch { /* the answer went out */ } } });
@@ -207,8 +207,8 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   };
   const person = (fn) => async (req, res) => {
     const v = personVerdict(req);
-    if (!v.ok) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword'); refusedBearer(req, v.code); return answer(res, v); }   // lane vault-paste-request: a pasted `value` too — lane browser-login: a typed `loginPassword`
-    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
+    if (!v.ok) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword', 'proxyPassword'); refusedBearer(req, v.code); return answer(res, v); }   // lane vault-paste-request: a pasted `value` too — lane browser-login: a typed `loginPassword`
+    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword', 'proxyPassword'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
   };
   /** An AGENT (vsst_ session / jbt_ job token) — it may read the state and lock, nothing else. */
   const agentOk = (req) => {
@@ -290,6 +290,21 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   //    agent-generated pending password), 删除 (its own grant row with it), 用于… (grant / take back: this account, any account on
   //    this site, any site). The password itself shows only through /api/vault/reveal. An agent has NO door here: its own is
   //    `vibespace-browser fill @ref --vault <entry>/password` (Hub types; VibeSpace never returns a value). Never cached by a proxy. ──
+  // ── B-8b87: A BROWSER PROXY'S LOGINS — the person's list (names only), save, removal, and the profile card's «Move the password
+  //    to the vault». The password is taken from the body at once and never answered; no bearer has a door here (the person guard):
+  //    its one reader is the browser keeper's forwarder (src/server/browser-proxy-logins.js read). Never cached by a proxy. ──
+  if (proxyLogins) {
+    const noStoreP = (fn) => (req, res) => { res.set('Cache-Control', 'no-store'); return fn(req, res); };
+    const bodyP = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
+    app.get('/api/vault/proxy-logins', noStoreP(person(() => ({ ok: true, logins: proxyLogins.names() }))));
+    app.post('/api/vault/proxy-logins', noStoreP(person((req) => {
+      const [pw] = take(req, 'proxyPassword');
+      const b = bodyP(req);
+      return proxyLogins.save({ proxy: b.proxy, user: b.user, password: typeof pw === 'string' ? pw : '' });
+    })));
+    app.delete('/api/vault/proxy-logins/:name', noStoreP(person((req) => proxyLogins.remove(String(req.params.name || '')))));
+    app.post('/api/vault/proxy-logins/move', noStoreP(person(async (req) => (typeof proxyMove === 'function' ? proxyMove(String(bodyP(req).profileId || '')) : { ok: false, code: 'unavailable', error: 'the browser keeper is not running on this server' }))));
+  }
   if (logins) {
     const whoL = (req) => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } };
     const noStoreL = (fn) => (req, res) => { res.set('Cache-Control', 'no-store'); return fn(req, res); };

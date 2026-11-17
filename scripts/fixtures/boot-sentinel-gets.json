@@ -307,6 +307,7 @@
   "/api/vault/web-logins",
   "/api/vault/web-logins/merge-words",
   "/api/vault/web-logins/site-words",
+  "/api/vault/proxy-logins",
   "/api/version",
   "/api/vnc/last-close",
   "/api/vnc/status",

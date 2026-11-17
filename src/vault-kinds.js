@@ -122,6 +122,15 @@ const FAMILIES = Object.freeze([
     surfaces: { request: REQUEST({ lands: 'login', kinds: ['login'], site: 'https://census.example.test' }), list: true, row: { module: 'src/lib/vault-login-row.js', exports: ['loginExtras'] }, add: { door: 'web-login', order: 45 }, reveal: true,
       use: { route: 'POST /api/agent/browser/fill-vault' }, delete: { method: 'DELETE', path: '/api/vault/web-logins/' }, cli: { bin: 'vibespace-browser', verbs: ['fill'] },
       route: ['GET /api/vault/web-logins', 'POST /api/vault/web-logins', 'DELETE /api/vault/web-logins/:name', 'POST /api/vault/web-logins/confirm', 'POST /api/vault/web-logins/discard'], words: NONE('the site and the user name it (web-login:<origin>#<user>)'), doc: '`web-login:<origin>#<user>`' } }),
+  // B-8b87 (lane cli-update-needs-nothing): A BROWSER PROXY'S LOGIN — its password sealed under
+  // `proxy-login:<scheme>://<host>:<port>#<user>`; ONE reader, the browser keeper's forwarder (src/server/browser-proxy-logins.js),
+  // each reading a use noted (door browser-proxy) — no agent door: the browser never sees it
+  fam({ id: 'proxy-login', label: 'A browser proxy\'s login', category: 'web-logins', stores: ['secrets'], entryRe: /^proxy-login:/, sample: 'proxy-login:socks5://census.example.test:1080#census-user', confirmKey: 'proxy-login',   // ui-words: the kind's name in the census's own table (scripts/test-vault-kinds-census prints it) — no window draws a family's label
+    surfaces: { request: NONE('saved where its proxy is set — the browser profile\'s «Proxy login», or «Move the password to the vault» on its card'), list: true, row: 'base',
+      add: NONE('added from the browser profile whose proxy it serves (its «Proxy login» field) — the Vault window lists and deletes it'), reveal: true,
+      use: SYSTEM('the browser keeper\'s forwarder hands it to the profile\'s proxy — the browser never sees it'), delete: { method: 'DELETE', path: '/api/vault/proxy-logins/' },
+      cli: NONE('no agent verb — the browser keeper uses it itself'), route: ['GET /api/vault/proxy-logins', 'POST /api/vault/proxy-logins', 'DELETE /api/vault/proxy-logins/:name', 'POST /api/vault/proxy-logins/move'],
+      words: NONE('the proxy and the user name it (proxy-login:<scheme>://<host>:<port>#<user>)'), doc: '`proxy-login:<scheme>://<host>:<port>#<user>`' } }),
   fam({ id: 'totp', label: 'A two-step code (TOTP)', category: 'two-step', stores: ['secrets'], entryRe: /^totp:/, sample: 'totp:census', confirmKey: 'totp',
     surfaces: { request: REQUEST({ lands: 'totp', kinds: ['totp'] }), list: true, row: { module: 'src/lib/vault-totp-row.js', exports: ['totpExtras', 'showTotpAddDialog'] }, /* request: lane totp-request-card (fb-251bb41646 — the card IS the 两步验证… dialog's fields: vault-totp-row.js totpFields) */ add: { door: 'totp', order: 35 }, reveal: true,
       use: { route: 'GET /api/agent/vault/totp/:name' }, delete: { method: 'DELETE', path: '/api/vault/totp/' }, cli: { bin: 'vibespace-vault', verbs: ['totp'] },

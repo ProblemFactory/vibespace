@@ -142,7 +142,7 @@ function keeper() { return installed; }
  *                    never admitted, never added to a list (identity verify r2, 2026-09-28); default none
  *   facts / runtime / limits / log / now / tickMs / guardSampleMs — injectable for the gate
  */
-function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined,
+function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined, proxyLogins = null /* B-8b87: src/server/browser-proxy-logins.js — a profile proxy's login, read by the forwarder alone */,
   // B-7a30 unit 1': the CLI judge's one file check (injectable: the gate PLACES a stall in it), the doors' bound, the re-judge period
   cliFileFact = null, cliActMs = 5 * 1000, cliEveryMs = 10 * 1000,
   serverNotice = null, getTelemetry = () => null, liveKeys: sessionLiveKeys = () => new Set(), remoteKeys = () => new Set(), userTodos = null,
@@ -312,7 +312,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const displayed = (opts, ex, file, rec) => {
       const eff0 = rec && rec.display ? displays.fileFor(file, rec.display) : file;
       const eff1 = rec && rec.engineView ? displays.engineFileFor(eff0, rec.engineView) : eff0; // lane engine-plugin: a conversation's browser on an ENGINE names its program + arguments at every call
-      const eff = rec && rec.tailnet && rec.tailnet.arg ? displays.tailnetFileFor(eff1, rec.tailnet) : eff1; // lane tailnet-names: a browser LAUNCHED with the tailnet PAC names it at every call (a different view relaunches)
+      const eff2 = rec && rec.tailnet && rec.tailnet.arg ? displays.tailnetFileFor(eff1, rec.tailnet) : eff1;
+      const eff = rec && rec.proxyRoad && rec.proxyRoad.arg ? displays.proxyFileFor(eff2, rec.proxyRoad) : eff2; // B-8b87: the profile's proxy (its forwarder's port) at every call // lane tailnet-names: a browser LAUNCHED with the tailnet PAC names it at every call (a different view relaunches)
       return eff === ex[VERBS.CONFIG_KEY] ? opts : { ...opts, extraEnv: { ...ex, [VERBS.CONFIG_KEY]: eff } };
     };
     const out = { ...r };
@@ -1079,7 +1080,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   };
   async function tailnetFor(p, { engine = false, remote = false, env = rtEnv } = {}) {
     try {
-      const explicit = !!(p && p.proxy) || userConfigProxy() || !!require('../tailnet-reach.js').envProxyOf(env);
+      const explicit = B.proxyRoadOf({ profileProxy: !!(p && p.proxy), userConfigProxy: userConfigProxy(), envProxy: !!require('../tailnet-reach.js').envProxyOf(env), tailnet: true }).explicit;   // B-8b87: THE ONE ranking (src/browser-profiles.js proxyRoadOf)
       const v = await (tailnet || require('./tailnet-door.js')).launch({ explicit, engine, remote, label: (p && p.label) || '' });
       return v ? { arg: v.on && v.arg ? v.arg : null, mode: v.mode || null, why: v.on ? null : v.why || null } : null;
     } catch { return null; }
@@ -1330,7 +1331,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (p.buildMissing) { delete p.buildMissing; dirty = true; log.log?.(`[browser] ${p.id} "${p.label}": ${BB.buildWords(c)} answers again`); } // the engine by its id (its label is the plugin's text)
     // lane engine-spi-egress: an engine that must stay inside a list is WRAPPED — THIS profile's allowlisting proxy (the keeper's,
     // its list = the engine's reserved row, read per request); one that cannot listen refuses the launch by name (egress_proxy_missing)
-    const egress = engine.egress ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || '', setting: engine.egress.setting, fallback: engine.egress.default }) : null;
+    const pv = B.proxyLaunchVerdict(p);   // B-8b87: judged at the start (refused there); here its proxy joins the engine's egress pair
+    const pproxy = pv.ok && pv.proxy ? { scheme: pv.proxy.scheme, host: pv.proxy.host, port: pv.proxy.port, credential: pv.proxy.credential || '' } : null;
+    const egress = engine.egress || pproxy ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || '', ...(engine.egress ? { setting: engine.egress.setting, fallback: engine.egress.default } : {}), ...(pproxy ? { proxy: pproxy } : {}) }) : null;
     return { executablePath: lo.launch.executablePath, args: lo.launch.args, env: lo.launch.env, egress, engine: { id: c.id, version: v.version, label: engine.label || null } };
   }
   /** What a launch RECORDS it was asked to run (`rec.browserChoice`): the choice, + an engine's version (the probe's fact). */
@@ -1523,11 +1526,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (isEph(p)) throw namedError('not_editable', `"${p.label}" is a conversation's managed ephemeral browser — it has no editable fields (it goes with its conversation); a login that should survive belongs in a named profile`);
     // "Who can use it" is a LIST (2026-09-27): `use` ({mode:'all'} | {mode:'only', who:[…]}) + the `base` stamp the reader
     // was given = the panel dialog's Save — a USER act. The 2.369.194 body (`scope` / `conversation`) is refused by name.
-    const allowed = new Set(['record', 'label', 'notes', 'sharing', 'use', 'base', 'recordMine', 'removeExcept']); // + BROWSE YOURSELF: "Also record my own actions"
+    const allowed = new Set(['record', 'label', 'notes', 'sharing', 'use', 'base', 'recordMine', 'removeExcept', 'proxy', 'proxyCredential']); // + B-8b87: the proxy and its login (a person's: the routes refuse a bearer) // + BROWSE YOURSELF: "Also record my own actions"
     const keys = Object.keys(patch || {}).filter((k) => patch[k] !== undefined);
     if (keys.includes('scope') || keys.includes('conversation')) throw namedError('bad-request', '"Who can use it" is a list now — send `use`: {mode:"all"} or {mode:"only", who:[{kind:"task", id} | {kind:"session", key}]} with the `base` stamp you read');
     const bad = keys.filter((k) => !allowed.has(k));
-    if (bad.length) throw namedError('bad-request', `these fields cannot be changed here: ${bad.join(', ')} (only record / label / notes / sharing / use / recordMine)`);
+    if (bad.length) throw namedError('bad-request', `these fields cannot be changed here: ${bad.join(', ')} (only record / label / notes / sharing / use / recordMine / proxy / proxyCredential)`);
     if (!keys.filter((k) => k !== 'base').length) throw namedError('bad-request', 'nothing to change');
     if (keys.includes('base') && !keys.includes('use')) throw namedError('bad-request', '`base` goes with `use`');
     // lane held-except-doors: `removeExcept` = the exceptions («除了») this Save takes away, by principal key — the dialog SAID
@@ -1566,6 +1569,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const v = B.validateProfileInput({ label: patch.label }, { existing: named().filter((x) => x.id !== id), control });
       if (!v.ok) throw namedError(v.code, v.error);
       if (v.value.label !== p.label) { changed.label = { was: p.label, now: v.value.label }; p.label = v.value.label; }
+    }
+    // B-8b87: THE PROXY AND ITS LOGIN — the address alone (a login in it is refused: it goes in the vault), the login a vault entry
+    // saved for THAT proxy; a profile on a paired machine takes none (the forwarder is this hub's); a browser running applies it at its
+    // next start (its forwarder's upstream is read at the start)
+    if (keys.includes('proxy') || keys.includes('proxyCredential')) {
+      const np = B.normalizeProxy(keys.includes('proxy') ? patch.proxy : p.proxy);
+      if (!np.ok) throw namedError(np.code || 'bad_proxy', np.error);
+      if (np.value && p.host) throw namedError('proxy_off_machine', `"${p.label}" runs on another machine — a browser profile's proxy works for browsers on this machine only, for now`);
+      const nc = B.normalizeProxyCredential(keys.includes('proxyCredential') ? patch.proxyCredential : (np.value === p.proxy ? p.proxyCredential : null), np.value);
+      if (!nc.ok) throw namedError(nc.code, nc.error);
+      if (np.value !== (p.proxy || null) || nc.value !== (p.proxyCredential || null)) { changed.proxy = { was: B.proxyPublicView(p.proxy), now: np.value, credential: nc.value, applies: 'at the next start' }; p.proxy = np.value; p.proxyCredential = nc.value; }
     }
     if (keys.includes('record')) { const v = patch.record === true || patch.record === 'true' || patch.record === 1; if (v !== !!p.record) { changed.record = { was: !!p.record, now: v }; p.record = v; } }
     // BROWSE YOURSELF (B-6ae8, the owner 4): the per-profile opt-OUT of recording the USER's own actions (default ON)
@@ -4238,6 +4252,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // program — the keeper's wrapper over the kernel — rides the build pin's own road (AGENT_BROWSER_EXECUTABLE_PATH), the
       // keeper's switches AGENT_BROWSER_ARGS (the mark + the automation flag the config's list would have carried + the quiet
       // switches, minus every name the engine gives), the engine's switches + env (ENGINE_ENV_KEYS only) the wrapper
+      // B-8b87: THE PROFILE'S PROXY — judged and its login read BEFORE anything starts (a refusal leaves no record and no process)
+      const pproxy = await profileProxyFor(p, { why, browserKey, starts: !!prow.starts });
       if (buildEnv.engineChoice) {
         buildEnv = await launchEngineOf(p, buildEnv.engineChoice);
         // lane engine-args-string r2: the CLI starts the keeper's WRAPPER (the engine's switches ride it whole); AGENT_BROWSER_ARGS
@@ -4259,6 +4275,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // display fact reads the base file)
         automationFlag: automationFlagOn() && !p.host && !!prow.automationFlag,
         quietLog }; // lane browser-stderr-pipe: launched with the quiet log switches (its config carries them)
+      // B-8b87: the profile's proxy on THIS road — its forwarder's loopback port, the ONE switch every call carries (the derived config,
+      // the attach argv); an engine's launch carries it in its own egress pair (launchEngineOf)
+      rec.proxyRoad = pproxy && !buildEnv.engine ? { arg: `--proxy-server=${await egressUrlFor(p.id, pproxy)}`, origin: `${pproxy.proxy.scheme}://${pproxy.proxy.host}:${pproxy.proxy.port}` } : null;
       rec.tailnet = tn; // lane tailnet-names: the stamp every call reads (displayed / the attach argv) — a different view relaunches
       // r5 LOW 3: the LAUNCH-MARK lineage rides every new record (a refused start too) — a profile once launched with the
       // mark never falls back to the pre-mark rule, whatever record comes next (set again at the launch below)
@@ -4266,7 +4285,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // lane profile-lock-roll (L1): the LAUNCH-HOST lineage rides every new record too (a refused start keeps the witness;
       // this machine's name is added only at the launch below)
       { const lh = launchHostsFor(prevRec, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prevRec && prevRec.host ? prevRec.host : lh[lh.length - 1]; } }
-      rec.egress = !p.host && buildEnv.egress ? egressRecordOf(profileId) : null; // lane engine-spi-egress r2: the port this launch view names (a wrapped engine's)
+      rec.egress = !p.host && (buildEnv.egress || rec.proxyRoad) ? egressRecordOf(profileId) : null;   // B-8b87: + a profile proxy's forwarder (the boot re-binds THAT port) // lane engine-spi-egress r2: the port this launch view names (a wrapped engine's)
       reg.browsers[profileId] = rec;
       commit();
       const failed = (code, msg) => { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = msg; commit(); return namedError(code, msg); };
@@ -4659,7 +4678,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now
     commit();
     const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? ENG.engineArgs(engineLaunch) : []; // lane engine-plugin: the engine's own arguments, censused by the builder (lane engine-spi-egress: + the keeper's proxy arguments when wrapped)
-    if (rec.tailnet && rec.tailnet.arg) engineArgs.push(rec.tailnet.arg); // lane tailnet-names: the keeper's tailnet PAC (never on an engine's launch) — IN through the builder
+    if (rec.tailnet && rec.tailnet.arg) engineArgs.push(rec.tailnet.arg);
+    if (rec.proxyRoad && rec.proxyRoad.arg) engineArgs.push(rec.proxyRoad.arg); // B-8b87: the profile's proxy — its forwarder's loopback port, IN through the builder // lane tailnet-names: the keeper's tailnet PAC (never on an engine's launch) — IN through the builder
     // lane engine-spi-egress L1b r3: the second wall on THIS road (the launch verdict refused them first) — an engine argument that starts
     // another program (src/browser-engines.js LAUNCHER_SWITCHES) never reaches an argv
     // r4: on the argument's TRIMMED form (src/browser-engines.js switchFormOf — Chromium's own reading), and a padded argument refused too
@@ -6521,13 +6541,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const have = egressProxies.get(k0);
     if (have && have.px.port() && (!port || have.px.port() === port)) { have.of = of; return have.px.url(); }
     const ent = { px: null, of };
-    const w = egressName(of), extra = { engine: of.engine };
+    const w = egressWho(of), extra = { engine: of.engine };
     // r2: `port` = the one a surviving browser's launch view names (adoption) — that port or a refusal, never another; a NEW proxy
     // (port 0) never keeps a port another live record names (that browser's proxy is re-bound on it at its adoption)
     const named = new Set(Object.values(reg.browsers).filter((r) => r && r.egress && Number.isInteger(r.egress.port) && String(r.profileId) !== k0 && B.isLiveBrowser(r)).map((r) => r.egress.port));
     let px = null;
     for (let i = 0; i < 8 && !px; i++) {
-      const c = EgressProxy.create({ allowlist: () => egressListOf(ent.of), log, ...(egressResolve ? { resolve: egressResolve } : {}) });
+      const c = EgressProxy.create({ allowlist: () => egressListOf(ent.of), allow: (h) => (ent.of && ent.of.setting ? B.egressVerdict(h, egressListOf(ent.of)) : B.profileProxyVerdict(h)), upstream: () => proxyUpstreamOf(k0, ent.of), log, ...(egressResolve ? { resolve: egressResolve } : {}) });
       try { await c.listen({ port }); } catch (e) {
         if (port && e && e.code === 'EADDRINUSE') throw namedError('egress_proxy_missing', `its allowlisting egress proxy cannot listen on its port ${port} again — another program holds it, and ${w} is never left behind a proxy that is not its own`, { ...extra, port });
         throw namedError('egress_proxy_missing', `the allowlisting egress proxy for ${w} could not listen (${e && e.message}) — ${w} is never started without it`, extra);
@@ -6541,7 +6561,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const raced = egressProxies.get(k0); // two starts of one profile raced the listen: the first proxy stays the one
     if (raced && raced.px.port()) { raced.of = of; px.close().catch(() => {}); return raced.px.url(); }
     egressProxies.set(k0, ent);
-    log.log?.(`[browser] egress proxy of ${w} for ${k0 || '?'} on ${px.url()} — admits: ${egressListOf(of).join(', ') || `nothing (no sites in ${of.setting})`}`);
+    log.log?.(`[browser] egress proxy of ${w} for ${k0 || '?'} on ${px.url()} — admits: ${of.setting ? (egressListOf(of).join(', ') || `nothing (no sites in ${of.setting})`) : 'every name but loopback'}${of.proxy ? ` — through ${of.proxy.scheme}://${of.proxy.host}:${of.proxy.port}${of.proxy.credential ? ' with its login from the vault' : ''}` : ''}`);
     return px.url();
   }
   /** r2: what a launch RECORDS of its proxy (`rec.egress`, persisted with the record): the port its launch view names + whose list
@@ -6549,9 +6569,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function egressRecordOf(profileId) {
     const e = egressProxies.get(String(profileId || ''));
     if (!e || !e.px.port()) return null;
-    return { port: e.px.port(), engine: String(e.of.engine || ''), label: String(e.of.label || ''), setting: String(e.of.setting || ''), fallback: String(e.of.fallback == null ? '' : e.of.fallback) };
+    return { port: e.px.port(), engine: String(e.of.engine || ''), label: String(e.of.label || ''), setting: String(e.of.setting || ''), fallback: String(e.of.fallback == null ? '' : e.of.fallback), ...(e.of.proxy ? { proxy: proxyOfRecord(e.of.proxy) } : {}) };   // B-8b87: + the profile's proxy (the address and the vault entry's NAME — never the secret)
   }
-  const egressOfRecord = (e) => ({ engine: String(e.engine || ''), label: String(e.label || ''), setting: String(e.setting || ''), fallback: String(e.fallback || '') });
+  const proxyOfRecord = (x) => (x && B.PROXY_SCHEMES.includes(x.scheme) && x.host && Number.isInteger(x.port) ? { scheme: x.scheme, host: String(x.host), port: x.port, credential: B.parseProxyLoginName(x.credential) ? String(x.credential) : '' } : null);
+  const egressOfRecord = (e) => ({ engine: String(e.engine || ''), label: String(e.label || ''), setting: String(e.setting || ''), fallback: String(e.fallback || ''), ...(proxyOfRecord(e.proxy) ? { proxy: proxyOfRecord(e.proxy) } : {}) });
   /** r2: THE ADOPTION of a wrapped browser — its proxy listening again on the port its record names (the list read live as before,
    *  its refusals this profile's) → `{ok:true}` | `{ok:false, port, error}` (the port is another program's: never rebound elsewhere). */
   async function egressAdopt(rec) {
@@ -6571,7 +6592,73 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     catch (e) { log.warn?.(`[browser] ${rec.profileId}: the egress notice was not filed (${e && e.message})`); }
   }
   /** A record removed ⇒ its proxy closed (removeProfile). */
-  function dropEgress(profileId) { const k0 = String(profileId || ''), e = egressProxies.get(k0); if (!e) return; egressProxies.delete(k0); e.px.close().catch(() => {}); }
+  function dropEgress(profileId) { const k0 = String(profileId || ''), e = egressProxies.get(k0); proxyCreds.delete(k0); if (!e) return; egressProxies.delete(k0); e.px.close().catch(() => {}); }   // B-8b87: its login leaves memory with it
+  // ── B-8b87 (lane cli-update-needs-nothing): A PROFILE'S PROXY REACHES ITS BROWSER — THE LAW: a field the form validates reaches the
+  // process it names. ONE road for every profile proxy: this profile's forwarder above (src/server/egress-proxy.js), its upstream =
+  // the profile's proxy, the browser handed only its loopback port (`rec.proxyRoad.arg` on the driver's derived config and the
+  // attach argv; an engine's own egress pair). Its LOGIN is read from the vault by the forwarder alone (proxyLogins.read — a use
+  // noted with the launch's actor) and held HERE, in memory only: never on an argv, in an env, in a config file or a record.
+  const proxyCreds = new Map();   // profile id → { ref, user, pass } | { ref, refused: { code, sentence, word }, at }
+  const egressWho = (of) => (of && of.engine ? egressName(of) : `the proxy of "${(of && of.label) || '?'}"`);
+  function readProxyCredential(profileId, ref, { by = 'system', conv = null, actor = null } = {}) {
+    const k0 = String(profileId || '');
+    const r = proxyLogins && typeof proxyLogins.read === 'function' ? proxyLogins.read(ref, { by, conv, actor, purpose: `the proxy of browser profile ${k0}` })
+      : { ok: false, error: 'this server has no vault for browser proxy logins', word: 'vault_not_set_up' };
+    const c = r.ok ? { ref, user: r.user, pass: r.pass } : { ref, refused: { code: 'proxy_credential_unreadable', sentence: r.error, word: r.word || null }, at: now() };
+    proxyCreds.set(k0, c);
+    return c;
+  }
+  /** The forwarder's upstream (asked per request): null | { scheme, host, port, auth? } | { refused } — a forwarder re-bound at a
+   *  boot reads the login again (the hub's own use), at most every 30 s while the vault stays locked; meanwhile every request is
+   *  answered with the vault's sentence — the browser is never sent direct. */
+  function proxyUpstreamOf(profileId, of) {
+    const px = of && of.proxy;
+    if (!px || !px.scheme) return null;
+    const up = { scheme: px.scheme, host: px.host, port: px.port };
+    if (!px.credential) return up;
+    let c = proxyCreds.get(String(profileId || ''));
+    if (!c || c.ref !== px.credential || (c.refused && now() - c.at > 30000)) c = readProxyCredential(profileId, px.credential, { by: 'system' });
+    return c.refused ? { refused: c.refused } : { ...up, auth: { user: c.user, pass: c.pass } };
+  }
+  /** THE LAUNCH'S STEP (every road asks it before anything starts): the verdict (refused BY NAME — a password still in the profile, a
+   *  socks4 address, a paired machine, a login saved for another proxy), the login read (a locked vault / a name the vault holds
+   *  nothing under ⇒ the launch is refused with the vault's own word — never a direct connection) → the forwarder's `of`, or null. */
+  async function profileProxyFor(p, { why = null, browserKey = null, starts = true } = {}) {
+    const v = B.proxyLaunchVerdict(p);
+    if (!v.ok) throw namedError(v.code, v.error);
+    if (v.proxy && !starts) throw namedError('proxy_external_browser', `"${p.label}" attaches to a browser VibeSpace does not start — that browser keeps its own proxy settings; clear this profile's proxy, or set it in that browser`);
+    if (!v.proxy) { proxyCreds.delete(String(p.id)); return null; }
+    if (v.proxy.credential) {
+      const by = browserKey ? 'agent' : (why === 'user' || why === BROWSE_WHY ? 'human' : 'system');
+      const c = readProxyCredential(p.id, v.proxy.credential, { by, conv: browserKey ? String(browserKey) : null, actor: browserKey ? 'a conversation' : null });
+      if (c.refused) throw namedError('proxy_credential_unreadable', `"${p.label}" was not started — ${c.refused.sentence}`, { word: c.refused.word || null });
+    } else proxyCreds.delete(String(p.id));
+    return { label: p.label, proxy: { scheme: v.proxy.scheme, host: v.proxy.host, port: v.proxy.port, credential: v.proxy.credential || '' } };
+  }
+  /** «Move the password to the vault» — the profile card's ONE press (a person's: src/routes/vault.js person()). An address saved
+   *  WITH its user name and password (before the proxy law) → the vault's proxy-login entry, the row rewritten to the address alone
+   *  + that entry, the password gone from the profiles store — one act, the vault first (a locked vault changes nothing). */
+  function moveProxyPassword(profileId) {
+    return batched(() => {
+      ensureLoaded();
+      const p = profile(profileId);
+      if (!p || isEph(p)) return { ok: false, code: 'not-found', error: `no profile ${profileId}` };
+      const m = /^([a-z0-9]+):\/\/([^@/\s]+)@(.+)$/i.exec(String(p.proxy || ''));
+      if (!m) return { ok: false, code: 'nothing_to_move', error: `"${p.label}"'s proxy carries no password` };
+      const dec = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+      const cut = m[2].indexOf(':');
+      const user = dec(cut >= 0 ? m[2].slice(0, cut) : m[2]), password = dec(cut >= 0 ? m[2].slice(cut + 1) : '');
+      const addr = B.normalizeProxy(`${m[1]}://${m[3]}`);
+      if (!addr.ok) return { ok: false, code: addr.code || 'bad_proxy', error: `"${p.label}"'s proxy cannot be moved as it is — ${addr.error}` };
+      if (!password) return { ok: false, code: 'nothing_to_move', error: `"${p.label}"'s proxy names a user but no password — choose its login in the profile` };
+      const r = proxyLogins && typeof proxyLogins.save === 'function' ? proxyLogins.save({ proxy: addr.value, user, password }) : { ok: false, code: 'unavailable', error: 'this server has no vault for browser proxy logins' };
+      if (!r.ok) return r;
+      p.proxy = addr.value; p.proxyCredential = r.name;
+      commit();
+      log.log?.(`[browser] ${p.id} "${p.label}": its proxy's password moved to the vault (${r.name}) — the profiles store no longer holds it`);
+      return { ok: true, profile: pview(p), credential: r.name };
+    });
+  }
   /** What ONE profile's wrapped browser may reach right now and what was refused (no secrets): its proxy's url, the list it
    *  admits, the sites its row names, the counts and the last refusals; nothing for a profile with no proxy. */
   function egressFor(profileId = null) {
@@ -8129,7 +8216,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // §7.4 failure form (1): the install action (verdict = PURE over the proof record; the act spawns npm ONLY on ok)
     installDir, retiredInstall: () => installs.slot.retiredAtBoot(), egressFor, egressRefusals, egressEngineOf, // lane engine-spi-egress: a wrapped engine's proxy per profile (L3: the names lost the anti-bot backend's word); the install rows' api in ...installs.api
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields
-    onLease, addDigest, updateProfile,
+    onLease, addDigest, updateProfile, moveProxyPassword, // + B-8b87: «Move the password to the vault»
     // P6 (§6.2 / §6.5): is `sharing:"instance"` a value here; the proxy (the routes ask it nothing directly)
     mediationOn, isMediated, mediator: () => (mediationOn() ? mediator : null),
     storeFile, STORE_FILE, uid, _reg: () => reg, _facts: bf, _runtime: rt,

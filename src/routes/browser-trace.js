@@ -373,6 +373,7 @@ router.patch('/api/browser/profiles/:id', async (req, res) => {
   if (typeof k.updateProfile !== 'function') return res.status(503).json({ error: 'this keeper cannot edit a profile', code: 'unavailable' });
   const { host, ...patch } = req.body || {};
   if (patch.use !== undefined && isAgentBearer(req)) return res.status(403).json({ error: USE_IS_USERS, code: 'agent_forbidden' }); // verify r1 (F6)
+  if ((patch.proxy !== undefined || patch.proxyCredential !== undefined) && isAgentBearer(req)) return res.status(403).json({ error: 'a browser profile\'s proxy and its login are the user\'s to set — an agent\'s token never changes them (B-8b87)', code: 'agent_forbidden' });
   try {
     // "Who can use it" (§6.2): shape → base → resolve the picked live sessions (the ONE resolver, routes/browser.js — one
     // refusal and NOTHING is written: a partial list is a list the user never saw) → the keeper validates the rows,

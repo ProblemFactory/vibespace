@@ -714,15 +714,15 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   const mt = kt ? await driveProfile(kt, { label: 'Token mutant' }, { stop: false }) : null;
   const mtv = mt ? tokenViews(kt, mt.p.id, mt.stamp.arg) : null;
   ok('MUTANT r4 N4: the keeper\'s view spreading the whole stamp (r3) ⇒ ②\'s token leg RED (the PAC token in list())', !!mtv && mtv.list === true, mtv);
-  const kA1 = 'const eff = rec && rec.tailnet && rec.tailnet.arg ? displays.tailnetFileFor(eff1, rec.tailnet) : eff1;', kA2 = ' || !!require(\'../tailnet-reach.js\').envProxyOf(env)';
+  const kA1 = 'const eff2 = rec && rec.tailnet && rec.tailnet.arg ? displays.tailnetFileFor(eff1, rec.tailnet) : eff1;', kA2 = 'envProxy: !!require(\'../tailnet-reach.js\').envProxyOf(env), tailnet: true';   // B-8b87: the env term now rides THE ONE ranking (proxyRoadOf)
   ok('the keeper mutants\' anchors are in browser-keeper.js', ksrc.includes(kA1) && ksrc.includes(kA2));
   reachNow = { ...R };
   const D3 = path.join(ROOT, 'data-km'); fs.mkdirSync(D3, { recursive: true });
-  const KM = ksrc.includes(kA1) ? MC.load('src/server/browser-keeper.js', ksrc.replace(kA1, 'const eff = eff1;'), 'no-stamp-calls') : null;
+  const KM = ksrc.includes(kA1) ? MC.load('src/server/browser-keeper.js', ksrc.replace(kA1, 'const eff2 = eff1;'), 'no-stamp-calls') : null;
   const mw = KM ? await driveProfile(mkKeeper(KM, D3), { label: 'Mutant' }) : null;
   ok('MUTANT the keeper\'s calls without the stamp\'s file ⇒ ②\'s every-call leg RED (a call names a file without the switch — Chrome would be relaunched)', !!mw && !(mw.files.length === 1 && mw.fileArgs[0] && mw.fileArgs[0].some((a) => /proxy-pac-url/.test(a))), mw && { files: mw.files, la: mw.la && mw.la.config });
   const D5k = path.join(ROOT, 'data-kenv'); fs.mkdirSync(D5k, { recursive: true });
-  const KE = ksrc.includes(kA2) ? MC.load('src/server/browser-keeper.js', ksrc.replace(kA2, ''), 'env-ignored') : null;
+  const KE = ksrc.includes(kA2) ? MC.load('src/server/browser-keeper.js', ksrc.replace(kA2, 'envProxy: false, tailnet: true'), 'env-ignored') : null;
   const me = KE ? await driveProfile(mkKeeper(KE, D5k, { HTTPS_PROXY: 'http://127.0.0.1:9' }), { label: 'Env mutant' }, { stop: false }) : null;
   ok('MUTANT the env proxy ignored ⇒ ②\'s N6 j leg RED (the PAC rides beside the person\'s proxy)', !!me && hasPac(me), me && me.stamp);
   ok('the copies live outside the tree', MC.files.length === 29 && MC.files.every((f) => !f.startsWith(path.join(REPO, 'src'))), MC.files);

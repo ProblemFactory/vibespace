@@ -1160,15 +1160,95 @@ function cleanLabel(v) {
   if (n > 0 && n < folded.length && /[\uD800-\uDBFF]/.test(folded.charAt(n - 1))) n -= 1;
   return PT.toAgentText(folded.slice(0, n), { kind: 'line', max: LABEL_MAX }).trim();
 }
-/** A proxy is `scheme://[user:pass@]host[:port]` for http/https/socks4/socks5,
- *  or nothing. The SECRET half (user:pass) never leaves the server:
- *  `publicProfileView` strips it. */
+// ── A PROFILE'S PROXY (B-8b87, lane cli-update-needs-nothing — THE LAW: a field the form validates reaches the process it
+// names, or the form does not show it). The address is `scheme://host:port` for http, https or socks5 (socks5h reads as socks5:
+// the name goes upstream either way); its login is NEVER part of it — a user name and password live in the VAULT as a
+// `proxy-login:<scheme>://<host>:<port>#<user>` entry the profile names (`proxyCredential`), read by the keeper's forwarder
+// alone (src/server/egress-proxy.js upstream; src/server/browser-proxy-logins.js). The browser gets the forwarder's loopback port.
+const PROXY_SCHEMES = Object.freeze(['http', 'https', 'socks5']);
+const PROXY_DEFAULT_PORT = Object.freeze({ http: 80, https: 443, socks5: 1080 });
+const PROXY_URL_RE = /^(https?|socks4a?|socks5h?):\/\/(?:([^@/\s]+)@)?([A-Za-z0-9.\-_]+|\[[0-9A-Fa-f:.]+\])(?::(\d{1,5}))?\/?$/;
+/** The parts of a stored address → { scheme, host, port, inline } (`inline` = it carries a user:pass@ — a value saved before
+ *  this law), or null when it is no address at all. */
+function proxyParts(v) {
+  const m = PROXY_URL_RE.exec(String(v == null ? '' : v).trim());
+  if (!m) return null;
+  const scheme = m[1] === 'socks5h' ? 'socks5' : m[1];
+  const host = m[3].replace(/^\[|\]$/g, '').toLowerCase();
+  return { scheme, host, port: m[4] ? Number(m[4]) : (PROXY_DEFAULT_PORT[scheme] || 0), inline: !!m[2] };
+}
+const proxyOrigin = (pp) => `${pp.scheme}://${pp.host.includes(':') ? `[${pp.host}]` : pp.host}:${pp.port}`;
+/** A proxy as the form / the API / the CLI give it → `scheme://host:port` (the one stored spelling), or nothing. A login in the
+ *  address is refused — it belongs in the vault; socks4 is refused (no name ever goes through it). */
 function normalizeProxy(v) {
   const s = String(v == null ? '' : v).trim();
   if (!s) return { ok: true, value: null };
-  const m = /^(https?|socks4|socks5|socks5h):\/\/(?:([^@/\s]+)@)?([A-Za-z0-9.\-_[\]]+)(?::(\d{1,5}))?\/?$/.exec(s);
-  if (!m) return { ok: false, error: 'proxy must look like http(s)://[user:pass@]host[:port] or socks5://host[:port]' };
+  const pp = proxyParts(s);
+  if (!pp) return { ok: false, error: 'proxy must look like http://host:port, https://host:port or socks5://host:port' };
+  if (pp.inline) return { ok: false, code: 'bad_proxy_inline_credential', error: 'a proxy\'s user name and password go in the vault, never in its address — give the address alone and choose its login (the profile\'s «Proxy login»)' };
+  if (!PROXY_SCHEMES.includes(pp.scheme)) return { ok: false, error: `${pp.scheme} proxies are not supported — use http, https or socks5 (a socks4 proxy cannot carry a site's name)` };
+  if (!(pp.port >= 1 && pp.port <= 65535)) return { ok: false, error: `the proxy's port must be 1–65535 (got ${pp.port})` };
+  return { ok: true, value: proxyOrigin(pp) };
+}
+// THE VAULT ENTRY of a proxy's login — `proxy-login:<scheme>://<host>:<port>#<user>` (src/vault-kinds.js row «proxy-login»)
+const PROXY_LOGIN_RE = /^proxy-login:(https?|socks5):\/\/([a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\]):(\d{1,5})#([^\s#\u0000-\u001f\u007f]{1,128})$/;   // = the vault engine's SECRET_RE head
+function proxyLoginName(proxyUrl, user) {
+  const pp = proxyParts(proxyUrl);
+  const u = String(user == null ? '' : user).trim();
+  if (!pp || pp.inline || !PROXY_SCHEMES.includes(pp.scheme) || !u || /[\s#]/.test(u) || u.length > 128) return null;
+  const name = `proxy-login:${proxyOrigin(pp)}#${u}`;
+  return PROXY_LOGIN_RE.test(name) ? name : null;
+}
+function parseProxyLoginName(name) {
+  const m = PROXY_LOGIN_RE.exec(String(name == null ? '' : name));
+  return m ? { scheme: m[1], host: m[2].replace(/^\[|\]$/g, '').toLowerCase(), port: Number(m[3]), user: m[4], origin: `${m[1]}://${m[2].toLowerCase()}:${m[3]}` } : null;
+}
+/** The profile's `proxyCredential` → the vault entry's name, or nothing. Its proxy must BE the profile's proxy — a login is never
+ *  handed to another host than the one it was saved for. */
+function normalizeProxyCredential(v, proxyUrl) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return { ok: true, value: null };
+  const lp = parseProxyLoginName(s);
+  if (!lp) return { ok: false, code: 'bad_proxy_credential', error: 'a proxy login is a vault entry named proxy-login:<scheme>://<host>:<port>#<user>' };
+  const pp = proxyParts(proxyUrl);
+  if (!pp || pp.inline) return { ok: false, code: 'bad_proxy_credential', error: 'a proxy login needs the proxy\'s address beside it' };
+  if (lp.origin !== proxyOrigin(pp)) return { ok: false, code: 'bad_proxy_credential', error: `that login was saved for ${lp.origin}, not for this profile's proxy ${proxyOrigin(pp)} — a login is never sent to another proxy` };
   return { ok: true, value: s };
+}
+/** THE LAUNCH'S VERDICT on a profile's proxy (every launch road asks it before anything starts) → { ok: true, proxy: null } |
+ *  { ok: true, proxy: { scheme, host, port, credential } } | { ok: false, code, error } — the stored values a launch refuses by
+ *  name: an address carrying its password (saved before this law: «Move the password to the vault» on its card), a socks4
+ *  address, a profile on a paired machine (the forwarder lives on this hub's loopback), a login saved for another proxy. */
+function proxyLaunchVerdict(p) {
+  if (!p || !p.proxy) return { ok: true, proxy: null };
+  const label = p.label ? `"${p.label}"` : 'this profile';
+  const pp = proxyParts(p.proxy);
+  if (!pp) return { ok: false, code: 'proxy_unusable', error: `${label}'s proxy address cannot be read — edit the profile and give it again (http://host:port, https://host:port or socks5://host:port)` };
+  if (pp.inline) return { ok: false, code: 'proxy_password_in_profile', error: `${label}'s proxy address carries its password — it was never used, and it is not used now. Press «Move the password to the vault» on the profile's card (the vault unlocked), then start the browser again` };
+  if (!PROXY_SCHEMES.includes(pp.scheme)) return { ok: false, code: 'proxy_scheme_unsupported', error: `${label}'s proxy is ${pp.scheme}, which cannot carry a site's name — edit the profile and give an http, https or socks5 proxy` };
+  if (p.host) return { ok: false, code: 'proxy_off_machine', error: `${label} runs on another machine — a browser profile's proxy works for browsers on this machine only, for now` };
+  const c = normalizeProxyCredential(p.proxyCredential, p.proxy);
+  if (!c.ok) return { ok: false, code: c.code, error: `${label}: ${c.error}` };
+  return { ok: true, proxy: { scheme: pp.scheme, host: pp.host, port: pp.port, credential: c.value } };
+}
+/** THE PROXY ROAD OF A LAUNCH — the ONE ranking (B-8b87). Chromium ranks a PAC above --proxy-server and both above the env, so
+ *  the keeper adds exactly ONE: the profile's own proxy > the proxy the person's own browser config names > the proxy the
+ *  launch's environment names (HTTPS_PROXY / HTTP_PROXY / ALL_PROXY) > the tailnet PAC (only when none of these) > direct.
+ *  An engine's egress allowlist is no rung — it fences whatever road wins. → { road, explicit, why } */
+function proxyRoadOf({ profileProxy = false, userConfigProxy = false, envProxy = false, tailnet = false } = {}) {
+  if (profileProxy) return { road: 'profile', explicit: true, why: 'the profile\'s own proxy' };
+  if (userConfigProxy) return { road: 'user-config', explicit: true, why: 'the proxy the person\'s own browser config names' };
+  if (envProxy) return { road: 'env', explicit: true, why: 'the proxy the launch\'s environment names' };
+  if (tailnet) return { road: 'tailnet', explicit: false, why: 'the tailnet PAC' };
+  return { road: 'direct', explicit: false, why: 'no proxy is named' };
+}
+/** What the forwarder admits for a profile whose proxy is its own (no engine allowlist): every name the proxy may carry —
+ *  never loopback / link-local (the forwarder is never a way back into this hub's services). */
+function profileProxyVerdict(host) {
+  const h = String(host || '').trim().toLowerCase().replace(/\.$/, '');
+  if (!h) return { allow: false, why: 'no host' };
+  if (h === 'localhost' || /^127\./.test(h) || h === '::1' || /^\[?::1\]?$/.test(h) || /^169\.254\./.test(h) || h.endsWith('.localhost') || h === 'host.docker.internal') return { allow: false, why: `${h} is loopback/link-local — never through the profile's proxy` };
+  return { allow: true, rule: 'the profile\'s proxy' };
 }
 function proxyPublicView(v) {
   const s = String(v == null ? '' : v);
@@ -1228,7 +1308,10 @@ function validateProfileInput(input = {}, { existing = [], control = null, media
   const fence = configFence({ allowedDomains: src.allowedDomains });
   if (fence) return { ok: false, code: 'fence_refused', error: `a persistent profile cannot carry allowedDomains (${fence.join(', ')}): the CLI refuses a domain fence beside a profile, so the flag would have to be dropped silently — fence at the proxy instead (§6.3)` };
   const proxy = normalizeProxy(src.proxy);
-  if (!proxy.ok) return { ok: false, code: 'bad_proxy', error: proxy.error };
+  if (!proxy.ok) return { ok: false, code: proxy.code || 'bad_proxy', error: proxy.error };
+  const proxyCredential = normalizeProxyCredential(src.proxyCredential, proxy.value);
+  if (!proxyCredential.ok) return { ok: false, code: proxyCredential.code, error: proxyCredential.error };
+  if (proxy.value && host) return { ok: false, code: 'proxy_off_machine', error: 'a browser profile\'s proxy works for browsers on this machine only, for now — this profile runs on another machine' };
   const seed = src.fingerprintSeed == null || src.fingerprintSeed === '' ? null : Number(src.fingerprintSeed);
   // §7.4: a per-profile default backend names a ROW (validated like any other
   // provider id; whether it can be used HERE is the switch's question)
@@ -1237,7 +1320,7 @@ function validateProfileInput(input = {}, { existing = [], control = null, media
   return {
     ok: true,
     value: {
-      label, provider, proxy: proxy.value, host, sharing, cdpPort, ownsDir: !!row.ownsDir,
+      label, provider, proxy: proxy.value, proxyCredential: proxyCredential.value, host, sharing, cdpPort, ownsDir: !!row.ownsDir,
       record: !!src.record, notes: cleanLabel(src.notes).slice(0, 400),
       fingerprintSeed: Number.isFinite(seed) ? Math.floor(seed) : null,
       defaultBackend,
@@ -1247,7 +1330,7 @@ function validateProfileInput(input = {}, { existing = [], control = null, media
 /** `dir` is null for a row that owns no directory (`cdp`) and for a profile
  *  on a PAIRED machine (the device composes and owns its directory — the hub
  *  records what the device answered on the BROWSER record, never here). */
-function newProfileRecord({ id, label, dir, provider = 'chromium', proxy = null, notes = '', record = false, fingerprintSeed = null, owner = null, legacy = false, now = 0, host = null, cdpPort = null, defaultBackend = null, sharing = null, ephemeral = false, createdBy = null } = {}) {
+function newProfileRecord({ id, label, dir, provider = 'chromium', proxy = null, proxyCredential = null, notes = '', record = false, fingerprintSeed = null, owner = null, legacy = false, now = 0, host = null, cdpPort = null, defaultBackend = null, sharing = null, ephemeral = false, createdBy = null } = {}) {
   // takeover C3 (design-browser-takeover §5.1): a MANAGED EPHEMERAL record is
   // owned by its CONVERSATION (kind 'conversation', id = the browser key — a
   // child key included) and by nothing else: never mediated, never legacy,
@@ -1272,7 +1355,7 @@ function newProfileRecord({ id, label, dir, provider = 'chromium', proxy = null,
   const by = createdBy == null ? null : parentKeyOf(String(createdBy));
   return {
     id: String(id), label: cleanLabel(label), dir: dir == null ? null : String(dir), provider: String(provider),
-    fingerprintSeed: fingerprintSeed == null ? null : fingerprintSeed, proxy: proxy || null, host: host == null || host === '' ? null : String(host),
+    fingerprintSeed: fingerprintSeed == null ? null : fingerprintSeed, proxy: proxy || null, proxyCredential: proxy && proxyCredential ? String(proxyCredential) : null, host: host == null || host === '' ? null : String(host),
     cdpPort: Number.isInteger(cdpPort) ? cdpPort : null,
     allowedDomains: null, owner: o, createdBy: by && isBrowserKey(by) ? by : null, sharing: legacy ? 'instance' : (sharing === 'instance' ? 'instance' : 'owner'), record: !!record,
     lastChromiumMajor: null, lastBackend: null, legacy: !!legacy,
@@ -1408,7 +1491,10 @@ function findProfile(profiles, ref) {
  *  masked, and `dir` stays (a path is not a secret; the label never becomes one). */
 function publicProfileView(p) {
   if (!p) return null;
-  return { ...p, proxy: proxyPublicView(p.proxy) };
+  // B-8b87: an address saved WITH its password (before the proxy law) is drawn without it, and says so — the card offers
+  // «Move the password to the vault»; the password itself never leaves the server
+  const pp = p.proxy ? proxyParts(p.proxy) : null;
+  return { ...p, proxy: proxyPublicView(p.proxy), ...(pp && pp.inline ? { proxyPasswordInProfile: true } : {}) };
 }
 
 // ── §6.2 who may attach ────────────────────────────────────────────────────
@@ -3517,7 +3603,7 @@ module.exports = {
   FLOOR_VERSION, cmpVersion, parseVersion, floorVerdict, floorNotice, floorNoticeDetail, // B-0b8c: + the settled-unknown notice's detail
   // P1 (§3.3–§3.5): the registry, the lease and the keeper's verdicts
   PROFILE_ID_RE, mintProfileId, isProfileId, profileDirName, PROVIDERS, OWNER_KINDS, LABEL_MAX, cleanLabel,
-  normalizeProxy, proxyPublicView, validateProfileInput, newProfileRecord, normalizeRegistry, normalizeLoginFenceState, findProfile, publicProfileView,
+  normalizeProxy, proxyPublicView, proxyParts, proxyLoginName, parseProxyLoginName, normalizeProxyCredential, proxyLaunchVerdict, proxyRoadOf, profileProxyVerdict, PROXY_SCHEMES, PROXY_LOGIN_RE, validateProfileInput, newProfileRecord, normalizeRegistry, normalizeLoginFenceState, findProfile, publicProfileView,
   SHARING_VALUES, sharingVerdict, isMediatedProfile, isEphemeralProfile, ephemeralLabel, holderRows, ephemeralPairsVerdict, pairsIdleMs, ephemeralDirOf, mayAttach, CHILD_KEY_RE, isChildKey, parentKeyOf, findLease, decideAttach, decideDetach, leasesOf, keyCarried,
   LEASE_DROP_GRACE_MS, reconcileLeases,
   LIVE_BROWSER_STATES, isLiveBrowser, browserIdle, ceilingVerdict,

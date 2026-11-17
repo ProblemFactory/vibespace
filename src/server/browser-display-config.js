@@ -22,6 +22,8 @@
  *        view and never relaunch it on Chrome (the measured relaunch rule).
  *   engineWrapperFor(name, spec) / dropEngineWrapper(name) — lane engine-args-string r2: THE ENGINE'S WRAPPER of one
  *        profile (`engine-<id>.sh` here, 0700, atomic, re-written when its text changes, removed with the profile).
+ *   proxyFileFor(file, stamp)                   — B-8b87: a browser launched with its PROFILE'S PROXY names the forwarder's switch at
+ *        every call (every other proxy switch out) — the tailnet rule below, for `rec.proxyRoad`.
  *   tailnetFileFor(file, stamp)                 — lane tailnet-names: a browser LAUNCHED with the tailnet PAC (`rec.tailnet.arg`,
  *        comma-free) names, at every call, the file it names anyway + that one switch last on the driver's line — the same
  *        derived-file rule, so no call's view differs from the launch (a differing view relaunches Chrome).
@@ -144,6 +146,20 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
     const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-tailnet-${tag}.json`);
     return derived(file, cfg, baseFile, 'the tailnet road\'s config');
   }
+  /** B-8b87: a browser launched with its PROFILE'S PROXY (`rec.proxyRoad.arg` = --proxy-server=http://127.0.0.1:<its forwarder>) names,
+   *  at every call, the file it names anyway + that one switch last — every other proxy switch (and the config's own `proxy`) out:
+   *  the profile's proxy is THE road (src/browser-profiles.js proxyRoadOf). The same derived-file rule as the tailnet's. */
+  function proxyFileFor(baseFile, stamp) {
+    const arg = stamp && typeof stamp.arg === 'string' ? stamp.arg : '';
+    if (!baseFile || !/^--proxy-server=http:\/\/127\.0\.0\.1:\d{1,5}$/.test(arg)) return baseFile;
+    const base = readCfg(baseFile);
+    if (!base) { say(`pread:${baseFile}`, `the profile proxy's road could not read ${baseFile} — its calls keep that file (the proxy is not reached through it)`); return baseFile; }
+    const { proxy: _own, ...rest } = base;
+    const cfg = { ...rest, args: [...V.driverArgsList(base.args).filter((a) => !/^--?(?:proxy-server|proxy-pac-url|proxy-bypass-list|no-proxy-server)(?:=|$)/.test(a)), arg] };
+    const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + arg).digest('hex').slice(0, 10);
+    const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-proxy-${tag}.json`);
+    return derived(file, cfg, baseFile, 'the profile proxy\'s config');
+  }
   /** lane engine-args-string r2: THE ENGINE'S WRAPPER of one profile — `<dir>/engine-<name>.sh` (`name` = the profile id: one
    *  per profile, which runs one engine at a time), its text src/browser-engines.js engineWrapperText. Written 0700 through a
    *  temporary file renamed over it (atomic), RE-WRITTEN at a launch only when its text changes (the derived rule: a regular
@@ -172,7 +188,7 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
   }
   /** …removed with its profile (the keeper's removeProfile). */
   function dropEngineWrapper(name) { if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(String(name || ''))) return; const f = wrapperFile(name); memo.delete(f); try { fs.rmSync(f, { force: true }); } catch { /* best effort */ } }
-  return { factFor, fileFor, engineFileFor, tailnetFileFor, engineWrapperFor, dropEngineWrapper, probe: probeNow, dir };
+  return { factFor, fileFor, engineFileFor, tailnetFileFor, proxyFileFor, engineWrapperFor, dropEngineWrapper, probe: probeNow, dir };
 }
 
 module.exports = { create };

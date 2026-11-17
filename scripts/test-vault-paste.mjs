@@ -141,6 +141,8 @@ const STAND_INS = {
   runOf: () => null, grantLive: () => true, subjects: () => ({ sessions: [], groups: [] }),   // no live run, every grant live, no subjects
   linkTokenFor: () => 'link-token-stand-in',   // a function, as the hub's (a road gated on it mounts); no world session has a link
   onVaultWait: () => {}, auditLink: () => {},
+  // B-8b87: a browser proxy's logins (names only here) and the keeper's «Move the password to the vault» — objects/functions as the hub's, so their person-only roads mount
+  proxyLogins: { names: () => [], save: () => ({ ok: false, code: 'vault_locked', error: 'the vault is locked' }), remove: () => ({ ok: true }) }, proxyMove: () => ({ ok: false, code: 'unavailable', error: 'no keeper in the world' }),
 };
 const EARS = ['log'];   // the world's ears only (the sweep reads its lines); the hub's default prints them — it gates no road
 /** → { missing: names the wiring passes that the world has no value for, extra: names the world passes that the wiring does not } */

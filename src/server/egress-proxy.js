@@ -21,18 +21,104 @@
  * Not a general proxy: no auth (loopback only, like the stream port, §6.1),
  * no caching, no rewriting, a bounded header read, one upstream per client
  * socket, and a rejected CONNECT closes the socket after the 403.
+ *
+ * THROUGH A PROFILE'S PROXY (B-8b87, lane cli-update-needs-nothing): `upstream()` names the profile's own proxy (http, https
+ * or socks5, with the credential the keeper read from the vault) — every admitted request then leaves THROUGH it: the
+ * destination's NAME goes upstream (`CONNECT host:port`, SOCKS5's domain-name address type) and is never resolved here — the
+ * only address this process dials is the upstream proxy's own (dialVia). The browser talks to this loopback port without
+ * authentication; the credential never reaches its argv, its env or its pages. `upstream()` answering `{ refused }` (the vault
+ * locked, the reference naming nothing) ⇒ every request is answered 502 with that sentence — never a direct connection.
  */
 const http = require('http');
 const net = require('net');
+const tls = require('tls');
 const B = require('../browser-profiles.js');
 
 const MAX_HEADER_BYTES = 16 * 1024;
+
+/** A small reader over a socket's first bytes: take(n) / until(marker) — the rest stays for the tunnel. */
+function socketReader(sock) {
+  let buf = Buffer.alloc(0), waiting = null, ended = null;
+  const wake = () => { if (waiting) { const w = waiting; waiting = null; w(); } };
+  sock.on('data', (d) => { buf = Buffer.concat([buf, d]); if (buf.length > MAX_HEADER_BYTES * 4) { ended = new Error('the upstream proxy answered too much before the tunnel'); } wake(); });
+  sock.on('end', () => { ended = ended || new Error('the upstream proxy closed the connection'); wake(); });
+  sock.on('error', (e) => { ended = ended || e; wake(); });
+  const need = async (ok) => { for (;;) { const r = ok(buf); if (r >= 0) return r; if (ended) throw ended; await new Promise((res) => { waiting = res; }); } };
+  return {
+    async take(n) { await need((b) => (b.length >= n ? n : -1)); const out = buf.subarray(0, n); buf = buf.subarray(n); return out; },
+    async until(marker) { const m = Buffer.from(marker); const at = await need((b) => { const i = b.indexOf(m); return i >= 0 ? i + m.length : (b.length > MAX_HEADER_BYTES ? (ended = new Error('the upstream proxy\'s answer has no end of headers'), -1) : -1); }); const out = buf.subarray(0, at); buf = buf.subarray(at); return out; },
+    rest() { sock.pause(); sock.removeAllListeners('data'); const r = buf; buf = Buffer.alloc(0); return r; },
+  };
+}
+const proxyErr = (code, msg) => Object.assign(new Error(msg), { code });
+/** A TCP (or TLS, for an https proxy) connection to the UPSTREAM PROXY itself — the one address this process dials. */
+function connectUpstream(up) {
+  return up.scheme === 'https'
+    ? tls.connect({ host: up.host, port: up.port, servername: net.isIP(up.host) ? undefined : up.host })
+    : net.connect({ host: up.host, port: up.port });
+}
+/**
+ * THROUGH THE PROFILE'S PROXY: a socket to `host:port` dialled via `up` = { scheme: 'http'|'https'|'socks5', host, port,
+ * auth?: { user, pass } }. The NAME goes upstream and is never resolved here. Resolves { sock, rest } (`rest` = the bytes
+ * that followed the proxy's answer); rejects with a coded error (proxy_auth_refused / proxy_refused / proxy_unreachable).
+ */
+async function dialVia(up, host, port, { timeoutMs = 10000 } = {}) {
+  const s = connectUpstream(up);
+  const r = socketReader(s);
+  const timer = setTimeout(() => { try { s.destroy(proxyErr('proxy_unreachable', `the profile's proxy ${up.host}:${up.port} did not answer in ${Math.round(timeoutMs / 1000)} s`)); } catch { /* gone */ } }, timeoutMs);
+  try {
+    await new Promise((res, rej) => { s.once(up.scheme === 'https' ? 'secureConnect' : 'connect', res); s.once('error', (e) => rej(proxyErr('proxy_unreachable', `the profile's proxy ${up.host}:${up.port} cannot be reached — ${e.message}`))); });
+    if (up.scheme === 'socks5') {
+      const withAuth = !!(up.auth && up.auth.user != null);
+      s.write(Buffer.from(withAuth ? [5, 2, 0, 2] : [5, 1, 0]));
+      const [v, m] = await r.take(2);
+      if (v !== 5) throw proxyErr('proxy_refused', 'the profile\'s proxy does not speak SOCKS5');
+      if (m === 2) {
+        const u = Buffer.from(String(up.auth.user)), p = Buffer.from(String(up.auth.pass || ''));
+        if (u.length > 255 || p.length > 255) throw proxyErr('proxy_auth_refused', 'the proxy\'s user name or password is longer than SOCKS5 allows (255 bytes)');
+        s.write(Buffer.concat([Buffer.from([1, u.length]), u, Buffer.from([p.length]), p]));
+        const [, st] = await r.take(2);
+        if (st !== 0) throw proxyErr('proxy_auth_refused', 'the profile\'s proxy refused its user name and password');
+      } else if (m !== 0) throw proxyErr('proxy_auth_refused', withAuth ? 'the profile\'s proxy accepts neither its user name and password nor no authentication' : 'the profile\'s proxy asks for a user name and password, and the profile names none');
+      // the destination: an address literal as itself; a NAME as the domain-name type (0x03) — resolved by the proxy, never here
+      const ip = net.isIP(host);
+      const addr = ip === 4 ? Buffer.from([1, ...host.split('.').map(Number)])
+        : ip === 6 ? Buffer.concat([Buffer.from([4]), Buffer.from(ipv6Bytes(host))])
+        : (() => { const n = Buffer.from(host); if (n.length > 255) throw proxyErr('proxy_refused', 'a host name longer than 255 bytes'); return Buffer.concat([Buffer.from([3, n.length]), n]); })();
+      s.write(Buffer.concat([Buffer.from([5, 1, 0]), addr, Buffer.from([port >> 8, port & 255])]));
+      const hd = await r.take(4);
+      if (hd[1] !== 0) throw proxyErr('proxy_refused', `the profile's proxy could not reach ${host}:${port} (SOCKS5 reply ${hd[1]})`);
+      const alen = hd[3] === 1 ? 4 : hd[3] === 4 ? 16 : (await r.take(1))[0];
+      await r.take(alen + 2);
+    } else {
+      const target = net.isIP(host) === 6 ? `[${host}]:${port}` : `${host}:${port}`;
+      const auth = up.auth && up.auth.user != null ? `Proxy-Authorization: Basic ${Buffer.from(`${up.auth.user}:${up.auth.pass || ''}`).toString('base64')}\r\n` : '';
+      s.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n${auth}\r\n`);
+      const head = (await r.until('\r\n\r\n')).toString('latin1');
+      const code = Number((/^HTTP\/1\.[01] (\d{3})/.exec(head) || [])[1] || 0);
+      if (code === 407) throw proxyErr('proxy_auth_refused', up.auth ? 'the profile\'s proxy refused its user name and password (407)' : 'the profile\'s proxy asks for a user name and password (407), and the profile names none');
+      if (code < 200 || code > 299) throw proxyErr('proxy_refused', `the profile's proxy refused ${target}${code ? ` (${code})` : ''}`);
+    }
+    clearTimeout(timer);
+    return { sock: s, rest: r.rest() };
+  } catch (e) { clearTimeout(timer); try { s.destroy(); } catch { /* gone */ } throw e.code ? e : proxyErr('proxy_unreachable', `the profile's proxy ${up.host}:${up.port} failed — ${e.message}`); }
+}
+/** the 16 bytes of an IPv6 literal (`::` expanded) */
+function ipv6Bytes(h) {
+  const [a, b = ''] = String(h).split('::');
+  const pa = a ? a.split(':') : [], pb = b ? b.split(':') : [];
+  const groups = [...pa, ...Array(8 - pa.length - pb.length).fill('0'), ...pb].map((g) => parseInt(g || '0', 16));
+  return groups.flatMap((g) => [g >> 8, g & 255]);
+}
 
 /**
  * @param allow  (host) => {allow, why|rule} — defaults to egressVerdict over `allowlist()`
  * @param allowlist  () => the current allowlist (string | array) — re-read per request so a setting change applies live
  */
-function create({ allowlist = () => '', allow = null, log = console, connectTimeoutMs = 10000, resolve = (h) => h, serve = null, tag = 'egress', failed = null, cutGraceMs = 15000 } = {}) {
+function create({ allowlist = () => '', allow = null, log = console, connectTimeoutMs = 10000, resolve = (h) => h, serve = null, tag = 'egress', failed = null, cutGraceMs = 15000, upstream = null } = {}) {
+  // B-8b87: `upstream()` → null (dial directly, as before) | { scheme, host, port, auth? } (every request leaves through it) |
+  // { refused: { code, sentence } } (502 with the sentence — never direct). Asked per request: an unlock applies at the next one
+  const upstreamOf = () => { if (typeof upstream !== 'function') return null; try { return upstream() || null; } catch (e) { return { refused: { code: 'proxy_credential_unreadable', sentence: String((e && e.message) || e) } }; } };
   // lane tailnet-names: `serve(req, res)` answers an ORIGIN-form request first (true = answered); `tag` names the journal lines;
   // r2: `failed(host, port, err)` hears an admitted host's upstream failure (→ {type, body} answers an absolute-form GET's 502)
   const heard = (host, port, e) => { try { return failed ? failed(host, port, e) || null : null; } catch { return null; } };
@@ -64,6 +150,8 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
   // a verdict that never comes is cut after `cutGraceMs` (15 s: past a resolver's own two 5 s tries); an admission's lookup
   // FAILURE is an answer (its 502), never a cut; a refusal on a cut socket ends it once written (never a half-open wait)
   const asking = new Set(), cutAfter = new Set();
+  /** B-8b87: the page a person sees when the profile's proxy cannot be used (the vault locked, the reference naming nothing) */
+  const page502 = (r) => `${String((r && r.sentence) || 'the profile\'s proxy cannot be used')}\n(${String((r && r.code) || 'proxy_credential_unreadable')})\n`;
 
   function refuse(res, v, host) {
     res.once('close', () => answered(v)); // r5: written, or its client gone
@@ -97,14 +185,32 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
       const headers = { ...req.headers };
       delete headers['proxy-connection']; delete headers['proxy-authorization'];
       headers.connection = 'close';
-      const up = http.request({ host: upstreamHost(v.to || target.hostname), port: Number(target.port) || 80, method: req.method, path: target.pathname + target.search, headers, timeout: connectTimeoutMs }, (ur) => {
-        res.writeHead(ur.statusCode || 502, { ...ur.headers, connection: 'close' });
-        ur.pipe(res);
-      });
-      up.on('timeout', () => { up.destroy(new Error('upstream timeout')); });
-      up.on('error', upFailed);
-      res.on('close', () => { if (!res.writableFinished) { left = true; try { up.destroy(); } catch { /* gone */ } } }); // r4: the client gone ⇒ the upstream too
-      req.pipe(up);
+      const send = (opts) => {
+        const up = http.request({ ...opts, method: req.method, headers, timeout: connectTimeoutMs }, (ur) => {
+          res.writeHead(ur.statusCode || 502, { ...ur.headers, connection: 'close' });
+          ur.pipe(res);
+        });
+        up.on('timeout', () => { up.destroy(new Error('upstream timeout')); });
+        up.on('error', upFailed);
+        res.on('close', () => { if (!res.writableFinished) { left = true; try { up.destroy(); } catch { /* gone */ } } }); // r4: the client gone ⇒ the upstream too
+        req.pipe(up);
+      };
+      // B-8b87: THROUGH THE PROFILE'S PROXY — an http(s) proxy takes the absolute form with its credential; a SOCKS5 proxy
+      // carries a tunnel to the NAME; a refusal (the vault locked) is the 502 page — never a direct dial
+      const via = upstreamOf();
+      if (via && via.refused) { stats.errors++; const body = page502(via.refused); try { res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': Buffer.byteLength(body), Connection: 'close' }); res.end(body); } catch { /* gone */ } log.log?.(`[${tag}] the profile's proxy refused ${target.hostname}: ${via.refused.code}`); return; }
+      if (via && via.scheme !== 'socks5') {
+        if (via.auth && via.auth.user != null) headers['proxy-authorization'] = `Basic ${Buffer.from(`${via.auth.user}:${via.auth.pass || ''}`).toString('base64')}`;
+        return send({ createConnection: () => connectUpstream(via), path: target.href });
+      }
+      if (via) {
+        return dialVia(via, target.hostname, Number(target.port) || 80, { timeoutMs: connectTimeoutMs }).then(({ sock: t, rest }) => {
+          if (rest.length) t.unshift(rest);
+          if (req.socket.destroyed) { try { t.destroy(); } catch { /* gone */ } return; }
+          send({ createConnection: () => t, path: target.pathname + target.search });
+        }, upFailed);
+      }
+      send({ host: upstreamHost(v.to || target.hostname), port: Number(target.port) || 80, path: target.pathname + target.search });
     });
   }
 
@@ -133,6 +239,33 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
       if (sock.destroyed) return;
       stats.allowed++;
       if (v.error) { stats.errors++; heard(host, port, v.error); try { sock.write(`HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\negress proxy: ${v.error.message}\n`); } catch { /* gone */ } try { sock.destroy(); } catch { /* gone */ } return; }
+      // B-8b87: THROUGH THE PROFILE'S PROXY — the tunnel to the NAME is opened upstream (never a local lookup, never direct)
+      const via = upstreamOf();
+      if (via && via.refused) {
+        stats.errors++;
+        const body = page502(via.refused);
+        try { sock.write(`HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`); } catch { /* gone */ }
+        try { sock.end(); } catch { /* gone */ }
+        log.log?.(`[${tag}] the profile's proxy refused CONNECT ${req.url}: ${via.refused.code}`);
+        return;
+      }
+      if (via) {
+        dialVia(via, host, port, { timeoutMs: connectTimeoutMs }).then(({ sock: t, rest }) => {
+          if (sock.destroyed) { try { t.destroy(); } catch { /* gone */ } return; }
+          try { sock.write('HTTP/1.1 200 Connection Established\r\n\r\n'); } catch { /* gone */ }
+          if (rest.length) sock.write(rest);
+          if (head && head.length) t.write(head);
+          t.pipe(sock); sock.pipe(t);
+          t.on('error', () => { try { sock.destroy(); } catch { /* gone */ } });
+          t.on('close', () => { try { sock.end(); } catch { /* gone */ } });
+          sock.on('close', () => { try { t.destroy(); } catch { /* gone */ } });
+        }, (e) => {
+          stats.errors++; heard(host, port, e);
+          try { sock.write(`HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\negress proxy: ${e.message}\n`); } catch { /* gone */ }
+          try { sock.destroy(); } catch { /* gone */ }
+        });
+        return;
+      }
       const up = net.connect({ host: upstreamHost(v.to || host), port });
       let open = false;
       const t = setTimeout(() => { if (!open) { try { up.destroy(new Error('connect timeout')); } catch { /* gone */ } } }, connectTimeoutMs);
@@ -179,4 +312,4 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
   return { listen, close, port: portOf, stats, verdict, recent: () => recentRefusals.map((r) => ({ ...r })), url: () => (server ? `http://127.0.0.1:${server.address().port}` : null) };
 }
 
-module.exports = { create, MAX_HEADER_BYTES };
+module.exports = { create, dialVia, MAX_HEADER_BYTES };

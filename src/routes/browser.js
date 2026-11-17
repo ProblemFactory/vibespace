@@ -601,6 +601,7 @@ router.post('/api/browser/profiles', async (req, res) => {
   // verify r1 (F6): "Who can use it" is the USER's too — an agent's token never writes the list (its own `new` makes a
   // profile every conversation can use; the PATCH in routes/browser-trace.js and the adopt below refuse the same way)
   if (use !== undefined && refuseAgentBearer(req, res, USE_IS_USERS)) return;
+  if (input.proxyCredential != null && input.proxyCredential !== '' && refuseAgentBearer(req, res, 'a browser profile\'s proxy login is the user\'s to choose — an agent\'s token never names a vault entry (B-8b87)')) return;
   try {
     const u = await resolveUseRows(use);
     if (!u.ok) return res.status(u.status).json(u.body);

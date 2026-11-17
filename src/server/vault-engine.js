@@ -76,7 +76,7 @@ const IDLE_MAX_HOURS = 720;
  *  writer, src/server/browser-logins.js) · `provider:<record id>` (lane lg-providers, B-d578: a third-party model provider's
  *  key — its record in data/providers.json names it, src/server/provider-store.js is its one writer; the spawn road and the
  *  provider Test read it) — never a key file's name (STORE_KEYS names start with `.` or `browser-`). */
-const SECRET_RE = /^(?:host|frp|file|apikey|totp|secret|provider):[\w.-]{1,160}$|^web-login:https?:\/\/(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?#[^\s#\u0000-\u001f\u007f]{1,160}$/;
+const SECRET_RE = /^(?:host|frp|file|apikey|totp|secret|provider):[\w.-]{1,160}$|^web-login:https?:\/\/(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?#[^\s#\u0000-\u001f\u007f]{1,160}$|^proxy-login:(?:https?|socks5):\/\/(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\]):\d{1,5}#[^\s#\u0000-\u001f\u007f]{1,128}$/;   // B-8b87: a browser proxy's login (src/server/browser-proxy-logins.js)
 const isSecretName = (name) => { const s = String(name || ''); return SECRET_RE.test(s) || V.AGENT_NS_RE.test(s); };   // lane vault-mint-put: `agent:<scope>/<name>` too
 
 let SIGNALS_ARMED = false;

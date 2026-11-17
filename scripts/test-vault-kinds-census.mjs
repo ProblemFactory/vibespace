@@ -327,7 +327,7 @@ ok(real.doors.size >= 7 && [...real.doors.keys()].every((d) => VK.addOrderOf(d) 
 ok(VK.ADD_DOORS.map((d) => d.door).join() === 'account,integration,channel,totp,automation,web-login,secret' && VK.ADD_DOORS.every((d, i, a) => !i || a[i - 1].order < d.order),
   '添加…\'s order is the registry\'s: Account… · Integration key… · Channel account… · Two-step code… · Automation key… · Website login… · Other key or password…', VK.ADD_DOORS);
 ok(R.cells.get('totp') && R.cells.get('totp').add.mark === '✓', 'TOTP\'s add surface: the 两步验证… door is registered (the gap the owner found is closed)', R.cells.get('totp'));
-ok(R.heads.join() === 'host,frp,file,apikey,totp,secret,provider,web-login', `the engine's SECRET_RE heads read: ${R.heads.join(', ')} (+ the agent namespace) — each held by a family`, R.heads);
+ok(R.heads.join() === 'host,frp,file,apikey,totp,secret,provider,web-login,proxy-login', `the engine's SECRET_RE heads read: ${R.heads.join(', ')} (+ the agent namespace) — each held by a family`, R.heads);
 ok(VI.PURPOSES === VK.CATEGORIES && VI.PURPOSE_IDS.join() === VK.CATEGORY_IDS.join(), 'the inventory\'s purposes ARE the registry\'s categories (one list — the rail reads it)');
 {
   const off = VK.FAMILIES.filter((f) => { const st = (f.stores && f.stores[0]) || 'secrets'; const fam = VK.familyOf(st, f.sample); return !fam || fam.id !== f.id || VI.purposeOf({ store: st, entry: f.sample }) !== f.category || VK.categoryOf(st, f.sample) !== f.category; });

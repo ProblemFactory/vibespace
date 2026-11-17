@@ -71,6 +71,8 @@ export const CENSUS = [
   ['browser-live-window.js', 'select', 'choice', 'a browser kernel prompt\'s choice field in its answer sheet (a select-popup\'s options — lane browser-surfaces)'],
   ['browser-new-profile.js', 'input', 'text+control', 'New profile…: the name, the CDP port and a chrome file\'s path (text); the provider / machine / build radios (control) — lane browser-admin 1, classified at verify r2; its who radios became the one picker at the 2.369.202 integration'],
   ['browser-new-profile.js', 'inputmode', 'text', 'New profile…: the CDP port box (`inputMode=numeric` — the phone keyboard\'s hint on that text box)'],
+  ['browser-proxy-field.js', 'input', 'text', 'B-8b87: a browser profile\'s proxy — its address, a new login\'s user name and password (text: typed, never driven by an agent; the password goes to the vault\'s own route at once)'],
+  ['browser-proxy-field.js', 'select', 'choice', 'B-8b87: the proxy\'s login — No login / a saved login for THAT address / New login… (choice)'],
   ['browser-passkeys-view.js', 'input', 'control', 'the Passkeys table\'s agents-off switch (a checkbox — lane passkey-ui; composed at the 2.369.261 integration)'],
   ['browser-replay-window.js', 'tabindex', 'widget', 'the replay window (← → Home End Space)'],
   ['browser-trace-view.js', 'input', 'control', 'the actions pane\'s "show page-size changes" checkbox (fitsToggle; the panel\'s record switches became ⋯ menu check rows — design 015)'],

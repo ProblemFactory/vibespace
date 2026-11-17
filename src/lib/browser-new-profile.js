@@ -22,6 +22,8 @@ import { providerRowsShown } from './browser-new-profile-model.js'; // lane ui-c
 import { buildRows, choiceOfRow, installHint, buildRefusalWords } from './browser-build-model.js'; // lane browser-admin 2a: the build section
 import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
 import { enterSubmits } from './chat-enter-keys.js';
+import { mountProxyField } from './browser-proxy-field.js'; // B-8b87: the proxy and its login (kept in the vault)
+import { proxyWords } from './browser-proxy-model.js';
 
 const DIALOG_ID = 'browser-new-profile-dialog';
 const jsonPost = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -129,6 +131,14 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   };
   syncWho();
 
+  // ── B-8b87: THE PROXY — the address alone and its login from the vault; offered for a browser THIS machine starts (a paired
+  //    machine's, or one VibeSpace only connects to, takes none — the server refuses it by name too) ──
+  const proxyWrap = el('div', 'bnew-proxy');
+  const proxyField = mountProxyField(proxyWrap, { fetchJson });
+  body.appendChild(proxyWrap);
+  const proxyOffered = () => adopt !== 'keep' && !st.host && st.provider !== 'cdp';
+  const syncProxy = () => { proxyWrap.style.display = proxyOffered() ? '' : 'none'; };
+
   // ── the refusal line + the footer ──
   const refusal = noteLine('bwho-refusal bnew-refusal', '', { warn: true });
   refusal.style.display = 'none';
@@ -181,6 +191,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     portRow.style.display = st.provider === 'cdp' ? '' : 'none';
   }
   function drawMachines() {
+    try { syncProxy(); } catch { /* drawn before the proxy section */ }
     if (adopt === 'keep') return;
     const list = machWrap.querySelector('.bnew-machines');
     const chosen = (st.hostRows || []).find((r) => r && r.id === st.provider);
@@ -220,6 +231,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   // rows yet (or none readable) = the default provider's, which offers one
   const buildChoiceOf = (id) => { const r = st.providers.find((x) => x && x.id === id); return r ? !!r.buildChoice : !st.providers.length; };
   function drawBuilds() {
+    try { syncProxy(); } catch { /* drawn before the proxy section */ }
     if (adopt === 'keep') return;
     if (!fromSession && st.cloneKey !== 'none') { buildWrap.style.display = 'none'; return; } // lane browser-profile-clone: a copy runs its source's build
     const show = buildChoiceOf(st.provider);
@@ -350,7 +362,11 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       if (!browser) { say(buildRefusalWords({ code: 'browser_choice_invalid' }, t)); if (buildPath) buildPath.focus(); return; }
     }
     const cloneFrom = !fromSession && st.cloneKey && st.cloneKey !== 'none' ? st.cloneKey : null;
-    const c = createBody({ label: nameInput.value, provider: st.provider, host: st.host, cdpPort: portInput.value, mode: whoMode(), who, adopt, browser, cloneFrom });
+    // B-8b87: the proxy read first — a new login is saved INTO the vault now (its password never rides the profile's request)
+    const pv = proxyOffered() ? await proxyField.read() : { ok: true, proxy: null, proxyCredential: null };
+    if (st.closed) return;
+    if (!pv.ok) { say(proxyWords(pv.code, t, pv.error)); if (pv.focus) pv.focus.focus(); return; }
+    const c = createBody({ label: nameInput.value, provider: st.provider, host: st.host, cdpPort: portInput.value, mode: whoMode(), who, adopt, browser, cloneFrom, proxy: pv.proxy, proxyCredential: pv.proxyCredential });
     if (!c.ok) { say(createRefusalWords({ code: c.code }, t)); (c.field === 'label' ? nameInput : c.field === 'cdpPort' ? portInput : picker).focus(); return; }
     st.busy = true; create.disabled = true; cancel.disabled = true; picker.setBusy(true);
     const cloneName = cloneFrom ? String(((st.cloneSources || []).find((x) => x && x.id === cloneFrom) || {}).label || cloneFrom) : '';

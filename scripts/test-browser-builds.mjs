@@ -1780,7 +1780,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const proxAnchor = '    const proxied = args.map(switchFormOf).filter((a) => PROXY_ARG_RE.test(a));'; // L1b r4: the rule reads the trimmed form
   const ENg = MUT.load('src/browser-engines.js', es.replace(ownAnchor, 'const OWN_ARG_RE = /^--(?:remote-debugging-(?:port|pipe|address)|user-data-dir)(?:=|$)/;').replace(proxAnchor, '    const proxied = [];'), 'old-own-args');
   ok(es.includes(ownAnchor) && es.includes(proxAnchor) && ENg.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--proxy-server=http://evil.test:8080'] } }, { id: EID }).ok === true, 'control (g): the base\'s own-argument rule ACCEPTS a plugin\'s --proxy-server — exactly what ⑦\'s V1 row catches');
-  const wrapAnchor = '    const egress = engine.egress ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || \'\', setting: engine.egress.setting, fallback: engine.egress.default }) : null;';
+  const wrapAnchor = '    const egress = engine.egress || pproxy ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || \'\', ...(engine.egress ? { setting: engine.egress.setting, fallback: engine.egress.default } : {}), ...(pproxy ? { proxy: pproxy } : {}) }) : null;';   // B-8b87: + a profile's proxy rides the same egress pair
   if (!ks.includes(wrapAnchor)) ok(false, 'control (h): the anchor (the keeper\'s wrap) is not in this tree', wrapAnchor);
   else await (async () => {
   const Kw = MUT.load('src/server/browser-keeper.js', ks.replace(wrapAnchor, '    const egress = null;'), 'no-wrap');

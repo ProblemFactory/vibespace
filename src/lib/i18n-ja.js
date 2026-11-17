@@ -13615,4 +13615,37 @@ export default {
   "{n} granted": "許可 {n} 件",
   "{n} of {m} account(s)": "{m} アカウント中 {n} 件",
   "{n} profile(s) · {m} saved login(s)": "プロファイル {n} 件 · 保存済みログイン {m} 件",
+  "proxy password not in the vault": "プロキシのパスワードが保管庫にありません", // B-8b87: a browser profile's proxy and its login
+  "Its proxy address carries its password, which is never used — «Move the password to the vault» in ⋯": "このプロキシのアドレスにはパスワードが含まれていますが、使われることはありません——⋯ の「パスワードを保管庫へ移す」で移せます", // B-8b87: a browser profile's proxy and its login
+  "proxy": "プロキシ", // B-8b87: a browser profile's proxy and its login
+  "Through its proxy {address}, with its login from the vault": "プロキシ {address} 経由（ログイン情報は保管庫から）", // B-8b87: a browser profile's proxy and its login
+  "Through its proxy {address}": "プロキシ {address} 経由", // B-8b87: a browser profile's proxy and its login
+  "Move the password to the vault": "パスワードを保管庫へ移す", // B-8b87: a browser profile's proxy and its login
+  "Its proxy address carries its password, which is never used — one press keeps it in the vault as this proxy's login and removes it from the profile": "このプロキシのアドレスにはパスワードが含まれていますが、使われることはありません——ワンタップでこのプロキシのログイン情報として保管庫に保存し、プロファイルからは削除します", // B-8b87: a browser profile's proxy and its login
+  "Proxy…": "プロキシ…", // B-8b87: a browser profile's proxy and its login
+  "This profile's proxy and its login (kept in the vault)": "このプロファイルのプロキシとそのログイン情報（保管庫に保存）", // B-8b87: a browser profile's proxy and its login
+  "Proxy of {label}": "{label} のプロキシ", // B-8b87: a browser profile's proxy and its login
+  "Its saved proxy address carries its password, which is never used. «Move the password to the vault» in ⋯ keeps it in one press — or give the address here and choose its login.": "保存されたプロキシのアドレスにはパスワードが含まれていますが、使われることはありません。⋯ の「パスワードを保管庫へ移す」ならワンタップで保存できます——またはここでアドレスを入力し、ログイン情報を選んでください。", // B-8b87: a browser profile's proxy and its login
+  "Applied at the browser's next start.": "ブラウザの次回起動時に反映されます。", // B-8b87: a browser profile's proxy and its login
+  "{label} goes through its proxy from its next start": "{label} は次回の起動からプロキシ経由になります", // B-8b87: a browser profile's proxy and its login
+  "{label} has no proxy from its next start": "{label} は次回の起動からプロキシを使いません", // B-8b87: a browser profile's proxy and its login
+  "Proxy": "プロキシ", // B-8b87: a browser profile's proxy and its login
+  "http, https or socks5 — the address alone; its login is kept in the vault. Empty: no proxy.": "http、https または socks5——アドレスだけを入力します。ログイン情報は保管庫に保存されます。空欄：プロキシなし。", // B-8b87: a browser profile's proxy and its login
+  "Proxy login": "プロキシのログイン", // B-8b87: a browser profile's proxy and its login
+  "Saved in the vault as this proxy's login — the browser never sees it.": "このプロキシのログイン情報として保管庫に保存されます——ブラウザからは見えません。", // B-8b87: a browser profile's proxy and its login
+  "No login": "ログインなし", // B-8b87: a browser profile's proxy and its login
+  "New login…": "新しいログイン情報…", // B-8b87: a browser profile's proxy and its login
+  "The proxy must be http://host:port, https://host:port or socks5://host:port.": "プロキシは http://ホスト:ポート、https://ホスト:ポート、socks5://ホスト:ポート のいずれかにしてください。", // B-8b87: a browser profile's proxy and its login
+  "A proxy's user name and password go in the vault — give the address alone, then choose its login below.": "プロキシのユーザー名とパスワードは保管庫に入れます——アドレスだけを入力し、下でログイン情報を選んでください。", // B-8b87: a browser profile's proxy and its login
+  "That login was saved for another proxy — choose this proxy's login, or make a new one.": "そのログイン情報は別のプロキシ用に保存されたものです——このプロキシのログイン情報を選ぶか、新しく作成してください。", // B-8b87: a browser profile's proxy and its login
+  "The vault is locked — unlock it in the Vault window, then save.": "保管庫はロックされています——保管庫ウィンドウでロックを解除してから保存してください。", // B-8b87: a browser profile's proxy and its login
+  "A browser profile's proxy works for browsers on this machine only, for now.": "現時点では、ブラウザのプロファイルのプロキシはこのマシン上のブラウザでのみ使えます。", // B-8b87: a browser profile's proxy and its login
+  "A new login needs its user name and its password.": "新しいログイン情報にはユーザー名とパスワードが必要です。", // B-8b87: a browser profile's proxy and its login
+  "This profile's proxy carries no password.": "このプロファイルのプロキシにはパスワードが含まれていません。", // B-8b87: a browser profile's proxy and its login
+  "The proxy could not be saved.": "プロキシを保存できませんでした。", // B-8b87: a browser profile's proxy and its login
+  "Could not move the password": "パスワードを移せませんでした", // B-8b87: a browser profile's proxy and its login
+  "{label}'s proxy password is in the vault now — the profile keeps the address alone": "{label} のプロキシのパスワードは保管庫に移りました——プロファイルにはアドレスだけが残ります", // B-8b87: a browser profile's proxy and its login
+  "Delete the proxy login \"{name}\"?": "プロキシのログイン情報「{name}」を削除しますか？", // B-8b87: a browser profile's proxy and its login
+  "Its password leaves the vault. A browser profile whose proxy uses it is refused at its next start until you choose a login again.": "パスワードは保管庫から削除されます。これを使うブラウザのプロファイルは、ログイン情報を選び直すまで次回の起動が拒否されます。", // B-8b87: a browser profile's proxy and its login
+  "A browser proxy's login — VibeSpace hands it to the proxy for the browser profile that names it; the browser never sees it": "ブラウザのプロキシのログイン情報——VibeSpace がそれを指定したブラウザのプロファイルのためにプロキシへ渡します。ブラウザからは見えません", // B-8b87: a browser profile's proxy and its login
 };
