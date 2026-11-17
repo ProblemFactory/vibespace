@@ -179,7 +179,6 @@ function factsFromSidecar(f) {
   return { v: FACTS_VERSION, fromStart: f.fromStart === true, cli: typeof f.cli === 'string' ? f.cli.slice(0, 32) : null,
     bg: Array.isArray(f.bg) ? bgOf(f.bg.map((t) => ({ task_id: t && t.id, task_type: t && t.type, description: t && t.description }))) : null,
     bgRaw: Number.isInteger(f.bgRaw) && f.bgRaw >= 0 ? f.bgRaw : null,
-    // an element that does not read back is never dropped silently: the list says it is not whole (unknown, said)
     // an element that does not read back is never dropped silently: it is COUNTED with those the bound let go (judged by the set alone)
     bgStarted: started, bgDropped: (Number.isInteger(f.bgDropped) && f.bgDropped >= 0 ? f.bgDropped : 0) + (f.bgStarted.length - started.length),
     bgAsk: asks, bgAskFull: f.bgAskFull === true || asks.length !== f.bgAsk.length,
@@ -258,12 +257,19 @@ function trackedFacts(st, { keeps = null, turn = null, levelDeclared = null } = 
   else if (st.cli === null) { out.background = null; out.backgroundWhy = WHY.noInitSeen; }   // work seen with no first record: a renamed init reads unknown
   else if (st.cli === '') { out.background = null; out.backgroundWhy = WHY.oldCli; }
   else if (levelMeasured(st.cli)) out.background = [];                               // never published on a MEASURED build = none
+  else if (!(/^\d+(\.\d+)*/.test(st.cli) && versionCmp(st.cli, LEVEL_MEASURED_TO) > 0)) { out.background = null; out.backgroundWhy = `its CLI version ${st.cli} is not measured for background tasks (measured ${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO})`; }   // BELOW the floor: nothing ever measured it — never asked
   else {
-    // piece 2b: the span is the FLOOR — a build whose own binary DECLARES the signal (read by the hub off the loop, once per build,
-    // kept: src/server/cli-model-catalog.js levelSignalOf) has it too; one that does not, or is not read yet, stays unknown, said
+    // piece 2b: the span is the FLOOR — a build ABOVE it whose own binary DECLARES the signal (read by the hub off the loop, once per
+    // build, kept: src/server/cli-model-catalog.js levelSignalOf) has it too; one that does not, whose bytes were read only in part,
+    // or that is not read yet, stays unknown, said
     let d = null; try { d = typeof levelDeclared === 'function' ? levelDeclared(st.cli) : null; } catch { d = null; }
     if (d === true) out.background = [];
-    else { out.background = null; out.backgroundWhy = d === false ? `its CLI ${st.cli} does not declare the background signal in its own record union` : `its CLI version ${st.cli} is outside the measured span (${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO}) and its binary has not been read for the background signal yet`; }
+    else {
+      out.background = null;
+      out.backgroundWhy = d === false ? `its CLI ${st.cli} does not declare the background signal in its own record union`
+        : d === 'partial' ? `its CLI ${st.cli}: the background signal was not found in the bytes read (the read stops 64 MiB past the model catalog) — whether it has it is unknown`
+        : `its CLI version ${st.cli} is above the measured span (${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO}) and its binary has not been read for the background signal yet`;
+    }
   }
   const tools = st && Array.isArray(st.tools) ? st.tools : [];
   const timerTool = tools.find((n) => TIMER_TOOLS.includes(n));

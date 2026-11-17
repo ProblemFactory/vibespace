@@ -60,7 +60,12 @@ console.log('B · the catalog\'s ONE read of the binary carries the fact (src/se
   // the window: past the catalog's parts the scan goes on at most LEVEL_SCAN_MAX (as the plan values do) — a declaration beyond it is not read
   const far = cli('2.1.992'); const fd = fs.openSync(far, 'r+'); const tail = 80 << 20; fs.ftruncateSync(fd, tail); fs.writeSync(fd, DECL, tail); fs.closeSync(fd);
   const ef = await CAT.readBinary(far, {});
-  ok(CAT.LEVEL_SCAN_MAX === 64 << 20 && ef.state === 'read' && ef.level && ef.level.declared === false, 'a declaration past the bound (80 MiB into a sparse file, the window ends 64 MiB after the catalog) is not read: the scan stays bounded', ef.level);
+  ok(CAT.LEVEL_SCAN_MAX === 64 << 20 && ef.state === 'read' && ef.level && ef.level.declared === false && ef.level.whole === false && no.level.whole === true,
+    'a declaration past the bound (80 MiB into a sparse file, the window ends 64 MiB after the catalog) is not read: the scan stays bounded — and the entry says the file was NOT read whole (a small file read to its end says it was)', { far: ef.level, small: no.level });
+  const dP = path.join(dir, 'dataP');
+  await CAT.noteBinary({ cmd: far, version: '2.1.992', dataDir: dP, which: (c) => c, event: () => { }, log: () => { } });
+  ok(CAT.levelSignalOf('2.1.992') === 'partial', 'levelSignalOf says «partial» for a binary read only in part — never false («does not declare»)');
+  CAT._reset();
   const never = () => new Promise(() => { });
   const cut = await CAT.readBinary(cli('2.1.993', DECL), { open: never, timeoutMs: 20 });
   ok(cut.retry === true && cut.level === undefined, 'a read cut short by its bound says nothing about the signal (tried again at a later tick)', { retry: cut.retry, level: cut.level });
@@ -103,7 +108,11 @@ console.log('C · the hub\'s judgment: the span is the FLOOR (src/conversation-f
   const t = (s, d) => CF.trackedFacts(s, { ...K, levelDeclared: d });
   ok(Array.isArray(t(st('2.1.322'), () => true).background) && t(st('2.1.322'), () => true).background.length === 0, 'a build outside the span whose binary DECLARES the signal: a never-published set is known-empty');
   ok(t(st('2.1.322'), () => false).background === null && /does not declare the background signal/.test(t(st('2.1.322'), () => false).backgroundWhy), 'a build whose binary does not declare it: unknown, said');
-  ok(t(st('2.1.322'), () => null).background === null && /outside the measured span .* has not been read for the background signal yet/.test(t(st('2.1.322'), () => null).backgroundWhy)
+  ok(t(st('2.1.322'), () => 'partial').background === null && /not found in the bytes read/.test(t(st('2.1.322'), () => 'partial').backgroundWhy) && !/does not declare/.test(t(st('2.1.322'), () => 'partial').backgroundWhy),
+    '«could not look» is not «does not declare»: a binary read only in part reads unknown, «not found in the bytes read»');
+  ok(t(st('2.1.200'), () => true).background === null && /2\.1\.200 is not measured for background tasks/.test(t(st('2.1.200'), () => true).backgroundWhy) && t(st('2.1.280'), () => true).background === null,
+    'MUST (主开发 14:26Z) BELOW THE FLOOR STAYS UNKNOWN: an older build whose binary declares the signal is never asked — nothing ever measured it');
+  ok(t(st('2.1.322'), () => null).background === null && /above the measured span .* has not been read for the background signal yet/.test(t(st('2.1.322'), () => null).backgroundWhy)
     && t(st('2.1.322'), () => { throw new Error('x'); }).background === null && t(st('2.1.322')).background === null, 'not read yet, a reader that throws, or no reader: unknown, said');
   ok(Array.isArray(t(st('2.1.312'), () => false).background), 'inside the span the tracked dumps decide (the floor)');
   const open = st('2.1.322', [{ type: 'system', subtype: 'task_started', task_id: 't1', task_type: 'local_bash', is_backgrounded: true }]);
@@ -125,6 +134,10 @@ console.log('C · the hub\'s judgment: the span is the FLOOR (src/conversation-f
   if (src.split(N).length !== 2) throw new Error('anchor missing: the floor');
   const mC = mutantCopies('level-signal-c', REPO).load('src/conversation-facts.js', src.replace(N, '    {'), 'span-only');
   ok(mC.trackedFacts(st('2.1.322'), { ...K, levelDeclared: () => true }).background === null, 'RED: the span alone reads a declaring 2.1.322 «unknown» — the feature off from the first build above the span');
+  const NF = "  else if (!(/^\\d+(\\.\\d+)*/.test(st.cli) && versionCmp(st.cli, LEVEL_MEASURED_TO) > 0)) { out.background = null; out.backgroundWhy = `its CLI version ${st.cli} is not measured for background tasks (measured ${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO})`; }   // BELOW the floor: nothing ever measured it — never asked\n";
+  if (src.split(NF).length !== 2) throw new Error('anchor missing: below the floor');
+  const mF = mutantCopies('level-signal-floor', REPO).load('src/conversation-facts.js', src.replace(NF, ''), 'below-floor-asked');
+  ok(Array.isArray(mF.trackedFacts(st('2.1.200'), { ...K, levelDeclared: () => true }).background), 'RED: without the floor\'s branch a 2.1.200 build whose binary declares the signal reads «owns nothing» — on a build nothing ever measured');
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

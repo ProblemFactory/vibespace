@@ -87,7 +87,7 @@ const isPlans = (p) => !!p && typeof p === 'object' && !Array.isArray(p) && Arra
   && p.types.every((x) => isStr(x, 40) && /^[a-z0-9_]{1,40}$/.test(x)) && [...p.tiers, ...p.withheld].every((x) => isStr(x, 60) && /^default_claude_[a-z0-9_]{1,40}$/.test(x))
   && !!p.orgTypes && typeof p.orgTypes === 'object' && !Array.isArray(p.orgTypes) && Object.keys(p.orgTypes).every((k) => p.types.includes(k) && isStr(p.orgTypes[k], 60))
   && p.anchor === (p.types.length > 0) && p.tiers.every((x) => !CPC.WITHHELD_TIERS.includes(x)) && p.withheld.every((x) => CPC.WITHHELD_TIERS.includes(x));
-const isLevel = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.declared === 'boolean' && (v.at === null || (Number.isInteger(v.at) && v.at >= 0));
+const isLevel = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.declared === 'boolean' && (v.at === null || (Number.isInteger(v.at) && v.at >= 0)) && (v.whole === undefined || typeof v.whole === 'boolean');
 const isEntry = (e) => {
   if (!e || typeof e !== 'object' || Array.isArray(e) || (e.state !== 'read' && e.state !== 'unreadable') || !Array.isArray(e.models) || !Array.isArray(e.refused || [])) return false;
   if (!e.models.every(isModelRow)) return false;
@@ -185,7 +185,8 @@ async function readBinary(file, { version = null, expect = null, timeoutMs = REA
         if (partsAt < 0 && anchorAt >= 0 && ident) partsAt = pos;
       }
       entry.plans = plans.result();
-      if (!abandoned) entry.level = { declared: levelAt >= 0, at: levelAt >= 0 ? levelAt : null };   // the window was read whole
+      // `whole`: the scan reached the file's end. Not found in bytes that were not all read (the window's bound) is NOT «does not declare»
+      if (!abandoned) entry.level = { declared: levelAt >= 0, at: levelAt >= 0 ? levelAt : null, whole: pos >= size };
       if (ident) { entry.builtAt = ident.builtAt; entry.evidence.versionString = ident.version; entry.evidence.versionAgrees = !version || ident.version === version; if (!entry.cli) entry.cli = ident.version; }
       if (anchorAt < 0) { entry.reason = { code: 'no-anchor', at: 0 }; return entry; }
       const from = Math.max(0, anchorAt - 4096);
@@ -330,8 +331,9 @@ function onView(fn) {
 }
 function view() { const l = st.ledger; return l && l.current ? viewOf(l.binaries[l.current]) : null; }
 /** majordomo piece 2b: does the build `version` DECLARE the background level signal, as this reader found in its binary? →
- *  true | false | null (no binary of that build read by this reader yet). IN MEMORY: the ledger the boot loaded and the ticks
- *  keep — no file is read here (src/server/conversation-facts.js asks it per row). */
+ *  true | false (the whole file read, not found) | 'partial' (not found in the bytes read — the window's bound came first: «could
+ *  not look», never «does not declare») | null (no binary of that build read by this reader yet). IN MEMORY: the ledger the boot
+ *  loaded and the ticks keep — no file is read here (src/server/conversation-facts.js asks it per row). */
 function levelSignalOf(version) {
   const l = st.ledger;
   if (!l || typeof version !== 'string' || !version) return null;
@@ -340,7 +342,7 @@ function levelSignalOf(version) {
     if (!e || e.reader !== CMC.READER_VERSION || e.retry || !isLevel(e.level)) continue;
     if (((e.evidence && e.evidence.versionString) || e.cli) !== version) continue;
     if (e.level.declared) return true;
-    out = false;
+    if (e.level.whole === true) out = false; else if (out === null) out = 'partial';
   }
   return out;
 }

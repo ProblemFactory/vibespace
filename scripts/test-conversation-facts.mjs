@@ -109,9 +109,9 @@ function unknownLegs(M) {
   const nv = obs([init()]);
   ok(nv.ch[0] === true && nv.st.cli === '' && nv.t.background === null && nv.t.backgroundWhy === CF.WHY.oldCli, 'MUST 3 an init that states NO version records «stated none» (a change) — the set reads unknown, never «no background work»', nv.t);
   const newer = obs([init('2.1.999')]);
-  ok(newer.t.background === null && /2\.1\.999 is outside the measured span/.test(newer.t.backgroundWhy) && newer.t.backgroundWhy.includes(CF.LEVEL_MEASURED_TO), 'MUST 1 a NEWER CLI the tree has not measured: unknown, and it says the span (a release moves the bound — no wrapper does)', newer.t.backgroundWhy);
+  ok(newer.t.background === null && /2\.1\.999 is above the measured span/.test(newer.t.backgroundWhy) && newer.t.backgroundWhy.includes(CF.LEVEL_MEASURED_TO), 'MUST 1 a NEWER CLI the tree has not measured: unknown, and it says the span (a release moves the bound — no wrapper does)', newer.t.backgroundWhy);
   const older = obs([init('2.1.200')]);
-  ok(older.t.background === null && /outside the measured span/.test(older.t.backgroundWhy), 'an older build outside the span: unknown too');
+  ok(older.t.background === null && /2\.1\.200 is not measured/.test(older.t.backgroundWhy), 'an older build below the span: unknown too (never asked of its binary)');
   const seen = obs([init('2.1.999'), { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'x', task_type: 'local_bash', description: 'a server' }] }]);
   ok(seen.ch[1] === true && seen.t.background.length === 1, 'a set SEEN is the set on any build, measured or not (the level signal is the full set)');
   const helper = obs([init('2.1.312'), { type: 'system', subtype: 'background_tasks_changed', parent_tool_use_id: 'toolu_1', tasks: [{ task_id: 'y' }] }]);
@@ -783,13 +783,15 @@ console.log('G · round three: one bound for the tasks, the measured census repl
   CF.factsStep(stK, { type: 'system', subtype: 'task_notification', task_id: 'fine', status: 'completed' }, 6); CF.factsStep(stK, { type: 'system', subtype: 'background_tasks_changed', tasks: [] }, 7);
   ok(odd.seen.length === CF.SEEN_MAX && odd.seenFull === true && !fine.seenFull && Array.isArray(tk.background) && tk.background.length === 1 && Array.isArray(CF.trackedFacts(stK, K).background) && CF.trackedFacts(stK, K).background.length === 0,
     'MUST 1 the seventeenth kind FLAGS THAT TASK only (its ending record may be the one not kept: it is judged by the set alone); the other task and the conversation stay known — busy while the set names one, known-empty after', { odd: { n: odd.seen.length, full: odd.seenFull }, fine });
-  const mK2 = mut("        else if (!t.seenFull) { t.seenFull = true; changed = true; }          // this task's kinds overflow: it marks ITSELF",
-    "        else if (!st.bgKindsFull) { st.bgKindsFull = true; changed = true; }", 'whole-conversation-mark');
-  const srcM = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
+  // RED at the HUB's judgment (主开发 14:26Z): without the flag's test in bgDoubt the odd task — unnamed, its ending maybe the kind not
+  // kept — reads the whole conversation unknown
+  const mK2 = mut("  const omitted = (Array.isArray(st.bgStarted) ? st.bgStarted : []).find((t) => t && !t.seenFull && !(Array.isArray(t.seen) && t.seen.some(TASK_ENDS)) && !named.has(t.id));",
+    "  const omitted = (Array.isArray(st.bgStarted) ? st.bgStarted : []).find((t) => t && !(Array.isArray(t.seen) && t.seen.some(TASK_ENDS)) && !named.has(t.id));", 'flag-not-read');
   const stK2 = mK2.factsFresh(); mK2.factsStep(stK2, init(), 1); mK2.factsStep(stK2, started('odd'), 2);
   for (let i = 0; i <= mK2.SEEN_MAX; i++) mK2.factsStep(stK2, { type: 'system', subtype: 'task_updated', task_id: 'odd', patch: { status: 'phase_' + i } }, 3);
-  ok(stK2.bgKindsFull === true && !stK2.bgStarted[0].seenFull && srcM.includes('t.seenFull = true') && !/bgStartedFull/.test(srcM),
-    'MUST 1 RED: the mark on the whole conversation (round three\'s shape) instead of the task — the source keeps the per-task flag and no sticky list mark');
+  mK2.factsStep(stK2, { type: 'system', subtype: 'background_tasks_changed', tasks: [] }, 4);
+  ok(stK2.bgStarted[0].seenFull === true && mK2.trackedFacts(stK2, K).background === null && /omits a task it started/.test(mK2.trackedFacts(stK2, K).backgroundWhy),
+    'MUST 1 RED: the hub without the flag\'s test — the odd task (flagged, unnamed) reads the conversation «background unknown»');
   // MUST 2 — the measured census (主开发, 2.1.322) replayed in order: busy at every step, empty at the end
   const ten = fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.322-background-kinds.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const stC = CF.factsFresh(); CF.factsStep(stC, init(), 1);
