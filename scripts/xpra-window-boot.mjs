@@ -58,7 +58,22 @@ export async function bootXpraWindow(part) {
   const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
   const skip = (n, why) => { skipped++; console.log(`  ⚠ SKIP ${n}: ${why}`); };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch {} if (v) return v; await sleep(step); } return null; };
+  // B-baa5 ONE BOUND FOR EVERY CALL (the .393 after-claim: test-desktop-xpra-window-close hung inside §10h on both tries; a CDP
+  // call was one Promise resolved only by its reply, a fetch had no signal, so until(…, ms) was not ms): every CDP call rejects
+  // BY NAME at CDP_CALL_MS (a call that waits in the page on purpose passes its own `ms`) and when its socket closes, every
+  // node-side fetch without a signal of its own is aborted BY NAME at FETCH_CALL_MS — so until(…, ms) ends within ms plus ONE
+  // call's own bound, never for ever, and a until() that ends empty after a bounded call failed SAYS that call's name. r2 (the
+  // batch's adversarial read): until() AWAITS each call — dropping one that was still out made a slow-but-true read (a digit
+  // key's Ctrl+C read at 200 ms left) count as unseen, and left its page work (a confirm's click) to land in the next step
+  const CDP_CALL_MS = 60000;    // 3× the longest in-page wait a part asks (openPage's app wait passes its own)
+  const FETCH_CALL_MS = 60000;
+  const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms; let named = null; while (Date.now() < t) { let v = null; try { v = await fn(); } catch (e) { if (/^(cdp|fetch) /.test(String(e && e.message))) named = e; } if (v) return v; await sleep(step); } if (named) console.log(`    (until: its last bounded call failed — ${String(named.message).slice(0, 300)})`); return null; };
+  const rawFetch = globalThis.fetch;
+  globalThis.fetch = (u, o = {}) => {
+    const { boundMs = FETCH_CALL_MS, ...init } = o || {};
+    if (init.signal) return rawFetch(u, init);
+    return rawFetch(u, { ...init, signal: AbortSignal.timeout(boundMs) }).catch((e) => { throw (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) ? new Error(`fetch ${String(u).slice(0, 160)}: no answer in ${boundMs} ms`) : e; });
+  };
   // EVIDENCE DEADLINES (lane xpra-control-judge, 2.369.208): the pre-fix CONTROLS reddened at load 35–67 in int205–int207 and
   // were green alone — they judged on the wall clock (a 20 s boot loop, a 3 s nap before reading X, a one-shot X read, a 45 s
   // title bound). A wait now ends on the event it is about; its deadline only fails a leg whose evidence NEVER
@@ -196,15 +211,24 @@ export async function bootXpraWindow(part) {
   const target = await until(async () => (await cdpTargets()).find((t) => t.type === 'page'), 20000, 250);
   async function page(t) {
     const ws = new WebSocket(t.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
-    await new Promise((r) => ws.on('open', r));
+    await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
     let seq = 0; const pend = new Map(); const logs = [];
     ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } else if (m.method === 'Runtime.consoleAPICalled') logs.push((m.params.args || []).map((a) => a.value ?? a.description ?? '').join(' ')); });
-    const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); ws.send(JSON.stringify({ id, method, params })); });
-    const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || JSON.stringify(r.exceptionDetails))); return r.result.value; };
+    ws.on('close', () => { for (const [id, f] of [...pend]) { pend.delete(id); f({ closed: true }); } });   // B-baa5: nothing waits on a closed socket
+    // B-baa5: the call, named — its method, what it evaluated, and the page it was asked of (the target's url and title)
+    const named = async (method, params, why) => { let at = 'unknown'; try { const x = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`, { boundMs: 5000 })).json()).find((y) => y.id === t.id); at = x ? `${x.url} «${x.title}»` : 'gone'; } catch {} return new Error(`cdp ${method}: ${why}${params && params.expression ? ` — ${String(params.expression).slice(0, 100)}` : ''} (the page: ${at})`); };
+    const cdp = (method, params = {}, { ms = CDP_CALL_MS } = {}) => new Promise((res, rej) => {
+      if (ws.readyState !== 1) { named(method, params, 'the page\'s socket is closed').then(rej); return; }
+      const id = ++seq;
+      const tm = setTimeout(() => { if (pend.delete(id)) named(method, params, `no answer in ${ms} ms`).then(rej); }, ms);
+      pend.set(id, (m) => { clearTimeout(tm); if (m.closed) named(method, params, 'the page\'s socket closed before its answer').then(rej); else if (m.error) rej(new Error(m.error.message)); else res(m.result); });
+      ws.send(JSON.stringify({ id, method, params }));
+    });
+    const evalJs = async (expr, { ms } = {}) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }, ms ? { ms } : undefined); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || JSON.stringify(r.exceptionDetails))); return r.result.value; };
     await cdp('Page.enable'); await cdp('Runtime.enable');
     return { ws, cdp, evalJs, logs, close: () => { try { ws.close(); } catch {} } };
   }
-  const openPage = async (p, origin) => { await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await p.cdp('Page.navigate', { url: `${origin}/` }); await sleep(1500); await p.evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })'); await until(() => p.evalJs('app.layoutManager && app.layoutManager._restoring === false'), 12000, 250); };
+  const openPage = async (p, origin) => { await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await p.cdp('Page.navigate', { url: `${origin}/` }); await sleep(1500); await p.evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })', { ms: 90000 }); await until(() => p.evalJs('app.layoutManager && app.layoutManager._restoring === false'), 12000, 250); };
   const trustedClickAt = async (p, x, y, modifiers = 0, button = 'left') => {
     await p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, modifiers });
     await p.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, clickCount: 1, modifiers });
@@ -373,11 +397,22 @@ export async function bootXpraWindow(part) {
     process.exit(failed ? 1 : 0);
   };
 
+  // B-baa5 THE BOUND, PROVEN on Chrome — in the part that hung (r2: once per family, not a second or more on every part):
+  // a call the page never answers fails BY NAME at its own bound, and until() over such calls ends at its bound plus one
+  // call's (before: both waited for ever and the part held its lock until its budget killed it)
+  if (target && part === 'test-desktop-xpra-window-close') {
+    const bp = await page(target), t0 = Date.now();
+    const said = await bp.cdp('Runtime.evaluate', { expression: 'new Promise(() => {})', awaitPromise: true }, { ms: 400 }).then(() => 'answered', (e) => String(e.message));
+    const t1 = Date.now(), u = await until(() => bp.cdp('Runtime.evaluate', { expression: 'new Promise(() => {})', awaitPromise: true }, { ms: 300 }), 600, 100), t2 = Date.now();
+    bp.close();
+    check(`B-baa5 one bound for every call: a CDP call the page never answers fails by name at its bound («${said.slice(0, 120)}» after ${t1 - t0} ms) and until(…, 600) over such calls ends at its bound plus one call's (after ${t2 - t1} ms)`, /^cdp Runtime\.evaluate: no answer in 400 ms/.test(said) && u === null && t2 - t1 < 10000, { said, ms: [t1 - t0, t2 - t1] });
+  }
+
   return { agentTokens, allDigits7, appsOf, bin, BOOT_DEADLINE_MS, bootedCopy, bootServer, CALC6, CDP_PORT, cdpTargets, check, chordC7, CHROME,
   chrome, COPY_RING_LINES, copyBack7, crashed, ctlServers, D, devHomes, devProcs, DIGITS7, dropPage, ensureActive, FAKE_BIN, FAKE_CLAUDE, fakeHome,
   finish, fixtureLitter, HIT7, HOSTNAME, hostResolves, identity7, KEY_DEADLINE_MS, keyOf, keySeen7, LAST7, launchOn, markerSweep, measurePane, mkPage,
   newPage, openPage, page, PORT, R2, REACH_DEADLINE_MS, reach7, readyOn, REAL_PROJECTS, realBefore, rebaseline, recordedApps, recordedPids, repo,
   revealBars, ringTail, RUNTIME, SEAT, SETTLE_DEADLINE_MS, sizeWinOn, skip, sleep, spawnCopy, srvEnv, srvLog, target, threw, TITLE_DEADLINE_MS,
   trustedClickAt, typedFile, until, VNC_ENV, WebSocket, WIN, worktrees, wt, XAGREE_DEADLINE_MS, XAUTH, XCLIP, xclipKids, XDOTOOL, xenvFor, XPRA,
-  xpraVersion, xq, XTERM };
+  xpraVersion, xq, XTERM, CDP_CALL_MS, FETCH_CALL_MS };
 }

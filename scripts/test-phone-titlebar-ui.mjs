@@ -151,14 +151,29 @@ else await (async () => {
   const sock = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r, e) => { sock.on('open', r); sock.on('error', e); });
   let seq = 0; const pend = new Map(); const pageErrors = [];
+  sock.on('close', () => { for (const [id, f] of [...pend]) { pend.delete(id); f({ closed: true }); } });   // B-baa5 (B-016d): nothing waits on a closed socket
   sock.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } else if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params?.exceptionDetails?.exception?.description || m.params?.exceptionDetails?.text); });
-  const cdp = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); sock.send(JSON.stringify({ id, method, params })); });
+  // B-baa5 (merged B-016d — the r6 path's first device/load hung under load 3–4: the page target about:blank, its renderers idle,
+  // a Runtime.evaluate unanswered, the heavy lock held until the caller's 590 s cap): every call has a bound of its own and
+  // fails BY NAME past it — its method, what it evaluated, and the page it was asked of (the target's url and title)
+  const CDP_CALL_MS = 45000;
+  const named = async (method, params, why) => { let at = 'unknown'; try { const x = (await (await fetch(`http://127.0.0.1:${CDP}/json`, { signal: AbortSignal.timeout(5000) })).json()).find((y) => y.id === target.id); at = x ? `${x.url} «${x.title}»` : 'gone'; } catch { } return new Error(`cdp ${method}: ${why}${params && params.expression ? ` — ${String(params.expression).slice(0, 100)}` : ''} (the page: ${at})`); };
+  const cdp = (method, params = {}, { ms = CDP_CALL_MS } = {}) => new Promise((r, j) => {
+    const id = ++seq;
+    const tm = setTimeout(() => { if (pend.delete(id)) named(method, params, `no answer in ${ms} ms`).then(j); }, ms);
+    pend.set(id, (m) => { clearTimeout(tm); if (m.closed) named(method, params, 'the page\'s socket closed before its answer').then(j); else r(m); });
+    sock.send(JSON.stringify({ id, method, params }));
+  });
   const evalJs = async (expr) => {
     const r = (await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true })).result || {};
     if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
     return r.result?.value;
   };
-  const waitFor = async (expr, ms = 10000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch { } await sleep(120); } try { return !!(await evalJs(expr)); } catch { return false; } };
+  // B-baa5 r2 (the batch's adversarial read: a dead page cost three bounded calls here — the loop's, the last ask's, load()'s
+  // next — before anything was named, past the caller's cap late in a run): a call that went past ITS bound is a page that
+  // answers nothing, so the wait fails BY NAME at once, never asking again
+  const deadPage = (e) => /^cdp \S+: (no answer in|the page's socket closed)/.test(String(e && e.message));
+  const waitFor = async (expr, ms = 10000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch (e) { if (deadPage(e)) throw e; } await sleep(120); } try { return !!(await evalJs(expr)); } catch (e) { if (deadPage(e)) throw e; return false; } };
   await cdp('Runtime.enable'); await cdp('Page.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
   const device = async (w, h, { mouse = false } = {}) => {
