@@ -63,7 +63,7 @@ fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(ROOT, { recursive: true });
 
 // ── the vendor rows: the SHIPPED declarations + Slack / Telegram as fixtures (spec §2.2, vendor facts S4 / T1–T2) ──
-const SLACK = { receive: 'poll', history: 'page', sendAs: ['user'], identityMarking: 'unknown', threads: { read: 'vendor', replyInto: true, listing: 'separate', placements: ['chat', 'thread', 'thread+chat'], rootReply: 'thread' } };
+const SLACK = { receive: 'poll', history: 'page', sendAs: ['user'], identityMarking: 'unknown', threads: { read: 'vendor', replyInto: true, listing: 'separate', placements: ['chat', 'thread', 'thread+chat'], filePlacements: ['chat', 'thread'], rootReply: 'thread' }, sendAttachments: { maxCount: 10, maxTotalBytes: 25e6, withText: true, alone: true } };
 const TELEGRAM = { receive: 'push', pushTransport: 'long-poll', pushAckBudgetMs: 3000, history: 'none', sendAs: ['bot'], identityMarking: 'marked', threads: { read: 'chain', replyInto: false, listing: 'none', placements: ['chat', 'quote'], rootReply: 'quote' } };
 const VENDORS = { lark: lark.caps, slack: SLACK, telegram: TELEGRAM, gmail: gmail.caps, agents: agents.caps, webhook: webhook.caps, fake: fake.fakePoll.caps, 'fake-push': fake.fakePush.caps };
 
@@ -117,6 +117,19 @@ console.log('① the placement table per vendor (PURE policy)');
   ok(nd.code === 'placement-not-offered' && J(nd.offered) === J(['chat', 'quote', 'thread']) && nd.placement === 'thread+chat' && /offered here: chat, quote, thread/.test(nd.error), 'a refusal NAMES the placement asked and what the channel offers (the agent reads it verbatim)', J(nd));
   const pit = P.placementVerdict({ requested: 'quote', replyTo: 'm-1', caps: SLACK });
   ok(pit.why === 'not-declared' && /thread\+chat \(in the thread and also in the chat\)/.test(pit.error), 'Slack offers no quote — refused not-declared, the offered list says what thread+chat means', pit.error);
+  // B-09d2 (fb-69c60c1b65: a Slack reply with files and --in-thread --also-in-chat was accepted, approved and sent nothing):
+  // files ride only the placements the row's `filePlacements` takes — refused HERE, before a proposal exists
+  const fv = (requested, files, caps = SLACK) => P.placementVerdict({ requested, replyTo: requested === 'chat' ? null : 'm-1', caps, files });
+  const F9 = { both: fv('thread+chat', 2), thread: fv('thread', 2), chat: fv('chat', 1), norm: fv(null, 1), noFiles: fv('thread+chat', 0), lark: fv('thread', 3, lark.caps), larkQuote: fv('quote', 1, lark.caps) };
+  ok(F9.both.code === 'placement-not-offered' && F9.both.why === 'with-files' && F9.both.placement === 'thread+chat' && J(F9.both.offered) === J(['chat', 'thread']) && /--in-thread --also-in-chat with files/.test(F9.both.error) && /nothing was created/.test(F9.both.error)
+    && F9.thread.ok && F9.thread.placement === 'thread' && F9.chat.ok && F9.norm.ok && F9.norm.placement === 'thread' && F9.noFiles.ok && F9.noFiles.placement === 'thread+chat' && F9.lark.ok && F9.larkQuote.ok
+    && J(P.filePlacementsOf(SLACK)) === J(['chat', 'thread']) && J(P.filePlacementsOf(lark.caps)) === J(P.placementsOf(lark.caps)),
+    'B-09d2 THE VERDICT WITH ITS FILES: on Slack a reply with files in the thread AND the chat is refused (placement-not-offered, why with-files, offered chat / thread, the flags named, nothing created); files into the thread, the chat, or by the root norm pass; no files ⇒ thread+chat as before; a row with no filePlacements (Lark) takes files in every placement it offers', F9);
+  const SLACK_REAL = require(path.join(REPO, 'src/channels/slack.js')).caps;
+  const capsBad = (over) => { try { CH.validateCaps('x-files', { ...SLACK_REAL, ...over }); return null; } catch (e) { return String(e.message || e); } };
+  const C9 = { real: capsBad({}), notDeclared: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: ['quote'] } }), notList: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: 'chat' } }), noFiles: capsBad({ sendAttachments: null }) };
+  ok(C9.real === null && /filePlacements must be a list of the declared placements/.test(C9.notDeclared || '') && /filePlacements must be a list/.test(C9.notList || '') && /sends no attachments/.test(C9.noFiles || '') && J(SLACK_REAL.threads.filePlacements) === J(['chat', 'thread']),
+    'B-09d2 THE CONTRACT: Slack\'s shipped row declares filePlacements chat / thread and passes validateCaps; a placement it does not offer, a non-list, and filePlacements on an adapter that sends no attachments are each refused by name', C9);
   // the pre-enum reading (a suite's scripted module) and the CLAMP (a declaration can never widen a control)
   const LEGACY = { sendAs: ['user'], threads: { read: 'vendor', replyInto: true, listing: 'inline' } };
   ok(P.rootReplyOf(LEGACY) === 'quote' && P.rootReplyOf({ sendAs: ['user'] }) === 'quote' && P.rootReplyOf({ sendAs: [] }) === null, 'a row with no `placements` reads as the pre-enum contract: a reply in the list (quote) is its norm');
@@ -251,7 +264,7 @@ async function engineLeg() {
   const sent = {};
   const modFor = (kind, threads) => ({
     kind,
-    caps: { receive: 'poll', history: 'page', pollInterval: { hot: 30, cold: 300, floor: 10 }, listConversations: true, sendAs: ['user'], identityMarking: 'none', identityMarkingWhere: null, identityMarkingText: null, tosRisk: 'none', idempotency: 'key', threading: 'thread-id', editSent: false, readReceipts: false, attachments: 'none', threads },
+    caps: { ...(threads.filePlacements ? { sendAttachments: { maxCount: 10, maxTotalBytes: 25e6, withText: true } } : {}), receive: 'poll', history: 'page', pollInterval: { hot: 30, cold: 300, floor: 10 }, listConversations: true, sendAs: ['user'], identityMarking: 'none', identityMarkingWhere: null, identityMarkingText: null, tosRisk: 'none', idempotency: 'key', threading: 'thread-id', editSent: false, readReceipts: false, attachments: 'none', threads },
     create() {
       const recs = [mint(kind, 'm-1', 'a plain question', {}, 1), mint(kind, 'm-root', 'the topic head', { threadKey: 'omt_t' }, 2), mint(kind, 'm-r1', 'a reply inside', { threadKey: 'omt_t', replyTo: 'm-root', root: 'm-root' }, 3)];
       let n = 0;
@@ -268,7 +281,7 @@ async function engineLeg() {
   const LK = 'pl-lark', SK = 'pl-slack';
   const registry = CH.createChannelRegistry();
   registry.register(modFor(LK, { read: 'vendor', replyInto: true, listing: 'inline', placements: ['chat', 'quote', 'thread'], rootReply: 'quote' }));
-  registry.register(modFor(SK, { read: 'vendor', replyInto: true, listing: 'inline', placements: ['chat', 'thread', 'thread+chat'], rootReply: 'thread' }));
+  registry.register(modFor(SK, { read: 'vendor', replyInto: true, listing: 'inline', placements: ['chat', 'thread', 'thread+chat'], filePlacements: ['chat', 'thread'], rootReply: 'thread' }));
   const dir = path.join(ROOT, 'engine');
   fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
   const row = (id) => ({ id, kind: id, label: id, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: null, scan: null });
@@ -294,6 +307,12 @@ async function engineLeg() {
   R.sRoot = await eng.propose(AG, SK, CID, { text: 's', replyTo: 'm-1' });
   R.sQuote = await eng.propose(AG, SK, CID, { text: 'sq', replyTo: 'm-1', placement: 'quote' });
   R.sBoth = await eng.propose(AG, SK, CID, { text: 'sb', replyTo: 'm-1', placement: 'thread+chat' });
+  // B-09d2: WITH FILES, thread+chat is refused at submit — nothing is created; into the thread it is filed
+  const FILE = [{ name: 'notes.txt', data: Buffer.from('the notes').toString('base64') }];
+  const fb0 = count();
+  R.sFilesBoth = await eng.propose(AG, SK, CID, { text: 'sf', replyTo: 'm-1', placement: 'thread+chat', attachments: FILE });
+  R.filesCreatedOnRefusal = count() - fb0;
+  R.sFilesThread = await eng.propose(AG, SK, CID, { text: 'st', replyTo: 'm-1', placement: 'thread', attachments: FILE });
   // a proposal stored BEFORE the enum: only `inThread` (the alias) — read and sent as thread
   const legacyId = 'p-legacy-1';
   await eng.store.outbox.update((ob) => { const src = ob.proposals[R.thread.proposal.id]; const q = JSON.parse(JSON.stringify(src)); delete q.placement; delete q.replyQuote; delete q.placementDefaulted; q.id = legacyId; q.text = 'legacy'; q.originalText = 'legacy'; ob.proposals[legacyId] = q; });
@@ -309,6 +328,8 @@ async function engineLeg() {
 {
   const R = await engineLeg();
   ok(R.logged, 'setup: the three messages are in the log (a plain one, a vendor thread\'s root, a reply inside it)');
+  ok(R.sFilesBoth.ok === false && R.sFilesBoth.code === 'placement-not-offered' && R.sFilesBoth.why === 'with-files' && R.filesCreatedOnRefusal === 0 && R.sFilesThread.ok === true && R.sFilesThread.proposal.placement === 'thread',
+    'B-09d2 THE ENGINE: a Slack-shaped reply with a file and thread+chat is refused at submit by name — NOTHING is created (no card offers an Approve that cannot send); the same file into the thread is filed', { both: R.sFilesBoth && { ok: R.sFilesBoth.ok, code: R.sFilesBoth.code, why: R.sFilesBoth.why, error: R.sFilesBoth.error }, created: R.filesCreatedOnRefusal, thread: R.sFilesThread && { ok: R.sFilesThread.ok, code: R.sFilesThread.code, error: R.sFilesThread.error } });
   const q = R.quote.proposal, t = R.thread.proposal, pl = R.plain.proposal;
   ok(R.quote.ok && q.placement === 'quote' && q.placementDefaulted === 'root' && !q.inThread && q.replyQuote && q.replyQuote.text === 'a plain question' && q.placementText === 'as a quoted reply, in the chat', 'Lark-shaped, --to alone on a message OUTSIDE a thread ⇒ stored `quote` (the vendor\'s norm, said as the default), the answered message quoted for the card', J(q && { placement: q.placement, d: q.placementDefaulted, rq: q.replyQuote }));
   ok(R.thread.ok && t.placement === 'thread' && t.placementDefaulted === 'parent-in-thread' && t.inThread === true && t.threadKey === 'omt_t' && t.threadQuote && t.threadQuote.text === 'a reply inside' && t.replyQuote.text === 'a reply inside', '…on a message INSIDE a vendor thread ⇒ stored `thread` (it cannot be quoted from the main list), with inThread + threadKey + threadQuote as the alias', J(t && { placement: t.placement, d: t.placementDefaulted, key: t.threadKey }));
@@ -332,7 +353,7 @@ console.log('⑥ the words: the card, the refusal, the touch row — zh / ja / e
   const keys = new Set();
   const QUOTE = { author: 'Ada', text: '周会改到几点？' };
   const card = (d) => P.PLACEMENTS.map((pl) => [pl, P.placementText(pl, { t: tFor(d, keys), quote: QUOTE }), P.placementText(pl, { t: tFor(d, keys) })]);
-  const refusals = (d) => [{ why: 'not-declared', placement: 'chat' }, { why: 'not-declared', placement: 'quote' }, { why: 'not-declared', placement: 'thread' }, { why: 'not-declared', placement: 'thread+chat' }, { why: 'parent-in-thread', placement: 'quote' }, { why: 'no-replies', placement: null }, { why: 'not-declared', placement: 'x' }].map((r) => P.placementRefusalText(r, { t: tFor(d, keys) }));
+  const refusals = (d) => [{ why: 'not-declared', placement: 'chat' }, { why: 'not-declared', placement: 'quote' }, { why: 'not-declared', placement: 'thread' }, { why: 'not-declared', placement: 'thread+chat' }, { why: 'parent-in-thread', placement: 'quote' }, { why: 'no-replies', placement: null }, { why: 'not-declared', placement: 'x' }, { why: 'with-files', placement: 'thread+chat' }, { why: 'with-files', placement: 'quote' }].map((r) => P.placementRefusalText(r, { t: tFor(d, keys) }));
   const touch = (d) => P.PLACEMENTS.map((pl) => T.rowWords(T.foldTouches([T.normalizeTouch({ op: 'reply', adapterId: 'lark-1', convId: 'oc_x', at: 1, placement: pl })])[0], tFor(d, keys)));
   const en = { card: card(null), refusals: refusals(null), touch: touch(null) };
   const zhW = { card: card(zh), refusals: refusals(zh), touch: touch(zh) }, jaW = { card: card(ja), refusals: refusals(ja), touch: touch(ja) };
@@ -377,6 +398,11 @@ const M = mutantCopies('placement', REPO);
   const c1 = M.load(POLICY, cut(SRC, PL3, '    if (false) { }', 'PL3'), 'pl3-blind');
   const b1 = runTable(c1);
   ok(b1.length >= 3 && b1.some((x) => x.startsWith('lark/thread/null')) && b1.some((x) => x.startsWith('slack/thread/null')), `CONTROL PL3 blind to the parent (always the root norm): ${b1.length} rows red — a reply to a threaded Lark message would be "quoted"`, b1.join(' | '));
+  // B-09d2: the files check removed ⇒ a Slack reply with files in the thread AND the chat passes the verdict (the base's bug)
+  const F9C = "  if (!v.ok || !files) return v;";
+  const c9 = M.load(POLICY, cut(SRC, F9C, '  return v;', 'with-files'), 'with-files');
+  const c9v = c9.placementVerdict({ requested: 'thread+chat', replyTo: 'm-1', caps: SLACK, files: 2 });
+  ok(c9v.ok === true && c9v.placement === 'thread+chat', 'CONTROL B-09d2 the files check removed: a Slack reply with two files in the thread and the chat passes the verdict — approved later, it would send nothing', c9v);
   const PL5 = "  if (placement === 'quote' && inThread) return refuse(";
   const c2 = M.load(POLICY, cut(SRC, PL5, '  if (false) return refuse(', 'PL5'), 'pl5-gone');
   const b2 = runTable(c2);

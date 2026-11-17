@@ -234,6 +234,7 @@ const GLYPHS = Object.freeze(['chat', 'mail', 'robot']);
  * a module may declare (absent = none — a flat, reaction-less channel):
  *   threads   {read: vendor|chain|none, replyInto: bool, listing: separate|inline|none,
  *              placements?: [chat|quote|thread|thread+chat], rootReply?: quote|thread}
+ *             (B-09d2: + filePlacements? — the placements a reply WITH FILES may take; absent = all of them)
  *             placements (2026-09-28, the owner's "the boolean is Lark-shaped")
  *             = where a reply may LAND: `chat` a plain message, `quote` an answer
  *             shown in the main list, `thread` inside the answered message's
@@ -501,6 +502,12 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
       if (t.placements.length && !(c.sendAs || []).length) bad('caps.threads.placements on a read-only adapter (caps.sendAs is empty) — a placement is where a SENT message lands');
       if (t.placements.includes('thread') !== (t.replyInto === true)) bad("caps.threads.replyInto and placements disagree — replyInto:true ⇔ 'thread' is declared");
       if (t.placements.includes('thread+chat') && !t.placements.includes('thread')) bad("caps.threads.placements 'thread+chat' without 'thread'");
+      // B-09d2: where a reply WITH FILES may land (absent ⇒ every declared placement) — a subset of `placements`; a
+      // reply placed elsewhere with files is refused at submit, never at the approved send
+      if (t.filePlacements !== undefined) {
+        if (!Array.isArray(t.filePlacements) || t.filePlacements.some((x) => !t.placements.includes(x))) bad(`caps.threads.filePlacements must be a list of the declared placements (${t.placements.join('|')})`);
+        else if (!c.sendAttachments) bad('caps.threads.filePlacements on an adapter that sends no attachments (caps.sendAttachments is empty)');
+      }
       const roots = t.placements.filter((x) => ROOT_REPLIES.includes(x));
       if (roots.length ? !roots.includes(t.rootReply) : (t.rootReply !== undefined && t.rootReply !== null)) bad(`caps.threads.rootReply must be one of the declared ${roots.length ? roots.join('|') : '(none — nothing answers a message)'} (the vendor's norm for a reply to a message outside any thread)`);
     } else if (t.rootReply !== undefined) bad('caps.threads.rootReply without caps.threads.placements');

@@ -527,7 +527,27 @@ const placementName = (x) => (x === 'thread+chat' ? 'thread+chat (in the thread 
  * `parent` = `{inThread: boolean}` — the answered message sits in a VENDOR thread (null: not loaded here ⇒ outside);
  * `alias` = the request spoke the old `inThread` boolean (its refusals keep `why: 'inThread'`).
  */
-function placementVerdict({ requested = null, replyTo = null, caps = null, parent = null, alias = false } = {}) {
+/** B-09d2: the placements a reply WITH FILES may take here — the `threads` row's `filePlacements` among the offered ones
+ *  (absent ⇒ every offered placement). */
+function filePlacementsOf(caps) {
+  const offered = placementsOf(caps), t = capsThreads(caps);
+  return t && Array.isArray(t.filePlacements) ? offered.filter((x) => t.filePlacements.includes(x)) : offered;
+}
+/** B-09d2 (fb-69c60c1b65: a Slack reply with files and --in-thread --also-in-chat was accepted, approved, and sent
+ *  nothing): THE VERDICT WITH ITS FILES — `files` = how many attachments the reply carries; a placement the adapter's
+ *  `filePlacements` does not take is refused HERE (`placement-not-offered`, why `with-files`, `offered` = where files may
+ *  go), so a card never offers an Approve that cannot send. */
+const PLACEMENT_FLAGS = Object.freeze({ chat: 'no --to', quote: '--to', thread: '--in-thread', 'thread+chat': '--in-thread --also-in-chat' });
+function placementVerdict(args = {}) {
+  const v = placementOnly(args);
+  const files = Math.max(0, Math.floor(Number(args.files) || 0));
+  if (!v.ok || !files) return v;
+  const may = filePlacementsOf(args.caps);
+  if (may.includes(v.placement)) return v;
+  return { ok: false, code: 'placement-not-offered', why: 'with-files', placement: v.placement, offered: may,
+    error: `files cannot go with a reply ${placementWords(v.placement)} on this channel (${PLACEMENT_FLAGS[v.placement]} with files) — nothing was created; with files, reply ${may.map(placementWords).filter(Boolean).join(' or ') || 'nowhere here'}${may.includes('thread') ? ' (--in-thread, without --also-in-chat)' : ''}, or send the files in a message of their own` };
+}
+function placementOnly({ requested = null, replyTo = null, caps = null, parent = null, alias = false } = {}) {
   const offered = placementsOf(caps);
   const req = requested === undefined || requested === null || requested === '' ? null : requested;
   if (req !== null && !PLACEMENTS.includes(req)) return { ok: false, code: 'bad-proposal', why: 'placement', error: `placement must be one of ${PLACEMENTS.join(' | ')}` };
@@ -571,6 +591,7 @@ function placementRefusalText(r, { t = defaultT } = {}) {
   const x = r || {};
   if (x.why === 'parent-in-thread') return t('That message is inside a thread — a reply to it goes in the thread');
   if (x.why === 'no-replies') return t('This channel cannot answer a specific message — send it as a plain message');
+  if (x.why === 'with-files') return x.placement === 'thread+chat' ? t('Files cannot go with a thread reply that is also shown in the chat here — send them in the thread') : t('Files cannot go with this kind of reply here');
   switch (x.placement) {
     case 'chat': return t('A plain message is not offered here');
     case 'quote': return t('A quoted reply is not offered here');
@@ -1714,7 +1735,7 @@ module.exports = {
   canTransition, isTerminal, policyMode, policyModesOf, policyRowModel, policyWhereText, GUARD_KEYS, GUARD_REASONS, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   ACCESS_REMOVED_NOTE, withheldReceiptLine,
   REACTION_POLICIES, reactionPolicyOf, REACTION_OPS, validateReaction, reactionQuote, decideReaction, decideRecall, recallVerdict,
-  PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,
+  PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf, filePlacementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,
   honestyLine, withHonestyLine, canReconcile, reconcileVerdict,
   REJECTED_DEFAULT_REASON, outcomeOf, outcomeText, reconcileWhyText,
   // r6 verify (2026-09-28): what you approve is what runs — the reply's anchor (F1), its recipients (F3),

@@ -6349,6 +6349,8 @@ export default {
   "A plain message is not offered here": "这里不支持发送普通消息",
   "A quoted reply is not offered here": "这里不支持引用回复",
   "A thread reply that is also shown in the chat is not offered here": "这里不支持“在话题中回复并同时显示在聊天中”",
+  "Files cannot go with a thread reply that is also shown in the chat here — send them in the thread": "这里的文件不能随“在话题中回复并同时显示在聊天中”一起发送——请把文件发到话题里",
+  "Files cannot go with this kind of reply here": "这里的文件不能随这种回复一起发送",
   "That kind of reply is not offered here": "这里不支持这种回复方式",
   "A reply must name the message it answers": "回复必须指明它回复的是哪条消息",
   "A plain message answers no message — choose a quote or the thread, or leave the message out": "普通消息不回复任何消息 —— 请选择引用或话题，或者不指定消息",

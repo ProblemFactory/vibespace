@@ -204,7 +204,9 @@ const caps = Object.freeze({
   revisions: Object.freeze({ recall: true, edit: true, how: 'absent' }),
   // F3: Slack's thread object (`thread_ts`), replies listed separately (`conversations.replies`), a reply in the
   // thread or in the thread AND the channel (`reply_broadcast`); the norm for answering a message is its thread
-  threads: Object.freeze({ read: 'vendor', replyInto: true, listing: 'separate', placements: Object.freeze(['chat', 'thread', 'thread+chat']), rootReply: 'thread' }),
+  // B-09d2: Slack's file sharing (files.completeUploadExternal) has no `reply_broadcast` — files go into the chat or a thread,
+  // never «in the thread and also in the chat»; refused at submit (src/channel-policy.js placementVerdict), not at approval
+  threads: Object.freeze({ read: 'vendor', replyInto: true, listing: 'separate', placements: Object.freeze(['chat', 'thread', 'thread+chat']), filePlacements: Object.freeze(['chat', 'thread']), rootReply: 'thread' }),
   // F4 / D7: a per-message list; added / removed as the person (own only); named emoji; custom emoji pictures are a
   // later step (their host is not in this adapter's egress yet) — drawn as `:name:`
   reactions: Object.freeze({ read: 'list', add: true, remove: 'own', vocabulary: 'names', custom: 'none', perMessageMax: null }),

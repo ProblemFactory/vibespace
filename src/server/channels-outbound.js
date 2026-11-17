@@ -599,7 +599,7 @@ function create(engineCtx) {
         parentFacts = { inThread: parentKey !== null };
       } catch { parentKey = null; parentFacts = null; }
     }
-    const pv = P.placementVerdict({ requested: v.proposal.placement || null, replyTo: v.proposal.replyTo, caps: c0, parent: parentFacts, alias: !!v.proposal.placementAlias });
+    const pv = P.placementVerdict({ requested: v.proposal.placement || null, replyTo: v.proposal.replyTo, caps: c0, parent: parentFacts, alias: !!v.proposal.placementAlias, files: att.files.length });   // B-09d2: with its files
     if (!pv.ok) return { ok: false, code: pv.code, why: pv.why, error: pv.error, ...(pv.placement !== undefined ? { placement: pv.placement } : {}), ...(pv.offered ? { offered: pv.offered } : {}) };
     const placement = pv.placement;
     const intoThread = P.isThreadPlacement(placement);
