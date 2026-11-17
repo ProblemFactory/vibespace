@@ -14,11 +14,17 @@
 //
 // THE TWO ROADS FOLLOW CREDIT (主开发 2026-11-17 — a master defect the separation's skeptic confirmed on the release):
 // the hub used to credit the device as it DELIVERED a session's output while this bridge threw away the attach link's
-// answer, so a stalled attach client made the hub hold the session's whole output (and a reattach replay); the input road
+// answer, so a stalled attach client made the HUB hold the session's whole output (and a reattach replay); the input road
 // credited the attach client at once whatever the device link took. Now the device session runs under MANUAL credit:
 // output goes on to the attach side and the device is credited only for what that side took (a false answer = the credit
 // waits for the attach channel's writable); input is credited to the attach side only for what the device link took
-// (a false answer = it waits for the device channel's writable). Each direction holds at most about one window.
+// (a false answer = it waits for the device channel's writable). The hub holds at most about one window each way; what a
+// stalled reader leaves unsent now sits on the DEVICE AGENT's side of its link (its senders queue — they do not pause).
+// THE GAP: bytes the device sends right behind its open answer (a reattach replay rides the same read) are KEPT until the
+// open has gone to the attach side, then pass through the same accounting — never dropped, never left uncredited.
+// THE ORPHAN: when the attach side dies, a pipe session's device channel stays open (the keeper model) — it goes back to
+// the release's road: what is owed is credited at once and every later byte as it arrives (a device-side detach would be
+// the real end of it; that is a row of its own).
 'use strict';
 
 const net = require('net');
@@ -69,16 +75,36 @@ class DialSessionBridge {
     let isPty = false;
     let pendingResize = null; // a resize that raced the open-session await
     let attachChan = null, owedDevice = 0, owedAttach = 0;   // credit held back on each road (see THE TWO ROADS above)
+    let early = null;   // device bytes that arrived before the wire (THE GAP above)
+    let attachGone = false;   // the attach side's link died: a pipe handle is an orphan from then on
     const bridge = this._bridges.get(sid);
-    const wire = (chan) => {   // an opened handle's two roads, under credit
-      attachChan = chan;
+    // THE ORPHAN's road (the release's): what is owed is credited now, every later byte as it arrives, nothing forwarded
+    const orphan = () => {
+      const h = handle; if (!h) return;
+      const owed = owedDevice + (early || []).reduce((n, b) => n + b.length, 0);
+      owedDevice = 0; early = null;
+      h.onData = (b) => { try { h.credit(b.length); } catch { } };
+      h.onWritable = null;
+      if (owed) { try { h.credit(owed); } catch { } }
+    };
+    // the moment the device handle exists — BEFORE its open answer: keep what arrives early, and hear the input road's writable
+    const prewire = (chan) => {
+      if (attachGone) { if (isPty) { try { handle.kill(); } catch { } } else orphan(); return; }   // the attach side died while the open was asked: a live pty is ended (onDead found no handle yet), a pipe session is an orphan
+      attachChan = chan; early = [];
+      handle.onData = (buf) => { early.push(buf); };
+      handle.onWritable = () => {   // the device link took the queued input: the attach side may send again
+        const n = owedAttach; owedAttach = 0; if (n) { try { mux.credit(chan, n); } catch { } }
+      };
+    };
+    // after the open has gone to the attach side: the output road, then the kept bytes through it in order
+    const wire = (chan) => {
+      if (attachGone) return;   // the orphan's road is already set (onDead / prewire)
       handle.onData = (buf) => {   // device → attach: the device is credited for what the attach side took
         let ok = false; try { ok = mux.data(chan, buf) !== false; } catch { ok = false; }
         if (ok) { try { handle.credit(buf.length); } catch { } } else owedDevice += buf.length;
       };
-      handle.onWritable = () => {   // the device link took the queued input: the attach side may send again
-        const n = owedAttach; owedAttach = 0; if (n) { try { mux.credit(chan, n); } catch { } }
-      };
+      const kept = early || []; early = null;
+      for (const b of kept) handle.onData(b);
     };
     const mux = new Mux(sock, {
       onControl: async (msg) => {
@@ -106,11 +132,12 @@ class DialSessionBridge {
           try {
             const dm = await this.deviceForDial(deviceId);
             handle = await dm.openSession({ cmd: msg.cmd, args: msg.args, cols: msg.cols, rows: msg.rows, cwd: msg.cwd, env: msg.env, manualCredit: true });
+            prewire(chan);
             if (bridge) bridge.ptyHandle = handle; // so close(sid) can kill it
             const ready = await handle.ready;
-            wire(chan);
             handle.onExit = (code) => { try { mux.control({ op: 'session-exit', chan, code }); } catch { } };
             mux.control({ op: 'session-open', chan, pid: ready.pid });
+            wire(chan);   // after the open: the kept bytes follow it, in order
             // apply a resize that arrived while we were still opening (the mux
             // fires onControl un-serialized, so a startup SIGWINCH can beat the
             // open — review finding)
@@ -133,8 +160,8 @@ class DialSessionBridge {
               offset: msg.offset || 0,
               manualCredit: true,
             });
+            prewire(chan);
             const ready = await handle.ready;
-            wire(chan);
             // A real CHILD exit arrives as the _remote_exit sentinel in the
             // byte stream — reaching onExit here means the DEVICE LINK died
             // (DeviceManager's mux.onDead fires s.onExit(-1) on every open
@@ -145,6 +172,7 @@ class DialSessionBridge {
             // backoff respawns it against a re-dialed device.
             handle.onExit = () => { try { mux.destroy?.(); } catch { } try { sock.destroy(); } catch { } };
             mux.control({ op: 'pipe-session-open', chan, pid: ready.pid, existing: !!ready.existing, exited: ready.exited });
+            wire(chan);   // after the open: the kept bytes (a replay's first part) follow it, in order
           } catch (e) {
             mux.control({ op: 'session-error', chan, error: e.message });
           }
@@ -155,7 +183,7 @@ class DialSessionBridge {
       },
       onData: (chan, buf) => {   // attach → device: the attach side is credited for what the device link took
         if (!handle) { try { mux.credit(chan, buf.length); } catch { } return; }
-        let ok = true; try { ok = handle.write(buf.toString('utf-8')) !== false; } catch { ok = true; }   // a dead link drops it, as before
+        let ok = true; try { ok = handle.write(buf) !== false; } catch { ok = true; }   // the bytes as bytes (a character split across two frames stays whole); a dead link drops it, as before
         if (ok) { try { mux.credit(chan, buf.length); } catch { } } else owedAttach += buf.length;
       },
       onWritable: (chan) => {   // the attach side took the queued output: the device may send again
@@ -171,6 +199,8 @@ class DialSessionBridge {
         // pty each flap, leaking the old claude forever otherwise).
         if (isPty && handle) { try { handle.kill(); } catch { } }
         if (isPty && bridge && bridge.ptyHandle === handle) bridge.ptyHandle = null;
+        attachGone = true;
+        if (!isPty && handle) orphan();   // THE ORPHAN: the device channel stays open — back to the release's road (see above)
       },
     });
   }

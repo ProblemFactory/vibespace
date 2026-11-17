@@ -613,7 +613,7 @@ class DeviceManager {
     });
     conn.sessions.set(chan, {
       // MANUAL CREDIT (opt-in — the dial bridge, 主开发 2026-11-17): the caller credits the device with handle.credit(n) as
-      // its consumer truly takes the bytes, so a stalled reader stops the device instead of piling its output in the hub
+      // its consumer truly takes the bytes, so a stalled reader leaves them on the device's side instead of in the hub
       manualCredit: manualCredit === true,
       onWritable: () => handle.onWritable?.(),
       onOpen: (m) => { handle.pid = m.pid; resolveReady({ pid: m.pid }); },
@@ -624,7 +624,7 @@ class DeviceManager {
       onExit: (code) => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); else handle.onExit?.(code); },
       onClose: () => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); },
     });
-    handle.write = (str) => conn.mux.data(chan, Buffer.from(str, 'utf-8'));   // false = queued for the device's credit (onWritable follows)
+    handle.write = (b) => conn.mux.data(chan, Buffer.isBuffer(b) ? b : Buffer.from(String(b), 'utf-8'));   // text or bytes; false = queued for the device's credit (onWritable follows)
     handle.credit = (n) => conn.mux.credit(chan, n);
     handle.resize = (c, r) => conn.mux.control({ op: 'resize-session', chan, cols: c, rows: r });
     handle.kill = () => conn.mux.control({ op: 'kill-session', chan });
@@ -663,7 +663,7 @@ class DeviceManager {
       onExit: (code) => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); else handle.onExit?.(code); },
       onClose: () => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); },
     });
-    handle.write = (str) => conn.mux.data(chan, Buffer.from(str, 'utf-8'));   // false = queued for the device's credit (onWritable follows)
+    handle.write = (b) => conn.mux.data(chan, Buffer.isBuffer(b) ? b : Buffer.from(String(b), 'utf-8'));   // text or bytes; false = queued for the device's credit (onWritable follows)
     handle.credit = (n) => conn.mux.credit(chan, n);
     handle.kill = () => conn.mux.control({ op: 'kill-pipe-session', sid });
     conn.mux.control(cmd
