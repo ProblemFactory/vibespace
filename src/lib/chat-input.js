@@ -1145,6 +1145,16 @@ export class ChatInput {
     return 'kept';
   }
 
+  /** Words back into the box (B-437e — a rewind gives the person's message back): written only into an EMPTY box (what
+   *  the person is writing now is never overwritten). Answers 'restored' | 'kept' | 'none' — the caller words the toast. */
+  putBack(text) {
+    if (!text) return 'none';
+    if (!this._textarea || this._textarea.value.trim()) return 'kept';
+    this._textarea.value = text;
+    this._textarea.dispatchEvent(new Event('input', { bubbles: true })); // resize + draft save
+    return 'restored';
+  }
+
   setDisconnected(disconnected) {
     // Keep the textarea fully editable — the user must be able to select/copy
     // (a disabled textarea blocks selection) and keep drafting; only SENDING

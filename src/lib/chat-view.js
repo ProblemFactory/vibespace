@@ -18,6 +18,7 @@ import { valueWord } from './value-words.js'; // lane ui-language: the message d
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
 import { waitingTurnOf, signinWallOf } from '../signin-model.js'; // PURE (lane door-signin-fixes): the turn waiting at the wall; which wall a death gets
 import { isAgentMemoryPath, effortDisplay, getBackendMeta, backendFeatureCaps, noteMemoryPaths, initHealthIssues, initFrameOf, notificationDeliveryFor, billingRow, viewIdFor, legacyIdFor, BACKEND_META } from './agent-meta.js';
+import { rewindPointOf, rewindPlanOf, rewindAnswerOf } from '../rewind-door.js'; // PURE (B-437e): the rewind door's static half + its plan (the confirm's count)
 import { registerCommand, registerKeybinding, runCommand, hasCommand } from './contributions.js';
 // The verb list a wrapper that publishes a queue WITHOUT naming verbs serves —
 // the SAME array the server maps a verb-less sidecar onto (src/server/
@@ -551,6 +552,8 @@ class ChatView {
       messageList: this._messageList,
       onPermissionResolve: () => { this._hideTyping(); this._updateRuns(); },
       onFork: (uuid, msg) => this._forkFromMessage(uuid, msg),
+      onRewind: (msg) => this._rewindFromMessage(msg), // B-437e «Rewind to here»
+      canRewind: () => !this._readOnly, // …only where the conversation is live in this view
       // the touch message menu from each message's … button (lane mobile-select — a long press on the words selects)
       onMsgMenu: (msg, x, y) => this._showMsgMenu(msg, x, y),
       // A 'queued' chip on a bubble is a second entry point for the same op as
@@ -2089,6 +2092,121 @@ class ChatView {
     try { this._loadPublishedUserFiles(); } catch { }
   }
 
+  // «REWIND TO HERE» (B-437e — docs/design-harness-features.md §3.2, tier one: the conversation). The person's own message
+  // and everything after it are taken back IN PLACE: the same conversation, the words back in the box, the files as they
+  // are. The SERVER decides (src/server/rewind-requests.js over the conversation it holds); this view asks once, names
+  // the cost first (showConfirmDialog — never a native dialog), and says every refusal by its reason. A running turn is
+  // refused here before any dialog (the server refuses it too): never a silent interrupt.
+  _rewindFromMessage(msg) {
+    if (this._disposed) return;                                         // a closed view asks nothing
+    const { backend } = this._getSessionIds();
+    const row = backendFeatureCaps(backend).checkpoints;
+    if (this._readOnly) { this._sayRewindRefusal('stopped', 'resume'); return; }   // resumable: «Resume … first»
+    if (!rewindPointOf(row, msg)) { showToast(t('This message cannot be rewound to.'), { type: 'error' }); return; }
+    if (this._rewindInFlight) { this._sayRewindRefusal('pending', 'busy'); return; }  // one at a time (the server says it too)
+    if (this._chatInput?.isStreaming) { showToast(t('Stop the current answer first, then rewind.'), { type: 'error' }); return; } // the composer holds the live turn fact
+    const plan = rewindPlanOf(row, this._messages, msg.id, { live: true });   // the page's own: its newest seen uuid
+    if (!plan.ok) { this._sayRewindRefusal(plan.reason, plan.cls); return; }
+    // a frame written while the socket is down would be sent on the reconnect — minutes later on a phone: never queued
+    if (!this.ws.connected) { showToast(t('Not connected — nothing was sent. Try again when the connection is back.'), { type: 'error' }); return; }
+    // WHAT IS SAID BEFORE THE PRESS COMES FROM THE SERVER'S PLAN (a dry run: the turns that go, the row's files fact)
+    this._rewindInFlight = true;
+    const dryId = 'rwd-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const free = () => { this._rewindInFlight = false; };
+    this._rewindCancel = this.ws.request(
+      { type: 'rewind', sessionId: this.sessionId, msgId: msg.id, reqId: dryId, lastSeenUuid: plan.lastSeenUuid, dryRun: true },
+      (m) => {
+        if (!m || m.type !== 'rewind-result' || m.sessionId !== this.sessionId || m.reqId !== dryId) return false;
+        free();
+        if (!m.ok) { this._sayRewindRefusal(m.reason, m.cls); return true; }
+        this._confirmRewind(msg, plan, m);
+        return true;
+      },
+      { isAlive: () => !this._disposed, timeoutMs: 15000, onTimeout: () => { this._rewindCancel?.(); if (this._disposed) return; free(); showToast(t('No answer to the rewind yet — the conversation is as you see it.'), { type: 'error' }); } },
+    );
+  }
+
+  /** The confirm, worded from the SERVER's plan `said` ({turns, files}), then the press itself. */
+  _confirmRewind(msg, plan, said) {
+    const n = Math.max(1, Number(said.turns) || 1);
+    const body = said.files !== true                       // the caveat is left out only when the plan SAYS files roll back
+      ? (n === 1 ? t('This message and everything after it are taken back — 1 turn. The agent will no longer remember it. Files on disk are not rolled back: whatever the agent changed stays as it is now.')
+        : t('This message and everything after it are taken back — {n} turns. The agent will no longer remember them. Files on disk are not rolled back: whatever the agent changed stays as it is now.', { n }))
+      : (n === 1 ? t('This message and everything after it are taken back — 1 turn. The agent will no longer remember it.')
+        : t('This message and everything after it are taken back — {n} turns. The agent will no longer remember them.', { n }));
+    showConfirmDialog({ title: t('Rewind to before this message?'), message: body, confirmText: t('Rewind'), danger: true }).then((yes) => {
+      if (!yes || this._rewindInFlight) return;
+      if (this._disposed) { showToast(t('The window was closed — nothing was sent.'), { type: 'error' }); return; }
+      if (!this.ws.connected) { showToast(t('Not connected — nothing was sent. Try again when the connection is back.'), { type: 'error' }); return; }
+      const now = rewindPlanOf(backendFeatureCaps(this._getSessionIds().backend).checkpoints, this._messages, msg.id, { live: true });
+      const reqId = 'rw-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      this._rewindInFlight = true;
+      const settle = () => { this._rewindInFlight = false; this._pendingRewind = null; clearTimeout(this._rewindAnswerTimer); };
+      // ONE request through ws.request: it unhooks itself when the view is gone, and a late result still binds
+      this._rewindCancel = this.ws.request(
+        // the page names the newest message IT shows (lastSeenUuid): the server refuses a conversation that moved past it
+        { type: 'rewind', sessionId: this.sessionId, msgId: msg.id, reqId, lastSeenUuid: now.ok ? now.lastSeenUuid : plan.lastSeenUuid, expectTaken: said.taken },
+        (m) => {
+          if (!m || m.type !== 'rewind-result' || m.sessionId !== this.sessionId || m.reqId !== reqId) return false;
+          if (!m.ok) { settle(); this._sayRewindRefusal(m.reason, m.cls); return true; }
+          // the request went out: the CLI's answer rides the stream (meta rewind-answer); none in 30 s is SAID
+          this._pendingRewind = { requestId: m.requestId };
+          clearTimeout(this._rewindAnswerTimer);
+          this._rewindAnswerTimer = setTimeout(() => {
+            if (this._disposed || this._pendingRewind?.requestId !== m.requestId) return;
+            settle();
+            showToast(t('No answer to the rewind yet — the conversation is as you see it.'), { type: 'error' });
+          }, 30000);
+          return true;
+        },
+        { isAlive: () => !this._disposed, timeoutMs: 15000, onTimeout: () => { if (this._disposed || this._pendingRewind) return; this._rewindCancel?.(); settle(); showToast(t('No answer to the rewind yet — the conversation is as you see it.'), { type: 'error' }); } },
+      );
+    });
+  }
+
+  /** The CLI's answer to THIS view's rewind (every open view receives the op; only the one that pressed speaks). */
+  _onRewindAnswer(d) {
+    if (!d || !this._pendingRewind || d.requestId !== this._pendingRewind.requestId) return;
+    this._pendingRewind = null;
+    this._rewindInFlight = false;
+    clearTimeout(this._rewindAnswerTimer);
+    const a = rewindAnswerOf('message', d.answer); // the CLI's reply as it came (the normalizer carries no reason table)
+    if (!a.ok) { this._sayRewindRefusal(a.reason, a.cls, a.text, a.retry); return; }
+    const put = this._chatInput?.putBack?.(a.prefillText || '') || 'none';
+    const n = Number(d.taken) || 0;
+    // whole sentences, one key each (zh / ja join sentences without a space — a concatenation put one between them)
+    showToast(put === 'restored'
+      ? (n === 1 ? t('Rewound — 1 message taken back. Your words are back in the box.') : t('Rewound — {n} messages taken back. Your words are back in the box.', { n }))
+      : put === 'kept'
+        ? (n === 1 ? t('Rewound — 1 message taken back. The box already had text, so your earlier words were not put back.') : t('Rewound — {n} messages taken back. The box already had text, so your earlier words were not put back.', { n }))
+        : (n === 1 ? t('Rewound — 1 message taken back.') : t('Rewound — {n} messages taken back.', { n })));
+    if (put === 'restored') this._chatInput?.focus?.();
+  }
+
+  /** Every refusal by its name (src/rewind-door.js REWIND_REFUSALS / CLAUDE_REWIND_REASONS — the class words it). */
+  _sayRewindRefusal(reason, cls, text, retry = true) {
+    const r = String(reason || '');
+    const line = r === 'queued' || r === 'commands_queued' ? t('Messages are waiting in the queue — send or remove them first, then rewind.')
+      : r === 'compacting' ? t('The conversation is being compacted — rewind when it is done.')
+        : r === 'no-target-id' ? t('The agent does not know this message by an id yet — reopen the conversation, then try again.')
+          : r === 'pending' ? t('A rewind is already on its way — wait for its answer.')
+            : r === 'not-the-person' ? t('Only you can rewind a conversation, from its own window.')
+              : r === 'changed-since' ? t('The conversation changed while you decided — nothing was taken back. Look again, then rewind.')
+                : cls === 'moved' && retry === false ? t('The conversation changed meanwhile — nothing was taken back.')
+            : r === 'rebuilding' ? t('The conversation is still loading — try again in a moment.')
+              : r === 'page-behind' ? t('This page has not shown the newest messages yet — wait a moment, then try again.')
+                : r === 'prompt_pending' ? t('Answer what the agent is asking first, then rewind.')
+                  : cls === 'other' && !text ? t('The agent refused the rewind.')
+          : cls === 'busy' ? t('Stop the current answer first, then rewind.')
+            : cls === 'resume' ? t('Resume this conversation first, then rewind.')
+              : cls === 'moved' ? t('The conversation changed meanwhile — nothing was taken back. Try again.')
+                : cls === 'limit' ? t('The account is at its usage limit — nothing was taken back.')
+                  : cls === 'failed' ? t('The rewind did not go through — nothing was taken back.')
+                    : cls === 'other' ? t('The agent refused the rewind: {text}', { text: String(text || r) })
+                      : t('This message cannot be rewound to.');
+    showToast(line, { type: 'error' });
+  }
+
   // Fork a new session from a specific assistant message (the chat fork button).
   // Resolves this view's session, then hands off to app.forkFromMessage which
   // adds --resume-session-at <uuid> so the branch is truncated at this point.
@@ -2215,6 +2333,10 @@ class ChatView {
     const canFork = !this._readOnly && backendFeatureCaps(backend).forkAtMessage && msg.role === 'assistant' && !!msg.uuid
       && !(typeof this.sessionId === 'string' && this.sessionId.startsWith('sub-'));
     if (canFork) items.push({ label: t('Fork from here'), action: () => this._forkFromMessage(msg.uuid, msg) });
+    // «Rewind to here» (B-437e): the hover button's gate to the letter (chat-renderers addRewindBtn)
+    if (!this._readOnly && rewindPointOf(backendFeatureCaps(backend).checkpoints, msg) && !(typeof this.sessionId === 'string' && this.sessionId.startsWith('sub-'))) {
+      items.push({ label: t('Rewind to here'), action: () => this._rewindFromMessage(msg) });
+    }
     if (items.length) items.push({ separator: true });
     items.push({ label: t('Message details'), action: () => this._showMsgMeta(msg, x, y) });
     const menu = showContextMenu(x, y, items); // one class name (the row class derives from it); the modifier after
@@ -4541,6 +4663,8 @@ class ChatView {
       return;
     }
 
+    // The CLI record uuid arrived after the bubble was drawn (the wrapper's frame_stamp, B-437e): «Rewind to here» follows
+    if ('uuid' in fields || 'batchOf' in fields) this._renderers.patchRewindBtn(this._elements.get(id), msg);
     // Queue chip: a cheap in-place swap. A full re-render here would rebuild
     // the whole bubble (markdown, images, fold state) for a one-word badge.
     if ('queueState' in fields || 'settling' in fields) {
@@ -4955,6 +5079,7 @@ class ChatView {
     // slice(offset,limit) and `total`, and re-indexing them under a reader is
     // where three paging incidents came from.
     if (op.subtype === 'rewound') { this._applyRewound(op.data); return; }
+    if (op.subtype === 'rewind-answer') { this._onRewindAnswer(op.data); return; }
     // THE command list changed mid-session (claude `commands_changed`, ACP
     // `available_commands_update`): REPLACE, never append. An `edit` op on the
     // init card cannot carry this — a complete system card is not re-rendered,
@@ -5089,6 +5214,7 @@ class ChatView {
   /** ONE place that turns the mark into DOM (create-path and live op share it,
    *  so a rebuilt history and a live retraction can never look different). */
   _markRewoundEl(el, kind) {
+    el?.querySelector?.(':scope > .chat-rewind-btn')?.remove(); // B-437e: a message taken back is no rewind point
     if (!el) return;
     el.classList.add(kind === 'superseded' ? 'chat-msg-superseded' : 'chat-msg-rewound');
     if (kind !== 'superseded' && !el.querySelector('.chat-rewound-tag')) {
@@ -6906,6 +7032,7 @@ class ChatView {
 
   _setReadOnly() {
     this._readOnly = true;
+    this._messageList?.querySelectorAll?.('.chat-rewind-btn').forEach((b) => b.remove()); // B-437e: nothing to rewind in a read-only view
     if (this._chatInput) this._chatInput.setReadOnly();
     this._showResumeBar();
   }
@@ -8001,6 +8128,7 @@ class ChatView {
 
   dispose() {
     this._statusBar?.dispose?.();
+    clearTimeout(this._rewindAnswerTimer); this._rewindCancel?.(); // B-437e: a closed view says nothing about a rewind
     try { this._outboxOff?.(); } catch { } // lane outbox-session-chip: the chip stops hearing the outbox feed
     try { this._needsCards?.stop(); } catch { } // lane chat-needs-you-card
     try { this._signInCard?.destroy(); } catch { } // lane door-signin-card

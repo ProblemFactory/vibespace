@@ -27,6 +27,12 @@
 //      uuid and the wrapper says it (frame_stamp, same uuid); a frame without a message id or with an origin is untouched
 //   §8 RED CONTROLS (U2) — the release's wrapper stamps no idle frame; a normalizer copy that does not read our answer,
 //      one that leaves last-prompt ignored — each RED on its law
+//   §9 THE PAGE'S DOOR (U4), DOM-free: the REAL methods lifted out of src/lib/chat-renderers.js and src/lib/chat-view.js
+//      over fake elements — the button only on a rewind point (the person's own message with its uuid, a harness with the
+//      row, never a sub-agent viewer, never a message taken back), drawn when the uuid arrives, gone when struck; a click
+//      while a turn runs says so and opens no dialog; the confirm names the count and that files stay; ONE ws frame; the
+//      answer puts the words back only into an empty box; every refusal reason has its words; every word in zh + ja; the
+//      CSS slot and the touch rule
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -578,6 +584,200 @@ say('— §8 red controls (U2)');
     try { bad = roadLaws(MM); } catch (e) { bad = [`threw: ${e.message}`]; }
     ok(bad.some((b) => b.startsWith(law)), `RED CONTROL «${name}» ⇒ the law «${law}» is red`, bad.join(' | ') || 'all green');
   }
+}
+
+say('— §9 the page\'s door');
+{
+  // lift a block of methods out of a class body in a real file (between two method heads), as a class over injected names
+  const lift = (file, from, to, deps) => {
+    const src = read(file);
+    const a = src.indexOf(from), b = src.indexOf(to, a + 1);
+    if (a < 0 || b < 0) throw new Error(`lift: ${from} … ${to} not found in ${file}`);
+    const names = Object.keys(deps);
+    return new Function(...names, `return class { ${src.slice(a, b)} }`)(...names.map((k) => deps[k]));
+  };
+  const said = [];
+  const T = (k, o) => String(k).replace(/\{(\w+)\}/g, (_, n) => (o && n in o ? String(o[n]) : `{${n}}`));
+  const el = (cls = '') => {
+    const kids = [], classes = new Set(String(cls).split(/\s+/).filter(Boolean));
+    const e = { className: cls, children: kids, title: '', innerHTML: '', attrs: {}, onclick: null, removed: false,
+      classList: { contains: (c) => classes.has(c), add: (c) => classes.add(c) },
+      setAttribute(k, v) { this.attrs[k] = String(v); }, appendChild(c) { kids.push(c); c.parent = this; return c; },
+      remove() { this.removed = true; const p = this.parent; if (p) { const j = p.children.indexOf(this); if (j >= 0) p.children.splice(j, 1); } },
+      querySelector(sel) { const m = /^:scope > \.([\w-]+)$/.exec(sel); return m ? kids.find((k) => String(k.className).split(/\s+/).includes(m[1])) || null : null; } };
+    return e;
+  };
+  const doc = { createElement: () => el() };
+  const metaCaps = (b) => ({ checkpoints: caps.capsOf(b).checkpoints });
+  const R = lift('src/lib/chat-renderers.js', '  addRewindBtn(el, msg) {', '  extractMsgText(msg) {',
+    { rewindPointOf: door.rewindPointOf, backendFeatureCaps: metaCaps, UI_ICONS: { rewind: '<svg/>' }, t: T, document: doc });
+  const r = new R();
+  const clicked = [];
+  let live = true;
+  Object.assign(r, { _onRewind: (m) => clicked.push(m.id), _canRewind: () => live, backend: 'claude', sessionId: 'sess-1' });
+  const person = { id: 'p1', role: 'user', uuid: U(31), content: [{ type: 'text', text: 'ask' }] };
+  const drawn = (msg, patch = {}, cls = 'chat-msg') => { const host = el(cls); host._rawMsg = msg; Object.assign(r, patch); r.addRewindBtn(host, msg); Object.assign(r, { backend: 'claude', sessionId: 'sess-1' }); return host.querySelector(':scope > .chat-rewind-btn'); };
+  const btn = drawn(person);
+  const bad = [];
+  if (!btn || !/chat-open-editor-btn/.test(btn.className) || !/Rewind to here/.test(btn.title) || btn.innerHTML !== '<svg/>') bad.push('button:drawn-on-the-person');
+  if (btn) { btn.onclick({ stopPropagation() { } }); if (JSON.stringify(clicked) !== '["p1"]') bad.push('button:click-asks-the-view'); }
+  if (drawn({ ...person, uuid: null })) bad.push('button:no-uuid-no-door');
+  if (drawn({ ...person, role: 'assistant' })) bad.push('button:agent-card');
+  if (drawn({ ...person, originKind: 'peer-message' })) bad.push('button:peer');
+  if (drawn({ ...person, rewound: 'rollback' })) bad.push('button:struck');
+  if (drawn({ ...person, batchOf: U(99) })) bad.push('button:batch-member');
+  if (drawn(person, { backend: 'codex' })) bad.push('button:row-off-harness');
+  if (drawn(person, { sessionId: 'sub-x' })) bad.push('button:sub-agent-viewer');
+  if (drawn(person, {}, 'chat-msg chat-gap-msg')) bad.push('button:gap-slab-copy');
+  live = false; if (drawn(person)) bad.push('button:read-only-view'); live = true;
+  { const host = el('chat-msg'); const m = { ...person, uuid: null }; host._rawMsg = m; r.addRewindBtn(host, m);
+    m.uuid = U(32); r.patchRewindBtn(host, m); const b1 = host.querySelector(':scope > .chat-rewind-btn');
+    r.patchRewindBtn(host, m); const n1 = host.children.filter((c) => /chat-rewind-btn/.test(c.className)).length;
+    m.batchOf = U(33); r.patchRewindBtn(host, m);
+    if (!b1 || n1 !== 1 || host.querySelector(':scope > .chat-rewind-btn')) bad.push('button:follows-the-uuid-and-the-batch'); }
+  // the view: the click, the confirm, the frame, the answer, the refusals
+  const V = lift('src/lib/chat-view.js', '  _rewindFromMessage(msg) {', '  // Fork a new session from a specific assistant message (the chat fork button).',
+    { backendFeatureCaps: metaCaps, rewindPointOf: door.rewindPointOf, rewindPlanOf: door.rewindPlanOf, rewindAnswerOf: door.rewindAnswerOf, t: T,
+      showToast: (m, o) => said.push([m, o && o.type]), showConfirmDialog: (o) => { said.push(['confirm', o]); return Promise.resolve(view._yes); } });
+  const reqs = [];
+  const view = new V();
+  // the real ChatInput.putBack, lifted, over a fake textarea
+  const CI = lift('src/lib/chat-input.js', '  putBack(text) {', '  setDisconnected(disconnected) {', {});
+  const box = new CI(); box._textarea = { value: '', dispatchEvent() { } }; box.isStreaming = false; box.focus = () => { };
+  Object.assign(view, { sessionId: 'sess-1', _readOnly: false, _disposed: false, _yes: true, _chatInput: box,
+    _getSessionIds: () => ({ backend: 'claude' }),
+    ws: { connected: true, request: (msg, match, opts) => { const q = { msg, match, opts, done: false }; reqs.push(q); return () => { q.done = true; }; } } });
+  const convo2 = [person, { id: 'a1', role: 'assistant', uuid: U(33), content: [] }, { id: 'p2', role: 'user', uuid: U(34), content: [{ type: 'text', text: 'two' }] }];
+  view._messages = convo2;
+  const tick = () => new Promise((res) => setTimeout(res, 0));
+  box.isStreaming = true; said.length = 0; view._rewindFromMessage(person); await tick();
+  if (said.length !== 1 || !/Stop the current answer first/.test(said[0][0]) || reqs.length) bad.push('view:busy-says-so-no-dialog');
+  box.isStreaming = false;
+  view._readOnly = true; said.length = 0; view._rewindFromMessage(person); await tick();
+  if (said.length !== 1 || !/Resume this conversation first/.test(said[0][0]) || reqs.length) bad.push('view:read-only-says-resume');
+  view._readOnly = false; said.length = 0;
+  view._rewindFromMessage(person); await tick();
+  // FIRST the server's plan (a dry run) — the confirm is worded from IT (the turns that go, the row's files fact)
+  const qd = reqs[0];
+  if (reqs.length !== 1 || !qd || qd.msg.dryRun !== true || said.some((x) => x[0] === 'confirm')) bad.push('view:asks-the-server-plan-first');
+  qd && qd.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: qd.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2, files: false });
+  await tick();
+  const conf = said.find((x) => x[0] === 'confirm');
+  if (!conf || !/taken back — 2 turns/.test(conf[1].message) || !/Files on disk are not rolled back/.test(conf[1].message) || conf[1].danger !== true || !conf[1].confirmText) bad.push(`view:confirm-worded-from-the-server-plan (${conf && conf[1].message})`);
+  const q = reqs[1];
+  if (reqs.length !== 2 || !q || q.msg.dryRun || q.msg.type !== 'rewind' || q.msg.msgId !== 'p1' || q.msg.sessionId !== 'sess-1' || !q.msg.reqId || q.msg.lastSeenUuid !== U(34)
+    || q.msg.expectTaken !== 3
+    || q.opts.timeoutMs !== 15000 || typeof q.opts.isAlive !== 'function' || q.opts.isAlive() !== true) bad.push(`view:then-one-press-with-the-page-newest-uuid (${q && JSON.stringify(q.msg)})`);
+  // a second press while the first is out: said, no second request, no dialog
+  said.length = 0; view._rewindFromMessage(person); await tick();
+  if (reqs.length !== 2 || !said.length || !/already on its way/.test(said[0][0])) bad.push('view:one-at-a-time');
+  const matched = q && q.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: q.msg.reqId, ok: true, requestId: 'vsr-1', taken: 3, prompts: 2 });
+  if (!matched || !view._pendingRewind || view._pendingRewind.requestId !== 'vsr-1') bad.push('view:result-arms-the-answer');
+  if (q && q.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: 'someone-else' })) bad.push('view:another-result-is-not-ours');
+  view._onRewindAnswer({ requestId: 'vsr-other', answer: { rewound: true, prefillText: 'x' }, taken: 3 });
+  if (box._textarea.value) bad.push('view:another-answer-is-not-ours');
+  said.length = 0;
+  view._onRewindAnswer({ requestId: 'vsr-1', answer: { rewound: true, targetMessageUuid: U(31), prefillText: 'ask' }, taken: 3 });
+  if (box._textarea.value !== 'ask' || view._rewindInFlight || !said.some((x) => /Rewound — 3 messages taken back\. Your words are back in the box\./.test(x[0]))) bad.push('view:answer-puts-words-back');
+  // the box was in use: the real putBack keeps it, and the toast says so
+  view._pendingRewind = { requestId: 'vsr-2' }; box._textarea.value = 'typing'; said.length = 0;
+  view._onRewindAnswer({ requestId: 'vsr-2', answer: { rewound: true, prefillText: 'ask' }, taken: 1 });
+  if (box._textarea.value !== 'typing' || !said.some((x) => /1 message taken back\. The box already had text/.test(x[0]))) bad.push('view:busy-box-kept');
+  box._textarea.value = '';
+  // the CLI refused: its reason, its words
+  view._pendingRewind = { requestId: 'vsr-3' }; said.length = 0;
+  view._onRewindAnswer({ requestId: 'vsr-3', answer: { rewound: false, reason: 'unseen_later_turn', error: 'unseen later turn', prefillText: null }, taken: 0 });
+  if (!said[0] || !/changed meanwhile/.test(said[0][0])) bad.push('view:cli-refusal-said');
+  // EVERY reason, its OWN words (a fallback line is not words)
+  const WORDS = {
+    'not-offered': /cannot be rewound/, 'not-a-point': /cannot be rewound/, 'already-rewound': /cannot be rewound/, 'no-target-id': /does not know this message by an id/,
+    'target-not-found': /changed meanwhile/, stopped: /Resume this conversation first/, 'turn-running': /Stop the current answer first/, queued: /waiting in the queue/,
+    compacting: /being compacted/, pending: /already on its way/, rebuilding: /still loading/, 'page-behind': /not shown the newest messages/,
+    commands_queued: /waiting in the queue/, prompt_pending: /Answer what the agent is asking/, turn_running: /Stop the current answer first/,
+    target_not_found: /changed meanwhile/, stale_target: /changed meanwhile/, unseen_later_turn: /changed meanwhile/, state_changed: /changed meanwhile/,
+    poll_tool_result_target: /cannot be rewound/, target_splits_tool_call: /cannot be rewound/, delivered_poll_events_in_range: /cannot be rewound/,
+    persist_failed: /did not go through/, expired: /did not go through/, usage_limited: /usage limit/, 'cli-error': /refused the rewind: the CLI words/, 'no-answer': /did not go through/,
+    'not-the-person': /Only you can rewind/, 'changed-since': /changed while you decided/,
+  };
+  const classOf = (r) => door.REWIND_REFUSALS[r] || (door.CLAUDE_REWIND_REASONS[r] || {}).cls || (r === 'cli-error' ? 'other' : 'failed');
+  for (const [reason, rx] of Object.entries(WORDS)) {
+    said.length = 0; view._sayRewindRefusal(reason, classOf(reason), 'the CLI words');
+    if (!said[0] || said[0][1] !== 'error' || !rx.test(said[0][0])) bad.push(`view:refusal-words:${reason} (${said[0] && said[0][0]})`);
+  }
+  said.length = 0; view._sayRewindRefusal('cli-other', 'other', null);
+  if (!said[0] || /cli-other/.test(said[0][0])) bad.push('view:no-internal-id-in-words');
+  const allReasons = [...Object.keys(door.REWIND_REFUSALS), ...Object.keys(door.CLAUDE_REWIND_REASONS)];
+  if (allReasons.some((x) => !(x in WORDS))) bad.push(`view:a-reason-without-pinned-words (${allReasons.filter((x) => !(x in WORDS))})`);
+  // cancel sends nothing; a closed view's late answer says nothing
+  const n0 = reqs.length; view._yes = false; view._rewindInFlight = false; view._rewindFromMessage(person); await tick();
+  const qc = reqs[n0]; qc && qc.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: qc.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2, files: false }); await tick();
+  if (reqs.length !== n0 + 1 || !qc || qc.msg.dryRun !== true) bad.push('view:cancel-sends-only-the-dry-run');
+  // a dry run the server refuses is said, and no press follows
+  view._yes = true; said.length = 0; view._rewindFromMessage(person); await tick();
+  const qr = reqs[n0 + 1]; qr && qr.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: qr.msg.reqId, ok: false, reason: 'not-the-person', cls: 'cannot' }); await tick();
+  if (reqs.length !== n0 + 2 || !said.some((x) => /Only you can rewind/.test(x[0])) || said.some((x) => x[0] === 'confirm') || view._rewindInFlight) bad.push('view:a-refused-dry-run-is-said');
+  // the socket is down: nothing is queued for the reconnect — said, no request
+  view._disposed = false; view._rewindInFlight = false; view.ws.connected = false; said.length = 0;
+  const nd = reqs.length; view._rewindFromMessage(person); await tick();
+  if (reqs.length !== nd || !said.some((x) => /Not connected — nothing was sent/.test(x[0]))) bad.push('view:not-while-disconnected');
+  view.ws.connected = true;
+  // a dry run with no answer is CANCELLED at its timeout (never answered late into a confirm out of nowhere)
+  said.length = 0; view._rewindFromMessage(person); await tick();
+  const qt = reqs[reqs.length - 1]; qt && qt.opts.onTimeout();
+  if (!qt || !qt.done || view._rewindInFlight || !said.some((x) => /No answer to the rewind yet/.test(x[0]))) bad.push('view:a-silent-dry-run-is-cancelled');
+  // a plan that does not SAY files roll back keeps the caveat (an older server sends no `files`)
+  said.length = 0; view._yes = false; view._rewindFromMessage(person); await tick();
+  const qf = reqs[reqs.length - 1]; qf && qf.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: qf.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2 }); await tick();
+  const cf = said.find((x) => x[0] === 'confirm');
+  if (!cf || !/Files on disk are not rolled back/.test(cf[1].message)) bad.push('view:the-caveat-unless-the-plan-says-files-roll-back');
+  // the view closed while the confirm stood open: the press is SAID, nothing sent
+  view._yes = true; said.length = 0; view._rewindFromMessage(person); await tick();
+  const qx = reqs[reqs.length - 1]; const nx = reqs.length;
+  qx && qx.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: qx.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2, files: false });
+  view._disposed = true; await tick();
+  if (reqs.length !== nx || !said.some((x) => /The window was closed — nothing was sent/.test(x[0]))) bad.push('view:a-press-in-a-closed-view-is-said');
+  // the CLI's «not to be sent again» reaches the words (no «Try again» for unseen_later_turn / stale_target)
+  said.length = 0; view._sayRewindRefusal('unseen_later_turn', 'moved', 'unseen later turn', false);
+  if (!said[0] || !/changed meanwhile — nothing was taken back\.$/.test(said[0][0])) bad.push(`view:no-try-again-when-not-resendable (${said[0] && said[0][0]})`);
+  const n1 = reqs.length; view._rewindInFlight = false; view._rewindFromMessage(person); await tick();
+  if (reqs.length !== n1) bad.push('view:a-closed-view-sends-nothing');
+  ok(bad.length === 0, 'the page\'s door: the button only on a rewind point (not without a uuid, an agent card, a peer\'s message, a struck one, a batch member, a harness whose row is off, a sub-agent viewer, a gap slab\'s copy, a read-only view), follows the uuid and the batch; busy and read-only say so with no dialog; the confirm names the count and that files stay (danger); ONE ws.request (self-unhooking, 15 s said) carrying the page\'s newest uuid; one at a time; only OUR answer acts — the REAL putBack fills only an empty box; the CLI\'s refusal is worded; every reason has its own pinned words; cancel and a closed view send nothing', bad.join(' | '));
+  // the WIRING the lifted methods hang on (each a line of the product; a removed one is red here)
+  const cv = read('src/lib/chat-view.js'), cr = read('src/lib/chat-renderers.js');
+  const wires = [
+    ['the renderer draws the door with the other message buttons', /this\.addForkBtn\(el, msg\);\n    this\.addRewindBtn\(el, msg\);/.test(cr)],
+    ['the view hands the renderer its click and its live gate', /onRewind: \(msg\) => this\._rewindFromMessage\(msg\)/.test(cv) && /canRewind: \(\) => !this\._readOnly/.test(cv)],
+    ['the stream\'s answer reaches the view', /if \(op\.subtype === 'rewind-answer'\) \{ this\._onRewindAnswer\(op\.data\); return; \}/.test(cv)],
+    ['a uuid or a batch arriving later redraws the door', /if \('uuid' in fields \|\| 'batchOf' in fields\) this\._renderers\.patchRewindBtn\(this\._elements\.get\(id\), msg\);/.test(cv)],
+    ['a struck message loses its door', /_markRewoundEl\(el, kind\) \{\n    el\?\.querySelector\?\.\(':scope > \.chat-rewind-btn'\)\?\.remove\(\);/.test(cv)],
+    ['a read-only view loses every door', /this\._readOnly = true;\n    this\._messageList\?\.querySelectorAll\?\.\('\.chat-rewind-btn'\)\.forEach\(\(b\) => b\.remove\(\)\);/.test(cv)],
+    ['a closed view stops its answer timer and its request', /dispose\(\) \{\n    this\._statusBar\?\.dispose\?\.\(\);\n    clearTimeout\(this\._rewindAnswerTimer\); this\._rewindCancel\?\.\(\);/.test(cv)],
+    ['the touch … menu row under the same gate', /rewindPointOf\(backendFeatureCaps\(backend\)\.checkpoints, msg\)[^\n]*\n\s*items\.push\(\{ label: t\('Rewind to here'\)/.test(cv)],
+  ];
+  const offWires = wires.filter(([, ok]) => !ok).map(([n]) => n);
+  ok(offWires.length === 0, `the wiring: ${wires.map(([n]) => n).join(' · ')}`, offWires.join(' | '));
+  // no backend id decides any part of the door (the §2.13 law — the caps row decides)
+  const blocks = {
+    'addRewindBtn': cr.slice(cr.indexOf('  addRewindBtn(el, msg) {'), cr.indexOf('  extractMsgText(msg) {')),
+    '_rewindFromMessage': cv.slice(cv.indexOf('  _rewindFromMessage(msg) {'), cv.indexOf('  // Fork a new session from a specific assistant message')),
+    'ws rewind': read('src/ws-handler.js').split("case 'rewind': {")[1]?.split('break;')[0] || '',
+    'rewind-requests': read('src/server/rewind-requests.js'),
+  };
+  const idGate = /backend(?:\s*(?:\|\||\?\?)\s*'[a-z-]+'\s*\))?\s*[!=]==\s*'(?:codex|claude|opencode|antigravity|shell)'/;
+  ok(Object.values(blocks).every((b) => b.length > 50 && !idGate.test(b)) && idGate.test("x.backend === 'claude'"), 'no backend id decides the door — the button, the view, the ws case, the server door (the checker proven on a planted gate)', Object.entries(blocks).filter(([, b]) => idGate.test(b) || b.length <= 50).map(([k]) => k).join(','));
+  // every word the door says, in both dictionaries
+  const nb = cr.indexOf("Number.isFinite(msg.content[0].rewindData?.taken)"), mb = cv.indexOf('// «Rewind to here» (B-437e): the hover button');
+  if (nb < 0 || mb < 0) bad.push('census:markers');
+  const texts = [blocks.addRewindBtn, blocks._rewindFromMessage, cr.slice(nb, cr.indexOf('return { el, sideEffect: null };', nb)), cv.slice(mb, cv.indexOf('\n    }\n', mb))];
+  const keys = [...new Set(texts.join('\n').match(/\bt\(\s*(['"])((?:(?!\1)[^\\]|\\.)+)\1/g).map((x) => x.replace(/^t\(\s*['"]/, '').slice(0, -1).replace(/\\(['"])/g, '$1')))];
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  const missing = keys.filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':'));
+  ok(nb > 0 && mb > 0 && keys.length >= 28 && missing.length === 0, `every word the door says (${keys.length}) has its zh and ja entry`, missing.join(' | '));
+  const css = read('public/chat.css');
+  ok(/\.chat-rewind-btn \{ right: 30px; \}/.test(css) && /@media \(hover: none\) and \(pointer: coarse\) \{ \.chat-msg > \.chat-open-editor-btn, \.chat-msg > \.chat-fork-btn \{ display: none; \} \}/.test(css)
+    && /@media \(hover: none\) and \(pointer: coarse\) \{ \.chat-msg > \.chat-rewind-btn \{ display: none; \} \}/.test(css) && /:has\(> \.chat-rewind-btn\)[^{]*\{ padding-right: 56px; \}/.test(css),
+    'the CSS: the fork\'s slot (a person\'s message never has a fork button), the words keep the column free, a touch client hides it in its OWN rule (the pinned touch line untouched; the … menu row serves touch)');
+  ok(/rewind: +_s\('<path/.test(read('src/lib/icons.js')), 'the button is an SVG icon (UI_ICONS.rewind)');
 }
 
 say(failed ? `\n${failed} FAILED (${passed} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${passed}${skipped ? `; ${skipped} red control SKIPPED — not in this clone` : ''})`);

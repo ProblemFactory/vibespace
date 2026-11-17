@@ -1452,12 +1452,15 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 .chat-open-editor-btn:hover { opacity: 1 !important; color: var(--accent); border-color: var(--accent); }
 /* Fork-from-here button sits just left of the open-in-editor button (4 px apart) */
 .chat-fork-btn { right: 30px; }
+/* «Rewind to here» (B-437e) — on the person's own messages, which never carry the fork button: the same slot */
+.chat-rewind-btn { right: 30px; }
 /* …and the words never run under them (lane desktop-small P2-5 — at 376–504 px «1→2→4→8→16 秒» read «1→2→4→8 [⑂][📋]»): a
    message that carries them keeps their column free — its text's right padding = the buttons' width (one 24 px button
    + 4, two + 4 apart), never a float (a float as tall as the buttons made every one-line row taller); a touch client has
    no hover buttons (the … button) */
 .chat-msg:has(> .chat-open-editor-btn) > :is(.chat-compact-msg, .chat-bubble) .chat-text { padding-right: 28px; }
 .chat-msg:has(> .chat-fork-btn) > :is(.chat-compact-msg, .chat-bubble) .chat-text { padding-right: 56px; }
+.chat-msg:has(> .chat-rewind-btn) > :is(.chat-compact-msg, .chat-bubble) .chat-text { padding-right: 56px; }
 @media (hover: none) and (pointer: coarse) { .chat-msg:has(> .chat-open-editor-btn) > :is(.chat-compact-msg, .chat-bubble) .chat-text { padding-right: 0; } }
 /* THE MESSAGE'S … BUTTON (touch only — created when app.isTouch; lane mobile-select). A long press on the words is
    the platform's selection, so the message menu opens from here. FLOATED as the content's first child: the first
@@ -1480,6 +1483,7 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
    INVISIBLE one sat over the … button and a tap on … opened the editor. The … button serves every touch client —
    the very media query app.isTouch reads (and the door installs on). */
 @media (hover: none) and (pointer: coarse) { .chat-msg > .chat-open-editor-btn, .chat-msg > .chat-fork-btn { display: none; } }
+@media (hover: none) and (pointer: coarse) { .chat-msg > .chat-rewind-btn { display: none; } } /* B-437e: the … menu row serves touch */
 /* ── Chat Compact Mode ── */
 .chat-compact .chat-message-list { padding: 8px 12px; gap: 2px; }
 .chat-compact .chat-msg { display: block; }

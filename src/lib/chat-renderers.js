@@ -15,6 +15,7 @@ import { UI_ICONS } from './icons.js';
 import { commandDrivesBrowser, toolCommandText } from '../browser-trace.js'; // agent browser P5 (§4.5 / D35): which shell calls carry an action trace
 import { commandTouchesChannels } from '../channel-touch.js'; // §26 (B-099e): a shell call running vibespace-channels carries the witness's box
 import { describeAgentCommand, agentCommandText, vendorBypassOf, alwaysOfferFor, updatesText, rulesText, folderOfferFor, FOLDER_PROMPT_AT } from '../agent-tool-rules.js';
+import { rewindPointOf } from '../rewind-door.js'; // PURE (B-437e): where «Rewind to here» is drawn
 import { requestPhrases } from '../command-words.js'; // PURE (lane door-healthy-chat): a request in a person's words — «install python-docx · read 3 files» // lane L: VibeSpace's own tools in plain words + the widened (or narrowed / withheld) Always Allow; r6: the ONE offer the server also sends (F6) + every update in words (F5)
 import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabel, initFrameOf, subagentView } from './agent-meta.js';
 import { subagentCardHtml, isSubagentToolRow, markConversationLinks, conversationLinksHtml } from './subagent-card.js'; // lane agy-subagent-cards: the card an Antigravity subagent shows + conversation:// links (PURE)
@@ -716,7 +717,7 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, onOpenArtifact = null, getWorkflowVerdict, getSourceWinId, peerFold, subagentKnown = null, getPermissionPromptCount = null }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onRewind, canRewind, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, onOpenArtifact = null, getWorkflowVerdict, getSourceWinId, peerFold, subagentKnown = null, getPermissionPromptCount = null }) {
     // Is THIS collab card the one the next row would coalesce into, on a turn
     // that is still streaming? Only the VIEW knows (it owns the streaming flag
     // and the message list), and the answer decides live age vs frozen span.
@@ -739,6 +740,8 @@ class ChatRenderers {
     this._messageList = messageList;
     this._onPermissionResolve = onPermissionResolve || (() => {});
     this._onFork = onFork || null;
+    this._onRewind = onRewind || null; // B-437e «Rewind to here» (chat-view _rewindFromMessage); absent = no button
+    this._canRewind = canRewind || null; // …and is the conversation live here (a read-only / history view draws none)
     this._onMsgMenu = onMsgMenu || null; // the touch message menu (the … button, lane mobile-select); absent = no button
     this._getSessionCtx = getSessionCtx || null;
     this._getPublishedFiles = getPublishedFiles || null; // toolCallId → published SendUserFile rows (owner ruling 8(c))
@@ -2091,6 +2094,20 @@ class ChatRenderers {
     // ROLLBACK NOTICE (§2.10 / §3.2): the normalizer bakes English (it cannot
     // know the device language) and carries the NUMBERS, so the sentence is
     // rebuilt here — the same contract as the model-fallback notices above.
+    if (msg.noticeKind === 'rewound' && msg.content?.[0] && Number.isFinite(msg.content[0].rewindData?.taken)) {
+      // the PERSON'S rewind (B-437e) — known by its data (`taken`), never by a harness id (test-architecture §78): the
+      // normalizer's numbers, the sentence in this device's language
+      const d = msg.content[0].rewindData;
+      const n = Number(d.taken) || 0;
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification chat-msg-rewind-notice';
+      const line = d.placed === false
+        ? t('↶ The conversation was rewound here — what it took back is not in this view.')
+        : n === 1 ? t('↶ Rewound to before your message — 1 message taken back. Files were not rewound.')
+          : t('↶ Rewound to before your message — {n} messages taken back. Files were not rewound.', { n });
+      el.innerHTML = `<span class="chat-system-text">${escHtml(line)}</span>`;
+      return { el, sideEffect: null };
+    }
     if (msg.noticeKind === 'rewound' && msg.content?.[0]) {
       const d = msg.content[0].rewindData || {};
       const n = Number(d.numTurns) || 0;
@@ -3365,6 +3382,7 @@ class ChatRenderers {
     el.style.position = 'relative';
     el.appendChild(btn);
     this.addForkBtn(el, msg);
+    this.addRewindBtn(el, msg);
   }
 
   /** THE MESSAGE'S … BUTTON (touch only — lane mobile-select). On a phone a long press on the words is the platform's
@@ -3424,6 +3442,34 @@ class ChatRenderers {
     btn.title = t('Fork from here — branch a new session up to this message');
     btn.onclick = (e) => { e.stopPropagation(); this._onFork(msg.uuid, msg); };
     el.appendChild(btn);
+  }
+
+  // «Rewind to here» (B-437e, design-harness-features §3.2 tier one): on one of the PERSON'S OWN messages — this message
+  // and everything after it are taken back IN PLACE (the same conversation; its words come back into the box; files stay
+  // as they are). Drawn where src/rewind-door.js rewindPointOf says so over the harness's `checkpoints` row (never a
+  // backend id): the person's own turn-starting message the harness knows by an id. A drawn door may still be refused
+  // (a running turn, a stopped conversation) — the click says why. Never in a sub-agent viewer.
+  addRewindBtn(el, msg) {
+    if (!this._onRewind || !el || el.querySelector(':scope > .chat-rewind-btn')) return;
+    if (this._canRewind && !this._canRewind()) return;                  // a read-only / history view: nothing to rewind here
+    if (el.classList?.contains?.('chat-gap-msg')) return;              // a gap slab's copy is no message of the live array
+    if (!rewindPointOf(backendFeatureCaps(this.backend).checkpoints, msg)) return;
+    if (typeof this.sessionId === 'string' && this.sessionId.startsWith('sub-')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chat-open-editor-btn chat-rewind-btn';
+    btn.innerHTML = UI_ICONS.rewind;
+    btn.title = t('Rewind to here — take this message and everything after it back (files stay as they are)');
+    btn.setAttribute('aria-label', t('Rewind to here'));
+    btn.onclick = (e) => { e.stopPropagation(); this._onRewind(el._rawMsg || msg); };
+    el.appendChild(btn);
+  }
+  /** The message changed after it was drawn — its uuid arrived (the wrapper's frame_stamp), it joined a batch, it was
+   *  taken back: the door follows the same gate. */
+  patchRewindBtn(el, msg) {
+    if (!el) return;
+    if (!rewindPointOf(backendFeatureCaps(this.backend).checkpoints, msg)) { el.querySelector(':scope > .chat-rewind-btn')?.remove(); return; }
+    this.addRewindBtn(el, msg);
   }
 
   extractMsgText(msg) {
