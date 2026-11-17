@@ -755,7 +755,7 @@ class UserTodoManager {
     // a field, belted). A conversation's own name is never belted under either shape (r3: the r2 label belt masked it).
     const agentWords = AGENT_WORDS_ORIGINS.includes(origin);
     const agentFields = AGENT_FIELDS_ORIGINS.includes(origin);
-    const beltOf = (s) => belt.maskForSink(s, { dataDir: _dataDir });
+    const beltOf = (s) => belt.maskForSink(s, { dataDir: _dataDir, message: true });
     if (agentFields) {
       // THE ONE FILER per fields origin (lane job-notify-user r4): a product file not listed in FIELDS_FILERS is refused by
       // name, whatever spelling of the origin it used — the store judges the WRITER by what it writes. r5: FAIL CLOSED — a

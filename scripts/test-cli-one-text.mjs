@@ -71,13 +71,14 @@ console.log('§1 the PURE rule (src/agent-cli-text.js)');
   ok(T.sentLine({}, '若对照') === 'sent: 3 characters', 'an older route without chars ⇒ the CLI\'s own count');
   ok(T.sentLine({ chars: 3, detailChars: 2 }, 'abc', 'de ') === 'sent: 3 characters + --detail 2', 'a --detail count rides the same line');
   // lane bl-msg B-3e61: a route that names what the secret belt MASKED is told that — never «the last N were CUT» (four sightings read the count as a length cap)
-  const MASKED_LINE = 'sent: 30 characters — the secret belt masked the value at «session:», «data-key=» (each now «redacted»); the rest arrived whole';
+  const MASKED_LINE = 'sent: 30 characters — the secret belt masked the value at «session:», «data-key=» (each now «redacted»)';
   ok(T.sentLine({ chars: 30, masked: ['session:', 'data-key='] }, 'y'.repeat(36)) === MASKED_LINE, 'a route that names what its belt masked ⇒ the line SAYS the mask and where, and no cut');
   ok(T.sentLine({ chars: 30, masked: [] }, 'y'.repeat(36)).endsWith('the last 6 were CUT') && T.sentLine({ chars: 30, masked: [7, ''] }, 'y'.repeat(36)).endsWith('the last 6 were CUT'), '…an empty or malformed masked list changes nothing (the cut is still said)');
   {
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const tsrc = fs.readFileSync(path.join(REPO, 'src/agent-cli-text.js'), 'utf8');
     const T0 = mutantCopies('blm-cli', REPO).load('src/agent-cli-text.js', tsrc.replace('  if (said.length) line +=', '  if (false) line +='), 'no-masked');
+    ok(T.sentLine({ chars: 30, masked: ['a:'], maskedMore: true }, 'y'.repeat(36)).includes('«a:» and more (each'), '…a ninth mask is said as «and more»');
     ok(tsrc.includes('  if (said.length) line +=') && T0.sentLine({ chars: 30, masked: ['session:'] }, 'y'.repeat(36)).endsWith('were CUT'), 'RED CONTROL (the masked branch removed): the mask is read as a CUT again — the leg above goes red');
   }
 }
@@ -282,7 +283,7 @@ console.log('§5 the echo is the ROUTE\'s count');
   const old = await run(CLI('msg'), ['send', 'g-1', '若对照 vs 名单'], { mode: 'none' });
   ok(old.code === 0 && old.out.includes('sent: 9 characters'), 'an older route without chars ⇒ the CLI\'s own count (code points)', old.out);
   const msk = await run(CLI('msg'), ['send', 'g-1', 'the session:abcdefghijklmnopqrst and the rest'], { mode: 'masked' });
-  ok(msk.code === 0 && msk.out.includes('sent: 35 characters — the secret belt masked the value at «session:» (each now «redacted»); the rest arrived whole') && !/CUT/.test(msk.out), 'lane bl-msg B-3e61: msg send through a route whose belt masked a value ⇒ the confirmation names it, never a cut', msk.out);
+  ok(msk.code === 0 && msk.out.includes('sent: 35 characters — the secret belt masked the value at «session:» (each now «redacted»)') && !/CUT/.test(msk.out), 'lane bl-msg B-3e61: msg send through a route whose belt masked a value ⇒ the confirmation names it, never a cut', msk.out);
   const one = await run(CLI('task'), ['backlog-add', 'x'], { mode: 'count' });
   ok(one.code === 0 && /^ {2}sent: 1 character$/m.test(one.out), 'one character ⇒ singular', one.out);
 }

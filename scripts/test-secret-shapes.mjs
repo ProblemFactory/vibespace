@@ -475,8 +475,14 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
   ok(line.every((x) => !x.o.text.includes(x.V) && !x.o.text.includes(TAIL)), 'the LINE MODE (no option — exit output, a job log) still hides to the line end: the stored head is unchanged');
   // a header is never prose: the scheme word alone would leave the credential after it
   const BT = v() + v(), DG = v() + v();
-  const hdr = [`Authorization: Bearer ${BT} ${TAIL}`, `x-auth: Digest username="u", response="${DG}" ${TAIL}`, `the token: basic ${BT}`].map((t) => SS.redactSecrets(t, { message: true }).text);
-  ok(hdr.every((t) => !t.includes(BT) && !t.includes(DG)), `MESSAGE MODE: a value whose first word is an HTTP auth scheme keeps the line-end extent (${hdr.map(J).join(' · ')})`);
+  // r2 (the adversarial read F1–F4): a header of ANY scheme, a cookie list, a key block flattened onto one line, a credential word before its token
+  const hdr = [`Authorization: Bearer ${BT} ${TAIL}`, `Authorization: Digest username="u", response="${DG}" ${TAIL}`, `the token: basic ${BT}`, `Authorization: Bot ${BT}.x ${TAIL}`,
+    `Cookie: theme=dark; PHPSESSID=${DG}; JSESSIONID=${BT}`, `PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY----- MII${BT} -----END RSA PRIVATE KEY-----`, `auth: password ${BT} then`, `secret: key ${BT}${DG} tail`, `token: Bearer ${BT} ok`].map((t) => SS.redactSecrets(t, { message: true }).text);
+  ok(hdr.every((t) => !t.includes(BT) && !t.includes(DG)), `MESSAGE MODE: a header (any scheme), a cookie list, a one-line key block and a credential word with its token are hidden (${hdr.map(J).join(' · ')})`);
+  // r2 (F6 / F7): a scheme or credential word in PROSE takes one more word, never the rest; a mention is never a value
+  const prose2 = [[`auth: token rotation is broken, ${TAIL}`, TAIL], [`Session: basic checks pass, ${TAIL}`, TAIL]].map(([t, k]) => SS.redactSecrets(t, { message: true }).text.includes(k));
+  const at = [`key: @beta please ${TAIL}`, `the password @beta knows ${TAIL}`].map((t) => SS.redactSecrets(t, { message: true }).text === t);
+  ok(prose2.every(Boolean) && at.every(Boolean), 'MESSAGE MODE: «auth: token rotation…» keeps its rest; «key: @beta …» and «the password @beta …» keep the mention (the @-scan reads the kept words)');
   // multi-line shapes keep their own rules in a message: a YAML continuation, a JSON object, a quoted value with blanks
   const PW = v();
   const multi = [`notes\npassword:\n  ${PW}\nback`, `{"password": "${PW} x", "user": "u"}`, `password: "${PW} two words"`, `-----BEGIN PRIVATE KEY-----\n${PW}\n-----END PRIVATE KEY-----`].map((t) => SS.redactSecrets(t, { message: true }).text);
@@ -484,15 +490,18 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
   // a KNOWN FLAG with a value from its closed public list is no credential — in both modes; any other value of it is masked
   const KF = fnOf2(SS.KNOWN_FLAG_VALUES);
   const fl = ['', 'message'].map((mode) => { const o = mode ? { message: true } : {}; const K = v();
-    return { keep: SS.redactSecrets(`chrome --password-store=basic --api-key=${K} ${TAIL}`, o).text, K, odd: SS.redactSecrets(`chrome --password-store=${PW} ${TAIL}`, o).text, q: SS.redactSecrets(`--password-store="kwallet5" x`, o).text }; });
-  ok(KF && fl.every((f) => f.keep.includes('--password-store=basic') && !f.keep.includes(f.K) && !f.odd.includes(PW) && f.q === '--password-store="kwallet5" x'),
+    return { keep: SS.redactSecrets(`chrome --password-store=basic --api-key=${K} ${TAIL}`, o).text, K, odd: SS.redactSecrets(`chrome --password-store=${PW} ${TAIL}`, o).text, q: SS.redactSecrets(`--password-store="kwallet5" x`, o).text, dot: SS.redactSecrets(`--password-store=basic.${PW} x`, o).text, end: SS.redactSecrets('use --password-store=basic.', o).text }; });
+  ok(KF && fl.every((f) => f.keep.includes('--password-store=basic') && !f.keep.includes(f.K) && !f.odd.includes(PW) && f.q === '--password-store="kwallet5" x' && !f.dot.includes(PW) && f.end === 'use --password-store=basic.'),
     `A KNOWN FLAG: --password-store=basic stays in both modes and the scan walks on past it (the next --api-key is masked); --password-store=<other> is masked (${fl.map((f) => J(f.keep)).join(' · ')})`);
   // RED CONTROLS (patched copies through the SAME legs)
   const cut = (src, from, to, name) => { ok(src.includes(from), `the control «${name}» finds its line`); return M.load('src/secret-shapes.js', src.replace(from, to), name); };
-  const noMsg = cut(SRC, 'if (message && !closed) {', 'if (false) {', 'no-message-mode');
+  const MSG_LINE = 'if (message && !closed && !LINE_HEADS.has(String(m[4]).toLowerCase())) {';
+  const noMsg = cut(SRC, MSG_LINE, 'if (false) {', 'no-message-mode');
   ok(run(noMsg, { message: true }).every((x) => !x.o.text.includes(TAIL)), 'RED CONTROL (the message mode removed): every sighting loses its rest again — the MESSAGE MODE leg goes red');
-  const noScheme = cut(SRC, 'if (!AUTH_SCHEMES.has(', 'if (true || !AUTH_SCHEMES.has(', 'no-scheme');
-  ok(noScheme.redactSecrets(`Authorization: Bearer ${BT} x`, { message: true }).text.includes(BT), 'RED CONTROL (the auth-scheme exception removed): the bearer credential is left in clear — the header leg goes red');
+  const noHeads = cut(SRC, MSG_LINE, 'if (message && !closed) {', 'no-line-heads');
+  ok(noHeads.redactSecrets(`Authorization: Bot ${BT} x`, { message: true }).text.includes(BT) && noHeads.redactSecrets(`Cookie: a=1; PHPSESSID=${DG}`, { message: true }).text.includes(DG), 'RED CONTROL (the header list removed): a Bot credential and a session cookie are left in clear — the header leg goes red');
+  const noTwo = cut(SRC, 'if (AUTH_SCHEMES.has(w) || SECRET_WORDS.has(w)) {', 'if (false) {', 'no-two-token');
+  ok(noTwo.redactSecrets(`auth: password ${BT} then`, { message: true }).text.includes(BT) && noTwo.redactSecrets(`token: Bearer ${BT} ok`, { message: true }).text.includes(BT), 'RED CONTROL (the credential word takes no token): «auth: password …» and «token: Bearer …» leave the secret in clear — the header leg goes red');
   const noFlag = cut(SRC, 'if (flagEnd >= 0) {', 'if (false) {', 'no-flag');
   ok(!noFlag.redactSecrets('chrome --password-store=basic x', { message: true }).text.includes('--password-store=basic'), 'RED CONTROL (the known-flag check removed): --password-store=basic is masked again — the flag leg goes red');
   // the belt carries the mode + the collector to the shapes (the group log and the stash ask it)

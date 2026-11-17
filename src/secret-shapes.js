@@ -94,7 +94,8 @@ const KNOWN_FLAG_VALUES = new Map([
   ['password-store', new Set(['basic', 'gnome', 'gnome-keyring', 'gnome-libsecret', 'kwallet', 'kwallet5', 'kwallet6', 'detect'])],
 ]);
 const FLAG_VALUE_RE = /[A-Za-z0-9][A-Za-z0-9_\-]{0,40}/y;
-const FLAG_VALUE_END = new Set([...'.,;:!?)]}\'"`»」）'].map((ch) => ch.charCodeAt(0)));
+const FLAG_VALUE_END = new Set([...',;)]}\'"`»」）'].map((ch) => ch.charCodeAt(0)));
+const FLAG_VALUE_STOP = new Set([...'.:!?'].map((ch) => ch.charCodeAt(0)));   // r2 (the read's F12): a sentence stop ends the value only before a blank or the end — `basic.x` is no closed-list value
 /** Is the value at `at` (after its head) a known flag's closed-list value? → the index just past it (and its closing quote) | -1 */
 function knownFlagEnd(text, name, at, q) {
   const vals = KNOWN_FLAG_VALUES.get(String(name).toLowerCase());
@@ -103,14 +104,18 @@ function knownFlagEnd(text, name, at, q) {
   const v = FLAG_VALUE_RE.exec(text); if (!v || !vals.has(v[0].toLowerCase())) return -1;
   const end = FLAG_VALUE_RE.lastIndex, c = end < text.length ? text.charCodeAt(end) : -1;
   if (q) return c === q.charCodeAt(0) ? end + 1 : -1;
-  return c < 0 || isBlankCode(c) || FLAG_VALUE_END.has(c) ? end : -1;
+  const c2 = end + 1 < text.length ? text.charCodeAt(end + 1) : -1;
+  return c < 0 || isBlankCode(c) || FLAG_VALUE_END.has(c) || (FLAG_VALUE_STOP.has(c) && (c2 < 0 || isBlankCode(c2))) ? end : -1;
 }
 // a MESSAGE's bare value ends at a blank or at one of these (a CJK sentence's own stops — a password holds none of them)
 const MESSAGE_STOPS = new Set([...'、。，；：！？「」『』（）【】《》〈〉'].map((ch) => ch.charCodeAt(0)));
 // a MESSAGE's value whose first token is an HTTP auth SCHEME is a header, never prose (`Authorization: Bearer <token>`, `Digest
 // username=…, response=…`): it keeps the line-end extent — one token would mask the scheme word and leave the credential after it
 const AUTH_SCHEMES = new Set(['bearer', 'basic', 'digest', 'token', 'negotiate', 'ntlm', 'dpop', 'hoba', 'mutual', 'vapid', 'gnap', 'privatetoken', 'scram-sha-1', 'scram-sha-256', 'aws4-hmac-sha256', 'apikey']);
-const SAID_MAX = 8, SAID_LEN = 60;
+// r2 (the read's F1 / F2): a HEADER is never prose — its value runs to the line end whatever its first word (`Authorization: Bot …`,
+// `Cookie: theme=dark; PHPSESSID=…` — every scheme list is open-ended, a cookie list's later names hold no credential word)
+const LINE_HEADS = new Set(['authorization', 'proxy-authorization', 'cookie', 'set-cookie']);
+const SAID_MAX = 9, SAID_LEN = 60;   // r2 (F9): one past what the answer shows — the ninth says «and more»
 /** the `said` collector: each trigger once, at most SAID_MAX, each at most SAID_LEN characters; null when nobody asked */
 function sayer(said) {
   if (!Array.isArray(said)) return null;
@@ -238,12 +243,24 @@ function redactKv(text, { message = false, say = null } = {}) {
     // lane bl-msg B-3e61 (seven sightings): in a MESSAGE a bare (or never-closed quoted) value is ONE token — past the blanks a head
     // left, to the next blank or CJK stop — and the rest of the line stays the reader's; a closer the prose opened before the head
     // (`[data-key=…]`, `(token=…)`) and ONE sentence-final `.` / `,` stay outside the mask (R7's queryTail). One forward scan
-    if (message && !closed) {
+    // r2 (the adversarial read): a HEADER keeps the line end (LINE_HEADS, F1 / F2); a first token that opens a key block
+    // (`-----BEGIN …` flattened onto one line, F3) keeps the line end; a first token that is a SCHEME or a CREDENTIAL word
+    // (`auth: password hunter2`, `token: Bearer …`, F4) takes the NEXT token with it — the rule after it would have read it —
+    // never the line end (`auth: token rotation is broken, …` keeps its rest, F6); a token that is a MENTION (`@beta`) is never
+    // a value (F7: the @-scan reads the kept words)
+    if (message && !closed && !LINE_HEADS.has(String(m[4]).toLowerCase())) {
+      const tokEnd = (from) => { let e = from; while (e < valEnd) { const c = text.charCodeAt(e); if (isBlankCode(c) || MESSAGE_STOPS.has(c)) break; e++; } return e; };
       let p = headEnd;
       while (p < valEnd && isBlankCode(text.charCodeAt(p))) p++;
       const s0 = p;
-      while (p < valEnd) { const c = text.charCodeAt(p); if (isBlankCode(c) || MESSAGE_STOPS.has(c)) break; p++; }
-      if (!AUTH_SCHEMES.has(text.slice(q && s0 === headEnd ? s0 + 1 : s0, p).toLowerCase())) valEnd = p - queryTail(text, headEnd, p, opens(text, headEnd));
+      p = tokEnd(s0);
+      const first = text.slice(q && s0 === headEnd ? s0 + 1 : s0, p);
+      if (first.charCodeAt(0) === 64) { KV_HEAD.lastIndex = p; continue; }
+      if (!first.startsWith('-----BEGIN')) {
+        const w = first.toLowerCase();
+        if (AUTH_SCHEMES.has(w) || SECRET_WORDS.has(w)) { let p2 = p; while (p2 < valEnd && isBlankCode(text.charCodeAt(p2))) p2++; if (p2 < valEnd) p = tokEnd(p2); }
+        valEnd = p - queryTail(text, headEnd, p, opens(text, headEnd));
+      }
     }
     // verify r2 F2: the WHOLE value, to its closing quote or its line end — a cut at VALUE_MAX replaced the first 4096
     // characters and KEPT the rest of the line: a 6 KB bearer JWT (an Azure token), a kubeconfig `client-key-data` of an
@@ -513,7 +530,7 @@ function redactSecrets(raw, { runs = false, message = false, said = null } = {})
     text = text.replace(HTTP_RE, (m, bearer, basic) => { n++; if (say) say(bearer || basic); return `${bearer || basic}${REDACTED}`; });
     const jwt = redactJwt(text); text = jwt.text; n += jwt.n; if (say && jwt.n) say('a JWT (eyJ…)');   // verify r4 F3: the JWT scan, before the bounded prefixes
     text = text.replace(PREFIX_RE, (m) => { n++; const h = PREFIX_HEAD.exec(m); if (say) say(`${h ? h[1] : ''}…`); return `${h ? h[1] : ''}${REDACTED}`; });
-    text = text.replace(WORD_NEXT_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });
+    text = text.replace(WORD_NEXT_RE, (m, w, sp) => { if (message && m.charCodeAt(w.length + sp.length) === 64) return m; n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });   // r2 (F7): in a message a mention is never the token
     text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });
     text = redactQuery(text, (head) => { n++; if (say) say(head); });   // R7 — lane mask-value-shape r3: ONE linear walk (THE NAME GRAMMAR; a public name's value walked on)
     if (runs) text = text.replace(RUN_RE, (m) => { if (!keyMaterial(m)) return m; n++; if (say) say('a key-material run'); return REDACTED; });

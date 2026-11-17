@@ -2381,9 +2381,9 @@ class TaskGroupManager {
   addProgress(id, { note, detail, session } = {}) {
     const t = this.get(id);
     const dataDir = path.dirname(this._file);   // the belt finds the vault from here
-    const clean = belt.maskForSink(String(note || '').trim(), { dataDir }).slice(0, CAPS.note);   // agent-output-sinks: mask BEFORE it lands
+    const clean = belt.maskForSink(String(note || '').trim(), { dataDir, message: true }).slice(0, CAPS.note);   // agent-output-sinks: mask BEFORE it lands
     if (!clean) throw new Error('note required');
-    const cleanDetail = typeof detail === 'string' && detail.trim() ? belt.maskForSink(detail.trim(), { dataDir }).slice(0, CAPS.detail) : null;
+    const cleanDetail = typeof detail === 'string' && detail.trim() ? belt.maskForSink(detail.trim(), { dataDir, message: true }).slice(0, CAPS.detail) : null;
     const taken = new Set((t.progress || []).map((p) => p && p.id).filter(Boolean));
     t.progress.push({ id: mintProgressId(taken), at: Date.now(), note: clean, ...(cleanDetail ? { detail: cleanDetail } : {}), session: typeof session === 'string' ? session.slice(0, 200) : null });
     t.progress = this._keepLive(id, t.progress);

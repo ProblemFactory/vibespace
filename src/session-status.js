@@ -167,8 +167,8 @@ class SessionStatusManager {
   setByAgent(key, fields) {
     const v = this._validate(fields);
     const _dd = path.dirname(this._file);   // agent-output-sinks: belt the AGENT's own notice only (never setByUser, never a system NOTICE_RENDERERS queue item)
-    if (v.reason) v.reason = belt.maskForSink(v.reason, { dataDir: _dd });
-    if (v.detail) v.detail = belt.maskForSink(v.detail, { dataDir: _dd });
+    if (v.reason) v.reason = belt.maskForSink(v.reason, { dataDir: _dd, message: true });
+    if (v.detail) v.detail = belt.maskForSink(v.detail, { dataDir: _dd, message: true });
     if (!v.state && !v.urgency && !v.reason && !v.detail) return this.clear(key, 'agent');
     const prev = this._state.statuses[key];
     this._state.statuses[key] = {
