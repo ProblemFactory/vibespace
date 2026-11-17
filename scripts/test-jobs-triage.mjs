@@ -580,5 +580,50 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'B-ef97 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
+// ── §13 B-c17d: the 14-day gc never collects a cron's child while its parent still schedules fires ──
+console.log('§13 B-c17d: a monthly cron keeps its child (its run ring) between two fires');
+{
+  const acc = { view: 'session', control: 'session' };
+  const ended = T0 - 20 * D;   // past the gc's 14 days, before the next monthly fire
+  const parent = (id, extra = {}) => ({ id, kind: 'cron', name: 'monthly ' + id.slice(-2), state: 'scheduled', desiredUp: true, schedule: { everyMs: 30 * D }, nextFireAt: T0 + 10 * D, owner: {}, access: acc, runs: [], createdAt: T0 - 50 * D, ...extra });
+  const child = (id, cronParent) => ({ id, kind: 'task', name: 'monthly run', state: 'done', cronParent, owner: {}, access: acc, runs: [{ startedAt: ended, endedAt: ended + 1000, exit: 0 }], createdAt: T0 - 50 * D });
+  const seed = (d) => fs.writeFileSync(path.join(d, 'jobs.json'), JSON.stringify([
+    parent('jb-c17d0p01'), child('jb-c17d0c01', 'jb-c17d0p01'),                          // a live monthly cron and its child
+    parent('jb-c17d0p02', { desiredUp: false, state: 'down' }), child('jb-c17d0c02', 'jb-c17d0p02'),   // a cron turned off: its child ages as before
+    { id: 'jb-c17d0t03', kind: 'task', name: 'one-shot', state: 'done', owner: {}, access: acc, runs: [{ startedAt: ended, endedAt: ended + 1000, exit: 0 }], createdAt: ended },   // a plain task: collected as before
+    parent('jb-c17d0p04', { state: 'done', schedule: { at: T0 - 30 * D }, nextFireAt: null }), child('jb-c17d0c04', 'jb-c17d0p04'),   // an --at cron after its one fire (state 'done', desiredUp still true)
+  ]));
+  const keep = policy.doneAfterHours; policy.doneAfterHours = 0;   // «never archive»: the records reach the gc (an active cron's child always does — the archive keeps it)
+  try {
+    const d13 = mkDir('jobs-triage-cron-gc'); seed(d13);
+    const { jm: G } = boot(d13);
+    const atBoot = ['jb-c17d0c01', 'jb-c17d0c02', 'jb-c17d0t03'].every((id) => G.jobs.has(id));
+    await G._gc({ now: T0 });
+    ok(atBoot && G.jobs.has('jb-c17d0c01') && G.jobs.get('jb-c17d0c01').runs.length === 1, 'B-c17d: the gc KEEPS a monthly cron\'s child whose last run ended 20 days ago — its parent still schedules fires (was: deleted with its run list and journal)');
+    ok(!G.jobs.has('jb-c17d0c02') && !G.jobs.has('jb-c17d0t03') && !G.jobs.has('jb-c17d0c04'), 'B-c17d: …and still collects a child whose cron is turned off, the child of a FIRED --at cron (it schedules nothing more) and a plain done task past 14 days');
+    G.shutdown();
+    // CONTROL (scripts/mutant-copy.mjs): the release's gc — leg (a) never asks the parent
+    const MJ = mutantCopies('jobs-cron-gc-c17d', ROOT);
+    const jsrc = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
+    const guard = '        if (this._cronParentActive(job)) continue;\n';
+    ok(jsrc.split(guard).length === 2, 'B-c17d control setup: the gc asks the parent on one line');
+    const JMod = MJ.load('src/jobs.js', jsrc.replace(guard, '        // MUTANT: the release — the gc never asks the parent\n'));
+    const d13c = mkDir('jobs-triage-cron-gc-mut'); seed(d13c);
+    const X = new JMod.JobManager({ dataDir: d13c, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy });
+    X.init(); await X._gc({ now: T0 });
+    ok(!X.jobs.has('jb-c17d0c01'), 'B-c17d CONTROL (the release, in a copy): the gc deletes the live monthly cron\'s child between two fires');
+    X.shutdown();
+    const atLine = "    return !!p && p.desiredUp !== false && p.state !== 'missed' && p.state !== 'done';\n";
+    ok(jsrc.split(atLine).length === 2, 'B-c17d control setup: a fired --at cron is not active, on one line');
+    const JAt = MJ.load('src/jobs.js', jsrc.replace(atLine, "    return !!p && p.desiredUp !== false && p.state !== 'missed'; // MUTANT: a fired --at counts as active\n"), 'at');
+    const d13a = mkDir('jobs-triage-cron-gc-at-mut'); seed(d13a);
+    const XA = new JAt.JobManager({ dataDir: d13a, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy });
+    XA.init(); await XA._gc({ now: T0 });
+    ok(XA.jobs.has('jb-c17d0c04'), 'B-c17d CONTROL (a fired --at counted active, in a copy): its child is kept FOR EVER — neither archived nor collected');
+    XA.shutdown();
+    for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 2, label: 'B-c17d ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  } finally { policy.doneAfterHours = keep; }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

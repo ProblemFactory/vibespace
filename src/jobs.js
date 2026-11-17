@@ -530,7 +530,8 @@ class JobManager {
   _cronParentActive(job) {
     if (!job.cronParent) return false;
     const p = this.jobs.get(job.cronParent);
-    return !!p && p.desiredUp !== false && p.state !== 'missed';
+    // B-c17d: a fired `--at` cron (state 'done', no fire to come) schedules nothing more — its child ages like any one-shot
+    return !!p && p.desiredUp !== false && p.state !== 'missed' && p.state !== 'done';
   }
   /** the STRUCTURE every surface renders the held-notification count from
    *  (5b): per conversation, by typed reason — the client says the words */
@@ -2594,6 +2595,9 @@ class JobManager {
       const stamp = this._readStamp(job);
       if (this._verifyAlive(stamp)) continue; // NEVER gc live work, regardless of record state
       if (job.kind === 'task' && ['done', 'interrupted'].includes(job.state)) {
+        // B-c17d: a cron's child is its RUN RING while the parent still schedules fires (the archive sweep's own question) — a
+        // cron that fires less often than every 14 days (monthly) lost its child, its run list and its journal between two fires
+        if (this._cronParentActive(job)) continue;
         const run = job.runs && job.runs[job.runs.length - 1];
         if (run && run.endedAt && run.endedAt < cutoff) {
           this.jobs.delete(id); this._dirty = true;
