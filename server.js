@@ -408,7 +408,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta, patch
 // ── Boot restore (src/server/boot-restore.js, decomposition #7) ──
 // migrations + restoreSessions + R6 pipe re-open + keeper re-adoption.
 const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
-  readoptOrphanKeeperSessions, probeSockets, probeFacts, stoppedSessions, keepEnded, endFactsBefore, keptRecordOf, dropKept, consumeKeptOf, // stoppedSessions: the kept metas read back (lane dead-socket-keeps-chat-meta); keepEnded: an end on purpose (lane end-obeys-verdict); keptRecordOf: one ended conversation's record (the resume verb reads it); consumeKeptOf: at a turn end (B-a5a4 (2))
+  readoptOrphanKeeperSessions, probeSockets, probeFacts, stoppedSessions, keepEnded, endFactsBefore, dropKept, keptRecordOf, consumeKeptOf, // stoppedSessions: the kept metas read back (lane dead-socket-keeps-chat-meta); keepEnded: an end on purpose (lane end-obeys-verdict); keptRecordOf: one ended conversation's record (the resume verb reads it); consumeKeptOf: at a turn end (B-a5a4 (2))
 } = require('./src/server/boot-restore.js').create({
   rootDir: __dirname, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,

@@ -119,13 +119,16 @@ const endGoal = (at) => (at && at.goalStated === true ? statedGoal({ goalStatus:
  *  today); the mode the wrapper's 'chat' else the meta's (boot-restore's own rule, default 'terminal'). What the record cannot
  *  say is UNKNOWN, never «none». */
 function keptFacts(k, wm = null) {
-  if (!k || !k.meta) return { goal: 'unknown', queue: null, timerMark: null, mode: null, cwd: null, hostId: null, kept: false };
+  if (!k || !k.meta) return { goal: 'unknown', queue: null, timerMark: null, mode: null, cwd: null, hostId: null, kept: false, stopReason: null, stoppedAt: null, endedBy: null, accountId: null };
   const m = k.meta;
   const at = m.endFacts && typeof m.endFacts === 'object' ? m.endFacts : null;
   if (!wm || typeof wm !== 'object') wm = null;
   return { goal: at ? endGoal(at) : statedGoal(wm), queue: at ? statedQueue(at, { ended: true }) : statedQueue(wm), timerMark: m.cliTimerMark === true ? true : null,
     mode: at ? (at.mode || m.mode || 'terminal') : (wm && wm.mode === 'chat') ? 'chat' : (m.mode || 'terminal'),   // an end's facts carry the mode, folder and machine as of the end
-    cwd: (at && at.folder) || m.cwd || null, hostId: (at && at.machine) || m.host || null, kept: true, ended: !!at };
+    cwd: (at && at.folder) || m.cwd || null, hostId: (at && at.machine) || m.host || null, kept: true, ended: !!at,
+    // the manager design's piece 7 reads HOW it ended and WHO pays through this ONE reader (never a second parse): the record's
+    // reason (none = a restart's — boot-restore's own default), its instant, piece 3's endedBy {kind, actorId, name}, the account
+    stopReason: m.stopReason || null, stoppedAt: Number(m.stoppedAt) || null, endedBy: m.endedBy && typeof m.endedBy === 'object' ? m.endedBy : null, accountId: m.accountId || null };
 }
 
 /** The verb's facts of an ended conversation: its kept record (an end's carries the facts as of the end — piece 3 writes it) and,

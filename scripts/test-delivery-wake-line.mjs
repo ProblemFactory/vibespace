@@ -79,11 +79,11 @@ function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), c
     resumeLine: R.line, getStashHandover: () => R.view, now: () => c.now,
     seams: {
       keyOf: (cid) => ({ sessionKey: `${backendOf[cid] || 'claude'}:${cid}` }),
-      factsOf: async (key) => ({ goal: 'none', timerMark: null, queue: 0, mode: 'chat', cwd: '/w', hostId: null, kept: true, ...(facts[key.slice(key.indexOf(':') + 1)] || {}) }),
+      // piece 4's reader's shape: the record's facts AND how it ended / who pays (the ORCH reads the kept record only through it)
+      factsOf: async (key) => { const c = key.slice(key.indexOf(':') + 1); R.calls.push('kept'); const k = R.kept[c] || null; return { goal: 'none', timerMark: null, queue: 0, mode: 'chat', cwd: '/w', hostId: null, kept: !!k, stopReason: (k && k.stopReason) || null, stoppedAt: (k && k.stoppedAt) || null, endedBy: (k && k.endedBy) || null, accountId: (k && k.accountId) || null, ...(facts[c] || {}) }; },
       heldAccountOf: (key) => held[key.slice(key.indexOf(':') + 1)] || null,
       configAccountOf: (key) => stated[key.slice(key.indexOf(':') + 1)] || null,
       dropKept: noDrop ? undefined : async (key) => { const c = key.slice(key.indexOf(':') + 1); R.calls.push('dropKept'); const had = c in R.kept; delete R.kept[c]; return had; },
-      keptMetaOf: async (key) => { R.calls.push('kept'); return R.kept[key.slice(key.indexOf(':') + 1)] || null; },
       isArchived: (key) => R.archived.has(key.slice(key.indexOf(':') + 1)),
       rowOf: (backend) => (rows && Object.hasOwn(rows, backend) ? rows[backend] : { headless: true, resumeContinues: 'goal' }),
       reopen: async (item, o) => {

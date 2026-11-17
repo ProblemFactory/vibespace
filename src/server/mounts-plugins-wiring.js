@@ -267,8 +267,7 @@ function endedKeyOf(target) {
 const isArchivedKey = (key) => !!(persistenceRouter && typeof persistenceRouter.isArchived === 'function' && persistenceRouter.isArchived(key));   // persistence's ONE reader (in memory; a bare-id entry answers too)
 const resumeRowOf = (backend) => RL_PURE.harnessRowOf(require('../backend-caps.js').capsOf(backend));
 // piece 7's seams: what a delivery's start reads of an ended conversation, through piece 4's own readers and road
-const deliveryWakeSeams = { keyOf: endedKeyOf, factsOf: (key) => resumeFactsOf(key), keptMetaOf: async (key) => { const k = typeof resumeRoad.kept === 'function' ? await resumeRoad.kept(key) : null; return (k && k.meta) || null; },
-  // which account the reopen will bill (主开发 12:46Z, the read): the conversation's STATED one (its saved settings — the
+const deliveryWakeSeams = { keyOf: endedKeyOf, factsOf: (key) => resumeFactsOf(key),   // which account the reopen will bill (主开发 12:46Z, the read): the conversation's STATED one (its saved settings — the
   // reopen's own cfg, state key else the bare id); null ⇒ the account it is held on (the kept record's)
   configAccountOf: (key) => { const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {}; const m = st.sessionConfigs || {}; const id = String(key).slice(String(key).indexOf(':') + 1); const c = Object.hasOwn(m, key) ? m[key] : Object.hasOwn(m, id) ? m[id] : null; return c && typeof c.account === 'string' && c.account ? c.account : null; },
   // …and with none stated and none kept: the account whose index lists the conversation — the create's OWN lookup (14:26Z)

@@ -51,9 +51,10 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
 
   /** the line's START for one owed wake (runs at its turn: at most two at a time hub-wide) */
   async function startOne(cid, entry, key, backend) {
-    let facts = null, meta = null;
+    let facts = null;
     try { facts = await seams.factsOf(key); } catch (e) { facts = null; log(`[delivery-wake] ${cid}: its kept record could not be read — ${(e && e.message) || e}`); }
-    try { meta = typeof seams.keptMetaOf === 'function' ? await seams.keptMetaOf(key) : null; } catch { meta = null; }
+    // the kept record read ONCE, through piece 4's reader (src/server/resume-line.js keptFacts): how it ended, who ended it, the account
+    const meta = facts && facts.kept ? { stopReason: facts.stopReason || null, stoppedAt: facts.stoppedAt || null, endedBy: facts.endedBy || null, accountId: facts.accountId || null, host: facts.hostId || null } : null;
     const verdict = D.deliveryResumeVerdict({ ...(facts || {}), archived: seams.isArchived(key) }, seams.rowOf(backend));
     const how = D.endedHow(meta);
     // the person's GRANT is read off each delivering job's row NOW (at the line), never remembered from the park
