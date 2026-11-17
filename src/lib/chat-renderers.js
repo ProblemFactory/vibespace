@@ -382,6 +382,7 @@ export function isImagePath(fp) { return !!fp && IMAGE_EXT_RE.test(String(fp)); 
 // rebuild or a page-in resolves the cards whose record precedes it in TIME
 // (a card that came AFTER a compaction is about the context being full again
 // and must keep its button — the rule is pure so that edge is tested).
+const INTERRUPT_ONLY_RE = /^\[Request interrupted by user(?: for tool use)?\]$/; // B-3d90: the bare marker (personRow's INTERRUPT_RE, anchored at both ends)
 export { isCompactSummaryText } from '../assistant-note.js'; // THE rule (PURE) — the voice context's never-list reads the same one (voice-verify F1)
 /** PURE: which cards to resolve. `cards` = [{ts, resolved}] in DOM order; a
  *  card with no ts (a legacy element) resolves only when NO bound is given
@@ -856,8 +857,14 @@ class ChatRenderers {
       return this._renderPeerMsg(msg, rawText);
     }
     if (isNotification) {
+      // B-3d90 (3): a scheduled wake-up / the CLI's own prompt says so — its words behind the expander, never a «You» bubble
+      if (msg.originKind === 'wakeup' || msg.originKind === 'system-prompt') return this._renderNotificationMsg(rawText, { label: msg.originKind === 'wakeup' ? t('Scheduled wake-up') : t('Sent automatically, not by you'), detail: rawText.trim() });
       return this._renderNotificationMsg(rawText);
     }
+    // B-3d90 (1, 4): the CLI's compaction summary and its interrupt marker — records nobody typed (personRow) — are
+    // system cards: the summary behind the expander, the marker as one line (the person pressed Stop; the words are the CLI's)
+    if (origin.why === 'compact') return this._renderNotificationMsg(rawText, { label: t('Context compacted'), detail: rawText.trim() });
+    if (origin.why === 'interrupt') return this._renderNotificationMsg(rawText, { label: t('Stopped by you'), detail: INTERRUPT_ONLY_RE.test(rawText.trim()) ? '' : rawText.trim() }); // the result row says «Interrupted»; words past the bare marker stay readable
     // A FOR-YOU INBOX REPLY (design-user-inbox-reply D1.8): the user's own
     // message, sent from the inbox, opening with `[For you reply #<id>]` + the
     // quoted item. Recognised from the TEXT (the marker is a protocol value), so
@@ -1358,10 +1365,14 @@ class ChatRenderers {
     this._appendResetCreditBtn(el, msg);
   }
 
-  _renderNotificationMsg(rawText) {
+  _renderNotificationMsg(rawText, { label: named = null, detail: namedDetail = '' } = {}) {
     const el = document.createElement('div');
     el.className = 'chat-msg chat-msg-system chat-system-notification';
     el._rawMsg = { role: 'system' };
+    if (named) { // B-3d90: a record whose verdict names its card (a compaction summary, an interrupt marker, a scheduled prompt)
+      el.innerHTML = namedDetail ? `<details class="chat-hook-details"><summary class="chat-hook-summary">${escHtml(named)}</summary><pre class="chat-hook-output">${escHtml(namedDetail)}</pre></details>` : `<span class="chat-system-text">${escHtml(named)}</span>`;
+      return el;
+    }
 
     // Extract readable label from tagged content
     let label = '', detail = '';

@@ -880,6 +880,11 @@ export default {
   "Install": "インストール",
   "Install failed": "インストールに失敗しました",
   "Interrupt": "中断",
+  // B-3d90: the system cards of three user records nobody typed
+  "Scheduled wake-up": "スケジュールされた再開",
+  "Sent automatically, not by you": "自動で送られたもので、あなたの入力ではありません",
+  "Stopped by you": "あなたが停止しました",
+  "Context compacted": "コンテキストを圧縮しました",
   "Interrupted": "中断しました",
   "LIVE": "実行中",
   "LIVE (VibeSpace-managed)": "実行中（VibeSpace 管理）",

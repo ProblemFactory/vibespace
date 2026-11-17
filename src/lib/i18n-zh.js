@@ -881,6 +881,11 @@ export default {
   "Install": "安装",
   "Install failed": "安装失败",
   "Interrupt": "中断",
+  // B-3d90: the system cards of three user records nobody typed
+  "Scheduled wake-up": "定时唤醒",
+  "Sent automatically, not by you": "自动发送，不是你发的",
+  "Stopped by you": "你停止了这一轮",
+  "Context compacted": "上下文已压缩",
   "Interrupted": "已中断",
   "LIVE": "运行中",
   "LIVE (VibeSpace-managed)": "运行中（VibeSpace 管理）",

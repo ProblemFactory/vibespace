@@ -350,7 +350,12 @@ function userRecordOf(raw) {
   const content = raw.message?.content;
   const blocks = Array.isArray(content) ? content : [{ type: 'text', text: String(content ?? '') }];
   const text = blocks.filter((b) => b && b.type === 'text').map((b) => b.text || '').join('');
-  const typed = !!(raw.promptSource || raw._fromWebui);
+  // B-3d90 (3): the CLI's OWN prompts are never the person's — a record naming its wakeup (`wakeupSource`: loop_wakeup /
+  // schedule_wakeup — the CLI classes it «scheduled» whatever its promptSource) and promptSource 'system' (the CLI's
+  // words for it: «other machine-injected turns» — peer / channel messages, task notifications, auto-continuation)
+  const wakeup = !raw._fromWebui && (typeof raw.wakeupSource === 'string' && !!raw.wakeupSource);
+  const systemPrompt = !raw._fromWebui && raw.promptSource === 'system';
+  const typed = !!((raw.promptSource && !systemPrompt && !wakeup) || raw._fromWebui);
   const companion = raw.isMeta === true && !raw.origin && !typed && META_NOTE_RE.test(text);
   // THE SAFETY STOP'S NUDGE (lane classifier-stop-card): the CLI's note to the MODEL after a classifier stop (isMeta +
   // turnCompanion in the transcript, isSynthetic on the stream). Read from the census TEXT (a transport may drop the
@@ -375,6 +380,7 @@ function userRecordOf(raw) {
     : raw.origin?.kind === 'peer' ? { originKind: 'peer-message' }
     // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
     : raw.originKind === 'auto-resume' ? { originKind: 'auto-resume', typed: false, ...(typeof raw.originNote === 'string' && raw.originNote ? { originNote: raw.originNote } : {}) }
+    : wakeup ? { originKind: 'wakeup' } : systemPrompt ? { originKind: 'system-prompt' }
     : typed ? { typed: true } : {};
   const said = stamps.originKind === 'peer-message' ? ((raw.message && (typeof content === 'string' ? content : (content || []).map((b) => b.text || '').join('\n'))) || '') : null;
   return { text, stamps, synthetic: !!(raw.isSynthetic || companion), companion, nudge: stop && stop.kind === 'nudge' ? stop : null,
