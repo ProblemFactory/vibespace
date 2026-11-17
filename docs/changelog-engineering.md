@@ -4,6 +4,16 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.407 — 2026-11-17
+
+### boot-helper (主开发 2026-11-17 04:02Z — P0 of the client/server separation, piece 1): THE SUITES' ONE HUB BOOT
+- **The count first (on 2.369.406):** 218 places under scripts/ spawn `server.js` themselves (test-architecture §57c's rule; §57's own rule reads 217 — it does not count a patched copy of server.js), in 203 suites + 2 harnesses (pairing-ui-harness, xpra-window-boot): 196 heavy, ONE fast (test-chat-e2e — the five other «fast» hits of a looser first count were fixtures spelled in strings), six excluded (red chrome suites in no runner since 2026-09-07). 127 suites read the hub's output, 202 name a kill signal.
+- **scripts/hub-boot.mjs**, three verbs — start (in a root ONLY the helper mints), the log (one file, a restart reads its own lines), stop BY IDENTITY (the hub by the pid + start time recorded at its spawn; everything rooted in its root — the cwd, the HOME it was given, the daemon root it was given, the argv only when none of those can be read — on RESOLVED paths, each pid + start time read again just before its signal, a changed one left and said; never a name, a pattern or a parent id). At exit: every hub, everything rooted, every git worktree in the root (through git), the root. 主开发's four conditions (the minted root + the refusals by name, resolved paths, the re-read, nothing at start) are each a leg.
+- **Measured on the real hub** (one terminal session, its cwd /tmp — outside the root): the hub by cwd; dtach ×2, pty-wrapper and the login shell by the HOME the hub gave them; nothing needed the argv; stop 5 signalled, 0 left.
+- **test-hub-boot** (fast, LAW kill, 2.4 s): stand-in hubs (a 20-line server.js: three detached children, one a grandchild no parent id reaches) + a look-alike hub in another root; 52 legs, eight RED controls over a SNAPSHOT /proc of its own processes with a recording kill (pattern, parent id, no re-read, no minted check, no worktree removal, lexical-only, realpath-only, argv-first).
+- **The ratchet** test-architecture §57c `BOOTS_OUTSIDE_HELPER` = 217 (test-chat-e2e re-pointed: its spawn, kill, cleanup and pre-clean gone — its tree, home and session cwd live in the helper's root; it leaves §57b's ENDS_DEBT). The fast cap +3 s by arithmetic (1110.989 + 2.4 = 1113.389 s over 592 → 1114).
+- **Not run by this lane:** test-chat-e2e's boot runs only with the CI token (on the box it SKIPs by VS_NO_REAL_CLI / no token) — its re-point is judged by the hosted run.
+
 ## 2.369.406 — 2026-11-16
 
 ### grants-read-is-a-lookup (主开发 2026-11-16 18:33Z — part of the root fix of the hub's held main loop): a channel grant read is a lookup
