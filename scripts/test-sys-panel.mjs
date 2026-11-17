@@ -44,12 +44,13 @@ await sleep(2500);
 const st1 = await evalJs(`(() => ({
   canvases: document.querySelectorAll('.sys-hist-chart').length,
   charts: (app.sidebar._railSysCharts || []).length,
-  chips: document.querySelectorAll('.sys-range-chip').length,
+  chips: document.querySelectorAll('.usage-section-title .sys-range .sys-range-chip').length,   // the History section's range chips (1h / 24h / 7d) — the process list's sort chips share the class (.prc-sorts) since it was built
+  allChips: document.querySelectorAll('.sys-range-chip').length,
   bars: document.querySelectorAll('.sys-bar').length,
 }))()`);
 check('hist markup built (3 canvases)', st1.canvases === 3); // mem/cpu/loop-lag (2.243.0)
 check('2 Chart instances live', st1.charts === 2);
-check('3 range chips', st1.chips === 3);
+check('3 range chips (1h / 24h / 7d — the History section\'s own; the process sort chips counted apart)', st1.chips === 3, JSON.stringify({ chips: st1.chips, allChips: st1.allChips }));
 check('live zone rendered (bars>0)', st1.bars > 0);
 // range chip click
 await evalJs(`(() => { document.querySelector('.sys-range-chip[data-r="1h"]').click(); return 1; })()`);
