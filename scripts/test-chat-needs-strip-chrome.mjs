@@ -790,6 +790,7 @@ try {
     check(`r10+ r11 (RED on bd5c5fd98: a generic toast, no flash, no clock; RED on 7ec6c6dcf: the toast REPLACED, no history entry) ONE band-1 ask from a window not in front ⇒ THE TOAST, GROWN: its toast stands (its history entry ${J(hist[0] || null)}), that window FLASHES (title bar + its taskbar button: the waiting blink), its strip's count wears the fill (${a1.w1 && a1.w1.fill}); ONE card at the For-you button — above it, NO popover — «${a1.cards[0] && a1.cards[0].who} · ${a1.cards[0] && a1.cards[0].what}»; the button pulsed`,
       !!q401 && hist.length === 1 && hist[0].ref.kind === 'todo' && !/Stress question/.test(hist[0].m) && a1.toasts.includes(q401.id) && a1.shown && !a1.popover && a1.above && a1.cards.length === 1 && a1.cards[0].id === q401.id && /Stress question 401/.test(a1.cards[0].what) && !!a1.w1 && a1.w1.waiting && a1.w1.announce && a1.w1.tbWaiting && a1.w1.fill && !/rgba\(0, 0, 0, 0\)|transparent/.test(a1.w1.fill) && !!a1.w2 && !a1.w2.announce && a1.blink, a1);
     // (b) TEN IN A MINUTE (the owner's loop) ⇒ one stack: the newest three + «N more», one card per item
+    await A.evalJs(`(() => { window.__annSeen18 = {}; const mark = () => { for (const c of document.querySelectorAll('.ut-announce > .uta-card[data-id]')) if (!(c.dataset.id in window.__annSeen18)) window.__annSeen18[c.dataset.id] = Date.now(); }; window.__annMo18 = new MutationObserver(mark); window.__annMo18.observe(document.body, { childList: true, subtree: true }); mark(); return 1; })()`);   // B-fbcc r2: (d) reads when each card was first drawn
     sayTo(s1, 'ten more do:par ' + Array.from({ length: 10 }, (_, k) => 'do:u' + (402 + k)).join(' '));
     const t11 = await byText(/^Stress question 4(0[1-9]|1[01]):/, 11, 60000);
     await A.waitFor(`(() => { const x = ${ANN}; return x.all === 11; })()`, 10000); await sleep(500);
@@ -810,17 +811,37 @@ try {
     await A.waitFor(`(() => { const x = ${ANN}; return x.all === 10 && !x.cards.some((c) => c.id === ${J(gone)}); })()`, 8000);
     const a3 = await A.evalJs(ANN);
     check('r10+ an item answered on another client ⇒ its card is gone from the stack (the next one shows)', a3.all === 10 && !a3.cards.some((c) => c.id === gone) && a3.cards.length === 3, a3);
-    // (d) A CARD EXPIRING WHILE IT IS UP (this page's copy of the item given a deadline 4 s out — every snapshot read through it)
+    // (d) A CARD EXPIRING WHILE IT IS UP (this page's copy of the item given a deadline 4 s out — every snapshot read through it).
+    // B-fbcc (the .399 cut mirror's «» → «»: the card WAS up at both reads — an absent one prints «no card» — with no clock):
+    // the stack holds the snapshot the model EMITTED (user-todos-panel apply(next)) and never reads app._inboxModel.todos, so a
+    // getter alone gave the item its deadline only when ANOTHER surface read the model after the patch (a needs-card pass, the
+    // For-you window's render) — on the box one came, on the runner none did. The deadline is written into the snapshot the
+    // stack holds NOW (the model's own object: the stack's 1 s refresh reads it) AND into every later snapshot BEFORE the model
+    // sees it (r2, the adversarial read: a snapshot that lands during (d) is a new object the panel repaints at once — so each
+    // socket handler is wrapped IN PLACE, order kept, and stamps the message's todos first); the getter stays for the other
+    // readers. r2 too: the card shows ANN_MS from its first draw and the deadline cannot extend that — so the deadline is what
+    // is left of the card's display time less 2.5 s (≤ 4 s), and a card with too little left is said by name. Each wait is
+    // judged; what the page held is said on a red
     const exp = a3.cards[0] && a3.cards[0].id;
-    await A.evalJs(`(() => { const m = app._inboxModel, d = Object.getOwnPropertyDescriptor(m, 'todos'); window.__todos18 = d; const get = d.get, at = Date.now() + 4000;
-      Object.defineProperty(m, 'todos', { configurable: true, get() { const t = get.call(m); for (const i of t.open || []) if (i.id === ${J(exp)}) i.expiresAt = at; return t; } }); return 1; })()`);
-    await A.waitFor(`(() => { const x = ${ANN}; const c = x.cards.find((y) => y.id === ${J(exp)}); return !!c && / s left$/.test(c.clock); })()`, 4000);
-    const e0 = (await A.evalJs(ANN)).cards.find((c) => c.id === exp);
-    await A.waitFor(`(() => { const x = ${ANN}; const c = x.cards.find((y) => y.id === ${J(exp)}); return !!c && c.expired; })()`, 8000); await sleep(400);
-    const a4 = await A.evalJs(ANN), e1 = a4.cards.find((c) => c.id === exp);
+    const ANN_MS18 = Number((/const ANN_MS = (\d+), ANN_SHOWN/.exec(fs.readFileSync(path.join(repo, 'src/lib/user-todos-panel.js'), 'utf8')) || [])[1]);
+    const pin18 = await A.evalJs(`(() => { const m = app._inboxModel, d = Object.getOwnPropertyDescriptor(m, 'todos'); window.__todos18 = d; const get = d.get;
+      const seen = (window.__annSeen18 || {})[${J(exp)}], left = ${ANN_MS18} - (Date.now() - (seen || 0)) - 500, lead = Math.min(4000, left - 2500);
+      if (!seen || !(lead >= 1500)) return { stamped: 0, short: true, seenAgo: seen ? Date.now() - seen : null, left };
+      const at = Date.now() + lead;
+      const stamp = (t) => { let n = 0; for (const i of (t && t.open) || []) if (i.id === ${J(exp)}) { i.expiresAt = at; n++; } return n; };
+      Object.defineProperty(m, 'todos', { configurable: true, get() { const t = get.call(m); stamp(t); return t; } });
+      const hs = app.ws.globalHandlers; window.__gh18 = hs.slice();
+      for (let k = 0; k < hs.length; k++) { const h = hs[k]; hs[k] = (msg) => { if (msg && msg.type === 'user-todos-updated' && msg.todos) stamp(msg.todos); return h(msg); }; }
+      window.__todosHeld18 = get.call(m); return { stamped: stamp(window.__todosHeld18), at, lead, left }; })()`);
+    const held18 = `(() => { const m = app._inboxModel, t = window.__todos18 && window.__todos18.get.call(m), i = t && (t.open || []).find((x) => x.id === ${J(exp)}); return { replaced: t !== window.__todosHeld18, deadline: i ? i.expiresAt || null : 'not open', msLeft: ${pin18 && pin18.at} - Date.now() }; })()`;
+    const left18 = await A.waitFor(`(() => { const x = ${ANN}; const c = x.cards.find((y) => y.id === ${J(exp)}); return !!c && / s left$/.test(c.clock); })()`, 4000);
+    const e0 = (await A.evalJs(ANN)).cards.find((c) => c.id === exp), h0 = await A.evalJs(held18);
+    const over18 = await A.waitFor(`(() => { const x = ${ANN}; const c = x.cards.find((y) => y.id === ${J(exp)}); return !!c && c.expired; })()`, 8000); await sleep(400);
+    const a4 = await A.evalJs(ANN), e1 = a4.cards.find((c) => c.id === exp), h1 = await A.evalJs(held18);
     await A.shot('desktop-1280-announce-expired.png');
-    check(`r10+ a card whose item expires while it is up: «${e0 && e0.clock}» → «${e1 && e1.clock}» — it SAYS expired and stays (a late card), never vanishing like one answered`, !!e0 && /^\d s left$/.test(e0.clock) && !!e1 && e1.expired && e1.clock === 'expired', { e0, e1 });
-    await A.evalJs(`(() => { const m = app._inboxModel; if (window.__todos18) { Object.defineProperty(m, 'todos', window.__todos18); delete window.__todos18; } return 1; })()`);
+    const said18 = (e) => (e ? e.clock : 'no card');
+    check(pin18 && pin18.short ? `r10+ a card whose item expires while it is up: the card's ${ANN_MS18} ms display time was nearly spent before (d) (first drawn ${pin18.seenAgo} ms ago) — the leg's precondition, named (B-fbcc r2)` : `r10+ a card whose item expires while it is up: «${said18(e0)}» → «${said18(e1)}» — it SAYS expired and stays (a late card), never vanishing like one answered`, ANN_MS18 > 0 && !!pin18 && pin18.stamped === 1 && left18 && over18 && !!e0 && /^\d s left$/.test(e0.clock) && !!e1 && e1.expired && e1.clock === 'expired', { e0, e1, pin: pin18, clockShown: left18, expiredShown: over18, held: [h0, h1], cards: a4.cards.map((c) => c.id) });
+    await A.evalJs(`(() => { const m = app._inboxModel; if (window.__todos18) { Object.defineProperty(m, 'todos', window.__todos18); delete window.__todos18; delete window.__todosHeld18; } if (window.__gh18) { app.ws.globalHandlers.splice(0, window.__gh18.length, ...window.__gh18); delete window.__gh18; } if (window.__annMo18) { window.__annMo18.disconnect(); delete window.__annMo18; } return 1; })()`);
     // (e) TWO WINDOWS ASKING AT ONCE (the For-you window in front): both flash, a card each
     await A.evalJs(`(() => { app.openInbox(); return 1; })()`); await sleep(900);
     sayTo(s1, 'at once do:u412'); sayTo(s2, 'at once do:u413');

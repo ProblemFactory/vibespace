@@ -6,7 +6,8 @@
 //      public hosts, look-alikes, the allow suffix; backlog B-be43: Tailscale's 100.64/10 and *.ts.net are private, a
 //      public 100.x outside the /10 and ts.net look-alikes are not) — the page and the server never disagree
 //   ② a state naming the instance (127.0.0.1): the browser lands on <instance>/api/channels/oauth/cb/slack with the
-//      query VERBATIM (the instance sees code + state + nothing else)
+//      query VERBATIM (the instance sees code + state + nothing else); ②b (B-fbcc) the same with the instance answering 1.5 s
+//      late — every open() waits for the redirect's commit and a settled document, never a first «complete»
 //   ③ a state naming a public host, a forged / missing state, a look-alike under a data-allow page: the code is SHOWN
 //      (Copy), no navigation; an `error=access_denied` with no way back says "declined"
 //   ④ CDP no-network census: across every load the page asks for index.html and relay.js only — no fetch, beacon,
@@ -90,7 +91,8 @@ const pageSrv = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': name.endsWith('.js') ? 'text/javascript' : 'text/html; charset=utf-8' }).end(body);
 }).listen(PAGE_PORT, '127.0.0.1');
 const landed = [];   // the instance's hits (the browser's own tab-icon request is not the page's)
-const instSrv = http.createServer((req, res) => { if (req.url !== '/favicon.ico') landed.push(req.url); res.writeHead(200, { 'Content-Type': 'text/html' }).end('<p id="landed">instance</p>'); }).listen(INST_PORT, '127.0.0.1');
+let instHoldMs = 0;   // B-fbcc ②b: the instance answers this much later (the redirect's commit waits on it)
+const instSrv = http.createServer((req, res) => { if (req.url !== '/favicon.ico') landed.push(req.url); setTimeout(() => res.writeHead(200, { 'Content-Type': 'text/html' }).end('<p id="landed">instance</p>'), instHoldMs); }).listen(INST_PORT, '127.0.0.1');
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', `--user-data-dir=${prof}`, 'about:blank'], { stdio: 'ignore' });
 process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {} try { fs.rmSync(prof, { recursive: true, force: true }); } catch {} });
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => process.exit(143));
@@ -99,15 +101,42 @@ let target = null;
 for (let i = 0; i < 60 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(250); } }
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 let seq = 0; const pend = new Map(); const requests = [];
-ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); return; } if (m.method === 'Network.requestWillBeSent') requests.push(m.params.request.url); });
+// B-fbcc: the main frame's navigations as CDP tells them — `pending` from a navigation's ask / start until its commit,
+// `commits` = the loaderIds that committed (open() below waits on them, never on a first «complete»)
+const nav = { main: null, pending: false, commits: [] };
+ws.on('message', (d) => {
+  const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); return; } if (m.method === 'Network.requestWillBeSent') requests.push(m.params.request.url);
+  const p = m.params || {};
+  if ((m.method === 'Page.frameRequestedNavigation' || m.method === 'Page.frameStartedNavigating' || m.method === 'Page.frameScheduledNavigation') && p.frameId === nav.main) nav.pending = true;
+  if (m.method === 'Page.frameNavigated' && p.frame && !p.frame.parentId) { nav.main = p.frame.id; nav.pending = false; nav.commits.push(p.frame.loaderId); }
+});
 await new Promise((r) => ws.on('open', r));
 const cmd = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(method + ': ' + m.error.message)) : res(m.result))); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expr) => (await cmd('Runtime.evaluate', { expression: expr, returnByValue: true })).result.value;
-await cmd('Network.enable'); await cmd('Page.enable');
+await cmd('Network.enable'); await cmd('Page.enable'); nav.main = (await cmd('Page.getFrameTree')).frameTree.frame.id;
 await cmd('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });   // the suites' common preset (the page itself writes nothing)
 const sign = (c) => crypto.createHmac('sha256', 'k').update(c).digest('base64url');
 const state = (u) => M.stateOf({ origin: u, flowId: '0123456789abcdef', issuedAt: Date.now() }, sign);
-const open = async (url) => { await cmd('Page.navigate', { url }); for (let i = 0; i < 40; i++) { await sleep(100); const s = await ev('document.readyState + "|" + location.href'); if (s && s.startsWith('complete')) { await sleep(250); return ev('location.href'); } } return ev('location.href'); };
+/** open(url) → the href the navigation SETTLES on (B-fbcc — the .399 cut mirror's «Runtime.evaluate: Inspected target navigated or
+ *  closed»: relay.js redirects WHILE its page parses (location.replace), so a read of readyState could be in flight when the
+ *  instance's document committed, and the relay document could read «complete» before the redirect committed). It waits for
+ *  ① THIS navigation's commit (its loaderId in a main-frame Page.frameNavigated), then ② no main-frame navigation asked and not
+ *  yet committed, the document complete, and the same href over two reads 250 ms apart with no commit between them. A read cut
+ *  by a navigation is «not yet» (never the suite's crash); at the bound it answers what the page holds and the leg judges it */
+const read = (expr) => ev(expr).catch((e) => (/navigated or closed|context|Cannot find/i.test(String(e && e.message)) ? null : Promise.reject(e)));
+const open = async (url) => {
+  const t0 = Date.now(), { loaderId } = await cmd('Page.navigate', { url });
+  while (Date.now() - t0 < 15000) {
+    await sleep(100);
+    if (loaderId && !nav.commits.includes(loaderId)) continue;
+    const n = nav.commits.length, a = nav.pending ? null : await read('document.readyState + "|" + location.href');
+    if (!a || !a.startsWith('complete|')) continue;
+    await sleep(250);
+    const b = nav.pending || nav.commits.length !== n ? null : await read('document.readyState + "|" + location.href');
+    if (b === a && !nav.pending && nav.commits.length === n) return a.slice('complete|'.length);
+  }
+  return (await read('location.href')) || '';
+};
 const PAGE = `http://127.0.0.1:${PAGE_PORT}/`, INST = `http://127.0.0.1:${INST_PORT}`;
 
 // ② back to the instance, the query verbatim
@@ -126,6 +155,16 @@ const foreign = requests.filter((u) => !/\/favicon\.ico$/.test(u)).filter((u) =>
 const own = [...new Set(served.map((p) => p.replace(/^\/allow/, '')))].sort().join();
 const stor = await ev(`JSON.stringify([Object.keys(localStorage).filter(function (k) { return ${JSON.stringify(Object.keys(PRESET_KEYS))}.indexOf(k) < 0; }).length, sessionStorage.length, document.cookie])`);
 ok(!foreign.length && own === '/,/relay.js' && stor === '[0,0,""]', `④ CDP census over ${requests.length} requests: the page asks only for itself and relay.js (and the one navigation back); nothing stored`, JSON.stringify({ foreign, own, stor }));
+// ②b B-fbcc: THE RACE'S WINDOW MADE WIDE — the instance answers 1.5 s late, so the relay document reads «complete» while its
+// redirect waits to commit (the old open() returned the relay page's own href there, or read across the commit and threw).
+// After ④: ③ and ④ count ②'s one landing
+{
+  const nb = landed.length, sb = state(INST), qb = `?code=1212.3434.abcdef&state=${encodeURIComponent(sb)}`;
+  instHoldMs = 1500;
+  const atb = await open(PAGE + qb);
+  instHoldMs = 0;
+  ok(atb === `${INST}/api/channels/oauth/cb/slack${qb}` && landed.length === nb + 1 && landed[nb] === `/api/channels/oauth/cb/slack${qb}`, '②b the instance answering 1.5 s late (the relay page complete meanwhile): the browser still lands on its /api/channels/oauth/cb/slack, the query verbatim — the leg waits for the redirect\'s commit, never for a first «complete»', JSON.stringify({ atb, landed: landed.slice(nb) }));
+}
 // ⑤ lane voice-p1-oauth-teach: a dropline state (k) in a real browser lands on the instance's /cb/dropline
 {
   const DO = require(path.join(repo, 'src/server/dropline-oauth.js'));
