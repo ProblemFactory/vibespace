@@ -82,6 +82,8 @@ const GRANT_FIELD = 'wakesEndedOwner';
 /** a plain agent token's write of the grant, refused BY NAME — naming the doors that exist TODAY (主开发 12:46Z: until the
  *  proposal card's tip exists beside this one, no word promises a card; that unit adds the propose sentence with its bound door) */
 const GRANT_REFUSAL = 'refused: an agent cannot set wakesEndedOwner (may this job wake its conversation after that conversation was ended on purpose) — the person sets it (the Terminate confirm, the job\'s row in Background Work), or a manager key holding the verb jobs.wakeGrant; or propose it to the person: vibespace-job propose-wake <id> "one sentence why" (one card, one press approves; you read the answer at your next turn)';
+// …at a REGISTRATION no job id exists yet: the recipe that works there is the registration's own flag (the cure's law 9)
+const GRANT_REFUSAL_CREATE = 'refused: an agent cannot set wakesEndedOwner when it registers a job — propose it to the person instead: add --propose-wake "one sentence why" to the same command (one card, one press approves; you read the answer at your next turn)';
 
 /**
  * HOW IT ENDED, from the kept record's meta (`m` = boot-restore keptRecordOf(key).meta, or null when nothing was kept):
@@ -224,4 +226,4 @@ function resumedRefusedLine(what = [], at = null, { code = 'handover_failed', wh
   return { key: 'Resumed {when} to deliver: {what} — but the hand-over was refused: {why}', params: { what: names.slice(0, 3).join(', ') || '—', why: String(why || '').slice(0, 200) }, at: Number(at) || null, refused: { code } };
 }
 
-module.exports = { WAKE_REASONS, peerLead, resumedRefusedLine, JOB_KINDS, RESTART_REASON, ENDED_REASON, GRANT_FIELD, GRANT_REFUSAL, owesWake, endedHow, endedRule, whoEnded, wakeChoiceRows, deliveryResumeVerdict, gate, FRAME_TAIL, senderWords, journalWords, waitingRow, resumedLine };
+module.exports = { WAKE_REASONS, peerLead, resumedRefusedLine, JOB_KINDS, RESTART_REASON, ENDED_REASON, GRANT_FIELD, GRANT_REFUSAL, GRANT_REFUSAL_CREATE, owesWake, endedHow, endedRule, whoEnded, wakeChoiceRows, deliveryResumeVerdict, gate, FRAME_TAIL, senderWords, journalWords, waitingRow, resumedLine };

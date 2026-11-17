@@ -1704,7 +1704,7 @@ async function proposeWake(a, job, why) {
   try { r = await door({ sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, conversationId: cid, name: s.name || null }, { rows: a.jm.wakeRowsOf([target]), why: text }); }
   catch (e) { r = { ok: false, code: 'failed', why: (e && e.message) || String(e) }; }
   if (!r || r.ok === false || r.error) return { status: 400, body: { error: (r && (r.why || r.error)) || 'the proposal was not filed', code: (r && r.code) || 'failed' } };
-  return { status: 200, body: { success: true, job: target.id, proposed: true, ...(r.id ? { proposal: r.id } : {}), note: 'filed for the person — one press approves; the answer reaches this conversation at its next turn' } };
+  return { status: 200, body: { success: true, job: target.id, proposed: true, wakesSelf: !!(cid && target.owner.conversation.id === cid), ...(r.id ? { proposal: r.id } : {}), note: 'filed for the person — one press approves; the answer reaches this conversation at its next turn' } };   // wakesSelf: the cure's law 1 — the tool says WHICH conversation the job would wake
 }
 function jobAuth(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
@@ -2800,7 +2800,7 @@ app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req
   // sends it with every shape; only a cron's task reads it). An older hub meeting a newer CLI says so — it never starts a job
   // without what it was asked to carry (its --vault values)
   // the manager design's piece 7: the person's grant to wake an ended conversation is never an agent's to write — refused BY NAME
-  if (b && b.wakesEndedOwner !== undefined) return res.status(403).json({ error: require('./delivery-wake.js').GRANT_REFUSAL, code: 'wake_grant_person_only' });
+  if (b && b.wakesEndedOwner !== undefined) return res.status(403).json({ error: require('./delivery-wake.js').GRANT_REFUSAL_CREATE, code: 'wake_grant_person_only' });
   const known = new Set([...Object.keys(spec).filter((k) => k !== 'owner'), 'token', 'proposeWake', 'notifyOk', 'stopWithOwner']);   // proposeWake: piece 7's --propose-wake (filed once the job exists)
   // B-70f9 ②: the stored stop-with-conversation flag is RETIRED (0 of 2 950 stored jobs carried it) — an older CLI's `false` passes;
   // asked for, it is refused by name with its door: the notice where a person ends the conversation

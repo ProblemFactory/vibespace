@@ -1130,10 +1130,10 @@ export function installUserTodos(app) {
       armExitButtons();
       const pv = pressVerdict({ since: propBtn2._armSince ?? null, now: performance.now() });
       if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
-      const { go, terminate, wakeTicks, grant } = proposalPressOf(propBtn2.closest('.ut-proposal-card'), propBtn2.dataset.answer);
+      const { go, terminate, wakeTicks, grant, drawn } = proposalPressOf(propBtn2.closest('.ut-proposal-card'), propBtn2.dataset.answer);
       if (go && !terminate.length) { showToast(t('Tick the conversations to terminate first')); return; }
       propBtn2.disabled = true;
-      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), 'proposal', { terminate, wakeTicks, ...(grant ? { grant } : {}) })).finally(() => { propBtn2.disabled = false; });
+      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), 'proposal', { terminate, wakeTicks, drawn, ...(grant ? { grant } : {}) })).finally(() => { propBtn2.disabled = false; });
       return;
     }
     const grantBtn = e.target.closest('.ut-action-grant');

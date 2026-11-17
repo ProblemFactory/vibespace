@@ -641,6 +641,7 @@ const I_RECV = {
   'src/server/vault-hooks.js|words': ['host', 'the Vault window\'s two For-you cards\' words (PURE vault-inventory useFailCard / rotateCard): an entry\'s NAME (an automation key\'s, an agent-stored value\'s — the owner\'s or the store\'s own words), the asking conversation\'s name, counts — the source of a new For-you record, never a copy of one'],
   'src/server/automation-engine.js|caller': ['host', 'the asking CONVERSATION\'s name on the first-use card and its log line — the session list\'s own name (the hub\'s record), never a record\'s text'],
   'src/server/end-proposals.js|caller': ['host', 'the PROPOSING conversation\'s name on its proposal card — the automation engine\'s caller (the session list\'s own name), never a record\'s text'],
+  'src/server/end-proposals.js|d': ['session', 'lane login-request-card\'s cure: a conversation row the card drew (the list builder\'s own name of a conversation) — named in the «declined» refusal toward the proposer, through the belt'],
   // ── lane vault-run-door (design q-043 §8 P0-f) ──
   'src/server/vault-run-door.js|caller': ['host', 'the asking CONVERSATION\'s name on the run card and its journal line — the session list\'s own name (the hub\'s record), never a record\'s text'],
   // lane vault-paste-request: a paste request's card (its words are the agent's own — bounded, hidden characters refused, secret

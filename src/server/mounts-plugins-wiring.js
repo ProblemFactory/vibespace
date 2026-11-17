@@ -301,7 +301,14 @@ const wakeDoor = (jobId, yes, by) => (jobsWiring && typeof jobsWiring.setWakeGra
 const endProposals = require('./end-proposals.js').create({ userTodos, deliver, listFacts, endConversation: (target, by) => require('./conversation-ops.js').endConversation(target, by),
   liveKeys: () => [...activeSessions.values()].map((x) => { const cid = x && (x.backendSessionId || x.claudeSessionId); return cid ? `${x.backend || 'claude'}:${cid}` : null; }).filter(Boolean),
   setWakeGrant: wakeDoor, storeWakeTicks: async (ticks, by) => { for (const t of ticks || []) { const r = await wakeDoor(t.id, t.grant === true, by); if (r && r.error) throw new Error(r.error); } },
+  // the conversation a job WAKES (its owner — a cron run's schedule's), read from the jobs engine at the drawing AND at the press
+  jobOwnerOf: (jobId) => { const jm = jobsWiring && typeof jobsWiring.getJobs === 'function' ? jobsWiring.getJobs() : null; const j = jm && jm.jobs ? jm.jobs.get(String(jobId || '')) : null; const t = j && j.cronParent ? (jm.jobs.get(j.cronParent) || j) : j; const cid = t && t.owner && t.owner.conversation && t.owner.conversation.id; if (!cid) return null; let backend = 'claude'; for (const x of activeSessions.values()) if (x && (x.backendSessionId || x.claudeSessionId) === cid) { backend = x.backend || 'claude'; break; } return { key: `${backend}:${cid}`, cid }; },
+  // THE FACT a conversation stopped: its kept record (boot-restore stoppedSessions) — a live set still filling is never evidence
+  endedKeys: async () => { const f = (listSources() || {}).stoppedSessions; const list = typeof f === 'function' ? await f() : []; return (Array.isArray(list) ? list : []).filter((r) => r && r.backendSessionId && !r.forkPending).map((r) => `${r.backend || 'claude'}:${r.backendSessionId}`); },
   log: (m) => console.log('[end-proposals]', m) });
+// the sweep rides THE session list's one notify point through conversation-ops (server.js broadcastActiveSessions calls its
+// settleBirthGroups there) — no line of its own in the server file (主开发's cure, must 3: at the cap, code moves OUT of server.js)
+require('./conversation-ops.js').provide({ onSessionList: () => { endProposals.sweep().catch(() => { }); } });
 if (jobsWiring && typeof jobsWiring.setProposalDoor === 'function') jobsWiring.setProposalDoor((caller, a) => endProposals.proposeWakeGrant(caller, a));   // piece 7's job tool ends here
 require('../routes/end-proposals.js').registerEndProposalRoutes(app, { proposals: endProposals });
 const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, log: (m) => console.log('[automation]', m),

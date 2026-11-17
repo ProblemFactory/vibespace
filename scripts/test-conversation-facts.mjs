@@ -95,7 +95,7 @@ function unknownLegs(M) {
   const ended = CF.shapeRow({ key: 'claude:e', state: 'ended' });
   ok(ended.ended === null && ended.endedWhy === CF.WHY.noRecord && ended.turnWhy === CF.WHY.notLive && ended.endable, 'an ended row with no kept record says «no record kept»; its live facts say it is not running', ended);
   const ref = CF.refusalOf(CF.endVerdict({ ...IDLE, background: [{ id: 'a' }, { id: 'b' }] }));
-  ok(ref.ok === false && ref.code === 'subject_busy' && ref.why === 'not ended — 2 background tasks are running. Nothing was stopped. A person can terminate it from its card in the sidebar (Terminate in its menu). Or propose it to the person: vibespace-api conversations propose <target> --why "…" (one card; you read the answer at your next turn).', 'the refusal says why, that nothing was stopped, and names the person\'s door (the design\'s sentence)', ref.why);
+  ok(ref.ok === false && ref.code === 'subject_busy' && ref.why === 'not ended — 2 background tasks are running. Nothing was stopped. A person can terminate it from its card in the sidebar (Terminate in its menu).', 'the refusal says why, that nothing was stopped, and names the person\'s door (the design\'s sentence)', ref.why);
 }
 {
   // THE WRAPPER RECORDS, THE HUB JUDGES (主开发's must 1): the step records OBSERVATIONS only; trackedFacts judges them

@@ -97,26 +97,51 @@ function cutOffWords(busy) {
   return out;
 }
 
-/** The answer the proposer reads at its next turn (agent-facing English, the tree's rule for verb answers). */
-function answerText({ terminated = [], kept = [], changed = [], ended = [] } = {}) {
+/** THE DRAWING A PRESS ANSWERS (主开发's cure, law 4 — a press acts only on what the person saw): a short stable signature of the
+ *  card (its why and rows); the page sends the one it drew, the hub compares it with the card it holds — a card changed since is
+ *  redrawn, never acted on. FNV-1a over the card's JSON (the same on both sides: this module is the client's and the hub's). */
+function cardSig(card) {
+  const s = JSON.stringify(card && typeof card === 'object' ? { why: card.why || '', rows: Array.isArray(card.rows) ? card.rows : [] } : null);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+
+/** The answer the proposer reads at its next turn (agent-facing English, the tree's rule for verb answers) — EVERY outcome with
+ *  its true reason (law 5): an end that FAILED is a failure with its code, never «something started in it». */
+function answerText({ terminated = [], kept = [], changed = [], failed = [], ended = [], granted = [], withdrawn = [] } = {}) {
   const list = (a) => a.map((r) => `${r.name || r.key} (${r.key})`).join(', ');
+  const jobs = (a) => a.map((r) => `${r.name || r.id} (${r.id})`).join(', ');
   const parts = [];
   if (terminated.length) parts.push(`terminated: ${list(terminated)}`);
   if (kept.length) parts.push(`kept: ${list(kept)}`);
   if (changed.length) parts.push(`not ended — something started in it after the card was drawn: ${list(changed)}`);
+  if (failed.length) parts.push(`not ended — the end failed: ${failed.map((r) => `${r.name || r.key} (${r.key}; ${r.failed || 'failed'})`).join(', ')}`);
   if (ended.length) parts.push(`already ended: ${list(ended)}`);
+  if (granted.length) parts.push(`its jobs that may now wake it after the end: ${jobs(granted)}`);
+  if (withdrawn.length) parts.push(`its jobs that may no longer wake it: ${jobs(withdrawn)}`);
   return `The person answered your proposal to end conversations — ${parts.join('; ') || 'nothing to do'}.`;
 }
 
-/** The wake card's answer to its proposer (agent-facing English). */
-function wakeAnswerText({ granted = [], withdrawn = [], unchanged = [], gone = [] } = {}) {
-  const list = (a) => a.map((r) => `${r.name || r.id} (${r.id})`).join(', ');
+/** The wake card's answer to its proposer (agent-facing English) — each job with the conversation it wakes, every outcome said. */
+function wakeAnswerText({ granted = [], withdrawn = [], unchanged = [], gone = [], moved = [], refused = [] } = {}) {
+  const list = (a) => a.map((r) => `${r.name || r.id} (${r.id}${r.owner && r.owner.key ? `, wakes ${r.owner.key}` : ''})`).join(', ');
   const parts = [];
-  if (granted.length) parts.push(`may now wake their conversation after it is ended: ${list(granted)}`);
+  if (granted.length) parts.push(`may now wake the conversation it belongs to after it is ended: ${list(granted)}`);
   if (withdrawn.length) parts.push(`may no longer wake it: ${list(withdrawn)}`);
   if (unchanged.length) parts.push(`kept as they were: ${list(unchanged)}`);
   if (gone.length) parts.push(`no longer exist (removed since the card was drawn): ${list(gone)}`);
+  if (moved.length) parts.push(`not written — it now belongs to another conversation than the card showed: ${list(moved)}`);
+  if (refused.length) parts.push(`not written — refused: ${refused.map((r) => `${r.name || r.id} (${r.id}; ${r.refused || 'refused'})`).join(', ')}`);
   return `The person answered your proposal about waking jobs — ${parts.join('; ') || 'nothing to do'}.`;
 }
 
-module.exports = { TYPE, isProposal, busyOf, MAX_TARGETS, WHY_MAX, targetsOf, drawnRow, pressVerdict, CUT_WORDS, cutOffWords, answerText, wakeAnswerText };
+/** The refusal a proposal meets when the person already declined exactly these (law 8 — told once, nothing filed). */
+function declinedText(kind, names, at) {
+  const when = Number.isFinite(at) ? new Date(at).toISOString().slice(0, 16).replace('T', ' ') + 'Z' : 'before';
+  return kind === 'wake'
+    ? `the person kept these jobs as they are at ${when}: ${names.join(', ')} — nothing was filed; propose again only when something about them differs`
+    : `the person kept these conversations at ${when}: ${names.join(', ')} — nothing was filed; propose again only when something about them differs (what runs in one)`;
+}
+
+module.exports = { TYPE, isProposal, busyOf, MAX_TARGETS, WHY_MAX, targetsOf, drawnRow, pressVerdict, CUT_WORDS, cutOffWords, cardSig, answerText, wakeAnswerText, declinedText };

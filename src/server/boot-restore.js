@@ -429,7 +429,7 @@ let endTmpSeq = 0;
 async function keepEnded(sockFile, meta, endedBy, endFacts = null) {
   const id = resumeIdOf(meta);
   if (!sockFile || !id) return null;
-  const by = endedBy && typeof endedBy === 'object' ? { kind: endedBy.kind === 'agent' ? 'agent' : 'person', actorId: endedBy.actorId ? String(endedBy.actorId).slice(0, 200) : null, name: endedBy.name ? String(endedBy.name).slice(0, 120) : null, ...(endedBy.forced === true ? { forced: true } : {}) } : { kind: 'person', actorId: null, name: null };
+  const by = endedBy && typeof endedBy === 'object' ? { kind: endedBy.kind === 'agent' ? 'agent' : 'person', actorId: endedBy.actorId ? String(endedBy.actorId).slice(0, 200) : null, name: endedBy.name ? String(endedBy.name).slice(0, 120) : null, ...(endedBy.forced === true ? { forced: true } : {}), ...(endedBy.proposedBy && typeof endedBy.proposedBy === 'object' && endedBy.proposedBy.key ? { proposedBy: { key: String(endedBy.proposedBy.key).slice(0, 200), name: endedBy.proposedBy.name ? String(endedBy.proposedBy.name).slice(0, 120) : null } } : {}) } : { kind: 'person', actorId: null, name: null };   // proposedBy: lane login-request-card (the cure's law 12)
   const facts = endFacts && typeof endFacts === 'object' ? endFacts : { goalStated: false, queueRead: false, notStated: 'nothing was read before the end' };
   const kept = { ...meta, status: 'stopped', stoppedAt: Date.now(), stopReason: STOP_ENDED, endedBy: by, endFacts: facts };
   const file = keptFile(sockFile), tmp = `${file}.${process.pid}.${++endTmpSeq}.tmp`;   // unique per write (two ends of one socket never share a temp)

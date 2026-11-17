@@ -377,12 +377,16 @@ function endVerdict(row) {
   return { endable: busy.length === 0, busy };
 }
 
-/** The refusal an agent's end answers with (piece 3 calls this; it says why and names the door). */
-function refusalOf(verdict, { stopped = 'Nothing was stopped.' } = {}) {
+/** lane login-request-card (piece 3b): the propose door, in the words each key can act on (the cure's law 9). */
+const PROPOSE_DOOR = ' Or propose it to the person: vibespace-api conversations propose <target> --why "…" (one card; you read the answer at your next turn).';
+const PROPOSE_NO_VERB = ' The owner can add the verb conversations.propose to this key — then you can propose it to the person.';
+/** The refusal an agent's end answers with (piece 3 calls this; it says why and names the door). `propose` = does the asking key
+ *  hold conversations.propose (true / false; null = not known — no door taught). */
+function refusalOf(verdict, { stopped = 'Nothing was stopped.', propose = null } = {}) {
   const busy = (verdict && Array.isArray(verdict.busy)) ? verdict.busy : [];
   const why = 'not ended — ' + (busy.length ? busy.map((b) => b.why).join('; ') : 'busy') + '. ' + stopped
     + ' A person can terminate it from its card in the sidebar (Terminate in its menu).'   // the door that EXISTS today (session-card's Terminate) — no System screen is built yet
-    + ' Or propose it to the person: vibespace-api conversations propose <target> --why "…" (one card; you read the answer at your next turn).';   // lane login-request-card (piece 3b): the propose door (conversations.propose — the proposal card)
+    + (propose === true ? PROPOSE_DOOR : propose === false ? PROPOSE_NO_VERB : '');   // lane login-request-card (piece 3b): the propose door — taught only to a key that holds the verb (the cure's law 9)
   return { ok: false, code: 'subject_busy', busy, why };
 }
 
@@ -420,7 +424,7 @@ function cellOf(row, fact) {
   return String(v);
 }
 
-module.exports = { WHY, ROW_FACTS, VERDICT_FIELDS, REASONS, verdictInput, endVerdict, refusalOf, shapeRow, cellOf,
+module.exports = { WHY, ROW_FACTS, VERDICT_FIELDS, REASONS, verdictInput, endVerdict, refusalOf, PROPOSE_DOOR, PROPOSE_NO_VERB, shapeRow, cellOf,
   FACTS_VERSION, LEVEL_MEASURED_FROM, LEVEL_MEASURED_TO, TIMER_TOOLS, NON_TIMER_TOOLS, TIMERISH, BG_MAX, TOOLS_MAX, TASKS_MAX, SEEN_MAX,
   BG_MEASURED, BG_MEASURED_KINDS, BG_MEASURED_ASK_TOOLS, TASK_ENDS, bgDoubt, levelMeasured, factsFresh, factsStep, factsFromSidecar,
   adoptionProof, factsAtAdoption, factsAdopted, trackedFacts };

@@ -30,7 +30,7 @@
 //          replyState(item) → {show, enabled, why}, optionsOf(item) → [label] (the chips: the agent's options, else
 //          its detail's parsed — lane foryou-honest, PURE src/ask-options.js), mini?}
 import { escHtml, formatSize } from './utils.js'; // formatSize: a size a person reads (the proposal card's memory)
-import { cutOffWords, isProposal } from '../end-proposal.js'; // PURE (CJS, lane login-request-card piece 3b): what would be cut off, in the person's words
+import { cutOffWords, isProposal, cardSig } from '../end-proposal.js'; // PURE (CJS, lane login-request-card piece 3b): what would be cut off, in the person's words
 import { vsLinkHtml } from './internal-link-door.js'; // lane login-request-card piece 1: THE drawing of a conversation / desktop link
 import { tc, t as tr, deviceLocale } from './i18n.js'; // lane foryou-honest: «Dismiss» in the For-you sense (忽略 — the plain key is a dialog's «close»); r7: the deadline ticker's words (no ctx at a tick)
 import { techFoldHtml } from './plain-words.js'; // lane ui-plain-words: an item's mechanics (`i18n.fold`) under ONE «技术细节» fold
@@ -571,6 +571,11 @@ export function patchSettingVolatile(root, i, t) {
 // jobs (piece 7's ONE helper, mounted by user-todos-actions mountProposalRows) are ticked before the end. Its SECOND kind (action.kind
 // 'wake' — piece 7's propose-wake) lists the proposed jobs through the same helper, drawn ticked: «Allow the ticked ones» · «Keep all as they are».
 const proposalOf = (i) => !!(i && !i.clearedAt && isProposal(i.action) && i.card && Array.isArray(i.card.rows));
+/** THE PERSON'S TICKS on a proposal card, per item (the cure's law 4: a redraw never drops a tick in a box in use) — `ends` by the
+ *  row's key, `jobs` by the job's id; recorded by the card's change listener (user-todos-actions mountProposalRows), read back at
+ *  every drawing of the same item (the tray, the chat's card and the For-you window alike). */
+export const PROPOSAL_TICKS = new Map();
+export const proposalTicksOf = (id) => { let m = PROPOSAL_TICKS.get(id); if (!m) { m = { ends: new Map(), jobs: new Map() }; PROPOSAL_TICKS.set(id, m); } return m; };
 const stampOf = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null);
 export function proposalCardOf(i, t) {
   if (!proposalOf(i)) return null;
@@ -579,17 +584,18 @@ export function proposalCardOf(i, t) {
     if (!end) return { id: String(r.id || ''), name: String(r.name || r.id || '') };
     const at = stampOf(r.idleSince);
     const cut = cutOffWords(r.busy).map((w) => t(w.key, w.params || {}));
-    return { key: String(r.key || ''), name: String(r.name || r.key || ''), pick: r.pick === true && !r.changed && !r.failed,
+    const held = PROPOSAL_TICKS.has(i.id) ? PROPOSAL_TICKS.get(i.id).ends.get(String(r.key || '')) : undefined;
+    return { key: String(r.key || ''), name: String(r.name || r.key || ''), pick: r.changed || r.failed ? false : held !== undefined ? held : r.pick === true,
       meta: [at != null ? t('last active {ago}', { ago: agoText(at, t) }) : t('last activity unknown'), Number.isFinite(r.memBytes) ? t('memory {size}', { size: formatSize(r.memBytes) }) : null].filter(Boolean).join(' · '),
       cut: cut.length ? cut : [t('Nothing runs in it.')],
       changed: Array.isArray(r.changed) && r.changed.length ? t('Something started in it after this card was drawn — it was not ended. Look again.') : r.failed ? t('It could not be terminated — look again.') : null };
   });
-  return { end, why: String(i.card.why || i.detail || ''), rows, sig: JSON.stringify(i.card) };
+  return { end, why: String(i.card.why || i.detail || ''), rows, sig: cardSig(i.card) };   // sig: THE drawing a press answers (the cure's law 4)
 }
 export function proposalCardHtml(i, t) {
   const c = proposalCardOf(i, t);
   if (!c) return '';
-  if (!c.end) return `<div class="ut-proposal-card ut-wakeprop" data-kind="wake"><div class="ut-ep-why">${escHtml(c.why)}</div><div class="ut-wp-rows" data-place="piece-7"></div>`
+  if (!c.end) return `<div class="ut-proposal-card ut-wakeprop" data-kind="wake" data-sig="${escHtml(c.sig)}"><div class="ut-ep-why">${escHtml(c.why)}</div><div class="ut-wp-rows" data-place="piece-7"></div>`
     + `<div class="ut-exit-answer ut-ep-answer"><button type="button" class="ut-act ut-action-endprop ut-endprop-go" data-answer="save">${escHtml(t('Allow the ticked ones'))}</button>`
     + `<button type="button" class="ut-act ut-action-endprop ut-endprop-keep" data-answer="keep">${escHtml(t('Keep all as they are'))}</button></div></div>`;
   const rowHtml = (r) => `<div class="ut-ep-row${r.changed ? ' ut-ep-changed' : ''}" data-key="${escHtml(r.key)}">`
@@ -599,7 +605,7 @@ export function proposalCardHtml(i, t) {
     + `<div class="ut-ep-cut">${r.cut.map((w) => `<div>${escHtml(w)}</div>`).join('')}</div>`
     + (r.changed ? `<div class="ut-ep-changed-words">${escHtml(r.changed)}</div>` : '')
     + `<div class="ut-ep-jobs" data-place="piece-7"></div></div>`;
-  return `<div class="ut-proposal-card ut-endprop" data-kind="end"><div class="ut-ep-why">${escHtml(c.why)}</div>${c.rows.map(rowHtml).join('')}`
+  return `<div class="ut-proposal-card ut-endprop" data-kind="end" data-sig="${escHtml(c.sig)}"><div class="ut-ep-why">${escHtml(c.why)}</div>${c.rows.map(rowHtml).join('')}`
     + `<div class="ut-exit-answer ut-ep-answer"><button type="button" class="ut-act ut-action-endprop ut-endprop-go" data-answer="terminate">${escHtml(t('Terminate selected'))}</button>`
     + `<button type="button" class="ut-act ut-action-endprop ut-endprop-keep" data-answer="keep">${escHtml(t('Keep all'))}</button></div></div>`;
 }
@@ -611,6 +617,7 @@ export function proposalCardEls(i, t) {
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
   const box = el('div', `ut-proposal-card ${c.end ? 'ut-endprop' : 'ut-wakeprop'}`);
   box.dataset.kind = c.end ? 'end' : 'wake';
+  box.dataset.sig = c.sig;
   box.append(el('div', 'ut-ep-why', c.why));
   if (!c.end) { const place = el('div', 'ut-wp-rows'); place.dataset.place = 'piece-7'; box.append(place); return [box]; }
   for (const r of c.rows) {

@@ -52,7 +52,9 @@ Three independent audiences:
    (the Terminate confirm lists your jobs and schedules; the job's row in Background Work)
    or by a manager key holding `jobs.wakeGrant`. You cannot set it — propose it:
    `vibespace-job propose-wake <id> "why"` (or `--propose-wake "why"` when you register it) files ONE
-   card for the person (one per conversation, refreshed); one press approves; the answer comes at your next turn.
+   card for the person (one per conversation; your next proposal adds to it). The card names the conversation the job
+   would wake — yours, or the job's owner when you propose for a job you can only see. One press approves; the answer comes
+   at your next turn.
    A subscriber's copy never resumes anyone — only the owner is resumed.
 2. **Subscribers** — any session that can VIEW the job may
    `vibespace-job subscribe <id> [--filter "regex"]`. The filter is a

@@ -309,6 +309,9 @@ function opsOver(getDeps) {
    *  activity line conversations.bind writes); a window's open writes none (the owner's own bind route writes none). → the
    *  number bound. */
   function settleBirthGroups() {
+    // THE session list's other listeners ride this call (server.js broadcastActiveSessions — its ONE notify point): the proposal
+    // card's sweep (lane login-request-card, provide({ onSessionList }) from mounts-plugins-wiring — no line of its own in server.js)
+    try { if (typeof D().onSessionList === 'function') D().onSessionList(); } catch { }
     const active = D().activeSessions;
     if (!active || typeof active.entries !== 'function' || !D().tasks) return 0;
     if (D().tasks.unreadState?.()) return 0;   // THE STORE HELD UNREAD (lane bl-windows): the birth binds WAIT (kept on the sessions) for the lift — never consumed and lost
@@ -339,7 +342,7 @@ function opsOver(getDeps) {
     claudeSessionId: s.claudeSessionId || null, name: s.name || '', cwd: s.cwd || '', mode: s.mode || 'terminal', accountId: s._accountId || null,
     createdAt: s.createdAt || null, host: s.host || null });
   const endedByOf = (by) => {
-    if (!(by && by.kind === 'automation')) return { kind: 'person', actorId: null, name: null };   // a person's sign-in handle is never stored as the actor's id (must 5)
+    if (!(by && by.kind === 'automation')) return { kind: 'person', actorId: null, name: null, ...(by && by.proposedBy && by.proposedBy.key ? { proposedBy: { key: String(by.proposedBy.key).slice(0, 200), name: by.proposedBy.name ? String(by.proposedBy.name).slice(0, 120) : null } } : {}) };   // a person's sign-in handle is never stored as the actor's id (must 5); lane login-request-card (the cure's law 12): the proposal card's press names its proposer beside the person
     let name = null; try { name = typeof D().keyNameOf === 'function' ? D().keyNameOf(by.key) || null : null; } catch { name = null; }
     return { kind: 'agent', actorId: by.key || null, name, ...(by.forced === true ? { forced: true } : {}) };   // forced: «ended mid-task by …»
   };
@@ -459,24 +462,27 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
   // then a conversation the hub cannot judge is a person's to end; then THE verdict over the list builder's own row. The two
   // refusals a key's OWN conversation can get teach the force word (must 2); no other reach is ever told of it. → null (it may end)
   // or the refusal.
-  const ENDED_DOOR = 'A person can terminate it from its card in the sidebar (Terminate in its menu). Or propose it to the person: vibespace-api conversations propose <target> --why "…" (one card; you read the answer at your next turn).';   // + the propose door (lane login-request-card piece 3b) — the same words as conversation-facts refusalOf
+  const ENDED_DOOR = 'A person can terminate it from its card in the sidebar (Terminate in its menu).';
+  // + the propose door, only for a key that holds conversations.propose (lane login-request-card piece 3b, the cure's law 9 — the same
+  // words as conversation-facts refusalOf; a scratch copy of this file carries no sibling, so they are spelled here too)
+  const doorOf = (propose) => ENDED_DOOR + (propose === true ? ' Or propose it to the person: vibespace-api conversations propose <target> --why "…" (one card; you read the answer at your next turn).' : propose === false ? ' The owner can add the verb conversations.propose to this key — then you can propose it to the person.' : '');
   const REACH_WORDS = { grant: 'through a grant of this key', instance: 'through the instance grant (every conversation here)', groups: 'through a Task Group grant' };
   const RECIPE = { opener: ' This key opened it: pass force (--force) to end it anyway.', self: ' It is this conversation itself: pass force (--force) to end it anyway.' };
-  function endGate(t, args, label, { discountAsks = false } = {}) {
+  function endGate(t, args, label, { discountAsks = false, propose = null } = {}) {
     const own = t.by === 'opener' || t.by === 'self';
-    if (args.force) return own ? null : { ok: false, code: 'force_not_yours', why: `force is honoured only for a conversation this key opened (or the calling conversation itself); this one is reached ${REACH_WORDS[t.by] || 'by another rule'} — nothing was stopped. ${ENDED_DOOR}`, target: label };
+    if (args.force) return own ? null : { ok: false, code: 'force_not_yours', why: `force is honoured only for a conversation this key opened (or the calling conversation itself); this one is reached ${REACH_WORDS[t.by] || 'by another rule'} — nothing was stopped. ${doorOf(propose)}`, target: label };
     const teach = own ? RECIPE[t.by] : '';
     // only a chat conversation whose harness row keeps every sidecar fact can ever be judged idle by the hub — the SAME caps the
     // list builder reads (listFacts.capsOf): anything else is the person's to end, said, so a manager does not retry
     const caps = listFacts && typeof listFacts.capsOf === 'function' ? listFacts.capsOf(t.s.backend || 'claude') : (() => { try { return require('../backend-caps.js').capsOf(t.s.backend || 'claude'); } catch { return null; } })();   // a list that hands none: the builder's own default source (sourcesFrom capsOf)
     const keeps = (caps && caps.sidecarFacts) || {};
-    if (t.s.mode !== 'chat' || !(keeps.background && keeps.timers && keeps.lastRecordAt)) return { ok: false, code: 'person_only', why: `not ended — only a person can end it: ${t.s.mode !== 'chat' ? 'a terminal conversation' : 'its harness'} reports too little of what an agent's end must know. Nothing was stopped. ${ENDED_DOOR}${teach}`, target: label };
+    if (t.s.mode !== 'chat' || !(keeps.background && keeps.timers && keeps.lastRecordAt)) return { ok: false, code: 'person_only', why: `not ended — only a person can end it: ${t.s.mode !== 'chat' ? 'a terminal conversation' : 'its harness'} reports too little of what an agent's end must know. Nothing was stopped. ${doorOf(propose)}${teach}`, target: label };
     const row = listFacts && typeof listFacts.rowOf === 'function' ? listFacts.rowOf(t.id) : null;
     if (!row) return { ok: false, code: 'not_ready', why: 'the conversation facts are not wired yet — nothing was stopped', target: label };
     const CF = require('../conversation-facts.js');   // THE end verdict (PURE) — required here: a suite's scratch copy of this file carries no sibling
     // the archive's own recipe (主开发 15:31Z): a call that RESOLVES the conversation's asks is judged with them discounted
     const v = CF.endVerdict(discountAsks ? { ...row, asks: 0, asksWhy: undefined } : row);
-    if (!v.endable) { const ref = CF.refusalOf(v); return { ...ref, why: ref.why + teach, target: label }; }
+    if (!v.endable) { const ref = CF.refusalOf(v, { propose }); return { ...ref, why: ref.why + teach, target: label }; }
     return null;
   }
   // WHO ENDED IT, toward an agent (must 5): the kind only — the ending key's id and its belted name only when it is the CALLING key
@@ -543,7 +549,8 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       const t = reached(args.target, ctx);
       if (!t.ok) return t;
       const label = t.s.name || args.target || null;
-      const gate = endGate(t, args, label);
+      const propose = Array.isArray(ctx.scopes) ? ctx.scopes.includes('conversations.propose') : null;   // the cure's law 9: teach the propose door only to a key that holds it
+      const gate = endGate(t, args, label, { propose });
       if (gate) return gate;
       // «forced» only when the gate WOULD have refused it — an idle own worker ended with the force word is no «ended mid-task»
       const cut = !!args.force && !!endGate(t, { ...args, force: false }, label);
@@ -570,7 +577,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       const asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean);
       if (asks.length && !args.resolveAsks) return { ok: false, code: 'asks_open', why: `${asks.length} open For-you ask${asks.length === 1 ? '' : 's'} of that conversation (${asks.join(', ')}) — the owner answers them, or pass resolveAsks`, asks, target: label };
       const discountAsks = !!args.resolveAsks;   // the archive's recipe: the asks it resolves are no reason to refuse
-      if (f.s) { const gate = endGate({ s: f.s, id: f.id, by: v.by }, args, label, { discountAsks }); if (gate) return gate; }   // the ONE end gate (lane end-obeys-verdict: must 1)
+      if (f.s) { const gate = endGate({ s: f.s, id: f.id, by: v.by }, args, label, { discountAsks, propose: Array.isArray(ctx.scopes) ? ctx.scopes.includes('conversations.propose') : null }); if (gate) return gate; }   // the ONE end gate (lane end-obeys-verdict: must 1)
       const cutA = !!(f.s && args.force && endGate({ s: f.s, id: f.id, by: v.by }, { ...args, force: false }, label, { discountAsks }));
       let resolved = [];
       if (asks.length) { try { resolved = (resolveAsks(asks, `automation:${keyId}`) || {}).changed || []; } catch { resolved = []; } }

@@ -635,7 +635,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     // its own) — the key's own opens and the grant's reach bound what it reaches, never the caller's say-so
     // + the GRANT'S REACH this use rides (lane key-instance-scope: the widest of the caller's always-grants, else the once-grant's — useVerdict)
     const reach = (target) => { const v = A.reachVerdict({ keyId: key.id, caller: caller.conversationId, target, opened: db.opened, reach: verdict.reach, reachRows: verdict.reachRows }); if (v.ok && v.by === 'opener' && target && target.webuiId && target.conversationId) noteOpened({ keyId: key.id, webuiId: target.webuiId, conversationId: target.conversationId }); return v; };
-    try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); }
+    try { result = await impl(runArgs, { caller, keyId: key.id, scopes: Array.isArray(key.scopes) ? key.scopes.slice() : [], identity: A.identityOf(key.id), grant: verdict.grant, reach }); }   // scopes: lane login-request-card (a refusal teaches only a verb the key holds)
     catch (e) { return done({ ...named('failed', String((e && e.message) || e).slice(0, 200)), args: v0.args }, key.id, asked ? { ask: asked } : {}); }
     // THE OPENER'S ROW: a successful open is remembered by the key that made it (the webui id now, the conversation id when known)
     if (verb === 'conversations.open' && result && result.ok && result.sessionId) noteOpened({ keyId: key.id, webuiId: String(result.sessionId), conversationId: result.claudeSessionId ? String(result.claudeSessionId) : null });

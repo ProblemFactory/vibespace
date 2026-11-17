@@ -1,11 +1,15 @@
 /**
  * src/server/end-proposals.js — ORCH: THE PROPOSAL CARD's store-side (lane login-request-card, majordomo piece 3b; PURE rules in
- * src/end-proposal.js). An agent that may NOT end a conversation PROPOSES the end (conversations.propose): ONE For-you item per
- * proposer (userTodos.add's own refresh-in-place by `itemKey`), its rows drawn from the SAME builder as conversations.list. The
- * person's press (the cookie-only route src/routes/end-proposals.js) is the person's own Terminate — each selected row judged again
- * at the press (pressVerdict): a row that started something since the drawing is NOT ended and is drawn again with what changed; one
- * that ended meanwhile is said. The proposer hears the answer at its NEXT turn through the stash (free — never a billed wake). The
- * card resolves when answered or when no row on it is live any more (sweep, at the live list's one notify point). No clock.
+ * src/end-proposal.js). An agent that needs a person-only act PROPOSES it; the person sees ONE card per proposer, refreshed, never a
+ * flood; one press approves or declines; the answer returns to the proposer at its next turn at no cost (the stash — never a wake).
+ * Two kinds of ONE action type: an END (conversations.propose — its rows from the SAME builder as conversations.list) and a WAKE
+ * GRANT (piece 7's propose-wake — each row names the conversation its job will wake, read from the job). THE CURE'S LAWS (主开发
+ * 2026-11-17 20:11Z): a row's identity cannot alias (a conversation with no id yet is refused at the proposal); a press carries the
+ * drawing it answers (a card changed since is redrawn, never acted on); one answer per card in flight; the press writes only what
+ * the card drew (an end row's job ticks: its own jobs, and only rows really ended); everything the press did is said, once, with the
+ * true reason; a second proposal ADDS to the open card (a row named again is redrawn) for both kinds; what the person declined
+ * stays declined until it differs; the card resolves only on the FACT that every conversation on it ended (a stopped record) — never
+ * because a live set is still filling; names toward the agent pass the belt; the ended record names the proposer. No clock.
  */
 'use strict';
 
@@ -16,20 +20,32 @@ const TYPE = 'end-proposal';   // = src/end-proposal.js TYPE (the census reads t
 const WAKE = 'wake';
 const kindOf = (i) => (i && i.action && i.action.kind === WAKE ? WAKE : 'end');
 const FROM_NAME = 'VibeSpace proposals';   // src/notification-senders.js lists it (the stash's sender prefix law)
+const ANSWERED = 'answered', ALL_ENDED = 'all-ended';   // the card's two ends (src/foryou-actions.js row `ends` — a decision: nothing else closes it)
+const line = (s) => PT.toAgentText(String(s || ''), { kind: 'line', max: 120 });
 
-function create({ userTodos, deliver, listFacts, endConversation, liveKeys = null, storeWakeTicks = null, setWakeGrant = null, log = () => { } } = {}) {
-  const openOf = (proposerKey, kind = 'end') => {
-    let ids = [];
-    try { ids = userTodos.idsWhere((i) => i && i.sessionKey === proposerKey && i.status === 'open' && EP.isProposal(i.action) && kindOf(i) === kind); } catch { ids = []; }
-    return ids.length ? userTodos.get(ids[0]) : null;
+function create({ userTodos, deliver, listFacts, endConversation, liveKeys = null, endedKeys = null, storeWakeTicks = null, setWakeGrant = null, jobOwnerOf = null, log = () => { } } = {}) {
+  const inFlight = new Set();   // the cards a press is answering right now — a second press is told so, the sweep leaves them alone
+  const ofProposer = (proposerKey, kind, pred) => { try { return userTodos.idsWhere((i) => i && i.sessionKey === proposerKey && EP.isProposal(i.action) && kindOf(i) === kind && pred(i)); } catch { return []; } };
+  const openOf = (proposerKey, kind = 'end') => { const ids = ofProposer(proposerKey, kind, (i) => i.status === 'open'); return ids.length ? userTodos.get(ids[0]) : null; };
+  const pastCount = (proposerKey, kind = 'end') => ofProposer(proposerKey, kind, () => true).length;
+  /** The last decision of this proposer for this kind (its card's `decided` record) — law 8. */
+  const lastDecided = (proposerKey, kind) => {
+    const items = ofProposer(proposerKey, kind, (i) => i.status !== 'open' && i.card && i.card.decided).map((id) => userTodos.get(id)).filter(Boolean);
+    items.sort((a, b) => ((b.card.decided.at || 0) - (a.card.decided.at || 0)));
+    return items.length ? items[0].card.decided : null;
   };
-  const pastCount = (proposerKey, kind = 'end') => { try { return userTodos.idsWhere((i) => i && i.sessionKey === proposerKey && EP.isProposal(i.action) && kindOf(i) === kind).length; } catch { return 0; } };
-  /** A row of the list by what a caller names: its key, its conversation id, or its live webui id. */
-  const rowFor = (rows, t) => rows.find((r) => r && (r.key === t || (r.key && r.key.slice(r.key.indexOf(':') + 1) === t) || r.id === t)) || null;
+  /** A row of the list by what a caller names: its key, its conversation id, or its live webui id (to refuse a keyless one by name). */
+  const rowFor = (rows, t) => rows.find((r) => r && ((r.key && (r.key === t || r.key.slice(r.key.indexOf(':') + 1) === t)) || r.id === t)) || null;
   // the press's act in piece 7's words: ONLY the person's own press ({kind:'human'} from the cookie-only route) becomes the jobs
   // engine's { kind: 'person' } — anything else reaches setWakeGrant as null and is refused there by name
   const personBy = (by) => (by && by.kind === 'human' ? { kind: 'person', by: 'person' } : null);
+  const proposerOf = (caller) => (caller && typeof caller.sessionKey === 'string' && /^[a-z][\w-]*:\S+$/.test(caller.sessionKey) ? caller.sessionKey : null);
   const words = (n, name) => ({ key: n === 1 ? '«{name}» proposes ending 1 conversation' : '«{name}» proposes ending {n} conversations', params: { name, n } });
+  // the decision's memory (law 8) — FLAT strings (a For-you card nests 4 deep at most): an end row «key|busy codes», a job «id|owner|grant»
+  const decidedNow = (card, kept) => ({ ...card, decided: { at: Date.now(), kept } });
+  const endMark = (d) => `${d.key}|${(d.busy || []).join(',')}`;
+  const jobMark = (r) => `${r.id}|${(r.owner && r.owner.key) || ''}|${r.grant === true ? 1 : 0}`;
+  const close = (id, by, card = null) => { try { if (card) userTodos.setCard(id, card); userTodos.setStatus(id, 'done', by); return true; } catch (e) { log(`card ${id} not closed: ${e && e.message || e}`); return false; } };
 
   /** conversations.propose — the verb's body. `reach(row)` = the ONE rule every verb asks (opener / grant / self). */
   async function propose({ targets, why }, { caller, reach }) {
@@ -37,158 +53,218 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     if (!t.ok) return t;
     const text = typeof why === 'string' ? why.replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, EP.WHY_MAX) : '';
     if (!text) return { ok: false, code: 'bad_args', why: 'why: one sentence of why the person should end them' };
+    const proposerKey = proposerOf(caller);
+    if (!proposerKey) return { ok: false, code: 'no_proposer', why: 'the calling conversation has no id yet — send it one message first; nothing was proposed' };
     if (!listFacts || typeof listFacts.list !== 'function') return { ok: false, code: 'not_ready', why: 'the conversation list is not wired yet' };
     const snap = await listFacts.list();
     const rows = Array.isArray(snap && snap.conversations) ? snap.conversations : [];
-    const unseen = [], gone = [], ended = [], drawn = [];
+    const unseen = [], gone = [], ended = [], keyless = [], drawn = [];
     for (const target of t.targets) {
       const r = rowFor(rows, target);
       if (!r) { gone.push(target); continue; }
       const cid = r.key ? r.key.slice(r.key.indexOf(':') + 1) : null;
       let v = null; try { v = reach({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [] }); } catch { v = null; }
       if (!(v && v.ok)) { unseen.push(target); continue; }
-      if (r.state === 'ended') { ended.push(r.name || r.key); continue; }
+      if (!r.key) { keyless.push(target); continue; }   // law 2: a row's identity cannot alias — no conversation id yet, no row
+      if (r.state === 'ended') { ended.push(line(r.name || r.key)); continue; }
       drawn.push(EP.drawnRow(r));
     }
     // a proposer that names a conversation outside what it can see is refused BY NAME — nothing is filed
     if (unseen.length) return { ok: false, code: 'not_visible', why: `outside what your key reaches: ${unseen.join(', ')} — nothing was proposed`, targets: unseen };
     if (gone.length) return { ok: false, code: 'not_found', why: `no conversation by ${gone.length === 1 ? 'that id' : 'those ids'}: ${gone.join(', ')} — nothing was proposed`, targets: gone };
+    if (keyless.length) return { ok: false, code: 'no_conversation_id', why: `${keyless.join(', ')} has not reported its conversation id yet — propose it once it has (it reports one at its first turn); nothing was proposed`, targets: keyless };
     if (!drawn.length) return { ok: false, code: 'nothing_to_end', why: `every one of them has ended already (${ended.join(', ')})` };
-    const proposerKey = caller.sessionKey || `claude:${caller.conversationId}`;
     const name = caller.name || proposerKey;
     const open = openOf(proposerKey);
+    // law 8: the very rows the person last kept, unchanged (the same keys, the same things running) — said once, nothing filed
+    const dec = open ? null : lastDecided(proposerKey, 'end');
+    if (dec && Array.isArray(dec.kept) && drawn.every((d) => dec.kept.includes(endMark(d)))) {
+      return { ok: false, code: 'declined', why: EP.declinedText('end', drawn.map((d) => line(d.name || d.key)), dec.at) };
+    }
+    // law 9: ONE rule for both kinds — a second proposal ADDS to the open card; a row named again is redrawn
+    const had = open && open.card && Array.isArray(open.card.rows) ? open.card.rows : [];
+    const keys = new Set(drawn.map((d) => d.key));
+    const all = [...had.filter((d) => d && d.key && !keys.has(d.key)), ...drawn];
+    if (all.length > EP.MAX_TARGETS) return { ok: false, code: 'card_full', why: `the open card holds ${had.length} conversations — at most ${EP.MAX_TARGETS} on one card; the person answers it first` };
     const itemKey = open ? open.itemKey : `end-proposal:${pastCount(proposerKey) + 1}`;
-    const w = words(drawn.length, name);
+    const w = words(all.length, name);
     const it = userTodos.add(proposerKey, {
       origin: 'agent', by: 'agent', sessionName: name, urgency: 'normal', itemKey,
-      text: w.key.replace('{name}', name).replace('{n}', String(drawn.length)), detail: text, i18n: { text: w },
-      action: { type: TYPE, kind: 'end', proposer: proposerKey, rows: drawn.length },
-      card: { why: text, rows: drawn, proposer: { key: proposerKey, name } },
+      text: w.key.replace('{name}', name).replace('{n}', String(all.length)), detail: text, i18n: { text: w },
+      action: { type: TYPE, kind: 'end', proposer: proposerKey, rows: all.length },
+      card: { why: text, rows: all, proposer: { key: proposerKey, name } },
     });
-    return { ok: true, item: it && it.id, rows: drawn.length, refreshed: !!(it && it.existing), ...(ended.length ? { alreadyEnded: ended } : {}) };
+    return { ok: true, item: it && it.id, rows: all.length, added: drawn.length, refreshed: !!(it && it.existing), ...(ended.length ? { alreadyEnded: ended } : {}) };
   }
 
-  /** THE PRESS — the person's own Terminate over the selected rows (`terminate` = keys; the rest are kept). `by` = the person's
-   *  act ({kind:'human', actBy}). → { ok, terminated, kept, changed, ended, open } (open: the card stays, redrawn with what changed). */
+  /** THE PRESS — `body.drawn` = the card's signature as the page drew it; END: `terminate` = keys, `wakeTicks` = the rows' job ticks;
+   *  WAKE: `grant` = the ids left ticked (none = keep all). `by` = the person's act ({kind:'human', actBy}). */
   async function answer(id, body = {}, by) {
-    const { terminate = [], wakeTicks = null, grant = null } = body || {};
+    const { drawn = null, terminate = [], wakeTicks = null, grant = null } = body || {};
     const it = userTodos.get(id);
     if (!it || !EP.isProposal(it.action)) return { ok: false, code: 'not_found', why: 'no proposal card by that id' };
     if (it.status !== 'open') return { ok: false, code: 'answered', why: 'that card was answered already' };
-    if (kindOf(it) === WAKE) return answerWake(it, { grant }, by);
+    if (inFlight.has(id)) return { ok: false, code: 'answering', why: 'that card is being answered on another page right now' };
+    if (!drawn || drawn !== EP.cardSig(it.card)) return { ok: false, code: 'card_changed', why: 'the card changed since it was drawn — read it again, then press' };   // law 4
+    inFlight.add(id);
+    try { return kindOf(it) === WAKE ? await answerWake(it, grant, by) : await answerEnd(it, terminate, wakeTicks, by); }
+    finally { inFlight.delete(id); }
+  }
+
+  async function answerEnd(it, terminate, wakeTicks, by) {
     const card = it.card || {};
-    const rows = Array.isArray(card.rows) ? card.rows : [];
+    const rows = Array.isArray(card.rows) ? card.rows.filter((d) => d && d.key) : [];
     const pick = new Set((Array.isArray(terminate) ? terminate : []).map(String));
     const snap = await listFacts.list();
     const now = Array.isArray(snap && snap.conversations) ? snap.conversations : [];
-    if (typeof storeWakeTicks === 'function' && Array.isArray(wakeTicks) && wakeTicks.length) { try { await storeWakeTicks(wakeTicks, personBy(by)); } catch (e) { return { ok: false, code: 'ticks_not_stored', why: String(e && e.message || e) }; } }   // piece 7's grant, stored BEFORE any end runs
-    const out = { terminated: [], kept: [], changed: [], ended: [] };
+    const ticks = Array.isArray(wakeTicks) ? wakeTicks : [];
+    const proposer = (it.action && it.action.proposer) || it.sessionKey;
+    const out = { terminated: [], kept: [], changed: [], failed: [], ended: [], granted: [], withdrawn: [], keptRows: [] };
     const still = [];
     for (const d of rows) {
-      const nowRow = now.find((r) => r && r.key === d.key) || null;
-      if (!pick.has(d.key)) { (nowRow && nowRow.state !== 'ended' ? out.kept : out.ended).push(d); continue; }
+      const nowRow = now.find((r) => r && r.key && r.key === d.key) || null;
+      if (!pick.has(d.key)) { if (nowRow && nowRow.state !== 'ended') { out.kept.push(d); out.keptRows.push(endMark(d)); } else out.ended.push(d); continue; }
       const pv = EP.pressVerdict(d, nowRow);
       if (pv.verdict === 'ended' || pv.verdict === 'gone') { out.ended.push(d); continue; }
       if (pv.verdict === 'changed') { out.changed.push({ ...d, added: pv.added }); still.push({ ...pv.row, changed: pv.added }); continue; }
+      // law 4: the ticks THIS row's jobs carry — only jobs that wake this very conversation, and only when it is really ended
+      const mine = ticks.filter((x) => x && typeof x.id === 'string' && typeof jobOwnerOf === 'function' && (jobOwnerOf(x.id) || {}).key === d.key).map((x) => ({ id: x.id, grant: x.grant === true }));
+      if (mine.length) {
+        if (typeof storeWakeTicks !== 'function') { out.failed.push({ ...d, failed: 'jobs_not_wired' }); still.push({ ...EP.drawnRow(nowRow), failed: 'jobs_not_wired' }); continue; }
+        try { await storeWakeTicks(mine, personBy(by)); } catch (e) { out.failed.push({ ...d, failed: 'ticks_not_stored' }); still.push({ ...EP.drawnRow(nowRow), failed: 'ticks_not_stored' }); continue; }
+      }
       const cid = d.key.slice(d.key.indexOf(':') + 1);
-      const r = await endConversation({ sessionId: nowRow.id, backendSessionId: cid }, by);
-      if (r && r.ok === false) { out.changed.push({ ...d, failed: r.code || 'failed' }); still.push({ ...EP.drawnRow(nowRow), failed: r.code || 'failed' }); continue; }
+      const r = await endConversation({ sessionId: nowRow.id, backendSessionId: cid }, { ...(by || {}), proposedBy: { key: proposer, name: (card.proposer && card.proposer.name) || null } });   // law 12: the record names the proposer
+      if (r && r.ok === false) {
+        if (mine.length) { try { await storeWakeTicks(mine.map((x) => ({ id: x.id, grant: !x.grant })), personBy(by)); } catch { /* said below: the end failed */ } }   // not ended ⇒ its ticks go back
+        out.failed.push({ ...d, failed: r.code || 'failed' }); still.push({ ...EP.drawnRow(nowRow), failed: r.code || 'failed' }); continue;
+      }
       out.terminated.push(d);
+      for (const x of mine) (x.grant ? out.granted : out.withdrawn).push({ id: x.id, name: x.id });
     }
-    if (still.length) { try { userTodos.setCard(id, { ...card, rows: still }); } catch { } }
-    else { try { answering.add(id); userTodos.setStatus(id, 'done', 'user'); } catch { } finally { answering.delete(id); } }   // the person's own decision (the press)
-    tell(it, out);
-    return { ok: true, ...out, open: still.length > 0 };
+    let open = still.length > 0;
+    if (open) { try { userTodos.setCard(it.id, { ...card, rows: still }); } catch { } }
+    else open = !close(it.id, ANSWERED, decidedNow(card, out.keptRows));
+    const told = tellText(it, EP.answerText(out));
+    const { keptRows, ...said } = out; void keptRows;
+    return { ok: true, ...said, open, told };
   }
 
   /** THE SECOND KIND — the door piece 7 binds (jobsWiring.setProposalDoor; `vibespace-job propose-wake` / `--propose-wake` reach it
-   *  through the agent route, which judged the job, the why and the owner conversation first): an agent proposes the wake grant
-   *  («this job or schedule may wake its conversation after that conversation was ended on purpose») WITHOUT proposing any end.
-   *  `rows` = piece 7's own wakeChoiceRows [{id, name, kind, nextAt, grant, by}]. ONE card per proposer: a job already on it is
-   *  REFRESHED in place (its row redrawn, the why replaced), a new job joins it — never a second card, never a second row per job
-   *  (主开发 12:49Z: one card per proposer and job, refreshed not multiplied). → { ok, id, rows, refreshed } */
-  function proposeWakeGrant(caller, { rows, why } = {}) {
-    const fresh = (Array.isArray(rows) ? rows : []).filter((r) => r && typeof r.id === 'string' && r.id).slice(0, EP.MAX_TARGETS)
-      .map((r) => ({ id: r.id.slice(0, 120), name: typeof r.name === 'string' && r.name ? r.name.slice(0, 120) : r.id.slice(0, 120), kind: r.kind === 'schedule' ? 'schedule' : 'job',
-        nextAt: Number.isFinite(r.nextAt) ? r.nextAt : null, grant: r.grant === true, by: r.grant === true && r.by && typeof r.by === 'object' ? { kind: r.by.kind === 'key' ? 'key' : 'person', name: typeof r.by.name === 'string' ? r.by.name.slice(0, 80) : null, at: Number(r.by.at) || null } : null }));
-    if (!fresh.length) return { ok: false, code: 'bad_args', why: 'name at least one job or schedule' };
+   *  through the agent route, which judged the job, the why and the owner conversation first). `rows` = piece 7's wakeChoiceRows;
+   *  each row is drawn with the conversation its job will WAKE (`owner`, read from the job — the proposer may be another, a manager
+   *  for a worker's job). ONE card per proposer: a job already on it is redrawn, a new job joins. → { ok, id, rows, refreshed } */
+  async function proposeWakeGrant(caller, { rows, why } = {}) {
+    const proposerKey = proposerOf(caller);
+    if (!proposerKey) return { ok: false, code: 'no_proposer', why: 'no proposing conversation (it has no id yet) — nothing was filed' };
     const text = typeof why === 'string' ? why.replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, EP.WHY_MAX) : '';
     if (!text) return { ok: false, code: 'bad_args', why: 'why: one sentence of why these may wake their conversation' };
-    const proposerKey = (caller && (caller.sessionKey || (caller.conversationId && `claude:${caller.conversationId}`))) || null;
-    if (!proposerKey) return { ok: false, code: 'bad_args', why: 'no proposing conversation' };
+    const names = new Map();
+    try { const snap = listFacts && typeof listFacts.list === 'function' ? await listFacts.list() : null; for (const r of (snap && snap.conversations) || []) if (r && r.key) names.set(r.key, r.name || null); } catch { /* names are words only */ }
+    const fresh = [];
+    for (const r of (Array.isArray(rows) ? rows : []).filter((x) => x && typeof x.id === 'string' && x.id).slice(0, EP.MAX_TARGETS)) {
+      const o = typeof jobOwnerOf === 'function' ? jobOwnerOf(r.id) : null;
+      if (!o || !o.key) return { ok: false, code: 'no_owner', why: `${r.id} belongs to no conversation — there is nothing for it to wake; nothing was filed` };
+      fresh.push({ id: r.id.slice(0, 120), name: typeof r.name === 'string' && r.name ? r.name.slice(0, 120) : r.id.slice(0, 120), kind: r.kind === 'schedule' ? 'schedule' : 'job',
+        nextAt: Number.isFinite(r.nextAt) ? r.nextAt : null, grant: r.grant === true, by: r.grant === true && r.by && typeof r.by === 'object' ? { kind: r.by.kind === 'key' ? 'key' : 'person', name: typeof r.by.name === 'string' ? r.by.name.slice(0, 80) : null, at: Number(r.by.at) || null } : null,
+        owner: { key: o.key, name: (names.get(o.key) || '').slice(0, 120) || null, self: o.key === proposerKey } });
+    }
+    if (!fresh.length) return { ok: false, code: 'bad_args', why: 'name at least one job or schedule' };
     const name = (caller && caller.name) || proposerKey;
     const open = openOf(proposerKey, WAKE);
+    const dec = open ? null : lastDecided(proposerKey, WAKE);
+    if (dec && Array.isArray(dec.kept) && fresh.every((r) => dec.kept.includes(jobMark(r)))) {
+      return { ok: false, code: 'declined', why: EP.declinedText('wake', fresh.map((r) => r.id), dec.at) };   // the jobs by id (a job's words never ride a sentence — the record-clear law)
+    }
     const had = open && open.card && Array.isArray(open.card.rows) ? open.card.rows : [];
     const ids = new Set(fresh.map((r) => r.id));
-    const list = [...had.filter((r) => r && !ids.has(r.id)), ...fresh].slice(-EP.MAX_TARGETS);   // a job already on the card is redrawn, never doubled
+    const list = [...had.filter((r) => r && !ids.has(r.id)), ...fresh];   // a job already on the card is redrawn, never doubled
+    if (list.length > EP.MAX_TARGETS) return { ok: false, code: 'card_full', why: `the open card holds ${had.length} jobs — at most ${EP.MAX_TARGETS} on one card; the person answers it first` };
     const itemKey = open ? open.itemKey : `wake-proposal:${pastCount(proposerKey, WAKE) + 1}`;
-    const w = { key: list.length === 1 ? '«{name}» asks that 1 job may wake it after it is ended' : '«{name}» asks that {n} jobs may wake it after it is ended', params: { name, n: list.length } };
+    const self = list.every((r) => r.owner && r.owner.self);
+    const only = !self && list.length === 1 ? list[0].owner : null;
+    const w = self
+      ? { key: list.length === 1 ? '«{name}» asks that 1 job may wake it after it is ended' : '«{name}» asks that {n} jobs may wake it after it is ended', params: { name, n: list.length } }
+      : only ? { key: '«{name}» asks that 1 job may wake «{owner}» after it is ended', params: { name, owner: only.name || only.key } }
+        : { key: '«{name}» asks that {n} jobs may wake the conversations they belong to after those are ended', params: { name, n: list.length } };   // law 1: «it» only when the proposer IS the conversation woken
+    let txt = w.key; for (const [k, v] of Object.entries(w.params)) txt = txt.replace(`{${k}}`, String(v));
     const it = userTodos.add(proposerKey, {
       origin: 'agent', by: 'agent', sessionName: name, urgency: 'normal', itemKey,
-      text: w.key.replace('{name}', name).replace('{n}', String(list.length)), detail: text, i18n: { text: w },
+      text: txt, detail: text, i18n: { text: w },
       action: { type: TYPE, kind: WAKE, proposer: proposerKey, rows: list.length },
       card: { why: text, rows: list, proposer: { key: proposerKey, name } },
     });
     return { ok: true, id: it && it.id, rows: list.length, refreshed: !!(it && it.existing) };
   }
 
-  /** The wake card's press: `grant` = the ids the person left ticked (the card draws each proposed job ticked — the press IS the
-   *  approval); a row whose tick differs from the grant it was drawn with is written through piece 7's in-process person door
-   *  (setWakeGrant(jobId, yes, {kind:'person'})); «Keep all as they are» (NO grant sent) writes nothing. A job removed since the
-   *  drawing is said (gone) and the rest still land; any other refused write is said and the card stays open. */
-  async function answerWake(it, { grant = null } = {}, by) {
-    const rows = it.card && Array.isArray(it.card.rows) ? it.card.rows : [];
-    const yes = new Set((Array.isArray(grant) ? grant : []).map(String));
-    const changes = Array.isArray(grant) ? rows.filter((r) => (r.grant === true) !== yes.has(r.id)) : [];   // no grant sent = «Keep all as they are»
-    if (changes.length && typeof setWakeGrant !== 'function') return { ok: false, code: 'not_ready', why: 'the jobs engine is not wired — nothing was written' };
-    const out = { granted: [], withdrawn: [], unchanged: rows.filter((r) => !changes.includes(r)), gone: [] };
-    for (const r of changes) {
-      const w = await setWakeGrant(r.id, yes.has(r.id), personBy(by));
-      if (w && w.code === 'not_found') { out.gone.push(r); continue; }   // removed since the card drew it — said, never a card stuck open on it
-      if (w && w.error) return { ok: false, code: w.code || 'failed', why: w.error, ...out };
-      (yes.has(r.id) ? out.granted : out.withdrawn).push(r);
+  /** The wake card's press: `grant` = the ids the person left ticked (null = «Keep all as they are»: nothing written). Each row whose
+   *  tick differs from the grant it was drawn with is written through piece 7's in-process person door — after its job is read
+   *  AGAIN: gone ⇒ said; now waking another conversation than the card showed ⇒ not written, said; refused ⇒ said, and what landed
+   *  is said too (the card stays open, redrawn with what landed). */
+  async function answerWake(it, grant, by) {
+    const card = it.card || {};
+    const rows = Array.isArray(card.rows) ? card.rows : [];
+    const out = { granted: [], withdrawn: [], unchanged: [], gone: [], moved: [], refused: [] };
+    if (!Array.isArray(grant)) {
+      out.unchanged = rows.slice();
+      const closed = close(it.id, ANSWERED, decidedNow(card, rows.map(jobMark)));
+      const told = tellText(it, EP.wakeAnswerText(out));
+      return { ok: true, ...out, open: !closed, told };
     }
-    try { answering.add(it.id); userTodos.setStatus(it.id, 'done', 'user'); } catch { } finally { answering.delete(it.id); }
-    tellText(it, EP.wakeAnswerText(out));
-    return { ok: true, ...out };
+    const yes = new Set(grant.map(String));
+    const changes = rows.filter((r) => (r.grant === true) !== yes.has(r.id));
+    if (changes.length && typeof setWakeGrant !== 'function') return { ok: false, code: 'not_ready', why: 'the jobs engine is not wired — nothing was written' };
+    out.unchanged = rows.filter((r) => !changes.includes(r));
+    const landed = new Map();
+    for (const r of changes) {
+      const o = typeof jobOwnerOf === 'function' ? jobOwnerOf(r.id) : null;
+      if (!o) { out.gone.push(r); continue; }
+      if (r.owner && o.key !== r.owner.key) { out.moved.push(r); continue; }
+      const w = await setWakeGrant(r.id, yes.has(r.id), personBy(by));
+      if (w && w.code === 'not_found') { out.gone.push(r); continue; }
+      if (w && w.error) { out.refused.push({ ...r, refused: w.code || 'refused' }); continue; }
+      (yes.has(r.id) ? out.granted : out.withdrawn).push(r); landed.set(r.id, yes.has(r.id));
+    }
+    let open = out.refused.length > 0;
+    if (open) { try { userTodos.setCard(it.id, { ...card, rows: rows.map((r) => (landed.has(r.id) ? { ...r, grant: landed.get(r.id) } : r)) }); } catch { } }
+    else open = !close(it.id, ANSWERED, decidedNow(card, rows.filter((r) => !yes.has(r.id)).map(jobMark)));
+    const told = tellText(it, EP.wakeAnswerText(out));
+    const none = out.refused.length > 0 && landed.size === 0;   // nothing landed and something was refused ⇒ a refusal; else what landed AND what was refused, both said
+    return { ok: !none, ...out, open, told, ...(out.refused.length ? { code: out.refused[0].refused, why: `not written: ${out.refused.map((r) => r.id).join(', ')}` } : {}) };
   }
 
-  /** The proposer hears it at its NEXT turn — the stash, free (never a wake). */
+  /** The proposer hears it at its NEXT turn — the stash, free (never a wake). → told (a failed stash is said to the person). */
   function tellText(it, text) {
     const proposer = (it.action && it.action.proposer) || it.sessionKey;
     const cid = String(proposer || '').slice(String(proposer || '').indexOf(':') + 1);
-    if (!cid || !deliver || typeof deliver.stashFor !== 'function') return;
-    try { deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: `${it.id}:${Date.now().toString(36)}`, text: PT.toAgentText(String(text || '')) }); }   // THE belt: a conversation's or a job's name on it may be an agent's words
-    catch (e) { log(`answer not stashed for ${proposer}: ${e && e.message || e}`); }
-  }
-  function tell(it, out) {
-    tellText(it, EP.answerText(out));
+    if (!cid || !deliver || typeof deliver.stashFor !== 'function') return false;
+    try { const r = deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: `${it.id}:${Date.now().toString(36)}`, text: PT.toAgentText(String(text || '')) }); return !(r && r.stored === false); }   // THE belt: a conversation's or a job's name on it may be an agent's words
+    catch (e) { log(`answer not stashed for ${proposer}: ${e && e.message || e}`); return false; }
   }
 
-  /** The card resolves when NO row on it is live any more (ended, archived, gone) — run at the live list's one notify point. */
+  /** The card resolves ONLY on the FACT that every conversation on it ended (a stopped record — endedKeys), never because one is
+   *  missing from a live set that may still be filling (a restart's restore); a card a press is answering is left alone. */
   async function sweep() {
     let ids = [];
-    try { ids = userTodos.idsWhere((i) => i && i.status === 'open' && EP.isProposal(i.action) && kindOf(i) === 'end'); } catch { ids = []; }
-    if (!ids.length) return 0;
-    let live;
-    if (typeof liveKeys === 'function') live = new Set(liveKeys());   // the live list's own keys — cheap, at its one notify point
-    else { const snap = listFacts ? await listFacts.list() : null; live = new Set((snap && snap.conversations || []).filter((r) => r && r.state !== 'ended').map((r) => r.key)); }
+    try { ids = userTodos.idsWhere((i) => i && i.status === 'open' && EP.isProposal(i.action) && kindOf(i) === 'end' && !inFlight.has(i.id)); } catch { ids = []; }
+    if (!ids.length || typeof endedKeys !== 'function') return 0;
+    const live = new Set(typeof liveKeys === 'function' ? liveKeys() : []);
+    let ended;
+    try { ended = new Set(await endedKeys()); } catch { return 0; }
     let n = 0;
     for (const id of ids) {
+      if (inFlight.has(id)) continue;
       const it = userTodos.get(id);
-      const rows = it && it.card && Array.isArray(it.card.rows) ? it.card.rows : [];
-      if (rows.some((d) => live.has(d.key))) continue;
-      try { userTodos.resolveAnswered([id], 'server', { allEnded: true }); n++; } catch { }
-      tell(it, { ended: rows });
+      const rows = it && it.status === 'open' && it.card && Array.isArray(it.card.rows) ? it.card.rows : [];
+      if (!rows.length || !rows.every((d) => d && d.key && ended.has(d.key) && !live.has(d.key))) continue;
+      if (!close(id, ALL_ENDED)) continue;
+      n++;
+      tellText(it, EP.answerText({ ended: rows.map((d) => ({ ...d, name: line(d.name || d.key) })) }));
     }
     return n;
   }
 
-  // the card's own ✕ (For-you's dismiss) keeps every conversation on it — the proposer hears that too (once; the press's own close is not this)
-  const answering = new Set();
-  try { userTodos.onStatus((it, { status }) => { if (!it || !EP.isProposal(it.action) || status !== 'dismissed' || answering.has(it.id)) return; if (kindOf(it) === WAKE) tellText(it, EP.wakeAnswerText({ unchanged: (it.card && it.card.rows) || [] })); else tell(it, { kept: (it.card && it.card.rows) || [] }); }); } catch { }
-
-  return { propose, proposeWakeGrant, answer, sweep, TYPE, FROM_NAME };
+  return { propose, proposeWakeGrant, answer, sweep, TYPE, FROM_NAME, ANSWERED, ALL_ENDED };
 }
 
 module.exports = { create, TYPE, FROM_NAME };

@@ -17,13 +17,15 @@ export async function loadWakeGrantRows(conversationId) {
   return r && Array.isArray(r.rows) ? r.rows : [];
 }
 
-/** the rows as a node + what the person changed. `rows` = loadWakeGrantRows's. → {node, changes(): [{id, grant}]} */
-export function wakeGrantRowsNode(rows, { now = Date.now() } = {}) {
+/** the rows as a node + what the person changed. `rows` = loadWakeGrantRows's. → {node, changes(): [{id, grant}]}
+ *  `head` = the line above the rows (lane login-request-card's proposal card says its own: which conversation each job wakes, and
+ *  that a wake is a billed turn — the cure's laws 1 and 7); a row that carries `owner` {name, key} names the conversation it wakes. */
+export function wakeGrantRowsNode(rows, { now = Date.now(), head: headWords = null } = {}) {
   const box = document.createElement('div');
   box.className = 'wake-grant-rows';
   const head = document.createElement('p');
   head.className = 'dialog-hint wake-grant-head';
-  head.textContent = t('Jobs and schedules it owns — a ticked one may resume it later to deliver its result:');
+  head.textContent = headWords || t('Jobs and schedules it owns — a ticked one may resume it later to deliver its result:');
   box.appendChild(head);
   const ticks = [];
   for (const r of rows || []) {
@@ -42,6 +44,7 @@ export function wakeGrantRowsNode(rows, { now = Date.now() } = {}) {
     if (Number(r.nextAt) > now) bits.push(t('next run {when}', { when: stampAt(Number(r.nextAt), { words: true }) }));
     fact.textContent = bits.join(' · ');
     row.append(cb, name, fact);
+    if (r.owner && (r.owner.name || r.owner.key)) { const o = document.createElement('span'); o.className = 'wake-grant-owner'; o.textContent = t('wakes «{name}»', { name: String(r.owner.name || r.owner.key) }); row.appendChild(o); }   // the conversation THIS job would resume (a conversation's name: text, never markup)
     const who = grantByWords(r.by);   // WHO allowed it, and when (the stored grant's own record)
     if (who) { const w = document.createElement('span'); w.className = 'wake-grant-by'; w.textContent = who; row.appendChild(w); }
     box.appendChild(row);

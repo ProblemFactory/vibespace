@@ -46,7 +46,7 @@ import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-
 import { postSecretAnswer, answerJobSecrets } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
 import { refusalText as pictureRefusalText } from './image-attach.js'; // B-51dd: a picture the route refused — the picture door's own words
 import { dropSentPictures } from './reply-pictures.js'; // B-51dd: a sent reply removes exactly the pictures it carried, and every box showing the item redraws
-import { noteHubClock, settingCardOf, noteSettingPresent, untilClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
+import { noteHubClock, settingCardOf, noteSettingPresent, untilClock, proposalTicksOf, PROPOSAL_TICKS } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
 import { isPointer, clockWords, headWordOf, doorOf, arrivalWords } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo; r4: an expired ask's end in words; lane ui-needs-a-button pick 6: the door a row declares
 import { PROPOSABLE, isSettingChange } from '../ask-setting.js';
 import { clockOf } from './page-time.js'; // lane ui-language: THE one formatter of a time a person reads — the agent's reply says the owner's clock through it (lane setting-doors pick 2) // PURE (CJS, lane setting-doors pick 2): a held row's default (a hold's `before` null)
@@ -84,15 +84,29 @@ export function sessionRowOf(app, key) {
  *  `itemOf(place)` → the item the place belongs to. */
 export function mountProposalRows(container, itemOf) {
   if (!container || typeof container.querySelectorAll !== 'function') return;
+  // the person's ticks are remembered per item, so a redraw (a refreshed card, a repaint) never drops one in a box in use (law 4)
+  for (const box of container.querySelectorAll('.ut-proposal-card:not([data-ticks])')) {
+    box.dataset.ticks = '1';
+    const it0 = typeof itemOf === 'function' ? itemOf(box) : null;
+    if (!it0 || typeof box.addEventListener !== 'function') continue;
+    box.addEventListener('change', (e) => {
+      const x = e && e.target; if (!x || x.type !== 'checkbox') return;
+      const m = proposalTicksOf(it0.id);
+      if (x.classList && x.classList.contains('ut-ep-check') && x.dataset.key) m.ends.set(x.dataset.key, !!x.checked);
+      else if (x.dataset && x.dataset.id) m.jobs.set(x.dataset.id, !!x.checked);
+    });
+  }
+  const held = (it, node) => { const m = it && PROPOSAL_TICKS.get(it.id); if (!m || !m.jobs.size || !node || typeof node.querySelectorAll !== 'function') return; for (const cb of node.querySelectorAll('input[type=checkbox][data-id]')) if (m.jobs.has(cb.dataset.id)) cb.checked = m.jobs.get(cb.dataset.id); };
   for (const place of container.querySelectorAll('.ut-proposal-card [data-place="piece-7"]:not([data-mounted])')) {
     place.dataset.mounted = '1';
+    const it = typeof itemOf === 'function' ? itemOf(place) : null;
     if (place.classList.contains('ut-wp-rows')) {
-      const it = typeof itemOf === 'function' ? itemOf(place) : null;
-      const h = wakeGrantRowsNode(((it && it.card && it.card.rows) || []).map((r) => ({ ...r, grant: true })));
-      place._wake = h; place.replaceChildren(h.node); continue;
+      // each row names the conversation its job would WAKE (its owner — not always the proposer), and a wake is a billed turn (laws 1, 7)
+      const h = wakeGrantRowsNode(((it && it.card && it.card.rows) || []).map((r) => ({ ...r, grant: true })), { head: t('Each ticked job may resume the conversation named on its row after that conversation is ended — every resume starts a turn billed to that conversation’s account:') });
+      place._wake = h; place.replaceChildren(h.node); held(it, h.node); continue;
     }
     const key = (place.closest('.ut-ep-row') || {}).dataset?.key || '';
-    loadWakeGrantRows(key.slice(key.indexOf(':') + 1)).then((rows) => { if (!rows.length || !place.isConnected) return; const h = wakeGrantRowsNode(rows); place._wake = h; place.replaceChildren(h.node); }).catch(() => { });
+    loadWakeGrantRows(key.slice(key.indexOf(':') + 1)).then((rows) => { if (!rows.length || !place.isConnected) return; const h = wakeGrantRowsNode(rows, { head: t('Its jobs and schedules — a ticked one may resume it after you terminate it (stored with «Terminate selected»; every resume starts a billed turn):') }); place._wake = h; place.replaceChildren(h.node); held(it, h.node); }).catch(() => { });
   }
 }
 /** …and what a press on that card sends, read off its drawn nodes: the ticked conversations, the changed job ticks (an end), the
@@ -103,7 +117,8 @@ export function proposalPressOf(box, answer) {
   const places = box ? [...box.querySelectorAll('[data-place="piece-7"]')].filter((p) => p._wake) : [];
   const wakeTicks = go ? places.flatMap((p) => p._wake.changes()) : [];
   const grant = wake && answer === 'save' ? places.flatMap((p) => [...p.querySelectorAll('input[type=checkbox][data-id]')].filter((x) => x.checked).map((x) => x.dataset.id)) : null;
-  return { go, wake, terminate, wakeTicks, grant };
+  const drawn = box && box.dataset ? box.dataset.sig || null : null;   // THE drawing the press answers (law 4) — the hub acts only on it
+  return { go, wake, terminate, wakeTicks, grant, drawn };
 }
 
 export function inboxModel(app) {
@@ -452,14 +467,22 @@ export function inboxModel(app) {
   /** lane login-request-card (piece 3b) — THE PROPOSAL CARD's press: the ticked rows (`terminate`, keys) to the person's door, which
    *  judges each row again (a row that started something since the drawing is NOT ended and comes back with what changed; one that
    *  ended meanwhile is said). An empty list = «Keep all». The proposer hears the answer at its next turn (the hub's stash — free). */
-  const pressProposal = async (rec, { terminate = [], wakeTicks = [], grant = null } = {}) => {
-    const r = await fetchJson(`/api/end-proposals/${encodeURIComponent(rec.id)}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(grant ? { grant } : { terminate, wakeTicks }) });   // the job ticks are stored through piece 7's person door BEFORE any end (the hub's order)
-    if (!(r && r.ok)) { showToast(t('Could not answer the proposal: {why}', { why: (r && (r.why || r.error)) || t('server unreachable') }), { type: 'error', duration: 9000 }); return false; }
+  const pressProposal = async (rec, { terminate = [], wakeTicks = [], grant = null, drawn = null } = {}) => {
+    // the press carries THE drawing it answers (law 4): a card that changed since is redrawn by the hub, never acted on
+    const r = await fetchJson(`/api/end-proposals/${encodeURIComponent(rec.id)}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(grant ? { drawn, grant } : { drawn, terminate, wakeTicks }) });
+    if (r && r.code === 'card_changed') { showToast(t('This card changed since you looked at it — read it again, then press')); return false; }
+    if (r && r.code === 'answering') { showToast(t('This card is being answered on another page')); return false; }
     const n = (a) => (Array.isArray(a) ? a.length : 0);
-    if (n(r.changed)) showToast(t('{n} changed since the card was drawn and were not terminated — look again', { n: n(r.changed) }), { duration: 9000 });
-    else if (n(r.terminated)) showToast(t('Terminated {n} — the agent will read it at its next turn', { n: n(r.terminated) }));
-    else if (n(r.granted) || n(r.withdrawn)) showToast(t('Saved — the agent will read it at its next turn'));
-    else showToast(t('Kept as they are — the agent will read it at its next turn'));
+    // EVERYTHING the press did, once, with the true reason (law 5) — what landed is said even when something was refused
+    const said = [
+      [r && r.terminated, '{n} terminated'], [r && r.kept, '{n} kept as they are'], [r && r.changed, '{n} changed since the card was drawn — not terminated'],
+      [r && r.failed, '{n} could not be terminated'], [r && r.ended, '{n} had already ended'], [r && r.granted, '{n} jobs may now wake their conversation'],
+      [r && r.withdrawn, '{n} jobs may no longer wake their conversation'], [r && r.unchanged, '{n} jobs kept as they are'], [r && r.gone, '{n} jobs no longer exist'],
+      [r && r.moved, '{n} jobs belong to another conversation now — not written'], [r && r.refused, '{n} jobs refused — not written'],
+    ].filter(([a]) => n(a)).map(([a, k]) => t(k, { n: n(a) }));
+    if (!(r && (r.ok || said.length))) { showToast(t('Could not answer the proposal: {why}', { why: (r && (r.why || r.error)) || t('server unreachable') }), { type: 'error', duration: 9000 }); return false; }
+    const tail = r.told === false ? t('The agent could not be told — tell it in chat.') : t('The agent will read it at its next turn.');
+    showToast(`${said.join(' · ')}. ${tail}`, { duration: r.ok ? 6000 : 9000, ...(r.ok ? {} : { type: 'error' }) });
     return !r.open;
   };
   /** A PRODUCER'S ACTION (design-reset-credits p2): the client maps the item's

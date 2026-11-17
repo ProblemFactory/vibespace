@@ -7531,7 +7531,12 @@ await section(async () => {
   const server = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const fnBody = (src, name) => { let body = null; visit(parse(src), (node) => { if (body == null && node.type === 'FunctionDeclaration' && node.id && node.id.name === name) body = src.slice(node.start, node.end); }); return body || ''; };
   const notify = fnBody(server, 'broadcastActiveSessions');
-  ok(/require\('\.\/src\/server\/local-index\.js'\)\.note\('sessions'\)/.test(notify), '§104b the session list\'s ONE notify point (server.js broadcastActiveSessions) feeds the index writer: note(\'sessions\')');
+  // the CODE, never a comment (lane login-request-card's cure, must 3: a call swallowed by a comment in front of it stayed green on the text)
+  const code104 = (x) => String(x || '').replace(/\/\/[^\n]*/g, '');
+  const noteCall = /require\('\.\/src\/server\/local-index\.js'\)\.note\('sessions'\)/;
+  ok(noteCall.test(code104(notify)), '§104b the session list\'s ONE notify point (server.js broadcastActiveSessions) feeds the index writer: note(\'sessions\') — in code, not in a comment');
+  ok(!noteCall.test(code104(notify.replace("try { require('./src/server/local-index.js').note('sessions'); } catch { }", "// try { require('./src/server/local-index.js').note('sessions'); } catch { }"))) && !noteCall.test(code104('try { a(); } catch { } // a comment that runs on: try { require(\'./src/server/local-index.js\').note(\'sessions\'); } catch { }')),
+    '§104b RED CONTROL: the same call commented out — or swallowed by a comment in front of it on the same line — reads as no call');
   ok(/require\('\.\/src\/server\/local-index\.js'\)\.stop\(\)/.test(fnBody(server, 'shutdownNow')), '§104b the shutdown tells the index the hub STOPPED (shutdownNow → stop())');
   ok((server.match(/require\('\.\/src\/server\/local-index\.js'\)\.configure\(/g) || []).length === 1 && /hub\.listen\(PORT, HOST, \(\) => \{[\s\S]{0,1200}local-index\.js'\)\.configure\(\{ rootDir: __dirname/.test(server), '§104b the boot configures it ONCE, at listen (the place decided once, the whole list written)');
   ok(/local-index\.js'\)\.configure\(\{[^\n]*owner: \(\(\) => \{ try \{ return ownerWriteRefusal\(\); \}/.test(server) && !/local-index\.js'\)\.configure\(\{[^\n]*throwaway: throwawayRoot/.test(server), '§104b WHO IS INSTALLED is the root verdict\'s (src/server-root.js via ownerWriteRefusal — the one rule for every owner-file write): a worktree / temp / SKIP_AGENT_HOOKS hub writes under its own root, never the person\'s HOME');

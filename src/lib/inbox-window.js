@@ -835,9 +835,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() });
       if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
       const pane = st.cur && st.cur.id === id ? st.cur.proposal.querySelector('.ut-proposal-card') : null;
-      const { go, terminate, wakeTicks, grant } = proposalPressOf(pane, a === 'endprop-go' ? 'terminate' : a === 'endprop-save' ? 'save' : 'keep');
+      const { go, terminate, wakeTicks, grant, drawn } = proposalPressOf(pane, a === 'endprop-go' ? 'terminate' : a === 'endprop-save' ? 'save' : 'keep');
       if (go && !terminate.length) { showToast(t('Tick the conversations to terminate first')); return; }
-      if (await model.runAction(it, 'proposal', { terminate, wakeTicks, ...(grant ? { grant } : {}) })) advance(id);
+      if (await model.runAction(it, 'proposal', { terminate, wakeTicks, drawn, ...(grant ? { grant } : {}) })) advance(id);
       return;
     }
     if (a === 'browser-grant') {

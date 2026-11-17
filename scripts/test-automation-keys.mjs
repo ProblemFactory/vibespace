@@ -870,7 +870,7 @@ console.log('⑫b MUTANT — the limits judged AFTER the spend authorizer (insid
       if (!lim.ok) return done(lim, key.id, { ...(asked ? { ask: asked } : {}), ...(held ? { once: release() } : {}) });
       runArgs = lim.args;
     }`;
-  const act = '    try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); }';
+  const act = '    try { result = await impl(runArgs, { caller, keyId: key.id, scopes: Array.isArray(key.scopes) ? key.scopes.slice() : [], identity: A.identityOf(key.id), grant: verdict.grant, reach }); }';   // + scopes: lane login-request-card
   ok(ESRC.split(judge).length === 2 && ESRC.split(act).length === 2, 'ANCHOR: the judge and the act are each spelled once');
   const MX = M.load('src/server/automation-engine.js', ESRC.replace(judge, '    let runArgs = v0.args;').replace(act, `    try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); if (verb === 'conversations.open') { const lim = await limitsJudge(keyById(key.id) || key, v0.args); if (!lim.ok) result = lim; } }`), 'limits-after');
   const rig = judgeRig();

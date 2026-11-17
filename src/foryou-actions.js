@@ -160,7 +160,10 @@ const ROWS = Object.freeze([
   // press is the person's own Terminate, each row judged again at the press; the answer reaches the proposer at its next turn, free.
   // Its SECOND kind (action.kind 'wake' — 主开发 05:13Z, the owner's widened wake grant): jobs or schedules that may wake their
   // conversation after an end on purpose — the ticks written through piece 7's person door; «Keep all as they are» writes nothing
-  { type: 'end-proposal', identity: 'proposer', producer: 'src/server/end-proposals.js', builtIn: 'src/end-proposal.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-api', 'conversations propose <target>[,<target>…] --why "…"', 'own'), scope: 'conversation' },
+  // …A DECISION (the cure's law 6): only its own presses end it — no ✓ Mark done that closes it untold, no ↺ Reopen that makes an answered
+  // card pressable again; its two ends: the person's answer, or every conversation on it ended (the stopped record's fact)
+  { type: 'end-proposal', identity: 'proposer', producer: 'src/server/end-proposals.js', builtIn: 'src/end-proposal.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-api', 'conversations propose <target>[,<target>…] --why "…"', 'own'), scope: 'conversation', decide: 'person', ends: ['answered', 'all-ended'],
+    endWords: Object.freeze({ answered: i18nKey('answered by you'), 'all-ended': i18nKey('every conversation on it ended') }) },
   { type: 'app-install', identity: 'id', producer: 'src/server/apps-engine.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-app', 'install / remove', 'own'), scope: 'conversation' },
   // ── the agent browser ──
   { type: 'browser-proposal', identity: 'id', producer: 'src/server/browser-propose.js', builtIn: 'src/browser-switch.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the proposal card the chat draws where it was proposed (lane browser-propose) — src/lib/browser-proposal-card.js', on: 'the proposal card in this conversation', scope: 'conversation' },

@@ -1113,6 +1113,8 @@ const PRINTS = {
     'r.preview': `${V}:the preview`, 'r.preview.enabled': `${V}:a flag`, 'r.preview.mode': `${V}:an enum`, 'r.preview.reason': `${V}:the preview's reason`,
     // the manager design's piece 7: --propose-wake's answer — the hub's own refusal sentence (src/agent-routes.js proposeWake: fixed words, or the proposal store's refusal)
     'r.wakeProposal.error': `${V}:the proposal door's refusal sentence (src/agent-routes.js proposeWake)`,
+    // lane login-request-card's cure (must 1): whether the job would wake the CALLER — a flag the route computes (src/agent-routes.js proposeWake)
+    'r.wakesSelf': `${V}:a flag`, 'r.wakeProposal.wakesSelf': `${V}:a flag`,
     'r.renamed': `${V}:a flag`, 'r.survivalNote': `${V}:the runtime note`, 'r.text': `${V}:the manual text (docs)`, 'res._neterr': `${V}:node's fetch error text`,
     'run.cause': `${V}:the run's cause`, 'run.exit': `${V}:an exit code`,
     // lane jobs-memory-bound: memLine(j) — the job's memory bound, the rung its last run measured, the park; and the `memory` verb's echo
