@@ -1,4 +1,4 @@
-import { chipMode, titleMinText, billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the row's billing pill folds, never cuts
+import { titleMinText, billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the row's billing pill folds, never cuts
 import { navBarFold, navTitleMinText, navMoreRows, navMoreLoud } from './title-chips.js'; // lane phone-titlebar-title: THE TITLE OWNS THE BAR — the chips beside it yield by measure
 import { FOLDED } from './bar-fold.js';
 import { t } from './i18n.js';
@@ -15,7 +15,7 @@ import { doorState, followDesktops, windowWaits } from '../desktop-switch.js';
 import { paintSwitcherRow } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): a switcher row's prompt-cache band
 import { windowListMark } from './agent-meta.js'; // lane phone-take-photo: a row wears its conversation's harness mark
 import { installPhoneSplit } from './phone-split-view.js'; // lane phone-six: side by side — two windows, left and right
-import { headName, nameFits, YIELD_LADDER } from '../phone-head.js'; // lane phone-six r2: the head's name keeps its width
+import { headName, nameFits, YIELD_LADDER, ROW_YIELD_LADDER, rowParts } from '../phone-head.js'; // lane phone-six r2: the head's name keeps its width (and the switcher row's)
 import { windowTypeIcon } from './window-types.js';
 
 const SHOWN_KEY = 'vibespace.phoneShown'; // { [desktopId]: winId } — this tab's window on show per desktop (§6b guard 10)
@@ -23,24 +23,34 @@ function readShown() {
   try { const v = JSON.parse(sessionStorage.getItem(SHOWN_KEY) || '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch { return {}; }
 }
 
-/** lane phone-chip (B-e5ff): a switcher row's billing pill takes the widest form that leaves the window's title
- *  readable — lane G's `chipMode` over MEASURED widths (the title and the pill share the row, as on a desktop title
- *  bar); a row not laid out keeps its full form. */
-function fitRowPill(label, chip) {
-  if (!label.isConnected || !chip.isConnected || !label.offsetWidth) return;
-  const w = {};
-  for (const m of ['full', 'compact', 'icon']) { chip.dataset.mode = m; w[m] = chip.getBoundingClientRect().width; }
-  if (!chip.querySelector('.pill-compact')) w.compact = w.full;
-  chip.dataset.mode = 'full';
+/** THE SWITCHER ROW YIELDS (主开发 2026-11-17, the owner's ruling B on the row — PURE phone-head.js ROW_YIELD_LADDER / rowParts):
+ *  each step is tried in the REAL layout until the name keeps its readable minimum (titleMinText: six CJK or twelve Latin glyphs
+ *  + «…», or its whole width when shorter) AND the name's box holds the row's centre (phone-six's ⑥c law, 主开发 09:33Z: a thumb
+ *  on the row's middle opens the window, never the chip); the chip's long form, its compact form, the Split door, the chip itself yield in
+ *  that order — the ⋯ and the ✕ never. The step lands on item.dataset.yield: the window's menu lists what yielded (it was
+ *  lane phone-chip's chip-only fit by chipMode — which left a long name 0 px once the doors grew). */
+function fitSwitcherRow(item, label, chip, split) {
+  if (!item.isConnected || !label.isConnected) return '';
   const probe = document.createElement('span');
   probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:inherit';
   label.appendChild(probe);
-  probe.textContent = label.firstChild && label.firstChild.nodeType === 3 ? label.firstChild.nodeValue : label.textContent;
-  const titlePx = probe.getBoundingClientRect().width;
-  probe.textContent = titleMinText(probe.textContent);
-  const titleMinPx = probe.getBoundingClientRect().width;
+  const text = label.firstChild && label.firstChild.nodeType === 3 ? label.firstChild.nodeValue : label.textContent;
+  probe.textContent = text; const fullPx = probe.getBoundingClientRect().width;
+  probe.textContent = titleMinText(text); const minPx = probe.getBoundingClientRect().width;
   probe.remove();
-  chip.dataset.mode = chipMode({ availablePx: label.offsetWidth + w.full, titlePx, titleMinPx, chipFullPx: w.full, chipCompactPx: w.compact });
+  const hasCompact = !!chip?.querySelector('.pill-compact');
+  const centreIn = () => { const lb = label.getBoundingClientRect(), rb = item.getBoundingClientRect(), c = rb.left + rb.width / 2; return lb.left <= c && lb.right >= c; };
+  let step = '';
+  for (const s of ROW_YIELD_LADDER) {
+    if ((s === 'compact' && !hasCompact) || (s === 'chip' && !chip) || (s === 'split' && !split)) continue;   // nothing of it to yield
+    const p = rowParts(s);
+    if (chip) { chip.style.display = p.chip ? '' : 'none'; chip.dataset.mode = p.chip === 'compact' && hasCompact ? 'compact' : 'full'; }
+    if (split) split.style.display = p.split ? '' : 'none';
+    step = s;
+    if (nameFits(label.getBoundingClientRect().width, fullPx, 0, minPx) && centreIn()) break;
+  }
+  item.dataset.yield = step;
+  return step;
 }
 
 /**
@@ -821,7 +831,7 @@ export class MobileNav {
     // outside-tap close exempts [data-popover]).
     item.addEventListener('contextmenu', (e) => {
       e.preventDefault(); e.stopPropagation();
-      showWindowContextMenu(this.app, win.id, e.clientX, e.clientY, { onAction: () => setTimeout(() => rerender?.(), 50) });
+      showWindowContextMenu(this.app, win.id, e.clientX, e.clientY, { onAction: () => setTimeout(() => rerender?.(), 50), rowYielded: yielded() });
     });
 
     // the window's mark (lane phone-take-photo, the owner 2026-11-09 «手机上对话列表的图标也match一下harness»): an agent
@@ -837,16 +847,16 @@ export class MobileNav {
 
     // Billing identity chip — mirrors the desktop title-bar badge (which has
     // no home on mobile). setAuthBadge stashes the auth object on the window.
-    let billChip = null;
+    let billChip = null, forms = null;
     const auth = win._authBadge;
     if (auth) {
       const isApi = auth.source === 'api-key' || auth.source === 'api-console' || auth.source === 'api-other';
       billChip = document.createElement('span');
       billChip.className = 'mobile-win-billing' + (isApi ? ' api' : '');
       // pooled parity with the desktop badge: name the pool AND its current real target (2.267.1). lane phone-chip
-      // (B-e5ff): the three forms, never cut — the row's title and the chip share the row (lane G's chipMode, fitted
+      // (B-e5ff): the three forms, never cut — the row's title and the chip share the row (fitSwitcherRow — ruling B on the row, fitted
       // once the row is laid out); the full words in title + aria-label
-      const forms = billingPillForms({ kind: auth.source === 'unknown' ? 'unknown' : auth.source === 'pooled' ? 'pooled' : isApi ? 'api' : 'subscription',
+      forms = billingPillForms({ kind: auth.source === 'unknown' ? 'unknown' : auth.source === 'pooled' ? 'pooled' : isApi ? 'api' : 'subscription',
         name: auth.source === 'pooled' ? (auth.name || t('pool')) : (auth.name || (isApi ? (auth.source === 'api-console' ? 'Console' : 'API') : t('CLI login'))),
         target: auth.source === 'pooled' ? (auth.poolTarget || '') : '' });
       billChip.innerHTML = billingPillHtml(forms, escHtml);
@@ -895,11 +905,20 @@ export class MobileNav {
     moreBtn.style.cssText = 'background:none;border:none;color:var(--text-secondary);padding:4px 6px;cursor:pointer;flex-shrink:0;min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center';
     moreBtn.innerHTML = UI_ICONS.more;   // the library's own static SVG
     moreBtn.title = t('More'); moreBtn.setAttribute('aria-label', t('More')); moreBtn.setAttribute('aria-haspopup', 'menu');
-    moreBtn.onclick = (e) => { e.stopPropagation(); const r = moreBtn.getBoundingClientRect(); showWindowContextMenu(this.app, win.id, r.left, r.bottom + 2, { onAction: () => setTimeout(() => rerender?.(), 50) }); };
+    moreBtn.onclick = (e) => { e.stopPropagation(); const r = moreBtn.getBoundingClientRect(); showWindowContextMenu(this.app, win.id, r.left, r.bottom + 2, { onAction: () => setTimeout(() => rerender?.(), 50), rowYielded: yielded() }); };
+    // lane phone-six (主开发 2026-11-17, ruling B on the row): what the row YIELDED (fitSwitcherRow → item.dataset.yield) is in the
+    // window's menu, first, under the words the row showed — the Split door (a refused one OFF with its why on its row) and the
+    // billing row (the chip's own words, the same switch door); the long press opens the same menu with the same rows
+    const yielded = () => {
+      const p = rowParts(item.dataset.yield || ''), out = [];
+      if (splitBtn && !p.split) out.push(sv.ok ? { label: t(sv.words), action: () => { close(); this.split.open(win.id); } } : { label: t('Split'), off: t(sv.words) });
+      if (billChip && !p.chip) out.push({ label: t('Billing: {name}', { name: forms.tip }), action: () => this.app.showBillingSwitcher?.(win.id, moreBtn) });
+      return out;
+    };
 
     item.append(...[icon, label, billChip, splitBtn, moreBtn, closeBtn].filter(Boolean));
     paintSwitcherRow(this.app, item, win); // lane cache-warmth-band: the row's warmth band + «N min left» (one row per tab)
-    if (billChip) requestAnimationFrame(() => fitRowPill(label, billChip));
+    requestAnimationFrame(() => fitSwitcherRow(item, label, billChip, splitBtn));   // ruling B on the row: the name keeps its readable minimum
     item.addEventListener('pointerdown', () => { item.style.background = 'var(--bg-hover)'; });
     // THE ROW NAMES THE WINDOW — reveal it as itself (inc-muiq348r-jwb5: a tab group's HOST row, tapped while the group
     // showed a guest, only raised the frame — the guest stayed on screen under the host's title and highlight)

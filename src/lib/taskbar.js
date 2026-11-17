@@ -384,6 +384,10 @@ export function registerWindowMenu() {
   const closeStyle = (c) => (c.closeKeeps ? '' : 'color:var(--red, #e55)');
   // Title-bar variant (2.212.0): the whole right-click used to BE the overlap
   // switcher — now it's a submenu whose scope is user-configurable.
+  // lane phone-six (主开发 2026-11-17, the switcher row's yield — phone-head.js ROW_YIELD_LADDER): what a phone switcher row
+  // could not draw beside the window's name (its Split door, its billing chip) is HERE, first, under the words the row showed
+  registerMenuItem({ menu: M, group: 'navigation', order: 1, id: 'window/phone-row-yielded', when: (c) => !!c.rowYielded?.length, expand: (c) => c.rowYielded });
+  registerMenuItem({ menu: M, group: 'navigation', order: 2, when: (c) => !!c.rowYielded?.length, separator: true });
   registerMenuItem({ menu: M, group: 'navigation', order: 10, id: 'window/switch-window', when: (c) => !!c.switchSubmenu, label: () => t('Switch window'), children: (c) => switchWindowItems(c.app, c.id) });
   registerMenuItem({ menu: M, group: 'navigation', order: 20, when: (c) => !!c.switchSubmenu, separator: true });
   registerMenuItem({ menu: M, group: '1_window', order: 10, command: 'window.move', kind: 'move', when: wmVerbs, label: (c, title) => '✥ ' + title });
@@ -455,7 +459,7 @@ export function registerWindowMenu() {
 registerWindowMenu();
 // end registerWindowMenu (scripts/test-contributions.mjs extracts the block above)
 
-export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onAction, switchSubmenu = false, group = false } = {}) {
+export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onAction, switchSubmenu = false, group = false, rowYielded = null } = {}) {
   const win = app.wm.windows.get(id);
   if (!win) return;
   // Items come from the 'window' MENU REGISTRY (registerWindowMenu above; a
@@ -465,6 +469,7 @@ export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onActi
   const closeKeeps = !closeLabel && !group && !!closeKeepsWord(sess);   // P2-2: a running session's window — its Close is not its Terminate
   closeLabel = closeLabel || '✕ ' + (closeKeeps ? t('Close window — it keeps running') : t('Close'));
   const ctx = { app, id, win, s: sess, switchSubmenu, closeLabel, group: !!group };
+  ctx.rowYielded = Array.isArray(rowYielded) ? rowYielded : null;   // lane phone-six: what a phone switcher row yielded (window/phone-row-yielded)
   ctx.closeKeeps = closeKeeps;   // closeStyle reads it (the line above is test-tab-close-confirm's pin)
   const wrapAct = (item, kind = item.kind) => {
     const out = { ...item };
