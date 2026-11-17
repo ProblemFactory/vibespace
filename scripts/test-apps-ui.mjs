@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, realClicker } from './scratch.mjs';
 const VNC_ENV = await vncEnv();
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -112,15 +112,11 @@ sock.on('message', (d) => {
 const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); sock.send(JSON.stringify({ id, method, params })); });
 const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
 const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch {} await sleep(150); } try { return await evalJs(expr); } catch { return false; } };
-const realClick = async (sel) => {
-  const r = await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, hits: !!hit && (hit === e || e.contains(hit)), hit: hit ? hit.tagName + '.' + String(hit.className).slice(0, 60) : null }; })()`);
-  if (!r || !r.hits) return r || false;
-  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
-  await sleep(120);
-  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-  return true;
-};
+// B-4f03 (lane bl-tests-e): the ONE real-click door, scratch.mjs realClicker — measure, wait until it holds still, the point
+// proven at press time (a target that moved is re-aimed once), the landing checked; false = no press or a missed one (`.lastMiss` says why).
+// The pause this suite's own copy made before its press (120 ms) rides the door's beforePress.
+const RC = realClicker({ evalJs, cdp });
+const realClick = (sel) => RC(sel, { beforePress: () => sleep(120) });
 const typeInto = async (sel, text) => { if (!await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return false; e.focus(); e.value = ''; return true; })()`)) throw new Error(`typeInto: the page has no ${sel}`); await cdp('Input.insertText', { text }); };
 const shot = async (name) => { const dir = process.env.VS_SHOT_DIR; if (!dir) return; try { const img = await cdp('Page.captureScreenshot', { format: 'png' }); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, name + '.png'), Buffer.from(img.data, 'base64')); console.log(`    (screenshot ${name}.png)`); } catch (e) { console.log(`    (screenshot ${name} failed: ${e.message})`); } };
 const api = async (method, p, body, headers = {}) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }); const text = await r.text(); let j = null; try { j = JSON.parse(text); } catch { j = text; } return { status: r.status, body: j }; };

@@ -100,7 +100,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, takeCspReports } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, takeCspReports, realClicker } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -304,15 +304,15 @@ const openNotices = async () => { if (await evalJs(`!!document.querySelector('#u
 // hit it (elementFromPoint) — the legs file items, every arrival is a toast, and
 // the toast stack sits over the popup's lower edge, where a click is an outside
 // click that closes the popup. A covered point clears the stack once and retries.
+// B-4f03 (lane bl-tests-e): the ONE real-click door, scratch.mjs realClicker — measure, wait until it holds still, the point
+// proven at press time (a target that moved is re-aimed once), the landing checked; false = no press or a missed one (`.lastMiss` says why).
+// The stack clears and the door tries again only when it made NO press (`.landed` stays null until it presses).
+const RC = realClicker({ evalJs, cdp });
 const realClick = async (sel) => {
   for (let k = 0; k < 2; k++) {
-    const r = await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, hits: !!hit && (hit === e || e.contains(hit)) }; })()`);
-    if (!r) return false;
-    if (!r.hits) { await evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => el.remove()); true`); continue; }
-    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
-    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-    return true;
+    if (await RC(sel)) return true;
+    if (k || RC.landed || !RC.lastMiss) return false;
+    await evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => el.remove()); true`);
   }
   return false;
 };

@@ -31,7 +31,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker } from './scratch.mjs';
 const VNC_ENV = await vncEnv();
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -124,13 +124,11 @@ const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++se
 const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
 const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch {} await sleep(150); } try { return await evalJs(expr); } catch { return false; } };
 const centerOf = (sel) => evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const h = document.elementFromPoint(x, y); return { x, y, hits: !!h && (h === e || e.contains(h)) }; })()`);
-const realClick = async (sel) => {
-  const r = await centerOf(sel); if (!r || !r.hits) return r || false;
-  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y }); await sleep(100);
-  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-  return true;
-};
+// B-4f03 (lane bl-tests-e): the ONE real-click door, scratch.mjs realClicker — measure, wait until it holds still, the point
+// proven at press time (a target that moved is re-aimed once), the landing checked; false = no press or a missed one (`.lastMiss` says why).
+// The pause this suite's own copy made before its press (100 ms) rides the door's beforePress.
+const RC = realClicker({ evalJs, cdp });
+const realClick = (sel) => RC(sel, { beforePress: () => sleep(100) });
 const clickMenu = (label) => evalJs(`(() => { const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => e.textContent.trim() === ${JSON.stringify(label)}); if (!it) return false; it.click(); return true; })()`);
 const menuRows = () => evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((e) => e.textContent.trim())`);
 const shot = async (name) => { const dir = process.env.VS_SHOT_DIR; if (!dir) return; try { const img = await cdp('Page.captureScreenshot', { format: 'png' }); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, name + '.png'), Buffer.from(img.data, 'base64')); } catch {} };

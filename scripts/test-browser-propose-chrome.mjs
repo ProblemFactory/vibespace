@@ -25,7 +25,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, realClicker } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const V = require('../src/browser-verbs.js');
@@ -179,15 +179,12 @@ const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expre
 const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch {} await sleep(150); } try { return await evalJs(expr); } catch { return false; } };
 const waitApp = () => evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })');
 let lastMiss = null;
-const realClick = async (sel) => {
-  const r = await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, w: q.width, h: q.height, hit: hit ? hit.tagName + '.' + String(hit.className).slice(0, 60) : null, hits: !!hit && (hit === e || e.contains(hit)) }; })()`);
-  if (!r || !r.hits) { lastMiss = r; return false; }
-  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
-  await sleep(900); // an Approve that just appeared or moved counts only after it sat still ARM_MS (700 ms — verify r1: the card has the rule too, ④b)
-  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-  return true;
-};
+// B-4f03 (lane bl-tests-e): the ONE real-click door, scratch.mjs realClicker — measure, wait until it holds still, the point
+// proven at press time (a target that moved is re-aimed once), the landing checked; false = no press or a missed one (`.lastMiss` says why).
+// The copy's 900 ms pause before its press rides the door's beforePress — written for an Approve, which counts only after it
+// sat still ARM_MS (700 ms, src/lib/press-arm.js; verify r1 ④b); the one press through it today is the For-you button.
+const RC = realClicker({ evalJs, cdp });
+const realClick = async (sel) => { const ok = await RC(sel, { beforePress: () => sleep(900) }); if (!ok) lastMiss = RC.lastMiss; return ok; };
 const shot = async (name, sel, pad = 6) => {
   const dir = process.env.VS_SHOT_DIR;
   if (!dir) return;

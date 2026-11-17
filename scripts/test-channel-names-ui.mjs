@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, realClicker } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -98,19 +98,10 @@ ok(await waitFor('!!(window.app && window.app.wm && window.app.sidebar)', 40000)
 // the fake adapter's rooms are discovered (the click resolves the rebuilt card's id from this list)
 ok(await waitFor(`fetch('/api/channels').then((r) => r.json()).then((d) => (d.conversations || []).some((c) => c.id === 'fake-poll-ops' && c.title === 'Ops room'))`, 40000), 'the server lists fake-poll-ops as "Ops room"');
 
-/** A REAL click at the element's centre — re-measured until two reads agree (a window still animating moves it). */
-async function realClick(sel) {
-  let r0 = null;
-  for (let i = 0; i < 25; i++) {
-    const r = await evaljs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2), w: b.width }; })()`);
-    if (r && r0 && r.x === r0.x && r.y === r0.y && r.w > 0) break;
-    r0 = r; await sleep(120);
-  }
-  if (!r0) return false;
-  const top = await evaljs(`(() => { const e = document.elementFromPoint(${r0.x}, ${r0.y}); return !!(e && e.closest(${JSON.stringify(sel)})); })()`);
-  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x: r0.x, y: r0.y, button: 'left', clickCount: type === 'mouseMoved' ? 0 : 1 });
-  return top;
-}
+// B-4f03 (lane bl-tests-e): the ONE real-click door, scratch.mjs realClicker — measure, wait until it holds still, the point
+// proven at press time (a target that moved is re-aimed once), the landing checked; false = no press or a missed one (`.lastMiss` says why).
+// (the copy re-measured until two reads agree — a window still animating moves it; the door's still check is that rule)
+const realClick = realClicker({ evalJs: evaljs, cdp });
 const channelWindow = (convId) => `(() => { for (const [, w] of window.app.wm.windows || []) { const s = w && w._openSpec; if (s && s.action === 'openChannel' && s.convId === ${JSON.stringify(convId)}) { const b = w.content.querySelector('.chanwin-bar b'); return { adapterId: s.adapterId, title: b ? b.textContent : '' }; } } return null; })()`;
 
 // ── ① the rebuilt card ──

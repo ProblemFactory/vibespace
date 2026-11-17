@@ -7374,5 +7374,56 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(!!sent107 && !/RELEASE|version|\{release\}|being fixed|\d+\.\d+\.\d+/.test(sent107) && !!said107 && !/\{release\}|being fixed|\d+\.\d+\.\d+/.test(said107), '§107 the storage-mount refusal says no version and no «being fixed» — the server\'s sentence and the client\'s words', { sent: sent107.slice(0, 200), said: said107.slice(0, 200) });
 }
 
+// ── §108 (B-4f03, lane bl-tests-e, 2026-11-17 — int358's registry law: a helper family with 14 copies is a kind with no row): ONE REAL-CLICK DOOR ──
+// realClick was COPIED across the chrome suites — 14 copies in 10 variants (int358), each measuring its element and then
+// pressing where it HAD been; rows that move while a turn lands put a NEIGHBOUR under the pointer (test-channel-jump ②, red 4
+// runs of 7 on the .358 train). The door is scripts/scratch.mjs realClicker (measure, hold still, the point proven at press
+// time, re-aim once, the landing checked). A suite's realClick is a thin wrapper over it; a realClick that dispatches its own
+// mouse events is a COPY and is red — except the three named below, each with what the door lacks (folding them grows the
+// door in scratch.mjs, which every chrome suite imports). A named exception whose copy is gone is red too (drop its row).
+console.log('\n§108 one real-click door (B-4f03): a realClick that presses by itself is a copy — red outside the named exceptions');
+{
+  const COPIES_KEPT = Object.freeze({
+    'pairing-ui-harness.mjs': 'an EXPRESSION target (a selector that starts with «(»), a wait for the element to appear (≤ ms) and the rect settled on THREE readings a frame or 50 ms apart (lane chrome-157: a background tab paints no frames) — the door reads a CSS selector and two looks 40 ms apart',
+    'test-wake-approve-card-chrome.mjs': 'it scrolls ONLY when the target is not wholly in view — measured there: a second centre scroll moved a centred Approve by 40 px under the pointer and the press arm rightly refused it; the door always scrolls to the centre',
+    'test-inbox-window-ui.mjs': 'one door per PAGE over two sign-ins, scrolled to the NEAREST edge and aimed 40 px in from the row\'s left (a row\'s centre may hold its own buttons) — the door scrolls to the centre and aims at the centre',
+  });
+  // a binding, a declaration, an assignment to a property (P.realClick = …), an object key (realClick: …) or a method
+  const DEF108 = /(?:(?<![\w$.])(?:(?:const|let|var)\s+realClick\s*=|(?:async\s+)?function\s+realClick\s*\(|realClick\s*:\s*(?:async\b|function\b|\()|async\s+realClick\s*\()|\.realClick\s*=(?!=))/g;
+  // a definition's text: its own line and every line indented deeper (a closing brace at its own depth included)
+  const body108 = (src, at) => {
+    const ls = src.lastIndexOf('\n', at) + 1, lines = src.slice(ls, ls + 20000).split('\n', 80), ind = (l) => l.match(/^\s*/)[0].length;
+    const out = [lines[0]];
+    for (let k = 1; k < lines.length; k++) { const l = lines[k]; if (!l.trim() || ind(l) > ind(lines[0])) { out.push(l); continue; } if (ind(l) === ind(lines[0]) && /^\s*[})\]]/.test(l)) out.push(l); break; }
+    return out.join('\n');
+  };
+  const copiesIn = (src) => [...src.matchAll(DEF108)].filter((m) => /Input\.dispatchMouseEvent|mousePressed/.test(body108(src, m.index))).map((m) => src.slice(0, m.index).split('\n').length);
+  const files108 = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => f.endsWith('.mjs') && f !== 'scratch.mjs' && f !== 'test-architecture.mjs');
+  const copies = [], wrappers = [], users = [];
+  for (const f of files108) {
+    const src = read('scripts/' + f);
+    if (/\brealClicker\s*\(/.test(src)) users.push(f);
+    const c = copiesIn(src);
+    if (c.length) copies.push(...c.map((l) => `${f}:${l}`));
+    else if (DEF108.test(src)) wrappers.push(f);
+    DEF108.lastIndex = 0;
+  }
+  const strays = copies.filter((c) => !Object.hasOwn(COPIES_KEPT, c.split(':')[0]));
+  const stale = Object.keys(COPIES_KEPT).filter((f) => !copies.some((c) => c.startsWith(f + ':')));
+  ok(files108.length > 1000 && users.length >= 18, `§108 ${files108.length} scripts read; ${users.length} take the door (scripts/scratch.mjs realClicker) — non-vacuous`, users);
+  ok(strays.length === 0, `§108 no realClick presses by itself outside the named exceptions${strays.length ? ' — a COPY at ' + strays.join(', ') + ' (wrap scratch.mjs realClicker: const RC = realClicker({ evalJs, cdp }))' : ''}`);
+  ok(stale.length === 0, `§108 every named exception still holds its copy (a folded one drops its row)${stale.length ? ' — stale: ' + stale.join(', ') : ''}`);
+  ok(wrappers.every((f) => users.includes(f)), `§108 every other realClick is a wrapper over the door (${wrappers.length}: each calls realClicker)`, wrappers.filter((f) => !users.includes(f)));
+  // controls over planted texts
+  const COPY = ['const realClick = async (sel) => {', '  const r = await evalJs(`measure ${sel}`); if (!r || !r.hits) return false;', "  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });", '  return true;', '};', ''].join('\n');
+  const ONE_LINE = "  const realClick = async (sel) => { const p = await centerOf(sel); await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }); return true; };\n";
+  const WRAP = ['const RC = realClicker({ evalJs, cdp });', 'const realClick = async (sel) => { const ok = await RC(sel); if (!ok) lastMiss = RC.lastMiss; return ok; };', "const press = () => cdp('Input.dispatchMouseEvent', { type: 'mousePressed' });", ''].join('\n');
+  ok(copiesIn(COPY).join() === '1' && copiesIn('x();\n' + ONE_LINE).join() === '2' && copiesIn('async function realClick(sel) {\n  for (const t of T) await P.cdp(\'Input.dispatchMouseEvent\', { type: t });\n}\n').join() === '1',
+    '§108 NEG: a copy is found — multi-line, one line inside a function, a function declaration pressing through a page object');
+  ok(copiesIn("P.realClick = async (sel) => { await P.cdp('Input.dispatchMouseEvent', { type: 'mousePressed' }); };\n").join() === '1' && copiesIn("const page = {\n  realClick: async (sel) => { await cdp('Input.dispatchMouseEvent', { type: 'mousePressed' }); },\n};\n").join() === '2'
+    && copiesIn("class Page {\n  async realClick(sel) {\n    await this.cdp('Input.dispatchMouseEvent', { type: 'mousePressed' });\n  }\n}\n").join() === '2', '§108 NEG: …and under another spelling — a property assigned, an object key, a class method');
+  ok(copiesIn(WRAP).length === 0, '§108 a wrapper over the door is not a copy — even with a press of its own on the NEXT line (the body ends where the definition does)');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
