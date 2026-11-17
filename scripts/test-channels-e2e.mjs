@@ -1381,7 +1381,13 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const notes = [...sec.querySelectorAll('.chan-sec-note')].map((n) => n.textContent.trim());
     return { health: [((sec.querySelector('.chan-sec-health-text') || {}).textContent) || '', ...notes].join(' | '), notes, pills: [...sec.querySelectorAll('.chan-row')].map((r) => ({ conv: r.dataset.conv, pill: ((r.querySelector('.chan-row-sub .chan-chip') || {}).textContent) || '' })) };
   })()`;
-  const seen = { rate: null, reads: [], gone: null, pausedJudged: null, failLine: false, first: undefined };
+  // B-f9e8 (the rebuilt .393 prep mirror, both tries on one runner: rows 2): the pill judgement waits, DURING THE WAIT — while
+  // the note counts the vendor's wait down («Google 限速中 · N 秒后继续»: the server's backoff is on) — for its own precondition,
+  // the account's listing on the server (rows ≥ 40), and only then judges. The note's later form («限速中 · 下一轮继续», the
+  // failed pass not yet replaced, the backoff over) is never a judgement point: a «paused» from the backoff would hide there.
+  // A listing that never came during the countdown is its own red by name, never «a paused pill». `rowsSeen` = each poll's read
+  const ROWS_WANT = 40, ROW_POLLS = 120;
+  const seen = { rate: null, reads: [], gone: null, pausedJudged: null, failLine: false, first: undefined, rowsSeen: [] };
   const t0 = Date.now();
   while (Date.now() - t0 < 100e3) {
     const c = await p1.evaljs(CARD).catch((e) => ({ threw: String(e.message).slice(0, 200) }));
@@ -1390,13 +1396,17 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
       const rn = c.notes.find((n) => /限速中/.test(n));
       if (rn && !seen.rate) seen.rate = rn;
       // a "暂停" pill during the wait must be the owner's OWN override (the ④ leg paused a room) — never the vendor's wait: judged against the server's digest
-      if (rn && !seen.pausedJudged) {
+      const counting = c.notes.some((n) => /限速中 · \d+ 秒后继续/.test(n));   // B-f9e8: the backoff's own countdown
+      if (counting && !seen.pausedJudged && seen.rowsSeen.length < ROW_POLLS) {
         // design 008: the account's EVERY row is the paged route's (the first read holds its newest 30)
         const d = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/rows?adapter=fake-poll&limit=200`)).json();
         const byKey = new Map((d.rows || []).filter((x) => x.adapterId === 'fake-poll').map((x) => [`${x.adapterId}/${x.id}`, x]));
-        const pausedPills = c.pills.filter((x) => /暂停/.test(x.pill));
-        const serverPaused = [...byKey.values()].filter((x) => x.freshness && x.freshness.state === 'paused');
-        seen.pausedJudged = { pills: pausedPills.length, notOverride: pausedPills.filter((x) => !(byKey.get(x.conv) && byKey.get(x.conv).refresh && byKey.get(x.conv).refresh.every === 'paused')).map((x) => x.conv), serverPaused: serverPaused.length, serverNotOverride: serverPaused.filter((x) => !(x.refresh && x.refresh.every === 'paused')).map((x) => x.id), rows: byKey.size };
+        seen.rowsSeen.push(byKey.size);
+        if (byKey.size >= ROWS_WANT) {   // B-f9e8: judged once the listing is there, never on the first poll the note shows
+          const pausedPills = c.pills.filter((x) => /暂停/.test(x.pill));
+          const serverPaused = [...byKey.values()].filter((x) => x.freshness && x.freshness.state === 'paused');
+          seen.pausedJudged = { pills: pausedPills.length, notOverride: pausedPills.filter((x) => !(byKey.get(x.conv) && byKey.get(x.conv).refresh && byKey.get(x.conv).refresh.every === 'paused')).map((x) => x.conv), serverPaused: serverPaused.length, serverNotOverride: serverPaused.filter((x) => !(x.refresh && x.refresh.every === 'paused')).map((x) => x.id), rows: byKey.size, poll: seen.rowsSeen.length };
+        }
       }
       if (c.notes.some((n) => /次抓取失败/.test(n))) seen.failLine = true;
       const m = /首次读取中 · 已 (\d+)\/(\d+) 个会话/.exec(c.health);
@@ -1408,7 +1418,10 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   console.log(`    ⑰ card: rate "${seen.rate}", first-read samples ${JSON.stringify(seen.reads.slice(0, 3))} … ${JSON.stringify(seen.reads.slice(-2))}, after: "${seen.gone}" (first read of the card: ${JSON.stringify(seen.first).slice(0, 300)})`);
   ok(!!seen.rate && /^Google 限速中 · \d+ 秒后继续$/.test(seen.rate), `⑰ the account card says the vendor's rate refusal by its name with the wait: "${seen.rate}"`);
   const pj = seen.pausedJudged || {};
-  ok(!!seen.pausedJudged && pj.notOverride.length === 0 && pj.serverNotOverride.length === 0 && pj.rows >= 40 && !seen.failLine, `⑰ …never as a paused pill — during the wait ${pj.serverPaused} of ${pj.rows} rooms read "paused" on the server and ${pj.pills} on the card, every one the owner's OWN override (④) — and never as a failed-passes line (a rate wait is not a failure)`, JSON.stringify({ pj, failLine: seen.failLine }));
+  const rowsTold = seen.rowsSeen.length ? `${seen.rowsSeen.length} poll(s) during the countdown read ${seen.rowsSeen[0]} → ${seen.rowsSeen[seen.rowsSeen.length - 1]} rows` : 'no poll during the countdown';
+  ok(!!seen.pausedJudged && pj.notOverride.length === 0 && pj.serverNotOverride.length === 0 && pj.rows >= ROWS_WANT && !seen.failLine, seen.pausedJudged
+    ? `⑰ …never as a paused pill — during the wait ${pj.serverPaused} of ${pj.rows} rooms read "paused" on the server and ${pj.pills} on the card, every one the owner's OWN override (④) — and never as a failed-passes line (a rate wait is not a failure)`
+    : `⑰ …the listing never came: the pills cannot be judged during the rate wait — ${rowsTold}, the server never held ${ROWS_WANT} while the wait was counted down (B-f9e8: the precondition, not the pills)`, JSON.stringify({ pj, failLine: seen.failLine, rowsSeen: seen.rowsSeen }));
   const rising = seen.reads.every((x, i) => i === 0 || x[0] >= seen.reads[i - 1][0]);
   ok(seen.reads.length >= 2 && rising && seen.reads[0][1] >= 40 && seen.reads[seen.reads.length - 1][0] > seen.reads[0][0], `⑰ during the paced first read the card says "首次读取中 · 已 N/M 个会话", rising (${seen.reads.length} samples: ${seen.reads[0] && seen.reads[0].join('/')} → ${seen.reads.length && seen.reads[seen.reads.length - 1].join('/')})`, JSON.stringify(seen.reads));
   ok(!!seen.gone && !/首次读取中/.test(seen.gone), `⑰ …and says nothing of it once every room was read ("${seen.gone}")`);
