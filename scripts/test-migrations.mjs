@@ -3285,6 +3285,53 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       ok(fs.readFileSync(wd.seedsFile, 'utf8') !== '{ not json', 'NEGATIVE CONTROL: a copy that reads past an unreadable seeds.json writes over the plugin\'s table — M8 goes red');
     } catch (e) { ok(false, `${ID}: the negative controls could not run on this tree (${(e && e.message) || e})`); }
   }
+  // B-8033 (B-ba47 pick A, 主开发 ruling 2): THE HOME-RENAME MIGRATION KEEPS ONE MARKER PER HALF, each beside what it changed —
+  // the projdirs move's with the HOME (~/.vibespace), the recorded-path rewrite's in the data/ (it kept one in data/ for both:
+  // a second real install over the same HOME moved that HOME's projdirs again — and, the projdirs moved, found no old user:
+  // its own stores kept /home/<old>). Over the REAL claude-home hook (src/harnesses/claude-home.js) and a scratch HOME.
+  console.log('— B-8033: the home-rename migration — one marker per half (src/server/home-rename.js)');
+  {
+    const HRS = 'src/server/home-rename.js';
+    const CH = require('../src/harnesses/claude-home.js');
+    const base = path.join(tmp, 'b8033');
+    const mkHome = (n, dirs) => { const h = path.join(base, n, 'home', 'userN'); for (const d of dirs) { fs.mkdirSync(path.join(h, '.claude', 'projects', d), { recursive: true }); fs.writeFileSync(path.join(h, '.claude', 'projects', d, 's1.jsonl'), '{}\n'); } fs.mkdirSync(h, { recursive: true }); return h; };
+    const mkData = (n) => { const d = path.join(base, n, 'data'); fs.mkdirSync(path.join(d, 'session-meta'), { recursive: true }); fs.writeFileSync(path.join(d, 'mounts.json'), JSON.stringify({ m: [{ path: '/home/olduser/proj' }] })); return d; };
+    const hook = () => { const calls = []; return { calls, staleUsers: CH.staleUsers, moveUser: (h, old, user) => { calls.push([old, user]); return CH.moveUser(h, old, user); } }; };
+    const quiet = { log() { }, warn() { } };
+    const run = async (Mod, dataDir, home, hk) => { const r = Mod.migrateHomeRename({ dataDir, metaDir: path.join(dataDir, 'session-meta'), home, hooks: [hk], log: quiet }); await r.written; return r; };
+    const mountOf = (d) => JSON.parse(fs.readFileSync(path.join(d, 'mounts.json'), 'utf8')).m[0].path;
+    const projOf = (h) => fs.readdirSync(path.join(h, '.claude', 'projects')).sort().join();
+    const NAME = '.home-migrated-olduser-to-userN';
+    const scenes = async (Mod, tag) => {
+      const hk = hook(), home = mkHome(`w-${tag}`, ['-home-olduser-proj']), dA = mkData(`w-${tag}/a`), dB = mkData(`w-${tag}/b`);
+      const a = await run(Mod, dA, home, hk), projA = projOf(home), b = await run(Mod, dB, home, hk), a2 = await run(Mod, dA, home, hk);
+      // an install migrated BEFORE the split (one data/ marker for both halves) over a HOME whose rename had left a projdir behind
+      const hk2 = hook(), home2 = mkHome(`l-${tag}`, ['-home-olduser-left']), dC = mkData(`l-${tag}/c`);
+      fs.writeFileSync(path.join(dC, NAME), JSON.stringify({ at: 1, moved: 3, rewrote: 1 }));
+      const c = await run(Mod, dC, home2, hk2);
+      return { hk, hk2, home, home2, dA, dB, dC, a, b, a2, c, projA, projC: projOf(home2) };
+    };
+    const S = await scenes(require('../' + HRS), 'real');
+    ok(S.hk.calls.length === 1 && S.a.length === 1 && S.a[0].home === true && S.a[0].data === true && S.projA === '-home-userN-proj' && mountOf(S.dA) === '/home/userN/proj' && fs.existsSync(path.join(S.dA, NAME)) && fs.existsSync(path.join(S.home, '.vibespace', NAME)),
+      'the first install: the projdir re-encoded ONCE (the real hook), its data/ stores rewritten, a marker per half — data/ and ~/.vibespace', { calls: S.hk.calls, a: S.a, proj: S.projA });
+    ok(S.hk.calls.length === 1 && S.b.length === 1 && S.b[0].home === false && S.b[0].data === true && mountOf(S.dB) === '/home/userN/proj' && fs.existsSync(path.join(S.dB, NAME)),
+      'a SECOND install over the same HOME (a fresh data/, no stale projdir left): the HOME marker names the old user — its OWN stores rewritten, nothing moved again', { calls: S.hk.calls, b: S.b, mountB: mountOf(S.dB) });
+    ok(!S.a2.length && S.hk.calls.length === 1, 'the first install\'s next start: both markers there — nothing runs');
+    ok(S.hk2.calls.length === 1 && S.c.length === 1 && S.c[0].home === true && S.c[0].data === false && S.projC === '-home-userN-left' && mountOf(S.dC) === '/home/olduser/proj' && fs.existsSync(path.join(S.home2, '.vibespace', NAME)),
+      'an install migrated before the split (a data/ marker only, a projdir left behind): the move runs — a merge — and writes the HOME marker; no second rewrite', { calls: S.hk2.calls, c: S.c, proj: S.projC });
+    const SRC = fs.readFileSync(path.join(REPO_ROOT, HRS), 'utf8');
+    const ONE = 'const homeDone = fs.existsSync(hm), dataDone = fs.existsSync(dm);';
+    const MARKED = 'const oldUsers = new Set([...hrs.flatMap((hr) => hr.staleUsers(home, user)), ...markedOldUsers(home, user)]);';
+    ok(SRC.split(ONE).length === 2 && SRC.split(MARKED).length === 2, 'ANCHOR: the two markers read once, the old users from the hooks AND the markers — each spelled once');
+    const MH = mutantCopies('home-rename', REPO_ROOT);
+    const M1 = await scenes(MH.load(HRS, SRC.replace(ONE, 'const dataDone = fs.existsSync(dm), homeDone = dataDone;'), 'one-marker'), 'm1');
+    ok(M1.hk.calls.length === 2, 'MUTANT RED: one marker in data/ for both halves (the release\'s) ⇒ the second install moves the HOME\'s projdirs again', M1.hk.calls);
+    const M2 = await scenes(MH.load(HRS, SRC.replace(MARKED, 'const oldUsers = new Set(hrs.flatMap((hr) => hr.staleUsers(home, user)));'), 'no-markers'), 'm2');
+    ok(!M2.b.length && mountOf(M2.dB) === '/home/olduser/proj', 'MUTANT RED: old users from the projdirs alone ⇒ the second install finds none — its stores keep /home/<old>', { b: M2.b, mountB: mountOf(M2.dB) });
+    const SJ = fs.readFileSync(path.join(REPO_ROOT, 'server.js'), 'utf8');
+    ok(/require\('\.\/src\/server\/home-rename\.js'\)\.migrateHomeRename\(\{ dataDir: path\.join\(__dirname, 'data'\), metaDir: META_DIR \}\);/.test(SJ) && !/function migrateHomeRename/.test(SJ),
+      'server.js runs it at boot through the module (its data/, its session metas) and keeps no copy of its own');
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

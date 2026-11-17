@@ -3,8 +3,8 @@
 // 2.369.213). claude encodes each per-project transcript dir under
 // ~/.claude/projects from the RESOLVED cwd (-home-<user>-…), so a renamed home
 // leaves every pre-rename conversation where claude's resume lookup no longer
-// looks ("No conversation found"). The core owns WHEN (server.js boot
-// migrateHomeRename: one-shot per old→new marker, then the generic
+// looks ("No conversation found"). The core owns WHEN (src/server/home-rename.js
+// migrateHomeRename at boot: one marker per half — B-8033 —, then the generic
 // recorded-path rewrite; boot-restore migrateLegacyHomeProjects: the
 // /home/vibe→/home/<name> symlink deploy) and asks every harness's hook; the
 // .claude/projects layout lives only here.

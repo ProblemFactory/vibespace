@@ -36,7 +36,6 @@ const PROOFS = new Set(['local-only', 'via-safefs', 'guarded']);
 // [file, scope, n, proof, why, match?]
 const ROWS = [
   ["server.js", "<module>", 6, "local-only", "GET / reads <checkout>/public/index.html + its asset stats; the 30 s boot sweep walks data/agentd, data/chat-frames (data/session-buffers' walk is src/server/wrapper-files.js sweepAgedWrapperFiles since ci358-reds round 2)."],
-  ["server.js", "migrateHomeRename", 7, "local-only", "marker <checkout>/data/.home-migrated-*; stores = data/{mounts,layouts,task-groups,machine-mounts}.json + data/session-meta/*."],
   ["server.js", "ensureDir", 2, "local-only", "callers pass only data dirs: USAGE_CACHE_FILE's dir (usage-routes), SOCKETS_DIR/BUFFERS_DIR (ws-create), AGENTD_DIR (spawn/ssh, spawn/dial)."],
   ["server.js", "refreshWebuiPids", 1, "local-only", "metaPath = BUFFERS_DIR/<session id>.json; BUFFERS_DIR = <checkout>/data/session-buffers."],
   ["server.js", "checkAgentHookHealth", 2, "local-only", "HOOK_OPTOUT_FILE = <checkout>/data/.agent-hooks-optout, HOOK_CMD = <checkout>/data/bin/vibespace-hook.mjs (agent-tool-generators.js)."],
@@ -284,6 +283,7 @@ const ROWS = [
   ["src/server/grants-migration.js", "readStore", 1, "local-only", "file = <dataDir>/<store rel>; dataDir = the boot migration's data dir (migrations.js:700)."],
   ["src/server/grants-migration.js", "migrate", 4, "local-only", "file = <dataDir>/hosts.json (+ .tmp) in the one-shot boot migration (migrations.js:700)."],
   ["src/server/grants-store.js", "*", 8, "local-only", "file / auditFile = <dataDir>/grants.json, grants-audit.jsonl (server.js create({dataDir: <checkout>/data}); forDir(dataDir) in migrations)"],
+  ["src/server/home-rename.js", "*", 10, "local-only", "B-8033 (from server.js migrateHomeRename): markers <home>/.vibespace/.home-migrated-* (the projdirs move — read and listed here, written async; home = os.homedir() at boot) and <checkout>/data/.home-migrated-* (the rewrite); stores = data/{mounts,layouts,task-groups,machine-mounts}.json + data/session-meta/* (+ .tmp / .pre-home-migrate beside each)."],
   ["src/server/host-tokens.js", "*", 10, "local-only", "agentdDir = AGENTD_DIR <checkout>/data/agentd (server.js) or the default <dataDir>/agentd (mounts-plugins-wiring.js)"],
   ["src/server/incident-freeze-worker.js", "runOp", 1, "local-only", "dir = <checkout>/data/incidents/<inc-id>; runs in the SafeFs incident-freeze worker, but its inlineRun fallback can run it on main."],
   ["src/server/incident-wiring.js", "*", 4, "local-only", "dir = INCIDENTS_DIR/<inc-id> (id regex-checked); INCIDENTS_DIR = <checkout>/data/incidents."],

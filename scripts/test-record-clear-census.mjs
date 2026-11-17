@@ -101,7 +101,7 @@ const sources = (override = {}) => new Map([...SERVER_FILES, ...CLI_FILES].map((
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 const STORE_FILES = [
   // token → the modules allowed to name it (the owner first; then the one-shot migrations that rewrite the SAME file in place)
-  { token: 'task-groups.json', owners: ['src/task-groups.js'], inPlace: ['src/server/migrations.js', 'server.js', 'src/server/grants-migration.js'] },   // migrations: dormant plan archival; server.js: the home-rename rewrite of paths; grants-migration: 2026-10-grants-unify READS a group's outside visibility (writes only data/grants.json)
+  { token: 'task-groups.json', owners: ['src/task-groups.js'], inPlace: ['src/server/migrations.js', 'src/server/home-rename.js', 'src/server/grants-migration.js'] },   // migrations: dormant plan archival; src/server/home-rename.js (B-8033, out of server.js): the home-rename rewrite of paths; grants-migration: 2026-10-grants-unify READS a group's outside visibility (writes only data/grants.json)
   { token: 'user-todos.json', owners: ['src/user-todos.js'], inPlace: ['src/server/migrations.js'] },                 // migrations: a presence check
   { token: 'session-status.json', owners: ['src/session-status.js'], inPlace: [] },
   { token: "'jobs.json'", owners: ['src/jobs.js'], inPlace: [] },

@@ -210,59 +210,9 @@ const SOCKETS_DIR = path.join(__dirname, 'data', 'sockets');
 const META_DIR = path.join(__dirname, 'data', 'session-meta');
 const BUFFERS_DIR = path.join(__dirname, 'data', 'session-buffers');
 
-// ── HOME-RENAME MIGRATION (B-b4a2, one-shot at boot) ────────────────────────
-// The 3.5.0 fleet image personalizes the container user, so $HOME moves (e.g.
-// /home/vibe → /home/userL) while the PVC keeps everything recorded under
-// the OLD path: ~/.claude/projects dirs encode the old cwd (claude's resume
-// lookup goes by CURRENT-cwd encoding → every resume died "No conversation
-// found"), and mounts/layouts/session metas hold dead /home/vibe/... paths.
-// This repeats for EVERY user on EVERY such roll (userL needed manual
-// surgery) — migrate automatically: rename projdirs to the new encoding and
-// prefix-rewrite recorded paths. One-shot per (oldUser→newUser) marker.
-function migrateHomeRename() {
-  try {
-    const home = os.homedir();
-    const user = path.basename(home);
-    // the transcript-dir layout is each harness's (store.homeRename — claude:
-    // src/harnesses/claude-home.js); this core owns the marker + the store rewrite
-    const hooks = require('./src/harnesses').list().map((h) => h.store && h.store.homeRename).filter((hr) => hr && typeof hr.staleUsers === 'function');
-    const oldUsers = new Set(hooks.flatMap((hr) => hr.staleUsers(home, user)));
-    for (const old of oldUsers) {
-      const marker = path.join(__dirname, 'data', `.home-migrated-${old}-to-${user}`);
-      if (fs.existsSync(marker)) continue;
-      console.log(`[migrate] home rename detected: /home/${old} → ${home} — migrating projdirs + recorded paths`);
-      let moved = 0;
-      for (const hr of hooks) moved += hr.moveUser(home, old, user) || 0;
-      // Prefix-rewrite every recorded string path in the small JSON stores.
-      const rewrite = (v) => (typeof v === 'string' && v.includes(`/home/${old}/`))
-        ? v.split(`/home/${old}/`).join(`/home/${user}/`)
-        : (typeof v === 'string' && v === `/home/${old}`) ? `/home/${user}` : v;
-      const walk = (x) => {
-        if (Array.isArray(x)) return x.map(walk);
-        if (x && typeof x === 'object') { for (const k of Object.keys(x)) x[k] = walk(x[k]); return x; }
-        return rewrite(x);
-      };
-      const stores = [path.join(__dirname, 'data', 'mounts.json'), path.join(__dirname, 'data', 'layouts.json'),
-        path.join(__dirname, 'data', 'task-groups.json'), path.join(__dirname, 'data', 'machine-mounts.json')];
-      try { for (const f of fs.readdirSync(META_DIR)) stores.push(path.join(META_DIR, f)); } catch { }
-      let rewrote = 0;
-      for (const f of stores) {
-        try {
-          if (!fs.existsSync(f)) continue;
-          const raw = fs.readFileSync(f, 'utf-8');
-          if (!raw.includes(`/home/${old}`)) continue;
-          const fixed = JSON.stringify(walk(JSON.parse(raw)));
-          fs.writeFileSync(f + '.pre-home-migrate', raw); // one-shot backup beside it
-          const tmp = f + '.tmp'; fs.writeFileSync(tmp, fixed); fs.renameSync(tmp, f);
-          rewrote++;
-        } catch (e) { console.warn(`[migrate] ${path.basename(f)}: ${e.message}`); }
-      }
-      fs.writeFileSync(marker, JSON.stringify({ at: Date.now(), moved, rewrote }));
-      console.log(`[migrate] home rename done: ${moved} projdirs, ${rewrote} stores rewritten (backups *.pre-home-migrate)`);
-    }
-  } catch (e) { console.warn('[migrate] home-rename check failed:', e.message); }
-}
-migrateHomeRename();
+// ── HOME-RENAME MIGRATION (B-b4a2, one-shot at boot): src/server/home-rename.js — B-8033: one marker per half (the projdirs
+// move's with the HOME it changes, ~/.vibespace; the recorded-path rewrite's in this data/)
+require('./src/server/home-rename.js').migrateHomeRename({ dataDir: path.join(__dirname, 'data'), metaDir: META_DIR });
 const USAGE_CACHE_FILE = path.join(__dirname, 'data', 'usage-cache.json');
 // Per-account PASSIVE usage capture (written by data/bin/vibespace-usage, the
 // statusLine hook). Key '__global__' = the machine's own login; 'sub-…' = a
