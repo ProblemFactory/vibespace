@@ -13,6 +13,8 @@ import { pluginCategoryOf } from './settings-schema.js';
 import { decisionLineOf, paintDecisionLine, liveDecisionLine } from './decision-readout.js'; // lane decision-spend-readout: the judge's money as the row's second line
 import { pluginGitCredOf } from '../plugin-cred-state.js'; // hotfix 2.369.368: the ONE reader of /api/integrations/plugin-git's answer shape ({ integration: view })
 import { fleetPluginWords } from './browser-build-model.js'; // lane fleet-plugin-catalog: the cluster's plugin — its row fact + the panel's fleet line
+/** The plugin guide (docs/plugins.md on the project's home) — the folder layout and the smallest complete example live there. */
+const PLUGINS_DOCS_URL = 'https://github.com/ProblemFactory/vibespace/blob/master/docs/plugins.md';
 const JSON_HDR = { 'Content-Type': 'application/json' };   // 2.369.359: a JSON body SAYS it is JSON — fetch's default for a string body is text/plain, which express.json() skips, so the route read an EMPTY body and refused «source must be …» (the owner, installing the custom browser plugin)
 
 // lane decision-vendor-hygiene: the LLM plugin row's STOPS (decision-model rowStopOf — no call until the key or the
@@ -109,7 +111,7 @@ function makeSwitch(on, { disabled = false, label, onChange }) {
 }
 /** one list row: icon dot · name + description [+ a readout line] · chip · switch · [install] · ⚙ — `fact` is a READOUT
  *  (a drawn element, not a control: the LLM plugin's money today, lane decision-spend-readout), under the description */
-function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, install, gear, fact = null, installed = false }) {
+function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, install, gear, fact = null, installed = false, idTip = '' }) {
   // lane ui-phone-and-fit M2: THE RAIL ROW (rail-row.js) — dot · the name (+ its description, + a readout) · the controls
   // (the status chip — the plugin's entry when it is a button, so it never folds and is never cut —, the switch, [install], ⚙)
   const c = document.createElement(onChip ? 'button' : 'span');
@@ -123,6 +125,7 @@ function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, 
   // the built-in rows keep their look
   if (installed) row.classList.add('plugin-row-installed');
   row.querySelector('.rail-row-main').title = description || '';
+  if (idTip) row.querySelector('.plugin-row-name').title = idTip; // lane ui-plain-words: the name shows, the id stays in its tooltip
   return row;
 }
 
@@ -313,7 +316,8 @@ export function installPluginsUI(App) {
       sec.className = 'plugin-manifests';
       const head = document.createElement('div');
       head.className = 'plugin-head plugin-manifests-head';
-      head.innerHTML = `<b>${escHtml(t('Installed plugins'))}</b> <span class="plugin-cfg-hint">${escHtml(t('a folder under data/plugins/<id>/ with vibespace-plugin.json — see docs/plugins.md'))}</span>`;
+      // lane ui-plain-words usage-18 / plugins-integrations-3: what to do, in words; the folder layout is the guide's (one link)
+      head.innerHTML = `<b>${escHtml(t('Installed plugins'))}</b> <span class="plugin-cfg-hint">${escHtml(t('Put a plugin’s folder in the plugins folder, or press Install plugin…'))} <a href="${PLUGINS_DOCS_URL}" target="_blank" rel="noopener">${escHtml(t('How plugins work'))}</a></span>`;
       const installBtn = document.createElement('button');
       installBtn.className = 'mounts-btn'; installBtn.textContent = t('Install plugin…');
       installBtn.onclick = () => this._pluginInstallDialog(() => { this.pluginClient?.refresh?.(); render(); });
@@ -333,7 +337,7 @@ export function installPluginsUI(App) {
       }
       if (!list.length) {
         const empty = document.createElement('div');
-        empty.className = 'empty-hint'; empty.textContent = t('No plugins installed. Use Install plugin… (a folder, a git URL, a .vsp file or a GitHub release) — docs/examples/hello-plugin is the smallest complete one.');
+        empty.className = 'empty-hint'; empty.textContent = t('No plugins installed. Press Install plugin… — it takes a folder, a git URL, a .vsp file or a GitHub release.');
         sec.appendChild(empty);
       }
       const rows = document.createElement('div'); rows.className = 'plugin-list';
@@ -406,7 +410,7 @@ export function installPluginsUI(App) {
         if (fleetFact) { fact = document.createElement('div'); fact.className = p.trustedBy === 'fleet' ? 'plugin-row-fact plugin-fleet-trusted' : 'plugin-row-fact plugin-fleet-consent'; fact.textContent = fleetFact; }
         else if (!p.install || p.install.source === 'zip') { fact = document.createElement('div'); fact.className = 'plugin-row-fact plugin-update-how'; fact.textContent = p.install ? t('Installed from an uploaded file — upload the new .vsp through Install plugin…') : t('Placed by hand — reinstall it through Install plugin… to make it updatable'); }
         const from = p.install && p.install.source === 'git' ? [p.install.ref ? `@${p.install.ref}` : '', p.install.sha ? p.install.sha.slice(0, 12) : ''].filter(Boolean).join(' ') : '';
-        rows.appendChild(pluginRow({ id: p.id, label: p.label && p.label !== p.id ? `${p.label} (${p.id})` : p.id, description: p.description || '', tone, chip, chipTitle: [p.version, from, why].filter(Boolean).join(' · '), onChip,
+        rows.appendChild(pluginRow({ id: p.id, label: p.label || p.id, idTip: p.label && p.label !== p.id ? p.id : '', description: p.description || '', tone, chip, chipTitle: [p.version, from, why].filter(Boolean).join(' · '), onChip, // lane ui-plain-words plugins-integrations-4: the name on the face, its id on hover
           sw, install: actions, gear: this._pluginGear(p.id, p.label || p.id), fact, installed: true }));
       }
       parent.appendChild(sec);

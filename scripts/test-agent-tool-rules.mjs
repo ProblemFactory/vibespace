@@ -278,10 +278,11 @@ console.log('⑧ the harness row');
   ok(HS.coerce(row, undefined) === true && HS.coerce(row, false) === false && HS.coerce(row, 'false') === true, 'unset ⇒ ON; only an explicit false turns it off (the string "false" is not a boolean)');
   ok(!HS.rowOf(HS.HARNESS_SETTINGS.codex, 'allowAgentTools'), 'codex declares no such row — its reason is written down (CODEX_NOTE)');
   ok(/CODEX_HOME/.test(R.CODEX_NOTE) && /sandbox/.test(R.CODEX_NOTE), 'CODEX_NOTE names the mechanism that exists and why it is not shipped');
-  ok(/vibespace-job run/.test(row.description) && /nothing is written/i.test(row.description), 'the description says what stays asked and that no settings file is written');
-  ok(/vibespace-page publish\) asks every time/.test(row.description), 'F2: the description says publishing a page asks every time');
-  ok(/asks every time, unless the session runs with full access/.test(row.description) && !/even with full access/.test(row.description) && /mode that asks anyway/.test(row.apply.how), 'r3: …and that full access is the exception (the ask rule follows the spawn mode) — never "even with full access"');
-  ok(/type or upload into a web page without asking/.test(row.description) && /~\/\.ssh/.test(row.description), 'F4: the description states the trade-off (anything the agent can read it can type or upload into a page without asking) and the refused stores');
+  const ruleText = [row.description, ...(row.details || [])].join(' '); // lane ui-plain-words settings-9: the face is two plain lines, the whole rule folds under «Details»
+  ok(/vibespace-job run/.test(ruleText) && /nothing is written/i.test(ruleText) && /background command still ask/.test(row.description), 'the row says what stays asked (its face) and its rule that no settings file is written (under Details)');
+  ok(/vibespace-page publish\) asks every time/.test(ruleText), 'F2: the description says publishing a page asks every time');
+  ok(/asks every time, unless the session runs with full access/.test(ruleText) && !/even with full access/.test(ruleText) && /mode that asks anyway/.test(row.apply.how), 'r3: …and that full access is the exception (the ask rule follows the spawn mode) — never "even with full access"');
+  ok(/type or upload into a web page without asking/.test(ruleText) && /~\/\.ssh/.test(ruleText), 'F4: the description states the trade-off (anything the agent can read it can type or upload into a page without asking) and the refused stores');
 }
 
 console.log('⑨ the permission-mode words');

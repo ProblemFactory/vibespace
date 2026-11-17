@@ -7,12 +7,12 @@ import { enterSubmits } from './chat-enter-keys.js';
  * Open an embedded browser window with URL bar, proxy toggle, and error overlay.
  * Returns the winInfo object.
  */
-export function openBrowser(app, url, { syncId, proxy = false } = {}) {
+export function openBrowser(app, url, { syncId, proxy = false, title = '' } = {}) { // `title`: a page with no host (a blob: report) is named by its opener (lane ui-plain-words)
   app._hideWelcome();
   const startUrl = url || '';
   const openSpec = { action: 'openBrowser', url: startUrl, proxy: !!proxy };
   let startTitle = t('Web view');
-  try { if (startUrl) startTitle = new URL(startUrl).hostname; } catch {} // scheme-less replayed URLs must not abort window creation
+  try { if (startUrl) startTitle = new URL(startUrl).hostname || title || startTitle; } catch {} // scheme-less replayed URLs must not abort window creation; a host-less page keeps a name
   const winInfo = app.wm.createWindow({ title: startTitle, type: 'browser', syncId, openSpec });
   const container = document.createElement('div');
   container.style.cssText = 'display:flex;flex-direction:column;height:100%';
@@ -74,7 +74,7 @@ export function openBrowser(app, url, { syncId, proxy = false } = {}) {
     errorMsg.style.display = 'none';
     iframe.style.display = '';
     iframe.src = proxyMode ? `/proxy/${u}` : u;
-    try { app.wm.setTitle(winInfo.id, new URL(u).hostname); } catch {}
+    try { app.wm.setTitle(winInfo.id, new URL(u).hostname || title || t('Web view')); } catch {}
     winInfo._browserUrl = u;
     if (winInfo._openSpec) winInfo._openSpec.url = u; // keep multi-client replay in sync with navigation
     // Persist + broadcast the new URL. scheduleAutoSave is a no-op during

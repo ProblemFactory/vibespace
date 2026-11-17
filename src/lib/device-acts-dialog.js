@@ -9,19 +9,57 @@ import { t, deviceLocale } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { createModalShell, showToast } from './utils.js';
 import { rowOf, kindOf, BY_KINDS } from '../device-acts.js';
+import { nameOrGone } from './plain-words.js';
 
 const LIMIT = 50;
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 const whenText = (at) => when(Number(at) || 0, { seconds: true });
 const durationText = (ms) => { if (ms == null) return ''; const s = (Math.max(0, Number(ms) || 0) / 1000).toFixed(1); return Number(s) === 0 ? '<0.1 s' : `${s} s`; };
-/** WHO asked, in the device's words: the kind's name + the subject's own id. */
-export function whoText(by) {
+/** WHO asked, in a person's words (lane ui-plain-words M2a: names, never ids — the raw subject is in the row's opened
+ *  line): this hub's own sign-in is «你», another sign-in its name, a conversation by its name (`nameOf(id)`, the sidebar's),
+ *  a job and VibeSpace by their words. */
+export function whoText(by, nameOf = () => '') {
   const k = kindOf(by);
   if (!k) return t('nobody named');
   const id = by.slice(k.length + 1);
-  const name = k === 'human' ? t('a person') : k === 'agent' ? t('a conversation') : k === 'job' ? t('a job') : t('VibeSpace');
-  return `${name} · ${id}`;
+  if (k === 'human') return id === 'local' ? t('You') : id || t('a person');
+  if (k === 'agent') { const n = nameOrGone('conversation', id, nameOf(id)); return n === nameOrGone('conversation', id, '') ? n : t('conversation “{name}”', { name: n }); }
+  return k === 'job' ? t('a job') : t('VibeSpace, by itself');
 }
+/** WHAT was done, in a person's words: one word per op FAMILY (scripts/test-plain-words.mjs: every op of device-acts.js's
+ *  TABLE has one); the raw op stays in the row's opened line. */
+const ACT_WORDS = {
+  'fs-op:stat': 'Read files', 'fs-op:list': 'Read files', 'fs-op:read-range': 'Read files', 'fs-op:home': 'Read files', 'fs-op:du': 'Read files',
+  'design-fs:read': 'Read files', 'design-fs:meta': 'Read files', 'design-fs:tokens': 'Read files',
+  'fs-op:write': 'Write a file', 'fs-op:write-stream': 'Write a file', 'design-fs:write-user': 'Write a file',
+  'fs-op:rm': 'Delete a file', 'fs-op:rename': 'Move a file', 'fs-op:move': 'Move a file', 'fs-op:copy': 'Copy a file', 'fs-op:mkdir': 'Make a folder',
+  'run-cmd': 'Run a command', 'run-stream': 'Run a command',
+  'sysinfo': 'Read system information', 'display-facts': 'Read system information', 'stream-facts': 'Read system information', 'remoteapp-facts': 'Read system information',
+  'proc-list': 'Read system information', 'dial-status': 'Read system information', 'probe-cli': 'Read system information', 'probe-creds': 'Read system information',
+  'ping-info': 'Read system information', 'ok': 'Read system information', 'stream-mic:facts': 'Read system information',
+  'desktop-apps-list': 'List its apps',
+  'discovery-snapshot': 'Read its conversations', 'discovery-claims': 'Read its conversations', 'discovery-watch': 'Read its conversations', 'session-events-watch': 'Read its conversations', 'transcript-op': 'Read its conversations',
+  'usage-scan': 'Read usage', 'usage-events-watch': 'Read usage', 'usage-events-ack': 'Read usage', 'pool-orders-log-ack': 'Read usage', 'quota-refresh': 'Read usage',
+  'stream-offer': 'Stream its screen', 'stream-answer': 'Stream its screen', 'stream-stop': 'Stream its screen', 'stream-stats': 'Stream its screen', 'stream-windows': 'Stream its screen',
+  'stream-audio': 'Stream its screen', 'window-track': 'Stream its screen', 'window-untrack': 'Stream its screen',
+  'tcp-connect': 'Connect to a port', 'tcp-connect:loopback': 'Connect to a port',
+  'tcp-listen': 'Forward a port', 'tcp-unlisten': 'Forward a port', 'serve-socks': 'Forward a port', 'unserve-socks': 'Forward a port',
+  'serve-folder': 'Share a folder', 'unserve-folder': 'Share a folder',
+  'hello': 'Run a terminal session', 'open-session': 'Run a terminal session', 'resize-session': 'Run a terminal session', 'kill-session': 'Run a terminal session',
+  'open-pipe-session': 'Run a terminal session', 'attach-pipe-session': 'Run a terminal session', 'kill-pipe-session': 'Run a terminal session', 'opencode-serve': 'Run a terminal session',
+  'desktop-serve': 'Remote Desktop', 'browser-serve': 'Run a browser', 'stream-mic:default': 'Change the default microphone',
+  'place-secret': 'Place a secret', 'input-events': 'Type and click', 'desktop-input': 'Type and click', 'desktop-grab': 'Type and click',
+  'peer-post': 'Send to another VibeSpace', 'pool-orders': 'Manage accounts', 'settings-open': 'Open settings', 'window-pin': 'Pin a window',
+  'upgrade': 'Update VibeSpace on it',
+};
+export function actWords(op) {
+  const o = String(op || ''), w = ACT_WORDS[o] || ACT_WORDS[o.split(':')[0]];
+  return w ? t(w) : t('an act');
+}
+/** The sidebar's name for a conversation id (a rename first) — '' when it is not listed. */
+const sessionNameOf = (app) => (id) => {
+  try { const s0 = (app?.sidebar?._allSessions || []).find((x) => x.webuiId === id || x.claudeSessionId === id || x.backendSessionId === id); return s0 ? ((app.sidebar.getCustomName && app.sidebar.getCustomName(s0)) || s0.webuiName || s0.name || '') : ''; } catch { return ''; }
+};
 /** The verdict of an act in the device's words. */
 export function actVerdictText(r) {
   if (!r) return '';
@@ -44,17 +82,17 @@ export function lostLine(lost) {
     : t('Since the hub started, this VibeSpace’s record (shared by all machines) dropped {n} lines, the last at {when}: they could not be written in time and may be from any machine — this list may miss some', { n, when: when(Number(lost.lastAt) || 0, { seconds: true, words: true }) });
 }
 /** The ONE row painter (keyed; an existing node is re-worded in place). */
-export function paintActRow(node, r) {
+export function paintActRow(node, r, nameOf = () => '') {
   node.dataset.key = actKeyOf(r);
   node.dataset.layer = r.layer || '';
   node.dataset.ok = r.ok == null ? '' : String(!!r.ok);
   let sum = node.querySelector(':scope > summary');
   if (!sum) { sum = el('summary', 'exit-runs-sum device-acts-sum'); node.appendChild(sum); }
   sum.textContent = '';
-  sum.append(el('span', 'exit-runs-when', whenText(r.at)), el('span', 'exit-runs-who device-acts-who', whoText(r.by)));
+  sum.append(el('span', 'exit-runs-when', whenText(r.at)), el('span', 'exit-runs-who device-acts-who', whoText(r.by, nameOf)));
   const main = el('div', 'exit-runs-main');
   const outcome = el('div', 'exit-runs-outcome');
-  outcome.append(el('span', 'device-acts-op', r.op), ' · ', el('span', 'exit-runs-verdict', actVerdictText(r)));
+  outcome.append(el('span', 'device-acts-op', actWords(r.op)), ' · ', el('span', 'exit-runs-verdict', actVerdictText(r)));
   if (r.ms != null) outcome.append(' · ', el('span', 'exit-runs-ms', durationText(r.ms)));
   if (r.repeats) outcome.append(' · ', el('span', 'device-acts-repeats', t('{n} more since {time}', { n: r.repeats, time: when(Number(r.since || r.at) || 0, { seconds: true, words: true }) })));   // B-c632: this line stands for N more refusals of the same act since the line before
   main.append(el('code', 'exit-runs-cmd device-acts-what', r.summary || ''), outcome);
@@ -62,7 +100,7 @@ export function paintActRow(node, r) {
   let body = node.querySelector(':scope > .exit-runs-out');
   if (!body) { body = el('div', 'exit-runs-out'); node.appendChild(body); }
   body.textContent = '';
-  body.appendChild(el('div', 'exit-runs-flags', `${t('Who asked')}: ${r.by || t('nobody named')} · ${r.layer === 'code' ? t('new agent code') : t('an act')}`));
+  body.appendChild(el('div', 'exit-runs-flags', `${t('Who asked')}: ${r.by || t('nobody named')} · ${r.op || ''} · ${r.layer === 'code' ? t('new agent code') : t('an act')}`));
   if (r.outHead) { body.appendChild(el('div', 'exit-runs-stream', t('output head'))); body.appendChild(el('pre', 'exit-runs-pre chat-pre-wrapped', r.outHead)); }
   else body.appendChild(el('div', 'exit-runs-none', t('no output kept')));
   return node;
@@ -70,6 +108,7 @@ export function paintActRow(node, r) {
 
 /** Open the activity list of `hostId`. Resolves when drawn. */
 export async function openDeviceActsDialog(app, { hostId, name = '' } = {}) {
+  const nameOf = sessionNameOf(app);
   let upsert = null, kind = '';
   const queued = [];
   // armed BEFORE the GET (the exit list's verify r1 F3): a line that lands during the read is applied after it
@@ -98,8 +137,8 @@ export async function openDeviceActsDialog(app, { hostId, name = '' } = {}) {
   const place = (r) => {
     const key = actKeyOf(r);
     const had = rows.get(key);
-    if (had) { paintActRow(had, r); return had; }
-    const node = paintActRow(document.createElement('details'), r);
+    if (had) { paintActRow(had, r, nameOf); return had; }
+    const node = paintActRow(document.createElement('details'), r, nameOf);
     node.className = 'exit-runs-row device-acts-row';
     node.setAttribute('role', 'listitem');
     node._at = Number(r.at) || 0;

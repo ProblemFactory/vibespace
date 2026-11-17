@@ -204,5 +204,33 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   ok((planted2.match(DOOR_RE) || []).length === 2, 'CONTROL: a hand-built fold (dataset.fold + the summary) is counted by the door leg');
 }
 
+// ── pick 2 (M2a): names, not ids — what the machine's activity says ──
+// every op of src/device-acts.js's TABLE (and its family) has a WORD in src/lib/device-acts-dialog.js ACT_WORDS, each word with
+// its zh AND ja row (the walk's «tcp-connect» / «fs-op:read» / «sysinfo» drawn raw); who asked is a name, never «某人 · local»
+{
+  console.log('names, not ids (the device activity, nameOrGone())');
+  const DA = require(path.join(REPO, 'src/device-acts.js'));
+  const dlg = fs.readFileSync(path.join(REPO, 'src/lib/device-acts-dialog.js'), 'utf8');
+  const tbl = dlg.slice(dlg.indexOf('const ACT_WORDS = {'), dlg.indexOf('};', dlg.indexOf('const ACT_WORDS = {')) + 2);
+  const words = Object.fromEntries([...tbl.matchAll(/'([a-z][\w:-]*)':\s*'([^']+)'/g)].map((m) => [m[1], m[2]]));
+  const unworded = Object.keys(DA.TABLE).filter((op) => !words[op] && !words[op.split(':')[0]]);
+  ok(Object.keys(words).length >= 40 && !unworded.length, `every device op has a word (${Object.keys(DA.TABLE).length} ops in the TABLE, ${new Set(Object.values(words)).size} words)`, unworded);
+  const Z = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, J = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+  const unrowed = [...new Set(Object.values(words))].filter((w) => typeof Z[w] !== 'string' || typeof J[w] !== 'string');
+  ok(!unrowed.length, 'every op word has its zh AND ja row', unrowed);
+  ok(/el\('span', 'device-acts-op', actWords\(r\.op\)\)/.test(dlg) && /whoText\(r\.by, nameOf\)/.test(dlg) && !/\$\{name\} · \$\{id\}/.test(dlg),
+    'the row draws the op\'s word and who asked by name (the raw op and subject stay in the opened line)');
+  ok(/\$\{r\.by \|\| t\('nobody named'\)\} · \$\{r\.op \|\| ''\}/.test(dlg), 'the opened line keeps the raw subject and op (an engineer reads them there)');
+  // RED control: the old row — `${kind word} · ${raw id}` and the raw op
+  const oldWho = (by) => { const k = by.split(':')[0]; return `${k === 'human' ? 'a person' : 'a conversation'} · ${by.slice(k.length + 1)}`; };
+  ok(oldWho('human:local') === 'a person · local' && oldWho('agent:walk-sess-1').endsWith('walk-sess-1'), 'RED control: the old who-asked text prints the raw subject id');
+  // nameOrGone(): a name, else the kind's words — never the id (the source: plain-words.js)
+  const pw = fs.readFileSync(path.join(REPO, 'src/lib/plain-words.js'), 'utf8');
+  ok(/export function nameOrGone\(kind, id, name\)/.test(pw) && /if \(n && n !== String\(id \?\? ''\)\.trim\(\)\) return n;/.test(pw) && /return \(GONE\[kind\] \|\| GONE\.conversation\)\(\);/.test(pw),
+    'nameOrGone(kind, id, name): the name, else generic words — a name equal to the id is no name, and the id is never returned');
+  const users = ['src/lib/jobs-panel.js', 'src/lib/path-field.js', 'src/lib/device-acts-dialog.js'].filter((f) => /\bnameOrGone\(/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
+  ok(users.length === 3, 'nameOrGone() is read by the jobs panel (a gone conversation / group), the path field (a machine) and the activity rows', users);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -302,6 +302,40 @@ for (const [file, s] of Object.entries(src)) {
 }
 ok([...censusTypes].every((t) => regTypes.includes(t)), `every createWindow type literal is a registered kind (${[...censusTypes].sort().join(' ')})`,
   'unregistered: ' + [...censusTypes].filter((t) => !regTypes.includes(t)).join(','));
+// lane ui-plain-words M2b — THE KIND'S WORDS: a window kind is named to a person by its registered label through t()
+// (window-types.js windowKindWords / windowWords), never by its raw `type` («machine-app» under a remote app's title,
+// «stage-placeholder» under the Stage, «browser» under a title-less web view were all on screen in the UI walk)
+{
+  const zhD = (await import('../src/lib/i18n-zh.js')).default, jaD = (await import('../src/lib/i18n-ja.js')).default;
+  const wordsOf = (r) => {
+    if (r.label != null) return r.label;
+    return src[r.file].match(new RegExp(`registerWindowType\\(\\{\\s*type:\\s*'${r.type}',\\s*label:\\s*t\\(\\s*'([^']+)'\\s*\\)`))?.[1] ?? null;
+  };
+  const words = typeRegs.map((r) => ({ type: r.type, words: wordsOf(r) }));
+  const bare = words.filter((w) => !w.words);
+  ok(!bare.length, `every core window kind registers its words — a label literal or t('…') (${words.length} kinds)`, 'no label: ' + bare.map((w) => w.type).join(','));
+  const unrowed = words.filter((w) => w.words && (typeof zhD[w.words] !== 'string' || typeof jaD[w.words] !== 'string'));
+  ok(!unrowed.length, `every kind's words have their zh AND ja row (${words.length - bare.length} labels)`, 'missing: ' + unrowed.map((w) => `${w.type} «${w.words}»`).join(', '));
+  // no naming fallback onto the raw kind or id: «title || type», «title || id», «parts[1] || type», a literal 'Window'
+  const FALLBACK = [/\b(?:win|w|frame|winInfo)\.title\b[^;\n]{0,12}\|\|\s*(?:[A-Za-z_$][\w$]*\.(?:type|id)\b|'Window')/g, /\bparts\[1\]\s*\|\|\s*[A-Za-z_$][\w$]*\.type\b/g, /String\(\s*(?:w|win)\s*&&\s*(?:w|win)\.id\s*\)/g];
+  const leaks = [];
+  for (const [file, s] of Object.entries(src)) {
+    if (file === 'window-types.js') continue;
+    for (const re of FALLBACK) for (const m of s.matchAll(re)) leaks.push(`${file}:${s.slice(0, m.index).split('\n').length} ${m[0]}`);
+  }
+  ok(!leaks.length, 'no window is named by its raw kind or id — every reader goes through windowWords (taskbar title / second line / lists, the «is on» toast, the phone list)', leaks.join(' | '));
+  const tb = src['taskbar.js'], wj = src['window.js'], mn = src['mobile-nav.js'];
+  ok(/title\.textContent = starPrefix \+ windowWords\(win\)/.test(tb) && /subtitle\.textContent = parts\[1\] \|\| \(kindWords !== windowWords\(win\) \? kindWords : ''\)/.test(tb) && /label: windowWords\(w\)/.test(tb) && /const nameOfWin = \(w\) => windowWords\(w\)/.test(tb)
+    && /\{ window: windowWords\(win\), desktop: desk \}/.test(wj) && /label\.textContent = windowWords\(win\)/.test(mn), 'the five readers name a window through windowWords (taskbar ×4, window.js toast, mobile-nav list)');
+  // FUNCTIONAL (en, no DOM ⇒ t() is the identity): the words, the fallbacks, and the RED control on the old expression
+  const wt2 = await import('../src/lib/window-types.js');
+  wt2.registerWindowType({ type: 'fake-kind-words', label: 'Machine app' });
+  const placeholder = { title: 'Stage', type: 'stage-placeholder' }, app = { title: '', type: 'fake-kind-words' }, odd = { title: '', type: 'no-such-kind' };
+  ok(wt2.windowWords({ title: 'Report — /tmp/x', type: 'viewer' }) === 'Report' && wt2.windowWords(app) === 'Machine app' && wt2.windowWords(odd) === 'Window' && wt2.windowKindWords('fake-kind-words') === 'Machine app',
+    'windowWords: the title\'s first part, else the kind\'s words, else «Window» (never the type)', [wt2.windowWords(app), wt2.windowWords(odd)]);
+  const oldSub = (w) => w.title.split(' — ')[1] || w.type;
+  ok(oldSub(placeholder) === 'stage-placeholder' && oldSub(app) === 'fake-kind-words', 'RED control: the old second line (`parts[1] || win.type`) prints the raw kind under the Stage and under a title-less window');
+}
 // census: every openSpec literal's action is a registered action
 const specActions = new Set();
 for (const s of Object.values(src)) for (const m of s.matchAll(/\{\s*action:\s*'([A-Za-z]+)'/g)) specActions.add(m[1]);
@@ -321,7 +355,7 @@ ok(!/TRANSIENT_WINDOW_TYPES/.test(lay.replace(/\/\/[^\n]*/g, '')) && /!isTransie
 const wtSrc = src['window-types.js'];
 ok(/track\('event', 'openspec-unknown', what\)/.test(wtSrc) && /console\.warn\(/.test(wtSrc), "unknown action is LOUD: console.warn + telemetry 'openspec-unknown'");
 const wtImports = [...wtSrc.matchAll(/^import\s[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
-ok(same(wtImports, ['./telemetry-client.js']), `window-types.js imports only telemetry-client (DOM-free at import) — got ${wtImports.join(',')}`);
+ok(same(wtImports, ['./telemetry-client.js', './i18n.js']), `window-types.js imports only telemetry-client and i18n (both DOM-free at import; i18n for the kind's words, lane ui-plain-words) — got ${wtImports.join(',')}`);
 ok(/'test-window-types'/.test(read('scripts/ci.mjs')), 'ci.mjs SUITES carries this suite');
 
 // ── THE MANAGER OWNS TITLES (channels r3) ──

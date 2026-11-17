@@ -10,7 +10,7 @@ import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { showWindowContextMenu, sessionForWin, closeKeepsWord, sayClosedKeepsRunning } from './taskbar.js';
 import { installTabGroupMixin } from './tab-group.js';
-import { windowTypeIcon } from './window-types.js';
+import { windowTypeIcon, windowWords } from './window-types.js';
 import { createAgentKindIcon, getAgentKindMeta, windowListMark, followListMarks } from './agent-meta.js';
 import { HIDE_REASONS, hiddenReasons, windowMarks, revealDesktop } from './view-visibility.js';
 import { placementNote, billingAuthKey } from './pool-priority-model.js'; // 2026-09-28: which rule placed a pooled conversation, in words (PURE); 2026-09-30 THE ONE billing re-render key
@@ -1516,7 +1516,7 @@ class WindowManager {
     }
     if (go.act === 'tell') {
       const desk = frame._desktopId === STAGE_ID ? t('Stage') : (dm.desktops || []).find((d) => d.id === frame._desktopId)?.name || frame._desktopId;
-      showToast(t('“{window}” is on “{desktop}”', { window: win.title || win.type, desktop: desk }), { type: 'info', duration: 5000 });
+      showToast(t('“{window}” is on “{desktop}”', { window: windowWords(win), desktop: desk }), { type: 'info', duration: 5000 });
     }
     const i = revealTab(ch, id);
     if (!raise) {

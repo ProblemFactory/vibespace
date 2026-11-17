@@ -106,7 +106,7 @@ export function registerGearMenu() {
     label: () => {
       const pref = getLangPref();
       const cur = { auto: t('Auto (system)'), en: 'English', zh: '中文', ja: '日本語' }[pref] || pref;
-      return `${t('Language')}: ${cur}`;
+      return t('Language: {lang}', { lang: cur }); // the colon inside the row: zh/ja write «：»
     },
   });
   [['auto', () => t('Auto (system)')], ['en', 'English'], ['zh', '中文'], ['ja', '日本語']].forEach(([code, name], i) => {

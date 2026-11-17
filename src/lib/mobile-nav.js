@@ -2,6 +2,7 @@ import { titleMinText, billingPillForms, billingPillHtml } from './title-chips.j
 import { navBarFold, navTitleMinText, navMoreRows, navMoreLoud } from './title-chips.js'; // lane phone-titlebar-title: THE TITLE OWNS THE BAR — the chips beside it yield by measure
 import { FOLDED } from './bar-fold.js';
 import { t } from './i18n.js';
+import { windowWords } from './window-types.js';
 import { escHtml, onOutsidePress, showContextMenu, showToast, uiScale } from './utils.js';
 import { personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { showWindowContextMenu } from './taskbar.js';
@@ -843,7 +844,7 @@ export class MobileNav {
 
     const label = document.createElement('span');
     label.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--text)';
-    label.textContent = win.title || 'Window';
+    label.textContent = windowWords(win);
 
     // Billing identity chip — mirrors the desktop title-bar badge (which has
     // no home on mobile). setAuthBadge stashes the auth object on the window.

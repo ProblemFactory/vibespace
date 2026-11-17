@@ -12,6 +12,21 @@
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
 
+/** M2a — a thing's NAME for a person, never its id (lane ui-plain-words): `name` when it has one (a name equal to the
+ *  id is no name), else the kind's generic words — «一个已不在列表中的对话». The id itself goes to a tooltip or a fold line,
+ *  never into the sentence. `kind`: conversation | job | machine | group. */
+const GONE = {
+  conversation: () => t('a conversation that is no longer listed'),
+  job: () => t('a job that is no longer listed'),
+  machine: () => t('a machine that is no longer listed'),
+  group: () => t('a Task Group that is no longer listed'),
+};
+export function nameOrGone(kind, id, name) {
+  const n = String(name ?? '').trim();
+  if (n && n !== String(id ?? '').trim()) return n;
+  return (GONE[kind] || GONE.conversation)();
+}
+
 /** The fold's summary words. `details` = the settings form's «详情» (a row's long explanation), else «技术细节». */
 const summaryOf = (summary) => (summary === 'details' ? t('Details') : summary || t('Technical details'));
 const linesOf = (lines) => (Array.isArray(lines) ? lines : [lines]).map((l) => String(l ?? '')).filter((l) => l.trim());

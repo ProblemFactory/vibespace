@@ -13,6 +13,7 @@ import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
 import { registerWindowType } from './window-types.js';
+import { nameOrGone } from './plain-words.js'; // lane ui-plain-words M2a: a gone conversation / group is named in words, its id in the tooltip
 import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, runLeftWords } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
@@ -226,7 +227,7 @@ function renderTaskSection(app, root, list, { compact, refresh, archivedCount })
     sh.setAttribute('aria-expanded', sess.expanded ? 'true' : 'false');
     sh.dataset.session = sess.key;
     const schev = document.createElement('span'); schev.className = 'jobs-group-chev'; schev.textContent = sess.expanded ? '▾' : '▸';
-    const sname = document.createElement('span'); sname.className = 'jobs-sess-name'; sname.textContent = sess.label.kind === 'manual' ? t('created by you') : sess.label.text;
+    const sname = document.createElement('span'); sname.className = 'jobs-sess-name'; sname.textContent = sess.label.kind === 'manual' ? t('created by you') : sess.label.kind === 'short' ? nameOrGone('conversation', sess.label.text, '') : sess.label.text;
     if (sess.label.kind === 'short') sh.title = t('session {id} (no longer listed)', { id: sess.label.text });
     const scnt = document.createElement('span'); scnt.className = 'jobs-group-count'; scnt.textContent = `×${sess.count}`;
     sh.append(schev, sname, scnt);
@@ -319,7 +320,7 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
     const memText = !compact && j.kind !== 'cron' ? memoryChip(j, t) : '';
     if (memText) { const mc = document.createElement('span'); mc.className = 'jobs-chip jobs-chip-mem' + (/^\d/.test(memText) ? '' : ' jobs-chip-mem-none'); mc.textContent = memText; mc.title = j.memoryBound?.why || ''; l2.appendChild(mc); }
     if (j.publishedUrl) { const u = document.createElement('button'); u.className = 'jobs-chip jobs-chip-url'; u.textContent = '↗ ' + j.publishedUrl.replace(/^https?:\/\//, ''); u.onclick = (ev) => { ev.stopPropagation(); app.openBrowser?.(j.publishedUrl) || window.open(j.publishedUrl); }; l2.appendChild(u); }
-    for (const g of (j.owner?.groups || []).slice(0, 2)) { const c = document.createElement('span'); c.className = 'jobs-chip jobs-chip-grp'; c.textContent = g; l2.appendChild(c); }
+    for (const g of (j.owner?.groups || []).slice(0, 2)) { const c = document.createElement('span'); c.className = 'jobs-chip jobs-chip-grp'; c.textContent = nameOrGone('group', g, ((app.sidebar && app.sidebar._tasks) || []).find((x) => x && x.id === g)?.title); c.title = g; l2.appendChild(c); }
     if (!compact && j.context?.payload) { const cx = document.createElement('span'); cx.className = 'jobs-ctx'; cx.textContent = j.context.payload.split('\n')[0].slice(0, 90); l2.appendChild(cx); }
     if (l2.childNodes.length) el.appendChild(l2);
   }

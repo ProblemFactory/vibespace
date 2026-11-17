@@ -47,8 +47,9 @@ console.log('§1 PURE revealDesktop');
 // the REAL door, sliced out of window.js (a class method body → a plain object method)
 const WJ = fs.readFileSync(path.join(repo, 'src/lib/window.js'), 'utf8');
 const sliceDoor = (src) => { const i = src.indexOf('\n  revealWindow('); const j = src.indexOf('\n  }\n', i); return src.slice(i, j + 4); };
-const door = (src) => new Function('revealDesktop', 'stageWindowKind', 'STAGE_ID', 'revealTab', 'showToast', 't', 'return {' + src + '};')(
-  revealDesktop, stageWindowKind, '__stage__', revealTab, (m) => toasts.push(m), (s, o) => s.replace(/\{(\w+)\}/g, (_, k) => (o && k in o ? o[k] : _))).revealWindow;
+const { windowWords } = await import('../src/lib/window-types.js'); // lane ui-plain-words: the door names a window through it
+const door = (src) => new Function('revealDesktop', 'stageWindowKind', 'STAGE_ID', 'revealTab', 'showToast', 't', 'windowWords', 'return {' + src + '};')(
+  revealDesktop, stageWindowKind, '__stage__', revealTab, (m) => toasts.push(m), (s, o) => s.replace(/\{(\w+)\}/g, (_, k) => (o && k in o ? o[k] : _)), windowWords).revealWindow;
 let toasts = [];
 function world(door, { active = 'D2', winDesk = 'D1', minimized = false, stage = null, land = true } = {}) {
   const log = [];

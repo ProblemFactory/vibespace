@@ -831,7 +831,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
   const cell = (row, cls, text, title) => { const c = el('span', 'bprof-cell ' + cls, text); if (title) c.title = title; row.appendChild(c); return c; };
   // 2026-09-25: the keeper's live resource reading (memBytes labelled by its metric — "412 MB (PSS)"), and its REPORT
   // sentence as the tooltip when over the threshold; the keeper never stops a browser for it
-  const usageLine = (host, u) => { const txt = u ? memoryText(u.memBytes, u.memMetric) : ''; if (!txt) return; const s = el('span', 'bprof-usage' + (u.over ? ' bprof-usage-over' : ''), txt); if (u.over) s.title = String(u.over); host.appendChild(s); };
+  // lane ui-plain-words browser-live-16: «内存 829 MB» on the face; the metric's name («PSS») and an over-limit reason on hover
+  const usageLine = (host, u) => { const full = u ? memoryText(u.memBytes, u.memMetric) : ''; if (!full) return; const s = el('span', 'bprof-usage' + (u.over ? ' bprof-usage-over' : ''), t('Memory {size}', { size: memoryText(u.memBytes, null) })); s.title = [full, u.over ? String(u.over) : ''].filter(Boolean).join(' — '); host.appendChild(s); };
   // lane headless-fallback: the launch's DISPLAY FACT under the state (no desktop session ⇒ headless; the window is back)
   const displayLine = (host, fact) => { const txt = displayFactText(fact); if (!txt) return; const s = el('span', 'bprof-display', txt); s.title = txt; host.appendChild(s); };
 
@@ -1030,11 +1031,17 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
   /** takeover C3 (design-browser-takeover §5.3): one managed EPHEMERAL browser —
    *  the record, whose conversation, its state, and the user's Stop (the
    *  profile stop route; the conversation's next command starts it again). */
+  /** lane ui-plain-words browser-live-16: the record's label `(ephemeral) <name>` (src/browser-profiles.js ephemeralLabel, stored) in
+   *  words — «临时浏览器 · <name>» */
+  function ephemeralWords(e) {
+    const n = String(e.label || '').replace(/^\(ephemeral\)\s*/, '').trim();
+    return t('Temporary browser · {name}', { name: !n || n === 'this conversation' ? t('this conversation') : n });
+  }
   function ephemeralRow(e) {
     const row = el('div', 'bprof-row bprof-ephemeral-browser');
     row.dataset.profileId = String(e.profileId || '');
-    const ident = el('div', 'bprof-ident'); ident.appendChild(el('span', 'bprof-label', String(e.label || e.profileId || ''))); if (e.child) ident.appendChild(el('span', 'bprof-chip', t('sub-agent'))); ident.title = String(e.profileId || ''); row.appendChild(ident);
-    cell(row, 'bprof-conv bprof-mono', String(e.browserKey || ''), e.sessionId ? t('session {id}', { id: String(e.sessionId) }) : '');
+    const ident = el('div', 'bprof-ident'); ident.appendChild(el('span', 'bprof-label', ephemeralWords(e))); if (e.child) ident.appendChild(el('span', 'bprof-chip', t('sub-agent'))); ident.title = String(e.profileId || ''); row.appendChild(ident);
+    cell(row, 'bprof-conv bprof-mono', '', [String(e.browserKey || ''), e.sessionId ? t('session {id}', { id: String(e.sessionId) }) : ''].filter(Boolean).join(' · ')); // lane ui-plain-words browser-live-16: the browser key is the tooltip's, not a column of ids
     const st = cell(row, 'bprof-state state-' + (e.live ? 'live' : 'kept'), ephemeralStateText(e));
     if (e.lastError) st.title = String(e.lastError);
     if (e.live) usageLine(st, e.usage);
@@ -1171,7 +1178,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     // takeover C3: every conversation's managed ephemeral browser — watched like a profile, gone with its conversation
     // design 015 (a): the browsers without a profile — their records' count and size in this section's head (no pseudo-row)
     const et = v.ephemeral?.trace || { n: 0, bytes: 0 };
-    const ephs = section(t('Ephemeral browsers'), t('one per conversation that browses without a profile — started by its first command, stopped after its idle timeout, removed with the conversation') + ' · ' + (et.n ? t('{n} action(s)', { n: et.n }) : t('no actions')) + ' · ' + t('{used} of {size}', { used: bytesText(Number(et.used) || 0), size: sizeText(Number(et.limit) || v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) }));
+    const ephs = section(t('Ephemeral browsers'), t('one for each conversation that browses without a profile — it stops when idle and goes with the conversation') + ' · ' + (et.n ? t('{n} action(s)', { n: et.n }) : t('no actions')) + ' · ' + t('{used} of {size}', { used: bytesText(Number(et.used) || 0), size: sizeText(Number(et.limit) || v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) }));
     fitsLine(ephs.firstChild, et);
     const erows = Array.isArray(v.ephemeralBrowsers) ? v.ephemeralBrowsers : [];
     if (!erows.length) ephs.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — no conversation has browsed without a profile since its start.')));

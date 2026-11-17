@@ -60,11 +60,11 @@ export function buildAppearancePanel(app, pop) {
   editBtn.onclick = (e) => { e.stopPropagation(); if (!app._themeEditor) app._themeEditor = new ThemeEditor(app); app._themeEditor.open(); };
 
   // Font size
-  const sizeLabel = document.createElement('label'); sizeLabel.textContent = t('Font Size');
+  const sizeLabel = document.createElement('label'); sizeLabel.textContent = t('Terminal font size'); // lane ui-plain-words phone-19: which of the three sizes this one is
   const sizeRow = document.createElement('div'); sizeRow.className = 'font-size-ctrl';
-  const sizeDown = document.createElement('button'); sizeDown.textContent = 'A-';
+  const sizeDown = document.createElement('button'); sizeDown.textContent = '−'; // the same − / + as the two size rows below
   const sizeVal = document.createElement('span'); sizeVal.textContent = app._fontSize;
-  const sizeUp = document.createElement('button'); sizeUp.textContent = 'A+';
+  const sizeUp = document.createElement('button'); sizeUp.textContent = '+';
   sizeRow.append(sizeDown, sizeVal, sizeUp);
 
   const applyFontSize = () => {

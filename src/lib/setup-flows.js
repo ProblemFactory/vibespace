@@ -4,6 +4,7 @@ import { TerminalSession } from './terminal.js';
 import { t, tc } from './i18n.js';
 import { stampAt as when, clockOf, span } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: a refusal toast's door
+import { techFoldHtml } from './plain-words.js'; // lane ui-plain-words: the report's instance and data folder fold
 import { sessionDisplayName } from '../session-name.js'; // THE name ladder — a drift-ledger row names its conversation (lane record-oracle-2-1-296)
 import * as chanCaps from '../channel-caps.js'; // lane channel-row-notices: a parked push lane's whole sentence (the row says one line)
 import { diagnosticsSection } from './cli-registration-words.js'; // lane cli-2-1-308-records: a claude build this release has no record table for
@@ -528,7 +529,7 @@ export function installSetupFlows(App) {
         // what changed right after this point ("HR 3 → 1") — the row a loss FOLLOWS is the one to restore (userW
         // inc-mun7qjmw-iksh); a point from before the field existed has none
         const change = Array.isArray(e.change) && e.change.length
-          ? e.change.map(([n, a, b]) => `${n || t('Desktop')} ${a} → ${b}`).join(' · ') : '';
+          ? e.change.map(([n, a, b]) => t('{desktop} went from {a} to {b} windows', { desktop: n || t('Desktop'), a, b })).join(' · ') : ''; // lane ui-plain-words gear-and-system-15: «个人 1 → 0» said in words
         // the point the hub's restart found (B-b05e — pinned: no burst after the restart pushes it out) says so
         return `<div class="lh-row"><div class="lh-main"><b>${escHtml(when(e.at))}</b>${e.restart ? `
             <div class="lh-sub lh-restart">${escHtml(t('As it was before the server restarted'))}</div>` : ''}
@@ -568,7 +569,7 @@ export function installSetupFlows(App) {
         if (!(await showConfirmDialog({
           title: t('Restore a previous layout'),
           message: t('Restore this layout? Your current one becomes a rollback point too, so this is undoable.'),
-          confirmText: tc('layout', 'Restore'),
+          confirmText: tc('layout', 'Restore'), // the dialog's own verb, «恢复» like its title (lane ui-plain-words gear-and-system-15)
         }))) return;
         const end = busy(b, t('Layout restored — reloading…'));
         const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rid: end.rid }) }).catch(() => null);
@@ -656,8 +657,9 @@ export function installSetupFlows(App) {
       .chip{display:inline-block;padding:1px 10px;border:1px solid #d0d7de;border-radius:12px;background:#f6f8fa;font-size:12px}
       .bar{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%} .bar i{display:block;width:16px;background:#54aeff;border-radius:2px 2px 0 0} .bar s{text-decoration:none;font-size:9px;color:#888;margin-top:2px}
     </style><body>
-    <h1>${esc(t('VibeSpace diagnostics'))} <span class="dim" style="font-size:13px">— ${esc(t('last {n} days', { n: d.days }))} · ${esc(t('instance'))} ${esc(d.instance || '?')}</span></h1>
-    <p class="dim">${esc(t('Local-only data from data/telemetry/. Total events: {n}.', { n: d.total }))}</p>
+    <h1>${esc(t('VibeSpace diagnostics'))} <span class="dim" style="font-size:13px">— ${esc(t('last {n} days', { n: d.days }))}</span></h1>
+    <p class="dim">${esc(t('This data stays on this machine. Total events: {n}.', { n: d.total }))}</p>
+    ${techFoldHtml([`${t('instance')} ${d.instance || '?'}`, 'data/telemetry/'], { mono: true })}
     ${csp && csp.app ? `<p><span class="chip" title="${esc(t('Lines in data/csp-reports.jsonl. A report from the app page also files a For-you notice; one from a frame the page made (a mail, a design) never does.'))}">${esc(t('Page security policy (reports only): {app} on the app page · {frames} from frames the page made', { app: csp.app.lines, frames: csp.frames.lines }))}</span>${csp.sanitizer && csp.sanitizer.lines ? ` <span class="chip" title="${esc(t('Lines of the sanitizer\'s parse in data/csp-reports.jsonl: somebody else\'s HTML (an agent\'s markdown, a .md file) carried an inline event handler, which the sanitizer dropped before anything ran. Chrome 156 reports that parse to the page security policy — it is not a gap in the policy and files no For-you notice.'))}">${esc(t('Sanitizer dropped an inline handler: {n}', { n: csp.sanitizer.lines }))}</span>` : ''}</p>` : ''}
     ${(() => {
       // lane runtime-floor: which Node runs and whether it is below the release that fixes the latest advisory; the
@@ -844,7 +846,7 @@ export function installSetupFlows(App) {
       <h2>${esc(t('Fleet errors'))}</h2>${ferrs}`;
     })()}
     </body>`;
-    this.openBrowser(URL.createObjectURL(new Blob([html], { type: 'text/html' })));
+    this.openBrowser(URL.createObjectURL(new Blob([html], { type: 'text/html' })), { title: t('VibeSpace diagnostics report') }); // a blob: page has no host to name it
   },
   });
 }

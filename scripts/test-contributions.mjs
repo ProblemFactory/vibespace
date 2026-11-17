@@ -458,7 +458,8 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   const switchWindowItems = () => [{ label: 'W-other' }, { label: '(no windows)', disabled: true }];
   // t = the identity with the runtime's {param} interpolation (every legacy label is param-free, so the matrix is unchanged)
   const ti = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : s);
-  new Function('registerCommand', 'registerMenuItem', 't', 'switchWindowItems', extract('src/lib/taskbar.js', 'registerWindowMenu'))(registerCommand, registerMenuItem, ti, switchWindowItems);
+  const { windowWords } = await import('../src/lib/window-types.js'); // lane ui-plain-words: the menu names a window through it
+  new Function('registerCommand', 'registerMenuItem', 't', 'switchWindowItems', 'windowWords', extract('src/lib/taskbar.js', 'registerWindowMenu'))(registerCommand, registerMenuItem, ti, switchWindowItems, windowWords);
   ok(hasCommand('window.close') && hasCommand('window.move') && hasCommand('window.terminateSession'), 'taskbar block registers the window.* commands + the window menu');
   // VERBATIM legacy builder (pre-registry taskbar.js showWindowContextMenu, 2.369.37), labels + act kinds
   const legacy = (app, id_, win, sess, { closeLabel = null, switchSubmenu = false } = {}) => {
@@ -622,7 +623,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   const calls = [];
   const panels = [];
   new Function('registerMenuItem', 't', 'getLangPref', 'setLang', 'fetchJson', 'GEAR_ICONS', 'PLUGIN_ICON', 'buildAppearancePanel', 'appearanceCaption', extract('src/lib/gear-menu.js', 'registerGearMenu'))(
-    registerMenuItem, id, () => 'zh', (code) => calls.push(['setLang', code]), () => Promise.resolve({}), GEAR_ICONS, PLUGIN_ICON, (app, pop) => { panels.push([app, pop]); return { panel: true }; }, (app) => 'cap:' + app._fontSize);
+    registerMenuItem, (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : s), () => 'zh', (code) => calls.push(['setLang', code]), () => Promise.resolve({}), GEAR_ICONS, PLUGIN_ICON, (app, pop) => { panels.push([app, pop]); return { panel: true }; }, (app) => 'cap:' + app._fontSize);
   // The four rows OTHER modules file under the heads — their specs are READ
   // OFF THE SOURCE (parent / order / label / gated-or-not) so the fixture
   // follows what the owners register, not a typed copy of it.

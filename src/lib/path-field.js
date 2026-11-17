@@ -29,6 +29,7 @@
 //   · never offered unasked: the instance's own checkout, its data dir, dot-folders (typed explicitly they still resolve)
 import { t } from './i18n.js';
 import { escHtml, fetchJson, createModalShell, onOutsidePress, pressToken, showToast } from './utils.js';
+import { nameOrGone } from './plain-words.js'; // lane ui-plain-words M2a: a machine by its name, never its id
 import { ownFloat } from './form-yield.js'; // PURE (lane dialog-yield r3): the floated list is the form's — a press on it keeps the form's keys
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
@@ -76,14 +77,22 @@ function localHome() {
   return LOCAL.p;
 }
 const stripSlash = (p) => { const s = String(p || '').trim(); return s.length > 1 ? s.replace(/\/+$/, '') : s; };
-/* a machine's NAME for the words (my-mac, never its id): GET /api/hosts once, else the page's host picker */
+/* a machine's NAME for the words (my-mac, never its id): GET /api/hosts once, else the page's host picker. Until the list
+   answers it is «这台机器»; a machine the list does not hold is «一台已不在列表中的机器» (lane ui-plain-words storage-4: the
+   field said «在 host-dial-build-box-01 上找：» — the first paint ran before the list came, and the id was the fallback) */
 const HOSTS = { names: null, p: null };
+const hostNamesLoaded = () => {
+  if (!HOSTS.names && !HOSTS.p) HOSTS.p = fetchJson('/api/hosts').then((d) => { HOSTS.names = Object.fromEntries(((d && d.hosts) || []).map((h) => [h.id, h.name])); }, () => { HOSTS.p = null; });
+  return HOSTS.names ? Promise.resolve() : HOSTS.p || Promise.resolve();
+};
 const hostName = (hk) => {
   if (!hk) return '';
-  if (!HOSTS.names && !HOSTS.p) HOSTS.p = fetchJson('/api/hosts').then((d) => { HOSTS.names = Object.fromEntries(((d && d.hosts) || []).map((h) => [h.id, h.name])); });
+  hostNamesLoaded();
   if (HOSTS.names && HOSTS.names[hk]) return HOSTS.names[hk];
   const o = [...document.querySelectorAll('select[id*="host"] option')].find((x) => x.value === hk);
-  return (o && o.textContent.replace(/\s*\(.*\)\s*$/, '').trim()) || hk;
+  const picked = o && o.textContent.replace(/\s*\(.*\)\s*$/, '').trim();
+  if (picked && picked !== hk) return picked;
+  return HOSTS.names ? nameOrGone('machine', hk, '') : t('the machine');
 };
 /* a paired machine the hub could not reach (lane hub-dies-dead-ssh-host): the server refuses it BY NAME before anything
    spawns (`unreachable` in the answer, kept a minute there) — the field says so in its own line and offers nothing there */
@@ -805,6 +814,7 @@ export function pathField(input, opts = {}) {
     list.remove();
   }
   paint();   // the chips row waits for refresh() (a field is built while the page boots — no fetch then)
+  if (hk() && !HOSTS.names) hostNamesLoaded().then(() => { if (!st.destroyed) paint(); }); // the machine's name, once the list answers
   const setDerived = (text, { note = '', commit: c = false } = {}) => set(text, { commit: c, how: 'derived', derived: { note } });
   const picking = () => !!(st.picking || (st.picker && st.picker.live()));   // its picker open, or its listing on the way (lane dialog-yield r6: a repaint keeps such a field)
   // lane dialog-yield r7: the person is IN the field — its box focused (or a press in its list / line / picker), its list open,

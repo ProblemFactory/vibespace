@@ -508,6 +508,7 @@ class SettingsUI {
     const pathEl = document.createElement('div');
     pathEl.className = 'settings-row-path';
     pathEl.textContent = path;
+    pathEl.hidden = !this._showAdvanced; // lane ui-plain-words usage-17: the setting's key is an engineer's word — shown with «显示高级设置» only
     info.append(label);
     if (chipLine.childNodes.length) info.append(chipLine);
     info.append(desc);

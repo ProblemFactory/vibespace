@@ -19,6 +19,7 @@
 // actions is a registration in its owning module — the test pins the exact
 // sets so a kind added without registering is red, not silent.
 import { track } from './telemetry-client.js';
+import { t } from './i18n.js';
 
 const TYPES = new Map();   // type   → { type, icon, label, persist, singleton }
 const ACTIONS = new Map(); // action → { action, type, replay }
@@ -38,8 +39,9 @@ export const svgIcon16 = (d) => `<svg style="width:1em;height:1em;vertical-align
  * Register a window kind.
  *   type       — the `type` passed to wm.createWindow (unique; the TYPE_ICONS key)
  *   icon       — inline SVG string ('' = no icon, e.g. usage/jobs today)
- *   label      — English display name (NOT wrapped in t() here — wrap at render time;
- *                nothing renders it yet, it is manifest metadata for the Ph2 loader)
+ *   label      — English display name, the kind's WORDS: windowKindWords() renders it through t() (the taskbar's
+ *                second line, a title-less window's name); scripts/i18n-extract.mjs extracts every label written
+ *                here as a key, so each needs its zh / ja row (lane ui-plain-words: never the raw `type`)
  *   persist    — default true: the window is recreated from its openSpec (layout
  *                restore / cross-client sync) and captureState breadcrumbs a
  *                missing spec. false = NOT restored from a spec: chat/terminal
@@ -109,6 +111,18 @@ export function getOpenAction(action) { return ACTIONS.get(action) || null; }
 /** Icon SVG for a window kind ('' when unregistered or icon-less — the exact
  *  value the pre-registry `TYPE_ICONS[type] || ''` reads produced). */
 export function windowTypeIcon(type) { return TYPES.get(type)?.icon || ''; }
+
+/** The words a person reads for a window KIND (lane ui-plain-words M2b): its registered label through t(), else
+ *  «窗口». Never the raw `type` — a kind's id is code («machine-app», «stage-placeholder»), not a word. */
+export function windowKindWords(type) { const l = TYPES.get(type)?.label; return l ? t(l) : t('Window'); }
+
+/** A window's name for a person: its title's first part (titles read «name — where»), else its kind's words. Every
+ *  reader that names a window (the taskbar, its window lists, the «is on that desktop» toast, the phone's list) goes
+ *  through here; scripts/test-window-types.mjs is red on a naming fallback to the raw kind or id anywhere else. */
+export function windowWords(win) {
+  const first = String((win && win.title) || '').split(' \u2014 ')[0].trim();
+  return first || windowKindWords(win && win.type);
+}
 
 /** layout.js captureState exemption: kinds that legitimately carry no openSpec. */
 export function isTransientWindowType(type) { return TYPES.get(type)?.persist === false; }

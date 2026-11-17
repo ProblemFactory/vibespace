@@ -35,6 +35,7 @@ const keys = new Set();
 const tRe = /\b(?:t|tr|i18nKey)\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g;
 // tc('ctx', 'str') — pgettext-style contextual keys, emitted as "ctx::str"
 const tcRe = /\btc\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*'((?:[^'\\]|\\.)*)'/g;
+const wtRe = /\bregisterWindowType\(\{(?:(?!registerWindowType\(|\}\);)[^])*?\blabel:\s*'((?:[^'\\]|\\.)*)'/g;
 // Unescape JS string escapes (\' \" \\ \n …) as escape PAIRS — a bare " (inside '…') gets its JSON escape,
 // an already-escaped \" (inside "…") stays one (dc-ratchet: the per-pair walk fixed a crash on such a key)
 const unescapeJs = (raw) => JSON.parse('"' + raw.replace(/\\.|"/g, (x) => (x === '"' ? '\\"' : x === "\\'" ? "'" : x)) + '"');
@@ -51,6 +52,9 @@ const walk = (dir) => {
       for (const m of src.matchAll(tcRe)) {
         keys.add(unescapeJs(m[1]) + '::' + unescapeJs(m[2]));
       }
+      // a window kind's `label: '…'` inside registerWindowType({…}) — the kind's words, rendered through t() by
+      // window-types.js windowKindWords (lane ui-plain-words: the taskbar never shows the raw `type`)
+      for (const m of src.matchAll(wtRe)) keys.add(unescapeJs(m[1]));
     }
   }
 };

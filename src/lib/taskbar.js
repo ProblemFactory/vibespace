@@ -4,6 +4,7 @@ import { stripHidden, wheelScroll } from './taskbar-fit.js'; // PURE (lane deskt
 import { menuPlace } from './menu-place.js'; // PURE: THE ONE placement — the «+N» list beside its chip (lane desktop-small r2 ②)
 import { groupClickVerdict, hoverVerdict, hoverStep, groupKeyVerdict, inFrontOf, GROUP_HOVER_INTENT_MS, GROUP_HOVER_LEAVE_MS } from './taskbar-group.js';
 import { t } from './i18n.js';
+import { windowWords, windowKindWords } from './window-types.js';
 import { terminalOnly, windowListMark } from './agent-meta.js'; // the harness table's own word for a plain shell (§78: no id branch here)
 import { visualTabOrder } from './chain-layout.js'; // the chooser lists a group in its STRIP order (split tabs v2: left half, then right)
 import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from './contributions.js';
@@ -115,7 +116,7 @@ function switchWindowItems(app, selfId) {
     }
     const otherDesk = scope === 'all' && w._desktopId && w._desktopId !== activeDesk && w._desktopId !== '__stage__';
     items.push({
-      label: (w.title || w.type) + (otherDesk ? `  — ${deskName(w._desktopId)}` : '') + (w.isMinimized ? ' ' + t('(minimized)') : ''),
+      label: windowWords(w) + (otherDesk ? `  — ${deskName(w._desktopId)}` : '') + (w.isMinimized ? ' ' + t('(minimized)') : ''),
       action: () => app.goToWinId(wid),
     });
   }
@@ -317,10 +318,13 @@ function _rebuildTaskbarItems(app, container, entries) {
     title.className = 'taskbar-title';
     // Split title: first part = name, second part = path (after " — ")
     const parts = win.title.split(' \u2014 ');
-    title.textContent = starPrefix + (parts[0] || win.title);
+    // lane ui-plain-words M2b: a title-less window is named by its kind's words; the second line is the title's tail,
+    // else the kind's words when they say something the first line does not (never the raw `type`: «stage-placeholder»)
+    title.textContent = starPrefix + windowWords(win);
     const subtitle = document.createElement('div');
     subtitle.className = 'taskbar-subtitle';
-    subtitle.textContent = parts[1] || win.type;
+    const kindWords = windowKindWords(win.type);
+    subtitle.textContent = parts[1] || (kindWords !== windowWords(win) ? kindWords : '');
     textCol.append(title, subtitle);
     item.append(icon, textCol);
     paintTile(app, item); // lane cache-warmth-band: the tile's warmth ring (before the icon), from the tick's map
@@ -418,7 +422,7 @@ export function registerWindowMenu() {
   const chainOf = (c) => (c.win && c.win._tabChain && Array.isArray(c.win._tabChain.tabs) ? c.win._tabChain : null);
   const inTabsGroup = (c) => { const ch = chainOf(c); return !!(ch && ch.layout !== 'split' && ch.tabs.length >= 2 && ch.tabs.includes(c.id) && !c.app.isMobile); };
   const inSplit = (c) => { const ch = chainOf(c); return !!(ch && ch.layout === 'split' && ch.split); };
-  const nameOfWin = (w) => String((w && w.title) || '').split(' \u2014 ')[0] || String(w && w.id);
+  const nameOfWin = (w) => windowWords(w);
   registerCommand({ id: 'window.unsplit', title: () => t('Unsplit'), run: (c) => c.app.wm.unbindSplit(chainOf(c)) });
   registerCommand({ id: 'window.swapSides', title: () => t('Swap left and right'), run: (c) => c.app.wm.swapSplit(chainOf(c)) });
   registerMenuItem({

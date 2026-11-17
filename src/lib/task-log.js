@@ -175,7 +175,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     if (state.tab === 'backlog') {
       const df = document.createElement('select');
       df.className = 'task-log-sessfilter';
-      df.innerHTML = [['all', t('All')], ['open', t('Open')], ['done', t('Done')], ['dropped', t('Dropped')]]
+      df.innerHTML = [['all', t('All')], ['open', tc('status', 'Open')], ['done', t('Done')], ['dropped', t('Dropped')]]
         .map(([v, l]) => `<option value="${v}"${state.statusFilter === v ? ' selected' : ''}>${escHtml(l)}</option>`).join('');
       df.onchange = () => { state.statusFilter = df.value; renderBody(); };
       head.appendChild(df);
@@ -519,7 +519,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
   // ── Backlog tab: open first (by priority, newest first — sortBacklog), then
   //    resolved; expandable detail + inline edit; a priority chip per row ──
   const STATUS_META = () => ({
-    open: { icon: '○', label: t('Open') },
+    open: { icon: '○', label: tc('status', 'Open') }, // lane ui-plain-words task-groups-8: the STATE «未完成», not the verb «打开»
     done: { icon: '✓', label: t('Done') },
     dropped: { icon: '⊘', label: t('Dropped') },
   });
@@ -634,6 +634,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
       st.textContent = meta.icon;
       st.title = meta.label;
       top.appendChild(st);
+      let idChip = null;
       if (it.id) {
         // the stable id — click to copy, so the user can hand it to ANY agent
         // ("look at backlog B-xxxx"), which can then view/claim it
@@ -645,7 +646,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
           e.preventDefault(); e.stopPropagation();
           import('./utils.js').then(({ copyText }) => copyText(it.id).then(() => showToast(t('Copied {id}', { id: it.id }))));
         };
-        top.appendChild(idc);
+        idChip = idc; // lane ui-plain-words task-groups-8: no column of its own — it sits with the row's actions (seen on hover / focus, always on a touch screen)
       }
       const chip = prioChip(it.priority);
       if (chip) top.appendChild(chip);
@@ -661,6 +662,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
       const acts = document.createElement('span');
       acts.className = 'task-log-blacts';
       top.appendChild(acts);
+      if (idChip) acts.appendChild(idChip);
       const btn = (txt2, title, onClick) => {
         const b = document.createElement('button');
         b.className = 'task-detail-x task-log-blbtn'; b.textContent = txt2; b.title = title;
@@ -705,7 +707,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     const resolved = visible.filter((i) => i.status !== 'open');
     if (open.length) {
       const h = document.createElement('div'); h.className = 'task-log-day';
-      h.innerHTML = `<span>${escHtml(t('Open'))}</span><span class="task-log-day-n">${open.length}</span>`;
+      h.innerHTML = `<span>${escHtml(tc('status', 'Open'))}</span><span class="task-log-day-n">${open.length}</span>`;
       body.appendChild(h);
       for (const it of open) body.appendChild(addItemRow(it));
     }
@@ -731,7 +733,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     addDetail.placeholder = t('Detail — context, options discussed, why it was deferred (optional)');
     const dToggle = document.createElement('button');
     dToggle.className = 'task-detail-btn';
-    dToggle.textContent = '† ' + t('detail');
+    dToggle.textContent = t('Add detail…'); // lane ui-plain-words task-groups-8: what the press does, not the log's † mark
     dToggle.title = t('Attach full context to the new item');
     dToggle.onclick = () => addDetail.classList.toggle('hidden');
     const commit = (how) => {

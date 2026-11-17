@@ -29,6 +29,7 @@ import { t } from './i18n.js';
 import { clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads (the lock's «since»)
 import { fetchJson, createModalShell, showToast, uiScale } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
+import { techFold } from './plain-words.js';
 import { createVncView, streamUrl } from './vnc-view.js';
 import { createStreamView } from './stream-view.js';
 import { createStreamStats } from './stream-stats.js'; // lane stream-window-fixes: THE stats row (the whole screen's window shows it too)
@@ -58,17 +59,29 @@ export function machineAppStateText(a, m, cmd = '') {
   return '';
 }
 
+/** A launch line's APP NAME for a title (lane ui-plain-words M2: a title names the app; the command itself goes into the
+ *  window's fold): the program's file name without its folder and extension — `start "" "C:\\…\\EXCEL.EXE" /x` → «EXCEL»,
+ *  `open -a "Visual Studio Code"` → «Visual Studio Code», `gedit notes.txt` → «gedit». '' when nothing names a program. */
+export function appNameOf(cmd) {
+  let s = String(cmd || '').trim().replace(/^start\s+(?:\/\w+\s+)*(?:"[^"]*"\s+)?/i, '');
+  const a = s.match(/^open\s+(?:-\w\s+)*-a\s+(?:"([^"]+)"|(\S+))/);
+  if (a) return (a[1] || a[2]).replace(/\.app$/i, '').slice(0, 60);
+  s = s.replace(/^open\s+/, '');
+  const prog = s.startsWith('"') ? s.slice(1).split('"')[0] : s.split(/\s+/)[0];
+  return prog.split(/[\\/]/).pop().replace(/\.(?:exe|app|lnk|bat|cmd|sh)$/i, '').slice(0, 60);
+}
+
 /**
  * THE WINDOW: `track` = { launched: {pid, at} } from the run's answer, or { target } (a window already followed);
  * `view` = the machine's picture options (its connect gate + sign-in — the whole desktop's own, src/lib/machine-desktop.js);
  * `openDesktop()` / `runAgain()` = the two ways on when the app's window is gone.
  */
-export function openMachineApp(app, m, { cmd = '', track = {}, view: viewOpts = {}, openDesktop = null, runAgain = null } = {}) {
+export function openMachineApp(app, m, { cmd = '', name = '', track = {}, view: viewOpts = {}, openDesktop = null, runAgain = null } = {}) {
   const id = machineDesktopId(m && m.hostId);
   if (!id) return null;
   app._hideWelcome?.();
   const machine = nameOf(m);
-  const winInfo = app.wm.createWindow({ title: t('{app} on {machine}', { app: cmd || t('An app'), machine }), type: 'machine-app' });
+  const winInfo = app.wm.createWindow({ title: t('{app} on {machine}', { app: name || appNameOf(cmd) || t('An app'), machine }), type: 'machine-app' });
   winInfo._machineApp = m.hostId;
   const c = winInfo.content;
   c.style.display = 'flex'; c.style.flexDirection = 'column';
@@ -79,7 +92,8 @@ export function openMachineApp(app, m, { cmd = '', track = {}, view: viewOpts = 
   const pinBtn = btn('file-tool-btn', t('Keep this one on top'), () => setOnTop(true)); pinBtn.style.cssText = 'width:auto;padding:0 10px;flex:0 0 auto';
   share.append(shareText, pinBtn);
   const host = el('div', 'position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column');
-  c.append(scope, share, host);
+  const cmdFold = techFold(cmd ? [cmd] : [], { mono: true, className: 'machine-app-cmd' }); // the command it started, never the title
+  c.append(scope, ...(cmdFold ? [cmdFold] : []), share, host);
 
   let key = null, seq = -1, answer = null, pin = null, closed = false, layout = null, lastActivate = 0, lastTitle = '';
   const view = createVncView(host, { url: streamUrl(`/api/desktop/${id}/stream`), autoReconnect: true, resizeSession: false, ...viewOpts });

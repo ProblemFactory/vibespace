@@ -31,6 +31,13 @@ import { railLabels, railUsed, RAIL_DONE } from '../day-one.js'; // lane door-da
 // usage-dashboard module having run its own Chart.register first.
 Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler);
 
+/** lane ui-plain-words system-ports-7: a store's WORDS by what it holds (its file path's first part — src/timed-sync.js STORES). */
+const STORE_SLOW_MS = 100;
+const STORE_WORDS = { 'session-meta': 'Conversations', 'session-status': 'Conversations', 'usage-history': 'Usage', 'usage-anchors': 'Usage', 'usage-reset-claims': 'Usage',
+  'user-todos': 'For you', 'task-groups': 'Task Groups', 'jobs': 'Background Work', 'job-notifications': 'Background Work', 'jobs-logs-sweep': 'Background Work',
+  'channels': 'Channels', 'telemetry': 'Diagnostics' };
+export const storeWords = (store, tr) => { const w = STORE_WORDS[String(store || '').split('/')[0]]; return w ? tr(w) : tr('Other data'); };
+
 // Protocol chip: what a port speaks (http/https/tcp) → how it can be shared.
 // `over` = user override active (shown filled/accented). Clicking opens the
 // override menu (Auto / HTTP / HTTPS / TCP).
@@ -672,10 +679,14 @@ export function installSidebarRail(Sidebar) {
           parts.push(`<div class="sys-load">${d.load.join(' · ')}${d.cpus ? ` <span class="sys-load-cpus">/ ${d.cpus} CPU</span>` : ''}</div>`);
         }
         // design 011 lane 1 (store-timing): this instance's slowest named store writes of the last hour
+        // lane ui-plain-words system-ports-7: in words — «存储写入正常» while the slowest stays under STORE_SLOW_MS, else the
+        // slowest one by what it holds («对话 120 ms»); the store's file names are the tooltip's (and the diagnostics page's)
         if (!hostId && Array.isArray(d.storeWrites)) {
           const dur = (v) => (v >= 1000 ? (v / 1000).toFixed(1) + ' s' : Math.round(v) + ' ms');
-          const list = d.storeWrites.map((w) => `${w.store} ${dur(w.ms)}`).join(' · ') || '—';
-          parts.push(`<div class="sys-load sys-store-writes">${escHtml(tr('Slowest store writes (last hour): {list}', { list }))}</div>`);
+          const top = d.storeWrites.filter((w) => w && Number(w.ms) >= STORE_SLOW_MS).sort((x, y) => y.ms - x.ms)[0];
+          const tip = d.storeWrites.map((w) => `${w.store} ${dur(w.ms)}`).join(' · ');
+          const say = top ? tr('Slowest data write in the last hour: {what} {time}', { what: storeWords(top.store, tr), time: dur(top.ms) }) : tr('Data writes are normal');
+          parts.push(`<div class="sys-load sys-store-writes" title="${escHtml(tip)}">${escHtml(say)}</div>`);
         }
         live.innerHTML = parts.join('');
         const fold = live.querySelector('.sys-mem-fold');

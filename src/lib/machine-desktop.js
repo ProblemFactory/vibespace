@@ -860,14 +860,14 @@ function machineViewOpts(m) {
 }
 /** lane machine-app-crop: "Run as its own window…" — the line confirmed as itself, run with the launch report, then the
  *  app's own window (src/lib/machine-app.js) follows the window that process opens. → the answer | null (cancelled) */
-export async function runAsAppWindow(app, m, line) {
+export async function runAsAppWindow(app, m, line, { name = '' } = {}) {
   const plan = desktopRunPlan(m.setup, line);
   if (!plan.ok) { showToast(desktopRefusalText({ code: plan.code, error: plan.error }, m), { type: 'error' }); return null; }
   if (!(await confirmRun(m, line))) return null;
   const r = await post('/api/desktop/machine-desktop/run', { host: m.hostId, cmd: line, window: true });
   if (!r || r.error) { showToast(desktopRefusalText(r, m), { type: 'error' }); return null; }
   saveRun(m.hostId, line);
-  openMachineApp(app, m, { cmd: line, track: { launched: r.launched || null }, view: machineViewOpts(m), openDesktop: () => openMachineDesktop(app, m), runAgain: () => runAsAppWindow(app, m, line) });
+  openMachineApp(app, m, { cmd: line, name, track: { launched: r.launched || null }, view: machineViewOpts(m), openDesktop: () => openMachineDesktop(app, m), runAgain: () => runAsAppWindow(app, m, line, { name }) });
   return r;
 }
 
@@ -893,7 +893,7 @@ const SOURCE_WORDS = { 'start-menu': () => t('Start menu'), uninstall: () => t('
  * KEYED by their launch line (a pending row by its name): a re-list moves the existing nodes, never rebuilds them.
  * A press hands the row's launch line to `onPick` — the run door judges it like any typed line.
  */
-function installedList(m, { onPick }) {
+function installedList(m, { onPick }) { // onPick(launch line, the app's name — the app window's title, lane ui-plain-words)
   const box = el('div'); box.className = 'machine-apps';
   const head = el('div'); head.className = 'machine-apps-head';
   const title = el('span'); title.className = 'machine-apps-title';
@@ -938,7 +938,7 @@ function installedList(m, { onPick }) {
       b.lastChild.textContent = (SOURCE_WORDS[r.source] || (() => ''))();
       b.title = r.launch || '';
       b.disabled = off || !r.launch;
-      b.onclick = () => { if (r.launch) onPick(r.launch); };
+      b.onclick = () => { if (r.launch) onPick(r.launch, r.name); };
       list.append(b); // in order: an existing node moves
     }
     list.hidden = !shown.length;
@@ -969,7 +969,8 @@ export function showMachineDesktopDialog(app, m0, { recheck = null, closeOpener 
   const scope = el('p', NOTE, t('Its desktop shows everything on {machine}’s screen, and what you type there goes to it. Only people can open it — agents cannot.', { machine }));
   const runHead = el('div', 'margin-top:12px;font-weight:600', t('Run on its desktop…'));
   const input = el('input', 'flex:1 1 120px;min-width:0;font-family:var(--font-mono, monospace)'); input.type = 'text'; input.spellcheck = false; input.autocomplete = 'off'; input.className = 'machine-desktop-cmd';
-  const apps = installedList(m, { onPick: (line) => { input.value = line; pickDefault(); input.focus(); } });
+  let picked = null; // { line, name } — the app a press filled the line with: its window is titled by that name while the line is unchanged
+  const apps = installedList(m, { onPick: (line, name) => { input.value = line; picked = { line, name }; pickDefault(); input.focus(); } });
   const presets = el('div'); presets.className = 'machine-apps-chips';
   const runRow = el('div', 'display:flex;flex-wrap:wrap;gap:6px'); // lane remoteapp-r1a: three buttons on a phone wrap below the line (the line keeps 120 px)
   const runBtn = btn('btn-create', t('Run…'), () => run());
@@ -1045,13 +1046,13 @@ export function showMachineDesktopDialog(app, m0, { recheck = null, closeOpener 
     input.disabled = offline; runBtn.disabled = offline; winBtn.disabled = offline; if (raBtn) raBtn.disabled = offline; apps.disable(offline); pickDefault();
     const list = desktopRunPresets(m.setup, readRuns()[m.hostId]);
     input.placeholder = list.length ? t('A command, e.g. {example}', { example: list[0].cmd }) : t('A command');
-    const chip = (p) => { const b = btn('file-tool-btn machine-apps-chip', p.label, () => { input.value = p.cmd; pickDefault(); input.focus(); }); b.title = p.cmd; b.disabled = offline; return b; };
+    const chip = (p) => { const b = btn('file-tool-btn machine-apps-chip', p.label, () => { input.value = p.cmd; picked = { line: p.cmd, name: p.label }; pickDefault(); input.focus(); }); b.title = p.cmd; b.disabled = offline; return b; };
     const group = (label, ps) => { if (!ps.length) return null; const g = el('div'); g.className = 'machine-apps-group'; g.append(el('span', null, label), ...ps.map(chip)); return g; };
     presets.replaceChildren(...[group(t('Recent'), list.filter((p) => p.remembered)), group(t('Examples'), list.filter((p) => !p.remembered))].filter(Boolean));
   }
   async function run({ window: own = false } = {}) {
     const line = input.value;
-    if (own) { winBtn.disabled = true; const r = await runAsAppWindow(app, m, line); winBtn.disabled = false; if (r) toWindow(); else if (live()) render(); return; } // the app's window is what the person wants to see now
+    if (own) { winBtn.disabled = true; const r = await runAsAppWindow(app, m, line, { name: picked && picked.line === line ? picked.name : '' }); winBtn.disabled = false; if (r) toWindow(); else if (live()) render(); return; } // the app's window is what the person wants to see now
     const plan = desktopRunPlan(m.setup, line); // the hub judges it again (the same PURE rule)
     if (!plan.ok) { showToast(desktopRefusalText({ code: plan.code, error: plan.error }, m), { type: 'error' }); return; }
     if (!(await confirmRun(m, line))) return;
