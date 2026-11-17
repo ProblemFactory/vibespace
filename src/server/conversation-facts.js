@@ -193,6 +193,9 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
   // again without a person: never owned. schedules = the crons among them; running = the rest. While an OWNER-LESS run from a
   // store recovery exists, nobody's job count is known (it may be anyone's).
   const TERMINAL_STATES = new Set(['done', 'failed', 'interrupted', 'missed']);
+  // round three: the recovery's own mark (src/jobs.js writes it on a skeleton; job-logs-sweep's isSkeleton reads the same) — a job a
+  // person made in the panel that reads unverified after a restart is not one
+  const isSkeleton = (j) => { let note = null; try { note = require('../job-logs-sweep.js').RECOVERED_NOTE; } catch { note = null; } return !!j && j.state === 'unverified' && !!note && j.note === note; };
   const ownedJob = (j) => j.state === 'unverified' || (j.state === 'down' ? j.desiredUp === true : !TERMINAL_STATES.has(j.state));
   const jobsIndex = memo(1000, () => {
     const jm = getJobs(); if (!jm || !jm.ready || !(jm.jobs instanceof Map)) return null;
@@ -200,7 +203,7 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
     by.ownerless = 0;
     for (const j of jm.jobs.values()) {
       const cid = j && j.owner && j.owner.conversation && j.owner.conversation.id;
-      if (!cid) { if (j && j.state === 'unverified') by.ownerless++; continue; }
+      if (!cid) { if (isSkeleton(j)) by.ownerless++; continue; }   // only the store recovery's OWN skeletons (a person's unverified job is nobody's conversation's)
       const unverified = j.state === 'unverified';
       if (!ownedJob(j)) continue;
       const e = by.get(cid) || { running: 0, schedules: 0, nextFireAt: null, items: [] };
