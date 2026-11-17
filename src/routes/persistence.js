@@ -1359,7 +1359,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     apply('userState', (d) => { if (d && typeof d === 'object') writeUserState(d, { whole: true }); });   // lane sidebar-echo-order r10: a person's import is an ACT at its time — an act made before it, re-sent after, does not land over it
     apply('bookmarks', (d) => { if (Array.isArray(d)) { writeBookmarks(d); broadcast({ type: 'bookmarks-updated', bookmarks: d }); } });
     // lane lg-store-writes, the census cure ((b)): the groups not on disk at the bound stop the import before the other stores — said
-    try { apply('tasks', (d) => { if (d && typeof d === 'object') getTasks?.()?.importBundle?.(d); }); }
+    try { apply('tasks', (d) => { if (d && typeof d === 'object') getTasks?.()?.importBundle?.(d, { bearer: !!require('../write-origin.js').pressBearer(req.headers) }); }); }   // lane lg-group-parents: a bearer's import brings no lineage
     catch (e) { if (e && e.code === 'EVSNOTONDISK') return res.status(503).json({ error: e.message, applied, notOnDisk: true }); throw e; }
     let pricingSkipped = [];
     apply('pricing', (d) => { if (d && typeof d === 'object') { const uh = getUsageHistory?.(); uh?.setPricing?.(d); pricingSkipped = uh?.lastCatalogSkips?.() || []; } });

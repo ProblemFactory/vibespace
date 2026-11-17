@@ -24,11 +24,18 @@
 //      conversation and the conversation started at the folder
 //   ⑤ the wiring pins + THE CENSUS: no hand-rolled `startsWith(<folder>.path + '/')` in a Task Group folder file (controls:
 //      the base's two spellings are caught)
+//   ⑥ lane lg-group-parents (B-91a7, the owner's rule ① of 2026-11-05): THE LINEAGE in the real store — `parents[]` written by
+//      the ONE writer (unknown / self / too many / a CYCLE refused by name, nothing written, the words name the path), the
+//      ancestors read nearest first (several parents = the union, an archived parent stops the walk, a cycle on disk ends it),
+//      grantGroupsOf (the doors' one reader), a removed parent leaves every child, an imported bundle healed; the manager
+//      agent's verb never takes `parents` (it WIDENS grants — the owner's door only); CONTROL: the store without its cycle
+//      check writes the cycle
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => { try { return fs.readFileSync(path.join(ROOT, f), 'utf8'); } catch { return ''; } };   // a missing file reads empty (the base has no task-membership.js — its legs go RED, never crash)
@@ -387,6 +394,106 @@ console.log('⑤ the wiring pins + THE CENSUS (one folder rule, one bind writer)
   ok(hits.length === 0, 'CENSUS: no hand-rolled `startsWith(<folder>.path + \'/\')` in a Task Group folder file — insideFolder is the rule (a folder includes itself)', hits);
   ok(HAND.test("          if (cwds.some(c => c === f.path || (f.recursive && c.startsWith(f.path + '/')))) { member = true; break; }") && HAND.test("          const under = s.cwd.startsWith(rec.path + '/') || (s.realCwd && s.realCwd.startsWith(rec.path + '/'));"),
     'CONTROL: the census catches the base\'s two spellings (task-groups.js groupsForSession, app.js _taskCwdSuggestions)');
+}
+
+console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE writer, acyclic; ancestors for the grant doors');
+{
+  const st = freshStore();
+  const G = st.create({ title: 'Grand' }), P = st.create({ title: 'Parent', parents: [G.id] }), C = st.create({ title: 'Child', parents: [P.id] });
+  ok(same(st.get(P.id).parents, [G.id]) && same(st.view(C.id).parents, [P.id]) && st.view(C.id).parents !== st.get(C.id).parents && st.get(G.id).parents === undefined, 'create names parents; the view carries a COPY; a group with none stores no field');
+  const code = (fn) => { try { fn(); return 'written'; } catch (e) { return e.code || e.message; } };
+  const before = JSON.stringify(st.get(G.id));
+  let msg = '';
+  try { st.update(G.id, { title: 'Moved', parents: [C.id] }); } catch (e) { msg = e.message; ok(e.code === 'parent_cycle', 'a CYCLE (the grandparent under its own grandchild) is refused parent_cycle', e.code); }
+  ok(JSON.stringify(st.get(G.id)) === before, '…and NOTHING moved — not even the title the same patch carried (the refusal comes first)');
+  ok(/«Child» already sits below «Grand» \(Grand › Parent › Child\)/.test(msg), 'the refusal names the path, top down', msg);
+  ok(code(() => st.update(P.id, { parents: [P.id] })) === 'parent_self' && code(() => st.update(P.id, { parents: ['T-nope'] })) === 'unknown_parent' && code(() => st.update(P.id, { parents: 'T-x' })) === 'bad_parents', 'itself ⇒ parent_self, a group the store does not hold ⇒ unknown_parent, not a list ⇒ bad_parents (each by name)');
+  const many = Array.from({ length: 9 }, (_, i) => st.create({ title: `M${i}` }).id);
+  ok(code(() => st.update(C.id, { parents: many })) === 'too_many_parents' && code(() => st.create({ title: 'Z', parents: many })) === 'too_many_parents', 'more than eight parents ⇒ too_many_parents (at the update and at the create)');
+  const Q = st.create({ title: 'Other parent' });
+  st.update(C.id, { parents: [P.id, Q.id, P.id] });
+  ok(same(st.get(C.id).parents, [P.id, Q.id]), 'several parents (rule ①: the union), duplicates collapsed, the order kept');
+  ok(same(st.ancestorsOf([C.id]), [P.id, Q.id, G.id]), 'ancestorsOf: every ancestor, nearest first, never the group itself', st.ancestorsOf([C.id]));
+  const D = st.create({ title: 'Diamond', parents: [P.id, Q.id] });
+  st.update(Q.id, { parents: [G.id] });
+  ok(same(st.ancestorsOf([D.id]), [P.id, Q.id, G.id]), 'a diamond reaches the grandparent ONCE');
+  ok(same(st.grantGroupsOf([st.get(C.id), D.id]), { ids: [C.id, D.id], inherited: [P.id, Q.id, G.id] }), 'grantGroupsOf (the doors\' ONE reader): own ids + their ancestors, from records or ids');
+  ok(same(st.grantGroupsOf([C.id, P.id]).inherited, [Q.id, G.id]), '…an own group is never in the inherited list (a conversation directly in the parent too)');
+  ok(same(st.childrenOf(P.id), [C.id, D.id]) && same(st.parentsOf(C.id), [P.id, Q.id]), 'childrenOf / parentsOf read the edges');
+  st.update(Q.id, { archived: true });
+  ok(same(st.ancestorsOf([C.id]), [P.id, G.id]) && !st.ancestorsOf([D.id]).includes(Q.id), 'an ARCHIVED parent gives nothing ITSELF (G still comes, by way of P and through Q)');
+  const E = st.create({ title: 'Under archived', parents: [Q.id] });
+  ok(same(st.ancestorsOf([E.id]), [G.id]), '…and the road runs THROUGH it: a child under an archived parent still inherits the grandparent (a grandparent\'s «除了» still covers it — the U3a read, MAJOR 4)', st.ancestorsOf([E.id]));
+  ok(code(() => st.update(G.id, { parents: [E.id] })) === 'parent_cycle', 'the cycle check walks THROUGH an archived group (E › archived Q › G: an unarchive never closes a cycle)');
+  st.update(Q.id, { archived: false });
+  st.remove(P.id);
+  ok(same(st.get(C.id).parents, [Q.id]) && st.get(D.id).parents.length === 1 && !st.ancestorsOf([C.id]).includes(P.id), 'a removed parent leaves every child\'s list');
+  st.update(C.id, { parents: [] });
+  ok(st.get(C.id).parents === undefined, 'an empty list removes the field');
+  // a cycle hand-written on disk: the walk ends, nothing loops
+  const raw = { version: 1, tasks: { 'T-a': { id: 'T-a', title: 'A', parents: ['T-b'], createdAt: 1 }, 'T-b': { id: 'T-b', title: 'B', parents: ['T-a', 'T-gone'], createdAt: 2 } } };
+  const st2 = freshStore(raw);
+  ok(same(st2.ancestorsOf(['T-a']), ['T-b']) && same(st2.parentsOf('T-b'), []), 'a cycle written on disk by hand is healed at the LOAD (its last edge dropped — the walk never meets it); a parent the store no longer holds is skipped', { a: st2.parentsOf('T-a'), b: st2.parentsOf('T-b') });
+  // an imported bundle is healed: gone ids, itself and a cycle-closing edge dropped
+  const st3 = freshStore();
+  const n = st3.importBundle({ tasks: [{ id: 'T-x', title: 'X', parents: ['T-y', 'T-x', 'T-none'], createdAt: 1 }, { id: 'T-y', title: 'Y', parents: ['T-x'], createdAt: 2 }] });
+  const px = st3.get('T-x').parents, py = st3.get('T-y').parents;
+  ok(n === 2 && same(px, ['T-y']) && py === undefined, 'importBundle heals the lineage: a gone id and itself dropped, the edge that would close a cycle dropped (groups in id order)', { px, py });
+  // the manager agent's verb never takes parents (a parent WIDENS what the child may use — the owner's door only)
+  const ar = read('src/agent-routes.js');
+  const adminUpd = (ar.match(/if \(update && update\.id\) \{[\s\S]*?tasks\.update\(update\.id, patch\);/) || [''])[0];
+  ok(adminUpd.length > 100 && !/parents/.test(adminUpd) && /app\.patch\('\/api\/tasks\/:id', \(req, res\) => \{\n    try \{ res\.json\(\{ success: true, task: tasks\.update\(req\.params\.id, req\.body \|\| \{\}, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\) \}\); \}/.test(read('src/server/task-groups-wiring.js'))
+    && /tasks\.create\(req\.body \|\| \{\}, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\)/.test(read('src/server/task-groups-wiring.js'))
+    && /importBundle\?\.\(d, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\)/.test(read('src/routes/persistence.js')), 'the manager agent\'s group-admin update never passes `parents`; the owner\'s create / PATCH and the config import hand the store WHO is asking (a bearer never sets a lineage)');
+  // ⑥b the U2 adversarial read's findings, each a leg
+  {
+    const s4 = freshStore();
+    const A = s4.create({ title: 'Alpha' }), Bq = s4.create({ title: 'Beta', parents: [A.id] });
+    const nextId = s4._genId('Gamma');
+    s4.get(Bq.id).parents = [A.id, nextId];   // an edge an older build / a hand edit left to an id nobody holds yet
+    const Gm = s4.create({ title: 'Gamma' });
+    ok(Gm.id === nextId && !s4.get(Bq.id).parents.includes(Gm.id) && same(s4.ancestorsOf([Bq.id]), [A.id]), 'read 1 (MAJOR): a NEW group never adopts a child through an edge left on disk for its id (the create clears it)', { id: Gm.id, next: nextId, b: s4.get(Bq.id).parents });
+    const s5 = freshStore({ version: 1, tasks: { 'T-c': { id: 'T-c', title: 'C', parents: ['T-gone', 'constructor', '__proto__', 'T-c', 'T-d'], createdAt: 1 }, 'T-d': { id: 'T-d', title: 'D', parents: ['T-c'], createdAt: 2 } } });
+    const pc = s5.get('T-c').parents, pd = s5.get('T-d').parents;
+    ok(same(pc, ['T-d']) && pd === undefined && same(s5.ancestorsOf(['T-c']), ['T-d']), 'read 1 + 6: the LOAD heals the lineage — a gone id, built-in names, itself and a cycle\'s last edge dropped', { pc, pd });
+    let thr = '';
+    try { s4.update(Bq.id, { parents: [Gm.id], color: '{x' }); } catch (e) { thr = e.message; }
+    ok(thr && same(s4.get(Bq.id).parents, [A.id]) && same(s4.ancestorsOf([Bq.id]), [A.id]), 'read 2 (MAJOR): a patch refused by a LATER check (a bad colour) moves no lineage — parents are applied last', { thr, p: s4.get(Bq.id).parents });
+    const logs = [];
+    s4.importBundle({ tasks: [{ id: A.id, title: 'Alpha', parents: [Bq.id], createdAt: 1 }] }, { log: (m) => logs.push(m) });
+    ok(same(s4.get(Bq.id).parents, [A.id]) && s4.get(A.id).parents === undefined && logs.some((l) => /1 parent link\(s\) not taken/.test(l)), 'read 3: a bundle\'s edge that would close a cycle with the store\'s OWN is the one dropped — and the import says so', { a: s4.get(A.id).parents, b: s4.get(Bq.id).parents, logs });
+    const gone = Array.from({ length: 8 }, (_, i) => `T-none-${i}`);
+    s4.importBundle({ tasks: [{ id: 'T-kid', title: 'Kid', parents: [...gone, A.id], createdAt: 9 }] }, { log: () => { } });
+    ok(same(s4.get('T-kid').parents, [A.id]), 'read 4: the cap of eight is applied AFTER the gone ids are dropped (the real parent kept)', s4.get('T-kid').parents);
+    const f = path.join(SCR, 'repo-file.md');
+    s4.exportToFile(Bq.id, f);
+    s4.importFromFile(f);
+    ok(same(s4.get(Bq.id).parents, [A.id]), 'read 5: the .md repo export / import never erases the lineage (it is the store\'s, as the table is)', s4.get(Bq.id).parents);
+    const no = (fn) => { try { fn(); return 'written'; } catch (e) { return e.code || e.message; } };
+    ok(no(() => s4.update(Gm.id, { parents: [A.id] }, { bearer: true })) === 'parents_owner_only' && no(() => s4.create({ title: 'Via bearer', parents: [A.id] }, { bearer: true })) === 'parents_owner_only' && s4.get(Gm.id).parents === undefined, 'read 7: a BEARER never sets a lineage (update and create refuse parents_owner_only; nothing written)');
+    s4.importBundle({ tasks: [{ id: Bq.id, title: 'Beta', parents: [Gm.id], createdAt: 2 }, { id: 'T-new-b', title: 'New', parents: [A.id], createdAt: 3 }] }, { bearer: true, log: () => { } });
+    ok(same(s4.get(Bq.id).parents, [A.id]) && s4.get('T-new-b').parents === undefined, 'read 7: a bearer\'s config import brings no lineage — an existing group keeps its own, a new one has none');
+    const r = s4.update(Bq.id, { title: 'Beta 2' });
+    ok(Array.isArray(r.parents) && r.parents !== s4.get(Bq.id).parents && s4.create({ title: 'Copy', parents: [A.id] }).parents !== undefined, 'read 8: what create / update hand back carries a COPY of the parents list');
+    s4.update(A.id, { archived: true });
+    ok(same(s4.grantGroupsOf([A.id]).inherited, []) && same(s4.ancestorsOf(['T-nobody']), []), 'read 9: an archived or unknown START gives nothing');
+    s4.update(A.id, { archived: false });
+    s4.update(Bq.id, { parents: null });
+    ok(s4.get(Bq.id).parents === undefined, 'read 10: parents:null clears (as the sibling fields read null)');
+  }
+  // CONTROL: the writer without its cycle check writes the cycle
+  const MZ = mutantCopies('task-groups-parents', ROOT);
+  try {
+    const src = read('src/task-groups.js');
+    const CYC = "      if (up) no('parent_cycle',";
+    ok(src.split(CYC).length === 2, 'CONTROL setup: the cycle refusal is found exactly once');
+    const MT = MZ.load('src/task-groups.js', src.replace(CYC, "      if (false && up) no('parent_cycle',"), 'no-cycle-check').TaskGroupManager;
+    const dm = path.join(SCR, 'data-mut'); fs.mkdirSync(dm, { recursive: true });
+    const sm = new MT({ dataDir: dm });
+    const a = sm.create({ title: 'A' }), b = sm.create({ title: 'B', parents: [a.id] });
+    let threw = false; try { sm.update(a.id, { parents: [b.id] }); } catch { threw = true; }
+    ok(!threw && same(sm.get(a.id).parents, [b.id]), 'CONTROL: a store without the cycle check WRITES the cycle — ⑥ «refused parent_cycle» would be red');
+  } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
 }
 
 console.log(`\ntest-task-groups: ${pass} passed, ${fail} failed`);

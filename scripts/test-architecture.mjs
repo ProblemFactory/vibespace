@@ -6556,7 +6556,7 @@ await section(async () => {
     } },
     { field: 'a Task Group\'s stored `externalVisibility`', re: /\.externalVisibility\b/, allow: {
       'src/server/grants-migration.js': { fns: null, why: 'the migration' },
-      'src/task-groups.js': { fns: ['_setVisibility(id, patch) {', '  update(id, patch = {}) {'], why: 'the PATCH\'s own field, written through the ONE writer (the view reads the row — visibilityOf)' },
+      'src/task-groups.js': { fns: ['_setVisibility(id, patch) {', '  update(id, patch = {}, { bearer = false } = {}) {' /* lane lg-group-parents: + who is asking (a bearer never sets parents) */], why: 'the PATCH\'s own field, written through the ONE writer (the view reads the row — visibilityOf)' },
       'src/lib/task-detail.js': { fns: null, why: 'the decorated view (the list\'s visibilityOf)' },
       'src/lib/new-session-form.js': { fns: null, why: 'the decorated view (the list\'s visibilityOf) — the New Session form\'s «Outside · notifications» fact (lane new-session-form; int346)' },
     } },

@@ -269,6 +269,10 @@ function slugify(title) {
 // agent browser P1 (§3.2.5 row 3): a group's default profile is a profile ID
 // (bp-<8 hex>) or null — a label would drift with a rename, so the picker
 // sends the id; anything else is null (never a throw out of a patch).
+// lane lg-group-parents (B-91a7): at most this many parents a group names (the owner's rule ①: several = the union)
+const PARENTS_MAX = 8;
+// the U2 read (7): a parent WIDENS what a child may use — a bearer (an agent, a job, an automation key) never sets one, sign-in on or off
+const PARENTS_OWNER_ONLY = () => Object.assign(new Error("a Task Group's parents are the owner's to set (the group's settings, signed in) — a bearer never sets them"), { code: 'parents_owner_only' });
 function sanitizeBrowserProfileId(v) { const s = typeof v === 'string' ? v.trim() : ''; return /^bp-[0-9a-f]{8}$/.test(s) ? s : null; }
 /** MULTIVIEW D4 (docs/design-browser-multiview.zh.md): the group's default PER-CONVERSATION browser cap, 1..6, or null (follow the instance setting). */
 function sanitizeBrowserCap(v) { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? Math.max(1, Math.min(6, Math.round(n))) : null; }
@@ -362,6 +366,9 @@ class TaskGroupManager {
     const readUserState = this._readUserState;
     for (const t of Object.values(this._state.tasks)) this._holdLegacy(t);
     this._primeMemberRows();   // B-55dc: the boot STARTS every Context row's first read, once, off the loop (no refresh loop)
+    // lane lg-group-parents (the U2 read, MAJOR 1): the lineage as the writer would take it — a gone id, a built-in name, a cycle a
+    // hand edit (or an older build) left are dropped at load, in memory; written with the store's next save
+    try { const dropped = this._healParents(); if (dropped.length) console.log(`[task-groups] load: ${dropped.length} parent link(s) dropped (a gone group, itself, or a cycle)`); } catch { /* a heal never blocks the boot */ }
     // One-time migration: Task Groups lost their status (岗位 refactor) — a
     // `done` group becomes archived, others just drop the field.
     let migrated = false;
@@ -2506,6 +2513,7 @@ class TaskGroupManager {
     const rows = this._ctxRows(t), res = this._res(t);
     return {
       ...t, plan: undefined, backlog: (t.backlog || []).map((b) => ({ ...b })), progress: [...(t.progress || [])], sessions: [...(t.sessions || [])],
+      ...(Array.isArray(t.parents) ? { parents: [...t.parents] } : {}),   // lane lg-group-parents: a copy, never the live list
       ctx: rows.map((r) => ({ ...r, ...(r.tags ? { tags: [...r.tags] } : {}) })),
       ctxRes: res.map((x) => (x.ref ? { ref: true } : { abs: x.abs || null, kind: x.kind, via: x.via || null, ...(x.host ? { host: x.host } : {}) })),
       folders: TC.discoverFolders(rows, res), contextDir: TC.notesDir(rows, res),
@@ -2520,10 +2528,108 @@ class TaskGroupManager {
     return t;
   }
 
-  create({ title, kind, archived, objective, sessions, ctx, folders, contextDir, color, pattern, injectContext, browserProfileId, browserCap } = {}) {
+  // ── THE LINEAGE (lane lg-group-parents, B-91a7 — the owner's four rules of 2026-11-05) ─────────────────────────────────
+  // A group may name SEVERAL parents (`parents: [groupId]`, ≤ PARENTS_MAX; rule ①: the union — a DAG, no order, no override).
+  // ONE writer (create / update, through _sanitizeParents — a cycle is refused before anything is written; remove() takes a
+  // gone group out of every child's list; importBundle heals what a bundle brings). ONE reader for the grant doors
+  // (grantGroupsOf: own groups + their ancestors, PURE src/grant-model.js judges). Setting a parent WIDENS what the child may
+  // use, so it is the owner's door only (PATCH /api/tasks/:id) — the manager agent's group-admin verb never takes it.
+  _titleOf(id) { const t = this._has(id) ? this._state.tasks[id] : null; return t ? String(t.title || id) : String(id); }
+  /** the U2 read (6): a group id is one this store HOLDS — its own key, never a built-in name (`constructor`, `__proto__`) */
+  _has(id) { return typeof id === 'string' && Object.prototype.hasOwnProperty.call(this._state.tasks, id) && !!this._state.tasks[id]; }
+  /** The path UP from `from` (through every parent, archived ones too — an unarchive must never close a cycle) to `target`
+   *  → [from, …, target], or null. Breadth-first with a visited set: a cycle hand-written on disk ends the walk. */
+  _pathUp(from, target) {
+    const back = new Map([[from, null]]), queue = [from];
+    while (queue.length) {
+      const id = queue.shift();
+      if (id === target) { const out = []; for (let x = id; x !== null; x = back.get(x)) out.unshift(x); return out; }
+      const t = this._has(id) ? this._state.tasks[id] : null;
+      for (const p of t && Array.isArray(t.parents) ? t.parents : []) if (this._has(p) && !back.has(p)) { back.set(p, id); queue.push(p); }
+    }
+    return null;
+  }
+  /** A `parents` patch → the clean list, or a thrown Error with its `code` (nothing written): a list of ids of groups this
+   *  store holds (`unknown_parent`), never the group itself (`parent_self`), at most PARENTS_MAX (`too_many_parents`), never
+   *  one that already sits below it (`parent_cycle` — the words name the path, top down). `selfId` null = a new group (no
+   *  child yet, so no cycle). */
+  _sanitizeParents(list, selfId) {
+    const no = (code, msg) => { throw Object.assign(new Error(msg), { code }); };
+    if (list === null) return [];   // the U2 read (10): null clears, as the sibling fields read it
+    if (!Array.isArray(list)) no('bad_parents', 'parents must be a list of Task Group ids');
+    const out = [];
+    for (const raw of list) {
+      const id = typeof raw === 'string' ? raw : raw && typeof raw === 'object' && typeof raw.id === 'string' ? raw.id : '';
+      if (!this._has(id)) no('unknown_parent', `no Task Group "${String(id).slice(0, 80)}" to be a parent`);
+      if (id === selfId) no('parent_self', 'a Task Group cannot be its own parent');
+      if (!out.includes(id)) out.push(id);
+    }
+    if (out.length > PARENTS_MAX) no('too_many_parents', `a Task Group names at most ${PARENTS_MAX} parents`);
+    if (selfId) for (const p of out) {
+      const up = this._pathUp(p, selfId);   // p … selfId: selfId already sits above p
+      if (up) no('parent_cycle', `«${this._titleOf(p)}» already sits below «${this._titleOf(selfId)}» (${up.slice().reverse().map((x) => this._titleOf(x)).join(' › ')}) — it cannot also be its parent`);
+    }
+    return out;
+  }
+  /** The parents a group names that this store still holds (its own order). */
+  parentsOf(id) { const t = this._has(id) ? this._state.tasks[id] : null; return t && Array.isArray(t.parents) ? t.parents.filter((p) => p !== id && this._has(p)) : []; }
+  /** The groups that name `id` as a parent (direct children, creation order). */
+  childrenOf(id) { return Object.values(this._state.tasks).filter((t) => t && Array.isArray(t.parents) && t.parents.includes(id)).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)).map((t) => t.id); }
+  /** Every ANCESTOR of the groups `ids` (breadth-first, nearest first; never one of `ids` themselves). An archived group gives
+   *  nothing ITSELF but the road runs THROUGH it (the U3a read, MAJOR 4: a grandparent's «除了» must still cover a grandchild
+   *  whose middle group was archived — rule ③ fails closed); a parent this store no longer holds is skipped; a cycle
+   *  hand-written on disk ends the walk (visited set). */
+  ancestorsOf(ids) {
+    const start = new Set((Array.isArray(ids) ? ids : [ids]).filter((x) => typeof x === 'string' && x));
+    // the U2 read (9): a start this store does not hold, or an ARCHIVED one, gives nothing (as an archived group's members get nothing)
+    const seen = new Set(start), out = [], queue = [...start].filter((x) => this._has(x) && !this._state.tasks[x].archived);
+    while (queue.length) {
+      for (const p of this.parentsOf(queue.shift())) {
+        if (seen.has(p)) continue;
+        seen.add(p);
+        queue.push(p);   // the road runs through an archived group …
+        if (!this._state.tasks[p].archived) out.push(p);   // … which itself gives nothing
+      }
+    }
+    return out;
+  }
+  /** THE ONE READER the grant doors take a caller's groups from: `groups` (records or ids — groupsForSession's answer) →
+   *  `{ ids, inherited }` = its own group ids and their ancestors (grant-model `groupIds` / `inheritedGroupIds`). */
+  grantGroupsOf(groups) {
+    const ids = [...new Set((Array.isArray(groups) ? groups : []).map((g) => String(g && typeof g === 'object' ? g.id : g)).filter((x) => x && x !== 'undefined' && x !== 'null'))];
+    return { ids, inherited: this.ancestorsOf(ids) };
+  }
+  /** The heal (the boot's load and importBundle): every group's parents re-read as the writer would take them — gone ids,
+   *  built-in names, itself and duplicates dropped, the cap kept AFTER that, and an edge that would close a cycle dropped. The
+   *  edges are taken again one by one, each judged against the edges taken so far: the store's OWN groups first (they were
+   *  acyclic), then `late` (a bundle's groups) — so of a cycle a bundle brings, the BUNDLE's edge is the one dropped (the U2 read,
+   *  3); groups in id order, parents in their order. → the dropped edges `[[child, parent]]` (the caller says them). */
+  _healParents(late = null) {
+    const asked = new Map();
+    for (const [id, t] of Object.entries(this._state.tasks)) if (t && Array.isArray(t.parents)) { asked.set(id, t.parents); t.parents = []; }
+    const lateSet = late instanceof Set ? late : new Set(late || []);
+    const order = [...asked.keys()].sort((a, b) => (lateSet.has(a) - lateSet.has(b)) || (a < b ? -1 : a > b ? 1 : 0));
+    const dropped = [];
+    for (const id of order) {
+      const t = this._state.tasks[id], was = asked.get(id);
+      for (const p of was) {
+        if (typeof p !== 'string' || p === id || !this._has(p) || t.parents.includes(p)) { if (typeof p === 'string' && p !== id && !t.parents.includes(p)) dropped.push([id, p]); continue; }
+        if (t.parents.length >= PARENTS_MAX || this._pathUp(p, id)) { dropped.push([id, p]); continue; }
+        t.parents.push(p);
+      }
+    }
+    for (const id of asked.keys()) { const t = this._state.tasks[id]; if (!t.parents.length) delete t.parents; }
+    return dropped;
+  }
+  /** (the U2 read, 8) a record handed back to a caller: a copy of the live parents list, never the list itself */
+  _out(t) { return Array.isArray(t.parents) ? { ...t, parents: [...t.parents] } : { ...t }; }
+
+  create({ title, kind, archived, objective, sessions, ctx, folders, contextDir, color, pattern, injectContext, browserProfileId, browserCap, parents } = {}, { bearer = false } = {}) {
     this._refuseUnread('a new Task Group'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const cleanTitle = String(title || '').trim().slice(0, CAPS.title);
     if (!cleanTitle) throw new Error('title required');
+    if (parents !== undefined && parents !== null && bearer) throw PARENTS_OWNER_ONLY();   // lane lg-group-parents (the U2 read, 7)
+    const cleanParents = parents !== undefined ? this._sanitizeParents(parents, null) : [];   // lane lg-group-parents: refused before anything is made
     const id = this._genId(cleanTitle);
     const now = Date.now();
     const t = {
@@ -2551,14 +2657,18 @@ class TaskGroupManager {
       // group's NEW sessions — never a retroactive edit of running ones
       browserProfileId: sanitizeBrowserProfileId(browserProfileId),
       browserCap: sanitizeBrowserCap(browserCap), // MULTIVIEW D4: the group's default per-conversation browser cap (null = the instance setting)
+      ...(cleanParents.length ? { parents: cleanParents } : {}),   // lane lg-group-parents: stored only when it names one
       createdAt: now,
       updatedAt: now,
       contentUpdatedAt: now,
     };
     this._state.tasks[id] = t;
+    // lane lg-group-parents (the U2 read, MAJOR 1): an id given out fresh never inherits an edge left on disk by a group of the
+    // same id that is gone (a hand edit, an older build's remove) — no child is adopted without the owner choosing it
+    for (const c of Object.values(this._state.tasks)) if (c && c !== t && Array.isArray(c.parents) && c.parents.includes(id)) { const left = c.parents.filter((p) => p !== id); if (left.length) c.parents = left; else delete c.parents; }
     this._save();
     this._notify(id);
-    return { ...t };
+    return this._out(t);
   }
 
   _ctxFromCreate({ ctx, folders, contextDir, id }) {
@@ -2624,9 +2734,11 @@ class TaskGroupManager {
     return v;
   }
 
-  update(id, patch = {}) {
+  update(id, patch = {}, { bearer = false } = {}) {
     this._refuseUnread('a change to a Task Group (a field, a backlog row)'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const t = this.get(id);
+    if (patch.parents !== undefined && bearer) throw PARENTS_OWNER_ONLY();   // lane lg-group-parents (the U2 read, 7): a bearer never sets a lineage
+    const parents = patch.parents !== undefined ? this._sanitizeParents(patch.parents, t.id) : undefined;   // lane lg-group-parents: refused BEFORE any field moves; applied LAST (below)
     if (patch.title !== undefined) {
       const clean = String(patch.title || '').trim().slice(0, CAPS.title);
       if (!clean) throw new Error('title required');
@@ -2701,6 +2813,8 @@ class TaskGroupManager {
         ? { reason: String(patch.attention.reason || '').slice(0, CAPS.reason), since: Number(patch.attention.since) || Date.now() }
         : null;
     }
+    // lane lg-group-parents (the U2 read, MAJOR 2): the lineage moves only after every check above that can throw has passed
+    if (parents !== undefined) { if (parents.length) t.parents = parents; else delete t.parents; }
     t.updatedAt = Date.now();
     // contentUpdatedAt gates AGENT re-injection: only what the injected context
     // actually renders (title/objective/backlog/the Context table) counts.
@@ -2714,7 +2828,7 @@ class TaskGroupManager {
     if (ctxChanged) t.ctxUpdatedAt = t.updatedAt;
     this._save();
     this._notify(id);
-    return { ...t };
+    return this._out(t);
   }
 
   remove(id) {
@@ -2727,6 +2841,7 @@ class TaskGroupManager {
     // its archived Activity log goes with it (first: a failed delete keeps the group, never orphaned words)
     if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });
     delete this._state.tasks[id];
+    for (const c of Object.values(this._state.tasks)) if (c && Array.isArray(c.parents) && c.parents.includes(id)) { const left = c.parents.filter((p) => p !== id); if (left.length) c.parents = left; else delete c.parents; }   // lane lg-group-parents: a gone parent leaves every child's list
     try { const g = this._grants(); if (g) g.remove('group-visibility', String(id), 'user'); } catch { /* the row of a gone group admits nobody */ }   // lane grants-unify
     this._legacy.delete(id);
     this._save();
@@ -3182,6 +3297,7 @@ class TaskGroupManager {
       })(),
       sessions: existing?.sessions || [],
       ctx: existing ? this._ctxRows(existing) : [],   // lane task-group-context: the table is the store's, never the file's
+      ...(existing && Array.isArray(existing.parents) ? { parents: [...existing.parents] } : {}),   // lane lg-group-parents (the U2 read, 5): the lineage too
       color: (typeof fm.color === 'string' && fm.color !== 'null' && !/[{};]/.test(fm.color)) ? fm.color.slice(0, 40) : (existing?.color || null),
       createdAt: existing?.createdAt || now,
       updatedAt: now,
@@ -3222,13 +3338,14 @@ class TaskGroupManager {
     }
   }
 
-  importBundle(bundle) {
+  importBundle(bundle, { bearer = false, log = (m) => console.log(m) } = {}) {
     this._refuseUnread('an import'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const items = Array.isArray(bundle?.tasks) ? bundle.tasks : [];
     // every group's archived months read STRICTLY first (主开发 00:41Z (e)): one that could not be read refuses the import before ANY group is applied — and what was read is what the loop merges (never a second read that could fail half-way)
     const pre = new Map();
     for (const raw of items) { if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !/^T-[\w-]{1,60}$/.test(raw.id) || !archivableId(raw.id)) continue; const months = bundle.archive && bundle.archive[raw.id]; if (!months || typeof months !== 'object') continue; const have = new Map(); for (const [m, text] of Object.entries(months)) if (/^\d{4}-\d{2}$/.test(m) && typeof text === 'string') have.set(m, this._monthEntries(raw.id, m + '.ndjson', { strict: true })); pre.set(raw.id, have); }
     let n = 0;
+    const late = new Set();   // lane lg-group-parents: the bundle's groups — their edges are judged after the store's own
     for (const raw of items) {
       if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !/^T-[\w-]{1,60}$/.test(raw.id)) continue;
       const now = Date.now();
@@ -3274,11 +3391,17 @@ class TaskGroupManager {
         ctx: Array.isArray(raw.ctx) ? TC.sanitizeRows(raw.ctx, { selfId: raw.id })
           : TC.rowsFromLegacy({ folders: this._sanitizeFolders(raw.folders), contextDir: (typeof raw.contextDir === 'string' && path.isAbsolute(raw.contextDir)) ? raw.contextDir : null }).rows,
         color: (typeof raw.color === 'string' && !/[{};]/.test(raw.color)) ? raw.color.slice(0, 40) : null,
+        // lane lg-group-parents: healed below, once every group is in (the cap AFTER the filter — the U2 read, 4); a BEARER's import
+        // (the U2 read, 7) brings no lineage: an existing group keeps its own, a new one has none
+        ...(bearer ? (this._state.tasks[raw.id] && Array.isArray(this._state.tasks[raw.id].parents) ? { parents: [...this._state.tasks[raw.id].parents] } : {})
+          : Array.isArray(raw.parents) && raw.parents.length ? { parents: raw.parents.filter((p) => typeof p === 'string' && /^T-[\w-]{1,60}$/.test(p)).slice(0, 64) } : {}),
         createdAt: Number(raw.createdAt) || now,
         updatedAt: Number(raw.updatedAt) || now,
       };
+      late.add(raw.id);
       n++;
     }
+    if (n) { const dropped = this._healParents(late); if (dropped.length) log(`[task-groups] import: ${dropped.length} parent link(s) not taken (a gone group, itself, past ${PARENTS_MAX}, or one that would close a cycle): ${dropped.slice(0, 5).map(([child, parent]) => `${child} › ${parent}`).join(', ')}`); }
     // the deferred-save census (its Task Groups pass): the config import writes other stores (credentials, hosts, the password) right after
     // this section — the groups LAND first (bounded), as the release's synchronous save did
     if (n) {

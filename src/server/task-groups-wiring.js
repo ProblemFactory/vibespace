@@ -75,12 +75,12 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
   // (the U4/U5 cure: on the writer's SYNCHRONOUS road — an answer still waiting when the hub stops goes out inside its exit flush)
   const onDisk = (res, body, notYet = null) => { if (typeof tasks.persisted !== 'function') { res.json(body); return; } tasks.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json(saved ? body : { ...body, notOnDisk: true, ...(notYet || {}) }); } catch { } }); };
   app.post('/api/tasks', (req, res) => {
-    try { onDisk(res, { success: true, task: tasks.create(req.body || {}) }); }
+    try { onDisk(res, { success: true, task: tasks.create(req.body || {}, { bearer: !!require('../write-origin.js').pressBearer(req.headers) }) }); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });
   app.patch('/api/tasks/:id', (req, res) => {
-    try { onDisk(res, { success: true, task: tasks.update(req.params.id, req.body || {}) }); }
-    catch (e) { res.status(e.message === 'task not found' ? 404 : e.code === 'except_unnamed' ? 409 : 400).json({ error: e.message, ...(e.code === 'except_unnamed' ? { code: e.code } : {}) }); }   // lane held-except-doors: a 除了 left out unnamed
+    try { onDisk(res, { success: true, task: tasks.update(req.params.id, req.body || {}, { bearer: !!require('../write-origin.js').pressBearer(req.headers) }) }); }
+    catch (e) { res.status(e.message === 'task not found' ? 404 : e.code === 'except_unnamed' ? 409 : e.code === 'parents_owner_only' ? 403 : 400).json({ error: e.message, ...(e.code === 'except_unnamed' ? { code: e.code } : {}) }); }   // lane held-except-doors: a 除了 left out unnamed
   });
   app.delete('/api/tasks/:id', (req, res) => {
     try { tasks.remove(req.params.id); onDisk(res, { success: true }, { code: 'finishes-on-landing' }); }   // the moved2 cure 2: its Activity log and grant follow by themselves at the landing
