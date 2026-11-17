@@ -193,7 +193,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   // takeover r2 (T6): the running app process's own executable — the name a wrapper the human typed execs
   // INTO (x-www-browser → chrome). One readlink; injectable for the suite; null = no evidence
   procExe = (pid) => { try { return fs.readlinkSync(`/proc/${pid}/exe`); } catch { return null; } },
-  groupsOf = null, modeProbeMs = MODE_PROBE_MS, grants = null } = {}) {
+  groupsOf = null, lineageOf = null, modeProbeMs = MODE_PROBE_MS, grants = null } = {}) {
   if (!keeper) throw new Error('window-targets engine: keeper required');
   const grantsOf = typeof grants === 'function' ? grants : () => grants || GS.forDir(dataDir);
   const leaseFile = path.join(dataDir, LEASE_FILE);
@@ -346,8 +346,11 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const s = (facts && sessionsMap().get(facts.sessionId)) || (facts && facts.session) || {};
     let groupIds = [], unreadable = false;
     if (typeof groupsOf === 'function') { try { const gs = groupsOf(s, facts.sessionId) || []; groupIds = gs.map((g) => String(g && typeof g === 'object' ? g.id : g)); if (gs.unread) unreadable = true; /* B-55dc: still being read ⇒ the lease is KEPT, a verb refused by name */ } catch (e) { unreadable = true; if (!(e && e.code === 'TASK_GROUPS_UNREAD') || e.firstOfHold) log.warn?.(`[window] group membership unreadable for ${facts.sessionId}: ${e.message}`); } }   // a held store: one line a hold (lane bl-windows)
+    // lane lg-group-parents U3a: the ancestors of those groups — a lineage that cannot be read is `unreadable` too
+    let inheritedGroupIds = [];
+    if (!unreadable && typeof lineageOf === 'function') { try { inheritedGroupIds = (lineageOf(groupIds) || []).map(String); } catch (e) { unreadable = true; log.warn?.(`[window] group lineage unreadable — ${e && e.message}`); } }
     const sessionKeys = keysOf(s, facts.sessionId);
-    return { sessionKeys, conversationKeys: sessionKeys.map(R.sessionKeyNow).filter(Boolean), groupIds, ...(unreadable ? { unreadable: true } : {}) };   // verify r6: a borrowed id is not a key · lane grants-unify: + the ONE spelling
+    return { sessionKeys, conversationKeys: sessionKeys.map(R.sessionKeyNow).filter(Boolean), groupIds, inheritedGroupIds, ...(unreadable ? { unreadable: true } : {}) };   // verify r6: a borrowed id is not a key · lane grants-unify: + the ONE spelling
   }
   const reachOfFacts = (rec, facts) => R.reachFor(reachRecord(rec.id), ctxOf(facts));
   /** THE REACH GATE (D1): a VibeSpace-started window this caller does not reach is refused `not_exposed` by name; a
@@ -1530,7 +1533,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       // the follow-owed read (should 4): a share that leaves a Task Group OUT reads each session's groups for every row kind — a
       // session / everyone row judged with no groups listed G's own members as reached (the dialog's list, the launch audit count)
       const c = needGroups ? ctxOf({ sessionId: id, session: s }) : { sessionKeys: keysOf(s, id), conversationKeys: keysOf(s, id).map(R.sessionKeyNow).filter(Boolean), groupIds: [] };
-      const v = GM.admits([one], { conversationKeys: c.conversationKeys, groupIds: c.groupIds, groupsUnreadable: !!c.unreadable });
+      const v = GM.admits([one], { conversationKeys: c.conversationKeys, groupIds: c.groupIds, inheritedGroupIds: c.inheritedGroupIds || [], groupsUnreadable: !!c.unreadable });   // lane lg-group-parents U3a
       if (!v.ok && v.code === 'groups_unreadable') { unreadable++; continue; }
       const hit = v.ok;
       if (hit) out.push({ sessionId: id, name: s.name || s.webuiName || id });

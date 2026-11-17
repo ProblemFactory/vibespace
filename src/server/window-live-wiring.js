@@ -39,14 +39,14 @@
  * missing dependency of its OWN (a programming error).
  */
 
-function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, access = null, deliver = null, groupsOf = null, browserStream = null, log = console, now = Date.now } = {}) {
+function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, access = null, deliver = null, groupsOf = null, lineageOf = null, browserStream = null, log = console, now = Date.now } = {}) {
   if (!app || !auth || !keeper || !vnc) throw new Error('window-live wiring: app, auth, vnc and keeper are required');
   const DV = require('../desktop-viewers.js');
   let streamRef = null;
   // a lease change re-applies every viewer's state (x5): the engine publishes through this broadcast
   const leaseBroadcast = (m) => { broadcast?.(m); if (m && m.type === 'window-leases-updated') { try { streamRef?.refreshAll(); } catch (e) { log.warn?.(`[window] viewer refresh failed — ${e && e.message}`); } } };
   // lane C2: the engine's world is THIS machine's windows (xdotool / AT-SPI act here) — a paired machine's app is not an agent window target
-  const engine = require('./window-targets-engine.js').create({ keeper: keeper.local || keeper, dataDir, env, activeSessions, serverSetting, broadcast: leaseBroadcast, groupsOf, log });
+  const engine = require('./window-targets-engine.js').create({ keeper: keeper.local || keeper, dataDir, env, activeSessions, serverSetting, broadcast: leaseBroadcast, groupsOf, lineageOf, log });   // lane lg-group-parents U3a: + the lineage reader
   // lane E (D3): the ONE producer of "Ask <agent> to take control" — free next turn by default, a wake through the gated ladder
   const windowRequest = require('./window-request.js').create({ engine, deliver, activeSessions, log });
   // THE PICTURE SOURCES (src/server/stream-sources.js): the singleton Desktop, a Windows / macOS machine's whole desktop

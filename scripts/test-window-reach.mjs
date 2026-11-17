@@ -430,7 +430,7 @@ console.log('§9 NEGATIVE CONTROLS — patched copies outside the tree');
   const file = path.join(REPO, 'src/window-reach.js');
   const src = fs.readFileSync(file, 'utf8');
   // (a) reachFor ignores group rows
-  const a = src.replace("groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], groupsUnreadable: !!ctx.unreadable });", "groupIds: [], groupsUnreadable: !!ctx.unreadable });");   // lane grants-unify: the door no longer hands the model the caller's groups
+  const a = src.replace("groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], inheritedGroupIds: Array.isArray(ctx.inheritedGroupIds) ? ctx.inheritedGroupIds : [], groupsUnreadable: !!ctx.unreadable });", "groupIds: [], inheritedGroupIds: [], groupsUnreadable: !!ctx.unreadable });");   // lane lg-group-parents U3a: + the lineage beside the groups   // lane grants-unify: the door no longer hands the model the caller's groups
   ok(a !== src, 'control (a): the patch applies (reachFor ignoring group rows)');
   const Ra = MUT.load('src/window-reach.js', a, 'nogroups');
   const ta = runTable(Ra);

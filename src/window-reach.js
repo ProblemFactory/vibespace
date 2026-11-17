@@ -165,11 +165,14 @@ function normPrincipal(p) {
   if (kind === 'session') { id = sessionKeyNow(id); if (!id) return null; }
   else if (!GROUP_ID_RE.test(id)) return null;
   const name = cleanName(p.name);
-  return name ? { kind, id, name } : { kind, id };
+  const only = kind === 'group' && p.only === true ? { only: true } : {};   // lane lg-group-parents (the U3a read, BLOCKER 2): «仅本组» rides the record
+  return name ? { kind, id, name, ...only } : { kind, id, ...only };
 }
-/** A record principal ⇄ the grant model's principal (`session` ⇄ `conversation`). */
-const toGrantPrincipal = (p) => (p.kind === 'session' ? { kind: 'conversation', key: p.id } : p.kind === 'group' ? { kind: 'group', id: p.id } : { kind: 'everyone' });
-const fromGrantPrincipal = (e) => (e.kind === 'conversation' ? { kind: 'session', id: e.key } : e.kind === 'group' ? { kind: 'group', id: e.id } : { kind: 'everyone', id: EVERYONE_ID });
+/** A record principal ⇄ the grant model's principal (`session` ⇄ `conversation`) — a group's «仅本组» both ways. */
+const toGrantPrincipal = (p) => (p.kind === 'session' ? { kind: 'conversation', key: p.id } : p.kind === 'group' ? { kind: 'group', id: p.id, ...(p.only === true ? { only: true } : {}) } : { kind: 'everyone' });
+const fromGrantPrincipal = (e) => (e.kind === 'conversation' ? { kind: 'session', id: e.key } : e.kind === 'group' ? { kind: 'group', id: e.id, ...(e.only === true ? { only: true } : {}) } : { kind: 'everyone', id: EVERYONE_ID });
+/** an exception never carries «仅本组» (rule ③ — it always covers the child groups) */
+const exceptPrincipal = (p) => { const g = toGrantPrincipal(p); if (g.only) delete g.only; return g; };
 const principalKey = (p) => `${p.kind}\u0000${p.id}`;
 
 // ── the record + its transitions (every one returns a NEW record) ───────────
@@ -224,7 +227,7 @@ function recordOfRows(windowId, mode, rows) {
 /** The record's row for the ONE writer: `{door:'window', resource, to, except}` (each entry its origin, at, name). */
 function rowOfRecord(record) {
   const rec = normRecord(record);
-  return { door: 'window', resource: rec.windowId || '-', to: rec.rows.map((r) => ({ ...toGrantPrincipal(r.principal), ...(r.principal.name ? { name: r.principal.name } : {}), ...(r.grantedAt ? { at: r.grantedAt } : {}), origin: r.by })), except: rec.except.map(toGrantPrincipal) };
+  return { door: 'window', resource: rec.windowId || '-', to: rec.rows.map((r) => ({ ...toGrantPrincipal(r.principal), ...(r.principal.name ? { name: r.principal.name } : {}), ...(r.grantedAt ? { at: r.grantedAt } : {}), origin: r.by })), except: rec.except.map(exceptPrincipal) };
 }
 /** «除了»: the members left OUT of the share's Task Groups / All agents. A principal the share names itself cannot be left
  *  out (`except_conflicts`); everyone never is (`bad_principal`). */
@@ -232,7 +235,7 @@ function setExcept(record, list) {
   const rec = normRecord(record);
   const out = [];
   for (const x of Array.isArray(list) ? list : []) {
-    const p = normPrincipal(x);
+    const p0 = normPrincipal(x), p = p0 && p0.only ? (({ only, ...rest }) => rest)(p0) : p0;   // lane lg-group-parents: an exception never carries «仅本组»
     if (!p || p.kind === 'everyone') return { ...refuse('bad_principal', 'an exception names a conversation or a Task Group'), record: rec, changed: false };
     if (rec.rows.some((r) => principalKey(r.principal) === principalKey(p))) return { ...refuse('except_conflicts', `${p.kind === 'session' ? 'that conversation' : 'that Task Group'} is shared with by name — it cannot also be left out`), record: rec, changed: false };
     if (!out.some((e) => principalKey(e) === principalKey(p))) out.push(p);
@@ -296,7 +299,7 @@ function reachFor(record, ctx = {}) {
   // the caller's keys in the ONE spelling (a pre-unify `<backend>:<cid>` key mapped; a bare `sessionId` is one more key)
   const keys = [...(Array.isArray(ctx.conversationKeys) ? ctx.conversationKeys : (Array.isArray(ctx.sessionKeys) ? ctx.sessionKeys : []).map(sessionKeyNow)), ...(ctx.sessionId ? [sessionKeyNow(ctx.sessionId) || String(ctx.sessionId)] : [])].filter(Boolean);
   // THE ONE ADMISSION (src/grant-model.js admits) — the most SPECIFIC admitting entry decides which row is named
-  const v = GM.admits([rowOfRecord(rec)], { conversationKeys: keys, groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], groupsUnreadable: !!ctx.unreadable });
+  const v = GM.admits([rowOfRecord(rec)], { conversationKeys: keys, groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], inheritedGroupIds: Array.isArray(ctx.inheritedGroupIds) ? ctx.inheritedGroupIds : [], groupsUnreadable: !!ctx.unreadable });   // lane lg-group-parents U3a: + the lineage
   if (!v.ok) {
     if (v.code === 'groups_unreadable') return { level: 'hidden', via: null, row: null, unreadable: true };
     if (v.code === 'excepted') return { level: 'hidden', via: null, row: null, excepted: true, except: v.entry ? fromGrantPrincipal(v.entry) : null };

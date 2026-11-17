@@ -628,8 +628,8 @@ console.log('⑦ the reach table: four principal sets × six actors × read / re
   {
     const wrSrc = read('src/window-reach.js');
     // lane grants-unify: window-reach hands the model its All row — the mutant hands it a row that names nobody instead
-    const WR_LINE = "p.kind === 'group' ? { kind: 'group', id: p.id } : { kind: 'everyone' });";
-    const wrMut = wrSrc.includes(WR_LINE) ? M.load('src/window-reach.js', wrSrc.replace(WR_LINE, "p.kind === 'group' ? { kind: 'group', id: p.id } : { kind: 'group', id: 'nobody' });"), 'all-names-nobody') : null;
+    const WR_LINE = "p.kind === 'group' ? { kind: 'group', id: p.id, ...(p.only === true ? { only: true } : {}) } : { kind: 'everyone' });";   // lane lg-group-parents U3a: a group keeps «仅本组»
+    const wrMut = wrSrc.includes(WR_LINE) ? M.load('src/window-reach.js', wrSrc.replace(WR_LINE, "p.kind === 'group' ? { kind: 'group', id: p.id, ...(p.only === true ? { only: true } : {}) } : { kind: 'group', id: 'nobody' });"), 'all-names-nobody') : null;
     const rec = wrMut ? wrMut.grant(wrMut.emptyRecord('w1'), ALL, { by: 'user', at: 1 }).record : null;
     ok(!!wrMut && wrMut.reachFor(rec, { sessionKeys: [`claude:${A9}`] }).level === 'hidden', 'CONTROL (7a): window-reach whose All row names nobody ⇒ the born-after cell reads hidden — RED');
     const cfSrc = read('src/channel-filter.js');

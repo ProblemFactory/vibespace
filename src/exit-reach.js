@@ -158,7 +158,10 @@ function grantOfRows(rows) {
   if (!list.length) return { mode: 'nobody', who: [], except: [] };
   const n = GM.normRow(list[0]);
   if (!n.ok || n.row.door !== 'exit') return null;
-  const who = n.row.to.filter((p) => p.kind !== 'everyone').map(GM.bareOf).slice(0, WHO_MAX);
+  // lane lg-group-parents (the U3a read, BLOCKER 1): «仅本组» (`only`) rides the row read — a bare principal would read a
+  // «仅本组» group grant as «含子组» and let the child's conversation in
+  const keepOnly = (p) => { const b = GM.bareOf(p); return b && b.kind === 'group' && p.only === true ? { ...b, only: true } : b; };
+  const who = n.row.to.filter((p) => p.kind !== 'everyone').map(keepOnly).slice(0, WHO_MAX);
   const mode = n.row.to.some((p) => p.kind === 'everyone') ? 'everyone' : who.length ? 'only' : 'nobody';
   return { mode, who, except: n.row.except.map(GM.bareOf) };
 }
@@ -212,7 +215,7 @@ const rowOfGrant = (g) => ({ door: 'exit', resource: '-', to: [...(g.mode === 'e
  *  mapped — `ctx.conversationKeys` when the caller already has them), its live groups, the two fault flags. */
 function factsOf(ctx = {}) {
   const keys = Array.isArray(ctx.conversationKeys) ? ctx.conversationKeys : (Array.isArray(ctx.sessionKeys) ? ctx.sessionKeys : []).map(GM.keyFromSessionKey).filter(Boolean);
-  return { conversationKeys: keys, groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], groupsUnreadable: !!ctx.unreadable, forkPending: !!ctx.forkPending };
+  return { conversationKeys: keys, groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], inheritedGroupIds: Array.isArray(ctx.inheritedGroupIds) ? ctx.inheritedGroupIds : [], groupsUnreadable: !!ctx.unreadable, forkPending: !!ctx.forkPending };   // lane lg-group-parents U3a: + the lineage
 }
 
 // ── the verdict ─────────────────────────────────────────────────────────────

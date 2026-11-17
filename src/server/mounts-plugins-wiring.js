@@ -133,11 +133,12 @@ const vaultUseGrants = require('./vault-use-grants.js').create({ grants: () => r
 const vaultUseFacts = (caller) => {
   for (const [id, s] of activeSessions) {
     if (!s || s.isTmuxView || !caller || require('../claude-lock-capture.js').addressableId(s) !== caller.conversationId) continue;   // fork-safe: a pending fork shares its parent's id and is never picked
-    let groupIds = [], groupsUnreadable = false;
+    let groupIds = [], inheritedGroupIds = [], groupsUnreadable = false;
     const tasks = getTasks && getTasks();
-    if (tasks && sessionStatusKey) { try { const ids = grantMemberIds(tasks, { sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }); groupIds = [...ids]; if (ids.unread) groupsUnreadable = true; /* B-55dc: still being read */ } catch { groupsUnreadable = true; } }   // a HELD store throws: UNREADABLE, never «in no group» (lane bl-windows)
+    // lane lg-group-parents U3a: own groups + their ancestors from the ONE reader (tasks.grantGroupsOf)
+    if (tasks && sessionStatusKey) { try { const ids = grantMemberIds(tasks, { sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }); const gg = tasks.grantGroupsOf(ids); groupIds = gg.ids; inheritedGroupIds = gg.inherited; if (ids.unread) groupsUnreadable = true; /* B-55dc: still being read */ } catch { groupsUnreadable = true; } }   // a HELD store throws: UNREADABLE, never «in no group» (lane bl-windows)
     const tb = s._turnBy && typeof s._turnBy === 'object' ? s._turnBy : null;   // B-d868: who started the turn now running (claude-stream-json's kept fact)
-    return { conversationKeys: require('../grant-model.js').conversationKeysOf(s, s._webuiId || id), groupIds, groupsUnreadable, turnBy: tb ? require('../message-manager.js').turnByForAsk({ ...tb, by: String(tb.by || 'unrecorded') }, s._turnByBackground) : null };   // B-d868: background work of another turn ⇒ «not recorded»
+    return { conversationKeys: require('../grant-model.js').conversationKeysOf(s, s._webuiId || id), groupIds, inheritedGroupIds, groupsUnreadable, turnBy: tb ? require('../message-manager.js').turnByForAsk({ ...tb, by: String(tb.by || 'unrecorded') }, s._turnByBackground) : null };   // B-d868: background work of another turn ⇒ «not recorded»
   }
   return { conversationKeys: caller && caller.conversationId ? [caller.conversationId] : [] };
 };

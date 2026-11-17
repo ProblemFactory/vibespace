@@ -105,7 +105,7 @@ function socksAuth(sock, check) {
 
 class ExitProxyManager {
   /** @param deps { hosts, log, groupsOf(session, webuiId), userTodos, emitCard(session, card), dataDir, now, sessionsMap(), bcastAll } */
-  constructor({ hosts, log, groupsOf = null, userTodos = null, emitCard = null, dataDir = null, now = () => Date.now(), sessionsMap = null, bcastAll = null, auditMaxBytes = AUDIT_MAX_BYTES, settingOf = null,
+  constructor({ hosts, log, groupsOf = null, lineageOf = null, userTodos = null, emitCard = null, dataDir = null, now = () => Date.now(), sessionsMap = null, bcastAll = null, auditMaxBytes = AUDIT_MAX_BYTES, settingOf = null,
     grants = null,   // lane grants-unify: THE grants store (or a getter); absent ⇒ the instance's installed one
     storeWriter = null,   // B-48a4: the store writer the audit's appender hands its lines to (absent ⇒ the process's own)
     timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) } } = {}) {
@@ -114,6 +114,7 @@ class ExitProxyManager {
     this.hosts = hosts;
     this.log = log || (() => {});
     this.groupsOf = groupsOf;
+    this.lineageOf = lineageOf;   // lane lg-group-parents U3a: (own group ids) → their ancestors (tasks.grantGroupsOf — the ONE reader)
     this.userTodos = userTodos;
     this.emitCard = emitCard;
     this.dataDir = dataDir;
@@ -159,9 +160,16 @@ class ExitProxyManager {
       try { const gs = this.groupsOf(s, sessionId) || []; groupIds = gs.map((g) => String(g && typeof g === 'object' ? g.id : g)); if (gs.unread) { unreadable = true; unread = true; } }
       catch (e) { unreadable = true; if (!(e && e.code === 'TASK_GROUPS_UNREAD') || e.firstOfHold) this.log(`group membership unreadable for ${sessionId}: ${e.message}`); }   // a held store: one line a hold (lane bl-windows)
     }
+    // lane lg-group-parents U3a: the ancestors of those groups (a child uses what its parents are granted; a parent's «除了»
+    // covers it) — a lineage that cannot be read is `unreadable` too, never «no parents»
+    let inheritedGroupIds = [];
+    if (!unreadable && typeof this.lineageOf === 'function') {
+      try { inheritedGroupIds = (this.lineageOf(groupIds) || []).map(String); }
+      catch (e) { unreadable = true; this.log(`group lineage unreadable for ${sessionId}: ${e.message}`); }
+    }
     // lane grants-unify: the same keys in the grant model's ONE spelling (the conversation id; `webui:<id>` before it has one)
     const conversationKeys = keys.map(GM.keyFromSessionKey).filter(Boolean);
-    return { sessionKeys: keys, conversationKeys, groupIds, ...(unreadable ? { unreadable: true } : {}), ...(unread ? { unread: true } : {}), ...(liveForkPending(s) ? { forkPending: true } : {}) };
+    return { sessionKeys: keys, conversationKeys, groupIds, inheritedGroupIds, ...(unreadable ? { unreadable: true } : {}), ...(unread ? { unread: true } : {}), ...(liveForkPending(s) ? { forkPending: true } : {}) };
   }
   /** B-55dc THE LAW «nobody loses anything on an answer still being read»: a verdict that refuses ONLY because a group row
    *  could decide while the caller's membership is still being READ (not a store that threw) ends nothing — the holder is

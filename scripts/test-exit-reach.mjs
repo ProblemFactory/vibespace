@@ -874,7 +874,7 @@ console.log('controls (patched copies)');
   const A = patch("if (isUnknown(access)) return refuse('unknown_shape', { grant });", "if (isUnknown(access)) return { ok: true, via: 'everyone', row: null };", 'unknown-everyone');
   ok(table(A).some((x) => x.includes('unknown')), 'CONTROL (a): exitAccessOf/exitVerdict reading unknown as everyone turns the unknown row red');
   // lane grants-unify: the membership test is the model's — the DOOR's part is handing it the caller's groups and faults
-  const B = patch('groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], groupsUnreadable', 'groupIds: [], groupsUnreadable', 'nogroups');
+  const B = patch('groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], inheritedGroupIds: Array.isArray(ctx.inheritedGroupIds) ? ctx.inheritedGroupIds : [], groupsUnreadable', 'groupIds: [], inheritedGroupIds: [], groupsUnreadable', 'nogroups');   // lane lg-group-parents U3a: the lineage rides beside the groups (ignoring group rows = ignoring both)
   ok(table(B).some((x) => x.includes('B∈G')), 'CONTROL (b): exitVerdict ignoring group rows turns the B∈G cells red');
   const C = patch('groupsUnreadable: !!ctx.unreadable', 'groupsUnreadable: false', 'fold');
   ok(table(C).some((x) => x.includes('unreadable')), 'CONTROL (c): unreadable folded into not_granted turns the unreadable cells red');

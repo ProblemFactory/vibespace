@@ -446,6 +446,81 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
   ok(st.set('exit', 'h5:use', { to: [G1], except: [] }).code === 'except_unnamed', 'CONTROL: over a readable row an exception left out unnamed is still refused except_unnamed');
 }
 
+// ═══ ⑪ lane lg-group-parents: every door honours the LINEAGE ═══════════════════════
+console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant admits its child\'s conversation, «仅本组» does not, a parent\'s «除了» leaves it out; group-visibility never inherits; THE CENSUS');
+{
+  const P = { kind: 'group', id: 'tg-p' }, PO = { ...P, only: true }, EV = { kind: 'everyone' };
+  // the child's conversation (own group tg-c, parent tg-p) and the parent's own member
+  const kid = { sessionKeys: ['claude:k1'], conversationKeys: ['k1'], groupIds: ['tg-c'], inheritedGroupIds: ['tg-p'] };
+  const par = { sessionKeys: ['claude:p1'], conversationKeys: ['p1'], groupIds: ['tg-p'], inheritedGroupIds: [] };
+  const E = require('../src/exit-reach.js');
+  const ex = (to, except = []) => E.exitAccessOf({ exit: {} }, { use: [{ door: 'exit', resource: 'h:use', to, except }], run: [] });
+  const eok = (acc, c) => !!E.exitVerdict(acc, 'use', c).ok;
+  ok(eok(ex([P]), kid) && !eok(ex([PO]), kid) && eok(ex([PO]), par) && !eok(ex([EV], [P]), kid) && eok(ex([EV], [P]), { ...kid, inheritedGroupIds: [] }), 'exit: the parent\'s row admits the child; «仅本组» admits only the parent\'s own; «All except the parent» leaves the child out (and, without the lineage, would not — the leg can fail)');
+  const R = require('../src/window-reach.js');
+  const wr = (to, except = []) => R.recordOfRows('w1', 'reach', [{ door: 'window', resource: 'w1', to, except }]);
+  const wok = (rec, c) => R.reachFor(rec, c).level === 'exposed';
+  ok(wok(wr([P]), kid) && !wok(wr([PO]), kid) && wok(wr([PO]), par) && !wok(wr([EV], [P]), kid), 'window: the same four answers');
+  const B = require('../src/browser-profiles.js');
+  // the exit door's caller facts: the REAL ExitProxyManager.ctxFor asks the ONE reader's lineage
+  const { ExitProxyManager } = require('../src/exit-proxy.js');
+  const xp = new ExitProxyManager({ hosts: { list: () => [], get: () => null }, log: () => { }, groupsOf: () => [{ id: 'tg-c' }], lineageOf: (ids) => (ids.includes('tg-c') ? ['tg-p'] : []), grants: GS.create({ memory: true }) });
+  const xc = xp.ctxFor({ claudeSessionId: 'k1', backend: 'claude' }, 'w-k1');
+  const xbad = new ExitProxyManager({ hosts: { list: () => [], get: () => null }, log: () => { }, groupsOf: () => [{ id: 'tg-c' }], lineageOf: () => { throw new Error('store gone'); }, grants: GS.create({ memory: true }) }).ctxFor({ claudeSessionId: 'k1', backend: 'claude' }, 'w-k1');
+  ok(J(xc.groupIds) === J(['tg-c']) && J(xc.inheritedGroupIds) === J(['tg-p']) && xbad.unreadable === true, 'exit: ctxFor hands the lineage (own groups stay own); a lineage that throws is UNREADABLE, never «no parents»', { xc, xbad });
+  // rule ④: the group-visibility door never inherits
+  const st = GS.create({ memory: true });
+  st.set('group-visibility', 'tg-p', { to: [{ ...P, level: 'messageable' }] });
+  const msgAcl = require('../src/msg-acl.js');
+  ok(msgAcl.levelFor({ cid: 'k1', groups: ['tg-c'], inheritedGroups: ['tg-p'] }, ['g-out'], (g) => st.rowsFor('group-visibility', g)) === 'none' && msgAcl.levelFor({ cid: 'p1', groups: ['tg-p'] }, ['g-out'], (g) => st.rowsFor('group-visibility', g)) === 'messageable', 'rule ④: a public PARENT never shows its child\'s members (group-visibility reads own groups only)');
+  // the producers: the server hands the exit and window doors the ONE reader; vault-use's facts carry it
+  const server = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8'), wiring = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8'), eng = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf-8');
+  ok((server.match(/lineageOf: \(ids\) => tasks\.grantGroupsOf\(ids\)\.inherited/g) || []).length === 2 && /broadcast: leaseBroadcast, groupsOf, lineageOf, log \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/window-live-wiring.js'), 'utf-8')) && /inheritedGroupIds = \(lineageOf\(groupIds\) \|\| \[\]\)\.map\(String\)/.test(eng) && /const gg = tasks\.grantGroupsOf\(tasks\.groupsForSession\(/.test(wiring) && /groupIds, inheritedGroupIds, groupsUnreadable \};/.test(wiring), 'the producers: server.js hands exit + window the ONE reader (tasks.grantGroupsOf); the window engine asks it; vaultUseFacts carries it (vault-run-door spreads those facts into every vault-use verdict)');
+  // THE CENSUS: every facts builder that names a caller's groups in a file that asks the grant model carries the lineage, or
+  // is NAMED here — exempt (with why) or PENDING (the unit that wires it). A stale entry is red too (the table stays true).
+  const EXEMPT = [
+    ['src/msg-acl.js', 'groupIds: (target.groups || []).filter(Boolean)', 'rule ④: group-visibility and «the same group» stay own groups only'],
+    ['src/server/grants-migration.js', '*', 'the one migration\'s legacy-equivalence probes (pre-lineage readers by design)'],
+    ['src/server/mounts-plugins-wiring.js', 'const conversationSubjects = ', 'the automation picker\'s roster (display, not a verdict)'],
+    ['src/server/vault-run-door.js', 'const facts = { ...uf, conversationKeys:', 'spreads vaultUseFacts — its inheritedGroupIds ride in `...uf`'],
+    ['src/server/window-targets-engine.js', "const ctx = facts ? ctxOf(facts) : { sessionKeys: [], groupIds: [] };", 'no caller: nothing to inherit'],
+    ['src/server/window-targets-engine.js', "const c = row.principal.kind === 'group' ? ctxOf(", 'a group row asks ctxOf (which carries it); a conversation / All row asks no groups, as on the release'],
+  ];
+  const PENDING = [
+    ['src/browser-profiles.js', "groupIds: Array.isArray(taskIds) ? taskIds : []", 'U3b (the browser doors)'],
+    ['src/channel-acl.js', 'groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS', 'U3c (the channel doors)'],
+    ['src/channel-filter.js', "door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid)", 'U3c'],
+    ['src/channel-filter.js', "to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id)", 'U3c'],
+    ['src/channel-filter.js', 'const F = GM.prepareFacts({ conversationKey: str(ctx.id), groupIds:', 'U3c'],
+    ['src/channel-filter.js', 'const mayWake = (item, tg) =>', 'U3c'],
+    ['src/server/channels-engine.js', 'const all = live.filter((x) => x && x.cid &&', 'U3c'],
+    ['src/server/channels-engine.js', 'return live.some((x) => x && x.cid === cid && GM.admits(', 'U3c'],
+    ['src/server/channels-grants.js', 'return GM.admits([{ door: DOORS.watch, resource: String(res), to: own,', 'U3c'],
+    ['src/automation-keys.js', 'const callerSubjects = (conversationId, groupIds = []) =>', 'U3d (the automation doors, after batch 22 B-3190)'],
+    ['src/automation-keys.js', "const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds:", 'U3d'],
+    ['src/automation-keys.js', "const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds:", 'U3d'],
+    ['src/server/automation-engine.js', 'const covers = (g, q) => GM.admits(', 'U3d'],
+    ['src/server/automation-engine.js', 'const facts = { conversationKeys: [String(caller.conversationId)], groupIds: caller.groups || []', 'U3d'],
+  ];
+  const listed = [...EXEMPT, ...PENDING];
+  const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'node_modules' ? [] : walk(path.join(d, e.name))) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
+  const ASKS = /grant-model(?:\.js)?'\)|GM\.(?:admits|prepareFacts|hitsOf)\(/;
+  const files = [...walk('src'), 'server.js'].filter((f) => f !== 'src/grant-model.js' && ASKS.test(fs.readFileSync(path.join(REPO, f), 'utf-8')));
+  const bare = [], used = new Set();
+  for (const f of files) {
+    fs.readFileSync(path.join(REPO, f), 'utf-8').split('\n').forEach((l, i) => {
+      if (!/\bgroupIds\s*:/.test(l) || /inheritedGroupIds/.test(l) || /^\s*(\*|\/\/)/.test(l)) return;
+      const hit = listed.findIndex(([lf, needle]) => lf === f && (needle === '*' || l.includes(needle)));
+      if (hit >= 0) used.add(hit); else bare.push(`${f}:${i + 1}`);
+    });
+  }
+  ok(files.length >= 15 && files.includes('src/exit-reach.js') && files.includes('src/window-reach.js') && files.includes('src/server/mounts-plugins-wiring.js'), `the census reads every file that asks the grant model (${files.length})`);
+  ok(bare.length === 0, 'CENSUS: every facts builder naming a caller\'s groups carries inheritedGroupIds — or is named exempt / pending', bare);
+  const stale = listed.filter((_, i) => !used.has(i)).map(([f, n]) => `${f} «${n.slice(0, 60)}»`);
+  ok(stale.length === 0, `CENSUS: every named entry still names a line (${EXEMPT.length} exempt, ${PENDING.length} pending: ${[...new Set(PENDING.map((p) => p[2].split(' ')[0]))].join(', ')})`, stale);
+  ok(!/\bgroupIds\s*:/.test('    return { conversationKeys: keys, groupIds: ctx.groupIds };') === false, 'CONTROL: the census\'s line test catches a bare facts builder');
+}
+
 // ═══ ⑩ lane lg-group-parents: «仅本组» leaves by name only ═══════════════════════
 console.log('⑩ lane lg-group-parents: «仅本组» (only:true) leaves by name only — a write silent on the flag keeps it; the audit names a flip');
 {
