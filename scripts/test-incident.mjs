@@ -180,10 +180,9 @@ check('REMOTE_SCRIPT defines probe_transcript once and embeds the per-harness li
     const s = inc.REMOTE_SCRIPT([CID]);
     check('scene rows: a fake harness (one register() line) is in the remote scene — ps words, its locks, its listing, its --version', /grep -E "[^"]*\bacme-cli\b/.test(s) && s.includes('echo "== acme-cli locks"\nfor f in $HOME/.acme/locks/*.json') && s.includes('echo "== acme threads"; ls $HOME/.acme/threads 2>/dev/null | head -7') && s.includes('(acme-cli --version 2>/dev/null || echo "acme-cli: not on PATH")'));
   } finally { reg.unregister('acme-cli'); }
-  const incCode = fs.readFileSync(path.join(repo, 'src', 'incident.js'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');   // code, not its history comments
-  check('scene rows: incident.js spells no harness lock dir, listing or CLI (local and remote read the rows)', !/\.claude\/sessions|\.codex\/sessions|claude --version|codex --version|\|claude\||\|codex\|/.test(incCode) && !/'\.claude', 'sessions'/.test(incCode));
+  // (the scene rows' source pin of src/incident.js: MOVED to the fast scripts/test-incident-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
-check('incident.js carries no backend id branch (the registry is the only harness knowledge)', !/['"]codex['"]\s*\?|backend === ['"]codex['"]|=== ['"]claude['"]/.test(fs.readFileSync(path.join(repo, 'src', 'incident.js'), 'utf8')));
+// (the no-backend-branch pin of src/incident.js: MOVED to the fast scripts/test-incident-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ── 2.239.1: the dialog must actually render its submit button (the boss's
 // "怎么提交" screenshot — shell.footer was undefined, appendChild threw, no

@@ -737,24 +737,7 @@ function rebuildUnderFault(PS, name, code) {
   ok(/if \(trimNow\)[^\n]*store\.trim\(rec\.id, convId\)/.test(eng) && /if \(appended && \(!en\.trimmedAt \|\| now\(\) - en\.trimmedAt >= TRIM_EVERY_MS\)\) \{ en\.trimmedAt = now\(\); trimNow = true; \}/.test(eng), '…right after a pass that actually appended, on the ONE conversation that grew, at most every TRIM_EVERY_MS (a timer sweeping every conversation would re-read logs nothing touched)', eng.split('\n').filter((l) => /store\.trim|trimNow = true/.test(l)).join(' | '));
 }
 
-// ── ⑨ tier + hygiene pins ──
-{
-  const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-  // A CENSUS READS CODE: this file's own header names the export it refuses
-  // to have, so prose is blanked before asking whether one survives.
-  const noComments = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  const reqs = [...src.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  ok(reqs.every((r) => ['fs', 'path', 'crypto', './channel-record.js', './channel-reactions.js', './channel-thread.js', './channel-facts.js', './channel-revisions.js', './timed-sync.js', './store-writer.js'].includes(r)), 'the store is SHARED: node builtins only — fs, path, and crypto for the attachment cache\'s file names (2026-09-26) — plus, since lane channel-threads, the PURE modules the side log\'s dedup key and compaction fold are theirs, and (lane lark-threads) the place patch\'s widen-only rules, and (lane message-facts) the fx lines\' compaction fold, and (lane channel-record-revisions) the rv lines\' (SHARED may import PURE); the SHARED store writer (lane hub-loop-stalls: the index\'s write off the main thread)', reqs.join(','));
-  ok(!/module\.exports[\s\S]*writeIndex|exports\.writeIndex/.test(src), 'there is deliberately NO "write the whole index back" export — the serialized owner is the index\'s only writer (§5.1), and (design 011 lane 1, store-timing) the PURE store-write clock around the index read and write');
-  ok(!/writeAdapters/.test(noComments), '…and none for adapters.json either (r2): every caller used to re-parse and write its own private copy back, which is the read-modify-write lost update this invariant exists to eliminate');
-  ok(/appendLines\(fp[\s\S]{0,300}?for \(const r of fresh\) rememberVendorId/.test(src) && !/if \(set\.has\(r\.vendorId\)[\s\S]{0,120}?rememberVendorId/.test(src), 'the dedup set is written AFTER the bytes are durable, never inside the selection loop');
-  ok(!/appendFileSync\(fp/.test(noComments) && /function writeAll\(fd, str\)[\s\S]{0,200}?while \(off < buf\.length\) off \+= fs\.writeSync/.test(src),
-    'the message log is written through the sealing, LOOPING writer (r3) — `appendFileSync` throws after a partial chunk and `fs.writeSync` does not retry a short write');
-  ok(/try \{\s*healed = appendLines\(fp[\s\S]{0,200}?\} catch \(e\) \{[\s\S]{0,160}?dedup\.delete\(`\$\{adapterId\}\/\$\{convId\}`\);[\s\S]{0,120}?throw e;/.test(src),
-    'a throw from INSIDE the write DROPS the cached dedup set before it propagates (r4) — a prefix may be durable and only the log knows which records; the set is rebuilt from the bytes on the retry');
-  ok(!fs.readFileSync(path.join(REPO, 'src/channel-store.js')).includes(0), 'no raw NUL byte (it would hide the module from grep, file(1) and every source census)');
-  ok(/writeJsonAtomic/.test(src) && !/fs\.writeFileSync\(indexFile/.test(src), 'the index goes through writeJsonAtomic (tmp+rename) — a bare writeFileSync is silent data loss on the exact crash this product exists to survive');
-}
+// (⑨ the tier + hygiene pins — MOVED to the fast scripts/test-channel-store-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 
 console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 finding 6)');
@@ -793,8 +776,7 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
     const rr = await fetch(`http://127.0.0.1:${srv.address().port}/api/channel-groups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'x', members: [RA, RB], quiet: true }) }).then(async (x) => ({ status: x.status, body: await x.json() }));
     await new Promise((resolve) => srv.close(resolve));
     ok(rr.status === 503 && rr.body.code === 'store-blocked' && /groups\.json/.test(rr.body.error), 'the owner\'s create over a blocked groups.json answers 503 {error, code:"store-blocked"} (was 500 with code null)', JSON.stringify(rr));
-    const W = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
-    ok((W.match(/case 'store-blocked'/g) || []).length === 2, 'PIN: both route-error worders (channels + groups) say store-blocked in words');
+    // (the store-blocked words pin: MOVED to the fast scripts/test-channel-store-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
     const pw = warns.length;
     st.pace.set({ v: 1, pairs: { 'a|b': 1 }, senders: {} });
     st.pace.flush();
@@ -804,8 +786,7 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
     st.close();
   }
   fs.chmodSync(dir, 0o755);
-  const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-  ok(!/_said/.test(src), 'PIN: no once-only flag silences a refused index flush after its first line');
+  // (the no-once-only-flag pin: MOVED to the fast scripts/test-channel-store-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 

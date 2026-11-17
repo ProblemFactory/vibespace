@@ -213,8 +213,7 @@ console.log('— ② the mediation rules: scope, session gate, paused, whole-bro
   const sent = M.mediationSentence({ profileLabel: 'Team' });
   ok(/everything but reads is refused \(browser_interrupted\)/.test(sent) && /interrupted — wait for the handback, then run it again/.test(sent) && !/script evaluation and reads are not/.test(sent) && M.mediationSentence({ profileLabel: 'Team', fenceScripts: false }) === sent, 'the sentence names the fence\'s REAL scope (the owner\'s ruling): everything but reads refused, what was running interrupted, the way out — the retired switch changes nothing');
   ok(M.isPausedMethod('Runtime.evaluate') && M.isPausedMethod('Runtime.callFunctionOn') && !M.isPausedMethod('DOM.getDocument') && M.isPausedMethod('Page.navigate') && M.isPausedMethod('Input.insertText'), '…and the table agrees: evaluate / callFunctionOn / navigate / Input.* are refused while paused, DOM reads are not');
-  { const REPO_DIR = new URL('..', import.meta.url).pathname; const wrapperTxt = fs.readFileSync(path.join(REPO_DIR, 'data/bin/vibespace-browser'), 'utf8'); const manual = fs.readFileSync(path.join(REPO_DIR, 'docs/agent/browser-manual.md'), 'utf8');
-    ok(/Taking over INTERRUPTS you/.test(wrapperTxt) && /browser_interrupted/.test(wrapperTxt) && !/not script evaluation/.test(wrapperTxt) && /Taking over interrupts you/.test(manual) && /browser_interrupted/.test(manual) && !/which is NOT fenced/.test(manual) && !/fenceScriptsWhileDriven/.test(wrapperTxt + manual), 'the CLI\'s `watch` and the manual say the same: a takeover interrupts (browser_interrupted) — no surface still says scripts pass or names the retired switch'); }
+  // (the wrapper's takeover words in data/bin/vibespace-browser: MOVED to the fast scripts/test-browser-mediation-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // ═══ ②r3 (verify S2 r3, 2026-09-26): the input side's OTHER doors ═══════════

@@ -282,8 +282,7 @@ console.log('— ③ the agent\'s CLI reads the pin beside itself; browser-env\'
   ok(pinnedCliFn() === path.join(tools, 'agent-browser-0.38.1', 'x'), 'a pin file naming a program inside the tools directory ⇒ that program');
   fs.writeFileSync(path.join(tools, 'cli-pin.json'), JSON.stringify({ path: '/usr/bin/evil' }));
   ok(pinnedCliFn() === null, 'a pin file naming anything else ⇒ no pin (PATH answers)');
-  const be = read('src/server/browser-env.js');
-  ok(/createBrowserFacts\(\{ pinned: require\('\.\.\/browser-facts\.js'\)\.cliPinReader\(dataDir\) \}\)/.test(be), 'browser-env\'s floor probe asks the pinned CLI (the keeper\'s pin file — two modules, one file)');
+  // (browser-env's pin-reader pin: MOVED to the fast scripts/test-browser-cli-pin-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   const F = require('../src/browser-facts.js');
   await k.cliFacts(); // the keeper re-reads the setting ("pinned") and writes its pin file
   const rd = F.cliPinReader(DATA, { everyMs: 0 });
@@ -338,7 +337,7 @@ console.log('— ⑤ the client words (en / zh / ja) + the panel wiring');
   const named1 = W.cliRowWords({ ...base, choice: { mode: 'version', version: '0.39.2' }, pinned: { version: '0.39.2', installed: true }, onPath: { version: '0.38.1' } }, t);
   ok(named0.offer === 'install' && named0.version === '0.39.2' && W.cliOfferLabel(named0.offer, t, { version: named0.version, table: base.table }) === 'Install agent-browser 0.39.2…' && W.cliOfferLabel('install', t, { version: '0.38.1', table: '0.38.1' }) === 'Install the measured version…'
     && /0\.39\.2 \(your choice\) — drifts/.test(named1.text) && named1.warn, 'a version the user named: Install… says its number ("the measured version" only for the measured one) and, in use, the row says it drifts and warns', { named0, named1 });
-  ok(/cliOfferLabel\(w\.offer, t, \{ version: w\.version, table: st\.cli && st\.cli\.table \}\)/.test(read('src/lib/browser-trace-view.js')), 'the panel labels the button with the version the install installs');
+  // (the panel's offer-label pin: MOVED to the fast scripts/test-browser-cli-pin-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   const cw = W.cliConfirmWords({ ...base, table: V.TABLE_VERSION }, t); // lane browser-stderr-pipe: the confirm of THE pin (its record's sizes)
   ok(/53 MB/.test(cw.message) && /registry\.npmjs\.org/.test(cw.message) && /118 MB/.test(cw.message) && /no script of the package runs/.test(cw.message) && cw.title === 'Install agent-browser 0.38.2?', 'the download confirm names the package, the host, the measured sizes and that no package script runs', cw);
   const said = new Set(); const rec = (k2) => { said.add(k2); return k2; };
@@ -349,10 +348,7 @@ console.log('— ⑤ the client words (en / zh / ja) + the panel wiring');
   for (const c of ['install_running', 'already_installed', 'install_unavailable', 'agent_forbidden', 'x']) W.cliOutcomeWords({ code: c }, rec); W.cliOutcomeWords({ ok: true, version: '1' }, rec); W.cliOutcomeWords(null, rec);
   const noZh = [...said].filter((k2) => !(k2 in zh)), noJa = [...said].filter((k2) => !(k2 in ja));
   ok(said.size > 15 && !noZh.length && !noJa.length, `every sentence the CLI model says (${said.size}) has a zh and a ja entry`, { noZh, noJa });
-  const tv = read('src/lib/browser-trace-view.js');
-  ok(/root\.append\(bar, body\)/.test(tv) && /mt\.append\(cliRow, swl, hint\)/.test(tv) /* design 015: the Maintenance section */ && /fetchJson\('\/api\/browser\/cli'\)/.test(tv) && /fetchJson\('\/api\/browser\/cli\/install', jsonInit\('POST', \{ version \}\)\)/.test(tv) && /showConfirmDialog\(\{ \.\.\.cliConfirmWords\(f, t, \{ version \}\) \}\)/.test(tv) && /app\.settings\?\.set\?\.\('browser\.cli', 'path'\)/.test(tv),
-    'the Agent browser panel: the Browser CLI row (its own fetch), the install behind the download confirm, the setting written by the row\'s act');
-  ok(/'browser\.cli': \{\s*type: 'string', default: 'path',/.test(read('src/lib/settings-schema.js')) && /serverSetting\('browser\.cli'\)/.test(read('src/server/browser-keeper.js')), 'the setting is declared (Agent browser) and read by the keeper');
+  // (the panel's Maintenance-row pins and the browser.cli setting pin: MOVED to the fast scripts/test-browser-cli-pin-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // ═══ ⑤b verify r2 (H1): a running browser keeps the CLI it was launched with ════════
@@ -505,8 +501,7 @@ const h1 = await h1Leg(K, 'real');
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const keys = ['1 browser still on the previous CLI — it switches when it stops', '{n} browsers still on the previous CLI — they switch when they stop', '1 browser runs on a CLI that is no longer installed — restart it to use the current one', '{n} browsers run on a CLI that is no longer installed — restart them to use the current one'];
   ok(keys.every((k2) => zh[k2] && ja[k2]), 'the four sentences have zh + ja entries');
-  const rs = read('src/routes/browser.js');
-  ok(/const cli = b\.cli && typeof b\.cli === 'object' && b\.cli\.version \? \{ version: String\(b\.cli\.version\)/.test(rs) && (rs.match(/\{ const g = await cliGoneVerdict\(k, (e|r)\.browser\); if \(g\) return failVerdict\(res, g\); \}/g) || []).length === 4, 'the agent\'s answers carry the CLI by VERSION only (never the program\'s path) and all four /resolve forms (lane jobs-browser\'s job form joined at the 2.369.202 integration) refuse a gone CLI before the agent runs anything (verify r3: the keeper\'s doors\' fact, awaited)');
+  // (the route's cli-body pin: MOVED to the fast scripts/test-browser-cli-pin-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // ═══ ⑥ controls ═══════════════════════════════════════════════════════════════

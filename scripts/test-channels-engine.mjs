@@ -506,10 +506,7 @@ function dayStartClock() {
   ok(read.status === 404 && /No such conversation/.test(read.body.error), 'POST /read answers the same rather than 200-with-a-mint', JSON.stringify(read));
   const good = await call('PUT', { path: '/api/channels/:adapterId/:convId/refresh', params: { adapterId: 'fake-poll', convId: 'fake-poll-ops' } }, { every: 'paused' });
   ok(good.status === 200 && good.body.ok === true && good.body.refresh.every === 'paused', 'POSITIVE CONTROL: a real conversation still answers 200');
-  // The messages route forwards BOTH halves of the page boundary.
-  const msrc = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8').replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-  ok(/beforeId/.test(msrc) && /messages\(req\.params\.adapterId, req\.params\.convId, \{ before, beforeId, limit \}\)/.test(msrc),
-    'the messages route forwards `beforeId` — dropping it would put the paging loss straight back');
+  // (the messages route's `beforeId` pin: MOVED to the fast scripts/test-channels-engine-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // ── ⑤ THE DIGEST DOES NOT ASSERT WHAT IT CANNOT CHECK ─────────────────────
@@ -3829,9 +3826,7 @@ console.log('\n⑱ lane channel-threads §5: the agent\'s thread read, its walk 
   ok(esrcO.split(OW).length === 2 && esrcO.split(OM).length === 2, 'CONTROL setup: the older walk asks its depth, and its memory is read, once each');
   const pre = await olderRun(MUTE.load('src/server/channels-engine.js', esrcO.replace(OW, '    const w = await threadRefresh(adapterId, convId, msg, { older: true });').replace(OM, '    if (false && none && none.count === held) return'), 'older-no-depth'), 'pre', 180);
   ok(pre.presses.every((p) => p.got === 0 && p.calls === 1 && p.held === 50), `CONTROL: without the depth every press re-reads the newest page — ${pre.calls} calls for 6 presses, the thread stuck at its newest 50 — the leg above would be red`, JSON.stringify(pre.presses));
-  // the pane's half (client): a REFUSED older page never marks the thread exhausted, and the "beyond reach" words
-  const paneSrc = fs.readFileSync(path.join(REPO, 'src/lib/channel-thread-pane.js'), 'utf-8');
-  ok(/if \(prepend && \(r\.exhausted \|\| r\.vendorHasNoOlder\) && !\(r\.records \|\| \[\]\)\.length && !r\.refused\) \{/.test(paneSrc) && /r\.olderBeyondReach && !list\.querySelector\('\.chanthread-beyond'\)/.test(paneSrc), 'wiring pin: the pane marks the thread exhausted only on an answer that was not refused, and draws the "beyond reach" words once');
+  // (the thread pane's refused-older-page pin: MOVED to the fast scripts/test-channels-engine-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 {
   // (b) reply-to-mine + the reaction digest, on a scripted poll adapter with a world we grow
@@ -6666,10 +6661,7 @@ console.log('\nconsent: a vendor declares its consent row; the engine + route na
   const JUDGE = 'const v = row.landing.stateVerdict(state, {';
   const PAGE = '.send(page(r));';
   ok(engSrcC.split(LIST).length === 2 && engSrcC.split(JUDGE).length === 2 && routeSrcC.split(PAGE).length === 2, 'consent: the patch sites exist once each (the list line, the engine\'s row judge, the route\'s row page)');
-  const code = (s) => s.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-  const quoted = (s) => (code(s).match(/['"`](lark|slack|gmail|fake)['"`]/g) || []).length;
-  ok(quoted(engSrcC) === 0 && quoted(routeSrcC) === 0 && quoted(fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf-8')) === 0
-    && !/SlackManifest|SlackWords|slackConsent|slackRelayUrl|LARK_CALLBACK_URL/.test(engSrcC + routeSrcC), 'consent: the engine, the channels routes and oauth-loopback quote no vendor id and name no vendor\'s consent module');
+  // (the vendor-neutral census of the engine, the routes and the loopback: MOVED to the fast scripts/test-channels-engine-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
   const withFake = engSrcC.replace(LIST, 'const REAL_ADAPTERS = Object.freeze([...VendorList.MANIFESTS.map(adapterOf), globalThis.__VS_CONSENT_FAKE]);');
   const roundTrip = async (tag, engText, routeText) => {
     const ENGC = MUTE.load('src/server/channels-engine.js', engText, `consent-${tag}`);

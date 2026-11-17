@@ -669,10 +669,8 @@ const shimLeg = async (file, label) => {
   return { good1, good2, good3, a, b, c, label };
 };
 {
-  ok(fs.existsSync(SHIM) && (fs.statSync(SHIM).mode & 0o111) !== 0, 'data/bin/agent-browser exists and is executable');
-  const src = fs.existsSync(SHIM) ? fs.readFileSync(SHIM, 'utf8') : '';
-  ok(src.startsWith('#!/usr/bin/env node') && src.includes(V.SHIM_MARKER), 'the shim is a node script carrying the marker resolvers skip it by');
-  ok(!/process\.env|require\(['"](?:https?|net|child_process|fs)['"]\)/.test(src), 'the shim reads no env, opens no network, spawns nothing');
+  // (the shim's source checks (exists, executable, the marker, no env / network / spawn): MOVED to the fast scripts/test-browser-verbs-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
+  const src = fs.existsSync(SHIM) ? fs.readFileSync(SHIM, 'utf8') : '';   // the legs below read it
   const s = await shimLeg(SHIM, 'shim');
   ok(s.good1, 'the shim exits 2 with exactly one stderr line naming `vibespace-browser open https://x`', JSON.stringify([s.a.status, s.a.stderr]));
   ok(s.good2, 'no args ⇒ the same sentence + `vibespace-browser help`', JSON.stringify([s.b.status, s.b.stderr]));

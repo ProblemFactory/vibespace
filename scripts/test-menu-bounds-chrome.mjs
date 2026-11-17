@@ -127,8 +127,7 @@ try {
     const row = m.querySelector('.context-menu-off'); if (!row) return null; let o = 1; for (let e = row.querySelector('.door-why'); e && e !== document.body; e = e.parentElement) o *= Number(getComputedStyle(e).opacity);
     const why = row.querySelector('.door-why'); return { o, why: why && why.textContent, whyColor: why && getComputedStyle(why).color }; })()`);
   check('⑦ an OFF row draws at full strength — its why\'s effective opacity 1 (never a greyed row with a tooltip)', !!offr && offr.o >= 0.99 && offr.why === 'it needs a sign-in', offr);
-  const src = fs.readFileSync(path.join(ROOT, 'src/lib/utils.js'), 'utf8'), ops = fs.readFileSync(path.join(ROOT, 'src/lib/file-explorer-ops.js'), 'utf8');
-  check('ONE placement: showContextMenu and the file explorer\'s builder both end in placeMenu (no clamp of their own); only the explorer\'s builder follows its rows', /\n  placeMenu\(pop, x, y, \{ up, placesItself \}\);\n  return pop;\n\}/.test(src) && /\n    placeMenu\(menu, x, y, \{ follow: true \}\);/.test(ops) && !/if \(mr\.bottom > vh\) menu\.style\.top/.test(ops));
+  // (the ONE-placement source pin: MOVED to the fast scripts/test-menu-bounds-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 } finally { cleanup(); }
 console.log(failed ? `${failed} FAILED (${passed} passed)` : `ALL PASS (${passed})`);
 process.exit(failed ? 1 : 0);
