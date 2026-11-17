@@ -15,13 +15,14 @@
 // postmortem's datacenter-IP co-factor applied to RAW token usage in
 // unofficial shapes, not this sanctioned channel. Wired via the
 // VIBESPACE_CI_OAT secret; fork PRs get no secret and SKIP.
-import { execSync, spawn } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, withoutVendorKeys, vncEnv } from './scratch.mjs';
+import { freePort, withoutVendorKeys, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub } from './hub-boot.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter, isFixtureProjectDir, FIXTURE_STALE_MS } = require('../src/fixture-guard.js');
@@ -38,7 +39,10 @@ if (!hasCli) { console.log('SKIP: no claude CLI on PATH'); process.exit(0); }
 
 const MODEL = process.env.VIBESPACE_CI_MODEL || 'claude-haiku-4-5-20251001';
 const PORT = await freePort(); // free port (2.369.46): fixed 3995 collided between concurrent gates
-const wt = scratch('chat-e2e');
+// THE SUITES' ONE HUB BOOT (P0 of the separation, 2026-11-17): the tree, the home and the session's cwd live in ONE root the
+// helper minted; at exit it ends the hub and everything rooted there, removes the worktree through git, then the root
+const root = mintRoot('chat-e2e');
+const wt = path.join(root, 't');
 // ISOLATED $HOME (2026-09-09). This suite runs ONE real haiku turn on every
 // non-docs push, so the CLI wrote a real transcript into the developer's REAL
 // ~/.claude/projects — and the cleanup that removed it sat at the very END of
@@ -54,7 +58,8 @@ const wt = scratch('chat-e2e');
 // `resolveForSpawn` takes the `oatOnly` branch and the token is the whole
 // login. HOME is not in AGENT_ENV_DROP, so the server hands it to the CLI it
 // spawns.
-const fakeHome = scratchHome('chat-e2e-home', fs);
+const fakeHome = path.join(root, 'home');
+for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
 // >>> real-home sweep (THE DECLARED WRITE EXCEPTION — do not widen)
@@ -89,7 +94,6 @@ let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + String(e).slice(0, 300) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) {
   execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -102,32 +106,25 @@ const am = new AccountManager({ dataDir: path.join(wt, 'data') });
 const acct = am.createSubscription({ name: 'CI-oat' });
 am.setOat(acct.id, token);
 
-const cwd = scratch('chat-e2e-cwd');
+const cwd = path.join(root, 'cwd');
 fs.mkdirSync(cwd, { recursive: true });
 // NO AMBIENT API KEY (B-5f0b): agentEnv() hands ANTHROPIC_API_KEY /
 // ANTHROPIC_AUTH_TOKEN to the CLI (a user's own choice), and either one
 // OUTRANKS the oat this suite seeds — the turn would bill metered API while
 // the badge assert below still read "the oat account".
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...withoutVendorKeys(process.env), ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
-// UNCONDITIONAL cleanup (2026-09-09). The transcript removal used to live at
-// the very END of the happy path, so every early `process.exit(1)` — and every
-// signal — left it behind. It runs here, from one function, on 'exit' AND on
-// the signals 'exit' does not fire for.
-const cleanup = () => {
-  try { srv.kill('SIGKILL'); } catch {}
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [cwd, fakeHome]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
-};
-process.on('exit', cleanup);
-for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...withoutVendorKeys(process.env), ...VNC_ENV, HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
+// UNCONDITIONAL cleanup (2026-09-09): the transcript, the home and the worktree went at the very END of the happy path, so every
+// early `process.exit(1)` — and every signal — left them behind. Since the one boot helper they all live in its root and go at
+// 'exit' with it; a signal 'exit' does not fire for becomes an exit.
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => process.exit(143));
 // BOOT WAIT sized for a LOADED box (2.369.75 gate: the fast tier runs beside
 // three implementer workflows on a 3,900-process machine; the worktree server
 // took longer than the old 15 s, the loop gave up SILENTLY and the WebSocket
-// below threw an unhandled ECONNREFUSED at 18 s). 120 s is a floor; a server
-// that never answers is a LOUD fail naming the wait, never a stack trace.
-let booted = false;
-for (let i = 0; i < 480 && !booted; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); booted = true; } catch { await sleep(250); } }
+// below threw an unhandled ECONNREFUSED at 18 s). 120 s is a floor (hub.ready's
+// own); a server that never answers is a LOUD fail naming the wait, never a stack trace.
+const booted = await hub.ready();
 check(`worktree server answered /api/home within the boot budget (${booted ? 'yes' : 'NO — 120 s elapsed'})`, booted);
+if (!booted) console.log(hub.log().slice(-2000));
 if (!booted) { console.log('FAIL'); process.exit(1); }
 
 const WebSocket = require('ws');
@@ -252,7 +249,7 @@ ws.send(JSON.stringify({ type: 'kill', sessionId: sid }));
 await sleep(1500);
 
 // THE REAL HOME IS UNTOUCHED. The CLI's transcript went to the isolated home
-// (removed by `cleanup`), so this asserts the CONSEQUENCE rather than trusting
+// (removed with the helper's root at exit), so this asserts the CONSEQUENCE rather than trusting
 // the env var: no fixture entry appeared in the developer's own projects dir.
 {
   const { cwdToProjectDir } = require(path.join(wt, 'src', 'session-store.js'));
