@@ -11,8 +11,10 @@
 //     mount or this checkout. A root inside the temp folder is the point (every mint is one), and a root inside the folder
 //     holding the checkout is not refused either — the gate's own isolated worktree lives directly under the temp folder, so
 //     that folder IS the temp folder there. A mount table that cannot be read refuses the mint (never «no mounts»).
-//     The first mint ARMS, once: the exit event, and SIGTERM / SIGINT / SIGHUP, each ending with exit(128 + its number) so the
-//     exit's end runs — a suite ended by a signal (the gate's timeout) leaves nothing; no suite carries a signal line of its own.
+//     The first mint ARMS, once: the exit event, and SIGTERM / SIGINT / SIGHUP — each runs the same end the exit runs (every
+//     'exit' listener), then removes that signal's listeners and RAISES the same signal on its own process, so the suite still
+//     DIES BY THE SIGNAL and its parent reads it (ci.mjs killedFromOutside tells «killed from outside» from a red by the signal,
+//     never the code) — a suite ended by a signal leaves nothing; no suite carries a signal line of its own.
 //   startHub({ root, tree, port, env, nodeArgs, args, log }) → hub
 //     spawns `node [...nodeArgs] server.js [...args]` in `tree` (inside `root`) with the suite's env + PORT. The env MUST carry a
 //     HOME in the root (the hub's children are ended by it), and a device daemon root (VIBESPACE_DEVICE_ROOT /
@@ -32,9 +34,26 @@
 //        Chrome) is SAID on stderr and left alone. The start time is read before AND after that judgement (it belongs to one
 //        process), and again just before the signal: one that changed is left alone and SAID. Passes repeat (≤ 3) until one
 //        lists nothing new — a process forked between a list and its signal is caught by the next.
-//   At exit (and after an armed signal): in every minted root, each hub, everything rooted, every git worktree directly in it
-//     (removed THROUGH GIT), then the root — unless a mount point lies inside it (then it stays, and that is said).
-//   Synchronous end: it runs inside an 'exit' handler.
+//     Before ANY read that can wait on a process (its environ, cwd, argv), the cheap facts come first: its owner (another user's
+//     process is never read) and its state from the stat file — a process in an uninterruptible wait (state D, e.g. wedged on a
+//     network mount) holds the lock an environ read waits on, so it is NOT read: it is retried by the next pass and, still D at
+//     the last, SAID and left.
+//   At exit (and after an armed signal): in every minted root, each hub, everything rooted; then ONE mount check — a mount point
+//     inside the root, or a mount table that cannot be read, stops BOTH removals and is said — then every git worktree directly in
+//     it (removed THROUGH GIT, with a scrubbed env), then the root. Synchronous end: it runs inside an 'exit' handler.
+//
+// THE RULES FOR EVERY SUITE ON THE HELPER (主开发, 2026-11-17 05:48Z; also in docs/kb-file-structure.md):
+//   1. ONE root per suite, minted before anything of the suite exists; ONE git worktree per root (its removal can outlast the gate's
+//      ten seconds between terminate and kill, and a removal cut short leaves a record in the real repository).
+//   2. Everything the suite wants ended inherits the HOME or the daemon root startHub checked. A process started with a scrubbed
+//      env (no such HOME) is only near — said and left — and the suite ends it itself, by its pid and start time.
+//   3. No signal line of a suite's own after its first mint: work that must happen at a signal is registered BEFORE the mint and
+//      is synchronous (the helper's listener ends the process in the middle of the emit).
+//   4. A suite that mounts anything under its root unmounts it itself (the end never removes over a mount).
+//   5. No pattern, parent-id, group or pid-zero kill, anywhere.
+//   6. Every wait is a bounded poll on a named effect.
+//   7. Two hubs that must outlive each other's stop take a root each.
+//   8. The env handed to startHub starts from strippedEnv() — no inherited daemon root, no vendor keys.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -42,6 +61,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { stampScratchRun } from './scratch-run.mjs';
+import { withoutVendorKeys } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const { FIXTURE_CWD_PREFIX, TMP_ROOTS } = require('../src/fixture-guard.js');
 
@@ -84,18 +104,30 @@ export function refusalOf(root, { homes = null, mounts = null, checkout = REPO, 
   const M = mounts ?? networkMounts(mountinfo);
   if (!M) return UNJUDGEABLE;
   const C = real(checkout);
+  const T = (temps ?? [os.tmpdir(), ...TMP_ROOTS]).map(real);
+  // the filesystem root and a temp root are never a home (a HOME=/ or HOME=/tmp would otherwise refuse every mint)
+  const H = (homes ?? [os.homedir(), process.env.HOME, '/root']).filter(Boolean).map((h) => path.resolve(h)).filter((h) => h !== '/' && !T.includes(h));
   const named = [
     ['the filesystem root', ['/']],
-    ['a home', (homes ?? [os.homedir(), process.env.HOME, '/root']).filter(Boolean).map((h) => path.resolve(h))],
+    ['a home', H],
     ['a network mount (the workspace mount)', M],
     ['this checkout', [C]],
     ['the folder holding this checkout (the lanes folder)', [path.dirname(C)]],
-    ['the temp folder itself', (temps ?? [os.tmpdir(), ...TMP_ROOTS]).map(real)],
+    ['the temp folder itself', T],
   ];
-  for (const [why, xs] of named) if (xs.includes(p)) return why;
-  for (const [why, xs] of named) if (xs.some((x) => isIn(x, p))) return `a folder holding ${why.replace(/ itself$/, '')}`;
-  for (const [why, xs] of named.slice(1, 4)) if (xs.some((x) => isIn(p, x))) return `inside ${why}`;
+  const at = (why, x) => (x === '/' ? why : `${why} at ${x}`);   // the refusal names the entry that matched
+  for (const [why, xs] of named) { const x = xs.find((v) => v === p); if (x !== undefined) return at(why, x); }
+  for (const [why, xs] of named) { const x = xs.find((v) => isIn(v, p)); if (x !== undefined) return at(`a folder holding ${why.replace(/ itself$/, '')}`, x); }
+  for (const [why, xs] of named.slice(1, 4)) { const x = xs.find((v) => isIn(p, v)); if (x !== undefined) return at(`inside ${why}`, x); }
   return null;
+}
+
+/** The env a suite hands its hub, stripped of what it must never inherit: the vendor keys (scratch.mjs withoutVendorKeys) and a
+ *  daemon root an enclosing run set (rule 8). */
+export function strippedEnv(env = process.env) {
+  const out = withoutVendorKeys(env);
+  for (const k of DAEMON_ROOT_ENV) delete out[k];
+  return out;
 }
 
 const MINTED = new Map();   // resolved root → { hubs: [] } — this process's mints only
@@ -114,9 +146,20 @@ export function mintRoot(name) {
   if (!armed) {
     armed = true;
     process.on('exit', endAll);
-    for (const sig of SIGNALS) process.on(sig, () => process.exit(128 + os.constants.signals[sig]));
+    for (const sig of SIGNALS) process.on(sig, () => endBySignal(sig));
   }
   return root;
+}
+
+/** An armed signal: the same end the exit runs (every 'exit' listener — this helper's end among them), then the signal's own
+ *  listeners removed and the SAME signal raised on this process, so it dies by it and its parent reads the signal. */
+function endBySignal(sig) {
+  const code = 128 + os.constants.signals[sig];
+  process.exitCode = code;
+  try { process.emit('exit', code); } catch { /* the end is best effort at a signal */ }
+  process.removeAllListeners(sig);
+  process.kill(process.pid, sig);
+  process.exit(code);   // only when the signal did not end the process (its disposition was not the default)
 }
 
 /** The minted root `root` names (resolved), or a throw that names why it is refused. */
@@ -128,10 +171,12 @@ function ownRoot(root) {
   return r;
 }
 
-/** A /proc pid's start time (clock ticks since boot, field 22 of stat) — null when it is gone or unreadable. */
-export function starttimeOf(pid, procRoot = '/proc') {
-  try { const st = fs.readFileSync(`${procRoot}/${pid}/stat`, 'latin1'); return Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[19]); } catch { return null; }
+/** A /proc pid's state (field 3) and start time (clock ticks since boot, field 22) from its stat file — null when gone. */
+function statFields(pid, procRoot = '/proc') {
+  try { const st = fs.readFileSync(`${procRoot}/${pid}/stat`, 'latin1'); const f = st.slice(st.lastIndexOf(')') + 2).split(' '); return { state: f[0], starttime: Number(f[19]) }; } catch { return null; }
 }
+/** A /proc pid's start time — null when it is gone or unreadable. */
+export function starttimeOf(pid, procRoot = '/proc') { const f = statFields(pid, procRoot); return f ? f.starttime : null; }
 const commOf = (pid, procRoot) => { try { return fs.readFileSync(`${procRoot}/${pid}/comm`, 'utf8').trim(); } catch { return '?'; } };
 
 /** Inside `r` on RESOLVED paths: the value as written AND what it resolves to both lie in `r` — a link out of the root is not
@@ -160,7 +205,7 @@ export function rootedVia(pid, r, procRoot = '/proc') {
 /** The processes ROOTED in `root` (selected by the environ), never `self` or its ancestors — each {pid, starttime, via}; the
  *  cwd-only / argv-only ones go to `near` when given. The start time is read before AND after the judgement and must not move.
  *  PURE over `procRoot` (a fake /proc in the suite's legs). */
-export function rootedProcesses(root, { procRoot = '/proc', self = process.pid, near = null } = {}) {
+export function rootedProcesses(root, { procRoot = '/proc', self = process.pid, near = null, stuck = null, uid = process.getuid() } = {}) {
   const r = real(String(root));
   const skip = new Set();
   for (let q = self; q > 1 && !skip.has(q);) {
@@ -171,8 +216,12 @@ export function rootedProcesses(root, { procRoot = '/proc', self = process.pid, 
   let pids = []; try { pids = fs.readdirSync(procRoot).filter((d) => /^\d+$/.test(d)).map(Number); } catch { return out; }
   for (const pid of pids) {
     if (skip.has(pid)) continue;
-    const st0 = starttimeOf(pid, procRoot);
-    if (st0 == null) continue;
+    // the cheap facts FIRST — the owner, then the state and start time from the stat file — before any read that can wait
+    try { if (fs.lstatSync(`${procRoot}/${pid}`).uid !== uid) continue; } catch { continue; }   // another user's: never read
+    const f = statFields(pid, procRoot);
+    if (!f) continue;
+    const st0 = f.starttime;
+    if (f.state === 'D') { if (stuck) stuck.push({ pid, starttime: st0 }); continue; }   // an uninterruptible wait: its environ is not read
     const j = rootedVia(pid, r, procRoot);
     if (!j.via && !j.near) continue;
     if (starttimeOf(pid, procRoot) !== st0) continue;   // the judgement read another process than the start time did
@@ -203,22 +252,27 @@ const settle = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer
 /** Everything rooted in `root`, ended by identity, pass after pass (≤ 3) until a pass lists nothing NEW — a process forked
  *  between a list and its signals shows in the next. `done` = the identities already ended (pid:starttime). A cwd-only or
  *  argv-only match is SAID once and left. */
-export function endRooted(root, { signal = 'SIGKILL', procRoot = '/proc', kill, done = new Set() } = {}) {
+export function endRooted(root, { signal = 'SIGKILL', procRoot = '/proc', kill, done = new Set(), uid } = {}) {
   const signalled = [], left = [], said = new Set();
+  let stuck = [];
   for (let pass = 0; pass < 3; pass++) {
     if (pass) settle(50);
-    const near = [];
-    const fresh = rootedProcesses(root, { procRoot, near }).filter((x) => !done.has(`${x.pid}:${x.starttime}`));
+    const near = []; stuck = [];
+    const fresh = rootedProcesses(root, { procRoot, near, stuck, ...(uid !== undefined ? { uid } : {}) }).filter((x) => !done.has(`${x.pid}:${x.starttime}`));
     for (const n of near) {
       if (said.has(`${n.pid}:${n.starttime}`)) continue;
       said.add(`${n.pid}:${n.starttime}`);
       left.push({ pid: n.pid, why: `its ${n.near} only` });
       say(`left pid ${n.pid} (${commOf(n.pid, procRoot)}) alone — its ${n.near === 'cwd' ? 'working directory' : 'argv'} lies in ${root}, but its environ carries no HOME or daemon root the helper handed out`);
     }
-    if (!fresh.length) break;
+    if (!fresh.length && !stuck.length) break;   // a pass that found a process in an uninterruptible wait looks again
     for (const x of fresh) done.add(`${x.pid}:${x.starttime}`);
     const r = endByIdentity(fresh, { signal, procRoot, kill });
     signalled.push(...r.signalled); left.push(...r.left);
+  }
+  for (const x of stuck) {
+    left.push({ pid: x.pid, why: 'in an uninterruptible wait' });
+    say(`left pid ${x.pid} (${commOf(x.pid, procRoot)}) unjudged — it is in an uninterruptible wait (state D, e.g. on a network mount), so its environ was not read`);
   }
   return { signalled, left };
 }
@@ -243,30 +297,29 @@ export function removeWorktrees(root) {
     const dir = path.join(root, e.name);
     let gitdir = null; try { gitdir = /^gitdir: (.+)$/m.exec(fs.readFileSync(path.join(dir, '.git'), 'utf8'))?.[1] || null; } catch { continue; }
     if (!gitdir) continue;
-    const r = spawnSync('git', ['--git-dir', path.resolve(dir, gitdir), 'worktree', 'remove', '--force', dir], { stdio: 'ignore', timeout: 60000 });
+    const r = spawnSync('git', ['--git-dir', path.resolve(dir, gitdir), 'worktree', 'remove', '--force', dir], { stdio: 'ignore', timeout: 60000, env: { PATH: process.env.PATH, HOME: process.env.HOME || os.homedir(), GIT_CONFIG_NOSYSTEM: '1' } });   // a scrubbed env: no GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR of an enclosing hook
     if (r.status === 0) gone.push(dir);
   }
   return gone;
 }
 
-/** The root removed — unless a mount point lies inside it, or the mount table cannot be read (then it stays and that is said).
- *  → true when removed. */
-export function removeRoot(root, { mountinfo } = {}) {
+/** The end of a root's files: ONE mount check first — a mount point inside the root, or a mount table that cannot be read, stops
+ *  BOTH removals and is said — then its git worktrees (through git), then the root. → true when removed. */
+export function finishRoot(root, { mountinfo } = {}) {
   const inside = mountsInside(root, mountinfo);
-  if (inside === null) { say(`left ${root} in place — the mount table cannot be read, so a mount inside it cannot be ruled out`); return false; }
-  if (inside.length) { say(`left ${root} in place — ${inside[0]} is mounted inside it`); return false; }
+  if (inside === null) { say(`left ${root} in place, its worktrees too — the mount table cannot be read, so a mount inside it cannot be ruled out`); return false; }
+  if (inside.length) { say(`left ${root} in place, its worktrees too — ${inside[0]} is mounted inside it`); return false; }
+  removeWorktrees(root);
   fs.rmSync(root, { recursive: true, force: true });
   return true;
 }
 
-/** The exit hook: in every minted root, each hub by its identity, then everything rooted there, then its git worktrees, then
- *  the root itself. */
+/** The exit hook: in every minted root, each hub by its identity, then everything rooted there, then its files (finishRoot). */
 function endAll() {
   for (const [root, m] of MINTED) {
     for (const h of m.hubs) try { if (!h.stopped) h.stop({ hubOnly: true }); } catch { /* best effort at exit */ }
     try { endRooted(root); } catch { /* best effort at exit */ }
-    try { removeWorktrees(root); } catch { /* best effort at exit */ }
-    try { removeRoot(root); } catch { /* best effort at exit */ }
+    try { finishRoot(root); } catch { /* best effort at exit */ }
   }
   MINTED.clear();
 }

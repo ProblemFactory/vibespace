@@ -21,9 +21,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, withoutVendorKeys, vncEnv } from './scratch.mjs';
-import { mintRoot, startHub } from './hub-boot.mjs';
-import { skipVerdict, maskText } from './chat-e2e-why.mjs';   // B-5a57: a missing reply says why — a SKIP only on THIS turn's own failure (its legs: test-ci-gate)
+import { freePort, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter, isFixtureProjectDir, FIXTURE_STALE_MS } = require('../src/fixture-guard.js');
@@ -116,7 +115,7 @@ fs.mkdirSync(cwd, { recursive: true });
 // ANTHROPIC_AUTH_TOKEN to the CLI (a user's own choice), and either one
 // OUTRANKS the oat this suite seeds — the turn would bill metered API while
 // the badge assert below still read "the oat account".
-const hub = startHub({ root, tree: wt, port: PORT, env: { ...withoutVendorKeys(process.env), ...VNC_ENV, HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 // UNCONDITIONAL cleanup (2026-09-09): the transcript, the home and the worktree went at the very END of the happy path, so every
 // early `process.exit(1)` — and every signal — left them behind. Since the one boot helper they all live in its root and go at
 // 'exit' with it; the helper arms SIGTERM / SIGINT / SIGHUP itself (each an exit), so this suite carries no signal line.
