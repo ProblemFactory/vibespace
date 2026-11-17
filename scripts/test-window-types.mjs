@@ -339,7 +339,8 @@ ok([...censusTypes].every((t) => regTypes.includes(t)), `every createWindow type
   // window-types.js, every call of windowWords( / windowTitle( in it, counted per file. A site swapped to the short name changes two
   // counts; a tenth reader changes one — either is red until it is classified here (the title line = windowWords; a list, a toast,
   // the phone list and compact bar, a split toast = windowTitle).
-  const SITES = { 'src/lib/taskbar.js': { words: 4, title: 4 }, 'src/lib/mobile-nav.js': { words: 1, title: 2 }, 'src/lib/tab-group.js': { words: 0, title: 2 }, 'src/lib/window.js': { words: 0, title: 2 } };
+  // mobile-nav: the phone bar is phone-six's painter (2.369.408) — its compact line keeps the whole title as it is (主开发 2026-11-17: closure F13's compact change dropped); windowWords names the regular bar's hover title, windowTitle the phone list
+  const SITES = { 'src/lib/taskbar.js': { words: 4, title: 4 }, 'src/lib/mobile-nav.js': { words: 1, title: 1 }, 'src/lib/tab-group.js': { words: 0, title: 2 }, 'src/lib/window.js': { words: 0, title: 2 } };
   const sitesNow = {};
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   for (const abs of walk(path.join(repo, 'src'))) {
@@ -350,7 +351,7 @@ ok([...censusTypes].every((t) => regTypes.includes(t)), `every createWindow type
     if (words || title) sitesNow[rel] = { words, title };
   }
   const sortK = (o) => JSON.stringify(Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]])));
-  ok(sortK(sitesNow) === sortK(SITES), `the window-name sites, grep-derived: ${Object.entries(sitesNow).map(([f, c]) => `${f.replace('src/lib/', '')} ${c.words}+${c.title}`).join(' · ')} — four title-line readers by windowWords, ten list / toast / phone readers by windowTitle; a new or swapped site is red until classified`, sortK(sitesNow));
+  ok(sortK(sitesNow) === sortK(SITES), `the window-name sites, grep-derived: ${Object.entries(sitesNow).map(([f, c]) => `${f.replace('src/lib/', '')} ${c.words}+${c.title}`).join(' · ')} — four title-line readers by windowWords, nine list / toast / phone readers by windowTitle; a new or swapped site is red until classified`, sortK(sitesNow));
   // FUNCTIONAL (en, no DOM ⇒ t() is the identity): the words, the fallbacks, and the RED control on the old expression
   const wt2 = await import('../src/lib/window-types.js');
   wt2.registerWindowType({ type: 'fake-kind-words', label: 'Machine app' });

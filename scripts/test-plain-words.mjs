@@ -129,7 +129,12 @@ const B = JSON.parse(fs.readFileSync(BASELINE_PATH, 'utf8'));
 const ALLOWED = {
   shapes: { flag: { 'On {machine}, run: xcode-select --install': 'machine-needs: the command IS the step a person types on the Mac — folding it would leave the instruction empty' } },
   sites: { 'the Mac has no screen helper yet — install the Command Line Tools there (xcode-select --install) or update VibeSpace': { n: 3, why: 'machine-needs: the same step at its third place (machine-app.js) — the command is the step' } },
-  doors: { 'src/lib/ffmpeg-door.js': { n: 1, why: 'machine-needs pick 3d: «What the machine printed» — a failure log filled AFTER the run, in the install dialog\'s log look (as desktop-app-launcher\'s); the door draws static lines' } },
+  wall: {
+    'accounts.onDemandQuotaRefresh': 'usage-predict (2.369.408): Claude\'s quota row as it shipped — its options and its sentence per choice are pinned word for word by test-agy-wall-signal ⑨b (law 1, law 6, the Off sentence naming «Refresh all», the select\'s width); settings-4 withdrawn on the restack (主开发 2026-11-17)',
+    'antigravity.autoUsageReads': 'usage-predict (2.369.408): Antigravity\'s own reads row — its sentence per choice and the U3 clause order are pinned word for word by test-agy-wall-signal ⑨b',
+  },
+  doors: { 'src/lib/setup-flows.js': { n: 7, why: 'loop-day-report (2.369.407): the Diagnostics hour table\'s raw journal lines — hourlyTable is run ALONE by test-loop-day-report (new Function over its slice), so it cannot call the module\'s door; six older folds of this file stay debt' },
+    'src/lib/ffmpeg-door.js': { n: 1, why: 'machine-needs pick 3d: «What the machine printed» — a failure log filled AFTER the run, in the install dialog\'s log look (as desktop-app-launcher\'s); the door draws static lines' } },
 };
 
 console.log('① the shapes: every visible key that shows an internal name is folded, or a printed debt row');
@@ -152,22 +157,19 @@ console.log('① the shapes: every visible key that shows an internal name is fo
   const grew = Object.entries(B.sites || {}).filter(([k, n]) => occurrences(M.files, k).filter((o) => !o.fold).length > Math.max(n, (ALLOWED.sites[k] || {}).n || 0)).map(([k]) => k.slice(0, 80));
   ok(B.sites && !grew.length, 'no debt sentence gained a new unfolded site (debt is keyed by its places, not only its words)', grew);
   ok(debtN <= MAX_DEBT_ROWS, `the printed debt has at most ${MAX_DEBT_ROWS} rows (${debtN})`);
-  const stale = [...Object.entries(ALLOWED.shapes).flatMap(([sh, o]) => Object.keys(o).filter((k) => !(M.hits[sh] || []).includes(k))), ...Object.entries(ALLOWED.sites).filter(([k, a]) => occurrences(M.files, k).filter((o) => !o.fold).length < a.n).map(([k]) => k), ...Object.entries(ALLOWED.doors).filter(([f, a]) => (M.doors[f] || 0) < a.n).map(([f]) => f)];
-  const whys = [...Object.values(ALLOWED.shapes).flatMap((o) => Object.values(o)), ...Object.values(ALLOWED.sites).map((a) => a.why), ...Object.values(ALLOWED.doors).map((a) => a.why)];
+  const stale = [...Object.entries(ALLOWED.shapes).flatMap(([sh, o]) => Object.keys(o).filter((k) => !(M.hits[sh] || []).includes(k))), ...Object.entries(ALLOWED.sites).filter(([k, a]) => occurrences(M.files, k).filter((o) => !o.fold).length < a.n).map(([k]) => k), ...Object.entries(ALLOWED.doors).filter(([f, a]) => (M.doors[f] || 0) < a.n).map(([f]) => f), ...Object.keys(ALLOWED.wall).filter((k) => !M.wall.includes(k))];
+  const whys = [...Object.values(ALLOWED.shapes).flatMap((o) => Object.values(o)), ...Object.values(ALLOWED.sites).map((a) => a.why), ...Object.values(ALLOWED.doors).map((a) => a.why), ...Object.values(ALLOWED.wall)];
   ok(!stale.length && whys.every((w) => typeof w === 'string' && w.length > 20), `every ALLOWED row is still met and names its reason (${whys.length} rows)`, stale);
 }
 
 console.log('② the wall: a settings description past ' + WALL_CHARS + ' characters has a `details:` fold, or is a printed debt row');
 {
   const base = new Set(B.wall || []);
-  const fresh = M.wall.filter((p) => !base.has(p)), shrank = [...base].filter((p) => !M.wall.includes(p));
+  const fresh = M.wall.filter((p) => !base.has(p) && !ALLOWED.wall[p]), shrank = [...base].filter((p) => !M.wall.includes(p));
   console.log(`    (the debt printed: ${base.size} rows)`);
   ok(fresh.length === 0, 'no NEW settings row puts a wall before its control', fresh);
   ok(shrank.length === 0, 'every wall row in the baseline is still a wall (a cured one leaves the baseline)', shrank);
-  const S = await import(path.join(REPO, 'src/lib/settings-schema.js'));
-  const q = S.SETTINGS_SCHEMA['accounts.onDemandQuotaRefresh'];
-  ok(q && Array.isArray(q.details) && q.details.length === 1 && /claude -p \/usage/.test(q.details[0]) && q.description.length <= WALL_CHARS && !/claude -p|statusline|dead-reckoner/.test(q.description) && /each read asks Anthropic with this account’s sign-in/.test(q.description) && q.options.length === 4,
-    'settings-4: the quota refresh row\'s face is plain (no command, no statusline, no dead-reckoner) and says each read asks Anthropic with this account\'s sign-in, the mechanics are its `details:`, the four choices kept', q && { d: q.description.length, opts: q.options.length });
+  // settings-4 (the quota row's face) withdrawn on the restack onto 2.369.408: the row is usage-predict's as shipped (ALLOWED.wall)
 }
 
 console.log('③ the one door: a «Technical details» fold is built by src/lib/plain-words.js');
@@ -382,7 +384,7 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   ok(/if \(!file\) return text \? t\('\{what\} “\{text\}”', \{ what, text \}\) : what;/.test(dc) && /export function pickWords\(pick, t\)/.test(dc), 'design-doc-12: the element in words, no leading separator without a file; the exact line stays one fold away');
   const cc = read('public/chat.css');
   ok(/\.chat-design-page \{ display: flex; flex-wrap: wrap;/.test(cc) && /\.chat-design-page-name \{ flex: 1 1 10em; min-width: 10em;/.test(cc) && /t\('Private · make public'\)/.test(read('src/lib/chat-status-bar.js')), 'design-doc-2: the published row says the state, then the act — and wraps its buttons before the name collapses (closure 2: at 390 the name had 8 px, a published design 0)');
-  const DET = { 'src/lib/settings-schema.js': 3, 'src/harness-settings.js': 1, 'src/channel-caps.js': 1, 'src/lib/app-card-model.js': 1 }; // the carriers whose `details: [` a surface draws (closure 2)
+  const DET = { 'src/lib/settings-schema.js': 2, 'src/harness-settings.js': 1, 'src/channel-caps.js': 1, 'src/lib/app-card-model.js': 1 }; // the carriers whose `details: [` a surface draws (closure 2; the schema's third, the quota row's, withdrawn with settings-4 on the restack onto 2.369.408)
   const detNow = {}; for (const f of execFileSync('git', ['-C', REPO, 'ls-files', 'src']).toString().split('\n').filter((x) => x.endsWith('.js'))) { const n = (fs.readFileSync(path.join(REPO, f), 'utf8').match(/details: \[/g) || []).length; if (n) detNow[f] = n; }
   ok(JSON.stringify(detNow, Object.keys(detNow).sort()) === JSON.stringify(DET, Object.keys(DET).sort()), '`details: [` stands only on the carriers that draw it (a settings row, the harness and channel rows, an app card) — a new one is a decision, not a habit', detNow);
   ok(/title: cliMissingTitle\(cliMissingState\(msg \|\| \{\}\), w\.cli\)/.test(read('src/lib/cli-missing-dialog.js')), 'the CLI-missing dialog draws its title by the state (cliMissingTitle), never a hard-wired «was not found» (closure 2)');
@@ -393,11 +395,8 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
 // ── closure 2 (5a–5e): pins that bite where the verifier's mutants survived ──
 {
   console.log('closure 2: the surviving mutants, pinned');
-  const sch = read('src/lib/settings-schema.js');
-  const OPTS = ["{ value: 'auto', label: t('Auto — when the usage panel opens and the reading is over 30 minutes old') }", "{ value: 'auto-cli', label: t('Auto in the background — the official CLI reads by itself as you use it') }", "{ value: 'off', label: t('Off — never asks Anthropic; the ⟳ button goes away') }"];
+  // the quota options' leg withdrawn with settings-4 (usage-predict's row as shipped — test-agy-wall-signal ⑨b pins its words)
   const Z = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, J = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
-  const optKeys = OPTS.map((o) => o.match(/t\('([^']+)'\)/)[1]);
-  ok(OPTS.every((o) => sch.includes(o)) && optKeys.every((k) => Z[k] && J[k]) && /后台/.test(Z[optKeys[1]]) && !/定时/.test(Z[optKeys[1]]) && /30/.test(Z[optKeys[0]]), 'settings-4: each option says its moment — the background one says it runs by itself (no schedule claimed), auto its 30-minute rule, off that ⟳ goes away — in en / zh / ja');
   const rw = read('src/lib/browser-replay-window.js');
   ok(/fill: \(\) => tc\('replay', 'Type'\), type: \(\) => tc\('replay', 'Type'\)/.test(rw) && /forward: \(\) => tc\('replay', 'Forward'\)/.test(rw) && Z['replay::Type'] === '输入' && Z['replay::Forward'] === '前进' && J['replay::Type'] === '入力' && J['replay::Forward'] === '進む',
     'replay verbs: fill / type / forward are said in their context (tc) — 输入 / 前进, never the noun «类型» or «转发»');
