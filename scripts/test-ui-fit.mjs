@@ -7,7 +7,7 @@
 //   ② THE ROW AND THE BAR: the rail row and the button-bar rules as written; the Agents panel's bars wear the bar (its
 //      status rows by selector — their class is the phone fold's census); NO rule cuts the words of a rail control
 //      (text-overflow on a class a rail renderer gives a button — the base's «+ 添加 ChatGPT 账号…» drew «+ 添加 Ch…»)
-//   ③ THE PORTS PANEL RENDERS ONCE (#9): a render builds aside and only the latest commits, whole (the base cleared, awaited,
+//   ③ THE PORTS PANEL RENDERS ONCE (#9): ONE latest render (utils.js latestRender since the .407 move), committed whole (the base cleared, awaited,
 //      appended — two renders drew the forwards, the scan and the input twice)
 //   ④ THE TOUR STEPS ASIDE (#4): a guided window opened from the tour hides the tour while it is up and brings it back
 //   ⑤ THE DISK NOTICE TAKES ITS OWN LINE (#3): the editor's bar wraps while «the file on disk changed» stands
@@ -80,11 +80,16 @@ check(`② CENSUS: no rule cuts the words of a rail control (${BTN.size} button 
 check('② CONTROL: the base\'s «.acct-roster-head .acct-add { … text-overflow: ellipsis }» is caught', cuts(cssRules('.acct-roster-head .acct-add { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }'), BTN).length === 1);
 
 // ③ THE PORTS PANEL RENDERS ONCE
-const portsBody = (() => { const i = RAIL.indexOf('let renderGen = 0;'), end = 'c.replaceChildren(...box.childNodes);', j = RAIL.indexOf(end, i); return i > 0 && j > i ? RAIL.slice(i, j + end.length) : ''; })();
-const rendersOnce = (b) => /const gen = \+\+renderGen;/.test(b) && (b.match(/if \(gen !== renderGen \|\| !c\.isConnected\) return;/g) || []).length >= 2
-  && /const box = document\.createElement\('div'\)/.test(b) && /c\.replaceChildren\(\.\.\.box\.childNodes\)/.test(b) && !/\bc\.(appendChild|append)\(|c\.innerHTML = ''/.test(b.replace(/\bc\.replaceChildren[^\n]*/, ''));
-check('③ the Ports panel: each render builds into its own box, a newer render drops the older one after each await, ONE replaceChildren commits', rendersOnce(portsBody), portsBody.slice(0, 300));
-check('③ CONTROL: the base\'s shape (c.innerHTML = \'\' before the await, c.appendChild after) is caught', !rendersOnce("let renderGen = 0; const render = async () => { const gen = ++renderGen; if (gen !== renderGen || !c.isConnected) return; c.innerHTML = ''; await x(c); if (gen !== renderGen || !c.isConnected) return; c.appendChild(sec); };"));
+// (the .407 move: ui-controls-and-bugs cured the same double draw with ONE helper, utils.js latestRender, which the move kept —
+// the law is read through it: the Ports render is a latestRender, and the helper builds off-DOM, drops an older build after
+// its await and commits ONE replaceChildren; the panel's own body never writes the container)
+const UTL = read('src/lib/utils.js');
+const latestBody = (() => { const i = UTL.indexOf('export function latestRender('), j = UTL.indexOf('\n}\n', i); return i >= 0 && j > i ? UTL.slice(i, j + 3) : ''; })();
+const portsBody = (() => { const i = RAIL.indexOf('const render = latestRender(c, async (out) => {'), j = RAIL.indexOf('\n      });\n', i); return i > 0 && j > i ? RAIL.slice(i, j) : ''; })();
+const rendersOnce = (b) => /const mine = \+\+gen;/.test(b) && /const out = document\.createElement\('div'\);/.test(b) && /await build\(out\);\s*\n\s*if \(mine !== gen \|\| !container\.isConnected\) return false;/.test(b)
+  && /container\.replaceChildren\(\.\.\.out\.childNodes\);/.test(b) && !/container\.(appendChild|append)\(|container\.innerHTML = ''/.test(b);
+check('③ the Ports panel: ONE latest render (utils.js latestRender) — built off-DOM, an older build dropped after its await, ONE replaceChildren commits; the panel\'s body never writes its container', rendersOnce(latestBody) && portsBody.length > 0 && !/\bc\.(appendChild|append|replaceChildren)\(|\bc\.innerHTML = /.test(portsBody), portsBody.slice(0, 200));
+check('③ CONTROL: the base\'s shape (the container cleared before the await, appended after) is caught', !rendersOnce("export function latestRender(container, build) { let gen = 0; return async () => { const mine = ++gen; container.innerHTML = ''; await build(container); if (mine !== gen || !container.isConnected) return false; container.appendChild(x); }; }"));
 
 // ④ THE TOUR STEPS ASIDE
 const FLOWS = read('src/lib/setup-flows.js');
