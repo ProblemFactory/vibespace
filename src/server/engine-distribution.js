@@ -720,13 +720,16 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
       catch (e) {
         if (e && (e.code === 'ENOENT' || e.code === 'ESRCH')) return ''; // ended since the listing; a kernel thread
         if (!e || (e.code !== 'EACCES' && e.code !== 'EPERM')) return null;
-        try { const st = await io.stat(`/proc/${p}`); if (me !== null && st.uid !== me) return ''; } catch (e2) { return e2 && e2.code === 'ENOENT' ? '' : null; }
+        // ENDED is ENOENT (gone before the open) or ESRCH (B-f8e5: it ended while its file was open — a read through an fd
+        // opened before the end answers ESRCH, measured on the box); anything else stays unknown ⇒ in use
+        const endedCode = (e) => !!e && (e.code === 'ENOENT' || e.code === 'ESRCH');
+        try { const st = await io.stat(`/proc/${p}`); if (me !== null && st.uid !== me) return ''; } catch (e2) { return endedCode(e2) ? '' : null; }
         // THIS user's process, its exe unreadable: judged by what can be read — its argv[0] and its name
         try {
           const argv0 = String(await io.readFile(`/proc/${p}/cmdline`)).split('\0')[0];
           const comm = String(await io.readFile(`/proc/${p}/comm`)).trim();
           return inPlace(argv0) || comm === bin || path.basename(argv0) === path.basename(plan.exe) ? null : '';
-        } catch (e3) { return e3 && e3.code === 'ENOENT' ? '' : null; }
+        } catch (e3) { return endedCode(e3) ? '' : null; }
       }
     };
     for (let i = 0; i < pids.length; i += 64) {

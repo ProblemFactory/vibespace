@@ -564,10 +564,16 @@ await leg('⑨ a start holding the place', async () => { // a start between its 
 console.log('— ⑩ (r2 N4) the real /proc check: real paths, fail closed');
 const inUseOf = async (L) => (typeof L.ED._inUse === 'function' ? L.ED._inUse(EID) : 'no in-use check on this tree');
 async function procScene(EDM, { link }) {
-  const deny = { exe: null, real: false };
-  const io = { readlink: (f) => (deny.exe && f === `/proc/${deny.exe}/exe` ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' })) : fs.promises.readlink(f)), realpath: (f) => (deny.real ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' })) : fs.promises.realpath(f)) };
+  const deny = { exe: null, real: false, read: null };
+  // deny.read = { pid, code }: that pid's cmdline / comm read answers `code` (B-f8e5: ESRCH = it ended while its file was open)
+  // B-f8e5: the REAL /proc, but only THIS suite's programs listed — every program of this user was read, and another lane's
+  // (the same user: an ending one answering ESRCH, a sandboxed chrome answering EACCES with the kernel's own name) held the place
+  const own = new Set([String(process.pid)]);
+  const io = { readdir: (d) => (d === '/proc' ? fs.promises.readdir(d).then((ns) => ns.filter((n) => own.has(n))) : fs.promises.readdir(d)), readlink: (f) => (deny.exe && f === `/proc/${deny.exe}/exe` ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' })) : fs.promises.readlink(f)), realpath: (f) => (deny.real ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' })) : fs.promises.realpath(f)),
+    readFile: (f, ...a) => (deny.read && (f === `/proc/${deny.read.pid}/cmdline` || f === `/proc/${deny.read.pid}/comm`) ? Promise.reject(Object.assign(new Error(deny.read.code), { code: deny.read.code })) : fs.promises.readFile(f, ...a)) };
   const L = light(snapC, { EDM, link, inUse: null, io });
   const k = await runFrom(L.plan.targetDir); // through the symlinked path when `link`
+  own.add(String(k.pid));
   return { L, k, deny };
 }
 if (!SLEEP) ok(false, 'a sleep program to run from the kernel\'s place (none on PATH)');
@@ -587,6 +593,33 @@ else await leg('⑩ the real /proc check', async () => {
   deny.exe = null;
   ok(use2 === true && use3 === true && use4 === false && land4 === true && L.receipt() === KSHA.k3,
     'FAILS CLOSED: this user\'s program in the place whose exe answers EACCES ⇒ in use (its argv[0] is in the place); a place that cannot be resolved ⇒ in use; this user\'s other program answering EACCES (argv[0] / name not the kernel\'s) does not hold it ⇒ with the program ended, K3 lands', { use2, use3, use4, land4 });
+});
+
+// B-f8e5 (the .386 re-cut's fast gate, load 8.4: «with the program ended, K3 lands» red — land4 false): the scan reads EVERY
+// program of this user, and one that ENDS mid-scan answers its open cmdline / comm read with ESRCH (an fd opened before the
+// end; measured on the box), which counted it as in use. The end is PLACED in the window (the io seam), never raced for: this
+// user's other program, exe EACCES, its name read answering ESRCH ⇒ ended, not in use, K3 lands; an unknown error (EIO) still
+// fails closed. The CONTROL is a copy of the module that knows only ENOENT.
+if (SLEEP) await leg('⑩b an ended program never holds the place (B-f8e5)', async () => {
+  const run = async (EDM) => {
+    const { L, k, deny } = await procScene(EDM, { link: false });
+    await ended(k);
+    deny.exe = process.pid; deny.read = { pid: process.pid, code: 'ESRCH' };
+    const gone = await inUseOf(L);
+    deny.read = { pid: process.pid, code: 'EIO' };
+    const unknown = await inUseOf(L);
+    deny.read = { pid: process.pid, code: 'ESRCH' };
+    const land = await L.ED.landNext(EID);
+    deny.exe = null; deny.read = null;
+    return { gone, unknown, land, receipt: L.receipt() };
+  };
+  const now = await run(undefined);
+  ok(now.gone === false && now.unknown === true && now.land === true && now.receipt === KSHA.k3,
+    'an ENDED program never holds the place: this user\'s program whose name read answers ESRCH (it ended while its file was open) is not in use and K3 lands; an unknown error (EIO) still counts as in use', now);
+  const src = fs.readFileSync(path.join(REPO, 'src/server/engine-distribution.js'), 'utf8'), NEEDLE = "const endedCode = (e) => !!e && (e.code === 'ENOENT' || e.code === 'ESRCH');";
+  const old = src.includes(NEEDLE) ? await run(mutantCopies('engine-dist-esrch', REPO).load('src/server/engine-distribution.js', src.replace(NEEDLE, "const endedCode = (e) => !!e && e.code === 'ENOENT';"), 'enoent-only')) : null;
+  ok(!!old && old.gone === true && old.land === false && old.receipt === KSHA.k2,
+    'CONTROL: a copy that knows only ENOENT counts the ended program as in use and K3 does not land — the leg above is red without the change', old || 'the needle is gone');
 });
 
 console.log('— ⑪ (r2 N5) no orphaned kernel folders');
