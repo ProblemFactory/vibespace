@@ -106,7 +106,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
     readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled, agentdRemote, dialBridge,
     harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, ownerWriteRefusal,
-    sessionCounterRef, createSessionMessages, poolChooser, sbNoteServerOp,
+    sessionCounterRef, createSessionMessages, poolChooser,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
     adapterRegistry, pty, path, fs, os, ensureDir, hosts,
@@ -1089,7 +1089,6 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // attach still loads it.
             if (!(data.resume && data.resumeId) && !data.fork && !data.keeperSid) session._historyLoaded = true;
             session._normalizer.onOp((op) => {
-              try { if (session.host && session.keeperSid) sbNoteServerOp?.(session.host, session.keeperSid, op); } catch { } // session-brain step-2 dark tap
               broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op });
             });
           }

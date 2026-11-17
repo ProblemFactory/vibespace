@@ -1,6 +1,6 @@
 # Three-tier architecture: frontend / orchestrator / device layer
 
-**Status**: EXECUTED — rounds R0–R6 code-complete as of 2.319.0 (2026-08-11); session-brain steps 1–4 shipped (2.316.0–2.318.0, flag-gated per the activation order); physical decomposition landed 2.325.0–2.326.0. Remaining: flip the three activation switches after soak. This is the formal design record;
+**Status**: EXECUTED — rounds R0–R6 code-complete as of 2.319.0 (2026-08-11); session-brain steps 1–4 shipped (2.316.0–2.318.0, flag-gated per the activation order); physical decomposition landed 2.325.0–2.326.0. Remaining: the activation switches. **2.369.407: the parity soak that was to gate them is REMOVED** — it could not fail from the day it was written (its two taps read `op.msg`; every create carries `message`); the switches stay off, and what follows them is the owner's decision on the separation design, not a soak. This is the formal design record;
 requirement discussions happen outside this repository.
 **Companion**: docs/design-cs-unification.md (the module-level migration ledger this generalizes).
 
@@ -200,16 +200,18 @@ default OFF** (`agentd.localPipeSessions`): new local chat sessions as daemon
 pipe sessions — same chat-wrapper, same buffer/meta paths, dtach retired for
 them; adoption-based (existing sessions never migrate, spawn falls back to
 dtach, kill → kill-pipe-session, boot re-opens agentdPipe metas by sid).
-ACTIVATION RULE: flip the flag only after the step-3 sb-parity-*/device-feed
-metrics have soaked live — the sequencing law's final application.
+ACTIVATION RULE (2.317.0–2.369.405): flip the flag only after the step-3 sb-parity-*/device-feed
+metrics have soaked live — the sequencing law's final application. SUPERSEDED in 2.369.407: the sb-parity
+comparator is removed (it could not fail); parity is a deterministic leg, and the flag's fate is the owner's
+separation decision.
 **CAMPAIGN CODE-COMPLETE (2.319.0)**: B-47e2 SHIPPED (flag `agentd.localDiscovery`
 — FS facts from the device snapshot, parity+latency+fallback proven in
 test-local-discovery-device.mjs incl. the TTL-cache vacuous-parity trap) and
 B-0f13 SHIPPED (remote statusline: script ships with the agent tools, the
 --settings JSON rides per-arg shq quoting, quota-refresh returns the host's
 passive cache fetchedAt-guarded). Every round has landed; what remains is
-ACTIVATION, in order: sb-parity soak → agentd.localDiscovery → 
-agentd.localPipeSessions. The routing table for future changes lives in
+ACTIVATION (2.369.407: the sb-parity soak is removed — the switches stay off; what follows them is the owner's
+decision on the separation design): agentd.localDiscovery → agentd.localPipeSessions. The routing table for future changes lives in
 CLAUDE.md §THE THREE-TIER FINAL FORM. The step-2 substrate exists — the daemon now owns a stdout tailer
 (sealed-orders) and bundles the shared adapter; the usage/banner/rate-limit
 event families already flow device-side (usage-events push; banner reflex).

@@ -88,7 +88,7 @@ function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
   attachToDtach, setupSessionPty, readSessionMeta, writeSessionMeta,
   deleteSessionMeta, broadcastToSession, broadcastActiveSessions,
-  refreshWebuiPids, sbNoteServerOp, getHosts, getDialBridge, getExitProxy = () => null, note = () => { }, agentEnv }) {
+  refreshWebuiPids, getHosts, getDialBridge, getExitProxy = () => null, note = () => { }, agentEnv }) {
   const hosts = mk(getHosts);
   const dialBridge = mk(getDialBridge);
   const exitProxyRef = mk(getExitProxy); // B-92a4: a session the re-probe un-adopts ends its exit pairs + waiting asks like any ended one
@@ -720,7 +720,6 @@ function restoreSessions() {
       // (a trimmed head lost the earlier processes; the kept fact did not) — src/cost-segments.js
       if (typeof session._normalizer.seedCost === 'function') { try { session._normalizer.seedCost(costSeedOf(meta.costKept, savedBuffer)); } catch { } }
       session._normalizer.onOp((op) => {
-        try { if (session.host && session.keeperSid) sbNoteServerOp(session.host, session.keeperSid, op); } catch { } // step-2 dark tap (the daemon streams by ITS sid = keeperSid)
         broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op });
       });
     }

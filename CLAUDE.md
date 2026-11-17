@@ -72,7 +72,7 @@ The 2026-08 campaign (docs/design-three-tier.md, R0–R6 + session-brain + closu
 | **A browser ENGINE plugin** (a profile's browser that is not Chrome — the custom kernel) | PURE `src/browser-engines.js` + ORCH `src/server/browser-engines.js` (ONE table, each verb ONE loader ask); never Chrome in its place ⇒ kb-design-lessons §18 | test-browser-builds ⑦, test-plugin-loader |
 | **A NEW CLAUDE CODE BUILD — may its long-lived tokens be spent** | SHARED `src/claude-oat-probe.js` (THE measurement) + ORCH `src/server/cli-self-measure.js` (the hub checks it itself; a PASS = the judge's, for those bytes) ⇒ kb-design-lessons §18 | test-cli-self-measure + test-oat-measure-fake |
 
-**ACTIVATION SWITCHES (code complete, soak-gated — flip deliberately, in order):** ① watch `sb-parity-hit/miss` in Diagnostics (step-2/3 live parity) → ② `agentd.localDiscovery` on (after `local-disc-snap-ms` looks sane on YOUR storage) → ③ `agentd.localPipeSessions` on (R6 — only after ①② soak; the design's sequencing law). Rollback = flip off; every path falls back structurally.
+**ACTIVATION SWITCHES (off):** `agentd.localDiscovery`, `agentd.localPipeSessions`. The sb-parity soak that gated them could not fail (its taps read `op.msg`; creates carry `message`) and is REMOVED (2.369.407); what follows is the owner's separation decision, not a soak. Parity: test-session-brain-dark (deterministic), test-unknown-records (the create's field). Rollback = flip off.
 
 **ENFORCEMENT (2.323.0; PHYSICAL since 2.325-2.326): the tier rules above are a RED TEST, not prose** — scripts/test-architecture.mjs (107 asserts — incl. §43, the GATE CENSUS: every scripts/test-*.mjs is in exactly one ci.mjs tier or in EXCLUDED with a reason; and §44 … ⇒ kb-design-lessons §18
 

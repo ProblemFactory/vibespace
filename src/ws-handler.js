@@ -240,7 +240,7 @@ const WS_CTX_CONTRACT = [
   'setupSessionPty', 'reattachLocalPty', 'ptyQuietSince', 'refreshWebuiPids', 'deleteSessionMeta', 'writeSessionMeta', 'readSessionMeta', 'autoResume',
   'readLayouts', 'writeLayouts', 'getSyncStore', 'serverSetting', 'integrationEnabled', 'agentdRemote', 'dialBridge',
   'harnessSetting', 'harnessDeclares', 'harnessSpawnSettings', 'cliConfigPlanB64', 'ownerWriteRefusal', // harness settings (design-harness-settings §5/§6) + the root verdict (src/server-root.js: a worktree / temp server runs no register helper)
-  'sessionCounterRef', 'createSessionMessages', 'poolChooser', 'sbNoteServerOp',
+  'sessionCounterRef', 'createSessionMessages', 'poolChooser',
   'SOCKETS_DIR', 'BUFFERS_DIR', 'PTY_WRAPPER', 'CHAT_WRAPPER',
   'NODE_CMD', 'DTACH_CMD', 'CLAUDE_CMD', 'EDITOR_CMD', 'AGENT_BIN_DIR', 'PORT', 'X_ENV', 'cliCmds', // cliCmds: the spawn-time re-resolve (B-a18e)
   'adapterRegistry', 'pty', 'path', 'fs', 'os', 'ensureDir', 'hosts', // execFileSync dropped (lane hub-sync-holds: a sync child nothing here called)
@@ -259,7 +259,7 @@ function registerWsHandler(wss, ctx) {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, reattachLocalPty, ptyQuietSince, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta, autoResume,
     readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled, agentdRemote, dialBridge,
-    sessionCounterRef, createSessionMessages, poolChooser, sbNoteServerOp,
+    sessionCounterRef, createSessionMessages, poolChooser,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, ensureDir, hosts,

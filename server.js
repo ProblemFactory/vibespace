@@ -466,7 +466,6 @@ const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
   deleteSessionMeta, broadcastToSession,
   broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),
   refreshWebuiPids: (...a) => refreshWebuiPids(...a),
-  sbNoteServerOp: (...a) => sbNoteServerOp(...a),
   getHosts: () => { try { return hosts; } catch { return null; } },
   getDialBridge: () => { try { return dialBridge; } catch { return null; } }, getExitProxy: () => { try { return exitProxy; } catch { return null; } }, note: (line) => bootTrace.note(line), // B-92a4: the re-probe un-adopts through the exit proxy's onSessionEnd; its lines ride the boot trace (⚙ Diagnostics)
   agentEnv: (...a) => require('./src/ws-handler').agentEnv(...a), // lane spawn-env-debts: the remote chat re-adopt's transport env (as ws-create's r6Env)
@@ -1204,9 +1203,7 @@ const sessionBrain = require('./src/server/session-brain.js').create({
   broadcastAll: (msg) => { const json = JSON.stringify(msg); for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) c.send(json); } catch {} } }, // session-vcs must reach an explorer-only client, not just the session's attached ones
   getSessionMetaStore: () => ({ readSessionMeta, writeSessionMeta }), getSessionStatus: () => { try { return sessionStatus; } catch { return null; } }, sessionStatusKey,
 });
-const { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing,
-  _sbMidCore, SB_RING_MAX,
-} = sessionBrain;
+const { sbSeenFirst, claudeSideEffects } = sessionBrain;
 hosts.onSessionEvents = (hostId, m) => {
   try {
     if (!m?.sid) return;
@@ -1223,16 +1220,7 @@ hosts.onSessionEvents = (hostId, m) => {
         }
       }
     }
-    if (!Array.isArray(m.batch)) return;
-    const r = _sbRing(hostId + ':' + m.sid);
-    for (const ej of m.batch) {
-      let op = null; try { op = JSON.parse(ej); } catch { continue; }
-      if (op?.op === 'create' && op.msg?.id) {
-        r.device.push(_sbMidCore(op.msg.id));
-        if (r.device.length > SB_RING_MAX) r.device.splice(0, r.device.length - SB_RING_MAX);
-      }
-    }
-    sbCompare(hostId, m.sid, r);
+    // (its normalized `batch` fed the step-2 parity soak — removed in 2.369.407: the raw records above are the feed)
   } catch { }
 };
 hosts.onUsageEvents = (hostId, text) => {
@@ -1508,7 +1496,6 @@ const { registerWsHandler, noConvoRef, pickCodexThreadCandidate } = require('./s
 const wsApi = registerWsHandler(wss, {
   getDeliver: () => { try { return deliver; } catch { return null; } },   // lane queued-is-not-woke round 3: a kill hands the ladder's held frames back at the act
   poolChooser: poolChooserForModel,
-  sbNoteServerOp,
   otelEnv: otelIngest.envFor,
   agentdRemote: { ensureAgentdOnHost, agentdHostToken, lockedWhy: (id) => hostTokens.lockedWhy(id), agentdDir: AGENTD_DIR, attachBundle: path.join(__dirname, 'data', 'bin', 'vibespace-agentd-attach.js') },
   dialBridge,
