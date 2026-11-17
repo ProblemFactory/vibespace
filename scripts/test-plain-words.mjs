@@ -123,12 +123,20 @@ if (process.argv.includes('--print-baseline')) {
   process.exit(0);
 }
 const B = JSON.parse(fs.readFileSync(BASELINE_PATH, 'utf8'));
+// ── THE ALLOWED (主开发 ride-403, 2026-11-14: «an allowed line gets a named row with its reason»): lines of OTHER units this census met
+// when the unit moved onto master (2.369.405, again 2.369.406), each judged and named — NOT debt: they never count toward MAX_DEBT_ROWS, the debt stays shrink-only,
+// and a row whose line is gone is red until it leaves this table ──
+const ALLOWED = {
+  shapes: { flag: { 'On {machine}, run: xcode-select --install': 'machine-needs: the command IS the step a person types on the Mac — folding it would leave the instruction empty' } },
+  sites: { 'the Mac has no screen helper yet — install the Command Line Tools there (xcode-select --install) or update VibeSpace': { n: 3, why: 'machine-needs: the same step at its third place (machine-app.js) — the command is the step' } },
+  doors: { 'src/lib/ffmpeg-door.js': { n: 1, why: 'machine-needs pick 3d: «What the machine printed» — a failure log filled AFTER the run, in the install dialog\'s log look (as desktop-app-launcher\'s); the door draws static lines' } },
+};
 
 console.log('① the shapes: every visible key that shows an internal name is folded, or a printed debt row');
 {
   const fresh = [], shrank = [];
   for (const [sh, ks] of Object.entries(M.hits)) {
-    const debt = new Set((B.shapes && B.shapes[sh]) || []);
+    const debt = new Set([...((B.shapes && B.shapes[sh]) || []), ...Object.keys(ALLOWED.shapes[sh] || {})]);
     for (const k of ks) {
       if (debt.has(k)) continue;
       const occ = occurrences(M.files, k);
@@ -141,9 +149,12 @@ console.log('① the shapes: every visible key that shows an internal name is fo
   ok(fresh.length === 0, 'no NEW visible key shows an env variable, a CLI command, a --flag, a path, a setting key or an id outside a fold', fresh.slice(0, 12));
   ok(shrank.length === 0, 'every baseline row still holds (a row that was cured or folded is removed from scripts/fixtures/plain-words-baseline.json — the debt only shrinks)', shrank.slice(0, 12));
   // closure F25 / E: a debt sentence reused in ONE more place is red (its unfolded sites only fall), and the row count only falls
-  const grew = Object.entries(B.sites || {}).filter(([k, n]) => occurrences(M.files, k).filter((o) => !o.fold).length > n).map(([k]) => k.slice(0, 80));
+  const grew = Object.entries(B.sites || {}).filter(([k, n]) => occurrences(M.files, k).filter((o) => !o.fold).length > Math.max(n, (ALLOWED.sites[k] || {}).n || 0)).map(([k]) => k.slice(0, 80));
   ok(B.sites && !grew.length, 'no debt sentence gained a new unfolded site (debt is keyed by its places, not only its words)', grew);
   ok(debtN <= MAX_DEBT_ROWS, `the printed debt has at most ${MAX_DEBT_ROWS} rows (${debtN})`);
+  const stale = [...Object.entries(ALLOWED.shapes).flatMap(([sh, o]) => Object.keys(o).filter((k) => !(M.hits[sh] || []).includes(k))), ...Object.entries(ALLOWED.sites).filter(([k, a]) => occurrences(M.files, k).filter((o) => !o.fold).length < a.n).map(([k]) => k), ...Object.entries(ALLOWED.doors).filter(([f, a]) => (M.doors[f] || 0) < a.n).map(([f]) => f)];
+  const whys = [...Object.values(ALLOWED.shapes).flatMap((o) => Object.values(o)), ...Object.values(ALLOWED.sites).map((a) => a.why), ...Object.values(ALLOWED.doors).map((a) => a.why)];
+  ok(!stale.length && whys.every((w) => typeof w === 'string' && w.length > 20), `every ALLOWED row is still met and names its reason (${whys.length} rows)`, stale);
 }
 
 console.log('② the wall: a settings description past ' + WALL_CHARS + ' characters has a `details:` fold, or is a printed debt row');
@@ -162,7 +173,7 @@ console.log('② the wall: a settings description past ' + WALL_CHARS + ' charac
 console.log('③ the one door: a «Technical details» fold is built by src/lib/plain-words.js');
 {
   const base = B.doors || {};
-  const fresh = Object.entries(M.doors).filter(([f, n]) => n > (base[f] || 0)).map(([f, n]) => `${f}: ${n} > ${base[f] || 0}`);
+  const fresh = Object.entries(M.doors).filter(([f, n]) => n > Math.max(base[f] || 0, (ALLOWED.doors[f] || {}).n || 0)).map(([f, n]) => `${f}: ${n} > ${base[f] || 0}`);
   const shrank = Object.entries(base).filter(([f, n]) => (M.doors[f] || 0) < n).map(([f, n]) => `${f}: ${M.doors[f] || 0} < ${n}`);
   console.log(`    (the debt printed: ${Object.keys(base).length} files, ${Object.values(base).reduce((a, b) => a + b, 0)} hand-built folds)`);
   ok(fresh.length === 0, 'no NEW hand-built «Technical details» / data-fold="tech" outside plain-words.js (use techFold / techFoldHtml)', fresh);

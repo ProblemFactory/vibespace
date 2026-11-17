@@ -154,8 +154,11 @@ check('③f the view\'s stop() ends the OPENED strip\'s observers (its place and
 check('③f CONTROL: a stop() that leaves them (a91f4bc8b\'s) is refused', !stopEnds(NC.replace(/\n    \/\/ the OPENED strip's own observers[^\n]*\n[^\n]*\n    try \{ const d = this\.view\?\._attnDock;[^\n]*\n/, '\n')));
 
 // ③b ONE ORDER wherever an item opens (主开发 13:34Z — the owner: «这样我都看不到推荐回复选项»): the question, its OPTIONS, then the detail
-check('③b ONE ORDER: the row (the tray, the mini inbox, the phone sheet, the strip, the card) draws its options BEFORE its detail fold',
-  ROW.includes("${opts}${card ? '' : detailFold}<div class=\"ut-meta\">") && !ROW.includes('detailFold}${opts}'));
+// the order, not the adjacency (ui-phone-and-fit's own form, handed to ui-plain-words on the .402 meeting map): the options, then the
+// detail fold, then the meta line — another fold of the detail (ui-plain-words' technical fold) may stand between the detail and the meta
+const oneOrder = (src) => { const line = src.split('\n').find((l) => l.includes('${opts}')) || ''; const at = (x) => line.indexOf(x); return at('${opts}') >= 0 && at('${opts}') < at('detailFold}') && at('detailFold}') < at('<div class="ut-meta">') && !src.includes('detailFold}${opts}'); };
+check('③b ONE ORDER: the row (the tray, the mini inbox, the phone sheet, the strip, the card) draws its options BEFORE its detail fold', oneOrder(ROW));
+check('③b CONTROL: the detail fold planted before the options is red', !oneOrder(ROW.replace("${opts}${card ? '' : detailFold}", "${card ? '' : detailFold}${opts}")));
 check('③b …the For-you window\'s pane: the options before the detail', /el\.append\(head, title, dl, arts, opts, detail, cutLine, replied, reach, reply, actions\);/.test(IW));
 check('③b …the opened strip: the options (order 6) before the detail (order 7), which scrolls below them',
   /\.chat-attn-dock\.cad-open \.cad-rows \.ut-item > \.ut-body > \.ut-detail-exp \{ display: block !important; order: 7;/.test(CC) && /\.cad-rows \.ut-body > \.ut-opts \{ order: 6;/.test(CC));
