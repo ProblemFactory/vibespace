@@ -637,8 +637,8 @@ function partsOf(entry, ctx) {
   let meta, ageWords = null, expWords = null; // r14: the row's VOLATILE words (the age, the lifetime) — patched in place, never in the signature
   if (resolved) {
     const by = resolvedByText(i.resolvedBy, t, i);
-    const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text
-      ? ' · ' + escHtml(t('You replied: {text}', { text: i.reply.text.length > REPLY_SNIPPET ? i.reply.text.slice(0, REPLY_SNIPPET) + '…' : i.reply.text })) : '';
+    const said = replyWords(i.reply, t, REPLY_SNIPPET);   // B-51dd: its text, its pictures, or both
+    const replied = said ? ' · ' + escHtml(t('You replied: {text}', { text: said })) : '';
     meta = (tail ? `<span class="ut-sess" title="${escHtml(t('Go to this session'))}">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
       + escHtml(statusWords(i, t)) // r3: a hidden pointer reads «hidden — nothing was decided», never «done»
       + (by ? ' · ' + escHtml(by) : '') + (endCodeOf(i) ? ` · <code class="ut-end-code">${escHtml(endCodeOf(i))}</code>` : '') + replied // r8: an end this client cannot classify — its code, typed
@@ -799,11 +799,20 @@ export function replyBoxEl(t) {
   return box;
 }
 
+/** B-51dd: what a reply said, in words — its text (cut at `max`), «N picture(s)» it carried, or both; '' for none. */
+export function replyWords(reply, t, max = 0) {
+  const text = reply && typeof reply.text === 'string' ? reply.text : '';
+  const n = reply && Number(reply.pictures) > 0 ? Number(reply.pictures) : 0;
+  const cut = max && text.length > max ? text.slice(0, max) + '…' : text;
+  const pics = n ? t('{n} picture(s)', { n }) : '';
+  return cut && pics ? `${cut} · ${pics}` : cut || pics;
+}
+
 /** A box the user is USING: it has focus or text. Never replaced or removed by a repaint. */
 export function boxInUse(box) {
   if (!box) return false;
   const ta = box.querySelector('textarea');
-  return box.contains(document.activeElement) || !!(ta && ta.value);
+  return box.contains(document.activeElement) || !!(ta && ta.value) || !!box.querySelector('.ut-reply-pic-item');   // B-51dd: a box holding a picture is in use
 }
 
 /** The live half: the reply button, the chips and an open box's Send follow

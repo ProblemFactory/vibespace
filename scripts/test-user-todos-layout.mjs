@@ -173,7 +173,7 @@ console.log('⑦ THE REPLY BUTTON — PURE replyButtonState = the ONE replyVerdi
   const sb = fs.readFileSync(path.join(ROOT, 'src/lib/sidebar.js'), 'utf8');
   const facts = (/const LIVE_SESSION_FACTS = Object\.freeze\(\{([\s\S]*?)\n\}\);/.exec(sb) || [])[1] || '';
   ok(/(^|[^\w])turn: \{ digest: null \}/m.test(facts), 'LIVE_SESSION_FACTS carries `turn` with `digest: null` (carried-only: a fact that flips twice per turn must not re-render the list)');
-  ok(/\/api\/user-todos\/\$\{encodeURIComponent\(id\)\}\/reply/.test(acts) && /const sent = await model\.postReply\(id, body\);/.test(panel), 'the reply POSTs /api/user-todos/:id/reply (the model\'s postReply, which the panel\'s sendReply calls)');
+  ok(/\/api\/user-todos\/\$\{encodeURIComponent\(id\)\}\/reply/.test(acts) && /const sent = await model\.postReply\(id, body(?:, replyOpts)?\);/.test(panel), 'the reply POSTs /api/user-todos/:id/reply (the model\'s postReply, which the panel\'s sendReply calls)');
   ok(/Could not reply: \{why\}/.test(acts) && /Reply sent/.test(acts) && !/fetchJson\(`\/api\/user-todos\/\$\{encodeURIComponent\(id\)\}\/reply`/.test(panel), 'both outcomes reach the user as a toast (no silent failure) — ONE reply POST, in the model (the panel holds no second)');
 }
 

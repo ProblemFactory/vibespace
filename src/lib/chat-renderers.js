@@ -944,7 +944,7 @@ class ChatRenderers {
     // the item, the quote folded, the reply as the body. Every piece escaped /
     // markdown-sanitized like any user message.
     const inboxReply = origin.why === 'tray-answer' ? parseInboxReply(rawText) : null;
-    if (inboxReply) return this._renderInboxReply(msg, inboxReply);
+    if (inboxReply) return this._renderInboxReply(msg, inboxReply, content);
 
     const el = document.createElement('div');
     el.className = 'chat-msg chat-msg-user';
@@ -969,7 +969,7 @@ class ChatRenderers {
     return el;
   }
 
-  _renderInboxReply(msg, r) {
+  _renderInboxReply(msg, r, content = []) {
     const el = document.createElement('div');
     el.className = 'chat-msg chat-msg-user chat-msg-inbox-reply';
     el._rawMsg = msg;
@@ -978,7 +978,9 @@ class ChatRenderers {
     const gist = (qLines[1] || r.id).slice(0, 120);
     const html = `<div class="chat-peer-head chat-inbox-reply-head">${UI_ICONS.inbox || ''} ${escHtml(t('For you · reply to #{id}', { id: r.id }))}</div>`
       + `<details class="chat-inbox-quote"><summary>${escHtml(gist)}</summary><div class="chat-inbox-quote-body">${escHtml(r.quote)}</div></details>`
-      + `<div class="chat-text">${this.renderMarkdown(r.reply || '')}</div>`;
+      + `<div class="chat-text">${this.renderMarkdown(r.reply || '')}</div>`
+      // B-51dd: the pictures the reply carried — the plain bubble's own media card (a picture alone is a reply)
+      + content.filter((b) => b && b.type === 'image' && !b.gone && b.data).map((b) => imageMediaHtml({ dataUrl: `data:${b.mediaType || 'image/png'};base64,${b.data}`, mediaType: b.mediaType || 'image/png', name: t('Image') })).join('');
     this.wrapMsg(el, 'user', t('You'), html);
     ChatRenderers.applyQueueChip(el, msg, this._canSteerQueue() ? this._onQueueChipClick : null);
     return el;

@@ -40,6 +40,8 @@ import { restartRefusalWords } from './browser-build-model.js'; // B-53df: the b
 import { humanRefusalText } from '../browser-human.js'; // B-53df: … the person's own browsing words first (PURE)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
+import { refusalText as pictureRefusalText } from './image-attach.js'; // B-51dd: a picture the route refused — the picture door's own words
+import { dropSentPictures } from './reply-pictures.js'; // B-51dd: a sent reply removes exactly the pictures it carried, and every box showing the item redraws
 import { noteHubClock, settingCardOf, noteSettingPresent, untilClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
 import { isPointer, clockWords, headWordOf, arrivalWords } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo; r4: an expired ask's end in words
 import { PROPOSABLE, isSettingChange } from '../ask-setting.js';
@@ -305,17 +307,18 @@ export function inboxModel(app) {
    *  the typing path, quoted. Both outcomes reach the user as a toast; resolves
    *  true when the reply was sent (the caller then clears its box + draft). A
    *  reply to a conversation that ENDED reopens it (`reopened` — its window opens here). */
-  const postReply = async (id, text, { sentToast = null, failWords = null } = {}) => {   // `failWords(why)` (lane setting-doors pick 2): a press that changed something says it beside the failure   // `sentToast` (lane controls-that-lie): a grant's own words replace «Reply sent»
+  const postReply = async (id, text, { sentToast = null, failWords = null, pictures: pics = null } = {}) => {   // `failWords(why)` (lane setting-doors pick 2): a press that changed something says it beside the failure   // `sentToast` (lane controls-that-lie): a grant's own words replace «Reply sent»; `pictures` (B-51dd): the box's pictures ride the reply
     // fetchJson never throws — a null (network) or an {error, code} body is a
-    // FAILURE the user must see (no silent failures); the box keeps its text
-    const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    // FAILURE the user must see (no silent failures); the box keeps its text (and its pictures)
+    const images = Array.isArray(pics) && pics.length ? pics.map((p) => ({ mediaType: p.mediaType, base64: p.base64, name: p.name })) : null;
+    const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(images ? { text, images } : { text }) });
     if (r && r.ok) {
-      replyFailures.delete(id); drafts.delete(id);
+      replyFailures.delete(id); drafts.delete(id); if (images) dropSentPictures(pictures, id, pics);
       if (r.reopened) { showToast(t('Reopened the conversation and sent your reply')); openReopened(r); }
       else showToast(sentToast || t('Reply sent'));
       return true;
     }
-    const why = r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');   // B-a5a4 follow-up r2: a refusal naming an account
+    const why = r && r.code === 'bad_image' && r.picture ? pictureRefusalText([r.picture], t) : r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');   // B-a5a4 follow-up r2: a refusal naming an account; B-51dd: a refused picture by its own words
     replyFailures.set(id, { code: (r && r.code) || 'unreachable', why });
     if (r && r.reopened && r.sessionId) openReopened(r); // reopened, but the reply did not go: the conversation is open — show it
     showToast(r && r.code === 'resume_failed' ? t('Could not reopen the conversation: {why}', { why }) : failWords ? failWords(why) : t('Could not reply: {why}', { why }), { type: 'error' });
@@ -737,6 +740,7 @@ export function inboxModel(app) {
   const boardOf = (key) => { const rec = statusFor(key); return rec ? { rec, word: boardWord(rec.state), why: typeof rec.reason === 'string' ? (isCleared(rec) ? clearedText() : rec.reason) : '' } : null; };
   const byId = (id) => todos.open.find((i) => i.id === id) || todos.resolved.find((i) => i.id === id) || null;
   const drafts = new Map(); // item id → the text of a FOLDED / unsent reply box (the popup's, the mini inbox's and the window's — one draft per item)
+  const pictures = new Map(); // B-51dd: item id → the pictures its reply box holds (src/lib/reply-pictures.js) — kept beside the draft, cleared by a sent reply
 
   // THE WHOLE DETAIL (2026-09-27): a snapshot carries a RESOLVED item's detail as a
   // 300-char preview (`detailTruncated`, the store's previewOf — history never grows the
@@ -792,10 +796,7 @@ export function inboxModel(app) {
     get todos() { return todos; },
     get loaded() { return loaded; },
     byId, sessionFor, displayName, wordsOf, detailOf, recordOf, detailLinesOf, nameFor, jump, isDoor, setStatus, resolveOne, optionsFor, readNotices, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
-    ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts,
-    /** lane setting-doors pick 2: every surface draws its rows again on the snapshot it holds — a fact a row reads that is no item's
-     *  changed (a proposed change's value NOW, a hold): the app calls it on the settings store's change and the holds' broadcast */
-    redraw() { if (loaded) emit('todos', todos); },
+    ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts, pictures,
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */
     rowCtx: { t, nameFor, wordsOf, detailOf, replyState, optionsOf: optionsFor, lang: resolveLang },

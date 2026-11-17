@@ -1122,10 +1122,12 @@ class UserTodoManager {
    *  already resolved or dismissed keeps its status and `resolvedBy` (a reply
    *  is refused for delivery reasons only, never bookkeeping) — either way the
    *  reply is kept on it as `{text ≤4000, at}`. ONE save + ONE broadcast. */
-  resolveByReply(id, text, now = this._now()) {
+  resolveByReply(id, text, now = this._now(), { pictures = 0 } = {}) {   // B-51dd: `pictures` = how many the reply carried (a picture alone is a reply)
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
+    const n = Math.max(0, Math.floor(Number(pictures) || 0));
     item.reply = { text: String(text == null ? '' : text).slice(0, REPLY_MAX), at: now };
+    if (n) item.reply.pictures = n;
     const wasOpen = item.status === 'open' && !decisionRefusal(item, 'done', 'reply');   // lane wake-approve-card r2: a typed reply never decides
     if (wasOpen) { item.status = 'done'; item.resolvedAt = now; item.resolvedBy = 'reply'; }
     this._save(); this._notify();

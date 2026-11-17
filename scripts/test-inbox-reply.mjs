@@ -281,14 +281,14 @@ const { createUserInputSender } = require(path.join(REPO, 'src/server/user-input
 const { createAdapterRegistry } = require(path.join(REPO, 'src/adapters/index.js'));
 const adapterRegistry = createAdapterRegistry({});
 const sessionStatusKey = (session, id) => { const bsid = session?.backendSessionId || session?.claudeSessionId; return bsid ? `${session.backend || 'claude'}:${bsid}` : `webui:${id}`; }; // server.js's, verbatim
-function harness(routeFile = 'src/routes/user-todos-reply.js', { reopen = null } = {}) {
+function harness(routeFile = 'src/routes/user-todos-reply.js', { reopen = null, buffersDir = null } = {}) {
   const { registerUserTodoReplyRoutes } = require(path.isAbsolute(routeFile) ? routeFile : path.join(REPO, routeFile)); // a patched copy (§6) is an absolute path outside the checkout
   const routes = {};
   const app = { post: (p, h) => { routes['POST ' + p] = h; }, get: (p, h) => { routes['GET ' + p] = h; } };
   const activeSessions = new Map();
   const rec = { feed: [], bcast: [], recovered: [] };
   const sender = createUserInputSender({
-    activeSessions, adapterRegistry, BUFFERS_DIR: tmpdir(),
+    activeSessions, adapterRegistry, BUFFERS_DIR: buffersDir || tmpdir(), framesDir: tmpdir(),   // B-51dd §10: a big frame rides a file — never under the checkout's data/
     broadcastToSession: (s, id, m) => rec.bcast.push(m), feedLive: (s, m) => rec.feed.push(m),
     autoResume: { noteRecovered: (id, why) => rec.recovered.push([id, why]) },
     reattachLocalPty: () => { throw new Error('no heal expected'); }, ptyQuietSince: () => false, log: () => { },
@@ -806,12 +806,12 @@ console.log('§8d wiring pins + RED CONTROL');
   const srv = read('server.js'), wsh = read('src/ws-handler.js'), rsrc = read('src/routes/user-todos-reply.js');
   ok(/const wsApi = registerWsHandler\(wss, \{/.test(srv) && /\n  return \{ convOps \}; \/\/ [^\n]*\n\}\n/.test(wsh), 'ws-handler hands its conversation seams back (return { convOps } — int322: never the raw create case) and server.js keeps them (wsApi)');
   ok(/const inboxReopen = require\('\.\/src\/server\/inbox-reopen\.js'\)\.create\(\{ getOpenConversation: \(\) => wsApi && wsApi\.convOps && wsApi\.convOps\.openConversation, activeSessions, readUserState: \(\) => persistenceRouter\.readUserState\(\), discover: async \(key\) => .*warmSessions\(\).*sessionKey === key/.test(srv), 'server.js builds the reopener over the conversation seam (int322), user-state and the discovery sweep the sidebar lists');
-  ok(/if \(!v\.ok && v\.code === 'no_live_session' && typeof reopen === 'function'\) return reopenAndSend\(req, res, item, t\.text\);\n      if \(!v\.ok\) return fail\(res, v\.code, v\.why\);/.test(rsrc), 'the route reopens ONLY on no_live_session, right before the refusal it replaces');
+  ok(/if \(!v\.ok && v\.code === 'no_live_session' && typeof reopen === 'function'\) return reopenAndSend\(req, res, item, t\.text, frame, pics\.blocks\.length\);\n      if \(!v\.ok\) return fail\(res, v\.code, v\.why\);/.test(rsrc), 'the route reopens ONLY on no_live_session, right before the refusal it replaces');
   ok(/NOT AN UNATTENDED SPEND: this first turn is the PERSON's/.test(rsrc) && (rsrc.match(/\bsendUserInput\s*\(/g) || []).length === 2, 'the reopened first turn is commented at its call as the PERSON\'s typed turn, and rides THE typing path (the file\'s 2 sendUserInput calls — the spend census\'s typed-send ALLOW row)');
   ok(!/formatChatInput|deliverToConversation|authorizeSpend|sendToSession/.test(read('src/server/inbox-reopen.js')) && !/formatChatInput|deliverToConversation|authorizeSpend|sendToSession|sendUserInput/.test(read('src/inbox-reopen.js')), 'the reopener sends nothing into a conversation (no frame, no ladder, no typing) — a resume bills no turn');
   // RED CONTROL: the route WITHOUT its reopen line = the pre-lane answer
   const rel = 'src/routes/user-todos-reply.js';
-  const needle = "      if (!v.ok && v.code === 'no_live_session' && typeof reopen === 'function') return reopenAndSend(req, res, item, t.text);";
+  const needle = "      if (!v.ok && v.code === 'no_live_session' && typeof reopen === 'function') return reopenAndSend(req, res, item, t.text, frame, pics.blocks.length);";   // B-51dd: the reopen carries the frame (its pictures) and their count
   ok(rsrc.includes(needle), '§8d control needle exists');
   const MUT = mutantCopies('inbox-reply-reopen', REPO);
   const mut = MUT.write(rel, rsrc.split('\n').map((l) => (l === needle ? '' : l)).join('\n'), 'no-reopen');
@@ -900,6 +900,171 @@ console.log('§9 readNotices + POST /api/user-todos/notices/read-all · unread (
   const body = (rsrc.match(/function registerResolveManyRoute[\s\S]*?\n\}\n/) || [''])[0];
   ok(/const noticesDoor = \(read\) => \(req, res\) => \{\n {4}const fail[^\n]*\n {4}try \{\n {6}if \(isAgentBearer\(req\)\) return fail\(403, 'agent_forbidden'/.test(body) && /userTodos\.readNotices\(ids, read, 'user'\)/.test(body)
     && /app\.post\('\/api\/user-todos\/notices\/read-all', noticesDoor\(true\)\);/.test(body) && /app\.post\('\/api\/user-todos\/notices\/unread', noticesDoor\(false\)\);/.test(body), 'wiring: both doors refuse an agent token FIRST and write through the store\'s ONE readNotices');
+}
+
+// ── §10 A REPLY TAKES A PICTURE (B-51dd — the owner, answering an ask that wanted a screenshot: the reply box could not send one) ──
+// THE LAW: a reply's pictures are judged by THE picture rule (src/image-attach-rule.js — the chat composer's) AGAIN at the route,
+// typed by their BYTES, and ride the composer's own frame (image blocks, then the quoted text) down THE typing path — the
+// reopen road too; one refused picture refuses the whole reply by name with nothing sent; a picture alone is a reply; no count cap
+console.log('§10 POST /api/user-todos/:id/reply with pictures (B-51dd)');
+{
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1]);
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]);
+  const HEIC = Buffer.from([0, 0, 0, 0x18, ...Buffer.from('ftypheic'), 0, 0, 0, 0, ...Buffer.from('mif1heic')]);
+  const pic = (buf, name, mediaType = 'image/png') => ({ base64: buf.toString('base64'), mediaType, name });
+  const frameOf = (line) => JSON.parse(line).message.content;
+  const H = harness();
+  const { wrote } = H.addSession('pic-1');
+  const it = H.userTodos.add('claude:sid-pic-1', { origin: 'agent', text: 'Send me a screenshot of the error', urgency: 'high' });
+  const r = H.call(it.id, { text: 'here it is', images: [pic(JPEG, 'shot.png', 'image/png'), pic(PNG, 'second.png')] });
+  const c = wrote[0] ? frameOf(wrote[0]) : [];
+  ok(r.status === 200 && r.json.ok === true && wrote.length === 1, 'a reply with two pictures ⇒ 200, ONE frame', r.json);
+  ok(c.length === 3 && c[0].type === 'image' && c[0].source.type === 'base64' && c[0].source.media_type === 'image/jpeg' && c[0].source.data === JPEG.toString('base64') && c[1].source.media_type === 'image/png',
+    'the frame = the composer\'s image blocks, each typed by its BYTES (the JPEG the page called image/png is image/jpeg)', c.map((b) => b.type + ':' + (b.source ? b.source.media_type : '')));
+  ok(c[2] && c[2].type === 'text' && c[2].text === R.composeReply({ ...it, status: 'open' }, 'here it is', { now: H.NOW }), '…then the quoted reply text — composeReply, exactly as a text reply', c[2] && c[2].text.slice(0, 80));
+  ok(H.userTodos.get(it.id).status === 'done' && H.userTodos.get(it.id).reply.text === 'here it is' && H.userTodos.get(it.id).reply.pictures === 2, 'the item resolved by the reply, its text kept AND how many pictures it carried (reply.pictures = 2)');
+  const alone = H.userTodos.add('claude:sid-pic-1', { origin: 'agent', text: 'Just the screenshot' });
+  const ra = H.call(alone.id, { text: '   ', images: [pic(PNG, 'only.png')] });
+  const ca = wrote[1] ? frameOf(wrote[1]) : [];
+  ok(ra.status === 200 && ca.length === 2 && ca[0].type === 'image' && ca[1].text === R.composeReply({ ...alone, status: 'open' }, '', { now: H.NOW }) && H.userTodos.get(alone.id).status === 'done' && H.userTodos.get(alone.id).reply.pictures === 1,
+    'a picture ALONE is a reply (no text needed): the image, then the quote; the item keeps reply.pictures = 1 (it reads as answered)', ra.json);
+  {
+    // the item's readers count a picture alone as the answer: the settled stamp and the attention row's `answered`
+    const FA = require(path.join(REPO, 'src/foryou-actions.js')), AM = require(path.join(REPO, 'src/attention-model.js'));
+    const done = H.userTodos.get(alone.id), bare = { ...done, reply: { text: '', at: done.reply.at } };
+    ok(FA.settledWords(done, (k) => k) === 'you replied' && FA.settledWords(bare, (k) => k) !== 'you replied' && AM.rowOf(done).answered === true && AM.rowOf(bare).answered === false,
+      'a picture-only reply reads as answered (settledWords «you replied», attention rowOf answered) — the same item without the count does not', [FA.settledWords(done, (k) => k), AM.rowOf(done).answered]);
+  }
+  ok(H.call(H.userTodos.add('claude:sid-pic-1', { origin: 'agent', text: 'nothing' }).id, { text: '', images: [] }).json.code === 'empty', 'no text and no picture is still refused as empty');
+  const w0 = wrote.length;
+  let bcasts = 0;   // store broadcasts caused by the refused CALLS (the item's own add is not one of them)
+  const refuse = (images, label) => { const x = H.userTodos.add('claude:sid-pic-1', { origin: 'agent', text: label }); const c0 = H.calls.length; const rr = H.call(x.id, { text: 'with it', images }); bcasts += H.calls.length - c0; return { rr, open: H.userTodos.get(x.id).status === 'open' }; };
+  const heic = refuse([pic(PNG, 'fine.png'), pic(HEIC, 'IMG_0001.HEIC', 'image/heif')], 'heic');
+  ok(heic.rr.status === 400 && heic.rr.json.code === 'bad_image' && heic.rr.json.picture && heic.rr.json.picture.name === 'IMG_0001.HEIC' && heic.rr.json.picture.code === 'heic' && /HEIC/.test(heic.rr.json.error) && heic.open,
+    'a HEIC among good pictures ⇒ 400 bad_image naming the file and the code; the item still open', heic.rr.json);
+  const big = refuse([pic(Buffer.concat([PNG, Buffer.alloc(4.5e6)]), 'huge.png')], 'big');
+  ok(big.rr.status === 400 && big.rr.json.picture.code === 'too_big' && big.rr.json.picture.size === 4500020 && /4\.29 MB — larger than 3\.75 MB/.test(big.rr.json.error) && big.open,
+    'a 4.5 MB picture (its base64 over the API\'s 5 MiB) ⇒ bad_image too_big, said with ITS size and the cap', big.rr.json);
+  const be32 = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const tall = refuse([pic(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, ...be32(1440), ...be32(12000), 8, 6, 0, 0, 0]), 'page.png')], 'tall');
+  ok(tall.rr.json.picture && tall.rr.json.picture.code === 'too_wide' && /1440 × 12000 pixels — the model takes at most 8000 pixels on a side/.test(tall.rr.json.error), 'a full-page capture over 8000 px ⇒ too_wide, with its sides', tall.rr.json);
+  const many3 = Array.from({ length: 9 }, (_, i) => pic(Buffer.concat([PNG, Buffer.alloc(3.5e6)]), `big${i}.png`));
+  const tooMuch = refuse(many3, 'total');
+  ok(tooMuch.rr.json.picture && tooMuch.rr.json.picture.code === 'too_much' && tooMuch.rr.json.picture.name === 'big6.png' && /pass 32 MB/.test(tooMuch.rr.json.error) && tooMuch.open,
+    'nine 3.5 MB pictures: the seventh takes the reply past the API\'s 32 MB request ⇒ too_much, named — nothing sent', tooMuch.rr.json && tooMuch.rr.json.picture);
+  const txt = refuse([pic(Buffer.from('just some text, not a picture'), 'notes.txt', 'text/plain')], 'txt');
+  const shape = refuse([{ base64: PNG.toString('base64').slice(0, -1), name: 'cut.png' }], 'shape');
+  const empty = refuse([{ base64: '', name: 'zero.png' }], 'empty');
+  const notArr = refuse({ base64: PNG.toString('base64') }, 'notarr');
+  ok(txt.rr.json.picture.code === 'not_image' && shape.rr.json.picture.code === 'not_image' && empty.rr.json.picture.code === 'empty' && notArr.rr.status === 400 && notArr.rr.json.code === 'bad_image' && !notArr.rr.json.picture,
+    'a text file, a cut base64, an empty picture, a non-array — each refused by name', [txt.rr.json.picture, shape.rr.json.picture, empty.rr.json.picture, notArr.rr.json]);
+  ok(wrote.length === w0 && bcasts === 0, 'every refusal: NOTHING written, NO store broadcast', { wrote: wrote.length - w0, bcasts });
+  ok(H.call(it.id, { text: 'x', images: [pic(PNG, 'a.png')] }, { authorization: 'Bearer vsst_x' }).status === 403 && wrote.length === w0, 'an agent token is refused before any picture is read (403)');
+  const many = H.userTodos.add('claude:sid-pic-1', { origin: 'agent', text: 'many' });
+  const rm = H.call(many.id, { text: 'all of them', images: Array.from({ length: 12 }, (_, i) => pic(PNG, `p${i}.png`)) });
+  ok(rm.status === 200 && frameOf(wrote[wrote.length - 1]).filter((b) => b.type === 'image').length === 12, 'twelve pictures ⇒ all twelve ride (NO invented count cap — 主开发 22:55Z)', rm.json);
+  H.userTodos.stop(); H.userTodos.flush();
+}
+{
+  // the ENDED conversation: the reopened session's FIRST frame carries the pictures
+  const made = [];
+  const H = harness(undefined, { reopen: async (item, o, { addSession }) => { const id = 'reo-pic'; const x = addSession(id, { backendSessionId: item.sessionKey.split(':')[1] }); made.push(x); return { ok: true, sessionId: id, conversation: { backend: 'claude', backendSessionId: item.sessionKey.split(':')[1], cwd: '/p', hostId: null, name: 'ended' } }; } });
+  const dead = H.userTodos.add('claude:ended-pic', { origin: 'agent', text: 'Screenshot please' });
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+  const r = await H.callAsync(dead.id, { text: 'attached', images: [{ base64: PNG.toString('base64'), name: 'e.png' }] });
+  const c = made[0] && made[0].wrote[0] ? JSON.parse(made[0].wrote[0]).message.content : [];
+  ok(r.status === 200 && r.json.reopened === true && c.length === 2 && c[0].source.media_type === 'image/png' && c[1].text === R.composeReply({ ...dead, status: 'open' }, 'attached', { now: H.NOW }), 'an ENDED conversation: the reopen\'s first input carries the picture, then the quote', r.json);
+  H.userTodos.stop(); H.userTodos.flush();
+}
+// the reopen road with a REAL screenshot's size: the fresh wrapper reports its frame-file verb a moment after the start —
+// a frame over 1 MiB before that is refused `too_large` + waitCaps by the sender; the route waits for the verb and sends
+const reopenBig = async (routeFile, capsAfterMs) => {
+  const D = tmpdir(), made = [];
+  const H = harness(routeFile, { buffersDir: D, reopen: async (item, o, { addSession }) => {
+    const id = 'reo-big-' + made.length; made.push(addSession(id, { agentdSession: true, backendSessionId: item.sessionKey.split(':')[1] }));
+    if (capsAfterMs != null) setTimeout(() => fs.writeFileSync(path.join(D, id + '.json'), JSON.stringify({ caps: { frameFile: true } })), capsAfterMs);
+    return { ok: true, sessionId: id, conversation: { backend: 'claude', backendSessionId: item.sessionKey.split(':')[1], cwd: '/p', hostId: null, name: 'ended' } };
+  } });
+  const dead = H.userTodos.add('claude:ended-big', { origin: 'agent', text: 'A real screenshot please' });
+  const shot = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 5, 0, 0, 0, 3, 0x20, 8, 6, 0, 0, 0]), Buffer.alloc(1.5e6, 7)]);   // a 1280 × 800 PNG head
+  const t0 = Date.now();
+  const r = await H.callAsync(dead.id, { text: 'here', images: [{ base64: shot.toString('base64'), name: 'shot.png' }] });
+  const w = made[0] ? made[0].wrote : [];
+  H.userTodos.stop(); H.userTodos.flush();
+  return { r, w, ms: Date.now() - t0, open: H.userTodos.get(dead.id).status === 'open' };
+};
+{
+  const ok1 = await reopenBig(undefined, 150);
+  const line = ok1.w[0] ? JSON.parse(ok1.w[0]) : null;
+  const filed = line && line.type === '_frame_file' && fs.existsSync(line.path) ? JSON.parse(fs.readFileSync(line.path, 'utf8')) : null;
+  ok(ok1.r.status === 200 && ok1.r.json.reopened === true && ok1.w.length === 1 && filed && filed.message.content[0].type === 'image' && ok1.ms >= 150,
+    'a 2 MB frame right after the reopen: the route waits for the fresh wrapper\'s frame-file report (150 ms here) and sends ONCE, through the frame file', { status: ok1.r.status, wrote: ok1.w.length, ms: ok1.ms, line: line && line.type });
+  // RED CONTROL: the route without the wait — the same reply is refused too_large, the item still open
+  const rsrc = read('src/routes/user-todos-reply.js'), needle = "      while (!ready(sessionId) && Date.now() < until) await new Promise((ok) => setTimeout(ok, CAPS_POLL_MS));";
+  ok(rsrc.includes(needle), '§10 reopen-wait control needle exists');
+  const MUT = mutantCopies('inbox-reply-capswait', REPO);
+  const mut = MUT.write('src/routes/user-todos-reply.js', rsrc.split(needle).join(''), 'no-caps-wait');
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 wait ' })) ok(row.pass, row.name, row.detail);
+  const red = await reopenBig(mut, 150);
+  ok(red.r.status === 400 && red.r.json.code === 'too_large' && red.w.length === 0 && red.open, 'RED CONTROL: without the wait the reopened reply with a real screenshot is refused too_large — the leg above can go red', red.r.json);
+}
+{
+  // RED CONTROL: the route with no picture rule (every picture taken as the page typed it) — the §10 refusals can go red
+  const rel = 'src/routes/user-todos-reply.js', rsrc = read(rel);
+  const needle = '    const v = judgeImageBase64(p && p.base64, { total });';
+  ok(rsrc.includes(needle), '§10 control needle exists');
+  const MUT = mutantCopies('inbox-reply-pictures', REPO);
+  const mut = MUT.write(rel, rsrc.split(needle).join("    const v = { ok: true, mediaType: (p && p.mediaType) || 'image/png' };"), 'no-picture-rule');
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 ' })) ok(row.pass, row.name, row.detail);
+  const H = harness(mut);
+  const { wrote } = H.addSession('pic-red');
+  const it = H.userTodos.add('claude:sid-pic-red', { origin: 'agent', text: 'control' });
+  const HEIC = Buffer.from([0, 0, 0, 0x18, ...Buffer.from('ftypheic'), 0, 0, 0, 0]);
+  const r = H.call(it.id, { text: 'x', images: [{ base64: HEIC.toString('base64'), mediaType: 'image/heif', name: 'a.heic' }] });
+  ok(r.status === 200 && wrote.length === 1 && JSON.parse(wrote[0]).message.content[0].source.media_type === 'image/heif', 'RED CONTROL: without the rule a HEIC rides to the model as image/heif — the §10 refusals can go red', r.json);
+  H.userTodos.stop(); H.userTodos.flush();
+}
+console.log('§10b the reply boxes take a picture (wiring census, both surfaces + the model + the chat\'s card)');
+{
+  const files = { panel: 'src/lib/user-todos-panel.js', win: 'src/lib/inbox-window.js', act: 'src/lib/user-todos-actions.js', rp: 'src/lib/reply-pictures.js', row: 'src/lib/user-todos-row.js', cr: 'src/lib/chat-renderers.js', lay: 'src/lib/inbox-window-layout.js' };
+  const src = Object.fromEntries(Object.entries(files).map(([k, f]) => [k, read(f)]));
+  const judge = ({ panel, win, act, rp, row, cr, lay }) => ({
+    panelBox: /const pics = replyPictures\(\{ box, ta, id: i\.id, store: model\.pictures, t \}\);/.test(panel) && /box\.append\(pics\.input, pics\.camera\.input\);/.test(panel),
+    panelSend: /const pics = chip \? \[\] : \(model\.pictures\.get\(id\) \|\| \[\]\);/.test(panel) && /if \(\(!body && !pics\.length\) \|\| row\.dataset\.sending === '1'\) return;/.test(panel) && /const sent = await model\.postReply\(id, body, replyOpts\);/.test(panel),
+    chipSays: /t\('\{label\} sent — the \{n\} picture\(s\) in the reply box were not sent'/.test(panel) && /t\('\{label\} sent — the \{n\} picture\(s\) in the reply box were not sent'/.test(win),
+    overlayInside: /#record-clear-dialog, \.chat-img-overlay'\)/.test(panel),
+    noFoldWipe: !/model\.pictures\.delete\(/.test(panel),
+    winBox: /const pics = replyPictures\(\{ box: reply, ta, id, store: model\.pictures, t \}\);/.test(win) && /reply\.append\(pics\.btn, pics\.input, pics\.camera\.input\);/.test(win),
+    winSend: /const pics = chip \? \[\] : \(model\.pictures\.get\(c\.id\) \|\| \[\]\);/.test(win) && /model\.postReply\(c\.id, body, \{ pictures: pics \}\)/.test(win) && /if \(st\.cur && \(model\.pictures\.get\(st\.cur\.id\) \|\| \[\]\)\.length\) \{ sendReply\(txt\); return; \}/.test(win),
+    model: /const pictures = new Map\(\);/.test(act) && /boardOf, drafts, pictures,/.test(act) && /body: JSON\.stringify\(images \? \{ text, images \} : \{ text \}\)/.test(act) && /if \(images\) dropSentPictures\(pictures, id, pics\);/.test(act) && /r\.code === 'bad_image' && r\.picture \? pictureRefusalText\(\[r\.picture\], t\)/.test(act),
+    door: /import \{ createImageDoor, refusalText, heldOf \} from '\.\/image-attach\.js';/.test(rp) && /held: \(\) => heldOf\(list\(\)\),/.test(rp) && /if \(!cd \|\| \(cd\.getData && cd\.getData\('text\/plain'\)\)\) return;/.test(rp) && /it\.kind === 'file'/.test(rp)
+      && /box\.addEventListener\('drop', \(e\) => \{[\s\S]{0,160}e\.preventDefault\(\); e\.stopPropagation\(\);/.test(rp) && /input\.accept = 'image\/\*';\s*input\.multiple = true;/.test(rp) && /const camera = cameraDoor\(\(shot\) => door\.add\(\[shot\]\)\);/.test(rp),
+    identity: /setList\(list\(\)\.filter\(\(q\) => q !== p\)\)/.test(rp) && /const redrawAll = \(id\) => \{ for \(const d of \[\.\.\.\(boxesOf\.get\(id\) \|\| \[\]\)\]\) d\(\); \};/.test(rp) && /filter\(\(p\) => !\(sent \|\| \[\]\)\.includes\(p\)\)/.test(rp),
+    // XSS: the only markup the strip writes is the constant icon; a picture is drawn by its .src, its name by alt / textContent
+    noMarkup: (rp.match(/\.innerHTML\s*=/g) || []).length === 1 && /btn\.innerHTML = UI_ICONS\.image;/.test(rp) && /img\.src = p\.dataUrl;/.test(rp),
+    inUse: /\|\| !!box\.querySelector\('\.ut-reply-pic-item'\);/.test(row),
+    // the conversation's card of a For-you reply draws the pictures it carried (the plain bubble's media card)
+    render: /if \(inboxReply\) return this\._renderInboxReply\(msg, inboxReply, content\);/.test(cr) && /content\.filter\(\(b\) => b && b\.type === 'image' && !b\.gone && b\.data\)\.map\(\(b\) => imageMediaHtml\(/.test(cr),
+    words: /const said = replyWords\(i\.reply, t, REPLY_SNIPPET\);/.test(row) && /Number\(i\.reply\.pictures\) > 0 \? t\('\{n\} picture\(s\)'/.test(lay),
+  });
+  const live = judge(src);
+  ok(Object.values(live).every(Boolean), 'both reply surfaces carry the strip (button + camera on a finger device, paste of a FILE — text stays text —, drop), both sends carry the item\'s pictures (a chip says it left them), the model posts them and removes exactly those, every box of the item redraws, a ✕ removes its own picture, no markup from a picture, the chat\'s card draws them, the readers word a picture-only reply', live);
+  {
+    // the readers' words, functional (PURE inbox-window-layout is DOM-free; replyWords is the row's)
+    const { pathToFileURL } = await import('node:url');
+    const { replyWords } = await import(pathToFileURL(path.join(REPO, 'src/lib/user-todos-row.js')).href).catch((e) => ({ err: e }));
+    const tt = (k, v = {}) => k.replace(/\{(\w+)\}/g, (_, n) => (n in v ? v[n] : `{${n}}`));
+    if (typeof replyWords === 'function') ok(replyWords({ text: 'see', pictures: 2 }, tt) === 'see · 2 picture(s)' && replyWords({ text: '', pictures: 1 }, tt) === '1 picture(s)' && replyWords({ text: 'abcdef' }, tt, 3) === 'abc…' && replyWords(null, tt) === '', 'replyWords: text · count, a count alone, the cut text, nothing');
+    else console.log('  · SKIP: src/lib/user-todos-row.js does not import in node here — the census above pins its words');
+  }
+  let base = {};
+  try { const { execFileSync } = require('node:child_process'); base = Object.fromEntries(['panel', 'cr'].map((k) => [k, execFileSync('git', ['show', `b06f36e90:${files[k]}`], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 })])); /* the two the release had (reply-pictures.js is new) */ } catch { base = {}; }
+  if (base.panel) { const b = judge({ ...src, panel: base.panel, cr: base.cr }); ok(!b.panelBox && !b.panelSend && !b.render && !b.overlayInside, 'RED: the release b06f36e90\'s tray box (no picture door, a text-only send) and its chat card (no pictures) fail the census', b); }
+  else console.log('  · SKIP: the release b06f36e90 is not in this clone — the planted reds below still run');
+  ok(!judge({ ...src, rp: src.rp.replace('img.src = p.dataUrl;', 'c.innerHTML = `<img src="${p.dataUrl}" alt="${p.name}">`;') }).noMarkup, 'RED: a chip drawn as markup with the picture\'s name');
+  ok(!judge({ ...src, panel: src.panel.replace('const pics = chip ? [] : (model.pictures.get(id) || []);', 'const pics = model.pictures.get(id) || [];') }).panelSend, 'RED: an option chip carrying the box\'s pictures unsaid');
+  ok(!judge({ ...src, rp: src.rp.replace("if (!cd || (cd.getData && cd.getData('text/plain'))) return;", 'if (!cd) return;') }).door, 'RED: a paste of a spreadsheet range (text + a picture of it) turned into a picture');
+  ok(!judge({ ...src, rp: src.rp.replace('setList(list().filter((q) => q !== p))', 'setList(list().slice(1))') }).identity, 'RED: a ✕ that removes by position');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

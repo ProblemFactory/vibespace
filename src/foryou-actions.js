@@ -529,7 +529,7 @@ function settledWords(item, t = fmt, kind = null) {
   item = ruledOf(item);
   const by = item && item.resolvedBy;
   const k = kind || (needOf(item) || {}).kind;
-  if (item && item.reply && item.reply.text) return t('you replied');
+  if (item && item.reply && (item.reply.text || item.reply.pictures)) return t('you replied');   // B-51dd: a picture alone is a reply
   if (by === 'allowed' && item.resolvedFact && item.resolvedFact.late === true) return t('let through once · waiting for it to run again');   // r8: a late Allow without the person mark (its stamp says «by you» when it has one)
   if (by === 'allowed') return k === 'approval' ? t('approved') : t('allowed');
   if (by === 'denied') return t('denied');

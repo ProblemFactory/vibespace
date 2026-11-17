@@ -743,6 +743,8 @@ export default {
   "The file could not be read": "ファイルを読み込めませんでした",
   "{name} — {why}": "{name}——{why}",
   "the pasted picture": "貼り付けた画像",
+  "{n} picture(s)": "画像 {n} 枚",
+  "{label} sent — the {n} picture(s) in the reply box were not sent": "「{label}」を送信しました——返信欄の画像 {n} 枚は送信していません",
   "Picture not added: {line}": "画像を追加しませんでした：{line}",
   "{n} pictures not added: {lines}": "{n} 枚の画像を追加しませんでした：{lines}",
   "Auth will be disabled — anyone who can reach this server gets full access.": "認証が無効になります——このサーバーに到達できる人は誰でもフルアクセスできます。",

@@ -20,6 +20,8 @@
  *       not_chat       — no pty, or not a chat-mode session
  *       input_rejected — the adapter's POISON GUARD refused the frame (2.360.0)
  *       too_large      — > 1 MiB for a wrapper without the frame-file verb (2.361.1)
+ * `send.framesReady(sessionId)` (B-51dd) → may a big frame go now: true unless this LOCAL session's wrapper has not
+ *   reported its capabilities YET (a fresh start: no sidecar) — one sidecar read, the reopen road's wait before its ONE send
  *       send_failed    — no adapter for the backend, or the pty write threw
  *
  * Mid-turn is NOT a refusal: the frame is written and the session's own send
@@ -254,7 +256,17 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     }
     return { ok: true, msgId };
   }
-  return { send };
+  /** B-51dd: a big frame's road is decided by the wrapper's sidecar (above) — a caller that just STARTED the session (the
+   *  For-you reopen) asks this before its one send, instead of sending into «has not reported its capabilities yet» */
+  function framesReady(sessionId) {
+    const s = activeSessions.get(sessionId);
+    if (!s || s.host || !(s.socketPath || s.agentdSession) || s._wrapperFrameFile === true) return true;
+    let c = null; try { c = wrapperCaps(BUFFERS_DIR, sessionId, s.socketPath); } catch { return true; }
+    if (c && c.frameFile) { s._wrapperFrameFile = true; return true; }
+    return !(c && c.reason === 'no-sidecar');
+  }
+  send.framesReady = framesReady;
+  return { send, framesReady };
 }
 
 module.exports = { createUserInputSender };

@@ -37,6 +37,7 @@ import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, it
 import { closersOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords, CHECK_AGAIN_TYPES, ROW_OF as FY_ROW } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
 import { fyLinkMenu } from './internal-link-door.js'; // lane login-request-card piece 1: a link of the scheme in an item's words — «Go» · «Copy link»
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { replyPictures } from './reply-pictures.js'; // B-51dd: a reply takes a picture (button · paste · drop) through THE picture door
 import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
 
 // The taskbar For-you button's own glyph (UI_ICONS.inbox's paths), in the registry's 16px chrome.
@@ -311,13 +312,16 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     if (ta.value) markTyped(ta);   // the person's own words (a draft holds only what this box held), carried into the rebuilt box: they still hold a stale page's reload
     const why = mk('div', 'iw-reply-why'); // the box's one-line note ABOVE it: the verdict's fact (an ended conversation: the send reopens it)
     reply.append(why, voiceField(ta, attachDictation(ta)));
+    const pics = replyPictures({ box: reply, ta, id, store: model.pictures, t }); // B-51dd: the item's pictures above the field, the picture button after it
+    reply.insertBefore(pics.strip, why.nextSibling);
+    reply.append(pics.btn, pics.input, pics.camera.input);
     const actions = mk('div', 'iw-actions');
     const arts = mk('div', 'iw-arts'); // lane foryou-attachments: the ask's --artifact chips, under the question
     el.append(head, title, dl, arts, opts, detail, cutLine, replied, reach, reply, actions); // ONE ORDER (lane ui-phone-and-fit pick 0, 主开发 13:34Z): the question, its options, then the detail
     const setting = mk('div', 'iw-setting'); // lane setting-doors pick 2: a proposed change's box (THE row's — its press is the action row's), under the question
     setting.style.display = 'none';
     dl.after(setting);
-    return { el, id, dot, sess, ld, nm, board, meta, title, dl, setting, arts, detail, cutLine, replied, opts, reach, reply, ta, why, actions, sig: {} };
+    return { el, id, dot, sess, ld, nm, board, meta, title, dl, setting, arts, detail, cutLine, replied, opts, reach, reply, ta, why, pics, actions, sig: {} };
   };
   /** A previewed detail (a resolved item's snapshot carries 300 chars): load the rest ONCE
    *  through the model; a failure lands on the pane as its sentence, never silently. */
@@ -739,14 +743,16 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const c = st.cur;
     if (!c || sending) return;
     const body = String(text || '').trim();
-    if (!body) return;
+    const pics = chip ? [] : (model.pictures.get(c.id) || []);   // B-51dd: the box's pictures ride its send (an option chip sends its label only)
+    if (!body && !pics.length) return;
     const it = model.byId(c.id);
     if (!it) return;
     const wasOpen = it.status === 'open';
     sending = true; patchLivePane();
-    const ok = await model.postReply(c.id, body);
+    const held = chip ? (model.pictures.get(c.id) || []).length : 0;   // B-51dd: an option chip sends its label only — said, when the box holds pictures
+    const ok = await (pics.length ? model.postReply(c.id, body, { pictures: pics }) : held ? model.postReply(c.id, body, { sentToast: t('{label} sent — the {n} picture(s) in the reply box were not sent', { label: body, n: held }) }) : model.postReply(c.id, body));
     sending = false;
-    if (ok && !chip && st.cur === c) c.ta.value = '';
+    if (ok && !chip && st.cur === c) { c.ta.value = ''; c.pics.draw(); }
     patchLivePane();
     if (ok && wasOpen) advance(c.id);
   };
@@ -756,6 +762,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     if (a === 'reply') {
       // an empty box: the button puts the cursor where the reply goes instead of doing nothing (verify round)
       const txt = st.cur ? st.cur.ta.value : '';
+      if (st.cur && (model.pictures.get(st.cur.id) || []).length) { sendReply(txt); return; }   // B-51dd: a picture alone is a reply
       if (!String(txt).trim()) { if (st.cur && !st.cur.ta.disabled) st.cur.ta.focus(); return; }
       sendReply(txt); return;
     }

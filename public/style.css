@@ -1678,6 +1678,19 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 }
 .ut-reply-send { display: inline-flex; align-items: center; justify-content: center; padding: 0; height: 22px; width: 22px; color: var(--accent); }
 .ut-reply-send[data-reopen="1"] { width: auto; gap: 4px; padding: 0 8px; white-space: nowrap; font-size: 11px; } /* "Reopen and send" — its words beside the icon */
+/* B-51dd: a reply box's pictures (src/lib/reply-pictures.js) — the strip above the field, the picture button beside Send, the
+   box outlined while files are dragged over it */
+.ut-reply-pics { flex: 0 0 100%; display: flex; flex-wrap: wrap; gap: 6px; padding-top: 4px; }
+.ut-reply-pics[hidden] { display: none; }
+.ut-reply-pic-item { position: relative; width: 40px; height: 40px; box-sizing: border-box; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); cursor: zoom-in; }
+.ut-reply-pic-item img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius-sm); }
+.ut-reply-pic-remove { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; padding: 0; border: none; border-radius: 50%; background: var(--red); color: var(--accent-fg); font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.ut-reply-pic { display: inline-flex; align-items: center; justify-content: center; padding: 0; height: 22px; width: 22px; }
+.ut-reply-pic svg { width: 13px; height: 13px; }
+.ut-reply-pic:hover { color: var(--accent); border-color: var(--accent); }
+.ut-reply.ut-reply-drop, .iw-reply.ut-reply-drop { outline: 1px dashed var(--accent); outline-offset: 2px; }
+.iw-reply .ut-reply-pics { padding: 0 0 6px; }
+.iw-reply > .ut-reply-pic { margin-top: 6px; }
 .ut-live-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; box-sizing: border-box; border: 1.5px solid var(--text-dim); background: var(--text-dim); }
 .ut-live-dot[data-state="running"] { border-color: var(--green, #3fb950); background: var(--green, #3fb950); }
 .ut-live-dot[data-state="idle"] { border-color: var(--green, #3fb950); background: transparent; }
@@ -2862,6 +2875,10 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   /* lane voice-everywhere: the microphone inside the reply box's trailing edge, like the chat composer (40×40 hit area) */
   html:not(.voice-absent) #user-todos-popup .voice-field > .ut-reply-input, html:not(.voice-absent) .ut-mini-popover .voice-field > .ut-reply-input, html:not(.voice-absent) #phone-home .voice-field > .ut-reply-input { min-height: 44px; padding-right: 46px; }
   #user-todos-popup .ut-reply-send, #phone-home .ut-reply-send { min-width: 36px; min-height: 36px; }
+  #user-todos-popup .ut-reply-pic, #phone-home .ut-reply-pic, .iw-reply > .ut-reply-pic { min-width: 36px; min-height: 36px; } /* B-51dd: the picture button is a touch target */
+  .ut-reply-pic svg { width: 17px; height: 17px; }
+  .ut-reply-pic-item { width: 52px; height: 52px; }
+  .ut-reply-pic-remove { width: 24px; height: 24px; top: -8px; right: -8px; font-size: 11px; }
   #user-todos-popup .ut-reply-btn svg, #user-todos-popup .ut-reply-send svg, #phone-home .ut-reply-btn svg, #phone-home .ut-reply-send svg { width: 15px; height: 15px; }
   #user-todos-popup .ut-live-dot, #phone-home .ut-live-dot { width: 9px; height: 9px; }
   /* chunk 4: "Mark all seen" and the fold's expander are touch targets too */

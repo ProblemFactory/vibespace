@@ -41,6 +41,7 @@ import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文�
 import { navOneBadge } from './title-chips.js'; // lane phone-titlebar-title: the phone bar's ONE-badge form
 import { BACK_DISMISS_EVENT } from './back-guard.js'; // lane mobile-back-guard: the phone's back closes this sheet through hidePopup
 import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
+import { replyPictures } from './reply-pictures.js'; // B-51dd: a reply box takes a picture (button · paste · drop) through THE picture door
 import { applySecretBox, submitSecretBox } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its paste box's presses + state
 import { onVaultFacts, showUnlock, showSetup } from './vault-unlock.js'; // … the box says a locked vault by name (live), its 解锁… is THE unlock dialog
 
@@ -625,6 +626,11 @@ export function installUserTodos(app) {
       const ta = box.querySelector('textarea');
       ta.value = drafts.get(i.id) || '';
       if (ta.value) markTyped(ta);   // the person's own words (a draft holds only what a reply box held), carried into the rebuilt box: they still hold a stale page's reload
+      // B-51dd: the item's pictures (kept across a fold) above the field, the picture button beside Send
+      const pics = replyPictures({ box, ta, id: i.id, store: model.pictures, t });
+      box.insertBefore(pics.strip, box.querySelector(':scope > .voice-field') || ta);
+      box.insertBefore(pics.btn, box.querySelector(':scope > .ut-reply-send'));
+      box.append(pics.input, pics.camera.input);
       applyLive(row, i, rowCtx);
       growBox(ta);
     }
@@ -638,19 +644,23 @@ export function installUserTodos(app) {
     const row = rowOf(box);
     const ta = box.querySelector('textarea');
     if (row && ta && ta.value && !sent) drafts.set(row.dataset.id, ta.value); else if (row) drafts.delete(row.dataset.id);
+    // B-51dd: a folded box keeps its pictures (model.pictures); a sent reply removed the ones it carried (postReply)
     box.remove();
     row?.dispatchEvent(new CustomEvent('ut-box-left', { bubbles: true }));
   };
   const sendReply = async (row, text, { chip = false } = {}) => {
     const id = row.dataset.id;
     const body = String(text || '').trim();
-    if (!body || row.dataset.sending === '1') return;
+    const pics = chip ? [] : (model.pictures.get(id) || []);   // B-51dd: the box's pictures ride its send (an option chip sends its label only)
+    if ((!body && !pics.length) || row.dataset.sending === '1') return;
     row.dataset.sending = '1';
     const item0 = byId(id);
     if (item0) applyLive(row, item0, rowCtx);
     // THE model's POST: both outcomes reach the user as a toast (no silent
     // failures); on a failure the box keeps its text
-    const sent = await model.postReply(id, body);
+    const held = chip ? (model.pictures.get(id) || []).length : 0;   // B-51dd: an option chip sends its label only — said, when the box holds pictures
+    const replyOpts = pics.length ? { pictures: pics } : held ? { sentToast: t('{label} sent — the {n} picture(s) in the reply box were not sent', { label: body, n: held }) } : {};
+    const sent = await model.postReply(id, body, replyOpts);
     delete row.dataset.sending;
     if (sent && !chip) { const box = row.querySelector(':scope > .ut-body > .ut-reply'); if (box) foldBox(box, { sent: true }); }
     const item1 = byId(id);
@@ -888,7 +898,7 @@ export function installUserTodos(app) {
   onOutsidePress(popup, (e) => hidePopup(e?.type === 'blur' ? 'frame' : 'outside'), {
     exclude: [btn, mBtn],
     // a row's own menu (right-click → Clear content…) and the confirm dialog it opens are ABOVE the panel too
-    ignore: (t) => !!t?.closest?.('.ut-mini-popover, .win-inbox-badge, .context-menu, #record-clear-dialog'),
+    ignore: (t) => !!t?.closest?.('.ut-mini-popover, .win-inbox-badge, .context-menu, #record-clear-dialog, .chat-img-overlay'),   // B-51dd: a reply picture shown full size is not a press outside
     nested: false, once: false,
   });
   // Escape closes the popup / phone sheet (verifier r2). This is a PERSISTENT

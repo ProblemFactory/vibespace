@@ -1198,6 +1198,7 @@ const CACHES = {
   'src/lib/user-todos-actions.js|liveByKey': 'live facts per session key (mode, turn) — no words',
   'src/lib/user-todos-actions.js|keyByWebuiId': 'ids',
   'src/lib/user-todos-actions.js|drafts': 'the OWNER\'s own unsent reply text per item — never a record\'s words',
+  'src/lib/user-todos-actions.js|pictures': 'B-51dd: the OWNER\'s own unsent reply pictures per item (what they pasted / dropped / picked) — never a record\'s words; deleted by the sent reply or a picture\'s ✕',
   'src/lib/user-todos-actions.js|fullById': 'the whole details this client saw — restoreDetails prunes to the ids the snapshot lists and a cleared item carries no detail (r3 + test-user-todos-layout ⑫)',
   'src/lib/user-todos-actions.js|detailLoads': 'id → an in-flight load (deleted on answer; ensureDetail re-checks isCleared after its GET)',
   'src/lib/user-todos-actions.js|replyFailures': 'id → THIS page\'s last refused reply {code, why} — the route\'s / the create\'s own reason (lane inbox-reply-dead-session), never an item\'s words; deleted on the next sent reply',

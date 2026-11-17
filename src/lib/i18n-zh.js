@@ -744,6 +744,8 @@ export default {
   "The file could not be read": "无法读取该文件",
   "{name} — {why}": "{name}——{why}",
   "the pasted picture": "粘贴的图片",
+  "{n} picture(s)": "{n} 张图片",
+  "{label} sent — the {n} picture(s) in the reply box were not sent": "已发送「{label}」——回复框里的 {n} 张图片没有发送",
   "Picture not added: {line}": "图片未添加：{line}",
   "{n} pictures not added: {lines}": "{n} 张图片未添加：{lines}",
   "Auth will be disabled — anyone who can reach this server gets full access.": "将禁用鉴权——任何能访问此服务器的人都将获得完全访问权限。",

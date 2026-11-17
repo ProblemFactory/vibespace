@@ -256,7 +256,10 @@ export function itemView(item, ctx = {}) {
   const verbs = !closers ? actions : actions.flatMap((a) => (a !== 'done' && a !== 'dismiss' && a !== 'reopen' ? [a] : closers.includes(a) ? [a] : a === 'dismiss' && closers.includes('hide') ? ['hide'] : []));
   const title = String(ctx.words != null ? ctx.words : (i.text || ''));
   const detail = String(ctx.detail != null ? ctx.detail : (i.detail || ''));
-  const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text ? i.reply.text : null;
+  // B-51dd: what the reply said — its text, the pictures it carried, or both (user-todos-row.js replyWords' words; this file imports nothing)
+  const rText = i.reply && typeof i.reply.text === 'string' ? i.reply.text : '';
+  const rPics = i.reply && Number(i.reply.pictures) > 0 ? t('{n} picture(s)', { n: Number(i.reply.pictures) }) : '';
+  const replied = (rText && rPics ? `${rText} · ${rPics}` : rText || rPics) || null;
   const copy = title + (detail ? '\n\n' + detail : '') + (replied ? '\n\n---\n\n' + t('You replied: {text}', { text: replied }) : '');
   // THE CUT SENTENCE: a detail that is a preview says so while the rest loads, and names the
   // reason when it could not be loaded — the pane never shows 300 chars as if they were all

@@ -238,6 +238,7 @@ export const CENSUS = [
   ['usage-window.js', 'canvas', 'none', 'charts'],
   ['user-todos-row.js', 'textarea', 'text', 'THE FOR-YOU REPLY BOX'],
   ['user-todos-row.js', 'tabindex', 'control', 'a path / link in the For-you window\'s words (role=link, 0: Enter opens it — lane foryou-attachments)'],
+  ['reply-pictures.js', 'input', 'control', 'B-51dd: a For-you reply box\'s picture picker (type=file, image/*, multiple — the tray\'s box and the For-you window\'s)'],
   ['user-todos-row.js', 'input', 'control', 'the first-use automation card\'s reach radios in the tray row (只有它开的会话 / 这些岗位的会话 / 整个 VibeSpace — lane key-instance-scope)'],
   ['utils.js', 'textarea', 'text+helper', 'THE INPUT DIALOG\'s box (showInputDialog, multi-line) · copyText\'s fallback scratch'],
   ['utils.js', 'tabindex', 'dialog', 'createModalShell\'s overlay (-1), a confirm\'s own focus — every modal ANNOUNCES its open (announceModal, lane dialog-keys)'],
