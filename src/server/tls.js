@@ -109,7 +109,7 @@ async function readPair(certFile, keyFile) {
 
 function create({ app, httpServer, dataDir, port, serverSetting = () => undefined, getUserTodos = () => null, log = console, env = process.env,
   tailscaleBin: binArg, run = runChild, now = () => Date.now(), user = (() => { try { return os.userInfo().username; } catch { return 'vibespace'; } })(),
-  statusTimeoutMs = STATUS_TIMEOUT_MS, timers = { setTimeout, clearTimeout }, step = (name, fn) => fn(), holdMaxMs = HOLD_MAX_MS } = {}) {
+  statusTimeoutMs = STATUS_TIMEOUT_MS, timers = { setTimeout, clearTimeout }, step = (name, fn) => fn(), holdMaxMs = HOLD_MAX_MS, onCertificate = () => { } } = {}) {   // onCertificate(pem | null): the live pair changed (B2b: a piped hub pushes it to the interface, which holds the port)
   const tailscaleBin = binArg === null ? null : binArg || env.VIBESPACE_TAILSCALE_BIN || 'tailscale';
   const dir = path.join(dataDir, 'tls');
   const stateFile = path.join(dir, 'state.json');
@@ -138,6 +138,7 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
       for (const [e, f] of listeners) httpsServer.on(e, f);
     } else httpsServer.setSecureContext({ cert: pem.cert, key: pem.key }); // a renewal: no restart
     liveFp = fp;
+    try { onCertificate(pem); } catch { }
   }
 
   // ── the demux ──
@@ -191,7 +192,7 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
   function applyPlan(p, pem) {
     plan = p;
     if (p.serving && pem) useCertificate(pem);
-    else if (!p.serving) liveFp = null;
+    else if (!p.serving) { if (liveFp !== null) { try { onCertificate(null); } catch { } } liveFp = null; }
     if (p.line !== lastLine) { lastLine = p.line; log.log?.(`[tls] ${p.line}`); }
     notice(p);
   }

@@ -35,6 +35,7 @@
 // in-process; a scratch dir under os.tmpdir(); a throwaway self-signed pair made with openssl.
 import fs from 'node:fs';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import net from 'node:net';
 import http from 'node:http';
 import https from 'node:https';
@@ -56,11 +57,14 @@ const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iface-'));
 process.on('exit', () => { try { fs.rmSync(T, { recursive: true, force: true }); } catch { } });
 
 /** a module of the tree compiled from `src` at its own path (a mutant keeps the real one's relative requires) */
+/** `rel`'s source with ONE line cut or swapped — the needle must occur exactly once, or the control is void (it throws) */
+function mutant(rel, needle, into) { const src = read(rel); if (src.split(needle).length !== 2) throw new Error(`CONTROL needle not found exactly once in ${rel}: ${needle.slice(0, 80)}`); return compileAt(rel, src.replace(needle, into)); }
 function compileAt(rel, src) { const file = path.join(REPO, rel); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src, file); return m.exports; }
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 /** the interface with chosen modules swapped in (a mutant front or relay) — index.js's own wiring, compiled with them */
-function interfaceWith({ front = null, relay = null, mux = null, index = null } = {}) {
-  const idx = (index || read('src/interface/index.js')).replace("require('./front.js')", 'globalThis.__vsFront').replace("require('./relay.js')", 'globalThis.__vsRelay').replace("require('../agentd/mux.js')", 'globalThis.__vsMux');
+function interfaceWith({ front = null, relay = null, mux = null, index = null, admission = null } = {}) {
+  const idx = (index || read('src/interface/index.js')).replace("require('./front.js')", 'globalThis.__vsFront').replace("require('./relay.js')", 'globalThis.__vsRelay').replace("require('../agentd/mux.js')", 'globalThis.__vsMux').replace("require('./admission.js')", 'globalThis.__vsAdmission');
+  globalThis.__vsAdmission = admission || require(path.join(REPO, 'src/interface/admission.js'));
   globalThis.__vsMux = mux || require(path.join(REPO, 'src/agentd/mux.js'));
   globalThis.__vsFront = front || require(path.join(REPO, 'src/interface/front.js'));
   globalThis.__vsRelay = relay || require(path.join(REPO, 'src/interface/relay.js'));
@@ -82,12 +86,18 @@ const app = http.createServer((req, res) => {
   if (req.url.startsWith('/big')) { const n = Number(new URL(req.url, 'http://x').searchParams.get('n')) || 1; res.writeHead(200, { 'content-length': n }); res.end(Buffer.alloc(n, 7)); return; }
   res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ path: req.url, stampHeader: req.headers['x-vs-stamp'] || null }));
 });
-function farJoin(sockPath) {
+/** the far party's start secret (piece B2b: a link is a party only once its hello is admitted) and its digest */
+const HUB_SECRET = crypto.randomBytes(32).toString('hex');
+const HUB_DIGEST = crypto.createHash('sha256').update(HUB_SECRET).digest('hex');
+function farJoin(sockPath, secret = HUB_SECRET) {
   return new Promise((resolve) => {
-    const s = net.connect(sockPath, () => resolve());
+    const s = net.connect(sockPath, () => { if (secret !== null) mux.control({ op: 'hello', protoVersion: 1, party: 'hub', secret }); resolve(); });
     const mux = new Mux(s, {
       heartbeat: false,
       onControl: (m) => {
+        if (m && m.op === 'hello-ack') { far.acked = m; return; }
+        if (m && m.op === 'auth-fail') { far.refused = true; return; }
+        if (m && m.op === 'certificate-ack') { far.certAcks.push(m); return; }
         if (!m || m.op !== 'open') return;
         far.opens.push(m);
         if (far.mode === 'http') { const d = new ChanStream(mux, m.chan); far.chans.set(m.chan, { d }); d.on('error', () => { }); app.emit('connection', d); return; }
@@ -122,17 +132,18 @@ function farJoin(sockPath) {
 }
 /** an interface listening on a loopback port with the far party joined over a fresh unix-socket link */
 let nIface = 0;
-async function boot(I = require(path.join(REPO, 'src/interface/index.js'))) {
-  const iface = I.create();
+async function boot(I = require(path.join(REPO, 'src/interface/index.js')), opts = {}) {
+  const iface = I.create(opts);
   const addr = await iface.listen(0, '127.0.0.1');
   const sock = path.join(T, `l${++nIface}.sock`);
   let link = null;
   const linkSrv = net.createServer((s) => { link = iface.attachLink(s); }).listen(sock);
   await new Promise((r) => linkSrv.once('listening', r));
-  far.opens = []; far.chans = new Map(); far.mode = 'http';
+  far.opens = []; far.chans = new Map(); far.mode = 'http'; far.acked = null; far.refused = false; far.certAcks = [];
+  iface.admit({ party: 'hub', digest: HUB_DIGEST });   // the supervisor's admit line, written before the party starts
   await farJoin(sock);
   await until(() => iface.stats().linked);
-  return { iface, port: addr.port, link: () => link, close: async () => { try { far.mux.destroy(); } catch { } await iface.close(); linkSrv.close(); } };
+  return { iface, port: addr.port, sock, link: () => link, close: async () => { try { far.mux.destroy(); } catch { } await iface.close(); linkSrv.close(); } };
 }
 const get = (port, p, { secure = false, headers = {} } = {}) => new Promise((resolve) => {
   const q = (secure ? https : http).get({ host: '127.0.0.1', port, path: p, headers, agent: false, rejectUnauthorized: false }, (res) => {
@@ -169,8 +180,8 @@ console.log('— ① THE MODULE GRAPH');
   };
   const g = graph('src/interface/index.js');
   const FORBIDDEN = /engine|vault|secret|store|normali[sz]er|message-manager|accounts|channel|auth\b|session/;
-  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/mux.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/owners.js', 'src/interface/relay.js']) && g.files.every((f) => !FORBIDDEN.test(f)),
-    `its module graph: ${g.files.join(', ')} — no engine, vault, secret-box, store or normaliser module`, g.files);
+  ok(JSON.stringify(g.files) === JSON.stringify(['src/agentd/mux.js', 'src/interface/admission.js', 'src/interface/front.js', 'src/interface/index.js', 'src/interface/owners.js', 'src/interface/relay.js', 'src/pairing-token.js']) && g.files.every((f) => !FORBIDDEN.test(f)),
+    `its module graph: ${g.files.join(', ')} — no engine, vault, secret-box, store or normaliser module (src/pairing-token.js: the constant-time compare of the admission, crypto only)`, g.files);
   ok(JSON.stringify(g.builtins) === JSON.stringify(['crypto', 'net', 'tls']), `node built-ins only: ${g.builtins.join(', ')}`, g.builtins);
   const planted = graph('src/interface/index.js', (rel) => (rel === 'src/interface/relay.js' ? read(rel).replace("const crypto = require('crypto');", "const crypto = require('crypto'); require('../server/vault-engine.js');") : read(rel)));
   ok(planted.files.includes('src/server/vault-engine.js') && planted.files.some((f) => FORBIDDEN.test(f)), 'RED CONTROL — a vault module planted in the relay is caught by the walk', planted.files);
@@ -206,8 +217,8 @@ async function syncCalls(I) {
   ok(law.ok && law.n === 0, `10 plain and 4 TLS exchanges, a certificate pushed and renewed, a 2 MB answer: ${law.n} synchronous fs / child_process / zlib calls`, law);
   const files = fs.readdirSync(path.join(REPO, 'src/interface')).filter((f) => f.endsWith('.js'));
   const syncForms = files.flatMap((f) => [...read(`src/interface/${f}`).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1').matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `${f}: ${m[0]}`));
-  ok(files.length === 4 && syncForms.length === 0, `and read statically: no …Sync name in src/interface's ${files.length} files (a reference taken at load is seen too)`, syncForms);
-  const mutRelay = compileAt('src/interface/relay.js', read('src/interface/relay.js').replace("      stats.toPage += buf.length;", "      stats.toPage += buf.length; require('fs').statSync(__filename);"));
+  ok(JSON.stringify(files.sort()) === JSON.stringify(['admission.js', 'front.js', 'index.js', 'main.js', 'owners.js', 'relay.js']) && syncForms.length === 0, `and read statically: no …Sync name in src/interface's ${files.length} files (a reference taken at load is seen too)`, syncForms);
+  const mutRelay = mutant('src/interface/relay.js', "      stats.toPage += buf.length;", "      stats.toPage += buf.length; require('fs').statSync(__filename);");
   const mut = await syncCalls(interfaceWith({ relay: mutRelay }));
   ok(mut.ok && mut.n > 0, `RED CONTROL — one stat planted on the relay's byte path: ${mut.n} counted`, mut);
 }
@@ -228,13 +239,13 @@ async function optionsSeen(I, n = 4) {
   const B = await boot(); far.mode = 'raw';
   const law = await roundTrips(B.port);
   await B.close();
-  const mutFront = compileAt('src/interface/front.js', read('src/interface/front.js').replace('  socket.setNoDelay(true);\n', '  socket.setNoDelay(false);\n'));
+  const mutFront = mutant('src/interface/front.js', '  socket.setNoDelay(true);\n', '  socket.setNoDelay(false);\n');
   const M = await boot(interfaceWith({ front: mutFront })); far.mode = 'raw';
   const nagle = await roundTrips(M.port);
   await M.close();
   ok(law.median * 3 < nagle.median, `30 keystroke round trips: median ${law.median.toFixed(2)} ms with the socket's options set here — RED CONTROL, the default left on (Nagle): ${nagle.median.toFixed(2)} ms`, { law, nagle });
   const opts = await optionsSeen();
-  const bare = await optionsSeen(interfaceWith({ front: compileAt('src/interface/front.js', read('src/interface/front.js').replace('  socket.setNoDelay(true);\n  socket.setKeepAlive(true, 0);\n', '')) }));
+  const bare = await optionsSeen(interfaceWith({ front: mutant('src/interface/front.js', '  socket.setNoDelay(true);\n  socket.setKeepAlive(true, 0);\n', '') }));
   ok(opts.noDelay >= 4 && opts.keepAlive >= 4 && bare.noDelay === 0 && bare.keepAlive === 0, `4 pages: every socket told no-delay (${opts.noDelay}) and keep-alive (${opts.keepAlive}) HERE — RED CONTROL, the options cut: ${bare.noDelay} / ${bare.keepAlive}`, { opts, bare });
 }
 
@@ -256,9 +267,9 @@ async function stalledThenResumed(I, { resumeMs = 15000 } = {}) {
   const law = await stalledThenResumed();
   ok(law.maxHeld > 0 && law.held <= INITIAL_WINDOW + 65536, `a page that stops reading a 64 MB answer: ${law.held} bytes wait in the interface (seen above zero: ${law.maxHeld}) — one window (${INITIAL_WINDOW}) and at most one 64 KiB write below the socket's line; the rest waits in the party's own queue`, law);
   ok(law.got === BIG, `the page reads again: all ${law.got} bytes arrive (the withheld credit goes back at each drain)`, law);
-  const onReceipt = await stalledThenResumed(interfaceWith({ relay: compileAt('src/interface/relay.js', read('src/interface/relay.js').replace('      if (p.page.write(buf)) mux.credit(chan, buf.length);\n      else { p.owed += buf.length; stats.withheld++; }', '      p.page.write(buf); mux.credit(chan, buf.length);')) }), { resumeMs: 15000 });
+  const onReceipt = await stalledThenResumed(interfaceWith({ relay: mutant('src/interface/relay.js', '        if (p.page.write(buf)) m.credit(chan, buf.length);\n        else { p.owed += buf.length; stats.withheld++; }', '        p.page.write(buf); m.credit(chan, buf.length);') }), { resumeMs: 15000 });
   ok(onReceipt.held > 4 * INITIAL_WINDOW, `RED CONTROL — credit given back for every byte received: ${onReceipt.held} bytes wait in the interface`, onReceipt.held);
-  const noDrain = await stalledThenResumed(interfaceWith({ relay: compileAt('src/interface/relay.js', read('src/interface/relay.js').replace("    page.on('drain', () => { if (p.owed && mux) { const n = p.owed; p.owed = 0; mux.credit(chan, n); } });\n", '')) }), { resumeMs: 1500 });
+  const noDrain = await stalledThenResumed(interfaceWith({ relay: mutant('src/interface/relay.js', "    page.on('drain', () => { if (p.owed && live()) { const n = p.owed; p.owed = 0; m.credit(chan, n); } });\n", '') }), { resumeMs: 1500 });
   ok(noDrain.got < BIG, `RED CONTROL — the drain's credit removed: the page reads again and gets ${noDrain.got} of ${BIG} bytes, then nothing`, noDrain);
 }
 async function uploadToDeafOwner(I) {
@@ -278,7 +289,7 @@ async function uploadToDeafOwner(I) {
 {
   const law = await uploadToDeafOwner();
   ok(law.paused >= 1 && law.toLink <= INITIAL_WINDOW + 2 * 65536, `a page uploads 16 MB to an owner that stopped reading: the page socket is paused (${law.paused}) and ${law.toLink} bytes were taken from it — one window and a chunk; the rest stays in the page's own buffers`, law);
-  const noPause = await uploadToDeafOwner(interfaceWith({ relay: compileAt('src/interface/relay.js', read('src/interface/relay.js').replace("    page.on('data', (b) => { stats.toLink += b.length; if (mux && !mux.data(chan, b)) { page.pause(); stats.paused++; } });", "    page.on('data', (b) => { stats.toLink += b.length; if (mux) mux.data(chan, b); });")) }));
+  const noPause = await uploadToDeafOwner(interfaceWith({ relay: mutant('src/interface/relay.js', "    page.on('data', (b) => { stats.toLink += b.length; if (live() && !m.data(chan, b)) { page.pause(); stats.paused++; } });", "    page.on('data', (b) => { stats.toLink += b.length; if (live()) m.data(chan, b); });") }));
   ok(noPause.toLink > 8 * INITIAL_WINDOW, `RED CONTROL — no pause: ${noPause.toLink} bytes taken from the page and queued here for an owner that reads nothing`, noPause);
 }
 
@@ -303,7 +314,7 @@ async function renewal(I) {
   await B.close();
   const law = await renewal();
   ok(law.before === 'localhost' && law.after === 'renewed', `a renewal with ANOTHER certificate is served in place: ${law.before} → ${law.after}`, law);
-  const ignored = await renewal(interfaceWith({ front: compileAt('src/interface/front.js', read('src/interface/front.js').replace('    } else tlsServer.setSecureContext({ cert: pem.cert, key: pem.key });   // a renewal: no restart', '    }')) }));
+  const ignored = await renewal(interfaceWith({ front: mutant('src/interface/front.js', '    } else tlsServer.setSecureContext({ cert: pem.cert, key: pem.key });   // a renewal: no restart', '    }') }));
   ok(ignored.after === 'localhost', `RED CONTROL — the renewal ignored: the page still sees ${ignored.after}`, ignored);
 }
 
@@ -424,8 +435,145 @@ async function silent(I) {
 {
   const law = await silent(require(path.join(REPO, 'src/interface/index.js')));
   ok(law.closed && law.opens === 0, `a connection that says nothing is dropped at the interface's own first-byte bound (60 ms here) and opens no channel`, law);
-  const unbound = await silent(interfaceWith({ front: compileAt('src/interface/front.js', read('src/interface/front.js').replace('    socket.setTimeout(firstByteMs, drop);\n', '')) }));
+  const unbound = await silent(interfaceWith({ front: mutant('src/interface/front.js', '    socket.setTimeout(firstByteMs, drop);\n', '') }));
   ok(!unbound.closed, `RED CONTROL — the bound not set: the silent socket is still open`, unbound);
+}
+
+console.log('— ⑫ THE ADMISSION (piece B2b): a link is a party only once its hello is admitted by this start\'s secret');
+/** an interface whose supervisor wrote `admits` (digests, in order) for the hub; a party then joins saying `secret` */
+async function admission(I, secret, admits = [HUB_DIGEST], opts = {}) {
+  const iface = I.create(opts); const addr = await iface.listen(0, '127.0.0.1');
+  const sock = path.join(T, `a${++nIface}.sock`); let link = null;
+  const srv = net.createServer((x) => { link = iface.attachLink(x); }).listen(sock); await new Promise((r) => srv.once('listening', r));
+  for (const d of admits) iface.admit({ party: 'hub', digest: d });
+  far.opens = []; far.chans = new Map(); far.mode = 'raw'; far.acked = null; far.refused = false; far.certAcks = [];
+  await farJoin(sock, secret);
+  await until(() => far.acked || far.refused || (link && link._dead), 3000);
+  const page = await rawClient(addr.port); let pageClosed = false; page.on('close', () => { pageClosed = true; }); page.write('PING\n');
+  await until(() => far.opens.length || pageClosed, 1000);
+  const st = iface.stats();
+  const r = { acked: !!far.acked, capabilities: far.acked && far.acked.capabilities, refused: far.refused, linkEnded: !!(link && link._dead), opens: far.opens.length, pageClosed, lastRefused: st.lastRefused };
+  page.destroy(); try { far.mux.destroy(); } catch { } await iface.close(); srv.close();
+  return r;
+}
+{
+  const IDX = require(path.join(REPO, 'src/interface/index.js'));
+  const right = await admission(IDX, HUB_SECRET);
+  ok(right.acked && Array.isArray(right.capabilities) && right.opens === 1, `the admitted secret: hello-ack (${(right.capabilities || []).join(', ')}) and the page relayed`, right);
+  const wrong = await admission(IDX, crypto.randomBytes(32).toString('hex'));
+  ok(wrong.refused && wrong.linkEnded && wrong.opens === 0 && wrong.pageClosed && wrong.lastRefused === 'secret', `a wrong secret: auth-fail, the link ended, and a page arriving meanwhile closed at once with no link — nothing relayed (${wrong.lastRefused})`, wrong);
+  const none = await admission(IDX, HUB_SECRET, []);
+  ok(none.refused && none.lastRefused === 'not-admitted' && none.opens === 0, `no admit line for the hub: refused (${none.lastRefused})`, none);
+  const S2 = crypto.randomBytes(32).toString('hex'), D2 = crypto.createHash('sha256').update(S2).digest('hex');
+  const old = await admission(IDX, HUB_SECRET, [HUB_DIGEST, D2]);
+  const fresh = await admission(IDX, S2, [HUB_DIGEST, D2]);
+  ok(old.refused && old.lastRefused === 'secret' && fresh.acked, 'a later admit replaces the earlier: the PREVIOUS generation\'s secret is refused, this start\'s is admitted', { old, fresh });
+  const silentParty = await admission(IDX, null, [HUB_DIGEST], { helloMs: 60 });
+  ok(silentParty.linkEnded && !silentParty.acked && silentParty.lastRefused === 'no-hello', `a link that says no hello is ended at the interface's own bound (60 ms here; ${silentParty.lastRefused})`, silentParty);
+  const ADM = 'src/interface/admission.js', CHECK = "    if (!tokenMatches(hello.secret, digest)) return { ok: false, why: 'secret' };   // a wrong secret, or a previous generation's\n";
+  const lax = await admission(interfaceWith({ admission: mutant(ADM, CHECK, '') }), HUB_SECRET, [HUB_DIGEST, D2]);
+  ok(lax.acked && lax.opens === 1, 'RED CONTROL — the secret\'s check cut: the PREVIOUS generation is admitted and pages are relayed to it', lax);
+}
+
+console.log('— ⑬ A RE-ATTACH: the old link goes first, and an old link\'s late death never empties the new link\'s pairs');
+async function reattach(I, { lateDeath = false, bound = null } = {}) {
+  const t0 = performance.now(), took = {};
+  const Bt = await boot(I); far.mode = 'raw';
+  const pA = await rawClient(Bt.port); let aClosed = false; pA.on('end', () => { aClosed = true; }); pA.on('close', () => { aClosed = true; }); pA.resume(); pA.write('PING\n');   // ended BY the interface: its FIN or its close (read, or no 'end' is ever emitted)
+  await until(() => far.opens.length === 1);
+  const far1 = far.mux; far.acked = null;
+  await farJoin(Bt.sock, HUB_SECRET);   // the hub's next start joins as the same party
+  await until(() => far.acked, 3000);
+  const oldEnded = await until(() => far1._dead, bound ? bound.old : 3000); took.old = performance.now() - t0;
+  if (oldEnded) await until(() => aClosed, 3000);   // its page's end arrives after the link's
+  const pB = await rawClient(Bt.port); let got = ''; pB.on('data', (b) => { got += b; }); pB.write('PING\n');
+  await until(() => got.includes('PONG'), 2000);
+  if (lateDeath) { try { far1.destroy(); } catch { } await sleep(50); }   // the OLD link dies now, after the new one carries pages
+  got = ''; const t1 = performance.now(); pB.write('PING\n'); const bAnswers = await until(() => got.includes('PONG'), bound ? bound.pong : 3000); took.pong = performance.now() - t1;
+  const r = { oldEnded, aClosed, bAnswers, parties: Bt.iface.stats().parties, took };
+  pA.destroy(); pB.destroy(); try { far1.destroy(); } catch { } await Bt.close();
+  return r;
+}
+{
+  const law = await reattach(require(path.join(REPO, 'src/interface/index.js')));
+  const bound = { old: Math.max(50, 4 * law.took.old), pong: Math.max(50, 4 * law.took.pong) };   // the reds wait four times what the law needed, measured here
+  ok(law.oldEnded && law.aClosed && law.bAnswers && JSON.stringify(law.parties) === '["hub"]', 'the same party joins again: its OLD link is ended first (and its page closed), the new link carries the pages', law);
+  const IDXS = 'src/interface/index.js', FIRST = "          if (old && old !== link) { try { old.destroy(); } catch { } }   // a re-attach: the old link goes FIRST (its onDead ends its own pages)\n";
+  const keeps = await reattach(interfaceWith({ index: (() => { const t = read(IDXS); if (t.split(FIRST).length !== 2) throw new Error('CONTROL needle: the re-attach line'); return t.replace(FIRST, ''); })() }), { lateDeath: true, bound });
+  ok(!keeps.oldEnded && keeps.bAnswers, 'with the old link left alive (the «first» line cut) and dying only AFTER the new one carries pages: the new link\'s page still answers — the relay binds each link\'s death to its own pairs', keeps);
+  ok(!keeps.oldEnded, 'RED CONTROL — the «first» line cut: the old link is NOT ended by a re-attach (two links for one party)', keeps);
+  const RLY = 'src/interface/relay.js', BIND = '        if (mux === m) mux = null;   // only THIS link stops being the one pages open on\n        for (const [chan, p] of pairs) if (p.mux === m) {';
+  const both = await reattach(interfaceWith({ index: read(IDXS).replace(FIRST, ''), relay: mutant(RLY, BIND, '        mux = null;\n        for (const [chan, p] of pairs) if (true) {') }), { lateDeath: true, bound });
+  ok(!both.bAnswers, 'RED CONTROL — the relay\'s per-link death cut too: the old link\'s late death empties the NEW link\'s pairs (its page never answers)', both);
+}
+
+console.log('— ⑭ A PUSHED CERTIFICATE THAT CANNOT BE LOADED keeps the old context, and never throws out of the control callback');
+async function pushes(I) {
+  const Bt = await boot(I); const uncaught = []; const onU = (e) => uncaught.push(String(e && e.message)); process.on('uncaughtException', onU);
+  far.mux.control({ op: 'certificate', cert: String(pair.cert), key: String(pair.key) }); await until(() => far.certAcks.length === 1, 2000);   // PEM text, as a party pushes it
+  const before = await peerCN(Bt.port);
+  far.mux.control({ op: 'certificate', cert: '-----BEGIN CERTIFICATE-----\nnot a certificate\n-----END CERTIFICATE-----\n', key: 'not a key' });
+  await until(() => far.certAcks.length === 2 || uncaught.length, 2000); await sleep(20);
+  const after = await peerCN(Bt.port);
+  process.off('uncaughtException', onU);
+  const r = { acks: far.certAcks.map((a) => a.ok), why: far.certAcks[1] && far.certAcks[1].why, before, after, uncaught: uncaught.length, linked: Bt.iface.stats().linked };
+  await Bt.close();
+  return r;
+}
+{
+  const law = await pushes(require(path.join(REPO, 'src/interface/index.js')));
+  ok(JSON.stringify(law.acks) === '[true,false]' && law.before === 'localhost' && law.after === 'localhost' && law.uncaught === 0 && law.linked, `a good pair pushed, then a malformed one: answered ok then {ok:false, why: ${law.why}}; TLS still serves the first (${law.after}); nothing thrown; the link lives`, law);
+  const FRT = 'src/interface/front.js', JUDGE = "    try { tls.createSecureContext({ cert: pem.cert, key: pem.key }); }   // judged BEFORE it replaces anything\n    catch (e) { return { ok: false, why: (e && (e.code || e.message)) || 'unusable certificate' }; }   // the old context stays\n";
+  const thrown = await pushes(interfaceWith({ front: mutant(FRT, JUDGE, '') }));
+  ok(thrown.uncaught >= 1, `RED CONTROL — the judgement cut: the malformed pair throws out of the frame code's control callback (${thrown.uncaught} uncaught)`, thrown);
+}
+
+console.log('— ⑮ THE TLS STAGE STATES ITS OWN BOUND: a handshake that never finishes is dropped at HANDSHAKE_MS');
+async function stalledHello(I, handshakeMs) {
+  const Bt = await boot(I, { handshakeMs }); Bt.iface.useCertificate(pair);
+  const s = await rawClient(Bt.port); let closed = false; s.on('close', () => { closed = true; });
+  s.write(Buffer.from([0x16, 0x03, 0x01]));   // the start of a ClientHello, then nothing
+  await until(() => closed, handshakeMs * 4);
+  const r = { closed, opens: far.opens.length }; s.destroy(); await Bt.close(); return r;
+}
+{
+  const FR = require(path.join(REPO, 'src/interface/front.js'));
+  ok(FR.HANDSHAKE_MS === 120000, `the bound is said by name: HANDSHAKE_MS = ${FR.HANDSHAKE_MS} ms (Node's default, today's front's)`);
+  const law = await stalledHello(require(path.join(REPO, 'src/interface/index.js')), 80);
+  ok(law.closed && law.opens === 0, 'a ClientHello begun and never finished: dropped at the interface\'s own handshake bound (80 ms here), no channel opened', law);
+  const unbound = await stalledHello(interfaceWith({ front: mutant('src/interface/front.js', ', handshakeTimeout: handshakeMs', '') }), 80);
+  ok(!unbound.closed, 'RED CONTROL — the bound not passed: after four times the bound the stalled handshake is still open', unbound);
+}
+
+console.log('— ⑯ THE OWNER DESTROYS ITS CHANNEL MID-UPLOAD, THEN THE PAGE CLOSES — on the REAL socket-shaped channel');
+async function midUpload(I, bound = null) {
+  // the far end is today's hub's own road: src/server/interface-party.js join() — the REAL ChanSocket router behind an http.Server
+  const iface = I.create(); const addr = await iface.listen(0, '127.0.0.1');
+  const sock = path.join(T, `u${++nIface}.sock`); let link = null;
+  const srv = net.createServer((x) => { link = iface.attachLink(x); }).listen(sock); await new Promise((r) => srv.once('listening', r));
+  iface.admit({ party: 'hub', digest: HUB_DIGEST });
+  let destroyedAt = 0;
+  const hubServer = http.createServer((req, res) => { req.on('data', (c) => { destroyedAt += c.length; if (destroyedAt > 100000) req.socket.destroy(); }); req.on('error', () => { }); });
+  const party = await require(path.join(REPO, 'src/server/interface-party.js')).join({ start: { party: 'hub', secret: HUB_SECRET, link: sock }, server: hubServer });
+  // the page holds its side open after the interface's FIN (allowHalfOpen), so its going is a RESET, never an answered FIN
+  const page = await new Promise((res) => { const x = net.connect({ port: addr.port, host: '127.0.0.1', allowHalfOpen: true }, () => res(x)); x.on('error', () => { }); });
+  let ended = false; page.on('end', () => { ended = true; }); page.on('close', () => { ended = true; });
+  page.write('POST /up HTTP/1.1\r\nHost: x\r\nContent-Length: 4000000\r\n\r\n');
+  const chunk = Buffer.alloc(65536, 7); for (let i = 0; i < 8; i++) page.write(chunk);   // 512 KiB of a 4 MB upload
+  await until(() => destroyedAt > 100000 && ended, 3000);
+  await sleep(30); page.resetAndDestroy();   // the page goes too (an RST: no FIN — its close handler's road)
+  const t0 = performance.now(); await until(() => iface.stats().channels === 0 && party.router.size === 0, bound || 3000); const took = performance.now() - t0; await sleep(20);
+  const L = link;
+  const r = { channels: iface.stats().channels, routerSize: party.router.size, held: { closeAfter: L._closeAfter.size, sendQ: L._sendQ.size, sendWin: L._sendWin.size }, took };
+  try { party.mux.destroy(); } catch { } await iface.close(); srv.close(); hubServer.close();
+  return r;
+}
+{
+  const law = await midUpload(require(path.join(REPO, 'src/interface/index.js')));
+  ok(law.channels === 0 && law.routerSize === 0 && law.held.closeAfter === 0 && law.held.sendQ === 0 && law.held.sendWin === 0, `the hub's socket destroyed after 100 KB of a 4 MB upload, then the page reset: no pair here, the hub's router empty (its sink removed by the interface's CLOSE), and the link's frame code holds nothing for the channel (held-close ${law.held.closeAfter}, queue ${law.held.sendQ}, window ${law.held.sendWin})`, law);
+  const RLY = 'src/interface/relay.js', CLOSE = "    page.on('close', () => { if (!p.ended.page) { p.ended.page = true; if (live()) m.closeChan(chan); } p.ended.owner = true; pairs.delete(chan); });";
+  const leaks = await midUpload(interfaceWith({ relay: mutant(RLY, CLOSE, "    page.on('close', () => { p.ended.owner = true; pairs.delete(chan); });") }), Math.max(50, 4 * law.took));
+  ok(leaks.routerSize >= 1, `RED CONTROL — the page's close sends no CLOSE: the hub's router keeps the channel as a sink for good (${leaks.routerSize})`, leaks);
 }
 
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);

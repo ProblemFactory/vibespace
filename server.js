@@ -106,7 +106,8 @@ setInterval(refreshAvailableModels, 3600000); // refresh hourly
 const HOST = process.env.HOST || '0.0.0.0';
 
 const app = express();
-const server = http.createServer(app); const hub = require('./src/server/tls.js').create({ app, httpServer: server, dataDir: path.join(__dirname, 'data'), port: PORT, serverSetting: (k) => serverSetting(k), getUserTodos: () => userTodos, log: console, tailscaleBin: throwawayRoot && !process.env.VIBESPACE_TAILSCALE_BIN ? null : undefined, step: (name, fn) => bootTrace.step(name, fn) }); // lane https-tailscale: ONE port, two servers — hub.front peeks each connection's first byte (TLS → https, else http), every listener reaches both through hub.attachToServers (test-architecture §89); a throwaway root never asks the real tailscale ⇒ src/server/tls.js
+const hubForm = require('./src/server/hub-port.js').decide(); let hubPort = null; // B2b: the start decides the hub's port (fd 3's start pipe ⇒ piped, else plain) — read before listen, off the loop
+const server = http.createServer(app); const hub = require('./src/server/tls.js').create({ app, httpServer: server, dataDir: path.join(__dirname, 'data'), port: PORT, onCertificate: (pem) => { if (hubPort) hubPort.pushCertificate(pem); }, serverSetting: (k) => serverSetting(k), getUserTodos: () => userTodos, log: console, tailscaleBin: throwawayRoot && !process.env.VIBESPACE_TAILSCALE_BIN ? null : undefined, step: (name, fn) => bootTrace.step(name, fn) }); // lane https-tailscale: ONE port, two servers — hub.front peeks each connection's first byte (TLS → https, else http), every listener reaches both through hub.attachToServers (test-architecture §89); a throwaway root never asks the real tailscale ⇒ src/server/tls.js
 
 // ── Optional password auth (VIBESPACE_PASSWORD env / data/auth.json) +
 //    optional Clerk SSO (VIBESPACE_CLERK_PUBLISHABLE_KEY — src/clerk-auth.js) ──
@@ -1537,7 +1538,7 @@ if (METRICS_PORT > 0) {
   }).listen(METRICS_PORT, () => console.log(`  metrics exporter on :${METRICS_PORT}`));
 }
 
-probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(); // B-1319: after the restore's probes (boot-restore probeSockets) — the one-port demux (src/server/tls.js) — listen errors / EADDRINUSE as before
+probeSockets().catch(() => { }).then(() => hubForm).then((d) => { hubPort = require('./src/server/hub-port.js').wire(d, { hub, server }); }).then(() => hub.listen(PORT, HOST, () => { bootTrace.listening(); // B2b (the separation, M1 lane B): THE START DECIDES — piped (a start pipe on fd 3) joins the interface's link and never listens; plain listens as before (src/server/hub-port.js). The same boot callback in both · B-1319: after the restore's probes (boot-restore probeSockets) — the one-port demux (src/server/tls.js) — listen errors / EADDRINUSE as before
   const ver = require('./package.json').version;
   console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}${hub.bootSuffix()}`); hub.start(); // lane human-cli: the person's CLI index on the machine's own disk is configured in the listen step's LAST turn (below, B-cd4b: its boot write lists the restored survivors, as when the step was one turn) · + " and https://<domain>:PORT" while a certificate is live; start = the boot pass + hourly
   // PID file for the supervised-restart path (scripts/update.sh in a container:
