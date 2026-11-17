@@ -700,6 +700,7 @@ require('./vault-hooks.js').wireVaultHooks({ vault, auth, wss, hostTokens, plugi
 mounts.startHealthWatchdog();
 app.locals.mounts = mounts; // files.js circuit breaker asks it about blocked mount roots
 require('../mount-door').register(mounts); // B-afc4: every other user-path reader asks the same answer (src/mount-door.js)
+require('./cwd-wait.js').register({ vault, mounts }); // B-864f: a session folder on a mount that waits for the vault is PENDING, never gone (src/server/cwd-wait.js)
 // Self-mount guard: a bridge token WE minted = the share points back at this
 // instance; fuse→HTTP→self deadlocks the threadpool (real incident).
 mounts.selfTokenCheck = (raw) => mountTokens.has(raw);

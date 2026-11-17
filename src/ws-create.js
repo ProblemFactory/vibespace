@@ -403,14 +403,15 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // usable; a transcript-coupled session in the wrong dir is not.)
             let missing = false;
             let hostName = '';
+            const dirMissing = () => new Promise((resolve) => {
+              execFile('test', ['-d', cwd], { timeout: 4000 }, (err) => resolve(!!err && err.code === 1));
+            });
             try {
               if (!data.hostId) {
                 // Child-process probe, NEVER node fs (§2.108.3 hung-mount
                 // doctrine: a wedged FUSE path blocks sync fs / eats a
                 // threadpool slot; a stuck child just gets killed by timeout).
-                missing = await new Promise((resolve) => {
-                  execFile('test', ['-d', cwd], { timeout: 4000 }, (err) => resolve(!!err && err.code === 1));
-                });
+                missing = await dirMissing();
               } else if (hosts) {
                 const hh = hosts.get(data.hostId);
                 if (hh) {
@@ -424,6 +425,24 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 }
               }
             } catch { /* probe failure must never block a create */ }
+            // A FOLDER THAT WAITS IS NOT GONE (B-864f, src/server/cwd-wait.js), asked for EVERY local cwd (a mount point left as a
+            // bare folder passes `test -d`) and BEFORE the recreate below (an empty folder made under a mount point that is not up
+            // would shadow the mount): the vault locked over the mount's secret ⇒ vault_locked (the page resumes it at the unlock);
+            // a mount being brought up ⇒ waited for, bounded; a missing folder under a recorded mount still down ⇒ mount_down.
+            if (!data.hostId) {
+              const CW = require('./server/cwd-wait.js');
+              let w = CW.verdict(cwd, { missing });
+              if (w && w.why === 'mount_starting') {
+                if (await CW.whenBack(cwd)) missing = await dirMissing();
+                w = CW.verdict(cwd, { missing });
+                if (w && w.why === 'mount_starting') w = { ...w, why: 'mount_down' };   // it waited its bound: still not up
+              }
+              if (w && (w.why === 'vault_locked' || w.why === 'mount_down')) {
+                global.__vsEvent?.('spawn-cwd-waits', `${w.why}/${data.resume ? 'resume' : 'new'}`);
+                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: w.why, cwd, waitsFor: w.name, message: w.why === 'vault_locked' ? CW.lockedWords(cwd, w) : CW.downWords(cwd, w) }));
+                break;
+              }
+            }
             // Recreate-empty-and-resume (B-7812, user-approved DANGER path):
             // only on the client's EXPLICIT flag (set after a red confirm that
             // spells out the files are gone). The resumed agent is told the

@@ -1978,16 +1978,25 @@ class LayoutManager {
   async _offerResumeAll(stopped) {
     // WHY (lane dead-socket-keeps-chat-meta): the ones a boot kept stopped because their process ended while it was down
     const ended = stopped.filter((d) => stoppedWhyFor(d.opts?.backend, d.opts?.backendSessionId || d.sessionId, this.app.sidebar?._allSessions)).length;
+    // B-864f: while the vault is LOCKED (every restart) a conversation whose folder is on a machine or a storage mount cannot
+    // start yet — the offer says so and unlocks FIRST; the resumes begin when the unlock dialog closes (unlocked, or 「稍后」:
+    // then such a conversation waits in its window and resumes once the vault is unlocked)
+    const { vaultFacts, showUnlock, refreshVaultFacts } = await import('./vault-unlock.js');
+    if (!vaultFacts()) await refreshVaultFacts();   // a slow hub's page may not have read them yet (fetchJson never throws)
+    const locked = vaultFacts()?.state === 'locked';
     const ok = await this.askResumeAll({
       title: t('Resume interrupted sessions?'),
       message: t('{n} sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?', { n: stopped.length }) // plain words: showConfirmDialog prints its message as TEXT (the tags showed, literally)
-        + (ended ? ' ' + t('{n} of them stopped because their process ended while the server was down.', { n: ended }) : ''),
-      confirmText: t('Resume all {n}', { n: stopped.length }),
+        + (ended ? ' ' + t('{n} of them stopped because their process ended while the server was down.', { n: ended }) : '')
+        + (locked ? ' ' + t('The vault is locked: a conversation whose folder is on a machine or a storage mount waits for it, so unlock first.') : ''),
+      confirmText: locked ? t('Unlock and resume all {n}', { n: stopped.length }) : t('Resume all {n}', { n: stopped.length }),
     }).catch(() => false);
     if (!ok) { this._keepOffer(stopped); return; } // dismissed: a door stays while they stay stopped (B-6352)
     this._keepOffer(null);
-    try { return await this._resumeAll(stopped); }
-    finally { this._keepOffer(stopped); } // a Stop, a refusal, a throw: the ones still stopped keep their door
+    try {
+      if (locked && vaultFacts()?.state === 'locked') return await new Promise((done) => showUnlock({ then: () => done(this._resumeAll(stopped)) }));   // B-864f: unlock FIRST
+      return await this._resumeAll(stopped);
+    } finally { this._keepOffer(stopped); } // a Stop, a refusal, a throw: the ones still stopped keep their door
   }
 
   /** The offer's question (showConfirmDialog — a method, so a suite answers it the way confirmRemovePlaceholder is answered). */

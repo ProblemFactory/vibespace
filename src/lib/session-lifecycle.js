@@ -28,10 +28,13 @@ import { DIALOG_ROOTS } from './form-yield.js'; // PURE (lane dialog-yield r2): 
 import { SIGN_IN } from '../day-one.js'; // lane door-day-one-landing: a sign-in terminal is not a session row
 import { resumeAccountOf, keptAccountOf, i18nParams } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a resume nobody gave an account goes to the one its row names
 import { resumeAccountVerdict } from '../resume-account.js'; // lane resume-account-door: the pinned account is asked FIRST at the Resume press
+import { onVaultFacts, vaultFacts } from './vault-unlock.js'; // B-864f: a conversation whose folder waits for the vault resumes once it is unlocked
+import { inTurn } from './resume-pacer.js'; // B-864f: ONE lane with the bulk resume — never two creates in flight
 import { openCliMissingDialog, cliMissingWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: a CLI the person's login shell cannot find is refused by name — a dialog
 
 // lane mirror-green-228: a window's focus on the server's answer never takes the keys from an open app dialog (the Rename
 // dialog a double-click on its own sidebar row opened while the attach was in flight)
+const turnOf = (fn) => inTurn(fn); // B-864f: the conversations whose folder waited for the vault resume in the bulk resume's lane, one create in flight
 const lateFocus = (view) => { if (lateFocusVerdict(document.querySelectorAll(DIALOG_ROOTS), document.activeElement) === 'take') view.focus(); }; // lane dialog-yield r2: ONE predicate — an open decision, or a FORM the person works in (the focus inside it, its window the active one), keeps the keys (it is no overlay any more)
 
 export function installSessionLifecycle(App, ctx = {}) {
@@ -67,6 +70,7 @@ export function installSessionLifecycle(App, ctx = {}) {
   },
 
   createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, lockContext, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, onCreateEnd, browserProfileId, browserProfileOrigin, quiet = false }) {
+    const createArgs = arguments[0] || {}; // B-864f: the create as it was asked — a window that waits for the vault replays it whole
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
     // service (opencode → the 'opencode-serve' plugin, default OFF since
@@ -254,6 +258,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       // surface it — without this the window stayed BLANK forever with no
       // feedback and no openSpec (found reproducing the remote-blank report).
       if (msg.type === 'error' && msg.reqId === reqId) {
+        // B-864f: a refusal this window resumes BY ITSELF at the unlock (its folder waits for the vault: a local chat resume, not a
+        // fork) — said on the answer BEFORE its end is told, so a bulk resume counts it as waiting, never as failed
+        if (msg.code === 'vault_locked' && msg.cwd && !hostId && resumeId && !fork && sessionMode === 'chat') msg.resumesAtUnlock = true;
         pending.remove(); settled('refused', msg);
         if (resumeKey) this._markResume(winInfo.id); // the answer's own turn is the resume's too (r4 N5)
         try { onCreateResult?.(false, msg); } catch { }
@@ -271,8 +278,17 @@ export function installSessionLifecycle(App, ctx = {}) {
           }); }
           return true;
         }
-        if (msg.code === 'vault_locked') { try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } }   // lane vault-e2e-password-fix-r2: a machine's session waits for the vault — its door
-        const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || (msg.i18n && msg.i18n.key ? t(msg.i18n.key, i18nParams(msg.i18n)) : '') || (msg.message ? t(msg.message) : '') || t('Session create failed');   // B-a5a4 follow-up: a sentence with a name rides its key + params   // B-a5a4 r1: a server sentence in the reader's words (t() answers an unknown one as it is)
+        // B-864f: the hub's vault_locked over a LOCAL folder (src/server/cwd-wait.js) — the folder is on a storage mount or a
+        // pulled machine folder that waits for the vault: never «gone», said in the page's words; no door of its own (a resume-all
+        // meets many at once, after the person may have just said 「稍后」 — the strip's Unlock and the window's line carry it)
+        const folderWaits = (msg.code === 'vault_locked' && !!msg.cwd && !hostId) || msg.code === 'mount_down';
+        if (msg.code === 'vault_locked' && !folderWaits) { try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } }   // lane vault-e2e-password-fix-r2: a machine's session waits for the vault — its door
+        const where = { name: msg.waitsFor || msg.cwd };
+        const folderWords = !folderWaits ? '' : msg.code === 'mount_down'
+          ? (resumeId ? t('This conversation\u2019s folder is on {name}, which is not mounted right now \u2014 nothing was started; resume it once the mount is back.', where) : t('The folder is on {name}, which is not mounted right now \u2014 start again once it is back.', where))
+          : msg.resumesAtUnlock ? t('This conversation\u2019s folder is on {name}, which opens after the vault is unlocked \u2014 while this page is open it resumes by itself once you unlock; nothing is lost.', where)
+            : t('The folder is on {name}, which opens after the vault is unlocked \u2014 unlock it, then start again.', where);
+        const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || folderWords || (msg.i18n && msg.i18n.key ? t(msg.i18n.key, i18nParams(msg.i18n)) : '') || (msg.message ? t(msg.message) : '') || t('Session create failed');   // B-a5a4 follow-up: a sentence with a name rides its key + params   // B-a5a4 r1: a server sentence in the reader's words (t() answers an unknown one as it is)
         // Failed RESUME rescue (2.219.0, real window-loss class): resumeSession
         // CLOSES the old read-only window before creating, so a failed create
         // used to leave only a spec-less "Create failed" shell — which
@@ -340,6 +356,21 @@ export function installSessionLifecycle(App, ctx = {}) {
           const view = this.sessions.get(winInfo.id);
           view?._renderers?.appendSystem(t('No transcript turned up for this conversation. Nothing has been deleted; the history below is whatever could be loaded.'));
           view?._showRetryResumeBar?.(retryHere);
+          return true;
+        }
+        // B-864f: A FOLDER THAT WAITS — the window keeps its history and says so (no toast: a resume-all meets many at once),
+        // and resumes ITSELF once the vault is unlocked: the waits in turn, each after the previous one's create ENDED (the
+        // resume-all-paced law — never every window at the unlock's tick); the hub then waits for the mount to come back
+        if (msg.resumesAtUnlock) {
+          rescueViewOnly();
+          const again = () => turnOf(() => new Promise((done) => {
+            if (!this._winIs(winInfo)) { done(); return; } // closed or re-made while it waited
+            const re = this._reopenWin(winInfo.id); // the row, re-opened (r2 N1)
+            const { onCreateResult: _r, onCreateEnd: _e, syncId: _s, winBounds: _w, recreateCwd: _c, ...asked } = createArgs;
+            this.createSession({ ...asked, winBounds: winBounds || re?.place, syncId: re?.id, onCreateEnd: () => done() });
+          }));
+          if (vaultFacts()?.state === 'unlocked') { again(); return true; } // unlocked between the refusal and now
+          const off = onVaultFacts((f) => { if (!f || f.state !== 'unlocked') return; off(); again(); });
           return true;
         }
         // Missing-cwd DANGER flow (B-7812, user-approved with the explicit

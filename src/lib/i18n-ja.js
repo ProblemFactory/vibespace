@@ -9994,6 +9994,10 @@ export default {
   "Passthrough · {transfer} {bits}-bit · {primaries}": "パススルー · {transfer} {bits} ビット · {primaries}", // lane stream-hdr-passthrough
   "waiting for the vault to be unlocked": "保管庫のロック解除待ち", // lane vault-e2e-password-fix-r2
   "This session waits for the vault — unlock it with the second password (Unlock… at the top of the page; For you names what is waiting on it); it reconnects by itself and nothing is lost.": "このセッションは保管庫を待っています — 第二パスワードでロックを解除すると（ページ上部の「ロック解除…」。待っているものは「あなた宛て」に載っています）自動で再接続し、何も失われません。", // lane vault-e2e-password-fix-r2
+  "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock; nothing is lost.": "この会話のフォルダーは {name} 上にあり、保管庫のロックを解除すると開きます — このページを開いている間は、解除すれば自動で再開し、何も失われません。",
+  "This conversation’s folder is on {name}, which is not mounted right now — nothing was started; resume it once the mount is back.": "この会話のフォルダーは {name} 上にありますが、今はマウントされていません — 何も開始していません。マウントが戻ってから再開してください。",
+  "The folder is on {name}, which is not mounted right now — start again once it is back.": "フォルダーは {name} 上にありますが、今はマウントされていません — 戻ってからもう一度始めてください。",
+  "The folder is on {name}, which opens after the vault is unlocked — unlock it, then start again.": "フォルダーは {name} 上にあり、保管庫のロックを解除すると開きます — 解除してから、もう一度始めてください。",
   "vault locked": "保管庫はロック中", // lane vault-e2e-password-fix-r2
   "{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.": "{machine}が Mac のユーザー名とパスワードを求めています。VibeSpace は保管庫に封印し、保管庫のロック解除中は自動でサインインします。", // lane desktop-vnc-remember
   "{machine} asks for its VNC password. VibeSpace seals it in the vault and signs in by itself while the vault is unlocked.": "{machine}が VNC パスワードを求めています。VibeSpace は保管庫に封印し、保管庫のロック解除中は自動でサインインします。", // lane desktop-vnc-remember
@@ -12159,7 +12163,9 @@ export default {
   "Resume interrupted sessions?": "中断されたセッションを再開しますか？",
   "{n} sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?": "{n} 件のセッションが中断され（サーバーまたはマシンの再起動）、読み取り専用の履歴として開き直されました。今すぐすべて再開しますか？",
   "{n} of them stopped because their process ended while the server was down.": "そのうち {n} 件は、サーバーが停止している間にプロセスが終了したため停止しました。",
+  "The vault is locked: a conversation whose folder is on a machine or a storage mount waits for it, so unlock first.": "保管庫がロックされています。フォルダーがマシンやストレージのマウント上にある会話はその解除を待つので、先にロックを解除してください。",
   "Resume all {n}": "すべて再開（{n}）",
+  "Unlock and resume all {n}": "ロックを解除してすべて再開（{n}）",
   "Session unavailable": "セッションを利用できません",
   "Press a desktop to restore it alone — your other desktops stay as they are now.": "デスクトップを押すとそれだけを復元します — ほかのデスクトップは今のままです。",
   "Restore only “{desktop}”": "「{desktop}」だけを復元",
@@ -13114,6 +13120,9 @@ export default {
   "the connection dropped before the server answered": "サーバーが応答する前に接続が切れました",
   "the server reported an error without a reason": "サーバーがエラーを返しましたが、理由は示されませんでした",
   "the server refused it without a reason": "サーバーが拒否しましたが、理由は示されませんでした",
+  "its folder waits for the vault": "フォルダーが保管庫の解除を待っています",
+  "its folder is on a mount that is not up": "フォルダーのマウントが準備できていません",
+  "{w} of {n} conversations wait for the vault — while this page is open, each resumes by itself once you unlock it.": "{n} 件中 {w} 件の会話が保管庫を待っています — このページを開いている間は、解除するとそれぞれ自動で再開します。",
   "it could not be started on this page": "このページでは開始できませんでした",
   "it was not resumed": "再開されませんでした",
   "Resuming the group stopped early because of an error on this page.": "このページでエラーが起きたため、グループの再開が途中で止まりました。",

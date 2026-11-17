@@ -204,6 +204,64 @@ console.log('— ⑪ S3: ONE SCREEN ON A PHONE; A THROW IN THE GROUP\'S PACE IS 
   ok(r === null && unhandled === 0 && saidOf(t1).includes('Resuming the group stopped early because of an error on this page.'), 'a throw inside the group\'s pace is SAID, never an unhandled rejection', { r, unhandled, said: saidOf(t1) });
 }
 
+console.log('— ⑫ B-864f: A FOLDER THAT WAITS FOR THE VAULT — never «gone»; each window resumes ITSELF once the vault is unlocked, in the pace\'s own lane');
+{
+  // the hub's vault_locked over a LOCAL folder (src/server/cwd-wait.js); the page's vault facts stood in by hooks the leg fires,
+  // and the REAL resume-pacer's lane (the same module instance layout.js runs: one URL)
+  const SRC = read('src/lib/session-lifecycle.js');
+  const IMP_V = /^import \{ onVaultFacts, vaultFacts \} from '\.\/vault-unlock\.js';.*$/m, IMP_T = /^import \{ inTurn \} from '\.\/resume-pacer\.js';.*$/m;
+  const { inTurn } = await import(pathToFileURL(PACER).href);
+  const vf = new Set();
+  Object.assign(globalThis, { __rapVault: (fn) => { vf.add(fn); return () => vf.delete(fn); }, __rapFacts: null, __rapTurn: inTurn });
+  const facts = (f) => { globalThis.__rapFacts = f; for (const fn of [...vf]) fn(f); };
+  const lifeOf = (mut = null) => {
+    if (!IMP_V.test(SRC) || !IMP_T.test(SRC)) throw new Error('the lifecycle imports moved');
+    const s0 = mut ? mut(SRC) : SRC;
+    if (mut && s0 === SRC) throw new Error('the patched lifecycle changed nothing');
+    return loadLifecycle(s0.replace(IMP_V, 'const onVaultFacts = (fn) => globalThis.__rapVault(fn); const vaultFacts = () => globalThis.__rapFacts;').replace(IMP_T, 'const inTurn = (fn) => globalThis.__rapTurn(fn);'));
+  };
+  const locked = (i, m) => ({ type: 'error', reqId: m.reqId, code: 'vault_locked', cwd: m.cwd, waitsFor: 'Studio Mac', message: `the vault is locked — the folder ${m.cwd} is on Studio Mac, which opens after the owner unlocks the vault with the second password` });
+  const created = (i, m) => ({ type: 'created', sessionId: 'new-' + i, cwd: m.cwd, mode: 'chat', reqId: m.reqId });
+  const pick = (m) => J({ cwd: m.cwd, resumeId: m.resumeId, mode: m.mode, backend: m.backend, sessionName: m.sessionName, model: m.model, permissionMode: m.permissionMode, effort: m.effort });
+  const waitsLeg = async (inst, { unlockMidPace = false, already = false } = {}) => {
+    vf.clear(); globalThis.__rapFacts = already ? { state: 'unlocked' } : { state: 'locked' };
+    const t0 = made.length, n = unlockMidPace ? 4 : 3;
+    const refused = new Set(), waits = (m) => (unlockMidPace ? m.resumeId === CID(1) : true);   // each waiting conversation is refused ONCE
+    const P = page(inst, { delay: 40, answer: (i, m) => (waits(m) && !refused.has(m.resumeId) ? (refused.add(m.resumeId), locked(i, m)) : created(i, m)) });
+    const run = P.lm._resumeAll(stoppedOf(n));
+    if (unlockMidPace) { for (let k = 0; k < 40 && P.creates.length < 2; k++) await tick(5); facts({ state: 'unlocked' }); }
+    await run; await tick(5);
+    const first = { creates: P.creates.length, said: saidOf(t0), waiting: vf.size };
+    if (!unlockMidPace && !already) { facts({ state: 'locked' }); await tick(30); first.whileLocked = P.creates.length; facts({ state: 'unlocked' }); }
+    const want = unlockMidPace ? 5 : 6;
+    for (let k = 0; k < 60 && P.answered < want; k++) await tick(30);
+    await tick(10); facts({ state: 'unlocked' }); await tick(80);
+    const same = refused.size > 0 && [...refused].every((rid) => { const ms = P.creates.filter((m) => m.resumeId === rid); return ms.length === 2 && pick(ms[0]) === pick(ms[1]); });
+    return { first, after: P.creates.length, max: Math.max(0, ...P.inFlightAtSend), same, left: vf.size, inFlightAtSend: P.inFlightAtSend };
+  };
+  const w = await waitsLeg(await lifeOf());
+  ok(w.first.creates === 3 && w.first.waiting === 3 && w.first.whileLocked === 3, 'three conversations whose folders wait for the vault: three refusals, each window waits (no gone dialog, nothing recreated); a tick still LOCKED starts nothing', w.first);
+  ok(J(w.first.said) === J(['3 of 3 conversations wait for the vault — while this page is open, each resumes by itself once you unlock it.']), 'ONE line says it, in the page\'s words: they WAIT (counted apart from a failure), no toast per window', w.first.said);
+  ok(w.after === 6 && w.max === 1 && w.same, 'the unlock ⇒ each conversation resumes ITSELF with the create it asked for, in turn — never two creates in flight', w);
+  ok(w.left === 0, 'each window waited ONCE: a later unlocked tick starts nothing more', w);
+  const mid = await waitsLeg(await lifeOf(), { unlockMidPace: true });
+  ok(mid.after === 5 && mid.max === 1 && mid.same, 'unlocked WHILE the pace still has a create in flight: the waiting window takes its turn in the pace\'s lane — never two in flight', mid);
+  const now = await waitsLeg(await lifeOf(), { already: true });
+  ok(now.after === 6 && now.max === 1 && now.left === 0 && now.same, 'a vault already unlocked when the refusal lands (it was unlocked meanwhile): the window resumes at once, in the lane', now);
+  const r1 = await waitsLeg(await lifeOf((x) => x.replace('        if (msg.resumesAtUnlock) {\n', '        if (false) {\n')));
+  ok(r1.after === 3, 'RED control: the window that waits taken out (the .407 shape) ⇒ nothing resumes after the unlock', r1);
+  const flood = (x) => x.replace('const turnOf = (fn) => inTurn(fn);', 'const turnOf = (fn) => fn();');
+  const r2 = await waitsLeg(await lifeOf(flood));
+  ok(r2.after === 6 && r2.max >= 2, 'RED control: the waits outside the lane ⇒ the unlock fires every create at once', r2);
+  const r3 = await waitsLeg(await lifeOf(flood), { unlockMidPace: true });
+  ok(r3.max >= 2, 'RED control: …and an unlock mid-pace puts a second create in flight beside the pace\'s', r3);
+  ok(/if \(msg\.code === 'vault_locked' && msg\.cwd && !hostId && resumeId && !fork && sessionMode === 'chat'\) msg\.resumesAtUnlock = true;\n\s*pending\.remove\(\); settled\('refused', msg\);/.test(SRC), 'the window that waits is a local chat RESUME (never a fork, a terminal or a machine\'s session), said on the answer BEFORE its end is told');
+  delete globalThis.__rapVault; delete globalThis.__rapFacts; delete globalThis.__rapTurn;
+  // the boot offer while LOCKED (layout.js _offerResumeAll): it reads the facts when the page has none, says so and unlocks FIRST
+  const LY = read('src/lib/layout.js'), body = LY.slice(LY.indexOf('  async _offerResumeAll(stopped) {'), LY.indexOf('  async _resumeAll(stopped) {'));
+  ok(/if \(!vaultFacts\(\)\) await refreshVaultFacts\(\);/.test(body) && /const locked = vaultFacts\(\)\?\.state === 'locked';/.test(body) && /confirmText: locked \? t\('Unlock and resume all \{n\}'/.test(body) && /if \(locked && vaultFacts\(\)\?\.state === 'locked'\) return await new Promise\(\(done\) => showUnlock\(\{ then: \(\) => done\(this\._resumeAll\(stopped\)\) \}\)\);[^\n]*\n      return await this\._resumeAll\(stopped\);/.test(body), 'the boot offer while locked: the facts read first, «Unlock and resume all n», the unlock dialog first, the paced resumes from its close');
+}
+
 console.log('— ⑥ RED CONTROLS');
 {
   // the master's _resumeAll, VERBATIM (2.369.404 d7f42cc21) — the fixed 400 ms clock

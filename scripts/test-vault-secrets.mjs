@@ -978,6 +978,78 @@ console.log('⑪ THE DOOR\'S PRESS (B-6f65) — the vault\'s door is heard from 
   delete globalThis.__vd;
 }
 
+console.log('⑫ A FOLDER THAT WAITS IS NOT GONE (B-864f) — a session folder on a mount that waits for the vault is PENDING, never «gone»');
+{
+  // the REAL engine (cheap KDF) + the REAL MountManager (rows whose mount points are bare folders: one whose secret is sealed
+  // under the vault, one with none) + a machine's pull
+  const CW = R('src/server/cwd-wait.js');
+  const { MountManager } = R('src/mounts.js');
+  const d = dirOf('cwdwait'), sealedAt = path.join(d, 'mnt', 'Team_drive'), openAt = path.join(d, 'mnt', 'Open_share'), pull = path.join(d, 'mnt', 'mac');
+  for (const x of [sealedAt, openAt, pull]) fs.mkdirSync(x, { recursive: true });
+  fs.mkdirSync(path.join(d, 'data'), { recursive: true });
+  const v = mkVault(path.join(d, 'data'));
+  const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const mounts = new MountManager({ dataDir: path.join(d, 'data'), broadcast: () => { }, getSetting: () => undefined });
+  mounts._state.mounts.push(
+    { id: 'm-team', name: 'Team drive', type: 's3', endpoint: 'https://s3.example.test', bucket: 'team', accessKey: 'AKEXAMPLE', secretKeyEnc: SB.encWith(crypto.randomBytes(32), 'x'), desired: 'mounted', customPath: sealedAt },
+    { id: 'm-open', name: 'Open share', type: 's3', endpoint: 'https://s3.example.test', bucket: 'open', desired: 'mounted', customPath: openAt });
+  let pulls = [{ id: 'p-mac', dir: 'pull', hostId: 'h-mac', mountpoint: pull, live: false }];
+  CW.register({ vault: v, mounts, getHosts: () => ({ get: (id) => (id === 'h-mac' ? { name: 'Studio Mac' } : null) }), getMachineMounts: () => ({ list: () => pulls }) });
+  const at = (root, ...p) => path.join(root, ...p);
+  const why = (cwd, o) => (CW.verdict(cwd, o) || { why: null }).why;
+  ok(why(at(sealedAt, 'proj'), { missing: false }) === null && why(at(sealedAt, 'proj')) === 'mount_down' && why(at(d, 'elsewhere')) === null && why(sealedAt + '-other/x') === null, 'a vault NOT SET UP: an existing folder waits for nothing; a MISSING one under a recorded mount that is down is mount_down (never «gone»); no mount on the path (or a prefix only) ⇒ null');
+  await v.setup(PW, {}); v.lock('door');
+  const row = mounts.list().find((r) => r.id === 'm-team');
+  ok(row && row.keyFile && row.keyFile.code === KF.VAULT_LOCKED, 'the REAL list row of a mount whose secret is sealed says its key waits for the vault', row && row.keyFile);
+  const ws = CW.verdict(at(sealedAt, 'proj'), { missing: false });
+  ok(ws && ws.why === 'vault_locked' && ws.root === sealedAt && ws.name === 'Team drive' && why(at(sealedAt, 'proj')) === 'vault_locked', 'LOCKED: a folder under a storage mount whose secret is sealed ⇒ vault_locked — the EXISTING bare mount point too (it passes test -d), its mount named', ws);
+  const wp = CW.verdict(at(pull, 'src', 'app'), { missing: false });
+  ok(wp && wp.why === 'vault_locked' && wp.root === pull && wp.name === 'Studio Mac', '…and under a machine\'s pulled folder that is not live (its link token is a vault entry) ⇒ vault_locked, the machine named', wp);
+  ok(why(at(openAt, 'x'), { missing: false }) === null && why(at(openAt, 'x')) === 'mount_down', 'LOCKED, a mount that needs NO secret: it waits for nothing of the vault — an existing folder ⇒ null, a missing one ⇒ mount_down');
+  mounts._state.mounts[0].desired = 'unmounted';
+  ok(why(at(sealedAt, 'proj')) === null, 'a storage row the person UNMOUNTED waits for nothing (the folder\'s own verdict)');
+  mounts._state.mounts[0].desired = 'mounted';
+  await v.unlock(PW, {});
+  const t0 = v.facts().unlockedSince;
+  ok(why(at(sealedAt, 'proj'), { now: t0 + 5e3 }) === 'mount_starting' && why(at(pull, 'x'), { missing: false, now: t0 + 5e3 }) === 'mount_starting', 'UNLOCKED a moment ago ⇒ mount_starting (the unlock\'s restore brings each mount up in turn)');
+  mounts._errors.set('m-team', 'the mount failed: AccessDenied');
+  ok(why(at(sealedAt, 'proj'), { now: t0 + 5e3 }) === 'mount_down', 'a mount whose restore already FAILED is not «starting» inside the heal window ⇒ mount_down at once');
+  mounts._errors.delete('m-team');
+  ok(why(at(sealedAt, 'proj'), { now: t0 + CW.HEAL_MS + 1 }) === 'mount_down' && why(at(sealedAt, 'proj'), { missing: false, now: t0 + CW.HEAL_MS + 1 }) === null, 'the heal window over, still down ⇒ a missing folder mount_down, an existing one its own verdict');
+  mounts._connecting = new Set(['m-team']);
+  ok(why(at(sealedAt, 'proj'), { now: t0 + CW.HEAL_MS + 1 }) === 'mount_starting', 'its connect in flight ⇒ mount_starting whenever it is');
+  mounts._connecting = new Set();
+  // the bounded wait: a stand-in clock; the pull comes back live at the 3rd step ⇒ true; never back ⇒ false at the bound
+  let clock = t0 + 1e3, steps = 0;
+  const now = () => clock, sleep = async (ms) => { clock += ms; if (++steps === 3) pulls = [{ ...pulls[0], live: true }]; };
+  ok(await CW.whenBack(at(pull, 'x'), { now, sleep }) === true && steps === 3, 'whenBack: waits while the mount comes up, true the moment it is live', { steps });
+  clock = t0 + 1e3; steps = -1e9;
+  ok(await CW.whenBack(at(sealedAt, 'proj'), { ms: 4e3, now, sleep }) === false && clock - (t0 + 1e3) >= 4e3 && clock - (t0 + 1e3) < 5e3, 'whenBack: never back ⇒ false at its bound (4 s here; 45 s in the product)', { waited: clock - (t0 + 1e3) });
+  v.lock('door');
+  clock = t0 + 1e3;
+  ok(await CW.whenBack(at(sealedAt, 'proj'), { now, sleep }) === false && why(at(sealedAt, 'proj')) === 'vault_locked', 'whenBack: the vault locked again ⇒ false at once, and the verdict is vault_locked again');
+  ok(/^the vault is locked — the folder X is on Team drive, which opens after the owner unlocks the vault with the second password/.test(CW.lockedWords('X', ws)) && /^the folder X is on Team drive, which is not mounted right now — nothing was started and nothing was made there/.test(CW.downWords('X', ws)), 'the refusals\' words (the hub\'s log, an older page) name the folder and its mount');
+  CW.register({ vault: null, mounts: null, getHosts: null, getMachineMounts: null });
+  // THE WIRING: ws-create asks for EVERY local cwd, BEFORE the recreate; after the bounded wait a mount still down is mount_down
+  const wc = read('src/ws-create.js');
+  const asksFirst = (src) => {
+    const probe = src.indexOf('missing = await dirMissing();'), ask = src.indexOf('let w = CW.verdict(cwd, { missing });'), rec = src.indexOf('if (missing && data.recreateCwd === true) {');
+    const blk = src.slice(ask, rec);
+    return probe > 0 && ask > probe && rec > ask && /\n            if \(!data\.hostId\) \{\n              const CW = /.test(src.slice(probe, ask + 40))
+      && /if \(await CW\.whenBack\(cwd\)\) missing = await dirMissing\(\);\n\s*w = CW\.verdict\(cwd, \{ missing \}\);\n\s*if \(w && w\.why === 'mount_starting'\) w = \{ \.\.\.w, why: 'mount_down' \};/.test(blk)
+      && /code: w\.why, cwd, waitsFor: w\.name/.test(blk) && /break;/.test(blk);
+  };
+  ok(asksFirst(wc), 'ws-create: EVERY local cwd is asked (a bare mount point passes test -d), BEFORE the recreate; after the bounded wait a mount still down is refused mount_down; the refusal names the folder and its mount');
+  const blk = wc.slice(wc.indexOf('            // A FOLDER THAT WAITS IS NOT GONE'), wc.indexOf('            // Recreate-empty-and-resume (B-7812'));
+  const moved = wc.replace(blk, '').replace("            if (missing) {\n              global.__vsEvent?.('spawn-cwd-missing'", blk + "            if (missing) {\n              global.__vsEvent?.('spawn-cwd-missing'");
+  ok(blk.length > 200 && moved !== wc && !asksFirst(moved), 'RED control: the ask moved AFTER the recreate (the recreate could make the folder under the waiting mount) ⇒ red');
+  const onlyMissing = wc.replace('            if (!data.hostId) {\n              const CW = ', '            if (missing && !data.hostId) {\n              const CW = ');
+  ok(onlyMissing !== wc && !asksFirst(onlyMissing), 'RED control: asked only for a MISSING cwd (a bare mount point resumes in an empty folder) ⇒ red');
+  const noDowngrade = wc.replace("                if (w && w.why === 'mount_starting') w = { ...w, why: 'mount_down' };   // it waited its bound: still not up\n", '');
+  ok(noDowngrade !== wc && !asksFirst(noDowngrade), 'RED control: the bound passed with the mount still starting falls through to «Working directory is gone» and its recreate ⇒ red');
+  ok(/require\('\.\/cwd-wait\.js'\)\.register\(\{ vault, mounts \}\)/.test(read('src/server/mounts-plugins-wiring.js')) && /require\('\.\/cwd-wait\.js'\)\.register\(\{ getHosts, getMachineMounts \}\)/.test(read('src/server/dial-pairing.js')), 'the vault + storage mounts register in mounts-plugins-wiring, the hosts + machine mounts in dial-pairing');
+}
+
 for (const e of engines) { try { e.close(); } catch { } }
 process.env.HOME = HOME0;
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }

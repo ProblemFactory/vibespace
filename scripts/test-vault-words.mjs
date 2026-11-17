@@ -159,6 +159,10 @@ const ROWS = {
     ['frpc starts without the shared relay token (the vault is locked)', 'log', 'the journal line when the lock starts frpc without the shared token (lane frp-token-proof) — the status (relay.restartAtUnlock) and, if the relay drops it, the For-you item say it to the owner'],
   ],
   'src/relay-token.js': [['because the vault was locked when it started', 'foryou', 'THE DROPPED-LOGIN For-you item\'s detail (lane frp-token-proof): the frp plugin\'s item IS the telling; the door — the second password, or the relay token again']],
+  // B-864f: a session folder on a mount that waits for the vault — the hub's refusal text, the pace's reason clause, the boot offer
+  'src/server/cwd-wait.js': [['the vault is locked — the folder ', 'log', 'B-864f: the hub\'s refusal message for a folder on a mount that waits for the vault (its console line, telemetry, what an older page prints); the page words it itself (session-lifecycle folderWords) and never shows this text']],
+  'src/lib/resume-pacer.js': [['its folder waits for the vault', 'label', 'B-864f: one reason clause inside the bulk resume\'s failure line, for a conversation that is not a local chat resume; the strip at the top of the page says where to unlock and For you names what waits on it']],
+  'src/lib/layout.js': [['The vault is locked: a conversation whose folder is on a machine or a storage mount waits for it', 'label', 'B-864f: the boot resume-all offer while locked — its own confirm «Unlock and resume all n» is the door beside these words (the unlock dialog opens first, the resumes follow its close)']],
   'src/key-file.js': [['the vault is locked — ', 'carried', 'the key-file law\'s refusal in a store\'s own error (key-unreadable:vault_locked)', { via: 'src/lib/key-file-words.js' }]],
   'src/secret-box.js': [['the vault is locked — ', 'carried', 'the at-rest cipher\'s refusal (key-unreadable:vault_locked)', { via: 'src/lib/key-file-words.js' }]],
   'src/server/sealed-json.js': [['the vault is locked — ', 'carried', 'a sealed JSON file (the voice pair) read while locked', { via: 'src/voice-model.js' }]],

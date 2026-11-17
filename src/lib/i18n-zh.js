@@ -9995,6 +9995,10 @@ export default {
   "Passthrough · {transfer} {bits}-bit · {primaries}": "直通 · {transfer} {bits} 位 · {primaries}", // lane stream-hdr-passthrough
   "waiting for the vault to be unlocked": "等待保险库解锁", // lane vault-e2e-password-fix-r2
   "This session waits for the vault — unlock it with the second password (Unlock… at the top of the page; For you names what is waiting on it); it reconnects by itself and nothing is lost.": "这个会话在等保险库——用第二密码解锁（页面顶部的「解锁…」；「待你处理」里写明了在等它的事）后它会自己重连，什么也不会丢。", // lane vault-e2e-password-fix-r2
+  "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock; nothing is lost.": "这个对话的文件夹在 {name} 上，要等保险库解锁后才能打开——只要这个页面开着，解锁后它会自己恢复，什么也不会丢。",
+  "This conversation’s folder is on {name}, which is not mounted right now — nothing was started; resume it once the mount is back.": "这个对话的文件夹在 {name} 上，它现在没有挂载——什么也没启动；等挂载恢复后再恢复这个对话。",
+  "The folder is on {name}, which is not mounted right now — start again once it is back.": "文件夹在 {name} 上，它现在没有挂载——等它恢复后再重新开始。",
+  "The folder is on {name}, which opens after the vault is unlocked — unlock it, then start again.": "文件夹在 {name} 上，要等保险库解锁后才能打开——请先解锁，再重新开始。",
   "vault locked": "保险库已锁定", // lane vault-e2e-password-fix-r2
   "{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.": "{machine}需要你的 Mac 用户名和密码。VibeSpace 会把它们封进保险库，保险库解锁时自动登录。", // lane desktop-vnc-remember
   "{machine} asks for its VNC password. VibeSpace seals it in the vault and signs in by itself while the vault is unlocked.": "{machine}需要它的 VNC 密码。VibeSpace 会把它封进保险库，保险库解锁时自动登录。", // lane desktop-vnc-remember
@@ -12160,7 +12164,9 @@ export default {
   "Resume interrupted sessions?": "恢复被中断的会话？",
   "{n} sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?": "{n} 个会话被中断（服务器或机器重启），已作为只读历史重新打开。现在全部恢复吗？",
   "{n} of them stopped because their process ended while the server was down.": "其中 {n} 个是因为服务器停机期间进程结束而停止的。",
+  "The vault is locked: a conversation whose folder is on a machine or a storage mount waits for it, so unlock first.": "保险库已锁定：文件夹在某台机器或存储挂载上的对话要等它解锁，请先解锁。",
   "Resume all {n}": "全部恢复（{n}）",
+  "Unlock and resume all {n}": "解锁并全部恢复（{n}）",
   "Session unavailable": "会话不可用",
   "Press a desktop to restore it alone — your other desktops stay as they are now.": "点一个桌面只恢复它——其他桌面保持现在的样子。",
   "Restore only “{desktop}”": "只恢复「{desktop}」",
@@ -13115,6 +13121,9 @@ export default {
   "the connection dropped before the server answered": "服务器回复前连接已断开",
   "the server reported an error without a reason": "服务器报告了错误，但没有说明原因",
   "the server refused it without a reason": "服务器拒绝了，但没有说明原因",
+  "its folder waits for the vault": "它的文件夹在等保险库",
+  "its folder is on a mount that is not up": "它的文件夹所在的挂载没有就绪",
+  "{w} of {n} conversations wait for the vault — while this page is open, each resumes by itself once you unlock it.": "{n} 个对话中有 {w} 个在等保险库——只要这个页面开着，解锁后它们会各自恢复。",
   "it could not be started on this page": "无法在此页面上启动",
   "it was not resumed": "没有恢复",
   "Resuming the group stopped early because of an error on this page.": "因为此页面出错，恢复该组提前停止。",
