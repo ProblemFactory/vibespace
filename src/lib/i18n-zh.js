@@ -11714,6 +11714,10 @@ export default {
   "Secrets": "密钥",
   "{who} wants to run {tool} with “{entries}”": "{who} 想用「{entries}」运行 {tool}",
   "{who} wants to run {tool}": "{who} 想运行 {tool}",
+  // B-99f7: an arrival toast / announce card of a run ask — its card's headline, its command's head and where it sends
+  "sends to {hosts}": "发往 {hosts}",
+  "sends to {hosts} and {n} more": "发往 {hosts} 及另外 {n} 个",
+  "where it sends is unknown": "发往哪里未知",
   "unknown ({why})": "未知（{why}）",
   "(in a folder an agent can write)": "（agent 可写的目录）",
   "No «Always»: {why}": "不提供「总是允许」：{why}",

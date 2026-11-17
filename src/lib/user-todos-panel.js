@@ -1322,7 +1322,7 @@ export function installUserTodos(app) {
   let annStack = null, annTimer = 0;
   const annCards = new Map(); // item id → { el, key: {id, createdAt}, until, expiredAt }
   const annAnchor = () => [btn, mBtn].find((b) => b && b.getClientRects().length > 0) || null;
-  const annWords = (it) => announceWords(it, { who: nameFor(it.sessionKey, [it]), what: wordsOf(it), now: Date.now(), t });
+  const annWords = (it) => announceWords(it, { who: nameFor(it.sessionKey, [it]), what: wordsOf(it, { arrival: true }), now: Date.now(), t }); // B-99f7: a run ask says its card's headline
   let annAt = '', annPin = null, annBox = null; // r15: the card a POINTER rests on and its top (annHeld); r17: the box the last placement left (annFold)
   // r14: a card under the pointer stays where it was read — r15 (the r14 acceptance: a card that ARRIVED while the pointer rested
   // grew the held stack DOWNWARD: the read card slid away, the new one took its place under the pointer, the stack ran over the
@@ -1642,7 +1642,7 @@ export function installUserTodos(app) {
         // the history keeps the HEAD + the item's id — never its words (lane-redact verify r4) NOR its label: a Background
         // Work ask's label (`sessionName`, what nameFor() falls back to) IS the job's name (verify r5, reproduced in chrome);
         // the label and the words are looked up live wherever the entry is shown
-        const el = showToast(`${head} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i)}`, { history: { m: head, ref: { kind: 'todo', id: i.id } } });
+        const el = showToast(`${head} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i, { arrival: true })}`, { history: { m: head, ref: { kind: 'todo', id: i.id } } });
         if (el) { el.dataset.todoId = i.id; el.dataset.todoHead = head; }
         // the click keeps the item's ID and key, never the item (lane-redact verify r5, a heap snapshot: the toast's handler
         // kept the original record — its words — reachable for the toast's life after a clear); it jumps with the LIVE record
@@ -1660,7 +1660,7 @@ export function installUserTodos(app) {
       const it = byId(el.dataset.todoId);
       const b = el.querySelector('.global-toast-body');
       if (!it || !b || typeof el.dataset.todoHead !== 'string') continue;
-      const want = `${el.dataset.todoHead} · ${nameFor(it.sessionKey, [it])}: ${wordsOf(it)}`;
+      const want = `${el.dataset.todoHead} · ${nameFor(it.sessionKey, [it])}: ${wordsOf(it, { arrival: true })}`;
       if (b.textContent !== want) b.textContent = want;
     }
     renderBtn(); renderPanel(); renderMini(); scheduleBadges(); renderHome();

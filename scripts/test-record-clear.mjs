@@ -348,7 +348,7 @@ const copiesFailures = (ui) => {
 // The history keeps the HEAD only; the tab looks the label AND the words up live; an old entry is cut back to its head.
 const toastFailures = (panelSrc, utilsSrc) => {
   const bad = [];
-  if (!/const el = showToast\(`\$\{head\} · \$\{nameFor\(i\.sessionKey, \[i\]\)\}: \$\{wordsOf\(i\)\}`, \{ history: \{ m: head, ref: \{ kind: 'todo', id: i\.id \} \} \}\);/.test(panelSrc)) bad.push('the arrival toast does not keep its history as the head + the item\'s ref');
+  if (!/const el = showToast\(`\$\{head\} · \$\{nameFor\(i\.sessionKey, \[i\]\)\}: \$\{wordsOf\(i, \{ arrival: true \}\)\}`, \{ history: \{ m: head, ref: \{ kind: 'todo', id: i\.id \} \} \}\);/.test(panelSrc)) bad.push('the arrival toast does not keep its history as the head + the item\'s ref');
   if (/history: \{ m: kept/.test(panelSrc) || /const kept = /.test(panelSrc)) bad.push('the history keeps the item\'s label (a job\'s name) beside the head');
   if (!/const histWords = \(e\) => \{[^\n]*byId\(e\.ref\.id\); return it \? `\$\{nameFor\(it\.sessionKey, \[it\]\)\}: \$\{wordsOf\(it\)\}` : ''; \};/.test(panelSrc) || !/\$\{histWords\(e\) \? ' · ' \+ escHtml\(histWords\(e\)\) : ''\}/.test(panelSrc)) bad.push('the Notifications tab does not word a ref\'s label and words from the live store');
   if (!/const cut = e\.m\.indexOf\(' · '\);\s*if \(cut < 0\) continue;\s*e\.m = e\.m\.slice\(0, cut\);/.test(utilsSrc)) bad.push('an older build\'s entry keeps its label (a job\'s name) after the load-time cut');
@@ -360,14 +360,14 @@ const toastFailures = (panelSrc, utilsSrc) => {
   const P_REL = 'src/lib/user-todos-panel.js', P_SRC = fs.readFileSync(path.join(ROOT, P_REL), 'utf8');
   const U_SRC = fs.readFileSync(path.join(ROOT, 'src/lib/utils.js'), 'utf8');
   ok(toastFailures(P_SRC, U_SRC).length === 0, 'a For-you arrival toast keeps no words in the device\'s toast history (head + ref; the tab words it live; older entries cut at load — verify r4)', toastFailures(P_SRC, U_SRC));
-  const OLD = "const el = showToast(`${head} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i)}`);";
-  const NEW = "const el = showToast(`${head} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i)}`, { history: { m: head, ref: { kind: 'todo', id: i.id } } });";
+  const OLD = "const el = showToast(`${head} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i, { arrival: true })}`);";
+  const NEW = "const el = showToast(`${head} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i, { arrival: true })}`, { history: { m: head, ref: { kind: 'todo', id: i.id } } });"; // (B-99f7: the arrival's words)
   ok(P_SRC.split(NEW).length === 2, 'the arrival toast call is present once (the control swaps exactly it)');
   const PRE = M.write(P_REL, P_SRC.replace(NEW, OLD), 'arrival-toast-keeps-words');
   const bad = toastFailures(fs.readFileSync(PRE, 'utf8'), U_SRC);
   ok(bad.some((b) => /head \+ the item's ref/.test(b)), 'NEGATIVE CONTROL: the pre-r4 arrival toast (the words in the message, no history) fails the check', bad);
   // verify r5 NEGATIVE CONTROL: r4's form — the history keeps `<head> · <label>` — fails too (the label can be a job's name)
-  const R4 = M.write(P_REL, P_SRC.replace(NEW, "const kept = `${head} · ${nameFor(i.sessionKey, [i])}`; const el = showToast(`${kept}: ${wordsOf(i)}`, { history: { m: kept, ref: { kind: 'todo', id: i.id } } });"), 'arrival-toast-keeps-label');
+  const R4 = M.write(P_REL, P_SRC.replace(NEW, "const kept = `${head} · ${nameFor(i.sessionKey, [i])}`; const el = showToast(`${kept}: ${wordsOf(i, { arrival: true })}`, { history: { m: kept, ref: { kind: 'todo', id: i.id } } });"), 'arrival-toast-keeps-label');
   const bad2 = toastFailures(fs.readFileSync(R4, 'utf8'), U_SRC);
   ok(bad2.some((b) => /label/.test(b)), 'NEGATIVE CONTROL (verify r5): r4\'s history (the head + the item\'s label) fails the check', bad2);
 }
@@ -471,7 +471,7 @@ const liveToastFailures = (src) => {
   const bad = [];
   if (!/if \(el\) \{ el\.dataset\.todoId = i\.id; el\.dataset\.todoHead = head; \}/.test(src)) bad.push('the arrival toast does not carry its item id + head');
   const body = (src.split("for (const el of document.querySelectorAll('#global-toasts > .global-toast[data-todo-id]')) {")[1] || '').split('\n    }\n')[0];
-  if (!body || !/const it = byId\(el\.dataset\.todoId\);/.test(body) || !/const want = `\$\{el\.dataset\.todoHead\} · \$\{nameFor\(it\.sessionKey, \[it\]\)\}: \$\{wordsOf\(it\)\}`;/.test(body)) bad.push('a snapshot does not re-word the live arrival toasts (label + words) from the current record');
+  if (!body || !/const it = byId\(el\.dataset\.todoId\);/.test(body) || !/const want = `\$\{el\.dataset\.todoHead\} · \$\{nameFor\(it\.sessionKey, \[it\]\)\}: \$\{wordsOf\(it, \{ arrival: true \}\)\}`;/.test(body)) bad.push('a snapshot does not re-word the live arrival toasts (label + words) from the current record');
   return bad;
 };
 {

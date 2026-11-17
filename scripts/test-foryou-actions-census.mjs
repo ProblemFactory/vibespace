@@ -225,6 +225,46 @@ console.log('⑤c THE ANNOUNCE\'s rows — ONE policy (toastWorthy: bands 1–2,
   }
 }
 
+// B-99f7 (vault-standing r6: three different run asks inside one toast's life read as three identical toasts — each said its
+// record's one sentence): THE ARRIVAL'S WORDS — three run asks from the generated card facts (scripts/fixtures/
+// vault-run-card-facts.json) say three different things, each its card's own headline (+ a known host; past two «and N more»);
+// a run ask whose facts never arrived, an item with no run card ⇒ null (the record's words); the panel's arrival toast, its
+// re-word on every snapshot and the announce card all say it (a cleared item: the record's sentence, wordsOf)
+console.log('⑤d THE ARRIVAL\'s words (B-99f7) — a run ask\'s toast and announce card say its card\'s headline, its command\'s head and where it sends');
+{
+  const J = JSON.stringify;
+  const FXV = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/vault-run-card-facts.json'), 'utf8')).variants, T0 = 1_800_000_000_000;
+  const runAsk = (name, over = {}) => ({ id: 'ut-' + name, status: 'open', kind: 'action', origin: 'vault', urgency: 'urgent', sessionKey: 'claude:ops', text: 'ops wants to run a command with a stored secret', createdAt: T0, expiresAt: T0 + 60e3, action: { type: 'vault-run-ask', askId: 'a'.repeat(32), always: true, tool: 'x' }, facts: { ...FXV.find((v) => v.name === name).facts, ...over } });
+  const has = typeof FA.arrivalWords === 'function', AW = (it, o = {}) => (has ? FA.arrivalWords(it, o) : null); // (the base has none: the legs fail by name, never a TypeError)
+  const said = (Fm, it) => (typeof Fm.arrivalWords === 'function' && Fm.arrivalWords(it, {})) || it.text; // (the model's wordsOf(i, { arrival: true }), a cleared item aside)
+  const three = ['hosts-unknown', 'hosts-known-always', 'config-reads'].map((n) => runAsk(n)), heads = three.map((it) => FA.runCardOf(it).headline);
+  const clip = (c) => { const l = String(c).replace(/\s+/g, ' ').trim(); return l.length > 60 ? l.slice(0, 59).trimEnd() + '\u2026' : l; }; // (the card's command, as the arrival cuts it)
+  const w3 = three.map((it) => said(FA, it)), many = said(FA, runAsk('hosts-known-always', { hosts: { known: true, list: ['a.example', 'b.example', 'c.example', 'd.example'] } }));
+  const sel = said(FA, runAsk('hosts-known-always', { cmd: "psql -h db.example.com -U svc -c 'select 1'" })), drop = said(FA, runAsk('hosts-known-always', { cmd: "psql -h db.example.com -U svc -c 'drop table orders'" }));
+  const longW = said(FA, runAsk('hosts-known-always', { cmd: 'psql ' + 'x'.repeat(300) }));
+  const none = [AW({ ...three[0], facts: null }), AW({ id: 'q1', status: 'open', kind: 'action', origin: 'agent', text: 'which one?' }), AW(null)];
+  const ZH = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), zhOf = (k) => { const m = ZH.match(new RegExp('^  ' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': ("(?:[^"\\\\]|\\\\.)*"),?$', 'm')); return m ? JSON.parse(m[1]) : null; };
+  const zkeys = ['sends to {hosts}', 'sends to {hosts} and {n} more', 'where it sends is unknown', '{who} wants to run {tool} with “{entries}”'], zd = Object.fromEntries(zkeys.map((k) => [k, zhOf(k)]));
+  const tz = (k, p) => (zd[k] || k).replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : ''));
+  const wz = AW(three[1], { t: tz }), wz0 = AW(three[0], { t: tz });
+  ok(has && new Set(w3).size === 3 && w3[0] === `${heads[0]} · ${clip(FA.runCardOf(three[0]).cmd)} · where it sends is unknown` && w3[1] === `${heads[1]} · ${clip(FA.runCardOf(three[1]).cmd)} · sends to db.example.com` && w3[2].startsWith(heads[2] + ' · curl ') && w3[2].endsWith(' · where it sends is unknown')
+    && w3.every((w) => !/a command with a stored secret/.test(w)) && many.endsWith(' · sends to a.example, b.example and 2 more') && sel !== drop && /drop table orders/.test(drop) && longW.length <= heads[1].length + 95 && /… · sends to db\.example\.com$/.test(longW) && none.every((x) => x === null),
+    `RED-able (B-99f7 — b06f36e90: three toasts «ops wants to run a command with a stored secret»): three run asks say three things — each its card's headline, its command's head, where it sends or that it is unknown (${J(w3)}); four hosts «…${many.slice(-40)}»; one program + one secret, two commands ⇒ two sentences; a long command cut at 60 («…${longW.slice(-40)}»); no facts / no run card ⇒ null (${J(none)})`, { w3, many, sel, drop, longW, none });
+  ok(Object.values(zd).every(Boolean) && /^运维 想用「生产数据库 · 密码」运行 psql · psql -h db\.example\.com .* · 发往 db\.example\.com$/.test(wz || '') && /· 发往哪里未知$/.test(wz0 || ''),
+    `the client's t() words it from the REAL zh dictionary («${wz}» · «…${(wz0 || '').slice(-12)}»)`, { zd, wz, wz0 });
+  const PSRC = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
+  const ASRC = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8');
+  const wired = { of: /const wordsOf = \(i, o\) => \(isCleared\(i\) \? clearedText\(\) : \(o && o\.arrival && arrivalWords\(i, \{ t \}\)\) \|\| /.test(ASRC),
+    toast: /showToast\(`\$\{head\} · \$\{nameFor\(i\.sessionKey, \[i\]\)\}: \$\{wordsOf\(i, \{ arrival: true \}\)\}`/.test(PSRC), reword: /const want = `\$\{el\.dataset\.todoHead\} · \$\{nameFor\(it\.sessionKey, \[it\]\)\}: \$\{wordsOf\(it, \{ arrival: true \}\)\}`;/.test(PSRC),
+    card: /const annWords = \(it\) => announceWords\(it, \{ who: nameFor\(it\.sessionKey, \[it\]\), what: wordsOf\(it, \{ arrival: true \}\),/.test(PSRC) };
+  ok(Object.values(wired).every(Boolean), `the panel says it on every arrival surface: the arrival toast, its re-word from the current record, the announce card — through the model's ONE wordsOf (its arrival option), a cleared item's sentence first (${J(wired)})`, wired);
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const FSRC = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8'), from = '  const v = runCardOf(item, { t });\n  if (!v || !v.cmd || !v.headline) return null;\n';
+  const Fm = FSRC.split(from).length === 2 ? require(mutantCopies('b99f7', ROOT).write('src/foryou-actions.js', FSRC.replace(from, '  const v = null;\n  if (!v) return null;\n'), 'arrival')) : null;
+  const wm = Fm ? three.map((it) => said(Fm, it)) : null;
+  ok(!!wm && new Set(wm).size === 1, `CONTROL (B-99f7): the mutant whose arrival says the record's words makes the three asks read alike (${J(wm && wm[0])}) — the leg goes red`, wm);
+}
+
 // ── ⑥ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑥ bandDoorsOf\'s types are rows; every field from its closed set; the CLI line each row declares');
 {

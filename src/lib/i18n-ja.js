@@ -11713,6 +11713,10 @@ export default {
   "Secrets": "秘密",
   "{who} wants to run {tool} with “{entries}”": "{who} が「{entries}」を使って {tool} を実行しようとしています",
   "{who} wants to run {tool}": "{who} が {tool} を実行しようとしています",
+  // B-99f7: an arrival toast / announce card of a run ask — its card's headline, its command's head and where it sends
+  "sends to {hosts}": "送信先 {hosts}",
+  "sends to {hosts} and {n} more": "送信先 {hosts} ほか {n} 件",
+  "where it sends is unknown": "送信先は不明",
   "unknown ({why})": "不明（{why}）",
   "(in a folder an agent can write)": "（エージェントが書き込めるフォルダ）",
   "No «Always»: {why}": "「常に許可」はありません：{why}",

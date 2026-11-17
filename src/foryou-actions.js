@@ -68,6 +68,8 @@
  *   newestFirst(a, b)            → the later filing first, a same-ms tie by the item's id (the dock's newest, the announce's
  *                                  stack — lane needs-card-tail r11); WHICH arrival announces is the attention model's toastWorthy
  *   announceWords(item, o)       → {who, what, left, expired, clock} — its card's words and its clock
+ *   arrivalWords(item, o)        → what the arrival toast and the announce card say of a RUN ask (its card's headline + where
+ *                                  it sends) | null — the record's own words (B-99f7)
  *   settledWords(item, t)        → «approved» / «denied» / «saved to the vault» / «done» … (the quiet line's verb)
  *   surfaceOf(type | item)       → {at: 'card' | 'window' | 'owner' | 'notice', kind, on} — where it IS shown and answered
  *   filedLine(type | item, id, tray) → THE one line an agent can quote after a filing (the hub's words; a CLI prints it),
@@ -454,6 +456,24 @@ function announceWords(item, { who = '', what = '', now = Date.now(), t = fmt } 
   const left = !expired && at > 0 ? Math.max(1, Math.ceil((at - now) / 1000)) : null;
   const clock = expired ? t('expired') : left == null ? '' : left >= 120 ? t('{n} min left', { n: Math.ceil(left / 60) }) : t('{n} s left', { n: left });
   return { who: String(who || ''), what: String(what || ''), left, expired, clock };
+}
+
+/** B-99f7 (vault-standing r6: three different run asks inside one toast's life read as three identical toasts — each said the
+ *  record's one sentence, «… wants to run a command with a stored secret»): THE ARRIVAL'S WORDS of a RUN ask — what the arrival
+ *  toast and the announce card say, the card's own parts: its headline (who · the program · the entries — runCardOf), the
+ *  command's head (ARRIVAL_CMD_MAX characters, one line — two asks of one program and one secret differ there) and where it
+ *  sends: the first two hosts, «and N more» past them, or — the card's warning — that where it sends is unknown. Any other item
+ *  — a run ask whose facts never arrived, a standing request (its card runs no command) — ⇒ null: the record's words. */
+const ARRIVAL_CMD_MAX = 60;
+function arrivalWords(item, { t = fmt } = {}) {
+  const v = runCardOf(item, { t });
+  if (!v || !v.cmd || !v.headline) return null;
+  const line = String(v.cmd).replace(/\s+/g, ' ').trim(), cmd = line.length > ARRIVAL_CMD_MAX ? line.slice(0, ARRIVAL_CMD_MAX - 1).trimEnd() + '\u2026' : line;
+  const h = item.facts && item.facts.hosts && typeof item.facts.hosts === 'object' ? item.facts.hosts : {};
+  const hosts = h.known === true && Array.isArray(h.list) ? h.list.filter((x) => typeof x === 'string' && x) : [];
+  const two = hosts.slice(0, 2).join(t(', '));
+  const where = !hosts.length ? t('where it sends is unknown') : hosts.length > 2 ? t('sends to {hosts} and {n} more', { hosts: two, n: hosts.length - 2 }) : t('sends to {hosts}', { hosts: two });
+  return [v.headline, cmd, where].filter(Boolean).join(' · ');
 }
 
 /** THE END A RECORD SAYS (lane wake-approve-card r8 — the acceptance drove vault-agent-own 4ff55fb4's real door: its late
@@ -1156,4 +1176,5 @@ const FORYOU_HEADS = Object.freeze({
 function headWordOf(name, t) { return typeof name === 'string' && Object.prototype.hasOwnProperty.call(FORYOU_HEADS, name) ? t(FORYOU_HEADS[name]) : name; }
 
 module.exports = {
+  arrivalWords,
   FORYOU_HEADS, headWordOf, buttonsOf, buttonsNoteOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
