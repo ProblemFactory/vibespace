@@ -50,6 +50,18 @@ const COLD_ROW_BUDGET = 100000;
 // r4 (verify #2): a terminated fold worker that has not exited 5 s later is STUCK (blocked in a sync read —
 // the storage is not answering); no new worker starts while one is.
 const COLD_TERMINATE_DEADLINE_MS = 5000;
+/** B-f35e: HOW A FOLD WORKER JUDGES ITS SOFT CAP (PURE). 'reading' — the cap IS the worker's old-space limit and V8 kept
+ *  it (no parent --max-old-space-size replaced the Worker's resourceLimits — the production hub): a reading over the cap
+ *  means the collector stands at the limit, so the release's check stands (it refuses near 1 500 of 1 536 held, where
+ *  «narrow the range or raise the cap» is right; judged on what is held, a fold too big would die of the limit instead,
+ *  with «retry»). 'held' — the limit is elsewhere (a parent flag; a cap under _spawnJob's 64 MB floor): the collector lets
+ *  the reading run far past what the fold holds (52 % of the cap read 1 551 MiB of 1 536, 11-12), so a reading over the cap
+ *  is judged after one full collection. heapLimitMb = heap_size_limit, which adds the young generation's reserve to the
+ *  old space (measured: 112 MiB under maxOld 64 + maxYoung 32, 10 048 under 10 000 + 32). */
+function foldCapRule({ capMb, heapLimitMb, maxOldMb, maxYoungMb } = {}) {
+  const cap = Number(capMb) || 0, old = Number(maxOldMb) || 0, young = Number(maxYoungMb) || 0, lim = Number(heapLimitMb) || 0;
+  return cap > 0 && old === cap && lim > 0 && lim <= cap + 2 * young + 16 ? 'reading' : 'held';
+}
 // The cold columns' DECLARED ceiling (verify #2): 256 MB ≈ 2.8 M cold rows, ~2.3× the owner's ledger. Past
 // it the rows still load (the money readers' numbers never change) and the census says OVER.
 const COLD_COLUMNS_MAX_BYTES = 256 * MB;
@@ -322,5 +334,5 @@ function cacheRow(name, { bytes = 0, count = 0, unit = 'entries', ceiling = null
 
 module.exports = {
   MB, DAY_MS, LEDGER_WINDOW_DAYS, LEDGER_HOT_MAX_BYTES, JSONL_CACHE_MAX_BYTES, JSONL_CACHE_IDLE_MS, JSONL_CACHE_MAX_ENTRIES, JSONL_LIVE_MAX_BYTES, ESTIMATOR_LINES_MAX_BYTES,
-  ESTIMATOR_LINES_IDLE_MS, ESTIMATOR_LIVE_MAX_BYTES, COLD_COLUMNS_MAX_BYTES, COLD_FOLD_DEADLINE_MS, COLD_QUEUE_MAX, COLD_ROW_BUDGET, COLD_TERMINATE_DEADLINE_MS, locOk, locOf, evictLru, evictIdle, ledgerCutoff, coldable, idHash, ColdSlab, HashIndex, cacheRow, TOKEN_FIELDS, NAME_FIELDS,
+  ESTIMATOR_LINES_IDLE_MS, ESTIMATOR_LIVE_MAX_BYTES, COLD_COLUMNS_MAX_BYTES, COLD_FOLD_DEADLINE_MS, COLD_QUEUE_MAX, COLD_ROW_BUDGET, COLD_TERMINATE_DEADLINE_MS, foldCapRule, locOk, locOf, evictLru, evictIdle, ledgerCutoff, coldable, idHash, ColdSlab, HashIndex, cacheRow, TOKEN_FIELDS, NAME_FIELDS,
 };
