@@ -246,11 +246,13 @@ const DEADLINE_MS = 2000, BUILD_SLACK_MS = 2000, START_MS = 30000, CHILDREN = 4;
 const sizeOf = (row) => Math.min(row.cap.n, 1024 * K);
 const deadlineOf = (row) => Math.max(DEADLINE_MS, row.ms || 0);
 /** ③'s child: every shape of ROWS[i] at its size, ONE call each, a `label<TAB>ms` line as each ends; the parent kills it
- *  past the row's deadline (+ the input's build) after the previous line. */
-function rowInChild(i) {
+ *  past the row's deadline (+ the input's build) after the previous line. The verdict is read at the child's 'close' — its
+ *  pipes drained — never at its 'exit' (B-b608: under load 'exit' came before the last line was read, and a row that
+ *  finished in 0.1 ms was «pending»). `argv` / `endOn` are ③b's seams (a planted child; the old 'exit' as the control). */
+function rowInChild(i, { argv = [new URL(import.meta.url).pathname, '--row', String(i)], endOn = 'close' } = {}) {
   const row = ROWS[i], labels = Object.keys(row.shapes), deadline = deadlineOf(row);
   return new Promise((res) => {
-    const c = spawn(process.execPath, [new URL(import.meta.url).pathname, '--row', String(i)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const c = spawn(process.execPath, argv, { stdio: ['ignore', 'pipe', 'pipe'] });
     const got = [];
     let buf = '', err = '', cut = setTimeout(() => c.kill('SIGKILL'), START_MS);
     // the kill timer is a HANG guard, not the bound: the bound is each shape's own in-child `ms < deadline` (judged below); the wall clock
@@ -260,7 +262,7 @@ function rowInChild(i) {
   const arm = () => { clearTimeout(cut); cut = setTimeout(() => c.kill('SIGKILL'), Math.max(START_MS, 10 * (deadline + BUILD_SLACK_MS))); };
     c.stdout.on('data', (d) => { buf += d; for (let k; (k = buf.indexOf('\n')) >= 0; buf = buf.slice(k + 1)) { const [l, ms] = buf.slice(0, k).split('\t'); if (l !== 'ready') got.push({ label: JSON.parse(l), ms: Number(ms) }); arm(); } });
     c.stderr.on('data', (d) => { err += d; });
-    c.on('exit', (code, sig) => { clearTimeout(cut); res({ deadline, got, code, killed: !!sig, pending: labels.slice(got.length), err: err.slice(-300) }); });
+    c.on(endOn, (code, sig) => { clearTimeout(cut); res({ deadline, got, code, killed: !!sig, pending: labels.slice(got.length), err: err.slice(-300) }); });
   });
 }
 console.log('② every row has a size cap; ③ every row is bounded on its own adversarial shapes (each at its cap ≤ 1 MiB, once, in a child under the row\'s deadline)');
@@ -278,6 +280,31 @@ for (const row of ROWS) {
     const v = verdicts[i], late = v.got.filter((g) => !(g.ms < v.deadline)), slow = v.got.reduce((a, g) => (g.ms > a.ms ? g : a), { label: '-', ms: 0 });
     ok(v.code === 0 && !v.killed && !late.length && !v.pending.length, `${row.mod}.${row.fn}: bounded — ${Object.keys(row.shapes).length} shapes at ${(sizeOf(row) / K).toFixed(1)} KB each finished under ${v.deadline} ms (slowest: ${slow.label} ${slow.ms.toFixed(1)} ms)`, J({ late, pending: v.pending, killed: v.killed, code: v.code, err: v.err }));
   });
+}
+// ③b THE VERDICT WAITS FOR THE CHILD'S LAST LINE (B-b608 — the tier saw «browser-tabs.chipTitleTail: bounded» red with
+// pending ["an address only"] while the child had exited 0 in 0.1 ms: 'exit' came before its last line was read). Placed,
+// never raced for: a planted child prints every line but the last and hands the last to a grandchild that writes it only
+// once the child is GONE (reaped — the moment 'exit' fires). Read at 'close' every line arrives; the old 'exit' loses it.
+{
+  const iT = ROWS.findIndex((r) => r.mod === 'browser-tabs' && r.fn === 'chipTitleTail'), labels = Object.keys(ROWS[iT].shapes);
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'vs-peer-lastline-')), f = path.join(dir, 'child.mjs');
+  const GRAND = 'const [p, line] = process.argv.slice(1); let n = 0; const t = setInterval(() => { try { process.kill(Number(p), 0); if (++n > 2000) throw 0; } catch { clearInterval(t); process.stdout.write(line); } }, 5);'; // a reused pid cannot hold the pipe for ever
+  fs.writeFileSync(f, [
+    "import { spawn } from 'node:child_process';",
+    `const labels = ${J(labels)};`,
+    "process.stdout.write('ready\\n');",
+    "for (const l of labels.slice(0, -1)) process.stdout.write(JSON.stringify(l) + '\\t0.1\\n');",
+    `const g = spawn(process.execPath, ['-e', ${J(GRAND)}, String(process.pid), JSON.stringify(labels[labels.length - 1]) + '\\t0.1\\n'], { stdio: ['ignore', 'inherit', 'ignore'], detached: true });`,
+    'g.unref();',
+    'process.exit(0);',
+  ].join('\n'));
+  try {
+    const now = await rowInChild(iT, { argv: [f] }), old = await rowInChild(iT, { argv: [f], endOn: 'exit' });
+    ok(labels.length > 1 && now.code === 0 && !now.pending.length && now.got.length === labels.length,
+      `③b the verdict waits for the child's pipes: ${labels.length} of ${labels.length} lines read, the last one written after the child was gone (pending: ${J(now.pending)})`);
+    ok(old.code === 0 && old.pending.length === 1 && old.pending[0] === labels[labels.length - 1],
+      `③b CONTROL: read at 'exit' (the old harness) the same child's last line is lost — pending ${J(old.pending)}: the leg above is red without the change`);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 // the census pins its own wiring: the bound every block reader cuts at is the record's, and stripHtml's is declared
 ok(TEXT_CAP === 64 * K && R.MAX_TEXT === 64 * K, 'the block readers\' bound IS the record\'s MAX_TEXT (64 KiB)');
@@ -303,7 +330,9 @@ const deadlineInChild = (file, fn, src) => new Promise((res) => {
   let out = '';
   c.stdout.on('data', (d) => { out += d; });
   const cut = setTimeout(() => c.kill('SIGKILL'), REGEX_DEADLINE_MS + 1500);
-  c.on('exit', (_c, sig) => { clearTimeout(cut); const ms = out ? Number(out) : null; res({ ms, killed: !!sig, over: !!sig || !(ms < REGEX_DEADLINE_MS) }); });
+  // B-b608 (the neighbour, the adversarial read): read at 'close' as rowInChild does, and a LOST reading is over the deadline —
+  // `!(null < X)` was false, so a lost line read as «under» (a 1.5 s row whose line was lost would have passed)
+  c.on('close', (_c, sig) => { clearTimeout(cut); const ms = out ? Number(out) : null; res({ ms, killed: !!sig, over: !!sig || !(ms !== null && ms < REGEX_DEADLINE_MS) }); });
 });
 {
   const M = mutantCopies('peer-parsers', REPO);
