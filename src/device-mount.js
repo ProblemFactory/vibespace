@@ -109,6 +109,28 @@ async function killMountDaemons(mountpoint, { procRoot = '/proc', kill = null, s
   return hit;
 }
 
+/** The lazy unmount of a pull mount point, in a CHILD (never a sync call from the loop) → 'ok' | 'no' (it ran: not mounted, or
+ *  refused) | 'missing' (neither program is here). THE LADDER of src/mounts.js and desktop-display: fusermount3 first (a fuse3
+ *  host — the repo's own image installs fuse3), fusermount when it is not on PATH; neither ⇒ said ONCE (adversarial r1 #3: a
+ *  missing program silently released nothing while every row said offline). */
+let unmountMissingSaid = false;
+function lazyUnmount(mountpoint, { say = null } = {}) {
+  const ran = (c, r) => { c.on('exit', (code) => r(code === 0 ? 'ok' : 'no')); c.on('error', (e) => r(e && e.code === 'ENOENT' ? 'missing' : 'no')); };
+  const fuse3 = () => new Promise((r) => { try { ran(spawn('fusermount3', ['-uz', mountpoint], { stdio: 'ignore' }), r); } catch { r('missing'); } });
+  const fuse2 = () => new Promise((r) => { try { ran(spawn('fusermount', ['-uz', mountpoint], { stdio: 'ignore' }), r); } catch { r('missing'); } });
+  return fuse3().then((a) => (a === 'missing' ? fuse2() : a)).then((b) => {
+    if (b === 'missing' && !unmountMissingSaid) { unmountMissingSaid = true; try { (say || ((l) => console.warn(l)))(`pull mount ${mountpoint}: neither fusermount3 nor fusermount is on PATH — a pull mount point cannot be released (install fuse3)`); } catch { } }
+    return b;
+  });
+}
+/** B-fcc7: release what a pull mount left on THIS machine — the lazy unmount, then the stale daemons of exactly that mount
+ *  point (B-1ea6). The pre-clean of every mount, and the boot's answer for a recorded pull whose machine is offline: its
+ *  last hub's rclone must not stay a FUSE entry whose every read fails ENOTCONN until the next mount. */
+async function releaseStale(mountpoint, { log = () => {} } = {}) {
+  await lazyUnmount(mountpoint, { say: log });
+  return killMountDaemons(mountpoint, { say: log }); // non-Linux: no /proc — the lazy unmount alone
+}
+
 /**
  * Keep held files of ONE pull mount fresh. A held file can only carry cached
  * pages after a content GET crossed the bridge, so sawRead() (the bridge saw a
@@ -240,7 +262,7 @@ function heldRefresher({ mountpoint, statRemote, invalidate, procRoot = '/proc',
  *  log          logger
  * @returns {Promise<{ mountpoint, devicePort, bridgePort, teardown }>}
  */
-async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vfsCacheDir, log = () => {} }) {
+async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vfsCacheDir, log = () => {}, onGone = null, preCleaned = false }) {
   let refresher = null, tornDown = false; // heldRefresher, once the mount is up
   const sawGet = (d) => { if (refresher && d.indexOf('GET ') !== -1) refresher.sawRead(); };
   // 1) ask the device to serve the folder over WebDAV on its own loopback
@@ -296,8 +318,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   // offline with no way back). Lazy-unmount + kill the exact orphan (B-1ea6:
   // argv ELEMENTS, never a substring — a prefix mount point named another
   // mount's daemon; the /proc pass off the loop; the kill re-checked at the signal).
-  await new Promise((r) => { const c = spawn('fusermount', ['-uz', mountpoint], { stdio: 'ignore' }); c.on('exit', r); c.on('error', r); });
-  await killMountDaemons(mountpoint, { say: log }); // non-Linux: no /proc — the fusermount pass alone
+  if (!preCleaned) await releaseStale(mountpoint, { log }); // machine-mounts _up released it before it asked the machine anything (B-fcc7 r2)
   await fs.promises.mkdir(mountpoint, { recursive: true }); // lane hub-fuse-sync-guard: a stale FUSE mount point right after the lazy unmount — never a sync call from the loop
   // /proc fd links name the REAL path; resolve it before the mount covers it
   let realMp = mountpoint; try { realMp = await fs.promises.realpath(mountpoint); } catch { }
@@ -319,20 +340,31 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   let stderr = '';
   rc.stderr.on('data', (d) => { stderr += d.toString().slice(0, 2000); });
   rc.unref();
-  // rclone gone = the mount is gone: the refresher stops and the journal says so
+  // rclone gone = the mount is gone: the refresher stops and the journal says so. B-fcc7: and the mount point is RELEASED
+  // at once — the lazy unmount (a child), the bridge closed, the device's folder server let go — and the owner told
+  // (onGone: the row says its state; the heal remounts). Never a zombie FUSE entry whose every read fails ENOTCONN.
+  let rcGone = false;
   rc.on('exit', (code, sig) => {
-    if (tornDown || !refresher) return;
+    rcGone = true;
+    if (tornDown || !refresher) return; // not up yet: the wait below answers it
+    tornDown = true;
     refresher.stop();
-    log(`pull refresh stopped: rclone for ${mountpoint} exited (${sig || code}) — the mount is gone until it is healed`);
+    log(`pull refresh stopped: rclone for ${mountpoint} exited (${sig || code}) — the mount is gone until it is healed (unmounted, lazy)`);
+    lazyUnmount(mountpoint, { say: log }).catch(() => { });
+    try { bridge.close(); } catch { }
+    Promise.resolve().then(() => device.unserveFolder(devicePort)).catch(() => { });
+    if (typeof onGone === 'function') { try { onGone({ why: 'rclone-exit', code, sig }); } catch { } }
   });
 
   // wait for the mount to appear (rclone forks; poll the mountpoint)
   const ok = await waitMounted(mountpoint, 8000);
-  if (!ok) {
-    try { process.kill(-rc.pid, 'SIGKILL'); } catch {}
+  if (!ok || rcGone) { // B-fcc7: an rclone that exited while we waited is a failed mount too (an empty directory lists fine)
+    tornDown = true;
+    if (!rcGone) { try { process.kill(-rc.pid, 'SIGKILL'); } catch {} }
+    lazyUnmount(mountpoint, { say: log }).catch(() => { }); // r1 #1: a mount that came up BROKEN (its listing failed) is a FUSE entry too — released
     try { bridge.close(); } catch {}
     try { await device.unserveFolder(devicePort); } catch {}
-    throw new Error('rclone webdav mount did not come up: ' + (stderr.slice(-300) || 'timeout'));
+    throw new Error((rcGone ? 'rclone webdav mount exited: ' : 'rclone webdav mount did not come up: ') + (stderr.slice(-300) || (rcGone ? 'no message' : 'timeout')));
   }
   log(`device folder ${remotePath} mounted at ${mountpoint} (device:${devicePort} ↔ bridge:${bridgePort})`);
   refresher = heldRefresher({
@@ -366,10 +398,11 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   });
 
   const teardown = async () => {
+    if (tornDown) return; // B-fcc7: rclone's exit already released it all (the lazy unmount, the bridge, the device's server)
     tornDown = true;
     refresher.stop();
-    try { spawn('fusermount', ['-uz', mountpoint]); } catch {}
-    setTimeout(() => { try { process.kill(rc.pid, 'SIGTERM'); } catch {} }, 300);
+    lazyUnmount(mountpoint, { say: log }).catch(() => {});
+    setTimeout(() => { try { if (rc.exitCode === null && rc.signalCode === null) process.kill(rc.pid, 'SIGTERM'); } catch {} }, 300);
     setTimeout(() => { try { bridge.close(); } catch {} }, 500);
     try { await device.unserveFolder(devicePort); } catch {}
   };
@@ -390,4 +423,4 @@ function waitMounted(mp, timeoutMs) {
   });
 }
 
-module.exports = { deviceFolderMount, heldRefresher, pullMountArgs, PULL_ROW, isMountDaemonOf, mountDaemonsOf, killMountDaemons };
+module.exports = { deviceFolderMount, heldRefresher, pullMountArgs, PULL_ROW, isMountDaemonOf, mountDaemonsOf, killMountDaemons, releaseStale, lazyUnmount };

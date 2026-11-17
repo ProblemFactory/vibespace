@@ -24,7 +24,7 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
-const { deviceFolderMount } = require('./device-mount');
+const DM = require('./device-mount'); // the pull chain (B-fcc7: read at each call — test-pull-refresh §15 drives the manager over a stub chain)
 const { rcloneMountArgs, shellWords, SSH_HOST_WEBDAV_ROW } = require('./mount-argv.js');   // THE mount argv (B-069b: the push mount's too)
 
 const RCLONE_PIN = 'v1.69.3'; // ≥1.66 brings `rclone nfsmount` (macOS without macFUSE); 2.369.12
@@ -478,16 +478,34 @@ class MachineMounts {
     if (this._live.has(rec.id) || this._mounting.has(rec.id)) return;
     this._mounting.add(rec.id);
     try {
+      // B-fcc7 (adversarial r1 #2): release what the LAST chain left FIRST, before the machine is asked anything — a heal that
+      // fails (an ssh machine unreachable: _online() is always true for ssh; a folder server refused) never leaves the old FUSE
+      // entry for the next try five minutes on
+      await DM.releaseStale(rec.mountpoint, { log: this.log });
       const device = await this.hosts.deviceBounded(rec.hostId, 10000); // ssh: daemon over --stdio; dial: the dialed-in link
       // normalize a stored trailing slash so an EXISTING record (minted before
       // the mountPull fix) works without a daemon update (the serve-folder
       // confinement double-slash 403 — userW's real bug)
       const remotePath = String(rec.remotePath || '').replace(/\/+$/, '') || '/';
-      const h = await deviceFolderMount({
+      let entry = null;
+      const h = await DM.deviceFolderMount({
         device, remotePath, mountpoint: rec.mountpoint,
-        rcloneBin: this.rcloneBin(), log: this.log,
+        rcloneBin: this.rcloneBin(), log: this.log, preCleaned: true,
+        // B-fcc7: its rclone exited — the mount point is already released (lazy unmount); the row says so at once, the
+        // sweep's pending branch remounts while the machine is linked (only THIS chain's entry: a newer one is left alone).
+        // r1 #5: a chain that died YOUNG keeps the sweep's 5-min backoff (no remount every sweep, each one a folder server
+        // asked of the device)
+        onGone: () => {
+          if (!entry || this._live.get(rec.id) !== entry) return;
+          this._live.delete(rec.id);
+          if (Date.now() - entry.at < 60000) (this._pullRetryAt = this._pullRetryAt || new Map()).set(rec.id, Date.now() + 5 * 60000);
+          this._notify();
+        },
       });
-      this._live.set(rec.id, { teardown: h.teardown, mountpoint: rec.mountpoint });
+      // r1 #4: the machine's link closed while this mount was being made (onMachineUnlinked saw no live chain) — let it go now
+      if (!this._online(rec.hostId)) { try { await h.teardown(); } catch { } throw new Error('the machine went offline while its folder was being mounted'); }
+      entry = { teardown: h.teardown, mountpoint: rec.mountpoint, at: Date.now() };
+      this._live.set(rec.id, entry);
       this.log(`pull mount up: ${rec.hostId}:${rec.remotePath} → ${rec.mountpoint}`);
     } finally { this._mounting.delete(rec.id); }
   }
@@ -568,6 +586,24 @@ class MachineMounts {
     }
   }
 
+  /** B-fcc7: the machine's link closed (its dial-in ended; the sweep's belt for a missed close). Each LIVE pull of it is
+   *  torn down at once — the lazy unmount, in a child — so a reader of the mount point meets an empty folder and the row
+   *  says the machine is offline (list(): live false, online false), never a zombie FUSE entry whose every read fails
+   *  «Transport endpoint is not connected». The record stays; the re-dial heals it (onMachineLinked). Fire-and-forget. */
+  onMachineUnlinked(hostId) {
+    if (!hostId) return 0;
+    let n = 0;
+    for (const rec of this._state.mounts.filter((m) => m.dir === 'pull' && m.hostId === hostId)) {
+      const live = this._live.get(rec.id);
+      if (!live) continue;
+      this._live.delete(rec.id); n++;
+      this.log(`pull mount ${rec.mountpoint}: its machine went offline — unmounted until it is back`);
+      Promise.resolve().then(() => live.teardown()).catch(() => { });
+    }
+    if (n) this._notify();
+    return n;
+  }
+
   /** Orphan-token GC: 'host:*' tokens whose id no PUSH RECORD references are
    *  unmanageable garbage (leaked by pre-2.162.1 failed pushes) — revoke them.
    *  Records are the source of truth; a token without one can't be re-owned,
@@ -593,9 +629,16 @@ class MachineMounts {
   async restore() {
     this.gcOrphanTokens();
     const byHost = new Set(this._state.mounts.map((m) => m.hostId));
+    const released = [];
     for (const hostId of byHost) {
       if (this._online(hostId)) { try { this.onMachineLinked(hostId); } catch { } }
+      // B-fcc7: an offline machine's recorded pull may still be mounted by the LAST hub's rclone (detached, it outlived
+      // that hub; its bridge died with it) — released now, not at the next mount: the reader meets an empty folder
+      else for (const rec of this._state.mounts.filter((m) => m.dir === 'pull' && m.hostId === hostId && !this._live.has(m.id) && !this._mounting.has(m.id))) {
+        released.push(DM.releaseStale(rec.mountpoint, { log: this.log }).catch(() => { }));
+      }
     }
+    await Promise.all(released); // children and async /proc reads only (the boot's caller does not wait on restore)
   }
 
   /** The machine is being removed/unpaired — drop its mounts (records + live
@@ -676,7 +719,8 @@ class MachineMounts {
     }
     for (const [id, h] of [...this._live]) {
       const rec = this._state.mounts.find((m) => m.id === id);
-      if (!rec || !this._online(rec.hostId)) continue;
+      if (!rec) continue;
+      if (!this._online(rec.hostId)) { this.onMachineUnlinked(rec.hostId); continue; } // B-fcc7: the belt for a missed link close
       const responsive = await new Promise((res) => {
         const c = spawn('ls', [h.mountpoint], { stdio: 'ignore' });
         const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch {} res(false); }, 8000);

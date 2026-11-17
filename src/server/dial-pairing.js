@@ -93,6 +93,7 @@ function noteDialEvent(deviceId, event, facts = {}) {
   let r = null;
   try { r = hosts.noteDial(deviceId, event, facts); } catch (e) { console.warn('[device] dial fact not recorded:', e.message); }
   if (event === 'accepted') dialBootOf.set(deviceId, facts && facts.boot ? String(facts.boot) : null);
+  if (event === 'disconnected') { try { machineMounts.onMachineUnlinked(hosts.findByDeviceId(deviceId)?.id); } catch { } } // B-fcc7: its pull mounts unmounted at once (never a zombie FUSE entry)
   if (!r || event === 'probed') return r;
   const now = Date.now();
   if (r.changed || now - (_dialBcastAt.get(deviceId) || 0) >= 60000) { _dialBcastAt.set(deviceId, now); try { bcastAll({ type: 'hosts-updated' }); } catch { } }
