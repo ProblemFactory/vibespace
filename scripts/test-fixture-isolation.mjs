@@ -438,8 +438,15 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   const spawnNames = (t) => ['[\'"`]server\\.js[\'"`]', ...serverConsts(t).map((c) => `\\b${c.replace(/\$/g, '\\$')}\\b`)];
   const spawnsThrough = (t) => serverConsts(t).some((c) => new RegExp(`spawn\\([^;]*?\\b${c.replace(/\$/g, '\\$')}\\b`, 's').test(t));
   const spawnsServer = (t) => /['"`]server\.js['"`]\s*\]/.test(t) || spawnsThrough(t);
+  // THE SUITES' ONE HUB BOOT (lane boot-helper, 2026-11-17): a suite on scripts/hub-boot.mjs spawns no server.js itself — it
+  // imports startHub and calls it. Its isolation is the helper's: startHub REFUSES an env without a HOME, or with a HOME outside
+  // the root the helper minted; the root (the home and its transcripts in it) is ended at exit AND at SIGTERM / SIGINT / SIGHUP,
+  // armed by the helper once, so the suite carries no signal line of its own.
+  const onHelper = (t) => /import\s*\{[^}]*\bstartHub\b[^}]*\}\s*from\s*'\.\/hub-boot\.mjs'/.test(t) && /\bstartHub\(/.test(t);
+  const helperHome = (t) => onHelper(t) && /\bstartHub\(\{[^;]*?\benv\s*:\s*\{[^;]*?\bHOME\s*:/s.test(t);
   const writesTranscript = (t) => /['"`]\.claude['"`]\s*,\s*['"`]projects['"`]/.test(t) && /writeFileSync|writeSync|openSync/.test(t);
   const namesHome = (t) => {
+    if (helperHome(t)) return true;   // the boot helper's start: the HOME in startHub's env (the helper refuses any other)
     // the HOME must be in the env of a server.js spawn, not merely mentioned (the literal, or a constant naming it)
     for (const n of spawnNames(t)) for (const m of t.matchAll(new RegExp(`spawn\\([^;]*?${n}[^;]*?\\{[^;]*?env\\s*:\\s*\\{([^}]*)\\}`, 'gs'))) {
       if (!/\bHOME\s*:/.test(m[1])) return false;
@@ -478,6 +485,8 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
     const good = bad.replace('PORT: String(PORT)', 'PORT: String(PORT), HOME: fakeHome');
     ok(spawnsServer(bad) && writesTranscript(bad) && !namesHome(bad), 'CONTROL (b): the PRE-FIX shape (no HOME in the spawn env) IS caught');
     ok(namesHome(good), 'CONTROL (b): adding HOME to that same spawn env is the whole fix');
+    const viaHelper = "import { mintRoot, startHub } from './hub-boot.mjs';\nfs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nfor (const f of ['src', 'server.js']) cp(f);\nconst hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), HOME: fakeHome } });";
+    ok(namesHome(viaHelper) && !namesHome(viaHelper.replace(', HOME: fakeHome', '')), 'CONTROL (b): a suite on the boot helper names its HOME in startHub\'s env — without it, it IS caught');
     // the constant shape (the follow-up): the census follows the constant into the spawn — and a constant that only names the
     // file (a source read, test-ledger-boot-load's SERVER_SOURCE) is not a spawn
     const viaConst = "fs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nconst SRV = path.join(wt, 'server.js');\nconst srv = spawn(process.execPath, [SRV], { cwd: wt, env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });";
@@ -534,11 +543,11 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   const SID_LITERAL = /['"`]e2e00000-0000-4000-8000-/i;
   for (const f of carriers) {
     const t = src(f);
-    ok(/scratchHome\(/.test(t) && (/HOME:\s*fakeHome/.test(t) || inProcessHome(t)),
-      `${f} runs its server under an ISOLATED home (scratchHome + HOME: fakeHome, or its own process re-homed)`);
+    ok((/scratchHome\(/.test(t) && (/HOME:\s*fakeHome/.test(t) || inProcessHome(t))) || helperHome(t),
+      `${f} runs its server under an ISOLATED home (scratchHome + HOME: fakeHome, its own process re-homed, or the boot helper's root)`);
     ok(!SID_LITERAL.test(t), `${f} MINTS its session id (fixtureSid), never a hand-spelled literal that could drift from the guard`);
-    ok(/for \(const sig of \[/.test(t) && /SIGTERM/.test(t) && /SIGINT/.test(t),
-      `${f} cleans up on SIGNALS too ('exit' does not fire for a default-terminated SIGINT/SIGTERM)`);
+    ok((/for \(const sig of \[/.test(t) && /SIGTERM/.test(t) && /SIGINT/.test(t)) || onHelper(t),
+      `${f} cleans up on SIGNALS too ('exit' does not fire for a default-terminated SIGINT/SIGTERM — or the boot helper armed them)`);
     ok(/fixtureLitter\(/.test(t),
       `${f} asserts the real ~/.claude/projects gained no fixture entry (its own per-suite census)`);
   }
@@ -555,10 +564,15 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   // (e) test-chat-e2e runs a REAL turn; it gets the same isolation + an
   //     unconditional cleanup (its old one sat past four early exits).
   const e2e = src('test-chat-e2e.mjs');
-  ok(/scratchHome\(/.test(e2e) && /HOME:\s*fakeHome/.test(e2e),
-    'test-chat-e2e runs its real haiku turn under an ISOLATED home (measured viable: the CLI serves a turn on the oat alone)');
-  ok(/process\.on\('exit', cleanup\)/.test(e2e) && /for \(const sig of \[/.test(e2e),
-    'test-chat-e2e cleans up unconditionally (exit + signals), not at the end of the happy path');
+  ok(((/scratchHome\(/.test(e2e) && /HOME:\s*fakeHome/.test(e2e)) || helperHome(e2e)) && /HOME:\s*fakeHome/.test(e2e),
+    'test-chat-e2e runs its real haiku turn under an ISOLATED home (measured viable: the CLI serves a turn on the oat alone) — since the boot helper, a HOME in the root startHub checks');
+  ok((/process\.on\('exit', cleanup\)/.test(e2e) && /for \(const sig of \[/.test(e2e)) || onHelper(e2e),
+    'test-chat-e2e cleans up unconditionally (exit + signals), not at the end of the happy path — since the boot helper, its root ends at exit and at the signals the helper armed');
+  {   // CONTROLS for the boot helper's road: an import with no call, or a call with no HOME, is no isolation
+    const imp = "import { mintRoot, startHub } from './hub-boot.mjs';\n";
+    ok(!onHelper(imp + 'const x = 1;') && onHelper(imp + 'startHub({ root });') && !helperHome(imp + 'startHub({ root, env: { PATH } });') && helperHome(imp + 'startHub({ root, env: { PATH, HOME: fakeHome } });'),
+      'CONTROL (e): the boot helper counts only when startHub is CALLED, and as an isolated home only with a HOME in its env');
+  }
 
   // (f) The PRODUCTION readers ask the shared rule — the half that survives a
   //     leftover no cleanup ever reached.
