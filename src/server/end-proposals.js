@@ -24,7 +24,23 @@ const ANSWERED = 'answered', ALL_ENDED = 'all-ended';   // the card's two ends (
 const line = (s) => PT.toAgentText(String(s || ''), { kind: 'line', max: 120 });
 
 function create({ userTodos, deliver, listFacts, endConversation, liveKeys = null, endedKeys = null, storeWakeTicks = null, setWakeGrant = null, jobOwnerOf = null, log = () => { } } = {}) {
-  const inFlight = new Set();   // the cards a press is answering right now — a second press is told so, the sweep leaves them alone
+  const inFlight = new Map();   // the cards a press is answering right now (id → that answer) — a second press is told so, the sweep leaves them alone, a proposal waits for it
+  // THE OWNER BY ITS OWN ID (主开发 23:06Z): a job's record keeps its owner's conversation id only, so a key's backend is a guess when
+  // the owner is not live — the press, the end card's ticks and the drawing compare and name by the conversation's id, never the key
+  const idOf = (k) => { const t = String(k || ''); const i = t.indexOf(':'); return i > 0 ? t.slice(i + 1) : t; };
+  const ownId = (o) => (o && (o.cid || idOf(o.key))) || '';
+  // THE HELD PROPOSAL (主开发 23:06Z, the should): a proposal landing while a press answers its card WAITS for that answer, then is filed —
+  // on the card if the press left it open, else as a NEW card; never merged into a card a press is closing (it was told «added», unseen)
+  const HELD_MAX = 8;
+  async function heldOpen(proposerKey, kind) {
+    for (let n = 0; n < HELD_MAX; n++) {
+      const o = openOf(proposerKey, kind);
+      if (!o || !inFlight.has(o.id)) return { open: o };
+      try { await inFlight.get(o.id); } catch { /* the press says its own failure */ }
+    }
+    return { busy: true };
+  }
+  const BUSY = { ok: false, code: 'answering', why: 'the person is answering your open card right now — propose again in a moment; nothing was proposed' };
   const ofProposer = (proposerKey, kind, pred) => { try { return userTodos.idsWhere((i) => i && i.sessionKey === proposerKey && EP.isProposal(i.action) && kindOf(i) === kind && pred(i)); } catch { return []; } };
   const openOf = (proposerKey, kind = 'end') => { const ids = ofProposer(proposerKey, kind, (i) => i.status === 'open'); return ids.length ? userTodos.get(ids[0]) : null; };
   const pastCount = (proposerKey, kind = 'end') => ofProposer(proposerKey, kind, () => true).length;
@@ -75,7 +91,9 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     if (keyless.length) return { ok: false, code: 'no_conversation_id', why: `${keyless.join(', ')} has not reported its conversation id yet — propose it once it has (it reports one at its first turn); nothing was proposed`, targets: keyless };
     if (!drawn.length) return { ok: false, code: 'nothing_to_end', why: `every one of them has ended already (${ended.join(', ')})` };
     const name = caller.name || proposerKey;
-    const open = openOf(proposerKey);
+    const held = await heldOpen(proposerKey, 'end');
+    if (held.busy) return BUSY;
+    const open = held.open;
     // law 8: the very rows the person last kept, unchanged (the same keys, the same things running) — said once, nothing filed
     const dec = open ? null : lastDecided(proposerKey, 'end');
     if (dec && Array.isArray(dec.kept) && drawn.every((d) => dec.kept.includes(endMark(d)))) {
@@ -106,9 +124,10 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     if (it.status !== 'open') return { ok: false, code: 'answered', why: 'that card was answered already' };
     if (inFlight.has(id)) return { ok: false, code: 'answering', why: 'that card is being answered on another page right now' };
     if (!drawn || drawn !== EP.cardSig(it.card)) return { ok: false, code: 'card_changed', why: 'the card changed since it was drawn — read it again, then press' };   // law 4
-    inFlight.add(id);
+    let done = null;
+    inFlight.set(id, new Promise((r) => { done = r; }));   // claimed BEFORE the answer starts: a proposal arriving now waits for it
     try { return kindOf(it) === WAKE ? await answerWake(it, grant, by) : await answerEnd(it, terminate, wakeTicks, by); }
-    finally { inFlight.delete(id); }
+    finally { inFlight.delete(id); done(); }
   }
 
   async function answerEnd(it, terminate, wakeTicks, by) {
@@ -128,7 +147,7 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
       if (pv.verdict === 'ended' || pv.verdict === 'gone') { out.ended.push(d); continue; }
       if (pv.verdict === 'changed') { out.changed.push({ ...d, added: pv.added }); still.push({ ...pv.row, changed: pv.added }); continue; }
       // law 4: the ticks THIS row's jobs carry — only jobs that wake this very conversation, and only when it is really ended
-      const mine = ticks.filter((x) => x && typeof x.id === 'string' && typeof jobOwnerOf === 'function' && (jobOwnerOf(x.id) || {}).key === d.key).map((x) => ({ id: x.id, grant: x.grant === true }));
+      const mine = ticks.filter((x) => x && typeof x.id === 'string' && typeof jobOwnerOf === 'function' && ownId(jobOwnerOf(x.id)) === idOf(d.key)).map((x) => ({ id: x.id, grant: x.grant === true }));
       if (mine.length) {
         if (typeof storeWakeTicks !== 'function') { out.failed.push({ ...d, failed: 'jobs_not_wired' }); still.push({ ...EP.drawnRow(nowRow), failed: 'jobs_not_wired' }); continue; }
         try { await storeWakeTicks(mine, personBy(by)); } catch (e) { out.failed.push({ ...d, failed: 'ticks_not_stored' }); still.push({ ...EP.drawnRow(nowRow), failed: 'ticks_not_stored' }); continue; }
@@ -159,19 +178,21 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     if (!proposerKey) return { ok: false, code: 'no_proposer', why: 'no proposing conversation (it has no id yet) — nothing was filed' };
     const text = typeof why === 'string' ? why.replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, EP.WHY_MAX) : '';
     if (!text) return { ok: false, code: 'bad_args', why: 'why: one sentence of why these may wake their conversation' };
-    const names = new Map();
-    try { const snap = listFacts && typeof listFacts.list === 'function' ? await listFacts.list() : null; for (const r of (snap && snap.conversations) || []) if (r && r.key) names.set(r.key, r.name || null); } catch { /* names are words only */ }
+    const names = new Map(), keyById = new Map();   // the list's rows by key AND by id: an owner not live is named (and keyed) by its id
+    try { const snap = listFacts && typeof listFacts.list === 'function' ? await listFacts.list() : null; for (const r of (snap && snap.conversations) || []) if (r && r.key) { names.set(r.key, r.name || null); keyById.set(idOf(r.key), r.key); } } catch { /* names are words only */ }
     const fresh = [];
     for (const r of (Array.isArray(rows) ? rows : []).filter((x) => x && typeof x.id === 'string' && x.id).slice(0, EP.MAX_TARGETS)) {
       const o = typeof jobOwnerOf === 'function' ? jobOwnerOf(r.id) : null;
       if (!o || !o.key) return { ok: false, code: 'no_owner', why: `${r.id} belongs to no conversation — there is nothing for it to wake; nothing was filed` };
       fresh.push({ id: r.id.slice(0, 120), name: typeof r.name === 'string' && r.name ? r.name.slice(0, 120) : r.id.slice(0, 120), kind: r.kind === 'schedule' ? 'schedule' : 'job',
         nextAt: Number.isFinite(r.nextAt) ? r.nextAt : null, grant: r.grant === true, by: r.grant === true && r.by && typeof r.by === 'object' ? { kind: r.by.kind === 'key' ? 'key' : 'person', name: typeof r.by.name === 'string' ? r.by.name.slice(0, 80) : null, at: Number(r.by.at) || null } : null,
-        owner: { key: o.key, name: (names.get(o.key) || '').slice(0, 120) || null, self: o.key === proposerKey } });
+        owner: { key: keyById.get(ownId(o)) || o.key, name: (names.get(keyById.get(ownId(o)) || o.key) || '').slice(0, 120) || null, self: ownId(o) === idOf(proposerKey) } });
     }
     if (!fresh.length) return { ok: false, code: 'bad_args', why: 'name at least one job or schedule' };
     const name = (caller && caller.name) || proposerKey;
-    const open = openOf(proposerKey, WAKE);
+    const held = await heldOpen(proposerKey, WAKE);
+    if (held.busy) return BUSY;
+    const open = held.open;
     const dec = open ? null : lastDecided(proposerKey, WAKE);
     if (dec && Array.isArray(dec.kept) && fresh.every((r) => dec.kept.includes(jobMark(r)))) {
       return { ok: false, code: 'declined', why: EP.declinedText('wake', fresh.map((r) => r.id), dec.at) };   // the jobs by id (a job's words never ride a sentence — the record-clear law)
@@ -219,7 +240,7 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     for (const r of changes) {
       const o = typeof jobOwnerOf === 'function' ? jobOwnerOf(r.id) : null;
       if (!o) { out.gone.push(r); continue; }
-      if (r.owner && o.key !== r.owner.key) { out.moved.push(r); continue; }
+      if (r.owner && ownId(o) !== ownId(r.owner)) { out.moved.push(r); continue; }
       const w = await setWakeGrant(r.id, yes.has(r.id), personBy(by));
       if (w && w.code === 'not_found') { out.gone.push(r); continue; }
       if (w && w.error) { out.refused.push({ ...r, refused: w.code || 'refused' }); continue; }
@@ -267,4 +288,21 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
   return { propose, proposeWakeGrant, answer, sweep, TYPE, FROM_NAME, ANSWERED, ALL_ENDED };
 }
 
-module.exports = { create, TYPE, FROM_NAME };
+/** THE READER of the conversation a job WAKES (its owner — a cron run's schedule's), as the hub binds it (mounts-plugins-wiring):
+ *  `getJobs()` = the jobs engine, `sessions()` = the live sessions, `addressableId` = the one addressing rule (never the raw idiom —
+ *  test-msg-cli-groups). The record keeps the owner's conversation ID only: the backend is a live session's that addresses it, else
+ *  a guess (`live: false`) — the store compares and names by `cid`, never by the key (主开发 23:06Z). → { key, cid, live } | null */
+function jobOwnerReader({ getJobs, sessions, addressableId }) {
+  return (jobId) => {
+    const jm = typeof getJobs === 'function' ? getJobs() : null;
+    const j = jm && jm.jobs ? jm.jobs.get(String(jobId || '')) : null;
+    const t = j && j.cronParent ? (jm.jobs.get(j.cronParent) || j) : j;
+    const cid = t && t.owner && t.owner.conversation && t.owner.conversation.id;
+    if (!cid) return null;
+    let backend = null;
+    for (const x of (typeof sessions === 'function' ? sessions() : null) || []) if (x && addressableId(x) === cid) { backend = x.backend || 'claude'; break; }
+    return { key: `${backend || 'claude'}:${cid}`, cid, live: !!backend };
+  };
+}
+
+module.exports = { create, jobOwnerReader, TYPE, FROM_NAME };

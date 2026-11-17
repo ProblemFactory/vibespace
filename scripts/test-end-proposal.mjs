@@ -204,7 +204,7 @@ console.log('③ THE STORE — one card per proposer (a second proposal ADDS); a
   const t1 = await ticked();
   ok(t1.r.ok && t1.w.wrote.length === 1 && t1.w.wrote[0].id === 'job-a' && t1.w.wrote[0].yes === true && t1.w.wrote[0].by.kind === 'person' && t1.r.granted.map((x) => x.id).join() === 'job-a',
     'THE END CARD\'S GRANT WRITER writes only the ticks of the jobs that wake the ENDED row, as the person — a job of another conversation slipped into the press is not written (law 4)', { wrote: t1.w.wrote, granted: t1.r.granted });
-  const t1r = await ticked({}, (src) => src.replace("const mine = ticks.filter((x) => x && typeof x.id === 'string' && typeof jobOwnerOf === 'function' && (jobOwnerOf(x.id) || {}).key === d.key)", "const mine = ticks.filter((x) => x && typeof x.id === 'string')"));
+  const t1r = await ticked({}, (src) => src.replace("const mine = ticks.filter((x) => x && typeof x.id === 'string' && typeof jobOwnerOf === 'function' && ownId(jobOwnerOf(x.id)) === idOf(d.key))", "const mine = ticks.filter((x) => x && typeof x.id === 'string')"));
   ok(t1r.w.wrote.some((x) => x.id === 'job-z'), 'RED CONTROL: a press that stores every tick it is handed writes the grant of a job the card never drew', t1r.w.wrote);
   const t2 = await ticked({ endResult: () => ({ ok: false, code: 'subject_busy' }) });
   ok(t2.r.failed.length === 1 && t2.r.failed[0].failed === 'subject_busy' && t2.r.changed.length === 0 && t2.w.wrote.map((x) => `${x.id}:${x.yes}`).join() === 'job-a:true,job-a:false' && /the end failed: Conv aaaa \(claude:aaaa; subject_busy\)/.test(t2.w.deliver.stashed.at(-1).text) && !/something started/.test(t2.w.deliver.stashed.at(-1).text),
@@ -333,7 +333,7 @@ console.log('④ THE SECOND KIND — the wake grant piece 7 proposes: each row n
   };
   const mv = await moved();
   ok(mv.r.moved.length === 1 && mv.v.wrote.length === 0 && /now belongs to another conversation than the card showed/.test(mv.v.deliver.stashed.at(-1).text), 'THE OWNER IS READ AGAIN AT THE PRESS: a job that now wakes another conversation than the card named is NOT written — said to both', { r: mv.r, wrote: mv.v.wrote });
-  const mvr = await moved((src) => src.replace('      if (r.owner && o.key !== r.owner.key) { out.moved.push(r); continue; }\n', ''));
+  const mvr = await moved((src) => src.replace('      if (r.owner && ownId(o) !== ownId(r.owner)) { out.moved.push(r); continue; }\n', ''));
   ok(mvr.v.wrote.length === 1, 'RED CONTROL: a press that trusts the drawn owner writes a grant that wakes a conversation no row named', mvr.v.wrote);
   for (const x of [tt.v, ttr.v, mv.v, mvr.v]) x.stop();
   // keep / approve / not the person / gone / without the door / declined
@@ -379,12 +379,13 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
   const A = mk('morning digest'), B = mk('night report');
   // THE WIRING, as the hub binds it (both lines pinned below): jobs-wiring's in-process person door + setProposalDoor ⇐ proposeWakeGrant
   const wiringDoor = (jobId, yes, by) => { const job = jm.jobs.get(String(jobId || '')); return job ? jm.setWakeGrant(job, yes === true, { by }) : { error: 'no such job', code: 'not_found' }; };
-  const wiringOwner = (jobId) => { const j = jm.jobs.get(String(jobId || '')); const t = j && j.cronParent ? (jm.jobs.get(j.cronParent) || j) : j; const cid = t && t.owner && t.owner.conversation && t.owner.conversation.id; return cid ? { key: `claude:${cid}`, cid } : null; };
+  // THE REAL READER the hub binds (end-proposals jobOwnerReader, pinned below) over this engine — no stub of the owner (主开发 23:06Z)
+  const wiringOwner = require(path.join(REPO, 'src/server/end-proposals.js')).jobOwnerReader({ getJobs: () => jm, sessions: () => [], addressableId: require(path.join(REPO, 'src/claude-lock-capture.js')).addressableId });
   const jw = read('src/server/jobs-wiring.js'), mp = read('src/server/mounts-plugins-wiring.js'), ar = read('src/agent-routes.js');
   ok(/const setWakeGrant = \(jobId, yes, by\) => \{ const job = jm\.jobs\.get\(String\(jobId \|\| ''\)\); return job \? jm\.setWakeGrant\(job, yes === true, \{ by \}\) : \{ error: 'no such job', code: 'not_found' \}; \};/.test(jw)
     && /setProposalDoor: \(fn\) => \{ jm\.proposeWakeDoor = typeof fn === 'function' \? fn : null; \}/.test(jw)
     && /jobsWiring\.setProposalDoor\(\(caller, a\) => endProposals\.proposeWakeGrant\(caller, a\)\)/.test(mp) && /jobsWiring\.setWakeGrant\(jobId, yes, by\)/.test(mp)
-    && /jobOwnerOf: \(jobId\) => \{ const jm = jobsWiring && typeof jobsWiring\.getJobs === 'function' \? jobsWiring\.getJobs\(\) : null; const j = jm && jm\.jobs \? jm\.jobs\.get\(String\(jobId \|\| ''\)\) : null; const t = j && j\.cronParent \? \(jm\.jobs\.get\(j\.cronParent\) \|\| j\) : j; const cid = t && t\.owner && t\.owner\.conversation && t\.owner\.conversation\.id;/.test(mp)
+    && /jobOwnerOf: require\('\.\/end-proposals\.js'\)\.jobOwnerReader\(\{ getJobs: \(\) => \(jobsWiring && typeof jobsWiring\.getJobs === 'function' \? jobsWiring\.getJobs\(\) : null\), sessions: \(\) => activeSessions\.values\(\), addressableId: require\('\.\.\/claude-lock-capture\.js'\)\.addressableId \}\),/.test(mp)
     && /door\(\{ sessionKey: cid \? `\$\{s\.backend \|\| 'claude'\}:\$\{cid\}` : null, conversationId: cid, name: s\.name \|\| null \}, \{ rows: a\.jm\.wakeRowsOf\(\[target\]\), why: text \}\)/.test(ar) && /r\.id \? \{ proposal: r\.id \}/.test(ar),
     'the hub binds the card to piece 7: the propose door (jobs-wiring setProposalDoor ⇐ the store\'s proposeWakeGrant, called with jm.wakeRowsOf) and the person\'s writes through jobs-wiring\'s own in-process door');
   const run = async (mutate) => {
@@ -430,9 +431,85 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
   const g1 = await goneRun();
   ok(g1.r.ok && g1.Cj[DW.GRANT_FIELD] === true && g1.r.gone.length === 1 && g1.r.gone[0].id === g1.Dj.id && g1.status === 'done' && /no longer exist \(removed since the card was drawn\)/.test(g1.said),
     'A JOB REMOVED between the drawing and the press: the rest still land, the gone one is said to the proposer — the card is answered', { r: g1.r, said: g1.said });
-  const g2 = await goneRun((src) => src.replace("      if (!o) { out.gone.push(r); continue; }\n", '').replace('      if (r.owner && o.key !== r.owner.key)', '      if (o && r.owner && o.key !== r.owner.key)').replace("      if (w && w.code === 'not_found') { out.gone.push(r); continue; }\n", ''));
+  const g2 = await goneRun((src) => src.replace("      if (!o) { out.gone.push(r); continue; }\n", '').replace('      if (r.owner && ownId(o) !== ownId(r.owner))', '      if (o && r.owner && ownId(o) !== ownId(r.owner))').replace("      if (w && w.code === 'not_found') { out.gone.push(r); continue; }\n", ''));
   ok(g2.status === 'open' && g2.r.refused.length === 1 && g2.r.gone.length === 0, 'RED CONTROL: a store that does not tell a gone job from a refusal leaves the card open on a job that no longer exists — the leg above would read it', g2.r);
   for (const x of [w, dup.w, dupRows.w, g1.gw, g2.gw]) x.stop();
+  try { jm.shutdown(); } catch { }
+}
+
+console.log('④c THE OWNER BY ITS OWN ID — the REAL reader over piece 7\'s REAL jobs engine: a codex conversation ended before the press is not «moved»; a proposal during a press is held');
+{
+  const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
+  const DW = require(path.join(REPO, 'src/delivery-wake.js'));
+  const EPS = require(path.join(REPO, 'src/server/end-proposals.js'));
+  const { addressableId } = require(path.join(REPO, 'src/claude-lock-capture.js'));
+  const jdir = fs.mkdtempSync(path.join(scratch, 'jobs-c-'));
+  const hush = (fn) => { const l = console.log, w0 = console.warn; console.log = () => { }; console.warn = () => { }; try { return fn(); } finally { console.log = l; console.warn = w0; } };
+  const jm = new JobManager({ dataDir: jdir, broadcast() { }, log() { }, notifyUser() { return { ok: true }; }, deliverToConversation: async () => ({ ok: true }), groupNotifyFor: () => null, notifyGlobal: () => true, peerReachable: () => true });
+  hush(() => jm.init()); for (const t of jm._timers || []) clearInterval(t);
+  const OWN = { conversation: { id: 'c0c0' }, sessionId: 's-c', sessionCreatedAt: 1, groupsSnapshot: [] };
+  const OWNER = { conversationId: 'c0c0', sessionId: 's-c', sessionCreatedAt: 1, groups: new Set() };
+  let n = 0;
+  const mk = (name) => { const r = hush(() => jm.create({ kind: 'cron', name: `${name} ${++n}`, schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: name }, owner: OWN, access: { view: 'session', control: 'session' } }, OWNER)); if (!r.job) throw new Error('create: ' + JSON.stringify(r)); return jm.jobs.get(r.job.id); };
+  let slow = null;
+  const door = async (jobId, yes, by) => { if (slow) await slow; const job = jm.jobs.get(String(jobId || '')); return job ? jm.setWakeGrant(job, yes === true, { by }) : { error: 'no such job', code: 'not_found' }; };
+  const CODEX = { sessionKey: 'codex:c0c0', conversationId: 'c0c0', name: 'Coder' };
+  const live = new Map();
+  const liveCoder = () => live.set('s-c', { backend: 'codex', backendSessionId: 'c0c0', name: 'Coder' });
+  const endCoder = (w) => { live.delete('s-c'); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder', state: 'ended' })); };
+  const build = (mutate) => {
+    const w = world({ setWakeGrant: door });
+    const M = mutate ? loadMutated('src/server/end-proposals.js', mutate) : EPS;
+    w.store = M.create({ userTodos: w.todos, deliver: w.deliver, listFacts: { list: async () => ({ conversations: [...w.rows.values()].map((r) => CF.shapeRow(r)) }) }, endConversation: async () => ({ ok: true }), setWakeGrant: door,
+      jobOwnerOf: M.jobOwnerReader({ getJobs: () => jm, sessions: () => live.values(), addressableId }) });
+    return w;
+  };
+  // the scene: a codex conversation proposes that its job may wake it; the person ENDS it (the very case the grant is for), then presses Allow
+  const scene = async (mutate, { endedAtDrawing = false } = {}) => {
+    const E = mk('codex digest');
+    const w = build(mutate);
+    liveCoder(); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder' }));
+    if (endedAtDrawing) endCoder(w);
+    const p = await w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([E]), why: 'the digest reaches it after its end' });
+    const drawn = p.id ? w.todos.get(p.id).card.rows[0].owner : null;
+    endCoder(w);
+    const r = p.id ? await press(w, p.id, { grant: [E.id] }) : null;
+    return { w, p, r, E, drawn, said: (w.deliver.stashed.at(-1) || {}).text || '' };
+  };
+  const a = await scene();
+  ok(a.p.ok && a.drawn && a.drawn.key === 'codex:c0c0' && a.drawn.name === 'Coder' && a.drawn.self === true && a.r && a.r.ok && a.r.moved.length === 0 && a.r.granted.length === 1 && a.E[DW.GRANT_FIELD] === true && a.E.wakeGrantBy.kind === 'person',
+    'A CODEX CONVERSATION ENDED BEFORE THE PRESS: the REAL reader finds no live session for it, and the press judges by its id — the grant is WRITTEN (not «moved»), as the person', { drawn: a.drawn, r: a.r && { moved: a.r.moved.length, granted: a.r.granted.length } });
+  const aR = await scene((src) => src.replace('      if (r.owner && ownId(o) !== ownId(r.owner)) { out.moved.push(r); continue; }', '      if (r.owner && o.key !== r.owner.key) { out.moved.push(r); continue; }'));
+  ok(aR.r && aR.r.moved.length === 1 && aR.r.granted.length === 0 && aR.E[DW.GRANT_FIELD] !== true && /another conversation/.test(aR.said),
+    'RED CONTROL: a press that compares the guessed key (the reader says claude for an owner not live) calls the ended codex conversation «moved», writes nothing and tells a false reason — the leg above would read it', { moved: aR.r && aR.r.moved.length, said: aR.said });
+  const b = await scene(null, { endedAtDrawing: true });
+  ok(b.p.ok && b.drawn && b.drawn.key === 'codex:c0c0' && b.drawn.name === 'Coder' && b.r && b.r.granted.length === 1,
+    'AN OWNER NOT LIVE AT THE DRAWING is keyed and NAMED from the list by its id (codex:c0c0 «Coder»), never a guessed key with no name', b.drawn);
+  const bR = await scene((src) => src.replace("        owner: { key: keyById.get(ownId(o)) || o.key, name: (names.get(keyById.get(ownId(o)) || o.key) || '').slice(0, 120) || null,", "        owner: { key: o.key, name: (names.get(o.key) || '').slice(0, 120) || null,"), { endedAtDrawing: true });
+  ok(bR.drawn && bR.drawn.key === 'claude:c0c0' && bR.drawn.name === null, 'RED CONTROL: a drawing keyed by the reader\'s guess names an owner not live as claude:c0c0 with no name — the leg above would read it', bR.drawn);
+
+  // THE HELD PROPOSAL (the should, its choice named: HELD): a proposal landing while the press answers its card waits for that answer,
+  // then is filed — here as a NEW card, the press having closed the first; never merged into a card being closed
+  const tick = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+  const held = async (mutate) => {
+    const F1 = mk('first job'), F2 = mk('second job');
+    const w = build(mutate);
+    liveCoder(); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder' }));
+    const p = await w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'one' });
+    let release = null; slow = new Promise((r) => { release = r; });
+    const pr = press(w, p.id, { grant: [F1.id] });   // in flight: it waits at the person's door
+    await tick();
+    const qp = w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F2]), why: 'two' });   // lands DURING the press
+    await tick(); release(); slow = null;
+    const [r, q] = await Promise.all([pr, qp]);
+    const open = openProps(w).map((id) => w.todos.get(id));
+    return { r, q, open, F1, F2, first: p.id };
+  };
+  const h = await held();
+  ok(h.r.ok && h.r.granted.length === 1 && h.q.ok && h.open.length === 1 && h.open[0].id !== h.first && h.open[0].card.rows.map((x) => x.id).join() === h.F2.id && h.F1[DW.GRANT_FIELD] === true,
+    'A PROPOSAL DURING A PRESS IS HELD: it waits for the answer, then is filed as a NEW card (the press closed the first) — the person sees it, the proposer was told the truth', { q: h.q, open: h.open.map((x) => ({ id: x.id, rows: x.card.rows.map((y) => y.id) })) });
+  const hR = await held((src) => src.replace("    const held = await heldOpen(proposerKey, WAKE);\n    if (held.busy) return BUSY;\n    const open = held.open;\n", "    const open = openOf(proposerKey, WAKE);\n"));
+  ok(hR.q.ok && hR.open.length === 0 && hR.F2[DW.GRANT_FIELD] !== true, 'RED CONTROL: a store that merges into the card a press is closing tells the proposer «added» and the row is closed away unseen — the leg above would read it', { q: hR.q, open: hR.open.length });
   try { jm.shutdown(); } catch { }
 }
 
