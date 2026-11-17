@@ -266,6 +266,7 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
     permissionDefault: (cwd, backend) => require('./permission-rules.js').resolveDefaultMode({ backend, cwd }),
     // 2.369.359 (userW): the folder judge's real paths come from the SafeFs worker, bounded — the loop never waits on a storage mount
     realpathAsync: async (p) => { const sf = app.locals && app.locals.safeFs; if (!sf) throw Object.assign(new Error('the SafeFs pool is not up'), { code: 'safefs_down' }); const r = await sf.call('realpath', { path: p }, { timeoutMs: 8000 }); return r && typeof r.path === 'string' ? r.path : null; } } });
+require('./conversation-ops.js').provide({ keyNameOf: (id) => automation.keyNameOf(id) }); // lane end-obeys-verdict: the end record names the key that ended it
 require('../routes/automation.js').registerAutomationRoutes(app, { engine: automation, who: (req) => require('../auth.js').Auth.signInHandle(req),
   limitChoices: () => require('./conversation-ops.js').limitChoices({ accounts: getAccounts() }),   // lane automation-open-limits: the limit pickers
   permissionNow: (cwd) => require('./permission-rules.js').resolveDefaultMode({ backend: 'claude', cwd: cwd || process.cwd() }),   // q-049 M2: the picker's 「CLI 自己的设置（现在是 X）」 — the key's first folder, else the hub's own

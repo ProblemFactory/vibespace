@@ -732,7 +732,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     return { ok: true, lines: lines.slice(-Math.max(1, Math.min(200, Number(limit) || 50))).reverse() };
   }
 
-  return { list, mint, revoke, grant, ungrant, pruneEnded, setReach, setExcept, edit, setLimits, use, useMaintainer, answer, reconcile, keysFor, mayUseFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
+  /** a key's name from the store this engine holds in memory (no file read — the end record names the key that ended a conversation) */
+  const keyNameOf = (id) => { const k = db && Array.isArray(db.keys) ? db.keys.find((x) => x && x.id === id) : null; return k && typeof k.name === 'string' ? k.name : null; };
+  return { list, keyNameOf, mint, revoke, grant, ungrant, pruneEnded, setReach, setExcept, edit, setLimits, use, useMaintainer, answer, reconcile, keysFor, mayUseFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
 }
 
 module.exports = { create, ACTION_TYPE };

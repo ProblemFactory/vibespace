@@ -121,7 +121,8 @@ const endSession = async (data, { reply = () => { } } = {}) => {
   try { reply({ type: 'killed', sessionId: data.sessionId, ok: ok1 }); } catch { }
   active.delete(data.sessionId);
 };
-const ops = (keepEnded = api.keepEnded) => OPS.forDeps({ endSession, activeSessions: active, keepEnded });
+const KEYS = { k1: 'Lane dispatch' };
+const ops = (keepEnded = api.keepEnded, more = {}) => OPS.forDeps({ endSession, activeSessions: active, keepEnded, endFactsBefore: api.endFactsBefore, keyNameOf: (id) => KEYS[id] || null, ...more });
 const rowOf = async (cid) => (await api.stoppedSessions()).find((r) => r.backendSessionId === cid) || null;
 
 console.log('③ a person\'s Terminate ends a busy conversation');
@@ -144,8 +145,8 @@ console.log('④ the kept record: who and when; the race; a resume');
   const r = await ops().endConversation({ webuiId: 'sess-a' }, { kind: 'automation', key: 'k1', cid: CALLER, sessionKey: `claude:${CALLER}`, name: 'Manager' });
   duringKill = null;
   const row = await rowOf('e2e00000-0000-4000-8000-0000000000c3');
-  ok(r.ok && row && row.stopReason === 'ended' && row.endedBy.kind === 'agent' && row.endedBy.actorId === `claude:${CALLER}` && row.endedBy.name === 'Manager' && row.stoppedAt >= t0 && row.name === 'Finished worker',
-    'after an admitted end the stopped row carries reason ended, WHO (the asking conversation by id and name) and when — and the name it had', row);
+  ok(r.ok && row && row.stopReason === 'ended' && row.endedBy.kind === 'agent' && row.endedBy.actorId === 'k1' && row.endedBy.name === 'Lane dispatch' && row.stoppedAt >= t0 && row.name === 'Finished worker',
+    'after an admitted end the stopped row carries reason ended, WHO (an agent: its KEY\'s id and name — the contract) and when — and the name it had', row);
   ok(Array.isArray(readDuring) && fs.existsSync(path.join(META, 'cw-3-1794880000003.json.stopped')), 'a session-list read DURING the kill did not eat the kept record (it was written after the session left the live map)', { readDuring: readDuring && readDuring.length });
   // CONTROL: registering the copy BEFORE the kill — the read during the kill consumes it (its conversation is still live)
   active.set('sess-x', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000d4', sockName: 'cw-4-1794880000004', name: 'Early' }));
@@ -153,11 +154,70 @@ console.log('④ the kept record: who and when; the race; a resume');
   duringKill = async () => { await api.stoppedSessions(); };
   await endSession({ sessionId: 'sess-x' });
   duringKill = null;
+  for (let i = 0; i < 50 && fs.existsSync(path.join(META, 'cw-4-1794880000004.json.stopped')); i++) await new Promise((r) => setTimeout(r, 10));   // the consume's unlink is async: let it land
   ok(!(await rowOf('e2e00000-0000-4000-8000-0000000000d4')) && !fs.existsSync(path.join(META, 'cw-4-1794880000004.json.stopped')), 'CONTROL a record registered BEFORE the kill is CONSUMED by the read during it (its conversation was still live) — the order above is the cure');
   // a resume consumes it
   active.set('sess-r', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000c3', sockName: 'cw-5-1794880000005' }));
   ok(!(await rowOf('e2e00000-0000-4000-8000-0000000000c3')), 'a resume (the conversation live again) consumes its ended record');
   active.delete('sess-r');
+}
+
+console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one bounded read, the end facts, the rank, the consume, the mark, the age');
+{
+  const never = () => new Promise(() => { });
+  // ONE bounded read before the kill — a read that never settles: the Terminate waits the bound, no longer; the facts say «not stated»
+  active.set('sess-n', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000e5', sockName: 'cw-6-1794880000006', name: 'Sick mount', cwd: '/srv/w', host: null, mode: 'chat' }));
+  // the end RETURNS at all only because the read is bounded (it never settles) — no wall-clock assert (the ratchet is at 0)
+  await ops(api.keepEnded, { endFactsBefore: (s, id) => api.endFactsBefore(s, id, { boundMs: 80, read: never }) }).endConversation({ sessionId: 'sess-n' }, { kind: 'human', actBy: 'person@sign-in' });
+  const rn = JSON.parse(fs.readFileSync(path.join(META, 'cw-6-1794880000006.json.stopped'), 'utf8'));   // the record itself (the page's row carries who and when)
+  const src = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
+  ok(!active.has('sess-n') && rn && rn.endFacts && rn.endFacts.goalStated === false && rn.endFacts.queueRead === false && /not read within 80 ms/.test(rn.endFacts.notStated) && rn.endFacts.folder === '/srv/w' && rn.endFacts.mode === 'chat' && src.includes('const END_READ_MS = 1000;'),
+    'a read that NEVER settles: the Terminate returns at the bound (a second by default), the record is written from memory and its facts say «not stated»', { facts: rn && rn.endFacts });
+  // the facts read from a real sidecar: the goal keys HELD, the claude wrapper's own queue
+  fs.writeFileSync(path.join(BUF, 'sess-g.json'), JSON.stringify({ mode: 'chat', goal: 'Ship the release', goalStatus: 'active', queue: [{ id: 1 }, { id: 2 }], queueRead: true }));
+  active.set('sess-g', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000e6', sockName: 'cw-7-1794880000007', name: 'Goal', cwd: '/srv/g', host: 'box-2' }));
+  await ops().endConversation({ sessionId: 'sess-g' }, { kind: 'human', actBy: 'person@sign-in' });
+  const g = JSON.parse(fs.readFileSync(path.join(META, 'cw-7-1794880000007.json.stopped'), 'utf8'));
+  const f = g.endFacts || {};
+  ok(f.goalStated === true && f.goalStatus === 'active' && f.goal === 'Ship the release' && f.queueRead === true && f.queueCount === 2 && f.mode === 'chat' && f.folder === '/srv/g' && f.machine === 'box-2' && !f.notStated,
+    'the facts as of the end, read once from its sidecar: goalStated (the goal keys HELD) and its status, queueRead (the wrapper\'s own mark) and the count, the mode, the folder, the machine', f);
+  // the codex wrapper's queue: an empty list it began with is NOT a read; its `queueRead` mark is
+  fs.writeFileSync(path.join(BUF, 'sess-c1.json'), JSON.stringify({ mode: 'chat', queue: [] }));
+  fs.writeFileSync(path.join(BUF, 'sess-c2.json'), JSON.stringify({ mode: 'chat', queue: [], queueRead: true }));
+  const c1 = await api.endFactsBefore({ backend: 'codex', mode: 'chat' }, 'sess-c1'), c2 = await api.endFactsBefore({ backend: 'codex', mode: 'chat' }, 'sess-c2');
+  const cw = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
+  ok(c1.queueRead === false && c1.queueCount === undefined && c2.queueRead === true && c2.queueCount === 0 && c1.goalStated === false
+    && /if \(fresh && meta\.queueRead !== true\) \{ meta\.queueRead = true; scheduleMeta\(\); \}\n  const fp = /.test(cw),
+    'the codex wrapper: the empty list it begins with states NO read; its one-way `queueRead` mark (a fresh list answered — set before the unchanged-answer return) does', { c1, c2 });
+  // an END OUTRANKS A RESTART: an earlier boot kept an ended record; a later restart's copy of the same conversation is newer
+  const M2 = path.join(ROOT, 'meta2'); fs.mkdirSync(M2, { recursive: true });
+  const CIDR = 'e2e00000-0000-4000-8000-0000000000e7';
+  fs.writeFileSync(path.join(M2, 'cw-8-1794880000008.json.stopped'), JSON.stringify({ backend: 'claude', backendSessionId: CIDR, name: 'Ranked', status: 'stopped', stoppedAt: 1000, stopReason: 'ended', endedBy: { kind: 'person', actorId: null, name: null } }));
+  fs.writeFileSync(path.join(M2, 'cw-9-1794880000009.json.stopped'), JSON.stringify({ backend: 'claude', backendSessionId: CIDR, name: 'Ranked', status: 'stopped', stoppedAt: 9000, stopReason: 'dead-socket-at-boot' }));
+  const mk = (Mx, meta) => Mx.create({ rootDir: ROOT, PORT: 0, BUFFERS_DIR: BUF, META_DIR: meta, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', NODE_CMD: process.execPath, CHAT_WRAPPER: '',
+    activeSessions: new Map(), sessionCounterRef: { value: 0 }, attachToDtach: () => { }, setupSessionPty: () => { }, readSessionMeta: () => ({}), writeSessionMeta: () => { }, deleteSessionMeta: () => { },
+    broadcastToSession: () => { }, broadcastActiveSessions: () => { }, refreshWebuiPids: () => { }, sbNoteServerOp: () => { }, getHosts: () => null, getDialBridge: () => null, getExitProxy: () => null, note: () => { } });
+  const M3 = path.join(ROOT, 'meta3'); fs.cpSync(M2, M3, { recursive: true });   // the RED's world, copied BEFORE the real run (a losing copy's file is deleted)
+  const ranked = ((await mk(BR, M2).stoppedSessions()).find((r) => r.backendSessionId === CIDR) || {});
+  ok(ranked.stopReason === 'ended', 'AN END OUTRANKS A RESTART: a newer restart\'s copy of the same conversation never turns «ended» back into «a restart ended it»', ranked);
+  const RK = "const endRank = (m) => (m && m.stopReason === STOP_ENDED ? 1 : 0);";
+  if (src.split(RK).length !== 2) throw new Error('anchor missing: the rank');
+  const MUTR = mutantCopies('end-record-rank', REPO).load('src/server/boot-restore.js', src.replace(RK, 'const endRank = () => 0;'), 'no-rank');
+  const unranked = ((await mk(MUTR, M3).stoppedSessions()).find((r) => r.backendSessionId === CIDR) || {});
+  ok(unranked.stopReason === 'dead-socket-at-boot', 'RED: without the rank the newer restart copy wins — the end is forgotten', unranked);
+  // CONSUMED at the ONE create road (memory and file), only when the create made it live
+  active.set('sess-k', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000e8', sockName: 'cw-10-1794880000010', name: 'Consumed' }));
+  await ops().endConversation({ sessionId: 'sess-k' }, { kind: 'human', actBy: 'person@sign-in' });
+  const had = !!(await rowOf('e2e00000-0000-4000-8000-0000000000e8'));
+  const gone = api.consumeKept('claude:e2e00000-0000-4000-8000-0000000000e8');
+  await new Promise((r) => setTimeout(r, 50));
+  const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
+  ok(had && gone === true && !(await rowOf('e2e00000-0000-4000-8000-0000000000e8')) && !fs.existsSync(path.join(META, 'cw-10-1794880000010.json.stopped')) && api.consumeKept('claude:none') === false
+    && /activeSessions\.set\(id, session\);\n(.*\n){2}.*if \(data\.resume && data\.resumeId && !data\.fork\) \{ try \{ require\('\.\/server\/boot-restore\.js'\)\.consumeEnded\(`\$\{backend\}:\$\{data\.resumeId\}`\); \} catch \{ \} \}/.test(wc) && typeof BR.consumeEnded === 'function',
+    'CONSUMED at the ONE create road (ws-create, right where the create makes it live — a person\'s resume too): memory and file; nothing kept ⇒ false', { had, gone });
+  // ITS AGE: an ended record a later boot finds is asked the transcript question, one at a time (a chain, off the loop)
+  ok(/if \(m\.stopReason === STOP_ENDED\) \{ const file = path\.join\(META_DIR, f\); endedSettle = endedSettle\.then\(\(\) => locateOrDrop\(sockFile, file, m, id\)\)\.catch\(\(\) => null\); \}/.test(src),
+    'ITS AGE: an ended record nothing resumed leaves like a restart\'s copy — superseded, consumed, or (asked once per boot, one at a time) gone with its transcript (source pin)');
 }
 
 console.log('⑤ the words and the census of stopReason readers');

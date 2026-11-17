@@ -374,10 +374,14 @@ const msOf = (v) => (typeof v === 'number' ? v : Date.parse(v) || 0);
 /** a's stop is the newer: its stoppedAt, then (one boot's stops share a clock tick) the later-created session */
 const newerStop = (a, b) => (msOf(a.stoppedAt) - msOf(b.stoppedAt) || msOf(a.createdAt) - msOf(b.createdAt)) > 0;
 /** → the sockFile whose copy this unlinked (the older stop of the same conversation), or null */
+// AN END OUTRANKS A RESTART (the one end record's contract, 主开发 2026-11-17 14:51Z): a record whose reason is `ended` (a person's
+// Terminate, an agent's admitted end) stands over a restart's copy of the same conversation, newer or not — a later restart that finds
+// its stale dead socket never turns it back into «a restart ended it»; only the create that makes it live again drops it
+const endRank = (m) => (m && m.stopReason === STOP_ENDED ? 1 : 0);
 function keepStopped(sockFile, meta, id) {
   const k = keptKey(sockFile, meta, id), was = keptStopped.get(k);
   if (was && was.sockFile !== sockFile) {
-    if (newerStop(was.meta, meta)) { fs.unlink(keptFile(sockFile), (err) => saidUnlinkFailure(sockFile, err)); return sockFile; }
+    if (endRank(was.meta) > endRank(meta) || (endRank(was.meta) === endRank(meta) && newerStop(was.meta, meta))) { fs.unlink(keptFile(sockFile), (err) => saidUnlinkFailure(sockFile, err)); return sockFile; }
     fs.unlink(keptFile(was.sockFile), (err) => saidUnlinkFailure(was.sockFile, err));
     keptStopped.set(k, { sockFile, meta, id });
     return was.sockFile;
@@ -399,11 +403,17 @@ function loadKept() {
       // it (its id is its parent's) and nothing consumed it (keyed by its socket): kept and listed for the boot that made it
       if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch((err) => saidUnlinkFailure(sockFile, err)); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }
       const id = resumeIdOf(m);
-      if (id) keepStopped(sockFile, m, id);
+      if (!id) continue;
+      keepStopped(sockFile, m, id);
+      // ITS AGE (the contract): an ENDED record nothing resumed leaves the way a restart's copy does — superseded by a newer stop
+      // of the same conversation, consumed when it is live again, deleted when its harness answers that no transcript exists. A
+      // restart's copy is asked at its retire; an ended one is asked here, once per boot, ONE AT A TIME (a chain, off the loop)
+      if (m.stopReason === STOP_ENDED) { const file = path.join(META_DIR, f); endedSettle = endedSettle.then(() => locateOrDrop(sockFile, file, m, id)).catch(() => null); }
     }
   })().catch(() => { });
   return keptLoaded;
 }
+let endedSettle = Promise.resolve();
 /** The kept metas as /api/sessions rows (routes/sessions merges them over its harnesses' discover): STOPPED, why and when,
  *  and the name / cwd / mode / account the meta kept — the doors resume with them. */
 /**
@@ -412,16 +422,57 @@ function loadKept() {
  * the session out of the live map — a session-list read during the kill would otherwise consume the copy (stoppedSessions drops
  * a copy whose conversation is live). One async atomic write; a failed write keeps nothing and says so.
  */
-async function keepEnded(sockFile, meta, endedBy) {
+async function keepEnded(sockFile, meta, endedBy, endFacts = null) {
   const id = resumeIdOf(meta);
   if (!sockFile || !id) return null;
   const by = endedBy && typeof endedBy === 'object' ? { kind: endedBy.kind === 'agent' ? 'agent' : 'person', actorId: endedBy.actorId ? String(endedBy.actorId).slice(0, 200) : null, name: endedBy.name ? String(endedBy.name).slice(0, 120) : null } : { kind: 'person', actorId: null, name: null };
-  const kept = { ...meta, status: 'stopped', stoppedAt: Date.now(), stopReason: STOP_ENDED, endedBy: by };
+  const facts = endFacts && typeof endFacts === 'object' ? endFacts : { goalStated: false, queueRead: false, notStated: 'nothing was read before the end' };
+  const kept = { ...meta, status: 'stopped', stoppedAt: Date.now(), stopReason: STOP_ENDED, endedBy: by, endFacts: facts };
   const file = keptFile(sockFile), tmp = `${file}.${process.pid}.tmp`;
   try { await fs.promises.writeFile(tmp, JSON.stringify(kept)); await fs.promises.rename(tmp, file); }
   catch (e) { fs.unlink(tmp, () => { }); console.warn(`[end] ${sockFile}: its ended record could not be written (${e.message}) — kept nothing`); return null; }
   keepStopped(sockFile, kept, id);
   return kept;
+}
+/**
+ * THE ONE READ BEFORE THE KILL (the contract): the kill body removes the session's meta and its wrapper's sidecar, so the facts a
+ * resume needs are read from the sidecar NOW — ONE async read, BOUNDED (END_READ_MS, a second); past it, or failed, the record is
+ * written from what the hub holds in memory and its facts say «not stated» with why. A Terminate never waits longer than the bound,
+ * whatever a mount does. → endFacts: { goalStated (true only when the sidecar HELD the goal keys) + goal / goalStatus; queueRead
+ * (true only when the wrapper STATES it really read the thread's queue — its one-way `queueRead` mark: the codex wrapper sets it when a
+ * fresh list answered; a wrapper that states none reads «not read», whatever list it holds) + queueCount; mode; folder; machine;
+ * notStated? }. No harness id is branched on here. `read` is a test's seam.
+ */
+const END_READ_MS = 1000;
+async function endFactsBefore(session, webuiId, { boundMs = END_READ_MS, read = null } = {}) {
+  const s = session || {};
+  const base = { mode: s.mode || 'terminal', folder: s.cwd || null, machine: s.host || null };
+  const name = typeof webuiId === 'string' && /^[A-Za-z0-9._-]+$/.test(webuiId) && !webuiId.includes('..') ? webuiId : null;
+  const none = (why) => ({ ...base, goalStated: false, queueRead: false, notStated: why });
+  if (!name) return none('its wrapper file has no plain name');
+  let timer = null;
+  const got = await Promise.race([
+    (async () => { try { return { wm: JSON.parse(await (read || ((f) => fs.promises.readFile(f, 'utf8')))(path.join(BUFFERS_DIR, name + '.json'))) }; } catch (e) { return { err: (e && e.code) || 'unreadable' }; } })(),
+    new Promise((r) => { timer = setTimeout(() => r({ late: true }), boundMs); }),
+  ]);
+  clearTimeout(timer);
+  if (got.late) return none(`its wrapper's file was not read within ${boundMs} ms`);
+  if (got.err) return none(`its wrapper's file could not be read (${got.err})`);
+  const wm = got.wm && typeof got.wm === 'object' && !Array.isArray(got.wm) ? got.wm : {};
+  const goalStated = Object.hasOwn(wm, 'goal') || Object.hasOwn(wm, 'goalStatus');
+  const queueRead = Array.isArray(wm.queue) && wm.queueRead === true;
+  return { ...base, mode: wm.mode === 'chat' ? 'chat' : base.mode, goalStated,
+    ...(goalStated ? { goal: wm.goal == null ? null : String(wm.goal).slice(0, 200), goalStatus: wm.goalStatus == null ? null : String(wm.goalStatus).slice(0, 40) } : {}),
+    queueRead, ...(queueRead ? { queueCount: wm.queue.length } : {}) };
+}
+/** CONSUMED AT THE ONE CREATE ROAD (the contract): the moment a create made the conversation live again (a person's resume too) its
+ *  kept record leaves — memory and file. `key` = `<backend>:<resumable id>`. → true | false (none kept) */
+function consumeKept(key) {
+  const k = String(key || ''), e = keptStopped.get(k);
+  if (!e) return false;
+  keptStopped.delete(k);
+  fs.unlink(keptFile(e.sockFile), () => { });
+  return true;
 }
 async function stoppedSessions() {
   await loadKept();
@@ -480,7 +531,14 @@ function sayDead(when = '') {
  *  `false` deletes the stopped meta, `true` / no answer (the pool down, past its bound) keeps it — never deleted on a guess. */
 const settling = new Set();
 function settleStopped(sockFile, file, meta, id) {
-  const p = (async () => {
+  const p = locateOrDrop(sockFile, file, meta, id);
+  settling.add(p); p.finally(() => settling.delete(p));
+  deadTally.settles.push(p.then((r) => (r === false ? sockFile : null), () => null)); // the facts line's answer for this copy
+}
+/** The kept copy's transcript question itself (settleStopped's, and an ended record's at a later boot): → found (true / null) or
+ *  false (no transcript: the copy and its file are gone). */
+function locateOrDrop(sockFile, file, meta, id) {
+  return (async () => {
     let found = null;
     try { found = await require('../adapters/codex.js').transcriptWorkerCall('locate', { backend: meta.backend || 'claude', id, cwd: meta.cwd || '' }, () => null); } catch { found = null; }
     if (found !== false) return found;
@@ -490,8 +548,6 @@ function settleStopped(sockFile, file, meta, id) {
     console.log(`    ↳ ${sockFile}: no transcript — its stopped meta deleted`);
     return false;
   })();
-  settling.add(p); p.finally(() => settling.delete(p));
-  deadTally.settles.push(p.then((r) => (r === false ? sockFile : null), () => null)); // the facts line's answer for this copy
 }
 /** A stale duplicate of a conversation another socket owns: SIGTERM its dtach session (claude, if any, is the older/losing
  *  writer — the pids from a pgrep CHILD, never a sync ask) and clean socket + buffer + meta. */
@@ -1129,11 +1185,16 @@ async function readoptOrphanKeeperSessions() {
   if (adopted) { refreshWebuiPids(); broadcastActiveSessions(); }
 }
 
+  liveConsume = consumeKept;   // the ONE create road (src/ws-create.js) consumes through the module's consumeEnded
   return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
     readoptOrphanKeeperSessions, probeSockets, probeFacts, reprobePending, probePending: () => new Map([...pendingProbes].map(([f, p]) => [f, [...p.q]])),
     stoppedSettled: () => Promise.all([...settling]), // the kept metas' transcript answers (settleStopped) — a test's wait
-    keepEnded, // lane end-obeys-verdict: an end on purpose keeps the stopped record (reason ended, who, when)
+    keepEnded, endFactsBefore, consumeKept, // lane end-obeys-verdict: the ONE end record — its one read before the kill, its writer, its consume
     stoppedSessions, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js)
     consumeKeptOf }; // B-a5a4 (2): a turn ended on a live session — its conversation's kept copy goes at once (server.js noteTurnEnd)
 }
-module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, STOP_DEAD_SOCKET, STOP_ENDED }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
+/** THE ONE CREATE ROAD's consume (the one end record's contract): src/ws-create.js calls it the moment a create made a conversation
+ *  live again — the running boot instance's consumeKept (none created yet ⇒ nothing kept, false). */
+let liveConsume = null;
+function consumeEnded(key) { try { return liveConsume ? liveConsume(key) : false; } catch { return false; } }
+module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, STOP_DEAD_SOCKET, STOP_ENDED, consumeEnded }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)

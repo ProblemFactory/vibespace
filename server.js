@@ -408,7 +408,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta, patch
 // ── Boot restore (src/server/boot-restore.js, decomposition #7) ──
 // migrations + restoreSessions + R6 pipe re-open + keeper re-adoption.
 const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
-  readoptOrphanKeeperSessions, probeSockets, probeFacts, stoppedSessions, keepEnded, consumeKeptOf, // stoppedSessions: the kept metas read back (lane dead-socket-keeps-chat-meta); keepEnded: an end on purpose (lane end-obeys-verdict); consumeKeptOf: at a turn end (B-a5a4 (2))
+  readoptOrphanKeeperSessions, probeSockets, probeFacts, stoppedSessions, keepEnded, endFactsBefore, consumeKeptOf, // stoppedSessions: the kept metas read back (lane dead-socket-keeps-chat-meta); keepEnded: an end on purpose (lane end-obeys-verdict); consumeKeptOf: at a turn end (B-a5a4 (2))
 } = require('./src/server/boot-restore.js').create({
   rootDir: __dirname, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
@@ -440,7 +440,7 @@ const {
 const harnessConfig = require('./src/server/harness-config-sync.js').create({
   serverSetting: (...a) => serverSetting(...a), harnesses: require('./src/harnesses'), adapterRegistry, activeSessions, hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery,
   log: (...a) => console.log(...a), warn: (...a) => console.warn(...a),
-}); require('./src/server/conversation-ops.js').provide({ keepEnded }); // lane end-obeys-verdict: TERMINATE SAYS WHO — the ended record, written around the kill body
+}); require('./src/server/conversation-ops.js').provide({ keepEnded, endFactsBefore }); // lane end-obeys-verdict: TERMINATE SAYS WHO — the ended record, written around the kill body
 const { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64 } = harnessConfig;
 // Generic operator-visible notice channel (2.226.0, user directive "不要静默
 // 失败"): server-side probes report through this instead of dying in the log —

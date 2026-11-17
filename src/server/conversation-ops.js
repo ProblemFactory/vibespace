@@ -332,21 +332,29 @@ function opsOver(getDeps) {
   /** END. The ws case hands its frame and its reply (`killed`); without a reply the answer is returned. */
   // lane end-obeys-verdict (majordomo piece 3) — TERMINATE SAYS WHO: the session's facts are taken BEFORE the kill (the kill
   // body deletes its meta) and its kept record is written AFTER it, once the session has left the live map (boot-restore
-  // keepEnded) — around the kill body, never inside it. A person's Terminate: kind person; an agent's admitted end: kind agent,
-  // the asking conversation by id and name.
+  // keepEnded) — around the kill body, never inside it. A person's Terminate: kind person; an agent's admitted end: kind agent, its
+  // KEY's id and name (the one end record's contract, 主开发 14:51Z). The facts a resume needs come from ONE bounded read of the
+  // wrapper's sidecar before the kill (boot-restore endFactsBefore, at most a second — a Terminate never waits longer).
   const keptMetaOf = (s, id) => ({ webuiSessionId: id, backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.claudeSessionId || null,
     claudeSessionId: s.claudeSessionId || null, name: s.name || '', cwd: s.cwd || '', mode: s.mode || 'terminal', accountId: s._accountId || null,
     createdAt: s.createdAt || null, host: s.host || null });
-  const endedByOf = (by) => (by && by.kind === 'automation'
-    ? { kind: 'agent', actorId: by.sessionKey || by.cid || null, name: by.name || null }
-    : { kind: 'person', actorId: (by && by.actBy) || null, name: null });
+  const endedByOf = (by) => {
+    if (!(by && by.kind === 'automation')) return { kind: 'person', actorId: (by && by.actBy) || null, name: null };
+    let name = null; try { name = typeof D().keyNameOf === 'function' ? D().keyNameOf(by.key) || null : null; } catch { name = null; }
+    return { kind: 'agent', actorId: by.key || null, name };
+  };
   async function keepEndedAfter(before, by) {
     if (!before || typeof D().keepEnded !== 'function') return null;
     const live = D().activeSessions;
     if (live && typeof live.has === 'function' && live.has(before.id)) return null;   // the kill did not take it: nothing ended
-    try { return await D().keepEnded(before.sock, before.meta, endedByOf(by)); } catch { return null; }
+    try { return await D().keepEnded(before.sock, before.meta, endedByOf(by), before.facts || null); } catch { return null; }
   }
-  const beforeOf = (id) => { const live = D().activeSessions; const s = live && typeof live.get === 'function' ? live.get(id) : null; return s && s.sockName ? { id, sock: s.sockName, meta: keptMetaOf(s, id) } : null; };
+  const beforeOf = async (id) => {
+    const live = D().activeSessions; const s = live && typeof live.get === 'function' ? live.get(id) : null;
+    if (!s || !s.sockName) return null;
+    let facts = null; try { facts = typeof D().endFactsBefore === 'function' ? await D().endFactsBefore(s, id) : null; } catch { facts = null; }
+    return { id, sock: s.sockName, meta: keptMetaOf(s, id), facts };
+  };
   // B-c134 cure: `endTree` — the end also ends what the conversation left running in the background (a person's Terminate, an
   // archive); an automation key's own kill frame never asks it (the verb decides: the archive verb does, the end verb does not)
   async function endConversation(target, by, { reply = null, endTree = false } = {}) {
@@ -355,14 +363,14 @@ function opsOver(getDeps) {
       const t = SPEC.targetVerdict(target); if (!t.ok) return t;
       const hit = liveOf(t.target);
       if (!hit) return refusal('not_found', 'no live conversation by that id');
-      const before = beforeOf(hit.id);
+      const before = await beforeOf(hit.id);
       const answers = [];
       await D().endSession({ sessionId: hit.id }, { reply: (m) => answers.push(m), actBy: SPEC.actByOf(by), endTree: endTree === true });
       const a = answers[answers.length - 1] || null;
       if (a && a.ok) await keepEndedAfter(before, by);
       return a && a.ok ? { ok: true, sessionId: hit.id } : refusal('not_found', 'no live conversation by that id');
     }
-    const before = target && target.sessionId ? beforeOf(String(target.sessionId)) : null;
+    const before = target && target.sessionId ? await beforeOf(String(target.sessionId)) : null;
     const r = await D().endSession(target, { reply: reply || (() => { }), actBy: SPEC.actByOf(by), endTree: endTree === true });
     await keepEndedAfter(before, by);
     return r;

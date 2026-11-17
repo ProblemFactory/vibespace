@@ -2011,6 +2011,10 @@ function publishQueue(items, { force = false, fresh = false } = {}) {
   // republish of the CACHED list — would list items the user has already been
   // told were removed.
   if (queueSweepActive) return;
+  // THE ONE END RECORD (主开发 2026-11-17 14:51Z): the sidecar's queue starts as an EMPTY list before any read — `queueRead` (one-way)
+  // says a FRESH list answered (a complete thread/queue/list read; an unchanged answer too), so an end's record never «states» a zero
+  // it merely began with
+  if (fresh && meta.queueRead !== true) { meta.queueRead = true; scheduleMeta(); }
   const fp = JSON.stringify(items.map((it) => [it.id, it.msgId, it.kind]));
   if (!force && fp === queueFingerprint) return;
   queueFingerprint = fp;
