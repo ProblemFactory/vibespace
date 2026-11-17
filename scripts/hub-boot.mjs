@@ -4,30 +4,37 @@
 //
 //   mintRoot(name) → root
 //     A FRESH directory the helper creates itself (mkdtemp `/tmp/vs-<name>-h??????`), stamped with this run's record (the
-//     gate's reaper reads the owner as alive) and removed when this process exits, after everything rooted in it is ended
-//     and every git worktree a suite added directly in it is removed THROUGH GIT (so the checkout keeps no dangling record).
-//     A hub runs ONLY in a root minted here, by this process: a root handed in by a caller is refused unless the helper made
-//     it, so no run can ever name another run's root — and the filesystem root, a home, a network mount (the workspace
-//     mount), the folder holding this checkout (the lanes folder) and the temp folder itself are refused BY NAME.
+//     gate's reaper reads the owner as alive). A hub runs ONLY in a root minted here, by this process: a root handed in by a
+//     caller is refused unless the helper made it, so no run names another run's root. Refused BY NAME, the most precise name
+//     first: a root that IS the filesystem root, a home, a network mount (the workspace mount), this checkout, the folder
+//     holding this checkout (the lanes folder) or the temp folder; one that HOLDS any of them; one INSIDE a home, a network
+//     mount or this checkout. A root inside the temp folder is the point (every mint is one), and a root inside the folder
+//     holding the checkout is not refused either — the gate's own isolated worktree lives directly under the temp folder, so
+//     that folder IS the temp folder there. A mount table that cannot be read refuses the mint (never «no mounts»).
+//     The first mint ARMS, once: the exit event, and SIGTERM / SIGINT / SIGHUP, each ending with exit(128 + its number) so the
+//     exit's end runs — a suite ended by a signal (the gate's timeout) leaves nothing; no suite carries a signal line of its own.
 //   startHub({ root, tree, port, env, nodeArgs, args, log }) → hub
-//     spawns `node [...nodeArgs] server.js [...args]` in `tree` (inside `root`) with the suite's env + PORT. The env's HOME and
-//     a device daemon root (VIBESPACE_DEVICE_ROOT / VIBESPACE_AGENTD_ROOT), when given, must lie in the root too, and the env
-//     must carry the per-run singleton-Desktop names (scratch.mjs vncEnv — test-architecture §57's law, kept at the one boot
-//     site). The hub's stdout and stderr go to ONE file, `<root>/<log>.log` (default `hub`; two hubs running at once in one
-//     root name two logs — a second start on a log a running hub still writes is refused); its pid and start time are
-//     recorded at the spawn. Nothing is stopped or cleaned at a start — the root is fresh. Hubs that must outlive each
-//     other's stop take a root each: a stop ends everything rooted in ITS root.
+//     spawns `node [...nodeArgs] server.js [...args]` in `tree` (inside `root`) with the suite's env + PORT. The env MUST carry a
+//     HOME in the root (the hub's children are ended by it), and a device daemon root (VIBESPACE_DEVICE_ROOT /
+//     VIBESPACE_AGENTD_ROOT), when given, must lie in the root too (resolved: a link out is refused), and the env must carry the per-run singleton-Desktop names (scratch.mjs vncEnv — test-architecture
+//     §57's law, kept at the one boot site). The hub's stdout and stderr go to ONE file, `<root>/<log>.log` (default `hub`;
+//     two hubs running at once in one root name two logs); its pid and start time are recorded at the spawn. Nothing is
+//     stopped or cleaned at a start. Hubs that must outlive each other's stop take a root each.
 //   hub.ready({ ms, path }) → true | false — waits (bounded, never throws) until GET <path> (default /api/home) answers.
 //   hub.log() → what THIS start wrote to the log so far · hub.waitForLog(re, ms) → the first matching line | null
 //   hub.stop({ signal, hubOnly }) → { signalled: [{pid, via}], left: [{pid, why}] } — ends the hub and EVERYTHING IT STARTED,
-//     BY IDENTITY, never by a name, a pattern or a parent id (the kill law):
+//     BY IDENTITY, never by a name, a pattern, a parent id or a working directory (the kill law):
 //     ① the hub: the pid AND start time recorded at its spawn, re-read just before the signal;
-//     ② (unless hubOnly — a restart leg whose sessions must outlive the hub) every process ROOTED in the root: judged on
-//        RESOLVED paths, in this order — its working directory, the HOME it was given, the device daemon root it was given;
-//        an argument path ONLY when none of those three can be read. Each is listed with its pid and start time, and both are
-//        read again just before its signal: one whose start time changed (its pid was recycled) is left alone and SAID on
-//        stderr; one that is gone is left in `left` silently. Passes repeat (≤ 3) until one finds nothing new — a process
-//        forked between a list and its signal is caught by the next. Synchronous: it runs inside an 'exit' handler.
+//     ② (unless hubOnly — a restart leg whose sessions must outlive the hub) every process whose READABLE environ carries a
+//        value the helper handed out and startHub checked: the HOME inside the root, or the daemon root inside the root (in
+//        that order; both judged on resolved paths — a link out of the root is not inside, a link into it makes no insider).
+//        A process whose cwd or argv alone lies in the root (a person's shell that cd'd in to watch the log, a suite's own
+//        Chrome) is SAID on stderr and left alone. The start time is read before AND after that judgement (it belongs to one
+//        process), and again just before the signal: one that changed is left alone and SAID. Passes repeat (≤ 3) until one
+//        lists nothing new — a process forked between a list and its signal is caught by the next.
+//   At exit (and after an armed signal): in every minted root, each hub, everything rooted, every git worktree directly in it
+//     (removed THROUGH GIT), then the root — unless a mount point lies inside it (then it stays, and that is said).
+//   Synchronous end: it runs inside an 'exit' handler.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -44,32 +51,45 @@ export const DAEMON_ROOT_ENV = Object.freeze(['VIBESPACE_DEVICE_ROOT', 'VIBESPAC
 /** A network or FUSE file system — the workspace mount's kind (a bindfs view over an NFS share on a dev box). */
 const NETWORK_FS = /^(?:nfs4?|cifs|smb3?|9p|ceph|glusterfs|fuse\..+)$/;
 
-const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+/** A path RESOLVED: its realpath, or — when it does not exist (yet, or any more) — its deepest existing ancestor's realpath with the
+ *  rest appended, so a missing name under a link out of the root still resolves outside it. */
+const real = (p) => { const r = path.resolve(String(p)); try { return fs.realpathSync(r); } catch { const d = path.dirname(r); return d === r ? r : path.join(real(d), path.basename(r)); } };
 const isIn = (p, dir) => p === dir || p.startsWith(dir === '/' ? '/' : dir + '/');
 
-/** The network / FUSE mount points of this machine (/proc/self/mountinfo: field 5 = the mount point, the fstype after « - »). */
-export function networkMounts(mountinfo = '/proc/self/mountinfo') {
-  let t = ''; try { t = fs.readFileSync(mountinfo, 'utf8'); } catch { return []; }
+/** The mount table's rows (/proc/self/mountinfo: field 5 = the mount point, already canonical — never resolved, a stale network
+ *  mount would hang a stat; the fstype after « - »), or null when the table cannot be read. */
+function mountRows(mountinfo = '/proc/self/mountinfo') {
+  let t; try { t = fs.readFileSync(mountinfo, 'utf8'); } catch { return null; }
   const out = [];
   for (const line of t.split('\n')) {
     const [pre, post] = line.split(' - ');
     if (!post) continue;
     const mp = (pre.split(' ')[4] || '').replace(/\\([0-7]{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)));
-    if (NETWORK_FS.test(post.split(' ')[0]) && mp) out.push(mp);
+    if (mp) out.push({ mp, fstype: post.split(' ')[0] });
   }
   return out;
 }
+/** The network / FUSE mount points of this machine — null when the mount table cannot be read. */
+export function networkMounts(mountinfo) { const rows = mountRows(mountinfo); return rows && rows.filter((x) => NETWORK_FS.test(x.fstype)).map((x) => x.mp); }
+/** Every mount point lying inside `dir` — null when the mount table cannot be read. */
+export function mountsInside(dir, mountinfo) { const rows = mountRows(mountinfo); return rows && rows.map((x) => x.mp).filter((mp) => mp !== dir && isIn(mp, dir)); }
 
-/** WHY a root is refused by name, or null (`root` resolved). Judged in three rounds, so the name is the most precise one: a root
- *  that IS the filesystem root, a home, a network mount (the workspace mount), the folder holding this checkout (the lanes
- *  folder) or the temp folder; then one that HOLDS one of them; then one INSIDE a home, a network mount or the lanes folder. */
-export function refusalOf(root, { homes = null, mounts = null, checkout = REPO, temps = null } = {}) {
+export const UNJUDGEABLE = 'a root the helper cannot judge: the mount table cannot be read';
+/** WHY a root is refused by name, or null. Three rounds, the most precise name first: a root that IS the filesystem root, a home,
+ *  a network mount, this checkout, the folder holding it or the temp folder; then one that HOLDS any of them; then one INSIDE a
+ *  home, a network mount or this checkout (never «inside» the checkout's parent, never «inside» the temp folder). Homes and mount
+ *  points are compared as written (never resolved); the root itself is resolved. */
+export function refusalOf(root, { homes = null, mounts = null, checkout = REPO, temps = null, mountinfo } = {}) {
   const p = real(String(root || '/'));
+  const M = mounts ?? networkMounts(mountinfo);
+  if (!M) return UNJUDGEABLE;
+  const C = real(checkout);
   const named = [
     ['the filesystem root', ['/']],
-    ['a home', (homes ?? [os.homedir(), process.env.HOME, '/root']).filter(Boolean).map(real)],
-    ['a network mount (the workspace mount)', (mounts ?? networkMounts()).map(real)],
-    ['the folder holding this checkout (the lanes folder)', [real(path.dirname(checkout))]],
+    ['a home', (homes ?? [os.homedir(), process.env.HOME, '/root']).filter(Boolean).map((h) => path.resolve(h))],
+    ['a network mount (the workspace mount)', M],
+    ['this checkout', [C]],
+    ['the folder holding this checkout (the lanes folder)', [path.dirname(C)]],
     ['the temp folder itself', (temps ?? [os.tmpdir(), ...TMP_ROOTS]).map(real)],
   ];
   for (const [why, xs] of named) if (xs.includes(p)) return why;
@@ -79,17 +99,23 @@ export function refusalOf(root, { homes = null, mounts = null, checkout = REPO, 
 }
 
 const MINTED = new Map();   // resolved root → { hubs: [] } — this process's mints only
-let exitArmed = false;
+let armed = false;
+const SIGNALS = ['SIGTERM', 'SIGINT', 'SIGHUP'];
 
-/** A fresh root for one suite's hub(s): `/tmp/vs-<name>-h??????`, created here (mkdtemp), stamped with this run's record. */
+/** A fresh root for one suite's hub(s): `/tmp/vs-<name>-h??????`, created here (mkdtemp), stamped with this run's record. The
+ *  first mint arms the end: the exit event, and each of SIGTERM / SIGINT / SIGHUP → exit(128 + its number). */
 export function mintRoot(name) {
   if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(String(name))) throw new Error(`hub-boot: mintRoot(): bad name ${JSON.stringify(name)}`);
   const root = real(fs.mkdtempSync(path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}${name}-h`)));
   const why = refusalOf(root);
-  if (why) { fs.rmSync(root, { recursive: true, force: true }); throw new Error(`hub-boot: the minted root ${root} is ${why} — refused`); }
+  if (why) { fs.rmdirSync(root); throw new Error(`hub-boot: the minted root ${root} is ${why} — refused`); }
   stampScratchRun(root);
   MINTED.set(root, { hubs: [] });
-  if (!exitArmed) { exitArmed = true; process.on('exit', endAll); }
+  if (!armed) {
+    armed = true;
+    process.on('exit', endAll);
+    for (const sig of SIGNALS) process.on(sig, () => process.exit(128 + os.constants.signals[sig]));
+  }
   return root;
 }
 
@@ -106,32 +132,35 @@ function ownRoot(root) {
 export function starttimeOf(pid, procRoot = '/proc') {
   try { const st = fs.readFileSync(`${procRoot}/${pid}/stat`, 'latin1'); return Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[19]); } catch { return null; }
 }
+const commOf = (pid, procRoot) => { try { return fs.readFileSync(`${procRoot}/${pid}/comm`, 'utf8').trim(); } catch { return '?'; } };
 
 /** Inside `r` on RESOLVED paths: the value as written AND what it resolves to both lie in `r` — a link out of the root is not
- *  inside, a link into it does not make an outsider an insider. A path that no longer resolves is judged as written. */
+ *  inside, a link into it does not make an outsider an insider; a missing name is resolved through its existing ancestors. (The
+ *  resolution runs only for a value already written inside the root — never a stat of an outside path.) */
 const insideRoot = (v, r) => { if (!v || !path.isAbsolute(v)) return false; const lex = path.resolve(v); return isIn(lex, r) && isIn(real(lex), r); };
 
-/** THE ROOTED JUDGEMENT of one pid → 'cwd' | 'home' | 'daemon-root' | 'argv' | null. cwd, HOME and the daemon root in that order;
- *  the argv only when NONE of the three could be read (a process whose /proc cwd and environ the box does not let us read). */
+/** THE ROOTED JUDGEMENT of one pid → { via: 'home' | 'daemon-root' | null, near: 'cwd' | 'argv' | null }. SELECTED (via) only by
+ *  its READABLE environ: the HOME inside the root, else a daemon root inside the root — values the helper handed out. A cwd or an
+ *  argv path in the root alone is `near`: said, never signalled. */
 export function rootedVia(pid, r, procRoot = '/proc') {
-  let read = false;
-  try { const c = fs.readlinkSync(`${procRoot}/${pid}/cwd`).replace(/ \(deleted\)$/, ''); read = true; if (insideRoot(c, r)) return 'cwd'; } catch { /* unreadable */ }
-  let env = null; try { env = fs.readFileSync(`${procRoot}/${pid}/environ`, 'utf8').split('\0'); } catch { /* unreadable */ }
+  let env = null; try { env = fs.readFileSync(`${procRoot}/${pid}/environ`, 'utf8').split('\0'); } catch { /* not ours to read, or gone */ }
   const val = (k) => { const kv = env && env.find((x) => x.startsWith(k + '=')); return kv ? kv.slice(k.length + 1) : null; };
   if (env) {
-    const home = val('HOME'); if (home != null) { read = true; if (insideRoot(home, r)) return 'home'; }
-    for (const k of DAEMON_ROOT_ENV) { const d = val(k); if (d != null) { read = true; if (insideRoot(d, r)) return 'daemon-root'; } }
+    if (insideRoot(val('HOME'), r)) return { via: 'home', near: null };
+    for (const k of DAEMON_ROOT_ENV) if (insideRoot(val(k), r)) return { via: 'daemon-root', near: null };
   }
-  if (read) return null;
+  try { if (insideRoot(fs.readlinkSync(`${procRoot}/${pid}/cwd`).replace(/ \(deleted\)$/, ''), r)) return { via: null, near: 'cwd' }; } catch { /* unreadable */ }
   try {
     const toks = fs.readFileSync(`${procRoot}/${pid}/cmdline`, 'utf8').split('\0');
-    if (toks.some((t) => insideRoot(t, r) || (t.includes('=') && insideRoot(t.slice(t.indexOf('=') + 1), r)))) return 'argv';
+    if (toks.some((t) => insideRoot(t, r) || (t.includes('=') && insideRoot(t.slice(t.indexOf('=') + 1), r)))) return { via: null, near: 'argv' };
   } catch { /* gone */ }
-  return null;
+  return { via: null, near: null };
 }
 
-/** The processes ROOTED in `root`, never `self` or its ancestors — each {pid, starttime, via}. PURE over `procRoot`. */
-export function rootedProcesses(root, { procRoot = '/proc', self = process.pid } = {}) {
+/** The processes ROOTED in `root` (selected by the environ), never `self` or its ancestors — each {pid, starttime, via}; the
+ *  cwd-only / argv-only ones go to `near` when given. The start time is read before AND after the judgement and must not move.
+ *  PURE over `procRoot` (a fake /proc in the suite's legs). */
+export function rootedProcesses(root, { procRoot = '/proc', self = process.pid, near = null } = {}) {
   const r = real(String(root));
   const skip = new Set();
   for (let q = self; q > 1 && !skip.has(q);) {
@@ -142,10 +171,13 @@ export function rootedProcesses(root, { procRoot = '/proc', self = process.pid }
   let pids = []; try { pids = fs.readdirSync(procRoot).filter((d) => /^\d+$/.test(d)).map(Number); } catch { return out; }
   for (const pid of pids) {
     if (skip.has(pid)) continue;
-    const via = rootedVia(pid, r, procRoot);
-    if (!via) continue;
-    const starttime = starttimeOf(pid, procRoot);
-    if (starttime != null) out.push({ pid, starttime, via });
+    const st0 = starttimeOf(pid, procRoot);
+    if (st0 == null) continue;
+    const j = rootedVia(pid, r, procRoot);
+    if (!j.via && !j.near) continue;
+    if (starttimeOf(pid, procRoot) !== st0) continue;   // the judgement read another process than the start time did
+    if (j.via) out.push({ pid, starttime: st0, via: j.via });
+    else if (near) near.push({ pid, starttime: st0, near: j.near });
   }
   return out;
 }
@@ -157,6 +189,7 @@ const say = (line) => { try { fs.writeSync(2, `hub-boot: ${line}\n`); } catch { 
 export function endByIdentity(list, { signal = 'SIGKILL', procRoot = '/proc', kill = (pid, sig) => process.kill(pid, sig) } = {}) {
   const signalled = [], left = [];
   for (const { pid, starttime, via = null } of list) {
+    if (!Number.isInteger(pid) || pid <= 0) { left.push({ pid, why: 'no pid' }); continue; }
     const now = starttimeOf(pid, procRoot);
     if (now === null) { left.push({ pid, why: 'gone' }); continue; }
     if (now !== starttime) { left.push({ pid, why: 'start time changed' }); say(`left pid ${pid} alone — listed with start time ${starttime}, it reads ${now} now (another process holds that pid)`); continue; }
@@ -168,12 +201,20 @@ export function endByIdentity(list, { signal = 'SIGKILL', procRoot = '/proc', ki
 const settle = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* no wait */ } };
 
 /** Everything rooted in `root`, ended by identity, pass after pass (≤ 3) until a pass lists nothing NEW — a process forked
- *  between a list and its signals shows in the next. `done` = the identities already ended (pid:starttime). */
+ *  between a list and its signals shows in the next. `done` = the identities already ended (pid:starttime). A cwd-only or
+ *  argv-only match is SAID once and left. */
 export function endRooted(root, { signal = 'SIGKILL', procRoot = '/proc', kill, done = new Set() } = {}) {
-  const signalled = [], left = [];
+  const signalled = [], left = [], said = new Set();
   for (let pass = 0; pass < 3; pass++) {
     if (pass) settle(50);
-    const fresh = rootedProcesses(root, { procRoot }).filter((x) => !done.has(`${x.pid}:${x.starttime}`));
+    const near = [];
+    const fresh = rootedProcesses(root, { procRoot, near }).filter((x) => !done.has(`${x.pid}:${x.starttime}`));
+    for (const n of near) {
+      if (said.has(`${n.pid}:${n.starttime}`)) continue;
+      said.add(`${n.pid}:${n.starttime}`);
+      left.push({ pid: n.pid, why: `its ${n.near} only` });
+      say(`left pid ${n.pid} (${commOf(n.pid, procRoot)}) alone — its ${n.near === 'cwd' ? 'working directory' : 'argv'} lies in ${root}, but its environ carries no HOME or daemon root the helper handed out`);
+    }
     if (!fresh.length) break;
     for (const x of fresh) done.add(`${x.pid}:${x.starttime}`);
     const r = endByIdentity(fresh, { signal, procRoot, kill });
@@ -208,6 +249,16 @@ export function removeWorktrees(root) {
   return gone;
 }
 
+/** The root removed — unless a mount point lies inside it, or the mount table cannot be read (then it stays and that is said).
+ *  → true when removed. */
+export function removeRoot(root, { mountinfo } = {}) {
+  const inside = mountsInside(root, mountinfo);
+  if (inside === null) { say(`left ${root} in place — the mount table cannot be read, so a mount inside it cannot be ruled out`); return false; }
+  if (inside.length) { say(`left ${root} in place — ${inside[0]} is mounted inside it`); return false; }
+  fs.rmSync(root, { recursive: true, force: true });
+  return true;
+}
+
 /** The exit hook: in every minted root, each hub by its identity, then everything rooted there, then its git worktrees, then
  *  the root itself. */
 function endAll() {
@@ -215,7 +266,7 @@ function endAll() {
     for (const h of m.hubs) try { if (!h.stopped) h.stop({ hubOnly: true }); } catch { /* best effort at exit */ }
     try { endRooted(root); } catch { /* best effort at exit */ }
     try { removeWorktrees(root); } catch { /* best effort at exit */ }
-    try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort at exit */ }
+    try { removeRoot(root); } catch { /* best effort at exit */ }
   }
   MINTED.clear();
 }
@@ -229,6 +280,7 @@ export function startHub({ root, tree, port, env = process.env, nodeArgs = [], a
   if (!tree || !isIn(t, r) || t === r) throw new Error(`hub-boot: the tree ${JSON.stringify(tree)} must lie in the minted root ${r}`);
   if (!fs.existsSync(path.join(t, 'server.js'))) throw new Error(`hub-boot: no server.js in the tree ${t}`);
   if (!Number.isInteger(Number(port)) || Number(port) <= 0) throw new Error(`hub-boot: a port is required — got ${JSON.stringify(port)}`);
+  if (env.HOME == null || env.HOME === '') throw new Error(`hub-boot: the env must carry a HOME in the minted root ${r} — the hub's children are ended by it`);
   for (const k of ['HOME', ...DAEMON_ROOT_ENV]) if (env[k] != null && !insideRoot(String(env[k]), r)) throw new Error(`hub-boot: the env's ${k} (${env[k]}) must lie in the minted root ${r}`);
   if (!env.VIBESPACE_VNC_DISPLAY || !env.VIBESPACE_VNC_PORT) throw new Error('hub-boot: the env must carry the per-run singleton-Desktop names VIBESPACE_VNC_DISPLAY + VIBESPACE_VNC_PORT (scratch.mjs vncEnv — test-architecture §57)');
   if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(String(log))) throw new Error(`hub-boot: bad log name ${JSON.stringify(log)}`);
