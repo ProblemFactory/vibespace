@@ -304,6 +304,8 @@ const endProposals = require('./end-proposals.js').create({ userTodos, deliver, 
   // the conversation a job WAKES (its owner — a cron run's schedule's), read from the jobs engine at the drawing AND at the press —
   // THE ONE READER (end-proposals jobOwnerReader: the backend from the live session that ADDRESSES it, the store judging by the id)
   jobOwnerOf: require('./end-proposals.js').jobOwnerReader({ getJobs: () => (jobsWiring && typeof jobsWiring.getJobs === 'function' ? jobsWiring.getJobs() : null), sessions: () => activeSessions.values(), addressableId: require('../claude-lock-capture.js').addressableId }),
+  // a held wake proposal's rows read again after its wait (the press may have granted one) — piece 7's own helper
+  wakeRowsNow: require('./end-proposals.js').wakeRowsReader({ getJobs: () => (jobsWiring && typeof jobsWiring.getJobs === 'function' ? jobsWiring.getJobs() : null) }),
   // THE FACT a conversation stopped: its kept record (boot-restore stoppedSessions) — a live set still filling is never evidence
   endedKeys: async () => { const f = (listSources() || {}).stoppedSessions; const list = typeof f === 'function' ? await f() : []; return (Array.isArray(list) ? list : []).filter((r) => r && r.backendSessionId && !r.forkPending).map((r) => `${r.backend || 'claude'}:${r.backendSessionId}`); },
   log: (m) => console.log('[end-proposals]', m) });

@@ -385,6 +385,7 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
   ok(/const setWakeGrant = \(jobId, yes, by\) => \{ const job = jm\.jobs\.get\(String\(jobId \|\| ''\)\); return job \? jm\.setWakeGrant\(job, yes === true, \{ by \}\) : \{ error: 'no such job', code: 'not_found' \}; \};/.test(jw)
     && /setProposalDoor: \(fn\) => \{ jm\.proposeWakeDoor = typeof fn === 'function' \? fn : null; \}/.test(jw)
     && /jobsWiring\.setProposalDoor\(\(caller, a\) => endProposals\.proposeWakeGrant\(caller, a\)\)/.test(mp) && /jobsWiring\.setWakeGrant\(jobId, yes, by\)/.test(mp)
+    && /wakeRowsNow: require\('\.\/end-proposals\.js'\)\.wakeRowsReader\(\{ getJobs: \(\) => \(jobsWiring && typeof jobsWiring\.getJobs === 'function' \? jobsWiring\.getJobs\(\) : null\) \}\),/.test(mp)
     && /jobOwnerOf: require\('\.\/end-proposals\.js'\)\.jobOwnerReader\(\{ getJobs: \(\) => \(jobsWiring && typeof jobsWiring\.getJobs === 'function' \? jobsWiring\.getJobs\(\) : null\), sessions: \(\) => activeSessions\.values\(\), addressableId: require\('\.\.\/claude-lock-capture\.js'\)\.addressableId \}\),/.test(mp)
     && /door\(\{ sessionKey: cid \? `\$\{s\.backend \|\| 'claude'\}:\$\{cid\}` : null, conversationId: cid, name: s\.name \|\| null \}, \{ rows: a\.jm\.wakeRowsOf\(\[target\]\), why: text \}\)/.test(ar) && /r\.id \? \{ proposal: r\.id \}/.test(ar),
     'the hub binds the card to piece 7: the propose door (jobs-wiring setProposalDoor ⇐ the store\'s proposeWakeGrant, called with jm.wakeRowsOf) and the person\'s writes through jobs-wiring\'s own in-process door');
@@ -457,11 +458,11 @@ console.log('④c THE OWNER BY ITS OWN ID — the REAL reader over piece 7\'s RE
   const live = new Map();
   const liveCoder = () => live.set('s-c', { backend: 'codex', backendSessionId: 'c0c0', name: 'Coder' });
   const endCoder = (w) => { live.delete('s-c'); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder', state: 'ended' })); };
-  const build = (mutate) => {
+  const build = (mutate, more = {}) => {
     const w = world({ setWakeGrant: door });
     const M = mutate ? loadMutated('src/server/end-proposals.js', mutate) : EPS;
     w.store = M.create({ userTodos: w.todos, deliver: w.deliver, listFacts: { list: async () => ({ conversations: [...w.rows.values()].map((r) => CF.shapeRow(r)) }) }, endConversation: async () => ({ ok: true }), setWakeGrant: door,
-      jobOwnerOf: M.jobOwnerReader({ getJobs: () => jm, sessions: () => live.values(), addressableId }) });
+      jobOwnerOf: M.jobOwnerReader({ getJobs: () => jm, sessions: () => live.values(), addressableId }), wakeRowsNow: M.wakeRowsReader({ getJobs: () => jm }), ...more });
     return w;
   };
   // the scene: a codex conversation proposes that its job may wake it; the person ENDS it (the very case the grant is for), then presses Allow
@@ -508,9 +509,99 @@ console.log('④c THE OWNER BY ITS OWN ID — the REAL reader over piece 7\'s RE
   const h = await held();
   ok(h.r.ok && h.r.granted.length === 1 && h.q.ok && h.open.length === 1 && h.open[0].id !== h.first && h.open[0].card.rows.map((x) => x.id).join() === h.F2.id && h.F1[DW.GRANT_FIELD] === true,
     'A PROPOSAL DURING A PRESS IS HELD: it waits for the answer, then is filed as a NEW card (the press closed the first) — the person sees it, the proposer was told the truth', { q: h.q, open: h.open.map((x) => ({ id: x.id, rows: x.card.rows.map((y) => y.id) })) });
-  const hR = await held((src) => src.replace("    const held = await heldOpen(proposerKey, WAKE);\n    if (held.busy) return BUSY;\n    const open = held.open;\n", "    const open = openOf(proposerKey, WAKE);\n"));
+  const hR = await held((src) => src.replace("  async function freeOf(proposerKey, kind) {\n", "  async function freeOf(proposerKey, kind) {\n    return {};\n").replace("    if (open && inFlight.has(open.id)) return depth >= HELD_MAX ? BUSY : proposeWakeGrant(caller, { rows: given, why }, depth + 1);\n", ''));
   ok(hR.q.ok && hR.open.length === 0 && hR.F2[DW.GRANT_FIELD] !== true, 'RED CONTROL: a store that merges into the card a press is closing tells the proposer «added» and the row is closed away unseen — the leg above would read it', { q: hR.q, open: hR.open.length });
+  // the reader's LIVE branch, pinned: a live codex session gives its own backend; once it ends the reader says live:false, the id kept
+  const readerAt = (M) => M.jobOwnerReader({ getJobs: () => jm, sessions: () => live.values(), addressableId });
+  const Ej = mk('reader probe');
+  liveCoder(); const l1 = readerAt(EPS)(Ej.id); live.delete('s-c'); const l2 = readerAt(EPS)(Ej.id);
+  liveCoder(); const l1r = readerAt(loadMutated('src/server/end-proposals.js', (src) => src.replace("    for (const x of (typeof sessions === 'function' ? sessions() : null) || []) if (x && addressableId(x) === cid) { backend = x.backend || 'claude'; break; }\n", '')))(Ej.id); live.delete('s-c');
+  ok(l1 && l1.key === 'codex:c0c0' && l1.live === true && l2 && l2.live === false && l2.cid === 'c0c0' && l1r && l1r.live === false && l1r.key === 'claude:c0c0',
+    'THE READER\'S LIVE BRANCH: a live codex session addressing the owner gives codex:c0c0 (live); ended, the reader keeps the id and says live:false — RED CONTROL: a reader that never looks at the sessions guesses claude', { l1, l2, l1r });
+  // a held wake proposal's rows are read AGAIN after its wait: the job the press just granted is drawn granted
+  const regrant = async (mutate) => {
+    const F1 = mk('regrant');
+    const w = build(mutate);
+    liveCoder(); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder' }));
+    const p = await w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'one' });
+    let release = null; slow = new Promise((r) => { release = r; });
+    const pr = press(w, p.id, { grant: [F1.id] });
+    await tick();
+    const qp = w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'again' });   // read while F1 was not yet granted
+    await tick(); release(); slow = null;
+    const [, q] = await Promise.all([pr, qp]);
+    const open = openProps(w).map((id) => w.todos.get(id));
+    return { q, row: open.length ? open[0].card.rows[0] : null, granted: F1[DW.GRANT_FIELD] === true };
+  };
+  const rg = await regrant();
+  ok(rg.q.ok && rg.granted && rg.row && rg.row.grant === true, 'A HELD WAKE PROPOSAL READS ITS ROWS AGAIN after the wait: the job the press just granted is drawn granted, never «not granted»', rg);
+  const rgR = await regrant((src) => src.replace("    if (free.waited && typeof wakeRowsNow === 'function') {", "    if (false) {"));
+  ok(rgR.row && rgR.row.grant === false && rgR.granted, 'RED CONTROL: rows read before the wait draw the job the press just granted as not granted — the leg above would read it', rgR.row);
+  // cure r3 (the readers 23:37Z): TWO proposals held on one press make ONE card — the final read is synchronous with the filing
+  const twoHeld = async (mutate) => {
+    const F1 = mk('first'), F2 = mk('second'), F3 = mk('third');
+    const w = build(mutate);
+    liveCoder(); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder' }));
+    const p = await w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'one' });
+    let release = null; slow = new Promise((r) => { release = r; });
+    const pr = press(w, p.id, { grant: [F1.id] });
+    await tick();
+    const qa = w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F2]), why: 'two' });
+    const qb = w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F3]), why: 'three' });
+    await tick(); release(); slow = null;
+    const [, a1, b1] = await Promise.all([pr, qa, qb]);
+    const open = openProps(w).map((id) => w.todos.get(id));
+    return { a1, b1, open, F2, F3 };
+  };
+  const t2 = await twoHeld();
+  ok(t2.a1.ok && t2.b1.ok && t2.open.length === 1 && t2.open[0].card.rows.map((x) => x.id).sort().join() === [t2.F2.id, t2.F3.id].sort().join(),
+    'TWO PROPOSALS HELD ON ONE PRESS make ONE new card holding both (one card per proposer) — the final read is synchronous with the filing', t2.open.map((x) => x.card.rows.map((y) => y.id)));
+  const t2r = await twoHeld((src) => src.replace("    const free = await freeOf(proposerKey, WAKE);   // held: the rows are drawn AFTER a press on this proposer's card\n    if (free.busy) return BUSY;\n", "    const free = await freeOf(proposerKey, WAKE);   // held: the rows are drawn AFTER a press on this proposer's card\n    if (free.busy) return BUSY;\n    const early = openOf(proposerKey, WAKE);\n").replace("    const open = openOf(proposerKey, WAKE);\n    if (open && inFlight.has(open.id)) return depth >= HELD_MAX ? BUSY : proposeWakeGrant(caller, { rows: given, why }, depth + 1);\n", '    const open = early;\n'));
+  ok(t2r.open.length === 2, 'RED CONTROL: a store that reads the open card BEFORE an await files two cards for one proposer — the leg above would read it', t2r.open.length);
+  // a press whose door never returns: a proposal waits no longer than heldWaitMs, then answers BUSY by name
+  const stuck = async (mutate) => {
+    const F1 = mk('stuck one'), F2 = mk('stuck two');
+    const w = build(mutate, { heldWaitMs: 40 });
+    liveCoder(); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder' }));
+    const p = await w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'one' });
+    let release = null; slow = new Promise((r) => { release = r; });
+    const pr = press(w, p.id, { grant: [F1.id] });
+    await tick();
+    const q = w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F2]), why: 'two' });
+    const r = await Promise.race([q, new Promise((res) => setTimeout(() => res('still waiting'), 250))]);
+    release(); slow = null; await pr; await q;
+    return r;
+  };
+  const sk = await stuck();
+  ok(sk && sk.ok === false && sk.code === 'answering' && /nothing was proposed/.test(sk.why), 'A PRESS WHOSE DOOR NEVER RETURNS: the held proposal answers BUSY by name at its deadline (heldWaitMs) — it never hangs the proposer\'s verb', sk);
+  const skR = await stuck((src) => src.replace("      try { got = await Promise.race([inFlight.get(o.id), late]); }", "      try { got = await inFlight.get(o.id); }"));
+  ok(skR === 'still waiting', 'RED CONTROL: a wait with no deadline still hangs after 250 ms — the leg above would read it', skR);
   try { jm.shutdown(); } catch { }
+}
+
+console.log('④d THE HELD END PROPOSAL — waits for the press on its card, then is JUDGED (cure r3, the readers 23:37Z)');
+{
+  const endHeld = async (mutate) => {
+    let release = null; const gate = new Promise((r) => { release = r; });
+    let w = null;
+    w = world({ onEnd: async (target) => { await gate; const cid = String((target && target.backendSessionId) || ''); for (const [key, r] of w.rows) if (cid && key.endsWith(':' + cid)) w.rows.set(key, { ...r, state: 'ended' }); } }, mutate);   // the press ends {sessionId, backendSessionId}
+    w.rows.set('claude:aaaa', raw('claude:aaaa')); w.rows.set('claude:bbbb', raw('claude:bbbb'));
+    await w.store.propose({ targets: ['claude:aaaa'], why: 'idle' }, { caller: CALLER, reach });
+    const first = openProps(w)[0];
+    const pr = press(w, first, { terminate: ['claude:aaaa'] });   // in flight: the end waits at the door
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    const qp = w.store.propose({ targets: ['claude:aaaa', 'claude:bbbb'], why: 'and the other' }, { caller: CALLER, reach });   // names the one being ended
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    release();
+    const [r, q] = await Promise.all([pr, qp]);
+    const open = openProps(w).map((id) => w.todos.get(id));
+    return { r, q, open, first };
+  };
+  const e1 = await endHeld();
+  ok(e1.r.ok && e1.q.ok && e1.open.length === 1 && e1.open[0].id !== e1.first && e1.open[0].card.rows.map((d) => d.key).join() === 'claude:bbbb' && Array.isArray(e1.q.alreadyEnded) && e1.q.alreadyEnded.length === 1,
+    'AN END PROPOSAL DURING A PRESS IS HELD AND JUDGED AFTER IT: a NEW card with the live row only — the one the press just ended is said as already ended, never drawn live', { q: e1.q, open: e1.open.map((x) => x.card.rows.map((d) => d.key)) });
+  const e1r = await endHeld((src) => src.replace("    const free = await freeOf(proposerKey, 'end');   // held: the rows are judged AFTER a press on this proposer's card\n    if (free.busy) return BUSY;\n", '').replace("    if (open && inFlight.has(open.id)) return depth >= HELD_MAX ? BUSY : propose({ targets, why }, { caller, reach }, depth + 1);\n", ''));
+  ok(e1r.open.length === 0 || e1r.open.some((x) => x.card.rows.some((d) => d.key === 'claude:aaaa')), 'RED CONTROL: an end store with no hold merges into the card the press is closing (the proposal closed away unseen) or draws the ended row live — the leg above would read it', e1r.open.map((x) => x.card.rows.map((d) => d.key)));
 }
 
 console.log('⑤ THE PERSON-ONLY DOOR (src/routes/end-proposals.js) — through the real app stack: express, its JSON body, the route, over HTTP');

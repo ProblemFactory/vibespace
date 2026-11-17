@@ -23,22 +23,30 @@ const FROM_NAME = 'VibeSpace proposals';   // src/notification-senders.js lists 
 const ANSWERED = 'answered', ALL_ENDED = 'all-ended';   // the card's two ends (src/foryou-actions.js row `ends` — a decision: nothing else closes it)
 const line = (s) => PT.toAgentText(String(s || ''), { kind: 'line', max: 120 });
 
-function create({ userTodos, deliver, listFacts, endConversation, liveKeys = null, endedKeys = null, storeWakeTicks = null, setWakeGrant = null, jobOwnerOf = null, log = () => { } } = {}) {
+function create({ userTodos, deliver, listFacts, endConversation, liveKeys = null, endedKeys = null, storeWakeTicks = null, setWakeGrant = null, jobOwnerOf = null, wakeRowsNow = null, heldWaitMs = 30000, log = () => { } } = {}) {
   const inFlight = new Map();   // the cards a press is answering right now (id → that answer) — a second press is told so, the sweep leaves them alone, a proposal waits for it
   // THE OWNER BY ITS OWN ID (主开发 23:06Z): a job's record keeps its owner's conversation id only, so a key's backend is a guess when
   // the owner is not live — the press, the end card's ticks and the drawing compare and name by the conversation's id, never the key
   const idOf = (k) => { const t = String(k || ''); const i = t.indexOf(':'); return i > 0 ? t.slice(i + 1) : t; };
   const ownId = (o) => (o && (o.cid || idOf(o.key))) || '';
-  // THE HELD PROPOSAL (主开发 23:06Z, the should): a proposal landing while a press answers its card WAITS for that answer, then is filed —
-  // on the card if the press left it open, else as a NEW card; never merged into a card a press is closing (it was told «added», unseen)
+  // THE HELD PROPOSAL (主开发 23:06Z, the should): a proposal landing while a press answers its card WAITS for that answer, then is judged
+  // and filed — on the card if the press left it open, else as a NEW card; never merged into a card a press is closing (it was told
+  // «added», unseen). The wait is bounded by answers (HELD_MAX) AND by time (heldWaitMs: a door that never returns answers BUSY); the
+  // final read of the open card is SYNCHRONOUS with the filing (two held proposals make one card), and a press that started during
+  // the list read is waited for again (the rows judged again — cure r3, the readers 23:37Z)
   const HELD_MAX = 8;
-  async function heldOpen(proposerKey, kind) {
-    for (let n = 0; n < HELD_MAX; n++) {
+  const LATE = {};
+  async function freeOf(proposerKey, kind) {
+    for (let n = 0; ; n++) {
       const o = openOf(proposerKey, kind);
-      if (!o || !inFlight.has(o.id)) return { open: o };
-      try { await inFlight.get(o.id); } catch { /* the press says its own failure */ }
+      if (!o || !inFlight.has(o.id)) return { waited: n > 0 };
+      if (n >= HELD_MAX) return { busy: true };
+      let t = null;
+      const late = new Promise((r) => { t = setTimeout(() => r(LATE), heldWaitMs); if (t && t.unref) t.unref(); });
+      let got = null;
+      try { got = await Promise.race([inFlight.get(o.id), late]); } catch { got = null; } finally { clearTimeout(t); }
+      if (got === LATE) return { busy: true };
     }
-    return { busy: true };
   }
   const BUSY = { ok: false, code: 'answering', why: 'the person is answering your open card right now — propose again in a moment; nothing was proposed' };
   const ofProposer = (proposerKey, kind, pred) => { try { return userTodos.idsWhere((i) => i && i.sessionKey === proposerKey && EP.isProposal(i.action) && kindOf(i) === kind && pred(i)); } catch { return []; } };
@@ -60,11 +68,11 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
   // the decision's memory (law 8) — FLAT strings (a For-you card nests 4 deep at most): an end row «key|busy codes», a job «id|owner|grant»
   const decidedNow = (card, kept) => ({ ...card, decided: { at: Date.now(), kept } });
   const endMark = (d) => `${d.key}|${(d.busy || []).join(',')}`;
-  const jobMark = (r) => `${r.id}|${(r.owner && r.owner.key) || ''}|${r.grant === true ? 1 : 0}`;
+  const jobMark = (r) => `${r.id}|${idOf((r.owner && r.owner.key) || '')}|${r.grant === true ? 1 : 0}`;   // the owner by its id (a guessed backend never makes a declined row look new)
   const close = (id, by, card = null) => { try { if (card) userTodos.setCard(id, card); userTodos.setStatus(id, 'done', by); return true; } catch (e) { log(`card ${id} not closed: ${e && e.message || e}`); return false; } };
 
   /** conversations.propose — the verb's body. `reach(row)` = the ONE rule every verb asks (opener / grant / self). */
-  async function propose({ targets, why }, { caller, reach }) {
+  async function propose({ targets, why }, { caller, reach }, depth = 0) {
     const t = EP.targetsOf(targets);
     if (!t.ok) return t;
     const text = typeof why === 'string' ? why.replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, EP.WHY_MAX) : '';
@@ -72,6 +80,8 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     const proposerKey = proposerOf(caller);
     if (!proposerKey) return { ok: false, code: 'no_proposer', why: 'the calling conversation has no id yet — send it one message first; nothing was proposed' };
     if (!listFacts || typeof listFacts.list !== 'function') return { ok: false, code: 'not_ready', why: 'the conversation list is not wired yet' };
+    const free = await freeOf(proposerKey, 'end');   // held: the rows are judged AFTER a press on this proposer's card
+    if (free.busy) return BUSY;
     const snap = await listFacts.list();
     const rows = Array.isArray(snap && snap.conversations) ? snap.conversations : [];
     const unseen = [], gone = [], ended = [], keyless = [], drawn = [];
@@ -91,9 +101,9 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     if (keyless.length) return { ok: false, code: 'no_conversation_id', why: `${keyless.join(', ')} has not reported its conversation id yet — propose it once it has (it reports one at its first turn); nothing was proposed`, targets: keyless };
     if (!drawn.length) return { ok: false, code: 'nothing_to_end', why: `every one of them has ended already (${ended.join(', ')})` };
     const name = caller.name || proposerKey;
-    const held = await heldOpen(proposerKey, 'end');
-    if (held.busy) return BUSY;
-    const open = held.open;
+    // the final read, SYNCHRONOUS with the filing below; a press that started during the list read is waited for (and judged) again
+    const open = openOf(proposerKey);
+    if (open && inFlight.has(open.id)) return depth >= HELD_MAX ? BUSY : propose({ targets, why }, { caller, reach }, depth + 1);
     // law 8: the very rows the person last kept, unchanged (the same keys, the same things running) — said once, nothing filed
     const dec = open ? null : lastDecided(proposerKey, 'end');
     if (dec && Array.isArray(dec.kept) && drawn.every((d) => dec.kept.includes(endMark(d)))) {
@@ -173,11 +183,16 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
    *  through the agent route, which judged the job, the why and the owner conversation first). `rows` = piece 7's wakeChoiceRows;
    *  each row is drawn with the conversation its job will WAKE (`owner`, read from the job — the proposer may be another, a manager
    *  for a worker's job). ONE card per proposer: a job already on it is redrawn, a new job joins. → { ok, id, rows, refreshed } */
-  async function proposeWakeGrant(caller, { rows, why } = {}) {
+  async function proposeWakeGrant(caller, { rows: given, why } = {}, depth = 0) {
+    let rows = given;
     const proposerKey = proposerOf(caller);
     if (!proposerKey) return { ok: false, code: 'no_proposer', why: 'no proposing conversation (it has no id yet) — nothing was filed' };
     const text = typeof why === 'string' ? why.replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, EP.WHY_MAX) : '';
     if (!text) return { ok: false, code: 'bad_args', why: 'why: one sentence of why these may wake their conversation' };
+    const free = await freeOf(proposerKey, WAKE);   // held: the rows are drawn AFTER a press on this proposer's card
+    if (free.busy) return BUSY;
+    // a row the caller read before the wait may be stale (that press may have just granted it): read each job's row again
+    if (free.waited && typeof wakeRowsNow === 'function') { const again = wakeRowsNow((Array.isArray(rows) ? rows : []).map((r) => r && r.id).filter(Boolean)); if (Array.isArray(again)) rows = again; }
     const names = new Map(), keyById = new Map();   // the list's rows by key AND by id: an owner not live is named (and keyed) by its id
     try { const snap = listFacts && typeof listFacts.list === 'function' ? await listFacts.list() : null; for (const r of (snap && snap.conversations) || []) if (r && r.key) { names.set(r.key, r.name || null); keyById.set(idOf(r.key), r.key); } } catch { /* names are words only */ }
     const fresh = [];
@@ -190,9 +205,9 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     }
     if (!fresh.length) return { ok: false, code: 'bad_args', why: 'name at least one job or schedule' };
     const name = (caller && caller.name) || proposerKey;
-    const held = await heldOpen(proposerKey, WAKE);
-    if (held.busy) return BUSY;
-    const open = held.open;
+    // the final read, SYNCHRONOUS with the filing below; a press that started during the list read is waited for (and drawn) again
+    const open = openOf(proposerKey, WAKE);
+    if (open && inFlight.has(open.id)) return depth >= HELD_MAX ? BUSY : proposeWakeGrant(caller, { rows: given, why }, depth + 1);
     const dec = open ? null : lastDecided(proposerKey, WAKE);
     if (dec && Array.isArray(dec.kept) && fresh.every((r) => dec.kept.includes(jobMark(r)))) {
       return { ok: false, code: 'declined', why: EP.declinedText('wake', fresh.map((r) => r.id), dec.at) };   // the jobs by id (a job's words never ride a sentence — the record-clear law)
@@ -305,4 +320,14 @@ function jobOwnerReader({ getJobs, sessions, addressableId }) {
   };
 }
 
-module.exports = { create, jobOwnerReader, TYPE, FROM_NAME };
+/** THE ROWS of named jobs AS THEY ARE NOW (piece 7's ONE helper, `jm.wakeRowsOf`) — a held wake proposal re-reads them after its wait
+ *  (the press it waited for may have granted one). `getJobs()` = the jobs engine. → rows | null */
+function wakeRowsReader({ getJobs }) {
+  return (ids) => {
+    const jm = typeof getJobs === 'function' ? getJobs() : null;
+    if (!jm || !jm.jobs || typeof jm.wakeRowsOf !== 'function') return null;
+    return jm.wakeRowsOf((ids || []).map((id) => jm.jobs.get(String(id))).filter(Boolean));
+  };
+}
+
+module.exports = { create, jobOwnerReader, wakeRowsReader, TYPE, FROM_NAME };
