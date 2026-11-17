@@ -419,6 +419,7 @@
 .chat-exit-out, .chat-exit-out-all { margin: 0; padding: 5px 8px; font-family: monospace; font-size: 11px; line-height: 1.45; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .chat-exit-out { max-height: 160px; overflow: auto; } /* verify r1 F4: three lines of 1 365 bytes wrap to ~100 rows on a phone — the preview never grows the card past this */
 .chat-exit-out[data-stream="stderr"] { border-left: 2px solid var(--red); }
+.chat-exit-margin { display: none; } /* lane phone-run-box, law 4: the preview's common left margin is not drawn — the text keeps every byte (Copy reads it) */
 .chat-exit-out-all { max-height: 320px; overflow: auto; }
 .chat-exit-out-full > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); }
 .chat-exit-stream { font-size: 10px; color: var(--text-dim); margin-top: 4px; }

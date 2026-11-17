@@ -615,14 +615,41 @@ function encodedCmdBlock(cmd, enc) {
   return wrap;
 }
 
+/** lane phone-run-box (the owner's phone, 2026-11-17: «这个框在手机上根本无法查看里面的内容»): a fold of a run card stays as the
+ *  person left it across every redraw of the row — a tool result landing, a re-render, a reconnect rebuild draw a NEW card
+ *  (chat-view _swapMessageEl carries no inner <details>). Its state is the VIEW's per-message fold state (`fold` = the
+ *  renderer's _peerFold, the compact line's own), keyed `<message id>#<which>`; no state or no id = a closed fold as before. */
+function keepFold(det, fold, id, which) {
+  if (!det || !fold || !id) return;
+  const key = `${id}#${which}`;
+  if (fold.isOpen?.(key)) det.open = true;
+  det.addEventListener('toggle', () => fold.set?.(key, !!det.open, det.closest?.('.chat-msg') || null));
+}
+
+/** lane phone-run-box, law 4 (a short output is shown as itself): the preview's COMMON LEFT MARGIN — the fewest leading
+ *  spaces among its non-blank lines — is not DRAWN (each line's margin in a span chat.css hides: `wc -l` prints «      42»,
+ *  a box that looked empty on a phone). The text is kept: the pre's textContent, Copy, the stored heads and «Show output»
+ *  carry every byte. A line led by a tab has no margin of spaces, so nothing is hidden there. */
+function drawPreview(pre, lines) {
+  const marg = Math.min(...lines.filter((l) => l.trim()).map((l) => /^ */.exec(l)[0].length));
+  if (!(marg > 0)) { pre.textContent = lines.join('\n'); return; }
+  lines.forEach((l, i) => {
+    if (i) pre.append('\n');
+    if (!l.trim()) { pre.append(l); return; }
+    const m = document.createElement('span'); m.className = 'chat-exit-margin'; m.textContent = l.slice(0, marg);
+    pre.append(m, l.slice(marg));
+  });
+}
+
 /** The command card's OUTPUT BLOCK (lane-exit-run-output E3): `x` = exit-reach cardOutput — bounded by the producer,
  *  still drawn as text only here. The preview = the first three lines of the stream that carries the answer (stderr
  *  first); the expander = both stored heads whole, each cut said. A run with no output says so in one dim line. */
-export function exitRunBlock(x) {
+export function exitRunBlock(x, { id = null, fold = null } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'chat-exit-run';
   // lane exit-see-whole: the command AS ITSELF on the card — lane exit-card-margin: in its 技术细节 fold, after the output
   const tech = typeof x.cmd === 'string' && x.cmd ? exitTechFold(x.cmd, { encoding: x.encoding }) : null;
+  keepFold(tech, fold, id, 'tech'); keepFold(tech && tech.querySelector('.chat-exit-cmd-raw'), fold, id, 'raw');   // lane phone-run-box, law 3
   const heads = { stdout: String(x.stdout || ''), stderr: String(x.stderr || ''), cut: { stdout: !!(x.cut && x.cut.stdout), stderr: !!(x.cut && x.cut.stderr) } };
   const pv = outputPreview(heads, 3);
   if (!pv.stream) {
@@ -636,12 +663,13 @@ export function exitRunBlock(x) {
   const pre = document.createElement('pre');
   pre.className = 'chat-exit-out chat-pre-wrapped';
   pre.dataset.stream = pv.stream;
-  pre.textContent = pv.lines.join('\n');
+  drawPreview(pre, pv.lines);   // lane phone-run-box, law 4: the common left margin not drawn; every byte kept
   wrap.appendChild(pre);
   if (pv.more) {
     const det = document.createElement('details');
     det.className = 'chat-exit-out-full';
     const sum = document.createElement('summary'); sum.textContent = t('Show output'); det.appendChild(sum);
+    keepFold(det, fold, id, 'out');   // lane phone-run-box, law 3
     for (const stream of ['stdout', 'stderr']) {
       if (!heads[stream].trim()) continue;
       const lab = document.createElement('div'); lab.className = 'chat-exit-stream'; lab.textContent = x.merged ? 'output' : stream; det.appendChild(lab); // lane exit-calls-in-history: a call read from the transcript has ONE text (claude merged the streams)
@@ -1111,7 +1139,7 @@ class ChatRenderers {
     // block — the first three lines of stderr (else stdout) in mono under the exit line, and "Show output" opening the
     // stored heads (4 KiB per stream, a cut SAID). Text a machine wrote: textContent only. The block is part of THIS
     // card (an expander on the element, never a second card, never re-created on a toggle).
-    if (msg.exitRun && typeof msg.exitRun === 'object') el.appendChild(exitRunBlock(msg.exitRun));
+    if (msg.exitRun && typeof msg.exitRun === 'object') el.appendChild(exitRunBlock(msg.exitRun, { id: msg.id, fold: this._peerFold }));   // + lane phone-run-box: its folds kept by the message's id
     // lane machine-card-compact: …and its ONE line for inside its machine's group (drawn only there — chat.css)
     const ml = machineLineOf(msg);
     if (ml) this._machineLine(el, msg, ml);

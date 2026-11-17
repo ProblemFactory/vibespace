@@ -19,6 +19,15 @@
 //   §3 the Remote panel's machine row (source census of src/lib/sidebar-mounts.js): the Commands icon and the
 //      last-run line both open openExitRunsDialog, no hover title on the last-run line; the CSS: both command pres
 //      wrap anywhere; inside 技术细节 the whole command scrolls past 60vh (no four-line clamp left)
+//   §5 lane phone-run-box (the owner's phone, 2026-11-17: «这个框在手机上根本无法查看里面的内容»): LAW 3 — every fold of the card
+//      («Technical details», «Show output», an encoded command's «Show full command») opened by the person stays open across
+//      a REDRAW (a fresh exitRunBlock of the same record, as chat-view's swap draws it), closed stays closed, keyed by the
+//      message's id through the view's per-message fold state (the renderer passes this._peerFold); another message's card
+//      and a card drawn without the state are closed as before. LAW 4 — the preview's common left margin (the fewest leading
+//      spaces among its non-blank lines) is not DRAWN (a span chat.css hides) while the pre's text keeps every byte (Copy
+//      reads textContent): «      42» draws «42»; a deeper line keeps its extra indent; a blank line stays; a tab-led line
+//      hides nothing; the stderr preview too; «Show output» is drawn as itself. Its CONTROLS: (h) no keeper (the release:
+//      a redraw closes every fold), (i) the release's drawing (the margin drawn)
 //   §4 CONTROLS (patched copies of the source, bundled in memory — src/ never touched): the painter's hover title back;
 //      the body's command cut to the head; the card without its command block; the command on the card again
 //      outside its fold (d); a row without the icon; the 2.369.207 duration words (f); the fold without the device's
@@ -180,6 +189,46 @@ ok(!cardOf(await bundle('src/lib/chat-renderers.js', pc), { cmd: ONE, code: 0, s
 ok(!cardOf(await bundle('src/lib/chat-renderers.js', pd), { cmd: L200, code: 0, stdout: 'x', stderr: '', cut: {} }).inFold, 'CONTROL (d): the command on the card again, outside its 技术细节 fold (the pre-lane shape) — §2 goes red');
 const noIcon = SM.replace(/\n {8}ibtn\(MI\.list,[^\n]*\n/, '\n');
 ok(noIcon !== SM && !rowCensus(noIcon).icon, 'CONTROL (e): a row without the Commands icon — §3\'s census goes red');
+
+// ── §5 lane phone-run-box: law 3 (the folds kept across a redraw) and law 4 (a short output shown as itself) ──
+console.log('§5 the card on a phone: its folds kept across a redraw (law 3); the preview\'s common margin not drawn, every byte kept (law 4)');
+const FOLDS = new Set(), KEEPER = { isOpen: (k) => FOLDS.has(k), set: (k, v) => { if (v) FOLDS.add(k); else FOLDS.delete(k); } };
+const ENC = 'powershell.exe -EncodedCommand ' + Buffer.from('Get-Date', 'utf16le').toString('base64');
+const RUN6 = { cmd: ENC, code: 0, stdout: Array.from({ length: 6 }, (_, i) => `line ${i}`).join('\n') + '\n', stderr: '', cut: {} };
+const press = (det, open) => { det.open = open; det.fire('toggle'); };
+const foldsOf = (b) => ({ tech: b.querySelector('.chat-exit-tech'), out: b.querySelector('.chat-exit-out-full'), raw: b.querySelector('.chat-exit-cmd-raw') });
+const keepCase = (Rm) => {
+  FOLDS.clear();
+  const f1 = foldsOf(Rm.exitRunBlock(RUN6, { id: 'm1', fold: KEEPER }));
+  const shape = !!(f1.tech && f1.out && f1.raw) && !f1.tech.open && !f1.out.open && !f1.raw.open;
+  press(f1.tech, true); press(f1.out, true); press(f1.raw, true);
+  const f2 = foldsOf(Rm.exitRunBlock(RUN6, { id: 'm1', fold: KEEPER }));   // the redraw: a NEW card of the same record
+  const kept = !!(f2.tech && f2.tech.open && f2.out.open && f2.raw.open);
+  press(f2.out, false);
+  const f3 = foldsOf(Rm.exitRunBlock(RUN6, { id: 'm1', fold: KEEPER }));
+  const closedStays = !!(f3.tech.open && !f3.out.open && f3.raw.open);
+  const other = foldsOf(Rm.exitRunBlock(RUN6, { id: 'm2', fold: KEEPER })), bare = foldsOf(Rm.exitRunBlock(RUN6));
+  return { shape, kept, closedStays, others: !other.tech.open && !other.out.open && !bare.tech.open && !bare.out.open, keys: [...FOLDS].sort() };
+};
+const k5 = keepCase(R);
+ok(k5.shape && k5.kept, 'law 3: «Technical details», «Show output» and an encoded command\'s «Show full command», opened, are OPEN again on the redrawn card', k5);
+ok(k5.closedStays && JSON.stringify(k5.keys) === JSON.stringify(['m1#raw', 'm1#tech']), 'law 3: one closed by the person stays closed on the next redraw; the state is the message\'s (`<id>#tech`, `#out`, `#raw`)', k5.keys);
+ok(k5.others, 'law 3: another message\'s card, and a card drawn without the view\'s state, are closed as before', k5);
+const RSRC = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
+ok(/el\.appendChild\(exitRunBlock\(msg\.exitRun, \{ id: msg\.id, fold: this\._peerFold \}\)\)/.test(RSRC), 'law 3: the notice renderer hands the card its message id and the view\'s per-message fold state (this._peerFold, the compact line\'s own)');
+const drawnOf = (pre) => pre.children.length ? pre.children.filter((c) => !c._cls.includes('chat-exit-margin')).map((c) => c.textContent).join('') : pre.textContent;
+const marginCase = (Rm, stdout, stderr = '') => { const pre = Rm.exitRunBlock({ cmd: 'x', code: 0, stdout, stderr, cut: {} }).querySelector('.chat-exit-out'); return { text: pre.textContent, drawn: drawnOf(pre), spans: pre.querySelectorAll('.chat-exit-margin').length }; };
+const m1 = marginCase(R, '      42\n'), m2 = marginCase(R, '  a\n    b\n\n  c\n'), m3 = marginCase(R, '\tx\n  y\n'), m4 = marginCase(R, '', '   err: no such file\n');
+ok(m1.text === '      42' && m1.drawn === '42' && m1.spans === 1, 'law 4: `wc -l`\'s «      42» is DRAWN as «42» — the pre\'s text (Copy reads it) keeps all six spaces', m1);
+ok(m2.text === '  a\n    b\n' && m2.drawn === 'a\n  b\n' && m3.text === '\tx\n  y' && m3.drawn === '\tx\n  y' && m3.spans === 0 && m4.drawn === 'err: no such file', 'law 4: the COMMON margin only — a deeper line keeps its extra indent, a blank line stays, a tab-led line hides nothing, the stderr preview too', { m2, m3, m4 });
+const all5 = R.exitRunBlock({ cmd: 'x', code: 0, stdout: Array.from({ length: 5 }, (_, i) => `    ${i}`).join('\n'), stderr: '', cut: {} }).querySelector('.chat-exit-out-all');
+ok(!!all5 && all5.textContent.startsWith('    0') && all5.querySelectorAll('.chat-exit-margin').length === 0, 'law 4: «Show output» is drawn as itself (the stored head, every byte, no margin hidden)');
+ok(/display: none/.test(rule(CSS, '.chat-exit-margin')), 'law 4: chat.css draws no `.chat-exit-margin` (the span the preview\'s margin sits in)');
+const ph = patched('src/lib/chat-renderers.js', "  if (!det || !fold || !id) return;\n  const key = `${id}#${which}`;", "  return; // CONTROL: no keeper (the release)\n  const key = `${id}#${which}`;");
+const pi = patched('src/lib/chat-renderers.js', '  drawPreview(pre, pv.lines);', "  pre.textContent = pv.lines.join('\\n'); // CONTROL: the release's drawing");
+ok(ph.applies && pi.applies, '§5 patches apply');
+ok(!keepCase(await bundle('src/lib/chat-renderers.js', ph)).kept, 'CONTROL (h): no keeper (the release) — the redraw closes every fold: §5\'s law 3 leg goes red');
+ok(marginCase(await bundle('src/lib/chat-renderers.js', pi), '      42\n').drawn !== '42', 'CONTROL (i): the release\'s drawing — «      42» drawn with its margin: §5\'s law 4 leg goes red');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
 process.exit(fail ? 1 : 0);
