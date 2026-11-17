@@ -2518,6 +2518,11 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 /* For-you inbox on the nav (design-mobile-gaps #1): the taskbar button's
    segmented badge, same classes, so the pills colour by urgency as there */
 #mobile-nav-todos { display: none; gap: 3px; }
+/* the search's home on the phone (lane mask-value-shape): a ≥ 36 px magnifier (the compact bar's 44 px door) while a conversation
+   is on show — the compact class only (the regular class keeps its own bar and the window's title bar) */
+#mobile-nav-search { display: none; background: none; border: none; color: var(--text-secondary); cursor: pointer; flex-shrink: 0; align-items: center; justify-content: center; min-width: 36px; min-height: 36px; padding: 0; }
+html[data-vc="compact"] #mobile-nav-search.on { display: flex; }
+#mobile-nav-search svg { width: 18px; height: 18px; display: block; }
 #mobile-nav-todos.ut-has-items { color: var(--text); }
 #mobile-nav-todos svg { width: 18px; height: 18px; }
 #mobile-nav-todos.ut-blink { animation: ut-blink 0.9s ease 2; }
@@ -2928,7 +2933,7 @@ html[data-vc="regular"] #workspace { flex: 1; min-height: 0; }
 #mobile-nav-overflow, .mnav-one { display: none; }
 html[data-vc="compact"] #mobile-nav { gap: 0; padding: 0; }
 html[data-vc="compact"] #mobile-nav-files { display: none; }
-html[data-vc="compact"] #mobile-nav > :is(#mobile-nav-menu, #mobile-nav-desktops, #mobile-nav-usage, #mobile-nav-vault, #mobile-nav-todos, #mobile-nav-gear, #mobile-nav-close, #mobile-nav-new, #mobile-nav-overflow) { min-width: 44px; min-height: 44px; }
+html[data-vc="compact"] #mobile-nav > :is(#mobile-nav-menu, #mobile-nav-desktops, #mobile-nav-usage, #mobile-nav-vault, #mobile-nav-todos, #mobile-nav-gear, #mobile-nav-search, #mobile-nav-close, #mobile-nav-new, #mobile-nav-overflow) { min-width: 44px; min-height: 44px; }
 html[data-vc="compact"] #mobile-nav > .bar-folded { display: none !important; }
 html[data-vc="compact"] #mobile-nav-overflow.on { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 0; background: none; border: none; color: var(--text-secondary); cursor: pointer; }
 html[data-vc="compact"] #mobile-nav-overflow svg { width: 20px; height: 20px; }

@@ -86,7 +86,7 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, channelRowWords: rowStateWords = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null, onOpenOutbox = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, channelRowWords: rowStateWords = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null, onOpenOutbox = null }) {
     this._ws = ws;
     // §26 (B-099e): the conversations THIS TURN read or drafted (PURE chipView over the witness's ring — the
     // view hands it over) and the one door that opens one; null = the turn touched nothing (no chip)
@@ -102,10 +102,6 @@ export class ChatStatusBar {
     // first) and its click goes there — null = the view cannot jump (no chip click)
     this._pendingAsks = [];
     this._onJumpToAsk = onJumpToAsk;
-    // The touch face of Ctrl+F (docs/design-mobile-gaps.md #4): a magnifier
-    // chip the stylesheet shows only ≤768px (the steer bolt's split). null =
-    // the view has no search bar (never rendered).
-    this._onSearch = onSearch;
     this._onDesignRequest = onDesignRequest; // 2.366.0 design chip (null = view-only window: no chip)
     // lane design-window: this session's designs in the popover — Open (the Design window) / Publish… (its dialog)
     this._onOpenDesign = onOpenDesign;
@@ -740,10 +736,16 @@ export class ChatStatusBar {
     this._initHealthKey = key;
     this._initHealth = rows;
     this.render();
+    this._tellStartFacts();
   }
 
   /** The ONE spelling of a health row — shared with the init card. */
   _healthLabel(issue) { return initHealthLabel(issue); }
+  /** THE HOMES OFF THE STRIP read these (lane mask-value-shape, page §4): Session Properties says them in words. */
+  initHealthRows() { return (this._initHealth || []).map((i) => this._healthLabel(i)); }
+  addedKindsWords() { return addedKindsChipWords(this._addedKinds, t); }
+  /** A start fact changed: an open Properties window of this conversation re-reads it. */
+  _tellStartFacts() { if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') window.dispatchEvent(new CustomEvent('vs-start-facts', { detail: { sessionId: this._sessionId } })); }
 
   /** A pick that has not taken effect yet (spawn-only key): shown on the chip
    *  so the choice is VISIBLY saved — 2.368.0 dropped it silently and the
@@ -780,6 +782,7 @@ export class ChatStatusBar {
     if (sig === (this._addedKindsSig || '')) return;
     this._addedKindsSig = sig; this._addedKinds = list;
     this.render();
+    this._tellStartFacts();
   }
   /** lane door-healthy-chat: whether this conversation's usage is billed (its `auth`, desktop and phone alike) — the cost chip's words. */
   setCostBasis(auth) {
@@ -826,7 +829,6 @@ export class ChatStatusBar {
 
     // Chat search, phone face (design-mobile-gaps #4): a keyboard shortcut has
     // no touch equivalent; the chip is display:none above 768px.
-    if (this._onSearch) chip('search', 'chat-status-search chat-status-clickable', t('Search this conversation'), UI_ICONS.search);
 
     // Model + effort badges — separate clickable segments, both ALWAYS
     // rendered: when a value hasn't been reported/commanded we say so
@@ -924,25 +926,11 @@ export class ChatStatusBar {
     // For-you items — a channel watch's approval, an ask with its choices, a secret to paste — are cards in the chat; the
     // chip names how many wait and of what kind, and its click lands the newest card whole and flashes it (S1's jump)
 
-    // SESSION HEALTH (§2.6, round 4) — the init frame's non-working MCP
-    // servers / config entries / plugins, on the ONE surface that does not
-    // depend on where the transcript is scrolled. The init CARD carries the
-    // same rows, but a card is a record at a POSITION: it is suppressed as a
-    // `frameRepeat`, and on an attach it usually sits hundreds of records
-    // before the tail-50 the window loads — measured on this instance's own
-    // buffers, 2 of the 9 multi-init conversations render an init record with
-    // no drawable card at all, so the "{n} not working" strip a live watcher
-    // saw was simply absent for a window that opened later. That is the exact
-    // invisibility §2.6 exists to end, so the fact gets a PINNED home fed by
-    // both paths (live init side effect + attach chatStatus.initFrame).
-    // Absent frame ⇒ untouched (ABSENT ≠ CLEAN, see initHealthIssues); a frame
-    // that reports everything connected CLEARS it — a gauge that cannot fall
-    // is not a gauge.
-    if (this._initHealth?.length) {
-      const rows = this._initHealth.map((i) => this._healthLabel(i));
-      const tip = t('Reported by the harness at session start — click for the list') + '\n' + rows.join('\n');
-      chip('health', 'chat-status-health chat-status-clickable', tip, `${UI_ICONS.alert} ${escHtml(t('{n} not working', { n: this._initHealth.length }))}`);
-    }
+    // SESSION HEALTH (§2.6, round 4) — the init frame's non-working MCP servers / config entries / plugins. lane mask-value-shape
+    // (the strip's step two, page §4 — the owner's arrangement): NOT a strip mark any more; its home is Session Properties, in
+    // words (initHealthRows(), told by the 'vs-start-facts' event), beside the init CARD's own rows. Why it had a PINNED home:
+    // a card is a record at a POSITION (suppressed as a frameRepeat, or hundreds of records before an attach's tail-50) — the
+    // Properties window is that position-free home now. Absent frame ⇒ untouched (ABSENT ≠ CLEAN, see initHealthIssues).
 
     // HELD Background Work notifications (design §13 5b ①): the one-line chip
     // the incident lacked — the head ("3 notifications held") on the bar, the
@@ -1265,12 +1253,9 @@ export class ChatStatusBar {
       // billed per use (an API key) — a subscription's figure, and one whose account nobody knows, are the context panel's
       if ((this._costBasis ?? null) === 'api') { const cx = chips.find((c) => c.key === 'ctx' || c.key === 'ctx-unknown'); if (cx) cx.html += ` <span class="chat-status-cost" style="color:${costColor}">${escHtml(cw.text)}</span>`; }
     }
-    // THE KINDS OF RECORD THE AGENT'S CLI ADDED (lane door-healthy-chat): ONE quiet chip instead of red cards in the flow —
-    // the update signal stays where the owner reads it; a press opens ⚙ Diagnostics. Last, so it never moves another chip.
-    {
-      const kw = addedKindsChipWords(this._addedKinds, t);
-      if (kw) chip('kinds', 'chat-status-kinds chat-status-clickable', kw.title, escHtml(kw.text));
-    }
+    // THE KINDS OF RECORD THE AGENT'S CLI ADDED (lane door-healthy-chat): never cards in the flow. lane mask-value-shape (page
+    // §4): not a strip mark any more — ⚙ Diagnostics holds their cause (the builds without a record table), Session Properties
+    // their names (addedKindsWords()).
 
     // THE STRIP'S ONE TABLE (lane mask-value-shape, the strip's step two — the owner's arrangement of 2026-11-14): the marks
     // in the table's fixed order, row 1 (always seen) then row 2 (always findable, the settings door last); ONE row at
@@ -1538,7 +1523,6 @@ export class ChatStatusBar {
   }
 
   _onClick(e) {
-    if (e.target.closest('.chat-status-search')) { e.stopPropagation(); this._onSearch?.(); return; }
     // THE CONTEXT DOOR (lane mask-value-shape): its panel says the window used, then each detail as its own sentence
     { const ctxEl = e.target.closest('.chat-status-ctx');
       if (ctxEl) {
@@ -1586,7 +1570,6 @@ export class ChatStatusBar {
     }
     if (e.target.closest('.chat-status-vault-wait')) { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); return; }   // r2: the vault's door
     if (e.target.closest('.chat-status-turnstate.chat-status-clickable')) { e.stopPropagation(); this._onJumpToAsk?.(); return; } // lane S1: go to the card that waits
-    if (e.target.closest('.chat-status-kinds')) { e.stopPropagation(); this._app?._openDiagnostics?.(); return; } // lane door-healthy-chat: the record kinds → ⚙ Diagnostics
     const wfChip = e.target.closest('.chat-status-wf');
     if (wfChip && this._onOpenWorkflow && wfChip.dataset.wfRun) {
       this._onOpenWorkflow(wfChip.dataset.wfRun, wfChip.dataset.wfName);
@@ -1797,23 +1780,6 @@ export class ChatStatusBar {
     // Session-health chip -> the same rows the init card lists. Touch has no
     // hover, so the tooltip alone would make this fact unreadable on the very
     // surface (≤768px) where the init card is hardest to scroll back to.
-    const healthEl = e.target.closest('.chat-status-health');
-    if (healthEl && this._initHealth?.length) {
-      e.stopPropagation();
-      const dropdown = showDropdown(healthEl);
-      if (!dropdown) return;
-      for (const issue of this._initHealth) {
-        const item = document.createElement('div');
-        item.className = 'chat-status-dropdown-item chat-status-health-row';
-        item.innerHTML = `${UI_ICONS.alert} ${escHtml(this._healthLabel(issue))}`;
-        dropdown.appendChild(item);
-      }
-      const note = document.createElement('div');
-      note.className = 'chat-status-dropdown-note';
-      note.textContent = t('Reported by the harness in this session\u2019s start frame.');   // the release's sentence (test-init-frame pins it; its law stands)
-      dropdown.appendChild(note);
-      return;
-    }
     // Background tasks click -> popup
     const taskEl = e.target.closest('.chat-status-tasks');
     if (taskEl && (this._activeTasks?.size || this._bgTasks?.length || this._runningWorkflows().length)) {

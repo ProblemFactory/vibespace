@@ -85,9 +85,17 @@ console.log('④ the census of the bar');
   ok(c.drawn.length >= 12 && c.doors.length >= 5, `the census sees the bar's marks (${c.drawn.length} on the strip or still to move, ${c.doors.length} drawn inside a door)`);
   ok(c.doorWrong.length === 0, `every mark the bar draws INSIDE a door is a door row of the table${c.doorWrong.length ? ' — WRONG: ' + c.doorWrong.join(', ') : ''}`);
   ok(c.unknown.length === 0, `every mark the bar draws has a row in the table${c.unknown.length ? ' — UNKNOWN: ' + c.unknown.join(', ') : ''}`);
-  // THE DEBT the bar's rewrite (P2) brings to zero: marks still drawn on the strip that the table places elsewhere
-  const DEBT = ['search', 'health', 'kinds'];   // = P3's homes (the title bar, Session Properties + Diagnostics, Diagnostics) · P2: design folded into 产出   // P2b: effort / wf behind their doors · P2c: style, goal, review, held, billing (+ auto-continue unless armed) in «对话设置» · P2d: cache, cache-k, odometer, turn-time, unreported, cost in the context door
-  ok(JSON.stringify([...c.offStrip].sort()) === JSON.stringify([...DEBT].sort()), `the marks the bar still draws on the strip that the table places elsewhere are exactly the named debt (${c.offStrip.length}) — it only shrinks`, `now: ${c.offStrip.join(', ')}`);
+  // THE DEBT the bar's rewrite brought to zero (P2: the doors; P3: the homes — search, health, kinds): no mark the table places
+  // elsewhere is drawn on the strip
+  ok(c.offStrip.length === 0, `no mark the table places elsewhere is drawn on the strip — the debt is ZERO`, `now: ${c.offStrip.join(', ')}`);
+  // MOVED, NOT LOST — each home READS the mark it took: Session Properties the health rows and the record kinds (from the bar's
+  // own accessors), the phone's top bar the search
+  const PROPS = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
+  ok(/bar\?\.initHealthRows\?\.\(\)/.test(PROPS) && /bar\?\.addedKindsWords\?\.\(\)/.test(PROPS) && /initHealthRows\(\) \{/.test(BAR) && /addedKindsWords\(\) \{/.test(BAR) && /window\.addEventListener\('vs-start-facts'/.test(PROPS),
+    'moved, not lost: Session Properties reads the start facts (a tool that did not start, the record kinds) from the bar, and re-reads them when they change');
+  const NAV = fs.readFileSync(path.join(REPO, 'src/lib/mobile-nav.js'), 'utf8'), HTML = fs.readFileSync(path.join(REPO, 'public/index.html'), 'utf8');
+  ok(/<button id="mobile-nav-search" [^>]*title="Search this conversation"/.test(HTML) && /this\._shownChat\(\)\?\._search\?\.open\?\.\(\)/.test(NAV) && !/chip\('search'/.test(BAR),
+    'moved, not lost: the search is the phone\'s top-bar magnifier (where the conversation\'s name lives), opening the shown conversation\'s search — no strip mark');
 }
 
 console.log('⑤ red controls');

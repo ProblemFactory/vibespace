@@ -422,11 +422,7 @@ class ChatView {
       getWorkflowIds: () => { const ids = this._getSessionIds(); return { claudeId: ids.claudeId, cwd: ids.cwd, host: ids.host }; },
       // the server's stalled verdict on a run (2026-09-26) → the Workflow card's chip
       onWorkflowVerdict: (runId, verdict) => this._setWorkflowVerdict(runId, verdict),
-      // Ctrl+F's touch face (design-mobile-gaps #4) — the same open() the key
-      // runs, and the same gate: every view builds ChatSearch since 2.369.221
-      // (Search everything lands a hit on a read-only viewer too — _mountSearch),
-      // so a read-only viewer gets the chip as well (a phone has no Ctrl+F).
-      onSearch: () => this._search?.open(),
+      // (Ctrl+F's touch face — design-mobile-gaps #4 — is the phone's top-bar magnifier now: mobile-nav.js, lane mask-value-shape)
       onJumpToAsk: () => { this.jumpToPendingAsk().catch(() => {}); }, // lane S1: the waiting chip goes to the card that waits
       // agent browser P2 (§3.8 ③): the Browser chip's three actions
       onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),

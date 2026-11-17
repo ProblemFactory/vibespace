@@ -639,10 +639,12 @@ try {
     check('a live claude chat session is created through the real spawn path (stub CLI behind the real wrapper)', !!sid, frames.slice(-3).map((f) => JSON.stringify(f).slice(0, 200)).join('\n'));
     if (sid) {
       await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'live stub', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
-      check('the live window attaches on the phone (composer present)', await waitFor(`!!document.querySelector('.window-active .chat-view .chat-input') && !!document.querySelector('.window-active .chat-view .chat-status-search')`, 20000));
-      const mag = await evalJs(`(() => { const s = document.querySelector('.window-active .chat-view .chat-status-search'); if (!s) return null; const r = s.getBoundingClientRect(); return { display: getComputedStyle(s).display, w: Math.round(r.width), h: Math.round(r.height), svg: !!s.querySelector('svg') }; })()`);
-      check(`the live status bar carries the search magnifier as a ≥ 36×36 SVG chip (${mag?.display}, ${mag?.w}×${mag?.h})`, mag && mag.display !== 'none' && mag.w >= 36 && mag.h >= 36 && mag.svg, mag);
-      await evalJs(`document.querySelector('.window-active .chat-view .chat-status-search').click(); true`); await sleep(250);
+      // lane mask-value-shape (the strip's step two, page §4): the magnifier lives on the phone's TOP bar now, where the
+      // conversation's name lives — never on the strip
+      check('the live window attaches on the phone (composer present)', await waitFor(`!!document.querySelector('.window-active .chat-view .chat-input') && !!document.querySelector('#mobile-nav-search.on')`, 20000));
+      const mag = await evalJs(`(() => { const s = document.querySelector('#mobile-nav-search'); if (!s) return null; const r = s.getBoundingClientRect(); return { display: getComputedStyle(s).display, w: Math.round(r.width), h: Math.round(r.height), svg: !!s.querySelector('svg') }; })()`);
+      check(`the phone's top bar carries the search magnifier as a ≥ 36×36 SVG button, and the strip none (${mag?.display}, ${mag?.w}×${mag?.h})`, mag && mag.display !== 'none' && mag.w >= 36 && mag.h >= 36 && mag.svg && !(await evalJs(`!!document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-search')`)), mag);
+      await evalJs(`document.querySelector('#mobile-nav-search').click(); true`); await sleep(250);
       check('tapping the magnifier opens the search bar (Ctrl+F\'s touch face, the same open())', await evalJs(`(() => { const b = document.querySelector('.window-active .chat-view .chat-search-bar'); return !!b && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none'; })()`));
       // r2: the bar's own prev / next / close were 24×17 / 24×17 / 20×20
       const sbBtns = await evalJs(rectsOf('.window-active .chat-view .chat-search-bar button'));
