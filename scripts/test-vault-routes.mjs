@@ -456,7 +456,7 @@ const hit0 = hit, PAGE0 = PAGE;
   app2.use(auth.middleware());
   app2.use(express.json());
   // lane vault-job-approval: a Background job's approval card's door, recorded (the door's own rules are test-vault-job's) — the ROUTE's law here
-  const jobAsks = { calls: [], answer(id, o) { this.calls.push({ id, ...o }); return { ok: true, outcome: o.answer === 'deny' ? 'denied' : 'allowed', job: 'jb-0000aaaa' }; } };
+  const jobAsks = { calls: [], revokes: [], answer(id, o) { this.calls.push({ id, ...o }); return { ok: true, outcome: o.answer === 'deny' ? 'denied' : 'allowed', job: 'jb-0000aaaa' }; }, revoke(entry, job, o) { this.revokes.push({ entry, job, ...o }); return { ok: true, outcome: 'revoked', job, stopped: true }; } };
   registerVaultRoutes(app2, { vault: vault2, activeSessions: sessions2, getJobs: () => ({ jobByToken: (t) => (t === 'jbt_live' ? { id: 'j1' } : null) }), contents, run: runDoor, jobAsks });
   const srv2 = await new Promise((r) => { const x = app2.listen(0, '127.0.0.1', () => r(x)); });
   const P2 = srv2.address().port, OWN2 = `http://127.0.0.1:${P2}`;
@@ -565,6 +565,14 @@ const hit0 = hit, PAGE0 = PAGE;
       srvM.close();
     }
     ok(mutHit === 1, 'CONTROL — the job card\'s answer route without person(): a session bearer\'s 允许 REACHES the door — RED on the copy', rcut ? { mutHit } : 'the copy could not be built (its anchor is missing)');
+    // decision ④: the ✕ (take a job's use of an entry back — it STOPS the job) is a person's click too; a bearer never takes it back
+    const RV = { entry: 'secrets:secret:k1#secret', job: 'jb-0000aaaa' };
+    const rvB = await hit('/api/vault/job/revoke', { headers: { ...PAGE, ...B }, body: RV });
+    const rvJ = await hit('/api/vault/job/revoke', { headers: { ...PAGE, authorization: 'Bearer jbt_live' }, body: RV });
+    const r0 = jobAsks.revokes.length;
+    const rvP = await hit('/api/vault/job/revoke', { body: RV });
+    ok(rvB.status === 403 && rvB.json.code === 'human_only' && rvJ.status === 403 && rvJ.json.code === 'human_only' && r0 === 0 && rvP.status === 200 && rvP.json.outcome === 'revoked' && jobAsks.revokes.length === 1 && jobAsks.revokes[0].entry === RV.entry && jobAsks.revokes[0].job === RV.job && jobAsks.revokes[0].by === 'user',
+      'the ✕ on a job\'s vault use (POST /api/vault/job/revoke): a session bearer and a job token are refused human_only; a person\'s click reaches the door with the entry and the job', [rvB.json.code, rvJ.json.code, jobAsks.revokes]);
   }
   const prG = hit('/api/agent/vault/run', { headers: B, body: { args: ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/z'], cwd: WORK } });
   const cardG = await waitCard();

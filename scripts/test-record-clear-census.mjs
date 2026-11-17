@@ -478,7 +478,7 @@ const ROUTES = {
   // lane vault-paste-request: a person's answer to a paste request (the person() wrapper names a refused bearer through the jobs
   // stash, like every person door), the Vault window's free entry and its delete door — no record of the five kinds' words
   'POST /api/vault/secret-requests/:id/answer': 'meta', 'POST /api/vault/secrets': 'meta', 'DELETE /api/vault/secrets/:id': 'meta', 'DELETE /api/vault/agent-secrets/:entry': 'meta', 'POST /api/vault/job-secrets/:answer': 'meta',
-  'POST /api/vault/job/asks/:askId': 'meta',   // lane vault-job-approval: a Background job's approval card's answer — ids and a grant row (the job's id), never a record's text
+  'POST /api/vault/job/asks/:askId': 'meta', 'POST /api/vault/job/revoke': 'meta',   // lane vault-job-approval: a Background job's approval card's answer and its ✕ — ids and a grant row (the job's id), never a record's text
   'POST /api/vault/words-asks/:id/answer': 'meta', 'POST /api/vault/entry-words': 'meta', 'POST /api/agent/vault/words': 'meta',   // lane vault-entry-description: an entry's name / description — the vault's own words (an Allow writes the card's words and resolves it; never a record's text)
   'GET /api/agent/design/systems': 'meta', 'GET /api/agent/design/system': 'meta', // lane design-systems-home: the design systems' names (belted) + ONE system's tokens.css — registry rows and a folder's file, no record
   // ── the 2.369.202 integration: lane jobs-browser's job principal — agentFacts → jobAgentFacts / refuseAgentBearer ask the

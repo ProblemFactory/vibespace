@@ -1184,6 +1184,7 @@ class JobManager {
     // themselves when the storage answers late (the route's reply says «not on disk yet»: record-clear's persisted); a kill first
     // leaves the old record, the question still asked
     if (askGone.length) this._ride(this.file, 'the cleared asks', () => { for (const j of askGone) { this._resolveAns(j); try { this.d.resolveJobAsk && this.d.resolveJobAsk(j.id); } catch { } } });
+    for (const id of gone) this._vaultGone(id); // lane vault-job-approval: a cleared job's approval goes with its words — its next start asks again
     if (out.cleared.length) { try { this.d.broadcast('jobs-updated', { cleared: out.cleared }); } catch { } }
     return out;
   }
@@ -2816,6 +2817,39 @@ class JobManager {
     if (job.state !== 'waiting') return false;
     this._vaultRefuse(job, v0, 'vault-denied');
     return true;
+  }
+  /** lane vault-job-approval (decision ④ — REVOKE = STOP): the person took back a job's use of an entry (its ✕) — a job that is
+   *  running, starting, scheduled, waiting or meant to be up is STOPPED at once (desiredUp false: no restart, no next fire) and
+   *  its owner conversation is told ONCE (`words`, the door's). A lock never comes here (decision ③). → whether it stopped one */
+  vaultRevoked(jobId, words) {
+    if (this.readOnly) return false;
+    const job = this.jobs.get(String(jobId || ''));
+    if (!job || !this._vaultLive(job)) return false;
+    this.stop(job);
+    this._touch(job, { what: String(words || 'stopped: its vault value was taken back'), alarm: true });
+    this._notifyOwner(job, { what: String(words || 'stopped: its vault value was taken back') });
+    this._save();
+    return true;
+  }
+  /** …the entry it names was DELETED: a waiting job is refused by name (entry_unknown — its card over); a live one is stopped
+   *  and its owner told once */
+  vaultEntryGone(jobId, words) {
+    if (this.readOnly) return false;
+    const job = this.jobs.get(String(jobId || ''));
+    if (!job) return false;
+    if (job.state === 'waiting') { this._vaultRefuse(job, { code: 'entry_unknown', words: VJ.WORDS.entry_unknown }, 'vault-entry-deleted'); return true; }
+    return this.vaultRevoked(job.id, words);
+  }
+  /** is anything of this job running or meant to run (what a revoke stops) */
+  _vaultLive(job) {
+    if (['up', 'starting', 'waiting', 'scheduled', 'awaiting-user'].includes(job.state)) return true;
+    return (job.kind === 'service' || job.kind === 'cron') && job.desiredUp !== false && job.state !== 'failed';
+  }
+  /** lane vault-job-approval: a job removed or its content cleared — its id leaves every `vault-job` row (the door's jobGone) */
+  _vaultGone(id) {
+    const door = this._vaultJob || this.d.vaultJob || null;
+    if (!door || typeof door.jobGone !== 'function') return;
+    try { door.jobGone(String(id)); } catch (e) { this.d.log(`[jobs] ${id}: its vault approvals could not be removed:`, e.message); }
   }
   /** its approval cards are over (removed, stopped, refused): the door closes each `ask-over` — a later start asks again */
   _vaultAskOver(job) {
@@ -4489,7 +4523,8 @@ class JobManager {
     if (alive && orphan) this.d.log(`[jobs] ${job.id} ORPHANED by request — live pid abandoned`);
     const last = job.runs && job.runs[job.runs.length - 1];
     if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was removed'); // lane vault-job-road: a removed cron's waiting run never starts
-    this._vaultAskOver(job); // lane vault-job-approval: a removed job leaves no open approval card
+    this._vaultAskOver(job); // lane vault-job-approval: a removed job leaves no open approval card…
+    this._vaultGone(job.id); // …and no approval: its id leaves every vault-job row (a new job asks again)
     this.jobs.delete(job.id); this._dirty = true; this._save();
     (this._removalOwed || (this._removalOwed = new Map())).set(job.id, job);   // its logs stay in the sweep's keep set until the landing
     // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING, no roll back): what cannot be undone — its kept processes

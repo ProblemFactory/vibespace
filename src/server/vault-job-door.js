@@ -34,6 +34,11 @@
  *     its own answer). A card closed by any other door would refuse its job `ask_closed` (none exists today: a decision row
  *     refuses every close that is not one of its ends — the listener is the belt). ONE `vault-job` audit line per ask /
  *     allow / deny / over — ids and references only.
+ *   · TAKEN BACK = STOPPED (decision ④; a LOCK stops nothing — decision ③: this file has no lock road): `revoke(entry, job)` (a
+ *     person's ✕ — the route's person()) takes the job out of the entry's row through the ONE writer and STOPS it (the engine's
+ *     vaultRevoked: desiredUp false, its owner told once); `dropRow` + `entryGone` — an entry deleted (the paste door's
+ *     dropEntry): its row goes first (a write that fails refuses the delete), then every job naming it stops (a waiting one is
+ *     refused entry_unknown); `jobGone(job)` — a job removed or its content cleared: its id leaves every row.
  * Nothing here returns a value to a caller but the frame to the spawner; nothing is logged but codes and ids.
  */
 const crypto = require('crypto');
@@ -318,8 +323,78 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     });
   }
 
+  // ── TAKEN BACK (lane vault-job-approval, decision ④ — revoke / delete STOPS; a lock stops nothing: no onLock road here) ──
+  const JOB_RE = /^jb-[0-9a-f]{8}$/;
+  const write = (id, next, by) => {
+    const g = store();
+    if (!g || typeof g.set !== 'function') return named('not_written');
+    let w = null;
+    try { w = g.set(VJ.DOOR, id, { to: next.to, except: next.except }, by); } catch (e) { w = { ok: false, code: 'not_written', error: (e && e.message) || 'write failed' }; }
+    return w && w.ok ? { ok: true } : { ok: false, code: (w && w.code) || 'not_written', error: (w && w.error) || 'the approval could not be changed — nothing changed' };
+  };
+  /** THE PERSON TAKES IT BACK (✕ on the Vault row's job chip or the job card — src/routes/vault.js person()): the job leaves the
+   *  entry's row through the ONE writer and is STOPPED at once (a ✕ that left it running would be a control that lies); its
+   *  owner conversation is told once (the engine's vaultRevoked); its next start asks again. → {ok, outcome, job, stopped} */
+  function revoke(entry, jobId, { by = 'user' } = {}) {
+    const id = String(entry || ''), j = String(jobId || '');
+    if (!VJ.entryOfRow(id) || !JOB_RE.test(j)) return named('bad_revoke');
+    const next = VJ.memberWithout(rowsFor(id)[0] || null, j);
+    if (!next.changed) return named('not_approved');
+    const w = write(id, next, String(by || 'user').slice(0, 40));
+    if (!w.ok) return w;
+    audit({ op: 'revoke', job: j, entry: id, by: String(by || 'user').slice(0, 40) });
+    let stopped = false;
+    try { stopped = !!(jm && jm.vaultRevoked(j, VJ.stopWords('revoked', entryLabelOf(VJ.entryOfRow(id))))); } catch (e) { log(`[vault-job] the revoke of ${j} could not stop it (${(e && e.message) || e})`); }
+    return { ok: true, outcome: 'revoked', job: j, stopped };
+  }
+  /** AN ENTRY IS DELETED (the Vault window's 删除 — src/server/vault-paste-door.js dropEntry), in two steps around the engine's
+   *  secretDrop: `dropRow(id)` FIRST — the entry's vault-job row is removed (a delete never leaves an approval dangling; a write
+   *  that fails refuses the whole delete, as the vault-use row's does) → {ok, jobs:[ids]}; then `entryGone(id)` — every job that
+   *  names the entry stops (a running one: stopped, its owner told once; a waiting one: refused `entry_unknown`, its card over). */
+  function dropRow(entry, { by = 'user' } = {}) {
+    const id = String(entry || '');
+    const row = rowsFor(id)[0] || null;
+    const jobs = [...new Set((Array.isArray(row && row.to) ? row.to : []).flatMap((m) => (m && Array.isArray(m.jobs) ? m.jobs.map(String) : [])))];
+    if (!row) return { ok: true, jobs };
+    const g = store();
+    if (!g || typeof g.remove !== 'function') return named('not_written');
+    let w = null;
+    try { w = g.remove(VJ.DOOR, id, String(by || 'user').slice(0, 40)); } catch (e) { w = { ok: false, code: 'not_written', error: (e && e.message) || 'write failed' }; }
+    if (!w || !w.ok) return { ok: false, code: (w && w.code) || 'not_written', error: (w && w.error) || 'the approvals of that entry could not be removed — nothing was deleted' };
+    audit({ op: 'drop', entry: id, jobs, by: String(by || 'user').slice(0, 40) });
+    return { ok: true, jobs };
+  }
+  function entryGone(entry, { label = null } = {}) {
+    const id = String(entry || '');
+    if (!jm || !VJ.entryOfRow(id)) return 0;
+    const words = VJ.stopWords('deleted', label || VJ.entryOfRow(id));
+    let n = 0;
+    for (const job of [...jm.jobs.values()]) {
+      if (!VJ.refsOf(job).some((r) => { const p = VR.parseRef(r.ref); return !!p && p.id === id; })) continue;
+      try { if (jm.vaultEntryGone(job.id, words)) n++; } catch (e) { log(`[vault-job] ${job.id}: its deleted entry could not stop it (${(e && e.message) || e})`); }
+    }
+    return n;
+  }
+  /** A JOB REMOVED OR ITS CONTENT CLEARED (the engine's rm / clearJobs): its id leaves every vault-job row (a later job — a new id —
+   *  asks again; a cleared one's next start asks again) → the rows changed */
+  function jobGone(jobId) {
+    const j = String(jobId || '');
+    const g = store();
+    if (!JOB_RE.test(j) || !g || typeof g.rowsOfDoor !== 'function') return 0;
+    let rows = [];
+    try { rows = g.rowsOfDoor(VJ.DOOR) || []; } catch { rows = []; }
+    let n = 0;
+    for (const row of rows) {
+      const next = VJ.memberWithout(row, j);
+      if (!next.changed) continue;
+      const w = write(row.resource, next, 'hub');
+      if (w.ok) { n++; audit({ op: 'gone', job: j, entry: row.resource }); } else log(`[vault-job] ${j}: its approval on ${row.resource} could not be removed (${w.code})`);
+    }
+    return n;
+  }
+
   const bindJobs = (engine) => { jm = engine || null; };
-  return { gate, payload, noteUses, blocked, onChange, ask, answer, askOver, bindJobs };
+  return { gate, payload, noteUses, blocked, onChange, ask, answer, askOver, revoke, dropRow, entryGone, jobGone, bindJobs };
 }
 
 module.exports = { create };

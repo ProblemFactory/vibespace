@@ -181,7 +181,7 @@ const browserLogins = require('./browser-logins.js').create({ vault, grants: () 
 // lane vault-paste-request (the owner 2026-10-23: 「应该允许你给我弹一个保险库输入框让我直接 paste 进去」): an agent ASKS for a secret, the
 // owner PASTES it into its For-you item's masked box (or refuses); the value goes to the one writer of its place (a registry
 // field: the integration store; a free entry: the vault's `secret:<id>`); the asker reads a receipt at its next turn (the stash)
-const vaultPaste = require('./vault-paste-door.js').create({ vault, integrations, userTodos, deliver, vaultRun, useGrants: vaultUseGrants, logins: browserLogins, totp: vaultTotp, runOf: totpRunOf, setting: (k) => serverSetting(k), log: (m) => console.log('[vault-paste]', m) });   // useGrants + setting: lane vault-use-grants (a request's default grant)
+const vaultPaste = require('./vault-paste-door.js').create({ vault, integrations, userTodos, deliver, vaultRun, vaultJob, useGrants: vaultUseGrants, logins: browserLogins, totp: vaultTotp, runOf: totpRunOf, setting: (k) => serverSetting(k), log: (m) => console.log('[vault-paste]', m) });   // useGrants + setting: lane vault-use-grants (a request's default grant)
 const vaultJobSecrets = require('./job-secrets-door.js').create({ dataDir: path.join(rootDir, 'data'), vault, paste: vaultPaste, userTodos, log: (m) => console.log('[vault-job-secrets]', m) });   // B-ef1b: the retired job-secrets notice's two buttons (move into the vault / delete the file)
 // lane chat-attachments-persist (the cut, 主开发 2026-11-13: «the record is the store»): a picture a message showed is READ
 // from the record it came in (the route, through the transcript service: this hub's transcript worker, or a paired

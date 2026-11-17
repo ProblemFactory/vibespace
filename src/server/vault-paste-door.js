@@ -103,7 +103,7 @@ const statusOf = (code) => STATUS[code] || 400;
  * @param {object} [o.vaultRun]    src/server/vault-run-door.js (grantPasted — the asker may use a NEW free entry in runs)
  * @param {object} [o.logins]      src/server/browser-logins.js (addOwn — THE web-login writer; grant — the 用于… row) — lane login-request-card
  */
-function create({ vault, integrations = null, userTodos = null, deliver = null, vaultRun = null, useGrants = null, logins = null, totp = null, runOf = () => null, loginChannel = null, setting = () => undefined, log = () => {}, now = () => Date.now() } = {}) {   // totp + runOf: lane totp-request-card (src/server/vault-totp.js — addEntry, THE person's two-step writer; grant, the entry's «Use for…»; runOf = the wiring's: a running conversation's run)
+function create({ vault, integrations = null, userTodos = null, deliver = null, vaultRun = null, useGrants = null, logins = null, totp = null, runOf = () => null, loginChannel = null, setting = () => undefined, log = () => {}, now = () => Date.now(), vaultJob = null } = {}) {   // vaultJob: lane vault-job-approval — a deleted entry's Background-job approvals go with it, its jobs stop   // totp + runOf: lane totp-request-card (src/server/vault-totp.js — addEntry, THE person's two-step writer; grant, the entry's «Use for…»; runOf = the wiring's: a running conversation's run)
   let loginChannelFn = typeof loginChannel === 'function' ? loginChannel : null;
   const setLoginChannel = (fn) => { loginChannelFn = typeof fn === 'function' ? fn : null; };
   // lane vault-use-grants: does a request that names its hosts grant the asker? (Settings ▸ vault.requestGrantsRequester — default on)
@@ -429,10 +429,17 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     // FIRST (it refuses while locked, needing the generation sidecar). If it cannot (a locked vault), REFUSE the whole delete by
     // name, so an entry is never gone while its grant row dangles (r4 deleted the secret and silently ignored the row's refusal).
     if (useGrants) { let dr = null; try { dr = useGrants.drop(`secrets:${entry}#${P.ENTRY_FIELD}`, { by }); } catch (e) { log(`${entry}: its vault-use grant row could not be removed — ${e.message}`); return named('store_failed'); } if (dr && !dr.ok) return named(dr.code === 'vault_locked' ? 'vault_locked' : 'store_failed'); }
+    // lane vault-job-approval (decision ④): …and the Background jobs approved to use it — their vault-job row goes FIRST (the
+    // same rule: a delete never leaves an approval dangling; a row that cannot be removed refuses the delete by name)
+    const rowId = `secrets:${entry}#${P.ENTRY_FIELD}`;
+    let label = entry;
+    try { const s = (vault.secretNames() || []).find((x) => x && x.name === entry); const row = s ? VI.secretRowOf(s) : null; if (row && row.label) label = String(row.label); } catch { }
+    if (vaultJob) { let jd = null; try { jd = vaultJob.dropRow(rowId, { by }); } catch (e) { log(`${entry}: its Background-job approvals could not be removed — ${e.message}`); return named('store_failed'); } if (jd && !jd.ok) return named('store_failed'); }
     const r = vault.secretDrop(entry);
     if (!r || !r.ok) return named('store_failed');
     if (r.already) return named('entry_unknown_id');
     audit('vault-secret-deleted', { by: String(by).slice(0, 40), entry });
+    if (vaultJob) { try { vaultJob.entryGone(rowId, { label }); } catch (e) { log(`${entry}: its Background jobs could not be stopped — ${e.message}`); } }   // every job that names it stops (a waiting one is refused)
     return { ok: true, entry };
   }
   /** B-3fb5 (design q-047 §3.3: 显示 · 换新… · 删除 for an agent's entry): an AGENT's OWN entry's delete door — its row's 删除 in

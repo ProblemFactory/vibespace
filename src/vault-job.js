@@ -24,7 +24,9 @@
  *     (`askCardOf` — the facts, never a value; no expiry; ≤ ASKS_PER_CONV open per conversation, ≤ ASKS_MAX on the hub; a Deny
  *     quiets that conversation × entry DENY_QUIET_MS). 允许 (a person, the second password) adds the job to the owner
  *     conversation's member of the entry's `vault-job` row (`memberWith` — through the grants store's ONE writer: the I/O is
- *     src/server/vault-job-door.js); 拒绝 refuses the job (`vault_denied`).
+ *     src/server/vault-job-door.js); 拒绝 refuses the job (`vault_denied`). TAKEN BACK (decision ④): the ✕ — `memberWithout`
+ *     — or the entry deleted STOPS the job (`stopWords` say it to its owner once); a job removed or cleared leaves the row too;
+ *     a lock stops nothing that runs (decision ③ — no lock road exists).
  *   · THE HAND-OFF (`fdPlan`, `envOf`, `specOf`, `encodeFrame` / `decodeFrame`): the hub writes ONE frame to the wrapper's fd 3
  *     — the names and lengths in its head, the bytes raw (never a JSON string of a value: every copy can be zeroed); the wrapper
  *     gives NAME the job's fd FD_BASE + i (fd 3 is the memory gate's — data/bin/job-wrapper.js GATE_EXEC) and the env only
@@ -300,6 +302,28 @@ function memberWith(row, key, jobId) {
   return { to, except, same: false };
 }
 
+/** …and the member WITHOUT the job (lane vault-job-approval — decision ④: the ✕ takes it back; a job removed or cleared takes
+ *  its id with it): every conversation member's `jobs` loses `jobId`, a member left naming no job leaves, every exception is
+ *  kept. → `{to, except, changed}` (`changed` false: no member named the job — nothing to write). */
+function memberWithout(row, jobId) {
+  const to = [];
+  let changed = false;
+  for (const m of Array.isArray(row && row.to) ? row.to : []) {
+    if (!m || typeof m !== 'object' || !Array.isArray(m.jobs) || !m.jobs.map(String).includes(jobId)) { to.push(m && typeof m === 'object' ? { ...m } : m); continue; }
+    changed = true;
+    const jobs = m.jobs.map(String).filter((x) => x !== jobId);
+    if (jobs.length) to.push({ ...m, jobs });
+  }
+  return { to, except: Array.isArray(row && row.except) ? row.except.slice() : [], changed };
+}
+/** The entry name of a `vault-job` row's resource (`secrets:<entry>#secret`) | null. */
+const entryOfRow = (id) => { const m = /^secrets:(.+)#secret$/.exec(String(id || '')); return m ? m[1] : null; };
+/** What the owner conversation is told ONCE when the person takes a running job's value back (`revoked`) or deletes its entry
+ *  (`deleted`) — and the job's own event line. Names only; what cannot be undone said plainly (a value already read). */
+const stopWords = (why, label) => (why === 'deleted'
+  ? `stopped: the user deleted its vault entry «${String(label || '').slice(0, 120)}» — the job is stopped and cannot start again with it`
+  : `stopped: the user took back its use of the vault entry «${String(label || '').slice(0, 120)}» — the job is stopped; a value it already read cannot be taken back (rotate the key at its provider); \`vibespace-job start\` asks the user again`);
+
 /** The job's state line while it waits. */
 const waitWords = (w) => (w === 'approval' ? WORDS.wait_approval : WORDS.wait_vault);
 /** Round 2 — A USE IS A HAND-OVER THAT COMPLETED: a start the wrapper never acknowledged (no ACK before its fd 3 closed) → the
@@ -315,7 +339,7 @@ function refusedOutcome(exit) {
 
 module.exports = {
   MAX, NAME_RE, FD_BASE, PAYLOAD_MAX, DRAIN_MS, DOOR, USE_DOOR, MAGIC, ACK, WAITS, WORDS,
-  ASK_TYPE, ASK_ID_RE, ASKS_PER_CONV, ASKS_MAX, DENY_QUIET_MS, askJobIdOf, askCardOf, memberWith,
+  ASK_TYPE, ASK_ID_RE, ASKS_PER_CONV, ASKS_MAX, DENY_QUIET_MS, askJobIdOf, askCardOf, memberWith, memberWithout, entryOfRow, stopWords,
   refsOf, parseVault, ownerOf, ownerKeysOf, jobIdsOf, familyOf, approvedBy, verdictOf,
   fdPlan, envOf, specOf, planOfSpec, encodeFrame, decodeFrame, waitWords, refusedOutcome,
 };
