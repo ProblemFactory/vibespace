@@ -4,6 +4,7 @@
 // door that shows it says the same sentence: the sidebar's card, the read-only window's resume bar, the resume-all offer,
 // the window's stopped tile. PURE but for t().
 import { t } from './i18n.js';
+import { stampAt } from './page-time.js';
 
 const seen = new Map(); // backend:id → {reason, at} — the rows a door read before the sidebar had its list (the boot's restore)
 const keyOf = (backend, id) => `${backend || 'claude'}:${id}`;
@@ -11,15 +12,24 @@ const rowFor = (rows, backend, id) => (rows || []).find((s) => s && (s.backend |
 
 /** Remember the stopped rows' reasons from a /api/sessions list (layout restoreState reads one at boot). */
 export function noteStoppedRows(rows) {
-  for (const r of rows || []) if (r && r.status === 'stopped' && r.stopReason) seen.set(keyOf(r.backend, r.backendSessionId || r.sessionId), { reason: r.stopReason, at: r.stoppedAt || null });
+  for (const r of rows || []) if (r && r.status === 'stopped' && r.stopReason) seen.set(keyOf(r.backend, r.backendSessionId || r.sessionId), { reason: r.stopReason, at: r.stoppedAt || null, endedBy: r.endedBy || null });
 }
-/** The sentence for a stop reason — '' for none (a conversation simply not running) or one this build does not word. */
-export function stoppedWhyText(reason) {
-  return reason === 'dead-socket-at-boot' ? t('Its process ended while the server was down.') : '';
+/** The sentence for a stop reason — '' for none (a conversation simply not running) or one this build does not word.
+ *  `ended` (lane end-obeys-verdict, majordomo piece 3): an end on purpose says WHO and when — an agent by its name, a person
+ *  «by hand» (the row's endedBy + stoppedAt). */
+export function stoppedWhyText(reason, row = null) {
+  if (reason === 'dead-socket-at-boot') return t('Its process ended while the server was down.');
+  if (reason === 'ended') {
+    const by = row && row.endedBy && typeof row.endedBy === 'object' ? row.endedBy : null;
+    const time = row && row.stoppedAt ? stampAt(Number(row.stoppedAt)) : '';
+    if (by && by.kind === 'agent' && by.name) return t('Terminated by «{name}» at {time}.', { name: String(by.name), time });
+    return t('Terminated by hand at {time}.', { time });
+  }
+  return '';
 }
 /** The sentence for a session row (the sidebar's card): only a STOPPED row says why. */
 export function stoppedWhyOf(row) {
-  return row && row.status === 'stopped' ? stoppedWhyText(row.stopReason) : '';
+  return row && row.status === 'stopped' ? stoppedWhyText(row.stopReason, row) : '';
 }
 /** The sentence for a conversation (a window's resume bar, its tile, the resume-all offer): its row in `rows`, else what a
  *  door saw listed. */
@@ -29,8 +39,8 @@ export function stoppedWhyFor(backend, id, rows) {
   if (r && r.status !== 'stopped') { seen.delete(k); return ''; } // it runs again: the boot's reason is spent
   // the row's own reason first; the remembered one only for THAT stop (r2: a later stop for another reason is never worded
   // «ended while the server was down» for the page's life)
-  if (r) return stoppedWhyText(r.stopReason || (was && was.at && r.stoppedAt === was.at ? was.reason : null));
-  return stoppedWhyText(was ? was.reason : null);
+  if (r) return stoppedWhyText(r.stopReason || (was && was.at && r.stoppedAt === was.at ? was.reason : null), r.stopReason ? r : { stoppedAt: was && was.at, endedBy: was && was.endedBy });
+  return stoppedWhyText(was ? was.reason : null, was ? { stoppedAt: was.at, endedBy: was.endedBy } : null);
 }
 /** The account a conversation's row names (a kept meta's, the agy index's account root) — a resume nobody gave an account
  *  goes there, never to the harness's default (the conversation lives in that account's store). undefined = no row says. */

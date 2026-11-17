@@ -12518,6 +12518,8 @@ export default {
   "Session stopped — click to resume": "セッションは停止しています — クリックで再開",
   // lane dead-socket-keeps-chat-meta: a session a boot kept stopped says why (the card, the resume bar, the tile, the resume-all offer)
   "Its process ended while the server was down.": "サーバーが停止している間に、そのプロセスは終了しました。",
+  "Terminated by «{name}» at {time}.": "{time} に「{name}」が終了しました。", // lane end-obeys-verdict (majordomo piece 3, the design's words)
+  "Terminated by hand at {time}.": "{time} に手動で終了しました。", // lane end-obeys-verdict
   "Resume interrupted sessions?": "中断されたセッションを再開しますか？",
   "{n} sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?": "{n} 件のセッションが中断され（サーバーまたはマシンの再起動）、読み取り専用の履歴として開き直されました。今すぐすべて再開しますか？",
   "{n} of them stopped because their process ended while the server was down.": "そのうち {n} 件は、サーバーが停止している間にプロセスが終了したため停止しました。",

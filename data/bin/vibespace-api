@@ -33,7 +33,8 @@ const USAGE = [
   '                [--model opus] [--effort xhigh] [--permission bypassPermissions] [--task <T-…>] [--pool <pool-…>]',
   '      a billed open (the spend ceiling decides first); answers sessionId + the conversation id, or pending',
   '  vibespace-api conversations status <target>              its ids (pending until its CLI reported one)',
-  '  vibespace-api conversations rename <target> "<name>"     ·  bind <target> <T-…>  ·  end <target>',
+  '  vibespace-api conversations rename <target> "<name>"     ·  bind <target> <T-…>  ·  end <target> [--force]',
+  '                (end: refused while it is busy or a fact is unknown — subject_busy with the reasons; --force only for a conversation this key opened)',
   '  vibespace-api conversations archive <target> [--force] [--resolve-asks]   end it if still live, then archive it as the sidebar\'s 归档 does',
   '                (a running turn ⇒ subject_busy unless --force; its open For-you asks ⇒ asks_open naming them, unless --resolve-asks dismisses them; archived already ⇒ already_archived)',
   '  vibespace-api groups invite <g-…|group name> <target>    into an agent group you are in (no wake)',
@@ -91,7 +92,7 @@ const TYPED = {
   'conversations status': { verb: 'conversations.status', pos: ['target'], flags: [] },
   'conversations rename': { verb: 'conversations.rename', pos: ['target', 'name'], flags: [] },
   'conversations bind': { verb: 'conversations.bind', pos: ['target', 'task'], flags: [] },
-  'conversations end': { verb: 'conversations.end', pos: ['target'], flags: [] },
+  'conversations end': { verb: 'conversations.end', pos: ['target'], flags: [], bool: ['force'] }, // lane end-obeys-verdict: --force only for a conversation the key opened
   // lane conversations-archive-verb: `bool` flags take NO value (--force / --resolve-asks ⇒ force / resolveAsks: true)
   'conversations archive': { verb: 'conversations.archive', pos: ['target'], flags: [], bool: ['force', 'resolve-asks'] },
   'groups invite': { verb: 'groups.invite', pos: ['group', 'target'], flags: [] },

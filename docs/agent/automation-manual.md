@@ -67,7 +67,7 @@ vibespace-api call conversations.rename --name "Worker 2" --target <conversation
 | `conversations.status` | `target` | no (a read) |
 | `conversations.rename` | `name`, `target?` | no |
 | `conversations.bind` | `target`, `task` (a Task Group this conversation is in) | no |
-| `conversations.end` | `target` | no |
+| `conversations.end` | `target`, `force?` — refused (`subject_busy` with `busy:[{code, why}]`, nothing stopped) while the conversation is busy or a fact is unknown (the reasons of conversations.list's `busy`); `force` passes only for a conversation THIS key opened (`force_not_yours` otherwise). The ended conversation keeps a stopped record: reason ended, who, when | no |
 | `conversations.archive` | `target`, `force?`, `resolveAsks?` — ends it if still live, then archives it exactly as the sidebar's 归档 does (the owner's list no longer shows it); a running turn ⇒ `subject_busy` unless `force`; its open For-you asks ⇒ `asks_open` (their ids) unless `resolveAsks` dismisses them; archived already ⇒ `already_archived` | no |
 | `conversations.list` | none — one snapshot: the machine's memory, the desktops, every conversation and running browser the key reaches (this conversation marked `self`; the rest only counted, `beyondReach`). Each row: `key`, state, turn, background tasks, held prompts, CLI timers, open asks, goal, armed continue, jobs, waiting notices, browser, desktop, idle age, memory, `busy` + `endable` (the end verdict), `link`. A fact the hub cannot know is `null` with a `<fact>Why` sentence — never 0, never idle; an unknown fact counts as busy | no (a read) |
 | `groups.invite` | `group`, `target` (an agent group this conversation is in; added without a wake) | no |

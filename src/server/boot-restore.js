@@ -101,6 +101,9 @@ function turnRan(rec, session) {
   const stop = session && session._promptStopReason;
   return stop !== 'error' && stop !== 'cancelled';
 }
+// lane end-obeys-verdict (majordomo piece 3): an END ON PURPOSE — a person's Terminate or an agent's admitted end — keeps the same
+// stopped record, reason `ended`, with who ended it (kind person | agent, the actor's id, a name) and when (stoppedAt)
+const STOP_ENDED = 'ended';
 /** tmp + rename (the atomic-persistence law): a crash mid-write leaves the old file or none, never a torn one. */
 function writeJsonAtomic(file, obj) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -403,6 +406,23 @@ function loadKept() {
 }
 /** The kept metas as /api/sessions rows (routes/sessions merges them over its harnesses' discover): STOPPED, why and when,
  *  and the name / cwd / mode / account the meta kept — the doors resume with them. */
+/**
+ * lane end-obeys-verdict (majordomo piece 3) — TERMINATE SAYS WHO. An end on purpose keeps the stopped record a restart already
+ * leaves (no new store): reason `ended`, `endedBy` {kind: 'person'|'agent', actorId, name}, and when. Called AFTER the kill took
+ * the session out of the live map — a session-list read during the kill would otherwise consume the copy (stoppedSessions drops
+ * a copy whose conversation is live). One async atomic write; a failed write keeps nothing and says so.
+ */
+async function keepEnded(sockFile, meta, endedBy) {
+  const id = resumeIdOf(meta);
+  if (!sockFile || !id) return null;
+  const by = endedBy && typeof endedBy === 'object' ? { kind: endedBy.kind === 'agent' ? 'agent' : 'person', actorId: endedBy.actorId ? String(endedBy.actorId).slice(0, 200) : null, name: endedBy.name ? String(endedBy.name).slice(0, 120) : null } : { kind: 'person', actorId: null, name: null };
+  const kept = { ...meta, status: 'stopped', stoppedAt: Date.now(), stopReason: STOP_ENDED, endedBy: by };
+  const file = keptFile(sockFile), tmp = `${file}.${process.pid}.tmp`;
+  try { await fs.promises.writeFile(tmp, JSON.stringify(kept)); await fs.promises.rename(tmp, file); }
+  catch (e) { fs.unlink(tmp, () => { }); console.warn(`[end] ${sockFile}: its ended record could not be written (${e.message}) — kept nothing`); return null; }
+  keepStopped(sockFile, kept, id);
+  return kept;
+}
 async function stoppedSessions() {
   await loadKept();
   const live = new Set(); // the conversations live sessions ADDRESS (addressableId: a pending fork addresses none — r2)
@@ -413,6 +433,7 @@ async function stoppedSessions() {
     const m = e.meta;
     rows.push({ backend: m.backend || 'claude', sessionId: e.id, backendSessionId: e.id, cwd: m.cwd || '', name: m.name || '', mode: m.mode || 'terminal', status: 'stopped',
       startedAt: m.stoppedAt || m.createdAt || 0, stoppedAt: m.stoppedAt || null, stopReason: m.stopReason || STOP_DEAD_SOCKET, accountId: m.accountId || (accountBoundOf(m.backend) ? 'subscription' : null), kept: e.sockFile,
+      ...(m.endedBy && typeof m.endedBy === 'object' ? { endedBy: m.endedBy } : {}), // lane end-obeys-verdict: who ended it on purpose
       ...(k.startsWith('sock:') ? { forkPending: true } : {}) }); // a pending fork's copy: kept and listed here, but `id` is its PARENT's — no sidebar row (routes/sessions)
   }
   return rows;
@@ -1111,7 +1132,8 @@ async function readoptOrphanKeeperSessions() {
   return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
     readoptOrphanKeeperSessions, probeSockets, probeFacts, reprobePending, probePending: () => new Map([...pendingProbes].map(([f, p]) => [f, [...p.q]])),
     stoppedSettled: () => Promise.all([...settling]), // the kept metas' transcript answers (settleStopped) — a test's wait
+    keepEnded, // lane end-obeys-verdict: an end on purpose keeps the stopped record (reason ended, who, when)
     stoppedSessions, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js)
     consumeKeptOf }; // B-a5a4 (2): a turn ended on a live session — its conversation's kept copy goes at once (server.js noteTurnEnd)
 }
-module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, STOP_DEAD_SOCKET }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
+module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, STOP_DEAD_SOCKET, STOP_ENDED }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)

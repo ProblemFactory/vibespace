@@ -172,7 +172,13 @@ function create({
     if (!inflight) inflight = build().finally(() => { inflight = null; });
     return inflight;
   }
-  return { list, build };
+  /** ONE conversation's row from memory (no pass: the verdict reads no memory and no idle age) — the end verb's input
+   *  (lane end-obeys-verdict). null = no live conversation by that webui id. */
+  function rowOf(id) {
+    const s = activeSessions && typeof activeSessions.get === 'function' ? activeSessions.get(id) : null;
+    return s && !s.isTmuxView ? CF.shapeRow(liveRow(id, s)) : null;
+  }
+  return { list, build, rowOf };
 }
 
 /**
@@ -267,7 +273,8 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
       const kept = typeof stoppedSessions === 'function' ? await stoppedSessions() : [];
       return (Array.isArray(kept) ? kept : []).filter((r) => r && (r.backendSessionId || r.sessionId)).map((r) => ({
         key: `${r.backend || 'claude'}:${r.backendSessionId || r.sessionId}`, name: r.name || null, cwd: r.cwd || null, backend: r.backend || 'claude', mode: r.mode || null,
-        ended: { at: r.stoppedAt || null, by: r.stopReason === 'dead-socket-at-boot' ? 'restart' : (r.stopReason || null) } }));
+        // who ended it (lane end-obeys-verdict): a restart, or an end on purpose — a person, or an agent by id and name
+        ended: { at: r.stoppedAt || null, by: r.stopReason === 'dead-socket-at-boot' ? 'restart' : r.stopReason === 'ended' ? (r.endedBy && typeof r.endedBy === 'object' ? r.endedBy : { kind: 'person', actorId: null, name: null }) : (r.stopReason || null) } }));
     },
     machineMem: async () => { const h = sysinfo && typeof sysinfo.history === 'function' ? sysinfo.history(5 * 60 * 1000) : null; const p = Array.isArray(h) && h.length ? h[h.length - 1] : null; return p && Number.isFinite(p.l) ? { memTotal: p.l, memAvailable: Number.isFinite(p.m) ? Math.max(0, p.l - p.m) : null } : { why: WHY.measuring }; },
     memOf: treeUsage ? async (s) => { const pid = s && s._childPid; if (!pid) return { why: WHY.noProcess }; const u = await treeUsage(pid); return u && Number.isFinite(u.memBytes) && u.memBytes > 0 ? u.memBytes : { why: WHY.noProcess }; } : null,

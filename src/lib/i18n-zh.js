@@ -12519,6 +12519,8 @@ export default {
   "Session stopped — click to resume": "会话已停止 — 点击恢复",
   // lane dead-socket-keeps-chat-meta: a session a boot kept stopped says why (the card, the resume bar, the tile, the resume-all offer)
   "Its process ended while the server was down.": "服务器停机期间，它的进程已结束。",
+  "Terminated by «{name}» at {time}.": "{time} 由「{name}」终止。", // lane end-obeys-verdict (majordomo piece 3, the design's words)
+  "Terminated by hand at {time}.": "{time} 手动终止。", // lane end-obeys-verdict
   "Resume interrupted sessions?": "恢复被中断的会话？",
   "{n} sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?": "{n} 个会话被中断（服务器或机器重启），已作为只读历史重新打开。现在全部恢复吗？",
   "{n} of them stopped because their process ended while the server was down.": "其中 {n} 个是因为服务器停机期间进程结束而停止的。",

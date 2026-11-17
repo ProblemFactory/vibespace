@@ -131,8 +131,9 @@ const SCOPES = Object.freeze([
     args: (a) => argsOf(a, { name: (v) => textArg(v, 'name'), target: (v) => idArg(v, 'target', { optional: true }) }) }),
   Object.freeze({ verb: 'conversations.bind', layer: 'act', billed: false, label: 'Put a conversation in a task group',
     args: (a) => argsOf(a, { target: (v) => idArg(v, 'target'), task: (v) => idArg(v, 'task') }) }),
+  // lane end-obeys-verdict (majordomo piece 3): the end obeys the verdict; `force` passes it only for a conversation this key opened
   Object.freeze({ verb: 'conversations.end', layer: 'act', billed: false, label: 'End a conversation',
-    args: (a) => argsOf(a, { target: (v) => idArg(v, 'target') }) }),
+    args: (a) => argsOf(a, { target: (v) => idArg(v, 'target'), force: (v) => boolArg(v, 'force') }) }),
   Object.freeze({ verb: 'groups.invite', layer: 'act', billed: false, label: 'Invite a conversation into a group',
     args: (a) => argsOf(a, { group: (v) => idArg(v, 'group'), target: (v) => idArg(v, 'target') }) }),
   // lane automation-verbs (L2): the ids a just-opened conversation reports a moment later (`pending` until its CLI said its

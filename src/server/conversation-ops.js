@@ -41,6 +41,7 @@
  * pins), scripts/test-spend-paths.mjs (the `headless-open` primitive must sit under the authorizer — a MUTANT without it
  * is UNWIRED), the ws suites unchanged (test-ws-contract, test-session-schema, test-agentd-session, test-restore-liveness).
  */
+const CF = require('../conversation-facts.js'); // lane end-obeys-verdict: THE end verdict (PURE)
 const crypto = require('crypto');
 const { capsOf } = require('../backend-caps');
 const SPEC = require('../conversation-spec.js');
@@ -330,6 +331,23 @@ function opsOver(getDeps) {
   }
 
   /** END. The ws case hands its frame and its reply (`killed`); without a reply the answer is returned. */
+  // lane end-obeys-verdict (majordomo piece 3) — TERMINATE SAYS WHO: the session's facts are taken BEFORE the kill (the kill
+  // body deletes its meta) and its kept record is written AFTER it, once the session has left the live map (boot-restore
+  // keepEnded) — around the kill body, never inside it. A person's Terminate: kind person; an agent's admitted end: kind agent,
+  // the asking conversation by id and name.
+  const keptMetaOf = (s, id) => ({ webuiSessionId: id, backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.claudeSessionId || null,
+    claudeSessionId: s.claudeSessionId || null, name: s.name || '', cwd: s.cwd || '', mode: s.mode || 'terminal', accountId: s._accountId || null,
+    createdAt: s.createdAt || null, host: s.host || null });
+  const endedByOf = (by) => (by && by.kind === 'automation'
+    ? { kind: 'agent', actorId: by.sessionKey || by.cid || null, name: by.name || null }
+    : { kind: 'person', actorId: (by && by.actBy) || null, name: null });
+  async function keepEndedAfter(before, by) {
+    if (!before || typeof D().keepEnded !== 'function') return null;
+    const live = D().activeSessions;
+    if (live && typeof live.has === 'function' && live.has(before.id)) return null;   // the kill did not take it: nothing ended
+    try { return await D().keepEnded(before.sock, before.meta, endedByOf(by)); } catch { return null; }
+  }
+  const beforeOf = (id) => { const live = D().activeSessions; const s = live && typeof live.get === 'function' ? live.get(id) : null; return s && s.sockName ? { id, sock: s.sockName, meta: keptMetaOf(s, id) } : null; };
   // B-c134 cure: `endTree` — the end also ends what the conversation left running in the background (a person's Terminate, an
   // archive); an automation key's own kill frame never asks it (the verb decides: the archive verb does, the end verb does not)
   async function endConversation(target, by, { reply = null, endTree = false } = {}) {
@@ -338,12 +356,17 @@ function opsOver(getDeps) {
       const t = SPEC.targetVerdict(target); if (!t.ok) return t;
       const hit = liveOf(t.target);
       if (!hit) return refusal('not_found', 'no live conversation by that id');
+      const before = beforeOf(hit.id);
       const answers = [];
       await D().endSession({ sessionId: hit.id }, { reply: (m) => answers.push(m), actBy: SPEC.actByOf(by), endTree: endTree === true });
       const a = answers[answers.length - 1] || null;
+      if (a && a.ok) await keepEndedAfter(before, by);
       return a && a.ok ? { ok: true, sessionId: hit.id } : refusal('not_found', 'no live conversation by that id');
     }
-    return D().endSession(target, { reply: reply || (() => { }), actBy: SPEC.actByOf(by), endTree: endTree === true });
+    const before = target && target.sessionId ? beforeOf(String(target.sessionId)) : null;
+    const r = await D().endSession(target, { reply: reply || (() => { }), actBy: SPEC.actByOf(by), endTree: endTree === true });
+    await keepEndedAfter(before, by);
+    return r;
   }
 
   /** INVITE INTO AN AGENT GROUP — the groups engine's invite, the inviter `by.cid` (a member of the group, as for its own
@@ -415,7 +438,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
     for (const [id, s] of activeSessions) { const cid = idOf(s); if (cid && (cid === t || `${s.backend || 'claude'}:${cid}` === t)) return [s, id]; }
     return null;
   }
-  const byOf = (caller, keyId) => ({ kind: 'automation', key: keyId, subject: `session:${caller.conversationId}`, cid: caller.conversationId, sessionKey: caller.sessionKey || `claude:${caller.conversationId}` });
+  const byOf = (caller, keyId) => ({ kind: 'automation', key: keyId, subject: `session:${caller.conversationId}`, cid: caller.conversationId, sessionKey: caller.sessionKey || `claude:${caller.conversationId}`, name: caller.name || null });
   const groupsOfLive = (s, id) => { try { return groupsOf(s, id) || []; } catch { return []; } };
   /** The target, if the key reaches it → [s, id] | a named refusal (carrying the target's name for the owner's notice). */
   function reached(target, { caller, reach }) {
@@ -424,7 +447,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
     const [s, id] = hit;
     const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id), ...require('./groups-hold.js').fact() });   // + the hub's hold (lane bl-windows): a reach «… except G» never admits a target whose groups are unknown   // ONE rule: opener / self / the grant's reach (B-3190)
     if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // lane key-instance-scope: the refusal names the grant's reach
-    return { ok: true, s, id };
+    return { ok: true, s, id, by: (v && v.by) || null };   // lane end-obeys-verdict: how the key reached it (`opener` = it opened it)
   }
   return {
     'conversations.open': async (args, { caller, keyId }) => {
@@ -466,11 +489,24 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
         return { ok: false, code: e.code || (e.message === 'task not found' ? 'not_found' : 'bad_args'), why: e.message };
       }
     },
+    // lane end-obeys-verdict (majordomo piece 3): AN AGENT'S END OBEYS THE VERDICT (src/conversation-facts.js endVerdict over the
+    // list's own row) — busy or unknown ⇒ subject_busy with its reasons, nothing stopped, the doors named. `force` passes the
+    // verdict ONLY for a conversation THIS key opened (the owner's decision); one reached through a grant ⇒ force_not_yours.
     'conversations.end': async (args, ctx) => {
       const t = reached(args.target, ctx);
       if (!t.ok) return t;
+      const label = t.s.name || args.target || null;
+      if (args.force) {
+        if (t.by !== 'opener') return { ok: false, code: 'force_not_yours', why: 'force is honoured only for a conversation this key opened; this one is reached through a grant — nothing was stopped. A person can terminate it from System → Conversations and browsers.', target: label };
+      } else {
+        const row = listFacts && typeof listFacts.rowOf === 'function' ? listFacts.rowOf(t.id) : null;
+        if (!row) return { ok: false, code: 'not_ready', why: 'the conversation facts are not wired yet — nothing was stopped', target: label };
+        const v = CF.endVerdict(row);
+        if (!v.endable) return { ...CF.refusalOf(v), target: label };
+      }
       const r = await O().endConversation({ webuiId: t.id }, byOf(ctx.caller, ctx.keyId));
-      return r && r.ok ? { ok: true, target: idOf(t.s) || t.id } : r;
+      const key = keyOf(t.s);
+      return r && r.ok ? { ok: true, target: idOf(t.s) || t.id, ...(key ? { link: 'vibespace://conversation/' + key } : {}) } : r;
     },
     // lane conversations-archive-verb: the opener's lifecycle ends with the sidebar's 归档
     'conversations.archive': async (args, ctx) => {
