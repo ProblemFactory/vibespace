@@ -19,6 +19,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
+import { CHROME_STORE } from './scratch.mjs';   // lane setting-doors (the keyring): this suite's Chrome keeps its own store — imported HERE, never inside the entry esbuild bundles (written at the repository root, a relative import there resolves nothing: the UI train's prep mirror)
 
 const execFileP = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,7 +40,6 @@ try {
   fs.writeFileSync(ENTRY, `
 import { installSidebarMounts } from ${JSON.stringify(path.join(ROOT, 'src/lib/sidebar-mounts.js'))};
 import { createModalShell } from ${JSON.stringify(path.join(ROOT, 'src/lib/utils.js'))};
-import { CHROME_STORE } from './scratch.mjs';   // lane setting-doors: a suite's Chrome keeps its own store
 const ENC=${ENC}, PLAIN=${PLAIN};
 const out=[]; const ok=(n,c,x="")=>out.push((c?"ok   ":"FAIL ")+n+(c?"":" -- "+x));
 function S(){} installSidebarMounts(S); const s=new S();
