@@ -510,6 +510,18 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   ok(fs.readFileSync(path.join(d12, 'job-notifications.json'), 'utf-8') === TORN_NOTIFS, 'B-ef97: the write-back writes jobs.json ALONE — a notifications file that did not load is not written over by it (nor by the exit)');
   const { jm: B } = boot(d12);
   ok(skel(B) === 'jb-5ke1e701,jb-5ke1e703' && B.jobs.get('jb-5ke1e701').note === LSm.RECOVERED_NOTE, 'B-ef97: AFTER A RESTART the recovered skeletons are still listed (was: the store loaded empty, the jobs vanished)', skel(B));
+  // B-2204: a skeleton is the person's alone — owner-less, view 'session': no conversation lists it, the person does
+  const sk = B.jobs.get('jb-5ke1e701'), agent = { conversationId: 'conv-any', sessionId: 'sess-any', sessionCreatedAt: 1, groups: new Set(['g-any']) };
+  ok(sk.access.view === 'session' && sk.access.control === 'session' && Object.keys(sk.owner).length === 0 && !M.canView(sk, agent) && M.canView(sk, { isUser: true }) && !M.visibleJobs([...B.jobs.values()], agent).some((j) => LSm.isSkeleton(j)), 'B-2204: a recovered skeleton is owner-less with view \'session\' — no conversation can view it (was \'all\': every one), the person can', sk.access);
+  // B-2204: a skeleton the RELEASE wrote (view 'all' — its _save wrote memory whenever anything dirtied the store) is read back the person's alone
+  const d12m = mkDir('jobs-triage-skel-migrate');
+  const oldSkel = (id) => ({ id, kind: 'task', name: id, state: 'unverified', note: LSm.RECOVERED_NOTE, owner: {}, access: { view: 'all', control: 'session' }, runs: [] });
+  fs.writeFileSync(path.join(d12m, 'jobs.json'), JSON.stringify([oldSkel('jb-5ke1e7m1')]));
+  fs.writeFileSync(path.join(d12m, 'jobs-archive.json'), JSON.stringify([{ ...oldSkel('jb-5ke1e7m2'), archivedAt: T0 - D, archivedWhy: 'unverified-acknowledged' }]));
+  const { jm: Mg } = boot(d12m);
+  const mArch = Mg._loadArchive().find((r) => r.id === 'jb-5ke1e7m2');
+  ok(Mg.jobs.get('jb-5ke1e7m1').access.view === 'session' && mArch && mArch.access.view === 'session' && !M.canView(Mg.jobs.get('jb-5ke1e7m1'), agent) && !M.canView(mArch, agent), 'B-2204: a skeleton the release wrote with view \'all\' (store and archive) is read back owner-less, view \'session\'');
+  Mg.shutdown();
   B.shutdown();
   // B-ef97: a skeleton the store holds for an ARCHIVED id (the release wrote one for every log dir) is dropped when the archive loads,
   // and a skeleton never moves OVER the archived record of its id (the sweep's replace-by-id), however it got into the store
@@ -537,11 +549,13 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   const jsrc = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
   const owedLine = '        if (bad && this.jobs.size) this._skeletonsOwed = true;\n';
   ok(jsrc.split(owedLine).length === 2, 'B-ef97 control setup: the write-back is marked on one line');
-  const JMod = MJ.load('src/jobs.js', jsrc.replace(owedLine, '        // MUTANT: the release — skeletons in memory only\n'));
+  const viewLine = "access: { view: 'session', control: 'session' }, runs: [] });\n";
+  ok(jsrc.split(viewLine).length === 2, 'B-2204 control setup: the skeleton\'s access is written on one line');
+  const JMod = MJ.load('src/jobs.js', jsrc.replace(owedLine, '        // MUTANT: the release — skeletons in memory only\n').replace(viewLine, "access: { view: 'all', control: 'session' }, runs: [] }); // MUTANT: the release\n"));
   const d12c = mkDir('jobs-triage-torn-mut');
   seedTorn(d12c);
   const mk = () => { const J = new JMod.JobManager({ dataDir: d12c, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); J.init(); return J; };
-  const X1 = mk(); const x1 = skel(X1); X1.shutdown();
+  const X1 = mk(); const x1 = skel(X1); const xv = X1.jobs.get('jb-5ke1e701'); const xSeen = !!xv && M.canView(xv, { conversationId: 'conv-any', sessionId: 'sess-any', sessionCreatedAt: 1, groups: new Set() }); X1.shutdown();
   const X2 = mk(); const x2 = skel(X2); X2.shutdown();
   ok(x1 === 'jb-5ke1e701,jb-5ke1e703' && x2 === '', 'B-ef97 CONTROL (the release, in a copy): the skeletons of boot 1 are GONE after a restart', { x1, x2 });
   const guardLine = "      if (LS.isSkeleton(moved[i]) && archIds.has(id)) { this.jobs.delete(id); this._dirty = true; moved.splice(i, 1); }\n      else if (!this.jobs.has(id)) moved.splice(i, 1);\n", dropLine = "      if (this.jobs.size) { const held = new Set(this.archive.map((r) => r.id)); for (const [id, j] of this.jobs) if (LS.isSkeleton(j) && held.has(id)) { this.jobs.delete(id); dropped++; } }\n";
@@ -554,6 +568,15 @@ console.log('§12 B-ef97: the torn store\'s skeletons are on disk, and a restart
   const DX = new JG1.JobManager({ dataDir: d12dx, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); DX.init();
   ok(DX.jobs.has('jb-5ke1e7d1'), 'B-ef97 CONTROL (no drop, in a copy): the skeleton of the archived id stays beside its record');
   DX.shutdown();
+  ok(xSeen, 'B-2204 CONTROL (the release, in a copy): any conversation can view a recovered skeleton (view \'all\')');
+  const accLine = "const skeletonAccess = (j) => { if (LS.isSkeleton(j)) { j.owner = {}; j.access = { view: 'session', control: 'session' }; } return j; };\n";
+  ok(jsrc.split(accLine).length === 2, 'B-2204 control setup: the read-back access is one line');
+  const JA2 = MJ.load('src/jobs.js', jsrc.replace(accLine, 'const skeletonAccess = (j) => j; // MUTANT: no read-back\n'), 'acc');
+  const dXm = mkDir('jobs-triage-skel-migrate-mut');
+  fs.writeFileSync(path.join(dXm, 'jobs.json'), JSON.stringify([oldSkel('jb-5ke1e7m1')]));
+  const XM = new JA2.JobManager({ dataDir: dXm, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy }); XM.init();
+  ok(XM.jobs.get('jb-5ke1e7m1').access.view === 'all', 'B-2204 CONTROL (no read-back, in a copy): a skeleton the release wrote stays view \'all\'');
+  XM.shutdown();
   for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'B-ef97 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 

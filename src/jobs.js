@@ -22,6 +22,8 @@ const { credentialEnvNames } = require('./harness-env.js'); // PURE: B-6be2 — 
 const { list: harnessList } = require('./harnesses');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const { applyClear, CLEARED_TEXT } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — this engine holds the door (clearJobs)
+// B-2204: a recovered skeleton is the person's alone — one the release wrote with view 'all' is read back owner-less, view 'session'
+const skeletonAccess = (j) => { if (LS.isSkeleton(j)) { j.owner = {}; j.access = { view: 'session', control: 'session' }; } return j; };
 const LS = require('./job-logs-sweep.js'); // lane job-logs-sweep: what a record no longer lists leaves data/job-logs after 14 days — every removal under job-logs off the main thread
 
 function writeJsonAtomic(file, obj) {
@@ -264,7 +266,7 @@ class JobManager {
     try {
       const arr = timedSync('jobs.read', () => JSON.parse(fs.readFileSync(this.file, 'utf-8')));
       if (!Array.isArray(arr)) throw Object.assign(new Error('the store is not a list of records'), { code: 'ENOTLIST' });   // lane job-logs-sweep r2: set aside like a torn file
-      for (const j of arr) this.jobs.set(j.id, j);
+      for (const j of arr) this.jobs.set(j.id, skeletonAccess(j));
     } catch (e) {
       // lane job-logs-sweep r2 law 1 / r3 §1 / r4: ONLY «the file is not there» means «no records». Any other failure is a fact the
       // clean-up's child honours on every road and after every restart: the bytes set aside before this load returns (renamed, else
@@ -280,7 +282,8 @@ class JobManager {
           const archived = bad ? new Set(this._loadArchive().map((r) => r.id)) : new Set();
           for (const id of fs.readdirSync(this.logsDir)) {
             if (!id.startsWith('jb-') || archived.has(id)) continue;
-            this.jobs.set(id, { id, kind: 'task', name: id, state: 'unverified', note: LS.RECOVERED_NOTE, owner: {}, access: { view: 'all', control: 'session' }, runs: [] });
+            // B-2204: owner-less and view 'session' — the person sees it (isUser), no conversation does (was view 'all': every one)
+            this.jobs.set(id, { id, kind: 'task', name: id, state: 'unverified', note: LS.RECOVERED_NOTE, owner: {}, access: { view: 'session', control: 'session' }, runs: [] });
           }
         } catch { }
         // B-ef97: the skeletons are WRITTEN BACK (were: memory only — the next boot loaded an empty store), once the torn bytes are
@@ -414,7 +417,7 @@ class JobManager {
     try {
       const arr = JSON.parse(fs.readFileSync(this.archiveFile, 'utf-8'));
       if (!Array.isArray(arr)) throw Object.assign(new Error('the archive is not a list of records'), { code: 'ENOTLIST' });   // lane job-logs-sweep r2: a non-list was read as [] with no bytes kept
-      this.archive = arr.filter((r) => r && typeof r === 'object' && r.id);
+      this.archive = arr.filter((r) => r && typeof r === 'object' && r.id).map(skeletonAccess);
       // B-ef97: a skeleton built while the archive could not answer may stand for an id the archive holds — that id has its record
       // here, the skeleton goes (else a person's acknowledgement would one day archive it OVER the real record, replace-by-id)
       let dropped = 0;
