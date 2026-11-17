@@ -303,6 +303,7 @@ function fail(res, e) {
     ...(typeof e?.restored === 'boolean' ? { restored: e.restored, from: e.from || null, to: e.to || null } : {}),
     // lane browser-profile-clone: a refused copy names its source, the size it measured and the fs code a failed copy hit
     ...(typeof e?.source === 'string' ? { source: e.source } : {}), ...(Number.isFinite(e?.bytes) ? { bytes: e.bytes } : {}), ...(e?.fsCode ? { fsCode: e.fsCode } : {}),
+    ...(e?.failed && typeof e.failed === 'object' ? { failed: e.failed } : {}), // B-a470: an engine plugin's OWN error (its code, message, what Node denied it) — every door quotes it
     ...rulingExtras(e), ...(res.locals && res.locals.recipe ? { recipe: res.locals.recipe } : {}) });
 }
 /** Owner ruling A: the extras a refusal on the sharing paths carries — a holder's NAME where a refusal names one + the

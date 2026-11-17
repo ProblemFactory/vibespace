@@ -27,6 +27,17 @@ export function choiceWords(choice, t) {
   return t(i18nKey("the browser CLI's default build"));
 }
 
+/** B-a470: an engine plugin that answered its probe with ITS OWN error (`failed` = src/browser-engines.js pluginErrorOf) — quoted
+ *  (its code, its message: the plugin's words, never translated); Node's ERR_ACCESS_DENIED said for what it is. '' = no such fact. */
+export function engineFailedWords(f, plugin, t) {
+  if (!f || typeof f !== 'object' || !(f.code || f.message)) return '';
+  const what = [f.code, f.message].filter(Boolean).map(String).join(': ');
+  if (f.code === 'ERR_ACCESS_DENIED' || /ERR_ACCESS_DENIED/.test(String(f.message || ''))) {
+    return f.resource ? t(i18nKey('{plugin} · its plugin was denied {resource}, outside its own folder (ERR_ACCESS_DENIED) — a bug in the plugin, unless its manifest declares that path'), { plugin, resource: String(f.resource) })
+      : t(i18nKey('{plugin} · its plugin was denied a path outside its own folder (ERR_ACCESS_DENIED) — a bug in the plugin, unless its manifest declares that path'), { plugin });
+  }
+  return t(i18nKey('{plugin} · its plugin failed: {what}'), { plugin, what });
+}
 /** lane engine-plugin: one engine row's sub-line — its plugin and the kernel's version (the probe's fact; never a path), or
  *  why it cannot be picked (the refusal by its code, the kernel's state). Lane engine-distribution: the kernel's download as
  *  it runs / why it failed; the version VibeSpace MEASURED («measured x») beats the plugin's word, which beats the declared
@@ -34,7 +45,7 @@ export function choiceWords(choice, t) {
 export function engineNote(e, t) {
   if (!e || typeof e !== 'object') return '';
   const plugin = String(e.label || e.id || '');
-  if (e.code) return buildRefusalWords({ code: e.code }, t) || t(i18nKey('{plugin} does not answer as a browser engine.'), { plugin });
+  if (e.code) return engineFailedWords(e.failed, plugin, t) || buildRefusalWords({ code: e.code }, t) || t(i18nKey('{plugin} does not answer as a browser engine.'), { plugin });
   // lane engine-spi-egress L1b: the OWNER's program (source 'user') — judged by VibeSpace, never downloaded: no download word, ever
   if (e.source === 'user') {
     const b = e.binary && typeof e.binary === 'object' ? e.binary : null;
@@ -306,6 +317,7 @@ export function changedWords({ label = '', to = null, restarted = false, told = 
 /** A refused change / create, in the device's words by the server's CODE. null = the caller adds the server's sentence. */
 export function buildRefusalWords(r, t) {
   switch (String((r && r.code) || '')) {
+  if (r && r.failed) { const fw = engineFailedWords(r.failed, String(r.failed.label || ''), t); if (fw) return fw; } // B-a470: an engine plugin's OWN error, quoted at every door
     case 'browser_build_missing': return t(i18nKey('That Chrome build is not installed there any more — pick another.'));
     case 'browser_build_not_executable': return t(i18nKey("That Chrome build's program can't be run."));
     case 'browser_path_missing': return t(i18nKey('There is no file at that path.'));

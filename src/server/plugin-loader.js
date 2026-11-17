@@ -112,15 +112,17 @@ function readThemeFile(dir, file) {
   return { ok: true, css: raw.css, terminal: raw.terminal || null };
 }
 
+/** Node's ERR_ACCESS_DENIED in words — the permission + the resource it names (the exit's trace below; B-a470: a plugin's own
+ *  answer quoting it, src/server/browser-engines.js). */
+function deniedWords({ permission = '', resource = '' } = {}) {
+  const perm = String(permission || ''), res = String(resource || '');
+  return `denied ${perm ? perm.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase() : 'access'}${res ? ' of ' + res : ''} outside its declared capabilities (ERR_ACCESS_DENIED — declare it under capabilities.server in vibespace-plugin.json, then enable again)`;
+}
 /** Node's ERR_ACCESS_DENIED trace names the permission + resource; turn the
  *  stderr tail into one line the panel can show. */
 function classifyExit(tail, code, signal) {
   const t = String(tail || '');
-  if (/ERR_ACCESS_DENIED/.test(t)) {
-    const perm = (t.match(/permission: '([^']+)'/) || [])[1];
-    const res = (t.match(/resource: '([^']+)'/) || [])[1];
-    return `denied ${perm ? perm.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase() : 'access'}${res ? ' of ' + res : ''} outside its declared capabilities (ERR_ACCESS_DENIED — declare it under capabilities.server in vibespace-plugin.json, then enable again)`;
-  }
+  if (/ERR_ACCESS_DENIED/.test(t)) return deniedWords({ permission: (t.match(/permission: '([^']+)'/) || [])[1], resource: (t.match(/resource: '([^']+)'/) || [])[1] });
   const lines = t.split('\n').map((l) => l.trim()).filter((l) => l && !/^\(node:\d+\)|^\(Use `node --trace|SecurityWarning/.test(l));
   const last = lines.length ? lines[lines.length - 1].slice(0, 300) : '';
   return `exited (${signal || 'code ' + code})${last ? ': ' + last : ''}`;
@@ -607,4 +609,4 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
   return { list, get, setEnabled, reload, shutdown, discover, syncShims, shimNames, install, uninstall, update, askRoute, installRecord, isTrusted: (id) => { const r = plugins.get(id); return !!r && isTrusted(r); }, SANDBOX_CSP, pluginsDir, shimDir, trashDir: installer.trashDir };
 }
 
-module.exports = { create, SANDBOX_CSP, readThemeFile, classifyExit };
+module.exports = { create, SANDBOX_CSP, readThemeFile, classifyExit, deniedWords };

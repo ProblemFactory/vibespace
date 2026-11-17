@@ -11288,6 +11288,9 @@ export default {
   "{id} — its plugin is not running on this computer": "{id} — 它的插件没有在这台电脑上运行", // lane engine-spi-egress: the default engine's options, drawn from the engine table
   "the custom kernel ({id})": "自研内核（{id}）",
   "{plugin} does not answer as a browser engine.": "{plugin} 没有按浏览器内核的方式应答。",
+  "{plugin} · its plugin was denied {resource}, outside its own folder (ERR_ACCESS_DENIED) — a bug in the plugin, unless its manifest declares that path": "{plugin} · 它的插件访问 {resource} 被拒绝，那在它自己的文件夹之外（ERR_ACCESS_DENIED）——这是插件的缺陷，除非它的清单声明了这个路径",
+  "{plugin} · its plugin was denied a path outside its own folder (ERR_ACCESS_DENIED) — a bug in the plugin, unless its manifest declares that path": "{plugin} · 它的插件访问自己文件夹之外的路径被拒绝（ERR_ACCESS_DENIED）——这是插件的缺陷，除非它的清单声明了这个路径",
+  "{plugin} · its plugin failed: {what}": "{plugin} · 它的插件出错：{what}",
   "{plugin} · its kernel is not installed on this computer.": "{plugin} · 它的内核没有装在这台电脑上。",
   "{plugin} · its kernel can't be run.": "{plugin} · 它的内核无法运行。",
   "{plugin} · version {version}": "{plugin} · 版本 {version}",

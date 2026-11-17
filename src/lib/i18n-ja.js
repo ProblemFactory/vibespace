@@ -11287,6 +11287,9 @@ export default {
   "{id} — its plugin is not running on this computer": "{id} — そのプラグインはこのコンピュータで動いていません", // lane engine-spi-egress: the default engine's options, drawn from the engine table
   "the custom kernel ({id})": "独自カーネル（{id}）",
   "{plugin} does not answer as a browser engine.": "{plugin} はブラウザエンジンとして応答しません。",
+  "{plugin} · its plugin was denied {resource}, outside its own folder (ERR_ACCESS_DENIED) — a bug in the plugin, unless its manifest declares that path": "{plugin} · プラグインが自分のフォルダ外の {resource} へのアクセスを拒否されました（ERR_ACCESS_DENIED）— マニフェストでそのパスを宣言していなければプラグインの不具合です",
+  "{plugin} · its plugin was denied a path outside its own folder (ERR_ACCESS_DENIED) — a bug in the plugin, unless its manifest declares that path": "{plugin} · プラグインが自分のフォルダ外のパスへのアクセスを拒否されました（ERR_ACCESS_DENIED）— マニフェストでそのパスを宣言していなければプラグインの不具合です",
+  "{plugin} · its plugin failed: {what}": "{plugin} · プラグインがエラーを返しました：{what}",
   "{plugin} · its kernel is not installed on this computer.": "{plugin} · そのカーネルはこのコンピュータにインストールされていません。",
   "{plugin} · its kernel can't be run.": "{plugin} · そのカーネルは実行できません。",
   "{plugin} · version {version}": "{plugin} · バージョン {version}",

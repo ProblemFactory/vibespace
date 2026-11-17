@@ -249,6 +249,11 @@ console.log('— ⑦ B-53df: the three RESTART doors say a refusal by its CODE (
     'src/lib/user-todos-actions.js': now['src/lib/user-todos-actions.js'].replace(/\(r && r\.error && restartRefusalWords\(r, \{[^\n]*?\}, t\)\) \|\| /, ''),
   };
   ok(FILES.every((f) => old[f] !== now[f]) && doorsRaw(old).length === 4, 'CONTROL: the doors printing r.error raw (the base\'s lines) are caught — all four (RED)', doorsRaw(old));
+  // B-a470 (the review's MUST-FIX on B-53df × B-a470): an engine plugin's OWN error rides the refusal — the restart door QUOTES it, never «another version of the engine protocol»
+  const FA = { status: 500, code: 'ERR_ACCESS_DENIED', message: 'Access to this API has been restricted.', permission: 'FileSystemRead', resource: '/usr/bin/python3', label: 'Kernel' };
+  const qa = W({ code: 'browser_engine_protocol', error: 'raw', failed: FA }, en), qz = W({ code: 'browser_engine_protocol', failed: { ...FA, resource: null } }, tz);
+  ok(qa.includes('/usr/bin/python3') && qa.includes('ERR_ACCESS_DENIED') && !/another version/.test(qa) && qz.includes('ERR_ACCESS_DENIED') && qz.includes('文件夹之外') && /another version/.test(W({ code: 'browser_engine_protocol' }, en)),
+    'B-53df × B-a470: a restart refused by an engine plugin\'s own error QUOTES it (en with the path; zh) — the protocol words only without the fact', { qa, qz });
   // CONTROL (the picker): a copy without the person's words falls to the generic build sentence — caught
   const msrc = read('src/lib/browser-build-model.js');
   const cut = "  const own = typeof human === 'function' && RESTART_HUMAN_CODES.includes(code) ? human(code, facts, t) : '';";

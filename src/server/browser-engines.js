@@ -32,6 +32,7 @@ const fsp = require('fs').promises;
 const crypto = require('crypto');
 const BE = require('../browser-engines.js');
 const BB = require('../browser-builds.js'); // lane engine-spi-egress L1b: fileFact — the file verdict a build pin already uses
+const PL = require('./plugin-loader.js'); // B-a470: deniedWords — Node's ERR_ACCESS_DENIED in the loader's own words, for a plugin's answer quoting it
 const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE the owner's program (a user-path) is read
 
 function create({ loader = null, plugins = null, dataDir = null, platform = process.platform, arch = process.arch, timeoutMs = null, log = console, setting = () => undefined } = {}) {
@@ -67,7 +68,7 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
       if (e && e.status === 504) return BE.unansweredOf({ id: row.id, label: row.label, ms: timeoutMs || 30000 });
       return BE.missingOf({ id: row.id });
     }
-    return BE.engineAnswerVerdict(verb, reply, { id: row.id, label: row.label, settings: row.settings });
+    return BE.engineAnswerVerdict(verb, reply, { id: row.id, label: row.label, settings: row.settings, denied: PL.deniedWords });
   }
   async function askBuiltin(row, verb, input) {
     const m = P();

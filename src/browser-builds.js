@@ -144,7 +144,7 @@ function browserChoiceVerdict({ choice, provider = null, by = 'user', builds = n
   } else if (c.kind === 'plugin') {
     // lane engine-plugin: the engine is there · its kernel installed and executable · its protocol (src/browser-engines.js)
     const ev = BE.engineChoiceVerdict({ choice: c, engine, machine });
-    if (!ev.ok) return { ok: false, code: ev.code, error: ev.error, engine: c.id };
+    if (!ev.ok) return { ok: false, code: ev.code, error: ev.error, engine: c.id, ...(ev.failed ? { failed: ev.failed } : {}) };
     executablePath = ev.executablePath; version = ev.version; major = ev.major;
   } else {
     if (pathFact && !pathFact.usable) return { ok: false, code: pathFact.why === 'missing' ? 'browser_path_missing' : 'browser_path_not_executable', why: pathFact.why, error: pathFact.why === 'missing' ? `there is no file at ${c.path} on ${machine}` : `${c.path} on ${machine} is not a runnable file (${pathFact.why})` };

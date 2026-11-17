@@ -451,7 +451,7 @@ function create(ctx, slot) {
     const dirMajor = p.host ? null : readDirMajor(p.dir);
     const v = BB.browserChoiceVerdict({ choice: c, provider: p.provider, by, builds, pathFact: c.kind === 'path' && !p.host ? BB.fileFact(c.path) : null, engine, machine: p.host || 'this computer', label: p.label,
       recordedMajor: Number.isInteger(p.lastChromiumMajor) ? p.lastChromiumMajor : null, dirMajor, written: dirWritten(p), ladder: true, confirmed: !!confirmed });
-    if (!v.ok) throw namedError(v.code, v.error, { needsConfirm: !!v.needsConfirm, waysOut: v.waysOut || [], version: c.kind === 'build' ? c.version : null, wrote: v.wrote != null ? v.wrote : null, ...(c.kind === 'plugin' ? { engine: c.id } : {}) });
+    if (!v.ok) throw namedError(v.code, v.error, { needsConfirm: !!v.needsConfirm, waysOut: v.waysOut || [], version: c.kind === 'build' ? c.version : null, wrote: v.wrote != null ? v.wrote : null, ...(c.kind === 'plugin' ? { engine: c.id } : {}), ...(v.failed ? { failed: v.failed } : {}) });
     if (switching.has(p.id)) { const rr = SW.restartingRefusal(p); throw namedError(rr.code, rr.error); } // re-asked after the listing's await
     { const h = drivenNow(); if (h.hold === 'driven') refuseDriven(h); } // (2) re-asked after the listing's await
     refuseBrowsing(); // verify r2 (H2): …and his own browsing, begun during it

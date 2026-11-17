@@ -682,6 +682,43 @@ const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platfor
   const rowsP = [[P0, true], [{ ...P0, version: null }, true], [{ ...P0, protocol: 2 }, 'browser_engine_protocol'], [{ ...P0, features: ['webauthn'] }, true], [{ ...P0, installed: 'yes' }, 'browser_engine_protocol'], [{ ...P0, installed: false, executable: false }, true]];
   const badP = rowsP.filter(([b, want]) => { const r = pv(b); return want === true ? !r.ok : r.ok || r.code !== want; });
   ok(!badP.length && pv(P0, 500).code === 'browser_engine_protocol' && pv({ ...P0, version: null }).fact.version === null, 'a probe answer: version null is a FACT (ok, null), protocol ≠ 1 / another shape / HTTP 500 ⇒ browser_engine_protocol, a kernel not installed is a fact (the choice judges it); lane engine-spi-egress: no `surfaces` is a fact too (Chrome\'s dialog road)', badP);
+  // B-a470: a plugin that answers with ITS OWN error is QUOTED — its code, its message, what Node denied it (the kernel side's
+  // server.js answers a caught throw as 500 {error, code}); no error of its own ⇒ the generic sentence stands
+  {
+    const PL0 = require('../src/server/plugin-loader.js');
+    const DEN = { error: 'Access to this API has been restricted. Use --allow-fs-read to manage permissions.', code: 'ERR_ACCESS_DENIED' };
+    const fv = (E, status, body, verb = 'probe') => E.engineAnswerVerdict(verb, { status, body }, { id: EID, label: 'Kernel', denied: PL0.deniedWords });
+    const fa = fv(ENGN, 500, { ...DEN, permission: 'FileSystemRead', resource: '/usr/bin/python3' });
+    const ft = fv(ENGN, 500, { error: "Error: Access to this API has been restricted\n  code: 'ERR_ACCESS_DENIED',\n  permission: 'FileSystemRead',\n  resource: '/opt/x/bin/python3'", code: 'ERR_ACCESS_DENIED' });
+    const fg = fv(ENGN, 503, { error: 'kernel index\nbroken', code: 'E_INDEX' }), fl = fv(ENGN, 500, { error: 'cannot resolve', code: 'E_RESOLVE' }, 'launchOptions');
+    ok(fa.code === 'browser_engine_protocol' && fa.failed && fa.failed.code === 'ERR_ACCESS_DENIED' && fa.failed.resource === '/usr/bin/python3' && fa.failed.permission === 'FileSystemRead' && fa.failed.status === 500
+      && fa.error.includes('failed its probe (HTTP 500 — ERR_ACCESS_DENIED: Access to this API has been restricted') && fa.error.includes(PL0.deniedWords({ permission: 'FileSystemRead', resource: '/usr/bin/python3' })) && /reads outside its own folder has a bug/.test(fa.error) && !/does not speak/.test(fa.error),
+      'B-a470: a probe answered 500 {error, code: ERR_ACCESS_DENIED, permission, resource} ⇒ the refusal QUOTES the plugin (its code + message), says what Node denied it in the loader\'s own words (deniedWords) + the hint — never «does not speak this VibeSpace\'s engine protocol»', fa);
+    ok(ft.failed.resource === '/opt/x/bin/python3' && ft.failed.permission === 'FileSystemRead' && ft.error.includes('of /opt/x/bin/python3') && !/\n/.test(ft.failed.message), '…Node\'s trace words in its message name the resource too (one line)', ft);
+    ok(fg.failed && fg.failed.code === 'E_INDEX' && fg.failed.message === 'kernel index broken' && fg.error.includes("(HTTP 503 — E_INDEX: kernel index broken) — the plugin's own error") && !/denied/.test(fg.error) && fl.failed && fl.failed.code === 'E_RESOLVE' && fl.error.includes('failed its launch options (HTTP 500 — E_RESOLVE: cannot resolve)'),
+      '…another error of its own is quoted as it is (its code + message, one line) — the launch verb too', { fg: fg.error, fl: fl.error });
+    const cvF = ENGN.engineChoiceVerdict({ choice: { kind: 'plugin', id: EID }, engine: { code: fa.code, error: fa.error, failed: fa.failed } }), bvF = BB.browserChoiceVerdict({ choice: { kind: 'plugin', id: EID }, provider: 'chromium', by: 'user', engine: { code: fa.code, error: fa.error, failed: fa.failed } });
+    ok(fa.failed.label === 'Kernel' && cvF.failed === fa.failed && bvF.failed === fa.failed && !bvF.ok, 'B-a470 (the review\'s MUST-FIX): the fact carries the engine\'s label, and BOTH choice verdicts (the engine\'s, the build\'s) carry `failed` on — every door\'s refusal can quote it', { cv: cvF.failed, bv: bvF.failed });
+    ok(!pv(P0, 500).failed && /answered its probe with HTTP 500/.test(pv(P0, 500).error) && !pv({ ok: false }, 500).failed && !pv({ error: '  ' }, 500).failed && !lv({ code: 'no_binary' }, 409).failed, '…no error of its own (a body without error / code) ⇒ the generic sentence, no `failed`; the launch\'s 409 no_binary keeps its own code');
+    const BMa = await import('../src/lib/browser-build-model.js');
+    const zhA = (await import('../src/lib/i18n-zh.js')).default, jaA = (await import('../src/lib/i18n-ja.js')).default;
+    const tA = (d) => (s, p) => String((d && d[s]) || s).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
+    const nA = BMa.engineNote({ id: EID, label: 'Kernel', code: fa.code, error: fa.error, failed: fa.failed }, tA(null));
+    const nZ = BMa.engineNote({ id: EID, label: 'Kernel', code: fa.code, failed: { ...fa.failed, resource: null } }, tA(zhA));
+    const nJ = BMa.engineNote({ id: EID, label: 'Kernel', code: fg.code, failed: fg.failed }, tA(jaA)), nOld = BMa.engineNote({ id: EID, label: 'Kernel', code: 'browser_engine_protocol' }, tA(null));
+    const rwF = BMa.buildRefusalWords({ code: 'browser_engine_protocol', error: fa.error, failed: fa.failed }, tA(null));
+    ok(rwF.includes('Kernel · its plugin was denied /usr/bin/python3') && !/another version/.test(rwF) && /another version/.test(BMa.buildRefusalWords({ code: 'browser_engine_protocol' }, tA(null))), 'B-a470: Change build… / New profile… / the restart doors (buildRefusalWords) quote the plugin\'s own error when the refusal carries it', rwF);
+    ok(nA.includes('/usr/bin/python3, outside its own folder (ERR_ACCESS_DENIED) — a bug in the plugin') && nZ.includes('ERR_ACCESS_DENIED') && nZ.includes('文件夹之外') && nJ.includes('E_INDEX: kernel index broken') && nJ.includes('エラー') && /another version of the engine protocol/.test(nOld),
+      'B-a470 THE CARD: the engine row\'s note quotes the plugin (en: the resource + the hint; zh with no resource; ja another error) — a refusal without the fact keeps its code\'s words', { nA, nZ, nJ });
+    // CONTROL: a verdict that ignores the plugin's own error (the base's road) — the quote legs above go red
+    const es0 = read('src/browser-engines.js');
+    const qAnchor = "  const failedAs = (verbWord) => { const pe = pluginErrorOf(status, body);";
+    ok(es0.includes(qAnchor), 'control setup (B-a470): the quote\'s line is where the control cuts');
+    const MA = mutantCopies('badm-a470', REPO);
+    const EQ = MA.load('src/browser-engines.js', es0.replace(qAnchor, "  const failedAs = (verbWord) => { const pe = null;"), 'no-quote');
+    const qa = fv(EQ, 500, { ...DEN, permission: 'FileSystemRead', resource: '/usr/bin/python3' });
+    ok(!qa.failed && !qa.error.includes('ERR_ACCESS_DENIED') && /does not speak this VibeSpace's engine protocol/.test(qa.error), 'CONTROL (B-a470): without the quote the 500 says the generic sentence — no code, no resource (RED for the legs above)', qa.error);
+  }
   // lane engine-spi-egress: the features are a CLOSED set; `egress-allowlist` needs the manifest's RESERVED row (a string)
   const PE = { ...P0, features: ['egress-allowlist', 'anti-bot'] }, ROWS = [{ key: 'egressAllowlist', type: 'string', default: 'a.test', label: 'Sites' }];
   const pvS = (settings, body = PE) => ENGN.engineAnswerVerdict('probe', { status: 200, body }, { id: 'acme.engine', label: 'Acme', settings });
@@ -926,6 +963,13 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   setMode({ probe: { protocol: 2 } });
   const ep = await thr(() => ke.start(pe.id, { why: 'test' }));
   ok(ep && ep.code === 'browser_engine_protocol' && /protocol 2/.test(ep.message), 'an engine of another protocol ⇒ browser_engine_protocol by name', ep && ep.message);
+  // B-a470 over the REAL loader + the fixture's IPC child: its probe answers 500 with its own error ⇒ quoted on every road
+  setMode({ probeStatus: 500, probeBody: { error: 'Access to this API has been restricted. Use --allow-fs-read to manage permissions.', code: 'ERR_ACCESS_DENIED', permission: 'FileSystemRead', resource: '/usr/bin/python3' } });
+  const prF = await ENGR.probe(EID), efF = await ke.engineFactOf(EID), rvF = (await ke.engineRowsView()).find((r) => r.id === EID);
+  const esF = await thr(() => ke.start(pe.id, { why: 'test' }));
+  ok(!prF.ok && prF.failed && prF.failed.resource === '/usr/bin/python3' && /ERR_ACCESS_DENIED: Access to this API/.test(prF.error) && /denied file system read of \/usr\/bin\/python3/.test(prF.error)
+    && efF.failed && efF.failed.code === 'ERR_ACCESS_DENIED' && rvF && rvF.failed && rvF.failed.resource === '/usr/bin/python3' && esF && esF.code === 'browser_engine_protocol' && /ERR_ACCESS_DENIED/.test(esF.message) && esF.failed && esF.failed.resource === '/usr/bin/python3',
+    'B-a470 over the real loader: the fixture\'s probe answering 500 {error, code, permission, resource} ⇒ the registry quotes it (deniedWords), the keeper\'s fact and the engines view carry `failed`, a start is refused naming ERR_ACCESS_DENIED', { prF: prF.error, esF: esF && esF.message });
   setMode(null);
   if (ke.profile(pe.id).buildMissing) { await ke.start(pe.id, { why: 'test' }); await ke.stop(pe.id, { why: 'user' }); } // clear the mark the two refusals above left
   // the PLUGIN turned off ⇒ the table loses it at once ⇒ refused browser_engine_missing (marked, ONE item)
@@ -1561,7 +1605,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
 {
   const MUT = mutantCopies('badm-engine', REPO);
   const ks = read('src/server/browser-keeper.js');
-  const anchor = "    if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id }); }";
+  const anchor = "    if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id, ...(v.failed ? { failed: v.failed } : {}) }); }";
   // lane engine-args-string r2: the wrapper step refuses a launch with no program by name — the mutant also skips it (a keeper
   // that falls back to Chrome would): absent on an older tree, that second patch is a no-op
   const fb = ks.replace(anchor, "    if (!v.ok) return {};").replace('        const ew = engineProgramOf(p, buildEnv);', '        const ew = buildEnv.executablePath ? engineProgramOf(p, buildEnv) : { program: null, args: [] };');
@@ -1701,8 +1745,12 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
     ok(await wBad(), 'control (i): the planted plugin with an import-time outside-sandbox fs.existsSync starts its IPC loop');
     const prBad = await badS.engrS.probe(EID);
     const rawBad = await badS.ldrS.askRoute(EID, { method: 'GET', path: '/probe', query: {} });
-    ok(!prBad.ok && prBad.code === 'browser_engine_protocol' && /answered its probe with HTTP 500/.test(prBad.error) && rawBad.status === 500 && rawBad.body && rawBad.body.code === 'ERR_ACCESS_DENIED',
+    ok(!prBad.ok && prBad.code === 'browser_engine_protocol' && rawBad.status === 500 && rawBad.body && rawBad.body.code === 'ERR_ACCESS_DENIED',
       'control (i): an import-time fs.existsSync outside VIBESPACE_PLUGIN_DIR / VIBESPACE_PLUGIN_DATA throws ERR_ACCESS_DENIED ⇒ HTTP 500 browser_engine_protocol — RED against the sandbox confinement law', { prBad, rawBad });
+    // B-a470 — the owner's 2026-11-01 install, reproduced: the plugin answers {error: err.message, code: err.code} (no resource) under
+    // the REAL node --permission ⇒ the refusal quotes ERR_ACCESS_DENIED + Node's message and says the plugin went outside its folder
+    ok(prBad.failed && prBad.failed.code === 'ERR_ACCESS_DENIED' && prBad.failed.status === 500 && prBad.error.includes('failed its probe (HTTP 500 — ERR_ACCESS_DENIED: Access to this API has been restricted') && /outside its declared capabilities/.test(prBad.error) && !/does not speak/.test(prBad.error),
+      'B-a470 (the real sandbox): the plugin\'s own ERR_ACCESS_DENIED is quoted — its code, Node\'s message, the loader\'s denied words and the hint — never the generic protocol sentence', prBad.error);
     badS.ldrS.shutdown();
   }
 }

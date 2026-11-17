@@ -5,7 +5,8 @@
 // POST /resolve-launch names that program + its arguments, HTTP 409 {code:'no_binary'} when the kernel is absent.
 // A suite bends one answer per leg with `mode.json` in the plugin's data folder (VIBESPACE_PLUGIN_DATA):
 //   {probe: {…fields over the answer}, launch: {…fields over the answer}, launchStatus: 500, hang: 'probe' | 'launch',
-//    noExec: true (lane engine-distribution: the kernel side's v0.1.1+ — no childProcess, so `version` is null)}
+//    noExec: true (lane engine-distribution: the kernel side's v0.1.1+ — no childProcess, so `version` is null),
+//    probeStatus: 500 + probeBody (B-a470: the plugin's own error, as the kernel side's server.js answers a caught throw)}
 // Lane engine-distribution: like theirs, the probe also answers `declaredVersion` (its package's kernel.json, when it has one)
 // and `integrity` (its read of the receipt VibeSpace wrote beside the kernel: `stat.size === bytes` ⇒ verified — never a rehash).
 // Lane engine-spi-egress: its id and its features follow ITS OWN manifest — the EGRESS VARIANT (scripts/fixtures/engine-plugin-egress/
@@ -41,7 +42,7 @@ process.on('message', (msg) => {
   const input = { ...(msg.query || {}), ...(msg.body && typeof msg.body === 'object' ? msg.body : {}) };
   const reply = (status, body) => process.send({ t: 'route-reply', id: msg.id, status, body });
   const bin = String(input.binaryPath || '');
-  if (msg.path === '/probe') { if (m.hang === 'probe') return; return reply(200, { ...probe(bin, m), ...(m.probe || {}) }); }
+  if (msg.path === '/probe') { if (m.hang === 'probe') return; if (m.probeStatus) return reply(m.probeStatus, m.probeBody || { error: 'fixture', code: 'fixture' }); return reply(200, { ...probe(bin, m), ...(m.probe || {}) }); }
   if (msg.path === '/resolve-launch' && msg.method === 'POST') {
     if (m.hang === 'launch') return;
     if (m.launchStatus) return reply(m.launchStatus, { error: 'fixture', code: 'fixture' });

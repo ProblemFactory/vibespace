@@ -1159,7 +1159,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // lane engine-plugin: an engine plugin's probe is I/O — the route asks it first and hands the FACT in (`engine`, like `builds`)
     const eng = c0 && c0.kind === 'plugin' ? (host ? engineOffMachine(host) : engine) : null;
     const v = BB.browserChoiceVerdict({ choice: raw, provider, by, builds: list, pathFact: pf, engine: eng, machine: host || 'this computer', label });
-    if (!v.ok) throw namedError(v.code, v.error, v.version ? { version: v.version } : {});
+    if (!v.ok) throw namedError(v.code, v.error, { ...(v.version ? { version: v.version } : {}), ...(v.failed ? { failed: v.failed } : {}) });
     return v.choice;
   }
   /** The chosen build's executable for a LOCAL chromium launch, judged NOW (a build that vanished since it was chosen is
@@ -1186,7 +1186,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const r = engs();
     if (!r || typeof r.probe !== 'function') return ENG.missingOf({ id });
     const v = await r.probe(id);
-    return v.ok ? withKernelFact(v.fact) : { code: v.code, error: v.error };
+    return v.ok ? withKernelFact(v.fact) : { code: v.code, error: v.error, ...(v.failed ? { failed: v.failed } : {}) }; // B-a470: the plugin's own error rides to the card
   }
   // lane engine-distribution: the engine RECORD's facts beside the probe's — the version VibeSpace measured, the download
   const eds = () => { try { return typeof engineDistribution === 'function' ? engineDistribution() : engineDistribution; } catch { return null; } };
@@ -1207,7 +1207,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const out = [];
     for (const row of r.rows()) {
       const f = await engineFactOf(row.id);
-      out.push({ id: row.id, label: row.label, family: row.family, plugin: row.version || null, ...(f.code ? { code: f.code, error: f.error } : { installed: !!f.installed, executable: !!f.executable, version: f.version, protocol: f.protocol, features: (f.features || []).slice(),
+      out.push({ id: row.id, label: row.label, family: row.family, plugin: row.version || null, ...(f.code ? { code: f.code, error: f.error, ...(f.failed ? { failed: f.failed } : {}) } : { installed: !!f.installed, executable: !!f.executable, version: f.version, protocol: f.protocol, features: (f.features || []).slice(),
         // lane engine-distribution: 实测 / 声明 — the measured version beats the declared one; the receipt's read; the download
         declaredVersion: f.declaredVersion || null, measuredVersion: f.measuredVersion || null, measuredAt: f.measuredAt || null, integrity: f.integrity || null, kernel: f.kernel || null,
         // lane engine-spi-egress L1b: the kernel's SOURCE ('download' | 'user'), and the core's verdict on the owner's program (never its path)
@@ -1311,9 +1311,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     else if (!v.ok && !fetching && refused && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace could not download it: ${refused.message || refused.code}`;
     if (!v.ok && fetching && fetching.answered === false && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace has asked ${fetching.host} for it and has no answer yet; start the browser again in a moment`;
     else if (!v.ok && fetching && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace is downloading it now (${fetching.total || fetching.bytes ? `${Math.round(Number(fetching.total || fetching.bytes) / 1e6)} MB` : 'its kernel.json\'s archive'}); start the browser again when it is done`;
-    if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id }); }
+    if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id, ...(v.failed ? { failed: v.failed } : {}) }); }
     const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}) });
-    if (!lo.ok) { if (lo.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, lo, engine); throw namedError(lo.code, lo.error, { engine: c.id }); }
+    if (!lo.ok) { if (lo.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, lo, engine); throw namedError(lo.code, lo.error, { engine: c.id, ...(lo.failed ? { failed: lo.failed } : {}) }); }
     if (p.buildMissing) { delete p.buildMissing; dirty = true; log.log?.(`[browser] ${p.id} "${p.label}": ${BB.buildWords(c)} answers again`); } // the engine by its id (its label is the plugin's text)
     // lane engine-spi-egress: an engine that must stay inside a list is WRAPPED — THIS profile's allowlisting proxy (the keeper's,
     // its list = the engine's reserved row, read per request); one that cannot listen refuses the launch by name (egress_proxy_missing)

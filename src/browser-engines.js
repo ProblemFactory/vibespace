@@ -186,17 +186,46 @@ function platformOf(nodePlatform) { return nodePlatform === 'darwin' ? 'macos' :
 /** An engine in a sentence: «the Custom Browser Kernel engine». */
 function engineWords({ id = '', label = '' } = {}) { const n = clip(label, 80) || clip(id, 80) || 'browser'; return /\bengine$/i.test(n) ? `the ${n}` : `the ${n} engine`; }
 
+/** B-a470: the plugin's OWN error in an answer that is not 200 (the kernel side's server.js catches a throw — an import-time
+ *  ERR_ACCESS_DENIED — and answers 500 `{error, code}`) → `{status, code, message, permission, resource}` | null (no error of its
+ *  own: the generic refusal stands). An ERR_ACCESS_DENIED names what it was denied: the body's `permission` / `resource`, else
+ *  Node's own trace words in its message (`permission: '…'`, `resource: '…'`). Every field one clipped line. */
+function pluginErrorOf(status, body) {
+  if (Number(status) === 200 || !isObj(body)) return null;
+  const msg = typeof body.error === 'string' ? body.error : typeof body.message === 'string' ? body.message : '';
+  const code = typeof body.code === 'string' ? body.code : '';
+  if (!msg.trim() && !code.trim()) return null;
+  const line = (s, n) => clip(String(s || '').replace(/\s+/g, ' ').trim(), n) || null;
+  const permission = typeof body.permission === 'string' ? body.permission : (msg.match(/permission: '([^']+)'/) || [])[1];
+  const resource = typeof body.resource === 'string' ? body.resource : (msg.match(/resource: '([^']+)'/) || [])[1];
+  return { status: Number(status) || null, code: line(code, 60), message: line(msg, 240), permission: line(permission, 40), resource: line(resource, 200) };
+}
+const isDenied = (pe) => !!pe && (pe.code === 'ERR_ACCESS_DENIED' || /ERR_ACCESS_DENIED/.test(String(pe.message || '')));
+/** …in a sentence (the hub's English: the journal, the agent, the error the card falls back to). `denied` = the loader's words for
+ *  Node's ERR_ACCESS_DENIED (src/server/plugin-loader.js deniedWords, handed in — this file is client-bundled, it requires nothing). */
+function pluginErrorWords(pe, verbWord, denied) {
+  const quote = [pe.code, pe.message].filter(Boolean).join(': ');
+  const head = `failed its ${verbWord} (HTTP ${pe.status || '?'}${quote ? ' — ' + quote : ''})`;
+  if (!isDenied(pe)) return `${head} — the plugin's own error`;
+  const d = typeof denied === 'function' ? denied({ permission: pe.permission || '', resource: pe.resource || '' }) : `denied ${pe.resource || 'access'} outside its declared capabilities (ERR_ACCESS_DENIED)`;
+  return `${head} — the plugin was ${d}; a plugin that reads outside its own folder has a bug, unless its manifest declares the path`;
+}
+
 /** THE ANSWER VERDICT of one verb. `reply` = the loader's route reply `{status, body}`; `settings` = the plugin's manifest
  *  `contributes.settings` (where the egress row is looked for). →
  *  probe: `{ok:true, fact:{id, installed, executable, binaryPath, version, protocol, kinds, features, egress}}` (`egress` =
  *  `{setting, default}` when it declares egress-allowlist, else null); launchOptions: `{ok:true, launch:{executablePath,
  *  args, env}}`; else `{ok:false, code, error}`. */
-function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null } = {}) {
+function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null, denied = null } = {}) {
   const who = engineWords({ id, label });
   const bad = (code, why) => ({ ok: false, code, error: `${who} ${why}` });
   const status = reply && Number(reply.status);
   const body = reply ? reply.body : null;
+  // B-a470: a plugin that answered with ITS OWN error is quoted (its code, its message, what Node denied it) — never the generic
+  // «does not speak this VibeSpace's engine protocol» over it (the code stays browser_engine_protocol; `failed` carries the facts)
+  const failedAs = (verbWord) => { const pe = pluginErrorOf(status, body); return pe ? { ...bad('browser_engine_protocol', pluginErrorWords(pe, verbWord, denied)), failed: { ...pe, label: clip(label || id, 80) || null } } : null; };
   if (verb === 'probe') {
+    { const f = status === 200 ? null : failedAs('probe'); if (f) return f; }
     if (status !== 200 || !isObj(body)) return bad('browser_engine_protocol', `answered its probe with ${status === 200 ? 'no JSON object' : 'HTTP ' + (status || '?')} — it does not speak this VibeSpace's engine protocol`);
     if (typeof body.installed !== 'boolean' || typeof body.executable !== 'boolean' || !(body.version === null || typeof body.version === 'string') || !strList(body.kinds) || !strList(body.features) || !(body.binaryPath === undefined || typeof body.binaryPath === 'string')) return bad('browser_engine_protocol', 'answered a probe of another shape (installed, executable, version, protocol, kinds, features) — it does not speak this VibeSpace\'s engine protocol');
     if (body.protocol !== PROTOCOL) return bad('browser_engine_protocol', `speaks engine protocol ${clip(body.protocol, 20)}, this VibeSpace speaks ${PROTOCOL} — update the plugin or VibeSpace`);
@@ -216,6 +245,7 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
   }
   if (verb === 'launchOptions') {
     if (status === 409 && isObj(body) && body.code === 'no_binary') return bad('browser_engine_kernel_missing', 'has no kernel installed on this computer (its launch answered no_binary)');
+    { const f = status === 200 ? null : failedAs('launch options'); if (f) return f; }
     if (status !== 200 || !isObj(body)) return bad('browser_engine_protocol', `answered its launch options with ${status === 200 ? 'no JSON object' : 'HTTP ' + (status || '?')}`);
     const exe = body.executablePath;
     if (typeof exe !== 'string' || !exe.startsWith('/') || exe.length > 4096 || /[\0\n\r]/.test(exe)) return bad('browser_engine_protocol', 'named no absolute program to start');
@@ -259,7 +289,7 @@ function majorOfVersion(v) { const m = /(\d{2,4})\.\d{1,6}\.\d{1,6}(?:\.\d{1,6})
 function engineChoiceVerdict({ choice = null, engine = null, machine = 'this computer' } = {}) {
   const id = choice && typeof choice.id === 'string' ? choice.id : '';
   if (!engine || typeof engine !== 'object') return missingOf({ id, machine });
-  if (engine.code) return { ok: false, code: ENGINE_CODES.includes(engine.code) ? engine.code : 'browser_engine_protocol', error: String(engine.error || engine.code) };
+  if (engine.code) return { ok: false, code: ENGINE_CODES.includes(engine.code) ? engine.code : 'browser_engine_protocol', error: String(engine.error || engine.code), ...(isObj(engine.failed) ? { failed: engine.failed } : {}) }; // B-a470: the plugin's own error rides the refusal
   const who = engineWords({ id, label: engine.label });
   // lane engine-spi-egress L1b: the OWNER's program, judged by the core (the fact carries the verdict) — said by its own words
   if (engine.source === 'user' && isObj(engine.userBinary)) return { ok: false, code: ENGINE_CODES.includes(engine.userBinary.code) ? engine.userBinary.code : 'browser_engine_not_executable', error: String(engine.userBinary.error || engine.userBinary.code) };
