@@ -240,6 +240,23 @@ console.log('— ⑥ the tokens');
   const rows = [...ed.matchAll(/\{ key: '(--warmth-[a-z]+)', label: (?:t\()?'([^']+)'\)?, group: 'Cache warmth', isText: true, derived: '([^']+)' \}/g)].map((m) => [m[1], m[3]]);
   ok('the theme editor lists the five under «Cache warmth», each starting as the theme\'s own derivation (r5: the raw hues, expired dim)', rows.length === 5 && rows.every(([k, v]) => want[k] === v), JSON.stringify(rows));
   ok('…and seeds them so (a theme saved from a built-in base keeps deriving from ITS status colours)', /for \(const d of CSS_VAR_DEFS\) if \(d\.derived\) this\._cssValues\[d\.key\] = d\.derived;/.test(code('src/lib/theme-editor.js')));
+  // B-2e7b: a save stores only what the person chose — a derived row still at its derivation is left out (the theme keeps
+  // deriving); re-opening shows the derivation. The editor's own lines (the defs + the two rules), run as written
+  const edc = code('src/lib/theme-editor.js');
+  const slice = (src) => { const a = src.indexOf('const CSS_VAR_DEFS = ['), b = src.indexOf('const CSS_VAR_GROUPS'); return a >= 0 && b > a ? src.slice(a, b) : ''; };
+  const rulesOf = (src) => { try { return new Function('t', 'tc', slice(src) + '\nreturn { storedCss, shownCss };')((s) => s, (c, s) => s); } catch (e) { return { error: String(e && e.message) }; } };
+  const values = { '--green': '#22c55e', '--warmth-fresh': 'var(--green)', '--warmth-mid': ' var(--blue, #3b82f6) ', '--warmth-late': '#ffaa00', '--warmth-critical': 'var(--red)', '--warmth-expired': 'color-mix(in srgb, var(--text-dim) 45%, transparent)' };
+  const judge = (R) => { if (!R || R.error || typeof R.storedCss !== 'function') return { ok: false, R }; const s = R.storedCss(values), back = R.shownCss(s);
+    return { ok: Object.keys(s).sort().join() === '--green,--warmth-late' && s['--warmth-late'] === '#ffaa00' && back['--warmth-fresh'] === 'var(--green)' && back['--warmth-mid'] === rows.find(([k]) => k === '--warmth-mid')[1] && back['--warmth-late'] === '#ffaa00' && back['--green'] === '#22c55e', s, back }; };
+  const j = judge(rulesOf(edc));
+  ok('B-2e7b: a save STORES the person\'s rows only — the four warmth rows still at their derivation are left out (a padded copy too), the one changed (#ffaa00) and --green stay; re-opening shows the derivation again', j.ok, JSON.stringify(j.s));
+  const KEEPALL = /const storedCss = \(values\) => [^\n]*/;
+  const mut = KEEPALL.test(edc) ? judge(rulesOf(edc.replace(KEEPALL, 'const storedCss = (values) => ({ ...(values || {}) });'))) : { ok: true };
+  ok('…CONTROL: a save that stores every row (the release\'s) reds the leg — the derivations freeze in the theme', KEEPALL.test(edc) && !mut.ok && Object.keys(mut.s || {}).length === 6, JSON.stringify(mut.s));
+  const NZ = require(path.join(REPO, 'src/custom-theme-normalize.js'));
+  ok('B-2e7b r1: ONE derivation table — the store\'s rule (DERIVED_WARMTH) spells exactly the editor\'s five `derived` strings', rows.length === 5 && rows.every(([k, v]) => NZ.DERIVED_WARMTH[k] === v) && Object.keys(NZ.DERIVED_WARMTH).length === 5, JSON.stringify(NZ.DERIVED_WARMTH));
+  ok('…wired: the POST body and the theme registered are the STORED rows; a saved theme opens through shownCss',
+    /const css = storedCss\(this\._cssValues\);/.test(edc) && /body: JSON\.stringify\(\{ name, css, terminal: this\._termValues \}\)/.test(edc) && /registerCustomTheme\(name, css, this\._termValues\)/.test(edc) && /this\._cssValues = shownCss\(saved\.css\);/.test(edc));
 }
 
 console.log('— ⑦ the stamp outlives a restart');

@@ -960,6 +960,15 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-11-warmth-derived-current',
+      note: "B-2e7b (the theme editor stored a «Cache warmth» row's CURRENT derivation as if the person chose it): a custom theme saved since the r5 ramp holds the five current strings verbatim, so the next change of a derivation would need another migration. The ONE rule (src/custom-theme-normalize.js) drops a value equal to its key's current derivation too — the store's writer applies it at every save; this row runs it once over what is on disk",
+      run() {
+        const rep = dropWarmthDerived(path.join(dataDir, 'custom-themes.json'));
+        console.log('[migrate] warmth-derived-current:', JSON.stringify(rep));
+        return rep;
+      },
+    },
+    {
       id: CLOAK_MIGRATION_ID,
       note: "CLOAKBROWSER INSTALLS AS A PLUGIN (lane engine-spi-egress L3 + its acceptance rounds 2 and 3, design-desk cloak-plugin.md §4 + its addendum §3 — the owner 2026-11-01/02: 「把cloakbrowser也做成插件，默认不要包含」「cloakbrowser直接去掉吧」): the core keeps no CloakBrowser of its own, so what this instance holds of it moves to the plugin `vibespace.cloak-browser` ONCE — no shim, no auto-install, nothing deleted. READ first — its own archive, data/browser-profiles.json, data/settings.json, the plugin's seeds.json: a torn or unreadable one FAILS by name before any write (retried at the next boot). VibeSpace's earlier download is carried ONLY when its install proof says so (data/browser-tools/cloak-installed.json names the measured build and the file hashes to it — the hash STREAMED, the row then STEPPED and the keeper's boot waiting for it; never on a retry that already has its verdict); otherwise it is left out, said as unverified. ARCHIVE BEFORE STRIP: the archive is the FIRST write (pending until the notice is out) and holds everything the run displaces; a retry resumes that judgement — the same end state, one notice in the first run's words, its `via` too. Then, each step idempotent: the seeds merged into seeds.json (never over the plugin's own); the program path + the site list into the plugin's rows (never over a value they hold), both old keys stripped; THROUGH the live keeper: every CloakBrowser profile → chromium + the plugin as its build, a defaultBackend of CloakBrowser cleared everywhere, a running one marked endAtBoot (ended by identity before adoption — and a record a failed run leaves is ended by the keeper's unreadable-record rule), the old proxy / seat / major readings dropped, an open proposal re-judged unavailable, a site hint naming it kept as tier 2 (the plugin has a program row) or dropped and archived; ONE For-you notice — only when something moved.",
       run() { return migrateCloakToPlugin(); },

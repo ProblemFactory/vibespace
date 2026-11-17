@@ -8,6 +8,10 @@
 // the raw hues. A value byte-equal to ITS superseded string is dropped (the derivation applies); any other value is the
 // person's and stays.
 //   SUPERSEDED_WARMTH           the five .374 strings by key (the only ones ever shipped — d4352c86f), byte-exact
+//   DERIVED_WARMTH              B-2e7b r1: the five CURRENT derivation strings (src/lib/theme-editor.js CSS_VAR_DEFS `derived` —
+//                               test-cache-warmth pins the two equal): a value equal to its key's (trimmed) is the theme's
+//                               DEFAULT, not a choice — a theme the editor saved before B-2e7b, an old tab still open, an
+//                               imported bundle — dropped too, so a later change of a derivation needs no migration
 //   normalizeCustomThemes(doc)  → { doc, changed, themes, dropped, kept, skipped }
 //     `doc` is never mutated: changed ⇒ a NEW store, else the one that came in. dropped = { <theme>: [keys] }; kept = the
 //     warmth values the person chose; skipped = the names whose theme or css is not an object (kept as they are). Every
@@ -20,6 +24,13 @@ const SUPERSEDED_WARMTH = Object.freeze({
   '--warmth-late': 'var(--warn-text)',
   '--warmth-critical': 'var(--bad-text)',
   '--warmth-expired': 'var(--border)',
+});
+const DERIVED_WARMTH = Object.freeze({
+  '--warmth-fresh': 'var(--green)',
+  '--warmth-mid': 'var(--blue, #3b82f6)',
+  '--warmth-late': 'var(--yellow)',
+  '--warmth-critical': 'var(--red)',
+  '--warmth-expired': 'color-mix(in srgb, var(--text-dim) 45%, transparent)',
 });
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -38,7 +49,7 @@ function normalizeCustomThemes(doc) {
     for (const k of Object.keys(theme.css)) {
       const v = theme.css[k];
       if (own(SUPERSEDED_WARMTH, k)) {
-        if (v === SUPERSEDED_WARMTH[k]) { (gone = gone || []).push(k); continue; }
+        if (v === SUPERSEDED_WARMTH[k] || (typeof v === 'string' && v.trim() === DERIVED_WARMTH[k])) { (gone = gone || []).push(k); continue; }
         kept++;
       }
       css[k] = v;
@@ -53,4 +64,4 @@ function normalizeCustomThemes(doc) {
   return { doc: changed ? out : doc, changed, themes, dropped, kept, skipped };
 }
 
-module.exports = { SUPERSEDED_WARMTH, normalizeCustomThemes };
+module.exports = { SUPERSEDED_WARMTH, DERIVED_WARMTH, normalizeCustomThemes };

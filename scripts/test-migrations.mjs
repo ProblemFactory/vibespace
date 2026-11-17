@@ -2783,6 +2783,27 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       ok(rb && rb.status === 'failed' && /could not be read/.test(rb.error) && !JSON.parse(fs.readFileSync(path.join(broken, 'data', 'migrations.json'), 'utf8')).applied[ID], 'an UNREADABLE grants store fails the run BY NAME — not recorded, retried on the next boot (never «nothing to reshape»)', rb);
     } catch (e) { ok(false, `${ID} threw on this tree (the migration it asks for is missing): ${(e && e.message) || e}`); }
   }
+  // ── B-2e7b r1: 2026-11-warmth-derived-current — the ONE rule drops a value equal to its key's CURRENT derivation (trimmed)
+  // too; the row runs it once over the stored file. A chosen colour, another key's string and a .374 string's neighbour stay
+  {
+    const ID = '2026-11-warmth-derived-current';
+    const NZ = require('../src/custom-theme-normalize.js');
+    const CUR = { ...NZ.DERIVED_WARMTH };
+    const r = path.join(tmp, 'warmth-current'); fs.mkdirSync(path.join(r, 'data'), { recursive: true });
+    const STORE = { savedSince: { css: { '--bg-window': '#101018', ...CUR, '--warmth-mid': ' var(--blue, #3b82f6) ' }, terminal: {} }, chosen: { css: { '--warmth-fresh': '#00ff88', '--warmth-late': 'var(--red)' }, terminal: {} } };
+    fs.writeFileSync(path.join(r, 'data', 'custom-themes.json'), JSON.stringify(STORE, null, 2));
+    let res = null, doc = null;
+    try { res = create({ rootDir: r, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID); doc = JSON.parse(fs.readFileSync(path.join(r, 'data', 'custom-themes.json'), 'utf8')); } catch (e) { res = { status: 'threw', error: (e && e.message) || String(e) }; }
+    ok(res && res.status === 'ran' && doc && Object.keys(CUR).every((k) => !(k in doc.savedSince.css)) && doc.savedSince.css['--bg-window'] === '#101018',
+      `${ID}: a theme saved since the r5 ramp loses the five CURRENT derivation strings (a padded copy too) — the theme keeps deriving; its other rows stay`, { res, css: doc && doc.savedSince.css });
+    ok(doc && doc.chosen.css['--warmth-fresh'] === '#00ff88' && doc.chosen.css['--warmth-late'] === 'var(--red)', '…a chosen colour and ANOTHER key\'s derivation string are the person\'s — kept', doc && doc.chosen.css);
+    const NSRC = fs.readFileSync(path.join(REPO_ROOT, 'src/custom-theme-normalize.js'), 'utf8');
+    const CURRULE = " || (typeof v === 'string' && v.trim() === DERIVED_WARMTH[k])";
+    ok(NSRC.split(CURRULE).length === 2, 'ANCHOR: the current-derivation rule, spelled once');
+    const MN = mutantCopies('theme-normalize', REPO_ROOT).load('src/custom-theme-normalize.js', NSRC.replace(CURRULE, ''), 'superseded-only');
+    const mres = MN.normalizeCustomThemes(STORE);
+    ok(!(mres.dropped && mres.dropped.savedSince), 'CONTROL RED: the release\'s rule (the .374 strings only) keeps every current string — the next derivation change needs another migration', mres.dropped);
+  }
   // ── 2026-11-warmth-ramp-derived (lane cache-warmth-ramp r2, q-059 r5): a custom theme saved on .374 froze the OLD warmth
   // derivation strings (the editor seeded each «Cache warmth» row with it); its injected rule outranks style.css's raw-hue
   // derivation. Each of the five keys whose value byte-equals ITS .374 string is dropped; anything else is the person's ──

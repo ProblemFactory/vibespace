@@ -81,6 +81,14 @@ const TERMINAL_COLOR_DEFS = [
   { key: 'brightWhite', label: t('Bright White'), group: 'Bright' },
 ];
 
+// B-2e7b (lane cache-warmth-ramp r2 found it): a save stored EVERY row as the person's choice — a derived row nobody touched
+// too, so its derivation froze in the theme and every later change of the derivation needed a migration (2026-11-warmth-ramp-
+// derived). THE CSS A SAVE STORES: the rows minus each derived row whose value is still its derivation (the theme's default,
+// not a choice — the theme keeps deriving from its own hues); THE CSS THE EDITOR SHOWS for a saved theme: a derived row it
+// did not store reads as its derivation again
+const storedCss = (values) => Object.fromEntries(Object.entries(values || {}).filter(([k, v]) => !CSS_VAR_DEFS.some((d) => d.key === k && d.derived && String(v).trim() === d.derived)));
+const shownCss = (saved) => { const css = { ...(saved || {}) }; for (const d of CSS_VAR_DEFS) if (d.derived && !Object.prototype.hasOwnProperty.call(css, d.key)) css[d.key] = d.derived; return css; };
+
 const CSS_VAR_GROUPS = [...new Set(CSS_VAR_DEFS.map(d => d.group))];
 const TERM_COLOR_GROUPS = [...new Set(TERMINAL_COLOR_DEFS.map(d => d.group))];
 
@@ -115,7 +123,7 @@ class ThemeEditor {
       const name = themeName.slice(7);
       const saved = this._customThemes[name];
       if (saved) {
-        this._cssValues = { ...saved.css };
+        this._cssValues = shownCss(saved.css);   // B-2e7b: a derived row the save left out shows its derivation
         this._termValues = { ...saved.terminal };
         return;
       }
@@ -530,17 +538,18 @@ class ThemeEditor {
     const builtIn = ['dark', 'light', 'dracula', 'nord', 'solarized', 'monokai'];
     if (builtIn.includes(name.toLowerCase())) { showToast(t('Cannot use a built-in theme name.'), { type: 'error' }); return; }
 
+    const css = storedCss(this._cssValues);   // B-2e7b: only what the person chose — a derived row still at its derivation is left out
     try {
       const res = await fetch('/api/custom-themes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, css: this._cssValues, terminal: this._termValues }),
+        body: JSON.stringify({ name, css, terminal: this._termValues }),
       });
       if (!res.ok) { const e = await res.json(); showToast(e.error || t('Save failed'), { type: 'error' }); return; }
     } catch (e) { showToast(t('Save failed: {error}', { error: e.message }), { type: 'error' }); return; }
 
     // Register locally
-    this.app.themeManager.registerCustomTheme(name, this._cssValues, this._termValues);
+    this.app.themeManager.registerCustomTheme(name, css, this._termValues);
     this._previewActive = false;
     this.app.themeManager.apply('custom-' + name);
     const termTheme = this.app.themeManager.getTerminalTheme();
