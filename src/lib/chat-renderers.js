@@ -62,6 +62,16 @@ const VS_ANCHOR_RE = new RegExp('<a\\x20href="((?:' + VS_MARKS.map((m) => m.repl
 // the bare pass's PLACEHOLDER for a conversation / desktop door (text only, so every later pass skips it — _linkifyBareText); the
 // after-pass draws it (vsLinkHtml: the icon, the real name, the unknown chip)
 const VS_BARE_RE = /<span class="chat-link-vs" data-vs-kind="(conversation|desktop)" data-vs-ref="([^"]*)">([^<]*)<\/span>/g;
+/** THE STREAMING FRAME's tail (主开发 12:21Z): the LAST bare door's placeholder, when the raw text ends with that very run (nothing after
+ *  it yet), goes back to words — the next frame draws it once a character follows. Labelled links need their `)` to be links at all. */
+function streamTailWords(html, text) {
+  const tail = /(?:^|[^\w/.])(vibespace:\/\/[A-Za-z]*(?:\/[A-Za-z0-9_.:~-]*)?)$/i.exec(String(text || ''));
+  if (!tail) return html;
+  let last = null;
+  for (const m of html.matchAll(VS_BARE_RE)) last = m;
+  if (!last || tail[1] !== last[3]) return html;   // the door ENDS at the text's end (a full stop after it is a character that follows)
+  return html.slice(0, last.index) + `<span class="chat-link-words">${last[3]}</span>` + html.slice(last.index + last[0].length);
+}
 const NOTE_SPAN_RE = / ?<span class="chat-link-note masked-link-note">([^<]*)<\/span>/g;
 const BLOCK_RE = /<pre\b[^>]*>[\s\S]*?<\/pre>|<code\b[^>]*>[\s\S]*?<\/code>/gi;
 export function notesAfterBlocks(html) {
@@ -1541,7 +1551,7 @@ class ChatRenderers {
       // markdown per the tool's own describe ("Supports markdown formatting").
       // renderMarkdown is sanitizeHtml(marked(...)) — the ONE sanitizer; the PURE
       // builder never carries one (it escapes instead).
-      const body = rec.message ? `<div class="chat-text">${this.renderMarkdown(rec.message)}</div>` : '';
+      const body = rec.message ? `<div class="chat-text">${this.renderMarkdown(rec.message, { vsLinks: true })}</div>` : '';   // the agent's own words to the person (the brief channel): the option on (主开发 12:21Z)
       el.classList.add('chat-msg-userchan');
       this.wrapMsg(el, 'tool', UI_ICONS.mail, userMessageCardHtml(rec, { esc: escHtml, t, icons: { mail: UI_ICONS.mail }, body }));
       return el;
@@ -2604,10 +2614,15 @@ class ChatRenderers {
 
   /** THE OPTION `vsLinks` (lane setting-doors pick 1 cure, 主开发 2026-11-17 — ONE rule for where the scheme's links render):
    *  off by default; on ONLY where the words are the conversation's own — the assistant text block and its streaming
-   *  frame, the sub-agent report, the sub-agent card's answer. Off ⇒ a `vibespace://` run is words: text a PEER wrote
-   *  (peer and group bodies, a VibeSpace notice — a job's record — the person's own text, a tool's input or output) never
-   *  draws a door, and a hand-written `#vs-setting-` anchor there is its label alone. */
-  renderMarkdown(text, { vsLinks = false } = {}) {
+   *  frame, the sub-agent report, the sub-agent card's answer, and the agent's own message card for the person (the brief
+   *  channel's message — 主开发's ruling, 12:21Z: the agent's words to the person) — LIVE OR HISTORY (the read-only history
+   *  view draws the same blocks, pressable). Off ⇒ a `vibespace://` run is words: text a PEER wrote (peer and group bodies,
+   *  a VibeSpace notice — a job's record — the person's own text, a tool's input or output) never draws a door, and a
+   *  hand-written `#vs-setting-` anchor there is its label alone. (For-you items' words are pressable WHATEVER they quote —
+   *  主开发's ruling: a press only goes somewhere; a fence there would be over-defence.)
+   *  `streaming` (the streaming frame only): a bare door that ENDS at the end of the text stays plain words until a character
+   *  follows it — a half-written address is never drawn as «unknown» (主开发's look law: a person never reads an address). */
+  renderMarkdown(text, { vsLinks = false, streaming = false } = {}) {
     try {
       // marked passes raw HTML through — sanitize before injecting into the
       // DOM (message content is model/tool-controlled and may echo hostile
@@ -2621,7 +2636,9 @@ class ChatRenderers {
       html = conversationLinksHtml(html, { known: (id) => (this._subagentKnown ? this._subagentKnown(id) : true), t, escHtml }); // lane agy-subagent-cards: [x](conversation://<id>) opens that subagent
       html = this._wrapTables(html);
       html = this._markOpenFences(text, html); // lane chat-mermaid: a fence still being streamed stays code
-      html = this._schemeAnchors(this.linkify(html, { vsLinks }), { vsLinks });   // lane setting-doors pick 1 (+ the option): [x](vibespace://settings/<key>) → the setting span (after linkify: its words are never re-linked)
+      html = this.linkify(html, { vsLinks });
+      if (vsLinks && streaming) html = streamTailWords(html, text);   // a door still being written stays words
+      html = this._schemeAnchors(html, { vsLinks });   // lane setting-doors pick 1 (+ the option): [x](vibespace://settings/<key>) → the setting span (after linkify: its words are never re-linked)
       return notesAfterBlocks(html);   // lane mask-value-shape r6 (m7): a code block / span reads as written — the note follows it
     } catch {
       return escHtml(text || '');
@@ -3166,7 +3183,7 @@ class ChatRenderers {
       const setting = settingLinkOf(e.target);   // lane setting-doors pick 1: a link to one setting OPENS it (a click, a tap) — no copy, no menu
       if (setting) { e.preventDefault(); e.stopPropagation(); this._openSettingLink(setting.dataset.setting); return; }
       const vs = vsLinkOf(e.target);   // lane login-request-card piece 1: a link to a conversation / desktop GOES (the page's door) — it only navigates
-      if (vs) { e.preventDefault(); e.stopPropagation(); const plan = pressInternalLink(vs.dataset.vsKind, vs.dataset.vsRef, { x: e.clientX, y: e.clientY }); this._linkOp(vs.dataset.vsKind, plan ? `press:${plan}` : 'press', vs.dataset.vsRef); return; }
+      if (vs) { e.preventDefault(); e.stopPropagation(); const plan = pressInternalLink(vs.dataset.vsKind, vs.dataset.vsRef, { x: e.clientX, y: e.clientY, el: vs }); this._linkOp(vs.dataset.vsKind, plan ? `press:${plan}` : 'press', vs.dataset.vsRef); return; }
       const link = chatLinkOf(e.target);
       if (!link) return;
       e.preventDefault();

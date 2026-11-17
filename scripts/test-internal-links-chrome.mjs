@@ -208,7 +208,10 @@ try {
 
   console.log('⑤ after a reload: B\'s row is on a desktop this page has not built — the press switches there and builds it');
   await evalJs(`app.desktopManager.switchTo(${JSON.stringify(D1)})`); await until(`app.desktopManager.activeDesktopId === ${JSON.stringify(D1)}`);
-  await sleep(2500);   // the layout's own debounce writes the record
+  // the layout's own debounce writes the record — WAIT FOR THE RECORD (主开发 12:21Z f: a fixed wait is a runner's speed guess): B's row in
+  // Desktop 2's stored record in this hub's data/layouts.json
+  const recorded = await (async () => { for (let i = 0; i < 200; i++) { try { const Ly = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'layouts.json'), 'utf8')); const ws = (((Ly.desktops || {})[D2] || {}).autoSave || {}).windows || []; if (ws.some((w) => ((w && w.openSpec) || {}).backendSessionId === B.sid)) return true; } catch { } await sleep(150); } return false; })();
+  check('Desktop 2\'s stored record holds B\'s row before the reload (waited for, never a fixed sleep)', recorded === true);
   await cdp('Page.reload');
   check('the page again, on Desktop 1', !!(await until(`!!(window.app && app.desktopManager && app.desktopManager.activeDesktopId === ${JSON.stringify(D1)} && document.querySelector(${JSON.stringify(linkSel(B.sid))}))`, { timeout: 40000 })));
   const builtBefore = (await winsOf(B.sid)).length;
