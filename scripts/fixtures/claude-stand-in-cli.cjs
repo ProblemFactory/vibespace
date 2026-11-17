@@ -39,6 +39,10 @@
 //   $STAND_IN_RELEASE_FILE  set: a LONGER- turn's tool ends only once THAT FILE exists (polled every 50 ms; 180 s at most) — the leg
 //                      releases it AFTER what must happen inside the turn (a server restart and the page back), never a clock.
 //                      Unset: as before.
+// THE CONVERSATION'S FACTS (lane conversation-facts): a turn whose text holds `BGSET-` says the level signal with one background
+// task (`system/background_tasks_changed`, the shape src/message-manager.js reads), `BGEMPTY-` says it with none, `WAKE-` writes
+// a fired loop wakeup (`command_lifecycle` started + `wakeup_source` / `scheduled_for`, src/record-shape.js:341-342), and
+// `BURST-` answers with 2000 assistant records in one go (a leg counts the wrapper's sidecar writes over them).
 //   $STAND_IN_HELPER_MS  how long a BGAGENT- helper works (default $STAND_IN_LONG_MS) — past a Stop, the session stays
 //                      'running' with no idle (the shape a Stop window must not wait on for ever)
 // Its records are VERSION-KEYED (lane claude-steer-inject r3): $STAND_IN_CLI_VERSION (default 2.1.312, the build the R0 table was
@@ -230,6 +234,10 @@ function begin(f, { follow = false } = {}) {
   }
   const uuids = INIT_UUIDS ? uuidsOf(f) : [];
   out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-4-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: CLI_VERSION, ...(uuids.length ? { user_message_uuids: uuids } : {}) });
+  if (/BGSET-/.test(text)) out({ type: 'system', subtype: 'background_tasks_changed', session_id: SID, tasks: [{ task_id: 'bg-stand-in-1', task_type: 'local_bash', description: 'a dev server' }] });
+  if (/BGEMPTY-/.test(text)) out({ type: 'system', subtype: 'background_tasks_changed', session_id: SID, tasks: [] });
+  if (/WAKE-/.test(text)) out({ type: 'command_lifecycle', session_id: SID, state: 'started', command_uuid: 'cmd-stand-in-' + turnSeq, wakeup_source: 'loop_wakeup', scheduled_for: Date.now() - 1000 });
+  if (/BURST-/.test(text)) for (let i = 0; i < 2000; i++) out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_b' + i, role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: 'burst ' + i }] } });
   const say = (t) => out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_' + Date.now(), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: t }] } });
   if (/TOOL-/.test(text) && !follow) {
     const toolId = 'toolu_stand_in_' + turnSeq;

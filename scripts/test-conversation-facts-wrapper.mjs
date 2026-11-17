@@ -1,0 +1,134 @@
+#!/usr/bin/env node
+// scripts/test-conversation-facts-wrapper.mjs — THE WRAPPER KEEPS THE CONVERSATION'S FACTS (lane conversation-facts, majordomo
+// piece 2; 主开发's ruling 2026-11-17, road A). MEASURED FIRST: after a hub restart with no page, 0 of 12 idle chat fixtures
+// read known for background tasks, timers and idle age — the hub held them in memory only. The wrapper reads every record
+// from its CLI's first line and outlives every restart, so it keeps them (src/conversation-facts.js factsStep, memory only,
+// per record) and writes them with the sidecar writes it already makes — never a write per record.
+// On the REAL data/bin/chat-wrapper.js over the stand-in CLI (scripts/fixtures/claude-stand-in-cli.cjs — BGSET- / BGEMPTY- /
+// WAKE- / BURST-): the sidecar's facts after a plain turn, a background set, an emptied set, a fired wakeup; the writes
+// counted over a burst of 2000 records (RED CONTROL: a copy that writes per record); the minute flush under a scaled clock
+// (scripts/fixtures/clock-scale.cjs); a failed sidecar write never stops it.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
+import { stopWrapper, scratch } from './scratch.mjs';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const CF = require(path.join(REPO, 'src/conversation-facts.js'));
+const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+const ad = new ClaudeCodeAdapter({ buffersDir: os.tmpdir() });
+const WRAPPER = path.join(REPO, 'data/bin/chat-wrapper.js');
+const STAND_IN = path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs');
+const CLOCK = path.join(REPO, 'scripts/fixtures/clock-scale.cjs');
+const ROOT = scratch('conversation-facts-wrapper');
+fs.mkdirSync(ROOT, { recursive: true });
+const atExit = [];
+const cleanup = () => { for (const f of atExit.splice(0)) { try { f(); } catch { } } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } };
+process.on('exit', cleanup);
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
+let pass = 0, fail = 0;
+const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const until = async (f, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await f()) return true; await sleep(30); } return !!(await f()); };
+
+// ── B · the REAL wrapper ────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('B · the REAL data/bin/chat-wrapper.js over the stand-in CLI');
+/** A preload that counts the wrapper's sidecar writes (each one is a rename onto the meta file) — test-only. */
+const COUNTER = path.join(ROOT, 'count-meta-writes.cjs');
+fs.writeFileSync(COUNTER, "'use strict';\nconst fs = require('fs');\nconst meta = process.argv[3], out = process.env.META_WRITES_FILE;\nconst real = fs.renameSync;\nfs.renameSync = function renameSync(a, b) { const r = real.apply(fs, arguments); if (out && b === meta) { try { fs.appendFileSync(out, Date.now() + '\\n'); } catch { } } return r; };\n");
+async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
+  const dir = fs.mkdtempSync(path.join(ROOT, label + '-'));
+  const writes = path.join(dir, 'writes.txt');
+  const argv = ['-r', COUNTER, ...(clock ? ['-r', CLOCK] : []), wrapper, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN];
+  const w = spawn(process.execPath, argv, { stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: dir, META_WRITES_FILE: writes, STAND_IN_LONG_MS: '200', ...(clock ? { CLOCK_SCALE: String(clock) } : {}) } });
+  atExit.push(() => { try { w.kill('SIGKILL'); } catch { } });
+  const recs = []; let lb = '';
+  w.stdout.setEncoding('utf8');
+  w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { const r = JSON.parse(l); r.__at = Date.now(); recs.push(r); } catch { } } });
+  w.stderr.on('data', () => { });
+  let n = 0;
+  const h = {
+    dir, w, recs,
+    say: (text) => w.stdin.write(ad.formatChatInput(text, 'm' + (++n)).stdinPayload + '\n'),
+    results: () => recs.filter((r) => r.type === 'result').length,
+    meta: () => { try { return JSON.parse(fs.readFileSync(path.join(dir, 's.json'), 'utf8')); } catch { return null; } },
+    writes: () => { try { return fs.readFileSync(writes, 'utf8').trim().split('\n').filter(Boolean).map(Number); } catch { return []; } },
+    turn: async (text) => { const r0 = h.results(); h.say(text); return until(() => h.results() > r0, 10000); },
+    stop: () => stopWrapper(w, { dir }),
+  };
+  await until(() => h.meta() !== null, 5000);
+  return h;
+}
+{
+  const h = await boot('facts');
+  const m0 = h.meta();
+  ok(m0 && m0.caps && m0.caps.facts === CF.FACTS_VERSION && m0.facts && m0.facts.fromStart === true && m0.facts.bg === null, 'at its start the sidecar advertises caps.facts and holds a tracker read from the CLI\'s first line', m0 && { caps: m0.caps, facts: m0.facts });
+  ok(await h.turn('hello'), 'a plain turn answers');
+  ok(await until(() => { const f = h.meta()?.facts; return f && Array.isArray(f.bg) && f.bg.length === 0 && f.cli; }, 3000), 'after a plain turn the sidecar says the empty set (the CLI\'s init named a level-publishing version)', h.meta()?.facts);
+  const lastRec = h.recs.filter((r) => r.type !== '_stdin_ack').at(-1).__at;
+  ok(await until(() => { const f = h.meta()?.facts; return f && Math.abs(f.at - lastRec) < 400; }, 3000), 'the sidecar\'s record time is the turn\'s last record (written with the turn-end write)', { at: h.meta()?.facts?.at, lastRec });
+  await h.turn('BGSET- start it');
+  ok(await until(() => h.meta()?.facts?.bg?.length === 1 && h.meta().facts.bg[0].description === 'a dev server', 3000), 'a background set: the sidecar holds it (id, type, description)', h.meta()?.facts);
+  await h.turn('BGEMPTY- it ended');
+  ok(await until(() => Array.isArray(h.meta()?.facts?.bg) && h.meta().facts.bg.length === 0, 3000), 'the set went empty: the sidecar says so', h.meta()?.facts);
+  ok(h.meta()?.facts?.timer === false, 'no timer seen yet');
+  await h.turn('WAKE- a fired loop wakeup');
+  ok(await until(() => h.meta()?.facts?.timer === true, 3000), 'a fired wakeup: the one-way mark is in the sidecar', h.meta()?.facts);
+  const back = CF.trackedFacts(CF.factsFromSidecar(h.meta().facts), { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' });
+  ok(Array.isArray(back.background) && back.timersWhy === CF.WHY.timerSet && Number.isFinite(back.idleSince), 'what a restarted hub reads from this sidecar: the set known, timers «it set a CLI timer», an idle age', back);
+  await h.stop();
+}
+{
+  // THE STAMP COSTS NOTHING PER RECORD: the writes over a burst of 2000 records
+  const burst = async (h) => { await h.turn('hello'); await sleep(900); const w0 = h.writes().length; const ok1 = await h.turn('BURST- go'); await sleep(900); return { ok: ok1, writes: h.writes().length - w0, records: h.recs.filter((r) => r.type === 'assistant').length }; };
+  const h = await boot('burst');
+  const b = await burst(h);
+  ok(b.ok && b.records >= 2000 && b.writes >= 1 && b.writes <= 4, `a turn of 2000 records costs ${b.writes} sidecar write(s) — the turn's own (≤ 4), never one per record`, b);
+  await h.stop();
+  // RED CONTROL: a copy whose step writes per record
+  const MUT = mutantCopies('conversation-facts-wrapper', REPO);
+  const src = fs.readFileSync(WRAPPER, 'utf8');
+  const NEEDLE = '  if (changed) { scheduleMeta(); return; }';
+  ok(src.split(NEEDLE).length === 2, 'the wrapper\'s write rule is in it once (the mutation anchor)');
+  const red = MUT.write('data/bin/chat-wrapper.js', src.replace(NEEDLE, '  persistMeta(); return;'), 'write-per-record');
+  const hr = await boot('burst-red', { wrapper: red });
+  const br = await burst(hr);
+  ok(br.ok && br.writes >= 1000, `CONTROL a wrapper that writes per record: ${br.writes} writes over the same burst — the leg above would be red`, br);
+  await hr.stop();
+}
+{
+  // the record time rides the next write — or, when nothing wrote for a minute, ONE write then (a scaled clock: 1 min = 1 s)
+  const h = await boot('flush', { clock: 60 });
+  await h.turn('hello');
+  await sleep(1600);   // the turn's writes and its scaled minute's flush have run
+  const w0 = h.writes().length;
+  const t = await h.turn('BGSET- once'); // one change write (debounced with the turn's own: 500 ms, under a second — not scaled)
+  await sleep(800);
+  const w1 = h.writes().length;
+  await sleep(2600);   // two scaled minutes with no record: at most one flush, then nothing (the flush re-arms only on a record)
+  const w2 = h.writes().length;
+  ok(t && w1 - w0 >= 1 && w2 - w1 <= 1, `after a turn, the minute flush writes at most once (${w2 - w1}) and then nothing while no record comes`, { w0, w1, w2 });
+  const lastRec = h.recs.filter((r) => r.type !== '_stdin_ack').at(-1).__at;
+  ok(Math.abs((h.meta()?.facts?.at || 0) - lastRec) < 400, 'the sidecar ends on the last record\'s time', { at: h.meta()?.facts?.at, lastRec });
+  await h.stop();
+}
+{
+  // a failed sidecar write never stops the wrapper
+  const h = await boot('rofs');
+  await h.turn('hello');
+  await sleep(700);
+  fs.chmodSync(h.dir, 0o555);
+  const answered = await h.turn('BGSET- while the folder refuses writes');
+  await sleep(800);
+  const alive = h.w.exitCode === null && h.w.signalCode === null;
+  const answered2 = await h.turn('hello again');
+  fs.chmodSync(h.dir, 0o755);
+  ok(answered && answered2 && alive, 'with its sidecar folder refusing writes, the wrapper keeps answering turns (a failed write is caught)', { answered, answered2, alive });
+  await h.stop();
+}
+
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

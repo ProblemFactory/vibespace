@@ -173,6 +173,25 @@ const CLAUDE_HOLD_VERBS = ['remove', 'reorder', 'edit'];
 // asks (`webui_receipt` — the person's CLI never stays attached; never the replay buffer) and refuses a TORN line with `_stdin_nack`
 const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_HOLD_VERBS, queueResync: true }, queue: [] };
 meta.caps.receipts = true;   // lane human-cli: the receipts road (an ack by id, a torn line's nack — <id>.receipts beside the buffer)
+// THE CONVERSATION'S FACTS, KEPT WHERE THEY ARE BORN (lane conversation-facts, majordomo piece 2 — 主开发's ruling, road A):
+// this process reads every record from the CLI's first line and outlives every hub restart, so it keeps what a restarted hub
+// cannot read back — the last background set (or the empty set from the start), the one-way CLI-timer mark, the last
+// record's time (src/conversation-facts.js factsStep: memory only, per record). They ride the sidecar writes this file
+// already makes: a CHANGE of the set or the mark through scheduleMeta (the debounced write task_started takes), the record
+// time with whatever write comes next — or, when nothing wrote for a minute, ONE write then (never a write per record).
+// A failed write is persistMeta's (caught, logged at boot only): it never stops this process. `caps.facts` = the shape
+// version: the hub reads a sidecar without it as a wrapper older than this record (unknown, never guessed).
+const FACTS_FLUSH_MS = 60 * 1000;
+let CF = null;
+try { CF = require(path.join(__dirname, '..', '..', 'src', 'conversation-facts.js')); meta.facts = CF.factsFresh(); meta.caps.facts = CF.FACTS_VERSION; } catch { CF = null; }
+let factsFlush = null;
+function noteFacts(msg) {
+  if (!CF || !meta.facts) return;
+  let changed = false;
+  try { changed = CF.factsStep(meta.facts, msg, Date.now()); } catch { return; }
+  if (changed) { scheduleMeta(); return; }
+  if (!factsFlush) { factsFlush = setTimeout(() => { factsFlush = null; if (!metaTimer) persistMeta(); }, FACTS_FLUSH_MS); factsFlush.unref?.(); }
+}
 let metaTimer = null;
 
 // replaced, never rewritten in place (ci358-reds item 7): a hub read between writeFileSync's truncate and its bytes saw an
@@ -980,6 +999,7 @@ function processLine(line) {
     log(`remote session exited on host with code ${remoteExited} signal ${remoteExitSignal}`);
     return;
   }
+  noteFacts(msg);   // the conversation's facts (memory only — see the head of this file)
 
   // THE PROMPT HOOK'S PHASE (acceptance r4): the adapter spawns the CLI with CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS,
   // so it says when a UserPromptSubmit hook starts and ends — the ONE word before a turn's init that says "a turn is
