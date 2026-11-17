@@ -7,6 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const PINNED = 'src/incident.js';   // the file these legs read, BY NAME: the moved legs build its path with path.join, which ci.mjs's affected rule cannot see
+void PINNED;
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
 
