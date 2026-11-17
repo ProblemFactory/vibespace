@@ -862,6 +862,11 @@ function acquireSingleton() {
     } catch {
       try {
         const pid = Number(fs.readFileSync(LOCK, 'utf-8').trim());
+        // A LOCK THAT NAMES THIS PROCESS IS STALE BY DEFINITION (主开发 2026-11-17): this agent has not written it yet. A
+        // previous agent died without its exit handler — a container killed while the lock lives on the home volume, whose
+        // fresh process table hands the new agent THE SAME pid; a reboot that repeats the number — and the check below read
+        // «alive, our own name» and refused to start, for good.
+        if (pid === process.pid) { fs.unlinkSync(LOCK); continue; }
         let cmd = '';
         try { cmd = fs.readFileSync('/proc/' + pid + '/cmdline', 'utf-8').replace(/\0/g, ' '); } catch { }
         // no /proc (macOS/BSD): verify via ps — without this, a RECYCLED pid
