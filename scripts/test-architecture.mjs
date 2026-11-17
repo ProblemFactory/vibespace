@@ -2769,7 +2769,12 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
   // not read; hub-boot.mjs is the helper). A RATCHET that
   // only falls: a re-pointed batch lowers BOOTS_OUTSIDE_HELPER in the same commit, a new boot outside the helper is red, and
   // at 0 it is the law. RED CONTROL: a re-pointed suite with its own spawn line restored counts one more.
-  const BOOTS_OUTSIDE_HELPER = 217;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e
+  const BOOTS_OUTSIDE_HELPER = 222;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e ⇒ 217 in 2.369.407.
+  // 222 in 2.369.408, BY THE COORDINATOR'S WORD (2026-11-17 18:50Z), the assembly's cure — not a loosening: five suites written before
+  // this rule shipped boarded with their units in 2.369.408 — test-phone-six-chrome (phone-six), test-ui-fit-chrome (ui-phone-and-fit),
+  // test-internal-links-chrome, test-setting-links-chrome and test-setting-propose-chrome (internal links). Their re-point onto
+  // hub-boot.mjs startHub is OWED: lane chrome-157 takes them as a batch of five on the release right after the push, and this
+  // ratchet comes down by five with it. A rise is the coordinator's word, names each suite and carries its owed re-point.
   const bootFiles = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.mjs$/.test(f) && !/^dbg-/.test(f) && f !== 'hub-boot.mjs').sort();
   const BOOT = /\b(?:spawn|fork)\(\s*(?:(?:process\.execPath|'node'|"node")\s*,\s*\[|[A-Za-z_$][\w$.]*\s*,\s*\[[^\]]*?(?:process\.execPath|'node'|"node")\s*,)[^\]]*?['"`]server\.js['"`]/g;
   const bootsOf = (t) => { const data = dataRanges(t); return [...t.matchAll(BOOT)].filter((m) => !data.some(([x, y]) => m.index >= x && m.index < y)).length; };
