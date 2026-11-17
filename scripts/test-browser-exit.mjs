@@ -356,6 +356,11 @@ console.log('⑤ THE PAGE\'S WORDS — every sentence in the dialog the page\'s,
   const refused = W.exitSay('exit_check_refused', T, { detail: '407 — Proxy Authentication Required' }), st = W.exitSay('exit_answer_unreadable', T, { kind: 'status', status: 503 });
   ok(/^The profile's proxy did not open the way to the check address\. \(407 — Proxy Authentication Required\)$/.test(refused) && /error status\..*\(503\)$/.test(st),
     'what the far side said rides AFTER the page\'s sentence as data — a proxy\'s own line, a status number — never as the sentence', [refused, st]);
+  // the owner's look (主开发 19:53Z): no space after a CJK full stop between two of the page's sentences — one after a Latin one
+  const ZHT = (k) => ({ 'The check address answered a web page, not JSON.': '检查地址回应的是一个网页，不是 JSON。', 'Type the exit by hand, or give another check address in the field above and press Check.': '请手动填写出口，或在上面的输入框里换一个检查地址，再按「检查」。' }[k] || k);
+  const zhU = W.exitWords('exit_answer_unreadable', ZHT, { kind: 'html' }).text, enU = W.exitWords('exit_answer_unreadable', T, { kind: 'html' }).text;
+  ok(zhU === '检查地址回应的是一个网页，不是 JSON。请手动填写出口，或在上面的输入框里换一个检查地址，再按「检查」。' && /JSON\. Type the exit/.test(enU) && W.joinSentences('a。', 'b') === 'a。b' && W.joinSentences('a.', 'b') === 'a. b',
+    'two of the page\'s sentences join with NO space after a CJK full stop (zh, ja) and one space after a Latin one', [zhU, enU]);
   const DLG = read('src/lib/browser-exit-dialog.js'), PD = read('src/lib/browser-proxy-dialog.js'), CSS = read('public/style.css');
   ok(!/say\([^;]*\.error/.test(DLG) && !/String\(error\)/.test(DLG) && /exitSay\(code, t, extra\)/.test(DLG),
     'the dialog says nothing from a server\'s `error` — every sentence through the page\'s words');

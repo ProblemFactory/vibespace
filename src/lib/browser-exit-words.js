@@ -42,7 +42,7 @@ export function exitWords(code, t, { kind = '', status = 0, detail = '' } = {}) 
     case 'exit_check_timeout': return row(t('The exit check address did not answer in time.'));
     case 'exit_check_too_big': return row(t('The exit check address answered more than this check reads (64 KiB).'));
     case 'exit_check_failed': return row(t('The exit check could not reach the check address through the profile\'s proxy.'), detail);
-    case 'exit_answer_unreadable': return row(`${exitKindWords(kind, t)} ${t('Type the exit by hand, or give another check address in the field above and press Check.')}`, kind === 'status' && status ? String(status) : '');
+    case 'exit_answer_unreadable': return row(joinSentences(exitKindWords(kind, t), t('Type the exit by hand, or give another check address in the field above and press Check.')), kind === 'status' && status ? String(status) : '');
     case 'exit_timezone_invalid': return row(t('That is not a time zone — give a zone name like Asia/Shanghai.'));
     case 'exit_ip_invalid': return row(t('The public address is one IP address, like 203.0.113.7 or 2001:db8::1.'));
     case 'exit_country_invalid': return row(t('The country is at most 64 characters.'));
@@ -57,6 +57,8 @@ export function exitWords(code, t, { kind = '', status = 0, detail = '' } = {}) 
   }
 }
 
+/** Two of the page's sentences, one after the other: a space after a Latin full stop, none after a CJK one («。» «！» «？» — zh, ja). */
+export function joinSentences(a, b) { return /[。！？]$/.test(String(a)) ? `${a}${b}` : `${a} ${b}`; }
 /** One sentence with its data after it — what the dialog shows. */
 export function exitSay(code, t, extra = {}) { const w = exitWords(code, t, extra); return w.data ? `${w.text} (${w.data})` : w.text; }
 
