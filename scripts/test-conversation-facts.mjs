@@ -729,8 +729,8 @@ console.log('F · the task records and the background asks: the wrapper records,
   const torn = JSON.parse(JSON.stringify(done.st)); torn.bgStarted.push(null);
   const tornSeen = JSON.parse(JSON.stringify(done.st)); tornSeen.bgStarted[0].seen = 'x';
   ok(back && back.bgStarted.length === 1 && CF.trackedFacts(back, K).background === null && backAsk && backAsk.bgAsk.join() === 'Bash' && CF.factsFromSidecar(v2old) === null
-    && CF.factsFromSidecar(torn).bgStartedFull === true && CF.trackedFacts(CF.factsFromSidecar(torn), K).backgroundWhy === CF.WHY.bgTasksFull && CF.factsFromSidecar(tornSeen).bgStartedFull === true,
-    'the sidecar round trip keeps the tasks (their kinds nested) and the asks; a v2 sidecar without them reads as an older shape; an element that does not read back marks the list not whole');
+    && CF.factsFromSidecar(torn).bgDropped === 1 && Array.isArray(CF.trackedFacts(CF.factsFromSidecar(torn), K).background) && CF.factsFromSidecar(tornSeen).bgDropped === 1 && CF.factsFromSidecar(tornSeen).bgStarted.length === 0,
+    'the sidecar round trip keeps the tasks (their kinds nested) and the asks; a v2 sidecar without them reads as an older shape; an element that does not read back is COUNTED with those the bound let go (judged by the set alone), never dropped silently');
   // THE WRAPPER RECORDS, IT DOES NOT JUDGE: the step names none of the hub's tables
   const srcCF = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
   const step = srcCF.slice(srcCF.indexOf('function factsStep('), srcCF.indexOf('function factsFromSidecar('));
@@ -753,20 +753,43 @@ console.log('G · round three: one bound for the tasks, the measured census repl
   const mut = (needle, repl, tag) => { if (srcCF.split(needle).length !== 2) throw new Error('anchor missing: ' + tag); return MUTG.load('src/conversation-facts.js', srcCF.replace(needle, repl), tag); };
   const init = (v = '2.1.322') => ({ type: 'system', subtype: 'init', claude_code_version: v });
   const started = (id, kind = 'local_bash') => ({ type: 'system', subtype: 'task_started', task_id: id, task_type: kind, is_backgrounded: true });
-  // MUST 1 — ONE bound (the kinds nested in each task), about a thousand; filled, it is SAID
+  // MUST 1 — ONE bound (the kinds nested in each task), about a thousand; at the bound the OLDEST task leaves, counted (主开发 13:56Z)
   const stB = CF.factsFresh(); CF.factsStep(stB, init(), 1);
   for (let i = 0; i < CF.TASKS_MAX; i++) { CF.factsStep(stB, started('t' + i), 2); CF.factsStep(stB, { type: 'system', subtype: 'task_updated', task_id: 't' + i, patch: { status: 'completed' } }, 3); CF.factsStep(stB, { type: 'system', subtype: 'task_notification', task_id: 't' + i, status: 'completed' }, 4); CF.factsStep(stB, { type: 'system', subtype: 'task_progress', task_id: 't' + i }, 5); }
   CF.factsStep(stB, { type: 'system', subtype: 'background_tasks_changed', tasks: [] }, 6);
   const atBound = CF.trackedFacts(JSON.parse(JSON.stringify(stB)), K);
   const over = CF.factsStep(stB, started('one-more'), 7);
-  ok(CF.TASKS_MAX >= 1000 && !('bgOutcomes' in CF.factsFresh()) && stB.bgStarted.length === CF.TASKS_MAX && stB.bgStarted[0].seen.length === 3 && Array.isArray(atBound.background) && atBound.background.length === 0
-    && over === true && stB.bgStartedFull === true && CF.trackedFacts(stB, K).backgroundWhy === CF.WHY.bgTasksFull,
-    'MUST 1 ONE bound covers the tasks and their kinds (nested, three per task here): a thousand-odd tasks all ended read known-empty; the next start reaches the bound — SAID (full), background unknown', { n: stB.bgStarted.length, kinds: stB.bgStarted[0].seen });
-  const mB = mut('const TASKS_MAX = 1024, SEEN_MAX = 16;', 'const TASKS_MAX = 256, SEEN_MAX = 16;', 'round-two-bound');
+  const ids = stB.bgStarted.map((t) => t.id);
+  ok(CF.TASKS_MAX >= 1000 && !('bgOutcomes' in CF.factsFresh()) && stB.bgStarted[1].seen.length === 3 && Array.isArray(atBound.background) && atBound.background.length === 0
+    && over === true && ids.length === CF.TASKS_MAX && ids[ids.length - 1] === 'one-more' && !ids.includes('t0') && ids[0] === 't1' && stB.bgDropped === 1 && !('bgStartedFull' in stB),
+    'MUST 1 ONE bound (the kinds nested, three per task here): a thousand-odd tasks all ended read known-empty; the 1025th start IS KEPT, the first is gone and the count of those let go is one', { n: ids.length, first: ids[0], last: ids[ids.length - 1], dropped: stB.bgDropped });
+  const afterOver = CF.trackedFacts(JSON.parse(JSON.stringify(stB)), K);
+  CF.factsStep(stB, { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'one-more', task_type: 'local_bash', description: '' }] }, 8);
+  const named = CF.trackedFacts(JSON.parse(JSON.stringify(stB)), K);
+  CF.factsStep(stB, { type: 'system', subtype: 'task_notification', task_id: 'one-more', status: 'completed' }, 9); CF.factsStep(stB, { type: 'system', subtype: 'background_tasks_changed', tasks: [] }, 10);
+  ok(afterOver.background === null && /omits a task it started/.test(afterOver.backgroundWhy) && Array.isArray(named.background) && named.background.length === 1 && Array.isArray(CF.trackedFacts(stB, K).background) && CF.trackedFacts(stB, K).background.length === 0,
+    'MUST 1 past the bound the omission guard still covers the NEW task (open and unnamed ⇒ unknown; named ⇒ busy; ended and the set empty ⇒ known-empty) — never «unknown for ever»');
+  const mB = mut("      if (st.bgStarted.length >= TASKS_MAX) { st.bgStarted.shift(); st.bgDropped = (Number.isInteger(st.bgDropped) ? st.bgDropped : 0) + 1; }   // the OLDEST leaves, counted\n      t = { id, kind: typeof rec.task_type === 'string' ? rec.task_type.slice(0, 32) : null, seen: [] }; st.bgStarted.push(t); changed = true;",
+    "      if (st.bgStarted.length < TASKS_MAX) { t = { id, kind: typeof rec.task_type === 'string' ? rec.task_type.slice(0, 32) : null, seen: [] }; st.bgStarted.push(t); changed = true; }", 'newest-not-kept');
   const stM = mB.factsFresh(); mB.factsStep(stM, init(), 1);
-  for (let i = 0; i < 300; i++) { mB.factsStep(stM, started('t' + i), 2); mB.factsStep(stM, { type: 'system', subtype: 'task_notification', task_id: 't' + i, status: 'completed' }, 3); }
-  mB.factsStep(stM, { type: 'system', subtype: 'background_tasks_changed', tasks: [] }, 4);
-  ok(mB.trackedFacts(stM, K).background === null && !CF.endVerdict(row(mB.trackedFacts(stM, K))).endable, 'MUST 1 RED: round two\'s bound (256) — three hundred tasks, every one ended, the set empty, and the conversation can never be ended');
+  for (let i = 0; i <= mB.TASKS_MAX; i++) mB.factsStep(stM, started('t' + i), 2);
+  ok(!stM.bgStarted.some((t) => t.id === 't' + mB.TASKS_MAX), 'MUST 1 RED: round three\'s bound — the 1025th start is not kept (the NEW task the omission guard is for is lost)');
+  // ... and a task with more kinds than its list holds marks ITSELF, never the whole conversation
+  const stK = CF.factsFresh(); CF.factsStep(stK, init(), 1); CF.factsStep(stK, started('odd'), 2); CF.factsStep(stK, started('fine'), 3);
+  for (let i = 0; i <= CF.SEEN_MAX; i++) CF.factsStep(stK, { type: 'system', subtype: 'task_updated', task_id: 'odd', patch: { status: 'phase_' + i } }, 4);
+  CF.factsStep(stK, { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'fine', task_type: 'local_bash', description: '' }] }, 5);
+  const odd = stK.bgStarted.find((t) => t.id === 'odd'), fine = stK.bgStarted.find((t) => t.id === 'fine');
+  const tk = CF.trackedFacts(JSON.parse(JSON.stringify(stK)), K);
+  CF.factsStep(stK, { type: 'system', subtype: 'task_notification', task_id: 'fine', status: 'completed' }, 6); CF.factsStep(stK, { type: 'system', subtype: 'background_tasks_changed', tasks: [] }, 7);
+  ok(odd.seen.length === CF.SEEN_MAX && odd.seenFull === true && !fine.seenFull && Array.isArray(tk.background) && tk.background.length === 1 && Array.isArray(CF.trackedFacts(stK, K).background) && CF.trackedFacts(stK, K).background.length === 0,
+    'MUST 1 the seventeenth kind FLAGS THAT TASK only (its ending record may be the one not kept: it is judged by the set alone); the other task and the conversation stay known — busy while the set names one, known-empty after', { odd: { n: odd.seen.length, full: odd.seenFull }, fine });
+  const mK2 = mut("        else if (!t.seenFull) { t.seenFull = true; changed = true; }          // this task's kinds overflow: it marks ITSELF",
+    "        else if (!st.bgKindsFull) { st.bgKindsFull = true; changed = true; }", 'whole-conversation-mark');
+  const srcM = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
+  const stK2 = mK2.factsFresh(); mK2.factsStep(stK2, init(), 1); mK2.factsStep(stK2, started('odd'), 2);
+  for (let i = 0; i <= mK2.SEEN_MAX; i++) mK2.factsStep(stK2, { type: 'system', subtype: 'task_updated', task_id: 'odd', patch: { status: 'phase_' + i } }, 3);
+  ok(stK2.bgKindsFull === true && !stK2.bgStarted[0].seenFull && srcM.includes('t.seenFull = true') && !/bgStartedFull/.test(srcM),
+    'MUST 1 RED: the mark on the whole conversation (round three\'s shape) instead of the task — the source keeps the per-task flag and no sticky list mark');
   // MUST 2 — the measured census (主开发, 2.1.322) replayed in order: busy at every step, empty at the end
   const ten = fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.322-background-kinds.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const stC = CF.factsFresh(); CF.factsStep(stC, init(), 1);
@@ -812,8 +835,8 @@ console.log('G · round three: one bound for the tasks, the measured census repl
     patch: stepLegs(mut('    if (!t && (bgKeyOn(rec) || bgKeyOn(rec.patch))) {', '    if (!t && (bgKeyOn(rec))) {', 'no-patch-start')).patch,
     outcome: stepLegs(mut('        if (t.seen.length < SEEN_MAX) { t.seen.push(kind); changed = true; }', '        if (false) { t.seen.push(kind); changed = true; }', 'no-outcome')).outcome,
     ask: stepLegs(mut("      if (bgKeyOn(b.input)) {", "      if (b.input && b.input.run_in_background) {", 'one-key-ask')).ask,
-    first: stepLegs(mut("      if (st.bgStarted.length < TASKS_MAX) { t = { id, kind: typeof rec.task_type === 'string' ? rec.task_type.slice(0, 32) : null, seen: [] }; st.bgStarted.push(t); changed = true; }",
-      "      if (st.bgStarted.length < TASKS_MAX) { t = { id, kind: typeof rec.task_type === 'string' ? rec.task_type.slice(0, 32) : null, seen: [] }; st.bgStarted.push(t); }", 'start-no-change')).first,
+    first: stepLegs(mut("      t = { id, kind: typeof rec.task_type === 'string' ? rec.task_type.slice(0, 32) : null, seen: [] }; st.bgStarted.push(t); changed = true;",
+      "      t = { id, kind: typeof rec.task_type === 'string' ? rec.task_type.slice(0, 32) : null, seen: [] }; st.bgStarted.push(t);", 'start-no-change')).first,
   };
   ok(Object.values(reds).every((v) => v === false), 'RED, the step\'s four mutants: the start not read from the patch, the outcome not captured, the ask look narrowed to one key name, a first start not a change — each reddens its own leg', reds);
 }

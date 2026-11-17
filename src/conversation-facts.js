@@ -35,7 +35,6 @@ const WHY = Object.freeze({
   noWakeGrant: 'this release reads no wake grant on a job yet',
   bgNoRaw: 'its wrapper did not record how many background tasks its CLI listed — whether work runs is unknown',
   bgIdless: 'its CLI listed a background task without a task id — a shape the hub has not measured, so whether work runs is unknown',
-  bgTasksFull: 'it started more background tasks than its wrapper keeps — whether work runs is unknown',
   noInitSeen: 'no first record of its CLI was seen, yet it did work (a renamed first record?) — whether it reports background tasks is unknown',
 });
 
@@ -72,8 +71,10 @@ const BG_MAX = 100, TOOLS_MAX = 256;
  *  kind AS STATED (`<subtype>` + `:<status>` when the record states one), deduplicated per task. Which kinds END a task is the
  *  hub's table (TASK_ENDS), never decided here. `bgAsk` = the tool names whose call INPUT asked for background (a truthy input
  *  key whose name says background — a generic look, no list of tools). ONE bound covers the tasks and their kinds (round three:
- *  TASKS_MAX tasks of ≤ SEEN_MAX kinds each; a weeks-long conversation must not reach it — the sidecar is rewritten only on a
- *  change); a bound reached is SAID, never dropped silently. */
+ *  TASKS_MAX tasks of ≤ SEEN_MAX kinds each — the sidecar is rewritten only on a change). AT THE BOUND THE OLDEST TASK LEAVES and
+ *  `bgDropped` counts how many left: every new start is always recorded (主开发 13:56Z — a heavy conversation reaches a thousand
+ *  background tasks in a week or two, and the omission guard is for the NEW ones). A task with more kinds than its list holds
+ *  marks ITSELF (`seenFull`), never the whole conversation. Nothing here is sticky for the process's life. */
 const TASKS_MAX = 1024, SEEN_MAX = 16;
 const bgKeyOn = (o) => !!o && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).some((k) => /background/i.test(k) && !!o[k]);
 const taskKindOf = (rec) => { const p = rec.patch && typeof rec.patch === 'object' ? rec.patch : {}; const st = typeof rec.status === 'string' && rec.status ? rec.status : typeof p.status === 'string' && p.status ? p.status : ''; return (rec.subtype + (st ? ':' + st : '')).slice(0, 48); };
@@ -110,7 +111,7 @@ function levelMeasured(v) {
   return typeof v === 'string' && /^\d+(\.\d+)*/.test(v) && versionCmp(v, LEVEL_MEASURED_FROM) >= 0 && versionCmp(v, LEVEL_MEASURED_TO) <= 0;
 }
 /** Observations of a CLI process read from its first line. */
-function factsFresh() { return { v: FACTS_VERSION, fromStart: true, cli: null, bg: null, bgRaw: null, bgStarted: [], bgAsk: [], tools: [], wake: false, at: null }; }
+function factsFresh() { return { v: FACTS_VERSION, fromStart: true, cli: null, bg: null, bgRaw: null, bgStarted: [], bgDropped: 0, bgAsk: [], tools: [], wake: false, at: null }; }
 /** The set AS SEEN (acceptance round 2, must 2 — the wrapper records, never understands): every object element is kept, one
  *  without a task id as `id: null` (a CLI that renames the key must not read as an empty set); `bgRaw` beside it = the raw
  *  element count, so the hub can tell a set it was handed whole from one with elements not kept. */
@@ -141,15 +142,15 @@ function factsStep(st, rec, now) {
     const id = String(rec.task_id).slice(0, 64);
     let t = st.bgStarted.find((x) => x && x.id === id) || null;
     if (!t && (bgKeyOn(rec) || bgKeyOn(rec.patch))) {                         // the record SAYS backgrounded: a start, as seen
-      if (st.bgStarted.length < TASKS_MAX) { t = { id, kind: typeof rec.task_type === 'string' ? rec.task_type.slice(0, 32) : null, seen: [] }; st.bgStarted.push(t); changed = true; }
-      else if (!st.bgStartedFull) { st.bgStartedFull = true; changed = true; }
+      if (st.bgStarted.length >= TASKS_MAX) { st.bgStarted.shift(); st.bgDropped = (Number.isInteger(st.bgDropped) ? st.bgDropped : 0) + 1; }   // the OLDEST leaves, counted
+      t = { id, kind: typeof rec.task_type === 'string' ? rec.task_type.slice(0, 32) : null, seen: [] }; st.bgStarted.push(t); changed = true;
     }
     if (t && rec.subtype !== 'task_started') {                                // a later record of a kept task: its kind, as stated
       const kind = taskKindOf(rec);
       if (!Array.isArray(t.seen)) t.seen = [];
       if (!t.seen.includes(kind)) {
         if (t.seen.length < SEEN_MAX) { t.seen.push(kind); changed = true; }
-        else if (!st.bgStartedFull) { st.bgStartedFull = true; changed = true; }
+        else if (!t.seenFull) { t.seenFull = true; changed = true; }          // this task's kinds overflow: it marks ITSELF
       }
     }
   }
@@ -173,13 +174,14 @@ function factsFromSidecar(f) {
   if (!f || typeof f !== 'object' || f.v !== FACTS_VERSION) return null;
   if (!Array.isArray(f.bgStarted) || !Array.isArray(f.bgAsk)) return null;   // a v2 build before the task records: an older shape
   const okStart = (t) => !!t && typeof t === 'object' && t.id != null && Array.isArray(t.seen) && t.seen.length <= SEEN_MAX && t.seen.every((k) => typeof k === 'string');
-  const started = f.bgStarted.slice(0, TASKS_MAX).filter(okStart).map((t) => ({ id: String(t.id).slice(0, 64), kind: typeof t.kind === 'string' ? t.kind.slice(0, 32) : null, seen: t.seen.map((k) => k.slice(0, 48)) }));
+  const started = f.bgStarted.slice(-TASKS_MAX).filter(okStart).map((t) => ({ id: String(t.id).slice(0, 64), kind: typeof t.kind === 'string' ? t.kind.slice(0, 32) : null, seen: t.seen.map((k) => k.slice(0, 48)), ...(t.seenFull === true ? { seenFull: true } : {}) }));
   const asks = f.bgAsk.slice(0, TOOLS_MAX).filter((n) => typeof n === 'string').map((n) => n.slice(0, 64));
   return { v: FACTS_VERSION, fromStart: f.fromStart === true, cli: typeof f.cli === 'string' ? f.cli.slice(0, 32) : null,
     bg: Array.isArray(f.bg) ? bgOf(f.bg.map((t) => ({ task_id: t && t.id, task_type: t && t.type, description: t && t.description }))) : null,
     bgRaw: Number.isInteger(f.bgRaw) && f.bgRaw >= 0 ? f.bgRaw : null,
     // an element that does not read back is never dropped silently: the list says it is not whole (unknown, said)
-    bgStarted: started, bgStartedFull: f.bgStartedFull === true || started.length !== f.bgStarted.length,
+    // an element that does not read back is never dropped silently: it is COUNTED with those the bound let go (judged by the set alone)
+    bgStarted: started, bgDropped: (Number.isInteger(f.bgDropped) && f.bgDropped >= 0 ? f.bgDropped : 0) + (f.bgStarted.length - started.length),
     bgAsk: asks, bgAskFull: f.bgAskFull === true || asks.length !== f.bgAsk.length,
     tools: Array.isArray(f.tools) ? f.tools.filter((n) => typeof n === 'string').map((n) => n.slice(0, 64)).slice(0, TOOLS_MAX) : [], toolsFull: f.toolsFull === true,
     wake: f.wake === true, at: Number.isFinite(f.at) ? f.at : null };
@@ -219,15 +221,16 @@ function factsAtAdoption(wrapperMeta, adoptedPid, notWhy = null) {
 }
 /** An adopted process whose wrapper kept NO observations (or was not proven): not read from its start, so neither the empty
  *  set nor «none seen». `why` replaces the older-wrapper sentence when the reason is another. */
-function factsAdopted(why = null) { return { v: FACTS_VERSION, fromStart: false, cli: null, bg: null, bgRaw: null, bgStarted: [], bgAsk: [], tools: [], wake: false, at: null, old: true, ...(why ? { oldWhy: why } : {}) }; }
+function factsAdopted(why = null) { return { v: FACTS_VERSION, fromStart: false, cli: null, bg: null, bgRaw: null, bgStarted: [], bgDropped: 0, bgAsk: [], tools: [], wake: false, at: null, old: true, ...(why ? { oldWhy: why } : {}) }; }
 /** THE HUB SUBTRACTS (round two, answer 1; round three): a reason the background fact is unknown however the set reads, or null.
- *  The bound the wrapper says it reached; a task a record said was backgrounded, with no ending record (TASK_ENDS) and not named
- *  by the set — «the CLI's set omits a task it started and has not ended». An ask of a kind no recording has measured (or asks
- *  past their bound) adds its words to that reason and is never a reason alone: it is doubt only WHILE such a task is open. */
+ *  A task a record said was backgrounded, with no ending record (TASK_ENDS) and not named by the set — «the CLI's set omits a
+ *  task it started and has not ended». An ask of a kind no recording has measured (or asks past their bound) adds its words to
+ *  that reason and is never a reason alone: it is doubt only WHILE such a task is open. The tasks the bound let go (`bgDropped`,
+ *  the oldest) and a task whose kinds overflowed its list (`seenFull` — its ending record may be the one not kept) are judged by
+ *  the SET ALONE: never «unknown for ever». */
 function bgDoubt(st) {
-  if (st.bgStartedFull) return WHY.bgTasksFull;
   const named = new Set(Array.isArray(st.bg) ? st.bg.map((t) => t && t.id) : []);
-  const omitted = (Array.isArray(st.bgStarted) ? st.bgStarted : []).find((t) => t && !(Array.isArray(t.seen) && t.seen.some(TASK_ENDS)) && !named.has(t.id));
+  const omitted = (Array.isArray(st.bgStarted) ? st.bgStarted : []).find((t) => t && !t.seenFull && !(Array.isArray(t.seen) && t.seen.some(TASK_ENDS)) && !named.has(t.id));
   if (!omitted) return null;
   const ask = st.bgAskFull ? 'more tools than its wrapper keeps' : (Array.isArray(st.bgAsk) ? st.bgAsk : []).find((n) => !BG_MEASURED_ASK_TOOLS.includes(n));
   return `the CLI's set omits a task it started and has not ended (${omitted.kind || 'its kind not stated'}${BG_MEASURED_KINDS.includes(omitted.kind) ? '' : ', a kind no recording has measured'})`
