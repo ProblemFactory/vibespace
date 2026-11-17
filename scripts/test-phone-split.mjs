@@ -25,6 +25,9 @@
 //     the panes may use is the window area now (the list column shown collapses the split), no dead pair (a minimized
 //     window restored before the pair is kept, a pane's window minimized / closed / moved drops it, said), one tap = one act
 //     on a pane's head, the head and the window's own head name with headName, the stylesheet's ladder, i18n
+//   ⑨ THE SWITCHER ROW YIELDS (主开发 2026-11-17, ruling B on the row): ROW_YIELD_LADDER / rowParts (PURE) with RED controls (the
+//     chip before the Split door; no compact step), fitSwitcherRow over the real layout (the ⋯ and the ✕ never yield), the
+//     yielded rows in the window menu (a refused Split OFF with its why; the billing row), the registry's row, i18n
 // Run: node scripts/test-phone-split.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -159,7 +162,7 @@ if (H) {
     'no dead pair: «Split» beside a minimized window restores it BEFORE the pair is kept; a pane\'s window minimized / closed after it stood / moved away drops the pair at apply() with a toast (a window not built yet is none of these)');
   ok(/addEventListener\('pointerdown', \(e\) => \{ const w = e\.target\.closest\?\.\('\.window\.phone-pane'\); pressedAside = !!w && !w\.classList\.contains\('window-active'\); \}, true\);/.test(mn) && /if \(pressedAside\) \{ pressedAside = false; return; \}/.test(mn),
     'one tap = one act: the press on the pane NOT on show (read in the capture phase, before the press focuses it) only makes it the one on show — the switcher opens from the head of the pane on show');
-  ok(/import \{ headName, nameFits, YIELD_LADDER \} from '\.\.\/phone-head\.js';/.test(mn) && /const name = win \? \(headName\(win\.title\) \|\| t\('Window'\)\) : t\('No window'\);/.test(mn) && /el\.title = !home && full !== name \? full : t\('Switch window'\);/.test(mn) && /new ResizeObserver\(\(\) => this\._paintHead\(\)\)\.observe\(document\.getElementById\('mobile-nav'\)\)/.test(mn)
+  ok(/import \{ headName, nameFits, YIELD_LADDER(?:, ROW_YIELD_LADDER, rowParts)? \} from '\.\.\/phone-head\.js';/.test(mn) && /const name = win \? \(headName\(win\.title\) \|\| t\('Window'\)\) : t\('No window'\);/.test(mn) && /el\.title = !home && full !== name \? full : t\('Switch window'\);/.test(mn) && /new ResizeObserver\(\(\) => this\._paintHead\(\)\)\.observe\(document\.getElementById\('mobile-nav'\)\)/.test(mn)
     && /titleSpan\.dataset\.name = headName\(title\);/.test(w) && /win\.titleSpan\.dataset\.name = headName\(t\);/.test(w)
     && /#mobile-nav\[data-yield\] :is\(#mobile-nav-viewer-close, #mobile-nav-artifacts, #mobile-nav-live\) \{ display: none !important; \}/.test(css) && /#mobile-nav:is\(\[data-yield="gear"\], \[data-yield="icon"\]\) #mobile-nav-gear:not\(\.vault-locked\) \{ display: none !important; \}/.test(css)
     && /registerMenuItem\(\{ menu: 'window', group: '9_bar', order: 10, id: 'window\/bar-gear', when: gearFolded, label: \(\) => t\('Global settings'\), run: \(c\) => c\.app\._pressGlobalSettings\(document\.getElementById\('mobile-nav-more'\)\) \}\);/.test(read('src/lib/trailing-bar.js')),
@@ -182,6 +185,28 @@ console.log('⑧ the finger\'s 16 px fields and the tab name\'s floor, as rules'
   const TABS = ':is(.window.window-active, .window.phone-pane) > .window-titlebar .tab-item > .tab-label { flex: 0 1 auto; min-width: 4em; }';
   ok(/^@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\)$/.test(blockOf(css, TABS) || ''), '⑧ on a phone every tab keeps its name a 4 em floor (the strip scrolls before a name drops under it — the recovery reader\'s law)');
   ok(!blockOf(css.replace(TABS, TABS.replace(' min-width: 4em;', '')), TABS), '⑧ CONTROL: the reader\'s T1 (the floor dropped) is red');
+}
+
+console.log('⑨ the switcher row yields (主开发 2026-11-17, ruling B on the row — the .407 move\'s meeting: a bill chip, the Split door, the ⋯ and the ✕ left a long name 0 px at 320)');
+{
+  const ladderOk = (HH) => !!HH && JSON.stringify(HH.ROW_YIELD_LADDER) === '["","compact","split","chip"]'
+    && JSON.stringify(['', 'compact', 'split', 'chip', 'nope'].map((s) => HH.rowParts(s))) === JSON.stringify([{ chip: 'full', split: true }, { chip: 'compact', split: true }, { chip: 'compact', split: false }, { chip: null, split: false }, { chip: 'full', split: true }]);
+  ok(ladderOk(H), 'ROW_YIELD_LADDER: the chip\'s long form → its compact form → the Split door into the ⋯ menu → the chip into the ⋯ menu; rowParts says what each step draws (an unknown step draws everything)', H && H.ROW_YIELD_LADDER);
+  ok(!ladderOk(mutant("const ROW_YIELD_LADDER = ['', 'compact', 'split', 'chip'];", "const ROW_YIELD_LADDER = ['', 'compact', 'chip', 'split'];", HEAD_SRC)), 'CONTROL: the chip yielding before the Split door is refused (主开发\'s order)');
+  ok(!ladderOk(mutant("return { chip: i >= 3 ? null : i >= 1 ? 'compact' : 'full', split: i < 2 };", "return { chip: i >= 3 ? null : 'full', split: i < 2 };", HEAD_SRC)), 'CONTROL: a ladder that skips the chip\'s compact form is refused');
+  const MN = read('src/lib/mobile-nav.js'), TB = read('src/lib/taskbar.js');
+  const at = MN.indexOf('function fitSwitcherRow('), fit = at < 0 ? '' : MN.slice(at, MN.indexOf('\n}\n', at));
+  ok(/for \(const s of ROW_YIELD_LADDER\)/.test(fit) && /if \(nameFits\(label\.getBoundingClientRect\(\)\.width, fullPx, 0, minPx\) && centreIn\(\)\) break;/.test(fit) && /const centreIn = \(\) => \{ const lb = label\.getBoundingClientRect\(\), rb = item\.getBoundingClientRect\(\), c = rb\.left \+ rb\.width \/ 2; return lb\.left <= c && lb\.right >= c; \};/.test(fit) && /probe\.textContent = titleMinText\(text\)/.test(fit) && !/moreBtn|closeBtn|mobile-win-more/.test(fit),
+    'fitSwitcherRow walks the ladder in the REAL layout until the name keeps its readable minimum (titleMinText) AND holds the row\'s centre (⑥c\'s law); the ⋯ and the ✕ are never among what yields');
+  ok(/requestAnimationFrame\(\(\) => fitSwitcherRow\(item, label, billChip, splitBtn\)\)/.test(MN) && !/fitRowPill/.test(MN), 'every switcher row is fitted, with or without a chip (the chip-only fit is gone)');
+  ok(/\{ label: t\('Split'\), off: t\(sv\.words\) \}/.test(MN) && /label: t\('Billing: \{name\}', \{ name: forms\.tip \}\), action: \(\) => this\.app\.showBillingSwitcher\?\.\(win\.id, moreBtn\)/.test(MN) && (MN.match(/rowYielded: yielded\(\)/g) || []).length === 2,
+    'what yielded is in the window\'s menu under the row\'s words — the Split door (a refused one OFF with its why on its row), the billing row (the same switch door); the ⋯ AND the long press carry it');
+  ok(/registerMenuItem\(\{ menu: M, group: 'navigation', order: 1, id: 'window\/phone-row-yielded', when: \(c\) => !!c\.rowYielded\?\.length, expand: \(c\) => c\.rowYielded \}\);/.test(TB), 'the window menu takes the yielded rows through its own registry, first');
+  const ST = read('public/style.css');
+  const menuFits = (css) => /\.taskbar-context-menu \{ width: max-content; max-width: calc\(100vw - 8px\); \}/.test(css) && /\.taskbar-context-menu-item\.disabled:has\(> \.door-why\) \{ flex-direction: column;/.test(css) && /\.taskbar-context-menu-item\.disabled \.door-label \{ white-space: nowrap; \}/.test(css);
+  ok(menuFits(ST), 'the window menu a row\'s ⋯ opens near the right edge keeps its natural width (menuPlace slides it left — at 320 it shrank to 104 px, «分 / 屏» one glyph a line) and an OFF row stacks its why under its words');
+  ok(!menuFits(ST.replace('.taskbar-context-menu { width: max-content; max-width: calc(100vw - 8px); }', '')), 'CONTROL: the menu without its natural width is refused');
+  ok(/"Billing: \{name\}": "计费：\{name\}"/.test(read('src/lib/i18n-zh.js')) && /"Billing: \{name\}": "課金：\{name\}"/.test(read('src/lib/i18n-ja.js')), 'the billing row\'s words in zh / ja');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

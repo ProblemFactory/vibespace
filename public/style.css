@@ -1796,6 +1796,13 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 /* item base lives in viewers.css (.context-menu-item); keep taskbar items identical */
 .taskbar-context-menu-item { padding: 5px 12px; font-size: calc(11px * var(--ui-font-scale, 1)); cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
 .taskbar-context-menu-item:hover { background: var(--bg-hover); color: var(--text); }
+/* lane phone-six (主开发 2026-11-17, the switcher row's yield): a window menu opened by a row's ⋯ near the screen's right edge
+   keeps its natural width — menuPlace slides it left (it shrank to the 104 px left of the edge at 320: «分 / 屏», one glyph a
+   line) — and an OFF row stacks its why under its words, as the context menu's does (utils.js showContextMenu's `off`) */
+.taskbar-context-menu { width: max-content; max-width: calc(100vw - 8px); }
+.taskbar-context-menu-item.disabled:has(> .door-why) { flex-direction: column; align-items: flex-start; gap: 2px; }
+.taskbar-context-menu-item.disabled .door-label { white-space: nowrap; }
+.taskbar-context-menu-off .door-why { color: var(--text-dim); white-space: normal; line-height: 1.4; }
 
 /* ── Dialogs ── */
 .dialog-overlay {

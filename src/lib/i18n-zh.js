@@ -12888,4 +12888,5 @@ export default {
   "Too narrow to split": "屏幕太窄，无法分屏",
   "Close the split": "关闭分屏",
   "The split ended: one of its windows was minimized, closed or moved to another desktop": "分屏已结束：其中一个窗口已最小化、关闭或移到了别的桌面",
+  "Billing: {name}": "计费：{name}",
 };

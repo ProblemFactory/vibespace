@@ -12887,4 +12887,5 @@ export default {
   "Too narrow to split": "画面が狭く分割できません",
   "Close the split": "分割を閉じる",
   "The split ended: one of its windows was minimized, closed or moved to another desktop": "分割を終了しました：一方のウィンドウが最小化されたか、閉じられたか、別のデスクトップに移されました",
+  "Billing: {name}": "課金：{name}",
 };
