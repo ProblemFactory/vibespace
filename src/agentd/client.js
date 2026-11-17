@@ -609,7 +609,7 @@ class DeviceManager {
                 if (h?.onExitMsg) { h.onExitMsg(m); return; }
                 sessions.delete(m.chan); h?.onExit?.(m.code, m.error); return;
               }
-              if (m.op === 'tcp-close') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onClose?.(); return; }
+              if (m.op === 'tcp-close') { const h = sessions.get(m.chan); sessions.delete(m.chan); try { mux.forget(m.chan); } catch { } h?.onClose?.(); return; }   // cs M1: the channel's send state goes with it
               if (m.op === 'discovery-dirty') { this._onDiscoveryDirty?.(); return; }
               if (m.op === 'usage-events') { this._onUsageEvents?.(m); return; }
               if (m.op === 'session-events') { this._onSessionEvents?.(m); return; } // step-2 dark stream (unsolicited push branch — the three-touch rule)
@@ -1838,7 +1838,7 @@ class DeviceManager {
     const early = []; let dataFn = null, closeFn = null, closed = false;
     const drain = () => { while (dataFn && early.length) dataFn(early.shift()); if (closed && closeFn && !early.length) { closed = false; closeFn(); } };
     const handle = { chan, get onData() { return dataFn; }, set onData(f) { dataFn = f; drain(); }, get onClose() { return closeFn; }, set onClose(f) { closeFn = f; drain(); } };
-    conn.sessions.set(chan, { onData: (b) => { if (dataFn && !early.length) dataFn(b); else early.push(b); }, onClose: () => { closed = true; drain(); } });
+    conn.sessions.set(chan, { onData: (b) => { if (dataFn && !early.length) dataFn(b); else early.push(b); }, onClose: () => { closed = true; drain(); }, onWritable: () => { try { handle.onWritable?.(); } catch { } } });   // cs M1: a write that said false hears when the channel can take more (a link riding it waits for this)
     // host defaults to loopback on the device; an explicit host reaches the
     // device's LAN (a user-driven forward to another internal machine)
     try { await this._request({ op: 'tcp-connect', port, chan, ...(host && host !== '127.0.0.1' ? { host } : {}), by }); } // lane device-act-audit: another LAN host = an act (`by`); the loopback = a read

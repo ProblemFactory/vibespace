@@ -3114,6 +3114,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       if (pipeSessions.detach(mux, chan)) return;
       const t = tcpChans.get(chan);
       if (t) { tcpChans.delete(chan); try { t.destroy(); } catch { } }
+      try { mux.forget(chan); } catch { }   // cs M1: the channel's send state goes with it
     },
     onWritable(chan) {
       try { pipeSessions.writable(mux, chan); } catch { }               // B-beaf: a held pipe pump reads again
