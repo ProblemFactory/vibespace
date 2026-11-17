@@ -22,6 +22,12 @@
 //      empty ⇔ no row) with its RED control ⑪ (a copy that never says empty = a silent empty menu); ⑫ a running
 //      conversation's pick re-resolved against its provider; ⑬ the listed-provider refresh's rules (the list URL per kind,
 //      the vault, once a minute — fetchedAt counts —, one in flight, the credential header, the /models parsers, the 1000 rows)
+//   ⑭ THE THIRD-PARTY ROAD (lane lg-providers, B-d578 U1): the SHIPPED presets (each draft a valid record, words without a
+//      technical word), fits (the kind decides: claude / codex / opencode-later), the key rules (an Anthropic subscription
+//      login refused by name), the store over a REAL vault on a scratch dir (sealed FIRST, the file never holds the key,
+//      locked ⇒ nothing written, rekey / patch / remove / keyOf), the doors (a person's only, 201 / 400 / 423 / 404), the
+//      refresh's key resolver; RED controls: a fits without the wire rule lets DeepSeek into codex; a key rule without
+//      the subscription refusal takes a Claude login; a store that skips the seal writes a record while the vault is locked
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -46,9 +52,10 @@ function mutant(pairs) {
 const EXAMPLE = { anthropic: 'claude-sonnet-5-5', openai: 'gpt-5.5', google: 'gemini-3-pro-preview', openrouter: 'deepseek/deepseek-chat', any: 'llama3.1:8b' };
 
 // ── ① the eight kinds × the schema ────────────────────────────────────────────────────────────────────────
-console.log('① the eight kinds × the schema');
-const WANT_KINDS = ['anthropic-subscription', 'anthropic-api', 'openai-responses', 'openai-chat', 'google-subscription', 'google-api', 'openrouter', 'self-hosted'];
-ok(eq(M.KIND_IDS, WANT_KINDS) && M.KINDS.length === 8, `exactly the design's eight kinds, in order (${M.KIND_IDS.join(' · ')})`);
+console.log('① the nine kinds × the schema');
+// the design's eight + `anthropic-compatible` (lane lg-providers U1: a third party under its own ids at an Anthropic-compatible address)
+const WANT_KINDS = ['anthropic-subscription', 'anthropic-api', 'anthropic-compatible', 'openai-responses', 'openai-chat', 'google-subscription', 'google-api', 'openrouter', 'self-hosted'];
+ok(eq(M.KIND_IDS, WANT_KINDS) && M.KINDS.length === 9, `exactly the nine kinds, in order (${M.KIND_IDS.join(' · ')})`);
 const kindRowOk = (k) => typeof k.label === 'string' && k.label && ['anthropic', 'openai', 'google', 'openrouter', 'any'].includes(k.family)
   && typeof k.wire === 'string' && Array.isArray(k.harnesses) && k.harnesses.length > 0 && Array.isArray(k.auths) && k.auths.length > 0
   && k.auths.every((a) => M.AUTHS.includes(a)) && typeof k.subscription === 'boolean' && typeof k.keyed === 'boolean'
@@ -56,7 +63,7 @@ const kindRowOk = (k) => typeof k.label === 'string' && k.label && ['anthropic',
   && k.idPattern instanceof RegExp && typeof k.idHint === 'string' && Object.isFrozen(k);
 ok(M.KINDS.every(kindRowOk), 'every kind row carries the schema (label, family, wire, harnesses, auths ⊂ AUTHS, subscription, keyed, modelsSource / listedBy, idPattern, idHint; frozen)', M.KINDS.filter((k) => !kindRowOk(k)).map((k) => k.id));
 ok(eq(M.KINDS.filter((k) => k.subscription).map((k) => k.id), ['anthropic-subscription', 'google-subscription']) && M.KINDS.filter((k) => k.subscription).every((k) => !k.keyed && eq(k.auths, ['oauth'])), 'the two subscription kinds are the first-party ones: no key of ours, the CLI\'s own login (oauth)');
-ok(eq(M.KINDS.map((k) => k.harnesses[0]), ['claude', 'claude', 'codex', 'opencode', 'gemini', 'gemini', 'codex', 'opencode']), 'the projection by interface shape: claude ↔ anthropic-*, codex ↔ openai-responses / openrouter, gemini ↔ google-*, opencode ↔ the rest (q-045 §2.2)');
+ok(eq(M.KINDS.map((k) => k.harnesses[0]), ['claude', 'claude', 'claude', 'codex', 'opencode', 'gemini', 'gemini', 'codex', 'opencode']), 'the projection by interface shape: claude ↔ anthropic-*, codex ↔ openai-responses / openrouter, gemini ↔ google-*, opencode ↔ the rest (q-045 §2.2)');
 const recordOf = (k) => ({ id: `pv-test-${k.id}`, kind: k.id, label: 'A ' + k.id, auth: k.auths[0], keyRef: k.keyed ? `providers:pv-test-${k.id}#key` : null, modelsSource: k.modelsSource, models: k.modelsSource === 'configured' ? [{ id: EXAMPLE[k.family], label: '', context: '200k', caps: ['tools'] }] : [] });
 const perKind = M.KINDS.map((k) => [k.id, codes(M.validateProvider(recordOf(k)))]);
 ok(perKind.every(([, c]) => c.length === 0), 'a record of EACH kind (its defaults + one example row where configured) validates', perKind.filter(([, c]) => c.length));
@@ -85,7 +92,7 @@ ok(eq(M.PRESETS.map(M.listerOf), ['claude', 'gemini', 'claude', 'codex']) && M.l
 
 // ── ③ the record shape ────────────────────────────────────────────────────────────────────────────────────
 console.log('③ the record shape');
-ok(eq(M.PROVIDER_FIELDS, ['id', 'kind', 'label', 'preset', 'baseUrl', 'auth', 'keyRef', 'models', 'defaultModel', 'aliases', 'modelsSource', 'listedBy', 'fetchedAt', 'lastTestAt']), 'PROVIDER_FIELDS = §1\'s record, field for field');
+ok(eq(M.PROVIDER_FIELDS, ['id', 'kind', 'label', 'preset', 'baseUrl', 'auth', 'keyRef', 'models', 'defaultModel', 'aliases', 'modelsSource', 'listedBy', 'fetchedAt', 'lastTestAt', 'tail', 'createdAt', 'wire']), 'PROVIDER_FIELDS = §1\'s record, field for field (+ tail, createdAt and a self-hosted one\'s wire, lane lg-providers U1)');
 const planted = M.normalizeProvider({ ...recordOf(M.kindOf('openrouter')), key: 'sk-or-v1-planted', apiKey: 'x', token: 'y', models: [{ id: 'a/b', secret: 'z' }] });
 ok(eq(Object.keys(planted), M.PROVIDER_FIELDS) && !JSON.stringify(planted).includes('planted') && eq(Object.keys(planted.models[0]), M.MODEL_FIELDS), 'normalizeProvider keeps EXACTLY the closed fields: a planted key / apiKey / token (and a row\'s extra field) never survive');
 ok(eq(M.MODEL_FIELDS, ['id', 'label', 'context', 'caps']) && eq(M.normalizeModelRow({ id: 'gpt-5.5', label: ' ', context: '1M', caps: ['1m', 'tools', 'nope'] }), { id: 'gpt-5.5', label: 'gpt-5.5', context: 1000000, caps: ['tools', '1m'] }), 'a row = id · label (defaults to the id) · context (200k / 1M parsed) · caps (CAPS order, unknown dropped once valid)');
@@ -275,6 +282,124 @@ ok(pMany.rows.length === M.REFRESH.maxRows && pMany.skipped === 5 && M.validateP
 ok(M.validateProvider(orFresh).length === 0 && codes(M.validateProvider({ ...orFresh, keyRef: 'sk-or-v1-abcdef' })).includes('key-ref'), 'a key named by its Vault reference — an Integrations row\'s `apiKey` field (integrations:openrouter#apiKey) — validates; a key VALUE still never does');
 ok(M.accountProviderId({ id: 'acct-1', backend: 'claude', type: 'api', providerId: 'pv-ds' }) === 'pv-ds' && M.accountProviderId({ id: 'acct-1', backend: 'claude', type: 'api', providerId: 'evil/../x' }) === 'pv-anthropic-api', 'an account that NAMES its third-party provider (providerId — the pool\'s member lookup reads the same field) rides it; a malformed name is ignored');
 ok(M.REFRESH.cooldownMs === 60000 && M.REFRESH.timeoutMs === 15000 && M.REFRESH.maxBytes === 1048576 && Object.keys(M.REFRESH_WORDS).length === 13, 'the door\'s numbers: once a minute, 15 s, 1 MB; every refusal has its words');
+
+// ── ⑭ THE THIRD-PARTY ROAD (lane lg-providers, B-d578 U1) ──────────────────────────────────────────────────
+console.log('⑭ the third-party road: shipped presets, fits, the key, the store over a real vault, the doors');
+const TECH = /https?:|ANTHROPIC_|OPENAI_|base[_ ]?url|\bapi\b|\benv\b|token|\bwire\b|responses/i;   // the wizard's first screen says none of these
+ok(eq(M.SHIPPED.map((p) => p.id), ['deepseek', 'kimi', 'glm', 'minimax', 'openrouter', 'other']) && /^\d{4}-\d{2}-\d{2}$/.test(M.SHIPPED_AT), `the shipped presets (dated ${M.SHIPPED_AT}): DeepSeek · Kimi · GLM · MiniMax · OpenRouter · other / self-hosted`);
+const shipBad = M.SHIPPED.filter((p) => { const d = M.draftOf(p.id, { baseUrl: p.baseRequired ? 'http://127.0.0.1:9/v1' : null, model: p.models.length || p.listed ? null : 'my-model' }); return !d || codes(M.validateProvider({ ...d, id: 'pv-census', keyRef: M.keyRefOf('pv-census') })).length || !M.kindOf(p.kind) || !M.kindOf(p.kind).keyed || !M.kindOf(p.kind).auths.includes(p.auth) || p.bases.some((b) => !/^https:\/\/[^\s/]+\//.test(b.url) || !M.REGIONS.includes(b.region)) || (p.bases[0] && p.bases[0].region !== 'global') || TECH.test(p.blurb) || (p.models.length && !p.models.some((m) => m.id === p.defaultModel)); });
+ok(shipBad.length === 0, 'every preset: a keyed kind with its auth, https addresses per region (global first), a default that is one of its rows, a blurb with no technical word — and its draft (with the person\'s choices) is a valid record', shipBad.map((p) => p.id));
+const dk = M.draftOf('kimi', { region: 'cn' }), dOther = M.draftOf('other', { baseUrl: ' http://10.0.0.5:8000/v1 ', model: 'Qwen/Qwen3-32B', label: 'Lab' }), dOr = M.draftOf('openrouter');
+ok(dk.baseUrl === 'https://api.moonshot.cn/anthropic' && M.draftOf('kimi').baseUrl === 'https://api.moonshot.ai/anthropic' && dOther.baseUrl === 'http://10.0.0.5:8000/v1' && dOther.label === 'Lab' && eq(dOther.models.map((m) => m.id), ['Qwen/Qwen3-32B']) && dOther.defaultModel === 'Qwen/Qwen3-32B' && dOther.modelsSource === 'configured' && dOr.modelsSource === 'listed' && dOr.listedBy === 'provider-api' && M.draftOf('nope') === null, 'a draft: the region picks the address; a typed address and an «Other…» model are kept (the model becomes the default row); OpenRouter is listed by its own /models (Train 1\'s refresh); an unknown preset ⇒ null');
+const F = (kind, wire) => { const f = M.fits({ kind, wire }); const w = (h) => (f[h].ok ? '✓' : f[h].code); return `${w('claude')} ${w('codex')} ${w('opencode')}`; };
+ok(F('anthropic-compatible') === '✓ wire later' && F('openrouter') === 'wire ✓ later' && F('anthropic-api') === '✓ wire later' && F('openai-chat') === 'wire wire later' && F('nope') === 'kind-unknown kind-unknown kind-unknown', 'fits — the kind decides (claude · codex · opencode): an Anthropic-compatible third party ✓ / not Codex / OpenCode later; OpenRouter Codex only; Chat-only none yet; an unknown kind none');
+ok(F('self-hosted') === 'wire wire later' && F('self-hosted', 'anthropic-messages') === '✓ wire later' && F('self-hosted', 'openai-responses') === 'wire ✓ later' && F('self-hosted', 'openai-chat') === 'wire wire later' && eq(M.WIRES, ['anthropic-messages', 'openai-responses', 'openai-chat']), 'a SELF-HOSTED one fits by the interface the person says it speaks: none said ⇒ none (a vLLM / Ollama /v1 is Chat Completions); Anthropic Messages ⇒ Claude Code; Responses ⇒ Codex (adversarial read r1)');
+ok(M.FIT_HARNESSES.slice().sort().join() === 'claude,codex,gemini,opencode' && M.fits({ kind: 'google-api' }).gemini.code === 'later' && M.fitsHarness({ kind: 'anthropic-compatible' }, 'claude') && !M.fitsHarness({ kind: 'anthropic-compatible' }, 'codex') && Object.keys(M.FIT_WORDS).every((c) => typeof M.FIT_WORDS[c] === 'string'), 'fitsHarness answers one harness; every code has its words');
+const OAT = ['sk-ant-', 'oat01-', 'q'.repeat(40)].join('');   // built at runtime (never a token-shaped literal)
+const vk = (k) => codes(M.validateKey(k));
+const CONSOLE = ['sk-ant-', 'api03-', 'z'.repeat(40)].join('');
+ok(eq(vk(`"${OAT}"`), ['key-subscription']) && eq(vk(`ANTHROPIC_AUTH_TOKEN=${OAT}`), ['key-subscription']) && eq(vk(JSON.stringify({ claudeAiOauth: { accessToken: OAT } })), ['key-subscription']) && eq(vk(['sk-ant-', 'sid01-', 'w'.repeat(30)].join('')), ['key-subscription']) && eq(vk(CONSOLE), ['key-anthropic']) && eq(vk('"sk-provider-1234"'), ['key-shape']) && eq(vk('MY_KEY=sk-provider-1234'), ['key-shape']) && eq(vk('sk-or-v1-abc.def_ghi-123'), []), 'an Anthropic credential ANYWHERE in the paste: quoted, after NAME=, inside a JSON blob, a claude.ai session key ⇒ key-subscription; a Console key ⇒ key-anthropic (it belongs on an Anthropic API account); quotes or a NAME= around another key ⇒ key-shape (adversarial read r1)');
+ok(eq(vk(''), ['key-empty']) && eq(vk('   '), ['key-empty']) && eq(vk('abc def ghij'), ['key-space']) && eq(vk('short'), ['key-short']) && eq(vk('k'.repeat(513)), ['key-long']) && eq(vk(OAT), ['key-subscription']) && eq(vk(' sk-provider-key-1234 '), []) && Object.keys(M.KEY_ERRORS).length === 13, 'the key: empty, a space inside, too short, too long ⇒ by code; an ANTHROPIC SUBSCRIPTION LOGIN ⇒ key-subscription (never sent to a third party); a good key (trimmed) passes');
+const recA = (o) => ({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1', model: 'm1' }), id: 'pv-c3', keyRef: M.keyRefOf('pv-c3'), ...o });
+ok(codes(M.validateProvider(recA({ baseUrl: 'http://203.0.113.7/v1' }))).includes('base-url-plain') && codes(M.validateProvider(recA({ baseUrl: 'http://llm.example.test/v1' }))).includes('base-url-plain') && ['http://127.0.0.1/v1', 'http://192.168.1.20/v1', 'http://10.1.2.3/v1', 'http://172.20.0.4/v1', 'http://gpu-box:8000/v1', 'http://lab.local/v1', 'http://[::1]:9/v1'].every((u) => codes(M.validateProvider(recA({ baseUrl: u }))).length === 0) && codes(M.validateProvider(recA({ baseUrl: 'http://203.0.113.7/v1', keyRef: null }))).length === 0, 'a record that names a key: plain http only on the person\'s own network (loopback, private ranges, .local, a dotless name) — a public host must be https (a record with no key is not judged)');
+ok(eq(codes(M.validateProvider(recA({ keyRef: M.keyRefOf('pv-other1') }))), ['key-ref-foreign']) && eq(codes(M.validateProvider(recA({ kind: 'openrouter', wire: 'openai-chat', models: [{ id: 'a/b' }], defaultModel: 'a/b' }))), ['wire-kind']), 'a record naming ANOTHER provider\'s sealed key is refused (key-ref-foreign — it would hand that key to this address); only a self-hosted one carries a wire');
+ok(M.keyEntryOf('pv-a1') === 'provider:pv-a1' && M.keyRefOf('pv-a1') === 'secrets:provider:pv-a1#key' && M.providerOfKeyRef(M.keyRefOf('pv-a1')) === 'pv-a1' && M.providerOfKeyRef('integrations:openrouter#apiKey') === null && M.providerOfKeyRef('secrets:provider:pv-a1#value') === null && M.tailOf(' sk-provider-key-1234 ') === '1234' && M.tailOf('abc') === null, 'the key\'s vault entry provider:<id>, its reference secrets:provider:<id>#key (round trip; another store\'s or field\'s is not one), the tail = the last four characters');
+
+const VE = require(path.join(ROOT, 'src/server/vault-engine.js'));
+const PDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvkey-'));
+const vault = VE.create({ dataDir: PDIR, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {}, error() {} }, idleTimer: false, register: false });
+const PW = 'correct horse battery staple';
+await vault.setup(PW, {});
+const KEY = ['sk-', 'prov', 'ider-', 'planted-', '7f3a9c'].join('');
+let pstore = PS.create({ dataDir: PDIR, catalogOf, vault: () => vault, now: () => 1792500000000, log: () => {} });
+const a1 = pstore.add({ preset: 'deepseek', key: ` ${KEY} `, label: '' });
+const disk = () => (fs.existsSync(pstore.file) ? fs.readFileSync(pstore.file, 'utf-8') : '');
+const pid = a1.ok ? a1.provider.id : null;
+const box = vault.secretGet(M.keyEntryOf(pid));
+ok(a1.ok && /^pv-[0-9a-f]{12}$/.test(pid) && a1.provider.keyRef === M.keyRefOf(pid) && a1.provider.tail === KEY.slice(-4) && a1.provider.label === 'DeepSeek' && a1.provider.createdAt === 1792500000000 && box.ok && box.value.toString('utf8') === KEY, 'add: the key sealed in the VAULT under provider:<id> (trimmed), the record names it by reference + its last four characters', { a1, box: box && box.ok });
+ok(!disk().includes(KEY) && !disk().includes(KEY.slice(3, -4)) && JSON.parse(disk()).providers[0].tail === KEY.slice(-4), 'data/providers.json never holds the key (nor its middle) — only the tail');
+ok(eq(pstore.keyOf(pid), { ok: true, value: KEY }) && pstore.keyOf('pv-anthropic-api').code === 'unknown' && pstore.keyOf('pv-nobody').code === 'unknown', 'keyOf: the ONE reader answers the value for a kept record; a built-in or unknown id ⇒ unknown');
+const before2 = disk();
+const bad = [pstore.add({ preset: 'deepseek', key: OAT }), pstore.add({ preset: 'other', key: KEY }), pstore.add({ preset: 'zzz', key: KEY }), pstore.add({ preset: 'deepseek', key: 'x' })];
+ok(eq(bad.map((r) => r.ok ? 'ok' : r.errors.map((e) => e.field + ':' + e.code).join('+')), ['key:key-subscription', 'baseUrl:base-url', 'preset:preset-unknown', 'key:key-short']) && disk() === before2 && vault.secretNames().filter((n) => n.name.startsWith('provider:')).length === 1, 'add refuses WHOLE by field (a Claude login, a self-hosted one with no address, an unknown preset, a short key) — nothing written, nothing sealed', bad.map((r) => r.errors));
+vault.lock('door');
+const lockedAdd = pstore.add({ preset: 'glm', key: KEY });
+ok(lockedAdd.code === 'vault_locked' && disk() === before2 && pstore.keyOf(pid).code === 'vault_locked' && pstore.rekey(pid, KEY + 'x').code === 'vault_locked', 'a LOCKED vault: add ⇒ vault_locked, nothing written; keyOf and rekey ⇒ vault_locked by name');
+await vault.unlock(PW, {});
+const rk = pstore.rekey(pid, 'sk-provider-second-key-0042');
+ok(rk.ok && rk.provider.tail === '0042' && pstore.keyOf(pid).value === 'sk-provider-second-key-0042' && !disk().includes('second-key'), 'rekey: the new key sealed over the old, the tail rewritten, still nothing of it in the file');
+const pt = pstore.patch(pid, { label: 'My DeepSeek', defaultModel: 'deepseek-reasoner' });
+const ptBad = pstore.patch(pid, { defaultModel: 'gpt-9' });
+ok(pt.ok && pt.provider.label === 'My DeepSeek' && pt.provider.defaultModel === 'deepseek-reasoner' && !ptBad.ok && codes(ptBad.errors).includes('default-dangling') && pstore.patch('pv-anthropic-api', { label: 'x' }).code === 'built-in', 'patch: rename + default (validated whole: a default not in the table refused); a built-in ⇒ built-in');
+pstore = PS.create({ dataDir: PDIR, catalogOf, vault: () => vault, log: () => {} });
+ok(pstore.get(pid).label === 'My DeepSeek' && pstore.thirdParty().length === 1 && PS.forDir(PDIR) === pstore, 'a new store over the same file reads it back (and is THE store of its data dir — the Vault row names its key by it)');
+ok(eq(pstore.patch(pid, { baseUrl: 'https://elsewhere.example.test/anthropic', key: KEY }).errors.map((e) => e.code), ['base-url-fixed']) && pstore.get(pid).baseUrl === 'https://api.deepseek.com/anthropic', 'a PRESET\'s address is VibeSpace\'s: a new one is refused (base-url-fixed) — the sealed key never moves to a host the preset does not name (adversarial read r1)');
+const own = pstore.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', model: 'qwen3', wire: 'anthropic-messages' });
+const mv1 = own.ok ? pstore.patch(own.provider.id, { baseUrl: 'https://gpu.example.test/v1' }) : null;
+const afterMv1 = own.ok ? pstore.get(own.provider.id).baseUrl : null;   // read BEFORE the second patch moves it
+const mv2 = own.ok ? pstore.patch(own.provider.id, { baseUrl: 'https://gpu.example.test/v1', key: 'sk-new-key-for-gpu-7777' }) : null;
+ok(own.ok && own.provider.wire === 'anthropic-messages' && M.fitsHarness(own.provider, 'claude') && !mv1.ok && codes(mv1.errors).includes('key-empty') && afterMv1 === 'http://127.0.0.1:9/v1' && mv2.ok && mv2.provider.baseUrl === 'https://gpu.example.test/v1' && mv2.provider.tail === '7777' && pstore.keyOf(own.provider.id).value === 'sk-new-key-for-gpu-7777', 'a SELF-HOSTED one (the person said Anthropic Messages ⇒ Claude Code fits): a new address only WITH the key pasted again (without ⇒ refused, nothing moved; with ⇒ moved, the new key sealed, its tail)');
+pstore.remove(own.provider.id);
+vault.secretPut(M.keyEntryOf('pv-orphan1'), 'sk-orphan-key-0001');
+const orph = pstore.remove('pv-orphan1');
+ok(orph.ok && orph.orphan === true && vault.secretGet(M.keyEntryOf('pv-orphan1')).value === null && pstore.remove('pv-never1').code === 'unknown', 'an ORPHANED key (its record gone) is still removed by the provider\'s own door — the Vault row\'s Remove never answers 404 for a key that is there; an id with neither ⇒ unknown');
+const VIu = require(path.join(ROOT, 'src/vault-inventory.js'));
+const vrow = VIu.secretRowOf(vault.secretNames().find((n) => n.name === M.keyEntryOf(pid)), { providerName: (id) => pstore.get(id).label });
+ok(vrow && vrow.field === 'key' && vrow.kind === 'api-key' && vrow.label === 'Model provider key · My DeepSeek' && !JSON.stringify(vrow).includes('0042') && eq(VIu.doorsOf({ store: 'secrets', entry: M.keyEntryOf(pid), field: 'key' }).delete, { method: 'DELETE', path: `/api/providers/${pid}`, confirm: 'provider' }), 'the Vault window\'s row: «Model provider key · <its name>», no character of the key; its Remove = the provider\'s own DELETE (confirm words «provider»)', vrow);
+const PMk = require(path.join(ROOT, 'src/server/provider-models.js'));
+const keyOfRef = PMk.vaultKeyOf({ getIntegrations: () => null, providers: pstore });
+ok(eq(keyOfRef(M.keyRefOf(pid)), { ok: true, value: 'sk-provider-second-key-0042' }) && eq(keyOfRef(M.keyRefOf(pid), pid), { ok: true, value: 'sk-provider-second-key-0042' }) && keyOfRef(M.keyRefOf(pid), 'pv-someone-else').code === 'key-unreadable' && keyOfRef(M.keyRefOf('pv-gone')).code === 'key-unreadable' && keyOfRef('integrations:openrouter#apiKey').code === 'key-unreadable', 'the listed-model refresh reads a provider\'s OWN key through the store (an unknown one / an Integrations row with no store ⇒ key-unreadable)');
+
+// the doors on a loopback app
+const papp = express();
+papp.use(express.json());
+const changes = [];
+require(path.join(ROOT, 'src/routes/providers.js')).registerProviderRoutes(papp, { providers: pstore, onChange: (c) => changes.push(c) });
+const psrv = await new Promise((res) => { const s2 = papp.listen(0, '127.0.0.1', () => res(s2)); });
+const pbase = `http://127.0.0.1:${psrv.address().port}`;
+const SAME = { 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json' };
+const call = async (method, p2, body, headers = SAME) => { const r = await fetch(pbase + p2, { method, headers, body: body ? JSON.stringify(body) : undefined }); return [r.status, await r.json()]; };
+try {
+  const [g1, l1] = await call('GET', '/api/providers', null, {});
+  const [g2, l2] = await call('GET', '/api/providers', null, { Authorization: 'Bearer vsst_planted' });
+  ok(g1 === 200 && l1.shipped.length === 6 && l1.shipped[0].fits.claude.ok && !l1.shipped[0].fits.codex.ok && l1.providers.length === 1 && l1.providers[0].id === pid && l1.providers[0].fits.claude.ok && l1.providers[0].hasKey === true && !('keyRef' in l1.providers[0]) && !JSON.stringify(l1).includes('second-key') && !JSON.stringify(l1).includes('secrets:provider'), 'GET: the shipped presets with what each fits, the kept records with theirs — no key, and not where the vault keeps it (hasKey only)');
+  ok(g2 === 403 && l2.code === 'human_only', 'GET by an agent\'s bearer ⇒ 403 human_only (the address and the tail are a page\'s to read)');
+  const [b1, x1] = await call('POST', '/api/providers', { preset: 'glm', key: KEY }, { ...SAME, Authorization: 'Bearer vsst_planted' });
+  const [b2, x2] = await call('POST', '/api/providers', { preset: 'glm', key: KEY }, { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' });
+  const [b3] = await call('DELETE', `/api/providers/${pid}`, null, { Authorization: 'Bearer jbt_planted' });
+  ok(b1 === 403 && x1.code === 'human_only' && b2 === 403 && x2.code === 'cross_site' && b3 === 403 && pstore.thirdParty().length === 1 && changes.length === 0, 'EVERY WRITE IS A PERSON\'S: an agent\'s bearer ⇒ 403 human_only, another site ⇒ 403 cross_site, a job token cannot remove — nothing changed, nothing announced');
+  const [c1, y1] = await call('POST', '/api/providers', { preset: 'glm', region: 'cn', key: KEY });
+  const [c2, y2] = await call('POST', '/api/providers', { preset: 'glm', key: OAT });
+  vault.lock('door');
+  const [c3, y3] = await call('POST', '/api/providers', { preset: 'glm', key: KEY });
+  await vault.unlock(PW, {});
+  ok(c1 === 201 && y1.provider.baseUrl === 'https://open.bigmodel.cn/api/anthropic' && y1.provider.fits.claude.ok && c2 === 400 && y2.errors[0].code === 'key-subscription' && c3 === 423 && y3.code === 'vault_locked' && changes.length === 1 && changes[0].what === 'add', 'POST: 201 with the record (the region\'s address); a Claude login ⇒ 400 by field; a locked vault ⇒ 423 vault_locked; only the kept one is announced', { y1: y1.provider && y1.provider.baseUrl, y2, y3 });
+  const gid = y1.provider.id;
+  const [d1, z1] = await call('POST', `/api/providers/${gid}/key`, { key: 'sk-provider-third-9999' });
+  const [d2, z2] = await call('PATCH', `/api/providers/${gid}`, { label: 'GLM (work)' });
+  const [d3, z3] = await call('DELETE', `/api/providers/${gid}`);
+  const [d4] = await call('DELETE', `/api/providers/${gid}`);
+  ok(d1 === 200 && z1.provider.tail === '9999' && d2 === 200 && z2.provider.label === 'GLM (work)' && d3 === 200 && z3.keyDropped === true && d4 === 404 && pstore.get(gid) === null && vault.secretGet(M.keyEntryOf(gid)).value === null && eq(changes.map((c) => c.what), ['add', 'rekey', 'patch', 'remove']), 'new key · rename · remove (the record AND its vault entry; a second remove ⇒ 404), each announced once');
+} finally { psrv.close(); }
+
+console.log('⑭ RED controls');
+const mFits = mutant([["    else if (!k.harnesses.includes(h)) out[h] = { ok: false, code: 'wire' };\n", '']]);
+ok(!M.fitsHarness({ kind: 'anthropic-compatible' }, 'codex') && mFits.fitsHarness({ kind: 'anthropic-compatible' }, 'codex'), 'CONTROL: fits without the wire rule puts DeepSeek (an Anthropic-compatible address) under Codex ⇒ RED (the real one says it does not offer what Codex needs)');
+const mKey = mutant([["  if (/sk-ant-(?:oat|ort|sid)/i.test(k)) return [{ field: 'key', code: 'key-subscription' }];\n  if (/sk-ant-/i.test(k)) return [{ field: 'key', code: 'key-anthropic' }];\n", '']]);
+ok(M.validateKey(OAT).length === 1 && mKey.validateKey(OAT).length === 0, 'CONTROL: the key rule without the subscription refusal takes a Claude login as a provider key ⇒ RED');
+const mAnchored = mutant([["  if (/sk-ant-(?:oat|ort|sid)/i.test(k)) return", "  if (/^sk-ant-(?:oat|ort|sid)/.test(k)) return"], ["  if (/sk-ant-/i.test(k)) return", "  if (/^sk-ant-/.test(k)) return"]]);
+ok(codes(M.validateKey(`"${OAT}"`)).join() === 'key-subscription' && codes(mAnchored.validateKey(`"${OAT}"`)).join() === 'key-shape' && codes(mAnchored.validateKey(`ANTHROPIC_AUTH_TOKEN=${OAT}`)).join() === 'key-shape' && codes(mAnchored.validateKey(JSON.stringify({ t: OAT }))).join() === 'key-shape', 'CONTROL: the rule ANCHORED at the start (the first cut) no longer names a quoted / NAME= / JSON-wrapped subscription login for what it is ⇒ the anywhere leg above goes RED');
+const mFitKind = mutant([["const fitKindOf = (p) => (p && p.kind === 'self-hosted' ? WIRE_KIND[p.wire] || 'openai-chat' : p && p.kind);", "const fitKindOf = (p) => p && p.kind;"]]);
+ok(!M.fitsHarness({ kind: 'self-hosted' }, 'claude') && mFitKind.fitsHarness({ kind: 'self-hosted' }, 'claude') && mFitKind.fitsHarness({ kind: 'self-hosted' }, 'codex'), 'CONTROL: fits by the kind\'s list alone (the first cut) tells a person with a Chat-only vLLM server that Claude Code AND Codex fit ⇒ RED');
+const SSRC = path.join(ROOT, 'src/server/provider-store.js');
+const storeMutant = (pairs) => { let t = fs.readFileSync(SSRC, 'utf-8'); for (const [from, to] of pairs) { if (!t.includes(from)) throw new Error('mutant anchor missing: ' + from.slice(0, 80)); t = t.replace(from, to); } const m = new Module(SSRC); m.filename = SSRC; m.paths = Module._nodeModulePaths(path.dirname(SSRC)); m._compile(t, SSRC); return m.exports; };
+const PSm = storeMutant([['      const sealed = seal(id, i.key);\n', '      const sealed = { ok: true };\n']]);
+const MDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvkey-m-'));
+vault.lock('door');
+const mstore = PSm.create({ dataDir: MDIR, catalogOf, vault: () => vault, log: () => {} });
+const ma1 = mstore.add({ preset: 'glm', key: KEY });
+ok(ma1.ok && fs.existsSync(mstore.file) && mstore.keyOf(ma1.provider.id).code === 'vault_locked', 'CONTROL: a store that skips the seal WRITES a record while the vault is locked (a provider whose key was never kept) ⇒ RED (the real one refuses vault_locked with the file untouched)');
+fs.rmSync(PDIR, { recursive: true, force: true }); fs.rmSync(MDIR, { recursive: true, force: true });
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -10338,6 +10338,34 @@ export default {
   "This account’s provider has no models — set them up first": "此账号的提供方没有模型 — 请先设置", // lane models-at-session
   "Models of {provider}": "{provider} 的模型", // lane models-at-session
   "{provider} does not serve the model “{model}”": "{provider} 不提供模型「{model}」", // lane models-at-session
+  "Anthropic-compatible": "Anthropic 兼容", // lane lg-providers
+  "DeepSeek’s models, paid by use with your own key": "DeepSeek 的模型，用你自己的密钥按量付费", // lane lg-providers
+  "Moonshot’s Kimi models, paid by use with your own key": "月之暗面的 Kimi 模型，用你自己的密钥按量付费", // lane lg-providers
+  "Zhipu’s GLM models, paid by use with your own key": "智谱的 GLM 模型，用你自己的密钥按量付费", // lane lg-providers
+  "MiniMax’s models, paid by use with your own key": "MiniMax 的模型，用你自己的密钥按量付费", // lane lg-providers
+  "Many vendors’ models behind one key, paid by use": "一把密钥用许多厂商的模型，按量付费", // lane lg-providers
+  "Other or self-hosted": "其他或自建", // lane lg-providers
+  "A service you run yourself, or one not listed here": "你自己运行的服务，或这里没列出的", // lane lg-providers
+  "Outside mainland China": "中国大陆以外", // lane lg-providers
+  "Mainland China": "中国大陆", // lane lg-providers
+  "This provider does not offer what {harness} needs": "这个提供方不提供 {harness} 需要的接口", // lane lg-providers
+  "{harness} cannot use a third-party provider yet": "{harness} 暂时还不能用第三方提供方", // lane lg-providers
+  "Paste the key": "请粘贴密钥", // lane lg-providers
+  "A key has no spaces or line breaks": "密钥里没有空格或换行", // lane lg-providers
+  "This is too short to be a key": "太短了，不像是密钥", // lane lg-providers
+  "At most 512 characters": "最多 512 个字符", // lane lg-providers
+  "This is a Claude subscription login, not a provider’s key — it is never sent to a third party": "这是 Claude 订阅的登录凭据，不是提供方的密钥——它绝不会发给第三方", // lane lg-providers
+  "An address starts with https:// (or http:// on your own network)": "地址以 https:// 开头（在你自己的网络里也可以是 http://）", // lane lg-providers
+  "This is an Anthropic key — add it as an Anthropic API account, not a third party": "这是 Anthropic 的密钥——请把它添加为 Anthropic API 账号，而不是第三方", // lane lg-providers
+  "Paste the key alone — without quotes or the name in front of it": "只粘贴密钥本身——不要带引号，也不要带前面的名字", // lane lg-providers
+  "Outside your own network the address must start with https://": "在你自己的网络之外，地址必须以 https:// 开头", // lane lg-providers
+  "This provider’s address is set by VibeSpace": "这个提供方的地址由 VibeSpace 设定", // lane lg-providers
+  "This provider names another provider’s key": "这个提供方指向了另一个提供方的密钥", // lane lg-providers
+  "Only a self-hosted provider says which interface it speaks": "只有自建的提供方才需要说明它用哪种接口", // lane lg-providers
+  "Model provider key": "模型提供方密钥", // lane lg-providers
+  "VibeSpace hands it to the agent CLI it starts for this provider": "VibeSpace 把它交给为这个提供方启动的 agent CLI", // lane lg-providers
+  "Remove the model provider \"{name}\"?": "移除模型提供方「{name}」？", // lane lg-providers
+  "Its key leaves the vault and the provider leaves every agent's account list. Conversations already running on it keep working until they restart.": "它的密钥会离开保险库，这个提供方也会从每个 agent 的账号列表里消失。已经在用它的对话会继续工作，直到重启。", // lane lg-providers
   "Always for this pool": "一直（这个池）",
   "Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time": "从现在起，这个池可以自己把对话切到另一个提供方，每次都会在对话里留一行",
   "Moved — this pool now moves a conversation to another provider by itself": "已切换——这个池以后会自己把对话切到另一个提供方",

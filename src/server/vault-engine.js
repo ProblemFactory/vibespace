@@ -73,8 +73,10 @@ const IDLE_MAX_HOURS = 720;
  *  into For you at an agent's request, or added in the Vault window; the hub picks the id, its label / kind / note ride
  *  beside the box: src/vault-paste.js) · `web-login:<origin>#<user>` (lane browser-login, P3 of the custom browser kernel: a
  *  website's login — the sealed JSON record of PURE src/browser-login.js, whose NAME_RE spells this same shape; written by ONE
- *  writer, src/server/browser-logins.js) — never a key file's name (STORE_KEYS names start with `.` or `browser-`). */
-const SECRET_RE = /^(?:host|frp|file|apikey|totp|secret):[\w.-]{1,160}$|^web-login:https?:\/\/(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?#[^\s#\u0000-\u001f\u007f]{1,160}$/;
+ *  writer, src/server/browser-logins.js) · `provider:<record id>` (lane lg-providers, B-d578: a third-party model provider's
+ *  key — its record in data/providers.json names it, src/server/provider-store.js is its one writer; the spawn road and the
+ *  provider Test read it) — never a key file's name (STORE_KEYS names start with `.` or `browser-`). */
+const SECRET_RE = /^(?:host|frp|file|apikey|totp|secret|provider):[\w.-]{1,160}$|^web-login:https?:\/\/(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?#[^\s#\u0000-\u001f\u007f]{1,160}$/;
 const isSecretName = (name) => { const s = String(name || ''); return SECRET_RE.test(s) || V.AGENT_NS_RE.test(s); };   // lane vault-mint-put: `agent:<scope>/<name>` too
 
 let SIGNALS_ARMED = false;
@@ -539,7 +541,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   // ── A REFUSAL IS THE SIGNAL (lane vault-locked-refusal-notice) ──
   const storeVerb = (name) => { const k = STORE_KEYS.find((x) => x.name === name); return k ? `the ${k.store} store` : name; };
-  const secretVerb = (name) => { const n = String(name), kind = n.split(':')[0]; return kind === 'host' ? 'a device link token' : kind === 'apikey' ? 'an automation key' : kind === 'file' ? `the sealed file ${n.slice(5)}` : kind === 'agent' ? 'an agent secret' : kind === 'secret' ? 'a stored password or key' : kind === 'web-login' ? 'a website login' : `the stored secret ${n}`; };   // a machine's / a key's id (and an agent entry's scope) is never the words
+  const secretVerb = (name) => { const n = String(name), kind = n.split(':')[0]; return kind === 'host' ? 'a device link token' : kind === 'apikey' ? 'an automation key' : kind === 'file' ? `the sealed file ${n.slice(5)}` : kind === 'agent' ? 'an agent secret' : kind === 'secret' ? 'a stored password or key' : kind === 'web-login' ? 'a website login' : kind === 'provider' ? 'a model provider\'s key' : `the stored secret ${n}`; };   // a machine's / a key's id (and an agent entry's scope) is never the words
   /** THE ONE HELPER a door calls when it refuses `vault_locked`: `actor` = WHO it stopped (a NAME a person reads — the door
    *  passes the conversation's / the machine's / the account's name, never an id), `verb` = WHAT. Only while LOCKED (a
    *  not-set-up vault refuses nothing by this code). A note that changes what the owner reads re-announces the facts and

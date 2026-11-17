@@ -17,9 +17,13 @@ const { safeFetch } = require('../safe-fetch');
 const VI = require('../vault-inventory.js');
 
 /** The record's key out of the vault: `keyRef` = a vault row reference `<store>:<entry>#<field>` — an Integrations row's
- *  secret field (the store's consumer read, resolveIntegration). → { ok, value } | { ok: false, code: 'key-unreadable' }. */
-function vaultKeyOf({ getIntegrations = () => null } = {}) {
-  return (keyRef) => {
+ *  secret field (the store's consumer read, resolveIntegration), or a provider's OWN sealed key (`secrets:provider:<id>#key`,
+ *  lane lg-providers: the provider store's keyOf, the one reader). → { ok, value } | { ok: false, code: 'key-unreadable' }. */
+function vaultKeyOf({ getIntegrations = () => null, providers = null } = {}) {
+  return (keyRef, providerId = null) => {
+    const own = MP.providerOfKeyRef(keyRef);
+    if (own && providerId !== null && own !== providerId) return { ok: false, code: 'key-unreadable' };   // another record's key is never this one's
+    if (own) { const k = providers && typeof providers.keyOf === 'function' ? providers.keyOf(own) : null; return k && k.ok ? { ok: true, value: k.value } : { ok: false, code: 'key-unreadable' }; }
     const ref = VI.parseRef(String(keyRef || ''));
     const store = ref && ref.store === 'integrations' ? getIntegrations() : null;
     if (!store || typeof store.resolveIntegration !== 'function') return { ok: false, code: 'key-unreadable' };
@@ -68,7 +72,7 @@ function create({ providers, vaultState = () => 'locked', keyOf = () => ({ ok: f
     lastAt.set(provider.id, now());
     inFlight.add(provider.id);
     try {
-      const key = provider.keyRef ? keyOf(provider.keyRef) : { ok: true, value: null };
+      const key = provider.keyRef ? keyOf(provider.keyRef) : { ok: true, value: null };   // a reference to ANOTHER record's key never loads (validateProvider key-ref-foreign)
       if (!key || !key.ok) return { ok: false, code: 'key-unreadable' };
       const headers = { accept: 'application/json', ...MP.authHeaders(provider, key.value) };
       let res;

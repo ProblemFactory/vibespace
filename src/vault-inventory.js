@@ -73,6 +73,9 @@ const SECRET_ROWS = Object.freeze([   // the entry name's shape → its row's fi
   // design q-047 L1 (lane vault-totp): a two-step code — its row names the entry only (the issuer, the account and the
   // settings are the entry's VALUE: shown with the seed, behind 显示 — owner decision ① as amended); the code is its own door
   { re: /^totp:([\w.-]{1,120})$/, field: 'seed', kind: 'totp', label: (rest) => rest, detail: '' },
+  // lane lg-providers (B-d578): a third-party model provider's key — its record (data/providers.json) names it; the row names
+  // the provider (its label, through `machineName`'s twin `providerName` — the hub's provider store), never a character of it
+  { re: /^provider:(pv-[a-z0-9][a-z0-9-]{0,63})$/, field: 'key', kind: 'api-key', label: (rest, nameOf, providerName) => `Model provider key · ${providerName(rest)}`, detail: 'VibeSpace hands it to the agent CLI it starts for this provider' },
 ]);
 /** lane vault-mint-put (design q-043 §9): an `agent:<scope>/<name>` entry's provenance — the Vault window v2's provenance
  *  chip renders `row.provenance` (SEAM: the integrator wires the chip onto the v2 window, lane vault-window-v2; this base
@@ -95,14 +98,15 @@ const LOGIN_SOURCES = Object.freeze({
 const TOTP_TYPED = i18nKey('Added by an agent itself — the agent saw the seed');   // lane vault-agent-own: `vibespace-vault totp add`
 const FREE_ENTRY_RE = /^secret:[\w.-]{1,160}$/;   // lane vault-paste-request (src/vault-paste.js — the hub's ids are 10 hex characters)
 const FREE_KINDS = Object.freeze(['api-key', 'password', 'secret']);
-function secretRowOf(s, { machineName = (k) => k } = {}) {
+function secretRowOf(s, { machineName = (k) => k, providerName = (k) => k } = {}) {
   const name = String((s && s.name) || ''), at = s && s.at;
   const nameOf = (k) => { try { return String(machineName(k) || k); } catch { return k; } };
+  const provOf = (k) => { try { return String(providerName(k) || k); } catch { return k; } };
   for (const r of SECRET_ROWS) {
     const m = r.re.exec(name);
     if (!m) continue;
     const typed = r.kind === 'totp' && s && s.kind === 'agent-typed';   // lane vault-agent-own: a seed an agent added itself (`vibespace-vault totp add`) — the agent saw it
-    return { entry: name, field: r.field, kind: r.kind, label: r.label(m[1], nameOf), detail: typed ? TOTP_TYPED : r.detail, createdAt: at, ...(typed ? { origin: 'put', provenance: { by: 'agent', prov: 'agent-typed', sawPlaintext: true, actor: s.actor || null, owner: s.owner || null } } : {}) };
+    return { entry: name, field: r.field, kind: r.kind, label: r.label(m[1], nameOf, provOf), detail: typed ? TOTP_TYPED : r.detail, createdAt: at, ...(typed ? { origin: 'put', provenance: { by: 'agent', prov: 'agent-typed', sawPlaintext: true, actor: s.actor || null, owner: s.owner || null } } : {}) };
   }
   // lane vault-paste-request: a FREE entry (`secret:<id>` — pasted by the owner in For you at an agent's request, or added
   // in the Vault window's 「其他密钥或密码…」): its row says the label, the kind and the note a person wrote (never a value)
@@ -210,6 +214,7 @@ function doorsOf({ store, entry, field }) {
   // lane vault-paste-request: a free entry — its own delete door (the run door's switch and grants on it go with it)
   if (store === 'secrets' && FREE_ENTRY_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/secrets/${enc(e.slice(7))}`, confirm: cf }, rotate: null };
   if (store === 'secrets' && WEB_LOGIN_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/web-logins/${enc(e)}`, confirm: cf }, rotate: null, login: { name: e } };   // lane browser-login: its own delete door (its grant row goes with it) + 用于…
+  if (store === 'secrets' && /^provider:pv-[a-z0-9][a-z0-9-]{0,63}$/.test(e)) return { delete: { method: 'DELETE', path: `/api/providers/${enc(e.slice(9))}`, confirm: cf }, rotate: null };   // lane lg-providers: the provider's own remove (its record goes with it)
   if (store === 'secrets' && /^totp:[\w.-]{1,120}$/.test(e)) { const p = `/api/vault/totp/${enc(e.slice(5))}`; return { delete: { method: 'DELETE', path: p, confirm: cf }, rotate: null, code: { path: p } }; }
   return { delete: null, rotate: null };
 }

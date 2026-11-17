@@ -170,6 +170,7 @@ ok(red0.length === 0, 'no auto-unlock shape; the vault doors are called only fro
     apikey: 'VibeSpace\'s own automation key (design q-046) — automation-engine; the owner reveals it to hand it out, an agent uses it by grant',
     totp: 'a two-step code\'s seed (design q-047 L1) — vault-totp; an agent gets the current code by grant, never the seed',
     secret: 'a FREE entry (lane vault-paste-request) — pasted by the owner into For you at an agent\'s request, or added in the Vault window; the owner reveals it (验证是你), an agent uses it by purpose (a run by reference — never its bytes)',
+    provider: 'a third-party model provider\'s key (lane lg-providers, B-d578) — pasted by the owner in the provider wizard, sealed by ONE writer (src/server/provider-store.js add / rekey), read by ONE reader (keyOf: the spawn road, the provider Test, the listed-model refresh); its record keeps the reference and the last four characters, never the value',
     'web-login': 'a website login (lane browser-login) — the sealed record of PURE src/browser-login.js, written by ONE writer (src/server/browser-logins.js); the custom kernel fills it, an agent never gets its bytes (purpose + receipt — ⑫); the owner reveals its password (验证是你)',
   };
   // the head alternation `^(?:a|b|…):` + every further anchored kind `|^<kind>:` of the same literal (lane browser-login's web-login)
@@ -178,7 +179,7 @@ ok(red0.length === 0, 'no auto-unlock shape; the vault doors are called only fro
   const kinds = kindsOf(engSrc);
   const noRow = kinds.filter((k) => !SECRET_KINDS[k]), noKind = Object.keys(SECRET_KINDS).filter((k) => !kinds.includes(k));
   ok(kinds.length >= 6 && !noRow.length && !noKind.length && VE.isSecretName('secret:0a1b2c3d4e') && !VE.isSecretName('secret:') && !VE.isSecretName('secrets:x'), `every secret kind of the engine is a row here — ${kinds.join(', ')} (+ agent:<scope>/<name>, lane vault-mint-put) — none unclassified, none dead`, { noRow, noKind });
-  const planted = kindsOf(engSrc.replace('|totp|secret):', '|totp|secret|note):'));
+  const planted = kindsOf(engSrc.replace('|totp|secret|provider):', '|totp|secret|provider|note):'));
   ok(planted.includes('note') && planted.filter((k) => !SECRET_KINDS[k]).join() === 'note', 'CONTROL: a planted kind (`note:`) in SECRET_RE is a kind with no row — RED');
 }
 

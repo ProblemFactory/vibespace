@@ -10337,6 +10337,34 @@ export default {
   "This account’s provider has no models — set them up first": "このアカウントの提供元にはモデルがありません — 先に設定してください", // lane models-at-session
   "Models of {provider}": "{provider} のモデル", // lane models-at-session
   "{provider} does not serve the model “{model}”": "{provider} はモデル「{model}」を提供していません", // lane models-at-session
+  "Anthropic-compatible": "Anthropic 互換", // lane lg-providers
+  "DeepSeek’s models, paid by use with your own key": "DeepSeek のモデル。自分のキーで従量課金", // lane lg-providers
+  "Moonshot’s Kimi models, paid by use with your own key": "Moonshot の Kimi モデル。自分のキーで従量課金", // lane lg-providers
+  "Zhipu’s GLM models, paid by use with your own key": "Zhipu の GLM モデル。自分のキーで従量課金", // lane lg-providers
+  "MiniMax’s models, paid by use with your own key": "MiniMax のモデル。自分のキーで従量課金", // lane lg-providers
+  "Many vendors’ models behind one key, paid by use": "1 つのキーで多くのベンダーのモデル。従量課金", // lane lg-providers
+  "Other or self-hosted": "その他・セルフホスト", // lane lg-providers
+  "A service you run yourself, or one not listed here": "自分で動かしているサービス、またはここにないもの", // lane lg-providers
+  "Outside mainland China": "中国本土以外", // lane lg-providers
+  "Mainland China": "中国本土", // lane lg-providers
+  "This provider does not offer what {harness} needs": "このプロバイダーは {harness} が必要とするものを提供していません", // lane lg-providers
+  "{harness} cannot use a third-party provider yet": "{harness} はまだサードパーティのプロバイダーを使えません", // lane lg-providers
+  "Paste the key": "キーを貼り付けてください", // lane lg-providers
+  "A key has no spaces or line breaks": "キーに空白や改行は含まれません", // lane lg-providers
+  "This is too short to be a key": "キーにしては短すぎます", // lane lg-providers
+  "At most 512 characters": "最大 512 文字", // lane lg-providers
+  "This is a Claude subscription login, not a provider’s key — it is never sent to a third party": "これは Claude サブスクリプションのログインで、プロバイダーのキーではありません——第三者には決して送られません", // lane lg-providers
+  "An address starts with https:// (or http:// on your own network)": "アドレスは https:// で始まります（自分のネットワーク内なら http:// も可）", // lane lg-providers
+  "This is an Anthropic key — add it as an Anthropic API account, not a third party": "これは Anthropic のキーです——サードパーティではなく Anthropic API アカウントとして追加してください", // lane lg-providers
+  "Paste the key alone — without quotes or the name in front of it": "キーだけを貼り付けてください——引用符や前の名前は付けずに", // lane lg-providers
+  "Outside your own network the address must start with https://": "自分のネットワークの外では、アドレスは https:// で始まる必要があります", // lane lg-providers
+  "This provider’s address is set by VibeSpace": "このプロバイダーのアドレスは VibeSpace が設定します", // lane lg-providers
+  "This provider names another provider’s key": "このプロバイダーは別のプロバイダーのキーを指しています", // lane lg-providers
+  "Only a self-hosted provider says which interface it speaks": "どのインターフェースを話すかを指定するのはセルフホストのプロバイダーだけです", // lane lg-providers
+  "Model provider key": "モデルプロバイダーのキー", // lane lg-providers
+  "VibeSpace hands it to the agent CLI it starts for this provider": "VibeSpace はこのプロバイダー用に起動するエージェント CLI にこれを渡します", // lane lg-providers
+  "Remove the model provider \"{name}\"?": "モデルプロバイダー「{name}」を削除しますか？", // lane lg-providers
+  "Its key leaves the vault and the provider leaves every agent's account list. Conversations already running on it keep working until they restart.": "キーは保管庫から消え、プロバイダーはすべてのエージェントのアカウント一覧から外れます。すでに使っている会話は再起動するまで動き続けます。", // lane lg-providers
   "Always for this pool": "常に（このプール）",
   "Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time": "今後このプールは会話を別のプロバイダーへ自動で移し、そのたびに会話に 1 行残します",
   "Moved — this pool now moves a conversation to another provider by itself": "移しました — 今後このプールは会話を別のプロバイダーへ自動で移します",

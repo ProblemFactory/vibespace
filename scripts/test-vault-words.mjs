@@ -69,6 +69,9 @@ const ROWS = {
   'src/lib/user-todos-row.js': [
     ['the vault locked before it was answered', 'label', 'the same outcome words on the tray row / the For-you window (resolvedByText) — a record\'s end, the lock told by its own item'],
   ],
+  'src/routes/providers.js': [
+    ['the vault first — the provider’s key is kept there', 'label', 'the provider wizard\'s own save / new-key verdict while the person is in the dialog (lane lg-providers U1) — a field verdict on a press, not a background tool refusal'],
+  ],
   'src/model-providers.js': [
     ['Unlock the vault first', 'label', 'the provider-config dialog\'s own save-time verdict shown while the person is in the dialog (lane provider-record) — a field verdict, not a background tool refusal (the two-facts rule is for refusals)'],
   ],

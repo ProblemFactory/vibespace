@@ -1717,6 +1717,8 @@ class AccountManager {
   }
   /** The provider store's lookup (P0a): `(account) → record | null`. Unset ⇒ every account answers its harness's own subscription. */
   setProviderLookup(fn) { this._providerLookup = typeof fn === 'function' ? fn : null; }
+  /** (lane lg-providers) a third-party provider was added / changed / removed: every page re-reads the account lists */
+  providersChanged() { this._notify(); }
   _providerKeyOf(p) { return p && typeof p === 'object' ? (String(p.id || p.kind || '') || null) : (typeof p === 'string' && p ? p : null); }
   /** (lane pool-provider-latents, q-055 M2) THE PROVIDER OF A DELETED ACCOUNT — what it served when it was removed (this
    *  process remembers it; an UNPLACED mark carries it across a restart). null = never known here. */

@@ -101,7 +101,7 @@ const vaultHostOf = (k) => { try { const s = String(k || ''); return s ? (s.star
 const vaultMachineName = (k) => { const h = vaultHostOf(k); return String((h && (h.name || h.id)) || k); };
 const vaultSources = {
   accounts: () => getAccounts(), integrations: () => (integrations ? { vaultRows: () => integrations.vaultRows({ machineName: vaultMachineName }), vaultReveal: (e, f) => integrations.vaultReveal(e, f) } : null), channels: () => getChannels(), mounts: () => mounts, 'app-secrets': () => appSecretsDoor,
-  secrets: () => require('./vault-contents.js').secretSource({ vault, machineName: vaultMachineName }),
+  secrets: () => require('./vault-contents.js').secretSource({ vault, machineName: vaultMachineName, providerName: (id) => { const s = require('./provider-store.js').forDir(path.join(rootDir, 'data')); const p = s && s.get(id); return p ? p.label : id; } }),   // lane lg-providers: a provider key's row names its provider
   passkeys: () => (browserDialogs && typeof browserDialogs.passkeyVaultRows === 'function' ? { vaultRows: () => browserDialogs.passkeyVaultRows(), vaultReveal: (e, f) => browserDialogs.passkeyVaultReveal(e, f) } : null),
   automation: () => automation,   // design q-046: the automation keys (their values, one per reveal — to hand to an outside party)
 };

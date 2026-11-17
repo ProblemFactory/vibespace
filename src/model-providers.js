@@ -6,7 +6,9 @@
 // { id, label, context, caps }, aliases (a name the harness or the conversation uses → a row OF THE TABLE), and where the rows
 // come from — `listed` (by the harness's own catalog, or the provider's API: P0c's refresh door) · `configured` (entered by the
 // owner on the account) · `none` (said so; never a silent empty menu). EVERY account names one: today's logins map onto the
-// built-in records below (accountProviderId); a third-party record lives in data/providers.json (its wizard is Train 2).
+// built-in records below (accountProviderId); a third-party record lives in data/providers.json — added from a SHIPPED preset
+// (SHIPPED below, q-045 D1: a list in the release, never fetched) with its key SEALED in the vault (`provider:<id>`, a hub
+// secret; the record keeps only the reference and the last four characters — lane lg-providers, B-d578 U1).
 const i18nKey = (s) => s; // marks a dictionary key declared here (the client translates it)
 
 // ── the model id, per kind (§3: the harness must accept it) — the regex is THE gate, an empty id included ──
@@ -41,6 +43,9 @@ const kind = (id, label, family, wire, harnesses, auths, extra = {}) => Object.f
 const KINDS = Object.freeze([
   kind('anthropic-subscription', i18nKey('Anthropic subscription'), 'anthropic', 'anthropic-messages', ['claude'], ['oauth'], { subscription: true, keyed: false, modelsSource: 'listed', listedBy: 'harness-cache' }),
   kind('anthropic-api', i18nKey('Anthropic API'), 'anthropic', 'anthropic-messages', ['claude', 'opencode'], ['x-api-key', 'bearer'], { modelsSource: 'listed', listedBy: 'harness-cache' }),
+  // a THIRD PARTY that speaks Anthropic's Messages interface under its own model ids (DeepSeek, Kimi, GLM, MiniMax at their
+  // `/anthropic` address — lane lg-providers U1): Claude Code runs it (ANTHROPIC_BASE_URL), Codex cannot (it needs Responses)
+  kind('anthropic-compatible', i18nKey('Anthropic-compatible'), 'any', 'anthropic-messages', ['claude', 'opencode'], ['bearer', 'x-api-key']),
   kind('openai-responses', i18nKey('OpenAI · Responses API'), 'openai', 'openai-responses', ['codex', 'opencode'], ['bearer', 'oauth']),
   kind('openai-chat', i18nKey('OpenAI-compatible · Chat Completions'), 'openai', 'openai-chat', ['opencode'], ['bearer']),
   kind('google-subscription', i18nKey('Google AI subscription'), 'google', 'google', ['gemini'], ['oauth'], { subscription: true, keyed: false, modelsSource: 'listed', listedBy: 'harness-cache' }),
@@ -57,7 +62,9 @@ const CAPS = Object.freeze(['tools', 'vision', 'reasoning', '1m']);
 const CAP_WORDS = Object.freeze({ tools: i18nKey('Tools'), vision: i18nKey('Image input'), reasoning: i18nKey('Reasoning'), '1m': i18nKey('1M context') });
 
 // ── THE RECORD (§1) — closed fields; nothing else is kept ──
-const PROVIDER_FIELDS = Object.freeze(['id', 'kind', 'label', 'preset', 'baseUrl', 'auth', 'keyRef', 'models', 'defaultModel', 'aliases', 'modelsSource', 'listedBy', 'fetchedAt', 'lastTestAt']);
+// `tail` = the key's last four characters (the roster's ••••1234, as an API-key account shows it); `createdAt` = when it was added
+// `wire` = the interface a SELF-HOSTED one speaks, as the person said (null for every other kind: its kind says it)
+const PROVIDER_FIELDS = Object.freeze(['id', 'kind', 'label', 'preset', 'baseUrl', 'auth', 'keyRef', 'models', 'defaultModel', 'aliases', 'modelsSource', 'listedBy', 'fetchedAt', 'lastTestAt', 'tail', 'createdAt', 'wire']);
 const MODEL_FIELDS = Object.freeze(['id', 'label', 'context', 'caps']);
 
 // ── THE BUILT-IN RECORDS: the two first-party subscription presets §1 names (anthropic-subscription = claude's OAuth,
@@ -187,8 +194,25 @@ function normalizeProvider(raw) {
     modelsSource: src,
     listedBy: src === 'listed' ? (LISTED_BY.includes(r.listedBy) ? r.listedBy : (k ? k.listedBy : null)) : null,
     fetchedAt: when(r.fetchedAt), lastTestAt: when(r.lastTestAt),
+    tail: typeof r.tail === 'string' && TAIL_RE.test(r.tail) ? r.tail : null, createdAt: when(r.createdAt),
+    wire: WIRES.includes(r.wire) ? r.wire : null,
   };
 }
+/** the interfaces a provider may speak — a self-hosted one's `wire` is one of them (lane lg-providers U1) */
+const WIRES = Object.freeze(['anthropic-messages', 'openai-responses', 'openai-chat']);
+/** plain http carries the key in clear: only to the person's OWN network (loopback, a private range, a .local / .lan / .internal
+ *  name, a name with no dot); anything else must be https */
+function ownNetworkHost(host) {
+  const raw = String(host || '').toLowerCase();
+  const v6 = /^\[([^\]]+)\](?::\d+)?$/.exec(raw);   // a bracketed IPv6 host, with or without its port
+  const h = v6 ? v6[1] : raw.replace(/:\d+$/, '');
+  if (!h) return false;
+  if (h === 'localhost' || h === '::1' || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^f[cd][0-9a-f]{2}:/.test(h)) return true;
+  if (/\.(local|lan|internal|home\.arpa)$/.test(h)) return true;
+  return !h.includes('.') && !h.includes(':');
+}
+const hostOf = (url) => { const m = /^https?:\/\/([^/?#]+)/i.exec(String(url || '')); return m ? m[1].replace(/^[^@]*@/, '') : ''; };
+const TAIL_RE = /^[\x21-\x7e]{1,4}$/;
 /** Every error of a whole record (normalized first) — the store refuses a record with any. */
 function validateProvider(raw) {
   const p = normalizeProvider(raw);
@@ -200,6 +224,11 @@ function validateProvider(raw) {
   if (k && !k.auths.includes(p.auth)) errors.push({ field: 'auth', code: 'auth-kind' });
   if (p.keyRef !== null && !KEY_REF.test(p.keyRef)) errors.push({ field: 'keyRef', code: 'key-ref' });
   if (p.baseUrl !== null && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(p.baseUrl)) errors.push({ field: 'baseUrl', code: 'base-url' });
+  // a record that names a KEY never sends it in clear past the person's own network (lane lg-providers U1)
+  else if (p.baseUrl !== null && p.keyRef !== null && /^http:\/\//i.test(p.baseUrl) && !ownNetworkHost(hostOf(p.baseUrl))) errors.push({ field: 'baseUrl', code: 'base-url-plain' });
+  // a provider's own sealed key is ITS OWN: a reference to another record's entry would hand that key to this address
+  if (p.keyRef !== null && /^secrets:provider:/.test(p.keyRef) && providerOfKeyRef(p.keyRef) !== p.id) errors.push({ field: 'keyRef', code: 'key-ref-foreign' });
+  if (p.wire !== null && p.kind !== 'self-hosted') errors.push({ field: 'wire', code: 'wire-kind' });
   if (p.modelsSource === 'listed' && !p.listedBy) errors.push({ field: 'listedBy', code: 'listed-by' });
   if (p.modelsSource === 'none' && p.models.length) errors.push({ field: 'models', code: 'none-has-models' });
   if (p.modelsSource === 'configured' && !p.models.length) errors.push({ field: 'models', code: 'configured-empty' });
@@ -388,6 +417,128 @@ const REFRESH_WORDS = Object.freeze({
   cross_site: i18nKey('Only a person on this page can refresh the list'),
 });
 
+// ── THE SHIPPED PRESETS (q-045 D1 + §2.4, lane lg-providers U1): the third parties a person picks from, a PURE list in the
+// release (never fetched — a list fetched from anywhere is a vendor call). Each = its kind (which harnesses it can serve: the
+// wire decides, `fits` below), its address per region (global first), how the key goes (`auth`), where to get a key, a
+// starting model table DATED by when it was written (the account dialog's 模型… edits it; the wizard's 测试 proves it), and
+// ONE sentence without a technical word (the wizard's first screen). The addresses are the vendors' own documented ones
+// for Claude Code (their `/anthropic` address); the model ids are a STARTING table only — written from what this lane knew
+// (late 2025 ids), dated SHIPPED_AT = when written, not «current as of»: a moved address or a retired id is said by the Test
+// («unreachable» / «not served»), and the account dialog's 模型… edits the table. ──
+const SHIPPED_AT = '2026-11-17';
+const ship = (o) => Object.freeze({ ...o, ...(o.wires ? { wires: Object.freeze([...o.wires]) } : {}), bases: Object.freeze(o.bases.map((b) => Object.freeze({ ...b }))), models: Object.freeze(o.models.map((m) => Object.freeze({ caps: [], context: null, ...m, caps: Object.freeze(m.caps || []) }))) });
+const SHIPPED = Object.freeze([
+  ship({ id: 'deepseek', label: 'DeepSeek', kind: 'anthropic-compatible', auth: 'bearer', blurb: i18nKey('DeepSeek’s models, paid by use with your own key'),
+    console: 'https://platform.deepseek.com', bases: [{ region: 'global', url: 'https://api.deepseek.com/anthropic' }],
+    models: [{ id: 'deepseek-chat', label: 'DeepSeek Chat', context: 128000, caps: ['tools'] }, { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner', context: 128000, caps: ['tools', 'reasoning'] }], defaultModel: 'deepseek-chat' }),
+  ship({ id: 'kimi', label: 'Kimi', kind: 'anthropic-compatible', auth: 'bearer', blurb: i18nKey('Moonshot’s Kimi models, paid by use with your own key'),
+    console: 'https://platform.moonshot.ai', bases: [{ region: 'global', url: 'https://api.moonshot.ai/anthropic' }, { region: 'cn', url: 'https://api.moonshot.cn/anthropic' }],
+    models: [{ id: 'kimi-k2-0905-preview', label: 'Kimi K2', context: 256000, caps: ['tools'] }, { id: 'kimi-k2-turbo-preview', label: 'Kimi K2 Turbo', context: 256000, caps: ['tools'] }], defaultModel: 'kimi-k2-0905-preview' }),
+  ship({ id: 'glm', label: 'GLM', kind: 'anthropic-compatible', auth: 'bearer', blurb: i18nKey('Zhipu’s GLM models, paid by use with your own key'),
+    console: 'https://z.ai/model-api', bases: [{ region: 'global', url: 'https://api.z.ai/api/anthropic' }, { region: 'cn', url: 'https://open.bigmodel.cn/api/anthropic' }],
+    models: [{ id: 'glm-4.6', label: 'GLM-4.6', context: 200000, caps: ['tools', 'reasoning'] }, { id: 'glm-4.5-air', label: 'GLM-4.5-Air', context: 128000, caps: ['tools'] }], defaultModel: 'glm-4.6' }),
+  ship({ id: 'minimax', label: 'MiniMax', kind: 'anthropic-compatible', auth: 'bearer', blurb: i18nKey('MiniMax’s models, paid by use with your own key'),
+    console: 'https://platform.minimax.io', bases: [{ region: 'global', url: 'https://api.minimax.io/anthropic' }, { region: 'cn', url: 'https://api.minimaxi.com/anthropic' }],
+    models: [{ id: 'MiniMax-M2', label: 'MiniMax-M2', context: 204800, caps: ['tools', 'reasoning'] }], defaultModel: 'MiniMax-M2' }),
+  ship({ id: 'openrouter', label: 'OpenRouter', kind: 'openrouter', auth: 'bearer', blurb: i18nKey('Many vendors’ models behind one key, paid by use'), listed: true,
+    console: 'https://openrouter.ai/keys', bases: [{ region: 'global', url: 'https://openrouter.ai/api/v1' }], models: [], defaultModel: '' }),
+  ship({ id: 'other', label: i18nKey('Other or self-hosted'), kind: 'self-hosted', auth: 'bearer', blurb: i18nKey('A service you run yourself, or one not listed here'), baseRequired: true, wires: WIRES,
+    console: null, bases: [], models: [], defaultModel: '' }),
+]);
+const shippedOf = (id) => SHIPPED.find((s) => s.id === id) || null;
+const REGIONS = Object.freeze(['global', 'cn']);
+const REGION_WORDS = Object.freeze({ global: i18nKey('Outside mainland China'), cn: i18nKey('Mainland China') });
+
+// ── WHICH HARNESSES A PROVIDER SERVES (q-045 §2.6 law 2: the interface decides, never a tick box) — the kind's own harness
+// list, and only a harness whose spawn road carries a third party (SPAWN_HARNESSES: claude + codex in this train; opencode is
+// P1-a). → { claude: { ok, code }, codex: …, opencode: … }; code 'wire' = the provider does not speak what the harness needs,
+// 'later' = the harness does not take a third party yet, 'kind-unknown'. ──
+const FIT_HARNESSES = Object.freeze([...new Set(KINDS.flatMap((k) => k.harnesses))]);   // every harness some kind serves (derived — no list of harnesses typed here)
+const SPAWN_HARNESSES = Object.freeze(['claude', 'codex']);
+/** a SELF-HOSTED record's kind for fitting = the kind of the interface the person said it speaks (none said ⇒ its kind's
+ *  own, Chat Completions — which no harness of this train runs): «self-hosted» alone claims nothing (adversarial read r1) */
+const WIRE_KIND = Object.freeze({ 'anthropic-messages': 'anthropic-compatible', 'openai-responses': 'openai-responses', 'openai-chat': 'openai-chat' });
+const fitKindOf = (p) => (p && p.kind === 'self-hosted' ? WIRE_KIND[p.wire] || 'openai-chat' : p && p.kind);
+function fits(p) {
+  const k = p && kindOf(fitKindOf(p));
+  const out = {};
+  for (const h of FIT_HARNESSES) {
+    if (!k) out[h] = { ok: false, code: 'kind-unknown' };
+    else if (!k.harnesses.includes(h)) out[h] = { ok: false, code: 'wire' };
+    else if (!SPAWN_HARNESSES.includes(h)) out[h] = { ok: false, code: 'later' };
+    else out[h] = { ok: true, code: null };
+  }
+  return out;
+}
+const fitsHarness = (p, harness) => !!(fits(p)[harness] || {}).ok;
+const FIT_WORDS = Object.freeze({
+  wire: i18nKey('This provider does not offer what {harness} needs'),
+  later: i18nKey('{harness} cannot use a third-party provider yet'),
+  'kind-unknown': i18nKey('Unknown provider kind'),
+});
+
+// ── THE KEY (q-043 「用途，不给值」): a vault entry of the hub's own secrets, `provider:<record id>` — the record names it by
+// the inventory's reference (`secrets:provider:<id>#key`) and keeps its last four characters; the value is read only by the
+// spawn road and the Test, never answered to anyone. ──
+const keyEntryOf = (id) => `provider:${String(id || '')}`;
+const keyRefOf = (id) => `secrets:${keyEntryOf(id)}#key`;
+/** The record id a key reference names (`secrets:provider:<id>#key`), or null — any other reference is another store's. */
+function providerOfKeyRef(ref) {
+  const m = /^secrets:provider:(pv-[a-z0-9][a-z0-9-]{0,63})#key$/.exec(String(ref || ''));
+  return m ? m[1] : null;
+}
+const KEY_MIN = 8;
+const KEY_MAX = 512;
+/** A pasted key → its errors (field 'key'). An ANTHROPIC SUBSCRIPTION token is refused by name: §ban-safety — a subscription
+ *  login is never sent to a third party (its own account rows carry it). */
+function validateKey(key) {
+  const k = typeof key === 'string' ? key.trim() : '';
+  if (!k) return [{ field: 'key', code: 'key-empty' }];
+  if (/[\s\u0000-\u001f\u007f]/.test(k)) return [{ field: 'key', code: 'key-space' }];
+  if (k.length < KEY_MIN) return [{ field: 'key', code: 'key-short' }];
+  if (k.length > KEY_MAX) return [{ field: 'key', code: 'key-long' }];
+  // an ANTHROPIC credential ANYWHERE in what was pasted (quoted, after NAME=, inside a JSON blob — adversarial read r1):
+  // a subscription login (oat / ort / a claude.ai session) by name; a Console key belongs on an Anthropic API account
+  if (/sk-ant-(?:oat|ort|sid)/i.test(k)) return [{ field: 'key', code: 'key-subscription' }];
+  if (/sk-ant-/i.test(k)) return [{ field: 'key', code: 'key-anthropic' }];
+  // a key is one token: quotes, braces, a backslash, a backtick or a leading NAME= are what was AROUND it
+  if (/["'`{}<>\\]/.test(k) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(k)) return [{ field: 'key', code: 'key-shape' }];
+  return [];
+}
+const tailOf = (key) => { const k = String(key == null ? '' : key).trim(); return k.length >= KEY_MIN ? k.slice(-4) : null; };
+/** A new record from a shipped preset and the person's choices (no id, no key: the store gives both) — the wizard's draft. */
+function draftOf(presetId, { region = null, baseUrl = null, label = null, model = null, wire = null } = {}) {
+  const s = shippedOf(presetId);
+  if (!s) return null;
+  const base = s.bases.find((b) => b.region === region) || s.bases[0] || null;
+  const url = typeof baseUrl === 'string' && baseUrl.trim() ? baseUrl.trim() : (base ? base.url : null);
+  const rows = s.models.map((m) => ({ id: m.id, label: m.label, context: m.context, caps: [...m.caps] }));
+  const want = typeof model === 'string' ? model.trim() : '';
+  if (want && !rows.some((m) => m.id === want)) rows.push({ id: want, label: want, context: null, caps: [] });   // «Other…» typed on screen 3
+  const listed = !!s.listed && !rows.length;
+  return {
+    kind: s.kind, label: String(label == null ? '' : label).trim() || s.label, preset: s.id, baseUrl: url, auth: s.auth,
+    models: rows, defaultModel: want || s.defaultModel || '', aliases: {},
+    modelsSource: listed ? 'listed' : rows.length ? 'configured' : 'none', listedBy: listed ? 'provider-api' : null,
+    wire: s.wires && s.wires.includes(wire) ? wire : null,
+  };
+}
+const KEY_ERRORS = Object.freeze({
+  'key-empty': i18nKey('Paste the key'),
+  'key-space': i18nKey('A key has no spaces or line breaks'),
+  'key-short': i18nKey('This is too short to be a key'),
+  'key-long': i18nKey('At most 512 characters'),
+  'key-subscription': i18nKey('This is a Claude subscription login, not a provider’s key — it is never sent to a third party'),
+  'key-anthropic': i18nKey('This is an Anthropic key — add it as an Anthropic API account, not a third party'),
+  'key-shape': i18nKey('Paste the key alone — without quotes or the name in front of it'),
+  'base-url-plain': i18nKey('Outside your own network the address must start with https://'),
+  'base-url-fixed': i18nKey('This provider’s address is set by VibeSpace'),
+  'key-ref-foreign': i18nKey('This provider names another provider’s key'),
+  'wire-kind': i18nKey('Only a self-hosted provider says which interface it speaks'),
+  'base-url': i18nKey('An address starts with https:// (or http:// on your own network)'),
+  'preset-unknown': i18nKey('Unknown provider'),
+});
+
 const MODEL_ERRORS = Object.freeze({
   'kind-unknown': i18nKey('Unknown provider kind'),
   'id-pattern': i18nKey('Not a model id this provider accepts'),
@@ -408,4 +559,6 @@ module.exports = {
   kindOf, presetOf, accountProviderId, listerOf, parseContext, formatContext, validateModelRow, normalizeModelRow, validateModels,
   normalizeProvider, validateProvider, listedRows, withListed, sameModel, namedModel, MODEL_NAME_MAX, resolveModel, servesModel, modelsOf, sourceOf,
   MENU_EMPTY, menuOf, resolvePick, REFRESH, LISTABLE_KINDS, REFRESH_WORDS, modelsEndpointOf, refreshable, refreshVerdict, authHeaders, parseListed,
+  SHIPPED, SHIPPED_AT, shippedOf, REGIONS, FIT_HARNESSES, fits, fitsHarness, FIT_WORDS, WIRES,
+  keyEntryOf, keyRefOf, providerOfKeyRef, validateKey, tailOf, draftOf, KEY_ERRORS,
 };
