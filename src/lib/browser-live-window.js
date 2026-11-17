@@ -162,6 +162,7 @@ import { fitChipState, fitChipWords, pictureState, zoomAt, pinchStep, panStep, z
 import { browserFactWords, liveFollowPlan } from '../browser-fact.js'; // lane S2: THE browser fact — the view's names, and a view FOLLOWS its session's browser
 import { ownResumable, keptLineWords } from '../browser-fact.js'; // lane browser-resume B (§3.9): may the user Resume its own browser, and the stopped line's words
 import { receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts } from '../browser-stream.js'; // lane S2: every input has a receipt
+import { restartRefusalWords } from './browser-build-model.js'; // B-53df: the Restart's refusal by its code (PURE words)
 import { humanEndChoices, humanRefusalText, humanSyncId, addressVerdict, humanShareLine, LAUNCH_CODES } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the user's own browsing — its end buttons, its refusals, the address row (PURE)
 import { dialogWords, answeredWords, stuckWords, promptWords, permissionWords, printWords } from '../browser-stuck.js'; // lane browser-stuck: a page dialog / an unresponsive page in words (PURE)
 import { surfaceWords } from '../browser-surfaces.js'; // lane browser-surfaces: a browser kernel's prompt in words — its answers are the buttons (PURE)
@@ -1340,7 +1341,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     st.restarting = true; renderDialog();
     const r = await fetchJson(`/api/browser/session/${encodeURIComponent(sessionId)}/restart`, { method: 'POST', body: JSON.stringify({ ref }), headers: { 'Content-Type': 'application/json' } });
     st.restarting = false; renderDialog();
-    if (r?.error) showToast(t('Could not restart the browser: {why}', { why: String(r.error) }), { type: 'error' });
+    if (r?.error) showToast(t('Could not restart the browser: {why}', { why: restartRefusalWords(r, { label: String((st.target && st.target.label) || ''), human: humanRefusalText }, t) || String(r.error) }), { type: 'error' });
     else showToast(r && r.restarted ? t('The browser was restarted — its tabs open fresh') : t('The browser was stopped — the agent’s next browser command starts it fresh'), { duration: 4000 });
   }
   const renderViewers = () => { viewersEl.textContent = t('{n} viewer(s)', { n: st.viewers || 1 }); viewersEl.title = t('Windows watching this browser right now (on every client)'); };

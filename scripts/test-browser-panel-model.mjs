@@ -202,5 +202,64 @@ console.log('— ⑥ words and purity');
   ok(['Profile', 'State', 'Who can use it', 'Disk · records', 'Maintenance', 'How long records are kept', '{n} director(ies) · {size}', '{n} profile(s) · {size} on disk'].every((k) => tv.includes(`t('${k}'`) && k in zh && k in ja), 'the view\'s new words (column titles, Maintenance, the ⓘ, the heads) have zh + ja');
 }
 
+console.log('— ⑦ B-53df: the three RESTART doors say a refusal by its CODE (every code, in the device\'s words)');
+{
+  const en = tOf(null), tz = tOf(zh), tj = tOf(ja);
+  const W = (r, t, label = 'Bank') => BM.restartRefusalWords(r, { label, human: BH.humanRefusalText }, t);
+  const by = W({ code: 'browsing_yourself', error: 'raw' }, en);
+  ok(by === BH.humanRefusalText('browsing_yourself', { label: 'Bank', act: 'restart' }) && /then restart it/.test(by) && W({ code: 'browsing_yourself' }, tz) !== by && W({ code: 'browsing_yourself' }, tz).includes('Bank'), 'browsing_yourself: the person\'s restart words (en; zh in its own words, the label kept)', by);
+  const land = 'The browser kernel is being replaced — try again in a moment.';
+  ok(W({ code: 'engine_kernel_landing', error: 'raw' }, en) === land && W({ code: 'engine_kernel_landing' }, tz) === zh[land] && W({ code: 'engine_kernel_landing' }, tj) === ja[land], 'engine_kernel_landing: en / zh / ja (the row\'s named code)');
+  const un = "That engine's plugin did not answer — restart it in ⚙ → Plugins.";
+  ok(W({ code: 'browser_engine_unanswered' }, tj) === ja[un] && W({ code: 'browser_build_missing' }, en) === BM.buildRefusalWords({ code: 'browser_build_missing' }, en), 'an engine / build refusal of the start inside the restart: the build words (ja; en)');
+  ok(/pid 4242/.test(W({ code: 'profile_locked', holderPid: 4242 }, en)) && W({ code: 'browser_unstable' }, tz) === zh['Its browser keeps closing — press Stop on its row first, then try again.'], 'profile_locked names the holder pid; browser_unstable in zh');
+  ok(W({ code: 'launch_failed', error: 'chrome exited' }, en) === '' && W({ code: 'backend_no_key', error: 'x' }, en) === '' && W({ error: 'boom' }, en) === '' && W(null, en) === '', 'a launch failure (what failed and why — the server\'s facts), no code ⇒ no words — the door says the server\'s sentence');
+  const sh = "This profile's browser is shared with other conversations — restarting it would close their tabs too. Stop it from the Agent browser panel if that is what you want.";
+  ok(W({ code: 'shared', error: 'x' }, en) === sh && W({ code: 'shared' }, tz) === zh[sh] && W({ code: 'browser_released' }, tj) === ja['That browser has not started yet — there is nothing to restart.'] && W({ code: 'not-found' }, tz) === zh['That browser is not there any more — there is nothing to restart.'],
+    'the restart routes\' own codes in the device\'s words: `shared` (the live view\'s most common), `browser_released`, `not-found` (never «This profile no longer exists») — en / zh / ja');
+  ok(W({ code: 'cap', n: 6 }, en) === '' && W({ code: 'remote_profile', machine: 'm' }, en) === '', 'cap / remote_profile ⇒ the server\'s sentence (their person words name Browse yourself)');
+  // THE CODE CENSUS: every code humanRefusalText words is placed — a restart word (RESTART_HUMAN_CODES), the build words, or kept out by name
+  const hsrc = read('src/browser-human.js');
+  const body = hsrc.slice(hsrc.indexOf('function humanRefusalText('), hsrc.indexOf('function humanShareLine('));
+  const codes = [...new Set([...body.matchAll(/case '([\w-]+)':/g)].map((m) => m[1]))];
+  const OUT = new Set(['not-found', 'not_attachable', 'cap', 'remote_profile', 'not_browsing', 'not_web', 'not_your_tab', 'tabs_unreadable']); // Browse yourself's own (its window, its tabs, «pair it again to browse it») — no restart meets them with these words (not-found has the restart's own)
+  const unplaced = codes.filter((c) => !BM.RESTART_HUMAN_CODES.includes(c) && !OUT.has(c) && BM.buildRefusalWords({ code: c }, en) === null);
+  ok(codes.length >= 14 && !unplaced.length, `every humanRefusalText code is placed for the restart doors (${codes.length})`, unplaced);
+  // THE DOORS: each routes its refusal through the picker before the server's sentence
+  const doorsRaw = (src) => {
+    const raw = [];
+    const tv = src['src/lib/browser-trace-view.js'];
+    const acts = [...tv.matchAll(/act\(`\/api\/browser\/profiles\/\$\{encodeURIComponent\(r\.id\)\}\/restart`[^\n]*/g)].map((m) => m[0]);
+    if (acts.length !== 2 || acts.some((l) => !/t\('Could not restart the browser'\), restartWordsOf\(r\)\)/.test(l))) raw.push('browser-trace-view restart / restart-hold');
+    if (!/reason: \(r && r\.error && typeof wordsOf === 'function' && wordsOf\(r\)\) \|\| \(r && r\.error\)/.test(tv) || !/restartRefusalWords\(r, \{ label: [^\n]*human: humanRefusalText \}, t\)/.test(tv)) raw.push('browser-trace-view act');
+    const lv = src['src/lib/browser-live-window.js'];
+    if (!/t\('Could not restart the browser: \{why\}', \{ why: restartRefusalWords\(r, \{ label: [^\n]*human: humanRefusalText \}, t\) \|\| String\(r\.error\) \}\)/.test(lv)) raw.push('browser-live-window restartBrowser');
+    const ut = src['src/lib/user-todos-actions.js'];
+    const blk = ut.slice(ut.indexOf("rec.action.type === 'browser-restart'"), ut.indexOf("rec.action.type === 'browser-restart'") + 1200);
+    if (!/showToast\(\(r && r\.error && restartRefusalWords\(r, \{ label: String\(\(\(\(app\._browserProfiles && app\._browserProfiles\.profiles\) \|\| \[\]\)\.find\(\(x\) => x && x\.id === rec\.action\.profileId\)[^\n]*human: humanRefusalText \}, t\)\) \|\| \(r && r\.error\)/.test(blk)) raw.push('user-todos-actions browser-restart'); // the review: the item's profile NAMED (never «this profile»)
+    return raw;
+  };
+  const FILES = ['src/lib/browser-trace-view.js', 'src/lib/browser-live-window.js', 'src/lib/user-todos-actions.js'];
+  const now = Object.fromEntries(FILES.map((f) => [f, read(f)]));
+  ok(!doorsRaw(now).length, 'the three doors (the panel\'s Restart + Restart to hold, the live view\'s Restart, the For-you item) word a refusal by its code', doorsRaw(now));
+  // CONTROL: the doors as they were (r.error raw) — the census goes red on each
+  const old = {
+    'src/lib/browser-trace-view.js': now['src/lib/browser-trace-view.js'].split(", restartWordsOf(r));").join(');').replace("(r && r.error && typeof wordsOf === 'function' && wordsOf(r)) || ", ''),
+    'src/lib/browser-live-window.js': now['src/lib/browser-live-window.js'].replace(/why: restartRefusalWords\(r, \{[^\n]*?\}, t\) \|\| String\(r\.error\)/, 'why: String(r.error)'),   // stale-pins: kept — the base's line, written back by this RED control
+    'src/lib/user-todos-actions.js': now['src/lib/user-todos-actions.js'].replace(/\(r && r\.error && restartRefusalWords\(r, \{[^\n]*?\}, t\)\) \|\| /, ''),
+  };
+  ok(FILES.every((f) => old[f] !== now[f]) && doorsRaw(old).length === 4, 'CONTROL: the doors printing r.error raw (the base\'s lines) are caught — all four (RED)', doorsRaw(old));
+  // CONTROL (the picker): a copy without the person's words falls to the generic build sentence — caught
+  const msrc = read('src/lib/browser-build-model.js');
+  const cut = "  const own = typeof human === 'function' && RESTART_HUMAN_CODES.includes(code) ? human(code, facts, t) : '';";
+  ok(msrc.includes(cut), 'control setup: the picker\'s person-words line is where the control cuts');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-bpm-rs-'));
+  const f = path.join(dir, 'browser-build-model.mjs');
+  fs.writeFileSync(f, msrc.replace(cut, "  const own = '';"));
+  const Mc = await import(f);
+  ok(Mc.restartRefusalWords({ code: 'browsing_yourself' }, { label: 'Bank', human: BH.humanRefusalText }, en) !== by, 'CONTROL: a picker without the person\'s words says another sentence for browsing_yourself (RED)');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
 process.exit(fail ? 1 : 0);

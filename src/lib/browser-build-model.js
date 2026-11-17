@@ -332,6 +332,24 @@ export function buildRefusalWords(r, t) {
     default: return null;
   }
 }
+/** B-53df: THE RESTART DOORS' refusal (the Agent browser panel's Restart and «Restart to hold dialogs», the live view's Restart,
+ *  the For-you browser-restart item) in the device's words by its CODE: the person's own browsing words first (`human` =
+ *  src/browser-human.js humanRefusalText, handed in: this file imports nothing), then the restart routes' own codes, then a build /
+ *  engine refusal (an engine plugin's own error quoted — B-a470). '' = a code whose server sentence carries what only the server
+ *  knows (a launch failure: what failed and why): the door says that sentence after its own lead. */
+export const RESTART_HUMAN_CODES = Object.freeze(['browsing_yourself', 'profile_locked', 'browser_unstable', 'backend_unavailable', 'not_ours']);
+export function restartRefusalWords(r, { label = '', human = null } = {}, t) {
+  const code = String((r && r.code) || '');
+  if (!code) return '';
+  const facts = { label: String(label || ''), act: 'restart', ...(Number.isInteger(r.holderPid) ? { pid: r.holderPid } : {}) };
+  const own = typeof human === 'function' && RESTART_HUMAN_CODES.includes(code) ? human(code, facts, t) : '';
+  if (own) return own;
+  // the restart routes' own refusals (src/routes/browser.js — the profile's and the session's Restart)
+  if (code === 'shared') return t(i18nKey("This profile's browser is shared with other conversations — restarting it would close their tabs too. Stop it from the Agent browser panel if that is what you want."));
+  if (code === 'browser_released') return t(i18nKey('That browser has not started yet — there is nothing to restart.'));
+  if (code === 'not-found') return t(i18nKey('That browser is not there any more — there is nothing to restart.'));
+  return buildRefusalWords(r, t) || '';
+}
 
 // ── lane chrome-builds-download (design 004, B-80c1): "Download another build…" — THE PICKER'S WORDS. The server sends each
 // version's verdict as STRUCTURE (src/browser-builds.js buildCompatVerdict: `hard` rows that refuse, `chips` the person reads)

@@ -45,7 +45,7 @@ import { whoChips, foldChips, CHIPS_WIDE, allAgentsSentence } from './browser-wh
 import { openWhoDialog, nameHelpers } from './browser-who-dialog.js';
 import { openNewProfileDialog } from './browser-new-profile.js'; // lane browser-admin: the panel's New profile…
 import { openBuildDialog } from './browser-build-dialog.js'; // lane browser-admin 2a: a row's Change build…
-import { cardBuildLine } from './browser-build-model.js'; // lane browser-admin 2a: the row's Chrome build line (PURE words)
+import { cardBuildLine, restartRefusalWords } from './browser-build-model.js'; // lane browser-admin 2a: the row's Chrome build line (PURE words); B-53df: a restart's refusal by its code
 import { cliRowWords, cliOfferLabel, cliConfirmWords, cliOutcomeWords } from './browser-cli-model.js'; // lane browser-admin 2b: the Browser CLI row
 import { UI_ICONS } from './icons.js';
 import { memoryText } from '../runaway-guard.js';
@@ -739,12 +739,15 @@ export function whoCell(app, { onChange = null } = {}) {
 }
 /** The live conversations that USE a profile (a lease or a pin) — the Delete… warning's and the narrowing's count. */
 export function usersOf(row) { return (Array.isArray(row && row.usedBy) ? row.usedBy : []).filter((u) => u && (u.leased || u.pinned)); }
-/** A user-action call: fetchJson never throws, so `{error}` IS the failure and must reach the user. */
-async function act(url, init, what) {
+/** A user-action call: fetchJson never throws, so `{error}` IS the failure and must reach the user. `wordsOf(r)` = the door's
+ *  own words for a refusal by its code (B-53df: the restarts); '' ⇒ the server's sentence. */
+async function act(url, init, what, wordsOf = null) {
   const r = await fetchJson(url, init);
-  if (!r || r.error) { showToast(t('{what} — {reason}', { what, reason: (r && r.error) || t('server unreachable') }), { type: 'error', duration: 9000 }); return null; }
+  if (!r || r.error) { showToast(t('{what} — {reason}', { what, reason: (r && r.error && typeof wordsOf === 'function' && wordsOf(r)) || (r && r.error) || t('server unreachable') }), { type: 'error', duration: 9000 }); return null; }
   return r;
 }
+/** B-53df: a profile row's Restart refusal in the device's words (PURE restartRefusalWords by its code). */
+const restartWordsOf = (row) => (r) => restartRefusalWords(r, { label: String((row && (row.label || row.id)) || ''), human: humanRefusalText }, t);
 const jsonInit = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 
 export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
@@ -969,13 +972,13 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     // (a Stop ends the record and its restart count); its logins stay in the profile, the next command starts it again
     stop: async (r) => { const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/stop`, jsonInit('POST'), t('Could not stop the browser')); if (res) showToast(t('Stopped {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); },
     // lane browser-stuck: a page that does not respond — the user's Restart (never automatic)
-    restart: async (r) => { const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/restart`, jsonInit('POST'), t('Could not restart the browser')); if (res) showToast(t('Restarted {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); },
+    restart: async (r) => { const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/restart`, jsonInit('POST'), t('Could not restart the browser'), restartWordsOf(r)); if (res) showToast(t('Restarted {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); },
     // verify r2 (the builder's open question 2): a browser launched before the lane still accepts leave-page dialogs
     // itself until its next start — ONE click starts that next start (the same human Restart; its tabs close, logins stay)
     'restart-hold': async (r) => {
       const yes = await showConfirmDialog({ title: t('Restart {label}?', { label: String(r.label || r.id) }), message: t('Its open tabs close (logins in the profile stay). From its next start VibeSpace holds leave-page dialogs for a decision, so nothing typed on a page is lost without a word.'), confirmText: t('Restart') });
       if (!yes) return;
-      const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/restart`, jsonInit('POST'), t('Could not restart the browser'));
+      const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/restart`, jsonInit('POST'), t('Could not restart the browser'), restartWordsOf(r));
       if (res) showToast(t('Restarted {label}', { label: String(r.label || r.id) }), { duration: 4000 });
       load();
     },

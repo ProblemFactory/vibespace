@@ -34,6 +34,8 @@ import { replyBoxView } from '../inbox-reply.js'; // PURE (lane inbox-reply-dead
 import { grantUseBody, grantReplyText } from '../ask-grant.js'; // PURE (lane controls-that-lie): an ask that names a grant — the PATCH it plans, the answer the agent reads
 import { openTakeover } from './browser-takeover-queue.js'; // lane browser-takeover-queue: a takeover request's item opens its live view
 import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «Who can use it»'s own refusal words (the dialog's)
+import { restartRefusalWords } from './browser-build-model.js'; // B-53df: the browser-restart item's refusal by its code (PURE words)
+import { humanRefusalText } from '../browser-human.js'; // B-53df: … the person's own browsing words first (PURE)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
 import { noteHubClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
@@ -379,7 +381,7 @@ export function inboxModel(app) {
       // tells every conversation on it and resolves this item)
       const r = await fetchJson(`/api/browser/profiles/${encodeURIComponent(rec.action.profileId)}/restart`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       if (r && r.browser) { showToast(t('Restarted {label}', { label: String(r.browser.label || rec.action.profileId) })); return true; }
-      showToast((r && r.error) || t('Could not restart the browser'), { type: 'error' });
+      showToast((r && r.error && restartRefusalWords(r, { label: String((((app._browserProfiles && app._browserProfiles.profiles) || []).find((x) => x && x.id === rec.action.profileId) || {}).label || ''), human: humanRefusalText }, t)) || (r && r.error) || t('Could not restart the browser'), { type: 'error' });
       return false;
     }
     // A «CHECK AGAIN» ROW THAT DECLARES ITS DOOR (lane cli-self-measure, ruling R6 — the held Claude Code's: the hub runs its own

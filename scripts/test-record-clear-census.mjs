@@ -1923,6 +1923,7 @@ const I_RECV = {
   'src/lib/app.js|BACKEND_META[h.id]': ['harness', 'a harness label'], 'src/lib/app.js|BACKEND_META[msg.backend]': ['harness', 'a harness label'],
   'src/lib/app.js|lost': ['account', 'an account'], 'src/lib/app.js|msg': ['frame', 'a server-notice / backend-status frame\'s text (its producer is judged at the `notice` sink)'],
   'src/lib/browser-live-window.js|dw': ['words', 'a PURE outcome\'s sentence (browser-switcher-model)'],
+  'src/lib/browser-live-window.js|st.target': ['browser profile', 'the shown browser\'s profile label (B-53df: the Restart refusal\'s words name it)'],
   'src/lib/browser-live-window.js|sw': ['words', 'a PURE step\'s sentence (browser-new-profile-model machineStepWords: a paired machine with no browser — the machine\'s id + its one command; lane remote-profile-start)'],
   'src/lib/browser-profile-picker.js|r.pin': ['browser profile', 'a profile label'], 'src/lib/browser-build-dialog.js|view': ['browser profile', 'a profile label (Change build…, lane browser-admin)'],   'src/server/jobs-wiring.js|e': ['error', 'the For you store\'s refusal (lane job-notify-user r2: its code and its open COUNT — a number, never an item\'s text)'], 'src/lib/browser-switcher.js|w': ['words', 'a PURE outcome\'s sentence'],
   // lane owner-press-attended: the refused hand-over's toast (PURE stash-summary handOverRefusalWords — the route's code + the
@@ -1931,6 +1932,7 @@ const I_RECV = {
   'src/lib/stash-strip.js|w': ['words', 'a PURE outcome\'s sentence (handOverRefusalWords: a refusal code + an account name, a cap, a time)'],
   'src/server/browser-handback.js|verdict': ['words', 'a PURE verdict\'s spend-reason CODE (announceVerdict: which reason the ladder is asked under)'],
   'src/lib/browser-trace-view.js|e': ['browser profile', 'a profile label'], 'src/lib/browser-trace-view.js|f': ['browser profile', 'a profile / its file'], 'src/lib/browser-trace-view.js|o': ['browser profile', 'an orphan profile dir'],
+  'src/lib/browser-trace-view.js|wordsOf()': ['words', 'a PURE refusal sentence by its code (B-53df restartRefusalWords: the row\'s label at most)'],
   'src/lib/browser-trace-view.js|res.profile': ['browser profile', 'a profile label'], 'src/lib/browser-trace-view.js|res': ['browser profile', 'the profile adopted from'], 'src/lib/browser-trace-view.js|r': ['browser profile', 'a profile label'],
   'src/lib/browser-trace-view.js|k': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'], 'src/server/browser-kept.js|e': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'],
   'src/lib/browser-who-dialog.js|r.profile': ['browser profile', 'a profile label'],
