@@ -42,7 +42,9 @@
 // THE CONVERSATION'S FACTS (lane conversation-facts): a turn whose text holds `BGSET-` says the level signal with one background
 // task (`system/background_tasks_changed` with its uuid, as the dumps declare — the shape src/message-manager.js reads), `BGEMPTY-` says it with none, `WAKE-` writes
 // a fired loop wakeup (`command_lifecycle` started + `wakeup_source` / `scheduled_for`, src/record-shape.js:341-342), and
-// `BURST-` answers with 2000 assistant records in one go (a leg counts the wrapper's sidecar writes over them).
+// `BURST-` answers with 2000 assistant records in one go (a leg counts the wrapper's sidecar writes over them). `BGSHELL-` asks a
+// Bash to run in the background (its input's `run_in_background`) and starts its task (`task_started`, is_backgrounded); `BGDONE-`
+// says that task's `task_notification` (completed) — the task records the wrapper keeps as seen.
 //   $STAND_IN_HELPER_MS  how long a BGAGENT- helper works (default $STAND_IN_LONG_MS) — past a Stop, the session stays
 //                      'running' with no idle (the shape a Stop window must not wait on for ever)
 // Its records are VERSION-KEYED (lane claude-steer-inject r3): $STAND_IN_CLI_VERSION (default 2.1.312, the build the R0 table was
@@ -236,6 +238,12 @@ function begin(f, { follow = false } = {}) {
   out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-4-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: CLI_VERSION, ...(uuids.length ? { user_message_uuids: uuids } : {}) });
   if (/BGSET-/.test(text)) out({ type: 'system', subtype: 'background_tasks_changed', session_id: SID, uuid: 'bgset-stand-in-' + turnSeq, tasks: [{ task_id: 'bg-stand-in-1', task_type: 'local_bash', description: 'a dev server' }] });
   if (/BGEMPTY-/.test(text)) out({ type: 'system', subtype: 'background_tasks_changed', session_id: SID, uuid: 'bgempty-stand-in-' + turnSeq, tasks: [] });
+  if (/BGSHELL-/.test(text)) {
+    out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_s' + turnSeq, role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: 'toolu_stand_in_bgsh', name: 'Bash', input: { command: 'npm run dev', description: 'a dev server', run_in_background: true } }] } });
+    out({ type: 'system', subtype: 'task_started', session_id: SID, uuid: 'bgsh-start-' + turnSeq, task_id: 'bgsh-stand-in-1', tool_use_id: 'toolu_stand_in_bgsh', description: 'a dev server', task_type: 'local_bash', is_backgrounded: true });
+    out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_stand_in_bgsh', content: 'Command running in background with ID: bgsh-stand-in-1', is_error: false }] } });
+  }
+  if (/BGDONE-/.test(text)) out({ type: 'system', subtype: 'task_notification', session_id: SID, uuid: 'bgsh-done-' + turnSeq, task_id: 'bgsh-stand-in-1', tool_use_id: 'toolu_stand_in_bgsh', status: 'completed' });
   if (/WAKE-/.test(text)) out({ type: 'command_lifecycle', session_id: SID, state: 'started', command_uuid: 'cmd-stand-in-' + turnSeq, wakeup_source: 'loop_wakeup', scheduled_for: Date.now() - 1000 });
   if (/BURST-/.test(text)) for (let i = 0; i < 2000; i++) out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_b' + i, role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: 'burst ' + i }] } });
   const say = (t) => out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_' + Date.now(), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: t }] } });

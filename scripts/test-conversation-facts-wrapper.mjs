@@ -81,6 +81,14 @@ async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
   ok(await until(() => h.meta()?.facts?.wake === true, 3000), 'a fired wakeup: the one-way mark the record states is in the sidecar', h.meta()?.facts);
   const back = CF.trackedFacts(CF.factsFromSidecar(h.meta().facts), { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' });
   ok(Array.isArray(back.background) && back.timersWhy === CF.WHY.timerSet && Number.isFinite(back.idleSince), 'what a restarted hub reads from this sidecar: the set known, timers «it set a CLI timer», an idle age', back);
+  // round two, answer 1: the task records AS SEEN and the background ask, kept by the REAL wrapper; the hub subtracts
+  await h.turn('BGSHELL- a dev server in the background');
+  ok(await until(() => { const f = h.meta()?.facts; return f && Array.isArray(f.bgStarted) && f.bgStarted.length === 1 && f.bgStarted[0].kind === 'local_bash' && Array.isArray(f.bgAsk) && f.bgAsk.includes('Bash'); }, 3000),
+    'a shell asked to run in the background: the sidecar holds its start (the kind as stated) and the ask', h.meta()?.facts);
+  await h.turn('BGDONE- it ended');
+  ok(await until(() => (h.meta()?.facts?.bgOutcomes || []).some((o) => o.id === 'bgsh-stand-in-1' && o.kind === 'task_notification:completed'), 3000), 'its notification: the sidecar holds the outcome as stated', h.meta()?.facts);
+  const sh = CF.trackedFacts(CF.factsFromSidecar(h.meta().facts), { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' });
+  ok(sh.background === null && /it asked Bash to run in the background/.test(sh.backgroundWhy), 'what a restarted hub reads: background unknown — a background shell is a kind no recording has measured yet', sh);
   await h.stop();
 }
 {

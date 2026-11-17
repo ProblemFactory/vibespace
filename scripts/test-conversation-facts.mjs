@@ -666,5 +666,73 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   fresh();
 }
 
+// ── F · ROUND TWO, ANSWER 1 (主开发 2026-11-17 13:13Z) — the task records AS SEEN and the background asks; the HUB subtracts ─────
+console.log('F · the task records and the background asks: the wrapper records, the hub subtracts');
+{
+  const K = { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' };
+  const judge = (Mx, recs) => { const st = Mx.factsFresh(); for (const r of recs) Mx.factsStep(st, r, 1); return { st, t: Mx.trackedFacts(st, K) }; };
+  const row = (t) => ({ ...IDLE, background: t.background, backgroundWhy: t.backgroundWhy });
+  const init = { type: 'system', subtype: 'init', claude_code_version: '2.1.312' };
+  const started = (id, kind, bg = true) => ({ type: 'system', subtype: 'task_started', task_id: id, task_type: kind, is_backgrounded: bg, tool_use_id: 'toolu_' + id });
+  const note = (id, status) => ({ type: 'system', subtype: 'task_notification', task_id: id, status });
+  const upd = (id, patch) => ({ type: 'system', subtype: 'task_updated', task_id: id, patch });
+  const set = (...ids) => ({ type: 'system', subtype: 'background_tasks_changed', tasks: ids.map((id) => ({ task_id: id, task_type: 'local_agent', description: 'a helper' })) });
+  const call = (name, input) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_c', name, input }] } });
+  // THE RECORDING replayed (2.1.312-frames): a background agent — the set names it while it runs and empties after its
+  // notification; a foreground Bash task (is_backgrounded false) is no start
+  const frames = fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.312-frames.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const stF = CF.factsFresh(); const mids = [];
+  for (const r of frames) { CF.factsStep(stF, r, 1); if (r.type === 'system' && r.subtype === 'task_started' && r.is_backgrounded) mids.push(CF.trackedFacts(JSON.parse(JSON.stringify(stF)), K).background); }
+  const endF = CF.trackedFacts(stF, K);
+  ok(stF.bgStarted.length === 1 && stF.bgStarted[0].kind === 'local_agent' && stF.bgOutcomes.some((o) => o.kind === 'task_notification:completed') && Array.isArray(mids[0]) && mids[0].length === 1 && Array.isArray(endF.background) && endF.background.length === 0,
+    'the 2.1.312 recording replayed: the background agent is recorded as started (its kind as stated) and named by the set while it runs; its notification is recorded and the set empties — known-empty; the foreground Bash task is no start', { started: stF.bgStarted, outcomes: stF.bgOutcomes, mid: mids[0], end: endF.background });
+  // the omission window: the set drops a running agent before its outcome (the tree's read of 2026-09-21) ⇒ unknown, said
+  const win = judge(CF, [init, started('a1', 'local_agent'), set('a1'), set()]);
+  ok(win.t.background === null && /^the CLI's set omits a task it started and has not ended \(local_agent\)$/.test(win.t.backgroundWhy) && !CF.endVerdict(row(win.t)).endable,
+    'the set omits a running agent whose outcome is not yet seen: background UNKNOWN, «the CLI\'s set omits a task it started and has not ended» — not endable', win.t);
+  const done = judge(CF, [init, started('a1', 'local_agent'), set('a1'), set(), note('a1', 'completed')]);
+  ok(Array.isArray(done.t.background) && done.t.background.length === 0 && done.st.bgOutcomes.length === 1 && done.st.bgOutcomes[0].kind === 'task_notification:completed', 'its outcome seen (task_notification, its kind as stated): known-empty', done.st.bgOutcomes);
+  const failed = judge(CF, [init, started('a2', 'local_agent'), set(), upd('a2', { status: 'failed' })]);
+  const prog = judge(CF, [init, started('a3', 'local_agent'), set(), { type: 'system', subtype: 'task_progress', task_id: 'a3' }]);
+  ok(Array.isArray(failed.t.background) && failed.st.bgOutcomes[0].kind === 'task_updated:failed' && prog.t.background === null && prog.st.bgOutcomes[0].kind === 'task_progress',
+    'a task_updated whose status is terminal ends it (the hub\'s table); a task_progress is recorded as seen and ends nothing');
+  const fg = judge(CF, [init, started('b1', 'local_bash', false), note('b1', 'completed')]);
+  ok(fg.st.bgStarted.length === 0 && fg.st.bgOutcomes.length === 0 && Array.isArray(fg.t.background), 'a FOREGROUND task (is_backgrounded false) is no start and its records are not kept (86 of 107 starts in the tree\'s read were foreground)');
+  const moved = judge(CF, [init, started('b2', 'local_bash', false), upd('b2', { is_backgrounded: true })]);
+  ok(moved.st.bgStarted.length === 1 && moved.st.bgStarted[0].id === 'b2' && moved.t.background === null && /a kind no recording has measured/.test(moved.t.backgroundWhy),
+    'a task a later record turns to background (its patch says so) is recorded as started — unknown until it ends', moved.t);
+  const many = judge(CF, [init, ...Array.from({ length: CF.TASKS_MAX + 1 }, (_, i) => started('m' + i, 'local_agent')), ...Array.from({ length: CF.TASKS_MAX + 1 }, (_, i) => note('m' + i, 'completed'))]);
+  ok(many.st.bgStarted.length === CF.TASKS_MAX && many.st.bgStartedFull === true && many.t.background === null && many.t.backgroundWhy === CF.WHY.bgTasksFull, 'more started tasks than the wrapper keeps: said (full) — background unknown');
+  // THE BACKGROUND ASKS: a truthy input key whose name says background, per tool name — the hub holds the measured kinds
+  const sh = judge(CF, [init, call('Bash', { command: 'npm run dev', run_in_background: true })]);
+  ok(sh.st.bgAsk.join() === 'Bash' && sh.t.background === null && /^it asked Bash to run in the background — a kind no recording has measured yet/.test(sh.t.backgroundWhy) && !CF.endVerdict(row(sh.t)).endable,
+    'a shell ASKED to run in the background: background UNKNOWN until a recording measures the kind — not endable', sh.t);
+  const ag = judge(CF, [init, call('Agent', { prompt: 'x', run_in_background: true })]);
+  const off = judge(CF, [init, call('Bash', { command: 'ls', run_in_background: false })]);
+  const mcp = judge(CF, [init, call('mcp__srv__start_job', { runInBackground: 1 })]);
+  ok(ag.st.bgAsk.join() === 'Agent' && Array.isArray(ag.t.background) && off.st.bgAsk.length === 0 && Array.isArray(off.t.background) && mcp.st.bgAsk.join() === 'mcp__srv__start_job' && mcp.t.background === null,
+    'the look is generic: an Agent asked for background (a measured kind) stays known; a false key asks nothing; any tool whose input key says background is recorded (an MCP tool too)');
+  const asksFull = judge(CF, [init, ...Array.from({ length: CF.TOOLS_MAX + 1 }, (_, i) => call('T' + i, { background: true }))]);
+  ok(asksFull.st.bgAsk.length === CF.TOOLS_MAX && asksFull.st.bgAskFull === true && asksFull.t.backgroundWhy === CF.WHY.bgAskFull, 'more asking tools than kept: said (full) — background unknown');
+  // the sidecar round trip; a v2 sidecar without the lists; an element that does not read back
+  const back = CF.factsFromSidecar(JSON.parse(JSON.stringify(win.st))), backAsk = CF.factsFromSidecar(JSON.parse(JSON.stringify(sh.st)));
+  const v2old = JSON.parse(JSON.stringify(win.st)); delete v2old.bgStarted; delete v2old.bgOutcomes; delete v2old.bgAsk;
+  const torn = JSON.parse(JSON.stringify(done.st)); torn.bgStarted.push(null);
+  ok(back && back.bgStarted.length === 1 && CF.trackedFacts(back, K).background === null && backAsk && backAsk.bgAsk.join() === 'Bash' && CF.factsFromSidecar(v2old) === null
+    && CF.factsFromSidecar(torn).bgStartedFull === true && CF.trackedFacts(CF.factsFromSidecar(torn), K).backgroundWhy === CF.WHY.bgTasksFull,
+    'the sidecar round trip keeps both lists and the asks; a v2 sidecar without them reads as an older shape; an element that does not read back marks its list not whole');
+  // THE WRAPPER RECORDS, IT DOES NOT JUDGE: the step names none of the hub's tables
+  const srcCF = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
+  const step = srcCF.slice(srcCF.indexOf('function factsStep('), srcCF.indexOf('function factsFromSidecar('));
+  ok(step.length > 500 && !/TASK_ENDS|BG_MEASURED|levelMeasured|TIMER_TOOLS|TIMERISH|bgDoubt/.test(step), 'the step the wrapper runs names none of the hub\'s tables (which records end a task, which kinds are measured)');
+  // RED: the hub without the subtraction
+  const NB = '  else if (st && !st.old && (doubt = bgDoubt(st))) { out.background = null; out.backgroundWhy = doubt; }\n';
+  if (srcCF.split(NB).length !== 2) throw new Error('anchor missing: the subtraction');
+  const mF = mutantCopies('conversation-facts-r2-tasks', REPO).load('src/conversation-facts.js', srcCF.replace(NB, ''), 'no-subtraction');
+  const w2 = judge(mF, [init, started('a1', 'local_agent'), set('a1'), set()]), s2 = judge(mF, [init, call('Bash', { command: 'npm run dev', run_in_background: true })]);
+  ok(Array.isArray(w2.t.background) && w2.t.background.length === 0 && Array.isArray(s2.t.background) && CF.endVerdict(row(w2.t)).endable && CF.endVerdict(row(s2.t)).endable,
+    'RED: without the hub\'s subtraction the omission window and a background shell read «no background work» — endable while the work runs');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
