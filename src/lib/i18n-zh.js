@@ -10247,6 +10247,7 @@ export default {
   "Rename a conversation": "给对话改名", // design q-046 (lane automation-keys-core)
   "Put a conversation in a task group": "把对话放进任务组", // design q-046 (lane automation-keys-core)
   "End a conversation": "结束一个对话", // design q-046 (lane automation-keys-core)
+  "Resume a conversation": "恢复一个对话",
   "Invite a conversation into a group": "把对话邀进群", // design q-046 (lane automation-keys-core)
   "Look up a conversation's ids": "查看对话的 id", // design q-046 (lane automation-verbs)
   "Mark an agent's feedback handled": "把 agent 的反馈标为已处理", // lane feedback-handled-verb

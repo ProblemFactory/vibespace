@@ -10246,6 +10246,7 @@ export default {
   "Rename a conversation": "会話の名前を変える", // design q-046 (lane automation-keys-core)
   "Put a conversation in a task group": "会話をタスクグループに入れる", // design q-046 (lane automation-keys-core)
   "End a conversation": "会話を終える", // design q-046 (lane automation-keys-core)
+  "Resume a conversation": "会話を再開する",
   "Invite a conversation into a group": "会話をグループに招待する", // design q-046 (lane automation-keys-core)
   "Look up a conversation's ids": "会話の ID を確かめる", // design q-046 (lane automation-verbs)
   "Mark an agent's feedback handled": "エージェントのフィードバックを対応済みにする", // lane feedback-handled-verb

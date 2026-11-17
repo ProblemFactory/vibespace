@@ -40,7 +40,7 @@
 //      VS_CPU_THROTTLE=4 throttles this leg's page 4× (the lane's robustness runs before the pin)
 //   UNSAVED (lane dialog-unsaved-guard, B-bc31): 编辑… with a verb taken away asks on ✕ / Esc (继续编辑 / 放弃 / 保存) — 放弃 writes
 //      nothing, 保存 writes the dialog's own Save; a clean 编辑… closes at once
-//   ⑥b 编辑… (lane key-folder-picker-all — the owner 2026-10-21): the key's row edits its VERBS — the mint's 10 checkboxes (+ conversations.list), its own
+//   ⑥b 编辑… (lane key-folder-picker-all — the owner 2026-10-21): the key's row edits its VERBS — the mint's 11 checkboxes (+ conversations.list, + conversations.resume), its own
 //      ticked; 把 agent 的反馈标为已处理 + 读 agent 未处理的反馈 added ⇒ the row says them, the REAL `vibespace-api call feedback.list`
 //      runs at once on the existing grant (no card: its audit line was never asked); taken away ⇒ the next call refused by
 //      name (verb_not_in_scope) · ⑨c 「所有路径」: 铸造… offers it above the browser (red, its title says your home is in it) ⇒
@@ -49,7 +49,7 @@
 //   ⑪ MANY GRANTS (lane vault-key-row-compact — the owner 2026-10-21 05:4xZ: 「授权很多的时候，这个界面需要优化一下」): a key holding every
 //      verb and unrestricted limits, granted to 2 then 12 (8 Task Groups, the live conversation, 3 ended conversations) — the row
 //      does not grow (measured desk / phone, 2 vs 12), folded ≤ 120 px, never names the permission modes (任何, the names in the title),
-//      the head counts (「9 个动作」 · 「授权给 12 个」; two lines in the 980-px window, ONE maximized), the limits in ONE line; the list
+//      the head counts (「11 个动作」 · 「授权给 12 个」; two lines in the 980-px window, ONE maximized), the limits in ONE line; the list
 //      opens in place (groups › running › ended, dim 已结束, a kept name), scrolls inside the row (≤ 400 px opened), a filter past
 //      eight, 清理已结束的授权 takes EXACTLY the 3 (one audit line), stays open; the verbs popover by family + 编辑…; the 需要你 band's
 //      head «<who> 用 key「Fleet」做「归档一个对话」被拒» over its cause (the count under ONE fold) and the tray's same head; phones 390×844
@@ -181,7 +181,7 @@ try {
   console.log('③ the Vault window: 铸造… an automation key');
   check('the window opens on «自动化 key» (a group head with 铸造…)', !!(await openWindow()) && (await textOf('.vw-group[data-purpose="automation"] .vw-group-name')) === '自动化 key' && (await textOf('.vw-ak-mint')) === '铸造…');
   await click('.vw-ak-mint');
-  check('铸造… opens its dialog: a name and the closed table of verbs (开一个对话 says it bills)', !!(await until(visible('#vault-ak-mint'), 5000)) && /（会开始一个计费回合）/.test(await textOf('#vault-ak-mint')) && (await evalJs(`document.querySelectorAll('#vault-ak-mint .vw-ak-verbs .vw-ak-pick input[type=checkbox]').length`)) === 10 && !(await evalJs(visible('#vault-ak-mint .vw-ak-limwrap')))); // lane automation-verbs: + conversations.status (a read); lane feedback-handled-verb: + feedback.handled, feedback.list; lane conversations-archive-verb: + conversations.archive (re-pinned by lane key-instance-scope)
+  check('铸造… opens its dialog: a name and the closed table of verbs (开一个对话 says it bills)', !!(await until(visible('#vault-ak-mint'), 5000)) && /（会开始一个计费回合）/.test(await textOf('#vault-ak-mint')) && (await evalJs(`document.querySelectorAll('#vault-ak-mint .vw-ak-verbs .vw-ak-pick input[type=checkbox]').length`)) === 11 && !(await evalJs(visible('#vault-ak-mint .vw-ak-limwrap')))); // lane automation-verbs: + conversations.status (a read); lane feedback-handled-verb: + feedback.handled, feedback.list; lane conversations-archive-verb: + conversations.archive (re-pinned by lane key-instance-scope); lane conversation-facts: + conversations.list; the manager design's piece 4: + conversations.resume
   await typeInto('#vault-ak-mint .vw-ak-name', 'Lane dispatch');
   await evalJs(`(() => { const c = document.querySelector('#vault-ak-mint input[value="conversations.rename"]'); c.checked = true; return true; })()`);
   await click('.vw-ak-mint-go');
@@ -268,8 +268,8 @@ try {
   const auditLines = () => fs.readFileSync(path.join(wt, 'data', 'automation-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   await clickWait(ROW + ' .vw-ak-edit');
   const editBoxes = await until(`(() => { const d = document.querySelector('#vault-ak-edit'); if (!d) return null; const cbs = [...d.querySelectorAll('.vw-ak-verbs input[type=checkbox]')]; const l = d.querySelector('.vw-ak-limwrap'); const r = l && l.getBoundingClientRect(); return cbs.length ? { n: cbs.length, on: cbs.filter((c) => c.checked).map((c) => c.value).join(), hint: (d.querySelector('.vw-ak-grant-hint') || {}).textContent, title: (d.querySelector('h3') || {}).textContent, lim: !!(r && r.width && r.height) } : null; })()`, 8000);
-  check('编辑… opens on the key\'s own verbs — the same 10 checkboxes as 铸造… (lane conversation-facts: + conversations.list) (its own ticked, the others unticked), the grant hint, no limits (it does not open)',
-    editBoxes && editBoxes.n === 10 && editBoxes.on === 'conversations.rename' && /授权是按「key × 会话」给的/.test(editBoxes.hint || '') && editBoxes.title === '编辑「Lane dispatch」' && !editBoxes.lim, editBoxes);
+  check('编辑… opens on the key\'s own verbs — the same 11 checkboxes as 铸造… (lane conversation-facts: + conversations.list; piece 4: + conversations.resume) (its own ticked, the others unticked), the grant hint, no limits (it does not open)',
+    editBoxes && editBoxes.n === 11 && editBoxes.on === 'conversations.rename' && /授权是按「key × 会话」给的/.test(editBoxes.hint || '') && editBoxes.title === '编辑「Lane dispatch」' && !editBoxes.lim, editBoxes);
   await evalJs(`(() => { for (const v of ['feedback.handled', 'feedback.list']) document.querySelector('#vault-ak-edit input[value="' + v + '"]').click(); return true; })()`);
   await shot('ak-3b-edit-verbs.png');
   await clickWait('.vw-ak-edit-save');
@@ -471,7 +471,7 @@ try {
   await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); for (const t of document.querySelectorAll('.toast')) t.remove(); return true; })()`);
   const kc = ((await api('GET', '/api/automation/keys')).json || {}).limitChoices || {};
   const ALL_PERMS = [...new Set((kc.permissionModes || []).map((r) => r.value))];
-  const ALL_VERBS = ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'groups.invite', 'conversations.status', 'conversations.archive', 'feedback.handled', 'feedback.list'];
+  const ALL_VERBS = ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'conversations.resume', 'groups.invite', 'conversations.status', 'conversations.archive', 'conversations.list', 'feedback.handled', 'feedback.list'];   // every verb of the closed table (the manager design's piece 4: + conversations.resume; lane conversation-facts: + conversations.list)
   const fleet = await api('POST', '/api/automation/keys', { name: 'Fleet', scopes: ALL_VERBS, limits: { cwdRoots: ['/'], accounts: 'any', permissionModes: ALL_PERMS, models: 'any', modes: ['chat', 'terminal'] } });
   const FLEET = fleet.json && fleet.json.key && fleet.json.key.id;
   const GROUP_NAMES = ['ops', 'web', 'data', 'infra', 'docs', 'qa', 'ml', 'sec'].map((x, i) => `岗位 ${String(i + 1).padStart(2, '0')} ${x}`);
@@ -508,7 +508,7 @@ try {
   check(`THE ROW WITH 12 GRANTS IS SHORT: folded, ≤ ${CAP_FOLDED} px tall at 1280×800 (no grant drawn until 「授权给 12 个」 opens them)`, !!m0 && m0.h <= CAP_FOLDED && m0.grantsShown === 0, m0);
   check('…and it never enumerates the permission modes (every mode allowed ⇒ 任何; the names only in the title)', !!m0 && m0.enumerated.length === 0, m0 && m0.enumerated);
   const head = await evalJs(`(() => { const r = ${FROW}; if (!r) return null; const l = r.querySelector('.vw-ak-limits-line'); const perm = l && l.querySelector('[data-field="permissionModes"]'); return { verbs: (r.querySelector('.vw-ak-verbs-chip') || {}).textContent || null, grants: (r.querySelector('.vw-ak-grants-chip') || {}).textContent || null, line: l ? l.innerText.replace(/\\s+/g, ' ').trim() : null, lineH: l ? Math.round(l.getBoundingClientRect().height) : 0, permTitle: perm ? perm.title : null, meta: !!r.querySelector('.vw-meta'), used: (r.querySelector('.vw-used') || {}).textContent, scopesLine: !!r.querySelector('.vw-ak-scopes') }; })()`);
-  check('THE HEAD counts: 「9 个动作」 · 「授权给 12 个」 · 从未使用 — no run-on verbs line, no meta line (the kind is the chip)', !!head && head.verbs === '9 个动作' && head.grants === '授权给 12 个' && head.used === '从未使用' && !head.meta && !head.scopesLine, head);
+  check('THE HEAD counts: 「11 个动作」 · 「授权给 12 个」 · 从未使用 — no run-on verbs line, no meta line (the kind is the chip)', !!head && head.verbs === '11 个动作' && head.grants === '授权给 12 个' && head.used === '从未使用' && !head.meta && !head.scopesLine, head);
   check('THE LIMITS in ONE line of words: 「文件夹: 所有路径 · 账号: 任何 · 权限模式: 任何 · 模型: 任何 · 模式: 任何」 (one visual line); 权限模式\'s title names every mode', !!head && head.line === '文件夹: 所有路径 · 账号: 任何 · 权限模式: 任何 · 模型: 任何 · 模式: 任何' && head.lineH <= 22 && /CLI 自己的设置/.test(head.permTitle || '') && /跳过确认/.test(head.permTitle || ''), head);
   // the head in lines: the distinct rows the name, the chips, the last use and the doors sit on (the default 980-px window: two — name · chips · last use, then the doors; maximized: ONE)
   const headLines = `(() => { const r = ${FROW}; const items = [r.querySelector('.vw-label'), ...r.querySelectorAll('.vw-chips > *'), r.querySelector('.vw-used'), ...r.querySelectorAll('.vw-act .vw-btn:not([hidden])')].filter(Boolean); const mids = items.map((e) => { const q = e.getBoundingClientRect(); return Math.round(q.top + q.height / 2); }).sort((a, b) => a - b); return { lines: mids.filter((m, i) => i === 0 || m - mids[i - 1] > 12).length, h: Math.round(r.getBoundingClientRect().height), w: Math.round(r.getBoundingClientRect().width) }; })()`;
@@ -520,7 +520,7 @@ try {
   await evalJs(`(() => { for (const [id, w] of app.wm.windows) if (w && w.type === 'vault' && w.isMaximized) app.wm.toggleMaximize(id); return true; })()`);
   await sleep(400);
   console.log(`  · measured: the head — ${hl980 && hl980.lines} line(s), the row ${hl980 && hl980.h} px (980-px window); maximized ${hlMax && hlMax.lines} line(s), ${hlMax && hlMax.h} px`);
-  check('THE HEAD: two lines in the default 980-px window (name · kind · 9 个动作 · 授权给 12 个 · last use, then 显示 and the doors); ONE line in a maximized window', !!hl980 && hl980.lines === 2 && !!hlMax && hlMax.lines === 1 && hlMax.h <= CAP_FOLDED, { hl980, hlMax });
+  check('THE HEAD: two lines in the default 980-px window (name · kind · 11 个动作 · 授权给 12 个 · last use, then 显示 and the doors); ONE line in a maximized window', !!hl980 && hl980.lines === 2 && !!hlMax && hlMax.lines === 1 && hlMax.h <= CAP_FOLDED, { hl980, hlMax });
   if (!(head && head.grants)) check('the head has its 「授权给 N 个」 chip (the legs below need it)', false);
   else {
     await evalJs(`(() => { const r = ${FROW}; const open = r.querySelector('.vw-ak-gfold'); if (open && open.hidden) r.querySelector('.vw-ak-grants-chip').click(); return true; })()`);
@@ -543,11 +543,11 @@ try {
       && pruned.length === 1 && ENDED.every((c) => pruned[0].note.includes(c)) && /^took back 3 grants to ended conversations: /.test(pruned[0].note), { after: after && after.grants.map((g) => g.subject), pruned });
     const g2 = await until(`(() => { const r = ${FROW}; const f = r && r.querySelector('.vw-ak-gfold'); const c = r && r.querySelector('.vw-ak-grants-chip'); return c && c.textContent === '授权给 9 个' ? { open: !f.hidden, expanded: c.getAttribute('aria-expanded'), prune: !!f.querySelector('.vw-ak-prune'), rows: f.querySelectorAll('.vw-ak-g').length, filter: !!f.querySelector('.vw-ak-gfilter') } : null; })()`, 10000);
     check('…the row says 「授权给 9 个」, the cleanup door is gone, and the list STAYS open (remembered per key for this page)', !!g2 && g2.open && g2.expanded === 'true' && !g2.prune && g2.rows === 9 && g2.filter, g2);
-    // the verbs: 「9 个动作」 ⇒ a popover grouped by family, 编辑… beside
+    // the verbs: 「11 个动作」 ⇒ a popover grouped by family, 编辑… beside
     await evalJs(`${FROW}.querySelector('.vw-ak-verbs-chip').click()`);
     const vp = await until(`(() => { const p = document.querySelector('.vw-ak-verbs-pop'); if (!p || !p.getBoundingClientRect().height) return null; return { fams: [...p.querySelectorAll('.vw-ak-vfam')].map((f) => f.querySelector('.vw-ak-vfam-name').textContent + ':' + f.querySelectorAll('.vw-ak-vrow').length).join('|'), first: (p.querySelector('.vw-ak-vrow') || {}).textContent, edit: (p.querySelector('.vw-ak-vedit') || {}).textContent }; })()`, 5000);
     await shot('ak-15-verbs.png');
-    check('「9 个动作」 opens the verbs as a popover grouped by family — 对话 6 · Agent 群组 1 · 反馈 2 (a billed verb says so) — with 编辑… beside', !!vp && vp.fams === '对话:6|Agent 群组:1|反馈:2' && vp.first === '开一个对话 （会开始一个计费回合）' && vp.edit === '编辑…', vp);
+    check('「11 个动作」 opens the verbs as a popover grouped by family — 对话 8 · Agent 群组 1 · 反馈 2 (a billed verb says so) — with 编辑… beside', !!vp && vp.fams === '对话:8|Agent 群组:1|反馈:2' && vp.first === '开一个对话 （会开始一个计费回合）' && vp.edit === '编辑…', vp);
     await evalJs(`document.querySelector('.vw-ak-verbs-pop .vw-ak-vedit').click()`);
     check('…its 编辑… opens the key\'s edit dialog (the popover closes)', !!(await until(`!!document.querySelector('#vault-ak-edit') && !document.querySelector('.vw-ak-verbs-pop')`, 5000)) && (await textOf('#vault-ak-edit h3')) === '编辑「Fleet」');
     // lane dialog-unsaved-guard (B-bc31): 编辑… closing with an unsaved change ASKS — a clean ✕ closes at once; a verb taken

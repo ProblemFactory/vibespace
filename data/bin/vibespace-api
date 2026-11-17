@@ -37,6 +37,10 @@ const USAGE = [
   '                (end / archive: refused while it is busy or a fact is unknown — subject_busy with the reasons; a terminal or too-quiet one is person_only; --force only for a conversation this key opened, or the caller itself)',
   '  vibespace-api conversations archive <target> [--force] [--resolve-asks]   end it if still live, then archive it as the sidebar\'s 归档 does',
   '                (the SAME gate as end: busy ⇒ subject_busy, a person\'s to end ⇒ person_only, --force only for your own; its open For-you asks ⇒ asks_open naming them, unless --resolve-asks dismisses them — then they are no reason; archived already ⇒ already_archived)',
+  '  vibespace-api conversations resume <target>              resume an ENDED conversation as a Resume press does — nothing is sent, nothing billed',
+  '                (one line: at most two start at a time, else queued with its place; refused by name: not_ended, archived, needs_a_page,',
+  '                 harness_unread, goal_active, timer_marked, queue_kept, queue_unknown, goal_unknown, line_full; a start that failed: resume_failed;',
+  '                 the background tasks it had started ended with its process and are not restarted)',
   '  vibespace-api groups invite <g-…|group name> <target>    into an agent group you are in (no wake)',
   '  vibespace-api list [--json] [--key <name|id>]   every conversation and browser the key reaches, sorted by memory: what runs in',
   '                each, whether it may be ended (busy + why), its desktop and its link; a fact the hub cannot know prints',
@@ -65,7 +69,8 @@ function reachWords(r) {
   return 'opened (only what the key opened, and yourself)';
 }
 async function call(method, route, body) {
-  const res = await CC.call(API + route, { ...(/conversations\.open/.test(route) ? { cls: 'wake' } : {}), method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+  // a resume at the head of the line waits its whole create, as an open does: the same wait class
+  const res = await CC.call(API + route, { ...(/conversations\.(open|resume)/.test(route) ? { cls: 'wake' } : {}), method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.ok === false) {
     // an open outside its key's limits: the refusal by name + what the key allows (ask inside them, or ask the user to widen them)
@@ -93,6 +98,7 @@ const TYPED = {
   'conversations rename': { verb: 'conversations.rename', pos: ['target', 'name'], flags: [] },
   'conversations bind': { verb: 'conversations.bind', pos: ['target', 'task'], flags: [] },
   'conversations end': { verb: 'conversations.end', pos: ['target'], flags: [], bool: ['force'] }, // lane end-obeys-verdict: --force only for a conversation the key opened
+  'conversations resume': { verb: 'conversations.resume', pos: ['target'], flags: [] },   // the manager design's piece 4
   // lane conversations-archive-verb: `bool` flags take NO value (--force / --resolve-asks ⇒ force / resolveAsks: true)
   'conversations archive': { verb: 'conversations.archive', pos: ['target'], flags: [], bool: ['force', 'resolve-asks'] },
   'groups invite': { verb: 'groups.invite', pos: ['group', 'target'], flags: [] },

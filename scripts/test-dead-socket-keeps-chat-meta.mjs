@@ -173,6 +173,15 @@ await section('§3 THE READ-BACK — the kept metas are /api/sessions rows, and 
   const rows2 = await B.stoppedSessions();
   ok(rows2.length === 3 && J(rows2.map((x) => x.backendSessionId).sort()) === J(rows.map((x) => x.backendSessionId).sort()) && rows2.find((x) => x.backendSessionId === UUID(1))?.accountId === AGY_META.accountId,
     '§3 THE NEXT BOOT reads them back from disk (a fresh boot-restore over the same data dir, no socket at all)', rows2);
+  // the manager design's piece 4: the resume verb judges ONE ended conversation by its kept record (the instance's own keptRecordOf)
+  const kr = await W.api.keptRecordOf('claude:' + CID(1)), ka = await W.api.keptRecordOf('antigravity:' + UUID(1)), kn = await W.api.keptRecordOf('claude:nobody');
+  ok(kr && kr.sockFile === socks.ledgerChat && kr.id === CID(1) && kr.meta && kr.meta.cwd === '/srv/u/ledger' && ka && ka.sockFile === socks.labChat && kn === null,
+    '§3 piece 4: ONE conversation\'s kept record by its key — {sockFile, meta, id} for the claude and the antigravity ones, null for none', { kr: kr && kr.sockFile, ka: ka && ka.sockFile, kn });
+  const kb = await B.keptRecordOf('claude:' + CID(1));
+  const RLs = require(path.join(REPO, 'src/server/resume-line.js'));
+  const F = RLs.keptFacts(kb, null);
+  ok(kb && kb.sockFile === socks.ledgerChat && F.kept === true && F.mode === 'chat' && F.goal === 'unknown' && F.cwd === '/srv/u/ledger' && RLs.sidecarNameOf(kb) !== null,
+    '§3 piece 4: the NEXT boot reads it back (its kept copies loaded first); its facts — kept, chat, its folder, the goal UNKNOWN with no wrapper sidecar here (never «none»)', { kb: kb && kb.sockFile, F });
   const old = 'cw-7-1793000000007';
   fs.writeFileSync(path.join(W.META, old + '.json.stopped'), J({ backend: 'claude', claudeSessionId: CID(7), name: 'Kept by .365', cwd: '/srv/u/old', mode: 'chat', stoppedAt: 1793000000000 }));
   const rows3 = await api(W).stoppedSessions();

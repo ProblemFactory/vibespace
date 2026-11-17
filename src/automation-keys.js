@@ -134,6 +134,14 @@ const SCOPES = Object.freeze([
   // lane end-obeys-verdict (majordomo piece 3): the end obeys the verdict; `force` passes it only for a conversation this key opened
   Object.freeze({ verb: 'conversations.end', layer: 'act', billed: false, label: 'End a conversation',
     args: (a) => argsOf(a, { target: (v) => idArg(v, 'target'), force: (v) => boolArg(v, 'force') }) }),
+  // the manager design's piece 4 (2026-11-17): resume an ENDED conversation the way a person's Resume press does — the page's own
+  // resume road run headless, NOTHING sent and nothing billed (no spend row); through the hub's one line (at most two starts); it
+  // refuses by name an active goal, a CLI timer mark, and an unknown goal on a harness that continues one by itself (goal_active /
+  // timer_marked / goal_unknown), a harness that declared neither (harness_unread), a thread queue the record states non-empty
+  // (queue_kept) or a queue it never read on a harness that runs one by itself (queue_unknown), a conversation still running (not_ended), an archived one, one that resumes only in a window a person opens
+  // (needs_a_page), and a full line (line_full); a create that failed answers resume_failed
+  Object.freeze({ verb: 'conversations.resume', layer: 'act', billed: false, label: 'Resume a conversation',
+    args: (a) => argsOf(a, { target: (v) => idArg(v, 'target') }) }),
   Object.freeze({ verb: 'groups.invite', layer: 'act', billed: false, label: 'Invite a conversation into a group',
     args: (a) => argsOf(a, { group: (v) => idArg(v, 'group'), target: (v) => idArg(v, 'target') }) }),
   // lane automation-verbs (L2): the ids a just-opened conversation reports a moment later (`pending` until its CLI said its
@@ -192,6 +200,11 @@ const CODES = Object.freeze({
   // lane key-grant-everyone r2: the caller's Task Groups could not be read while a grant's Task Group (in `to` or «除了»)
   // decides — never judged as «in no Task Group» (that admitted a conversation left out of All agents); call again
   groups_unreadable: 409,
+  // the manager design's piece 4 (conversations.resume): the conversation is running · archived · resumes only in a window a person
+  // opens · its kept record shows an active goal / a CLI timer mark / an unknown goal on a harness that continues one by itself (a
+  // resume could start a billed turn nobody pressed) · this key's ten waiting resumes · the create refused (its own reason named)
+  // (+ its cure round: a harness row that declares neither value · a thread queue the record states non-empty)
+  not_ended: 409, archived: 409, needs_a_page: 409, goal_active: 409, timer_marked: 409, goal_unknown: 409, harness_unread: 409, queue_kept: 409, queue_unknown: 409, line_full: 429, resume_failed: 503,
 });
 
 /** A key record off disk → its shape (null = not a record). Copies NAMED fields only — never a spread. */

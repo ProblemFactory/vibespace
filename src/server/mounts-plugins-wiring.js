@@ -229,6 +229,19 @@ const sessionCallerOf = (token) => { for (const [id, s] of activeSessions) if (s
 const conversationSubjects = () => { const tasks = getTasks && getTasks(); const sessions = []; for (const [id, s] of activeSessions) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude', webuiId: String(s._webuiId || id) /* lane login-request-card: a grant written under its page id names it too */, ...((gr) => ({ groupIds: gr.ids, ...(gr.unreadable ? { groupsUnreadable: true } : {}) }))(automationGroupsRead(s, id)) /* lane grants-unify: the «除了» row offers a picked group's members; the follow-owed read: the hold rides it (the login dialog's «by what» judges them) */ }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; };
 // lane vault-window-v2 (design q-047 §3.4): the Vault window's 「需要你」 producers — a use door's refusal (使用失败), an agent's put (建议轮换)
 const vaultAttention = require('./vault-hooks.js').createVaultAttention({ userTodos });
+// THE MANAGER DESIGN'S PIECE 4 — the hub's ONE LINE of resumes nobody pressed (src/server/resume-line.js: at most two starts at a
+// time, each next when a start before it ENDED) and its road: inbox-reopen's headless reopen — the page's own resume create, nothing
+// sent — bound by server.js once it is built (`resumeRoad.reopen`); the line starts only once server.js says the boot ADOPTED the
+// live sessions (`resumeRoad.adopted()`, when the keepers' 8 s re-adoption settled — the cure round's must 5)
+let adoptedNow = null;
+const resumeRoad = { reopen: null, kept: null, adopted: () => { if (adoptedNow) adoptedNow(); } };   // kept: boot-restore's keptRecordOf (server.js binds it)
+const RL = require('./resume-line.js'), RL_PURE = require('../resume-line.js');
+const resumeLine = RL.createResumeLine({ start: RL.startThrough(resumeRoad), ready: new Promise((r) => { adoptedNow = r; }), log: (m) => console.log(m) });
+// an ENDED conversation's facts for the resume verb (src/server/resume-line.js factsReaderOver — the READER of the kept record; an end's
+// record is written by piece 3's writer, after the kill): its kept record and, for a boot's record, its wrapper's sidecar in
+// BUFFERS_DIR — small files in the own data dir, read async only when a key asks to resume
+const readDataJson = async (p) => JSON.parse(await fs.promises.readFile(p, 'utf8'));
+const resumeFactsOf = RL.factsReaderOver({ buffersDir: BUFFERS_DIR, road: resumeRoad, readJson: readDataJson });
 const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, log: (m) => console.log('[automation]', m),
   // lane feedback-handled-verb: + feedback.handled / feedback.list over THE feedback store (the owner's PATCH's own call)
   // lane conversations-archive-verb: the archive verb's seams on conversation-ops' automationVerbs — the sidebar's own archived-list
@@ -239,6 +252,11 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
     asksOf: (key) => { try { return userTodos.forSession([key]).filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page'); } catch { return []; } },
     resolveAsks: (ids, by) => userTodos.setStatusMany(ids, 'dismissed', by),
     turnOf: require('./turn-facts.js').turnOf,
+    resumeLine, resumeFactsOf,
+    isArchived: (key) => { const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {}; return Array.isArray(st.archivedSessions) && st.archivedSessions.includes(key); },
+    resumeRowOf: (backend) => RL_PURE.harnessRowOf(require('../backend-caps.js').capsOf(backend)),
+    // the desktop's NAME is a person's words reaching an agent: ONE call of the belt, as a line (the peer-text census row of vibespace-api)
+    rowDesktopOf: (key) => { const d = RL_PURE.rowDesktopOf(persistenceRouter && typeof persistenceRouter.readLayouts === 'function' ? persistenceRouter.readLayouts() : null, key); return d ? { id: d.id, name: d.name == null ? null : require('../peer-text.js').toAgentText(d.name, { kind: 'line', max: 200 }) } : null; },
     deadOf: (target) => {
       const t = String(target || '');
       if (!t || /^sess-/.test(t)) return null;   // a dead webui id names nothing durable
@@ -1662,7 +1680,7 @@ function createSessionMessages(session, sessionId) {
     });
     mayUse.mount(app, { personVerdict: require('../routes/vault.js').personVerdict });
   } catch (e) { console.warn('[may-use] the route could not be mounted — ' + (e && e.message)); }
-  return { settingHolds, decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
+  return { resumeRoad, resumeLine, settingHolds, decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
     // lane engine-distribution (P4, §5.4): THE FLEET'S ENGINE PLUGIN at boot — ONE job after the listen, never on the boot path
     bootEngineDistribution: () => { if (!engineDistribution) return; engineDistribution.bootFleet().then((r) => { const line = engineDistribution.bootLine(r); if (line) console.log(line); }, (e) => console.warn(`[plugins] the fleet's engine plugin boot job failed — ${e && e.message}`)); } };
 }

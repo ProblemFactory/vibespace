@@ -8,6 +8,9 @@
 //   ③ the coordinator: conversations open (the CLI's argv reaches the worker's spawn: --model / --effort / --permission-mode)
 //      ⇒ its sessionId AND conversation id (open waits for it) · status · rename · bind into its Task Group · groups invite
 //      (quiet) · end ⇒ every effect seen on the hub (the session list, the Task Group, the group's members, the worker gone)
+//   ③b THE RESUME (the manager design's piece 4): the ENDED worker resumed by the key — live again on the same conversation
+//      (its CLI started with --resume <id>), ZERO user frames on its stdin, no new spend row; CONTROL a person's chat-input is ONE
+//      user frame; a resume while it runs ⇒ not_ended
 //   ④ THE AUDIT: one line per verb for the coordinator (open / status / rename / bind / invite / end, ok), names only;
 //      THE SPEND: one automation-open stamp charged to the key's identity (data/spend-budget.json)
 //   ④b THE LIMITS (lane automation-open-limits — the q-048 verify's M2): a key limited to ONE folder — an open outside it
@@ -35,6 +38,7 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -45,7 +49,9 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VNC_ENV = await vncEnv();
 const [PORT] = await freePorts(1);
 const BASE = `http://127.0.0.1:${PORT}`;
-const root = mintRoot('av-wt'), wt = path.join(root, 't'), stubDir = path.join(root, 'stub'), fakeHome = path.join(root, 'home'), CWD = path.join(root, 'cwd');
+// the conversations' folder: OUTSIDE /tmp/vs-* — session discovery skips every scratch() cwd (src/fixture-guard.js), and ③b resumes
+// an ended worker by its transcript there (test-phone-resume-keeps-layout-ui's own reason, the same folder rule)
+const root = mintRoot('av-wt'), wt = path.join(root, 't'), stubDir = path.join(root, 'stub'), fakeHome = path.join(root, 'home'), CWD = fs.mkdtempSync(path.join(os.tmpdir(), 'av-cwd-'));
 for (const d of [stubDir, fakeHome, CWD]) fs.mkdirSync(d, { recursive: true });
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
@@ -64,10 +70,14 @@ const fs = require('fs');
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('2.1.274 (Claude Code) stub'); process.exit(0); }
 if (args.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
-const sid = require('crypto').randomUUID();
+// a RESUMED run (the manager design's piece 4) is that conversation: it echoes --resume's id; every run logs its stdin lines by id
+const sid = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : require('crypto').randomUUID();
 fs.writeFileSync(${JSON.stringify(stubDir)} + '/env-' + process.pid + '.json', JSON.stringify({ sid, args, token: process.env.VIBESPACE_SESSION_TOKEN || null, webui: process.env.CLAUDE_WEBUI_SESSION_ID || null }));
 process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-fable-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: '2.1.274' }) + '\\n');
-process.stdin.on('data', () => {});
+// its transcript, where the CLI keeps one (~/.claude/projects/<the folder, encoded>/<id>.jsonl): an ENDED conversation is found by it
+if (!args.includes('--resume')) { const proj = require('path').join(require('os').homedir(), '.claude', 'projects', process.cwd().replace(/[/._]/g, '-')); fs.mkdirSync(proj, { recursive: true }); const at = new Date().toISOString(); fs.writeFileSync(proj + '/' + sid + '.jsonl', JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello' }, uuid: 'u-' + sid, timestamp: at, cwd: process.cwd(), sessionId: sid }) + '\\n' + JSON.stringify({ type: 'assistant', message: { id: 'msg_' + sid, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: 'a-' + sid, parentUuid: 'u-' + sid, timestamp: at, cwd: process.cwd(), sessionId: sid }) + '\\n'); }
+let inBuf = '';
+process.stdin.on('data', (d) => { inBuf += d; let i; while ((i = inBuf.indexOf('\\n')) >= 0) { const line = inBuf.slice(0, i); inBuf = inBuf.slice(i + 1); if (line.trim()) fs.appendFileSync(${JSON.stringify(stubDir)} + '/stdin-' + sid + '.ndjson', line + '\\n'); } });
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
@@ -125,8 +135,8 @@ try {
   const GROUP = gr.json && gr.json.group && (gr.json.group.id || gr.json.group);
   check(`the coordinator's agent group (${GROUP})`, gr.status === 200 && /^g-/.test(String(GROUP)), gr);
 
-  console.log('② a key with the seven verbs, granted to the coordinator');
-  const SCOPES = ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'groups.invite', 'conversations.status', 'conversations.archive'];
+  console.log('② a key with the eight verbs, granted to the coordinator');
+  const SCOPES = ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'groups.invite', 'conversations.status', 'conversations.archive', 'conversations.resume'];
   // lane automation-open-limits: an opening key carries the owner's limits — the coordinator's folder, its permission mode
   const mk = await req('POST', '/api/automation/keys', { name: 'dispatch', scopes: SCOPES, limits: { cwdRoots: [CWD], accounts: 'any', permissionModes: ['default', 'bypassPermissions'], models: 'any', modes: ['chat'] } });
   const KEY = mk.json && mk.json.key && mk.json.key.id;
@@ -157,6 +167,29 @@ try {
   const en = await cli(['conversations', 'end', W.sessionId], C.token);
   const gone = await until(async () => !(await active()).some((s) => s.id === W.sessionId));
   check('conversations end: exit 0 and the worker is gone from the live list', en.code === 0 && !!gone, en);
+  // ③b THE RESUME (the manager design's piece 4): the ENDED worker resumed by the key — the page's own resume road run headless,
+  // NOTHING sent into it and nothing billed; CONTROL: a person's chat-input into it is ONE user frame (the probe sees a turn)
+  const stdinOf = (sid) => { try { return fs.readFileSync(path.join(stubDir, `stdin-${sid}.ndjson`), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } };
+  const userFrames = (sid) => stdinOf(sid).filter((m) => m.type === 'user');
+  const ledger = () => { try { const b = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')).budget || {}; return { instance: (b.instance || []).length, key: ((b.identities || {})[`automation:${KEY}`] || []).length }; } catch { return { instance: 0, key: 0 }; } };
+  const opened = await until(() => (ledger().key === 1 ? ledger() : null));
+  const rs = await cli(['conversations', 'resume', W.claudeSessionId], C.token);
+  const RS = rs.json || {};
+  const back = await until(async () => (await active()).find((s) => s.id === RS.sessionId && (s.backendSessionId === W.claudeSessionId || s.claudeSessionId === W.claudeSessionId)));
+  const resumedStub = await until(() => stubs().find((x) => x.args.includes('--resume') && x.args[x.args.indexOf('--resume') + 1] === W.claudeSessionId));
+  check('③b conversations resume (the ENDED worker, by its conversation id): exit 0 — LIVE AGAIN on the same conversation, its CLI started with --resume <id>, the note says nothing was sent',
+    rs.code === 0 && /^sess-/.test(String(RS.sessionId)) && RS.sessionKey === `claude:${W.claudeSessionId}` && !!back && !!resumedStub && /nothing was sent to it/.test(String(RS.note)), { rs, back: !!back, stub: !!resumedStub });
+  await sleep(3000);   // past the spend guard's write debounce and the wrapper's start
+  const after = ledger();
+  check('③b …its CLI read ZERO user frames, and the spend ledger has NO new row (still the open\'s ONE automation-open stamp)', userFrames(W.claudeSessionId).length === 0 && !!opened && after.key === opened.key && after.instance === opened.instance, { frames: stdinOf(W.claudeSessionId).map((m) => m.type), opened, after });
+  ws.send(JSON.stringify({ type: 'chat-input', sessionId: RS.sessionId, text: 'a person typed this' }));
+  const typed = await until(() => (userFrames(W.claudeSessionId).length === 1 ? true : null), 10000);
+  check('③b CONTROL: a person\'s chat-input into the resumed worker ⇒ its CLI reads ONE user frame (the probe sees a turn)', !!typed, stdinOf(W.claudeSessionId).map((m) => m.type));
+  const rs2 = await cli(['conversations', 'resume', W.claudeSessionId], C.token);
+  check('③b a resume of a RUNNING conversation ⇒ exit 1 not_ended', rs2.code === 1 && /\(not_ended\)/.test(rs2.err), rs2);
+  const enR = await cli(['conversations', 'end', RS.sessionId], C.token);
+  const goneR = await until(async () => !(await active()).some((s) => s.id === RS.sessionId));
+  check('③b …and the key ends it again', enR.code === 0 && !!goneR, enR);
   // lane conversations-archive-verb: the opener's lifecycle ends with the sidebar's 归档 — AFTER the end, by the conversation id (the key opened it; no grant of its own)
   const ar = await cli(['conversations', 'archive', W.claudeSessionId], C.token);
   const ust = (await req('GET', '/api/user-state')).json || {};
@@ -169,9 +202,9 @@ try {
   const audit = fs.readFileSync(path.join(wt, 'data', 'automation-audit.jsonl'), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
   const mine = audit.filter((l) => l.subject === `session:${C.sid}` && l.verb !== 'key.grant');
   const okMine = mine.filter((l) => l.ok);
-  check(`the audit: one ok line per verb for the coordinator (${okMine.map((l) => l.verb).join(', ')}) + the refused second archive (already_archived), names and ids only`,
-    JSON.stringify(okMine.map((l) => l.verb)) === JSON.stringify(['conversations.open', 'conversations.status', 'conversations.rename', 'conversations.bind', 'groups.invite', 'conversations.end', 'conversations.archive']) && okMine.every((l) => l.key === KEY)
-    && mine.filter((l) => !l.ok).length === 1 && mine.find((l) => !l.ok).code === 'already_archived' && !audit.some((l) => /vsak_/.test(JSON.stringify(l))), mine);
+  check(`the audit: one ok line per verb for the coordinator (${okMine.map((l) => l.verb).join(', ')}) + the refused second resume (not_ended) and second archive (already_archived), names and ids only`,
+    JSON.stringify(okMine.map((l) => l.verb)) === JSON.stringify(['conversations.open', 'conversations.status', 'conversations.rename', 'conversations.bind', 'groups.invite', 'conversations.end', 'conversations.resume', 'conversations.end', 'conversations.archive']) && okMine.every((l) => l.key === KEY)
+    && JSON.stringify(mine.filter((l) => !l.ok).map((l) => l.code)) === JSON.stringify(['not_ended', 'already_archived']) && !audit.some((l) => /vsak_/.test(JSON.stringify(l))), mine);
   const spend = await until(() => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); return (j.budget && j.budget.identities && j.budget.identities[`automation:${KEY}`]) || null; } catch { return null; } }, 5000);
   check('the spend: ONE automation-open stamp charged to the key (automation:<keyId>)', Array.isArray(spend) && spend.length === 1 && spend[0].reason === 'automation-open', spend);
 

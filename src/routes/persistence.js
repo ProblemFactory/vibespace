@@ -577,6 +577,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   writeLayouts.note = noteLayout; // the ws handler's notes for the ring (a property: the ws ctx contract hands writeLayouts alone)
   router.flushLayouts = flushLayouts;
   router.readUserState = () => readUserState(); // TaskGroupManager one-time Groups migration
+  router.readLayouts = () => readLayouts(); // the manager design's piece 4: the resume verb names the desktop of a conversation's row — READ ONLY (the live cache)
   // lane peer-card-sender (③): ONE custom name set from the server (ws rename-session — an agent or a script renaming a
   // session) through the same store + broadcast the sidebar's own rename PATCHes; an unchanged name writes nothing
   router.setCustomName = (key, name) => {

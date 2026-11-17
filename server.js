@@ -408,7 +408,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta, patch
 // ── Boot restore (src/server/boot-restore.js, decomposition #7) ──
 // migrations + restoreSessions + R6 pipe re-open + keeper re-adoption.
 const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
-  readoptOrphanKeeperSessions, probeSockets, probeFacts, stoppedSessions, keepEnded, endFactsBefore, consumeKeptOf, // stoppedSessions: the kept metas read back (lane dead-socket-keeps-chat-meta); keepEnded: an end on purpose (lane end-obeys-verdict); consumeKeptOf: at a turn end (B-a5a4 (2))
+  readoptOrphanKeeperSessions, probeSockets, probeFacts, stoppedSessions, keepEnded, endFactsBefore, keptRecordOf, consumeKeptOf, // stoppedSessions: the kept metas read back (lane dead-socket-keeps-chat-meta); keepEnded: an end on purpose (lane end-obeys-verdict); keptRecordOf: one ended conversation's record (the resume verb reads it); consumeKeptOf: at a turn end (B-a5a4 (2))
 } = require('./src/server/boot-restore.js').create({
   rootDir: __dirname, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
@@ -1233,7 +1233,7 @@ const integrationsWiring = require('./src/server/integrations-wiring.js').create
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), drivePresets: () => require('./src/mounts').MountManager.drivePresets(),
 }); // created BEFORE the mounts-plugins wiring: the agent browser's key consumer (P4 §7.5) registers its Test runners with this store and the keeper resolves through it
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
-const { settingHolds, decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, bootEngineDistribution, pluginLoader,
+const { resumeRoad, settingHolds, decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, bootEngineDistribution, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
   app, server: hub, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, getJobs: () => jobsWiring.getJobs(),
   listSources: () => ({ autoResume, stashView, sysinfo, stoppedSessions }), // lane conversation-facts: conversations.list's in-memory sources // + lane jobs-browser: a job browses as its owner conversation // + agent browser P4 second half (§7.5): the key consumer's store
@@ -1313,7 +1313,7 @@ const wsApi = registerWsHandler(wss, {
   getExitProxy: () => { try { return exitProxy; } catch { return null; } }, // verify-r2 A3-r2 / ask-a: the kill path ends a dead conversation's pairs + asks
   USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, sendUserInput, getDesign: () => designEngine, setCustomName: (k, n) => persistenceRouter.setCustomName(k, n), /* lane peer-card-sender: rename-session → customNames */ // getDesign = the Design window's watch (design-watch / design-unwatch); telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1); sendUserInput = THE typing path (src/server/user-input.js), shared with the For-you reply route
 });
-const inboxReopen = require('./src/server/inbox-reopen.js').create({ getOpenConversation: () => wsApi && wsApi.convOps && wsApi.convOps.openConversation, activeSessions, readUserState: () => persistenceRouter.readUserState(), discover: async (key) => require('./src/routes/sessions').sessionRow(key) /* B-891e: one row, asked of the sweep's worker */, locate: (b, id, cwd) => { const h = require('./src/harnesses').get(b); return h && h.store && typeof h.store.locate === 'function' ? h.store.locate(id, cwd) : null; }, defaultsFor: (b) => ({ permission: harnessDeclares(b, 'defaultPermissionMode') ? String(harnessSetting(b, 'defaultPermissionMode') ?? '') : '', extraArgs: harnessDeclares(b, 'defaultExtraArgs') ? String(harnessSetting(b, 'defaultExtraArgs') ?? '') : '' }), taskFor: (key) => (tasks.list().find((g) => (g.sessions || []).includes(key)) || {}).id || null }); // a For-you reply to an ENDED conversation reopens it by the resume road (the ws create case, a headless creator) — lane inbox-reply-dead-session
+const inboxReopen = require('./src/server/inbox-reopen.js').create({ getOpenConversation: () => wsApi && wsApi.convOps && wsApi.convOps.openConversation, activeSessions, readUserState: () => persistenceRouter.readUserState(), discover: async (key) => require('./src/routes/sessions').sessionRow(key) /* B-891e: one row, asked of the sweep's worker */, locate: (b, id, cwd) => { const h = require('./src/harnesses').get(b); return h && h.store && typeof h.store.locate === 'function' ? h.store.locate(id, cwd) : null; }, defaultsFor: (b) => ({ permission: harnessDeclares(b, 'defaultPermissionMode') ? String(harnessSetting(b, 'defaultPermissionMode') ?? '') : '', extraArgs: harnessDeclares(b, 'defaultExtraArgs') ? String(harnessSetting(b, 'defaultExtraArgs') ?? '') : '' }), taskFor: (key) => (tasks.list().find((g) => (g.sessions || []).includes(key)) || {}).id || null }); if (resumeRoad) Object.assign(resumeRoad, { reopen: (item, o) => inboxReopen.reopen(item, o), kept: keptRecordOf }); // a For-you reply to an ENDED conversation reopens it by the resume road (the ws create case, a headless creator) — lane inbox-reply-dead-session; the manager design's piece 4: the resume verb's road (conversations.resume, through the one line) is the same create, and keptRecordOf the record it judges an ended conversation by
 
 // Billing identity for the card badge. Precedence: env-key spawn (definite) →
 // the CLI's OWN init statement (apiKeySource: 'none'=subscription OAuth,
@@ -1608,7 +1608,7 @@ probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(
   // host come back LIVE by themselves (no manual surgery). Runs even on a
   // zero-socket boot (the pod-recreation case restoreSessions early-returns
   // on); delayed off the boot critical path; probes are read-only ssh.
-  setTimeout(() => { readoptOrphanKeeperSessions().catch((e) => console.warn('[readopt] failed:', e.message)); }, 8000);
+  setTimeout(() => { Promise.resolve().then(() => readoptOrphanKeeperSessions()).catch((e) => console.warn('[readopt] failed:', e.message)).finally(() => { if (resumeRoad) resumeRoad.adopted(); }); }, 8000); // the manager design's piece 4 (R3, its cure round's must 5): the one resume line opens once the keepers' sessions too are ADOPTED — resolved or thrown alike
 
   // Orphan sweep — AGE-BASED (2.89.1). The activeSessions-keyed sweep was a
   // real data-loss race: a live dtach session the restore didn't re-adopt

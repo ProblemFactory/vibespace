@@ -301,14 +301,7 @@ export function inboxModel(app) {
   const openReopened = (r) => {
     const c = (r && r.conversation) || {};
     let row = null;
-    try {
-      for (const [winId, term] of [...app.sessions]) {
-        const spec = app.wm?.windows?.get(winId)?._openSpec;
-        if (spec && c.backendSessionId && (spec.backend || 'claude') === (c.backend || 'claude') && spec.backendSessionId === c.backendSessionId && term?.sessionId !== r.sessionId) {
-          if (!row) row = app._reopenWin(winId); else app._closeSecondView(winId, { backend: c.backend || 'claude', cid: c.backendSessionId }); // its row re-opened; any other is a second view (r3: the fence)
-        }
-      }
-    } catch { }
+    try { row = app._reopenRowOf(c, r.sessionId); } catch { }   // THE ROW LOOP, shared with the pages that follow a resume nobody pressed (session-lifecycle)
     const opts = { mode: 'chat', backend: c.backend || 'claude', backendSessionId: c.backendSessionId || undefined, hostId: c.hostId || undefined };
     try { if (row) app._attachInRow(row, r.sessionId, c.name || '', c.cwd || '', opts); else app.attachSession(r.sessionId, c.name || '', c.cwd || '', opts); }
     catch (e) { showToast(t('Could not open the conversation: {why}', { why: e.message }), { type: 'error' }); }

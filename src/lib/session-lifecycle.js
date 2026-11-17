@@ -934,9 +934,9 @@ export function installSessionLifecycle(App, ctx = {}) {
     return { set: (s) => { el.textContent = s; }, remove: () => el.remove() };
   },
 
-  attachSession(serverId, name, cwd, { mode, syncId, backend = 'claude', backendSessionId, hostId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, machine = false } = {}) {
+  attachSession(serverId, name, cwd, { mode, syncId, backend = 'claude', backendSessionId, hostId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, machine = false, quiet = false } = {}) {
     cwd = stripCwdHostLabel(cwd); // keep openSpec.cwd a REAL path — it persists into layouts and feeds later resumes
-    this._closeSidebarOnMobile();
+    if (!quiet) this._closeSidebarOnMobile();   // a QUIET attach (a page following a resume nobody pressed) leaves a phone's open sidebar as it is
     // If we already have a window for this session, show it (a replay / restore — `syncId` or `machine` — only raises it)
     if (this._focusExistingSession(serverId, { replay: !!(syncId || machine) })) return null;
     // AN OPEN RESOLVES TO THE WINDOW THIS PAGE HAS FIRST (r7 S — the r6 acceptance: with the conversation's window still attaching
@@ -973,6 +973,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       syncId,
       openSpec,
       titleMeta: this._buildTitleMeta(openSpec),
+      ...(quiet ? { quiet: true } : {}),   // the manager design, piece 4: a page following a resume nobody pressed — drawn, never focused (no apostrophe here: the window-types census reads this body)
     });
     (this._attachWins || (this._attachWins = new Map())).set(serverId, winInfo); // B-0cc8: the window this attach waits in
 
@@ -1049,7 +1050,7 @@ export function installSessionLifecycle(App, ctx = {}) {
             chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
           };
           winInfo._notifyChanged = () => this.updateTaskbar();
-          lateFocus(chatView);
+          if (!quiet || this.wm.activeWindowId === winInfo.id) lateFocus(chatView); // a QUIET attach never takes the keys (the caret stays where the person types)
         } else {
           // Terminal mode (existing)
           const term = new TerminalSession(winInfo, this.ws, serverId, this.themeManager, (fp, sp) => this._openExternalEditor(fp, sp), {}, this.settings);
@@ -1064,7 +1065,7 @@ export function installSessionLifecycle(App, ctx = {}) {
             setTimeout(() => { term.terminal.write(buf, () => { term._suppressWaiting = false; term._replaying = false; term.terminal.scrollToBottom(); term.fit(); }); }, 300);
           }
           this._wireTerminalWindow(winInfo, term, serverId, { backend });
-          lateFocus(term);
+          if (!quiet || this.wm.activeWindowId === winInfo.id) lateFocus(term); // a QUIET attach never takes the keys
         }
         return true;
       }
@@ -1077,10 +1078,13 @@ export function installSessionLifecycle(App, ctx = {}) {
         // ACKED ⇒ the server IS alive and working (the 2.234.1 lesson: "check
         // the connection or reload the tab" on a legitimately slow remote pull
         // is the misdiagnosis that made users reload and lose windows).
+        // a QUIET attach (nobody on this page pressed anything) says a slow attach to the log, never as a toast
         if (acked) {
+          if (quiet) { console.log(`[attach] "${name || serverId}" is still loading on a quiet follow`); return; }
           showToast(t('"{name}" is still loading — {host} may be slow. Leave the window open.', { name: name || serverId, host: hostName || t('the machine') }));
           return;
         }
+        if (quiet) { console.log(`[attach] "${name || serverId}" is taking unusually long on a quiet follow`); return; }
         showToast(t('Attaching "{name}" is taking unusually long — it may still be working; check the connection before reloading', { name: name || serverId }), { type: 'error' });
       },
       resend: true,
@@ -1247,6 +1251,58 @@ export function installSessionLifecycle(App, ctx = {}) {
 
   /** _reopenWin as a create's fields: the new window takes the row's id and place ({} — no such window). */
   _reopenedAs(winId) { const re = this._reopenWin(winId); return re ? { syncId: re.id, winBounds: re.place } : {}; },
+
+  /** THE ROW LOOP — ONE, shared (the manager design's piece 4: the For-you reply's reopen on the pressing page, and every page that
+   *  follows a resume nobody pressed): this page's windows of conversation `c` ({backend, backendSessionId}) that do not show session
+   *  `sessionId` — the first is its ROW, re-opened (_reopenWin: same id, place and desktop); any other is a second view, closed through
+   *  the fence. `endedOnly`: only a window that shows the conversation ENDED (a read-only view) — a live window, or a view somebody
+   *  opened of a RUNNING conversation, is not touched. → the row ({id, desk, place}) or null */
+  _reopenRowOf(c, sessionId, { endedOnly = false, carryZ = false } = {}) {
+    let row = null;
+    for (const [winId, term] of [...this.sessions]) {
+      const spec = this.wm?.windows?.get(winId)?._openSpec;
+      if (!spec || !c || !c.backendSessionId || (spec.backend || 'claude') !== (c.backend || 'claude') || spec.backendSessionId !== c.backendSessionId || term?.sessionId === sessionId) continue;
+      if (endedOnly && !(term && term._readOnly)) continue;
+      if (!row) {
+        const z = carryZ ? Number(this.wm.windows.get(winId)?.element?.style?.zIndex) || 0 : 0;   // a follow carries the row's stacking, never raises it
+        row = this._reopenWin(winId);
+        if (row && row.place && z > 0) row.place.zIndex = z;
+      } else this._closeSecondView(winId, { backend: c.backend || 'claude', cid: c.backendSessionId }); // its row re-opened; any other is a second view (r3: the fence)
+    }
+    return row;
+  },
+
+  /** THE PAGES FOLLOW (the manager design's piece 4, 主开发 2026-11-17): a conversation the live list newly shows RUNNING — resumed
+   *  by something no person pressed on this page (an agent's conversations.resume, later a delivery) — turns its ENDED window live
+   *  in ITS ROW on this page: the same window id, box, tab group and desktop, QUIETLY (drawn, never focused, no desktop switch).
+   *  No new frame: every page already receives the live list (sidebar `active-sessions`). The first list a page hears is its
+   *  baseline (a load's replay attaches what runs, existing); a resume THIS page has in flight is its own (the create's answer
+   *  opens it); no ended window here ⇒ no window is made (the hub never picks a desktop). → how many rows turned live */
+  _followResumed(sessions) {
+    const now = new Map();
+    for (const s of sessions || []) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && s.id) now.set(`${s.backend || 'claude'}:${cid}`, s); }
+    const before = this._liveConvKeys;
+    this._liveConvKeys = new Set(now.keys());
+    if (!before) return 0;
+    let n = 0;
+    for (const [key, s] of now) {
+      if (before.has(key)) continue;
+      const backend = s.backend || 'claude', cid = key.slice(key.indexOf(':') + 1);
+      if (this._pendingResumeWin && this._pendingResumeWin(backend, cid)) continue;   // this page's own resume: its create's answer opens it
+      try {
+        const shown = this.wm?.activeWindowId ?? null;   // the person's active window: it stays the active one
+        const row = this._reopenRowOf({ backend, backendSessionId: cid }, s.id, { endedOnly: true, carryZ: true });
+        if (!row) continue;
+        // ALWAYS QUIET (no sidebar closed, no toast, no caret taken); when the ended row WAS the active window, ONE separate step gives
+        // it the focus back — only the focus — as the person's own resume does (its attach then lets the caret in: the window is active)
+        const wasShown = shown != null && String(row.id) === String(shown);
+        const win = this._attachInRow(row, s.id, s.name || '', s.cwd || '', { mode: s.mode || 'chat', backend, backendSessionId: cid, hostId: s.host || undefined, quiet: true });
+        if (wasShown && win) this.wm.revealWindow(win.id);   // give the focus back — THE door that reveals a window as itself (§62)
+        n++;
+      } catch (e) { console.warn('[pages-follow] a resumed conversation\'s row did not turn live:', e); }
+    }
+    return n;
+  },
 
   /** A CONVERSATION LIVE ELSEWHERE IS ATTACHED, NEVER RE-CREATED (r2 N2): row `re` (a _reopenWin result, or a held row's {id, desk,
    *  place}) shows live session `serverId` as itself — same id, its carried place. A page that already shows that session live

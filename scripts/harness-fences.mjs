@@ -345,6 +345,21 @@ export const ROW_KINDS = Object.freeze([
     },
   },
   {
+    // the manager design's piece 4 (its cure round): an agent's resume starts NO turn nobody pressed only on a harness that has
+    // DECLARED what its resume does by itself — 'nothing' (read to start nothing) or 'goal' (it continues an active goal); a
+    // row that declares neither is refused by the verb (harness_unread), so a new descriptor declares it here, READ from its wrapper
+    kind: 'resume-continues', file: 'src/backend-caps.js',
+    applies: (n, ctx) => ctx.builtin.includes(n.id),
+    rowOf(n, text) { const a = text.indexOf(`\n  ${n.id}: {`); if (a < 0) return null; const b = text.indexOf('\n  },', a); return b < 0 ? null : { a, b, body: text.slice(a, b) }; },
+    row: (n) => `    resumeContinues: 'goal', // TODO READ ${n.label}'s wrapper: does a resume with NOTHING sent start a turn by itself? 'goal' (it continues an active goal) | 'nothing' (read to start nothing)\n`,
+    check(n, ctx) {
+      const r = this.rowOf(n, ctx.read(this.file) || '');
+      if (!r) return [];   // no capability row yet: the caps table is an id-keyed fence site the lane writes by judgment (the census names it)
+      return /\n {4}resumeContinues: '(nothing|goal)',/.test(r.body) ? [] : [{ file: this.file, row: `${n.id}'s capability row declares resumeContinues: 'nothing' | 'goal' — what a resume with nothing sent starts by itself, READ from its wrapper (undeclared: the resume verb refuses it, harness_unread)` }];
+    },
+    insert(n, text) { const r = this.rowOf(n, text); if (!r) throw new Error(`the ${n.id} capability row not found`); const i = text.indexOf('\n', r.a + 1) + 1; return text.slice(0, i) + this.row(n) + text.slice(i); },
+  },
+  {
     kind: 'registry-require', file: 'src/harnesses/index.js',
     applies: (n, ctx) => ctx.builtin.includes(n.id),
     row: (n) => `require('./${n.id}')`,

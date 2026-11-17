@@ -402,6 +402,9 @@ function deriveInputModes(row) {
 const NO_SIDECAR_FACTS = Object.freeze({ background: false, timers: false, lastRecordAt: false });
 const BACKEND_CAPS = {
   claude: {
+    // RESUME CONTINUES (the manager design's piece 4, 主开发 2026-11-17): may a resume with NOTHING sent start a turn by itself?
+    // 'goal' = it continues an active goal; 'nothing' = read to start nothing. the CLI's native /goal continues only from its Stop hook after a turn ENDS (data/bin/chat-wrapper.js:1047–1050, 1379–1383) — READ, not measured
+    resumeContinues: 'nothing',
     pool: true,
     hotSwitch: 'verified',
     // THE MEASUREMENT BEHIND 'verified' (lane-hot-switch, 2026-09-30): fake
@@ -493,6 +496,9 @@ const BACKEND_CAPS = {
     sidecarFacts: Object.freeze({ background: true, timers: true, lastRecordAt: true }), // data/bin/chat-wrapper.js keeps all three (essay at NO_SIDECAR_FACTS)
   },
   codex: {
+    // RESUME CONTINUES (the manager design's piece 4, 主开发 2026-11-17): may a resume with NOTHING sent start a turn by itself?
+    // 'goal' = it continues an active goal; 'nothing' = read to start nothing. a thread resumed with an ACTIVE goal continues it by itself (data/bin/codex-chat-wrapper.js:1531–1536, «Codex design») — READ, not measured
+    resumeContinues: 'goal',
     pool: true,
     hotSwitch: 'impossible',
     hotSwitchEvidence: null, // the 2026-08-24 P3 experiment (above) predates the record form; 'impossible' grants nothing
@@ -550,6 +556,9 @@ const BACKEND_CAPS = {
     sidecarFacts: NO_SIDECAR_FACTS, // its wrapper keeps none of them yet (essay at NO_SIDECAR_FACTS)
   },
   shell: {
+    // RESUME CONTINUES (the manager design's piece 4, 主开发 2026-11-17): may a resume with NOTHING sent start a turn by itself?
+    // 'goal' = it continues an active goal; 'nothing' = read to start nothing. a login shell: no agent, no turn
+    resumeContinues: 'nothing',
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false,
     forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     checkpoints: NO_CHECKPOINTS, // terminal-only: no conversation to rewind
@@ -577,6 +586,9 @@ const BACKEND_CAPS = {
   // claude flag — so review/renameWriteback/forkAtMessage stay false until a
   // PROBE proves otherwise (setVerifiedCap is how `fork` flips), never guessed.
   opencode: {
+    // RESUME CONTINUES (the manager design's piece 4, 主开发 2026-11-17): may a resume with NOTHING sent start a turn by itself?
+    // 'goal' = it continues an active goal; 'nothing' = read to start nothing. its wrapper (acp-wrapper.js) has no goal and no continue on resume — READ, not measured
+    resumeContinues: 'nothing',
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     checkpoints: NO_CHECKPOINTS, // its revert puts the FILES back with the messages — no conversation-only rewind (essay at NO_CHECKPOINTS)
     streamProtocol: 'acp-events',
@@ -630,6 +642,9 @@ const BACKEND_CAPS = {
   // settle), never declared by hand. steerJoinsTurn:false — its steer is a stop + a new turn, so a notification for a
   // busy agy takes the 'queue' lane (its own billed turn after this one, charged when written), never 'steer' (free).
   antigravity: {
+    // RESUME CONTINUES (the manager design's piece 4, 主开发 2026-11-17): may a resume with NOTHING sent start a turn by itself?
+    // 'goal' = it continues an active goal; 'nothing' = read to start nothing. agy-wrapper.js has no goal and no continue on resume — READ, not measured
+    resumeContinues: 'nothing',
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     checkpoints: NO_CHECKPOINTS, // no programmatic rewind door (essay at NO_CHECKPOINTS)
     streamProtocol: 'acp-events',
@@ -657,7 +672,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ sidecarFacts: NO_SIDECAR_FACTS, modelFacts: false, terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, checkpoints: NO_CHECKPOINTS, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
+const NO_CAPS = Object.freeze({ resumeContinues: 'unread', sidecarFacts: NO_SIDECAR_FACTS, modelFacts: false, terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, checkpoints: NO_CHECKPOINTS, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed

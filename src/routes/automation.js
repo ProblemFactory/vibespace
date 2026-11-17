@@ -54,6 +54,13 @@ const WORDS = Object.freeze({
   maintainer_key_scope: 'the maintainer key opens the two feedback verbs only (feedback.list, feedback.handled)',   // lane fleet-feedback-marks
   maintainer_key_unknown: 'this instance does not know that maintainer key',
   session_only: 'only a conversation uses automation keys (a job does not, yet)',
+  // the manager design's piece 4 (conversations.resume) — the answer's `why` says which and the door
+  not_ended: 'that conversation is running', archived: 'that conversation is archived',
+  needs_a_page: 'that conversation resumes only in a window a person opens',
+  goal_active: 'resuming it could start a billed turn nobody pressed', timer_marked: 'resuming it could start a billed turn nobody pressed',
+  goal_unknown: 'resuming it could start a billed turn nobody pressed', queue_kept: 'resuming it could start a billed turn nobody pressed', queue_unknown: 'resuming it could start a billed turn nobody pressed',
+  harness_unread: 'that harness has not declared what its resume does', line_full: 'the resume line is full for this key',
+  resume_failed: 'the conversation did not start',
   human_only: 'only a person mints, grants, revokes or answers — an agent never writes a grant',
   cross_site: 'these doors answer this instance\'s own page only',
   unauthorized: 'missing or unknown session token', not_found: 'not found', not_ready: 'the server is still starting — try again in a moment', failed: 'it failed',

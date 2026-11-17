@@ -437,7 +437,11 @@ function beltRow(r) {
 const OPEN_ID_WAIT_MS = 20 * 1000;     // a claude CLI reports its conversation id within seconds of the spawn
 const BUSY_TURNS = ['running', 'waiting'];   // turn-facts' non-idle states: mid-turn, or paused on the user (requires_action)
 function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, waitMs = OPEN_ID_WAIT_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
-  archive = null, asksOf = () => [], resolveAsks = () => ({ changed: [], unknown: [] }), turnOf = () => 'idle', deadOf = () => null, listFacts = null } = {}) {
+  archive = null, asksOf = () => [], resolveAsks = () => ({ changed: [], unknown: [] }), turnOf = () => 'idle', deadOf = () => null, listFacts = null,
+  // the manager design's piece 4 (conversations.resume): the hub's one line of resumes nobody pressed (src/server/resume-line.js), an
+  // ended conversation's kept facts ({goal, timerMark, mode, cwd, hostId}), the archived list, its harness's row (src/resume-line.js
+  // harnessRowOf: {resumeContinues, headless}), and the desktop of the row that shows it (or null — the hub never picks one)
+  resumeLine = null, resumeFactsOf = () => null, isArchived = () => false, resumeRowOf = () => ({ resumeContinues: 'unread', headless: false }), rowDesktopOf = () => null } = {}) {
   const O = () => ops || sharedOps;
   const idOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const keyOf = (s) => { const cid = idOf(s); return cid ? `${(s && s.backend) || 'claude'}:${cid}` : null; };
@@ -602,6 +606,43 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       const keys = new Set(rows.map((r) => r.key).filter(Boolean));
       const browsers = Array.isArray(snap.browsers) ? snap.browsers.filter((b) => !Array.isArray(b.holders) || !b.holders.length || b.holders.some((k) => keys.has(k))) : null;
       return { ok: true, at: snap.at, machine: snap.machine, desktops: snap.desktops, ...(snap.desktopsWhy ? { desktopsWhy: snap.desktopsWhy } : {}), conversations: rows, browsers, ...(browsers ? {} : { browsersWhy: snap.browsersWhy || 'not collected' }), beyondReach: beyond, pass: snap.pass };
+    },
+    // THE MANAGER DESIGN'S PIECE 4: resume an ENDED conversation the way a person's Resume press does — the page's own resume road
+    // run headless (src/server/inbox-reopen.js reopen, through the one line), NOTHING sent into it and nothing billed (a person's
+    // create: no spend row). A resume nobody pressed must not start a turn nobody pressed (主开发 02:23Z): from the conversation's
+    // KEPT RECORD it refuses by name an active goal, a CLI timer mark, and — on a harness whose resume continues a goal by itself
+    // (its declared row) — a goal the record cannot speak for (src/resume-line.js resumeVerdict). Not conversations.open: the
+    // open spec stays closed.
+    'conversations.resume': async (args, ctx) => {
+      const { reach } = ctx;
+      const note = 'background tasks it had started ended with its process, and the resume does not restart them; nothing was sent to it';
+      const hit = findSession(args.target);
+      if (hit) {   // NOT ENDED: refused by name (a resume that RACED a person's press answers `already` below — inbox-reopen's road)
+        const [s, id] = hit;
+        const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id) });
+        if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || args.target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // ONE shape for a live and an ended conversation
+        const key = keyOf(s);
+        return { ok: false, code: 'not_ended', why: 'there is nothing to resume — message it instead (its link is in this answer)', target: idOf(s) || id, sessionKey: key, sessionId: id, link: key ? `vibespace://conversation/${key}` : null };
+      }
+      let d = null; try { d = deadOf(args.target); } catch { d = null; }
+      if (!d || !d.conversationId) return { ok: false, code: 'not_found', why: 'no conversation by that id — live, or ended on this machine', target: args.target || null };
+      const label = d.name || args.target;
+      const v = reach({ conversationId: d.conversationId, webuiId: null, groups: Array.isArray(d.groups) ? d.groups : [] });
+      if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v && v.reach ? { reach: v.reach } : {}) };
+      const backend = d.sessionKey.slice(0, d.sessionKey.indexOf(':')) || 'claude';
+      let facts = null; try { facts = (await resumeFactsOf(d.sessionKey)) || null; } catch { facts = null; }
+      let archived = false; try { archived = !!isArchived(d.sessionKey); } catch { archived = false; }
+      let row = null; try { row = resumeRowOf(backend) || null; } catch { row = null; }
+      const verdict = require('../resume-line.js').resumeVerdict({ ...(facts || { goal: 'unknown', timerMark: null, mode: null }), archived }, row || { resumeContinues: 'unread', headless: false });
+      if (!verdict.ok) return { ok: false, code: verdict.code, why: verdict.why, target: label };
+      if (!resumeLine) return { ok: false, code: 'not_ready', why: 'the resume line is not wired yet' };
+      const q = resumeLine.submit({ target: d.sessionKey, by: ctx.keyId, payload: { cwd: (facts && facts.cwd) || '', hostId: (facts && facts.hostId) || null, actBy: `automation:${ctx.keyId}` } });
+      if (!q.ok) return { ok: false, code: q.code, why: `${q.count} of this key's resumes wait their turn — ask again once one of them has started (conversations status names it live)`, count: q.count, target: label };
+      const base = { target: d.conversationId, sessionKey: d.sessionKey, link: `vibespace://conversation/${d.sessionKey}`, desktop: (() => { try { return rowDesktopOf(d.sessionKey) || null; } catch { return null; } })(), note };
+      if (q.position > 0) return { ok: true, queued: true, position: q.position, next: `conversations status ${d.sessionKey} answers once it runs; asking again keeps its place`, ...base };
+      const r = await q.result;
+      if (!r || !r.ok) return { ok: false, code: 'resume_failed', why: `${(r && r.why) || 'the create gave no reason'} — a person can resume it from its window`, target: label };
+      return { ok: true, sessionId: r.sessionId, ...(r.already ? { already: true } : {}), ...base };
     },
     'groups.invite': async (args, ctx) => {
       const t = reached(args.target, ctx);

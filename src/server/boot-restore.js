@@ -479,6 +479,14 @@ async function consumeKept(key) {
   fs.unlink(keptFile(e.sockFile), () => { });
   return true;
 }
+/** THE KEPT RECORD of an ended conversation (the manager design's piece 4 — its READER; piece 3 owns the writer of an end's
+ *  record): `backend:id` → {sockFile, meta, id} or null — this boot's copy and, loaded once, the earlier boots'. The resume verb
+ *  judges it (src/server/resume-line.js keptFacts): what the record does not state is UNKNOWN. */
+async function keptRecordOf(key) {
+  await loadKept();
+  const e = keptStopped.get(String(key || ''));
+  return e ? { sockFile: e.sockFile, meta: e.meta, id: e.id } : null;
+}
 async function stoppedSessions() {
   await loadKept();
   const live = new Set(); // the conversations live sessions ADDRESS (addressableId: a pending fork addresses none — r2)
@@ -1196,7 +1204,7 @@ async function readoptOrphanKeeperSessions() {
     readoptOrphanKeeperSessions, probeSockets, probeFacts, reprobePending, probePending: () => new Map([...pendingProbes].map(([f, p]) => [f, [...p.q]])),
     stoppedSettled: () => Promise.all([...settling]), // the kept metas' transcript answers (settleStopped) — a test's wait
     keepEnded, endFactsBefore, consumeKept, // lane end-obeys-verdict: the ONE end record — its one read before the kill, its writer, its consume
-    stoppedSessions, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js)
+    stoppedSessions, keptRecordOf, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js); one conversation's record (the resume verb — piece 4 reads it)
     consumeKeptOf }; // B-a5a4 (2): a turn ended on a live session — its conversation's kept copy goes at once (server.js noteTurnEnd)
 }
 /** THE ONE CREATE ROAD's consume (the one end record's contract): src/ws-create.js calls it the moment a create made a conversation

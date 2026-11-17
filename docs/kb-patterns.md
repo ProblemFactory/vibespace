@@ -97,6 +97,23 @@ No permanent `requestAnimationFrame` loop, not even a cheap one. A loop that onl
 A placement that lands where it stands writes nothing, and nothing tracks while its feature is off. Measured: the follower's 4-Hz timer with 31 `elementsFromPoint` a pass took a third to a half of a scratch page's main thread while two hidden chats streamed. On the owner's page that is 335 ms a pass, and their keys arrived in batches 318 ms apart.
 Pinned: test-voice-follow-chrome ⑦ (0 placements and 0 forced layouts in 5 s with nothing moving); test-desktop-small-chrome ⑧ (a close's toast: 0 hit tests); test-user-todos-layout (the chrome rule and the announce's step-aside: 0 hit tests).
 
+### A page follows what the hub did without a person (the manager design's piece 4, 2026-11-17)
+When something no person pressed on THIS page changes a conversation — an agent's `conversations.resume` now, a delivery that
+resumes its addressee later — every page follows it from what it ALREADY receives (the live list, sidebar.js `active-sessions`),
+never from a new frame and never from a server-side layout write. The rules:
+- **In its row, as itself.** A window that shows the conversation ENDED (read-only) turns live under the same window id, box,
+  tab group and desktop, through THE row loop (session-lifecycle `_reopenRowOf`, shared with the For-you reply's reopen — never a
+  copy) and `_attachInRow`. No row on this page ⇒ no window: the hub never picks a desktop.
+- **Quietly — nothing a person sees or feels changes but the row's state.** `createWindow({quiet: true})` (the asked-quiet open)
+  and attachSession's own late focus guarded the same way (the caret stays where the person types); the row's stacking CARRIED,
+  never raised; a phone's open sidebar left open; a slow attach said to the log, never a toast. When the ended row WAS the active
+  window, the follow stays quiet and only gives it the focus back (one separate step), as the person's own resume does.
+- **Only what it can tell apart.** The first list a page hears is its baseline (a load's replay attaches what runs); a resume
+  this page has in flight is its own (`_pendingResumeWin` — its create's answer opens it); a live view somebody opened on
+  purpose is not touched (`endedOnly`).
+- **No ping-pong.** The re-key is not a person's change: at most one layout-sync per page for it, none after it settled.
+- A person's press is never paced by, or waits on, what the hub does for an agent: the one resume line paces resumes NOBODY PRESSED; a person's resumes are paced by the page.
+
 ### A card's doors in the chat (lane card-door-in-chat, 2026-11-07 — the owner on a ⤓ that said «已复制！»: «这个按钮怎么是复制？！»)
 A door drawn inside a chat does what its icon says. The chat's link delegation (click = copy, Ctrl/⌘+click = open, right-click / tap = Open + Copy) acts on the chat's OWN links only: a `.chat-link` span its linkify drew, a BARE `<a href>` in its text. The one verdict is `chatLinkOf(target)` in src/lib/card-doors.js, and both delegations ask it. A card that draws an anchor into the chat gives it a class: safe-html keeps no class on what somebody else wrote, so a classed anchor is always ours, and the delegation leaves it to its card. Never re-implement the boundary with a per-card `stopPropagation`; it works only for a handler on that anchor, and the ⤓ had none. Census: test-path-linkify ⑩ (the real delegation over each card kind's door + a static census of the anchor sites in the modules that draw cards into the chat), test-channel-outbox (the verdict over every element of the real Outbox card).
 

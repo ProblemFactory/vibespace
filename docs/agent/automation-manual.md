@@ -68,6 +68,7 @@ vibespace-api call conversations.rename --name "Worker 2" --target <conversation
 | `conversations.rename` | `name`, `target?` | no |
 | `conversations.bind` | `target`, `task` (a Task Group this conversation is in) | no |
 | `conversations.end` | `target`, `force?` — refused (`subject_busy` with `busy:[{code, why}]`, nothing stopped) while the conversation is busy or a fact is unknown (the reasons of conversations.list's `busy`); `force` passes only for a conversation THIS key opened (`force_not_yours` otherwise). A terminal conversation, or one whose harness reports too little, answers `person_only` — only a person can end it (do not retry), unless this key opened it (or it is the caller itself): both refusals then name `force`. conversations.archive asks the SAME gate. A person's door: the conversation's card in the sidebar, Terminate in its menu. The ended conversation keeps a stopped record: reason ended, who, when | no |
+| `conversations.resume` | `target` — an ENDED conversation, resumed the way a person's Resume press does: nothing is sent into it | no |
 | `conversations.archive` | `target`, `force?`, `resolveAsks?` — ends it if still live, then archives it exactly as the sidebar's 归档 does (the owner's list no longer shows it); a running turn ⇒ `subject_busy` unless `force`; its open For-you asks ⇒ `asks_open` (their ids) unless `resolveAsks` dismisses them; archived already ⇒ `already_archived` | no |
 | `conversations.list` | none — one snapshot: the machine's memory, the desktops, every conversation and running browser the key reaches (this conversation marked `self`; the rest only counted, `beyondReach`). Each row: `key`, state, turn, background tasks, held prompts, CLI timers, open asks, goal, armed continue, jobs, waiting notices, browser, desktop, idle age, memory, `busy` + `endable` (the end verdict), `link`. A fact the hub cannot know is `null` with a `<fact>Why` sentence — never 0, never idle; an unknown fact counts as busy | no (a read) |
 | `groups.invite` | `group`, `target` (an agent group this conversation is in; added without a wake) | no |
@@ -97,6 +98,7 @@ vibespace-api conversations status <target>
 vibespace-api conversations rename <target> "<name>"
 vibespace-api conversations bind <target> <T-…>
 vibespace-api conversations end <target> [--force]
+vibespace-api conversations resume <target>
 vibespace-api conversations archive <target> [--force] [--resolve-asks]
 vibespace-api groups invite <g-…|group name> <target>
 vibespace-api list [--json]          conversations.list as a table sorted by memory («unknown (<why>)» where the hub cannot know)
@@ -125,6 +127,35 @@ vibespace-api list [--json]          conversations.list as a table sorted by mem
 
   Example: `vibespace-api: that folder is outside this key's folders: "/etc" is outside this key's folders (/var/tmp/lanes) (cwd_outside_roots)`
   then `  this key's limits: folders /var/tmp/lanes (with subfolders) · accounts pool-… · permission modes default, bypassPermissions · models any · modes chat` (exit 1).
+
+**Resuming an ended conversation.** `conversations resume <target>` starts an ended conversation again, the way a person's
+Resume press does: the same conversation, with its own saved settings. Nothing is sent into it and nothing is billed: it waits
+for its next message. The background tasks it had started ended with its process, and the resume does not restart them (the
+answer's `note` says so).
+
+- The answer: `sessionId`, `sessionKey`, `link`, and `desktop` (`{id, name}` of the desktop that shows it, or `null` when no
+  window on this instance shows it). Pages that show the conversation as ended turn that window live in its place, quietly.
+- `link` (`vibespace://conversation/<key>`) opens the conversation on the person's page: put it in a message to the person when
+  they should look at it.
+- `already: true`: a person (or another page) resumed it at the same moment. It is live; your call started nothing more.
+- The line paces the resumes NOBODY PRESSED (yours, and other agents'); a person's own resumes never wait on it. At most two
+  start at a time. A later one answers at once with `queued: true`, its `position` and `next`: `conversations status <key>`
+  answers once it runs. Asking again keeps its place (it never starts twice); once it runs, the answer is `not_ended`.
+- Ten of this key's resumes already waiting ⇒ `line_full` with the count: ask again once one of them has started.
+- The CLI waits for a resume at the head of the line as it waits for an open. If it gives up first, the resume goes on: ask
+  again.
+- It refuses by name, and nothing starts:
+  - `not_ended`: it is running. Message it instead.
+  - `archived`: it is archived.
+  - `needs_a_page`: it ran in a terminal window, or its harness has no chat. A person resumes it from its window.
+  - `harness_unread`: its harness has not declared what its resume does by itself.
+  - `goal_active`, `goal_unknown`: resuming it could start a billed turn nobody asked for. The record of its last end shows an
+    active goal; or it does not state the goal, and its harness (codex) continues a goal by itself.
+  - `queue_kept`, `queue_unknown`: messages still wait in its thread's queue (codex) — or its record does not say the queue was
+    read — and a resume could run them.
+  - `timer_marked`: reserved for a CLI timer mark; nothing writes that mark yet.
+  - `resume_failed`: the start itself failed; the answer gives the reason (a signed-out account, no transcript here, …).
+  - After each of these refusals a person can still resume it from its window.
 
 **Opening a worker (the coordinator's road):**
 
@@ -161,6 +192,7 @@ To send the person to a conversation or a desktop, put its link in your reply �
 | `session_only` | a background job's token was used — only conversations use automation keys for now |
 | `spend_refused` (429) | the spend ceiling is full — `bucket` names it (`hour-cap`, `day-cap`, `instance-cap`, …), `retryAfter` when it frees; nothing was opened |
 | `pending` (409) | the conversation has not reported its id yet — poll `conversations status` |
+| `not_ended` / `archived` / `needs_a_page` / `harness_unread` / `goal_active` / `timer_marked` / `queue_kept` / `queue_unknown` / `goal_unknown` (409), `line_full` (429), `resume_failed` (503) | a resume refused — see «Resuming an ended conversation» |
 | `subject_busy` / `asks_open` / `already_archived` (409) | an archive met a running turn (`--force` ends it anyway) / the target's open For-you asks (the answer lists their ids; `--resolve-asks` dismisses them) / a conversation already archived |
 | `bad_args` / `unknown_field` / `bad_cwd` / `bad_name` / `bad_model` / `bad_effort` / `bad_permission_mode` / … | the argument it names is malformed or not allowed |
 | `cwd_outside_roots` / `account_not_allowed` / `permission_not_allowed` / `model_not_allowed` / `mode_not_allowed` (403) | an open outside its key's limits (the table under «The typed verbs») — nothing was charged or opened; the answer prints the key's limits |
