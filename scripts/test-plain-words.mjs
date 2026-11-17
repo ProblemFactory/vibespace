@@ -250,5 +250,30 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   ok(/el\('span', 'brp-action-label', actionWords\(e\)/.test(rw) && /\{ title: timelineLabel\(e\) \}/.test(rw), 'the step label is the words; the CLI\'s line is its tooltip');
 }
 
+// ── pick 5 (M4): a dialog's button says what it does — no showConfirmDialog / showInputDialog call leans on the default «OK».
+// A call names `confirmText:`, or spreads a words object (`...words`) whose builder names it (each builder below pinned by
+// its own source) ──
+{
+  console.log('the dialog buttons say what they do');
+  const callsOf = (src) => { const out = []; const re = /show(?:Confirm|Input)Dialog\(/g; let m;
+    while ((m = re.exec(src))) { let i = m.index + m[0].length, d = 1, q = null;
+      for (; i < src.length && d > 0; i++) { const c = src[i]; if (q) { if (c === '\\') { i++; continue; } if (c === q) q = null; continue; }
+        if (c === "'" || c === '"' || c === '`') q = c; else if ('({['.includes(c)) d++; else if (')}]'.includes(c)) d--; }
+      out.push({ at: src.slice(0, m.index).split('\n').length, call: src.slice(m.index, i) }); }
+    return out; };
+  const files = execFileSync('git', ['-C', REPO, 'ls-files', 'src']).toString().split('\n').filter((f) => f.endsWith('.js') && !/i18n-|utils\.js$/.test(f));
+  const bare = [];
+  for (const f of files) { const src = fs.readFileSync(path.join(REPO, f), 'utf8'); if (!/show(?:Confirm|Input)Dialog\(/.test(src)) continue;
+    for (const c of callsOf(src)) if (!/confirmText\s*:/.test(c.call) && !/\.\.\./.test(c.call) && !/^show\w+Dialog\(\s*\)$/.test(c.call)) bare.push(`${f}:${c.at}`); }
+  ok(!bare.length, 'every confirm / input dialog names its button (confirmText) — none falls back to «OK»', bare);
+  const BUILDERS = { 'src/lib/browser-build-model.js': ['downloadConfirmWords', 'removeConfirmWords'], 'src/lib/browser-cli-model.js': ['cliConfirmWords'], 'src/lib/pool-priority-model.js': ['gatherConfirmWords'] };
+  const loose = [];
+  for (const [f, names] of Object.entries(BUILDERS)) { const src = fs.readFileSync(path.join(REPO, f), 'utf8');
+    for (const n of names) { const i = src.indexOf(`export function ${n}(`); const body = i < 0 ? '' : src.slice(i, src.indexOf('\n}\n', i)); if (!/confirmText\s*:/.test(body)) loose.push(`${f} ${n}`); } }
+  ok(!loose.length, `the spread words builders name their button (${Object.values(BUILDERS).flat().length})`, loose);
+  const planted = "showConfirmDialog({ title: t('Remove account'), message: msg })";
+  ok(callsOf(planted).length === 1 && !/confirmText\s*:/.test(callsOf(planted)[0].call), 'CONTROL: a planted call without confirmText is seen as bare');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

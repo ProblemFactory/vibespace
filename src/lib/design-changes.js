@@ -205,7 +205,7 @@ export function mountDesignChanges(ctx) {
   function composer(box, foot, ta) {
     const add = mk('button', 'btn-cancel design-changes-add');
     add.type = 'button';
-    add.textContent = t('Add');
+    add.textContent = t('Add to the changes'); // lane ui-plain-words design-doc-13: the UI's own noun, beside «Send this now»
     add.title = t('Add to the changes — send them all at once');
     foot.insertBefore(add, foot.lastElementChild); // Cancel · Add · Send
     add.addEventListener('click', () => addComment(ta));

@@ -1105,7 +1105,7 @@ export function installSidebarRail(Sidebar) {
                 // fixed-subdomain choice (2.358.0, owner request): blank keeps
                 // the prior/random one; only HTTP backends ride subdomains
                 const { showInputDialog } = await import('./utils.js');
-                const sub = await showInputDialog({ title: tr('Publish to the internet'), label: tr('Subdomain (optional — blank = keep previous or random)'), value: f.publicSub || '', placeholder: 'myapp' });
+                const sub = await showInputDialog({ title: tr('Publish to the internet'), confirmText: tr('Publish'), label: tr('Subdomain (optional — blank = keep previous or random)'), value: f.publicSub || '', placeholder: 'myapp' });
                 if (sub === null) return; // cancelled
                 body = JSON.stringify({ sub: sub.trim() });
               }
@@ -1127,7 +1127,7 @@ export function installSidebarRail(Sidebar) {
                 if (r?.error) showToast(r.error, { type: 'error' });
               } else {
                 const { showInputDialog } = await import('./utils.js');
-                const name = await showInputDialog({ title: tr('Mount under this domain'), label: tr('Path name → /svc/<name>/ (apps must tolerate a URL prefix — vite base, jupyter base_url, code-server do)'), value: (svcM && svcM[1] !== CLEARED_TEXT ? svcM[1] : '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, ''), placeholder: 'myapp' });
+                const name = await showInputDialog({ title: tr('Mount under this domain'), confirmText: tr('Mount'), label: tr('Path name → /svc/<name>/ (apps must tolerate a URL prefix — vite base, jupyter base_url, code-server do)'), value: (svcM && svcM[1] !== CLEARED_TEXT ? svcM[1] : '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, ''), placeholder: 'myapp' });
                 if (name === null || !name.trim()) return;
                 const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/path`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
                 if (r?.error) showToast(r.error, { type: 'error' });

@@ -749,7 +749,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   // ── image: the house input dialog; only what the view may carry (safeImageSrc) ──
   async function insertImage() {
     if (!S.ed || S.mode !== 'rich') return;
-    const src = ((await showInputDialog({ title: t('Image'), label: t('An image address, or a path beside this file'), placeholder: 'img/figure.png' })) || '').trim();
+    const src = ((await showInputDialog({ title: t('Image'), confirmText: t('Insert'), label: t('An image address, or a path beside this file'), placeholder: 'img/figure.png' })) || '').trim();
     if (!src || !S.ed) return;
     if (!safeImageSrc(src)) { say(t('Not an image this document can carry: {url}', { url: src })); return; }
     S.ed.chain().focus().setImage({ src, alt: '' }).run();

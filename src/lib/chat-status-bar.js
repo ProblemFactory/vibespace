@@ -1537,7 +1537,7 @@ export class ChatStatusBar {
     const vis = document.createElement('button');
     vis.className = 'btn-cancel';
     const paint = () => {
-      vis.textContent = p.public ? t('Public') : t('Private');
+      vis.textContent = p.public ? t('Public · make private') : t('Private · make public'); // lane ui-plain-words design-doc-2: the state, then what the press does
       vis.title = p.public ? t('Anyone with the link can view — click to make private') : t('Viewers must be logged in — click to make public');
     };
     paint();

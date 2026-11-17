@@ -1226,7 +1226,7 @@ export function installManageAgents(App, ctx = {}) {
     const oatEscape = () => {
       if (!live()) return true; // nothing running: the shell's door (the guard asks for a pasted token)
       (async () => {
-        if (!(await showConfirmDialog({ title: t('Cancel the sign-in?'), message: t('The sign-in for “{name}” is still running. Cancel it?', { name }), danger: true }))) return;
+        if (!(await showConfirmDialog({ title: t('Cancel the sign-in?'), confirmText: t('Stop the sign-in'), message: t('The sign-in for “{name}” is still running. Cancel it?', { name }), danger: true }))) return;
         await mintApi(`/${encodeURIComponent(mint.id)}`, { method: 'DELETE' }).catch(() => null);
         shut();
       })();
@@ -1272,7 +1272,7 @@ export function installManageAgents(App, ctx = {}) {
     }
     const rm = body.querySelector('#oat-remove');
     if (rm) rm.onclick = async () => {
-      if (!(await showConfirmDialog({ title: t('Remove token'), message: t('Remove the long-lived token from “{name}”? Machines relying on it lose access at their next spawn (running sessions keep working).', { name }) }))) return;
+      if (!(await showConfirmDialog({ title: t('Remove token'), confirmText: t('Remove'), message: t('Remove the long-lived token from “{name}”? Machines relying on it lose access at their next spawn (running sessions keep working).', { name }) }))) return;
       const r = await fetchJson(`/api/accounts/${enc}/oat`, { method: 'DELETE' });
       if (!r?.success) { showToast(r?.error || t('Remove failed'), { type: 'error' }); return; }
       showToast(t('Removed')); shut(); refresh?.();
@@ -2165,7 +2165,7 @@ export function installManageAgents(App, ctx = {}) {
         }
       };
       const doDelete = async () => {
-        if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: a?.name }) }))) return;
+        if (!(await showConfirmDialog({ title: t('Remove account'), confirmText: t('Remove'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: a?.name }) }))) return;
         try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(t('Removed “{name}”', { name: a?.name || '' })); }
         catch (err) { showToast(t('Could not remove the account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
         refresh();
@@ -2291,7 +2291,7 @@ export function installManageAgents(App, ctx = {}) {
         }
       };
       const doDelete = async () => {
-        if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: a?.name }) }))) return;
+        if (!(await showConfirmDialog({ title: t('Remove account'), confirmText: t('Remove'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: a?.name }) }))) return;
         try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(t('Removed “{name}”', { name: a?.name || '' })); }
         catch (err) { showToast(t('Could not remove the account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
         refresh();
@@ -3539,13 +3539,14 @@ export function installManageAgents(App, ctx = {}) {
         }
         items.push({ label: t('New subscription — log in on {host}…', { host: hostLabel }), action: () => { done(); this._addSubscription(selectedHost, hostLabel); } });
       } else {
-        items.push({ label: t('Sign in with Claude…'), action: () => { done(); this._openSignInCard(); } });
-        items.push({ label: t('Add subscription…'), action: () => { done(); this._addSubscription(); } });
+        // lane ui-plain-words agents-accounts-13: the usual way first, named so; the others after a line, each saying what it adds
+        items.push({ label: t('Sign in with Claude (recommended)…'), action: () => { done(); this._openSignInCard(); } }, { separator: true });
+        items.push({ label: t('Add another subscription…'), action: () => { done(); this._addSubscription(); } });
         // Add a subscription straight as a LONG-LIVED TOKEN (B-211a) — no local
         // login needed, usable on any machine. Mints the account record then
         // opens the mint dialog directly (real request: 'why can only add oat
         // to an existing account').
-        items.push({ label: t('Add subscription via long-lived token…'), action: () => { done(); this._addSubscriptionViaOat(); } });
+        items.push({ label: t('Paste a long-lived token…'), action: () => { done(); this._addSubscriptionViaOat(); } });
       }
       items.push(
         { label: t('Add Console account…'), action: () => { done(); this._addConsoleAccount(); } },
@@ -3739,7 +3740,7 @@ export function installManageAgents(App, ctx = {}) {
         const msg = isSub
           ? t('Remove "{name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.', { name: a?.name })
           : t('Remove "{name}"? The roster is one shared list — this deletes the MASTER key copy held by VibeSpace (it disappears from every machine’s view) and sweeps the per-session working copies it placed on hosts. The Anthropic Console cannot re-show an existing key’s value, so make sure it’s saved elsewhere first. Running sessions keep working.', { name: a?.name });
-        if (!(await showConfirmDialog({ title: t('Remove account'), message: msg }))) return;
+        if (!(await showConfirmDialog({ title: t('Remove account'), confirmText: t('Remove'), message: msg }))) return;
         try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(t('Removed “{name}”', { name: a?.name || '' })); }
         catch (err) { showToast(t('Could not remove the account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
         refresh();

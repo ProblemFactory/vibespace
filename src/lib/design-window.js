@@ -241,7 +241,8 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
     const rows = [];
     for (const [el, k] of KEYS) {
       if (!folded.has(k.key) || el.style.display === 'none') continue;
-      if (k.key === 'pages') { for (const p of canvas.pages()) rows.push({ label: (p.id === canvas.page() ? '✓ ' : '') + (p.name || t('Page')), action: () => canvas.setPage(p.id) }); continue; }
+      // lane ui-plain-words design-doc-6: the pages read as pages — «页面：网页», set apart from the zoom and the actions
+      if (k.key === 'pages') { if (rows.length) rows.push({ separator: true }); for (const p of canvas.pages()) rows.push({ label: (p.id === canvas.page() ? '✓ ' : '') + t('Page: {name}', { name: p.name || t('Page') }), action: () => canvas.setPage(p.id) }); rows.push({ separator: true }); continue; }
       if (k.key === 'zoom') { rows.push({ label: t('Zoom: {pct}', { pct: zoomLbl.textContent }), action: () => canvas.zoomTo(1) }); continue; }
       if (k.key === 'stamp') { if (stamp.textContent) rows.push({ label: stamp.textContent, action: () => load() }); continue; }
       if (ROW_ACTS[k.key]) rows.push({ label: k.label, action: ROW_ACTS[k.key] });
@@ -423,7 +424,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
     ta.setAttribute('aria-label', t('What should change?'));
     const foot = mk('div', 'design-composer-foot');
     const cancel = mk('button', 'btn-cancel'); cancel.type = 'button'; cancel.textContent = t('Cancel');
-    const send = mk('button', 'btn-create'); send.type = 'button'; send.textContent = t('Send');
+    const send = mk('button', 'btn-create'); send.type = 'button'; send.textContent = t('Send this now'); // lane ui-plain-words design-doc-13: not the changes' «send all»
     foot.append(cancel, send);
     box.append(face, quoteFold, voiceField(ta, attachDictation(ta)), foot);
     changes.composer(box, foot, ta); // "Add" beside Send + the Style row (src/lib/design-changes.js)
@@ -486,7 +487,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
     const r = await fetchJson('/api/design/comment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: winInfo._design.sessionId, host: h, dir: d, quote: { file: p.file, path: p.path, tag: p.tag, text: p.text }, text }), signal: ctl.signal });
     clearTimeout(slow); clearTimeout(late);
     sending = null;
-    c.send.textContent = t('Send');
+    c.send.textContent = t('Send this now');
     if (ctl.signal.aborted) { sayChip(t('No answer from the server yet — the comment may still reach the agent: look at the chat before sending it again')); return; } // the words stay
     if (!r || r.error || r.ok === false) { sayChip(commentRefusalText(r)); return; } // the typed words stay in the box
     if (composer !== c) { showToast(commentSentText(r)); return; } // closed or re-opened meanwhile: never close the NEXT composer's words

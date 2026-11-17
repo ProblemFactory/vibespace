@@ -149,7 +149,7 @@ export async function showGroupMembersDialog(app, { group = null } = {}) {
 }
 
 export async function renameGroup(group) {
-  const name = await showInputDialog({ title: t('Rename group'), label: t('Name'), value: group.name || '' });
+  const name = await showInputDialog({ title: t('Rename group'), label: t('Name'), value: group.name || '', confirmText: t('Rename') });
   if (name === null || name === undefined || !String(name).trim() || name === group.name) return;
   await groupPost(gpath(group.id, 'rename'), { name });
 }

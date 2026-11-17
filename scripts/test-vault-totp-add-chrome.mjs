@@ -406,7 +406,7 @@ check('添加… in Chinese: 两步验证… after 频道账号…', !!zhItems &
 await pickMenu('两步验证…');
 await until(visible(D), { timeout: 5000 });
 const zh = await evalJs(`(() => { const d = document.querySelector(${JSON.stringify(D)}); return { title: d.querySelector('.dialog-header h3').textContent, ways: [...d.querySelectorAll('.vt-way')].map((b) => b.textContent).join(' · '), preview: d.querySelector('.vt-preview-b').textContent }; })()`);
-check('the dialog in Chinese: 添加两步验证 · 粘贴 otpauth 链接 · 输入密钥 · 预览', zh.title === '添加两步验证' && zh.ways === '粘贴 otpauth 链接 · 输入密钥' && zh.preview === '预览', zh);
+check('the dialog in Chinese: 添加两步验证 · 粘贴 otpauth 链接 · 输入密钥 · 检查验证码（下一步保存）', zh.title === '添加两步验证' && zh.ways === '粘贴 otpauth 链接 · 输入密钥' && zh.preview === '检查验证码（下一步保存）', zh);
 await typeInto(`${D} .vt-link`, 'otpauth://hotp/X:y?secret=' + SEED2 + '&counter=1');
 check('a refusal in Chinese (a counter-based link)', /不支持基于计数器的（HOTP）验证码/.test(await err() || ''), await err());
 await shot('vt-5-zh.png');

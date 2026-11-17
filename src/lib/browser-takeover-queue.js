@@ -134,8 +134,9 @@ export function createTakeoverSection(app) {
           act(t('Hand back'), 'btq-done btq-primary', t('Hand the controls back to the agent — it is told the current URL'), () => markTakeoverDone(app, req)));
       } else {
         p.acts.append(act(t('Take over'), 'btq-take btq-primary', t('Open its live view with the controls yours — the agent waits until you hand back'), () => openTakeover(app, req, { take: true })),
-          act(t('Done'), 'btq-done', t('It is done (you did it elsewhere, or it is no longer needed) — the agent is told'), () => markTakeoverDone(app, req)),
-          act(t('Reply'), 'btq-reply', t('One line to the agent, without taking over'), () => replyToTakeover(app, req)));
+          act(t('Handled · tell the agent'), 'btq-done', // lane ui-plain-words browser-live-15: who it tells, not «done»
+             t('It is done (you did it elsewhere, or it is no longer needed) — the agent is told'), () => markTakeoverDone(app, req)),
+          act(t('Reply to the agent…'), 'btq-reply', t('One line to the agent, without taking over'), () => replyToTakeover(app, req)));
       }
     }
   }

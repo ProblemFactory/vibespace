@@ -1574,10 +1574,10 @@ class App {
       };
 
       const actions = document.createElement('div'); actions.className = 'layout-card-actions';
-      const btnOverwrite = document.createElement('button'); btnOverwrite.className = 'layout-card-btn'; btnOverwrite.textContent = '⟳';
+      const btnOverwrite = document.createElement('button'); btnOverwrite.className = 'layout-card-btn'; btnOverwrite.textContent = t('Overwrite with current'); // lane ui-plain-words window-manager-9: words, not a glyph
       btnOverwrite.title = t('Overwrite with current');
       btnOverwrite.onclick = (e) => { e.stopPropagation(); this.layoutManager.savePreset(name).then(() => this._renderPresetsList()); };
-      const btnDel = document.createElement('button'); btnDel.className = 'layout-card-btn delete'; btnDel.textContent = '✕';
+      const btnDel = document.createElement('button'); btnDel.className = 'layout-card-btn delete'; btnDel.textContent = t('Delete');
       btnDel.title = t('Delete');
       btnDel.onclick = (e) => { e.stopPropagation(); this.layoutManager.deletePreset(name).then(() => this._renderPresetsList()); };
       actions.append(btnOverwrite, btnDel);

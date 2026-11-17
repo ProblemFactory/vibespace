@@ -262,7 +262,7 @@ export function totpFields({ name: proposed = '', autofocus = true, onReady = ()
   name.type = 'text'; name.autocomplete = 'off'; name.spellcheck = false; name.placeholder = t('e.g. github-owner — how the vault lists it');
   // 预览: the code the seed makes NOW (the hub's), its ring and its seconds
   const prev = el('div', 'vt-preview');
-  const prevB = el('button', 'vw-btn vt-preview-b', t('Preview'));
+  const prevB = el('button', 'vw-btn vt-preview-b', t('Check the code (save next)')); // lane ui-plain-words vault-grants-7: step one names itself
   prevB.type = 'button';
   prevB.title = t('The code this seed makes right now — nothing is stored; compare it with your authenticator');
   const code = el('span', 'vw-code vt-code');
@@ -349,12 +349,12 @@ export function totpFields({ name: proposed = '', autofocus = true, onReady = ()
       if (st.closed) return;
     }
     const p = planNow();
-    if (!p.ok) { prevB.textContent = t('Preview'); stale(); drawFacts(st.way === 'link' ? p : null); say(p); return; }
+    if (!p.ok) { prevB.textContent = t('Check the code (save next)'); stale(); drawFacts(st.way === 'link' ? p : null); say(p); return; }
     const body = JSON.stringify(p.body);
     if (!again) prevB.textContent = t('Previewing…');   // every vault wait is said (lane vault-slow-load)
     return onWire('preview', body, async () => {
       const r = await post('/api/vault/totp', { ...p.body, preview: true }).catch(() => null);
-      prevB.textContent = t('Preview');
+      prevB.textContent = t('Check the code (save next)');
       if (st.closed) return;
       if (JSON.stringify(planNow().body || null) !== body) return;   // typed on meanwhile: that answer speaks for nothing
       if (!r || !r.ok || typeof r.code !== 'string') { stale(); say(r || {}); return; }
@@ -419,8 +419,9 @@ export function showTotpAddDialog({ refresh = () => {} } = {}) {
   const save = el('button', 'btn-create vt-save', t('Save to vault'));
   cancel.type = save.type = 'button';
   save.hidden = true;   // drawn once a preview worked (never a greyed button)
+  const saveHint = el('span', 'dialog-hint vt-save-hint', t('Check the code first; saving comes next.')); // lane ui-plain-words vault-grants-7: the footer says the second step
   f = totpFields({
-    onReady: (on) => { save.hidden = !on; },
+    onReady: (on) => { save.hidden = !on; saveHint.textContent = on ? t('If it matches your authenticator app, save it.') : t('Check the code first; saving comes next.'); },
     onSaving: (on) => { save.textContent = on ? t('Saving…') : t('Save to vault'); },
     onSaved: (r, p) => {
       close();
@@ -429,7 +430,7 @@ export function showTotpAddDialog({ refresh = () => {} } = {}) {
     },
   });
   body.append(...f.nodes);
-  foot.append(cancel, save);
+  foot.append(saveHint, cancel, save);
   dialog.append(foot);
   cancel.onclick = () => close();
   const doSave = () => f.doSave((b) => post('/api/vault/totp', b));
