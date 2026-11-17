@@ -11,7 +11,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const wt = scratch('syspanel-test'), fakeHome = scratch('syspanel-home');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
-const check = (n, c) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}`); } };
+const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + e : ''}`); } };   // + the detail (the EXCLUDED package: a red names what it saw)
 try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
