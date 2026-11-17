@@ -1,0 +1,32 @@
+{
+  "about": "B-1fe9 (lane lg-leak-census): the hub-level leak census's table — scripts/test-agent-leak-census.mjs. THE BEARERS: a conversation's session token (vsst_), a Background Work job's token (jbt_), the maintainer key (vsmk_); an automation key's value (vsak_) is a vault entry, never a bearer. doors: every `if (…) return next();` of src/auth.js's middleware, `bearer` (a bearer reaches it with no cookie: swept) or `other: <why>`. dynamic: a registration whose path is no literal — `other: <why>` or `bearer: <METHOD path>, …` (those join the sweep). belts: a `.use` under a bearer door, with its why. routes: a bearer route's row ({ skip: why } or the sweep's fill / body) — a route with no row is swept with the defaults.",
+  "doors": {
+    "p === '/dav' || p.startsWith('/dav/')": "other: WebDAV — a scoped Bearer mount token (src/webdav.js MountTokens), never a session or job token",
+    "p.startsWith('/api/agent/')": "bearer",
+    "p === '/api/editor/open'": "bearer",
+    "p === '/agentd.js' || p === '/agentd-install.sh' || p === '/agentd-install.ps1' || p === '/vibespace-device.js' || p === '/vibespace-device-install.sh' || p === '/vibespace-device-install.ps1'": "other: the device bundle and its installers are public files (no secret, no conversation fact)",
+    "p === '/api/agentd-dial'": "other: the device dial upgrade — the per-device dial token judges it",
+    "p.startsWith('/vibespace-node/')": "other: the installer's Node runtime mirror — read-only, allowlisted, public",
+    "p === '/api/telemetry/ingest'": "other: remote instances — the collector's shared Bearer token",
+    "(req.method === 'POST' && p === '/api/feedback/forward') || (req.method === 'GET' && p === '/api/feedback/forward/marks')": "other: remote instances — the collector's shared Bearer token, then the caller's origin key",
+    "req.method === 'POST' && p === '/api/csp-report'": "other: a browser's CSP report — no credential; the route judges a report content type, 32 KB and a per-address pace; it answers nothing stored",
+    "req.method === 'GET' && /^\\/frame-host\\/f\\/[A-Za-z0-9_-]{24}\\//.test(p)": "other: the editor preview's folder token, minted on a signed-in navigation for ONE folder",
+    "p === '/svc' || p.startsWith('/svc/')": "other: path-mounted services — per mount; a private mount asks requestAuthed (the cookie)",
+    "p.startsWith('/otel/')": "other: the local CLI's OTLP ingest — loopback + the persisted x-vibespace-otel token (a session's CLI env carries it, OTEL_EXPORTER_OTLP_HEADERS); write-only: every answer is { partialSuccess: {} } or a refusal, no stored fact",
+    "p.startsWith('/p/')": "other: published pages — per page; a private page asks requestAuthed (the cookie)",
+    "req.method === 'GET' && /^\\/api\\/channels\\/oauth\\/cb\\/[^/]+$/.test(p)": "other: the Slack consent landing — the signed state is the credential",
+    "/^\\/hook(?:\\/|$)/.test(p) || (req.method === 'GET' && /^\\/api\\/channels\\/webhook\\/[a-z0-9][a-z0-9-]{0,62}\\/replies$/.test(p)) || (req.method === 'POST' && /^\\/api\\/channels\\/webhook\\/[a-z0-9][a-z0-9-]{0,62}\\/pair$/.test(p))": "other: webhook callers — their own token or signature (src/routes/webhook.js); the pairing code",
+    "!this.enabled": "other: a hub nobody signs in to — every route is open there to any caller (said by the census, not swept: it reads the signed-in hub)",
+    "p === '/login' || p === '/api/login' || p === '/api/clerk-login' || p === '/api/logout' || p === '/favicon.ico'": "other: the login flow"
+  },
+  "dynamic": {
+    "src/routes/desktop-apps.js router.get(XPRA_UI_RE)": "other: the xpra HTML5 client's files under the desktop-apps prefix — cookie-gated (no bearer door matches it)",
+    "src/routes/webhook.js router.all(/^\\/hook(?:\\/.*)?$/)": "other: the /hook door — webhook callers' own token (auth.js's webhook door)",
+    "src/server/frame-host.js app.get(`${FOLDER_PATH}:tok/*`)": "other: the editor preview's /frame-host/f/<token>/ folder — auth.js's frame-host door"
+  },
+  "belts": {
+    "/api/agent/browser src/routes/browser.js": "the agent belt (agentBelt): every /api/agent/browser* answer passes browser-profiles agentAnswerView — another conversation's browser identifiers are cut from what an agent reads",
+    "/api/agent/vault src/routes/vault.js": "the vault doors' timing belt (with /api/vault): a slow answer is logged by its route shape, never a value; it changes no answer"
+  },
+  "routes": {}
+}
