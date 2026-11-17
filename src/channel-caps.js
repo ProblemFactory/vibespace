@@ -520,7 +520,7 @@ const CONV_CAPS_FAIL_WHYS = Object.freeze(['rate-limited', 'backoff', 'not-conne
  *   refused-at-first-use lane lark-refresh-stall r2: a consent LANDED on a dead sign-in and the vendor refused the new
  *                       sign-in's first request with no cause of its own (the account verified it and it failed)
  */
-const SIGNIN_CAUSES = Object.freeze(['refresh-refused', 'revoked-elsewhere', 'token-expired', 'client-refused', 'client-missing', 'consent-unfinished', 'refresh-lost', 'refused-at-first-use']);
+const SIGNIN_CAUSES = Object.freeze(['refresh-refused', 'revoked-elsewhere', 'token-expired', 'client-refused', 'client-missing', 'consent-unfinished', 'refresh-lost', 'refused-at-first-use', 'client-changed']);   // B-166e: + client-changed
 /** lane lark-refresh-stall r2: what a stall's words may NAME as its cause — only what the hub's own witness measured in that
  *  window: 'disk' = the slow synchronous fs calls loop-blame timed cover at least half of it. Nothing else is a cause word
  *  (CPU work, a GC, an unwrapped wait are not told apart — the words then say the length alone). */
@@ -616,6 +616,7 @@ function signinCauseText(cause, { t = defaultT, heldMs = null, heldWhy = null } 
     case 'token-expired': return t('the sign-in reached the end of its lifetime');
     case 'client-refused': return t('the vendor refused the OAuth client');
     case 'client-missing': return t('its OAuth client is no longer set up here');
+    case 'client-changed': return t('the OAuth client under its name was replaced after this sign-in');   // B-166e
     case 'consent-unfinished': return t('the sign-in was not finished');
     default: return '';
   }

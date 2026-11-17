@@ -909,8 +909,8 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   {
     const r = await coalesce(reg);
     ok(r.r1 === 'ok' && r.rx === 'ok' && r.ry === 'ok' && r.held === '1//rot-2' && !r.retired.includes(r.held) && r.rz === 'ok' && r.state === 'connected', `(h) a later token's persist queued behind an in-flight flush of the earlier one: the store ends with the LIVE token (${r.held}; retired ${r.retired.join(',')}), the next refresh ok, connected`, JSON.stringify(r));
-    const r5 = srcMain.replace(srcMain.slice(srcMain.indexOf('  let persisting = null;'), srcMain.indexOf('  async function refreshAccessToken')), "  let persisting = null;   // ONE write in flight: the waiters of a refresh each re-enter accessToken() and must not each re-write\n  function persistToken(next) {\n    if (persisting) return persisting;\n    persisting = (async () => {\n      const raw = tokens.read(); const storeRt = raw && raw.token ? String(raw.token.refresh_token || '') : '';\n      try { await tokens.write(next, { expiresAt: null, scopes: next.scopes || [], user: next.email || null }); unsaved = null; }\n      catch (e) {\n        unsaved = { token: next, supersedes: storeRt };\n        log.warn && log.warn(`[channels] gmail: the refreshed token could not be persisted (${(e && e.message) || e}) \u2014 held in memory and written again at the next request`);\n      }\n    })().finally(() => { persisting = null; });\n    return persisting;\n  }" + '\n');
-    ok(r5 !== srcMain && /if \(persisting\) return persisting;/.test(r5), 'CONTROL fixture: the r5 single-flight persist (a different token handed the in-flight promise) restored in a copy');
+    const r5 = srcMain.replace(srcMain.slice(srcMain.indexOf('  let persisting = null;'), srcMain.indexOf('  let swapSaid = null;')), "  let persisting = null;   // ONE write in flight: the waiters of a refresh each re-enter accessToken() and must not each re-write\n  function persistToken(next) {\n    if (persisting) return persisting;\n    persisting = (async () => {\n      const raw = tokens.read(); const storeRt = raw && raw.token ? String(raw.token.refresh_token || '') : '';\n      try { await tokens.write(next, { expiresAt: null, scopes: next.scopes || [], user: next.email || null }); unsaved = null; }\n      catch (e) {\n        unsaved = { token: next, supersedes: storeRt };\n        log.warn && log.warn(`[channels] gmail: the refreshed token could not be persisted (${(e && e.message) || e}) \u2014 held in memory and written again at the next request`);\n      }\n    })().finally(() => { persisting = null; });\n    return persisting;\n  }" + '\n');
+    ok(r5 !== srcMain && /if \(persisting\) return persisting;/.test(r5) && r5.includes('  const openSecret = '), 'CONTROL fixture: the r5 single-flight persist (a different token handed the in-flight promise) restored in a copy — the slice ends before B-166e\'s client helpers, which the copy keeps');
     const mod5 = M.load('src/channels/gmail.js', r5, 'r5-persist'); const rg5 = CH.createChannelRegistry(); rg5.register(mod5.adapter);
     const c = await coalesce(rg5);
     ok(c.held === '1//rot-1' && c.retired.includes(c.held) && c.rz !== 'ok', `CONTROL: the r5 persist DROPS the later token — the store keeps the retired ${c.held}, the next refresh ${c.rz}`, JSON.stringify(c));
@@ -2154,6 +2154,110 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   ok(rsFix.id && rsFix.status === 'done' && rsPre.id && rsPre.status === 'open', 'a restart resolves the open «finish connecting» items (the sign-ins did not survive it); RED CONTROL: without the sweep the item stayed, its button opening an empty dialog', J({ fix: rsFix, pre: rsPre }));
   for (const x of copiesCensus(ML.files, ML.dir, REPO, { minCopies: 10, label: '㉕ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
   for (const e2 of CRIGS) { try { e2.stop(); } catch {} }
+}
+
+// ── ㉖ B-166e (the 2026-10-23 fleet Gmail outage: the company presets were replaced under the SAME keys, Desktop → Web, and
+//    every account's refresh was refused for seven hours): a Google refresh token answers only to the client it was issued
+//    to. Now a token names the client it was minted under (sealed with it) and a refresh uses the preset's values while they
+//    name that client, the MINTED client once the preset under its key names another; a token minted before the rule adopts
+//    the client at its first good refresh; a refusal for the wrong client is named. Over a fake Google that honours a
+//    refresh only from the issuing client. CONTROL: the release's refresh line (the preset's client, whatever it is).
+console.log('\n㉖ B-166e: an account refreshes with the client it signed in with — a preset swapped under its key no longer kills it');
+{
+  const J = JSON.stringify;
+  const OLD = PRESETS.find((p) => p.key === 'channels');   // the suite's own preset (its secret as the suite has it)
+  const ROT = ['channels', 'rotated', '01'].join('-');
+  const NEW = { key: 'channels', label: 'Channels', clientId: 'chweb.apps.googleusercontent.com', clientSecret: ['channels-web', 'value-00'].join('-') };   // built at run time (a secret-shaped literal is never in the tree)
+  const google = () => {
+    const calls = [];
+    const issued = new Map();   // refresh token → {clientId, secret}
+    const fetchFn = async (url, init = {}) => {
+      const u = new URL(String(url));
+      const form = init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null;
+      calls.push({ host: u.hostname, path: u.pathname, form, q: Object.fromEntries(u.searchParams) });
+      if (u.hostname === 'oauth2.googleapis.com' && form.grant_type === 'authorization_code') { const rt = `1//rt-${issued.size + 1}`; issued.set(rt, { clientId: form.client_id, secret: form.client_secret }); return jsonRes({ ...FX.token, refresh_token: rt }); }
+      if (u.hostname === 'oauth2.googleapis.com' && form.grant_type === 'refresh_token') {
+        const who = issued.get(form.refresh_token);
+        if (!who) return jsonRes({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }, 400);
+        if (who.clientId !== form.client_id) return jsonRes({ error: 'unauthorized_client', error_description: 'Unauthorized' }, 401);
+        if (who.secret !== form.client_secret && !(form.client_id === OLD.clientId && form.client_secret === ROT)) return jsonRes({ error: 'invalid_client', error_description: 'Unauthorized' }, 401);
+        return jsonRes(FX.tokenRefreshed);
+      }
+      const p = u.pathname.replace('/gmail/v1/users/me', '');
+      if (p === '/profile') return jsonRes(FX.profile);
+      if (p === '/threads') return jsonRes({ threads: [], resultSizeEstimate: 0 });
+      return jsonRes({ error: { code: 404, message: `unrouted ${p}` } }, 404);
+    };
+    return { calls, issued, fetchFn };
+  };
+  const OL = require(path.join(REPO, 'src/oauth-loopback.js'));
+  const saved = presetsHolder.list;
+  const SEAL = { seal: (v) => 'sealed:' + Buffer.from(String(v)).toString('base64'), open: (v) => Buffer.from(String(v).slice(7), 'base64').toString() };
+  async function account(mod, { legacy = false, seal = true } = {}) {
+    presetsHolder.list = [OLD];
+    const g = google();
+    const warns = [];
+    const lg = { log() {}, error() {}, warn: (...a) => warns.push(a.join(' ')) };
+    const tok = { st: { token: null }, read: () => ({ token: tok.st.token, why: tok.st.token ? null : 'never-authenticated' }), write: async (t) => { tok.st.token = t; }, clear: async () => { tok.st.token = null; } };
+    const oauth = OL.createOAuthLoopback({ now, log: quiet });
+    const reg = CH.createChannelRegistry(); reg.register(mod.adapter);
+    const mkA = (withSeal) => reg.create('gmail', { id: 'gmail-swap', options: {}, credentialKey: 'cluster:channels' }, { now, fetch: g.fetchFn, tokens: tok, oauth, credentialKey: 'cluster:channels', resolveIntegration: (id, o) => integrations.resolveIntegration(id, o), log: lg, ...(withSeal ? { secrets: SEAL } : {}) });
+    let a = mkA(seal);
+    const f = await a.auth.begin();
+    const fin = await a.auth.finish(f.flowId, `${f.redirectUri}/?state=${new URL(f.consentUrl).searchParams.get('state')}&code=c-swap`);
+    oauth.stopAll();
+    if (legacy) delete tok.st.token.client;   // a token minted before the rule
+    const refresh = async () => { tok.st.token.expiresAt = now() + 1000; const e = await threw(() => a.listConversations({ limit: 10 })); return { e, form: (g.calls.filter((c) => c.form && c.form.grant_type === 'refresh_token').pop() || {}).form || null }; };
+    return { get a() { return a; }, g, tok, warns, fin, refresh, reseal: () => { a = mkA(true); } };
+  }
+  try {
+    const A = await account(gmail);
+    const minted = A.tok.st.token.client;
+    ok(A.fin.ok && minted && minted.id === OLD.clientId && minted.key === 'cluster:channels' && !('secret' in minted) && typeof minted.secretEnc === 'string' && !minted.secretEnc.includes(OLD.clientSecret) && SEAL.open(minted.secretEnc) === OLD.clientSecret, 'the consent\'s token names the client it was minted under (id, key) and its secret SEALED by the account\'s secret-box — the token JSON a Vault reveal shows carries no client secret in the clear', J({ ok: A.fin.ok, id: minted && minted.id, key: minted && minted.key, plain: minted && 'secret' in minted }));
+    presetsHolder.list = [NEW];   // THE OUTAGE: the preset under the same key now names another client
+    const r1 = await A.refresh();
+    const st1 = await A.a.auth.state();
+    ok(!r1.e && r1.form && r1.form.client_id === OLD.clientId && r1.form.client_secret === OLD.clientSecret && !A.tok.st.token.invalidGrantAt, 'after the swap the refresh goes out with the client the account signed in with — and Google answers it (the account stays connected)', J({ e: r1.e && r1.e.message, form: r1.form && r1.form.client_id }));
+    ok(st1.state === 'connected' && st1.clientSwapped === true, 'auth.state says it: connected, the client under its key changed since this sign-in (clientSwapped)', J(st1));
+    await A.refresh();
+    ok(A.warns.filter((w) => /refreshes with the client it signed in with/.test(w)).length === 1 && A.warns.some((w) => w.includes(OLD.clientId) && w.includes(NEW.clientId)), 'the swap is said ONCE in the log, naming both clients', J(A.warns));
+    // the same client with a ROTATED secret: the preset's new secret is used (never the minted one)
+    presetsHolder.list = [{ ...OLD, clientSecret: ROT }];
+    const r2 = await A.refresh();
+    ok(!r2.e && r2.form.client_id === OLD.clientId && r2.form.client_secret === ROT && (await A.a.auth.state()).clientSwapped === undefined, 'the same client with a rotated secret refreshes with the PRESET\'s secret — no swap said', J({ e: r2.e && r2.e.message, form: r2.form }));
+    // a token minted BEFORE the rule: it adopts the client at its first good refresh, then survives a swap
+    const L = await account(gmail, { legacy: true });
+    const r3 = await L.refresh();
+    ok(!r3.e && L.tok.st.token.client && L.tok.st.token.client.id === OLD.clientId && SEAL.open(L.tok.st.token.client.secretEnc) === OLD.clientSecret, 'a token minted before the rule adopts the client that refreshed it (its secret sealed)', J({ e: r3.e && r3.e.message, client: L.tok.st.token.client && L.tok.st.token.client.id }));
+    presetsHolder.list = [NEW];
+    const r4 = await L.refresh();
+    ok(!r4.e && r4.form.client_id === OLD.clientId, '…and then survives the swap like a new one', J({ e: r4.e && r4.e.message }));
+    // a legacy token caught by the swap BEFORE any refresh: the refusal is NAMED (the client changed), never «expired or revoked»
+    const L2 = await account(gmail, { legacy: true });
+    presetsHolder.list = [NEW];
+    const r5 = await L2.refresh();
+    ok(r5.e && r5.e.code === 'auth-expired' && r5.e.detail && r5.e.detail.cause === 'client-changed' && /unauthorized_client\) — the sign-in was made with another client/.test(r5.e.message) && L2.tok.st.token.refusedCause === 'client-changed', 'a legacy token refused for the wrong client says so (unauthorized_client: the client under the key changed — re-authorize), and the stamp keeps the cause', J(r5.e && { code: r5.e.code, detail: r5.e.detail, message: r5.e.message }));
+    const r5b = await L2.refresh();
+    const CAPS6 = require(path.join(REPO, 'src/channel-caps.js'));
+    ok(r5b.e && r5b.e.detail && r5b.e.detail.cause === 'client-changed' && CAPS6.signinCauseOf(r5b.e) === 'client-changed' && CAPS6.signinCauseText('client-changed') === 'the OAuth client under its name was replaced after this sign-in', 'THE NEXT PASS says the same cause (the dead sign-in\'s item reads «the OAuth client under its name was replaced», never «the vendor refused the refresh token»)', J(r5b.e && { detail: r5b.e.detail, cause: CAPS6.signinCauseOf(r5b.e) }));
+    // a sign-in that could not seal (the transient Connect road): the account adopts the sealed secret at its first refresh
+    const N = await account(gmail, { seal: false });
+    ok(N.tok.st.token.client && N.tok.st.token.client.id === OLD.clientId && !N.tok.st.token.client.secretEnc, 'a sign-in with no secret-box names its client without a secret (nothing stored in the clear)', J(N.tok.st.token.client));
+    N.reseal();
+    const r7 = await N.refresh();
+    ok(!r7.e && SEAL.open(N.tok.st.token.client.secretEnc || 'sealed:') === OLD.clientSecret, '…and the account\'s own adapter seals it at the first refresh, so a later swap is survived', J({ e: r7.e && r7.e.message }));
+    // CONTROL: the release's refresh line — the preset's client whatever it is ⇒ the swap refuses the refresh (the outage)
+    const GS = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+    const FORM = "form: { grant_type: 'refresh_token', client_id: use.clientId, client_secret: use.clientSecret, refresh_token: token.refresh_token } }).catch((e0) => {";
+    ok(GS.split(FORM).length === 2, 'control setup: the refresh form line is present once');
+    const MS = mutantCopies('chan-gmail-swap', REPO);
+    const gOld = MS.load('src/channels/gmail.js', GS.replace(FORM, "form: { grant_type: 'refresh_token', client_id: cred.values.clientId, client_secret: cred.values.clientSecret, refresh_token: token.refresh_token } }).catch((e0) => {"), 'release-refresh');
+    const C = await account(gOld);
+    presetsHolder.list = [NEW];
+    const r6 = await C.refresh();
+    ok(r6.e && r6.e.code === 'auth-expired' && C.tok.st.token.invalidGrantAt && r6.form.client_id === NEW.clientId, 'RED CONTROL: with the release\'s refresh line the swapped preset\'s client is sent — refused, the account stamped dead (the outage\'s shape)', J(r6.e && { code: r6.e.code, form: r6.form && r6.form.client_id }));
+    for (const x of copiesCensus(MS.files, MS.dir, REPO, { minCopies: 1, label: '㉖ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  } finally { presetsHolder.list = saved; }
 }
 
 eng.stop();

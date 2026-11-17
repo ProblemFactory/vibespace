@@ -11091,6 +11091,7 @@ export default {
   "the sign-in reached the end of its lifetime": "サインインの有効期限が切れました",
   "the vendor refused the OAuth client": "サービス側が OAuth クライアントを拒否しました",
   "its OAuth client is no longer set up here": "この環境にはその OAuth クライアントがもう設定されていません",
+  "the OAuth client under its name was replaced after this sign-in": "このログインの後、同じ名前の OAuth クライアントが差し替えられました",
   "the sign-in was not finished": "サインインが完了しませんでした",
   "Re-authorizing… (in the tab that opened)": "再認証中…（開いたタブで続けてください）",
   // lane lark-refresh-stall r2: a landed sign-in until its first request answers

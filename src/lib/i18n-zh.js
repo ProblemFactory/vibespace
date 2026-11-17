@@ -11092,6 +11092,7 @@ export default {
   "the sign-in reached the end of its lifetime": "登录已到期",
   "the vendor refused the OAuth client": "服务方拒绝了 OAuth 客户端",
   "its OAuth client is no longer set up here": "这里已不再配置它的 OAuth 客户端",
+  "the OAuth client under its name was replaced after this sign-in": "登录之后，同名下的 OAuth 客户端被替换了",
   "the sign-in was not finished": "重新授权没有完成",
   "Re-authorizing… (in the tab that opened)": "正在重新授权…（在打开的那个标签页里）",
   // lane lark-refresh-stall r2: a landed sign-in until its first request answers
