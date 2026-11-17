@@ -150,7 +150,13 @@ const Plan = require('../channel-upload-plan.js');
 /** The failure of an upload the plan stopped trying: the last transport failure, its words saying why it stopped. */
 const stoppedUpload = (e, n, stop) => new ChannelError('transport', `${e.message} ${Plan.stopWords({ n, stop, retryAfterSec: e.detail && e.detail.retryAfterSec })}`, { retryable: true, detail: { ...(e.detail || {}), attempts: n, stopped: stop } });
 /** r3 m1: a retry's URL ask — callSlack's own 20 s at most, and it leaves the bytes their minimum window. */
-const ASK_WINDOW = Object.freeze({ ownMs: REQUEST_TIMEOUT_MS, leaveMs: Plan.UPLOAD_MIN_WINDOW_MS });
+// r4 (B-0207): a retry's chain is three requests — the URL ask leaves the bytes AND the completing call their minimum, the
+// bytes leave the completing call its; the fit check counts all three
+const ASK_WINDOW = Object.freeze({ ownMs: REQUEST_TIMEOUT_MS, leaveMs: 2 * Plan.UPLOAD_MIN_WINDOW_MS });
+const BYTES_WINDOW = Object.freeze({ ownMs: Plan.UPLOAD_WINDOW_MS, leaveMs: Plan.UPLOAD_MIN_WINDOW_MS });
+const ATTEMPT_NEED_MS = 3 * Plan.UPLOAD_MIN_WINDOW_MS;
+/** r4: the send's time ran out before a request that follows a landed retry could leave — nothing of it was sent */
+const budgetStop = (what) => new ChannelError('transport', `slack ${what}: the send's time ran out after a retry — not sent (budget)`, { retryable: true, detail: { method: what, stopped: true, budget: true } });
 const TS_RE = /^\d{9,11}\.\d{1,6}$/;
 const ID_RE = /^[A-Z0-9][A-Z0-9_]{1,40}$/;
 const tsMs = (ts) => (TS_RE.test(String(ts || '')) ? Math.round(Number(ts) * 1000) : 0);
@@ -751,15 +757,17 @@ function create(record = {}, deps = {}) {
   async function sendFiles(convId, params, files, deadline = Infinity) {
     if (!has(scopesHeld(), FILES_SCOPE)) throw new ChannelError('forbidden', `slack: the pasted token has no ${FILES_SCOPE} scope — nothing was sent (add ${FILES_SCOPE} to the app's user scopes and paste the new token)`, { retryable: false, detail: { why: 'files-scope-not-granted', requiredScopes: [FILES_SCOPE] } });
     const parts = [];
-    let first = null;
+    let first = null, bounded = false;   // r4 (B-0207): once a retry landed, every later request reads the send's budget
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       const label = { part: 'attachment', name: f.name, ...(i === 0 && params.text ? { withText: true } : {}) };
       try {
-        const { url, fid, retried } = await uploadFile(f, convId, deadline);
+        const { url, fid, retried } = await uploadFile(f, convId, deadline, bounded);
+        if (retried) bounded = true;
         const c = { files: JSON.stringify([{ id: fid, title: f.name }]), channel_id: convId, ...(params.thread_ts ? { thread_ts: params.thread_ts } : {}), ...(i === 0 && params.text ? { initial_comment: params.text } : {}) };
-        try { await api('files.completeUploadExternal', c, { convId }); }
-        catch (e) { if (e instanceof ChannelError && e.code === 'transport') throw new ChannelError('transport', `${e.message} — the request left and Slack's answer was lost; check Slack before sending again`, { retryable: false, detail: { ...(e.detail || {}), lost: true } }); throw e; }
+        const completeWindow = bounded ? () => { const w = Plan.windowMs(1, now(), deadline, { ownMs: REQUEST_TIMEOUT_MS, bounded: true }); if (!w) throw budgetStop('files.completeUploadExternal'); return w; } : null;
+        try { await api('files.completeUploadExternal', c, { convId, windowOf: completeWindow }); }
+        catch (e) { if (e instanceof ChannelError && e.detail && e.detail.stopped) throw e; if (e instanceof ChannelError && e.code === 'transport') throw new ChannelError('transport', `${e.message} — the request left and Slack's answer was lost; check Slack before sending again`, { retryable: false, detail: { ...(e.detail || {}), lost: true } }); throw e; }
         parts.push({ ...label, ok: true, vendorMessageId: fid, ...(retried ? { retried } : {}) });
         if (!first) first = { ok: true, vendorMessageId: fid, at: now(), sentAs: 'user', observed: { senderType: 'user', senderId: null, ...(params.thread_ts ? { threadKey: params.thread_ts } : {}) } };
       } catch (e) {
@@ -781,20 +789,21 @@ function create(record = {}, deps = {}) {
    *  none left ⇒ nothing sent and the upload stops on the budget (a retry's ask that fails once none is left too). The
    *  URL ask itself (callSlack's own judgement), a 429 (the ladder's hold) and any other refusal are never retried. A
    *  landing after a retry is said on the console; the last failure says why it stopped (the count, or the budget). */
-  async function uploadFile(f, convId, deadline = Infinity) {
+  async function uploadFile(f, convId, deadline = Infinity, bounded = false) {
     let lastErr = null;
     for (let n = 1; ; n++) {
-      const windowOf = (own) => { const w = Plan.windowMs(n, now(), deadline, own); if (!w) throw stoppedUpload(lastErr, n - 1, 'budget'); return w; };
+      // r4: `bounded` (a retry landed for an earlier file) — this file's first attempt reads the budget too
+      const windowOf = (own) => { const w = Plan.windowMs(n, now(), deadline, { ...own, bounded }); if (!w) throw (lastErr ? stoppedUpload(lastErr, n - 1, 'budget') : budgetStop(own === ASK_WINDOW ? 'files.getUploadURLExternal' : 'files.upload')); return w; };
       let u;
       try { u = await api('files.getUploadURLExternal', { filename: f.name, length: f.data.length }, { convId, windowOf: () => windowOf(ASK_WINDOW) }); }
       catch (e) { if (n > 1 && e instanceof ChannelError && e.code === 'transport') windowOf(ASK_WINDOW); throw e; }   // r3: a retry's ask that failed once no window is left = the budget's stop
       const url = String((u && u.upload_url) || ''), fid = String((u && u.file_id) || '');
       if (!url.startsWith(FILES_ORIGIN) || !ID_RE.test(fid)) throw new ChannelError('vendor-error', 'slack files.getUploadURLExternal: the answer names no files.slack.com upload URL — nothing was uploaded', { retryable: false, detail: { why: 'upload-url' } });
-      try { await uploadBytes(url, f.data, convId, () => windowOf()); }
+      try { await uploadBytes(url, f.data, convId, () => windowOf(BYTES_WINDOW)); }
       catch (e) {
         if (e instanceof ChannelError && e.detail && e.detail.stopped) throw e;   // r3: the budget's stop before the bytes left
         if (!(e instanceof ChannelError) || e.code !== 'transport') throw e;   // a 429, a 403 / 413, any other refusal: ONE request
-        const next = Plan.nextTry({ n, retryAfterSec: e.detail && e.detail.retryAfterSec, random, now: now(), deadline });   // r2 F1: the vendor's wait, at least
+        const next = Plan.nextTry({ n, retryAfterSec: e.detail && e.detail.retryAfterSec, random, now: now(), deadline, needMs: ATTEMPT_NEED_MS });   // r2 F1: the vendor's wait, at least; r4: all three requests fit
         if (!next.go) throw stoppedUpload(e, n, next.stop);
         lastErr = e;
         await sleep(next.waitMs);

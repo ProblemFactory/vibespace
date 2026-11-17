@@ -1213,6 +1213,11 @@ const SEND_HOLD_DEFAULT_SEC = 30;
 const Plan = require('../channel-upload-plan.js');
 /** The failure of an upload the plan stopped trying: the last transport failure, its words saying why it stopped. */
 const stoppedUpload = (e, n, stop) => new ChannelError('transport', `${e.message} ${Plan.stopWords({ n, stop, retryAfterSec: e.detail && e.detail.retryAfterSec })}`, { retryable: true, detail: { ...(e.detail || {}), attempts: n, stopped: stop } });
+/** r4 (B-0207): a retry's chain is two requests — the upload leaves the file's message its minimum; the fit check counts both */
+const UPLOAD_LEAVE = Object.freeze({ ownMs: Plan.UPLOAD_WINDOW_MS, leaveMs: Plan.UPLOAD_MIN_WINDOW_MS });
+const ATTEMPT_NEED_MS = 2 * Plan.UPLOAD_MIN_WINDOW_MS;
+/** r4: the send's time ran out before a request that follows a landed retry could leave — nothing of it was sent */
+const budgetStop = (what) => new ChannelError('transport', `${what}: the send's time ran out after a retry — not sent (budget)`, { retryable: true, detail: { what, stopped: 'budget' } });
 /** PURE: how ONE stored attachment goes to Lark — `{route, msgType, fields, field, keyName}`. */
 function attachmentPlan(f) {
   const mime = String((f && f.mime) || '');
@@ -1869,10 +1874,12 @@ function create(record = {}, deps = {}) {
    */
   async function sendWithFiles(convId, { text, replyTo, replyAnchor, idemKey, inThread, placement, files, deadline = Infinity }) {
     const parts = [];
-    const one = async (what, body, i) => {
-      return sendImpl(convId, { text: '', replyTo, idemKey: i == null ? idemKey : `${idemKey}:a${i}`, replyAnchor, inThread, placement, _body: body });
+    const one = async (what, body, i, windowOf = null) => {
+      return sendImpl(convId, { text: '', replyTo, idemKey: i == null ? idemKey : `${idemKey}:a${i}`, replyAnchor, inThread, placement, _body: body, _windowOf: windowOf });
     };
-    let first = null;
+    // r4 (B-0207): once a retry landed, every later request (this file's message, a later file's upload) reads the budget
+    let first = null, bounded = false;
+    const messageWindow = (what) => () => { const w = Plan.windowMs(1, now(), deadline, { ownMs: REQUEST_TIMEOUT_MS, bounded: true }); if (!w) throw budgetStop(what); return w; };
     const hasText = !!String(text == null ? '' : text).trim();
     const fail = (e, part) => ({ ...part, ok: false, code: (e && e.code) || 'vendor-error', why: String((e && e.message) || e).slice(0, 300), ...(e && e.detail && e.detail.lost ? { lost: true } : {}), ...(e && e.detail && e.detail.requiredScopes ? { requiredScopes: e.detail.requiredScopes } : {}) });
     const pieces = [...(hasText ? [{ part: 'text' }] : []), ...files.map((f, i) => ({ part: 'attachment', name: f.name, i, f }))];
@@ -1886,8 +1893,9 @@ function create(record = {}, deps = {}) {
         else {
           const plan = attachmentPlan(p.f);
           if (plan.msgType === 'file' && Number(p.f.data.length) > LARK_FILE_MAX) throw new ChannelError('too-large', `lark: ${JSON.stringify(String(p.name).slice(0, 80))} is over Lark's 30 MB file ceiling`, { retryable: false, detail: { why: 'attachment-too-large' } });
-          const up = await upload(plan, p.f, tally, deadline);
-          r = await one(`lark send ${plan.msgType}`, { msg_type: plan.msgType, content: JSON.stringify({ [plan.keyName]: up }) }, p.i);
+          const up = await upload(plan, p.f, tally, deadline, bounded);
+          if (tally.retried) bounded = true;
+          r = await one(`lark send ${plan.msgType}`, { msg_type: plan.msgType, content: JSON.stringify({ [plan.keyName]: up }) }, p.i, bounded ? messageWindow(`lark send ${plan.msgType}`) : null);
         }
         parts.push({ ...label, ok: true, vendorMessageId: r.vendorMessageId, ...(tally.retried ? { retried: tally.retried } : {}) });
         if (!first) first = r;
@@ -1909,21 +1917,21 @@ function create(record = {}, deps = {}) {
    *  `deadline` — r3: its window read right before it leaves, after the token + the pace (none left ⇒ not sent, no unit
    *  metered, the budget's stop); a 429 (the hold's) and any other refusal are never retried.
    *  `tally.retried` = the tries before it landed. */
-  async function upload(plan, f, tally = {}, deadline = Infinity) {
+  async function upload(plan, f, tally = {}, deadline = Infinity, bounded = false) {
     let d = null, n = 0, lastErr = null;
     for (;;) {
       n++;
       let at0 = await accessToken();
       await pace(1);
       if (bearerExpired()) at0 = await accessToken();
-      const w = Plan.windowMs(n, now(), deadline);   // r3 m1: read HERE, after the token + the pace (r2 F3: attempt 1's own 60 s, a retry's = what is left)
-      if (!w) throw stoppedUpload(lastErr, n - 1, 'budget');   // r3 m2: none left — not sent, no unit metered
+      const w = Plan.windowMs(n, now(), deadline, { ...UPLOAD_LEAVE, bounded });   // r3 m1: read HERE, after the token + the pace (r2 F3: attempt 1's own 60 s, a retry's = what is left); r4: less the message's minimum
+      if (!w) throw lastErr ? stoppedUpload(lastErr, n - 1, 'budget') : budgetStop(`lark upload ${plan.msgType}`);   // r3 m2: none left — not sent, no unit metered
       meter(1);
       try { d = await callForm(fetchFn, `${H.open}/open-apis${plan.route}`, { what: `lark upload ${plan.msgType}`, headers: { Authorization: `Bearer ${bearerNow(at0)}` }, fields: plan.fields, file: { field: plan.field, data: f.data, mime: f.mime, name: f.name }, signal: AbortSignal.timeout(w) }); break; }   // gated-inline: upload
       catch (e) {
         if (e instanceof ChannelError && e.code === 'rate-limited') throw e;   // the account's send hold (noteSendHold) — ONE request
         if (!(e instanceof ChannelError) || e.code !== 'transport') throw e;   // a 403 / 4xx / a refused body: ONE request
-        const next = Plan.nextTry({ n, retryAfterSec: e.detail && e.detail.retryAfterSec, random, now: now(), deadline });   // r2 F1: the vendor's wait, at least
+        const next = Plan.nextTry({ n, retryAfterSec: e.detail && e.detail.retryAfterSec, random, now: now(), deadline, needMs: ATTEMPT_NEED_MS });   // r2 F1: the vendor's wait, at least; r4: both requests fit
         if (!next.go) throw stoppedUpload(e, n, next.stop);
         lastErr = e;
         await sleep(next.waitMs);
@@ -1935,7 +1943,7 @@ function create(record = {}, deps = {}) {
     if (typeof key !== 'string' || !key || key.length > 200) throw new ChannelError('vendor-error', `lark upload ${plan.msgType}: the answer carries no ${plan.keyName}`, { retryable: false, detail: { why: 'no-key' } });
     return key;
   }
-  async function sendImpl(convId, { text, replyTo = null, idemKey, as = 'user', replyAnchor = null, inThread = false, placement = null, attachments = null, _body = null, budgetMs = null } = {}) {
+  async function sendImpl(convId, { text, replyTo = null, idemKey, as = 'user', replyAnchor = null, inThread = false, placement = null, attachments = null, _body = null, _windowOf = null, budgetMs = null } = {}) {
     const deadline = Plan.deadlineOf(budgetMs, now());   // r2 F3: the caller's remaining time bounds the upload retry
     if (as !== 'user') throw new ChannelError('send-not-available', `lark: sending as '${as}' is not declared (caps.sendAs: user)`, { retryable: false, detail: { sendAs: caps.sendAs } });
     // r6 verify F1 (the belt under the engine's gate): the reply endpoint names only the MESSAGE, never the chat —
@@ -1966,13 +1974,15 @@ function create(record = {}, deps = {}) {
     let d;
     try {
       await pace(1);   // lane R5 verify r4: a send is a vendor request like any other — paced, then metered (it was neither)
+      const win = _windowOf ? _windowOf() : null;   // r4 (B-0207): a file's message after a landed retry reads the budget here (none left: thrown, nothing metered or sent)
       meter(1);
       if (bearerExpired()) at0 = await accessToken();   // verify r5: an expired bearer is refreshed before the send, never sent
       const at = bearerNow(at0);
       d = replyTo
-        ? await callJson(fetchFn, `${H.open}/open-apis/im/v1/messages/${encodeURIComponent(String(replyTo))}/reply`, { method: 'POST', what: 'lark reply', headers: { Authorization: `Bearer ${at}` }, body })   // gated-inline: send-reply
-        : await callJson(fetchFn, `${H.open}/open-apis/im/v1/messages?receive_id_type=chat_id`, { method: 'POST', what: 'lark send', headers: { Authorization: `Bearer ${at}` }, body: { receive_id: convId, ...body } });   // gated-inline: send
+        ? await callJson(fetchFn, `${H.open}/open-apis/im/v1/messages/${encodeURIComponent(String(replyTo))}/reply`, { method: 'POST', what: 'lark reply', headers: { Authorization: `Bearer ${at}` }, body, ...(win ? { signal: AbortSignal.timeout(win) } : {}) })   // gated-inline: send-reply
+        : await callJson(fetchFn, `${H.open}/open-apis/im/v1/messages?receive_id_type=chat_id`, { method: 'POST', what: 'lark send', headers: { Authorization: `Bearer ${at}` }, body: { receive_id: convId, ...body }, ...(win ? { signal: AbortSignal.timeout(win) } : {}) });   // gated-inline: send
     } catch (e) {
+      if (e instanceof ChannelError && e.detail && e.detail.stopped === 'budget' && !e.detail.status) throw e;   // r4: the budget's stop BEFORE the message left — never «the answer was lost»
       noteSendHold(e);   // lane lark-send-hold: a send's own 429 holds the account's later sends
       if (e instanceof ChannelError && e.code === 'transport') throw new ChannelError('transport', `${e.message} — the request left and the answer was lost`, { retryable: true, detail: { ...(e.detail || {}), lost: true, uuid } });
       // lane channel-threads (L6 errors): 230019 the thread is gone, 230071 this group does not support replies in

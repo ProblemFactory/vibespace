@@ -995,14 +995,14 @@ async function stepsJudge(S, L) {
   { const { a, calls, clock, units } = probeRig(S, 'slack', { askMs: (k) => (k === 2 ? 19000 : 0) });
     const { e } = await sendB(a, 'C0FIXTURE', files().slice(0, 1), 'x', 18000);
     const t = clock.t - T0;
-    if (!(stoppedOne(e, 'slack') && chainOf(calls) === 'UP' && units.length === 2 && t === 13000)) fail('m1·slack', `18 s, 504 at 12 s, a 19 s URL ask: chain ${chainOf(calls)}, ${units.length} units, said at ${t} ms, ${saidE(e)} (want «UP» — no second ask —, 2 units, «(after 1 attempt (budget))» at 13000 ≤ 18000)`);
+    if (!(stoppedOne(e, 'slack') && chainOf(calls) === 'UP' && units.length === 2 && t === 12000)) fail('m1·slack', `18 s, 504 at 12 s, a 19 s URL ask: chain ${chainOf(calls)}, ${units.length} units, said at ${t} ms, ${saidE(e)} (want «UP» — no second ask —, 2 units, «(after 1 attempt (budget))» at 12000 — r4: no wait sat through: the retry's three requests never fit; was 13000 ≤ 18000)`);
   }
   // the ask's own window: the CLI's 28 s, the same probe ⇒ the retry's ask leaves at 13 s in min(20 s, 15 − 5) = 10 s and
   // runs it out ⇒ the budget's stop at 23 s (never the ask's own timeout words)
   { const { a, calls, clock } = probeRig(S, 'slack', { askMs: (k) => (k === 2 ? 19000 : 0) });
     const { e } = await sendB(a, 'C0FIXTURE', files().slice(0, 1), 'x', 28000);
     const U = calls.filter(isUrl), t = clock.t - T0;
-    if (!(stoppedOne(e, 'slack') && chainOf(calls) === 'UPU' && U[1].win === 10000 && t === 23000)) fail('m1·slack', `28 s, 504 at 12 s, a 19 s URL ask: chain ${chainOf(calls)}, the retry's ask in ${U[1] ? U[1].win : '—'} ms, said at ${t} ms, ${saidE(e)} (want «UPU», the ask's window 10000, «(after 1 attempt (budget))» at 23000 ≤ 28000)`);
+    if (!(stoppedOne(e, 'slack') && chainOf(calls) === 'UPU' && U[1].win === 5000 && t === 18000)) fail('m1·slack', `28 s, 504 at 12 s, a 19 s URL ask: chain ${chainOf(calls)}, the retry's ask in ${U[1] ? U[1].win : '—'} ms, said at ${t} ms, ${saidE(e)} (want «UPU», the ask's window 5000 — r4: it leaves the bytes and the completing call 5 s each —, said at 18000; «(after 1 attempt (budget))» at 23000 ≤ 28000)`);
   }
   // the Lark twin: the retry's token is refreshed (its answer 12 s) ⇒ the window read after it — 3 s left — NO second
   // upload, no unit for it, said at 25 s
@@ -1046,7 +1046,7 @@ if (Plan) {
     "plan — windowMs with a request's own window and what it leaves: Slack's URL ask on attempt 1 its own 20 s; on a retry min(20 s, what is left − the bytes' 5 s), 0 under 5 s");
 }
 const sj = await stepsJudge(slack, lark);
-ok(!sj['m1·slack'], `m1 slack: the acceptance's probe (18 s, the bytes 504 at 12 s, a 19 s URL ask) ⇒ NO second ask, «(after 1 attempt (budget))» at 13 s, «UP»; with the CLI's 28 s the retry's ask leaves in 10 s and runs it out ⇒ the budget's stop at 23 s${sj['m1·slack'] ? ` — ${sj['m1·slack'].join('; ')}` : ''}`);
+ok(!sj['m1·slack'], `m1 slack: the acceptance's probe (18 s, the bytes 504 at 12 s, a 19 s URL ask) ⇒ NO second ask, «(after 1 attempt (budget))» at 12 s (r4: no wait sat through), «UP»; with the CLI's 28 s the retry's ask leaves in 5 s (r4: the bytes and the completing call keep 5 s each) and runs it out ⇒ the budget's stop at 18 s${sj['m1·slack'] ? ` — ${sj['m1·slack'].join('; ')}` : ''}`);
 ok(!sj['m1·lark'], `m1 lark: the retry's token refreshed in 12 s (28 s, 504 at 12 s) ⇒ the window read AFTER it, 3 s left ⇒ no second upload, «(after 1 attempt (budget))» at 25 s${sj['m1·lark'] ? ` — ${sj['m1·lark'].join('; ')}` : ''}`);
 const zw = await zeroWindowJudge(slack, lark);
 ok(!zw['m2·slack'], `m2 slack: a pace that eats the window before the retry's URL ask (no ask) or its bytes (no second POST) ⇒ the zero-window stop, «(after 1 attempt (budget))», no unit metered for the request not sent${zw['m2·slack'] ? ` — ${zw['m2·slack'].join('; ')}` : ''}`);
@@ -1063,14 +1063,15 @@ ok(!zw['m2·lark'], `m2 lark: a pace that eats the window before the retry's upl
   const ASK_ON = '{ convId, windowOf: () => windowOf(ASK_WINDOW) }';
   // lark's r2 order: the window read BEFORE the token + the pace
   const L_TOKEN = '      let at0 = await accessToken();\n      await pace(1);\n      if (bearerExpired()) at0 = await accessToken();\n';
-  const lWin = (src) => { const m = /      const w = Plan\.windowMs\(n, now\(\), deadline\);[^\n]*\n      if \(!w\) throw stoppedUpload\(lastErr, n - 1, 'budget'\);[^\n]*\n/.exec(src); return m && src.includes(L_TOKEN + m[0]) ? src.replace(L_TOKEN + m[0], m[0] + L_TOKEN) : null; };
-  const STOP = "if (!w) throw stoppedUpload(lastErr, n - 1, 'budget');";
+  const lWin = (src) => { const m = /      const w = Plan\.windowMs\(n, now\(\), deadline, \{ \.\.\.UPLOAD_LEAVE, bounded \}\);[^\n]*\n      if \(!w\) throw [^\n]*\n/.exec(src); return m && src.includes(L_TOKEN + m[0]) ? src.replace(L_TOKEN + m[0], m[0] + L_TOKEN) : null; };
+  // r4 (B-0207): each adapter's stop also names a request that follows a landed retry (budgetStop) — the same stop
+  const STOP_S = "if (!w) throw (lastErr ? stoppedUpload(lastErr, n - 1, 'budget')", STOP_L = "if (!w) throw lastErr ? stoppedUpload(lastErr, n - 1, 'budget')";
   const ASK_CATCH = "catch (e) { if (n > 1 && e instanceof ChannelError && e.code === 'transport') windowOf(ASK_WINDOW); throw e; }";
   const say = (red, pins) => (red === null ? 'the patch site is gone' : red.length === pins.length ? `red by ${red.join(' ')}` : `red by ${red.join(' ') || 'nothing'} — GREEN on ${pins.filter((p) => !red.includes(p)).join(' ')}`);
   const m1 = both(sub(ASK_ON, '{ convId }'), lWin, 'r3-m1-ask-outside-budget');
   const m1w = both(sub(ASK_CATCH, 'catch (e) { throw e; }'), (src) => src, 'r3-m1-ask-own-words');
-  const m2a = both(sub(STOP, ''), sub(STOP, ''), 'r3-m2-no-stop');
-  const m2b = both(sub(STOP, STOP.replace('n - 1', 'n')), sub(STOP, STOP.replace('n - 1', 'n')), 'r3-m2-off-by-one');
+  const m2a = both(sub(STOP_S, STOP_S.replace('if (!w)', 'if (false)')), sub(STOP_L, STOP_L.replace('if (!w)', 'if (false)')), 'r3-m2-no-stop');
+  const m2b = both(sub(STOP_S, STOP_S.replace('n - 1', 'n')), sub(STOP_L, STOP_L.replace('n - 1', 'n')), 'r3-m2-off-by-one');
   const rows = [
     ["r3-m1-ask-outside-budget (slack: the retry's URL ask in callSlack's own 20 s; lark: the window read before the token + the pace — r2's order)", m1 ? await stepsJudge(m1.S, m1.L) : null, ['m1·slack', 'm1·lark']],
     ["r3-m1-ask-own-words (slack: a retry's ask that ran the budget out said as its own timeout)", m1w ? await stepsJudge(m1w.S, m1w.L) : null, ['m1·slack']],
@@ -1083,6 +1084,67 @@ ok(!zw['m2·lark'], `m2 lark: a pace that eats the window before the retry's upl
   }
   clearInterval(keepR);
 }
+console.log('⑫d lane channel-upload-retry r4 (B-0207): the fit check counts every request of a retry; after a landed retry the whole send fits the budget');
+/** 'r4·fit·slack' / 'r4·after·slack' / 'r4·later·slack' / 'r4·after·lark' — the r3 acceptance's two confirmed minors, on the REAL
+ *  adapters over the fake clock (the window each request carries recorded by the wrapped AbortSignal.timeout). */
+async function wholeSendJudge(S, L) {
+  const out = {};
+  const fail = (pin, m) => { (out[pin] = out[pin] || []).push(m); };
+  // confirmed[1]: an inline direct reply (18 s), the bytes 504 at 8 s with Retry-After 5 ⇒ the base slept the 5 s, minted
+  // nothing and stopped at 13 s. r4: the retry's ask + bytes + completing call (3 × 5 s) never fit ⇒ said AT 8 s, no sleep
+  { let failed = false;
+    const { a, calls, clock, sleeps } = retryRig(S, 'slack', (c, k) => { if (!failed && isPost(c)) { failed = true; k.t += 8000; return jsonRes(504, GATEWAY, RA(5)); } return okSlack(c); }, { random: half });
+    const { e } = await sendB(a, 'C0FIXTURE', files().slice(0, 1), 'x', 18000);
+    const t = clock.t - T0;
+    if (!(e && e.code === 'transport' && /\(after 1 attempt \(budget\) — Retry-After 5 s\)$/.test(e.message) && sleeps.length === 0 && t === 8000 && chainOf(calls) === 'UP')) fail('r4·fit·slack', `18 s, 504 + Retry-After 5 at 8 s: ${sleeps.length} sleeps, said at ${t} ms, chain ${chainOf(calls)}, ${saidE(e)} (want no sleep, «(after 1 attempt (budget) — Retry-After 5 s)» at 8000, «UP»)`);
+  }
+  // confirmed[0]: 28 s, the bytes 504 at 12 s, the retry lands at 13 s ⇒ the retry's bytes leave the completing call 5 s
+  // (min(60 s, 15 − 5) = 10 s) and the completing call reads what is left (min(20 s, 15 s) = 15 s) — the base: 15 s and 20 s
+  { const { a, calls, clock } = probeRig(S, 'slack');
+    const { r, e } = await sendB(a, 'C0FIXTURE', files().slice(0, 1), 'x', 28000);
+    const P2 = calls.filter(isPost)[1], C = calls.filter(isDone)[0];
+    if (!(r && !e && P2 && P2.win === 10000 && C && C.win === 15000 && C.at - T0 + C.win <= 28000)) fail('r4·after·slack', `28 s, 504 at 12 s, landed on the retry: the retry's bytes in ${P2 ? P2.win : '—'} ms, the completing call in ${C ? C.win : '—'} ms at ${C ? C.at - T0 : '—'} ms, ${saidE(e)} (want 10000, then 15000 — ending by 28 s)`);
+  }
+  // …and a LATER file after that landed retry: its first attempt reads the budget too (the base: 20 s / 60 s / 20 s)
+  { const { a, calls } = probeRig(S, 'slack');
+    const { r, e } = await sendB(a, 'C0FIXTURE', files(), 'x', 28000);
+    const U = calls.filter(isUrl), P = calls.filter(isPost), C = calls.filter(isDone);
+    if (!(r && !e && U.length === 3 && U[2].win === 5000 && P[2].win === 10000 && C[1] && C[1].win === 15000)) fail('r4·later·slack', `two files, the first landed on its retry at 13 s: the second's ask ${U[2] ? U[2].win : '—'} ms, bytes ${P[2] ? P[2].win : '—'} ms, completing call ${C[1] ? C[1].win : '—'} ms, ${saidE(e)} (want 5000 / 10000 / 15000)`);
+  }
+  // Lark: 28 s, the upload 504 at 12 s, landed at 13 s ⇒ the retry's upload leaves the message 5 s (10 s) and the file's
+  // message reads what is left (15 s) — the base: 15 s and callJson's own 20 s
+  { const { a, calls } = probeRig(L, 'lark');
+    const { r, e } = await sendB(a, 'oc_fixture', files().slice(1), '', 28000);
+    const U = calls.filter(isUp), M = calls.filter(isMsg);
+    if (!(r && !e && U.length === 2 && U[1].win === 10000 && M.length === 1 && M[0].win === 15000)) fail('r4·after·lark', `28 s, 504 at 12 s, landed on the retry: the retry's upload in ${U[1] ? U[1].win : '—'} ms, the file's message in ${M[0] ? M[0].win : '—'} ms, ${saidE(e)} (want 10000, then 15000)`);
+  }
+  // no retry: the base's own windows stand (the budget bounds only what a retry adds)
+  { const { a, calls } = retryRig(S, 'slack', okSlack, { random: half });
+    const { r } = await sendB(a, 'C0FIXTURE', files().slice(0, 1), 'x', 28000);
+    const C = calls.filter(isDone)[0];
+    if (!(r && C && C.win === 20000 && calls.filter(isPost)[0].win === 60000)) fail('r4·after·slack', `no retry: the bytes in ${calls.filter(isPost)[0] && calls.filter(isPost)[0].win} ms, the completing call in ${C && C.win} ms (want the base's 60000 and 20000)`);
+  }
+  return out;
+}
+const ws = await wholeSendJudge(slack, lark);
+for (const [pin, what] of [['r4·fit·slack', 'the acceptance\'s confirmed[1]: an 18 s send, the bytes 504 + Retry-After 5 at 8 s ⇒ stopped AT 8 s, no 5 s slept for nothing (a retry is three requests)'], ['r4·after·slack', 'confirmed[0]: a landed retry\'s bytes leave the completing call 5 s and the completing call reads what is left (10 s / 15 s, the send ends by its 28 s); no retry ⇒ the base\'s windows'], ['r4·later·slack', 'a later file after a landed retry: its first attempt reads the budget (5 s / 10 s / 15 s)'], ['r4·after·lark', 'Lark: a landed retry\'s upload leaves the file\'s message 5 s, the message reads what is left (10 s / 15 s)']]) ok(!ws[pin], `${pin} — ${what}${ws[pin] ? ` — ${ws[pin].join('; ')}` : ''}`);
+{
+  const keepR = setInterval(() => {}, 1000);
+  const SS = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8'), LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8');
+  const two = (s2, l2, tag) => (s2 && l2 ? { S: require(MC.write('src/channels/slack.js', s2, `${tag}-slack`)), L: require(MC.write('src/channels/lark.js', l2, `${tag}-lark`)) } : null);
+  const once = (src, from, to) => (src.split(from).length === 2 ? src.replace(from, to) : null);
+  const rows = [
+    ['r4-one-request-fit (both: the fit check counts one request again)', two(once(SS, ', needMs: ATTEMPT_NEED_MS });', ' });'), once(LS, ', needMs: ATTEMPT_NEED_MS });', ' });'), 'r4-fit'), ['r4·fit·slack']],
+    ['r4-after-unbounded (both: the completing call / the file\'s message in their own 20 s after a retry)', two(once(SS, 'const completeWindow = bounded ? ', 'const completeWindow = false ? '), once(LS, ', p.i, bounded ? messageWindow(', ', p.i, false ? messageWindow('), 'r4-after'), ['r4·after·slack', 'r4·after·lark']],
+    ['r4-later-unbounded (slack: a later file\'s first attempt in the base\'s windows)', two(once(SS, 'await uploadFile(f, convId, deadline, bounded);', 'await uploadFile(f, convId, deadline, false);'), LS, 'r4-later'), ['r4·later·slack']],
+  ];
+  for (const [what, m, pins] of rows) {
+    const r = m ? await wholeSendJudge(m.S, m.L) : null;
+    const red = r ? pins.filter((x) => r[x]) : null;
+    ok(Array.isArray(red) && red.length === pins.length, `control — ${what}: ${red === null ? 'the patch site is gone' : red.length === pins.length ? `red by ${red.join(' ')}` : `GREEN on ${pins.filter((x) => !red.includes(x)).join(' ')}`}`);
+  }
+  clearInterval(keepR);
+}
 AbortSignal.timeout = sigTimeout;
 
 console.log('⑦ patched-copy controls');
@@ -1090,7 +1152,7 @@ const keep = setInterval(() => {}, 1000);   // a send-gap wait inside a copy is 
 const ctl = [
   ['lark.js', 'msg_type: plan.msgType, content: JSON.stringify({ [plan.keyName]: up })', "msg_type: 'text', content: JSON.stringify({ text: up })", larkJudge, 'channels/lark.js', 'lark: the key sent as TEXT'],
   ['lark.js', 'parts.push(fail(e, label));', 'parts.push({ ...label, ok: true });', larkJudge, 'channels/lark.js', 'lark: a refusal DROPPED (reported landed)'],
-  ['slack.js', "try { await api('files.completeUploadExternal', c, { convId }); }", "try { await api('chat.postMessage', { channel: convId, text: url }, { convId }); }", slackJudge, 'channels/slack.js', 'slack: the upload URL sent as TEXT'],
+  ['slack.js', "try { await api('files.completeUploadExternal', c, { convId, windowOf: completeWindow }); }", "try { await api('chat.postMessage', { channel: convId, text: url }, { convId }); }", slackJudge, 'channels/slack.js', 'slack: the upload URL sent as TEXT'],
   ['slack.js', 'if (files.length && params.reply_broadcast) throw', 'if (false) throw', slackJudge, 'channels/slack.js', 'slack: thread+chat with a file NOT refused'],
   ['slack.js', 'parts.push(no, ...rest);', 'parts.push({ ...label, ok: true }, ...rest);', slackJudge, 'channels/slack.js', 'slack: a refusal DROPPED'],
 ];

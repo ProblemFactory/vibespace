@@ -17,6 +17,12 @@
  *     token — from `windowMs`: Slack's URL ask gets min(its own 20 s, what is left − UPLOAD_MIN_WINDOW_MS) (it leaves the
  *     bytes their minimum), the bytes / Lark's upload min(60 s, what is left); under UPLOAD_MIN_WINDOW_MS the request is
  *     not sent (no unit metered, no URL minted) and the upload stops on the budget, «(after n − 1 attempts (budget))».
+ *   - r4 (B-0207, the r3 acceptance's two minors): the fit check counts EVERY request a retry brings — `nextTry`'s
+ *     `needMs` = the minimum of each (Slack: the URL ask, the bytes and the completing call — 3 × UPLOAD_MIN_WINDOW_MS;
+ *     Lark: the upload and the file's message — 2 ×), so no adapter sleeps a wait it then cannot use; and the WHOLE send
+ *     fits the budget once a retry landed: each earlier request leaves the later ones their minimum (`leaveMs`), and the
+ *     completing call / the file's message / a later file's first attempt read their window from what is left
+ *     (`windowMs` with `bounded` — before any retry the base's own windows stand: the budget bounds only what a retry adds).
  * A failure that stopped says why in its words (`stopWords`): «(after 3 attempts)» (the count), «(after 2 attempts
  * (budget))» (the budget), «(after 1 attempt (budget) — Retry-After 30 s)» (a vendor wait that did not fit).
  * Reads no clock and no randomness of its own: every instant and the jitter source are handed in. Imports nothing.
@@ -49,19 +55,20 @@ function deadlineOf(budgetMs, now) {
  *  (`ownMs`, the base's — the bytes' / upload's UPLOAD_WINDOW_MS); a retry's is what the budget has left less what a LATER
  *  request of the same attempt needs (`leaveMs` — Slack's URL ask leaves the bytes UPLOAD_MIN_WINDOW_MS), capped at
  *  `ownMs`, and 0 when that is under UPLOAD_MIN_WINDOW_MS (r3: the request is not sent). */
-function windowMs(n, now, deadline = Infinity, { ownMs = UPLOAD_WINDOW_MS, leaveMs = 0 } = {}) {
-  if (n <= 1) return ownMs;
+function windowMs(n, now, deadline = Infinity, { ownMs = UPLOAD_WINDOW_MS, leaveMs = 0, bounded = false } = {}) {
+  if (n <= 1 && !bounded) return ownMs;   // r4: `bounded` — a retry landed earlier in this send: what follows reads the budget too
   const left = Number(deadline) - Number(now) - leaveMs;
   return left >= UPLOAD_MIN_WINDOW_MS ? Math.min(ownMs, left) : 0;
 }
 /** After attempt n failed in transport: `{ go: true, waitMs }` (wait, then attempt n + 1), or `{ go: false, stop }` where
  *  `stop` is 'count' (UPLOAD_ATTEMPTS made) or 'budget' (the wait the next attempt needs, the vendor's included, does not
  *  fit the send's budget or is longer than UPLOAD_WAIT_MAX_MS). */
-function nextTry({ n, retryAfterSec = null, random = Math.random, now = 0, deadline = Infinity } = {}) {
+function nextTry({ n, retryAfterSec = null, random = Math.random, now = 0, deadline = Infinity, needMs = UPLOAD_MIN_WINDOW_MS } = {}) {
   if (n >= UPLOAD_ATTEMPTS) return { go: false, stop: 'count' };
   const named = Number(retryAfterSec) > 0 ? Math.ceil(Number(retryAfterSec) * 1000) : 0;
   const waitMs = Math.max(backoffMs(n, random), named);
-  if (waitMs > UPLOAD_WAIT_MAX_MS || Number(now) + waitMs + UPLOAD_MIN_WINDOW_MS > Number(deadline)) return { go: false, stop: 'budget', waitMs };
+  // r4: `needMs` — every request the next attempt makes, at its minimum (the caller's count; one request by default)
+  if (waitMs > UPLOAD_WAIT_MAX_MS || Number(now) + waitMs + Math.max(UPLOAD_MIN_WINDOW_MS, Number(needMs) || 0) > Number(deadline)) return { go: false, stop: 'budget', waitMs };
   return { go: true, waitMs };
 }
 /** The words a stopped upload's failure ends with (appended to the vendor's own message). */
