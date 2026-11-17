@@ -8339,6 +8339,8 @@ export default {
   "Rebuilding the search index…": "検索インデックスを再構築しています…",
   "Could not rebuild: {why}": "再構築できませんでした：{why}",
   "Search conversations and files…": "会話とファイルを検索…",
+  // B-19bd: a search hit whose words another conversation wrote
+  "Another conversation": "別の会話",
   "Search everything": "すべてを検索",
   "Search everything…": "すべてを検索…",
   "{n} matches · {ms} ms": "{n} 件一致 · {ms} ms",

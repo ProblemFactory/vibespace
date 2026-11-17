@@ -31,6 +31,7 @@ const { parentPort, workerData, isMainThread } = require('worker_threads');
 const { answerMemory } = require('./worker-memory.js');
 const M = require('./search-model.js');
 const RC = require('./record-clear.js'); // PURE: the cleared sentence + the witness rule the ladder's judge uses (B-b291)
+const AN = require('./assistant-note.js'); // PURE (B-19bd): THE verdict «did the person type this record?» — personRow
 const crypto = require('crypto');
 
 if (isMainThread) throw new Error('search-index-worker runs only in a worker thread — the main thread never opens the search index');
@@ -38,10 +39,10 @@ if (isMainThread) throw new Error('search-index-worker runs only in a worker thr
 const { dbDir, dataReal, buffersDir = null } = workerData;
 const ctl = new Int32Array(workerData.ctl); // [0] CLOSED (set here) · [1] CLOSE asked
 const DB_FILE = path.join(dbDir, 'search.db');
-const SCHEMA_VERSION = 2; // 2 (B-b291): msg.grp — a schema change drops and rebuilds the index, so the rows written before it are judged too
+const SCHEMA_VERSION = 3; // 2 (B-b291): msg.grp — a schema change drops and rebuilds the index, so the rows written before it are judged too; 3 (B-19bd): msg.who
 const TOKENIZE = "tokenize = 'unicode61 remove_diacritics 2'";
 const SCHEMA = [
-  'CREATE TABLE msg (id INTEGER PRIMARY KEY, sid TEXT NOT NULL, host TEXT NOT NULL DEFAULT \'\', backend TEXT, mid TEXT NOT NULL, ts INTEGER, role TEXT, body TEXT NOT NULL, grp TEXT, UNIQUE (host, sid, mid))',
+  'CREATE TABLE msg (id INTEGER PRIMARY KEY, sid TEXT NOT NULL, host TEXT NOT NULL DEFAULT \'\', backend TEXT, mid TEXT NOT NULL, ts INTEGER, role TEXT, body TEXT NOT NULL, grp TEXT, who TEXT, UNIQUE (host, sid, mid))',
   'CREATE INDEX msg_grp ON msg (grp) WHERE grp IS NOT NULL',
   `CREATE VIRTUAL TABLE msg_fts USING fts5 (body, content = 'msg', content_rowid = 'id', ${TOKENIZE}, detail = full)`,
   'CREATE TABLE art (id INTEGER PRIMARY KEY, sessionId TEXT, host TEXT NOT NULL DEFAULT \'\', path TEXT NOT NULL, mtime INTEGER, kind TEXT, skipped TEXT, body TEXT NOT NULL DEFAULT \'\', UNIQUE (host, path))',
@@ -81,7 +82,7 @@ function openOnce() {
 // otherwise leave search for good. The step adds its columns; every conversation the backfill CAN read is marked to be read
 // again (its rows are replaced then — `migrated` cursors), and every user row is held as a possible peer card (grp '': the
 // whole-message rule judges it) until it is. A table set this release does not know is dropped and rebuilt as before.
-const ADDED_COLUMNS = [['grp', 'TEXT']];
+const ADDED_COLUMNS = [['grp', 'TEXT'], ['who', 'TEXT']]; // who (B-19bd): a migrated row says nothing until its transcript is read again
 const KNOWN_TABLES = ['msg', 'msg_fts', 'art', 'art_fts', 'cursor', 'meta'];
 function migrate() {
   const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
@@ -123,7 +124,7 @@ function open() {
     }
   }
   S = {
-    insMsg: db.prepare('INSERT OR IGNORE INTO msg (sid, host, backend, mid, ts, role, body, grp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+    insMsg: db.prepare('INSERT OR IGNORE INTO msg (sid, host, backend, mid, ts, role, body, grp, who) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     setBody: db.prepare('UPDATE msg SET body = ? WHERE id = ?'),
     ofGroup: db.prepare('SELECT id, mid, body, grp FROM msg WHERE grp = ?'),
     namingFts: db.prepare('SELECT m.id, m.mid, m.body, m.grp FROM msg_fts JOIN msg m ON m.id = msg_fts.rowid WHERE msg_fts MATCH ? AND instr(m.body, ?) > 0'),
@@ -253,6 +254,9 @@ function addCleared({ groups, whole = false } = {}) {
 /** A sweep that rewrote rows: the WAL's older page images (the words before) are folded into the file and dropped. */
 function checkpointAfter(n) { if (n > 0) { try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch { } } }
 
+/** B-19bd: WHO WROTE A USER ROW — null = the person typed it; else the person-row verdict's why (a peer, a notice, a
+ *  compaction summary…). The live door hands it (`who`: it judged the whole card); the backfill judges the card here. */
+const whoOf = (m) => { if (m.role !== 'user') return null; if (Object.prototype.hasOwnProperty.call(m, 'who')) return typeof m.who === 'string' && m.who ? m.who : null; const v = AN.personRow(m); return v.person ? null : v.why; };
 /** Rows (normalized cards) → inserted rows; a mid already indexed is skipped (UNIQUE). */
 function insertMessages(sid, host, backend, msgs) {
   let n = 0;
@@ -262,7 +266,7 @@ function insertMessages(sid, host, backend, msgs) {
     const body = judgeRow(mid, M.textOf(m), grp);
     if (!body || !mid) continue;
     if (partial) insertedWhilePartial++;
-    const r = S.insMsg.run(sid, host || '', backend || null, mid, Number(m.ts) || 0, m.role, body, grp);
+    const r = S.insMsg.run(sid, host || '', backend || null, mid, Number(m.ts) || 0, m.role, body, grp, whoOf(m));
     if (r.changes) { S.ftsMsg.run(r.lastInsertRowid, M.segment(body)); n++; }
   }
   return n;
@@ -381,11 +385,11 @@ function search({ q = '', scope = 'all', limit = 50, offset = 0 } = {}) {
   }
   groups.sort((x, y) => (x.best - y.best) || (y.ts - x.ts));
   out.total = groups.reduce((n, g) => n + g.n, 0);
-  const msgHits = db.prepare('SELECT m.sid, m.host, m.backend, m.mid, m.ts, m.role, m.body, bm25(msg_fts) AS score FROM msg_fts JOIN msg m ON m.id = msg_fts.rowid WHERE msg_fts MATCH ? AND m.sid = ? AND m.host = ? ORDER BY score, m.ts DESC LIMIT ?');
+  const msgHits = db.prepare('SELECT m.sid, m.host, m.backend, m.mid, m.ts, m.role, m.body, m.who, bm25(msg_fts) AS score FROM msg_fts JOIN msg m ON m.id = msg_fts.rowid WHERE msg_fts MATCH ? AND m.sid = ? AND m.host = ? ORDER BY score, m.ts DESC LIMIT ?');
   const artHits = db.prepare("SELECT a.sessionId, a.host, a.path, a.mtime, a.kind, a.body, bm25(art_fts) AS score FROM art_fts JOIN art a ON a.id = art_fts.rowid WHERE art_fts MATCH ? AND COALESCE(a.sessionId, '') = ? AND a.host = ? ORDER BY score, a.mtime DESC LIMIT ?");
   for (const g of groups.slice(off, off + lim)) {
     out.groups.push({ kind: g.kind, sid: g.sid || null, host: g.host, count: g.n });
-    if (g.kind === 'message') for (const r of msgHits.iterate(match, g.sid, g.host, PER)) out.hits.push({ kind: 'message', sid: r.sid, host: r.host, backend: r.backend, uuid: r.mid, ts: r.ts, role: r.role, snippet: M.snippetOf(r.body, terms) });
+    if (g.kind === 'message') for (const r of msgHits.iterate(match, g.sid, g.host, PER)) out.hits.push({ kind: 'message', sid: r.sid, host: r.host, backend: r.backend, uuid: r.mid, ts: r.ts, role: r.role, ...(r.role === 'user' && r.who ? { other: r.who } : {}), snippet: M.snippetOf(r.body, terms) }); // other (B-19bd): nobody typed it — whose words it is
     else for (const r of artHits.iterate(match, g.sid, g.host, PER)) out.hits.push({ kind: 'artifact', sessionId: r.sessionId, host: r.host, path: r.path, mtime: r.mtime, fileKind: r.kind, snippet: M.snippetOf(r.body, terms) });
   }
   return { ...out, took: Date.now() - t0 };

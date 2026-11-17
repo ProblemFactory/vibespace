@@ -30,6 +30,7 @@ const { Worker } = require('worker_threads');
 const { trackWorker } = require('../worker-memory.js');
 const { exitWithout } = require('./exit-hook.js'); // THE re-raise past a join bound (lane usage-fold-worker-exit-hook)
 const M = require('../search-model.js');
+const AN = require('../assistant-note.js'); // PURE (B-19bd): the person-row verdict a live row carries into the index
 
 const REASON = Object.freeze({ OFF: 'not-started', STARTING: 'starting', NO_SQLITE: 'no-node-sqlite', LOCKED: 'locked-by-another-server', WRITE_FAILED: 'write-failed',
   EXITED: 'worker-exited', CLOSED: 'closed', UNDER_DATA: 'index-under-data', NOT_LOCAL: 'not-local-disk' });
@@ -170,6 +171,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
   const liveTimers = new Map();
   let liveQueued = 0;
   const sidOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
+  const whoWrote = (m) => { const v = AN.personRow(m); return v.person ? null : v.why; };
   /** Called by session-stdout's feedLive gate for every live record: the
    *  session's NEW complete cards go to the index ~1.5 s later. Never throws. */
   function noteLive(session) {
@@ -196,7 +198,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
       for (const i of walk.send) {
         const m = msgs[i];
         const body = M.textOf(m);
-        if (body) out.push({ mid: m.id, ts: m.ts, role: m.role, content: [{ type: 'text', text: body }], ...(m.peerGroup ? { peerGroup: { id: m.peerGroup.id } } : m.originKind === 'peer-message' ? { peerCard: true } : {}) });   // B-b291: the group a card is of (a peer card that names none: peerCard)
+        if (body) out.push({ mid: m.id, ts: m.ts, role: m.role, content: [{ type: 'text', text: body }], ...(m.peerGroup ? { peerGroup: { id: m.peerGroup.id } } : m.originKind === 'peer-message' ? { peerCard: true } : {}), ...(m.role === 'user' ? { who: whoWrote(m) } : {}) });   // B-b291: the group a card is of (a peer card that names none: peerCard); B-19bd: who wrote it, judged on the whole card
         cur.sent.add(m.id);
       }
       cur.from = walk.from;

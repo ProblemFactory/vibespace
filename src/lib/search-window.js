@@ -15,6 +15,10 @@ import { registerCommand, registerKeybinding, registerMenuItem } from './contrib
 import { enterSubmits } from './chat-enter-keys.js';
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: the sentence a cleared group message's row holds (B-b291)
 import { clearedText } from './record-clear-ui.js';
+// B-19bd: a user-role hit the person never typed says whose words they are — the index keeps the person-row verdict
+// (src/assistant-note.js personRow, the minimap list's and the chat renderer's ONE answer) as the hit's `other`
+const otherWord = (why) => (why === 'peer' ? t('Another conversation') : why === 'notice' || why === 'note' || why === 'auto-resume' ? t('VibeSpace') : t('System'));
+const hitWho = (h) => (h.role === 'user' ? (h.other ? otherWord(h.other) : t('You')) : t('Agent'));
 
 const SCOPES = [['all', 'All'], ['chats', 'Conversations'], ['artifacts', 'Files']];
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -138,7 +142,7 @@ export function openSearchWindow(app, opts = {}) {
       const addHit = (h) => {
         const k = hitKey(h);
         const row = oldRows.get(k) || el('div', 'search-hit'); row._key = k; row.setAttribute('role', 'option'); row.classList.remove('active');
-        const meta = el('span', 'search-hit-meta', h.kind === 'artifact' ? h.path.split('/').pop() : `${fmtTime(h.ts)} · ${h.role === 'user' ? t('You') : t('Agent')}`);
+        const meta = el('span', 'search-hit-meta', h.kind === 'artifact' ? h.path.split('/').pop() : `${fmtTime(h.ts)} · ${hitWho(h)}`);
         if (h.kind === 'artifact') meta.title = h.path;
         row.replaceChildren(meta, snippetNode(h.snippet || {}));
         row.onclick = () => activate(row._hit);

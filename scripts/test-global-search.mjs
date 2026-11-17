@@ -408,7 +408,7 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     return m;
   };
   const mg = await migrateScene();
-  ok(mg.migrated === 'schema 1 → 2, rows kept' && mg.kept === 1 && !!mg.lastBuild, `an index written by the release (schema 1) is MIGRATED, not dropped: a conversation no transcript reader can read stays found, the index counts as built (${mg.migrated})`, mg);
+  ok(mg.migrated === 'schema 1 → 3, rows kept' && mg.kept === 1 && !!mg.lastBuild, `an index written by the release (schema 1) is MIGRATED, not dropped: a conversation no transcript reader can read stays found, the index counts as built (${mg.migrated})`, mg);
   ok(mg.reread && mg.stale === 0 && mg.fresh === 1, 'a conversation its transcript can give again is read again, its rows replaced (the release\'s row gone, the transcript\'s words found)', mg);
   // the controls: the change removed ⇒ the legs go RED
   const W2 = read('src/search-index-worker.js'), GE2 = read(GE_REL), O2 = read('src/server/search-index.js');
@@ -478,6 +478,44 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     `the count line says the index is building beside «No matches» / «N matches» until one build finished; a periodic walk over a whole index adds nothing («${running}» · «${notYet}» · «${notYet0}» · «${built}» · «${walking}»)`);
   ok(/status\.textContent = searchStatusText\(r\);/.test(read('src/lib/search-window.js')) && /app\.ws\.onGlobal\(onClear\)/.test(read('src/lib/search-window.js')) && /app\.ws\.offGlobal\(onClear\)/.test(read('src/lib/search-window.js')),
     'the window paints that line, and asks an open query again when a group message is cleared anywhere (listener removed with the window)');
+}
+console.log('§11 who wrote a hit (B-19bd): a user row the person never typed carries the person-row verdict');
+{
+  const N = require(path.join(REPO, 'src/normalizers.js'));
+  const AN = require(path.join(REPO, 'src/assistant-note.js'));
+  const proj = path.join(home, '.claude/projects/-w-who'); fs.mkdirSync(proj, { recursive: true });
+  const WS = '0f5e1a00-0000-4000-8000-00000000d0a1';
+  const peer = 'Another Claude session sent a message:\n#### Group "ops" (g-0a0b0c0d) — 1 new since your last report\n- [11-17T22:50Z] Ada: the saffronwick plan is ready\nReply: vibespace-msg send g-0a0b0c0d "..."\n\nThis came from another Claude session — not typed by your user.';
+  const recs = [
+    { type: 'user', uuid: 'w-typed', sessionId: WS, timestamp: new Date(2e12).toISOString(), promptSource: 'sdk', message: { role: 'user', content: 'my own saffronwick question' } },
+    { type: 'user', uuid: 'w-peer', sessionId: WS, timestamp: new Date(2e12 + 1000).toISOString(), isMeta: true, origin: { kind: 'peer', from: 'unknown' }, message: { role: 'user', content: peer } },
+    { type: 'user', uuid: 'w-compact', sessionId: WS, timestamp: new Date(2e12 + 2000).toISOString(), isCompactSummary: true, message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context. saffronwick notes follow.' } },
+  ];
+  fs.writeFileSync(path.join(proj, WS + '.jsonl'), recs.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const run = async (workerFile = null) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-who-'));
+    const x = SI.use(SI.create({ dataDir: d, homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9, liveDebounceMs: 20, ...(workerFile ? { workerFile } : {}) })); x.start();
+    await x.call('indexConversation', { sid: WS, backend: 'claude', cwd: '/w/who' });
+    // LIVE: a peer card the ladder fed (no group) and a background-task wake
+    const s = { backend: 'claude', backendSessionId: '0f5e1a00-0000-4000-8000-00000000d0a2', host: '', _normEpoch: 1, _historyLoaded: true, _normalizer: N.createMessageManager('claude', 'w-who') };
+    s._normalizer.injectPeerCard({ fromName: 'Ada', text: 'saffronwick from a peer', kind: 'peer' });
+    s._normalizer.processLive({ type: 'user', uuid: 'w-task', origin: { kind: 'task-notification' }, message: { role: 'user', content: '<task-notification>saffronwick done</task-notification>' } });
+    SI.noteLive(s); await new Promise((r) => setTimeout(r, 40)); await x.call('status', {});
+    const hits = (await x.search({ q: 'saffronwick', scope: 'chats', limit: 50 })).hits.filter((h) => h.role === 'user');
+    await x.close({ final: true });
+    const by = (re) => hits.find((h) => re.test(h.snippet.text));
+    return { n: hits.length, typed: by(/my own/), peer: by(/plan is ready/), compact: by(/ran out of context/), live: by(/from a peer/), task: by(/done/) };
+  };
+  const o = await run();
+  ok(o.n === 5 && o.typed && !o.typed.other && o.peer && o.peer.other === 'peer' && o.compact && o.compact.other === 'compact', `the backfill: a typed row has no «other»; a peer delivery says peer, a compaction summary compact (${o.n} user hits)`, o);
+  ok(o.live && o.live.other === (AN.personRow({ role: 'user', originKind: 'peer-message', peerVia: 'peer', peerFrom: 'Ada', content: [{ type: 'text', text: 'saffronwick from a peer' }] }).why) && o.task && o.task.other === 'notification', 'the live door: the verdict judged on the WHOLE card (the index gets only its text) — a live peer card, a background-task wake', o);
+  const W3 = read('src/search-index-worker.js');
+  const NO = "    const r = S.insMsg.run(sid, host || '', backend || null, mid, Number(m.ts) || 0, m.role, body, grp, whoOf(m));";
+  ok(W3.split(NO).length === 2, 'the control\'s anchor is in the worker once');
+  const oc = await run(MUT.write('src/search-index-worker.js', W3.replace(NO, NO.replace('whoOf(m)', 'null')), 'nowho'));
+  ok(oc.peer && !oc.peer.other && oc.live && !oc.live.other, 'CONTROL (the verdict not stored): every user hit is drawn as the person\'s again — the leg goes RED', oc);
+  const SWT = read('src/lib/search-window.js');
+  ok(/const hitWho = \(h\) => \(h\.role === 'user' \? \(h\.other \? otherWord\(h\.other\) : t\('You'\)\) : t\('Agent'\)\);/.test(SWT) && SWT.includes('${fmtTime(h.ts)} · ${hitWho(h)}'), 'the search window labels a hit by it: You only for the person\'s own words');
 }
 await ix.close({ final: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -8340,6 +8340,8 @@ export default {
   "Rebuilding the search index…": "正在重建搜索索引…",
   "Could not rebuild: {why}": "无法重建：{why}",
   "Search conversations and files…": "搜索对话和文件…",
+  // B-19bd: a search hit whose words another conversation wrote
+  "Another conversation": "其他对话",
   "Search everything": "全局搜索",
   "Search everything…": "全局搜索…",
   "{n} matches · {ms} ms": "{n} 条匹配 · {ms} 毫秒",
