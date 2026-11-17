@@ -518,7 +518,8 @@ console.log('lane bl-msg B-be02: a secret NAME=value INSIDE a prose line — the
   const SRC = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
   const V = crypto.randomBytes(8).toString('hex'), N = String(10000000 + crypto.randomInt(89999999));
   // the row's measured cases (0 redactions on the release) + a public head before a holder mid-line
-  const PROSE = [`A prose line: API_KEY=${V} should be hidden.`, `set it so: DB_PASSWORD=${N}`, `status: token=${V} rest`, `name: build, path: /x, secret: ${V} rest`];
+  // r2 (the adversarial read G1 / G2 / G5): the wrapped forms agents write and a flag that carries an assignment; the base hid none of these
+  const PROSE = [`A prose line: API_KEY=${V} should be hidden.`, `set it so: DB_PASSWORD=${N}`, `status: token=${V} rest`, 'set `DB_PASSWORD=' + N + '` then', `"API_KEY=${V}"`, `**API_KEY=${V}** x`, `<API_KEY=${V}>`, `gcloud run deploy --set-env-vars=API_KEY=${V},DB_PASSWORD=${N}`];
   const judge = (SSx, o) => PROSE.map((t) => ({ t, out: SSx.redactSecrets(t, o).text }));
   const leaks = (rows) => rows.filter((x) => x.out.includes(V) || x.out.includes(N));
   for (const [mode, o] of [['line', {}], ['message', { message: true }]]) {
@@ -531,11 +532,14 @@ console.log('lane bl-msg B-be02: a secret NAME=value INSIDE a prose line — the
   // a vault mark (the live-value masker's placeholder) is never re-opened: the give-back is the blanks only, never the head's `:`
   const MARK = 'see «<[vault:apikey:k]>» and [vault:agent:ops/deploy] here';
   ok(SS.redactSecrets(MARK).text === MARK && SS.redactSecrets(MARK, { message: true }).text === MARK, 'a vault mark stays whole in both modes (its `vault:` head gives back no colon)');
-  const COLON = SRC.replace("    KV_HEAD.lastIndex = headEnd - (m[5].length - m[5].trimEnd().length);\n", "    KV_HEAD.lastIndex = headEnd - ((m[5].length - m[5].trimEnd().length) || (m[5].endsWith(':') ? 1 : 0));\n");
+  const COLON = SRC.replace("(m[5].endsWith('=') ? 1 : 0));   // r2", "(/[:=]$/.test(m[5]) ? 1 : 0));   // r2");
   ok(COLON !== SRC && mutantCopies('blmbe2', REPO).load('src/secret-shapes.js', COLON, 'colon-back').redactSecrets(MARK).text !== MARK, 'RED CONTROL (the colon given back too — the first cut): the vault mark is re-masked — the leg above goes red');
   ok(SS.redactSecrets(SS.redactSecrets(PROSE[0]).text).text === SS.redactSecrets(PROSE[0]).text, 'idempotent');
+  ok(SS.redactSecrets('set `DB_PASSWORD=' + N + '` then', { message: true }).text === 'set `DB_PASSWORD=' + REDACTED + '` then' && SS.redactSecrets(`**API_KEY=${V}** x`, { message: true }).text === `**API_KEY=${REDACTED}** x`, 'MESSAGE MODE: the wrapper\'s closing twin stays the prose\'s (a backtick, the bold marks)');
+  const noOpen = mutantCopies('blmbe3', REPO).load('src/secret-shapes.js', SRC.replace("/(^|[\\s,;{(\\[:/=`\"'*<])(-{0,2})", "/(^|[\\s,;{(\\[:/])(-{0,2})"), 'no-new-openers');
+  ok(SRC.includes("/(^|[\\s,;{(\\[:/=`\"'*<])(-{0,2})") && leaks(judge(noOpen, {})).length >= 5, `RED CONTROL (the base's openers): the wrapped forms and the flag's assignment leak again (${leaks(judge(noOpen, {})).length}/${PROSE.length})`);
   // RED CONTROL: the give-back removed — the row's two sentences leak again in both modes
-  const GIVE = "    KV_HEAD.lastIndex = headEnd - (m[5].length - m[5].trimEnd().length);\n";
+  const GIVE = "    KV_HEAD.lastIndex = headEnd - (bl || (m[5].endsWith('=') ? 1 : 0));   // r2: a bare `=` is given back (an opener now) — never a `:`\n";
   ok(SRC.split(GIVE).length === 2, 'the control finds its line (the give-back)');
   const noBack = mutantCopies('blmbe', REPO).load('src/secret-shapes.js', SRC.replace(GIVE, ''), 'no-give-back');
   ok(leaks(judge(noBack, {})).length >= 3 && leaks(judge(noBack, { message: true })).length >= 3, `RED CONTROL (the head keeps its trailing blank): the prose lines leak again (${leaks(judge(noBack, {})).length}/${PROSE.length}) — the legs above go red`);

@@ -211,7 +211,8 @@ function redactContinuations(text, say) {
 // decided in code (a regex that consumed the value either stopped a bare value at a space — `Authorization: Bearer
 // abc` kept `abc` — or swallowed the next key of `a=1 token=x`): a quoted value to its closing quote on the line, a
 // bare value to the end of its line. Round 23 (MAJOR): the `,})]` cut applies ONLY inside a JSON document (a quoted key `"name":`) and the typed-value skip ONLY under a `:` key (JSON / YAML, where a parser TYPES the scalar) — NEVER on a dotenv / shell / `--flag=value` / bare `NAME=value` line, where every value is a STRING redacted WHOLE to the line end (`DB_PASSWORD=84726193` and `DB_PASSWORD=Xy)9#kq]Lm2v` hide whole; r21/r22 ran the cut and the number rule on every head and leaked the tail / the numeric password). A space is NOT a delimiter (`Bearer abc`, `token=a ms=5` keep reading); a stored head hides more, never less
-const KV_HEAD = /(^|[\s,;{(\[:/])(-{0,2})(["']?)([A-Za-z_][A-Za-z0-9_.\-]{0,80})\3([ \t]*[:=][ \t]*)/gm;   // verify r2 F4: `:` and `/` open a name too (.npmrc's `//registry…/:_authToken=<uuid>`)
+const KV_HEAD = /(^|[\s,;{(\[:/=`"'*<])(-{0,2})(["']?)([A-Za-z_][A-Za-z0-9_.\-]{0,80})\3([ \t]*[:=][ \t]*)/gm;   // lane bl-msg B-be02 r2: `=` and a prose wrapper (` " ' * <) open a name too — «`DB_PASSWORD=…`», «--set-env-vars=API_KEY=…»
+const OPENER_TWIN = new Map([['`', '`'], ['"', '"'], ["'", "'"], ['*', '*'], ['<', '>']]);   // B-be02 r2: in a message the wrapper's closing twin stays the prose's   // verify r2 F4: `:` and `/` open a name too (.npmrc's `//registry…/:_authToken=<uuid>`)
 /** Is the character at `i` preceded by an ODD run of backslashes (escaped)? */
 function escapedAt(text, i) { let k = 0; while (i - 1 - k >= 0 && text[i - 1 - k] === '\\') k++; return k % 2 === 1; }
 function redactKv(text, { message = false, say = null } = {}) {
@@ -223,7 +224,8 @@ function redactKv(text, { message = false, say = null } = {}) {
     // lane bl-msg B-be02: a PUBLIC head gives back its trailing BLANKS — the NEXT name's opener — so «A prose line: API_KEY=…»
     // and «set it so: DB_PASSWORD=…» judge the second name (its opener was eaten as the first one's separator: 0 redactions on the
     // release). Never its `:`: a vault mark `[vault:apikey:k]` would open `apikey:` and lose its entry; every holder path sets lastIndex itself
-    KV_HEAD.lastIndex = headEnd - (m[5].length - m[5].trimEnd().length);
+    const bl = m[5].length - m[5].trimEnd().length;
+    KV_HEAD.lastIndex = headEnd - (bl || (m[5].endsWith('=') ? 1 : 0));   // r2: a bare `=` is given back (an opener now) — never a `:`
     if (!holderName(m[4])) continue;                       // the next key may start right after this head; lane mask-value-shape: THE NAME GRAMMAR
     const q = text[headEnd] === '"' || text[headEnd] === "'" ? text[headEnd] : '';
     const flagEnd = knownFlagEnd(text, m[4], headEnd, q);           // lane bl-msg B-3e61: a known flag's closed-list value is public — walk on past it
@@ -259,6 +261,8 @@ function redactKv(text, { message = false, say = null } = {}) {
       if (!first.startsWith('-----BEGIN')) {
         const w = first.toLowerCase();
         if (AUTH_SCHEMES.has(w) || SECRET_WORDS.has(w)) { let p2 = p; while (p2 < valEnd && isBlankCode(text.charCodeAt(p2))) p2++; if (p2 < valEnd) p = tokEnd(p2); }
+        const twin = OPENER_TWIN.get(m[1]);
+        if (twin) while (p > s0 + 1 && text[p - 1] === twin) p--;   // B-be02 r2: «`DB_PASSWORD=v`» keeps its closing backtick
         valEnd = p - queryTail(text, headEnd, p, opens(text, headEnd));
       }
     }
