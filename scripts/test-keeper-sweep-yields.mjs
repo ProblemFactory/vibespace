@@ -300,7 +300,7 @@ console.log('— ⑧ F5: one registry write and one broadcast per PIECE of the w
 }
 
 console.log('— ⑨ «gone» is a fact the keeper has SEEN: a live daemon whose fact is missing is still closed by the CLI');
-const unseen = async (Km, shape) => {
+const unseen = async (Km, shape, waitMs = 1500) => {   // waitMs: how long a close may take to end the daemon (a mutant that never closes waits it whole)
   const proc = spawn('sleep', ['30'], { stdio: 'ignore' });
   await new Promise((res) => setTimeout(res, 50));
   const id = 'bp-1ffffffd', key = `${PARENT}.997`;
@@ -309,7 +309,7 @@ const unseen = async (Km, shape) => {
   closeHook = () => { try { process.kill(proc.pid, 'SIGTERM'); } catch { /* gone */ } };   // the CLI's own close ends its daemon
   try {
     const s = await sweep(Km, registry(0, { live: true, extra }), { stallMs: 0 });
-    const ended = await new Promise((r) => { if (proc.exitCode !== null || proc.signalCode) return r(true); proc.once('exit', () => r(true)); setTimeout(() => r(false), 1500); });
+    const ended = await new Promise((r) => { if (proc.exitCode !== null || proc.signalCode) return r(true); proc.once('exit', () => r(true)); setTimeout(() => r(false), waitMs); });
     return { closes: s.closes, removed: s.removed, ended };
   } finally { closeHook = null; try { proc.kill('SIGKILL'); } catch { /* gone */ } }
 };
@@ -321,7 +321,7 @@ const unseen = async (Km, shape) => {
   const oldJudge = ksrc.replace('!stopping.has(profileId) && daemonSeenGone(rec0)) {', '!stopping.has(profileId) && daemonGone(rec0)) {');
   ok(oldJudge !== ksrc, 'MUTANT (an absent fact read as «gone», the old judgment): the patch applies');
   if (oldJudge !== ksrc) {
-    const um = await unseen(M.load('src/server/browser-keeper.js', oldJudge, 'absent-is-gone'), 'no pid');
+    const um = await unseen(M.load('src/server/browser-keeper.js', oldJudge, 'absent-is-gone'), 'no pid', 300);   // no close is made: 300 ms shows it left running
     ok(um.closes === 0 && !um.ended, `MUTANT (the old judgment) is RED on the law: ${um.closes} CLI starts, the live daemon ${um.ended ? 'ended' : 'left running'} — a live browser nobody ends`, um);
   }
 }
