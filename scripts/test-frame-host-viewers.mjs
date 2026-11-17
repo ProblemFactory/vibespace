@@ -45,6 +45,7 @@ const [PORT, CDP_PORT] = await freePorts(2);
 const BASE = `http://127.0.0.1:${PORT}`;
 const PW = 'pw-fhv-' + Math.random().toString(36).slice(2, 10);
 const root = mintRoot('fhview-smoke'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const prof = scratch('fhview-chrome');
 const FX = scratch('fhview-fx');
 const OUT = scratch('fhview-out');
@@ -97,7 +98,7 @@ execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 fs.mkdirSync(path.join(root, 'home'), { recursive: true }); // the hub's HOME lies in its root (hub-boot.mjs)
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: PW, HOME: path.join(root, 'home') } });
 const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1400,950',
-  '--disable-background-timer-throttling', `--user-data-dir=${prof}`, 'about:blank'], { stdio: 'ignore' });
+  '--disable-background-timer-throttling', `--user-data-dir=${prof}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }
   for (const d of [prof, FX, OUT]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }

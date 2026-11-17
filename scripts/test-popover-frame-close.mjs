@@ -24,7 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, takeCspReports, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, takeCspReports } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for the server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -35,6 +35,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT] = await freePorts(2);
 const root = mintRoot('popover-frame-smoke'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const PROFILE = scratch('popover-frame-chrome');
 const DESIGN = scratch('popover-frame-design'); // the artboards the Design window draws
 let failed = 0;
@@ -62,10 +63,9 @@ fs.mkdirSync(path.join(root, 'home'), { recursive: true }); // the hub's HOME li
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', HOME: path.join(root, 'home') } });
 // a REAL MOUSE (test-gear-menu's lesson): headless linux chrome answers hover:none without these blink settings
 const REAL_MOUSE = '--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4';
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1280,800', REAL_MOUSE, '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1280,800', REAL_MOUSE, '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
-  try { endRootedProcesses(PROFILE); } catch {} // §57b: whatever Chrome started under its own root ends with it; the hub's are hub-boot.mjs's
   for (const d of [PROFILE, DESIGN]) try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} // Chrome releases its profile a beat after SIGKILL
 };
 process.on('exit', cleanup);

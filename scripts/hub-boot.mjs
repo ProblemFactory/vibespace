@@ -35,9 +35,9 @@
 //        process), and again just before the signal: one that changed is left alone and SAID. Passes repeat (≤ 3) until one
 //        lists nothing new — a process forked between a list and its signal is caught by the next.
 //     Before ANY read that can wait on a process (its environ, cwd, argv), the cheap facts come first: its owner (another user's
-//     process is never read) and its state from the stat file — a process in an uninterruptible wait (state D, e.g. wedged on a
-//     network mount) holds the lock an environ read waits on, so it is NOT read: it is retried by the next pass and, still D at
-//     the last, SAID and left.
+//     process is never read) and its state from the stat file — of the leader AND of every thread (/proc/<pid>/task/<tid>/stat, which
+//     never blocks): a process with any thread in an uninterruptible wait (state D, e.g. wedged on a network mount) holds the lock an
+//     environ read waits on, so it is NOT read: it is retried by the next pass and, still D at the last, SAID and left.
 //   At exit (and after an armed signal): in every minted root, each hub, everything rooted; then ONE mount check — a mount point
 //     inside the root, or a mount table that cannot be read, stops BOTH removals and is said — then every git worktree directly in
 //     it (removed THROUGH GIT, with a scrubbed env), then the root. Synchronous end: it runs inside an 'exit' handler.
@@ -54,6 +54,9 @@
 //   6. Every wait is a bounded poll on a named effect.
 //   7. Two hubs that must outlive each other's stop take a root each.
 //   8. The env handed to startHub starts from strippedEnv() — no inherited daemon root, no vendor keys.
+//   9. A browser or ANY other process a suite starts itself carries a HOME inside the root (主开发 10:04Z): the helper then ends it
+//      by its environ and start time BEFORE the root is removed. The suite's own kill by its handle stays the first try; a suite
+//      on the helper calls no rooted end of its own (scratch.mjs endRootedProcesses / endDaemonsOf) — the helper IS the rooted end.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -133,31 +136,36 @@ export function strippedEnv(env = process.env) {
 const MINTED = new Map();   // resolved root → { hubs: [] } — this process's mints only
 let armed = false;
 const SIGNALS = ['SIGTERM', 'SIGINT', 'SIGHUP'];
+const OWN = {};   // the helper's own listener per signal — the only one it ever removes
+let bySignal = false;   // the end runs on a signal's road: the gate's TERM → KILL window is ten seconds
 
 /** A fresh root for one suite's hub(s): `/tmp/vs-<name>-h??????`, created here (mkdtemp), stamped with this run's record. The
- *  first mint arms the end: the exit event, and each of SIGTERM / SIGINT / SIGHUP → exit(128 + its number). */
+ *  first mint arms the end: the exit event, and each of SIGTERM / SIGINT / SIGHUP — the same end, then the same signal raised on
+ *  this process so it dies by it (endBySignal). */
 export function mintRoot(name) {
   if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(String(name))) throw new Error(`hub-boot: mintRoot(): bad name ${JSON.stringify(name)}`);
   const root = real(fs.mkdtempSync(path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}${name}-h`)));
   const why = refusalOf(root);
   if (why) { fs.rmdirSync(root); throw new Error(`hub-boot: the minted root ${root} is ${why} — refused`); }
   stampScratchRun(root);
-  MINTED.set(root, { hubs: [] });
+  MINTED.set(root, { hubs: [], since: bootTicks() - 2 });   // processes started before the mint cannot carry this root (rule 1)
   if (!armed) {
     armed = true;
     process.on('exit', endAll);
-    for (const sig of SIGNALS) process.on(sig, () => endBySignal(sig));
+    for (const sig of SIGNALS) { OWN[sig] = () => endBySignal(sig); process.on(sig, OWN[sig]); }
   }
   return root;
 }
 
-/** An armed signal: the same end the exit runs (every 'exit' listener — this helper's end among them), then the signal's own
- *  listeners removed and the SAME signal raised on this process, so it dies by it and its parent reads the signal. */
+/** An armed signal: the same end the exit runs (every 'exit' listener — this helper's end among them — and the end once more, so
+ *  a suite listener that throws first cannot skip it), then the helper's own listener removed and the SAME signal raised on this
+ *  process, so it dies by it and its parent reads the signal (a suite's own listener left in place answers it instead: the code). */
 function endBySignal(sig) {
   const code = 128 + os.constants.signals[sig];
-  process.exitCode = code;
-  try { process.emit('exit', code); } catch { /* the end is best effort at a signal */ }
-  process.removeAllListeners(sig);
+  process.exitCode = code; bySignal = true;
+  try { process.emit('exit', code); } catch { /* a suite's 'exit' listener threw — the end still runs, below */ }
+  try { endAll(); } catch { /* idempotent: a no-op when the emit already ran it */ }
+  process.removeListener(sig, OWN[sig]);   // only the helper's own listener (a suite's, registered before the mint, stays)
   process.kill(process.pid, sig);
   process.exit(code);   // only when the signal did not end the process (its disposition was not the default)
 }
@@ -175,8 +183,16 @@ function ownRoot(root) {
 function statFields(pid, procRoot = '/proc') {
   try { const st = fs.readFileSync(`${procRoot}/${pid}/stat`, 'latin1'); const f = st.slice(st.lastIndexOf(')') + 2).split(' '); return { state: f[0], starttime: Number(f[19]) }; } catch { return null; }
 }
+/** Any thread of `pid` in an uninterruptible wait (state D) — its task/<tid>/stat files, which never block. */
+function anyThreadStuck(pid, procRoot = '/proc') {
+  let tids = []; try { tids = fs.readdirSync(`${procRoot}/${pid}/task`); } catch { return false; }
+  for (const tid of tids) { const f = statFields(`${pid}/task/${tid}`, procRoot); if (f && f.state === 'D') return true; }
+  return false;
+}
 /** A /proc pid's start time — null when it is gone or unreadable. */
 export function starttimeOf(pid, procRoot = '/proc') { const f = statFields(pid, procRoot); return f ? f.starttime : null; }
+/** Now, in the stat file's clock: ticks (USER_HZ = 100) since boot — a process's start time compares to it. 0 when unreadable. */
+const bootTicks = () => { try { return Math.floor(Number(fs.readFileSync('/proc/uptime', 'utf8').split(' ')[0]) * 100); } catch { return 0; } };
 const commOf = (pid, procRoot) => { try { return fs.readFileSync(`${procRoot}/${pid}/comm`, 'utf8').trim(); } catch { return '?'; } };
 
 /** Inside `r` on RESOLVED paths: the value as written AND what it resolves to both lie in `r` — a link out of the root is not
@@ -213,15 +229,19 @@ export function rootedProcesses(root, { procRoot = '/proc', self = process.pid, 
     try { const st = fs.readFileSync(`${procRoot}/${q}/stat`, 'latin1'); q = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]); } catch { break; }
   }
   const out = [];
+  // ONLY processes younger than the root (rule 1: the root is minted before anything of the suite exists — an older process's
+  // environ was fixed before this root's name existed): on the real /proc, a start time before the mint is skipped before any
+  // further read — the judgement reads a handful of processes, not the box's thousands
+  const since = procRoot === '/proc' ? (MINTED.get(r)?.since || 0) : 0;
   let pids = []; try { pids = fs.readdirSync(procRoot).filter((d) => /^\d+$/.test(d)).map(Number); } catch { return out; }
   for (const pid of pids) {
     if (skip.has(pid)) continue;
     // the cheap facts FIRST — the owner, then the state and start time from the stat file — before any read that can wait
     try { if (fs.lstatSync(`${procRoot}/${pid}`).uid !== uid) continue; } catch { continue; }   // another user's: never read
     const f = statFields(pid, procRoot);
-    if (!f) continue;
+    if (!f || f.starttime < since) continue;
     const st0 = f.starttime;
-    if (f.state === 'D') { if (stuck) stuck.push({ pid, starttime: st0 }); continue; }   // an uninterruptible wait: its environ is not read
+    if (f.state === 'D' || anyThreadStuck(pid, procRoot)) { if (stuck) stuck.push({ pid, starttime: st0 }); continue; }   // an uninterruptible wait: its environ is not read
     const j = rootedVia(pid, r, procRoot);
     if (!j.via && !j.near) continue;
     if (starttimeOf(pid, procRoot) !== st0) continue;   // the judgement read another process than the start time did
@@ -289,7 +309,7 @@ export function endHub({ pid, starttime, root, hubOnly = false, signal = 'SIGKIL
 
 /** Every git worktree directly in `root` (a `.git` FILE naming its gitdir) removed through git — its record in the checkout's
  *  .git/worktrees goes with it. Synchronous (the exit hook). → the dirs removed. */
-export function removeWorktrees(root) {
+export function removeWorktrees(root, { timeout = bySignal ? 5000 : 60000 } = {}) {   // under the gate's 10 s TERM → KILL window on a signal's road
   const gone = [];
   let ents = []; try { ents = fs.readdirSync(root, { withFileTypes: true }); } catch { return gone; }
   for (const e of ents) {
@@ -297,7 +317,7 @@ export function removeWorktrees(root) {
     const dir = path.join(root, e.name);
     let gitdir = null; try { gitdir = /^gitdir: (.+)$/m.exec(fs.readFileSync(path.join(dir, '.git'), 'utf8'))?.[1] || null; } catch { continue; }
     if (!gitdir) continue;
-    const r = spawnSync('git', ['--git-dir', path.resolve(dir, gitdir), 'worktree', 'remove', '--force', dir], { stdio: 'ignore', timeout: 60000, env: { PATH: process.env.PATH, HOME: process.env.HOME || os.homedir(), GIT_CONFIG_NOSYSTEM: '1' } });   // a scrubbed env: no GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR of an enclosing hook
+    const r = spawnSync('git', ['--git-dir', path.resolve(dir, gitdir), 'worktree', 'remove', '--force', dir], { stdio: 'ignore', timeout, env: { PATH: process.env.PATH, HOME: process.env.HOME || os.homedir(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } });   // a scrubbed env: no GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR of an enclosing hook
     if (r.status === 0) gone.push(dir);
   }
   return gone;
