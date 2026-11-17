@@ -10182,7 +10182,6 @@ export default {
   "Search names, kinds, where they came from…": "搜索名字、种类、来源…", // lane vault-window-v2
   "Only the ones I can show": "只看可显示", // lane vault-window-v2
   "Where from": "出处", // lane vault-window-v2
-  "The code could not be read — {reason}": "读不到验证码——{reason}", // lane vault-window-v2
   "{n} s left": "剩 {n} 秒", // lane vault-window-v2
   "{when} · you": "{when} · 你", // lane vault-window-v2
   "{when} · VibeSpace": "{when} · VibeSpace", // lane vault-window-v2
@@ -10359,9 +10358,6 @@ export default {
   "«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "按「总是允许」（需验证是你）也会为此条目打开「可供 agent 运行使用」——它只为当前这个对话打开；你暂停的其他授权仍保持暂停。", // lane vault-run-door
   "{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)": "本机的 {tool} 已变更：{from} → {to}（由 root 安装的工具——运行照常继续）", // lane vault-agent-own r18 (item 5): the drift FYI notice
   "{tool} ({path}) is sealed by root ownership, so the vault trusts whatever root installs there. Its bytes changed since the last run ({from} → {to}) — root (a package roll or a reinstall) replaced it, and runs continue. This is a notice; nothing to do.": "本机的 {tool}（{path}）由 root 所有权封存，因此 vault 信任 root 在那里安装的任何内容。它的字节自上次运行以来发生了变更（{from} → {to}）——是 root（软件包滚动或重新安装）替换了它，运行照常继续。这只是一条通知；无需处理。", // lane vault-agent-own r19 (MINOR): the drift FYI DETAIL paragraph
-  "Always for this shape": "此形状总是", // lane vault-run-door
-  "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同一工具、旗标、主机与密钥 30 天内不再问——先要再输一次第二密码", // lane vault-run-door
-  "Allowed for this shape for 30 days": "此形状 30 天内总是允许", // lane vault-run-door
   "Usable by agent runs": "可供 agent 运行使用", // lane vault-run-door
   "An agent may use it in vibespace-vault run without ever seeing it — each new command asks you first": "agent 可以在 vibespace-vault run 里使用它，却永远看不到它——每条新命令先问你", // lane vault-run-door
   "Agents may use it in a run now — each new command asks you first": "agent 现在可以在运行中使用它——每条新命令先问你", // lane vault-run-door
@@ -11113,7 +11109,6 @@ export default {
   "Changes save as you make them (a path row takes effect when you leave the box, or on Enter)": "改动即时保存（路径行离开字段就生效，回车也行）", // lane task-group-context
   "tab::Activity log": "活动记录", // lane task-group-context
   "Saved when you left the box — no Enter needed": "离开输入框就保存了，不用回车", // lane task-group-context
-  "Not applied: {path} was not found — the row keeps what it had": "未生效：找不到 {path} —— 这一行保持原样", // lane task-group-context
   "Context table budget per group (bytes)": "每组 Context 表的注入预算（字节）", // lane task-group-context
   "How many bytes one Task Group's Context table may take in what a conversation is told. Rows are told in table order at the depth each one chose; a row that does not fit steps down (contents, then file names with key files, then file names, then only the path and note) and says so. The room the hook carries beside the tools and the standing instructions caps it too. 0 = only that room.": "一个任务组的 Context 表在对话听到的内容里最多占多少字节。各行按表中顺序、按各自选的深度告诉 agent；装不下的一行会退一档（内容 → 文件名 + 关键文件内容 → 文件名 → 只说明路径和说明）并写明。钩子在工具说明和常驻指令之外能带的空间也会限制它。0 = 只受那个空间限制。", // lane task-group-context
   "「{path}」 is too big to tell as 「{chosen}」 → told as 「{level}」 (the agent still knows where it is and what it is for)": "「{path}」太大，无法按「{chosen}」告诉 → 退到「{level}」（agent 仍然知道它在哪、管什么）", // lane task-group-context
@@ -11826,7 +11821,6 @@ export default {
   "Always let this conversation use it (these hosts)": "总是允许这个对话用它（这些主机）", // lane vault-use-grants
   "A standing approval: this conversation may use it for these hosts for 30 days — the Vault window lists it": "已设为长期授权：这个对话 30 天内可用于这些主机——保险库窗口里能看到它", // lane vault-use-grants
   "A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first": "长期授权：这个对话 30 天内对这些主机使用这些秘密运行命令无需再问——保险库窗口列出它，也可收回；先要输入第二密码", // lane vault-use-grants
-  "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用于：{hosts}——在你于保险库窗口该行（「谁可以用…」）允许之前，发起请求的对话不能使用它。", // lane vault-use-grants
   "A pasted secret may be used by the conversation that asked for it": "你粘贴的秘密可由请求它的对话使用", // lane vault-use-grants
   "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — they are not asked again. A command to any other host still shows you its card, a new kind of command whose destination cannot be read (a shell, an interpreter, an unknown program) still shows you its card, and a request that named no hosts shows a card for every command. Locking the vault ends the grant, and the entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "当 agent 请你粘贴一个秘密并写明用于哪些主机时，发起请求的对话可以在接下来 8 小时内用它向这些主机发命令——不再逐次询问。向其他任何主机的命令仍会给你看卡片；无法读出目的地的新类型命令（shell、解释器、未知程序）也仍会给你看卡片；若请求未写明主机，则每条命令都给你看卡片。锁定保险库即结束授权，条目自己的「可供 agent 运行使用」开关不受影响。关闭：粘贴不授予任何权限——agent 的回执会让它去请求该秘密，由你在保险库窗口打开此条目。", // lane vault-use-grants
   "Policy for the judge: «{text}»": "裁决策略：「{text}」", // lane vault-use-grants

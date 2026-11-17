@@ -818,6 +818,20 @@ if (isMain) {
   ok(now.login.page.length === 0, `⑧ the sign-in page src/auth.js draws shows no English literal outside src/login-words.js`, now.login.page);
   ok(now.heads.missing.length === 0 && now.heads.lines > 20, `⑥ every literal For-you head (${now.heads.lines} producer lines) is a row of FORYOU_HEADS (${now.heads.table}) — worded at display, never in the store`, now.heads.missing);
   ok(now.dict.missing.length === 0, `② every extracted key has a zh AND a ja row`, now.dict.missing);
+  // B-cc5e (lane bl-tests-e): THE ONE ENTRY PARSER (scripts/i18n-extract.mjs dictEntries — i18n-check's duplicates / parity /
+  // params and the unused-key census read it) sees EVERY row the dictionary module holds. An entry ending in a `// …` comment
+  // was invisible to it — 1178 rows per dictionary on 2.369.407, six of them dead text no census could name.
+  {
+    const { dictEntries } = await import(pathToFileURL(path.join(REPO, 'scripts', 'i18n-extract.mjs')).href);
+    for (const [lang, rel] of Object.entries(DICTS)) {
+      const seen = new Set(dictEntries(fs.readFileSync(path.join(REPO, rel), 'utf8')).map((e) => e.key)), keys = (await dictOf(REPO, rel)).map((e) => e.key);
+      const unseen = keys.filter((k) => !seen.has(k));
+      ok(keys.length > 10000 && unseen.length === 0 && seen.size === keys.length, `② the one entry parser sees every ${lang} row the module exports (${seen.size} of ${keys.length}) — a trailing comment hides none`, unseen.slice(0, 5));
+    }
+    const plant = ['export default {', '  "Run": "运行",', '  "Run": "执行", // a second copy — a lane\'s note after it', "  'Stop': '停止',  // single quotes, two spaces", '};'].join('\n');
+    const pe = dictEntries(plant);
+    ok(pe.map((e) => e.key).join() === 'Run,Run,Stop' && pe[1].value === '执行' && pe[1].line === 3, 'RED CONTROL (the planted dictionary): the duplicate whose second copy carries a trailing comment is SEEN twice — i18n-check\'s duplicate gate can name it', pe);
+  }
   ok(now.params.length === 0, `③ every {param} in a literal key is filled by its call`, now.params);
   ok(now.markup.length === 0, `④ no key carrying markup reaches a text sink`, now.markup);
   ok(now.dict.addedMarkup.length === 0, `④ no dict value adds markup its key lacks`, now.dict.addedMarkup);

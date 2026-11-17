@@ -87,6 +87,10 @@ console.log('\n§1 the diff readers');
   ok(c2.attributable && c2.keys.join() === 'New key', 'a comment line is no change; an added entry is its key');
   const c3 = change('src/lib/i18n-zh.js', DICT, edit(DICT, 'export default {', 'const extra = 1;\nexport default {'));
   ok(!c3.attributable && /not a dictionary entry/.test(c3.offending[0]), 'CONTROL: a code line in the dictionary file is not attributable (the old rule)');
+  // B-cc5e (lane bl-tests-e): an entry ending in a `// …` comment (1178 rows per dictionary on 2.369.407) IS an entry — the one
+  // parser saw none of them, so an edit of one fell to the broad old rule; now it is attributable to its key
+  const c4 = change('src/lib/i18n-zh.js', DICT, edit(DICT, '"Bye": "再见",', '"Bye": "再会", // lane x — a note after the entry'));
+  ok(c4.attributable && c4.keys.join() === 'Bye' && c4.values.sort().join() === '再会,再见', 'a value edit on a row with a trailing comment: attributable to its key (B-cc5e)', c4);
 
   const s1 = change('src/lib/settings-schema.js', SCHEMA, edit(SCHEMA, "t('The first {n} rows')", "t('The first {n} rows shown')"));
   ok(s1.rule === 'settings-text' && s1.attributable && s1.keys.join() === 'a.one' && s1.words.includes('The first {n} rows shown'), 'a description edit: attributable to its row, the old and new words');

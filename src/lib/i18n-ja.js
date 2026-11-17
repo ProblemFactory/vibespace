@@ -10181,7 +10181,6 @@ export default {
   "Search names, kinds, where they came from…": "名前・種類・出所で検索…", // lane vault-window-v2
   "Only the ones I can show": "表示できるものだけ", // lane vault-window-v2
   "Where from": "出所", // lane vault-window-v2
-  "The code could not be read — {reason}": "コードを読めません——{reason}", // lane vault-window-v2
   "{n} s left": "残り {n} 秒", // lane vault-window-v2
   "{when} · you": "{when} · あなた", // lane vault-window-v2
   "{when} · VibeSpace": "{when} · VibeSpace", // lane vault-window-v2
@@ -10358,9 +10357,6 @@ export default {
   "«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「常に許可」（本人確認が必要）を押すと、この項目の「エージェントの実行で使用可」もオンになります——開くのはこの会話だけで、あなたが一時停止した他の許可は停止したままです。", // lane vault-run-door
   "{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)": "このマシンの {tool} が変更されました：{from} → {to}（root 所有のツール——実行は継続します）", // lane vault-agent-own r18 (item 5): the drift FYI notice
   "{tool} ({path}) is sealed by root ownership, so the vault trusts whatever root installs there. Its bytes changed since the last run ({from} → {to}) — root (a package roll or a reinstall) replaced it, and runs continue. This is a notice; nothing to do.": "このマシンの {tool}（{path}）は root 所有によって封印されているため、vault は root がそこにインストールするものをすべて信頼します。前回の実行以降、バイト列が変更されました（{from} → {to}）——root（パッケージ更新または再インストール）が置き換えたもので、実行は継続します。これは通知です。対応は不要です。", // lane vault-agent-own r19 (MINOR): the drift FYI DETAIL paragraph
-  "Always for this shape": "この形は常に許可", // lane vault-run-door
-  "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同じツール・フラグ・ホスト・シークレットなら 30 日間確認せずに実行します — 先に第二パスワードを確認します", // lane vault-run-door
-  "Allowed for this shape for 30 days": "この形を 30 日間許可しました", // lane vault-run-door
   "Usable by agent runs": "エージェントの実行で使用可", // lane vault-run-door
   "An agent may use it in vibespace-vault run without ever seeing it — each new command asks you first": "エージェントは値を見ることなく vibespace-vault run でこれを使えます — 新しいコマンドごとに先に確認します", // lane vault-run-door
   "Agents may use it in a run now — each new command asks you first": "エージェントが実行でこれを使えるようになりました — 新しいコマンドごとに先に確認します", // lane vault-run-door
@@ -11112,7 +11108,6 @@ export default {
   "Changes save as you make them (a path row takes effect when you leave the box, or on Enter)": "変更はその場で保存されます（パスの行は欄を離れるか Enter で反映）", // lane task-group-context
   "tab::Activity log": "アクティビティ記録", // lane task-group-context
   "Saved when you left the box — no Enter needed": "欄を離れた時点で保存しました —— Enter は不要です", // lane task-group-context
-  "Not applied: {path} was not found — the row keeps what it had": "未反映：{path} が見つかりません —— この行は元のままです", // lane task-group-context
   "Context table budget per group (bytes)": "グループごとの Context 表の注入予算（バイト）", // lane task-group-context
   "How many bytes one Task Group's Context table may take in what a conversation is told. Rows are told in table order at the depth each one chose; a row that does not fit steps down (contents, then file names with key files, then file names, then only the path and note) and says so. The room the hook carries beside the tools and the standing instructions caps it too. 0 = only that room.": "一つのタスクグループの Context 表が、会話に伝える内容の中で何バイトまで使えるか。各行は表の順に、それぞれ選んだ深さで伝えます。入りきらない行は一段下げ（内容 → ファイル名 + 主要ファイルの内容 → ファイル名 → パスと説明だけ）、そのことを書き添えます。フックがツールの説明と常駐指示の横に運べる容量も上限になります。0 = その容量だけ。", // lane task-group-context
   "「{path}」 is too big to tell as 「{chosen}」 → told as 「{level}」 (the agent still knows where it is and what it is for)": "「{path}」は「{chosen}」で伝えるには大きすぎます → 「{level}」で伝えます（エージェントは場所と用途を引き続き知っています）", // lane task-group-context
@@ -11825,7 +11820,6 @@ export default {
   "Always let this conversation use it (these hosts)": "この会話に常に使わせる（このホスト）", // lane vault-use-grants
   "A standing approval: this conversation may use it for these hosts for 30 days — the Vault window lists it": "常設の許可：この会話は 30 日間このホスト向けに使えます——保管庫ウィンドウに表示されます", // lane vault-use-grants
   "A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first": "常設の許可：この会話は 30 日間、このホスト向けならこれらの秘密でコマンドを確認なしに実行できます——保管庫ウィンドウに表示され、取り消せます。先に第二パスワードを求めます", // lane vault-use-grants
-  "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用途：{hosts}——保管庫ウィンドウのその行（「誰が使えるか…」）で許可するまで、依頼した会話は使えません。", // lane vault-use-grants
   "A pasted secret may be used by the conversation that asked for it": "貼り付けた秘密を、依頼した会話が使えるようにする", // lane vault-use-grants
   "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — they are not asked again. A command to any other host still shows you its card, a new kind of command whose destination cannot be read (a shell, an interpreter, an unknown program) still shows you its card, and a request that named no hosts shows a card for every command. Locking the vault ends the grant, and the entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "エージェントが秘密の貼り付けを依頼し、使うホストを指定した場合、依頼した会話は 8 時間だけそのホスト向けのコマンドで使え、再度は尋ねられません。他のホスト向けのコマンドは引き続きカードを表示し、宛先を読み取れない新しい種類のコマンド（シェル、インタープリター、未知のプログラム）も引き続きカードを表示し、ホストを指定しなかった依頼では毎コマンドでカードを表示します。保管庫をロックすると付与は終了し、項目自身の「エージェントの実行で使用可」スイッチは変わりません。オフ：貼り付けても何も付与されません——エージェントの受領メッセージが秘密の請求を促し、あなたが保管庫ウィンドウで項目を開きます。", // lane vault-use-grants
   "Policy for the judge: «{text}»": "判定用ポリシー：「{text}」", // lane vault-use-grants

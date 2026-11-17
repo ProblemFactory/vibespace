@@ -11,7 +11,12 @@ import path from 'path';
 // (2.227.1: python-inserted single-quoted entries were invisible to a double-quote-only reader). The one parser:
 // scripts/i18n-check.mjs (duplicates / parity / params) and scripts/dead-code-census.mjs (unused keys) both read it.
 const STR_LIT = `(?:"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*')`;
-const ENTRY_RE = new RegExp(`^  (${STR_LIT}): (${STR_LIT}),?$`);
+// B-cc5e (lane bl-tests-e, 2026-11-17): an entry may END WITH A `// …` COMMENT (a lane's name, a reason) — 1178 rows per
+// dictionary did on 2.369.407 and every one was invisible here: no duplicate, parity, param or unused-key judgement saw them
+// (six were dead text). Its readers: i18n-check, dead-code-census, affected-model's dictionary rule (an edit of such a row is
+// attributable to its key now, no longer the broad old rule), test-doc-comment-send, test-spend-paths. test-ui-language ② holds
+// this parser to the dictionary module itself: every key it exports is seen.
+const ENTRY_RE = new RegExp(`^  (${STR_LIT}): (${STR_LIT}),?\\s*(?:\\/\\/.*)?$`);
 const decodeLit = (lit) => { try { return new Function('return ' + lit)(); } catch { return lit; } };
 export const dictEntries = (text) => text.split('\n').flatMap((ln, i) => {
   const m = ln.match(ENTRY_RE);
