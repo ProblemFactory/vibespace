@@ -137,8 +137,14 @@ check('ON-spawn env has the tools PATH prefix', !!argv1 && argv1.includes(`PATH=
 const tok1 = argv1 && (argv1.match(/VIBESPACE_SESSION_TOKEN=(vsst_[\w-]+)/) || [])[1];
 check('ON-spawn env has the session token', !!tok1);
 const auth = { headers: { Authorization: `Bearer ${tok1}` } };
+// the EXCLUDED package (2026-11-17): this suite's session is a SHELL terminal, and task-context answers nothing to a harness that
+// ignores SessionStart output (src/agent-routes.js honoursSessionStart — a shell has no agent; channel-jump verify r7) — so its
+// old «task-context delivers content while ON» was red by design. The ON delivery a shell session's token gets is prompt-context
+// (no harness check for a call that is not the hook's): content while ON, empty while OFF (Phase 3) — the switch's contrast.
 const ctxOn = await (await api('/api/agent/task-context', auth)).json();
-check('task-context delivers content while ON', !!(ctxOn.success && ctxOn.context && ctxOn.context.length > 50), JSON.stringify(ctxOn).slice(0, 200));
+check('task-context: a shell session (its harness ignores SessionStart) gets nothing from it, by design', ctxOn.success === true && (ctxOn.context || '') === '', JSON.stringify(ctxOn).slice(0, 200));
+const pOn = await (await api('/api/agent/prompt-context', auth)).json();
+check('prompt-context delivers content while ON (the delivery this token gets)', !!(pOn.success && pOn.context && pOn.context.length > 50), JSON.stringify(pOn).slice(0, 200));
 
 // ═══ Phase 2: toggle OFF live ═══════════════════════════════════════════════
 console.log('Phase 2: PATCH agents.vibespaceIntegration=false');
