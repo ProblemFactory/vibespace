@@ -23,6 +23,7 @@ export function whoText(by, nameOf = () => '') {
   if (!k) return t('nobody named');
   const id = by.slice(k.length + 1);
   if (k === 'human') return id === 'local' ? t('You') : id || t('a person');
+  if (k === 'agent' && (id === 'unknown' || !id)) return t('an agent VibeSpace could not identify'); // closure 2: never «no longer listed» for a requester the hub did not know
   if (k === 'agent') { const n = nameOrGone('conversation', id, nameOf(id)); return n === nameOrGone('conversation', id, '') ? n : t('conversation “{name}”', { name: n }); } // id = '<backend>:<sid>' | 'webui:<id>' (sessionNameOf parses it)
   return k === 'job' ? t('a job') : t('VibeSpace, by itself');
 }

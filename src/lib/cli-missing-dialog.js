@@ -116,6 +116,13 @@ export function cliMissingState(msg) {
   if (msg.answer === 'unanswered') return 'unanswered';
   return 'none';
 }
+/** The dialog's TITLE by state (closure 2): «not found» only when nothing was found. */
+export function cliMissingTitle(st, cli) {
+  if (st === 'configured' || st === 'broken') return t('{cli} cannot run', { cli });
+  if (st === 'wrapped') return t('{cli} is wrapped in an alias or a function', { cli });
+  if (st === 'unanswered') return t('{cli} could not be looked up', { cli });
+  return t('{cli} was not found', { cli });
+}
 /** The face sentence by state — «not found» is said only when nothing was found. */
 export function cliMissingFace(st, cli) {
   if (st === 'configured') return t('The path set for {cli} is not a program it can run, so nothing was started.', { cli });
@@ -128,7 +135,7 @@ export function cliMissingFace(st, cli) {
 /** THE DIALOG for a refused create (`app` = the App: its Manage agents door). Never a toast alone; no native dialog. */
 export function openCliMissingDialog(app, msg) {
   const w = cliMissingWords(msg || {});
-  const { dialog, body, close } = createModalShell({ id: 'cli-missing-dialog', title: t('{cli} was not found', { cli: w.cli }), bodyClass: 'cli-missing-body', minWidth: 'min(480px, 92vw)', escapeToClose: true, kind: 'decision' }); // decision: a refused create — the person picks a door (Manage agents / How to install)
+  const { dialog, body, close } = createModalShell({ id: 'cli-missing-dialog', title: cliMissingTitle(cliMissingState(msg || {}), w.cli), bodyClass: 'cli-missing-body', minWidth: 'min(480px, 92vw)', escapeToClose: true, kind: 'decision' }); // decision: a refused create — the person picks a door (Manage agents / How to install)
   const line = (cls, text) => { const el = document.createElement('div'); el.className = cls; el.textContent = text; body.appendChild(el); return el; };
   // lane ui-plain-words first-run-16 (closure, the readers' A1): the face sentence follows the STATE — «not found» only when nothing
   // was found; a line that names a path to fix or a variable to set (the cause + the recipe) stays IN VIEW; only who was asked and

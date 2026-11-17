@@ -330,12 +330,18 @@ ok([...censusTypes].every((t) => regTypes.includes(t)), `every createWindow type
   }
   ok(!leaks.length, 'no window is named by its raw kind or id — every reader goes through windowWords (taskbar title / second line / lists, the «is on» toast, the phone list)', leaks.join(' | '));
   const tb = src['taskbar.js'], wj = src['window.js'], mn = src['mobile-nav.js'];
-  ok(/title\.textContent = starPrefix \+ windowWords\(win\)/.test(tb) && /subtitle\.textContent = parts\[1\] \|\| \(kindWords !== windowWords\(win\) \? kindWords : ''\)/.test(tb) && /label: windowWords\(w\)/.test(tb) && /const nameOfWin = \(w\) => windowWords\(w\)/.test(tb)
-    && /\{ window: windowWords\(win\), desktop: desk \}/.test(wj) && /label\.textContent = windowWords\(win\)/.test(mn), 'the five readers name a window through windowWords (taskbar ×4, window.js toast, mobile-nav list)');
+  // closure 2: a LIST shows the full title («name — folder», two same-named conversations read apart, as the release did) through
+  // windowTitle; the taskbar's title line and the tile keep the first part (windowWords); only a title-less window takes the kind's words
+  ok(/title\.textContent = starPrefix \+ windowWords\(win\)/.test(tb) && /subtitle\.textContent = parts\[1\] \|\| \(kindWords !== windowWords\(win\) \? kindWords : ''\)/.test(tb) && /label: windowTitle\(w\)/.test(tb) && /const nameOfWin = \(w\) => windowWords\(w\)/.test(tb)
+    && /\{ window: windowTitle\(win\), desktop: desk \}/.test(wj) && /label\.textContent = windowTitle\(win\)/.test(mn) && /label\.textContent = windowTitle\(w\)/.test(wj) && /const nameOf = \(id\) => windowTitle\(this\.windows\.get\(id\)\)/.test(src['tab-group.js']),
+    'the readers: the title line by windowWords; every list, the «is on» toast, the phone list and the split toasts by windowTitle (the folder kept)');
   // FUNCTIONAL (en, no DOM ⇒ t() is the identity): the words, the fallbacks, and the RED control on the old expression
   const wt2 = await import('../src/lib/window-types.js');
   wt2.registerWindowType({ type: 'fake-kind-words', label: 'Machine app' });
   const placeholder = { title: 'Stage', type: 'stage-placeholder' }, app = { title: '', type: 'fake-kind-words' }, odd = { title: '', type: 'no-such-kind' };
+  const two = [{ title: 'Fix the build — /work/a', type: 'chat' }, { title: 'Fix the build — /work/b', type: 'chat' }];
+  ok(typeof wt2.windowTitle === 'function' && wt2.windowTitle(two[0]) !== wt2.windowTitle(two[1]) && wt2.windowTitle(two[0]) === 'Fix the build — /work/a' && wt2.windowTitle({ title: '', type: 'fake-kind-words' }) === 'Machine app'
+    && wt2.windowWords(two[0]) === wt2.windowWords(two[1]), 'windowTitle keeps the folder (two same-named conversations read apart); a title-less window is its kind — RED control: windowWords reads them the same');
   ok(wt2.windowWords({ title: 'Report — /tmp/x', type: 'viewer' }) === 'Report' && wt2.windowWords(app) === 'Machine app' && wt2.windowWords(odd) === 'Window' && wt2.windowKindWords('fake-kind-words') === 'Machine app',
     'windowWords: the title\'s first part, else the kind\'s words, else «Window» (never the type)', [wt2.windowWords(app), wt2.windowWords(odd)]);
   const oldSub = (w) => w.title.split(' — ')[1] || w.type;

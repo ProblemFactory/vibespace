@@ -41,7 +41,7 @@ function actionWords(e) {
   const x = e || {}, p = x.position || {};
   const verb = (ACTION_WORDS[x.action] || (() => String(x.action || '?')))();
   const where = p.kind === 'point' ? `(${p.x}, ${p.y})` : p.kind === 'keys' && p.keys ? String(p.keys) : p.kind === 'navigation' && p.url ? String(p.url).slice(0, 60)
-    : p.kind === 'scroll' ? `${p.direction || ''} ${p.amount || ''}`.trim() : p.kind === 'viewport' && p.width && p.height ? `${p.width}×${p.height}` : ''; // closure F30: where, on the face
+    : p.kind === 'scroll' ? `${({ up: tc('scroll', 'up'), down: tc('scroll', 'down'), left: tc('scroll', 'left'), right: tc('scroll', 'right') })[p.direction] || ''} ${p.amount || ''}`.trim() : p.kind === 'viewport' && p.width && p.height ? `${p.width}×${p.height}` : ''; // closure F30: where, on the face
   return (where ? verb + ' ' + where : verb) + (x.ok === false ? ' ✗' : '');
 }
 

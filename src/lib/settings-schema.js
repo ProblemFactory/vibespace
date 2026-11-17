@@ -771,7 +771,7 @@ const SETTINGS_SCHEMA = {
       { value: 'default', label: t('Chrome (the automatic choice)') },
     ],
     label: t('Default browser engine'),
-    description: t('Which browser program NEW agent browsers run: Chrome as the browser CLI installs it (default), or the browser of a browser engine plugin enabled on this computer (the choices list them). Read when a profile is created and when a conversation\'s browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.'),
+    description: t('Which browser program NEW agent browsers run: Chrome as the browser driver installs it (default), or the browser of a browser engine plugin enabled on this computer (the choices list them). Read when a profile is created and when a conversation\'s browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.'),
     tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
     fact: 'browser-engine',

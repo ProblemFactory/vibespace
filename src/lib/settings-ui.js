@@ -961,7 +961,11 @@ class SettingsUI {
     again.textContent = t('Check again');
     const probe = document.createElement('div');
     probe.className = 'settings-https-probe';
-    line.append(text, again, probe);
+    // closure 2 (settings-5): the last check's raw words (a command, its error) are a debugger's — they fold under «Last check»; the
+    // probe element keeps its class and its `hidden` (the https suite reads it)
+    const probeFold = techFold(['…'], { mono: true, className: 'settings-https-probe-fold' }); // the door's «技术细节» — the line itself says «Last check:» (closure 2: the head was said twice)
+    probeFold.querySelector('.tech-fold-body').replaceChildren(probe);
+    line.append(text, again, probeFold);
     host.appendChild(line);
     const paint = (r) => {
       if (!r || !r.i18n) { text.textContent = r && r.words ? r.words : t('checking…'); return; }
@@ -979,12 +983,12 @@ class SettingsUI {
         line.insertBefore(btn, again);
       }
       const p = r.probe;
-      probe.hidden = !p;
+      probe.hidden = !p; probeFold.hidden = !p;
       probe.textContent = !p ? '' : t('Last check: {what}', { what: p.code === 'TIMEOUT' ? t('tailscale {cmd} timed out after {s} s', { cmd: p.cmd, s: Math.round(p.bound / 1000) })
         : p.code === 0 ? t('tailscale {cmd} answered {bytes} bytes that are not a status', { cmd: p.cmd, bytes: p.bytes })
         : t('tailscale {cmd} failed ({code}): {err}', { cmd: p.cmd, code: p.code, err: p.err || '' }) });
     };
-    probe.hidden = true;
+    probe.hidden = true; probeFold.hidden = true;
     again.onclick = () => {
       again.disabled = true; text.textContent = t('checking…');
       fetchJson('/api/tls/recheck', { method: 'POST' }).then(paint).finally(() => { again.disabled = false; });

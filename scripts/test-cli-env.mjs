@@ -845,6 +845,12 @@ console.log('⑧ round 5 (final) — THE SHELL SAYS WHERE; THE SPAWN IS ALWAYS A
   const nnView = inView(nn), dgView = inView(dg);
   ok(`A1: a wrapper's face says it is WRAPPED, and the recipe line is in view («${nnView.slice(0, 200)}»)`, /cli-missing-face=Your shell wraps vsreal\d+ in an alias or a function VibeSpace does not run/.test(nnView) && /cli-missing-what=.*Set CLAUDE_CMD|cli-missing-what=.*set [A-Z_]+/i.test(nnView) && !/could not find/.test(nnView), nnView);
   ok(`A1: a dangling alias's face says the shell names something that cannot run, and its cause is in view («${dgView.slice(0, 200)}»)`, /cli-missing-face=Your shell names a vsreal\d+ that cannot run/.test(dgView) && /cli-missing-what=.*which is missing\./.test(dgView) && !/could not find/.test(dgView), dgView);
+  // closure 2 (5d / 6a): every STATE's face and title, run through the module — configured, broken, wrapped, unanswered, none
+  const ST = mod && mod.cliMissingState ? ['configured', 'broken', 'wrapped', 'unanswered', 'none'].map((st) => [st, mod.cliMissingFace(st, 'claude'), (typeof mod.cliMissingTitle === 'function' ? mod.cliMissingTitle(st, 'claude') : '(no title per state)')]) : []; // a sha without the title door is RED here, never a crash
+  const stOf = mod && mod.cliMissingState ? [mod.cliMissingState({ answer: 'configured' }), mod.cliMissingState({ notExecutable: '/x' }), mod.cliMissingState({ wrapper: { kind: 'alias' } }), mod.cliMissingState({ answer: 'unanswered' }), mod.cliMissingState({ answer: 'none' })] : [];
+  ok(`5d / 6a: each state has its own face and title — «not found» only when nothing was found («${ST.map((x) => x[2]).join(' | ')}»)`, ST.length === 5 && JSON.stringify(stOf) === JSON.stringify(['configured', 'broken', 'wrapped', 'unanswered', 'none'])
+    && /path set for claude is not a program/.test(ST[0][1]) && ST[0][2] === 'claude cannot run' && /names a claude that cannot run/.test(ST[1][1]) && /wraps claude in an alias or a function/.test(ST[2][1]) && /could not be asked/.test(ST[3][1]) && /could not find claude/.test(ST[4][1]) && ST[4][2] === 'claude was not found'
+    && ST.slice(0, 4).every((x) => !/not found|could not find/.test(x[1] + x[2])), JSON.stringify(ST));
   delete globalThis.document;
 }
 {

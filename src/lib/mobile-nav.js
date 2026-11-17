@@ -844,7 +844,7 @@ export class MobileNav {
 
     const label = document.createElement('span');
     label.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--text)';
-    label.textContent = windowWords(win);
+    label.textContent = windowTitle(win);
 
     // Billing identity chip — mirrors the desktop title-bar badge (which has
     // no home on mobile). setAuthBadge stashes the auth object on the window.

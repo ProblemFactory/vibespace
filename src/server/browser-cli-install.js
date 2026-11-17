@@ -120,7 +120,7 @@ function create(ctx, slot) {
     log[e ? 'warn' : 'log']?.(`[browser] browser CLI install ${VERBS.CLI_PACKAGE}@${version} ${e ? 'failed — ' + e : 'finished'}`);
     notify();
   }
-  const ROW = { id: 'cli', words: () => 'the browser CLI', logName: 'browser CLI', group: true, afterRestart: (m, { stalled = false, letGo = false } = {}) => finishCli(String(m.version), stalled ? stalledWords('npm') : letGo ? `the install from before the restart (pid ${m.pid}) ran past its deadline and could not be proven to be it — VibeSpace stopped waiting; install again` : null) };
+  const ROW = { id: 'cli', words: () => 'the browser driver', logName: 'browser CLI', group: true, afterRestart: (m, { stalled = false, letGo = false } = {}) => finishCli(String(m.version), stalled ? stalledWords('npm') : letGo ? `the install from before the restart (pid ${m.pid}) ran past its deadline and could not be proven to be it — VibeSpace stopped waiting; install again` : null) };
   return { row: ROW, api: { cliFacts, installCli } };
 }
 

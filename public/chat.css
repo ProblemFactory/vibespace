@@ -96,8 +96,8 @@
 .chat-design-public { font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; margin-right: auto; }
 .chat-design-public.chat-design-ask { margin-right: 0; } /* lane design-ask: the ask-first box sits before the public box */
 .chat-design-pages { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 6px; max-height: 180px; overflow: auto; }
-.chat-design-page { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-.chat-design-page-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-design-page { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; row-gap: 4px; font-size: 12px; }
+.chat-design-page-name { flex: 1 1 10em; min-width: 10em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* lane ui-plain-words design-doc-2 (closure 2, driven at 390 and 1440): the name keeps 10em and the buttons wrap under it — with «私有 · 改为公开» the name had shrunk to 8 px, a published design's to 0 */
 .chat-design-page button { padding: 1px 8px; font-size: 11px; }
 .chat-design-pages.hidden { display: none; }
 .chat-design-group-head { font-size: 11px; color: var(--text-dim); margin-top: 2px; } /* lane pages-chip-groups: one head per group */

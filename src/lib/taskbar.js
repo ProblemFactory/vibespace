@@ -4,7 +4,7 @@ import { stripHidden, wheelScroll } from './taskbar-fit.js'; // PURE (lane deskt
 import { menuPlace } from './menu-place.js'; // PURE: THE ONE placement — the «+N» list beside its chip (lane desktop-small r2 ②)
 import { groupClickVerdict, hoverVerdict, hoverStep, groupKeyVerdict, inFrontOf, GROUP_HOVER_INTENT_MS, GROUP_HOVER_LEAVE_MS } from './taskbar-group.js';
 import { t } from './i18n.js';
-import { windowWords, windowKindWords } from './window-types.js';
+import { windowWords, windowKindWords, windowTitle } from './window-types.js';
 import { terminalOnly, windowListMark } from './agent-meta.js'; // the harness table's own word for a plain shell (§78: no id branch here)
 import { visualTabOrder } from './chain-layout.js'; // the chooser lists a group in its STRIP order (split tabs v2: left half, then right)
 import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from './contributions.js';
@@ -116,7 +116,7 @@ function switchWindowItems(app, selfId) {
     }
     const otherDesk = scope === 'all' && w._desktopId && w._desktopId !== activeDesk && w._desktopId !== '__stage__';
     items.push({
-      label: windowWords(w) + (otherDesk ? `  — ${deskName(w._desktopId)}` : '') + (w.isMinimized ? ' ' + t('(minimized)') : ''),
+      label: windowTitle(w) + (otherDesk ? `  — ${deskName(w._desktopId)}` : '') + (w.isMinimized ? ' ' + t('(minimized)') : ''),
       action: () => app.goToWinId(wid),
     });
   }
@@ -266,7 +266,7 @@ function showHiddenTiles(app, chip) {
     icon.appendChild(windowListMark(win, { className: 'window-backend-icon' })); // its harness's mark (lane phone-take-photo)
     icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
     const label = document.createElement('span');
-    label.textContent = (win.isMinimized ? '\u229E ' : '') + windowWords(win);
+    label.textContent = (win.isMinimized ? '\u229E ' : '') + windowTitle(win);
     item.append(icon, label);
     item.onclick = () => {
       pop.remove();
@@ -791,7 +791,7 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
     icon.style.cssText = 'flex-shrink:0;display:inline-flex;align-items:center';
     icon.appendChild(_cloneTabIcon(win));
     const label = document.createElement('span');
-    label.textContent = windowWords(win);
+    label.textContent = windowTitle(win);
     item.append(icon, label);
     paintTile(app, item); // lane cache-warmth-band: the row's own ring (its tab's conversation)
     item.onclick = () => {
@@ -950,7 +950,7 @@ export function showWindowList(app, anchor, opts = {}) {
       icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
       if (win.isMinimized) icon.style.opacity = '0.4';
       const label = document.createElement('span');
-      label.textContent = (win.isMinimized ? '\u229E ' : '') + windowWords(win);
+      label.textContent = (win.isMinimized ? '\u229E ' : '') + windowTitle(win);
       item.append(icon, label);
       if (warm) { item.dataset.winId = id; paintListRow(app, item, { ids: tabIds }, label); rows.push(item); } // a host row: its tabs' worst
       item.onclick = () => {

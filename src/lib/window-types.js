@@ -124,6 +124,13 @@ export function windowWords(win) {
   return first || windowKindWords(win && win.type);
 }
 
+/** A window's FULL title for a list (closure 2, the regression the closure added): «name — folder», so two conversations of one
+ *  name in different folders read apart, as the release showed them; only a title-less window is named by its kind's words. */
+export function windowTitle(win) {
+  const full = String((win && win.title) || '').trim();
+  return full || windowKindWords(win && win.type);
+}
+
 /** layout.js captureState exemption: kinds that legitimately carry no openSpec. */
 export function isTransientWindowType(type) { return TYPES.get(type)?.persist === false; }
 

@@ -457,7 +457,7 @@ export function restartRefusalWords(r, { label = '', human = null } = {}, t) {
 const mb = (b) => Math.max(1, Math.round(Number(b) / 1e6));
 /** The intro: where the builds come from and the one law the table applies (a profile opened by a major refuses every lower one). */
 export function pickerIntro(t) {
-  return t(i18nKey("Chrome for Testing builds, from Google. Once a profile is opened by a Chrome version, every older major is refused for it. Canary and Dev change weekly; Stable is what the browser CLI's own install picks."));
+  return t(i18nKey("Chrome for Testing builds, from Google. Once a profile is opened by a Chrome version, every older major is refused for it. Canary and Dev change weekly; Stable is what the browser driver's own install picks."));
 }
 /** A channel row's head ("Stable · 154.0.8037.92" — the channel names are Google's) / an older major's. */
 export function channelLabel(row) { return `${String((row && row.channel) || '')} · ${String((row && row.version) || '')}`; }
@@ -477,7 +477,7 @@ export function verdictLines(v, t) {
     else if (c.kind === 'census' && c.relation === 'older') out.push({ text: t(i18nKey('Older than the census: a few methods it lacks are listed harmlessly')), warn: false });
     else if (c.kind === 'profile') out.push({ text: t(i18nKey("Older than the Chrome that last opened {label} ({wrote}) — can't be picked for it; fine for a new profile"), { label: String(c.label || ''), wrote: c.wrote }), warn: true });
     // verify r1 (H1): newer than every build here = the browser CLI's next default (it launches its newest build)
-    else if (c.kind === 'default') out.push({ text: (c.users || []).length ? t(i18nKey("Becomes the browser CLI\'s default build (now {from}): {who} and every conversation's browser start with it next time — after that they can't go back to an older Chrome"), { from: String(c.from || '—'), who: c.users.join(', ') }) : t(i18nKey("Becomes the browser CLI\'s default build (now {from}): every conversation's browser starts with it next time — after that it can't go back to an older Chrome"), { from: String(c.from || '—') }), warn: true });
+    else if (c.kind === 'default') out.push({ text: (c.users || []).length ? t(i18nKey("Becomes the automatic choice (now {from}): {who} and every conversation's browser start with it next time — after that they can't go back to an older Chrome"), { from: String(c.from || '—'), who: c.users.join(', ') }) : t(i18nKey("Becomes the automatic choice (now {from}): every conversation's browser starts with it next time — after that it can't go back to an older Chrome"), { from: String(c.from || '—') }), warn: true });
   }
   return out;
 }
@@ -485,7 +485,7 @@ export function verdictLines(v, t) {
  *  what happens after. ONE button: Download. */
 export function downloadConfirmWords({ version = '', host = '', bytes = null, root = '', becomesDefault = false } = {}, t) {
   const where = Number(bytes) > 0 ? t(i18nKey('About {size} MB comes from {host} and unpacks to about {unpacked} MB in {root}.'), { size: mb(bytes), host, unpacked: mb(Number(bytes) * 2), root }) : t(i18nKey('It comes from {host} and unpacks into {root}.'), { host, root });
-  return { title: t(i18nKey('Download Chrome {version}?'), { version }), message: where + ' ' + t(i18nKey("It is checked against the server's own length and checksum — Google publishes no separate one. Nothing restarts; it becomes a build you can pick. Chrome for Testing never auto-updates.")) + (becomesDefault ? ' ' + t(i18nKey("It also becomes the browser CLI\'s default build: profiles on the default and every conversation's browser start with it next time.")) : ''), confirmText: t(i18nKey('Download')), danger: false };
+  return { title: t(i18nKey('Download Chrome {version}?'), { version }), message: where + ' ' + t(i18nKey("It is checked against the server's own length and checksum — Google publishes no separate one. Nothing restarts; it becomes a build you can pick. Chrome for Testing never auto-updates.")) + (becomesDefault ? ' ' + t(i18nKey("It also becomes the automatic choice: profiles on the default and every conversation's browser start with it next time.")) : ''), confirmText: t(i18nKey('Download')), danger: false };
 }
 /** A refused download / removal / list read, by its CODE. null = the caller adds the server's sentence. */
 export function downloadRefusalWords(r, t) {
@@ -521,7 +521,7 @@ export function downloadProgressWords(i, t) {
     if (i.step === 'verify') return { text: t(i18nKey('Verifying Chrome {version}…'), { version }), busy: true };
     return { text: t(i18nKey('Downloading Chrome {version}… {got} MB of {total} MB'), { version, got: Math.floor(Number(i.bytes || 0) / 1e6), total: Number(i.total) > 0 ? mb(i.total) : '?' }), busy: true };
   }
-  if (i.other) return { text: t(i18nKey('Another install is running ({what}) — downloads wait for it.'), { what: i.other === 'cli' ? t(i18nKey('the browser CLI')) : String(i.other) }), busy: true };
+  if (i.other) return { text: t(i18nKey('Another install is running ({what}) — downloads wait for it.'), { what: i.other === 'cli' ? t(i18nKey('the browser driver')) : String(i.other) }), busy: true };
   if (i.done) return { text: t(i18nKey('Chrome {version} is ready — pick it in the list.'), { version: String(i.done) }), done: true };
   if (i.failed) return { text: t(i18nKey("Chrome {version} didn't download — {reason}"), { version, reason: downloadRefusalWords({ code: i.code }, t) || String(i.error || '') }), warn: true, failed: true };
   return null;

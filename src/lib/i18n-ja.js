@@ -7758,13 +7758,13 @@ export default {
   "Exactly these bytes are sent; if a file changes, the send is refused.": "送られるのはこのバイト列そのものです。ファイルが変わると送信は拒否されます。",
   // lane chrome-builds-download (design 004): Download another build…
   "Download another build…": "別のビルドをダウンロード…",
-  "Becomes the browser CLI's default build (now {from}): {who} and every conversation's browser start with it next time — after that they can't go back to an older Chrome": "ブラウザ CLI の既定のビルドになります（現在は {from}）：{who} と各会話のブラウザは次回からこれで起動し、その後は古い Chrome に戻せません",
-  "Becomes the browser CLI's default build (now {from}): every conversation's browser starts with it next time — after that it can't go back to an older Chrome": "ブラウザ CLI の既定のビルドになります（現在は {from}）：各会話のブラウザは次回からこれで起動し、その後は古い Chrome に戻せません",
-  "It also becomes the browser CLI's default build: profiles on the default and every conversation's browser start with it next time.": "これはブラウザ CLI の既定のビルドにもなります。既定を使うプロファイルと各会話のブラウザは次回からこれで起動します。",
+  "Becomes the automatic choice (now {from}): {who} and every conversation's browser start with it next time — after that they can't go back to an older Chrome": "自動の選択になります（現在は {from}）：{who} と各会話のブラウザは次回からこれで起動し、その後は古い Chrome に戻せません",
+  "Becomes the automatic choice (now {from}): every conversation's browser starts with it next time — after that it can't go back to an older Chrome": "自動の選択になります（現在は {from}）：各会話のブラウザは次回からこれで起動し、その後は古い Chrome に戻せません",
+  "It also becomes the automatic choice: profiles on the default and every conversation's browser start with it next time.": "これは自動の選択にもなります。既定を使うプロファイルと各会話のブラウザは次回からこれで起動します。",
   "From Google's Chrome for Testing — every version, its compatibility said before it downloads.": "Google の Chrome for Testing から——どのバージョンもダウンロード前に互換性を表示します。",
   "Downloads are offered on Linux x64 computers; to add a Chrome build on this one ({machine}), run {command} in a terminal.": "ダウンロードは Linux x64 のコンピューターでのみ提供されます。このコンピューター（{machine}）に Chrome ビルドを追加するには、ターミナルで {command} を実行してください。",
   "Downloads to a paired machine aren't offered yet; to add a Chrome build there, run {command} on that machine.": "ペアリングしたマシンへのダウンロードはまだ提供していません。そこに Chrome ビルドを追加するには、そのマシンで {command} を実行してください。",
-  "Chrome for Testing builds, from Google. Once a profile is opened by a Chrome version, every older major is refused for it. Canary and Dev change weekly; Stable is what the browser CLI's own install picks.": "Google の Chrome for Testing ビルドです。プロファイルを一度ある Chrome のバージョンで開くと、それより古いメジャーバージョンはそのプロファイルに使えません。Canary と Dev は毎週変わります。Stable はブラウザー CLI 自身のインストールが選ぶものです。",
+  "Chrome for Testing builds, from Google. Once a profile is opened by a Chrome version, every older major is refused for it. Canary and Dev change weekly; Stable is what the browser driver's own install picks.": "Google の Chrome for Testing ビルドです。プロファイルを一度ある Chrome のバージョンで開くと、それより古いメジャーバージョンはそのプロファイルに使えません。Canary と Dev は毎週変わります。Stable はブラウザ操作ツール自身のインストールが選ぶものです。",
   "Chrome {major} · newest {version} · {n} versions": "Chrome {major} · 最新 {version} · {n} 個のバージョン",
   "Downloads are offered on Linux x64 computers; on {machine} install by hand: {command}": "ダウンロードは Linux x64 のコンピューターでのみ提供されます。{machine} では手動でインストールしてください：{command}",
   "Downloads are offered on Linux x64 computers.": "ダウンロードは Linux x64 のコンピューターでのみ提供されます。",
@@ -7800,7 +7800,7 @@ export default {
   "Verifying Chrome {version}…": "Chrome {version} の動作を確認中…",
   "Downloading Chrome {version}… {got} MB of {total} MB": "Chrome {version} をダウンロード中… {got} MB / {total} MB",
   "Another install is running ({what}) — downloads wait for it.": "別のインストールが実行中です（{what}）。ダウンロードはその完了を待ちます。",
-  "the browser CLI": "ブラウザー CLI",
+  "the browser driver": "ブラウザ操作ツール",
   "Chrome {version} is ready — pick it in the list.": "Chrome {version} の準備ができました。一覧から選んでください。",
   "Chrome {version} didn't download — {reason}": "Chrome {version} をダウンロードできませんでした——{reason}",
   "{size} MB · in use by {who}": "{size} MB · {who} が使用中",
@@ -11599,7 +11599,7 @@ export default {
   // lane engine-plugin: a browser ENGINE plugin — the «自研内核» card, the default engine setting, the consent line
   "Chrome (the automatic choice)": "Chrome（自動の選択）",
   "Default browser engine": "既定のブラウザエンジン",
-  "Which browser program NEW agent browsers run: Chrome as the browser CLI installs it (default), or the browser of a browser engine plugin enabled on this computer (the choices list them). Read when a profile is created and when a conversation's browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.": "新しいエージェントブラウザが動かすブラウザプログラム：ブラウザ CLI がインストールした Chrome（既定）か、このコンピュータで有効なブラウザエンジンプラグインのブラウザ（選択肢に一覧されます）。プロファイルの作成時と会話のブラウザの初回起動時に読まれ、その後はそこに保存されます — 既存のプロファイルは「ビルドを変更…」で切り替えます。クラスタが事前に設定できます。ここで選んだ値が優先されます。",
+  "Which browser program NEW agent browsers run: Chrome as the browser driver installs it (default), or the browser of a browser engine plugin enabled on this computer (the choices list them). Read when a profile is created and when a conversation's browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.": "新しいエージェントブラウザが動かすブラウザプログラム：ブラウザ操作ツール がインストールした Chrome（既定）か、このコンピュータで有効なブラウザエンジンプラグインのブラウザ（選択肢に一覧されます）。プロファイルの作成時と会話のブラウザの初回起動時に読まれ、その後はそこに保存されます — 既存のプロファイルは「ビルドを変更…」で切り替えます。クラスタが事前に設定できます。ここで選んだ値が優先されます。",
   "{engine} (browser engine plugin)": "{engine}（ブラウザエンジンのプラグイン）", // lane engine-spi-egress: the default engine's options, drawn from the engine table
   "{id} — its plugin is not running on this computer": "{id} — そのプラグインはこのコンピュータで動いていません", // lane engine-spi-egress: the default engine's options, drawn from the engine table
   "the custom kernel ({id})": "独自カーネル（{id}）",
@@ -14059,4 +14059,13 @@ export default {
   "If this runs in a container, this copy is lost when the container is rebuilt.": "コンテナで動いている場合、コンテナを作り直すとこのインストールは失われます。",
   "something that is no longer listed": "一覧にない項目",
   "How it is delivered": "届け方",
+  // lane ui-plain-words closure 2 (主开发 20:39Z, ui-fix/closure2-plain-words.md)
+  "{cli} cannot run": "{cli} を実行できません",
+  "{cli} is wrapped in an alias or a function": "{cli} はエイリアスか関数で包まれています",
+  "{cli} could not be looked up": "{cli} の場所を調べられませんでした",
+  "an agent VibeSpace could not identify": "VibeSpace が特定できない agent",
+  "scroll::up": "上へ",
+  "scroll::down": "下へ",
+  "scroll::left": "左へ",
+  "scroll::right": "右へ",
 };

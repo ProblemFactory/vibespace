@@ -1166,9 +1166,10 @@ function create(engineCtx) {
               // closure A3 / F5: what Deny does and when an unanswered ask ends are DECIDING facts — beside what Approve does
               { key: i18nKey('Deny changes nothing. Without it, the agent can still ask for the news on its next turn (free).') },
               { key: i18nKey('Unanswered, it expires in {n} days — the agent can ask again.'), params: { n: ttlDays } },
+              // closure 2 (B2): the counts are said in the detail too (only when it has any) — every surface that draws the item
+              // (the row, its chat card, the For-you window's pane, the needs strip, the vault band) draws it; this ask has no fold
+              ...(own || waiting.length ? [{ key: i18nKey('It already has {n} notifications of its own and {m} wake asks waiting.'), params: { n: own, m: waiting.length } }] : []),
             ],
-            // lane ui-plain-words (chat-cards-5): only the counts fold (said only when it has any)
-            ...(own || waiting.length ? { fold: [{ key: i18nKey('It already has {n} notifications of its own and {m} wake asks waiting.'), params: { n: own, m: waiting.length } }] } : {}),
             source: INBOX_SOURCE,
           },
         });

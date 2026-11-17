@@ -9,7 +9,7 @@ import { paintTab } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 
 import { captureOn, setDragShield, attachDragFeed, startPointerDrag } from './drag-feed.js'; // ONE feed for every drag door (lane-drag-release verify r1)
 import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, splitSideFor, chainFocusOf, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget, tabDragMode, closeAsks, groupCloseList } from './chain-layout.js';
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
-import { windowWords } from './window-types.js';
+import { windowTitle } from './window-types.js';
 
 /**
  * Tab grouping — mixin methods for WindowManager.
@@ -492,7 +492,7 @@ const tabGroupMethods = {
     this._notify();
     if (snap && chain.layout === 'split') {
       snap.chain = chain; snap.pairAfter = [...chain.split.pair];
-      const nameOf = (id) => windowWords(this.windows.get(id)); // closure F13: a window by its words, never its id
+      const nameOf = (id) => windowTitle(this.windows.get(id)); // closure 2: the full title as the release showed it; a title-less window by its kind, never its id
       const actions = [{ label: t('Undo'), run: () => this.undoSplit(snap) }];
       // F3's second button: stay grouped, as tabs (never silent when the split is already gone) — at the drop slot
       // while the strip is still the one this bind made (a later reorder is the user's and stays)
@@ -729,7 +729,7 @@ const tabGroupMethods = {
     const host = this.windows.get(chain.tabs[0]);
     if (!other || !host) return;
     const snap = { chain, anchorId: other.id, guestId: dragged.id, guestWasFree: true, guestRect: from, hostRect: this._rectSnap(host), chainBefore: before && before.layout === 'split' ? before : null, pairAfter: [...chain.split.pair] };
-    const nameOf = (id) => windowWords(this.windows.get(id)); // closure F13: a window by its words, never its id
+    const nameOf = (id) => windowTitle(this.windows.get(id)); // closure 2: the full title as the release showed it; a title-less window by its kind, never its id
     showToast(t('Side by side: {left} | {right}', { left: nameOf(chain.split.pair[0]), right: nameOf(chain.split.pair[1]) }), { actions: [{ label: t('Undo'), run: () => this.undoSplit(snap) }] });
   },
 

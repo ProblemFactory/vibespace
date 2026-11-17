@@ -380,9 +380,6 @@
    "class=\"rc-cleared\"",
    "var(--text-dim)"
   ],
-  "src/lib/mobile-nav.js": [
-   "Window"
-  ],
   "src/lib/chain-layout.js": [
    "Unbind",
    "Snap beside"
@@ -403,9 +400,6 @@
    "--bg-taskbar",
    "--terminal-fg",
    "--terminal-cursor"
-  ],
-  "src/lib/browser-panel-model.js": [
-   "vibespace-browser passkey register"
   ],
   "src/channels/slack-manifest.js": [
    "Reads and sends your Slack messages through your own VibeSpace"
