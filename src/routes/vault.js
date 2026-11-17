@@ -306,6 +306,8 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     app.get('/api/vault/web-logins/site-words', noStoreL(person((req) => whyL(logins.siteWordsFor(String(req.query.name || ''), String(req.query.site || ''), { user: String(req.query.user || '') })))));
     app.post('/api/vault/web-logins/sites', noStoreL(person((req) => { const b = bodyL(req); return whyL(logins.addSite(String(b.name || ''), { site: String(b.site || ''), user: String(b.user || '') }, { who: whoL(req) })); })));
     app.post('/api/vault/web-logins/sites/remove', noStoreL(person((req) => { const b = bodyL(req); return whyL(logins.removeSite(String(b.name || ''), String(b.site || ''), { who: whoL(req) })); })));
+    // the merge's words BEFORE the press (主开发 23:01Z, must 2): the sites that join, the two-step code dropped, the owner that loses its fill, who may then have it filled
+    app.get('/api/vault/web-logins/merge-words', noStoreL(person((req) => whyL(logins.mergeWordsFor(String(req.query.keep || ''), String(req.query.other || ''))))));
     app.post('/api/vault/web-logins/merge', noStoreL(person((req) => { const b = bodyL(req); return whyL(logins.merge(String(b.keep || ''), String(b.other || ''), { who: whoL(req) })); })));
     // lane vault-agent-own: AN AGENT stores a login it holds itself (`vibespace-vault login add <origin> --user <name> --from-file |
     // --stdin [--totp <name>]`) — the password taken OFF the body (never the URL); a `web-login:` entry, provenance agent-typed,
