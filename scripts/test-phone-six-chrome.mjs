@@ -461,18 +461,20 @@ try {
       await phone(w, h); await load(); await windowArea();
       await evalJs(`(() => { const ws = [...app.wm.windows.values()], chips = ${JSON.stringify(CHIPS)}; ws.forEach((x, i) => { x.title = ${JSON.stringify(LONG[lang])}; if (chips[i]) x._authBadge = chips[i]; }); return ws.length; })()`);
       await openSwitcher(); await sleep(300);
-      const rows = await evalJs(`[...document.querySelectorAll('.mobile-win-row')].map((r) => { const b = r.getBoundingClientRect(), h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2), part = h && h.closest('.mobile-win-row > *');
+      // each row is brought on screen first (the 700 × 390 column shows three of the five rows; a point below the screen hits nothing)
+      const rows = await evalJs(`[...document.querySelectorAll('.mobile-win-row')].map((r) => { r.scrollIntoView({ block: 'nearest' }); const b = r.getBoundingClientRect(), h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2), part = h && h.closest('.mobile-win-row > *');
         const label = [...r.children].find((k) => k.tagName === 'SPAN' && k.style.flex.startsWith('1')), more = r.querySelector('.mobile-win-more'), close = r.lastElementChild;
         const inside = (e) => { if (!e) return false; const q = e.getBoundingClientRect(); return q.width >= 35.5 && q.left >= -0.5 && q.right <= innerWidth + 0.5 && getComputedStyle(e).display !== 'none'; };
         const chip = r.querySelector('.mobile-win-billing');
-        return { name: !!part && part === label, nameW: label ? Math.round(label.getBoundingClientRect().width) : 0, more: inside(more), close: inside(close) && close !== more, yield: r.dataset.yield || '', chip: chip ? (getComputedStyle(chip).display === 'none' ? 'menu' : chip.dataset.mode || 'full') : '' }; })`);
+        return { split: !!r.querySelector('.mobile-win-split'), name: !!part && part === label, nameW: label ? Math.round(label.getBoundingClientRect().width) : 0, more: inside(more), close: inside(close) && close !== more, yield: r.dataset.yield || '', chip: chip ? (getComputedStyle(chip).display === 'none' ? 'menu' : chip.dataset.mode || 'full') : '' }; })`);
       yields.push({ lang, w, h, rows });
       if (w === 320 && lang === 'zh') {
         await shot('switcher-row-chips-zh-320.png');
-        const yr = rows.findIndex((r) => r.yield === 'split' || r.yield === 'chip');
+        // a row that HAD a Split door and yielded it (the window on show has none — its menu has no Split row to hold)
+        const yr = rows.findIndex((r) => r.split && (r.yield === 'split' || r.yield === 'chip'));
         if (yr >= 0) {
           menuYield = rows[yr].yield;
-          await evalJs(`document.querySelectorAll('.mobile-win-row')[${yr}].querySelector('.mobile-win-more').click(); true`); await sleep(500);
+          await evalJs(`(() => { const r = document.querySelectorAll('.mobile-win-row')[${yr}]; r.scrollIntoView({ block: 'nearest' }); r.querySelector('.mobile-win-more').click(); return true; })()`); await sleep(500);
           menu = await evalJs(`[...document.querySelectorAll('.taskbar-context-menu > *')].slice(0, 4).map((e) => { const l = e.querySelector('.door-label') || e, g = document.createRange(); g.selectNodeContents(l); return { cls: String(e.className), text: e.textContent.trim(), why: e.querySelector('.door-why')?.textContent || '', labelLines: new Set([...g.getClientRects()].filter((q) => q.width > 0.5).map((q) => Math.round(q.top))).size }; })`);
           menuBox = await evalJs(`(() => { const q = document.querySelector('.taskbar-context-menu')?.getBoundingClientRect(); return q ? { left: Math.round(q.left), right: Math.round(q.right), w: Math.round(q.width) } : null; })()`);
           await shot('switcher-row-menu-zh-320.png');
