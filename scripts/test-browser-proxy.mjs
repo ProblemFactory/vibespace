@@ -148,10 +148,10 @@ fs.rmSync(TLS_DIR, { recursive: true, force: true });
 const tlsConnect = (o) => tls.connect({ ...o, ca: TLS_CERT });
 for (const s of [httpUp, socksUp, up407, socksBad, httpsUp]) await new Promise((r) => s.listen(0, '127.0.0.1', r));
 const HTTP_UP = httpUp.address().port, SOCKS_UP = socksUp.address().port, UP407 = up407.address().port, BAD_UP = socksBad.address().port, HTTPS_UP = httpsUp.address().port;
-/** a plain http:// GET through the forwarder on `port` → the whole answer ('timeout' after 6 s) */
-const plain = (port, host = NAME, p = '/page') => new Promise((res) => {
+/** a plain http:// GET through the forwarder on `port` → the whole answer ('timeout' after `waitMs`) */
+const plain = (port, host = NAME, p = '/page', waitMs = 6000) => new Promise((res) => {
   const s = net.connect(port, '127.0.0.1', () => s.write(`GET http://${host}${p} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`));
-  let b = ''; const t = setTimeout(() => { s.destroy(); res('timeout ' + b); }, 6000);
+  let b = ''; const t = setTimeout(() => { s.destroy(); res('timeout ' + b); }, waitMs);
   s.on('data', (d) => { b += d.toString(); }); s.on('end', () => { clearTimeout(t); res(b); }); s.on('error', (e) => { clearTimeout(t); res('ERR ' + e.message + ' ' + b); });
 });
 /** a CONNECT to NAME:443 through the forwarder on `port` → '<status line> | echoed' or the answer's body */
@@ -199,7 +199,8 @@ console.log('③ THE FORWARDER — the destination\'s NAME goes upstream, with t
     '…through a SOCKS5 proxy: a tunnel to the NAME on port 80, the request inside it, and the origin\'s body arrives (not the ten-second bound)', [g2.slice(0, 160), sc2]);
   const EPr = mutant('src/server/egress-proxy.js', 'createConnection: () => { setImmediate(() => { try { t.resume(); } catch { /* gone */ } }); return t; }', 'createConnection: () => t');
   const fr = EPr.create({ allow: () => ({ allow: true }), upstream: () => ({ scheme: 'socks5', host: '127.0.0.1', port: SOCKS_UP, auth: { user: USER, pass: PASS } }), connectTimeoutMs: 1500, log: { log() { }, warn() { } } });
-  const gr = await plain(await fr.listen());
+  // it asserts only that NO body arrives: 1 s is a hundred times the green pages above (about 10 ms each on the box)
+  const gr = await plain(await fr.listen(), NAME, '/page', 1000);
   ok(!gr.includes('origin-body'), 'RED: the socks road before the cure (the reader\'s paused socket handed to the http client, never resumed) — the body never arrives', gr.slice(0, 160));
   const f407 = mk(() => ({ scheme: 'http', host: '127.0.0.1', port: UP407, auth: { user: USER, pass: PASS } }));
   const g4 = await plain(await f407.listen());
