@@ -164,6 +164,18 @@ const API_ROW = Object.freeze({
   docs: Object.freeze(['https://developers.google.com/workspace/explore', 'https://developers.google.com/gmail/api/reference/rest']),
   readByPost: Object.freeze([/:batchGet$/]),
   sensitive: Object.freeze([/\/permissions/, /trash/i, /delete/i, /\/acl/]),   // `batchDelete` too
+  // B-4e97: the scopes (any one) each Google API host needs — this account's consent asks the Gmail ones only, so the raw
+  // API's docs list the hosts its token reaches and name the rest with what they need (whether the consent asks for more is
+  // the owner's); www.googleapis.com serves many APIs and is not judged
+  hostScopes: Object.freeze(Object.fromEntries(Object.entries({
+    'gmail.googleapis.com': ['gmail.readonly', 'gmail.compose', 'gmail.modify', 'gmail.send', 'gmail.metadata', 'gmail.labels', 'gmail.insert'],
+    'docs.googleapis.com': ['documents', 'documents.readonly', 'drive', 'drive.readonly', 'drive.file'],
+    'sheets.googleapis.com': ['spreadsheets', 'spreadsheets.readonly', 'drive', 'drive.readonly', 'drive.file'],
+    'slides.googleapis.com': ['presentations', 'presentations.readonly', 'drive', 'drive.readonly', 'drive.file'],
+    'drive.googleapis.com': ['drive', 'drive.readonly', 'drive.file', 'drive.metadata', 'drive.metadata.readonly', 'drive.appdata'],
+    'people.googleapis.com': ['contacts', 'contacts.readonly', 'contacts.other.readonly', 'directory.readonly', 'userinfo.profile', 'userinfo.email'],
+    'tasks.googleapis.com': ['tasks', 'tasks.readonly'],
+  }).map(([h, l]) => [h, Object.freeze([...l.map((x) => `https://www.googleapis.com/auth/${x}`), ...(h === 'gmail.googleapis.com' ? ['https://mail.google.com/'] : [])])]))),
 });
 
 /** Per-record OPTIONS the engine stores and the panel edits (§6.3). */

@@ -629,7 +629,7 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
  *   · readByPost  — the vendor's read-by-POST paths (a POST that reads): RegExp, or a string anchored with `^`
  *   · sensitive   — the paths that ALWAYS ask (never auto, never "always allow"): RegExp, or a string anchored with `^`
  *   · refresh     — (optional) the https token endpoint VibeSpace refreshes the credential at itself */
-const API_ROW_KEYS = Object.freeze(['label', 'hosts', 'docs', 'readByPost', 'sensitive', 'refresh']);
+const API_ROW_KEYS = Object.freeze(['label', 'hosts', 'docs', 'readByPost', 'sensitive', 'refresh', 'hostScopes']);
 const API_HOST = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
 const httpsUrl = (u) => { try { const x = new URL(String(u)); return typeof u === 'string' && x.protocol === 'https:' && API_HOST.test(x.hostname); } catch { return false; } };
 const apiPattern = (p) => p instanceof RegExp || (typeof p === 'string' && p.length > 1 && p.startsWith('^'));
@@ -643,6 +643,15 @@ function validateApi(kind, api) {
   if (!Array.isArray(api.docs) || !api.docs.length || !api.docs.every(httpsUrl)) bad('docs must be the vendor\'s own API reference as https URLs (at least one)');
   for (const k of ['readByPost', 'sensitive']) if (!Array.isArray(api[k]) || !api[k].every(apiPattern)) bad(`${k} must be a list of RegExp or strings anchored with "^"`);
   if (api.refresh !== undefined && !httpsUrl(api.refresh)) bad('refresh must be an https URL (the token endpoint)');
+  // B-4e97: `hostScopes` = {host: [scope, …]} — a host the token reaches only while it holds ONE of these scopes (absent = any)
+  if (api.hostScopes !== undefined) {
+    const hs = api.hostScopes;
+    if (!hs || typeof hs !== 'object' || Array.isArray(hs)) bad('hostScopes must be {host: [scope, …]} — the scopes (any one of them) a host needs');
+    for (const [h, list] of Object.entries(hs)) {
+      if (!api.hosts.includes(h)) bad(`hostScopes names ${h}, which is not one of its hosts`);
+      if (!Array.isArray(list) || !list.length || !list.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 200)) bad(`hostScopes.${h} must be a non-empty list of scope names`);
+    }
+  }
   return true;
 }
 

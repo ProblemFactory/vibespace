@@ -952,7 +952,7 @@ const PRINTS = {
     'JSON.stringify(r, null, 2)': `${V}:the docs answer (the vendor table: reference URLs, hosts, the fence)`, 'r': `${V}:the docs answer`,
     'r.code': `${V}:the refusal code`, 'r.bytes': `${V}:a byte count`, 'r.status': `${V}:the vendor's HTTP status`, 'r.truncated': `${V}:a flag`,
     'r.headers': 'judged:apiAnswer — the allow-listed response headers, belted', 'r.json': 'judged:apiAnswer — the vendor\'s JSON answer, belted',
-    'shown': 'judged:apiAnswer — the vendor answer (status, headers, body), belted', 'JSON.stringify(shown, null, 2)': 'judged:apiAnswer — the vendor answer, belted',
+    'r.scopeSays': 'judged:apiAnswer — the scope line (our words + the challenge\'s scope names cut to the token alphabet), belted', 'shown': 'judged:apiAnswer — the vendor answer (status, headers, body), belted', 'JSON.stringify(shown, null, 2)': 'judged:apiAnswer — the vendor answer, belted',
     // verify r4 F4: the REACH of a chain's root and of the chain-printing helpers printProposal(p) / printReplaced(r) — the records behind the printed fields (each field its own row)
     'JSON.stringify(body)': `${O}:the caller's own request body — reached through call()'s fetch (sent, never printed)`, 'e.message': `${V}:node's own error text (fetch / JSON)`,
     'r.proposal': `${V}:the proposal record printProposal prints (its fields p.* — each its own row)`, 'j.proposal': `${V}:the same, on a refusal's answer`, 'r.proposals': `${V}:the proposal records (status; p.*)`, 'p': `${V}:the proposal record handed to printProposal (its fields p.* — rows)`, 'p.receipt': `${V}:the receipt record (its fields rc.* — rows)`,

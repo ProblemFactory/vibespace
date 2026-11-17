@@ -8838,6 +8838,7 @@ function create(deps = {}) {
     const bearer = e && e.adapter && typeof e.adapter.apiBearer === 'function' ? () => e.adapter.apiBearer() : null;
     return {
       id: rec.id, kind: rec.kind, api: (e && e.adapter && e.adapter.api) || null, label: rec.label || rec.id, source: 'channels', bearer,
+      scopes: () => (rec.auth && Array.isArray(rec.auth.scopes) && rec.auth.scopes.length ? rec.auth.scopes.map(String) : null),   // B-4e97: what its sign-in granted (an empty list = not known: every declared host stays listed)
       // the account's vendor meter, shared with the channel's own reads: back-off, the minute's budget, the agents' share
       gate: () => (inBackoff(e) ? backoffRefusal(rec, e) : !affordable(rec, e) ? budgetRefusal(rec, e) : agentShareRefusal(rec, e)),
       charge: () => spendAs('agent', () => charge(e, budgetDecl(rec).unit === 'quota-unit' ? 5 : 1)),

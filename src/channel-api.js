@@ -42,6 +42,31 @@ const PENDING_MAX = 10;                    // one conversation's proposals waiti
  *  no raw API (fail closed: a sensitive list that cannot be read never lets a call run unasked). */
 const ROWS = new WeakMap();
 const asPattern = (p) => (p instanceof RegExp ? p : typeof p === 'string' && p.length > 1 && p.startsWith('^') ? new RegExp(p) : null);
+/** B-4e97: the row's `hostScopes` as read — only hosts of the row, each a list of scope strings (a malformed entry is
+ *  dropped: that host is then judged reachable, as before the field). */
+function hostScopesOf(hs, hosts) {
+  const out = {};
+  if (hs && typeof hs === 'object' && !Array.isArray(hs)) for (const [h, l] of Object.entries(hs)) if (hosts.includes(h) && Array.isArray(l) && l.length && l.every((x) => typeof x === 'string')) out[h] = Object.freeze(l.slice());
+  return Object.freeze(out);
+}
+/** B-4e97: WHICH DECLARED HOSTS THE HELD TOKEN REACHES — a host its row's `hostScopes` names needs ONE of those scopes;
+ *  `held` null (a credential that cannot say its scopes) reaches every host as declared. → {reach, needs: [{host, scopes}]} */
+function reachOf(row, held) {
+  const hs = (row && row.hostScopes) || {};
+  const have = Array.isArray(held) ? new Set(held.map(String)) : null;
+  const reach = [], needs = [];
+  for (const h of (row && row.hosts) || []) { const want = hs[h]; if (!have || !want || want.some((x) => have.has(x))) reach.push(h); else needs.push({ host: h, scopes: want.slice() }); }
+  return { reach, needs };
+}
+/** B-4e97: a vendor's «your token lacks a scope» answer, read off the STANDARD challenge (RFC 6750 §3: `WWW-Authenticate:
+ *  Bearer error="insufficient_scope", scope="a b"`) — never a vendor's body format. → {scopes: [...]} or null; bounded. */
+function insufficientScopeOf(challenge) {
+  const s = typeof challenge === 'string' ? challenge.slice(0, 4000) : '';
+  if (!/\berror\s*=\s*"?insufficient_scope"?/i.test(s)) return null;
+  const m = /\bscope\s*=\s*"([^"]{0,2000})"/i.exec(s);
+  // a scope NAME only (a URL or a word in the token alphabet, ≤ 200): the vendor's header is peer bytes — anything else is dropped
+  return { scopes: m ? m[1].split(/\s+/).filter((x) => /^[A-Za-z0-9._:\/+-]{1,200}$/.test(x)).slice(0, 40) : [] };
+}
 function vendorRowOf(cred) {
   const a = cred && typeof cred === 'object' ? cred.api : null;
   if (!a || typeof a !== 'object') return null;
@@ -51,7 +76,7 @@ function vendorRowOf(cred) {
   let row = null;
   if (hosts && hosts.length && hosts.every((h) => typeof h === 'string' && /^[a-z0-9.-]+$/.test(h)) && docs && rbp && sen) {
     const r = rbp.map(asPattern), x = sen.map(asPattern);
-    if (!r.includes(null) && !x.includes(null)) row = Object.freeze({ label: String(a.label || ''), hosts: Object.freeze([...hosts]), docs: Object.freeze(docs.map(String)), readByPost: Object.freeze(r), sensitive: Object.freeze(x), refresh: typeof a.refresh === 'string' ? a.refresh : null });
+    if (!r.includes(null) && !x.includes(null)) row = Object.freeze({ label: String(a.label || ''), hosts: Object.freeze([...hosts]), docs: Object.freeze(docs.map(String)), readByPost: Object.freeze(r), sensitive: Object.freeze(x), refresh: typeof a.refresh === 'string' ? a.refresh : null, hostScopes: hostScopesOf(a.hostScopes, hosts) });
   }
   ROWS.set(a, row);
   return row;
@@ -310,6 +335,6 @@ function apiGrant({ principal, cred, tier, perDay = null, at = null, by = 'user'
 module.exports = {
   METHODS, READ_METHODS, BODY_MAX, RESPONSE_MAX, SENSITIVE_BODY, PATH_MAX, TIMEOUT_MS, REDIRECTS_MAX, REDIRECT_STATUSES, BUDGET_DEFAULT, SHOWN_BODY_MAX, PENDING_MAX,
   HEADER_ALLOW, HEADER_REFUSED, RESPONSE_HEADER_ALLOW, TIERS, EVERYONE_TIER, TIER_SAYS, REDIRECT_WHY,
-  vendorRowOf, validateRequest, classOf, sensitiveOf, shapeOf, verdict, offersAlways, freeze, thaw, digestOf, urlOf,
+  vendorRowOf, reachOf, insufficientScopeOf, validateRequest, classOf, sensitiveOf, shapeOf, verdict, offersAlways, freeze, thaw, digestOf, urlOf,
   callText, addressOf, redirectRequest, judgeRedirect, retarget, boundResponse, responseHeaders, budgetCheck, auditLine, logTail, LOG_TAIL_MAX, apiGrant,
 };

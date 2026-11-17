@@ -203,7 +203,19 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     // the bearer itself never rides an answer — a vendor echo of the request is cut out of ANY body, binary too (verify r1 M5)
     const hdrs = F.responseHeaders(res.headers);
     for (const k of Object.keys(hdrs)) hdrs[k] = hdrs[k].split(token).join(REDACTED);
-    return { ok: true, status: res.status, headers: beltValue(hdrs), ...beltBody(scrubToken(b.body, token), res.headers.get('content-type')), bytes: b.bytes, truncated: b.truncated, ms: now() - t0 };
+    const scopeSays = res.status === 403 ? scopeRefusalOf(c, cur, res.headers.get('www-authenticate')) : null;   // B-4e97: a 403 for a missing scope said, never silent
+    return { ok: true, status: res.status, headers: beltValue(hdrs), ...beltBody(scrubToken(b.body, token), res.headers.get('content-type')), bytes: b.bytes, truncated: b.truncated, ms: now() - t0, ...(scopeSays ? { scopeSays } : {}) };
+  }
+  /** B-4e97: the ONE line a scope refusal adds — the vendor's own challenge names the scope, else the row's declaration for
+   *  the host the call went to (the held token lacks every scope it lists); null when neither says so. */
+  function scopeRefusalOf(c, req, challenge) {
+    const ins = F.insufficientScopeOf(challenge);
+    const host = String((req && req.host) || '').toLowerCase();
+    const need = F.reachOf(F.vendorRowOf(c), c && typeof c.scopes === 'function' ? c.scopes() : null).needs.find((n) => n.host === host);
+    if (!ins && !need) return null;
+    const scopes = ins && ins.scopes.length ? ins.scopes : need ? need.scopes : [];
+    // belted like every answer field (the scope names come from the vendor's header — reduced to the token alphabet above)
+    return beltValue(`the token lacks the permission this API needs${scopes.length ? ` (${scopes.slice(0, 6).join(' or ')}${scopes.length > 6 ? ' …' : ''})` : ''} — this account's sign-in did not ask for it; whether it asks for more is the user's decision`);
   }
   function scrubToken(buf, token) {
     const t = Buffer.from(String(token || ''));
@@ -240,7 +252,9 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     const c = tr.tier !== 'none' && allCreds().some((x) => x.id === cred) ? credentialOf(cred) : null;
     const v = F.vendorRowOf(c);
     if (!v) return NOT_GRANTED();
-    return { ok: true, cred, vendor: v.label, docs: v.docs, hosts: v.hosts, tier: tr.tier, tierSays: F.TIER_SAYS[tr.tier] || tr.tier, fence: { readByPost: v.readByPost.map(String), sensitive: v.sensitive.map(String), sensitiveAlso: ['DELETE', `a body over ${F.SENSITIVE_BODY / 1024} KiB`, 'an upload'], budget: { perMin: F.BUDGET_DEFAULT.perMin, perDay: tr.perDay || F.BUDGET_DEFAULT.perDay }, bodyMax: F.BODY_MAX, responseMax: F.RESPONSE_MAX } };
+    // B-4e97: the hosts the HELD token reaches; the rest named with the scopes they need (the consent is the owner's)
+    const r = F.reachOf(v, c && typeof c.scopes === 'function' ? c.scopes() : null);
+    return { ok: true, cred, vendor: v.label, docs: v.docs, hosts: r.reach, ...(r.needs.length ? { needsScope: r.needs, needsScopeSays: 'these hosts need a permission this account\'s sign-in did not ask for — calls there are refused (403); whether its sign-in asks for more is the user\'s decision' } : {}), tier: tr.tier, tierSays: F.TIER_SAYS[tr.tier] || tr.tier, fence: { readByPost: v.readByPost.map(String), sensitive: v.sensitive.map(String), sensitiveAlso: ['DELETE', `a body over ${F.SENSITIVE_BODY / 1024} KiB`, 'an upload'], budget: { perMin: F.BUDGET_DEFAULT.perMin, perDay: tr.perDay || F.BUDGET_DEFAULT.perDay }, bodyMax: F.BODY_MAX, responseMax: F.RESPONSE_MAX } };
   }
   /** ONE PROPOSAL: the FROZEN request (what the user's Approve runs), the policy, the agent's note; the oldest decided
    *  ones beyond PROPOSALS_KEEP are dropped. The caller saves + tells the owner. */
@@ -354,7 +368,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     const kept = {};
     const r = await run(ctx, p.cred, c, req, kept);
     p.status = r.ok ? 'ran' : 'failed';
-    p.result = r.ok ? { status: r.status, headers: r.headers, json: r.json, text: r.text, binary: r.binary || false, bytes: r.bytes, truncated: r.truncated } : { code: r.code, error: r.error, ...(r.to ? { status: r.status || null, from: r.from, to: r.to, why: r.why, resubmit: r.resubmit === true } : {}) };
+    p.result = r.ok ? { status: r.status, headers: r.headers, json: r.json, text: r.text, binary: r.binary || false, bytes: r.bytes, truncated: r.truncated, ...(r.scopeSays ? { scopeSays: r.scopeSays } : {}) } : { code: r.code, error: r.error, ...(r.to ? { status: r.status || null, from: r.from, to: r.to, why: r.why, resubmit: r.resubmit === true } : {}) };
     // 重新提交 (B-fc37): the target the vendor pointed at, kept SERVER-side (its query may be signed) for resubmit()
     if (!r.ok && r.resubmit === true && kept.target) p.redirect = { status: r.status, ...kept.target };
     audit(p.cred, F.auditLine({ at: now(), principal: ctx, conv: p.conv, cred: p.cred, req, status: r.status || null, bytes: r.bytes || 0, ms: r.ms || 0, verdict: r.ok ? 'approved' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, proposal: p.id, by, redirect: r.ok ? null : r.to ? { to: r.to, why: r.why } : null }));
