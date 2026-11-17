@@ -24,6 +24,8 @@
 //   ⑤ THE TABS IN LANDSCAPE (「横屏之后 tab 就不见了」): 844 × 390 and 390 × 844 — the two-tab group's strip is drawn, each
 //     tab ≥ 44 px tall, a press on the other tab shows it
 //     ⑤b six tabs at 390 and 669 (the recovery's reader): every name keeps ≥ 4 em and the strip scrolls (four clones of the real tab)
+//   ⑥d THE ROW YIELDS (主开发 2026-11-17, ruling B on the row): both chips, a long name, zh / en, 320–430 + the column beside the
+//     list at 700 × 390 — the centre is the NAME, the ⋯ and ✕ whole inside the screen; at 320 the ⋯ menu holds what yielded
 //   ⑥ SIDE BY SIDE: 390 × 844 — the switcher's «Split» door SAYS why («Rotate to split») and its press says it again;
 //     844 × 390 — «Split» opens two panes (left | right, each ≥ MIN_PANE, both transcripts drawn, each composer 16 px,
 //     each head naming its window with a 44 px ✕), a pane's tap makes it the one on show, the back closes a layer opened
@@ -446,6 +448,47 @@ try {
     await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); return true; })()`);
     const offName = centres.filter((c) => !c.rows.length || c.rows.some((r) => !r.name));
     check(`⑥c the row's centre is its NAME — every row, a long name, zh and en, at 320 / 360 / 390 / 430 (${centres.map((c) => c.lang + c.w + ':' + c.rows.length).join(' ')})`, centres.length === 8 && offName.length === 0, offName.slice(0, 3));
+    // ⑥d THE ROW YIELDS (主开发 2026-11-17 — the .407 move's meeting: a bill chip, the Split door, the window's ⋯ and the ✕ left a
+    // long name 0 px at 320 and cut the ✕ at the screen's edge; the owner's ruling B on the row, PURE phone-head.js
+    // ROW_YIELD_LADDER): BOTH chips (pooled + subscription) on two rows, the long name, zh and en, at 320 / 360 / 390 / 430 and in
+    // the narrow column beside the list (700 × 390) — every row's centre is its NAME, its ⋯ and ✕ stand whole inside the screen
+    // (never yielded, never cut); at 320 the ⋯ menu of a row that yielded holds what it yielded (Split OFF with its why, the
+    // billing row). RED CONTROL: phone-six's 522660c2d (the lane's pictures, phone-six/switcher-407-look.md).
+    const CHIPS = [{ source: 'pooled', name: 'Team pool', poolTarget: 'Work Max' }, { source: 'subscription', name: 'Work Max' }];
+    const yields = []; let menu = null, menuYield = '', menuBox = null;
+    for (const lang of ['zh', 'en']) for (const [w, h] of [[320, 844], [360, 844], [390, 844], [430, 932], [700, 390]]) {
+      await evalJs(`(() => { localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); return true; })()`);
+      await phone(w, h); await load(); await windowArea();
+      await evalJs(`(() => { const ws = [...app.wm.windows.values()], chips = ${JSON.stringify(CHIPS)}; ws.forEach((x, i) => { x.title = ${JSON.stringify(LONG[lang])}; if (chips[i]) x._authBadge = chips[i]; }); return ws.length; })()`);
+      await openSwitcher(); await sleep(300);
+      const rows = await evalJs(`[...document.querySelectorAll('.mobile-win-row')].map((r) => { const b = r.getBoundingClientRect(), h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2), part = h && h.closest('.mobile-win-row > *');
+        const label = [...r.children].find((k) => k.tagName === 'SPAN' && k.style.flex.startsWith('1')), more = r.querySelector('.mobile-win-more'), close = r.lastElementChild;
+        const inside = (e) => { if (!e) return false; const q = e.getBoundingClientRect(); return q.width >= 35.5 && q.left >= -0.5 && q.right <= innerWidth + 0.5 && getComputedStyle(e).display !== 'none'; };
+        const chip = r.querySelector('.mobile-win-billing');
+        return { name: !!part && part === label, nameW: label ? Math.round(label.getBoundingClientRect().width) : 0, more: inside(more), close: inside(close) && close !== more, yield: r.dataset.yield || '', chip: chip ? (getComputedStyle(chip).display === 'none' ? 'menu' : chip.dataset.mode || 'full') : '' }; })`);
+      yields.push({ lang, w, h, rows });
+      if (w === 320 && lang === 'zh') {
+        await shot('switcher-row-chips-zh-320.png');
+        const yr = rows.findIndex((r) => r.yield === 'split' || r.yield === 'chip');
+        if (yr >= 0) {
+          menuYield = rows[yr].yield;
+          await evalJs(`document.querySelectorAll('.mobile-win-row')[${yr}].querySelector('.mobile-win-more').click(); true`); await sleep(500);
+          menu = await evalJs(`[...document.querySelectorAll('.taskbar-context-menu > *')].slice(0, 4).map((e) => { const l = e.querySelector('.door-label') || e, g = document.createRange(); g.selectNodeContents(l); return { cls: String(e.className), text: e.textContent.trim(), why: e.querySelector('.door-why')?.textContent || '', labelLines: new Set([...g.getClientRects()].filter((q) => q.width > 0.5).map((q) => Math.round(q.top))).size }; })`);
+          menuBox = await evalJs(`(() => { const q = document.querySelector('.taskbar-context-menu')?.getBoundingClientRect(); return q ? { left: Math.round(q.left), right: Math.round(q.right), w: Math.round(q.width) } : null; })()`);
+          await shot('switcher-row-menu-zh-320.png');
+          await evalJs(`document.querySelectorAll('.taskbar-context-menu').forEach((m) => m.remove()); true`);
+        }
+      }
+      await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); true`);
+    }
+    await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); return true; })()`);
+    const badRows = yields.filter((y) => !y.rows.length || y.rows.some((r) => !r.name || !r.more || !r.close));
+    check(`⑥d with BOTH chips the row yields (ruling B on the row): every row's centre is its NAME, its ⋯ and ✕ whole inside the screen — zh and en, 320 / 360 / 390 / 430 and the column beside the list at 700 × 390 (${yields.map((y) => y.lang + y.w + ':' + y.rows.map((r) => r.yield || '·').join('')).join(' ')})`,
+      yields.length === 10 && badRows.length === 0 && yields.some((y) => y.rows.some((r) => r.yield)), badRows.slice(0, 2));
+    const splitRow = (menu || []).find((m) => /-off\b/.test(m.cls) && /分屏/.test(m.text) && m.why === '横屏后可分屏'), billRow = (menu || []).find((m) => /^计费：/.test(m.text));
+    check(`⑥d …and nothing that yields is lost: at 320 the ⋯ menu of a row that yielded (${menuYield || 'none'}) holds its Split door OFF with its why («横屏后可分屏») and, when the chip yielded too, the billing row («计费：…»)`,
+      !!menu && !!splitRow && (menuYield !== 'chip' || !!billRow), menu);
+    check('⑥d …and that menu reads: inside the screen, its rows\' words on one line each (it keeps its natural width — it once shrank to the 104 px left of the edge, «分 / 屏»)', !!menuBox && menuBox.left >= 0 && menuBox.right <= 320 && (menu || []).filter((m) => m.text).every((m) => m.labelLines === 1), { menuBox, menu });
     await phone(390, 844); await load(); await windowArea();
     await evalJs(`app.wm.revealWindow(${JSON.stringify(A)}); true`); await sleep(600);
     await phone(844, 390); await settled('regular');
