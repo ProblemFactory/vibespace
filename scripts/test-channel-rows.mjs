@@ -244,6 +244,7 @@ console.log('④ source census: the full-list readers');
     ['src/lib/channel-rows.js', '  for (const r of d.conversations || []) {\n', 'the store: applyBroadcast (a partial broadcast\'s changed rows, by key)'],
     ['src/lib/channels-panel.js', "t('{n} conversations', { n: sc.conversations })", 'a COUNT — the scheduler census (kept facts)'],
     ['src/lib/channel-filter-editor.js', "t('over {n} conversations', { n: e.conversations })", 'a COUNT — a rule\'s estimate'],
+    ['src/lib/setup-flows.js', '[z.conversations, z.pageSockets, z.wsIn, z.wsOut]', 'a COUNT — the hub\'s live conversations in an hour of ⚙ Diagnostics «The main loop, by hour» (lane hub-loop-stalls «loop-day-report»), never a digest\'s rows'],
   ];
   const census = (files) => {
     const hits = [];
@@ -252,7 +253,7 @@ console.log('④ source census: the full-list readers');
   };
   const files = fs.readdirSync(LIB).filter((f) => f.endsWith('.js')).map((f) => [`src/lib/${f}`, fs.readFileSync(path.join(LIB, f), 'utf8')]);
   const c = census(files);
-  ok(c.hits.length === JUDGED.length && c.unjudged.length === 0, `every client read of a digest's \`conversations\` is judged (${c.hits.length}: the store's two doors + two counts) — no surface treats the first read as every conversation`, c.unjudged);
+  ok(c.hits.length === JUDGED.length && c.unjudged.length === 0, `every client read of a digest's \`conversations\` is judged (${c.hits.length}: the store's two doors + three counts) — no surface treats the first read as every conversation`, c.unjudged);
   const fetched = files.filter(([, src]) => /fetchJson\('\/api\/channels'\)/.test(src)).map(([rel]) => rel);
   ok(fetched.join() === 'src/lib/channels-panel.js', `GET /api/channels (the first read) is fetched by the panel alone; the rail asks ?scope=totals, the window ?scope=accounts, a chat card rows?conv= (${fetched.join(', ')})`);
   const planted = census([...files, ['src/lib/chat-renderers.js', "    const hit = (d.conversations || []).find((c) => c.id === ref.convId);\n"]]);
