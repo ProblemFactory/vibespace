@@ -455,7 +455,7 @@ const HARNESS_SETTINGS = {
       ],
       label: t("Antigravity usage reads"),
       description: t("Automatically: an account's usage is read once each time one of its conversations hits a usage wall, and once after a stretch of work — when a turn ends and 5 minutes pass with no new turn on the account; that read comes at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself. Either way, Re-check in the account's menu reads it: this row decides only the reads that happen by themselves."),
-      apply: { kind: 'server', how: 'the CLI usage door — the wall read and the after-turn read' },
+      apply: { kind: 'server', how: t("when a conversation hits a usage wall, and after a stretch of work") },   // the note a person reads under the row: plain words, through the dictionary
     },
     {
       key: "defaultEffort",

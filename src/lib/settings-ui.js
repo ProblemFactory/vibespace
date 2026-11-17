@@ -794,7 +794,7 @@ class SettingsUI {
     const head = document.createElement('div');
     head.className = 'settings-row-apply-head';
     head.textContent = applyHead(schema.apply, { t, advanced: !!this._showAdvanced }) || '';
-    if (schema.apply.how) head.title = schema.apply.how;   // the engineer's line, on hover (lane ui-language)
+    if (schema.apply.how) head.title = t(schema.apply.how);   // the note, on hover (lane ui-language) — prose in the person's language, a flag literal (cli-config-chips.js applyHead)
     box.appendChild(head);
     if (schema.apply.kind === 'cli-config') {
       const key = path.slice(schema.harness.length + 1);

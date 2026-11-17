@@ -4162,6 +4162,7 @@ export default {
   "terminal mode": "终端模式",
   "running chat sessions follow from their next turn": "运行中的聊天会话从下一轮起跟随",
   "Read by VibeSpace": "由 VibeSpace 读取",
+  "when a conversation hits a usage wall, and after a stretch of work": "对话撞到用量上限时，以及一段工作结束后",
   "Written into the CLI config": "写入 CLI 配置",
   "The CLI output style new chat sessions start with. \"Concise\" makes Claude lead with results and skip preamble. Blank = the CLI's own default. A stream-json session cannot switch style mid-conversation, so a change takes effect on the next resume; the chat status bar sets it per session.": "新聊天会话启动时使用的 CLI 输出风格。\"Concise\" 让 Claude 直接给结果、省去铺垫。留空 = CLI 自己的默认值。stream-json 会话无法在对话中途切换风格,改动在下次 resume 生效;聊天状态栏可按会话设置。",
   "CLI default (leave config.toml alone)": "CLI 默认(不动 config.toml)",
