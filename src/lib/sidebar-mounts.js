@@ -6,6 +6,7 @@ import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override 
 import { pluginProvides } from './plugins-ui.js'; // the ONE relay probe (declared capability)
 import { t as tr, tc, deviceLocale } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
 import { dateOf, clockOf, stampAt as when } from './page-time.js';
+import { techFold } from './plain-words.js'; // lane ui-plain-words: the mechanics fold
 import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from './mounts-dialog.js'; // D1: the ONE dialog component (storage + channel accounts)
 import { revealHeaders, askRevealPassword } from './vault-reveal.js'; // lane vault-contents-window r2: a set-up vault prefills secrets only inside the reveal window of this page
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
@@ -2336,7 +2337,9 @@ export function installSidebarMounts(Sidebar) {
         return;
       }
       const info = document.createElement('div'); info.className = 'tiny'; info.style.marginBottom = '10px';
-      info.innerHTML = tr('Installs the VibeSpace daemon as a persistent service on the machine so it <b>dials back to this instance over a WebSocket</b>. Every file/discovery/transcript op then uses that link — no ssh banner-hang, ControlMaster staleness, or per-op child processes. <b>ssh is kept</b> as the bootstrap + rescue channel, and you can remove this anytime.');
+      // lane ui-plain-words machines-25: what it does in plain words (no markup); the mechanics fold under it
+      info.textContent = tr('Installs a VibeSpace service on the machine that connects back to this VibeSpace, so its files and conversations stop going through ssh. ssh stays as the way in to set it up or fix it, and you can remove this anytime.');
+      info.appendChild(techFold([tr('The service dials this instance over a WebSocket; every file, discovery and transcript op then uses that link — no ssh banner hang, no ControlMaster staleness, no child process per op.')]));
       body.appendChild(info);
       // lane-pairing ①: the SAME address list as the pairing dialog (the machine dials the address chosen here; the
       // server's ssh-side curl precheck stays — it is this path's twin of the device's --dial-check)

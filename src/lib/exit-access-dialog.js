@@ -136,8 +136,8 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       sec.dataset.grant = grant;
       sec.appendChild(el('h4', 'exit-access-title', grant === 'use' ? t('Borrow its network') : t('Run commands on it')));
       sec.appendChild(el('p', 'agents-note', grant === 'use'
-        ? t('An agent points one command at this machine\'s network (vibespace-exit use / url) — the command runs here, only its traffic leaves from {machine}.', { machine })
-        : t('An agent runs a shell command ON {machine}, as you, up to 30 s (vibespace-exit run).', { machine })));
+        ? t('An agent sends one command’s traffic out through {machine} — the command runs here, only its traffic leaves from {machine}.', { machine })
+        : t('An agent runs a shell command ON {machine}, as you, for up to 30 s.', { machine })));
       const radios = el('div', 'exit-access-modes');
       radios.setAttribute('role', 'radiogroup');
       radios.setAttribute('aria-label', grant === 'use' ? t('Borrow its network') : t('Run commands on it'));

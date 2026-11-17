@@ -185,7 +185,7 @@ const SETTINGS_SCHEMA = {
   },
   'desktop.dynamicEnabled': {
     type: 'boolean', default: false, label: t('Dynamic desktop (Stage)'),
-    description: t('A special desktop at the left of the strip: sessions materialize into a shared slot together with their own workspace of helper windows. See docs/design-dynamic-desktop.md'),
+    description: t('A special desktop at the left of the strip: sessions materialize into a shared slot together with their own workspace of helper windows.'),
     category: t('Window'), liveApply: true,
   },
   'desktop.idleTimeoutMin': {
@@ -618,7 +618,8 @@ const SETTINGS_SCHEMA = {
   'agents.vibespaceIntegration': {
     type: 'boolean', default: true,
     label: t('VibeSpace agent integration (master switch)'),
-    description: t('Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every option below only applies while this is ON.'),
+    description: t('On: agents get VibeSpace’s context, reminders and tools. Off: Claude Code and Codex run plain, with no VibeSpace hooks or tools — the next sessions, and the running ones stop being nudged.'),
+    details: [t('Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every option below only applies while this is ON.')], // lane ui-plain-words settings-19: the whole rule (its files, what keeps working) under «详情»
     category: t('Integration'), liveApply: true,
   },
   // lane agent-context-owner-facts (B-7960 a — userW: every time the product told an agent was UTC while he lives in

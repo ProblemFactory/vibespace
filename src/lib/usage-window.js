@@ -850,7 +850,7 @@ function renderFooter(d) {
   const from = d.range?.from ? new Date(d.range.from).toISOString().slice(0, 10) : '—';
   const to = d.range?.to ? new Date(d.range.to).toISOString().slice(0, 10) : '—';
   f.innerHTML = `<span>${t('Data range: {from} → {to}', { from, to })}</span>
-    <span>${t('Cost is an estimate (API-equivalent) — subscriptions are plan-covered. Prices editable in data/usage-history/pricing.json.')}</span>`;
+    <span>${t('Cost is an estimate at API prices — a subscription’s use is covered by its plan. Change the prices with «Pricing…».')}</span>`;
   return f;
 }
 

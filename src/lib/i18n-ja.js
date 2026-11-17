@@ -1568,7 +1568,7 @@ export default {
   "Cached reads": "キャッシュ読み取り",
   "Claude subscription": "Claude サブスクリプション",
   "Cost": "コスト",
-  "Cost is an estimate (API-equivalent) — subscriptions are plan-covered. Prices editable in data/usage-history/pricing.json.": "コストは概算(API 換算)です——サブスクはプランに含まれます。価格は data/usage-history/pricing.json で編集できます。",
+  "Cost is an estimate at API prices — a subscription’s use is covered by its plan. Change the prices with «Pricing…».": "コストは API 価格での概算です——サブスクリプションの利用はプランに含まれます。価格は「料金…」で変更できます。", // lane ui-plain-words usage-5: the button, not the file
   "Could not load usage": "使用状況を読み込めませんでした",
   "Daily trend": "日次推移",
   "Data range: {from} → {to}": "データ範囲:{from} → {to}",
@@ -2301,7 +2301,7 @@ export default {
   "Stage — sessions materialize here with their workspace": "ダイナミックデスクトップ——セッションがワークスペースと共にここに現れます",
   "Click any session (sidebar, taskbar, Ctrl+K) — it materializes here with its workspace.": "任意のセッション（サイドバー、タスクバー、Ctrl+K）をクリック——ワークスペースと共にここに現れます。",
   "Dynamic desktop (Stage)": "ダイナミックデスクトップ（Stage）",
-  "A special desktop at the left of the strip: sessions materialize into a shared slot together with their own workspace of helper windows. See docs/design-dynamic-desktop.md": "ストリップ左端の特別なデスクトップ：セッションは共有スロットに、補助ウィンドウのワークスペースと共に現れます。docs/design-dynamic-desktop.md 参照",
+  "A special desktop at the left of the strip: sessions materialize into a shared slot together with their own workspace of helper windows.": "ストリップ左端の特別なデスクトップ：セッションは共有スロットに、補助ウィンドウのワークスペースと共に現れます。",
   "Stage: workspaces kept alive": "Stage：保持するワークスペース数",
   "How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed": "直近いくつのワークスペースを（非表示のまま）保持して即切替できるようにするか。それ以前は保存して閉じます",
   "Remote matches": "リモート一致",
@@ -2889,7 +2889,6 @@ export default {
   "Forwarded {p} → {u}": "転送しました {p} → {u}",
   "Goal not confirmed — the session may be unresponsive. Your command was restored to the input.": "目標が確認されませんでした——セッションが応答していない可能性があります。入力内容は入力欄に復元されました。",
   "Installing on the machine…": "マシンにインストール中…",
-  "Installs the VibeSpace daemon as a persistent service on the machine so it <b>dials back to this instance over a WebSocket</b>. Every file/discovery/transcript op then uses that link — no ssh banner-hang, ControlMaster staleness, or per-op child processes. <b>ssh is kept</b> as the bootstrap + rescue channel, and you can remove this anytime.": "マシンに VibeSpace デーモンを永続サービスとしてインストールし、<b>WebSocket 経由で本インスタンスへ発信接続</b>させます。以後、ファイル/検出/転録などの操作はすべてこのリンクを使います——ssh バナーのハング、ControlMaster の陳腐化、操作ごとの子プロセス生成がなくなります。<b>ssh はブートストラップ＋救援用として維持</b>され、いつでも削除できます。",
   "Jumping to that point in the conversation…": "会話内のその位置へジャンプ中…",
   "Last known scan — {host} was unreachable.": "最終確認済みスキャン — {host} は当時到達できませんでした。",
   "Loading earlier messages…": "それより前のメッセージを読み込み中…",
@@ -6404,8 +6403,6 @@ export default {
   "The stored access could not be read — nothing is allowed until you save it again.": "保存されたアクセス設定を読み取れません — もう一度保存するまで何も許可されません。",
   "Borrow its network": "ネットワークを借りる",
   "Run commands on it": "コマンドを実行する",
-  "An agent points one command at this machine's network (vibespace-exit use / url) — the command runs here, only its traffic leaves from {machine}.": "エージェントが 1 つのコマンドをこのマシンのネットワーク経由にします（vibespace-exit use / url）— コマンドはここで動き、通信だけが {machine} から出ます。",
-  "An agent runs a shell command ON {machine}, as you, up to 30 s (vibespace-exit run).": "エージェントが {machine} 上であなたとしてシェルコマンドを実行します（最長 30 秒、vibespace-exit run）。",
   "Ask me each time": "毎回確認する",
   "Every command waits for your Allow in \"For you\" (60 s, then it is refused).": "各コマンドは「あなた宛」であなたの許可を待ちます（60 秒で拒否）。",
   "{n} conversation(s) using it now will lose it when you save": "保存すると、現在使用中の {n} 件の会話は使えなくなります",
@@ -9232,7 +9229,6 @@ export default {
   "Fetching the certificate for {url} from Tailscale…": "Tailscale から {url} の証明書を取得しています…",
   "HTTPS is off (server.https = off) — VibeSpace answers on http only.": "HTTPS はオフです（server.https = off）— VibeSpace は http だけで応答します。",
   "VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY must name readable certificate and key files — VibeSpace answers on http only.": "VIBESPACE_TLS_CERT と VIBESPACE_TLS_KEY には読み取れる証明書と秘密鍵のファイルを指定してください — VibeSpace は今 http だけで応答します。",
-  "No secure address: Tailscale is not running on this machine (or set VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY to a certificate of your own).": "安全なアドレスがありません：このマシンで Tailscale が動いていません（VIBESPACE_TLS_CERT と VIBESPACE_TLS_KEY で自分の証明書を指定することもできます）。",
   "Tailscale refused VibeSpace: {error}": "Tailscale が VibeSpace を拒否しました：{error}",
   "Tailscale HTTPS certificates are off for your tailnet: turn on HTTPS Certificates in the Tailscale admin console → DNS, and VibeSpace fetches its certificate within the hour.": "tailnet の Tailscale HTTPS 証明書がオフです：Tailscale 管理コンソール → DNS → HTTPS Certificates をオンにすると、VibeSpace が 1 時間以内に証明書を自動で取得します。",
   "VibeSpace may not fetch certificates from Tailscale yet: run sudo tailscale set --operator={user} once on this machine ({user} = the user running VibeSpace); it retries every hour.": "VibeSpace はまだ Tailscale から証明書を取得できません：このマシンで sudo tailscale set --operator={user} を一度実行してください（{user} = VibeSpace を動かしているユーザー）。その後は 1 時間ごとに自動で再試行します。",
@@ -9509,7 +9505,7 @@ export default {
   "Every feature above counts toward it: once a day's calls have cost this much, nothing more is sent to the model until midnight. Example: one judged message costs well under $0.001, so $1 covers a busy day. The LLM row in the Plugins list and Settings › Spending show today's spend.": "上のすべての機能が対象です。その日の呼び出しがこの額に達すると、深夜 0 時まで何もモデルに送りません。例：1 件の判定は $0.001 を大きく下回るので、$1 で忙しい 1 日分まかなえます。プラグイン一覧の LLM の行と 設定 › 支出 に今日の支出が出ます。",
   "Every feature of the LLM plugin uses this key": "LLM プラグインの各機能がこのキーを使います",
   "How sure the judging model must be (0.50–0.90) before it picks a conversation out. Example: at 0.80 “Can you sign this today?” still gets picked, a vague “maybe we could catch up sometime” does not. It shows in what Channels home lists.": "判定モデルがどれだけ確信したら会話を選び出すか（0.50–0.90）。例：0.80 なら「今日これにサインしてもらえますか？」は選ばれ、あいまいな「そのうち話しましょう」は選ばれません。結果はチャンネルのホームの一覧に表れます。",
-  "In your own words (at most 1,500 characters), what the judging model should pick out for you — it reads it as written. Example: “Invoices and anything from my manager matter; newsletters never do.” It shapes what Channels home lists. “Draft from my recent decisions” (with an OpenRouter key: “Draft from my verdicts”) proposes lines from your ✓ / ✗ answers; nothing is saved until you save it.": "判定モデルに何を選び出してほしいかを自分の言葉で（最大 1,500 文字）。書いたとおりに読まれます。例：「請求書と上司からの連絡は大事。ニュースレターは不要。」チャンネルのホームに何が並ぶかが変わります。「最近の判断から下書き」（OpenRouter のキーがあれば「判定から下書き」）が ✓ / ✗ の回答から行を提案します。保存するまで何も保存されません。",
+  "In your own words (at most 1,500 characters), what the judging model should pick out for you — it reads it as written. Example: “Invoices and anything from my manager matter; newsletters never do.” It shapes what Channels home lists. The draft button below proposes lines from your recent ✓ / ✗ answers; nothing changes until you save.": "判定モデルに何を選び出してほしいかを自分の言葉で（最大 1,500 文字）。書いたとおりに読まれます。例：「請求書と上司からの連絡は大事。ニュースレターは不要。」チャンネルのホームに何が並ぶかが変わります。下の下書きボタンで、最近の ✓ / ✗ から行を提案します。保存するまで何も変わりません。",
   "Judging model": "判定モデル",
   "Language model (OpenAI / OpenRouter)": "言語モデル（OpenAI / OpenRouter）",
   "Needs-attention threshold": "要対応のしきい値",
@@ -11260,7 +11256,6 @@ export default {
   "Back to the harness’s own settings": "ハーネス自身の設定に戻す",
   "allowed, asks no more": "許可・もう確認しない",
   "default": "既定",
-  "Bash cannot be ✗: the vibespace-status / msg / task reporting tools run through Bash — their allow rules are always kept": "Bash は ✗ にできません：vibespace-status / msg / task などの報告ツールは Bash で動くため、その許可ルールは常に残ります",
   "Click: default → ✓ allow (asks no more) → ✗ remove → default": "クリック：既定 → ✓ 許可（もう確認しない）→ ✗ 外す → 既定",
   "Permission mode is bypass: a ✓ changes nothing (nothing asks anyway); a ✗ still removes the tool": "権限モードが bypass です：✓ は何も変えません（もともと確認しない）。✗ はツールを外します",
   "Available tools": "使えるツール",
@@ -11284,9 +11279,7 @@ export default {
   "Built in · always on": "組み込み · 常にオン",
   "Artifacts it makes": "作成した Artifacts",
   "The files it writes, shown in this conversation’s Artifacts": "書いたファイルを、この会話の Artifacts で見せます",
-  "Tells the maintainers where a tool felt wrong (vibespace-feedback)": "ツールの使いにくい点をメンテナーに伝えます（vibespace-feedback）",
   "Page publishing": "ページ公開",
-  "Publishes a page on this VibeSpace (vibespace pages)": "この VibeSpace にページを公開します（vibespace pages）",
   "Remove “{name}”": "「{name}」を外す",
   "several allowed": "複数選択可",
   "Task Groups (several allowed)": "タスクグループ（複数選択可）",
@@ -11314,7 +11307,6 @@ export default {
   "Could not open “{name}” to this conversation: {why}": "「{name}」をこの会話に開けませんでした：{why}",
   "Choose a folder first": "先にフォルダーを選んでください",
   "Where and how it runs": "どこで・どう動かすか",
-  "Prefilled from last time · the harness’s own flags go on its command line": "前回の値を入力済み · ハーネス自身のフラグはそのコマンドラインに入ります",
   "Backend and model": "バックエンドとモデル",
   "More options": "その他のオプション",
   "Selected": "選択分",
@@ -12093,9 +12085,8 @@ export default {
   "except {name}": "{name} を除く", // lane vault-use-grants
   "used {n}× by {m} conversations": "{m} 件の会話で {n} 回使用", // lane vault-use-grants
   "Who may use «{name}»": "「{name}」を誰が使えるか", // lane vault-use-grants
-  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.": "下のホスト向けなら、毎回カードなしでこれを使ってコマンドを実行できます（vibespace-vault run）。値そのものは見えません。別のホストや、送り先を判断できないコマンド（シェル、スクリプト）は引き続き確認します。", // lane vault-use-grants
   "Share it: let another conversation or a Task Group run commands with it for the hosts you name. Another host is refused — an agent's own value goes only where you say.": "共有する：別の会話またはタスクグループが、指定したホストに対してこれを使ってコマンドを実行できるようにします。ほかのホストは拒否されます——エージェントが保存した値は、あなたが指定した先にだけ送られます。",
-  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told, is refused: an agent's own value goes only where you say.": "彼らはこれを使ってコマンドを実行します（vibespace-vault run）。下のホストには毎回カードを出しません。値は見えません。ほかのホスト、または送り先が判断できないコマンドは拒否されます：エージェントが保存した値は、あなたが指定した先にだけ送られます。",
+  "Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere, is refused: an agent's own value goes only where you say.": "その agent は下のホストでは毎回確認せずに使え、シークレットそのものは決して見ません。ほかのホストや、行き先がわからないコマンドは拒否されます：エージェントが保存した値は、あなたが指定した先にだけ送られます。",
   "Who may use it": "誰が使えるか", // lane vault-use-grants
   "Who": "誰に", // lane vault-use-grants
   "For which hosts": "どのホスト向けか", // lane vault-use-grants
@@ -12518,7 +12509,6 @@ export default {
   "For commands to {hosts} — the hosts a command may connect to.": "{hosts} へ接続するコマンドに——コマンドが接続してよいホストです。", // lane vault-standing-request
   "For the command {command} — VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.": "コマンド {command} に——VibeSpace はシークレットの送り先を見られません。「許可」はこのコマンドそのものを信頼するという意味です。プログラムやスクリプトが変わればまた確認します。", // lane vault-standing-request
   "It runs: {program} {arg}": "実行するもの：{program} {arg}", // lane vault-standing-request
-  "It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.": "エージェントが vibespace-vault request {ref} --standing（--host … または --command …）で申請し、まさにこの許可を求めるカードが 1 枚だけ届きます。", // lane vault-standing-request
   "Not sure what to fill in? Let the agent ask.": "何を入れればいいか分からない？エージェントに申請させましょう。", // lane vault-standing-request
   "Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.": "取り消すまで有効——⚙ システム ▸ 保管庫… のその行の「誰が使えるか…」と同じで、そこに表示され、そこで取り消せます。ロックしても終わりません（ロック中は何も実行されません）。「許可」には第 2 パスワードが必要です。", // lane vault-standing-request
   "VibeSpace cannot see where this program sends the secret; «Always (this command)» means you trust this command itself. A changed program or script asks again.": "VibeSpace はこのプログラムがシークレットをどこへ送るか見られません。「常に（このコマンド）」はこのコマンドそのものを信頼するという意味です。プログラムやスクリプトが変わればまた確認します。", // lane vault-standing-request
@@ -14008,4 +13998,20 @@ export default {
   "The plugin is checked before it is installed; one that asks for more than the sandbox allows waits for you to review it before it turns on.": "インストール前にプラグインを確認します。サンドボックス以上の権限を求めるプラグインは、あなたが確認するまで有効になりません。",
   "Lists, opens, resumes and copies stopped {name} conversations in the sidebar": "停止した {name} の会話をサイドバーで一覧・表示・再開・複製します",
   "Runs a service only this computer can reach, with the {name} you installed — nothing is downloaded and nothing is opened to the network": "あなたがインストールした {name} で、このコンピュータからだけ使えるサービスを動かします——何もダウンロードせず、ネットワークにも公開しません",
+  // lane ui-plain-words pick 4 — commands, CLI names, env and paths out of sentences (part 2)
+  "An agent sends one command’s traffic out through {machine} — the command runs here, only its traffic leaves from {machine}.": "agent が 1 つのコマンドの通信を {machine} 経由で外に出します——コマンドはここで動き、通信だけが {machine} から出ます。",
+  "An agent runs a shell command ON {machine}, as you, for up to 30 s.": "agent があなたとして {machine} 上で shell コマンドを最長 30 秒実行します。",
+  "Prefilled from last time · its own options go on the command line": "前回の内容を入力済み · 固有のオプションはコマンドラインに書きます",
+  "Bash cannot be ✗: VibeSpace’s own reporting tools (status, messages, tasks) run through Bash, so their allow rules are always kept": "Bash は ✗ にできません：VibeSpace 自身の報告ツール（状態・メッセージ・タスク）は Bash で動くため、その許可ルールは常に残ります",
+  "Tells the maintainers where a tool felt wrong": "どのツールが使いにくかったかをメンテナーに伝えます",
+  "Publishes a page on this VibeSpace": "この VibeSpace でページを公開します",
+  "the machine you pick above": "上で選ぶマシン",
+  "On: agents get VibeSpace’s context, reminders and tools. Off: Claude Code and Codex run plain, with no VibeSpace hooks or tools — the next sessions, and the running ones stop being nudged.": "オン：agent は VibeSpace のコンテキスト・リマインダー・ツールを使えます。オフ：Claude Code と Codex は VibeSpace のフックやツールなしでそのまま動きます——以降のセッションに効き、実行中のセッションにもリマインダーが届かなくなります。",
+  "Installs a VibeSpace service on the machine that connects back to this VibeSpace, so its files and conversations stop going through ssh. ssh stays as the way in to set it up or fix it, and you can remove this anytime.": "このマシンに VibeSpace のサービスを入れ、この VibeSpace へ接続し返すようにします。以後、ファイルや会話は ssh を通りません。ssh はセットアップと修復用に残り、いつでも削除できます。",
+  "The service dials this instance over a WebSocket; every file, discovery and transcript op then uses that link — no ssh banner hang, no ControlMaster staleness, no child process per op.": "サービスは WebSocket でこのインスタンスに接続し、以後のファイル・検出・会話記録の操作はすべてその接続を使います——ssh バナーでの停止も、ControlMaster の古さも、操作ごとの子プロセスもありません。",
+  "Unnamed conversation · {id}": "名前のない会話 · {id}",
+  "Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere (a shell, a script), still asks you.": "その agent は下のホストでは毎回確認せずに使え、シークレットそのものは決して見ません。ほかのホストや、行き先がわからないコマンド（shell・スクリプト）は引き続き確認します。",
+  "It sends you ONE card with exactly this permission to allow — it knows the command.": "この権限そのままのカードが 1 枚届くので、許可するだけです——コマンドは agent が知っています。",
+  "No secure address: Tailscale is not running on this machine.": "安全なアドレスがありません：このマシンで Tailscale が動いていません。",
+  "Or use a certificate of your own: set VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY to its certificate and key files.": "または自分の証明書を使います：VIBESPACE_TLS_CERT と VIBESPACE_TLS_KEY に証明書と鍵のファイルを指定してください。",
 };

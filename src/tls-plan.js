@@ -36,7 +36,8 @@ const W = {
   fetching: 'Fetching the certificate for {url} from Tailscale…',
   disabled: 'HTTPS is off (server.https = off) — VibeSpace answers on http only.',
   filesMissing: 'VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY must name readable certificate and key files — VibeSpace answers on http only.',
-  noTailscale: 'No secure address: Tailscale is not running on this machine (or set VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY to a certificate of your own).',
+  noTailscale: 'No secure address: Tailscale is not running on this machine.',
+  ownCert: 'Or use a certificate of your own: set VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY to its certificate and key files.', // lane ui-plain-words settings-5: the fold under noTailscale
   socketRefused: 'Tailscale refused VibeSpace: {error}',
   notEnabled: 'Tailscale HTTPS certificates are off for your tailnet: turn on HTTPS Certificates in the Tailscale admin console → DNS, and VibeSpace fetches its certificate within the hour.',
   operator: 'VibeSpace may not fetch certificates from Tailscale yet: run sudo tailscale set --operator={user} once on this machine ({user} = the user running VibeSpace); it retries every hour.',
@@ -52,14 +53,17 @@ function domainOf(status) {
   return n.replace(/\.+$/, '').toLowerCase();
 }
 
+/** The lines a sentence's fold carries (the settings fact draws them under it through techFold). */
+const FOLDS = { noTailscale: ['ownCert'] };
 function tlsPlan({ setting = 'auto', env = {}, tailscale = {}, files = {}, now = 0, port = 3456, user = 'vibespace', dir = 'data/tls' } = {}) {
   const set = SETTINGS.includes(setting) ? setting : 'auto';
   const say = (mode, why, key, params = {}, more = {}) => {
-    const words = fill(W[key], params);
+    const fold = (FOLDS[key] || []).map((k) => ({ key: W[k] })); // lane ui-plain-words: the face is the sentence; the alternative (env names) folds
+    const words = [fill(W[key], params), ...fold.map((f) => f.key)].join(' ');
     const serving = !!more.serving;
     const line = serving ? `https on :${port} — ${more.url} (${mode} certificate${more.notAfter ? ', until ' + new Date(more.notAfter).toISOString().slice(0, 10) : ''})` : `https ${mode === 'off' ? 'off' : 'pending'} — ${why}: ${words}`;
     return { mode, setting: set, serving, domain: more.domain || null, url: more.url || null, certPath: more.certPath || null, keyPath: more.keyPath || null,
-      renew: !!more.renew, notAfter: more.notAfter || null, why, words, i18n: { key: W[key], params }, line, notice: NOTICE_WHYS.includes(why) };
+      renew: !!more.renew, notAfter: more.notAfter || null, why, words, i18n: { key: W[key], params, ...(fold.length ? { fold } : {}) }, line, notice: NOTICE_WHYS.includes(why) };
   };
   if (set === 'off') return say('off', 'disabled', 'disabled');
   const envCert = String(env.VIBESPACE_TLS_CERT || '').trim(), envKey = String(env.VIBESPACE_TLS_KEY || '').trim();

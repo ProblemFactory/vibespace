@@ -272,7 +272,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     unsaved: { isDirty: () => start !== null && stateOf() !== start, save: () => saveNow() } });
   if (raised) return null;   // raised: the same entry's «Who may use» form, as it was (int361, dialog-yield §103 r3: key = the entry)
   let ownBox = null, hostsIn = null, endSel = null, polIn = null, previewNow = () => {};
-  body.append(el('div', 'vw-ak-hint', u.own ? t('They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told, is refused: an agent\'s own value goes only where you say.') : t('They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.')));   // B-bc3b: an agent's own entry — another host is REFUSED there, never a card
+  body.append(el('div', 'vw-ak-hint', u.own ? t('Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere, is refused: an agent\'s own value goes only where you say.') : t('Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere (a shell, a script), still asks you.')));   // B-bc3b: an agent's own entry — another host is REFUSED there, never a card
   picker = principalPicker({ items: () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))], app, multi: true, selected: stored.selected, placeholder: t('Search sessions and groups…'), label: t('Who may use it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, except: { selected: stored.except, extra, onChange: () => previewNow() }, onChange: () => previewNow() });
   body.append(el('div', 'vw-ak-sec', t('Who')), picker.el);
   // THE HOSTS: one list for the members this save writes; the entry's own («the hosts it was stored for») when it has them
@@ -294,7 +294,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   body.append(hostsIn);
   // «让 agent 自己申请» (B-eba2): right under the field the owner could not fill — the agent can ask for exactly this grant, one card to allow
   const askAgent = el('div', 'vw-ak-hint vw-use-ask-agent');
-  askAgent.append(el('b', null, t('Not sure what to fill in? Let the agent ask.')), document.createTextNode(' ' + t('It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.', { ref: u.ref || 'vault://…' })));
+  askAgent.append(el('b', null, t('Not sure what to fill in? Let the agent ask.')), document.createTextNode(' ' + t('It sends you ONE card with exactly this permission to allow — it knows the command.')));
   if (!u.own) body.append(askAgent);   // B-bc3b (the read): an agent's own entry — another conversation's --standing ask is refused there (use_not_granted), its own needs none
   const syncOwn = () => { hostsIn.hidden = !!(ownBox && ownBox.checked); };
   if (ownBox) { ownBox.onchange = syncOwn; syncOwn(); }

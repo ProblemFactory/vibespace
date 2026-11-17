@@ -48,6 +48,7 @@ import { t as tr, deviceLocale } from './i18n.js';
 import { dateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { pushClaimOptions } from './value-words.js'; // lane ui-language: the push declaration's options, one list
 import { needLine } from './need-line.js'; // lane ui-needs-a-button (channels-accounts-4): a reference with its release door
+import { techFold } from './plain-words.js'; // lane ui-plain-words: the vendor's scope names fold
 import { mountsDialog, wireOAuthConnect, reauthDialog, wireStepPaste, api as mountsApi } from './mounts-dialog.js';
 import { routeErrorText, policyModeText } from './channel-words.js';
 import * as P from '../channel-policy.js';
@@ -809,8 +810,17 @@ function authFactText(a) {
   bits.push(auth.state === 'connected' ? tr('Signed in') : auth.state === 'expired' ? tr('The sign-in expired or was revoked') : auth.state === 'needs-credentials' ? tr('No usable OAuth client') : tr('Not signed in'));
   if (auth.user && !auth.self) bits.push(String(auth.user));
   if (auth.expiresAt && Number.isFinite(Number(auth.expiresAt))) bits.push(tr('sign-in valid until {date}', { date: dateOf(Number(auth.expiresAt), { full: true, words: true }) }));
-  if (Array.isArray(auth.scopes) && auth.scopes.length) bits.push(tr('scopes {list}', { list: auth.scopes.join(', ') }));
-  return bits.join(' · ');
+  return bits.join(' · '); // lane ui-plain-words channels-accounts-13: the granted scopes are the fold's (authFactNode)
+}
+/** The sign-in fact as a node: the plain line, and the vendor's raw scope names folded under it. */
+function authFactNode(a) {
+  const d = document.createElement('div');
+  d.className = 'mounts-note';
+  d.textContent = authFactText(a);
+  const scopes = Array.isArray(a.auth && a.auth.scopes) ? a.auth.scopes : [];
+  const fold = techFold(scopes.length ? [tr('scopes {list}', { list: scopes.join(', ') })] : [], { mono: true, className: 'chan-auth-scopes' });
+  if (fold) d.appendChild(fold);
+  return d;
 }
 export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
   const r = await fetchJson(`/api/channels/adapters/${enc(a.id)}/config`);
@@ -836,7 +846,7 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
     ...clientFieldSpecs({ ...spec, presets: cfg.presets || spec.presets }, { value: cur, custom, secretType: 'text',
       hint: tr('This account’s token was minted under this client. Switching the client means signing in again — Save opens Re-authorize.'),
       secretHint: tr('Secrets are never shown again after saving — only replaced.') }),
-    { key: 'authfact', label: tr('Sign-in'), type: 'note', value: authFactText(a) },
+    { key: 'authfact', label: tr('Sign-in'), type: 'node', node: authFactNode(a) },
     ...optionFieldSpecs(spec.optionsSchema, { values: cfg.options || {}, presets: spec.presets || [] }),
     ...(cfg.push ? [pushClaimSpec(cfg.push.claimedExclusive)] : []),
     ...(a.senderHonestyLine ? [{ key: 'honesty', label: tr('Sender line'), type: 'select', value: honesty, options: [['default', tr('Instance default')], ['on', tr('on')], ['off', tr('off')]],

@@ -426,8 +426,11 @@ function chartSplit(body, data, panel, mlist) {
   if (!pv || !pv.length) return empty(body);
   const dimMeta = DIMENSIONS().find((d) => d.key === panel.dim);
   const numericKeys = panel.dim === 'hour' || panel.dim === 'weekday';
+  // lane ui-plain-words usage-3: a row is NAMED like the unsplit chart's (the groups' own names) — never a raw session id
+  const dimNames = new Map((data.groups?.[panel.dim] || []).map((g) => [g.key, g.name || (panel.dim === 'origin' ? originLabel(g.key) : '')]));
+  const labelOf = (k) => dimNames.get(k) || (panel.dim === 'session' ? t('Unnamed conversation · {id}', { id: String(k).slice(0, 8) }) : String(k));
   let rows = pv.map((r) => ({
-    key: r.key, cells: r.cells,
+    key: r.key, label: labelOf(r.key), cells: r.cells,
     total: Object.values(r.cells).reduce((s2, c) => s2 + valueOf(c, m.key), 0),
   }));
   const smode = effectiveSort(panel, dimMeta);
@@ -474,7 +477,7 @@ function chartSplit(body, data, panel, mlist) {
     opts.scales[catAxis].stacked = true;
     opts.scales.pri.stacked = true;
   }
-  new Chart(canvas, { type: stacked ? 'bar' : 'line', data: { labels: rows.map((r) => String(r.key)), datasets }, options: opts });
+  new Chart(canvas, { type: stacked ? 'bar' : 'line', data: { labels: rows.map((r) => String(r.label)), datasets }, options: opts });
 }
 
 function chartTable(body, rows, mlist, panel) {

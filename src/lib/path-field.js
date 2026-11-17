@@ -87,6 +87,7 @@ const hostNamesLoaded = () => {
 };
 const hostName = (hk) => {
   if (!hk) return '';
+  if (hk === 'none') return t('the machine you pick above'); // lane ui-plain-words storage-3: a mount dialog before its machine is picked asks /api/hosts/none/…
   hostNamesLoaded();
   if (HOSTS.names && HOSTS.names[hk]) return HOSTS.names[hk];
   const o = [...document.querySelectorAll('select[id*="host"] option')].find((x) => x.value === hk);

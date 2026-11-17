@@ -37,7 +37,7 @@ const PLUGIN_SETTINGS = {
         description: t('How sure the judging model must be (0.50–0.90) before it picks a conversation out. Example: at 0.80 “Can you sign this today?” still gets picked, a vague “maybe we could catch up sometime” does not. It shows in what Channels home lists.') },
       { key: 'attentionBlock', path: 'decision.attentionBlock', type: 'text', multiline: true, maxLength: 1500, draft: 'decision', default: '', apply: 'server',
         label: t('What matters to me'),
-        description: t('In your own words (at most 1,500 characters), what the judging model should pick out for you — it reads it as written. Example: “Invoices and anything from my manager matter; newsletters never do.” It shapes what Channels home lists. “Draft from my recent decisions” (with an OpenRouter key: “Draft from my verdicts”) proposes lines from your ✓ / ✗ answers; nothing is saved until you save it.') },
+        description: t('In your own words (at most 1,500 characters), what the judging model should pick out for you — it reads it as written. Example: “Invoices and anything from my manager matter; newsletters never do.” It shapes what Channels home lists. The draft button below proposes lines from your recent ✓ / ✗ answers; nothing changes until you save.') },
       // lane decision-attention-facts: IMPLICIT LABELS — a reply ⇒ "needs", a listed row left unopened a day ⇒ "not"
       // (src/server/channels-attention.js `learn`); off by default, nothing written while off
       { key: 'implicitLabels', path: 'decision.implicitLabels', type: 'boolean', default: false, apply: 'server',

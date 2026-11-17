@@ -1569,7 +1569,7 @@ export default {
   "Cached reads": "缓存读取",
   "Claude subscription": "Claude 订阅",
   "Cost": "费用",
-  "Cost is an estimate (API-equivalent) — subscriptions are plan-covered. Prices editable in data/usage-history/pricing.json.": "费用为预估值(API 等价)——订阅由套餐覆盖。价格可在 data/usage-history/pricing.json 中编辑。",
+  "Cost is an estimate at API prices — a subscription’s use is covered by its plan. Change the prices with «Pricing…».": "费用是按 API 价格估算的——订阅的用量由套餐包含。点「价格…」可以修改价格。", // lane ui-plain-words usage-5: the button, not the file
   "Could not load usage": "无法加载用量",
   "Daily trend": "每日趋势",
   "Data range: {from} → {to}": "数据范围:{from} → {to}",
@@ -2300,7 +2300,7 @@ export default {
   "Stage — sessions materialize here with their workspace": "动态桌面——会话连同其工作区在此物化",
   "Click any session (sidebar, taskbar, Ctrl+K) — it materializes here with its workspace.": "点击任意会话（侧栏、任务栏、Ctrl+K）——它会连同自己的工作区在这里物化。",
   "Dynamic desktop (Stage)": "动态桌面（Stage）",
-  "A special desktop at the left of the strip: sessions materialize into a shared slot together with their own workspace of helper windows. See docs/design-dynamic-desktop.md": "桌面条最左侧的特殊桌面：会话物化到共享槽位，并带上各自的辅助窗口工作区。详见 docs/design-dynamic-desktop.md",
+  "A special desktop at the left of the strip: sessions materialize into a shared slot together with their own workspace of helper windows.": "桌面条最左侧的特殊桌面：会话物化到共享槽位，并带上各自的辅助窗口工作区。",
   "Stage: workspaces kept alive": "动态桌面：保活工作区数",
   "How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed": "最近多少个会话工作区保持加载（隐藏）以便秒切；更早的会被保存并关闭",
   "Remote matches": "远程匹配",
@@ -2889,7 +2889,6 @@ export default {
   "Forwarded {p} → {u}": "已转发 {p} → {u}",
   "Goal not confirmed — the session may be unresponsive. Your command was restored to the input.": "目标未确认——该会话可能没有响应。你的指令已还原到输入框。",
   "Installing on the machine…": "正在机器上安装…",
-  "Installs the VibeSpace daemon as a persistent service on the machine so it <b>dials back to this instance over a WebSocket</b>. Every file/discovery/transcript op then uses that link — no ssh banner-hang, ControlMaster staleness, or per-op child processes. <b>ssh is kept</b> as the bootstrap + rescue channel, and you can remove this anytime.": "在机器上把 VibeSpace 守护进程安装为持久化服务，使它<b>通过 WebSocket 拨回本实例</b>。此后文件/发现/转录等操作都走这条链路——不再有 ssh banner 卡住、ControlMaster 陈旧、或每次操作都开子进程的问题。<b>ssh 仍会保留</b>作为引导与救援通道，随时可以移除此项。",
   "Jumping to that point in the conversation…": "正在跳转到对话中的那个位置…",
   "Last known scan — {host} was unreachable.": "最后一次已知扫描 — {host} 当时不可达。",
   "Loading earlier messages…": "正在加载更早的消息…",
@@ -6405,8 +6404,6 @@ export default {
   "The stored access could not be read — nothing is allowed until you save it again.": "存储的访问设置无法读取 — 在你重新保存之前，什么都不允许。",
   "Borrow its network": "借用它的网络",
   "Run commands on it": "在它上面运行命令",
-  "An agent points one command at this machine's network (vibespace-exit use / url) — the command runs here, only its traffic leaves from {machine}.": "agent 让一条命令走这台机器的网络（vibespace-exit use / url）— 命令在这里运行，只有流量从 {machine} 出去。",
-  "An agent runs a shell command ON {machine}, as you, up to 30 s (vibespace-exit run).": "agent 以你的身份在 {machine} 上运行 shell 命令，最长 30 秒（vibespace-exit run）。",
   "Ask me each time": "每次都问我",
   "Every command waits for your Allow in \"For you\" (60 s, then it is refused).": "每条命令都会在“给你”里等你点允许（60 秒后自动拒绝）。",
   "{n} conversation(s) using it now will lose it when you save": "现在正在使用它的 {n} 个会话会在保存后失去它",
@@ -9233,7 +9230,6 @@ export default {
   "Fetching the certificate for {url} from Tailscale…": "正在向 Tailscale 获取 {url} 的证书…",
   "HTTPS is off (server.https = off) — VibeSpace answers on http only.": "HTTPS 已关闭（server.https = off）— VibeSpace 只用 http 应答。",
   "VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY must name readable certificate and key files — VibeSpace answers on http only.": "VIBESPACE_TLS_CERT 和 VIBESPACE_TLS_KEY 必须指向可读的证书和私钥文件 — VibeSpace 现在只用 http 应答。",
-  "No secure address: Tailscale is not running on this machine (or set VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY to a certificate of your own).": "没有安全地址：这台机器上没有运行 Tailscale（也可以用 VIBESPACE_TLS_CERT 和 VIBESPACE_TLS_KEY 指定你自己的证书）。",
   "Tailscale refused VibeSpace: {error}": "Tailscale 拒绝了 VibeSpace：{error}",
   "Tailscale HTTPS certificates are off for your tailnet: turn on HTTPS Certificates in the Tailscale admin console → DNS, and VibeSpace fetches its certificate within the hour.": "Tailscale 的 HTTPS 证书功能没开：在 Tailscale 管理台 → DNS → HTTPS Certificates 打开后，VibeSpace 会在一小时内自动取证书",
   "VibeSpace may not fetch certificates from Tailscale yet: run sudo tailscale set --operator={user} once on this machine ({user} = the user running VibeSpace); it retries every hour.": "VibeSpace 还不能向 Tailscale 取证书：在这台机器上运行一次 sudo tailscale set --operator={user}（{user} = 运行 VibeSpace 的用户），之后它每小时自动重试",
@@ -9510,7 +9506,7 @@ export default {
   "Every feature above counts toward it: once a day's calls have cost this much, nothing more is sent to the model until midnight. Example: one judged message costs well under $0.001, so $1 covers a busy day. The LLM row in the Plugins list and Settings › Spending show today's spend.": "上面每个功能都算在内：当天的调用花到这个数就停，午夜前不再发给模型。例如判断一条消息远低于 $0.001，所以 $1 够忙碌的一天用。插件列表里的 LLM 一行和 设置 › 花费 会显示今天花了多少。",
   "Every feature of the LLM plugin uses this key": "LLM 插件的各项功能用这把钥匙",
   "How sure the judging model must be (0.50–0.90) before it picks a conversation out. Example: at 0.80 “Can you sign this today?” still gets picked, a vague “maybe we could catch up sometime” does not. It shows in what Channels home lists.": "判断模型要有多大把握（0.50–0.90）才把一个会话挑出来。例如设为 0.80 时，“今天能签一下这个吗？”仍会被挑出，含糊的“改天有空聊聊吧”不会。结果体现在频道首页列出的会话里。",
-  "In your own words (at most 1,500 characters), what the judging model should pick out for you — it reads it as written. Example: “Invoices and anything from my manager matter; newsletters never do.” It shapes what Channels home lists. “Draft from my recent decisions” (with an OpenRouter key: “Draft from my verdicts”) proposes lines from your ✓ / ✗ answers; nothing is saved until you save it.": "用你自己的话（最多 1,500 字）写下判断模型该替你挑出什么——它按原文读取。例如：“发票和我经理发来的都重要；新闻简报从来不重要。”它决定频道首页列出哪些会话。“从我最近的判定草拟”（有 OpenRouter key 时为“从我的判定起草”）会根据你的 ✓ / ✗ 提议几行；你保存之前什么都不会保存。",
+  "In your own words (at most 1,500 characters), what the judging model should pick out for you — it reads it as written. Example: “Invoices and anything from my manager matter; newsletters never do.” It shapes what Channels home lists. The draft button below proposes lines from your recent ✓ / ✗ answers; nothing changes until you save.": "用你自己的话（最多 1,500 字）写下判断模型该替你挑出什么——它按原文读取。例如：“发票和我经理发来的都重要；新闻简报从来不重要。”它决定频道首页列出哪些会话。按下面的起草按钮，会根据你最近标的 ✓ / ✗ 起草几行；保存前不会改动。",
   "Judging model": "判断模型",
   "Language model (OpenAI / OpenRouter)": "语言模型（OpenAI / OpenRouter）",
   "Needs-attention threshold": "需关注阈值",
@@ -11261,7 +11257,6 @@ export default {
   "Back to the harness’s own settings": "回到 harness 自己的设置",
   "allowed, asks no more": "允许，不再询问",
   "default": "默认",
-  "Bash cannot be ✗: the vibespace-status / msg / task reporting tools run through Bash — their allow rules are always kept": "Bash 不能 ✗：vibespace-status / msg / task 这些回报工具走 Bash —— 它们的允许规则一直保留",
   "Click: default → ✓ allow (asks no more) → ✗ remove → default": "点一下：默认 → ✓ 允许（不再询问）→ ✗ 拿掉 → 默认",
   "Permission mode is bypass: a ✓ changes nothing (nothing asks anyway); a ✗ still removes the tool": "权限模式是 bypass：✓ 没有区别（本来就不问）；✗ 仍然把工具拿掉",
   "Available tools": "可用工具",
@@ -11285,9 +11280,7 @@ export default {
   "Built in · always on": "内置 · 一直开着",
   "Artifacts it makes": "产出 Artifacts",
   "The files it writes, shown in this conversation’s Artifacts": "它写的文件，在这个对话的 Artifacts 里给你看",
-  "Tells the maintainers where a tool felt wrong (vibespace-feedback)": "工具哪里不顺，告诉维护者（vibespace-feedback）",
   "Page publishing": "页面发布",
-  "Publishes a page on this VibeSpace (vibespace pages)": "把一页发布到这个 VibeSpace（vibespace pages）",
   "Remove “{name}”": "移出「{name}」",
   "several allowed": "可多选",
   "Task Groups (several allowed)": "任务组（可多选）",
@@ -11315,7 +11308,6 @@ export default {
   "Could not open “{name}” to this conversation: {why}": "没能把「{name}」开放给这个对话：{why}",
   "Choose a folder first": "先选文件夹",
   "Where and how it runs": "在哪、怎么跑",
-  "Prefilled from last time · the harness’s own flags go on its command line": "按上次预填 · harness 自己认的参数写进它的命令行",
   "Backend and model": "后端和模型",
   "More options": "更多选项",
   "Selected": "已选",
@@ -12094,9 +12086,8 @@ export default {
   "except {name}": "除了 {name}", // lane vault-use-grants
   "used {n}× by {m} conversations": "已被 {m} 个对话使用 {n} 次", // lane vault-use-grants
   "Who may use «{name}»": "谁可以用「{name}」", // lane vault-use-grants
-  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.": "他们可以用它运行命令（vibespace-vault run），发往下面的主机时不再每次弹卡片；他们永远看不到它。其他主机，或无法判断发往何处的命令（shell、脚本），仍会问你。", // lane vault-use-grants
   "Share it: let another conversation or a Task Group run commands with it for the hosts you name. Another host is refused — an agent's own value goes only where you say.": "共享它：让另一个会话或任务组，在你指定的主机上用它运行命令。其他主机会被拒绝——代理自己存放的值只去你说的地方。",
-  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told, is refused: an agent's own value goes only where you say.": "他们用它运行命令（vibespace-vault run），对下面的主机每次都不弹卡片；他们看不到它的值。其他主机，或无法判断去向的命令，会被拒绝：代理自己存放的值只去你说的地方。",
+  "Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere, is refused: an agent's own value goes only where you say.": "它的 agent 可以在下面这些主机上使用它，不必每次问你，而且永远看不到密钥本身。其他主机，或者去向说不清的命令，会被拒绝：代理自己存放的值只去你说的地方。",
   "Who may use it": "谁可以用", // lane vault-use-grants
   "Who": "给谁", // lane vault-use-grants
   "For which hosts": "用于哪些主机", // lane vault-use-grants
@@ -12519,7 +12510,6 @@ export default {
   "For commands to {hosts} — the hosts a command may connect to.": "用于连往 {hosts} 的命令——即命令可以连接的主机。", // lane vault-standing-request
   "For the command {command} — VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.": "用于命令 {command}——VibeSpace 看不到它把密钥发往哪里；「允许」表示你信任这条命令本身。换了程序或脚本会再问。", // lane vault-standing-request
   "It runs: {program} {arg}": "它运行：{program} {arg}", // lane vault-standing-request
-  "It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.": "它用 vibespace-vault request {ref} --standing（--host … 或 --command …）来申请，你只会收到一张卡片，允许的正是这条授权。", // lane vault-standing-request
   "Not sure what to fill in? Let the agent ask.": "不知道怎么填？让 agent 自己申请。", // lane vault-standing-request
   "Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.": "直到你收回——和 ⚙ 系统 ▸ 保险库… 里它那一行的「谁可以用…」一样，那里列着它，也在那里收回。上锁不会结束它（锁着时什么都不运行）。「允许」会要第二密码。", // lane vault-standing-request
   "VibeSpace cannot see where this program sends the secret; «Always (this command)» means you trust this command itself. A changed program or script asks again.": "VibeSpace 看不到这个程序把密钥发往哪里；「总是（这条命令）」表示你信任这条命令本身。换了程序或脚本会再问。", // lane vault-standing-request
@@ -14009,4 +13999,20 @@ export default {
   "The plugin is checked before it is installed; one that asks for more than the sandbox allows waits for you to review it before it turns on.": "安装前会先检查插件；需要沙盒以外权限的插件，要你确认后才会启用。",
   "Lists, opens, resumes and copies stopped {name} conversations in the sidebar": "在侧边栏列出、打开、继续和复制已停止的 {name} 对话",
   "Runs a service only this computer can reach, with the {name} you installed — nothing is downloaded and nothing is opened to the network": "用你自己安装的 {name} 在本机运行一个只对本机开放的服务——不下载任何东西，也不对外开放",
+  // lane ui-plain-words pick 4 — commands, CLI names, env and paths out of sentences (part 2)
+  "An agent sends one command’s traffic out through {machine} — the command runs here, only its traffic leaves from {machine}.": "agent 让一条命令的网络流量从 {machine} 出去——命令在这里运行，只有它的流量从 {machine} 发出。",
+  "An agent runs a shell command ON {machine}, as you, for up to 30 s.": "agent 以你的身份在 {machine} 上运行一条 shell 命令，最长 30 秒。",
+  "Prefilled from last time · its own options go on the command line": "沿用上次的设置 · 它自己的选项写在命令行里",
+  "Bash cannot be ✗: VibeSpace’s own reporting tools (status, messages, tasks) run through Bash, so their allow rules are always kept": "Bash 不能设为 ✗：VibeSpace 自带的汇报工具（状态、消息、任务）通过 Bash 运行，所以它们的允许规则总会保留",
+  "Tells the maintainers where a tool felt wrong": "告诉维护者哪个工具用着不对",
+  "Publishes a page on this VibeSpace": "在这个 VibeSpace 上发布页面",
+  "the machine you pick above": "上面选的机器",
+  "On: agents get VibeSpace’s context, reminders and tools. Off: Claude Code and Codex run plain, with no VibeSpace hooks or tools — the next sessions, and the running ones stop being nudged.": "开：agent 会得到 VibeSpace 的上下文、提醒和工具。关：Claude Code 和 Codex 以原样运行，没有 VibeSpace 的钩子和工具——对之后的会话生效，正在运行的会话也不再收到提醒。",
+  "Installs a VibeSpace service on the machine that connects back to this VibeSpace, so its files and conversations stop going through ssh. ssh stays as the way in to set it up or fix it, and you can remove this anytime.": "在这台机器上安装一个 VibeSpace 服务，由它主动连回这个 VibeSpace，之后它的文件和对话不再走 ssh。ssh 仍保留，用来安装和修复，你随时可以移除。",
+  "The service dials this instance over a WebSocket; every file, discovery and transcript op then uses that link — no ssh banner hang, no ControlMaster staleness, no child process per op.": "这个服务通过 WebSocket 连到本实例；之后每个文件、发现和对话记录操作都走这条连接——没有 ssh 横幅卡住、没有 ControlMaster 失效，也不再每个操作开一个子进程。",
+  "Unnamed conversation · {id}": "未命名的对话 · {id}",
+  "Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere (a shell, a script), still asks you.": "它的 agent 可以在下面这些主机上使用它，不必每次问你，而且永远看不到密钥本身。其他主机，或者去向说不清的命令（shell、脚本），仍会问你。",
+  "It sends you ONE card with exactly this permission to allow — it knows the command.": "它会发给你一张卡片，正好是这条授权，你点允许即可——命令它自己知道。",
+  "No secure address: Tailscale is not running on this machine.": "没有安全地址：这台机器上没有运行 Tailscale。",
+  "Or use a certificate of your own: set VIBESPACE_TLS_CERT and VIBESPACE_TLS_KEY to its certificate and key files.": "或者用你自己的证书：把 VIBESPACE_TLS_CERT 和 VIBESPACE_TLS_KEY 设为它的证书和私钥文件。",
 };

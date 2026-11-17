@@ -273,7 +273,7 @@ export function installNewSessionForm(App) {
       b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
     }
     const sub = $('ns-left-sub');
-    if (sub) sub.textContent = shell ? t('Prefilled from last time · a login shell, no harness') : t('Prefilled from last time · the harness’s own flags go on its command line');
+    if (sub) sub.textContent = shell ? t('Prefilled from last time · a login shell, no harness') : t('Prefilled from last time · its own options go on the command line');
     $('ns-card-backend')?.classList.toggle('hidden', shell); $('ns-card-backend-h')?.classList.toggle('hidden', shell);   // 终端: the card is not drawn
     $('row-model')?.closest('.ns-pair')?.classList.toggle('hidden', shell);
     this._nsPaintGroups();
@@ -301,7 +301,7 @@ export function installNewSessionForm(App) {
       const chips = row.tools.map((x) => {
         const s = st[x] || ''; const keep = (row.keep || []).includes(x);
         const words = s === 'allow' ? t('allowed, asks no more') : s === 'deny' ? t('removed') : t('default');
-        const tip = keep ? t('Bash cannot be ✗: the vibespace-status / msg / task reporting tools run through Bash — their allow rules are always kept') : t('Click: default → ✓ allow (asks no more) → ✗ remove → default');
+        const tip = keep ? t('Bash cannot be ✗: VibeSpace’s own reporting tools (status, messages, tasks) run through Bash, so their allow rules are always kept') : t('Click: default → ✓ allow (asks no more) → ✗ remove → default');
         return `<button type="button" class="ns-tool-chip${s ? ' ' + s : ''}" data-tool="${escHtml(x)}" aria-label="${escHtml(x + ': ' + words)}" title="${escHtml(tip)}">${s === 'allow' ? '<b>✓</b>' : s === 'deny' ? '<b>✗</b>' : ''}${escHtml(x)}${keep ? `<span class="ns-keep" aria-hidden="true">${ic('lock')}</span>` : ''}</button>`;
       }).join('');
       const warn = [];
@@ -309,7 +309,7 @@ export function installNewSessionForm(App) {
       box.innerHTML = `<span class="ns-lab">${escHtml(t('Available tools'))} <span class="ns-lab-hint">${escHtml(t('Claude Code’s own switch — not a VibeSpace rule'))}</span>${reset}</span>
         <div class="ns-tool-chips" role="group" aria-label="${escHtml(t('Available tools'))}">${chips}</div>
         <div class="ns-tool-flags" id="ns-tool-flags">${ans.dirty ? `${escHtml(t('Adds to the command line:'))} <code>${escHtml(cmd(ans.args))}</code>` : escHtml(t('Default: which tools ask and which just run is Claude Code’s own settings plus the permission mode above'))}</div>
-        <div class="ns-tool-flags">${ic('lock')} ${escHtml(t('Bash cannot be ✗: the vibespace-status / msg / task reporting tools run through Bash — their allow rules are always kept'))}</div>
+        <div class="ns-tool-flags">${ic('lock')} ${escHtml(t('Bash cannot be ✗: VibeSpace’s own reporting tools (status, messages, tasks) run through Bash, so their allow rules are always kept'))}</div>
         ${warn.map((w) => `<div class="ns-tool-warn">${escHtml(w)}</div>`).join('')}`;
       return;
     }
@@ -602,7 +602,7 @@ export function installNewSessionForm(App) {
       return;
     }
     // built in
-    const BUILTIN = [['artifacts', t('Artifacts it makes'), t('The files it writes, shown in this conversation’s Artifacts')], ['feedback', t('Feedback'), t('Tells the maintainers where a tool felt wrong (vibespace-feedback)')], ['pages', t('Page publishing'), t('Publishes a page on this VibeSpace (vibespace pages)')]];
+    const BUILTIN = [['artifacts', t('Artifacts it makes'), t('The files it writes, shown in this conversation’s Artifacts')], ['feedback', t('Feedback'), t('Tells the maintainers where a tool felt wrong')], ['pages', t('Page publishing'), t('Publishes a page on this VibeSpace')]];
     const builtinRows = BUILTIN.map(([k, n, w]) => prov({ cls: 'locked', data: `data-builtin="${k}"`, icon: ic('lock'), name: n, what: w, end: on })).join('');
     // 频道 — one tick per account (the same assignment record the Channels window writes); a group grant ticked + locked, its 除了
     const rows = this._nsAccountRows();   // THE account model over THE channel door's verdict (unit what-it-may-use)
