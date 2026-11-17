@@ -886,6 +886,98 @@ console.log('⑩ THE DAILY-FAILURE CARD (lane vault-use-law — design q-043 D7)
   t.stop();
 }
 
+console.log('⑪ THE DOOR\'S PRESS (B-6f65) — the vault\'s door is heard from the App\'s construction; a press before the facts waits for them');
+{
+  // the REAL src/lib/vault-unlock.js bundled by esbuild; stubs only for what draws a dialog, asks the hub or opens a window
+  const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+  const STUBS = {
+    'i18n.js': 'export const t = (s) => s;',
+    'utils.js': 'export const createModalShell = (o) => globalThis.__vd.shell(o); export const fetchJson = (u) => globalThis.__vd.fetch(u); export const showToast = () => {};',
+    'icons.js': 'export const UI_ICONS = {};',
+    'chat-enter-keys.js': 'export const enterSubmits = () => {};',
+    'window-types.js': 'export const replayOpenSpec = (app, spec) => globalThis.__vd.open(spec);',
+    'customize-mode.js': 'export const slotBeside = () => null;',
+  };
+  const built = new Map();   // one esbuild run per shape; each page requires a fresh copy (its own module state)
+  const bundleDoor = async (mutate) => {
+    if (!built.has(mutate)) built.set(mutate, await buildDoor(mutate));
+    const f = path.join(dirOf('door'), 'vault-unlock.cjs');
+    fs.writeFileSync(f, built.get(mutate));
+    return require(f);
+  };
+  const buildDoor = async (mutate) => {
+    const out = await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/vault-unlock.js')], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
+      plugins: [{ name: 'vd', setup(b) {
+        b.onResolve({ filter: /^\.\/(i18n|utils|icons|chat-enter-keys|window-types|customize-mode)\.js$/ }, (a) => ({ path: a.path.slice(2), namespace: 'vd-stub' }));
+        b.onLoad({ filter: /.*/, namespace: 'vd-stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' }));
+        if (mutate) b.onLoad({ filter: /vault-unlock\.js$/ }, (a) => { const s0 = fs.readFileSync(a.path, 'utf8'), m = mutate(s0); if (m === s0) throw new Error('the door mutant changed nothing'); return { contents: m, loader: 'js', resolveDir: path.dirname(a.path) }; });
+      } }] });
+    return out.outputFiles[0].text;
+  };
+  // a page: the window (a real EventTarget — the door's event), a document that draws nothing, the hub's answer held until told
+  const anyEl = () => new Proxy(function () { }, { get: (t0, k) => (k === Symbol.toPrimitive ? () => '' : anyEl()), set: () => true, apply: () => anyEl() });
+  const tick = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r)); };
+  const page = async (mutate) => {
+    const M = await bundleDoor(mutate), seen = [], gets = [];
+    let answer = null;
+    globalThis.__vd = {
+      shell: (o) => { seen.push(`dialog:${o.id}`); return { dialog: anyEl(), body: anyEl(), close() { }, raised: true }; },
+      fetch: (u) => { gets.push(String(u)); return new Promise((r) => { answer = r; }); },
+      open: (spec) => { seen.push(`window:${spec.action}`); },
+    };
+    const win = new EventTarget();
+    const press = () => win.dispatchEvent(new CustomEvent('vs-vault-door'));
+    return { M, seen, gets, press, win, answer: (f) => { if (answer) answer(f); } };
+  };
+  const had = { window: globalThis.window, document: globalThis.document };
+  const scene = async (mutate, run) => {
+    const p = await page(mutate);
+    globalThis.window = p.win; globalThis.document = { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener() { }, removeEventListener() { }, createElement: () => anyEl(), body: anyEl() };
+    try { return await run(p); } finally { globalThis.window = had.window; globalThis.document = had.document; }
+  };
+  // (a) THE EARLY PRESS: the App's construction listened (app.js), /api/home has not answered — initVault has not run
+  const early = (p) => (async () => { p.M.listenVaultDoor({}); p.press(); await tick(); const asked = p.gets.length; p.answer({ state: 'unlocked' }); await tick(); return { seen: p.seen.join(), asked }; })();
+  const e1 = await scene(null, early);
+  ok(e1.asked === 1 && e1.seen === 'window:openVault', 'a press BEFORE initVault ran (the construction listened) is heard: it reads the state and opens the Vault window (unlocked)', e1);
+  const only407 = (s0) => s0.replace('  window.addEventListener(VAULT_DOOR_EVENT, pressDoor);\n', '').replace('  listenVaultDoor(app);   // (app.js already did, at the construction — B-6f65; once)\n', '  window.addEventListener(VAULT_DOOR_EVENT, pressDoor);\n');
+  const eRed = await scene(only407, early);
+  ok(eRed.seen === '' && eRed.asked === 0, 'RED control: the door added only where initVault adds it (the .407 shape: initVault listens, the construction does not) ⇒ the same press is LOST — nothing opens', eRed);
+  // (b) THE PRESS BEFORE THE FACTS: initVault's boot read is in flight
+  const before = (state) => (p) => (async () => {
+    p.M.initVault({}); p.press(); p.press(); await tick();
+    const meanwhile = p.seen.join(), asked = p.gets.length;
+    p.answer({ state, startedAt: 7 }); await tick();
+    return { meanwhile, asked, seen: p.seen.join(), gets: p.gets.length };
+  })();
+  const b1 = await scene(null, before('unlocked'));
+  ok(b1.meanwhile === '' && b1.seen === 'window:openVault' && b1.gets === 1, 'two presses while the boot read is in flight: nothing opens over a state not yet known, then ONE Vault window once it answers unlocked — no second read, no unlock dialog', b1);
+  const b2 = await scene(null, before('locked'));
+  ok(b2.meanwhile === '' && /^dialog:vault-unlock-dialog/.test(b2.seen) && !/window:/.test(b2.seen) && b2.gets === 1, 'the same presses over a LOCKED vault ⇒ the unlock dialog (the load\'s ask and the press are one dialog), no window', b2);
+  const b3 = await scene(null, before('not_set_up'));
+  ok(b3.seen === 'dialog:vault-setup-dialog', 'over a vault NOT SET UP ⇒ the setup dialog', b3);
+  const bRed = await scene((s0) => s0.replace('  if (facts) { doorOpens(); return; }\n', '  { doorOpens(); return; }\n'), before('unlocked'));
+  // A HUB THAT ANSWERS NOTHING (a held loop): the press waits DOOR_WAIT_MS at most (3 s; 30 ms in this shape), then the unlock
+  // dialog — and the press is still answered when the facts land (unlocked ⇒ the Vault window)
+  const short = (s0) => s0.replace('const DOOR_WAIT_MS = 3000;', 'const DOOR_WAIT_MS = 30;');
+  const held = (p) => (async () => {
+    p.M.initVault({}); p.press(); await new Promise((r) => setTimeout(r, 80)); await tick();
+    const bounded = p.seen.join();
+    p.answer({ state: 'unlocked', startedAt: 7 }); await tick();
+    return { bounded, seen: p.seen.join() };
+  })();
+  const h1 = await scene(short, held);
+  ok(h1.bounded === 'dialog:vault-unlock-dialog' && h1.seen === 'dialog:vault-unlock-dialog,window:openVault', 'a hub that answers nothing: after the bound the UNLOCK dialog (never a silent press); once the facts say unlocked, the Vault window (the dialog removes itself)', h1);
+  const hRed = await scene((s0) => short(s0).replace('    await Promise.race([read, bound]);\n', '    await read;\n'), held);
+  ok(hRed.bounded === '', 'RED control: the wait without its bound ⇒ a press on a held hub shows NOTHING for as long as the hub holds', hRed);
+  ok(/^dialog:vault-unlock-dialog/.test(bRed.meanwhile), 'RED control: the press decides at once (the .407 shape) ⇒ the UNLOCK dialog opens over the unlocked vault', bRed);
+  // the wiring: app.js listens in the App's construction, before /api/home is asked (initVault stays in its then)
+  const appSrc = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
+  const listensFirst = (src) => { const i = src.indexOf('\n    listenVaultDoor(this);'), h = src.indexOf("\n    fetch('/api/home').then(r => {"); return i > 0 && h > i && h - i < 300 && src.indexOf('initVault(this);') > h; };
+  ok(listensFirst(appSrc), 'app.js: listenVaultDoor(this) runs in the construction right before /api/home is asked; initVault(this) stays in its then');
+  ok(!listensFirst(appSrc.replace('\n    listenVaultDoor(this);', '').replace('initVault(this);', 'listenVaultDoor(this); initVault(this);')), 'RED control: the call moved into /api/home\'s then ⇒ the wiring check is red');
+  delete globalThis.__vd;
+}
+
 for (const e of engines) { try { e.close(); } catch { } }
 process.env.HOME = HOME0;
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }

@@ -217,6 +217,33 @@ export function stateIconEl(state) { const s = el('span', 'vault-state-icon'); s
  *  unlocked meanwhile, the Vault window; not set up, the setup modal). One event (`window.dispatchEvent(new CustomEvent('vs-vault-door'))`), so a card
  *  needs no import of this module. */
 const VAULT_DOOR_EVENT = 'vs-vault-door';
+/** THE DOOR LISTENS FROM THE START (B-6f65): app.js calls this in the App's construction, before /api/home is asked — a door a
+ *  card shows is heard however slow the hub is (initVault ran only in /api/home's then, which nothing ordered before
+ *  app.ready: a press right after the splash was lost). A press before the facts are known WAITS for them (the boot read in
+ *  flight, else its own read), then opens what the state asks — never the unlock dialog over an unlocked vault; presses
+ *  while it waits are one open. A hub that answers nothing within DOOR_WAIT_MS (a held loop) gets the unlock dialog — it
+ *  removes itself when the facts land, and the press is still answered then (unlocked: the Vault window; not set up: setup). */
+const DOOR_WAIT_MS = 3000;
+let bootRead = null, doorWait = null, doorHeard = false;
+function doorOpens() { if (facts && facts.state === 'unlocked') replayOpenSpec(appRef, { action: 'openVault' }); else if (facts && facts.state === 'not_set_up') showSetup(); else showUnlock(); }   // lane vault-one-door: the window, not the old ⚙ dialog
+function pressDoor() {
+  if (facts) { doorOpens(); return; }
+  doorWait ||= (async () => {
+    const read = (async () => { try { await bootRead; } catch { } if (!facts) await refreshVaultFacts().catch(() => null); })();
+    const bound = new Promise((r) => setTimeout(r, DOOR_WAIT_MS));
+    await Promise.race([read, bound]);
+    doorWait = null;
+    if (facts) { doorOpens(); return; }
+    showUnlock();   // the state is not known yet: the dialog says what the door is for
+    read.then(() => { if (facts && facts.state !== 'locked') doorOpens(); });   // …and the press is answered once it is
+  })();
+}
+export function listenVaultDoor(app) {
+  if (app) appRef = app;
+  if (doorHeard) return;
+  doorHeard = true;
+  window.addEventListener(VAULT_DOOR_EVENT, pressDoor);
+}
 
 /** THE UNLOCK MODAL — right after the page loads while the vault is locked. lane vault-locked-loud: 「稍后」, Esc and ✕ close it
  *  and set THIS lock's ask aside for the tab (the strip, the chip and the ⚙ mark stay); `then` runs once it closes, whichever
@@ -367,8 +394,8 @@ export async function initVault(app) {
   };
   document.addEventListener('pointerdown', ping, { capture: true, passive: true });
   document.addEventListener('keydown', ping, { capture: true, passive: true });
-  window.addEventListener(VAULT_DOOR_EVENT, () => { if (facts && facts.state === 'unlocked') replayOpenSpec(appRef, { action: 'openVault' }); else if (facts && facts.state === 'not_set_up') showSetup(); else showUnlock(); });   // lane vault-one-door: the window, not the old ⚙ dialog
-  const f = await fetchJson('/api/vault/state');
+  listenVaultDoor(app);   // (app.js already did, at the construction — B-6f65; once)
+  const f = await (bootRead = fetchJson('/api/vault/state'));   // a press before it answers waits for it (pressDoor)
   vaultBooted = true;   // from here a reconnect may re-ask; the first connect was the load, handled by this read
   if (!f || !f.state) return;
   // the LOAD-TIME ask never looks at startedAt (`maybeNagVault` (app.js) may have pre-read the facts — the relock-door trap):

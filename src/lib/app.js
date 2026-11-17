@@ -95,7 +95,7 @@ import { sessionGivenName } from '../session-name.js'; // lane session-title-rec
 import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off); lane voice-follows-focus: dictation follows the focus
 import { enterSubmits } from './chat-enter-keys.js';
 import { placeWarmthChip } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the prompt-cache warmth summary chip follows For-you like the lock chip
-import { initVault, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
+import { initVault, listenVaultDoor, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
 import { insideFolder, membershipCwds } from '../task-membership.js'; // PURE (lane open-task-binds): THE Task Group folder rule (a folder includes itself); B-df5f: the page's cwds of a row
 
 const BACKEND_SESSION_OPTIONS = {
@@ -554,6 +554,7 @@ class App {
       }
     });
 
+    listenVaultDoor(this); // B-6f65: the vault's door is heard from here on — before /api/home, whatever app.ready waits for
     fetch('/api/home').then(r => {
       if (r.status === 401) { location.href = '/login'; throw new Error('unauthorized'); }
       return r.json();

@@ -53,8 +53,8 @@
 // THE RELOAD (lane vp393 — the .393 prep mirror's ⑥b red, 3 of 6 runs on the runner's Node 22 at 2 cores, with fable and without):
 //   `Page.navigate` + «no splash» passed on the NEW document before its parser reached the splash (readyState 'loading', no app),
 //   and a vault door pressed then was never heard. A reload (reload()) is over only when a NEW document (its performance.timeOrigin
-//   moved) is complete with no splash, the window holds the vault door's listener (vault-unlock.js initVault — run in /api/home's
-//   then: nothing orders it before app.ready, B-6f65), every GET /api/vault/state of that document has answered (the facts the door
+//   moved) is complete with no splash, the window holds the vault door's listener (vault-unlock.js listenVaultDoor — from the
+//   App's construction since B-6f65, a press before the facts waits for them), every GET /api/vault/state of that document has answered (the facts the door
 //   acts on), and app.ready has resolved; then the door is pressed ONCE, and a door that opens nothing is red by name
 // Run: node scripts/test-vault-paste-chrome.mjs   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
