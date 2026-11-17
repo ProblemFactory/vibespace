@@ -96,10 +96,14 @@ console.log('— M3.3 discovery: raw-facts snapshot + dirty push —');
   // process — must be filtered as PID reuse), one dead lock, one jsonl.
   // NOT a symlink to sleep: /bin/sleep can be a multi-call binary (uutils/
   // busybox) that dispatches on argv0 and dies when invoked as 'claude'.
-  // A script named 'claude' gets comm='claude' (script basename) portably.
-  const claudeLn = path.join(fakeHome, 'claude');
-  fs.writeFileSync(claudeLn, '#!/bin/sh\nsleep 300\n', { mode: 0o755 });
-  const fakeClaude = (await import('node:child_process')).spawn(claudeLn, [], { stdio: 'ignore' });
+  // NOR a `#!/bin/sh` script named 'claude' any more (the EXCLUDED package, 2026-11-17 — why this suite sat red): the lock scan
+  // asks THE CLI identity rule (src/cli-identity.js isCliProcess, B-3185 r3 — the substring rule retired), and a shebang script
+  // runs as argv ['/bin/sh', '…/claude'] — argv[0] is `sh`, not an interpreter the rule knows, its image is the shell's. The real
+  // CLI runs as node over its entry point, so the fixture does too: rung 2 — `node …/claude.js` (an interpreter running the
+  // CLI's entry point). This process's own pid (node over THIS suite's file) stays the PID-reuse case below.
+  const claudeLn = path.join(fakeHome, 'claude.js');
+  fs.writeFileSync(claudeLn, 'setTimeout(() => {}, 300000);\n');
+  const fakeClaude = (await import('node:child_process')).spawn(process.execPath, [claudeLn], { stdio: 'ignore' });
   await new Promise((r) => setTimeout(r, 200));
   fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', fakeClaude.pid + '.json'), JSON.stringify({ pid: fakeClaude.pid, sessionId: 'live-1', cwd: '/tmp/proj' }));
   fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: 'pid-reused-1', cwd: '/tmp/proj' }));
