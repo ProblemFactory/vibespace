@@ -2909,16 +2909,57 @@ await section(async () => {
     `§57 NEGATIVE CONTROL: the pre-fix shapes are caught (${caught.join(', ')}), the idiom passes by every route (${passed.join(', ')}); a git ls-files and a spawn spelled in a string or comment are no spawn`);
   // §57c THE SUITES' ONE HUB BOOT (P0 of the client/server separation, 2026-11-17): every hub a suite runs is started, read and
   // stopped by scripts/hub-boot.mjs, so when the hub becomes several processes one file changes. A HUB BOOT OUTSIDE THE HELPER
-  // = a spawn/fork of node — directly or through a launcher — whose argv array names 'server.js' ANYWHERE (§57's forms, and a
-  // patched copy `[MC.write('server.js', …)]` that §57's env rule does not need), outside comments and strings (data, as
-  // above), in a scripts/test-*.mjs or a harness beside them (scripts/*.mjs; the dbg-* developer probes are no gate and are
-  // not read; hub-boot.mjs is the helper). A RATCHET that
+  // = a spawn / spawnSync / fork / execFile / execFileSync of node — the command `process.execPath` / 'node' / a constant
+  // defined as one of them, or a LAUNCHER (dbus-run-session, prlimit…) whose argv array carries node — whose argv array names
+  // the server file in ANY element: a literal or template ending in server.js (`'server.js'`, `'./server.js'`, `${wt}/server.js`),
+  // a path.join / a patched copy `MC.write('server.js', …)` mentioning it, or a CONSTANT whose definition names it
+  // (`const SRV = path.join(wt, 'server.js')`); and an exec / execSync whose command string runs node on it. Counted only
+  // outside comments and strings (data, as above) — a fixture STRING that merely contains a spawn line is no boot. Read in a
+  // scripts/test-*.mjs or a harness beside them (scripts/*.mjs; the dbg-* developer probes are no gate and are not read;
+  // hub-boot.mjs is the helper). THE ONE COUNT of this fact (主开发 2026-11-17 06:00Z — no second counter). A RATCHET that
   // only falls: a re-pointed batch lowers BOOTS_OUTSIDE_HELPER in the same commit, a new boot outside the helper is red, and
   // at 0 it is the law. RED CONTROL: a re-pointed suite with its own spawn line restored counts one more.
-  const BOOTS_OUTSIDE_HELPER = 197;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e (217), heavy batch 1 twenty suites (197)
+  const BOOTS_OUTSIDE_HELPER = 199;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e (217), heavy batch 1 twenty suites (197); the rule WIDENED (主开发 06:00Z) found two the narrow pattern missed — test-boot-loop-hold's spread argv, test-update-road's stub server.js (its first line the real runtime boot) — 199
   const bootFiles = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.mjs$/.test(f) && !/^dbg-/.test(f) && f !== 'hub-boot.mjs').sort();
-  const BOOT = /\b(?:spawn|fork)\(\s*(?:(?:process\.execPath|'node'|"node")\s*,\s*\[|[A-Za-z_$][\w$.]*\s*,\s*\[[^\]]*?(?:process\.execPath|'node'|"node")\s*,)[^\]]*?['"`]server\.js['"`]/g;
-  const bootsOf = (t) => { const data = dataRanges(t); return [...t.matchAll(BOOT)].filter((m) => !data.some(([x, y]) => m.index >= x && m.index < y)).length; };
+  // one argument's text from `i` to the first comma / closing bracket at depth 0 (quotes and templates skipped) → { text, end }
+  const argAt = (t, i) => {
+    let d = 0, q = null, j = i;
+    for (; j < t.length; j++) {
+      const c = t[j];
+      if (q) { if (c === '\\') j++; else if (c === q) q = null; continue; }
+      if (c === "'" || c === '"' || c === '`') { q = c; continue; }
+      if (c === '(' || c === '[' || c === '{') d++;
+      else if (c === ')' || c === ']' || c === '}') { if (!d) break; d--; }
+      else if (c === ',' && !d) break;
+    }
+    return { text: t.slice(i, j).trim(), end: j };
+  };
+  const elementsOf = (arr) => { const out = []; let i = 1; while (i < arr.length - 1) { const a = argAt(arr, i); if (a.text) out.push(a.text); i = a.end + 1; } return out; };
+  const NODE_TOK = /^(?:process\.execPath|'node'|"node")$/;
+  const bootsOf = (t) => {
+    const data = dataRanges(t);
+    const isData = (i) => data.some(([x, y]) => i >= x && i < y);
+    const defOf = (name) => { const m = new RegExp(`\\b(?:const|let|var)\\s+${name.replace(/\$/g, '\\$')}\\s*=\\s*([^;\\n]+)`).exec(t); return m ? m[1].trim() : null; };
+    const isNode = (tok) => NODE_TOK.test(tok) || (/^[A-Za-z_$][\w$]*$/.test(tok) && NODE_TOK.test(defOf(tok) || ''));
+    const NAMES = /(?:['"`/])server\.js['"`]/;
+    const namesServer = (el) => NAMES.test(el) || (/^[A-Za-z_$][\w$]*$/.test(el) && NAMES.test(defOf(el) || ''));
+    let n = 0;
+    for (const m of t.matchAll(/\b(?:spawn|spawnSync|fork|execFile|execFileSync)\(\s*/g)) {
+      if (isData(m.index) || /[.\w$]$/.test(t.slice(Math.max(0, m.index - 1), m.index))) continue;   // a call outside data, not `x.spawn(` of another API
+      const first = argAt(t, m.index + m[0].length);
+      let k = first.end; if (t[k] !== ',') continue; k++; while (/\s/.test(t[k] || '')) k++;
+      if (t[k] !== '[') continue;
+      const els = elementsOf(walk(t, k, false));
+      if (!(isNode(first.text) || els.some((e) => NODE_TOK.test(e) || isNode(e)))) continue;
+      if (els.some(namesServer)) n++;
+    }
+    for (const m of t.matchAll(/\bexec(?:Sync)?\(\s*/g)) {
+      if (isData(m.index) || /[.\w$]$/.test(t.slice(Math.max(0, m.index - 1), m.index))) continue;
+      const cmd = argAt(t, m.index + m[0].length).text;
+      if (/^['"`]/.test(cmd) && /\bnode\b[^;&|]*server\.js/.test(cmd)) n++;
+    }
+    return n;
+  };
   const bootsIn = Object.fromEntries(bootFiles.map((f) => [f, bootsOf(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'))]).filter(([, n]) => n));
   const nBoots = Object.values(bootsIn).reduce((a, n) => a + n, 0);
   console.log(`    §57c hub boots outside the helper: ${nBoots} sites in ${Object.keys(bootsIn).length} files (${Object.keys(bootsIn).filter((f) => !/^test-/.test(f)).join(', ')} among them)`);
@@ -2928,10 +2969,15 @@ await section(async () => {
   ok(!bootsIn['test-chat-e2e.mjs'] && bootsOf(reverted) === 1 && nBoots + bootsOf(reverted) > BOOTS_OUTSIDE_HELPER,
     '§57c RED CONTROL: test-chat-e2e (re-pointed by piece 1) with its own spawn line restored counts one more — over the ratchet');
   // the rule's reach: every §57 form, the patched-copy form, and nothing spelled in a comment or a string
-  const forms = { direct: "spawn(process.execPath, ['server.js'], {})", preload: "spawn('node', ['-r', pre, 'server.js'])", joined: "fork(process.execPath, [path.join(wt, 'server.js')])", launcher: "spawn(DBUS, ['--', process.execPath, 'server.js'], {})", patched: "spawn(process.execPath, [MC.write('server.js', src, 'x')], {})" };
-  const notBoots = { comment: "// spawn(process.execPath, ['server.js'])", string: "const ctl = \"spawn('node', ['server.js'])\";", copy: "for (const f of ['src', 'server.js']) cp(f);", git: "execFileSync('git', ['ls-files', 'server.js'])" };
+  const forms = { constant: "const SRV = path.join(wt, 'server.js');\nconst c = spawn(process.execPath, [SRV], { cwd: wt });", nodeConst: "const NODE = process.execPath;\nspawn(NODE, ['server.js'], {});",
+    dbus: "const s = spawn(DBUS, ['--', process.execPath, 'server.js'], { cwd: wt, detached: true, env: benv });", prlimit: "spawn(prlimitBin, [`--nofile=${L}:${L}`, 'node', 'server.js'], { cwd: wt });",
+    spawnSync: "spawnSync(process.execPath, ['server.js'], { timeout: 5000 });", execFile: "execFile('node', [`${wt}/server.js`], () => {});", execFileSync: "execFileSync(process.execPath, ['./server.js'], {});",
+    execCmd: "execSync(`node ${wt}/server.js &`, { cwd: wt });",
+    direct: "spawn(process.execPath, ['server.js'], {})", preload: "spawn('node', ['-r', pre, 'server.js'])", joined: "fork(process.execPath, [path.join(wt, 'server.js')])", launcher: "spawn(DBUS, ['--', process.execPath, 'server.js'], {})", patched: "spawn(process.execPath, [MC.write('server.js', src, 'x')], {})" };
+  const notBoots = { comment: "// spawn(process.execPath, ['server.js'])", string: "const ctl = \"spawn('node', ['server.js'])\";", fixture: "const FIX = `const srv = spawnSync(process.execPath, [SRV]);\nconst SRV = path.join(wt, 'server.js');`;",
+    otherProgram: "const SRV = path.join(wt, 'server.js');\nexecFileSync('git', ['log', SRV]);", otherNode: "const HUB = path.join(sdir, 'hub.cjs');\nspawn(process.execPath, [HUB, jobsJs]);", method: "child.spawn(process.execPath, ['server.js']);", copy: "for (const f of ['src', 'server.js']) cp(f);", git: "execFileSync('git', ['ls-files', 'server.js'])" };
   ok(Object.values(forms).every((v) => bootsOf(v) === 1) && Object.values(notBoots).every((v) => bootsOf(v) === 0) && judge(forms.patched).spawns === 0,
-    `§57c the rule reads every boot form (${Object.keys(forms).join(', ')} — the patched copy §57's own rule does not count) and no comment, string, copy list or git argument`);
+    `§57c the rule reads every boot form (${Object.keys(forms).join(', ')} — a constant naming the server file, a launcher, the sync forms, a command string, the patched copy) and no comment, fixture string, copy list, git argument, other node script or another API's spawn`);
 });
 
 // §58 EVERY ICON A MODULE NAMES EXISTS (lane I, 2026-09-25 — the owner's live-view screenshot printed the word
