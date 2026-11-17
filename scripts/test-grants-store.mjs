@@ -487,7 +487,6 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ['src/server/window-targets-engine.js', "const c = row.principal.kind === 'group' ? ctxOf(", 'a group row asks ctxOf (which carries it); a conversation / All row asks no groups, as on the release'],
   ];
   const PENDING = [
-    ['src/browser-profiles.js', "groupIds: Array.isArray(taskIds) ? taskIds : []", 'U3b (the browser doors)'],
     ['src/channel-acl.js', 'groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS', 'U3c (the channel doors)'],
     ['src/channel-filter.js', "door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid)", 'U3c'],
     ['src/channel-filter.js', "to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id)", 'U3c'],
@@ -505,20 +504,63 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   const listed = [...EXEMPT, ...PENDING];
   const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'node_modules' ? [] : walk(path.join(d, e.name))) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const ASKS = /grant-model(?:\.js)?'\)|GM\.(?:admits|prepareFacts|hitsOf)\(/;
-  const files = [...walk('src'), 'server.js'].filter((f) => f !== 'src/grant-model.js' && ASKS.test(fs.readFileSync(path.join(REPO, f), 'utf-8')));
-  const bare = [], used = new Set();
-  for (const f of files) {
-    fs.readFileSync(path.join(REPO, f), 'utf-8').split('\n').forEach((l, i) => {
-      if (!/\bgroupIds\s*:/.test(l) || /inheritedGroupIds/.test(l) || /^\s*(\*|\/\/)/.test(l)) return;
-      const hit = listed.findIndex(([lf, needle]) => lf === f && (needle === '*' || l.includes(needle)));
-      if (hit >= 0) used.add(hit); else bare.push(`${f}:${i + 1}`);
-    });
-  }
-  ok(files.length >= 15 && files.includes('src/exit-reach.js') && files.includes('src/window-reach.js') && files.includes('src/server/mounts-plugins-wiring.js'), `the census reads every file that asks the grant model (${files.length})`);
+  // U3b: every file is read — a facts-shaped line (groupIds beside a caller's keys or the fault flag) counts in a file that never
+  // imports the model too (src/routes/browser.js builds a web login's facts for src/browser-login.js). THE LINE TEST (the U3a
+  // read, 5): `groupIds:` or the shorthand `{ …, groupIds, … }` names a caller's groups; it CARRIES the lineage only when the
+  // code (its trailing comment cut) names `inheritedGroupIds` with a value other than a hard-coded `[]`.
+  const all = [...walk('src'), 'server.js'].filter((f) => f !== 'src/grant-model.js');
+  const FACTS = /\b(?:conversationKeys?|groupsUnreadable|sessionKeys)\b/;
+  const codeOf = (l) => l.replace(/\s\/\/\s.*$/, '').replace(/\/\*.*?\*\//g, '');
+  const namesGroups = (c) => /\bgroupIds\s*:/.test(c) || /[{,]\s*groupIds\s*[,}]/.test(c);
+  const carries = (c) => /\binheritedGroupIds\b/.test(c) && !/[{,]\s*inheritedGroupIds\s*:\s*\[\s*\]/.test(c);   // a KEY hard-coded to [] carries nothing (`x.inheritedGroupIds : []`, a ternary's else, is not a key)
+  const censusOf = (texts) => {
+    const bare = [], used = new Set();
+    for (const [f, src] of texts) {
+      const asks = ASKS.test(src);
+      src.split('\n').forEach((l, i) => {
+        if (/^\s*(\*|\/\/)/.test(l)) return;
+        const c = codeOf(l);
+        if (!namesGroups(c) || carries(c) || !(asks || FACTS.test(c))) return;
+        const hit = listed.findIndex(([lf, needle]) => lf === f && (needle === '*' || l.includes(needle)));
+        if (hit >= 0) used.add(hit); else bare.push(`${f}:${i + 1}`);
+      });
+    }
+    return { bare, used };
+  };
+  const texts = all.map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf-8')]);
+  const files = texts.filter(([, s]) => ASKS.test(s)).map(([f]) => f);
+  const { bare, used } = censusOf(texts);
+  ok(files.length >= 15 && files.includes('src/exit-reach.js') && files.includes('src/window-reach.js') && files.includes('src/server/mounts-plugins-wiring.js') && texts.length > 300, `the census reads every source file (${texts.length}; ${files.length} ask the grant model)`);
   ok(bare.length === 0, 'CENSUS: every facts builder naming a caller\'s groups carries inheritedGroupIds — or is named exempt / pending', bare);
   const stale = listed.filter((_, i) => !used.has(i)).map(([f, n]) => `${f} «${n.slice(0, 60)}»`);
   ok(stale.length === 0, `CENSUS: every named entry still names a line (${EXEMPT.length} exempt, ${PENDING.length} pending: ${[...new Set(PENDING.map((p) => p[2].split(' ')[0]))].join(', ')})`, stale);
-  ok(!/\bgroupIds\s*:/.test('    return { conversationKeys: keys, groupIds: ctx.groupIds };') === false, 'CONTROL: the census\'s line test catches a bare facts builder');
+  // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
+  const planted = [['src/planted.js', [
+    "const GM = require('./grant-model.js');",
+    'const a = { conversationKeys: keys, groupIds: ctx.groupIds };',
+    'const b = { conversationKeys, groupIds, groupsUnreadable };',
+    'const c = { conversationKeys: keys, groupIds: g, inheritedGroupIds: [] };',
+    'const d = { conversationKeys: keys, groupIds: g };   // inheritedGroupIds rides elsewhere',
+    'const e = { conversationKeys: keys, groupIds: g, inheritedGroupIds: inh };',
+    'const f = { conversationKeys: keys, groupIds: g, inheritedGroupIds: Array.isArray(x.inheritedGroupIds) ? x.inheritedGroupIds : [] };',
+  ].join('\n')]];
+  const pc = censusOf(planted).bare;
+  ok(J(pc) === J(['src/planted.js:2', 'src/planted.js:3', 'src/planted.js:4', 'src/planted.js:5']), 'CONTROL: the census catches a bare builder, the shorthand, a hard-coded empty lineage and a lineage named only in a comment — and passes the one that carries it', pc);
+  // U3b: the browser doors — the PURE verdict, the keeper's ONE helper, the routes' own judgements, the web login
+  const prof = { id: 'bp-0000d001', label: 'team', grantUse: B.useOfRows([{ door: 'browser-profile', resource: 'bp-0000d001', to: [P], except: [] }]) };
+  const profOnly = { id: 'bp-0000d002', label: 'own', grantUse: B.useOfRows([{ door: 'browser-profile', resource: 'bp-0000d002', to: [PO], except: [] }]) };
+  const profX = { id: 'bp-0000d003', label: 'all-but', grantUse: B.useOfRows([{ door: 'browser-profile', resource: 'bp-0000d003', to: [EV], except: [P] }]) };
+  const bm = (p, inh) => B.mayAttach(p, { browserKey: 'bk-0000000k', conversationKeys: ['k1'], taskIds: ['tg-c'], inheritedTaskIds: inh }).ok;
+  ok(bm(prof, ['tg-p']) && !bm(prof, []) && !bm(profOnly, ['tg-p']) && !bm(profX, ['tg-p']) && bm(profX, []), 'browser-profile: the parent\'s «Who can use it» admits the child (with the lineage only); «仅本组» does not; «All except the parent» leaves it out');
+  const keeperSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf-8'), routesSrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf-8');
+  ok((keeperSrc.match(/B\.mayAttach\(/g) || []).length === 1 && /const mayAttachL = \(p, f\) => \{ const l = lineOf\(f && f\.taskIds\); return B\.mayAttach\(p, \{ \.\.\.f, inheritedTaskIds: l\.inherited,/.test(keeperSrc) && (keeperSrc.match(/B\.decideAttach\(/g) || []).length === 1 && /B\.decideAttach\(\{[^\n]*inheritedTaskIds: line\.inherited/.test(keeperSrc), 'the keeper judges a caller ONLY through mayAttachL (the lineage asked for the ids it judges) — its one decideAttach too');
+  ok((routesSrc.match(/inheritedTaskIds = \(ctx\.lineageOf\(taskIds\) \|\| \[\]\)\.map\(String\)/g) || []).length === 2 && /const agentFactsOf = \(f\) => \(\{ browserKey: f\.browserKey, taskIds: f\.taskIds, inheritedTaskIds: f\.inheritedTaskIds \|\| \[\]/.test(routesSrc) && !/B\.mayAttach\((?!named, agentFactsOf\(f\)\))/.test(routesSrc), 'the routes: a live and a job caller\'s facts carry the lineage; the one direct mayAttach takes agentFactsOf (which carries it)');
+  ok(/groupLineageOf: \(ids\) => \{ const tasks = getTasks \? getTasks\(\) : null; return tasks \? tasks\.grantGroupsOf\(ids\)\.inherited : \[\]; \}/.test(wiring) && /lineageOf: \(ids\) => \{ const tasks = getTasks \? getTasks\(\) : null; return tasks \? tasks\.grantGroupsOf\(ids\)\.inherited : \[\]; \},   \/\/ lane lg-group-parents U3b: the routes/.test(wiring), 'the wiring hands the keeper and the routes the ONE reader');
+  const BLg = require('../src/browser-login.js');
+  const spec = BLg.parseVaultFillSpec('shop.example.test/password');
+  const lr = (rows) => (res) => (res === 'https://shop.example.test#*' ? rows : []);
+  const fill = (rows, inh) => BLg.fillVerdict({ tabOrigin: 'https://shop.example.test', spec, entries: [{ origin: 'https://shop.example.test', user: 'alice', hasCurrent: true }], grantRows: lr(rows), facts: { conversationKeys: ['k1'], groupIds: ['tg-c'], inheritedGroupIds: inh }, vaultState: 'unlocked' }).ok;
+  ok(fill([{ door: 'browser-login', resource: 'https://shop.example.test#*', to: [P], except: [] }], ['tg-p']) && !fill([{ door: 'browser-login', resource: 'https://shop.example.test#*', to: [PO], except: [] }], ['tg-p']), 'browser-login: a parent\'s web-login row fills for the child; «仅本组» does not');
 }
 
 // ═══ ⑩ lane lg-group-parents: «仅本组» leaves by name only ═══════════════════════

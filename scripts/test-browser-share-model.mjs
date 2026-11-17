@@ -1041,9 +1041,10 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const Ba = M.load('src/browser-profiles.js', bsrc.replace(aNeedle, "  if (u.unknown) return { door: 'browser-profile', resource: String((p && p.id) || '-'), to: [{ kind: 'everyone' }], except: [] };\n  const bare = (e) => GM.bareOf(e);\n"), 'who-unknown-all');
   ok(sig(Ba) !== real && Ba.mayAttach(PROFS[3], { browserKey: KB }).ok, 'CONTROL (a): an admission reading an unknown shape as "all" admits everyone — THE TABLE\'s unknown row goes red', sig(Ba));
   // (b) a mayAttach that ignores Task Group rows
-  const bNeedle = "groupIds: Array.isArray(taskIds) ? taskIds : [], groupsUnreadable: !!groupsUnreadable });\n";
+  // lane lg-group-parents U3b: the admission also hands the model the asker's lineage — the mutant drops both lists
+  const bNeedle = "groupIds: Array.isArray(taskIds) ? taskIds : [], inheritedGroupIds: Array.isArray(inheritedTaskIds) ? inheritedTaskIds : [], groupsUnreadable: !!groupsUnreadable });\n";
   ok(bsrc.split(bNeedle).length === 2, 'control (b) setup: the Task Group admission (the asker\'s groups handed to the model) is found exactly once');
-  const Bb = M.load('src/browser-profiles.js', bsrc.replace(bNeedle, "groupIds: [], groupsUnreadable: !!groupsUnreadable });\n"), 'no-task-rows');
+  const Bb = M.load('src/browser-profiles.js', bsrc.replace(bNeedle, "groupIds: [], inheritedGroupIds: [], groupsUnreadable: !!groupsUnreadable });\n"), 'no-task-rows');
   ok(sig(Bb) !== real && Bb.mayAttach(PROFS[2], ASK[2]).code === 'not_owner', 'CONTROL (b): a mayAttach ignoring task rows refuses a conversation in the listed Task Group — THE TABLE\'s "B in G" cells go red', sig(Bb));
   // a scratch keeper world seeded straight into its registry (no browser needed: the re-judge and the write are registry acts)
   const seedKeeper = (Kmod, tag, keys = [KA, KB, KC]) => {

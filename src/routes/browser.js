@@ -412,7 +412,10 @@ function sessionFacts(id) {
   // webui key, its browser key: the keeper's keysOfKey set)
   const cid = require('../claude-lock-capture.js').addressableId(s);
   const conversationKeys = [...new Set([...(cid ? [String(cid)] : []), `webui:${id}`, ...(s._browserKey ? [String(s._browserKey)] : [])])];
-  return { session: s, sessionId: id, browserKey: s._browserKey || null, taskIds, groupsUnreadable, remote, conversationKeys };
+  // lane lg-group-parents U3b: the ancestors of those groups (the routes' own judgements — the keeper derives its own); a throw ⇒ unreadable
+  let inheritedTaskIds = [];
+  if (!groupsUnreadable && typeof ctx.lineageOf === 'function') { try { inheritedTaskIds = (ctx.lineageOf(taskIds) || []).map(String); } catch { groupsUnreadable = true; } }
+  return { session: s, sessionId: id, browserKey: s._browserKey || null, taskIds, inheritedTaskIds, groupsUnreadable, remote, conversationKeys };
 }
 /**
  * THE ONE RESOLVER OF A PICKED LIVE SESSION (§6.3): the "Who can use it" dialog picks live sessions by their webui id;
@@ -1665,6 +1668,8 @@ function jobFactsOf(token, { mint = true } = {}) {
     if (raw.unread) groupsUnreadable = true;   // B-55dc: an answer still being read (the keeper refuses a grant, keeps a lease)
     taskIds = raw.map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean);
   } catch (e) { taskIds = []; groupsUnreadable = true; }
+  let inheritedTaskIds = [];   // lane lg-group-parents U3b
+  if (!groupsUnreadable && typeof ctx.lineageOf === 'function') { try { inheritedTaskIds = (ctx.lineageOf(taskIds) || []).map(String); } catch { groupsUnreadable = true; } }
   const k = ctx.keeper;
   let handle = null;
   if (mint) { try { handle = k.jobHandleFor({ ownerKey, jobId: job.id }); } catch (e) { return { refusal: { status: STATUS[e && e.code] || 409, code: (e && e.code) || 'error', error: String((e && e.message) || e) } }; } }
@@ -1673,7 +1678,7 @@ function jobFactsOf(token, { mint = true } = {}) {
   // a job whose conversation is not running has no live session: the facts carry a stub (a name for the browser's
   // session label; no spawn pairs — a job never starts the conversation's own temporary browser)
   const conversationKeys = [...new Set([...(cid ? [String(cid)] : []), ...(id ? [`webui:${id}`] : []), ...(ownerKey ? [String(ownerKey)] : [])])];   // lane grants-unify: as its owner conversation
-  return { session: s || { name: label, webuiName: label }, sessionId: id, browserKey: handle || ownerKey, ownerKey, taskIds, groupsUnreadable, remote: false, job: { id: String(job.id), cid }, conversationKeys };
+  return { session: s || { name: label, webuiName: label }, sessionId: id, browserKey: handle || ownerKey, ownerKey, taskIds, inheritedTaskIds, groupsUnreadable, remote: false, job: { id: String(job.id), cid }, conversationKeys };
 }
 /** The /api/agent/browser/<route> a request names (the job's route lists judge it). */
 function agentRouteOf(req) {
@@ -1746,7 +1751,7 @@ function agentDigest(k, f) {
   return B.agentDigestView(k.list(), agentFactsOf(f), (id) => k.profile(id));
 }
 /** The asking conversation's admission facts (the ONE shape every agent view takes). */
-const agentFactsOf = (f) => ({ browserKey: f.browserKey, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable, ...(Array.isArray(f.conversationKeys) ? { conversationKeys: f.conversationKeys } : {}) });   // lane grants-unify: + the keys the store names it by
+const agentFactsOf = (f) => ({ browserKey: f.browserKey, taskIds: f.taskIds, inheritedTaskIds: f.inheritedTaskIds || [], groupsUnreadable: f.groupsUnreadable, ...(Array.isArray(f.conversationKeys) ? { conversationKeys: f.conversationKeys } : {}) });   // lane grants-unify: + the keys the store names it by
 router.get('/api/agent/browser/profiles', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
@@ -2329,7 +2334,7 @@ router.post('/api/agent/browser/fill-vault', async (req, res) => {
   try {
     const s = f.session || {};
     const cid = require('../claude-lock-capture.js').addressableId(s) || (f.job && f.job.cid ? String(f.job.cid) : null);
-    const facts = { conversationKeys: Array.isArray(f.conversationKeys) ? f.conversationKeys : [], groupIds: Array.isArray(f.taskIds) ? f.taskIds : [], groupsUnreadable: !!f.groupsUnreadable };
+    const facts = { conversationKeys: Array.isArray(f.conversationKeys) ? f.conversationKeys : [], groupIds: Array.isArray(f.taskIds) ? f.taskIds : [], inheritedGroupIds: Array.isArray(f.inheritedTaskIds) ? f.inheritedTaskIds : [], groupsUnreadable: !!f.groupsUnreadable };   // lane lg-group-parents U3b: + the lineage (a web login)
     const conv = cid ? String(cid) : f.sessionId;
     const actor = String(s.webuiName || s.name || '').slice(0, 80) || null;
     const owners = [cid, f.sessionId].filter(Boolean).map(String);

@@ -215,6 +215,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // archived}` | null (a store that no longer lists it) — the write's `unknown_task` and the panel's words. Absent ⇒ no
   // Task Group admits anyone the keeper judges itself (the routes hand their own taskIds to attach).
   taskIdsForKey = null, taskInfo = null,
+  groupLineageOf = null,   // lane lg-group-parents U3b: (own Task Group ids) → their ancestors (tasks.grantGroupsOf — the ONE reader)
   // lane grants-unify (2026-10-23): "Who can use it" is a ROW of the ONE grants store (door `browser-profile`) — `grants` =
   // the store (or a getter; absent ⇒ the store of this data dir); a conversation is named there by its conversation id, so
   // the keeper maps a browser key to the conversation keys it answers to (`conversationKeysForKey(bk)` → {keys, live}) and
@@ -444,6 +445,15 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     try { const r = taskIdsForKey(B.parentKeyOf(String(browserKey || ''))) || {}; return { ids: Array.isArray(r.ids) ? r.ids.map(String) : [], unreadable: !!r.unreadable, live: r.live !== false, keys }; }
     catch (e) { log.warn?.(`[browser] the Task Group list could not be read for ${browserKey} — ${e && e.message}`); return { ids: [], unreadable: true, live: true, keys }; }
   };
+  // lane lg-group-parents U3b: THE BROWSER DOOR TAKES THE LINEAGE — every judgement of a caller's Task Groups here asks the ONE
+  // reader for the ancestors of the ids it judges (a child uses what its parents may; a parent's «除了» leaves it out); a lineage
+  // read that throws is UNREADABLE, never «no parents». ONE helper, so no judgement can skip it (test-grants-store ⑪ pins it)
+  const lineOf = (ids) => {
+    if (typeof groupLineageOf !== 'function') return { inherited: [], unreadable: false };
+    try { return { inherited: (groupLineageOf((Array.isArray(ids) ? ids : []).map(String)) || []).map(String), unreadable: false }; }
+    catch (e) { log.warn?.(`[browser] the Task Group lineage could not be read — ${e && e.message}`); return { inherited: [], unreadable: true }; }
+  };
+  const mayAttachL = (p, f) => { const l = lineOf(f && f.taskIds); return B.mayAttach(p, { ...f, inheritedTaskIds: l.inherited, groupsUnreadable: !!(f && f.groupsUnreadable) || l.unreadable }); };
   /** A CONVERSATION ON ANOTHER MACHINE (identity verify r2, 2026-09-28): the wiring names the keys live remote sessions
    *  carry; `remote` = the caller's own knowledge (ws-create's spawn, before the session is registered). Never throws. */
   const isRemoteKey = (browserKey, remote = false) => { if (remote) return true; try { const v = remoteKeys(); const set = v instanceof Set ? v : new Set(v || []); return set.has(B.parentKeyOf(String(browserKey || ''))); } catch (e) { log.warn?.(`[browser] the remote-session list could not be read — ${e && e.message}`); return false; } };
@@ -1908,7 +1918,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       // its next command asks with live facts (verify 2026-09-28: "stopped" read as "in no group" let a WIDENING detach
       // a stopped member of the listed group — a tab closed for a change that kept it)
       const notNow = !!g.unreadable || g.live === false;
-      const may = B.mayAttach(p, { browserKey: l.browserKey, conversationKeys: g.keys || keysOfKey(l.browserKey), taskIds: g.ids, groupsUnreadable: notNow });
+      const may = mayAttachL(p, { browserKey: l.browserKey, conversationKeys: g.keys || keysOfKey(l.browserKey), taskIds: g.ids, groupsUnreadable: notNow });
       if (may.ok) continue;
       if (may.code === 'groups_unreadable') { out.undecided.push(l.browserKey); if (!quietUndecided) log.log?.(`[browser] ${profileId} "${p.label}": ${l.browserKey} kept (${why}) — ${g.live === false && !g.unreadable ? 'no running session carries it, so its Task Groups are judged at its next command' : 'its Task Groups could not be read'}; whether the list still admits it is undecided`); continue; }
       try { detach({ profileId, browserKey: l.browserKey, by: 'user' }); out.detached.push({ browserKey: l.browserKey, sessionId: l.sessionId || null }); closeLeaseSession(p, l.browserKey, why); }
@@ -1985,7 +1995,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // the PATCH refuses its key, and its lease could never reach this machine's browser (the pin stays a preference)
     if (isRemoteKey(browserKey, remote)) { log.log?.(`[browser] ${B.parentKeyOf(browserKey)} NOT added to who can use ${p.id} "${p.label}" — it runs on another machine`); return null; }
     const g = facts || groupsOfKey(browserKey);
-    const may = B.mayAttach(p, { browserKey, conversationKeys: g.keys || keysOfKey(browserKey), taskIds: g.ids, groupsUnreadable: !!g.unreadable });
+    const may = mayAttachL(p, { browserKey, conversationKeys: g.keys || keysOfKey(browserKey), taskIds: g.ids, groupsUnreadable: !!g.unreadable });
     if (may.ok) return null;
     // lane grants-unify: the user's pick names the CONVERSATION in the ONE store (and lifts an exception that left it out)
     const ck = conversationOfKey(browserKey);
@@ -2005,7 +2015,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function mayAttachAtCreate(id, { taskIds = [] } = {}) {
     const p = profile(String(id || ''));
     if (!p || isEph(p)) return { ok: false, code: 'not-found', error: `no profile ${id}` };
-    return B.mayAttach(p, { browserKey: '', taskIds: Array.isArray(taskIds) ? taskIds.map(String) : [] });
+    return mayAttachL(p, { browserKey: '', taskIds: Array.isArray(taskIds) ? taskIds.map(String) : [] });
   }
   /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every listed profile judged for ONE existing conversation by
    *  THE door's verdict (`B.mayAttach` — its keys, its browser key, its Task Groups now), answered as may-use-model answer
@@ -2050,7 +2060,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const p = profile(profileId);
     if (!p || isEph(p)) throw namedError('not-found', `no profile ${profileId}`);
     const facts = Array.isArray(taskIds) ? { ids: taskIds.map(String), unreadable: !!groupsUnreadable } : null;
-    if (by === 'agent') { const g = facts || groupsOfKey(browserKey); const may = B.mayAttach(p, { browserKey, conversationKeys: g.keys || keysOfKey(browserKey), taskIds: g.ids, groupsUnreadable: !!g.unreadable }); if (!may.ok) throw namedError(may.code, may.error, may.remedy ? { remedy: may.remedy } : {}); }
+    if (by === 'agent') { const g = facts || groupsOfKey(browserKey); const may = mayAttachL(p, { browserKey, conversationKeys: g.keys || keysOfKey(browserKey), taskIds: g.ids, groupsUnreadable: !!g.unreadable }); if (!may.ok) throw namedError(may.code, may.error, may.remedy ? { remedy: may.remedy } : {}); }
     const added = by !== 'agent' && origin === 'chosen' ? addConversation(p, browserKey, facts, { remote }) : null;
     reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };
     pinFailures.delete(browserKey);
@@ -5359,7 +5369,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const facts = { ids: (Array.isArray(taskIds) ? taskIds : []).map(String), unreadable: !!groupsUnreadable };
     let added = null;
     if (by === 'user') { added = addConversation(p, browserKey, facts); if (added) commit(); }
-    const d = B.decideAttach({ profile: p, leases: reg.leases, browserKey, sessionId, now: now(), taskIds: facts.ids, groupsUnreadable: facts.unreadable, conversationKeys: keysOfKey(browserKey) });   // lane grants-unify: judged by the keys the store names it by
+    const line = lineOf(facts.ids);   // lane lg-group-parents U3b
+    const d = B.decideAttach({ profile: p, leases: reg.leases, browserKey, sessionId, now: now(), taskIds: facts.ids, inheritedTaskIds: line.inherited, groupsUnreadable: facts.unreadable || line.unreadable, conversationKeys: keysOfKey(browserKey) });   // lane grants-unify: judged by the keys the store names it by
     if (!d.ok) {
       // MEMBERSHIP IS JUDGED AT EVERY COMMAND (§2.3; the owner's default 2 — no store subscription): a conversation the
       // list no longer admits (it left the Task Group the profile is kept to, a narrowing it missed) is refused AND the
@@ -7551,7 +7562,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     let admitted = null;
     if (by && by.kind === 'agent') {
       if (!browserKey || isRemoteKey(browserKey)) admitted = false;
-      else { const g = Array.isArray(taskIds) ? { ids: taskIds.map(String), unreadable: !!groupsUnreadable } : groupsOfKey(browserKey); admitted = B.mayAttach(p, { browserKey, conversationKeys: g.keys || keysOfKey(browserKey), taskIds: g.ids, groupsUnreadable: !!g.unreadable }).ok === true; }
+      else { const g = Array.isArray(taskIds) ? { ids: taskIds.map(String), unreadable: !!groupsUnreadable } : groupsOfKey(browserKey); admitted = mayAttachL(p, { browserKey, conversationKeys: g.keys || keysOfKey(browserKey), taskIds: g.ids, groupsUnreadable: !!g.unreadable }).ok === true; }
     }
     const v = SW.switchVerdict({
       profile: p, target, rowOf, controlOf: control, capabilityRefusalOf: B.capabilityRefusal,
@@ -7887,7 +7898,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (proxy) {
       for (const np of named()) {
         if (!isLocalMediatedCandidate(np)) continue;
-        const may = B.mayAttach(np, { browserKey: parentBk || bk, conversationKeys: g.keys, taskIds: g.ids, groupsUnreadable: !!g.unreadable });
+        const may = mayAttachL(np, { browserKey: parentBk || bk, conversationKeys: g.keys, taskIds: g.ids, groupsUnreadable: !!g.unreadable });
         if (may && may.ok) usableProfiles.push(np.label || np.id);
         else restrictedCount++;
       }
@@ -7910,7 +7921,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
           pid = rv.attachment.profileId;
         } else if (rv.ok && rv.kind === 'pin' && rv.profileId) {
           const pinP = profile(rv.profileId);
-          const may = pinP ? B.mayAttach(pinP, { browserKey: parentBk || bk, conversationKeys: g.keys, taskIds: g.ids, groupsUnreadable: !!g.unreadable }) : null;
+          const may = pinP ? mayAttachL(pinP, { browserKey: parentBk || bk, conversationKeys: g.keys, taskIds: g.ids, groupsUnreadable: !!g.unreadable }) : null;
           if (pinP && may && may.ok) pid = rv.profileId;
           else resolvedEphemeral = true;
         } else if (rv.ok) {

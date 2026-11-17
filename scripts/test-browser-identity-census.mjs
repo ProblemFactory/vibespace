@@ -90,8 +90,9 @@ function admissionSites(src) {
 /** THE KNOWN TABLE: function → the fence evidence its text must carry, IN ORDER (each needle after the previous). */
 const KNOWN_KEEPER = {
   attach: { why: 'THE admission: the remote fence first, then the list (decideAttach → mayAttach), then the lease', order: ['isRemoteKey(browserKey)', 'B.remoteSessionRefusal(', 'B.decideAttach(', 'reg.leases.push(d.lease)', 'mediator.grantFor('] },
-  addConversation: { why: 'THE add: the remote fence, then the list judged, then the conversation written through the ONE writer', order: ['isRemoteKey(browserKey, remote)', 'B.mayAttach(', 'B.rowWithConversation(', 'writeUseRow(p, row'] },
-  setPin: { why: 'a USER pick writes the list through addConversation before the pin; an AGENT pin is judged by mayAttach', order: ["by === 'agent'", 'B.mayAttach(', 'addConversation(p, browserKey, facts, { remote })', 'reg.pins[browserKey] = '], never: ['B.rowWithConversation(', 'writeUseRow(', 'p.owner ='] },
+  // lane lg-group-parents U3b: the keeper judges through its ONE helper mayAttachL (B.mayAttach + the lineage of the ids it judges)
+  addConversation: { why: 'THE add: the remote fence, then the list judged, then the conversation written through the ONE writer', order: ['isRemoteKey(browserKey, remote)', 'mayAttachL(', 'B.rowWithConversation(', 'writeUseRow(p, row'] },
+  setPin: { why: 'a USER pick writes the list through addConversation before the pin; an AGENT pin is judged by mayAttach', order: ["by === 'agent'", 'mayAttachL(', 'addConversation(p, browserKey, facts, { remote })', 'reg.pins[browserKey] = '], never: ['B.rowWithConversation(', 'writeUseRow(', 'p.owner ='] },
   copyPin: { why: 'a fork\'s COPY of a pin: a preference carried, never an authorization', order: ['reg.pins[toKey] = '], never: ['B.rowWithConversation(', 'writeUseRow(', 'p.owner =', 'reg.leases'] },
   // the .196 integration (lane-browser-key's late key): the spawn's WITNESSED pick restored under a late key — a preference
   // like copyPin's, so it writes the pin alone: never an owner (a witness widens nothing), never a lease

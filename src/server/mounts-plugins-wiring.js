@@ -1338,6 +1338,7 @@ function createSessionMessages(session, sessionId) {
       // conversation's membership cannot be read through the live rule, and it is not "no groups" either (verify
       // 2026-09-28: read as "no groups", a WIDENING detached a stopped member of the listed Task Group — its tab in the
       // shared browser closed for a change that kept it); the keeper judges it at its next command instead
+      groupLineageOf: (ids) => { const tasks = getTasks ? getTasks() : null; return tasks ? tasks.grantGroupsOf(ids).inherited : []; },   // lane lg-group-parents U3b: the ONE reader
       taskIdsForKey: (bk) => {
         const tasks = getTasks ? getTasks() : null;
         if (!tasks) return { ids: [], unreadable: false };
@@ -1568,6 +1569,7 @@ function createSessionMessages(session, sessionId) {
         return userTodos.add(sessionStatusKey(session, sessionId), { origin: 'browser', text, detail, urgency: 'normal', by, sessionName: session && (session.name || session.webuiName) || null }); // origin: the BROWSER routes' switch proposal (this file only wires them)
       },
       tasksForSession: (s, id) => taskIdsFor(s, id),
+      lineageOf: (ids) => { const tasks = getTasks ? getTasks() : null; return tasks ? tasks.grantGroupsOf(ids).inherited : []; },   // lane lg-group-parents U3b: the routes' direct judgements
       // §3.8 layer ②: a USER's pin/attach/detach queues one typed notice that
       // rides the user's own next message (zero billed turns); the queue is
       // session-status's, keyed the way the prompt-context route drains it

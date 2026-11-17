@@ -1734,7 +1734,10 @@ function grantRowOf(p) {
   const u = p && p.grantUse && typeof p.grantUse === 'object' ? p.grantUse : { to: [], except: [] };
   if (u.unknown) return null;
   const bare = (e) => GM.bareOf(e);
-  return { door: 'browser-profile', resource: String((p && p.id) || '-'), to: (u.to || []).map(bare).filter(Boolean), except: (u.except || []).map(bare).filter(Boolean) };
+  // lane lg-group-parents (the U3b read, BLOCKER): «仅本组» rides the judged row — a bare group entry would read a «仅本组» grant as
+  // «含子组» once the lineage is fed (an exception never carries it: rule ③)
+  const toEntry = (e) => { const b = bare(e); return b && b.kind === 'group' && e.only === true ? { ...b, only: true } : b; };
+  return { door: 'browser-profile', resource: String((p && p.id) || '-'), to: (u.to || []).map(toEntry).filter(Boolean), except: (u.except || []).map(bare).filter(Boolean) };
 }
 /** WHICH 「除了」 took this caller out of `p`'s list (unit what-it-may-use — mayAttach's `excepted` refusal names no entry): the
  *  exception THE model decided by, over the same row and the same facts mayAttach judged with → a bare principal | null. */
@@ -1804,7 +1807,7 @@ function exceptedRefusal({ label = '' } = {}) {
  *   an owner shape this release cannot judge ⇒ not_owner (fail closed)
  * A PIN IS NEVER AN INPUT HERE — the user's pick wrote the list (keeper.setPin); ruling A (4)'s dated pin is gone.
  */
-function mayAttach(profile, { browserKey, conversationKeys = null, taskIds = [], groupsUnreadable = false } = {}) {
+function mayAttach(profile, { browserKey, conversationKeys = null, taskIds = [], inheritedTaskIds = [], groupsUnreadable = false } = {}) {   // lane lg-group-parents U3b: + the ancestors of taskIds
   if (!profile) return { ok: false, code: 'not-found', error: 'no such profile' };
   const K = parentKeyOf(String(browserKey || ''));
   const U = whoMayUse(profile);
@@ -1818,7 +1821,7 @@ function mayAttach(profile, { browserKey, conversationKeys = null, taskIds = [],
   // maps its browser key to them; one it cannot map is judged by its browser key itself (every conversation may ⇒ it may) —
   // and its live Task Groups, minus the members the user left out
   const keys = (Array.isArray(conversationKeys) ? conversationKeys : []).filter(Boolean).map(String);
-  const v = GM.admits([row], { conversationKeys: keys.length ? keys : [K || 'unknown-caller'], groupIds: Array.isArray(taskIds) ? taskIds : [], groupsUnreadable: !!groupsUnreadable });
+  const v = GM.admits([row], { conversationKeys: keys.length ? keys : [K || 'unknown-caller'], groupIds: Array.isArray(taskIds) ? taskIds : [], inheritedGroupIds: Array.isArray(inheritedTaskIds) ? inheritedTaskIds : [], groupsUnreadable: !!groupsUnreadable });
   if (v.ok) return v.via === 'everyone' ? { ok: true, via: 'all' } : v.via === 'conversation' ? { ok: true, via: 'conversation' } : { ok: true, via: 'task', taskId: v.entry.id };
   if (v.code === 'groups_unreadable') return groupsUnreadableRefusal({ label: profile.label });
   if (v.code === 'excepted') return exceptedRefusal({ label: profile.label });
@@ -2273,8 +2276,8 @@ function findLease(leases, profileId, browserKey) {
  * rewrites `sessionId` IN PLACE; it never creates a second lease. `input` has
  * exactly one holder (`agent` at attach; the live view flips it, P2).
  */
-function decideAttach({ profile, leases, browserKey, sessionId, now = 0, taskIds = [], groupsUnreadable = false, conversationKeys = null } = {}) {
-  const may = mayAttach(profile, { browserKey, conversationKeys, taskIds, groupsUnreadable });   // lane grants-unify: the caller's conversation keys (the store names conversations by them)
+function decideAttach({ profile, leases, browserKey, sessionId, now = 0, taskIds = [], inheritedTaskIds = [], groupsUnreadable = false, conversationKeys = null } = {}) {
+  const may = mayAttach(profile, { browserKey, conversationKeys, taskIds, inheritedTaskIds, groupsUnreadable });   // lane grants-unify: the caller's conversation keys (the store names conversations by them)
   if (!may.ok) return may;
   if (!isBrowserKey(browserKey) && !isChildKey(browserKey)) return { ok: false, code: 'bad-request', error: 'a lease needs a browser key' };
   const existing = findLease(leases, profile.id, browserKey);
