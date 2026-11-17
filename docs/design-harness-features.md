@@ -397,7 +397,7 @@ inputModes: {
 | harness | 对话回溯 | 文件回滚 | 粒度 | 重做 |
 |---|---|---|---|---|
 | claude | `rewind_conversation{target_message_uuid}`、`/branch`（在此处分叉对话） | `rewind_files` + spawn 时 `enableFileCheckpointing` | message uuid | 消息选择器 |
-| codex | `thread/rollback{threadId,numTurns}` / `thread/revert{threadId,beforeTurnId}` | — | turn | — |
+| codex | `thread/rollback{threadId,numTurns}`（只在 0.153.4 表里）/ `thread/revert{threadId,beforeTurnId}`（0.159.3 起唯一的一个：只改历史，新建 reverted rollout 并重载 thread，推 `thread/reverted`；只支持 paginated thread） | — | turn | — |
 | opencode | `POST /session/:id/revert{messageID}` | 同一动作（snapshot 支撑） | message | `unrevert` |
 | gemini | `/rewind`（对话+代码 / 只对话 / 只代码） | 影子 git repo | 交互列表 | — |
 
@@ -408,6 +408,7 @@ inputModes: {
 **贡献点**：消息级按钮，挂在 chat-renderers.js:1525 的 `addForkBtn` 旁边（该按钮是消息级 fork，见 §2.13 的 `forkAtMessage` 说明）。
 **红线**：动工作树 ⇒ ① 必须有点名后果的确认对话框（含 snapshot diff 摘要），**用 `showConfirmDialog`，绝不用原生 confirm**（no-native-dialogs 法律）；② streaming 时一律拒绝（依赖 §3.5 的权威状态）；③ 与 writer-sweep 的「一个转录只能有一个写者」不变量对齐。
 **门**：新增 `scripts/test-checkpoints.mjs`（caps 矩阵 + 每 harness 一档 + 拒绝路径 + DOM-free 按钮渲染）。**尺寸 L**，建议先只做 `conversation`（决策 2）。
+**进度（B-437e，lane lg-rewind，2026-11-17）**：第一层动工。U1 = caps 行（每家都先是 off，修好路的那个单元才翻 true）+ PURE 门 `src/rewind-door.js`（裁决 / 计划 / 回答）+ test-checkpoints；claude 的 `rewind_conversation` 回复形状与 13 个拒绝理由读自 2.1.322 二进制。
 
 ### 3.3 questions —— 结构化提问（新）
 

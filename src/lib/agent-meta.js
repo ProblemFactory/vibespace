@@ -7,7 +7,7 @@ import { t } from './i18n.js';
 // against the server row) and never a hand-copied boolean that disagrees with
 // the list next to it.
 import { statusBarOf } from '../status-bar-facts.js'; // PURE (lane agy-status-bar-facts): the status-bar facts row
-import { SEND_DOOR_TABLE as SHARED_SEND_DOOR_TABLE, sendDoors, deriveInputModes, notificationDelivery, worktreeCaps as serverWorktreeCaps, NO_WORKTREE, worktreePick, worktreeLatchWrite, capsOf as serverCapsOf, subagentView as serverSubagentView, toolAllowlistArgs } from '../backend-caps.js';
+import { SEND_DOOR_TABLE as SHARED_SEND_DOOR_TABLE, sendDoors, deriveInputModes, notificationDelivery, worktreeCaps as serverWorktreeCaps, NO_WORKTREE, NO_CHECKPOINTS, worktreePick, worktreeLatchWrite, capsOf as serverCapsOf, subagentView as serverSubagentView, toolAllowlistArgs } from '../backend-caps.js';
 
 export const BACKEND_META = {
   claude: {
@@ -45,7 +45,7 @@ export const BACKEND_META = {
     // inProgressTools is FALSE on every harness today: claude's record for it
     // never leaves the CLI's own host callback (backend-caps.js carries the
     // dump + the wire measurement), so nothing may draw an "executing" dot.
-    caps: { fork: true, forkAtMessage: true, review: false, renameWriteback: false, autoResume: { signal: true, resume: 'message', supported: true }, accounts: true, peerDelivery: 'cli-inbox', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'steer-all', 'reorder', 'edit'], enterDoor: 'steer' }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: false, values: ['Concise', 'Explanatory', 'Learning', 'Proactive'] }, worktree: { supported: true, flag: '--worktree', named: true, requiresGitRepo: true, hookEscape: 'WorktreeCreate', landsIn: '.claude/worktrees/<name>', branchPrefix: 'worktree-' }, permissionRules: { source: 'settings-files', session: true, instance: true, liveVerb: false }, toolAllowlist: { kind: 'tools', allow: '--allowedTools', deny: '--disallowedTools', tools: ['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'NotebookEdit'], keep: ['Bash'] } },
+    caps: { fork: true, forkAtMessage: true, checkpoints: NO_CHECKPOINTS, review: false, renameWriteback: false, autoResume: { signal: true, resume: 'message', supported: true }, accounts: true, peerDelivery: 'cli-inbox', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'steer-all', 'reorder', 'edit'], enterDoor: 'steer' }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: false, values: ['Concise', 'Explanatory', 'Learning', 'Proactive'] }, worktree: { supported: true, flag: '--worktree', named: true, requiresGitRepo: true, hookEscape: 'WorktreeCreate', landsIn: '.claude/worktrees/<name>', branchPrefix: 'worktree-' }, permissionRules: { source: 'settings-files', session: true, instance: true, liveVerb: false }, toolAllowlist: { kind: 'tools', allow: '--allowedTools', deny: '--disallowedTools', tools: ['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'NotebookEdit'], keep: ['Bash'] } },
     // One-line hint per response-style VALUE (same contract as effortHints:
     // English key, t() at render — the VALUE itself is protocol and is never
     // translated).
@@ -107,7 +107,7 @@ export const BACKEND_META = {
     // fork: the thread-fork RPC exists but is unwired (flips when wired).
     // fork: true since 2.369.21 — thread/fork is wired end to end (wrapper
     // CODEX_WEBUI_FORK → thread/fork; server _forkRequested per caps).
-    caps: { fork: true, forkAtMessage: false, review: true, renameWriteback: true, autoResume: { signal: true, resume: 'turn-start', supported: true }, quotaRefresh: 'session-rpc', accounts: true, peerDelivery: 'rpc-queue', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'steer-all', 'reorder', 'edit', 'run-now', 'run-all'] }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: true, closed: true, values: ['none', 'friendly', 'pragmatic'] }, worktree: NO_WORKTREE, permissionRules: { source: 'config-read', session: true, instance: false, liveVerb: true }, toolAllowlist: { kind: 'sandbox', sandboxFlag: '--sandbox', approvalFlag: '--ask-for-approval', sandbox: ['read-only', 'workspace-write', 'danger-full-access'], approval: ['untrusted', 'on-request', 'on-failure', 'never'] } },
+    caps: { fork: true, forkAtMessage: false, checkpoints: NO_CHECKPOINTS, review: true, renameWriteback: true, autoResume: { signal: true, resume: 'turn-start', supported: true }, quotaRefresh: 'session-rpc', accounts: true, peerDelivery: 'rpc-queue', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'steer-all', 'reorder', 'edit', 'run-now', 'run-all'] }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: true, closed: true, values: ['none', 'friendly', 'pragmatic'] }, worktree: NO_WORKTREE, permissionRules: { source: 'config-read', session: true, instance: false, liveVerb: true }, toolAllowlist: { kind: 'sandbox', sandboxFlag: '--sandbox', approvalFlag: '--ask-for-approval', sandbox: ['read-only', 'workspace-write', 'danger-full-access'], approval: ['untrusted', 'on-request', 'on-failure', 'never'] } },
     // codex Personality values (0.153.4 schema): protocol strings, hinted here.
     responseStyleHints: {
       none: 'no persona — the model\u2019s plain voice',
@@ -152,7 +152,7 @@ export const BACKEND_META = {
     brandColor: '#4ade80',
     fallbackModels: [],
     modelsFromAgent: true,
-    caps: { fork: false, forkAtMessage: false, review: false, renameWriteback: false, autoResume: { signal: false, resume: 'prompt', supported: false }, accounts: false, peerDelivery: 'stash-only', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'reorder', 'edit'] }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: 'serve-config', session: false, instance: true, liveVerb: false }, toolAllowlist: null },
+    caps: { fork: false, forkAtMessage: false, checkpoints: NO_CHECKPOINTS, review: false, renameWriteback: false, autoResume: { signal: false, resume: 'prompt', supported: false }, accounts: false, peerDelivery: 'stash-only', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'reorder', 'edit'] }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: 'serve-config', session: false, instance: true, liveVerb: false }, toolAllowlist: null },
     settingsPrefix: 'opencode',
     permissionModes: ['build', 'plan'],
     // The STORE (stopped conversations: list/open/resume/fork) runs behind a
@@ -185,7 +185,7 @@ export const BACKEND_META = {
     fallbackModels: ['gemini-4-argon-high', 'gemini-3.8-flash-medium'],
     modelsFromAgent: true,
     modelsReported: true, // lane agy-models-report: `agy models` per account — a chat's model menu OPENING asks for it (POST /api/cli-models/open)
-    caps: { fork: false, forkAtMessage: false, review: false, renameWriteback: false, autoResume: { signal: true, resume: null, supported: false }, accounts: true, peerDelivery: 'rpc-queue', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'], steerJoinsTurn: false }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: null, session: false, instance: false, liveVerb: false }, toolAllowlist: null },
+    caps: { fork: false, forkAtMessage: false, checkpoints: NO_CHECKPOINTS, review: false, renameWriteback: false, autoResume: { signal: true, resume: null, supported: false }, accounts: true, peerDelivery: 'rpc-queue', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'], steerJoinsTurn: false }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: null, session: false, instance: false, liveVerb: false }, toolAllowlist: null },
     settingsPrefix: 'antigravity',
     permissionModes: ['accept-edits', 'auto', 'plan', 'bypassPermissions'],
     // THE DECLARED UI ROW — mirrors src/harnesses/antigravity.js key for key (test-harness-contract deep-compares).
@@ -443,7 +443,7 @@ export function settingsPrefixFor(backend) {
 }
 
 /** Feature caps for a backend (all-false for unknown/shell — chrome shows nothing it can't do). */
-const NO_FEATURE_CAPS = Object.freeze({ fork: false, forkAtMessage: false, review: false, renameWriteback: false, autoResume: Object.freeze({ signal: false, resume: null, supported: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), worktree: NO_WORKTREE, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), toolAllowlist: null });
+const NO_FEATURE_CAPS = Object.freeze({ fork: false, forkAtMessage: false, checkpoints: NO_CHECKPOINTS, review: false, renameWriteback: false, autoResume: Object.freeze({ signal: false, resume: null, supported: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), worktree: NO_WORKTREE, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), toolAllowlist: null });
 export function backendFeatureCaps(backend) {
   return BACKEND_META[backend]?.caps || NO_FEATURE_CAPS;
 }

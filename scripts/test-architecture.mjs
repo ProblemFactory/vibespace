@@ -142,6 +142,7 @@ const PURE = new Set(['src/tailnet-reach.js' /* lane tailnet-names: A TAILNET HO
   // bundle it and the rule is unit-provable in one place.
   'src/spend-authorizer.js',
   'src/rewind-ops.js', // claude tombstone / codex thread_rolled_back → ONE 'rewound' meta op; index-stable marking, no I/O
+  'src/rewind-door.js', // B-437e: the rewind door — the verdict (refusal by name), the plan (the cut before the target), the harness's answer; imports nothing
   // THE FRESH-WINDOW EDGE (2026-09-08): does a normalized quota reading say the
   // wall a conversation is waiting on is gone? PURE because both producers ask
   // it (claude rate_limit_event, codex rate_limits_updated) and because the

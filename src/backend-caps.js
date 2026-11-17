@@ -237,6 +237,43 @@
 const NO_WORKTREE = Object.freeze({ supported: false, flag: null, named: false, requiresGitRepo: false, hookEscape: null, landsIn: null, branchPrefix: null });
 const CLAUDE_WORKTREE = Object.freeze({ supported: true, flag: '--worktree', named: true, requiresGitRepo: true, hookEscape: 'WorktreeCreate', landsIn: '.claude/worktrees/<name>', branchPrefix: 'worktree-' });
 
+// checkpoints (B-437e, docs/design-harness-features.md §3.2 — TIER ONE, the conversation; the owner ruled both tiers on
+// 2026-09-07 and the files tier is a later unit of its own): can VibeSpace REWIND this harness's conversation IN PLACE —
+// the same conversation and the same harness session, the chosen prompt of the person and everything after it taken
+// back. Not a fork: «Fork from here» (forkAtMessage) starts a NEW conversation and leaves this one as it was. Every
+// surface of the rewind (the per-message door, the ws verb, its refusal) gates on THIS row, never on a backend id; the
+// door's verdict, its plan and the harness's answer are PURE in src/rewind-door.js. A row enters ONLY in this shape:
+// a contributed harness's row goes through checkpointsRowOf (anything else is the off row), and no prober flips it.
+//   conversation — VibeSpace drives a programmatic in-place rewind of this harness. A row turns true in the SAME unit
+//                  that builds its road, never before (a declared door with no road is a dead control). The roads,
+//                  as measured from the installed binaries (nothing run):
+//                  claude 2.1.322 — the control request `rewind_conversation {target_message_uuid,
+//                  last_seen_user_message_uuid}`: success {rewound:true, targetMessageUuid, prefillText, …}, a refusal
+//                  {rewound:false, reason, error} names one of 13 reasons (src/rewind-door.js CLAUDE_REWIND_REASONS);
+//                  codex — `thread/rollback {threadId, numTurns}` is in the 0.153.4 table ONLY; `thread/revert
+//                  {threadId, beforeTurnId}` is in every measured table (0.153.4, 0.159.3, 0.163.0) — history only: a new
+//                  «reverted rollout», the thread reloaded, `thread/reverted` pushed; paginated threads only
+//                  (scripts/fixtures/codex-app-server/).
+//                  opencode: none — its `POST /session/:id/revert` puts the FILES back with the messages
+//                  (snapshot-backed), so it has no conversation-only rewind; antigravity: no programmatic door.
+//   files        — false everywhere in tier one: a rewind NEVER touches the working tree, and the door says so.
+//   granularity  — what the harness cuts at: 'message' (claude: the uuid of one of the person's messages) | 'turn'
+//                  (codex: the turn the chosen message starts) | null.
+//   redo         — taking a rewind back: none is offered (claude's own picker is interactive only; codex has none).
+//   verb         — the harness's own name for the act (the record and the census read it; nothing parses it).
+const NO_CHECKPOINTS = Object.freeze({ conversation: false, files: false, granularity: null, redo: false, verb: null });
+/** A row as it may enter (a contributed harness): exactly the five keys, files and redo false (tier one), a true row with
+ *  its granularity and verb, a false row with neither — frozen; anything else is the off row. */
+function checkpointsRowOf(row) {
+  const r = row && typeof row === 'object' ? row : null;
+  const keys = r ? Object.keys(r) : [];
+  const shaped = r && keys.length === 5 && ['conversation', 'files', 'granularity', 'redo', 'verb'].every((k) => keys.includes(k))
+    && r.files === false && r.redo === false
+    && (r.conversation === true ? (r.granularity === 'message' || r.granularity === 'turn') && typeof r.verb === 'string' && r.verb.length > 0
+      : r.conversation === false && r.granularity === null && r.verb === null);
+  return shaped && r.conversation === true ? Object.freeze({ conversation: true, files: false, granularity: r.granularity, redo: false, verb: r.verb }) : NO_CHECKPOINTS;
+}
+
 // toolAllowlist (lane new-session-form — the New Session form's 「可用工具」 row) names the HARNESS'S OWN per-session
 // tool switch: a flag on its command line, never a VibeSpace rule. null = this harness has none and the row is never
 // offered (a plain shell, opencode, antigravity). The form, the spawn and the suites gate on THIS row, never on an id.
@@ -380,6 +417,7 @@ const BACKEND_CAPS = {
     scopedCapsOnDemand: true,     // a not-read model-scoped weekly cap (e.g. Fable) only the ⟳ read can answer — essay at scopedCapsOnDemand below
     fork: true,                   // --fork-session (+ --resume-session-at for a mid-conversation fork)
     forkAtMessage: true,          // --resume-session-at <uuid> --fork-session (the per-message boundary the CLI accepts)
+    checkpoints: NO_CHECKPOINTS,  // B-437e: turns true with its road — control_request rewind_conversation (essay at NO_CHECKPOINTS)
     review: false,                // no review verb on the stream-json control protocol
     renameWriteback: false,       // the JSONL transcript has no title to write back
     titleRecord: 'session_title_changed', // 2.1.288: the CLI names the session itself (session-brain noteSessionTitle → cliTitle)
@@ -448,6 +486,7 @@ const BACKEND_CAPS = {
     scopedCapsOnDemand: false,    // its caps ride its pushes (a model-named limit such as Spark among them) — drawn as read, never a placeholder ring
     fork: true,                   // thread/fork (whole-thread fork; the wrapper sends it when CODEX_WEBUI_FORK=1)
     forkAtMessage: false,         // thread/fork takes no message boundary — a per-message button here would be a dead control
+    checkpoints: NO_CHECKPOINTS,  // B-437e: turns true with its road — thread/revert {beforeTurnId} (essay at NO_CHECKPOINTS)
     review: true,                 // review/start: working tree / base branch / commit / custom, inline or detached
     renameWriteback: true,        // set-thread-name → the thread's own name in codex's store
     titleRecord: null,            // no title record (the thread name is OURS, written back) — the ladder's CLI-title rung is absent
@@ -493,6 +532,7 @@ const BACKEND_CAPS = {
   shell: {
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false,
     forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
+    checkpoints: NO_CHECKPOINTS, // terminal-only: no conversation to rewind
     streamProtocol: null, // terminal-only: no chat parse pipeline
     modelFacts: false,          // its server states no model facts: the chip takes the model a LIVE init names (lane fable-52-cli-321 r5)
     peerDelivery: 'stash-only',
@@ -517,6 +557,7 @@ const BACKEND_CAPS = {
   // PROBE proves otherwise (setVerifiedCap is how `fork` flips), never guessed.
   opencode: {
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
+    checkpoints: NO_CHECKPOINTS, // its revert puts the FILES back with the messages — no conversation-only rewind (essay at NO_CHECKPOINTS)
     streamProtocol: 'acp-events',
     modelFacts: false,          // its server states no model facts: the chip takes the model a LIVE init names (lane fable-52-cli-321 r5)
     peerDelivery: 'stash-only',
@@ -568,6 +609,7 @@ const BACKEND_CAPS = {
   // busy agy takes the 'queue' lane (its own billed turn after this one, charged when written), never 'steer' (free).
   antigravity: {
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
+    checkpoints: NO_CHECKPOINTS, // no programmatic rewind door (essay at NO_CHECKPOINTS)
     streamProtocol: 'acp-events',
     modelFacts: false,          // its server states no model facts: the chip takes the model a LIVE init names (lane fable-52-cli-321 r5)
     peerDelivery: 'rpc-queue',
@@ -591,7 +633,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ modelFacts: false, terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
+const NO_CAPS = Object.freeze({ modelFacts: false, terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, checkpoints: NO_CHECKPOINTS, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed
@@ -603,6 +645,7 @@ function contributeCaps(id, row) {
   if (!row) { CONTRIBUTED_CAPS.delete(id); return null; }
   const merged = { ...NO_CAPS, ...row };
   merged.inputModes = deriveInputModes(row.inputModes || NO_CAPS.inputModes);
+  merged.checkpoints = checkpointsRowOf(row.checkpoints === undefined ? NO_CHECKPOINTS : row.checkpoints); // B-437e: the row enters only in its shape
   CONTRIBUTED_CAPS.set(id, merged);
   return merged;
 }
@@ -700,6 +743,8 @@ function setVerifiedCap(backend, key, value) {
   // the SWITCHING verdict is a measurement with a record (hotSwitchEvidence),
   // never something a runtime prober flips (lane-hot-switch)
   if (key === 'hotSwitch' || key === 'hotSwitchEvidence') return false;
+  // the rewind door is declared WITH its road (B-437e), never flipped by a prober
+  if (key === 'checkpoints') return false;
   row[key] = value;
   return true;
 }
@@ -891,4 +936,5 @@ function doorCapsOf(inputModes, servedVerbs) {
 module.exports = { SEND_DOOR_TABLE, sendDoors, doorCapsOf, BACKEND_CAPS, capsOf, SUBAGENT_VIEWS, subagentView, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
   AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume,
   NO_WORKTREE, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite,
+  NO_CHECKPOINTS, checkpointsRowOf,
   toolAllowlistCaps, toolAllowlistArgs };
