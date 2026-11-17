@@ -180,6 +180,9 @@ export function bindNumberField(input, { schema, path, settings, clamp, onBound 
   input.onchange = () => {
     onTyping(false);
     const num = parseFloat(input.value);
+    // B-0a33 (3): a Spending CAP left blank is stored EMPTY (null) — every turn nobody typed is held and the row says so —
+    // never the default; any other row reverts to its default as before
+    if (!Number.isFinite(num) && SPEND_CAP_PATHS.includes(path)) { settings.set(path, null); input.value = ''; onCommit(); return; }
     if (!Number.isFinite(num)) { settings.set(path, schema.default); input.value = schema.default; onCommit(); return; }
     const c = clamp(num);
     settings.set(path, c.value);
@@ -187,6 +190,8 @@ export function bindNumberField(input, { schema, path, settings, clamp, onBound 
     onCommit();
   };
 }
+/** B-0a33 (3): the three cap rows a blank field leaves EMPTY (the notice threshold is not a cap: blank = its default) */
+export const SPEND_CAP_PATHS = Object.freeze(['spend.unattendedPerIdentityHour', 'spend.unattendedPerIdentityDay', 'spend.unattendedPerInstanceDay']);
 /** The Spending rows whose number the SERVER's spend guard reads — path → its `budgetLimits` field. */
 const SPEND_LIVE_FIELDS = Object.freeze({
   'spend.unattendedPerIdentityHour': 'perIdentityHour',
@@ -201,16 +206,22 @@ const SPEND_LIVE_FIELDS = Object.freeze({
 export function inForceOf(path, { live = null, server = () => undefined, budgetLimits = null } = {}) {
   const f = SPEND_LIVE_FIELDS[path];
   if (!f) return null;
-  if (live && live.spend && Number.isFinite(Number(live.spend[f]))) return Number(live.spend[f]);
+  // B-0a33 (3): a cap left EMPTY is in force as «none» (every turn nobody typed is held) — never shown as 0, never the default
+  const unset = (L) => !!(L && Array.isArray(L.unset) && L.unset.includes(f));
+  if (live && live.spend && Number.isFinite(Number(live.spend[f]))) return unset(live.spend) ? IN_FORCE_UNSET : Number(live.spend[f]);
   if (typeof budgetLimits !== 'function') return null;
-  const v = Number(budgetLimits(server)[f]);
+  const L = budgetLimits(server);
+  if (unset(L)) return IN_FORCE_UNSET;
+  const v = Number(L[f]);
   return Number.isFinite(v) ? v : null;
 }
+/** inForceOf's answer for a cap whose setting is empty (B-0a33 (3)) — saveMarkWords says it in words */
+export const IN_FORCE_UNSET = 'unset';
 /** The row's save mark: 'typed' «Not saved yet — press Enter or leave the field» (the field differs from the store; nothing
  *  is stored) → 'pending' / 'saving' «Saving…» (committed; the debounce, then the POST) → 'saved' «Saved» — it STAYS
  *  until the next edit | 'failed'; a Spending row adds the number in force (`inForce`, see inForceOf). '' = nothing. */
 export function saveMarkWords(state, t = (s) => s, { inForce = null } = {}) {
-  const live = inForce !== null && inForce !== undefined ? { value: inForce } : null;
+  const live = inForce === IN_FORCE_UNSET ? { value: t('none — every turn nobody typed is held until a number is set') } : inForce !== null && inForce !== undefined ? { value: inForce } : null;   // B-0a33 (3)
   if (state === 'typed') return live ? t('Not saved yet — press Enter or leave the field · in force now: {value}', live) : t('Not saved yet — press Enter or leave the field');
   if (state === 'pending' || state === 'saving') return t('Saving…');
   if (state === 'failed') return t('Not saved — the server did not answer; change it again to retry');

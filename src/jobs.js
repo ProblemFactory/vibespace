@@ -151,6 +151,7 @@ function heldOf(r, reason) {
     if (r.identity && (r.identity.name || r.identity.key)) out.identity = String(r.identity.name || r.identity.key);
     if (Number.isFinite(Number(r.cap))) out.cap = Number(r.cap);
     if (Number(r.retryAfter) > 0) out.retryAfter = Number(r.retryAfter);
+    if (r.capUnset === true) out.capUnset = true;   // B-0a33 (3): an empty cap, said as itself (never «ceiling (0)»)
   }
   return out;
 }

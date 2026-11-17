@@ -527,6 +527,36 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
     sm5._server = { [PATH]: 500 };   // a hand edit above the clamp (the server reads it, budgetLimits clamps it at CAP_MAX)
     const clamp = V.inForceOf(PATH, { live: null, server: (k) => sm5.serverValue(k), budgetLimits: SA.budgetLimits });
     ok(clamp === SA.CAP_MAX.perIdentityHour && V.inForceOf('chat.compactMode', { server: () => true, budgetLimits: SA.budgetLimits }) === null, `R3 a Spending row says the number the server USES — a stored 500 reads in force ${clamp} (CAP_MAX); a row the spend guard does not read says none`);
+    // B-0a33 (3) (the owner's word via 主开发 2026-11-17): A CAP LEFT EMPTY is in force as «none» — every turn nobody typed is
+    // held — never shown as 0 and never as the default; from the server's echo (`spend.unset`) and from the stored value alike
+    {
+      const sm6 = new SettingsManager();
+      sm6._server = { [PATH]: null };
+      const fromStore = V.inForceOf(PATH, { live: null, server: (k) => sm6.serverValue(k), budgetLimits: SA.budgetLimits });
+      const fromEcho = V.inForceOf(PATH, { live: { spend: SA.budgetLimits((k) => (k === PATH ? '' : undefined)) }, budgetLimits: SA.budgetLimits });
+      const zero = V.inForceOf(PATH, { live: { spend: SA.budgetLimits((k) => (k === PATH ? 0 : undefined)) }, budgetLimits: SA.budgetLimits });
+      const said = { en: V.saveMarkWords('saved', tEn, { inForce: fromStore }), zh: V.saveMarkWords('saved', tZh, { inForce: fromEcho }), ja: V.saveMarkWords(null, tJa, { inForce: fromEcho }) };
+      ok(fromStore === V.IN_FORCE_UNSET && fromEcho === V.IN_FORCE_UNSET && zero === 0 && said.en === 'Saved · in force now: none — every turn nobody typed is held until a number is set'
+        && !/\{value\}|none — every/.test(said.zh) && /无/.test(said.zh) && /なし/.test(said.ja),
+      'B-0a33 (3) an EMPTY cap (null stored, blank echoed) is in force as «none — every turn nobody typed is held until a number is set» (en / zh / ja) — never «0», never the default; an explicit 0 still says 0', JSON.stringify({ fromStore, fromEcho, zero, said }));
+      const orig = read('src/lib/settings-view.js');
+      const NEEDLES = [["  if (unset(L)) return IN_FORCE_UNSET;\n", ''], ['return unset(live.spend) ? IN_FORCE_UNSET : Number(live.spend[f]);', 'return Number(live.spend[f]);']];
+      const M7 = mutantCopies('settings-view-unset', REPO);
+      const Mu = await import(pathToFileURL(M7.write('src/lib/settings-view.js', NEEDLES.reduce((x, [f, t]) => x.replace(f, t), orig), 'unset', { esm: true })).href);
+      const muStore = Mu.inForceOf(PATH, { live: null, server: (k) => sm6.serverValue(k), budgetLimits: SA.budgetLimits });
+      ok(NEEDLES.every(([f]) => orig.includes(f)) && muStore === 0 && Mu.saveMarkWords('saved', tEn, { inForce: muStore }) === 'Saved · in force now: 0',
+        'B-0a33 (3) CONTROL: the two «none» answers removed from a copy — the empty cap reads «Saved · in force now: 0» (the release) — RED', JSON.stringify({ muStore }));
+      // THE FIELD: a Spending cap left BLANK is stored EMPTY (null → «none», every turn nobody typed held) — never the default;
+      // any other number row left blank reverts to its default as before
+      const blank = (p0) => { const stored = []; const inp = { value: '', oninput: null, onchange: null }; V.bindNumberField(inp, { schema: S.SETTINGS_SCHEMA[p0], path: p0, settings: { get: () => S.SETTINGS_SCHEMA[p0].default, set: (k, v) => stored.push([k, v]) }, clamp: (n) => S.clampToSchema(S.SETTINGS_SCHEMA[p0], n) }); inp.onchange(); return { stored, shown: inp.value }; };
+      const capRows = V.SPEND_CAP_PATHS.map(blank);
+      const other = blank('spend.budgetNoticePct');
+      ok(capRows.every((r, i) => r.stored.length === 1 && r.stored[0][0] === V.SPEND_CAP_PATHS[i] && r.stored[0][1] === null && r.shown === '') && other.stored[0][1] === S.SETTINGS_SCHEMA['spend.budgetNoticePct'].default,
+        'B-0a33 (3) the three Spending caps left BLANK are stored EMPTY (null) — never the default; the notice threshold (not a cap) still reverts to its default', JSON.stringify({ capRows, other }));
+      const Mb = await import(pathToFileURL(M7.write('src/lib/settings-view.js', orig.replace("    if (!Number.isFinite(num) && SPEND_CAP_PATHS.includes(path)) { settings.set(path, null); input.value = ''; onCommit(); return; }\n", ''), 'blank', { esm: true })).href);
+      const mb = (() => { const stored = []; const inp = { value: '', oninput: null, onchange: null }; Mb.bindNumberField(inp, { schema: S.SETTINGS_SCHEMA[PATH], path: PATH, settings: { get: () => 30, set: (k, v) => stored.push(v) }, clamp: (n) => S.clampToSchema(S.SETTINGS_SCHEMA[PATH], n) }); inp.onchange(); return stored; })();
+      ok(orig.includes("SPEND_CAP_PATHS.includes(path)) { settings.set(path, null);") && mb.length === 1 && mb[0] === S.SETTINGS_SCHEMA[PATH].default, 'B-0a33 (3) CONTROL: the blank rule removed from a copy — a blank cap is stored as the DEFAULT (the release: read as the default) — RED', JSON.stringify(mb));
+    }
     // NO ROW COMMITS ON INPUT: every plain number row of the schema, typed into with the real binding — the store is never written
     const rows = Object.keys(S.SETTINGS_SCHEMA).filter((k) => S.SETTINGS_SCHEMA[k].type === 'number' && !S.SETTINGS_SCHEMA[k].slider && !S.SETTINGS_SCHEMA[k].store);
     let writes = 0;

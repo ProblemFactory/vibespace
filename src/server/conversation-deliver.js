@@ -107,7 +107,7 @@ const RETRY_CAP = STASH_CAP;   // the hand-over's sender (src/notification-sende
 // cannot name. It is charged to a NAMED bucket (`host:<id>` / `unattributed`)
 // rather than guessed at or waved through — the instance/day ceiling still
 // applies to it, and the name says what we do not know.
-function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, authorizeSpend = null, noteSpend = null, releaseSpend = null, reservationState = null, waitingReservations = null, onStashChange = () => { }, log = () => { }, retryClock = null, renderBatch = null }) {   // renderBatch (verify r1 N1d): the hand-over's renderer (agent-routes renderMsgStash), injected — a batch of parked entries goes out as ONE frame in its shape
+function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, authorizeSpend = null, noteSpend = null, releaseSpend = null, reservationState = null, waitingReservations = null, waitingOverCap = null, onStashChange = () => { }, log = () => { }, retryClock = null, renderBatch = null }) {   // renderBatch (verify r1 N1d): the hand-over's renderer (agent-routes renderMsgStash), injected — a batch of parked entries goes out as ONE frame in its shape
   const stashFile = path.join(dataDir, 'msg-stash.json');
   let stash = {};
   try { stash = JSON.parse(fs.readFileSync(stashFile, 'utf-8')) || {}; } catch { }
@@ -204,11 +204,13 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // unclaimed as before. The same rule in the jobs engine's store (src/jobs.js capUnclaimedNotifs)
     let over = q.filter((e) => !(e && e.ho)).length - STASH_CAP;
     over -= q.filter((e) => e && e.slot && !e.ho).length;   // a KEYED SLOT entry (lane queued-is-not-woke, shape C: the sender's one waiting entry) is never counted and never dropped
+    const capHeld = (e) => !!(e && e.held && e.held.capHeld === true);   // B-0a33 (2): words a lowered cap took back out of a wrapper's queue — never dropped (bounded by queued-wakes' 50 per conversation)
+    over -= q.filter((e) => capHeld(e) && !e.ho && !e.slot).length;
     const dropped = [];
     if (over <= 0) return dropped;
     for (const pass of [(e) => !!(e.held && e.held.maybeDelivered), () => true]) {
       for (let i = 0; i < q.length && over > 0;) {
-        if (!q[i] || q[i].ho || q[i].slot || !pass(q[i])) { i++; continue; }
+        if (!q[i] || q[i].ho || q[i].slot || capHeld(q[i]) || !pass(q[i])) { i++; continue; }
         dropped.push(...q.splice(i, 1)); over--;
       }
     }
@@ -1105,7 +1107,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         return;
       }
       giveBack({ attempted: true });
-      if (r && r.refused === 'spend') { for (const e of shown) fellRetry(e, 'spend-cap', r.reason || 'spend budget', { why: r.why || undefined, identity: r.identity ? String(r.identity.name || r.identity.key) : undefined, cap: Number.isFinite(Number(r.cap)) && r.cap != null ? Number(r.cap) : undefined, retryAfter: Number(r.retryAfter) > 0 ? Number(r.retryAfter) : undefined }); return; }
+      if (r && r.refused === 'spend') { for (const e of shown) fellRetry(e, 'spend-cap', r.reason || 'spend budget', { why: r.why || undefined, identity: r.identity ? String(r.identity.name || r.identity.key) : undefined, cap: Number.isFinite(Number(r.cap)) && r.cap != null ? Number(r.cap) : undefined, retryAfter: Number(r.retryAfter) > 0 ? Number(r.retryAfter) : undefined, capUnset: r.capUnset === true ? true : undefined }); return; }   // B-0a33 (3)
       if (r && r.notRunning) { for (const e of shown) fellRetry(e, 'not-running', r.reason || 'the conversation is no longer running'); return; }
       const attempt = { at: now, reason: (r && r.reason) || 'unknown', phase: (r && r.phase) || null, busy: null, late: 0, why };
       let step = Infinity;
@@ -1135,7 +1137,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       if (v && v.ok === false) {
         const cap = v.why === 'hour-cap' ? v.limits?.perIdentityHour : v.why === 'day-cap' ? v.limits?.perIdentityDay : v.why === 'instance-cap' ? v.limits?.perInstanceDay : null;
         giveBack({ attempted: true });
-        for (const e of shown) fellRetry(e, 'spend-cap', `spend budget: ${v.detail || v.why}`, { why: v.why, identity: v.identity ? String(v.identity.name || v.identity.key) : undefined, cap: Number.isFinite(Number(cap)) ? Number(cap) : undefined, retryAfter: Number(v.retryAfter) > 0 ? Number(v.retryAfter) : undefined });
+        for (const e of shown) fellRetry(e, 'spend-cap', `spend budget: ${v.detail || v.why}`, { why: v.why, identity: v.identity ? String(v.identity.name || v.identity.key) : undefined, cap: Number.isFinite(Number(cap)) ? Number(cap) : undefined, retryAfter: Number(v.retryAfter) > 0 ? Number(v.retryAfter) : undefined, capUnset: v.capUnset === true ? true : undefined });   // B-0a33 (3)
         return;
       }
       charged = { reason: spendReason, identity: (v && v.identity) ? { key: v.identity.key, name: v.identity.name || v.identity.key } : identity, hold: (v && v.hold) || null, holdAt: now };
@@ -1366,7 +1368,20 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // THE QUEUED WAKE (lane queued-is-not-woke, law 1): a frame written to a wrapper whose conversation is IN A TURN waits in
   // that wrapper's queue — it is not «woke», not «read», not charged until a turn carries it (src/server/queued-wakes.js)
   // reservationState: the guard's word before any marked copy; stashHas: a handed-back frame's words still wait (round 4)
-  const queued = require('./queued-wakes.js').create({ dataDir, noteSpend, releaseSpend, reservationState, waitingReservations, stashHas: (cid, ref) => (stash[cid] || []).some((e) => e && e.ref === ref), log });
+  const queued = require('./queued-wakes.js').create({ dataDir, noteSpend, releaseSpend, reservationState, waitingReservations, waitingOverCap, pull: (cid, item, holder) => pullQueued(cid, item, holder), stashHas: (cid, ref) => (stash[cid] || []).some((e) => e && e.ref === ref), log });
+  // B-0a33 (2): a settings write that moved the caps re-judges the frames already waiting AT ONCE (src/routes/persistence.js)
+  require('./spend-guard.js').onLimitsWritten(() => { try { queued.rejudge(); } catch (e) { log('[deliver] re-judging the waiting frames failed:', e.message); } });
+  /** B-0a33: TAKE A WAITING FRAME BACK OUT of its wrapper's queue — the wrapper's own `remove` verb (the person's queue edit);
+   *  the wrapper hands the words back (a mode-less peer_message_result) and queued-wakes' hand-back road stashes them. Only the
+   *  process that holds it, only a wrapper whose own advert serves `remove`. false = not asked. */
+  function pullQueued(cid, item, holder) {
+    const rpc = findRpcPeer(cid);
+    if (!rpc || !item) return false;
+    if (holder && rpc.wc && rpc.wc.pid && String(rpc.wc.pid) !== String(holder)) return false;   // another process: never its queue
+    if (!(Array.isArray(rpc.wc.queueVerbs) && rpc.wc.queueVerbs.includes('remove'))) return false;
+    try { rpc.s.pty.write(JSON.stringify({ type: 'queue-op', op: 'remove', id: String(item) }) + '\n'); return true; }
+    catch (e) { log('[deliver] taking a queued frame back out failed: ' + e.message); return false; }
+  }
   /** Give a withheld frame's authorization hold back to the guard (r5). A
    *  stranded frame gets it too: the wrapper died holding our money open, and
    *  the guard's own TTL would give it back anyway — this just does it the
@@ -1441,7 +1456,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** The conversation's wrapper process is GONE (session-stdout's teardown; the boot sweep): every frame it held is handed
    *  back BY THE HUB to the next-turn road (the stash — delivered once, at the next turn) and its reservation returned. */
   /** the hub's own hand-back: the words to the stash WITH a ref (its drain names the frame — the row reads «read» only then) */
-  const heldBackStash = (cid) => (e, w) => { stashFor(cid, { source: 'agent', kind: w.kind === 'notification' ? 'notification' : 'peer', fromName: w.fromName || null, text: w.text, ref: w.ref }); };
+  const heldBackStash = (cid) => (e, w) => { stashFor(cid, { source: 'agent', kind: w.kind === 'notification' ? 'notification' : 'peer', fromName: w.fromName || null, text: w.text, ref: w.ref, ...(w.held && w.held.kind ? { held: w.held } : {}) }); };   // B-0a33 (2): `held` = taken back for a lowered cap
   /** WHO HOLDS IT: the wrapper process of the conversation's live session (its own sidecar's pid); null = no process;
    *  undefined = it cannot be told (nothing is judged). A frame the old process held is never «carried» by another. */
   function holderOf(cid) {
@@ -1572,7 +1587,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       // entry names the slot and the ceiling it hit, so the panel can say why
       if (v && v.ok === false) {
         const cap = v.why === 'hour-cap' ? v.limits?.perIdentityHour : v.why === 'day-cap' ? v.limits?.perIdentityDay : v.why === 'instance-cap' ? v.limits?.perInstanceDay : null;
-        return { ok: false, reason: `spend budget: ${v.detail || v.why}`, refused: 'spend', why: v.why, retryAfter: v.retryAfter || 0, identity: v.identity ? { key: v.identity.key, name: v.identity.name || v.identity.key } : null, cap: Number.isFinite(Number(cap)) ? Number(cap) : null };
+        return { ok: false, reason: `spend budget: ${v.detail || v.why}`, refused: 'spend', why: v.why, retryAfter: v.retryAfter || 0, identity: v.identity ? { key: v.identity.key, name: v.identity.name || v.identity.key } : null, cap: Number.isFinite(Number(cap)) ? Number(cap) : null, ...(v.capUnset ? { capUnset: true } : {}) };   // B-0a33 (3): an empty cap is said as itself
       }
       // CHARGE WHAT YOU AUTHORIZED (r4, reproduced). `identity` is null on the
       // local-session branch, and handing that null to the charge made

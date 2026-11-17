@@ -193,9 +193,13 @@ const LOAD_RETENTION = Object.freeze({
  *  Stop nudge's own thresholds use. A negative/garbage value is not a choice
  *  and falls back. */
 function budgetLimits(get = () => undefined) {
-  const num = (key, dflt, hi) => {
+  const unset = [];   // B-0a33 (3): the caps whose setting is there and EMPTY (null / blank) — still 0, said as «no cap is set»
+  const num = (key, dflt, hi, field = null) => {
     let v;
     try { v = get(key); } catch { v = undefined; }
+    // B-0a33 (3) (the owner's word via 主开发 2026-11-17): A NULL OR BLANK CAP STAYS A REFUSAL — never the default, never
+    // a silent 0: it is 0 here (every turn nobody typed refused) and named in `unset`, so the refusal says «no cap is set»
+    if (field && (v === null || (typeof v === 'string' && !v.trim()))) { unset.push(field); return 0; }
     // A BOOLEAN IS NEVER A CAP. `Number(true)` is 1, so a settings reader that
     // answers `true` to everything (a harness stub, a corrupted store) would
     // silently set every ceiling to ONE unattended turn — a value nobody chose,
@@ -205,15 +209,18 @@ function budgetLimits(get = () => undefined) {
     if (!Number.isFinite(n) || n < 0) return dflt;
     return Math.min(hi, Math.round(n));
   };
-  return {
+  const out = {
     // clamped at the schema's OWN max (CAP_MAX) — see its comment: a ceiling the
     // settings UI offers and the ledger cannot count is not a ceiling
-    perIdentityHour: num('spend.unattendedPerIdentityHour', BUDGET_DEFAULTS.perIdentityHour, CAP_MAX.perIdentityHour),
-    perIdentityDay: num('spend.unattendedPerIdentityDay', BUDGET_DEFAULTS.perIdentityDay, CAP_MAX.perIdentityDay),
-    perInstanceDay: num('spend.unattendedPerInstanceDay', BUDGET_DEFAULTS.perInstanceDay, CAP_MAX.perInstanceDay),
+    perIdentityHour: num('spend.unattendedPerIdentityHour', BUDGET_DEFAULTS.perIdentityHour, CAP_MAX.perIdentityHour, 'perIdentityHour'),
+    perIdentityDay: num('spend.unattendedPerIdentityDay', BUDGET_DEFAULTS.perIdentityDay, CAP_MAX.perIdentityDay, 'perIdentityDay'),
+    perInstanceDay: num('spend.unattendedPerInstanceDay', BUDGET_DEFAULTS.perInstanceDay, CAP_MAX.perInstanceDay, 'perInstanceDay'),
     noticePct: (() => { const n = num('spend.budgetNoticePct', BUDGET_DEFAULTS.noticePct, 100); return n > 0 ? n : 0; })(),
   };
+  return unset.length ? { ...out, unset } : out;
 }
+/** PURE (B-0a33 (3)). Is this cap field set EMPTY (null / blank) in these limits? */
+const capUnset = (limits, field) => !!(limits && Array.isArray(limits.unset) && limits.unset.includes(field));
 
 /** PURE. An empty ledger. */
 function emptyBudget() { return { v: 1, identities: {}, instance: [], notices: {}, attended: [] }; }
@@ -618,11 +625,12 @@ function authorizeUnattendedSpend({
   // which refusalText prints as nothing at all). A window full of HOLDS alone has
   // no oldest stamp — its retryAfter is 0, never `0 + HOUR_MS` (a 1970 instant the
   // client would say as «free now», lane owner-press-attended r2).
-  if (L.perIdentityHour === 0) return no('hour-cap', `unattended turns per identity per hour are set to 0`);
+  const unsetSaid = (what) => `no cap is set for ${what} (the setting is empty) — every unattended turn is refused until a number is set in Settings → Spending`;   // B-0a33 (3)
+  if (L.perIdentityHour === 0) return no('hour-cap', capUnset(L, 'perIdentityHour') ? unsetSaid('unattended turns per identity per hour') : `unattended turns per identity per hour are set to 0`, 0, null, capUnset(L, 'perIdentityHour') ? { capUnset: true } : null);
   if (counts.hour + inFlight.identity >= L.perIdentityHour) return no('hour-cap', `${name} has ${spentWord(counts.promisedHour)} ${counts.hour}${flight(inFlight.identity)} unattended turns this hour${promisedTail(counts.promisedHour)} (cap ${L.perIdentityHour})`, counts.hourOldest ? counts.hourOldest + HOUR_MS : 0, counts.producers.hour);
-  if (L.perIdentityDay === 0) return no('day-cap', `unattended turns per identity per day are set to 0`);
+  if (L.perIdentityDay === 0) return no('day-cap', capUnset(L, 'perIdentityDay') ? unsetSaid('unattended turns per identity per day') : `unattended turns per identity per day are set to 0`, 0, null, capUnset(L, 'perIdentityDay') ? { capUnset: true } : null);
   if (counts.day + inFlight.identity >= L.perIdentityDay) return no('day-cap', `${name} has ${spentWord(counts.promisedDay)} ${counts.day}${flight(inFlight.identity)} unattended turns today${promisedTail(counts.promisedDay)} (cap ${L.perIdentityDay})`, counts.dayOldest ? counts.dayOldest + DAY_MS : 0, counts.producers.day);
-  if (L.perInstanceDay === 0) return no('instance-cap', `unattended turns for this instance are set to 0`);
+  if (L.perInstanceDay === 0) return no('instance-cap', capUnset(L, 'perInstanceDay') ? unsetSaid('unattended turns for this instance') : `unattended turns for this instance are set to 0`, 0, null, capUnset(L, 'perInstanceDay') ? { capUnset: true } : null);
   if (counts.instanceDay + inFlight.instance >= L.perInstanceDay) return no('instance-cap', `this instance has ${spentWord(counts.promisedInstanceDay)} ${counts.instanceDay}${flight(inFlight.instance)} unattended turns today${promisedTail(counts.promisedInstanceDay)} (cap ${L.perInstanceDay})`, counts.instanceOldest ? counts.instanceOldest + DAY_MS : 0, counts.producers.instanceDay);
   return { ok: true, why: null, detail: null, retryAfter: 0, counts, inFlight, limits: L, reason, identity: identity || null };
 }
@@ -648,7 +656,9 @@ function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET
   const ridKeyOwner = ridKey ? (key && (s.identities[key] || []).some((t) => t && t.rid === ridKey) ? key : Object.keys(s.identities).find((k) => (s.identities[k] || []).some((t) => t && t.rid === ridKey)) || null) : null;
   if (ridKey && ridKeyOwner) {
     // B-0a33: the carry is counted where it RAN (`ran`) — in the hour and the day (a stash drain too: the turn it rode ran then)
-    if (carried) { for (const list of [s.identities[ridKeyOwner], s.instance || []]) for (const t of list) if (t && t.rid === ridKey) { if (waitingStamp(t)) t.ran = at; t.conv = true; } return { state: s, warn: null, converted: true }; }
+    // B-0a33 (1): a frame the hub had GIVEN UP on (`end`) that is then seen running in its wrapper is counted where it ran —
+    // its instant moves to the run (later: never out of a window still ahead); a stash drain rides another turn, and keeps it
+    if (carried) { for (const list of [s.identities[ridKeyOwner], s.instance || []]) for (const t of list) if (t && t.rid === ridKey) { if (waitingStamp(t) || (!drain && t.end && !t.ran)) t.ran = at; t.conv = true; } return { state: s, warn: null, converted: true }; }
     // B-0a33: ENDED — the hub stopped waiting for the frame and cannot tell whether it ran: the unit stays counted (never
     // returned by this), in the hour the hub stopped; it no longer holds the hour of every later authorize
     if (ended) { for (const list of [s.identities[ridKeyOwner], s.instance || []]) for (const t of list) if (t && t.rid === ridKey && waitingStamp(t)) t.end = at; return { state: s, warn: null, ended: true }; }
@@ -710,6 +720,29 @@ function returnReservation(state, { rid = null, now = Date.now(), limits = null 
 /** The refusal's verb: a window holding reservations (frames waiting behind running turns) is «spent or promised», and says how many wait. */
 const spentWord = (promised) => (promised > 0 ? 'spent or promised' : 'spent');
 const promisedTail = (promised) => (promised > 0 ? `, ${promised} of them waiting behind running turns` : '');
+
+/** PURE (B-0a33 (2), the owner's word via 主开发 2026-11-17). THE WAITING FRAMES A CAP NO LONGER HOLDS — a cap lowered below
+ *  what already waits (or set to 0, or left empty): per identity, the excess of its hour and its day over their caps; for the
+ *  instance, the excess of its day over the instance cap beyond those already named — each time the NEWEST waiting
+ *  reservations, at most as many as wait. queued-wakes takes these out of their wrapper's queue (held, said, never dropped):
+ *  the ones left then run inside every cap. [] when every window holds what waits. */
+function waitingOverCap(state, limits, now = Date.now()) {
+  const s = state && typeof state === 'object' ? state : emptyBudget();
+  const L = { ...BUDGET_DEFAULTS, ...(limits || {}) };
+  const fresh = (t) => waitingStamp(t) && stampAt(t) > now - RESERVATION_WAIT_MAX_MS;
+  const newest = (list) => (Array.isArray(list) ? list : []).filter(fresh).reverse().sort((a, b) => stampAt(b) - stampAt(a));   // the list is in write order: a tie is newest last
+  const out = [];
+  const taken = new Set();
+  for (const k of Object.keys(s.identities || {})) {
+    const c = spendCounts(s, k, now);
+    const over = Math.max(c.hour - (Number(L.perIdentityHour) || 0), c.day - (Number(L.perIdentityDay) || 0), 0);
+    for (const t of newest(s.identities[k]).slice(0, over)) if (!taken.has(t.rid)) { taken.add(t.rid); out.push(t.rid); }
+  }
+  const ci = spendCounts(s, '__instance__', now);
+  const overI = ci.instanceDay - (Number(L.perInstanceDay) || 0) - newest(s.instance).filter((t) => taken.has(t.rid)).length;
+  if (overI > 0) for (const t of newest(s.instance).filter((x) => !taken.has(x.rid)).slice(0, overI)) { taken.add(t.rid); out.push(t.rid); }
+  return out;
+}
 
 /** PURE (B-0a33 round 1). Every WAITING reservation id in the ledger — queued-wakes ends the ones no live entry holds. */
 function waitingRids(state) {
@@ -775,6 +808,8 @@ const REFUSAL_WORDS = Object.freeze({
   'instance-cap': Object.freeze(['VibeSpace held {producer} in «{conversation}»: this instance has used its {cap} turns nobody typed in 24 hours. {next}', 'VibeSpace held {producer}: this instance has used its {cap} turns nobody typed in 24 hours. {next}']),
   'switched-off': Object.freeze(['VibeSpace held {producer} in «{conversation}»: turns nobody typed are switched off for {account} — its limit is 0.', 'VibeSpace held {producer}: turns nobody typed are switched off for {account} — its limit is 0.']),
   'switched-off-instance': Object.freeze(['VibeSpace held {producer} in «{conversation}»: turns nobody typed are switched off for this instance — its limit is 0.', 'VibeSpace held {producer}: turns nobody typed are switched off for this instance — its limit is 0.']),
+  'cap-unset': Object.freeze(['VibeSpace held {producer} in «{conversation}»: no limit is set for turns nobody typed on {account} — set a number.', 'VibeSpace held {producer}: no limit is set for turns nobody typed on {account} — set a number.']),   // B-0a33 (3)
+  'cap-unset-instance': Object.freeze(['VibeSpace held {producer} in «{conversation}»: no limit is set for turns nobody typed on this instance — set a number.', 'VibeSpace held {producer}: no limit is set for turns nobody typed on this instance — set a number.']),
   'identity-cannot-serve': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} cannot answer a request right now ({state}) — sign it in again from the Usage window.', 'VibeSpace held {producer}: {account} cannot answer a request right now ({state}) — sign it in again from the Usage window.']),
   'spend-control-reached': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} has reached its spend control, so its requests are refused — a turn on it would buy nothing.', 'VibeSpace held {producer}: {account} has reached its spend control, so its requests are refused — a turn on it would buy nothing.']),
   'identity-unknown': Object.freeze(['VibeSpace held {producer} in «{conversation}»: it could not tell which account the turn would bill.', 'VibeSpace held {producer}: it could not tell which account the turn would bill.']),
@@ -810,10 +845,11 @@ const DOOR_WORDS = Object.freeze({
   usage: 'Sign {account} in again from the Usage window — the limits in Settings → Spending cannot help here.',
   vendor: 'The spend control is set with the account’s vendor — the limits in Settings → Spending cannot help here.',
   waiting: 'Open the conversation they wait behind: they run when its turn ends, or when you stop that turn there. Raising the limits in Settings → Spending would let more turns run meanwhile.',   // B-0a33 round 1
+  unset: 'A limit left empty refuses every turn nobody typed until it is set: set a number in Settings → Spending. Turns you type, and the buttons you press that say «starts a turn», are never counted.',   // B-0a33 (3)
   ledger: 'This is VibeSpace failing closed, not a limit: the hub could not read data/spend-budget.json. Turns nobody typed start again within a minute of the file reading again — repair it, or remove it to start the count over. The limits in Settings → Spending cannot help here.',   // B-3b0f
   wiring: 'This is VibeSpace failing closed, not a limit: the Usage window lists the accounts and the hub log’s [spend] lines name the conversation — the limits in Settings → Spending cannot help here.',
 });
-const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'ledger-unreadable': 'ledger', 'unknown-reason': 'wiring', other: 'wiring' });
+const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'cap-unset': 'unset', 'cap-unset-instance': 'unset', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'ledger-unreadable': 'ledger', 'unknown-reason': 'wiring', other: 'wiring' });
 const SPENT_ROWS = 6;
 const CAP_OF = Object.freeze({ 'hour-cap': ['perIdentityHour', 'hour'], 'day-cap': ['perIdentityDay', 'day'], 'instance-cap': ['perInstanceDay', 'instance'] });
 /** a producer as words: a declared reason says its `what` in the viewer's language; a legacy stamp says so */
@@ -821,6 +857,7 @@ const producerWords = (r) => (SPEND_REASONS[r] ? { key: SPEND_REASONS[r].what } 
 /** PURE. Which REFUSAL_WORDS row a refused verdict reads (a cap set to 0 is «switched off», never «used its 0 turns»). */
 function refusalRow(v) {
   const capOf = CAP_OF[v && v.why];
+  if (capOf && Number((v.limits || {})[capOf[0]]) === 0 && capUnset(v.limits, capOf[0])) return v.why === 'instance-cap' ? 'cap-unset-instance' : 'cap-unset';   // B-0a33 (3): said as itself
   if (capOf) return Number((v.limits || {})[capOf[0]]) === 0 ? (v.why === 'instance-cap' ? 'switched-off-instance' : 'switched-off') : v.why;
   return v && REFUSAL_WORDS[v.why] ? v.why : 'other';
 }
@@ -880,7 +917,7 @@ function noticeText(warn) {
 module.exports = {
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
-  budgetLimits, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText,
+  budgetLimits, capUnset, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText,
   pendingCounts, reservePending, releasePending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
   authorizeUnattendedSpend, noteUnattendedSpend, returnReservation, reservationState, refusalText, refusalI18n, refusalRow, noticeText,

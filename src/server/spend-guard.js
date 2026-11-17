@@ -168,6 +168,8 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   const flush = () => { if (timer) { clearTimeout(timer); timer = null; } writeNow(); };
 
   const limits = () => A.budgetLimits(serverSetting);
+  // B-0a33 (2) × B-3b0f: while the ledger cannot be read no wait can be judged — '*' = every waiting frame is held
+  const overCapNow = (now) => (unreadable ? ['*'] : A.waitingOverCap(state, limits(), now));
   const overagePolicy = () => (serverSetting('spend.allowOverageTurns') === true ? 'allow' : 'refuse');
 
   /** Retire the holds whose producer never came back. THE COUNT IS A CENSUS,
@@ -431,7 +433,11 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   return {
     authorize, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
     reservationState: (rid) => A.reservationState(state, rid),   // lane queued-is-not-woke round 3: 'converted' | 'reserved' | null
-    waitingReservations: () => A.waitingRids(state),   // B-0a33 round 1: queued-wakes ends the ones no live entry holds
+    // B-0a33 round 1: queued-wakes ends the ones no live entry holds. B-0a33 (2): the answer also carries `overCap` (read
+    // lazily) — the waiting reservations no cap holds now: server.js wires this ONE function into the ladder, so the
+    // re-judge rides it (no new wiring line in server.js)
+    waitingReservations: () => { const rids = A.waitingRids(state); Object.defineProperty(rids, 'overCap', { get: () => overCapNow(Date.now()) }); return rids; },
+    waitingOverCap: (now = Date.now()) => overCapNow(now),   // B-0a33 (2): the waiting frames a lowered cap no longer holds
     limits, overagePolicy,
     snapshot: () => ({
       budget: A.pruneBudget(state, Date.now(), A.LOAD_RETENTION), nudge: { ...nudge },   // round 4: every prune keeps what the largest caps could count
@@ -444,4 +450,11 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   };
 }
 
-module.exports = { create, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, LEDGER_RECHECK_MS, noticeExpiry };
+// B-0a33 (2): THE SETTINGS WRITE SAYS THE CAPS MOVED — src/routes/persistence.js writeSettings calls noteLimitsWritten(prev,
+// next) (budgetLimits of the file before and after); the delivery ladder listens and re-judges the frames already waiting at
+// once, before the running turn can end and let its wrapper run them past a cap just lowered. One registry for the process.
+const limitsListeners = new Set();
+function onLimitsWritten(fn) { limitsListeners.add(fn); return () => limitsListeners.delete(fn); }
+function noteLimitsWritten(prev, next) { for (const fn of [...limitsListeners]) { try { fn(prev || null, next || null); } catch { } } }
+
+module.exports = { create, onLimitsWritten, noteLimitsWritten, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, LEDGER_RECHECK_MS, noticeExpiry };

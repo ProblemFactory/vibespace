@@ -2504,7 +2504,7 @@ console.log('§6 the shared-store census (words another principal wrote into a s
     'opts.fromName || null': "the ladder relaying its caller's",
     // lane queued-is-not-woke (law 1 round 2): a queued frame keeps the name the ladder relayed at its write (opts.fromName, judged
     // by its caller) and hands it back with the words when the hub returns the frame to the stash
-    'fromName || null': "queued-wakes noteWritten: the ladder's relayed opts.fromName, persisted with the entry", 'e.fromName': "queued-wakes' hand-back: the STORED entry's name (relayed at the write) to the hub's stash call",
+    'fromName || null': "queued-wakes noteWritten: the ladder's relayed opts.fromName, persisted with the entry", 'e.fromName': "queued-wakes' hand-back: the STORED entry's name (relayed at the write) to the hub's stash call", 'g.fromName': "queued-wakes' given-up record taken back out of its wrapper's queue (B-0a33 (1)): the STORED entry's name, copied into the record at the give-up, to the hub's stash call",
     'w.fromName || null': "conversation-deliver's queued hand-back (heldBackStash): the STORED entry's name as the module handed it",
     'one.fromName || null': "the retry park's single landed entry at its card (notify-retry verify r2 ④): the STORED entry's name as it stands — the park relays opts.fromName at the park, the clear door rewrites it (redactStash); an owed wake's: the groups engine's own `<sender> · <group>` read as the frame leaves (lane paced-wake-retry), the same spelling wakeOnce hands the ladder",
     'wordsOf(e).fromName || null': "the retry park's batch row: the stored entry's name as it stands, or an owed wake's as the groups engine read it as the frame left",

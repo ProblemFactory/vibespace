@@ -2689,8 +2689,8 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
   const MA = (edits) => mutantModule('src/spend-authorizer.js', edits);
   const mAtSend = MA([['  const since = (list, ms) => list.filter((t) => live(t) && countAt(t, now) > now - ms);', '  const since = (list, ms) => list.filter((t) => live(t) && stampAt(t) > now - ms);']]);
   const mDaySend = MA([['  const day = since(mine, DAY_MS);', '  const day = mine.filter((t) => stampAt(t) > now - DAY_MS);']]);
-  const mNoRan = MA([['if (waitingStamp(t)) t.ran = at; t.conv = true;', 't.conv = true;']]);
-  const mDrain = MA([['if (waitingStamp(t)) t.ran = at; t.conv = true;', 'if (waitingStamp(t) && !drain) t.ran = at; t.conv = true;']]);
+  const mNoRan = MA([['if (waitingStamp(t) || (!drain && t.end && !t.ran)) t.ran = at; t.conv = true;', 't.conv = true;']]);   // B-0a33 (1) put the given-up branch on this line
+  const mDrain = MA([['if (waitingStamp(t) || (!drain && t.end && !t.ran)) t.ran = at; t.conv = true;', 'if ((waitingStamp(t) && !drain) || (!drain && t.end && !t.ran)) t.ran = at; t.conv = true;']]);
   const mPruneSend = MA([['list.filter((t) => lastStampAt(t) > cut || (waitingStamp(t) && stampAt(t) > now - RESERVATION_WAIT_MAX_MS))', 'list.filter((t) => stampAt(t) > cut || (waitingStamp(t) && stampAt(t) > now - RESERVATION_WAIT_MAX_MS))']]);
   const mNoEnd = MA([['for (const t of list) if (t && t.rid === ridKey && waitingStamp(t)) t.end = at; return', 'for (const t of list) if (false) t.end = at; return']]);
   const mNoAge = MA([['  const live = (t) => !(waitingStamp(t) && stampAt(t) <= now - RESERVATION_WAIT_MAX_MS);', '  const live = () => true;']]);
@@ -2921,6 +2921,298 @@ console.log('\n§5c the charge is debited to the identity the authorization reso
   // own guard, which is the census a grep over five call sites cannot be:
   // "no await in between" is a property of an arrangement of code, not of the
   // question being asked once.
+}
+
+// ── §5g B-0a33's REMAINDERS (the owner's word via 主开发 2026-11-17: the gate may count MORE or refuse — never loosen) ──
+// The 2.369.402 Known list, each built in the direction that counts more or refuses: (3) a null or blank cap stays a refusal
+// and is SAID as itself; (2) a frame already waiting when a cap is lowered below it is taken back out of its wrapper's queue
+// (held, said, never dropped) — the frames left run inside the cap; (1) a frame the hub gave up on is counted where it runs,
+// or — still listed in its process's queue — taken back out so it does not run. One clock: the REAL guard + the REAL
+// queued-wakes, and a stand-in wrapper queue that answers a take-back the way data/bin/codex-chat-wrapper.js does (a
+// mode-less peer_message_result carrying the words).
+console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowered cap takes waiting frames back; a given-up frame is counted where it runs or does not run');
+{
+  const QWm = require(path.join(REPO, 'src/server/queued-wakes.js'));
+  const HOUR = 3600e3, DAY = 24 * HOUR, MIN = 60e3, SEC = 1e3;
+  const IDg = { key: 'slot-g', name: 'G' };
+  const mkWorld = (caps, { serves = true, qMod = QWm, gMod = guardMod } = {}) => {
+    let CLOCK = Date.parse('2026-11-17T08:00:00Z');
+    const dir = tmpdir('vs-spend-5g-');
+    const settings = { 'spend.unattendedPerIdentityHour': 30, 'spend.unattendedPerIdentityDay': 2000, 'spend.unattendedPerInstanceDay': 10000, ...caps };
+    const producers = {}, files = {};
+    const writer = { dirty: (file, o) => { producers[file] = o.produce; } };
+    const W = { dir, settings, ran: [], stash: [], backs: [], logs: [], queue: {}, pulls: [], serves };
+    W.now = () => CLOCK; W.setClock = (t) => { CLOCK = t; }; W.adv = (ms) => { CLOCK += ms; };
+    W.mkG = () => gMod.create({ dataDir: dir, serverSetting: (k) => settings[k], identityOf: () => IDg, getUserTodos: () => null, log: () => { }, schedule: () => null, unschedule: () => { } });
+    const stashFn = (pe, w) => W.stash.push(w.text);
+    // the stand-in wrapper: its queue per conversation; `remove` takes the item out and hands the words back (mode-less)
+    W.pull = (cid, item, holder) => {
+      W.pulls.push(item);
+      if (!W.serves) return false;
+      const q = W.queue[cid] || [];
+      const i = q.findIndex((x) => x.id === item);
+      if (i < 0) return true;   // gone: it ran (the wrapper answers 'gone', nothing comes back)
+      const [it] = q.splice(i, 1);
+      W.q.noteHandedBack(cid, it.text, 'removed from the queue before it was delivered', stashFn);
+      W.q.noteQueue(cid, q.map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });
+      return true;
+    };
+    W.mkQ = (f) => qMod.create({ dataDir: dir, now: () => CLOCK, writer, readFile: (x) => { if (!(x in f)) { const e = new Error('none'); e.code = 'ENOENT'; throw e; } return f[x]; },
+      noteSpend: (rec) => W.g.note({ ...rec, now: CLOCK }), releaseSpend: (rec) => W.g.release({ ...rec, now: CLOCK }), reservationState: (rid) => W.g.reservationState(rid),
+      waitingReservations: () => W.g.waitingReservations(), waitingOverCap: () => W.g.waitingOverCap(CLOCK), pull: (cid, item, holder) => W.pull(cid, item, holder), stashHas: () => false, log: (...a) => W.logs.push(a.join(' ')) });
+    W.g = W.mkG(); W.q = W.mkQ({});
+    W.q.onHandedBack((cid, pe, x) => W.backs.push(x.reason || null));
+    W.restart = ({ tornLedger = false } = {}) => { W.g.flush(); if (tornLedger) fs.writeFileSync(path.join(dir, 'spend-budget.json'), '{"v":1,"budget":{"identit'); for (const [fl, pr] of Object.entries(producers)) files[fl] = pr(); W.g = W.mkG(); W.q = W.mkQ({ ...files }); W.q.onHandedBack((cid, pe, x) => W.backs.push(x.reason || null)); };
+    W.sendUnbound = (cid, text) => {   // a send whose queue item the hub has not seen listed yet
+      const v = W.g.authorize({ reason: 'peer-message', identity: IDg, now: CLOCK }); if (!v.ok) return { refused: v.why };
+      const e = W.q.noteWritten(cid, { charged: { reason: 'peer-message', identity: IDg, hold: v.hold }, text, holder: '4242' });
+      W.q.answer(e.id, { mode: 'queued' });
+      (W.queue[cid] = W.queue[cid] || []).push({ id: 'it-' + e.id, text });
+      return e;
+    };
+    W.send = (cid, text) => {   // the ladder's send behind a running turn + the wrapper's queue_changed
+      const v = W.g.authorize({ reason: 'peer-message', identity: IDg, now: CLOCK }); if (!v.ok) return { refused: v.why };
+      const e = W.q.noteWritten(cid, { charged: { reason: 'peer-message', identity: IDg, hold: v.hold }, text, holder: '4242' });
+      W.q.answer(e.id, { mode: 'queued' });
+      (W.queue[cid] = W.queue[cid] || []).push({ id: 'it-' + e.id, text });
+      W.q.noteQueue(cid, W.queue[cid].map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });
+      return e;
+    };
+    W.runNext = (cid) => { W.q.noteTurnEnded(cid); W.q.noteTurnStarted(cid); const it = (W.queue[cid] || []).shift(); if (it) W.ran.push(CLOCK); W.q.noteQueue(cid, (W.queue[cid] || []).map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true }); return it; };
+    W.spend = () => { const v = W.g.authorize({ reason: 'auto-resume', identity: IDg, now: CLOCK }); if (!v.ok) return v.why; W.g.note({ reason: 'auto-resume', identity: IDg, hold: v.hold, now: CLOCK }); W.ran.push(CLOCK); return true; };
+    W.counts = () => W.g.authorize({ reason: 'auto-resume', identity: IDg, hold: false, now: CLOCK }).counts;
+    W.maxIn = (win) => { const ts = W.ran.slice().sort((a, b) => a - b); let m = 0; for (let i = 0, j = 0; i < ts.length; i++) { while (j < ts.length && ts[j] < ts[i] + win) j++; m = Math.max(m, j - i); } return m; };
+    return W;
+  };
+  // ── (3) A NULL OR BLANK CAP STAYS A REFUSAL, SAID AS ITSELF ──
+  {
+    const rows = [null, '', '  ', undefined, 0, -1].map((x) => { const L = A.budgetLimits(() => x); return [x, L.perIdentityHour, (L.unset || []).includes('perIdentityHour')]; });
+    ok('§5g (3) budgetLimits: null / blank are 0 AND named unset; no setting (undefined) is the default; an explicit 0 is a 0 (not unset); garbage (-1) falls back as before',
+      JSON.stringify(rows) === JSON.stringify([[null, 0, true], ['', 0, true], ['  ', 0, true], [undefined, 30, false], [0, 0, false], [-1, 30, false]]), JSON.stringify(rows));
+    const L = A.budgetLimits((k) => (k === 'spend.unattendedPerIdentityHour' ? null : undefined));
+    const v = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IDg, state: A.emptyBudget(), limits: L });
+    ok('§5g (3) a null hour cap REFUSES (never the default 30) and the refusal says «no cap is set», not «set to 0»', v.ok === false && v.why === 'hour-cap' && v.capUnset === true && /no cap is set for unattended turns per identity per hour/.test(v.detail) && !/set to 0/.test(v.detail), v.detail);
+    const i = A.refusalI18n(v, { sessionName: 'ops' });
+    const doorKeys = i.detail.map((d) => d.key);
+    ok('§5g (3) …the notice reads its own row («no limit is set … — set a number») and the door that sets it, never «switched off — its limit is 0»',
+      /no limit is set for turns nobody typed on \{account\} — set a number/.test(i.text.key) && doorKeys.includes(A.DOOR_WORDS.unset) && !/switched off/.test(i.text.key), JSON.stringify(i.text));
+    const Li = A.budgetLimits((k) => (k === 'spend.unattendedPerInstanceDay' ? '' : undefined));
+    const vi = A.authorizeUnattendedSpend({ reason: 'peer-message', identity: IDg, state: A.emptyBudget(), limits: Li });
+    ok('§5g (3) a blank INSTANCE cap: refused, «on this instance»', vi.why === 'instance-cap' && /on this instance — set a number/.test(A.refusalI18n(vi, {}).text.key));
+    const { dictEntries } = await import('./i18n-extract.mjs');
+    const ZH = new Map([...dictEntries(read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntries(read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
+    const SSm = require(path.join(REPO, 'src/stash-summary.js'));
+    const toast = SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, capUnset: true, identity: IDg }, (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m)), {});
+    ok('§5g (3) the hand-over toast says it (no limit is set — set a number) with the Spending door; a 0 cap still says «switched off»',
+      /no limit is set for turns nobody typed on G: set a number in Settings → Spending/.test(toast.text) && toast.door === 'spending'
+        && /switched off/.test(SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, identity: IDg }, (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m)), {}).text), toast.text);
+    const keys = [...A.REFUSAL_WORDS['cap-unset'], ...A.REFUSAL_WORDS['cap-unset-instance'], A.DOOR_WORDS.unset, 'Not handed over — no limit is set for turns nobody typed on {account}: set a number in Settings → Spending. The notices keep waiting.', 'Not handed over — no limit is set for turns nobody typed on this instance: set a number in Settings → Spending. The notices keep waiting.', 'none — every turn nobody typed is held until a number is set'];
+    ok('§5g (3) every new sentence is in zh and ja', keys.every((k) => ZH.has(k) && JA.has(k)), keys.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
+    const m = mutantModule('src/spend-authorizer.js', [["    if (field && (v === null || (typeof v === 'string' && !v.trim()))) { unset.push(field); return 0; }\n", '']]);
+    ok('§5g (3) CONTROL: the release\'s reading re-applied to a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    if (!m.err) {
+      const Lm = m.mod.budgetLimits((k) => (k === 'spend.unattendedPerIdentityHour' ? null : undefined));
+      const vm = m.mod.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IDg, state: m.mod.emptyBudget(), limits: Lm });
+      ok('§5g (3) CONTROL: with it, a null cap is a SILENT 0 — «switched off … its limit is 0», no «no cap is set» — RED', Lm.perIdentityHour === 0 && !Lm.unset && /switched off/.test(m.mod.refusalI18n(vm, {}).text.key) && !/no cap is set/.test(vm.detail));
+    }
+  }
+  // ── (2) A CAP LOWERED BELOW WHAT ALREADY WAITS ──
+  for (const lowered of [2, 0]) {
+    const W = mkWorld({ 'spend.unattendedPerIdentityHour': 5 });
+    const t0 = W.now();
+    for (let i = 0; i < 5; i++) W.send('c1', 'l' + i);
+    W.settings['spend.unattendedPerIdentityHour'] = lowered;
+    W.q.rejudge();   // what the settings write's listener calls (wired below)
+    const c0 = W.counts();
+    W.setClock(t0 + 3 * HOUR); for (let i = 0; i < 5; i++) { W.runNext('c1'); W.adv(MIN); }
+    const keep = lowered;
+    ok(`§5g (2) cap 5 → ${lowered} with 5 waiting: the ${5 - keep} NEWEST are taken back out at once, their words ride the stash (never dropped), their units returned — the hour counts ${keep}`,
+      JSON.stringify(W.stash.slice().sort()) === JSON.stringify(['l0', 'l1', 'l2', 'l3', 'l4'].slice(keep)) && c0.hour === keep && c0.promisedHour === keep && W.backs.filter((r) => r === QWm.PULL_WHY).length === 5 - keep, JSON.stringify({ stash: W.stash, hour: c0.hour, backs: W.backs }));
+    ok(`§5g (2) …the frames left run inside the cap: worst hour of billed turns ${keep} (the release: 5)`, W.maxIn(HOUR) === keep && W.ran.length === keep, JSON.stringify({ worst: W.maxIn(HOUR), ran: W.ran.length }));
+  }
+  {
+    const W = mkWorld({ 'spend.unattendedPerIdentityHour': 5 }, { serves: false });
+    for (let i = 0; i < 3; i++) W.send('c1', 'n' + i);
+    W.settings['spend.unattendedPerIdentityHour'] = 1;
+    W.q.rejudge(); W.q.rejudge();
+    ok('§5g (2) an agent that serves no «remove»: nothing is lost or returned; said ONCE per frame in the journal («could not be asked back out now»), asked again later',
+      W.stash.length === 0 && W.counts().promisedHour === 3 && W.logs.filter((l) => /could not be asked back out now/.test(l)).length === 2, JSON.stringify(W.logs));
+  }
+  // THE WIRING: a settings write reaches the REAL ladder (server.js's own wiring: the verdict rides waitingReservations),
+  // which writes the wrapper's own remove verb for the bound item; the wrapper's answer is HELD in the stash — said as the
+  // spending ceiling's, and never evicted by the stash's cap (30) however many wait
+  const wiring = async ({ gMod = guardMod, dMod = deliverMod } = {}) => {
+    const dataDir = tmpdir('vs-spend-5g-wire-');
+    fs.mkdirSync(path.join(dataDir, 'session-buffers'), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'session-buffers', 'w1.json'), JSON.stringify({ caps: CURRENT_WRAPPER_CAPS }));
+    const settings = { 'spend.unattendedPerIdentityHour': 4 };
+    const guard = gMod.create({ dataDir, serverSetting: (k) => settings[k], identityOf: () => IDg, getUserTodos: () => null, log: () => { } });
+    const frames = [];
+    const S = { backend: 'codex', mode: 'chat', _webuiId: 'w1', backendSessionId: 'cid-1', _isStreaming: true, pty: { write: (x) => frames.push(String(x)) }, name: 'busy' };
+    const deliver = dMod.create({
+      dataDir, activeSessions: new Map([['w1', S]]),
+      peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) },
+      getHosts: () => null, getConvIndex: () => null, serverSetting: () => undefined, emitPeerCard: () => { },
+      authorizeSpend: (req) => guard.authorize(req), noteSpend: (rec) => guard.note(rec), releaseSpend: (rec) => guard.release(rec),
+      reservationState: (rid) => guard.reservationState(rid), waitingReservations: () => guard.waitingReservations(), log: () => { },
+    });
+    for (let i = 0; i < 30; i++) deliver.stashFor('cid-1', { source: 'agent', kind: 'peer', fromName: 'peer', text: 'older ' + i });   // a FULL stash
+    await deliver.deliverToConversation('cid-1', 'a waiting note', { kind: 'peer', spendReason: 'peer-message' });
+    deliver.settleRpcDelivery('cid-1', { ok: true, mode: 'queued' });
+    deliver.noteQueueItems('cid-1', [{ id: 'it-9', kind: 'peer' }], { fresh: true });
+    const before = frames.length;
+    settings['spend.unattendedPerIdentityHour'] = 0;
+    gMod.noteLimitsWritten({ perIdentityHour: 4 }, { perIdentityHour: 0 });
+    const asked = frames.slice(before).map((x) => { try { return JSON.parse(x); } catch { return null; } }).filter(Boolean);
+    if (asked.length) deliver.noteHandedBack('cid-1', 'a waiting note', 'removed from the queue before it was delivered');   // the wrapper's answer (codex-events)
+    const q = deliver.stashEntries('cid-1') || [];
+    return { asked, guard, q, frames: frames.slice(before) };
+  };
+  {
+    const w = await wiring();
+    ok('§5g (2) WIRING: the settings write\'s signal reaches the real ladder, which writes the wrapper\'s OWN remove verb for the bound item at once',
+      w.asked.length === 1 && w.asked[0].type === 'queue-op' && w.asked[0].op === 'remove' && w.asked[0].id === 'it-9', JSON.stringify(w.frames));
+    const held = w.q.filter((e) => e && e.text === 'a waiting note');
+    const SSh = require(path.join(REPO, 'src/stash-summary.js'));
+    ok('§5g (2) …its words are HELD in the stash and SAID as the spending ceiling\'s («the spending ceiling held them»), and a FULL stash (30) drops nothing for them — 31 entries, the oldest still there',
+      held.length === 1 && held[0].held && held[0].held.kind === 'spend-cap' && held[0].held.capHeld === true && SSh.HELD_WHY[SSh.heldKeyOf(held[0].held)] === 'the spending ceiling held them' && w.q.length === 31 && w.q.some((e) => e && e.text === 'older 0'), JSON.stringify({ n: w.q.length, held: held.map((e) => e.held) }));
+    ok('§5g (2) WIRING: src/routes/persistence.js writeSettings sends the signal (budgetLimits before and after) on every write', /function writeSettings\(data\) \{[\s\S]{0,2200}noteLimitsWritten\(spendOf\(prev\), spend\)/.test(read('src/routes/persistence.js')));
+    ok('§5g (2) WIRING: server.js wires the guard\'s waitingReservations into the ladder (its answer carries the verdict — server.js unchanged)', /waitingReservations: \(\) => spendGuard\.waitingReservations\(\)/.test(read('server.js')) && Array.isArray(w.guard.waitingReservations().overCap));
+    const mg = mutantModule('src/server/spend-guard.js', [["Object.defineProperty(rids, 'overCap', { get: () => overCapNow(Date.now()) }); ", '']]);
+    ok('§5g (2) CONTROL: the verdict taken off the guard\'s waitingReservations answer in a copy (the patch hit)', !mg.err && mg.hits === 1, mg.err || '');
+    if (!mg.err) { const wm = await wiring({ gMod: mg.mod }); ok('§5g (2) CONTROL: with it, the settings signal writes NO remove frame — the waiting frame would run past the cap — RED', wm.asked.length === 0, JSON.stringify(wm.frames)); }
+    const md = mutantModule('src/server/conversation-deliver.js', [['        if (!q[i] || q[i].ho || q[i].slot || capHeld(q[i]) || !pass(q[i])) { i++; continue; }', '        if (!q[i] || q[i].ho || q[i].slot || !pass(q[i])) { i++; continue; }'], ['    over -= q.filter((e) => capHeld(e) && !e.ho && !e.slot).length;\n', '']]);
+    ok('§5g (2) CONTROL: the held words\' exemption from the stash cap removed from a copy of the ladder (the patch hit)', !md.err && md.hits === 2, md.err || '');
+    if (!md.err) { const wd = await wiring({ dMod: md.mod }); ok('§5g (2) CONTROL: with it, the full stash EVICTS the oldest entry to make room — a drop — RED', wd.q.length === 30 && !wd.q.some((e) => e && e.text === 'older 0'), String(wd.q.length)); }
+  }
+  {   // ASKED THE MOMENT IT CAN BE: a frame the hub could not yet name (no listing) is not paused once its item binds
+    const W = mkWorld({ 'spend.unattendedPerIdentityHour': 5 });
+    W.sendUnbound('c1', 'u0');
+    W.settings['spend.unattendedPerIdentityHour'] = 0;
+    W.q.rejudge();
+    const pulledBefore = W.pulls.length;
+    W.q.noteQueue('c1', W.queue.c1.map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });   // its item binds now
+    ok('§5g (2) a frame not yet bound when the cap drops is asked back out the MOMENT its item binds (no 60 s pause for a take-back never sent)',
+      pulledBefore === 0 && W.pulls.length === 1 && W.stash.length === 1 && W.stash[0] === 'u0', JSON.stringify({ pulledBefore, pulls: W.pulls, stash: W.stash }));
+    const m = mutantModule('src/server/queued-wakes.js', [['      delete e.pulled;   // never asked ⇒ no pause', '      e.pulled.asked = false;   // never asked ⇒ no pause']]);
+    ok('§5g (2) CONTROL: the pause kept for a take-back never sent, in a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    if (!m.err) {
+      const Wm = mkWorld({ 'spend.unattendedPerIdentityHour': 5 }, { qMod: m.mod });
+      Wm.sendUnbound('c1', 'u0'); Wm.settings['spend.unattendedPerIdentityHour'] = 0; Wm.q.rejudge();
+      Wm.q.noteQueue('c1', Wm.queue.c1.map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });
+      ok('§5g (2) CONTROL: with it, the bound frame is NOT asked for 60 s — the turn may end and run it past the cap — RED', Wm.pulls.length === 0 && Wm.stash.length === 0);
+    }
+  }
+  {   // B-3b0f × (2): the ledger unreadable after a restart — no wait can be judged, every waiting frame is held
+    const W = mkWorld({ 'spend.unattendedPerIdentityHour': 5 });
+    for (let i = 0; i < 3; i++) W.send('c1', 'r' + i);
+    W.restart({ tornLedger: true });
+    W.q.noteQueue('c1', W.queue.c1.map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });   // the attach's queue-resync
+    ok('§5g (2) × B-3b0f: after a restart the ledger cannot be read — every frame still waiting is taken back out (held, never run uncounted)',
+      W.g.snapshot().ledgerUnreadable !== null && JSON.stringify(W.g.waitingOverCap()) === '["*"]' && W.stash.length === 3 && W.queue.c1.length === 0, JSON.stringify({ stash: W.stash, left: W.queue.c1.length }));
+  }
+  {
+    const m = mutantModule('src/server/queued-wakes.js', [["    if (!verdict) return 0;\n    let rids = [];", "    if (true) return 0;\n    let rids = [];"]]);
+    ok('§5g (2) CONTROL: the re-judge removed from a copy of queued-wakes (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    if (!m.err) {
+      const W = mkWorld({ 'spend.unattendedPerIdentityHour': 5 }, { qMod: m.mod });
+      const t0 = W.now();
+      for (let i = 0; i < 5; i++) W.send('c1', 'l' + i);
+      W.settings['spend.unattendedPerIdentityHour'] = 2; W.q.rejudge();
+      W.setClock(t0 + 3 * HOUR); for (let i = 0; i < 5; i++) { W.runNext('c1'); W.adv(MIN); }
+      ok('§5g (2) CONTROL: with it, 5 run in one hour at cap 2 (the reader\'s d8 ⑦) — RED', W.maxIn(HOUR) === 5 && W.stash.length === 0, String(W.maxIn(HOUR)));
+    }
+  }
+  // ── (1) A FRAME THE HUB GAVE UP ON ──
+  {   // ③b with the take-back: aged out at 7 days while its agent still lists it ⇒ taken back out, its words kept, it never runs
+    const W = mkWorld({ 'spend.unattendedPerIdentityHour': 2 });
+    const t0 = W.now(); W.send('c1', 'z');
+    W.setClock(t0 + 7 * DAY + SEC); W.q.ageOut();
+    W.adv(MIN); W.runNext('c1');
+    ok('§5g (1) AGED OUT while its agent still lists it: taken back out at once — its words ride the stash, it never runs, nothing is left watched',
+      W.ran.length === 0 && W.stash.length === 1 && W.stash[0] === 'z' && W.q.goneFor('c1').length === 0 && W.queue.c1.length === 0, JSON.stringify({ ran: W.ran.length, stash: W.stash, gone: W.q.goneFor('c1') }));
+  }
+  const scene3b = (opts) => {   // the reader's d8 ③b, with an agent that cannot take it back: it runs — counted where it ran
+    const W = mkWorld({ 'spend.unattendedPerIdentityHour': 2 }, opts);
+    const t0 = W.now(); W.send('c1', 'z');
+    W.setClock(t0 + 7 * DAY + SEC); W.q.ageOut();   // its unit counted where the hub stopped waiting…
+    W.adv(2 * HOUR); const s1 = W.spend();          // …two hours later its agent's turn ends:
+    W.adv(MIN); W.runNext('c1'); W.adv(MIN); const s2 = W.spend(); const s3 = W.spend();
+    return { W, s1, s2, s3 };
+  };
+  {
+    const { W, s1, s2, s3 } = scene3b({ serves: false });
+    ok('§5g (1) AGED OUT, no take-back (the reader\'s ③b): it runs two hours after the give-up and is COUNTED WHERE IT RAN — the next spend is refused, worst hour 2 at cap 2 (the release: 3)',
+      s1 === true && s2 === 'hour-cap' && s3 === 'hour-cap' && W.maxIn(HOUR) === 2 && W.counts().hour === 2 && /ran in its agent after all — counted where it ran/.test(W.logs.join('\n')), JSON.stringify({ s1, s2, s3, worst: W.maxIn(HOUR), hour: W.counts().hour }));
+  }
+  {   // an UNBOUND frame (no queue item the hub could name) aged out: nothing can watch it — its unit is counted where the hub stopped
+    const W = mkWorld({ 'spend.unattendedPerIdentityHour': 2 });
+    const t0 = W.now(); W.sendUnbound('c1', 'q');
+    W.setClock(t0 + 7 * DAY + SEC);
+    const before = W.counts().hour;
+    W.q.ageOut();
+    ok('§5g (1) an UNBOUND frame aged out is COUNTED where the hub stopped waiting (its 7-day stamp counted in no window) — it may still run',
+      before === 0 && W.counts().hour === 1 && W.q.goneFor('c1').length === 0, JSON.stringify({ before, after: W.counts().hour }));
+    const m = mutantModule('src/server/queued-wakes.js', [["      if (!live(e) || !e.reserved) continue;\n      // idempotent by its id", "      continue;\n      // idempotent by its id"]]);
+    ok('§5g (1) CONTROL: the count at the give-up removed from a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    if (!m.err) {
+      const Wm = mkWorld({ 'spend.unattendedPerIdentityHour': 2 }, { qMod: m.mod });
+      const tm = Wm.now(); Wm.sendUnbound('c1', 'q'); Wm.setClock(tm + 7 * DAY + SEC); Wm.q.ageOut();
+      ok('§5g (1) CONTROL: with it, the aged-out frame is counted NOWHERE (0 this hour) — RED', Wm.counts().hour === 0);
+    }
+  }
+  {
+    const JL = await import(path.join(REPO, 'src/lib/jobs-layout.js'));
+    const { dictEntries } = await import('./i18n-extract.mjs');
+    const ZH = new Map([...dictEntries(read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntries(read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
+    const fill = (str, p) => String(str).replace(/\{(\w+)\}/g, (mm, x) => (p && p[x] !== undefined ? String(p[x]) : mm));
+    const words = JL.heldText({ total: 2, byConversation: { c: { count: 2, reason: { kind: 'spend-cap', why: 'hour-cap', cap: 0, capUnset: true, identity: 'G' }, kinds: { 'spend-cap': 2 } } } }, { t: fill, cid: 'c' });
+    const zero = JL.heldText({ total: 2, byConversation: { c: { count: 2, reason: { kind: 'spend-cap', why: 'hour-cap', cap: 0, identity: 'G' }, kinds: { 'spend-cap': 2 } } } }, { t: fill, cid: 'c' });
+    const jobs = read('src/jobs.js');
+    ok('§5g (3) Background Work\'s held line says an EMPTY cap as itself («no limit is set … — set a number»), never «hourly ceiling (0)»; a real 0 still says (0); the held record carries the flag; zh / ja',
+      /no limit is set for turns nobody typed — set a number/.test(words) && !/ceiling \(0\)/.test(words) && /ceiling \(0\)/.test(zero) && /if \(r\.capUnset === true\) out\.capUnset = true;/.test(jobs) && ZH.has('no limit is set for turns nobody typed — set a number') && JA.has('no limit is set for turns nobody typed — set a number'), words);
+  }
+  const scene4 = (opts) => {   // the reader's d8 ④: the hub restarts, reads the holder dead (it is alive), then the agent re-states its queue
+    const W = mkWorld({ 'spend.unattendedPerIdentityHour': 3 }, opts);
+    const t0 = W.now();
+    for (let i = 0; i < 3; i++) W.send('c1', 'b' + i);
+    W.restart();
+    const settled = W.q.bootSettle('c1', { alive: () => false, converted: (id) => W.g.reservationState(id), stash: (pe, w) => W.stash.push(w.text) });
+    W.q.noteQueue('c1', W.queue.c1.map((x) => ({ id: x.id, kind: 'peer' })), '4242', { fresh: true });   // the attach's queue-resync
+    W.setClock(t0 + 2 * HOUR); const spent = (() => { let n = 0; while (n < 10 && W.spend() === true) n++; return n; })();
+    for (let i = 0; i < 3; i++) { W.runNext('c1'); W.adv(MIN); }
+    return { W, settled, spent };
+  };
+  {
+    const { W, settled, spent } = scene4({});
+    ok('§5g (1) JUDGED GONE AT BOOT, alive after all (the reader\'s ④): its re-stated queue lists the three ⇒ each taken back out — none runs; the words wait ONCE (the three marked copies, never six)',
+      JSON.stringify(settled) === JSON.stringify(['unknown', 'unknown', 'unknown']) && W.queue.c1.length === 0 && W.ran.length === spent && spent === 3 && W.maxIn(HOUR) === 3 && W.stash.length === 3 && W.stash.every((x) => x.startsWith(QWm.REPEAT_HEAD)) && W.q.goneFor('c1').length === 0,
+      JSON.stringify({ settled, ran: W.ran.length, spent, worst: W.maxIn(HOUR), stash: W.stash.length, gone: W.q.goneFor('c1').length }));
+  }
+  {
+    const { W, spent } = scene4({ serves: false });
+    ok('§5g (1) …and with an agent that cannot take them back: they run — each COUNTED WHERE IT RAN (the hour holds the three spends and the three runs, and refuses the next)',
+      spent === 3 && W.counts().hour === 6 && W.spend() === 'hour-cap' && W.logs.filter((l) => /counted where it ran/.test(l)).length === 3, JSON.stringify({ spent, hour: W.counts().hour, logs: W.logs.filter((l) => /counted/.test(l)) }));
+  }
+  {
+    const m = mutantModule('src/server/queued-wakes.js', [["    if (!e || !Array.isArray(e.bind) || !e.bind.length) return;   // no queue item known", "    if (true) return;   // no queue item known"]]);
+    ok('§5g (1) CONTROL: the give-up record removed from a copy of queued-wakes (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    if (!m.err) {
+      const { W, s2 } = scene3b({ serves: false, qMod: m.mod });
+      ok('§5g (1) CONTROL: with it, the frame stays counted at the give-up, two hours back — its run\'s hour is free: the next spend is allowed, worst hour 3 at cap 2 — RED', s2 === true && W.maxIn(HOUR) === 3, JSON.stringify({ s2, worst: W.maxIn(HOUR) }));
+    }
+    const ma = mutantModule('src/spend-authorizer.js', [['if (waitingStamp(t) || (!drain && t.end && !t.ran)) t.ran = at;', 'if (waitingStamp(t)) t.ran = at;']]);
+    ok('§5g (1) CONTROL: the guard\'s «counted where it ran» for a given-up stamp removed from a copy of the authorizer (the patch hit)', !ma.err && ma.hits === 1, ma.err || '');
+    if (!ma.err) {
+      let st = ma.mod.noteUnattendedSpend(ma.mod.emptyBudget(), { identity: IDg, reason: 'peer-message', rid: 'qw-e', at: 1000, limits: ma.mod.BUDGET_DEFAULTS }).state;
+      st = ma.mod.noteUnattendedSpend(st, { identity: IDg, reason: 'peer-message', rid: 'qw-e', ended: true, at: 2000, limits: ma.mod.BUDGET_DEFAULTS }).state;
+      const runAt = 2000 + 5 * HOUR;
+      const realSt = A.noteUnattendedSpend(JSON.parse(JSON.stringify(st)), { identity: IDg, reason: 'peer-message', rid: 'qw-e', carried: true, at: runAt, limits: A.BUDGET_DEFAULTS }).state;
+      const mutSt = ma.mod.noteUnattendedSpend(JSON.parse(JSON.stringify(st)), { identity: IDg, reason: 'peer-message', rid: 'qw-e', carried: true, at: runAt, limits: ma.mod.BUDGET_DEFAULTS }).state;
+      ok('§5g (1) CONTROL: a given-up stamp seen running 5 h later — the real guard counts it in the run\'s hour, the copy leaves it in the give-up hour (the run\'s hour free) — RED',
+        A.spendCounts(realSt, IDg.key, runAt + 1).hour === 1 && ma.mod.spendCounts(mutSt, IDg.key, runAt + 1).hour === 0);
+    }
+  }
 }
 
 // ── §5d AUTHORIZE AND CHARGE ARE NOT ONE INSTANT (r5) ───────────────────────

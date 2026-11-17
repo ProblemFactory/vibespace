@@ -336,7 +336,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
           : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-handover', fromName: FROM_NAME, cardText });
       } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
       if (!r || !r.ok) {
-        if (r && r.refused === 'spend') return { ok: false, code: 'spend_refused', id, error: r.reason || 'the spend ceiling refused this turn', why: r.why || null, retryAfter: r.retryAfter || 0, identity: r.identity || null, cap: r.cap == null ? null : r.cap };
+        if (r && r.refused === 'spend') return { ok: false, code: 'spend_refused', id, error: r.reason || 'the spend ceiling refused this turn', why: r.why || null, retryAfter: r.retryAfter || 0, identity: r.identity || null, cap: r.cap == null ? null : r.cap, ...(r.capUnset ? { capUnset: true } : {}) };
         if (r && (r.refused === 'wrapper-no-steer' || r.refused === 'no-wake')) return { ok: false, code: 'held_for_next_turn', id, error: r.reason || 'held for the conversation’s next prompt' };
         return { ok: false, code: 'unreachable', id, error: (r && r.reason) || 'the agent could not be reached — the notices keep waiting for its next turn' };
       }

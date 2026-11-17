@@ -974,6 +974,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // side effect is the Integration master switch — everything else is read
     // lazily via readSettings. Never let a callback failure break the write.
     try { onSettingsWrite?.(data, prev); } catch (e) { console.warn('[settings] change callback failed:', e.message); }
+    try { require('../server/spend-guard.js').noteLimitsWritten(spendOf(prev), spend); } catch { }   // B-0a33 (2): waiting frames re-judged at once
     return spend;
   }
 

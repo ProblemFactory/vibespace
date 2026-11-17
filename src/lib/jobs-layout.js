@@ -189,7 +189,8 @@ export function heldText(digest, { t, cid = null } = {}) {
   if (kind === 'spend-cap') {
     const who = (reason && reason.identity) || tr('this account');
     const cap = reason && reason.cap != null ? reason.cap : null;
-    const scope = reason && reason.why === 'day-cap' ? tr('{who}’s daily ceiling{cap} reached', { who, cap: cap != null ? ` (${cap})` : '' })
+    const scope = reason && reason.capUnset === true ? tr('no limit is set for turns nobody typed — set a number')   // B-0a33 (3)
+      : reason && reason.why === 'day-cap' ? tr('{who}’s daily ceiling{cap} reached', { who, cap: cap != null ? ` (${cap})` : '' })
       : reason && reason.why === 'instance-cap' ? tr('the instance ceiling{cap} reached', { cap: cap != null ? ` (${cap})` : '' })
       : tr('{who}’s hourly ceiling{cap} reached', { who, cap: cap != null ? ` (${cap})` : '' });
     why = scope + '; ' + tr('delivered with the conversation’s next prompt') + ' · ' + tr('Settings → Spending');
