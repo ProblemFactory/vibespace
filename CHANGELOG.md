@@ -27,6 +27,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Turning the phone no longer opens the conversation list; it stays as you left it.
 - A window's tabs stay on screen with their names when the phone is turned sideways; many tabs scroll instead of shrinking to icons.
 - On a phone the window list keeps each window's name readable: a full row shortens its billing tag, then moves «Split» and the tag into its ⋯ menu.
+- In the sidebar's Plugins, Background Work and Agents panels, names stay whole and buttons keep their words together, even at the narrowest sidebar.
+- After you forward a port, the Ports panel no longer shows its forwards and machines twice.
+- A checkbox in a dialog now sits at the left of its words, in the vault's paste dialog and the two publish dialogs too.
+- In «Send a message on …», a recipient's name no longer breaks into one character per line.
+- Pressing Install during the welcome tour now shows the install window instead of opening it behind the tour.
+- When a file you are editing changes on disk, the editor shows «File changed on disk» in full, on a phone too.
+- In the sidebar's System panel each memory figure stays whole on its own line, and a long account name in the Agents panel shows in full when you point at it.
 
 ## 2.369.407 — 2026-11-17
 
