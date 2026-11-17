@@ -197,8 +197,57 @@ try {
   r = probe(b.plan, 'unlock');
   check('Unlock answers the objects, no prompt, never locked', r.unlock && r.unlock.ok && r.unlock.value.unlocked === 1 && r.unlock.value.locked.join() === 'false');
   const store = path.join(appDir, 'portal', M.SECRETS_STORE_FILE);
+  // B-694d: ONE read is the right read — the service answers a store only after the sealer renamed the new file in
+  // (secret-service.py Store.save). The plaintext is looked for OUTSIDE the ciphertext: the ciphertext is base64, where
+  // a three-letter word turns up by chance (/ann/ matched 0.22 % of correctly sealed files — the .390 cut's one red);
+  // the ciphertext is judged by what it is: iv.tag.data that opens with this display's key to the two items
+  const PLAIN = /s3cr3t|pw-two|ann|a\.example/, keyBuf = Buffer.from(facts.keyHex, 'hex');
+  const opened = (o) => { try { return JSON.parse(SB.decWith(keyBuf, o.sealed)); } catch { return null; } };
+  const sealedOk = (text) => { let o; try { o = JSON.parse(text); } catch { return false; } const items = opened(o); return Object.keys(o).sort().join() === 'n,sealed,v' && o.n === 2 && SB.BOX_CIPHERTEXT_RE.test(o.sealed) && Array.isArray(items) && items.length === 2 && !PLAIN.test(JSON.stringify({ ...o, sealed: '' })); };
   const sealed = fs.readFileSync(store, 'utf8');
-  check('ONE sealed file, 0600, n = 2, no plaintext secret or attribute', JSON.parse(sealed).n === 2 && (fs.statSync(store).mode & 0o777) === 0o600 && !/s3cr3t|pw-two|ann|a\.example/.test(sealed));
+  check('ONE sealed file, 0600, n = 2, the two items under this display\'s key, no plaintext secret or attribute outside the ciphertext', sealedOk(sealed) && (fs.statSync(store).mode & 0o777) === 0o600, sealed.slice(0, 120));
+  const items2 = opened(JSON.parse(sealed)) || [];
+  let annBlob = '';
+  for (let i = 0; i < 100000 && !annBlob; i++) { const t = JSON.stringify({ v: 1, n: 2, sealed: SB.encWith(keyBuf, JSON.stringify(items2)) }); if (/ann/.test(t)) annBlob = t; }
+  check('RED control: a CORRECT sealed file whose ciphertext holds «ann» by chance ⇒ the old whole-file regex reds it, the shape check takes it', !!annBlob && PLAIN.test(annBlob) && sealedOk(annBlob), annBlob.slice(0, 120));
+  check('RED control: the same items in CLEARTEXT (as the sealed field, or beside it) ⇒ the shape check reds', !sealedOk(JSON.stringify({ v: 1, n: 2, sealed: JSON.stringify(items2) })) && !sealedOk(JSON.stringify({ ...JSON.parse(sealed), items: items2 })));
+  // B-694d, the product's side: EVERY writer whose seal FAILS is answered with an error by name and changes nothing in
+  // memory — never «stored» (or «deleted», «forgotten») over bytes that are not on the disk. The fault: a DIRECTORY where
+  // the file goes ⇒ the sealer's rename fails (EISDIR — for root too, where a read-only dir would not refuse)
+  const faulted = async (fn) => {
+    fs.renameSync(store, `${store}.keep`); fs.mkdirSync(path.join(store, 'x'), { recursive: true });
+    try { return await fn(); } finally { fs.rmSync(store, { recursive: true, force: true }); fs.renameSync(`${store}.keep`, store); }
+  };
+  const refused = (x) => !!(x && !x.ok && /could not be written — nothing was stored or changed/.test(x.error || ''));
+  /** the four writers under the fault, on a service that holds ann (= `was`): replace, delete, a NEW item, Forget all */
+  async function faultLegs(bb, was) {
+    const rp = await faulted(() => probe(bb.plan, 'store', 'pw-refused'));
+    const rd = await faulted(() => probe(bb.plan, 'delete'));
+    const all0 = (probe(bb.plan, 'search')['search-secrets'] || {}).value;
+    probe(bb.plan, 'delete');   // (no fault) ann is gone — the next store under the fault is a NEW item
+    const rn = await faulted(() => probe(bb.plan, 'store', 'pw-refused'));
+    probe(bb.plan, 'store', was);   // (no fault) ann is back
+    const fg = await faulted(() => D.forgetAppSecrets({ rec: { secrets: 'on' }, dir: appDir, env }));
+    const all1 = (probe(bb.plan, 'search')['search-secrets'] || {}).value;
+    return {
+      replace: refused(rp.store) && rp.lookup && rp.lookup.value === was,
+      delete: refused(rd.delete) && rd['lookup-after-delete'] && rd['lookup-after-delete'].value === was,
+      create: refused(rn.store) && rn.lookup && rn.lookup.value === null,
+      forget: !fg.ok && fg.via === 'bus' && /nothing was forgotten/.test(fg.why || '') && JSON.stringify(all1) === JSON.stringify(all0),
+      seen: { rp, rd, rn, fg, all0, all1 },
+    };
+  }
+  const fl = await faultLegs(b, 'pw-one-s3cr3t');
+  check('a REPLACE whose seal fails ⇒ an error by name; the item keeps its old value', fl.replace, JSON.stringify(fl.seen.rp));
+  check('a DELETE whose seal fails ⇒ an error by name; the item is still there', fl.delete, JSON.stringify(fl.seen.rd));
+  check('a NEW item whose seal fails ⇒ an error by name; nothing is stored', fl.create, JSON.stringify(fl.seen.rn));
+  check('Forget all whose seal fails ⇒ refused by name over the bus (the hub removes no file behind a service that still holds the items); nothing forgotten', fl.forget, JSON.stringify(fl.seen.fg) + ' ' + JSON.stringify([fl.seen.all0, fl.seen.all1]));
+  r = probe(b.plan, 'store', 'pw-one-s3cr3t');
+  check('… and the service goes on: the next store is sealed (n = 2, the same items)', r.store && r.store.ok && sealedOk(fs.readFileSync(store, 'utf8')), JSON.stringify(r.store));
+  const sealSrc = fs.readFileSync(path.join(ROOT, 'src/app-secrets-seal.js'), 'utf8');
+  const syncedFirst = (x) => { const f = x.indexOf(' fs.fsyncSync(fd);'), rn = x.indexOf('fs.renameSync(tmp, file);'); return f > 0 && rn > f; };
+  check('the sealer fsyncs the temp file BEFORE its rename — «stored» is answered after the sealer exits, so the bytes are on the disk', syncedFirst(sealSrc));
+  check('RED control: a sealer copy without that fsync ⇒ the order check is red', !syncedFirst(sealSrc.replace(' fs.fsyncSync(fd);', '')));
   const pids = execFileSync('ps', ['-s', String(b.child.pid), '-o', 'pid='], { encoding: 'utf8' }).trim().split(/\s+/);
   const argvs = pids.map((p) => { try { return fs.readFileSync(`/proc/${p}/cmdline`, 'utf8'); } catch { return ''; } }).join('\n');
   check('the service runs in the bus\'s session; no key or secret in any argv', /secret-service\.py/.test(argvs) && !argvs.includes(facts.keyHex) && !argvs.includes('s3cr3t'));
@@ -250,6 +299,25 @@ try {
   await stopBus(b);
   const mlog = fs.readFileSync(path.join(appDir, 'app.log'), 'utf8');
   check('MUTANT (the service logs a secret) ⇒ the no-secret-in-log check is RED', /pw-mutant-s3cr3t/.test(mlog));
+  // B-694d's RED control: every writer in its .407 shape (memory changed, the seal's answer ignored, ok answered) ⇒ each
+  // of the four fault legs is RED on its own writer
+  const mut2 = path.join(tmp, 'secret-service-unsealed.py');
+  let src2 = src;
+  for (const [a, z] of [
+    ["                if not S.save({**S.items, n: val}): return err(FAILED, NOT_WRITTEN)\n                emit(conn, 'ItemChanged', item_path(n))", "                S.items[n] = val; S.save(); emit(conn, 'ItemChanged', item_path(n))"],
+    ["                n = S.next; val['created'] = now\n                if not S.save({**S.items, n: val}): return err(FAILED, NOT_WRITTEN)\n                S.next += 1; register_item(conn, n)", "                n = S.next; S.next += 1; val['created'] = now; S.items[n] = val; S.save(); register_item(conn, n)"],
+    ["            if not S.save({k: v for k, v in S.items.items() if k != n}): return err(FAILED, NOT_WRITTEN)\n            drop_item(conn, n); emit(conn, 'ItemDeleted', path)", "            drop_item(conn, n); S.save(); emit(conn, 'ItemDeleted', path)"],
+    ["            if not S.save({}): return err(FAILED, NOT_WRITTEN)\n            for n in ns: drop_item(conn, n); emit(conn, 'ItemDeleted', item_path(n))\n            say(", "            for n in ns: drop_item(conn, n); emit(conn, 'ItemDeleted', item_path(n))\n            S.save(); say("],
+  ]) { if (!src2.includes(a)) throw new Error('the .407-shape mutant anchor moved: ' + a.slice(0, 60)); src2 = src2.replace(a, z); }
+  fs.writeFileSync(mut2, src2);
+  b = await startBus('on', mut2);
+  probe(b.plan, 'lookup');   // the bus activates the service now — a service started over the fault refuses to start (it opens the store)
+  const fl2 = await faultLegs(b, 'pw-mutant-s3cr3t');
+  await stopBus(b);
+  check('RED control (every writer in its .407 shape): the replace leg is RED — ok answered, the new value served', !fl2.replace && fl2.seen.rp.store && fl2.seen.rp.store.ok && fl2.seen.rp.lookup.value === 'pw-refused', JSON.stringify(fl2.seen.rp));
+  check('RED control: the delete leg is RED — ok answered, the item gone from memory', !fl2.delete && fl2.seen.rd.delete && fl2.seen.rd.delete.ok, JSON.stringify(fl2.seen.rd));
+  check('RED control: the new-item leg is RED — ok answered, the item served', !fl2.create && fl2.seen.rn.store && fl2.seen.rn.store.ok, JSON.stringify(fl2.seen.rn));
+  check('RED control: the Forget-all leg is RED — the service said forgotten while its file kept the items', !fl2.forget && fl2.seen.fg.ok === true, JSON.stringify(fl2.seen.fg));
 } finally {
   for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } }
   fs.rmSync(tmp, { recursive: true, force: true });

@@ -24,6 +24,7 @@ BASE = '/org/freedesktop/secrets'
 COL = BASE + '/collection/login'
 ALIAS = BASE + '/aliases/default'
 NOT_SUPPORTED, NO_OBJECT, NO_SESSION = 'org.freedesktop.DBus.Error.NotSupported', 'org.freedesktop.Secret.Error.NoSuchObject', 'org.freedesktop.Secret.Error.NoSession'
+FAILED, NOT_WRITTEN = 'org.freedesktop.DBus.Error.Failed', 'the sealed store could not be written — nothing was stored or changed'
 LABEL, ATTRS = 'org.freedesktop.Secret.Item.Label', 'org.freedesktop.Secret.Item.Attributes'
 XML = '''<node>
 <interface name="org.freedesktop.Secret.Service">
@@ -83,8 +84,12 @@ def take_key(path):
     return (key, '') if len(key) == 64 and all(c in '0123456789abcdef' for c in key) else ('', 'the key file is not 64 hex')
 
 def sealer(mode, data=None):
-    # the key reaches the sealer over a PIPE (its fd number in VS_APP_SECRETS_FD), never that child's environ
-    r, w = os.pipe()
+    # the key reaches the sealer over a PIPE (its fd number in VS_APP_SECRETS_FD), never that child's environ. B-694d: a sealer
+    # that could not run at all (no fd, no fork, a timeout) is an exit code the caller is answered with, never an exception
+    try:
+        r, w = os.pipe()
+    except OSError:
+        return subprocess.CompletedProcess([NODE, SEALER, mode, STORE], 125, b'', b'')
     try:
         os.write(w, KEY.encode('ascii'))
     finally:
@@ -92,6 +97,10 @@ def sealer(mode, data=None):
     env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'VS_APP_SECRETS_FD': str(r)}
     try:
         return subprocess.run([NODE, SEALER, mode, STORE], input=data, capture_output=True, env=env, pass_fds=(r,), timeout=20)
+    except subprocess.TimeoutExpired:  # a sealer that never answered wrote nothing a caller may be told about (B-694d)
+        return subprocess.CompletedProcess([NODE, SEALER, mode, STORE], 124, b'', b'')
+    except (OSError, subprocess.SubprocessError):
+        return subprocess.CompletedProcess([NODE, SEALER, mode, STORE], 125, b'', b'')
     finally:
         os.close(r)
 
@@ -107,10 +116,14 @@ class Store:
         else:
             for it in json.loads(r.stdout.decode('utf-8') or '[]'):
                 self.items[self.next] = it; self.next += 1
-    def save(self):
-        r = sealer('seal', json.dumps(list(self.items.values())).encode('utf-8'))
+    def save(self, items=None):
+        # B-694d: every writer answers its caller only AFTER this — True once the sealer renamed the new file in (the reply
+        # waits for the atomic rename); False = the file on disk is the old one, so the items in memory stay the old ones
+        # too and the caller is told nothing was stored (never «stored» over bytes that are not sealed)
+        items = self.items if items is None else items
+        r = sealer('seal', json.dumps(list(items.values())).encode('utf-8'))
         if r.returncode != 0: say('the sealed store was not written (sealer exit %d)' % r.returncode); return False
-        self.modified = int(time.time()); return True
+        self.items = items; self.modified = int(time.time()); return True
     def match(self, attrs):
         return [n for n, it in sorted(self.items.items()) if all(it['attributes'].get(k) == v for k, v in attrs.items())]
 
@@ -167,8 +180,9 @@ def on_call(conn, sender, path, iface, method, params, inv):
         if method == 'Count': return ok('(u)', len(S.items))
         if method == 'ForgetAll':
             ns = list(S.items)
+            if not S.save({}): return err(FAILED, NOT_WRITTEN)
             for n in ns: drop_item(conn, n); emit(conn, 'ItemDeleted', item_path(n))
-            S.save(); say('forgot all (%d)' % len(ns)); return ok('(u)', len(ns))
+            say('forgot all (%d)' % len(ns)); return ok('(u)', len(ns))
     if iface == 'org.freedesktop.Secret.Collection':
         if method == 'Delete': return err(NOT_SUPPORTED, 'the default collection cannot be deleted')
         if method == 'SearchItems': return ok('(ao)', [item_path(n) for n in S.match(a[0])])
@@ -180,21 +194,27 @@ def on_call(conn, sender, path, iface, method, params, inv):
             now = int(time.time())
             val = {'label': str(props.get(LABEL) or ''), 'attributes': attrs, 'secret': base64.b64encode(bytes(sec[2])).decode('ascii'), 'content_type': sec[3] or 'text/plain', 'modified': now}
             if same:
-                n = same[0]; val['created'] = S.items[n].get('created', now); S.items[n] = val; S.save(); emit(conn, 'ItemChanged', item_path(n))
+                n = same[0]; val['created'] = S.items[n].get('created', now)
+                if not S.save({**S.items, n: val}): return err(FAILED, NOT_WRITTEN)
+                emit(conn, 'ItemChanged', item_path(n))
             else:
-                n = S.next; S.next += 1; val['created'] = now; S.items[n] = val; S.save(); register_item(conn, n); emit(conn, 'ItemCreated', item_path(n))
+                n = S.next; val['created'] = now
+                if not S.save({**S.items, n: val}): return err(FAILED, NOT_WRITTEN)
+                S.next += 1; register_item(conn, n); emit(conn, 'ItemCreated', item_path(n))
             return ok('(oo)', item_path(n), '/')
     if iface == 'org.freedesktop.Secret.Item':
         n = item_of(path)
         if n is None: return err(NO_OBJECT, 'no such item')
         if method == 'Delete':
-            drop_item(conn, n); S.save(); emit(conn, 'ItemDeleted', path); return ok('(o)', '/')
+            if not S.save({k: v for k, v in S.items.items() if k != n}): return err(FAILED, NOT_WRITTEN)
+            drop_item(conn, n); emit(conn, 'ItemDeleted', path); return ok('(o)', '/')
         if method == 'GetSecret':
             if a[0] not in SESSIONS: return err(NO_SESSION, 'no such session')
             return ok('((oayays))', secret_of(n, a[0]))
         if method == 'SetSecret':
-            S.items[n]['secret'] = base64.b64encode(bytes(a[0][2])).decode('ascii'); S.items[n]['content_type'] = a[0][3] or 'text/plain'
-            S.items[n]['modified'] = int(time.time()); S.save(); emit(conn, 'ItemChanged', path); return ok('()')
+            it = dict(S.items[n], secret=base64.b64encode(bytes(a[0][2])).decode('ascii'), content_type=a[0][3] or 'text/plain', modified=int(time.time()))
+            if not S.save({**S.items, n: it}): return err(FAILED, NOT_WRITTEN)
+            emit(conn, 'ItemChanged', path); return ok('()')
     if iface == 'org.freedesktop.Secret.Session' and method == 'Close':
         SESSIONS.discard(path); return ok('()')
     return err(NOT_SUPPORTED, '%s.%s is not supported' % (iface, method))
@@ -213,7 +233,9 @@ def on_get(conn, sender, path, iface, prop):
 def on_set(conn, sender, path, iface, prop, value):
     n = item_of(path)
     if n is None or prop not in ('Label', 'Attributes'): return False
-    S.items[n]['label' if prop == 'Label' else 'attributes'] = value.unpack(); S.save(); emit(conn, 'ItemChanged', path); return True
+    it = dict(S.items[n]); it['label' if prop == 'Label' else 'attributes'] = value.unpack()
+    if not S.save({**S.items, n: it}): return False
+    emit(conn, 'ItemChanged', path); return True
 
 def on_bus(conn, name):
     for iface in ('org.freedesktop.Secret.Service', 'org.vibespace.AppSecrets'): conn.register_object(BASE, IF[iface], on_call, on_get, None)

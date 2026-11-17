@@ -10,7 +10,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const DD = require('./desktop-display');
-const run = (bin, args, { env, timeout }) => new Promise((r) => execFile(bin, args, { env, timeout }, (err, stdout) => r({ err, stdout: String(stdout || '') })));
+const run = (bin, args, { env, timeout }) => new Promise((r) => execFile(bin, args, { env, timeout }, (err, stdout, stderr) => r({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })));
 
 /** lane app-display-secrets: the Secret Service's facts on THIS machine → desktop-apps secretServicePlan's `facts`:
  *  python3 + its GObject introspection (probed once per interpreter, ≤ 5 s), the service + sealer files beside this
@@ -61,6 +61,9 @@ async function forgetAppSecrets({ rec, dir, env = process.env, timeout = 5000 })
     const r = await run(ds, ['--bus=unix:path=' + sock, '--print-reply=literal', '--reply-timeout=' + timeout, '--dest=org.freedesktop.secrets', '/org/freedesktop/secrets', 'org.vibespace.AppSecrets.ForgetAll'], { env, timeout: timeout + 500 });
     const m = /uint32\s+(\d+)/.exec(r.err ? '' : r.stdout);
     if (m) return { ok: true, forgot: Number(m[1]), via: 'bus' };
+    // B-694d: the service ANSWERED and refused (its store could not be sealed) — it still holds the items, so removing the
+    // file now would be undone at its next store: said by name, nothing removed
+    if (/org\.freedesktop\.DBus\.Error\.Failed/.test(String(r.stderr || '') + String(r.stdout || ''))) return { ok: false, via: 'bus', why: 'the app\'s keyring could not write its store — nothing was forgotten; try again once its disk has room' };
   }
   const before = appSecretsOf({ rec, dir }).count;
   try { fs.unlinkSync(store); } catch (e) { if (!e || e.code !== 'ENOENT') return { ok: false, why: `the store could not be removed (${(e && e.code) || 'error'})` }; }

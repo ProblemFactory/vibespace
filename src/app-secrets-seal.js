@@ -7,10 +7,12 @@
  * display-secret-fd, B-6c6d: never an env value, never argv — this process's environ carries a number, not a key).
  *   open <file>  → stdout the items JSON (`[]` when the file does not exist); exit 3 = not decryptable with this key
  *   seal <file>  ← stdin the items JSON; writes `{ v, n, sealed }` (n = the item count, read by the window's ⋯ menu
- *                  without the key) to a 0600 temp file and renames it over <file> (atomic).
+ *                  without the key) to a 0600 temp file, fsyncs it, renames it over <file> (atomic) and fsyncs the folder —
+ *                  B-694d: the service answers «stored» after this exits 0, so the bytes are on the disk by then.
  * Its words name no byte of a secret: a failure says the step and the errno.
  */
 const fs = require('fs');
+const path = require('path');
 const { encWith, decWith } = require('./secret-box');
 
 const fail = (code, line) => { process.stderr.write(`app-secrets-seal: ${line}\n`); process.exit(code); };
@@ -34,7 +36,9 @@ if (mode === 'open') {
   if (!Array.isArray(items)) fail(2, 'the items are not a list');
   const tmp = `${file}.tmp-${process.pid}`;
   try {
-    fs.writeFileSync(tmp, JSON.stringify({ v: 1, n: items.length, sealed: encWith(key, JSON.stringify(items)) }), { mode: 0o600 });
+    const fd = fs.openSync(tmp, 'w', 0o600);
+    try { fs.writeSync(fd, JSON.stringify({ v: 1, n: items.length, sealed: encWith(key, JSON.stringify(items)) })); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     fs.renameSync(tmp, file);
+    try { const dfd = fs.openSync(path.dirname(file), 'r'); try { fs.fsyncSync(dfd); } finally { fs.closeSync(dfd); } } catch { /* the folder's fsync is best effort (the rename is done) */ }
   } catch (e) { try { fs.unlinkSync(tmp); } catch { /* never written */ } fail(1, `cannot write the store (${(e && e.code) || 'error'})`); }
 } else fail(2, `unknown mode ${String(mode).slice(0, 16)}`);

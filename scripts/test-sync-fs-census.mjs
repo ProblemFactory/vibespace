@@ -47,7 +47,7 @@ const ROWS = [
   ["src/agent-routes.js", "*", 1, "local-only", "<checkout>/docs/agent/<f>, f from the fixed AGENT_DOC_TOPICS table"],
   ["src/agy-backfill.js", "*", 1, "local-only", "dir = <dataDir>/agy-subs/<id> (id must match ^agy-[0-9a-f]{6,32}$)"],
   ["src/agy-store-fs.js", "*", 5, "local-only", "root = <home>/.gemini/antigravity-cli, home = os.homedir() or data/agy-subs/<id> (agy-backfill homeOf, its only hub caller): the vendor CLI's own store"],
-  ["src/app-secrets-seal.js", "*", 6, "via-safefs", "a child-process CLI (argv open|seal <file>) run by src/secret-service.py subprocess.run([node, sealer, mode, STORE]); never required by the hub"],
+  ["src/app-secrets-seal.js", "*", 7, "via-safefs", "a child-process CLI (argv open|seal <file>) run by src/secret-service.py subprocess.run([node, sealer, mode, STORE]); never required by the hub (B-694d +1: the temp file written through its own fd and fsynced, the folder fsynced after the rename — «stored» is answered after this exits)"],
   ["src/app-secrets.js", "*", 5, "local-only", "every path is <dataDir>/desktop-apps/<id>/portal/{secrets store, bus} — dir = machine.logRoot/<id> (desktop-app-keeper.js:778-779)."],
   ["src/app-system-serve.js", "*", 3, "local-only", "shimDir = <home>/.vibespace/sysroot/bin (HOME dot-dir); shim must have dirname === shimDir, opened O_NOFOLLOW"],
   ["src/browser-facts.js", "isShimFile", 1, "local-only", "p = <dir>/agent-browser for each hub-env PATH dir, or the CLI pin confined under <dataDir>/browser-tools (resolveRealBinary)"],
