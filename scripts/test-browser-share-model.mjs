@@ -33,7 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, deadPort, CHROME_STORE } from './scratch.mjs';
+import { scratch, deadPort } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
@@ -1905,7 +1905,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
     { const r = kE._reg().browsers[eph.profileId];
       ok(r && r.state === 'failed' && Array.isArray(r.hosts) && r.hosts.includes(PREV) && r.mark === KG, '④g F5 ephemeral: a REFUSED start\'s record still carries the launch-host lineage (pod-old) and the conversation\'s mark', { state: r && r.state, hosts: r && r.hosts, mark: r && r.mark });
       // a hand-launched CLI Chrome (--remote-debugging-port=0, no mark) on the kept directory after that refusal: refused by name, never ended
-      const hu = spawn(process.execPath, [...CHROME_STORE, '-e', 'setTimeout(() => {}, 600000)', '--', `--user-data-dir=${dir}`, '--remote-debugging-port=0'], { stdio: 'ignore' }); procsG.push(hu); await sleep(120); plantG(dir, HOSTg, hu.pid);
+      const hu = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', `--user-data-dir=${dir}`, '--remote-debugging-port=0'], { stdio: 'ignore' }); procsG.push(hu); await sleep(120); plantG(dir, HOSTg, hu.pid);
       const e = await threw(() => ensure());
       ok(e && e.code === 'profile_locked' && /your own browser/.test(e.message) && isAliveG(hu.pid) && singletonsG(dir).length === 3, '④g F5 ephemeral: …so a pre-mark CLI launch on the directory after the refusal is still refused by name and left running (the mark kept)', e ? `${e.code}: ${e.message.slice(0, 160)}` : `launched; holder alive ${isAliveG(hu.pid)}`);
       try { hu.kill('SIGKILL'); } catch { } unplant(dir);

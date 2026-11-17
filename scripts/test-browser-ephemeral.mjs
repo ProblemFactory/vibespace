@@ -63,7 +63,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, deadPorts, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, deadPorts } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const [DEAD_CDP1, DEAD_CDP2, DEAD_CDP3] = await deadPorts(3); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
@@ -1130,7 +1130,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
   const argvOf6 = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); } catch { return []; } };
   /** "The human": a chrome started BY HAND on a directory — no daemon, no --remote-debugging-port, no launch mark
    *  (`extra` adds argv: the pre-mark CLI shape / another record's mark). Its parent is this suite (a shell's stand-in). */
-  const human6 = async (dir, extra = []) => { const h = spawn(process.execPath, [...CHROME_STORE, '-e', CHROME_SRC, '--', '--user-data-dir=' + dir, '--headless=new', ...extra], { stdio: 'ignore', env: { PATH: PATH6, HOME: HOME6, FAKE_MARK: ST6 } }); for (let i = 0; i < 150 && readLock(dir) !== h.pid; i++) await sleep(20); return h; };
+  const human6 = async (dir, extra = []) => { const h = spawn(process.execPath, ['-e', CHROME_SRC, '--', '--user-data-dir=' + dir, '--headless=new', ...extra], { stdio: 'ignore', env: { PATH: PATH6, HOME: HOME6, FAKE_MARK: ST6 } }); for (let i = 0; i < 150 && readLock(dir) !== h.pid; i++) await sleep(20); return h; };
   const cdpOf6 = (env) => (Array.isArray(env) ? (env.find((kv) => kv.startsWith('AGENT_BROWSER_CDP=')) || '') : '').slice('AGENT_BROWSER_CDP='.length);
 
   // (a) a NAMED profile: the daemon dies (SIGKILL), its Chrome stays holding the lock — the tick ends it; the relaunch runs.
@@ -1239,7 +1239,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     const own = path.join(R6, 'my chrome profile'); fs.mkdirSync(own, { recursive: true });
     const adopted = kk.adoptDirectory({ label: 'Human', dir: own, owner: { kind: 'instance', id: null } });
     const bank = adopted.profile;
-    const human = spawn(process.execPath, [...CHROME_STORE, '-e', CHROME_SRC, '--', '--user-data-dir=' + bank.dir, '--headless=new'], { stdio: 'ignore', env: { PATH: PATH6, HOME: HOME6, FAKE_MARK: ST6 } });
+    const human = spawn(process.execPath, ['-e', CHROME_SRC, '--', '--user-data-dir=' + bank.dir, '--headless=new'], { stdio: 'ignore', env: { PATH: PATH6, HOME: HOME6, FAKE_MARK: ST6 } });
     for (let i = 0; i < 100 && readLock(bank.dir) !== human.pid; i++) await sleep(20);
     let err = null; try { await kk.start(bank.id, { why: 'test' }); } catch (e) { err = e; }
     ok(err && err.code === 'profile_locked' && err.message.includes(String(human.pid)) && /may be the user's|it may be theirs/.test(err.message) && !/exit code: 21/.test(err.message) && alive(human.pid) && log6('refused.log').filter((x) => x.dir === bank.dir).length === 0, `⑥ M1: a lock held on a directory VibeSpace never minted (an adopted one: a human's Chrome) is refused \`profile_locked\` naming pid ${human.pid} and saying it may be the user's — never signalled, never the raw exit 21, nothing launched`, err ? err.code + ' ' + err.message : 'no refusal');
