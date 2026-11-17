@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - On slow storage, saving a Channels account, its groups, aliases or outbox no longer freezes VibeSpace for seconds; your own changes still wait until saved.
 - A machine's agent no longer refuses to start when a restart hands it the same process number as the agent before it (a killed container, a reboot).
+- When a chat that used many helper browsers ends, VibeSpace stays responsive while it clears them; it could stop answering for minutes.
 
 ## 2.369.406 — 2026-11-16
 
