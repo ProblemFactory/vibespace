@@ -14,7 +14,10 @@
 // Fixtures only: a scratch HOME + runtime dir + data dir, a bogus DISPLAY (nothing here draws), never the owner's bus.
 // lane mirror-263-reds: a FAST suite never requires a machine capability — the plan's shape is proven over a FIXTURE
 // binary table (+ the empty-table refusal as its RED control); ③ is the ONE real-binary road and SKIPs with the reason
-// on a box without the portal binaries / python3-gi (the CI runner has no xdg-desktop-portal).
+// on a box without the portal binaries / python3-gi (the CI runner has no xdg-desktop-portal) — or without THE TEST'S OWN
+// CLIENT: the probe imports libsecret's introspection for python3-gi (Ubuntu / Debian: gir1.2-secret-1), tried FIRST, so a
+// machine that has everything the feature needs but not the client skips BY NAME instead of going red at its first step
+// (主开发 + the owner 2026-11-17, the test machine's first whole tier: «Namespace Secret not available»).
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';
@@ -108,7 +111,14 @@ for (const d of [appDir, home, run]) fs.mkdirSync(d, { recursive: true, mode: 0o
 const env = { PATH: process.env.PATH, HOME: home, XDG_RUNTIME_DIR: run };
 const facts = await D.appSecretsFacts({ env, mode: 'on', dataDir, id: 'da-sec1' });
 const realPlan = M.portalPlan({ dir: appDir, display: ':199', authFile: null, bins: D.portalBins({ env }), why: 'browser' });
-const capWhy = !realPlan.ok ? `portalPlan: ${realPlan.why}` : /^python3 /.test(facts.why || '') ? `appSecretsFacts: ${facts.why}` : null;
+// the probe's OWN import, tried first (the client is the test's, not the feature's: the feature's needs are judged after it)
+const clientWhy = (() => {
+  const r = spawnSync('python3', ['-c', "import gi; gi.require_version('Secret', '1'); from gi.repository import Secret"], { env: { PATH: process.env.PATH }, encoding: 'utf8', timeout: 15000 });
+  if (r.error) return `the test's own client: python3 did not start (${r.error.code || r.error.message})`;
+  if (r.status !== 0) return `the test's own client: libsecret's introspection for python3-gi is missing (package gir1.2-secret-1) — «${String(r.stderr || '').trim().split('\n').pop().slice(0, 120)}»`;
+  return null;
+})();
+const capWhy = clientWhy || (!realPlan.ok ? `portalPlan: ${realPlan.why}` : /^python3 /.test(facts.why || '') ? `appSecretsFacts: ${facts.why}` : null);
 if (capWhy) { // a machine capability, never a red: the plan's shape is proven in ① over the fixture table
   console.log(`  SKIP: ${capWhy} — ③ the real bus + libsecret road runs only where they exist`);
   fs.rmSync(tmp, { recursive: true, force: true });
