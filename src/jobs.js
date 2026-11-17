@@ -2728,12 +2728,14 @@ class JobManager {
     }
     this.d.log(`[jobs] ${job.id} refused to run (${trigger}) — ${vet.code || 'vendor/credential pattern'}`);   // lane job-secrets-retire: a refusal with a name (envfrom_retired) journals it
     this._save();
+    this._vaultAskOver(parent || job); // lane vault-job-approval: a job refused at its vet leaves no open approval card
   }
   // ── THE VAULT VALUES (lane vault-job-road, design-vault-service-secret L1a) ─────────────────────────────────────────────
   /** the door (src/server/vault-job-door.js), wired once the vault exists (the mounts wiring) — never before: a job that needs
    *  its values meanwhile WAITS for the vault, exactly as when it is locked */
   setVaultJob(door) {
     this._vaultJob = door || null;
+    if (door && typeof door.bindJobs === 'function') door.bindJobs(this); // lane vault-job-approval: a Deny on its card refuses the job (vaultRefused)
     if (door && typeof door.onChange === 'function') door.onChange((why) => this.vaultChanged(why));
     this.vaultChanged('wired');
   }
@@ -2759,6 +2761,7 @@ class JobManager {
   /** a wait that will never start: it ends, said once (a task's never ran — interrupted; a service's — down) */
   _settleWait(job, why) {
     if (job.state !== 'waiting') return;
+    this._vaultAskOver(job); // lane vault-job-approval: a wait that ends without a start closes its cards
     job.state = job.kind === 'task' ? 'interrupted' : 'down'; delete job.waitFor;
     this._touch(job, { what: `not started: ${why}` });
     this._save();
@@ -2767,8 +2770,19 @@ class JobManager {
   _vaultGate(job, trigger) {
     const door = this._vaultJob || this.d.vaultJob || null;
     let v = door ? door.gate(job) : { wait: 'vault' };
-    if (v.go) { const p = door.payload(v); if (p.ok) { p.frame.fill(0); return { ...v, door }; } v = p; } // every value opened and checked — the frame itself is built where it is handed (_spawn)
-    if (v.wait) { this._waitFor(job, v.wait, door); return false; }
+    if (v.go) { const p = door.payload(v); if (p.ok) { p.frame.fill(0); this._vaultAskOver(job); return { ...v, door }; } v = p; } // every value opened and checked — the frame itself is built where it is handed (_spawn); lane vault-job-approval: a job that STARTS (by any road) leaves no open card
+    if (v.wait) {
+      // lane vault-job-approval (L1b): a wait for the person's approval files its CARD (ONE per job × entry — the door's); a card
+      // that cannot be filed (the caps, a Deny's ten minutes, the tray refused it) is a refusal by name — never a silent wait
+      const a = v.wait === 'approval' && door && typeof door.ask === 'function' ? door.ask(job, v) : null;
+      if (!(a && a.ok === false)) { this._waitFor(job, v.wait, door); return false; }
+      v = a;
+    }
+    throw new Error(this._vaultRefuse(job, v, trigger));
+  }
+  /** a job (and a scheduled run's cron) refused its vault values — failed, said once with the door's words; its approval cards
+   *  close (lane vault-job-approval) → the words */
+  _vaultRefuse(job, v, trigger) {
     const words = `${v.words || v.code}${v.key ? ` (--vault ${v.key})` : ''}`;
     const parent = job.cronParent ? this.jobs.get(job.cronParent) : null;
     for (const j of parent ? [job, parent] : [job]) {
@@ -2779,7 +2793,35 @@ class JobManager {
     }
     this.d.log(`[jobs] ${job.id} refused to run (${trigger}) — its vault values (${v.code})`);
     this._save();
-    throw new Error(words);
+    this._vaultAskOver(parent || job);
+    return words;
+  }
+  /** lane vault-job-approval (L1b): the person DENIED a job's use of an entry on its card (or the card closed unanswered) — the
+   *  waiting job is refused by name (a scheduled run's: its cron too — the approval is the cron's); a later start asks again.
+   *  `v` = the door's refusal ({code, words, key}). → whether a waiting job was refused */
+  vaultRefused(jobId, v) {
+    if (this.readOnly) return false;
+    const job = this.jobs.get(String(jobId || ''));
+    if (!job) return false;
+    // whatever its wait reads NOW (the adversarial read: a locked boot re-judges an approval wait into a VAULT wait — the person's
+    // Deny still refuses it); a schedule is refused whole — its waiting run, or the cron itself between two fires
+    const v0 = v || { code: 'vault_denied' };
+    if (job.kind === 'cron') {
+      const run = [...this.jobs.values()].find((k) => k.cronParent === job.id && k.state === 'waiting') || null;
+      if (run) { this._vaultRefuse(run, v0, 'vault-denied'); return true; }
+      if (job.state === 'failed' || job.desiredUp === false) return false;
+      this._vaultRefuse(job, v0, 'vault-denied');
+      return true;
+    }
+    if (job.state !== 'waiting') return false;
+    this._vaultRefuse(job, v0, 'vault-denied');
+    return true;
+  }
+  /** its approval cards are over (removed, stopped, refused): the door closes each `ask-over` — a later start asks again */
+  _vaultAskOver(job) {
+    const door = this._vaultJob || this.d.vaultJob || null;
+    if (!door || typeof door.askOver !== 'function' || !VJ.refsOf(job).length) return;
+    try { door.askOver(VJ.askJobIdOf(job)); } catch (e) { this.d.log(`[jobs] ${job.id}: its approval cards could not be closed:`, e.message); }
   }
   /** A WAIT, NEVER A COUNTED FAILURE (kb §18: «a lock is a wait»): no run, the supervisor's count untouched; a locked vault's
    *  ONE helper names the job (the lock's one For-you item — never a new one); the state line says it once */
@@ -4264,6 +4306,7 @@ class JobManager {
     if (!hadProc && job.kind === 'cron') { job.state = 'down'; }
     if (job.state === 'waiting') { job.state = job.kind === 'task' ? 'interrupted' : 'down'; delete job.waitFor; } // lane vault-job-road: it never ran — it waits no more
     if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was stopped'); // …nor does its scheduled run
+    this._vaultAskOver(job); // lane vault-job-approval: a stopped job's approval card is over — its next start asks again
     this._touch(job);
     this._save();
     return { ok: true, hadProc };
@@ -4446,6 +4489,7 @@ class JobManager {
     if (alive && orphan) this.d.log(`[jobs] ${job.id} ORPHANED by request — live pid abandoned`);
     const last = job.runs && job.runs[job.runs.length - 1];
     if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was removed'); // lane vault-job-road: a removed cron's waiting run never starts
+    this._vaultAskOver(job); // lane vault-job-approval: a removed job leaves no open approval card
     this.jobs.delete(job.id); this._dirty = true; this._save();
     (this._removalOwed || (this._removalOwed = new Map())).set(job.id, job);   // its logs stay in the sweep's keep set until the landing
     // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING, no roll back): what cannot be undone — its kept processes

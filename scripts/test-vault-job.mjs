@@ -27,6 +27,12 @@
 //      a start DEFERRED behind its last run whose values would wait answers the wait (the review); a stop that lands while
 //      the wrapper drains writes ONE `refused:stopped` and no `ok` (the job never ran).
 //      CONTROLS: r1's line written as the frame was queued · r1's start answer · a wrapper that ACKs before it reads the stop
+//   ⑨ THE APPROVAL CARD (lane vault-job-approval, L1b) — over the REAL For-you store: a wait for approval files ONE card per job ×
+//      entry (its facts: the program's / script's real paths and who may change them, the folder, the command, the fd; no
+//      value anywhere; no expiry), never a second at a re-judge; 允许 without 验证是你 writes nothing, with it ONE member through
+//      the grants store's writer and the job starts by itself; 拒绝 refuses the job + 10 minutes' quiet; 4 per conversation, 64
+//      on the hub (each a refusal by name); a removed or stopped job closes its card; a card outlives a restart.
+//      MUTANTS (a copy of the door each — RED): no reauth check · a card per re-judge · a Deny that leaves its job · no bound
 //   THE SCRATCH — every root a leg makes carries THIS run's pid in its name and is removed at the end (a failed leg too: the
 //   exit hook); the last line counts what is left of THIS run's prefix in the tmp dir — registered or not (0)
 import { createRequire } from 'module';
@@ -38,7 +44,10 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const R = (p) => require(path.join(REPO, p));
 const VE = R('src/server/vault-engine.js'), VR = R('src/vault-run.js'), VJ = R('src/vault-job.js'), M = R('src/job-model.js');
 const DOOR = R('src/server/vault-job-door.js'), GS = R('src/server/grants-store.js');
+const { UserTodoManager } = R('src/user-todos.js');   // lane vault-job-approval: the REAL For-you store — the card is its item
 const Module = require('module');
+const DOOR_PATH = path.join(REPO, 'src/server/vault-job-door.js'), DOOR_SRC = fs.readFileSync(DOOR_PATH, 'utf8');
+const doorOf = (src) => { if (!src) return DOOR; const m = new Module(DOOR_PATH, null); m.filename = DOOR_PATH; m.paths = Module._nodeModulePaths(path.dirname(DOOR_PATH)); m._compile(src, DOOR_PATH); return m.exports; };
 const JOBS = path.join(REPO, 'src/jobs.js'), JOBS_SRC = fs.readFileSync(JOBS, 'utf8');
 const WRAP_SRC = fs.readFileSync(path.join(REPO, 'data/bin/job-wrapper.js'), 'utf8');
 const { JobManager } = R('src/jobs.js');
@@ -73,7 +82,7 @@ const ROOTS = new Set(), PREFIX = `vs-vjob-${process.pid}-`;
 const ours = () => { try { return fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith(PREFIX)).map((n) => path.join(os.tmpdir(), n)); } catch { return []; } };   // the review: counted in the tmp dir, never only in the set
 const sweepRoots = () => { for (const r of new Set([...ROOTS, ...ours()])) { try { fs.rmSync(r, { recursive: true, force: true }); } catch { } } return ours().length; };
 process.on('exit', () => { sweepRoots(); });
-async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir = null, vault = null } = {}) {
+async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir = null, vault = null, doorSrc = null, grants: grants0 = null } = {}) {
   const root = dataDir ? path.dirname(dataDir) : fs.mkdtempSync(path.join(os.tmpdir(), `${PREFIX}${tag}-`));
   ROOTS.add(root);
   const dd = dataDir || path.join(root, 'data');
@@ -84,12 +93,13 @@ async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir
   }
   const v = vault || VE.create({ dataDir: dd, kdf: { N: 1024, r: 8, p: 1 }, log: { log() { }, warn() { } }, idleTimer: false, register: false });
   if (!vault) await v.setup(PW);
-  const grants = GS.create({ memory: true });
+  const grants = grants0 || GS.create({ memory: true });
+  const todos = new UserTodoManager({ dataDir: dd, expirySweepMs: 0 });   // lane vault-job-approval: a wait for approval files its card here
   const frames = [], journal = [];
   const JM = jmOf(jobs);
   const jm = new JM({ dataDir: dd, broadcast: (t, p) => frames.push(JSON.stringify(p || {})), notifyUser() { return { ok: true }; }, log: (...a) => journal.push(a.join(' ')), memoryRungs: [] });
   jm.init();
-  const door = DOOR.create({ vault: v, grants: () => grants }), built = [];
+  const door = doorOf(doorSrc).create({ vault: v, grants: () => grants, userTodos: todos, nameOf: (cid) => (cid === 'conv-a' ? 'Chat A' : null) }), built = [];
   const pay = door.payload; door.payload = (x) => { const r = pay(x); if (r && r.ok) built.push(r.frame); return r; };   // every frame the door builds, read after the start
   jm.setVaultJob(door);
   const owner = { conversation: { id: 'conv-a' }, sessionId: 'w-a', createdBy: 'agent', groupsSnapshot: [] };
@@ -104,10 +114,13 @@ async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir
   const audit = () => { try { return fs.readFileSync(path.join(dd, 'vault-audit.jsonl'), 'utf8'); } catch { return ''; } };
   const uses = (id) => audit().split('\n').filter((l) => l.includes('"event":"vault-use"') && l.includes('"door":"service"') && (!id || l.includes(`Background job ${id}`))).map((l) => JSON.parse(l));
   const walk = (d, out = []) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p, out); else if (e.isFile()) out.push(fs.readFileSync(p, 'latin1')); } return out; };
-  const end = () => { try { for (const t of jm._timers || []) clearInterval(t); jm.readOnly = true; jm.shutdown(); } catch { } };
-  return { root, dd, vault: v, grants, frames, journal, jm, built, create, until, untilMs, got, release, audit, uses, walk, end, put: (s) => v.agentPut('agent:conv-a/tok', s) };
+  const end = () => { try { for (const t of jm._timers || []) clearInterval(t); jm.readOnly = true; jm.shutdown(); } catch { } try { todos.stop(); } catch { } };
+  return { root, dd, vault: v, grants, todos, door, frames, journal, jm, built, create, until, untilMs, got, release, audit, uses, walk, end, put: (s) => v.agentPut('agent:conv-a/tok', s) };
 }
 const procRead = (pid, f) => { try { return fs.readFileSync(`/proc/${pid}/${f}`, 'latin1'); } catch { return ''; } };
+// lane vault-job-approval: the door's «an agent cannot change it» rule (OWNERSHIP — root owns every component, none group/other-
+// writable), restated for the expectation: a root-owned node (a container run as root) is no agent's to change, an nvm one is
+const rootChain = (p) => { let cur = ''; for (const part of String(p).split('/').slice(1)) { cur += '/' + part; try { const st = fs.statSync(cur); if (st.uid !== 0 || (st.mode & 0o022)) return false; } catch { return false; } } return true; };
 // the wrapper's fd table: its fd 3 right after the spawn (the hub's channel — read before the wrapper's node has booted) and
 // every fd it holds later; Node marks an inherited fd ≥ 3 close-on-exec at its start (measured: flags 02000002), so the CLOSE is
 // seen in the wrapper's own table — never in a child's
@@ -218,12 +231,181 @@ async function legApproval() {
   const job = W.jm.jobs.get(r.job.id);
   row(job.state === 'waiting' && job.waitFor === 'approval' && job.runs.length === 0, 'a value the hub MINTED waits for the owner\'s approval (no run)');
   const st = W.jm.start(job), words = String(st.after || '');
-  row(st.ok && st.state === 'waiting' && st.waitFor === 'approval' && job.runs.length === 0 && /arrives in a later VibeSpace update/.test(words) && /nothing can approve it/.test(words) && /vibespace-vault put/.test(words) && !/starts by itself once they do/.test(words), 'round 2: start() of the waiting task answers its wait in words that promise NO card this version lacks — and name the door that works now (an entry the agent puts)', st);
+  row(st.ok && st.state === 'waiting' && st.waitFor === 'approval' && job.runs.length === 0 && /ONE card per entry asks the user in their For-you tray/.test(words) && /starts by itself once they allow it/.test(words) && /vibespace-vault put/.test(words) && !/later VibeSpace update/.test(words), 'round 2 + lane vault-job-approval: start() of the waiting task answers its wait in the words of now — the card in the user\'s tray, what each answer does, and the door that needs none (an entry the agent puts)', st);
   W.grants.set('vault-job', 'secrets:agent:conv-a/tok#secret', { to: [{ kind: 'conversation', key: 'conv-a', jobs: [job.id] }] }, 'test');
   await W.until(() => W.got().length === 1 && job.state === 'done');
   const minted = W.vault.secretGet('agent:conv-a/tok').value.toString();
   const log = fs.readFileSync(job.runs[0].log, 'utf8');
   row((W.got()[0] || {}).v === minted && formsAbsent(log, minted) && job.runs.length === 1, 'a vault-job row naming THIS job starts it (the grants store\'s change): the job read the minted value, its log holds none of it');
+  W.end();
+  return rows;
+}
+// ── ⑨ THE APPROVAL CARD (lane vault-job-approval, design-vault-service-secret L1b — the owner's decisions ① ②) ──────────────
+const cards = (W, st = 'open') => ((W.todos.snapshot() || {})[st] || []).filter((i) => i.action && i.action.type === 'vault-job-ask');
+const resolvedOf = (W, askId) => (W.todos.snapshot().resolved || []).find((i) => i.action && i.action.askId === askId) || {};
+const jobLines = (W) => W.audit().split('\n').filter((l) => l.includes('"event":"vault-job"'));
+async function legCard(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('card', { doorSrc });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const minted = W.vault.secretGet('agent:conv-a/tok').value.toString();
+  const job = W.jm.jobs.get(W.create({}).job.id);
+  const c0 = cards(W), it = c0[0] || {}, a = it.action || {}, f = it.facts || {};
+  rows.first = { job, a };
+  row(job.state === 'waiting' && job.waitFor === 'approval' && c0.length === 1 && VJ.ASK_ID_RE.test(String(a.askId)) && a.jobId === job.id && a.entry === 'secrets:agent:conv-a/tok#secret' && a.name === 'TOK' && a.conv === 'conv-a' && it.sessionKey === 'claude:conv-a' && !it.expiresAt && it.sessionName === 'Chat A',
+    'a value the hub MINTED waits for approval — and ONE card is filed: vault-job-ask (the job, the entry, the NAME, the owner conversation), under that conversation, NO expiry', { state: job.state, n: c0.length, action: a, key: it.sessionKey, exp: it.expiresAt });
+  row(f.v === 1 && f.job && f.job.id === job.id && f.job.kind === 'task' && f.entry && f.entry.var === 'TOK_FD' && f.program && f.program.path === fs.realpathSync(process.execPath) && f.program.writable === !rootChain(fs.realpathSync(process.execPath)) && f.script && f.script.path === fs.realpathSync(path.join(W.root, 'prog.js')) && f.script.writable === true && f.folder === W.root && f.dest === 'unknown' && /prog\.js/.test(f.command) && /— an agent can change this script\./.test(it.detail) && /Where it sends the secret: unknown/.test(it.detail),
+    'its facts: the job and its kind, the fd it reads ($TOK_FD), the program\'s and the script\'s real paths and that an agent can change them (plain facts), the folder, the command, the destination unknown', f);
+  row(!JSON.stringify(W.todos.snapshot()).includes(minted) && formsAbsent(JSON.stringify(W.todos.snapshot()), minted) && W.walk(W.dd).every((t) => !t.includes(minted)), 'the card, the For-you store and every file of the data dir hold no spelling of the value (the card is an accident road)');
+  W.jm.vaultChanged('vault-approved'); W.jm.start(job); W.jm.vaultChanged('vault-unlocked');
+  rows.rejudge = cards(W).length;
+  row(cards(W).length === 1 && job.state === 'waiting', 'every re-judge of the waiting job (an approval change, a start, an unlock) files NO second card — one per job × entry', cards(W).length);
+  const no = W.door.answer(a.askId, { answer: 'allow', reauthed: false, by: 'user', person: true });
+  row(!no.ok && no.code === 'reveal_needs_password' && W.grants.rowsFor('vault-job', a.entry).length === 0 && job.state === 'waiting' && cards(W).length === 1, '允许 WITHOUT this page\'s 验证是你 writes nothing (reveal_needs_password) — the job waits, the card stays', no);
+  rows.unauthed = no;
+  const bad = W.door.answer(a.askId, { answer: 'always', reauthed: true });
+  row(!bad.ok && bad.code === 'bad_job_answer' && cards(W).length === 1, 'an answer that is neither allow nor deny is refused by name, nothing written', bad);
+  const yes = W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
+  await W.until(() => W.got().length === 1 && job.state === 'done');
+  const gr = W.grants.rowsFor('vault-job', a.entry)[0] || {}, m = (gr.to || [])[0] || {}, res = resolvedOf(W, a.askId);
+  row(yes.ok && yes.outcome === 'allowed' && (gr.to || []).length === 1 && m.kind === 'conversation' && m.key === 'conv-a' && JSON.stringify(m.jobs) === JSON.stringify([job.id]) && res.resolvedBy === 'allowed' && res.resolvedFact && res.resolvedFact.decidedBy === 'person' && cards(W).length === 0,
+    '允许 WITH 验证是你: ONE member (the owner conversation, jobs [this job]) through the grants store\'s ONE writer; the card closed «allowed», the person\'s mark on it', { yes, to: gr.to, by: res.resolvedBy });
+  row((W.got()[0] || {}).v === minted && job.runs.length === 1, 'the waiting job starts BY ITSELF at the allow (the row\'s change) — with the minted value', { runs: job.runs.length });
+  const au = jobLines(W).filter((l) => l.includes(`"askId":"${a.askId}"`));
+  row(au.filter((l) => l.includes('"op":"ask"')).length === 1 && au.filter((l) => l.includes('"op":"allow"')).length === 1 && formsAbsent(jobLines(W).join('\n'), minted), 'exactly ONE vault-job audit line for its ask (three re-judges wrote none) and ONE for its allow — ids and references, never the value', au.length);
+  const again = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
+  row(!again.ok && again.code === 'ask_settled', 'answered again ⇒ ask_settled (nothing changes)', again);
+  W.end();
+  return rows;
+}
+async function legDeny(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('deny', { doorSrc });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never' }).job.id);
+  const a = (cards(W)[0] || {}).action || {};
+  const d = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
+  const res = resolvedOf(W, a.askId);
+  rows.state = job.state;
+  row(d.ok && d.outcome === 'denied' && job.state === 'failed' && job.desiredUp === false && job.runs.length === 0 && res.resolvedBy === 'denied' && W.journal.some((l) => l.includes(`${job.id} refused to run (vault-denied)`) && l.includes('vault_denied')) && W.grants.rowsFor('vault-job', a.entry).length === 0 && jobLines(W).some((l) => l.includes('"op":"deny"')),
+    '拒绝 is a click: the job is REFUSED by name (vault_denied, said once) and never started; the card closed «denied»; nothing written; its audit line', { d, state: job.state, by: res.resolvedBy });
+  const r2 = W.create({ kind: 'task', name: 'deny2' }), j2 = W.jm.jobs.get(r2.job && r2.job.id);
+  row(!!j2 && j2.state === 'failed' && /less than 10 minutes ago/.test(String(r2.error)) && cards(W).length === 0, 'the same conversation × entry within 10 minutes of a Deny: the next job is refused by name (ask_quiet) — no new card', { err: r2.error, state: j2 && j2.state, n: cards(W).length });
+  W.end();
+  return rows;
+}
+async function legCaps(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('caps', { doorSrc });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const made = []; for (let i = 0; i < 5; i++) made.push(W.create({ name: `cap${i}` }));
+  const states = made.map((r) => (W.jm.jobs.get(r.job && r.job.id) || {}).state);
+  rows.n = cards(W).length;
+  row(cards(W).length === 4 && states.slice(0, 4).every((s) => s === 'waiting') && states[4] === 'failed' && /Background Work jobs waiting for the user's approval/.test(String(made[4].error)), 'FOUR open cards per conversation: the fifth job is refused by name (too_many_asks) — never a silent wait', { n: cards(W).length, states, err: made[4].error });
+  const first = W.jm.jobs.get(made[0].job.id), fa = ((cards(W).find((i) => i.action.jobId === first.id)) || {}).action || {};
+  W.jm.rm(first);
+  const late = W.door.answer(fa.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
+  row(resolvedOf(W, fa.askId).resolvedBy === 'ask-over' && cards(W).length === 3 && !late.ok && late.code === 'ask_settled' && W.grants.rowsFor('vault-job', fa.entry).length === 0 && jobLines(W).some((l) => l.includes('"op":"over"') && l.includes(fa.askId)), 'a waiting job REMOVED ⇒ its card closes (ask-over) — never an orphan card; a late 允许 writes nothing', { by: resolvedOf(W, fa.askId).resolvedBy, late });
+  const second = W.jm.jobs.get(made[1].job.id), sa = ((cards(W).find((i) => i.action.jobId === second.id)) || {}).action || {};
+  W.jm.stop(second);
+  row(resolvedOf(W, sa.askId).resolvedBy === 'ask-over' && cards(W).length === 2 && second.state !== 'waiting', 'a waiting job STOPPED ⇒ its card closes (ask-over) — its next start asks again', { by: resolvedOf(W, sa.askId).resolvedBy, state: second.state });
+  W.jm.start(second);
+  row(cards(W).filter((i) => i.action.jobId === second.id).length === 1 && second.state === 'waiting', '…and it does: start() files ONE new card');
+  const D = doorOf(doorSrc).create({ vault: W.vault, grants: () => W.grants, userTodos: W.todos });   // the hub's bound, over the same store
+  const fake = (i) => ({ id: `jb-${(0x10000000 + i).toString(16)}`, kind: 'task', owner: { conversation: { id: `conv-h${Math.floor(i / 4)}` } }, vault: [{ name: 'TOK', ref: `vault://agent:conv-h${Math.floor(i / 4)}/tok` }] });
+  const open0 = cards(W).length, room = VJ.ASKS_MAX - open0, got = [];
+  for (let i = 0; i < room; i++) got.push(D.ask(fake(i), { missing: ['TOK'] }));
+  const over = D.ask(fake(room), { missing: ['TOK'] });
+  row(got.every((x) => x.ok && x.filed === 1) && cards(W).length === VJ.ASKS_MAX && !over.ok && over.code === 'too_many_asks_hub', `${VJ.ASKS_MAX} open cards on the hub: the next is refused by name (too_many_asks_hub)`, { open0, n: cards(W).length, code: over.code });
+  W.end();
+  return rows;
+}
+async function legCardRestart() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('crst');
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const minted = W.vault.secretGet('agent:conv-a/tok').value.toString();
+  const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never' }).job.id);
+  const a = (cards(W)[0] || {}).action || {};
+  W.end();
+  const W2 = await world('crst', { dataDir: W.dd, vault: W.vault, grants: W.grants });
+  const j2 = W2.jm.jobs.get(job.id), n = cards(W2).length;
+  const yes = W2.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
+  await W2.until(() => W2.got().length === 1);
+  row(!!j2 && n === 1 && yes.ok && (W2.got()[0] || {}).v === minted, 'a card filed BEFORE a restart is still ONE card after it (the item IS the ask — the boot\'s re-judge files no second) and its 允许 starts the job', { n, yes, got: W2.got().length });
+  W2.end();
+  return rows;
+}
+// ── ⑨c THE ADVERSARIAL READ'S CURES (lane vault-job-approval) ─────────────────────────────────────────────────────────────────
+async function legCronCard() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('ccard');
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const task = { cmd: { argv: [process.execPath, path.join(W.root, 'prog.js'), path.join(W.root, 'out')], cwd: W.root }, vault: ['TOK=vault://agent:conv-a/tok'] };
+  const mk = (name) => { const r = W.jm.create({ kind: 'cron', name, schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task }, owner: { conversation: { id: 'conv-a' }, sessionId: 'w-a', createdBy: 'agent', groupsSnapshot: [] } }, { conversationId: 'conv-a', groups: new Set() }); return W.jm.jobs.get(r.job && r.job.id); };
+  const runsOf = (c) => [...W.jm.jobs.values()].filter((j) => j.cronParent === c.id);
+  const c1 = mk('cron-allow');
+  W.jm._fireCron(c1, 'test');
+  const k1 = runsOf(c1)[0];
+  const mine = cards(W).filter((i) => i.action.jobId === c1.id), a1 = (mine[0] || {}).action || {};
+  row(!!k1 && k1.state === 'waiting' && k1.waitFor === 'approval' && mine.length === 1 && !cards(W).some((i) => i.action.jobId === k1.id), 'a SCHEDULED run that waits files ONE card — for its CRON (the approval is the schedule\'s: every fire reads it), never one per run', { k1: k1 && k1.state, n: mine.length });
+  const y = W.door.answer(a1.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
+  await W.untilMs(() => W.got().length >= 1 && k1.state === 'done', 4000);
+  const m1 = (((W.grants.rowsFor('vault-job', a1.entry)[0] || {}).to || [])[0] || {}).jobs || [];
+  row(y.ok && JSON.stringify(m1) === JSON.stringify([c1.id]) && k1.state === 'done', '允许 on the cron\'s card writes the CRON\'s id — its waiting run starts with the value', { y, m1, k1: k1.state });
+  W.jm._fireCron(c1, 'test');
+  const k1b = runsOf(c1).find((k) => k !== k1);
+  await W.untilMs(() => W.got().length >= 2 && !!k1b && k1b.state === 'done', 4000);
+  row(!!k1b && k1b.state === 'done' && cards(W).filter((i) => i.action.jobId === c1.id).length === 0, '…and its next fire runs at once — no card (every fire reads the cron\'s approval)', k1b && k1b.state);
+  const c2 = mk('cron-deny');
+  W.jm._fireCron(c2, 'test');
+  const k2 = runsOf(c2)[0], a2 = ((cards(W).find((i) => i.action.jobId === c2.id)) || {}).action || {};
+  const d = W.door.answer(a2.askId, { answer: 'deny', by: 'user', person: true });
+  row(d.ok && c2.state === 'failed' && c2.desiredUp === false && c2.nextFireAt == null && !!k2 && k2.state === 'failed', '拒绝 on a cron\'s card refuses the SCHEDULE whole (no next fire) and its waiting run', { d, c2: c2.state, k2: k2 && k2.state });
+  W.end();
+  return rows;
+}
+async function legDenyVaultWait(jobs = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(jobs ? 'dlockm' : 'dlock', { jobs });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never', name: 'dlock' }).job.id);
+  const a = ((cards(W).find((i) => i.action.jobId === job.id)) || {}).action || {};
+  W.vault.lock('door');
+  W.jm.start(job);   // a re-judge while locked (a boot's replay reads the same): the approval wait is now a VAULT wait — its card still open
+  const before = job.waitFor;
+  const d = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
+  rows.state = job.state;
+  row(before === 'vault' && d.ok && job.state === 'failed' && job.desiredUp === false && W.journal.some((l) => l.includes(`${job.id} refused to run (vault-denied)`)), 'a Deny after the wait turned into a VAULT wait (a locked boot\'s re-judge) still REFUSES the job by name — never a card closed «denied» over a job that waits on', { before, d, state: job.state });
+  W.end();
+  return rows;
+}
+async function legCapJobs(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(doorSrc ? 'capjm' : 'capj', { doorSrc });
+  for (let i = 1; i <= 5; i++) W.vault.agentMint(`agent:conv-a/t${i}`, { length: 32 });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const five = W.jm.jobs.get(W.create({ name: 'five', vault: [1, 2, 3, 4, 5].map((i) => `K${i}=vault://agent:conv-a/t${i}`) }).job.id);
+  rows.state = five.state;
+  row(five.state === 'waiting' && five.waitFor === 'approval' && cards(W).filter((i) => i.action.jobId === five.id).length === 5, 'a job with FIVE entries to approve WAITS on five cards — the cap counts JOBS (four per conversation), so a job with many values can still start', { state: five.state, n: cards(W).length });
+  const two = W.jm.jobs.get(W.create({ name: 'two', vault: ['A=vault://agent:conv-a/tok', 'B=vault://agent:conv-a/tok'] }).job.id);
+  row(two.state === 'waiting' && cards(W).filter((i) => i.action.jobId === two.id).length === 1, 'two NAMEs on ONE entry: one card (one per job × entry)', cards(W).filter((i) => i.action.jobId === two.id).length);
+  W.end();
+  return rows;
+}
+async function legOwnAndGone() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('owng');
+  W.put(SENT('own')); W.release();
+  const own = W.jm.jobs.get(W.create({ name: 'own' }).job.id);
+  await W.untilMs(() => own.state === 'done', 4000);
+  row(own.state === 'done' && cards(W).length === 0, 'a value the conversation PUT itself files NO card — the job just runs', { state: own.state, n: cards(W).length });
+  W.vault.agentMint('agent:conv-a/m1', { length: 32 });
+  const job = W.jm.jobs.get(W.create({ name: 'gone', vault: ['TOK=vault://agent:conv-a/m1'] }).job.id);
+  const a = ((cards(W).find((i) => i.action.jobId === job.id)) || {}).action || {};
+  W.vault.secretDrop('agent:conv-a/m1');   // the entry deleted while its card is open
+  const y = W.door.answer(a.askId, { answer: 'allow', reauthed: true, by: 'user', person: true });
+  row(!y.ok && y.code === 'entry_unknown' && W.grants.rowsFor('vault-job', a.entry).length === 0 && resolvedOf(W, a.askId).resolvedBy === 'ask-over', '允许 on the card of an entry DELETED meanwhile writes nothing (entry_unknown — a later entry of that name never inherits it) and the card closes', { y, by: resolvedOf(W, a.askId).resolvedBy });
   W.end();
   return rows;
 }
@@ -405,6 +587,19 @@ const [handed, locked, crash, boot, bootMut, approval, noMasker, noMaskerMut, wi
   legApproval(), legNoMasker(), QUEUED ? legNoMasker(QUEUED) : { okLines: -1 }, legWindow(), mutantStart(), mutantLock(), legDeferred(), legStopDrain(), EARLY_ACK ? legStopDrain(EARLY_ACK) : { okLines: -1 }, legCronStopped(),
   legCronStopped(swap(swap(JOBS_SRC, '    if (!job.cronParent) return true;\n', '    return true;\n'), "    if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was stopped');", '')), ...MUTANTS.map(([n, o, red]) => mutant(n, o, red)), legStopDrainLate(),
 ]);
+// lane vault-job-approval: the card's legs and their mutants (each a copy of the door compiled at its real path)
+const dmut = (from, to) => { try { return swap(DOOR_SRC, from, to); } catch { return null; } };
+const MUT_REAUTH = dmut("    if (reauthed !== true) return named('reveal_needs_password');\n", '');
+const MUT_DEDUPE = dmut('const fresh = need.filter((r) => !open.some((q) => q.jobId === jobId && q.entry === r.id));', 'const fresh = need;');
+const MUT_DENY = dmut("try { jm.vaultRefused(q.jobId, named('vault_denied', { key: q.name })); }", 'try { void q; }');
+const MUT_CAP = dmut("    if (!mine.has(jobId) && mine.size + 1 > VJ.ASKS_PER_CONV) return named('too_many_asks');\n", '');
+const [card, deny, caps, cardRestart, cardMutReauth, cardMutDedupe, denyMut, capsMut] = await Promise.all([legCard(), legDeny(), legCaps(), legCardRestart(),
+  MUT_REAUTH ? legCard(MUT_REAUTH) : {}, MUT_DEDUPE ? legCard(MUT_DEDUPE) : {}, MUT_DENY ? legDeny(MUT_DENY) : {}, MUT_CAP ? legCaps(MUT_CAP) : {}]);
+// ⑨c: the cures and their mutants — a Deny that refuses an APPROVAL wait only (r1's engine), a cap that counts CARDS (r1's door)
+const MUT_DENYWAIT = (() => { try { return swap(JOBS_SRC, "    if (job.state !== 'waiting') return false;\n    this._vaultRefuse(job, v0, 'vault-denied');", "    if (job.state !== 'waiting' || job.waitFor !== 'approval') return false;\n    this._vaultRefuse(job, v0, 'vault-denied');"); } catch { return null; } })();
+const MUT_CAPCARDS = dmut("    if (!mine.has(jobId) && mine.size + 1 > VJ.ASKS_PER_CONV) return named('too_many_asks');", "    if (open.filter((q) => q.conv === conv).length + fresh.length > VJ.ASKS_PER_CONV) return named('too_many_asks');");
+const [cronCard, denyWait, capJobs, ownGone, denyWaitMut, capJobsMut] = await Promise.all([legCronCard(), legDenyVaultWait(), legCapJobs(), legOwnAndGone(),
+  MUT_DENYWAIT ? legDenyVaultWait(MUT_DENYWAIT) : {}, MUT_CAPCARDS ? legCapJobs(MUT_CAPCARDS) : {}]);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const print = (title, rows) => { console.log(title); for (const [c, n, e] of rows) ok(c, n, e); };
@@ -419,6 +614,15 @@ print('⑥ NO MASKER, NO START', noMasker);
 print('⑥b A STOPPED SCHEDULE STARTS NOTHING', cronStopped);
 print('⑥c AN UPDATE WINDOW\'S WRAPPER (round 2)', windowRows);
 print('⑥d A DEFERRED START · A STOP WHILE IT DRAINS (round 2, the review)', [...deferred, ...stopDrain]);
+print('⑨ THE APPROVAL CARD (lane vault-job-approval — one card per job × entry, 允许 = 验证是你 + the grant row, 拒绝 = refused)', [...card, ...deny, ...caps, ...cardRestart]);
+print('⑨c THE ADVERSARIAL READ\'S CURES — a cron\'s card, a Deny after a locked boot, the cap counts jobs, one card per entry, an own value, a deleted entry', [...cronCard, ...denyWait, ...capJobs, ...ownGone]);
+console.log('⑨b MUTANTS of the card (each a copy of the door — RED)');
+ok(!!MUT_DENYWAIT && denyWaitMut.state === 'waiting', 'CONTROL — a Deny that refuses only an APPROVAL wait (r1): the job still waits after the locked boot\'s re-judge — RED on the copy', MUT_DENYWAIT ? denyWaitMut.state : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_CAPCARDS && capJobsMut.state === 'failed', 'CONTROL — the cap counting CARDS (r1): a five-entry job is refused for ever — RED on the copy', MUT_CAPCARDS ? capJobsMut.state : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_REAUTH && !!cardMutReauth.unauthed && cardMutReauth.unauthed.ok === true, 'CONTROL — 允许 without 验证是你 (the door\'s reauth check removed): the row is WRITTEN — RED on the copy', MUT_REAUTH ? cardMutReauth.unauthed : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_DEDUPE && cardMutDedupe.rejudge > 1, 'CONTROL — a card per re-judge (the open-card check removed): a second card — RED on the copy', MUT_DEDUPE ? cardMutDedupe.rejudge : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_DENY && denyMut.state === 'waiting', 'CONTROL — a Deny that leaves its job (the refusal removed): the job still waits — RED on the copy', MUT_DENY ? denyMut.state : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_CAP && capsMut.n === 5, 'CONTROL — no per-conversation bound: a fifth card — RED on the copy', MUT_CAP ? capsMut.n : 'the copy could not be built (its anchor is missing)');
 console.log('⑦ MUTANTS');
 ok(!bootMut.waited, 'CONTROL — a locked boot starts it (the gate skipped at the replay): RED on the copy');
 ok(mutLock[0], mutLock[1]);

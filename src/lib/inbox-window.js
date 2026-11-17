@@ -395,6 +395,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     'hub-always': () => actBtn('hub-always', UI_ICONS.check, t('Always on this machine'), t('Sets Hub automation of this machine to Always allow — every kind, no more asks'), 'iw-act-exit'),
     'hub-deny': () => actBtn('hub-deny', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit'),
     'words-allow': () => actBtn('words-allow', UI_ICONS.check, t('Allow'), t('Write these words on the entry — every agent that may use it reads them'), 'iw-act-primary iw-act-exit'),   // lane vault-entry-description
+    'job-allow': () => actBtn('job-allow', UI_ICONS.check, t('Allow'), t('Let this job use the secret at each start — asks for your second password first'), 'iw-act-primary iw-act-exit'),   // lane vault-job-approval
     // design q-046 (lane automation-keys-core): a held automation call's Always grants the key to THAT conversation
     'auto-always': () => actBtn('auto-always', UI_ICONS.check, t('Always for this conversation'), t('Grants the key to this conversation — the Vault window lists it; take it back there'), 'iw-act-exit'),
     // q-053 P0b (decision ①): a pool's move to another provider — Always lets THIS pool make such a move by itself from now on
@@ -867,11 +868,11 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       if (await model.runAction(it, a === 'proposal-approve' ? 'approve' : 'reject')) advance(id);
       return;
     }
-      if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always' || a === 'pool-always' || a === 'shape-always' || a === 'shape-window' || a === 'grant-8h' || a === 'grant-standing' || a === 'words-allow') {
+      if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always' || a === 'pool-always' || a === 'shape-always' || a === 'shape-window' || a === 'grant-8h' || a === 'grant-standing' || a === 'words-allow' || a === 'job-allow') {
       // lane hub-act-ask: the same arm as every Allow (a pane shown ARM_MS ago or less is not the one the user read)
       if (a !== 'hub-deny') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again')); return; } }
         const reachPick = st.cur && st.cur.id === id ? st.cur.reach.querySelector('input:checked') : null;   // lane key-instance-scope: the pane's picked reach rides an automation answer
-        if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a === 'shape-window' ? 'window' : a === 'grant-8h' ? '8h' : a === 'grant-standing' ? 'standing' : a === 'words-allow' ? 'allow' : a.slice(4), reachPick ? { reach: reachPick.value } : {})) advance(id);
+        if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a === 'shape-window' ? 'window' : a === 'grant-8h' ? '8h' : a === 'grant-standing' ? 'standing' : a === 'words-allow' || a === 'job-allow' ? 'allow' : a.slice(4), reachPick ? { reach: reachPick.value } : {})) advance(id);
       return;
     }
     if (a === 'secret-paste') { showSecretPasteDialog(model, it, { words: model.wordsOf(it), detail: model.detailOf(it) }); return; }   // lane vault-paste-request: the box as a dialog (the store resolves the item — the pane follows)

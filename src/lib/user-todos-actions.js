@@ -635,6 +635,22 @@ export function inboxModel(app) {
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_unknown' ? t('That request is gone') : code === 'entry_unknown' ? t('That entry is not in the vault any more') : (r && r.error) || t('server unreachable'), { type: 'error' });   // a lock withdraws a proposal (its card is gone)
       return false;
     }
+    if (rec && rec.action && rec.action.type === 'vault-job-ask') {
+      // lane vault-job-approval (design-vault-service-secret L1b): THE person's answer to a Background job's approval card (cookie
+      // route; any bearer is refused human_only). Allow lets a program hold the value at each start — 验证是你 opens FIRST, in the
+      // press's own task (the route checks this page's window); Deny is a click (the job is refused).
+      if (answer !== 'deny' && !revealLeftMs() && !(await askRevealPassword())) return false;
+      const r = await fetchJson(`/api/vault/job/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(answer !== 'deny' ? revealHeaders() : {}) }, body: JSON.stringify({ answer: answer === 'deny' ? 'deny' : 'allow' }) });
+      if (r && r.ok) {
+        const st = String(r.state || '');
+        showToast(r.outcome !== 'allowed' ? t('Denied — the job was not started') : st === 'waiting' && r.waitFor === 'approval' ? t('Allowed — it still waits for another of its approvals') : st === 'waiting' ? t('Allowed — it starts once the vault is unlocked') : ['failed', 'interrupted', 'down'].includes(st) ? t('Allowed — but the job did not start: Background Work says why') : t('Allowed — the job starts with the secret'));
+        return true;
+      }
+      const code = r && r.code;
+      if (code === 'reveal_needs_password') forgetReveal();
+      showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_unknown' ? t('That request is gone') : code === 'ask_over' ? t('The job that asked is gone — nothing was written') : (r && r.error) || t('server unreachable'), { type: 'error' });
+      return false;
+    }
     if (rec && rec.action && rec.action.type === 'vault-grant-ask') {
       // lane vault-manual-and-lock (design q-043 D4): THE person's answer to an agent's request for a stored secret (cookie
       // route; any bearer is refused human_only) — once (its next run) / 8h (every run for 8 hours) / deny. A click: a grant

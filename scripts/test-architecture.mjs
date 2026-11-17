@@ -6763,6 +6763,7 @@ await section(async () => {
     ['src/server/channels-grants.js', 'function setGrainRows(', /\.setMany\(/], ['src/task-groups.js', '_setVisibility(id, patch) {', /\bg\.set\(/], ['src/server/grants-migration.js', 'function migrate(', /\.seed\(/],
     ['src/server/browser-logins.js', 'function grant(', /\bg\.set\(/], ['src/server/browser-logins.js', 'function ungrant(', /\bg\.(?:set|remove)\(/], ['src/server/browser-logins.js', 'function drop(', /\bg\.remove\(/], // lane browser-login: 用于… / ✕ / 删除
     ['src/server/vault-use-grants.js', 'function setRow(', /\bg\.(?:set|remove)\(/], ['src/server/vault-use-grants.js', 'function addMember(', /\bg\.set\(/], ['src/server/vault-use-grants.js', 'function revoke(', /\bg\.(?:set|remove)\(/], ['src/server/vault-use-grants.js', 'function drop(', /\bg\.remove\(/], // lane vault-use-grants: 谁可以用… / «Always» + the request default / ✕ / the entry deleted
+    ['src/server/vault-job-door.js', 'function answer(', /\bg\.set\(/], // lane vault-job-approval: a Background job's approval card's 允许 (the job joins its conversation's member)
   ];
   const judgeC = (getSrc) => WRITERS97.filter(([f, head, re]) => !re.test(bodyOf(strip97(getSrc(f)), head))).map(([f, head]) => `${f} ${head} does not call the ONE writer`);
   const badC = judgeC(read);

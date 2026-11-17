@@ -17,10 +17,14 @@
  *     the vault not unlocked ⇒ WAIT `vault` (never a start without its values, never a counted failure); a value the agent PUT
  *     itself (it saw it) ⇒ go; a value the hub MINTED (the agent never saw it) or a free entry ⇒ go only on a `vault-job` grant
  *     row (src/grant-model.js — ONE row per entry, the member = the job's owner conversation, its `jobs` naming THIS job — a
- *     scheduled run's: its cron), else WAIT `approval`. The row's writer is lane vault-job-approval; this file only reads it.
- *     Round 2 (the acceptance's MAJOR — «no silent failures; every refusal names a door»): THIS version has no writer and no
- *     card, so the approval wait's words say so and name the door that works NOW (an entry the agent PUT); the lock's words name
- *     where a person unlocks it. The CLI's first line is the wait (never «started») — data/bin/vibespace-job.
+ *     scheduled run's: its cron), else WAIT `approval`. Round 2 (the acceptance's MAJOR — «no silent failures; every refusal
+ *     names a door»): the wait's words name the door that works; the lock's name where a person unlocks it. The CLI's first line
+ *     is the wait (never «started») — data/bin/vibespace-job.
+ *   · THE APPROVAL (lane vault-job-approval, L1b — design D1, D9): a wait for `approval` files ONE For-you card per job × entry
+ *     (`askCardOf` — the facts, never a value; no expiry; ≤ ASKS_PER_CONV open per conversation, ≤ ASKS_MAX on the hub; a Deny
+ *     quiets that conversation × entry DENY_QUIET_MS). 允许 (a person, the second password) adds the job to the owner
+ *     conversation's member of the entry's `vault-job` row (`memberWith` — through the grants store's ONE writer: the I/O is
+ *     src/server/vault-job-door.js); 拒绝 refuses the job (`vault_denied`).
  *   · THE HAND-OFF (`fdPlan`, `envOf`, `specOf`, `encodeFrame` / `decodeFrame`): the hub writes ONE frame to the wrapper's fd 3
  *     — the names and lengths in its head, the bytes raw (never a JSON string of a value: every copy can be zeroed); the wrapper
  *     gives NAME the job's fd FD_BASE + i (fd 3 is the memory gate's — data/bin/job-wrapper.js GATE_EXEC) and the env only
@@ -30,6 +34,7 @@
 const VR = require('./vault-run.js');
 const VB = require('./vault-blocked.js');
 const GM = require('./grant-model.js');
+const HC = require('./hidden-chars.js');   // lane vault-job-approval: the card shows a hidden character, never draws it
 
 const MAX = 8;                          // --vault values per job
 const NAME_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
@@ -43,6 +48,17 @@ const ACK = 0x06;                       // round 2: the wrapper's ONE byte back 
 const REFUSED_RE = /^[a-z][a-z0-9_]{0,40}$/;   // the wrapper's refusal code (its exit.json `refused`)
 const RESERVED_RE = /^VIBESPACE_/;      // the hub's own env names
 const WAITS = Object.freeze(['vault', 'approval']);
+// lane vault-job-approval (L1b, design D1 + D9): THE APPROVAL CARD — one For-you item per job × entry, no expiry, 允许 (the second
+// password) writes the job's id into the entry's `vault-job` grant row, 拒绝 refuses the job
+const ASK_TYPE = 'vault-job-ask';       // the card's For-you action type (src/foryou-actions.js row)
+const ASK_ID_RE = /^vj-[0-9a-f]{16}$/;  // a card's id (`askId`)
+const ASKS_PER_CONV = 4;                // JOBS waiting on open cards per conversation (the paste request's number — design D9; a job with
+                                        // several entries holds one card each, counted as ONE job — the adversarial read: a 5-entry job
+                                        // counted by cards could never start)
+const ASKS_MAX = 64;                    // …and on the whole hub (jobs)
+const DENY_QUIET_MS = 10 * 60 * 1000;   // a Deny quiets the same conversation × entry this long (request_quiet's ten minutes)
+const MEMBER_JOBS_MAX = 64;             // = src/grant-model.js JOBS_MAX: the job ids one member's approval names
+const CARD_LINE_MAX = 400;              // a path, a folder or a command on the card, cut with its mark (never a value — a reference)
 
 const WORDS = Object.freeze({
   vault_bad_spec: 'a --vault is NAME=vault://<entry> — the reference `vibespace-vault list` prints, never a value',
@@ -59,8 +75,16 @@ const WORDS = Object.freeze({
   vault_not_set_up: 'the vault is not set up on this instance — there is no value to hand the job',
   payload_too_large: `the job's vault values are larger than ${PAYLOAD_MAX / 1024} KiB together — the job was not started`,
   wait_vault: VB.agentWords('the job waits (a wait, never a failure) and starts by itself once a person unlocks it on this instance\'s page (⚙ System ▸ Vault…)'),
-  // round 2: THE TRUTH OF THIS VERSION — no approval card exists yet (lane vault-job-approval); never a promise of one that will not come
-  wait_approval: 'waiting for the user\'s approval of this job\'s vault values (a key the user stored, or a value the hub minted) — the approval card arrives in a later VibeSpace update, so in this version nothing can approve it and the job does not start; to run it now, store the key as this conversation\'s own entry (vibespace-vault put <name> --stdin — a value you put needs no approval; it takes the key in hand, so a value the hub minted, which you never saw, cannot be put), then rm this job and create it again with --vault NAME=vault://agent:<this conversation>/<name>',
+  // lane vault-job-approval (L1b): THE CARD EXISTS — the wait names it, and what each answer does (round 2's law: never a promise of
+  // a door that is not there, and the door that is)
+  wait_approval: 'waiting for the user\'s approval of this job\'s vault values (a key the user stored, or a value the hub minted) — at its start ONE card per entry asks the user in their For-you tray (a schedule: at its first fire); the job starts by itself once they allow it, and is refused if they deny it; a value this conversation PUT itself needs no approval (vibespace-vault put <name> --stdin, then --vault NAME=vault://agent:<this conversation>/<name>)',
+  vault_denied: 'the user denied this job the use of that vault entry — it was not started; `vibespace-job start` asks again (not within 10 minutes of the denial)',
+  ask_quiet: 'the user denied this conversation that vault entry less than 10 minutes ago — the job was not started; start it again later to ask again',
+  too_many_asks: `this conversation already has ${ASKS_PER_CONV} Background Work jobs waiting for the user's approval — the job was not started; wait for an answer (or rm a waiting job), then start it again`,
+  too_many_asks_hub: `${ASKS_MAX} Background Work jobs on this instance are waiting for the user's approval — the job was not started; start it again later`,
+  no_owner_conversation: 'a job with no owner conversation cannot be approved to use a vault value (an approval names its conversation) — the job was not started; create it from a conversation',
+  ask_unfiled: 'the approval card could not be filed in the user\'s For-you tray — the job was not started',
+  ask_closed: 'the approval card was closed without an answer — the job was not started; `vibespace-job start` asks again',
 });
 
 const refuse = (code, extra = {}) => ({ ok: false, code, words: WORDS[code] || code, ...extra });
@@ -210,6 +234,72 @@ function decodeFrame(buf, plan) {
   return { ok: true, values };
 }
 
+/** The job id an approval names: a scheduled run's is its cron's (every fire reads the cron's approval — D4), else the job's. */
+const askJobIdOf = (job) => String((job && (job.cronParent || job.id)) || '');
+
+/** THE APPROVAL CARD (lane vault-job-approval, design D1) — the facts of ONE job × entry → `{text, detail, i18n, facts}`: who asks,
+ *  the job (its name, its kind and what that means), the entry (its Vault name, its reference, the fd the program reads), the
+ *  program (its real path — and, a PLAIN fact, that an agent can change it: design D1's risk, never an alarm), the script an
+ *  interpreter runs, the folder, the command, the destination (unknown — a program), what a lock does. Names, paths and
+ *  references only — never a value (the card is an accident road). `facts` = the closed codes a client draws in its language. */
+const i18nKey = (s) => s;   // the extractor's marker (scripts/i18n-extract.mjs): a declared human-visible string — the card's lines are t()'d by the client
+const KIND_LINES = Object.freeze({
+  service: i18nKey('A service: it starts again by itself when it stops, and again after a VibeSpace restart once the vault is unlocked — each start gets the secret.'),
+  'service-on-failure': i18nKey('A service: it starts again by itself when it fails, and again after a VibeSpace restart once the vault is unlocked — each start gets the secret.'),
+  'service-never': i18nKey('A service that is not restarted by itself — each start gets the secret.'),
+  cron: i18nKey('A scheduled job: each run on its schedule gets the secret.'),
+  task: i18nKey('A task: it runs once and gets the secret once.'),
+});
+/** the kind's line by its restart policy (the adversarial read: a `never` service does not «start again by itself») */
+const kindKeyOf = (kind, restart) => (kind === 'service' ? (restart === 'never' ? 'service-never' : restart === 'on-failure' ? 'service-on-failure' : 'service') : kind === 'cron' ? 'cron' : 'task');
+// THE ONE HIDDEN-CHARACTER DOOR (src/hidden-chars.js — the approval census §1d): a job's name, a path and a command are the
+// agent's — a reordering / invisible character is SHOWN as ⟦U+XXXX⟧ (never drawn), a line break or a tab becomes a space
+const cardClip = (s) => { const t = HC.revealHidden(String(s == null ? '' : s)).replace(/[\u0000-\u001f\u007f]/g, ' '); return t.length > CARD_LINE_MAX ? `${t.slice(0, CARD_LINE_MAX - 1)}…` : t; };
+const fillLine = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
+function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null, folder = '', command = '' } = {}) {
+  const kind = ['service', 'cron', 'task'].includes(job.kind) ? job.kind : 'task';
+  const restart = kind === 'service' && ['always', 'on-failure', 'never'].includes(job.restart) ? job.restart : null;
+  const f = {
+    v: 1, who: cardClip(who).slice(0, 80), job: { id: String(job.id || ''), name: cardClip(job.label || job.id || ''), kind, ...(restart ? { restart } : {}) },   // who '' = unknown (the client says «a conversation» in its language)   // `label` = the engine's belted name (labelOf — §93), never the record's raw one
+    entry: { label: cardClip(entry.label || entry.id || ''), ref: cardClip(entry.ref || ''), var: `${entry.name || ''}_FD` },
+    program: { path: cardClip(program.path || ''), writable: program.writable === true },
+    ...(script && script.path ? { script: { path: cardClip(script.path), writable: script.writable === true } } : {}),
+    folder: cardClip(folder), command: cardClip(command), dest: 'unknown', lock: 'runs-on',
+  };
+  // ≤ 12 lines whatever the facts (the store keeps an item's first 12 i18n lines — src/user-todos.js normalizeI18n): «an agent
+  // can change it» rides its path's own line
+  const lines = [
+    { key: i18nKey('Job: {name} ({id})'), params: { name: f.job.name, id: f.job.id } },
+    { key: KIND_LINES[kindKeyOf(kind, restart)] },
+    { key: i18nKey('Secret: {label} — {ref}'), params: { label: f.entry.label, ref: f.entry.ref } },
+    { key: i18nKey('The program reads it once from the descriptor ${var} names — never from its environment, its command line or a file.'), params: { var: f.entry.var } },
+    f.program.writable ? { key: i18nKey('Program: {path} — an agent can change this program.'), params: { path: f.program.path } } : { key: i18nKey('Program: {path}'), params: { path: f.program.path } },
+    ...(f.script ? [f.script.writable ? { key: i18nKey('Script: {path} — an agent can change this script.'), params: { path: f.script.path } } : { key: i18nKey('Script: {path}'), params: { path: f.script.path } }] : []),
+    { key: i18nKey('Folder: {folder}'), params: { folder: f.folder } },
+    { key: i18nKey('Command: {command}'), params: { command: f.command } },
+    { key: i18nKey('Where it sends the secret: unknown — VibeSpace cannot read where a program connects.') },
+    { key: i18nKey('Locking the vault stops nothing that runs; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it.') },
+  ];
+  const text = { key: i18nKey('{who} asks to let the Background job «{name}» use a stored secret'), params: { who: f.who || 'a conversation', name: f.job.name } };
+  return { text: fillLine(text), detail: lines.map(fillLine).join('\n'), i18n: { text, detail: lines }, facts: f };
+}
+
+/** THE GRANT ROW'S NEXT LISTS (lane vault-job-approval — 允许 writes through the grants store's ONE writer): the member of the job's
+ *  owner conversation (`key`) gains `jobId`; every other member and every exception is kept as it is. `row` = the entry's
+ *  `vault-job` row | null. → `{to, except, same}` (`same`: the member names the job already — nothing to write) | null (the
+ *  member names MEMBER_JOBS_MAX jobs already). */
+function memberWith(row, key, jobId) {
+  const to = Array.isArray(row && row.to) ? row.to.map((m) => (m && typeof m === 'object' ? { ...m } : m)) : [];
+  const except = Array.isArray(row && row.except) ? row.except.slice() : [];
+  const m = to.find((x) => x && typeof x === 'object' && x.kind === 'conversation' && x.key === key);
+  if (!m) { to.push({ kind: 'conversation', key, jobs: [jobId] }); return { to, except, same: false }; }
+  const jobs = Array.isArray(m.jobs) ? m.jobs.map(String) : [];
+  if (jobs.includes(jobId)) return { to, except, same: true };
+  if (jobs.length >= MEMBER_JOBS_MAX) return null;
+  m.jobs = [...jobs, jobId];
+  return { to, except, same: false };
+}
+
 /** The job's state line while it waits. */
 const waitWords = (w) => (w === 'approval' ? WORDS.wait_approval : WORDS.wait_vault);
 /** Round 2 — A USE IS A HAND-OVER THAT COMPLETED: a start the wrapper never acknowledged (no ACK before its fd 3 closed) → the
@@ -225,6 +315,7 @@ function refusedOutcome(exit) {
 
 module.exports = {
   MAX, NAME_RE, FD_BASE, PAYLOAD_MAX, DRAIN_MS, DOOR, USE_DOOR, MAGIC, ACK, WAITS, WORDS,
+  ASK_TYPE, ASK_ID_RE, ASKS_PER_CONV, ASKS_MAX, DENY_QUIET_MS, askJobIdOf, askCardOf, memberWith,
   refsOf, parseVault, ownerOf, ownerKeysOf, jobIdsOf, familyOf, approvedBy, verdictOf,
   fdPlan, envOf, specOf, planOfSpec, encodeFrame, decodeFrame, waitWords, refusedOutcome,
 };

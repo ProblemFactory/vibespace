@@ -455,7 +455,9 @@ const hit0 = hit, PAGE0 = PAGE;
   const app2 = express();
   app2.use(auth.middleware());
   app2.use(express.json());
-  registerVaultRoutes(app2, { vault: vault2, activeSessions: sessions2, getJobs: () => ({ jobByToken: (t) => (t === 'jbt_live' ? { id: 'j1' } : null) }), contents, run: runDoor });
+  // lane vault-job-approval: a Background job's approval card's door, recorded (the door's own rules are test-vault-job's) — the ROUTE's law here
+  const jobAsks = { calls: [], answer(id, o) { this.calls.push({ id, ...o }); return { ok: true, outcome: o.answer === 'deny' ? 'denied' : 'allowed', job: 'jb-0000aaaa' }; } };
+  registerVaultRoutes(app2, { vault: vault2, activeSessions: sessions2, getJobs: () => ({ jobByToken: (t) => (t === 'jbt_live' ? { id: 'j1' } : null) }), contents, run: runDoor, jobAsks });
   const srv2 = await new Promise((r) => { const x = app2.listen(0, '127.0.0.1', () => r(x)); });
   const P2 = srv2.address().port, OWN2 = `http://127.0.0.1:${P2}`;
   const PAGE2 = { ...PAGE0, origin: OWN2 };
@@ -533,6 +535,37 @@ const hit0 = hit, PAGE0 = PAGE;
   ok(ans0.status === 403 && ans0.json.code === 'reveal_needs_password' && asksOf().length === 1, 'a person\'s Allow WITHOUT this page\'s 验证是你 ⇒ 403 reveal_needs_password, the ask stays (a grant opens the entry as the switch does — never a bare click a local process could forge)', ans0.json);
   const ans = await hit(`/api/vault/request/asks/${rq1.json.askId}`, { body: { answer: 'once', page } });
   ok(ans.status === 200 && ans.json.outcome === 'granted-once' && !asksOf().length, 'WITH it (Allow once) ⇒ the grant row; the ask resolved', ans.json);
+  // lane vault-job-approval (design-vault-service-secret L1b): a Background job's approval card is a PERSON's door — a bearer
+  // never answers it (human_only: the door is never asked); 允许 carries THIS page's 验证是你 only when the page holds it; 拒绝 is a click
+  {
+    const VJA = '/api/vault/job/asks/vj-' + '0'.repeat(16);
+    const jaB = await hit(VJA, { headers: { ...PAGE, ...B }, body: { answer: 'allow', page } });
+    const jaJ = await hit(VJA, { headers: { ...PAGE, authorization: 'Bearer jbt_live' }, body: { answer: 'allow', page } });
+    const n0 = jobAsks.calls.length;
+    const ja0 = await hit(VJA, { body: { answer: 'allow' } });
+    const ja1 = await hit(VJA, { body: { answer: 'allow', page } });
+    const jaD = await hit(VJA, { body: { answer: 'deny' } });
+    const cs = jobAsks.calls;
+    ok(jaB.status === 403 && jaB.json.code === 'human_only' && jaJ.status === 403 && jaJ.json.code === 'human_only' && n0 === 0, 'a Background job\'s approval card: a session bearer and a job token are refused human_only — its door is never asked', [jaB.json.code, jaJ.json.code, n0]);
+    ok(ja0.status === 200 && ja1.status === 200 && jaD.status === 200 && cs.length === 3 && cs[0].reauthed === false && cs[1].reauthed === true && cs[2].answer === 'deny' && cs[2].reauthed === false && cs.every((c) => c.person === true && c.by === 'user' && c.id === 'vj-' + '0'.repeat(16)),
+      'a PERSON\'s 允许 reaches the door with reauthed = this page\'s 验证是你 window (none on the page ⇒ false — the door refuses it); 拒绝 never needs it; every answer is the person\'s', cs);
+    // MUTANT: the answer route WITHOUT person() ⇒ a bearer's answer reaches the door — RED on the copy
+    const Mod = require('module'), rf = path.join(REPO, 'src/routes/vault.js'), rsrc = fs.readFileSync(rf, 'utf8');
+    const PERSON_AT = "if (jobAsks) app.post('/api/vault/job/asks/:askId', person((req) => {";
+    const rcut = rsrc.split(PERSON_AT).length === 2 ? rsrc.replace(PERSON_AT, "if (jobAsks) app.post('/api/vault/job/asks/:askId', ((fn) => async (req, res) => res.json(await fn(req)))((req) => {") : null;
+    let mutHit = null;
+    if (rcut) {
+      const rm = new Mod(rf); rm.filename = rf; rm.paths = Mod._nodeModulePaths(path.dirname(rf)); rm._compile(rcut, rf);
+      const stub = { calls: [], answer(id, o) { this.calls.push({ id, ...o }); return { ok: true, outcome: 'allowed' }; } };
+      const appM = express(); appM.use(auth.middleware()); appM.use(express.json());
+      rm.exports.registerVaultRoutes(appM, { vault: vault2, activeSessions: sessions2, getJobs: () => null, contents, run: runDoor, jobAsks: stub });
+      const srvM = await new Promise((r) => { const x = appM.listen(0, '127.0.0.1', () => r(x)); });
+      await hit0(VJA, { headers: { ...PAGE0, origin: `http://127.0.0.1:${srvM.address().port}`, ...B }, body: { answer: 'allow' }, port: srvM.address().port });
+      mutHit = stub.calls.length;
+      srvM.close();
+    }
+    ok(mutHit === 1, 'CONTROL — the job card\'s answer route without person(): a session bearer\'s 允许 REACHES the door — RED on the copy', rcut ? { mutHit } : 'the copy could not be built (its anchor is missing)');
+  }
   const prG = hit('/api/agent/vault/run', { headers: B, body: { args: ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/z'], cwd: WORK } });
   const cardG = await waitCard();
   await hit(`/api/vault/run/asks/${cardG.action.askId}`, { body: { answer: 'once', page } });   // int331 seam: q-043 H1 (int330) — a sign-in-off hub's run-card «once» demands this page's 验证是你 window too (the grant opened the ENTRY; the shape card is still answered with the window)

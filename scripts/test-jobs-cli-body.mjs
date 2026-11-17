@@ -543,7 +543,7 @@ console.log('(6) A JOB THAT WAITS IS NEVER «started» — its first line says i
   });
   const first = (r) => String(r.out).split('\n')[0];
   const LOCK = /the vault is locked — the job waits \(a wait, never a failure\) and starts by itself once a person unlocks it on this instance's page \(⚙ System ▸ Vault…\); the user has already been told/;
-  const APPR = /the approval card arrives in a later VibeSpace update, so in this version nothing can approve it and the job does not start; to run it now, store the key as this conversation's own entry \(vibespace-vault put <name> --stdin/;
+  const APPR = /at its start ONE card per entry asks the user in their For-you tray \(a schedule: at its first fire\); the job starts by itself once they allow it, and is refused if they deny it; a value this conversation PUT itself needs no approval \(vibespace-vault put <name> --stdin/;   // lane vault-job-approval: the card exists — the wait names it
   const waits = (leg, E, door) => { const r = W6[leg], j = jobOf(E, leg); return r.code === 0 && new RegExp(`^waiting: jb-[0-9a-f]{8} \\(service ${leg}\\) was created and is NOT started — `).test(first(r)) && door.test(first(r)) && !/^started\b/m.test(r.out) && !!j && j.state === 'waiting' && j.runs.length === 0; };
   const shown = (leg) => `${W6[leg].code}: ${first(W6[leg]) || W6[leg].err}`;
   ok(waits('vwl', VWL, LOCK), 'the vault LOCKED ⇒ the first line says waiting (never «started») and the door: a person unlocks it on this instance\'s page (⚙ System ▸ Vault…), the user already told — exit 0, the job waits with no run', shown('vwl'));

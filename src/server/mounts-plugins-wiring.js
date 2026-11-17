@@ -159,7 +159,7 @@ process.once('exit', () => { try { vaultRun.closeAll(); } catch { } });
 // lane vault-job-road (design-vault-service-secret L1a): a Background Work job's `--vault` values — the engine asks this door at
 // EVERY spawn (locked or unapproved ⇒ the job waits; an unlock or a `vault-job` grant row starts it), the values ride the
 // wrapper's fd 3 and the job's fd 4+ (src/server/vault-job-door.js over PURE src/vault-job.js) — never env, argv or a file
-try { const jm = getJobs && getJobs(); if (jm && typeof jm.setVaultJob === 'function') jm.setVaultJob(require('./vault-job-door.js').create({ vault, grants: () => require('./grants-store.js').store(), log: (m) => console.log(m) })); } catch (e) { console.error('[vault-job] the job door could not be wired:', e.message); }
+let vaultJob = null; try { const jm = getJobs && getJobs(); vaultJob = require('./vault-job-door.js').create({ vault, grants: () => require('./grants-store.js').store(), log: (m) => console.log(m), userTodos, nameOf: (cid) => { for (const s of activeSessions.values()) if (s && cid && (s.claudeSessionId || s.backendSessionId) === cid) return s.name || null; return null; } }); if (jm && typeof jm.setVaultJob === 'function') jm.setVaultJob(vaultJob); } catch (e) { console.error('[vault-job] the job door could not be wired:', e.message); }   // lane vault-job-approval: + its approval cards (For you) and the person's answer route (jobAsks)
 setTimeout(() => { try { const n = vaultRun.reconcile(); if (n) console.log(`[vault-run] ${n} run card(s) from before the restart resolved expired`); } catch { } }, 3000).unref?.();
 // design q-047 L1 (lane vault-totp): TWO-STEP CODES — the vault's `totp:<name>` entries (src/server/vault-totp.js over PURE
 // src/totp.js): a person sees the CODE (no 「验证是你」, audited); a conversation — THIS RUN of it (its token's digest) — or a
@@ -212,7 +212,7 @@ app.locals.settingHolds = settingHolds;   // the agent's ask route judges a last
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
   proxyLogins: browserProxyLogins, proxyMove: (id) => { const k = require('./browser-keeper.js').keeper(); return k && typeof k.moveProxyPassword === 'function' ? k.moveProxyPassword(id) : { ok: false, code: 'unavailable', error: 'the browser keeper is not running on this server' }; },   // B-8b87
-  logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)
+  logins: browserLogins, jobAsks: vaultJob,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)   // lane vault-job-approval: a Background job's approval card's answer
   jobSecrets: vaultJobSecrets,   // B-ef1b: the retired job-secrets notice's buttons (a person's door)
   linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who),
   // lane lg-remote-hardening (D3 half b): the attach child's hub signature — laws 1 + 2 in host-tokens.js signForMachine
