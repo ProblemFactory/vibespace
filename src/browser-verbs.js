@@ -1455,6 +1455,112 @@ function parseSnapshotRefs(outText) {
   return out;
 }
 
+// ═══ lane digit-zero (主开发 2026-11-17 — the owner's own agent: a date field answered «Done» and stayed EMPTY) ═══
+// WHAT AN AGENT TYPES ARRIVES, AND A FILL THAT CANNOT SET A FIELD SAYS SO. MEASURED on the driver this tree pins (agent-browser
+// 0.38.2, Chrome 154 — headless, headed on Xvfb and through the real cdp-mediator, identical): `keyboard type` / `type <sel>`
+// send one Input.insertText PER CHARACTER and `fill` one Input.insertText of the whole text — no key event; `press <key>` a real
+// keyDown / keyUp (code Digit0, windowsVirtualKeyCode 48, text "0": the zero arrives in every field). A NATIVE date / time /
+// datetime-local / month / week field takes NO inserted text — nothing lands, not even an input event — and the driver still
+// answers «✓ Done». So the wrapper reads every fill / type / keyboard type back (`readBack`, the driver's own `eval` injected):
+// a field of those kinds (and a colour / range control, the same «no text» family) gets the value through its OWN setter, in
+// the form its kind accepts, read back before the answer; a value it cannot take is refused by name with the form it wants.
+// Any other field is compared with what was asked: nothing landed is refused, a different value is said — never «Done».
+// A `press` of a key's CODE (Digit0, KeyA) types nothing (the driver sends the code as the key, with no text): refused before
+// it runs, with the key's name.
+const FIELD_FORMS = Object.freeze({
+  date: Object.freeze({ re: /^\d{4,}-\d{2}-\d{2}$/, example: '2027-01-07', words: 'year-month-day' }),
+  time: Object.freeze({ re: /^\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/, example: '09:05', words: 'hours:minutes, 24-hour clock' }),
+  'datetime-local': Object.freeze({ re: /^\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/, example: '2027-01-07T09:05', words: 'year-month-dayThours:minutes' }),
+  month: Object.freeze({ re: /^\d{4,}-\d{2}$/, example: '2027-01', words: 'year-month' }),
+  week: Object.freeze({ re: /^\d{4,}-W\d{2}$/, example: '2027-W01', words: 'year-Wweek' }),
+  color: Object.freeze({ re: /^#[0-9a-fA-F]{6}$/, example: '#3366cc', words: 'a # and six hex digits' }),
+  range: Object.freeze({ re: /^-?(?:\d+\.?\d*|\.\d+)$/, example: '50', words: 'a number inside the control\'s range' }),
+});
+const READ_BACK_TEXT_MAX = 120;
+/** What one command reads back — `fill <sel> <text>`, `type <sel> <text>`, `keyboard type|inserttext <text>` with exactly
+ *  those positionals (anything else is not judged); never a vault fill (its own verification) → { verb, sel, asked } | null. */
+function readBackPlan(argv) {
+  const a = (Array.isArray(argv) ? argv : []).map((x) => String(x ?? ''));
+  if (hasVaultFillFlag(a)) return null;
+  const vi = verbAt(a);
+  const verb = a[vi];
+  const pos = [];
+  for (let i = vi + 1; i < a.length;) { if (isFlag(a[i]) && a[i] !== '--') { i = flagEnd(a, i); continue; } if (a[i] !== '--') pos.push(a[i]); i++; }
+  if ((verb === 'fill' || verb === 'type') && pos.length === 2) return { verb, sel: pos[0], asked: pos[1] };
+  if (verb === 'keyboard' && (pos[0] === 'type' || pos[0] === 'inserttext') && pos.length === 2) return { verb: `keyboard ${pos[0]}`, sel: null, asked: pos[1] };
+  return null;
+}
+/** A `press` / `key` / `keydown` / `keyup` of a key's CODE (`Digit0`, `KeyA`, in a chord too) → the refusal, else null. */
+const KEY_CODE_NAME_RE = /^(?:Digit([0-9])|Key([A-Z]))$/;
+function keyNameVerdict(argv) {
+  const a = (Array.isArray(argv) ? argv : []).map((x) => String(x ?? ''));
+  const vi = verbAt(a);
+  if (!['press', 'key', 'keydown', 'keyup'].includes(a[vi])) return null;
+  let spec = null;
+  for (let i = vi + 1; i < a.length;) { if (isFlag(a[i]) && a[i] !== '--') { i = flagEnd(a, i); continue; } spec = a[i]; break; }
+  if (!spec) return null;
+  const parts = spec.split('+');
+  if (!parts.some((p) => KEY_CODE_NAME_RE.test(p))) return null;
+  const named = parts.map((p) => { const m = KEY_CODE_NAME_RE.exec(p); return m ? (m[1] !== undefined ? m[1] : m[2].toLowerCase()) : p; }).join('+');
+  const bad = parts.filter((p) => KEY_CODE_NAME_RE.test(p));
+  return {
+    code: 'key_code_name',
+    error: `${a[vi]} takes a key's NAME, not its code: «${bad.join('», «')}» ${bad.length === 1 ? 'is the code of a key' : 'are key codes'} — the browser would send ${bad.length === 1 ? 'it' : 'them'} as the key and type nothing`,
+    remedy: `vibespace-browser ${a[vi]} ${named}`,
+  };
+}
+// the deepest focused element (through same-origin frames) — its tag, kind, state and value; a password's value never leaves the page
+const FOCUSED_JS = 'let el=document.activeElement;try{while(el&&el.contentDocument&&el.contentDocument.activeElement)el=el.contentDocument.activeElement}catch(e){}';
+/** The page-side probe of the focused field (an expression for the driver's `eval`): `asked` is compared IN the page. */
+function fieldProbeJs(asked) {
+  return `(()=>{${FOCUSED_JS}if(!el||!el.tagName)return {tag:null};const tag=el.tagName.toLowerCase();const kind=tag==='input'?String(el.type||'text').toLowerCase():tag;const v=typeof el.value==='string'&&(tag==='input'||tag==='textarea')?el.value:null;const a=${JSON.stringify(String(asked))};const secret=kind==='password';return {tag,kind,has:v!==null,equal:v===a,includes:v!==null&&v.includes(a),len:v===null?null:v.length,locked:!!(el.readOnly||el.disabled),value:secret||v===null?null:v.slice(0,${READ_BACK_TEXT_MAX + 1})}})()`;
+}
+/** The field's OWN setter (the native value setter of its own window, so a framework's tracked value moves too), then the
+ *  input + change events a person's edit fires; answers what the field holds after. */
+function fieldSetJs(value) {
+  return `(()=>{${FOCUSED_JS}if(!el||!el.tagName||el.tagName.toLowerCase()!=='input')return {set:false};const w=(el.ownerDocument&&el.ownerDocument.defaultView)||window;const d=Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype,'value');d.set.call(el,${JSON.stringify(String(value))});el.dispatchEvent(new w.Event('input',{bubbles:true}));el.dispatchEvent(new w.Event('change',{bubbles:true}));return {set:true,kind:String(el.type||'').toLowerCase(),value:el.value}})()`;
+}
+const shown = (v) => { const s = String(v ?? ''); return JSON.stringify(s.length > READ_BACK_TEXT_MAX ? s.slice(0, READ_BACK_TEXT_MAX) + '…' : s); };
+/** The driver's `eval` answer → the object it printed (a JSON value on its last line; a string holding JSON is read once more). */
+function evalAnswer(r) {
+  if (!r || r.code !== 0) return null;
+  const line = String(r.out || '').trim().split('\n').filter(Boolean).pop() || '';
+  try { let v = JSON.parse(line); if (typeof v === 'string') v = JSON.parse(v); return v && typeof v === 'object' ? v : null; } catch { return null; }
+}
+/** THE READ-BACK (after the driver answered 0): `run(args)` → Promise<{code, out, err}> runs the driver on the same session.
+ *  → null (what the field holds is what was asked — the driver's own answer stands) · { note } (the field could not be read:
+ *  said under the driver's answer) · { code, out, err, as } (the answer REPLACED: the setter's success, a refusal, a mismatch). */
+async function readBack({ plan, run, json = false }) {
+  if (!plan || typeof run !== 'function') return null;
+  const what = plan.verb === 'fill' ? 'fill' : plan.verb === 'type' ? 'type' : plan.verb;
+  const target = plan.sel ? plan.sel : "<the field's @ref>";
+  const answer = (code, as, text, data = null) => (json
+    ? { code, as, out: JSON.stringify(code === 0 ? { success: true, data: { ...(data || {}), readBack: as }, error: null } : { success: false, data, code: as, error: text }) + '\n', err: code === 0 ? `note: ${text} [${as}]\n` : `[${as}]\n` }
+    : { code, as, out: text + '\n', err: code === 0 ? `[${as}]\n` : `[${as}]\n` });
+  let f = null;
+  try { f = evalAnswer(await run(['eval', fieldProbeJs(plan.asked)])); } catch { f = null; }
+  if (!f) return { note: `note: your ${what} ran, but the field could not be read back afterwards — check it (vibespace-browser get value ${target}) before you go on [read_back_unavailable]` };
+  if (!f.tag) return null; // nothing focused that holds a value (a page, a rich editor): not judged
+  const form = f.tag === 'input' ? FIELD_FORMS[f.kind] : null;
+  if (form) {
+    if (f.locked) return answer(1, 'field_locked', `nothing was set: the ${f.kind} field is read-only or disabled`);
+    if (!form.re.test(plan.asked)) {
+      return answer(1, 'field_form', `nothing was set: a ${f.kind} field takes no typed text and holds its value as ${form.example} (${form.words}) — your ${what} of ${shown(plan.asked)} is not in that form. Run: vibespace-browser fill ${target} ${form.example} (your value in that form)${f.kind === 'color' || f.kind === 'range' ? '' : ', or click the field and press each digit in the order it shows'}`, { kind: f.kind, form: form.example });
+    }
+    let g = null;
+    try { g = evalAnswer(await run(['eval', fieldSetJs(plan.asked)])); } catch { g = null; }
+    if (g && g.set && g.value === plan.asked) return answer(0, 'field_setter', `✓ Done — the ${f.kind} field holds ${plan.asked}, set through the field's own setter (a ${f.kind} field takes no typed text) and read back`, { kind: f.kind, value: g.value, via: 'setter' });
+    return answer(1, 'field_refused', `nothing was set: the ${f.kind} field did not take ${shown(plan.asked)} (it holds ${shown(g && g.value)}) — a value outside its range or not a real ${f.kind === 'datetime-local' ? 'date and time' : f.kind} is refused by the field itself`, { kind: f.kind, value: g ? g.value : null });
+  }
+  if (!f.has) return null;
+  const secret = f.kind === 'password';
+  if (plan.verb === 'fill' ? f.equal : f.includes) return null;
+  if (plan.verb !== 'fill' && /[\n\r\t]/.test(plan.asked)) return null; // a line break or a tab may submit the form or move the focus: not judged
+  if (f.len === 0 && plan.asked.length > 0) return answer(1, 'nothing_landed', `nothing landed: the ${f.kind} field is empty after your ${what} of ${secret ? `${plan.asked.length} characters` : shown(plan.asked)} — the page refused or cleared it`, { kind: f.kind, value: '' });
+  const holds = secret ? `${f.len} characters` : shown(f.value);
+  return answer(0, 'field_differs', `${what === 'fill' ? 'filled' : 'typed'} — but the ${f.kind} field holds ${holds}, not ${plan.verb === 'fill' ? 'exactly ' : 'a text containing '}${secret ? `the ${plan.asked.length} characters you gave` : shown(plan.asked)} (the page reformatted, cut or moved it)`, { kind: f.kind, value: secret ? null : f.value });
+}
+
 module.exports = {
   browserCell, REAL_BINARY, SHIM_MARKER, OURS, OURS_PAGE, PAGE_VERBS, REFUSED_VERBS, IDENTITY_FLAGS, RAW_CDP_FLAGS, LAUNCH_FLAGS, OPEN_FLAGS,
   ENV_PASS, ENV_LEGACY_KEEP, SOCKET_KEY, VALUE_FLAGS: Object.freeze([...VALUE_FLAGS]), BOOL_FLAGS: Object.freeze([...BOOL_FLAGS]), GET_NOUNS,
@@ -1475,4 +1581,6 @@ module.exports = {
   SECRET_COMPONENTS, IMAGE_PATH_RE, pathSlots, rewriteSlots, physicalPath, DAEMON_CWD_PREFIX, daemonCwdVerdict, ensureDaemonCwd, verbAt,
   // lane vault-login r22
   hasVaultFillFlag, parseFillVaultArgs, parseSnapshotRefs,
+  // lane digit-zero: a fill / type / keyboard type read back; a key's code refused
+  FIELD_FORMS, readBackPlan, keyNameVerdict, fieldProbeJs, fieldSetJs, evalAnswer, readBack,
 };

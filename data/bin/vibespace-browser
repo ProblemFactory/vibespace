@@ -300,6 +300,18 @@ function navFacts(outText) {
  *  else the session's `tab list --json` active tab (0.38.1: a new tab becomes the session's active one; measured ≤ 80 ms,
  *  bounded here) — handed to the server with the audit so the watch binds the tab to THIS conversation, never to the verb
  *  that happened to be in flight (two commands at once left it nobody's: a loop in it was never told, `stop` found nothing). */
+/** lane digit-zero: one more driver command on the SAME session (the read-back's `eval`), bounded, never printed →
+ *  { code, out, err } (a spawn that fails or overruns its bound answers a non-zero code). */
+function runBinQuiet(bin, args, { env, cwd, ms = 10000 }) {
+  return new Promise((resolve) => {
+    let out = '', err = '', c = null;
+    try { c = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env, cwd }); } catch (e) { return resolve({ code: 127, out: '', err: String(e && e.message) }); }
+    const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { /* ended */ } resolve({ code: 124, out, err: err + ' (no answer within the read-back bound)' }); }, ms);
+    c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
+    c.on('error', (e) => { clearTimeout(t); resolve({ code: 127, out, err: String(e && e.message) }); });
+    c.on('exit', (code) => { clearTimeout(t); resolve({ code: code == null ? 1 : code, out, err }); });
+  });
+}
 function tabNewAck(outText, { bin, env, cwd, wantsJson }) {
   const idOf = (x) => (typeof x === 'string' && /^[0-9A-Za-z_-]{4,64}$/.test(x) ? x : null);
   const lastJson = (text, pick) => { for (const line of String(text || '').split('\n').reverse()) { const l = line.trim(); if (!l.startsWith('{')) continue; try { const v = pick(JSON.parse(l)); if (v) return v; } catch { /* not the result line */ } } return null; };
@@ -688,6 +700,8 @@ async function runPage(c) {
   // and every rewritten word is judged (the over-named sets above already hold them; this is the proof, not a hope)
   let framed = inFrame(cls);
   { const wr = framed.writes.length ? writeRefusal(framed.writes) : null; if (wr) refuseLocally(wr); }
+  // lane digit-zero: a `press` of a key's CODE (Digit0, KeyA) types nothing — refused before anything runs, with the key's name
+  { const kn = typeof V.keyNameVerdict === 'function' ? V.keyNameVerdict(cls.argv) : null; if (kn) refuseLocally(kn); }
   const runCwd = startsNothing ? { ok: true, dir: null } : daemonCwd();
   if (!runCwd.ok) refuseLocally(runCwd);
   let bin = startsNothing ? { ok: true, path: '' } : realBinary();
@@ -1085,6 +1099,9 @@ async function runPage(c) {
       process.exit(1);
     }
   }
+  // lane digit-zero: what this command reads back after the driver answers (a fill / type / keyboard type; never a vault fill,
+  // a batch, or a tab under the read fence — its reads are the hub's to judge)
+  const readPlan = typeof V.readBackPlan === 'function' && !isVaultFill && !r.scrubOutput && cls.verb !== 'batch' ? V.readBackPlan(cls.argv) : null;
   // r5 F1 (b): the binary (and a daemon this spawn starts) runs in the private directory, never this shell's
   const child = spawn(bin.path, argv, { stdio, env, cwd: runCwd.dir });
   if (stdinJson != null) child.stdin.end(stdinJson);
@@ -1129,6 +1146,14 @@ async function runPage(c) {
   child.on('exit', async (code) => {
     childDone = true; pollAbort.abort(); if (shotTimer) clearTimeout(shotTimer);
     let outText = Buffer.concat(outChunks).toString('utf8'), errText = Buffer.concat(errChunks).toString('utf8');
+    // lane digit-zero: a fill / type / keyboard type the driver answered 0 is READ BACK before anything is said — a date /
+    // time field takes no typed text (its own setter, in its form, read back), nothing landed is refused, a different value is
+    // said (V.readBack); the audit below then records what the read-back found
+    if (code === 0 && readPlan && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit) {
+      const rb = await V.readBack({ plan: readPlan, json: wantsJson, run: (args) => runBinQuiet(bin.path, [...(argv.includes('--pin-tab') ? ['--pin-tab'] : []), ...args], { env, cwd: runCwd.dir }) });
+      if (rb && rb.note) errText += rb.note + '\n';
+      else if (rb) { outText = rb.out; errText = rb.err; code = rb.code; }
+    }
     let tail = (outText + errText).slice(-4000);
     // §3.7's audit: who used which browser, when, to do WHAT (the verb only —
     // a fill's content is never recorded) — the ephemeral browser too. A

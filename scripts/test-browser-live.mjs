@@ -575,6 +575,119 @@ async function legPasskeyRoads() {
   }
 }
 // lane passkey-browse-yourself: BROWSER_LIVE_ONLY=pk runs ⑪ alone (the passkey roads' real leg)
+// ═══ ⑫ LANE DIGIT-ZERO (主开发 2026-11-17 — the owner's own agent on a web form's native date field: `keyboard type 01072027`
+// left it 0227-01-07, four presses for 2027 gave 227, `fill` of an ISO date answered Done over an EMPTY field). WHAT AN AGENT
+// TYPES ARRIVES, AND A FILL THAT CANNOT SET A FIELD SAYS SO — on the REAL road: the REAL keeper launching ONE profile HEADED (the
+// driver's own Xvfb — the owner's shape), the REAL cdp-mediator, the REAL routes, the shipped `vibespace-browser` driving the REAL
+// driver over a loopback form of its own that logs every keydown / input / change it receives:
+//   a  the ten digits — keyboard type into a text and a number field, a press of each into a number field: every digit
+//      arrives, the zero included (the page's own value and log)
+//   b  a native date field — keyboard type 01072027 (the owner's act) refused [field_form] with the form, nothing set; fill
+//      2027-01-07 through the field's own setter, read back (the page saw input + change); eight presses 0 1 0 7 2 0 2 7 put a
+//      year 2027 in it (the zero arrives by key, never 0227)
+//   c  a time field — fill 09:05 set the same way; fill 0905 refused [field_form]
+//   d  press Digit0 refused [key_code_name] before anything runs (the page sees no key)
+//   e  a file into a frame's file input: `frame <the frame's selector>` → `upload <the input>` → `frame main` puts it there;
+//      `upload` of a selector inside a frame, from the main frame, does not reach it (the manual's recipe, both halves)
+//   RED CONTROL: the same CLI without its read-back (a copy beside its modules) answers «✓ Done» over the EMPTY date field —
+//   the release's road.
+// SKIPs by name without the driver / Xvfb. Zero vendor calls; ends every daemon it started (by their session names).
+const TYPED_FORM = '<!doctype html><meta charset=utf-8><title>TYPED</title><input id=t type=text><input id=n type=number><input id=d type=date><input id=tm type=time>'
+  + '<iframe id=f srcdoc="<!doctype html><input id=up type=file>"></iframe><iframe id=f2 srcdoc="<!doctype html><input id=up2 type=file>"></iframe>'
+  + '<script>window.__log=[];for(const ev of ["keydown","input","change"])document.addEventListener(ev,(e)=>{window.__log.push([ev,e.target&&e.target.id,e.key===undefined?null:e.key])},true);</script>';
+async function legTypedKinds() {
+  console.log('— ⑫ lane digit-zero: what an agent types arrives; a fill that cannot set a field says so — the real keeper, mediator and driver, headed');
+  const envBase = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_') && !k.startsWith('VIBESPACE_') && !['DISPLAY', 'WAYLAND_DISPLAY', 'XDG_SESSION_TYPE', 'DBUS_SESSION_BUS_ADDRESS', 'XAUTHORITY'].includes(k)) envBase[k] = v;
+  const realBin = F.binaryResolver('agent-browser', envBase)();
+  const DD = require('../src/desktop-display.js');
+  const missing = Object.entries({ 'agent-browser': realBin, Xvfb: DD.binOnPath('Xvfb', { env: envBase }) }).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length) { skip(`⑫ the typed-kinds leg: ${missing.join(', ')} not on this machine`); return; }
+  const K12 = require('../src/server/browser-keeper.js'), D12 = require('../src/server/browser-dialogs.js'), R12 = require('../src/routes/browser.js'), MED12 = require('../src/server/cdp-mediator.js');
+  const express = require('express');
+  const RT = path.join(ROOT, 'typed'), KH = path.join(RT, 'h'), KXD = path.join(RT, 'x'), CWD = path.join(RT, 'cwd'), CTL = path.join(RT, 'ctl');
+  for (const d of [path.join(KH, '.agent-browser'), KXD, CWD, CTL]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  const env = { ...envBase, HOME: KH, XDG_RUNTIME_DIR: KXD };
+  const pages = http.createServer((req, res) => { res.setHeader('content-type', 'text/html; charset=utf-8'); res.setHeader('cache-control', 'no-store'); res.end(TYPED_FORM); });
+  await new Promise((r) => pages.listen(0, '127.0.0.1', r));
+  const SITE = `http://127.0.0.1:${pages.address().port}/form`;
+  const quiet = { log() { }, warn() { }, error() { }, info() { } };
+  const KA = 'bk-0000d2a1', TA = 'vsst_btyped_a';
+  const med = MED12.create({ log: quiet });
+  const kk = K12.create({ dataDir: path.join(RT, 'data'), homeDir: KH, env: () => env, serverSetting: (k) => (k === 'browser.headed' ? 'yes' : undefined), liveKeys: () => new Set([KA]), runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: quiet, install: false, mediator: med });
+  const prof = kk.createProfile({ label: 'Typed' }, { owner: { kind: 'instance', id: null } });
+  const sessions12 = new Map([['sess-ta', { agentToken: TA, _browserKey: KA, _browserVariant: 'D', _browserEnv: null, name: 'Chat T', cwd: CWD }]]);
+  const dialogs = D12.create({ keeper: kk, log: quiet, leaseCountOf: (pid) => new Set(((kk.list().leases) || []).filter((l) => l && l.profileId === pid && l.browserKey).map((l) => l.browserKey)).size, holdersOf: () => [] });
+  kk.setStuckSource((bk) => dialogs.stuckForKey(bk));
+  dialogs.setTabsOf((q) => { try { return kk.holderTabs(q && q.profileId, q && q.browserKey) || []; } catch { return []; } });
+  R12.setup({ keeper: kk, activeSessions: sessions12, dialogs, tasksForSession: () => [] });
+  const app = express(); app.use(express.json()); app.use(R12.router);
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const API = `http://127.0.0.1:${srv.address().port}`;
+  const PASSWD = path.join(RT, 'passwd.cjs'); fs.writeFileSync(PASSWD, `const os = require('os'); const real = os.userInfo; os.userInfo = (o) => ({ ...real(o), homedir: ${JSON.stringify(KH)} });\n`);
+  const run = (bin, args, e, timeoutMs) => new Promise((resolve) => {
+    const t0 = Date.now(); const c = spawn(bin, args, { env: e, cwd: CWD });
+    let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
+    const t = setTimeout(() => { c.kill('SIGKILL'); }, timeoutMs);
+    c.on('exit', (code) => { clearTimeout(t); resolve({ code, out, err, ms: Date.now() - t0 }); });
+  });
+  const cliAt = (cliPath) => (args, timeoutMs = 60000) => run(process.execPath, ['--require', PASSWD, cliPath, ...args], { ...env, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: TA, VIBESPACE_SESSION_CWD: CWD }, timeoutMs);
+  const A = cliAt(path.join(repo, 'data/bin/vibespace-browser'));
+  // THE RED CONTROL: the shipped CLI without its read-back, beside the modules it loads (a copy outside any checkout)
+  const CLI_SRC = fs.readFileSync(path.join(repo, 'data/bin/vibespace-browser'), 'utf8');
+  const HOOK = '    if (code === 0 && readPlan && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit) {';
+  fs.writeFileSync(path.join(CTL, 'vibespace-browser'), CLI_SRC.replace(HOOK, '    if (false) { // CONTROL: no read-back'), { mode: 0o755 });
+  for (const [from, to] of [['src/browser-verbs.js', 'vibespace-browser-verbs.js'], ['src/cli-call.js', 'cli-call.js'], ['src/browser-stuck.js', 'vibespace-browser-stuck.js'], ['src/browser-passkey.js', 'vibespace-browser-passkey.js']]) fs.copyFileSync(path.join(repo, from), path.join(CTL, to));
+  const Ctl = cliAt(path.join(CTL, 'vibespace-browser'));
+  const page = async () => { const r = await A(['eval', 'JSON.stringify({ t: document.querySelector("#t").value, n: document.querySelector("#n").value, d: document.querySelector("#d").value, tm: document.querySelector("#tm").value, up: document.querySelector("#f").contentDocument.querySelector("#up").files.length, up2: document.querySelector("#f2").contentDocument.querySelector("#up2").files.length, log: window.__log })']); try { let v = JSON.parse(String(r.out).trim().split('\n').filter(Boolean).pop()); if (typeof v === 'string') v = JSON.parse(v); return v; } catch { return { raw: r.out + r.err }; } };
+  const reset = () => A(['eval', 'for (const e of document.querySelectorAll("input")) e.value = ""; window.__log = []; document.activeElement && document.activeElement.blur(); "reset"']);
+  const keysOf = (p, id) => (p.log || []).filter((l) => l[0] === 'keydown' && l[1] === id).map((l) => l[2]);
+  try {
+    await kk.attach({ profileId: prof.id, browserKey: KA, sessionId: 'sess-ta', by: 'user' });
+    const o = await A(['open', SITE]);
+    if (o.code !== 0 || !kk.browserOf(prof.id)) { skip(`⑫ the keeper could not launch the browser here: ${(o.out + o.err).slice(-300)}`); return; }
+    const DIG = '0123456789';
+    // a
+    await reset(); await A(['focus', '#t']); let k = await A(['keyboard', 'type', DIG]); let p = await page();
+    ok(k.code === 0 && p.t === DIG, `⑫ a: keyboard type ${DIG} into a text field — every digit arrives, the zero included (${JSON.stringify(p.t)})`, k.out + k.err);
+    await reset(); await A(['focus', '#n']); k = await A(['keyboard', 'type', DIG]); p = await page();
+    ok(k.code === 0 && p.n === DIG, `⑫ a: keyboard type ${DIG} into a number field — every digit arrives (${JSON.stringify(p.n)})`, k.out + k.err);
+    await reset(); await A(['focus', '#n']); for (const d of DIG) await A(['press', d]); p = await page();
+    ok(p.n === DIG && keysOf(p, 'n').join('') === DIG, `⑫ a: a press of each digit into a number field — ten keys the page saw, the zero first (${JSON.stringify(keysOf(p, 'n'))} → ${JSON.stringify(p.n)})`, JSON.stringify(p));
+    // b
+    await reset(); await A(['focus', '#d']); k = await A(['keyboard', 'type', '01072027']); p = await page();
+    ok(k.code === 1 && /\[field_form\]/.test(k.err) && k.out.includes('a date field takes no typed text and holds its value as 2027-01-07') && p.d === '', `⑫ b: the owner's act — keyboard type 01072027 into a native date field is REFUSED [field_form] with the form, nothing set (never «Done»)`, JSON.stringify({ k, d: p.d }));
+    await reset(); k = await A(['fill', '#d', '2027-01-07']); p = await page();
+    ok(k.code === 0 && k.out.includes('✓ Done — the date field holds 2027-01-07, set through the field\'s own setter') && p.d === '2027-01-07' && (p.log || []).some((l) => l[0] === 'input' && l[1] === 'd') && (p.log || []).some((l) => l[0] === 'change' && l[1] === 'd'), `⑫ b: fill 2027-01-07 sets the date field through its own setter, read back — the page saw input and change (value ${JSON.stringify(p.d)})`, JSON.stringify({ k, p }));
+    await reset(); await A(['focus', '#d']); for (const d of '01072027') await A(['press', d]); p = await page();
+    ok(/^2027-/.test(p.d) && keysOf(p, 'd').join('') === '01072027', `⑫ b: eight presses 0 1 0 7 2 0 2 7 into the date field — every key arrives and the year is 2027, never 0227 (${JSON.stringify(p.d)})`, JSON.stringify(p));
+    // c
+    await reset(); k = await A(['fill', '#tm', '09:05']); p = await page();
+    ok(k.code === 0 && p.tm === '09:05' && /set through the field's own setter/.test(k.out), `⑫ c: fill 09:05 sets the time field the same way (${JSON.stringify(p.tm)})`, k.out + k.err);
+    await reset(); k = await A(['fill', '#tm', '0905']); p = await page();
+    ok(k.code === 1 && /\[field_form\]/.test(k.err) && k.out.includes('09:05') && p.tm === '', '⑫ c: fill 0905 into the time field is refused [field_form] with its form', k.out + k.err);
+    // d
+    await reset(); await A(['focus', '#t']); k = await A(['press', 'Digit0']); p = await page();
+    ok(k.code === 1 && /\[key_code_name\]/.test(k.err) && k.err.includes('vibespace-browser press 0') && p.t === '' && keysOf(p, 't').length === 0, '⑫ d: press Digit0 (a key\'s code) is refused [key_code_name] with `press 0` — before anything runs: the page saw no key', k.out + k.err);
+    // e
+    const FILE = path.join(CWD, 'frame-upload.txt'); fs.writeFileSync(FILE, 'one file\n');
+    const u0 = await A(['upload', '#up2', FILE]); p = await page();
+    ok(u0.code !== 0 && p.up2 === 0, `⑫ e: upload of a selector inside a frame, from the main frame, does not reach it (exit ${u0.code}: ${(u0.out + u0.err).trim().split('\n').pop().slice(0, 160)})`, JSON.stringify({ u0, up2: p.up2 }));
+    const f1 = await A(['frame', '#f']), u1 = await A(['upload', '#up', FILE]), f0 = await A(['frame', 'main']); p = await page();
+    ok(f1.code === 0 && u1.code === 0 && f0.code === 0 && p.up === 1, `⑫ e: frame #f → upload #up <file> → frame main puts the file in the frame's input (${p.up} file)`, JSON.stringify({ f1: f1.out + f1.err, u1: u1.out + u1.err, f0: f0.out + f0.err, up: p.up }));
+    // RED CONTROL
+    await reset(); k = await Ctl(['fill', '#d', '2027-01-07']); p = await page();
+    ok(k.code === 0 && /✓ Done/.test(k.out) && p.d === '', `⑫ RED CONTROL: the CLI without its read-back answers «✓ Done» over the EMPTY date field — the release's road (value ${JSON.stringify(p.d)})`, JSON.stringify({ k, d: p.d }));
+  } catch (e) {
+    ok(false, '⑫ the typed-kinds leg threw', e && (e.stack || e.message));
+  } finally {
+    try { await kk.stop(prof.id, { why: 'user' }); } catch { }
+    try { dialogs.shutdown(); kk.shutdown?.(); med.shutdown(); } catch { }
+    await new Promise((r) => srv.close(() => r())); await new Promise((r) => pages.close(() => r()));
+    reapDaemons(new Set([`vs-${KA}`, `vs-${prof.id}`]));
+    try { fs.rmSync(RT, { recursive: true, force: true }); } catch { }
+  }
+}
+if (process.env.BROWSER_LIVE_ONLY === 'typed') { await legTypedKinds(); done(); }
 if (process.env.BROWSER_LIVE_ONLY === 'pk') { await legPasskeyRoads(); done(); }
 // lane browser-shared-profile-freeze: BROWSER_LIVE_ONLY=freeze runs ⑩ alone (the shared-profile freeze's real leg)
 if (process.env.BROWSER_LIVE_ONLY === 'freeze') { await legSharedFreeze(); done(); }
@@ -2139,4 +2252,5 @@ await (async () => {
 await legSharedFreeze(); // ⑩ lane browser-shared-profile-freeze
 await legAttach(); // ⑨ lane one-browser-b1
 await legPasskeyRoads(); // ⑪ lane passkey-browse-yourself
+await legTypedKinds(); // ⑫ lane digit-zero
 done();

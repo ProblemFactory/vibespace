@@ -149,6 +149,23 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
 
 ---
 
+### Typing into a form — dates, times, keys, and a file in a frame
+
+* `fill`, `type` and `keyboard type` are **read back** before they answer. A field the page cut or reformatted is said
+  (`[field_differs]`, what it holds); a field left empty is refused (`[nothing_landed]`) — never «Done».
+* A **date, time, date-and-time, month or week** field (and a colour or range control) takes no typed text. Give it the
+  value in its own form and VibeSpace sets it through the field's own setter, then reads it back:
+  `vibespace-browser fill @ref 2027-01-07` (date) · `fill @ref 09:05` (time, 24-hour clock) · `fill @ref 2027-01-07T09:05`
+  (date and time) · `fill @ref 2027-01` (month) · `fill @ref 2027-W01` (week) · `fill @ref '#3366cc'` (colour) · `fill @ref 50`
+  (range). Any other form (`01/07/2027`, `01072027`, `9:05 AM`) is refused `[field_form]` with the form the field wants. A
+  person's way works too: click the field and `press` each digit in the order the field shows it (`press 0`, `press 1`, …).
+* `press` takes a key's **name** — `press 0`, `press a`, `press Enter`, `press Control+a`. A key's code (`Digit0`, `KeyA`)
+  types nothing and is refused `[key_code_name]` with the name to use.
+* **A file input inside a frame:** `upload` by a selector does not reach into a frame. Enter the frame by ITS selector, upload
+  on the input itself, come back:
+  `vibespace-browser frame '#upload-frame'` → `vibespace-browser upload 'input[type=file]' /path/to/file` →
+  `vibespace-browser frame main`.
+
 ## 2. Your browser
 
 * **It is this conversation's.** Its tabs, cookies and storage are yours; no
