@@ -11,7 +11,7 @@
 // row-fold-model.js — a primary control never folds). Gate: test-ui-fit (fast) ② + test-ui-fit-chrome (every rail panel at 260
 // and 200 px: no word broken inside itself, nothing wider than its box, every control on one line).
 import { rowActionsFold, ROW_INLINE_MAX } from './row-fold-model.js';
-import { showContextMenu, showToast } from './utils.js';
+import { showContextMenu } from './utils.js';
 import { t } from './i18n.js';
 
 const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
@@ -42,9 +42,10 @@ export function railRow({ row = null, className = '', lead = null, name = null, 
     const more = el('button', 'rail-row-more'); more.type = 'button'; more.textContent = '⋯'; more.title = t('More'); more.setAttribute('aria-label', t('More'));
     const rest = list.filter((_, i) => folded.has(String(i)));
     // the reader's minor: a folded GROUP (a <div> of buttons — the manifest plugin's Update · Uninstall) is its BUTTONS, one row
-    // each; a disabled control's row is drawn off and its press SAYS why (its own tip), never a silent nothing
+    // each; a control that cannot act is an OFF row that says WHY on the row (utils.js showContextMenu's `off` — ui-controls'
+    // rule since 2.369.402: a row works, or it is a caption, or it is off with its why), never a toast, never a silent nothing
     const rows = rest.flatMap((c) => (c.tagName === 'BUTTON' ? [c] : [...c.querySelectorAll('button')]));
-    more.onclick = (e) => { e.stopPropagation(); const b = more.getBoundingClientRect(); showContextMenu(b.left, b.bottom + 2, rows.map((c) => ({ label: labelOf(c), title: c.title || '', disabled: false, action: () => { if (c.disabled) showToast(c.title || (labelOf(c) + ' — ' + t('not available'))); else c.click(); } }))); };
+    more.onclick = (e) => { e.stopPropagation(); const b = more.getBoundingClientRect(); showContextMenu(b.left, b.bottom + 2, rows.map((c) => (c.disabled ? { label: labelOf(c), off: c.title || t('not available') } : { label: labelOf(c), title: c.title || '', action: () => c.click() }))); };
     ctl.appendChild(more);
   }
   r.replaceChildren(...[lead, m, ctl].filter(Boolean));
