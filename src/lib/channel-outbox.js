@@ -268,6 +268,40 @@ function envRow(cls, label, value) {
 }
 /** F1 / F3 (r6 verify): what the reply ANSWERS (its author + an excerpt of the stored message) and, where the
  *  adapter derives them from it, WHO RECEIVES it — the recipients resolved when it was proposed, sent verbatim. */
+// lane bl-msg B-9b9c (fb-8c0809911d: two conversations' replies to ONE message were both approved — the contact got it twice):
+// ANOTHER REPLY TO THIS MESSAGE — waiting, in flight or sent (the engine's `also`, resolved NOW) — is said on the card, both cards
+// linked, before Approve; while one is still open (or sent) the first Approve press only says so, the second sends
+const ALSO_SAID = new Set(['proposed', 'awaiting-approval', 'sending', 'unknown', 'sent']);
+export const alsoOpen = (p) => (Array.isArray(p && p.also) ? p.also : []).filter((a) => a && a.id && ALSO_SAID.has(a.state));
+const alsoWho = (a) => { const d = (a && a.by) || {}; return d.kind === 'agent' ? (d.name || d.id || t('an agent')) : t('you'); };
+export function alsoWords(a) {
+  const who = alsoWho(a);
+  if (a.state === 'sent') return t('A reply to this message was already sent — drafted by {who}', { who });
+  if (a.state === 'sending' || a.state === 'unknown') return t('Another reply to this message is being sent — drafted by {who}', { who });
+  return t('Another reply to this message is waiting — drafted by {who}', { who });
+}
+function appendAlso(app, card, p) {
+  for (const a of alsoOpen(p)) {
+    const row = el('div', 'chan-prop-also');
+    row.dataset.also = String(a.id);
+    row.setAttribute('role', 'note');
+    row.appendChild(el('span', 'chan-prop-also-text', alsoWords(a)));
+    const b = el('button', 'chan-prop-also-show', t('Show it'));
+    b.type = 'button';
+    b.onclick = (ev) => { if (ev && ev.stopPropagation) ev.stopPropagation(); if (app && typeof app.openChannelOutbox === 'function') app.openChannelOutbox({ show: String(a.id) }); };
+    row.appendChild(b);
+    card.appendChild(row);
+  }
+}
+/** The first Approve press on a card with another reply still open (or sent) only SAYS it (once per card); → true = the press stops here. */
+export function alsoHolds(card, p) {
+  if (!alsoOpen(p).length || card.dataset.alsoAsked === '1') return false;
+  card.dataset.alsoAsked = '1';
+  const w = el('div', 'chan-prop-also-ask', t('Another reply to this same message is still open or already sent — press Approve again to send this one too'));
+  w.setAttribute('role', 'alert');
+  card.appendChild(w);
+  return true;
+}
 function appendReplyTarget(card, p) {
   const a = p.replyAnchor;
   if (a && a.vendorId) {
@@ -500,7 +534,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
     card.appendChild(envRow('chan-prop-to', t('To'), (p.compose.to || []).join(', ')));
     if ((p.compose.cc || []).length) card.appendChild(envRow('chan-prop-cc', t('Cc'), p.compose.cc.join(', ')));
     card.appendChild(envRow('chan-prop-subject', t('Subject'), p.compose.subject || ''));
-  } else appendReplyTarget(card, p);
+  } else { appendReplyTarget(card, p); appendAlso(app, card, p); }   // lane bl-msg B-9b9c: the other replies to this message, linked
   // lane channel-threads (spec §5.2) + 2026-09-28 THE PLACEMENT: a reply says WHERE it lands, above its text — a
   // quote shown in the chat, a reply in the thread, a thread reply also shown in the chat (PURE `placementText`
   // over the placement read through its alias — a proposal stored before the enum says `inThread`); a plain message
@@ -705,6 +739,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
     if (noFile) { approve.textContent = t('Send without the file'); approve.dataset.withoutFiles = '1'; if (!String(p.text || '').trim()) approve.disabled = true; }
     const lock = (on) => { for (const b of act.querySelectorAll('button')) b.disabled = on; };
     const doApprove = async (deliver) => {
+      if (alsoHolds(card, p)) return;   // lane bl-msg B-9b9c: another reply to this message is open — said first, the next press sends
       lock(true);
       const text = editor ? editor.value : null;
       // r3: a send that starts a turn echoes the count the card SAID (`expectWakes`) — and a receipt woken now is one more

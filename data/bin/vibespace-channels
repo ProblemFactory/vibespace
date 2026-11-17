@@ -627,6 +627,8 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     else if (p.state === 'awaiting-approval') { console.log(`proposed — proposal ${p.id} is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`); console.log('  the card is in this chat and in Channels › Outbox'); }   // lane chat-proposal-card: WHERE the card is — the agent's prose stopped inventing a place («Channels 里放了一条…»)
     else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
     console.log('  ' + TX.sentLine(r, text));   // lane cli-one-text-arg: the route's count — a cut is visible here
+    // lane bl-msg B-9b9c: another reply to the SAME message is open or sent — said by id (yours or another conversation's); the user's cards are linked
+    for (const a of Array.isArray(p.also) ? p.also : []) console.log(`  another reply to this message is ${a.state === 'sent' ? 'already sent' : a.state === 'sending' || a.state === 'unknown' ? 'being sent' : 'waiting for approval'}: proposal ${a.id} (${a.mine ? 'yours' : 'from another conversation'}) — the user sees both cards linked${a.mine && a.state !== 'sent' ? `; take one back: vibespace-channels withdraw ${a.id}` : ''}`);
     const attLine = attachmentLine(p);
     if (attLine) console.log(attLine);
     printRecipients(p);

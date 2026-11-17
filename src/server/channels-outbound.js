@@ -126,6 +126,19 @@ function create(engineCtx) {
   }
   /** A proposal as the two surfaces read it — plus the identity warning
    *  STRUCTURE for its adapter and its expiry instant. */
+  // lane bl-msg B-9b9c (fb-8c0809911d: two conversations each proposed a reply to ONE message, both cards were approved, the contact
+  // got it twice): a reply proposal is CROSS-LINKED at propose with every other reply to the same message that is waiting, in flight
+  // or sent (`alsoFor`: ids, both ways, at most ALSO_MAX); the view resolves each id's state NOW (`also`), so a card says it, the
+  // agent's answer names it, and the card's Approve asks once more while another is still open
+  const ALSO_STATES = new Set(['proposed', 'awaiting-approval', 'sending', 'unknown', 'sent']);
+  const ALSO_MAX = 8;
+  function alsoView(p) {
+    if (!Array.isArray(p.alsoFor) || !p.alsoFor.length) return null;
+    const all = store.outbox.snapshot().proposals || {};
+    const out = p.alsoFor.map((sid) => all[sid]).filter((q) => q && q.id !== p.id && ALSO_STATES.has(q.state))
+      .map((q) => ({ id: q.id, state: q.state, at: q.at || null, by: q.draftedBy ? { kind: q.draftedBy.kind, id: q.draftedBy.id || null, name: q.draftedBy.name || null } : null }));
+    return out.length ? out : null;
+  }
   function proposalView(p) {
     const rec = adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
     const c = rec ? registry.capsOf(rec.kind) : null;
@@ -139,8 +152,9 @@ function create(engineCtx) {
     // a reaction carries no text, so no sender line; its lost outcome is checked by ONE list call where reactions are listed
     const honestyLine = reactionKind || recallKind ? null : pending ? P.honestyLine({ draftedBy: p.draftedBy, enabled: honestyLineFor(rec) }) : (p.result && p.result.honestyLine ? P.honestyLine({ draftedBy: p.draftedBy, enabled: true }) : null);
     const can = p.state === 'unknown' ? (!c ? { ok: false, code: 'no-adapter', why: 'the adapter no longer exists' } : recallKind ? (caps.recallRowOf(c) ? { ok: true } : { ok: false, code: 'no-idempotency', why: 'this channel no longer declares a recall — only a person can check the platform' }) : reactionKind ? (reactionsRow(c).read === 'list' ? { ok: true } : { ok: false, code: 'no-idempotency', why: 'this channel does not list reactions — only a person can check the platform' }) : P.canReconcile(c)) : null;
+    const also = alsoView(p);   // lane bl-msg B-9b9c
     return {
-      ...p, ...(p.convId && conversationName(p.adapterId, p.convId) ? { title: conversationName(p.adapterId, p.convId) } : {}),   // B-c127: the conversation's name NOW (a proposal froze its title — or the raw id — when it was drafted)
+      ...p, ...(also ? { also } : {}), ...(p.convId && conversationName(p.adapterId, p.convId) ? { title: conversationName(p.adapterId, p.convId) } : {}),   // B-c127: the conversation's name NOW (a proposal froze its title — or the raw id — when it was drafted)
       adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, identityWarning: c ? caps.identityWarning(c) : null, ttlAt, canDecide: p.state === 'awaiting-approval',
       convKind: (p.key && store.index.live()[p.key] && store.index.live()[p.key].kind) || null,
       // lane lark-upload-preflight: an awaiting card whose files this account cannot carry WARNS on the chip and its
@@ -176,7 +190,9 @@ function create(engineCtx) {
   const scopeConvOf = (p) => (p && !p.compose && p.convId ? p.convId : null);
   function agentProposalView(ctx, p) {
     if (!p) return p;
-    const v = agentProposalViewRaw(ctx, p);
+    let v = agentProposalViewRaw(ctx, p);
+    // lane bl-msg B-9b9c: an agent reads the other replies by id and state — whether one is its OWN, never another conversation's name
+    if (v && Array.isArray(v.also) && ctx && ctx.kind === 'agent') v = { ...v, also: v.also.map((a) => ({ id: a.id, state: a.state, mine: !!(a.by && a.by.kind === 'agent' && a.by.id === ctx.id) })) };
     return ctx && ctx.kind === 'agent' ? agentIdsOf(v) : v;   // verify r3 F6: an AGENT's view carries its ids as line pieces (the user's window keeps them as they are)
   }
   /** the drafter's view (whole while it still sees, else the fate) — its two lines are test-channels-engine's control pins, kept verbatim */
@@ -667,6 +683,8 @@ function create(engineCtx) {
       staged = OF.stage(store.dir, att.files);   // design 005: SYNCHRONOUS — no await between the reach re-check above and the record
       await store.outbox.update((ob) => {
         const id = store.outbox.nextId();
+        // lane bl-msg B-9b9c: every other reply to THIS message still open or sent (read in the same update that writes this one)
+        const alsoIds = v.proposal.replyTo ? Object.values(ob.proposals || {}).filter((q) => q && q.id !== id && !q.kind && !q.compose && q.adapterId === adapterId && q.convId === convId && q.replyTo != null && String(q.replyTo) === String(v.proposal.replyTo) && ALSO_STATES.has(q.state)).map((q) => q.id).slice(-ALSO_MAX) : [];
         created = ob.proposals[id] = {
           id, adapterId, convId, key: en.key, title: agentTitle(en, convId),   // verify r1 F2: the proposal's title is printed by `vibespace-channels status`
           text: v.proposal.text, originalText: v.proposal.text, replyTo: v.proposal.replyTo, why: v.proposal.why, attachments: OF.metaOf(att.files),
@@ -679,7 +697,9 @@ function create(engineCtx) {
           sendAs: who.as, identity: identityFor(rec, who.as),
           ttlMs: P.PROPOSAL_TTL_MS, awaitingSince: null, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null,
           history: [{ state: 'proposed', at: t, by: drafter.kind }],
+          ...(alsoIds.length ? { alsoFor: alsoIds } : {}),
         };
+        for (const sid of alsoIds) { const q = ob.proposals[sid]; if (q) q.alsoFor = [...(Array.isArray(q.alsoFor) ? q.alsoFor.filter((x) => x !== id) : []), id].slice(-ALSO_MAX); }   // both ways: the earlier card says it too
       });
       OF.commit(store.dir, staged, created.id);
       staged = null;
@@ -698,7 +718,7 @@ function create(engineCtx) {
     if (decision.mode !== 'direct') {
       await transition(created.id, 'awaiting-approval', 'policy');
       await pointerSync(en.key);
-      notifyOutbox([created.id]);
+      notifyOutbox([created.id, ...(Array.isArray(created.alsoFor) ? created.alsoFor : [])]);   // lane bl-msg B-9b9c: the linked cards redraw too
       notify([convId]);
     }
     const fresh = store.outbox.snapshot().proposals[created.id];

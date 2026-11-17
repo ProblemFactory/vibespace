@@ -4392,5 +4392,46 @@ const sendRed = (c) => [...c.doors.filter((d) => !d.reads).map((d) => `door ${d.
   ok(deaf !== ROUTES_SRC && sendRed(sendCensus(CLI_SRC, deaf)).some((x) => /door composeCallers does not read b\.collect/.test(x)), 'CONTROL: a send door that drops the CLI\'s collect (compose --caller) is RED by name');
 }
 
+// lane bl-msg B-9b9c (fb-8c0809911d): two conversations each proposed a reply to ONE incoming message, the person approved both cards and
+// the contact got the reply twice. A reply is CROSS-LINKED at propose with every other reply to the same message that is open or sent:
+// both views carry `also` (resolved NOW), the agent's answer names it by id and whose, never another conversation's name
+console.log('§bl-msg B-9b9c two replies to ONE message — both cards name the other; the agent is told; another message is not linked');
+{
+  const runOn = async (ENGM, name) => {
+    const W9 = mkEngine({ name, engine: ENGM, live: [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }, { cid: 'agent-2', name: 'Helper', groups: ['g1'] }] });
+    const { eng } = W9;
+    await prime(eng);
+    await eng.setReach(A, C, { principal: { kind: 'agent', id: 'agent-2', name: 'Helper' }, level: 'visible' });
+    const AG2 = { kind: 'agent', id: 'agent-2', name: 'Helper', groups: ['g1'], msgLevelFor: () => 'none' };
+    const recs = eng.store.readTail(A, C, { limit: 20 }).filter((x) => x && x.vendorId);
+    const msg = recs[recs.length - 1].vendorId, other = recs[0].vendorId;
+    const p1 = await eng.propose(AGENT, A, C, { text: 'reply one', replyTo: msg });
+    const p2 = await eng.propose(AG2, A, C, { text: 'reply two', replyTo: msg });
+    const p3 = await eng.propose(AGENT, A, C, { text: 'to another message', replyTo: other });
+    const v = (id) => eng.outboxView().proposals.find((x) => x.id === id) || {};
+    const out = { msg, other, p1: p1.proposal, p2: p2.proposal, p3: p3.proposal, v1: v(p1.proposal.id), v2: v(p2.proposal.id), v3: v(p3.proposal.id) };
+    if (p1.proposal) await eng.reject(p1.proposal.id).catch(() => null);
+    out.v2after = v(p2.proposal.id);
+    return out;
+  };
+  const g = await runOn(ENG, 'b9b9c');
+  const ids = (x) => (Array.isArray(x && x.also) ? x.also.map((a) => a.id) : []);
+  ok(g.msg !== g.other && g.p1 && g.p2 && g.p1.state === 'awaiting-approval' && g.p2.state === 'awaiting-approval', 'two agents each proposed a reply to the same message (both await approval)', JSON.stringify({ s1: g.p1 && g.p1.state, s2: g.p2 && g.p2.state }));
+  ok(JSON.stringify(ids(g.v1)) === JSON.stringify([g.p2.id]) && JSON.stringify(ids(g.v2)) === JSON.stringify([g.p1.id]) && g.v2.also[0].by && g.v2.also[0].by.name === 'Worker' && g.v2.also[0].state === 'awaiting-approval',
+    'THE CARDS: each view names the other (id, state, who drafted it) — linked both ways', JSON.stringify({ v1: g.v1.also, v2: g.v2.also }));
+  ok(Array.isArray(g.p2.also) && g.p2.also.length === 1 && g.p2.also[0].mine === false && !('by' in g.p2.also[0]) && !JSON.stringify(g.p2.also).includes('Worker'),
+    'THE AGENT\'S ANSWER: the second drafter is told the other proposal by id and «not yours», never the other conversation\'s name', JSON.stringify(g.p2.also));
+  ok(!ids(g.v3).length && !ids(g.v1).includes(g.p3.id), 'a reply to ANOTHER message is not linked');
+  ok(!ids(g.v2after).length, '…and once the other is rejected, the card no longer names it (resolved now, never a frozen copy)', JSON.stringify(g.v2after.also || null));
+  // RED CONTROL: the cross-link removed at propose ⇒ nothing names the other — the legs above go red
+  const src = engineSource(REPO);
+  const LINK = "const alsoIds = v.proposal.replyTo ?";
+  ok(src.split(LINK).length === 2, 'the control finds its line');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MUTO = mutantCopies('blm-9b9c', REPO);
+  const r = await runOn(MUTO.load('src/server/channels-engine.js', src.replace(LINK, 'const alsoIds = false ?'), 'no-also'), 'b9b9c-red');
+  ok(!ids(r.v1).length && !ids(r.v2).length && !(r.p2 && r.p2.also), 'RED CONTROL (no cross-link): neither card nor the answer names the other reply — the B-9b9c legs go red');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
