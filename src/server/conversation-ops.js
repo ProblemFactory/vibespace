@@ -41,7 +41,6 @@
  * pins), scripts/test-spend-paths.mjs (the `headless-open` primitive must sit under the authorizer — a MUTANT without it
  * is UNWIRED), the ws suites unchanged (test-ws-contract, test-session-schema, test-agentd-session, test-restore-liveness).
  */
-const CF = require('../conversation-facts.js'); // lane end-obeys-verdict: THE end verdict (PURE)
 const crypto = require('crypto');
 const { capsOf } = require('../backend-caps');
 const SPEC = require('../conversation-spec.js');
@@ -499,6 +498,11 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       if (args.force) {
         if (t.by !== 'opener') return { ok: false, code: 'force_not_yours', why: 'force is honoured only for a conversation this key opened; this one is reached through a grant — nothing was stopped. A person can terminate it from System → Conversations and browsers.', target: label };
       } else {
+        const CF = require('../conversation-facts.js');   // THE end verdict (PURE) — required here: a suite's scratch copy of this file carries no sibling
+        // only a chat conversation whose harness row keeps every sidecar fact can ever be judged idle by the hub (on top of piece 2):
+        // anything else is the person's to end — said, so a manager does not retry
+        const keeps = (() => { try { return require('../backend-caps.js').capsOf(t.s.backend || 'claude').sidecarFacts || {}; } catch { return {}; } })();
+        if (t.s.mode !== 'chat' || !(keeps.background && keeps.timers && keeps.lastRecordAt)) return { ok: false, code: 'person_only', why: `not ended — only a person can end it: ${t.s.mode !== 'chat' ? 'a terminal conversation' : 'its harness'} reports none of what an agent's end must know. Nothing was stopped. A person can terminate it from System → Conversations and browsers.`, target: label };
         const row = listFacts && typeof listFacts.rowOf === 'function' ? listFacts.rowOf(t.id) : null;
         if (!row) return { ok: false, code: 'not_ready', why: 'the conversation facts are not wired yet — nothing was stopped', target: label };
         const v = CF.endVerdict(row);

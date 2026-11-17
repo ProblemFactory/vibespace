@@ -306,7 +306,10 @@ console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `
   W.activeSessions.set('sess-0-9', { name: 'coordinator', backend: 'claude', backendSessionId: 'c0ffee', claudeSessionId: 'c0ffee', clients: new Map() });
   W.activeSessions.set('sess-0-8', { name: 'stranger', backend: 'claude', backendSessionId: 'dd44', claudeSessionId: 'dd44', clients: new Map() });
   let ticks = 0;
-  const V = OPS.automationVerbs({ activeSessions: W.activeSessions, groupsOf: () => [], ops: opsW, waitMs: 2000, sleep: async () => { ticks++; if (ticks === 3) for (const s of W.activeSessions.values()) if (!s.backendSessionId) { s.backendSessionId = s.claudeSessionId = 'ee55'; } } });
+  // lane end-obeys-verdict (majordomo piece 3): the end verb asks THE verdict over the list builder's row — an idle chat conversation here
+  const IDLE_ROW = { turn: 'idle', background: [], heldPrompts: 0, asks: 0, goal: 'none', continue: { armed: false }, timers: 'none-seen', browser: null, handover: false, jobs: { running: 0, schedules: 0, nextFireAt: null, items: [] } };
+  const listFacts = { rowOf: () => require(path.join(ROOT, 'src/conversation-facts.js')).shapeRow({ ...IDLE_ROW }) };
+  const V = OPS.automationVerbs({ activeSessions: W.activeSessions, groupsOf: () => [], ops: opsW, waitMs: 2000, listFacts, sleep: async () => { ticks++; if (ticks === 3) for (const s of W.activeSessions.values()) if (!s.backendSessionId) { s.backendSessionId = s.claudeSessionId = 'ee55'; } } });
   // the engine's reach (ONE PURE rule — src/automation-keys.js reachVerdict): the caller itself, or what the key OPENED (the engine's
   // store rows stand in here as `opened`; test-automation-keys ⑰ proves the real store across a restart)
   const opened = new Set();
@@ -335,6 +338,7 @@ console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `
   const denied = await V['groups.invite']({ group: 'g-1', target: 'sess-0-7' }, { ...ctx, reach: () => ({ ok: false, code: 'not_granted' }) });
   const young = await V['groups.invite']({ group: 'g-1', target: 'sess-0-7' }, { ...ctx, reach: () => ({ ok: true, by: 'grant' }) });
   ok(denied.code === 'not_granted' && young.code === 'pending' && W.ge.calls.length === 1, 'invite: a conversation the key does not reach ⇒ not_granted; one that has no id yet ⇒ pending — the engine is never asked', { denied, young });
+  W.activeSessions.get(id).mode = 'chat';   // lane end-obeys-verdict: an idle CHAT conversation (a terminal one is the person's to end)
   const en = await V['conversations.end']({ target: id }, ctx);
   ok(en.ok && en.target === 'ee55' && W.ends.at(-1).d.sessionId === id && W.ends.at(-1).actBy === 'agent:claude:c0ffee', 'end: the conversation ends, its teardown names the calling conversation', en);
   // ⑥b lane conversations-archive-verb: THE ARCHIVE VERB over the seams — asks_open / resolveAsks, subject_busy / force, end then archive, a dead target, already_archived

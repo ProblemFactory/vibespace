@@ -61,7 +61,6 @@ console.log('① the end obeys the verdict');
     ['a CLI timer it set', { s: session({ _convFacts: (() => { const st = idleFacts(); CF.factsStep(st, { type: 'command_lifecycle', state: 'started', wakeup_source: 'loop_wakeup', scheduled_for: 5 }, 3); return st; })() }) }, 'timer'],
     ['a hand-over in flight', { over: { handoverOf: () => true } }, 'handover'],
     ['a schedule without the person\'s wake grant', { over: { jobsOf: () => ({ running: 0, schedules: 1, nextFireAt: 9, items: [{ id: 'j1', kind: 'schedule', wakeGrant: false }] }) } }, 'job'],
-    ['an UNKNOWN fact (a terminal conversation: its turn)', { s: session({ mode: 'terminal' }) }, 'turn_unknown'],
     ['an UNKNOWN wake grant', { over: { jobsOf: () => ({ running: 1, schedules: 0, nextFireAt: null, items: [{ id: 'j1', kind: 'job', wakeGrant: null }] }) } }, 'job_unknown'],
   ];
   for (const [label, w, code] of cases) {
@@ -70,6 +69,16 @@ console.log('① the end obeys the verdict');
     ok(!r.ok && r.code === 'subject_busy' && r.busy.some((b) => b.code === code) && W.ended.length === 0 && W.sessions.has('sess-1') && /Nothing was stopped/.test(r.why) && /System → Conversations and browsers/.test(r.why),
       `${label} ⇒ subject_busy (${code}), the session still live, nothing ended, the person's door named`, { code: r.code, busy: r.busy && r.busy.map((b) => b.code) });
   }
+  // on top of piece 2: only a chat conversation whose harness row keeps every sidecar fact can ever be judged idle by the hub —
+  // a terminal one, or a harness that keeps none, is «only a person can end it» (so a manager does not retry)
+  for (const [label, s0] of [['a terminal conversation', session({ mode: 'terminal' })], ['a chat on a harness whose row keeps no sidecar facts (codex)', session({ backend: 'codex' })]]) {
+    const W = world({ s: s0 });
+    const r = await W.call({ target: CID });
+    ok(!r.ok && r.code === 'person_only' && /only a person can end it/.test(r.why) && W.ended.length === 0 && W.sessions.has('sess-1'), `${label} ⇒ person_only («only a person can end it»), nothing ended`, r);
+  }
+  const forcedTerm = world({ s: session({ mode: 'terminal' }) });
+  const ft = await forcedTerm.call({ target: CID, force: true }, 'opener');
+  ok(ft.ok && forcedTerm.ended.length === 1, 'force on a terminal conversation THIS key opened ends it (the coordinator\'s own terminal worker — the changelog says so)', ft);
   const idle = world();
   const r = await idle.call({ target: CID });
   ok(r.ok && idle.ended.length === 1 && r.link === `vibespace://conversation/claude:${CID}`, 'an idle conversation with every fact known is ended — the answer carries its link', r);
