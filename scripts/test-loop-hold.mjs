@@ -19,6 +19,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
+import vm from 'node:vm';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
@@ -780,6 +781,76 @@ console.log('⑬ the number — the held seconds per day by cause, from the tele
     '(5) no hold in the seven days ⇒ the one sentence; a server older than the field ⇒ nothing; a cause outside the fixed key prints «(other)» (nothing of its text reaches the page); the drawing reads no zone (+08:00 draws the same words)', { empty });
   ok(/\$\{heldDaysTable\(d\.loopHeld, \{ t, esc \}\)\}/.test(SF.slice(SF.indexOf("<h2>${esc(t('Main loop held'))}</h2>"), SF.indexOf("const pf = lh.profile || {};"))),
     '(5) ⚙ Diagnostics «Main loop held» draws it from the summary it already fetched (d.loopHeld), inside its own section');
+}
+
+console.log('⑭ B-fe0b — the ask\'s own delivery names no hold; node\'s own code inside a hold says so (measured on Node 22.23.4 and 24.22.1)');
+{
+  // the frames below are MEASURED (a worker session asking the product's own expression of a main thread in each state,
+  // both Nodes): an idle loop answered with NO frame 14 490 of 14 491 times (Node 24; 13 036 of 13 037 on Node 22); a
+  // channel's first MessageEvent ran undici's lazy load — under node's loader, often deep in what it pulls (crypto, tls,
+  // http2), the 31-frame stack cut before its bottom; a sync gzip answered in slice (node:buffer) under processChunkSync
+  const S = (frames) => LH.sampleOf(enc(frames), ROOT).frames;
+  const A = (frames) => { const sm = LH.sampleOf(enc(frames), ROOT); return LH.framesAnswer(sm.frames, sm.form, sm.cut); };
+  const R0 = 'node:internal/bootstrap/realm', U = 'node:internal/deps/undici/undici';
+  const UNDICI8 = [['__require', U, 6], ['', U, 1230], ['compileForInternalLoader', R0, 398], ['requireBuiltin', R0, 429], ['lazyMessageEvent', 'node:internal/worker/io', 108], ['onMessageEvent', 'node:internal/worker/io', 320],
+    ['[nodejs.internal.kHybridDispatch]', 'node:internal/event_target', 845], ['', 'node:internal/per_context/messageport', 23]];
+  const UNDICI31 = [['set', '', 0], ['createSupportedAlgorithms', 'node:internal/crypto/util', 61], ['', 'node:internal/crypto/util', 80],
+    ...[['node:internal/tls/secure-context'], ['node:internal/tls/common'], ['node:tls'], ['node:internal/http2/core'], ['node:http2']].flatMap(([f]) => [['compileForInternalLoader', R0, 398], ['requireBuiltin', R0, 429], ['', f, 1]]),
+    ['compileForInternalLoader', R0, 398], ['requireBuiltin', R0, 429], ['requireWithFallbackInDeps', R0, 475],
+    ...['lib/dispatcher/client-h2.js', 'lib/dispatcher/client.js', 'lib/dispatcher/pool.js', 'lib/dispatcher/agent.js', 'lib/global.js'].flatMap((m) => [[m, U, 1056], ['__require', U, 6]])];
+  const WEBSTREAMS22 = [['getNonWritablePropertyDescriptor', 'node:internal/webstreams/readablestream', 12], ['', 'node:internal/webstreams/readablestream', 3], ['compileForInternalLoader', R0, 398], ['requireBuiltin', R0, 429],
+    ['lib/web/fetch/response.js', U, 1056], ['__require', U, 6], ['', U, 1230], ['compileForInternalLoader', R0, 398], ['requireBuiltin', R0, 429], ['lazyMessageEvent', 'node:internal/worker/io', 108], ['onMessageEvent', 'node:internal/worker/io', 320]];
+  const ZLIB = [['slice', 'node:buffer', 1], ['processChunkSync', 'node:zlib', 463], ['zlibBufferSync', 'node:zlib', 182], ['syncBufferWrapper', 'node:zlib', 816], ['zlibHog', ROOT + '/src/hogs.js', 9]];
+  const TIMERS = [['peek', 'node:internal/priority_queue', 26], ['processTimers', 'node:internal/timers', 520]];
+  const HTTP = [['push', '', 0], ['compileForInternalLoader', R0, 398], ['requireBuiltin', R0, 429], ['', 'node:_http_agent', 1], ['compileForInternalLoader', R0, 398], ['requireBuiltin', R0, 429], ['', 'node:http', 1],
+    ['compileForInternalLoader', R0, 398], ['requireBuiltin', R0, 429], ['loadHttp', ROOT + '/src/x.js', 3]];
+  const OWN_SESSION = [['', '', 0], ['post', 'node:inspector', 140], ['askSelf', ROOT + '/src/x.js', 7]];
+  const STREAM = [['readableAddChunk', 'node:internal/streams/readable', 9], ['Readable.push', 'node:internal/streams/readable', 4], ['onStreamRead', 'node:internal/stream_base_commons', 189]];
+  const INSPECTOR_ONLY = [['get', '', 0], ['#onMessage', 'node:inspector', 70], ['', 'node:inspector', 120], ['', 'node:internal/inspector/network', 5]];
+  const ud = A(UNDICI8), u31 = A(UNDICI31), w22 = A(WEBSTREAMS22), zl = A(ZLIB), tm = A(TIMERS), ht = A(HTTP), osn = A(OWN_SESSION), st = A(STREAM);
+  const NO = 'with no frame of ours below it', CUT = 'the stack cut before any frame of ours';
+  ok(ud.words === `node’s own code — undici, ${NO}` && ud.key === '(node’s own code — undici)' && ud.keyWords === ud.key && !ud.empty,
+    `a channel's first MessageEvent (undici's lazy load, measured): «${ud.words}», keyed by the module — never a frame of undici's bundle`, ud);
+  ok(UNDICI31.length === LH.SAMPLE_FRAMES && u31.words === `node’s own code — undici, ${CUT}` && u31.key === ud.key && w22.words === ud.words,
+    'the same load in a FULL answer (31 frames, cut inside crypto / tls / http2 — Node 24) and inside webstreams (Node 22): still undici — the bundled dependency in the run names it, never the innermost module; the full one never claims «no frame of ours»', { u31, w22 });
+  ok(zl.words === 'node’s own code — zlib, driven by zlibHog (src/hogs.js:9)' && zl.key === 'src/hogs.js:9' && zl.keyWords === 'zlibHog (src/hogs.js:9)',
+    `a sync gzip answered in slice (node:buffer) under processChunkSync: «${zl.words}» — keyed by our frame, as before`, zl);
+  ok(st.words === `node’s own code — streams, ${NO}` && tm.words === `node’s own code — timers, ${NO}` && ht.words === 'node’s own code — http, driven by loadHttp (src/x.js:3)' && osn.words === 'node’s own code — inspector, driven by askSelf (src/x.js:7)' && !osn.empty,
+    'stream glue run from the loop (its innermost module, never stream_base_commons); node\'s timers with nothing of ours (priority_queue is a helper); a lazy require of http by our code (the module node\'s loader was loading at the outermost level, never the http_agent it pulled); this thread\'s OWN inspector session — held code driven by ours, never the delivery', { st: st.words, tm: tm.words, ht: ht.words, osn: osn.words });
+  const del = A([]), ins = A(INSPECTOR_ONLY), bi = A([['test', '', 0]]), ours = A([['busyHog', ROOT + '/src/hogs.js', 38], ['', 'node:internal/timers', 585]]);
+  ok(del.empty && ins.empty && del.words === LH.WORDS.between && !bi.empty && bi.words === '(built-in)' && ours.words === 'busyHog (src/hogs.js:38) ← (anonymous) (node:internal/timers:585)' && ours.key === 'src/hogs.js:38',
+    'THE DELIVERY: no frame, or only the inspector\'s dispatch (with V8 built-ins), is the empty answer; a built-in alone and a stack whose first frame is ours keep their words', { del, ins, bi, ours });
+  // in a hold: two asks answered at JavaScript speed inside undici's load + one on the CPU unanswered (B-1409's fourth case,
+  // .393 self-hosted, Node 24) — JavaScript, as the ruling says, and the samples SAY undici; the delivery of an idle ask names nothing
+  const FROM = 50000, TO = FROM + 1500, B0 = 3;
+  const at = (i, answer, ms = 0.05) => ({ postedAt: FROM + 300 + i * 300, answeredAt: answer ? FROM + 300 + i * 300 + ms : null, state: 'running', answer, beat: B0 });
+  const holdOf = (asks) => { const J = LH.judgeAsks(asks, { beat0: B0, holdEnd: TO }); const h = { from: FROM, to: TO, fromM: FROM, toM: TO, ms: 1500, samples: J.samples, outside: J.outside, d: null }; return { fo: LH.foldHold(h), line: LH.holdLine(h) }; };
+  // the ask's own delivery: posted inside the hold, answered in its LAST beat once the held code returned (an empty
+  // answer earlier in a hold is a promise flood's — read as the hold's end too, round 4's law, kept here)
+  const mixed = holdOf([at(0, ud), at(1, ud), at(2, null)]), gz = holdOf([at(0, zl), at(1, zl)]), idle = holdOf([{ postedAt: TO - 100, answeredAt: TO - 99.95, state: 'running', answer: del, beat: B0 }]);
+  ok(mixed.fo.verdict === LH.V.js && mixed.line.includes(`node’s own code — undici, ${NO} ×2`) && mixed.fo.frame === '(node’s own code — undici)',
+    `undici's load inside a hold: JavaScript for the verdict, and the hold says whose — ${mixed.line}`, mixed);
+  ok(gz.fo.verdict === LH.V.js && gz.line.includes('node’s own code — zlib, driven by zlibHog (src/hogs.js:9) ×2') && gz.fo.frame === 'zlibHog (src/hogs.js:9)', `a zlib hold: ${gz.line}`, gz);
+  ok(idle.fo.verdict !== LH.V.js && idle.fo.inside === 0 && idle.line.includes('not sampled (no sample landed inside it — asked 1 time: the answer came at its end, with no frame of it)'),
+    `the ask's own delivery names no hold: ${idle.line}`, idle);
+  { // the watchdog's answer IS this function (the worker's textAnswer)
+    const WK = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8');
+    ok(/\n  return LH\.framesAnswer\(sm\.frames, sm\.form, sm\.cut === true\);\n\}/.test(WK) && !/LH\.chainWords\(/.test(WK), 'the watchdog thread answers through LH.framesAnswer with the answer\'s cut (no chain words of its own)');
+  }
+  { // RED CONTROLS: each rule cut alone — a patched copy compiled in memory (src/loop-hold.js requires nothing; no file is
+    // written, the tree never touched) — its pin goes red
+    const SRC = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8');
+    const load = (src) => { const m = { exports: {} }; vm.compileFunction(src, ['module', 'exports', 'require'], { filename: 'loop-hold-fe0b-mutant.js' })(m, m.exports, require); return m.exports; };
+    const cut = (from, to) => (SRC.split(from).length === 2 ? load(SRC.replace(from, to)) : null);
+    const noOwn = cut('  const o = nodeOwnOf(frames);\n', '  const o = null;\n'), noIns = cut('  return inspector > 0;\n', '  return false;\n'), noDeps = cut('if (DEPS_FILE.test(run[j].file)) owner = run[j];', '{ }');
+    const noLoader = cut('    for (let j = k - 1; j >= 0 && !owner; j--) if (!LOADER_FILE.test(run[j].file)) owner = run[j];\n', ''), noHelper = cut('!HELPER_MODULE.has(moduleOf(run[j].file))', 'true');
+    const noCut = cut(": cut ? ', the stack cut before any frame of ours' :", ':');
+    const r = (L, f) => { const sm = L.sampleOf(enc(f), ROOT); return L.framesAnswer(sm.frames, sm.form, sm.cut); };
+    const red = { own: noOwn && !/node’s own code/.test(r(noOwn, UNDICI8).words) && !/node’s own code/.test(r(noOwn, ZLIB).words), inspector: noIns && !r(noIns, INSPECTOR_ONLY).empty,
+      deps: noDeps && /— http2, /.test(r(noDeps, UNDICI31).words) && r(noDeps, UNDICI8).words === ud.words, loader: noLoader && /— http_agent, /.test(r(noLoader, HTTP).words),
+      helper: noHelper && /— buffer, /.test(r(noHelper, ZLIB).words), cut: noCut && r(noCut, UNDICI31).words.endsWith(NO) };
+    ok(Object.values(red).every((v) => v === true), `RED CONTROLS: without the rule undici and zlib say their chains (${noOwn && r(noOwn, UNDICI8).words.slice(0, 60)}…); without the inspector branch its dispatch is a sample; without the bundled dependency first the full stack says «${noDeps && r(noDeps, UNDICI31).words}»; without the loader rule «${noLoader && r(noLoader, HTTP).words}»; without the helpers «${noHelper && r(noHelper, ZLIB).words}»; without the cut the full stack claims «${NO}»`, red);
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

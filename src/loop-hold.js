@@ -251,6 +251,9 @@ const INSTRUMENT_FILES = Object.freeze(['src/server/loop-blame.js', 'src/server/
 /** the capture's frame for time ASLEEP in a wrapped synchronous fs call (the watchdog read the call from the live slot at
  *  its post): `fn` = the call (one of loop-blame's SYNC_FNS), never a path */
 const SYNC_FS_URL = 'vibespace:sync-fs';
+/** B-fe0b: the most frames an answer carries (the expression's stackTraceLimit 32 less its own frame) — a sample this long
+ *  may be CUT before its bottom (`cut`): a frame of ours may lie beyond it */
+const SAMPLE_FRAMES = 31;
 function instrumentTrim(raw, root) {
   const r = typeof root === 'string' && root.startsWith('/') ? root.replace(/\/+$/, '') + '/' : null;
   if (!r || !Array.isArray(raw)) return raw;
@@ -271,7 +274,7 @@ function sampleOf(text, root, isRepoFile = null, lineOf = null, isInternal = nul
     if (lines[0] !== 'Error' || lines.length < 2) return { form: 'formatting', frames: [] };   // V8's own header for `new Error()`, exactly
     const raw = lines.slice(1).map(stringFrame);
     if (raw.some((x) => x === null)) return { form: 'formatting', frames: [] };   // ONE line not in V8's format ⇒ the whole sample is unreadable
-    return { form: 'string', frames: instrumentTrim(raw.slice(1, 32), root).map((x) => frameOf(x, root, isRepoFile, null, isInternal)) };   // its own frame skipped
+    return { form: 'string', frames: instrumentTrim(raw.slice(1, 32), root).map((x) => frameOf(x, root, isRepoFile, null, isInternal)), cut: raw.length - 1 >= SAMPLE_FRAMES };   // its own frame skipped
   }
   if (text[0] !== 'C') return { form: 'none', frames: [] };
   const raws = [];
@@ -283,7 +286,7 @@ function sampleOf(text, root, isRepoFile = null, lineOf = null, isInternal = nul
     raws.push({ fn: a[0], file: b[0], line: Number(m[1]), encl: Number(m[2]), evalish: m[3] === 'e' });
     i = b[1] + m[0].length;
   }
-  return { form: 'calls', frames: instrumentTrim(raws, root).map((x) => frameOf(x, root, isRepoFile, lineOf, isInternal)) };
+  return { form: 'calls', frames: instrumentTrim(raws, root).map((x) => frameOf(x, root, isRepoFile, lineOf, isInternal)), cut: raws.length >= SAMPLE_FRAMES };
 }
 /** PURE: the call-site form's frames (sampleOf's, for a caller that wants frames only). */
 const parseSample = (text, root, isRepoFile = null, lineOf = null) => { const s = sampleOf(text, root, isRepoFile, lineOf); return s.form === 'calls' || s.form === 'string' ? s.frames : []; };
@@ -308,6 +311,72 @@ function chainWords(frames) {
  *  form answered («x» from call sites, a location-only frame from the string form) — and its display words. */
 const keyFrame = (frames) => { const rf = repoFrame(frames); const f = rf || (frames && frames[0]); return f ? frameLoc(f) : '(no frame)'; };
 const keyWords = (frames) => { const rf = repoFrame(frames); const f = rf || (frames && frames[0]); return f ? frameText(f) : '(no frame)'; };
+/** B-fe0b (主开发's ruling 2026-11-11 18:58Z, measured on Node 22.23.4 and 24.22.1 with the product's own expression asked
+ *  from a worker session): A SAMPLE OF NODE'S OWN CODE.
+ *  · THE ASK'S OWN DELIVERY names no hold: no frame below the sample's own (the interrupt ran on the loop's own pump —
+ *    14 490 of 14 491 asks of an idle loop on Node 24, 13 036 of 13 037 on Node 22), or ONLY the inspector's dispatch
+ *    (node:inspector / node:internal/inspector*, with V8 built-ins) — never met measured, kept as ruled. It is the empty
+ *    answer (askOf: 'end'; a profile: idle / between). AN EMPTY STACK IS NOT ONLY THE DELIVERY: V8 also answers between
+ *    the jobs of a promise flood with no frame (an await chain: 10 118 of 11 941 asks on Node 24, 10 587 of 11 646 on 22).
+ *    Every empty answer is still the hold's end — round 4's law («JavaScript» only from an answer with a frame), kept
+ *    here; telling the two apart (an empty answer more than a beat before the hold's end) is a ruling to ask for.
+ *  · ANY OTHER sample whose first frame past V8's built-ins is node's own (a node: id) ran held code: «node's own code —
+ *    <module>», JavaScript for the verdict, then «, driven by <the first frame of ours below it>» or «, with no frame of
+ *    ours below it» — or «, the stack cut before any frame of ours» when the answer is SAMPLE_FRAMES long. <module>: a
+ *    bundled dependency in that run of node frames (node:internal/deps/<x> — undici's lazy load for a channel's first
+ *    MessageEvent, whose stack also runs crypto, tls, net and http under node's loader), else the module node's own
+ *    loader was loading at the outermost level, else the run's INNERMOST frame whose module is not one of the helpers
+ *    a module's work runs through (HELPER_MODULE, as measured: a sync gzip answers in slice (node:buffer) under
+ *    processChunkSync (node:zlib) ⇒ zlib; performance.now in validators / errors ⇒ perf; the timer pump in
+ *    priority_queue ⇒ timers), else its outermost node frame. The module is read off the frame's LOCATION — as its
+ *    location words are — never off its name. A sample driven by ours keeps its key (our frame's location); one with no
+ *    frame of ours is keyed by the module. */
+const NODE_OWN = 'node\u2019s own code';
+const INSPECTOR_FILE = /^node:(?:inspector(?:\/promises)?|internal\/inspector(?:\/[\w/-]+)?)$/;
+const LOADER_FILE = /^node:internal\/bootstrap\/(?:realm|loaders)$/;
+const DEPS_FILE = /^node:internal\/deps\//;
+const HELPER_MODULE = new Set(['buffer', 'util', 'validators', 'errors', 'priority_queue', 'per_context']);
+/** PURE: is this sample the ask's own delivery (nothing of the thread's own work on its stack)? */
+function isDelivery(frames) {
+  if (!Array.isArray(frames) || !frames.length) return true;
+  let inspector = 0;
+  for (const f of frames) { if (f && f.cls === 'node' && INSPECTOR_FILE.test(f.file)) inspector++; else if (!f || f.cls !== 'builtin') return false; }
+  return inspector > 0;
+}
+/** PURE: a node: id → its module word (node:internal/deps/undici/undici ⇒ undici, node:zlib ⇒ zlib, node:_http_agent ⇒ http_agent) */
+const moduleOf = (file) => String(file || '').replace(/^node:/, '').replace(/^internal\//, '').replace(/^deps\//, '').split('/')[0].replace(/^_+/, '') || 'node';
+/** PURE: a sample whose first frame past the built-ins is node's own → { module, driver (the first repo frame below the run, or null) }, else null */
+function nodeOwnOf(frames) {
+  if (!Array.isArray(frames)) return null;
+  let i = 0;
+  while (i < frames.length && frames[i] && frames[i].cls === 'builtin') i++;
+  if (i >= frames.length || !frames[i] || frames[i].cls !== 'node') return null;
+  let end = i;
+  while (end < frames.length && frames[end] && (frames[end].cls === 'node' || frames[end].cls === 'builtin')) end++;
+  const run = frames.slice(i, end).filter((f) => f.cls === 'node');   // innermost first
+  let owner = null;
+  for (let j = run.length - 1; j >= 0 && !owner; j--) if (DEPS_FILE.test(run[j].file)) owner = run[j];
+  if (!owner) {
+    let k = -1;
+    for (let j = run.length - 1; j >= 0 && k < 0; j--) if (LOADER_FILE.test(run[j].file)) k = j;
+    for (let j = k - 1; j >= 0 && !owner; j--) if (!LOADER_FILE.test(run[j].file)) owner = run[j];
+  }
+  for (let j = 0; j < run.length && !owner; j++) if (!LOADER_FILE.test(run[j].file) && !HELPER_MODULE.has(moduleOf(run[j].file))) owner = run[j];
+  for (let j = run.length - 1; j >= 0 && !owner; j--) if (!LOADER_FILE.test(run[j].file)) owner = run[j];
+  return { module: moduleOf((owner || run[0]).file), driver: repoFrame(frames.slice(end)) };
+}
+/** PURE: the words of a sample of node's own code */
+const nodeOwnWords = (o, cut = false) => `${NODE_OWN} \u2014 ${o.module}${o.driver ? `, driven by ${frameText(o.driver)}` : cut ? ', the stack cut before any frame of ours' : ', with no frame of ours below it'}`;
+/** PURE: a sample's frames (+ `cut`: the answer was SAMPLE_FRAMES long) → the watchdog's answer {kind 'js', words, key,
+ *  keyWords, empty | form}: the delivery is the empty answer; node's own code says so (above); any other sample its
+ *  chain, keyed by its first repo frame */
+function framesAnswer(frames, form, cut = false) {
+  if (isDelivery(frames)) return { kind: 'js', words: WORDS.between, key: KEYS.between, keyWords: KEYS.between, empty: true };
+  const o = nodeOwnOf(frames);
+  if (o && o.driver) return { kind: 'js', words: nodeOwnWords(o), key: frameLoc(o.driver), keyWords: frameText(o.driver), form };
+  if (o) { const k = `(${NODE_OWN} \u2014 ${o.module})`; return { kind: 'js', words: nodeOwnWords(o, cut), key: k, keyWords: k, form }; }
+  return { kind: 'js', words: chainWords(frames), key: keyFrame(frames), keyWords: keyWords(frames), form };
+}
 
 // ── the scheduler's facts ─────────────────────────────────────────────────────────────────────────────────────────────
 const num = (x) => (Number.isFinite(x) ? x : null);
@@ -877,7 +946,7 @@ function profileLine(p) {
 module.exports = { partsOf, PART_SHARE, waitedMuch, RUNNING_KERNEL_WORDS, WOKE_WORDS, unseenWhy, unsampledWords, cutWords,
   profileOf, profileLine, foldProfileBy, sharesOf, heapFillOf, nodeArgv, PROFILE_MS, PROFILE_EVERY_MS, PROFILE_NOTE, PROFILE_HEAP_SHARE, PROFILE_KEEP, PROFILE_TOP, PROFILE_WORD_MAX,
   PROFILE_STOPPED, PROFILE_STOPPED_ANY, PROFILE_UNSAMPLED, PROFILE_UNSAMPLED_ANY, PROFILE_REFUSED, PROFILE_REFUSED_ANY, STOPPED_LATE_SHARE, STOPPED_RUN_SHARE, HOOK_KEY, ASK_WORDS, OUTSIDE_WORDS,
-  frameOf, frameText, frameLoc, parseSample, sampleOf, instrumentTrim, INSTRUMENT_FILES, SYNC_FS_URL, stringFrame, spelledIn, repoFrame, chainWords, keyFrame, keyWords, sampleExpr, codeOf, thrownOf, stepRefusalOf, landedOf, isUnseenHold, isHoldOf, isGapHold, insideOf, notInsideWords,
+  frameOf, frameText, frameLoc, parseSample, sampleOf, instrumentTrim, INSTRUMENT_FILES, SYNC_FS_URL, stringFrame, spelledIn, repoFrame, chainWords, keyFrame, keyWords, isDelivery, nodeOwnOf, nodeOwnWords, framesAnswer, NODE_OWN, SAMPLE_FRAMES, HELPER_MODULE, sampleExpr, codeOf, thrownOf, stepRefusalOf, landedOf, isUnseenHold, isHoldOf, isGapHold, insideOf, notInsideWords,
   parseTaskStat, parseSchedstat, parseCpuStat, cpuStatPaths, parsePressure, parseRss, readingOf, schedDelta, coveredDelta, verdict, stateOf, askOf, judgeAsks, clsOf, UNREAD, V, KEYS, WORDS,
   schedWords, heldWords, gcOf, memWords, samplesWords, foldHold, holdLine, liveWords, publicHold, boundReport,
   sampleDue, samplesBound, holdRefusalOf, budgetAllows, BUDGET_WORDS, tableAdd, tableRows, secs, pct,

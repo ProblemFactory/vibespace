@@ -257,16 +257,16 @@ function settleAsk(now) {
   if (q.late && !q.enteredSeenAt && Atomics.load(I, 3) - q.beat0 >= 3) { inflight = null; if (q.asker.kind === 'capture') captureDropped(q); else if (q.asker.kind === 'census') censusDropped(q); }   // the loop turned 3 times and it never ran: dropped
 }
 /** an answer → what it says (the check's condition 3): frames; «the stack was nearly full (deep recursion)»; «between
- *  JavaScript frames» for a stack with no JavaScript frame; «frames unreadable (inside the program's own stack
- *  formatting)»; the stand-downs ('D' a debugger port, 'A' an accessor). */
+ *  JavaScript frames» for a stack with no JavaScript frame — or the ask's own delivery (B-fe0b: LH.framesAnswer, which
+ *  also says a sample of node's own code); «frames unreadable (inside the program's own stack formatting)»; the
+ *  stand-downs ('D' a debugger port, 'A' an accessor). */
 function textAnswer(text, readers = NO_READ) {
   const sm = LH.sampleOf(text, rootDir, readers.isRepoFile, readers.lineOf, readers.isInternal);
   if (sm.form === 'accessor') return { kind: 'standDown', why: 'accessor' };
   if (sm.form === 'debugger') return { kind: 'standDown', why: 'debugger' };
   if (sm.form === 'formatting') return { kind: 'js', words: LH.WORDS.formatting, key: LH.KEYS.formatting, keyWords: LH.KEYS.formatting };
   if (sm.form === 'none') return { kind: 'js', words: LH.WORDS.unreadable, key: LH.KEYS.unreadable, keyWords: LH.KEYS.unreadable };
-  if (!sm.frames.length) return { kind: 'js', words: LH.WORDS.between, key: LH.KEYS.between, keyWords: LH.KEYS.between, empty: true };
-  return { kind: 'js', words: LH.chainWords(sm.frames), key: LH.keyFrame(sm.frames), keyWords: LH.keyWords(sm.frames), form: sm.form };
+  return LH.framesAnswer(sm.frames, sm.form, sm.cut === true);
 }
 function answered(q, a, beat, at) {
   if (q.asker && q.asker.kind === 'hold' && Number.isInteger(q.ownUs) && q.ownUs >= 0) { askSpent.push({ at: mono(), ms: q.ownUs / 1000 }); if (askSpent.length > 20000) askSpent.shift(); }   // the budget: what this ask cost the main thread
