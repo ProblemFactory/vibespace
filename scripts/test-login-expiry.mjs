@@ -999,7 +999,7 @@ console.log('— §5 wiring');
     /const loginExpiryWatch = require\('\.\/src\/server\/login-expiry-watch\.js'\)/.test(srv)
     && /getLoginExpiryWatch: \(\) => \{ try \{ return loginExpiryWatch; \} catch \{ return null; \} \}/.test(srv));
   const aur = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
-  ck('the routes destructure it (an unread dep is the 2.355.0 unstaged-wiring class)', /getTelemetry, getUsageHistory, getLoginExpiryWatch(?:, getCliCmds = \(\) => null)? \}\) \{/.test(aur) /* int332: lane antigravity-card-fixes appends getCliCmds */);
+  ck('the routes destructure it (an unread dep is the 2.355.0 unstaged-wiring class)', /getTelemetry, getUsageHistory, getLoginExpiryWatch(?:, getCliCmds = \(\) => null)?(?:, harnessSetting = null)? \}\) \{/.test(aur) /* int332: lane antigravity-card-fixes appends getCliCmds; 2.369.408: lane usage-predict appends harnessSetting (the vendor's own automatic-read row, one row per vendor) */);
   ck('every login FINALIZE route sweeps, gated on the login having actually succeeded', (() => {
     const calls = (aur.match(/sweepLoginExpiry\('[^']+'\)/g) || []).concat(aur.match(/sweepOnLoginTransition\([^)]*'[^']+'\)/g) || []);
     return calls.length === 4
