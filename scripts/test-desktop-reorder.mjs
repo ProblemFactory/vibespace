@@ -4,7 +4,7 @@
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path'; import http from 'node:http';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, endRootedProcesses } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
@@ -16,10 +16,21 @@ execSync(`git worktree add --detach ${wt} HEAD`, {cwd:repo, stdio:'ignore'});
 for (const f of ['node_modules','public/bundle.js']) { try { fs.symlinkSync(path.join(repo,f), path.join(wt,f)); } catch {} }
 for (const f of execSync('git diff --name-only HEAD',{cwd:repo}).toString().split('\n').filter(Boolean))
   { try { fs.mkdirSync(path.dirname(path.join(wt,f)),{recursive:true}); fs.copyFileSync(path.join(repo,f), path.join(wt,f)); } catch {} }
-const env={...process.env}; delete env.VIBESPACE_PASSWORD; delete env.VIBESPACE_GENERATE_PASSWORD;
+// the EXCLUDED package (2026-11-17) — why it was NOT RE-RUNNABLE (pass / fail / pass / fail): its Chrome had NO --user-data-dir, so
+// every run used the machine user's own Chrome profile, whose local storage for 127.0.0.1:<port> outlived the run — a next run on
+// the same free ports started from the last one's toolbar state. Now: a fresh profile per run (no keyring, no session bus), the
+// throwaway hub under a scratch HOME (never the user's own), and every dir and process ended at ANY exit, not only the happy path.
+const home=scratch('desk-home'), chromeDir=scratch('desk-chrome'); fs.mkdirSync(home,{recursive:true}); fs.mkdirSync(chromeDir,{recursive:true});
+const env={...process.env, HOME: home}; delete env.VIBESPACE_PASSWORD; delete env.VIBESPACE_GENERATE_PASSWORD;
+const { DBUS_SESSION_BUS_ADDRESS: _bus, ...chromeEnv } = process.env;
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs)
 const srv=spawn('node',[path.join(wt,'server.js')],{cwd:wt,env:{...env, ...VNC_ENV,PORT:String(PORT),VIBESPACE_SKIP_AGENT_HOOKS:'1'},stdio:'ignore'});
-const chrome=spawn(CHROME,[...CHROME_STORE, '--headless=new',`--remote-debugging-port=${CDP_PORT}`,'--no-sandbox','--disable-gpu','about:blank'],{stdio:'ignore'});
+const chrome=spawn(CHROME,[...CHROME_STORE, '--headless=new',`--remote-debugging-port=${CDP_PORT}`,'--no-sandbox','--disable-gpu','--password-store=basic',`--user-data-dir=${chromeDir}`,'about:blank'],{stdio:'ignore',env:chromeEnv});
+let cleaned=false;
+const cleanup=()=>{ if(cleaned) return; cleaned=true; try{chrome.kill('SIGKILL');}catch{} try{srv.kill('SIGKILL');}catch{} for(const r of [wt, home]){ try{endRootedProcesses(r);}catch{} }
+  try{execSync(`git worktree remove --force ${wt}`,{cwd:repo,stdio:'ignore'});}catch{} for(const d of [chromeDir, home]){ try{fs.rmSync(d,{recursive:true,force:true});}catch{} } };
+process.on('exit', cleanup);
+for (const sig of ['SIGINT','SIGTERM']) process.on(sig, ()=>{ cleanup(); process.exit(1); });
 await new Promise(r=>setTimeout(r,4000));
 const get=(u)=>new Promise((res,rej)=>http.get(u,s=>{let b='';s.on('data',d=>b+=d);s.on('end',()=>res(b))}).on('error',rej));
 const WebSocket=require(path.join(repo,'node_modules/ws/index.js'));
@@ -84,6 +95,5 @@ ck('--toolbar-scale drives the rendered toolbar size (and resets)', thOk==='ok',
 ck('no JS exceptions during boot+interactions', errs.length===0);
 if(errs.length) console.log('   errs:', errs.slice(0,3));
 console.log(fail?`${fail} FAILED (${pass} passed)`:`ALL PASS (${pass})`);
-ws.close(); chrome.kill(); srv.kill();
-try { execSync(`git worktree remove --force ${wt}`,{cwd:repo,stdio:'ignore'}); } catch {}
+ws.close(); cleanup();
 process.exit(fail?1:0);
