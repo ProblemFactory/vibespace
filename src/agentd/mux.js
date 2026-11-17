@@ -120,6 +120,11 @@ class Mux {
     if (!q.length) { this._sendQ.delete(chan); this.onWritable(chan); }
   }
 
+  /** B-beaf: bytes still queued on a channel for the peer's credit (0 = all sent). Local only — no wire change. */
+  queued(chan) { return (this._sendQ.get(chan) || []).reduce((n, b) => n + b.length, 0); }
+  /** B-beaf: forget a channel this side is done with — its send window and anything still queued on it. Local only. */
+  forget(chan) { this._sendQ.delete(chan); this._sendWin.delete(chan); }
+
   /** grant the peer n consumed bytes back on a byte channel. */
   credit(chan, n) {
     const p = Buffer.alloc(4);

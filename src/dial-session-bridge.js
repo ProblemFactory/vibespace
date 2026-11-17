@@ -23,8 +23,8 @@
 // THE GAP: bytes the device sends right behind its open answer (a reattach replay rides the same read) are KEPT until the
 // open has gone to the attach side, then pass through the same accounting — never dropped, never left uncredited.
 // THE ORPHAN: when the attach side dies, a pipe session's device channel stays open (the keeper model) — it goes back to
-// the release's road: what is owed is credited at once and every later byte as it arrives (a device-side detach would be
-// the real end of it; that is a row of its own).
+// the release's road: what is owed is credited at once and every later byte as it arrives. B-beaf: a daemon that says
+// `pipe-detach` takes the real end instead — the handle's detach closes the channel and the device ends that tail.
 'use strict';
 
 const net = require('net');
@@ -87,9 +87,12 @@ class DialSessionBridge {
       h.onWritable = null;
       if (owed) { try { h.credit(owed); } catch { } }
     };
+    // B-beaf (3): the attach side is gone — a daemon that says pipe-detach ends the channel's tail (the handle's detach answers
+    // true), an older daemon's channel takes THE ORPHAN's road
+    const letGo = () => { const h = handle; if (!h) return; let done = false; try { done = typeof h.detach === 'function' && h.detach() === true; } catch { done = false; } if (!done) orphan(); };
     // the moment the device handle exists — BEFORE its open answer: keep what arrives early, and hear the input road's writable
     const prewire = (chan) => {
-      if (attachGone) { if (isPty) { try { handle.kill(); } catch { } } else orphan(); return; }   // the attach side died while the open was asked: a live pty is ended (onDead found no handle yet), a pipe session is an orphan
+      if (attachGone) { if (isPty) { try { handle.kill(); } catch { } } else letGo(); return; }   // the attach side died while the open was asked: a live pty is ended (onDead found no handle yet), a pipe session is an orphan
       attachChan = chan; early = [];
       handle.onData = (buf) => { early.push(buf); };
       handle.onWritable = () => {   // the device link took the queued input: the attach side may send again
@@ -160,7 +163,7 @@ class DialSessionBridge {
               offset: msg.offset || 0,
               manualCredit: true,
             });
-            prewire(chan);
+            prewire(chan);   // B-beaf: an attach already gone is let go here; the bridge still awaits `ready` (a refusal is caught)
             const ready = await handle.ready;
             // A real CHILD exit arrives as the _remote_exit sentinel in the
             // byte stream — reaching onExit here means the DEVICE LINK died
@@ -200,7 +203,13 @@ class DialSessionBridge {
         if (isPty && handle) { try { handle.kill(); } catch { } }
         if (isPty && bridge && bridge.ptyHandle === handle) bridge.ptyHandle = null;
         attachGone = true;
-        if (!isPty && handle) orphan();   // THE ORPHAN: the device channel stays open — back to the release's road (see above)
+        // THE ORPHAN / B-beaf (3): a pipe session's device channel — its device-side TAIL ends now on a daemon that says
+        // pipe-detach (the session and its buffer live on; the next attach comes with its offset on a new channel), else
+        // back to the release's road (see above)
+        if (!isPty && handle) letGo();
+        // B-beaf r2 (#8): a mux that died of missed pongs (an attach stuck in a blocking stdout write) still has its socket —
+        // end it, so the attach exits now and reattaches with its offset (its later input would go to a let-go channel)
+        if (!isPty) { try { sock.destroy(); } catch { } }
       },
     });
   }

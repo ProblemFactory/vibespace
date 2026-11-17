@@ -649,9 +649,10 @@ class DeviceManager {
       resolveReady = (v) => { readySettled = true; res(v); };
       rejectReady = (e) => { readySettled = true; rej(e); };
     });
+    let drainThenClose = null;   // B-beaf: a detach waiting for the input this side still queues on the channel
     conn.sessions.set(chan, {
       manualCredit: manualCredit === true,   // opt-in, as openSession's (the dial bridge)
-      onWritable: () => handle.onWritable?.(),
+      onWritable: () => { if (drainThenClose) { const f = drainThenClose; drainThenClose = null; f(); return; } handle.onWritable?.(); },
       onOpen: (m) => { handle.pid = m.pid; resolveReady({ pid: m.pid, existing: !!m.existing, exited: m.exited }); },
       onError: (e) => rejectReady(new Error(e)),
       onData: (buf) => handle.onData?.(buf),
@@ -666,6 +667,24 @@ class DeviceManager {
     handle.write = (b) => conn.mux.data(chan, Buffer.isBuffer(b) ? b : Buffer.from(String(b), 'utf-8'));   // text or bytes; false = queued for the device's credit (onWritable follows)
     handle.credit = (n) => conn.mux.credit(chan, n);
     handle.kill = () => conn.mux.control({ op: 'kill-pipe-session', sid });
+    // B-beaf (3): this consumer is DONE with the channel (the dial bridge's attach client left). ONLY a daemon that says
+    // `pipe-detach` can end its tail there: its words go nowhere from now, a pending `ready` is settled, and a CLOSE frame is
+    // sent once the input this side still queues on the channel has gone out (a CLOSE overtaking it cut a stdin line in half),
+    // then the routing and the channel are forgotten — `true`. An OLDER daemon keeps its tail: nothing is touched and the
+    // answer is `false` — the caller takes its own road (the dial bridge's orphan: credited as it arrives, the release's; a
+    // channel never credited again would queue that session's every later byte on the device)
+    handle.canDetach = () => !!conn.info?.capabilities?.includes?.('pipe-detach');
+    let detached = false;
+    handle.detach = () => {
+      if (!handle.canDetach()) return false;
+      if (detached) return true;   // one CLOSE per channel
+      detached = true;
+      handle.onData = null; handle.onExit = null; handle.onWritable = null;
+      if (!readySettled) { handle.ready.catch(() => { }); rejectReady(new Error('detached before the session opened')); }   // never an unhandled rejection in the hub
+      const close = () => { conn.sessions.delete(chan); try { conn.mux.closeChan(chan); } catch { } try { conn.mux.forget(chan); } catch { } };
+      if (conn.mux.queued(chan) > 0) drainThenClose = close; else close();
+      return true;
+    };
     conn.mux.control(cmd
       ? { op: 'open-pipe-session', chan, sid, cmd, args, cwd, env, offset }
       : { op: 'attach-pipe-session', chan, sid, offset });

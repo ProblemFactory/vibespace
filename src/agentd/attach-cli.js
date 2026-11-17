@@ -23,6 +23,7 @@
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { Mux, PROTO_VERSION } = require('./mux.js');
+const AR = require('./attach-roads.js'); // B-beaf: both roads under the link's credit (the device credited for what stdout took; stdin paused on a held link)
 
 function arg(name) {
   const i = process.argv.indexOf(name);
@@ -121,6 +122,7 @@ if (cfg.pty) {
   try { require('child_process').execFileSync('stty', ['raw', '-echo'], { stdio: ['inherit', 'inherit', 'ignore'] }); } catch { }
   try { if (process.stdin.isTTY) process.stdin.setRawMode(true); } catch { }
   const size = () => ({ cols: process.stdout.columns || cfg.pty.cols || 120, rows: process.stdout.rows || cfg.pty.rows || 30 });
+  let roads = null;
   const mux = new Mux(stream, {
     onControl(msg) {
       if (msg.op === 'hello-ack') {
@@ -155,11 +157,13 @@ if (cfg.pty) {
       if (msg.op === 'proto-mismatch') { return bail('device/server version mismatch — update the device daemon.', 'protocol mismatch'); }
       if (msg.op === 'session-error') { return bail(msg.error || 'session error', 'session error: ' + msg.error); }
     },
-    onData(chan, buf) { if (chan !== CHAN) return; process.stdout.write(buf); mux.credit(chan, buf.length); },
+    onData(chan, buf) { if (chan !== CHAN) return; roads.out(buf); },   // B-beaf: credited when the terminal took it
+    onWritable(chan) { if (roads) roads.writable(chan); },              // B-beaf: the link took the queued input — read stdin again
     onDead(reason) { log('transport dead: ' + reason); process.exit(opened ? 1 : 5); },
   });
+  roads = AR.attachRoads({ mux, chan: CHAN, stdin: process.stdin, stdout: process.stdout });
   onTransportReady(() => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken, serverVersion: cfg.version || '0' }));
-  process.stdin.on('data', (d) => { try { mux.data(CHAN, d); } catch { } });
+  process.stdin.on('data', (d) => { roads.in(d); });   // B-beaf: a held link pauses stdin (it never queues here without bound)
   process.stdin.resume();
   // DEFER the size read: on SIGWINCH, Node's OWN listener refreshes
   // process.stdout.columns/rows — reading them synchronously in our handler
@@ -168,6 +172,7 @@ if (cfg.pty) {
   // after Node's refresh, so we forward the true new size to the device pty.
   process.on('SIGWINCH', () => setImmediate(() => { const s = size(); try { mux.control({ op: 'resize-session', chan: CHAN, cols: s.cols, rows: s.rows }); } catch { } }));
 } else {
+  let roads = null;
   const mux = new Mux(stream, {
     onControl(msg) {
       if (msg.op === 'hello-ack') {
@@ -184,8 +189,7 @@ if (cfg.pty) {
     },
     onData(chan, buf) {
       if (chan !== CHAN) return;
-      process.stdout.write(buf); // RAW bytes only — the wrapper's offset contract
-      mux.credit(chan, buf.length);
+      roads.out(buf); // RAW bytes only — the wrapper's offset contract; B-beaf: the device credited when stdout took them
       // keeper exit semantics: after forwarding the _remote_exit sentinel, exit 3
       // (drain done) — the wrapper finalizes on child-exit + remoteExited set.
       // Rolling tail scan only; the passthrough above is untouched.
@@ -196,16 +200,18 @@ if (cfg.pty) {
         setTimeout(() => process.exit(3), 300);
       }
     },
+    onWritable(chan) { if (roads) roads.writable(chan); },   // B-beaf: the link took the queued input — read stdin again
     onDead(reason) {
       log('transport dead: ' + reason);
       process.exit(opened ? 3 : 5); // wrapper reconnects with a fresh offset
     },
   });
+  roads = AR.attachRoads({ mux, chan: CHAN, stdin: process.stdin, stdout: process.stdout });
   onTransportReady(() => {
     mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken, serverVersion: cfg.version || '0' });
   });
 
-  process.stdin.on('data', (d) => { try { mux.data(CHAN, d); } catch { } });
+  process.stdin.on('data', (d) => { roads.in(d); });   // B-beaf: a held link pauses stdin
   process.stdin.on('end', () => { /* dtach/pipe closed — keep relaying until killed */ });
   process.stdin.resume();
 }
