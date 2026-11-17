@@ -758,7 +758,7 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   const out = path.join(WIRE_ROOT, 'learn-card.bundle.cjs');
   const stub = { name: 'stub-utils', setup(b) {
     b.onResolve({ filter: /\/utils\.js$/ }, () => ({ path: 'utils-stub', namespace: 'stub' }));
-    b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const fetchJson = (...a) => globalThis.__fetchJson(...a); export const showToast = (...a) => globalThis.__toasts.push(a);', loader: 'js' }));
+    b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const fetchJson = (...a) => globalThis.__fetchJson(...a); export const showToast = (...a) => globalThis.__toasts.push(a); export const escHtml = (s) => String(s ?? \'\').replace(/[&<>"\']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\\"": "&quot;", "\'": "&#39;" })[c]);'   /* lane ui-plain-words: the card's ONE fold is plain-words.js, which escapes through utils' escHtml */, loader: 'js' }));
   } };
   await esbuild.build({ stdin: { contents: `export * from ${JSON.stringify(path.join(repo, 'src/lib/learn-card.js'))}; export { wasTyped } from ${JSON.stringify(path.join(repo, 'src/lib/stale-watch.js'))};`, resolveDir: repo, loader: 'js' }, bundle: true, format: 'cjs', platform: 'neutral', outfile: out, plugins: [stub], logLevel: 'error', mainFields: ['module', 'main'] });
   const LC = require(out);
@@ -839,7 +839,7 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   const E170c = wordsOf(170, 'contract'), L152c = wordsOf(152), BLK2 = `${L152c}\nForum digests never matter`;
   const savedF4 = [];
   const c7 = LC.renderLearnCard(answerOf(BLK2, { lines: [{ text: L152c, kind: 'keep', line: 1, from: [] }, { text: E170c, kind: 'edit', line: 2, from: [1], evidence: 'one contract waited' }], removed: [], note: '' }), { onSave: (x) => { savedF4.push(x); return true; } });
-  const r7 = c7.querySelectorAll('.learn-row')[1], fold7 = r7.querySelectorAll('details'), box7 = r7.querySelector('.learn-text');
+  const r7 = c7.querySelectorAll('.learn-row')[1], fold7 = [...r7.querySelectorAll('details')].filter((d) => d.dataset.fold === 'tech'), box7 = r7.querySelector('.learn-text');   // lane ui-plain-words: the row's evidence chip is a disclosure of its own («依据 1 个判定»), never the tech fold
   ok(r7.dataset.long === '1' && r7.querySelector('.learn-long').textContent === '太长——已截短' && !r7.querySelector('.learn-tick').checked && !/omitted|…\[/.test(box7.value) && box7.value.length <= 120 && E170c.startsWith(box7.value) && fold7.length === 1 && fold7[0].dataset.fold === 'tech' && !fold7[0].open && fold7[0].textContent === '技术细节' + E170c,
     "F4 the 170-char edit: 「太长——已截短」, NOT ticked, its box cut at a word boundary without a marker, the model's whole text only under the row's own closed 技术细节 fold", { chip: (r7.querySelector('.learn-long') || {}).textContent, tick: r7.querySelector('.learn-tick').checked, box: box7.value, folds: fold7.length });
   look(c7).save.onclick();

@@ -15,6 +15,7 @@
 // diary (./nav-log.js, lane phone-back-reload) rides every capture as
 // snapshot.navLog: entry shapes, back verdicts, versions — never a URL.
 import { t } from './i18n.js';
+import { techFoldHtml } from './plain-words.js'; // lane ui-plain-words (gear-and-system-16): the face first, what it captures folded
 import { onRendererFreeze } from './telemetry-client.js';
 import { BUILD_VERSION } from './build-version.js';
 import { actionKeyWords, actionKeyUpWords, imeMarker } from './chat-enter-keys.js';
@@ -276,8 +277,9 @@ export function installIncidentRecorder(app) {
     if (shell.raised) return;   // raised: the same subject's form, as it was // (Escape from inside: the note typed is asked about, never dropped — lane dialog-yield r2)
     const body = shell.body;
     body.innerHTML = `
-      <div class="usage-note" style="margin-bottom:8px">${escHtml(t('This freezes the whole scene — the last few minutes of UI activity (clicks, window events, errors; never any text you typed or message content), plus the live environment on this instance AND on every machine your sessions use: process tables, session state, lock files, transcript fingerprints. Capture this BEFORE you try to fix things yourself — afterwards the evidence is gone.'))}</div>
-      <textarea class="dialog-input" rows="3" style="width:100%;box-sizing:border-box" placeholder="${escHtml(t('What went wrong? (optional but helpful)'))}"></textarea>`;
+      <div class="usage-note" style="margin-bottom:6px">${escHtml(t('Press Capture now before you fix anything — fixing it erases what went wrong.'))}</div>
+      ${techFoldHtml([t('This freezes the whole scene — the last few minutes of UI activity (clicks, window events, errors; never any text you typed or message content), plus the live environment on this instance AND on every machine your sessions use: process tables, session state, lock files, transcript fingerprints. Capture this BEFORE you try to fix things yourself — afterwards the evidence is gone.')], { summary: t('What it captures') })}
+      <textarea class="dialog-input" rows="5" style="width:100%;box-sizing:border-box" placeholder="${escHtml(t('What went wrong? (optional but helpful)'))}"></textarea>`;
     const ta = body.querySelector('textarea');
     const btn = document.createElement('button');
     btn.className = 'btn-create';
@@ -318,7 +320,8 @@ export function installIncidentRecorder(app) {
         <div style="text-align:center;padding:12px 4px">
           <div class="usage-section-title">${escHtml(t('Scene captured. Send this ID to the admin:'))}</div>
           <div class="mono" style="font-size:20px;font-weight:700;margin:10px 0;user-select:all">${escHtml(r.id)}</div>
-          <div class="usage-note">${escHtml(t('The full environment is frozen (processes, session state, locks, transcript fingerprints — local and on every machine involved), so you can now troubleshoot freely: resuming, killing or restarting anything will NOT destroy the evidence. A follow-up snapshot of the next 2 minutes attaches automatically.'))}</div>
+          <div class="usage-note">${escHtml(t('Captured. You can fix things now — nothing you do will erase it.'))}</div>
+          ${techFoldHtml([t('The full environment is frozen (processes, session state, locks, transcript fingerprints — local and on every machine involved), so you can now troubleshoot freely: resuming, killing or restarting anything will NOT destroy the evidence. A follow-up snapshot of the next 2 minutes attaches automatically.')])}
         </div>`;
       btn.textContent = t('Copy ID');
       btn.disabled = false;

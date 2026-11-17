@@ -78,8 +78,11 @@ export function secretBoxEl(item) {
   const row = mk('div', 'ut-secret-row');
   const input = secretInput(t('Paste it here'));
   input.classList.add('ut-secret-input');
+  input.setAttribute('aria-label', t('What to store'));
   const save = btn(t('Save to vault'), 'ut-act ut-secret-save');
   const deny = btn(t('Refuse'), 'ut-act ut-secret-deny');
+  // lane ui-plain-words (vault-8): the field says what it is — a visible label above the paste box, never a bare box at the end
+  box.append(mk('div', 'ut-secret-label ut-secret-paste-label', t('What to store')));
   row.append(input, save, deny);
   // lane wake-approve-card r3 (主开发: a FORM card — «wrong label — ask again»): the request names a place the AGENT chose; a wrong
   // one is refused here and the agent asks again with the right one (the refusal reaches it on its next turn)

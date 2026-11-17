@@ -7,6 +7,7 @@
 import { fetchJson, api, createModalShell, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { techFold } from './plain-words.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { rowToPick, principalOfRow, exceptRemoved } from './principal-picker-model.js';   // lane grants-unify: «除了» — a stored row drawn, a pick written
 import { renderApiCard } from './channel-api-card-view.js';   // B-2198 part 2: the ONE card (chat · Outbox · For you · here)
@@ -158,7 +159,10 @@ export async function showApiAccessDialog(app, cred) {
     body.append(picker.el, unexcept, list);
     drawRows(); syncUnexcept();
     // THE SENSITIVE LIST (read-only)
-    const sens = el('div', 'chan-api-sensitive chat-status-dim', `${t('DELETE and these paths always ask')}: ${(cur.sensitive || []).map(sensitiveWords).join(' · ')}`);
+    // lane ui-plain-words (channels-accounts-18): the face says what happens in plain words; the vendor's raw patterns fold under «技术细节»
+    const sens = el('div', 'chan-api-sensitive chat-status-dim', t('Deletes and a few sensitive calls always ask you first.'));
+    const sensFold = techFold(['DELETE', ...(cur.sensitive || []).map(sensitiveWords)], { mono: true });
+    if (sensFold) sens.appendChild(sensFold);
     body.appendChild(sens);
     // ALWAYS ALLOWED (per conversation, revocable)
     body.appendChild(el('div', 'dialog-label', t('Always allowed')));

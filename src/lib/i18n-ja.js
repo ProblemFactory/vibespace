@@ -3068,7 +3068,6 @@ export default {
   "awaiting you": "あなた待ち",
   "ago": "前",
   "No background jobs yet — agents register them with vibespace-job": "バックグラウンドジョブはまだありません — エージェントが vibespace-job で登録します",
-  "Auto via the CLI (burn-aware background refresh)": "CLI 経由の自動（消費量に応じたバックグラウンド更新）",
   "Session “{name}” not found — it may have been renamed or closed": "セッション「{name}」が見つかりません——名前が変更されたか閉じられた可能性があります",
   "Session “{name}” is not open right now": "セッション「{name}」は現在開かれていません",
   "Session properties": "セッションのプロパティ",
@@ -6389,7 +6388,6 @@ export default {
   "no route": "経路なし",
   "not a VibeSpace address": "VibeSpace のアドレスではありません",
   "this server": "このサーバー",
-  "Connected since {time} — before that {n} attempts failed ({reason})": "{time} から接続中 — その前に {n} 回失敗（{reason}）",
   "Connected since {time}": "{time} から接続中",
   "Connected, but the device refuses this server's key — it was installed with a different command; generate a new one": "接続済みですが、デバイスがこのサーバーの鍵を拒否しています — 別のコマンドで導入されたため、再生成してください",
   "Last dial: refused ({reason}) at {time} — the device holds an older command; generate a new one": "最後のダイヤル: 拒否（{reason}）{time} — デバイスのコマンドが古いため、再生成してください",
@@ -8368,7 +8366,6 @@ export default {
   "Read + write, ask each": "読み取り + 書き込み（毎回確認）",
   "Read + write, auto (sensitive still asks)": "読み取り + 書き込み（自動・機密操作は確認）",
   "Calls a day": "1 日の呼び出し回数",
-  "DELETE and these paths always ask": "DELETE とこれらのパスは常に確認します",
   "Always allowed": "常に許可",
   "No call shapes are always allowed": "常に許可している呼び出しの形はありません",
   "Waiting for you": "あなたの判断待ち",
@@ -9506,11 +9503,9 @@ export default {
   "the model gave no usable proposal — try again": "モデルから使える提案が返りませんでした — もう一度どうぞ",
   "OpenRouter did not answer — try again in a minute": "OpenRouter から応答がありません — 少し待ってもう一度どうぞ",
   "{model} read {n} of your decisions and proposes {m} lines": "{model} があなたの判断 {n} 件を読み、{m} 行を提案しました",
-  "{own} yours · {inferred} inferred": "あなたの判断 {own} 件 · 推定 {inferred} 件",
   "digests went through OpenRouter to a zero-data-retention endpoint": "要約は OpenRouter 経由でデータを保持しないエンドポイントに送られました",
   "use this line": "この行を使う",
   "no evidence": "根拠なし",
-  "based on {list}": "根拠 {list}",
   "inferred": "推定",
   "was: {text}": "元：{text}",
   "Lines it would remove": "削除の提案",
@@ -13904,4 +13899,25 @@ export default {
   "This temporary browser keeps its passkeys with this conversation; they are removed with it. Cancel the request to use the page’s other way in, or sign in on your own device; a new passkey is registered only after you allow it.": "この一時ブラウザのパスキーはこの会話に保存され、会話とともに削除されます。リクエストを取り消すと、ページの別のログイン方法か、自分のデバイスでのサインインが使えます。新しいパスキーはあなたが許可した後にだけ登録されます。",
   // lane ui-needs-a-button (closure 4)
   "Automatic turns still run on this account while it bills paid overage (its Spending setting allows them).": "このアカウントが従量課金中でも、自動ターンは実行されます（支出の設定で許可されています）。",
+  // lane ui-plain-words pick 1 — channels-accounts-1: the saved section's own empty note
+  "No saved message matches": "保存済みのメッセージに一致するものはありません",
+  // lane ui-plain-words pick 1 — channels-accounts-18: the always-ask line in plain words (the patterns fold)
+  "Deletes and a few sensitive calls always ask you first.": "削除と一部の重要な操作は、いつも先にあなたに確認します。",
+  // lane ui-plain-words pick 1 — channels-policy-15: the learning card says what it stands on
+  "Judged from {own} you marked and {inferred} inferred": "あなたが付けた {own} 件と推定 {inferred} 件から判断",
+  "based on {n} of your decisions": "{n} 件の判断に基づく",
+  // lane ui-plain-words pick 1 — gear-and-system-16: the report dialog's face (what it captures folds)
+  "Press Capture now before you fix anything — fixing it erases what went wrong.": "直す前に「今すぐキャプチャ」を押してください — 直すと、何が起きたかの痕跡が消えます。",
+  "What it captures": "キャプチャする内容",
+  "Captured. You can fix things now — nothing you do will erase it.": "キャプチャしました。もう直して大丈夫です — 何をしても記録は消えません。",
+  // lane ui-plain-words pick 1 — machines-5: a connected machine's earlier failures, as tooltip words
+  "Before that, {n} attempts failed ({reason})": "それ以前に {n} 回失敗しました（{reason}）",
+  // lane ui-plain-words pick 1 — task-groups-1 / -6: the preview's fold, the budget's face
+  "A new conversation gets {used} of {budget} at the start": "新しい会話は最初に {used} を受け取ります（上限 {budget}）",
+  "Show the text the agent receives (English, sent as it is)": "agent が受け取る原文を表示（英語、そのまま送信）",
+  // lane ui-plain-words pick 1 — task-groups-16: the background jobs' face
+  "Background jobs tell this conversation when they finish or need input.": "バックグラウンドのジョブは、終わったときや入力が必要なときにこの会話へ知らせます。",
+  "This conversation is not told when its background jobs finish — the agent has to check by itself.": "バックグラウンドのジョブが終わっても、この会話には知らされません — agent が自分で確認する必要があります。",
+  // lane ui-plain-words pick 1 — vault-8: the paste field's label
+  "What to store": "保存する内容",
 };

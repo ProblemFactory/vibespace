@@ -32,6 +32,7 @@
 import { escHtml } from './utils.js';
 import { vsLinkHtml } from './internal-link-door.js'; // lane login-request-card piece 1: THE drawing of a conversation / desktop link
 import { tc, t as tr, deviceLocale } from './i18n.js'; // lane foryou-honest: «Dismiss» in the For-you sense (忽略 — the plain key is a dialog's «close»); r7: the deadline ticker's words (no ctx at a tick)
+import { techFoldHtml } from './plain-words.js'; // lane ui-plain-words: an item's mechanics (`i18n.fold`) under ONE «技术细节» fold
 import { dateOf, stampAt } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
@@ -681,7 +682,7 @@ function partsOf(entry, ctx) {
   const go = (notice || entry.band) && rowDoor ? `<button type="button" class="ut-go ut-go-door" title="${escHtml(t(rowDoor.title || rowDoor.verb))}" aria-label="${escHtml(t(rowDoor.verb))}" data-label="${escHtml(t(rowDoor.verb))}">${UI_ICONS.external}</button>`
     : notice || entry.band ? `<button type="button" class="ut-go${parkedGo ? ' ut-go-answer' : ''}" title="${escHtml(parkedGo || t('Go to this session'))}" aria-label="${escHtml(parkedGo || t('Go to this session'))}" data-label="${escHtml(parkedGo || tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
   const deadline = dline ? deadlineHtml(i, t, dline) : ''; // r7 addendum: the time left, under the question
-  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words, { whole: wordsWhole })}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + settingCardHtml(i, t, { strip: !!ctx.noPick }) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) + doorHtml(i, t) : ''}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
+  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words, { whole: wordsWhole })}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + settingCardHtml(i, t, { strip: !!ctx.noPick }) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) + doorHtml(i, t) : ''}${opts}${card ? '' : detailFold}${card || resolved ? '' : techFoldHtml(ctx.foldOf ? ctx.foldOf(i) : [], { className: 'ut-tech-fold' })}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   // lane foryou-honest (the touch scale): every verb carries its WORD in data-label — a touch screen draws it under the icon
   // (style.css's touch block, ::after — never the button's text, so a title / aria / textContent reader is unchanged)

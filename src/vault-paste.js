@@ -309,13 +309,15 @@ function cardOf({ who, words, purpose, target, replaces = false, grant = null, s
         ? { key: i18nKey('It said it needs it for: {hosts}. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours — a command to any other host still shows you its card, and a new kind of command whose destination cannot be read (a shell, an interpreter, an unknown program) still shows you its card too; a vault lock ends it. To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.'), params: { hosts: target.hosts.join(', ') } }
         : { key: i18nKey('If you paste it, the conversation that asked may use it, but every command still shows you its card (it named no hosts); a vault lock ends it. To let it be used without a card, turn on «Usable by agent runs» on its row in the Vault window.') })
       : { key: i18nKey('The conversation that asked is not allowed to use it in runs until you turn on «Usable by agent runs» on its row in the Vault window.') }] : []),
-    { key: i18nKey('Paste it below and press Save to vault — it goes straight into the vault. The agent is told only that it is stored and where, never the value.') },
   ];
+  // lane ui-plain-words (vault-8): how the box works (paste, Save, what the agent hears) is the box's own labelled field now —
+  // the line rides the item's ONE fold; the record (`detail`, Copy) still says every line
+  const fold = [{ key: i18nKey('Paste it below and press Save to vault — it goes straight into the vault. The agent is told only that it is stored and where, never the value.') }];
   const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => { const v = l.params && l.params[k]; return v == null ? m : typeof v === 'object' ? String(v.key) : String(v); });
   return {
     text: `${who} asks you for a secret: ${words}`,
-    detail: lines.map(fill).join('\n'),
-    i18n: { text: { key: i18nKey('{who} asks you for a secret: {words}'), params: { who, words } }, detail: lines },
+    detail: [...lines, ...fold].map(fill).join('\n'),
+    i18n: { text: { key: i18nKey('{who} asks you for a secret: {words}'), params: { who, words } }, detail: lines, fold },
   };
 }
 
@@ -338,7 +340,7 @@ function loginCardOf({ who, words, purpose, target, site = null }) {
   const lines = [
     { key: i18nKey('What: {words}'), params: { words } },
     { key: PURPOSE_LINE, params: { purpose } },
-    { key: LOGIN_ONLY },
+    // lane ui-plain-words (vault-7): LOGIN_ONLY is said ONCE — by the fields' own hint below (the add door's line), never again here
     { key: i18nKey('Type its user name and password below — they go straight into the vault. VibeSpace tells the agent only that it is stored and for which site, never handing over the password.') },
   ];
   const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => { const v = l.params && l.params[k]; return v == null ? m : String(v); });

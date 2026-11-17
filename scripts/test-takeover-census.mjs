@@ -93,6 +93,7 @@ export const CENSUS = [
   ['channel-webhook.js', 'input', 'text+control', 'the New path wizard\'s fields (slug, title, reply name, keys, rate / wakes numbers, the reply URL); the Send a message caller picker\'s checkboxes'],
   ['channel-webhook.js', 'select', 'choice', 'the wizard\'s delivery / policy / caller auth pickers (whSelect)'],
   ['channel-webhook.js', 'textarea', 'text', 'THE SEND A MESSAGE BOX (a path\'s picked callers)'],
+  ['plain-words.js', 'details', 'control', 'THE face / fold door (lane ui-plain-words): every «技术细节» / «详情» fold a surface draws through techFold — its summary is the control'],
   ['channel-webhook.js', 'details', 'control', 'the Join with a pairing code dialog\'s Technical details fold after a pair (the caller id · its reply URL) (lane webhook-pair-join; the 2.369.270 integration)'],
   ['channel-window.js', 'input', 'control', 'the Reply-all checkbox under a Gmail reply (lane gmail-reply-all — composed at the 2.369.202 integration)'],
   ['channel-window.js', 'textarea', 'text', 'THE CHANNEL COMPOSER (a conversation, an agent group)'],

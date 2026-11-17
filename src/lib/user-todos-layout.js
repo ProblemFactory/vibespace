@@ -112,7 +112,9 @@ export function itemTextOf(i, said) { return i && i.i18n && i.i18n.text ? said(i
 export function itemDetailLinesOf(i, said) { return i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map(said) : String((i && i.detail) || '').split('\n').filter(Boolean); }
 /** PURE. The detail as the RECORD a Copy says (lane owner-press-attended r3: «the fold is for the eye, not the record»):
  *  a line that folds rows (`more` — «And 6 more producers.») is said as the rows it folds; every other line as itself. */
-export function itemRecordLinesOf(i, said) { return i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.flatMap((l) => (l && Array.isArray(l.more) && l.more.length ? l.more.map(said) : [said(l)])) : itemDetailLinesOf(i, said); }
+export function itemRecordLinesOf(i, said) { return (i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.flatMap((l) => (l && Array.isArray(l.more) && l.more.length ? l.more.map(said) : [said(l)])) : itemDetailLinesOf(i, said)).concat(itemFoldLinesOf(i, said)); }
+/** PURE. lane ui-plain-words: an item's FOLD lines (`i18n.fold` — its mechanics, drawn under ONE «技术细节» fold); [] when none. */
+export function itemFoldLinesOf(i, said) { return i && !i.clearedAt && i.i18n && Array.isArray(i.i18n.fold) ? i.i18n.fold.map(said) : []; }
 
 /**
  * WHERE THE TRAY IS (lane S3, naive-user study 2: the assistant said "I've

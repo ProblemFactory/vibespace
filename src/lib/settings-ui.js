@@ -8,6 +8,7 @@ import { kernelDoors, kernelDownloadWords, kernelPollStep, kernelSaidStep } from
 import { engineFactText, engineFactDoor, fillEngineSelect } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
 import { t } from './i18n.js';
 import { needLine, needDoorButton, reloadDoor, pluginDoor, pluginsDoor } from './need-line.js'; // lane ui-needs-a-button (settings-13): the reload a changed row waits for, on its line
+import { techFold } from './plain-words.js'; // lane ui-plain-words: a row's long explanation (schema `details:`) under ONE «详情» fold
 import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -509,7 +510,10 @@ class SettingsUI {
     pathEl.textContent = path;
     info.append(label);
     if (chipLine.childNodes.length) info.append(chipLine);
-    info.append(desc, pathEl);
+    info.append(desc);
+    const more = schema.details ? techFold(schema.details, { summary: 'details' }) : null;   // lane ui-plain-words: the face is the description, the mechanics fold
+    if (more) info.append(more);
+    info.append(pathEl);
     if (schema.apply) this._renderApplyChip(info, path, schema);
     else if (schema.channel) this._renderChannelChip(info, schema);
     if (schema.fact === 'browser-display') this._renderDisplayFact(info);

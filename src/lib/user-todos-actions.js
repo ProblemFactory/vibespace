@@ -22,7 +22,7 @@ import { i18nParams } from './stopped-why.js'; // B-a5a4 cure 2: a refusal's int
 import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: a check's switch
 import { ROW_OF as FORYOU_ROW_OF, buttonsOf } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
 import { fetchJson, showToast } from './utils.js';
-import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
+import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf, itemFoldLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
 import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launcher.js';
 import { agentUpdateAction, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: a refusal for an old agent carries its door as the toast's action
 import { appRefusalText } from './app-install-dialog.js'; // a refusal code → the user's words (busy, a decided proposal…)
@@ -110,6 +110,7 @@ export function inboxModel(app) {
   const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? detailLinesOf(i).join('\n') : String((i && i.detail) || '').split('\n').map((l) => tLine(i, l)).join('\n'));
   /** lane owner-press-attended r3: the detail as the RECORD a Copy says — a fold («And 6 more producers.») said as the rows it
    *  folds (the fold is for the eye, not the record) */
+  const foldOf = (i) => (isCleared(i) ? [] : itemFoldLinesOf(i, said));   // lane ui-plain-words: the item's mechanics, drawn under ONE «技术细节» fold
   const recordOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? itemRecordLinesOf(i, said).join('\n') : (i && i.detail) || '');
   const nameFor = (key, items) => {
     const s = sessionFor(key);
@@ -817,7 +818,7 @@ export function inboxModel(app) {
     redraw() { if (loaded) emit('todos', todos); },
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */
-    rowCtx: { t, nameFor, wordsOf, detailOf, replyState, optionsOf: optionsFor, lang: resolveLang },
+    rowCtx: { t, nameFor, wordsOf, detailOf, foldOf, replyState, optionsOf: optionsFor, lang: resolveLang },
     /** Subscribe: `todos` (every snapshot, the store's order), `live` (an
      *  active-sessions payload was ingested), `status` (the board statuses
      *  moved). A surface that closes passes its AbortSignal (or calls the

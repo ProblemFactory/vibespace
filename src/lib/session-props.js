@@ -8,6 +8,7 @@ import { t, deviceLocale } from './i18n.js';
 import { stampAt as when, stampAt as whenAt } from './page-time.js';
 import { valueWord } from './value-words.js'; // lane ui-language: an unknown board state is shown through the door too
 import { needLine, needDoorButton, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (task-groups-15): a need + its door on one line
+import { techFold } from './plain-words.js'; // lane ui-plain-words: the mechanics under ONE fold
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { placementNote } from './pool-priority-model.js'; // 2026-09-28 (PURE)
 import { registerOpenAction } from './window-types.js';
@@ -796,11 +797,14 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
       bwSec.appendChild(rowEl);
       const hint = document.createElement('div');
       hint.className = 'empty-hint';
-      hint.textContent = eff
-        ? t('Background jobs owned by this conversation message it when they finish, fail, get parked, or ask for input; while it is closed, notifications queue and inject at resume. Each Task Group can also set its own.')
-        : t('This conversation is NOT notified when its background jobs finish — agents must poll. Each Task Group can also set its own.');
+      // lane ui-plain-words (task-groups-16): ONE plain line; the mechanics (closed ⇒ queued, where it is switched) fold under 技术细节
+      hint.textContent = eff ? t('Background jobs tell this conversation when they finish or need input.') : t('This conversation is not told when its background jobs finish — the agent has to check by itself.');
       { const d = settingsDoor(app, 'agents.jobNotify', { label: t('Change…'), kind: 'secondary' }); if (d) hint.append(' ', needDoorButton(d)); } // lane ui-needs-a-button pick 5
       bwSec.appendChild(hint);
+      const bwFold = techFold([eff
+        ? t('Background jobs owned by this conversation message it when they finish, fail, get parked, or ask for input; while it is closed, notifications queue and inject at resume. Each Task Group can also set its own.')
+        : t('This conversation is NOT notified when its background jobs finish — agents must poll. Each Task Group can also set its own.')]);
+      if (bwFold) bwSec.appendChild(bwFold);
       // B-70f9 ② (design §9): the jobs this conversation OWNS — glyph · name · state; a click opens the Background Work
       // panel at that job. Read-only here; when a person ENDS or archives the conversation, one notice names those still running with «Stop these too» (B-70f9 ②).
       {
@@ -852,7 +856,9 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
           : lane === 'queue' ? t('This harness has no steer verb, so a notification arriving mid-turn waits in the input queue and runs as its own turn afterwards — like a message from another agent.')
             : lane === 'cli-inbox' ? t('Delivery goes through the CLI\u2019s own inbox: it queues a mid-turn notification itself and opens a turn when the session is idle. Same for messages from other agents.')
               : t('This harness has no live delivery lane, so notifications and agent messages are stashed and injected at the session\u2019s next turn.');
-        bwSec.appendChild(laneHint);
+        // lane ui-plain-words (task-groups-16): how a notification is delivered is mechanics — under ONE fold, never a paragraph
+        const laneFold = techFold([laneHint.textContent]);
+        if (laneFold) bwSec.appendChild(laneFold);
       }
     }
 

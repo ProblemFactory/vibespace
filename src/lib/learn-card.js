@@ -23,6 +23,7 @@
 // 「…要留原文就取消上面的勾」); the person's own tick on that line is theirs for the card's life — the rewording's tick never
 // moves it again (R3-F6); the stored-block notice follows the count — never «over» beside an enabled 保存 (R3-F5).
 import { t } from './i18n.js';
+import { techFold } from './plain-words.js'; // lane ui-plain-words: the card's ONE 技术细节 fold
 import { fetchJson, showToast } from './utils.js';
 import { markTyped } from './stale-watch.js';   // the stale page's mark, from its PURE home (utils.js re-exports it; a suite stubs utils.js)
 import { blockFrom, blockFit } from '../rule-learning.js';
@@ -81,7 +82,9 @@ export function renderLearnCard(r, { onSave = () => { }, onDiscard = () => { } }
   card.dataset.learnCard = '1';
   card.appendChild(el('div', 'learn-card-head', t('{model} read {n} of your decisions and proposes {m} lines', { model: r.label || r.model || '', n: r.read || 0, m: table.rows.length })));
   const c = r.counts || {};
-  card.appendChild(el('div', 'learn-card-sub', [t('{own} yours · {inferred} inferred', { own: c.own || 0, inferred: c.inferred || 0 }), t('digests went through OpenRouter to a zero-data-retention endpoint'), moneyText(r.usd, true, { fine: true })].join(' · ')));
+  // lane ui-plain-words (channels-policy-15): the sub line says what the draft stands on and what it cost; the routing (OpenRouter, zero
+  // data retention) is a technical fact — it rides the card's ONE 技术细节 fold with the model's note (card grammar rule 4)
+  card.appendChild(el('div', 'learn-card-sub', [t('Judged from {own} you marked and {inferred} inferred', { own: c.own || 0, inferred: c.inferred || 0 }), moneyText(r.usd, true, { fine: true })].join(' · ')));
   const st = table.stored;
   let stored = null;
   if (st && st.over) {   // F6: the block as stored is over the bound — said before anything else, never cut unsaid (its words: recount)
@@ -103,8 +106,13 @@ export function renderLearnCard(r, { onSave = () => { }, onDiscard = () => { } }
     if (x.long) { row.dataset.long = '1'; main.appendChild(el('span', 'learn-none learn-long', t('too long — shortened'))); }
     if (x.unsupported) main.appendChild(el('span', 'learn-none', t('no evidence')));
     else if (x.from.length) {
-      const chip = el('span', 'learn-evidence', t('based on {list}', { list: x.from.map((n) => `#${n}`).join(' ') }));
-      chip.title = x.from.map((n) => { const e = ex.get(n); return e ? `#${n} ${e.verdict === 'needs' ? '✓' : '✗'}${e.inferred ? ` (${t('inferred')})` : ''} ${e.snippet}` : `#${n}`; }).join('\n');
+      // lane ui-plain-words (channels-policy-15): «based on #3 #12» named numbers nobody can see — the chip says how many decisions,
+      // and opens to the decisions themselves (✓ needed / ✗ not, a snippet each)
+      const chip = el('details', 'learn-evidence');
+      chip.appendChild(el('summary', null, t('based on {n} of your decisions', { n: x.from.length })));
+      const evList = el('div', 'learn-evidence-list');
+      for (const n of x.from) { const e = ex.get(n); if (e) evList.appendChild(el('div', 'learn-evidence-line', `${e.verdict === 'needs' ? '✓' : '✗'}${e.inferred ? ` (${t('inferred')})` : ''} ${e.snippet}`)); }
+      chip.appendChild(evList);
       main.appendChild(chip);
     }
     row.appendChild(main);
@@ -147,11 +155,9 @@ export function renderLearnCard(r, { onSave = () => { }, onDiscard = () => { } }
     }
     card.append(h, list);
   }
-  if (r.note) {
-    const tech = el('details', 'learn-tech'); tech.dataset.fold = 'tech';
-    tech.appendChild(el('summary', null, t('Technical details')));
-    tech.appendChild(el('div', 'learn-note', r.note));
-    card.appendChild(tech);
+  {   // the card's ONE fold (lane ui-plain-words): the routing sentence + the model's own note
+    const tech = techFold([t('digests went through OpenRouter to a zero-data-retention endpoint'), r.note || ''], { className: 'learn-tech' });
+    if (tech) card.appendChild(tech);
   }
   const fit = el('div', 'learn-fit');
   fit.setAttribute('role', 'status');

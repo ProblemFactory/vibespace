@@ -1,5 +1,6 @@
 import { escHtml, showConfirmDialog, showToast, autoTaskColor, showContextMenu, markLanded } from './utils.js';
 import { t, tc } from './i18n.js';
+import { techFoldHtml } from './plain-words.js'; // lane ui-plain-words: the budget's rule under ONE fold
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { mountTaskLog } from './task-log.js'; // the Backlog / 活动记录 tabs ARE the log viewer
 import { touches, metaChanged, windowVerdict } from '../task-delta.js'; // PURE (lane task-group-fanout): what a tasks-updated delta moved
@@ -386,8 +387,13 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       const b = preview.budget || {};
       const eff = Math.max(1, b.effective || 1);
       const pct = Math.min(100, Math.round(((preview.used || 0) / eff) * 100));
-      bar.querySelector('.ctx-budget-words').textContent = t('Injection budget {used} / {budget}', { used: kb(preview.used || 0), budget: kb(b.effective || 0) })
-        + (b.own && b.room < b.own ? ' ' + t('({own} set; the tools and the standing instructions leave {room})', { own: kb(b.own), room: kb(b.room) }) : '');
+      bar.querySelector('.ctx-budget-words').textContent = t('A new conversation gets {used} of {budget} at the start', { used: kb(preview.used || 0), budget: kb(b.effective || 0) });
+      // the set / room arithmetic is a fold line (lane ui-plain-words, task-groups-6) — said only when the room is under what was set
+      const foldBody = bar.querySelector('.ctx-budget-fold .tech-fold-body');
+      let room = foldBody && foldBody.querySelector('.ctx-budget-room');
+      const roomWords = b.own && b.room < b.own ? t('({own} set; the tools and the standing instructions leave {room})', { own: kb(b.own), room: kb(b.room) }) : '';
+      if (foldBody && roomWords && !room) { room = document.createElement('div'); room.className = 'tech-fold-line ctx-budget-room'; foldBody.prepend(room); }
+      if (room) { if (roomWords) room.textContent = roomWords; else room.remove(); }
       bar.querySelector('.ctx-budget-fill').style.width = pct + '%';
       const warn = bar.querySelector('.ctx-budget-warn');
       const stepped = (preview.rows || []).filter((pr) => pr.level !== pr.chosen && (pr.kind === 'dir' || pr.kind === 'file'));
@@ -517,7 +523,8 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     // the budget bar
     const budget = document.createElement('div');
     budget.className = 'ctx-budget';
-    budget.innerHTML = `<div class="ctx-budget-head"><span class="ctx-budget-words"></span><span class="task-detail-hint">${escHtml(t('rows go in table order; one that does not fit steps down a level: contents → names + key files → names → note only'))}</span></div><div class="ctx-budget-track"><div class="ctx-budget-fill"></div></div><div class="ctx-budget-warn ctx-warn" hidden></div>`;
+    // lane ui-plain-words (task-groups-6): the face says what a new conversation gets; the step-down rule and the set / room arithmetic fold
+    budget.innerHTML = `<div class="ctx-budget-head"><span class="ctx-budget-words"></span></div>${techFoldHtml([t('rows go in table order; one that does not fit steps down a level: contents → names + key files → names → note only')], { className: 'ctx-budget-fold' })}<div class="ctx-budget-track"><div class="ctx-budget-fill"></div></div><div class="ctx-budget-warn ctx-warn" hidden></div>`;
     ctxSec.appendChild(budget);
 
     // 「新对话会收到」 — the renderer's exact output
@@ -531,7 +538,12 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     pvBar.append(full, meta);
     const pre = document.createElement('pre'); pre.className = 'task-detail-preview';
     pre.textContent = preview ? (state.full ? preview.text : preview.block) : t('Loading…');
-    pvSec.append(pvBar, pre);
+    // lane ui-plain-words (task-groups-1): the verbatim block is the AGENT's text (English, sent as it is) — folded under words that
+    // say so; never edited (the section promises «exactly what the agent reads», its Task ID line included)
+    const pvFold = document.createElement('details'); pvFold.className = 'task-detail-preview-fold';
+    const pvSum = document.createElement('summary'); pvSum.textContent = t('Show the text the agent receives (English, sent as it is)');
+    pvFold.append(pvSum, pre);
+    pvSec.append(pvBar, pvFold);
 
     // 更多选项 — folded, its values on the chips
     paintMore(host);

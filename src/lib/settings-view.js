@@ -136,7 +136,7 @@ export function settingsViewModel(schema, { categories = [], query = '', showAdv
     if (!sec) continue;
     if (row.held) continue; // a HELD row is never drawn (the header's `held`)
     // lane attention-policy: a block's head words find its rows too (typing 需关注 / attention finds 「需关注 · 怎么判断」)
-    if (q && !((row.label || '') + ' ' + (row.description || '') + ' ' + path + ' ' + (row.blockTitle || '')).toLowerCase().includes(q)) continue;
+    if (q && !((row.label || '') + ' ' + (row.description || '') + ' ' + [].concat(row.details || []).join(' ') + ' ' + path + ' ' + (row.blockTitle || '')).toLowerCase().includes(q)) continue;   // lane ui-plain-words: a folded `details:` is still found
     const why = whyHidden(row, ctx, t);
     const advanced = row.tier === 'advanced';
     const modified = !!isModified(path);

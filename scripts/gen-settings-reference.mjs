@@ -38,7 +38,7 @@ export function renderTable(schema, category) {
   const lines = ['| Setting | Type | Default | Description |', '|---------|------|---------|-------------|'];
   for (const [key, s] of rows) {
     const label = cell(s.label || key);
-    const desc = cell(s.description || '');
+    const desc = cell([s.description || '', ...[].concat(s.details || [])].filter(Boolean).join(' ')); // lane ui-plain-words: a row's folded `details:` is still the reference's text
     lines.push(`| ${code(key)} | ${cell(s.type || '')} | ${defaultCell(s.default)} | **${label}**${desc ? ' — ' + desc : ''} |`);
   }
   return lines.join('\n');

@@ -181,7 +181,7 @@ try {
   check('「新对话会收到」 IS the renderer\'s output (GET /api/tasks/:id/context block, byte for byte)', pv0 === ctx0.block && pv0.includes('负责投资人沟通。\n对外一律不提供应商名和价格。') && pv0.includes('Always cite the figures table.'), { pv0: (pv0 || '').slice(0, 300) });
   check('the big folder steps down and SAYS so — on its row (超出…退到「只说明」) and in the budget bar', /只说明/.test(rowFacts[3].plan) && /太大|超出注入预算/.test(rowFacts[3].plan) && await D.ev(`!!(${W(ir.id)}).element.querySelector('.ctx-budget-warn:not([hidden])')`), rowFacts[3]);
   const budgetWords = await D.ev(`(${W(ir.id)}).element.querySelector('.ctx-budget-words').textContent`);
-  check(`the budget bar names what was used of what (${budgetWords})`, /^注入预算 [\d.]+ (KB|B) \/ [\d.]+ KB/.test(budgetWords || ''), budgetWords);
+  check(`the budget bar names what was used of what (${budgetWords})`, /^新对话一开始会收到 [\d.]+ (KB|B)（上限 [\d.]+ KB）/.test(budgetWords || '')   // lane ui-plain-words (task-groups-6): the face in plain words, budgetWords);
   await shot(D.S, 'desk-settings.png');
 
   // 告诉 agent: a real press on 文件名 for the IR folder ⇒ the preview lists, no key file contents

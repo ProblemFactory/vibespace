@@ -1163,7 +1163,11 @@ function create(engineCtx) {
               { key: kws.length ? i18nKey('Approve writes: wake {agent} now (a billed turn) on messages with: {words} — in {where}, at most {cap} wakes a day.') : i18nKey('Approve writes: wake {agent} now (a billed turn) on every new message in {where}, at most {cap} wakes a day.'), params: { agent: ctx.name || ctx.id, words: kws.join(', '), where, cap: row.dailyWakeCap } },
               ...(row.notify === 'digest' ? [{ key: i18nKey('As a digest: one billed turn every {n} minutes at most.'), params: { n: row.digestMinutes } }] : []),
               ...(reason ? [{ key: i18nKey('Reason: {reason}'), params: { reason } }] : []),
-              { key: i18nKey('It already has {n} notifications of its own and {m} wake asks waiting.'), params: { n: own, m: waiting.length } },
+            ],
+            // lane ui-plain-words (chat-cards-5): the card's face is what Approve does (+ the digest, the reason); the mechanics — what it
+            // already has (said only when it has any), what Deny does, when an unanswered ask ends — fold under ONE «技术细节»
+            fold: [
+              ...(own || waiting.length ? [{ key: i18nKey('It already has {n} notifications of its own and {m} wake asks waiting.'), params: { n: own, m: waiting.length } }] : []),
               { key: i18nKey('Deny changes nothing. Without it, the agent can still ask for the news on its next turn (free).') },
               { key: i18nKey('Unanswered, it expires in {n} days — the agent can ask again.'), params: { n: ttlDays } },
             ],

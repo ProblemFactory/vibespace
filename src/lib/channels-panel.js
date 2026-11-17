@@ -634,7 +634,10 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
       cov.scanned += c.scanned; cov.total += c.total; cov.capped = cov.capped || c.capped;
     }
     r.results.sort((m, n) => (Number(n.record && n.record.at) || 0) - (Number(m.record && m.record.at) || 0));
-    status.textContent = r.results.length ? (r.truncated ? t('{n} results — more exist; narrow the words', { n: r.results.length }) : t('{n} results', { n: r.results.length })) : t('No message matches.');
+    // lane ui-plain-words (channels-accounts-1): «No message matches.» only when NOTHING more is coming — an account that also
+    // searches its own vendor fills section two below; then the empty SAVED section says it in its own note, never the top line
+    const vendorAsked = answers.some(({ x }) => x && !x.error && x.vendorSearch);
+    status.textContent = r.results.length ? (r.truncated ? t('{n} results — more exist; narrow the words', { n: r.results.length }) : t('{n} results', { n: r.results.length })) : vendorAsked ? '' : t('No message matches.');
     // lane channel-names-readable: nothing matched words with letters on an account whose people's names cannot be read
     const blind = !r.results.length && /\p{L}/u.test(q) ? accounts.find((acc) => acc && acc.namesReadable && acc.namesReadable.ok === false) : null;
     if (blind) status.textContent = chanCaps.namesSearchText(blind.namesReadable, { t });
@@ -649,6 +652,7 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
       gone = agentHits.filter((h) => h && !have.has(String(h.msgId))).length;
     }
     s1.note.textContent = SR.coverageText(cov, { t });
+    if (!r.results.length && vendorAsked) s1.note.textContent = [t('No saved message matches'), s1.note.textContent].filter(Boolean).join(' · ');
     const grouped = group && !sc;
     const ck = (h) => `${h.adapterId}\u0000${h.convId}`;
     let ordered = r.results;

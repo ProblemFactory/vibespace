@@ -51,7 +51,7 @@ import { memberState, seedPriority, movePriority, priorityRows, rowWords, placem
 import { deviceLocale } from './i18n.js';
 import { overageState, spendControlState } from '../spend-authorizer.js'; // the ONE overage / spend-control verdict (PURE)
 import { dialRowState } from '../dial-facts.js'; // lane-pairing ③: THE one dial state (the machine row, this card, the pairing sheet)
-import { dialStateText, dialHistoryLine } from './dial-address-picker.js';
+import { dialStateText, dialHistoryLine, dialHistoryText } from './dial-address-picker.js';
 import { openExitAccessDialog, exitSummaryText, exitCodeWords, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { signinChipHtml } from './machine-signin-chip.js'; // lane desktop-vnc-remember: the Machines card's 「登录已记住」
 import { runtimeLineEl, runtimeFixEl } from './machine-runtime-line.js'; // lane device-node-version: the node its agent runs on + 「运行时过旧」
@@ -2936,7 +2936,7 @@ export function installManageAgents(App, ctx = {}) {
           const drs = h.transport === 'dial' || h.graduated ? dialRowState(h) : null;
           const live = drs ? drs.state === 'connected' : null;
           const dialWords = drs ? dialStateText(drs) : '';
-          const dot = live == null ? '' : `<span class="agents-mach-dot${live ? '' : ' off'}${drs && (drs.state === 'refused' || drs.state === 'auth-fail') ? ' err' : ''}" data-tip="${escHtml(dialWords)}"></span>`;
+          const dot = live == null ? '' : `<span class="agents-mach-dot${live ? '' : ' off'}${drs && (drs.state === 'refused' || drs.state === 'auth-fail') ? ' err' : ''}" data-tip="${escHtml([dialWords, dialHistoryText(drs)].filter(Boolean).join(' · '))}"></span>`;
           const pill = hostQuotaPillHtml(this._hostOwnUsage?.[h.id]); // the tightest bucket, through bucketView (lane reset-unproven)
           const kept = signinChipHtml(Object.hasOwn(signins, h.id) ? signins[h.id] : null); // lane desktop-vnc-remember: 「登录已记住」
           sum.innerHTML = `${dot}<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`)}</span>${kept}${pill}`;

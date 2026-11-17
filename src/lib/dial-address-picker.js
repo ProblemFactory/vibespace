@@ -203,15 +203,21 @@ export function dialStateText(rs) {
   if (rs && rs.dup) return `${base} · ${t('Another device is also dialing in as this one (from {from}, {time}) — it holds a copy of this pairing; pair it under its own name', { from: rs.dup.from || '?', time: hhmm(rs.dup.at) })}`;
   return base;
 }
+/** lane ui-plain-words (machines-5): what came BEFORE a connection that holds now — the failed attempts; '' otherwise. A tooltip's words. */
+export function dialHistoryText(rs) {
+  return rs && rs.state === 'connected' && rs.n > 0 ? t('Before that, {n} attempts failed ({reason})', { n: rs.n, reason: dialReasonText(rs.reason) }) : '';
+}
 function dialStateBase(rs) {
   const time = rs && rs.at ? hhmm(rs.at) : '';
   const host = (rs && rs.host) || t('this server');
   switch (rs && rs.state) {
-    case 'connected': return rs.n > 0 ? t('Connected since {time} — before that {n} attempts failed ({reason})', { time, n: rs.n, reason: dialReasonText(rs.reason) }) : t('Connected since {time}', { time });
+    // lane ui-plain-words (machines-5): a machine that IS connected says that, nothing else — the failures before it are history,
+    // read on the dot's tooltip (dialHistoryText), never a second clause on the row
+    case 'connected': return t('Connected since {time}', { time });
     case 'auth-fail': return t('Connected, but the device refuses this server\'s key — it was installed with a different command; generate a new one');
     // naive-user N-refused: a refusal newer than the current command means the device still runs an OLDER one — and
-    // the newest is usually in the user's hands (a Generate just made it): "generate a new one" sent him round the
-    // rotation loop the lane exists to end (each Generate retires the command he was about to paste). Name the
+    // the newest is usually in the user's hands (a Generate just made it): "generate a new one" sent the person round the
+    // rotation loop the lane exists to end (each Generate retires the command the person was about to paste). Name the
     // current command's time and say to run THAT one; a new one only if it is lost.
     case 'refused': return rs.mintedAt
       ? t('Last dial: refused ({reason}) at {time} — the device still holds a command older than the one generated at {minted}: run that one on the device (or generate a new one if you no longer have it)', { reason: dialReasonText(rs.reason), time, minted: hhmm(rs.mintedAt) })

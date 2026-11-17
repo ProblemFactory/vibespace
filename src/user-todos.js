@@ -80,6 +80,12 @@ function normalizeI18n(x) {
     // kept for the RECORD a Copy says whole (the fold is for the eye, never the record); a row carries no fold of its own
     out.detail = x.detail.slice(0, 12).map((l, i) => { const o = line(l, `detail[${i}]`); if (Array.isArray(l.more) && l.more.length) o.more = l.more.slice(0, MORE_LINES_MAX).map((m, j) => line(m, `detail[${i}].more[${j}]`)); return o; });
   }
+  // lane ui-plain-words: `fold` — the item's mechanics (counts, what Deny does, when it expires): lines the person may open,
+  // drawn under ONE «技术细节» fold (src/lib/plain-words.js) — the face stays the detail's first lines; the record (Copy) says them all
+  if (x.fold != null) {
+    if (!Array.isArray(x.fold)) throw new Error('i18n.fold must be an array of lines');
+    out.fold = x.fold.slice(0, 12).map((l, i) => line(l, `fold[${i}]`));
+  }
   if (x.source != null) out.source = { key: line(x.source, 'source').key };
   return out;
 }

@@ -3068,7 +3068,6 @@ export default {
   "awaiting you": "等你处理",
   "ago": "前",
   "No background jobs yet — agents register them with vibespace-job": "还没有后台任务——agent 用 vibespace-job 注册",
-  "Auto via the CLI (burn-aware background refresh)": "CLI 自动（燃烧感知的后台刷新）",
   "Session “{name}” not found — it may have been renamed or closed": "找不到会话「{name}」——可能已改名或已关闭",
   "Session “{name}” is not open right now": "会话「{name}」当前未打开",
   "Session properties": "会话属性",
@@ -6390,7 +6389,6 @@ export default {
   "no route": "网络不可达",
   "not a VibeSpace address": "不是 VibeSpace 地址",
   "this server": "本服务器",
-  "Connected since {time} — before that {n} attempts failed ({reason})": "已连接（{time} 起）— 此前 {n} 次拨号失败（{reason}）",
   "Connected since {time}": "已连接（{time} 起）",
   "Connected, but the device refuses this server's key — it was installed with a different command; generate a new one": "已连接，但设备拒绝了本服务器的密钥 — 它是用另一条命令安装的，请重新生成",
   "Last dial: refused ({reason}) at {time} — the device holds an older command; generate a new one": "最近一次拨号：被拒绝（{reason}），{time} — 设备上的命令已过期，请重新生成",
@@ -8369,7 +8367,6 @@ export default {
   "Read + write, ask each": "读 + 写，每次写都问你",
   "Read + write, auto (sensitive still asks)": "读 + 写，自动（敏感操作仍会问你）",
   "Calls a day": "每天调用次数",
-  "DELETE and these paths always ask": "DELETE 和这些路径总是会问你",
   "Always allowed": "总是允许",
   "No call shapes are always allowed": "没有总是允许的调用形状",
   "Waiting for you": "等你处理",
@@ -9507,11 +9504,9 @@ export default {
   "the model gave no usable proposal — try again": "模型没给出可用的提议——再试一次",
   "OpenRouter did not answer — try again in a minute": "OpenRouter 没有回应——过一分钟再试",
   "{model} read {n} of your decisions and proposes {m} lines": "{model} 读了你的 {n} 个判定，提议 {m} 行",
-  "{own} yours · {inferred} inferred": "你标的 {own} 个 · 推断 {inferred} 个",
   "digests went through OpenRouter to a zero-data-retention endpoint": "摘要经 OpenRouter 送到零数据保留端点",
   "use this line": "用这一行",
   "no evidence": "无依据",
-  "based on {list}": "依据 {list}",
   "inferred": "推断",
   "was: {text}": "原来：{text}",
   "Lines it would remove": "提议删掉的行",
@@ -13905,4 +13900,25 @@ export default {
   "This temporary browser keeps its passkeys with this conversation; they are removed with it. Cancel the request to use the page’s other way in, or sign in on your own device; a new passkey is registered only after you allow it.": "这个临时浏览器的通行密钥随本对话保存，对话删除时一并移除。取消这个请求后，可以用网页的其他登录方式，或在你自己的设备上登录；新的通行密钥只有在你允许后才会注册。",
   // lane ui-needs-a-button (closure 4)
   "Automatic turns still run on this account while it bills paid overage (its Spending setting allows them).": "该账号按量付费期间，自动回合照常进行（花费里的设置允许了它们）。",
+  // lane ui-plain-words pick 1 — channels-accounts-1: the saved section's own empty note
+  "No saved message matches": "本机保存的消息里没有匹配",
+  // lane ui-plain-words pick 1 — channels-accounts-18: the always-ask line in plain words (the patterns fold)
+  "Deletes and a few sensitive calls always ask you first.": "删除和少数敏感操作，始终先问你。",
+  // lane ui-plain-words pick 1 — channels-policy-15: the learning card says what it stands on
+  "Judged from {own} you marked and {inferred} inferred": "依据你标的 {own} 个、推断的 {inferred} 个判定",
+  "based on {n} of your decisions": "依据 {n} 个判定",
+  // lane ui-plain-words pick 1 — gear-and-system-16: the report dialog's face (what it captures folds)
+  "Press Capture now before you fix anything — fixing it erases what went wrong.": "修好之前，先点「立即抓取」——一修，出错的现场就没了。",
+  "What it captures": "会抓取哪些内容",
+  "Captured. You can fix things now — nothing you do will erase it.": "已抓取。现在可以动手修了——接下来做什么都不会抹掉它。",
+  // lane ui-plain-words pick 1 — machines-5: a connected machine's earlier failures, as tooltip words
+  "Before that, {n} attempts failed ({reason})": "在此之前失败过 {n} 次（{reason}）",
+  // lane ui-plain-words pick 1 — task-groups-1 / -6: the preview's fold, the budget's face
+  "A new conversation gets {used} of {budget} at the start": "新对话一开始会收到 {used}（上限 {budget}）",
+  "Show the text the agent receives (English, sent as it is)": "查看 agent 收到的原文（英文，原样发送）",
+  // lane ui-plain-words pick 1 — task-groups-16: the background jobs' face
+  "Background jobs tell this conversation when they finish or need input.": "后台任务完成或需要输入时，会告诉这个对话。",
+  "This conversation is not told when its background jobs finish — the agent has to check by itself.": "后台任务完成时不会告诉这个对话——agent 得自己去查。",
+  // lane ui-plain-words pick 1 — vault-8: the paste field's label
+  "What to store": "要存入的内容",
 };

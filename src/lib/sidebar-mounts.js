@@ -10,7 +10,7 @@ import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from 
 import { revealHeaders, askRevealPassword } from './vault-reveal.js'; // lane vault-contents-window r2: a set-up vault prefills secrets only inside the reveal window of this page
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf } from '../dial-facts.js'; // lane-pairing ③: THE one dial state of a machine row (PURE, bundled); verify-r4 F6: the name rule + its collision verdict
-import { dialAddressPicker, dialStateText, dialStateShort, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
+import { dialAddressPicker, dialStateText, dialHistoryText, dialStateShort, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
 import { openExitAccessDialog, exitSummaryText, exitGranted, lastRunText, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane exit-see-whole: the machine's command list, ONE click from its row (the icon + the last-run line)
 import { UI_ICONS } from './icons.js';
@@ -1088,7 +1088,7 @@ export function installSidebarMounts(Sidebar) {
       row._face = face;
       const dot = isDial ? (rs.state === 'connected' ? 'ok' : (rs.state === 'auth-fail' || rs.state === 'refused') ? 'err' : 'off') : face.dot;
       const dotTip = isDial
-        ? dialWords + (rs.state === 'refused' && h.dial?.lastRefusal?.from ? ` · ${tr('from {addr}', { addr: h.dial.lastRefusal.from })}` : '')
+        ? [dialWords, dialHistoryText(rs)].filter(Boolean).join(' · ') + (rs.state === 'refused' && h.dial?.lastRefusal?.from ? ` · ${tr('from {addr}', { addr: h.dial.lastRefusal.from })}` : '')
         : face.dotTip;
       const nameTip = isDial ? tr('Dial-out device — it connects TO this instance over a websocket (no ssh)') : `${h.user}@${h.host}:${h.port}`;
       const badge = isDial
