@@ -11,7 +11,8 @@
 // 'drain' only after a false write — fifty small inner frames behind a held close tell no forgotten channel «writable» (red:
 // the as-built drain); the queued close is OPT-IN (`closeAfterQueue`, the interface's link and an inner link) — without it
 // today's device link sends a close at once with two windows queued (red: the reviewed tip that held every close); every
-// wait is on its effect with a deadline; the scratch device agent lives in /tmp by name and is stopped on every path.
+// wait is on its effect with a deadline; the scratch device agent's roots come from the tree's scratch helper, and it is
+// stopped on every path.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,7 +20,7 @@ import net from 'node:net';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
-import { endDaemonsAndWait, endDaemonsOf } from './scratch.mjs';
+import { endDaemonsAndWait, endDaemonsOf, scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -203,18 +204,20 @@ for (const [name, M, want] of [['the frame code', Mux, true], ['RED CONTROL (the
 
 console.log('§3 A LINK INSIDE A LINK, over a REAL daemon — the outer channel starved of credit');
 // device #0 constructed as server.js does (test-local-device's recipe): a SCRATCH DEVICE AGENT (the built
-// data/bin/vibespace-agentd.js, started detached by the DeviceManager) in its own root under /tmp by name (the identity stop
-// refuses any other), the daemon root env the agent prefers REMOVED and HOME pointed at the scratch root BEFORE the manager
-// is built; the agent is stopped on EVERY path — the end, an exit, a signal
-const root = fs.mkdtempSync('/tmp/vs-linkframes-');
-const dataDir = fs.mkdtempSync('/tmp/vs-linkframes-data-');
+// data/bin/vibespace-agentd.js, started detached by the DeviceManager) in its own roots from THE TREE'S SCRATCH HELPER
+// (scratch.mjs scratch(): /tmp/vs-<name>-<pid>, the shape the identity stop accepts — never a path this suite spells, the gate's
+// census), the daemon root env the agent prefers REMOVED and HOME pointed at the scratch root BEFORE the manager is built; the
+// agent is stopped on EVERY path — the end, an exit, a signal. The stop is registered BEFORE the first mint, so at an exit it
+// runs before the helper removes the roots (a daemon never outlives its root).
+let root = null, dataDir = null, scratchEnded = false;
+const endScratch = () => { if (scratchEnded || !root) return; scratchEnded = true; try { endDaemonsOf(root); } catch { } for (const d of [root, dataDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } };
+process.on('exit', endScratch);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { endScratch(); process.exit(128 + (sig === 'SIGINT' ? 2 : sig === 'SIGTERM' ? 15 : 1)); });
+root = scratch('linkframes'); dataDir = scratch('linkframes-data');
+fs.mkdirSync(root, { recursive: true }); fs.mkdirSync(dataDir, { recursive: true });
 delete process.env.VIBESPACE_DEVICE_ROOT;                    // the agent takes it before VIBESPACE_AGENTD_ROOT (agentd.js ROOT)
 process.env.VIBESPACE_AGENTD_ROOT = path.join(root, 'agentd');
 process.env.HOME = root;
-let scratchEnded = false;
-const endScratch = () => { if (scratchEnded) return; scratchEnded = true; try { endDaemonsOf(root); } catch { } for (const d of [root, dataDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } };
-process.on('exit', endScratch);
-for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { endScratch(); process.exit(128 + (sig === 'SIGINT' ? 2 : sig === 'SIGTERM' ? 15 : 1)); });
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
 const dm = new DeviceManager({ dataDir, bundlePath: path.join(REPO, 'data/bin/vibespace-agentd.js'), version: require(path.join(REPO, 'package.json')).version, nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
 let farSock = null; const far = { bytes: 0, controls: [] };
