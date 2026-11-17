@@ -443,7 +443,7 @@ function settleLive(session, result) {
 
 module.exports = {
   normalize: normalizeCodexRateLimit,
-  predict: require('./codex-predict.js'), // the prediction adapter (usage-predict pick 3): no prior — learn first
+  predict: 'codex', // its prediction adapter, by name (src/harnesses/predict-adapters.js)
   readLive, settleLive, // the live read the engine calls for any harness that declares it (above)
   signalFromStream,
   probe: capsOf('codex').quotaProbe, // 'rpc-rate-limits': account/rateLimits/read on a LIVE app-server

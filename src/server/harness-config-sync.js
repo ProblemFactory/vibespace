@@ -89,6 +89,13 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
   const refusalNow = () => (typeof ownerWriteRefusal === 'function' ? ownerWriteRefusal() : null)
     || (hookRegistrationSafe() ? null : { kind: 'unknown', why: 'this server never writes the owner\'s CLI config' });
   const { harnessSetting, harnessDeclares, harnessSpawnSettings } = accessorsFor({ serverSetting, harnesses });
+  // THE PREDICTION ADAPTERS ARE CHECKED ON THE HUB, at its boot (lane usage-predict; 主开发 2026-11-17: the device agent carries no
+  // code it never runs): a built-in descriptor NAMES its adapter, and every name must resolve to one that keeps its contract
+  // (src/harnesses/predict-adapters.js checkRegistry) — a mismatch is a bug, said by name instead of a hub that starts
+  if (harnesses && typeof harnesses.list === 'function' && typeof harnesses.isBuiltin === 'function') {
+    const predictErrs = require('../harnesses/predict-adapters.js').checkRegistry(harnesses.list().filter((h) => harnesses.isBuiltin(h.id)));
+    if (predictErrs.length) throw new Error(`prediction adapters: ${predictErrs.join('; ')}`);
+  }
   /** The persisted paths of every cli-config row of every registered harness. */
   function cliConfigKeys() {
     const out = [];

@@ -102,28 +102,43 @@ ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META ro
   ok(!whole, 'POSITIVE control: the whole antigravity descriptor validates', whole);
 }
 // ── THE PREDICTION ADAPTER (lane usage-predict pick 3, 2026-11-15; the owner: «把预测系统做成通用的adapter接在不同的账号来源上»): every
-// harness declares `quota.predict` — its unit and prior, or `{ none: '<why>' }` — checked at registration; the estimator's core
-// reaches a source's adapter WITHOUT the registry (src/harnesses/predict-adapters.js) and the two bindings are the same object.
+// harness declares `quota.predict` — its adapter's NAME, or `{ none: '<why>' }`. The registry checks the name's shape (it runs on
+// the device agent too, which carries no prediction code — 主开发 2026-11-17); the hub resolves each name in ONE module,
+// src/harnesses/predict-adapters.js (checkRegistry at the hub's boot), which the estimator's core reaches WITHOUT the registry.
 {
   const UP = require(path.join(REPO, 'src/usage-predict.js'));
   const PA = require(path.join(REPO, 'src/harnesses/predict-adapters.js'));
   const { validate } = require(path.join(REPO, 'src/harnesses/index.js'));
   const ids = harnessIds();
-  const rows = ids.map((id) => { const p = HARNESSES[id]?.quota?.predict; return { id, p, errs: UP.checkPredict(p) }; });
-  ok(rows.every((r) => !r.errs.length), `predict: every harness declares it (${rows.map((r) => r.id + '=' + (r.p && r.p.none ? 'none' : r.p && r.p.unit)).join(' · ')})`, JSON.stringify(rows.filter((r) => r.errs.length)));
-  const pr = (id) => HARNESSES[id]?.quota?.predict?.prior;
+  const H = require(path.join(REPO, 'src/harnesses/index.js'));
+  const rows = ids.map((id) => { const p = HARNESSES[id]?.quota?.predict; return { id, p, errs: [...H.predictShapeErrs(p), ...PA.checkRegistry([HARNESSES[id]])] }; });
+  ok(rows.every((r) => !r.errs.length), `predict: every harness declares it — an adapter's name, resolved and checked on the hub, or { none } (${rows.map((r) => r.id + '=' + (typeof r.p === 'string' ? r.p : 'none')).join(' · ')})`, JSON.stringify(rows.filter((r) => r.errs.length)));
+  const pr = (id) => { const p = HARNESSES[id]?.quota?.predict; return typeof p === 'string' ? PA.adapterOf(p)?.prior : undefined; };
   ok(pr('claude') && pr('claude').sevenDay > 0 && pr('claude').fiveHour > 0 && pr('claude').classes5h, 'predict: Claude states its measured prior (5h, 7d, its caps) and its 5h class priors');
   ok(['codex', 'antigravity'].every((id) => pr(id) && typeof pr(id).none === 'string' && pr(id).none.length > 10), 'predict: codex and Antigravity declare NO prior, and say why (learn first)');
-  ok(rows.filter((r) => r.p && r.p.none).every((r) => !(r.id in PA.ADAPTERS)) && rows.filter((r) => r.p && !r.p.none).every((r) => PA.adapterOf(r.id) === r.p),
-    'predict: the core\'s binding (predict-adapters) IS the descriptor\'s for every source that predicts; a source that states no quota has no row', JSON.stringify(rows.map((r) => [r.id, PA.adapterOf(r.id) === r.p])));
+  ok(rows.filter((r) => r.p && r.p.none).every((r) => !(r.id in PA.ADAPTERS)) && rows.filter((r) => typeof r.p === 'string').every((r) => r.p === r.id && PA.adapterOf(r.p) !== null),
+    'predict: every source that predicts NAMES its own adapter (the core\'s binding, predict-adapters, by the same name); a source that states no quota has no row', JSON.stringify(rows.map((r) => [r.id, r.p])));
   const g = HARNESSES.claude;
-  const bad = [[{ ...g, quota: { ...g.quota, predict: undefined } }, 'no predict'], [{ ...g, quota: { ...g.quota, predict: { unit: 'usd-api', prior: { sevenDay: -5 } } } }, 'a negative size'],
-    [{ ...g, quota: { ...g.quota, predict: { unit: 'credits', prior: { none: 'x y z w' } } } }, 'an unknown unit'], [{ ...g, quota: { ...g.quota, predict: { none: '' } } }, 'a none that says no why']];
+  const bad = [[{ ...g, quota: { ...g.quota, predict: undefined } }, 'no predict'], [{ ...g, quota: { ...g.quota, predict: 'Claude adapter!' } }, 'a name that is no name'],
+    [{ ...g, quota: { ...g.quota, predict: { unit: 'usd-api', prior: { sevenDay: 5 } } } }, 'the adapter object itself (the shape before: it would carry its code into the device bundle)'], [{ ...g, quota: { ...g.quota, predict: { none: '' } } }, 'a none that says no why']];
   for (const [copy, what] of bad) { let msg = ''; try { validate(copy); } catch (e) { msg = e.message; } ok(/quota\.predict/.test(msg), `RED control: a descriptor with ${what} is refused at registration (${msg.slice(0, 90)})`); }
+  // the HUB's check: a well-shaped name no hub adapter answers passes the registry (the device cannot know) and is said by checkRegistry
+  let unk = ''; try { validate({ ...g, quota: { ...g.quota, predict: 'nosuch' } }); } catch (e) { unk = e.message; }
+  const unkHub = PA.checkRegistry([{ id: 'claude', quota: { ...g.quota, predict: 'nosuch' } }]);
+  ok(!unk && unkHub.length === 1 && /names 'nosuch', which no hub adapter answers/.test(unkHub[0]) && PA.checkRegistry(ids.map((id) => HARNESSES[id])).length === 0,
+    'predict: a name no hub adapter answers passes the registry (the device checks the shape) and the hub\'s check says it by name; the built-ins all resolve', JSON.stringify([unk.slice(0, 80), unkHub]));
+  // the hub's boot: harness-config-sync is created once by server.js with the registry — a built-in naming no adapter stops it by name
+  const HCS = require(path.join(REPO, 'src/server/harness-config-sync.js'));
+  const mkHcs = (harnesses) => { try { HCS.create({ serverSetting: () => undefined, harnesses, adapterRegistry: null, activeSessions: new Map(), log: () => { }, warn: () => { } }); return ''; } catch (e) { return e.message; } };
+  const realH = require(path.join(REPO, 'src/harnesses/index.js'));
+  const wrongH = { ...realH, list: () => realH.list().map((h) => (h.id === 'claude' ? { ...h, quota: { ...h.quota, predict: 'nosuch' } } : h)) };
+  const okBoot = mkHcs(realH), badBoot = mkHcs(wrongH);
+  ok(!okBoot && /^prediction adapters: claude: quota\.predict names 'nosuch', which no hub adapter answers/.test(badBoot),
+    'predict: the hub checks every built-in name at its boot (harness-config-sync, created by server.js) — the built-ins pass; a built-in naming no adapter stops it by name', JSON.stringify([okBoot.slice(0, 80), badBoot.slice(0, 120)]));
   // a CONTRIBUTED harness (a plugin written before the member) may omit it — read as none; one it declares is checked
   let cOmit = ''; try { validate({ id: 'made-plugin', quota: { ...g.quota, predict: undefined } }, { full: false }); } catch (e) { cOmit = e.message; }
   let cBad = ''; try { validate({ id: 'made-plugin', quota: { ...g.quota, predict: { unit: 'credits', prior: { none: 'x y' } } } }, { full: false }); } catch (e) { cBad = e.message; }
-  ok(!cOmit && /quota\.predict — unit must be one of/.test(cBad), 'predict: a contributed harness that omits it registers (read as none); a malformed one is refused all the same', JSON.stringify([cOmit.slice(0, 80), cBad.slice(0, 80)]));
+  ok(!cOmit && /quota\.predict — missing — name the adapter/.test(cBad), 'predict: a contributed harness that omits it registers (read as none); a malformed one is refused all the same', JSON.stringify([cOmit.slice(0, 80), cBad.slice(0, 80)]));
   // CONFORMANCE per source: the same made pair, learned under each source's own prior — Claude's rate leans on its prior;
   // a source with none learns only from its own pairs (no rate under $1 of cost)
   const E = require(path.join(REPO, 'src/usage-estimator.js'));
