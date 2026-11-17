@@ -82,10 +82,11 @@ const BAR = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf8
 console.log('④ the census of the bar');
 {
   const c = censusOfBar(BAR);
-  ok(c.drawn.length >= 25, `the census sees the bar's marks (${c.drawn.length})`);
+  ok(c.drawn.length >= 12 && c.doors.length >= 5, `the census sees the bar's marks (${c.drawn.length} on the strip or still to move, ${c.doors.length} drawn inside a door)`);
+  ok(c.doorWrong.length === 0, `every mark the bar draws INSIDE a door is a door row of the table${c.doorWrong.length ? ' — WRONG: ' + c.doorWrong.join(', ') : ''}`);
   ok(c.unknown.length === 0, `every mark the bar draws has a row in the table${c.unknown.length ? ' — UNKNOWN: ' + c.unknown.join(', ') : ''}`);
   // THE DEBT the bar's rewrite (P2) brings to zero: marks still drawn on the strip that the table places elsewhere
-  const DEBT = ['search', 'effort', 'health', 'held', 'goal', 'style', 'design', 'billing', 'wf', 'review', 'cache', 'cache-k', 'odometer', 'turn-time', 'unreported', 'cost', 'kinds', 'more'];
+  const DEBT = ['search', 'health', 'kinds'];   // = P3's homes (the title bar, Session Properties + Diagnostics, Diagnostics) · P2: design folded into 产出   // P2b: effort / wf behind their doors · P2c: style, goal, review, held, billing (+ auto-continue unless armed) in «对话设置» · P2d: cache, cache-k, odometer, turn-time, unreported, cost in the context door
   ok(JSON.stringify([...c.offStrip].sort()) === JSON.stringify([...DEBT].sort()), `the marks the bar still draws on the strip that the table places elsewhere are exactly the named debt (${c.offStrip.length}) — it only shrinks`, `now: ${c.offStrip.join(', ')}`);
 }
 
@@ -95,6 +96,8 @@ console.log('⑤ red controls');
   const p = censusOfBar(planted);
   ok(planted !== BAR && p.unknown.includes('planted'), 'RED CONTROL: a planted mark the table does not know is named (unknown)');
   const back = censusOfBar("chip('model', 'm', '', 'x'); chip('cache', 'c', '', 'x');");
+  const wrongDoor = censusOfBar("inDoor('model', 'm', '', 'x');");
+  ok(wrongDoor.doorWrong.includes('model'), 'RED CONTROL: a strip mark put inside a door is named (doorWrong)');
   ok(back.offStrip.includes('cache') && !back.offStrip.includes('model'), 'RED CONTROL: a detail put back on the strip is named (off the strip by its row)');
 }
 

@@ -292,17 +292,18 @@ console.log('⑩b NO PRESS AROUND THE WHY · EVERY CONTROL HAS ITS WORDS — cen
   ok(r.join('|') === 'refresh|refresh+sort|refresh+sort+manage|refresh+sort+manage' && wired && css,
     'the sessions filter row never runs past the sidebar (evaluated): the sort\'s words, else its icon, else it and manage are rows of the ⋯ — the chrome-bar fold', JSON.stringify({ r, wired, css })); }
 { // THE ONE ROW (the .402 rehearsal: test-artifacts-handover-ui red at 390 px — pick 1's «Auto-continue: off» words, 20 → 92 px,
-  // took the Artifacts chip's place): an OFF auto-continue is its ICON on the one-row bar, its words on the wide bar; ARMED keeps
-  // its words. EVALUATED: the real phoneBarFold at 390 px with the rehearsal's measured row (the box's face, model 113; the
-  // runner's, model 100) — the icon keeps «产出 · N» in the row; CONTROL: the words put back fold it
+  // took the Artifacts chip's place). lane mask-value-shape (the strip's step two, the owner's arrangement of 2026-11-14): no
+  // one row folds any more — an auto-continue that is not ARMED is a row of «⚙ 对话设置» (its words its value there), ARMED with
+  // its time it is row 1's; 产出 keeps row 2's first place either way. EVALUATED: the strip's PURE arrange at 390 px; RED: the
+  // source drawing the off state on the strip again
   const CSB3 = read('src/lib/chat-status-bar.js');
-  const tc = await import(new URL('../src/lib/title-chips.js', import.meta.url).href);
-  const room = 390 - 24 - (36 + 8), row = (ar, model) => [{ key: 'search', w: 36 }, { key: 'model', w: model }, { key: 'goal', w: 20 }, { key: 'autoresume', w: ar }, { key: 'design', w: 28 }, { key: 'artifacts', w: 60 }];
-  const fold = (ar, model) => tc.phoneBarFold({ chips: row(ar, model), room, gap: 8 }).folded.has('artifacts');
-  const v = { boxIcon: fold(20, 113), runnerIcon: fold(20, 100), boxWords: fold(92, 113), runnerWords: fold(92, 100) };
-  ok(!v.boxIcon && !v.runnerIcon && v.boxWords && v.runnerWords, 'the one row at 390 px (evaluated phoneBarFold, both faces): an OFF auto-continue as its icon keeps the Artifacts chip in the row — CONTROL: its words put back fold it behind ⋯', JSON.stringify(v));
-  ok(/const offWords = this\._oneRow\(\) \? '' : ' ' \+ escHtml\(t\('Auto-continue: off'\)\);/.test(CSB3) && /: \(a\.enabled \? ' ' \+ escHtml\(t\('auto'\)\) : offWords\);/.test(CSB3) && /' ' \+ escHtml\(t\('continues at \{t\}', \{ t: resetAt \}\)\)/.test(CSB3),
-    'the rule in one sentence: on the one-row bar (a phone, a narrow window) an auto-continue that is OFF is its icon; armed, with its time, it keeps its words'); }
+  const ST = await import(new URL('../src/lib/strip-table.js', import.meta.url).href);
+  const off = ST.arrange({}, 390), armed = ST.arrange({ autoresume: true }, 390);
+  ok(off.rows[1][0] === 'artifacts' && armed.rows[1][0] === 'artifacts' && armed.rows[0].includes('autoresume') && !off.rows.flat().includes('autoresume'),
+    'the strip at 390 px (evaluated arrange): 产出 keeps row 2\'s first place — auto-continue ARMED is row 1\'s, not armed it is not on the strip', JSON.stringify({ off: off.rows, armed: armed.rows }));
+  const pin = (src) => /\(a\.armed \? chip : inDoor\)\('autoresume', /.test(src) && /const offWords = ' ' \+ escHtml\(t\('Auto-continue: off'\)\);/.test(src) && /: \(a\.enabled \? ' ' \+ escHtml\(t\('auto'\)\) : offWords\);/.test(src) && /' ' \+ escHtml\(t\('continues at \{t\}', \{ t: resetAt \}\)\)/.test(src);
+  ok(pin(CSB3) && !pin(CSB3.replace("(a.armed ? chip : inDoor)('autoresume', ", "chip('autoresume', ")),
+    'the rule in one sentence: an auto-continue that is OFF (or on, not armed) is a row of «⚙ 对话设置» saying its words; armed, with its time, it keeps its words on row 1 — RED: the off state drawn on the strip again'); }
 { const UT2 = read('src/lib/user-todos-row.js');
   const btns = [...UT2.matchAll(/<button([^>]*class="ut-act[^"]*"[^>]*)>([\s\S]*?)<\/button>/g)];
   const glyphOnly = btns.filter((m) => !/\bt\(|\btc\(|escHtml\(/.test(m[2]) && !/data-label=/.test(m[1])).map((m) => m[1].match(/class="([^"]*)"/)[1]);

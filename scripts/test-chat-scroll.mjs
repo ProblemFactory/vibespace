@@ -282,16 +282,19 @@ try {
 
   // ── ② ──
   console.log('② the cost says what it is');
-  const cost = () => evalJs(`(() => { const c = document.querySelector('.chat-view .chat-status-cost'); return c ? { text: c.textContent, title: c.title, color: c.getAttribute('style') } : null; })()`);
-  await waitFor(`/subscription/.test(document.querySelector('.chat-view .chat-status-cost')?.textContent || '')`, 8000);
+  // lane mask-value-shape (the strip's step two): the spend is a ROW of the context door (its panel), on the door's face only
+  // when billed per use — read from the bar's door rows, and whether the face carries it
+  const COSTROW = `((${VIEW})?._statusBar?._doorRows || []).find((x) => x.key === 'cost')`;
+  const cost = () => evalJs(`(() => { const r = ${COSTROW}; if (!r) return null; const face = (${VIEW})._statusBar.element.querySelector('.chat-status-ctx .chat-status-cost'); return { text: r.value, title: r.title, color: r.style, onFace: !!face }; })()`);
+  await waitFor(`/subscription/.test((${COSTROW})?.value || '')`, 8000);
   const k1 = await cost();
-  check('a subscription conversation: «This chat ≈ $0.47 · included in your subscription», quiet (the dim colour)', k1 && k1.text === 'This chat ≈ $0.47 · included in your subscription' && /--text-dim/.test(k1.color) && /nothing is billed per use/.test(k1.title), k1);
+  check('a subscription conversation: «This chat ≈ $0.47 · included in your subscription», quiet (the dim colour) — in the context door\'s panel, never on its face', k1 && k1.text === 'This chat ≈ $0.47 · included in your subscription' && /--text-dim/.test(k1.color) && /nothing is billed per use/.test(k1.title) && !k1.onFace, k1);
   await evalJs(`${VIEW}.setCostBasis?.({ source: 'api-key' }); true`);
   const k2 = await cost();
-  check('an API key: «This chat ≈ $0.47 · billed per use (API key)» in a tier colour', k2 && k2.text === 'This chat ≈ $0.47 · billed per use (API key)' && /--green/.test(k2.color), k2);
+  check('an API key: «This chat ≈ $0.47 · billed per use (API key)» in a tier colour — and on the context door\'s face', k2 && k2.text === 'This chat ≈ $0.47 · billed per use (API key)' && /--green/.test(k2.color) && k2.onFace, k2);
   await evalJs(`${VIEW}.setCostBasis?.(null); true`);
   const k3 = await cost();
-  check('nobody knows: «This chat ≈ $0.47» — the figure with its words, no claim', k3 && k3.text === 'This chat ≈ $0.47' && /depends on the account/.test(k3.title), k3);
+  check('nobody knows: «This chat ≈ $0.47» — the figure with its words, no claim (in the panel, off the face)', k3 && k3.text === 'This chat ≈ $0.47' && /depends on the account/.test(k3.title) && !k3.onFace, k3);
   await evalJs(`${VIEW}.setCostBasis?.({ source: 'subscription' }); true`);
 
   // ── ③ ──

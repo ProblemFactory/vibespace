@@ -332,13 +332,14 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
       barScrolls: bar.scrollWidth >= bar.clientWidth,
       barOverflowX: getComputedStyle(bar).overflowX,
       barH: Math.round(br.height),
-      fold: !!bar.querySelector('.chat-status-more'), // lane phone-chat-composer: the phone bar folds behind ⋯ instead of scrolling
+      fold: !!bar.querySelector('.chat-status-more'), // lane mask-value-shape (the strip's step two): there is no ⋯ fold any more — the same two rows at every width
+      first: bar.firstElementChild === chip,   // the owner's arrangement (2026-11-14): what asks for the person is FIRST on row 1
     };
   })()`);
   check(`'requires_action' draws the third state at 375×667 (${JSON.stringify(m)})`, m?.chip === true && m.w > 0 && m.h > 0 && m.display !== 'none' && m.visibility !== 'hidden', m);
   check('…it says what it means, and the tooltip names WHO reported it', /waiting for you|等你操作|あなた待ち/.test(m?.text || '') && /harness/.test(m?.title || ''), JSON.stringify([m?.text, m?.title]));
-  check('…and at ≤768px it lands inside the swipeable status lane, fully within the 375px viewport (no clipped chip)', m?.insideBar === true && m?.insideViewport === true && (m?.barOverflowX === 'auto' || (m?.fold === true && m?.barOverflowX === 'hidden')), m);
-  check('…the bar stayed ONE line (mobile rule: never wrap into rows that eat the space above the input)', m?.barH > 0 && m.barH <= 40, String(m?.barH));
+  check('…and at ≤768px it is the FIRST mark of row 1, fully inside the bar and the 375px viewport, never behind a fold (re-pointed by lane mask-value-shape: the strip\'s two rows replaced the swipe lane and its ⋯)', m?.insideBar === true && m?.insideViewport === true && m?.first === true && m?.fold === false, m);
+  check('…the bar is at most the arrangement\'s TWO rows (the owner, 2026-11-14: the same two rows at 360 — never a third row eating the space above the input)', m?.barH > 0 && m.barH <= 84, String(m?.barH));
   const back = await evaljs(`(() => { window.__v._statusBar.setTurnState('idle'); return window.__v._statusBar._element.querySelectorAll('.chat-status-turnstate').length; })()`);
   check('…and it goes away again when the harness says idle (the chip is a live state, not a sticky banner)', back === 0, String(back));
 }

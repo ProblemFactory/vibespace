@@ -1094,8 +1094,10 @@ if (!CHROME) {
         text: chip.textContent.replace(/\s+/g, ' ').trim(),
         clipped: chip.scrollWidth > chip.clientWidth + 1,
         shrink: ccs.flexShrink, barWrap: bcs.flexWrap, barOverflowX: bcs.overflowX, fold: !!bar.querySelector('.chat-status-more'),
-        // reachable = fully on screen now, or scrollable into view by a swipe
+        // reachable = fully on screen now, inside the bar's rows (the strip's arrangement — lane mask-value-shape: no swipe)
         onScreen: chip.getBoundingClientRect().right <= innerWidth + 1,
+        inBar: (() => { const b = bar.getBoundingClientRect(), c = chip.getBoundingClientRect(); return c.left >= b.left - 0.5 && c.right <= b.right + 0.5 && c.top >= b.top - 0.5 && c.bottom <= b.bottom + 0.5; })(),
+        row2: !!bar.firstElementChild && chip.getBoundingClientRect().top >= bar.firstElementChild.getBoundingClientRect().bottom - 0.5,
         barScrollable: bar.scrollWidth > bar.clientWidth,
         index: [...bar.children].indexOf(chip),
         children: bar.children.length,
@@ -1106,11 +1108,10 @@ if (!CHROME) {
       m.before.cardW <= m.vw + 1 && m.before.warnRight <= m.vw + 1 && m.before.listScrollW <= m.before.listClientW + 1, m);
     ok(`375×667: the summary is a WRAPPING row, and at this width it does not overflow its own box (flex-wrap ${m.before.sumWrap}, scrollWidth ${m.before.sumScrollW} ≤ ${m.before.sumClientW}, height ${Math.round(m.before.sumH)}px) — a longer style name or a bigger count wraps to a second line instead of clipping`,
       m.before.sumWrap === 'wrap' && m.before.sumScrollW <= m.before.sumClientW + 1, m.before);
-    ok(`375×667: the health chip keeps its FULL label on the narrow bar (${m.chip && Math.round(m.chip.w)}px, text "${m.chip && m.chip.text}", not clipped by its own box) and never shrinks away — the ≤768px bar is a single swipeable nowrap row (flex-wrap ${m.chip && m.chip.barWrap}, overflow-x ${m.chip && m.chip.barOverflowX}) so it is reachable ${m.chip && m.chip.onScreen ? 'without scrolling' : 'by a horizontal swipe'}`,
-      !!m.chip && m.chip.w > 0 && !m.chip.clipped && m.chip.shrink === '0' && m.chip.barWrap === 'nowrap' && (m.chip.barOverflowX === 'auto' || (m.chip.fold && m.chip.barOverflowX === 'hidden'))
-      && (m.chip.onScreen || m.chip.barScrollable), m.chip);
-    ok(`375×667: it sits near the FRONT of the bar (child ${m.chip && m.chip.index} of ${m.chip && m.chip.children}) — a warning parked behind eight chips on a 375px row is a warning nobody swipes to`,
-      !!m.chip && m.chip.index >= 0 && m.chip.index <= 2, m.chip);
+    ok(`375×667: the health chip keeps its FULL label on the narrow bar (${m.chip && Math.round(m.chip.w)}px, text "${m.chip && m.chip.text}", not clipped by its own box) and never shrinks away — the ≤768px bar is the strip's two WRAPPING rows (lane mask-value-shape; was one swiped nowrap row: flex-wrap ${m.chip && m.chip.barWrap}), the chip inside them on screen, nothing behind ⋯`,
+      !!m.chip && m.chip.w > 0 && !m.chip.clipped && m.chip.shrink === '0' && m.chip.barWrap === 'wrap' && !m.chip.fold && m.chip.onScreen && m.chip.inBar, m.chip);
+    ok(`375×667: it sits on row 2, the strip's always-findable row, until its homes off the strip (Session Properties + ⚙ Diagnostics — the table's place; was the FRONT of the one swiped row, where a warning past eight chips was one nobody swipes to) — seen without a swipe (child ${m.chip && m.chip.index} of ${m.chip && m.chip.children}, bar scrollable ${m.chip && m.chip.barScrollable})`,
+      !!m.chip && m.chip.row2 && !m.chip.barScrollable, m.chip);
     ok(`375×667 expanded: the inventory wraps too — long verbatim lists break instead of pushing the transcript sideways (body right ${Math.round(m.after.bodyRight)} ≤ ${m.vw}, scrollWidth ${m.after.listScrollW} ≤ ${m.after.listClientW}, body ${Math.round(m.after.bodyH)}px tall)`,
       m.after.bodyRight <= m.vw + 1 && m.after.listScrollW <= m.after.listClientW + 1 && m.after.bodyH > 0, m.after);
 
@@ -1201,20 +1202,23 @@ if (!CHROME) {
       bar.setModel('claude-fable-5');
       bar.setPermMode('default');
       ${extra}
-      // lane phone-chat-composer: on a phone these chips sit behind ⋯ — open it, as the person does, and keep the census's
-      // one-row geometry (chips past the right edge are what the clamp exists for; the open phone bar wraps them instead)
-      bar._foldOpen = true; bar.render(); bar.element.style.flexWrap = 'nowrap'; bar.element.style.overflowX = 'auto';
+      // the strip's real two rows (lane mask-value-shape — was the ⋯ fold opened and one forced nowrap row): every door on
+      // screen; «⚙ 对话设置» is row 2's LAST — the right end the clamp exists for
       bar.render();
       window.__bar = bar;
       return true;
     })()`;
     // `neuter` = the pre-fix behaviour of ONE mechanism, restored on the live
     // panel so the assert above it is measured against its own absence.
+    // `sel` = a mark on the strip, or «door|row» — a mark inside a door (lane mask-value-shape): its door opens, then its
+    // row is pressed, and ITS panel opens at the door, as the person does it
     const censusProbe = async (sel, extra, neuter = '') => evaljs(`(() => {
       ${mkBarFull(extra)};
-      const anchor = document.querySelector(${JSON.stringify(sel)});
+      const anchor = document.querySelector(${JSON.stringify(sel.split('|')[0])});
       if (!anchor) return { missing: true };
       anchor.click();
+      const row = ${JSON.stringify(sel.split('|')[1] || '')};
+      if (row) { const r = document.querySelector('.chat-status-dropdown [data-row="' + row + '"]'); if (!r) return { noRow: true }; r.click(); }
       const dd = document.querySelector('.chat-status-dropdown');
       if (!dd) return { noDropdown: true };
       ${neuter}
@@ -1230,7 +1234,7 @@ if (!CHROME) {
       // string and hand the rest of it to the parser as code.)
       const panelOverflow = dd.scrollWidth - dd.clientWidth;
       return { vw: innerWidth, docScrollW: document.documentElement.scrollWidth, docClientW: document.documentElement.clientWidth,
-        left: +r.left.toFixed(2), right: +r.right.toFixed(2), width: +r.width.toFixed(2), rows: rows.length, panelOverflow,
+        left: +r.left.toFixed(2), right: +r.right.toFixed(2), width: +r.width.toFixed(2), rows: rows.length, panelOverflow, aLeft: +anchor.getBoundingClientRect().left.toFixed(2),
         styleMinW: dd.style.minWidth, styleMaxW: dd.style.maxWidth, overflow: getComputedStyle(dd).overflow, worst,
         fits: r.right <= innerWidth - 8 + 0.5 && r.left >= -0.5 };
     })()`);
@@ -1240,25 +1244,25 @@ if (!CHROME) {
       ['.chat-status-model', 'model', ''],
       ['.chat-status-effort', 'effort', "bar.setEffort('xhigh', 'xhigh');"],
       ['.chat-status-perm', 'permission mode', ''],
-      ['.chat-status-style', 'response style', ''],
+      ['.chat-status-settings|style', 'response style', ''],
       ['.chat-status-health', 'session health', ''],
-      ['.chat-status-design', 'design', ''],
-      ['.chat-status-goal', 'set-a-goal', ''],
-      ['.chat-status-goal', 'active goal', "bar.setGoal('ship the release when every test in scripts/ passes', 5000); bar.setGoalStatus('active');"],
+      ['.chat-status-artifacts', 'design', ''],   // in 产出 (no file yet: its press is the design panel)
+      ['.chat-status-settings|goal', 'set-a-goal', ''],
+      ['.chat-status-settings|goal', 'active goal', "bar.setGoal('ship the release when every test in scripts/ passes', 5000); bar.setGoalStatus('active');"],
       ['.chat-status-tasks', 'background tasks', "bar.setTasks({ t1: { status: 'running', description: 'a background task with a fairly long description' } });"],
-      ['.chat-status-wf-multi', 'workflows', "bar.trackWorkflow('wf_a', 'alpha'); bar.trackWorkflow('wf_b', 'beta');"],
+      ['.chat-status-tasks', 'workflows', "bar.trackWorkflow('wf_a', 'alpha'); bar.trackWorkflow('wf_b', 'beta');"],   // in «后台»
     ];
     const census = [];
     for (const [sel, name, extra] of CENSUS) {
       const d = await censusProbe(sel, extra);
       census.push([name, d]);
       ok(`375×667 CENSUS — the ${name} panel opens and lands fully on screen (left ${d.left} → right ${d.right} ≤ ${d.vw} − 8, ${d.width}px wide over ${d.rows} row(s))`,
-        !d.missing && !d.noDropdown && d.fits && d.docScrollW === d.docClientW, { sel, ...d });
+        !d.missing && !d.noDropdown && !d.noRow && d.fits && d.docScrollW === d.docClientW, { sel, ...d });
       ok(`375×667 CENSUS — …and nothing in the ${name} panel is CLIPPED by the squeeze (worst row ${d.worst ? d.worst.o : 0}px over ${d.rows} row(s), panel content ${d.panelOverflow}px, inside an ${d.overflow} box${d.worst ? `, longest "${d.worst.t}"` : ''}) — the panel has no scroller of its own, so anything wider than it is content nobody can read`,
         !d.missing && !d.noDropdown && (!d.worst || d.worst.o <= 1) && d.panelOverflow <= 1, { sel, worst: d.worst, panelOverflow: d.panelOverflow, width: d.width });
     }
     ok(`the census covered every chip that opens a panel (${census.length}) — the three that state a width INTENT (design / active goal / set-a-goal) are IN it, which is the whole point: they are exactly the ones the old two-entry belt loop could not have caught`,
-      census.length === CENSUS.length && census.every(([, d]) => !d.missing && !d.noDropdown),
+      census.length === CENSUS.length && census.every(([, d]) => !d.missing && !d.noDropdown && !d.noRow),
       census.map(([n, d]) => `${n}:${d.right}`).join(' '));
 
     // NEGATIVE CONTROL ① — the DEFECT, replayed whole. The pre-fix path is
@@ -1278,10 +1282,11 @@ if (!CHROME) {
       dd.style.maxWidth = Math.max(preMin, host.width - preLeft - 8) + 'px';
       dd.style.minWidth = '${minW}'; dd.style.maxWidth = '${maxW}';   // …then the caller, after the fact
       void preMin;`;
+    // (lane mask-value-shape) the two goal panels open at «⚙ 对话设置», row 2's LAST — the right end, where the defect replays;
+    // the design panel opens at 产出, row 2's FIRST, where the pre-fix placement fits too — no defect left to replay there
     for (const [sel, name, extra, minW, maxW] of [
-      ['.chat-status-design', 'design', '', '300px', '440px'],
-      ['.chat-status-goal', 'set-a-goal', '', '280px', '420px'],
-      ['.chat-status-goal', 'active goal', "bar.setGoal('ship the release when every test in scripts/ passes', 5000); bar.setGoalStatus('active');", '240px', '400px'],
+      ['.chat-status-settings|goal', 'set-a-goal', '', '280px', '420px'],
+      ['.chat-status-settings|goal', 'active goal', "bar.setGoal('ship the release when every test in scripts/ passes', 5000); bar.setGoalStatus('active');", '240px', '400px'],
     ]) {
       const d = await censusProbe(sel, extra, PRE_FIX(minW, maxW));
       ok(`NEGATIVE CONTROL: the PRE-FIX path replayed whole for the ${name} panel (place against the 130px CSS min-width, then the caller writes minWidth ${minW} / maxWidth ${maxW}) puts it back at left ${d.left} → right ${d.right} — ${Math.round(d.right - d.vw)}px past a ${d.vw}px screen that does not scroll sideways. A clamp cannot see a width its caller has not stated yet`,
@@ -1291,8 +1296,9 @@ if (!CHROME) {
     // be indistinguishable from "ignored", and the panels would silently lose
     // the width they ask for on every desktop too.
     const dsn = census.find(([n]) => n === 'design')[1];
-    ok(`…and the intent is not merely swallowed: on this 375px container the design panel still got its full 300px (min-width ${dsn.styleMinW}, max-width ${dsn.styleMaxW}) — the clamp spent the intent by moving the panel LEFT (${dsn.left}px, its chip sits at the right end of the bar), which is what the caller actually asked for`,
-      parseFloat(dsn.styleMinW) === 300 && dsn.width >= 300 - 0.5 && dsn.left < 237, dsn);
+    const sg = census.find(([n]) => n === 'set-a-goal')[1];   // (lane mask-value-shape) the right-end door is «⚙ 对话设置» now — 产出, the design's, is row 2's FIRST
+    ok(`…and the intent is not merely swallowed: on this 375px container the design panel still got its full 300px (min-width ${dsn.styleMinW}, max-width ${dsn.styleMaxW}, on screen), and the set-a-goal panel its 280px (min-width ${sg.styleMinW}) — the clamp spent that intent by moving the panel LEFT of its door (${sg.left}px < ${sg.aLeft}px: «⚙ 对话设置» sits at the right end of the bar), which is what the caller actually asked for`,
+      parseFloat(dsn.styleMinW) === 300 && dsn.width >= 300 - 0.5 && dsn.fits && parseFloat(sg.styleMinW) === 280 && sg.width >= 280 - 0.5 && sg.left < sg.aLeft, { dsn, sg });
 
     // A container with NO measurable width is the one place a clamp can do
     // more harm than the thing it prevents: bounds computed off a zero rect
