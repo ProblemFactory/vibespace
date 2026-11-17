@@ -14,6 +14,8 @@
 //          over N parallel lanes + one serial lane (FAST LANES, 2026-10-04).
 //          Fail-fast: the first red stops the run and blocks the push
 //          (`--keep-going`, B-6e71: every suite runs and every red is listed).
+//          A red suite is run ONCE more first (B-3f38): green again = FLAKY,
+//          counted in data/ci-fast/reruns.jsonl; red again = red.
 //   HEAVY  (`npm run ci:heavy`) — headless chrome, real worktree servers, real
 //          agent CLIs, the real opencode binary, and anything over ~10 s. The
 //          pre-push hook launches it DETACHED after the fast tier is green, in
@@ -1430,9 +1432,9 @@ export function censusFindings(diskNames, suites = SUITES, excluded = EXCLUDED) 
 // whole BOX shares — a literal port it binds, a fixed /tmp path it creates,
 // removes or checks a worktree into — cannot survive a second run of anything.
 // In the heavy tier that is contained by the machine lock; in the FAST tier it
-// is not, because the fast tier is fail-fast, has no retry and blocks the push
-// directly, so one squatter from any of this box's ~160 checkouts turns a
-// perfectly good push red. (Measured on the code this replaced: with a plain
+// is not, because the fast tier is fail-fast and blocks the push directly (its
+// one retry, B-3f38, runs beside the same squatter), so one squatter from any
+// of this box's ~160 checkouts turns a perfectly good push red. (Measured on the code this replaced: with a plain
 // listener on :3991, the pre-fix test-attach-ack — which the fast tier reached
 // through the launcher self-test's slice — hung 240 s to its budget; with the
 // free port it passes in 2 s under the same squatter.) PURE so the rule can be
@@ -2309,6 +2311,24 @@ export function failLegs(stdout, stderr) {
 // ci-mirror-hygiene (its hang reports there too) — ci.yml's fast job uploads it on a red, as the heavy shards do theirs.
 export const FAST_FAIL_LOGS = 'data/ci-fast/fail-logs';
 const fastFailDir = () => path.join(repo, ...FAST_FAIL_LOGS.split('/'));
+// THE FAST TIER'S RERUN LEDGER (B-3f38), the heavy tier's <markers>/reruns.jsonl's twin: one line per retried red suite.
+export const FAST_RERUNS = 'data/ci-fast/reruns.jsonl';
+// A red fast suite is run once more before it is called red — except these: the retry would be a cost, not a second look.
+export const FAST_NO_RETRY = Object.freeze([
+  { name: 'test-chat-e2e', why: 'the one real turn: a retry would bill a second one (§ban-safety)' },
+]);
+/** PURE: why a red fast suite is NOT retried, or '' (retry it). A suite that died of a signal this runner did not send
+ *  (killedFromOutside — the run is being torn down) is not a flake to look at twice; a suite that HUNG to its budget
+ *  already cost the push gate its whole budget (300 s) and left a hang report naming its threads — a second hang would
+ *  cost as much again, so it is red at once; so is one its OWN watchdog ended (suite-watchdog.mjs: exit 1 just under the
+ *  budget, the report kept — `r.hangReport`). B-3f38 is about legs that read a clock under load, not about hangs. */
+export function fastRetryRefusal(s, r, { noRetry = FAST_NO_RETRY } = {}) {
+  const row = noRetry.find((x) => x.name === (s && s.name));
+  if (row) return row.why;
+  if (r && r.killedFromOutside) return 'it died of a signal this runner did not send — the run is being torn down, not a flake';
+  if (r && (r.hangReport || (r.error && r.error.code === 'ETIMEDOUT'))) return 'it hung — to its budget or to its own watchdog — and a second hang would cost the gate as much again (its hang report names the threads)';
+  return '';
+}
 export function writeFailLog(dir, sha, s, r, attempt, { tag = '[ci]', log = console.log } = {}) {
   if (r.ok || r.absent || !r.full) return null;
   try {
@@ -2318,6 +2338,12 @@ export function writeFailLog(dir, sha, s, r, attempt, { tag = '[ci]', log = cons
     return f;
   } catch (e) { log(`  · fail log not kept: ${e && e.message}`); return null; }
 }
+// THE RERUN LEDGER'S LINE, ONE SHAPE FOR BOTH TIERS (q-038 ④; the fast tier's since B-3f38): the suite, both outcomes,
+// both loads, the first run's first ✗ lines — appended to <dir>/reruns.jsonl, said on the log, never laundered.
+export function rerunRecord({ sha, suite, lane, first, again, at = Date.now(), host = os.hostname() }) {
+  return { at, sha, host, suite, lane: String(lane), first: { ms: first.ms, load: first.load, tail: [first.lines[1] || '', first.lines[2] || ''].join('\n').split('\n').filter((x) => /^\s*✗ /.test(x)).slice(0, 3).map((x) => x.trim().slice(0, 200)) }, again: { ok: again.ok, ms: again.ms, load: again.load } };
+}
+export const rerunSaid = (tag, suite, first, again, file) => `  [${tag}] RERUN LEDGER ${suite}: red (load ${(first.load || []).join('→')}) → ${again.ok ? 'GREEN — FLAKY, counted' : 'red again'} (load ${(again.load || []).join('→')}) — ${file}`;
 const load1 = () => Math.round(os.loadavg()[0] * 10) / 10;
 export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set(), hang = null } = {}) {
   return new Promise((resolve) => {
@@ -3579,10 +3605,13 @@ export function fastTimingReport(timings, { top = 10, maxMs = FAST_MAX_MS } = {}
  * on its own is judged, even if the stop landed during its sweep). KEEP-GOING
  * (`--keep-going`): every row runs — the serial lane too — and every red is listed by name; nothing is SIGTERMed (the
  * 2026-11-06 .382 cut: one standing date red stopped the tier and hid three lane reds behind it, a re-cut each).
- * → { reds, absent, skipped, timings, parMs, serMs, stoppedBy }
+ * ONE RETRY (B-3f38 — three load-sensitive fast legs reddened three master runs in a row, each green on a manual rerun):
+ * a red row runs once more on its lane, `run(s, { lane, attempt: 2 })`, unless fastRetryRefusal names why not; one
+ * line goes to `ledger` (rerunRecord) and the log says it; green again = FLAKY (counted, not red), red again = red.
+ * → { reds, flaky, absent, skipped, timings, parMs, serMs, stoppedBy }
  */
-export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, after = async () => {}, skip = () => '', inflight = new Set(), failDir = null, sha = '', log = console.log } = {}) {
-  const reds = [], absent = [], skipped = [], timings = [];
+export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, after = async () => {}, skip = () => '', inflight = new Set(), failDir = null, ledger = null, sha = '', log = console.log, refusal = fastRetryRefusal } = {}) {
+  const reds = [], flaky = [], absent = [], skipped = [], timings = [];
   let stoppedBy = null; // fail-fast only: the red that stopped the tier
   const laneWorker = async (queue, lane) => {
     for (;;) {
@@ -3600,6 +3629,20 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
       if (r.absent) { absent.push(s.name); continue; }
       if (r.ok) { timings.push({ name: s.name, ms: r.ms, lane: String(lane) }); continue; }
       if (failDir) writeFailLog(failDir, sha, s, r, 1); // its whole output — ci.yml's fast job uploads it (test-ci-gate §2i)
+      const no = stoppedBy ? `${stoppedBy} is red — the tier is stopping` : refusal(s, r);
+      if (no) log(`  · ${s.name} is not retried — ${no}`);
+      else {
+        log(`  … ${s.name} failed — retrying once before calling it red [lane ${lane}]`);
+        const again = await run(s, { lane, attempt: 2 });
+        const cut2 = stoppedBy; // another lane's red ended the retry: not a verdict (its first try's red stays in its fail log)
+        if (cut2) again.lines = [`  · ${s.name} stopped [lane ${lane}] — ${cut2} is red`];
+        await after(again);
+        if (cut2) break;
+        if (failDir) writeFailLog(failDir, sha, s, again, 2);
+        if (ledger) { try { fs.mkdirSync(path.dirname(ledger), { recursive: true }); fs.appendFileSync(ledger, JSON.stringify(rerunRecord({ sha, suite: s.name, lane, first: r, again })) + '\n'); } catch (e) { log(`  · rerun ledger not written: ${e && e.message}`); } }
+        log(rerunSaid('ci', s.name, r, again, ledger || '(no ledger)'));
+        if (again.ok) { flaky.push(s.name); timings.push({ name: s.name, ms: again.ms, lane: String(lane) }); continue; }
+      }
       reds.push(s.name);
       if (!keepGoing && !stoppedBy) {
         stoppedBy = s.name;
@@ -3614,7 +3657,7 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
   await Promise.all(Array.from({ length: Math.max(1, Math.min(lanes, parallelQ.length)) }, (_, i) => laneWorker(parallelQ, i + 1)));
   const parMs = Date.now() - tPar, tSer = Date.now();
   if (!stoppedBy && plan.serial.length) await laneWorker([...plan.serial], 'S');
-  return { reds, absent, skipped, timings, parMs, serMs: Date.now() - tSer, stoppedBy };
+  return { reds, flaky, absent, skipped, timings, parMs, serMs: Date.now() - tSer, stoppedBy };
 }
 
 /**
@@ -3657,14 +3700,14 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false } = {}) {
     if (keepGoing) console.log('[ci] --keep-going: every suite runs and every red is listed by name (B-6e71) — nothing is stopped by a red');
     const dirPace = dirSweepPacer();
     const hangDir = fastFailDir(); // the fast tier's fail-log dir: a timed-out suite's hang report (ci-hang-report) + a red suite's whole output (ci-mirror-hygiene)
-    const { reds, absent, skipped: skippedByName, timings, parMs, serMs } = await runFastLanes(plan, {
-      lanes, keepGoing, inflight, failDir: hangDir, sha,
+    const { reds, flaky, absent, skipped: skippedByName, timings, parMs, serMs } = await runFastLanes(plan, {
+      lanes, keepGoing, inflight, failDir: hangDir, sha, ledger: path.join(repo, ...FAST_RERUNS.split('/')),
       // VS_NO_REAL_CLI=1 (r6, §ban-safety): the real-turn row is not started at all — SKIPPED by name (the wire leg skips inside its suite).
       // Only a suite PRESENT in the tree being gated (r7c): an absent one stays ABSENT, so a commit that contains none of
       // the suites still gets NO VERDICT (the .363 train: under VS_NO_REAL_CLI=1 an all-absent stub counted one skip and
       // claimed ALL GREEN). A by-name skip ran nothing either: it never counts as a suite that ran.
       skip: (s) => (s.name === 'test-chat-e2e' && process.env.VS_NO_REAL_CLI === '1' && fs.existsSync(path.join(runRoot, 'scripts', s.name + '.mjs')) ? 'VS_NO_REAL_CLI=1 (the one real turn)' : ''),
-      run: (s, { lane }) => runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: { dir: hangDir, attempt: 1 } }),
+      run: (s, { lane, attempt = 1 }) => runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: { dir: hangDir, attempt } }),
       after: async (r) => {
         console.log(r.lines.join('\n'));
         // a suite may not leave a daemon behind (2.369.104) — swept after every suite, as the heavy lanes do
@@ -3675,6 +3718,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false } = {}) {
     });
     dirPace.boundary("the fast tier's end"); // B-9ec9: whatever the pace left since its last sweep
     if (keepGoing && reds.length) console.error(`\n[ci] --keep-going: ${reds.length} red of ${fast.length - absent.length - skippedByName.length} suites that ran — ${reds.join(', ')} (each one's whole output: ${hangDir})`);
+    if (flaky.length) console.log(`\n[ci] FLAKY — red, then green on its one retry (counted in ${FAST_RERUNS}): ${flaky.join(', ')}`);
     if (reds.length) { console.error(`\n✗ ${reds.join(', ')} — release gate is RED, do not push\n`); return 1; }
     // NOTHING RAN IS NOT A PASS. An old tag or a commit that predates the gate
     // contains none of these suites (measured: v2.30.0 ⇒ 73 of 73 absent), and
@@ -3985,9 +4029,9 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
           if (again.ok) { flaky.push(s.name); r = again; } else { failed.push(s.name); }
           // THE RERUN LEDGER (q-038 ④): one rerun, ONE line per rerun in <markers>/reruns.jsonl — the suite, both
           // outcomes, both loads, the first run's last lines — so a flake is counted across runs, never laundered
-          const line = { at: Date.now(), sha, host: os.hostname(), suite: s.name, lane: String(lane), first: { ms: first.ms, load: first.load, tail: [first.lines[1] || '', first.lines[2] || ''].join('\n').split('\n').filter((x) => /^\s*✗ /.test(x)).slice(0, 3).map((x) => x.trim().slice(0, 200)) }, again: { ok: again.ok, ms: again.ms, load: again.load } };
+          const line = rerunRecord({ sha, suite: s.name, lane, first, again });
           try { fs.mkdirSync(d, { recursive: true }); fs.appendFileSync(path.join(d, 'reruns.jsonl'), JSON.stringify(line) + '\n'); } catch (e) { console.log(`  · rerun ledger not written: ${e && e.message}`); }
-          console.log(`  [ci:heavy] RERUN LEDGER ${s.name}: red (load ${(first.load || []).join('→')}) → ${again.ok ? 'GREEN — FLAKY, counted' : 'red again'} (load ${(again.load || []).join('→')}) — ${path.join(d, 'reruns.jsonl')}`);
+          console.log(rerunSaid('ci:heavy', s.name, first, again, path.join(d, 'reruns.jsonl')));
         }
         timings.push({ name: s.name, ms: r.ms, ok: r.ok, lane: String(lane), load: r.load });
         if (par) { parInFlight--; overlapCheck(); }

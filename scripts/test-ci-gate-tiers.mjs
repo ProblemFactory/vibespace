@@ -22,7 +22,7 @@ try {
 // Two rules the round-2 findings turned into asserts.
 //
 // (a) A FAST-tier suite must not claim a name the whole BOX shares. The fast
-//     tier is fail-fast, has no retry and blocks the push directly, so one
+//     tier is fail-fast (its one retry, B-3f38, runs beside the same squatter) and blocks the push directly, so one
 //     squatter from any of this machine's ~160 checkouts of this repo turns an
 //     unrelated push red. Measured: with a bare listener on :3991,
 //     test-attach-ack — which the fast tier reached through the launcher
@@ -598,7 +598,7 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
     const failDir = path.join(root, `fail-${tag}`), rows = [], said = [], inflight = new Set();
     fs.rmSync(release, { force: true });
     const res = await M.runFastLanes(plan(), {
-      lanes: 2, keepGoing, inflight, failDir, sha: 'kee9601e0000', log: (l) => said.push(l),
+      lanes: 2, keepGoing, inflight, failDir, sha: 'kee9601e0000', log: (l) => said.push(l), refusal: () => 'the retry is §8f\'s (B-3f38)',
       run: (s, { lane }) => M.runSuiteAsync(s, { root, sha: 'kee9601e0000', lane, inflight }),
       after: async (r) => { rows.push(r.lines.join('\n')); if (keepGoing && /✗ test-kg-red1 FAILED/.test(r.lines[0])) fs.writeFileSync(release, '1'); },
     });
@@ -630,6 +630,66 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
     'ci.mjs KNOWS --keep-going (the usage says it; a typo of it is refused by name and runs nothing)');
   ok(/\n {2}fastGate\(\{ sha: str\('sha'\), isolate: !!arg\('isolate'\), keepGoing: !!arg\('keep-going'\) \}\)/.test(src),
     'WIRING: main() hands --keep-going to fastGate (and fastGate to runFastLanes — test-ci-gate §2i pins that line)');
+}
+
+// ── §8f A RED FAST SUITE IS RUN ONCE MORE, AND THE RETRY IS COUNTED (B-3f38) ──
+// int361 2026-11-07: three load-sensitive fast legs reddened three master runs in a row, each green on a manual rerun;
+// the heavy tier retries once and keeps a ledger, the fast tier stopped at the first red. Planted suites through the REAL
+// runSuiteAsync: a flake (red on its first try only — a marker FILE, never a clock), a suite red on both tries, a red
+// test-chat-e2e (the one real turn: never retried), a green. The control is a copy of ci.mjs whose retry is cut.
+console.log('\n§8f a red fast suite runs once more — green again is FLAKY and counted, red again is red (B-3f38)');
+{
+  const ci = await import('./ci.mjs');
+  const root = mktmp('fastretry');
+  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  const plant = (name, body) => fs.writeFileSync(path.join(root, 'scripts', name + '.mjs'), body);
+  const once = path.join(root, 'flake-seen');
+  plant('test-rr-flaky', `import fs from 'node:fs';\nif (!fs.existsSync(${JSON.stringify(once)})) { fs.writeFileSync(${JSON.stringify(once)}, '1'); console.log('  ✗ planted flake (first try)'); console.log('1 FAILED'); process.exit(1); }\nconsole.log('ALL PASS (1)');\n`);
+  plant('test-rr-red', `console.log('  ✗ planted red (every try)');\nconsole.log('1 FAILED');\nprocess.exit(1);\n`);
+  plant('test-chat-e2e', `console.log('  ✗ planted real-turn red');\nconsole.log('1 FAILED');\nprocess.exit(1);\n`);
+  plant('test-rr-green', `console.log('ALL PASS (1)');\n`);
+  const row = (name) => ({ name, tier: 'fast', budgetMs: 8000 });
+  const drive = async (M, tag, { keepGoing = true, names = ['test-rr-flaky', 'test-rr-red', 'test-chat-e2e', 'test-rr-green'] } = {}) => {
+    const failDir = path.join(root, `fail-${tag}`), ledger = path.join(root, `ledger-${tag}`, 'reruns.jsonl'), said = [], rows = [], inflight = new Set(), runs = [];
+    fs.rmSync(once, { force: true });
+    const res = await M.runFastLanes({ parallel: names.map(row), serial: [] }, {
+      lanes: 1, keepGoing, inflight, failDir, ledger, sha: 'f1a4e3f38000', log: (l) => said.push(l),
+      run: (s, { lane, attempt = 1 }) => { runs.push(`${s.name}#${attempt}`); return M.runSuiteAsync(s, { root, sha: 'f1a4e3f38000', lane, inflight }); },
+      after: async (r) => { rows.push(r.lines.join('\n')); },
+    });
+    let lines = []; try { lines = fs.readFileSync(ledger, 'utf-8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { }
+    return { ...res, said, rows, runs, lines, fails: fs.existsSync(failDir) ? fs.readdirSync(failDir).sort() : [] };
+  };
+  const a = await drive(ci, 'kg');
+  ok(a.flaky.join(',') === 'test-rr-flaky' && a.reds.slice().sort().join(',') === 'test-chat-e2e,test-rr-red' && a.timings.some((t) => t.name === 'test-rr-flaky'),
+    `the flake is FLAKY (green on its retry, counted, not red); the suite red twice is red (flaky: ${a.flaky.join(', ')} · red: ${a.reds.join(', ')})`);
+  ok(a.runs.join(' ') === 'test-rr-flaky#1 test-rr-flaky#2 test-rr-red#1 test-rr-red#2 test-chat-e2e#1 test-rr-green#1'
+    && a.said.some((l) => /^ {2}· test-chat-e2e is not retried — the one real turn: a retry would bill a second one/.test(l)),
+    `ONE retry each, on its lane — never the real turn (test-chat-e2e: not retried, said why) (${a.runs.join(' ')})`);
+  const L = Object.fromEntries(a.lines.map((x) => [x.suite, x]));
+  ok(a.lines.length === 2 && L['test-rr-flaky']?.again.ok === true && L['test-rr-red']?.again.ok === false && L['test-rr-flaky'].sha === 'f1a4e3f38000' && L['test-rr-flaky'].lane === '1'
+    && /planted flake \(first try\)/.test(L['test-rr-flaky'].first.tail[0] || '') && Array.isArray(L['test-rr-red'].again.load) && !L['test-chat-e2e'],
+    `the ledger: ONE line per retried red — the suite, the sha, its lane, the first try's ✗ line, both loads, the second outcome (${a.lines.map((x) => `${x.suite} → ${x.again.ok ? 'green' : 'red'}`).join(' · ')})`);
+  ok(a.said.some((l) => /^ {2}\[ci\] RERUN LEDGER test-rr-flaky: red \(load [\d.]+→[\d.]+\) → GREEN — FLAKY, counted \(load [\d.]+→[\d.]+\) — \S+reruns\.jsonl$/.test(l)) && a.said.some((l) => /^ {2}\[ci\] RERUN LEDGER test-rr-red: red .* → red again /.test(l)),
+    '…said on the log in the heavy tier\'s words (rerunSaid — the ledger line of both tiers is ONE shape, rerunRecord)');
+  ok(a.fails.join(',') === 'f1a4e3f3.test-chat-e2e.1.log,f1a4e3f3.test-rr-flaky.1.log,f1a4e3f3.test-rr-red.1.log,f1a4e3f3.test-rr-red.2.log',
+    `every red try keeps its whole output, the try in its name (${a.fails.join(', ')})`);
+  const ff = await drive(ci, 'ff', { keepGoing: false, names: ['test-rr-flaky', 'test-rr-green'] });
+  ok(!ff.reds.length && !ff.stoppedBy && ff.flaky.join(',') === 'test-rr-flaky' && ff.timings.map((x) => x.name).join(',') === 'test-rr-flaky,test-rr-green',
+    'FAIL-FAST: a flake no longer stops the tier — it is retried, counted, and the next row runs');
+  ok(ci.fastRetryRefusal({ name: 'test-x' }, { killedFromOutside: true }).includes('did not send') && ci.fastRetryRefusal({ name: 'test-x' }, { error: { code: 'ETIMEDOUT' } }).includes('hung') && ci.fastRetryRefusal({ name: 'test-x' }, { status: 1, hangReport: '/x/f1a4e3f3.test-x.1.hang.json' }).includes('own watchdog') && ci.fastRetryRefusal({ name: 'test-x' }, { status: 1 }) === ''
+    && ci.FAST_NO_RETRY.every((r) => SUITES.some((s) => s.name === r.name && s.tier === 'fast') && r.why.length > 20),
+    'fastRetryRefusal: a suite killed from outside (the run is being torn down) or hung — to its budget or to its own watchdog (a hang report kept) — is not retried; a plain red is; every FAST_NO_RETRY row names a fast suite and why');
+  // the CONTROL: ci.mjs with the retry cut — the flake is RED and nothing is counted
+  const M = mutantCopies('ci-fastretry', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8'), CUT = "      const no = stoppedBy ? `${stoppedBy} is red — the tier is stopping` : refusal(s, r);\n";
+  const mut = src.includes(CUT) ? await import(pathToFileURL(M.write('scripts/ci.mjs', src.replace(CUT, "      const no = 'the retry cut (the control)';\n"), 'no-retry', { esm: true })).href) : null;
+  const b = mut ? await drive(mut, 'mut') : null;
+  ok(!!b && b.reds.includes('test-rr-flaky') && !b.flaky.length && !b.lines.length,
+    `CONTROL: a copy of ci.mjs without the retry calls the flake RED and counts nothing (${b ? b.reds.join(', ') : 'the cut line is gone'}) — the legs above are red without the change`);
+  ok(/ledger: path\.join\(repo, \.\.\.FAST_RERUNS\.split\('\/'\)\)/.test(src) && ci.FAST_RERUNS === 'data/ci-fast/reruns.jsonl' && /hang: \{ dir: hangDir, attempt \} \}\)/.test(src)
+    && /const line = rerunRecord\(\{ sha, suite: s\.name, lane, first, again \}\);/.test(src),
+    'WIRING: fastGate keeps its ledger in data/ci-fast/reruns.jsonl, a retry\'s hang report is named by its try, and the heavy tier writes the same rerunRecord');
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
