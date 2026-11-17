@@ -12,11 +12,16 @@
 //       given a synchronous wait is red here; census ② of test-store-write-census is red on it by name).
 //   (j) the writer makes a missing parent directory ONLY for a write that asks (the people door) — any other store whose
 //       directory is gone fails ENOENT, never a silently re-created directory.
+//   (k) test-channel-store ⑭'s two ORDER laws on the writer's thread: a healed stamp is in the journal before the index
+//       that drops it (a SIGKILL right after the writer's index write keeps all 300); the journal folds only on a side-file
+//       write that LANDED (a failed one keeps every line). Each with its control.
 // Run: node scripts/test-channel-store-writer-laws.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { performance } from 'node:perf_hooks';
+import { spawnSync } from 'node:child_process';
+import Module from 'node:module';
 import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -163,5 +168,86 @@ console.log('(j) the writer\'s mkdir is bounded to the people door');
 }
 
 try { SW.storeWriter().stop(); } catch { }
+// (k) THE TWO ORDER LAWS OF test-channel-store ⑭, ON THE WRITER'S THREAD (the .407 prep mirror: that suite's controls cut
+//     the store at two marks this unit moved). Both laws stand; one carrier changed:
+//     (k1) OWED — a healed (legacy) stamp is on disk BEFORE the index that drops it: in the JOURNAL now (one synchronous
+//          append on the main thread, at the heal), and the index written after it by the WRITER's thread (durable(), never
+//          the suite's flush); a child SIGKILLed right after that write — the next start reads every stamp back.
+//          CONTROL: the heal's append cut — the same kill loses them.
+//     (k2) FOLD — the journal is folded only by a side-file write that LANDED: the writer's write of poll-stamps.json fails
+//          (the stand-in thread) — the journal keeps every line and a store started then reads every stamp; once the
+//          storage heals, the landing folds it. CONTROL: a fold on the failed write too — the journal emptied, no side
+//          file, the stamps gone.
+console.log('(k) the two ORDER laws of test-channel-store ⑭ on the writer\'s thread');
+{
+  const CS_FILE = path.join(REPO, 'src/channel-store.js');
+  const SRC = fs.readFileSync(CS_FILE, 'utf8');
+  const HEAL_J = ['    if (took.length) journal(took);', '    if (took.length && false) journal(took);'];
+  const FOLD_OK = ['    if (!ok) { stampsDirty = true; return; }', '    if (!ok) { stampsDirty = true; foldJournal(null); return; }'];
+  ok(SRC.split(HEAL_J[0]).length === 2 && SRC.split(FOLD_OK[0]).length === 2, '(k0) CONTROL setup: the heal\'s journal append and the failed side-file write\'s branch are each spelled once');
+  const T = Date.UTC(2026, 9, 3, 2, 0, 0);
+  const lines = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
+  // (k1) a legacy index (300 rows carrying their stamps), healed at the load; one real change; the WRITER writes the index
+  const k1 = (tag, cut) => {
+    const dir = path.join(ROOT, `k1-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const legacy = { v: 1, updatedAt: T, conversations: {} };
+    for (let i = 0; i < 300; i++) legacy.conversations[`a/l${i}`] = { key: `a/l${i}`, id: `l${i}`, adapterId: 'a', title: 'l' + i, lane: { via: 'poll', lastPushAt: null, lastPollAt: T - i * 1000, lastScanAt: null, walkStartedAt: T - i * 1000 - 5, firstSeenByPoll: 0, firstSeenTotal: 0 } };
+    fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify(legacy, null, 1));
+    const child = `(async () => {
+      const Module = require('module'), fs = require('fs'), path = require('path');
+      const file = ${JSON.stringify(CS_FILE)};
+      let src = fs.readFileSync(file, 'utf8');
+      ${cut ? `src = src.replace(${JSON.stringify(cut[0])}, ${JSON.stringify(cut[1])});` : ''}
+      const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src, file);
+      const st = m.exports.createChannelStore({ dir: ${JSON.stringify(dir)}, log: { log() {}, info() {}, warn() {}, error() {} } });
+      let jl = 0; try { jl = fs.readFileSync(st.stamps.log, 'utf8').split('\\n').filter(Boolean).length; } catch { }
+      await st.index.update(() => { st.index.entry('a', 'l1').title = 'changed'; });
+      const landed = await st.index.durable();
+      process.stdout.write(JSON.stringify({ jl, landed, side: fs.existsSync(st.stamps.file) }) + '\\n');
+      process.kill(process.pid, 'SIGKILL');
+    })()`;
+    const k = spawnSync(process.execPath, ['-e', child], { encoding: 'utf8', timeout: 30e3 });
+    let said = {}; try { said = JSON.parse(String(k.stdout).trim().split('\n').pop()); } catch { }
+    const disk = fs.readFileSync(path.join(dir, 'index.json'), 'utf8');
+    const re = CS.createChannelStore({ dir, log: quiet });
+    let back = 0; for (let i = 0; i < 300; i++) { const l = re.stamps.lane(re.index.peek(`a/l${i}`)); if (l.lastPollAt === T - i * 1000 && l.walkStartedAt === T - i * 1000 - 5) back++; }
+    re.close();
+    return { signal: k.signal, ...said, written: disk.includes('"changed"'), stripped: !/lastPollAt|walkStartedAt|lastScanAt/.test(disk), back };
+  };
+  const r1 = k1('real', null);
+  ok(r1.signal === 'SIGKILL' && r1.jl === 300 && r1.landed === true && r1.written && r1.stripped && r1.side === false && r1.back === 300,
+    `(k1) OWED on the writer's thread: the journal held all ${r1.jl} healed stamps BEFORE any index write; the writer's write of the index landed (${r1.landed}) without a stamp in it (side file ${r1.side ? 'present' : 'absent'}); SIGKILLed right after — the next start reads ${r1.back} of 300 back`, r1);
+  const c1 = k1('cut', HEAL_J);
+  ok(c1.signal === 'SIGKILL' && c1.jl === 0 && c1.written && c1.stripped && c1.back === 0,
+    `(k1) CONTROL: the heal not journaled — the same index write and kill leave ${c1.back} of 300 stamps (each row «never polled») — red`, c1);
+  // (k2) the side file's write fails on the (stand-in) writer's thread — the journal is not folded until a write LANDS
+  const KEYS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
+  const load = (cut) => { if (!cut) return CS; const m = new Module(CS_FILE, null); m.filename = CS_FILE; m.paths = Module._nodeModulePaths(path.dirname(CS_FILE)); m._compile(SRC.replace(cut[0], cut[1]), CS_FILE); return m.exports; };
+  const k2 = async (tag, cut, { heal = true } = {}) => {
+    const dir = path.join(ROOT, `k2-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const w = SW.create({ log: quiet, workerPath: STAND });
+    const st = load(cut).createChannelStore({ dir, log: quiet, writer: w, stampsFlushMs: 50 });
+    await st.index.update(() => { for (const c of KEYS) st.index.entry('acct', c, { create: true }); });
+    failOn('poll-stamps.json', true);
+    KEYS.forEach((c, i) => st.stamps.set(`acct/${c}`, { lastPollAt: T + i }));
+    const j0 = lines(st.stamps.log);
+    for (let k = 0; k < 160 && !((w.whyNotDurable(st.stamps.file) || {}).why === 'failed'); k++) await sleep(25);
+    const r = { j0, failed: (w.whyNotDurable(st.stamps.file) || {}).why === 'failed', jFailed: lines(st.stamps.log), side: fs.existsSync(st.stamps.file) };
+    const reborn = CS.createChannelStore({ dir, log: quiet, writer: SW.create({ log: quiet, workerPath: STAND }) });   // what a kill leaves now
+    r.back = KEYS.filter((c, i) => (reborn.stamps.get(`acct/${c}`) || {}).lastPollAt === T + i).length;
+    failOn('poll-stamps.json', false);   // the storage heals: the writer's retry lands the side file, and only then the fold
+    if (heal) for (let k = 0; k < 400 && !(((st.stamps.stats() || {}).writes || 0) >= 1 && lines(st.stamps.log) === 0); k++) await sleep(25);
+    r.writes = (st.stamps.stats() || {}).writes || 0; r.jHealed = lines(st.stamps.log); r.sideHealed = fs.existsSync(st.stamps.file);
+    w.stop();
+    return r;
+  };
+  const r2 = await k2('real', null);
+  ok(r2.j0 === 6 && r2.failed && r2.jFailed === 6 && !r2.side && r2.back === 6 && r2.writes >= 1 && r2.jHealed === 0 && r2.sideHealed,
+    `(k2) FOLD on the writer's thread: the side file's write FAILED — the journal kept ${r2.jFailed} of ${r2.j0} lines and a store started then reads ${r2.back} of 6 stamps; once the storage healed, the landing (${r2.writes} write) folded it to ${r2.jHealed} lines`, r2);
+  const c2 = await k2('cut', FOLD_OK, { heal: false });
+  ok(c2.failed && c2.jFailed === 0 && !c2.side && c2.back === 0,
+    `(k2) CONTROL: a fold on the failed write too — the journal emptied (${c2.jFailed} lines) with no side file, a store started then reads ${c2.back} of 6 stamps — red`, c2);
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

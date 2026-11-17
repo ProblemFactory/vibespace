@@ -1378,14 +1378,17 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const HEAL = ['      healRow(k, conv[k]);\n', ''];
   const SKIP = ['    if (!bytesOwed && top === lastTop) { flushStats.skipped++; return null; }\n', ''];
   const CLOSE = ['    flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache\n    stampsFlush();\n', '    flush({ full: true });\n'];
-  const OWED = ['    if (stampsOwed) stampsFlush();\n', ''];
+  // channel-store-off-loop (.407 cure): THE ORDER LAW kept, its carrier changed — a healed stamp reaches the disk in the
+  // JOURNAL (one synchronous append on the main thread, at the heal), before the index that no longer holds it is handed
+  // to the writer's thread (was: the side file written first, inline). The control cuts that append.
+  const OWED = ['    if (took.length) journal(took);', '    if (took.length && false) journal(took);'];
   const LOADHEAL = ['    for (const k of Object.keys(conv)) if (healRow(k, conv[k])) healed++;\n', ''];
   const PRUNE = ['      if (!hasOwn(conv, k)) { stampMap.delete(k); continue; }\n', ''];
   const BIRTH = ['      if (stampMap.delete(key)) { stampsDirty = true; journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps\n', ''];
   const SAID = ['      else if (lost) warn(', '      else if (lost && false) warn('];
   const JOURNAL = ['    journal(k);\n    armStamps();\n', '    armStamps();\n'];
   const REPLAY = ['      if (Object.keys(st).length) stampMap.set(a[0], st); else stampMap.delete(a[0]);\n', ''];
-  const FOLD = ['    try { fs.truncateSync(stampsLog, 0); journalTorn = false; }', '    try { journalTorn = false; }'];
+  const FOLD = ['    try { if (journalFd !== null) fs.ftruncateSync(journalFd, 0); else fs.truncateSync(stampsLog, 0); journalTorn = false; }', '    try { journalTorn = false; }'];   // the fold runs in the side file's LANDED callback (stampsWritten)
   const cuts = { KEEP, HEAL, SKIP, CLOSE, OWED, LOADHEAL, PRUNE, BIRTH, SAID, JOURNAL, REPLAY, FOLD };
   const missing = Object.entries(cuts).filter(([, [from]]) => src.split(from).length !== 2).map(([k]) => k);
   ok(!missing.length, `⑭ CONTROL setup: the twelve rules are where the controls cut them (missing: ${missing.join(', ') || 'none'})`);
@@ -1460,7 +1463,8 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const kr = killRun(cutFile('qk-noreplay', REPLAY), 'c-noreplay');
   ok(kr.exact === 0, `⑭ CONTROL: the journal written but not replayed at the start — ${kr.exact} of 40 read back — red`, JSON.stringify(kr));
 
-  // a legacy row (an index written before this lane) is read, said, and healed — the side file lands BEFORE the index
+  // a legacy row (an index written before this lane) is read, said, and healed — its stamps reach the disk BEFORE the index
+  // that drops them: the JOURNAL holds every one (one append at the load), then the index is written without them
   const legacyRun = async (M, tag, { kill = false } = {}) => {
     const dir = path.join(ROOT, `ql-${tag}`); fs.mkdirSync(dir, { recursive: true });
     const legacy = { v: 1, updatedAt: T, conversations: {} };
@@ -1469,10 +1473,11 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
     const n0 = say.length;
     const st = M.createChannelStore({ dir, log: slog });
     const read = st.stamps.lane(st.index.peek('a/l7')).lastPollAt;
+    const jl = (() => { try { return fs.readFileSync(st.stamps.log, 'utf8').split('\n').filter(Boolean); } catch { return []; } })();   // BEFORE any index write
     await st.index.update(() => { st.index.entry('a', 'l1').title = 'changed'; });   // one real change: the index is written
     st.index.flush();
     const disk = fs.readFileSync(st.indexFile, 'utf8');
-    const r = { read, said: say.slice(n0).some((w) => /poll times taken out of index\.json/.test(w)), stripped: !/lastPollAt|walkStartedAt|lastScanAt/.test(disk), sideFirst: fs.existsSync(st.stamps.file) };
+    const r = { read, said: say.slice(n0).some((w) => /poll times taken out of index\.json/.test(w)), stripped: !/lastPollAt|walkStartedAt|lastScanAt/.test(disk), journalFirst: jl.length === 300 && jl.some((l) => l.startsWith(`["a/l7",${T - 7000},`)), side: fs.existsSync(st.stamps.file) };
     if (!kill) st.close();   // kill: the process dies right after that index write (no close)
     const re = M.createChannelStore({ dir, log: slog });
     r.after = re.stamps.lane(re.index.peek('a/l7')).lastPollAt; r.walk = re.stamps.lane(re.index.peek('a/l299')).walkStartedAt;
@@ -1480,9 +1485,9 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
     return r;
   };
   const lh = await legacyRun(S, 'head', { kill: true });
-  ok(lh.read === T - 7000 && lh.said && lh.stripped && lh.sideFirst && lh.after === T - 7000 && lh.walk === T - 299000 - 5, '⑭ a legacy row is read (through stamps.lane()), said once, and healed: its first index write carries no stamp and the side file is written BEFORE it — a process killed right after that write keeps every stamp', JSON.stringify(lh));
+  ok(lh.read === T - 7000 && lh.said && lh.stripped && lh.journalFirst && lh.after === T - 7000 && lh.walk === T - 299000 - 5, '⑭ a legacy row is read (through stamps.lane()), said once, and healed: its first index write carries no stamp and the journal holds all 300 healed stamps BEFORE it — a process killed right after that write keeps every stamp', JSON.stringify(lh));
   const lc = await legacyRun(cut('ql-noowed', OWED), 'c-noowed', { kill: true });
-  ok(lc.stripped && !lc.after, `⑭ CONTROL: the index written before the side file — killed right after it, the legacy stamps are gone (lastPollAt ${lc.after}) — red`);
+  ok(lc.stripped && !lc.after, `⑭ CONTROL: the heal not journaled — the index written without the stamps, killed right after it, the legacy stamps are gone (lastPollAt ${lc.after}) — red`);
   const lc2 = await legacyRun(cut('ql-noheal', HEAL, LOADHEAL), 'c-noheal');
   ok(lc2.stripped && !lc2.after, `⑭ CONTROL: no heal — the legacy stamp reads (${lc2.read}) until the first write drops it from the file, and the restart has none (${lc2.after}) — red`);
 

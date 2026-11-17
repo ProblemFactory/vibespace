@@ -295,6 +295,7 @@ function dayStartClock() {
   {
     const { eng, dataDir } = build('health-alone', ['broken']);
     for (let i = 0; i < 5; i++) await eng.pass('broken', { force: true });
+    await eng.store.adapters.landed();   // channel-store-off-loop: a pass's stamp is PACED (memory first, the writer's turn) — the disk is read once it landed
     const r = rowOf(dataDir, 'broken');
     ok(r.consecutiveFailures === 5 && r.lastPass && r.lastPass.code === 'auth-expired',
       'CONTROL: five failing passes alone persist 5 consecutive failures and the vendor\'s own code', JSON.stringify(r.lastPass));
@@ -304,6 +305,7 @@ function dayStartClock() {
   {
     const { eng, dataDir } = build('health-neighbour', ['broken', 'slow']);
     for (let i = 0; i < 5; i++) await Promise.all([eng.pass('broken', { force: true }), eng.pass('slow', { force: true })]);
+    await eng.store.adapters.landed();   // channel-store-off-loop: a pass's stamp is PACED (memory first, the writer's turn) — the disk is read once it landed
     const b = rowOf(dataDir, 'broken'), s = rowOf(dataDir, 'slow');
     ok(b.consecutiveFailures === 5 && b.lastPass && b.lastPass.code === 'auth-expired',
       'the SAME five failures survive a healthy neighbour passing beside them — the panel still says why', JSON.stringify({ fails: b.consecutiveFailures, code: b.lastPass && b.lastPass.code }));
@@ -353,6 +355,7 @@ function dayStartClock() {
     const eng = PE.create({ dataDir, registry, env: {}, broadcast: () => {} });
     engines.push(eng);
     for (let i = 0; i < 5; i++) await Promise.all([eng.pass('broken', { force: true }), eng.pass('slow', { force: true })]);
+    await eng.store.adapters.landed();   // the same landing as the legs above: the control fails for its own reason, never a disk that lags
     const b = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'adapters.json'), 'utf-8')).adapters.find((a) => a.id === 'broken') || {};
     ok(b.consecutiveFailures === 0 && !b.lastPass,
       'NEGATIVE CONTROL: the pre-fix engine persists ZERO failures for a token-expired adapter — the panel draws it as healthy', JSON.stringify(b.lastPass));
@@ -4828,6 +4831,10 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     a.eng.store.index.update = (fn) => { if (armed && String(new Error().stack).includes('feedPage')) { armed = false; return Promise.reject(new Error('EIO: the disk died under the owed marks')); } return upd(fn); };
     await a.eng.pass('feedy');                     // the crash: the owed write throws inside the feed page
     a.eng.store.index.update = upd;
+    // channel-store-off-loop: the crash pass's stamps (the window in flight, the strike) are PACED — read once they landed.
+    // The law stands in memory first: the cursor moves only after store.index.durable() says the owed marks landed, so the
+    // cursor on disk is never ahead of them (a kill before the paced stamp lands leaves the older cursor: a re-read, no loss)
+    await a.eng.store.adapters.landed();
     const onDisk = JSON.parse(fs.readFileSync(path.join(dd, 'channels', 'adapters.json'), 'utf-8')).adapters[0].feed || {};
     // "the process died": a fresh one over the same files
     clock += 31e3;
