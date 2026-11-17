@@ -114,8 +114,15 @@ export function arrange(present = {}, width = ONE_ROW_PX) {
  * PURE over the source text; scripts/test-strip-table.mjs runs it on src/lib/chat-status-bar.js and on a planted copy.
  */
 export function censusOfBar(src) {
-  const drawn = [...new Set([...String(src).matchAll(/\bchip\(\s*'([a-z0-9-]+)'/g)].map((m) => m[1]))];
-  return { drawn, unknown: drawn.filter((k) => !ROW_OF[k]), offStrip: drawn.filter((k) => ROW_OF[k] && !onStrip(k)) };
+  const keysOf = (re) => [...new Set([...String(src).matchAll(re)].map((m) => m[1]))];
+  const drawn = keysOf(/\bchip\)?\(\s*'([a-z0-9-]+)'/g);            // chip('x', …) — and `(cond ? chip : inDoor)('x', …)` (the armed auto-continue)
+  const doors = keysOf(/\binDoor\)?\(\s*'([a-z0-9-]+)'/g);          // inDoor('x', …): a row of a door's panel
+  return {
+    drawn, doors,
+    unknown: [...new Set([...drawn, ...doors])].filter((k) => !ROW_OF[k]),
+    offStrip: drawn.filter((k) => ROW_OF[k] && !onStrip(k) && !doors.includes(k)),
+    doorWrong: doors.filter((k) => ROW_OF[k] && !ROW_OF[k].place.startsWith('in:') && !(ROW_OF[k].alsoIn && ROW_OF[k].alsoIn === 'settings')),
+  };
 }
 
 /**

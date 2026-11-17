@@ -21,7 +21,8 @@
 //   ⑥ THE TASKBAR (P2-2 + the owner's desktops): 15 windows — tiles ≥ 90 px, every whole tile's centre hits itself, the cut
 //      ones are counted on a visible «+N» chip whose list is exactly them (a row raises its window), the wheel's deltaY
 //      scrolls the strip; 8 desktops — the switcher is ONE «Desktop k/N» button whose list switches and adds
-//   ⑦ THE CHAT WINDOW (P2-4 / P2-5): narrower than 480 px — the status bar ONE row ≤ 28 px (⋯ opens the rest); under 300 px
+//   ⑦ THE CHAT WINDOW (P2-4 / P2-5): at 360 px — the status bar the strip's SAME two rows (row 1 its always-seen marks, row 2
+//      the rest, ≤ 60 px — two 28-px rows and their gap; lane mask-value-shape — it was ONE row with ⋯), every mark shown, nothing folded; under 300 px
 //      high — the message list ≥ 45 % of the window; the Open in editor / Fork buttons never over a message's words
 //   ⑧ THE 24 px MOUSE TARGET (P2-6): every visible clickable (buttons, role=button, status chips, tiles, previews, a toast's
 //      ✕, a dialog's ✕) ≥ 24×24 or inside a ≥ 24×24 clickable — exceptions NAMED — and the window buttons ≥ 4 px apart
@@ -85,8 +86,8 @@
 //   RED CONTROL r2 — a second esbuild bundle of THIS tree with the round-1 rules put back (a row with no doors, no ⋯, no
 //   drop, nothing springs; the self-placed «+N» list; no resize release) at 951×585: ⑬ ⑭ ⑮ go RED there.
 //   RED CONTROL — one esbuild bundle of THIS tree with the base's rules put back (no nearest cell, no release clamp, no
-//   recovery; no «+N» / wheel / compact switcher and the 60 px tile floor; the bottom-anchored title menu; no narrow fold
-//   and no short composer), served through the Fetch domain with the matching style.css / chat.css at 1024×600: P2-1, P2-2,
+//   recovery; no «+N» / wheel / compact switcher and the 60 px tile floor; the bottom-anchored title menu; the bar's ONE
+//   row put back (nowrap: row 2's marks on row 1, cut) and no short composer), served through the Fetch domain with the matching style.css / chat.css at 1024×600: P2-1, P2-2,
 //   P2-3 and P2-4 go RED there; the real bundle back, the same legs pass (the fix, not the reload).
 //   CI HOTFIX (2.369.358 — the hosted runner red on both tries, reproduced here with its fontconfig and its PATH): TWO
 //   FONT LEGS — DejaVu Sans (the runner's sans-serif: a scratch fontconfig naming only the DejaVu / Liberation / Noto CJK /
@@ -112,6 +113,8 @@ import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// the strip's ONE table (lane mask-value-shape): each mark's place — ⑦ reads which row a drawn mark belongs on
+const PLACE = Object.fromEntries((await import(path.join(repo, 'src/lib/strip-table.js'))).STRIP_ROWS.map((r) => [r.key, r.place]));
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 if (!fs.existsSync(path.join(repo, 'public', 'bundle.js'))) { console.log('✗ no public/bundle.js — run `npm run build` first'); process.exit(1); }
@@ -182,13 +185,12 @@ const MUTANT = {};
   sub('src/lib/desktop-manager.js', "    if (form === 'compact') { this._renderCompactSwitcher(container); return; }\n", '');
   // P2-3: the base's bottom anchor (no top clamp)
   sub('src/lib/taskbar.js', "  return showContextMenu(x, y, menuItems, 'taskbar-context-menu', { up: y > window.innerHeight / 2 });", "  const menu = showContextMenu(x, y, menuItems, 'taskbar-context-menu');\n  if (y > window.innerHeight / 2) { menu.style.top = ''; menu.style.bottom = (window.innerHeight - y + 4) + 'px'; }\n  return menu;");
-  // P2-4: the desk bar wraps (no narrow one-row fold)
-  sub('src/lib/chat-status-bar.js', '  _oneRow() {\n    if (PHONE_MQ?.matches) return true;', '  _oneRow() {\n    if (true) return !!PHONE_MQ?.matches;');
+  // P2-4 (the strip's step two): the base's ONE row is chat.css's (nowrap) — MUTANT.chat below
   execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT });
   MUTANT.bundle = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));
   const css = (rel, pairs) => { let s = fs.readFileSync(path.join(repo, rel), 'utf8'); for (const [from, to] of pairs) { if (s.split(from).length !== 2) throw new Error(`mutant css anchor ${rel}: ${from.slice(0, 70)}`); s = s.replace(from, to); } return Buffer.from(s); };
   MUTANT.style = css('public/style.css', [['max-width: 200px; min-width: 90px; overflow: hidden;', 'max-width: 200px; min-width: 60px; overflow: hidden;']]);
-  MUTANT.chat = css('public/chat.css', [['.chat-view.chat-short .chat-input-area {', '.chat-view.chat-short-OFF .chat-input-area {'], ['.chat-view.chat-short .chat-input {', '.chat-view.chat-short-OFF .chat-input {']]);
+  MUTANT.chat = css('public/chat.css', [['.chat-status-bar { flex-wrap: wrap; }\n', '.chat-status-bar { flex-wrap: nowrap; overflow: hidden; }\n'], ['.chat-view.chat-short .chat-input-area {', '.chat-view.chat-short-OFF .chat-input-area {'], ['.chat-view.chat-short .chat-input {', '.chat-view.chat-short-OFF .chat-input {']]);
 }
 
 // ── the RED CONTROL r2: this source with the round-1 rules put back (acceptance r2 ①②③ undone), one esbuild ──
@@ -658,8 +660,16 @@ const legNarrowChat = async () => {
   await layout('freeform');
   const id = (await chatWins())[0];
   await evalJs(`app.wm.resizeWindowTo(${J(id)}, { w: 360, h: 420 })`); await sleep(500);
-  const narrow = await evalJs(`(() => { const w = app.wm.windows.get(${J(id)}).element; const bar = w.querySelector('.chat-status-bar'); const kids = [...bar.children].filter((c) => c.getBoundingClientRect().width > 0); const tops = new Set(kids.map((c) => Math.round(c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2)));
-    return { w: w.offsetWidth, bar: Math.round(bar.getBoundingClientRect().height), rows: tops.size, more: !!bar.querySelector(':scope > .chat-status-more') && bar.querySelector(':scope > .chat-status-more').getBoundingClientRect().width > 0 }; })()`);
+  // the strip's arrangement (lane mask-value-shape): its rows by the marks' centres (a new row past 6 px), each drawn mark on
+  // the row its place in the table says (row 1 = 'row1', row 2 = the rest), none past the bar's edges, nothing folded
+  const narrow = await evalJs(`(() => { const PLACE = ${J(PLACE)}; const w = app.wm.windows.get(${J(id)}).element; const bar = w.querySelector('.chat-status-bar'); const br = bar.getBoundingClientRect(); const kids = [...bar.children].filter((c) => !c.classList.contains('chat-status-rowbreak') && c.getBoundingClientRect().width > 0); const mid = (c) => { const r = c.getBoundingClientRect(); return r.top + r.height / 2; };
+    const rowsAt = []; for (const m of kids.map(mid).sort((a, b) => a - b)) if (!rowsAt.length || m - rowsAt[rowsAt.length - 1] > 6) rowsAt.push(m);
+    const rowOf = (c) => { const m = mid(c); let k = 0; rowsAt.forEach((x, i) => { if (Math.abs(x - m) < Math.abs(rowsAt[k] - m)) k = i; }); return k; };
+    const marks = kids.map((c) => ({ key: c.getAttribute('data-chip'), row: rowOf(c), r: c.getBoundingClientRect() }));
+    const wrongRow = marks.filter((m) => (m.row === 0) !== (PLACE[m.key] === 'row1')).map((m) => m.key + '@' + (m.row + 1));
+    const hidden = marks.filter((m) => m.r.left < br.left - 0.5 || m.r.right > br.right + 0.5 || m.r.bottom > br.bottom + 0.5).map((m) => m.key);
+    return { w: w.offsetWidth, bar: Math.round(br.height), rows: rowsAt.length, row1: marks.filter((m) => m.row === 0).map((m) => m.key).join(' '), row2: marks.filter((m) => m.row === 1).map((m) => m.key).join(' '), wrongRow, hidden,
+      more: !!bar.querySelector(':scope > .chat-status-more'), folded: bar.querySelectorAll(':scope > .chat-status-folded').length }; })()`);
   await evalJs(`app.wm.resizeWindowTo(${J(id)}, { w: 520, h: 250 })`); await sleep(500);
   const short = await evalJs(`(() => { const w = app.wm.windows.get(${J(id)}).element; const l = w.querySelector('.chat-message-list').getBoundingClientRect(); return { h: w.offsetHeight, list: Math.round(l.height), share: l.height / w.getBoundingClientRect().height }; })()`);
   return { id, narrow, short };
@@ -731,12 +741,8 @@ const runViewport = async ([VW, VH], font) => {
   console.log(`— ⑦ the chat window (${tag})`);
   await step(`${tag} ⑦ the chat window`, async () => {
     const c = await legNarrowChat();
-    check(`⑦ ${tag}: a ${c.narrow.w} px chat window keeps its status bar ONE row (${c.narrow.rows} row, ${c.narrow.bar} px ≤ 28) with ⋯ for the rest (P2-4)`, c.narrow.rows === 1 && c.narrow.bar <= 28 && c.narrow.more, c.narrow);
-    await evalJs(`app.wm.resizeWindowTo(${J(c.id)}, { w: 360, h: 420 })`); await sleep(500);
-    const more = await evalJs(`(() => { const b = app.wm.windows.get(${J(c.id)}).element.querySelector('.chat-status-more'); if (!b) return null; const r = b.getBoundingClientRect(); return r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`);
-    if (more) { await click(more); await sleep(350); }
-    const opened = await evalJs(`(() => { const bar = app.wm.windows.get(${J(c.id)}).element.querySelector('.chat-status-bar'); return { open: bar.classList.contains('chat-status-open'), folded: bar.querySelectorAll(':scope > .chat-status-folded').length, model: !!bar.querySelector('.chat-status-model') && bar.querySelector('.chat-status-model').getBoundingClientRect().width > 0 }; })()`);
-    check(`⑦ ${tag}: ⋯ opens the bar in place — every chip shown again`, opened.open && opened.folded === 0 && opened.model, opened);
+    check(`⑦ ${tag}: a ${c.narrow.w} px chat window's status bar is the strip's SAME two rows (${c.narrow.rows} rows, ${c.narrow.bar} px ≤ 60; row 1 «${c.narrow.row1}», row 2 «${c.narrow.row2}») — each mark on the row the table gives it (P2-4)`, c.narrow.rows === 2 && c.narrow.bar <= 60 && c.narrow.wrongRow.length === 0, c.narrow);
+    check(`⑦ ${tag}: nothing behind «show more» — no ⋯, nothing folded, every mark inside the bar (${c.narrow.hidden.length ? 'cut: ' + c.narrow.hidden.join(', ') : 'none cut'})`, !c.narrow.more && c.narrow.folded === 0 && c.narrow.hidden.length === 0 && /\bmodel\b/.test(c.narrow.row1) && /\bsettings\b/.test(c.narrow.row2), c.narrow);
     check(`⑦ ${tag}: a ${c.short.h} px high chat window keeps ≥ 45 % of itself for messages (${Math.round(c.short.share * 100)} %, ${c.short.list} px)`, c.short.share >= 0.45, c.short);
     const over = await hoverWords(c.id);
     check(`⑦ ${tag}: the Open in editor / Fork buttons never stand on a message's words (${over && over.messages} messages with buttons, hovered; ${over && over.spaces} hanging spaces under one — no word) (P2-5)`, !!over && over.messages > 0 && over.bad.length === 0, over);
@@ -1538,7 +1544,7 @@ const acceptanceAndControls = async () => {
     const m = await legTitleMenu();
     check('RED P2-3: the lower-row title menu runs off the top (first row at y < 0)', !!m.m && m.m.firstTop < 0, m.m);
     const c = await legNarrowChat();
-    check('RED P2-4: a 360 px chat window wraps its bar (more than one row) and a 250 px high one keeps under 45 % for messages', c.narrow.rows > 1 && c.short.share < 0.45, { narrow: c.narrow, short: c.short });
+    check('RED P2-4: the base\'s ONE row back — a 360 px chat window puts row 2\'s marks on row 1 (cut), and a 250 px high one keeps under 45 % for messages', c.narrow.rows === 1 && c.narrow.wrongRow.length > 0 && c.short.share < 0.45, { narrow: c.narrow, short: c.short });
     mutantOn = null;
     // the fix, not the reload: the real bundle back, the same legs pass
     await load(1024, 600); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);

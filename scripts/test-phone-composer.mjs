@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // test-phone-composer — THE PHONE COMPOSER's structure (lane phone-chat-composer, owner 2026-10-13 "输入框非常窄。下面状态栏
 // 又很稀疏"): on a phone the text box owns its row — ONE leading "+" door whose sheet reaches the image / file / folder
-// inputs, the microphone INSIDE the field — and the status bar is one row with the rest behind ⋯; the desk row is the
-// pinned one. A source census over src/lib/chat-input.js, src/lib/chat-status-bar.js and the public/chat.css block,
+// inputs, the microphone INSIDE the field — and the status bar is the strip's SAME two rows (lane mask-value-shape, the
+// owner's arrangement of 2026-11-14 — it was one row with the rest behind ⋯); the desk row is the pinned one. A source census over src/lib/chat-input.js, src/lib/chat-status-bar.js and the public/chat.css block,
 // each judged on the shipped text AND on a planted copy (RED controls): the desk row gaining the door, the phone face
-// keeping a desk button beside the field, the phone CSS un-gated, the ⋯ chip on the desk.
+// keeping a desk button beside the field, the phone CSS un-gated, the ⋯ chip planted back, the row break taken out.
 // lane phone-take-photo (owner 2026-11-09 «为啥我在手机上添加图片的时候不能拍照»): the sheet's rows are 拍照 / 照片 / 文件 /
 // 文件夹 — 拍照 = the camera door's OWN input (images, capture="environment", one shot), shown only on a finger device
 // (isTouchDevice), its shot on the picked image's road; the gallery input keeps `multiple` and never gains capture.
@@ -47,10 +47,12 @@ function judgeInput(src) {
 }
 function judgeBar(src) {
   return {
-    // lane desktop-small P2-4: the ONE row is a phone's AND a narrow desk window's (_oneRow: PHONE_MQ, or a window < NARROW_BAR_PX)
-    more: /if \(this\._oneRow\(\)\) chip\('more', /.test(src) && /_oneRow\(\) \{\s*if \(PHONE_MQ\?\.matches\) return true;[\s\S]{0,260}return \(w > 0 && w < NARROW_BAR_PX\) \|\| \(h > 0 && h < SHORT_WINDOW_PX\);/.test(src),
-    foldGate: (() => { const f = src.indexOf('  _fold() {'), p = src.indexOf('phone = this._oneRow()', f), g = src.indexOf('if (!phone || open) return;', f), a = src.indexOf("classList.add('chat-status-folded')", f); return f > 0 && p > f && g > p && a > g; })(),
-    sheetRows: /if \(PHONE_MQ\?\.matches\) for \(const \[k, label\] of \[\['effort', t\('Effort'\)\], \['style', t\('Output style'\)\]\]\)/.test(src),
+    // lane mask-value-shape (the strip's step two): no ⋯ and no fold at any width — below ONE_ROW_PX the row break between
+    // row 1 and row 2 (strip-table.js), the same on a phone and a narrow desk window
+    noMore: !/chip\('more', /.test(src) && !/_oneRow\(\)/.test(src) && !/classList\.add\('chat-status-folded'\)/.test(src),
+    rowBreak: /const one = !\(w > 0\) \|\| w >= ONE_ROW_PX;/.test(src) && /if \(!one && firstRow2 > 0\) ordered\.splice\(firstRow2, 0, mark\('row-break', 'chat-status-rowbreak'\)\);/.test(src),
+    // the thinking level is a part of the model door; the output style a row of «⚙ 对话设置» (the phone's old sheet rows)
+    doors: /data-door-part="effort"/.test(src) && /inDoor\('style', `chat-status-style chat-status-clickable/.test(src),
   };
 }
 function judgeCss(css) {
@@ -73,8 +75,8 @@ ok('the + sheet says what each row opens — 拍照 (the camera door) · 照片 
 ok('拍照 = the camera door\'s OWN input (image/*, capture=environment, one shot), its row only on a finger device, the shot on _addImageAttachment', jI.camera, jI);
 ok('照片 = the gallery input: image/*, multiple, no capture', jI.gallery, jI);
 ok('the phone face is gated on the 768 px query (and follows it)', jI.gated, jI);
-ok('the status bar: ⋯ exists only on a phone or a desk window narrower than NARROW_BAR_PX (lane desktop-small P2-4); the fold writes nothing on a wide desk bar', jB.more && jB.foldGate, jB);
-ok('the model chip\'s sheet carries effort + style on a phone', jB.sheetRows, jB);
+ok('the status bar: no ⋯ and no fold at any width — the row break between the strip\'s two rows below ONE_ROW_PX (lane mask-value-shape; was ⋯ on a phone / a desk window under 480 px)', jB.noMore && jB.rowBreak, jB);
+ok('the thinking level sits inside the model door, the output style is a row of «⚙ 对话设置» (was: the model chip\'s phone sheet carried both)', jB.doors, jB);
 ok('chat.css: the phone block is gated — outside the query it only hides the door', jC.block && jC.gated, jC);
 
 console.log('② i18n — the sheet + bar words in zh / ja');
@@ -93,7 +95,8 @@ ok('RED: the camera door taking many shots', !judgeInput(ci.replace("input.setAt
 ok('RED: the shot on another road (the upload)', !judgeInput(ci.replace('cameraDoor((shot) => this._addImageAttachment(shot))', 'cameraDoor((shot) => this.uploadFiles([shot]))')).camera);
 ok('RED: the gallery input gaining capture', !judgeInput(ci.replace('attachInput.multiple = true;', "attachInput.multiple = true; attachInput.setAttribute('capture', 'environment');")).gallery);
 ok('RED: 拍照 opening the gallery input', !judgeInput(ci.replace('        camera.row(),', "        sheetRow(UI_ICONS.camera, t('Take photo'), () => attachInput.click()),")).sheet);
-ok('RED: ⋯ on every desk bar', !judgeBar(sb.replace("if (this._oneRow()) chip('more', ", "chip('more', ")).more);
+ok('RED: the ⋯ chip planted back', judgeBar(sb).noMore && !judgeBar(sb.replace("chip('settings', ", "chip('more', 'chat-status-more', '', '\u22EF');\n    chip('settings', ")).noMore);
+ok('RED: the row break taken out (the rows run together)', !judgeBar(sb.replace('if (!one && firstRow2 > 0) ordered.splice(', 'if (false) ordered.splice(')).rowBreak);
 
 console.log('④ the fold table (PURE phoneBarFold; lane phone-bar-billing-nofold — mirror-262: the runner\'s fonts folded the billing chip)');
 // a row = the bar's chips as measured at 390 px (room = 390 − 24 padding − ⋯ 36 − gap 8 = 322): the hub's fonts, then
@@ -109,8 +112,10 @@ const wide = plan(phoneBarFold, 74, { full: 200, compact: 64, icon: 19 }), narro
 ok('the three forms by the room the other never-fold chips leave: full → compact → icon', wide.billing === 'compact' && narrow.billing === 'icon' && runner.billing === 'full', { wide, narrow });
 ok('no room at all: the icon still draws — the billing chip is never in the folded set', none.billing === 'icon' && !none.folded.split(',').includes('billing') && none.folded.includes('goal'), none);
 ok('effort + style always fold and their width folds nothing else (style 80 px > the room left)', hub.folded.split(',').includes('style') && !hub.folded.includes('autoresume'), hub);
-ok('wiring: _fold lays the bar by phoneBarFold and writes the billing form; _fitBilling leaves the closed phone row to it',
-  /const plan = phoneBarFold\(\{ chips, room, gap \}\);/.test(sb) && /bill\.el\.dataset\.mode = plan\.billing;/.test(sb) && /if \(this\._oneRow\(\) && !this\._foldOpen\) return;/.test(sb), null);
+// lane mask-value-shape: the status bar folds nothing any more (its billing chip is a row of «⚙ 对话设置», its full words
+// the row's value) — the PURE table above stays title-chips.js's own; the bar no longer imports it
+ok('wiring: the status bar no longer folds by phoneBarFold (nothing folds; the billing chip is a row of «⚙ 对话设置» whose value is its FULL words)',
+  !/phoneBarFold/.test(sb) && /inDoor\('billing', [^\n]*value: forms\.full \}\);/.test(sb), null);
 { // RED control: the billing chip foldable again (the base's rule) — the runner row folds it
   const tc = read('src/lib/title-chips.js'), f = path.join(os.tmpdir(), `vs-phonebar-red-${process.pid}.mjs`);
   fs.writeFileSync(f, tc.replace("'turnstate', 'health', 'billing']", "'turnstate', 'health']"));

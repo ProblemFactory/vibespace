@@ -64,7 +64,8 @@ check('stdout policy explanation is included', /violative cyber content/.test(c4
   const walk = (Klass) => {
     const bar = new Klass({ send() {} }, 'sid-c643', { backend: 'claude', getToolMsg: () => null, openSubagentViewer() {}, openInTempEditor() {} });
     const chip = () => bar.element.children.find((el) => el.getAttribute('data-chip') === 'model');
-    const read = () => ({ label: chip()?.textContent || '', title: chip()?.title || '' });
+    // (lane mask-value-shape) the model door's label: what precedes its thinking level (« · » + the effort part)
+    const read = () => ({ label: (chip()?.innerHTML || '').split(' <span class="chat-status-door-sep"')[0].replace(/<[^>]*>/g, ''), title: chip()?.title || '' });
     bar.applyStatus({ model: 'claude-fable-5', permissionMode: 'default' });
     bar.setServedModel('claude-opus-4-8');
     if (bar.setRefusalFallback) bar.setRefusalFallback(REROUTE);

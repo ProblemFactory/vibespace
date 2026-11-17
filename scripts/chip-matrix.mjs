@@ -74,7 +74,8 @@ function chipOfBar(bar) {
   const el = (bar.element?.children || []).find((e) => e.getAttribute('data-chip') === 'model');
   if (!el) return { label: null, amber: false, locked: false, title: '', lockTip: '' };
   const t = el.title || '', cut = t.indexOf(' · ');
-  return { label: el.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), locked: /chat-status-model-locked/.test(el.className), title: cut < 0 ? t : t.slice(0, cut), lockTip: cut < 0 ? '' : t.slice(cut + 3) };
+  // (lane mask-value-shape) the model door's face is the model, then « · » and its thinking level — the label is what precedes it
+  return { label: el.innerHTML.split(' <span class="chat-status-door-sep"')[0].replace(/<[^>]*>/g, '').trim(), amber: /chat-status-model-fallback/.test(el.className), locked: /chat-status-model-locked/.test(el.className), title: cut < 0 ? t : t.slice(0, cut), lockTip: cut < 0 ? '' : t.slice(cut + 3) };
 }
 
 function arrowOf(src, head) {

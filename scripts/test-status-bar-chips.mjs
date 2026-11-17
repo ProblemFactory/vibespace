@@ -17,19 +17,22 @@
 //
 //   ① identity — after the first render, twenty context%/cache/cost/turn-state
 //     ticks leave every chip the SAME node object, in the same order, with the
-//     hot chips' inner markup re-written and the cold chips' never touched;
-//     zero elements created after the first render.
-//   ② appearance / disappearance — a turn-state chip, a health chip, a held
-//     chip, a workflow chip (with its data-* attributes) each appear at their
-//     place and leave again, the neighbours keeping identity both times; the
-//     goal chip flips empty ↔ set on ONE element.
+//     hot chip's inner markup re-written and the cold chips' never touched;
+//     zero elements created after the first render. (lane mask-value-shape, the
+//     strip's step two: the details — cache, [k], the cost, «not reported» — are
+//     ROWS of a door now, `_doorRows`, read in its panel: no element on the strip.)
+//   ② appearance / disappearance — a turn-state chip, a health chip, the
+//     «后台» door for a workflow each appear at their place (the strip's table)
+//     and leave again, the neighbours keeping identity both times; the held
+//     notices and the goal are ONE row of «⚙ 对话设置» each (the goal empty ↔ set).
 //   ③ attribute parity — a title with quotes / ampersand / angle brackets lands
 //     as the raw string (the old code escaped it into the markup and the parser
-//     un-escaped it: same value), the classless cache/cost chips carry NO class
-//     attribute, the ctx chip's inner pie keeps its markup shape.
+//     un-escaped it: same value), the classless cache row carries NO class, the
+//     ctx door's face keeps its pie + its word + percent (the [used/total] in
+//     its data-* and its panel).
 //   ④ NEGATIVE CONTROL — a scratch copy of the module with the reconcile
 //     neutered back to a whole-bar rebuild FAILS ①'s identity check.
-//   ⑤ wiring pins — render() ends in `this._reconcile(chips)`, the file never
+//   ⑤ wiring pins — render() ends in `this._reconcile(this._arranged(chips))`, the file never
 //     assigns `this._element.innerHTML`, the click handling is still the ONE
 //     delegated listener (nothing bound per chip); ci.mjs carries this suite.
 //   ⑦ the LOCKED chip (lane fable-52-cli-321, F1) — the served model held against the
@@ -90,6 +93,8 @@ const mkBar = (ChatStatusBar, opts = {}) => new ChatStatusBar({ send() {} }, 'si
 });
 const keys = (bar) => bar.element.children.map((el) => el.getAttribute('data-chip'));
 const byKey = (bar) => Object.fromEntries(bar.element.children.map((el) => [el.getAttribute('data-chip'), el]));
+// lane mask-value-shape: a mark the strip's table places INSIDE a door is a row of that door (its panel draws it on a press)
+const rowsOf = (bar) => Object.fromEntries((bar._doorRows || []).map((r) => [r.key, r]));
 const firstStatus = { model: 'claude-fable-5-1', contextWindow: 200000, lastUsage: { input_tokens: 1000, cache_read_input_tokens: 500 }, total_cost_usd: 0.5, permissionMode: 'default', effort: 'high' };
 
 /** Twenty ticks of the kind every turn produces; returns the identity verdict. */
@@ -119,25 +124,31 @@ globalThis.document = { createElement: (t) => new FakeEl(t) };
   bar.applyStatus(firstStatus);
   const order0 = keys(bar);
   // lane agy-status-bar-facts: a claude bar says «not reported» (ONE chip) for the facts its row lacks — token total, turn time
-  ok(order0.join(',') === 'search,model,effort,goal,style,design,perm,ctx,cache,cache-k,unreported,cost', `first render draws the expected chip set in bar order (${order0.join(',')})`);
+  // lane mask-value-shape: the strip's table order — row 1 (model door, permission, context door), row 2 (产出, «⚙ 对话设置»),
+  // then the search until its home in the title bar (P3); the rest are door rows
+  ok(order0.join(',') === 'model,perm,ctx,artifacts,settings,search', `first render draws the expected chip set in bar order (${order0.join(',')})`);
+  ok(Object.keys(rowsOf(bar)).join(',') === 'goal,style,design,cache,cache-k,unreported,cost', `…and the marks the table puts inside a door are door rows, none on the strip (${Object.keys(rowsOf(bar)).join(',')})`);
   ok(bar.element.children.every((el) => el.tagName === 'SPAN' && el.getAttribute('data-chip')), 'every chip is a <span data-chip=…>');
   const v = driveTwenty(bar);
   ok(Object.keys(v.touched).length === 0, `① every chip is the SAME node object after 20 context%/cache/cost/turn-state ticks (replaced: ${JSON.stringify(v.touched)})`);
   ok(v.created === 0, `① zero elements created after the first render (${v.created})`);
   ok(v.orderAfter.join(',') === v.order.join(','), `① the order is unchanged (${v.orderAfter.join(',')})`);
-  const hot = ['ctx', 'cost'], warm = ['cache', 'cache-k'], cold = ['search', 'model', 'effort', 'goal', 'style', 'design', 'perm', 'unreported'];
-  ok(hot.every((k) => v.after[k].innerSets === 21), `① the hot chips (${hot.join('/')}) re-wrote their inner markup once per tick — their text changes every tick (${hot.map((k) => v.after[k].innerSets).join('/')})`);
-  // the cache percentage / [k] round to the same string on several ticks — an
-  // unchanged string is NOT written (that is the point), so fewer than 21
-  ok(warm.every((k) => v.after[k].innerSets > 1 && v.after[k].innerSets < 21), `① the cache chips (${warm.join('/')}) re-wrote only when their rounded text changed (${warm.map((k) => v.after[k].innerSets).join('/')} of 21 ticks)`);
+  // (lane mask-value-shape) the cost and the cache chips are rows of the context door now — no element ticks for them; the
+  // cost joins the door's face only on an account billed per use (this fixture's account is not known)
+  // the ctx door's face is its pie + word + ROUNDED percent (the [used/total] moved to its data-* and its panel): an unchanged
+  // string is NOT written (that is the point), so more than once, fewer than 21
+  const warm = ['ctx'], cold = ['search', 'model', 'perm', 'artifacts', 'settings'];
+  ok(warm.every((k) => v.after[k].innerSets > 1 && v.after[k].innerSets < 21), `① the ctx door (${warm.join('/')}) re-wrote its inner markup only when its rounded percent changed (${warm.map((k) => v.after[k].innerSets).join('/')} of 21 ticks)`);
   ok(cold.every((k) => v.after[k].innerSets === 1), `① the cold chips (${cold.join('/')}) were written once and never again (${cold.map((k) => v.after[k].innerSets).join('/')})`);
   // tick 20: 21000 + 2500 + 20 = 23520 of 200000 → 12 %, "24k"
-  ok(/>12%</.test(v.after.ctx.innerHTML) && /\[24k\/200k\]/.test(v.after.ctx.innerHTML), `① …and the ctx chip shows the LAST reading (${v.after.ctx.textContent})`);
-  ok(v.after.cost.innerHTML === 'This chat ≈ $2.50', `① …and the cost chip shows the LAST turn's figure IN WORDS (lane door-healthy-chat — the studies' W3: a bare «$0.47» read as a bill) (${v.after.cost.innerHTML})`);
+  ok(/>12%</.test(v.after.ctx.innerHTML) && v.after.ctx.getAttribute('data-used') === '24k' && v.after.ctx.getAttribute('data-total') === '200k', `① …and the ctx door shows the LAST reading (${v.after.ctx.textContent} · ${v.after.ctx.getAttribute('data-used')}/${v.after.ctx.getAttribute('data-total')})`);
+  const dr = rowsOf(bar);
+  ok(dr.cost.html === 'This chat ≈ $2.50' && !/chat-status-cost/.test(v.after.ctx.innerHTML), `① …and the cost row says the LAST turn's figure IN WORDS (lane door-healthy-chat — the studies' W3: a bare «$0.47» read as a bill), off the door's face on an account not billed per use (${dr.cost.html})`);
+  ok(/11%/.test(dr.cache.html) && /\[3k\]/.test(dr['cache-k'].html), `① …and the cache rows say the LAST reading (${dr.cache.html.replace(/<[^>]*>/g, '').trim()} · ${dr['cache-k'].html})`);
   { // 2.369.402: the CLI's total is a running total per process — the server folds it; a turn's figure REPLACES the shown one
     const b2 = mkBar(ChatStatusBar); b2.applyStatus({ ...firstStatus, total_cost_usd: 0.3 }); b2.turnCost(0.3); b2.turnCost(0.3); b2.turnCost(63854.44);
-    const c2 = byKey(b2).cost.innerHTML; b2.turnCost(0.3);
-    ok(c2 === 'This chat ≈ $63,854.44' && byKey(b2).cost.innerHTML === 'This chat ≈ $0.30', `① a turn's carried figure replaces the bar's — $0.30 three times reads $0.30, never $0.90; a large figure has its thousands mark (${c2})`);
+    const c2 = rowsOf(b2).cost.html; b2.turnCost(0.3);
+    ok(c2 === 'This chat ≈ $63,854.44' && rowsOf(b2).cost.html === 'This chat ≈ $0.30', `① a turn's carried figure replaces the bar's — $0.30 three times reads $0.30, never $0.90; a large figure has its thousands mark (${c2})`);
   }
   // a render with NOTHING changed writes nothing at all
   const w = counters.innerHTML; bar.render();
@@ -153,36 +164,36 @@ console.log('— ② chips appear at their place and leave again, neighbours unt
   const base = byKey(bar);
   bar.setTurnState('requires_action');
   let k = keys(bar);
-  ok(k.indexOf('turnstate') === k.indexOf('effort') + 1 && byKey(bar).turnstate.className === 'chat-status-turnstate chat-status-needs-action', `② turn-state chip appears right after effort (${k.join(',')})`);
+  ok(k.indexOf('turnstate') === 0 && byKey(bar).turnstate.className === 'chat-status-turnstate chat-status-needs-action', `② turn-state chip appears FIRST on row 1 (the strip's table: what waits for the person) (${k.join(',')})`);
   ok(byKey(bar).turnstate.textContent.includes('waiting for you'), '② …with its label');
-  ok(['effort', 'goal', 'perm', 'ctx'].every((x) => byKey(bar)[x] === base[x]), '② …and effort / goal / perm / ctx keep their identity across the insertion');
+  ok(['model', 'perm', 'ctx', 'settings'].every((x) => byKey(bar)[x] === base[x]), '② …and model / perm / ctx / settings keep their identity across the insertion');
   bar.setTurnState('idle');
-  ok(!keys(bar).includes('turnstate') && ['effort', 'goal', 'perm', 'ctx'].every((x) => byKey(bar)[x] === base[x]), '② turn-state chip leaves on idle; neighbours keep identity across the removal');
+  ok(!keys(bar).includes('turnstate') && ['model', 'perm', 'ctx', 'settings'].every((x) => byKey(bar)[x] === base[x]), '② turn-state chip leaves on idle; neighbours keep identity across the removal');
 
   bar.setInitHealth([{ kind: 'mcp', name: 'srv', detail: 'failed' }]);
   k = keys(bar);
-  ok(k.indexOf('health') === k.indexOf('effort') + 1 && byKey(bar).health.textContent.includes('1 not working'), `② health chip appears after effort with its count (${k.join(',')})`);
+  ok(k.indexOf('health') > k.indexOf('settings') && byKey(bar).health.textContent.includes('1 not working'), `② health chip appears at row 2's end, past «⚙ 对话设置», with its count — until its homes (Session Properties + ⚙ Diagnostics) are built (${k.join(',')})`);
   bar.setInitHealth([]);
   ok(!keys(bar).includes('health'), '② health chip clears on an empty (told-and-clean) answer');
 
   bar.setJobsHeld('3 notifications held — waiting for the turn');
-  ok(keys(bar).includes('held') && byKey(bar).held.textContent.includes('3 notifications held'), '② held chip appears with its head');
+  ok(!keys(bar).includes('held') && !!rowsOf(bar).held && rowsOf(bar).held.html.includes('3 notifications held'), '② the held notices are a row of «⚙ 对话设置» with their head (never a strip chip)');
   bar.setJobsHeld('');
-  ok(!keys(bar).includes('held'), '② held chip leaves when the stash drains');
+  ok(!rowsOf(bar).held, '② …the row leaves when the stash drains');
 
-  // the goal chip: empty ↔ set is ONE element (same key), only its class/markup change
-  const goalEmpty = byKey(bar).goal;
-  ok(goalEmpty.className.includes('chat-status-goal-empty'), '② the goal chip starts empty (set-a-goal entry point)');
+  // the goal (lane mask-value-shape: a row of «⚙ 对话设置»): empty ↔ set is ONE row (same key), its class / markup patched
+  const goalEmpty = rowsOf(bar).goal;
+  ok(!keys(bar).includes('goal') && goalEmpty.cls.includes('chat-status-goal-empty') && goalEmpty.value === 'Not set', '② the goal row starts empty (set-a-goal entry point), its value said in words');
   bar.setGoal('all tests pass', 65000);
-  const goalSet = byKey(bar).goal;
-  ok(goalSet === goalEmpty && !goalSet.className.includes('chat-status-goal-empty') && /chat-goal-timer/.test(goalSet.innerHTML) && goalSet.textContent.includes('all tests pass'), '② setting a goal re-uses the goal element (class + markup patched, not a new node)');
+  const goalSet = rowsOf(bar).goal;
+  ok(!goalSet.cls.includes('chat-status-goal-empty') && /chat-goal-timer/.test(goalSet.html) && goalSet.html.includes('all tests pass'), '② setting a goal patches the goal row (class + markup)');
   bar.setGoal(null);
-  ok(byKey(bar).goal === goalEmpty && goalEmpty.className.includes('chat-status-goal-empty'), '② clearing it flips the same element back to empty');
+  ok(rowsOf(bar).goal.cls.includes('chat-status-goal-empty'), '② clearing it flips the row back to empty');
 
-  // the workflow chip carries data-* attributes the click handler reads
+  // a running workflow opens the «后台» door (lane mask-value-shape: tasks + workflows behind ONE chip, the runs in its panel)
   bar.trackWorkflow('wf_abc', 'Build & verify');
-  const wf = byKey(bar).wf;
-  ok(!!wf && wf.getAttribute('data-wf-run') === 'wf_abc' && wf.getAttribute('data-wf-name') === 'Build & verify' && wf.className.includes('chat-status-wf'), '② the workflow chip carries data-wf-run / data-wf-name as RAW attribute values');
+  const wf = byKey(bar).tasks;
+  ok(!!wf && !keys(bar).includes('wf') && wf.getAttribute('data-door') === 'background' && wf.getAttribute('title') === 'Build & verify' && keys(bar).indexOf('tasks') === keys(bar).indexOf('settings') - 1, '② a running workflow is the «后台» door (ONE chip, before «⚙ 对话设置»), its title the workflow\'s name as the RAW string');
   bar.dispose();
   const created = counters.created;
   bar.setBrowserProfile({ key: 'k', fact: { input: null, live: false }, words: { show: true, line: 'Work', name: 'Work', tooltip: 'Using: Work', amber: false } }); // lane S2: the chip prints THE browser fact's words
@@ -196,18 +207,18 @@ console.log('— ③ attributes land as raw strings; classless chips carry no cl
   bar.applyStatus(firstStatus);
   const nasty = 'a "quoted" & <tagged> reason';
   bar.setJobsHeld(nasty);
-  ok(byKey(bar).held.getAttribute('title') === nasty, `③ a title with quotes / & / <> is the raw string (${JSON.stringify(byKey(bar).held.getAttribute('title'))})`);
-  ok(byKey(bar).held.innerHTML.includes('a &quot;quoted&quot; &amp; &lt;tagged&gt; reason') && !byKey(bar).held.innerHTML.includes('<tagged>'), '③ …while the same text inside the chip is escaped markup (escHtml unchanged)');
-  const els = byKey(bar);
-  ok(!els.cache.hasAttribute('class') && els.cost.className === 'chat-status-cost' && els['cache-k'].className === 'chat-status-dim', '③ the cache chip carries NO class attribute (as before), the cost chip `chat-status-cost` (lane door-healthy-chat: its words + its title); the [k] twin is chat-status-dim');
+  ok(rowsOf(bar).held.title === nasty, `③ a title with quotes / & / <> is the raw string (${JSON.stringify(rowsOf(bar).held.title)})`);
+  ok(rowsOf(bar).held.html.includes('a &quot;quoted&quot; &amp; &lt;tagged&gt; reason') && !rowsOf(bar).held.html.includes('<tagged>'), '③ …while the same text inside the row is escaped markup (escHtml unchanged)');
+  const els = byKey(bar), rws = rowsOf(bar);
+  ok(!rws.cache.cls && rws.cost.cls === 'chat-status-cost' && rws['cache-k'].cls === 'chat-status-dim', '③ the cache row carries NO class (as before), the cost row `chat-status-cost` (lane door-healthy-chat: its words + its title); the [k] twin is chat-status-dim');
   // 500 of 1500 cached = 33 % → the orange tier (a color-mix of the two theme vars), never a literal colour
-  ok(/^color:color-mix\(in srgb, var\(--red, #e55\) 50%, var\(--yellow, #e5c07b\)\)$/.test(els.cache.getAttribute('style')) && /^color:var\(--green, #3fb950\)$/.test(els.cost.getAttribute('style')), `③ their colour rides the style attribute, theme vars only (${els.cache.getAttribute('style')} / ${els.cost.getAttribute('style')})`);
-  ok(/^<span class="chat-status-ctx-pie" style="background:conic-gradient\(.*\)"><\/span> <span style="color:.*">\d+%<\/span><span class="chat-status-dim">\[\d+k\/\d+k\]<\/span>$/.test(els.ctx.innerHTML), '③ the ctx chip keeps its pie + percent + [used/total] markup shape');
+  ok(/^color:color-mix\(in srgb, var\(--red, #e55\) 50%, var\(--yellow, #e5c07b\)\)$/.test(rws.cache.style) && /^color:var\(--green, #3fb950\)$/.test(rws.cost.style), `③ their colour rides the style attribute, theme vars only (${rws.cache.style} / ${rws.cost.style})`);
+  ok(/^<span class="chat-status-ctx-pie" style="background:conic-gradient\(.*\)"><\/span> <span class="chat-status-door-word">[^<]+<\/span> <span style="color:.*">\d+%<\/span>$/.test(els.ctx.innerHTML) && /^\d+k$/.test(els.ctx.getAttribute('data-used')) && /^\d+k$/.test(els.ctx.getAttribute('data-total')), '③ the ctx door keeps its pie + its word + percent markup shape, the [used/total] in its data-* (its panel says it)');
   ok(els.perm.getAttribute('title') === 'Ask before acting — Click to change permission mode' && els.perm.textContent.endsWith(' default'), '③ the permission chip: the mode VERBATIM on the chip, its words in the title (protocol values ruling, 主开发 2026-11-14)');
   // the "?" chips when nothing was reported
   const bare = mkBar(ChatStatusBar, { onSearch: null, onDesignRequest: null });
   bare.render();
-  ok(keys(bare).join(',') === 'model,effort,goal,style,perm,unreported' && byKey(bare).model.textContent === 'model: ?' && byKey(bare).model.className.includes('chat-status-dim'), `③ a never-reported session draws model: ? / effort: ? dim, no search/design chips when the view offers none (${keys(bare).join(',')})`);
+  ok(keys(bare).join(',') === 'model,perm,artifacts,settings' && byKey(bare).model.textContent.startsWith('model: ?') && /chat-status-effort[^"]*chat-status-dim/.test(byKey(bare).model.innerHTML) && byKey(bare).model.className.includes('chat-status-dim') && !rowsOf(bare).design, `③ a never-reported session draws model: ? / its thinking level dim inside the model door, no search chip nor design row when the view offers none (${keys(bare).join(',')})`);
   bar.dispose(); bare.dispose();
 }
 
@@ -218,7 +229,7 @@ console.log('— ④ negative control: a neutered copy (whole-bar rebuild) break
   fs.mkdirSync(dir, { recursive: true });
   try {
     const src = read('src/lib/chat-status-bar.js');
-    const neutered = src.replace('    this._reconcile(chips);\n', '    this._chipEls.clear(); this._element.innerHTML = \'\'; this._element.childNodes.length = 0; this._reconcile(chips);\n')   // (lane phone-chip's _fitBilling() follows the reconcile since the 2.369.202 integration)
+    const neutered = src.replace('    this._reconcile(this._arranged(chips));\n', '    this._chipEls.clear(); this._element.innerHTML = \'\'; this._element.childNodes.length = 0; this._reconcile(this._arranged(chips));\n')   // (lane mask-value-shape: the reconcile takes the strip's arrangement)
       .replace(/from '\.\//g, `from '${pathToFileURL(path.join(repo, 'src/lib')).href}/`)
       .replace(/from '\.\.\//g, `from '${pathToFileURL(path.join(repo, 'src')).href}/`);
     ok(neutered !== src, '④ the copy differs from the source (the neuter landed)');
@@ -238,10 +249,10 @@ console.log('— ⑤ wiring');
 {
   const src = read('src/lib/chat-status-bar.js');
   const renderBody = src.slice(src.indexOf('\n  render() {'), src.indexOf('\n  _reconcile(chips) {'));
-  ok(renderBody.length > 0 && /\n    this\._reconcile\(chips\);\n(?:    this\._fitBilling\(\);\n)?(?:    this\._fold\(\);\n)?  \}\s*$/.test(renderBody.replace(/\n  \/\*\*[\s\S]*$/, '\n')), '⑤ render() ends in this._reconcile(chips) (then lane phone-chip\'s _fitBilling(), which measures the drawn pill, then lane phone-chat-composer\'s phone-only _fold())');
+  ok(renderBody.length > 0 && /\n    this\._reconcile\(this\._arranged\(chips\)\);\n  \}\s*$/.test(renderBody.replace(/\n  \/\*\*[\s\S]*$/, '\n')), '⑤ render() ends in this._reconcile(this._arranged(chips)) — the strip\'s table order (lane mask-value-shape; lane phone-chip\'s _fitBilling and the phone fold are gone: nothing folds, the billing pill is a door row)');
   ok(!/this\._element\.innerHTML\s*=/.test(src), '⑤ the file never assigns this._element.innerHTML (the whole-bar rebuild is gone)');
   ok(!/\bparts\.push\(|parts\.join\(/.test(src), '⑤ no parts.push / parts.join left');
-  ok((src.match(/\n\s*(?:if \([^)]*\) )?chip\('/g) || []).length >= 22, `⑤ every chip site goes through chip(key, …) (${(src.match(/\n\s*(?:if \([^)]*\) )?chip\('/g) || []).length} sites)`);
+  ok((src.match(/\n\s*(?:if \([^)]*\) )?(?:chip|inDoor)\('/g) || []).length >= 22, `⑤ every chip site goes through chip(key, …) or a door's inDoor(key, …) (${(src.match(/\n\s*(?:if \([^)]*\) )?(?:chip|inDoor)\('/g) || []).length} sites)`);
   ok(/this\._element\.addEventListener\('click', \(e\) => \{\s*this\._onClick\(e\);/.test(src) && !/\bel\.onclick\s*=|\bel\.addEventListener\(/.test(src.slice(src.indexOf('_reconcile(chips) {'), src.indexOf('// ── Private ──'))), '⑤ click handling stays the ONE delegated listener on the bar — _reconcile binds nothing per chip');
   ok(/\{ name: 'test-status-bar-chips', tier: 'fast'(?:,| \})/.test(read('scripts/ci.mjs')), '⑤ ci.mjs carries test-status-bar-chips in the fast tier');
 }
@@ -261,9 +272,13 @@ console.log('— ⑤ wiring');
   bar.setCostBasis({ source: 'subscription' });
   bar.setAddedKinds([{ kind: 'record', name: 'api-request-blob', cli: '2.1.309' }]);
   const order = keys(bar), els = byKey(bar);
-  ok(order[order.length - 1] === 'kinds' && order.join(',').startsWith('search,model,effort,goal,style,design,perm,ctx,cache,cache-k,unreported,cost'), `⑥ the kinds chip is LAST — every other chip keeps its place (${order.join(',')})`);
+  ok(order[order.length - 1] === 'kinds' && order.join(',').startsWith('model,perm,ctx,artifacts,settings,search'), `⑥ the kinds chip is LAST (until its home in ⚙ Diagnostics) — every other chip keeps its place (${order.join(',')})`);
   ok(els.kinds.textContent === '1 record kind this version added — Diagnostics' && els.kinds.className === 'chat-status-kinds chat-status-clickable' && !els.kinds.getAttribute('style') && /api-request-blob: a new record \(2\.1\.309\)/.test(els.kinds.getAttribute('title')), '⑥ «1 record kind this version added — Diagnostics», quiet (no inline colour — the theme\'s dim), each kind in its title');
-  ok(els.cost.innerHTML === 'This chat ≈ $0.50 · included in your subscription' && els.cost.getAttribute('style') === 'color:var(--text-dim)', `⑥ a subscription's cost is quiet (dim), never the tier colours (${els.cost.getAttribute('style')})`);
+  const cr = rowsOf(bar).cost;
+  ok(cr.html === 'This chat ≈ $0.50 · included in your subscription' && cr.style === 'color:var(--text-dim)' && !/chat-status-cost/.test(els.ctx.innerHTML), `⑥ a subscription's cost is quiet (dim), never the tier colours — a row of the context door, never on its face (${cr.style})`);
+  bar.setCostBasis({ source: 'api-key' });
+  ok(/<span class="chat-status-cost" style="color:var\(--green, #3fb950\)">This chat ≈ \$0\.50 · billed per use \(API key\)<\/span>$/.test(byKey(bar).ctx.innerHTML), `⑥ billed per use (an API key): the spend joins the context door's face in its tier colour (the strip's table: onDoorWhen billedPerUse)`, byKey(bar).ctx.innerHTML);
+  bar.setCostBasis({ source: 'subscription' });
   const n = counters.innerHTML; bar.setAddedKinds([{ kind: 'record', name: 'api-request-blob', cli: '2.1.309' }]); bar.setCostBasis({ source: 'subscription' });
   ok(counters.innerHTML === n, '⑥ the same kinds / the same basis again write nothing');
   bar.setAddedKinds([]);
@@ -278,7 +293,8 @@ console.log('— ⑤ wiring');
 // (stream-wall lockFrame → the `model-lock` op → applyStatus). Unlocked, or a lock whose target an older meta never named ⇒ as before.
 console.log('— ⑦ a locked chip holds the served model against the lock target (the owner\'s 🔒 fable[1m] scene)');
 {
-  const chipOf = (bar) => { const el = byKey(bar).model; return { text: el.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), locked: /chat-status-model-locked/.test(el.className), dim: /chat-status-dim/.test(el.className), title: el.getAttribute('title') || '' }; };
+  // (lane mask-value-shape) the model door's face is the model, then « · » and its thinking level — the label is what precedes it
+  const chipOf = (bar) => { const el = byKey(bar).model; return { text: el.innerHTML.split(' <span class="chat-status-door-sep"')[0].replace(/<[^>]*>/g, '').trim(), amber: /chat-status-model-fallback/.test(el.className), locked: /chat-status-model-locked/.test(el.className), dim: /chat-status-dim/.test(el.className), title: el.getAttribute('title') || '' }; };
   const plain = (c, text) => c.locked && !c.amber && c.text === text;
   const lockedOn = (target, model = 'claude-fable-5-2') => { const b = mkBar(ChatStatusBar); b.applyStatus({ ...firstStatus, model, modelLocked: true, lockedModel: target }); return b; };
   // (the scene) attached, a live turn served by 5-2, then the scroll up draws an older turn's init (5-1) and a /model echo of
@@ -479,7 +495,7 @@ console.log('— ⑦ a locked chip holds the served model against the lock targe
 // and keeps the two numbers only to drop a stale frame. Master's mismatch over those fields IS the order judgement. The facts here
 // are the REAL modelFacts over a session's fields.
 console.log('— ⑧ one bar (round 13): a live session\'s numbered facts write master\'s own fields; a press is master\'s; a refusal undoes its own press');
-const chipOf = (bar) => { const el = byKey(bar).model; return { amber: /chat-status-model-fallback/.test(el.getAttribute('class') || ''), locked: /chat-status-model-locked/.test(el.getAttribute('class') || ''), warn: el.innerHTML.includes('⚠'), text: el.innerHTML.replace(/<[^>]*>/g, ''), title: el.getAttribute('title') || '' }; };
+const chipOf = (bar) => { const el = byKey(bar).model; return { amber: /chat-status-model-fallback/.test(el.getAttribute('class') || ''), locked: /chat-status-model-locked/.test(el.getAttribute('class') || ''), warn: el.innerHTML.includes('⚠'), text: el.innerHTML.split(' <span class="chat-status-door-sep"')[0].replace(/<[^>]*>/g, ''), title: el.getAttribute('title') || '' }; };
 const { createRequire: createRequire8 } = await import('node:module');
 const MA8 = createRequire8(path.join(repo, 'src/server/model-ask.js'))('./model-ask.js');
 const MP8 = await import(pathToFileURL(path.join(repo, 'src/model-providers.js')).href);

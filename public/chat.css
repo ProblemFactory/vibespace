@@ -167,17 +167,37 @@
 .chat-status-bar { flex-wrap: wrap; }
 /* lane desktop-small — the desk bar at a small screen. P2-6: every clickable chip is a ≥ 24×24 mouse target (the model /
    effort / goal / style chips were 13–14 px tall text pills), the painted pill unchanged (the model's background clipped
-   to its padding box); the bar's padding gives the height back, so one row stays ≤ 28 px. P2-4: a desk window narrower
-   than 480 px keeps its bar ONE row — what does not fit folds behind ⋯, which opens the bar in place (chat-status-bar.js
-   _fold over PURE phoneBarFold, the phone's own fold) — and one under 300 px high starts its composer at ONE line, so its
-   messages keep ≥ 45 % of the window (a Quad cell kept 62–144 px of them under three bar rows and a 79 px composer). */
+   to its padding box); the bar's padding gives the height back, so one row stays ≤ 28 px. P2-4: a narrow desk window's
+   bar is the strip's SAME two rows (below; lane mask-value-shape — it was ONE row with ⋯ for the rest) — and one under
+   300 px high starts its composer at ONE line, so its messages keep ≥ 45 % of the window (a Quad cell kept 62–144 px of
+   them under three bar rows and a 79 px composer). */
 .chat-status-bar { padding-top: 1px; padding-bottom: 1px; row-gap: 2px; }
 .chat-status-bar .chat-status-clickable { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; min-width: 24px; box-sizing: border-box; flex-shrink: 0; } /* flex-shrink 0: an explicit min-width replaces a flex item's content minimum — without it a chip shrank under its words (the billing pill's full form clipped) */
 .chat-status-bar .chat-status-model { border: solid transparent; border-width: 5px 0; background-clip: padding-box; }
-.chat-status-bar.chat-status-narrow { flex-wrap: nowrap; }
-.chat-status-bar.chat-status-narrow.chat-status-open { flex-wrap: wrap; }
-.chat-status-bar.chat-status-narrow > .chat-status-folded { display: none !important; }
-.chat-status-bar.chat-status-narrow > .chat-status-more { font-size: 13px; letter-spacing: 1px; }
+/* THE STRIP'S TWO ROWS (lane mask-value-shape, the strip's step two — the owner's arrangement of 2026-11-14): below the one-row width the
+   bar is the SAME two rows at every width — the row break sits between row 1 (always seen) and row 2; nothing behind «show more». */
+.chat-status-bar > .chat-status-rowbreak { flex-basis: 100%; width: 100%; height: 0; margin: 0; padding: 0; overflow: hidden; }
+/* the ONE row (≥ 960 px): a hairline between the classes; the two rows: «⚙ 对话设置» at row 2's far end (the context too at ≤ 360) */
+.chat-status-bar > .chat-status-classline { width: 1px; height: 18px; flex: none; margin: 0 2px; background: color-mix(in srgb, var(--text-dim) 45%, transparent); }
+.chat-status-bar.chat-status-two-rows > .chat-status-settings { margin-left: auto; }
+.chat-status-bar.chat-status-two-rows.chat-status-short > .chat-status-ctx { margin-left: auto; }
+/* A DOOR LOOKS LIKE A DOOR (page §3, the artboard the owner accepted): a hairline border, then ▾ (it opens a menu) or › (it
+   opens a place) — the glyph is the stylesheet's, never in the chip's words; a status (the cache, a turn's time) has neither */
+.chat-status-bar > .chat-status-clickable:is(.chat-status-model, .chat-status-perm, .chat-status-autoresume-armed, .chat-status-ctx, .chat-status-artifacts, .chat-status-outbox, .chat-status-browser, .chat-status-channels, .chat-status-tasks, .chat-status-settings, .chat-status-turnstate) { border: 1px solid color-mix(in srgb, var(--text-dim) 45%, transparent); border-radius: var(--radius); padding: 0 6px; background-clip: padding-box; }
+.chat-status-bar > .chat-status-clickable:is(.chat-status-model, .chat-status-perm, .chat-status-autoresume-armed, .chat-status-artifacts, .chat-status-outbox, .chat-status-settings)::after { content: '\25BE'; margin-left: 4px; opacity: 0.7; }
+.chat-status-bar > .chat-status-clickable:is(.chat-status-ctx, .chat-status-browser, .chat-status-channels, .chat-status-tasks, .chat-status-turnstate)::after { content: '\203A'; margin-left: 4px; opacity: 0.7; }
+.chat-status-bar > .chat-status-model.chat-status-clickable { border-color: var(--border-active); }
+.chat-status-bar > .chat-status-turnstate.chat-status-needs-action { border-color: var(--yellow); }
+.chat-status-bar .chat-status-model .chat-status-effort, .chat-status-bar .chat-status-model .chat-status-door-sep { color: var(--text-secondary); }
+/* a door's word and its short form (≤ 360 px: «⚙ 设置», «⟳ 1», «38%»); a long title is cut INSIDE its own chip, never a row */
+.chat-status-bar .chat-status-door-short { display: none; }
+.chat-status-bar.chat-status-short .chat-status-door-word { display: none; }
+.chat-status-bar.chat-status-short .chat-status-door-short { display: inline; }
+.chat-status-bar .chat-status-door-title { display: inline-block; max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.chat-status-bar .chat-status-door-sep { opacity: 0.6; }
+/* «⚙ 对话设置»'s panel: each row its name and its present value */
+.chat-status-dropdown .chat-status-settings-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.chat-status-dropdown .chat-status-settings-row .chat-status-settings-value { color: var(--text-dim); text-align: end; }
 .chat-view.chat-short .chat-input-area { padding-top: 6px; padding-bottom: 6px; }
 .chat-view.chat-short .chat-input { min-height: 34px; padding-top: 6px; padding-bottom: 6px; }
 .chat-view.chat-short .chat-shortcut-hint { display: none; }
@@ -1774,17 +1794,16 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 }
 @keyframes chat-spinner-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
-/* Mobile: status bar stays ONE swipeable line instead of wrapping into 2-3
-   rows that eat the space above the input */
+/* Mobile: the status bar is the strip's SAME two rows (lane mask-value-shape — it was ONE swiped line; the row break is
+   chat-status-bar.js `_arranged`), never 3–4 rows that eat the space above the input */
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
-  .chat-status-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 8px; }
+  .chat-status-bar { flex-wrap: wrap; overflow-x: visible; scrollbar-width: none; gap: 8px; }   /* lane mask-value-shape: the same two rows on a phone too (was ONE swiped line) */
   .chat-status-bar::-webkit-scrollbar { display: none; }
   .chat-status-bar > * { flex-shrink: 0; }
   /* lane S4 (naive study 2 — the phone's ONLY way to the live view sat entirely off-screen at x≈403 of 390): the
-     "Agent browser" chip never scrolls out of the bar — sticky at BOTH edges of the swipe scroller (at rest it is
-     pinned to the right edge when its place is further right; swiped past, to the left edge), opaque over the chips
-     that slide under it, its words cut to fit (the full sentence is its tooltip and its menu) */
-  .chat-status-bar > .chat-status-browser { position: sticky; left: 0; right: 0; z-index: 2; background: var(--bg-taskbar); max-width: 46vw; box-shadow: -6px 0 6px -4px var(--bg-taskbar), 6px 0 6px -4px var(--bg-taskbar); }
+     "Agent browser" chip is never off the bar — its own place on row 2 (the strip's arrangement; it was sticky at both
+     edges of the old swipe scroller), its words cut INSIDE the chip (the full sentence is its tooltip and its menu) */
+  .chat-status-bar > .chat-status-browser { max-width: 46vw; }
   .chat-status-bar > .chat-status-browser .chat-status-browser-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Per-message hover buttons (open-in-editor / fork, 21×16 px) sat ON the
      message text at 390 px (measured: 18 of 18 intersected). The long-press
@@ -2333,17 +2352,12 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
   .chat-input-field.chat-input-tall .chat-expand-btn { display: flex; }
   .chat-input-area .chat-send-btn { width: 40px; height: 40px; margin-bottom: 2px; }
   .chat-input-area .chat-shortcut-hint { display: none; }
-  .chat-view .chat-status-bar { flex-wrap: nowrap; overflow: hidden; gap: 8px; min-height: 40px; padding: 0 12px env(safe-area-inset-bottom, 0px); border-top: none; background: var(--bg-titlebar); font-size: 12px; }
+  .chat-view .chat-status-bar { flex-wrap: wrap; overflow: hidden; gap: 0 8px; min-height: 40px; padding: 0 12px env(safe-area-inset-bottom, 0px); border-top: none; background: var(--bg-titlebar); font-size: 12px; }
   .chat-view .chat-status-bar .chat-status-clickable { padding: 0 4px; }
-  /* the 24 px MOUSE-target floor (lane desktop-small P2-6, above) is the desk's: on the phone's ONE row it widened every
-     icon chip 20 → 24 px and folded the next chip behind ⋯ (ci358-reds: «产出 · 4» at 390 px in DejaVu Sans) — the touch
-     bar keeps its own scale (the 36 px search and ⋯ chips below are their own rules) */
+  /* the 24 px MOUSE-target floor (lane desktop-small P2-6, above) is the desk's: on the phone it widened every icon chip
+     20 → 24 px (ci358-reds: «产出 · 4» pushed behind the old ⋯ at 390 px in DejaVu Sans) — the touch bar keeps its own scale */
   .chat-status-bar .chat-status-clickable { min-width: auto; }
   .chat-view .chat-status-bar .chat-status-model { font-size: 12px; padding: 0 8px; letter-spacing: 0; border: solid transparent; border-width: 4px 0; background-clip: padding-box; border-radius: var(--radius); }
-  .chat-status-bar > .chat-status-folded { display: none !important; }
-  .chat-view .chat-status-bar > .chat-status-more { min-width: 36px; justify-content: center; font-size: 16px; }
-  .chat-view .chat-status-bar.chat-status-open { flex-wrap: wrap; }
-  .chat-view .chat-status-bar.chat-status-open > .chat-status-browser { position: static; box-shadow: none; }
 }
 /* ── end THE PHONE COMPOSER ── */
 

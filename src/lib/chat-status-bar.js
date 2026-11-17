@@ -1,4 +1,4 @@
-import { pillMode, billingPillForms, billingPillHtml, phoneBarFold } from './title-chips.js'; // lane phone-chip: the billing pill folds, never cuts
+import { billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the billing pill's forms (its «对话设置» row says the full one)
 import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress, followContent } from './utils.js';
 import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
 import { outboxChipFace } from './outbox-feed.js'; // lane outbox-session-chip: the Outbox chip's words (the PURE verdict's numbers)
@@ -14,15 +14,13 @@ import { stampAt as when, num } from './page-time.js'; // lane ui-language: the 
 import { permissionModeWords, permissionModeDanger } from './permission-mode-labels.js';
 import { modelLabelWords } from './value-words.js'; // lane ui-language pick 2: the effort / model chips and the model menu in words // lane ui-language: the lock chip and its menu in words, never the protocol value
 import { shortWorkflowName } from '../workflow-name.js';
-// THE PHONE BAR (lane phone-chat-composer): ≤ 768 px the bar is ONE 40-px row — see _fold
+import { ROW_OF, DOORS, ONE_ROW_PX, SHORT_FORM_PX } from './strip-table.js'; // PURE (lane mask-value-shape, the strip's step two): the ONE table the bar draws from
+// THE PHONE (lane phone-chat-composer): its media list — a desk window's short composer is never the phone's
 const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(VC_PHONE_MEDIA) : null;
-/** THE NARROW DESK WINDOW (lane desktop-small P2-4 — at 340–376 px a chat window's bar wrapped to THREE rows, 69 px, and a
- *  Quad cell kept 62–144 px of messages): a desk window narrower than this keeps its bar ONE row, the rest behind ⋯ (the
- *  phone's own fold, PURE phoneBarFold) — and one shorter than SHORT_WINDOW_PX too, with its composer at one line. */
-export const NARROW_BAR_PX = 480;
+/** THE SHORT DESK WINDOW (lane desktop-small P2-4 — a Quad cell kept 62–144 px of messages): a desk window shorter than
+ *  this starts its composer at one line. The NARROW one is the strip's arrangement now (src/lib/strip-table.js — lane
+ *  mask-value-shape): the SAME two rows below ONE_ROW_PX, the short forms at SHORT_FORM_PX; nothing behind ⋯ / ﹀. */
 export const SHORT_WINDOW_PX = 300;
-/** The regular class's one-row bar keeps these (the model, the billing icon, a dropped ssh pipe's amber chip); the rest fold behind ﹀. */
-const REGULAR_BAR_KEEP = new Set(['model', 'billing', 'remote']); // (lane needs-card-tail r10: what waits on the person is the window's attention dock, never a bar chip)
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
 import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
@@ -195,27 +193,21 @@ export class ChatStatusBar {
     this._element.addEventListener('click', (e) => {
       this._onClick(e);
     });
-    this._foldOpen = false;
     PHONE_MQ?.addEventListener?.('change', () => this.render());
     // the bar AND its window (a narrow / short desk window — lane desktop-small P2-4): the window is watched once it exists
     if (typeof ResizeObserver !== 'undefined') { this._sizeRO = new ResizeObserver(() => this._onSize()); this._sizeRO.observe(this._element); }
   }
 
-  /** ONE ROW: a phone, or a desk window narrower than NARROW_BAR_PX or shorter than SHORT_WINDOW_PX (its ⋯ folds what does not fit). */
-  _oneRow() {
-    if (PHONE_MQ?.matches) return true;
-    const win = typeof this._element.closest === 'function' ? this._element.closest('.window') : null, w = win ? win.offsetWidth : 0, h = win ? win.offsetHeight : 0;
-    return (w > 0 && w < NARROW_BAR_PX) || (h > 0 && h < SHORT_WINDOW_PX);
-  }
-  /** A size change of the bar or its window: the one-row verdict re-drawn when it flips (the ⋯ chip comes or goes), else
-   *  the fold re-measured; a desk window under SHORT_WINDOW_PX marks its view `chat-short` (the composer starts at one line —
-   *  chat.css), so its messages keep ≥ 45 % of the window. */
+  /** A size change of the bar or its window: re-drawn when the arrangement's layout flips (one row ↔ the two rows, the
+   *  short forms — strip-table.js); a desk window under SHORT_WINDOW_PX marks its view `chat-short` (the composer starts at
+   *  one line — chat.css), so its messages keep ≥ 45 % of the window. */
   _onSize() {
     if (this._disposed || typeof this._element.closest !== 'function') return;
     const win = this._element.closest('.window');
     if (win && this._sizeRO && this._watchedWin !== win) { this._watchedWin = win; this._sizeRO.observe(win); }
-    const one = this._oneRow();
-    if (one !== !!this._wasOneRow) { this._wasOneRow = one; this.render(); } else this._fold();
+    const bw = this._element.clientWidth || (win ? win.offsetWidth : 0) || 0;
+    const lay = `${!(bw > 0) || bw >= ONE_ROW_PX ? 1 : 2}${bw > 0 && bw <= SHORT_FORM_PX ? 's' : ''}`;   // the same verdict as _arranged
+    if (lay !== this._layoutKey) this.render();
     const view = this._element.closest('.chat-view');
     const short = !!win && !PHONE_MQ?.matches && win.offsetHeight > 0 && win.offsetHeight < SHORT_WINDOW_PX;
     if (view && view.classList.contains('chat-short') !== short) view.classList.toggle('chat-short', short);
@@ -829,6 +821,9 @@ export class ChatStatusBar {
     // reaches innerHTML). The descriptor list is what the old join(' ') was.
     const chips = [];
     const chip = (key, cls, title, html, extra) => chips.push({ key, cls, title, html, style: extra?.style || '', attrs: extra?.attrs || null });
+    // a mark the table puts INSIDE a door (lane mask-value-shape, the strip's step two): its descriptor, kept for that door's panel
+    const doorRows = [];
+    const inDoor = (key, cls, title, html, extra) => doorRows.push({ key, cls, title, html, style: extra?.style || '', attrs: extra?.attrs || null, value: extra?.value ?? null });
 
     // Chat search, phone face (design-mobile-gaps #4): a keyboard shortcut has
     // no touch equivalent; the chip is display:none above 768px.
@@ -856,7 +851,7 @@ export class ChatStatusBar {
       const label = locked
         ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : escHtml((target && (this._servedModel || target)) || this._statusModel || '?'))
         : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : (known ? escHtml(modelLabelFor(this._backend, this._statusModel) || this._statusModel) : t('model: ?')));
-      chip('model', `chat-status-model chat-status-clickable${known || target ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}`, title + lockTip, label);
+      chip('model', `chat-status-model chat-status-clickable${known || target ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}`, title + lockTip, `<span class="chat-status-model-label">${label}</span>`);   // the label its own part: the model door also holds the thinking level (lane mask-value-shape)
       // NO effort menu ⇒ NO effort chip (lane effort-menu-per-harness): a harness whose CLI takes no effort
       // (ui.effortLevels null — opencode) shows nothing, never a «?» that opens another harness's ladder.
       if (hasEffortMenu(this._backend)) {
@@ -899,7 +894,12 @@ export class ChatStatusBar {
         const eFull = (eShown && eShown !== this._statusEffort ? eShown + ' · ' : '') + eTitle
           + (eLive ? '\n' + t('{effort} is still in effect until the next turn starts', { effort: eLive }) : '')
           + (eOriginLine ? '\n' + eOriginLine() : '');
-        chip('effort', `chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}`, eFull, eKnown ? escHtml(this._statusEffort) : t('effort: not reported'));   // the level VERBATIM (protocol values ruling, 主开发 2026-11-14)
+        // THE MODEL DOOR (lane mask-value-shape, the strip's step two — the owner: «切换模型/思考…需要时刻看到»): the thinking level is
+        // drawn INSIDE the model chip, its own part with its own class (a press on it opens its own menu; the rest of the chip
+        // opens the models) — one door on the strip, both values read on its face. The table: effort = in:model.
+        const effortPart = `<span class="chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}" data-door-part="effort" title="${escHtml(eFull)}">${eKnown ? escHtml(this._statusEffort) : escHtml(t('effort: not reported'))}</span>`;
+        const mc = chips.find((c) => c.key === 'model');
+        if (mc) mc.html += ` <span class="chat-status-door-sep" aria-hidden="true">\u00b7</span> ${effortPart}`;   // the level VERBATIM (protocol values ruling, 主开发 2026-11-14)
       }
     }
 
@@ -950,7 +950,7 @@ export class ChatStatusBar {
     // reason in the tooltip; it disappears when the stash drains
     if (this._jobsHeld) {
       const head = this._jobsHeld.split(' — ')[0];
-      chip('held', 'chat-status-held', this._jobsHeld, `${UI_ICONS.clock} ${escHtml(head)}`);
+      inDoor('held', 'chat-status-held', this._jobsHeld, `${UI_ICONS.clock} ${escHtml(head)}`);
     }
 
     // Goal indicator — always rendered so there's a discoverable entry point
@@ -966,9 +966,9 @@ export class ChatStatusBar {
       const statusHint = status === 'usagelimited' ? t(' — paused by usage limit, click → Continue Goal to resume')
         : status === 'budgetlimited' ? t(' — token budget exhausted, click → Continue Goal to resume') : '';
       const shortGoal = this._goal.length > 30 ? this._goal.substring(0, 30) + '…' : this._goal;
-      chip('goal', 'chat-status-goal chat-status-clickable', this._goal + statusHint, `${UI_ICONS.goal}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}`);
+      inDoor('goal', 'chat-status-goal chat-status-clickable', this._goal + statusHint, `${UI_ICONS.goal}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}`);
     } else {
-      chip('goal', 'chat-status-goal chat-status-goal-empty chat-status-clickable', t('Set a goal \u2014 the agent keeps working until the condition is met'), UI_ICONS.goal);
+      inDoor('goal', 'chat-status-goal chat-status-goal-empty chat-status-clickable', t('Set a goal \u2014 the agent keeps working until the condition is met'), UI_ICONS.goal, { value: t('Not set') });   // its «对话设置» row says so in words
     }
 
     // Response style (2.368.0 outputStyle, generalized 2.369.58): the chip is
@@ -997,7 +997,7 @@ export class ChatStatusBar {
                : t('Response style: whatever this agent\u2019s own config says \u2014 click to pick one (applies from the next turn)'))
           : (os ? t('Response style: {v} \u2014 set at spawn; a change applies on the next resume', { v: os })
                : t('Response style: the agent default \u2014 click to pick (applies on the next resume)'));
-      chip('style', `chat-status-style chat-status-clickable${(os || hasPend) ? '' : ' chat-status-dim'}`, tip, label);
+      inDoor('style', `chat-status-style chat-status-clickable${(os || hasPend) ? '' : ' chat-status-dim'}`, tip, label);
     }
 
     // Auto-continue after a usage limit (2.368.0; GENERIC since 2026-09-08).
@@ -1050,15 +1050,13 @@ export class ChatStatusBar {
       const arState = a.armed ? ' chat-status-autoresume-armed' : (a.enabled ? ' chat-status-autoresume-on' : ' chat-status-dim');
       // lane ui-controls-and-bugs (the walk's MAJOR: a bare «09:22 PM», one press turned it off): the chip SAYS what it means —
       // «21:22 自动继续» / «自动继续：关» — and a press opens it (below), never acts at once
-      // THE ONE ROW (a phone, a narrow window — the owner's angle on the strip, 2026-11-14; the .402 rehearsal: «产出 · 4» folded
-      // behind ⋯ at 390 px): what a person must always FIND keeps its place before the WORDS of a low-frequency state — an
-      // auto-continue that is OFF is its ICON there (as on 2.369.400; its words in the tooltip and the panel), its words on the
-      // wide bar; armed, with its time, it keeps its words everywhere
-      const offWords = this._oneRow() ? '' : ' ' + escHtml(t('Auto-continue: off'));
+      // THE STRIP'S ARRANGEMENT (lane mask-value-shape — the owner's angle on the strip, 2026-11-14): an auto-continue that is
+      // OFF (or on, not armed) is a row of «对话设置», its words its present value there; ARMED, with its time, it is row 1's
+      const offWords = ' ' + escHtml(t('Auto-continue: off'));
       const arLabel = a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(t('continues at {t}', { t: resetAt }))) : (a.enabled ? ' ' + escHtml(t('auto')) : offWords);
       title = title.replace(CANCEL_TAIL, '');   // a press OPENS the panel now and cancelling is its own row: the old «Click to cancel.» is not said (the acceptance reader)
       this._autoResumeTitle = title;   // the panel's first line (the reset, whose account) — the same words as the tooltip
-      chip('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}${arLabel}`);
+      (a.armed ? chip : inDoor)('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}${arLabel}`);   // ARMED: its time on row 1; else a row of «对话设置»
     }
 
     // Design canvas entry (2.366.0): rendered like the goal chip — the
@@ -1067,7 +1065,7 @@ export class ChatStatusBar {
     if (this._onDesignRequest) {
       const pc = this._pagesChip(); // F2: a published design is ONE; lane pages-chip-groups: + the pages shown here
       const n = pc.chipCount, dTitle = pc.tip;
-      chip('design', `chat-status-design chat-status-clickable${n ? '' : ' chat-status-design-empty'}`, dTitle, `${UI_ICONS.design}${n ? ` ${n}` : ''}`);
+      inDoor('design', `chat-status-design chat-status-clickable${n ? '' : ' chat-status-design-empty'}`, dTitle, `${UI_ICONS.design}${n ? ` ${n}` : ''}`);   // lane mask-value-shape: inside 产出
     }
 
     // Browser chip (agent browser P2, §3.8 layer ③; lane S2): THE browser fact's words — the browser this
@@ -1097,11 +1095,16 @@ export class ChatStatusBar {
       chip('channels', 'chat-status-channels chat-status-clickable', tip, `${glyph} <span class="chat-status-channels-text">${escHtml(channelChipText(v, t))}</span>`);
     }
 
-    // lane artifacts-model: the Artifacts chip (keyed) — the files the agent made here, documents first, code folded
-    if (this._artifacts) {
+    // lane artifacts-model: the Artifacts chip (keyed) — the files the agent made here, documents first, code folded.
+    // lane mask-value-shape (the strip's step two, page.md §4): 产出 is ALWAYS on row 2, even at zero — its count is the
+    // registry's ONE count (lane artifacts-registries: a published page and a design are cards of it already — adding the
+    // design chip's count would count them twice); its panel groups them by kind, «＋ 新建设计» inside
+    {
       const v = this._artifacts;
-      chip('artifacts', 'chat-status-artifacts chat-status-clickable', t('Files the agent made in this conversation — click for the list'), `${UI_ICONS.memo || ''} <span class="chat-status-artifacts-text">${escHtml(t('Artifacts · {n}', { n: v.count || 0 }))}</span>`);
+      const n = v ? v.count || 0 : 0;
+      chip('artifacts', 'chat-status-artifacts chat-status-clickable', t('Files the agent made in this conversation — click for the list'), `${UI_ICONS.memo || ''} <span class="chat-status-artifacts-text">${escHtml(t('Artifacts · {n}', { n }))}</span>`);
     }
+
     // lane outbox-session-chip: the Outbox chip (keyed) BESIDE Artifacts — «Outbox · N» = every proposal this conversation drafted (its messages and its API calls);
     // the accent + «M waiting» while M await the owner; a click opens the Outbox filtered to this conversation
     if (this._outbox) {
@@ -1147,10 +1150,10 @@ export class ChatStatusBar {
         + (a.hostName && (a.name || isApi) ? ' · ' + t('on "{name}"', { name: a.hostName }) : '')
         + (a.guessed ? ' · ' + t('estimated from the login state at spawn') : '')
         + ' · ' + t('Click to switch billing');
-      // lane phone-chip (B-e5ff): a pill is WHOLE or it FOLDS, never cut — the three forms in one chip, the widest
-      // that fits a line of this (wrapping) bar drawn after the render (`_fitBilling`); the full words in title + aria-label
+      // lane phone-chip (B-e5ff): a pill is WHOLE, never cut — a row of «对话设置» now (lane mask-value-shape): its present
+      // value there is the FULL form's words; the full words in title + aria-label
       const forms = billingPillForms({ kind: a.source === 'unknown' ? 'unknown' : isPooled ? 'pooled' : isApi ? 'api' : 'subscription', name: isPooled ? (a.name || t('Pool')) : label, target: isPooled ? (a.poolTarget || '') : '' });
-      chip('billing', `chat-status-billing chat-status-clickable${isApi ? ' api' : ''}${isPooled ? ' pooled' : ''}`, forms.tip + ' — ' + tip, billingPillHtml(forms, escHtml), { attrs: { 'aria-label': forms.tip } });
+      inDoor('billing', `chat-status-billing chat-status-clickable${isApi ? ' api' : ''}${isPooled ? ' pooled' : ''}`, forms.tip + ' — ' + tip, billingPillHtml(forms, escHtml), { attrs: { 'aria-label': forms.tip }, value: forms.full });
     }
 
     // Permission mode (always show, click to change; Codex sandbox policy in tooltip)
@@ -1160,33 +1163,25 @@ export class ChatStatusBar {
     const permTitle = (permWords ? permWords + ' — ' : '') + (this._statusSandbox ? t('Click to change permission mode \u00B7 sandbox: {sandbox}', { sandbox: this._statusSandbox }) : t('Click to change permission mode'));
     chip('perm', `chat-status-perm chat-status-clickable${permissionModeDanger(this._backend, permMode) ? ' danger' : ''}`, permTitle, `${UI_ICONS.lock} ${escHtml(permLabel)}`);
 
-    // Background tasks. The harness's LEVEL signal (setBackgroundTasks), when
-    // published, is the count's truth — "N background tasks" — with the
-    // card-derived running set as the pre-2026-09-21 fallback.
-    if (this._bgTasks?.length) {
-      const count = this._bgTasks.length;
-      const label = count === 1 ? (shortWorkflowName(this._bgTasks[0].description) || t('1 background task')) : t('{count} background tasks', { count }); // 2.369.141: a Workflow's task description is its whole meta.description — the chip shows the short form, the tooltip the whole
-      chip('tasks', 'chat-status-tasks chat-status-clickable', this._bgTasks.map((r) => r.description).join(', '), `${UI_ICONS.refresh} ${escHtml(label)}`);
-    } else if (this._activeTasks?.size > 0) {
-      const count = this._activeTasks.size;
-      const tasks = [...this._activeTasks.values()];
-      const label = count === 1 ? shortWorkflowName(tasks[0].description) : t('{count} tasks', { count });
-      chip('tasks', 'chat-status-tasks chat-status-clickable', tasks.map(t => t.description).join(', '), `${UI_ICONS.refresh} ${escHtml(label)}`);
-    }
-
-    // Running dynamic workflows — one chip; MULTIPLE collapse into a count
-    // chip with a dropdown, like the tasks chip (owner: 多个workflow在运行
-    // 也应该像tasks那样收起来).
-    const wfs = this._runningWorkflows();
-    if (wfs.length) {
-      if (wfs.length === 1) {
-        const wf = wfs[0];
-        const prog = wf.probed && wf.agents ? ` ${wf.done}/${wf.agents}` : '';
-        chip('wf', 'chat-status-wf chat-status-clickable', (wf.summary ? wf.summary + '\n' : '') + t('Workflow running — click for the live view'), `⛭ ${escHtml(String(wf.name).slice(0, 24))}${prog}`, { attrs: { 'data-wf-run': String(wf.runId), 'data-wf-name': String(wf.name) } });
-      } else {
-        const agents = wfs.reduce((n, w) => n + (w.agents || 0), 0);
-        const done = wfs.reduce((n, w) => n + (w.done || 0), 0);
-        chip('wf', 'chat-status-wf chat-status-wf-multi chat-status-clickable', wfs.map((w) => w.name).join(', '), `⛭ ${escHtml(t('{count} workflows', { count: wfs.length }))}${agents ? ` ${done}/${agents}` : ''}`);
+    // THE «后台» DOOR (lane mask-value-shape, the strip's step two — page.md §4): background tasks AND running workflows
+    // behind ONE door on row 2 (the table: tasks = the door, wf = in:tasks). Its face says the ONE item's own sentence at the
+    // one-row width (cut inside the chip, the whole in its tip), else «后台 n» — the short form «n» (CSS, chat-status-short);
+    // its panel lists the tasks and every running workflow (each opens its run). The harness's LEVEL signal
+    // (setBackgroundTasks), when published, is the tasks' truth, the card-derived running set the fallback.
+    {
+      const tasks = this._bgTasks?.length ? this._bgTasks.map((r) => ({ description: r.description })) : [...(this._activeTasks?.values() || [])];
+      const wfs = this._runningWorkflows();
+      const listedWf = new Set((this._bgTasks || []).filter((r) => r.type === 'workflow').map((r) => r.description));
+      const wfRows = wfs.filter((w) => !listedWf.has(w.summary) && !listedWf.has(w.name));
+      const n = tasks.length + wfRows.length;
+      if (n > 0) {
+        const one = n === 1 ? (tasks.length ? (shortWorkflowName(tasks[0].description) || tasks[0].description || '') : String(wfRows[0].name || '')) : '';
+        const tip = [...tasks.map((x) => x.description), ...wfRows.map((w) => (w.summary ? `${w.name} — ${w.summary}` : w.name))].filter(Boolean).join('\n');
+        const word = `<span class="chat-status-door-word">${escHtml(t('Background work'))}</span>`;
+        const face = one && !!this._element.classList?.contains('chat-status-one-row')
+          ? `${word}<span class="chat-status-door-sep">:</span> <span class="chat-status-door-title">${escHtml(one)}</span>`
+          : `${word} <span class="chat-status-door-count">${num(n)}</span>`;
+        chip('tasks', 'chat-status-tasks chat-status-clickable', tip, `${UI_ICONS.refresh} ${face}`, { attrs: { 'data-door': 'background' } });
       }
     }
 
@@ -1195,7 +1190,7 @@ export class ChatStatusBar {
       const reviewTitle = this._reviewEnabled
         ? t('Start Codex review')
         : t('Review becomes available after the first completed assistant turn');
-      chip('review', `chat-status-review ${reviewClass}`, reviewTitle, `\u2713 ${escHtml(t('Review'))}`);
+      inDoor('review', `chat-status-review ${reviewClass}`, reviewTitle, `\u2713 ${escHtml(t('Review'))}`);
     }
 
     // THE FACTS ROW (lane agy-status-bar-facts): context / cache / odometer / model / turn time are drawn for what this
@@ -1206,8 +1201,8 @@ export class ChatStatusBar {
     // Context: used tokens without a fake percentage when the window is unknown
     if (facts.context && !ctxWindow && this._statusLastInputTokens) {
       const usedK = fmtK(this._statusLastInputTokens);
-      if (facts.context === 'table') chip('ctx-unknown', 'chat-status-ctx chat-status-dim', t("Context used last turn: {used} tokens. The model's context window is unknown (it is not in this harness's window table), so no percentage is shown.", { used: usedK }), `${escHtml(usedK)}/${escHtml(t('window unknown'))}`);
-      else chip('ctx-unknown', 'chat-status-ctx chat-status-dim', t('Context used last turn: {used} tokens. The context window size was not reported by the CLI, so no percentage is shown.', { used: usedK }), `${escHtml(usedK)}/?`);
+      if (facts.context === 'table') chip('ctx-unknown', 'chat-status-ctx chat-status-clickable chat-status-dim', t("Context used last turn: {used} tokens. The model's context window is unknown (it is not in this harness's window table), so no percentage is shown.", { used: usedK }), `${escHtml(usedK)}/${escHtml(t('window unknown'))}`);
+      else chip('ctx-unknown', 'chat-status-ctx chat-status-clickable chat-status-dim', t('Context used last turn: {used} tokens. The context window size was not reported by the CLI, so no percentage is shown.', { used: usedK }), `${escHtml(usedK)}/?`);
     }
     // Context % with pie chart
     if (facts.context && ctxWindow && this._statusLastInputTokens) {
@@ -1225,7 +1220,7 @@ export class ChatStatusBar {
           out: fmtK(u.output_tokens || 0), reasoning: u.reasoning_output_tokens ? t(', reasoning {n}', { n: fmtK(u.reasoning_output_tokens) }) : '',
         });
       }
-      chip('ctx', 'chat-status-ctx', ctxTitle, `<span class="chat-status-ctx-pie" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"></span> <span style="color:${color}">${pct}%</span><span class="chat-status-dim">[${usedK}/${totalK}]</span>`);
+      chip('ctx', 'chat-status-ctx chat-status-clickable', ctxTitle, `<span class="chat-status-ctx-pie" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"></span> <span class="chat-status-door-word">${escHtml(t('Context'))}</span> <span style="color:${color}">${pct}%</span>`, { attrs: { 'data-door': 'context', 'data-used': usedK, 'data-total': totalK } });   // lane mask-value-shape: the bracket lives in the door's panel
     }
 
     // Cache ratio
@@ -1234,8 +1229,8 @@ export class ChatStatusBar {
       const cachePct = cacheTotal > 0 ? Math.round((this._statusLastCacheRead / cacheTotal) * 100) : 0;
       const cacheColor = cachePct >= 80 ? tierGreen : cachePct >= 50 ? tierYellow : tierOrange;
       const cacheTip = t('Prompt cache hit rate (last turn): {pct}% of input tokens were read from cache ({read} of {total}). Higher = cheaper + faster.', { pct: cachePct, read: fmtK(this._statusLastCacheRead), total: fmtK(cacheTotal) });
-      chip('cache', '', cacheTip, `${UI_ICONS.bolt}${cachePct}%`, { style: `color:${cacheColor}` });
-      chip('cache-k', 'chat-status-dim', cacheTip, `[${fmtK(this._statusLastCacheRead)}]`);
+      inDoor('cache', '', cacheTip, `${UI_ICONS.bolt}${cachePct}%`, { style: `color:${cacheColor}` });
+      inDoor('cache-k', 'chat-status-dim', cacheTip, `[${fmtK(this._statusLastCacheRead)}]`);
     }
     // THE ODOMETER (lane agy-status-bar-facts): the conversation's running token total as the harness counts it, with
     // the thinking share (codex's reasoning tokens, agy's thinking tokens) — the facts row's `odometer`
@@ -1243,20 +1238,20 @@ export class ChatStatusBar {
       const u = this._statusTotalUsage;
       const think = u.reasoning_output_tokens || 0;
       const thinkPart = think ? t(', thinking {n} = {pct}% of the total', { n: fmtK(think), pct: Math.round((think / u.total_tokens) * 100) }) : '';
-      chip('odometer', 'chat-status-dim', t('Token total of this conversation, as the harness counts it: {total} (in {inp}, cached {cached}, out {out}{thinking})', { total: fmtK(u.total_tokens), inp: fmtK(u.input_tokens || 0), cached: fmtK(u.cached_input_tokens || 0), out: fmtK(u.output_tokens || 0), thinking: thinkPart }), `\u03A3${escHtml(fmtK(u.total_tokens))}`);
+      inDoor('odometer', 'chat-status-dim', t('Token total of this conversation, as the harness counts it: {total} (in {inp}, cached {cached}, out {out}{thinking})', { total: fmtK(u.total_tokens), inp: fmtK(u.input_tokens || 0), cached: fmtK(u.cached_input_tokens || 0), out: fmtK(u.output_tokens || 0), thinking: thinkPart }), `\u03A3${escHtml(fmtK(u.total_tokens))}`);
     }
     // THE TURN'S TIME (+ its spend in the title) — the facts row's `duration`
     if (facts.duration && this._statusTurnMs) {
       const tu = this._statusTurnUsage;
       let tip = t('The last turn took {time}', { time: this._fmtElapsed(this._statusTurnMs) });
       if (tu && tu.total != null) tip += ' \u00B7 ' + t('it spent {total} tokens (in {inp}, cached {cached}, out {out}){calls}', { total: fmtK(tu.total || 0), inp: fmtK(tu.input || 0), cached: fmtK(tu.cacheRead || 0), out: fmtK(tu.output || 0), calls: !tu.calls ? '' : tu.calls === 1 ? t(' over one model call') : t(' over {n} model calls', { n: tu.calls }) });
-      chip('turn-time', 'chat-status-dim', tip, `${UI_ICONS.clock}${escHtml(this._fmtElapsed(this._statusTurnMs))}`);
+      inDoor('turn-time', 'chat-status-dim', tip, `${UI_ICONS.clock}${escHtml(this._fmtElapsed(this._statusTurnMs))}`);
     }
     // WHAT THIS HARNESS DOES NOT REPORT — said once, never a blank (the facts row's missing keys)
     const lacks = unreportedRows(facts);
     if (lacks.length) {
       const FACT_WORDS = { context: t('context used'), cache: t('cache hit rate'), odometer: t('token total'), model: t('model it ran on'), duration: t('turn time') };
-      chip('unreported', 'chat-status-unreported chat-status-dim', t('Not reported by this harness: {facts}', { facts: lacks.map((k) => FACT_WORDS[k]).join(', ') }), escHtml(t('not reported')));
+      inDoor('unreported', 'chat-status-unreported chat-status-dim', t('Not reported by this harness: {facts}', { facts: lacks.map((k) => FACT_WORDS[k]).join(', ') }), escHtml(t('not reported')));
     }
 
     // THE COST, IN WORDS (lane door-healthy-chat — the naive studies' W3/C21: a bare «$0.47 → $5.35» every tester read as
@@ -1266,7 +1261,10 @@ export class ChatStatusBar {
     if (this._statusCost > 0) {
       const cw = costChipWords(this._statusCost, this._costBasis ?? null, t, (v) => num(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })); // the page's number formatter (ui-language page-time)
       const costColor = cw.tone === 'quiet' ? 'var(--text-dim)' : this._statusCost > 5 ? tierRed : this._statusCost > 1 ? tierOrange : tierGreen;
-      chip('cost', 'chat-status-cost', cw.title, escHtml(cw.text), { style: `color:${costColor}` });
+      inDoor('cost', 'chat-status-cost', cw.title, escHtml(cw.text), { style: `color:${costColor}`, value: cw.text });   // its context-panel row says the FIGURE (its title has none)
+      // the table's place (strip-table.js `onDoorWhen: 'billedPerUse'`): on the context door's face ONLY on an account known to be
+      // billed per use (an API key) — a subscription's figure, and one whose account nobody knows, are the context panel's
+      if ((this._costBasis ?? null) === 'api') { const cx = chips.find((c) => c.key === 'ctx' || c.key === 'ctx-unknown'); if (cx) cx.html += ` <span class="chat-status-cost" style="color:${costColor}">${escHtml(cw.text)}</span>`; }
     }
     // THE KINDS OF RECORD THE AGENT'S CLI ADDED (lane door-healthy-chat): ONE quiet chip instead of red cards in the flow —
     // the update signal stays where the owner reads it; a press opens ⚙ Diagnostics. Last, so it never moves another chip.
@@ -1275,40 +1273,13 @@ export class ChatStatusBar {
       if (kw) chip('kinds', 'chat-status-kinds chat-status-clickable', kw.title, escHtml(kw.text));
     }
 
-    // the regular class (SPEC-v3 §2.4, lane duo-build-1): the bar's own expander wears ﹀ — this conversation's ONE ⋯ is the trailing bar's
-    if (this._oneRow()) chip('more', `chat-status-more chat-status-clickable${this._foldOpen ? ' active' : ''}`, this._foldOpen ? t('Close') : t('More'), this._foldOpen ? '\u2715' : (document.documentElement.dataset.vc === 'regular' ? (UI_ICONS.chevronDown || '\u22EF') : '\u22EF'));
-    this._reconcile(chips);
-    this._fitBilling();
-    this._fold();
-  }
-
-  /** lane phone-chip (B-e5ff): the billing pill takes the widest form that fits ONE LINE of this wrapping bar
-   *  (PURE `pillMode` = lane G's `chipMode` with no title beside it) — measured in layout px, its three widths
-   *  once per set of words; re-decided on every render and when the bar's width changes (rotation, UI scale). */
-  _fitBilling() {
-    const rec = this._chipEls && this._chipEls.get('billing');
-    const bar = this._element;
-    if (!rec || !bar || !bar.isConnected || !bar.clientWidth) return;
-    const el = rec.el;
-    if (!this._billingRO && typeof ResizeObserver === 'function') { this._billingRO = new ResizeObserver(() => this._fitBilling()); this._billingRO.observe(bar); }
-    const cs = getComputedStyle(bar);
-    // ONE unit (verify r1): under the UI scale (a CSS zoom on <body>, desktop widths) a rect is in zoomed px and
-    // clientWidth in the bar's own — the slot is converted by the bar's effective zoom `k`, the widths cached per k
-    // (mixed, 1.25 folded a pill that fit a 220 px bar to its glyph; 0.8 drew one wider than the line)
-    const k = bar.offsetWidth ? bar.getBoundingClientRect().width / bar.offsetWidth : 1;
-    const slotPx = (bar.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)) * k;
-    if (!this._billingW || this._billingW.html !== rec.html || Math.abs(this._billingW.k - k) > 1e-3) {
-      const cur = el.dataset.mode || 'full';
-      const w = { html: rec.html, k };
-      for (const m of ['full', 'compact', 'icon']) { el.dataset.mode = m; w[m] = el.getBoundingClientRect().width; }
-      el.dataset.mode = cur;
-      if (!(w.full > 0)) return;
-      if (!el.querySelector('.pill-compact')) w.compact = Infinity;   // no short word: full or the glyph
-      this._billingW = w;
-    }
-    if (this._oneRow() && !this._foldOpen) return; // the ONE row (a phone, a narrow desk window): `_fold` picks the form (lane phone-bar-billing-nofold)
-    const mode = pillMode({ slotPx, fullPx: this._billingW.full, compactPx: this._billingW.compact });
-    if (el.dataset.mode !== mode) el.dataset.mode = mode;
+    // THE STRIP'S ONE TABLE (lane mask-value-shape, the strip's step two — the owner's arrangement of 2026-11-14): the marks
+    // in the table's fixed order, row 1 (always seen) then row 2 (always findable, the settings door last); ONE row at
+    // ONE_ROW_PX and above, the SAME two rows below it; nothing behind «show more» (the ⋯ fold is gone).
+    // «⚙ 对话设置» — ALWAYS row 2's last: the low-frequency things inside, each its present value (its panel: _onClick)
+    chip('settings', 'chat-status-settings chat-status-clickable', t('Conversation settings'), `${UI_ICONS.sliders || ''} <span class="chat-status-door-word">${escHtml(t('Conversation settings'))}</span><span class="chat-status-door-short">${escHtml(t('Settings'))}</span>`, { attrs: { 'data-door': 'settings' } });   // its ▾: chat.css (a door looks like a door)
+    this._doorRows = doorRows;
+    this._reconcile(this._arranged(chips));
   }
 
   /** THE IN-PLACE UPDATE (design-accessibility-tree §3 row 8 (b), §8 lean set):
@@ -1321,6 +1292,37 @@ export class ChatStatusBar {
    *  is inserted at / removed from its place without touching its neighbours.
    *  The bar's own delegated click listener (_onClick, `closest`) is the ONE
    *  handler binding — nothing is bound per chip, so nothing is re-bound. */
+  /** The descriptors in the table's order (src/lib/strip-table.js): row 1, a row break below ONE_ROW_PX, row 2. A mark the
+   *  table places inside a door is drawn right after that door, one placed in a home off the strip at row 2's end — until
+   *  its door / home is built (never lost on the way). Writes the bar's layout classes (one row / two rows / short forms). */
+  _arranged(chips) {
+    const bar = this._element;
+    const win = typeof bar.closest === 'function' ? bar.closest('.window') : null;
+    const w = bar.clientWidth || (win ? win.offsetWidth : 0) || 0;
+    const one = !(w > 0) || w >= ONE_ROW_PX;   // an unmeasured bar (detached, hidden) decides nothing: its first measured size re-draws it (_onSize)
+    const rank = (key) => {
+      const r = ROW_OF[key];
+      if (!r) return [2, 2000];
+      if (r.place === 'row1') return [1, r.order];
+      if (r.place === 'row2') return [2, r.order];
+      const d = r.place.startsWith('in:') ? ROW_OF[r.place.slice(3)] : null;
+      return d ? [d.place === 'row1' ? 1 : 2, d.order + r.order / 1000] : [2, 1000 + r.order];
+    };
+    const ordered = chips.map((c, i) => ({ c, i, k: rank(c.key) })).sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.i - b.i).map((x) => x.c);
+    const firstRow2 = ordered.findIndex((c) => rank(c.key)[0] === 2);
+    const mark = (key, cls) => ({ key, cls, title: '', html: '', style: '', attrs: { 'aria-hidden': 'true' } });
+    if (!one && firstRow2 > 0) ordered.splice(firstRow2, 0, mark('row-break', 'chat-status-rowbreak'));
+    else if (one && w > 0) {   // the ONE row (the artboard at 960): a hairline between the classes — before row 2, before «⚙ 对话设置»
+      const iSet = ordered.findIndex((c) => c.key === 'settings');
+      if (iSet > 0) ordered.splice(iSet, 0, mark('class-line-iii', 'chat-status-classline'));
+      if (firstRow2 > 0 && (iSet < 0 || firstRow2 < iSet)) ordered.splice(firstRow2, 0, mark('class-line-ii', 'chat-status-classline'));
+    }
+    const lay = { 'chat-status-one-row': one, 'chat-status-two-rows': !one, 'chat-status-short': w > 0 && w <= SHORT_FORM_PX };
+    if (bar.classList) for (const [c, on] of Object.entries(lay)) if (bar.classList.contains(c) !== on) bar.classList[on ? 'add' : 'remove'](c);   // (a host with no classList — a fake DOM — draws the same order)
+    this._layoutKey = `${one ? 1 : 2}${lay['chat-status-short'] ? 's' : ''}`;
+    return ordered;
+  }
+
   _reconcile(chips) {
     const bar = this._element;
     const seen = new Set();
@@ -1357,42 +1359,7 @@ export class ChatStatusBar {
     }
   }
 
-  /** THE PHONE BAR (lane phone-chat-composer, owner 2026-10-13 "状态栏又很稀疏"): on a phone the bar is ONE row —
-   *  the chips that fit stay in bar order, everything past the width folds behind ⋯ (a tap opens the bar in place,
-   *  wrapped, so every chip keeps its own menu); effort + style always fold (the model chip's sheet carries them).
-   *  The billing chip (who pays) never folds: it goes compact, then icon (PURE `phoneBarFold`, lane
-   *  phone-bar-billing-nofold — the runner's wider fonts folded it). The desk bar is never touched (no ⋯ chip, no class written). */
-  _fold() {
-    const bar = this._element, phone = this._oneRow(), open = phone && this._foldOpen; // `phone` = the ONE row: a phone, or a narrow desk window (lane desktop-small P2-4)
-    if (!phone && !this._phoneFolded) return; // the wide desk bar: nothing read, nothing written
-    this._phoneFolded = phone; // one wide pass after the one-row face clears what it wrote
-    const narrow = phone && !PHONE_MQ?.matches;
-    if (bar.classList.contains('chat-status-narrow') !== narrow) bar.classList.toggle('chat-status-narrow', narrow);
-    if (bar.classList.contains('chat-status-open') !== open) bar.classList.toggle('chat-status-open', open);
-    for (const el of bar.querySelectorAll(':scope > .chat-status-folded')) el.classList.remove('chat-status-folded');
-    if (!phone || open) return;
-    const more = this._chipEls.get('more')?.el;
-    const cs = getComputedStyle(bar), gap = parseFloat(cs.columnGap) || 0;
-    const room = bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (more ? more.offsetWidth + gap : 0);
-    const bill = this._chipEls.get('billing');
-    if (bill && (!this._billingW || this._billingW.html !== bill.html)) this._fitBilling(); // its three widths (cached per words)
-    const bw = bill && this._billingW && this._billingW.html === bill.html ? this._billingW : null;
-    const chips = [];
-    for (const el of bar.children) {
-      if (el === more) continue;
-      const key = el.getAttribute('data-chip');
-      chips.push(key === 'billing' && bw ? { key, w: el.offsetWidth, forms: { full: bw.full / bw.k, compact: bw.compact / bw.k, icon: bw.icon / bw.k } } : { key, w: el.offsetWidth });
-    }
-    // the regular class (SPEC-v3 §2.4): THREE items — the model, the billing chip as its icon, ﹀; everything else behind ﹀
-    if (document.documentElement.dataset.vc === 'regular') {
-      for (const el of bar.children) if (el !== more && !REGULAR_BAR_KEEP.has(el.getAttribute('data-chip'))) el.classList.add('chat-status-folded');
-      if (bill && bill.el.dataset.mode !== 'icon') bill.el.dataset.mode = 'icon';
-      return;
-    }
-    const plan = phoneBarFold({ chips, room, gap });
-    for (const el of bar.children) if (plan.folded.has(el.getAttribute('data-chip'))) el.classList.add('chat-status-folded');
-    if (bill && plan.billing && bill.el.dataset.mode !== plan.billing) bill.el.dataset.mode = plan.billing;
-  }
+
 
   // ── Private ──
 
@@ -1572,8 +1539,52 @@ export class ChatStatusBar {
   }
 
   _onClick(e) {
-    if (e.target.closest('.chat-status-more')) { e.stopPropagation(); this._foldOpen = !this._foldOpen; this.render(); return; }
     if (e.target.closest('.chat-status-search')) { e.stopPropagation(); this._onSearch?.(); return; }
+    // THE CONTEXT DOOR (lane mask-value-shape): its panel says the window used, then each detail as its own sentence
+    { const ctxEl = e.target.closest('.chat-status-ctx');
+      if (ctxEl) {
+        e.stopPropagation();
+        const dropdown = showDropdown(ctxEl, { minWidth: 260, maxWidth: 420 });
+        if (!dropdown) return;
+        const add = (cls, text, tip) => { const d = document.createElement('div'); d.className = `chat-status-dropdown-item chat-status-ctx-row ${cls}`; d.textContent = text; if (tip && tip !== text) d.title = tip; dropdown.appendChild(d); };
+        if (ctxEl.dataset.used) add('chat-status-ctx-window', t('Context: {used} of {total} tokens', { used: ctxEl.dataset.used, total: ctxEl.dataset.total }));
+        else if (ctxEl.title) add('chat-status-ctx-window', ctxEl.title);
+        const order = (k) => (ROW_OF[k] ? ROW_OF[k].order : 99);
+        for (const r of [...(this._doorRows || [])].filter((x) => ROW_OF[x.key] && ROW_OF[x.key].place === 'in:ctx' && x.key !== 'cache-k').sort((x, y) => order(x.key) - order(y.key))) add(`chat-status-ctx-${r.key}`, r.value ?? r.title ?? '', r.title);   // moved, not lost: each detail's own sentence, the spend its figure
+        return;
+      }
+    }
+    // «⚙ 对话设置» (lane mask-value-shape, the strip's step two): ONE door for the low-frequency things — each row its
+    // present value; a press runs THAT member's own menu, opened at the door (its handler below is given the door as its
+    // element: `closest` answers only the member's own selector)
+    { const setEl = e.target.closest('.chat-status-settings');
+      if (setEl) {
+        e.stopPropagation();
+        const dropdown = showDropdown(setEl, { minWidth: 260, maxWidth: 380 });
+        if (!dropdown) return;
+        const LABEL = { style: t('Output style'), autoresume: t('Continue after a usage limit'), goal: t('Goal'), review: t('Review'), held: t('Held notifications'), billing: t('Who pays') };
+        const textOf = (html) => { const d = document.createElement('div'); d.innerHTML = html; return d.textContent.replace(/\s+/g, ' ').trim(); };
+        const order = (k) => (ROW_OF[k] ? ROW_OF[k].order : 99);
+        const mine = (k) => !!ROW_OF[k] && (ROW_OF[k].place === `in:${DOORS.settings}` || ROW_OF[k].alsoIn === DOORS.settings);
+        for (const r of [...(this._doorRows || [])].filter((x) => mine(x.key)).sort((x, y) => order(x.key) - order(y.key))) {
+          const item = document.createElement('div');
+          const live = r.key !== 'held';   // the held notices are a state, never a door
+          item.className = `chat-status-dropdown-item chat-status-settings-row${live ? ' chat-status-clickable' : ''}`;
+          item.dataset.row = r.key;
+          if (r.title) item.title = r.title;
+          const lab = document.createElement('span'); lab.className = 'chat-status-settings-label'; lab.textContent = LABEL[r.key] || r.key;
+          const val = document.createElement('span'); val.className = 'chat-status-settings-value'; val.textContent = (r.value ?? textOf(r.html)) + (live ? ' ›' : '');
+          item.append(lab, val);
+          if (live) item.onclick = (ev) => {
+            ev.stopPropagation(); dropdown.remove();
+            const sel = `.chat-status-${r.key}`;
+            this._onClick({ target: { closest: (q) => (q === sel ? setEl : null) }, stopPropagation() {}, preventDefault() {} });
+          };
+          dropdown.appendChild(item);
+        }
+        return;
+      }
+    }
     if (e.target.closest('.chat-status-vault-wait')) { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); return; }   // r2: the vault's door
     if (e.target.closest('.chat-status-turnstate.chat-status-clickable')) { e.stopPropagation(); this._onJumpToAsk?.(); return; } // lane S1: go to the card that waits
     if (e.target.closest('.chat-status-kinds')) { e.stopPropagation(); this._app?._openDiagnostics?.(); return; } // lane door-healthy-chat: the record kinds → ⚙ Diagnostics
@@ -1720,6 +1731,13 @@ export class ChatStatusBar {
     }
     // lane artifacts-model: Artifacts chip -> the deliverables (documents first, "Code (n)" folded); a row opens beside the chat
     const afEl = e.target.closest('.chat-status-artifacts');
+    if (afEl && !this._artifacts && this._onDesignRequest) {   // lane mask-value-shape: no file yet — 产出's panel is the designs and pages
+      e.stopPropagation();
+      const dropdown = showDropdown(afEl, DESIGN_PANEL_W);
+      if (!dropdown) return;
+      this._renderDesignPopover(dropdown);
+      return;
+    }
     if (afEl && this._artifacts) {
       e.stopPropagation();
       const dropdown = showDropdown(afEl, { minWidth: 300, maxWidth: 420 });
@@ -1799,10 +1817,21 @@ export class ChatStatusBar {
     }
     // Background tasks click -> popup
     const taskEl = e.target.closest('.chat-status-tasks');
-    if (taskEl && (this._activeTasks?.size || this._bgTasks?.length)) {
+    if (taskEl && (this._activeTasks?.size || this._bgTasks?.length || this._runningWorkflows().length)) {
       e.stopPropagation();
       const dropdown = showDropdown(taskEl);
       if (!dropdown) return;
+      // lane mask-value-shape (the «后台» door): the running workflows the harness did not report as tasks, each opens its run
+      { const listedWf = new Set((this._bgTasks || []).filter((r) => r.type === 'workflow').map((r) => r.description));
+        for (const w of this._runningWorkflows().filter((x) => !listedWf.has(x.summary) && !listedWf.has(x.name))) {
+          const item = document.createElement('div');
+          item.className = 'chat-status-dropdown-item chat-task-detail chat-status-clickable chat-status-wf-row';
+          item.dataset.wfRun = w.runId;   // the run it opens, as the old ⛭ chip carried it
+          const prog = w.probed && w.agents ? ` ${w.done}/${w.agents}` : '';
+          item.innerHTML = `<div class="chat-task-title">⛭ ${escHtml(String(w.name || ''))}${escHtml(prog)}</div><div class="chat-status-dim">${escHtml(w.summary || t('Workflow running — click for the live view'))}</div>`;
+          item.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); this._onOpenWorkflow?.(w.runId, w.name); };
+          dropdown.appendChild(item);
+        } }
       // the harness's own level set first — rows the cards never learned about
       // (a task launched by a sub-agent, a task whose launch ack was lost)
       const known = new Set([...(this._activeTasks?.values() || [])].map((t) => String(t.id)));
@@ -2195,16 +2224,6 @@ export class ChatStatusBar {
       e.stopPropagation();
       const dropdown = showDropdown(modelEl);
       if (!dropdown) return;
-      // the phone bar folds effort + style: their rows lead the model chip's sheet (a tap opens the bar, then the chip's own menu)
-      if (PHONE_MQ?.matches) for (const [k, label] of [['effort', t('Effort')], ['style', t('Output style')]]) {
-        const chipEl = this._chipEls.get(k)?.el;
-        if (!chipEl) continue;
-        const row = document.createElement('div');
-        row.className = 'chat-status-dropdown-item chat-status-fold-row';
-        row.textContent = `${label} · ${chipEl.textContent.trim()} \u203A`;
-        row.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); this._foldOpen = true; this.render(); chipEl.click(); };
-        dropdown.appendChild(row);
-      }
       const backend = this._backend || 'claude'; // the real id — META/model lists are per backend since P4
       const pick = (model) => {
         // ONE WAY TO PRESS (round 13): master's pick on every page — shown and saved at once; its id rides the frame (the answer names

@@ -459,25 +459,18 @@ await (async () => {
   // turn · health · billing never fold; every other chip in bar order while it fits, the rest behind ⋯). The S4 legs measured the
   // older SCROLLING bar (the chip sticky inside it, swiped to both ends) and were red from then on (int348; the box run of 2.369.413:
   // «the phone's chat status bar carries the chip» ✗ ×3), hidden by the suite's own skip wherever the real driver is absent.
-  // THE LAW NOW: the "Agent browser" chip is FINDABLE on the phone — in the row, inside the bar, or FOLDED behind ⋯ with ⋯ in the
-  // row; a real press on ⋯ opens the fold and the chip is then drawn INSIDE the visible bar (never off-screen: the study's x≈403
-  // of 390). Every fact judged is printed, green or red.
-  const chipFacts = () => Ph.evaluate(`(() => { ${barQ} if (!bar) return { bar: false }; const more = bar.querySelector(':scope > [data-chip="more"]'); const b = bar.getBoundingClientRect(); const box = (el) => { if (!el) return null; const q = el.getBoundingClientRect(); return { l: Math.round(q.left), r: Math.round(q.right), w: Math.round(q.width), top: Math.round(q.top), h: Math.round(q.height) }; }; const c = chip ? chip.getBoundingClientRect() : null; return { bar: true, vw: window.innerWidth, barBox: [Math.round(b.left), Math.round(b.right)], chip: !!chip, folded: !!chip && chip.classList.contains('chat-status-folded'), open: bar.classList.contains('chat-status-open'), shown: !!c && c.width > 0, inside: !!c && c.width > 0 && c.left >= b.left - 1 && c.right <= b.right + 1 && c.right <= window.innerWidth + 1, chipBox: box(chip), more: !!more && more.getBoundingClientRect().width > 0, moreInside: !!more && (() => { const q = more.getBoundingClientRect(); return q.width > 0 && q.left >= b.left - 1 && q.right <= b.right + 1 && q.right <= window.innerWidth + 1; })(), moreBox: box(more), text: chip ? chip.textContent.trim().slice(0, 60) : null, font: chip ? getComputedStyle(chip).fontFamily.slice(0, 40) : null }; })()`);
-  const findable = (f) => !!f && !!f.chip && ((f.shown && f.inside) || (f.folded && f.more && f.moreInside)); // folded: ⋯ itself drawn inside the bar (r372's should)
-  const pressMore = async () => { const f = await chipFacts(); if (!f.more) return false; await clickAt(Ph, (f.moreBox.l + f.moreBox.r) / 2, f.moreBox.top + f.moreBox.h / 2); return true; };
-  const foldIs = (open) => until(() => Ph.evaluate(`(() => { ${barQ} return !!bar && bar.classList.contains('chat-status-open') === ${open}; })()`), 4000, 50);
+  // THE LAW NOW (lane mask-value-shape, the strip's step two — it supersedes the fold): the phone bar is the strip's TWO rows and
+  // folds NOTHING (no ⋯), so the "Agent browser" chip is in its row, INSIDE the visible bar (never off-screen: the study's x≈403
+  // of 390), and the bar never overflows sideways. Every fact judged is printed, green or red.
+  const chipFacts = () => Ph.evaluate(`(() => { ${barQ} if (!bar) return { bar: false }; const more = bar.querySelector(':scope > [data-chip="more"]'); const b = bar.getBoundingClientRect(); const box = (el) => { if (!el) return null; const q = el.getBoundingClientRect(); return { l: Math.round(q.left), r: Math.round(q.right), w: Math.round(q.width), top: Math.round(q.top), h: Math.round(q.height) }; }; const c = chip ? chip.getBoundingClientRect() : null; return { bar: true, vw: window.innerWidth, barBox: [Math.round(b.left), Math.round(b.right)], chip: !!chip, folded: !!chip && chip.classList.contains('chat-status-folded'), open: bar.classList.contains('chat-status-open'), shown: !!c && c.width > 0, inside: !!c && c.width > 0 && c.left >= b.left - 1 && c.right <= b.right + 1 && c.right <= window.innerWidth + 1, chipBox: box(chip), more: !!more && more.getBoundingClientRect().width > 0, moreInside: !!more && (() => { const q = more.getBoundingClientRect(); return q.width > 0 && q.left >= b.left - 1 && q.right <= b.right + 1 && q.right <= window.innerWidth + 1; })(), moreBox: box(more), overflow: Math.round(bar.scrollWidth - bar.clientWidth), text: chip ? chip.textContent.trim().slice(0, 60) : null, font: chip ? getComputedStyle(chip).fontFamily.slice(0, 40) : null }; })()`);
+  const findable = (f) => !!f && !!f.chip && f.shown && f.inside && !f.more && !f.folded && f.overflow <= 0;
   const phoneChip = async (lang) => {
     const ready = await until(async () => findable(await chipFacts()), 20000, 200);
     const rest = await chipFacts();
     console.log(`    ${lang} — the chip at rest: ${JSON.stringify(rest)}`);
-    if (!ok(ready && findable(rest), `${lang}: the phone's chat status bar carries the "Agent browser" chip — ${rest.folded ? `folded behind ⋯ (⋯ in the row, inside the bar ${JSON.stringify(rest.moreBox)})` : rest.shown ? 'in the row, inside the bar' : 'NOT FOUND (not in the row, not behind ⋯)'}`, rest)) return null;
-    if (!rest.folded) return rest;
-    const pressed = await pressMore(), opened = pressed && await foldIs(true), open = await chipFacts();
-    console.log(`    ${lang} — the chip with the fold open: ${JSON.stringify(open)}`);
-    ok(opened && open.shown && open.inside, `${lang}: a real press on ⋯ opens the fold and the chip is drawn INSIDE the visible bar ${JSON.stringify(open.chipBox)} (the bar ${JSON.stringify(open.barBox)}, the screen ${open.vw}) — "${open.text}" (${open.font})`, open);
-    return open;
+    ok(ready && findable(rest), `${lang}: the phone's chat status bar carries the "Agent browser" chip in its row, INSIDE the bar ${JSON.stringify(rest.chipBox)} (the bar ${JSON.stringify(rest.barBox)}, the screen ${rest.vw}) — nothing behind ⋯ (${rest.more ? 'a ⋯ is drawn' : 'no ⋯'}), no sideways overflow (${rest.overflow} px) — "${rest.text}" (${rest.font})`, rest);
+    return findable(rest) ? rest : null;
   };
-  const closeFold = async () => { const f = await chipFacts(); if (f.open && f.more) { await pressMore(); await foldIs(false); } };
   {
     const seen = await phoneChip('en');
     if (seen) {
@@ -487,16 +480,6 @@ await (async () => {
       await Ph.evaluate(`(() => { document.getElementById('b737b-off').remove(); return true; })()`);
       console.log(`    CONTROL — the chip pushed past the bar: ${JSON.stringify(ctl)}`);
       ok(ctl.shown && !ctl.inside, `CONTROL: the chip drawn 420 px past its place is OUTSIDE the visible bar ${JSON.stringify(ctl.chipBox)} (the bar ${JSON.stringify(ctl.barBox)}) — the inside check goes RED`, ctl);
-      await closeFold();
-      // CONTROL (r372's should): a ⋯ that takes no press — the real press then opens nothing, and the open check goes RED
-      if (seen.more || (await chipFacts()).more) {
-        await Ph.evaluate(`(() => { const s = document.createElement('style'); s.id = 'b737b-deaf'; s.textContent = '.chat-status-bar > [data-chip="more"] { pointer-events: none !important; }'; document.head.appendChild(s); return true; })()`);
-        const pressed = await pressMore(), opened = pressed && await foldIs(true), deaf = await chipFacts();
-        await Ph.evaluate(`(() => { document.getElementById('b737b-deaf').remove(); return true; })()`);
-        console.log(`    CONTROL — ⋯ that takes no press: pressed ${pressed}, opened ${opened}: ${JSON.stringify({ open: deaf.open, folded: deaf.folded, shown: deaf.shown })}`);
-        ok(pressed && !opened && !deaf.open, 'CONTROL: a ⋯ that takes no press opens NOTHING on a real press — the «opens the fold» check goes RED', deaf);
-        await closeFold();
-      }
     }
   }
   // ═══ verify r1: the chip census under zh / ja with DejaVu Sans forced (the .185 pattern — the runner's fallback font) ═══
@@ -508,7 +491,7 @@ await (async () => {
     await Ph.evaluate(`(() => { window.app.attachSession(${JSON.stringify(s2.sessionId)}, ${JSON.stringify(s2.name)}, ${JSON.stringify(D)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
     await until(() => Ph.evaluate(`(() => !![...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(s2.sessionId)}))()`), 10000, 100);
     await Ph.evaluate(`(() => { const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(s2.sessionId)}); if (cw) window.app.goToWinId(cw.id); return true; })()`);
-    if (await phoneChip(lang)) await closeFold();
+    await phoneChip(lang);
   }
   // cleanup of this leg's browsers: the sessions' own `close`, then the reaper by evidence (endLeg, below the leg)
   // r1100: DON'T START WHAT IT WON'T USE — a `close` goes to the real driver only for a browser the hub says is RUNNING (its own

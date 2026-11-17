@@ -5,7 +5,8 @@
 //   ② `pillMode` (= `chipMode` with no title) over names × slot widths × UI scale 1 / 1.25 — the widest form that fits;
 //   ③ the CSS census: neither phone pill (.chat-status-billing, .mobile-win-billing) caps its width or ellipsizes,
 //      and the three forms are shown by `data-mode`; CONTROL: the pre-fix stylesheet (git show b924041f) fails it;
-//   ④ wiring: the status bar fits after every render (and on resize) by `pillMode`; the switcher row by `chipMode`;
+//   ④ wiring: the status bar's billing chip is a row of «⚙ 对话设置» (lane mask-value-shape, the strip's step two — it
+//      was fitted on the strip by `pillMode`), its value there the FULL form's words; the switcher row fits by `chipMode`;
 //      both draw `billingPillHtml` and say the full words in title + aria-label.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -81,9 +82,9 @@ try {
 console.log('④ wiring');
 {
   const sb = read('src/lib/chat-status-bar.js'), mn = read('src/lib/mobile-nav.js');
-  ok(/this\._reconcile\(chips\);\n    this\._fitBilling\(\);/.test(sb) && /const mode = pillMode\(\{ slotPx, fullPx: this\._billingW\.full, compactPx: this\._billingW\.compact \}\);/.test(sb) && /new ResizeObserver\(\(\) => this\._fitBilling\(\)\)/.test(sb), 'the status bar fits its pill after every render and on every width change, by pillMode');
-  ok(/const k = bar\.offsetWidth \? bar\.getBoundingClientRect\(\)\.width \/ bar\.offsetWidth : 1;/.test(sb) && /paddingRight\) \|\| 0\)\) \* k;/.test(sb) && /Math\.abs\(this\._billingW\.k - k\) > 1e-3/.test(sb), 'ONE unit under the UI scale (verify r1): the slot converted by the bar\'s zoom k, the widths cached per k');
-  ok(/billingPillHtml\(forms, escHtml\), \{ attrs: \{ 'aria-label': forms\.tip \} \}\);/.test(sb) && /forms\.tip \+ ' — ' \+ tip/.test(sb), 'the status bar draws the three forms; title + aria-label carry every word');
+  ok(/inDoor\('billing', [^\n]*value: forms\.full \}\);/.test(sb) && !/_fitBilling|pillMode/.test(sb), 'the status bar\'s billing chip is a row of «⚙ 对话设置» — nothing to fit on the strip; its value there is the FULL form\'s words (lane mask-value-shape)');
+  ok(/val\.textContent = \(r\.value \?\? textOf\(r\.html\)\) \+/.test(sb), 'the settings row writes that value whole, as text (never the three forms run together, never cut)');
+  ok(/billingPillHtml\(forms, escHtml\), \{ attrs: \{ 'aria-label': forms\.tip \}, value: forms\.full \}\);/.test(sb) && /forms\.tip \+ ' — ' \+ tip/.test(sb), 'the status bar draws the three forms; title + aria-label carry every word');
   ok(/billChip\.innerHTML = billingPillHtml\(forms, escHtml\);/.test(mn) && /billChip\.setAttribute\('aria-label', forms\.tip\);/.test(mn) && /requestAnimationFrame\(\(\) => fitSwitcherRow\(item, label, billChip, splitBtn\)\)/.test(mn) && /chip\.dataset\.mode = p\.chip === 'compact' && hasCompact \? 'compact' : 'full';/.test(mn), 'the switcher row draws the three forms and fits them by the row\'s ladder beside its title (fitSwitcherRow — 主开发 2026-11-17, ruling B on the row; it was chipMode alone)');
 }
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -230,7 +230,9 @@ try {
   }
 
   console.log('K4 the Artifacts chip counts the file the SUB wrote');
-  check('the chip reads «Artifacts · 1»', await waitFor(`/Artifacts · 1/.test(document.querySelector('.chat-status-artifacts')?.textContent || '')`, 10000), await evalJs(`document.querySelector('.chat-status-artifacts')?.textContent || '(no chip)'`));
+  // (lane mask-value-shape) 产出 is drawn in EVERY chat view now, even at zero — read THIS conversation's own bar
+  const AFCHIP = `(${VIEW(sid)})?._statusBar?.element?.querySelector('.chat-status-artifacts')`;
+  check('the chip reads «Artifacts · 1»', await waitFor(`/Artifacts · 1/.test((${AFCHIP})?.textContent || '')`, 10000), await evalJs(`(${AFCHIP})?.textContent || '(no chip)'`));
   const card = await evalJs(`(() => { const c = (${LIST(sid)})?.querySelector('.chat-artifact-card'); return c ? { name: c.querySelector('.chat-artifact-name')?.textContent || '', text: c.textContent } : null; })()`);
   check('…and its card names report.md', !!card && /report\.md/.test(card.name), card);
   check('no page error on the way', pageErrors.length === 0, pageErrors);

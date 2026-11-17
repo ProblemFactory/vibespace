@@ -5,8 +5,9 @@
 //   phone 390 / 412 (DPR 3, Android UA, touch): the field owns ≥ 72 % / ≥ 75 % of the composer row; ONE "+" door
 //     (36×36) whose sheet reaches the image / file / folder inputs; the mic INSIDE the field's trailing edge and its
 //     recording capsule in place (fake getUserMedia) → the words land; send 40×40 sends; the ⤢ glyph only past 2 lines;
-//     the status bar ONE row ≤ 40 px, no horizontal overflow with the agent-browser chip present, no gap > 8 px, the
-//     rest behind ⋯ (a tap opens the bar in place), effort + style reachable from the model chip's sheet
+//     the status bar the strip's SAME two rows ≤ 84 px (lane mask-value-shape, the owner's arrangement of 2026-11-14 — it
+//     was ONE row with the rest behind ⋯), no horizontal overflow with the agent-browser chip present, no gap > 8 px,
+//     nothing folded; the thinking level inside the model door, the output style a row of «⚙ 对话设置» (each opens its menu)
 //   desk 1100: the composer + bar DOM signature is the pinned desk one; its PNG equals the one rendered with the lane's
 //     phone CSS block stripped (RED control: the same block un-gated ⇒ a different PNG)
 //   ③ lane phone-take-photo (owner 2026-11-09 «为啥我在手机上添加图片的时候不能拍照»): the sheet reads 拍照 / 照片 / 文件 / 文件夹,
@@ -15,7 +16,7 @@
 //     the message as an image block; a cancelled camera adds nothing and says nothing; a phone-wide window on a FINE pointer
 //     (no finger device) has no 拍照 row; the desk has no camera input at all
 // PNGs: PHONE_COMPOSER_PNG_DIR (default: the scratch dir), named <PHONE_COMPOSER_TAG|after>-390.png, -412.png,
-//   -412-light.png, -390-rec.png, -390-more.png, -390-sheet.png, -390-shot.png, desk-1100.png
+//   -412-light.png, -390-rec.png, -390-settings.png, -390-sheet.png, -390-shot.png, desk-1100.png
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -209,10 +210,11 @@ async function phoneLeg(w, minRatio) {
     const row = area.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
     const ta = document.querySelector('#frame textarea').getBoundingClientRect();
     const bar = document.querySelector('#frame .chat-status-bar');
-    const kids = [...bar.children].filter((e) => e.offsetWidth > 0).map((e) => e.getBoundingClientRect());
+    const kids = [...bar.children].filter((e) => e.offsetWidth > 0 && !e.classList.contains('chat-status-rowbreak')).map((e) => e.getBoundingClientRect());
     let gap = 0; for (let i = 1; i < kids.length; i++) gap = Math.max(gap, kids[i].left - kids[i - 1].right);
+    const mids = []; for (const y of kids.map((r) => r.top + r.height / 2).sort((a, b) => a - b)) if (!mids.length || y - mids[mids.length - 1] > 6) mids.push(y);
     const shown = [...document.querySelectorAll('#frame .chat-input-wrap > *')].filter((e) => e.offsetWidth > 0).map((e) => e.className);
-    return { ratio: ta.width / row, row, ta: ta.width, taH: ta.height, barH: bar.getBoundingClientRect().height, sw: bar.scrollWidth, cw: bar.clientWidth, gap, browser: !!bar.querySelector('.chat-status-browser'), more: !!bar.querySelector('.chat-status-more'), shown };
+    return { ratio: ta.width / row, row, ta: ta.width, taH: ta.height, barH: bar.getBoundingClientRect().height, sw: bar.scrollWidth, cw: bar.clientWidth, gap, browser: !!bar.querySelector('.chat-status-browser'), more: !!bar.querySelector('.chat-status-more'), folded: bar.querySelectorAll('.chat-status-folded').length, rows: mids.length, shown };
   })()`);
   ok(`${w}: the field owns ≥ ${minRatio * 100} % of the composer row (${(m.ratio * 100).toFixed(1)} % of ${m.row} px)`, m.ratio >= minRatio, m);
   ok(`${w}: the field is ≥ 44 px tall at rest`, m.taH >= 44 && m.taH < 60, m.taH);
@@ -221,9 +223,9 @@ async function phoneLeg(w, minRatio) {
   ok(`${w}: the + door is 36×36`, plus && Math.round(plus.w) === 36 && Math.round(plus.h) === 36, plus);
   ok(`${w}: send is 40×40`, send && Math.round(send.w) === 40 && Math.round(send.h) === 40, send);
   ok(`${w}: the mic sits INSIDE the field at its trailing edge (a 40×40 hit area — lane voice-everywhere)`, inside(mic, field) && field.r - mic.r <= 8 && Math.round(mic.h) === 40, { mic, field });
-  ok(`${w}: the status bar is ONE row ≤ 40 px`, m.barH <= 40, m.barH);
+  ok(`${w}: the status bar is the strip's TWO rows ≤ 84 px (${m.rows} rows, ${Math.round(m.barH)} px)`, m.rows === 2 && m.barH <= 84, { rows: m.rows, barH: m.barH });
   ok(`${w}: no horizontal overflow with the agent-browser chip present`, m.browser && m.sw <= m.cw, m);
-  ok(`${w}: no gap between bar chips > 8 px, ⋯ present`, m.gap <= 8 && m.more, m);
+  ok(`${w}: no gap between bar chips > 8 px, nothing behind ⋯ (no ⋯, nothing folded)`, m.gap <= 8 && !m.more && m.folded === 0, m);
   // the + sheet: four rows (lane phone-take-photo: 拍照 first, on a finger device), each reaching its own hidden input
   const picked = [];
   for (const i of [0, 1, 2, 3]) {
@@ -258,18 +260,21 @@ async function phoneLeg(w, minRatio) {
   if (w === 390) await p.shot(`${TAG}-390-rec.png`);
   await p.tap('#frame .chat-voice-btn.recording');
   ok(`${w}: the dictated words land in the field`, await p.until(`document.querySelector('#frame textarea').value.includes('DICTATED ON THE PHONE')`, 6000), await p.ev(`document.querySelector('#frame textarea').value`));
-  // ⋯ opens the bar in place (the browser chip reachable); effort + style ride the model chip's sheet
-  await p.tap('#frame .chat-status-more');
-  const open = await p.ev(`(() => { const b = document.querySelector('#frame .chat-status-bar'); const br = b.querySelector('.chat-status-browser'); return { open: b.classList.contains('chat-status-open'), browserW: br ? br.offsetWidth : 0, effortW: (b.querySelector('.chat-status-effort') || {}).offsetWidth || 0 }; })()`);
-  ok(`${w}: ⋯ opens the bar in place — the agent-browser and effort chips are reachable`, open.open && open.browserW > 0 && open.effortW > 0, open);
-  if (w === 390) await p.shot(`${TAG}-390-more.png`);
-  await p.tap('#frame .chat-status-more');
-  await p.tap('#frame .chat-status-model');
-  const rows = await p.ev(`[...document.querySelectorAll('.chat-status-dropdown .chat-status-fold-row')].map((e) => e.textContent)`).catch(() => []);
-  ok(`${w}: the model chip's sheet carries effort + style rows`, rows.length === 2 && /推理强度/.test(rows[0]) && /输出风格/.test(rows[1]), rows);
-  await p.tap('.chat-status-dropdown .chat-status-fold-row');
-  const eff = await p.ev(`(() => { const d = document.querySelector('.chat-status-dropdown'); return { dd: !!d && /high|max|low|medium/i.test(d.textContent), open: document.querySelector('#frame .chat-status-bar').classList.contains('chat-status-open') }; })()`);
-  ok(`${w}: the effort row opens the effort chip's own menu`, eff.dd && eff.open, eff);
+  // nothing to open first (lane mask-value-shape): the agent-browser chip and the thinking level (inside the model door) are
+  // on the bar; the output style is a row of «⚙ 对话设置» whose press opens the style's own menu at the door
+  const doors = await p.ev(`(() => { const b = document.querySelector('#frame .chat-status-bar'); const br = b.querySelector('.chat-status-browser'); const ef = b.querySelector('.chat-status-model .chat-status-effort'); return { browserW: br ? br.offsetWidth : 0, effortW: ef ? ef.offsetWidth : 0, settings: !!b.querySelector('.chat-status-settings') }; })()`);
+  ok(`${w}: nothing to open first — the agent-browser chip and the thinking level (inside the model door) are on the bar, «⚙ 对话设置» last`, doors.browserW > 0 && doors.effortW > 0 && doors.settings, doors);
+  await p.tap('#frame .chat-status-settings');
+  const rows = await p.ev(`[...document.querySelectorAll('.chat-status-dropdown .chat-status-settings-row')].map((e) => ({ row: e.dataset.row, text: e.textContent }))`).catch(() => []);
+  if (w === 390) await p.shot(`${TAG}-390-settings.png`);
+  ok(`${w}: «⚙ 对话设置» lists its rows, each with its present value — the output style among them`, rows.some((r) => r.row === 'style' && /输出风格/.test(r.text)), rows);
+  await p.tap('.chat-status-dropdown .chat-status-settings-row[data-row="style"]');
+  const sty = await p.ev(`(() => { const d = document.querySelector('.chat-status-dropdown'); return { dd: !!d, settings: !!(d && d.querySelector('.chat-status-settings-row')), rows: d ? d.querySelectorAll('.chat-status-dropdown-item').length : 0 }; })()`);
+  ok(`${w}: the style row opens the style's own menu, at the door`, sty.dd && !sty.settings && sty.rows >= 2, sty);
+  await p.ev(`(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); return true; })()`);
+  await p.tap('#frame .chat-status-model .chat-status-effort');
+  const eff = await p.ev(`(() => { const d = document.querySelector('.chat-status-dropdown'); return { dd: !!d && /high|max|low|medium/i.test(d.textContent) }; })()`);
+  ok(`${w}: the thinking level's press (inside the model door) opens its own menu`, eff.dd, eff);
   p.close();
   if (w === 412) {
     const l = await page(412, 860, { phone: true, theme: 'light' });

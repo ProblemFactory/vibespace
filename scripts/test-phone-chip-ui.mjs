@@ -12,6 +12,11 @@
 // installed — else this box's face, said.
 // CONTROL: the pre-fix chat-status-bar.js + style.css (git show b924041f) under the same scene ⇒ the owner's cut
 // (the chip's text overflows its 90 px box).
+// lane mask-value-shape (the strip's step two, page §4 «the phone's account»): the billing pill is a ROW of «⚙ 对话设置»
+// now — nothing to fit on the strip; the census reads THAT row (the door pressed, as a person does): its value is the FULL
+// form's words, whole (no ellipsis, nothing past its box, inside the phone's viewport — a long name wraps inside its row),
+// the full words in its tooltip. CONTROL: the same page with the row's value capped and ellipsized (the old 90 px cut put on
+// the row) ⇒ red; the pre-fix bytes are still the cut the owner read.
 // SKIPs with evidence without chrome. Scratch: /tmp/vs-pchip-<pid>/ only.
 // Cleanup kills Chrome's whole process group and waits for it to be empty before removing the scratch (a lone
 // browser-pid SIGKILL left its network service writing into Default/: ENOTEMPTY on the runner).
@@ -92,11 +97,17 @@ const at = async (url, width) => {
   await send('Page.navigate', { url });
   for (let i = 0; i < 60; i++) { if (await ev('typeof window.mkBar === "function" && document.readyState === "complete"')) break; await sleep(100); }
 };
-const READ = `(() => { const el = document.querySelector('.chat-status-billing'); const bar = el && el.parentElement; if (!el) return null;
+const READ_PRE = `(() => { const el = document.querySelector('.chat-status-billing'); const bar = el && el.parentElement; if (!el) return null;
   const vis = [...el.querySelectorAll('span')].filter((s) => getComputedStyle(s).display !== 'none').map((s) => s.textContent);
   const cs = getComputedStyle(bar); const slot = bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
   return { mode: el.dataset.mode || null, text: vis.length ? vis.join('') : el.textContent, overflow: el.scrollWidth - el.clientWidth, w: el.getBoundingClientRect().width, slot,
     title: el.getAttribute('title') || '', aria: el.getAttribute('aria-label') || '', forms: [...el.querySelectorAll('span')].map((s) => s.textContent) }; })()`;
+// the «Who pays» row of «⚙ 对话设置» (the door pressed): its value's words, overflow, box, and the row's tooltip
+const READ = `(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); const door = document.querySelector('.chat-status-settings'); if (!door) return null; door.click();
+  const row = document.querySelector('.chat-status-dropdown .chat-status-settings-row[data-row="billing"]'); if (!row) return { door: true, row: false };
+  const v = row.querySelector('.chat-status-settings-value'); const r = row.getBoundingClientRect();
+  return { text: v.textContent.replace(/\\s*›$/, ''), overflow: Math.max(v.scrollWidth - v.clientWidth, row.scrollWidth - row.clientWidth), left: r.left, right: r.right, vw: innerWidth,
+    title: row.getAttribute('title') || '', onStrip: !!document.querySelector('.chat-status-bar > .chat-status-billing') }; })()`;
 const NAMES = [
   { lang: 'zh', auth: { source: 'pooled', name: '全部', poolTarget: 'Beta Max' }, full: '⣿ 全部 → Beta Max' },
   { lang: 'ja', auth: { source: 'pooled', name: 'すべてのアカウント', poolTarget: 'ベータ チーム' }, full: '⣿ すべてのアカウント → ベータ チーム' },
@@ -105,42 +116,38 @@ const NAMES = [
   { lang: 'en-sub', auth: { source: 'subscription', name: 'Personal Max' }, full: 'Personal Max' },
 ];
 
-console.log(`— the status bar's billing pill on a phone (${dejavu ? 'DejaVu Sans forced' : 'this box\'s face — DejaVu Sans not installed'})`);
+console.log(`— the phone's account: a row of «⚙ 对话设置», its full words whole (${dejavu ? 'DejaVu Sans forced' : 'this box\'s face — DejaVu Sans not installed'})`);
+const whole = (r, n) => !!r && r.row !== false && r.text === n.full && !/…/.test(r.text) && r.overflow <= 0 && r.left >= -0.5 && r.right <= r.vw + 0.5 && r.title.startsWith(n.full) && !r.onStrip;
 for (const width of [360, 375, 390]) {
   for (const n of NAMES) {
     await at(pageNow, width);
     await ev(`window.mkBar(${JSON.stringify(n.auth)})`);
     await sleep(80);
     const r = await ev(READ);
-    const whole = r && (r.forms.includes(r.text)) && !/…/.test(r.text);
-    ok(r && whole && r.overflow <= 0 && r.w <= r.slot + 0.5 && r.title.startsWith(n.full) && r.aria === n.full,
-      `${width} px ${n.lang}: ${r && r.mode} "${r && r.text}" — a whole form, no overflow (${r && r.overflow}), ${r && Math.round(r.w)} ≤ ${r && Math.round(r.slot)} px, the full words in title + aria-label`, JSON.stringify(r));
-    if (n.lang === 'zh') ok(r && r.mode === 'full' && r.text === n.full, `${width} px zh: the owner's chip is drawn WHOLE: "${n.full}"`, JSON.stringify(r));
-    if (n.lang === 'en-long') ok(r && r.mode !== 'full', `${width} px: a name longer than a line folds (${r && r.mode}), never cut`, JSON.stringify(r));
+    ok(whole(r, n), `${width} px ${n.lang}: «Who pays» says "${r && r.text}" — the full words, whole (overflow ${r && r.overflow}, ${r && Math.round(r.left)}–${r && Math.round(r.right)} of ${width} px), the full words in its tooltip, never on the strip`, JSON.stringify(r));
   }
 }
-{ // rotation: the ResizeObserver re-decides
-  await at(pageNow, 360);
-  await ev(`window.mkBar(${JSON.stringify(NAMES[3].auth)})`); await sleep(80);
-  const a = await ev(READ);
-  await send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 780, deviceScaleFactor: 2, mobile: true }); await sleep(250);
-  const b = await ev(READ);
-  ok(a && b && a.mode !== 'full' && b.mode === 'full' && b.overflow <= 0, `a rotation re-decides by itself: ${a && a.mode} at 360 px → ${b && b.mode} at 1400 px`, JSON.stringify({ a, b }));
-}
-{ // verify r1: the UI scale = a CSS zoom on <body> (desktop widths; a phone is always 1) — a rect is zoomed px, clientWidth
-  // the bar's own; mixed, 1.25 folded a pill that FITS a 220 px bar to its glyph and 0.8 drew one WIDER than a 180 px line
-  for (const [zoom, hostW, want] of [[1.25, 220, 'full'], [0.8, 180, 'icon']]) {
+{ // the UI scale = a CSS zoom on <body> (desktop widths): the row stays whole in one unit
+  for (const [zoom, hostW] of [[1.25, 220], [0.8, 180]]) {
     await at(pageNow, 1000);
     await ev(`document.body.style.zoom = '${zoom}'; document.getElementById('host').style.width = '${hostW}px'; true`);
-    await ev(`window.mkBar(${JSON.stringify({ source: 'pooled', name: '全部', poolTarget: 'Engineering Team Max' })})`); await sleep(120);
+    const n = { auth: { source: 'pooled', name: '全部', poolTarget: 'Engineering Team Max' }, full: '⣿ 全部 → Engineering Team Max' };
+    await ev(`window.mkBar(${JSON.stringify(n.auth)})`); await sleep(120);
     const r = await ev(READ);
-    ok(r && r.mode === want && r.overflow <= 0, `UI scale ${zoom}, a ${hostW} px bar: ${r && r.mode} (want ${want}) — the slot and the pill in one unit`, JSON.stringify(r));
+    ok(!!r && r.text === n.full && r.overflow <= 0, `UI scale ${zoom}, a ${hostW} px bar: «Who pays» whole — "${r && r.text}" (overflow ${r && r.overflow})`, JSON.stringify(r));
   }
+}
+{ // CONTROL: the old cut put on the row (a 90 px cap + an ellipsis) ⇒ the census goes red
+  await at(pageNow, 360);
+  await ev(`(() => { const st = document.createElement('style'); st.textContent = '.chat-status-settings-value { display: inline-block; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }'; document.head.appendChild(st); return true; })()`);
+  await ev(`window.mkBar(${JSON.stringify(NAMES[0].auth)})`); await sleep(80);
+  const r = await ev(READ);
+  ok(!!r && !whole(r, NAMES[0]) && r.overflow > 0, `CONTROL: the row's value capped at 90 px with an ellipsis CUTS the owner's name (overflow ${r && r.overflow} px) — the census goes red`, JSON.stringify(r));
 }
 if (pagePre) {
   await at(pagePre, 360);
   await ev(`window.mkBar(${JSON.stringify(NAMES[0].auth)})`); await sleep(80);
-  const r = await ev(READ);
+  const r = await ev(READ_PRE);
   ok(r && r.overflow > 0, `CONTROL: the pre-fix chip CUTS the owner's name (its text overflows its box by ${r && r.overflow} px — "⣿ 全部 → Beta Ma…")`, JSON.stringify(r));
 }
 await done();
