@@ -81,7 +81,7 @@ const ENDED_REASON = 'ended';   // piece 3's reason for an end on purpose, besid
 const GRANT_FIELD = 'wakesEndedOwner';
 /** a plain agent token's write of the grant, refused BY NAME — naming the doors that exist TODAY (主开发 12:46Z: until the
  *  proposal card's tip exists beside this one, no word promises a card; that unit adds the propose sentence with its bound door) */
-const GRANT_REFUSAL = 'refused: an agent cannot set wakesEndedOwner (may this job wake its conversation after that conversation was ended on purpose) — the person sets it (the Terminate confirm, the job\'s row in Background Work), or a manager key holding the verb jobs.wakeGrant; ask the person in chat';
+const GRANT_REFUSAL = 'refused: an agent cannot set wakesEndedOwner (may this job wake its conversation after that conversation was ended on purpose) — the person sets it (the Terminate confirm, the job\'s row in Background Work), or a manager key holding the verb jobs.wakeGrant; or propose it to the person: vibespace-job propose-wake <id> "one sentence why" (one card, one press approves; you read the answer at your next turn)';
 
 /**
  * HOW IT ENDED, from the kept record's meta (`m` = boot-restore keptRecordOf(key).meta, or null when nothing was kept):

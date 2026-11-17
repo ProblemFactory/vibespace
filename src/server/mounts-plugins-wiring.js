@@ -32,6 +32,9 @@ function create({ deliveryWakeDeps = () => ({}), app, server, rootDir, HOST, POR
   getJobs = null,
   // unit what-it-may-use: the doors built AFTER this wiring (server.js — the channels engine, the exit manager, the window engine), asked at each read
   mayUseDoors = null,
+  // lane login-request-card (majordomo piece 3b): the jobs wiring — piece 7's in-process wake-grant door (setWakeGrant) and the
+  // proposal door it calls (setProposalDoor ⇐ the proposal store's proposeWakeGrant)
+  jobsWiring = null,
   // lane conversation-facts (majordomo piece 2): the hub's own instances the list's sources read (in memory) — {autoResume, stashView, sysinfo, stoppedSessions}
   listSources = () => ({}),
   // B-f7ab: the late browser key reads the record it extends (never a partial one) and asks THE integration switch
@@ -285,6 +288,22 @@ const deliveryWake = require('./delivery-wake.js').create({ resumeLine, seams: d
   isPoolScope: (id) => { try { const a = getAccounts() && getAccounts().get(id); return !!(a && a.type === 'pooled'); } catch { return false; } },
   log: (m) => console.log(m) });
 if (deliver && typeof deliver.registerEndedWake === 'function') deliver.registerEndedWake((cid, entry) => deliveryWake.onEndedWake(cid, entry));
+// lane conversation-facts (majordomo piece 2): conversations.list's ONE builder — hoisted (lane login-request-card, majordomo piece
+// 3b): the proposal card's rows come from the SAME builder as the list
+const listFacts = (() => { const CFX = require('./conversation-facts.js'); const src = () => listSources() || {}; return CFX.create({ activeSessions, groupsOf: automationGroupsOf, ...CFX.sourcesFrom({
+      getJobs: () => (getJobs ? getJobs() : null), userTodos, persistenceRouter, keeper: () => browserKeeper, browserStream: () => browserStream,
+      autoResume: () => src().autoResume || null, stashView: () => src().stashView || null, deliver: () => deliver, sysinfo: { history: (ms) => { const si = src().sysinfo; return si && typeof si.history === 'function' ? si.history(ms) : null; } },
+      stoppedSessions: () => { const f = src().stoppedSessions; return typeof f === 'function' ? f() : []; }, treeUsage: require('../browser-facts.js').treeUsage, buffersDir: BUFFERS_DIR }) }); })();
+// lane login-request-card (majordomo piece 3b): THE PROPOSAL CARD — an agent proposes a person-only act (an end; piece 7's wake grant); ONE
+// card per proposer, refreshed; the person's press through the person's doors (the Terminate; piece 7's setWakeGrant); the answer free
+// at the proposer's next turn (src/server/end-proposals.js + the cookie-only door src/routes/end-proposals.js)
+const wakeDoor = (jobId, yes, by) => (jobsWiring && typeof jobsWiring.setWakeGrant === 'function' ? jobsWiring.setWakeGrant(jobId, yes, by) : { error: 'the jobs engine is not wired', code: 'not_ready' });
+const endProposals = require('./end-proposals.js').create({ userTodos, deliver, listFacts, endConversation: (target, by) => require('./conversation-ops.js').endConversation(target, by),
+  liveKeys: () => [...activeSessions.values()].map((x) => { const cid = x && (x.backendSessionId || x.claudeSessionId); return cid ? `${x.backend || 'claude'}:${cid}` : null; }).filter(Boolean),
+  setWakeGrant: wakeDoor, storeWakeTicks: async (ticks, by) => { for (const t of ticks || []) { const r = await wakeDoor(t.id, t.grant === true, by); if (r && r.error) throw new Error(r.error); } },
+  log: (m) => console.log('[end-proposals]', m) });
+if (jobsWiring && typeof jobsWiring.setProposalDoor === 'function') jobsWiring.setProposalDoor((caller, a) => endProposals.proposeWakeGrant(caller, a));   // piece 7's job tool ends here
+require('../routes/end-proposals.js').registerEndProposalRoutes(app, { proposals: endProposals });
 const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, log: (m) => console.log('[automation]', m),
   // lane feedback-handled-verb: + feedback.handled / feedback.list over THE feedback store (the owner's PATCH's own call)
   // lane conversations-archive-verb: the archive verb's seams on conversation-ops' automationVerbs — the sidebar's own archived-list
@@ -302,10 +321,7 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
     rowDesktopOf: (key) => { const d = RL_PURE.rowDesktopOf(persistenceRouter && typeof persistenceRouter.readLayouts === 'function' ? persistenceRouter.readLayouts() : null, key); return d ? { id: d.id, name: d.name == null ? null : require('../peer-text.js').toAgentText(d.name, { kind: 'line', max: 200 }) } : null; },
     deadOf: endedKeyOf,
     // lane conversation-facts (majordomo piece 2): conversations.list's ONE builder over the hub's in-memory facts
-    listFacts: (() => { const CFX = require('./conversation-facts.js'); const src = () => listSources() || {}; return CFX.create({ activeSessions, groupsOf: automationGroupsOf, ...CFX.sourcesFrom({
-      getJobs: () => (getJobs ? getJobs() : null), userTodos, persistenceRouter, keeper: () => browserKeeper, browserStream: () => browserStream,
-      autoResume: () => src().autoResume || null, stashView: () => src().stashView || null, deliver: () => deliver, sysinfo: { history: (ms) => { const si = src().sysinfo; return si && typeof si.history === 'function' ? si.history(ms) : null; } },
-      stoppedSessions: () => { const f = src().stoppedSessions; return typeof f === 'function' ? f() : []; }, treeUsage: require('../browser-facts.js').treeUsage, buffersDir: BUFFERS_DIR }) }); })() }),
+    listFacts, proposals: endProposals }),
     // the manager design's piece 7: jobs.wakeGrant — a key holding it sets a job's grant to resume an on-purpose-ended conversation
     ...require('./delivery-wake.js').automationVerbs({ jobs: () => (deliveryWakeDeps().jobs || (() => null))(), groupsOf: (cid) => { const k = endedKeyOf(cid); return (k && Array.isArray(k.groups)) ? k.groups : []; }, keyNameOf: (id) => { const L = automation.list(); const arr = Array.isArray(L) ? L : (L && L.keys) || []; const k = arr.find((x) => x && x.id === id); return (k && k.name) || null; } }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
   openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }),
@@ -1709,7 +1725,7 @@ function createSessionMessages(session, sessionId) {
     });
     mayUse.mount(app, { personVerdict: require('../routes/vault.js').personVerdict });
   } catch (e) { console.warn('[may-use] the route could not be mounted — ' + (e && e.message)); }
-  return { resumeRoad, resumeLine, deliveryWakeSeams, settingHolds, decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
+  return { resumeRoad, endProposals, resumeLine, deliveryWakeSeams, settingHolds, decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
     // lane engine-distribution (P4, §5.4): THE FLEET'S ENGINE PLUGIN at boot — ONE job after the listen, never on the boot path
     bootEngineDistribution: () => { if (!engineDistribution) return; engineDistribution.bootFleet().then((r) => { const line = engineDistribution.bootLine(r); if (line) console.log(line); }, (e) => console.warn(`[plugins] the fleet's engine plugin boot job failed — ${e && e.message}`)); } };
 }

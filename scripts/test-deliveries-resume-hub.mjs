@@ -5,7 +5,8 @@
 // MACHINE RESTART staged by ending every process rooted in the scratch tree, then booting again over the same data.
 //   ① the grant's writers BEFORE the end: the person's press (POST /api/jobs/:id/wake-grant); a manager key holding the verb
 //      jobs.wakeGrant (the row records the key); a key WITHOUT the verb refused by name; an agent token's write refused by name,
-//      naming the propose door; propose-wake with no proposal card on this instance ⇒ proposal_door_not_ready, the grant still no
+//      naming the propose door; propose-wake files ONE proposal card for the person (lane login-request-card's unit binds the
+//      door), a second proposal from the same conversation JOINS that card — the grant still no until a person's press
 //   ② the restart: R ended by it (kept `dead-socket-at-boot` — the boot writes it); P ended by a PERSON and A by an AGENT (kept
 //      `ended` + endedBy — STAND-IN for piece 3's writer, which no tree has yet: this suite writes that record as piece 3 will)
 //   ③ the first reminders fire: R is resumed with NO grant — ONE frame, the design's sentence, the window's line; P's schedule
@@ -162,14 +163,17 @@ try {
 
   const byToken = await req('POST', `/api/agent/jobs/${J['p-remind'].id}/wake-grant`, { grant: true }, { bearer: P.token });
   const cookieWithBearer = await req('POST', `/api/jobs/${J['p-remind'].id}/wake-grant`, { grant: true }, { bearer: P.token });
-  check('an agent token\'s WRITE is refused by name — on its own route and on the person\'s — naming the doors that exist (the person\'s, the key verb)',
-    byToken.status === 403 && byToken.json.code === 'wake_grant_person_only' && /Terminate confirm/.test(byToken.json.error) && /jobs\.wakeGrant/.test(byToken.json.error) && cookieWithBearer.status === 403 && cookieWithBearer.json.code === 'wake_grant_person_only', { byToken, cookieWithBearer });
+  check('an agent token\'s WRITE is refused by name — on its own route and on the person\'s — naming the doors that exist (the person\'s, the key verb) and the propose door',
+    byToken.status === 403 && byToken.json.code === 'wake_grant_person_only' && /Terminate confirm/.test(byToken.json.error) && /jobs\.wakeGrant/.test(byToken.json.error) && /vibespace-job propose-wake/.test(byToken.json.error) && cookieWithBearer.status === 403 && cookieWithBearer.json.code === 'wake_grant_person_only', { byToken, cookieWithBearer });
   const created = await req('POST', '/api/agent/jobs', { kind: 'cron', name: 'sneaky', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: 'x' }, wakesEndedOwner: true }, { bearer: P.token });
   check('…and a registration carrying the field is refused by name (nothing created)', created.status === 403 && created.json.code === 'wake_grant_person_only' && !(await jobNamed('sneaky')), created);
   const prop = await job(['propose-wake', J['p-remind'].id, 'so the morning digest reaches it after an end'], P.token);
   const regProp = await job(['notify-cron', '--name', 'p-extra', '--at', isoIn(3600e3), '--text', 'extra', '--propose-wake', 'it carries the digest'], P.token);
-  check('propose-wake with no proposal card on this instance ⇒ refused by name (proposal_door_not_ready); --propose-wake at registration creates the job and says the same',
-    prop.code !== 0 && /proposal card is not on this instance/.test(prop.err + prop.out) && regProp.code === 0 && /wake proposal was NOT filed/.test(regProp.out), { prop, regProp });
+  const cards = (((await req('GET', '/api/user-todos')).json || {}).todos || {}).open || [];
+  const pCards = cards.filter((i) => i && i.action && i.action.type === 'end-proposal' && i.action.kind === 'wake' && String(i.sessionKey || '').endsWith(`:${P.sid}`));
+  check('propose-wake files ONE proposal card for the person (lane login-request-card binds the door); --propose-wake at registration creates the job and JOINS the same card — one card per proposer, a row per job',
+    prop.code === 0 && /proposed to the person/.test(prop.out) && regProp.code === 0 && /proposed to the person/.test(regProp.out) && pCards.length === 1
+      && JSON.stringify(((pCards[0].card || {}).rows || []).map((r) => r.id).sort()) === JSON.stringify([J['p-remind'].id, (await jobNamed('p-extra') || {}).id].sort()), { prop, regProp, pCards });
   const rows0 = (await req('GET', `/api/jobs-wake-grants?conversation=${P.sid}`)).json || {};
   check('…the grant stays NO until a person\'s press (the doors\' rows say so)', Array.isArray(rows0.rows) && rows0.rows.length >= 2 && rows0.rows.every((r) => r.grant === false), rows0);
 

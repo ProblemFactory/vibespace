@@ -155,6 +155,12 @@ const ROWS = Object.freeze([
   { type: 'pool-cross-provider', identity: 'askId', producer: 'src/server/usage-pool-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'conversation' },
   { type: 'reset-credit', identity: null, producer: 'src/server/usage-pool-engine.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the limit wall card\'s «Use a reset credit» (design-reset-credits) — src/lib/chat-renderers.js', on: 'the limit card in this conversation', scope: 'conversation' },
   // ── apps ──
+  // lane login-request-card (majordomo piece 3b — the owner's addition, 2026-11-16): an agent that may NOT end a conversation PROPOSES
+  // the end — ONE card per proposer (refreshed by its next proposal, userTodos.add's itemKey), a row per conversation; the person's
+  // press is the person's own Terminate, each row judged again at the press; the answer reaches the proposer at its next turn, free.
+  // Its SECOND kind (action.kind 'wake' — 主开发 05:13Z, the owner's widened wake grant): jobs or schedules that may wake their
+  // conversation after an end on purpose — the ticks written through piece 7's person door; «Keep all as they are» writes nothing
+  { type: 'end-proposal', identity: 'proposer', producer: 'src/server/end-proposals.js', builtIn: 'src/end-proposal.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-api', 'conversations propose <target>[,<target>…] --why "…"', 'own'), scope: 'conversation' },
   { type: 'app-install', identity: 'id', producer: 'src/server/apps-engine.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-app', 'install / remove', 'own'), scope: 'conversation' },
   // ── the agent browser ──
   { type: 'browser-proposal', identity: 'id', producer: 'src/server/browser-propose.js', builtIn: 'src/browser-switch.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the proposal card the chat draws where it was proposed (lane browser-propose) — src/lib/browser-proposal-card.js', on: 'the proposal card in this conversation', scope: 'conversation' },

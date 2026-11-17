@@ -56,6 +56,7 @@ const PRODUCERS = {
   'src/server/browser-dialogs.js': { origin: 'browser', scope: 'group', types: [], why: 'lane vault-login r22: live-fill ceiling notice under the browser\'s group key' },
   'src/server/browser-propose.js': { origin: 'browser', scope: 'conversation', types: ['browser-proposal'] },
   'src/agent-routes/status.js': { origin: 'agent', scope: 'conversation', types: ['browser-grant', 'setting-change'] },   // lane setting-doors pick 2: + an ask that proposes one change of one setting (`--propose`)
+  'src/server/end-proposals.js': { origin: 'agent', scope: 'conversation', types: ['end-proposal'], why: 'lane login-request-card piece 3b: THE PROPOSAL CARD — an agent\'s proposal (to end conversations, or that its jobs may wake it) filed under the PROPOSER\'s own key; ONE card per proposer (two add() sites: the end and the wake kinds)' },
   'src/server/helper-asks.js': { origin: 'agent', scope: 'conversation', types: ['helper-ask'] },
   'src/server/main-asks.js': { origin: 'agent', scope: 'conversation', types: ['main-ask'] },
   'src/server/unexpected-exit.js': { origin: 'agent', scope: 'conversation', types: [] },

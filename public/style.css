@@ -1633,6 +1633,17 @@ html[data-vc="compact"] .drawer-foryou svg { width: 18px; height: 18px; flex: no
 .vs-link-name { margin-left: 0.4em; color: var(--text-dim); }
 .vs-link-unknown { color: var(--text-dim); cursor: default; }
 .vs-link-chip { display: inline-block; padding: 0 5px; border-radius: var(--radius-sm); font-size: 10px; line-height: 15px; background: var(--bg-hover); color: var(--text-dim); }
+/* lane login-request-card piece 3b: THE PROPOSAL CARD — an agent proposes ending conversations (a row each: the tick, the name,
+   last activity · memory, what would be cut off); a row that started something after the drawing is marked; the wake kind's job rows
+   are piece 7's helper (.wake-grant-rows) */
+.ut-proposal-card { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.ut-ep-why { color: var(--text-secondary); }
+.ut-ep-row { display: grid; grid-template-columns: auto 1fr; column-gap: 6px; padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.ut-ep-pick { grid-row: span 4; align-self: start; padding-top: 2px; }
+.ut-ep-meta { color: var(--text-dim); font-size: 12px; }
+.ut-ep-cut, .ut-ep-changed-words { font-size: 12px; color: var(--text-secondary); }
+.ut-ep-changed { border-color: var(--warning, var(--accent)); }
+.ut-ep-changed-words { color: var(--warning, var(--accent)); }
 /* lane mask-value-shape: a link a belt masked inside — its WORDS (never a link: the target is mangled) + the note naming the road */
 .fy-masked, .chat-link-masked { overflow-wrap: anywhere; }
 .masked-link-note { color: var(--warn-text); font-size: 0.92em; }

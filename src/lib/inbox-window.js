@@ -30,9 +30,9 @@ import { pressVerdict } from './press-arm.js'; // verify-r6 V1: an Allow counts 
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: an automation card's reach choices in the pane
-import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
+import { inboxModel, actionWords, mountProposalRows, proposalPressOf } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
-import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow, hubClock, settingCardOf, settingCardEls, patchSettingVolatile } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
+import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, proposalCardOf, proposalCardEls, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow, hubClock, settingCardOf, settingCardEls, patchSettingVolatile } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
 import { closersOf, doorOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords, CHECK_AGAIN_TYPES, ROW_OF as FY_ROW, isParkedAsk } from '../foryou-actions.js';
 import { needLine } from './need-line.js'; // lane ui-needs-a-button: a sentence that says something is needed carries its door on its line // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
@@ -336,7 +336,10 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const setting = mk('div', 'iw-setting'); // lane setting-doors pick 2: a proposed change's box (THE row's — its press is the action row's), under the question
     setting.style.display = 'none';
     dl.after(setting);
-    return { el, id, dot, sess, ld, nm, board, meta, title, dl, setting, arts, detail, cutLine, replied, opts, reach, reply, ta, why, pics, actions, sig: {} };
+    const proposal = mk('div', 'iw-proposal'); // lane login-request-card (piece 3b): THE proposal card (THE row's, as nodes — its presses are the action row's)
+    proposal.style.display = 'none';
+    dl.after(proposal);
+    return { el, id, dot, sess, ld, nm, board, meta, title, dl, setting, proposal, arts, detail, cutLine, replied, opts, reach, reply, ta, why, pics, actions, sig: {} };
   };
   /** A previewed detail (a resolved item's snapshot carries 300 chars): load the rest ONCE
    *  through the model; a failure lands on the pane as its sentence, never silently. */
@@ -374,6 +377,11 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       : actBtn('channel-reauth', UI_ICONS.check, t('Re-authorize'), t('Re-authorize'), 'iw-act-primary')), // lane channel-names-readable: the account's Re-authorize dialog
     'desktop-app-show': () => actBtn('desktop-app-show', UI_ICONS.check, t('Show window'), t('Show the app’s window'), 'iw-act-primary'), // lane app-display-notify-sink
     // lane controls-that-lie: an ask that names a grant — the button DOES it («Who can use it» gains the conversation, then the agent is told)
+    // lane login-request-card (piece 3b): THE proposal card's presses — the person's own Terminate over the ticked rows · keep them all;
+    // the wake kind: allow the jobs left ticked · keep them all as they are
+    'endprop-go': () => actBtn('endprop-go', UI_ICONS.check, t('Terminate selected'), t('Terminate selected'), 'iw-act-primary'),
+    'endprop-save': () => actBtn('endprop-save', UI_ICONS.check, t('Allow the ticked ones'), t('Allow the ticked ones'), 'iw-act-primary'),
+    'endprop-keep': (it) => { const pc = proposalCardOf(it, t); const w = pc && !pc.end ? t('Keep all as they are') : t('Keep all'); return actBtn('endprop-keep', UI_ICONS.close || UI_ICONS.check, w, w); },
     'browser-grant': (it) => { const g = grantAskOf(it) || { label: '' }; return actBtn('browser-grant', UI_ICONS.check, t('Let this conversation use {label}', { label: g.label }), t('Adds this conversation under “Who can use it” for {label}, then tells the agent', { label: g.label }), 'iw-act-primary'); },
     // lane setting-doors pick 2: an ask that proposes one change of one setting — the button DOES it; its words name the amount and the moment
     'setting-press': (it) => { const sc = settingCardOf(it, t); const b = actBtn('setting-press', UI_ICONS.check, sc && sc.button ? sc.button.words : '', sc && sc.button ? sc.button.title : '', 'iw-act-primary'); if (sc) b.dataset.shown = String(sc.now); return b; },
@@ -416,6 +424,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
   };
   const viewOf = (it, e) => itemView(it, { buttonsOf,   // lane queued-is-not-woke: a row's declared buttons (the layout imports nothing)
     settingAsk: (() => { const sc = settingCardOf(it, t); return sc ? { press: !!sc.button } : null; })(),   // lane setting-doors pick 2: the press only while THE verdict against the value NOW allows it
+    proposalAsk: (() => { const pc = proposalCardOf(it, t); return pc ? { end: pc.end } : null; })(),   // lane login-request-card (piece 3b): the card's kind
     t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : (runCardOf(it, { t }) || { headline: model.wordsOf(it) }).headline, detail: model.detailOf(it), options: model.optionsFor(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
     reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), door: doorOf(it), ago: (ts) => agoText(ts, t), expires: (ts) => { const d = deadlineOf(it, { t, now: hubNow(), clock: hubClock() }); return d && d.state !== 'late' ? '' : expiresText(ts, t); }, statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item), endCode: (item) => endCodeOf(item),
@@ -525,6 +534,12 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       c.sig.setting = scSig;
     } else if (sc) patchSettingVolatile(c.setting, it, t);
     c.setting.style.display = sc ? '' : 'none';
+    // lane login-request-card (piece 3b): THE proposal card — redrawn only when its card changed (a tick the person set stays until then);
+    // its job rows through piece 7's ONE helper (the tray's own mount)
+    const pc = v.resolved ? null : proposalCardOf(it, t);
+    const pcSig = pc ? pc.sig : '';
+    if (c.sig.proposal !== pcSig) { c.proposal.replaceChildren(...(pc ? proposalCardEls(it, t) : [])); mountProposalRows(c.proposal, () => it); if (c.sig.proposal !== undefined && st.armId === id) st.armAt = performance.now(); c.sig.proposal = pcSig; }
+    c.proposal.style.display = pc ? '' : 'none';
     const artsSig = JSON.stringify((!model.isCleared(it) && it.artifacts) || null);
     if (c.sig.arts !== artsSig) { c.arts.replaceChildren(...askChipEls(it, t)); c.arts.style.display = c.arts.childElementCount ? '' : 'none'; c.sig.arts = artsSig; } // NODES, its words textContent
     // verify-r4 F4: an exit ask's detail IS the command it asks to run — shown VERBATIM (textContent in a <pre>), never as
@@ -815,6 +830,16 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     }
     if (a === 'channel-reauth') { await model.runAction(it); return; } // lane channel-names-readable: the dialog opens; the engine resolves the item
     if (a === 'desktop-app-show') { if (await model.runAction(it)) advance(id); return; } // lane app-display-notify-sink: the window raised resolves the item
+    if (a === 'endprop-go' || a === 'endprop-keep' || a === 'endprop-save') {
+      // lane login-request-card (piece 3b): what the pane's card shows ticked — a pane shown (or redrawn) a moment ago is not a press on what the user read
+      const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() });
+      if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
+      const pane = st.cur && st.cur.id === id ? st.cur.proposal.querySelector('.ut-proposal-card') : null;
+      const { go, terminate, wakeTicks, grant } = proposalPressOf(pane, a === 'endprop-go' ? 'terminate' : a === 'endprop-save' ? 'save' : 'keep');
+      if (go && !terminate.length) { showToast(t('Tick the conversations to terminate first')); return; }
+      if (await model.runAction(it, 'proposal', { terminate, wakeTicks, ...(grant ? { grant } : {}) })) advance(id);
+      return;
+    }
     if (a === 'browser-grant') {
       // lane controls-that-lie: the grant an ask names, performed — a pane shown a moment ago is not a press on what the user read
       const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() });

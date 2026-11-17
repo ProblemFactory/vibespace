@@ -441,7 +441,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
   // the manager design's piece 4 (conversations.resume): the hub's one line of resumes nobody pressed (src/server/resume-line.js), an
   // ended conversation's kept facts ({goal, timerMark, mode, cwd, hostId}), the archived list, its harness's row (src/resume-line.js
   // harnessRowOf: {resumeContinues, headless}), and the desktop of the row that shows it (or null — the hub never picks one)
-  resumeLine = null, resumeFactsOf = () => null, isArchived = () => false, resumeRowOf = () => ({ resumeContinues: 'unread', headless: false }), rowDesktopOf = () => null } = {}) {
+  resumeLine = null, resumeFactsOf = () => null, isArchived = () => false, resumeRowOf = () => ({ resumeContinues: 'unread', headless: false }), rowDesktopOf = () => null, proposals = null } = {}) {
   const O = () => ops || sharedOps;
   const idOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const keyOf = (s) => { const cid = idOf(s); return cid ? `${(s && s.backend) || 'claude'}:${cid}` : null; };
@@ -459,7 +459,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
   // then a conversation the hub cannot judge is a person's to end; then THE verdict over the list builder's own row. The two
   // refusals a key's OWN conversation can get teach the force word (must 2); no other reach is ever told of it. → null (it may end)
   // or the refusal.
-  const ENDED_DOOR = 'A person can terminate it from its card in the sidebar (Terminate in its menu).';
+  const ENDED_DOOR = 'A person can terminate it from its card in the sidebar (Terminate in its menu). Or propose it to the person: vibespace-api conversations propose <target> --why "…" (one card; you read the answer at your next turn).';   // + the propose door (lane login-request-card piece 3b) — the same words as conversation-facts refusalOf
   const REACH_WORDS = { grant: 'through a grant of this key', instance: 'through the instance grant (every conversation here)', groups: 'through a Task Group grant' };
   const RECIPE = { opener: ' This key opened it: pass force (--force) to end it anyway.', self: ' It is this conversation itself: pass force (--force) to end it anyway.' };
   function endGate(t, args, label, { discountAsks = false } = {}) {
@@ -643,6 +643,12 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       const r = await q.result;
       if (!r || !r.ok) return { ok: false, code: 'resume_failed', why: `${(r && r.why) || 'the create gave no reason'} — a person can resume it from its window`, target: label };
       return { ok: true, sessionId: r.sessionId, ...(r.already ? { already: true } : {}), ...base };
+    },
+    // lane login-request-card (majordomo piece 3b): an agent PROPOSES ending conversations it can see — ONE For-you card per proposer
+    // (src/server/end-proposals.js); a target outside the key's reach is refused by name, nothing filed; nothing ends here
+    'conversations.propose': async (args, ctx) => {
+      if (!proposals || typeof proposals.propose !== 'function') return { ok: false, code: 'not_ready', why: 'the proposal card is not wired yet' };
+      return proposals.propose({ targets: args.targets, why: args.why }, ctx);
     },
     'groups.invite': async (args, ctx) => {
       const t = reached(args.target, ctx);

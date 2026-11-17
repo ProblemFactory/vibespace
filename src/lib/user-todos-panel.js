@@ -30,7 +30,7 @@ import { t, tc } from './i18n.js';
 import { SHEET_ROOTS, DIALOG_ROOTS, personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY, noticeReadAll, openCount, sessionMark, firstLine } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
-import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
+import { inboxModel, tierCounts, actionWords, mountProposalRows, proposalPressOf } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf, reachFor, pickReach, forgetReachPicks } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
 import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale, chromeAvoidRects, frontRects, seenAt, toastDeskSpot, placeToastsSoon, MODAL_OPEN_EVENT, markTyped } from './utils.js';
@@ -360,6 +360,7 @@ export function installUserTodos(app) {
       head, isRow: (c) => c.classList.contains('ut-item'), create: (e) => renderRow(e, ctx), patch: (row, e) => patchRow(row, e, ctx), drop: releaseBoxesIn,
     });
     if (arm) armExitButtons(); // the chat's needs cards arm their own list, once, after a pass that changed one (round 4, #3)
+    mountProposalRows(container, (place) => byId((place.closest('.ut-item') || {}).dataset?.id));   // lane login-request-card (piece 3b): piece 7's ONE helper fills the proposal card's job rows
     container.querySelectorAll(':scope > .ut-item .ut-live-dot').forEach((d) => patchDot(d)); // lane foryou-folds: a band row's running dot (a new / re-drawn row starts unpainted)
   };
   // verify-r6 V1: every "Allow … to run a command?" button in the page, re-stamped after each row pass — one that
@@ -371,7 +372,7 @@ export function installUserTodos(app) {
   };
   const armExitButtons = (root = document) => {
     const now = performance.now();
-    for (const b of root.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve, .ut-action-app.ut-app-install, .ut-action-grant, .ut-action-setting')) { // lane browser-propose: an Approve is armed the same way; design 009: so is a card's one-click Install; lane setting-doors pick 2: so is a proposed change's one button
+    for (const b of root.querySelectorAll('.ut-action-endprop, .ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve, .ut-action-app.ut-app-install, .ut-action-grant, .ut-action-setting')) {   // lane login-request-card (piece 3b): + the proposal card's two // lane browser-propose: an Approve is armed the same way; design 009: so is a card's one-click Install; lane setting-doors pick 2: so is a proposed change's one button
       stampArm(b, now);
       armed.add(b);
     }
@@ -1120,6 +1121,19 @@ export function installUserTodos(app) {
       if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again'), { type: 'warn' }); return; }
       setBtn.disabled = true;
       Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), 'setting', { shown: setBtn.dataset.shown })).finally(() => { setBtn.disabled = false; });
+      return;
+    }
+    const propBtn2 = e.target.closest('.ut-action-endprop');
+    if (propBtn2) {
+      // lane login-request-card (piece 3b): THE PROPOSAL CARD's press — the person's own Terminate over the ticked rows (the job ticks
+      // stored first through piece 7's door), «Keep all»; the wake kind: the ticks of its rows — armed like every decision button
+      armExitButtons();
+      const pv = pressVerdict({ since: propBtn2._armSince ?? null, now: performance.now() });
+      if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
+      const { go, terminate, wakeTicks, grant } = proposalPressOf(propBtn2.closest('.ut-proposal-card'), propBtn2.dataset.answer);
+      if (go && !terminate.length) { showToast(t('Tick the conversations to terminate first')); return; }
+      propBtn2.disabled = true;
+      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), 'proposal', { terminate, wakeTicks, ...(grant ? { grant } : {}) })).finally(() => { propBtn2.disabled = false; });
       return;
     }
     const grantBtn = e.target.closest('.ut-action-grant');

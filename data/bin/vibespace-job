@@ -191,8 +191,8 @@ control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibesp
          vibespace-job access <id> [--view session|group|all] [--control session|group|all]
          vibespace-job notify <id> on|off|inherit   (owner only — change auto-notify without recreating)
          vibespace-job memory <id> 8G|512M|inherit  (owner only — its memory bound from its next run; 0 is the user's call)
-         vibespace-job propose-wake <id> "why"  (not on this instance yet — it answers proposal_door_not_ready. Only the
-             person (the Terminate confirm, the job's row) or a manager key holding jobs.wakeGrant lets a job resume your
+         vibespace-job propose-wake <id> "why"  (ONE card for the person, refreshed by your next proposal; one press approves; the
+             answer comes at your next turn. Only the person (the card, the Terminate confirm, the job's row) or a manager key holding jobs.wakeGrant lets a job resume your
              conversation after an end on purpose; a restart-ended conversation needs none)
          vibespace-job subscribe <id> [--filter "SpaceX|Starship"] · unsubscribe <id>   (any session that can VIEW
            the job gets its notifications; --filter = case-insensitive regex on the message text, re-subscribe updates it;
@@ -421,7 +421,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
     }
     case 'propose-wake': {
       // the manager design's piece 7: ask the PERSON to let this job (or schedule) resume this conversation after it is ended on
-      // purpose — the card arrives with lane login-request-card's unit; until then the hub answers proposal_door_not_ready
+      // purpose — lane login-request-card's proposal card (src/server/end-proposals.js proposeWakeGrant, bound at boot)
       if (!pos[1] || !pos[2]) { console.error('usage: vibespace-job propose-wake <id|name> "one sentence why"'); process.exit(1); }
       const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/propose-wake`, { why: pos.slice(2).join(' ') });
       console.log(r.already ? `${r.job} already may resume this conversation after an end on purpose — nothing was filed` : `proposed to the person: ${r.job} may resume this conversation after it is ended on purpose — one press approves; the answer comes at your next turn`);

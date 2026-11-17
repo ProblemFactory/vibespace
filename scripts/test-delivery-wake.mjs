@@ -135,8 +135,8 @@ console.log('④ the words each party is told');
   const byYou = D.resumedLine(['nightly report'], 5, { by: { kind: 'person', by: 'person' } }), byKey = D.resumedLine(['nightly report'], 5, { by: { kind: 'key', by: 'automation:ak-1', name: 'dispatch' } });
   ok(/you allowed it/.test(byYou.key) && byYou.by.kind === 'person' && /the key «\{by\}»/.test(byKey.key) && byKey.params.by === 'dispatch',
     '…and after an end on purpose it names WHO allowed it — the person, or the manager key by its name (主开发 05:13Z)', { byYou, byKey });
-  ok(/an agent cannot set wakesEndedOwner/.test(D.GRANT_REFUSAL) && /Terminate confirm/.test(D.GRANT_REFUSAL) && /jobs\.wakeGrant/.test(D.GRANT_REFUSAL) && !/propose|card/.test(D.GRANT_REFUSAL),
-    'a plain agent token\'s write is refused BY NAME, naming the doors that exist today (the person\'s, the key verb) — no card is promised until the proposal card\'s unit binds it', D.GRANT_REFUSAL);
+  ok(/an agent cannot set wakesEndedOwner/.test(D.GRANT_REFUSAL) && /Terminate confirm/.test(D.GRANT_REFUSAL) && /jobs\.wakeGrant/.test(D.GRANT_REFUSAL) && /vibespace-job propose-wake <id>/.test(D.GRANT_REFUSAL),
+    'a plain agent token\'s write is refused BY NAME, naming the doors that exist (the person\'s, the key verb) and the PROPOSE door (lane login-request-card\'s card binds it)', D.GRANT_REFUSAL);
   const rf = D.resumedRefusedLine(['nightly report'], 9, { code: 'spend', why: 'the hour cap' });
   ok(rf.refused.code === 'spend' && rf.params.what === 'nightly report' && rf.at === 9 && D.peerLead('alpha · crew') === 'alpha · crew sent it a message with a wake',
     'a hand-over refused AFTER the resume leaves its line on the live conversation (the code the page words); the bare peer lead names who woke it', { rf, lead: D.peerLead('alpha · crew') });

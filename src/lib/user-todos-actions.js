@@ -20,6 +20,8 @@
 import { t, resolveLang } from './i18n.js';
 import { i18nParams } from './stopped-why.js'; // B-a5a4 cure 2: a refusal's interface words in the reader's language
 import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: a check's switch
+import { isProposal } from '../end-proposal.js'; // PURE (CJS, lane login-request-card piece 3b): THE proposal card's type, spelled once
+import { wakeGrantRowsNode, loadWakeGrantRows } from './wake-grant-rows.js'; // piece 7's ONE helper — the proposal card's job rows (lane login-request-card piece 3b)
 import { ROW_OF as FORYOU_ROW_OF, buttonsOf } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf, itemFoldLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
@@ -72,6 +74,36 @@ export function sessionRowOf(app, key) {
     try { return app.sidebar._getSessionStateKey(s) === key; }
     catch { return `${s.backend || 'claude'}:${s.sessionId}` === key; }
   }) || null;
+}
+
+/** lane login-request-card (piece 3b): THE PROPOSAL CARD's job rows through piece 7's ONE helper (src/lib/wake-grant-rows.js — name,
+ *  kind, next fire, a tick; no second form of those rows) — the tray, the mini inbox, the chat's card and the For-you window's pane
+ *  mount them HERE. An end card's row loads the jobs its conversation owns (ticks = the STORED grant, written before the end); a wake
+ *  card's rows are the proposed jobs drawn TICKED (the proposal: «Allow the ticked ones» is the one press that approves; an untick
+ *  keeps that job as it is). The handle stays on the place (`place._wake` — the press reads its ticks). Mounted once per drawn place.
+ *  `itemOf(place)` → the item the place belongs to. */
+export function mountProposalRows(container, itemOf) {
+  if (!container || typeof container.querySelectorAll !== 'function') return;
+  for (const place of container.querySelectorAll('.ut-proposal-card [data-place="piece-7"]:not([data-mounted])')) {
+    place.dataset.mounted = '1';
+    if (place.classList.contains('ut-wp-rows')) {
+      const it = typeof itemOf === 'function' ? itemOf(place) : null;
+      const h = wakeGrantRowsNode(((it && it.card && it.card.rows) || []).map((r) => ({ ...r, grant: true })));
+      place._wake = h; place.replaceChildren(h.node); continue;
+    }
+    const key = (place.closest('.ut-ep-row') || {}).dataset?.key || '';
+    loadWakeGrantRows(key.slice(key.indexOf(':') + 1)).then((rows) => { if (!rows.length || !place.isConnected) return; const h = wakeGrantRowsNode(rows); place._wake = h; place.replaceChildren(h.node); }).catch(() => { });
+  }
+}
+/** …and what a press on that card sends, read off its drawn nodes: the ticked conversations, the changed job ticks (an end), the
+ *  ids left ticked (a wake's «Allow the ticked ones»). `answer` = the pressed button's data-answer. */
+export function proposalPressOf(box, answer) {
+  const go = answer === 'terminate', wake = !!(box && box.dataset && box.dataset.kind === 'wake');
+  const terminate = go && box ? [...box.querySelectorAll('.ut-ep-check')].filter((x) => x.checked).map((x) => x.dataset.key) : [];
+  const places = box ? [...box.querySelectorAll('[data-place="piece-7"]')].filter((p) => p._wake) : [];
+  const wakeTicks = go ? places.flatMap((p) => p._wake.changes()) : [];
+  const grant = wake && answer === 'save' ? places.flatMap((p) => [...p.querySelectorAll('input[type=checkbox][data-id]')].filter((x) => x.checked).map((x) => x.dataset.id)) : null;
+  return { go, wake, terminate, wakeTicks, grant };
 }
 
 export function inboxModel(app) {
@@ -417,11 +449,25 @@ export function inboxModel(app) {
         : t('{label}: changed to {value} — but the agent could not be told: {why}', { label: card.label, value, why })),
     });
   };
+  /** lane login-request-card (piece 3b) — THE PROPOSAL CARD's press: the ticked rows (`terminate`, keys) to the person's door, which
+   *  judges each row again (a row that started something since the drawing is NOT ended and comes back with what changed; one that
+   *  ended meanwhile is said). An empty list = «Keep all». The proposer hears the answer at its next turn (the hub's stash — free). */
+  const pressProposal = async (rec, { terminate = [], wakeTicks = [], grant = null } = {}) => {
+    const r = await fetchJson(`/api/end-proposals/${encodeURIComponent(rec.id)}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(grant ? { grant } : { terminate, wakeTicks }) });   // the job ticks are stored through piece 7's person door BEFORE any end (the hub's order)
+    if (!(r && r.ok)) { showToast(t('Could not answer the proposal: {why}', { why: (r && (r.why || r.error)) || t('server unreachable') }), { type: 'error', duration: 9000 }); return false; }
+    const n = (a) => (Array.isArray(a) ? a.length : 0);
+    if (n(r.changed)) showToast(t('{n} changed since the card was drawn and were not terminated — look again', { n: n(r.changed) }), { duration: 9000 });
+    else if (n(r.terminated)) showToast(t('Terminated {n} — the agent will read it at its next turn', { n: n(r.terminated) }));
+    else if (n(r.granted) || n(r.withdrawn)) showToast(t('Saved — the agent will read it at its next turn'));
+    else showToast(t('Kept as they are — the agent will read it at its next turn'));
+    return !r.open;
+  };
   /** A PRODUCER'S ACTION (design-reset-credits p2): the client maps the item's
    *  `action.type` to a verb it owns. Today: the reset-credit confirm dialog. */
   const runAction = async (rec, answer = null, extra = {}) => {   // `extra.reach` (lane key-instance-scope): an automation card's picked reach
     if (rec && rec.action && rec.action.type === 'browser-grant') return grantBrowser(rec);
     if (rec && isSettingChange(rec.action)) return pressSetting(rec, extra);   // lane setting-doors pick 2: the change an ask proposes, in ONE press (`extra.shown` = the value the pressed button drew)
+    if (rec && isProposal(rec.action)) return pressProposal(rec, extra);   // lane login-request-card (piece 3b): the person's own Terminate over the ticked rows / «Keep all» / the wake ticks
     if (rec && rec.action && rec.action.type === 'browser-takeover') {
       // lane browser-takeover-queue: ONE record — the item IS the request: its live view, the input side offered (the view's
       // Take over; the agent's words in its bar); the request as the app's queue holds it (else the item's own facts)

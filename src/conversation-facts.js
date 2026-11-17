@@ -381,7 +381,8 @@ function endVerdict(row) {
 function refusalOf(verdict, { stopped = 'Nothing was stopped.' } = {}) {
   const busy = (verdict && Array.isArray(verdict.busy)) ? verdict.busy : [];
   const why = 'not ended — ' + (busy.length ? busy.map((b) => b.why).join('; ') : 'busy') + '. ' + stopped
-    + ' A person can terminate it from its card in the sidebar (Terminate in its menu).';   // the door that EXISTS today (session-card's Terminate) — no System screen is built yet
+    + ' A person can terminate it from its card in the sidebar (Terminate in its menu).'   // the door that EXISTS today (session-card's Terminate) — no System screen is built yet
+    + ' Or propose it to the person: vibespace-api conversations propose <target> --why "…" (one card; you read the answer at your next turn).';   // lane login-request-card (piece 3b): the propose door (conversations.propose — the proposal card)
   return { ok: false, code: 'subject_busy', busy, why };
 }
 

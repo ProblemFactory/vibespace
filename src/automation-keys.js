@@ -101,6 +101,16 @@ const shapeArg = (v, what, re, words) => {
   const s = str(v).trim();
   return re.test(s) ? { ok: true, value: s } : bad(`${what} must be ${words}`);
 };
+/** A LIST of ids (lane login-request-card, conversations.propose's targets): an array of ids, or ONE string split on commas /
+ *  blanks (the CLI's one positional); each an id (ID_RE), duplicates folded, 1..max — refused by name, never trimmed to fit. */
+const idListArg = (v, what, { max = 20 } = {}) => {
+  const list = Array.isArray(v) ? v : typeof v === 'string' ? v.split(/[\s,]+/) : null;
+  if (!list) return bad(`${what} is one or more ids`);
+  const out = [];
+  for (const x of list) { const t = str(x).trim(); if (!t) continue; if (!ID_RE.test(t)) return bad(`${what}: «${clean(t, 40)}» must be an id (letters, digits, . _ : -; ≤ 200)`); if (!out.includes(t)) out.push(t); }
+  if (!out.length) return bad(`${what} is required`);
+  return out.length > max ? bad(`${what} is at most ${max} ids`) : { ok: true, value: out };
+};
 /** A yes/no argument: true / 'true' / 'yes' / '1' / 'on' ⇒ true; absent / false / 'no' / '0' / 'off' ⇒ none (the verb's default). */
 const boolArg = (v, what) => {
   if (v == null || v === '' || v === false) return { ok: true, value: null };
@@ -171,6 +181,12 @@ const SCOPES = Object.freeze([
   // conversation the key reaches; the row records the key as who set it (the window's wake line names it). Nothing is billed.
   Object.freeze({ verb: 'jobs.wakeGrant', layer: 'act', billed: false, label: 'Let a job resume its conversation after an end on purpose',   // ui-words: a t() key — the Vault window words it (zh / ja rows exist)
     args: (a) => argsOf(a, { job: (v) => idArg(v, 'job'), grant: (v) => onOffArg(v, 'grant') }) }),
+  // lane login-request-card (majordomo piece 3b — the owner's addition, 2026-11-16): an agent that may NOT end a conversation PROPOSES
+  // the end to the person — ONE For-you card per proposer (a second proposal refreshes it), its rows from conversations.list's
+  // builder; the person's press is the person's own Terminate; the answer reaches the proposer at its next turn, free. Not billed;
+  // the door the end verb's refusal names (src/server/end-proposals.js)
+  Object.freeze({ verb: 'conversations.propose', layer: 'act', billed: false, label: 'Propose ending conversations to the person',   // ui-words: a verb's label, worded through t() by the key's window
+    args: (a) => argsOf(a, { targets: (v) => idListArg(v, 'targets', { max: 20 }), why: (v) => textArg(v, 'why', { max: 200 }) }) }),
   // lane feedback-handled-verb: the owner's «Mark handled» on an agent's feedback report, naming the release that shipped
   // the fix (+ a note); and the OPEN reports with their ids — a READ (another agent's words: belted at the hub)
   Object.freeze({ verb: 'feedback.handled', layer: 'act', billed: false, label: "Mark an agent's feedback handled",

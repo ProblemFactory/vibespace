@@ -50,7 +50,9 @@ Three independent audiences:
    had been ended and was resumed to hand you this. Background tasks and timers it had
    before are gone.» — re-register what you still need. The grant is set by the PERSON
    (the Terminate confirm lists your jobs and schedules; the job's row in Background Work)
-   or by a manager key holding `jobs.wakeGrant`. You cannot set it — ask the person in chat.
+   or by a manager key holding `jobs.wakeGrant`. You cannot set it — propose it:
+   `vibespace-job propose-wake <id> "why"` (or `--propose-wake "why"` when you register it) files ONE
+   card for the person (one per conversation, refreshed); one press approves; the answer comes at your next turn.
    A subscriber's copy never resumes anyone — only the owner is resumed.
 2. **Subscribers** — any session that can VIEW the job may
    `vibespace-job subscribe <id> [--filter "regex"]`. The filter is a
