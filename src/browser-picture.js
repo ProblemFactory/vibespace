@@ -220,6 +220,30 @@ function xWindowLookups({ targetId = null, own = null, holderTabs = [] } = {}) {
   return out;
 }
 function xTicketMoved({ ticketWid = null, wid = null } = {}) { return wid != null && Number(wid) !== Number(ticketWid); }
+/** HOTFIX cure r2 (主开发 22:13Z, after step seven went red on real xpra): «MOVED» IS JUDGED BY THE TAB'S OWN CDP WINDOW. The keeper
+ *  FINDS a tab's X row by its CDP window's bounds; on a real display a new window's row can be missing for seconds (xpra maps it
+ *  later) while the old window — at the very same place and size — still matches: the bounds match finds a row, it never proves
+ *  that nothing moved. One look's verdict, for a viewer's `ticket` ({wid, cdpWin, targetId} | null) and the keeper's `answer`
+ *  ({wid: the X row found, windowId: the tab's CDP window}), `tid` = the tab on show, `known` = the X windows this relay minted ⇒
+ *  their CDP window (a Map):
+ *  · 'same' — the tab's CDP window IS the ticket's (or, its CDP window untold, the very tab of the ticket): nothing re-issued, silently;
+ *  · 'wait' — the tab's X window is not told yet: no row, or the row found is ANOTHER CDP window's (stale rows), or — the CDP window
+ *    untold — another tab answered with the ticket's own window (never proof);
+ *  · 'mint' — told: a ticket for that window. */
+function xFollowVerdict({ ticket = null, answer = null, tid = null, known = null } = {}) {
+  const wid = answer && answer.wid != null ? Number(answer.wid) : null;
+  const cdp = answer && answer.windowId != null ? Number(answer.windowId) : null;
+  const eq = (a, b) => a != null && b != null && Number(a) === Number(b);
+  const sameTab = !!ticket && String(ticket.targetId || '') === String(tid || '');
+  if (ticket && cdp != null && eq(ticket.cdpWin, cdp)) return 'same';
+  if (ticket && cdp == null && sameTab && (wid == null || eq(ticket.wid, wid))) return 'same';
+  if (wid == null) return 'wait';
+  const owner = known && typeof known.get === 'function' ? known.get(wid) : null;
+  if (cdp != null && owner != null && Number(owner) !== cdp) return 'wait';
+  if (cdp == null && ticket && eq(ticket.wid, wid) && !sameTab) return 'wait';
+  if (ticket && eq(ticket.wid, wid)) return 'same';
+  return 'mint';
+}
 
 function deskDoorOf({ source = null, xShown = false, stuck = null, human = false } = {}) {
   if (!human || !source || source.source !== PICTURE_X || !source.displaySession || xShown || !stuck) return null;
@@ -230,5 +254,5 @@ function deskDoorOf({ source = null, xShown = false, stuck = null, human = false
 module.exports = {
   PICTURE_X, PICTURE_SCREENCAST, NO_XPRA_WHY_HEAD, SOURCE_WORDS, DIALOG_MIN_W, DIALOG_MIN_H, X_TICKET_RE, DESK_DOOR_WORDS,
   pictureSourceOf, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xSeatRootOf, xScopeOf, deskDoorAct, deskDoorOf, deskDoorStuck,
-  xShownTarget, xWindowLookups, xTicketMoved, // hotfix 2026-11-17: the picture shows the tab the view says it shows
+  xShownTarget, xWindowLookups, xTicketMoved, xFollowVerdict, // hotfix 2026-11-17: the picture shows the tab the view says it shows (+ cure r2: moved by the CDP window)
 };

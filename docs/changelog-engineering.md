@@ -21,8 +21,13 @@ This file is the engineers' record of every release: the lanes, the verification
   - (2) another holder's tab, watched through a chip, is drawn with the WATCH seat and never sized;
   - (3) the page's own ask is always answered, even when a follow supersedes it;
   - a burst of tab flips is one keeper ask per viewer, and a viewer that left is skipped.
+- CURE ROUND 2 (主开发 22:13Z): test-browser-x-picture ⑦, run alone by the integrator on real xpra, was RED. The picture kept the old window for the agent's new tab, «connected», with no «untold».
+  - «Moved» is now judged by the tab's own CDP window (PURE xFollowVerdict). The bounds match only FINDS an X row: a new window at the old one's place and size is missing from the rows until xpra maps it, while the old row still matches.
+  - A tab whose window is not told yet is waited for, SAID: the page shows its own picture of the tab with «waiting for this tab's window» (en / zh / ja). Fresh looks, bounded at 10 s, then «could not be shown as a window». An unmounted view never reads «connected».
+  - Proof: a stall leg holds the new window's row 2.05 s, past the old 1.95 s, with the tip's rule as red control. Step ⑦ asserts the page is never «connected» on the old window after a 1.5 s grace.
+  - THE DIAGNOSTIC (one sanctioned run alone, with debug lines): on this suite's road the lease's own `tab new` lands IN its window. Both tabs had CDP window 862276532, every look answered X window 4194311 by bounds, and the stream's active flag moved correctly. Only a MEDIATED lease's tabs get windows of their own. So step ⑦'s first red was its fixture (it wanted a new window). ⑦ now walks both roads: the same window (the picture draws the new page there), and another window (a real second Chrome window, the agent switched to it).
 - NOT HERE (unit two): the view's own watch when a picture stops while its source moves (a held hub loop, a return from hidden), and a watch of a background tab that shares ONE window.
-- Fast sum: test-browser-picture restated 1.5 → 9.4 s, so 1157.739 s over 599 rows and cap 1158 by arithmetic. The release's own number is the integrator's at the cut.
+- Fast sum: test-browser-picture restated 1.5 → 6.5 s (its scenes side by side), so 1154.839 s over 599 rows and cap 1155 by arithmetic.
 
 ## 2.369.407 — 2026-11-17
 

@@ -679,7 +679,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   function unmountX() {
     if (!xp.view) return;
     try { xp.view.dispose(); } catch { /* gone */ }
-    clearTimeout(xp.refreshTimer); xp.view = null; xp.mode = null; winInfo._liveX = null;
+    clearTimeout(xp.refreshTimer); xp.view = null; xp.mode = null; xp.status = null; winInfo._liveX = null; // hotfix cure r2: no view, no «connected»
     xHost.textContent = ''; xHost.style.display = 'none'; canvas.style.display = '';
     send({ type: 'config', maxFps: wantFps() });
     scheduleReport(); renderDeskDoor(); // lane desktop-x-seat-browser r2: the X picture gone — the raw fallback's door is judged again
@@ -722,7 +722,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     xp.asking = false;
     if (!m || !m.ok) {
       xp.failed = { why: (m && m.why) || 'refused', ds: st.pictureSource && st.pictureSource.displaySession, at: Date.now() }; xp.ticket = null; unmountX(); renderMode();
-      if (m && m.why === 'untold-tab') { xp.untoldSaid = true; setStatus(SOURCE_T.untold()); } // hotfix cure r1, law 1: the window of the tab on show could not be told — SAID, never another tab's window in silence
+      // hotfix cure r1/r2: the window of the tab on show is WAITED FOR (said) or could not be told (said) — the page's own picture of
+      // that tab meanwhile, never another tab's window saying «connected»
+      if (m && m.why === 'waiting-window') { xp.untoldSaid = true; setStatus(t('Waiting for this tab’s window to appear on the display — showing the page’s own picture of it meanwhile')); }
+      if (m && m.why === 'untold-tab') { xp.untoldSaid = true; setStatus(t('This tab could not be shown as a window — showing the page’s own picture of it')); }
       return;
     }
     if (xp.untoldSaid) { xp.untoldSaid = false; setStatus('', { hide: true }); } // its window told now: the words go

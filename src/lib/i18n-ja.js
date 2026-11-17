@@ -30,6 +30,8 @@ export default {
   "the page's picture — this browser was not started on VibeSpace's display": "ページの画面 — このブラウザは VibeSpace のディスプレイで起動されていません",
   "the page's picture — the browser's display session is gone": "ページの画面 — ブラウザのディスプレイセッションがなくなりました",
   "the page's picture": "ページの画面",
+  "Waiting for this tab’s window to appear on the display — showing the page’s own picture of it meanwhile": "このタブのウィンドウがディスプレイに現れるのを待っています — その間はページ自身の画面を表示します",
+  "This tab could not be shown as a window — showing the page’s own picture of it": "このタブをウィンドウとして表示できませんでした — ページ自身の画面を表示しています",
   "the page's picture — this conversation's window could not be told apart on the display": "ページの画面 — この会話のウィンドウをディスプレイ上で見分けられませんでした",
   "Connecting to the browser window…": "ブラウザのウィンドウに接続中…",
   "The browser window is not available": "ブラウザのウィンドウを利用できません",

@@ -311,7 +311,7 @@ console.log("§8b the picture shows the tab the view says it shows — across wi
       streamPortFor: async () => ({ ok: true, port: upPort }), setViewportFor: async () => ({ ok: true }), inputStateFor: () => ({ input: 'agent' }),
       pictureSourceFor: () => ({ source: 'x', why: 'attach', displaySession: 'da-x1' }),
       // the keeper's answer for the tab named (its own window); no tab named ⇒ the lease's own window (the first tab's)
-      xWindowFor: async (pid, o) => ({ wid: W[o && o.targetId] || W[T1], why: 'bounds', source: { source: 'x', why: 'attach', displaySession: 'da-x1' } }),
+      xWindowFor: async (pid, o) => ({ wid: W[o && o.targetId] || W[T1], why: 'bounds', windowId: ({ [T1]: 1, [T2]: 2, [T3]: 3 })[o && o.targetId] || 1, source: { source: 'x', why: 'attach', displaySession: 'da-x1' } }), // each tab's CDP window too
       tabOwnersFor: async () => ({ ok: true, owners: { [T1]: 'agent', [T2]: 'agent', [T3]: 'agent' } }),
       watchTabFor: async () => ({ ok: true, close() { } }),
     };
@@ -358,41 +358,57 @@ console.log("§8b the picture shows the tab the view says it shows — across wi
   ok(rel.agentTab === null && rel.first === W[T1], `RED CONTROL — the release's ticket rule (no ticket when the agent's tab moves): the agent's new tab leaves the viewer on the FIRST window (${rel.first}; no ticket in 0.8 s)`, rel);
 }
 
-// ═══ §8c THE HOTFIX's CURE ROUND (主开发 21:14Z — three musts as laws) ═══
-console.log("§8c the follow looks again on a stale answer, draws another holder's window without sizing it, always answers the page (cure r1)");
+// ═══ §8c THE HOTFIX's CURE ROUNDS (主开发 21:14Z three musts; 22:13Z after step seven went red on real xpra: «MOVED» BY THE CDP
+//     WINDOW, THE WAIT SAID, THE LATE WINDOW PROVEN BY A STALL) ═══
+console.log("§8c the follow judges «moved» by the tab's CDP window, says its wait, draws another holder's window without sizing it, always answers the page");
 {
   const T1 = 'A1'.repeat(16), T2 = 'B2'.repeat(16), T3 = 'C3'.repeat(16), T4 = 'D4'.repeat(16), T5 = 'E5'.repeat(16);
   const W1 = 4194311, W2 = 4194599, W5 = 4195175;
+  const C = { [T1]: 1, [T2]: 2, [T3]: 3, [T4]: 1, [T5]: 5 }; // each tab's CDP window (T4 shares T1's window — the other road)
   const Module = require('node:module');
   const compileAt = (rel, from, to) => { const file = path.join(REPO, rel), src = fs.readFileSync(file, 'utf8'); if (src.split(from).length !== 2) throw new Error(`the mutant's anchor moved in ${rel} — update this suite`); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src.replace(from, to), file); return m.exports; };
-  // PURE — why ONE look is not enough: the keeper's cached rows from before the new window answer the OLD window «confidently»
-  // (the only window), and two windows of EQUAL bounds answer none — never a wrong window by bounds
+  // PURE — the keeper's ONE look can lie: a stale row set answers the OLD window by «the only window», two windows of EQUAL bounds none
   const row = (id, x) => ({ id, title: 'p - Google Chrome', cls: 'Google-chrome', instance: 'google-chrome (/tmp/x)', x, y: 0, w: 800, h: 600, mapped: true });
   const stale = PIC.xWindowOf({ bounds: { left: 30, top: 0, width: 800, height: 600 }, rows: [row(W1, 0)], profileDir: '/tmp/x' });
   const equal = PIC.xWindowOf({ bounds: { left: 0, top: 0, width: 800, height: 600 }, rows: [row(W1, 0), row(W2, 0)], profileDir: '/tmp/x' });
-  ok(stale.wid === W1 && stale.why === 'only-window' && equal.wid == null && equal.why === 'ambiguous', `PURE: a stale row set answers the OLD window as «the only window» (${stale.why}) and two windows of EQUAL bounds answer none (${equal.why}) — the follow must look again, never trust one look`, { stale, equal });
-  /** the real bridge over a keeper whose answers the leg scripts: `answer(targetId, fresh, n)` → wid | null; calls counted */
-  async function rig(B, answer, { owners = null, delayMs = 0 } = {}) {
+  ok(stale.wid === W1 && stale.why === 'only-window' && equal.wid == null && equal.why === 'ambiguous', `PURE: a stale row set answers the OLD window as «the only window» (${stale.why}) and two windows of EQUAL bounds answer none (${equal.why}) — a bounds match finds a row, it never proves nothing moved`, { stale, equal });
+  // PURE — THE VERDICT BY THE CDP WINDOW
+  const known = new Map([[W1, 1]]);
+  const tk = { wid: W1, cdpWin: 1, targetId: T1 };
+  const V = (answer, tid, ticket = tk) => PIC.xFollowVerdict({ ticket, answer, tid, known });
+  const vrows = {
+    sameCdp: V({ wid: W1, windowId: 1 }, T4), // another tab IN THE SAME CDP window: the same window
+    staleRow: V({ wid: W1, windowId: 2 }, T2), // a new CDP window answered with the old window's row: not told
+    noRow: V({ wid: null, windowId: 2 }, T2), // no row yet
+    told: V({ wid: W2, windowId: 2 }, T2), // its own row
+    first: V({ wid: W1, windowId: 1 }, T1, null), // a first ask
+    untoldCdpOther: V({ wid: W1, windowId: null }, T2), // the CDP window untold, another tab answered with the ticket's window
+    untoldCdpSame: V({ wid: W1, windowId: null }, T1), // the CDP window untold, the very tab
+  };
+  ok(vrows.sameCdp === 'same' && vrows.staleRow === 'wait' && vrows.noRow === 'wait' && vrows.told === 'mint' && vrows.first === 'mint' && vrows.untoldCdpOther === 'wait' && vrows.untoldCdpSame === 'same',
+    'PURE xFollowVerdict — «moved» by the tab\'s CDP window: the same CDP window ⇒ same (silently); a new CDP window answered with ANOTHER CDP window\'s row, or with no row ⇒ wait; its own row ⇒ mint; the CDP window untold ⇒ the ticket\'s own tab is the same, another tab\'s «same window» is never proof', vrows);
+  /** the real bridge over a keeper whose answers the leg scripts: answer(targetId, fresh, n, sinceTabsMs) → wid (its CDP window is C[t]) */
+  async function rig(B, answer, { owners = null, delayMs = 0, waitBoundMs = 400 } = {}) {
     const upPort = await freePort();
     const up = new WebSocketServer({ port: upPort, host: '127.0.0.1' }); await new Promise((r) => up.on('listening', r));
     let upWs = null; up.on('connection', (ws) => { upWs = ws; ws.send(JSON.stringify({ type: 'status', connected: true, screencasting: true, viewportWidth: 1280, viewportHeight: 720 })); });
-    const calls = [];
+    const calls = []; let tabsAt = Date.now();
     const keeper = {
       setFor: () => ({ attachments: [{ profileId: 'bp-x1', alias: 'xwork', label: 'X', isDefault: true }] }), list: () => ({ profiles: [{ id: 'bp-x1', label: 'X', dir: '/tmp/x' }] }),
       streamPortFor: async () => ({ ok: true, port: upPort }), setViewportFor: async () => ({ ok: true }), inputStateFor: () => ({ input: 'agent' }),
       pictureSourceFor: () => ({ source: 'x', why: 'attach', displaySession: 'da-x1' }),
-      xWindowFor: async (pid, o) => { calls.push({ targetId: o && o.targetId, fresh: !!(o && o.fresh), at: Date.now() }); if (delayMs) await sleep(delayMs); const wid = answer(o && o.targetId, !!(o && o.fresh), calls.length); return { wid, why: wid == null ? 'no-match' : 'bounds', source: { source: 'x', why: 'attach', displaySession: 'da-x1' } }; },
+      xWindowFor: async (pid, o) => { const t = o && o.targetId; calls.push({ targetId: t, fresh: !!(o && o.fresh), at: Date.now() }); if (delayMs) await sleep(delayMs); const wid = answer(t, !!(o && o.fresh), calls.length, Date.now() - tabsAt); return { wid, why: wid == null ? 'no-match' : 'bounds', windowId: t ? C[t] : 1, source: { source: 'x', why: 'attach', displaySession: 'da-x1' } }; },
       tabOwnersFor: async () => ({ ok: true, owners: owners || { [T1]: 'agent', [T2]: 'agent', [T3]: 'agent', [T4]: 'agent', [T5]: 'agent' } }),
       watchTabFor: async () => ({ ok: true, close() { } }),
     };
-    const bridge = B.create({ keeper, activeSessions: new Map([['sess-1', { _browserKey: 'bk-0000000a', name: 'one' }]]), requestAuthed: (req) => /(^|; )vs=1/.test(String(req.headers.cookie || '')), log: { warn() { }, log() { } }, xFollowRetryMs: [30, 60, 90] });
+    const bridge = B.create({ keeper, activeSessions: new Map([['sess-1', { _browserKey: 'bk-0000000a', name: 'one' }]]), requestAuthed: (req) => /(^|; )vs=1/.test(String(req.headers.cookie || '')), log: { warn() { }, log() { } }, xFollowRetryMs: [30, 60, 90], xWaitBoundMs: waitBoundMs });
     const srv = http.createServer((_q, r) => { r.statusCode = 404; r.end(); });
     srv.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head));
     await new Promise((r) => srv.listen(0, '127.0.0.1', r));
     const ws = new WebSocket(`ws://127.0.0.1:${srv.address().port}/api/browser/stream?session=sess-1&profile=bp-x1`, { headers: { Cookie: 'vs=1' } });
     const v = { msgs: [] }; ws.on('message', (d) => { try { v.msgs.push(JSON.parse(d)); } catch { } }); ws.on('error', () => { });
     await new Promise((r) => ws.on('open', r)); await until(() => v.msgs.find((m) => m.type === 'hello')); await until(() => upWs);
-    const tabs = (list, active) => upWs.send(JSON.stringify({ type: 'tabs', tabs: list.map((t, i) => ({ targetId: t, tabId: 't' + i, url: `http://127.0.0.1/p${i}`, title: 'p' + i, active: t === active })) }));
+    const tabs = (list, active) => { tabsAt = Date.now(); upWs.send(JSON.stringify({ type: 'tabs', tabs: list.map((t, i) => ({ targetId: t, tabId: 't' + i, url: `http://127.0.0.1/p${i}`, title: 'p' + i, active: t === active })) })); };
     const answers = () => v.msgs.filter((m) => m.type === 'x-ticket');
     const send = (o) => ws.send(JSON.stringify(o));
     tabs([T1], T1); await sleep(100);
@@ -400,61 +416,57 @@ console.log("§8c the follow looks again on a stale answer, draws another holder
     send({ type: 'fit', width: 1298, height: 814, dpr: 1, visible: true }); await sleep(60);
     return { bridge, v, calls, tabs, answers, send, ws, close: () => { ws.close(); bridge.shutdown(); srv.close(); up.close(); } };
   }
-  // LAW 1 — THE FOLLOW DOES NOT GIVE UP ON ONE STALE LOOK: the first (cached) look at the agent's new tab answers the OLD window;
-  // the fresh look answers its own — the picture moves. Then a tab whose window is never told: SAID (the page's own picture)
+  // LAW 1 (r2) — a STALE first look (the old window's row for the new tab's CDP window): the wait is SAID, then the fresh look moves the
+  // picture; a tab whose window is never told: SAID waiting, then at the bound «untold-tab» — the page stays on its own picture
   const law1 = async (B) => {
-    const R = await rig(B, (t, fresh) => (t === T2 ? (fresh ? W2 : W1) : t === T3 ? null : t === T4 ? W1 : W1));
+    const R = await rig(B, (t, fresh) => (t === T2 ? (fresh ? W2 : W1) : t === T3 ? null : W1));
     const f = {};
     const n0 = R.answers().length;
-    R.tabs([T1, T2], T2); const a = await until(() => (R.answers().length > n0 ? R.answers().at(-1) : null), 450); f.moved = a && a.ok ? a.wid : null;
-    f.freshLooks = R.calls.filter((c) => c.targetId === T2 && c.fresh).length;
+    R.tabs([T1, T2], T2); const a = await until(() => R.answers().slice(n0).find((m) => m.ok), 600);
+    f.moved = a ? a.wid : null; f.saidFirst = (R.answers().slice(n0)[0] || {}).why || null;
     const n1 = R.answers().length;
-    R.tabs([T1, T2, T3], T3); const b = await until(() => (R.answers().length > n1 ? R.answers().at(-1) : null), 700); f.untold = b ? { ok: b.ok, why: b.why } : null;
-    f.untoldLooks = R.calls.filter((c) => c.targetId === T3).length;
+    R.tabs([T1, T2, T3], T3); const b = await until(() => R.answers().slice(n1).find((m) => m.why === 'untold-tab'), 1200);
+    f.untold = !!b; f.waitedFirst = (R.answers().slice(n1)[0] || {}).why || null; f.untoldLooks = R.calls.filter((c) => c.targetId === T3).length;
+    f.connectedOnOld = R.answers().slice(n0).some((m) => m.ok && m.wid === W1);
     R.close();
     return f;
   };
-  const l1 = await law1(BS);
-  ok(l1.moved === W2 && l1.freshLooks >= 1, `LAW 1 — a STALE first look (the keeper's cached rows answer the old window ${W1} for the agent's new tab): the follow looks again with FRESH rows (${l1.freshLooks}) and the picture moves to its window (${l1.moved})`, l1);
-  ok(l1.untold && l1.untold.ok === false && l1.untold.why === 'untold-tab' && l1.untoldLooks === 4, `LAW 1 — a tab whose window is never told: one look + three fresh ones (${l1.untoldLooks}), then SAID («untold-tab» — the page shows its own picture of the tab and says so in its status line), never another tab's window in silence`, l1);
-  const BStip = compileAt('src/server/browser-stream.js', '        if (tries < X_FOLLOW_RETRY_MS.length) { // law 1:', '        if (false) { // the tip fecae86de: no second look —');
-  const t1 = await law1(BStip);
-  ok(t1.moved == null, `RED CONTROL — the tip fecae86de (one look per change): the stale answer is taken as «not moved» and the picture stays on the old window (${JSON.stringify(t1)})`, t1);
-  // ONE window holding both tabs (the other road: a page's own window.open): fresh rows confirm the same window ⇒ nothing re-issued, nothing said
-  { const R = await rig(BS, (t) => (t === T4 ? W1 : W1)); const n = R.answers().length; R.tabs([T1, T4], T4); await sleep(350); ok(R.answers().length === n, `a tab in the SAME window (fresh rows confirm ${W1}): no ticket re-issued, nothing said (${R.answers().length - n})`); R.close(); }
-  // LAW 2 — A VIEWER NEVER SIZES A WINDOW THAT IS NOT ITS HOLDER'S: this pane RULES its holder's window ('size'); a chip on the OTHER
-  // conversation's tab draws that window with the WATCH seat (the other agent keeps its window's size)
+  // the SAME CDP window holding both tabs (a lease's own window — measured on real xpra: its `tab new` lands IN it)
+  const sameWin = async () => { const R = await rig(BS, () => W1); const n = R.answers().length; R.tabs([T1, T4], T4); await sleep(350); const f = { answers: R.answers().length - n, looks: R.calls.filter((c) => c.targetId === T4).length }; R.close(); return f; };
+  // THE LATE WINDOW, PROVEN BY A STALL (主开发 22:13Z): the new window's row is held back 2.2 s — past the old 1.95 s of looks — the
+  // keeper answering the old window's row until then; the wait is said, then the picture moves. RED CONTROL: the tip's rule (the X
+  // rows' «same window» trusted, the CDP window forgotten) stays on the old window for good
+  const STALL_MS = 2050; // past the tip's 1.95 s of looks
+  const stall = async (B, waitMs) => {
+    const R = await rig(B, (t, fresh, n, since) => (t === T2 ? (since < STALL_MS ? W1 : W2) : W1), { waitBoundMs: 8000 });
+    const n0 = R.answers().length;
+    R.tabs([T1, T2], T2);
+    const a = await until(() => R.answers().slice(n0).find((m) => m.ok), waitMs, 50);
+    const f = { said: (R.answers().slice(n0)[0] || {}).why || null, moved: a ? a.wid : null, oldTicket: R.answers().slice(n0).some((m) => m.ok && m.wid === W1) };
+    R.close();
+    return f;
+  };
+  // LAW 2 — A VIEWER NEVER SIZES A WINDOW THAT IS NOT ITS HOLDER'S
   const law2 = async (B) => {
     const R = await rig(B, (t) => (t === T5 ? W5 : W1), { owners: { [T1]: 'agent', [T5]: 'other' } });
     const before = R.answers().at(-1);
     const seat0 = R.bridge.xSeat('da-x1', before && before.ticket);
     await until(() => R.v.msgs.find((m) => m.type === 'tab-owners'), 1500);
     const n = R.answers().length; R.send({ type: 'watch-tab', targetId: T5 });
-    const a = await until(() => (R.answers().length > n ? R.answers().at(-1) : null), 700);
+    const a = await until(() => R.answers().slice(n).find((m) => m.ok), 700);
     const f = { seat0, wid: a && a.wid, told: a && a.seat, bridge: a ? R.bridge.xSeat('da-x1', a.ticket) : null };
     R.close();
     return f;
   };
-  const l2 = await law2(BS);
-  ok(l2.seat0 === 'size' && l2.wid === W5 && l2.told === 'watch' && l2.bridge === 'watch', `LAW 2 — this pane rules its holder's window (${l2.seat0}); its chip on ANOTHER conversation's tab draws that window ${l2.wid} with the WATCH seat (told ${l2.told}, the bridge ${l2.bridge}) — it never sizes a window that is not its holder's`, l2);
-  const BSl2 = compileAt('src/server/browser-stream.js', 'targetId: tid, foreign: foreignOf(relay, viewer, tid), at: now() });', 'targetId: tid, foreign: false, at: now() });');
-  const c2 = await law2(BSl2);
-  ok(c2.bridge === 'size', `RED CONTROL — without the foreign rule the chip's ticket would SIZE the other conversation's window (${c2.bridge})`, c2);
-  // LAW 3 — A FOLLOW NEVER SWALLOWS AN ANSWER THE PAGE WAITS FOR: the page asks again while a slow keeper answers; a follow (the
-  // agent moved to a tab in the SAME window) supersedes that ask and finds «not moved» — the page's ask is answered all the same
+  // LAW 3 — A FOLLOW NEVER SWALLOWS AN ANSWER THE PAGE WAITS FOR
   const law3 = async (B) => {
-    const R = await rig(B, (t) => W1, { delayMs: 140 });
+    const R = await rig(B, () => W1, { delayMs: 140 });
     const n = R.answers().length;
     R.send({ type: 'x-ticket' }); await sleep(10); R.tabs([T1, T4], T4);
     const a = await until(() => (R.answers().length > n ? R.answers().at(-1) : null), 600);
     R.close();
     return { answered: !!a, ok: a && a.ok };
   };
-  const l3 = await law3(BS);
-  ok(l3.answered && l3.ok, `LAW 3 — the page's own ask, superseded by a follow that found «not moved», is ANSWERED (${JSON.stringify(l3)})`, l3);
-  const BSl3 = compileAt('src/server/browser-stream.js', '    if (follow && viewer.xOwed) follow = false;', '    ');
-  const c3 = await law3(BSl3);
-  ok(!c3.answered, `RED CONTROL — without law 3 the follow swallows the page's ask: no answer comes, the page stays «asking» for good (${JSON.stringify(c3)})`, c3);
   // a BURST of tab flips is ONE keeper ask for the viewer (coalesced); a viewer that LEFT is skipped
   const burst = async (B) => {
     const R = await rig(B, (t) => (t === T2 ? W2 : W1));
@@ -468,15 +480,30 @@ console.log("§8c the follow looks again on a stale answer, draws another holder
     R.close();
     return { asks, afterLeft };
   };
-  const bu = await burst(BS);
-  ok(bu.asks === 1 && bu.afterLeft === 0, `five tab flips in a burst are ONE keeper ask for the viewer (${bu.asks}); after the viewer LEFT a flip asks nothing for it (${bu.afterLeft})`, bu);
+  const BStip = compileAt('src/server/browser-stream.js', 'const verdict = PIC.xFollowVerdict({ ticket: cur, answer: x, tid, known: relay.xCdpOfWid });', 'const verdict = PIC.xFollowVerdict({ ticket: cur, answer: { wid: x.wid, windowId: null }, tid: cur ? cur.targetId : tid, known: null }); // the tip: the X rows trusted');
+  const BSl2 = compileAt('src/server/browser-stream.js', 'targetId: tid, foreign: foreignOf(relay, viewer, tid), at: now() });', 'targetId: tid, foreign: false, at: now() });');
+  const BSl3 = compileAt('src/server/browser-stream.js', '    if (follow && viewer.xOwed) follow = false;', '    ');
   const BSco = compileAt('src/server/browser-stream.js', "      if (!v || v.agent || !v.xWanted || relay.viewers.get(v.id) !== v || v.xFollowTimer) continue;\n", "      if (!v || v.agent || !v.xWanted || relay.viewers.get(v.id) !== v) continue; xTicketFor(relay, v, { follow: true }); continue;\n");
-  const cbu = await burst(BSco);
+  // the scenes run SIDE BY SIDE (each its own bridge, ports and fake keeper): the section costs its longest scene, not their sum
+  const [l1, sw, st, sc, l2, c2, l3, c3, bu, cbu] = await Promise.all([law1(BS), sameWin(), stall(BS, 3500), stall(BStip, STALL_MS + 350), law2(BS), law2(BSl2), law3(BS), law3(BSl3), burst(BS), burst(BSco)]);
+  ok(l1.saidFirst === 'waiting-window' && l1.moved === W2 && !l1.connectedOnOld, `LAW 1 — a STALE first look (the old window's row for the new tab's CDP window): the wait is SAID («${l1.saidFirst}») and the fresh look moves the picture to its window ${l1.moved} — never a ticket for the old window`, l1);
+  ok(l1.waitedFirst === 'waiting-window' && l1.untold && l1.untoldLooks >= 3, `LAW 1 — a tab whose window is never told: «waiting-window» said, ${l1.untoldLooks} looks, then «untold-tab» at the bound — the page stays on its own picture of the tab`, l1);
+  ok(sw.answers === 0 && sw.looks === 1, `a tab in the SAME CDP window: ONE look (${sw.looks}), no ticket re-issued, nothing said (${sw.answers})`, sw);
+  ok(st.said === 'waiting-window' && st.moved === W2 && !st.oldTicket, `THE LATE WINDOW (a STALL: the new window's row held back ${STALL_MS} ms, past the old 1.95 s): «${st.said}» said at once, then the picture moved to ${st.moved} — no ticket for the old window meanwhile`, st);
+  ok(sc.moved == null && sc.said == null, `RED CONTROL — the tip's rule (the X rows' «same window» trusted, the CDP window forgotten): nothing said, the picture never left the old window (${JSON.stringify(sc)})`, sc);
+  ok(l2.seat0 === 'size' && l2.wid === W5 && l2.told === 'watch' && l2.bridge === 'watch', `LAW 2 — this pane rules its holder's window (${l2.seat0}); its chip on ANOTHER conversation's tab draws that window ${l2.wid} with the WATCH seat (told ${l2.told}, the bridge ${l2.bridge}) — it never sizes a window that is not its holder's`, l2);
+  ok(c2.bridge === 'size', `RED CONTROL — without the foreign rule the chip's ticket would SIZE the other conversation's window (${c2.bridge})`, c2);
+  ok(l3.answered && l3.ok, `LAW 3 — the page's own ask, superseded by a follow that found the same window, is ANSWERED (${JSON.stringify(l3)})`, l3);
+  ok(!c3.answered, `RED CONTROL — without law 3 the follow swallows the page's ask: no answer comes, the page stays «asking» for good (${JSON.stringify(c3)})`, c3);
+  ok(bu.asks === 1 && bu.afterLeft === 0, `five tab flips in a burst are ONE keeper ask for the viewer (${bu.asks}); after the viewer LEFT a flip asks nothing for it (${bu.afterLeft})`, bu);
   ok(cbu.asks >= 4, `RED CONTROL — uncoalesced, the same burst is ${cbu.asks} keeper asks`, cbu);
-  // the page SAYS an untold window in its status line (source pin: the live view's own words, reused)
+  // the page SAYS its wait and an untold window in its status line (en / zh / ja), and an unmounted view never reads «connected»
   const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(/if \(m && m\.why === 'untold-tab'\) \{ xp\.untoldSaid = true; setStatus\(SOURCE_T\.untold\(\)\); \}/.test(live) && /if \(xp\.untoldSaid\) \{ xp\.untoldSaid = false; setStatus\('', \{ hide: true \}\); \}/.test(live),
-    'the page says «untold-tab» in its status line (the view\'s own words for an untold window) and takes them back when a ticket comes');
+  const WAIT = 'Waiting for this tab’s window to appear on the display — showing the page’s own picture of it meanwhile', UNTOLD = 'This tab could not be shown as a window — showing the page’s own picture of it';
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  ok(live.includes(`if (m && m.why === 'waiting-window') { xp.untoldSaid = true; setStatus(t('${WAIT}')); }`) && live.includes(`if (m && m.why === 'untold-tab') { xp.untoldSaid = true; setStatus(t('${UNTOLD}')); }`)
+    && /xp\.view = null; xp\.mode = null; xp\.status = null;/.test(live) && zh.includes(`"${WAIT}":`) && zh.includes(`"${UNTOLD}":`) && ja.includes(`"${WAIT}":`) && ja.includes(`"${UNTOLD}":`),
+    'the page says «waiting-window» and «untold-tab» in its status line in plain words (en / zh / ja), takes them back when a ticket comes, and an unmounted X view never reads «connected»');
 }
 
 // ═══ §9 THE WIRING ═══

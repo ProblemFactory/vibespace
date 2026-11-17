@@ -5,7 +5,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ## 2.369.408 — 2026-11-17
 
 ### Fixed
-- When the agent opens a new tab, the browser window now shows that tab instead of the first one; choosing a tab in its tab row shows it too.
+- When the agent opens a new tab, the browser window shows that tab, not the first one, and says so while its window is still appearing.
 
 ## 2.369.407 — 2026-11-17
 

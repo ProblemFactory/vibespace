@@ -30,6 +30,8 @@ export default {
   "the page's picture — this browser was not started on VibeSpace's display": "页面画面 — 这个浏览器不是在 VibeSpace 的显示上启动的",
   "the page's picture — the browser's display session is gone": "页面画面 — 浏览器的显示会话已不在",
   "the page's picture": "页面画面",
+  "Waiting for this tab’s window to appear on the display — showing the page’s own picture of it meanwhile": "正在等待此标签页的窗口出现在显示上 — 期间显示该页面自身的画面",
+  "This tab could not be shown as a window — showing the page’s own picture of it": "无法将此标签页显示为窗口 — 正在显示该页面自身的画面",
   "the page's picture — this conversation's window could not be told apart on the display": "页面画面 — 无法在显示上分辨出本对话的窗口",
   "Connecting to the browser window…": "正在连接浏览器窗口…",
   "The browser window is not available": "浏览器窗口不可用",
