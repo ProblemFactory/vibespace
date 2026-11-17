@@ -318,23 +318,30 @@ console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
 console.log('\n§7b a leg never passes by its name: no swapped call anywhere, one guarded helper, the unguarded only fall');
 {
   const C = await import('./lib/check.mjs');
-  // The inline ok / check helpers without the swap guard on the tree, counted by C.helperDefs (order known, guarded
-  // false) — pinned EXACT so it only falls: a suite that takes the lib (or guards its own helper) lowers this number in
-  // the same commit; a new suite takes `import { checker } from './lib/check.mjs'`; raising it is a reviewed choice.
-  const UNGUARDED_CAP = 1020;
+  // The inline ok / check helpers without the swap guard, BY FILE (scripts/fixtures/unguarded-helpers.json — 1020 in 1016 files on
+  // 2.369.407). ONE-WAY (主开发 2026-11-17, the batch-36 readers): a file that ADDS one is red by name — a new suite takes
+  // `import { checker } from './lib/check.mjs'` — and the red prints the row that admits it on purpose; a file whose helper is
+  // gone or guarded is NEVER red (forty-six lanes merge suites into one train), its stale row is only said.
+  const LISTED = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'unguarded-helpers.json'), 'utf-8')).files || {};
   const self = path.basename(fileURLToPath(import.meta.url));
   const dir = path.join(REPO, 'scripts');
   const files = [...fs.readdirSync(dir).filter((f) => f.endsWith('.mjs') && f !== self), ...fs.readdirSync(path.join(dir, 'lib')).filter((f) => f.endsWith('.mjs')).map((f) => 'lib/' + f)];
-  let defs = 0; const unguarded = [], swapped = [];
+  let defs = 0; const unguarded = [], swapped = [], perFile = {};
   for (const f of files) {
     const src = fs.readFileSync(path.join(dir, f), 'utf-8'), d = C.helperDefs(src);
     defs += d.length;
-    for (const x of d) if (x.order !== 'unknown' && !x.guarded) unguarded.push(`${f}:${x.line}`);
+    for (const x of d) if (x.order !== 'unknown' && !x.guarded) { unguarded.push(`${f}:${x.line}`); (perFile[f] = perFile[f] || []).push(x.line); }
     for (const c of C.swappedCalls(src, d)) swapped.push(`${f}:${c.line} (a ${c.order} helper, :${c.defLine}) ${c.text.slice(0, 90)}`);
   }
   ok(files.length > 1000 && defs > 900, `${files.length} scripts read, ${defs} inline ok / check helpers found (non-vacuous; this file exempts itself)`);
   ok(swapped.length === 0, `no call hands its own helper a string where the condition goes${swapped.length ? ' — ' + swapped.slice(0, 12).join(' · ') : ''}`);
-  ok(unguarded.length === UNGUARDED_CAP, `the inline helpers without the swap guard only fall: ${unguarded.length} = ${UNGUARDED_CAP}${unguarded.length > UNGUARDED_CAP ? ' — a NEW one: a new suite imports { checker } from \'./lib/check.mjs\'' : unguarded.length < UNGUARDED_CAP ? ' — it FELL: lower UNGUARDED_CAP to ' + unguarded.length : ''}`);
+  const added = Object.entries(perFile).filter(([f, ls]) => ls.length > (LISTED[f] || 0)), fell = Object.keys(LISTED).filter((f) => (perFile[f] || []).length < LISTED[f]);
+  ok(Object.keys(LISTED).length > 900 && added.length === 0, `the inline helpers without the swap guard only fall (${unguarded.length} in ${Object.keys(perFile).length} files, the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)})${added.length ? ' — ADDED by ' + added.map(([f, ls]) => `${f}:${ls.join(',')} (import { checker } from './lib/check.mjs'; on purpose: "${f}": ${ls.length} in scripts/fixtures/unguarded-helpers.json)`).join(' · ') : ''}`);
+  if (fell.length) console.log(`    (${fell.length} listed file(s) no longer carry an unguarded helper — not red; drop their rows when convenient: ${fell.slice(0, 8).join(', ')}${fell.length > 8 ? ', …' : ''})`);
+  // the one-way rule over plants: an added helper is red by name, a removed one is not
+  const judge = (per, listed) => ({ added: Object.entries(per).filter(([f, ls]) => ls.length > (listed[f] || 0)).map(([f]) => f), fell: Object.keys(listed).filter((f) => (per[f] || []).length < listed[f]) });
+  const jA = judge({ 'test-new.mjs': [7], 'test-old.mjs': [3] }, { 'test-old.mjs': 1 }), jB = judge({ 'test-old.mjs': [3, 9] }, { 'test-old.mjs': 1 }), jC = judge({}, { 'test-old.mjs': 1 });
+  ok(jA.added.join() === 'test-new.mjs' && jB.added.join() === 'test-old.mjs' && jC.added.length === 0 && jC.fell.join() === 'test-old.mjs', 'ONE-WAY: a new file with its own helper, or a second helper in a listed file, is named; a file whose helper went is only said');
 
   // the census over planted texts (a helper spelled in pieces so no scanner reads THIS file's strings as one)
   const K = 'const', NF = `${K} ok = (n, c, e) => { if (c) { pass++; } else { fail++; } };\n`, CF = `${K} ok = (c, n, e) => { if (c) { pass++; } else { fail++; } };\n`;

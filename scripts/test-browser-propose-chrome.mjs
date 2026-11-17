@@ -182,7 +182,9 @@ let lastMiss = null;
 // B-4f03 (lane bl-tests-e): the ONE real-click door, scratch.mjs realClicker — measure, wait until it holds still, the point
 // proven at press time (a target that moved is re-aimed once), the landing checked; false = no press or a missed one (`.lastMiss` says why).
 // The copy's 900 ms pause before its press rides the door's beforePress — written for an Approve, which counts only after it
-// sat still ARM_MS (700 ms, src/lib/press-arm.js; verify r1 ④b); the one press through it today is the For-you button.
+// sat still ARM_MS (700 ms, src/lib/press-arm.js; verify r1 ④b); the one press through it today is the For-you button. A press
+// the door RE-AIMS (the target moved after the pause) is made at once, without a second pause: an armed Approve pressed through
+// this wrapper and re-aimed would meet its «just moved» refusal — repeat the pause there before relying on it (B-4f03 reader).
 const RC = realClicker({ evalJs, cdp });
 const realClick = async (sel) => { const ok = await RC(sel, { beforePress: () => sleep(900) }); if (!ok) lastMiss = RC.lastMiss; return ok; };
 const shot = async (name, sel, pad = 6) => {
