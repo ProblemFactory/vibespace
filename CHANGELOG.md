@@ -7,6 +7,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - An Antigravity account’s usage is read once after a stretch of work (5 quiet minutes, at most every 30 minutes); its own Settings row can turn that off.
 - An Antigravity account’s row says how many times its usage was read today; hover it to see who asked.
+- On a phone turned sideways two windows can stand side by side: «Split» beside a window in the window list; held upright, the phone says to turn it.
 
 ### Changed
 - Settings: Claude’s usage refresh row now covers Claude only; Antigravity’s automatic usage reads have their own row, Off if Claude’s was Off.
@@ -14,9 +15,18 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The usage popup draws an estimate between readings only where this hub’s own record shows it lands closer than the last reading, as “about Y%”.
 - Elsewhere the popup shows the reading and how many requests ran here since, and the account pool reads an estimate only where it has proven itself.
 - Codex and Antigravity usage estimates learn only from their own readings, never from Claude’s quota sizes.
+- On a phone the For you button shows a single number; on a wider screen its numbers fold into one when the window's name needs the room.
 
 ### Fixed
 - A usage wall seen again after a restart no longer reads the Antigravity account a second time.
+- In a chat, a code block's Copy and Wrap buttons sit in their own row above it and never cover its words; on a phone they are big enough for a finger.
+- A Thinking block has no Wrap button; its one Copy button sits beside its title.
+- On a computer, moving to a code block's buttons with the Tab key shows them.
+- Tapping a text box on a phone no longer zooms the page, so the send button stays on the screen.
+- After switching desktops on a phone the title names that desktop's window at once, or says «No window».
+- Turning the phone no longer opens the conversation list; it stays as you left it.
+- A window's tabs stay on screen with their names when the phone is turned sideways; many tabs scroll instead of shrinking to icons.
+- On a phone the window list keeps each window's name readable: a full row shortens its billing tag, then moves «Split» and the tag into its ⋯ menu.
 
 ## 2.369.407 — 2026-11-17
 
