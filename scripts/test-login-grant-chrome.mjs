@@ -16,8 +16,9 @@
 //      the kept previous password with when; a wider grant «经由» with NO ✕ and its door; its own grant keeps its ✕;
 //   ⑦ the top of the login's dialog — user name, site, the two-step code with its door; the door's dialog lists the vault's codes by
 //      name, «无» unbinds: POST /api/vault/web-logins/totp {name, totpName: null}, and the head then says «无»;
-//   ⑧ EVERYONE ON THE STAR ROW (MUST 1 + should d): a login's dialog draws ONE locked line «全部 · 经由：任何网站» with its door — not a
-//      chip per conversation — and a conversation that ALSO holds this login's own row stays ticked and removable, «也经由» beside it.
+//   ⑧ EVERYONE ON THE STAR ROW, ONE CONVERSATION LEFT OUT (MUST 1 + should d; 主开发 23:25Z): a login's dialog draws ONE locked line
+//      «全部 · 经由：任何网站 · 除了 新对话» with its door — not a chip per conversation; the left-out conversation's row says it is left out
+//      (never drawn like a covered one); a conversation that ALSO holds this login's own row stays ticked and removable, «也经由» beside it.
 // LGD_SHOTS_DIR=<dir> also writes the pictures (360 and 960) for the owner's look.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -60,8 +61,8 @@ const DATA = {
 };
 // EVERYONE ON THE STAR ROW — «by what» as the hub now answers it (Everyone, the group and every conversation through «any site»; A also
 // by this login's own row)
-const STAR_ALL = { resource: '*', scope: 'any-site', to: [{ kind: 'everyone' }], except: [] };
-const DATA_ALL = { ...DATA, entries: [alice([OWN, STAR_ALL], { everyone: ['any-site'], 'group:g1': ['any-site'], 'conversation:conv-a': ['this-account', 'any-site'], 'conversation:conv-b': ['any-site'], 'conversation:conv-d': ['any-site'] }), ...DATA.entries.slice(1)] };
+const STAR_ALL = { resource: '*', scope: 'any-site', to: [{ kind: 'everyone' }], except: [conv('conv-d')] };   // D left out
+const DATA_ALL = { ...DATA, entries: [alice([OWN, STAR_ALL], { everyone: ['any-site'], 'group:g1': ['any-site'], 'conversation:conv-a': ['this-account', 'any-site'], 'conversation:conv-b': ['any-site'] }), ...DATA.entries.slice(1)] };
 const entry = `import { showLoginGrantPicker, showAnySiteDialog, showAnyAccountDialog, wideHeaderDoors, loginHeld } from ${J('src/lib/vault-login-grants.js')};
 import { loginExtras } from ${J('src/lib/vault-login-row.js')};
 const q = new URLSearchParams(location.search), mode = q.get('mode') || 'login';
@@ -235,13 +236,15 @@ for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { v
   }
   p.close();
 }
-console.log('⑧ Everyone on the star row — ONE locked line for Everyone; a conversation with its own grant stays removable');
+console.log('⑧ Everyone on the star row, D left out — ONE locked line that says so; D\'s row marked; a conversation with its own grant stays removable');
 for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { vw: 960, vh: 900 }]]) {
   const p = await page({ ...o, query: 'mode=login&star=everyone', sel: LOGIN + ' .pp-chip-locked' });
-  const r = await p.ev(`(() => { const d = document.querySelector(${Q(LOGIN)}); const locked = [...d.querySelectorAll('.pp-chip-locked')]; const ownA = [...d.querySelectorAll('.pp-chip')].find((c) => !c.classList.contains('pp-chip-locked') && /采购助手/.test(c.textContent)); const rowA = d.querySelector('.pp-row[data-key="agent:conv-a"]'); const rowB = d.querySelector('.pp-row[data-key="agent:conv-b"]');
-    return { locked: locked.map((c) => c.textContent), lockedDoors: locked.filter((c) => c.querySelector('.pp-chip-door')).length, ownAx: ownA ? ownA.querySelectorAll('.pp-chip-x').length : -1, rowAhint: rowA ? rowA.textContent : '', rowAlocked: rowA ? rowA.classList.contains('pp-locked') : null, rowBlocked: rowB ? rowB.classList.contains('pp-locked') : null }; })()`);
-  ok(r.locked.length === 1 && /全部/.test(r.locked[0]) && /经由：任何网站/.test(r.locked[0]) && r.lockedDoors === 1 && r.rowBlocked === false,
-    `${tag}: ONE locked line «全部 · 经由：任何网站» with its door — not a chip per conversation (B, covered by it, has no chip of its own)`, r);
+  const r = await p.ev(`(() => { const d = document.querySelector(${Q(LOGIN)}); const locked = [...d.querySelectorAll('.pp-chip-locked')]; const ownA = [...d.querySelectorAll('.pp-chip')].find((c) => !c.classList.contains('pp-chip-locked') && /采购助手/.test(c.textContent)); const rowA = d.querySelector('.pp-row[data-key="agent:conv-a"]'); const rowB = d.querySelector('.pp-row[data-key="agent:conv-b"]'); const rowD = d.querySelector('.pp-row[data-key="agent:conv-d"]');
+    return { locked: locked.map((c) => c.textContent), lockedDoors: locked.filter((c) => c.querySelector('.pp-chip-door')).length, ownAx: ownA ? ownA.querySelectorAll('.pp-chip-x').length : -1, rowAhint: rowA ? rowA.textContent : '', rowAlocked: rowA ? rowA.classList.contains('pp-locked') : null, rowBlocked: rowB ? rowB.classList.contains('pp-locked') : null, rowB: rowB ? rowB.textContent : '', rowD: rowD ? rowD.textContent : '' }; })()`);
+  ok(r.locked.length === 1 && /全部/.test(r.locked[0]) && /经由：任何网站/.test(r.locked[0]) && /除了 新对话/.test(r.locked[0]) && r.lockedDoors === 1 && r.rowBlocked === false,
+    `${tag}: ONE locked line «全部 · 经由：任何网站 · 除了 新对话» with its door — not a chip per conversation (B, covered by it, has no chip of its own)`, r);
+  ok(/不在「全部」里——经由：任何网站/.test(r.rowD) && !/不在「全部」里/.test(r.rowB),
+    `${tag}: D, which the star row leaves out, is marked «不在「全部」里» — B, which it covers, is not: the two never look alike`, { rowB: r.rowB, rowD: r.rowD });
   ok(r.ownAx === 1 && r.rowAlocked === false && /也经由：任何网站/.test(r.rowAhint),
     `${tag}: A holds this login's own row too — its chip keeps its ✕, its row is removable, «也经由：任何网站» beside it`, r);
   ok(fits(await p.fit(LOGIN)) && await p.noRefusal(), `${tag}: it fits inside and draws no refusal before one`);

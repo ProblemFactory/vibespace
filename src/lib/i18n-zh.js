@@ -11284,6 +11284,8 @@ export default {
   "through: any account on this site": "经由：这个网站的任何账号", // the owner 2026-11-17: who may have a web login filled
   "also through: any site": "也经由：任何网站", // the owner 2026-11-17: who may have a web login filled
   "also through: any account on this site": "也经由：这个网站的任何账号", // the owner 2026-11-17: who may have a web login filled
+  "except {names}": "除了 {names}", // the owner 2026-11-17: who may have a web login filled
+  "left out of Everyone — {through}": "不在「全部」里——{through}", // the owner 2026-11-17: who may have a web login filled
   "Any site…": "任何网站…", // the owner 2026-11-17: who may have a web login filled
   "Any account on this site…": "这个网站的任何账号…", // the owner 2026-11-17: who may have a web login filled
   "VibeSpace never hands them the password and types it only on the matching site into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls.": "VibeSpace 绝不把密码交给它们，只在匹配的网站上把密码填进密码或验证码输入框；我们的防护能挡住误读和错误的网站，但不保证能挡住故意钻研它自己控制的页面的智能体。", // the owner 2026-11-17: who may have a web login filled

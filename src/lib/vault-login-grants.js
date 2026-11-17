@@ -15,7 +15,7 @@ import { principalPicker } from './principal-picker.js';
 import { rowToPick, pickToRow } from './principal-picker-model.js';
 import { showUnlock } from './vault-unlock.js';
 import { loadTotp } from './vault-totp-row.js';
-import { EVERYONE_KEY, rosterFromSubjects, lockedPlan, rowAt, savePlan, sitesOf, wideSummary, principalKeyOf, heldFacts } from './login-grant-model.js';
+import { EVERYONE_KEY, rosterFromSubjects, lockedPlan, everyoneLeftOut, rowAt, savePlan, sitesOf, wideSummary, principalKeyOf, pickKeyOf, heldFacts } from './login-grant-model.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const post = (url, body = {}) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -58,9 +58,15 @@ function grantDialog({ id, scope, resource, name, title, head = null, consequenc
   body.append(el('div', 'vw-ak-hint vw-login-consequence', consequence));
   // what «by what» says, drawn (主开发 22:41Z): a subject only a wider row admits — locked «through» it, with its door; one that also
   // holds THIS row — ticked and removable, «also through» beside it; Everyone held wider — ONE line, not one chip per conversation
-  const plan = lockedPlan(byWhat || {}, scope, EVERYONE_KEY);
-  const locked = plan.locked.map((l) => ({ key: l.key, why: throughWords(l.through), door: { label: doorWords(l.through), run: () => openWider && openWider(l.through) } }));
-  const alsoHint = new Map(plan.also.map((l) => [l.key, l.through === 'any-site' ? t('also through: any site') : t('also through: any account on this site')]));
+  const plan = lockedPlan(byWhat || {}, scope, EVERYONE_KEY, { held: (stored.to || []).map(principalKeyOf).filter(Boolean) });
+  // Everyone held wider: its line says whom that row LEAVES OUT, and their rows are marked so (a left-out row must not look covered)
+  const loginRows = (((data && data.entries) || []).find((e) => e.name === name) || {}).grants || grants;
+  const leftOut = plan.everyone ? everyoneLeftOut(loginRows, plan.everyone.through) : [];
+  const nameOf = (p) => { const k = pickKeyOf(principalKeyOf(p) || '', EVERYONE_KEY); const r = roster.find((x) => x.key === k); return r ? r.name : String(p.name || p.key || p.id || '').slice(0, 12); };
+  const leftWhy = leftOut.length ? ` · ${t('except {names}', { names: leftOut.map(nameOf).join(', ') })}` : '';
+  const locked = plan.locked.map((l) => ({ key: l.key, why: throughWords(l.through) + (l.principal === 'everyone' ? leftWhy : ''), door: { label: doorWords(l.through), run: () => openWider && openWider(l.through) } }));
+  const alsoHint = new Map(plan.also.map((l) => [l.key, (l.through === 'any-site' ? t('also through: any site') : t('also through: any account on this site')) + (l.principal === 'everyone' ? leftWhy : '')]));
+  for (const p of leftOut) { const k = pickKeyOf(principalKeyOf(p) || '', EVERYONE_KEY); if (k && !alsoHint.has(k)) alsoHint.set(k, t('left out of Everyone — {through}', { through: throughWords(plan.everyone.through) })); }
   // a conversation a wider row holds that is not running has its row too — «not running now» (its name as the row stored it)
   const nameIn = (pk) => { for (const g of grants) for (const p of g.to || []) if (p && p.kind === 'conversation' && `conversation:${p.key}` === pk && p.name) return String(p.name); return null; };
   const own = [...roster, ...extra.filter((x) => !roster.some((r) => r.key === x.key))];

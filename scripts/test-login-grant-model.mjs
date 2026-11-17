@@ -179,13 +179,13 @@ console.log('⑥ THE CURE (主开发 22:41Z): Everyone and its groups by «by wh
   ok(!GM.admits(star.anySite, {}).ok && GM.admits(star.anySite, probe.facts).ok && !/^[A-Za-z0-9]/.test(BL.BY_WHAT_PROBE),
     'RED CONTROL (the probe as it was): Everyone probed with EMPTY facts is admitted by no row — the grant model counts an Everyone entry only for a caller with a key; the probe key starts with no letter or digit, so no row can hold it');
   // should (d): ONE line for Everyone — the subjects it covers through the same row are not drawn one by one
-  const plan = M.lockedPlan(bw, 'this-account');
+  const plan = M.lockedPlan(bw, 'this-account', M.EVERYONE_KEY, { held: ['conversation:conv-a'] });
   ok(plan.locked.length === 1 && plan.locked[0].key === M.EVERYONE_KEY && plan.locked[0].through === 'any-site' && plan.covered === 3,
     'in a login\'s dialog the star row\'s Everyone is ONE locked line «through: any site» — not a chip per conversation (B, C and the group are covered by it)', plan);
   // should (a): a subject with its OWN grant here AND a wider one is drawn ticked and removable, «also through» beside it
   ok(plan.also.length === 1 && plan.also[0].key === 'agent:conv-a' && !plan.locked.some((l) => l.key === 'agent:conv-a'),
     'A holds this login\'s own row AND the star row: removable here (its own grant stays once the wider one goes), not locked', plan.also);
-  const mixed = M.lockedPlan({ everyone: ['any-site'], 'group:g1': ['any-account'], 'conversation:conv-b': ['any-site'] }, 'this-account');
+  const mixed = M.lockedPlan({ everyone: ['any-site'], 'group:g1': ['any-account'], 'conversation:conv-b': ['any-site'] }, 'this-account', M.EVERYONE_KEY, { held: [] });
   ok(mixed.locked.map((l) => `${l.key}>${l.through}`).sort().join() === 'everyone:*>any-site,group:g1>any-account' && mixed.covered === 1,
     'a subject through a NARROWER wider row (the group through «any account») keeps its own line beside Everyone\'s', mixed);
   // should (b): a conversation a wider row holds that is not running is a subject too
@@ -207,6 +207,29 @@ console.log('⑥ THE CURE (主开发 22:41Z): Everyone and its groups by «by wh
   const CSS = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
   ok(/\.vw-login-grant-dialog \[hidden\], \.vw-login-site-pick \[hidden\], \.vw-login-totp-dialog \[hidden\] \{ display: none; \}/.test(CSS),
     'MUST 2: the dialogs are form windows outside the Vault window\'s `.vw [hidden]` — their own rule keeps a hidden press hidden (.vw-btn sets display)');
+}
+
+console.log('⑦ THE FOLLOW-UP (主开发 23:25Z): the Everyone line says whom it leaves out; it folds when Everyone holds this row too; «also» is the stored row\'s own');
+{
+  // 1. the star row holds Everyone EXCEPT D: the line names D, and D's row is marked left out (never drawn like a covered one)
+  const grantsD = [{ resource: LOGIN, scope: 'this-account', to: [conv('conv-a')], except: [] }, { resource: '*', scope: 'any-site', to: [everyone], except: [conv('conv-d')] }];
+  ok(JSON.stringify(M.everyoneLeftOut(grantsD, 'any-site')) === JSON.stringify([conv('conv-d')]) && M.everyoneLeftOut(grantsD, 'any-account').length === 0 && M.everyoneLeftOut([{ resource: '*', scope: 'any-site', to: [conv('conv-b')], except: [conv('conv-d')] }], 'any-site').length === 0,
+    'the wider row that holds Everyone says whom it leaves out (D) — only a row that holds Everyone, only at its own scope');
+  const G = fs.readFileSync(path.join(REPO, 'src/lib/vault-login-grants.js'), 'utf8');
+  ok(/everyoneLeftOut\(loginRows, plan\.everyone\.through\)/.test(G) && /t\('except \{names\}'/.test(G) && /t\('left out of Everyone — \{through\}'/.test(G),
+    'the dialog carries them on the Everyone line («除了 …») and marks each left-out row «不在「全部」里» (the chrome suite\'s ⑧ reads both on the page)');
+  // 2. Everyone holds THIS row as well as the star row: still ONE line, the conversations not one chip each
+  const bwE = { everyone: ['this-account', 'any-site'], 'conversation:conv-b': ['any-site'], 'conversation:conv-d': ['any-site'], 'group:g1': ['any-site'] };
+  const pe = M.lockedPlan(bwE, 'this-account', M.EVERYONE_KEY, { held: ['everyone'] });
+  ok(pe.also.length === 1 && pe.also[0].key === M.EVERYONE_KEY && pe.locked.length === 0 && pe.covered === 3, 'Everyone held HERE and wider: its own chip stays removable, «also through» beside it — and the three it covers get no locked chip each', pe);
+  const LM2 = await esMutant('src/lib/login-grant-model.js', "const ev = all.find((l) => l.principal === 'everyone');", "const ev = wide.find((l) => l.principal === 'everyone');");
+  ok(LM2.lockedPlan(bwE, 'this-account', M.EVERYONE_KEY, { held: ['everyone'] }).locked.length === 3, 'RED CONTROL (the fold as it was — on a wider-only Everyone): Everyone held here too ⇒ one locked chip per subject again');
+  // 3. «also» is the stored row's OWN principal: a conversation admitted here only through its Task Group is not «its own grant»
+  const bwG = { 'group:g1': ['this-account', 'any-site'], 'conversation:conv-c': ['this-account', 'any-site'] };
+  const pg = M.lockedPlan(bwG, 'this-account', M.EVERYONE_KEY, { held: ['group:g1'] });
+  ok(pg.also.map((l) => l.key).join() === 'group:g1' && pg.locked.map((l) => l.key).join() === 'agent:conv-c', 'C, admitted here only through its Task Group: locked «through any site», never drawn as holding its own grant — the group is the row\'s own', pg);
+  const byWhatOwn = (bw, scope) => Object.entries(bw).filter(([, sc]) => sc.includes(scope)).map(([k]) => k);
+  ok(byWhatOwn(bwG, 'this-account').includes('conversation:conv-c'), 'RED CONTROL (the «also» test as it was — «by what»\'s own scope): C reads as holding its own grant');
 }
 
 console.log(fail ? `\nFAIL (${fail} failed, ${pass} passed)` : `\nALL PASS (${pass})`);
