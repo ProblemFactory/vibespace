@@ -83,6 +83,7 @@ const LOOKS_LIKE_RECORD = /^(?:\x1b\[[0-9;?]*[A-Za-z]|\s)*(?:\{\s*["}]|\[\s*[[{"
  *  (first 3 per session per kind, then every 100th; the count is exact in
  *  `_droppedLines`); never a silent drop, never one telemetry event per line
  *  from a chatty producer (round 4). */
+const CONV_FACTS = require('../../conversation-facts.js'); // lane conversation-facts: the one step the wrapper also runs
 function noteDroppedLine(session, id, kind, line, err) {
   const c = session._droppedLines || (session._droppedLines = {});
   const n = (c[kind] = (c[kind] || 0) + 1);
@@ -555,7 +556,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             global.__vsEvent?.('cli-unknown-stream-type', String(msg.type).slice(0, 60));
             console.log(`[claude] new stream record type from the CLI: ${msg.type} (unhandled — see Diagnostics)`);
           }
-          if (msg.type === '_stdin_ack' || msg.type === '_stdin_nack') { session._stdinAckReceived = true; continue; }   // a nack (a torn line, lane human-cli r2) proves the pipe too; its warning rides a system/informational record
+          if (msg.type === '_stdin_ack' || msg.type === '_stdin_nack') { session._stdinAckReceived = true; continue; }
+          // lane conversation-facts: the conversation's facts, in memory per record (the wrapper's own step — src/conversation-facts.js)
+          if (session._convFacts) { try { CONV_FACTS.factsStep(session._convFacts, msg, Date.now()); } catch { } }   // a nack (a torn line, lane human-cli r2) proves the pipe too; its warning rides a system/informational record
           // Remote transport state from the chat-wrapper (2.125.0): the ssh
           // pipe died and the wrapper is reconnecting to the host-side keeper
           // (the REMOTE session is fine). Surfaced as a status-bar chip; the

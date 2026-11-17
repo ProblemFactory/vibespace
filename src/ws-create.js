@@ -1264,6 +1264,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           if (sessionMode === 'chat') {
             session._normalizer = createMessageManager(backend, id);
             session._normEpoch = Date.now();
+            session._convFacts = require('./conversation-facts.js').factsFresh(); // lane conversation-facts: a CLI process this hub started — read from its first record
             // A NEW CONVERSATION IS BORN WITH ITS HISTORY LOADED (inc-mvl02dkn-gop0): `_historyLoaded` says "this
             // normalizer holds the whole conversation", and one that sees the conversation's FIRST record does — there
             // is nothing on disk before it. It used to be set only by the first ATTACH's rebuild, and the creator never

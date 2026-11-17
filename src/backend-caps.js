@@ -393,6 +393,13 @@ function deriveInputModes(row) {
     ...(row && row.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}),
   });
 }
+// sidecarFacts names which of the conversation's facts its WRAPPER keeps in its sidecar (lane conversation-facts, majordomo
+// piece 2 — measured: after a hub restart with no page, 0 of 12 idle chat conversations read known; 主开发's ruling, road A:
+// the facts are kept where they are born). { background, timers, lastRecordAt }: the last background set (or the empty set
+// from the CLI's start), the one-way CLI-timer mark, the last record's time — written with the sidecar writes the wrapper
+// already makes (src/conversation-facts.js factsStep). conversations.list reads THIS row, never a harness id: a row that
+// keeps none says «unknown» with its reason, and the idle age then comes from the conversation's output file's own time.
+const NO_SIDECAR_FACTS = Object.freeze({ background: false, timers: false, lastRecordAt: false });
 const BACKEND_CAPS = {
   claude: {
     pool: true,
@@ -483,6 +490,7 @@ const BACKEND_CAPS = {
     terminalOnly: false, oauthUsage: true, globalUsageKey: '__global__', // lane dc-harness-tail: the rows' essay is at capsOf
     subagents: 'virtual', // lane agy-subagent-cards: a live virtual session per helper (essay at subagentView)
     autoResume: NO_AUTO_RESUME,
+    sidecarFacts: Object.freeze({ background: true, timers: true, lastRecordAt: true }), // data/bin/chat-wrapper.js keeps all three (essay at NO_SIDECAR_FACTS)
   },
   codex: {
     pool: true,
@@ -539,6 +547,7 @@ const BACKEND_CAPS = {
     terminalOnly: false, oauthUsage: false, globalUsageKey: '__global_codex__',
     subagents: 'threads', // lane agy-subagent-cards: a collab card opens the child's own thread
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
+    sidecarFacts: NO_SIDECAR_FACTS, // its wrapper keeps none of them yet (essay at NO_SIDECAR_FACTS)
   },
   shell: {
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false,
@@ -557,6 +566,7 @@ const BACKEND_CAPS = {
     terminalOnly: true, oauthUsage: false, globalUsageKey: null, // no agent: no chat, no window reach, no browser pin, no name prompt
     subagents: 'none', // lane agy-subagent-cards: no agent, no subagent
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it (shell has neither half)
+    sidecarFacts: NO_SIDECAR_FACTS, // its wrapper keeps none of them yet (essay at NO_SIDECAR_FACTS)
   },
   // ACP v1 harnesses (S8, design-harness-plugins §2.3): the agent holds its
   // own login/provider config — no pool, no quota probe, no credential
@@ -603,6 +613,7 @@ const BACKEND_CAPS = {
     terminalOnly: false, oauthUsage: false, globalUsageKey: null,
     subagents: 'none', // lane agy-subagent-cards: opencode's ACP stream shows no subagent's own steps — its row says so
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
+    sidecarFacts: NO_SIDECAR_FACTS, // its wrapper keeps none of them yet (essay at NO_SIDECAR_FACTS)
   },
   // Antigravity CLI (`agy`, lane antigravity-harness): NOT an ACP agent, but its chat wrapper
   // (data/bin/agy-wrapper.js) journals the SAME 'acp-events' records, so the protocol rows are
@@ -637,6 +648,7 @@ const BACKEND_CAPS = {
     subagents: 'cards', // lane agy-subagent-cards: the wrapper reads agy's store — a card per sub + its timeline
     accountBound: true, // B-a5a4 follow-up: a conversation lives in ITS account root's store (the descriptor's store.accountBound — the page reads it here)
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
+    sidecarFacts: NO_SIDECAR_FACTS, // its wrapper keeps none of them yet (essay at NO_SIDECAR_FACTS)
   },
 };
 
@@ -645,7 +657,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ modelFacts: false, terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, checkpoints: NO_CHECKPOINTS, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
+const NO_CAPS = Object.freeze({ sidecarFacts: NO_SIDECAR_FACTS, modelFacts: false, terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, imageLimits: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, checkpoints: NO_CHECKPOINTS, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed
