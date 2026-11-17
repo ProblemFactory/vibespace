@@ -342,7 +342,7 @@ console.log('§4e the other readers see what the gate sees (r4)');
   fs.writeFileSync(path.join(dir, `${S}.red`), JSON.stringify(goodRec(S, 'red', { failed: ['test-x'] })));
   ok((safely(() => existingVerdictOf(dir, S)) || {}).kind === 'red', '…a readable FULL red is one');
   const SRC4 = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
-  ok(/const existing = existingVerdictOf\(dir, sha\);/.test(SRC4) && /\(only \|\| shard \|\| host\) && existing\) noVerdict =/.test(SRC4), 'WIRING: the partial-run refusal asks existingVerdictOf');
+  ok(/else if \(partial\) \{\s*const existing = existingVerdictOf\(dir, sha\);\s*if \(existing\) noVerdict =/.test(SRC4) && /partial: !!\(only \|\| shard \|\| host\)/.test(SRC4), 'WIRING: the partial-run refusal (settleHeavyMarker) asks existingVerdictOf');
   const now = Date.now();
   const g = { kind: 'green', sha: S, scope: 'full', failed: [], mtimeMs: now - 1000 }, u = { kind: 'red', sha: S, unreadable: 'not a JSON object (null)', file: `/m/${S}.red`, failed: [], mtimeMs: 1 };
   const a1 = heavyAlreadyGreen({ markers: [g], sha: S, full: S, commitTimeMs: now - 60000, scope: 'full', now });

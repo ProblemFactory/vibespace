@@ -12,13 +12,17 @@
 //   §5 the wait line — pid, cmd, sha / label uncut, suites, «WITHOUT a ticket», the place; heavyGate prints it.
 //   §6 ONE DOOR — no script under scripts/ or data/bin but ci.mjs names the machine lock (planted controls).
 //   §7 NEGATIVE CONTROLS — the queue check removed (the late 10-ms poller wins); the reaper removed (a dead ticket blocks the line).
-//   §8 nothing left behind.
+//   §8 THE BUILD STAMP — a claim does not rebuild a tree built at its commit (a real `npm run build` in a scratch repo): the stamp holds
+//      the bytes the build read and its tree's top level — an edit hidden by skip-worktree / assume-unchanged, an ignored new file under
+//      src/ and a copy nested in an ignored directory each build; a red build writes no verdict marker (settleHeavyMarker, driven).
+//   §9 nothing left behind.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { acquireMachineLock, machineQueue, ticketDirOf, lockWaitLine } from './ci.mjs';
+import { acquireMachineLock, machineQueue, ticketDirOf, lockWaitLine, runBuild, buildStampWhy, buildStampPathOf, BUILD_OUTPUTS, settleHeavyMarker } from './ci.mjs';
+import { spawnSync } from 'node:child_process';
 import { REPO, ok, report } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
@@ -255,11 +259,103 @@ const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
   ok(!r.served, `CONTROL: without the polling test a frozen head blocks the free lock for everyone (the next waiter not served in ${BOUND} ms) — §2's leg is the one that reds`); }
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: '§7 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 
-console.log('§8 nothing left behind');
+console.log('§8 THE BUILD STAMP');
+const NCC = path.join(os.tmpdir(), 'node-compile-cache'), nccBefore = fs.existsSync(NCC);   // npm (run by runBuild) leaves its compile cache here
+{ const R = scratch('stamp'), g = (...a) => spawnSync('git', ['-C', R, ...a], { encoding: 'utf-8' });
+  g('init', '-q', '-b', 'main'); g('config', 'user.email', 'q@test.local'); g('config', 'user.name', 'queue test');
+  fs.writeFileSync(path.join(R, 'build.cjs'), `const fs=require('fs'),path=require('path');if(fs.existsSync(${JSON.stringify(path.join(R, '..', 'fail-' + TAG))}))process.exit(1);   // (ci.mjs runs the build with its own fixed env)
+const skip=fs.existsSync(${JSON.stringify(path.join(R, '..', 'absent-' + TAG))})?${JSON.stringify(BUILD_OUTPUTS[BUILD_OUTPUTS.length - 1])}:null;   // B-88e5: a build that leaves one output out (the unsigned build's manifest)
+for(const f of ${JSON.stringify(BUILD_OUTPUTS)}){if(f===skip){fs.rmSync(f,{force:true});continue;}fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,'built '+f+'\\n');}
+if(fs.existsSync(${JSON.stringify(path.join(R, '..', 'move-' + TAG))}))require('child_process').execFileSync('git',['-C',${JSON.stringify(R)},'commit','-q','--allow-empty','-m','moved during the build']);   // B-88e5: the tree moves under the build
+fs.appendFileSync(${JSON.stringify(path.join(R, '..', 'builds-' + TAG))},'1\\n');`);
+  fs.writeFileSync(path.join(R, 'package.json'), JSON.stringify({ name: 'q', version: '1.0.0', private: true, scripts: { build: 'node build.cjs' } }));
+  fs.writeFileSync(path.join(R, '.gitignore'), ['node_modules', 'src/*.gen.js', 'copies/', ...BUILD_OUTPUTS].join('\n') + '\n');
+  fs.mkdirSync(path.join(R, 'src'), { recursive: true }); fs.writeFileSync(path.join(R, 'src', 'a.js'), 'export const V = 3;\n');
+  fs.mkdirSync(path.join(R, 'node_modules')); fs.writeFileSync(path.join(R, 'node_modules', '.package-lock.json'), '{"lockfileVersion":3}\n');
+  g('add', '-A'); g('commit', '-q', '-m', 'one');
+  const builds = () => { try { return fs.readFileSync(path.join(R, '..', 'builds-' + TAG), 'utf-8').trim().split('\n').length; } catch { return 0; } };
+  const quiet = { log: () => { } }, readJsonQ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return null; } };
+  const b1 = runBuild({ cwd: R, reuse: true, ...quiet });
+  ok(b1.ok && builds() === 1 && fs.existsSync(buildStampPathOf(R)) && g('status', '--porcelain').stdout === '', `a first claim builds and leaves a stamp in the tree's own git dir — the work tree stays clean (${buildStampPathOf(R).replace(R, '<repo>')})`);
+  const b2 = runBuild({ cwd: R, reuse: true, ...quiet });
+  ok(b2.ok && b2.reused && builds() === 1 && buildStampWhy(R) === null, 'a second claim on the same built tree does NOT rebuild (the stamp matches commit, tree, node, dependencies and every output)');
+  const b0 = runBuild({ cwd: R, ...quiet });
+  ok(b0.ok && !b0.reused && builds() === 2, '…a caller that does not ask to reuse (the fast gate) still builds');
+  // B-88e5 (its adversarial read): a build NOT asked to reuse writes no stamp (the fast gate, an --isolate claim) …
+  { const sp = buildStampPathOf(R), keepSt = fs.readFileSync(sp); fs.unlinkSync(sp);
+    const bn = runBuild({ cwd: R, ...quiet });
+    ok(bn.ok && !fs.existsSync(sp), '…and writes NO stamp (only an in-place claim that asks reuse ever writes one)'); fs.writeFileSync(sp, keepSt); }
+  // … a tree that MOVES under the build (a commit in the worktree during it) gets no stamp: the next claim builds again …
+  { const flag = path.join(R, '..', 'move-' + TAG); fs.writeFileSync(flag, ''); fs.rmSync(buildStampPathOf(R), { force: true });   // no stamp: this claim builds
+    const headBefore = g('rev-parse', 'HEAD').stdout.trim(), bm = runBuild({ cwd: R, reuse: true, ...quiet }); fs.unlinkSync(flag);
+    const moved = g('rev-parse', 'HEAD').stdout.trim() !== headBefore, w = buildStampWhy(R);
+    ok(bm.ok && moved && !fs.existsSync(buildStampPathOf(R)) && w === 'no build stamp', `a commit made DURING the build leaves no stamp — the bundle was built from the commit before it (${w})`);
+    runBuild({ cwd: R, reuse: true, ...quiet }); }
+  // … and a build that leaves one output OUT (the unsigned build removes the agentd manifest) is still reused, its absence stamped
+  { const flag = path.join(R, '..', 'absent-' + TAG); fs.writeFileSync(flag, ''); fs.rmSync(buildStampPathOf(R), { force: true });   // no stamp: this claim builds
+    const n0 = builds(), ba = runBuild({ cwd: R, reuse: true, ...quiet });   // the stamp above names every output: this one builds and stamps the absence
+    const n1 = builds(), bb = runBuild({ cwd: R, reuse: true, ...quiet }); fs.unlinkSync(flag);
+    const absentNow = !fs.existsSync(path.join(R, BUILD_OUTPUTS[BUILD_OUTPUTS.length - 1]));
+    ok(ba.ok && bb.ok && bb.reused && builds() === n1 && absentNow && (readJsonQ(buildStampPathOf(R)) || {}).outputs && readJsonQ(buildStampPathOf(R)).outputs[BUILD_OUTPUTS[BUILD_OUTPUTS.length - 1]] === null,
+      `a build that leaves ${BUILD_OUTPUTS[BUILD_OUTPUTS.length - 1]} out stamps it ABSENT, and the next claim reuses the tree (${n0}→${n1}→${builds()} builds)`);
+    runBuild({ cwd: R, reuse: true, ...quiet }); }
+  const why = (label, mutate, restore) => { mutate(); const w = buildStampWhy(R); restore(); return `${label}: ${w}`; };
+  const r1 = why('dirty', () => fs.writeFileSync(path.join(R, 'package.json'), fs.readFileSync(path.join(R, 'package.json'), 'utf-8') + '\n'), () => g('checkout', '-q', '--', 'package.json'));
+  const r2 = why('untracked', () => fs.writeFileSync(path.join(R, 'stray.js'), 'x'), () => fs.unlinkSync(path.join(R, 'stray.js')));
+  const out0 = path.join(R, BUILD_OUTPUTS[0]), keep = fs.readFileSync(out0);
+  const r3 = why('output', () => fs.writeFileSync(out0, 'edited'), () => fs.writeFileSync(out0, keep));
+  const lock = path.join(R, 'node_modules', '.package-lock.json'), keepL = fs.readFileSync(lock);
+  const r4 = why('deps', () => fs.writeFileSync(lock, '{"lockfileVersion":3,"x":1}\n'), () => fs.writeFileSync(lock, keepL));
+  const r5 = why('gone', () => fs.unlinkSync(out0), () => fs.writeFileSync(out0, keep));
+  ok(/not clean/.test(r1) && /not clean/.test(r2) && /is not the one the stamp built/.test(r3) && /deps/.test(r4) && /is not the one the stamp built/.test(r5) && buildStampWhy(R) === null,
+    `anything else builds — a dirty tree, an untracked file, an edited or missing output, other dependencies (${[r1, r2, r3, r4, r5].join(' · ')})`);
+  fs.writeFileSync(path.join(R, 'two.txt'), '2\n'); g('add', 'two.txt'); g('commit', '-q', '-m', 'two');
+  ok(/the stamp's head/.test(String(buildStampWhy(R))), `another commit builds (${buildStampWhy(R)})`);
+  const flag = path.join(R, '..', 'fail-' + TAG); fs.writeFileSync(flag, '1');
+  const bf = runBuild({ cwd: R, reuse: true, ...quiet });
+  fs.unlinkSync(flag);
+  ok(!bf.ok && !fs.existsSync(buildStampPathOf(R)), 'a build that FAILS leaves no stamp (the next claim builds again)');
+  // git status is BLIND to these three (主开发's verifier, round 1): the stamp's input digest is not
+  const fresh = runBuild({ cwd: R, reuse: true, ...quiet });   // a stamp for the new commit first
+  const aJs = path.join(R, 'src', 'a.js'), keepA = fs.readFileSync(aJs);
+  const hidden = (flag) => { g('update-index', flag, 'src/a.js'); fs.writeFileSync(aJs, 'export const V = 4;\n'); const st = g('status', '--porcelain').stdout; const w = buildStampWhy(R);
+    fs.writeFileSync(aJs, keepA); g('update-index', flag.replace('--', '--no-'), 'src/a.js'); return { st, w }; };
+  const sw = hidden('--skip-worktree'), au = hidden('--assume-unchanged');
+  ok(fresh.ok && sw.st === '' && /inputs/.test(String(sw.w)) && au.st === '' && /inputs/.test(String(au.w)) && buildStampWhy(R) === null,
+    `an edit HIDDEN from git status (skip-worktree, assume-unchanged: status clean) builds — the stamp holds the bytes the build read (${sw.w} · ${au.w})`);
+  const gen = path.join(R, 'src', 'x.gen.js'); fs.writeFileSync(gen, 'export const G = 1;\n');
+  const ig = { st: g('status', '--porcelain').stdout, w: buildStampWhy(R) }; fs.unlinkSync(gen);
+  ok(ig.st === '' && /inputs/.test(String(ig.w)) && buildStampWhy(R) === null, `a git-IGNORED new file under src/ builds (${ig.w})`);
+  const C = path.join(R, 'copies', 'c'); fs.mkdirSync(C, { recursive: true });
+  for (const f of ['build.cjs', 'package.json', '.gitignore', 'src']) fs.cpSync(path.join(R, f), path.join(C, f), { recursive: true });
+  fs.symlinkSync(path.join(R, 'node_modules'), path.join(C, 'node_modules'));
+  for (const f of BUILD_OUTPUTS) { fs.mkdirSync(path.dirname(path.join(C, f)), { recursive: true }); fs.copyFileSync(path.join(R, f), path.join(C, f)); }
+  const cw = buildStampWhy(C);
+  ok(/not the top level of its own git tree/.test(String(cw)), `a copy nested in an ignored directory of a built repo builds — it would read the PARENT's git dir and stamp (${cw})`);
+  fs.rmSync(path.join(R, 'copies'), { recursive: true, force: true });
+  const SRC8 = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  ok(/noteChildResult\(runBuild\(\{ cwd: runRoot, reuse: !isolate \}\)\)/.test(SRC8), 'WIRING: the heavy gate asks reuse only for an IN-PLACE tree; an --isolate checkout is fresh (no stamp asked, nothing hashed)');
+  // a tree WITHOUT a stamp is answered without reading its inputs (the .389 mirror: the hash ran before the stamp check, in every
+  // isolated run, and a SIGTERM landing in it waited for the hash and the build — test-ci-heavy-launch's supersede leg red ×2)
+  const Rn = scratch('nostamp'); spawnSync('git', ['-C', Rn, 'init', '-q']); fs.writeFileSync(path.join(Rn, 'a.txt'), 'a\n');
+  const realRead = fs.readFileSync; let reads = 0;
+  fs.readFileSync = function (f, ...a) { if (String(f).startsWith(Rn)) reads++; return realRead.call(this, f, ...a); };
+  let wn; try { wn = buildStampWhy(Rn); } finally { fs.readFileSync = realRead; }
+  ok(wn === 'no build stamp' && reads === 0, `a tree with NO stamp is answered without reading one of its files (${wn}; ${reads} reads)`);
+  // A RED BUILD WRITES NO VERDICT — driven, not read: the gate's own last step with a failing build and a scratch marker dir
+  const S = 'c'.repeat(40), rec = { sha: S, result: 'red', failed: ['npm run build'], startedAt: 1, endedAt: 2, scope: 'full' };
+  const md = scratch('settle'), red = settleHeavyMarker({ dir: md, sha: S, rec, buildOk: false });
+  const md2 = scratch('settle-ok'), okd = settleHeavyMarker({ dir: md2, sha: S, rec: { ...rec, result: 'green', failed: [] }, buildOk: true });
+  ok(/the BUILD failed/.test(red.noVerdict) && red.file === null && fs.readdirSync(md).join() === `${S}.skipped` && JSON.parse(fs.readFileSync(path.join(md, `${S}.skipped`), 'utf-8')).result === 'skipped', `A RED BUILD WRITES NO VERDICT: the gate's last step with a failing build writes no green or red — only its <sha>.skipped trace with the reason (B-88e5) («${red.noVerdict}»)`);
+  ok(okd.file && fs.existsSync(okd.file) && fs.readdirSync(md2).includes(`${S}.green`), '…CONTROL: the same step with a green build writes its marker');
+  ok(/settleHeavyMarker\(\{ dir, sha, rec, abandonedWhy, buildOk: build\.ok, dirtyAtStart,/.test(SRC8), 'WIRING: the heavy gate hands its build result to that step'); }
+
+console.log('§9 nothing left behind');
+if (!nccBefore) fs.rmSync(NCC, { recursive: true, force: true });   // the cache npm made for §8's builds, never one that was there
 for (const k of kids) { try { k.kill('SIGKILL'); } catch { } }
 await until(() => kids.every(exited), 3000);
 fs.rmSync(ROOT, { recursive: true, force: true });
 const leftovers = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith(`vs-ciqueue-${process.pid}-`));
 const children = fs.readdirSync('/proc').filter((p) => /^\d+$/.test(p)).filter((p) => { try { return fs.readFileSync(`/proc/${p}/cmdline`, 'utf-8').includes(TAG); } catch { return false; } });
-ok(leftovers.length === 0 && children.length === 0, `0 scratch dirs and 0 children left (${leftovers.length} dirs, ${children.length} processes)`);
+ok(leftovers.length === 0 && children.length === 0 && (nccBefore || !fs.existsSync(NCC)), `0 scratch dirs, 0 children and no npm compile cache of ours left under TMPDIR (${leftovers.length} dirs, ${children.length} processes)`);
 report();

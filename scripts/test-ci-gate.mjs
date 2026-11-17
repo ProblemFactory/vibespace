@@ -852,7 +852,7 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
     okd(CI.pruneFailLogs(path.join(pd, 'none')).length === 0 && CI.pruneFailLogs(pd).length === 0, '…a dir that does not exist prunes nothing, and a second prune finds nothing more', gone);
   }
   const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
-  ok(/\n {4}const pruned = pruneFailLogs\(hangDir\);/.test(SRC) && /\n {6}pruneMarkers\(dir\);\n {6}pruneFailLogs\(path\.join\(d, 'fail-logs'\)\);/.test(SRC),
+  ok(/\n {4}const pruned = pruneFailLogs\(hangDir\);/.test(SRC) && /\n {2}pruneMarkers\(dir\);\n {2}pruneFailLogs\(path\.join\(d, 'fail-logs'\)\);[^\n]*\n  return \{ noVerdict: '', file \};/.test(SRC),
     'WIRING: the fast tier prunes its fail-log dir before its lanes, the heavy tier its <markers>/fail-logs beside its markers (B-c327)');
   // B-6e71: the loop is runFastLanes now (keep-going) — fastGate hands it the dir, the loop keeps every red's output
   ok(/const hangDir = fastFailDir\(\);/.test(SRC) && /\n {6}lanes, keepGoing, inflight, failDir: hangDir, sha,/.test(SRC) && /\n {6}if \(r\.ok\) \{[^\n]*\n {6}if \(failDir\) writeFailLog\(failDir, sha, s, r, 1\);/.test(SRC),

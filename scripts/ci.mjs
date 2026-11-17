@@ -968,7 +968,7 @@ export const SUITES = [
   { name: 'test-ci-gate-hang', tier: 'fast', why: 'LAW architecture · 5.2 s — the gate\'s own gate, part 6/7: §11 a hang leaves a report (five planted suites under a 3 s budget, at once)' },
   { name: 'test-ci-gate-watchdog', tier: 'fast', why: 'LAW architecture · 4.1 s — the gate\'s own gate, part 7/7: §12 a suite\'s own clock fires before the gate\'s and names its leg (two planted suites under a 4 s row, at once)' },
   { name: 'test-ci-heavy-verdict', tier: 'fast', why: 'LAW architecture · 4.6 s (B-a2c9, restated 2026-11-18 in the box\'s scale: 5.46 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 3.8–5.4 s); read on a run with legs red that this stack cures — the time of a whole run; was 3.6 s) (measured under the box\'s thermal cap, 2026-11-10: 3.64 s alone — not restated at full speed yet) — B-e381, lane ci-heavy-verdict r4: the CI mirror\'s verified run written as the HOSTED half\'s listed green (never full, the list read from the commit), the union reader (a red clears when every failed suite has run green since), LAW A (a marker that cannot be read never opens the gate; the writer, status and already-green see it too), LAW B (a list-scoped `absent` covers nothing; a FULL green clears), pruning by commits, five mutant controls, the parity over production\'s 30 markers; every refusal writes nothing' },
-  { name: 'test-ci-heavy-queue', tier: 'fast', why: 'LAW architecture · 8.4 s (measured under the box\'s thermal cap, 2026-11-10: 8.07–8.40 s alone — not restated at full speed yet) — lane ci-heavy-queue: the machine\'s heavy lock serves its waiters oldest first (a ticket each in <lock>.q, held only while its waiter is alive AND polling — dead, recycled and silent tickets reaped, the head at 200 ms), the wait line names the holder uncut, ONE door (only ci.mjs names the lock); real processes, three mutant controls' },
+  { name: 'test-ci-heavy-queue', tier: 'fast', why: 'LAW architecture · 8.9 s (measured under the box\'s thermal cap, 2026-11-10: 8.61–8.87 s alone — not restated at full speed yet) — lane ci-heavy-queue (+ THE BUILD STAMP: a claim does not rebuild a tree built at its commit; a red build writes no verdict): the machine\'s heavy lock serves its waiters oldest first (a ticket each in <lock>.q, held only while its waiter is alive AND polling — dead, recycled and silent tickets reaped, the head at 200 ms), the wait line names the holder uncut, ONE door (only ci.mjs names the lock); real processes, three mutant controls' },
   { name: 'test-usage-ledger-perf', tier: 'fast', why: 'in-process · 4.7 s (restated 2026-10-20, was 551 ms)' }, // inc-mtox23xw: the estimator's per-pair ledger walk is O(log n + k) + interval-memoized (it blocked the loop 10-59s); parity vs brute force + timing pins
   { name: 'test-ledger-boot-load', tier: 'fast', why: 'in-process · 4.4 s measured in a depth-1 clone, three runs 4.37–4.42 s at a box load of ~5 (ledger-boot-load, 2.369.397: a 9 876-row real-shape ledger, 16 worker loads incl. 7 planted failures, three planted copies; the failing load\'s road in test-ledger-boot-fail)' }, // THE LEDGER'S FIRST LOAD OFF THE LOOP: «loading» until the worker's cache is swapped in; rows once; a dead worker said once, never a sync fallback
   { name: 'test-ledger-boot-fail', tier: 'fast', why: 'in-process · 6.0 s measured in a depth-1 clone, three runs 5.94–6.00 s at a box load of ~5 (ledger-boot-load round 2 + its follow-up, 2.369.397 — split from test-ledger-boot-load under the 10 s: a real-shape ledger, throwing and hung first loads, transcripts walked by the real scan through the real route handler on a fake app, eight planted copies)' }, // NOTHING WAITS ON A LOAD THAT IS FAILING: bounded by the try, a person\'s Retry tries now, LOADING a state
@@ -2477,11 +2477,91 @@ function runSecretScan({ cwd = repo, sha = '', log = console.log } = {}) {
   return { ok: false, ms };
 }
 
-function runBuild({ cwd = repo, log = console.log } = {}) {
+// THE BUILD STAMP (lane ci-heavy-queue, 2026-11-10). Every heavy claim ran `npm run build` (~80 s inside the machine lock) even on a
+// tree already built at that commit — no flag skipped it. Now a GREEN build leaves a stamp in the tree's own git dir (outside the work
+// tree, so it never dirties it): the commit, its tree, the node version, a digest of the installed dependencies (node_modules/
+// .package-lock.json) and a sha256 of every output. A heavy claim (`reuse`) skips the build only on a CLEAN tree (no change, no untracked
+// file) whose stamp matches all of these; anything else builds, and a build that fails removes the stamp.
+export const BUILD_OUTPUTS = Object.freeze(['public/bundle.js', 'public/design-viewer.js', 'public/doc-editor.js', 'public/mermaid.js', 'public/novnc.js',
+  'src/lib/build-version.js', 'data/bin/vibespace-agentd.js', 'data/bin/vibespace-agentd-attach.js', 'data/bin/vibespace-agentd.manifest.json']);
+const fileDigest = (f) => { try { return createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } catch { return null; } };
+/** r2 (主开发's ruling 06:22Z: `git status` can be BLIND — skip-worktree, assume-unchanged, an ignored new file): the stamp holds a
+ *  digest of WHAT THE BUILD READ — the bytes of every file under the tree's top level, but .git, node_modules, the runtime data/ (save
+ *  data/bin) and the build's own outputs; ~0.15 s for 2 800 files against an 80-s build. */
+export function buildInputsDigest(top) {
+  const h = createHash('sha256'), outs = new Set(BUILD_OUTPUTS);
+  const walk = (rel) => {
+    let ents; try { ents = fs.readdirSync(path.join(top, rel || '.'), { withFileTypes: true }); } catch { h.update(`${rel}\0UNREADABLE\0`); return; }
+    ents.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const e of ents) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (!rel && (e.name === '.git' || e.name === 'node_modules')) continue;
+      if (r === 'data') { walk('data/bin'); continue; }   // markers, logs and other runtime data are not read by the build; data/bin is
+      if (outs.has(r)) continue;
+      const abs = path.join(top, r);
+      if (e.isSymbolicLink()) { let t = ''; try { t = fs.readlinkSync(abs); } catch { } h.update(`${r}\0L${t}\0`); continue; }
+      if (e.isDirectory()) { walk(r); continue; }
+      if (!e.isFile()) continue;
+      let b; try { b = fs.readFileSync(abs); } catch { h.update(`${r}\0UNREADABLE\0`); continue; }
+      h.update(`${r}\0${b.length}\0`); h.update(b);
+    }
+  };
+  walk('');
+  return h.digest('hex');
+}
+export function buildInputsOf(cwd) {
+  let deps = null; try { deps = fileDigest(path.join(fs.realpathSync(path.join(cwd, 'node_modules')), '.package-lock.json')); } catch { }
+  let top = null, gitTop = null; try { top = fs.realpathSync(cwd); } catch { } try { gitTop = fs.realpathSync(gitIn(cwd, ['rev-parse', '--show-toplevel']) || '/nonexistent'); } catch { }
+  return { top, gitTop, head: gitIn(cwd, ['rev-parse', 'HEAD']), tree: gitIn(cwd, ['rev-parse', 'HEAD^{tree}']), clean: gitIn(cwd, ['status', '--porcelain']) === '', node: process.version, deps, inputs: top ? buildInputsDigest(top) : null };
+}
+export const buildStampPathOf = (cwd) => { const gd = gitIn(cwd, ['rev-parse', '--absolute-git-dir']); return gd ? path.join(gd, 'vibespace-build-stamp.json') : null; };
+/** null = this tree is built at its commit (skip the build); else WHY it must build. */
+export function buildStampWhy(cwd) {
+  const p = buildStampPathOf(cwd); if (!p) return 'no git dir';
+  // the STAMP first: a tree without one (a fresh --isolate checkout always) is answered WITHOUT hashing its inputs — the hash is a
+  // synchronous read of the whole tree, and a SIGTERM landing in it (a superseded run) waited for the hash AND the build after it
+  // (the .389 mirror: test-ci-heavy-launch's supersede leg, red ×2)
+  if (!fs.existsSync(p)) return 'no build stamp';
+  const inp = buildInputsOf(cwd);
+  if (!inp.head || !inp.tree) return 'no commit';
+  // the stamp belongs to the tree whose TOP LEVEL it was written for: a copy nested in another repository reads that one's git dir
+  if (!inp.top || inp.top !== inp.gitTop) return `this directory is not the top level of its own git tree (${inp.gitTop || 'none'})`;
+  if (!inp.clean) return 'the tree is not clean';
+  if (!inp.deps) return 'no dependency digest (node_modules/.package-lock.json)';
+  const st = readJson(p); if (!st) return 'no build stamp';
+  for (const k of ['top', 'head', 'tree', 'node', 'deps', 'inputs']) if (st[k] !== inp[k]) return `the stamp's ${k} is not this tree's`;
+  // an output the build did not write (the unsigned build removes data/bin/vibespace-agentd.manifest.json) is stamped null and must
+  // still be absent; one the stamp does not name at all is an older stamp's shape (B-88e5's read)
+  for (const f of BUILD_OUTPUTS) { if (!st.outputs || !(f in st.outputs)) return `the stamp names no ${f}`; if (fileDigest(path.join(cwd, f)) !== st.outputs[f]) return `${f} is not the one the stamp built`; }
+  return null;
+}
+/** The tree as git names it — head, tree, clean — cheap (three git calls, no hash): what a build must not see move under it. */
+export const buildTreeOf = (cwd) => ({ head: gitIn(cwd, ['rev-parse', 'HEAD']), tree: gitIn(cwd, ['rev-parse', 'HEAD^{tree}']), clean: gitIn(cwd, ['status', '--porcelain']) === '' });
+export function writeBuildStamp(cwd, { before = null } = {}) {
+  const p = buildStampPathOf(cwd); if (!p) return;
+  // THE TREE MAY NOT MOVE UNDER THE BUILD (B-88e5's adversarial read): a commit, checkout, rebase or pull in the worktree during the
+  // ~80 s build leaves it clean at another commit, and a stamp read AFTER the build would name that commit for a bundle built from the
+  // first — the next claim would skip its build and vouch green for sources never built. The tree before must be clean and equal to
+  // the tree after (head, tree), else no stamp.
+  const now = buildTreeOf(cwd);
+  if (before && !(before.clean && now.clean && before.head === now.head && before.tree === now.tree)) { try { fs.unlinkSync(p); } catch { } return; }
+  const inp = buildInputsOf(cwd);
+  if (!inp.clean || !inp.deps || !inp.inputs || inp.top !== inp.gitTop) { try { fs.unlinkSync(p); } catch { } return; }
+  const outputs = {}; for (const f of BUILD_OUTPUTS) outputs[f] = fileDigest(path.join(cwd, f));
+  try { fs.writeFileSync(p, JSON.stringify({ ...inp, outputs, builtAt: Date.now() }) + '\n'); } catch { }
+}
+export function runBuild({ cwd = repo, log = console.log, reuse = false } = {}) {
+  if (reuse) {
+    const why = buildStampWhy(cwd);
+    if (!why) { log(`  ✓ npm run build — SKIPPED: this tree is built at ${shortSha(gitIn(cwd, ['rev-parse', 'HEAD']))} (its build stamp matches the commit, tree, node, dependencies and every output)`); return { ok: true, ms: 0, reused: true }; }
+    log(`  · npm run build: ${why}`);
+  }
+  const before = reuse ? buildTreeOf(cwd) : null;   // a stamp names the tree the build STARTED from — only if it did not move
   const t = Date.now();
   const r = spawnSync('npm', ['run', 'build'], { cwd, stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000, encoding: 'utf-8', env: GIT_ENV });
   const ms = Date.now() - t;
-  if (r.status === 0) { log(`  ✓ npm run build (${ms}ms)`); return { ok: true, ms }; }
+  if (r.status === 0) { if (reuse) writeBuildStamp(cwd, { before }); log(`  ✓ npm run build (${ms}ms)`); return { ok: true, ms }; }   // a stamp only where one will be asked
+  try { const p = buildStampPathOf(cwd); if (p) fs.unlinkSync(p); } catch { }
   log(`\n✗ npm run build FAILED (${ms}ms${r.signal ? ', ' + r.signal : ''})`);
   log((r.stdout || '').split('\n').slice(-40).join('\n'));
   log(r.stderr || '');
@@ -3535,6 +3615,37 @@ export function heavyVerdict({ sha, runId, repoRoot = repo, dir, ghJson = ghApiJ
 export function existingVerdictOf(dir, sha) {
   return readMarkers(dir, { withUnreadable: true }).find((m) => m.sha === sha && (m.kind === 'green' || m.kind === 'red') && (m.unreadable || !m.partial)) || null;
 }
+/** THE VERDICT'S LAST STEP (lane ci-heavy-queue r2: a seam the suite drives with a failing build and a scratch marker dir). Decide
+ *  whether this run may claim anything about `sha`, and write its marker only if so. → { noVerdict, file }. */
+export function settleHeavyMarker({ dir, sha, rec, abandonedWhy = '', buildOk = true, dirtyAtStart = false, allAbsent = false, partial = false } = {}) {
+  let noVerdict = '';
+  if (abandonedWhy) noVerdict = abandonedWhy;
+  // a RED BUILD is no verdict: no suite ran (2026-11-10: a build that ran out of heap wrote <sha>.red into a marker dir)
+  else if (!buildOk) {
+    noVerdict = 'the BUILD failed — no suite ran, so nothing is claimed about this commit';
+    // …but it leaves a TRACE (B-88e5's adversarial read: a commit whose clean build fails wrote nothing at all — ci:status was blank):
+    // <sha>.skipped with the reason, the run record the lock-timeout road writes too; never a verdict, never over one
+    try { const d = markerDir(dir); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, `${sha}.skipped`), JSON.stringify({ sha, result: 'skipped', reason: 'the build failed — no suite ran', endedAt: Date.now() }) + '\n'); } catch { }
+  }
+  else if (dirtyAtStart) noVerdict = 'the tree was DIRTY — the sha would not describe what ran';
+  // …and a run in which EVERY suite was absent judged nothing (round 6): an
+  // old ref that predates them would otherwise earn a GREEN marker for a run
+  // of zero suites — the vacuous green `--only` already refuses on a typo.
+  else if (allAbsent) noVerdict = `every suite in this run is absent at ${shortSha(sha)} — nothing ran, so nothing is claimed`;
+  else if (partial) {
+    const existing = existingVerdictOf(dir, sha);
+    if (existing) noVerdict = `partial run — keeping the existing ${existing.unreadable ? 'UNREADABLE' : 'FULL'} ${existing.kind.toUpperCase()} marker for ${shortSha(sha)}${existing.unreadable ? ` (${existing.unreadable})` : ''}`;
+  }
+  if (noVerdict) return { noVerdict, file: null };
+  const d = markerDir(dir);
+  fs.mkdirSync(d, { recursive: true });
+  for (const ext of ['green', 'red', 'skipped']) { try { fs.unlinkSync(path.join(d, `${sha}.${ext}`)); } catch {} }
+  const file = path.join(d, `${sha}.${rec.result}`);
+  fs.writeFileSync(file, JSON.stringify(rec, null, 2) + '\n');
+  pruneMarkers(dir);
+  pruneFailLogs(path.join(d, 'fail-logs')); // B-c327: its fail logs are bounded like its markers
+  return { noVerdict: '', file };
+}
 /** Keep the newest `keep` COMMITS — every file of a commit inside the window stays, whatever the age of one of them (a commit's
  *  time = its newest marker; an unreadable file's = its mtime); every file of a commit outside it goes, unreadable ones too (r4). */
 export function pruneMarkers(dir, keep = 30) {
@@ -4120,7 +4231,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // is only noticed here, and a build for a run that is already over is
     // the round-2 supersede cost one step earlier.
     let abandonedWhy = abandoned();
-    const build = abandonedWhy ? { ok: false } : noteChildResult(runBuild({ cwd: runRoot }));
+    const build = abandonedWhy ? { ok: false } : noteChildResult(runBuild({ cwd: runRoot, reuse: !isolate }));   // a built IN-PLACE tree is not rebuilt (THE BUILD STAMP); an --isolate checkout is fresh: no stamp asked, nothing hashed
     const failed = [], flaky = [], timings = [], absent = [];
     let laneN = 0, serialNames = [];
     const dirPace = dirSweepPacer();
@@ -4276,24 +4387,10 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // describe what ran — normally refused at t=0, reachable here only via
     // --dirty-ok), and a PARTIAL run trying to overwrite a full verdict (a
     // `--only` re-run must not erase what the whole tier said).
-    const existing = existingVerdictOf(dir, sha);
-    let noVerdict = '';
-    if (abandonedWhy || (abandonedWhy = abandoned())) noVerdict = abandonedWhy;
-    else if (dirtyAtStart) noVerdict = 'the tree was DIRTY — the sha would not describe what ran';
-    // …and a run in which EVERY suite was absent judged nothing (round 6): an
-    // old ref that predates them would otherwise earn a GREEN marker for a run
-    // of zero suites — the vacuous green `--only` already refuses on a typo.
-    else if (absent.length && absent.length === heavy.length) noVerdict = `every suite in this run is absent at ${shortSha(sha)} — nothing ran, so nothing is claimed`;
-    else if ((only || shard || host) && existing) noVerdict = `partial run — keeping the existing ${existing.unreadable ? 'UNREADABLE' : 'FULL'} ${existing.kind.toUpperCase()} marker for ${shortSha(sha)}${existing.unreadable ? ` (${existing.unreadable})` : ''}`;
-    if (noVerdict) {
-      console.log('\n[ci:heavy] ' + noVerdict);
-    } else {
-      fs.mkdirSync(d, { recursive: true });
-      for (const ext of ['green', 'red', 'skipped']) { try { fs.unlinkSync(path.join(d, `${sha}.${ext}`)); } catch {} }
-      fs.writeFileSync(path.join(d, `${sha}.${rec.result}`), JSON.stringify(rec, null, 2) + '\n');
-      pruneMarkers(dir);
-      pruneFailLogs(path.join(d, 'fail-logs')); // B-c327: its fail logs are bounded like its markers
-    }
+    if (!abandonedWhy) abandonedWhy = abandoned();
+    const { noVerdict } = settleHeavyMarker({ dir, sha, rec, abandonedWhy, buildOk: build.ok, dirtyAtStart,
+      allAbsent: !!(absent.length && absent.length === heavy.length), partial: !!(only || shard || host) });
+    if (noVerdict) console.log('\n[ci:heavy] ' + noVerdict);
     // THE CLOSING LINE IS THE ONE PEOPLE READ. "HEAVY GATE GREEN" is a claim
     // about a commit; when no marker was written there is no such claim, and
     // saying it anyway is how a developer waits out the whole tier and stays
