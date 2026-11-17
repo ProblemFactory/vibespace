@@ -62,7 +62,7 @@ export function proxyWords(code, t, error = '', { act = 'save', word = '' } = {}
     case 'proxy_unusable': return t('Its proxy address cannot be read — give it again in Proxy….');
     case 'not_written': return act === 'move' ? t('The login is saved in the vault, but the profile could not be written — press «Move the password to the vault» again.') : t('The proxy could not be saved.');
     case 'login_needs': return t('A new login needs its user name and its password.');
-    case 'login_user_unusable': return t('A login\'s user name cannot hold a space or #, and is at most 128 characters.');
+    case 'proxy_user_unusable': return t('A login\'s user name cannot hold a space or #, and is at most 128 characters.');
     case 'nothing_to_move': return t('This profile\'s proxy carries no password.');
     default: return code ? t('The proxy could not be used ({code}).', { code: String(code) }) : t('server unreachable');
   }

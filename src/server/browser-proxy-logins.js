@@ -20,6 +20,11 @@ const str = (v) => String(v == null ? '' : v);
 function create({ vault = null, log = console } = {}) {
   const named = (code, error, extra = {}) => ({ ok: false, code, error, ...extra });
   const vstate = () => { try { return vault && typeof vault.state === 'function' ? vault.state() : 'absent'; } catch { return 'absent'; } };
+  // B-8b87 round 3: the vault's REAL state — locked (a person unlocks it) or never set up (a person sets it up: there is no second
+  // password to ask for)
+  const notOpen = (act, st = vstate()) => (st === 'locked'
+    ? named('vault_locked', act === 'remove' ? 'the vault is locked — unlock it in the Vault window, then remove' : 'the vault is locked — unlock it in the Vault window, then save')
+    : named('vault_not_set_up', act === 'remove' ? 'the vault is not set up yet — set it up in the Vault window, then remove' : 'the vault is not set up yet — set it up in the Vault window, then save'));
   /** The vault's proxy-login NAMES → [{ name, origin, user, at }] — never a value. */
   function names() {
     let list = [];
@@ -34,17 +39,17 @@ function create({ vault = null, log = console } = {}) {
     if (!name) return named('bad-request', 'a proxy login needs the proxy\'s address (http, https or socks5) and a user name without spaces or #');
     const pw = Buffer.isBuffer(password) ? password : Buffer.from(str(password), 'utf8');
     if (!pw.length) return named('bad-request', 'a proxy login needs its password');
-    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it in the Vault window, then save');
+    if (vstate() !== 'unlocked') return notOpen('save');
     let r;
     try { r = vault.secretPut(name, pw, { kind: 'proxy-login' }); } catch (e) { r = { ok: false, code: str(e && e.message) }; } finally { if (!Buffer.isBuffer(password)) { try { pw.fill(0); } catch { /* */ } } }
-    if (!r || !r.ok) return named(/vault_locked|vault_not_set_up/.test(str(r && r.code)) ? 'vault_locked' : 'not_written', str(r && r.code) || 'not written');
+    if (!r || !r.ok) return /vault_not_set_up/.test(str(r && r.code)) ? notOpen('save', 'not_set_up') : /vault_locked/.test(str(r && r.code)) ? notOpen('save', 'locked') : named('not_written', str(r && r.code) || 'not written');
     log.log?.(`[browser-proxy] the vault keeps a proxy login: ${name}`);
     return { ok: true, name };
   }
   /** A person's removal of one entry. */
   function remove(name) {
     if (!B.parseProxyLoginName(name)) return named('bad-request', 'not a proxy login');
-    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it in the Vault window, then remove');
+    if (vstate() !== 'unlocked') return notOpen('remove');
     let r;
     try { r = vault.secretDrop(name); } catch (e) { r = { ok: false, code: str(e && e.message) }; }
     return r && r.ok !== false ? { ok: true } : named('not_removed', str(r && r.code) || 'not removed');

@@ -58,7 +58,7 @@ export function mountProxyField(container, { proxy = '', credential = '', fetchJ
     if (sel.value !== NEW) return { ok: true, proxy: a.value, proxyCredential: sel.value || null };
     const u = user.value.trim();
     if (!u || !pass.value) return { ok: false, code: 'login_needs', focus: u ? pass : user };
-    if (!userNameFits(u)) return { ok: false, code: 'login_user_unusable', focus: user };   // B-8b87 cure: refused at the field, nothing sent
+    if (!userNameFits(u)) return { ok: false, code: 'proxy_user_unusable', focus: user };   // B-8b87 cure: refused at the field, nothing sent
     const r = await fetchJson('/api/vault/proxy-logins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proxy: a.value, user: u, proxyPassword: pass.value }) });
     if (!r || r.ok === false || r.error) return { ok: false, code: (r && r.code) || 'not_written', word: (r && r.word) || '', error: r && r.error, focus: pass };
     pass.value = '';   // the password is the vault's now — never left in the page

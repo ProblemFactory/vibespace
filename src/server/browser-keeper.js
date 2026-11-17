@@ -278,7 +278,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // (`session info` never restarts a daemon of another version — measured — so a browser whose CLI is gone is still ASKED
     // with the current one: its liveness / adoption reads keep working; every other call is refused by name)
     const add = async (ns, o, m) => {
-      const opts = attachOpts(ns, o) || withConfig(ns, o);
+      const opts = attachOpts(ns, o) || withConfig(ns, o, m);
       if (opts.cli) return opts;
       // verify r3 (Y1): a binary never asked its version is ASKED before the call is judged (cliOptReady) — a same-version
       // re-install at the same path used to be refused once, "no longer installed"
@@ -301,24 +301,30 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const cdp = typeof ex.AGENT_BROWSER_CDP === 'string' && B.isLoopbackCdpUrl(ex.AGENT_BROWSER_CDP) ? ex.AGENT_BROWSER_CDP : rec.cdpUrl;
       return { ...opts, dir: null, attach: { cdp, socketDir: rec.socketDir || null }, extraEnv: { ...ex, ...(file ? { [VERBS.CONFIG_KEY]: file } : {}) } };
     };
-    const withConfig = (ns, o) => {
+    // B-8b87 round 3: a TEARDOWN or a READ opens no page — the close-all of a stop and the session info of an adoption never need the
+    // proxy's switch, so when the config that carries it cannot be produced they keep the base file (said in the journal) and the
+    // stop goes on to its identity-checked ladder, the adoption keeps its record; every other call stays refused by name
+    const NO_PAGE_CALLS = new Set(['closeAll', 'info']);
+    const withConfig = (ns, o, m = null) => {
       const opts = o && typeof o === 'object' ? o : {};
       const ex = opts.extraEnv && typeof opts.extraEnv === 'object' ? opts.extraEnv : {};
       // lane headless-fallback: every call of a browser whose LAUNCH fell back names the planned config (displayed)
-      if (Object.prototype.hasOwnProperty.call(ex, VERBS.CONFIG_KEY)) return displayed(opts, ex, ex[VERBS.CONFIG_KEY], recordForCall(ns, opts.session || null, ex));
+      if (Object.prototype.hasOwnProperty.call(ex, VERBS.CONFIG_KEY)) return displayed(opts, ex, ex[VERBS.CONFIG_KEY], recordForCall(ns, opts.session || null, ex), m);
       const file = configForCall(ns, opts.session || null, ex);
-      if (file) return displayed(opts, ex, file, recordForCall(ns, opts.session || null, ex));
+      if (file) return displayed(opts, ex, file, recordForCall(ns, opts.session || null, ex), m);
       // B-8b87 cure: a record whose browser rides its profile's proxy and NO config file to carry the switch ⇒ refused by name (the
       // call would leave direct)
       const r0 = recordForCall(ns, opts.session || null, ex);
-      if (r0 && r0.proxyRoad && r0.proxyRoad.arg) throw namedError('egress_proxy_missing', `"${r0.profileId || '?'}" rides its profile's proxy, and no config file carries the switch — the call was refused, never run outside its proxy`);
+      if (r0 && r0.proxyRoad && r0.proxyRoad.arg && !NO_PAGE_CALLS.has(m)) throw namedError('egress_proxy_missing', `"${r0.profileId || '?'}" rides its profile's proxy, and no config file carries the switch — the call was refused, never run outside its proxy`);
       return opts;
     };
-    const displayed = (opts, ex, file, rec) => {
+    const displayed = (opts, ex, file, rec, m = null) => {
       const eff0 = rec && rec.display ? displays.fileFor(file, rec.display) : file;
       const eff1 = rec && rec.engineView ? displays.engineFileFor(eff0, rec.engineView) : eff0; // lane engine-plugin: a conversation's browser on an ENGINE names its program + arguments at every call
       const eff2 = rec && rec.tailnet && rec.tailnet.arg ? displays.tailnetFileFor(eff1, rec.tailnet) : eff1;
-      const eff = rec && rec.proxyRoad && rec.proxyRoad.arg ? displays.proxyFileFor(eff2, rec.proxyRoad) : eff2; // B-8b87: the profile's proxy (its forwarder's port) at every call // lane tailnet-names: a browser LAUNCHED with the tailnet PAC names it at every call (a different view relaunches)
+      let eff = eff2;
+      try { eff = rec && rec.proxyRoad && rec.proxyRoad.arg ? displays.proxyFileFor(eff2, rec.proxyRoad) : eff2; }
+      catch (e) { if (!(e && e.code === 'egress_proxy_missing' && NO_PAGE_CALLS.has(m))) throw e; log.warn?.(`[browser] ${rec.profileId}: its ${m} keeps the base config — ${e.message} (a ${m === 'closeAll' ? 'teardown' : 'read'} opens no page)`); } // B-8b87: the profile's proxy (its forwarder's port) at every call // lane tailnet-names: a browser LAUNCHED with the tailnet PAC names it at every call (a different view relaunches)
       return eff === ex[VERBS.CONFIG_KEY] ? opts : { ...opts, extraEnv: { ...ex, [VERBS.CONFIG_KEY]: eff } };
     };
     const out = { ...r };
@@ -358,7 +364,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // BROWSE YOURSELF (B-6ae8, the owner 4): `recordMine` = "Also record my own actions" — an opt-OUT, absent = on
   // B-8b87 cure: the proxy origin the RUNNING browser was launched with (no login, no port of ours) — undefined when none runs
   const proxyLiveOf = (p) => { const rec = p ? reg.browsers[p.id] : null; if (!B.isLiveBrowser(rec)) return undefined; const e = rec.egress && rec.egress.proxy; return rec.proxyRoad && rec.proxyRoad.origin ? String(rec.proxyRoad.origin) : e && e.scheme ? `${e.scheme}://${e.host}:${e.port}` : null; };
-  const pview = (p) => (p ? { ...B.publicProfileView(p), ...(proxyLiveOf(p) !== undefined ? { proxyLive: proxyLiveOf(p) } : {}), mediated: isMediated(p), agentRoad: dialogRoadOf(p).why, scope: B.scopeOf(p), use: B.useDigestOf(p), createdBy: p.createdBy || null, ...(B.isEphemeralProfile(p) ? {} : { recordMine: HM.recordsMine(p), disk: disk.diskOf(p) }) } : null); // (a conversation's own temporary browser is never browsed by the person — no switch of theirs rides its record: verify r1 H1)
+  // round 3: …and the login's NAME it was launched with (the forwarder keeps the login named at the start until the next start)
+  const proxyLiveLoginOf = (p) => { const rec = p ? reg.browsers[p.id] : null; if (!B.isLiveBrowser(rec)) return undefined; const e = rec.egress && rec.egress.proxy; return rec.proxyRoad ? String(rec.proxyRoad.credential || '') : e ? String(e.credential || '') : ''; };
+  const pview = (p) => (p ? { ...B.publicProfileView(p), ...(proxyLiveOf(p) !== undefined ? { proxyLive: proxyLiveOf(p), proxyLiveLogin: proxyLiveLoginOf(p) } : {}), mediated: isMediated(p), agentRoad: dialogRoadOf(p).why, scope: B.scopeOf(p), use: B.useDigestOf(p), createdBy: p.createdBy || null, ...(B.isEphemeralProfile(p) ? {} : { recordMine: HM.recordsMine(p), disk: disk.diskOf(p) }) } : null); // (a conversation's own temporary browser is never browsed by the person — no switch of theirs rides its record: verify r1 H1)
   // ── lane grants-unify: "Who can use it" = the profile's row of the ONE grants store, mirrored as `p.grantUse` ──
   /** A conversation's browser key for the panel's spelling (null while it has none). */
   // (no resolver wired — a keeper built alone: a browser key IS the conversation key it is judged by, both ways)
@@ -4285,7 +4293,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         quietLog }; // lane browser-stderr-pipe: launched with the quiet log switches (its config carries them)
       // B-8b87: the profile's proxy on THIS road — its forwarder's loopback port, the ONE switch every call carries (the derived config,
       // the attach argv); an engine's launch carries it in its own egress pair (launchEngineOf)
-      rec.proxyRoad = pproxy && !buildEnv.engine ? { arg: `--proxy-server=${await egressUrlFor(p.id, pproxy)}`, origin: `${pproxy.proxy.scheme}://${pproxy.proxy.host}:${pproxy.proxy.port}` } : null;
+      rec.proxyRoad = pproxy && !buildEnv.engine ? { arg: `--proxy-server=${await egressUrlFor(p.id, pproxy)}`, origin: `${pproxy.proxy.scheme}://${pproxy.proxy.host}:${pproxy.proxy.port}`, credential: pproxy.proxy.credential || '' } : null;   // round 3: + the login's NAME it was launched with
       rec.tailnet = tn; // lane tailnet-names: the stamp every call reads (displayed / the attach argv) — a different view relaunches
       // r5 LOW 3: the LAUNCH-MARK lineage rides every new record (a refused start too) — a profile once launched with the
       // mark never falls back to the pre-mark rule, whatever record comes next (set again at the launch below)
@@ -4851,7 +4859,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // The CLI's own stop first — it owns the daemon and chromium. A managed
       // ephemeral browser is asked under its session's pairs (its socket dir).
       if (isEph(p)) await rt.closeAll(null, { extraEnv: pairsEnv(pairsOf(profileId) || [`AGENT_BROWSER_SESSION=${rec.ns}`, `AGENT_BROWSER_NAMESPACE=${rec.ns}`]) });
-      else await rt.closeAll(rec.ns, { dir: p ? p.dir : null, extraEnv: rec.launchEnv || { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } }); // naive study 2: the launch's own view
+      else { try { await rt.closeAll(rec.ns, { dir: p ? p.dir : null, extraEnv: rec.launchEnv || { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } }); } catch (e) { log.warn?.(`[browser] ${profileId}: the CLI's close-all failed (${(e && e.code) || ''} ${(e && e.message) || e}) — the stop goes on to its ladder`); } } // naive study 2: the launch's own view // B-8b87 round 3: a close-all that fails never aborts the stop
       // lane one-browser-b1: on the ATTACH road the record's process IS Chrome (this keeper spawned it; a CDP session's close
       // never ends an attached browser — measured) — ended by its identity now, then its display session goes with it
       if (rec.launch === 'attach') { await endProcess(rec.pid, rec.starttime, { termMs: STOP_GRACE_MS }); await endDisplay(rec, `its browser stopped (${why})`); }
@@ -6659,6 +6667,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const addr = B.normalizeProxy(`${m[1]}://${m[3]}`);
       if (!addr.ok) return { ok: false, code: addr.code || 'bad_proxy', error: `"${p.label}"'s proxy cannot be moved as it is — ${addr.error}` };
       if (!password) return { ok: false, code: 'nothing_to_move', error: `"${p.label}"'s proxy names a user but no password — choose its login in the profile` };
+      if (!B.proxyLoginName(addr.value, user)) return { ok: false, code: 'proxy_user_unusable', error: `"${p.label}"'s proxy user name cannot name a vault entry (a space, a # or over 128 characters) — choose its login in the profile` };   // round 3
       const r = proxyLogins && typeof proxyLogins.save === 'function' ? proxyLogins.save({ proxy: addr.value, user, password }) : { ok: false, code: 'unavailable', error: 'this server has no vault for browser proxy logins' };
       if (!r.ok) return r;
       const was = { proxy: p.proxy, proxyCredential: p.proxyCredential };

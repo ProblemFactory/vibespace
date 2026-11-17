@@ -96,6 +96,8 @@ function refuseHost(req, res) {
 }
 const STATUS = {
   'not-found': 404, 'bad-request': 400, 'unsupported-host': 400, unavailable: 503, internal: 500,
+  // B-8b87 round 3: an edit's proxy refusals by name (the creation's route has the same rows) — never a 500 for a refusal
+  proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400,
   // the trace
   trace_off: 409, 'not-live': 409, ended: 409, refused: 409,
   // housekeeping (§7.1 / §8 / D8): the sweep's scope, the archive-before-remove rule

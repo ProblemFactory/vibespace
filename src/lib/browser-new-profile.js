@@ -23,7 +23,8 @@ import { buildRows, choiceOfRow, installHint, buildRefusalWords } from './browse
 import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
 import { enterSubmits } from './chat-enter-keys.js';
 import { mountProxyField } from './browser-proxy-field.js'; // B-8b87: the proxy and its login (kept in the vault)
-import { proxyWords, PROXY_REFUSALS } from './browser-proxy-model.js';
+import { proxyWords, proxyDoor, PROXY_REFUSALS } from './browser-proxy-model.js';
+import { showUnlock, showSetup } from './vault-unlock.js';
 
 const DIALOG_ID = 'browser-new-profile-dialog';
 const jsonPost = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -142,13 +143,16 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   // ── the refusal line + the footer ──
   const refusal = noteLine('bwho-refusal bnew-refusal', '', { warn: true });
   refusal.style.display = 'none';
-  const notes = el('div', 'bwho-notes'); notes.appendChild(refusal);
+  // B-8b87 round 3: a locked (or never set up) vault's refusal carries ITS press here too — Unlock… / Set up the vault…
+  const door = btn('', () => { try { (door.dataset.door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } }, 'bproxy-door');
+  door.style.display = 'none';
+  const notes = el('div', 'bwho-notes'); notes.append(refusal, door);
   const footer = el('div', 'dialog-footer bwho-footer');
   const cancel = btn(t('Cancel'), () => shell.close(), 'bnew-cancel');
   const create = btn(adopt ? t('Create and use it here') : t('Create'), () => doCreate(), 'mounts-btn-primary bnew-create');
   footer.append(cancel, create);
   shell.dialog.append(notes, footer);
-  const say = (text) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; notes.style.display = text ? '' : 'none'; };
+  const say = (text, which = null) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; notes.style.display = text ? '' : 'none'; door.dataset.door = which || ''; door.textContent = which === 'setup' ? t('Set up the vault…') : t('Unlock…'); door.style.display = text && which ? '' : 'none'; };
   say('');
 
   // ── drawing the two lists (keyed by id: a re-draw after a broadcast patches the rows, the choice stays) ──
@@ -368,7 +372,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     const unbusy = () => { st.busy = false; create.disabled = false; };
     const pv = proxyOffered() ? await proxyField.read() : { ok: true, proxy: null, proxyCredential: null };
     if (st.closed) return;
-    if (!pv.ok) { unbusy(); say(proxyWords(pv.code, t, pv.error, { act: 'save', word: pv.word })); if (pv.focus) pv.focus.focus(); return; }
+    if (!pv.ok) { unbusy(); say(proxyWords(pv.code, t, pv.error, { act: 'save', word: pv.word }), proxyDoor(pv.code, pv.word)); if (pv.focus) pv.focus.focus(); return; }
     const c = createBody({ label: nameInput.value, provider: st.provider, host: st.host, cdpPort: portInput.value, mode: whoMode(), who, adopt, browser, cloneFrom, proxy: pv.proxy, proxyCredential: pv.proxyCredential });
     if (!c.ok) { unbusy(); say(createRefusalWords({ code: c.code }, t)); (c.field === 'label' ? nameInput : c.field === 'cdpPort' ? portInput : picker).focus(); return; }
     st.busy = true; create.disabled = true; cancel.disabled = true; picker.setBusy(true);
@@ -391,7 +395,8 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
         openNewProfileDialog(app, { label: nameInput.value, fromSession: { ...fromSession, adoptKeeps: r.now === 'keep' }, onCreated, onDismissed, opener: 'person' });   // (the person's Create press re-opens it: in front, as it was — r3's 'system' put it behind their window; a field they moved on to and type in keeps its keys through typedLast; lane dialog-yield r4)
         return;
       }
-      say((r && PROXY_REFUSALS.includes(r.code) ? proxyWords(r.code, t, '', { act: 'save', word: r.word }) : '') || createRefusalWords(r, t) || buildRefusalWords(r, t) || (t('Could not create the profile') + ' — ' + ((r && r.error) || t('server unreachable'))));
+      const pw = r && PROXY_REFUSALS.includes(r.code) ? proxyWords(r.code, t, '', { act: 'save', word: r.word }) : '';
+      say(pw || createRefusalWords(r, t) || buildRefusalWords(r, t) || (t('Could not create the profile') + ' — ' + ((r && r.error) || t('server unreachable'))), pw ? proxyDoor(r.code, r.word) : null);
       if (r && (r.code === 'label_required' || r.code === 'label_taken')) nameInput.focus();
       return;
     }

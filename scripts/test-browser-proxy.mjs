@@ -26,6 +26,9 @@
 //   ⑥ THE PERSON'S DOORS: the routes sit behind person() (no bearer reaches a proxy login); an agent MAY give the address when it creates
 //      a profile, never edits an existing profile's proxy and never names a login (the refusal names the card's Proxy… door); the vault
 //      kind's row reads «no agent door»
+//   ROUND 3: a teardown is never blocked (the config broken under a running browser ⇒ Stop still stops it — RED: the stop before; an
+//      adoption keeps its record); a vault never set up is said as itself at the save and the move (server-driven into ⑦); the edit's
+//      route answers 400; a switch onto a cloud browser refused at the press; the running road read from the keeper's own list
 //   ⑦ THE PAGE'S WORDS (src/lib/browser-proxy-model.js): every refusal a person sees by its code in the page's words (never the server's
 //      English), the locked one per act with its Unlock… press, a vault never set up its own; a login the vault no longer lists shown as
 //      itself; the card's «from its next start»; New profile busy before the login is saved
@@ -48,11 +51,15 @@ const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); 
 if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) { console.error('src/lib/build-version.js is missing — run `npm run build` first'); process.exit(1); }
 /** an in-memory copy of a src module with `from` replaced — its own requires resolve beside the original */
 function mutant(rel, from, to) {
-  const file = path.join(REPO, rel), src = read(rel);
-  const at = src.split(from).length - 1;
-  if (at !== 1) throw new Error(`mutant: ${rel} holds ${JSON.stringify(from.slice(0, 70))} ${at} times (exactly once wanted)`);
+  const file = path.join(REPO, rel);
+  let src = read(rel);
+  for (const [a, b] of Array.isArray(from) ? from : [[from, to]]) {
+    const at = src.split(a).length - 1;
+    if (at !== 1) throw new Error(`mutant: ${rel} holds ${JSON.stringify(a.slice(0, 70))} ${at} times (exactly once wanted)`);
+    src = src.split(a).join(b);
+  }
   const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file));
-  m._compile(src.split(from).join(to), file);
+  m._compile(src, file);
   return m.exports;
 }
 const B = require('../src/browser-profiles.js');
@@ -221,11 +228,11 @@ console.log('③ THE FORWARDER — the destination\'s NAME goes upstream, with t
 }
 
 // ── a stand-in vault: the engine's verbs the proxy-login module uses (state / secretPut / secretGet / secretDrop / secretNames / noteUse) ──
-function standinVault() {
+function standinVault({ setUp = true } = {}) {
   const v = { locked: false, entries: new Map(), uses: [] };
   return Object.assign(v, {
-    state: () => (v.locked ? 'locked' : 'unlocked'),
-    secretPut: (name, value) => { if (v.locked) return { ok: false, code: 'key-unreadable:vault_locked' }; v.entries.set(name, Buffer.from(value)); return { ok: true }; },
+    state: () => (!setUp ? 'not_set_up' : v.locked ? 'locked' : 'unlocked'),   // = the vault engine's three states
+    secretPut: (name, value) => { if (!setUp) return { ok: false, code: 'vault_not_set_up' }; if (v.locked) return { ok: false, code: 'key-unreadable:vault_locked' }; v.entries.set(name, Buffer.from(value)); return { ok: true }; },
     secretGet: (name) => (v.locked ? { ok: false, code: 'key-unreadable:vault_locked' } : { ok: true, value: v.entries.has(name) ? Buffer.from(v.entries.get(name)) : null }),
     secretDrop: (name) => { v.entries.delete(name); return { ok: true }; },
     secretNames: () => [...v.entries.keys()].map((name) => ({ name, at: 1 })),
@@ -269,6 +276,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(130)
 const K = require('../src/server/browser-keeper.js');
 const mkKeeper = (dataDir, extra = {}, mod = K) => { fs.mkdirSync(dataDir, { recursive: true }); return mod.create({ dataDir, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: { add: () => ({ id: 'u1' }) }, ...extra }); };
 const thr = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
+let NOT_SET_UP = null;   // round 3: the server's own answers for a vault never set up (⑤) — the page's words read THEM (⑦)
 {
   const vault = standinVault(), pl = PL.create({ vault, log: { log() { }, warn() { } } });
   const proxyUrl = `http://127.0.0.1:${HTTP_UP}`;
@@ -393,7 +401,7 @@ const thr = async (fn) => { try { await fn(); return null; } catch (e) { return 
   const noConfig = async (dir, mod) => { const kk = mkKeeper(dir, { proxyLogins: pl, homeDir: HOME2 }, mod); const pp = kk.createProfile({ label: 'No config', proxy: proxyUrl, proxyCredential: ref }); const n = fake.launches().length; const e = await thr(() => kk.start(pp.id, { why: 'user' })); const launched = fake.launches().length - n; try { await kk.stop(pp.id, { why: 'user' }); } catch { } kk.shutdown?.(); await kk._forwardersClose(); return { e, launched, last: launched ? fake.launches().at(-1) : null }; };
   const nc = await noConfig(path.join(ROOT, 'data-5'));
   ok(nc.e && nc.e.code === 'egress_proxy_missing' && nc.launched === 0, 'a browser that rides its profile\'s proxy with NO config file to carry the switch (the person\'s config unreadable) ⇒ the start refused by name (egress_proxy_missing) — nothing launched, never direct', nc.e && [nc.e.code, nc.e.message]);
-  const ncr = await noConfig(path.join(ROOT, 'data-5r'), mutant('src/server/browser-keeper.js', '      if (r0 && r0.proxyRoad && r0.proxyRoad.arg) throw namedError(', '      if (false) throw namedError('));
+  const ncr = await noConfig(path.join(ROOT, 'data-5r'), mutant('src/server/browser-keeper.js', '      if (r0 && r0.proxyRoad && r0.proxyRoad.arg && !NO_PAGE_CALLS.has(m)) throw namedError(', '      if (false) throw namedError('));
   ok(!ncr.e && ncr.launched === 1 && !JSON.stringify((ncr.last || {}).config || {}).includes('--proxy-server='), 'RED: a keeper that runs the call without a config — it launched DIRECT, no switch (the leg above goes red on it)', ncr.e && ncr.e.code);
   const DC = require('../src/server/browser-display-config.js');
   const mkDc = (name, mod = DC) => { const d = path.join(ROOT, name); fs.mkdirSync(d, { recursive: true }); return mod.create({ dir: d, writeJson: (file, o) => fs.writeFileSync(file, JSON.stringify(o, null, 2)), log: { log() { }, warn() { } } }); };
@@ -416,6 +424,85 @@ const thr = async (fn) => { try { await fn(); return null; } catch (e) { return 
   let eCe = null;
   try { const pc = k.createProfile({ label: 'Cloud two', provider: 'cloud:browserbase' }); eCe = await thr(() => k.updateProfile(pc.id, { proxy: proxyUrl })); } catch (e) { eCe = { code: 'create-refused:' + e.code }; }
   ok(eCc && eCc.code === 'proxy_cloud_browser' && eCe && eCe.code === 'proxy_cloud_browser', 'a cloud browser\'s proxy is refused by name at the creation and at the edit (proxy_cloud_browser) — its pages would never pass the hub\'s forwarder', [eCc && eCc.code, eCe && eCe.code]);
+  // round 3 — the EDIT's route answers a proxy refusal with its status (never a 500): a PATCH on a cloud profile ⇒ 400
+  {
+    const express = require('express'), RT = require('../src/routes/browser-trace.js');
+    const app = express(); app.use(express.json()); RT.setup({ keeper: k }); app.use(RT.router);
+    const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+    const pc2 = k.createProfile({ label: 'Cloud three', provider: 'cloud:browserbase' });
+    const resp = await fetch(`http://127.0.0.1:${srv.address().port}/api/browser/profiles/${pc2.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proxy: proxyUrl }) });
+    const body = await resp.json().catch(() => ({}));
+    srv.close();
+    ok(resp.status === 400 && body.code === 'proxy_cloud_browser' && ['proxy_cloud_browser', 'proxy_off_machine', 'bad_proxy', 'bad_proxy_credential', 'bad_proxy_inline_credential'].every((c) => RT.STATUS[c] === 400),
+      'the edit\'s route (PATCH /api/browser/profiles/:id): a proxy on a cloud profile answers 400 proxy_cloud_browser — and its table holds every proxy refusal the edit can give, never a 500', [resp.status, body.code]);
+  }
+  // round 3 — a switch of the browser kind ONTO a cloud one with a stored proxy: refused at the press, nothing stopped
+  {
+    const pw = k.createProfile({ label: 'Switch to cloud', proxy: proxyUrl, proxyCredential: ref });
+    await k.start(pw.id, { why: 'user' });
+    const pid = k._reg().browsers[pw.id].pid;
+    const eS = await thr(() => k.switchBackend({ profileId: pw.id, target: 'cloud:browserbase', by: { kind: 'user' } }));
+    const after = k._reg().browsers[pw.id];
+    ok(eS && eS.code === 'switch_export_only' && after.state === 'ready' && after.pid === pid && k.list().profiles.find((x) => x.id === pw.id).provider === 'chromium',
+      'a switch of a running profile with a proxy ONTO a cloud browser is refused AT THE PRESS by the switch\'s own verdict (switch_export_only: no cloud row takes an in-place switch) — its browser not stopped, nothing rolled back', eS && [eS.code, after.state]);
+    await k.stop(pw.id, { why: 'user' });
+  }
+  // round 3 — the running road on the keeper's OWN list: the address alone (no user, no password), and the login's name
+  {
+    const pr = k.createProfile({ label: 'Running road', proxy: proxyUrl, proxyCredential: ref });
+    await k.start(pr.id, { why: 'user' });
+    const row = k.list().profiles.find((x) => x.id === pr.id) || {};
+    const rowText = JSON.stringify(row);
+    ok(row.proxyLive === proxyUrl && row.proxyLiveLogin === ref && !rowText.includes(PASS) && !rowText.includes(`${USER}:`),
+      'the keeper\'s own list: a running browser\'s road (proxyLive) is the proxy\'s address alone, and the login it was launched with by its vault NAME — never a user:password, never the password', { proxyLive: row.proxyLive, proxyLiveLogin: row.proxyLiveLogin });
+    await k.stop(pr.id, { why: 'user' });
+  }
+  // round 3 — A TEARDOWN NEVER GOES DIRECT AND IS NEVER BLOCKED: the config that carries the switch broken under a running browser ⇒
+  // the Stop still stops it (the close-all keeps the base file — it opens no page — and the identity-checked ladder runs)
+  const breakConfig = (dir) => { const d = path.join(dir, 'browser-env', 'display'); for (const n of fs.readdirSync(d)) if (/-proxy-/.test(n)) fs.rmSync(path.join(d, n)); fs.chmodSync(d, 0o500); return () => fs.chmodSync(d, 0o700); };
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const stopBroken = async (dir, mod) => {
+    const kk = mkKeeper(dir, { proxyLogins: pl }, mod); const pp = kk.createProfile({ label: 'Broken config', proxy: proxyUrl, proxyCredential: ref });
+    await kk.start(pp.id, { why: 'user' });
+    const pid = kk._reg().browsers[pp.id].pid, mend = breakConfig(dir);
+    let e = null; try { e = await thr(() => kk.stop(pp.id, { why: 'user' })); } finally { mend(); }
+    const out = { e, state: kk._reg().browsers[pp.id].state, alive: alive(pid) };
+    if (out.alive) { try { await kk.stop(pp.id, { why: 'user' }); } catch { } }
+    kk.shutdown?.(); await kk._forwardersClose();
+    return out;
+  };
+  const sb = await stopBroken(path.join(ROOT, 'data-6'));
+  ok(!sb.e && sb.state === 'stopped' && !sb.alive, 'the config that carries the switch broken under a running browser ⇒ the person\'s Stop STILL stops it: the close-all keeps the base file (a teardown opens no page), the ladder runs — never a browser left running', sb.e ? [sb.e.code, sb.e.message] : sb);
+  const sbr = await stopBroken(path.join(ROOT, 'data-6r'), mutant('src/server/browser-keeper.js', [["const NO_PAGE_CALLS = new Set(['closeAll', 'info']);", 'const NO_PAGE_CALLS = new Set([]);'], ["      else { try { await rt.closeAll(rec.ns, { dir: p ? p.dir : null, extraEnv: rec.launchEnv || { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } }); } catch (e) {", "      else { try { await rt.closeAll(rec.ns, { dir: p ? p.dir : null, extraEnv: rec.launchEnv || { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } }); } catch (e) { throw e;"]]));
+  ok(sbr.e && sbr.e.code === 'egress_proxy_missing' && sbr.alive, 'RED: the stop of the cure before (the close-all\'s refusal aborts the stop) — the Stop answers egress_proxy_missing and the browser keeps running', sbr.e ? [sbr.e.code, sbr.alive] : sbr);
+  // …and an ADOPTION with that config broken keeps the record while its browser lives (the session info is a read: base file)
+  {
+    const D7 = path.join(ROOT, 'data-7'), k7 = mkKeeper(D7, { proxyLogins: pl });
+    const p7 = k7.createProfile({ label: 'Adopted broken', proxy: proxyUrl, proxyCredential: ref });
+    await k7.start(p7.id, { why: 'user' });
+    k7.shutdown?.(); await k7._forwardersClose();
+    const mend = breakConfig(D7);
+    let r7;
+    try { const k7b = mkKeeper(D7, { proxyLogins: pl }); await k7b.adoptAll(); r7 = { ...k7b._reg().browsers[p7.id] }; mend(); await k7b.stop(p7.id, { why: 'user' }); k7b.shutdown?.(); await k7b._forwardersClose(); } finally { try { mend(); } catch { } }
+    ok(r7 && r7.state === 'ready' && r7.adoptedAt, 'a restart with that config broken: the browser is still ADOPTED (its session info keeps the base file — a read opens no page), never dropped while it lives', r7 && { state: r7.state, lastError: r7.lastError });
+  }
+  // round 3 — A VAULT NEVER SET UP is said as itself (never «locked»: there is no second password to ask for) — the save and the move
+  {
+    const vN = standinVault({ setUp: false }), plN = PL.create({ vault: vN, log: { log() { }, warn() { } } });
+    const sN = plN.save({ proxy: proxyUrl, user: USER, password: PASS });
+    const DN = path.join(ROOT, 'data-n'), idN = (() => { const kk = mkKeeper(DN, { proxyLogins: plN }); const pp = kk.createProfile({ label: 'Never set up', proxy: proxyUrl }); const d0 = JSON.parse(fs.readFileSync(path.join(DN, 'browser-profiles.json'), 'utf8')); d0.profiles.find((x) => x.id === pp.id).proxy = withLogin('http', `127.0.0.1:${HTTP_UP}`); fs.writeFileSync(path.join(DN, 'browser-profiles.json'), JSON.stringify(d0)); return pp.id; })();
+    const mN = await mkKeeper(DN, { proxyLogins: plN }).moveProxyPassword(idN);
+    NOT_SET_UP = { save: sN, move: mN };
+    ok(!sN.ok && sN.code === 'vault_not_set_up' && /not set up/.test(sN.error) && !mN.ok && mN.code === 'vault_not_set_up' && vN.entries.size === 0,
+      'a vault never set up: the login\'s save and «Move the password to the vault» answer vault_not_set_up (the vault\'s real state) — never «locked», nothing written', [sN.code, mN.code]);
+  }
+  // the move: a user name the vault entry cannot carry ⇒ its own code (the page has the sentence)
+  {
+    const DU = path.join(ROOT, 'data-u'), kk = mkKeeper(DU, { proxyLogins: pl }), pp = kk.createProfile({ label: 'Odd user', proxy: proxyUrl });
+    const d0 = JSON.parse(fs.readFileSync(path.join(DU, 'browser-profiles.json'), 'utf8')); d0.profiles.find((x) => x.id === pp.id).proxy = 'http://' + ['a%20b', PASS].join(':') + `@127.0.0.1:${HTTP_UP}`; fs.writeFileSync(path.join(DU, 'browser-profiles.json'), JSON.stringify(d0));
+    const mU = await mkKeeper(DU, { proxyLogins: pl }).moveProxyPassword(pp.id);
+    ok(!mU.ok && mU.code === 'proxy_user_unusable', 'a move whose user name a vault entry cannot carry (a space) ⇒ proxy_user_unusable — the page\'s user-name sentence, not «could not be used (bad-request)»', mU.code);
+  }
 }
 
 console.log('⑥ THE PERSON\'S DOORS — no bearer reaches a proxy login; an agent\'s token never sets the proxy or names its login');
@@ -442,19 +529,25 @@ console.log('⑦ THE PAGE\'S WORDS — every proxy refusal in the page\'s langua
     'every proxy refusal a person sees has its OWN words by its code (the start\'s, the edit\'s, the creation\'s); a code with none is named by its code — never the server\'s English sentence', each.filter(([, w]) => w.includes(SERVER) || /could not be used/.test(w)));
   const lockedSave = PM.proxyWords('vault_locked', T), lockedMove = PM.proxyWords('vault_locked', T, '', { act: 'move' }), lockedStart = PM.proxyWords('proxy_credential_unreadable', T, '', { act: 'start', word: 'key-unreadable:vault_locked' });
   ok(/Unlock…/.test(lockedSave) && /save/.test(lockedSave) && /Unlock…/.test(lockedMove) && !/save/.test(lockedMove) && /move the password/.test(lockedMove) && /start the browser/.test(lockedStart)
-     && PM.proxyDoor('vault_locked') === 'unlock' && PM.proxyDoor('proxy_credential_unreadable', 'key-unreadable:vault_locked') === 'unlock' && PM.proxyDoor('vault_not_set_up') === 'setup' && PM.proxyDoor('proxy_cloud_browser') === null
-     && /Set up the vault…/.test(PM.proxyWords('vault_not_set_up', T, '', { act: 'move' })) && /no longer in the vault/.test(PM.proxyWords('proxy_credential_unreadable', T, '', { act: 'start', word: 'proxy_login_no_entry' })) && /again/.test(PM.proxyWords('not_written', T, '', { act: 'move' })),
+     && PM.proxyDoor('vault_locked') === 'unlock' && PM.proxyDoor('proxy_credential_unreadable', 'key-unreadable:vault_locked') === 'unlock' && PM.proxyDoor('proxy_cloud_browser') === null
+     && /no longer in the vault/.test(PM.proxyWords('proxy_credential_unreadable', T, '', { act: 'start', word: 'proxy_login_no_entry' })) && /again/.test(PM.proxyWords('not_written', T, '', { act: 'move' })),
     'the locked vault in words that fit the act (Save: «then save» · the move: «then move the password again» · a start: «then start the browser again»), each with the Unlock… press; a vault never set up has its own sentence and press; a login gone from the vault, and a move unwritten, said', [lockedSave, lockedMove, lockedStart]);
+  // round 3: the vault never set up — the SERVER's own answers (⑤) through the page's words: Set up the vault…, never Unlock…
+  const nsSave = PM.proxyWords(NOT_SET_UP.save.code, T, NOT_SET_UP.save.error, { act: 'save', word: NOT_SET_UP.save.word }), nsMove = PM.proxyWords(NOT_SET_UP.move.code, T, NOT_SET_UP.move.error, { act: 'move', word: NOT_SET_UP.move.word });
+  ok(PM.proxyDoor(NOT_SET_UP.save.code, NOT_SET_UP.save.word) === 'setup' && PM.proxyDoor(NOT_SET_UP.move.code, NOT_SET_UP.move.word) === 'setup' && /Set up the vault…/.test(nsSave) && /Set up the vault…/.test(nsMove) && !/Unlock/.test(nsSave + nsMove)
+     && /user name cannot hold a space/.test(PM.proxyWords('proxy_user_unusable', T, '', { act: 'move' })),
+    'a vault never set up, as the SERVER answers it at the save and the move: the page says «Set up the vault…» with that press — never «press Unlock…» (there is no second password)', [nsSave, nsMove]);
   const parts = PM.loginNameParts(`proxy-login:socks5://proxy.example.test:1080#${USER}`);
   ok(parts && parts.origin === 'socks5://proxy.example.test:1080' && parts.user === USER && PM.loginNameParts('web-login:x') === null && PM.userNameFits(USER) && !PM.userNameFits('a b') && !PM.userNameFits('a#b') && !PM.userNameFits('x'.repeat(129)),
     'a saved login\'s name read back to its address and user (the field shows a login the vault no longer lists AS ITSELF); a user name the entry cannot carry is refused at the field', parts);
   const FIELD = read('src/lib/browser-proxy-field.js'), NEWP = read('src/lib/browser-new-profile.js');
-  ok(/loaded !== null && loginRow\.style\.display !== 'none'/.test(FIELD) && FIELD.includes("no longer in the vault") && FIELD.includes("the vault\\'s list could not be read") && /if \(!userNameFits\(u\)\) return \{ ok: false, code: 'login_user_unusable'/.test(FIELD)
-     && NEWP.indexOf('st.busy = true; create.disabled = true;\n') > 0 && NEWP.indexOf('st.busy = true; create.disabled = true;\n') < NEWP.indexOf('await proxyField.read()'),
-    'the field counts the login as changed only once the vault\'s list answered, keeps a missing login as its own option, refuses an unusable user name before sending; New profile is BUSY before the login is saved (a double press sends one create)');
+  ok(/loaded !== null && loginRow\.style\.display !== 'none'/.test(FIELD) && FIELD.includes("no longer in the vault") && FIELD.includes("the vault\\'s list could not be read") && /if \(!userNameFits\(u\)\) return \{ ok: false, code: 'proxy_user_unusable'/.test(FIELD)
+     && NEWP.indexOf('st.busy = true; create.disabled = true;\n') > 0 && NEWP.indexOf('st.busy = true; create.disabled = true;\n') < NEWP.indexOf('await proxyField.read()')
+     && /say\(proxyWords\(pv\.code, t, pv\.error, \{ act: 'save', word: pv\.word \}\), proxyDoor\(pv\.code, pv\.word\)\)/.test(NEWP) && /pw \? proxyDoor\(r\.code, r\.word\) : null/.test(NEWP) && /'bproxy-door'/.test(NEWP),
+    'the field counts the login as changed only once the vault\'s list answered, keeps a missing login as its own option, refuses an unusable user name before sending; New profile is BUSY before the login is saved (a double press sends one create), and its refusal line carries the vault\'s press (Unlock… / Set up the vault…) like the Proxy… dialog and the toasts');
   const chip = (r) => (PNL.nameChips({ provider: 'chromium', ...r }, { w: { t: T } }).find((c) => c.key === 'proxy') || {}).text || '';
   ok(chip({ proxy: 'socks5://b.example.test:1080', proxyLive: 'socks5://a.example.test:1080' }) === 'proxy from its next start' && chip({ proxy: 'socks5://a.example.test:1080', proxyLive: 'socks5://a.example.test:1080' }) === 'proxy'
-     && chip({ proxy: 'socks5://a.example.test:1080' }) === 'proxy' && chip({ proxy: null, proxyLive: 'socks5://a.example.test:1080' }) === 'no proxy from its next start' && chip({ proxy: 'socks5://a.example.test:1080', proxyLive: null }) === 'proxy from its next start' && chip({ proxy: null, proxyLive: null }) === '',
+     && chip({ proxy: 'socks5://a.example.test:1080' }) === 'proxy' && chip({ proxy: 'socks5://a.example.test:1080', proxyCredential: 'proxy-login:socks5://a.example.test:1080#u2', proxyLive: 'socks5://a.example.test:1080', proxyLiveLogin: 'proxy-login:socks5://a.example.test:1080#u1' }) === 'proxy from its next start' && chip({ proxy: null, proxyLive: 'socks5://a.example.test:1080' }) === 'no proxy from its next start' && chip({ proxy: 'socks5://a.example.test:1080', proxyLive: null }) === 'proxy from its next start' && chip({ proxy: null, proxyLive: null }) === '',
     'the card says «from its next start» while the RUNNING browser\'s road differs from the profile\'s (an edit, or a browser started before) — and the plain chip once they agree', [chip({ proxy: 'socks5://b.example.test:1080', proxyLive: 'socks5://a.example.test:1080' })]);
   const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js'), missing = [...used].filter((k) => !ZH.includes(JSON.stringify(k) + ':') || !JA.includes(JSON.stringify(k) + ':'));
   ok(used.size > 20 && missing.length === 0, `every one of those ${used.size} sentences is in the zh and ja dictionaries — the page's language`, missing);
