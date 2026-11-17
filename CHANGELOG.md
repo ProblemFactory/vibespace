@@ -8,6 +8,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An Antigravity account’s usage is read once after a stretch of work (5 quiet minutes, at most every 30 minutes); its own Settings row can turn that off.
 - An Antigravity account’s row says how many times its usage was read today; hover it to see who asked.
 - On a phone turned sideways two windows can stand side by side: «Split» beside a window in the window list; held upright, the phone says to turn it.
+- An agent's reply or a For-you item can link to a conversation or a desktop; a press goes there, and an ended one offers «Resume here» or «Read its history».
+- A vibespace://settings/<setting> link in an agent's reply, a For-you item or a notice opens Settings on that one row; it never changes the value.
+- When VibeSpace refuses a turn nobody typed, or warns that a limit is close, its notice links to that limit's row in Settings.
+- An agent can propose a new value for a limit on turns nobody typed: For you shows the limit, its value now and the proposal, and one press changes it.
+- A raised limit always has an end time, when it goes back by itself unless you changed it meanwhile; until then its Settings row says so, with «End now».
 
 ### Changed
 - Settings: Claude’s usage refresh row now covers Claude only; Antigravity’s automatic usage reads have their own row, Off if Claude’s was Off.
@@ -27,6 +32,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Turning the phone no longer opens the conversation list; it stays as you left it.
 - A window's tabs stay on screen with their names when the phone is turned sideways; many tabs scroll instead of shrinking to icons.
 - On a phone the window list keeps each window's name readable: a full row shortens its billing tag, then moves «Split» and the tag into its ⋯ menu.
+
+### Security
+- On browsers older than mid-2025, a chat link written with a crafted title can no longer run code.
+- An agent can no longer change the limits on turns nobody typed or the judge's daily spend cap: only your own page can; an agent that tries is told to ask you.
+- With sign-in off, Settings › Spending says that anything reaching VibeSpace could still change those limits, with a button to set a password.
 
 ## 2.369.407 — 2026-11-17
 
