@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
@@ -40,6 +40,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT, AUX_PORT] = await freePorts(3);
 const root = mintRoot('exit-hop-wt'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeRoot = scratch('exit-hop-chrome');
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -76,7 +77,6 @@ let chrome = null;
 const cleanup = () => {
   try { chrome?.kill('SIGKILL'); } catch {}
   try { aux.kill('SIGKILL'); } catch {}
-  try { endRootedProcesses(chromeRoot); } catch { } // whatever Chrome started under its own root (§57b); the hub's are hub-boot.mjs's
   for (const d of [chromeRoot]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }
 };
 process.on('exit', cleanup);
@@ -112,7 +112,7 @@ const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date
 const launch = async (cache) => {
   const dir = path.join(chromeRoot, cache); fs.mkdirSync(dir, { recursive: true });
   chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling',
-    ...(cache === 'off' ? ['--disable-features=BackForwardCache'] : []), '--window-size=382,580', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore' });
+    ...(cache === 'off' ? ['--disable-features=BackForwardCache'] : []), '--window-size=382,580', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
   let target = null;
   for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((x) => x.type === 'page'); } catch {} if (!target) await sleep(250); }
   if (!target) throw new Error('chrome never exposed a CDP page target');
@@ -124,7 +124,6 @@ const launch = async (cache) => {
 const quit = async () => {
   try { sock.close(); } catch { }
   if (chrome && chrome.exitCode === null) { const gone = new Promise((r) => chrome.once('exit', r)); chrome.kill('SIGKILL'); await Promise.race([gone, sleep(3000)]); }
-  try { endRootedProcesses(chromeRoot); } catch { }
   chrome = null;
 };
 const nav = async () => { const h = await cdp('Page.getNavigationHistory'); return { index: h.currentIndex, url: h.entries[h.currentIndex].url }; };

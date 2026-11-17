@@ -2740,7 +2740,7 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
   // hub-boot.mjs is the helper). THE ONE COUNT of this fact (主开发 2026-11-17 06:00Z — no second counter). A RATCHET that
   // only falls: a re-pointed batch lowers BOOTS_OUTSIDE_HELPER in the same commit, a new boot outside the helper is red, and
   // at 0 it is the law. RED CONTROL: a re-pointed suite with its own spawn line restored counts one more.
-  const BOOTS_OUTSIDE_HELPER = 199;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e (217), heavy batch 1 twenty suites (197); the rule WIDENED (主开发 06:00Z) found two the narrow pattern missed — test-boot-loop-hold's spread argv, test-update-road's stub server.js (its first line the real runtime boot) — 199
+  const BOOTS_OUTSIDE_HELPER = 199;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e (217), heavy batch 1 twenty suites (197); the rule WIDENED (主开发 06:00Z) found two the narrow pattern missed — test-boot-loop-hold's spread argv, test-update-road's stub server.js (its first line the real runtime boot) — 199. THE FLOOR IS 1, not 0: test-update-road's stub is the one boot that can never move onto startHub (it measures the launcher's first line, no hub)
   const bootFiles = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.mjs$/.test(f) && !/^dbg-/.test(f) && f !== 'hub-boot.mjs').sort();
   // one argument's text from `i` to the first comma / closing bracket at depth 0 (quotes and templates skipped) → { text, end }
   const argAt = (t, i) => {
@@ -2764,10 +2764,16 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
     const isNode = (tok) => NODE_TOK.test(tok) || (/^[A-Za-z_$][\w$]*$/.test(tok) && NODE_TOK.test(defOf(tok) || ''));
     const NAMES = /(?:['"`/])server\.js['"`]/;
     const namesServer = (el) => NAMES.test(el) || (/^[A-Za-z_$][\w$]*$/.test(el) && NAMES.test(defOf(el) || ''));
+    // the child-process module's own receivers in this file (`import * as cp from 'node:child_process'`, `const cp = require(…)`):
+    // `cp.spawn(process.execPath, […])` is a boot too — any other `x.spawn(` is another API's
+    const CP = new Set(['child_process', 'childProcess']);
+    for (const mm of t.matchAll(/(?:import\s+\*\s+as\s+|import\s+)([A-Za-z_$][\w$]*)\s+from\s+['"](?:node:)?child_process['"]|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+import|require)\(\s*['"](?:node:)?child_process['"]\s*\)/g)) CP.add(mm[1] || mm[2]);
+    const memberOk = (i) => { const pre = /([A-Za-z_$][\w$]*)\.$/.exec(t.slice(Math.max(0, i - 64), i)); return !pre ? !/[\w$]$/.test(t.slice(Math.max(0, i - 1), i)) : CP.has(pre[1]); };
     let n = 0;
-    for (const m of t.matchAll(/\b(?:spawn|spawnSync|fork|execFile|execFileSync)\(\s*/g)) {
-      if (isData(m.index) || /[.\w$]$/.test(t.slice(Math.max(0, m.index - 1), m.index))) continue;   // a call outside data, not `x.spawn(` of another API
+    for (const m of t.matchAll(/\b(spawn|spawnSync|fork|execFile|execFileSync)\(\s*/g)) {
+      if (isData(m.index) || !memberOk(m.index)) continue;   // a call outside data — bare, or on the child-process module; never `x.spawn(` of another API
       const first = argAt(t, m.index + m[0].length);
+      if (m[1] === 'fork' && namesServer(first.text)) { n++; continue; }   // fork(modulePath, …) runs node on its FIRST argument
       let k = first.end; if (t[k] !== ',') continue; k++; while (/\s/.test(t[k] || '')) k++;
       if (t[k] !== '[') continue;
       const els = elementsOf(walk(t, k, false));
@@ -2775,7 +2781,7 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
       if (els.some(namesServer)) n++;
     }
     for (const m of t.matchAll(/\bexec(?:Sync)?\(\s*/g)) {
-      if (isData(m.index) || /[.\w$]$/.test(t.slice(Math.max(0, m.index - 1), m.index))) continue;
+      if (isData(m.index) || !memberOk(m.index)) continue;
       const cmd = argAt(t, m.index + m[0].length).text;
       if (/^['"`]/.test(cmd) && /\bnode\b[^;&|]*server\.js/.test(cmd)) n++;
     }
@@ -2793,12 +2799,24 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
   const forms = { constant: "const SRV = path.join(wt, 'server.js');\nconst c = spawn(process.execPath, [SRV], { cwd: wt });", nodeConst: "const NODE = process.execPath;\nspawn(NODE, ['server.js'], {});",
     dbus: "const s = spawn(DBUS, ['--', process.execPath, 'server.js'], { cwd: wt, detached: true, env: benv });", prlimit: "spawn(prlimitBin, [`--nofile=${L}:${L}`, 'node', 'server.js'], { cwd: wt });",
     spawnSync: "spawnSync(process.execPath, ['server.js'], { timeout: 5000 });", execFile: "execFile('node', [`${wt}/server.js`], () => {});", execFileSync: "execFileSync(process.execPath, ['./server.js'], {});",
-    execCmd: "execSync(`node ${wt}/server.js &`, { cwd: wt });",
+    execCmd: "execSync(`node ${wt}/server.js &`, { cwd: wt });", cpMember: "import * as cp from 'node:child_process';\nconst s = cp.spawn(process.execPath, ['server.js'], { cwd: wt });", cpRequire: "const childProcess = require('child_process');\nchildProcess.spawn('node', ['server.js']);", forkModule: "const c = fork(path.join(wt, 'server.js'), [], { cwd: wt });",
     direct: "spawn(process.execPath, ['server.js'], {})", preload: "spawn('node', ['-r', pre, 'server.js'])", joined: "fork(process.execPath, [path.join(wt, 'server.js')])", launcher: "spawn(DBUS, ['--', process.execPath, 'server.js'], {})", patched: "spawn(process.execPath, [MC.write('server.js', src, 'x')], {})" };
   const notBoots = { comment: "// spawn(process.execPath, ['server.js'])", string: "const ctl = \"spawn('node', ['server.js'])\";", fixture: "const FIX = `const srv = spawnSync(process.execPath, [SRV]);\nconst SRV = path.join(wt, 'server.js');`;",
-    otherProgram: "const SRV = path.join(wt, 'server.js');\nexecFileSync('git', ['log', SRV]);", otherNode: "const HUB = path.join(sdir, 'hub.cjs');\nspawn(process.execPath, [HUB, jobsJs]);", method: "child.spawn(process.execPath, ['server.js']);", copy: "for (const f of ['src', 'server.js']) cp(f);", git: "execFileSync('git', ['ls-files', 'server.js'])" };
+    otherProgram: "const SRV = path.join(wt, 'server.js');\nexecFileSync('git', ['log', SRV]);", otherNode: "const HUB = path.join(sdir, 'hub.cjs');\nspawn(process.execPath, [HUB, jobsJs]);", method: "child.spawn(process.execPath, ['server.js']);", otherApi: "import pty from 'node-pty';\npty.spawn(process.execPath, ['server.js']);", copy: "for (const f of ['src', 'server.js']) cp(f);", git: "execFileSync('git', ['ls-files', 'server.js'])" };
   ok(Object.values(forms).every((v) => bootsOf(v) === 1) && Object.values(notBoots).every((v) => bootsOf(v) === 0) && judge(forms.patched).spawns === 0,
     `§57c the rule reads every boot form (${Object.keys(forms).join(', ')} — a constant naming the server file, a launcher, the sync forms, a command string, the patched copy) and no comment, fixture string, copy list, git argument, other node script or another API's spawn`);
+  // §57d RULE NINE (主开发 2026-11-17 10:04Z): a suite on the boot helper calls NO rooted end of its own — the helper IS the rooted
+  // end (it ends a process by the HOME / daemon root it handed out, by start time, never reading one in an uninterruptible wait);
+  // scratch.mjs endRootedProcesses / endDaemonsOf pick by a cwd or an argv token and kill a bare pid. A suite's own browser carries
+  // the root's HOME instead (hub-boot.mjs rule 9). Counted outside comments and strings.
+  const onHelperSrc = (t) => /\bfrom\s*['"]\.\/hub-boot\.mjs['"]/.test(t);
+  const callsOldEnd = (t) => { const data = dataRanges(t); return [...t.matchAll(/\b(?:endRootedProcesses|endDaemonsOf)\s*\(/g)].some((m) => !data.some(([x, y]) => m.index >= x && m.index < y)); };
+  const bothEnds = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f)).filter((f) => { const t = fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'); return onHelperSrc(t) && callsOldEnd(t); });
+  const onHelperN = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && onHelperSrc(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'))).length;
+  ok(onHelperN >= 2 && bothEnds.length === 0, `§57d no suite on the boot helper (${onHelperN}) also calls an old rooted end (endRootedProcesses / endDaemonsOf) — the helper IS the rooted end${bothEnds.length ? ' — ' + bothEnds.join(', ') : ''}`);
+  const hbImp = "import { mintRoot, startHub } from './hub-boot.mjs';\n";
+  ok(callsOldEnd(hbImp + 'try { endRootedProcesses(chromeDir); } catch {}') && callsOldEnd(hbImp + 'endDaemonsOf(dev);') && !callsOldEnd(hbImp + '// endRootedProcesses(chromeDir)') && !callsOldEnd(hbImp + "const s = 'endRootedProcesses(x)';") && !onHelperSrc("import { endRootedProcesses } from './scratch.mjs';"),
+    '§57d CONTROLS: a call on the helper\'s suite is caught (either old end), one in a comment or a string is not, and a suite not on the helper is not judged');
 }
 
 // §58 EVERY ICON A MODULE NAMES EXISTS (lane I, 2026-09-25 — the owner's live-view screenshot printed the word

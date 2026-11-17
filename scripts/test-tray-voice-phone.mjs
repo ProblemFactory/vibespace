@@ -35,7 +35,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const require = createRequire(import.meta.url);
@@ -46,6 +46,7 @@ const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (nev
 
 const [PORT, CDP_PORT] = await freePorts(2);
 const root = mintRoot('tray-voice-wt'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeDir = scratch('tray-voice-chrome'); // its own registered scratch root (test-mobile-back-chrome's lesson)
 const SHOTS = process.env.VIBESPACE_TRAY_VOICE_PNG_DIR || scratch('tray-voice-png');
@@ -67,10 +68,9 @@ const stubPath = `${wt}-claude-stub`; // never a vendor CLI: the boot probes get
 fs.writeFileSync(stubPath, '#!/bin/sh\nfor a in "$@"; do case "$a" in --version) echo "2.1.288 (Claude Code) stub"; exit 0;; esac; done\nexit 0\n', { mode: 0o755 });
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
-  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
+  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
-  try { endRootedProcesses(chromeDir); } catch { } // whatever Chrome started under its own root (§57b); the hub's are hub-boot.mjs's
   for (const d of [chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} }
 };
 process.on('exit', cleanup);
@@ -320,6 +320,5 @@ console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass}
 // Chrome first, and wait for it: a profile dir removed while its processes still write comes back
 try { sock.close(); } catch { }
 if (chrome.exitCode === null) { const gone = new Promise((r) => chrome.once('exit', r)); chrome.kill('SIGKILL'); await Promise.race([gone, sleep(3000)]); }
-try { endRootedProcesses(chromeDir); } catch { }
 await sleep(300);
 process.exit(fail ? 1 : 0);

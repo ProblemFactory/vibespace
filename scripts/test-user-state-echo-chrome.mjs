@@ -26,6 +26,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT] = await freePorts(2);
 const root = mintRoot('ueo-chrome'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const fakeHome = path.join(root, 'home');
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
@@ -40,7 +41,7 @@ fs.mkdirSync(path.join(fakeHome, '.claude'), { recursive: true });
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome } });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', ...(process.env.VS_CHROME ? ['--no-sandbox'] : []), `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });   // (VS_CHROME: a Chrome for Testing unpacked from its zip has no setuid sandbox helper — as the other suites run it)
+const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', ...(process.env.VS_CHROME ? ['--no-sandbox'] : []), `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });   // (VS_CHROME: a Chrome for Testing unpacked from its zip has no setuid sandbox helper — as the other suites run it)
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
   try { fs.rmSync(`${wt}-chrome`, { recursive: true, force: true }); } catch {}
