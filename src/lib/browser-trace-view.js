@@ -630,6 +630,11 @@ export function rowWhyText(r) {
     : x.browserClosed === 'profile_locked' ? t('its folder is held by another browser')
       : x.browserClosed ? t('its browser is closed (the next command starts it again)') : '';
   const age = Number.isFinite(Number(x.ageMs)) && x.ageMs !== null ? Number(x.ageMs) : null;
+  const w = rowStateWhy(x, closed, age);
+  // lane browsers-stop: a named profile a conversation's key stopped says so, as the short-lived rows do (ephemeralStateText)
+  return x.stoppedBy === 'manager' && w ? `${w} · ${t('stopped by a conversation with a key')}` : w;
+}
+function rowStateWhy(x, closed, age) {
   switch (x.state) {
     case 'in-use': { const n = Number(x.held) || 0; const head = n === 1 ? t('1 conversation uses it') : t('{n} conversations use it', { n }); return closed ? `${head} · ${closed}` : head; }
     case 'live': return closed || t('its browser is running');

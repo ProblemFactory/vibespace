@@ -275,7 +275,13 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   ok(S.asksOf(KEY_A).length === 1 && JSON.stringify(S.continueOf(s, 'sess-1')) === '{"armed":true,"resetsAt":5}' && S.handoverOf(s) === true, 'asks (its own, never a notice), the armed continue, a hand-over armed for the turn end');
   const b = S.browserOf(s, 'sess-1');
   ok(b && b.drivenBy === 'person' && b.viewers === 0 && b.personBrowsing === false && CF.endVerdict({ ...IDLE, browser: b }).busy[0].code === 'browser', 'a browser the person took over: drivenBy person — busy (browser)', b);
-  ok(S.browserOf({}, 'x') === null && S.browsers().why.includes('piece 6'), 'no browser key = no browser (a known answer); the list of every browser waits for the keeper\'s rows (piece 6), said so');
+  ok(S.browserOf({}, 'x') === null && S.browsers().why === CF.WHY.notCollected, 'no browser key = no browser (a known answer); a keeper without its rows lists no browser — unknown, said');
+  // lane browsers-stop (piece 6): the list's browsers ARE the keeper's rows — the id browsers.stop takes, holders as conversation keys
+  const Sb = COL.sourcesFrom({ keeper: () => ({ stopRows: () => [{ id: 'bp-aa', kind: 'own', name: 'Research', memBytes: 5e8, lastCommandAt: 7, holders: [{ sessionId: 'sess-1' }] }, { id: 'bp-bb', kind: 'profile', name: 'Work', holders: [{ sessionId: 'sess-gone' }] }] }),
+    activeSessions: new Map([['sess-1', { backend: 'claude', backendSessionId: KEY_A.slice(7) }]]) });
+  const bl = Sb.browsers();
+  ok(Array.isArray(bl) && bl[0].id === 'bp-aa' && bl[0].kind === 'own' && bl[0].holders.join() === KEY_A && bl[0].memBytes === 5e8 && bl[1].holders.join() === 'a conversation not running here',
+    'the list\'s browsers come from the keeper\'s rows: each with the id browsers.stop takes, its kind, its holders as conversation keys (a holder not running here stays a mark no key matches)', bl);
   ok(JSON.stringify(S.desktopOf(KEY_A)) === '{"desktop":{"id":"d1","name":"Main"},"window":true}' && S.desktopOf(KEY_B).window === false && S.desktops().length === 1, 'the stored layout (in memory): its desktop and window; another conversation has no window; the stage is not a desktop');
   const S0 = COL.sourcesFrom({ persistenceRouter: { layoutsCached: () => null }, sysinfo: { history: () => [] } });
   ok(S0.desktopOf(KEY_A).why && S0.desktops().why && (await S0.machineMem()).why === CF.WHY.measuring, 'no layout read since the boot, no memory sample yet: unknown with their reasons (never a guess)');

@@ -2491,9 +2491,10 @@ function idleReleaseVerdict({ live = false, turn = null, idleSince = null, now =
  * EVERY UNKNOWN REFUSES. → { stop, code, why } — `code` null when it may stop. A person's own Stop overrides all of it.
  *   live           true | false | null
  *   holders        [{ turn, granted, unknown }] — the conversations holding it (`unknown`: not running here)
- *   kind           'own' | 'helper' | 'profile' | 'external' | 'remote'
+ *   kind           'own' | 'helper' | 'profile' | 'external' | 'remote' — THIS MACHINE ONLY for now (主开发's ruling): a paired
+ *                  machine's browser is refused by name after reach, before anything is stopped (its road moves with the separation)
  *   takenOver / watched / personBrowsing — true | false | null
- *   inFlight       null | the in-flight thing the dialog watch reports (a page dialog, a passkey ceremony)
+ *   inFlight       null | what the dialog watch reports in flight on THIS browser (a page dialog, a browser prompt, a passkey ceremony)
  *   tabsKept       true only where the keeper really keeps the tabs (a conversation's own browser, the kept store wired)
  *   closeTabs      the call accepts that the tabs close
  */
@@ -2505,8 +2506,11 @@ function stopVerdict({ live = null, holders = null, kind = null, takenOver = nul
   // reach first — nothing below is said to a key that does not reach every holder
   if (!Array.isArray(holders)) return no('holder_unknown', 'which conversations hold it is unknown');
   if (holders.length === 0) return no('no_holder', 'no conversation holds it — its own idle clock stops it');
-  if (holders.some((h) => h && h.unknown)) return no('holder_unknown', 'a conversation holding it is not running here — whether it is yours to stop is unknown');
-  if (holders.some((h) => !h || h.granted !== true)) return no('not_granted', 'it is not yours: a conversation outside this key\'s reach holds it');
+  const known = holders.filter((h) => h && !h.unknown);
+  if (known.some((h) => h.granted !== true)) return no('not_granted', 'it is not yours: a conversation outside this key\'s reach holds it');
+  // «a holder is not running here» is said only to a key that reaches a holder; to any other it is simply not its own
+  if (known.length < holders.length) return known.length ? no('holder_unknown', 'a conversation holding it is not running here — whether it is yours to stop is unknown') : no('not_granted', 'it is not yours: no conversation within this key\'s reach holds it');
+  if (kind === 'remote') return no('other_machine', 'it runs on a paired machine — a key stops browsers on this machine only, for now');
   if (kind === 'external') return no('not_ours', 'it is an attached external browser — a stop only drops its forward; it keeps running');
   if (takenOver === true) return no('person_driving', 'a person drives it (a takeover, or a request open to the person)');
   if (takenOver !== false) return no('person_driving', 'whether a person drives it is unknown');

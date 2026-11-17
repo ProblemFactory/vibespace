@@ -1286,8 +1286,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const d = rec && rec.displaySession && rec.displaySession.display;
     return d ? String(d).slice(0, 40) : null;
   }
-  /** The conversation-level stuck fact (the keeper's `factFor` → the chip / the row): across its browsers. */
-  function stuckForKey(browserKey) {
+  /** The conversation-level stuck fact (the keeper's `factFor` → the chip / the row): across its browsers — or, given
+   *  `{profileId}` (lane browsers-stop: the stop asks about ONE browser), that browser's own fact only. */
+  function stuckForKey(browserKey, { profileId = null } = {}) {
     if (!keeper || !browserKey) return null;
     const bk = String(browserKey);
     // lane passkey-browse-yourself (rule 2): the user's OWN browsing (`hu-…`: no lease, no set) — its profile, his tabs (the
@@ -1299,6 +1300,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     let e = null; if (!humanPid) { try { e = keeper.ephemeralFor ? keeper.ephemeralFor(bk) : null; } catch { e = null; } }
     if (e && e.profileId) cands.push({ profileId: e.profileId, ephemeral: true, sessionId: e.sessionId || null });
     for (const c of cands) {
+      if (profileId && String(c.profileId) !== String(profileId)) continue;
       // lane browser-unresponsive: the WHOLE browser judged hung (the keeper's fact) is said before any page's state
       let br = null; try { br = typeof keeper.browserOf === 'function' ? keeper.browserOf(c.profileId) : null; } catch { br = null; }
       if (br && br.unresponsive && Number.isFinite(br.unresponsive.since)) { let p = null; try { p = keeper.profile(c.profileId); } catch { p = null; } return { state: 'unresponsive', why: 'browser', count: Number(br.unresponsive.asks) || 0, since: br.unresponsive.since, label: (p && p.label) || c.profileId, profileId: c.profileId }; }

@@ -316,7 +316,7 @@ if (deliver && typeof deliver.registerEndedWake === 'function') deliver.register
 // 3b): the proposal card's rows come from the SAME builder as the list
 const listFacts = (() => { const CFX = require('./conversation-facts.js'); const src = () => listSources() || {}; return CFX.create({ activeSessions, groupsOf: automationGroupsStrict /* restack 416 (r311 (a)): a membership still being read THROWS — the row says so */, ...CFX.sourcesFrom({
       hosts,   // B-24e2: a paired machine is asked for its own binary's background signal
-      getJobs: () => (getJobs ? getJobs() : null), userTodos, persistenceRouter, keeper: () => browserKeeper, browserStream: () => browserStream,
+      getJobs: () => (getJobs ? getJobs() : null), userTodos, persistenceRouter, keeper: () => browserKeeper, browserStream: () => browserStream, activeSessions,
       autoResume: () => src().autoResume || null, stashView: () => src().stashView || null, deliver: () => deliver, sysinfo: { history: (ms) => { const si = src().sysinfo; return si && typeof si.history === 'function' ? si.history(ms) : null; } },
       stoppedSessions: () => { const f = src().stoppedSessions; return typeof f === 'function' ? f() : []; }, treeUsage: require('../browser-facts.js').treeUsage, buffersDir: BUFFERS_DIR }) }); })();
 // lane login-request-card (majordomo piece 3b): THE PROPOSAL CARD — an agent proposes a person-only act (an end; piece 7's wake grant); ONE
@@ -1506,7 +1506,7 @@ function createSessionMessages(session, sessionId) {
         notice: (sessionId, n) => { const st = getSessionStatus ? getSessionStatus() : null; const s = activeSessions.get(sessionId); if (st && sessionStatusKey && s) st.pushNotice(sessionStatusKey(s, sessionId), n, { replaceKind: true }); },
         withdraw: (sessionId, dialogId) => { const st = getSessionStatus ? getSessionStatus() : null; const s = activeSessions.get(sessionId); if (st && sessionStatusKey && s && typeof st.dropNotices === 'function') st.dropNotices(sessionStatusKey(s, sessionId), (x) => x && x.kind === 'browser-dialog' && x.dialog && x.dialog.id === dialogId); },
       });
-      browserKeeper.setStuckSource((bk) => browserDialogs.stuckForKey(bk));
+      browserKeeper.setStuckSource((bk, pid) => browserDialogs.stuckForKey(bk, pid ? { profileId: pid } : undefined)); // lane browsers-stop: the stop asks about ONE browser
       browserKeeper.setPasskeyDrop?.((pid) => browserDialogs.dropPasskeys(pid)); // lane passkey-store-core: a removed profile's keys go with it
       browserKeeper.setPaintWatch?.(browserDialogs); // lane browser-swiftshader-cpu: idle paint stops on the watch's own socket
       // verify r1 (site-reset): a holder's tabs the KEEPER can attribute (its pinned tab, its mediated lease's tabs, the user's

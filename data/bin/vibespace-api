@@ -46,7 +46,7 @@ const USAGE = [
   '  vibespace-api list [--json] [--key <name|id>]   every conversation and browser the key reaches, sorted by memory: what runs in',
   '                each, whether it may be ended (busy + why), its desktop and its link; a fact the hub cannot know prints',
   '                «unknown» with its reason (never 0, never idle) — --json prints the hub\'s answer whole',
-  '  vibespace-api browsers stop <bp-…> [--close-tabs]   stop a running browser nobody uses (its id: vibespace-browser profiles); refused, with why,',
+  '  vibespace-api browsers stop <bp-…> [--close-tabs]   stop a running browser nobody uses, ON THIS MACHINE (its id: vibespace-api list); refused, with why,',
   '                while it is not yours, a person uses it, something is in flight or a holder is mid-turn; a helper\'s or a named profile\'s tabs close — only with --close-tabs',
   '  <target> = a conversation id, <backend>:<id> or a session id (sess-…); a conversation the key opened is within its reach',
   '  the grant\'s REACH (`keys` prints it): opened = only what the key opened (+ yourself) · groups: <T-…> = those Task Groups\' conversations too · instance = every conversation here; outside it ⇒ not_granted naming the reach (the user widens it on the key\'s row in the Vault window)',
@@ -157,7 +157,7 @@ function listWords(d, now = Date.now()) {
   if (d.beyondReach) out.push('', `${d.beyondReach} more beyond this key's reach`);
   if (d.beyondWhy) out.push(String(d.beyondWhy));   // the hub's own sentence (the store HELD: rows NOT JUDGED are not rows outside the reach) — never the count alone
   if (!Array.isArray(d.browsers)) out.push(`browsers: unknown (${d.browsersWhy || 'the hub did not say why'})`);
-  for (const b of d.browsers || []) out.push(`browser ${b.name || b.id}: ${b.running ? 'running' : 'stopped'}${GB(b.memBytes) ? ' · ' + GB(b.memBytes) : ''}${Array.isArray(b.holders) && b.holders.length ? ' · held by ' + b.holders.join(', ') : ''}`);
+  for (const b of d.browsers || []) out.push(`browser ${b.name ? b.name + ' (' + b.id + ')' : b.id}${b.kind ? ' · ' + b.kind : ''}: ${b.running ? 'running' : 'stopped'}${GB(b.memBytes) ? ' · ' + GB(b.memBytes) : ''}${Array.isArray(b.holders) && b.holders.length ? ' · held by ' + b.holders.join(', ') : ''}`);
   if (d.pass && d.pass.ranOut) out.push('', `the facts pass ran out of time after ${d.pass.reached} of ${d.pass.of} — the rows after it print unknown; ask again`);
   return out.join('\n');
 }

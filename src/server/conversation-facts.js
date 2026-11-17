@@ -189,7 +189,7 @@ function create({
  * or read a file and they are NOT called here: the stash summary (its gate may write), the keeper's published browser fact
  * and its ephemerals() rows (a stat per kept store), the first layouts read, the machine memory reader).
  */
-function sourcesFrom({ hosts = null, getJobs = () => null, userTodos = null, persistenceRouter = null, keeper = () => null, browserStream = () => null,
+function sourcesFrom({ hosts = null, getJobs = () => null, userTodos = null, persistenceRouter = null, keeper = () => null, browserStream = () => null, activeSessions = null,
   autoResume = () => null, stashView = () => null, deliver = () => null, sysinfo = null, stoppedSessions = null, treeUsage = null, buffersDir = null,
   // the person's grant «may wake its conversation» on one job or schedule (the owner's rule, 2026-11-17 — piece 7 owns the field):
   // true | false | null (unknown). Until piece 7 names it, every grant reads unknown — the safe side (unknown refuses).
@@ -280,7 +280,16 @@ function sourcesFrom({ hosts = null, getJobs = () => null, userTodos = null, per
       try { for (const st of (k.inputsFor ? k.inputsFor(bk) : [])) { if (st.profileId && k.humanOf) { const h = k.humanOf(st.profileId); if (h && h.state === 'driving') personBrowsing = true; } } } catch { personBrowsing = null; }
       return { browserKey: bk, drivenBy: sum.input === 'user' ? 'person' : null, viewers, personBrowsing, ...(Number.isInteger(viewers) && personBrowsing !== null ? {} : { known: false, why: WHY.notCollected }) };
     },
-    browsers: () => ({ why: 'every running browser is listed by the keeper\'s rows (majordomo piece 6)' }),
+    // lane browsers-stop (majordomo piece 6): every running browser from the keeper's rows (stopRows: a read, no file) — the id
+    // browsers.stop takes; its holders as conversation keys (a holder not running here stays a mark no key matches: never listed by it)
+    browsers: () => {
+      const k = keeper(); if (!k || typeof k.stopRows !== 'function') return { why: WHY.notCollected };
+      let rows = null; try { rows = k.stopRows(); } catch { rows = null; }
+      if (!Array.isArray(rows)) return { why: 'the browser keeper did not answer' };
+      const keyOfSid = (sid) => { const s = sid && activeSessions && typeof activeSessions.get === 'function' ? activeSessions.get(sid) : null; const cid = idOf(s); return cid ? `${s.backend || 'claude'}:${cid}` : null; };
+      return rows.map((r) => ({ id: r.id, kind: r.kind, name: r.name || null, running: true, memBytes: Number.isFinite(r.memBytes) ? r.memBytes : null, lastCommandAt: Number.isFinite(r.lastCommandAt) ? r.lastCommandAt : null,
+        holders: (Array.isArray(r.holders) ? r.holders : []).map((h) => keyOfSid(h && h.sessionId) || 'a conversation not running here') }));
+    },
     prepare: () => (persistenceRouter && typeof persistenceRouter.layoutsAsync === 'function' ? persistenceRouter.layoutsAsync() : null),
     desktopOf: (key) => { const L = layoutIndex(); if (!L) return { why: noLayout() }; const d = L.win.get(String(cidOfKey(key))); return { desktop: d || null, window: !!d }; },
     desktops: () => { const L = layoutIndex(); return L ? L.desktops : { why: noLayout() }; },

@@ -1150,9 +1150,12 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    * as its one holder; a HELPER's browser (a child key) is its own kind and keeps nothing; a named profile's holders are its
    * leases and the person's own browsing is its human row; an attached external browser is its own kind. tabsKept is true
    * only where the keeper really keeps the tabs (a conversation's own browser, the kept store wired). inFlight = what the
-   * dialog watch reports open on it (a page dialog, a passkey ceremony — never new tracking). turn = the holder's turn as the
-   * idle release reads it (null = unknown). Nothing here judges: src/browser-profiles.js stopVerdict does.
+   * dialog watch reports in flight on THIS browser — the fact asked for THIS profile (a fact on another profile of the same
+   * conversation never hides it), mapped state by state: a page dialog, a browser prompt (a file chooser or a sign-in), a
+   * passkey ceremony are in flight; a blind tab, a navigation loop and an unresponsive page are not. turn = the holder's turn
+   * as the idle release reads it (null = unknown). Nothing here judges: src/browser-profiles.js stopVerdict does.
    */
+  const IN_FLIGHT = Object.freeze({ dialog: 'a page dialog', prompt: 'a browser prompt (a file chooser or a sign-in)', passkey: 'a passkey ceremony' });
   function stopRows() {
     ensureLoaded();
     const out = [];
@@ -1171,8 +1174,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       const viewers = keys.reduce((n, bk) => n + (watchers.get(inputKey(bk, scope)) || 0), 0) + (human ? Number(human.viewers) || 0 : 0);
       let inFlight = null;
       for (const bk of keys) {
-        let st = null; try { st = stuckSource ? stuckSource(bk) || null : null; } catch { st = null; }
-        if (st && (!st.profileId || st.profileId === p.id) && st.state && st.state !== 'unresponsive') { inFlight = /passkey/i.test(String(st.state)) ? 'a passkey ceremony' : 'a page dialog'; break; }
+        let st = null; try { st = stuckSource ? stuckSource(bk, p.id) || null : null; } catch { st = null; }
+        if (st && (!st.profileId || st.profileId === p.id) && Object.prototype.hasOwnProperty.call(IN_FLIGHT, st.state)) { inFlight = IN_FLIGHT[st.state]; break; }
       }
       const u = live.get(p.id);
       out.push({ id: p.id, kind: rec.external ? 'external' : !isLocalRec(rec) ? 'remote' : helper ? 'helper' : own ? 'own' : 'profile', name: p.label || null, running: true,
@@ -1182,10 +1185,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     return out;
   }
   /** lane browsers-stop: the manager's stop — the keeper's own stop under its own closed reason (`manager`: automatic for the
-   *  kept tabs, never deliberate). → { freed, why } — the TRUTH of what was freed: a stop that left the browser running (a
-   *  daemon that survived, a machine that could not be asked) is NOT freed. Who stopped it is the record's `stoppedBy`
-   *  (the Browser panel words it), never the word in its error field. */
-  const NOT_CLEAN = /could not be asked|survived SIGKILL|not provably ours|NOT clean/;
+   *  kept tabs, never deliberate), for a browser ON THIS MACHINE (the verb refuses a paired machine's before it gets here).
+   *  → { freed, why } — the TRUTH of what was freed: a browser still running, or ANY residue the stop left in its error field
+   *  (the reason word aside), is NOT freed. Who stopped it is the record's `stoppedBy` (the Browser panel words it). */
   async function managerStop(profileId) {
     await stop(profileId, { why: 'manager' });
     const rec = reg.browsers[profileId];
@@ -1194,7 +1196,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (left === 'manager') left = ''; else if (left.startsWith('manager; ')) left = left.slice('manager; '.length);
     rec.lastError = left || null;   // who stopped it is `stoppedBy: 'manager'` (the stop wrote it) — the panel says it; never the error field
     commit();
-    const freed = !B.isLiveBrowser(rec) && !NOT_CLEAN.test(left);
+    const freed = !B.isLiveBrowser(rec) && !left;
     return { freed, why: freed ? null : (left || 'it is still running') };
   }
 
