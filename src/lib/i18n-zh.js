@@ -11280,16 +11280,61 @@ export default {
   "Open the {n} open items of this conversation in the For-you window": "在「待你处理」窗口中打开这个对话的 {n} 项",
   "Marked done": "已标记完成",
   "Dismissed": "已忽略",
+  "through: any site": "经由：任何网站", // the owner 2026-11-17: who may have a web login filled
+  "through: any account on this site": "经由：这个网站的任何账号", // the owner 2026-11-17: who may have a web login filled
+  "Any site…": "任何网站…", // the owner 2026-11-17: who may have a web login filled
+  "Any account on this site…": "这个网站的任何账号…", // the owner 2026-11-17: who may have a web login filled
+  "VibeSpace never hands them the password and types it only on the matching site into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls.": "VibeSpace 绝不把密码交给它们，只在匹配的网站上把密码填进密码或验证码输入框；我们的防护能挡住误读和错误的网站，但不保证能挡住故意钻研它自己控制的页面的智能体。", // the owner 2026-11-17: who may have a web login filled
+  "The vault is locked — press Unlock…, then save again.": "保险库已锁定——请按「解锁…」，然后再保存。", // the owner 2026-11-17: who may have a web login filled
+  "An exception is a running conversation, under a Task Group or Everyone.": "「除了」里只能放正在运行的对话，并且要放在任务组或「全部」下面。", // the owner 2026-11-17: who may have a web login filled
+  "Not saved ({code}).": "未保存（{code}）。", // the owner 2026-11-17: who may have a web login filled
+  "Not saved — the server did not answer.": "未保存——服务器没有回应。", // the owner 2026-11-17: who may have a web login filled
+  "Search conversations and groups…": "搜索对话和任务组…", // the owner 2026-11-17: who may have a web login filled
+  "Who may have it filled": "谁可以让 Hub 填入", // the owner 2026-11-17: who may have a web login filled
+  "No conversation is running": "没有正在运行的对话", // the owner 2026-11-17: who may have a web login filled
+  "every conversation on this instance, now and later": "这个实例上的每个对话，现在和以后的", // the owner 2026-11-17: who may have a web login filled
+  "Ticked and locked: a wider grant already lets them — change it at its own door.": "已勾选并锁定：更宽的授权已经允许它们——请在那份授权自己的入口修改。", // the owner 2026-11-17: who may have a web login filled
+  "Who may have «{login}» filled": "谁可以让 Hub 填入「{login}」", // the owner 2026-11-17: who may have a web login filled
+  "These conversations can sign in as you with this account, on this site only.": "这些对话可以用这个账号以你的身份登录，只在这个网站上。", // the owner 2026-11-17: who may have a web login filled
+  "No web login is saved yet": "还没有保存任何网站登录", // the owner 2026-11-17: who may have a web login filled
+  "Who may have ANY web login filled — on every site": "谁可以让 Hub 填入「任何」网站登录——在每个网站上", // the owner 2026-11-17: who may have a web login filled
+  "Every web login this vault holds, on every site — the ones added later too. Grant this only to conversations you would trust with all of them.": "这个保险库里的每一个网站登录，在每个网站上——以后添加的也算。只授权给你愿意把它们全部托付的对话。", // the owner 2026-11-17: who may have a web login filled
+  "Who may have any account of {site} filled": "谁可以让 Hub 填入 {site} 的任何账号", // the owner 2026-11-17: who may have a web login filled
+  "Any login this vault holds for {site} — the ones added later too — and an agent may register a NEW account there through the vault.": "这个保险库为 {site} 保存的任何登录——以后添加的也算——而且智能体可以通过保险库在那里注册「新」账号。", // the owner 2026-11-17: who may have a web login filled
+  "Any account on which site?": "哪个网站的任何账号？", // the owner 2026-11-17: who may have a web login filled
+  "Choose the site; its own dialog then says who may have any of its accounts filled.": "选择网站；接着它自己的对话框会写明谁可以让 Hub 填入它的任何账号。", // the owner 2026-11-17: who may have a web login filled
+  "{n} account(s)": "{n} 个账号", // the owner 2026-11-17: who may have a web login filled
+  "granted": "已授权", // the owner 2026-11-17: who may have a web login filled
+  "Any account on a site…": "某个网站的任何账号…", // the owner 2026-11-17: who may have a web login filled
+  "Who may have any account of one site filled": "谁可以让 Hub 填入某个网站的任何账号", // the owner 2026-11-17: who may have a web login filled
+  "Any site: {who}": "任何网站：{who}", // the owner 2026-11-17: who may have a web login filled
+  "Any account on: {sites}": "任何账号：{sites}", // the owner 2026-11-17: who may have a web login filled
+  "Two-step code: {name}": "两步验证码：{name}", // the owner 2026-11-17: who may have a web login filled
+  "Two-step code: none": "两步验证码：无", // the owner 2026-11-17: who may have a web login filled
+  "Bind…": "绑定…", // the owner 2026-11-17: who may have a web login filled
+  "Change or unbind the two-step code this login uses": "更改或解除这个登录使用的两步验证码", // the owner 2026-11-17: who may have a web login filled
+  "Bind one of this vault's two-step codes to this login": "把这个保险库里的一个两步验证码绑定到这个登录", // the owner 2026-11-17: who may have a web login filled
+  "Previous password kept — replaced {ago}": "保留着上一个密码——{ago}被替换", // the owner 2026-11-17: who may have a web login filled
+  "Previous password kept": "保留着上一个密码", // the owner 2026-11-17: who may have a web login filled
+  "Pending password kept — made {ago}": "保留着待确认的密码——{ago}生成", // the owner 2026-11-17: who may have a web login filled
+  "Pending password kept": "保留着待确认的密码", // the owner 2026-11-17: who may have a web login filled
+  "No two-step code of that name is in this vault any more — choose one from the list.": "这个保险库里已经没有这个名字的两步验证码——请从列表中选一个。", // the owner 2026-11-17: who may have a web login filled
+  "The two-step code «{login}» uses": "「{login}」使用的两步验证码", // the owner 2026-11-17: who may have a web login filled
+  "Hub types its code only on this login's site, into the field an agent names — no agent is ever shown the code or its seed.": "Hub 只在这个登录的网站上、把验证码填进智能体指定的输入框——任何智能体都看不到验证码或它的种子。", // the owner 2026-11-17: who may have a web login filled
+  "None — no two-step code": "无——不使用两步验证码", // the owner 2026-11-17: who may have a web login filled
+  "This vault holds no two-step code yet — add one with Add… ▸ Two-step code…, then bind it here.": "这个保险库里还没有两步验证码——先用「添加… ▸ 两步验证…」添加一个，再回到这里绑定。", // the owner 2026-11-17: who may have a web login filled
+  "Two-step code bound: {name}": "已绑定两步验证码：{name}", // the owner 2026-11-17: who may have a web login filled
+  "Two-step code unbound": "已解除两步验证码", // the owner 2026-11-17: who may have a web login filled
+  "{name} (not in this vault any more)": "{name}（已不在这个保险库里）", // the owner 2026-11-17: who may have a web login filled
+  "User name: {name}": "用户名：{name}", // the owner 2026-11-17: who may have a web login filled
+  "Site: {site}": "网站：{site}", // the owner 2026-11-17: who may have a web login filled
   "Any site": "任何网站",
   "Any account on this site": "这个网站的任何账号",
   "This account": "这个账号",
   "Shows the password — after the second password. VibeSpace never hands it to an agent: Hub types it only on the matching site into the field the agent names": "显示密码 — 先输入第二道密码。VibeSpace 不会把密码交给 agent：只由 Hub 在匹配的网站上填进 agent 指定的字段",
   "Filled for:": "可为谁填入：",
   "Choose who may sign in with this login — VibeSpace never hands them the password": "选择谁可以用这个登录 — VibeSpace 不会把密码交给他们",
-  "Who may have \"{name}\" filled": "谁可以让 Hub 填入「{name}」",
   "For": "范围",
-  "Every conversation on this instance": "这个实例上的所有对话",
-  "Allowed conversations can sign in as you on this site. VibeSpace never hands them the password and types it only on the matching site into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls. «Any account on this site» also lets an agent register new accounts there through the vault.": "被允许的对话能以你的身份登录这个网站。VibeSpace 自己的门不会把密码交给它们，且只在匹配的网站上往密码或验证码框里填；我们的围栏防意外读到和输错网站，对于故意在自己控制的页面里去挖的 agent，我们不承诺拦住。「这个网站的任何账号」也允许 agent 经由保险库在那里注册新账号。",
   "Pending your confirmation — registered by an agent (Confirm promotes it to current; Discard removes it)": "待你确认 — 由 agent 注册（确认将其升为当前密码；丢弃则删除该未确认条目）",
   "Pending your confirmation — generated replacement password (Confirm promotes it to current and keeps the old password in previous; Discard drops the candidate)": "待你确认 — 由保险库生成的新密码（确认将其升为当前密码并把原密码移入上一版；丢弃则删除候选密码）",
   "Promotes the pending password to current in the vault": "把待确认密码升为保险库里的当前密码",

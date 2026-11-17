@@ -279,16 +279,17 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     const whoL = (req) => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } };
     const noStoreL = (fn) => (req, res) => { res.set('Cache-Control', 'no-store'); return fn(req, res); };
     const bodyL = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
-    app.get('/api/vault/web-logins', noStoreL(person(() => ({ ...logins.list(), subjects: subjects() }))));
+    app.get('/api/vault/web-logins', noStoreL(person(() => { const sub = subjects(); return { ...logins.list({ subjects: sub }), subjects: sub }; })));   // + «by what» per login (the fill's own rule)
     app.post('/api/vault/web-logins', noStoreL(person((req) => {
       const [pw] = take(req, 'loginPassword');
       const b = bodyL(req);
       return logins.addOwn({ origin: b.origin, username: b.username, password: typeof pw === 'string' ? pw : '', totpName: b.totpName || null }, { who: whoL(req) });
     })));
+    app.post('/api/vault/web-logins/totp', noStoreL(person((req) => { const b = bodyL(req); return logins.bindTotp(String(b.name || ''), b.totpName == null ? null : String(b.totpName), { who: whoL(req) }); })));   // the owner 2026-11-17: a login's two-step code bound / unbound by name (the row's door) — never a code
     app.post('/api/vault/web-logins/confirm', noStoreL(person((req) => { const b = bodyL(req); return logins.confirmOwn(String(b.name || ''), { rev: b.rev, who: whoL(req) }); })));
     app.post('/api/vault/web-logins/discard', noStoreL(person((req) => { const b = bodyL(req); return logins.discardPending(String(b.name || ''), { rev: b.rev, who: whoL(req) }); })));
     app.delete('/api/vault/web-logins/:name', noStoreL(person((req) => logins.drop(String(req.params.name || ''), { who: whoL(req) }))));
-    app.post('/api/vault/web-logins/grants', noStoreL(person((req) => { const b = bodyL(req); return logins.grant(String(b.name || ''), String(b.scope || ''), String(b.subject || ''), { by: `user:${whoL(req).slice(0, 24)}` }); })));
+    app.post('/api/vault/web-logins/grants', noStoreL(person((req) => { const b = bodyL(req); return logins.grant(String(b.name || ''), String(b.scope || ''), String(b.subject || ''), { by: `user:${whoL(req).slice(0, 24)}`, ...(Array.isArray(b.except) ? { except: b.except.map(String) } : {}) }); })));   // + «除了» for a group / Everyone
     app.post('/api/vault/web-logins/ungrant', noStoreL(person((req) => { const b = bodyL(req); return logins.ungrant(String(b.resource || ''), String(b.principal || ''), { by: `user:${whoL(req).slice(0, 24)}` }); })));
     // lane vault-agent-own: AN AGENT stores a login it holds itself (`vibespace-vault login add <origin> --user <name> --from-file |
     // --stdin [--totp <name>]`) — the password taken OFF the body (never the URL); a `web-login:` entry, provenance agent-typed,

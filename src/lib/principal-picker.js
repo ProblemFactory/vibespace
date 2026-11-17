@@ -98,7 +98,7 @@ export function rosterFromApp(app, { agents = true, groups = true } = {}) {
  * the roster's broadcasts when `app` is given). Returns
  * `{el, selected(), setSelected(keys), refresh(), focus(), close()}`.
  */
-export function principalPicker({ items = [], app = null, multi = false, compact = false, selected = [], placeholder = '', label = '', emptyText = '', autofocus = false, onChange = null, cls = '', everyone = null, except = null, chipPrefix = '' } = {}) {
+export function principalPicker({ items = [], app = null, multi = false, compact = false, selected = [], placeholder = '', label = '', emptyText = '', autofocus = false, onChange = null, cls = '', everyone = null, except = null, chipPrefix = '', locked = null } = {}) {
   const id = `pp-${++seq}`;
   const raw = typeof items === 'function' ? items : () => items;
   // THE ALL-AGENTS ROW (the caller's key and words; the device's words by default) — first, unless the roster
@@ -107,6 +107,8 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   const source = () => { const r = raw() || []; return allRow && !r.some((x) => x && PM.isEveryone(x)) ? [allRow, ...r] : r; };
   let rows = source() || [];
   let sel = (selected || []).map(String);
+  // LOCKED (the owner 2026-11-17): what a wider grant already admits — drawn granted, never this picker's to change
+  const lockedNow = () => PM.lockedMap(typeof locked === 'function' ? locked() : locked);
   let query = '';
   let active = null;
   // the recent picks as they were when the list OPENED — a pick made now is remembered for the next time,
@@ -162,10 +164,30 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     while (kids.length > out.length) parent.removeChild(kids[kids.length - 1]);
   }
   const chipNodes = new Map();   // key → chip node (KEYED, like the rows: a press on a chip's ✕ survives a patch)
+  const lockedChips = new Map();   // key → its locked chip (no ✕: a wider grant holds it; its why and its door)
+  function lockedChipOf(r, lk) {
+    const c = el('span', 'pp-chip pp-chip-locked' + (PM.isEveryone(r) ? ' pp-chip-everyone' : ''));
+    c.dataset.key = String(r.key); c.dataset.locked = 'true';
+    c.appendChild(avatar({ name: r.name, key: PM.identityOf(r), glyph: glyphOf(r) }, 18, 'pp-chip-av'));
+    c.appendChild(el('span', 'pp-chip-name', r.name));
+    if (lk.why) c.appendChild(el('span', 'pp-chip-why', lk.why));
+    if (lk.door) { const d = document.createElement('button'); d.type = 'button'; d.className = 'pp-chip-door'; d.textContent = lk.door.label; d.onclick = (ev) => { ev.stopPropagation(); try { lk.door.run(); } catch { /* the door's own */ } }; c.appendChild(d); }
+    return c;
+  }
   function drawChips() {
     const m = byKey();
     const out = [];
+    const lk = lockedNow();
+    for (const [k, l] of lk) {   // what a wider grant admits — first, granted, no ✕
+      const r = m.get(k) || known.get(k) || { key: k, kind: k.startsWith('group:') ? 'group' : 'agent', name: k };
+      const sig = JSON.stringify([r.name, l.why, l.door && l.door.label]);
+      let c = lockedChips.get(k);
+      if (!c || c.dataset.sig !== sig) { c = lockedChipOf(r, l); c.dataset.sig = sig; lockedChips.set(k, c); }
+      out.push(c);
+    }
+    for (const k of [...lockedChips.keys()]) if (!lk.has(k)) lockedChips.delete(k);
     for (const k of PM.chipOrder(sel, everyoneKeys())) {   // the All-agents chip first
+      if (lk.has(k)) continue;   // held by a wider grant too: its locked chip says so
       const r = m.get(k) || known.get(k) || { key: k, kind: k.startsWith('group:') ? 'group' : 'agent', name: k };
       let c = chipNodes.get(k);
       if (!c || c.dataset.name !== r.name) { c = chipOf(r); c.dataset.name = r.name; chipNodes.set(k, c); }
@@ -173,7 +195,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     }
     for (const k of [...chipNodes.keys()]) if (!sel.includes(k)) chipNodes.delete(k);
     reconcile(chips, out);
-    chips.style.display = sel.length ? '' : 'none';
+    chips.style.display = out.length ? '' : 'none';
     if (trigger) {
       trigger.textContent = '';
       const r = m.get(sel[0]);
@@ -209,11 +231,14 @@ export function principalPicker({ items = [], app = null, multi = false, compact
       if (r.hint) n.appendChild(el('span', 'pp-hint', r.hint));
       n.title = [r.name, r.folder, (r.groupNames || []).join(', '), r.hint].filter(Boolean).join(' · ');
     }
-    const on = sel.includes(String(r.key));
+    const lk = lockedNow().get(String(r.key));
+    const on = sel.includes(String(r.key)) || !!lk;
     n.setAttribute('aria-selected', on ? 'true' : 'false');
     n.classList.toggle('pp-on', on);
-    n.classList.toggle('pp-disabled', !!r.disabled);
-    if (r.disabled) n.setAttribute('aria-disabled', 'true'); else n.removeAttribute('aria-disabled');
+    n.classList.toggle('pp-locked', !!lk);
+    n.classList.toggle('pp-disabled', !!r.disabled || !!lk);
+    if (r.disabled || lk) n.setAttribute('aria-disabled', 'true'); else n.removeAttribute('aria-disabled');
+    { const w = n.querySelector(':scope > .pp-lock-why'); if (lk && lk.why && !w) n.appendChild(el('span', 'pp-hint pp-lock-why', lk.why)); else if (!lk && w) w.remove(); }
     n.classList.toggle('pp-active', active === String(r.key));
     return n;
   }
@@ -263,6 +288,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   }
   function pick(r) {
     const k = String(r.key);
+    if (lockedNow().has(k)) return;   // a wider grant holds it: never picked or unpicked here
     if (multi) { if (sel.includes(k)) sel = sel.filter((x) => x !== k); else { sel = [...sel, k]; remember(r); } }
     else { sel = [k]; remember(r); }
     query = ''; box.value = '';

@@ -13,9 +13,6 @@ import { loadTotp } from './vault-totp-row.js';   // lane vault-totp-add: the tw
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const failWords = (r) => t('Not done — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') });
 const post = (url, body = {}) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-/** The scopes of a grant — the resource it is written under (src/browser-login.js scopeOf). */
-const SCOPES = ['this-account', 'any-account', 'any-site'];
-const scopeWords = (s) => (s === 'any-site' ? t('Any site') : s === 'any-account' ? t('Any account on this site') : t('This account'));
 /** A subject of the picker (`session:<cid>` | `group:<gid>` | 'everyone') ⇄ the grant model's principal key. */
 const keyOfSubject = (s) => (s === 'everyone' ? 'everyone' : /^session:/.test(s) ? `conversation:${s.slice(8)}` : /^group:/.test(s) ? s : null);
 const keyOfEntry = (e) => (e && e.kind === 'everyone' ? 'everyone' : e && e.kind === 'group' ? `group:${e.id}` : e && e.kind === 'conversation' ? `conversation:${e.key}` : null);
@@ -33,12 +30,17 @@ function principalName(e, data) {
   return hit ? hit.name : e.name || (e.kind === 'group' ? `${t('Task group')} ${e.id}` : String(e.key || ''));
 }
 
-/** A web login's row extras: `box` (pending notice + grant chips, for the main column), `doors` (Confirm / Discard / 用于…). `show` = the row's 显示. */
-export function loginExtras(row, data, { refresh, show } = {}) {
+/** A web login's row extras: `box` (what it holds + pending notice + grant chips, for the main column), `doors` (Confirm / Discard /
+ *  用于…). `show` = the row's 显示. `doors` (the window's, src/lib/vault-login-grants.js) = `held` (what the login holds, drawn FIRST)
+ *  and the openers `grant`, `anySite`, `anyAccount`. */
+export function loginExtras(row, data, { refresh, show, doors: open = {} } = {}) {
   const entry = ((data && data.entries) || []).find((e) => e.name === row.entry) || { name: row.entry, grants: [] };
   if (show) show.title = t('Shows the password — after the second password. VibeSpace never hands it to an agent: Hub types it only on the matching site into the field the agent names');
   const box = el('div', 'vw-ak vw-login');
   box.dataset.login = row.entry;
+  // what it holds FIRST — the bound two-step code leads (the owner 2026-11-17: «比如绑定了哪个两步验证码»)
+  const held = typeof open.held === 'function' ? open.held(entry, data, { refresh }) : null;
+  if (held) box.append(held);
   if (entry.pending === 'register' || entry.pending === 'change') {
     box.append(el('div', 'vw-desc-pending vw-login-pending', entry.pending === 'register'
       ? t('Pending your confirmation — registered by an agent (Confirm promotes it to current; Discard removes it)')
@@ -51,11 +53,22 @@ export function loginExtras(row, data, { refresh, show } = {}) {
     for (const g of grants) for (const p of g.to || []) {
       const chip = el('span', 'vw-ak-chip');
       chip.dataset.scope = g.scope || '';
-      chip.append(el('span', null, `${principalName(p, data)} · ${scopeWords(g.scope)}`));
-      const x = el('button', 'vw-ak-x', '✕');
-      x.type = 'button'; x.title = t('Take this grant back'); x.setAttribute('aria-label', x.title);
-      x.onclick = async () => { const r = await post('/api/vault/web-logins/ungrant', { resource: g.resource, principal: keyOfEntry(p) }); if (!r || !r.ok) showToast(failWords(r), { type: 'error' }); refresh?.(); };
-      chip.append(x);
+      if (g.scope === 'this-account') {
+        // this login's OWN grant: taken back here
+        chip.append(el('span', null, principalName(p, data)));
+        const x = el('button', 'vw-ak-x', '✕');
+        x.type = 'button'; x.title = t('Take this grant back'); x.setAttribute('aria-label', x.title);
+        x.onclick = async () => { const r = await post('/api/vault/web-logins/ungrant', { resource: g.resource, principal: keyOfEntry(p) }); if (!r || !r.ok) showToast(failWords(r), { type: 'error' }); refresh?.(); };
+        chip.append(x);
+      } else {
+        // a WIDER grant reaches this login: «through» it, NO ✕ here (it is taken back at its own door — never from one login's row)
+        chip.classList.add('vw-ak-chip-through');
+        chip.append(el('span', null, `${principalName(p, data)} · ${g.scope === 'any-site' ? t('through: any site') : t('through: any account on this site')}`));
+        const d = el('button', 'vw-ak-door', g.scope === 'any-site' ? t('Any site…') : t('Any account on this site…'));
+        d.type = 'button';
+        d.onclick = () => (g.scope === 'any-site' ? open.anySite?.(data, { refresh }) : open.anyAccount?.(data, { refresh, site: entry.origin }));
+        chip.append(d);
+      }
       chips.append(chip);
     }
     box.append(chips);
@@ -85,75 +98,14 @@ export function loginExtras(row, data, { refresh, show } = {}) {
   const useB = el('button', 'vw-btn vw-login-grant', t('Use for…'));
   useB.type = 'button';
   useB.title = t('Choose who may sign in with this login — VibeSpace never hands them the password');
-  useB.onclick = () => showLoginGrantPicker(entry, data, { refresh });
+  useB.onclick = () => open.grant?.(entry, data, { refresh });
   doors.push(useB);
   return { box, doors };
 }
 
-/** 用于…: the scope (this account / any account on this site / any site) and who — checked = granted at that scope. */
-export function showLoginGrantPicker(entry, data, { refresh } = {}) {
-  // not the subject: data — the vault's catalog (the subjects it offers), the same for every entry
-  const { body, close, raised } = createModalShell({ id: 'vault-login-grant', key: entry.id, title: t('Who may have "{name}" filled', { name: entry.user ? `${entry.user} · ${String(entry.origin || '').replace(/^https:\/\//, '')}` : entry.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
-    unsaved: { isDirty: () => boxes.some((b) => b.checked !== hadAt(scope).has(b.value)), save: () => doSave() }, kind: 'form' });
-  if (raised) return null;   // raised: the same subject's form, as it was
-  const subjects = (data && data.subjects) || { sessions: [], groups: [] };
-  const rowOf = (s) => (entry.grants || []).find((g) => g.scope === s && !g.unknown) || null;
-  const hadAt = (s) => new Set(((rowOf(s) || {}).to || []).map(keyOfEntry).filter(Boolean));
-  let scope = 'this-account';
-  const scopes = el('div', 'vw-login-scopes');
-  for (const s of SCOPES) {
-    const lab = el('label', 'vw-ak-pick');
-    const rb = el('input');
-    rb.type = 'radio'; rb.name = 'vw-login-scope'; rb.value = s; rb.checked = s === scope;
-    rb.onchange = () => { scope = s; paint(); };
-    lab.append(rb, el('span', null, scopeWords(s)));
-    scopes.append(lab);
-  }
-  body.append(el('div', 'vw-ak-sec', t('For')), scopes);
-  const boxes = [];
-  const pick = el('div', 'vw-login-who');
-  const section = (title, list) => {
-    if (!list.length) return;
-    pick.append(el('div', 'vw-ak-sec', title));
-    for (const s of list) {
-      const k = keyOfSubject(s.subject);
-      if (!k) continue;
-      const lab = el('label', 'vw-ak-pick');
-      const cb = el('input');
-      cb.type = 'checkbox'; cb.value = k; cb.dataset.subject = s.subject;
-      lab.append(cb, el('span', null, s.name));
-      pick.append(lab);
-      boxes.push(cb);
-    }
-  };
-  section(t('Conversations'), subjects.sessions || []);
-  section(t('Task groups'), subjects.groups || []);
-  section(t('Everyone'), [{ subject: 'everyone', name: t('Every conversation on this instance') }]);
-  body.append(pick);
-  const paint = () => { const had = hadAt(scope); for (const b of boxes) b.checked = had.has(b.value); };
-  paint();
-  body.append(el('div', 'vw-ak-hint', t('Allowed conversations can sign in as you on this site. VibeSpace never hands them the password and types it only on the matching site into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls. «Any account on this site» also lets an agent register new accounts there through the vault.')));
-  const f = el('div', 'dialog-footer');
-  const cancel = el('button', 'btn-cancel', t('Cancel'));
-  const save = el('button', 'btn-create vw-login-save', t('Save'));
-  cancel.type = save.type = 'button';
-  cancel.onclick = () => close();
-  const doSave = async () => {
-    const had = hadAt(scope), row = rowOf(scope);
-    let bad = null;
-    for (const b of boxes) {
-      if (b.checked && !had.has(b.value)) { const r = await post('/api/vault/web-logins/grants', { name: entry.name, scope, subject: b.dataset.subject }); if (!r || !r.ok) bad = r || {}; }
-      else if (!b.checked && had.has(b.value) && row) { const r = await post('/api/vault/web-logins/ungrant', { resource: row.resource, principal: b.value }); if (!r || !r.ok) bad = r || {}; }
-    }
-    if (bad) showToast(failWords(bad), { type: 'error' }); else showToast(t('Saved'));
-    close();
-    refresh?.();
-    return true;
-  };
-  save.onclick = () => { doSave(); };
-  f.append(cancel, save);
-  body.parentNode.append(f);
-}
+// 用于… — who may have THIS login filled: src/lib/vault-login-grants.js (the owner 2026-11-17 — one dialog, one resource; the wider grants
+// at their own doors on the «Web logins» header; a wider admit shown locked «through»). The window hands this row its openers (`doors`):
+// this module imports no dialog, so what imports it for its add fields (the paste box, the login card) does not carry the picker.
 
 /** THE ADD DOOR'S FIELDS — ONE form module (lane login-request-card, B-a681): the Vault window's 添加 ▸ 网站登录… dialog AND the
  *  login card an agent's ask files in For you (src/lib/vault-paste-box.js) draw THESE fields, and one validator stands behind both

@@ -4,8 +4,9 @@
 // headless Chrome, the built bundle:
 //   ① sign in, set the second password, store two secrets (an integration key that is an HTML payload, an API key)
 //   ② the window lists them MASKED: no value anywhere in the page's DOM (markup or any input's value)
-//   ②e (lane browser-login): 添加… ▸ 网站登录… adds a website login — its row under Web logins («user · site», By you), 用于… offers
-//      the three scopes and writes ONE grants row, 删除 in its own words; the password never in the page.
+//   ②e (lane browser-login): 添加… ▸ 网站登录… adds a website login — its row under Web logins («user · site», By you); its 用于…
+//      is about THAT login (no radio — the owner 2026-11-17), «Any site…» on the Web logins head writes ONE grants row and the row
+//      shows it «through» with no ✕; 删除 in its own words; the password never in the page.
 //   ②d (lane vault-paste-request, the owner's 「我压根没法添加啊」): 添加… ▸ 其他密钥或密码… adds a FREE entry (name, kind, a masked
 //      value, a note) — its row under Passwords & keys (Password · By you), 显示 behind 验证是你, a bearer refused human_only, 删除
 //      through the usual confirm; lane vault-entry-description: the note IS its description — its own line under the name, and
@@ -321,7 +322,7 @@ console.log('②d 「其他密钥或密码…」 (lane vault-paste-request — t
   check('the window reopens (its 5-minute reveal window ended with the close)', !!(await openWindow()) && (await evalJs(`document.querySelectorAll('.vw-plain').length`)) === 0);
 }
 
-console.log('②e lane browser-login: 添加… ▸ 网站登录… — a website login: its row under Web logins, 用于… with the three scopes, 删除; never a password in the page');
+console.log('②e lane browser-login: 添加… ▸ 网站登录… — a website login: its row under Web logins, its own 用于…, «Any site…» on the head, 删除; never a password in the page');
 {
   const WPW = ['wl', crypto.randomBytes(8).toString('hex'), 'Q7'].join('-');   // built at run time
   await click('.vw-add');
@@ -338,12 +339,16 @@ console.log('②e lane browser-login: 添加… ▸ 网站登录… — a websit
   check('its row: «alice@example.test · shop.example.test» under Web logins — By you, 用于… and 删除 (the rail counts it)', !!wr && wr.id === 'secrets:web-login:https://shop.example.test#alice@example.test#password' && /alice@example\.test · shop\.example\.test/.test(wr.text) && wr.prov === 'me' && wr.use && wr.del && wr.rail === '1', wr);
   check('the password is in no markup and no field of the page', !(await pageText()).includes(WPW));
   await click(ROW_WL + ' .vw-login-grant');
-  const pk = await until(`(() => { const d = [...document.querySelectorAll('.vw-ak-dialog')].pop(); if (!d) return null; return { scopes: [...d.querySelectorAll('input[type=radio]')].map((x) => x.value), who: [...d.querySelectorAll('input[type=checkbox]')].map((x) => x.value) }; })()`, { timeout: 5000 });
-  check('用于… offers the three scopes (this account · any account on this site · any site) and who (everyone among them)', !!pk && pk.scopes.join() === 'this-account,any-account,any-site' && pk.who.includes('everyone'), pk);
-  await evalJs(`(() => { const d = [...document.querySelectorAll('.vw-ak-dialog')].pop(); d.querySelector('input[value="any-site"]').click(); [...d.querySelectorAll('input[type=checkbox]')].find((x) => x.value === 'everyone').click(); return true; })()`);
+  const pk = await until(`(() => { const d = document.querySelector('.vw-login-grant-dialog'); if (!d || !d.querySelector('.pp')) return null; return { radios: d.querySelectorAll('input[type=radio]').length, head: (d.querySelector('.vw-login-head') || {}).textContent || '', everyone: !!d.querySelector('.pp-row[data-key="everyone:*"]') }; })()`, { timeout: 5000 });
+  check('用于… is about THIS login (the owner 2026-11-17): no radio — the house picker (Everyone among its rows) under the login\'s own facts (its user name, its site, «Two-step code: none»)', !!pk && pk.radios === 0 && pk.everyone && /alice@example\.test/.test(pk.head) && /shop\.example\.test/.test(pk.head) && /Two-step code: none/.test(pk.head), pk);
+  await click('.vw-login-grant-dialog .btn-cancel');
+  await until(`!document.querySelector('.vw-login-grant-dialog')`, { timeout: 5000 });
+  await click('.vw-group[data-purpose="web-logins"] .vw-login-wide-any-site');
+  await until(`!!document.querySelector('.vw-login-grant-dialog .pp-row[data-key="everyone:*"]')`, { timeout: 5000 });
+  await click('.vw-login-grant-dialog .pp-row[data-key="everyone:*"]');
   await click('.vw-login-save');
   const g = await until(`fetch('/api/vault/web-logins').then((r) => r.json()).then((j) => { const e = (j.entries || [])[0]; return e && e.grants.length ? e.grants.map((x) => x.scope + ':' + (x.to || []).map((p) => p.kind).join('+')).join() : null; })`, { timeout: 8000 });
-  check('Save ⇒ ONE row of the grants store («any site» to everyone, door browser-login); the row\'s chip shows it', g === 'any-site:everyone' && !!(await until(`!!document.querySelector(${JSON.stringify(ROW_WL + ' .vw-ak-chip[data-scope="any-site"]')})`, { timeout: 8000 })), g);
+  check('«Any site…» on the Web logins head, Everyone, Save ⇒ ONE row of the grants store («any site» to everyone, door browser-login); the login\'s row shows it «through» with NO ✕', g === 'any-site:everyone' && !!(await until(`(() => { const c = document.querySelector(${JSON.stringify(ROW_WL + ' .vw-ak-chip[data-scope="any-site"]')}); return !!c && c.classList.contains('vw-ak-chip-through') && !c.querySelector('.vw-ak-x'); })()`, { timeout: 8000 })), g);
   await click(ROW_WL + ' .vw-del');
   check('删除 ⇒ the confirm in its own words (the password leaves the vault)', /Its password leaves the vault/.test(await until(`[...document.querySelectorAll('.dialog-overlay')].map((o) => o.textContent).join(' ') || null`, { timeout: 5000 }) || ''));
   await evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].pop(); o.querySelector('.btn-create').click(); return true; })()`);

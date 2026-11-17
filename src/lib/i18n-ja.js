@@ -11279,16 +11279,61 @@ export default {
   "Open the {n} open items of this conversation in the For-you window": "この会話の {n} 件を「あなた宛て」ウィンドウで開く",
   "Marked done": "完了にしました",
   "Dismissed": "無視しました",
+  "through: any site": "経由：任意のサイト", // the owner 2026-11-17: who may have a web login filled
+  "through: any account on this site": "経由：このサイトの任意のアカウント", // the owner 2026-11-17: who may have a web login filled
+  "Any site…": "任意のサイト…", // the owner 2026-11-17: who may have a web login filled
+  "Any account on this site…": "このサイトの任意のアカウント…", // the owner 2026-11-17: who may have a web login filled
+  "VibeSpace never hands them the password and types it only on the matching site into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls.": "VibeSpace はパスワードを渡さず、一致するサイトのパスワード欄またはコード欄にだけ入力します。誤った読み取りや違うサイトは防ぎますが、自分が操作するページを意図的に調べるエージェントまで防ぐとは約束しません。", // the owner 2026-11-17: who may have a web login filled
+  "The vault is locked — press Unlock…, then save again.": "保管庫はロックされています——「ロック解除…」を押してから、もう一度保存してください。", // the owner 2026-11-17: who may have a web login filled
+  "An exception is a running conversation, under a Task Group or Everyone.": "除外できるのは実行中の会話だけで、タスクグループか「全員」の下に置きます。", // the owner 2026-11-17: who may have a web login filled
+  "Not saved ({code}).": "保存されていません（{code}）。", // the owner 2026-11-17: who may have a web login filled
+  "Not saved — the server did not answer.": "保存されていません——サーバーが応答しませんでした。", // the owner 2026-11-17: who may have a web login filled
+  "Search conversations and groups…": "会話とグループを検索…", // the owner 2026-11-17: who may have a web login filled
+  "Who may have it filled": "入力してよい相手", // the owner 2026-11-17: who may have a web login filled
+  "No conversation is running": "実行中の会話はありません", // the owner 2026-11-17: who may have a web login filled
+  "every conversation on this instance, now and later": "このインスタンスのすべての会話（今後のものも）", // the owner 2026-11-17: who may have a web login filled
+  "Ticked and locked: a wider grant already lets them — change it at its own door.": "チェック済みでロック：より広い許可がすでに認めています——その許可の入口で変更してください。", // the owner 2026-11-17: who may have a web login filled
+  "Who may have «{login}» filled": "「{login}」を入力してよい相手", // the owner 2026-11-17: who may have a web login filled
+  "These conversations can sign in as you with this account, on this site only.": "これらの会話は、このアカウントであなたとしてログインできます（このサイトのみ）。", // the owner 2026-11-17: who may have a web login filled
+  "No web login is saved yet": "保存されたウェブログインはまだありません", // the owner 2026-11-17: who may have a web login filled
+  "Who may have ANY web login filled — on every site": "任意のウェブログインを入力してよい相手——すべてのサイトで", // the owner 2026-11-17: who may have a web login filled
+  "Every web login this vault holds, on every site — the ones added later too. Grant this only to conversations you would trust with all of them.": "この保管庫のすべてのウェブログイン、すべてのサイトで——あとで追加するものも含みます。すべてを任せられる会話にだけ許可してください。", // the owner 2026-11-17: who may have a web login filled
+  "Who may have any account of {site} filled": "{site} の任意のアカウントを入力してよい相手", // the owner 2026-11-17: who may have a web login filled
+  "Any login this vault holds for {site} — the ones added later too — and an agent may register a NEW account there through the vault.": "この保管庫が {site} 用に持つ任意のログイン——あとで追加するものも含みます——さらに、エージェントは保管庫を通じてそこで新しいアカウントを登録できます。", // the owner 2026-11-17: who may have a web login filled
+  "Any account on which site?": "どのサイトの任意のアカウント？", // the owner 2026-11-17: who may have a web login filled
+  "Choose the site; its own dialog then says who may have any of its accounts filled.": "サイトを選んでください。そのサイトのダイアログで、任意のアカウントを入力してよい相手を設定します。", // the owner 2026-11-17: who may have a web login filled
+  "{n} account(s)": "{n} 件のアカウント", // the owner 2026-11-17: who may have a web login filled
+  "granted": "許可あり", // the owner 2026-11-17: who may have a web login filled
+  "Any account on a site…": "サイトの任意のアカウント…", // the owner 2026-11-17: who may have a web login filled
+  "Who may have any account of one site filled": "あるサイトの任意のアカウントを入力してよい相手", // the owner 2026-11-17: who may have a web login filled
+  "Any site: {who}": "任意のサイト：{who}", // the owner 2026-11-17: who may have a web login filled
+  "Any account on: {sites}": "任意のアカウント：{sites}", // the owner 2026-11-17: who may have a web login filled
+  "Two-step code: {name}": "2 段階認証コード：{name}", // the owner 2026-11-17: who may have a web login filled
+  "Two-step code: none": "2 段階認証コード：なし", // the owner 2026-11-17: who may have a web login filled
+  "Bind…": "紐付け…", // the owner 2026-11-17: who may have a web login filled
+  "Change or unbind the two-step code this login uses": "このログインが使う 2 段階認証コードを変更または解除", // the owner 2026-11-17: who may have a web login filled
+  "Bind one of this vault's two-step codes to this login": "この保管庫の 2 段階認証コードをこのログインに紐付け", // the owner 2026-11-17: who may have a web login filled
+  "Previous password kept — replaced {ago}": "以前のパスワードを保持——{ago}に置き換え", // the owner 2026-11-17: who may have a web login filled
+  "Previous password kept": "以前のパスワードを保持", // the owner 2026-11-17: who may have a web login filled
+  "Pending password kept — made {ago}": "確認待ちのパスワードを保持——{ago}に作成", // the owner 2026-11-17: who may have a web login filled
+  "Pending password kept": "確認待ちのパスワードを保持", // the owner 2026-11-17: who may have a web login filled
+  "No two-step code of that name is in this vault any more — choose one from the list.": "その名前の 2 段階認証コードはもうこの保管庫にありません——一覧から選んでください。", // the owner 2026-11-17: who may have a web login filled
+  "The two-step code «{login}» uses": "「{login}」が使う 2 段階認証コード", // the owner 2026-11-17: who may have a web login filled
+  "Hub types its code only on this login's site, into the field an agent names — no agent is ever shown the code or its seed.": "Hub はこのログインのサイトでだけ、エージェントが指定した欄にコードを入力します——エージェントにコードやシードが見せられることはありません。", // the owner 2026-11-17: who may have a web login filled
+  "None — no two-step code": "なし——2 段階認証コードを使わない", // the owner 2026-11-17: who may have a web login filled
+  "This vault holds no two-step code yet — add one with Add… ▸ Two-step code…, then bind it here.": "この保管庫にはまだ 2 段階認証コードがありません——「追加… ▸ 2 段階認証コード…」で追加してから、ここで紐付けてください。", // the owner 2026-11-17: who may have a web login filled
+  "Two-step code bound: {name}": "2 段階認証コードを紐付けました：{name}", // the owner 2026-11-17: who may have a web login filled
+  "Two-step code unbound": "2 段階認証コードを解除しました", // the owner 2026-11-17: who may have a web login filled
+  "{name} (not in this vault any more)": "{name}（もうこの保管庫にありません）", // the owner 2026-11-17: who may have a web login filled
+  "User name: {name}": "ユーザー名：{name}", // the owner 2026-11-17: who may have a web login filled
+  "Site: {site}": "サイト：{site}", // the owner 2026-11-17: who may have a web login filled
   "Any site": "すべてのサイト",
   "Any account on this site": "このサイトのすべてのアカウント",
   "This account": "このアカウント",
   "Shows the password — after the second password. VibeSpace never hands it to an agent: Hub types it only on the matching site into the field the agent names": "パスワードを表示します — 2 つ目のパスワードの後で。VibeSpace はエージェントにパスワードを渡しません：一致するサイトでのみ、エージェントが指定した欄に Hub が入力します",
   "Filled for:": "入力を許可：",
   "Choose who may sign in with this login — VibeSpace never hands them the password": "このログインでサインインできる対象を選びます — VibeSpace はパスワードを渡しません",
-  "Who may have \"{name}\" filled": "「{name}」を入力してもらえるのは誰か",
   "For": "範囲",
-  "Every conversation on this instance": "このインスタンスのすべての会話",
-  "Allowed conversations can sign in as you on this site. VibeSpace never hands them the password and types it only on the matching site into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls. «Any account on this site» also lets an agent register new accounts there through the vault.": "許可した会話は、このサイトにあなたとしてサインインできます。VibeSpace はパスワードを渡さず、一致するサイトのパスワード欄またはコード欄にのみ入力します。柵は誤読と別サイトを防ぎますが、自分が操作するページ内を意図的に探るエージェントを止めるとは約束しません。「このサイトのすべてのアカウント」は、エージェントが保管庫経由で新しいアカウントを登録することも許可します。",
   "Pending your confirmation — registered by an agent (Confirm promotes it to current; Discard removes it)": "確認待ち — エージェントが登録（確認すると現在のパスワードに昇格し、破棄すると未確認エントリを削除します）",
   "Pending your confirmation — generated replacement password (Confirm promotes it to current and keeps the old password in previous; Discard drops the candidate)": "確認待ち — ボールトが生成した新しいパスワード（確認すると現在に昇格し旧パスワードを前世代に残します。破棄すると候補を削除します）",
   "Promotes the pending password to current in the vault": "確認待ちパスワードをボールトの現在のパスワードに昇格します",

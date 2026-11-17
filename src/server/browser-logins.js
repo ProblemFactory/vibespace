@@ -781,9 +781,13 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
   }
 
   // ── THE OWNER'S DOORS (the Vault window) ──
-  function list() {
+  function list({ subjects = null } = {}) {
     const st = vstate();
     const g = store();
+    // «by what» (the owner 2026-11-17): each login answers which scope admits each subject, by the fill's own rule (src/browser-login.js
+    // byWhatOf over the same rows the fill reads) — the dialogs draw it, never a second test
+    const byWhatSubjects = subjects ? BL.byWhatSubjects(subjects) : null;
+    const rawAt = (r) => (g ? g.rowsFor(BL.DOOR, r) : []);
     if (st === 'unlocked') maybeRemindPending();
     const rowsAt = (r) => {
       const rows = g ? g.rowsFor(BL.DOOR, r) : [];
@@ -809,6 +813,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
               ...(pub.totpName ? { totpName: pub.totpName } : {}),
             } : {}),
             grants: [...rowsAt(`${e.origin}#${e.user}`), ...rowsAt(`${e.origin}#*`), ...wild],
+            ...(byWhatSubjects ? { byWhat: BL.byWhatOf({ rows: { thisAccount: rawAt(`${e.origin}#${e.user}`), anyAccount: rawAt(`${e.origin}#*`), anySite: rawAt('*') }, subjects: byWhatSubjects }) } : {}),
           };
         }),
     };
@@ -842,6 +847,31 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     resolvePendingItemsForName(n, prevPendingItemId);
     try { vault.audit?.('vault-web-login-saved', { why: n, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
     return { ok: true, name: n, updated: !!ex.rec };
+  }
+
+  /** A login's two-step code BOUND or UNBOUND by the PERSON (the Vault window's row and the top of its 用于… dialog — the owner
+   *  2026-11-17: «比如绑定了哪个两步验证码»): a name this vault holds, or none (null / ''). The password, its slots and `rev` stay as
+   *  they are (BL.totpBoundRecord); ONE audit line, the entry and the name — never a code. */
+  function bindTotp(name, totpName = null, { who = null } = {}) {
+    if (!BL.parseName(name)) return named('not_found', 'no such web login');
+    const want = totpName == null ? '' : str(totpName).trim();
+    if (want && !/^[\w.-]{1,120}$/.test(want)) return named('bad_totp', 'a two-step entry name from the Vault (letters, digits, . _ -)');
+    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then save');
+    if (want) {
+      let tl = [];
+      try { tl = typeof vault.secretNames === 'function' ? vault.secretNames() || [] : []; } catch { tl = []; }
+      if (!tl.some((s) => s && s.name === `totp:${want}`)) return named('bad_totp', `no two-step entry "${want.slice(0, 120)}" in the Vault — add it first under Two-step codes`);
+    }
+    const o = open(name);
+    if (!o.ok) return o;
+    if (!o.rec) return named('not_found', 'no such web login');
+    if (str(o.rec.totpName) === want) return { ok: true, name, totpName: want || null, changed: false };
+    const rec = BL.totpBoundRecord(o.rec, want || null);
+    if (!rec) return named('bad-record', 'not a web-login record');
+    const w = writeEntry(name, rec);
+    if (!w.ok) return w;
+    try { vault.audit?.('vault-web-login-totp', { why: name, by: 'human', who: who ? str(who).slice(0, 40) : null, totp: want || null }); } catch { /* */ }
+    return { ok: true, name, totpName: want || null, changed: true };
   }
 
   function addAgent({ origin, username, password, totpName = null } = {}, { owner = null, actor = null } = {}) {
@@ -899,18 +929,33 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
   }
 
   function resourceFor(name, scope) { const p = BL.parseName(name); if (scope === 'any-site') return '*'; if (!p) return null; return scope === 'any-account' ? `${p.origin}#*` : `${p.origin}#${p.user}`; }
-  function grant(name, scope, subject, { by = 'user' } = {}) {
+  function grant(name, scope, subject, { by = 'user', except = undefined } = {}) {
     const resource = resourceFor(name, scope);
     if (!resource || !BL.resourceOk(resource)) return named('bad_resource', 'a login and a scope: this-account, any-account or any-site');
     const p = subject === 'everyone' ? { kind: 'everyone' } : GM.fromSubject(subject);
     if (!p) return named('bad_principal', 'a running conversation, a Task Group, or everyone');
+    // «除了» (the owner 2026-11-17, 主开发's Q2): a Task Group's or Everyone's grant carries its exceptions — the conversations left out
+    // (the row model's own `except`); a conversation's grant takes none
+    let exceptList = null;
+    if (except !== undefined && except !== null) {
+      if (!Array.isArray(except)) return named('bad_except', 'the exceptions are a list of conversations');
+      if (p.kind !== 'group' && p.kind !== 'everyone') return named('bad_except', 'exceptions belong to a Task Group or Everyone');
+      exceptList = [];
+      for (const x of except) { const q = GM.fromSubject(String(x || '')); if (!q || q.kind !== 'conversation') return named('bad_except', 'an exception is a running conversation'); if (!exceptList.some((e) => GM.principalKey(e) === GM.principalKey(q))) exceptList.push(q); }
+    }
     const g = store();
     const [row] = g.rowsFor(BL.DOOR, resource);
     const cur = row ? GM.publicRow(row) : { to: [], except: [] };
     if (cur.unknown) return named('unknown_shape', cur.why || 'that grant row could not be read');
     const key = GM.principalKey(p);
-    if ((cur.to || []).some((e) => GM.principalKey(e) === key)) return { ok: true, resource, already: true };
-    const w = g.set(BL.DOOR, resource, { to: [...(cur.to || []), p], except: (cur.except || []).filter((e) => GM.principalKey(e) !== key), removeExcept: [key] }, by);
+    const has = (cur.to || []).some((e) => GM.principalKey(e) === key);
+    if (has && !exceptList) return { ok: true, resource, already: true };
+    const nextExcept = exceptList ? exceptList.filter((e) => GM.principalKey(e) !== key) : (cur.except || []).filter((e) => GM.principalKey(e) !== key);
+    // the store MERGES `except` on a write: what leaves the list is named (`removeExcept`) — the new principal itself, and every exception
+    // the person took out of «除了»
+    const nextKeys = new Set(nextExcept.map((e) => GM.principalKey(e)));
+    const removeExcept = [...new Set([...(has ? [] : [key]), ...(cur.except || []).map((e) => GM.principalKey(e)).filter((k) => !nextKeys.has(k))])];
+    const w = g.set(BL.DOOR, resource, { to: has ? (cur.to || []) : [...(cur.to || []), p], except: nextExcept, ...(removeExcept.length ? { removeExcept } : {}) }, by);
     return w && w.ok ? { ok: true, resource } : named((w && w.code) || 'not_written', (w && w.error) || 'not written');
   }
   function ungrant(resource, principalKey, { by = 'user' } = {}) {
@@ -967,6 +1012,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     noticeTakeoverSaveDropped,
     list,
     addOwn,
+    bindTotp,
     addAgent,
     drop,
     grant,

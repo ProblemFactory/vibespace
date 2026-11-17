@@ -317,3 +317,12 @@ export function rowToPick(row, rows, { everyoneKey = 'everyone:*', notRunning = 
   const except = (Array.isArray(r.except) ? r.except : []).map(keyOf).filter(Boolean);
   return { selected: [...new Set(selected)], except: [...new Set(except)], extra, storedKey };
 }
+
+/** LOCKED SELECTIONS (the owner 2026-11-17 — «who may have a web login filled»): subjects a WIDER grant already admits, shown GRANTED
+ *  here but not this picker's to take back. `locked` = [{ key, why, door? }] (the caller's words; `door` = {label, run}) → a Map key →
+ *  entry (the last wins), unknown shapes dropped. A locked key is never picked or unpicked by a press; its chip has no ✕. */
+export function lockedMap(locked) {
+  const m = new Map();
+  for (const x of Array.isArray(locked) ? locked : []) if (x && x.key != null && x.key !== '') m.set(String(x.key), { key: String(x.key), why: String(x.why || ''), door: x.door && typeof x.door.run === 'function' ? { label: String(x.door.label || ''), run: x.door.run } : null });
+  return m;
+}

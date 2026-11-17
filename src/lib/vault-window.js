@@ -35,7 +35,9 @@ import { passkeyDeleteWords } from './browser-panel-model.js';
 import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PROVENANCES, provenanceOf, PROVENANCE_FILTERS, stateChipsOf, viewOf, bandItemsOf, bandDoorsOf, SEARCHED_FIELDS } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
 import { useExtras, useSigOf } from './vault-use-row.js'; // lane vault-use-grants: «Who may use it» — the members (hosts, end, uses) + 「Who may use it…」
 import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
-import { loadLogins, loginExtras, showLoginAddDialog } from './vault-login-row.js'; // lane browser-login: a website login's row — 用于… (this account / any account on this site / any site) + 网站登录…
+import { loadLogins, loginExtras, showLoginAddDialog } from './vault-login-row.js'; // lane browser-login: a website login's row — what it holds, who may have it filled + 用于… + 网站登录…
+import { wideHeaderDoors, loginHeld, showLoginGrantPicker, showAnySiteDialog, showAnyAccountDialog } from './vault-login-grants.js';   // the owner 2026-11-17: what a login holds (its two-step door), the three grant dialogs + the wider doors on the «Web logins» head
+const LOGIN_DOORS = Object.freeze({ held: loginHeld, grant: showLoginGrantPicker, anySite: showAnySiteDialog, anyAccount: showAnyAccountDialog });   // handed to each login row (it imports no dialog — the paste box's bundle stays as it is)
 import { loadTotp, totpExtras, showTotpAddDialog } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…; lane vault-totp-add: 添加… ▸ 两步验证…
 import { addOrderOf, familyOf } from '../vault-kinds.js'; // PURE: THE KIND REGISTRY (lane vault-entry-description: familyOf — which kinds carry a name and a description) — which 添加… doors must exist, in its order (scripts/test-vault-kinds-census.mjs)
 import { inboxModel } from './user-todos-actions.js'; // lane vault-window-v2: 「需要你」 = For you's own items (one store, one set of answers)
@@ -447,7 +449,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     if (row.store === 'automation' && st.auto) { const ex = automationExtras(row, st.auto, { refresh }); chips.append(...(ex.chips || [])); wide = ex.box; doors.append(...ex.doors); }
     if (row.run && row.run.use) { const ux = useExtras(row, { app, refresh }); main.append(ux.box); doors.append(...ux.doors); x.use = ux; x.useSig = useSigOf(row); }   // lane vault-use-grants: who may use it with no card
     if (totpTx) { main.append(totpTx.box); doors.append(...totpTx.doors); }   // design q-047 L1: the code's grant chips + 用于…
-    if (isLogin(row) && st.logins) { const lx = loginExtras(row, st.logins, { refresh, show }); main.append(lx.box); doors.append(...lx.doors); }   // lane browser-login: who may have it filled + 用于…
+    if (isLogin(row) && st.logins) { const lx = loginExtras(row, st.logins, { refresh, show, doors: LOGIN_DOORS }); main.append(lx.box); doors.append(...lx.doors); }   // lane browser-login: who may have it filled + 用于…
     if (words) { const b = btnEl(t('Edit…'), 'vw-words-edit', { title: t('Its name and description') }); b.onclick = () => showWordsEditDialog({ row, refresh }); doors.append(b); }   // lane vault-entry-description
     if (row.doors && row.doors.rotate) { const b = btnEl(t('Renew…'), 'vw-renew'); b.onclick = () => doRenew(row); doors.append(b); }
     if (row.doors && row.doors.delete) { const b = btnEl(t('Delete'), 'vw-del'); b.onclick = () => doDelete(row); doors.append(b); }
@@ -502,6 +504,10 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
       // design q-046: 铸造… on the «Automation keys» head — the vault unlocked only (a key's value is sealed at once)
       if (g.id === 'automation' && d.state === 'unlocked' && !h.mint) { h.mint = btnEl(t('Mint…'), 'vw-ak-mint'); h.mint.onclick = () => showMintDialog({ refresh, data: st.auto }); h.el.append(h.mint); }
       if (h.mint) h.mint.hidden = d.state !== 'unlocked';
+      // the owner 2026-11-17: the WIDER web-login grants have their own doors HERE, on the «Web logins» head — «任何网站…» and «某个网站的任何
+      // 账号…», each its own dialog — with one line of what they hold (never reachable by a slip from one login's dialog)
+      if (g.id === 'web-logins' && st.logins && !h.wide) { h.wide = wideHeaderDoors(() => st.logins, { refresh }); h.el.append(h.wide.el); }
+      if (h.wide) { h.wide.el.hidden = !st.logins || d.state !== 'unlocked'; if (st.logins) h.wide.update(); }
       want.push(h.el);
       if (!g.rows.length) { want.push(emptyEl(t('Nothing stored here'), `empty-${g.id}`)); continue; }
       for (const r of g.rows) { const x = rowEls.get(r.id); if (x) want.push(x.el); }

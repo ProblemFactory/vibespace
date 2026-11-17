@@ -459,6 +459,18 @@ function ownerUpdatedRecord(rec, password, { totpName = undefined, now = 0 } = {
   });
 }
 
+/** The record with its two-step code BOUND to `totpName` (a name the vault holds) or UNBOUND (null / '') by the person (the owner
+ *  2026-11-17: «比如绑定了哪个两步验证码» — the row's door to change or unbind it). The password, its slots and `rev` stay as they are
+ *  (a pending card's Confirm / Discard still reads the same login). null = not a record or not a two-step name. */
+function totpBoundRecord(rec, totpName = null) {
+  const r = recordOf(rec);
+  if (!r) return null;
+  const want = totpName == null ? '' : str(totpName).trim();
+  if (want && !TOTP_NAME_RE.test(want)) return null;
+  const { totpName: _bound, totp: _legacy, ...rest } = r;   // both spellings recordOf reads — an unbind leaves neither
+  return recordOf({ ...rest, ...(want ? { totpName: want } : {}) });
+}
+
 /** True iff `rec` has an unconfirmed `pending` slot that has been untouched for >= 7 days and has NEVER been reminded yet. */
 function shouldRemindPending(rec, now, { alreadyReminded = false } = {}) {
   if (alreadyReminded) return false;
@@ -965,7 +977,32 @@ function noticeWords(state, { origin = '', username = '', conversation = '', tar
   };
 }
 
+/** «BY WHAT» (the owner 2026-11-17 — «who may have a web login filled»): for each subject the grant dialogs show (a conversation, a Task
+ *  Group, Everyone), EVERY scope whose rows ADMIT it, narrowest first — by the fill's own rule: GM.admits over each of grantResources'
+ *  rows in turn (this account, any account on the site, any site), with that subject's facts. `rows` = { thisAccount, anyAccount,
+ *  anySite } (raw rows); `subjects` = [{ key, facts }] (key = the principal key). → { [key]: ['this-account' | 'any-account' |
+ *  'any-site', …] } (absent = none admits it). PURE: the dialogs draw what this answers — never a second test. */
+function byWhatOf({ rows = {}, subjects = [] } = {}) {
+  const order = [['this-account', rows.thisAccount], ['any-account', rows.anyAccount], ['any-site', rows.anySite]];
+  const out = {};
+  for (const s of Array.isArray(subjects) ? subjects : []) {
+    if (!s || !s.key) continue;
+    const by = order.filter(([, rs]) => Array.isArray(rs) && rs.length && GM.admits(rs, s.facts || {}).ok).map(([scope]) => scope);
+    if (by.length) out[String(s.key)] = by;
+  }
+  return out;
+}
+/** The subjects of the Vault's grant dialogs (the hub's `subjects()`: sessions with their Task Groups, the groups) → [{ key, facts }] for
+ *  byWhatOf — a conversation by its own key and groups, a group as a member of it, Everyone as nobody in particular. */
+function byWhatSubjects(subjects = {}) {
+  const out = [];
+  for (const s of (subjects && subjects.sessions) || []) { const k = GM.keyFromSubject(s && s.subject); if (k) out.push({ key: `conversation:${k}`, facts: { conversationKey: k, groupIds: Array.isArray(s.groupIds) ? s.groupIds : [] } }); }
+  for (const g of (subjects && subjects.groups) || []) { const m = /^group:(.+)$/.exec(str(g && g.subject)); if (m) out.push({ key: `group:${m[1]}`, facts: { groupIds: [m[1]] } }); }
+  out.push({ key: 'everyone', facts: {} });
+  return out;
+}
 module.exports = {
+  byWhatOf, byWhatSubjects,
   PREFIX, DOOR, USER_MAX, GENERATED_LEN, TEXT_MAX, NOTES_MAX, PENDING_REMIND_MS,
   VAULT_FIELDS, TYPED_SLOTS, BY, SOURCES, STRENGTHS, PENDING_KINDS, REFUSALS, LIVE_FILL_ALLOW_VERBS,
   NAME_RE, ORIGIN_RE, ENTRY_GEN_RE, CLASSES, NOTICE,
@@ -973,7 +1010,7 @@ module.exports = {
   LOCKED, HOLD_TOO_MUCH_TEXT, HOLD_UNKNOWN_TYPED, HOLD_VALUE_SHOWN, HOLD_AWAIT_VAULT, HOLD_ENTRY_GONE, HOLD_WORD_OF_REASON, HOLD_WORDS, HOLD_PHASES, isHoldWord,
   hasExplicitScheme, originOf, hostOf, siteOriginOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
   recordOf, textOf, publicOf, resolveSlotValue, scrubSecretsOf, mintEntryGen,
-  newRecord, mintChangeRecord, confirmPendingRecord, discardPendingRecord, ownerUpdatedRecord,
+  newRecord, mintChangeRecord, confirmPendingRecord, discardPendingRecord, ownerUpdatedRecord, totpBoundRecord,
   shouldRemindPending, pendingRemindKey,
   generatePassword, parseVaultFillSpec, fillVerdict,
   liveFillAllowsVerb, liveFillVerdict, postLiftOutcomeVerdict,

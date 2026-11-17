@@ -7612,6 +7612,13 @@ label.chan-cap-row { cursor: default; }
 .pp-chip-prefix { flex: 0 0 auto; padding-left: 4px; color: var(--text-secondary); white-space: nowrap; }
 .pp-chip-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: 0 0 auto; border-radius: 50%; border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 0; }
 .pp-chip-x:hover, .pp-chip-x:focus-visible { background: var(--bg-hover); color: var(--text); outline: none; }
+/* the owner 2026-11-17 (who may have a web login filled): a LOCKED chip — a wider grant holds it: no ✕, its «through» and its door */
+.pp-chip-locked { background: var(--bg-secondary); border-style: dashed; padding-right: 6px; }
+.pp-chip-why { font-size: 11px; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-chip-door { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0 2px; font: inherit; font-size: 11px; white-space: nowrap; }
+.pp-chip-door:hover, .pp-chip-door:focus-visible { text-decoration: underline; outline: none; }
+.pp-locked { cursor: default; }
+.pp-locked .pp-lock-why { color: var(--text-dim); }
 .pp-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 6px 9px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text); }
 .pp-input:focus { outline: none; border-color: var(--accent); }
 .pp-list { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px; }
@@ -9410,6 +9417,27 @@ button.vw-chip { cursor: pointer; }
 .vw-ak-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 8px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); }
 .vw-ak-x { border: 0; background: none; color: var(--text-dim); cursor: pointer; padding: 0 4px; font: inherit; }
 .vw-ak-x:hover { color: var(--bad-text); }
+/* the owner 2026-11-17: a WIDER grant reaching a login — «through», no ✕, its door; what the login holds besides its secret */
+.vw-ak-chip-through { border-style: dashed; color: var(--text-dim); padding-right: 6px; }
+.vw-ak-door { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0 2px; font: inherit; }
+.vw-ak-door:hover, .vw-ak-door:focus-visible { text-decoration: underline; outline: none; }
+.vw-login-held { font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vw-login-held-otp { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; color: var(--text); min-width: 0; }
+.vw-login-held-otp-name { min-width: 0; overflow-wrap: anywhere; }
+.vw-login-held-otp-door { font-size: 11px; white-space: nowrap; }
+/* the top of a login's 用于… dialog — the login itself: user name, site, what it holds */
+.vw-login-head { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-secondary); min-width: 0; }
+.vw-login-head-id { font-size: 12px; overflow-wrap: anywhere; min-width: 0; }
+.vw-login-head .vw-login-held { margin-top: 2px; }
+.vw-login-totp-select { width: 100%; min-width: 0; }
+/* the «Web logins» head's wider doors and their one line */
+.vw-login-wide { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; font-weight: normal; letter-spacing: 0; min-width: 0; }
+.vw-login-wide-line { color: var(--text-dim); min-width: 0; overflow-wrap: anywhere; }
+.vw-login-site { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; margin: 4px 0; min-width: 0; }
+.vw-login-site-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.vw-login-site-n, .vw-login-site-held { flex: 0 0 auto; font-size: 11px; color: var(--text-dim); }
+.vw-login-consequence { margin-bottom: 6px; }
+.vw-login-refusal { color: var(--warn-text); }
 /* lane vault-use-grants: «Who may use it» — the members as the key / login chips, the door under them (the door column keeps its width) */
 .vw-use-host { display: flex; flex-direction: column; gap: 3px; }
 .vw-use .vw-use-grant { align-self: flex-start; }
