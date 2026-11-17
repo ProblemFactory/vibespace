@@ -209,7 +209,7 @@ export const FENCE_EXEMPT = Object.freeze([
   { file: 'scripts/test-harness-contract.mjs', needle: 'consumers', ids: ['shell'], why: 'the stdout consumer per chat harness; a terminal has no stream protocol' },
   { file: 'scripts/test-model-providers.mjs', needle: "'gemini', 'gemini'", ids: ['antigravity', 'shell'], why: "the provider KINDS' harness projection (q-045 §2.2): antigravity has no provider kind yet (Google's own login only); shell runs no model" },
   { file: 'scripts/test-queue-steer.mjs', needle: "[['codex', 'codex']", ids: ['shell'], why: 'the queue verbs per chat harness; a terminal has no queue' },
-  { file: 'scripts/test-queue-steer.mjs', needle: "=== 'codex'|=== 'claude'", ids: ['shell'], why: 'the no-id-branch pin over the queue-op case and the composer: a terminal has no queue, nothing there can branch on it' },
+  { file: 'scripts/test-queue-steer-pins.mjs', needle: "=== 'codex'|=== 'claude'", ids: ['shell'], why: 'the no-id-branch pin over the queue-op case and the composer: a terminal has no queue, nothing there can branch on it' },
   { file: 'scripts/test-settings-view.mjs', needle: 'harnesses', ids: ['shell'], why: 'the installed-CLI facts of the Settings view; shell has no settings section' },
   { file: 'src/artifacts.js', needle: 'AGENT_CONFIG_DIR', ids: ['antigravity', 'shell'], why: "keyed by the agent's config DOTDIR, not its id: antigravity's is .gemini (listed); a terminal has none" },
   { file: 'src/harness-settings.js', needle: 'HARNESS_SETTINGS', ids: ['shell'], why: 'shell declares no settings table (the contract allows none)' },
