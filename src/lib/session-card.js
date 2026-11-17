@@ -67,7 +67,10 @@ export function registerSessionCardMenu() {
   registerCommand({ id: 'session.resumeChat', title: () => tr('Resume in Chat'), run: (c) => resumeWith(c, 'chat') });
   registerCommand({ id: 'session.resumeTerminal', title: () => tr('Resume in Terminal'), run: (c) => resumeWith(c, 'terminal') });
   registerCommand({ id: 'session.viewHistory', title: () => tr('View History'), run: (c) => c.app.viewSession(c.s.sessionId, c.s.cwd, c.customName || c.s.name, { ...c.agentOpts }) });
-  registerCommand({ id: 'session.fork', title: () => tr('Fork…'), run: (c) => c.app.forkSession(c.s) });
+  // FORK'S CONDITION LIVES ON THE COMMAND (lane think-tools-phone, 主开发 2026-11-17 — the owner: «另外右键菜单我怎么找不到fork»): the
+  // harness can fork, and never an external process. Every menu that offers session.fork (this card's, the window's —
+  // src/lib/taskbar.js) shows it under this ONE condition, so the two menus cannot disagree about when a fork is possible.
+  registerCommand({ id: 'session.fork', title: () => tr('Fork…'), run: (c) => c.app.forkSession(c.s), when: (c) => !!c.s && !!backendFeatureCaps(c.s.backend || 'claude').fork && c.s.status !== 'external' });
   // S9 remainder (c): a shell the OpenCode SERVE owns, in this conversation's
   // own directory. Local machine only — the serve streams its ptys over a
   // loopback websocket, so a remote conversation's terminal is the host's own
@@ -136,7 +139,7 @@ export function registerSessionCardMenu() {
   registerMenuItem({ menu: M, group: '0_primary', order: 10, command: 'session.resumeChat', when: stopped });
   registerMenuItem({ menu: M, group: '0_primary', order: 20, command: 'session.resumeTerminal', when: stopped });
   registerMenuItem({ menu: M, group: '0_primary', order: 30, command: 'session.viewHistory' });
-  registerMenuItem({ menu: M, group: '0_primary', order: 40, command: 'session.fork', when: (c) => !!backendFeatureCaps(c.s.backend || 'claude').fork && c.s.status !== 'external' });
+  registerMenuItem({ menu: M, group: '0_primary', order: 40, command: 'session.fork' });   // its condition: the command's own (above)
   registerMenuItem({ menu: M, group: '0_primary', order: 50, command: 'session.opencodeTerminal', when: (c) => (c.s.backend || 'claude') === 'opencode' && !c.s.host });
   // 1_state: star / archive / rename / status / task groups
   registerMenuItem({ menu: M, group: '1_state', order: 0, separator: true });

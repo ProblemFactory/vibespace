@@ -15,6 +15,8 @@ import * as quotaModel from '../quota-model.js'; // PURE: the display verdict (w
 // collab-row), so "the instance default is a NEW-session default" is ONE law
 // with two callers instead of two `||` chains that drift.
 import { resumeSpawnPick } from '../resume-continuity.js';
+import { locateVerdict, LOCATE_WORDS } from '../locate-verdict.js'; // lane think-tools-phone: «not visible» only when true, with its door
+const LOCATE_WAIT_MS = 3000; // the bounded wait for the row (the list's next frame draws it; a folder's lazy cards are built on the way)
 import { lateFocusVerdict } from './keyboard-yield.js'; // lane mirror-green-228: a focus on the server's answer leaves an open dialog's keys
 import { forkGroupPlan } from './fork-groups.js'; // a fork lands in its source's Task Groups (2026-09-25)
 import { carriedGeometry } from './stage-rules.js'; // the geometry a replaced window carries: a borrowed hero's HOME, never the Stage's slot (verify r1 of inc-munl8jkl-gaih)
@@ -642,20 +644,37 @@ export function installSessionLifecycle(App, ctx = {}) {
   // Jump the sidebar to a conversation's entry (owner UX: with dozens of
   // sessions the entry hunt was the pain) — switch to Folders, expand the
   // containing folder if collapsed, scroll to the card and flash it.
-  locateSessionInSidebar(backendSessionId) {
+  /** «LOCATE IN SIDEBAR» (lane think-tools-phone, 主开发 2026-11-17 — the owner, the row on screen and selected: «这哪里不可见了？»).
+   *  It looked for `.session-card` — a class no card wears (a card is `.session-item-card`) — so it never found one; it went
+   *  through the rail's re-click (an OPEN sessions list collapsed); it looked 60 ms after an open, before the list drew. The laws:
+   *  LOCATE NEVER HIDES WHAT IT IS ASKED TO SHOW (the rail's one show door), IT WAITS FOR THE ROW (a bounded wait on the effect —
+   *  the card drawn, its folder opened and its lazy cards built), and «NOT VISIBLE» IS SAID ONLY WHEN IT IS TRUE, with its
+   *  reason and its door (the PURE src/locate-verdict.js over the list's own filters). */
+  async locateSessionInSidebar(backendSessionId) {
     const sb = this.sidebar;
     if (!sb || !backendSessionId) return;
-    try { sb._railGo?.('folders'); } catch { }
-    try { if (sb._activeTab !== 'folders') { sb._activeTab = 'folders'; sb.render?.(); } } catch { }
-    setTimeout(() => {
-      const card = [...document.querySelectorAll('.session-card')].find((c) => c._sessionId === backendSessionId);
-      if (!card) { showToast(t('Entry not visible — it may be archived or filtered out')); return; }
-      const group = card.closest('.folder-group');
-      if (group?.classList.contains('collapsed')) group.classList.remove('collapsed');
-      card.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      card.classList.add('locate-flash');
-      setTimeout(() => card.classList.remove('locate-flash'), 2400);
-    }, 60);
+    try { sb._railShow?.('folders'); } catch { }
+    const v = locateVerdict(sb._locateFacts?.(backendSessionId) || { present: false });
+    if (!v.show) {
+      const w = LOCATE_WORDS[v.why] || LOCATE_WORDS.absent;
+      const words = t(w.words, { name: sb._locateName?.(v.why, v.name) ?? (v.name || ''), term: v.term || '' });
+      showToast(words, w.door ? { action: { label: t(w.door), run: () => { sb._locateDoor?.(v.why); this.locateSessionInSidebar(backendSessionId); } } } : {});
+      return;
+    }
+    const card = await new Promise((resolve) => {
+      const t0 = Date.now();
+      const look = () => {
+        try { sb._openFolderOf?.(backendSessionId); } catch { }
+        const c = [...(sb.listEl || document).querySelectorAll('.session-item-card')].find((x) => x._sessionId === backendSessionId);
+        if (c || Date.now() - t0 > LOCATE_WAIT_MS) return resolve(c || null);
+        requestAnimationFrame(look);
+      };
+      look();
+    });
+    if (!card) { showToast(t('The session list did not draw this conversation in time — press Locate again')); return; }
+    card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    card.classList.add('locate-flash');
+    setTimeout(() => card.classList.remove('locate-flash'), 2400);
   },
 
   async killPid(pid, host) {

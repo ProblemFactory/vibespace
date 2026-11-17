@@ -2484,7 +2484,7 @@ export function reconcile(parent, out) {
 export function focusChannelsPanel(app, opts = {}) {
   const sb = app.sidebar;
   if (!opts.forceWindow && sb && sb._railEl && sb.listEl) {
-    if (sb._activeTab !== 'channels') sb._railGo('channels');
+    if (sb._activeTab !== 'channels') sb._railShow('channels');   // the rail's one show door (never the re-click's collapse)
     else {
       if (!sb.isOpen) sb.toggle(true);
       sb.listEl.querySelector('.rail-panel-channels')?.remove();

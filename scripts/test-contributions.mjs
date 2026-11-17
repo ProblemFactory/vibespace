@@ -496,6 +496,10 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
       } else if (sess.sessionId) {
         menuItems.push({ label: t('Resume session'), kind: act('resume') });
       }
+      // + the ONE row added since 2.369.37 (lane think-tools-phone, 2026-11-17 — the owner could not find Fork on the window's menu):
+      // Fork, under the card's own condition (the session.fork command's `when`: B1's backendFeatureCaps forks every backend but a
+      // shell — the matrix's rows are claude — and never an external process)
+      if (sess.status !== 'external') menuItems.push({ label: t('Fork…'), kind: act('fork') });
       menuItems.push({ label: t('Locate in sidebar'), kind: act('locate') });
       menuItems.push({ label: t('Session properties…'), kind: act('props') });
       menuItems.push({ separator: true });
@@ -543,7 +547,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   for (const l of ['✥ Move', '□ Restore', 'Rename…', '⟳ Restart session', 'Terminate session', 'Locate in sidebar', 'Session properties…', '✕ Close']) items.find((i) => i.label === l).action();
   ok(J(calls) === J([['wm.startMoveMode', 'win-1'], ['wm.witnessGeometry', 'win-1'], ['wm.restore', 'win-1'], ['renameSession', 'N', 'N'], ['restartConversationInPlace', sess], ['killSession', 'w1'], ['locateSessionInSidebar', 'abc'], ['openSessionProps', sess], ['wm.requestClose', 'win-1']] /* round 3 A2: the menu's Close asks the veto point */),
     'window actions call the same wm/app handlers with the same arguments (session ops via the shared session.* commands; the Restore / Minimize row stamps the geometry witness first — desktop-move verify r4 ③)', J(calls));
-  ok(J(items.map((i) => i.kind).filter(Boolean)) === J(['move', 'minimize', 'rename', 'restart', 'terminate', 'locate', 'props', 'close']), 'every window item carries its onAction kind');
+  ok(J(items.map((i) => i.kind).filter(Boolean)) === J(['move', 'minimize', 'rename', 'restart', 'terminate', 'fork', 'locate', 'props', 'close']), 'every window item carries its onAction kind');
 
   // ── lane I (2026-09-25, the owner looked for the live view on the chat window's own menu; only the sidebar card had it) ──
   {

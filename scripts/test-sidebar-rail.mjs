@@ -3,6 +3,9 @@
 // rail renders by default, panel tabs (Ports / Agents / Plugins) render into the
 // sidebar list area, re-click collapses the sidebar, and turning the setting off
 // live-restores the classic tab bar (and back on again restores the rail).
+// + «Locate in sidebar» (lane think-tools-phone, 2026-11-17), pressed on the window's own menu (which offers «Fork…» too): ① the
+//   owner's case — the sidebar closed, the row drawn late — and ② the open list end OPEN on the sessions list with the row
+//   flashed; another panel too; the search box and an archived row are said with their doors, each door pressed.
 // Runs a THROWAWAY server in a git worktree (own data dir — never touches a
 // live instance) + headless chrome over raw CDP. Requires google-chrome.
 // Run: node scripts/test-sidebar-rail.mjs
@@ -274,6 +277,78 @@ try {
   await evalJs(`app.settings.set('sidebar.activityRail', true)`);
   await sleep(500);
   check('rail rebuilt when setting on', await evalJs(`!!document.getElementById('sidebar-rail')`));
+
+  // ── «LOCATE IN SIDEBAR» NEVER HIDES WHAT IT IS ASKED TO SHOW (lane think-tools-phone, 主开发 2026-11-17 — the owner, the row's
+  // conversation open in a window, two toasts «条目不可见——可能已归档或被过滤»: «这哪里不可见了？»; and «另外右键菜单我怎么找不到fork»).
+  // One conversation planted in the client's own list (the poll held, so the scratch hub's empty list cannot wipe it) and a
+  // window the window menu reads as that conversation's (no agent CLI runs on the scratch hub). Locate is pressed where the owner
+  // pressed it — the window title bar's right-click menu — and must end OPEN on the sessions list with the row flashed. The legs, in
+  // 主开发's order: ① the owner's own case — the sidebar CLOSED, the row drawn LATE (the list's lazy folders get their cards from an
+  // IntersectionObserver; its building entries are held 400 ms here); ② the OPEN list with the row on screen; then another panel,
+  // the reasons a row is truly hidden (each said with its door, the door pressed) and the rail item's own re-click. The release's
+  // Locate is the RED CONTROL in the fast tier (test-locate-verdict: on a model of this rail and list, an open list collapses and a
+  // closed one misses at 60 ms).
+  await evalJs(`(() => { const sb = app.sidebar; clearTimeout(sb._pollTimer); sb._poll = async () => {}; return true; })()`);
+  const LOC = 'locate-fixture-1';
+  const plant = (extra = {}) => evalJs(`(() => { const sb = app.sidebar; sb._allSessions = [Object.assign({ sessionId: '${LOC}', name: 'locate me', cwd: '/srv/locate-fixture', status: 'stopped', backend: 'claude' }, ${JSON.stringify(extra)})]; sb._render(); return true; })()`);
+  const clearToasts = () => evalJs(`(() => { document.querySelectorAll('#global-toasts .global-toast').forEach((t) => t.remove()); document.querySelectorAll('.taskbar-context-menu').forEach((m) => m.remove()); return true; })()`);
+  const STATE = `(() => { const sb = app.sidebar, c = [...document.querySelectorAll('#sidebar .session-item-card')].find((x) => x._sessionId === '${LOC}'); return { open: !!sb.isOpen, tab: sb._activeTab, card: !!c, flash: !!c && c.classList.contains('locate-flash'), toast: [...document.querySelectorAll('#global-toasts .global-toast')].map((t) => t.textContent.trim()).join(' | ') }; })()`;
+  const shown = (r) => r.open && r.tab === 'folders' && r.card && r.flash && !r.toast;
+  // THE CONVERSATION'S WINDOW: a file window, marked as the planted conversation's terminal (taskbar.js sessionForWin reads the
+  // window's type and its open spec's backendSessionId)
+  const WIN = await evalJs(`(async () => { const before = new Set(app.wm.windows.keys()); app.openFileExplorer(); for (let i = 0; i < 40; i++) { const id = [...app.wm.windows.keys()].find((k) => !before.has(k)); if (id) { const w = app.wm.windows.get(id); w._locateType0 = w.type; w.type = 'terminal'; w._openSpec = { ...(w._openSpec || {}), backendSessionId: '${LOC}' }; return id; } await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  check(`a window stands for the planted conversation (${WIN})`, !!WIN);
+  const windowMenu = () => evalJs(`(() => { document.querySelectorAll('.taskbar-context-menu').forEach((m) => m.remove()); const w = app.wm.windows.get('${WIN}'); const tb = w && w.element && w.element.querySelector('.window-titlebar'); if (!tb) return null; const b = tb.getBoundingClientRect(); tb.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: b.left + 40, clientY: b.top + b.height / 2 })); return [...document.querySelectorAll('.taskbar-context-menu > .taskbar-context-menu-item')].map((r) => r.textContent.trim()); })()`);
+  const locate = async () => {
+    const rows = await windowMenu();
+    const pressed = await evalJs(`(() => { const r = [...document.querySelectorAll('.taskbar-context-menu > .taskbar-context-menu-item')].find((x) => x.textContent.trim() === 'Locate in sidebar'); if (!r) return false; r.click(); return true; })()`);
+    await sleep(600);
+    return { ...(await evalJs(STATE)), pressed, rows };
+  };
+  await clearToasts();
+  // ① THE OWNER'S CASE: the sidebar CLOSED, the list drawn while it was closed (its folders pending), the observer's building
+  // entries held 400 ms — the row drawn late
+  await evalJs(`app.sidebar._railShow('folders')`); await sleep(300); await plant(); await sleep(200);
+  await evalJs(`app.sidebar.toggle(false)`); await sleep(300);
+  await evalJs(`(() => { if (!window.__locateIO0) { const IO0 = window.IntersectionObserver; window.__locateIO0 = IO0; window.IntersectionObserver = class extends IO0 { constructor(cb, o) { super((entries, obs) => { const build = entries.filter((e) => e.isIntersecting), rest = entries.filter((e) => !e.isIntersecting); if (rest.length) cb(rest, obs); if (build.length) setTimeout(() => cb(build, obs), 400); }, o); } }; } app.sidebar._render(); return true; })()`);
+  await sleep(200);
+  let L = await locate();
+  check(`the window's menu offers «Locate in sidebar» and «Fork…» for its conversation (${JSON.stringify(L.rows)})`, Array.isArray(L.rows) && L.rows.includes('Locate in sidebar') && L.rows.includes('Fork…'), L.rows);
+  check(`① THE OWNER'S CASE — the sidebar CLOSED, Locate from the window's menu, the row drawn late: open on the sessions list, the row flashed, no toast (${JSON.stringify({ ...L, rows: undefined })})`, L.pressed && shown(L), L);
+  await evalJs(`(() => { if (window.__locateIO0) { window.IntersectionObserver = window.__locateIO0; delete window.__locateIO0; } return true; })()`);
+  // ② THE OPEN LIST with the row on screen (the release collapsed it here and said «not visible»)
+  await clearToasts(); await plant(); await sleep(600);
+  const before = await evalJs(STATE);
+  L = await locate();
+  check(`② the OPEN sessions list, the row on screen (${JSON.stringify(before)}): Locate from the window's menu keeps it open and flashes the row, no toast (${JSON.stringify({ ...L, rows: undefined })})`, before.open && before.card && L.pressed && shown(L), L);
+  // another panel open: back on the sessions list
+  await clearToasts(); await evalJs(`app.sidebar._railShow('ports')`); await sleep(500); await plant();
+  L = await locate();
+  check(`Locate from another panel (Ports): back on the sessions list, the row flashed (${JSON.stringify({ ...L, rows: undefined })})`, L.pressed && shown(L), L);
+  // a row hidden by the SEARCH BOX: said, with the words searched and its door
+  await clearToasts(); await plant();
+  await evalJs(`(() => { const el = document.getElementById('session-filter'); el.value = 'zz-no-such-row'; app.sidebar._render(); return true; })()`);
+  L = await locate();
+  check(`a row hidden by the SEARCH BOX: said so, with the words searched and the door «Clear search» (${L.toast})`, /Hidden by the search box: «zz-no-such-row»/.test(L.toast) && /Clear search/.test(L.toast) && !L.card && L.open, L);
+  await evalJs(`(() => { const b = document.querySelector('#global-toasts .global-toast-action'); if (b) b.click(); return !!b; })()`);
+  await sleep(900);
+  L = await evalJs(`(() => { const c = [...document.querySelectorAll('#sidebar .session-item-card')].find((x) => x._sessionId === '${LOC}'); return { box: document.getElementById('session-filter').value, flash: !!c && c.classList.contains('locate-flash') }; })()`);
+  check(`…its door «Clear search» empties the box and the row is located and flashed (${JSON.stringify(L)})`, L.box === '' && L.flash, L);
+  // an ARCHIVED row: said, with its door «Show archived»
+  await clearToasts(); await plant();
+  await evalJs(`(() => { const sb = app.sidebar; sb.toggleArchive(sb._allSessions[0]); sb._render(); return true; })()`); await sleep(300);
+  L = await locate();
+  check(`an ARCHIVED row: said so, with the door «Show archived» (${L.toast})`, /This conversation is archived/.test(L.toast) && /Show archived/.test(L.toast) && !L.card && L.open, L);
+  await evalJs(`(() => { const b = document.querySelector('#global-toasts .global-toast-action'); if (b) b.click(); return !!b; })()`);
+  await sleep(900);
+  L = await evalJs(`(() => { const sb = app.sidebar, c = [...document.querySelectorAll('#sidebar .session-item-card')].find((x) => x._sessionId === '${LOC}'); return { archivedOn: sb._statusFilter.has('archived'), flash: !!c && c.classList.contains('locate-flash') }; })()`);
+  check(`…its door shows the archived rows and the row is located and flashed (${JSON.stringify(L)})`, L.archivedOn && L.flash, L);
+  await evalJs(`(() => { const sb = app.sidebar; sb.toggleArchive(sb._allSessions[0]); sb._statusFilter.delete('archived'); localStorage.setItem('statusFilter', JSON.stringify([...sb._statusFilter])); sb._render(); return true; })()`);
+  await clearToasts();
+  // the re-click rule stays the rail ITEM's own: a person's second click on the open tab still collapses
+  await evalJs(`app.sidebar._railShow('folders')`); await sleep(200); await evalJs(`app.sidebar._railGo('folders')`); await sleep(300);
+  check('the rail item\'s own re-click still collapses (the show door never does)', await evalJs(`!app.sidebar.isOpen`));
+  await evalJs(`(() => { const w = app.wm.windows.get('${WIN}'); if (w) { w.type = w._locateType0; delete w._openSpec.backendSessionId; app.wm.closeWindow('${WIN}'); } const sb = app.sidebar; delete sb._poll; sb.toggle(true); sb._poll(); return true; })()`);
 
 } catch (e) {
   failed++;

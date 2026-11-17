@@ -433,6 +433,11 @@ export function registerWindowMenu() {
   registerMenuItem({ menu: M, group: '2_session', order: 10, id: 'window/restart-session', command: 'session.restart', kind: 'restart', when: live, label: () => '⟳ ' + t('Restart session') });
   registerMenuItem({ menu: M, group: '2_session', order: 20, command: 'window.terminateSession', kind: 'terminate', when: live, style: 'color:var(--red, #e55)' });
   registerMenuItem({ menu: M, group: '2_session', order: 10, id: 'window/resume-session', command: 'session.restart', kind: 'resume', when: (c) => hasSess(c) && c.s.status !== 'live' && !!c.s.sessionId, label: () => t('Resume session') });
+  // FORK WHERE THE PERSON LOOKS (lane think-tools-phone, 主开发 2026-11-17 — the owner: «另外右键菜单我怎么找不到fork»): the card's own
+  // command, under the card's own condition — it lives on the command (src/lib/session-card.js session.fork `when`: the harness can
+  // fork, never an external process), so this row adds only «a conversation's window». src/session-menu-parity.js holds the two
+  // menus to one table (scripts/test-locate-verdict.mjs).
+  registerMenuItem({ menu: M, group: '2_session', order: 25, command: 'session.fork', kind: 'fork', when: hasSess });
   registerMenuItem({ menu: M, group: '2_session', order: 30, command: 'session.locate', kind: 'locate', when: (c) => hasSess(c) && wmVerbs(c) });
   // AGENT BROWSER — the live view from the session's OWN window (lane I, 2026-09-25: the owner was told to open it "from
   // the menu" and looked here; only the sidebar card had it). Offered on a live local session whose conversation HAS a

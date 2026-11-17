@@ -6300,7 +6300,7 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 .ports-svc-pub { color: var(--yellow, #e5c07b); border-color: color-mix(in srgb, var(--yellow, #e5c07b) 50%, transparent); }
 
 /* Locate-in-sidebar flash (2.369.8) */
-.session-card.locate-flash { outline: 2px solid var(--accent); outline-offset: -2px; transition: outline-color 1.8s ease; }
+.session-item-card.locate-flash { outline: 2px solid var(--accent); outline-offset: -2px; transition: outline-color 1.8s ease; }
 
 /* Mobile Task-Groups tab icon (owner: "任务组的手机版界面非常丑陋"): the
    Folders tab's icon carried inline sizing, the Tasks tab's carried only this

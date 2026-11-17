@@ -503,7 +503,26 @@ class Sidebar {
     // scroll finds nothing or a hidden node. First locate the containing
     // folder-group via its stored lazy item list (present even before render),
     // expand it (persisting so it stays open), and force-render its cards.
-    for (const group of mayScroll ? this.listEl.querySelectorAll('.folder-group') : []) {
+    if (mayScroll) this._openFolderOf(sessionId);
+
+    for (const card of this.listEl.querySelectorAll('.session-item-card')) {
+      if (card._sessionId === sessionId) {
+        card.classList.add('highlighted');
+        if (isNew) requestAnimationFrame(() => card.classList.add('highlight-flash'));
+        if (mayScroll) {
+          if (card.scrollIntoViewIfNeeded) card.scrollIntoViewIfNeeded(false);
+          else card.scrollIntoView({ block: 'nearest' });
+        }
+        break;
+      }
+    }
+  }
+
+  /** The folder that holds this conversation, OPENED and DRAWN: a collapsed folder opened and remembered as expanded, a LAZY
+   *  folder's cards built (highlightSession's jump and «Locate in sidebar» share it — lane think-tools-phone). → true when a folder
+   *  of the list holds it. */
+  _openFolderOf(sessionId) {
+    for (const group of this.listEl.querySelectorAll('.folder-group')) {
       const sessionsDiv = group.querySelector('.folder-sessions');
       const items = sessionsDiv?._lazyItems;
       if (!items || !items.some(s => s.sessionId === sessionId)) continue;
@@ -525,20 +544,52 @@ class Sidebar {
         for (const s of items) sessionsDiv.appendChild(this._buildSessionCard(s));
         sessionsDiv.dataset.lazy = 'rendered';
       }
-      break;
+      return true;
     }
+    return false;
+  }
 
-    for (const card of this.listEl.querySelectorAll('.session-item-card')) {
-      if (card._sessionId === sessionId) {
-        card.classList.add('highlighted');
-        if (isNew) requestAnimationFrame(() => card.classList.add('highlight-flash'));
-        if (mayScroll) {
-          if (card.scrollIntoViewIfNeeded) card.scrollIntoViewIfNeeded(false);
-          else card.scrollIntoView({ block: 'nearest' });
-        }
-        break;
-      }
-    }
+  /** THE LOCATE FACTS (lane think-tools-phone, 主开发 2026-11-17): the sessions list's own filters as facts about ONE conversation, for
+   *  the PURE verdict (src/locate-verdict.js) — the same matchers `_renderInner` filters with, read in its order. */
+  _locateFacts(sessionId) {
+    const s = (this._allSessions || []).find((x) => x.sessionId === sessionId);
+    if (!s) return { present: false };
+    const term = (document.getElementById('session-filter')?.value || '').toLowerCase();
+    return {
+      present: true, term, matchesTerm: !term || sessionMatchesFilter(s, term),
+      backend: s.backend || 'claude', backendFilter: [...this._backendFilter], host: s.host || 'local', hostFilter: [...this._hostFilter],
+      kindPass: !this._agentKindFilter || passesAgentKindFilter(s, this._agentKindFilter),
+      archived: !!this.isArchived(s), showArchived: this._statusFilter.has('archived'), status: s.status, statusFilter: [...this._statusFilter],
+      activeView: this._activeView || null,
+    };
+  }
+
+  /** A locate verdict's NAME in the words the list's own controls show — the filter menu's rows (Live / Stopped…, an agent's
+   *  label, Local or a machine's name) and the quick tabs (LIVE / STOP…) — never a raw id («stopped» is no word in zh or ja). */
+  _locateName(why, name) {
+    const id = String(name || '');
+    if (why === 'status') return ({ live: tr('Live'), tmux: tr('Tmux'), external: tr('External'), stopped: tr('Stopped') })[id] || id;
+    if (why === 'view') return ({ live: tr('LIVE'), tmux: tr('TMUX'), external: tr('EXT'), stopped: tr('STOP'), archived: tr('ARCH') })[id] || id.toUpperCase();
+    if (why === 'backend') return getBackendMeta(id).label;
+    if (why === 'host') return id === 'local' ? tr('Local') : ((this._hostsData?.hosts || []).find((h) => h.id === id)?.name || (this._allSessions || []).find((s) => s.host === id)?.hostName || id);
+    return id;
+  }
+
+  /** A locate verdict's DOOR: the one act that shows the row — the same writes the filter's own row in the funnel makes (its saved
+   *  value, the quick view back to ALL, the button's look), then the list drawn again. */
+  _locateDoor(why) {
+    const btn = (id) => document.getElementById(id);
+    if (why === 'search') { const el = btn('session-filter'); if (el) el.value = ''; }
+    else if (why === 'backend') { this._backendFilter = new Set(); localStorage.setItem('backendFilter', '[]'); this._activeView = null; if (btn('backend-filter')) this._updateBackendFilterBtn(btn('backend-filter')); }
+    else if (why === 'host') { this._hostFilter = new Set(); localStorage.setItem('hostFilter', '[]'); this._activeView = null; }
+    else if (why === 'kind') { this._showAllAgentKinds(); return; }
+    else if (why === 'archived' || why === 'status') {
+      if (why === 'archived') this._statusFilter.add('archived'); else for (const x of ['live', 'tmux', 'external', 'stopped']) this._statusFilter.add(x);
+      localStorage.setItem('statusFilter', JSON.stringify([...this._statusFilter]));
+      this._activeView = null;
+      if (btn('live-filter')) this._updateFilterBtn(btn('live-filter'));
+    } else if (why === 'view') this._activeView = null;
+    this._render();
   }
 
   _updateSortBtn(btn) {

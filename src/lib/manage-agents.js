@@ -2281,7 +2281,7 @@ export function installManageAgents(App, ctx = {}) {
     // would open BEHIND the wizard overlay.
     if (!container && !forceModal && !this.isMobile && this.sidebar?._railEl) {
       this.sidebar.toggle?.(true);
-      if (this.sidebar._activeTab !== 'agents') this.sidebar._railGo?.('agents');
+      this.sidebar._railShow?.('agents');   // the rail's one show door (never the re-click's collapse)
       return;
     }
     // lane dialog-unsaved-guard: the Advanced fold's instructions / stop-nudge numbers typed and not saved ⇒ ✕ / Esc / the

@@ -155,7 +155,7 @@ export function installPluginsUI(App) {
   Object.assign(App.prototype, {
   async openPluginsDialog({ container } = {}) {
     // rail mode: render into the sidebar panel instead of a modal (one source)
-    if (!container && !this.isMobile && this.sidebar?._railEl) { this.sidebar.toggle?.(true); this.sidebar._railGo?.('plugins'); return; }
+    if (!container && !this.isMobile && this.sidebar?._railEl) { this.sidebar._railShow?.('plugins'); return; }   // the rail's one show door: opened on Plugins, never collapsed by a re-click
     // the broadcast listener below ENDS WITH THE MODAL'S CLOSE (2.369.398, the dialog seam's ruling: a listener that left only at
     // the next socket frame lingered in app.ws.globalHandlers until one came) — `offWs` and the redraw timer are declared BEFORE
     // the shell, so a close reads them through these bindings (the set-up dialog's pattern, src/lib/sidebar-mounts.js

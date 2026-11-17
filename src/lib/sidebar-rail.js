@@ -99,7 +99,7 @@ export function openRailPanel(app, tab, { syncId, forceWindow = false } = {}) {
   const sb = app.sidebar;
   if (!sb || !PANEL_TABS.includes(tab)) return null;
   if (!forceWindow && sb._railEl && sb.listEl) {
-    if (sb._activeTab !== tab) sb._railGo(tab);
+    if (sb._activeTab !== tab) sb._railShow(tab);
     else {
       if (!sb.isOpen) sb.toggle(true);
       sb.listEl.querySelector('.rail-panel-' + tab)?.remove();
@@ -437,6 +437,17 @@ export function installSidebarRail(Sidebar) {
       const tabs = this.el.querySelector('.sidebar-tabs');
       if (tabs) tabs.style.display = '';
       if (PANEL_TABS.includes(this._activeTab)) { this._activeTab = 'folders'; this._updateTabs(); this._render(); }
+    },
+
+    /** THE ONE SHOW DOOR (lane think-tools-phone, 主开发 2026-11-17 — «Locate in sidebar» on an open sessions list COLLAPSED it, the
+     *  re-click rule): a PROGRAM asking the rail to show a tab ends with the sidebar OPEN on that tab, from any state — never the
+     *  re-click's collapse (that stays the rail item's own click, `_railGo`). Every program caller comes here; scripts/
+     *  test-locate-verdict's census refuses a `_railGo(` anywhere but the rail's own items. */
+    _railShow(id) {
+      if (!this.isOpen) this.toggle(true);
+      if (this._activeTab === id) { this._railSync?.(); return; }
+      if (this._railEl) { this._railGo(id); return; }   // open now and on another tab ⇒ the switch (_railGo collapses only its own tab)
+      this._activeTab = id; this._updateTabs?.(); this._render?.();   // the classic tab bar / the phone's drawer: the tab, drawn
     },
 
     _railGo(id) {

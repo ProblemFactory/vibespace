@@ -111,7 +111,7 @@ export function focusJobsPanel(app, jobId) {
   const sb = app.sidebar;
   if (!sb?._railEl || !sb.listEl) return false;
   if (jobId) { sb._jobsFocusId = jobId; EXPANDED.add(jobId); }
-  if (sb._activeTab !== 'jobs') sb._railGo('jobs');
+  if (sb._activeTab !== 'jobs') sb._railShow('jobs');   // the rail's one show door (never the re-click's collapse; a collapsed sidebar opens)
   else {
     if (!sb.isOpen) sb.toggle(true);
     sb.listEl.querySelector('.rail-panel-jobs')?.remove();
