@@ -32,6 +32,7 @@ const WHY = Object.freeze({
   oldWrapper: 'its wrapper is older than this record; it learns at its next start',
   oldCli: 'its CLI version does not report background tasks',
   turnRunning: 'a turn is running',
+  noWakeGrant: 'this release reads no wake grant on a job yet',
 });
 
 // ── THE FACTS KEPT WHERE THEY ARE BORN (主开发's ruling 2026-11-17 02:26Z, road A) ──────────────────────────────────────
@@ -189,12 +190,16 @@ function endVerdict(row) {
   // 9 handover — a hand-over to it is in flight
   if (r.handover === true) add('handover', 'a hand-over to it is in flight');
   else if (r.handover !== false) unknown('handover', 'a hand-over is', 'handover');
-  // 10 job — it owns a job or schedule and a delivery could NOT resume it (piece 7 not shipped: wakeable is false)
+  // 10 job — it owns a registered job or schedule WITHOUT the person's grant «may wake its conversation» (the owner's rule,
+  //    2026-11-17: a conversation ended on purpose is resumed only by a job or schedule that carries that grant — piece 7 owns the
+  //    field). An unknown grant refuses; when every job and schedule it owns carries the grant, this reason does not hold.
   const j = r.jobs;
-  if (!j || typeof j !== 'object' || !isCount(j.running) || !isCount(j.schedules)) unknown('job', 'its jobs are', 'jobs');
-  else if ((j.running + j.schedules) > 0 && j.wakeable !== true) {
-    const parts = [j.running ? plural(j.running, 'job runs', 'jobs run') : null, j.schedules ? plural(j.schedules, 'schedule', 'schedules') : null].filter(Boolean).join(' and ');
-    add('job', `${parts} for it, and nothing could resume it for their result`);
+  if (!j || typeof j !== 'object' || !isCount(j.running) || !isCount(j.schedules) || !Array.isArray(j.items)) unknown('job', 'its jobs are', 'jobs');
+  else {
+    const without = j.items.filter((x) => !x || x.wakeGrant !== true);
+    const unknownGrant = without.filter((x) => !x || x.wakeGrant !== false);
+    if (unknownGrant.length) add('job_unknown', `whether ${plural(unknownGrant.length, 'job or schedule it owns carries', 'jobs or schedules it owns carry')} the person's grant to wake it is unknown (${(unknownGrant[0] && typeof unknownGrant[0].wakeGrantWhy === 'string' && unknownGrant[0].wakeGrantWhy) || WHY.notCollected}) — the person decides, job by job`);
+    else if (without.length) add('job', `${plural(without.length, 'job or schedule it owns has', 'jobs or schedules it owns have')} no grant from the person to wake it — the person decides, job by job`);
   }
   return { endable: busy.length === 0, busy };
 }

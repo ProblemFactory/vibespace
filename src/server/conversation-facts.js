@@ -84,7 +84,7 @@ function create({
     const goal = call(goalOf, s, id); if (goal === 'active' || goal === 'none') r.goal = goal;
     const cont = call(continueOf, s, id); if (cont && typeof cont === 'object' && typeof cont.armed === 'boolean') r.continue = { armed: cont.armed, resetsAt: cont.resetsAt || null };
     const jobs = key ? call(jobsOf, key) : undefined;
-    if (jobs && isCount(jobs.running) && isCount(jobs.schedules)) r.jobs = { running: jobs.running, schedules: jobs.schedules, nextFireAt: jobs.nextFireAt || null, wakeable: false };   // wakeable: false until piece 7
+    if (jobs && isCount(jobs.running) && isCount(jobs.schedules)) r.jobs = { running: jobs.running, schedules: jobs.schedules, nextFireAt: jobs.nextFireAt || null, items: Array.isArray(jobs.items) ? jobs.items : null };
     const waiting = call(waitingOf, s, id); if (waiting && typeof waiting === 'object') r.waiting = waiting;
     const ho = call(handoverOf, s, id); if (ho === true || ho === false) r.handover = ho;
     const b = call(browserOf, s, id); r.browser = b === undefined ? { known: false, why: WHY.notCollected } : b;
@@ -104,7 +104,7 @@ function create({
     else { r.desktop = null; r.window = null; r.windowWhy = (d && typeof d.why === 'string' && d.why) || WHY.notCollected; }
     const waiting = e && e.waiting; if (waiting && typeof waiting === 'object') r.waiting = waiting;
     const jobs = key ? call(jobsOf, key) : undefined;
-    if (jobs && isCount(jobs.running) && isCount(jobs.schedules)) r.jobs = { running: jobs.running, schedules: jobs.schedules, nextFireAt: jobs.nextFireAt || null, wakeable: false };
+    if (jobs && isCount(jobs.running) && isCount(jobs.schedules)) r.jobs = { running: jobs.running, schedules: jobs.schedules, nextFireAt: jobs.nextFireAt || null, items: Array.isArray(jobs.items) ? jobs.items : null };
     r.link = key ? LINK_CONVERSATION + key : null;
     return r;
   }
@@ -176,7 +176,10 @@ function create({
  * and its ephemerals() rows (a stat per kept store), the first layouts read, the machine memory reader).
  */
 function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter = null, keeper = () => null, browserStream = () => null,
-  autoResume = () => null, stashView = () => null, deliver = () => null, sysinfo = null, stoppedSessions = null, treeUsage = null, buffersDir = null } = {}) {
+  autoResume = () => null, stashView = () => null, deliver = () => null, sysinfo = null, stoppedSessions = null, treeUsage = null, buffersDir = null,
+  // the person's grant «may wake its conversation» on one job or schedule (the owner's rule, 2026-11-17 — piece 7 owns the field):
+  // true | false | null (unknown). Until piece 7 names it, every grant reads unknown — the safe side (unknown refuses).
+  wakeGrantOf = () => null } = {}) {
   const idOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const memo = (ms, build) => { let at = 0, v = null; return () => { const t = Date.now(); if (!v || t - at > ms) { v = build(); at = t; } return v; }; };
   // jobs by the OWNER conversation (its bare id): running = starting / up / awaiting-user / waiting; schedules = cron + scheduled
@@ -185,9 +188,10 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
     const by = new Map();
     for (const j of jm.jobs.values()) {
       const cid = j && j.owner && j.owner.conversation && j.owner.conversation.id; if (!cid) continue;
-      const e = by.get(cid) || { running: 0, schedules: 0, nextFireAt: null };
-      if (['starting', 'up', 'awaiting-user', 'waiting'].includes(j.state)) e.running++;
-      if (j.kind === 'cron' && j.state === 'scheduled') { e.schedules++; if (Number.isFinite(j.nextFireAt) && (e.nextFireAt === null || j.nextFireAt < e.nextFireAt)) e.nextFireAt = j.nextFireAt; }
+      const e = by.get(cid) || { running: 0, schedules: 0, nextFireAt: null, items: [] };
+      const item = (kind) => { let g = null; try { const v = wakeGrantOf(j); g = v === true || v === false ? v : null; } catch { g = null; } return { id: String(j.id || ''), kind, ...(kind === 'schedule' && Number.isFinite(j.nextFireAt) ? { nextFireAt: j.nextFireAt } : {}), wakeGrant: g, ...(g === null ? { wakeGrantWhy: WHY.noWakeGrant } : {}) }; };
+      if (['starting', 'up', 'awaiting-user', 'waiting'].includes(j.state)) { e.running++; e.items.push(item('job')); }
+      if (j.kind === 'cron' && j.state === 'scheduled') { e.schedules++; e.items.push(item('schedule')); if (Number.isFinite(j.nextFireAt) && (e.nextFireAt === null || j.nextFireAt < e.nextFireAt)) e.nextFireAt = j.nextFireAt; }
       by.set(cid, e);
     }
     return by;
@@ -219,7 +223,7 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
     asksOf: (key) => { if (!userTodos) return undefined; const all = userTodos.forSession([key]); return Array.isArray(all) ? all.filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page') : undefined; },
     goalOf: (s) => { if (!s) return undefined; if (!s._goal) return 'none'; const st = String(s._goalStatus || '').toLowerCase(); return st === 'complete' ? 'none' : st ? 'active' : undefined; },
     continueOf: (s, id) => { const ar = autoResume(); if (!ar || typeof ar.statusFor !== 'function') return undefined; const st = ar.statusFor(id); return st ? { armed: !!st.armed, resetsAt: st.resetsAt || null } : undefined; },
-    jobsOf: (key) => { const by = jobsIndex(); if (!by) return undefined; return by.get(cidOfKey(key)) || { running: 0, schedules: 0, nextFireAt: null }; },
+    jobsOf: (key) => { const by = jobsIndex(); if (!by) return undefined; return by.get(cidOfKey(key)) || { running: 0, schedules: 0, nextFireAt: null, items: [] }; },
     handoverOf: (s) => { const cid = idOf(s); const sv = stashView(), dv = deliver(); if (!cid || !sv || typeof sv.inFlight !== 'function') return undefined; return !!(sv.inFlight(cid) || (dv && typeof dv.handoverArmed === 'function' && dv.handoverArmed(cid))); },
     browserOf: (s, id) => {
       const k = keeper(); if (!k || typeof k.inputSummaryFor !== 'function') return { known: false, why: WHY.notCollected };

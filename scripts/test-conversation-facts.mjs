@@ -23,7 +23,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 
 /** A row with every verdict fact known and nothing busy. */
 const IDLE = Object.freeze({ state: 'running', turn: 'idle', background: [], heldPrompts: 0, asks: 0, goal: 'none', continue: { armed: false },
-  timers: 'none-seen', browser: null, handover: false, jobs: { running: 0, schedules: 0, nextFireAt: null, wakeable: false } });
+  timers: 'none-seen', browser: null, handover: false, jobs: { running: 0, schedules: 0, nextFireAt: null, items: [] } });
 const codes = (v) => v.busy.map((b) => b.code);
 
 // ── A · the PURE module ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -42,6 +42,7 @@ function unknownLegs(M) {
   one('continue unknown', { continue: null }, 'continue_unknown');
   one('handover unknown', { handover: null }, 'handover_unknown');
   one('jobs unknown', { jobs: null }, 'job_unknown');
+  one('a job whose wake grant is unknown', { jobs: { running: 1, schedules: 0, items: [{ id: 'j1', kind: 'job', wakeGrant: null, wakeGrantWhy: M.WHY.noWakeGrant || 'x' }] } }, 'job_unknown', M.WHY.noWakeGrant);
   one('a browser whose users are unknown', { browser: { id: 'b1', known: false, why: M.WHY.timedOut } }, 'browser_unknown', M.WHY.timedOut);
   one('a turn value nobody defined', { turn: 'thinking' }, 'turn_unknown');
   return out;
@@ -55,14 +56,14 @@ function unknownLegs(M) {
     ['an open ask', { asks: 2 }, 'asks'], ['a goal loop', { goal: 'active' }, 'goal'], ['an armed continue', { continue: { armed: true, resetsAt: 1 } }, 'continue'],
     ['the timer mark', { timers: null, timersWhy: CF.WHY.timerSet }, 'timer'], ['a person drives its browser', { browser: { id: 'b', drivenBy: 'person', viewers: 0, personBrowsing: false } }, 'browser'],
     ['a person watches its browser', { browser: { id: 'b', drivenBy: null, viewers: 1, personBrowsing: false } }, 'browser'], ['a person browses in it', { browser: { id: 'b', drivenBy: null, viewers: 0, personBrowsing: true } }, 'browser'],
-    ['a hand-over in flight', { handover: true }, 'handover'], ['a schedule, no delivery could resume it', { jobs: { running: 0, schedules: 1, wakeable: false } }, 'job'],
-    ['a running job, no delivery could resume it', { jobs: { running: 1, schedules: 0, wakeable: false } }, 'job'],
+    ['a hand-over in flight', { handover: true }, 'handover'], ['a schedule without the person\'s wake grant', { jobs: { running: 0, schedules: 1, items: [{ id: 'j1', kind: 'schedule', wakeGrant: false }] } }, 'job'],
+    ['a running job without the grant, beside one with it', { jobs: { running: 1, schedules: 1, items: [{ id: 'j1', kind: 'job', wakeGrant: false }, { id: 'j2', kind: 'schedule', wakeGrant: true }] } }, 'job'],
   ];
   const bad = each.map(([n, r, c]) => [n, CF.endVerdict({ ...IDLE, ...r }), c]).filter(([, v, c]) => v.endable || codes(v).join() !== c);
   ok(bad.length === 0, `the ten reasons, each ALONE, refuse with its own code (${each.length} rows)`, bad.map(([n, v]) => [n, codes(v)]));
   ok(CF.REASONS.length === 10 && each.every(([, , c]) => CF.REASONS.includes(c)), 'REASONS is the design\'s ten, and every code above is one of them', CF.REASONS);
-  const wake = CF.endVerdict({ ...IDLE, jobs: { running: 1, schedules: 2, wakeable: true } });
-  ok(wake.endable, 'a job or schedule whose delivery CAN resume it is not busy by itself (piece 7\'s switch)', wake);
+  const wake = CF.endVerdict({ ...IDLE, jobs: { running: 1, schedules: 2, items: [{ id: 'j1', kind: 'job', wakeGrant: true }, { id: 'j2', kind: 'schedule', wakeGrant: true }, { id: 'j3', kind: 'schedule', wakeGrant: true }] } });
+  ok(wake.endable, 'every job and schedule it owns carries the person\'s wake grant: the job reason does not hold (the owner\'s rule, 2026-11-17)', wake);
   ok(CF.endVerdict({ ...IDLE, browser: { id: 'b', drivenBy: null, viewers: 0, personBrowsing: false } }).endable, 'an idle browser nobody uses is not busy');
   const all = CF.endVerdict({ ...IDLE, turn: 'running', background: [{ id: 'a' }], heldPrompts: 1 });
   ok(codes(all).join() === 'turn,background,held', 'several reasons at once are each named, in the design\'s order', codes(all));
@@ -129,7 +130,7 @@ function unknownLegs(M) {
   // the words: never «sleep» or its kin, in any language — the strings this module adds, with a planted control
   const BAN = /\b(sleep|asleep|hibernat\w*|suspend\w*|paus\w*)\b|睡眠|休眠|挂起|暂停|スリープ|休止/i;
   const words = [...Object.values(CF.WHY), CF.refusalOf(CF.endVerdict({ ...IDLE, turn: 'running' })).why,
-    ...CF.endVerdict({ state: 'running' }).busy.map((b) => b.why), ...CF.endVerdict({ ...IDLE, turn: 'running', background: [{}, {}], heldPrompts: 2, asks: 1, goal: 'active', continue: { armed: true }, timers: null, timersWhy: CF.WHY.timerSet, handover: true, jobs: { running: 1, schedules: 1, wakeable: false }, browser: { drivenBy: 'p', viewers: 0, personBrowsing: false } }).busy.map((b) => b.why)];
+    ...CF.endVerdict({ state: 'running' }).busy.map((b) => b.why), ...CF.endVerdict({ ...IDLE, turn: 'running', background: [{}, {}], heldPrompts: 2, asks: 1, goal: 'active', continue: { armed: true }, timers: null, timersWhy: CF.WHY.timerSet, handover: true, jobs: { running: 1, schedules: 1, items: [{ id: 'j1', kind: 'job', wakeGrant: false }] }, browser: { drivenBy: 'p', viewers: 0, personBrowsing: false } }).busy.map((b) => b.why)];
   ok(words.length > 30 && words.every((w) => !BAN.test(w)), `the module's ${words.length} sentences never say sleep (or its kin)`, words.filter((w) => BAN.test(w)));
   ok(BAN.test('the conversation is asleep') && BAN.test('会话已暂停') && BAN.test('スリープ中'), 'CONTROL the grep catches a planted «asleep» / 暂停 / スリープ');
 }
@@ -151,7 +152,7 @@ const KEEPS = { sidecarFacts: { background: true, timers: true, lastRecordAt: tr
 const KEY_A = 'claude:e2e00000-0000-4000-8000-0000000000a1', KEY_B = 'claude:e2e00000-0000-4000-8000-0000000000b2', KEY_T = 'claude:e2e00000-0000-4000-8000-0000000000c3';
 function fakeChat(name, step = []) { const st = CF.factsFresh(); for (const [rec, at] of step) CF.factsStep(st, rec, at); return { backend: 'claude', mode: 'chat', name, cwd: '/tmp', _convFacts: st }; }
 const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.mode === 'chat', heldOf: () => 0, asksOf: () => [], goalOf: () => 'none', continueOf: () => ({ armed: false }),
-  jobsOf: () => ({ running: 0, schedules: 0, nextFireAt: null }), waitingOf: () => ({ notices: 0 }), handoverOf: () => false, browserOf: () => null,
+  jobsOf: () => ({ running: 0, schedules: 0, nextFireAt: null, items: [] }), waitingOf: () => ({ notices: 0 }), handoverOf: () => false, browserOf: () => null,
   desktopOf: () => ({ desktop: { id: 'd1', name: 'Main' }, window: true }), desktops: () => [{ id: 'd1', name: 'Main' }], machineMem: async () => ({ memTotal: 64e9, memAvailable: 20e9 }), memOf: async () => 2e9 };
 {
   const A = fakeChat('Alpha', [[{ type: 'system', subtype: 'init', claude_code_version: '2.1.312' }, 1794880000000]]);
@@ -227,7 +228,11 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
     keeper: () => ({ inputSummaryFor: () => ({ input: 'user' }), inputsFor: () => [] }), browserStream: () => ({ viewerCount: () => 0 }), treeUsage: async () => ({ memBytes: 3e9 }) });
   const s = { backend: 'claude', backendSessionId: 'e2e00000-0000-4000-8000-0000000000a1', _goal: 'ship it', _goalStatus: 'active', _browserKey: 'bk1', _childPid: 4242, _convFacts: { heldAtBoot: 2 },
     _normalizer: { queuePublished: () => false, queueState: () => [] } };
-  ok(JSON.stringify(S.jobsOf(KEY_A)) === JSON.stringify({ running: 1, schedules: 2, nextFireAt: 1794880000000 }), 'jobs by the OWNER conversation: 1 running, 2 schedules, the soonest next fire', S.jobsOf(KEY_A));
+  const jo = S.jobsOf(KEY_A);
+  ok(jo.running === 1 && jo.schedules === 2 && jo.nextFireAt === 1794880000000 && jo.items.length === 3 && jo.items.every((x) => x.wakeGrant === null && x.wakeGrantWhy === CF.WHY.noWakeGrant) && jo.items.filter((x) => x.kind === 'schedule').length === 2,
+    'jobs by the OWNER conversation: 1 running, 2 schedules, the soonest next fire — each listed with its wake grant, UNKNOWN until piece 7 names the field (the safe side)', jo);
+  const Sg = COL.sourcesFrom({ getJobs: () => ({ ready: true, jobs }), wakeGrantOf: (j) => j.state === 'up' });
+  ok(JSON.stringify(Sg.jobsOf(KEY_A).items.map((x) => x.wakeGrant)) === '[true,false,false]', 'the grant is read per job through ONE reader (true / false), never guessed', Sg.jobsOf(KEY_A).items);
   ok(S.heldOf(s) === 2 && S.heldOf({ ...s, _normalizer: { queuePublished: () => true, queueState: () => [1] } }) === 1 && S.heldOf({}) === undefined, 'held prompts: the wrapper\'s live publication, else its sidecar queue read at the adoption, else unknown');
   ok(S.goalOf(s) === 'active' && S.goalOf({ _goal: 'x', _goalStatus: 'complete' }) === 'none' && S.goalOf({ _goal: 'x' }) === undefined && S.goalOf({}) === 'none', 'goal: active · complete = none · a goal with no status = unknown · no goal = none');
   ok(S.asksOf(KEY_A).length === 1 && JSON.stringify(S.continueOf(s, 'sess-1')) === '{"armed":true,"resetsAt":5}' && S.handoverOf(s) === true, 'asks (its own, never a notice), the armed continue, a hand-over armed for the turn end');
