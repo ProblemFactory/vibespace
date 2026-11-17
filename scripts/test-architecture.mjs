@@ -2665,7 +2665,7 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
     'test-agents-overview.mjs', 'test-attach-ack.mjs', 'test-attach-rescue.mjs', 'test-ax-budget.mjs', 'test-browser-continuity.mjs', 'test-browser-identity.mjs',
     'test-browser-live-ui.mjs', 'test-browser-live.mjs', 'test-browser-multiview.mjs', 'test-browser-propose-chrome.mjs', 'test-browser-resume-ui.mjs', 'test-channel-jump.mjs',
     'test-channel-threads-ui.mjs', 'test-channel-window-render.mjs', 'test-channels-aggregate-ui.mjs', 'test-channels-e2e.mjs', 'test-channels-groups-e2e.mjs', 'test-channels-panel-redraw.mjs',
-    'test-chat-e2e.mjs', 'test-chat-hygiene-ui.mjs', 'test-chat-paging.mjs', 'test-cli-cmd-refresh.mjs', 'test-client-boot.mjs', 'test-collab-live-counter.mjs',
+    'test-chat-hygiene-ui.mjs', 'test-chat-paging.mjs', 'test-cli-cmd-refresh.mjs', 'test-client-boot.mjs', 'test-collab-live-counter.mjs',
     'test-cwd-recreate.mjs', 'test-desktop-app-snap.mjs', 'test-desktop-app-window.mjs', 'test-desktop-drop.mjs', 'test-desktop-reorder.mjs', 'test-desktop-resume-paging.mjs',
     'test-desktop-vnc-fit.mjs', 'test-desktop-xpra.mjs', 'test-fork-restore.mjs', 'test-gear-menu.mjs',
     'test-ghost-host-heal.mjs', 'test-graduate-dial.mjs', 'test-group-report-card.mjs', 'test-harness-honesty.mjs', 'test-helper-ask-ui.mjs', 'test-inbox-reply-ui.mjs',
@@ -2719,6 +2719,31 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
   const passed = Object.entries(pass).filter(([, v]) => judge(v).findings.length === 0).map(([k]) => k);
   ok(caught.length === Object.keys(plant).length && passed.length === Object.keys(pass).length && judge(pass.git).spawns === 0 && judge(pass.quoted).spawns === 0,
     `§57 NEGATIVE CONTROL: the pre-fix shapes are caught (${caught.join(', ')}), the idiom passes by every route (${passed.join(', ')}); a git ls-files and a spawn spelled in a string or comment are no spawn`);
+  // §57c THE SUITES' ONE HUB BOOT (P0 of the client/server separation, 2026-11-17): every hub a suite runs is started, read and
+  // stopped by scripts/hub-boot.mjs, so when the hub becomes several processes one file changes. A HUB BOOT OUTSIDE THE HELPER
+  // = a spawn/fork of node — directly or through a launcher — whose argv array names 'server.js' ANYWHERE (§57's forms, and a
+  // patched copy `[MC.write('server.js', …)]` that §57's env rule does not need), outside comments and strings (data, as
+  // above), in a scripts/test-*.mjs or a harness beside them (scripts/*.mjs; the dbg-* developer probes are no gate and are
+  // not read; hub-boot.mjs is the helper). A RATCHET that
+  // only falls: a re-pointed batch lowers BOOTS_OUTSIDE_HELPER in the same commit, a new boot outside the helper is red, and
+  // at 0 it is the law. RED CONTROL: a re-pointed suite with its own spawn line restored counts one more.
+  const BOOTS_OUTSIDE_HELPER = 217;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e
+  const bootFiles = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.mjs$/.test(f) && !/^dbg-/.test(f) && f !== 'hub-boot.mjs').sort();
+  const BOOT = /\b(?:spawn|fork)\(\s*(?:(?:process\.execPath|'node'|"node")\s*,\s*\[|[A-Za-z_$][\w$.]*\s*,\s*\[[^\]]*?(?:process\.execPath|'node'|"node")\s*,)[^\]]*?['"`]server\.js['"`]/g;
+  const bootsOf = (t) => { const data = dataRanges(t); return [...t.matchAll(BOOT)].filter((m) => !data.some(([x, y]) => m.index >= x && m.index < y)).length; };
+  const bootsIn = Object.fromEntries(bootFiles.map((f) => [f, bootsOf(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'))]).filter(([, n]) => n));
+  const nBoots = Object.values(bootsIn).reduce((a, n) => a + n, 0);
+  console.log(`    §57c hub boots outside the helper: ${nBoots} sites in ${Object.keys(bootsIn).length} files (${Object.keys(bootsIn).filter((f) => !/^test-/.test(f)).join(', ')} among them)`);
+  ok(nBoots <= BOOTS_OUTSIDE_HELPER, `§57c no NEW hub boot outside scripts/hub-boot.mjs (${nBoots} sites, the ratchet ${BOOTS_OUTSIDE_HELPER})${nBoots > BOOTS_OUTSIDE_HELPER ? ' — boot the hub through hub-boot.mjs startHub' : ''}`);
+  ok(nBoots >= BOOTS_OUTSIDE_HELPER, `§57c the ratchet only falls and is lowered with the fall (${nBoots} sites, the ratchet ${BOOTS_OUTSIDE_HELPER})${nBoots < BOOTS_OUTSIDE_HELPER ? ` — lower BOOTS_OUTSIDE_HELPER to ${nBoots} in the same commit` : ''}`);
+  const reverted = fs.readFileSync(path.join(REPO, 'scripts', 'test-chat-e2e.mjs'), 'utf8') + "\nconst srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...VNC_ENV, PORT: String(PORT) }, stdio: 'ignore' });\n";
+  ok(!bootsIn['test-chat-e2e.mjs'] && bootsOf(reverted) === 1 && nBoots + bootsOf(reverted) > BOOTS_OUTSIDE_HELPER,
+    '§57c RED CONTROL: test-chat-e2e (re-pointed by piece 1) with its own spawn line restored counts one more — over the ratchet');
+  // the rule's reach: every §57 form, the patched-copy form, and nothing spelled in a comment or a string
+  const forms = { direct: "spawn(process.execPath, ['server.js'], {})", preload: "spawn('node', ['-r', pre, 'server.js'])", joined: "fork(process.execPath, [path.join(wt, 'server.js')])", launcher: "spawn(DBUS, ['--', process.execPath, 'server.js'], {})", patched: "spawn(process.execPath, [MC.write('server.js', src, 'x')], {})" };
+  const notBoots = { comment: "// spawn(process.execPath, ['server.js'])", string: "const ctl = \"spawn('node', ['server.js'])\";", copy: "for (const f of ['src', 'server.js']) cp(f);", git: "execFileSync('git', ['ls-files', 'server.js'])" };
+  ok(Object.values(forms).every((v) => bootsOf(v) === 1) && Object.values(notBoots).every((v) => bootsOf(v) === 0) && judge(forms.patched).spawns === 0,
+    `§57c the rule reads every boot form (${Object.keys(forms).join(', ')} — the patched copy §57's own rule does not count) and no comment, string, copy list or git argument`);
 }
 
 // §58 EVERY ICON A MODULE NAMES EXISTS (lane I, 2026-09-25 — the owner's live-view screenshot printed the word
