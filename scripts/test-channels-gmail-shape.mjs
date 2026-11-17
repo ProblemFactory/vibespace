@@ -1818,6 +1818,185 @@ console.log('\n㉓ lane gmail-draft-not-a-message: a DRAFT-labelled message is a
   for (const e2 of DRIGS) { try { e2.stop(); } catch {} }
 }
 
+// ── ㉔ B-2f6c (userW's pod, 2026-10-23: an account whose refresh died and that was re-authorized hours later never read
+//    10 of the 16 INBOX messages of the dead window; its sibling read all). The one road on the tree that loses them: a
+//    DISCONNECT wiped the account's state — the mailbox cursor — so the next sync reseeded with nothing to judge against
+//    and the listing walk marked every KNOWN thread walked: its news was never read (a NEW thread was born and read).
+//    Now the state stays through a Disconnect (the root; the install's setup report goes, a record never bound to an
+//    identity keeps nothing), a walk with no lost cursor reads every thread the engine already HOLDS once and survives a
+//    restart (defence in depth), and the card says how far back the catch-up went — a reseed's too. Measured through the
+//    REAL engine over a mailbox-shaped fake vendor (history ids, an INBOX listing newest first, a refresh that can die, a
+//    history that can expire) on all four roads; CONTROLS: the wipe restored in a copy of channels-auth (an engine copy
+//    requires it), the old walk line, `named` for `held`, and the old restore line in copies of the adapter.
+console.log('\n㉔ B-2f6c: a Disconnect keeps the mailbox cursor — the re-authorize reads every message of the signed-out window');
+{
+  const J = JSON.stringify;
+  const SELF_HOLE = 'Member A <member.a@example.com>';
+  function holeVendor() {
+    const mb = { hid: 9000, threads: new Map(), hist: [], refresh: 'ok', calls: [], minValid: 0 };
+    let n = 0;
+    mb.add = (threadId, { from = 'Ada <ada@example.com>', labels = ['INBOX', 'UNREAD'], at = clock } = {}) => {
+      const id = `h${(++n).toString(16).padStart(6, '0')}`;
+      const tid = threadId || id;   // Gmail: a thread's id is its first message's
+      if (!mb.threads.has(tid)) mb.threads.set(tid, { id: tid, messages: [] });
+      mb.hid++;
+      mb.threads.get(tid).messages.push({ id, threadId: tid, labelIds: labels, internalDate: String(at), historyId: String(mb.hid), snippet: `snip ${id}`,
+        payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: `Subject ${tid}` }, { name: 'From', value: from }, { name: 'To', value: 'member.a@example.com' }, { name: 'Message-ID', value: `<${id}@example.com>` }], body: { data: Buffer.from(`body ${id}`).toString('base64url'), size: 8 } } });
+      mb.hist.push({ id: String(mb.hid), messagesAdded: [{ message: { id, threadId: tid, labelIds: labels } }] });
+      return id;
+    };
+    const tHist = (t) => String(Math.max(...t.messages.map((m) => Number(m.historyId))));
+    const tAt = (t) => Math.max(...t.messages.map((m) => Number(m.internalDate)));
+    mb.fetchFn = async (url, init = {}) => {
+      const u = new URL(String(url));
+      const form = init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null;
+      mb.calls.push({ path: u.pathname, q: Object.fromEntries(u.searchParams) });
+      if (u.hostname === 'oauth2.googleapis.com') return form && form.grant_type === 'authorization_code' ? jsonRes(FX.token) : (mb.refresh === 'ok' ? jsonRes(FX.tokenRefreshed) : jsonRes(FX.tokenInvalidGrant, 400));
+      if (u.hostname !== 'gmail.googleapis.com') return jsonRes({ error: { code: 404, message: 'unrouted host' } }, 404);
+      const p = u.pathname.replace('/gmail/v1/users/me', '');
+      if (p === '/profile') return jsonRes({ emailAddress: 'member.a@example.com', historyId: String(mb.hid), messagesTotal: 1 });
+      if (p === '/threads') {
+        const all = [...mb.threads.values()].filter((t) => t.messages.some((m) => m.labelIds.includes('INBOX'))).sort((a, b) => tAt(b) - tAt(a));
+        const off = Number(u.searchParams.get('pageToken') || 0), size = Number(u.searchParams.get('maxResults') || 100);
+        return jsonRes({ threads: all.slice(off, off + size).map((t) => ({ id: t.id, snippet: 's', historyId: tHist(t) })), ...(off + size < all.length ? { nextPageToken: String(off + size) } : {}), resultSizeEstimate: all.length });
+      }
+      if (p === '/history') {
+        if (Number(u.searchParams.get('startHistoryId')) < mb.minValid) return jsonRes(FX.errors.historyGone.body, 404);
+        const h = mb.hist.filter((x) => Number(x.id) > Number(u.searchParams.get('startHistoryId')));
+        return jsonRes({ historyId: String(mb.hid), ...(h.length ? { history: h } : {}) });
+      }
+      const tm = /^\/threads\/([^/]+)$/.exec(p);
+      if (tm) { const t = mb.threads.get(decodeURIComponent(tm[1])); return t ? jsonRes({ id: t.id, historyId: tHist(t), messages: t.messages }) : jsonRes(FX.errors.threadGone.body, 404); }
+      const mm = /^\/messages\/([^/]+)$/.exec(p);
+      if (mm) { for (const t of mb.threads.values()) { const m = t.messages.find((x) => x.id === decodeURIComponent(mm[1])); if (m) return jsonRes(m); } return jsonRes(FX.errors.threadGone.body, 404); }
+      return jsonRes({ error: { code: 404, message: `unrouted ${p}` } }, 404);
+    };
+    return mb;
+  }
+  const land = async (r) => { await get(`${r.flow.redirectUri}/?state=${new URL(r.flow.consentUrl).searchParams.get('state')}&code=auth-code-hole`); await sleep(40); };
+  const HRIGS = [];
+  async function holeRig(tag, { E = ENG, mod = gmail, road = 'disconnect', unbound = false, expire = false } = {}) {
+    const mb = holeVendor();
+    const dir = path.join(ROOT, `hole-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    clock += 24 * 3600e3;
+    for (let i = 0; i < 6; i++) { const tid = mb.add(null, { at: clock - (12 - 2 * i) * 3600e3 }); mb.add(tid, { from: SELF_HOLE, labels: ['SENT'], at: clock - (11 - 2 * i) * 3600e3 }); }
+    const mk = () => { const reg = CH.createChannelRegistry(); reg.register(mod.adapter); const x = E.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations, fetch: mb.fetchFn, log: quiet, registry: reg, ...FAST_PACE }); HRIGS.push(x); return x; };
+    let e2 = mk();
+    const settle = async (k) => { for (let i = 0; i < k; i++) { clock += 61e3; await e2.pass('gmail', { force: true }).catch(() => {}); await sleep(5); } };
+    await land(await e2.connect('gmail'));
+    await settle(4);
+    const known = [...mb.threads.keys()];
+    const stored = () => { const s = new Set(); for (const t of mb.threads.keys()) for (const m of e2.messages('gmail', t, { limit: 500 }) || []) s.add(m.vendorId); return s; };
+    const out = { before: stored().size, named: known.filter((id) => (e2.store.index.entry('gmail', id, { create: false }) || {}).named === true).length };
+    // the refresh dies (the client the account's token was issued under is no longer what it refreshes with — B-166e);
+    // threads 0–4 gain mail, thread 5 none (the price of a LOST cursor: it is read once too)
+    mb.refresh = 'dead';
+    const adds = [], knownAdds = [];
+    for (let h = 0; h < 6; h++) {
+      clock += 3600e3;
+      if (h < 5) for (const k of [h, (h + 2) % 5]) { const id = mb.add(known[k]); adds.push(id); knownAdds.push(id); }
+      adds.push(mb.add(null));
+      await e2.pass('gmail', { force: true }).catch(() => {});
+      if (road === 'restart' && h === 3) { e2.stop(); await sleep(20); e2 = mk(); }
+    }
+    const rec = () => e2.adapterRecords().adapters.find((a) => a.id === 'gmail');
+    out.cursor0 = (rec().state || {}).gmailHistoryId || null;
+    await e2.store.adapters.update(() => { const r = rec(); r.state = { ...(r.state || {}), setup: { probes: { historyTier: 'limited-15' }, at: clock } }; if (unbound) delete r.identity; });
+    mb.refresh = 'ok';
+    clock += 600e3;
+    if (expire) mb.minValid = Number(out.cursor0) + 1;   // the vendor no longer keeps the history from the cursor (a 404)
+    const r0 = mb.calls.filter((c) => /\/threads\/[^/]+$/.test(c.path) && c.q.format === 'full').length;
+    if (road === 'disconnect') {
+      await e2.disconnect('gmail');
+      out.cursorKept = ((rec().state || {}).gmailHistoryId || null) === out.cursor0;
+      out.setupKept = !!(rec().state || {}).setup;
+      await land(await e2.reauthorize('gmail', {}));
+    } else if (road === 'rebind') await land(await e2.reauthorize('gmail', { clientPreset: 'org1' }));
+    else await land(await e2.reauthorize('gmail', {}));
+    await settle(8);
+    const got = stored();
+    out.lost = adds.filter((id) => !got.has(id));
+    out.lostKnown = knownAdds.filter((id) => !got.has(id)).length;
+    out.reads = mb.calls.filter((c) => /\/threads\/[^/]+$/.test(c.path) && c.q.format === 'full').length - r0;
+    out.auth = (e2.adapterView(rec()) || {}).auth?.state;
+    out.feed = (e2.adapterView(rec()) || {}).feed || null;
+    out.adds = adds.length; out.knownAdds = knownAdds.length;
+    return out;
+  }
+  const H = await holeRig('fix');
+  ok(H.before === 12 && H.named === 6 && H.adds === 16 && H.knownAdds === 10 && H.auth === 'connected', 'the rig: 6 named threads read (12 messages), then 16 INBOX adds over a 6 h dead sign-in (10 into 5 of the known threads, 6 new threads), Disconnect, Re-authorize', J(H));
+  ok(H.cursorKept && H.cursor0 && !H.setupKept, 'THE ROOT: the mailbox cursor is still on the record after the Disconnect (the adapter\'s state is the account\'s); the install\'s setup report is not (the next sign-in probes again)', J({ cursor0: H.cursor0, kept: H.cursorKept, setup: H.setupKept }));
+  ok(H.lost.length === 0, 'THE INCIDENT\'S ROAD: after Disconnect → Re-authorize every one of the 16 messages of the signed-out window is read', J(H.lost));
+  const lc = H.feed && H.feed.lastCatchUp;
+  ok(lc && lc.gapMs >= 6 * 3600e3 && lc.touched === 11 && !lc.walked, 'the feed\'s catch-up names its gap (≥ 6 h, from the last good page) and the 11 conversations it touched — what the account row says', J(lc));
+  const CAPS = require(path.join(REPO, 'src/channel-caps.js'));
+  const said = CAPS.feedResumeText(H.feed, { stamp: (ms) => (ms === lc.at - lc.gapMs ? 'FROM' : '?'), now: clock });
+  ok(said === 'Caught up from FROM — 11 conversations had new messages', 'the account row says how far back it caught up, from the feed the engine serves', J(said));
+  // CONTROLS — the wipe restored (an engine copy requires the auth copy), and the old walk line
+  const ASRC = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf-8');
+  const KEEP = '    await store.adapters.update(() => { rec.lastAuthError = null; rec.state = bound ? stateWithoutSetup(rec.state) : {}; rec.lastPass = null; delete rec.lastOkAt; rec.consecutiveFailures = 0; });\n';
+  const WIPE = '    await store.adapters.update(() => { rec.lastAuthError = null; rec.state = {}; rec.lastPass = null; delete rec.lastOkAt; rec.consecutiveFailures = 0; });\n';
+  const GSRC = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+  const WALK = '          if (mailbox.walkFrom ? (t.historyId && Number(t.historyId) > Number(mailbox.walkFrom)) : holds(id)) mailbox.changed.add(id);\n';
+  const OLD_WALK_H = '          if (mailbox.walkFrom && t.historyId && Number(t.historyId) > Number(mailbox.walkFrom)) mailbox.changed.add(id);\n';
+  ok(ASRC.split(KEEP).length === 2 && GSRC.split(WALK).length === 2, 'control setup: the Disconnect\'s write and the walk line are present ONCE each');
+  const MH = mutantCopies('chan-gmail-hole', REPO);
+  const authWipe = MH.write('src/server/channels-auth.js', ASRC.replace(KEEP, WIPE), 'wipe');
+  const ESRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  ok(ESRC.split("require('./channels-auth.js')").length === 2, 'control setup: the engine requires channels-auth once');
+  const engWipe = MH.load('src/server/channels-engine.js', ESRC.replace("require('./channels-auth.js')", `require(${JSON.stringify(authWipe)})`), 'wipe');
+  const gOldWalk = MH.load('src/channels/gmail.js', GSRC.replace(WALK, OLD_WALK_H), 'old-walk');
+  const W = await holeRig('wipe', { E: engWipe });
+  ok(!W.cursorKept && W.lost.length === 0 && W.reads === 12, 'RED CONTROL (the root): with the wipe restored the cursor is gone after the Disconnect — and the defence still reads every held thread once (none lost)', J({ kept: W.cursorKept, lost: W.lost, reads: W.reads }));
+  const P = await holeRig('pre', { E: engWipe, mod: gOldWalk });
+  ok(P.lostKnown === 10 && P.lost.length === 10, 'RED CONTROL (the release\'s code: the wipe + the old walk): the 10 messages added to KNOWN threads are never read — the incident\'s shape; the 6 new threads are', J({ lost: P.lost.length, known: P.lostKnown }));
+  const R = await holeRig('root-alone', { mod: gOldWalk });
+  ok(R.cursorKept && R.lost.length === 0, 'the root alone (the old walk line) reads every message: the kept cursor names each changed thread', J({ kept: R.cursorKept, lost: R.lost }));
+  ok(H.reads === 11 && R.reads === 11 && W.reads === 12 && P.reads === 6, 'the price: a KEPT cursor reads each thread that changed (5 known + 6 new); a LOST one reads every held thread once (6 + 6 — the unchanged one too); the release read only the 6 new', J({ kept: H.reads, lost: W.reads, root: R.reads, pre: P.reads }));
+  // THE OTHER THREE ROADS (they lost nothing on the release either — pinned so a regression shows)
+  const roads = {};
+  for (const road of ['plain', 'rebind', 'restart']) roads[road] = await holeRig(`road-${road}`, { road });
+  ok(Object.values(roads).every((x) => x.lost.length === 0 && x.auth === 'connected' && x.feed && x.feed.lastCatchUp && x.feed.lastCatchUp.touched === 11), 'a plain re-authorize, a client-switch rebind and a restart inside the dead window read every message too, and say their catch-up', J(Object.fromEntries(Object.entries(roads).map(([k, x]) => [k, { lost: x.lost, auth: x.auth, lc: x.feed && x.feed.lastCatchUp }]))));
+  // a record whose identity was never stamped keeps nothing through a Disconnect (its next sign-in is not bound) — the defence reads its held threads
+  const U = await holeRig('unbound', { unbound: true });
+  ok(!U.cursorKept && U.lost.length === 0 && U.reads === 12, 'a record never bound to an identity keeps no cursor through a Disconnect; the defence still reads every held thread once (none lost)', J({ kept: U.cursorKept, lost: U.lost, reads: U.reads }));
+  // the vendor's history EXPIRED during the gap (a 404): the reseed judges against the lost cursor; the card says the walk
+  const E4 = await holeRig('expired', { expire: true });
+  const lcE = E4.feed && E4.feed.lastCatchUp;
+  const saidE = lcE && CAPS.feedResumeText(E4.feed, { stamp: () => 'FROM', now: clock });
+  ok(E4.lost.length === 0 && lcE && lcE.walked === true && lcE.gapMs >= 6 * 3600e3 && saidE === 'Caught up from FROM — the change history had expired, so every conversation is checked once', 'a gap the vendor\'s history no longer covers (404): nothing lost, and the card says the catch-up as a walk (it used to say nothing)', J({ lost: E4.lost, lc: lcE, said: saidE }));
+  // THE ADAPTER'S OWN LEGS — a held row the engine never NAMED, and a restart in the middle of a cursor-less walk
+  {
+    const mb = holeVendor();
+    for (let i = 0; i < 3; i++) mb.add(null, { at: clock - (5 - i) * 3600e3 });
+    const ids = [...mb.threads.keys()].sort();
+    const walkRun = async (mod, st0, { named: nm = () => false, held: hd = () => true } = {}) => {
+      let st = { ...st0 };
+      const tok = { read: () => ({ token: { access_token: 'ya29.x', expiresAt: clock + 3600e3, refresh_token: '1//r', scopes: [gmail.SCOPE], email: 'member.a@example.com' }, why: null }), write: async () => {}, clear: async () => {} };
+      const reg = CH.createChannelRegistry(); reg.register(mod.adapter);
+      const a = reg.create('gmail', { id: 'gmail-w', options: {} }, { now, fetch: mb.fetchFn, tokens: tok, named: nm, held: hd, state: { read: () => st, write: async (p) => { st = { ...st, ...p }; } }, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+      await a.changes();   // the sync: no cursor ⇒ the profile (a reseed with nothing to judge by); a restored walk ⇒ the walk stands
+      await a.listConversations({ limit: 100 });   // the walk
+      clock += 61e3;
+      const ch = await a.changes();
+      return { changed: ch.changed.slice().sort(), st };
+    };
+    const gNamed = MH.load('src/channels/gmail.js', GSRC.replace(WALK, WALK.replace(': holds(id))', ': named(id))')), 'named-not-held');
+    const lostCur = await walkRun(gmail, {});
+    const lostNamed = await walkRun(gNamed, {});
+    ok(J(lostCur.changed) === J(ids) && lostNamed.changed.length === 0, 'a LOST cursor reads every thread the engine HOLDS, named or not (a catch-up past the naming budget leaves rows unnamed); RED CONTROL: keyed on `named`, those rows were walked unread', J({ held: lostCur.changed, named: lostNamed.changed }));
+    ok(lostCur.st.gmailMustWalk === false && !!lostCur.st.gmailHistoryId, 'the completed walk is persisted as done (gmailMustWalk false)', J(lostCur.st));
+    const RESTORE = '    if (st0 && st0.gmailHistoryId) { mailbox.historyId = String(st0.gmailHistoryId); mailbox.mustWalk = !!st0.gmailWalkFrom || st0.gmailMustWalk === true;';
+    ok(GSRC.split(RESTORE).length === 2, 'control setup: the restore line is present once');
+    const gOldRestore = MH.load('src/channels/gmail.js', GSRC.replace(RESTORE, RESTORE.replace(' || st0.gmailMustWalk === true', '')), 'old-restore');
+    const mid = { gmailHistoryId: String(mb.hid), gmailChanged: [], gmailWalkFrom: null, gmailMustWalk: true };   // a restart in the middle of a cursor-less walk
+    const resumed = await walkRun(gmail, mid), dropped = await walkRun(gOldRestore, mid);
+    ok(J(resumed.changed) === J(ids) && dropped.changed.length === 0, 'a restart in the middle of a cursor-less walk walks again and reads every held thread; RED CONTROL: the old restore line dropped the walk (the held threads\' news never read)', J({ resumed: resumed.changed, dropped: dropped.changed }));
+  }
+  for (const x of copiesCensus(MH.files, MH.dir, REPO, { minCopies: 5, label: '㉔ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  for (const e2 of HRIGS) { try { e2.stop(); } catch {} }
+}
+
 eng.stop();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

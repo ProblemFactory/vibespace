@@ -28,13 +28,13 @@
  * the include query become conversations (default `label:INBOX`, a per-record
  * OPTION the panel edits) — otherwise a mailbox is forty thousand rows.
  *
- * THE MAILBOX CURSOR IS IN MEMORY ON PURPOSE. `history.list` is mailbox-wide,
- * so its cursor may only advance once every thread it named has been walked
- * — and untracked threads are never walked, so a persisted cursor could never
- * be proven safe to advance. The first pass after a restart therefore does
- * ONE full `threads.get` per tracked thread (the dedup absorbs the re-read),
- * and every later pass costs one `history.list` plus one `threads.get` per
- * thread that actually changed.
+ * THE MAILBOX CURSOR (`history.list` is mailbox-wide) is persisted in the
+ * account's state with the threads it named and nobody read yet (2026-09-26),
+ * so a restart, a dead sign-in and a Disconnect resume from it (B-2f6c); every
+ * pass costs one `history.list` plus one `threads.get` per thread that
+ * actually changed. A cursor the vendor no longer honours (404) reseeds and
+ * judges each listed thread against the lost one; a LOST cursor reads every
+ * thread the engine already holds once (that walk survives a restart).
  *
  * THE PUSH LANE IS THE `live` HALF (src/channels/live/gmail.js — `users.watch`
  * + a Pub/Sub PULL subscription, decision 20): `caps.receive` is `push` with
@@ -958,17 +958,18 @@ function create(record = {}, deps = {}) {
   const stateStore = deps.state && typeof deps.state.read === 'function' ? deps.state : null;
   try {
     const st0 = stateStore ? stateStore.read() : {};
-    if (st0 && st0.gmailHistoryId) { mailbox.historyId = String(st0.gmailHistoryId); mailbox.mustWalk = !!st0.gmailWalkFrom; mailbox.walkFrom = st0.gmailWalkFrom ? String(st0.gmailWalkFrom) : null; for (const id of Array.isArray(st0.gmailChanged) ? st0.gmailChanged : []) mailbox.changed.add(String(id)); }
+    if (st0 && st0.gmailHistoryId) { mailbox.historyId = String(st0.gmailHistoryId); mailbox.mustWalk = !!st0.gmailWalkFrom || st0.gmailMustWalk === true; mailbox.walkFrom = st0.gmailWalkFrom ? String(st0.gmailWalkFrom) : null; for (const id of Array.isArray(st0.gmailChanged) ? st0.gmailChanged : []) mailbox.changed.add(String(id)); }
   } catch { /* an unreadable state is a fresh seed */ }
   let persistTimer = null, persisted = '';
   function persistCursor(soon = true) {
     if (!stateStore) return;
     const doIt = () => {
       persistTimer = null;
-      const next = JSON.stringify([mailbox.historyId, [...mailbox.changed].slice(0, 2000), mailbox.walkFrom]);
+      const next = JSON.stringify([mailbox.historyId, [...mailbox.changed].slice(0, 2000), mailbox.walkFrom, mailbox.mustWalk]);
       if (next === persisted) return;
       persisted = next;
-      Promise.resolve(stateStore.write({ gmailHistoryId: mailbox.historyId, gmailChanged: [...mailbox.changed].slice(0, 2000), gmailWalkFrom: mailbox.walkFrom })).catch((e) => log.warn && log.warn(`[channels] gmail: the mailbox cursor could not be persisted: ${(e && e.message) || e}`));
+      // B-2f6c: + the walk a LOST cursor owes (no `walkFrom` to judge by) — a restart mid-walk walks again, never skips it
+      Promise.resolve(stateStore.write({ gmailHistoryId: mailbox.historyId, gmailChanged: [...mailbox.changed].slice(0, 2000), gmailWalkFrom: mailbox.walkFrom, gmailMustWalk: mailbox.mustWalk === true })).catch((e) => log.warn && log.warn(`[channels] gmail: the mailbox cursor could not be persisted: ${(e && e.message) || e}`));
     };
     if (!soon) { if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; } doIt(); return; }
     if (persistTimer) return;
@@ -1278,6 +1279,7 @@ function create(record = {}, deps = {}) {
     return out;
   }
   const named = typeof deps.named === 'function' ? deps.named : () => false;   // the engine's index: the row already carries a read name
+  const holds = typeof deps.held === 'function' ? deps.held : named;   // B-2f6c: the engine's index holds the row (named or not)
 
   // THE PUSH LANE (decision 20, default off): the watch + pull loop over this
   // adapter's own authorized call, token and LIVE options.
@@ -1399,7 +1401,10 @@ function create(record = {}, deps = {}) {
       if (mailbox.mustWalk) {
         for (const t of items) {
           const id = String(t.id);
-          if (mailbox.walkFrom && t.historyId && Number(t.historyId) > Number(mailbox.walkFrom)) mailbox.changed.add(id);
+          // B-2f6c: a walk with NO lost cursor (the cursor itself was lost — a wiped state) cannot judge a thread by its
+          // historyId: a thread the engine already HOLDS is read once (its anchor keeps the read to what is new), only a
+          // thread it never held is walked (its birth reads it) — every known thread used to be walked: its news never read
+          if (mailbox.walkFrom ? (t.historyId && Number(t.historyId) > Number(mailbox.walkFrom)) : holds(id)) mailbox.changed.add(id);
           else mailbox.walked.add(id);
         }
         // complete = from the listing's FIRST page to its last under this walk (a reseed mid-listing waits for the next walk)

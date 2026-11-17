@@ -814,7 +814,7 @@ function create(deps = {}) {
       // `pace` (lane R5): the adapter AWAITS it before every request it sends
       // (drain rule 18's bucket, the SAME one the pass's `wait` reads) and
       // then meters it — the per-second shape is enforced call by call.
-      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m) }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec), named: (convId) => { const en = store.index.entry(rec.id, String(convId), { create: false }); return !!(en && en.named === true); },
+      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m) }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec), named: (convId) => { const en = store.index.entry(rec.id, String(convId), { create: false }); return !!(en && en.named === true); }, held: (convId) => !!store.index.entry(rec.id, String(convId), { create: false }),   /* B-2f6c: the row exists (a lost cursor reads it once) */
         // lane webhook-l1-server: the account's OWN data directory (data/channels/<id>/), the channels secret-box, a stored
         // record by its vendor id, an instance setting — handed to every adapter, read by the ones that need them
         ownDir: path.join(dataDir, 'channels', String(rec.id)), secrets: { seal: (v) => box.enc(v), open: (v) => box.dec(v) }, findRecord: (convId, vendorId) => (store.index.entry(rec.id, String(convId), { create: false }) ? store.findRecord(rec.id, String(convId), String(vendorId)) : null), setting: (key) => { try { return serverSetting(key); } catch { return undefined; } },
@@ -1900,7 +1900,7 @@ function create(deps = {}) {
       f.lastCatchUp = { at: t, gapMs: gap.gapMs, pages, touched: changed.length };
       const mins = Math.max(1, Math.round((Number(gap.gapMs) || 0) / 60e3));
       log.log(`[channels] ${rec.id}: the change feed resumed after ${mins} min — ${pages} history page${pages === 1 ? '' : 's'}, ${changed.length} conversation${changed.length === 1 ? '' : 's'} touched, 0 per-row reads`);
-    }
+    } else if (gap.verdict === 'catch-up') f.lastCatchUp = { at: t, gapMs: gap.gapMs, pages, touched: 0, walked: true };   // B-2f6c: a gap that ended in a reseed (the history was gone) is said too — every conversation is checked
     await store.adapters.update(() => {}, { paced: true });
     const due = [];
     for (const id of changed) {

@@ -1036,11 +1036,13 @@ function create(engineCtx) {
     // lane lark-consent-chain: a chain's page landed in a tab with permissions still pending — the next page, same tab
     return r && r.ok ? chainNext(r, (o) => adapterFor(rec).adapter.auth.begin(o)) : null;
   }
+  const stateWithoutSetup = (st) => { const o = { ...((st && typeof st === 'object') ? st : {}) }; delete o.setup; return o; };   // B-2f6c
   /** DISCONNECT = drop the token, for EVERY account (r4 §4: the pre-r4
    *  "a further account's disconnect removes it" special case is gone —
    *  REMOVE is its own verb with its own reference check). The record, its
-   *  client, its conversations, assignments and grants stay; a later
-   *  Re-authorize resumes them. Any running flow is cancelled. */
+   *  client, its conversations, assignments, grants and the adapter's state
+   *  (a mailbox cursor) stay; a later Re-authorize resumes them from where
+   *  they stopped. Any running flow is cancelled. */
   async function disconnect(adapterId) {
     const rec = recordOrThrow(adapterId);
     const running = flows.runningFor(rec.id);
@@ -1050,7 +1052,12 @@ function create(engineCtx) {
     // with the Bearer captured before the wait), the pass in flight ends at its next step, the lane cannot outlive its credential
     dropLive(rec.id, 'disconnected');
     await tokensFor(rec).clear();
-    await store.adapters.update(() => { rec.lastAuthError = null; rec.state = {}; rec.lastPass = null; delete rec.lastOkAt; rec.consecutiveFailures = 0; });
+    // B-2f6c: the adapter's STATE stays — it is the account's (a mailbox cursor), and a later sign-in lands only on the same
+    // account (the identity rule). A wiped cursor reseeded with nothing to judge against: every message added to a known
+    // thread while signed out was never read. The install's SETUP REPORT goes (the next sign-in may be another app — its
+    // own probes answer again); a record whose identity was never stamped keeps nothing (its next sign-in is not bound)
+    const bound = !!(rec.identity && typeof rec.identity === 'object' && Object.keys(identityOf(rec.identity)).length);
+    await store.adapters.update(() => { rec.lastAuthError = null; rec.state = bound ? stateWithoutSetup(rec.state) : {}; rec.lastPass = null; delete rec.lastOkAt; rec.consecutiveFailures = 0; });
     await retractFailure(rec);
     await retractSignin(rec, 'the owner disconnected it');   // lane channel-reauth-visible: «not connected» is the owner's own act, never «expired»
     const e = adapterFor(rec);   // rebuilt at once (its buckets carried) so the card answers the adapter's own `unknown`

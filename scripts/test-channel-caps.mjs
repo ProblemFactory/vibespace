@@ -570,6 +570,25 @@ console.log("lane channel-feed-authority: the feed's AUTHORITY (authoritative �
   const tx = C.feedText(gap, { clock: (ms) => (ms === G20 ? '11:40' : '?') });
   const tp = C.feedText(park, { vendor: 'Gmail', clock: (ms) => (ms === G20 ? '11:40' : ms === NOW + 60e3 ? '12:01' : '?') });
   ok(tx === 'Catching up since 11:40 — the change feed resumes from where it stopped' && tp === 'Catching up since 11:40 — Gmail asked the change feed to wait; it resumes from where it stopped at 12:01', `feedText words the gap: "${tx}" · "${tp}"`);
+  // B-2f6c: AFTER the gap — how far back the feed read, said on the account card for a day after a gap a person asks about
+  const H6 = 6 * 3600e3, AT = NOW - 3600e3;
+  const st = (ms) => (ms === AT - H6 ? '08:15' : '?');
+  const said = (lc, now = NOW) => C.feedResumeText({ lastCatchUp: lc }, { stamp: st, now });
+  const RT = [
+    ['11 touched', { at: AT, gapMs: H6, pages: 1, touched: 11 }, NOW, 'Caught up from 08:15 — 11 conversations had new messages'],
+    ['one touched', { at: AT, gapMs: H6, pages: 1, touched: 1 }, NOW, 'Caught up from 08:15 — 1 conversation had new messages'],
+    ['nothing touched', { at: AT, gapMs: H6, pages: 1, touched: 0 }, NOW, 'Caught up from 08:15 — no new messages'],
+    ['a gap that ended in a reseed (the history had expired)', { at: AT, gapMs: H6, pages: 1, touched: 0, walked: true }, NOW, 'Caught up from 08:15 — the change history had expired, so every conversation is checked once'],
+    ['a short gap (a restart) is not said', { at: AT, gapMs: C.CATCHUP_SAY_GAP_MS - 1, touched: 3 }, NOW, ''],
+    ['the gap bound itself is said', { at: AT, gapMs: C.CATCHUP_SAY_GAP_MS, touched: 2 }, NOW, 'Caught up from ? — 2 conversations had new messages'],
+    ['a day later it is gone', { at: AT, gapMs: H6, touched: 11 }, AT + C.CATCHUP_SAY_FOR_MS + 1, ''],
+    ['no catch-up yet', null, NOW, ''],
+    ['a malformed record', { at: 'x', gapMs: H6, touched: 4 }, NOW, ''],
+  ];
+  const badR = RT.filter(([, lc, n, want]) => said(lc, n) !== want).map(([name, lc, n]) => `${name} → «${said(lc, n)}»`);
+  ok(!badR.length && C.CATCHUP_SAY_GAP_MS === 30 * 60e3 && C.CATCHUP_SAY_FOR_MS === 24 * 3600e3 && C.feedResumeText(null) === '', `feedResumeText: ${RT.length} shapes — from the gap's start, the conversations it touched (a reseed: the walk), a gap ≥ 30 min, said for 24 h`, badR.join('; '));
+  const PANEL = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
+  ok(PANEL.split("chanCaps.feedResumeText(a.feed, { t, stamp: (ms) => when(ms, { words: true }), now: Date.now() })").length === 2 && /dataset\.chanFeedResume = a\.id/.test(PANEL), 'WIRING: the account card says it under the feed\'s lines (one call, the device clock\'s words)');
 }
 
 // ── lane lark-upload-preflight (userW inc-muxsy69b-mjg1): THE send-attachment OFFER — the declared row AND the held scopes ──

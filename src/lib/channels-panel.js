@@ -439,6 +439,9 @@ function accountLines(app, a, kinds) {
       }
       const cl = chanCaps.feedCatchUpText(a.feed.catchUp, { t });
       if (cl) { const n = noteLine('chan-sec-note', cl); n.dataset.chanFeedCatchup = a.id; out.push(n); }
+      // B-2f6c: how far back the feed read after a gap (a dead sign-in, a Disconnect, a restart) — said for a day
+      const rl = chanCaps.feedResumeText(a.feed, { t, stamp: (ms) => when(ms, { words: true }), now: Date.now() });
+      if (rl) { const n = noteLine('chan-sec-note', rl); n.dataset.chanFeedResume = a.id; out.push(n); }
     }
     // design 012 (Slack S1): an account whose vendor's terms take the local copy with it says WHERE the copy lives and who
     // reads it (the owner's Q2: agents read what the person can see — the model provider is named); the setup report's

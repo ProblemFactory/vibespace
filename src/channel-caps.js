@@ -1497,6 +1497,21 @@ function feedCatchUpText(cu, { t = defaultT } = {}) {
   if (!n) return '';
   return c.bounded ? t('Found {n} single chats from the last {d} days — quieter ones appear with their next message', { n, d }) : t('Found {n} single chats from the last {d} days', { n, d });
 }
+/** B-2f6c: HOW FAR BACK a cursor feed read after a gap (a dead sign-in, a Disconnect, a restart) — its `lastCatchUp`
+ *  {at, gapMs, touched, walked} said on the account card for CATCHUP_SAY_FOR_MS after a gap a person asks about («did I
+ *  miss mail?», ≥ CATCHUP_SAY_GAP_MS); `walked` = the gap ended in a reseed (the vendor's history was gone): no count, every
+ *  conversation is checked; `stamp` words an instant on the device's clock. */
+const CATCHUP_SAY_GAP_MS = 30 * 60 * 1000;
+const CATCHUP_SAY_FOR_MS = 24 * 3600 * 1000;
+function feedResumeText(v, { t = defaultT, stamp = (ms) => new Date(ms).toISOString(), now = Date.now() } = {}) {
+  const c = v && v.lastCatchUp && typeof v.lastCatchUp === 'object' ? v.lastCatchUp : null;
+  const at = c ? Number(c.at) : 0, gap = c ? Number(c.gapMs) : 0;
+  if (!(at > 0) || !(gap >= CATCHUP_SAY_GAP_MS) || now - at > CATCHUP_SAY_FOR_MS) return '';
+  const n = Math.max(0, Math.floor(Number(c.touched) || 0)), time = stamp(at - gap);
+  if (c.walked) return t('Caught up from {time} — the change history had expired, so every conversation is checked once', { time });   // a reseed: no count to give
+  if (!n) return t('Caught up from {time} — no new messages', { time });
+  return n === 1 ? t('Caught up from {time} — 1 conversation had new messages', { time }) : t('Caught up from {time} — {n} conversations had new messages', { time, n });
+}
 /** What ONE Re-authorize adds (owner ruling 2026-09-28, lane lark-search-poll §5.3): every declared grant whose
  *  scopes the sign-in does not hold, the account WANTS (its option is not off), and the vendor did not refuse — ONE
  *  sentence, one verb; a scope the vendor refused at the consent is named with the console step instead.
@@ -1640,7 +1655,7 @@ module.exports = {
   // lane channel-row-notices: the push lane's one-line notice + the re-authorization line's words
   pushLaneNotice, REAUTH_WHYS, SCOPE_FAMILIES, scopeFamilies, reauthWhyText,
   // lane lark-search-poll: the change feed's one lane answer + its words
-  FEED_MODES, FEED_DEFAULTS, feedState, FEED_AUTHORITIES, feedAuthoritative, feedText, feedFactsText, missClassWord, feedCatchUpText, grantsText, untitledText, credentialChangedAt, feedBoundSec, feedFreshMs, changeFeedRow,
+  FEED_MODES, FEED_DEFAULTS, feedState, FEED_AUTHORITIES, feedAuthoritative, feedText, feedFactsText, missClassWord, feedCatchUpText, feedResumeText, CATCHUP_SAY_GAP_MS, CATCHUP_SAY_FOR_MS, grantsText, untitledText, credentialChangedAt, feedBoundSec, feedFreshMs, changeFeedRow,
   // lane lark-p2p: a shape park's bounded field lists + the unreadable-hits line; verify r1: the lone-miss bound
   shapeFields, feedUnreadableText, FEED_LOUD_STRIKES,
   // lane lark-threads (A5): the thread measurement's one sentence
