@@ -1282,6 +1282,22 @@ console.log('⑬ a company preset never rides an address its app does not list; 
 // its other road a loopback). A failing seed prints its whole sequence. RED: the two r4 guards removed (mutant bundles), and
 // the leg itself run on e4cc4acee (the report).
 console.log('\n⑭ THE LAW (r4): the live Connect dialog over the real engine — seeded interleavings of press / other road / Cancel / close / reopen');
+// «FROM A SWEEP» IS A FRAME'S FUNCTION NAME, NEVER ITS LINE (B-c35f — a checkout path holding the word, e.g. a worktree named
+// wt-groups-sweep-on-change, matched EVERY frame: the driver never found its race and the control was red there). Real V8
+// stacks from a module written under a directory whose name holds the word.
+const frameNames = (stack) => String(stack || '').split('\n').map((l) => (/^\s*at (.+?) \(/.exec(l) || [])[1]).filter(Boolean); // a frame's FUNCTION part — «async Object.get sweep [as sweep]» — never its location
+const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
+{
+  const d = path.join(scratch('consent-sweep-frame'), 'wt-groups-sweep-on-change');
+  fs.mkdirSync(d, { recursive: true });
+  const f = path.join(d, 'frames.mjs');
+  fs.writeFileSync(f, 'export function press() { return new Error().stack; }\nexport const live = { sweep: async () => { await null; return new Error().stack; } };\nexport function viaSweep() { return (function sweep() { return press(); })(); }\nfunction closeSweep() { return new Error().stack; }\nexport const aliased = { sweep: closeSweep };\nexport const viaGetter = { get sweep() { return new Error().stack; } };\n');
+  const F = await import(new URL('file://' + f).href);
+  const plain = F.press(), swept = await F.live.sweep(), nested = F.viaSweep(), aliased = F.aliased.sweep(), getter = F.viaGetter.sweep;
+  ok(plain.includes('wt-groups-sweep-on-change') && !stackHasFrame(plain, /\bsweep\b/) && stackHasFrame(swept, /\bsweep\b/) && stackHasFrame(nested, /\bsweep\b/) && stackHasFrame(aliased, /\bsweep\b/) && stackHasFrame(getter, /\bsweep\b/),
+    '«from a sweep» reads the frames\' FUNCTION names: a call from a checkout whose path holds the word is not a sweep; a sweep method (after its await), a call made under a sweep frame, a function stored as `sweep` («[as sweep]») and a `get sweep` accessor are', { plain: frameNames(plain), swept: frameNames(swept) });
+  ok(/\bsweep\b/.test(plain), 'CONTROL: the old whole-stack test calls that same plain call a sweep — the path alone fools it (the leg above is red with it)');
+}
 {
   const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
   const net = await import('node:net');
@@ -1384,8 +1400,9 @@ console.log('\n⑭ THE LAW (r4): the live Connect dialog over the real engine �
     const byButton = kind === 'cancel' && P.inAct === 'cancel' && !!d && d.ctx.body.isConnected;   // the Cancel button's own cancel
     const actsAt = d ? d.acts : 0;   // the dialog's act count when it asked — an answer to an OLDER act's question is not news
     // a CLOSED dialog's sweep (its close reading what its page started) asks in the tab's name after a reopen — never the open
-    // dialog's news (the bundle keeps its function names: the sweep's frame is on the stack when it asks)
-    const fromSweep = /\bsweep\b/.test(new Error().stack || '');
+    // dialog's news (the bundle keeps its function names: the sweep's frame is on the stack when it asks) — a FRAME's function
+    // name, never its line (B-c35f: a checkout named wt-groups-sweep-on-change matched every frame's path)
+    const fromSweep = stackHasFrame(new Error().stack, /\bsweep\b/);
     const mayFail = kind === 'start' || byButton;
     const tag = `${P.tabs.length > 1 ? 'AB'[tab] || '?' : ''}${method === 'GET' ? 'get' : 'post'} ${u.replace(/^\/api\/channels\/(oauth\/)?/, '').replace(/flowId=([0-9a-f]{6})[0-9a-f]*/, 'flowId=$1').slice(0, 40)}`;
     P.held.push({ tag: `→${tag}`, mayFail, go: async (fail) => {
