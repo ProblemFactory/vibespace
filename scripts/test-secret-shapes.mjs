@@ -443,5 +443,64 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   ok(s0.some((g) => g.t === 'link' && g.ref.includes(REDACTED)) && s0.some((g) => g.t === 'link' && g.kind === 'path') && !s0.some((g) => g.t === 'masked'), 'RED CONTROL (the base\'s card): a masked URL and a masked path are whole-looking LINKS — the LAW 2 legs go red');
 }
 
+console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (one token), a known flag, the sender is told');
+{
+  const SS = r('src/secret-shapes.js'), J = JSON.stringify;
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('blm', REPO);
+  const SRC = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
+  const v = () => crypto.randomBytes(6).toString('hex');            // a value per leg, built at runtime
+  const TAIL = 'and the rest of the brief arrives ' + v();              // what the seven sightings lost
+  // the sightings as the row tells them (each: the text, the value that must go, the name that must stay)
+  const SIGHT = (V) => ({
+    '1st: the session word glued to its token': [`Step 3: NO key.grant line for session:${V} must appear, ${TAIL}`, V, 'session:'],
+    '2nd: a data-key attribute in a selector': [`Click .pp-row[data-key=${V}:*] ${TAIL}`, V, 'data-key='],
+    '6th: a suite name ending in schema, a colon, a quoted leg': [`test-session-schema: «${V} passes» ${TAIL}`, V, 'test-session-schema:'],
+    'a lane name ending in shield, a colon': [`agent-credential-shield: ${V} is stood down, ${TAIL}`, V, 'agent-credential-shield:'],
+    'a dotenv token mid-sentence': [`set it with DB_PASSWORD=${V} then ${TAIL}`, V, 'DB_PASSWORD='],
+    'a CJK sentence (no blank after the value)': [`会话 session:${V}，${TAIL}`, V, 'session:'],
+    'a value in parentheses (the closer is the prose\'s)': [`the value (token=${V}) ${TAIL}`, V, 'token='],
+  });
+  const S1 = SIGHT(v());
+  const run = (SSx, opt) => Object.entries(S1).map(([n, [t, V, name]]) => { const said = []; const o = SSx.redactSecrets(t, { ...opt, said }); return { n, t, V, name, o, said }; });
+  const msg = run(SS, { message: true });
+  const bad = msg.filter((x) => x.o.text.includes(x.V) || !x.o.text.includes(TAIL) || !x.o.text.includes(x.name) || !x.o.text.includes(REDACTED));
+  ok(bad.length === 0, `MESSAGE MODE: all ${msg.length} sightings keep the REST of the message, hide the value, keep the name${bad.length ? ' — off: ' + bad.map((x) => x.n + ' → ' + J(x.o.text)).join(' · ') : ''}`);
+  ok(msg.every((x) => x.said.includes(x.name)), `MESSAGE MODE: \`said\` names each trigger as written (${msg.map((x) => x.said.join('+')).join(' · ')})`);
+  ok(msg.every((x) => SS.redactSecrets(x.o.text, { message: true }).text === x.o.text), 'MESSAGE MODE is idempotent: a masked message masks to itself (the group log\'s second belt pass finds nothing)');
+  ok(SS.redactSecrets(`(token=${S1['1st: the session word glued to its token'][1]}).`, { message: true }).text === `(token=${REDACTED}).` && SS.redactSecrets(`session: ${'z'.repeat(9)} rest`, { message: true }).text === `session:${REDACTED} rest`,
+    'MESSAGE MODE: the prose\'s own closer + a sentence-final dot stay outside; a no-break blank after the head is no escape');
+  // a STORED head keeps the line-end extent (exit output, a job log: hides more, never less)
+  const line = run(SS, {});
+  ok(line.every((x) => !x.o.text.includes(x.V) && !x.o.text.includes(TAIL)), 'the LINE MODE (no option — exit output, a job log) still hides to the line end: the stored head is unchanged');
+  // a header is never prose: the scheme word alone would leave the credential after it
+  const BT = v() + v(), DG = v() + v();
+  const hdr = [`Authorization: Bearer ${BT} ${TAIL}`, `x-auth: Digest username="u", response="${DG}" ${TAIL}`, `the token: basic ${BT}`].map((t) => SS.redactSecrets(t, { message: true }).text);
+  ok(hdr.every((t) => !t.includes(BT) && !t.includes(DG)), `MESSAGE MODE: a value whose first word is an HTTP auth scheme keeps the line-end extent (${hdr.map(J).join(' · ')})`);
+  // multi-line shapes keep their own rules in a message: a YAML continuation, a JSON object, a quoted value with blanks
+  const PW = v();
+  const multi = [`notes\npassword:\n  ${PW}\nback`, `{"password": "${PW} x", "user": "u"}`, `password: "${PW} two words"`, `-----BEGIN PRIVATE KEY-----\n${PW}\n-----END PRIVATE KEY-----`].map((t) => SS.redactSecrets(t, { message: true }).text);
+  ok(multi.every((t) => !t.includes(PW)), 'MESSAGE MODE: a YAML continuation, a JSON value, a quoted value with blanks and a PEM block are hidden whole');
+  // a KNOWN FLAG with a value from its closed public list is no credential — in both modes; any other value of it is masked
+  const KF = fnOf2(SS.KNOWN_FLAG_VALUES);
+  const fl = ['', 'message'].map((mode) => { const o = mode ? { message: true } : {}; const K = v();
+    return { keep: SS.redactSecrets(`chrome --password-store=basic --api-key=${K} ${TAIL}`, o).text, K, odd: SS.redactSecrets(`chrome --password-store=${PW} ${TAIL}`, o).text, q: SS.redactSecrets(`--password-store="kwallet5" x`, o).text }; });
+  ok(KF && fl.every((f) => f.keep.includes('--password-store=basic') && !f.keep.includes(f.K) && !f.odd.includes(PW) && f.q === '--password-store="kwallet5" x'),
+    `A KNOWN FLAG: --password-store=basic stays in both modes and the scan walks on past it (the next --api-key is masked); --password-store=<other> is masked (${fl.map((f) => J(f.keep)).join(' · ')})`);
+  // RED CONTROLS (patched copies through the SAME legs)
+  const cut = (src, from, to, name) => { ok(src.includes(from), `the control «${name}» finds its line`); return M.load('src/secret-shapes.js', src.replace(from, to), name); };
+  const noMsg = cut(SRC, 'if (message && !closed) {', 'if (false) {', 'no-message-mode');
+  ok(run(noMsg, { message: true }).every((x) => !x.o.text.includes(TAIL)), 'RED CONTROL (the message mode removed): every sighting loses its rest again — the MESSAGE MODE leg goes red');
+  const noScheme = cut(SRC, 'if (!AUTH_SCHEMES.has(', 'if (true || !AUTH_SCHEMES.has(', 'no-scheme');
+  ok(noScheme.redactSecrets(`Authorization: Bearer ${BT} x`, { message: true }).text.includes(BT), 'RED CONTROL (the auth-scheme exception removed): the bearer credential is left in clear — the header leg goes red');
+  const noFlag = cut(SRC, 'if (flagEnd >= 0) {', 'if (false) {', 'no-flag');
+  ok(!noFlag.redactSecrets('chrome --password-store=basic x', { message: true }).text.includes('--password-store=basic'), 'RED CONTROL (the known-flag check removed): --password-store=basic is masked again — the flag leg goes red');
+  // the belt carries the mode + the collector to the shapes (the group log and the stash ask it)
+  const said = []; const bo = belt.maskForSink(S1['1st: the session word glued to its token'][0], { message: true, said });
+  ok(bo.includes(TAIL) && !bo.includes(S1['1st: the session word glued to its token'][1]) && said.includes('session:') && !belt.maskForSink(S1['1st: the session word glued to its token'][0]).includes(TAIL),
+    'THE BELT: maskForSink(text, { message: true, said }) keeps the rest and says what it masked; without it the line mode stays');
+}
+function fnOf2(x) { return x && typeof x.get === 'function' ? x : null; }
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

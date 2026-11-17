@@ -26,6 +26,12 @@
  *      cred(s) / bearer — judged by THE NAME GRAMMAR (below): the credential word must be the name's HEAD or sit under a
  *      container head (`XDG_SESSION_ID=…` is hidden: a false hide on an env dump costs nothing, a miss is a key on disk);
  *      one that only modifies a DESCRIPTOR head names a fact about a credential and stays (`SSH_AUTH_SOCK`, `TOKEN_TTL`)
+ *      A MESSAGE (`{ message: true }`, lane bl-msg B-3e61 — seven sightings of a lane's brief losing its rest after «session:…»,
+ *      «data-key=…», a flag): a message is prose, so a bare value there is ONE token (to the first blank or CJK stop; a closer the
+ *      prose opened stays outside, as R7's) and the rest of the line is the reader's; a stored head (exit, a job log) keeps the
+ *      line-end extent. A KNOWN FLAG whose value is from its program's closed public list (KNOWN_FLAG_VALUES: Chrome's
+ *      `--password-store=basic`) is no credential anywhere. `{ said: [] }` collects what triggered each mask (the head as written:
+ *      `session:`, `Bearer`, `ghp_…`) so a sender is told what was masked, never guesses a cut
  *   R2b a value continued on the FOLLOWING lines (verify r2 F3) — a secret-named key with nothing after its `:` / `=`
  *      (`"password":` ⏎ `"hunter2"`, YAML's plain multi-line scalar), a YAML block scalar (`token: |`), PuTTY's
  *      `Private-Lines: N`: the deeper-indented lines after it (the N lines) are the value
@@ -82,6 +88,34 @@ function secretName(k) {
   return String(k || '').split(/[_\-.\s]+|(?<=[a-z0-9])(?=[A-Z])/).some((w) => w && SECRET_WORDS.has(w.toLowerCase()));
 }
 
+// lane bl-msg B-3e61: a KNOWN FLAG of a known program whose value is from its CLOSED public list — never a credential (Chrome's
+// keyring choice; the seventh sighting: two lines to the coordinator cut at it). The name and the value both exact (lower-cased)
+const KNOWN_FLAG_VALUES = new Map([
+  ['password-store', new Set(['basic', 'gnome', 'gnome-keyring', 'gnome-libsecret', 'kwallet', 'kwallet5', 'kwallet6', 'detect'])],
+]);
+const FLAG_VALUE_RE = /[A-Za-z0-9][A-Za-z0-9_\-]{0,40}/y;
+const FLAG_VALUE_END = new Set([...'.,;:!?)]}\'"`»」）'].map((ch) => ch.charCodeAt(0)));
+/** Is the value at `at` (after its head) a known flag's closed-list value? → the index just past it (and its closing quote) | -1 */
+function knownFlagEnd(text, name, at, q) {
+  const vals = KNOWN_FLAG_VALUES.get(String(name).toLowerCase());
+  if (!vals) return -1;
+  FLAG_VALUE_RE.lastIndex = q ? at + 1 : at;
+  const v = FLAG_VALUE_RE.exec(text); if (!v || !vals.has(v[0].toLowerCase())) return -1;
+  const end = FLAG_VALUE_RE.lastIndex, c = end < text.length ? text.charCodeAt(end) : -1;
+  if (q) return c === q.charCodeAt(0) ? end + 1 : -1;
+  return c < 0 || isBlankCode(c) || FLAG_VALUE_END.has(c) ? end : -1;
+}
+// a MESSAGE's bare value ends at a blank or at one of these (a CJK sentence's own stops — a password holds none of them)
+const MESSAGE_STOPS = new Set([...'、。，；：！？「」『』（）【】《》〈〉'].map((ch) => ch.charCodeAt(0)));
+// a MESSAGE's value whose first token is an HTTP auth SCHEME is a header, never prose (`Authorization: Bearer <token>`, `Digest
+// username=…, response=…`): it keeps the line-end extent — one token would mask the scheme word and leave the credential after it
+const AUTH_SCHEMES = new Set(['bearer', 'basic', 'digest', 'token', 'negotiate', 'ntlm', 'dpop', 'hoba', 'mutual', 'vapid', 'gnap', 'privatetoken', 'scram-sha-1', 'scram-sha-256', 'aws4-hmac-sha256', 'apikey']);
+const SAID_MAX = 8, SAID_LEN = 60;
+/** the `said` collector: each trigger once, at most SAID_MAX, each at most SAID_LEN characters; null when nobody asked */
+function sayer(said) {
+  if (!Array.isArray(said)) return null;
+  return (w) => { const t = String(w == null ? '' : w).trim().slice(0, SAID_LEN); if (t && said.length < SAID_MAX && !said.includes(t)) said.push(t); };
+}
 // R1: the PEM lines (BEGIN / END of a private key). verify r4 F2 (the regex census): `^\s*-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----\s*$`
 // put two runs of ONE class around a literal that class itself spells — on a line `-----BEGIN PRIVATE KEY PRIVATE KEY …` with no closing
 // dashes the second run backtracked at every occurrence of the literal (380 ms at the 64 KiB bound, 3.6 ms per 4 KiB stored head). The label
@@ -94,11 +128,11 @@ function pemLine(line, word) {
   const label = t.slice(head.length, -5);
   return label.indexOf('PRIVATE KEY') >= 0 && PEM_LABEL.test(label);
 }
-function redactPem(text) {
+function redactPem(text, say) {
   if (text.indexOf('PRIVATE KEY') < 0) return { text, n: 0 };
   const lines = text.split('\n'); const out = []; let n = 0, inside = false;
   for (const l of lines) {
-    if (!inside) { out.push(l); if (pemLine(l, 'BEGIN')) { inside = true; out.push(REDACTED); n++; } continue; }
+    if (!inside) { out.push(l); if (pemLine(l, 'BEGIN')) { inside = true; out.push(REDACTED); n++; if (say) say('a PRIVATE KEY block'); } continue; }
     if (pemLine(l, 'END')) { inside = false; out.push(l); }
   }
   return { text: out.join('\n'), n };
@@ -139,7 +173,7 @@ const indentCols = (l) => { let c = 0; const ws = /^[ \t]*/.exec(l)[0]; for (let
 // group) backtracked quadratically on `a: ` + spaces + `x` (1.5 s at 32 KiB, 100 ms per 8 KiB head, twice per run)
 // (verify r3 F7: a value that OPENS a quote may be a continuation head too — the gate admits any quoted value's line, the rule judges)
 const CONT_ANY_RE = /[:=][ \t]*(?:[|>][+-]?\d*[ \t]*|["'][^\n]*)?(?:\r?\n|$)/;
-function redactContinuations(text) {
+function redactContinuations(text, say) {
   if (!CONT_ANY_RE.test(text) && !/private-lines/i.test(text)) return { text, n: 0 };
   const lines = text.split('\n'); let n = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -148,7 +182,7 @@ function redactContinuations(text) {
     if (/^private-lines$/i.test(name)) {
       const cnt = parseInt(val, 10); if (!(cnt > 0)) continue;
       const end = Math.min(lines.length, i + 1 + Math.min(cnt, 100000));
-      if (end > i + 1 && !(end === i + 2 && lines[i + 1].trim() === REDACTED)) { lines[i] = lines[i].replace(/\d+(?=\s*$)/, REDACTED); lines.splice(i + 1, end - (i + 1), REDACTED); n++; }   // round 22: R2b redacts the COUNT here too — else the typed-value rule leaves `Private-Lines: 2` and a second pass re-reads the count and eats the MAC line (idempotency); a re-read sees «redacted» ⇒ parseInt NaN ⇒ skip
+      if (end > i + 1 && !(end === i + 2 && lines[i + 1].trim() === REDACTED)) { lines[i] = lines[i].replace(/\d+(?=\s*$)/, REDACTED); lines.splice(i + 1, end - (i + 1), REDACTED); n++; if (say) say(name + ':'); }   // round 22: R2b redacts the COUNT here too — else the typed-value rule leaves `Private-Lines: 2` and a second pass re-reads the count and eats the MAC line (idempotency); a re-read sees «redacted» ⇒ parseInt NaN ⇒ skip
       continue;
     }
     if (!secretName(name) || (val !== '' && val !== REDACTED && !BLOCK_VAL.test(val) && !openQuote(val))) continue;
@@ -164,7 +198,7 @@ function redactContinuations(text) {
       if (l !== want) { lines[j] = want; any = true; }
       if (closes) break;                                                     // verify r4 F5: the quote's closing line ends it
     }
-    if (any) n++;
+    if (any) { n++; if (say) say(name + ':'); }
   }
   return { text: lines.join('\n'), n };
 }
@@ -175,24 +209,37 @@ function redactContinuations(text) {
 const KV_HEAD = /(^|[\s,;{(\[:/])(-{0,2})(["']?)([A-Za-z_][A-Za-z0-9_.\-]{0,80})\3([ \t]*[:=][ \t]*)/gm;   // verify r2 F4: `:` and `/` open a name too (.npmrc's `//registry…/:_authToken=<uuid>`)
 /** Is the character at `i` preceded by an ODD run of backslashes (escaped)? */
 function escapedAt(text, i) { let k = 0; while (i - 1 - k >= 0 && text[i - 1 - k] === '\\') k++; return k % 2 === 1; }
-function redactKv(text) {
+function redactKv(text, { message = false, say = null } = {}) {
   let n = 0, out = '', last = 0, m, lineEnd = -1;
+  const opens = message ? proseOpens() : null;   // lane bl-msg B-3e61: what the prose opened before a head (a closer it closes stays outside)
   KV_HEAD.lastIndex = 0;
   while ((m = KV_HEAD.exec(text))) {
     const headEnd = KV_HEAD.lastIndex;
     if (!holderName(m[4])) continue;                       // the next key may start right after this head; lane mask-value-shape: THE NAME GRAMMAR
     const q = text[headEnd] === '"' || text[headEnd] === "'" ? text[headEnd] : '';
+    const flagEnd = knownFlagEnd(text, m[4], headEnd, q);           // lane bl-msg B-3e61: a known flag's closed-list value is public — walk on past it
+    if (flagEnd >= 0) { KV_HEAD.lastIndex = flagEnd; continue; }
     const sepColon = m[5].indexOf(':') >= 0;                        // round 23: a `:` key (JSON / YAML / a header) vs an `=` assignment (dotenv / shell / `--flag=`)
     const jsonCtx = sepColon && (m[3] === '"' || m[3] === "'");     // a QUOTED key under a `:` is a JSON document — only there does `,})]` close a bare value
     // verify r4 F4 (the census, in code): the line's end was searched from EVERY head — `token="a" token="b" …` on one line walked the
     // line once per head (quadratic by construction; the clock read ×8 only because a 64 KiB memchr lives in cache); found once per line
     if (headEnd > lineEnd) { const nl = text.indexOf('\n', headEnd); lineEnd = nl < 0 ? text.length : nl; }
-    let valEnd = lineEnd;
+    let valEnd = lineEnd, closed = false;
     if (q) {   // verify r2 F5: a backslash-escaped quote inside the value does not close it (`"ab\"cd"` kept `cd"`); verify r5 F1: nor a doubled one (`'it''s'` kept `s'`)
       const close = nextClose(text, headEnd + 1, q, lineEnd);
-      if (close >= 0) valEnd = close + 1;
+      if (close >= 0) { valEnd = close + 1; closed = true; }
     } else if (jsonCtx) {   // round 23 (MAJOR): a bare value closes at the first `,` `}` `]` `)` ONLY inside a JSON document (a quoted `"name":`) so a one-line JSON is never swallowed; on a dotenv / shell / `--flag=` / bare line a bare value runs WHOLE to the line end (a `)` or `,` in a password is kept hidden)
       for (let p = headEnd; p < lineEnd; p++) { const c = text.charCodeAt(p); if (c === 44 || c === 125 || c === 93 || c === 41) { valEnd = p; break; } }
+    }
+    // lane bl-msg B-3e61 (seven sightings): in a MESSAGE a bare (or never-closed quoted) value is ONE token — past the blanks a head
+    // left, to the next blank or CJK stop — and the rest of the line stays the reader's; a closer the prose opened before the head
+    // (`[data-key=…]`, `(token=…)`) and ONE sentence-final `.` / `,` stay outside the mask (R7's queryTail). One forward scan
+    if (message && !closed) {
+      let p = headEnd;
+      while (p < valEnd && isBlankCode(text.charCodeAt(p))) p++;
+      const s0 = p;
+      while (p < valEnd) { const c = text.charCodeAt(p); if (isBlankCode(c) || MESSAGE_STOPS.has(c)) break; p++; }
+      if (!AUTH_SCHEMES.has(text.slice(q && s0 === headEnd ? s0 + 1 : s0, p).toLowerCase())) valEnd = p - queryTail(text, headEnd, p, opens(text, headEnd));
     }
     // verify r2 F2: the WHOLE value, to its closing quote or its line end — a cut at VALUE_MAX replaced the first 4096
     // characters and KEPT the rest of the line: a 6 KB bearer JWT (an Azure token), a kubeconfig `client-key-data` of an
@@ -216,6 +263,7 @@ function redactKv(text) {
     n++;
     out += text.slice(last, headEnd) + (q ? q + REDACTED + q : REDACTED) + val.slice(trimmed.length);
     last = valEnd; KV_HEAD.lastIndex = valEnd;
+    if (say) say(text.slice(nameStart - m[2].length - m[3].length, headEnd).trim());   // lane bl-msg B-3e61: the head as written
   }
   return { text: out + text.slice(last), n };
 }
@@ -422,7 +470,7 @@ function redactQuery(text, onMask) {
     if (!hold) { QUERY_HEAD_RE.lastIndex = vs; continue; }                           // public: walk on — the next head may sit inside its value
     if (ve < 0) { const v = QUERY_VALUE_RE.exec(text); ve = vs + (v ? v[0].length : 0); }
     const keep = queryTail(text, vs, ve, at(text, m.index));
-    out += text.slice(last, vs) + REDACTED; last = ve - keep; onMask();
+    out += text.slice(last, vs) + REDACTED; last = ve - keep; onMask(`${m[1]}${m[2]}=`);
     QUERY_HEAD_RE.lastIndex = ve;
   }
   return last ? out + text.slice(last) : text;
@@ -446,24 +494,25 @@ function maskedLink(url) {
   return shape || vault.length ? { shape, vault } : null;
 }
 const JOINER_IN_WORD_RE = /(?<=[A-Za-z0-9_.\-])[\u200C\u200D]+(?=[A-Za-z0-9_.\-])/g;
-function redactSecrets(raw, { runs = false } = {}) {
+function redactSecrets(raw, { runs = false, message = false, said = null } = {}) {
   let text = String(raw == null ? '' : raw);
   if (text.length > INPUT_MAX) text = text.slice(0, INPUT_MAX);
   if (!text) return { text, redacted: 0 };
   if (text.includes('\u200C') || text.includes('\u200D')) text = text.replace(JOINER_IN_WORD_RE, '');
   let n = 0;
+  const say = sayer(said);   // lane bl-msg B-3e61: what triggered each mask, for the sender (only when a caller asks)
   try {
-    const pem = redactPem(text); text = pem.text; n += pem.n;
-    const cont = redactContinuations(text); text = cont.text; n += cont.n;   // verify r2 F3: before R2 (R2 then hides the head's own value)
-    const kv = redactKv(text); text = kv.text; n += kv.n;
-    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; return `${ind}${name}${sep}${REDACTED}`; });   // verify r4 F7: before R5
-    text = text.replace(HTTP_RE, (m, bearer, basic) => { n++; return `${bearer || basic}${REDACTED}`; });
-    const jwt = redactJwt(text); text = jwt.text; n += jwt.n;   // verify r4 F3: the JWT scan, before the bounded prefixes
-    text = text.replace(PREFIX_RE, (m) => { n++; const h = PREFIX_HEAD.exec(m); return `${h ? h[1] : ''}${REDACTED}`; });
-    text = text.replace(WORD_NEXT_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });
-    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });
-    text = redactQuery(text, () => { n++; });   // R7 — lane mask-value-shape r3: ONE linear walk (THE NAME GRAMMAR; a public name's value walked on)
-    if (runs) text = text.replace(RUN_RE, (m) => { if (!keyMaterial(m)) return m; n++; return REDACTED; });
+    const pem = redactPem(text, say); text = pem.text; n += pem.n;
+    const cont = redactContinuations(text, say); text = cont.text; n += cont.n;   // verify r2 F3: before R2 (R2 then hides the head's own value)
+    const kv = redactKv(text, { message: !!message, say }); text = kv.text; n += kv.n;
+    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; if (say) say(name); return `${ind}${name}${sep}${REDACTED}`; });   // verify r4 F7: before R5
+    text = text.replace(HTTP_RE, (m, bearer, basic) => { n++; if (say) say(bearer || basic); return `${bearer || basic}${REDACTED}`; });
+    const jwt = redactJwt(text); text = jwt.text; n += jwt.n; if (say && jwt.n) say('a JWT (eyJ…)');   // verify r4 F3: the JWT scan, before the bounded prefixes
+    text = text.replace(PREFIX_RE, (m) => { n++; const h = PREFIX_HEAD.exec(m); if (say) say(`${h ? h[1] : ''}…`); return `${h ? h[1] : ''}${REDACTED}`; });
+    text = text.replace(WORD_NEXT_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });
+    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });
+    text = redactQuery(text, (head) => { n++; if (say) say(head); });   // R7 — lane mask-value-shape r3: ONE linear walk (THE NAME GRAMMAR; a public name's value walked on)
+    if (runs) text = text.replace(RUN_RE, (m) => { if (!keyMaterial(m)) return m; n++; if (say) say('a key-material run'); return REDACTED; });
   } catch { /* a text that cannot be judged is returned as far as it got — the caller's belt still runs */ }
   return { text, redacted: n };
 }
@@ -482,4 +531,4 @@ function hasTokenShape(raw) {
   return false;
 }
 
-module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, SECRET_WORDS, CONTAINER_HEADS, DESCRIPTOR_HEADS, secretName, holderName, maskedLink, redactSecrets, hasTokenShape };
+module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, SECRET_WORDS, CONTAINER_HEADS, DESCRIPTOR_HEADS, KNOWN_FLAG_VALUES, secretName, holderName, maskedLink, redactSecrets, hasTokenShape };

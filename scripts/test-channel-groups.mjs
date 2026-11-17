@@ -2511,5 +2511,42 @@ console.log('§R2 the claims on the REAL ladder and jobs engine — a claim belo
   f.close();
 }
 
+// lane bl-msg B-3e61 (seven sightings): the belt cut the REST of a lane's brief after «session:…», «data-key=…», a flag. The group
+// log belts a message in its MESSAGE mode — the value only, the rest arrives — BEFORE the @-scan (a mention's place is read on the
+// words the log keeps), and the sender's answer names what was masked (`masked`) instead of a shorter count read as a cut.
+console.log('§bl-msg B-3e61 a message arrives whole — the value masked, the rest kept, the sender told, the @ places on the kept words');
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
+  const V = ['q7', 'x9z3', 'w5k2', 'm4'].join('');   // a value, joined at runtime
+  const TEXT = `NO grant line for session:${V} must appear — @beta the rest of the brief arrives`;
+  const t2 = `token=${V} then @beta can you?`, at2 = t2.indexOf('@beta');
+  const drive = async (name, ge) => {
+    const f = fixture(name, ge ? { ge } : {});
+    const made = await f.eng.create({ by: G.OWNER, name: 'whole', members: [A, B, C], quiet: true });
+    const gid = made.group.id;
+    const p = await f.eng.post({ group: gid, from: A, text: TEXT });
+    const stored = p.ok && f.store.readTail(G.GROUP_ADAPTER_ID, gid, { limit: 1000 }).find((r) => r.vendorId === p.message.vendorId);
+    const pk = await f.eng.post({ group: gid, from: G.OWNER, text: t2, mentions: [{ id: C, start: at2, end: at2 + 5 }] });
+    const plain = await f.eng.post({ group: gid, from: A, text: 'all green, nothing secret' });
+    f.close();
+    const placeOf = (q, id) => { const m = q && q.ok && q.message.mentions.find((x) => x.id === id); return m && m.pos && m.pos[0] ? q.message.text.slice(m.pos[0][0], m.pos[0][1]) : null; };
+    return { p, stored, pk, plain, atB: placeOf(p, B), atPick: placeOf(pk, C) };
+  };
+  const live = await drive('blmsg');
+  ok(live.p.ok && !live.p.message.text.includes(V) && live.p.message.text.endsWith('@beta the rest of the brief arrives') && live.stored && live.stored.text === live.p.message.text,
+    'SEND: the value is masked and the REST of the message is in the log (the 1st sighting\'s shape)', JSON.stringify(live.p.message && live.p.message.text));
+  ok(JSON.stringify(live.p.masked) === '["session:"]' && Array.isArray(live.plain.masked) && live.plain.masked.length === 0, '…the answer names what was masked, as the sender wrote it (a message with nothing secret: none)', JSON.stringify(live.p.masked));
+  ok(live.atB === '@beta' && live.atPick === '@beta' && live.pk.ok && live.pk.message.mentions.length === 1 && live.pk.message.mentions[0].id === C && !live.pk.message.text.includes(V),
+    '…the @ places sit on the KEPT words: a scanned @ after a mask, and the owner\'s picked place moved by the mask before it', JSON.stringify([live.atB, live.atPick]));
+  // RED CONTROLS (patched copies of the engine through the SAME drive)
+  const M = mutantCopies('blmsg-ge', REPO);
+  const LATE = 'const body = belt.maskForSink(given, { dataDir, message: true, said: masked });';
+  ok(src.split(LATE).length === 2 && src.split('message: true').length === 4, 'the controls find their lines (the post\'s mask, the three MESSAGE-mode asks)');
+  const late = await drive('blmsg-late', M.load('src/server/groups-engine.js', src.replace(LATE, 'const body = given;'), 'late-mask'));
+  ok(late.p.ok && late.atB !== '@beta' && !(late.p.masked || []).length, 'RED CONTROL (the mask only at the append, after the @-scan): the @ place misses its @ and the answer names nothing — the SEND legs go red', JSON.stringify(late.atB));
+  const lineMode = await drive('blmsg-line', M.load('src/server/groups-engine.js', src.split('message: true').join('message: false'), 'line-mode'));
+  ok(lineMode.p.ok && !lineMode.p.message.text.includes('the rest of the brief arrives'), 'RED CONTROL (the line mode in the group log): the rest of the message is lost again — the SEND leg goes red', JSON.stringify(lineMode.p.message && lineMode.p.message.text));
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

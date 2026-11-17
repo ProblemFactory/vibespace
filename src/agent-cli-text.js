@@ -134,12 +134,16 @@ function strayRefusal({ tool, what = 'a message', strays, after = null, detail =
 }
 
 /** The echo (③): `sent: N characters` from the route's count; when the route kept fewer than this CLI handed it, the
- *  cut is SAID. An older route that does not count ⇒ this CLI's own count of what it sent. */
-function sentLine({ chars: kept, detailChars } = {}, text, detail) {
+ *  cut is SAID. An older route that does not count ⇒ this CLI's own count of what it sent.
+ *  lane bl-msg B-3e61: a route that names what the secret belt MASKED (`masked`: the heads as written) is told that — the
+ *  count moved because a value became «redacted», never because the end was cut (four sightings read it as a length cap). */
+function sentLine({ chars: kept, detailChars, masked } = {}, text, detail) {
   const given = chars(String(text ?? '').trim());   // routes trim the ends; that is not a cut
   const n = Number.isFinite(kept) ? kept : chars(text);
   let line = `sent: ${n} character${n === 1 ? '' : 's'}`;
-  if (n < given) line += ` — ${given} were given: the last ${given - n} were CUT`;
+  const said = Array.isArray(masked) ? masked.filter((x) => typeof x === 'string' && x).slice(0, 8) : [];
+  if (said.length) line += ` — the secret belt masked the value at ${said.map((x) => `«${x}»`).join(', ')} (each now «redacted»); the rest arrived whole`;
+  else if (n < given) line += ` — ${given} were given: the last ${given - n} were CUT`;
   if (typeof detail === 'string' && detail.trim()) {
     const dGiven = chars(detail.trim());
     const d = Number.isFinite(detailChars) ? detailChars : chars(detail);
