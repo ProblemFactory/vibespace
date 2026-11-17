@@ -75,7 +75,7 @@ const CODEX_MONEY = 'reset-helper|fork-ledger-purge';
 const OWNERS = Object.freeze([
   { id: 'interface', words: 'the interface: the page protocol and its fan-out, sign-in, the page-written stores — and the hub process’s own (the listener, boot and exit, the store writer, the loop’s instrument)',
     rules: [/^src\/agentd\/mux\.js$/,
-      name('ws-heartbeat|ws-keepalive|session-broadcast|sync-store|op-seq|static-public|app-csp|csp-reports|frame-host|auth|clerk-auth|write-origin|tls|tls-plan|login-words|persistence|user-state-ops|editor|custom-theme-normalize|retired-settings|desktop-record|day-one|phone-doors|changelog-style|instance-url'),
+      name('ws-heartbeat|ws-keepalive|session-broadcast|sync-store|op-seq|static-public|setting-holds|app-csp|csp-reports|frame-host|auth|clerk-auth|write-origin|tls|tls-plan|login-words|persistence|user-state-ops|editor|custom-theme-normalize|retired-settings|desktop-record|day-one|phone-doors|changelog-style|instance-url'),
       name('runtime-boot|runtime-floor|node-runtime|boot-phase|boot-trace|migration-runner|ops-routes|exit-hook|exit-settle|store-writer|store-writer-worker|store-exit-keeper|telemetry|opslog|timed-sync|fd-budget|fd-gauge|memory-census|memory-sampler|worker-memory|cpu-capture|sync-fs-witness|sync-fs-witness-worker'),
       lead('loop|incident')] },
   { id: 'vault', words: 'the vault: the key and every sealed entry, the mask and its belt, the integration credentials, web logins',
@@ -86,12 +86,12 @@ const OWNERS = Object.freeze([
       lead('webhook|gmail-sync|mail-frame|oauth-loopback|oauth-doors|consent-road|roster-pass|api-call-words'), name('api-call-words\\.generated'),
       name('peer-text')] },   // cure r3: the channel record's belt — it requires src/channel-record.js and runs its frame rule at every call
   { id: 'money', words: 'accounts and money: the pool, usage and readings, the spend guard, auto-resume, the delivery ladder (stash, retry, wakes)',
-    rules: [name('account-(?:pool-auto|usage-routes|models)'), but('usage-', 'walker'),
+    rules: [name('account-(?:pool-auto|usage-routes|models)|door-reads|after-turn-read'), but('usage-', 'walker'),
       lead('quota|spend|auto-resume|auto-cli|reset-credit|reading|ledger|stash|provider|model-providers|model-family|wait|park-step|record-lateness|slot-transitions|sealed-orders|window-stamp|weekly-lanes-unfold|plan-names|claude-plan-catalog|login-expiry|cost-segments|catalog-pricing|rate-limit-capture|otel-truth|stream-wall|queued-wakes|conversation-deliver|refresh-note|fixture-ledger-purge|agy-turn-usage|cli-usage-door'),
       name(`codex-(?:${CODEX_MONEY})|oat-(?:file-sync|identity|identity-model|shape-routes)`), new RegExp(`^src/harnesses/(?:${QUOTA_HARNESS})\\.js$`)] },
   { id: 'workspace', words: 'the workspace: tasks, agent groups, For you, grants, automation, artifact rows, the design and doc registries, the decision engine, voice, feedback',
     rules: [lead('task|backlog-select|groups-engine|channel-groups|group-card|msg-acl|worker-dispatch|dispatch-model|foryou|inbox|user-todos|main-asks?|helper-asks?|attention-model|grant-model|grants|ask-grant|automation|artifacts|artifact-registry|doc|published-pages|decision|rule-learning|text-model-client|voice|dropline|feedback|conversation-index|conversation-spec|search-index|search-model|records?-clear|assistant-note|notification-senders|session-status'),
-      name('design'), but('design-', 'fs')] },
+      name('design|ask-setting'), but('design-', 'fs')] },
   { id: 'machines', words: 'the machines registry: hosts and pairing, browser records and leases, jobs records, mounts, desktop apps and windows, plugins, exits',
     rules: [dir('app-kinds|mount-providers|plugins|browser-backends'),
       lead('host-tokens|pairing-token|dial-pairing|dial-health|dial-facts|agentd-signature|device|engine-kernel|engine-distribution|apps|install-slot|installs|ffmpeg-install|mic-install|machine-needs|machine-mounts|mount|path-mounts|vfs-cache-place|rclone-obscure|storage-path|storage-facts|fs-canary|relay-token|tailnet|tailscale-dns|hub-act|desktop-apps|desktop-app-keeper|desktop-browser-app|desktop-handover|desktop-machines-cache|encoded-command|modifier-map'),
