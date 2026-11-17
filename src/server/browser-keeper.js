@@ -1746,6 +1746,26 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!p || isEph(p)) return { ok: false, code: 'not-found', error: `no profile ${id}` };
     return B.mayAttach(p, { browserKey: '', taskIds: Array.isArray(taskIds) ? taskIds.map(String) : [] });
   }
+  /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every listed profile judged for ONE existing conversation by
+   *  THE door's verdict (`B.mayAttach` — its keys, its browser key, its Task Groups now), answered as may-use-model answer
+   *  rows; an exception that takes it out is named from the same row (`B.exceptEntryOf` — mayAttach's refusal carries no entry). A
+   *  conversation's own temporary browser is not a grant and is not listed. */
+  function admitsFor({ browserKey = '', conversationKeys = [], taskIds = [], groupsUnreadable = false } = {}) {
+    ensureLoaded();
+    const out = [];
+    for (const p of reg.profiles) {
+      if (isEph(p)) continue;
+      const v = B.mayAttach(p, { browserKey: String(browserKey || ''), conversationKeys, taskIds: Array.isArray(taskIds) ? taskIds.map(String) : [], groupsUnreadable: !!groupsUnreadable });
+      const base = { door: 'browser-profile', resource: String(p.id), name: String(p.label || p.id) };
+      if (v.ok) { out.push({ ...base, ok: true, via: v.via, ...(v.taskId ? { groupId: String(v.taskId) } : {}) }); continue; }
+      if (v.code === 'excepted') {
+        const e = B.exceptEntryOf(p, { conversationKeys, taskIds, groupsUnreadable });
+        out.push({ ...base, ok: false, code: 'excepted', ...(e ? { except: e } : {}) });
+      } else if (v.code === 'groups_unreadable') out.push({ ...base, ok: false, code: 'groups_unreadable' });
+      else if (v.code === 'not_owner' && !B.grantRowOf(p)) out.push({ ...base, ok: false, code: 'unknown_shape' });
+    }
+    return out;
+  }
   /** Every listed profile's admission for a new conversation in `taskIds` (the form's 浏览器 row). */
   function admitsAtCreate({ taskIds = [] } = {}) {
     ensureLoaded();
@@ -8080,7 +8100,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     capOf, capFor, setCap, stampGroupCap, groupCapOf, ownLive, noteViewers, sweepIdleReleases, idleReleaseAfterMs,
     pairsForKey: (k) => { const e = ephemeralFor(k); return e ? (pairsOf(e.profileId) || null) : null; }, // MULTIVIEW §4: a helper's OWN pairs (the bridge's child relay answers confirmations under them)
     pinFor, setPin, pinForCreate, instanceDefault, taskGroupDefaultFor,
-    mayAttachAtCreate, admitsAtCreate, // lane new-session-form: the New Session form's profile list + the create's judge (ONE verdict: mayAttach)
+    mayAttachAtCreate, admitsAtCreate, admitsFor, // admitsFor: unit what-it-may-use (Session Properties); lane new-session-form: the New Session form's profile list + the create's judge (ONE verdict: mayAttach)
     restorePin, taskGroupCapFor, // B-f7ab verify r2: the spawn's witnessed pick restored under the late key (a PREFERENCE — it never edits "Who can use it"); the group cap READ for the witness
     // owner ruling A: a pin that did not open is said; one driver at a time; Delete… releases everything first; the adopt
     // stops the conversation's own browser first. "Who can use it" is a list (2026-09-27): the ONE re-judge, the pick that

@@ -356,6 +356,7 @@ const ROUTES = {
   'GET /api/session-status/history': 'reads',
   'GET /api/agent/task-context': 'reads',               // the SessionStart injection (Activity lines, the jobs digest, the held job notifications)
   'GET /api/agent/prompt-context': 'reads',             // the per-turn injection (Activity deltas, the jobs updates ring, the override notices, the group reports — folded)
+  'GET /api/may-use': 'meta',                           // unit what-it-may-use: Session Properties' «What it may use» — Task Group NAMES (its membership) and a job's LABEL (jm.labelOf), never a record's words
   'GET /api/agent/stop-check': 'meta',                  // the Stop nudge: fixed words + the status entry's TIME
   'GET /api/agent/task': 'reads',
   'POST /api/agent/task-progress': 'echo',
@@ -1945,7 +1946,7 @@ const I_RECV = {
   'src/lib/browser-trace-view.js|k': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'], 'src/server/browser-kept.js|e': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'],
   'src/lib/browser-who-dialog.js|r.profile': ['browser profile', 'a profile label'],
   'src/lib/user-todos-actions.js|r.browser': ['browser profile', 'a profile label (the For-you Restart of a browser that stopped answering — int220, lane browser-unresponsive)'],
-  'src/lib/new-session-form.js|acc': ['channel account', 'lane new-session-form: the account ticked in the New Session form — its name in the toast that says its access row was not written'], 'src/lib/channel-account-dialogs.js|k': ['channel account', 'an integration key label'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
+  'src/lib/new-session-form.js|acc': ['channel account', 'lane new-session-form: the account ticked in the New Session form — its name in the toast that says its access row was not written'], 'src/lib/may-use-section.js|a': ['channel account', 'unit what-it-may-use: the account a tick in Session Properties\' «What it may use» takes back — its name in the toast that says its access row was not removed'], 'src/lib/channel-account-dialogs.js|k': ['channel account', 'an integration key label'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
   'src/lib/channel-group-dialogs.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-outbox.js|r': ['outbox proposal', 'a send\'s refusal reason'],
   'src/lib/channel-webhook.js|v': ['channel author', 'a webhook caller\'s registered name (the owner typed it; the author of its calls)'], 'src/lib/channel-webhook.js|o': ['outbox proposal', 'a send\'s outcome — the caller\'s name + the server\'s refusal reason'], // lane webhook-l2-ui
   'src/lib/channel-webhook.js|ck': ['channel author', 'the other VibeSpace\'s name its pairing code carries (its owner\'s reply name), worded in the join box\'s done toast'], 'src/routes/webhook.js|cv': ['channel author', 'the other VibeSpace\'s name its pairing code carries, named in the join\'s refusal sentence'], // lane webhook-pair-join

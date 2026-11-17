@@ -1184,8 +1184,27 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     }
   } catch { /* engine without hooks */ }
 
+  /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every saved web login ONE conversation may have filled —
+   *  the fill verdict's own admission (a login it saved itself, else THE model's `admits` over the grant rows of its origin
+   *  and user: the one account, «any account on this site», «any site» — rows ADD) — as may-use-model answer rows: the site
+   *  and the user name, never a value (`names()` opens no entry). */
+  function mayUseFor(facts = {}) {
+    const keys = new Set((facts.conversationKeys || []).map(String));
+    const out = [];
+    for (const e of names()) {
+      if (e.pending) continue;   // a login waiting for its owner's card is nobody's to fill yet
+      const base = { door: BL.DOOR, resource: e.name, name: `${BL.hostOf(e.origin) || e.origin} · ${e.user}`, detail: { origin: e.origin, user: e.user } };
+      if (e.owner && keys.has(String(e.owner))) { out.push({ ...base, ok: true, via: 'own' }); continue; }
+      const v = GM.admits(BL.grantResources(e.origin, e.user).flatMap((r) => rowsOf(r) || []), facts);
+      if (v.ok) out.push({ ...base, ok: true, via: v.via, ...(v.via === 'group' && v.entry ? { groupId: String(v.entry.id) } : {}) });
+      else if (v.code === 'excepted') out.push({ ...base, ok: false, code: 'excepted', ...(v.entry ? { except: GM.bareOf(v.entry) } : {}) });
+      else if (v.code === 'groups_unreadable' || v.code === 'unknown_shape') out.push({ ...base, ok: false, code: v.code });
+    }
+    return out;
+  }
   return {
     names,
+    mayUseFor,
     resolveFill,
     confirmOwn,
     discardPending,

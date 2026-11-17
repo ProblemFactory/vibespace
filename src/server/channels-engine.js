@@ -8541,6 +8541,7 @@ function create(deps = {}) {
     get timer() { return timer; },
   };
   const {
+    mayUseFor,   // unit what-it-may-use (channels-access)
     policyFor, authorityCapsFor, healP2, rotationsOf, filterFor, assignmentView, pendingOf, clearCarried, elidedTotal, statsView, wakeLatencyFor,
     accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets, wakeEffOf,
     storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, convFor,
@@ -9003,6 +9004,7 @@ function create(deps = {}) {
     listFor, readFor, statusFor,
     proposalsListFor, proposeRecall,   // lane channels-proposals-recall: the agent's own proposals as a list; a recall of the user's message, proposed
     reachCountFor,   // lane channels-teach: the hook teaches vibespace-channels on this (a count, never a render)
+    mayUseFor,   // unit what-it-may-use: the channel doors for ONE conversation, off the prepared rows (Session Properties «What it may use»)
     signinExpiredFor, speakSignin, retractSignin, landSignin, retractFailure,   // lane channel-reauth-visible: the hook's dead-sign-in names; the items' doors (suites drive them)
     connectOffer, connectOffers, connectTaught,   // lane pod-oauth-callback: the agent's `connect` verb, `list`'s not-connected line, the 'connect' reach word
     flushPending: (adapterId, convId, opts) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushPending(rec, convId, opts || {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },

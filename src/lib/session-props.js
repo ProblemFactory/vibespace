@@ -14,6 +14,7 @@ import { metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout)
 import { ownedJobsView } from '../job-model.js'; // B-70f9 ② (PURE): the jobs this conversation owns, attention first
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (`mounts-btn`)
 import { cpuPriorityWords } from './cpu-priority-words.js'; // B-460d (PURE): the CPU priority the conversation started at
+import { mountMayUse } from './may-use-section.js'; // unit what-it-may-use: «What it may use» — every door, by what (GET /api/may-use)
 
 /** 2026-09-27: how many browser sessions a conversation has, per ask (the window re-renders on every broadcast, so the
  *  count is remembered here and re-asked at most every 15 s; the row appears once the answer says there are some). */
@@ -90,7 +91,7 @@ export function statusNowHtml(st) {
     : `<span style="color:var(--text-dim)">${escHtml(t('none declared'))}</span>`;
 }
 
-export function openSessionProps(app, sessionRef, { syncId } = {}) {
+export function openSessionProps(app, sessionRef, { syncId, section = null } = {}) {
   const sidebar = app.sidebar;
   const refKey = typeof sessionRef === 'string' ? sessionRef : sidebar._getSessionStateKey(sessionRef);
   const findSession = () =>
@@ -100,7 +101,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
   if (!s0) return null;
 
   const existing = [...app.wm.windows.values()].find(w => w._sessionPropsKey === refKey);
-  if (existing) { app.wm.revealWindow(existing.id, { replay: !!syncId }); return existing; }
+  if (existing) { app.wm.revealWindow(existing.id, { replay: !!syncId }); if (section === 'may-use') existing.content?.querySelector?.('.session-props-may-use')?.scrollIntoView?.({ block: 'start' }); return existing; }
 
   const openSpec = { action: 'openSessionProps', sessionKey: refKey, cwd: s0.cwd || '', name: s0.name || '' };
   const winInfo = app.wm.createWindow({
@@ -108,6 +109,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     type: 'task', syncId, openSpec, width: 440, height: 620,
   });
   winInfo._sessionPropsKey = refKey;
+  winInfo._mayUseFocus = section === 'may-use';   // the menu's «What it may use…» opens at that section
 
   // The Task Group window's shape (task-detail.js): the `.task-detail` root is only the flex column, and ONE scrolling
   // `.task-detail-body` holds every section — the padding, the gap between sections and the scroll live on the body
@@ -725,6 +727,16 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     }
     if (!(sidebar._tasks || []).filter(t => !t.archived).length) tgSec.insertAdjacentHTML('beforeend', `<div class="empty-hint">${escHtml(t('No Task Groups yet'))}</div>`);
 
+    // ── What it may use (unit what-it-may-use — the owner, 2026-11-17) — every door, by what, read from the hub; MOUNTED ONCE
+    // per window: its element rides every render (a broadcast repaints this body; the section refetches on its own events only)
+    {
+      const muSec = section(t('What it may use'));
+      muSec.classList.add('session-props-may-use');
+      if (!winInfo._mayUse) winInfo._mayUse = mountMayUse(app, () => { const x = findSession(); return x ? { sessionKey: refKey, webuiId: x.webuiId || null } : null; });
+      muSec.appendChild(winInfo._mayUse.el);
+      if (winInfo._mayUseFocus) { winInfo._mayUseFocus = false; requestAnimationFrame(() => { try { muSec.scrollIntoView({ block: 'start' }); } catch { } }); }
+    }
+
     // ── Agent permissions: Group manager delegation (issue #21) ──
     // Double-gated: this per-session toggle AND the global setting
     // agents.allowGroupManagement must both be on for /api/agent/group-admin.
@@ -915,7 +927,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
   }, { signal: winInfo._listenerCtl?.signal });
   if (winInfo.element && !winInfo.element.hasAttribute('tabindex')) winInfo.element.tabIndex = -1; // focusable, so a click in it gives it the key
   const prevClose = winInfo.onClose;
-  winInfo.onClose = () => { app.ws.offGlobal(onMsg); prevClose?.(); };
+  winInfo.onClose = () => { app.ws.offGlobal(onMsg); try { winInfo._mayUse?.destroy(); } catch { } prevClose?.(); };
   return winInfo;
 }
 

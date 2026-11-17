@@ -2970,7 +2970,89 @@ function create(engineCtx) {
     return { ok: true, estimate: e };
   }
 
+  /**
+   * «WHAT IT MAY USE» (Session Properties, unit what-it-may-use) — the channel doors for ONE conversation, read off the
+   * PREPARED rows (CG's per-door index, rebuilt only when a channel row changes) and the grains' own lists: never a walk of
+   * the channel conversations, never a rule evaluated per conversation (the owner's hub paid 420 s a day for that once — the
+   * cure of 2.369.406). Each grain's stored row is judged ONCE by THE model (channels-grants admitsFor: `admits` over `{to, except}` — what
+   * channel-filter rowNames and channel-acl principalApplies ask entry by entry); the raw-API tier by channel-acl
+   * effectiveApi. `facts` = { cid, conversationKeys, groupIds, groupsUnreadable }.
+   * → { accounts: [new-session-model accountRows' row + `state` granted | own | none | excepted | unknown, `own`],
+   *     answers: [may-use-model answer rows — the rules, single conversations, notifications and raw-API tiers that admit
+   *               it (or leave it out), each under its account (`parent`)] }
+   */
+  function mayUseFor(facts = {}) {
+    const F2 = { conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), groupsUnreadable: !!facts.groupsUnreadable };
+    const judge = (door, res) => CG.admitsFor(door, res, F2);   // THE model over the grain's stored row (channels-grants admitsFor)
+    const viaOf = (v) => (v.ok ? { ok: true, via: v.via, ...(v.via === 'group' ? { groupId: String((v.hits.find((h) => h.kind === 'group') || {}).id || '') } : {}) } : v.code === 'excepted' ? { ok: false, code: 'excepted', ...(v.entry ? { except: v.entry } : {}) } : { ok: false, code: v.code });
+    const listed = (v) => v.ok || v.code === 'excepted' || v.code === 'groups_unreadable' || v.code === 'unknown_shape';
+    const authorityOf = (v) => (v.ok && v.hits.some((h) => h.authority === 'send') ? 'send' : 'draft');
+    const declOf = (a) => { try { return registry.get(a.kind); } catch { return null; } };   // the module's DECLARED facts (adapterView's)
+    const recs = (adapterRecords().adapters || []).filter((a) => a && a.id);
+    const recById = new Map(recs.map((a) => [String(a.id), a]));
+    const live = store.index.live();
+    const accounts = [];
+    for (const a of recs) {
+      const decl = declOf(a);
+      if ((decl && decl.listed === false) || ((decl && decl.reach) || 'grants') !== 'grants') continue;   // the form's own account list: listed, reach by grants (the declared facts — never a builtin branch, §88)
+      const v = judge(CG.DOORS.reach, CG.RES.account(a.id));
+      const hits = v.ok ? v.hits : [];
+      const groups = hits.filter((h) => h.kind === 'group').map((h) => h.id);
+      const everyone = hits.some((h) => h.kind === 'everyone');
+      const own = hits.some((h) => h.kind === 'conversation');
+      const granted = everyone || groups.length > 0;
+      accounts.push({ id: String(a.id), kind: a.kind || '', vendor: a.vendor || a.kind || '', label: a.label || a.id, enabled: a.enabled !== false,
+        granted, own, authority: v.ok ? authorityOf(v) : null, everyone, groups, except: granted ? CG.exceptBare(CG.RES.account(a.id)) : [],
+        state: granted ? 'granted' : own ? 'own' : v.code === 'excepted' ? 'excepted' : v.code === 'groups_unreadable' || v.code === 'unknown_shape' ? 'unknown' : 'none',
+        ...(v.code === 'excepted' && v.entry ? { exceptedBy: v.entry } : {}) });
+    }
+    const answers = [];
+    const nameOfConv = (adapterId, convId) => { const rec = recById.get(String(adapterId)); const en = live[`${adapterId}/${convId}`]; try { return (rec && en && humanNameOf(rec, en)) || String(convId); } catch { return String(convId); } };
+    const grainOf = (res) => {   // a grain resource → { parent (its account), name }
+      let m = /^account:([^#]+)$/.exec(res);
+      if (m) { const rec = recById.get(m[1]); return { parent: `account:${m[1]}`, name: rec ? String(rec.label || rec.id) : m[1], kind: 'account' }; }
+      m = /^rule:(.+)$/.exec(res);
+      if (m) { const pa = patternById(m[1]); return { parent: pa ? `account:${pa.adapterId}` : '', name: String((pa && (pa.name || pa.label)) || m[1]), kind: 'rule' }; }
+      m = /^conversation:([^/#]+)\/([^#]+)(?:#(user|request))?$/.exec(res);
+      if (m) return { parent: `account:${m[1]}`, name: nameOfConv(m[1], m[2]), kind: 'conversation', key: `${m[1]}/${m[2]}` };
+      return null;
+    };
+    // the rules and single conversations whose reach rows admit it (a conversation's access, the owner's rows and its
+    // approved requests ADD: one answer per conversation, its best)
+    const conv = new Map();
+    for (const res of CG.resourcesOf(CG.DOORS.reach)) {
+      const g = grainOf(res);
+      if (!g || g.kind === 'account') continue;
+      const v = judge(CG.DOORS.reach, res);
+      if (!listed(v)) continue;
+      const ans = { door: 'channel-reach', resource: g.kind === 'conversation' ? `conversation:${g.key}` : res, name: g.name, parent: g.parent, ...viaOf(v), ...(v.ok ? { detail: { authority: authorityOf(v) } } : {}) };
+      if (g.kind === 'conversation') { const was = conv.get(g.key); if (!was || (!was.ok && ans.ok)) conv.set(g.key, ans); } else answers.push(ans);
+    }
+    answers.push(...conv.values());
+    // the notifications that wake it (a grain's watch row)
+    for (const res of CG.resourcesOf(CG.DOORS.watch)) {
+      const g = grainOf(res);
+      if (!g) continue;
+      const v = judge(CG.DOORS.watch, res);
+      if (listed(v)) answers.push({ door: 'channel-watch', resource: res, name: g.name, parent: g.parent, ...viaOf(v), detail: { grain: g.kind } });
+    }
+    // the raw-API tier (channel-acl effectiveApi: the widest tier a grant that admits it holds)
+    const api = CG.apiGrants();
+    const ctx = { kind: 'agent', id: facts.cid ? String(facts.cid) : '', groups: F2.groupIds };
+    const VIA_OF_PRINCIPAL = { agent: 'conversation', group: 'group', everyone: 'everyone' };
+    for (const cred of [...new Set(api.map((g) => g && g.scope && g.scope.id).filter(Boolean))]) {
+      if (!ctx.id) break;
+      const e = ACL.effectiveApi(ctx, cred, api);
+      if (!e || e.tier === 'none') continue;
+      const win = api.find((g) => g && ACL.grantId(g) === e.grantId);
+      const rec = recById.get(String(cred));
+      answers.push({ door: 'channel-api', resource: String(cred), name: rec ? String(rec.label || rec.id) : String(cred), parent: rec ? `account:${cred}` : '', ok: true,
+        via: (win && VIA_OF_PRINCIPAL[win.principal && win.principal.kind]) || 'unknown', ...(win && win.principal && win.principal.kind === 'group' ? { groupId: String(win.principal.id) } : {}), detail: { tier: e.tier, perDay: e.perDay } });
+    }
+    return { accounts, answers };
+  }
   return {
+    mayUseFor,   // unit what-it-may-use
     policyFor, policyRequiresReview, authorityCapsFor, healP2, rotationsOf, filterFor, assignmentView, pendingOf, clearCarried, elidedTotal,
     statsView, wakeLatencyFor, accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets,
     wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession,

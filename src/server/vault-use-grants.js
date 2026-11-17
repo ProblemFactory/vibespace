@@ -420,7 +420,27 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     }
     return out;
   }
-  return { rowsOf, verdictFor, heldBy, setRow, addMember, judgeMember, snapshotRow, restoreRow, revoke, revokeWindow, pruneWindows, windowOf, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
+  /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every entry ONE conversation holds a live member of — THE
+   *  door's verdict (`U.useVerdict` over the verified row, the destination not known: the hosts are the member's own words) —
+   *  plus the entries a 「除了」 takes it out of, as may-use-model answer rows: the entry's NAME and its member's hosts / until,
+   *  never a value. A LOCKED vault cannot verify its members (publicFor's rule) ⇒ ONE answer that says so. */
+  function mayUseFor(facts = {}) {
+    if (!unlocked()) return [{ door: U.DOOR, resource: '*', name: '', ok: false, code: 'vault_locked' }];
+    const bare = (k) => { const m = /^(group|conversation):(.+)$/.exec(String(k || '')); return m ? (m[1] === 'group' ? { kind: 'group', id: m[2] } : { kind: 'conversation', key: m[2] }) : null; };
+    const nameOf = (id) => { const m = /^[^:]+:([^#]*)(?:#(.*))?$/.exec(String(id)); return m ? (m[2] && m[2] !== 'value' ? `${m[1]} · ${m[2]}` : m[1]) : String(id); };
+    const out = [];
+    for (const row of store().rowsOfDoor(U.DOOR)) {
+      const v = U.useVerdict([verifiedRow(row)], facts, { destinationKnown: false, now: now() });
+      const base = { door: U.DOOR, resource: String(row.resource), name: nameOf(row.resource) };
+      if (U.holds(v)) {
+        const m = v.member || {}; const p = bare(m.principal || (v.entry ? GM.principalKey(v.entry) : ''));
+        out.push({ ...base, ok: true, via: m.via || (v.entry && v.entry.kind), ...(p && p.kind === 'group' ? { groupId: p.id } : {}), detail: { hosts: Array.isArray(m.hosts) ? m.hosts.slice(0, 16) : [], until: m.until || null } });
+      } else if (v.code === 'excepted') { const p = bare(v.except); out.push({ ...base, ok: false, code: 'excepted', ...(p ? { except: p } : {}) }); }
+      else if (v.code === 'groups_unreadable' || v.code === 'unknown_shape') out.push({ ...base, ok: false, code: v.code });
+    }
+    return out;
+  }
+  return { rowsOf, verdictFor, heldBy, mayUseFor, setRow, addMember, judgeMember, snapshotRow, restoreRow, revoke, revokeWindow, pruneWindows, windowOf, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
 }
 
 module.exports = { create, widens, STATUS, WORDS };

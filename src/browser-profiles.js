@@ -1634,6 +1634,13 @@ function grantRowOf(p) {
   const bare = (e) => GM.bareOf(e);
   return { door: 'browser-profile', resource: String((p && p.id) || '-'), to: (u.to || []).map(bare).filter(Boolean), except: (u.except || []).map(bare).filter(Boolean) };
 }
+/** WHICH 「除了」 took this caller out of `p`'s list (unit what-it-may-use — mayAttach's `excepted` refusal names no entry): the
+ *  exception THE model decided by, over the same row and the same facts mayAttach judged with → a bare principal | null. */
+function exceptEntryOf(p, { conversationKeys = [], taskIds = [], groupsUnreadable = false } = {}) {
+  const row = grantRowOf(p);
+  const v = row ? GM.admits([row], { conversationKeys, groupIds: Array.isArray(taskIds) ? taskIds : [], groupsUnreadable: !!groupsUnreadable }) : null;
+  return v && v.code === 'excepted' && v.entry ? GM.bareOf(v.entry) : null;
+}
 /** The closed set of words the digest's `scope` speaks (derived from `owner`, never stored twice). */
 const SCOPES = Object.freeze(['all', 'only']);
 /** 'all' | 'only' (an ephemeral record, an unknown shape: only), null for no record. */
@@ -3546,6 +3553,6 @@ module.exports = {
   freshBrowserKey, FRESH_KEY_TRIES, // identity verify r4 (2026-09-28): the fresh-key rule — a key the store still names is never minted again
   agentBrowserView, agentAnswerView, echoesOf, BELT_EXCEPTIONS, MASKED_KEY, MASKED_ID, KEY_IN_TEXT_RE, BELT_MAX_DEPTH, // identity verify r3 (2026-09-28): the browser record's view + THE SERVER BELT every agent answer passes
   useStamp, useBaseVerdict, useShapeVerdict, usePatchVerdict, rowWithConversation, rowForCreate, ownerForWrite, migrateWhoList,
-  useOfRows, whoOfEntry, grantRowOf, exceptedRefusal, isUseKey,   // lane grants-unify
+  useOfRows, whoOfEntry, grantRowOf, exceptEntryOf, exceptedRefusal, isUseKey,   // lane grants-unify; exceptEntryOf: unit what-it-may-use
   ownsLiveBrowser, conversationOwnCount, ephemeralHolderRefusal,
 };

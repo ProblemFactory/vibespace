@@ -250,6 +250,7 @@
   "/api/loop-holds/cpu-profiles/:name",
   "/api/machine-mounts",
   "/api/maintenance",
+  "/api/may-use",
   "/api/mount-tokens",
   "/api/mounts",
   "/api/mounts/:id/config",

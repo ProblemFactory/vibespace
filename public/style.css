@@ -3447,10 +3447,10 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 .ns-tg-reason.dim { color: var(--text-dim); }
 .ns-tg-it { display: flex; flex-direction: column; min-width: 0; text-align: left; }
 .ns-tg-it small { font-size: 10.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#ns-right .ns-acc { display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto; align-items: center; column-gap: 7px; font-size: 11.5px; font-weight: 400; color: var(--text); padding: 2px 0; cursor: pointer; }
-#ns-right .ns-acc.granted { cursor: default; }
-#ns-right .ns-acc input { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
-#ns-right .ns-acc .ns-acc-n { font-weight: 500; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; }
+#ns-right .ns-acc, .mu-section .ns-acc { display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto; align-items: center; column-gap: 7px; font-size: 11.5px; font-weight: 400; color: var(--text); padding: 2px 0; cursor: pointer; }
+#ns-right .ns-acc.granted, .mu-section .ns-acc.granted { cursor: default; }
+#ns-right .ns-acc input, .mu-section .ns-acc input { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
+#ns-right .ns-acc .ns-acc-n, .mu-section .ns-acc .ns-acc-n { font-weight: 500; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; }
 .ns-exc { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--text-secondary); border: 1px dashed var(--border-active); border-radius: 8px; padding: 0 6px; line-height: 16px; }
 .ns-exc b { font-weight: 500; color: var(--text); }
 .ns-plain { font-size: 11.5px; color: var(--text-secondary); line-height: 1.5; padding: 8px 10px; }
@@ -3475,10 +3475,18 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 .ns-res.open .ns-res-body { display: flex; }
 .ns-res-body .ns-builtin .ns-prov { grid-template-columns: 18px minmax(0, 1fr) auto; }
 .ns-res-body .ns-builtin .ns-prov .ns-pv-what { grid-column: 2 / -1; }
-#ns-right .ns-res-body .ns-acc { grid-template-columns: 20px minmax(0, 1fr); row-gap: 2px; padding: 6px 0; font-size: 13px; min-height: 32px; }
-#ns-right .ns-res-body .ns-acc input { width: 18px; height: 18px; }
-#ns-right .ns-res-body .ns-acc .ns-pv-via { grid-column: 2; font-size: 12px; }
-#ns-right .ns-res-body .ns-acc .ns-acc-end { grid-column: 2; justify-self: start; }
+#ns-right .ns-res-body .ns-acc, .mu-section .ns-res-body .ns-acc { grid-template-columns: 20px minmax(0, 1fr); row-gap: 2px; padding: 6px 0; font-size: 13px; min-height: 32px; }
+#ns-right .ns-res-body .ns-acc input, .mu-section .ns-res-body .ns-acc input { width: 18px; height: 18px; }
+#ns-right .ns-res-body .ns-acc .ns-pv-via, .mu-section .ns-res-body .ns-acc .ns-pv-via { grid-column: 2; font-size: 12px; }
+#ns-right .ns-res-body .ns-acc .ns-acc-end, .mu-section .ns-res-body .ns-acc .ns-acc-end { grid-column: 2; justify-self: start; }
+/* «What it may use» in Session Properties (unit what-it-may-use): the New Session form's rows (the shared .ns-* classes) in
+   the Properties body — its own lines only: a grain under its account, the count of the rest, an empty kind, the stored line */
+.mu-section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.mu-section .ns-card { padding: 0; }
+.mu-section .mu-kids { display: flex; flex-direction: column; gap: 3px; padding: 2px 0 6px 23px; min-width: 0; }
+.mu-section .mu-line b { font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
+.mu-section .mu-line, .mu-section .mu-more, .mu-section .mu-none { overflow-wrap: anywhere; }
+.mu-section .ns-pv-sub { min-width: 0; }
 .ns-res-body .ns-pv-subrow select { width: 100%; }
 /* the group picker as a BOTTOM SHEET on the phone (full-width rows under the thumb, ✓, 完成 — not a 220 px popover) */
 .ns-tg-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.38); z-index: 99999; }

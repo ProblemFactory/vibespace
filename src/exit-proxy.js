@@ -174,6 +174,26 @@ class ExitProxyManager {
     if (namesGroup) return this.ctxFor(session, sessionId);
     return { ...this.ctxFor(session, sessionId, { groups: false }), groupIds: (judged && judged.groupIds) || [], ...(judged && judged.unreadable ? { unreadable: true } : {}) };
   }
+  /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every machine's two lists (use its exit / run through it)
+   *  judged for ONE conversation by THE door's verdict (`E.exitVerdict` over the machine's access, as `_judge` asks it) —
+   *  `facts` = { sessionKeys, conversationKeys, groupIds, groupsUnreadable } — as may-use-model answer rows (the machine's
+   *  name, the grant, its list's mode). */
+  mayUseFor(facts = {}) {
+    const ctx = { sessionKeys: (facts.sessionKeys || []).map(String), conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), ...(facts.groupsUnreadable ? { unreadable: true } : {}) };
+    const out = [];
+    for (const h of this._hosts()) {
+      if (!h || h.id == null) continue;
+      const access = this.accessOf(this._raw(h.id) || h);
+      for (const grant of E.GRANTS) {
+        const v = E.exitVerdict(access, grant, ctx);
+        const base = { door: 'exit', resource: `${h.id}:${grant}`, name: String(h.name || h.label || h.id), detail: { grant, mode: access && access[grant] ? access[grant].mode : null } };
+        if (v.ok) out.push({ ...base, ok: true, via: v.via, ...(v.via === 'group' && v.row && v.row.id ? { groupId: String(v.row.id) } : {}) });
+        else if (v.code === 'excepted') out.push({ ...base, ok: false, code: 'excepted', ...(v.except ? { except: v.except } : {}) });
+        else if (v.code === 'groups_unreadable' || v.code === 'unknown_shape') out.push({ ...base, ok: false, code: v.code });
+      }
+    }
+    return out;
+  }
   keyOf(session, sessionId) { return addressableId(session) ? R.sessionKeyOf(session, sessionId) : `webui:${sessionId}`; }
   /** lane grants-unify: a live session's key in the grant model's ONE spelling — its own conversation id, a pending
    *  fork's (or a not-yet-started conversation's) `webui:<id>`. */

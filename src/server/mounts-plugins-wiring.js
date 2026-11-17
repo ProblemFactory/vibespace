@@ -25,6 +25,8 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
   getTasks = null, sessionStatusKey = null, getSessionStatus = null, persistSessionMeta = null, rebindSessionMeta = null,
   // lane jobs-browser (B-dbc1): the Background Work engine — a job browses as its owner conversation while its run is alive
   getJobs = null,
+  // unit what-it-may-use: the doors built AFTER this wiring (server.js — the channels engine, the exit manager, the window engine), asked at each read
+  mayUseDoors = null,
   // B-f7ab: the late browser key reads the record it extends (never a partial one) and asks THE integration switch
   readSessionMetaOf = null, integrationEnabled = null,
   // agent browser P3 (§4.3.1): the ONE delivery ladder the handback announcer forwards to, and the "For you" inbox
@@ -1585,6 +1587,23 @@ function createSessionMessages(session, sessionId) {
     } catch (e) { console.warn('[browser-trace] boot failed:', e && e.message); }
   };
 
+  // «WHAT IT MAY USE» (unit what-it-may-use — the owner, 2026-11-17): Session Properties' section reads ONE route; every door
+  // answers through its own lister (src/server/may-use.js), the cookie only (THE person verdict)
+  try {
+    let bindingsMemo = null;
+    const later = () => { try { return (typeof mayUseDoors === 'function' ? mayUseDoors() : null) || {}; } catch { return {}; } };
+    const mayUse = require('./may-use.js').create({
+      activeSessions, sessionKeyOf: (s, id) => (sessionStatusKey ? sessionStatusKey(s, id) : ''), addressableId: (s) => require('../claude-lock-capture.js').addressableId(s),
+      storedRow: async (key) => (((await require('../routes/sessions').warmSessions()) || {}).sessions || []).find((x) => x && x.sessionKey === key) || null,
+      groupsOf: (q) => { const tasks = getTasks ? getTasks() : null; if (!tasks) throw new Error('the Task Group store is not ready'); return tasks.groupsForSession(q); },
+      noAgentOf: (b) => !!require('../backend-caps.js').capsOf(b).terminalOnly,
+      browserKeyOf: (cid) => { bindingsMemo = bindingsMemo || require('./browser-bindings.js').create({ dataDir: path.join(rootDir, 'data'), log: console }); return bindingsMemo.lookup(String(cid)) || ''; },
+      grants: () => require('./grants-store.js').store(),
+      doors: { channels: () => later().channels, browser: () => browserKeeper, logins: browserLogins, vaultUse: vaultUseGrants, automation, exits: () => later().exitProxy, windows: () => later().windows, jobs: () => (getJobs ? getJobs() : null) },
+      log: (m) => console.log(m),
+    });
+    mayUse.mount(app, { personVerdict: require('../routes/vault.js').personVerdict });
+  } catch (e) { console.warn('[may-use] the route could not be mounted — ' + (e && e.message)); }
   return { settingHolds, decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
     // lane engine-distribution (P4, §5.4): THE FLEET'S ENGINE PLUGIN at boot — ONE job after the listen, never on the boot path
     bootEngineDistribution: () => { if (!engineDistribution) return; engineDistribution.bootFleet().then((r) => { const line = engineDistribution.bootLine(r); if (line) console.log(line); }, (e) => console.warn(`[plugins] the fleet's engine plugin boot job failed — ${e && e.message}`)); } };

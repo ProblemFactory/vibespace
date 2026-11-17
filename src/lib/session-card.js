@@ -137,6 +137,8 @@ export function registerSessionCardMenu() {
     },
   });
   registerCommand({ id: 'session.properties', title: () => tr('Properties…'), run: (c) => c.app.openSessionProps(c.s) });
+  // unit what-it-may-use (the owner, 2026-11-17): ONE command opens Properties at «What it may use» — every door, by what
+  registerCommand({ id: 'session.mayUse', title: () => tr('What it may use…'), run: (c) => c.app.openSessionProps(c.s, { section: 'may-use' }) });
   registerCommand({ id: 'session.locate', title: () => tr('Locate in sidebar'), run: (c) => c.app.locateSessionInSidebar(c.s.sessionId) });
   registerCommand({
     id: 'session.terminate', title: () => tr('Terminate'),
@@ -195,6 +197,7 @@ export function registerSessionCardMenu() {
   registerMenuItem({ menu: M, group: '3_admin', order: 17, command: 'session.browserHandback', when: (c) => c.s.status === 'live' && !!c.s.webuiId && !!c.s.browserKey && !c.s.host && c.s.browserInput === 'user' });
   registerMenuItem({ menu: M, group: '3_admin', order: 20, command: 'session.rescueTranscript', when: (c) => stopped(c) && !c.s.host });
   registerMenuItem({ menu: M, group: '3_admin', order: 30, command: 'session.properties' });
+  registerMenuItem({ menu: M, group: '3_admin', order: 31, command: 'session.mayUse' });
   registerMenuItem({ menu: M, group: '3_admin', order: 40, command: 'session.terminate', when: (c) => c.s.status !== 'stopped', style: 'color: var(--red, #e55)' });
 }
 registerSessionCardMenu();
