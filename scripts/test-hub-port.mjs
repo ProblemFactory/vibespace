@@ -149,7 +149,7 @@ async function pushes(mod, form) {
 
 console.log('— ⑦ THE PLAIN FORM IS A DEBT WITH A COUNT (主开发\'s law 3): the hub\'s own listener is ONE seam, owed until the helper\'s count reaches its floor');
 /** THE DEBT'S JUDGEMENT: owed while hub boots outside the helper remain above the floor; at it, the words say B2c */
-const LISTENER_DEBT_FLOOR = 0;   // the helper's own law (test-architecture §57c): «at 0 it is the law» — every hub a suite runs is the helper's
+const LISTENER_DEBT_FLOOR = 1;   // the boot helper's answer (lane chrome-157, 2026-11-17): the floor is 1 — test-update-road boots its own STUB server.js, which stays outside the helper; every real hub a suite runs is the helper's
 const debt = (count) => (count > LISTENER_DEBT_FLOOR
   ? { owed: true, words: `owed: ${count} hub boots outside the helper, the floor ${LISTENER_DEBT_FLOOR}` }
   : { owed: false, words: `the count is at its floor (${count}) — DELETE THE LISTENER NOW, B2c: remove src/server/hub-port.js plainListen and the plain form, in ONE commit with the helper's last batch` });
