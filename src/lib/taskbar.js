@@ -207,9 +207,11 @@ export function fitTaskbarStrip(app) {
     strip._fitWired = true;
     // a vertical wheel scrolls the strip sideways (PURE wheelScroll) — it has no height to scroll
     strip.addEventListener('wheel', (e) => {
+      strip._bringIn = null;   // B-b13c: the person's own scroll ends a «+N» row's bring-in (it never pulls the strip back)
       const v = wheelScroll({ scrollLeft: strip.scrollLeft, max: strip.scrollWidth - strip.clientWidth, deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode, width: strip.clientWidth });
       if (v.used) { strip.scrollLeft = v.left; e.preventDefault(); }
     }, { passive: false });
+    strip.addEventListener('pointerdown', () => { strip._bringIn = null; }, { passive: true });   // …and so does a press / a drag on it
     const again = () => { if (_fitRaf) return; _fitRaf = requestAnimationFrame(() => { _fitRaf = 0; fitTaskbarStrip(app); }); };
     strip.addEventListener('scroll', again, { passive: true });
     if (typeof ResizeObserver === 'function') new ResizeObserver(again).observe(strip);
@@ -222,6 +224,25 @@ export function fitTaskbarStrip(app) {
   paintOverflowChip(app, chip);
   chip.title = t('{n} more windows — click for the list', { n: hidden.length });
   chip.setAttribute('aria-label', chip.title);
+  bringTileIn(strip);   // B-b13c: the refit a «+N» row's own scroll started may have moved the strip's edge
+}
+
+/** B-b13c: the tile a «+N» row raised, brought into the strip WHOLE — by whole pixels rounded outward (a scroll offset is
+ *  whole, the flex:1 strip's edge is not), and again at each refit for BRING_IN_MS: the row's scroll refits the strip, the
+ *  chip's new count moves the strip's edge AFTER the scroll (1024×600: tile right 761 vs strip right 760.17). «Whole» is
+ *  stripHidden's own (±0.5 px — the end of the range is whole pixels, the edge is not); at most three scrolls; the person's
+ *  own wheel or press ends it. */
+const BRING_IN_MS = 600;
+function bringTileIn(strip) {
+  const want = strip._bringIn;
+  if (!want) return;
+  const el = performance.now() <= want.until && want.tries > 0 ? [...strip.children].find((c) => c.dataset && c.dataset.winId === want.id) : null;
+  if (!el) { strip._bringIn = null; return; }
+  const r = el.getBoundingClientRect(), sr = strip.getBoundingClientRect();
+  if (r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5) return;   // whole (stripHidden's rule) — kept for the refit the chip's words may still start
+  want.tries--;
+  if (r.left < sr.left) strip.scrollLeft -= Math.ceil(sr.left - r.left) + 4;
+  else strip.scrollLeft += Math.ceil(r.right - sr.right) + 4;
 }
 
 /** The «+N» chip's list: the windows whose tiles the strip cuts — a row raises its window (the tile's own activation) and
@@ -250,13 +271,7 @@ function showHiddenTiles(app, chip) {
       pop.remove();
       activateWindow(app, tl.id);
       // then its tile into the strip — looked up afresh (the activation may have re-drawn the strip), the nearest edge
-      requestAnimationFrame(() => {
-        const el = [...strip.children].find((c) => c.dataset && c.dataset.winId === tl.id);
-        if (!el) return;
-        const r = el.getBoundingClientRect(), sr = strip.getBoundingClientRect();
-        if (r.left < sr.left) strip.scrollLeft -= sr.left - r.left + 4;
-        else if (r.right > sr.right) strip.scrollLeft += r.right - sr.right + 4;
-      });
+      requestAnimationFrame(() => { strip._bringIn = { id: tl.id, until: performance.now() + BRING_IN_MS, tries: 3 }; bringTileIn(strip); });
     };
     pop.appendChild(item);
   }

@@ -718,7 +718,7 @@ const runViewport = async ([VW, VH], font) => {
     const pick = list.rows[list.rows.length - 1];
     const rowAt = await evalJs(`(() => { const r = document.querySelector('.taskbar-overflow-list .overlap-switcher-item[data-win-id="${pick}"]'); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
     if (rowAt) await click(rowAt); await sleep(500);
-    const picked = await evalJs(`(() => { const t = document.querySelector('.taskbar-item[data-win-id="${pick}"]'), s = document.getElementById('taskbar-items'); const r = t.getBoundingClientRect(), sr = s.getBoundingClientRect(); return { active: app.wm.activeWindowId === ${J(pick)}, whole: r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5 }; })()`);
+    const picked = await evalJs(`(() => { const t = document.querySelector('.taskbar-item[data-win-id="${pick}"]'), s = document.getElementById('taskbar-items'); const r = t.getBoundingClientRect(), sr = s.getBoundingClientRect(); return { active: app.wm.activeWindowId === ${J(pick)}, whole: r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5, tile: [r.left, r.right], strip: [sr.left, sr.right], scrollLeft: s.scrollLeft, clientWidth: s.clientWidth, scrollWidth: s.scrollWidth }; })()`);   // B-b13c: the geometry rides the evidence
     check(`⑥ ${tag}: …a row raises its window and brings its tile into the strip`, picked.active && picked.whole, picked);
     // the compact switcher's list switches and adds
     await press('.desktop-switch-compact'); await sleep(350);
