@@ -6,6 +6,7 @@
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { linkOf } from '../internal-link.js'; // PURE (CJS): the link as the list prints it — a BARE link is one whose words are that address
 
 let door = null;
 /** The page's door: { targetOf(kind, ref) → {state, name}, press(kind, ref, at) → plan, menu(kind, ref, at, flash) }. */
@@ -20,15 +21,20 @@ export function internalLinkMenu(kind, ref, at = {}, flash = null) { try { if (d
 const ICON = { conversation: () => UI_ICONS.chat, desktop: () => UI_ICONS.monitor };
 const TITLE = { conversation: () => t('Go to this conversation'), desktop: () => t('Go to this desktop') };
 const UNKNOWN = { conversation: () => t('unknown conversation'), desktop: () => t('unknown desktop') };
+const WHAT = { conversation: () => t('conversation'), desktop: () => t('Desktop') };   // a bare link to a target the page has not read yet: what it is, never its address
 const textOf = (html) => String(html || '').replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
 
 /** THE DRAWING of a conversation / desktop link. `innerHtml` = the label as the surface already escaped it; `cls` + `attrs` = the
- *  surface's own pressable span (the chat's `.chat-link.chat-vs-link`, For-you's `.fy-link`); `target` = linkTargetOf's answer. */
+ *  surface's own pressable span (the chat's `.chat-link.chat-vs-link`, For-you's `.fy-link`); `target` = linkTargetOf's answer.
+ *  A PERSON NEVER READS AN ADDRESS (主开发's look, 2026-11-17): a BARE link (its words are the address itself — bare text or an autolink)
+ *  is drawn as the target's real name with its icon (what it is — «对话» / «桌面» — while the page has not read its list); the address
+ *  stays in «Copy link». Only an UNKNOWN target shows what was written, with its chip. */
 export function vsLinkHtml(kind, ref, innerHtml, { cls, attrs = '', target = linkTargetOf(kind, ref) } = {}) {
   if (!ICON[kind]) return innerHtml;
   const icon = `<span class="vs-link-icon" aria-hidden="true">${ICON[kind]()}</span>`;
   if (target.state === 'unknown') return `<span class="vs-link-unknown">${icon}${innerHtml} <span class="vs-link-chip">${escHtml(UNKNOWN[kind]())}</span></span>`;
   const name = String(target.name || '').trim();
+  if (textOf(innerHtml).trim().toLowerCase() === linkOf(kind, ref).toLowerCase()) return `<span class="${cls}"${attrs} title="${escHtml(TITLE[kind]())}">${icon}${escHtml(name || WHAT[kind]())}</span>`;
   const named = name && !textOf(innerHtml).toLowerCase().includes(name.toLowerCase()) ? `<span class="vs-link-name">${escHtml(name)}</span>` : '';
   return `<span class="${cls}"${attrs} title="${escHtml(TITLE[kind]())}">${icon}${innerHtml}${named}</span>`;
 }

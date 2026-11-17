@@ -176,6 +176,8 @@ try {
       chip: u ? u.querySelector('.vs-link-chip').textContent : null, chipPressable: !!(u && (u.closest('.chat-link') || u.dataset.vsRef)) }; })()`);
   check('B\'s link: an SVG icon, its real name «Links B» after the label that lacks it; the desktop\'s «Desktop 2»', drawn.bIcon && drawn.bName === 'Links B' && drawn.dName === 'Desktop 2', drawn);
   check('the key no row has: the chip «未知对话», nothing to press', drawn.chip === '未知对话' && drawn.chipPressable === false, drawn);
+  const bare = await evalJs(`(() => { const c = document.querySelector(${JSON.stringify(linkSel(C.sid))}); return { c: c ? c.textContent.trim() : null, cIcon: !!(c && c.querySelector('.vs-link-icon svg')), addresses: [...document.querySelectorAll('.chat-vs-link')].filter((e) => /vibespace:/.test(e.textContent)).length }; })()`);
+  check('a BARE link (C, written as its address) reads as its real name «Links C» with its icon — no drawn link shows an address (主开发\'s look)', bare.c === 'Links C' && bare.cIcon && bare.addresses === 0, bare);
 
   console.log('③ the presses — each only navigates');
   const runs0 = stubRuns().length;
