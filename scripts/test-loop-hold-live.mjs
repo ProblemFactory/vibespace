@@ -161,6 +161,11 @@ for (const k of ['busyHog', 'monoHog', 'pbkdfHog', 'parseHog', 'jsonHog', 'zlibH
 const make = () => require((cfg.tree || ${JSON.stringify(REPO)}) + '/src/server/sync-fs-witness.js').create({ rootDir: ${JSON.stringify(ROOT)}, armed: true, readMountinfo: () => '', fresh: true,
   beatMs: cfg.beatMs || 20, holdMs: 100, noAnswerMs: 50, liveMs: cfg.liveMs || 250, askBudgetMs: cfg.budget == null ? 36000 : cfg.budget, samplingOn: () => cfg.sampling !== false, ...(cfg.samplesPerHold ? { samplesPerHold: cfg.samplesPerHold } : {}),
   ...(fproc ? { procRoot: fproc } : {}),
+  // loop-day-report (the .407 mirror): the census OFF in these children — every leg here reads EVERY Runtime.evaluate (the
+  // sweeps' post-watch, leg 7's count) as the HOLD SAMPLER's; the census (on in a hub, ≤ 1 ask a second while the loop is
+  // busy) is a second asker by design, proven by test-loop-census (its take: (c)). cfg.census = its rate, for the one leg
+  // that shows the extra asks are its own
+  censusEveryMs: cfg.census || 0,
   profileEveryMs: cfg.profileEveryMs || 50, holdsOptions: { eluEveryMs: 50, eluBeforeMs: 500, profileMs: cfg.profileMs || 1500, gcMinMs: cfg.gcMinMs || 50, observeGc: !!cfg.observeGc, lostAfterMs: cfg.lostAfterMs || 30000,
     ...(cfg.fakeHeap ? { heap: () => ({ heapUsed: cfg.fakeHeap * 1e9, heapLimit: 1e9, external: 0 }) } : {}) },
   ...(cfg.heapHighAfterMs ? { heapStats: () => ({ used_heap_size: Date.now() - T0 >= cfg.heapHighAfterMs ? 95 : 10, heap_size_limit: 100 }) } : {}) }).start();
@@ -556,6 +561,12 @@ async function legAcceptance() {
   const rb = await run({ plan: 'busy', countEvals: true });
   const rh = rb.out && rb.out.report.holds[0];
   ok(rh && rb.out.checks.evals >= 1 && rb.out.checks.evals <= LH.samplesBound(rh.msHi || rh.ms, 100), `7 — a ${rh && rh.ms} ms hold drew ${rb.out && rb.out.checks.evals} real evaluates — at most the schedule's ${rh && LH.samplesBound(rh.msHi || rh.ms, 100)} (a worker that asks at every check goes red here)`, rb.out && rb.out.checks);
+  // …and the census is a SECOND asker (loop-day-report, the .407 mirror's «3 where 2»): the same busy hold with the census
+  // on (every 50 ms here; 1 s in a hub) draws the hold's evaluates PLUS the census's own asks while the loop ran — they are
+  // not the hold's, and the leg above counts with it off
+  const rc = await run({ plan: 'busy', countEvals: true, census: 50 });
+  const rch = rc.out && rc.out.report.holds[0];
+  ok(rch && rb.out && rc.out.checks.evals > rb.out.checks.evals, `7 — the census is a second asker: the same hold with the census on (every 50 ms) drew ${rc.out && rc.out.checks.evals} real evaluates against ${rb.out && rb.out.checks.evals} with it off — the census's own asks while the loop ran (the hold: «${rch && rch.verdict}»)`, { on: rc.out && rc.out.checks.evals, off: rb.out && rb.out.checks.evals, verdict: rch && rch.verdict });
   // smaller: the press refuses AT THE PRESS; a dead watchdog leaves no profile running; the telemetry name; the byte bound
   const p1 = await run({ plan: 'pressRefuse', sampling: false }), p2 = await run({ plan: 'pressRefuse', openPortFirst: true }), p3 = await run({ plan: 'pressRefuse', fakeHeap: 0.9 });
   const e = (r) => r.out && r.out.checks.press && r.out.checks.press.error;
