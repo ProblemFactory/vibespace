@@ -35,6 +35,12 @@ const READ_TIMEOUT_MS = 60e3;   // law D: one read never blocks the next tick's 
 // anchor; every tier string before it) — never the catalog's verdict: a map not found is `plans.anchor: false` (way ② of the
 // guided door is then not offered), the models stay read
 const PLAN_SCAN_MAX = 64 << 20;
+// THE BACKGROUND LEVEL SIGNAL RIDES THE SAME READ (lane level-signal-2b, majordomo piece 2b): does the build's record union DECLARE
+// it (CMC.levelSignalAt)? Looked for in the very chunks the catalog reads — on 2.1.322 (342 MB) the declaration sits at 285.8 MB,
+// 2.3 MB past the catalog anchor and before the plan map, so it costs no byte more; the scan goes on past the catalog for at most
+// LEVEL_SCAN_MAX after the catalog's parts, as the plan values do. Found ⇒ `level {declared: true, at}`; the window read whole and
+// not found ⇒ `declared: false` (a verdict about the bytes); a read cut short (the bound) says nothing — the entry is tried again.
+const LEVEL_SCAN_MAX = 64 << 20;
 // law E: what a read's refusal MEANS. A content verdict (the bytes are what they are) is stored for good; anything else is
 // an I/O moment (EACCES before a chmod, a swapped file, a timeout) and is tried again at a later tick — the key does not change.
 const CONTENT_CODES = new Set(['no-anchor', 'no-literal', 'not-a-literal', 'forbidden-key', 'too-deep', 'string-long', 'array-long', 'literal-long',
@@ -81,12 +87,14 @@ const isPlans = (p) => !!p && typeof p === 'object' && !Array.isArray(p) && Arra
   && p.types.every((x) => isStr(x, 40) && /^[a-z0-9_]{1,40}$/.test(x)) && [...p.tiers, ...p.withheld].every((x) => isStr(x, 60) && /^default_claude_[a-z0-9_]{1,40}$/.test(x))
   && !!p.orgTypes && typeof p.orgTypes === 'object' && !Array.isArray(p.orgTypes) && Object.keys(p.orgTypes).every((k) => p.types.includes(k) && isStr(p.orgTypes[k], 60))
   && p.anchor === (p.types.length > 0) && p.tiers.every((x) => !CPC.WITHHELD_TIERS.includes(x)) && p.withheld.every((x) => CPC.WITHHELD_TIERS.includes(x));
+const isLevel = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.declared === 'boolean' && (v.at === null || (Number.isInteger(v.at) && v.at >= 0));
 const isEntry = (e) => {
   if (!e || typeof e !== 'object' || Array.isArray(e) || (e.state !== 'read' && e.state !== 'unreadable') || !Array.isArray(e.models) || !Array.isArray(e.refused || [])) return false;
   if (!e.models.every(isModelRow)) return false;
   const ids = new Set(e.models.map((m) => m.id));
   if (e.state === 'read' && (!e.models.length || !isIdMap(e.aliases || {}, ids) || !isIdMap(e.latestPerFamily || {}, ids))) return false;
   if (e.plans !== undefined && e.plans !== null && !isPlans(e.plans)) return false;
+  if (e.level !== undefined && e.level !== null && !isLevel(e.level)) return false;
   return (e.refused || []).every((r) => !!r && typeof r === 'object' && !Array.isArray(r) && typeof r.code === 'string');
 };
 
@@ -153,15 +161,22 @@ async function readBinary(file, { version = null, expect = null, timeoutMs = REA
       if (expect && (fst.dev !== expect.dev || fst.ino !== expect.ino)) { entry.reason = { code: 'changed', at: 0 }; return entry; }
       const size = fst.size; entry.size = size;
       const buf = Buffer.alloc(CHUNK + OVERLAP);
-      let pos = 0, carry = 0, anchorAt = -1, ident = null, partsAt = -1;
+      let pos = 0, carry = 0, anchorAt = -1, ident = null, partsAt = -1, levelAt = -1;
       const plans = CPC.createPlanScanner();
       const planOpen = () => !plans.found() && (partsAt < 0 || pos - partsAt < PLAN_SCAN_MAX);
-      while (pos < size && (anchorAt < 0 || !ident || planOpen()) && !abandoned) {
+      const levelOpen = () => levelAt < 0 && (partsAt < 0 || pos - partsAt < LEVEL_SCAN_MAX);
+      while (pos < size && (anchorAt < 0 || !ident || planOpen() || levelOpen()) && !abandoned) {
         const { bytesRead } = await fh.read(buf, carry, CHUNK, pos);
         if (!bytesRead) break;
         const view = buf.subarray(0, carry + bytesRead), base = pos - carry;
         plans.feed(buf.subarray(carry, carry + bytesRead).toString('latin1'));
         if (anchorAt < 0) { const i = view.indexOf(CMC.ANCHOR, 0, 'latin1'); if (i >= 0) anchorAt = base + i; }
+        if (levelAt < 0) {   // each occurrence of the literal: a 200-byte look decoded (no whole-chunk string)
+          for (let j = view.indexOf(CMC.LEVEL_NEEDLE, 0, 'latin1'); j >= 0 && levelAt < 0; j = view.indexOf(CMC.LEVEL_NEEDLE, j + 1, 'latin1')) {
+            const from = Math.max(0, j - 200), k = CMC.levelSignalAt(view.subarray(from, j + CMC.LEVEL_NEEDLE.length).toString('latin1'));
+            if (k >= 0) levelAt = base + from + k;
+          }
+        }
         if (!ident) {
           const b = view.indexOf('BUILD_TIME:"', 0, 'latin1');
           if (b >= 0) ident = CMC.identityIn(view.subarray(Math.max(0, b - 800), b + 48).toString('latin1'));
@@ -170,6 +185,7 @@ async function readBinary(file, { version = null, expect = null, timeoutMs = REA
         if (partsAt < 0 && anchorAt >= 0 && ident) partsAt = pos;
       }
       entry.plans = plans.result();
+      if (!abandoned) entry.level = { declared: levelAt >= 0, at: levelAt >= 0 ? levelAt : null };   // the window was read whole
       if (ident) { entry.builtAt = ident.builtAt; entry.evidence.versionString = ident.version; entry.evidence.versionAgrees = !version || ident.version === version; if (!entry.cli) entry.cli = ident.version; }
       if (anchorAt < 0) { entry.reason = { code: 'no-anchor', at: 0 }; return entry; }
       const from = Math.max(0, anchorAt - 4096);
@@ -260,7 +276,10 @@ function noteBinary({ cmd, version = null, dataDir = null, which = null, event =
     if (!s.isFile()) return null;
     const key = `${version || '?'}|${s.dev}:${s.ino}:${s.size}:${Math.round(s.mtimeMs)}`;
     const l = loadLedger(dataDir);
-    if (st.key === key && l.current === key && !(l.binaries[key] && l.binaries[key].retry)) return l.binaries[key];
+    // the binary in use, already read BY THIS READER: nothing to do. An entry an older reader wrote is read once more — also right
+    // after a boot (law A loads the ledger and sets the key; before lane level-signal-2b this early return skipped that re-read, so a
+    // reader's new fact — the plan values at 2, the level signal at 3 — never reached the binary in use until the CLI updated)
+    if (st.key === key && l.current === key && l.binaries[key] && l.binaries[key].reader === CMC.READER_VERSION && !l.binaries[key].retry) return l.binaries[key];
     let e = l.binaries[key];
     const known = !!(e && e.reader === CMC.READER_VERSION && !e.retry); // an I/O failure is tried again (law E); a verdict stays
     if (!known) {
@@ -310,6 +329,21 @@ function onView(fn) {
   return () => { st.subs = st.subs.filter((f) => f !== fn); };
 }
 function view() { const l = st.ledger; return l && l.current ? viewOf(l.binaries[l.current]) : null; }
+/** majordomo piece 2b: does the build `version` DECLARE the background level signal, as this reader found in its binary? →
+ *  true | false | null (no binary of that build read by this reader yet). IN MEMORY: the ledger the boot loaded and the ticks
+ *  keep — no file is read here (src/server/conversation-facts.js asks it per row). */
+function levelSignalOf(version) {
+  const l = st.ledger;
+  if (!l || typeof version !== 'string' || !version) return null;
+  let out = null;
+  for (const e of Object.values(l.binaries)) {
+    if (!e || e.reader !== CMC.READER_VERSION || e.retry || !isLevel(e.level)) continue;
+    if (((e.evidence && e.evidence.versionString) || e.cli) !== version) continue;
+    if (e.level.declared) return true;
+    out = false;
+  }
+  return out;
+}
 /** THE CLI'S OWN SUBSCRIPTION VALUES (lane oat-add-door): the binary in use's plan values as its bytes state them →
  *  {cli, types, orgTypes, tiers, withheld, anchor} or null (no binary read yet, or one read before the reader knew them) */
 function plans() {
@@ -326,4 +360,4 @@ function _reset() { st.dataDir = null; st.ledger = null; st.key = null; st.readi
 /** tests only: the ledger loaded with no reader fed (no apply, no listener) / a save now (prune + write) */
 function _load(dataDir) { return loadLedger(dataDir); }
 function _saveNow() { saveLedger(); }
-module.exports = { boot, noteBinary, readBinary, onView, view, plans, status, apply, LEDGER, READ_TIMEOUT_MS, PLAN_SCAN_MAX, _reset, _load, _saveNow };
+module.exports = { boot, noteBinary, readBinary, onView, view, plans, levelSignalOf, status, apply, LEDGER, READ_TIMEOUT_MS, PLAN_SCAN_MAX, LEVEL_SCAN_MAX, _reset, _load, _saveNow };

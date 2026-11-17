@@ -12,7 +12,9 @@ const MP = require('./model-providers.js');
 
 // 2 (lane oat-add-door, 2.369.399): the same streamed read also reads the CLI's own subscription values (src/claude-plan-catalog.js)
 // — a binary read by 1 is read once more
-const READER_VERSION = 2;
+// 3 (lane level-signal-2b, majordomo piece 2b): the same read also says whether the build DECLARES the background level signal in
+// its own record union (levelSignalAt) — a binary read by 2 is read once more
+const READER_VERSION = 3;
 const ANCHOR = 'schema_version:1,pricing_tiers:{';
 const LITERAL_MAX = 512 * 1024;
 const BACK_MAX = 4096;          // how far before the anchor the literal's `{` may sit (the `"//"` comment is ~250 B)
@@ -306,7 +308,29 @@ function priceLayerOf(entries) {
   return Object.keys(rows).length ? { rows } : null;
 }
 
+/** THE BACKGROUND LEVEL SIGNAL, DECLARED (lane level-signal-2b, majordomo piece 2b). The hub reads a conversation's never-published
+ *  background set as EMPTY only on a build that has the signal (src/conversation-facts.js trackedFacts); a build outside the
+ *  measured span of tracked dumps has it when its OWN binary declares it in its record union — the object the tree's dump recipe
+ *  reads (scripts/claude-cli-dump.mjs extractZodUnion: `<obj>({type:<lit>("system"),subtype:<lit>("background_tasks_changed")`,
+ *  measured on 2.1.322: `u({type:T("system"),subtype:T("background_tasks_changed"),tasks:C(u({task_id:o(),…`). A mention in a
+ *  description, or a reader's comparison (`e.subtype==="background_tasks_changed"`), is not a declaration. `levelSignalAt(text)`
+ *  → the index of the declaration in `text`, or -1. PURE; bounded by the occurrences of the literal (each a 200-char look). */
+const LEVEL_SIGNAL = 'background_tasks_changed';
+const LEVEL_NEEDLE = '("' + LEVEL_SIGNAL + '")';
+const LEVEL_IDENT = '[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*';
+const LEVEL_DECL = new RegExp('(?<![A-Za-z0-9_$.])' + LEVEL_IDENT + '\\(\\{type:(' + LEVEL_IDENT + ')\\("system"\\),subtype:\\1\\("' + LEVEL_SIGNAL + '"\\)$');
+function levelSignalAt(text) {
+  if (typeof text !== 'string') return -1;
+  let i = -1;
+  while ((i = text.indexOf(LEVEL_NEEDLE, i + 1)) >= 0) {
+    const from = Math.max(0, i - 200), end = i + LEVEL_NEEDLE.length;
+    const m = LEVEL_DECL.exec(text.slice(from, end));
+    if (m) return from + m.index;
+  }
+  return -1;
+}
+
 module.exports = {
-  READER_VERSION, ANCHOR, LITERAL_MAX, RATE_MAX, KNOWN_CATALOG_IDS, START_TRIES, PARSE_BUDGET,
+  READER_VERSION, ANCHOR, LEVEL_SIGNAL, LEVEL_NEEDLE, levelSignalAt, LITERAL_MAX, RATE_MAX, KNOWN_CATALOG_IDS, START_TRIES, PARSE_BUDGET,
   parseLiteral, catalogIn, identityIn, priceRowOf, validateCatalog, menuRows, familiesOf, remoteRows, aliasGuard, priceLayerOf, fmtWindow, core,
 };

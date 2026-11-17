@@ -679,7 +679,7 @@
    "file": "src/conversation-facts.js",
    "keyedOn": "version",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "LEVEL_MEASURED_FROM / LEVEL_MEASURED_TO — the span of the tracked dumps that declare the background level signal: the HUB reads a never-published set as empty only for a stated build inside it; a newer build reads unknown (the safe side) until a measurement moves the bound — an ordinary update never needs a release",
+   "road": "LEVEL_MEASURED_FROM / LEVEL_MEASURED_TO — the span of the tracked dumps that declare the background level signal, now a FLOOR (lane level-signal-2b): the HUB reads a never-published set as empty for a stated build inside it OR one whose own binary declares the signal (read at runtime by the model catalog's one reader of the binary, kept per build); a build not declaring it, or not read yet, reads unknown (the safe side) — an ordinary update never needs a release",
    "suite": "test-conversation-facts",
    "match": "version-literal",
    "sites": 2

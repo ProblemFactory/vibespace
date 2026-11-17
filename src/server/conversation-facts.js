@@ -39,6 +39,7 @@ function within(promiseLike, ms) {
 function create({
   activeSessions,
   capsOf = () => ({}),          // backend → its caps row (src/backend-caps.js capsOf): `sidecarFacts` decides, never a harness id
+  levelDeclared = () => null,   // piece 2b: a stated CLI build → does its own binary declare the background signal? true | false | null
   keyOf = () => null,           // session → `<backend>:<conversation id>` | null (the id not reported yet)
   turnOf = () => null, turnKnown = () => false,   // src/server/turn-facts.js
   groupsOf = () => [],          // (session, webuiId) → Task Group ids
@@ -77,7 +78,7 @@ function create({
       state: 'running',
       turn, ...(chat ? (turn ? {} : { turnWhy: WHY.notCollected }) : { turnWhy: WHY.terminal }),
     };
-    if (chat) Object.assign(r, CF.trackedFacts(s._convFacts || null, { keeps: caps.sidecarFacts, turn }));
+    if (chat) Object.assign(r, CF.trackedFacts(s._convFacts || null, { keeps: caps.sidecarFacts, turn, levelDeclared }));
     else Object.assign(r, { background: null, backgroundWhy: WHY.terminalNone, timers: null, timersWhy: WHY.terminalNone, idleSince: null, idleSinceWhy: WHY.terminalNone });
     const held = call(heldOf, s, id);
     if (isCount(held)) r.heldPrompts = held; else { r.heldPrompts = null; r.heldPromptsWhy = WHY.noWrapper; }
@@ -236,6 +237,7 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
   const cidOfKey = (key) => (key ? String(key).slice(String(key).indexOf(':') + 1) : null);
   return {
     capsOf: (b) => require('../backend-caps.js').capsOf(b),
+    levelDeclared: (v) => require('./cli-model-catalog.js').levelSignalOf(v),   // piece 2b: in memory (the catalog's ledger)
     keyOf: (s) => { const cid = idOf(s); return cid ? `${s.backend || 'claude'}:${cid}` : null; },
     turnOf: require('./turn-facts.js').turnOf, turnKnown: require('./turn-facts.js').turnKnown,
     heldOf: (s) => {

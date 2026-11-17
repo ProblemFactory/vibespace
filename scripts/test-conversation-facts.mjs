@@ -109,9 +109,9 @@ function unknownLegs(M) {
   const nv = obs([init()]);
   ok(nv.ch[0] === true && nv.st.cli === '' && nv.t.background === null && nv.t.backgroundWhy === CF.WHY.oldCli, 'MUST 3 an init that states NO version records «stated none» (a change) — the set reads unknown, never «no background work»', nv.t);
   const newer = obs([init('2.1.999')]);
-  ok(newer.t.background === null && /2\.1\.999 is not measured/.test(newer.t.backgroundWhy) && newer.t.backgroundWhy.includes(CF.LEVEL_MEASURED_TO), 'MUST 1 a NEWER CLI the tree has not measured: unknown, and it says the span (a release moves the bound — no wrapper does)', newer.t.backgroundWhy);
+  ok(newer.t.background === null && /2\.1\.999 is outside the measured span/.test(newer.t.backgroundWhy) && newer.t.backgroundWhy.includes(CF.LEVEL_MEASURED_TO), 'MUST 1 a NEWER CLI the tree has not measured: unknown, and it says the span (a release moves the bound — no wrapper does)', newer.t.backgroundWhy);
   const older = obs([init('2.1.200')]);
-  ok(older.t.background === null && /not measured/.test(older.t.backgroundWhy), 'an older build outside the span: unknown too');
+  ok(older.t.background === null && /outside the measured span/.test(older.t.backgroundWhy), 'an older build outside the span: unknown too');
   const seen = obs([init('2.1.999'), { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'x', task_type: 'local_bash', description: 'a server' }] }]);
   ok(seen.ch[1] === true && seen.t.background.length === 1, 'a set SEEN is the set on any build, measured or not (the level signal is the full set)');
   const helper = obs([init('2.1.312'), { type: 'system', subtype: 'background_tasks_changed', parent_tool_use_id: 'toolu_1', tasks: [{ task_id: 'y' }] }]);

@@ -146,7 +146,7 @@ console.log('§5 the plan values ride the streamed read');
   ok(!!l.binaries.k1 && !l.binaries.k2 && !l.binaries.k3 && JSON.stringify(CMC.plans()?.types) === '["max","pro","enterprise","team"]', 'the ledger load re-checks the plan values: a hostile type or a withheld tier offered ⇒ the entry is dropped; plans() hands the current binary\'s', Object.keys(l.binaries));
   CMC._reset();
   const MC = require(path.join(REPO, 'src/claude-model-catalog.js'));
-  ok(MC.READER_VERSION === 2, 'the reader\'s version moved (2): a binary read before the plan values were is read once more');
+  ok(MC.READER_VERSION === 3, 'the reader\'s version moved (2: the plan values; 3, lane level-signal-2b: the background level signal): a binary read before them is read once more');
   // RED CONTROL: the reader without the scanner's feed
   const src = fs.readFileSync(path.join(REPO, 'src/server/cli-model-catalog.js'), 'utf8');
   const red = src.replace("        plans.feed(buf.subarray(carry, carry + bytesRead).toString('latin1'));\n", '');

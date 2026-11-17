@@ -240,7 +240,7 @@ function bgDoubt(st) {
  * THE HUB'S JUDGMENT of the observations → the row's three facts. `keeps` = the harness row's `sidecarFacts` ({background,
  * timers, lastRecordAt}); a harness whose wrapper keeps none of them says so (never a harness id here). `turn` decides idleSince.
  */
-function trackedFacts(st, { keeps = null, turn = null } = {}) {
+function trackedFacts(st, { keeps = null, turn = null, levelDeclared = null } = {}) {
   const k = keeps && typeof keeps === 'object' ? keeps : {};
   const out = {};
   let doubt = null;
@@ -258,7 +258,13 @@ function trackedFacts(st, { keeps = null, turn = null } = {}) {
   else if (st.cli === null) { out.background = null; out.backgroundWhy = WHY.noInitSeen; }   // work seen with no first record: a renamed init reads unknown
   else if (st.cli === '') { out.background = null; out.backgroundWhy = WHY.oldCli; }
   else if (levelMeasured(st.cli)) out.background = [];                               // never published on a MEASURED build = none
-  else { out.background = null; out.backgroundWhy = `its CLI version ${st.cli} is not measured for background tasks (measured ${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO})`; }
+  else {
+    // piece 2b: the span is the FLOOR — a build whose own binary DECLARES the signal (read by the hub off the loop, once per build,
+    // kept: src/server/cli-model-catalog.js levelSignalOf) has it too; one that does not, or is not read yet, stays unknown, said
+    let d = null; try { d = typeof levelDeclared === 'function' ? levelDeclared(st.cli) : null; } catch { d = null; }
+    if (d === true) out.background = [];
+    else { out.background = null; out.backgroundWhy = d === false ? `its CLI ${st.cli} does not declare the background signal in its own record union` : `its CLI version ${st.cli} is outside the measured span (${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO}) and its binary has not been read for the background signal yet`; }
+  }
   const tools = st && Array.isArray(st.tools) ? st.tools : [];
   const timerTool = tools.find((n) => TIMER_TOOLS.includes(n));
   const timerish = tools.find((n) => !TIMER_TOOLS.includes(n) && !NON_TIMER_TOOLS.includes(n) && TIMERISH.test(ownToolName(n)));
