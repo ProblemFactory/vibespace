@@ -30,6 +30,7 @@
 //          replyState(item) → {show, enabled, why}, optionsOf(item) → [label] (the chips: the agent's options, else
 //          its detail's parsed — lane foryou-honest, PURE src/ask-options.js), mini?}
 import { escHtml } from './utils.js';
+import { vsLinkHtml } from './internal-link-door.js'; // lane login-request-card piece 1: THE drawing of a conversation / desktop link
 import { tc, t as tr, deviceLocale } from './i18n.js'; // lane foryou-honest: «Dismiss» in the For-you sense (忽略 — the plain key is a dialog's «close»); r7: the deadline ticker's words (no ctx at a tick)
 import { dateOf, stampAt } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { UI_ICONS } from './icons.js';
@@ -552,7 +553,8 @@ export const optionWords = (label, t) => t('Reply: {label}', { label: String(lab
 /** THE WORDS OF AN ITEM, ONE RENDERER (lane foryou-honest, the stress evaluation's P1-2): plain text + the For-you links
  *  (foryou-links linkedHtml — every segment escaped, a link a span around its own words), never markdown — the tray's rows
  *  and the For-you window's pane both draw this (the pane's markdown turned `__tests__/` into a bold «tests/»). */
-export const wordsHtml = (text) => linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr), has: isSettingKey });   // lane mask-value-shape: a masked link = words + THE note
+const fyDraw = (g, inner, attrs) => vsLinkHtml(g.kind, g.ref, inner, { cls: 'fy-link', attrs });   // lane login-request-card piece 1: a conversation / desktop link's ONE drawing (the icon, the real name, the unknown chip)
+export const wordsHtml = (text) => linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr), has: isSettingKey, draw: fyDraw });   // lane mask-value-shape: a masked link = words + THE note
 /** The labels a row's chips stand for (lane foryou-honest): ctx.optionsOf (the model's — explicit, else parsed), else the item's own. */
 export const rowOptions = (i, ctx) => (ctx && typeof ctx.optionsOf === 'function' ? ctx.optionsOf(i) : i && Array.isArray(i.options) ? i.options : []) || [];
 
@@ -742,6 +744,11 @@ export function linkifyInto(el) {
         frag.append(w, ' ', n); continue;
       }
       if (g.t !== 'link') { frag.append(document.createTextNode(g.s)); continue; }
+      if (g.kind === 'conversation' || g.kind === 'desktop') {   // lane login-request-card piece 1: THE drawing — every string in it escaped (vsLinkHtml)
+        const box = document.createElement('span');
+        box.innerHTML = fyDraw(g, escHtml(g.s), ` role="link" tabindex="0" data-fy="${escHtml(g.kind)}" data-ref="${escHtml(g.ref)}"`);
+        frag.append(...box.childNodes); made++; continue;
+      }
       const a = document.createElement('span');
       a.className = 'fy-link'; a.setAttribute('role', 'link'); a.tabIndex = 0;
       a.dataset.fy = g.kind; a.dataset.ref = g.ref; a.textContent = g.s;

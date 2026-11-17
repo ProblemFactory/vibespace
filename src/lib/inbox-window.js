@@ -35,6 +35,7 @@ import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice,
 import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow, hubClock, settingCardOf, settingCardEls, patchSettingVolatile } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
 import { closersOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords, CHECK_AGAIN_TYPES, ROW_OF as FY_ROW } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
+import { fyLinkMenu } from './internal-link-door.js'; // lane login-request-card piece 1: a link of the scheme in an item's words — «Go» · «Copy link»
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
 
@@ -840,7 +841,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     if (fy && st.cur && st.cur.el.contains(fy)) {
       e.preventDefault();
       const it = model.byId(st.cur.id);
-      if (it) { if (fy.classList.contains('ut-art')) model.openArtifact(it, Number(fy.dataset.ai)); else model.openLink(it, fy.dataset.fy, fy.dataset.ref); }
+      if (it) { if (fy.classList.contains('ut-art')) model.openArtifact(it, Number(fy.dataset.ai)); else model.openLink(it, fy.dataset.fy, fy.dataset.ref, { x: e.clientX, y: e.clientY }); }
       return;
     }
     // A NAVIGATION IS A NEW VIEW (verify round): a tab or scope switch re-sorts the list like an open
@@ -878,6 +879,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
   // the row and the pane in place. The reply box keeps its own native menu.
   root.addEventListener('contextmenu', (e) => {
     if (e.target.closest('.iw-reply')) return;
+    if (fyLinkMenu(e)) return;   // lane login-request-card piece 1: a link of the scheme in the words — «Go» · «Copy link»
     const row = e.target.closest('.iw-row');
     const id = row ? row.dataset.id : (st.cur && st.cur.el.contains(e.target) ? st.cur.id : null);
     const items = id ? model.menuFor(id) : [];

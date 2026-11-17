@@ -29,7 +29,7 @@ console.log('① the closed list and the ask\'s verdict (src/ask-setting.js, PUR
   const marked = [...sch.matchAll(/^  '([\w.]+)': \{\n\s+type: 'number', default: (\d+), min: (\d+), max: (\d+), step: (\d+), proposable: true,/gm)].map((m) => ({ key: m[1], def: +m[2], min: +m[3], max: +m[4], step: +m[5] }));
   ok(marked.length === 3 && JSON.stringify(Object.keys(AS.PROPOSABLE).sort()) === JSON.stringify(marked.map((x) => x.key).sort()) && marked.every((x) => { const p = AS.PROPOSABLE[x.key]; return p.def === x.def && p.min === x.min && p.max === x.max && p.step === x.step; }),
     'the closed list IS the schema rows marked `proposable: true` — the three ceilings on turns nobody typed, key, default, min, max and step equal', marked);
-  ok(AS.LINK(DAY) === require(path.join(REPO, 'src/setting-links.js')).settingLink(DAY), 'its link is the setting-links spelling');
+  ok(AS.LINK(DAY) === require(path.join(REPO, 'src/internal-link.js')).settingLink(DAY), 'its link is the scheme\'s spelling (src/internal-link.js)');
   const r = (o, p = 800) => AS.askVerdict(o, { present: p, now: NOW, tzOffsetMin: PT });
   const raise = r({ propose: `${DAY}=1600`, until: '6h' });
   ok(raise.ok && raise.action.type === 'setting-change' && raise.action.key === DAY && raise.action.value === 1600 && raise.action.was === 800 && raise.action.untilRel === 6 * 3600e3 && raise.action.askedAt === NOW, 'a raise with --until 6h ⇒ the action: the row, the value, the value when asked, a stretch counted from the PRESS', raise);

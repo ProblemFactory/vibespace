@@ -3,6 +3,15 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  // lane login-request-card piece 1 (the design's «Internal links» — the words on screen, LINKS): a link to a conversation or a desktop
+  "Go": "移動",
+  "Go to this desktop": "このデスクトップへ移動",
+  "unknown conversation": "不明な会話",
+  "unknown desktop": "不明なデスクトップ",
+  "link::Resume here": "ここで再開",
+  "Read its history": "履歴を読む",
+  "Opened on {desktop} — it had no window.": "{desktop} で開きました。ウィンドウがありませんでした。",
+  "This conversation is archived — open it from the archived list in the sidebar.": "この会話はアーカイブ済みです。サイドバーのアーカイブ一覧から開いてください。",
   // lane sidebar-echo-order (inc-mwbn2xp8-ks0b, round 9): the page speaks only when it takes something back on the screen
   "The server refused a change ({reason}), so it was undone here": "サーバーが変更を拒否したため、ここで元に戻しました（{reason}）",
   "The server refused a change, so it was undone here.": "サーバーが変更を拒否したため、ここで元に戻しました。",

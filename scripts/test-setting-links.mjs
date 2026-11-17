@@ -13,13 +13,13 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, name, info) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', typeof info === 'string' ? info : JSON.stringify(info).slice(0, 900)); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
-const SL = require(path.join(REPO, 'src/setting-links.js'));
+const SL = require(path.join(REPO, 'src/internal-link.js'));   // lane login-request-card piece 1: the settings row of the scheme's ONE module (src/setting-links.js folded in)
 const A = require(path.join(REPO, 'src/spend-authorizer.js'));
 const KEYS = new Set(['spend.unattendedPerInstanceDay', 'spend.unattendedPerIdentityDay', 'spend.unattendedPerIdentityHour', 'spend.allowOverageTurns', 'chat.uploadDir', 'plugin.voice-input.language']);
 const has = (k) => KEYS.has(k);
 const keysOf = (t) => SL.settingLinkHits(t, has).map((h) => h.key);
 
-console.log('① the grammar (src/setting-links.js, PURE)');
+console.log('① the grammar (src/internal-link.js\'s settings row, PURE)');
 {
   ok(SL.SCHEME === 'vibespace://settings/' && SL.settingLink('spend.unattendedPerInstanceDay') === 'vibespace://settings/spend.unattendedPerInstanceDay', 'the spelling: vibespace://settings/<the schema\'s dotted key>');
   ok(A.DOOR_LINK_WORDS && /\{link\}/.test(A.DOOR_LINK_WORDS.spending) && /const SL = Object\.freeze\(\{ settingLink: \(key\) => `vibespace:\/\/settings\/\$\{key\}` \}\);/.test(read('src/spend-authorizer.js')), 'the spend authorizer (PURE, imports nothing) spells the link with the SAME scheme');
@@ -252,17 +252,17 @@ console.log('⑦ THE EXACT-TAG LAW (主开发 2026-11-15, the verifier\'s F4): a
   const convRaw = `<p><a href="#vs-conversation-${UUID}" title="${EVIL}">x</a></p>`, convOk = `<p><a href="#vs-conversation-${UUID}">x</a></p>`;
   const maskRaw = `<p><a href="https://x.example/?token=«redacted»" title="${EVIL}" target="_blank" rel="noopener noreferrer">label</a></p>`, maskOk = `<p><a href="https://x.example/?token=«redacted»" target="_blank" rel="noopener noreferrer">label</a></p>`;
   const legs = (R, S) => { const rr = mk(R);
-    return { set: rr._settingAnchors(setRaw, { vsLinks: true }), setOk: rr._settingAnchors(setOk, { vsLinks: true }), conv: S.conversationLinksHtml(convRaw), convOk: S.conversationLinksHtml(convOk), mask: rr.linkify(maskRaw), maskOk: rr.linkify(maskOk) }; };
+    return { set: rr._schemeAnchors(setRaw, { vsLinks: true }), setOk: rr._schemeAnchors(setOk, { vsLinks: true }), conv: S.conversationLinksHtml(convRaw), convOk: S.conversationLinksHtml(convOk), mask: rr.linkify(maskRaw), maskOk: rr.linkify(maskOk) }; };
   const L = legs(CR, SC);
   ok(!tagsOutside(L.set).includes('img') && L.set === setRaw && /chat-setting-link/.test(L.setOk), 'the setting pass: an anchor carrying more than its href stays the sanitizer\'s own (no tag opens outside an attribute); the ordinary one is the door', L.set);
   ok(!tagsOutside(L.conv).includes('img') && L.conv === convRaw && /chat-sub-link/.test(L.convOk), 'the conversation-link pass (subagent-card): the same — only `<a href="#vs-conversation-<id>">` is rewritten', L.conv);
   ok(!tagsOutside(L.mask).includes('img') && /masked-link-note/.test(L.maskOk) && /masked-link-note/.test(L.mask), 'the masked-anchor pass: the tree\'s own open tag read with each value WHOLE (a titled masked link is still words + its note, and nothing opens outside the title)', { mask: L.mask, ok: L.maskOk });
   // the mutants: the old «not a greater-than sign» run put back, pass by pass — each is RED
-  const crOld = (src) => src.replace("const SETTING_ANCHOR_RE = new RegExp('<a\\\\x20href=\"(' + SETTING_ANCHOR + '[' + SETTING_KEY_CH + ']+)\">([\\\\s\\\\S]*?)<\\\\/a>', 'g');", "const SETTING_ANCHOR_RE = new RegExp('<a\\\\b[^>]*?\\\\shref=\"(' + SETTING_ANCHOR + '[^\"]*)\"[^>]*>([\\\\s\\\\S]*?)<\\\\/a>', 'g');")
+  const crOld = (src) => src.replace("'<a\\\\x20href=\"((?:'", "'<a\\\\b[^>]*?\\\\shref=\"((?:'").replace("')[^\"]*)\">([\\\\s\\\\S]*?)<\\\\/a>'", "')[^\"]*)\"[^>]*>([\\\\s\\\\S]*?)<\\\\/a>'")   // the scheme's after-pass (every target's mark, lane login-request-card piece 1)
     .replace('const open = SANITIZED_ANCHOR_OPEN_RE.exec(a);', 'const open = /^<a\\b[^>]*>/i.exec(a);').replace('const href = [open[0], open[1]], inner', 'const href = /\\shref\\s*=\\s*"([^"]*)"/i.exec(open[0]), inner');
   const scOld = (src) => src.replace('/<a href="#vs-conversation-([0-9a-f-]{36})">([\\s\\S]*?)<\\/a>/g', '/<a href="#vs-conversation-([0-9a-f-]{36})"[^>]*>([\\s\\S]*?)<\\/a>/g');
   const crSrc = read('src/lib/chat-renderers.js'), scSrc = read('src/lib/subagent-card.js');
-  ok(crOld(crSrc) !== crSrc && scOld(scSrc) !== scSrc && crOld(crSrc).split('[^>]*').length - crSrc.split('[^>]*').length >= 2, 'the mutants\' needles are in this tree (the old patterns can be put back)');
+  ok(crOld(crSrc) !== crSrc && scOld(scSrc) !== scSrc && crOld(crSrc).split('[^>]*').length - crSrc.split('[^>]*').length >= 2 && !crOld(crSrc).includes("'<a\\x20href=\"((?:'"), 'the mutants\' needles are in this tree (the old patterns can be put back)');
   const M = legs(await bundle('src/lib/chat-renderers.js', 'chat-renderers.js', crOld), await bundle('src/lib/subagent-card.js', 'subagent-card.js', scOld));
   ok(tagsOutside(M.set).includes('img') && tagsOutside(M.conv).includes('img') && tagsOutside(M.mask).includes('img'), 'RED CONTROL: each pass with its old «[^>]*>» run writes an <img onerror> OUTSIDE an attribute — the setting pass, the conversation pass, the masked pass', { set: M.set, conv: M.conv, mask: M.mask });
 }

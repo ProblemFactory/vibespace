@@ -48,16 +48,20 @@ const TRAIL_ONLY_RE = new RegExp('(?![' + URL_STOP + '])[' + CJK_PUNCT + ']');
 const SCHEME_AT = /https?:\/\//gi;
 // r6 (m7): a masked run's NOTE never sits inside a verbatim block (a <pre>, a code element) — the block reads exactly as written (a copy of it
 // copies the command), the note follows it. One pass over the rendered HTML, only when a note is in it (notesAfterBlocks)
-// lane setting-doors pick 1: an anchor whose href is a link to ONE SETTING — marked's output BEFORE the sanitizer (which keeps no
-// unknown scheme): `[x](vibespace://settings/<key>)`, `<vibespace://settings/<key>>`, a raw <a>; inside code marked writes `&lt;a`, so
-// only real tags. A known key becomes the fragment mark the sanitizer keeps; after linkify that anchor becomes the setting span.
-const SETTING_HREF_RE = new RegExp('(<a\\b[^>]*?\\shref\\s*=\\s*)(?:"vibespace:\\/\\/settings\\/([' + SETTING_KEY_CH + ']+)"|\'vibespace:\\/\\/settings\\/([' + SETTING_KEY_CH + ']+)\')', 'gi');
+// THE SCHEME (src/internal-link.js — lane setting-doors pick 1's settings, lane login-request-card piece 1's conversation and desktop):
+// an anchor whose href IS a link of the scheme — marked's output BEFORE the sanitizer (which keeps no unknown scheme):
+// `[x](vibespace://…)`, `<vibespace://…>`, a raw <a>; inside code marked writes `&lt;a`, so only real tags. A target the grammar takes
+// becomes the fragment mark the sanitizer keeps; after linkify that anchor becomes OUR span — only where the renderer's option is on.
+const VS_HREF_RE = /(<a\b[^>]*?\shref\s*=\s*)(?:"(vibespace:\/\/[^"]*)"|'(vibespace:\/\/[^']*)')/gi;
 // THE EXACT-TAG LAW (主开发 2026-11-15, the verifier's F4): a pass that rewrites a SANITIZED anchor accepts only the open tag the tree's own
 // rewrite + sanitizer produce, every byte accounted for — for an in-page `#vs-…` href that is `<a href="…">` and nothing else (safe-html's
 // hook adds target / rel only to other hrefs). An anchor carrying anything more stays the sanitizer's inert in-page anchor: an engine
 // older than mid-2025 writes a raw `>` inside an attribute value, and a «not a greater-than sign» run would end the tag inside it
 const SANITIZED_ANCHOR_OPEN_RE = /^<a\x20href="([^"]*)"(?:\x20title="[^"]*")?(?:\x20target="_blank"\x20rel="noopener noreferrer")?>/;   // (\x20: a pattern READS an anchor, it makes none — test-path-linkify's anchor-site census)   // THE EXACT-TAG LAW: the tree's own anchor, byte for byte
-const SETTING_ANCHOR_RE = new RegExp('<a\\x20href="(' + SETTING_ANCHOR + '[' + SETTING_KEY_CH + ']+)">([\\s\\S]*?)<\\/a>', 'g');
+const VS_ANCHOR_RE = new RegExp('<a\\x20href="((?:' + VS_MARKS.map((m) => m.replace(/[-#]/g, (c) => '\\' + c)).join('|') + ')[^"]*)">([\\s\\S]*?)<\\/a>', 'g');   // the exact-tag law, every target's mark
+// the bare pass's PLACEHOLDER for a conversation / desktop door (text only, so every later pass skips it — _linkifyBareText); the
+// after-pass draws it (vsLinkHtml: the icon, the real name, the unknown chip)
+const VS_BARE_RE = /<span class="chat-link-vs" data-vs-kind="(conversation|desktop)" data-vs-ref="([^"]*)">([^<]*)<\/span>/g;
 const NOTE_SPAN_RE = / ?<span class="chat-link-note masked-link-note">([^<]*)<\/span>/g;
 const BLOCK_RE = /<pre\b[^>]*>[\s\S]*?<\/pre>|<code\b[^>]*>[\s\S]*?<\/code>/gi;
 export function notesAfterBlocks(html) {
@@ -73,8 +77,9 @@ export function notesAfterBlocks(html) {
 }
 // r4 (M4) → r9: a token's tail is shed by a backward walk over path-linkify's ONE trailing set (isTrailing); cleanPath is that walk too
 import { mcpParts } from './chat-run-summary.js';
-import { chatLinkOf, settingLinkOf } from './card-doors.js'; // lane card-door-in-chat: THE boundary — the chat's own links only, never a card's door; lane setting-doors pick 1: a link to one setting opens it
-import { splitSettingLinks, keyOfAnchor, runRe as settingRunRe, hasScheme as hasSettingScheme, SCHEME as SETTING_SCHEME, ANCHOR_PREFIX as SETTING_ANCHOR, KEY_CH as SETTING_KEY_CH } from '../setting-links.js'; // PURE (CJS, lane setting-doors pick 1): THE grammar of `vibespace://settings/<key>`
+import { chatLinkOf, settingLinkOf, vsLinkOf } from './card-doors.js'; // lane card-door-in-chat: THE boundary — the chat's own links only, never a card's door; lane setting-doors pick 1: a link to one setting opens it
+import { splitLinks, hrefTarget, markOf, targetOfMark, runRe as vsRunRe, runFloor as vsRunFloor, hasScheme as hasVsScheme, MARK_PREFIXES as VS_MARKS } from '../internal-link.js'; // PURE (CJS): THE scheme's ONE grammar — every target (settings, conversation, desktop), the marks, the runs
+import { vsLinkHtml, pressInternalLink, internalLinkMenu } from './internal-link-door.js'; // lane login-request-card piece 1: THE drawing of a conversation / desktop link + the page's door (registered at boot)
 import { isSettingKey } from './settings-schema.js'; // lane setting-doors pick 1: THE client's schema test — a link only when the key IS a row
 import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
 import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../notification-senders.js'; // lane S3: a VibeSpace notice is titled "VibeSpace · …", never `Message from "…"`; S3 verify F3: decided by the record's PATH (`peerVia`), never its sender's name or first sentence
@@ -2597,7 +2602,7 @@ class ChatRenderers {
       html = conversationLinksHtml(html, { known: (id) => (this._subagentKnown ? this._subagentKnown(id) : true), t, escHtml }); // lane agy-subagent-cards: [x](conversation://<id>) opens that subagent
       html = this._wrapTables(html);
       html = this._markOpenFences(text, html); // lane chat-mermaid: a fence still being streamed stays code
-      html = this._settingAnchors(this.linkify(html, { vsLinks }), { vsLinks });   // lane setting-doors pick 1 (+ the option): [x](vibespace://settings/<key>) → the setting span (after linkify: its words are never re-linked)
+      html = this._schemeAnchors(this.linkify(html, { vsLinks }), { vsLinks });   // lane setting-doors pick 1 (+ the option): [x](vibespace://settings/<key>) → the setting span (after linkify: its words are never re-linked)
       return notesAfterBlocks(html);   // lane mask-value-shape r6 (m7): a code block / span reads as written — the note follows it
     } catch {
       return escHtml(text || '');
@@ -2851,26 +2856,40 @@ class ChatRenderers {
    * writes `&lt;a` / `&quot;`.
    */
   _fileHrefs(html) {
-    return this._settingHrefs(html.replace(/(<a\b[^>]*?\shref\s*=\s*)(?:"(file:[^"]*)"|'(file:[^']*)')/gi, (m, pre, dq, sq) => {
+    return this._schemeHrefs(html.replace(/(<a\b[^>]*?\shref\s*=\s*)(?:"(file:[^"]*)"|'(file:[^']*)')/gi, (m, pre, dq, sq) => {
       const fp = fileUrlPath(unescHtml(dq ?? sq));
       const carried = fp && fp.replace(/%/g, '%25');
       return carried && hrefPath(carried) ? `${pre}"${escHtml(carried)}"` : m;
     }));
   }
-  /** lane setting-doors pick 1 — THE PRE-SANITIZE REWRITE: an href the sanitizer would drop that names ONE SETTING
-   *  (`vibespace://settings/<key>`, the key a row of the schema — isSettingKey, exactly; a value part never matches) is
-   *  carried as the fragment `#vs-setting-<key>` the sanitizer keeps (the conversation:// precedent, subagent-card.js);
-   *  _settingAnchors turns it into the setting span after linkify. An unknown key is left as written — dropped, as before. */
-  _settingHrefs(html) {
-    if (!/vibespace:\/\/settings\//i.test(html)) return html;   // the scheme is case-blind in an href (a URL's scheme); the key is not
-    return html.replace(SETTING_HREF_RE, (m, pre, dq, sq) => { const key = dq ?? sq; return isSettingKey(key) ? `${pre}"${SETTING_ANCHOR}${key}"` : m; });
+  /** THE PRE-SANITIZE REWRITE (lane setting-doors pick 1; every target of the scheme since lane login-request-card piece 1): an href
+   *  the sanitizer would drop that IS a link of the scheme (src/internal-link.js hrefTarget — a setting only when its key is a row,
+   *  isSettingKey exactly; a conversation / desktop by its shape; a value part never matches) is carried as the target's fragment mark
+   *  the sanitizer keeps (the conversation:// precedent, subagent-card.js); _schemeAnchors decides after linkify. Anything else is left
+   *  as written — dropped, as before. The mark is inert: with the option off it is its label. */
+  _schemeHrefs(html) {
+    if (!/vibespace:\/\//i.test(html)) return html;   // the scheme is case-blind in an href (a URL's scheme); the reference is not
+    return html.replace(VS_HREF_RE, (m, pre, dq, sq) => { const tg = hrefTarget(dq ?? sq, isSettingKey); return tg ? `${pre}"${markOf(tg.kind, tg.ref)}"` : m; });
   }
-  /** lane setting-doors pick 1: the sanitized, linkified HTML → each `<a href="#vs-setting-<key>">` naming a known row becomes
-   *  THE setting span (its inner HTML the sanitizer's own output). */
-  _settingAnchors(html, { vsLinks = false } = {}) {
-    if (html.indexOf(SETTING_ANCHOR) < 0) return html;
-    if (!vsLinks) return html.replace(SETTING_ANCHOR_RE, (m, href, inner) => inner);   // the option off: the mark is its label, words — never a door
-    return html.replace(SETTING_ANCHOR_RE, (m, href, inner) => { const key = keyOfAnchor(href); return key && isSettingKey(key) ? this._settingSpan(key, inner) : m; });
+  /** THE AFTER-PASS — the sanitized, linkified HTML: each `<a href="<mark>">` of the scheme (the exact tag) and each bare placeholder.
+   *  The renderer's option OFF ⇒ its label, words — never a door; ON ⇒ a known setting is the setting span, a conversation / desktop
+   *  is THE drawing (internal-link-door vsLinkHtml: the icon, the real name, or the unknown chip that cannot be pressed). */
+  _schemeAnchors(html, { vsLinks = false } = {}) {
+    if (html.indexOf('#vs-') >= 0) html = html.replace(VS_ANCHOR_RE, (m, href, inner) => {
+      if (!vsLinks) return inner;   // the option off: the mark is its label
+      const tg = targetOfMark(href);
+      if (!tg) return m;
+      if (tg.kind === 'setting') return isSettingKey(tg.ref) ? this._settingSpan(tg.ref, inner) : m;
+      return this._vsSpan(tg.kind, tg.ref, inner);
+    });
+    if (html.indexOf('chat-link-vs') >= 0) html = html.replace(VS_BARE_RE, (m, kind, ref, text) => this._vsSpan(kind, unescHtml(ref), text));
+    return html;
+  }
+  /** THE conversation / desktop span in chat (lane login-request-card piece 1): `.chat-link.chat-vs-link` + data-vs-kind / data-vs-ref
+   *  — a press GOES (setupLinkHandler → the page's door: the stated exception to copy-on-click, like the subagent link); right-click or
+   *  long-press offers Go · Copy link. */
+  _vsSpan(kind, ref, innerHtml) {
+    return vsLinkHtml(kind, ref, innerHtml, { cls: 'chat-link chat-vs-link', attrs: ` data-vs-kind="${escHtml(kind)}" data-vs-ref="${escHtml(ref)}"` });
   }
   /** THE setting span (lane setting-doors pick 1): `.chat-link.chat-setting-link` + data-setting — no href, no value; a click
    *  opens Settings on the row (setupLinkHandler → app.openSettingAt), never the copy / open menu (card-doors chatLinkOf). */
@@ -3042,23 +3061,27 @@ class ChatRenderers {
   }
 
   /**
-   * lane setting-doors pick 1 — THE BARE PASS: a `vibespace://settings/<key>` in text naming a KNOWN row (src/setting-links.js:
-   * trailing punctuation shed, the longest known key wins) is ONE setting span; a run naming NO row is WORDS — claimed whole
-   * (`chat-link-words`: every later pass skips it, the click handler never sees a .chat-link), so the path pass — whose rule
-   * linked its `//settings/…` tail — never makes half a link of it. Skips a link span an earlier pass made (a URL's).
+   * THE BARE PASS (lane setting-doors pick 1; every target since lane login-request-card piece 1): a door of the scheme in text
+   * (src/internal-link.js splitLinks — trailing punctuation shed; a setting only when the key is a row, the longest known key wins; a
+   * conversation / desktop by its shape) is ONE span — a setting's span, or a conversation / desktop PLACEHOLDER the after-pass draws;
+   * every other run of the scheme is WORDS — claimed whole (`chat-link-words`: every later pass skips it, the click handler never sees
+   * a .chat-link), so the path pass — whose rule linked its `//…` tail — never makes half a link of it. The renderer's option OFF ⇒
+   * every run is words. Skips a link span an earlier pass made (a URL's).
    */
-  linkifySettingLinks(text, { vsLinks = false } = {}) {
-    if (!hasSettingScheme(text)) return text;   // l1: the scheme in any case
-    const html = !vsLinks ? text : this._linkifyBareText(text, (txt) => splitSettingLinks(txt, isSettingKey).map((g) => (g.key ? this._settingSpan(g.key, g.text) : g.text)).join(''));
-    return this._linkifyBareText(html, (txt) => txt.replace(settingRunRe(), (run) => {   // l1: EVERY run that is no door — glued to a word or a path too — so the path pass never links its tail
-      let end = run.length; while (end > SETTING_SCHEME.length && isTrailing(run[end - 1])) end--;
+  linkifySchemeLinks(text, { vsLinks = false } = {}) {
+    if (!hasVsScheme(text)) return text;   // l1: the scheme in any case
+    const html = !vsLinks ? text : this._linkifyBareText(text, (txt) => splitLinks(txt, isSettingKey).map((g) => (!g.kind ? g.text
+      : g.kind === 'setting' ? this._settingSpan(g.ref, g.text)
+        : `<span class="chat-link-vs" data-vs-kind="${g.kind}" data-vs-ref="${escHtml(g.ref)}">${g.text}</span>`)).join(''));
+    return this._linkifyBareText(html, (txt) => txt.replace(vsRunRe(), (run) => {   // l1: EVERY run that is no door — glued to a word or a path too — so the path pass never links its tail
+      let end = run.length; const floor = vsRunFloor(run); while (end > floor && isTrailing(run[end - 1])) end--;
       return `<span class="chat-link-words">${run.slice(0, end)}</span>${run.slice(end)}`;
     }));
   }
 
   /** Combined URL + path linkification on a text segment. */
   linkifySegment(text, esc, opts = {}) {   // opts.vsLinks — renderMarkdown's option (off: a run of the scheme is words)
-    return this.linkifyPathsTagSafe(this.linkifySettingLinks(this.linkifyPagePaths(this.linkifyFileUrls(this.linkifyUrls(text))), opts), esc);
+    return this.linkifyPathsTagSafe(this.linkifySchemeLinks(this.linkifyPagePaths(this.linkifyFileUrls(this.linkifyUrls(text))), opts), esc);
   }
 
   /**
@@ -3095,8 +3118,9 @@ class ChatRenderers {
   }
 
   /** Linkify plain text (for tool output, user messages that don't go through markdown) */
-  linkifyText(text, opts = {}) {   // a tool's words: never given the option (lane setting-doors cure)
-    return this.linkifySegment(escHtml(text), false, opts);
+  linkifyText(text, opts = {}) {   // a tool's words: never given the option (lane setting-doors cure); given it, the scheme's after-pass draws (one drawing)
+    const html = this.linkifySegment(escHtml(text), false, opts);
+    return opts && opts.vsLinks ? this._schemeAnchors(html, opts) : html;
   }
 
   // Resolve a clicked link into {url, fp, rel}. A local filesystem path — our
@@ -3122,6 +3146,8 @@ class ChatRenderers {
       // «已复制！»); a conversation:// link is ChatView's (lane agy-subagent-cards)
       const setting = settingLinkOf(e.target);   // lane setting-doors pick 1: a link to one setting OPENS it (a click, a tap) — no copy, no menu
       if (setting) { e.preventDefault(); e.stopPropagation(); this._openSettingLink(setting.dataset.setting); return; }
+      const vs = vsLinkOf(e.target);   // lane login-request-card piece 1: a link to a conversation / desktop GOES (the page's door) — it only navigates
+      if (vs) { e.preventDefault(); e.stopPropagation(); const plan = pressInternalLink(vs.dataset.vsKind, vs.dataset.vsRef, { x: e.clientX, y: e.clientY }); this._linkOp(vs.dataset.vsKind, plan ? `press:${plan}` : 'press', vs.dataset.vsRef); return; }
       const link = chatLinkOf(e.target);
       if (!link) return;
       e.preventDefault();
@@ -3146,6 +3172,14 @@ class ChatRenderers {
     // Right-click / long-press on a link: same Open/Copy menu (desktop native
     // menu has no useful actions for .chat-link spans)
     this._messageList.addEventListener('contextmenu', (e) => {
+      // lane login-request-card piece 1: a link of the scheme (a conversation, a desktop, a setting) — «Go» · «Copy link»
+      const vsl = vsLinkOf(e.target), setl = !vsl && settingLinkOf(e.target);
+      if (vsl || setl) {
+        e.preventDefault(); e.stopPropagation();
+        const el = vsl || setl, kind = vsl ? vsl.dataset.vsKind : 'setting', ref = vsl ? vsl.dataset.vsRef : setl.dataset.setting;
+        internalLinkMenu(kind, ref, { x: e.clientX, y: e.clientY }, (w) => this.flashLink(el, w));
+        return;
+      }
       const link = chatLinkOf(e.target);   // a card's door keeps the browser's own menu (Save link as…)
       if (!link) return;
       e.preventDefault();
