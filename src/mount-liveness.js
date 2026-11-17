@@ -73,7 +73,16 @@ const WORDS = Object.freeze({
     zh: '存储停止响应 — 其进程连续 {N} 次未回应检查；为保护服务器已断开，将自动重试',
     ja: 'ストレージが応答を停止 — プロセスが {N} 回続けて確認に応答しません。サーバー保護のため切断しました。再試行します',
   },
+  // B-5ce7: a wedge is PARKED — a reconnect re-wedged the owner's OneDrive in 10–30 min, three times a night — so its words
+  // say it stays disconnected and name the door (the For-you item's Reconnect, the mount row's Connect)
   wedged: {
+    en: 'storage stuck — its listing hung {N} times in a row while the provider answered; disconnected and left disconnected (a reconnect usually hangs it again) — Connect it (or Reconnect in For you) to try again',
+    zh: '存储卡住 — 服务商有回应，但列目录连续 {N} 次挂起；已断开且不再自动重连（重连后通常会再次挂起）— 点「连接」（或「待你处理」里的「重新连接」）再试',
+    ja: 'ストレージが停止状態 — プロバイダーは応答するのに一覧が {N} 回続けて止まりました。切断したまま自動では再接続しません（再接続すると通常また止まります）— 「接続」（または「あなたへ」の「再接続」）で再試行できます',
+  },
+  // the wedge whose provider answered with a REFUSAL (a dead token: the cold listing hangs, a fresh lsf says 401) — not parked:
+  // the reconnect meets the refusal and says its re-authorize words (adversarial r1 #3)
+  wedgedRetry: {
     en: 'storage stuck — its listing hung {N} times in a row while the provider answered; disconnected to protect the server; will retry',
     zh: '存储卡住 — 服务商有回应，但列目录连续 {N} 次挂起；为保护服务器已断开，将自动重试',
     ja: 'ストレージが停止状態 — プロバイダーは応答するのに一覧が {N} 回続けて止まりました。サーバー保護のため切断しました。再試行します',
@@ -105,7 +114,9 @@ const EMPTY = Object.freeze({ silent: 0, wedged: 0, slow: 0, unreachableSince: 0
  *   state     — the previous step's `state` (or undefined): { silent, wedged, slow, unreachableSince }
  *   w         — witnesses: { daemonAlive, attr: {state, ms}, list: {state, ms}, backend: {state, ms}, cpuTicks (Δ|null), now }
  *   row       — the record's EFFECTIVE provider row (its `probe` cell; a child reads its parent's row)
- * → { verdict, reason, teardown, blockMs, unblock, words: {key, vars}, strikes: {n, N}, state }
+ * → { verdict, reason, teardown, park, blockMs, unblock, words: {key, vars}, strikes: {n, N}, state }
+ *   park — B-5ce7: a teardown that must NOT be followed by an automatic reconnect (a wedge: the reconnect re-wedges); the
+ *          manager keeps the record disconnected until the person's Reconnect
  */
 function livenessStep(state, w, row) {
   const P = probeCell(row);
@@ -115,7 +126,8 @@ function livenessStep(state, w, row) {
   const list = (w && w.list && w.list.state) || 'skipped';
   const backend = (w && w.backend && w.backend.state) || 'skipped';
   const progress = w && w.cpuTicks != null && w.cpuTicks >= (Number.isFinite(w.progressTicks) ? w.progressTicks : P.progressTicks);
-  const out = (verdict, reason, o) => ({ verdict, reason, teardown: false, blockMs: 0, unblock: false, strikes: { n: 0, N: 0 }, ...o });
+  const still = !!(w && w.list && w.list.state === 'hung' && w.list.held);   // B-5ce7: the listing hung SINCE an earlier sweep («hung (still)»)
+  const out = (verdict, reason, o) => ({ verdict, reason, teardown: false, park: false, blockMs: 0, unblock: false, strikes: { n: 0, N: 0 }, ...o });
 
   if (w && w.daemonAlive === false) {
     return out('died', 'the mount daemon is gone', { teardown: true, words: { key: 'died', vars: {} }, state: { ...EMPTY } });
@@ -147,22 +159,26 @@ function livenessStep(state, w, row) {
     }
     return out('unreachable', 'the listing and a fresh check both got no answer; the mount\'s own process answers', {
       blockMs: P.slowBlockMs, words: { key: 'unreachable', vars: { min: mins(P.unreachableCeilingMs) } },
-      state: { ...s, silent: 0, wedged: 0, slow: s.slow + 1, unreachableSince: since } });
+      state: { ...s, silent: 0, wedged: 0, slow: s.slow + 1, unreachableSince: since } });   // an outage breaks the chain (r1 #12)
   }
   if (answered(backend)) {   // the vendor answers a fresh process but the daemon's listing hangs
     const n = s.wedged + 1;
     if (n >= P.wedgedStrikes) {
       return out('wedged', `the listing hung ${n} sweeps in a row while the backend answered each time — the daemon is not serving what the vendor serves`, {
-        teardown: true, blockMs: 90000, words: { key: 'wedged', vars: { N: n } }, strikes: { n, N: P.wedgedStrikes }, state: { ...EMPTY } });
+        // PARKED only when the provider answered with its listing (`ok`): a refusal (`error` — a dead token) is no wedge a
+        // person can lift by reconnecting; the reconnect meets the refusal and says its re-authorize words
+        teardown: true, park: backend === 'ok', blockMs: 90000, words: { key: backend === 'ok' ? 'wedged' : 'wedgedRetry', vars: { N: n } }, strikes: { n, N: P.wedgedStrikes }, state: { ...EMPTY } });
     }
     return out('slow', `the listing took over ${secs(P.listMs)} s; the backend answered (strike ${n} of ${P.wedgedStrikes})`, {
       blockMs: P.slowBlockMs, words: { key: 'slow', vars: { s: secs(P.listMs) } }, strikes: { n, N: P.wedgedStrikes },
       state: { ...s, silent: 0, wedged: n, slow: s.slow + 1, unreachableSince: 0 } });
   }
-  // backend unknown (no fresh-process probe for this row): slow, and the wedged chain breaks
-  return out('slow', `the listing took over ${secs(P.listMs)} s; no backend answer to compare`, {
-    blockMs: P.slowBlockMs, words: { key: 'slow', vars: { s: secs(P.listMs) } },
-    state: { ...s, silent: 0, wedged: 0, slow: s.slow + 1, unreachableSince: 0 } });
+  // backend unknown (no fresh-process probe for this row, or an inconclusive answer): slow, and the wedged chain breaks —
+  // UNLESS the listing is the SAME hung probe as before (`held`: «hung (still)»): one listing hung across sweeps is no slow
+  // storage, so the chain is HELD (never advanced without a backend answer, never reset to 0/0 — B-5ce7)
+  return out('slow', `the listing took over ${secs(P.listMs)} s; no backend answer to compare${still ? ' (the same listing, still hung — the chain is held)' : ''}`, {
+    blockMs: P.slowBlockMs, words: { key: 'slow', vars: { s: secs(P.listMs) } }, ...(still ? { strikes: { n: s.wedged, N: P.wedgedStrikes } } : {}),
+    state: { ...s, silent: 0, wedged: still ? s.wedged : 0, slow: s.slow + 1, unreachableSince: 0 } });
 }
 
 const fmt = (x) => (!x || x.state === 'skipped') ? 'skipped' : x.state === 'hung' ? (x.held ? 'hung (still)' : 'hung') : `${Math.round(x.ms || 0)}ms${x.state === 'error' ? ' error' : ''}`;

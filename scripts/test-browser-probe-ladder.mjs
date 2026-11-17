@@ -372,7 +372,7 @@ console.log('— ⑤ wiring: the pane\'s Check again, the model\'s verb, the wor
   // lane cli-self-measure: the «Check again» verbs are ONE family the window reads off the registry (foryou-actions CHECK_AGAIN_TYPES —
   // a row that declares `checkAgain`, its hover); the floor probe is one of them
   const FYA = require(path.join(REPO, 'src/foryou-actions.js'));
-  ok(FYA.CHECK_AGAIN_TYPES.includes('browser-floor-check') && /once more now/.test(FYA.ROW_OF['browser-floor-check'].checkAgain) && /CHECK_AGAIN_TYPES\.map\(\(ty\) => \[ty, \(\) => actBtn\(ty, UI_ICONS\.refresh, t\('Check again'\), t\(FY_ROW\[ty\]\.checkAgain\)/.test(win) && /if \(CHECK_AGAIN_TYPES\.includes\(a\)\) \{ if \(await model\.runAction\(it\)\) advance\(id\); return; \}/.test(win), 'the window draws the button (the registry row\'s hover) and runs the model\'s verb');
+  ok(FYA.CHECK_AGAIN_TYPES.includes('browser-floor-check') && /once more now/.test(FYA.ROW_OF['browser-floor-check'].checkAgain) && /CHECK_AGAIN_TYPES\.map\(\(ty\) => \[ty, \(\) => actBtn\(ty, UI_ICONS\.refresh, FY_ROW\[ty\]\.checkLabel \? t\(FY_ROW\[ty\]\.checkLabel\) : t\('Check again'\), t\(FY_ROW\[ty\]\.checkAgain\)/.test(win) && /if \(CHECK_AGAIN_TYPES\.includes\(a\)\) \{ if \(await model\.runAction\(it\)\) advance\(id\); return; \}/.test(win), 'the window draws the button (the registry row\'s hover) and runs the model\'s verb');
   const Z = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default;
   const Jx = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
   const keys = ['Check again', 'Ask for the browser version once more now — this notice goes away by itself once it reads', 'The browser version reads again: {version}', 'Still no answer: {why}'];

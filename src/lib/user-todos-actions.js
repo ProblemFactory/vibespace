@@ -390,7 +390,9 @@ export function inboxModel(app) {
     // model reads the row and never branches on its type; the item resolves itself while it runs and comes back only on a FAIL
     const checkRow = rec && rec.action ? FORYOU_ROW_OF[rec.action.type] : null;
     if (checkRow && typeof checkRow.checkRoute === 'string') {
-      const r = await fetchJson(checkRow.checkRoute, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      // B-5ce7: a route naming the item's own field ({mountId}) is filled from its action — a row for one thing among many
+      const route = checkRow.checkRoute.replace(/\{(\w+)\}/g, (_, k) => encodeURIComponent(String((rec.action && rec.action[k]) || '')));
+      const r = await fetchJson(route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const said = checkRow.checkSaid || {};
       // what the press did, said as it is (small 1): a check already running is NOT restarted — it says how long is left
       if (r && r.ok && r.already) { showToast(t(said.already, { n: String(Number(r.leftMin) || 1) })); return true; }

@@ -205,5 +205,222 @@ const MC = mutantCopies('mount-liveness', REPO);
   fsp.readdir = rd0; fs.readdirSync = rds0; console.warn = w0;
   fs.rmSync(tmp6, { recursive: true, force: true });
 }
+// ⑦ B-5ce7 (the owner's OneDrive 10-23/24: three wedged teardowns in a night, each reconnected in 2 min and wedged again in
+// 10–30 min, 20+ hub stalls between): a WEDGE PARKS — no automatic reconnect, a For-you item with its Reconnect door — and the
+// wedged chain is HELD (never reset to 0/0) while the listing is the same hung probe («list hung (still)») and the backend's
+// answer is inconclusive. Every record here has its mount point under the scratch dir (customPath) and the rclone install road
+// stubbed (round 2: a record without one resolves under HOME, and restore() may install rclone).
+console.log('⑦ B-5ce7: a wedged mount is parked and said; the wedged chain is held while the listing is still hung');
+const H = (backend, now = 0) => ({ ...W('ok', 'hung', backend, 0, now), list: { state: 'hung', ms: 80000, held: true } });
+const heldSeq = (Lx) => run(Lx, [W('ok', 'hung', 'ok'), H('skipped'), H('skipped'), H('ok')]);
+// ⑦'s mounts.js controls share ONE patched copy (one compile, not three): each edit is guarded by its own switch, set only
+// while its control runs — A: the park removed (the backoff instead), B: the auto-remount's park check removed, K: the alive
+// branch's resolve of the stopped-process notice removed. Each anchor must exist or its control is red by name.
+const MUT7 = { A: ["        if (v.park) this._park(live, v, w);\n", "        if (v.park && !globalThis.__vsMut7.A) this._park(live, v, w);\n"],
+  B: ["    if (m.parked) return;   // B-5ce7: a parked mount waits", "    if (m.parked && !globalThis.__vsMut7.B) return;   // B-5ce7: a parked mount waits"],
+  K: ["      if (first || this._killedSaid?.has(m.id)) {", "      if (!globalThis.__vsMut7.K && (first || this._killedSaid?.has(m.id))) {"] };
+let mut7mod = null;
+const mut7 = () => {
+  if (mut7mod) return mut7mod;
+  let src = fs.readFileSync(MOUNTS, 'utf8');
+  for (const [k, [a, b]] of Object.entries(MUT7)) { ok(src.includes(a), `⑦ the control anchor ${k} exists in src/mounts.js`); src = src.replace(a, b); }
+  globalThis.__vsMut7 = {};
+  return (mut7mod = require(MC.write('src/mounts.js', src, 'mut7')));
+};
+const withMut7 = async (k, fn) => { mut7(); globalThis.__vsMut7 = { [k]: true }; try { return await fn(); } finally { globalThis.__vsMut7 = {}; } };
+{
+  const [a, b] = run(L, [W('ok', 'hung', 'ok'), W('ok', 'hung', 'ok')]);
+  ok(a.park === false && b.teardown && b.park === true && b.words.key === 'wedged' && /Reconnect in For you/.test(L.wordsFor('wedged', 'en', { N: 2 })), '⑦ the wedged teardown PARKS (no automatic reconnect) and its words name the doors (Connect, Reconnect in For you)', JSON.stringify(b));
+  const [, dn] = run(L, [W('ok', 'hung', 'error'), W('ok', 'hung', 'error')]);
+  ok(dn.verdict === 'wedged' && dn.teardown && dn.park === false && dn.words.key === 'wedgedRetry', '⑦ a wedge whose provider REFUSED (a dead token: the fresh lsf says 401) is torn down but NOT parked — the reconnect meets the refusal and says its re-authorize words (r1 #3)', JSON.stringify(dn));
+  const CEIL = L.probeCell(cloud).unreachableCeilingMs;
+  const others = [run(L, [W('hung', 'skipped', 'skipped'), W('hung', 'skipped', 'skipped')])[1], L.livenessStep(undefined, { daemonAlive: false }, cloud), run(L, [W('ok', 'hung', 'hung', 0, 1000), W('ok', 'hung', 'hung', 0, 1000 + CEIL)])[1]];
+  ok(others.every((v) => v.teardown && v.park === false), '⑦ …and only an answered wedge: the dead / died / unreachable-ceiling teardowns keep the reconnect with backoff', JSON.stringify(others.map((v) => [v.verdict, v.park])));
+  const held = heldSeq(L);
+  ok(held[1].state.wedged === 1 && held[1].strikes.n === 1 && held[1].strikes.N === 2 && held[2].state.wedged === 1 && !held[1].teardown && !held[2].teardown && held[3].teardown && held[3].park,
+    '⑦ «list hung (still)»: an inconclusive (skipped) backend neither advances nor resets the chain — never 0/0; the next answered sweep parks', JSON.stringify(held.map((v) => [v.verdict, v.strikes, v.state.wedged])));
+  const outage = run(L, [W('ok', 'hung', 'ok'), H('hung'), H('ok')]);
+  ok(outage[1].state.wedged === 0 && !outage.some((v) => v.teardown), '⑦ an OUTAGE (the backend silent too) breaks the chain even under «hung (still)» — the storage, not the daemon (r1 #12)', JSON.stringify(outage.map((v) => [v.verdict, v.state.wedged])));
+  const fresh = run(L, [W('ok', 'hung', 'ok'), W('ok', 'hung', 'skipped'), W('ok', 'hung', 'ok')]);
+  ok(!fresh.some((v) => v.teardown) && fresh[1].state.wedged === 0, '⑦ a FRESH hung listing with no backend answer still breaks the chain (the ① law: no comparison between ⇒ never a teardown)');
+  const line = L.verdictLine('od', held[1], H('skipped'));
+  ok(/list hung \(still\)/.test(line) && /strike 1\/2$/.test(line), '⑦ the journal line says «hung (still)» · strike 1/2 (it read 0/0)', line);
+}
+const scratchRec = (D, extra = {}) => ({ id: 'od', name: 'OneDrive', type: 'onedrive', desired: 'mounted', customPath: path.join(D, 'mnt', 'od'), ...extra });
+const noInstall = (mm) => { mm.maybeUpgradePinnedRclone = () => {}; mm.rcloneAvailable = () => true; return mm; };
+async function parkLegs(MM, tag, { upTo = null, race = false } = {}) {   // upTo 'noRemount': a control stops after the sweeps it tests
+  const os = require('node:os');
+  const D = fs.mkdtempSync(path.join(process.env.VS_TEST_TMP || os.tmpdir(), 'vs-mlive-park-' + tag + '-'));
+  const out = {};
+  const parks = [], unparks = [], calls = { mount: 0, backoff: 0, internal: 0 };
+  const warn = console.warn; console.warn = () => {};
+  const stubbed = (mm, mounted) => {
+    noInstall(mm);
+    mm.isMounted = (m) => m.id === 'od' && mounted.v; mm._daemonAlive = () => mounted.v; mm._daemonPids = () => []; mm._kindOf = () => 'mount';   // its daemon lives while it is mounted
+    mm._probeMountpoint = async (mp, ms, verb) => verb === 'attr' ? { health: 'ok', ms: 4 } : { health: 'hung', ms };
+    mm._probeBackendAccess = async () => 'ok';
+    mm._killMountDaemon = () => {}; mm._mountInner = async () => { calls.mount++; mounted.v = true; return true; };
+    const nb = mm._noteReconnectBackoff.bind(mm); mm._noteReconnectBackoff = (id) => { calls.backoff++; nb(id); };
+    mm.onPark = (m, info) => parks.push([m.id, info]); mm.onUnpark = (m, why) => unparks.push([m.id, why]);
+    return mm;
+  };
+  try {
+    const mounted = { v: true };
+    const mm = stubbed(new MM({ dataDir: D, broadcast: () => {} }), mounted);
+    mm._state.mounts.push(scratchRec(D));
+    const rec = () => mm._state.mounts.find((x) => x.id === 'od');
+    // the teardown's internal unmount (stubbed: no fusermount); `race` = the person's Unmount lands while it is awaited
+    mm.unmount = async (id, o) => { if (o && o.internal) { calls.internal++; mounted.v = false; if (race) rec().desired = 'unmounted'; } };
+    await mm._healthSweep(); await mm._healthSweep();
+    out.parked = { parked: rec() && rec().parked ? { verdict: rec().parked.verdict, strikes: rec().parked.strikes } : null, internal: calls.internal, backoff: calls.backoff, parks: parks.map(([id, i]) => [id, i.verdict, i.strikes]), row: mm.list().find((x) => x.id === 'od'), blocked: !!mm.pathBlocked(mm.pathOf(rec())) };
+    if (race) return out;
+    // two minutes later (the owner's journal: the remount came 2 min after each teardown): the backoff and EVERY path block
+    // (the park's own too) are lifted here — so only the park check can stop the sweep's dead-mount branch
+    mm._reconnects?.clear(); try { mm.unblockPath(mm.pathOf(rec())); } catch { }
+    await mm._healthSweep(); await mm._healthSweep();   // the sweep's dead-mount branch: no reconnect for a parked record
+    out.noRemount = { mount: calls.mount, still: !!(rec() && rec().parked) };
+    if (upTo === 'noRemount') return out;
+    const p0 = parks.length;
+    await mm.restore();
+    out.restore = { mount: calls.mount, still: !!(rec() && rec().parked), error: mm.list().find((x) => x.id === 'od').error, refiled: parks.length === p0 + 1, blocked: !!mm.pathBlocked(mm.pathOf(rec())) };
+    const mm2 = stubbed(new MM({ dataDir: D, broadcast: () => {} }), { v: false });   // a RESTART: the park is on disk
+    await mm2.restore();
+    out.restart = { mount: calls.mount, still: !!(mm2._state.mounts.find((x) => x.id === 'od') || {}).parked };
+    delete mm.unmount;
+    await mm.mount('od');   // the person's Reconnect / Connect
+    out.reconnect = { mount: calls.mount, parked: !!rec().parked, unparks: unparks.filter((u) => u[1] !== 'boot'), error: mm.list().find((x) => x.id === 'od').error, blocked: !!mm.pathBlocked(mm.pathOf(rec())) };
+    const PV = L.livenessStep({ wedged: 1, silent: 0, slow: 1, unreachableSince: 0 }, W('ok', 'hung', 'ok'), cloud);
+    mm._park(rec(), PV, {}); mounted.v = false;
+    await mm.unmount('od');   // the person's Unmount (the real road: its mount point is under the scratch dir)
+    out.unmount = { parked: !!rec().parked, desired: rec().desired, last: unparks[unparks.length - 1] };
+    mm._park(rec(), PV, {});
+    await mm.remove('od');
+    out.remove = { gone: !mm._state.mounts.some((x) => x.id === 'od'), last: unparks[unparks.length - 1] };
+  } catch (e) { out.err = String(e && e.stack || e); }
+  finally { console.warn = warn; fs.rmSync(D, { recursive: true, force: true }); }
+  return out;
+}
+{
+  const P = await parkLegs(mod.MountManager, 'real');
+  ok(!P.err && P.parked.parked && P.parked.parked.verdict === 'wedged' && P.parked.parked.strikes === 2 && P.parked.internal === 1 && P.parked.backoff === 0 && JSON.stringify(P.parked.parks) === JSON.stringify([['od', 'wedged', 2]]),
+    '⑦ the manager: two wedged sweeps ⇒ ONE internal teardown, the record PARKED on disk (no reconnect backoff armed), the producer told once', JSON.stringify(P.parked || P.err));
+  ok(P.parked && P.parked.row && P.parked.row.parked && P.parked.row.parked.verdict === 'wedged' && /Reconnect in For you/.test(P.parked.row.error || '') && P.parked.blocked, '⑦ list(): the row carries `parked` and says why, with its doors; its path is BLOCKED while parked (the hub\'s own doors answer — r1 #6)', JSON.stringify(P.parked && P.parked.row && { parked: P.parked.row.parked, error: P.parked.row.error, blocked: P.parked.blocked }));
+  ok(P.noRemount && P.noRemount.mount === 0 && P.noRemount.still, '⑦ the sweep\'s dead-mount branch never reconnects a parked mount, even with every block lifted (the flap loop is gone)', JSON.stringify(P.noRemount));
+  ok(P.restore && P.restore.mount === 0 && P.restore.still && /Reconnect in For you/.test(P.restore.error || '') && P.restore.refiled && P.restore.blocked, '⑦ restore() keeps it disconnected, says why, blocks its path and re-files its item (merged by its key — r1 #16)', JSON.stringify(P.restore));
+  ok(P.restart && P.restart.mount === 0 && P.restart.still, '⑦ a RESTART keeps the park (persisted on the record; the new manager\'s restore connects nothing)', JSON.stringify(P.restart));
+  ok(P.reconnect && P.reconnect.mount === 1 && !P.reconnect.parked && JSON.stringify(P.reconnect.unparks) === JSON.stringify([['od', 'reconnect']]) && !P.reconnect.error && !P.reconnect.blocked, '⑦ the person\'s Reconnect (any mount()) ends the park — the producer told, the words cleared, the path unblocked', JSON.stringify(P.reconnect));
+  ok(P.unmount && !P.unmount.parked && P.unmount.desired === 'unmounted' && JSON.stringify(P.unmount.last) === JSON.stringify(['od', 'unmounted']), '⑦ the person\'s Unmount ends the park', JSON.stringify(P.unmount));
+  ok(P.remove && P.remove.gone && JSON.stringify(P.remove.last) === JSON.stringify(['od', 'removed']), '⑦ removing the record ends the park', JSON.stringify(P.remove));
+  const R = await parkLegs(mod.MountManager, 'race', { race: true });
+  ok(!R.err && R.parked && !R.parked.parked && R.parked.parks.length === 0 && R.parked.backoff === 0, '⑦ the person\'s Unmount landing while the teardown was awaited wins: no park, no item, no backoff (r1 #10)', JSON.stringify(R.parked || R.err));
+}
+{ // the producer over the REAL For-you store: ONE item per mount (its itemKey), origin server, its door; resolved at the end
+  const os = require('node:os');
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const MP = require(path.join(REPO, 'src/server/mount-for-you.js'));
+  const D = fs.mkdtempSync(path.join(process.env.VS_TEST_TMP || os.tmpdir(), 'vs-mlive-fy-'));
+  const u = new UserTodoManager({ dataDir: D, onChange: () => {}, expirySweepMs: 0 });
+  try {
+    const pk = MP.create({ getUserTodos: () => u });
+    const m = { id: 'od', name: 'Work OneDrive' };
+    pk.park(m, { strikes: 2, provider: 'OneDrive' }); pk.park({ ...m, name: 'Work OneDrive (renamed)' }, { strikes: 3, provider: 'OneDrive' });
+    const open = u.forSession([MP.ITEM_KEY]);
+    const it = open[0] || {};
+    ok(open.length === 1 && it.origin === 'server' && it.kind === 'action' && it.action && it.action.type === 'mount-reconnect' && it.action.mountId === 'od'
+      && it.text === 'Storage Work OneDrive (renamed) is kept disconnected: its listing hung 3 times in a row while OneDrive answered' && it.i18n && it.i18n.text.key === MP.TEXT,
+      '⑦ the producer: a re-park with OTHER words (a renamed mount, another count) updates the ONE open item — its itemKey (r1 #18) — origin server, action mount-reconnect {mountId}', JSON.stringify(open.map((x) => ({ origin: x.origin, kind: x.kind, action: x.action, text: x.text }))));
+    const FA = require(path.join(REPO, 'src/foryou-actions.js'));
+    const row = FA.ROW_OF['mount-reconnect'] || {};
+    ok(row.checkRoute === '/api/mounts/{mountId}/reconnect' && row.checkLabel === 'Reconnect' && FA.CHECK_AGAIN_TYPES.includes('mount-reconnect') && FA.ACTION_IDENTITY['mount-reconnect'] === 'mountId', '⑦ its registry row declares the door (the route with {mountId}, the verb Reconnect) and the merge identity');
+    const n = pk.unpark(m, 'reconnect');
+    ok(n === 1 && u.forSession([MP.ITEM_KEY]).length === 0 && u.get(it.id).status === 'done', '⑦ the park ends ⇒ the item resolves itself');
+  } finally { try { u.stop(); } catch { } fs.rmSync(D, { recursive: true, force: true }); }
+}
+async function killedLegs(MM, tag) {   // the merged B-f230: a hung process stopped ⇒ the person knows it until the mount answers again
+  const os = require('node:os');
+  const D = fs.mkdtempSync(path.join(process.env.VS_TEST_TMP || os.tmpdir(), 'vs-mlive-kill-' + tag + '-'));
+  const said = [], warn = console.warn; console.warn = () => {};
+  const out = {};
+  try {
+    const mounted = { v: true }, attr = { v: 'hung' };
+    const mm = noInstall(new MM({ dataDir: D, broadcast: () => {} }));
+    mm._state.mounts.push(scratchRec(D));
+    mm.isMounted = (m) => m.id === 'od' && mounted.v; mm._daemonAlive = () => mounted.v; mm._daemonPids = () => []; mm._kindOf = () => 'mount'; mm._cpuTicks = () => 0;
+    mm._probeMountpoint = async (mp, ms, verb) => verb === 'attr' ? (attr.v === 'hung' ? { health: 'hung', ms } : { health: 'ok', ms: 4 }) : { health: 'ok', ms: 900 };
+    mm._probeBackendAccess = async () => 'ok'; mm._killMountDaemon = () => {};
+    mm._mountInner = async () => { mounted.v = true; return true; };
+    mm.unmount = async (id, o) => { if (o && o.internal) mounted.v = false; };
+    Object.assign(mm, { onKilled: (m) => said.push(['killed', m.id]), onAnswered: (m) => said.push(['answered', m.id]), onStranded: (m, i) => said.push(['stranded', m.id, i.dest, i.path]) });
+    await mm._healthSweep(); await mm._healthSweep();   // the root check silent twice, no CPU progress ⇒ dead: stopped
+    out.killed = said.slice();
+    attr.v = 'ok'; mm._reconnects?.clear(); try { mm.unblockPath(mm.pathOf(mm._get('od'))); } catch { }
+    await mm._healthSweep();   // the sweep reconnects it (not parked: a stopped process is no wedge)
+    await mm._healthSweep();   // …and it answers
+    out.answered = said.slice();
+    mm._noteStranded(mm._get('od'), '/x/od.stranded-20261117T2340');
+    out.stranded = said[said.length - 1];
+  } catch (e) { out.err = String(e && e.stack || e); }
+  finally { console.warn = warn; fs.rmSync(D, { recursive: true, force: true }); }
+  return out;
+}
+{
+  const K = await killedLegs(mod.MountManager, 'real');
+  ok(!K.err && JSON.stringify(K.killed) === JSON.stringify([['killed', 'od']]), '⑦ (B-f230) its hung process stopped (the dead teardown) ⇒ ONE stopped-process notice', JSON.stringify(K.killed || K.err));
+  ok(!K.err && JSON.stringify(K.answered) === JSON.stringify([['killed', 'od'], ['answered', 'od']]), '⑦ (B-f230) …reconnected by itself (no park), and the notice resolves at its next answer', JSON.stringify(K.answered || K.err));
+  ok(!K.err && K.stranded && K.stranded[0] === 'stranded' && K.stranded[2] === '/x/od.stranded-20261117T2340' && typeof K.stranded[3] === 'string' && K.stranded[3].length > 0, '⑦ (B-f230) stranded files moved aside ⇒ the producer told where (kept in For-you, not a toast only)', JSON.stringify(K.stranded || K.err));
+  const msrc = fs.readFileSync(MOUNTS, 'utf8');
+  ok(/console\.warn\(`\[mounts\] \$\{r\} daemon on \$\{mp\} \(never mounted\) — killed`\);\n\s*this\._killMountDaemon\(mp\);\n\s*this\._noteReconnectBackoff\(id\);\n\s*this\._saidKilled\(m\);/.test(msrc)
+    && /if \(v\.verdict === 'dead' \|\| v\.verdict === 'unreachable'\) this\._saidKilled\(live\);/.test(msrc) && /const dest = await this\._ensureMountpointDir\(mp, \{ quarantine: true \}\);[^\n]*\n\s*if \(dest\) this\._noteStranded\(m, dest\);/.test(msrc),
+    '⑦ (B-f230) every road that stops a mount\'s process says it: the STARTING hung / ceiling kill, the dead and the unreachable-ceiling teardowns; a CephFS mount\'s stranded files too (r1 #4, #19)');
+  const os = require('node:os');
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const MP = require(path.join(REPO, 'src/server/mount-for-you.js'));
+  const D = fs.mkdtempSync(path.join(process.env.VS_TEST_TMP || os.tmpdir(), 'vs-mlive-fyk-'));
+  const u = new UserTodoManager({ dataDir: D, onChange: () => {}, expirySweepMs: 0 });
+  try {
+    const fy = MP.create({ getUserTodos: () => u });
+    const m = { id: 'od', name: 'Work OneDrive' };
+    fy.killed(m); fy.killed(m); fy.stranded(m, { dest: '/x/od.stranded-1', path: '/x/od' }); fy.stranded(m, { dest: '/x/od.stranded-2', path: '/x/od' });
+    const open = u.forSession([MP.ITEM_KEY]);
+    const k = open.filter((i) => i.facts && i.facts.why === 'killed'), st = open.filter((i) => i.facts && i.facts.why === 'stranded');
+    ok(k.length === 1 && k[0].kind === 'notice' && k[0].origin === 'server' && /^Storage Work OneDrive stopped answering and was disconnected/.test(k[0].text) && st.length === 1 && st[0].text === 'Files written into /x/od while storage Work OneDrive was disconnected were moved to /x/od.stranded-2 — nothing was deleted',
+      '⑦ (B-f230) the producer: ONE stopped-process notice per mount; ONE stranded notice per mount, naming the latest folder (r1 #15: the key\'s open items are capped)', JSON.stringify(open.map((i) => [i.kind, i.text])));
+    ok(fy.answered(m) === 1 && u.forSession([MP.ITEM_KEY]).filter((i) => i.facts && i.facts.why === 'killed').length === 0 && u.forSession([MP.ITEM_KEY]).some((i) => i.facts && i.facts.why === 'stranded'), '⑦ (B-f230) the answer resolves the stopped-process notice only (the stranded one is the person\'s)');
+  } finally { try { u.stop(); } catch { } fs.rmSync(D, { recursive: true, force: true }); }
+  const KC = await withMut7('K', () => killedLegs(mut7().MountManager, 'noanswer'));
+  ok(KC && JSON.stringify(KC.answered) === JSON.stringify([['killed', 'od']]), '⑦ CONTROL: the alive branch\'s resolve removed ⇒ the stopped-process notice outlives the answer (red)', JSON.stringify(KC && (KC.answered || KC.err)));
+}
+{ // the door on the page and the wiring: the route's {mountId} filled from the item, the verb named by the row, its words in zh / ja
+  const dict = (f) => { const txt = fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8'); return new Proxy({}, { get: (_, k) => txt.includes('\n  ' + JSON.stringify(String(k)) + ': "') }); };
+  const Z = dict('i18n-zh.js'), J = dict('i18n-ja.js');
+  const FA = require(path.join(REPO, 'src/foryou-actions.js'));
+  const MP = require(path.join(REPO, 'src/server/mount-for-you.js'));
+  const row = FA.ROW_OF['mount-reconnect'] || { checkSaid: {} };
+  const keys = [row.checkAgain, row.checkLabel, ...['done', 'started', 'none', 'failed'].map((k) => row.checkSaid[k]), MP.TEXT, MP.DETAIL, MP.KILLED, MP.STRANDED];
+  const miss = keys.filter((k) => typeof k !== 'string' || !Z[k] || !J[k]);
+  ok(miss.length === 0, '⑦ every word of the mounts\' items and the door is in the zh and ja dictionaries', miss.join(' | '));
+  const UTA = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf8');
+  const FILL = "const route = checkRow.checkRoute.replace(/\\{(\\w+)\\}/g, (_, k) => encodeURIComponent(String((rec.action && rec.action[k]) || '')));";
+  ok(UTA.includes(FILL) && /const r = await fetchJson\(route, \{ method: 'POST'/.test(UTA), '⑦ the client posts the row\'s route with the item\'s own field filled in, encoded (a row for one mount among many)');
+  const IW = fs.readFileSync(path.join(REPO, 'src/lib/inbox-window.js'), 'utf8'), IWL = fs.readFileSync(path.join(REPO, 'src/lib/inbox-window-layout.js'), 'utf8');
+  ok(IW.includes("FY_ROW[ty].checkLabel ? t(FY_ROW[ty].checkLabel) : t('Check again')") && IWL.includes("i.action.type === 'mount-reconnect'"), '⑦ the For-you window draws the parked item\'s verb (Reconnect, the row\'s label) in the check-again family');
+  const WIRE = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  ok(/Object\.assign\(mounts, \{ onPark: \(m, info\) => fy\.park\(m, info\), onUnpark: \(m\) => fy\.unpark\(m\), onKilled: \(m, info\) => fy\.killed\(m, info\), onAnswered: \(m\) => fy\.answered\(m\), onStranded: \(m, info\) => fy\.stranded\(m, info\) \}\);/.test(WIRE)
+    && /app\.post\('\/api\/mounts\/:id\/reconnect'[\s\S]{0,900}state: 'checking'[\s\S]{0,300}state: 'pass'[\s\S]{0,200}ok: false, error:/.test(WIRE) && /verdict !== 'alive'/.test(WIRE),
+    '⑦ the wiring: the manager\'s five hooks are the producer\'s (mounts-plugins-wiring); the Reconnect route answers checking / pass (only when the mount answers its checks — r1 #7) / its error (r1 #17)');
+}
+{ // ⑦ controls
+  const PA = await withMut7('A', () => parkLegs(mut7().MountManager, 'nopark', { upTo: 'noRemount' }));
+  ok(PA.parked && !PA.parked.parked && PA.parked.backoff === 1 && PA.noRemount && PA.noRemount.mount === 1, '⑦ CONTROL: the park removed ⇒ the wedged mount is reconnected by the sweep (the flap loop — red)', JSON.stringify({ parked: PA.parked && PA.parked.parked, backoff: PA.parked && PA.parked.backoff, noRemount: PA.noRemount, err: PA.err }));
+  const PB = await withMut7('B', () => parkLegs(mut7().MountManager, 'remounts', { upTo: 'noRemount' }));
+  ok(PB.noRemount && PB.noRemount.mount === 1 && !PB.noRemount.still, '⑦ CONTROL: the auto-remount\'s park check removed ⇒ the sweep reconnects it (red)', JSON.stringify(PB.noRemount || PB.err));
+  const lsrc = fs.readFileSync(path.join(REPO, 'src/mount-liveness.js'), 'utf8');
+  const fromC = "  const still = !!(w && w.list && w.list.state === 'hung' && w.list.held);";
+  ok(lsrc.includes(fromC), '⑦ the held-chain anchor exists');
+  const LC = require(MC.write('src/mount-liveness.js', lsrc.replace(fromC, '  const still = false;'), 'noheld'));
+  const hc = heldSeq(LC);
+  ok(hc[1].state.wedged === 0 && hc[1].strikes.n === 0 && !hc[3].teardown, '⑦ CONTROL: the held chain removed ⇒ «hung (still)» resets to 0/0 and the wedge never parks (red)', JSON.stringify(hc.map((v) => [v.verdict, v.strikes])));
+}
+
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);
 process.exit(fail ? 1 : 0);

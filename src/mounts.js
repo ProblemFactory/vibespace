@@ -728,6 +728,7 @@ class MountManager {
         canCephShare: this.canCephShare(m),
         path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
         mounted: this.isMounted(m), error: this._errors.get(m.id) || null,
+        parked: m.parked ? { at: m.parked.at, verdict: m.parked.verdict } : null,   // B-5ce7: kept disconnected until the person's Reconnect
         ...(BOX_CIPHERTEXT_RE.test(JSON.stringify(conn)) && keyOf() ? { keyFile: keyOf() } : {}),   // { code, file } only on a refusal: a row with a secret says restore the key file
         ...((lv) => lv ? { probe: { verdict: lv.verdict, strikes: lv.strikes, lastMs: lv.lastMs } } : {})(this._liveness?.get(m.id)),   // the sweep's last verdict (lane mount-liveness)
         // A connect legitimately spends 10-25s in mount()'s window (mountpoint
@@ -991,6 +992,8 @@ class MountManager {
     }
     const mpRemoved = this.pathOf(m);
     if (this.isMounted(m)) await this.unmount(id);
+    if (m.parked) this._unpark(m, 'removed');   // B-5ce7: its For-you item resolves with it
+    this._killedSaid?.delete(id); try { this.onAnswered?.(m); } catch { }
     this._state.mounts = this._state.mounts.filter(x => x.id !== id);
     setTimeout(() => this._cleanupEmptyMountpoint(mpRemoved), 1500);
     this._errors.delete(id);
@@ -1172,6 +1175,9 @@ class MountManager {
   }
 
   async mount(id) {
+    // B-5ce7: a connect ends a PARK — the automatic roads (restore, the sweep's reconnect) never call mount() for a parked
+    // record, so a mount() here is the person's (the Reconnect door, Connect, an edit, a re-authorization)
+    { const pm = this._state.mounts.find((x) => x.id === id); if (pm && pm.parked) this._unpark(pm, 'reconnect'); if (pm) { try { this._forgetHeldProbes(this.pathOf(pm)); } catch { } } }
     // One connect in flight per record — the watchdog's auto-reconnect must
     // never race a user-initiated connect (or itself).
     // A second connect JOINS the one in flight (2.369.213: one daemon per
@@ -1311,6 +1317,7 @@ class MountManager {
   // for 60 s, or past the ceiling, is killed. Ceiling 15 min ≈ 3× the measured
   // 164 788-file scan (the scan is ~linear in cached files).
   static STARTING = Object.freeze({ ceilingMs: 15 * 60e3, hungMs: 60e3, progressTicks: 30, pollMs: 500, quickMs: 5000, countCap: 200000 });
+  static PARK_BLOCK_MS = 10 * 365 * 24 * 3600e3;   // B-5ce7: a parked mount's path stays blocked until its park ends (_unpark unblocks it)
 
   /** Watch a spawned/adopted daemon until its fuse mount exists. A quick
    *  mount answers the caller with the real verdict; past quickMs the caller
@@ -1400,6 +1407,7 @@ class MountManager {
       console.warn(`[mounts] ${r} daemon on ${mp} (never mounted) — killed`);
       this._killMountDaemon(mp);
       this._noteReconnectBackoff(id);
+      this._saidKilled(m);   // B-5ce7 (merged B-f230): the STARTING state too — a daemon stopped while it was coming up is said
     }
     this._errors.set(id, msg);
     this.unblockPath(mp);
@@ -1409,7 +1417,10 @@ class MountManager {
 
   /** Stray files moved aside at connect: said on the row (the move itself
    *  broadcasts the level-2 server-notice). */
-  _noteStranded(m, dest) { (this._stranded = this._stranded || new Map()).set(m.id, dest); }
+  _noteStranded(m, dest) {
+    (this._stranded = this._stranded || new Map()).set(m.id, dest);
+    try { this.onStranded?.(m, { dest, path: this.pathOf(m) }); } catch (e) { console.warn(`[mounts] ${m.id}: the stranded notice was not filed: ${e.message}`); }   // B-5ce7 (merged B-f230): kept in For-you, not a toast only
+  }
 
   /** The fuse mount exists: IO health probe, unblock, access check. */
   async _afterMounted(m, mp) {
@@ -1617,17 +1628,35 @@ class MountManager {
     this._liveness = this._liveness || new Map();
     const v = LIVENESS.livenessStep(this._liveness.get(m.id)?.state, w, rowFor(this, m));
     this._liveness.set(m.id, { state: v.state, verdict: v.verdict, strikes: v.strikes.n, lastMs: Math.round((w.list && w.list.state !== 'skipped' ? w.list.ms : w.attr?.ms) || 0) });
-    if (v.verdict === 'alive') { if (v.unblock) this.unblockPath(mp); return v; }
+    if (v.verdict === 'alive') {
+      if (v.unblock) this.unblockPath(mp);
+      // B-5ce7 (B-f230): the stopped-process notice resolves itself at the answer — and the FIRST answer after a boot resolves one
+      // a hub before this one filed (r1 #9: the said-set lives in memory)
+      const first = !(this._answeredOnce = this._answeredOnce || new Set()).has(m.id);
+      if (first || this._killedSaid?.has(m.id)) { this._answeredOnce.add(m.id); this._killedSaid?.delete(m.id); try { this.onAnswered?.(m); } catch { } }
+      return v;
+    }
     console.warn(LIVENESS.verdictLine(m.id, v, w));   // the record id, never its name (the journal ring outlives a clear)
     try { global.__vsMetric?.('mount-probe-ms', Math.round((w.list?.state === 'hung' ? w.list.ms : w.attr?.ms) || 0), `mount=${m.id} verdict=${v.verdict}`); } catch {}
     if (v.blockMs) this.blockPath(mp, v.blockMs);
     const words = LIVENESS.wordsFor(v.words.key, 'en', v.words.vars);
     if (this._errors.get(m.id) !== words) { this._errors.set(m.id, words); if (!v.teardown) this._notify(); }
     if (v.teardown && v.verdict !== 'died') {
-      // desired stays 'mounted' → the sweep's dead-mount branch reconnects with backoff; only a user Unmount ends supervision
+      // desired stays 'mounted' → the sweep's dead-mount branch reconnects with backoff; only a user Unmount ends supervision —
+      // B-5ce7: unless the verdict PARKS (a wedge: the reconnect re-wedges — the flap loop): kept disconnected, said, a For-you
+      // item with the Reconnect door; nothing automatic connects it again
       await this.unmount(m.id, { internal: true });
       this._killMountDaemon(mp);
-      this._noteReconnectBackoff(m.id);
+      this._forgetHeldProbes(mp);   // r1 #11: a stuck `ls` of the OLD daemon must not read «hung (still)» on the next mount
+      // r1 #10: the teardown awaited up to seconds — a person's Unmount / Remove in that window wins (no park, no backoff)
+      const live = this._state.mounts.find((x) => x.id === m.id);
+      if (live && live.desired === 'mounted') {
+        if (v.park) this._park(live, v, w);
+        else this._noteReconnectBackoff(m.id);
+        // B-5ce7 (merged B-f230): its process was stopped (silent, or its storage unreachable past the ceiling) — the person
+        // KNOWS it until it answers again
+        if (v.verdict === 'dead' || v.verdict === 'unreachable') this._saidKilled(live);
+      }
       this._notify();
     }
     return v;
@@ -1775,6 +1804,46 @@ class MountManager {
   // bounded, threadpool-safe. Auth-class failures are excluded: retrying a
   // revoked/expired credential just hammers the backend and OVERWRITES the
   // actionable error the user needs to see.
+  /** B-5ce7 (B-f230): a stopped process is said once per episode (`onKilled`), resolved at its next answer. */
+  _saidKilled(m) {
+    (this._killedSaid = this._killedSaid || new Set()).add(m.id);
+    try { this.onKilled?.(m, {}); } catch (e) { console.warn(`[mounts] ${m.id}: the stopped notice was not filed: ${e.message}`); }
+  }
+  /** r1 #11: the held probe children of a mount point (the `list:` / `attr:` keys of _probeMountpoint) are forgotten. */
+  _forgetHeldProbes(mp) { this._heldProbes?.delete('list:' + mp); this._heldProbes?.delete('attr:' + mp); }
+  /** B-5ce7: PARK a torn-down record — persisted (`m.parked`, so a restart keeps it disconnected), its words on the row, its
+   *  path BLOCKED while parked (r1 #6: the hub's own doors answer, never write into the bare folder), and the For-you producer
+   *  told (`onPark`, wired to src/server/mount-for-you.js). The record id in the journal, never its name. */
+  _park(m, v, w) {
+    const n = (v.strikes && v.strikes.n) || 0;
+    m.parked = { at: Date.now(), verdict: v.verdict, reason: String(v.reason || '').slice(0, 240), strikes: n };
+    this._reconnects?.delete(m.id);
+    this._save();
+    this.blockPath(this.pathOf(m), MountManager.PARK_BLOCK_MS);
+    if (this._killedSaid?.delete(m.id)) { try { this.onAnswered?.(m); } catch { } }   // r1 #8: a stopped-process notice ends with the park
+    this._errors.set(m.id, this._parkedWords(m));
+    console.warn(`[mounts] ${m.id} PARKED after the ${v.verdict} teardown (${n} strikes) — no automatic reconnect until the person's Reconnect`);   // the record id and the verdict only (the record-clear census)
+    let provider = ''; try { provider = String(this._sourceLabel(m) || ''); } catch { }
+    if (!provider) provider = String(m.type || '');
+    try { this.onPark?.(m, { verdict: v.verdict, reason: m.parked.reason, strikes: n, provider }); } catch (e) { console.warn(`[mounts] ${m.id}: the parked notice was not filed: ${e.message}`); }
+  }
+  /** B-5ce7: END a park (the person's connect / Unmount, the record removed) — the For-you item resolves (`onUnpark`). */
+  _unpark(m, why) {
+    if (!m || !m.parked) return;
+    delete m.parked;
+    this._save();
+    try { this.unblockPath(this.pathOf(m)); } catch { }
+    if (this._errors.get(m.id) === this._parkedWordsFor(m.id)) this._errors.delete(m.id);
+    console.warn(`[mounts] ${m.id} park ended (${why})`);
+    try { this.onUnpark?.(m, why); } catch (e) { console.warn(`[mounts] ${m.id}: the parked notice was not resolved: ${e.message}`); }
+  }
+  _parkedWords(m) {
+    const words = LIVENESS.wordsFor('wedged', 'en', { N: (m.parked && m.parked.strikes) || 2 });   // the one verdict that parks
+    (this._parkedSaid = this._parkedSaid || new Map()).set(m.id, words);
+    return words;
+  }
+  _parkedWordsFor(id) { return this._parkedSaid?.get(id); }
+
   _noteReconnectBackoff(id) {
     const r = (this._reconnects = this._reconnects || new Map());
     const st = r.get(id) || { attempts: 0, nextAt: 0 };
@@ -1784,6 +1853,7 @@ class MountManager {
   }
 
   async _maybeAutoRemount(m) {
+    if (m.parked) return;   // B-5ce7: a parked mount waits for the person's Reconnect — never a remount loop
     const mp = this.pathOf(m);
     if (this.pathBlocked(mp) || this._connecting?.has(m.id) || this._starting?.has(m.id)) return; // connect/start/teardown in flight
     if (m.expiresAt && Date.now() > m.expiresAt) return;             // expired — user must re-import
@@ -1831,7 +1901,8 @@ class MountManager {
   async _mountCephfs(id) {
     const m = this._get(id);
     const mp = this.pathOf(m);
-    await this._ensureMountpointDir(mp, { quarantine: true }); // sudo -n fallback covers root-owned parents
+    const dest = await this._ensureMountpointDir(mp, { quarantine: true }); // sudo -n fallback covers root-owned parents
+    if (dest) this._noteStranded(m, dest);   // B-5ce7 (B-f230, r1 #19): a CephFS mount's stranded files reach For-you too
     await this._ensureModprobeShim(); // 3.5.0-class images lack kmod — see above
     // `sudo mount -t ceph <mons>:<path> <mp> -o name=<user>,secret=<key>,mds_namespace=<fs>`
     // Root-only, so sudo (the container has passwordless sudo). Secret rides in
@@ -2152,6 +2223,8 @@ class MountManager {
     if (!opts.internal) {
       m.desired = 'unmounted';
       this._reconnects?.delete(id);
+      if (m.parked) this._unpark(m, 'unmounted');   // B-5ce7: the person ended supervision — its For-you item resolves
+      this._killedSaid?.delete(id); try { this.onAnswered?.(m); } catch { }   // …and a stopped-process notice with it (r1 #9: even one a hub before this one filed)
       this._save();
     }
     const finish = (ok) => {
@@ -2196,8 +2269,15 @@ class MountManager {
   /** Boot: adopt live mounts, re-mount anything desired-but-dead. */
   async restore() {
     this.maybeUpgradePinnedRclone(); // async, best-effort — see the pin note
+    // B-5ce7 (r1 #16): an item whose record is NOT parked any more (a crash between the park's end and its item's) resolves
+    for (const m of this._state.mounts) if (!m.parked) { try { this.onUnpark?.(m, 'boot'); } catch { } }
     for (const m of this._state.mounts) {
       if (m.desired !== 'mounted') continue;
+      if (m.parked) {   // B-5ce7: kept disconnected across a restart — said, its path blocked, its For-you item re-filed (merged)
+        this._errors.set(m.id, this._parkedWords(m)); this.blockPath(this.pathOf(m), MountManager.PARK_BLOCK_MS);
+        try { this.onPark?.(m, { verdict: m.parked.verdict, reason: m.parked.reason, strikes: m.parked.strikes, provider: String(m.type || '') }); } catch { }
+        continue;
+      }
       if (m.expiresAt && Date.now() > m.expiresAt) { this._errors.set(m.id, 'credential expired'); continue; }
       if (this.isMounted(m)) continue; // adopted — detached rclone survived
       try { await this.mount(m.id); } catch (e) { this._errors.set(m.id, String(e.message || e)); }

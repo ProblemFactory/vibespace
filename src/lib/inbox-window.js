@@ -351,7 +351,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     'browser-grant': (it) => { const g = grantAskOf(it) || { label: '' }; return actBtn('browser-grant', UI_ICONS.check, t('Let this conversation use {label}', { label: g.label }), t('Adds this conversation under “Who can use it” for {label}, then tells the agent', { label: g.label }), 'iw-act-primary'); },
     'browser-restart': () => actBtn('browser-restart', UI_ICONS.check, t('Restart'), t('Restart the browser that stopped answering — logins stay in the profile, its tabs are re-opened'), 'iw-act-primary'), // lane browser-unresponsive
     // the «Check again» verbs (B-0b8c's browser version, lane cli-self-measure's held Claude Code): the registry row declares the hover
-    ...Object.fromEntries(CHECK_AGAIN_TYPES.map((ty) => [ty, () => actBtn(ty, UI_ICONS.refresh, t('Check again'), t(FY_ROW[ty].checkAgain), 'iw-act-primary')])),
+    ...Object.fromEntries(CHECK_AGAIN_TYPES.map((ty) => [ty, () => actBtn(ty, UI_ICONS.refresh, FY_ROW[ty].checkLabel ? t(FY_ROW[ty].checkLabel) : t('Check again'), t(FY_ROW[ty].checkAgain), 'iw-act-primary')])),   // B-5ce7: a row may name its verb (a parked mount's Reconnect)
     'exit-allow': () => actBtn('exit-allow', UI_ICONS.check, t('Allow'), t('Allow'), 'iw-act-primary iw-act-exit'),
     'exit-deny': () => actBtn('exit-deny', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit'),
     // lane hub-act-ask: a hub act held on a cluster instance — Allow once (primary) / Always on this machine / Deny
