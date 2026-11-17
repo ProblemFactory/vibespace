@@ -5,7 +5,8 @@ import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { mountProxyField } from './browser-proxy-field.js';
-import { proxyWords } from './browser-proxy-model.js';
+import { proxyWords, proxyDoor } from './browser-proxy-model.js';
+import { showUnlock, showSetup } from './vault-unlock.js';
 
 export function openProxyDialog(app, r, { onDone = null } = {}) {
   const label = String((r && (r.label || r.id)) || '');
@@ -18,8 +19,11 @@ export function openProxyDialog(app, r, { onDone = null } = {}) {
   shell.body.appendChild(el('div', 'bnew-hint', t('Applied at the browser\'s next start.')));
   const refusal = noteLine('bwho-refusal bnew-refusal', '', { warn: true });
   refusal.style.display = 'none';
-  const notes = el('div', 'bwho-notes'); notes.appendChild(refusal);
-  const say = (text) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; };
+  // B-8b87 cure: a locked (or never set up) vault's refusal carries ITS press — Unlock… / Set up the vault…
+  const door = btn('', () => { try { (door.dataset.door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } }, 'bproxy-door');
+  door.style.display = 'none';
+  const notes = el('div', 'bwho-notes'); notes.append(refusal, door);
+  const say = (text, which = null) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; door.dataset.door = which || ''; door.textContent = which === 'setup' ? t('Set up the vault…') : t('Unlock…'); door.style.display = text && which ? '' : 'none'; };
   const footer = el('div', 'dialog-footer bwho-footer');
   const cancel = btn(t('Cancel'), () => shell.close(), 'bnew-cancel');
   const save = btn(t('Save'), () => doSave(), 'mounts-btn-primary bproxy-save');
@@ -31,9 +35,9 @@ export function openProxyDialog(app, r, { onDone = null } = {}) {
     busy = true; save.disabled = true;
     try {
       const v = await field.read();
-      if (!v.ok) { say(proxyWords(v.code, t, v.error)); if (v.focus) v.focus.focus(); return; }
+      if (!v.ok) { say(proxyWords(v.code, t, v.error, { act: 'save', word: v.word }), proxyDoor(v.code, v.word)); if (v.focus) v.focus.focus(); return; }
       const res = await fetchJson(`/api/browser/profiles/${encodeURIComponent(r.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proxy: v.proxy || '', proxyCredential: v.proxyCredential || '' }) });
-      if (!res || res.error) { say(proxyWords(res && res.code, t, res && res.error)); return; }
+      if (!res || res.error) { say(proxyWords(res && res.code, t, res && res.error, { act: 'save', word: res && res.word }), proxyDoor(res && res.code, res && res.word)); return; }
       showToast(v.proxy ? t('{label} goes through its proxy from its next start', { label }) : t('{label} has no proxy from its next start', { label }), { duration: 6000 });
       shell.close();
       try { onDone?.(); } catch { /* the panel reloads on its own */ }

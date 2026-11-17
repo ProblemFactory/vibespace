@@ -9,24 +9,36 @@
 //      the tailnet above the profile
 //   ③ THE FORWARDER (src/server/egress-proxy.js upstream): a name the local resolver cannot resolve reaches the stand-in upstream AS THE
 //      NAME (CONNECT host:port; SOCKS5 address type 3), with the login; a refusal is the 502 page with the vault's sentence. RED: a copy
-//      that resolves the name locally first
+//      that resolves the name locally first (a SPY stands in for the resolver — the box's is never asked). A plain http:// page through
+//      each upstream: the origin's body arrives (RED: the socks road before the cure); an upstream's 407 is the forwarder's own page;
+//      the SOCKS5 refusals by code; an IPv6 literal with an IPv4 tail refused, never mis-encoded
 //   ④ THE ONE READER (src/server/browser-proxy-logins.js over a stand-in vault): save (locked refused), read (a use NOTED: door
 //      browser-proxy, by the launch's actor), locked ⇒ the vault's own word, a name the vault holds nothing under ⇒ its word
 //   ⑤ THE REAL KEEPER over the fake agent-browser: the switch on the driver's config is the forwarder's loopback port, the forwarder
 //      carries the profile's proxy with its login, the login is NOWHERE in the launch / the calls / the store; a locked vault ⇒ the
 //      launch refused by name, nothing launched; a password saved in the address ⇒ refused, and «Move the password to the vault»
-//      moves it in one act. REDs: a keeper that never stamps the switch; a keeper that starts despite the locked vault
-//   ⑥ THE PERSON'S DOORS: the routes sit behind person() (no bearer reaches a proxy login); an agent's token never sets the proxy or its
-//      login; the vault kind's row reads «no agent door»
+//      moves it in one act (locked ⇒ nothing changed; a store that cannot be written ⇒ not_written, the vault entry kept). REDs: a keeper
+//      that never stamps the switch; a keeper that starts despite the locked vault; a move that says done unwritten. A HUB RESTART adopts
+//      the browser and re-binds its forwarder on the same port (the vault locked: re-bound, every request the locked page) — RED: the
+//      line that ended it; the driver road FAIL-CLOSED (no config to carry the switch ⇒ refused by name, nothing launched — RED: the
+//      call run without it); the person's own proxy switches out by the tree's one rule (RED: the four-switch filter); a cloud browser's
+//      proxy refused at the creation and the edit
+//   ⑥ THE PERSON'S DOORS: the routes sit behind person() (no bearer reaches a proxy login); an agent MAY give the address when it creates
+//      a profile, never edits an existing profile's proxy and never names a login (the refusal names the card's Proxy… door); the vault
+//      kind's row reads «no agent door»
+//   ⑦ THE PAGE'S WORDS (src/lib/browser-proxy-model.js): every refusal a person sees by its code in the page's words (never the server's
+//      English), the locked one per act with its Unlock… press, a vault never set up its own; a login the vault no longer lists shown as
+//      itself; the card's «from its next start»; New profile busy before the login is saved
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
+import tls from 'node:tls';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
-import { scratch, deadPort } from './scratch.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { scratch } from './scratch.mjs';
 import { writeFakeAgentBrowser } from './fixtures/fake-agent-browser.mjs';
-const DEAD_CDP = await deadPort();
 const require = createRequire(import.meta.url);
 const Module = require('node:module');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -37,7 +49,8 @@ if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) { console.error
 /** an in-memory copy of a src module with `from` replaced — its own requires resolve beside the original */
 function mutant(rel, from, to) {
   const file = path.join(REPO, rel), src = read(rel);
-  if (!src.includes(from)) throw new Error(`mutant: ${rel} no longer holds ${JSON.stringify(from.slice(0, 70))}`);
+  const at = src.split(from).length - 1;
+  if (at !== 1) throw new Error(`mutant: ${rel} holds ${JSON.stringify(from.slice(0, 70))} ${at} times (exactly once wanted)`);
   const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file));
   m._compile(src.split(from).join(to), file);
   return m.exports;
@@ -78,6 +91,11 @@ console.log('① THE SHAPE — the address alone; its login a vault entry saved 
   ok(!vc.ok && vc.code === 'proxy_off_machine' && /this machine only, for now/.test(vc.error) && vl.ok && vl.value.proxy === 'http://proxy.example.test:3128' && vl.value.proxyCredential === null, 'a NEW profile on a paired machine with a proxy is refused at its creation too; on this machine it is kept, the address alone', [vc.code, vl.ok]);
 }
 
+{ // B-8b87 cure: a cloud browser runs at its vendor — refused at the start's verdict and at the creation (the edit: ⑤)
+  const PX = 'socks5://p.example.test:1080', cv = B.proxyLaunchVerdict({ label: 'C', provider: 'cloud:browserbase', proxy: PX }), ci = B.validateProfileInput({ label: 'C', provider: 'cloud:browserbase', proxy: PX });
+  ok(!cv.ok && cv.code === 'proxy_cloud_browser' && !ci.ok && ci.code === 'proxy_cloud_browser' && B.proxyLaunchVerdict({ label: 'L', provider: 'chromium', proxy: PX }).ok,
+    'a cloud browser (cloud:<vendor>) with a proxy: refused by name at the start\'s verdict and at the creation — a local browser\'s is not', [cv.code, ci.code]);
+}
 console.log('② THE ONE RANKING — profile > the person\'s browser config > the launch\'s env > the tailnet PAC > direct');
 {
   const ROW = (R) => [0, 1].flatMap((a) => [0, 1].flatMap((b) => [0, 1].flatMap((c) => [0, 1].map((d) => R.proxyRoadOf({ profileProxy: !!a, userConfigProxy: !!b, envProxy: !!c, tailnet: !!d }).road)))).join(',');
@@ -94,17 +112,41 @@ console.log('② THE ONE RANKING — profile > the person\'s browser config > th
 
 // ── the stand-in upstreams (loopback): an HTTP CONNECT proxy and a SOCKS5 proxy with a user name and password ──
 const seen = [];
-const httpUp = net.createServer((c) => { c.on('error', () => { }); let b = ''; c.on('data', function f(d) { b += d.toString('latin1'); const i = b.indexOf('\r\n\r\n'); if (i < 0) return; c.removeListener('data', f); const auth = (/proxy-authorization: basic (\S+)/i.exec(b) || [])[1]; seen.push({ kind: 'http', line: b.split('\r\n')[0], login: auth ? Buffer.from(auth, 'base64').toString() : null }); c.write('HTTP/1.1 200 OK\r\n\r\n'); c.on('data', (x) => c.write(x)); }); });
+const answer = (c, body) => c.end(`HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);   // the ORIGIN's page, served by the stand-in upstream
+const httpProxyConn = (c) => { c.on('error', () => { }); let b = ''; c.on('data', function f(d) { b += d.toString('latin1'); const i = b.indexOf('\r\n\r\n'); if (i < 0) return; c.removeListener('data', f); const auth = (/proxy-authorization: basic (\S+)/i.exec(b) || [])[1], first = b.split('\r\n')[0], login = auth ? Buffer.from(auth, 'base64').toString() : null; if (/^GET http:\/\//.test(first)) { seen.push({ kind: 'http-get', line: first, login }); return answer(c, 'origin-body ' + first.split(' ')[1]); } seen.push({ kind: 'http', line: first, login }); c.write('HTTP/1.1 200 OK\r\n\r\n'); c.on('data', (x) => c.write(x)); }); };
+const httpUp = net.createServer(httpProxyConn);
 const socksUp = net.createServer((c) => { c.on('error', () => { }); let st = 0, b = Buffer.alloc(0); c.on('data', (d) => { b = Buffer.concat([b, d]);
   for (;;) {
     if (st === 0 && b.length >= 2 && b.length >= 2 + b[1]) { const ms = [...b.subarray(2, 2 + b[1])]; b = b.subarray(2 + b[1]); c.write(Buffer.from([5, ms.includes(2) ? 2 : 0xff])); st = 1; continue; }
     if (st === 1 && b.length >= 2 && b.length >= 3 + b[1] && b.length >= 3 + b[1] + b[2 + b[1]]) { const ul = b[1], u = b.subarray(2, 2 + ul).toString(), pl = b[2 + ul], p = b.subarray(3 + ul, 3 + ul + pl).toString(); b = b.subarray(3 + ul + pl); seen.push({ kind: 'socks-auth', login: `${u}:${p}` }); c.write(Buffer.from([1, u === USER && p === PASS ? 0 : 1])); st = 2; continue; }
     if (st === 2 && b.length >= 5) { const at = b[3], need = at === 3 ? 5 + b[4] + 2 : at === 1 ? 10 : 22; if (b.length < need) break; seen.push({ kind: 'socks-connect', atyp: at, name: at === 3 ? b.subarray(5, 5 + b[4]).toString() : null, port: b.readUInt16BE(need - 2) }); b = b.subarray(need); c.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0])); st = 3; continue; }
-    if (st === 3 && b.length) { c.write(b); b = Buffer.alloc(0); }
+    if (st === 3 && b.length) { const s0 = b.toString('latin1'); if (/^GET \//.test(s0)) { if (!s0.includes('\r\n\r\n')) break; seen.push({ kind: 'socks-get', line: s0.split('\r\n')[0] }); b = Buffer.alloc(0); answer(c, 'origin-body ' + s0.split(' ')[1]); break; } c.write(b); b = Buffer.alloc(0); }
     break;
   } }); });
-await new Promise((r) => httpUp.listen(0, '127.0.0.1', r)); await new Promise((r) => socksUp.listen(0, '127.0.0.1', r));
-const HTTP_UP = httpUp.address().port, SOCKS_UP = socksUp.address().port;
+// an http proxy that answers 407 to every request; a SOCKS5 proxy that refuses by `badMode` (no acceptable method · reply 5 · address type 9)
+const up407 = net.createServer((c) => { c.on('error', () => { }); c.once('data', () => c.end('HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="standin"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')); });
+let badMode = 'noauth';
+const socksBad = net.createServer((c) => { c.on('error', () => { }); let st = 0; c.on('data', (d) => {
+  if (st === 0) { st = 1; return c.write(Buffer.from([5, badMode === 'noauth' ? 0xff : 0])); }
+  if (st === 1) { st = 2; return c.write(Buffer.from(badMode === 'reply5' ? [5, 5, 0, 1, 0, 0, 0, 0, 0, 0] : [5, 0, 0, 9, 0, 0, 0, 0, 0, 0])); }
+}); });
+// an HTTPS proxy: the same stand-in behind TLS — a throwaway self-signed certificate for 127.0.0.1 (openssl, as the tree's
+// connection-notice suite makes its TLS stand-in), trusted only through the forwarder's tlsConnect seam (its CA)
+const TLS_DIR = scratch('bproxy-tls');
+fs.mkdirSync(TLS_DIR, { recursive: true });
+execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', path.join(TLS_DIR, 'k.pem'), '-out', path.join(TLS_DIR, 'c.pem'), '-days', '2', '-subj', '/CN=standin', '-addext', 'subjectAltName=IP:127.0.0.1'], { stdio: 'ignore' });
+const TLS_CERT = fs.readFileSync(path.join(TLS_DIR, 'c.pem'));
+const httpsUp = tls.createServer({ key: fs.readFileSync(path.join(TLS_DIR, 'k.pem')), cert: TLS_CERT }, httpProxyConn);
+fs.rmSync(TLS_DIR, { recursive: true, force: true });
+const tlsConnect = (o) => tls.connect({ ...o, ca: TLS_CERT });
+for (const s of [httpUp, socksUp, up407, socksBad, httpsUp]) await new Promise((r) => s.listen(0, '127.0.0.1', r));
+const HTTP_UP = httpUp.address().port, SOCKS_UP = socksUp.address().port, UP407 = up407.address().port, BAD_UP = socksBad.address().port, HTTPS_UP = httpsUp.address().port;
+/** a plain http:// GET through the forwarder on `port` → the whole answer ('timeout' after 6 s) */
+const plain = (port, host = NAME, p = '/page') => new Promise((res) => {
+  const s = net.connect(port, '127.0.0.1', () => s.write(`GET http://${host}${p} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`));
+  let b = ''; const t = setTimeout(() => { s.destroy(); res('timeout ' + b); }, 6000);
+  s.on('data', (d) => { b += d.toString(); }); s.on('end', () => { clearTimeout(t); res(b); }); s.on('error', (e) => { clearTimeout(t); res('ERR ' + e.message + ' ' + b); });
+});
 /** a CONNECT to NAME:443 through the forwarder on `port` → '<status line> | echoed' or the answer's body */
 const tunnel = (port, host = NAME) => new Promise((res) => {
   const s = net.connect(port, '127.0.0.1', () => s.write(`CONNECT ${host}:443 HTTP/1.1\r\nHost: ${host}:443\r\n\r\n`));
@@ -129,12 +171,53 @@ console.log('③ THE FORWARDER — the destination\'s NAME goes upstream, with t
   const r3 = await tunnel(await f3.listen());
   ok(/^HTTP\/1\.1 502/.test(r3) && r3.includes("a person unlocks it on this instance's page") && seen.length === 3,
     'a refusal (the vault locked) is the 502 page that says where to unlock — and no upstream, no direct dial was made', r3);
-  const EPx = mutant('src/server/egress-proxy.js', 'async function dialVia(up, host, port, { timeoutMs = 10000 } = {}) {', 'async function dialVia(up, host, port, { timeoutMs = 10000 } = {}) {\n  await require(\'dns\').promises.lookup(host);   // RED: resolved here first');
+  const EPx = mutant('src/server/egress-proxy.js', 'async function dialVia(up, host, port, { timeoutMs = 10000, tlsConnect = tls.connect } = {}) {', 'async function dialVia(up, host, port, { timeoutMs = 10000, tlsConnect = tls.connect } = {}) {\n  await require(\'dns\').promises.lookup(host);   // RED: resolved here first');
   const fx = mk(() => ({ scheme: 'http', host: '127.0.0.1', port: HTTP_UP }), EPx);
   seen.length = 0;
-  const rx = await tunnel(await fx.listen());
-  ok(!/echoed/.test(rx) && seen.length === 0, 'RED: a copy that resolves the name locally first — the tunnel fails and the upstream never sees the name', rx);
-  for (const f of [f1, f2, f3, fx]) await f.close({ cut: true });
+  // a SPY stands in for the resolver (the box's is never asked): it notes the name and answers as no resolver would
+  const dns = require('node:dns'), realLookup = dns.promises.lookup, asked = [];
+  dns.promises.lookup = async (h) => { asked.push(h); throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${h}`), { code: 'ENOTFOUND' }); };
+  let rx;
+  try { rx = await tunnel(await fx.listen()); } finally { dns.promises.lookup = realLookup; }
+  ok(!/echoed/.test(rx) && seen.length === 0 && asked.length === 1 && asked[0] === NAME, 'RED: a copy that resolves the name locally first (the spy heard it ask) — the tunnel fails and the upstream never sees the name', [rx, asked]);
+  // B-8b87 cure — a plain http:// page through each upstream: the origin's body arrives
+  const fg1 = mk(() => ({ scheme: 'http', host: '127.0.0.1', port: HTTP_UP, auth: { user: USER, pass: PASS } }));
+  const fg2 = mk(() => ({ scheme: 'socks5', host: '127.0.0.1', port: SOCKS_UP, auth: { user: USER, pass: PASS } }));
+  seen.length = 0;
+  const g1 = await plain(await fg1.listen()), g2 = await plain(await fg2.listen());
+  const hg = seen.find((x) => x.kind === 'http-get'), sg = seen.find((x) => x.kind === 'socks-get'), sc2 = seen.find((x) => x.kind === 'socks-connect');
+  ok(/^HTTP\/1\.1 200/.test(g1) && g1.includes(`origin-body http://${NAME}/page`) && hg && hg.line === `GET http://${NAME}/page HTTP/1.1` && hg.login === `${USER}:${PASS}`,
+    'a plain http:// page through an HTTP proxy: the absolute form goes upstream with the login, and the origin\'s body arrives', [g1.slice(0, 160), hg]);
+  ok(/^HTTP\/1\.1 200/.test(g2) && g2.includes('origin-body /page') && sc2 && sc2.atyp === 3 && sc2.name === NAME && sc2.port === 80 && sg && sg.line === 'GET /page HTTP/1.1',
+    '…through a SOCKS5 proxy: a tunnel to the NAME on port 80, the request inside it, and the origin\'s body arrives (not the ten-second bound)', [g2.slice(0, 160), sc2]);
+  const EPr = mutant('src/server/egress-proxy.js', 'createConnection: () => { setImmediate(() => { try { t.resume(); } catch { /* gone */ } }); return t; }', 'createConnection: () => t');
+  const fr = EPr.create({ allow: () => ({ allow: true }), upstream: () => ({ scheme: 'socks5', host: '127.0.0.1', port: SOCKS_UP, auth: { user: USER, pass: PASS } }), connectTimeoutMs: 1500, log: { log() { }, warn() { } } });
+  const gr = await plain(await fr.listen());
+  ok(!gr.includes('origin-body'), 'RED: the socks road before the cure (the reader\'s paused socket handed to the http client, never resumed) — the body never arrives', gr.slice(0, 160));
+  const f407 = mk(() => ({ scheme: 'http', host: '127.0.0.1', port: UP407, auth: { user: USER, pass: PASS } }));
+  const g4 = await plain(await f407.listen());
+  ok(/^HTTP\/1\.1 502/.test(g4) && g4.includes('refused its user name and password (407)') && g4.includes('(proxy_auth_refused)') && !/proxy-authenticate/i.test(g4),
+    'an upstream\'s 407 on a plain page is the forwarder\'s own named page (502) — never passed on (no Proxy-Authenticate: the browser raises no login prompt for the proxy)', g4.slice(0, 260));
+  // the SOCKS5 refusals by code — each the forwarder's 502, never a hang
+  const said = {};
+  for (const mode of ['noauth', 'reply5', 'atyp9']) { badMode = mode; const fb = mk(() => ({ scheme: 'socks5', host: '127.0.0.1', port: BAD_UP, auth: { user: USER, pass: PASS } })); said[mode] = await tunnel(await fb.listen()); await fb.close({ cut: true }); }
+  const fw = mk(() => ({ scheme: 'socks5', host: '127.0.0.1', port: SOCKS_UP, auth: { user: USER, pass: 'not-' + PASS } }));
+  said.wrong = await tunnel(await fw.listen());
+  ok(/^HTTP\/1\.1 502/.test(said.noauth) && said.noauth.includes('(proxy_auth_refused)') && said.wrong.includes('(proxy_auth_refused)') && said.reply5.includes('SOCKS5 reply 5') && said.reply5.includes('(proxy_refused)') && said.atyp9.includes('an address type SOCKS5 does not define (9)') && said.atyp9.includes('(proxy_refused)'),
+    'the SOCKS5 refusals by code: no acceptable method or a wrong login ⇒ proxy_auth_refused; the proxy\'s own reply 5 and an undefined address type ⇒ proxy_refused — each the 502 page, at once', said);
+  seen.length = 0;
+  const fm = mk(() => ({ scheme: 'socks5', host: '127.0.0.1', port: SOCKS_UP, auth: { user: USER, pass: PASS } }));
+  const rm = await tunnel(await fm.listen(), '[::ffff:192.0.2.1]');
+  ok(/^HTTP\/1\.1 502/.test(rm) && rm.includes('IPv4 tail') && !seen.some((x) => x.kind === 'socks-connect'),
+    'an IPv6 address written with an IPv4 tail (::ffff:a.b.c.d) is refused by name — never encoded as another address', rm.slice(0, 200));
+  // an HTTPS proxy: TLS to the proxy itself, then the same CONNECT / absolute form inside it
+  const fh = EP.create({ allow: () => ({ allow: true }), upstream: () => ({ scheme: 'https', host: '127.0.0.1', port: HTTPS_UP, auth: { user: USER, pass: PASS } }), tlsConnect, log: { log() { }, warn() { } } });
+  seen.length = 0;
+  const ph = await fh.listen(), th = await tunnel(ph), gh = await plain(ph);
+  const hh = seen.find((x) => x.kind === 'http'), hgh = seen.find((x) => x.kind === 'http-get');
+  ok(/echoed/.test(th) && hh && hh.line === `CONNECT ${NAME}:443 HTTP/1.1` && hh.login === `${USER}:${PASS}` && gh.includes(`origin-body http://${NAME}/page`) && hgh && hgh.login === `${USER}:${PASS}`,
+    'through an HTTPS proxy (TLS to the proxy, its certificate checked): the tunnel to the NAME with the login, and a plain page\'s body', [th, gh.slice(0, 120)]);
+  for (const f of [f1, f2, f3, fx, fg1, fg2, fr, f407, fw, fm, fh]) await f.close({ cut: true });
 }
 
 // ── a stand-in vault: the engine's verbs the proxy-login module uses (state / secretPut / secretGet / secretDrop / secretNames / noteUse) ──
@@ -181,7 +264,7 @@ const fake = writeFakeAgentBrowser(path.join(ROOT, 'bin'), path.join(ROOT, 'ab-s
 const cdpSrv = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ Browser: 'Chrome/149.0.1.1' })); });
 const CDP_PORT = await new Promise((r) => cdpSrv.listen(0, '127.0.0.1', () => r(cdpSrv.address().port)));
 const PATH_ENV = `${path.join(ROOT, 'bin')}:${path.dirname(process.execPath)}:/usr/bin:/bin`;
-process.on('exit', () => { fake.reap(); for (const s of [cdpSrv, httpUp, socksUp]) { try { s.close(); } catch { } } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
+process.on('exit', () => { fake.reap(); for (const s of [cdpSrv, httpUp, socksUp, up407, socksBad, httpsUp]) { try { s.close(); } catch { } } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(130));
 const K = require('../src/server/browser-keeper.js');
 const mkKeeper = (dataDir, extra = {}, mod = K) => { fs.mkdirSync(dataDir, { recursive: true }); return mod.create({ dataDir, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: { add: () => ({ id: 'u1' }) }, ...extra }); };
@@ -243,14 +326,18 @@ const thr = async (fn) => { try { await fn(); return null; } catch (e) { return 
   doc.profiles.find((x) => x.id === pm.id).proxy = withLogin('http', `127.0.0.1:${HTTP_UP}`);
   fs.writeFileSync(path.join(D2, 'browser-profiles.json'), JSON.stringify(doc));
   const k2 = mkKeeper(D2, { proxyLogins: pl });
-  const view = k2.profile ? JSON.stringify(k2.listProfiles ? k2.listProfiles() : []) : '';
+  const view = JSON.stringify(k2.list().profiles.find((x) => x.id === pm.id) || null);
   const n3 = fake.launches().length;
   const eP = await thr(() => k2.start(pm.id, { why: 'user' }));
   ok(eP && eP.code === 'proxy_password_in_profile' && /Move the password to the vault/.test(eP.message) && !eP.message.includes(PASS) && fake.launches().length === n3 && !view.includes(PASS),
     'a password saved IN the address before this law ⇒ never used: the launch refused by name, its sentence naming «Move the password to the vault» — nothing launched', eP && eP.code);
+  ok(view.includes('"proxyPasswordInProfile":true') && !view.includes(PASS), 'the keeper\'s list masks it: the card\'s row flags the password in the address and never carries it', view.slice(0, 200));
+  const storeL0 = fs.readFileSync(path.join(D2, 'browser-profiles.json'), 'utf8'), entriesL0 = vault.entries.size;
   vault.locked = true;
   const mL = await k2.moveProxyPassword(pm.id);
   vault.locked = false;
+  ok(!mL.ok && mL.code === 'vault_locked' && fs.readFileSync(path.join(D2, 'browser-profiles.json'), 'utf8') === storeL0 && vault.entries.size === entriesL0 && JSON.stringify(k2.list().profiles.find((x) => x.id === pm.id)).includes('"proxyPasswordInProfile":true'),
+    '«Move the password to the vault» with the vault locked ⇒ NOTHING changed: the profiles store byte for byte, the vault\'s entries, the card\'s flag', mL.code);
   const before = vault.entries.size;
   const mv = await k2.moveProxyPassword(pm.id);
   const store2 = fs.readFileSync(path.join(D2, 'browser-profiles.json'), 'utf8');
@@ -262,6 +349,73 @@ const thr = async (fn) => { try { await fn(); return null; } catch (e) { return 
   ok(JSON.stringify((fake.launches().at(-1) || {}).config || {}).includes('--proxy-server=http://127.0.0.1:'), '…and its next start goes through its proxy, the login read from the vault');
   try { await k2.stop(pm.id, { why: 'user' }); } catch { }
   try { await k.stop(p.id, { why: 'user' }); } catch { }
+  // B-8b87 cure — a store that cannot be written ⇒ not_written: the vault entry kept, the file and the card as they were
+  const legacyIn = (dir, label) => { const kk = mkKeeper(dir, { proxyLogins: pl }); const pp = kk.createProfile({ label, proxy: proxyUrl }); const d0 = JSON.parse(fs.readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8')); d0.profiles.find((x) => x.id === pp.id).proxy = withLogin('http', `127.0.0.1:${HTTP_UP}`); fs.writeFileSync(path.join(dir, 'browser-profiles.json'), JSON.stringify(d0)); return pp.id; };
+  const moveUnwritten = async (dir, mod) => { const id = legacyIn(dir, 'Unwritten'); const kk = mkKeeper(dir, { proxyLogins: pl }, mod); kk.list(); const f0 = fs.readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8'); fs.chmodSync(dir, 0o500); let m; try { m = await kk.moveProxyPassword(id); } finally { fs.chmodSync(dir, 0o700); } return { m, same: fs.readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8') === f0, card: JSON.stringify(kk.list().profiles.find((x) => x.id === id)) }; };
+  const u4 = await moveUnwritten(path.join(ROOT, 'data-4'));
+  ok(u4.m && !u4.m.ok && u4.m.code === 'not_written' && u4.same && vault.entries.has(u4.m.credential) && u4.card.includes('"proxyPasswordInProfile":true'),
+    '«Move the password to the vault» with a profiles store that cannot be written ⇒ not_written: the vault entry kept, the file and the card still say the password is in the profile (never «done»)', u4.m);
+  const u4r = await moveUnwritten(path.join(ROOT, 'data-4r'), mutant('src/server/browser-keeper.js', '      if (save() === false) { p.proxy = was.proxy;', '      if (false) { p.proxy = was.proxy;'));
+  ok(u4r.m && u4r.m.ok === true && u4r.same, 'RED: a move that does not ask its write — «done» while the file still holds the password (the leg above goes red on it)', u4r.m && u4r.m.ok);
+  // B-8b87 cure — A HUB RESTART: the browser of a profile with a proxy is ADOPTED, its forwarder re-bound on the SAME port
+  const D3 = path.join(ROOT, 'data-3'), k3 = mkKeeper(D3, { proxyLogins: pl });
+  const p3 = k3.createProfile({ label: 'Survivor', proxy: proxyUrl, proxyCredential: ref });
+  await k3.start(p3.id, { why: 'user' });
+  const port3 = (k3._reg().browsers[p3.id].egress || {}).port, pid3 = k3._reg().browsers[p3.id].pid;
+  k3.shutdown?.(); await k3._forwardersClose();
+  const k3b = mkKeeper(D3, { proxyLogins: pl });
+  await k3b.adoptAll();
+  const r3 = k3b._reg().browsers[p3.id];
+  seen.length = 0;
+  const t3 = port3 ? await tunnel(port3) : 'no port';
+  ok(r3.state === 'ready' && r3.adoptedAt && r3.pid === pid3 && (r3.egress || {}).port === port3 && /echoed/.test(t3) && seen.some((x) => x.kind === 'http' && x.line === `CONNECT ${NAME}:443 HTTP/1.1` && x.login === `${USER}:${PASS}`),
+    'a hub restart: a new keeper over the same store ADOPTS the profile\'s browser and re-binds its forwarder on the SAME port — the proxy and its login carried again', { state: r3.state, lastError: r3.lastError, port3, t3 });
+  k3b.shutdown?.(); await k3b._forwardersClose();
+  vault.locked = true;
+  const k3c = mkKeeper(D3, { proxyLogins: pl });
+  await k3c.adoptAll();
+  const r3c = k3c._reg().browsers[p3.id];
+  seen.length = 0;
+  const t3c = port3 ? await tunnel(port3) : 'no port';
+  vault.locked = false;
+  ok(r3c.state === 'ready' && /^HTTP\/1\.1 502/.test(t3c) && t3c.includes("a person unlocks it on this instance's page") && seen.length === 0,
+    '…the vault locked at that restart: still adopted and re-bound, every request answered with the locked page — no upstream dial, never direct', { state: r3c.state, t3c });
+  k3c.shutdown?.(); await k3c._forwardersClose();
+  const k3r = mkKeeper(D3, { proxyLogins: pl }, mutant('src/server/browser-keeper.js', " && !(typeof e.engine === 'string' && e.engine) && !proxyOfRecord(e.proxy)) return", " && !(typeof e.engine === 'string' && e.engine)) return"));
+  await k3r.adoptAll();
+  const r3r = k3r._reg().browsers[p3.id];
+  ok(r3r.state !== 'ready' && /no engine names it/.test(String(r3r.lastError || (r3r.endAtBoot && r3r.endAtBoot.why) || '')), 'RED: the line before the cure — the restart ENDS that browser («no engine names it»; the adoption leg goes red on it)', { state: r3r.state, lastError: r3r.lastError });
+  k3r.shutdown?.(); await k3r._forwardersClose();
+  // B-8b87 cure — THE DRIVER ROAD FAILS CLOSED: no config file to carry the switch ⇒ the start refused by name, nothing launched
+  const HOME2 = path.join(ROOT, 'home-2');
+  fs.mkdirSync(path.dirname(path.join(HOME2, B.USER_CONFIG_REL)), { recursive: true });
+  fs.writeFileSync(path.join(HOME2, B.USER_CONFIG_REL), '{ not json');
+  const noConfig = async (dir, mod) => { const kk = mkKeeper(dir, { proxyLogins: pl, homeDir: HOME2 }, mod); const pp = kk.createProfile({ label: 'No config', proxy: proxyUrl, proxyCredential: ref }); const n = fake.launches().length; const e = await thr(() => kk.start(pp.id, { why: 'user' })); const launched = fake.launches().length - n; try { await kk.stop(pp.id, { why: 'user' }); } catch { } kk.shutdown?.(); await kk._forwardersClose(); return { e, launched, last: launched ? fake.launches().at(-1) : null }; };
+  const nc = await noConfig(path.join(ROOT, 'data-5'));
+  ok(nc.e && nc.e.code === 'egress_proxy_missing' && nc.launched === 0, 'a browser that rides its profile\'s proxy with NO config file to carry the switch (the person\'s config unreadable) ⇒ the start refused by name (egress_proxy_missing) — nothing launched, never direct', nc.e && [nc.e.code, nc.e.message]);
+  const ncr = await noConfig(path.join(ROOT, 'data-5r'), mutant('src/server/browser-keeper.js', '      if (r0 && r0.proxyRoad && r0.proxyRoad.arg) throw namedError(', '      if (false) throw namedError('));
+  ok(!ncr.e && ncr.launched === 1 && !JSON.stringify((ncr.last || {}).config || {}).includes('--proxy-server='), 'RED: a keeper that runs the call without a config — it launched DIRECT, no switch (the leg above goes red on it)', ncr.e && ncr.e.code);
+  const DC = require('../src/server/browser-display-config.js');
+  const mkDc = (name, mod = DC) => { const d = path.join(ROOT, name); fs.mkdirSync(d, { recursive: true }); return mod.create({ dir: d, writeJson: (file, o) => fs.writeFileSync(file, JSON.stringify(o, null, 2)), log: { log() { }, warn() { } } }); };
+  const ARG = `--proxy-server=http://127.0.0.1:${HTTP_UP}`, base = path.join(ROOT, 'base.json');
+  fs.writeFileSync(base, JSON.stringify({ args: ['--lang=en', '--proxy-auto-detect', '--winhttp-proxy-resolver', '--proxy-server=http://other.example.test:1'] }));
+  const argsOf = (file) => { const c = JSON.parse(fs.readFileSync(file, 'utf8')); return Array.isArray(c.args) ? c.args : String(c.args || '').split(','); };
+  const out1 = argsOf(mkDc('dc-1').proxyFileFor(base, { arg: ARG }));
+  ok(out1.includes('--lang=en') && out1.at(-1) === ARG && !out1.some((a) => /auto-detect|winhttp|other\.example/.test(a)), 'the person\'s own proxy switches leave by the tree\'s ONE rule (src/browser-engines.js PROXY_ARG_RE — auto-detect and the resolver switch too): the forwarder\'s switch is the only one', out1);
+  const DCr = mutant('src/server/browser-display-config.js', 'ENG.withoutProxyArgs(V.driverArgsList(base.args))', "V.driverArgsList(base.args).filter((a) => !/^--?(?:proxy-server|proxy-pac-url|proxy-bypass-list|no-proxy-server)(?:=|$)/.test(a))");
+  ok(argsOf(mkDc('dc-r', DCr).proxyFileFor(base, { arg: ARG })).includes('--proxy-auto-detect'), 'RED: the four-switch filter before the cure — auto-detect survives beside the forwarder\'s switch');
+  const nulCfg = path.join(ROOT, 'nul.json'); fs.writeFileSync(nulCfg, JSON.stringify({ args: ['--lang=en', '--x=a\u0000b'] }));   // a NUL inside a switch: the driver's one line cannot carry it
+  const tryFile = (dc, file) => { try { return { file: dc.proxyFileFor(file, { arg: ARG }) }; } catch (e) { return { e }; } };
+  const dc2 = mkDc('dc-2'), eU = tryFile(dc2, path.join(ROOT, 'no-such.json')).e, eC = tryFile(dc2, nulCfg).e, eN = tryFile(dc2, null).e;
+  ok([eU, eC, eN].every((e) => e && e.code === 'egress_proxy_missing'), 'a config that cannot be read, one whose switches the driver\'s line cannot carry, or none named ⇒ THROWN by name (egress_proxy_missing) — never the base file without the switch', [eU, eC, eN].map((e) => e && e.message));
+  const DCo = mutant('src/server/browser-display-config.js', 'throw proxyMissing(`${baseFile} could not be read`); }', 'return baseFile; }');
+  const rO = tryFile(mkDc('dc-o', DCo), path.join(ROOT, 'no-such.json'));
+  ok(!rO.e && rO.file === path.join(ROOT, 'no-such.json'), 'RED: the read before the cure — the call keeps the base file, which carries no switch (the leg above goes red on it)', rO);
+  // B-8b87 cure — A CLOUD BROWSER runs at its vendor: its proxy refused at the creation and at the edit (the start: ① above)
+  const eCc = await thr(() => k.createProfile({ label: 'Cloud', provider: 'cloud:browserbase', proxy: proxyUrl }));
+  let eCe = null;
+  try { const pc = k.createProfile({ label: 'Cloud two', provider: 'cloud:browserbase' }); eCe = await thr(() => k.updateProfile(pc.id, { proxy: proxyUrl })); } catch (e) { eCe = { code: 'create-refused:' + e.code }; }
+  ok(eCc && eCc.code === 'proxy_cloud_browser' && eCe && eCe.code === 'proxy_cloud_browser', 'a cloud browser\'s proxy is refused by name at the creation and at the edit (proxy_cloud_browser) — its pages would never pass the hub\'s forwarder', [eCc && eCc.code, eCe && eCe.code]);
 }
 
 console.log('⑥ THE PERSON\'S DOORS — no bearer reaches a proxy login; an agent\'s token never sets the proxy or names its login');
@@ -275,6 +429,35 @@ console.log('⑥ THE PERSON\'S DOORS — no bearer reaches a proxy login; an age
   const VK = require('../src/vault-kinds.js'), row = VK.FAMILIES.find((f) => f.id === 'proxy-login');
   ok(row && row.surfaces.cli && row.surfaces.cli.none && row.surfaces.use && row.surfaces.use.system && row.surfaces.request && row.surfaces.request.none && row.surfaces.reveal === true,
     'the vault kind «proxy-login»: no agent verb, no agent request, its use VibeSpace\'s own (the forwarder), revealable to the person (so the output belt masks it)', row && row.surfaces);
+}
+
+console.log('⑦ THE PAGE\'S WORDS — every proxy refusal in the page\'s language with the vault\'s press; a missing login as itself; «from its next start»');
+{
+  const PM = await import(pathToFileURL(path.join(REPO, 'src/lib/browser-proxy-model.js')).href);
+  const PNL = await import(pathToFileURL(path.join(REPO, 'src/lib/browser-panel-model.js')).href);
+  const used = new Set(), T = (k, v) => { used.add(k); return String(k).replace(/\{(\w+)\}/g, (_, n) => (v && v[n] !== undefined ? String(v[n]) : `{${n}}`)); };
+  const SERVER = 'the server\'s own English sentence';
+  const each = PM.PROXY_REFUSALS.map((code) => [code, PM.proxyWords(code, T, SERVER, { act: 'start' })]);
+  ok(each.every(([, w]) => !w.includes(SERVER) && !/could not be used/.test(w)) && PM.proxyWords('something_new', T, SERVER).includes('(something_new)') && !PM.proxyWords('something_new', T, SERVER).includes(SERVER),
+    'every proxy refusal a person sees has its OWN words by its code (the start\'s, the edit\'s, the creation\'s); a code with none is named by its code — never the server\'s English sentence', each.filter(([, w]) => w.includes(SERVER) || /could not be used/.test(w)));
+  const lockedSave = PM.proxyWords('vault_locked', T), lockedMove = PM.proxyWords('vault_locked', T, '', { act: 'move' }), lockedStart = PM.proxyWords('proxy_credential_unreadable', T, '', { act: 'start', word: 'key-unreadable:vault_locked' });
+  ok(/Unlock…/.test(lockedSave) && /save/.test(lockedSave) && /Unlock…/.test(lockedMove) && !/save/.test(lockedMove) && /move the password/.test(lockedMove) && /start the browser/.test(lockedStart)
+     && PM.proxyDoor('vault_locked') === 'unlock' && PM.proxyDoor('proxy_credential_unreadable', 'key-unreadable:vault_locked') === 'unlock' && PM.proxyDoor('vault_not_set_up') === 'setup' && PM.proxyDoor('proxy_cloud_browser') === null
+     && /Set up the vault…/.test(PM.proxyWords('vault_not_set_up', T, '', { act: 'move' })) && /no longer in the vault/.test(PM.proxyWords('proxy_credential_unreadable', T, '', { act: 'start', word: 'proxy_login_no_entry' })) && /again/.test(PM.proxyWords('not_written', T, '', { act: 'move' })),
+    'the locked vault in words that fit the act (Save: «then save» · the move: «then move the password again» · a start: «then start the browser again»), each with the Unlock… press; a vault never set up has its own sentence and press; a login gone from the vault, and a move unwritten, said', [lockedSave, lockedMove, lockedStart]);
+  const parts = PM.loginNameParts(`proxy-login:socks5://proxy.example.test:1080#${USER}`);
+  ok(parts && parts.origin === 'socks5://proxy.example.test:1080' && parts.user === USER && PM.loginNameParts('web-login:x') === null && PM.userNameFits(USER) && !PM.userNameFits('a b') && !PM.userNameFits('a#b') && !PM.userNameFits('x'.repeat(129)),
+    'a saved login\'s name read back to its address and user (the field shows a login the vault no longer lists AS ITSELF); a user name the entry cannot carry is refused at the field', parts);
+  const FIELD = read('src/lib/browser-proxy-field.js'), NEWP = read('src/lib/browser-new-profile.js');
+  ok(/loaded !== null && loginRow\.style\.display !== 'none'/.test(FIELD) && FIELD.includes("no longer in the vault") && FIELD.includes("the vault\\'s list could not be read") && /if \(!userNameFits\(u\)\) return \{ ok: false, code: 'login_user_unusable'/.test(FIELD)
+     && NEWP.indexOf('st.busy = true; create.disabled = true;\n') > 0 && NEWP.indexOf('st.busy = true; create.disabled = true;\n') < NEWP.indexOf('await proxyField.read()'),
+    'the field counts the login as changed only once the vault\'s list answered, keeps a missing login as its own option, refuses an unusable user name before sending; New profile is BUSY before the login is saved (a double press sends one create)');
+  const chip = (r) => (PNL.nameChips({ provider: 'chromium', ...r }, { w: { t: T } }).find((c) => c.key === 'proxy') || {}).text || '';
+  ok(chip({ proxy: 'socks5://b.example.test:1080', proxyLive: 'socks5://a.example.test:1080' }) === 'proxy from its next start' && chip({ proxy: 'socks5://a.example.test:1080', proxyLive: 'socks5://a.example.test:1080' }) === 'proxy'
+     && chip({ proxy: 'socks5://a.example.test:1080' }) === 'proxy' && chip({ proxy: null, proxyLive: 'socks5://a.example.test:1080' }) === 'no proxy from its next start' && chip({ proxy: 'socks5://a.example.test:1080', proxyLive: null }) === 'proxy from its next start' && chip({ proxy: null, proxyLive: null }) === '',
+    'the card says «from its next start» while the RUNNING browser\'s road differs from the profile\'s (an edit, or a browser started before) — and the plain chip once they agree', [chip({ proxy: 'socks5://b.example.test:1080', proxyLive: 'socks5://a.example.test:1080' })]);
+  const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js'), missing = [...used].filter((k) => !ZH.includes(JSON.stringify(k) + ':') || !JA.includes(JSON.stringify(k) + ':'));
+  ok(used.size > 20 && missing.length === 0, `every one of those ${used.size} sentences is in the zh and ja dictionaries — the page's language`, missing);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

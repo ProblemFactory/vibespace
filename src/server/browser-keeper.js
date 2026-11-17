@@ -307,7 +307,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // lane headless-fallback: every call of a browser whose LAUNCH fell back names the planned config (displayed)
       if (Object.prototype.hasOwnProperty.call(ex, VERBS.CONFIG_KEY)) return displayed(opts, ex, ex[VERBS.CONFIG_KEY], recordForCall(ns, opts.session || null, ex));
       const file = configForCall(ns, opts.session || null, ex);
-      return file ? displayed(opts, ex, file, recordForCall(ns, opts.session || null, ex)) : opts;
+      if (file) return displayed(opts, ex, file, recordForCall(ns, opts.session || null, ex));
+      // B-8b87 cure: a record whose browser rides its profile's proxy and NO config file to carry the switch ⇒ refused by name (the
+      // call would leave direct)
+      const r0 = recordForCall(ns, opts.session || null, ex);
+      if (r0 && r0.proxyRoad && r0.proxyRoad.arg) throw namedError('egress_proxy_missing', `"${r0.profileId || '?'}" rides its profile's proxy, and no config file carries the switch — the call was refused, never run outside its proxy`);
+      return opts;
     };
     const displayed = (opts, ex, file, rec) => {
       const eff0 = rec && rec.display ? displays.fileFor(file, rec.display) : file;
@@ -351,7 +356,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // owner ruling A: `scope` = who may use it ('all' | 'only'), DERIVED from `owner` (one field), never stored twice; `use` =
   // the list as keys and ids only (the broadcast — the panel names them from its own rows; the agent's route strips it)
   // BROWSE YOURSELF (B-6ae8, the owner 4): `recordMine` = "Also record my own actions" — an opt-OUT, absent = on
-  const pview = (p) => (p ? { ...B.publicProfileView(p), mediated: isMediated(p), agentRoad: dialogRoadOf(p).why, scope: B.scopeOf(p), use: B.useDigestOf(p), createdBy: p.createdBy || null, ...(B.isEphemeralProfile(p) ? {} : { recordMine: HM.recordsMine(p), disk: disk.diskOf(p) }) } : null); // (a conversation's own temporary browser is never browsed by the person — no switch of theirs rides its record: verify r1 H1)
+  // B-8b87 cure: the proxy origin the RUNNING browser was launched with (no login, no port of ours) — undefined when none runs
+  const proxyLiveOf = (p) => { const rec = p ? reg.browsers[p.id] : null; if (!B.isLiveBrowser(rec)) return undefined; const e = rec.egress && rec.egress.proxy; return rec.proxyRoad && rec.proxyRoad.origin ? String(rec.proxyRoad.origin) : e && e.scheme ? `${e.scheme}://${e.host}:${e.port}` : null; };
+  const pview = (p) => (p ? { ...B.publicProfileView(p), ...(proxyLiveOf(p) !== undefined ? { proxyLive: proxyLiveOf(p) } : {}), mediated: isMediated(p), agentRoad: dialogRoadOf(p).why, scope: B.scopeOf(p), use: B.useDigestOf(p), createdBy: p.createdBy || null, ...(B.isEphemeralProfile(p) ? {} : { recordMine: HM.recordsMine(p), disk: disk.diskOf(p) }) } : null); // (a conversation's own temporary browser is never browsed by the person — no switch of theirs rides its record: verify r1 H1)
   // ── lane grants-unify: "Who can use it" = the profile's row of the ONE grants store, mirrored as `p.grantUse` ──
   /** A conversation's browser key for the panel's spelling (null while it has none). */
   // (no resolver wired — a keeper built alone: a browser key IS the conversation key it is judged by, both ways)
@@ -1577,6 +1584,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const np = B.normalizeProxy(keys.includes('proxy') ? patch.proxy : p.proxy);
       if (!np.ok) throw namedError(np.code || 'bad_proxy', np.error);
       if (np.value && p.host) throw namedError('proxy_off_machine', `"${p.label}" runs on another machine — a browser profile's proxy works for browsers on this machine only, for now`);
+      if (np.value && B.isCloudProfile(p)) throw namedError('proxy_cloud_browser', `"${p.label}": ${B.PROXY_CLOUD_WHY}`);   // B-8b87 cure
       const nc = B.normalizeProxyCredential(keys.includes('proxyCredential') ? patch.proxyCredential : (np.value === p.proxy ? p.proxyCredential : null), np.value);
       if (!nc.ok) throw namedError(nc.code, nc.error);
       if (np.value !== (p.proxy || null) || nc.value !== (p.proxyCredential || null)) { changed.proxy = { was: B.proxyPublicView(p.proxy), now: np.value, credential: nc.value, applies: 'at the next start' }; p.proxy = np.value; p.proxyCredential = nc.value; }
@@ -6653,8 +6661,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (!password) return { ok: false, code: 'nothing_to_move', error: `"${p.label}"'s proxy names a user but no password — choose its login in the profile` };
       const r = proxyLogins && typeof proxyLogins.save === 'function' ? proxyLogins.save({ proxy: addr.value, user, password }) : { ok: false, code: 'unavailable', error: 'this server has no vault for browser proxy logins' };
       if (!r.ok) return r;
+      const was = { proxy: p.proxy, proxyCredential: p.proxyCredential };
       p.proxy = addr.value; p.proxyCredential = r.name;
-      commit();
+      // B-8b87 cure: the write ASKED (commit() inside batched drops save()'s answer) — a failed write is said, the row put back to what
+      // the file still holds (its password), the vault entry kept (the next press reuses it)
+      if (save() === false) { p.proxy = was.proxy; p.proxyCredential = was.proxyCredential; log.warn?.(`[browser] ${p.id} "${p.label}": its proxy's password is in the vault (${r.name}), but the profiles store could not be written — it still holds the password`); return { ok: false, code: 'not_written', credential: r.name, error: `"${p.label}"'s proxy login is saved in the vault, but the profiles store could not be written — it still holds the password; press «Move the password to the vault» again` }; }
+      notify();
       log.log?.(`[browser] ${p.id} "${p.label}": its proxy's password moved to the vault (${r.name}) — the profiles store no longer holds it`);
       return { ok: true, profile: pview(p), credential: r.name };
     });
@@ -7622,7 +7634,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const prov = p && p.provider ? String(p.provider) : '';
     if (prov && !rowOf(prov)) return `its profile names a browser backend this version does not have («${prov.replace(/[^\w:.-]/g, '').slice(0, 40)}»)`;
     const e = rec && rec.egress;
-    if (e && typeof e === 'object' && !(typeof e.engine === 'string' && e.engine)) return 'its site-list proxy is a shape this version does not read (no engine names it)';
+    // B-8b87 cure: a PROFILE PROXY's forwarder (no engine, its proxy readable) is this version's own shape — adopted and re-bound on its port
+    if (e && typeof e === 'object' && !(typeof e.engine === 'string' && e.engine) && !proxyOfRecord(e.proxy)) return 'its site-list proxy is a shape this version does not read (no engine names it)';
     return null;
   }
   async function adoptAll() {
@@ -8219,7 +8232,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     onLease, addDigest, updateProfile, moveProxyPassword, // + B-8b87: «Move the password to the vault»
     // P6 (§6.2 / §6.5): is `sharing:"instance"` a value here; the proxy (the routes ask it nothing directly)
     mediationOn, isMediated, mediator: () => (mediationOn() ? mediator : null),
-    storeFile, STORE_FILE, uid, _reg: () => reg, _facts: bf, _runtime: rt,
+    storeFile, STORE_FILE, uid, _reg: () => reg, _forwardersClose: () => Promise.all([...egressProxies.values()].map((e) => e.px.close({ cut: true }).catch(() => { }))).then(() => { egressProxies.clear(); }), /* B-8b87 cure: a suite's stand-in for this process's end (its forwarders' ports free for the next keeper's re-bind) */ _facts: bf, _runtime: rt,
     floorFacts, checkFloorNow, // B-0b8c (lane browser-probe-transient): the facts API + the For-you notice's Check again
     lineageKeyOf, moveDirLineage, // verify r8 (T2 ②): the product's own move of a directory (a Forget) carries its lineage
 

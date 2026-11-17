@@ -23,7 +23,7 @@ import { buildRows, choiceOfRow, installHint, buildRefusalWords } from './browse
 import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
 import { enterSubmits } from './chat-enter-keys.js';
 import { mountProxyField } from './browser-proxy-field.js'; // B-8b87: the proxy and its login (kept in the vault)
-import { proxyWords } from './browser-proxy-model.js';
+import { proxyWords, PROXY_REFUSALS } from './browser-proxy-model.js';
 
 const DIALOG_ID = 'browser-new-profile-dialog';
 const jsonPost = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -136,7 +136,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   const proxyWrap = el('div', 'bnew-proxy');
   const proxyField = mountProxyField(proxyWrap, { fetchJson });
   body.appendChild(proxyWrap);
-  const proxyOffered = () => adopt !== 'keep' && !st.host && st.provider !== 'cdp';
+  const proxyOffered = () => adopt !== 'keep' && !st.host && st.provider !== 'cdp' && !/^cloud:/.test(String(st.provider || ''));   // B-8b87 cure: a cloud browser runs at its vendor
   const syncProxy = () => { proxyWrap.style.display = proxyOffered() ? '' : 'none'; };
 
   // ── the refusal line + the footer ──
@@ -363,11 +363,14 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     }
     const cloneFrom = !fromSession && st.cloneKey && st.cloneKey !== 'none' ? st.cloneKey : null;
     // B-8b87: the proxy read first — a new login is saved INTO the vault now (its password never rides the profile's request)
+    // B-8b87 cure: BUSY before the login is saved — a second press while it is saved sends no second create
+    st.busy = true; create.disabled = true;
+    const unbusy = () => { st.busy = false; create.disabled = false; };
     const pv = proxyOffered() ? await proxyField.read() : { ok: true, proxy: null, proxyCredential: null };
     if (st.closed) return;
-    if (!pv.ok) { say(proxyWords(pv.code, t, pv.error)); if (pv.focus) pv.focus.focus(); return; }
+    if (!pv.ok) { unbusy(); say(proxyWords(pv.code, t, pv.error, { act: 'save', word: pv.word })); if (pv.focus) pv.focus.focus(); return; }
     const c = createBody({ label: nameInput.value, provider: st.provider, host: st.host, cdpPort: portInput.value, mode: whoMode(), who, adopt, browser, cloneFrom, proxy: pv.proxy, proxyCredential: pv.proxyCredential });
-    if (!c.ok) { say(createRefusalWords({ code: c.code }, t)); (c.field === 'label' ? nameInput : c.field === 'cdpPort' ? portInput : picker).focus(); return; }
+    if (!c.ok) { unbusy(); say(createRefusalWords({ code: c.code }, t)); (c.field === 'label' ? nameInput : c.field === 'cdpPort' ? portInput : picker).focus(); return; }
     st.busy = true; create.disabled = true; cancel.disabled = true; picker.setBusy(true);
     const cloneName = cloneFrom ? String(((st.cloneSources || []).find((x) => x && x.id === cloneFrom) || {}).label || cloneFrom) : '';
     if (cloneFrom) { cloneHint.textContent = t('Copying {source}… the new profile appears when it is done.', { source: cloneName }); cloneHint.style.display = ''; cloneWrap.setAttribute('aria-busy', 'true'); create.textContent = t('Copying…'); }
@@ -388,7 +391,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
         openNewProfileDialog(app, { label: nameInput.value, fromSession: { ...fromSession, adoptKeeps: r.now === 'keep' }, onCreated, onDismissed, opener: 'person' });   // (the person's Create press re-opens it: in front, as it was — r3's 'system' put it behind their window; a field they moved on to and type in keeps its keys through typedLast; lane dialog-yield r4)
         return;
       }
-      say(createRefusalWords(r, t) || buildRefusalWords(r, t) || (t('Could not create the profile') + ' — ' + ((r && r.error) || t('server unreachable'))));
+      say((r && PROXY_REFUSALS.includes(r.code) ? proxyWords(r.code, t, '', { act: 'save', word: r.word }) : '') || createRefusalWords(r, t) || buildRefusalWords(r, t) || (t('Could not create the profile') + ' — ' + ((r && r.error) || t('server unreachable'))));
       if (r && (r.code === 'label_required' || r.code === 'label_taken')) nameInput.focus();
       return;
     }

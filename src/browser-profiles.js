@@ -1219,6 +1219,10 @@ function normalizeProxyCredential(v, proxyUrl) {
  *  { ok: true, proxy: { scheme, host, port, credential } } | { ok: false, code, error } — the stored values a launch refuses by
  *  name: an address carrying its password (saved before this law: «Move the password to the vault» on its card), a socks4
  *  address, a profile on a paired machine (the forwarder lives on this hub's loopback), a login saved for another proxy. */
+/** B-8b87 cure: a cloud browser (`cloud:<vendor>`) runs at its vendor — the hub's loopback forwarder is out of its reach, so its proxy
+ *  is refused at the creation, the edit and the start (the paired machine's three moments) */
+const PROXY_CLOUD_WHY = 'a cloud browser runs at its vendor, where a profile\'s proxy on this machine cannot reach it — clear the proxy, or set one in the vendor\'s own settings';
+const isCloudProfile = (p) => { const row = p && p.provider ? providerRow(p.provider) : null; return !!(row && row.cloud); };
 function proxyLaunchVerdict(p) {
   if (!p || !p.proxy) return { ok: true, proxy: null };
   const label = p.label ? `"${p.label}"` : 'this profile';
@@ -1227,6 +1231,7 @@ function proxyLaunchVerdict(p) {
   if (pp.inline) return { ok: false, code: 'proxy_password_in_profile', error: `${label}'s proxy address carries its password — it was never used, and it is not used now. Press «Move the password to the vault» on the profile's card (the vault unlocked), then start the browser again` };
   if (!PROXY_SCHEMES.includes(pp.scheme)) return { ok: false, code: 'proxy_scheme_unsupported', error: `${label}'s proxy is ${pp.scheme}, which cannot carry a site's name — edit the profile and give an http, https or socks5 proxy` };
   if (p.host) return { ok: false, code: 'proxy_off_machine', error: `${label} runs on another machine — a browser profile's proxy works for browsers on this machine only, for now` };
+  if (isCloudProfile(p)) return { ok: false, code: 'proxy_cloud_browser', error: `${label}: ${PROXY_CLOUD_WHY}` };
   const c = normalizeProxyCredential(p.proxyCredential, p.proxy);
   if (!c.ok) return { ok: false, code: c.code, error: `${label}: ${c.error}` };
   return { ok: true, proxy: { scheme: pp.scheme, host: pp.host, port: pp.port, credential: c.value } };
@@ -1312,6 +1317,7 @@ function validateProfileInput(input = {}, { existing = [], control = null, media
   const proxyCredential = normalizeProxyCredential(src.proxyCredential, proxy.value);
   if (!proxyCredential.ok) return { ok: false, code: proxyCredential.code, error: proxyCredential.error };
   if (proxy.value && host) return { ok: false, code: 'proxy_off_machine', error: 'a browser profile\'s proxy works for browsers on this machine only, for now — this profile runs on another machine' };
+  if (proxy.value && row.cloud) return { ok: false, code: 'proxy_cloud_browser', error: PROXY_CLOUD_WHY };   // B-8b87 cure
   const seed = src.fingerprintSeed == null || src.fingerprintSeed === '' ? null : Number(src.fingerprintSeed);
   // §7.4: a per-profile default backend names a ROW (validated like any other
   // provider id; whether it can be used HERE is the switch's question)
@@ -3603,7 +3609,7 @@ module.exports = {
   FLOOR_VERSION, cmpVersion, parseVersion, floorVerdict, floorNotice, floorNoticeDetail, // B-0b8c: + the settled-unknown notice's detail
   // P1 (§3.3–§3.5): the registry, the lease and the keeper's verdicts
   PROFILE_ID_RE, mintProfileId, isProfileId, profileDirName, PROVIDERS, OWNER_KINDS, LABEL_MAX, cleanLabel,
-  normalizeProxy, proxyPublicView, proxyParts, proxyLoginName, parseProxyLoginName, normalizeProxyCredential, proxyLaunchVerdict, proxyRoadOf, profileProxyVerdict, PROXY_SCHEMES, PROXY_LOGIN_RE, validateProfileInput, newProfileRecord, normalizeRegistry, normalizeLoginFenceState, findProfile, publicProfileView,
+  normalizeProxy, proxyPublicView, proxyParts, proxyLoginName, parseProxyLoginName, normalizeProxyCredential, proxyLaunchVerdict, isCloudProfile, PROXY_CLOUD_WHY, proxyRoadOf, profileProxyVerdict, PROXY_SCHEMES, PROXY_LOGIN_RE, validateProfileInput, newProfileRecord, normalizeRegistry, normalizeLoginFenceState, findProfile, publicProfileView,
   SHARING_VALUES, sharingVerdict, isMediatedProfile, isEphemeralProfile, ephemeralLabel, holderRows, ephemeralPairsVerdict, pairsIdleMs, ephemeralDirOf, mayAttach, CHILD_KEY_RE, isChildKey, parentKeyOf, findLease, decideAttach, decideDetach, leasesOf, keyCarried,
   LEASE_DROP_GRACE_MS, reconcileLeases,
   LIVE_BROWSER_STATES, isLiveBrowser, browserIdle, ceilingVerdict,

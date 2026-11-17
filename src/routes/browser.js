@@ -192,6 +192,8 @@ function refuseHost(req, res) {
   return true;
 }
 const STATUS = { // lane browser-profile-clone: the copy's refusals by name
+  // B-8b87 cure: a profile proxy's refusals by name (a person's page words them by code — never a 500 for a refusal)
+  proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400, proxy_unusable: 409, proxy_password_in_profile: 409, proxy_scheme_unsupported: 409, proxy_external_browser: 409, egress_proxy_missing: 409, proxy_credential_unreadable: 423,
   'bad-size': 400, size_out_of_bounds: 400, not_your_window: 403, // lane launch-picture-size: a fixed picture size refused by name
   source_not_found: 404, source_same_machine_only: 409, source_leased: 409, source_still_running: 409, source_no_folder: 409, clone_too_big: 413, clone_failed: 500, clone_unsupported_platform: 400, clone_agent_too_old: 400,
   'not-found': 404, no_lease: 404, 'bad-request': 400, label_required: 400, label_taken: 409, provider_unknown: 400, provider_unavailable: 400, 'unsupported-host': 400, sharing_refused: 400, fence_refused: 409, bad_proxy: 400, ambiguous: 409, not_owner: 403, leased: 409, running: 409, cap: 409, launch_failed: 502, dir_unwritable: 500, unavailable: 503,
@@ -297,7 +299,7 @@ function fail(res, e) {
   // B-f7ab verify r2 (LOW): a key minted by THIS call rides a refused answer too (`res.locals.minted`, set by needKey) — the
   // agent's first command may be refused (not_owner, launch_failed…) and it still needs to know nothing needs restarting
   // lane remote-profile-start: a machine's refusal keeps the user's one command (`step`) — never on an agent's route
-  res.status(STATUS[code] || 500).json({ error: agentRoad ? agentSafeText(String(e?.message || e), e?.failed) : String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}), ...(e?.step && !/^\/api\/agent\//.test(String((res.req && res.req.path) || '')) ? { step: e.step } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}),
+  res.status(STATUS[code] || 500).json({ error: agentRoad ? agentSafeText(String(e?.message || e), e?.failed) : String(e?.message || e), code, ...(typeof e?.word === 'string' && e.word ? { word: e.word } : {}), ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}), ...(e?.step && !/^\/api\/agent\//.test(String((res.req && res.req.path) || '')) ? { step: e.step } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}),
     // P4 (§7.4): a refusal carries its ACTIONABLE way out (`action.openIntegration`), the ways out of a refused downgrade, and whether one human confirmation would do
     // MULTIVIEW D4: WHICH cap refused (this conversation's own, or the machine's) + the counts — never another session's name
     ...(e?.scope ? { scope: e.scope } : {}), ...(Number.isFinite(e?.others) ? { others: e.others } : {}), ...(Number.isFinite(e?.capOwn) ? { own: e.capOwn, cap: e.capOf } : {}),
@@ -601,7 +603,7 @@ router.post('/api/browser/profiles', async (req, res) => {
   // verify r1 (F6): "Who can use it" is the USER's too — an agent's token never writes the list (its own `new` makes a
   // profile every conversation can use; the PATCH in routes/browser-trace.js and the adopt below refuse the same way)
   if (use !== undefined && refuseAgentBearer(req, res, USE_IS_USERS)) return;
-  if (input.proxyCredential != null && input.proxyCredential !== '' && refuseAgentBearer(req, res, 'a browser profile\'s proxy login is the user\'s to choose — an agent\'s token never names a vault entry (B-8b87)')) return;
+  if (input.proxyCredential != null && input.proxyCredential !== '' && refuseAgentBearer(req, res, 'an agent may give a proxy address when it creates a profile, but never names its login — the person chooses it on the profile\'s card (Proxy…) (B-8b87)')) return;
   try {
     const u = await resolveUseRows(use);
     if (!u.ok) return res.status(u.status).json(u.body);

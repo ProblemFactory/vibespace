@@ -148,17 +148,25 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
   }
   /** B-8b87: a browser launched with its PROFILE'S PROXY (`rec.proxyRoad.arg` = --proxy-server=http://127.0.0.1:<its forwarder>) names,
    *  at every call, the file it names anyway + that one switch last — every other proxy switch (and the config's own `proxy`) out:
-   *  the profile's proxy is THE road (src/browser-profiles.js proxyRoadOf). The same derived-file rule as the tailnet's. */
+   *  the profile's proxy is THE road (src/browser-profiles.js proxyRoadOf). The same derived-file rule as the tailnet's — but FAIL-CLOSED
+   *  like the engine's wrapped view (B-8b87 cure): a file that cannot be read, built or written THROWS (code egress_proxy_missing) —
+   *  the call is refused by name, never run from a file without the switch (it would leave DIRECT). The person's proxy switches
+   *  leave by the tree's ONE rule (src/browser-engines.js PROXY_ARG_RE: auto-detect and the resolver switch too). */
+  const proxyMissing = (why) => Object.assign(new Error(`the browser's proxy rides its own config, and ${why} — the call was refused, never run outside its proxy`), { code: 'egress_proxy_missing' });
   function proxyFileFor(baseFile, stamp) {
     const arg = stamp && typeof stamp.arg === 'string' ? stamp.arg : '';
-    if (!baseFile || !/^--proxy-server=http:\/\/127\.0\.0\.1:\d{1,5}$/.test(arg)) return baseFile;
+    if (!arg) return baseFile;
+    if (!/^--proxy-server=http:\/\/127\.0\.0\.1:\d{1,5}$/.test(arg)) throw proxyMissing(`its switch «${arg.slice(0, 60)}» is not the keeper's forwarder`);
+    if (!baseFile) throw proxyMissing('no config file is named for it');
     const base = readCfg(baseFile);
-    if (!base) { say(`pread:${baseFile}`, `the profile proxy's road could not read ${baseFile} — its calls keep that file (the proxy is not reached through it)`); return baseFile; }
+    if (!base) { say(`pread:${baseFile}`, `the profile proxy's road could not read ${baseFile} — its calls are refused (never run without the proxy)`); throw proxyMissing(`${baseFile} could not be read`); }
     const { proxy: _own, ...rest } = base;
-    const cfg = { ...rest, args: [...V.driverArgsList(base.args).filter((a) => !/^--?(?:proxy-server|proxy-pac-url|proxy-bypass-list|no-proxy-server)(?:=|$)/.test(a)), arg] };
+    const cfg = { ...rest, args: [...ENG.withoutProxyArgs(V.driverArgsList(base.args)), arg] };
     const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + arg).digest('hex').slice(0, 10);
     const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-proxy-${tag}.json`);
-    return derived(file, cfg, baseFile, 'the profile proxy\'s config');
+    const got = derived(file, cfg, baseFile, 'the profile proxy\'s config');
+    if (got !== file) throw proxyMissing(`its config could not be written at ${file}`);
+    return got;
   }
   /** lane engine-args-string r2: THE ENGINE'S WRAPPER of one profile — `<dir>/engine-<name>.sh` (`name` = the profile id: one
    *  per profile, which runs one engine at a time), its text src/browser-engines.js engineWrapperText. Written 0700 through a

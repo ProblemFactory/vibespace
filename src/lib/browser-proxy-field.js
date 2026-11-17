@@ -3,7 +3,7 @@
 // vault's own route at once, never into the profile). PURE rules: src/lib/browser-proxy-model.js.
 import { t } from './i18n.js';
 import { el } from './channel-chrome.js';
-import { proxyAddressOf, loginsFor } from './browser-proxy-model.js';
+import { proxyAddressOf, loginsFor, loginNameParts, userNameFits } from './browser-proxy-model.js';
 
 const NEW = '__new';
 /** → { el, read(): Promise<{ ok, proxy, proxyCredential } | { ok: false, code, error?, focus? }>, focus() } */
@@ -29,22 +29,26 @@ export function mountProxyField(container, { proxy = '', credential = '', fetchJ
   newRows.append(user, pass, el('div', 'bnew-hint', t('Saved in the vault as this proxy\'s login — the browser never sees it.')));
   wrap.append(addrRow, hint, loginRow, newRows);
   container.appendChild(wrap);
-  let logins = [], want = String(credential || '');
+  let logins = [], want = String(credential || ''), loaded = null;   // B-8b87 cure: null = the vault's list asked · true = read · false = unreadable
   const initial = { addr: String(proxy || '').trim(), login: String(credential || '') };
+  const kept = loginNameParts(initial.login);
   const draw = () => {
     const a = proxyAddressOf(addr.value);
     const keep = sel.value || want;
     sel.textContent = '';
     const opt = (value, label) => { const o = document.createElement('option'); o.value = value; o.textContent = label; sel.appendChild(o); return o; };
     opt('', t('No login'));
-    for (const l of loginsFor(logins, a.ok ? a.value : null)) opt(l.name, String(l.user));
+    const list = loginsFor(logins, a.ok ? a.value : null);
+    for (const l of list) opt(l.name, String(l.user));
+    // B-8b87 cure: the profile's login the vault does not list (deleted, or the list unreadable) shown AS ITSELF — never «No login»
+    if (kept && a.ok && a.value === kept.origin && !list.some((l) => l.name === initial.login)) opt(initial.login, loaded === false ? t('{user} — the vault\'s list could not be read', { user: kept.user }) : loaded ? t('{user} — no longer in the vault', { user: kept.user }) : kept.user);
     opt(NEW, t('New login…'));
     sel.value = [...sel.options].some((o) => o.value === keep) ? keep : '';
     loginRow.style.display = a.ok && a.value ? '' : 'none';
     newRows.style.display = a.ok && a.value && sel.value === NEW ? '' : 'none';
   };
   draw();
-  Promise.resolve(typeof fetchJson === 'function' ? fetchJson('/api/vault/proxy-logins') : null).then((r) => { logins = r && Array.isArray(r.logins) ? r.logins : []; draw(); }, () => { /* the vault's logins unreadable here: none offered */ });
+  Promise.resolve(typeof fetchJson === 'function' ? fetchJson('/api/vault/proxy-logins') : null).then((r) => { if (r && Array.isArray(r.logins)) { logins = r.logins; loaded = true; } else loaded = false; draw(); }, () => { loaded = false; draw(); });
   addr.addEventListener('input', draw);
   sel.addEventListener('change', () => { want = sel.value === NEW ? want : sel.value; draw(); if (sel.value === NEW) setTimeout(() => { try { user.focus(); } catch { /* none */ } }, 0); });
   async function read() {
@@ -54,14 +58,16 @@ export function mountProxyField(container, { proxy = '', credential = '', fetchJ
     if (sel.value !== NEW) return { ok: true, proxy: a.value, proxyCredential: sel.value || null };
     const u = user.value.trim();
     if (!u || !pass.value) return { ok: false, code: 'login_needs', focus: u ? pass : user };
+    if (!userNameFits(u)) return { ok: false, code: 'login_user_unusable', focus: user };   // B-8b87 cure: refused at the field, nothing sent
     const r = await fetchJson('/api/vault/proxy-logins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proxy: a.value, user: u, proxyPassword: pass.value }) });
-    if (!r || r.ok === false || r.error) return { ok: false, code: (r && r.code) || 'not_written', error: r && r.error, focus: pass };
+    if (!r || r.ok === false || r.error) return { ok: false, code: (r && r.code) || 'not_written', word: (r && r.word) || '', error: r && r.error, focus: pass };
     pass.value = '';   // the password is the vault's now — never left in the page
     logins = [...logins.filter((l) => l.name !== r.name), { name: r.name, origin: a.value, user: u }];
     want = r.name; draw();
     return { ok: true, proxy: a.value, proxyCredential: r.name };
   }
   /** a change the person made (the address, the login, a new login typed) — the dialog's unsaved guard */
-  const isDirty = () => addr.value.trim() !== initial.addr || (sel.value === NEW ? true : (sel.value || '') !== initial.login && loginRow.style.display !== 'none') || !!user.value || !!pass.value;
+  // B-8b87 cure: the login counts as changed only once the vault's list has answered (before it, the select holds no saved login)
+  const isDirty = () => addr.value.trim() !== initial.addr || (loaded !== null && loginRow.style.display !== 'none' && (sel.value === NEW || (sel.value || '') !== initial.login)) || !!user.value || !!pass.value;
   return { el: wrap, read, focus: () => addr.focus(), isDirty };
 }

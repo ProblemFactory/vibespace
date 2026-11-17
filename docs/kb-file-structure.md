@@ -780,7 +780,7 @@ scripts/fixtures/fake-kernel.mjs (lane passkey-sink) — + the webauthn legs: tr
 src/browser-login.js — PURE WEB LOGINS (lane browser-login, .356; r22 .381): 3-slot record (current/previous/pending, human-only Confirm/Discard, 7d remind), parseVaultFillSpec, fillVerdict (vault · entry · grant · origin · frame), 24-char generatePassword, liveFillVerdict ⇒ kb-file-structure.md
 src/login-hold-words.js — PURE, imports nothing: THE HOLD WORDS of a website-login fence (one closed set per held tab's record row, the HOLD_* reasons, the restart phases); apart from browser-login so the device bundle never carries it (§107) ⇒ kb-file-structure «THE PERSISTED HOLD»
 src/server/browser-logins.js — ORCH THE ONE WRITER of the vault's web-login entries (r22 .381): resolveFill (mints pending + 1 For-you card before typing) / confirmOwn / discardPending / maybeRemindPending / takeover save-login card / Vault window doors ⇒ kb-file-structure.md
-src/server/browser-proxy-logins.js — ORCH B-8b87: THE ONE writer and reader of the vault's proxy-login:<scheme>://<host>:<port>#<user> entries — save/remove a person's; read = the keeper's forwarder alone, each a use noted (door browser-proxy) ⇒ kb-file-structure.md
+src/server/browser-proxy-logins.js — ORCH B-8b87: THE ONE writer and reader of the vault's proxy-login:<scheme>://<host>:<port>#<user> entries — save/remove a person's; read = the keeper's forwarder alone, each a use noted (door browser-proxy) ⇒ kb-features.md
 src/server/browser-dialogs.js (lane browser-login; r22 .381) — + UNIFIED VAULT FILL (Chrome + custom kernel): fillVaultField → precheckVaultFill (0 CDP when locked) + isolated-world origin & focus gate + Input.insertText, liveFill fence, cross-origin cred block, SPA wipe ⇒ kb-file-structure.md
 src/server/browser-dialogs.js + server/browser-stream.js + browser-fact.js + browser-passkey.js + lib/browser-live-window.js (lane passkey-browse-yourself) — every road watched (human-start, heal, a close under him); his key's fact; a view fact via its relay; ONE banner; DOORS; unknown, never null ⇒
 src/lib/vault-login-row.js — CLIENT a web login's Vault-window row (lane browser-login; r22 .381): what it holds FIRST (the window's `held`), grant chips (a wider grant «through», no ✕), 网站登录…, Confirm / Discard; imports no dialog ⇒ kb-features.md
@@ -1813,6 +1813,8 @@ src/server/queued-wakes.js — THE QUEUED WAKE (lane queued-is-not-woke, law 1):
 src/server/wait-watch.js + src/wait-words.js (PURE) + groups-engine readWaiting — WHAT WAITS IS READ, NEVER KEPT (shape C): in a running turn only; the sender's one slot at 1 h, the owner's one item per turn at 4 h ⇒ kb-file-structure.md
 
 src/lib/browser-proxy-field.js — B-8b87 the proxy field (New profile, the card's Proxy…): the address alone + its login picked from the vault or a New login… saved INTO the vault (POST /api/vault/proxy-logins); PURE rules browser-proxy-model.js ⇒ kb-features.md
+src/lib/browser-proxy-dialog.js — B-8b87 the card's «Proxy…» dialog: the field, Save = PATCH (applied at the next start), a refusal in the page's words with its vault press (Unlock… / Set up the vault…) ⇒ kb-features.md
+src/lib/browser-proxy-model.js — B-8b87 PURE: the typed address (normalizeProxy's mirror), a login's name read back, the logins for one address, every proxy refusal's words by code and act + its vault press ⇒ kb-features.md
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 
 | Task | Primary File(s) | Notes |

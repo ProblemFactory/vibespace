@@ -13638,7 +13638,28 @@ export default {
   "The proxy must be http://host:port, https://host:port or socks5://host:port.": "プロキシは http://ホスト:ポート、https://ホスト:ポート、socks5://ホスト:ポート のいずれかにしてください。", // B-8b87: a browser profile's proxy and its login
   "A proxy's user name and password go in the vault — give the address alone, then choose its login below.": "プロキシのユーザー名とパスワードは保管庫に入れます——アドレスだけを入力し、下でログイン情報を選んでください。", // B-8b87: a browser profile's proxy and its login
   "That login was saved for another proxy — choose this proxy's login, or make a new one.": "そのログイン情報は別のプロキシ用に保存されたものです——このプロキシのログイン情報を選ぶか、新しく作成してください。", // B-8b87: a browser profile's proxy and its login
-  "The vault is locked — unlock it in the Vault window, then save.": "保管庫はロックされています——保管庫ウィンドウでロックを解除してから保存してください。", // B-8b87: a browser profile's proxy and its login
+  "proxy from its next start": "次回の起動からプロキシ", // B-8b87 cure: a proxy's refusals in the page's words
+  "Through its proxy {address} from its next start — the running browser still uses {road}": "次回の起動からプロキシ {address} 経由——起動中のブラウザはまだ {road} を使っています", // B-8b87 cure: a proxy's refusals in the page's words
+  "no proxy": "プロキシなし", // B-8b87 cure: a proxy's refusals in the page's words
+  "no proxy from its next start": "次回の起動からプロキシなし", // B-8b87 cure: a proxy's refusals in the page's words
+  "The running browser still goes through {road} — no proxy from its next start": "起動中のブラウザはまだ {road} 経由です——次回の起動からプロキシなし", // B-8b87 cure: a proxy's refusals in the page's words
+  "{user} — the vault's list could not be read": "{user}——保管庫の一覧を読み取れませんでした", // B-8b87 cure: a proxy's refusals in the page's words
+  "{user} — no longer in the vault": "{user}——もう保管庫にありません", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then move the password again.": "保管庫はロックされています——「ロック解除…」を押してから、もう一度パスワードを移してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then start the browser again.": "保管庫はロックされています——「ロック解除…」を押してから、もう一度ブラウザを起動してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then save.": "保管庫はロックされています——「ロック解除…」を押してから保存してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is not set up yet — press Set up the vault…, then try again.": "保管庫はまだ設定されていません——「保管庫を設定…」を押してから、もう一度お試しください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "A cloud browser runs at its vendor, where a proxy on this machine cannot reach it — clear the proxy, or set one in the vendor's own settings.": "クラウドブラウザはベンダー側で動いており、このマシンのプロキシは届きません——プロキシを空にするか、ベンダー自身の設定でプロキシを設定してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy login is no longer in the vault — choose its login again in Proxy….": "プロキシのログインはもう保管庫にありません——「プロキシ…」でログインを選び直してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy login could not be read from the vault ({code}).": "保管庫からプロキシのログインを読み取れませんでした（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy address carries its password, which is never used — press «Move the password to the vault» in ⋯ first.": "プロキシのアドレスにパスワードが含まれており、そのパスワードは使われません——先に ⋯ の「パスワードを保管庫へ移す」を押してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy is socks4, which cannot carry a site's name — give an http, https or socks5 proxy in Proxy….": "プロキシが socks4 で、サイトの名前を渡せません——「プロキシ…」で http、https または socks5 のプロキシを指定してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "This profile attaches to a browser VibeSpace does not start — that browser keeps its own proxy settings.": "このプロファイルは VibeSpace が起動しないブラウザに接続します——そのブラウザは自身のプロキシ設定を使います。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The browser's proxy could not be put in its config — the browser was not started without it.": "ブラウザの設定にプロキシを書き込めませんでした——プロキシなしでブラウザを起動することはしていません。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy address cannot be read — give it again in Proxy….": "プロキシのアドレスを読み取れません——「プロキシ…」でもう一度指定してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The login is saved in the vault, but the profile could not be written — press «Move the password to the vault» again.": "ログインは保管庫に保存されましたが、プロファイルを書き込めませんでした——もう一度「パスワードを保管庫へ移す」を押してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "A login's user name cannot hold a space or #, and is at most 128 characters.": "ログインのユーザー名には空白や # を含められず、最大 128 文字です。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The proxy could not be used ({code}).": "このプロキシを使えませんでした（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
   "A browser profile's proxy works for browsers on this machine only, for now.": "現時点では、ブラウザのプロファイルのプロキシはこのマシン上のブラウザでのみ使えます。", // B-8b87: a browser profile's proxy and its login
   "A new login needs its user name and its password.": "新しいログイン情報にはユーザー名とパスワードが必要です。", // B-8b87: a browser profile's proxy and its login
   "This profile's proxy carries no password.": "このプロファイルのプロキシにはパスワードが含まれていません。", // B-8b87: a browser profile's proxy and its login

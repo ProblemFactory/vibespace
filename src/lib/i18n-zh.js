@@ -13639,7 +13639,28 @@ export default {
   "The proxy must be http://host:port, https://host:port or socks5://host:port.": "代理必须是 http://主机:端口、https://主机:端口 或 socks5://主机:端口。", // B-8b87: a browser profile's proxy and its login
   "A proxy's user name and password go in the vault — give the address alone, then choose its login below.": "代理的用户名和密码要放进保险库——只填地址，再在下面选它的登录信息。", // B-8b87: a browser profile's proxy and its login
   "That login was saved for another proxy — choose this proxy's login, or make a new one.": "这个登录信息是为另一个代理保存的——请选这个代理的登录信息，或新建一个。", // B-8b87: a browser profile's proxy and its login
-  "The vault is locked — unlock it in the Vault window, then save.": "保险库已锁定——请在保险库窗口里解锁，然后保存。", // B-8b87: a browser profile's proxy and its login
+  "proxy from its next start": "下次启动起走代理", // B-8b87 cure: a proxy's refusals in the page's words
+  "Through its proxy {address} from its next start — the running browser still uses {road}": "下次启动起经代理 {address}——正在运行的浏览器仍走 {road}", // B-8b87 cure: a proxy's refusals in the page's words
+  "no proxy": "不走代理", // B-8b87 cure: a proxy's refusals in the page's words
+  "no proxy from its next start": "下次启动起不走代理", // B-8b87 cure: a proxy's refusals in the page's words
+  "The running browser still goes through {road} — no proxy from its next start": "正在运行的浏览器仍经 {road}——下次启动起不走代理", // B-8b87 cure: a proxy's refusals in the page's words
+  "{user} — the vault's list could not be read": "{user}——无法读取保险库的列表", // B-8b87 cure: a proxy's refusals in the page's words
+  "{user} — no longer in the vault": "{user}——已不在保险库中", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then move the password again.": "保险库已锁定——请按「解锁…」，然后再移一次密码。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then start the browser again.": "保险库已锁定——请按「解锁…」，然后再启动浏览器。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, then save.": "保险库已锁定——请按「解锁…」，然后保存。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is not set up yet — press Set up the vault…, then try again.": "保险库还没有设置——请按「设置保险库…」，然后再试一次。", // B-8b87 cure: a proxy's refusals in the page's words
+  "A cloud browser runs at its vendor, where a proxy on this machine cannot reach it — clear the proxy, or set one in the vendor's own settings.": "云端浏览器运行在服务商那里，这台机器上的代理够不到它——请清空代理，或在服务商自己的设置里设代理。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy login is no longer in the vault — choose its login again in Proxy….": "它的代理登录已不在保险库中——请在「代理…」里重新选择登录。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy login could not be read from the vault ({code}).": "无法从保险库读取它的代理登录（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy address carries its password, which is never used — press «Move the password to the vault» in ⋯ first.": "它的代理地址里带着密码，这个密码从不使用——请先在 ⋯ 里按「把密码移入保险库」。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy is socks4, which cannot carry a site's name — give an http, https or socks5 proxy in Proxy….": "它的代理是 socks4，无法传递网站的名称——请在「代理…」里填写 http、https 或 socks5 代理。", // B-8b87 cure: a proxy's refusals in the page's words
+  "This profile attaches to a browser VibeSpace does not start — that browser keeps its own proxy settings.": "这个配置连接的是一个不由 VibeSpace 启动的浏览器——那个浏览器保留它自己的代理设置。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The browser's proxy could not be put in its config — the browser was not started without it.": "无法把代理写进浏览器的配置——浏览器没有在不走代理的情况下启动。", // B-8b87 cure: a proxy's refusals in the page's words
+  "Its proxy address cannot be read — give it again in Proxy….": "无法读取它的代理地址——请在「代理…」里重新填写。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The login is saved in the vault, but the profile could not be written — press «Move the password to the vault» again.": "登录已存入保险库，但配置没能写入——请再按一次「把密码移入保险库」。", // B-8b87 cure: a proxy's refusals in the page's words
+  "A login's user name cannot hold a space or #, and is at most 128 characters.": "登录的用户名不能包含空格或 #，最长 128 个字符。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The proxy could not be used ({code}).": "无法使用这个代理（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
   "A browser profile's proxy works for browsers on this machine only, for now.": "目前浏览器配置的代理只对这台机器上的浏览器生效。", // B-8b87: a browser profile's proxy and its login
   "A new login needs its user name and its password.": "新的登录信息需要用户名和密码。", // B-8b87: a browser profile's proxy and its login
   "This profile's proxy carries no password.": "这个配置的代理里没有密码。", // B-8b87: a browser profile's proxy and its login
