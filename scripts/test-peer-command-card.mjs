@@ -143,7 +143,9 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
   // nor hand them to any brain consumer as something else. A second consumer instance with a RECORDING
   // brainRef (every method it is asked for is logged) watches the whole turn-start → result path.
   const brainLog = [];
-  const recBrain = new Proxy({}, { get: (_, name) => (typeof name === 'string' ? (...a) => { brainLog.push([name, a[2]?.type || null]); } : undefined) });
+  // lane conversation-facts (majordomo piece 2): `noteConvFacts` is the conversation's OBSERVATION step — handed EVERY record of the
+  // CLI by design (src/conversation-facts.js factsStep records, it never judges a record as a card or a turn) — so it is not counted here
+  const recBrain = new Proxy({}, { get: (_, name) => (typeof name === 'string' ? (...a) => { if (name !== 'noteConvFacts') brainLog.push([name, a[2]?.type || null]); } : undefined) });
   const { attach: attachRec } = consumer.create({
     activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'command_lifecycle']), _seenStreamTypes: new Set(),
     USAGE_SCANNER_PATH: path.join(tmp, 'none'), checkClaudeGoalStatus() { }, noteModelSeen() { }, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null }, brainRef: recBrain,
