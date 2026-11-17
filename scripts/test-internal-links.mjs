@@ -94,12 +94,12 @@ const URI_RULE = String.raw`^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|m
 const STUB = `const OK = new RegExp(${JSON.stringify(URI_RULE)}, 'i');\nexport const sanitizeHtml = (h) => h.replace(/(<a\\b[^>]*?)\\shref="([^"]*)"/gi, (m, pre, v) => (OK.test(v.replace(/[\\u0000-\\u0020]/g, '')) ? m : pre));\nexport const sanitizeDiagramSvg = () => '';`;
 let nb = 0;
 /** ONE build of several entries (code splitting: the door module is ONE instance for the renderer and the suite). */
-const bundle = async (entries, patch = null) => {
+const bundle = async (entries, patch = null, patchFile = /chat-renderers\.js$/) => {
   const out = path.join(SCR, `b${nb++}`);
   const plug = { name: 'il', setup(b) {
     b.onResolve({ filter: /(build-version|safe-html)\.js$/ }, (a) => ({ path: path.basename(a.path), namespace: 'il-stub' }));
     b.onLoad({ filter: /.*/, namespace: 'il-stub' }, (a) => ({ contents: a.path === 'safe-html.js' ? STUB : "export const BUILD_VERSION = 'test';", loader: 'js' }));
-    if (patch) b.onLoad({ filter: /chat-renderers\.js$/ }, (a) => ({ contents: patch(fs.readFileSync(a.path, 'utf8')), loader: 'js', resolveDir: path.dirname(a.path) }));
+    if (patch) b.onLoad({ filter: patchFile }, (a) => ({ contents: patch(fs.readFileSync(a.path, 'utf8')), loader: 'js', resolveDir: path.dirname(a.path) }));
   } };
   await esbuild.build({ entryPoints: entries.map((e) => path.join(REPO, e)), bundle: true, splitting: true, format: 'esm', platform: 'node', target: 'es2022', outdir: out, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [plug] });
   return Promise.all(entries.map((e) => import(path.join(out, path.basename(e, '.js') + '.js'))));
@@ -126,8 +126,12 @@ const [CR, DOOR] = await bundle(['src/lib/chat-renderers.js', 'src/lib/internal-
   ok(vsDoors(on) === 2 && /data-vs-kind="conversation" data-vs-ref="claude:0e0e0e0e-1111-4222-8333-444455556666" title="Go to this conversation">/.test(on) && /data-vs-kind="desktop" data-vs-ref="desk-mh3k2-a1b"/.test(on),
     'ON: a markdown link and a bare link each become ONE .chat-vs-link (kind + key, no href)', on);
   ok((on.match(/<span class="vs-link-icon" aria-hidden="true"><svg/g) || []).length === 3, 'each drawn link (and the chip) carries an SVG icon — never an emoji', on);
-  ok(/the report<span class="vs-link-name">Research<\/span><\/span>/.test(on) && /desk-mh3k2-a1b<span class="vs-link-name">Desktop 2<\/span><\/span>\./.test(on),
-    'the real name follows in muted text when the label lacks it; the full stop stays outside', on);
+  const showsAddress = (h) => /chat-vs-link"[^>]*><span class="vs-link-icon" aria-hidden="true"><svg\/><\/span>vibespace:/.test(String(h).replace(/<svg[\s\S]*?<\/svg>/g, '<svg/>'));   // a drawn link whose words are an address
+  ok(/the report<span class="vs-link-name">Research<\/span><\/span>/.test(on), 'a LABELLED link: the real name follows in muted text when the label lacks it', on);
+  ok(/data-vs-kind="desktop" data-vs-ref="desk-mh3k2-a1b" title="Go to this desktop"><span class="vs-link-icon" aria-hidden="true"><svg[\s\S]*?<\/svg><\/span>Desktop 2<\/span>\./.test(on) && !showsAddress(on),
+    'A PERSON NEVER READS AN ADDRESS: a BARE link is drawn as the target\'s real name with its icon (the full stop outside); no drawn link shows an address', on.slice(Math.max(0, on.indexOf('data-vs-kind="desktop"') - 10)).replace(/<svg[\s\S]*?<\/svg>/g, '<svg/>'));
+  const unsure = r.renderMarkdown('see vibespace://conversation/claude:unsure now', { vsLinks: true });
+  ok(/data-vs-ref="claude:unsure"[^>]*><span class="vs-link-icon"[\s\S]*?<\/span>conversation<\/span> now/.test(unsure) && !/>vibespace:/.test(unsure), 'a bare link to a target the page has not read yet: what it is («conversation»), never its address', unsure);
   ok(/<span class="vs-link-unknown">.*?vibespace:\/\/conversation\/claude:gone <span class="vs-link-chip">unknown conversation<\/span><\/span>/.test(on) && !/data-vs-ref="claude:gone"/.test(on),
     'a target this page does not have: the chip «unknown conversation» — no .chat-link, no key: nothing to press', on);
   const named = r.renderMarkdown(`[Open Research](${C})`, { vsLinks: true });
@@ -137,7 +141,11 @@ const [CR, DOOR] = await bundle(['src/lib/chat-renderers.js', 'src/lib/internal-
   const hand = r.renderMarkdown(`[y](#vs-to-conversation-${KEY})`);
   ok(!/vs-link|data-vs-/.test(hand) && /<p>y<\/p>/.test(hand), 'OFF: a hand-written mark is its label', hand);
   const auto = r.renderMarkdown(`<${C}>`, { vsLinks: true }), code = r.renderMarkdown('`' + D + '`', { vsLinks: true });
-  ok(vsDoors(auto) === 1 && vsDoors(code) === 1 && /<code>/.test(code), 'an autolink and a code span are doors too (as the settings row)', { auto, code });
+  ok(vsDoors(auto) === 1 && vsDoors(code) === 1 && /<code>/.test(code) && /<\/span>Research<\/span>/.test(auto) && /<\/span>Desktop 2<\/span>/.test(code), 'an autolink and a code span are doors too (as the settings row) — each drawn as its real name', { auto, code });
+  const [BARE_MUT] = await bundle(['src/lib/internal-link-door.js'], (src) => src.replace("  if (textOf(innerHtml).trim().toLowerCase() === linkOf(kind, ref).toLowerCase()) return", "  if (false) return"), /internal-link-door\.js$/);
+  BARE_MUT.registerInternalLinks(doorOf([]));
+  const mutBare = BARE_MUT.vsLinkHtml('desktop', DESK, D, { cls: 'chat-link chat-vs-link' });
+  ok(showsAddress(mutBare) && /<span class="vs-link-name">Desktop 2/.test(mutBare), 'RED CONTROL: a drawing without the bare rule shows the address (the leg above reads it)', mutBare);
   const sub = r.renderMarkdown('[`0e0e0e0e-1111-4222-8333-444455556666`](conversation://0e0e0e0e-1111-4222-8333-444455556666)', { vsLinks: true });
   ok(/chat-sub-link/.test(sub) && !/chat-vs-link/.test(sub), 'the vendor\'s conversation:// stays the sub-agent link (not this scheme)', sub);
   ok([on, off, auto, code].every((h) => !pathy(h)), 'the leading-slash path rule never links a run\'s //… tail');
@@ -187,8 +195,8 @@ console.log('⑤ FOR YOU: the same grammar — its option (`has`), its drawing, 
   ok(segs.length === 3 && segs[0].kind === 'conversation' && segs[0].ref === KEY && segs[1].kind === 'desktop' && segs[1].ref === DESK && segs[2].ref === 'claude:gone', 'the For-you segmenter has the kinds `conversation` and `desktop` (its option on; a well-shaped key the page lacks is drawn as the chip)', segs);
   ok(FY.segmentText(C).filter((g) => g.t === 'link').length === 0, 'its option off (no `has` — the vault plan): no door, and no path of its tail', FY.segmentText(C));
   const words = ROW.wordsHtml(`go ${C} or ${D}`);
-  ok(/<span class="fy-link" role="link" tabindex="0" data-fy="conversation" data-ref="claude:0e0e0e0e-1111-4222-8333-444455556666" title="Go to this conversation"><span class="vs-link-icon"/.test(words) && /<span class="vs-link-name">Desktop 2<\/span>/.test(words),
-    'an item\'s words (wordsHtml): THE drawing — a keyboard-reachable .fy-link with its icon and the real name', words);
+  ok(/<span class="fy-link" role="link" tabindex="0" data-fy="conversation" data-ref="claude:0e0e0e0e-1111-4222-8333-444455556666" title="Go to this conversation"><span class="vs-link-icon"[\s\S]*?<\/span>Research<\/span>/.test(words) && /<\/span>Desktop 2<\/span>/.test(words) && !/>vibespace:/.test(words),
+    'an item\'s words (wordsHtml): THE drawing — a keyboard-reachable .fy-link with its icon, a bare link as the real name (never an address)', words);
   const evil = DOOR.vsLinkHtml('conversation', KEY, 'x', { cls: 'fy-link', target: { state: 'known', name: '<img src=x onerror=alert(1)>' } });
   ok(!/<img/.test(evil) && /&lt;img/.test(evil), 'the drawing escapes the real name (a name is somebody\'s words)', evil);
   ok(JSON.stringify(FY.linkTarget('conversation', KEY)) === JSON.stringify({ open: 'conversation', key: KEY }) && JSON.stringify(FY.linkTarget('desktop', DESK)) === JSON.stringify({ open: 'desktop', id: DESK }) && FY.linkTarget('conversation', 'nope') === null,
