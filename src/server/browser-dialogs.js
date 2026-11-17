@@ -112,6 +112,7 @@ const WA = () => WAm || (WAm = require('../webauthn-sign.js'));
 // lane passkey-browse-yourself: the user's own key (`hu-…`) → its profile — required at first use (only a human key asks it)
 let HMm = null;
 const HM = () => HMm || (HMm = require('../browser-human.js'));
+const PROMPT_FY_KEY = 'prompt-auth:'; // B-ebb7: a sign-in's For-you item is keyed — a past hub life's open ones are swept when a watch starts
 const REARM_MS = 2000; // a watch whose socket closed under the person's own browsing is opened again after this — doubled at each failed try (acceptance r1: a refused port looped every 2 s)
 const REARM_TRIES = 5; // then the watch stops trying and his fact says so (`gave-up`) until the next arm (his window, his press, a verb)
 const REARM_HEALTHY = 10; // a socket that stayed open this many REARM_MS was healthy: its close starts the backoff over
@@ -2228,13 +2229,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     // lane browser-ui-prompts-r2: a sign-in holds the navigating verb — the verb's long-poll hears it NOW (the dialog's seam)
     if (type === 'http-auth') for (const x of [...waiters]) if (x.profileId === w.profileId && x.prompt && inScope(x.scope(), tid)) { waiters.delete(x); x.resolve({ prompt: ST.promptBlock(rec, { now: now() }), via: 'event', at: now() }); }
   }
-  /** A sign-in unanswered PROMPT_ASK_MS ⇒ ONE For-you item (a human must type it); resolved when it ends. */
+  /** A sign-in unanswered PROMPT_ASK_MS ⇒ ONE For-you item (a human must type it); resolved when it ends. B-ebb7: the detail is
+   *  an ARRAY of lines (user-todos' normalizeI18n refuses an object — the item was never filed from 2.369.237 to this cure). */
   function promptAsk(w, rec) {
     if (!forYou || w.prompts.get(rec.targetId) !== rec || w.promptForYou.has(rec.id)) return;
     let label = null; try { label = labelOf ? labelOf(w.profileId) : null; } catch { label = null; }
     const host = ST.hostOf(rec.origin) || rec.origin;
     const text = 'A page in the agent browser asks you to sign in ({host})'; const detail = 'Open its live view and type the username and password there — the agent never sees them.';
-    let id = null; try { id = forYou.add?.(w.profileId, { text: text.replace('{host}', host) + (label ? ` — ${String(label).slice(0, 80)}` : ''), detail, i18n: { text: { key: text, params: { host } }, detail: { key: detail } } }); } catch (err) { say('prm-fy:' + (err && err.message), `the sign-in For-you item was not filed — ${err && err.message}`); }
+    let id = null; try { id = forYou.add?.(w.profileId, { text: text.replace('{host}', host) + (label ? ` — ${String(label).slice(0, 80)}` : ''), detail, i18n: { text: { key: text, params: { host } }, detail: [{ key: detail }] }, itemKey: `${PROMPT_FY_KEY}${w.profileId}:${rec.id}:${rec.openedAt}` }); } catch (err) { say('prm-fy:' + (err && err.message), `the sign-in For-you item was not filed — ${err && err.message}`); }
     if (id) w.promptForYou.set(rec.id, id);
   }
   function dropPrompt(w, rec, why) {
@@ -5200,6 +5202,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // B-97ae round 2: a leftover's For-you item a PAST hub life filed names a tab this hub does not hold — and the hub that held it
   // took its sessions (and, measured — S12 — the authenticators in them) when it went: it is not kept
   try { const n = forYou && typeof forYou.sweep === 'function' ? forYou.sweep('pk-left:') : 0; if (n) log.log?.(`[browser-dialog] ${n} passkey «could not be taken back» item(s) of a past hub life resolved — that hub's sessions took the authenticators with them`); } catch { /* the tray's own failure */ }
+  // B-ebb7: a sign-in a PAST hub life asked the person to type — its paused request was held on that hub's watch socket, which
+  // closed with it: no answer typed now could reach it, so the item is resolved here, said once
+  try { const n = forYou && typeof forYou.sweep === 'function' ? forYou.sweep(PROMPT_FY_KEY) : 0; if (n) log.log?.(`[browser-dialog] ${n} sign-in For-you item(s) of a past hub life resolved — that hub's sign-in requests ended with it`); } catch { /* the tray's own failure */ }
 
   if (logins && typeof logins.onVaultOpen === 'function') {
     unsubVaultOpen = logins.onVaultOpen(() => {

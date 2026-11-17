@@ -17,6 +17,7 @@ import http from 'http';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { WebSocketServer } = require('ws');
@@ -102,8 +103,19 @@ function fakeChrome() {
 }
 const PW = 's3cret-Pw-7731';
 const lines = []; const log = { warn: (l) => lines.push(String(l)), log: (l) => lines.push(String(l)), error: (l) => lines.push(String(l)) };
-const fy = { added: [], resolved: [] };
-const forYou = { add: (pid, item) => { fy.added.push(item); return 'todo-' + fy.added.length; }, resolve: (id) => fy.resolved.push(id) };
+const fy = { added: [], resolved: [], stored: [] };
+// B-ebb7: every item goes through the REAL For-you store first, filed as the hub's wiring files it (src/server/mounts-plugins-wiring.js,
+// browser-dialogs' forYou.add) — a shape the store refuses THROWS here as it does on the hub, so the watch's own catch eats it and the
+// item never lands (2.369.237 → the cure: the sign-in's i18n.detail was an object; this fake took any shape, so nothing saw it)
+const { UserTodoManager } = require('../src/user-todos.js');
+const todos = new UserTodoManager({ dataDir: path.join(ROOT, 'todos'), onChange: () => {}, expirySweepMs: 0 });
+const fileItem = (item) => todos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Agent browser', ...item });
+// …and resolved / swept through the same store, as the hub's wiring does (the adversarial read: an own 'todo-N' id proved nothing)
+const forYou = {
+  add: (pid, item) => { const r = fileItem(item); const id = r && typeof r === 'object' ? r.id : r; fy.stored.push(todos.get(id) || r); fy.added.push(item); return id; },
+  resolve: (id) => { fy.resolved.push(id); if (todos.get(id)?.status === 'open') todos.setStatus(id, 'done', 'browser'); },
+  sweep: (prefix) => { const ids = todos.idsWhere((i) => i.status === 'open' && i.sessionKey === 'browser' && typeof i.itemKey === 'string' && i.itemKey.startsWith(String(prefix))); for (const id of ids) todos.setStatus(id, 'done', 'browser'); return ids.length; },
+};
 const ch = await fakeChrome().listen();
 const w = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: ch.url }) }, log, forYou, promptAskMs: 120, authHoldMaxMs: 400 });
 const events = []; w.onChange((ev) => events.push(ev));
@@ -137,12 +149,39 @@ await w.answerPrompt(tgt, { cancel: true });
 ok(callsOf('Fetch.continueWithAuth').some((m) => m.params.requestId === 'R2' && m.params.authChallengeResponse.response === 'CancelAuth'), 'Cancel ⇒ CancelAuth (the page gets its 401)');
 ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R3' }); await sleep(200);
 ok(fy.added.length === 1 && fy.added[0].i18n.text.key === 'A page in the agent browser asks you to sign in ({host})' && fy.added[0].i18n.text.params.host === '127.0.0.1', 'unanswered past the ask clock ⇒ ONE For-you item naming the site', fy.added);
+// B-ebb7: the item is FILED by the real store (the watch's catch said nothing to the agent and the tray stayed empty before the cure)
+const signIn = fy.stored[0];
+ok(fy.stored.length === 1 && signIn && signIn.sessionKey === 'browser' && signIn.status === 'open' && Array.isArray(signIn.i18n && signIn.i18n.detail) && signIn.i18n.detail[0].key === 'Open its live view and type the username and password there — the agent never sees them.' && !lines.some((l) => /the sign-in For-you item was not filed/.test(l)), '…FILED by the real For-you store: its detail an array of lines the client words (B-ebb7)', { stored: fy.stored, said: lines.filter((l) => /not filed/.test(l)) });
+// the control: the shape before the cure (detail as one object) is REFUSED by the same store — the leg above judges with a real judge
+let objRefused = null; try { fileItem({ text: 't', detail: 'd', i18n: { text: { key: 'A page in the agent browser asks you to sign in ({host})', params: { host: 'x' } }, detail: { key: 'd' } } }); } catch (e) { objRefused = String(e && e.message); }
+ok(/i18n\.detail must be an array of lines/.test(String(objRefused)), 'the control: the pre-cure object detail is REFUSED by the store by name (so a watch that files it files nothing)', objRefused);
 await sleep(320);
-ok(callsOf('Fetch.continueWithAuth').some((m) => m.params.requestId === 'R3' && m.params.authChallengeResponse.response === 'CancelAuth') && fy.resolved.includes('todo-1') && w.factFor({ ...tgt, consume: false }).prompt === null, 'nobody answers within the hold ⇒ CancelAuth, the For-you item resolved, the record gone');
+ok(callsOf('Fetch.continueWithAuth').some((m) => m.params.requestId === 'R3' && m.params.authChallengeResponse.response === 'CancelAuth') && fy.resolved.includes(signIn && signIn.id) && todos.get(signIn.id).status === 'done' && w.factFor({ ...tgt, consume: false }).prompt === null, 'nobody answers within the hold ⇒ CancelAuth, the For-you item resolved, the record gone');
 ok(/nobody answered it within/.test(w.factFor({ ...tgt, consume: true }).notes.join(' ')), '…and the agent hears it was cancelled for want of an answer');
 ch.emit('Page.fileChooserOpened', FILE_P); await sleep(40);
 ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R4' }); await sleep(40);
 ok(w.factFor({ ...tgt, consume: false }).prompt.type === 'http-auth', 'one prompt per tab: the newer one is said');
+// B-ebb7 (the adversarial read): a filed item must not outlive its hub — it is KEYED, and the next hub life's watch resolves it
+await sleep(160);
+const r4 = fy.stored[fy.stored.length - 1]; const r4Item = r4 && todos.get(r4.id);
+const r4Open = !!(r4Item && r4Item !== signIn && r4Item.status === 'open' && String(r4Item.itemKey || '').startsWith(`prompt-auth:${NAMED}:`));
+const said0 = lines.length;
+const wNext = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: false }) }, log, forYou, promptAskMs: 120, authHoldMaxMs: 400 });
+ok(r4Open && todos.get(r4.id).status === 'done' && lines.slice(said0).filter((l) => /sign-in For-you item\(s\) of a past hub life resolved/.test(l)).length === 1, '…its item is KEYED (prompt-auth:<profile>:…) and the next hub life\'s watch resolves a past life\'s open sign-in item, said once', { r4Open, now: r4 && todos.get(r4.id) && todos.get(r4.id).status, said: lines.slice(said0) });
+wNext.shutdown();
+{ // CONTROL: a watch copy WITHOUT the sweep leaves a past life's sign-in item open for good
+  const MUTP = mutantCopies('uiprompts-sweep', REPO);
+  const dsrc0 = read('src/server/browser-dialogs.js');
+  const sweepNeedle = "try { const n = forYou && typeof forYou.sweep === 'function' ? forYou.sweep(PROMPT_FY_KEY) : 0;";
+  ok(dsrc0.split(sweepNeedle).length === 2, 'control setup: the sign-in sweep is found once in src/server/browser-dialogs.js');
+  const past = forYou.add(NAMED, { text: 'past', detail: 'past', i18n: { text: { key: 'A page in the agent browser asks you to sign in ({host})', params: { host: 'x' } } }, itemKey: `prompt-auth:${NAMED}:prm-past-1:1` });
+  const Dm = MUTP.load('src/server/browser-dialogs.js', dsrc0.replace(sweepNeedle, 'try { const n = 0;'), 'nosweep');
+  const wm = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: false }) }, log, forYou, promptAskMs: 120, authHoldMaxMs: 400 });
+  ok(todos.get(past).status === 'open', 'CONTROL (a watch without the sweep): a past hub life\'s sign-in item stays open for good', todos.get(past));
+  wm.shutdown();
+  forYou.sweep('prompt-auth:');
+  for (const c of copiesCensus(MUTP.files, MUTP.dir, REPO, { label: '③ sweep control: ' })) ok(c.pass, c.name, c.detail);
+}
 w.shutdown(); await ch.close();
 
 // ═══ ③x lane browser-x-in-window (B2): THE X ROAD — Chrome's OWN sheet, in the window the live view now shows ═══
