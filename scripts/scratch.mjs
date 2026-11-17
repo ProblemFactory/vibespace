@@ -267,14 +267,26 @@ export function stillPresser({ evalJs, cdp, log = (line) => console.log(line), s
 /** A suite that plants a violation ON PURPOSE (a negative control) TAKES its report: waits ≤ `ms` for `want` lines matching
  *  `match` (a parsed line → bool) in this suite's file, removes them and returns them (the hub never writes the same key
  *  twice). What is left is what the teardown judges. */
+// THE TAKE NEVER REWRITES THE HUB'S FILE (B-c327 — it read the file, wrote the rest to a .take and renamed that over it:
+// a report the hub appended between the read and the rename was lost, and the teardown could not see it). The file stays
+// the hub's, append-only; what this suite took is kept HERE, line by line, and every reader of this suite's file —
+// cspReportLines: the take itself, a suite's own read, the teardown (cspReportsIn) — leaves it out.
+const CSP_TAKEN = new Map(); // a taken line's text → how many times it was taken
+/** The report lines of `file` (this suite's CSP_REPORTS_FILE by default), less every line this suite took from it. */
+export function cspReportLines(file = CSP_REPORTS_FILE) {
+  let lines = []; try { lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean); } catch { }
+  if (file !== CSP_REPORTS_FILE || !CSP_TAKEN.size) return lines;
+  const left = new Map(CSP_TAKEN);
+  return lines.filter((l) => { const n = left.get(l) || 0; if (n) left.set(l, n - 1); return !n; });
+}
 export async function takeCspReports(match, { ms = 5000, step = 100, want = 1 } = {}) {
   const t0 = Date.now();
   for (;;) {
-    let lines = []; try { lines = fs.readFileSync(CSP_REPORTS_FILE, 'utf8').split('\n').filter(Boolean); } catch { }
+    const lines = cspReportLines();
     const parsed = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } });
     const hit = parsed.filter((r) => r && match(r));
     if (hit.length >= want || Date.now() - t0 > ms) {
-      if (hit.length) { const keep = lines.filter((l, i) => !(parsed[i] && match(parsed[i]))); const tmp = CSP_REPORTS_FILE + '.take'; fs.writeFileSync(tmp, keep.length ? keep.join('\n') + '\n' : ''); fs.renameSync(tmp, CSP_REPORTS_FILE); }
+      lines.forEach((l, i) => { if (parsed[i] && match(parsed[i])) CSP_TAKEN.set(l, (CSP_TAKEN.get(l) || 0) + 1); });
       return hit;
     }
     await new Promise((r) => setTimeout(r, step));
@@ -349,7 +361,7 @@ export const cspSanitizerLine = (l) => { try { return JSON.parse(l).kind === 'sa
 /** The report lines in these files: [{ file, lines }] (a file that is missing or empty is not listed). */
 export function cspReportsIn(files) {
   const out = [];
-  for (const f of files) { let t = ''; try { t = fs.readFileSync(f, 'utf8'); } catch { continue; } const lines = t.split('\n').filter(Boolean); if (lines.length) out.push({ file: f, lines }); }
+  for (const f of files) { const lines = cspReportLines(f); if (lines.length) out.push({ file: f, lines }); } // this suite's own file less what it took (B-c327)
   return out;
 }
 function cspReportsAtExit() {

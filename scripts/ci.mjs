@@ -2344,6 +2344,28 @@ export function rerunRecord({ sha, suite, lane, first, again, at = Date.now(), h
   return { at, sha, host, suite, lane: String(lane), first: { ms: first.ms, load: first.load, tail: [first.lines[1] || '', first.lines[2] || ''].join('\n').split('\n').filter((x) => /^\s*✗ /.test(x)).slice(0, 3).map((x) => x.trim().slice(0, 200)) }, again: { ok: again.ok, ms: again.ms, load: again.load } };
 }
 export const rerunSaid = (tag, suite, first, again, file) => `  [${tag}] RERUN LEDGER ${suite}: red (load ${(first.load || []).join('→')}) → ${again.ok ? 'GREEN — FLAKY, counted' : 'red again'} (load ${(again.load || []).join('→')}) — ${file}`;
+// A FAIL-LOG DIR IS BOUNDED (B-c327 — data/ci-fast/fail-logs grew by every red run's whole output and nothing removed a
+// file; <markers>/fail-logs the same). Like pruneMarkers: the files of the newest FAIL_LOGS_KEEP commits stay (a commit's
+// time = its newest file's mtime, so a try-2 log keeps its try-1 and its hang report beside it); every other commit's
+// files go. Only the runner's own names are judged — `<sha8>.<suite>.<try>.log` and hang-report.mjs's
+// `<sha8>.<suite>.<try>.hang.json` (`nosha` for none); anything else in the dir is never touched. → the removed paths
+export const FAIL_LOGS_KEEP = 30;
+const FAIL_LOG_NAME = /^([0-9a-f]*|nosha)\.[^/]+\.\d+\.(?:log|hang\.json)$/;
+export function pruneFailLogs(dir, keep = FAIL_LOGS_KEEP) {
+  let names = []; try { names = fs.readdirSync(dir); } catch { return []; }
+  const by = new Map();
+  for (const n of names) {
+    const m = FAIL_LOG_NAME.exec(n);
+    if (!m) continue;
+    let st = null; try { st = fs.lstatSync(path.join(dir, n)); } catch { continue; }
+    if (!st.isFile()) continue;
+    const g = by.get(m[1]) || { t: 0, files: [] };
+    g.t = Math.max(g.t, st.mtimeMs); g.files.push(n); by.set(m[1], g);
+  }
+  const gone = [];
+  for (const [, g] of [...by.entries()].sort((a, b) => b[1].t - a[1].t).slice(keep)) for (const n of g.files) { try { fs.unlinkSync(path.join(dir, n)); gone.push(path.join(dir, n)); } catch { } }
+  return gone;
+}
 const load1 = () => Math.round(os.loadavg()[0] * 10) / 10;
 export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set(), hang = null } = {}) {
   return new Promise((resolve) => {
@@ -3700,6 +3722,8 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false } = {}) {
     if (keepGoing) console.log('[ci] --keep-going: every suite runs and every red is listed by name (B-6e71) — nothing is stopped by a red');
     const dirPace = dirSweepPacer();
     const hangDir = fastFailDir(); // the fast tier's fail-log dir: a timed-out suite's hang report (ci-hang-report) + a red suite's whole output (ci-mirror-hygiene)
+    const pruned = pruneFailLogs(hangDir); // B-c327: the newest FAIL_LOGS_KEEP commits' logs stay, nothing else of ours
+    if (pruned.length) console.log(`[ci] fail logs: ${pruned.length} file(s) of commits older than the newest ${FAIL_LOGS_KEEP} removed from ${hangDir}`);
     const { reds, flaky, absent, skipped: skippedByName, timings, parMs, serMs } = await runFastLanes(plan, {
       lanes, keepGoing, inflight, failDir: hangDir, sha, ledger: path.join(repo, ...FAST_RERUNS.split('/')),
       // VS_NO_REAL_CLI=1 (r6, §ban-safety): the real-turn row is not started at all — SKIPPED by name (the wire leg skips inside its suite).
@@ -4119,6 +4143,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       for (const ext of ['green', 'red', 'skipped']) { try { fs.unlinkSync(path.join(d, `${sha}.${ext}`)); } catch {} }
       fs.writeFileSync(path.join(d, `${sha}.${rec.result}`), JSON.stringify(rec, null, 2) + '\n');
       pruneMarkers(dir);
+      pruneFailLogs(path.join(d, 'fail-logs')); // B-c327: its fail logs are bounded like its markers
     }
     // THE CLOSING LINE IS THE ONE PEOPLE READ. "HEAVY GATE GREEN" is a claim
     // about a commit; when no marker was written there is no such claim, and

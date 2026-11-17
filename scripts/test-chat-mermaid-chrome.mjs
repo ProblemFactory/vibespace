@@ -28,7 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, evalInBlankTab, CSP_REPORTS_FILE, takeProbeCspReport, probeVerdictFault } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, evalInBlankTab, cspReportLines, takeProbeCspReport, probeVerdictFault } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -355,7 +355,7 @@ try {
   const p0 = probe.taken[0];
   const fault = probeVerdictFault(probe, { major, forYou: Array.isArray(forYou) ? forYou : [{ text: `For you unread: ${JSON.stringify(forYou).slice(0, 200)}` }], count: { before: cspBefore, after: cspAfter } });
   check(`⑦'s own probe: ${browser} ${p0 ? `reported its dropped handler — EXPECTED, taken (script-src-attr inline «${p0.sample}», set by ${p0.source} at ${p0.line}:${p0.column}); THE HUB'S VERDICT: ${probe.kind ? `kind ${probe.kind}` : 'the app page\'s'}, ${probe.noticed ? 'filed as a notice' : 'no notice'}, For you ${forYou && forYou.length ? `${forYou.length} page-security notice(s)` : 'empty'}, Diagnostics' sanitizer count +${(cspAfter?.sanitizer?.lines ?? NaN) - (cspBefore?.sanitizer?.lines ?? NaN)}` : `reported nothing for it (it reports no dropped handler; Diagnostics' sanitizer count +${(cspAfter?.sanitizer?.lines ?? NaN) - (cspBefore?.sanitizer?.lines ?? NaN)})`}`, probe.ok && !fault, fault || probe.taken);
-  let csp = []; try { csp = fs.readFileSync(CSP_REPORTS_FILE, 'utf8').split('\n').filter(Boolean); } catch { }
+  const csp = cspReportLines(); // this suite's report lines less what it took (scratch.mjs — the take never rewrites the hub's file, B-c327)
   check('the app page reported nothing ELSE to its CSP (script-src \'self\': every script came from this origin)', csp.length === 0, csp.slice(0, 4));
   check('no uncaught page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {

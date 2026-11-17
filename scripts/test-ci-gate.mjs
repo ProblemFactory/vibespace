@@ -715,7 +715,25 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
   const f = CI.writeFailLog(dir, sha, { name: 'test-planted-legs' }, legs, 1, { log: (l) => said.push(l) });
   okd(f === path.join(dir, 'c0ffee01.test-planted-legs.1.log') && fs.readFileSync(f, 'utf-8') === legs.full && legs.full.includes('leg one') && said.join('\n') === `  [ci] the whole output of test-planted-legs (try 1): ${f}` && CI.writeFailLog(dir, sha, { name: 'test-planted-green' }, { ok: true }, 1, { log: () => {} }) === null,
     `its whole output is kept: ${CI.FAST_FAIL_LOGS}/<sha8>.<suite>.<try>.log, said on its own line (a green suite keeps none)`, f);
+  // B-c327: a fail-log dir is BOUNDED — the newest FAIL_LOGS_KEEP commits' files stay (a commit's newest file dates it), the
+  // older commits' go, a name that is not the runner's own is never touched
+  {
+    const pd = mktmp('prune'), T0 = Date.now() / 1000 - 3600, K = CI.FAIL_LOGS_KEEP;
+    const put = (n, age) => { fs.writeFileSync(path.join(pd, n), 'x'); fs.utimesSync(path.join(pd, n), T0 + age, T0 + age); };
+    const shaOf = (i) => (0xa0000000 + i).toString(16);
+    for (let i = 0; i < K + 3; i++) put(`${shaOf(i)}.test-planted.1.log`, i * 10);
+    put(`${shaOf(1)}.test-planted.2.log`, 1000); put(`${shaOf(1)}.test-planted.2.hang.json`, 1000); // an old commit's newer try: the commit is new
+    put('nosha.test-planted.1.hang.json', -500); put('README', -900); fs.mkdirSync(path.join(pd, `${shaOf(0)}.dir.1.log`));
+    const gone = CI.pruneFailLogs(pd).map((f) => path.basename(f)).sort();
+    const left = fs.readdirSync(pd);
+    okd(gone.join(',') === [`${shaOf(0)}.test-planted.1.log`, `${shaOf(2)}.test-planted.1.log`, `${shaOf(3)}.test-planted.1.log`, 'nosha.test-planted.1.hang.json'].sort().join(',')
+      && left.includes(`${shaOf(1)}.test-planted.1.log`) && left.includes(`${shaOf(1)}.test-planted.2.hang.json`) && left.includes('README') && left.includes(`${shaOf(0)}.dir.1.log`) && left.length === K + 2 + 2,
+      `pruneFailLogs keeps the newest ${K} commits' files (an old commit with a newer try stays whole), removes the rest, never a name that is not the runner's (README, a directory)`, { gone, left: left.length });
+    okd(CI.pruneFailLogs(path.join(pd, 'none')).length === 0 && CI.pruneFailLogs(pd).length === 0, '…a dir that does not exist prunes nothing, and a second prune finds nothing more', gone);
+  }
   const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  ok(/\n {4}const pruned = pruneFailLogs\(hangDir\);/.test(SRC) && /\n {6}pruneMarkers\(dir\);\n {6}pruneFailLogs\(path\.join\(d, 'fail-logs'\)\);/.test(SRC),
+    'WIRING: the fast tier prunes its fail-log dir before its lanes, the heavy tier its <markers>/fail-logs beside its markers (B-c327)');
   // B-6e71: the loop is runFastLanes now (keep-going) — fastGate hands it the dir, the loop keeps every red's output
   ok(/const hangDir = fastFailDir\(\);/.test(SRC) && /\n {6}lanes, keepGoing, inflight, failDir: hangDir, sha,/.test(SRC) && /\n {6}if \(r\.ok\) \{[^\n]*\n {6}if \(failDir\) writeFailLog\(failDir, sha, s, r, 1\);/.test(SRC),
     'WIRING: the fast tier keeps its red suite\'s whole output in FAST_FAIL_LOGS (its hang reports beside it)');

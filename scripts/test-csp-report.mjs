@@ -25,6 +25,8 @@
 //      — 156 one, 154 none; a line differing in any field still fails the suite (MUTANT: keyed by directive alone ⇒ RED);
 //      THE HUB'S VERDICT on the taken line (probeVerdictFault, lane csp-mermaid-sites r2): the sanitizer's, no notice,
 //      For you empty, the count +1 ⇒ the suite passes; the line NOTICED on a tree with the table ⇒ RED by name
+//      ⑥e the take never rewrites the hub's file (B-c327): a report the hub appends between the take's read and its end
+//      stays — in the file and in what the suite reads — and the taken line stays out (MUTANT: the old rewrite ⇒ RED)
 //   ③ the route: a fake report lands as ONE line; the duplicate is still one line + ONE notice; the same pair on another
 //      line is a second line and no second notice; a restart re-writes and re-notices nothing; a report from a FRAME the
 //      page made (document about / blob / data) is a line and NO notice (主开发's ruling 2) — the count tells them apart
@@ -868,6 +870,50 @@ console.log('⑥d a suite\'s own probe: its report is taken by its payload (take
   fs.writeFileSync(mut, src.replace(anchor, '(r) => r.directive === key.directive && r.blocked === key.blocked').replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
   const m = child('test-csp-child-probe-mutant.mjs', [PROBE, ...near], KEY, mut);
   ok(m.rc === 0 && m.take?.n === 4, 'MUTANT (keyed by directive + blocked alone) ⇒ RED: all 4 lines taken and the suite passes', m.take);
+}
+
+// ── ⑥e THE TAKE NEVER REWRITES THE HUB'S FILE (B-c327 — the take read the file, wrote the rest to a .take and renamed it
+// over the file the hub appends to: a report appended between the read and the rename was LOST) ──
+// The hub's append is placed IN the window, never raced for: the child wraps fs.readFileSync so the first read of its
+// own report file appends one more line right after it (what the hub does, from its own process, at any moment).
+console.log('⑥e the take never rewrites the hub\'s file: a report appended in the take\'s window stays (B-c327)');
+{
+  const dir = path.join(ROOT, 'suite6e'); fs.mkdirSync(dir, { recursive: true });
+  const SCR = path.join(REPO, 'scripts', 'scratch.mjs');
+  const child = (name, scr) => {
+    const f = path.join(dir, name);
+    fs.writeFileSync(f, `const S = await import(${JSON.stringify(scr)});\n`
+      + `const fs = (await import('node:fs')).default; const path = await import('node:path');\n`
+      + `const file = process.env[S.CSP_REPORTS_ENV]; fs.mkdirSync(path.dirname(file), { recursive: true });\n`
+      + `const L = (n) => JSON.stringify({ at: 'x', directive: 'script-src-attr', blocked: 'inline', sample: 'window.__race=' + n, source: 'http://127.0.0.1:1/mermaid.js', document: 'http://127.0.0.1:1/', line: n, column: 1, kind: 'sanitizer-parse' });\n`
+      + `fs.appendFileSync(file, L(1) + '\\n' + L(2) + '\\n');\n`
+      + `const ino = fs.statSync(file).ino, real = fs.readFileSync; let armed = true;\n`
+      + `fs.readFileSync = function (p, ...a) { const out = real.call(this, p, ...a); if (armed && p === file) { armed = false; fs.appendFileSync(file, L(3) + '\\n'); } return out; };\n`
+      + `const hit = await S.takeCspReports((r) => r.sample === 'window.__race=1', { ms: 0 });\n`
+      + `fs.readFileSync = real;\n`
+      + `const sam = (ls) => ls.map((l) => JSON.parse(l).sample.slice(-1)).join('');\n`
+      + `const raw = real(file, 'utf8').split('\\n').filter(Boolean);\n`
+      + `const seen = typeof S.cspReportLines === 'function' ? S.cspReportLines() : raw;\n`
+      + `console.log('RACE ' + JSON.stringify({ hit: hit.length, armed, raw: sam(raw), seen: sam(seen), again: (await S.takeCspReports((r) => r.sample === 'window.__race=1', { ms: 0 })).length, sameFile: fs.statSync(file).ino === ino }));\n`
+      + `console.log('ALL PASS (1)'); process.exit(0);\n`);
+    const r = spawnSync(process.execPath, [f], { encoding: 'utf8', env: { ...process.env, VIBESPACE_CSP_REPORTS_FILE: '' } });
+    const race = (/^RACE (.+)$/m.exec(r.stdout) || [])[1];
+    return { rc: r.status, race: race ? JSON.parse(race) : null, out: r.stdout + r.stderr };
+  };
+  const a = child('test-csp-child-take-race.mjs', SCR);
+  ok(a.rc === 0 && a.race?.hit === 1 && a.race.armed === false && a.race.sameFile === true && a.race.raw === '123',
+    'the take leaves the hub\'s file as the hub wrote it — the SAME file, and the line the hub appended in the take\'s window is still in it (raw «' + (a.race?.raw ?? '') + '»)', a);
+  ok(a.race?.seen === '23' && a.race.again === 0 && /CSP: 2 line\(s\) of the sanitizer's parse/.test(a.out),
+    '…and the suite reads it: its view (cspReportLines, the teardown) holds the appended line and not the taken one, and a second take finds nothing to take', a.race);
+  // MUTANT: the old take (read → write the rest to .take → rename over the file) ⇒ the appended line is LOST (RED)
+  const src = readRepo('scripts/scratch.mjs'), anchor = "      lines.forEach((l, i) => { if (parsed[i] && match(parsed[i])) CSP_TAKEN.set(l, (CSP_TAKEN.get(l) || 0) + 1); });\n";
+  ok(src.includes(anchor), 'the mutant anchor (the take records what it took, in memory) is in scripts/scratch.mjs');
+  const mut = path.join(dir, 'scratch-mutant-rewrite.mjs');
+  fs.writeFileSync(mut, src.replace(anchor, "      if (hit.length) { const keep = lines.filter((l, i) => !(parsed[i] && match(parsed[i]))); const tmp = CSP_REPORTS_FILE + '.take'; fs.writeFileSync(tmp, keep.length ? keep.join('\\n') + '\\n' : ''); fs.renameSync(tmp, CSP_REPORTS_FILE); }\n")
+    .replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
+  const m = child('test-csp-child-take-race-mutant.mjs', mut);
+  ok(m.race && m.race.hit === 1 && m.race.raw === '2' && m.race.seen === '2' && m.race.sameFile === false,
+    'MUTANT (the old take: the rest written to .take and renamed over the file) ⇒ RED: the line the hub appended in the window is gone (raw «' + (m.race?.raw ?? '') + '»)', m.race || m);
 }
 
 // ── ⑦ THE FRAME HOST ──
