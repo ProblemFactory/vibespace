@@ -30,6 +30,11 @@
 //      THE HOLD WORDS on each of the three view rows (over NFS, over storage with the guard off, over the local disk — a
 //      watched 'disk' root, never refused): three real 120 ms holds, the canary line and the For-you tail of each;
 //      ROUND 2: an rclone and a product row BELOW the NFS source, reached through the view — all five sync calls refused, named
+//   §10 B-1425 A PATH DIR ON A MOUNT IS NEVER STATTED FROM THE MAIN THREAD (src/desktop-display.js binOnPath — a production
+//      checkout's data/bin on NFS rides the hub's PATH when a person launches it from a shell): the sync walk stats only the
+//      local dirs; an NFS dir answers from the async walk (hostFacts awaits it), its answer spawns; a storage dir is never
+//      read nor an answer; tmuxOnPath stats no mount dir; no refusal. CONTROLS: the old walk (statSyncs into the storage
+//      dir, refused, and the NFS view), the storage dir answered (its spawn's re-stat refused)
 // Run: node scripts/test-fs-canary.mjs
 // before the first pool use: §3 saturates a pool of TWO — PINNED, never inherited (lane race-sweep, B-2d49: a VibeSpace agent
 // session's env carries UV_THREADPOOL_SIZE=32, the 12-job saturation then never queued the stat — fs 0 ms, 3 FAILED)
@@ -502,6 +507,51 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
     `a product storage row BELOW the NFS source, reached through the view: all five refused (${said(fp)}), named: ${lineAt(9)}`);
   const own = five(path.join(NFS, 'drive', 'f'));
   ok(own.every(([, r]) => !r.ok && r.code === 'EVSMOUNTSYNC' && r.mount === path.join(NFS, 'drive')) && after.every(([, r]) => r.ok), 'the same rclone at its own spelling is refused too; a project path beside it through the view still runs');
+  console.log('§10 B-1425 A PATH DIR ON A MOUNT IS NEVER STATTED FROM THE MAIN THREAD (desktop-display binOnPath, session-store tmuxOnPath)');
+  { // the hub's PATH: a storage dir (the rclone), the NFS view's dir, a local dir — the tool in the storage dir AND the local
+    // one, a second tool only on the NFS view. The files are made with async fs (the guard is armed: a sync call into the
+    // rclone is refused, as it must be)
+    const DD = require(path.join(REPO, 'src/desktop-display.js'));
+    const T = 'tool-b1425', TN = 'tool-b1425-nfs', RB = path.join(R, 'bin'), NB = path.join(PROJ, 'bin'), LB10 = path.join(S, 'localbin');
+    for (const d of [RB, NB, LB10]) await fs.promises.mkdir(d, { recursive: true });
+    for (const f of [path.join(RB, T), path.join(LB10, T), path.join(NB, TN), path.join(NB, 'tmux'), path.join(LB10, 'tmux')]) { await fs.promises.writeFile(f, '#!/bin/sh\n'); await fs.promises.chmod(f, 0o755); }
+    const env10 = { PATH: [RB, NB, LB10].join(path.delimiter) };
+    const stats = [], astats = [], realStat = fs.statSync, realAStat = fs.promises.stat;
+    const spy = () => { stats.length = 0; astats.length = 0; fs.statSync = function (p, ...a) { stats.push(String(p)); return realStat.call(this, p, ...a); }; fs.promises.stat = function (p, ...a) { astats.push(String(p)); return realAStat.call(this, p, ...a); }; };
+    const unspy = () => { fs.statSync = realStat; fs.promises.stat = realAStat; };
+    const spied = (fn) => { spy(); try { return fn(); } finally { unspy(); } };
+    const spiedAsync = async (fn) => { spy(); try { return await fn(); } finally { unspy(); } };
+    const intoMounts = (list = stats) => list.filter((p) => p.startsWith(R + '/') || p.startsWith(WS + '/'));
+    const refused0 = w.counts.refused;   // the guard's own count (its journal line is said once per call site)
+    DD.resetBinMemo();
+    const first = spied(() => DD.binOnPath(T, { env: env10 }));
+    ok(first === path.join(LB10, T) && !intoMounts().length && stats.includes(path.join(LB10, T)),
+      `§10 the sync walk stats the local dir only (${stats.length} stat(s), none under a mount); the NFS dir not answered yet, it answers the local hit for now: ${first && first.slice(S.length)}`);
+    const hf = await spiedAsync(() => DD.hostFacts({ env: env10, bins: [T, TN] }));
+    ok(hf && hf.bins[T] === path.join(LB10, T) && hf.bins[TN] === path.join(NB, TN) && !intoMounts().length && astats.some((x) => x.startsWith(NB + '/')) && !astats.some((x) => x.startsWith(R + '/')),
+      `§10 hostFacts awaits the NFS dir's async stats (a tool only there is found: ${hf && hf.bins[TN] && hf.bins[TN].slice(S.length)}); the storage dir is never read — sync or async — nor an answer (every spawn re-stats its binary, which the guard refuses there): ${hf && hf.bins[T] && hf.bins[T].slice(S.length)}; sync stats into a mount ${intoMounts().length}, async into the rclone ${astats.filter((x) => x.startsWith(R + '/')).length}`);
+    const again = spied(() => DD.binOnPath(TN, { env: env10 }));
+    ok(again === path.join(NB, TN) && !stats.length, `§10 then the sync ask reads the memo: ${again && again.slice(S.length)}, ${stats.length} stat(s)`);
+    const exec = (() => { try { return DD.assertExecutable(again, TN); } catch (e) { return e.code; } })();
+    ok(exec === again, `§10 the answer can be spawned: the spawn's own re-stat (assertExecutable) passes on the NFS view (${exec === again ? 'ok' : exec})`);
+    const oldPath = process.env.PATH;
+    process.env.PATH = env10.PATH;
+    const tmux = (() => { try { return spied(() => SS.tmuxOnPath()); } finally { process.env.PATH = oldPath; } })();
+    ok(tmux === path.join(LB10, 'tmux') && !intoMounts().length, `§10 session-store's tmuxOnPath stats no mount dir from the main thread either: ${tmux && tmux.slice(S.length)} (${stats.length} stat(s), ${intoMounts().length} under a mount)`);
+    ok(w.counts.refused === refused0, `§10 the guard refused nothing on the way (${w.counts.refused - refused0})`);
+    // CONTROLS: the walk as it was — every dir statSync'd on the main thread; the storage dir answered from the async walk
+    const ddSrc = fs.readFileSync(path.join(REPO, 'src/desktop-display.js'), 'utf8');
+    const oldWalk = ddSrc.replace("    if (r && r.kind === 'storage') continue;\n    if (r) { const f = mountFact(dir, name, now); if (!f) { pending = true; continue; } if (f.yes) { found = p; break; } continue; }\n", '');
+    const DDo = M.load('src/desktop-display.js', oldWalk, 'b1425-syncwalk');
+    const was = spied(() => DDo.binOnPath(TN, { env: env10 }));
+    ok(oldWalk !== ddSrc && intoMounts().length === 2 && was === path.join(NB, TN) && w.counts.refused === refused0 + 1,
+      `CONTROL (the old walk): ${intoMounts().length} statSync(s) into a mount on the main thread (the rclone's refused: ${w.counts.refused - refused0}) ⇒ RED`);
+    const answersStorage = ddSrc.replace("    if (r && r.kind === 'storage') continue;\n", '').replace(".filter(([, r]) => r && r.kind !== 'storage');", '.filter(([, r]) => r);');
+    const DDs = M.load('src/desktop-display.js', answersStorage, 'b1425-storage');
+    const hs = await DDs.hostFacts({ env: env10, bins: [T] });
+    const spawnS = (() => { try { return DDs.assertExecutable(hs.bins[T], T); } catch (e) { return e.code; } })();
+    ok(answersStorage !== ddSrc && hs.bins[T] === path.join(RB, T) && spawnS === 'exec-vanished', `CONTROL (the storage dir answered): hostFacts names ${hs.bins[T] && hs.bins[T].slice(S.length)}, and its spawn's re-stat is refused there (${spawnS}) ⇒ RED`);
+  }
   w.stop();
   SP.setRoots([]);
   fs.rmSync(S, { recursive: true, force: true });

@@ -120,6 +120,7 @@ const cliIdentity = require('./cli-identity');
 const { BROWSER_BINS } = require('./desktop-apps'); // B-bfe6: the browser families' binary names — ONE list, the PURE model's
 const { INSTALL_FILES } = require('./install-slot'); // lane C verify r2 (F3/F4): the detached install's log / pidfile / exit file names — ONE spelling, the launcher's
 const OFFICE = require('./office-open'); // §7.9: the LibreOffice binaries + each module's library name — ONE table, the PURE model's
+const SP = require('./storage-path.js'); // B-1425: the witness's mount roots (SHARED; none in a process nobody set — the daemon, a child)
 
 const LOCAL_HOST_IDS = new Set([null, undefined, '', 'local']);
 function assertLocal(hostId, what) {
@@ -137,23 +138,79 @@ const namedError = (code, msg) => { const e = new Error(msg); e.code = code; ret
  *  spawn re-stats its path through `assertExecutable`, which forgets a YES
  *  that stopped being true. */
 const BIN_RECHECK_MS = 60000;
-const _binMemo = new Map(); // name -> { at, path }
+const _binMemo = new Map(); // name -> { at, path, pending? }
+/** B-1425: A PATH DIR ON A MOUNT IS NEVER STATTED FROM THE MAIN THREAD. The walk stats a local dir as before (µs). A dir
+ *  under one of the witness's mount roots (src/storage-path.js rootOf — a production checkout's data/bin on NFS is on the
+ *  hub's PATH whenever a person launches it from a shell):
+ *    · a STORAGE root (a storage row, a FUSE / SMB / WebDAV mount): never read and never an answer — every spawn re-stats
+ *      its binary on the main thread (assertExecutable), which the guard refuses there; the release's walk found nothing
+ *      there either (the guard refused its stat), now without the refusal;
+ *    · any other root (NFS, the mount the instance lives on, a view of a local disk): answered from the last ASYNC stat
+ *      into it (`_mountFacts`, landed by `landMounts`). A dir not answered yet leaves the walk PENDING: nothing is
+ *      remembered, one background walk per (name, dirs) is started, and its landing drops the memo so the next ask walks
+ *      again — in PATH order, every dir known. hostFacts awaits that landing (its first answer is exact).
+ *  The stats into ONE root run one after another, each bounded by MOUNT_STAT_DEADLINE_MS from its own start (⇒ NO for this
+ *  round, re-asked after BIN_RECHECK_MS); while one is past its bound the root is HELD and every ask into it answers NO at
+ *  once, queuing nothing — a hung mount holds ONE pool thread, whatever its dirs on PATH. A process with no roots (the
+ *  device daemon, a suite) walks every dir as before. */
+const MOUNT_STAT_DEADLINE_MS = 2000;
+const _mountFacts = new Map(); // `${dir}\0${name}` -> { at, yes }
+const _mountRoots = new Map(); // root -> { tail: the last stat queued, held: a stat past its bound has not returned }
+const _landing = new Map();    // `${name}\0${the env's mount dirs}` -> the walk in flight
+const pathDirs = (env) => String((env && env.PATH) || '').split(path.delimiter).filter(Boolean);
+const rootOfDir = (dir) => { try { return SP.rootOf(dir) || null; } catch { return null; } };
+function mountFact(dir, name, now) {
+  const f = _mountFacts.get(dir + '\0' + name);
+  return f && (f.yes || now() - f.at < BIN_RECHECK_MS) ? f : null;
+}
 function binOnPath(name, { env = process.env, now = Date.now } = {}) {
   if (typeof name !== 'string' || !name || /[\/\0]/.test(name)) return null;
   const hit = _binMemo.get(name);
-  if (hit && (hit.path || now() - hit.at < BIN_RECHECK_MS)) return hit.path;
-  let found = null;
-  for (const dir of String(env.PATH || '').split(path.delimiter)) {
-    if (!dir) continue;
-    const p = path.join(dir, name);
+  if (hit && !hit.pending && (hit.path || now() - hit.at < BIN_RECHECK_MS)) return hit.path;
+  let found = null, pending = false;
+  for (const dir of pathDirs(env)) {
+    const p = path.join(dir, name), r = rootOfDir(dir);
+    if (r && r.kind === 'storage') continue;
+    if (r) { const f = mountFact(dir, name, now); if (!f) { pending = true; continue; } if (f.yes) { found = p; break; } continue; }
     try { const st = fs.statSync(p); if (st.isFile() && (st.mode & 0o111)) { found = p; break; } } catch { /* not here */ }
   }
-  _binMemo.set(name, { at: now(), path: found });
+  _binMemo.set(name, pending ? { at: now(), path: found, pending: true } : { at: now(), path: found });
+  if (pending) landMounts(name, { env, now }).catch(() => { });
   return found;
 }
-function resetBinMemo() { _binMemo.clear(); }
-/** Drop ONE memoised answer (a YES that a re-stat just refuted). */
-function forgetBin(name) { _binMemo.delete(name); }
+/** ONE async stat into a dir under `root` → true | false, never rejects: queued behind the root's previous stat, bounded
+ *  from its own start; a held root answers false at once. */
+function statInto(root, dir, name) {
+  let r = _mountRoots.get(root);
+  if (!r) _mountRoots.set(root, r = { tail: Promise.resolve(), held: false });
+  if (r.held) return Promise.resolve(false);
+  const run = r.tail.then(() => (r.held ? false : new Promise((resolve) => {
+    let over = false;
+    const timer = setTimeout(() => { over = true; r.held = true; resolve(false); }, MOUNT_STAT_DEADLINE_MS);
+    if (timer.unref) timer.unref();
+    fs.promises.stat(path.join(dir, name)).then((st) => st.isFile() && !!(st.mode & 0o111), () => false)
+      .then((yes) => { clearTimeout(timer); if (over) r.held = false; else resolve(yes); });
+  })));
+  r.tail = run;
+  return run;
+}
+/** Land the facts of the env's non-storage mount dirs for `name` (the ones not known), then drop its memo — one walk in
+ *  flight per (name, dirs), shared. */
+function landMounts(name, { env = process.env, now = Date.now } = {}) {
+  const mounts = pathDirs(env).map((d) => [d, rootOfDir(d)]).filter(([, r]) => r && r.kind !== 'storage');
+  const key = name + '\0' + mounts.map(([d]) => d).join(path.delimiter);
+  if (_landing.has(key)) return _landing.get(key);
+  const todo = mounts.filter(([d]) => !mountFact(d, name, now));
+  if (!todo.length) return Promise.resolve();
+  const walk = Promise.all(todo.map(([d, r]) => statInto(r.root, d, name).then((yes) => { _mountFacts.set(d + '\0' + name, { at: now(), yes }); })))
+    .then(() => { const m = _binMemo.get(name); if (m && m.pending) _binMemo.delete(name); })
+    .finally(() => _landing.delete(key));
+  _landing.set(key, walk);
+  return walk;
+}
+function resetBinMemo() { _binMemo.clear(); _mountFacts.clear(); }
+/** Drop ONE memoised answer (a YES that a re-stat just refuted) — and what the mount dirs said about it. */
+function forgetBin(name) { _binMemo.delete(name); for (const k of [..._mountFacts.keys()]) if (k.endsWith('\0' + name)) _mountFacts.delete(k); }
 /** Re-stat a binary path IMMEDIATELY before spawning it. Throws a named
  *  `exec-vanished` and forgets the memo when the path is no longer an
  *  executable file — the next `hostFacts` re-probes it. */
@@ -232,7 +289,9 @@ async function hostFacts({ hostId = null, env = process.env, bins = PROBE_BINS, 
   assertLocal(hostId, 'hostFacts');
   if (fresh) { for (const e of OFFICE.OFFICE_EXECS) { const hit = _binMemo.get(e); if (hit && !hit.path) forgetBin(e); } _officeMemo.clear(); }
   const out = {};
-  for (const b of [...bins, ...BROWSER_BINS, ...OFFICE.OFFICE_EXECS]) if (!(b in out)) out[b] = binOnPath(b, { env, now });
+  const names = [...new Set([...bins, ...BROWSER_BINS, ...OFFICE.OFFICE_EXECS])];
+  await Promise.all(names.map((b) => landMounts(b, { env, now }).catch(() => { }))); // B-1425: a mount dir on PATH answers off the main thread
+  for (const b of names) out[b] = binOnPath(b, { env, now });
   const xpra = out.xpra ? { ...(await xpraVersion({ binPath: out.xpra, env })), www: xpraWwwDir({ binPath: out.xpra, env }) } : null;
   const browsers = {};
   for (const b of BROWSER_BINS) if (out[b]) browsers[b] = { path: out[b], confinement: browserConfinement(out[b]) };

@@ -116,6 +116,7 @@ function tmuxOnPath() {
   let found = null;
   for (const dir of String(process.env.PATH || '').split(path.delimiter)) {
     if (!dir) continue;
+    if (SP.rootOf(dir)) continue;   // B-1425: a PATH dir on a mount (NFS, a storage mount) is never statted from the main thread — tmux there is not seen
     try {
       const p = path.join(dir, 'tmux');
       const st = fs.statSync(p);
