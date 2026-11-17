@@ -70,7 +70,7 @@ export function registerSessionCardMenu() {
   // FORK'S CONDITION LIVES ON THE COMMAND (lane think-tools-phone, 主开发 2026-11-17 — the owner: «另外右键菜单我怎么找不到fork»): the
   // harness can fork, and never an external process. Every menu that offers session.fork (this card's, the window's —
   // src/lib/taskbar.js) shows it under this ONE condition, so the two menus cannot disagree about when a fork is possible.
-  registerCommand({ id: 'session.fork', title: () => tr('Fork…'), run: (c) => c.app.forkSession(c.s), when: (c) => !!c.s && !!backendFeatureCaps(c.s.backend || 'claude').fork && c.s.status !== 'external' });
+  registerCommand({ id: 'session.fork', title: () => tr('Fork…'), run: (c) => c.app.forkSession(c.s), when: (c) => !!backendFeatureCaps(c.s.backend || 'claude').fork && c.s.status !== 'external' });
   // S9 remainder (c): a shell the OpenCode SERVE owns, in this conversation's
   // own directory. Local machine only — the serve streams its ptys over a
   // loopback websocket, so a remote conversation's terminal is the host's own

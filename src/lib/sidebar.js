@@ -580,16 +580,24 @@ class Sidebar {
   _locateDoor(why) {
     const btn = (id) => document.getElementById(id);
     if (why === 'search') { const el = btn('session-filter'); if (el) el.value = ''; }
-    else if (why === 'backend') { this._backendFilter = new Set(); localStorage.setItem('backendFilter', '[]'); this._activeView = null; if (btn('backend-filter')) this._updateBackendFilterBtn(btn('backend-filter')); }
-    else if (why === 'host') { this._hostFilter = new Set(); localStorage.setItem('hostFilter', '[]'); this._activeView = null; }
+    else if (why === 'backend') { this._backendFilter = new Set(); this._saveListFilters(); this._activeView = null; if (btn('backend-filter')) this._updateBackendFilterBtn(btn('backend-filter')); }
+    else if (why === 'host') { this._hostFilter = new Set(); this._saveListFilters(); this._activeView = null; }
     else if (why === 'kind') { this._showAllAgentKinds(); return; }
     else if (why === 'archived' || why === 'status') {
       if (why === 'archived') this._statusFilter.add('archived'); else for (const x of ['live', 'tmux', 'external', 'stopped']) this._statusFilter.add(x);
-      localStorage.setItem('statusFilter', JSON.stringify([...this._statusFilter]));
+      this._saveListFilters();
       this._activeView = null;
       if (btn('live-filter')) this._updateFilterBtn(btn('live-filter'));
     } else if (why === 'view') this._activeView = null;
     this._render();
+  }
+
+  /** The list's three saved filters, written in ONE place — the funnel's rows and a Locate door both come here (lane
+   *  think-tools-phone: test-user-state-echo holds every browser-store write to the sites master makes). */
+  _saveListFilters() {
+    localStorage.setItem('statusFilter', JSON.stringify([...this._statusFilter]));
+    localStorage.setItem('backendFilter', JSON.stringify([...this._backendFilter]));
+    localStorage.setItem('hostFilter', JSON.stringify([...this._hostFilter]));
   }
 
   _updateSortBtn(btn) {
@@ -696,7 +704,7 @@ class Sidebar {
         cb.checked = this._statusFilter.has(id);
         cb.onchange = () => {
           if (cb.checked) this._statusFilter.add(id); else this._statusFilter.delete(id);
-          localStorage.setItem('statusFilter', JSON.stringify([...this._statusFilter]));
+          this._saveListFilters();
           this._activeView = null;
           this._render();
         };
@@ -725,7 +733,7 @@ class Sidebar {
         const next = this._backendFilter.size === 0 ? new Set(backends) : new Set(this._backendFilter);
         if (cb.checked) next.add(id); else next.delete(id);
         this._backendFilter = next.size === backends.length ? new Set() : next;
-        localStorage.setItem('backendFilter', JSON.stringify([...this._backendFilter]));
+        this._saveListFilters();
         this._activeView = null;
         this._updateBackendFilterBtn(anchor);
         this._render();
@@ -754,7 +762,7 @@ class Sidebar {
           const next = this._hostFilter.size === 0 ? new Set(all) : new Set(this._hostFilter);
           if (cb.checked) next.add(hid); else next.delete(hid);
           this._hostFilter = next.size === all.length ? new Set() : next;
-          localStorage.setItem('hostFilter', JSON.stringify([...this._hostFilter]));
+          this._saveListFilters();
           this._activeView = null;
           this._render();
         };

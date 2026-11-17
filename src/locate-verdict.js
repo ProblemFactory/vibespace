@@ -14,14 +14,14 @@
 // PURE: imports nothing (client: src/lib/session-lifecycle.js + src/lib/sidebar.js; gate: scripts/test-locate-verdict.mjs).
 
 const LOCATE_WORDS = Object.freeze({
-  absent: Object.freeze({ words: 'This conversation is not in the session list', door: null }),
-  search: Object.freeze({ words: 'Hidden by the search box: «{term}»', door: 'Clear search' }),
-  backend: Object.freeze({ words: 'Hidden by the agent filter: {name}', door: 'Show all agents' }),
-  host: Object.freeze({ words: 'Hidden by the location filter: {name}', door: 'Show all locations' }),   // the filter menu's «Location» section
-  kind: Object.freeze({ words: 'Hidden by the conversation-kind filter', door: 'Show all kinds' }),
-  archived: Object.freeze({ words: 'This conversation is archived', door: 'Show archived' }),
-  status: Object.freeze({ words: 'Hidden by the status filter: {name}', door: 'Show every status' }),
-  view: Object.freeze({ words: 'Hidden by the «{name}» view', door: 'Show all' }),
+  absent: Object.freeze({ words: 'This conversation is not in the session list', door: null }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
+  search: Object.freeze({ words: 'Hidden by the search box: «{term}»', door: 'Clear search' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
+  backend: Object.freeze({ words: 'Hidden by the agent filter: {name}', door: 'Show all agents' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
+  host: Object.freeze({ words: 'Hidden by the location filter: {name}', door: 'Show all locations' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
+  kind: Object.freeze({ words: 'Hidden by the conversation-kind filter', door: 'Show all kinds' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
+  archived: Object.freeze({ words: 'This conversation is archived', door: 'Show archived' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
+  status: Object.freeze({ words: 'Hidden by the status filter: {name}', door: 'Show every status' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
+  view: Object.freeze({ words: 'Hidden by the «{name}» view', door: 'Show all' }),   // ui-words: an English KEY — the client words it through t() where it is drawn (session-lifecycle.js; zh / ja rows)
 });
 
 const NON_ARCHIVED = 4; // live · tmux · external · stopped — the status filter narrows only when fewer are on (sidebar.js)

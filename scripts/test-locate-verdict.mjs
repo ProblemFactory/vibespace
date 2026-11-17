@@ -16,7 +16,7 @@
 //      ends at the bound with its own sentence. RED CONTROL = THE RELEASE'S LOCATE (2.369.407): an open list COLLAPSES and says
 //      «not visible»; a closed one MISSES at 60 ms (the list's lazy folders are built by an IntersectionObserver, after a frame —
 //      sidebar-render.js); it also looked for `.session-card`, a class no card wears
-//   ⑤ THE TWO SESSION MENUS AGREE (src/session-menu-parity.js): every card command has a row — on the window's menu, or not
+//   ⑤ THE TWO SESSION MENUS AGREE (scripts/lib/session-menu-parity.js): every card command has a row — on the window's menu, or not
 //      applicable with its reason; the window's menu registers each named entry; Fork shows on both menus for the same
 //      conversations (its condition is the session.fork command's). RED CONTROLS: the window's Fork row deleted, a card command
 //      with no row, a window Fork row narrowed to live conversations
@@ -30,7 +30,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf-8');
 const { LOCATE_WORDS, locateVerdict, NON_ARCHIVED } = require(path.join(REPO, 'src/locate-verdict.js'));
-const { CARD_TO_WINDOW } = require(path.join(REPO, 'src/session-menu-parity.js'));
+const { CARD_TO_WINDOW } = require(path.join(REPO, 'scripts/lib/session-menu-parity.js'));
 let pass = 0, fail = 0;
 const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra ? '\n      ' + extra : '')); } };
 const J = JSON.stringify;
@@ -92,7 +92,7 @@ console.log('② THE VERDICT ≡ THE LIST\'S OWN FILTERS (sidebar.js _renderInne
   const bind = (head) => new Function(...scope, 'return ' + asFunction(methodText(SIDEBAR, head)))(...args);
   const FACTS = bind('  _locateFacts(sessionId) {'), DOOR = bind('  _locateDoor(why) {'), ALLKINDS = bind('  _showAllAgentKinds() {');
   const fakeOf = (st) => ({ _allSessions: [st.s], _backendFilter: new Set(st.bf), _hostFilter: new Set(st.hf), _agentKindFilter: st.kf, _statusFilter: new Set(st.sf), _activeTab: 'folders', _activeView: st.av,
-    isArchived: (x) => !!x._arch, _updateBackendFilterBtn() {}, _updateFilterBtn() {}, _render() {}, _renderAgentKindQuickTabs() {}, _showAllAgentKinds() { return ALLKINDS.call(this); } });
+    isArchived: (x) => !!x._arch, _updateBackendFilterBtn() {}, _updateFilterBtn() {}, _saveListFilters() {}, _render() {}, _renderAgentKindQuickTabs() {}, _showAllAgentKinds() { return ALLKINDS.call(this); } });
   const listed = (fake, list = LIST) => list.call(fake, ...args).some((x) => x.sessionId === 'c1');
   const states = [];
   for (const [term, m, backend, bf, host, hf, kf, kp, arch, sf, status, av] of cartesian(['', 'zz'], [true, false], [undefined, 'codex'], [[], ['claude'], ['codex']], [undefined, 'h1'], [[], ['local']],
@@ -289,7 +289,7 @@ console.log('⑤ THE TWO SESSION MENUS AGREE — Fork on the window\'s menu, one
   };
   const agree = (C) => {
     const off = [];
-    for (const [status, backend, host] of cartesian(['live', 'stopped', 'tmux', 'external'], ['claude', 'codex', 'shell', 'opencode', undefined], [null, 'h1'])) {
+    for (const [status, backend, host] of cartesian(['live', 'stopped', 'tmux', 'external'], ['claude', 'codex', 'shell', 'opencode', 'antigravity', undefined], [null, 'h1'])) {
       const s = { status, backend, host, sessionId: 'abc', webuiId: status === 'live' ? 'w1' : null, name: 'N', cwd: '/w' };
       const state = { isStarred: () => false, isArchived: () => false, _tasks: [], getSessionConfig: () => ({}) };
       const cardHas = C.menuItems('session-card', { app: { isMobile: false }, state, s, card: {}, event: { clientX: 1, clientY: 2 }, displayName: 'D', customName: '', originalName: 'N', onRename() {}, agentOpts: {} }).some((i) => i.command === 'session.fork');
@@ -302,7 +302,7 @@ console.log('⑤ THE TWO SESSION MENUS AGREE — Fork on the window\'s menu, one
   const Creal = await fresh('real', WIN);
   const off = agree(Creal);
   const forkRows = ['live', 'stopped'].map((status) => Creal.menuItems('window', { app: { sidebar: { _tasks: [] }, desktopManager: { getDesktopMenuItems: () => [] }, wm: { windows: new Map([['w', {}]]) } }, id: 'w', win: {}, s: { status, sessionId: 'abc' }, switchSubmenu: false, closeLabel: '✕ Close' }).find((i) => i.command === 'session.fork'));
-  ok(!off.length && forkRows.every((r) => r && r.label === 'Fork…' && r.kind === 'fork'), `over 40 conversations (4 statuses × 5 agents × 2 locations) the window's menu offers Fork exactly when the card does — «Fork…», under the command's one condition`, off.join(' | '));
+  ok(!off.length && forkRows.every((r) => r && r.label === 'Fork…' && r.kind === 'fork'), `over 48 conversations (4 statuses × 6 agents, every registered harness and none, × 2 locations) the window's menu offers Fork exactly when the card does — «Fork…», under the command's one condition`, off.join(' | '));
   const narrowed = WIN.replace("command: 'session.fork', kind: 'fork', when: hasSess });", "command: 'session.fork', kind: 'fork', when: live });");
   const Cnar = await fresh('narrowed', narrowed);
   ok(narrowed !== WIN && agree(Cnar).length > 0, `RED CONTROL: a window Fork row narrowed to live conversations disagrees with the card (${agree(Cnar).length} conversations)`);

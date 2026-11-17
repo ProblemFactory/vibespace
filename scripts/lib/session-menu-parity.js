@@ -5,7 +5,8 @@
 // and the rows that have no window. This table names, for EVERY session command of the card's menu, its entry on the window's
 // menu — or that it is not applicable there, and why. scripts/test-locate-verdict.mjs reads both registries against it: a card
 // command with no row, or a row naming a window entry the window's menu does not register, is red — the menus cannot drift again.
-// PURE: data only, imports nothing.
+// PURE: data only, imports nothing. It lives with the gate (scripts/lib), not in src/: no product code reads it — it is the
+// contract both menus are held to, and src/ holds only what the hub or the page loads (test-loop-census).
 const CARD_TO_WINDOW = Object.freeze({
   'session.focusWindow': { na: 'the window menu is opened on the window itself — it is the one in front' },
   'session.restart': { window: 'session.restart' },
