@@ -15,12 +15,13 @@
 //     'exit' listener), then removes that signal's listeners and RAISES the same signal on its own process, so the suite still
 //     DIES BY THE SIGNAL and its parent reads it (ci.mjs killedFromOutside tells «killed from outside» from a red by the signal,
 //     never the code) — a suite ended by a signal leaves nothing; no suite carries a signal line of its own.
-//   startHub({ root, tree, port, env, nodeArgs, args, log }) → hub
+//   startHub({ root, tree, port, env, nodeArgs, args, log, keepLog }) → hub
 //     spawns `node [...nodeArgs] server.js [...args]` in `tree` (inside `root`) with the suite's env + PORT. The env MUST carry a
 //     HOME in the root (the hub's children are ended by it), and a device daemon root (VIBESPACE_DEVICE_ROOT /
 //     VIBESPACE_AGENTD_ROOT), when given, must lie in the root too (resolved: a link out is refused), and the env must carry the per-run singleton-Desktop names (scratch.mjs vncEnv — test-architecture
 //     §57's law, kept at the one boot site). The hub's stdout and stderr go to ONE file, `<root>/<log>.log` (default `hub`;
-//     two hubs running at once in one root name two logs); its pid and start time are recorded at the spawn. Nothing is
+//     two hubs running at once in one root name two logs; `keepLog` = a path OUTSIDE the root the log is APPENDED to at the
+//     end, before the root goes — a suite's kept artifact, on every road); its pid and start time are recorded at the spawn. Nothing is
 //     stopped or cleaned at a start. Hubs that must outlive each other's stop take a root each.
 //   hub.ready({ ms, path }) → true | false — waits (bounded, never throws) until GET <path> (default /api/home) answers.
 //   hub.log() → what THIS start wrote to the log so far · hub.waitForLog(re, ms) → the first matching line | null
@@ -368,6 +369,7 @@ export function finishRoot(root, { mountinfo, stuck = [] } = {}) {
 function endAll() {
   for (const [root, m] of MINTED) {
     for (const h of m.hubs) try { if (!h.stopped) h.stop({ hubOnly: true }); } catch { /* best effort at exit */ }
+    for (const h of m.hubs) if (h.keepLog) try { fs.appendFileSync(h.keepLog, h.log()); } catch (e) { say(`could not keep ${h.logFile} at ${h.keepLog} (${e && e.code})`); }   // the kept artifact, before the root goes
     let stuck = [];
     try { stuck = endRooted(root).left.filter((x) => x.why === 'in an uninterruptible wait').map((x) => ({ pid: x.pid, starttime: starttimeOf(x.pid) })); } catch { /* best effort at exit */ }
     try { finishRoot(root, { stuck }); } catch { /* best effort at exit */ }
@@ -377,7 +379,7 @@ function endAll() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function startHub({ root, tree, port, env = process.env, nodeArgs = [], args = [], log = 'hub' } = {}) {
+export function startHub({ root, tree, port, env = process.env, nodeArgs = [], args = [], log = 'hub', keepLog = null } = {}) {
   if (!root) throw new Error('hub-boot: a minted root is required (mintRoot)');
   const r = ownRoot(root);
   const t = real(String(tree || ''));
@@ -389,6 +391,8 @@ export function startHub({ root, tree, port, env = process.env, nodeArgs = [], a
   if (!env.VIBESPACE_VNC_DISPLAY || !env.VIBESPACE_VNC_PORT) throw new Error('hub-boot: the env must carry the per-run singleton-Desktop names VIBESPACE_VNC_DISPLAY + VIBESPACE_VNC_PORT (scratch.mjs vncEnv — test-architecture §57)');
   if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(String(log))) throw new Error(`hub-boot: bad log name ${JSON.stringify(log)}`);
   const logFile = path.join(r, `${log}.log`);
+  const keep = keepLog ? path.resolve(String(keepLog)) : null;
+  if (keep && (isIn(keep, r) || insideRoot(keep, r))) throw new Error(`hub-boot: keepLog ${keep} lies in the minted root ${r} — it would go with the root`);
   if (MINTED.get(r).hubs.some((h) => !h.stopped && h.logFile === logFile)) throw new Error(`hub-boot: a running hub of this root still writes ${logFile} — name another log`);
   const fd = fs.openSync(logFile, 'a');
   const from = fs.fstatSync(fd).size;
@@ -396,7 +400,7 @@ export function startHub({ root, tree, port, env = process.env, nodeArgs = [], a
   try { child = spawn(process.execPath, [...nodeArgs, 'server.js', ...args], { cwd: t, env: { ...env, PORT: String(port) }, stdio: ['ignore', fd, fd] }); }
   finally { fs.closeSync(fd); }
   const hub = {
-    pid: child.pid, starttime: child.pid ? starttimeOf(child.pid) : null, port: Number(port), root: r, tree: t, logFile, child, stopped: false,
+    pid: child.pid, starttime: child.pid ? starttimeOf(child.pid) : null, port: Number(port), root: r, tree: t, logFile, keepLog: keep, child, stopped: false,
     url: (p = '') => `http://127.0.0.1:${port}${p}`,
     async ready({ ms = 120000, path: p = '/api/home' } = {}) {
       const until = Date.now() + ms;

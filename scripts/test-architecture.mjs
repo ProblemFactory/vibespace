@@ -2852,22 +2852,22 @@ await section(async () => {
   const ENDS_DEBT = new Set([
     'test-attach-ack.mjs', 'test-attach-rescue.mjs', 'test-ax-budget.mjs', 'test-browser-continuity.mjs', 'test-browser-identity.mjs',
     'test-browser-live-ui.mjs', 'test-browser-live.mjs', 'test-browser-multiview.mjs', 'test-browser-propose-chrome.mjs', 'test-browser-resume-ui.mjs', 'test-channel-jump.mjs',
-    'test-channel-threads-ui.mjs', 'test-channel-window-render.mjs', 'test-channels-aggregate-ui.mjs', 'test-channels-e2e.mjs', 'test-channels-groups-e2e.mjs', 'test-channels-panel-redraw.mjs',
-    'test-chat-hygiene-ui.mjs', 'test-chat-paging.mjs', 'test-cli-cmd-refresh.mjs', 'test-client-boot.mjs', 'test-collab-live-counter.mjs',
+    'test-channel-threads-ui.mjs', 'test-channel-window-render.mjs', 'test-channels-aggregate-ui.mjs', 'test-channels-e2e.mjs', 'test-channels-groups-e2e.mjs',
+    'test-chat-paging.mjs', 'test-cli-cmd-refresh.mjs', 'test-client-boot.mjs', 'test-collab-live-counter.mjs',
     'test-desktop-app-snap.mjs', 'test-desktop-app-window.mjs', 'test-desktop-reorder.mjs', 'test-desktop-resume-paging.mjs',
-    'test-desktop-vnc-fit.mjs', 'test-desktop-xpra.mjs', 'test-fork-restore.mjs', 'test-gear-menu.mjs',
-    'test-graduate-dial.mjs', 'test-group-report-card.mjs', 'test-harness-honesty.mjs', 'test-helper-ask-ui.mjs', 'test-inbox-reply-ui.mjs',
+    'test-desktop-vnc-fit.mjs', 'test-desktop-xpra.mjs', 'test-fork-restore.mjs',
+    'test-graduate-dial.mjs', 'test-group-report-card.mjs', 'test-harness-honesty.mjs', 'test-helper-ask-ui.mjs',
     'test-incident.mjs', 'test-integration-toggle.mjs', 'test-integrations-ui.mjs', 'test-jobs-panel.mjs', 'test-mobile-gaps.mjs',
     'test-office-desktop.mjs', 'test-opencode-plugin.mjs', 'test-opencode-s9.mjs', 'test-permission-rules.mjs', 'test-profile-blindness-chip.mjs',
     'test-queue-steer.mjs', 'test-readings-attribution.mjs', 'test-reattach-stagger-ui.mjs', 'test-reconnect-storm.mjs', 'test-restore-smoke.mjs', 'test-resume-breaker.mjs',
     'test-roster-reset-eta.mjs', 'test-run-collapse-fold.mjs', 'test-sidebar-empty-remote.mjs', 'test-sidebar-rail.mjs', 'test-split-close-resurrect.mjs',
-    'test-split-ux.mjs', 'test-stage-overlap.mjs', 'test-sys-panel.mjs', 'test-taskbar-group-ui.mjs', 'test-tasks-mirror-race.mjs',
+    'test-split-ux.mjs', 'test-stage-preview.mjs', 'test-sys-panel.mjs',
     'test-title-chips-ui.mjs', 'test-turn-truth-ui.mjs', 'test-window-binding.mjs',
     'test-worktree-userchan-ui.mjs',
     // the 2.369.202 integration: server-booting suites the OTHER lanes of this release (and .200) added beside lane
     // runaway-daemon's rule — the same debt, named; each leaves this list when it calls endRootedProcesses
-    'test-apps-ui.mjs', 'test-channel-lark-threads-ui.mjs', 'test-channel-names-ui.mjs', 'test-chat-send-landing.mjs', 'test-desktop-keepalive-chrome.mjs',
-    'test-mobile-select.mjs', 'test-page-link-ui.mjs']);
+    'test-apps-ui.mjs', 'test-channel-lark-threads-ui.mjs', 'test-chat-send-landing.mjs', 'test-desktop-keepalive-chrome.mjs',
+    'test-mobile-select.mjs']);
   const endsIn = (t) => { const data = dataRanges(t); return [...t.matchAll(/\bendRootedProcesses\s*\(/g)].some((m) => !data.some(([a, b]) => m.index >= a && m.index < b)); };
   const harnesses = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.mjs$/.test(f) && !/^test-/.test(f) && f !== 'scratch.mjs' && endsIn(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')));
   const endsVia = (t) => endsIn(t) || harnesses.some((h) => new RegExp(`from\\s+['"]\\./${h.replace('.', '\\.')}['"]`).test(t));
@@ -2919,7 +2919,7 @@ await section(async () => {
   // hub-boot.mjs is the helper). THE ONE COUNT of this fact (主开发 2026-11-17 06:00Z — no second counter). A RATCHET that
   // only falls: a re-pointed batch lowers BOOTS_OUTSIDE_HELPER in the same commit, a new boot outside the helper is red, and
   // at 0 it is the law. RED CONTROL: a re-pointed suite with its own spawn line restored counts one more.
-  const BOOTS_OUTSIDE_HELPER = 199;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e (217), heavy batch 1 twenty suites (197); the rule WIDENED (主开发 06:00Z) found two the narrow pattern missed — test-boot-loop-hold's spread argv, test-update-road's stub server.js (its first line the real runtime boot) — 199. THE FLOOR IS 1, not 0: test-update-road's stub is the one boot that can never move onto startHub (it measures the launcher's first line, no hub)
+  const BOOTS_OUTSIDE_HELPER = 168;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e (217), heavy batch 1 twenty suites (197); the rule WIDENED (主开发 06:00Z) found two the narrow pattern missed — test-boot-loop-hold's spread argv, test-update-road's stub server.js (its first line the real runtime boot) — 199. Heavy batch 2 re-pointed thirty-one: 199 → 168. THE FLOOR IS 1, not 0: test-update-road's stub is the one boot that can never move onto startHub (it measures the launcher's first line, no hub)
   const bootFiles = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.mjs$/.test(f) && !/^dbg-/.test(f) && f !== 'hub-boot.mjs').sort();
   // one argument's text from `i` to the first comma / closing bracket at depth 0 (quotes and templates skipped) → { text, end }
   const argAt = (t, i) => {
@@ -2997,7 +2997,7 @@ await section(async () => {
     || outsideData(t, /^import\s*\{([^}]*)\}\s*from\s*['"]\.\/scratch\.mjs['"]/gm).some((m) => OLD_ENDS.test(m[1]));
   const bothEnds = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f)).filter((f) => { const t = fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'); return onHelperSrc(t) && callsOldEnd(t); });
   const onHelperN = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && onHelperSrc(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'))).length;
-  ok(onHelperN >= 22 && bothEnds.length === 0, `§57d no suite on the boot helper (${onHelperN}; the floor 22 = test-chat-e2e, test-hub-boot and batch 1's twenty) calls or imports an old rooted end (endRootedProcesses / endDaemonsOf / endDaemonsAndWait) — the helper IS the rooted end${bothEnds.length ? ' — ' + bothEnds.join(', ') : ''}`);
+  ok(onHelperN >= 53 && bothEnds.length === 0, `§57d no suite on the boot helper (${onHelperN}; the floor 53 = test-chat-e2e, test-hub-boot, batch 1's twenty and batch 2's thirty-one) calls or imports an old rooted end (endRootedProcesses / endDaemonsOf / endDaemonsAndWait) — the helper IS the rooted end${bothEnds.length ? ' — ' + bothEnds.join(', ') : ''}`);
   const hbImp = "import { mintRoot, startHub } from './hub-boot.mjs';\n";
   ok(callsOldEnd(hbImp + 'try { endRootedProcesses(chromeDir); } catch {}') && callsOldEnd(hbImp + 'endDaemonsOf(dev);') && callsOldEnd(hbImp + 'await endDaemonsAndWait(dev);')
     && callsOldEnd(hbImp + "import { freePorts, endRootedProcesses as endAllOf } from './scratch.mjs';\nendAllOf(dir);")

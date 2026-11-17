@@ -104,13 +104,17 @@ const A = await connect(firstTarget.webSocketDebuggerUrl, 'A');
 const B = await connect(secondTarget.webSocketDebuggerUrl, 'B');
 const V = (sid) => `([...(window.app.sessions?.values?.() || [])].find((v) => v && v._messageList && v.sessionId === ${JSON.stringify(sid)}))`;
 const CI = (sid) => `(${V(sid)})._chatInput`;
-const box = (P, sid) => P.evalJs(`${CI(sid)}._textarea.value`);
-const held = (P, sid) => P.evalJs(`${CI(sid)}._heldDraft`);
-const activeIsBox = (P, sid) => P.evalJs(`document.activeElement === ${CI(sid)}._textarea && document.hasFocus()`);
-const focusBox = (P, sid) => P.evalJs(`${CI(sid)}._textarea.focus(); true`);
-const blurBox = (P, sid) => P.evalJs(`${CI(sid)}._textarea.blur(); true`);
+// THE VIEW FIRST (the hosted run 44141280569, heavy 2/7: «B page threw … reading '_chatInput'» 16.8 s in — page B's session view was
+// replaced for a moment by a re-render, so V(sid) was undefined): every read through CI(sid) first polls — bounded, on a named effect —
+// for THAT page's view carrying its chat input, instead of dereferencing a view that is not there yet
+const viewReady = async (P, sid) => { if (!(await P.waitFor(`!!(${V(sid)})?._chatInput?._textarea`, 15000))) throw new Error(`${P.name || 'a'} page: the chat view of ${sid} never carried its chat input`); };
+const box = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`${CI(sid)}._textarea.value`); };
+const held = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`${CI(sid)}._heldDraft`); };
+const activeIsBox = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`document.activeElement === ${CI(sid)}._textarea && document.hasFocus()`); };
+const focusBox = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`${CI(sid)}._textarea.focus(); true`); };
+const blurBox = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`${CI(sid)}._textarea.blur(); true`); };
 const typeChar = (P, ch) => P.cdp('Input.insertText', { text: ch });
-const replaceBox = async (P, sid, text) => { await P.evalJs(`${CI(sid)}._textarea.select(); true`); await P.cdp('Input.insertText', { text }); };
+const replaceBox = async (P, sid, text) => { await viewReady(P, sid); await P.evalJs(`${CI(sid)}._textarea.select(); true`); await P.cdp('Input.insertText', { text }); };
 const sentFor = (P, sid, from = 0) => P.sent.slice(from).filter((f) => f.key === 'chat:' + sid).map((f) => f.value);
 const enter = async (P) => {
   for (const type of ['keyDown', 'keyUp']) await P.cdp('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });
@@ -157,7 +161,7 @@ const replied = (P, sid, n) => P.waitFor(`(((${V(sid)})?._messageList?.textConte
 // ① A typing, B saving: A keeps A's text and sends it
 const A_TEXT = '好，退款那条也改成同样的策略';
 // the CONTROL patch goes on AFTER ensureChat (a rebuilt window is a new composer)
-const patchBase = async (pages, sid) => { for (const P of pages) await P.evalJs(`${CI(sid)}._landDraft = ${BASE_LAND}; true`); };
+const patchBase = async (pages, sid) => { for (const P of pages) { await viewReady(P, sid); await P.evalJs(`${CI(sid)}._landDraft = ${BASE_LAND}; true`); } };
 async function legTyping(sid, name, { base = [] } = {}) {
   await ensureChat(sid, name);
   await patchBase(base, sid);

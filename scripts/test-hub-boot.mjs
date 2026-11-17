@@ -291,7 +291,8 @@ fs.writeFileSync(path.join(root, 'wt', '.git'), 'gitdir: ' + meta + '\\n'); fs.w
 fs.writeFileSync(path.join(meta, 'commondir'), '../..\\n'); fs.writeFileSync(path.join(meta, 'HEAD'), process.env.HB_HEAD + '\\n');
 const listed = spawnSync('git', ['-C', process.env.HB_GREPO, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }).stdout.includes(path.join(root, 'wt'));
 const port = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
-const hub = HB.startHub({ root, tree: path.join(root, 't'), port, env: { PATH: process.env.PATH, HOME: path.join(root, 'home'), VIBESPACE_VNC_DISPLAY: 's', VIBESPACE_VNC_PORT: 's', HB_ROOT: root, HB_OUT: process.env.HB_OUT, HB_TAG: 'e' } });
+const kept = path.join(process.env.HB_OUT, path.basename(root) + '.kept.log');
+const hub = HB.startHub({ root, tree: path.join(root, 't'), port, env: { PATH: process.env.PATH, HOME: path.join(root, 'home'), VIBESPACE_VNC_DISPLAY: 's', VIBESPACE_VNC_PORT: 's', HB_ROOT: root, HB_OUT: process.env.HB_OUT, HB_TAG: 'e' }, keepLog: kept });
 const ready = await hub.ready({ ms: 30000 });
 const oFile = path.join(process.env.HB_OUT, path.basename(root) + '.outsider'), oMark = oFile + '.marker'; fs.writeFileSync(oMark, '');
 spawn(process.execPath, ['-e', process.env.HB_KEEP.replace('PIDFILE', oFile).replace('WATCH', oMark)], { cwd: path.join(root, 'proj'), env: { PATH: process.env.PATH, HOME: process.env.HB_OUT }, detached: true, stdio: 'ignore' }).unref();
@@ -305,7 +306,7 @@ const st = (p) => { try { const s = fs.readFileSync('/proc/' + p + '/stat', 'lat
 const map = { hub: hub.pid, g1: read(files.g1), g2: read(files.g2), g3: read(files.g3) };   // a FIXED map: null for a missing pid
 const o = read(files.outsider);
 const b = read(files.browser);
-console.log(JSON.stringify({ root, ready, map, pids: Object.values(map), starttimes: Object.values(map).map((p) => (p ? st(p) : null)), outsider: { pid: o, starttime: o ? st(o) : null, marker: oMark }, browser: { pid: b, starttime: b ? st(b) : null, marker: bMark }, wt: listed }));
+console.log(JSON.stringify({ root, ready, map, pids: Object.values(map), starttimes: Object.values(map).map((p) => (p ? st(p) : null)), outsider: { pid: o, starttime: o ? st(o) : null, marker: oMark }, browser: { pid: b, starttime: b ? st(b) : null, marker: bMark }, wt: listed, kept, hubPid: hub.pid }));
 if (process.env.HB_MODE === 'wait') setInterval(() => { if (!fs.existsSync(process.env.HB_OUT)) process.exit(4); }, 200);   // ended by the parent's signal; never a clock
 else process.exit(3);   // a red: no stop, no cleanup of its own
 `;
@@ -320,6 +321,8 @@ const wl = git('-C', GREPO, 'worktree', 'list', '--porcelain').stdout;
 ok(exo && wl.split('\n').filter((l) => l.startsWith('worktree ')).length === 1 && !wl.includes(exo.root), 'and its git worktree went THROUGH GIT — the repository keeps no record of it', wl);
 ok(exo && await waitFor(() => exo.pids.every(gone)), 'and every process its hub started is gone', exo && exo.pids.map((p) => statOf(p)));
 ok(exo && alive(exo.outsider.pid, exo.outsider.starttime) && ex.stderr.includes(`hub-boot: left pid ${exo.outsider.pid} (`) && ex.stderr.includes(`its working directory lies in ${exo.root}`), 'the OUTSIDER survives the exit, and the child\'s stderr names it', ex.stderr.slice(0, 400));
+ok(exo && (() => { try { return fs.readFileSync(exo.kept, 'utf8').includes(`stand-in hub ${exo.hubPid} listening`); } catch { return false; } })(), 'keepLog: the hub\'s log was APPENDED to the kept path outside the root before the root went (the suite\'s artifact survives its end)', exo && exo.kept);
+ok(throwsWith(() => HB.startHub({ root: A, tree: path.join(A, 't'), port: 1, env: envFor(A, 'x'), keepLog: path.join(A, 'kept.log') }), /keepLog .* lies in the minted root/), 'a keepLog inside the minted root is refused (it would go with the root)');
 ok(exo && exo.browser.pid && !alive(exo.browser.pid, exo.browser.starttime) && !fs.existsSync(exo.root),
   'RULE NINE: the stand-in browser the suite started itself (its profile in the root, the root\'s HOME) was ended by the helper BEFORE the root went — it watches a marker outside, so nothing but the helper ended it');
 if (exo && exo.outsider.pid) endKeeper(exo.outsider);   // the suite's own outsider, ended by its identity
@@ -421,6 +424,10 @@ ok(!/did not mint it/.test(eN) && /no server\.js in the tree/.test(eN), 'CONTROL
 const PARENT = await mutant('inside-parent', patch('for (const [why, xs] of named.slice(1, 4)) {', 'for (const [why, xs] of named.slice(1, 5)) {'));
 ok(PARENT.refusalOf('/tt/vs-hb-a-h1', UNDER_TEMP) === 'inside the folder holding this checkout (the lanes folder) at /tt' && PARENT.refusalOf('/vt/lanes/other', L) !== null,
   'CONTROL (no /proc) «inside» the checkout\'s parent refused — RED: a checkout directly under the temp folder refuses every mint (the gate\'s isolated worktree)', PARENT.refusalOf('/tt/vs-hb-a-h1', UNDER_TEMP));
+const exK = runChild(pathToFileURL(mutantFile('no-keep', patch("    for (const h of m.hubs) if (h.keepLog) try { fs.appendFileSync(h.keepLog, h.log()); } catch (e) { say(`could not keep ${h.logFile} at ${h.keepLog} (${e && e.code})`); }   // the kept artifact, before the root goes\n", ''))).href);
+const exKo = report(exK.stdout);
+ok(exKo && !fs.existsSync(exKo.kept) && !fs.existsSync(exKo.root), 'CONTROL (a real child in its own fresh root) no copy at the end — RED: the kept log is missing, the root (and its log) gone');
+if (exKo) { if (exKo.outsider.pid) endKeeper(exKo.outsider); }
 const exN = runChild(pathToFileURL(mutantFile('noworktree', patch('  removeWorktrees(root);\n', ''))).href);
 const exNo = report(exN.stdout);
 const wlN = git('-C', GREPO, 'worktree', 'list', '--porcelain').stdout;

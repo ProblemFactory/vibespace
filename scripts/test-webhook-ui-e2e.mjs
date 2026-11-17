@@ -22,7 +22,8 @@ import crypto from 'node:crypto';
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { freePort, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WA = require(path.join(repo, 'src/webhook-auth.js'));
@@ -39,10 +40,10 @@ const PNG_DIR = process.env.WEBHOOK_UI_PNG_DIR || '';
 
 const VNC_ENV = await vncEnv();
 const PORT = await freePort(), CDP_PORT = await freePort();
-const wt = scratch('webhook-ui');
+const root = mintRoot('webhook-ui'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const chromeDir = scratch('webhook-ui-chrome');
-const fakeHome = scratchHome('webhook-ui-home', fs);
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -100,22 +101,17 @@ const peerCode = ({ exp = null, token = null } = {}) => {
   const row = peerPend.put({ slug: 'ci', callerId, token: tk, nonce: crypto.randomBytes(16).toString('hex'), name: 'Hub A' }, Date.now());
   return WP.encodeCode({ hook: `${PEER}/hook/ci`, caller: callerId, token: token || tk, nonce: row.nonce, exp: exp || row.exp, name: 'Hub A' });
 };
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, stdio: 'ignore', env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
-  '--window-size=1100,800', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
+  '--window-size=1100,800', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }
-  try { srv.kill('SIGKILL'); } catch { }
-  try { endRootedProcesses(wt); } catch { }   // §57b: whatever the server (and the dtach stub) started under the scratch tree
   try { stub.close(); } catch { }
   try { peer.close(); } catch { }
-  try { execFileSync('pkill', ['-KILL', '-f', STUB], { stdio: 'ignore' }); } catch { }
-  try { execFileSync('pkill', ['-KILL', '-f', SOCK_DIR], { stdio: 'ignore' }); } catch { }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [fakeHome, wt, chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
+  // the suite's own dtach stubs carry HOME: fakeHome (in the root — rule nine): hub-boot.mjs ends them by identity (no pattern kill)
+  for (const d of [chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { cleanup(); process.exit(143); });
 
 const raw = (method, p, { headers = {}, body = null } = {}) => new Promise((resolve) => {
   const b = body === null ? null : typeof body === 'string' ? body : JSON.stringify(body);

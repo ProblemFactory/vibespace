@@ -39,7 +39,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, evalInBlankTab, CHROME_STORE } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, evalInBlankTab } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -49,9 +50,10 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const T0 = Date.now();
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('record-clear-ui-wt');
-const fakeHome = scratchHome('record-clear-ui-home', fs);
-const stubDir = scratch('record-clear-ui-stub');
+const root = mintRoot('record-clear-ui-wt'), wt = path.join(root, 't');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
+const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
+const stubDir = path.join(root, 'stub');
 fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 // the stopped conversation's cwd lives OUTSIDE the scratch shape: discovery refuses a /tmp/vs-* project dir
@@ -175,23 +177,20 @@ let GID = null, MSG_VID = null;
 // hermetic agent CLIs (nothing real is ever run)
 const stub = path.join(stubDir, 'cli');
 fs.writeFileSync(stub, `#!${process.execPath}\nif (process.argv.includes('--version')) { console.log('0.0.0 stub'); process.exit(0); }\nprocess.exit(1);\n`, { mode: 0o755 });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stub, CODEX_CMD: stub, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stub, CODEX_CMD: stub, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 const chromeDir = `${wt}-chrome`;
 const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
-  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
+  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
   // every process this suite caused, judged by /proc EVIDENCE (cwd, HOME or an argv token under one of this run's scratch roots), never by a name
-  for (const root of [wt, chromeDir, fakeHome, stubDir]) { try { endRootedProcesses(root); } catch {} }
-  for (const d of [wt, chromeDir, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  for (const d of [chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
   try { execSync('git worktree prune', { cwd: repo, stdio: 'ignore' }); } catch {}
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+await hub.ready();
 const api = async (p) => (await fetch(`http://127.0.0.1:${PORT}${p}`)).json();
 for (let i = 0; i < 60; i++) { const r = await fetch(`http://127.0.0.1:${PORT}/api/jobs`); if (r.status === 200) break; await sleep(250); }
 
