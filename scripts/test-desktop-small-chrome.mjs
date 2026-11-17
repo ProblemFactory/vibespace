@@ -723,8 +723,20 @@ const runViewport = async ([VW, VH], font) => {
     check(`⑥ ${tag}: the «+N» chip lists exactly the cut tiles (${list.rows.length})`, list.rows.length > 0 && J([...list.rows].sort()) === J([...list.now].sort()), list);
     const pick = list.rows[list.rows.length - 1];
     const rowAt = await evalJs(`(() => { const r = document.querySelector('.taskbar-overflow-list .overlap-switcher-item[data-win-id="${pick}"]'); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
-    if (rowAt) await click(rowAt); await sleep(500);
-    const picked = await evalJs(`(() => { const t = document.querySelector('.taskbar-item[data-win-id="${pick}"]'), s = document.getElementById('taskbar-items'); const r = t.getBoundingClientRect(), sr = s.getBoundingClientRect(); return { active: app.wm.activeWindowId === ${J(pick)}, whole: r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5, tile: [r.left, r.right], strip: [sr.left, sr.right], scrollLeft: s.scrollLeft, clientWidth: s.clientWidth, scrollWidth: s.scrollWidth }; })()`);   // B-b13c: the geometry rides the evidence
+    // B-6cf9 (⑥ at 1024×600 answered {active:true, whole:false} twice on one box day, green on a rerun): the row's press raises
+    // the window at once and brings its tile into the strip in the NEXT frame (src/lib/taskbar.js: one instant scrollLeft
+    // write inside a requestAnimationFrame, with a 4 px slack). r2 (the batch's adversarial read: a stillness wait can end
+    // BEFORE that frame) — the leg waits, bounded (3 s), for the state it judges (active and whole), as ① does, and prints the
+    // wait; a long one is a NAMED row. A tile still cut at the bound is red with the geometry that names why: the tile, the
+    // strip, its scroll, the «+N» chip's words and width (a chip that grows narrows the flex strip by more than the slack).
+    // Restacked on the train after B-b13c (5d17e527c), which cured that product cause (a fractional strip edge, the bring-in
+    // redone after the chip's refit) and put the geometry into this leg's evidence: kept here, with its clientWidth / scrollWidth
+    if (rowAt) await click(rowAt);
+    const PICKED = `(() => { const t = document.querySelector('.taskbar-item[data-win-id="${pick}"]'), s = document.getElementById('taskbar-items'); if (!t || !s) return { active: false, whole: false }; const r = t.getBoundingClientRect(), sr = s.getBoundingClientRect(), ch = document.getElementById('taskbar-overflow'), cr = ch ? ch.getBoundingClientRect() : null; const q = (v) => Math.round(v * 2) / 2; return { active: app.wm.activeWindowId === ${J(pick)}, whole: r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5, tile: [q(r.left), q(r.right)], strip: [q(sr.left), q(sr.right)], scroll: q(s.scrollLeft), clientWidth: s.clientWidth, scrollWidth: s.scrollWidth, chip: ch ? [ch.textContent.trim(), q(cr.width)] : null }; })()`;   // B-b13c's geometry rides the evidence
+    const t6 = Date.now(); let picked = await evalJs(PICKED);
+    while (!(picked.active && picked.whole) && Date.now() - t6 < 3000) { await sleep(100); picked = await evalJs(PICKED); }
+    picked = { ...picked, waitedMs: Date.now() - t6 };
+    if (picked.waitedMs > 450 || !(picked.active && picked.whole)) console.log(`  ⓘ NAMED ⑥ ${tag}: the raised tile waited ${picked.waitedMs} ms for «active and whole»${picked.active && picked.whole ? '' : ' and ended on the 3 s bound'} ${J(picked)}`);
     check(`⑥ ${tag}: …a row raises its window and brings its tile into the strip`, picked.active && picked.whole, picked);
     // the compact switcher's list switches and adds
     await press('.desktop-switch-compact'); await sleep(350);
