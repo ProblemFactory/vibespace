@@ -1587,6 +1587,166 @@ console.log('\n§3d the boot load prunes with the widest retention, not with lim
   }
 }
 
+// ── §3f B-3b0f: AN UNREADABLE LEDGER REFUSES; IT IS NEVER AN EMPTY ONE ───────
+// The account-reset-door r4 panel (2026-11-11): create() wrapped JSON.parse in try { } catch { } and went on with an
+// EMPTY budget when data/spend-budget.json was torn or a directory — three unattended continues were authorized as if no
+// turn had been spent; and the next persist renamed that empty ledger OVER the file, so one restart made the forgiveness
+// permanent. The law (the routing table, «A turn nobody typed»): all three money-gate layers fail CLOSED.
+console.log('\n§3f B-3b0f: an unreadable ledger refuses every unattended turn by name, once in the tray, and is never written over');
+{
+  const LF = path.join;
+  const ID = { key: 'sub-a', name: 'A' }, ID2 = { key: 'sub-b', name: 'B' };
+  const TORN = '{"v":1,"budget":{"v":1,"identities":{"sub-a":[';
+  const mk = (mod, dir, inbox, logs, settings = {}) => mod.create({
+    dataDir: dir, serverSetting: (k) => settings[k],
+    getUserTodos: () => ({ add: (key, item) => { inbox.push({ key, ...item }); return { id: 'ut-' + inbox.length }; } }),
+    log: (...a) => logs.push(a.join(' ')),
+  });
+  const world = (setup) => { const dir = tmpdir('vs-spend-3f-'); setup(LF(dir, 'spend-budget.json')); return dir; };
+  const now = Date.now();
+  // (1) a TORN file: every unattended reason refused by name, for every account; ONE notice for the instance
+  {
+    const dir = world((f) => fs.writeFileSync(f, TORN));
+    const inbox = [], logs = [];
+    const g = mk(guardMod, dir, inbox, logs);
+    const v1 = g.authorize({ reason: 'auto-resume', identity: ID, now });
+    const v2 = g.authorize({ reason: 'peer-message', identity: ID2, now: now + 1000 });
+    const v3 = g.authorize({ reason: 'job-notification', identity: ID, now: now + 2000 });
+    ok('§3f a TORN ledger refuses every unattended reason BY NAME, on every account (never «allowed on an empty count»)',
+      [v1, v2, v3].every((v) => v.ok === false && v.why === 'ledger-unreadable') && /could not be read \(not JSON\)/.test(v1.detail), JSON.stringify([v1.why, v2.why, v3.why, v1.detail]));
+    const notes = inbox.filter((i) => i.origin === 'spend');
+    ok('§3f …and the tray gets exactly ONE notice for the instance (not one per account), urgent, naming the file and its door',
+      notes.length === 1 && notes[0].key === 'accounts' && notes[0].urgency === 'high' && /spend-budget\.json could not be read \(not JSON\)/.test(notes[0].detail)
+        && notes[0].i18n && notes[0].i18n.door === 'ledger' && !/Unattended turns used/.test(notes[0].detail), JSON.stringify(notes.map((n) => [n.key, n.urgency, n.detail.slice(0, 120)])));
+    ok('§3f …and the journal says it at load, before any refusal', /^\[spend\] data\/spend-budget\.json could not be read \(not JSON\)/.test(logs[0] || ''), logs[0]);
+    ok('§3f …the snapshot says it (Diagnostics can read it)', g.snapshot().ledgerUnreadable && g.snapshot().ledgerUnreadable.error === 'not JSON');
+    const att = g.authorize({ reason: 'owner-channel-send', identity: ID, now: now + 3000 });
+    ok('§3f a person\'s press is not refused — the ceiling never counts it, so an unreadable count cannot decide it', att.ok === true && att.attended === true, JSON.stringify(att.why));
+    g.note({ reason: 'owner-channel-send', identity: ID, now: now + 3000 });
+    g.noteNudge('claude:c1', { at: now + 3000 });
+    g.flush();
+    ok('§3f THE FILE IS NEVER WRITTEN OVER: after a press, a nudge and the exit flush its bytes are the torn bytes', fs.readFileSync(LF(dir, 'spend-budget.json'), 'utf8') === TORN && !fs.existsSync(LF(dir, 'spend-budget.json.tmp')));
+    const g2 = mk(guardMod, dir, [], []);   // ← A RESTART
+    ok('§3f …so a RESTART still refuses (the release: the flush made an empty ledger the record, and the next boot authorized)',
+      g2.authorize({ reason: 'auto-resume', identity: ID, now: now + 4000 }).why === 'ledger-unreadable');
+    // (2) READ AGAIN: inside the re-read bound still refused; after it, the file's own stamps count — and the press made meanwhile is kept
+    fs.writeFileSync(LF(dir, 'spend-budget.json'), JSON.stringify({ v: 1, budget: { v: 1, identities: { 'sub-a': [now - 60e3, now - 50e3] }, instance: [now - 60e3, now - 50e3], notices: {} }, nudge: {} }));
+    const g3inbox = [], g3logs = [];
+    const g3 = mk(guardMod, world((f) => fs.mkdirSync(f)), g3inbox, g3logs);   // (a fresh world for the directory below)
+    ok('§3f the re-read is bounded: inside LEDGER_RECHECK_MS of the failure the file is not read again',
+      g.authorize({ reason: 'auto-resume', identity: ID, now: now + 30e3 }).why === 'ledger-unreadable' && guardMod.LEDGER_RECHECK_MS === 60e3);
+    const back = g.authorize({ reason: 'auto-resume', identity: ID, now: now + 70e3 });
+    ok('§3f REPAIRED: past the bound the file reads again — its two stamps count (2 this hour), the turn is allowed, the refusal ends',
+      back.ok === true && back.counts.hour === 2 && g.snapshot().ledgerUnreadable === null && /reads again/.test(logs.join('\n')), JSON.stringify({ ok: back.ok, why: back.why, hour: back.counts && back.counts.hour }));
+    ok('§3f …and the press made while it was unreadable is KEPT beside the file\'s stamps (a stamp is never dropped)',
+      Object.values(g.snapshot().attended || {}).reduce((a, b) => a + (Number(b) || 0), 0) === 1, JSON.stringify(g.snapshot().attended));
+    g.release({ hold: back.hold, now: now + 70e3 });
+    g.flush();
+    ok('§3f …and from then on it is written as before', /"sub-a"/.test(fs.readFileSync(LF(dir, 'spend-budget.json'), 'utf8')) && fs.readFileSync(LF(dir, 'spend-budget.json'), 'utf8') !== TORN);
+    // (3) A DIRECTORY in its place (the panel's second scene): refused; removed by the owner ⇒ the count starts over
+    const d3 = g3.authorize({ reason: 'stop-nudge', identity: ID, now });
+    ok('§3f a DIRECTORY in the file\'s place refuses by name (EISDIR), and nothing is left beside it (no .tmp)',
+      d3.ok === false && d3.why === 'ledger-unreadable' && /EISDIR/.test(d3.detail), d3.detail);
+    g3.flush();
+    ok('§3f …the flush writes nothing (no rename onto the directory, no stranded .tmp)', fs.statSync(g3._file).isDirectory() && !fs.existsSync(g3._file + '.tmp'));
+    fs.rmSync(g3._file, { recursive: true, force: true });
+    const d3b = g3.authorize({ reason: 'stop-nudge', identity: ID, now: Date.now() + 61e3 });
+    ok('§3f REMOVED by the owner: past the bound the count starts over — allowed, said in the journal, and the file is written again',
+      d3b.ok === true && /was removed — the count starts over/.test(g3logs.join('\n')) && (g3.release({ hold: d3b.hold }), g3.flush(), fs.statSync(g3._file).isFile()), JSON.stringify({ why: d3b.why, logs: g3logs.slice(-2) }));
+  }
+  // (4) NOT A LEDGER: JSON that is no object — null, an array, a number — is unreadable too; NOTHING ON DISK is a fresh start
+  for (const [label, text] of [['null', 'null'], ['an array', '[1,2]'], ['a number', '7'], ['an empty object', '{}'], ['a budget that is a string', '{"budget":"x"}'], ['a budget that is an array', '{"v":1,"budget":[]}']]) {
+    const dir = world((f) => fs.writeFileSync(f, text));
+    const v = mk(guardMod, dir, [], []).authorize({ reason: 'auto-resume', identity: ID, now });
+    ok(`§3f a file holding ${label} is no ledger — refused by name`, v.ok === false && v.why === 'ledger-unreadable' && /not a ledger object/.test(v.detail), v.why);
+  }
+  {   // ONE For-you item across restarts (its itemKey), and it is RESOLVED the moment the file reads again
+    const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+    const dir = world((f) => fs.writeFileSync(f, TORN));
+    const store = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
+    const mkS = () => guardMod.create({ dataDir: dir, serverSetting: () => undefined, getUserTodos: () => store, log: () => { } });
+    mkS().authorize({ reason: 'auto-resume', identity: ID, now });
+    mkS().authorize({ reason: 'auto-resume', identity: ID, now: now + 1000 });   // ← a restart, still unreadable
+    const open1 = (store.snapshot().open || []).filter((i) => i.itemKey === 'spend-ledger-unreadable');
+    const g = mkS();
+    fs.writeFileSync(LF(dir, 'spend-budget.json'), JSON.stringify({ v: 1, budget: { v: 1, identities: {}, instance: [], notices: {} }, nudge: {} }));
+    g.authorize({ reason: 'auto-resume', identity: ID, now: Date.now() + 70e3 });
+    const open2 = (store.snapshot().open || []).filter((i) => i.itemKey === 'spend-ledger-unreadable');
+    store.stop();
+    ok('§3f the notice is ONE For-you item across a restart (its own itemKey), and the file reading again RESOLVES it — never a stale «refused» standing for 6 h',
+      open1.length === 1 && open2.length === 0, JSON.stringify({ open1: open1.length, open2: open2.length }));
+  }
+  {
+    const dir = tmpdir('vs-spend-3f-none-');
+    const v = mk(guardMod, dir, [], []).authorize({ reason: 'auto-resume', identity: ID, now });
+    ok('§3f NO FILE (ENOENT) is a first start, not a failure: allowed, nothing said', v.ok === true && v.why === null);
+  }
+  // (5) A READ ERROR that is not ENOENT (a file the hub may not read)
+  {
+    const dir = world((f) => { fs.writeFileSync(f, '{}'); fs.chmodSync(f, 0); });
+    let readable = true; try { fs.readFileSync(LF(dir, 'spend-budget.json')); } catch { readable = false; }
+    const v = mk(guardMod, dir, [], []).authorize({ reason: 'auto-resume', identity: ID, now });
+    ok('§3f a file the hub may not read (EACCES) refuses by name' + (readable ? ' — SKIPPED: this user reads a mode-0 file' : ''), readable || (v.why === 'ledger-unreadable' && /EACCES/.test(v.detail)), v.detail);
+    try { fs.chmodSync(LF(dir, 'spend-budget.json'), 0o600); } catch { }
+  }
+  // (6) THE WORDS: rendered through the client's own renderer, en / zh / ja — no count line (there is none), the ledger door;
+  // and the hand-over toast says it in words, never the bare `why`
+  {
+    const LY = await import(path.join(REPO, 'src/lib/user-todos-layout.js'));
+    const { dictEntries } = await import('./i18n-extract.mjs');
+    const dict = (f) => new Map([...dictEntries(read(f))].map((e) => [e.key, e.value]));
+    const ZH = dict('src/lib/i18n-zh.js'), JA = dict('src/lib/i18n-ja.js');
+    const fill = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m));
+    const T = { en: (k, p) => fill(k, p), zh: (k, p) => fill(ZH.has(k) ? ZH.get(k) : `«MISSING ${k}»`, p), ja: (k, p) => fill(JA.has(k) ? JA.get(k) : `«MISSING ${k}»`, p) };
+    const v = { ok: false, why: 'ledger-unreadable', reason: 'auto-resume', identity: ID, limits: A.BUDGET_DEFAULTS, counts: { hour: 0, day: 0, instanceDay: 0 }, retryAfter: 0, detail: 'x' };
+    const item = { i18n: A.refusalI18n(v, { sessionName: 'build-bot' }) };
+    const out = Object.fromEntries(['en', 'zh', 'ja'].map((l) => { const said = (x) => LY.saidLine(x, T[l], { now, locale: l, timeZone: 'America/Los_Angeles' }); return [l, { text: LY.itemTextOf(item, said), lines: LY.itemDetailLinesOf(item, said) }]; }));
+    console.log('    en: ' + out.en.text + ' / ' + out.en.lines.join(' / '));
+    const all = (o) => o.text + '\n' + o.lines.join('\n');
+    ok('§3f the notice, en: the producer, the conversation, «could not be read», the ledger door (repair or remove) — and NO count line',
+      /the continue after a usage limit in «build-bot»: its record of turns nobody typed could not be read/.test(out.en.text) && /repair it, or remove it to start the count over/.test(all(out.en)) && !/Turns nobody typed:|0 of 30/.test(all(out.en)), all(out.en));
+    ok('§3f …in zh and ja, every line in the language (no MISSING)', ['zh', 'ja'].every((l) => !/MISSING/.test(all(out[l])) && /spend-budget\.json/.test(all(out[l]))) && /账本读不出来/.test(out.zh.text) && /記録を読めない/.test(out.ja.text), all(out.zh) + ' || ' + all(out.ja));
+    const SSm = require(path.join(REPO, 'src/stash-summary.js'));
+    const toast = (l) => SSm.handOverRefusalWords({ code: 'spend_refused', why: 'ledger-unreadable', identity: ID }, T[l], { now }).text;
+    ok('§3f the hand-over toast says it in words (en / zh / ja), never «the spend ceiling refused this turn (ledger-unreadable)»',
+      /could not read its record of turns nobody typed/.test(toast('en')) && !/ledger-unreadable/.test(toast('en')) && ['zh', 'ja'].every((l) => !/MISSING/.test(toast(l))), toast('en'));
+  }
+  // RED CONTROLS — patched copies of the real modules
+  {   // the release's load: an unreadable file is an empty budget
+    const m = mutantModule('src/server/spend-guard.js', [['  if (loaded.error) {\n', '  if (false) {\n']]);
+    ok('§3f CONTROL: the release\'s load re-applied to a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    if (!m.err) {
+      const dir = world((f) => fs.writeFileSync(f, TORN));
+      const g = mk(m.mod, dir, [], []);
+      const v = g.authorize({ reason: 'auto-resume', identity: ID, now });
+      if (v.hold) g.note({ reason: 'auto-resume', identity: ID, hold: v.hold, now });
+      g.flush();
+      ok('§3f CONTROL: with it, the torn ledger AUTHORIZES on an empty count and the flush writes the empty count over the file — RED',
+        v.ok === true && fs.readFileSync(LF(dir, 'spend-budget.json'), 'utf8') !== TORN, JSON.stringify({ ok: v.ok }));
+    }
+  }
+  {   // the write guard removed: the refusal alone, the file still written over
+    const m = mutantModule('src/server/spend-guard.js', [['    if (unreadable) {   // B-3b0f: never written over', '    if (false) {   // B-3b0f: never written over']]);
+    ok('§3f CONTROL: the write guard removed from a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    if (!m.err) {
+      const dir = world((f) => fs.writeFileSync(f, TORN));
+      const g = mk(m.mod, dir, [], []);
+      g.noteNudge('claude:c1', { at: now }); g.flush();
+      const g2 = mk(m.mod, dir, [], []);
+      ok('§3f CONTROL: with it, one flush makes an empty ledger the record and the next boot AUTHORIZES — RED',
+        fs.readFileSync(LF(dir, 'spend-budget.json'), 'utf8') !== TORN && g2.authorize({ reason: 'auto-resume', identity: ID, now }).ok === true);
+    }
+  }
+  {   // the pure rule removed: the authorizer ignores `ledger`
+    const m = mutantModule('src/spend-authorizer.js', [['  if (ledger && ledger.unreadable) return no(', '  if (false) return no(']]);
+    ok('§3f CONTROL: the pure rule removed from a copy of the authorizer (the patch hit)', !m.err && m.hits === 1, m.err || '');
+    if (!m.err) {
+      const args = { reason: 'auto-resume', identity: ID, state: A.emptyBudget(), limits: A.BUDGET_DEFAULTS, ledger: { unreadable: true, error: 'not JSON' }, now };
+      ok('§3f CONTROL: the real rule refuses an unreadable ledger, the copy without it ALLOWS — RED', A.authorizeUnattendedSpend(args).why === 'ledger-unreadable' && m.mod.authorizeUnattendedSpend(args).ok === true);
+    }
+  }
+}
+
 // ── §4 THE REAL AUTO-RESUME + THE REAL POOL ENGINE ──────────────────────────
 console.log('\n§4 the real auto-resume: the ceiling refuses what the loop breaker would allow');
 /** The world: one pooled member, one conversation, real symlinks, real engine

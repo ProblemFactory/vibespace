@@ -272,6 +272,18 @@ function pruneBudget(state, now = Date.now(), limits = null) {
   return { v: 1, identities, instance: keep(s.instance), notices, attended };
 }
 
+/** PURE (B-3b0f). Two ledgers as one — the file's, read again, and the stamps made while it could not be read: every
+ *  stamp of both is kept (the file's first, then the newer ones; never deduplicated — counting one twice is the safe side). */
+function mergeBudget(a, b) {
+  const x = a && typeof a === 'object' ? a : emptyBudget(), y = b && typeof b === 'object' ? b : emptyBudget();
+  const list = (l) => (Array.isArray(l) ? l : []);
+  const identities = {};
+  for (const k of new Set([...Object.keys(x.identities || {}), ...Object.keys(y.identities || {})])) identities[k] = [...list((x.identities || {})[k]), ...list((y.identities || {})[k])];
+  const notices = { ...(x.notices || {}) };
+  for (const [k, v] of Object.entries(y.notices || {})) notices[k] = Math.max(Number(notices[k]) || 0, Number(v) || 0);
+  return { v: 1, identities, instance: [...list(x.instance), ...list(y.instance)], notices, attended: [...list(x.attended), ...list(y.attended)] };
+}
+
 /** PURE. What this identity (and the instance) has spent inside each window. */
 function spendCounts(state, identityKey, now = Date.now()) {
   const s = state && typeof state === 'object' ? state : emptyBudget();
@@ -546,7 +558,7 @@ function spendControlState(cache, { now = Date.now(), staleMs = OVERAGE_STALE_MS
 function authorizeUnattendedSpend({
   reason, identity = null, state = null, limits = BUDGET_DEFAULTS,
   overage = null, overagePolicy = 'refuse', credential = null,
-  spendControl = null, pending = null, now = Date.now(),
+  spendControl = null, pending = null, ledger = null, now = Date.now(),
 } = {}) {
   const L = { ...BUDGET_DEFAULTS, ...(limits || {}) };
   const key = identity && identity.key ? String(identity.key) : null;
@@ -597,6 +609,9 @@ function authorizeUnattendedSpend({
   // ATTENDED (lane owner-press-attended): a person's per-occurrence press — the BUDGET neither refuses nor counts it.
   // Answered BEFORE the caps (a full hour of stamps does not refuse it) and with no hold (spend-guard reads `attended`).
   if (isAttended(reason)) return { ok: true, attended: true, why: null, detail: null, retryAfter: 0, counts, inFlight, limits: L, reason, identity: identity || null };
+  // B-3b0f: THE LEDGER COULD NOT BE READ — a count that restarted from nothing is not a count, so no cap below can be
+  // judged; every unattended turn is refused BY NAME until the file reads again or is removed (spend-guard `ledger`)
+  if (ledger && ledger.unreadable) return no('ledger-unreadable', `the record of unattended turns (data/spend-budget.json) could not be read (${String(ledger.error || 'unreadable').slice(0, 120)}) — none can be counted, so none run`);
   // THE HOLD IS PART OF THE SUM. `retryAfter` still speaks only of STAMPS: a
   // hold settles when its producer answers, not on a window boundary, so
   // promising an instant for it would be a guess (0 = "no promise about when",
@@ -764,6 +779,7 @@ const REFUSAL_WORDS = Object.freeze({
   'spend-control-reached': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} has reached its spend control, so its requests are refused — a turn on it would buy nothing.', 'VibeSpace held {producer}: {account} has reached its spend control, so its requests are refused — a turn on it would buy nothing.']),
   'identity-unknown': Object.freeze(['VibeSpace held {producer} in «{conversation}»: it could not tell which account the turn would bill.', 'VibeSpace held {producer}: it could not tell which account the turn would bill.']),
   'overage-in-use': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} is billing paid overage, and turns nobody typed are refused while real money is spent. {next}', 'VibeSpace held {producer}: {account} is billing paid overage, and turns nobody typed are refused while real money is spent. {next}']),
+  'ledger-unreadable': Object.freeze(['VibeSpace held {producer} in «{conversation}»: its record of turns nobody typed could not be read, so it counts none and starts none.', 'VibeSpace held {producer}: its record of turns nobody typed could not be read, so it counts none and starts none.']),   // B-3b0f
   'unknown-reason': Object.freeze(['VibeSpace refused a turn nobody typed in «{conversation}»: «{producer}» is not a declared reason.', 'VibeSpace refused a turn nobody typed: «{producer}» is not a declared reason.']),
   other: Object.freeze(['VibeSpace held {producer} in «{conversation}»: the spend ceiling refused it ({why}).', 'VibeSpace held {producer}: the spend ceiling refused it ({why}).']),
 });
@@ -794,9 +810,10 @@ const DOOR_WORDS = Object.freeze({
   usage: 'Sign {account} in again from the Usage window — the limits in Settings → Spending cannot help here.',
   vendor: 'The spend control is set with the account’s vendor — the limits in Settings → Spending cannot help here.',
   waiting: 'Open the conversation they wait behind: they run when its turn ends, or when you stop that turn there. Raising the limits in Settings → Spending would let more turns run meanwhile.',   // B-0a33 round 1
+  ledger: 'This is VibeSpace failing closed, not a limit: the hub could not read data/spend-budget.json. Turns nobody typed start again within a minute of the file reading again — repair it, or remove it to start the count over. The limits in Settings → Spending cannot help here.',   // B-3b0f
   wiring: 'This is VibeSpace failing closed, not a limit: the Usage window lists the accounts and the hub log’s [spend] lines name the conversation — the limits in Settings → Spending cannot help here.',
 });
-const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'unknown-reason': 'wiring', other: 'wiring' });
+const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'ledger-unreadable': 'ledger', 'unknown-reason': 'wiring', other: 'wiring' });
 const SPENT_ROWS = 6;
 const CAP_OF = Object.freeze({ 'hour-cap': ['perIdentityHour', 'hour'], 'day-cap': ['perIdentityDay', 'day'], 'instance-cap': ['perInstanceDay', 'instance'] });
 /** a producer as words: a declared reason says its `what` in the viewer's language; a legacy stamp says so */
@@ -826,7 +843,8 @@ function refusalI18n(v, { sessionName = null, behind = null } = {}) {
   const c = v.counts || {};
   const detail = [{ key: LINE_WORDS.held, params: { producer, reason: String(v.reason == null ? '?' : v.reason).slice(0, 80) } }];
   detail.push(account ? { key: LINE_WORDS.account, params: { account } } : { key: LINE_WORDS.accountUnknown });
-  if (account && v.counts) detail.push({ key: LINE_WORDS.counts, params: { hour: c.hour || 0, hourCap: Number(L.perIdentityHour) || 0, day: c.day || 0, dayCap: Number(L.perIdentityDay) || 0, instance: c.instanceDay || 0, instanceCap: Number(L.perInstanceDay) || 0 } });
+  if (row === 'ledger-unreadable') { /* B-3b0f: no count can be said — the ledger they live in could not be read */ }
+  else if (account && v.counts) detail.push({ key: LINE_WORDS.counts, params: { hour: c.hour || 0, hourCap: Number(L.perIdentityHour) || 0, day: c.day || 0, dayCap: Number(L.perIdentityDay) || 0, instance: c.instanceDay || 0, instanceCap: Number(L.perInstanceDay) || 0 } });
   else if (v.counts) detail.push({ key: LINE_WORDS.countsInstance, params: { instance: c.instanceDay || 0, instanceCap: Number(L.perInstanceDay) || 0 } });   // r3: identity-unknown kept «(instance 7/800)» only in English
   // r3: what the English line says as «(+N in flight)» — the holds a cap sums with the stamps (a cap reached by holds alone
   // read «used its 3 turns» beside «0 of 3»)
@@ -862,7 +880,7 @@ function noticeText(warn) {
 module.exports = {
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
-  budgetLimits, emptyBudget, pruneBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText,
+  budgetLimits, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText,
   pendingCounts, reservePending, releasePending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
   authorizeUnattendedSpend, noteUnattendedSpend, returnReservation, reservationState, refusalText, refusalI18n, refusalRow, noticeText,

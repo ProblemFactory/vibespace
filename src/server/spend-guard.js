@@ -45,6 +45,8 @@ function writeJsonAtomic(file, obj) {
 const REFUSE_LOG_MS = 5 * 60 * 1000;      // one journal line per (reason, identity, why)
 const REFUSE_INBOX_MS = 6 * 60 * 60 * 1000; // one "For you" item per (identity, why)
 const INBOX_KEY = 'accounts';
+const LEDGER_RECHECK_MS = 60 * 1000;     // B-3b0f: an unreadable ledger is read again at most this often
+const LEDGER_ITEM = 'spend-ledger-unreadable';   // B-3b0f: the notice's identity (one For-you item, across restarts)
 const WAIT_CAPS = Object.freeze({ 'hour-cap': 1, 'day-cap': 1, 'instance-cap': 1 });   // B-0a33 round 1: the caps waiting frames can hold             // the same inbox row login-expiry-watch files under
 // WHAT A NOTICE IS ABOUT DECIDES WHEN IT DIES (2.369.152, "SPEND NOTICES LIVED
 // FOREVER AS ACTIONS"): every inbox item this module files carries the end of
@@ -79,9 +81,32 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   const file = path.join(dataDir, 'spend-budget.json');
   let state = A.emptyBudget();
   let nudge = {};   // sessionKey -> {at, n, everSeenStatus} (the Stop nudge's PERSISTED cooldown)
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
-    if (raw && typeof raw === 'object') {
+  // B-3b0f: THE LEDGER FAILS CLOSED ON ITS OWN RECORD. A file that is there and cannot be read (torn JSON, a directory, a
+  // read error) used to start an EMPTY budget — the count restarted and unattended turns were authorized as if none had
+  // been spent; and the next persist renamed that empty ledger OVER the file, so one restart made it permanent. Now ENOENT
+  // (nothing spent yet) is told apart from UNREADABLE: unreadable ⇒ every unattended reason is refused by name
+  // ('ledger-unreadable'), the file is never written over, and it is read again at most once a LEDGER_RECHECK_MS — it
+  // reads again ⇒ its stamps and the ones made meanwhile both count; it is gone (the owner removed it) ⇒ the count starts over
+  let unreadable = null;     // {error, since} while the file is there and cannot be read
+  let recheckAt = 0;
+  // the ONE read of the file (the load and the re-read): its text, `missing` (ENOENT), or the error that kept it unread
+  const readText = () => { try { return { text: fs.readFileSync(file, 'utf-8') }; } catch (e) { return e && e.code === 'ENOENT' ? { missing: true } : { error: String((e && e.code) || 'read failed') }; } };
+  const parseLedger = (t) => {
+    if (t.text === undefined) return t;
+    let raw; try { raw = JSON.parse(t.text); } catch { return { error: 'not JSON' }; }
+    // a ledger is an object holding a `budget` object (what writeNow writes) or, an older build's, the budget itself
+    const obj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+    return obj(raw) && (obj(raw.budget) || (!('budget' in raw) && (obj(raw.identities) || Array.isArray(raw.instance)))) ? { raw } : { error: 'not a ledger object' };
+  };
+  const loaded = parseLedger(readText());
+  if (loaded.error) {
+    unreadable = { error: loaded.error, since: Date.now() };
+    recheckAt = unreadable.since;
+    log(`[spend] data/spend-budget.json could not be read (${loaded.error}) — unattended turns are refused until it reads again or is removed; it is not written over`);
+  }
+  {
+    const raw = loaded.raw;
+    if (raw) {
       // PRUNE WIDE AT LOAD (r5, reproduced) — see A.LOAD_RETENTION. Retention is
       // a function of the caps (r2), but HERE THE CAPS ARE NOT KNOWABLE:
       // server.js builds this guard ~318 lines before `setupPersistence()`
@@ -95,7 +120,24 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       state = A.pruneBudget(raw.budget || raw, Date.now(), A.LOAD_RETENTION);
       if (raw.nudge && typeof raw.nudge === 'object') nudge = raw.nudge;
     }
-  } catch { }
+  }
+  /** B-3b0f: read an unreadable ledger again (bounded). true when it reads again or is gone — the refusal ends. */
+  function recheckLedger(now) {
+    if (!unreadable || now - recheckAt < LEDGER_RECHECK_MS) return false;
+    recheckAt = now;
+    const r = parseLedger(readText());
+    if (r.error) { unreadable.error = r.error; return false; }
+    // stamps made meanwhile (an attended press, a carried frame) are KEPT beside the file's: a stamp is never dropped (a frame
+    // carried meanwhile may then count twice — its file stamp and its fresh one — for a day: the safe direction)
+    if (r.raw) {
+      state = A.mergeBudget(A.pruneBudget(r.raw.budget || r.raw, now, A.LOAD_RETENTION), state);
+      if (r.raw.nudge && typeof r.raw.nudge === 'object') nudge = { ...r.raw.nudge, ...nudge };
+    }
+    log(r.raw ? '[spend] data/spend-budget.json reads again — unattended turns are counted and allowed again' : '[spend] data/spend-budget.json was removed — the count starts over from the turns since the hub started');
+    unreadable = null;
+    try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === LEDGER_ITEM && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { }   // its notice is no longer true
+    return true;
+  }
   const spoke = new Map();   // journal dedup: `${reason}|${key}|${why}` -> {at, more, line, timer} (`more` = refusals the window swallowed)
   // r2 (measured: five refusals in a minute ⇒ ONE line, and with no later refusal the other four were never journaled):
   // a window that SWALLOWED refusals is FLUSHED when it ends — one bounded timer per signature, armed at the first
@@ -114,6 +156,11 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   let lastHoldLog = 0;
   let timer = null;
   const writeNow = () => {
+    if (unreadable) recheckLedger(Date.now());
+    if (unreadable) {   // B-3b0f: never written over while it cannot be read — the empty count must not become the record
+      if (!unreadable.saidWrite) { unreadable.saidWrite = true; log('[spend] data/spend-budget.json is not written while it cannot be read'); }
+      return;
+    }
     try { writeJsonAtomic(file, { v: 1, budget: state, nudge }); }
     catch (e) { log('[spend] persist failed: ' + e.message); }
   };
@@ -199,7 +246,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     } catch { return null; }
   }
 
-  function fileInbox(text, detail, urgency, expiresAt, i18n = null, about = null) {
+  function fileInbox(text, detail, urgency, expiresAt, i18n = null, about = null, itemKey = null) {
     let userTodos = null;
     try { userTodos = getUserTodos(); } catch { userTodos = null; }
     if (!userTodos) return false;
@@ -209,7 +256,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // `i18n` (lane owner-press-attended): the refusal as STRUCTURE — the client says the next free slot in the viewer's
     // zone from its epoch (A.refusalI18n), never a time string this hub rendered
     // B-0a33 round 1: `about` = the conversation waiting frames wait behind — the notice is filed under ITS key, so it opens it
-    try { userTodos.add(about && about.key ? about.key : INBOX_KEY, { ...(i18n ? { i18n } : {}), origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
+    try { userTodos.add(about && about.key ? about.key : INBOX_KEY, { ...(i18n ? { i18n } : {}), ...(itemKey ? { itemKey } : {}), origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
     catch (e) { log('[spend] could not file the inbox item: ' + e.message); return false; }
   }
 
@@ -218,13 +265,14 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
    *  effects of a refusal (journal + telemetry + inbox) happen here, once. */
   function authorize({ reason, session = null, sessionId = null, sessionName = null, cid = null, identity: identityHint = null, hold: takeHold = true, now = Date.now() } = {}) {
     sweepHolds(now);
+    if (recheckLedger(now)) persist();
     const identity = identityFor(session, identityHint);
     const key = identity && identity.key;
     const v = A.authorizeUnattendedSpend({
       reason, identity, state, limits: limits(),
       overage: overageFor(key), overagePolicy: overagePolicy(),
       credential: credentialFor(key), spendControl: spendControlFor(key),
-      pending, now,
+      pending, ledger: unreadable ? { unreadable: true, error: unreadable.error } : null, now,
     });
     // AN "ALLOWED" ANSWER HOLDS ITS SLOT (r5). The caller carries `hold` back
     // to `note()` (it became a turn) or to `release()` (it did not); an answer
@@ -280,7 +328,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const wait = promisedHere > 0 && behind.length ? behind[0] : null;
     // THE KEY IS THE PLACE (follow-up 2): the account, the cap, the conversation the frames wait behind — never the oldest frame
     // (a queue that drains one frame a turn would mint a new key, and a new notice, at every carry)
-    const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|at|${wait.key || '?'}` : `inbox|${key || '?'}|${v.why}`;
+    const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|at|${wait.key || '?'}` : v.why === 'ledger-unreadable' ? 'inbox|*|ledger-unreadable' : `inbox|${key || '?'}|${v.why}`;   // B-3b0f: ONE notice for the instance, not one per account
     const lastInbox = Number(state.notices[inboxSig]) || 0;
     // THE SEAM WITH LAWS 2 + 3 (shape C — 主开发 2026-11-13 15:30Z): while a «messages waiting» For-you item stands for the
     // conversation these frames wait behind (src/server/wait-watch.js, the same key `<backend>:<cid>`), IT speaks: the spending
@@ -293,12 +341,13 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     if (now - lastInbox > REFUSE_INBOX_MS && !waitItemStands) {
       const filed = fileInbox(text,
         `Reason: ${reason}\nIdentity: ${identity ? identity.name : 'unknown'}\nRefusal: ${v.why}\n`
-        + `Unattended turns used: ${v.counts.hour}/${v.limits.perIdentityHour} this hour, ${v.counts.day}/${v.limits.perIdentityDay} today `
-        + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`
+        + (v.why === 'ledger-unreadable' ? `The ledger data/spend-budget.json could not be read (${unreadable ? unreadable.error : '?'}): no count can be said, so none run until it reads again or is removed.\n\n`   // B-3b0f
+          : `Unattended turns used: ${v.counts.hour}/${v.limits.perIdentityHour} this hour, ${v.counts.day}/${v.limits.perIdentityDay} today `
+          + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`)
         + (wait ? `${promisedHere} of them are messages waiting behind running turns — in ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''}. They run when that turn ends, or when you stop it there.\n\n` : '')
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + 'Background Work notifications and messages from other sessions. Adjust them in Settings → Spending, or act on the account named above.',
-        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null);
+        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : null);   // B-3b0f: ONE item across restarts, resolved when the file reads again
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;
@@ -387,6 +436,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     snapshot: () => ({
       budget: A.pruneBudget(state, Date.now(), A.LOAD_RETENTION), nudge: { ...nudge },   // round 4: every prune keeps what the largest caps could count
       chargesUnhinted, holdsOpen: A.expirePending(pending, Date.now()).live.length, holdsExpired,
+      ledgerUnreadable: unreadable ? { error: unreadable.error, since: unreadable.since } : null,   // B-3b0f
       // lane owner-press-attended: the presses the ceiling neither refused nor counted, by reason (the last 24 h)
       attended: A.producerCounts(A.pruneBudget(state, Date.now(), A.LOAD_RETENTION).attended),
     }),
@@ -394,4 +444,4 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   };
 }
 
-module.exports = { create, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, noticeExpiry };
+module.exports = { create, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, LEDGER_RECHECK_MS, noticeExpiry };
