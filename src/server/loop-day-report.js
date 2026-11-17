@@ -33,7 +33,7 @@ const BROWSER_RE = /^(chrome|chromium|chromium-browser|google-chrome|headless_sh
 // in its arguments — a conversation's wrapper carries the CLI's absolute path among them and is a wrapper (cure r2, S3)
 const NODE_OPTS_WITH_VALUE = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-e', '--eval', '-p', '--print', '--title', '--inspect-port']);
 const scriptOf = (argv) => { for (let i = 1; i < argv.length; i++) { const a = argv[i]; if (NODE_OPTS_WITH_VALUE.has(a)) { i++; continue; } if (a.startsWith('-')) continue; return a; } return ''; };
-const CLI_SCRIPT_RE = /\/(?:@anthropic-ai\/claude-code|@openai\/codex|opencode-ai|@google\/gemini-cli|@qwen-code\/qwen-code)\/|\/(?:claude|codex|opencode|gemini|qwen)(?:\.[cm]?js)?$/;
+const CLI_SCRIPT_RE = /\/(?:@anthropic-ai\/claude-code|@openai\/codex|opencode-ai|@google\/gemini-cli|@qwen-code\/qwen-code)\/|\/(?:claude|codex|opencode|gemini|qwen|agy)(?:\.[cm]?js)?$/;
 const WRAPPER_SCRIPT_RE = /(?:^|\/)[\w.-]*-wrapper\.[cm]?js$/;
 const AGENTD_SCRIPT_RE = /(?:^|\/)vibespace-agentd\.js$|\/agentd\/current\/agentd\.js$/;
 

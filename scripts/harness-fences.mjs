@@ -192,6 +192,8 @@ export function scanTables(files, names) {
 // ── THE EXEMPTIONS: a judgment per site and id, with its reason (the only hand-written part; a dead row is red) ──────
 /** { file, needle (a substring of `<decl> <head>`), ids: [harness ids the site rightly omits], why } */
 export const FENCE_EXEMPT = Object.freeze([
+  { file: 'src/server/loop-day-report.js', needle: 'CLI_RE /^(', ids: ['shell'], why: "the hub's processes by kind name agent CLI PROGRAMS; a terminal session runs the person's own shell, counted as «other»" },
+  { file: 'src/server/loop-day-report.js', needle: 'CLI_SCRIPT_RE', ids: ['shell'], why: "the node SCRIPTS of agent CLIs (a node process told by the script it runs); the shell harness runs no CLI script" },
   { file: 'scripts/ci.mjs', needle: 'REAL_PROGRAMS', ids: ['shell'], why: "a terminal session runs the person's own shell — no program a suite spawns by harness name" },
   { file: 'scripts/ci.mjs', needle: 'REAP_NAMES', ids: ['shell'], why: 'the reaper names agent PROGRAMS left behind; the shell harness has none' },
   { file: 'scripts/test-architecture.mjs', needle: 'KEY_LITERAL', ids: ['shell'], why: 'shell declares no settings table — no `shell.` key can exist' },

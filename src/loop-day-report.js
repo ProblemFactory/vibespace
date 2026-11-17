@@ -89,7 +89,7 @@ function censusWords(c) {
   if (!c || !Array.isArray(c.shares) || !Number.isFinite(c.busyTicks)) return none;
   const by = new Map(c.shares.map((s) => [s.family, s.share]));
   const extra = (k) => (c[k] && Number.isFinite(c[k].share) ? c[k].share : (by.get(k) || 0));
-  const t = (k) => (c[k] && Number.isFinite(c[k].ticks) ? c[k].ticks : null);
+  const ticksOf = (k) => (c[k] && Number.isFinite(c[k].ticks) ? c[k].ticks : null);   // never `t` — the i18n extractor reads t('…') as a word
   const ns = c.notSampled && Number.isFinite(c.notSampled.ticks) ? c.notSampled.ticks : null;
   const p0 = (x) => `${((x || 0) * 100).toFixed(0)}%`;
   // cure r3 (T1): a SPLIT file — one file that holds two owners' work — is a bucket of its own, printed by its short name marked «*»
@@ -99,7 +99,7 @@ function censusWords(c) {
   const words = c.busyTicks > 0 ? [...ENGINES.map((f) => `${f} ${p0(by.get(f))}`), ...splits.map((x) => `${x.short}* ${p0(x.share)}`), `native ${p0(extra('native'))}`, `outside ${p0(extra('outside'))}`].join('; ') : '?';
   const all = Number.isFinite(c.sampledTicks) && ns != null ? c.sampledTicks + ns : null;
   const cost = c.cost || {};
-  return { words, ticks: all, busy: c.busyTicks, held: t('held'), idle: t('idle'), stopped: t('stopped'), notSampled: ns, viaHelper: t('viaHelper'), deep: t('deep'),
+  return { words, ticks: all, busy: c.busyTicks, held: ticksOf('held'), idle: ticksOf('idle'), stopped: ticksOf('stopped'), notSampled: ns, viaHelper: ticksOf('viaHelper'), deep: ticksOf('deep'),
     asks: Number.isFinite(cost.asks) ? cost.asks : null, paidMs: Number.isFinite(cost.paidMs) ? cost.paidMs : null };
 }
 
