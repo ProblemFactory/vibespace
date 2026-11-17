@@ -59,6 +59,9 @@ export const BACKEND_META = {
     // Offline seed for the permission-mode dropdown before the first status
     // (the live list comes from the session's chatStatus.permissionModes).
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'],
+    // the strip's FACE per mode (lane mask-value-shape — page §4's «全部放行»): a word of strip-faces.js PERM_FACES, read by the
+    // bar for THIS harness (its own meaning of a value; no file branches on the harness)
+    permissionModeFaces: { default: 'Ask each time', manual: 'Ask each time', acceptEdits: 'Accept edits', bypassPermissions: 'Allow all', plan: 'Plan only', auto: 'Auto', dontAsk: 'Pre-approved only' },
     // THE DECLARED UI ROW (lane dc-client-billing, 2026-10-04): billing words, the accounts-store default field,
     // the usage bucket, effort/lock facts and the legacy id forms — the chrome reads THESE, never an id. The
     // client META mirrors it key for key (test-harness-contract deep-compares). effortExtras (lane effort-ultracode): the effort
@@ -116,6 +119,9 @@ export const BACKEND_META = {
     },
     settingsPrefix: 'codex',
     permissionModes: ['default', 'read-only', 'safe-yolo', 'yolo'],
+    // the strip's FACE per mode (lane mask-value-shape — page §4's «全部放行»): a word of strip-faces.js PERM_FACES, read by the
+    // bar for THIS harness (its own meaning of a value; no file branches on the harness)
+    permissionModeFaces: { default: 'Default', 'read-only': 'Read only', 'safe-yolo': 'Ask on failure', yolo: 'Allow all' },
     // Effort rows that deserve a one-line hint (B-21e4 item 3): 'ultra' is
     // codex 0.153's multi-agent delegation level — the model spawns sub-agent
     // threads, which burn extra usage. Offered only when the served model's
@@ -155,6 +161,9 @@ export const BACKEND_META = {
     caps: { fork: false, forkAtMessage: false, checkpoints: serverCapsOf('opencode').checkpoints, review: false, renameWriteback: false, autoResume: { signal: false, resume: 'prompt', supported: false }, accounts: false, peerDelivery: 'stash-only', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'reorder', 'edit'] }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: 'serve-config', session: false, instance: true, liveVerb: false }, toolAllowlist: null },
     settingsPrefix: 'opencode',
     permissionModes: ['build', 'plan'],
+    // the strip's FACE per mode (lane mask-value-shape — page §4's «全部放行»): a word of strip-faces.js PERM_FACES, read by the
+    // bar for THIS harness (its own meaning of a value; no file branches on the harness)
+    permissionModeFaces: { build: 'Make changes', plan: 'Plan only' },
     // The STORE (stopped conversations: list/open/resume/fork) runs behind a
     // built-in plugin that is OFF by default (2026-09-07 owner decision) —
     // the id is the mirror of the harness descriptor's store.servicePlugin,
@@ -188,6 +197,9 @@ export const BACKEND_META = {
     caps: { fork: false, forkAtMessage: false, checkpoints: serverCapsOf('antigravity').checkpoints, review: false, renameWriteback: false, autoResume: { signal: true, resume: null, supported: false }, accounts: true, peerDelivery: 'rpc-queue', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'], steerJoinsTurn: false }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: null, session: false, instance: false, liveVerb: false }, toolAllowlist: null },
     settingsPrefix: 'antigravity',
     permissionModes: ['accept-edits', 'auto', 'plan', 'bypassPermissions'],
+    // the strip's FACE per mode (lane mask-value-shape — page §4's «全部放行»): a word of strip-faces.js PERM_FACES, read by the
+    // bar for THIS harness (its own meaning of a value; no file branches on the harness)
+    permissionModeFaces: { 'accept-edits': 'Accept edits', auto: 'Auto', plan: 'Plan only', bypassPermissions: 'Allow all' },
     // THE DECLARED UI ROW — mirrors src/harnesses/antigravity.js key for key (test-harness-contract deep-compares).
     ui: { billing: { globalLogin: 'Google login', cliLogin: 'Google login', pickLogin: 'Google login (Antigravity CLI)', pickLoginHost: 'Google login (on the host)', planSuffix: '', switchLogin: 'Google login', accountLogin: 'Google', defaultIdField: 'defaultAntigravityAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: null, globalUsageKey: null, estimates: false }, effortReport: null, effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'], modelLock: true, legacyIds: false, resumeResend: false, subagents: 'cards', statusBar: { context: 'table', cache: true, odometer: true, model: true, duration: true, windows: [{ prefix: 'gemini-4-carbon', tokens: 1048576 }, { prefix: 'gemini-4-argon', tokens: 1048576 }, { prefix: 'gemini-3.8-flash', tokens: 1048576 }, { prefix: 'gemini-3.7-flash', tokens: 1048576 }, { prefix: 'gemini-3.6-flash', tokens: 1048576 }, { prefix: 'gemini-3.1-pro', tokens: 1048576 }] } },
   },

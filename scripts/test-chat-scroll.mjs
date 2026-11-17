@@ -294,7 +294,8 @@ try {
   check('an API key: «This chat ≈ $0.47 · billed per use (API key)» in a tier colour — and on the context door\'s face', k2 && k2.text === 'This chat ≈ $0.47 · billed per use (API key)' && /--green/.test(k2.color) && k2.onFace, k2);
   await evalJs(`${VIEW}.setCostBasis?.(null); true`);
   const k3 = await cost();
-  check('nobody knows: «This chat ≈ $0.47» — the figure with its words, no claim (in the panel, off the face)', k3 && k3.text === 'This chat ≈ $0.47' && /depends on the account/.test(k3.title) && !k3.onFace, k3);
+  // (主开发's ruling on the strip's cure: a spend whose billing basis is UNKNOWN is inside the context panel and SAID as unknown there)
+  check('nobody knows: «This chat ≈ $0.47 · whether it is billed is not known» — the figure, said as unknown (in the panel, off the face)', k3 && k3.text === 'This chat ≈ $0.47 · whether it is billed is not known' && /depends on the account/.test(k3.title) && !k3.onFace, k3);
   await evalJs(`${VIEW}.setCostBasis?.({ source: 'subscription' }); true`);
 
   // ── ③ ──

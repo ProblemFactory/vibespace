@@ -9,6 +9,8 @@
 //      strip that the table places elsewhere are the named debt the bar's rewrite (P2) brings to zero
 //   ④a MOVED, NOT LOST: every mark off the strip names its home; only what the page removes is gone (red controls)
 //   ⑤ RED CONTROLS: a planted mark the table does not know is red by name; a detail put back on the strip is red by name
+//   ⑥ THE FACES (src/lib/strip-faces.js, the cure of 644a67ec2's MUST 4): a known value wears its label, a value its harness
+//      does not declare wears its raw spelling — never a guessed face (the adversarial read's cases, each a row)
 // PURE + source text only — no DOM, no clock.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -91,11 +93,16 @@ console.log('④ the census of the bar');
   // MOVED, NOT LOST — each home READS the mark it took: Session Properties the health rows and the record kinds (from the bar's
   // own accessors), the phone's top bar the search
   const PROPS = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
-  ok(/bar\?\.initHealthRows\?\.\(\)/.test(PROPS) && /bar\?\.addedKindsWords\?\.\(\)/.test(PROPS) && /initHealthRows\(\) \{/.test(BAR) && /addedKindsWords\(\) \{/.test(BAR) && /window\.addEventListener\('vs-start-facts'/.test(PROPS),
-    'moved, not lost: Session Properties reads the start facts (a tool that did not start, the record kinds) from the bar, and re-reads them when they change');
+  ok(/bar\?\.initHealthWords\?\.\(\)/.test(PROPS) && /v\._statusBar\.initHealthWords\?\.\(\)/.test(fs.readFileSync(path.join(REPO, 'src/lib/setup-flows.js'), 'utf8')) && /bar\?\.addedKindsWords\?\.\(\)/.test(PROPS) && /initHealthRows\(\) \{/.test(BAR) && /addedKindsWords\(\) \{/.test(BAR) && /window\.addEventListener\('vs-start-facts'/.test(PROPS),
+    'moved, not lost: Session Properties reads the start facts (a tool that did not start — in plain words —, the record kinds) from the bar, and re-reads them when they change; ⚙ Diagnostics lists the tools that did not start');
   const NAV = fs.readFileSync(path.join(REPO, 'src/lib/mobile-nav.js'), 'utf8'), HTML = fs.readFileSync(path.join(REPO, 'public/index.html'), 'utf8');
   ok(/<button id="mobile-nav-search" [^>]*title="Search this conversation"/.test(HTML) && /this\._shownChat\(\)\?\._search\?\.open\?\.\(\)/.test(NAV) && !/chip\('search'/.test(BAR),
     'moved, not lost: the search is the phone\'s top-bar magnifier (where the conversation\'s name lives), opening the shown conversation\'s search — no strip mark');
+  const STYLE = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
+  const shownIn = (css) => ['compact', 'regular'].filter((vc) => new RegExp(`html\\[data-vc="${vc}"\\] #mobile-nav-search\\.on \\{ display: (?:inline-)?flex;`).test(css));
+  const noRegular = STYLE.replace(/\nhtml\[data-vc="regular"\] #mobile-nav-search\.on \{[^}]*\}/, '');
+  ok(shownIn(STYLE).join() === 'compact,regular' && shownIn(noRegular).join() === 'compact',
+    'moved, not lost: the magnifier is shown in the COMPACT and the REGULAR class (a tablet in portrait, a fold\'s inner screen) — RED CONTROL: the regular rule taken out is named', JSON.stringify({ now: shownIn(STYLE), control: shownIn(noRegular) }));
 }
 
 console.log('⑤ red controls');
@@ -107,6 +114,35 @@ console.log('⑤ red controls');
   const wrongDoor = censusOfBar("inDoor('model', 'm', '', 'x');");
   ok(wrongDoor.doorWrong.includes('model'), 'RED CONTROL: a strip mark put inside a door is named (doorWrong)');
   ok(back.offStrip.includes('cache') && !back.offStrip.includes('model'), 'RED CONTROL: a detail put back on the strip is named (off the strip by its row)');
+  const beside = censusOfBar("chip('model', 'm', '', 'x'); inDoor('cache', '', '', 'x'); chip('cache', 'c', '', 'x');");
+  ok(beside.offStrip.includes('cache'), 'RED CONTROL: a chip planted BESIDE a door row of the same name is named too (the census hole of 644a67ec2)');
+  const ternary = censusOfBar("(a.armed ? chip : inDoor)('autoresume', 'x', '', 'x');");
+  ok(!ternary.offStrip.length && ternary.doors.includes('autoresume') && ternary.drawn.includes('autoresume'), 'the either/or call (armed auto-continue: row 1 while armed, else a settings row) is read as both, and is not red');
+}
+
+console.log('⑥ the faces');
+{
+  const F = await import(path.join(REPO, 'src/lib/strip-faces.js'));
+  const { BACKEND_META } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
+  const tc = (c, x) => c + '::' + x, t = (x) => x;
+  const MODEL = [['claude-fable-5-1[1m]', 'Fable 5.1 1M'], ['fable[1m]', 'Fable 1M'], ['claude-opus-5-5', 'Opus 5.5'], ['opus', 'Opus'], ['sonnet[1m]', 'Sonnet 1M'],
+    ['claude-opus-4-20250514', 'claude-opus-4-20250514'],   // a dated id is not «Opus 4.20250514»: raw
+    ['gpt-5-codex', 'gpt-5-codex'], ['openrouter/anthropic/claude-opus-5-5', 'openrouter/anthropic/claude-opus-5-5'], ['my-opus-tune', 'my-opus-tune'],   // another harness's id, a token inside another id: raw
+    ['⚠ claude-fable-5-1 · refusal (cyber)', '⚠ Fable 5.1 · refusal (cyber)'], ['claude-sonnet-5-5 → claude-opus-5-5', 'Sonnet 5.5 → Opus 5.5']];
+  const badM = MODEL.filter(([v, want]) => F.modelFace(v) !== want).map(([v, want]) => `${v} → ${F.modelFace(v)} (want ${want})`);
+  ok(badM.length === 0, `the model's face: ${MODEL.length} labels, a known token worded, every other spelling kept as it is`, badM);
+  const EFF = [['high', 'effort::High'], ['xhigh', 'effort::Extra high'], ['ultracode', 'effort::Ultra'], ['minimal', 'effort::Minimal'], ['none', 'effort::None'], ['turbo', 'turbo'], ['', '']];
+  const badE = EFF.filter(([v, want]) => F.effortFace(v, tc) !== want).map(([v, want]) => `${v} → ${F.effortFace(v, tc)} (want ${want})`);
+  ok(badE.length === 0, `the thinking level's face: ${EFF.length} values (an unknown level is its raw word)`, badE);
+  const face = (be, v) => F.permissionModeFace(BACKEND_META[be]?.permissionModeFaces, v, tc, t);
+  const PERM = [['claude', 'default', 'perm::Ask each time'], ['claude', 'bypassPermissions', 'perm::Allow all'], ['claude', 'plan', 'perm::Plan only'],
+    ['codex', 'default', 'Default'],                     // codex «default» is not claude's «ask each time» (the read's first catch)
+    ['codex', 'yolo', 'perm::Allow all'], ['codex', 'read-only', 'perm::Read only'], ['opencode', 'build', 'perm::Make changes'], ['antigravity', 'accept-edits', 'perm::Accept edits'],
+    ['claude', '', 'Default'], ['claude', 'brand-new-mode', 'brand-new-mode'], ['shell', 'default', 'default'], ['opencode', 'default', 'default']];
+  const badP = PERM.filter(([be, v, want]) => face(be, v) !== want).map(([be, v, want]) => `${be}/${v} → ${face(be, v)} (want ${want})`);
+  ok(badP.length === 0, `the permission mode's face is the HARNESS's own declared row: ${PERM.length} cases (an undeclared value, or a harness with none, is its raw spelling)`, badP);
+  const undeclared = Object.entries(BACKEND_META).filter(([, m]) => Array.isArray(m.permissionModes) && m.permissionModes.some((v) => !(m.permissionModeFaces || {})[v])).map(([be]) => be);
+  ok(undeclared.length === 0, 'every mode a harness lists has its face declared beside it', undeclared);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

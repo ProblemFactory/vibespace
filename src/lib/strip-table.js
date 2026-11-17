@@ -46,7 +46,7 @@ export const STRIP_ROWS = Object.freeze([
   row('ctx-unknown', 'I', 'row1', 60, { door: DOORS.context, short: 'percent', sameSlotAs: 'ctx' }),
   // ── row 2: II, always findable, then III's one door ──
   row('artifacts', 'II', 'row2', 10, { door: DOORS.artifacts }),             // 产出 — always, even at zero; designs and pages folded in
-  row('outbox', 'II', 'row2', 20),                                           // 发件箱 — «n 在等» on its face when some wait
+  row('outbox', 'II', 'row2', 20),                                           // 发件箱 — «n 在等» on its face when some wait; «· 0» at zero (a subagent's viewer has none: it drafts under its parent)
   row('browser', 'II', 'row2', 30, { exists: true, title: { maxCh: 18 } }),  // the agent browser — its profile name cut inside the chip
   row('channels', 'II', 'row2', 40, { exists: true, title: { maxCh: 18 } }), // the channel this turn touched — its title cut inside the chip
   row('tasks', 'II', 'row2', 50, { exists: true, door: DOORS.background, short: 'count' }), // «后台» — tasks + workflows
@@ -115,13 +115,16 @@ export function arrange(present = {}, width = ONE_ROW_PX) {
  */
 export function censusOfBar(src) {
   const keysOf = (re) => [...new Set([...String(src).matchAll(re)].map((m) => m[1]))];
-  const drawn = keysOf(/\bchip\)?\(\s*'([a-z0-9-]+)'/g);            // chip('x', …) — and `(cond ? chip : inDoor)('x', …)` (the armed auto-continue)
-  const doors = keysOf(/\binDoor\)?\(\s*'([a-z0-9-]+)'/g);          // inDoor('x', …): a row of a door's panel
+  const plain = keysOf(/(?<![\w.$])chip\(\s*'([a-z0-9-]+)'/g);                // chip('x', …): drawn ON the strip
+  const either = keysOf(/\?\s*chip\s*:\s*inDoor\)\(\s*'([a-z0-9-]+)'/g);    // (cond ? chip : inDoor)('x', …): on the strip while cond, else a row
+  const doors = keysOf(/(?<![\w.$])inDoor\(\s*'([a-z0-9-]+)'/g);              // inDoor('x', …): a row of a door's panel
+  const drawn = [...new Set([...plain, ...either])];
   return {
-    drawn, doors,
+    drawn, doors: [...new Set([...doors, ...either])],
     unknown: [...new Set([...drawn, ...doors])].filter((k) => !ROW_OF[k]),
-    offStrip: drawn.filter((k) => ROW_OF[k] && !onStrip(k) && !doors.includes(k)),
-    doorWrong: doors.filter((k) => ROW_OF[k] && !ROW_OF[k].place.startsWith('in:') && !(ROW_OF[k].alsoIn && ROW_OF[k].alsoIn === 'settings')),
+    // a plain chip off its place is RED even beside a door row of the same name (the cure of 644a67ec2: the census hole)
+    offStrip: drawn.filter((k) => ROW_OF[k] && !onStrip(k)),
+    doorWrong: [...new Set([...doors, ...either])].filter((k) => ROW_OF[k] && !ROW_OF[k].place.startsWith('in:') && !(ROW_OF[k].alsoIn && ROW_OF[k].alsoIn === 'settings')),
   };
 }
 

@@ -783,6 +783,13 @@ export function installSetupFlows(App) {
       })()}`;
     })()}
     <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>
+    ${(() => {
+      // lane mask-value-shape (the strip's step two, page §1 — the cure of 644a67ec2): A TOOL THAT DID NOT START, its ⚙ Diagnostics
+      // home — each open conversation's start facts (its status bar holds them; absent ≠ clean: a conversation not open says nothing)
+      const rows = [...(this.sessions?.values?.() || [])].map((v) => ({ v, items: (v && v._statusBar && v._statusBar.initHealthWords?.()) || [] })).filter((x) => x.items.length);
+      if (!rows.length) return '';
+      return `<h2>${esc(t('Tools that did not start'))}</h2><table class="start-tools">${rows.map((x) => x.items.map((h) => `<tr><td>${esc(String((x.v.winInfo && x.v.winInfo.title) || x.v.sessionId || ''))}</td><td title="${esc(h.row)}">${esc(h.words)}</td></tr>`).join('')).join('')}</table>`;
+    })()}
     ${diagnosticsSection(reg, { t, esc, when })}
     ${(() => {
       // HARNESS DRIFT (design-unknown-records §3): unknown record types and
