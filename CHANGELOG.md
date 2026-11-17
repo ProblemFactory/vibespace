@@ -7,6 +7,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - Diagnostics → Main loop held shows how long VibeSpace was held each day, by cause: today, yesterday and the last seven days.
 
+### Changed
+- Opening VibeSpace no longer waits on a slow disk: the page's first file is kept in memory.
+
 ### Fixed
 - On slow storage, saving a Channels account, its groups, aliases or outbox no longer freezes VibeSpace for seconds; your own changes still wait until saved.
 
