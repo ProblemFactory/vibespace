@@ -219,22 +219,4 @@ stream-json 下 assistant 的 `thinking→text→thinking→tool_use` 三明治�
 
 ### Bug Fixes Applied — INDEX
 
-**Every incident line (459, moved verbatim by lane claude-md-diet) lives in docs/kb-bugfix-invariants.md `## INDEX` head, the essays below it (ancient one-liners in docs/history-archive.md) — search there before re-diagnosing a familiar symptom. A new incident adds its line THERE, not here.** ⇒ kb-bugfix-invariants.md
-
-The 15 most recent (the last 7 days, dated by the commit that added each; copies — the INDEX head is the record):
-
-- (2026-10-08) A PAGE THAT ANSWERED EVERY COMMAND WAS CALLED NOT RESPONDING (browser-held-not-hung): one tab's unanswered Page.enable read as a hung page. 不变量 = 'not responding' is a claim about the page's answers; a watch that cannot see in says so as itself. ⇒ kb-bugfix-invariants.md
-- (2026-10-07) THE .229 MIRROR: A TAB READ PRUNED THE JOB WINDOW'S NEWEST ROOT (mirror-green-229, test-jobs-browser F11): CDP read before the await, holders after ⇒ a tab stamped between was pruned, the finalize closed nothing. 不变量 = a read prunes only what it could have seen. ⇒ kb-bugfix-invariants.md
-- (2026-10-08) THE ARTIFACTS POPOVER RAN OFF THE VIEWPORT AND HAD ONE ORDER (owner, 43 + 174 rows) — 不变量 = a list of deliverables is bounded, filterable, grouped and sorted on the client over the same rows; the window is the same model at full size (kb-bugfix-invariants)
-- (2026-10-08) THE OWNER COULD NOT OPEN WHAT THE AGENT FOUND (the memo was keyed by the agent's scope; hits missing from the copy were counted, not shown) — 不变量 = what one searcher found for a conversation is remembered for that conversation; a remembered hit is shown, with its context, never a count
-- (2026-10-08) A MESSAGE TO A CONVERSATION THAT ENDED WAITED FOR EVER (owner 2026-10-07) — 不变量 = a record's state is a fact about its addressee; a dead addressee is said and the pair group closes (kb-bugfix-invariants)
-- (2026-10-08) THE ACCOUNT'S POLICY HAD A ROUTE AND NO DOOR (userW 2026-10-07) — 不变量 = every grain that holds a value has a door the owner can find, and a refusal that names a value names where to change it (kb-bugfix-invariants)
-- (2026-10-08) THE HIDDEN WINDOW DREW A PAGE NOBODY WATCHED AT NINE CORES (userW 2026-10-07) — 不变量 = software GL is for WebGL only, never raster; a browser nobody watches or drives paints nothing (switch browser.idlePaintFreeze, on by default since .332; a thaw never touches another conversation's window) (kb-bugfix-invariants)
-- (2026-10-08) THE CLI'S OWN UI CHATTER WORE THE RED 'UNKNOWN EVENT' CARD (cli-2-1-288-records) — 不变量 = a record is known by its measured shape and version; the oracle is pinned per CLI version, never to the box (kb-bugfix-invariants)
-- (2026-10-08) A REPLY TO A MESSAGE AN AGENT SENT WOKE NOBODY (owner 2026-10-07) — 不变量 = what an agent sent is its own thread of concern: a reply to it, in any shape the channel has, reaches the sender; on a group each member for its own sends (kb-bugfix-invariants)
-- (2026-10-08) THE AGENT COULD WATCH ONLY BY KEYWORD WHILE THE OWNER HAD TWELVE RULE KINDS (owner 2026-10-07) — 不变量 = one notification grammar, one validator, two doors (the dialog and the CLI); authority stays the owner's (kb-bugfix-invariants)
-- (2026-10-08) A MAIN CONVERSATION'S OWN ASK BLINKED A HIDDEN DESKTOP AND TOLD THE TRAY NOTHING (a fleet user, 22 h) — 不变量 = an ask nobody answered in a minute is a For-you item, filed once, resolved by its answer
-- (2026-10-08) A SIXTEEN-MINUTE SILENCE RE-READ A WHOLE MAILBOX (B-5134) — 不变量 = a gap in a cursor feed is one walk from the cursor; silence is never evidence of misses (kb-bugfix-invariants)
-- (2026-10-08) THE SCHEDULER CARD WALKED 90 000 ROWS EVERY PASS (B-7978) — 不变量 = a census is read off kept facts; a pass is O(due + touched), never O(rows) (kb-bugfix-invariants)
-- (2026-10-08) A SEARCH BY THE NAME A PERSON READS FOUND NOTHING, AND THE MISSING PERMISSION WAS A LOG LINE — 不变量 = the name a person reads is a search key; a permission the product lacks is said where the owner looks (kb-bugfix-invariants)
-- (2026-10-08) EVERY RESTART RE-LISTED EVERY MAILBOX (B-6638) — 不变量 = a cursor the vendor gives us is persisted; a restart resumes, it never re-asks what it already knows (kb-bugfix-invariants)
+**Every incident line lives in docs/kb-bugfix-invariants.md `## INDEX` head, newest LAST, the essays below it (ancient one-liners in docs/history-archive.md) — search there before re-diagnosing a familiar symptom. A new incident adds its line THERE, not here.** ⇒ kb-bugfix-invariants.md

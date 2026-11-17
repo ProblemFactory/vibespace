@@ -4717,6 +4717,13 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
   const INDEX_DATED = /^- \(20\d\d-\d\d-\d\d\)/;
   const strandedDated = (text, region) => { const rr = regionAt82(text, region); const inR = rr ? new Set(rr.idx) : new Set(); return text.split('\n').map((l, i) => [l, i]).filter(([l, i]) => INDEX_DATED.test(l) && !inR.has(i)); };
   const strandedDup = (text, region) => { const rr = regionAt82(text, region); if (!rr) return []; const inR = new Set(rr.idx), L = rr.lines; const regHashes = new Set(rr.idx.filter((i) => L[i].startsWith('- ')).map((i) => rowOfMoved(L[i]).split(':')[1])); return L.map((l, i) => [l, i]).filter(([l, i]) => l.startsWith('- ') && !inR.has(i) && regHashes.has(rowOfMoved(l).split(':')[1])); };
+  // B-046a: CLAUDE.md carries no DATED incident bullet — the stale-copy shape. Its «15 most recent (the last 7 days)» block of
+  // copies of the kb INDEX head still listed the 2026-10-08 set five weeks later: nothing re-copies such a block, and every
+  // session start re-sends it; the record is the kb INDEX head (newest LAST). ONE predicate, used by the leg and by its controls
+  // in r82 below: a `-` / `*` bullet whose text opens (bold or not) with a (YYYY-MM-DD) date.
+  const datedBullets82 = (text) => text.split('\n').filter((l) => /^\s*[-*]\s+(?:\*\*)?\(20\d\d-\d\d-\d\d\)/.test(l));
+  const copies82 = datedBullets82(md);
+  ok(copies82.length === 0, `§82 ⑦ CLAUDE.md carries no dated incident bullet — a copy of the kb INDEX head goes stale (${copies82.length})`, copies82.map((l) => l.slice(0, 60)));
   for (const b of fx82.blocks) {
     const text = fs.readFileSync(path.join(REPO, b.home), 'utf8'), lines = region82(text, b.region);
     homes.set(b.name, { text, lines });
@@ -4782,6 +4789,11 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
     ['a verbatim moved line over 300 stays exempt (frozen, never edited)', !!verbatimLong82 && over300(fsb, [...fl.filter((l) => l !== verbatimLong82), verbatimLong82]).length > over300(fsb, fl).length, false],
     ['a dangling pointer', pointers82(md + '\nnew line ⇒ kb-nope.md\n').some((k) => !fs.existsSync(path.join(REPO, 'docs', k + '.md'))), true],
     ['one byte over the ratchet', Buffer.byteLength(md + 'x'.repeat(CLAUDE_MD_MAX_BYTES - bytes + 1)) > CLAUDE_MD_MAX_BYTES, true],
+    // B-046a (§82 ⑦): the removed block's first line planted back, in the plain, bold and `*` forms, is a dated bullet; a
+    // non-dated bullet (the routing laws' shape) is not
+    ['⑦ the removed «15 most recent» block\'s first line planted back', datedBullets82(md + '\n- (2026-10-08) A PAGE THAT ANSWERED EVERY COMMAND WAS CALLED NOT RESPONDING (browser-held-not-hung) ⇒ kb-bugfix-invariants.md\n').length === 1, true],
+    ['⑦ …bold or with a `*` bullet', datedBullets82('- **(2026-11-01) x**\n* (2026-11-02) y\n').length === 2, true],
+    ['⑦ a non-dated bullet is spared', datedBullets82('- **CS separation**: hostId is a PARAMETER (2026-11-01)\n').length > 0, false],
     // round 9 (MINOR): §82 ⑥'s OWN predicate (strandedDated) judges a plant — not a regex re-declared here (the tautology §82
     // bans). A dated line stranded after the region is caught in the ⇒ tail form AND in the parens tail form (dialog-yield's
     // rebase stranded exactly the parens form, which r7 missed); a NON-dated essay bullet is not an INDEX line and is spared.
