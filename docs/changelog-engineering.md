@@ -30,6 +30,9 @@ This file is the engineers' record of every release: the lanes, the verification
 - NOT HERE (unit two): the view's own watch when a picture stops while its source moves (a held hub loop, a return from hidden), and a watch of a background tab that shares ONE window.
 - Fast sum: test-browser-picture restated 1.5 → 6.5 s (its scenes side by side), so 1154.839 s over 599 rows and cap 1155 by arithmetic.
 
+### int408 seam — the hosted heavy shards' limit
+- The heavy shards' limit in .github/workflows/ci.yml goes from 45 to 60 minutes: green shards take 33 to 40 minutes of suites, and on the UI train's prep mirror heavy 3/7 was cancelled by the 45-minute limit with a red suite's retry inside it, hiding the suites it had not run.
+
 ## 2.369.407 — 2026-11-17
 
 ### hub-loop-stalls — channel-store off the loop (the owner's root ask: the hub's main process stops being held)
