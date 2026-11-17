@@ -4273,6 +4273,7 @@ export default {
   "terminal mode": "ターミナルモード",
   "running chat sessions follow from their next turn": "実行中のチャットセッションは次のターンから従います",
   "Read by VibeSpace": "VibeSpace が読み取ります",
+  "when a conversation hits a usage wall, and after a stretch of work": "会話が使用量の上限に達した時と、作業の区切りの後",
   "Written into the CLI config": "CLI 設定に書き込み",
   "The CLI output style new chat sessions start with. \"Concise\" makes Claude lead with results and skip preamble. Blank = the CLI's own default. A stream-json session cannot switch style mid-conversation, so a change takes effect on the next resume; the chat status bar sets it per session.": "新しいチャットセッションが開始時に使う CLI の出力スタイル。\"Concise\" は Claude に結果を先に述べさせ前置きを省かせます。空欄 = CLI 自身の既定値。stream-json セッションは会話の途中でスタイルを切り替えられないため、変更は次回の resume で有効になります。チャットのステータスバーでセッションごとに設定できます。",
   "CLI default (leave config.toml alone)": "CLI の既定(config.toml に触れない)",
