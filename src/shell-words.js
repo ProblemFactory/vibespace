@@ -396,8 +396,9 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     }
     // r15 (the r14 verdict MAJOR 2): the WORD's literal text — each real expansion one `_` — read once: a `$(` / `${` /
     // backtick in it came from a quote or an escape (`let "a[\$(C)]=1"`, `read a[\$\(C\)]`, `'a[$(C)]'`)
-    if (/[$`]/.test(v)) { let lit = '', k = 0; for (let r = 0; r < real.length; r += 2) { lit += v.slice(k, real[r]) + '_'; k = real[r + 1]; } quotedSubst(lit + v.slice(k), i0, pw); }
-    return { v, at, end: i, q };
+    let ls = false;   // B-e779: the literal text holds a substitution (`x='$(C &)'`) — an evaluator may expand the value later
+    if (/[$`]/.test(v)) { let lit = '', k = 0; for (let r = 0; r < real.length; r += 2) { lit += v.slice(k, real[r]) + '_'; k = real[r + 1]; } lit += v.slice(k); quotedSubst(lit, i0, pw); ls = SUBST.test(lit); }
+    return ls ? { v, at, end: i, q, ls } : { v, at, end: i, q };
   };
   // r13: the text of an UNQUOTED `${ … }` (`${x:-word}`, `${x#word}`, `${x/a/b}` …) — its words read as words, with the
   // quotes every shell keeps there: `'…'` / `$'…'` quote (`${x:-'$(C)'}` prints `$(C)` — bash, zsh, dash), `"…"` is a
@@ -863,6 +864,77 @@ function endJobs(cmds, stops = [], all = cmds) {
 /** r14: does a word hand an evaluator a value the reader never computes — a parameter word the line expands first
  *  (`eval echo ${x:-'$(C)'}`, `bash -c ${x:-'C &'}`, `sh -c "${x:-'C &'}"`)? */
 const opaqueWord = (c, w) => !!c.src && !!w && expanded(c.src.slice(w.at, w.end));
+/** B-e779: a command word's raw text with its single-quoted, `$'…'` and escaped parts made inert — and its BASE: the part
+ *  after its last `/` that stands outside every expansion (`"$HOME/bin/vibespace-channels"` is the CLI by its literal base;
+ *  the slash of `${x:-/bin/vibespace-channels}` is inside the expansion — the base is the whole word). Linear. */
+const headBase = (raw) => {
+  const t = String(raw).replace(/\$?'[^']*'/g, 'q').replace(/\\[^]/g, 'q');
+  let d = 0, bq = false, cut = -1;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (ch === '`') { bq = !bq; continue; }
+    if (bq) continue;
+    if (ch === '$' && (t[i + 1] === '{' || t[i + 1] === '(')) { d++; i++; continue; }
+    if (d > 0 && (ch === '{' || ch === '(')) d++;
+    else if (d > 0 && (ch === '}' || ch === ')')) d--;
+    else if (d === 0 && ch === '/') cut = i;
+  }
+  return t.slice(cut + 1);
+};
+/** B-e779 (the r15 review): a command word whose BASE a PARAMETER computes (`$CMD`, `"${CMD}"`, `${x:-vibespace-channels}`,
+ *  `${x:-vibespace-chan}nels`, `$1`, `$@`) names its program only when the line runs: `CMD=vibespace-channels; $CMD read …`
+ *  ran the CLI while the reader saw no CLI word (cliRuns and cliMay empty, the line not inert). UNKNOWN (`param-head`) ⇒
+ *  MAY RUN. The cost, named: `$PY x.py && vibespace-channels read …` reads MAY, no longer exact (once one part of a line is
+ *  UNKNOWN none of its runs is an exact reading). A SUBSTITUTION's output in command position (`$(echo C) read …`) is not
+ *  this reason — its own commands are read; the program its output names stays OPEN (the r16 A10 `eval $'\x24(C &)'` row
+ *  reads its exact run). Judged in `run` — every command word a line runs, a `find -exec`'s too (r1). */
+const PARAM_HEAD = /\$(?![({])[A-Za-z_{@*#?$!0-9=~^+-]|\$\{/;   // r1 (the lane's adversarial read): + zsh's `$=CMD` `$~CMD` `$^CMD` `$+CMD`
+const paramHead = (c, w) => !!c.src && !!w && PARAM_HEAD.test(headBase(c.src.slice(w.at, w.end)));
+/** B-e779: what a parameter head reads, its quotes removed, in BOTH readings of its parameters — UNSET (`${n:-w}` /
+ *  `${n-w}` / `${n:=w}` / `${n=w}` their word, `${n:+w}` / `${n+w}` nothing) and SET (a literal the line gave it, `${n:+w}`
+ *  / `${n+w}` their word) — so a name a default or an alternate SPLITS (`${x:-vibespace-chan}nels read …`,
+ *  `${x:+vibespace-chan}nels`, `${x:-vibespace-chan}'nels'`) is NAMED (a may name only — never an exact run). zsh's flags
+ *  after the `$` (`$=`, `$~`, `$^`) are read through. OPEN: a literal set on an OUTER line read by a nested one (`CMD=…;
+ *  eval "${CMD}nels …"` — UNKNOWN, unnamed). */
+const PARAM_READ = /\$\{[=~^]*([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-=+])([^{}]*))?\}|\$[=~^+]?([A-Za-z_][A-Za-z0-9_]*)/g;
+const headReads = (raw, assigned) => {
+  const t = headBase(String(raw).replace(/["']/g, ''));
+  const read = (set) => t.replace(PARAM_READ, (m, n, op, w, b) => { const v = assigned.get(n || b) || ''; if (!op) return v; return op.endsWith('+') ? (set ? w : '') : v || (set ? '' : w); });
+  return [read(false), read(true)];
+};
+/** B-e779 (the r15 review): a value the line ASSIGNS (`x=`, `x+=`, `a[0]=` — r1) whose LITERAL text holds a substitution
+ *  (`x='$(C &)'`, `i="\$(C &)"` — a real `$(…)` in it already ran and was read), read again later on the line BY AN
+ *  EVALUATOR (`valueEvaluated`): an evaluator expands the value the reader never computed — UNKNOWN (`param-value`). At
+ *  most PARAM_VALUES names are judged (the rest: UNKNOWN at once). r1 (the lane's adversarial read): a plain argument
+ *  (`MSG='Fixed the \`foo\` bug'; vibespace-channels reply … "$MSG"`) is no evaluator — the line keeps its exact run.
+ *  Not read: a value written by `read` / `printf -v` / `mapfile` from text (indirect — the same family, OPEN). */
+const PARAM_VALUES = 64;
+const TAINT_RE = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?\+?=/;
+/** the commands that EVALUATE the words they are handed (arithmetic, a script, a subscript in a name, a value as code) */
+const EVALUATORS = new Set(['let', 'eval', 'source', '.', 'trap', 'alias', 'fc', 'sched', '[[', 'test', '[', 'declare', 'typeset', 'local', 'export', 'readonly', 'integer', 'float', ...SHELLS]);
+/** B-e779: is `name` read by an evaluator in `text` past `from` — inside a SUBSCRIPT's span (`a[$x]`, `"a[$i]"`), inside
+ *  arithmetic (`(( … ))`, `$(( … ))`, `$[ … ]`), or a word of an EVALUATORS command (`cmds`)? Linear: each span read once. */
+function valueEvaluated(name, text, from, cmds) {
+  const re = new RegExp(`(^|[^A-Za-z0-9_])${name}(?![A-Za-z0-9_])`);
+  const t = text.slice(from);
+  let seen = -1;
+  for (const m of t.matchAll(SUB_START)) {
+    const k0 = m.index + m[0].length;
+    if (k0 <= seen) continue;
+    let k = k0;
+    for (let d = 1; k < t.length && d > 0; k++) { if (t[k] === '[') d++; else if (t[k] === ']') d--; }
+    if (re.test(t.slice(k0, k))) return true;
+    seen = k;
+  }
+  for (let i = t.indexOf('(('); i >= 0; i = t.indexOf('((', i + 2)) { const e = spanEnd(t, i, '(', ')', false); if (re.test(t.slice(i, e + 1))) return true; i = Math.max(i, e - 1); }
+  for (let i = t.indexOf('$['); i >= 0; i = t.indexOf('$[', i + 2)) { const e = t.indexOf(']', i); if (re.test(t.slice(i, e < 0 ? t.length : e))) return true; if (e < 0) break; i = e - 1; }
+  for (const c of cmds) {
+    const cw = commandWord(c.words);
+    if (!cw || !EVALUATORS.has(cw.base) || !c.src) continue;
+    if (c.words.some((w) => w.at >= from && re.test(c.src.slice(w.at, w.end)))) return true;
+  }
+  return false;
+}
 /** r3: THE SCRIPTS A SHELL COMMAND WORD RUNS — the shell IS these, never a command of its own: its `-c` string (an
  *  UNQUOTED operand with words after it is a re-joined argv — codex's `["bash","-lc","…"]` joined with no quoting — so the
  *  rest of the line is the script, `joined`), its heredocs and here-strings, or the stdin a pipe feeds it (`cat <<EOF |
@@ -921,6 +993,7 @@ function readRuns(cmd, owner, depth, offset) {
   out.blind = cmds.blind.slice();
   out.unknown = cmds.unknown.slice();
   const opaque = (why, at) => { out.unknown.push({ at, why }); };
+  const tainted = [], assigned = new Map(), heads = [];   // B-e779: values with a literal substitution; literal values; computed heads' names
   // r6: a run of a background job (`bg`) carries `ended` when the line ends that job itself (endJobs) — r7: inside a
   // command sent to the background, a run its own shell sent to the background ends only when that shell ended it too
   // (`bash -c 'cli &' & wait` leaves the CLI running) — r9: never in a script the line does not pass as written (a
@@ -929,9 +1002,16 @@ function readRuns(cmd, owner, depth, offset) {
     for (const { ended: e0, ...x } of list) { const e = e0 && sure && !cmds.unsure; out.push(bg ? { ...x, bg: true, ...(ended && (!x.bg || e) ? { ended: true } : {}) } : { ...x, ...(e ? { ended: true } : {}) }); }
     for (const b of list.blind) out.blind.push(b);
     for (const u of list.unknown || []) out.unknown.push(u);
+    for (const h of list.heads || []) heads.push(h);   // B-e779: a nested line's computed heads
   };
   const run = (c, words, cw, at, bg, ended, waited) => {
     if (cw.lookup) { out.push({ base: cw.base, at, verb: '', lookup: true }); return; }
+    // B-e779: a head the shell computes — UNKNOWN; the CLI its readings spell is a may name (r1: in `run`, so a `find -exec`'s too)
+    if (paramHead(c, words[cw.k])) {
+      const w = words[cw.k], raw = c.src.slice(w.at, w.end);
+      opaque('param-head', at);
+      if (!raw.includes(CLI) && headReads(raw, assigned).includes(CLI)) heads.push({ at, verb: words[cw.k + 1] ? words[cw.k + 1].v : '' });   // a head spelling the CLI itself is named by mayNames
+    }
     if (cw.split !== undefined && depth < 4) { if (opaqueWord(c, words[cw.rest - 1])) opaque('eval', at); add(commandsRun([cw.split, ...words.slice(cw.rest).map((w) => w.v)].join(' '), at, depth + 1), bg, waited); return; }
     if (SHELLS.has(cw.base) && depth < 4) {
       const scripts = shellScripts(c, words, cw.k);
@@ -985,12 +1065,22 @@ function readRuns(cmd, owner, depth, offset) {
     // r14: `builtin …`, zsh's `noglob …`; `command` / `exec` before a word with a reading of its own (zsh's `command trap`
     // runs no builtin)
     if (cw && (PRECOMMANDS.has(cw.base) || (PRE_KNOWN.has(cw.base) && c.words.slice(0, cw.k).some((x) => !x.q && (x.v === 'command' || x.v === 'exec'))))) opaque('precommand', c.words[cw.k].at);
+    // B-e779: values with a literal substitution (judged after the loop); literal values (a computed head's reading)
+    for (const w of c.words) { const m = w.ls && TAINT_RE.exec(w.v); if (m) tainted.push({ name: m[1], end: w.end }); }
+    for (const w of c.words) if (!w.q && !w.ls && ASSIGN_RE.test(w.v) && !/[$`]/.test(w.v)) assigned.set(w.v.slice(0, w.v.indexOf('=')), w.v.slice(w.v.indexOf('=') + 1));
     if (cw) run(c, c.words, cw, c.owner === null ? offset + c.words[cw.k].at : c.owner, !!c.words.bg, ended, waited);
   }
+  // B-e779: a value assigned with a substitution in its literal text, read again by an evaluator ⇒ UNKNOWN
+  const text = String(cmd || '');
+  for (const [i, x] of tainted.entries()) {
+    if (i >= PARAM_VALUES) { opaque('param-value', x.end); break; }
+    if (valueEvaluated(x.name, text, x.end, cmds)) { opaque('param-value', x.end); break; }
+  }
   // r14: UNKNOWN ⇒ MAY RUN — the line's runs are no exact reading (cliRuns gives none), it ends no job, and it may run
-  // each CLI name its text holds (`may`); `mayBg` — its text holds a single `&`
-  if (out.unknown.length) { for (const x of out) delete x.ended; out.may = mayNames(cmd); out.mayBg = BG_AMP.test(String(cmd || '')); }
+  // each CLI name its text holds (`may`); `mayBg` — its text holds a single `&`; B-e779: + each name a computed head spells
+  if (out.unknown.length) { for (const x of out) delete x.ended; const named = mayNames(cmd); out.may = [...named, ...heads.filter((h) => !named.some((m) => m.at === h.at))].sort((a, b) => a.at - b.at); out.mayBg = BG_AMP.test(String(cmd || '')); }
   else out.may = [];
+  if (heads.length) out.heads = heads;
   return out;
 }
 

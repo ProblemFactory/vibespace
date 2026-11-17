@@ -2948,7 +2948,8 @@ await section('⑬', async () => {
   const fdName = sw('varfd', ' || varfd(c, x)', '');
   ok(endsIn(fdName, 'r11 W: true {IFS}>/dev/null; C & wait $!'), 'CONTROL a `{NAME}>` redirection read as no write (r11): `true {IFS}>/dev/null` sets IFS to the descriptor\'s number in bash');
   // r14: and the dq `${x@P}`'s UNKNOWN (it would keep the row from ending on its own)
-  const noArith = sw2('arith', ['    if (arithmetic(c, cw)) return false;   // r11: arithmetic or an evaluation it cannot read\n', ''], ["          if (s[j] === '$' && s[j + 1] === '{' && evalsParam(s, j)) unknown(j, 'eval');", '         ']);
+  // B-e779: its param-value reason reads `x='$((IFS=…))'; … ${x@P}` too (a value with a literal substitution named again) — off in this copy
+  const noArith = sw2('arith', ['    if (arithmetic(c, cw)) return false;   // r11: arithmetic or an evaluation it cannot read\n', ''], ["          if (s[j] === '$' && s[j + 1] === '{' && evalsParam(s, j)) unknown(j, 'eval');", '         '], ['    if (valueEvaluated(x.name, text, x.end, cmds)) { opaque(\'param-value\', x.end); break; }', '    ']);
   ok(endsIn(noArith, 'r11 A: echo $[IFS=…] > /dev/null; C & wait $!', 'r11 A: a[IFS=…]=x; C & wait $!', 'r11 A: x=abc; echo ${x:IFS=…} > /dev/null; C & wait $!', 'r11 A: declare -i n; n=IFS=…; C & wait $!', 'r11 A: i=IFS=…; a[i]=x; C & wait $!', 'r11 E: x=\'$((IFS=…))\'; echo "${x@P}" > /dev/null; C & wait $!'),
     'CONTROL arithmetic outside `(( ))` read as plain (r11): `$[IFS=…]`, `a[IFS=…]=x`, `${x:IFS=…}`, `declare -i n; n=IFS=…`, `i=IFS=…; a[i]=x` (the value is evaluated again), `${x@P}` — bash writes IFS, `wait $!` returns at once');
   const noIndirect = sw('indirect', ' || INDIRECT.test(x.v)', '');
@@ -3041,7 +3042,8 @@ await section('⑬', async () => {
   const lostIn = (TT, ...labels) => labels.every((l) => TRUTH.some((x) => x[0] === l && x.slice(2).some((v) => v !== 'none')) && !mayOf(TT, line(l)).length && !TT.channelsRuns(line(l)).length);
   const noGlob = sw2('unknown-glob', ["      if (ch === '(' && argParen(words, i)) unknown(i, 'glob');", '     '], ["    if (ch === '#' && s[i - 1] === '(') unknown(i, 'glob');", '   '], ["  if (!depth && i >= s.length && groups.length) unknown(i, 'unclosed');", '  ']);
   ok(lostIn(noGlob, "r14 G1: ls -d ((#i)readme|license)* > /dev/null 2>&1; C > /dev/null &", "r14 G2: ls *((#i)readme) > /dev/null 2>&1; C > /dev/null &", "r14 G4: ls ((#i)a|b) > /dev/null 2>&1; C > /dev/null &", "r14 G5: ls -d ((#i)readme|license)* > /dev/null 2>&1; C"), 'CONTROL zsh\'s glob read as two groups and a comment (r13 — the r13 verdict MAJOR 2): `ls -d ((#i)readme|license)*; C &`, `ls *((#i)readme); C &`, `ls ((#i)a|b); C &` and the foreground form read only `ls` — zsh runs the CLI (the copy drops the `(` argument rule, the `(#` rule and the unclosed-group net behind them)');
-  const noOpaque = sw('unknown-eval', "      if (scripts && scripts.some((sc) => sc.opaque)) opaque('eval', at);", '     ');
+  // B-e779: the script a shell re-reads (`${x:-C &}`) starts with a parameter — its param-head reason is off in this copy
+  const noOpaque = sw2('unknown-eval', ["      if (scripts && scripts.some((sc) => sc.opaque)) opaque('eval', at);", '     '], ['    if (paramHead(c, words[cw.k])) {', '    if (false) {']);
   ok(lostIn(noOpaque, "r14 E3: bash -c ${x:-'C > /dev/null &'}", "r14 E11: echo ${x:-'C > /dev/null &'} | bash", "r14 E12: bash <<< ${x:-'C > /dev/null &'}"), 'CONTROL a parameter word a SHELL reads again read as written (r1–r13): `bash -c ${x:-\'C &\'}`, `echo ${x:-\'C &\'} | bash`, `bash <<< ${x:-\'C &\'}` read no run — every shell runs the CLI, it outlives');
   const noParam = sw('unknown-param', '  const quotedSubst = (t, at, pw) => { if (pw ? SUBST.test(t) :', '  const quotedSubst = (t, at, pw) => { if (pw ? false :');
   ok(lostIn(noParam, "r14 S1: a=(1); echo ${a['$(C > /dev/null &)']} > /dev/null", "r14 S2: x=abc; echo ${x:'$(C > /dev/null &)'} > /dev/null", "r14 S3: x=abc; echo ${x:0:'$(C > /dev/null &)'} > /dev/null", "r14 S5: x=abc; echo ${x:'$(C)'} > /dev/null"), 'CONTROL a quote in an arithmetic slot of `${ … }` read as a quote (r13 — its claim re-run, finding 1): `${a[\'$(C &)\']}`, `${x:\'$(C &)\'}`, `${x:0:\'$(C &)\'}`, the foreground offset — bash, zsh and the tool\'s zsh run the CLI');
@@ -3051,7 +3053,8 @@ await section('⑬', async () => {
   ok(lostIn(noPre, "r14 P1: builtin trap 'C > /dev/null &' EXIT", "r14 P2: builtin mapfile -C 'C > /dev/null &' -c 1 a <<< x", "r14 P3: builtin eval 'C > /dev/null &'", "r14 P6: noglob C > /dev/null & (zsh)"), 'CONTROL `builtin` / `noglob` read as a command of its own (r1–r13 — the r13 verdict, unverified (4)): `builtin trap \'C &\' EXIT`, `builtin mapfile -C \'C &\'`, `builtin eval \'C &\'`, zsh\'s `noglob C &` — the CLI runs and outlives');
   const noFunsubRead = sw('unknown-funsub', "      if (body[j] === '$' && body[j + 1] === '{' && (FUNSUB.test(body[j + 2] || '') || evalsParam(body, j))) { unknown(at, 'funsub'); continue; }\n", '');
   ok(lostIn(noFunsubRead, "r14 F1: (( ${ C > /dev/null & } 1 ))", "r14 F2: echo $(( ${ C > /dev/null & } 1 )) > /dev/null", "r14 F3: cat <<EOF > /dev/null ⏎${ C > /dev/null & }⏎EOF", "r14 F4: if (( ${ C; } 0 > 0 )); then echo has; fi"), 'CONTROL bash 5.3\'s `${ …; }` in arithmetic or a heredoc skipped (r13 — the r13 verdict (3)): `(( ${ C & } 1 ))`, `$(( ${ C & } 1 ))`, a heredoc\'s `${ C & }`, `if (( ${ C; } … ))` — bash runs the CLI');
-  const noEvals = sw('unknown-evals', "if (evalsParam(s, i)) unknown(i, 'eval'); if (pnest", 'if (pnest');
+  // B-e779: `x='$(C &)'; echo ${(e)x}` is a value with a literal substitution named again — its param-value reason is off in this copy
+  const noEvals = sw2('unknown-evals', ["if (evalsParam(s, i)) unknown(i, 'eval'); if (pnest", 'if (pnest'], ['    if (valueEvaluated(x.name, text, x.end, cmds)) { opaque(\'param-value\', x.end); break; }', '    ']);
   ok(lostIn(noEvals, "r14 E8: x='$(C > /dev/null &)'; echo ${(e)x} > /dev/null (zsh)"), 'CONTROL zsh\'s `(e)` flag read as a plain parameter (r1–r13): `x=\'$(C &)\'; echo ${(e)x}` — zsh evaluates the value, the CLI outlives');
   const noShut = sw2('unknown-unclosed', ["  const shut = (e, at) => { if (e >= s.length) unknown(at, 'unclosed'); return e; };", '  const shut = (e, at) => e;'], ["  if (!depth && i >= s.length && groups.length) unknown(i, 'unclosed');", '  ']);
   ok(namesIn(noShut, "r14 U1 control: echo $((1+2; C > /dev/null & (unclosed)", "r14 U2 control: (( x + 1; C > /dev/null & (unclosed)", "r14 U5 control: (C > /dev/null & (unclosed group)", "r14 U6 control: if true; then C > /dev/null & (no fi)"), 'CONTROL a span the shells never close read as closed at the end (r13 — the r13 verdict, unverified (5)): `echo $((1+2; C &`, `(( x + 1; C &`, `(C &`, `if true; then C &` (a parse error in every shell — nothing runs) read an exact run of the CLI');
@@ -3145,6 +3148,8 @@ await section('⑬', async () => {
     "r15 L18 control: echo \"a[\\$(C > /dev/null &)]\" (a literal, never evaluated)",
     "r15 S6: x=abc; echo ${x:\"\\$(C > /dev/null &)\"} > /dev/null",
     "r15 S7: x=abc; echo ${x:\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)} > /dev/null (unquoted, escaped)",
+    "r15 H1 follow-up: ${x:-vibespace-channels} read lark/inbox (X01 — could run)",
+    "r15 H2 follow-up: CMD=vibespace-channels; $CMD read lark/inbox (X02 — could run)",
     "r16 A1: let $'a[\\x24(C > /dev/null &)]=1'",
     "r16 A2: let $'a[\\044(C > /dev/null &)]=1' (octal)",
     "r16 A3: printf -v $'a[\\x24(C > /dev/null &)]' x",
@@ -3206,7 +3211,7 @@ await section('⑬', async () => {
     "r18 E22 control: a=(1 2); let 'x=a[\\$(C > /dev/null &)]'",
   ];
   console.log(`  · UNKNOWN ⇒ MAY RUN: ${mayRows.length} of the ${TRUTH.length} rows read may-run (${mayRows.filter((l) => r12Rows.some((x) => x[0] === l)).length} of r12's ${r12Rows.length}) — every other row is read exactly`);
-  ok(eq(mayRows, MAY_ROWS) && MAY_ROWS.length === 137, `THE MAY-RUN CENSUS (r14 — the brief's (c); r15: + 20 of its 23 rows; r16: + 11 of its 21 — the decoded \`$'…'\` subscripts, their literal control A12, the markdown residual M8; r17: + 26 of its 28 — the non-ASCII names U1–U8 (U8 a cost), the spans S1–S12, the decoded NULs N1–N5, the named markdown cost M9; r18: + its 22 — a subscript holding an escaped \`$(\` / backtick, E1–E22, 15 of them no shell runs: r16's reading, a cost named): of the table's ${TRUTH.length} rows exactly the ${MAY_ROWS.length} listed read may-run — 6 of r12's ${r12Rows.length} (\`C & builtin exit; wait\`, zsh's \`echo x(/)\`, \`\${x@P}\`, \`\${(e)x}\`, two \`*(e:…:)\` — each read lingering before and now), r13's 5 literal-quote controls, r14's own and r15's own (all but its exact control L19 and the follow-up's H1 / H2); every other row is read exactly — a row that newly reads may-run fails here by its label`, { newly: mayRows.filter((l) => !MAY_ROWS.includes(l)), gone: MAY_ROWS.filter((l) => !mayRows.includes(l)) });
+  ok(eq(mayRows, MAY_ROWS) && MAY_ROWS.length === 139, `THE MAY-RUN CENSUS (r14 — the brief's (c); B-e779: + the follow-up's X01 X02 (a parameter in command position); r15: + 20 of its 23 rows; r16: + 11 of its 21 — the decoded \`$'…'\` subscripts, their literal control A12, the markdown residual M8; r17: + 26 of its 28 — the non-ASCII names U1–U8 (U8 a cost), the spans S1–S12, the decoded NULs N1–N5, the named markdown cost M9; r18: + its 22 — a subscript holding an escaped \`$(\` / backtick, E1–E22, 15 of them no shell runs: r16's reading, a cost named): of the table's ${TRUTH.length} rows exactly the ${MAY_ROWS.length} listed read may-run — 6 of r12's ${r12Rows.length} (\`C & builtin exit; wait\`, zsh's \`echo x(/)\`, \`\${x@P}\`, \`\${(e)x}\`, two \`*(e:…:)\` — each read lingering before and now), r13's 5 literal-quote controls, r14's own and r15's own (all but its exact control L19 and the follow-up's H1 / H2); every other row is read exactly — a row that newly reads may-run fails here by its label`, { newly: mayRows.filter((l) => !MAY_ROWS.includes(l)), gone: MAY_ROWS.filter((l) => !mayRows.includes(l)) });
   // r14: A GRAMMAR ROW WITHOUT ITS TABLE IS REFUSED (the brief's (b)) — every construct the reader reads EXACTLY since
   // r13 is a row of shell-words ROWS with the truth rows behind it, its site marked `row:<name>`; the reader's branches
   // are counted — a new one comes with its row and its measured table (else the line it reads is UNKNOWN: it may run)
@@ -3216,8 +3221,14 @@ await section('⑬', async () => {
   // an UNKNOWN line, never exact); the decoding itself is the row `ansi-c` (its A rows). r17: + 8 — a subscript's span
   // read as the shells skip it (subscriptSubst, 7) and a decoded NUL (1): they make a line UNKNOWN, never exact (no
   // grammar row; the r17 U / S / N rows measure them). r18: + 1 — an escaped `$(` / `${` / backtick in a span (the r17
-  // review G1): UNKNOWN, never exact (the E rows measure it)
-  const BRANCHES = 219;
+  // review G1): UNKNOWN, never exact (the E rows measure it). B-e779: + 13 — a head a PARAMETER computes (headBase's
+  // walk 6, the head and its split name 2) and a value with a literal substitution named again (the marks 2, the bound and
+  // the read 2, the nested heads 1): they make a line UNKNOWN or add a may name, never exact (no grammar row; X01 X02
+  // measure the head, the r15 review measured the value shapes in all three shells — the B-e779 legs below pin the reading);
+  // + 10 at the lane's adversarial read r1 — the value read only by an EVALUATOR (valueEvaluated: a subscript's span, the
+  // arithmetic spans, the evaluating commands — 9), both readings of a computed head (1), the `x+=` / `a[0]=` mark (1, one
+  // replaced): UNKNOWN or a may name, never exact
+  const BRANCHES = 242;
   const rowCensus = (text, rows) => {
     const bad = [], marks = [...text.matchAll(/row:([\w-]+)/g)].map((m) => m[1]), branches = (text.match(/\bif \(/g) || []).length;
     if (!rows || !Object.keys(rows).length) bad.push('no ROWS table');
@@ -3268,10 +3279,65 @@ await section('⑬', async () => {
   const unescaped = (l) => l.replace(/\$'((?:[^'\\]|\\[^])*)'/g, (m, b) => b.replace(/\\(x[\da-fA-F]{1,2}|[0-7]{1,3})/g, (e, c) => String.fromCharCode(c[0] === 'x' ? parseInt(c.slice(1), 16) : parseInt(c, 8) & 255)));
   const nameSide = ranRows.filter((x) => NAMED.test(x[1]) || NAMED.test(unescaped(x[1])));
   const nameless = nameSide.filter((x) => !T.channelsRuns(x[1]).length && !mayOf(T, x[1]).length).map((x) => x[0]);
+  // B-e779 (the follow-up's own row): a parameter in command position is UNKNOWN (`param-head`) — the two may run the CLI at its name
   const FOLLOW_UP = ["r15 H1 follow-up: ${x:-vibespace-channels} read lark/inbox (X01 — could run)", "r15 H2 follow-up: CMD=vibespace-channels; $CMD read lark/inbox (X02 — could run)"];
-  console.log(`  · THE NAME SIDE: ${nameSide.length} rows a shell runs the CLI in whose text names it — ${nameless.length} read naming none (the follow-up's ${FOLLOW_UP.length}, could run)`);
-  ok(nameSide.length >= 680 && eq(nameless, FOLLOW_UP) && FOLLOW_UP.every((l) => !T.runsNothing(line(l)) && !unknownOf(T, line(l)).length),
-    `THE NAME SIDE, ONE-SIDED (r15 — the r14 verdict MAJOR 1): over the table's ${nameSide.length} rows a shell runs the CLI in whose text holds its name, none reads as neither running nor may running it (r14: 17 — the «-» names on UNKNOWN lines, the escaped subscripts read inert); the follow-up's two — \`\${x:-vibespace-channels} read …\`, \`CMD=vibespace-channels; $CMD read …\` (read whole, a parameter word in command position) — could run, never inert, pinned until their row`, { nameless });
+  console.log(`  · THE NAME SIDE: ${nameSide.length} rows a shell runs the CLI in whose text names it — ${nameless.length} read naming none (B-e779: the follow-up's ${FOLLOW_UP.length} may run it)`);
+  ok(nameSide.length >= 680 && eq(nameless, []) && FOLLOW_UP.every((l) => !T.runsNothing(line(l)) && !T.channelsRuns(line(l)).length && mayOf(T, line(l)).length > 0 && unknownOf(T, line(l)).some((u) => u.why === 'param-head')),
+    `THE NAME SIDE, ONE-SIDED (r15 — the r14 verdict MAJOR 1): over the table's ${nameSide.length} rows a shell runs the CLI in whose text holds its name, none reads as neither running nor may running it (r14: 17 — the «-» names on UNKNOWN lines, the escaped subscripts read inert); B-e779: the follow-up's two — \`\${x:-vibespace-channels} read …\`, \`CMD=vibespace-channels; $CMD read …\` (a parameter word in command position) — UNKNOWN (param-head), may run the CLI, never inert`, { nameless });
+  // B-e779 (the touch-chip-cause follow-up + the r15 review): VARIABLE INDIRECTION — a head a parameter computes, a value
+  // with a literal substitution an evaluator reads again. Each shape of the row: UNKNOWN by its reason, no exact run, may run
+  // the CLI (named — a SPLIT name by the head's default reading), never inert. The costs and the kept readings, named
+  const CLIR = 'vibespace-channels read lark/inbox';
+  const E779 = {
+    H1: ['param-head', '${x:-vibespace-channels} read lark/inbox'],
+    H2: ['param-head', 'CMD=vibespace-channels; $CMD read lark/inbox'],
+    H3: ['param-head', '"${CMD}" read lark/inbox'],
+    H4: ['param-head', '${x:-vibespace-chan}nels read lark/inbox'],
+    H5: ['param-head', 'CMD=vibespace-chan; ${CMD}nels read lark/inbox'],
+    H6: ['param-head', 'eval ${x:-vibespace-chan}nels read lark/inbox'],
+    V1: ['param-value', `x='$(${CLIR} > /dev/null &)'; let "a[$x]=1"`],
+    V2: ['param-value', `i='$(${CLIR} > /dev/null &)'; printf -v "a[$i]" x`],
+    V3: ['param-value', `x="\\$(${CLIR} &)"; eval echo $x`],
+    V4: ['param-value', `local x='$(${CLIR} &)'; let "a[$x]=1"`],
+    // r1 (the lane's adversarial read): a head under `find -exec` / `-execdir`, zsh's `$=` `$~` `$^`, a split behind a quote or
+    // an alternate; a value assigned with `+=` or into a subscript; a value a shell's `-c` script expands
+    H7: ['param-head', 'CMD=vibespace-channels; find . -maxdepth 0 -exec $CMD read lark/inbox \\;'],
+    H8: ['param-head', 'CMD=vibespace-channels; find . -execdir "$CMD" read lark/inbox {} +'],
+    H9: ['param-head', 'CMD=vibespace-channels; $=CMD read lark/inbox'],
+    H10: ['param-head', 'CMD=vibespace-channels; $~CMD read lark/inbox'],
+    H11: ['param-head', 'CMD=vibespace-channels; $^CMD read lark/inbox'],
+    H12: ['param-head', "${x:-vibespace-chan}'nels' read lark/inbox"],
+    H13: ['param-head', 'x=1; ${x:+vibespace-chan}nels read lark/inbox'],
+    V5: ['param-value', `x=; x+='$(${CLIR} > /dev/null &)'; let "a[$x]=1"`],
+    V6: ['param-value', `a[0]='$(${CLIR} > /dev/null &)'; let "b[$a]=1"`],
+    V7: ['param-value', `x='$(${CLIR} &)'; bash -c "echo $x"`],
+  };
+  const e779 = Object.fromEntries(Object.entries(E779).map(([k, [why, l]]) => [k, { why: unknownOf(T, l).map((u) => u.why), exact: T.channelsRuns(l).length, may: mayOf(T, l).length, inert: T.runsNothing(l) }]));
+  ok(Object.entries(E779).every(([k, [why]]) => e779[k].why.includes(why) && !e779[k].exact && (k === 'H3' ? e779[k].may === 0 : e779[k].may > 0) && !e779[k].inert),
+    'B-e779 THE ROW\'S SHAPES: a parameter in command position (H1 `${x:-vibespace-channels} read …`, H2 `CMD=vibespace-channels; $CMD read …`, H3 `"${CMD}" read …` — H3 names nothing: could run, never inert; H4 / H5 / H6 a name a default or a literal SPLITS — named by the head\'s readings; r1: H7 / H8 under `find -exec` / `-execdir`, H9–H11 zsh\'s `$=` `$~` `$^`, H12 a split behind a quote, H13 an alternate `:+`) and a value with a literal substitution an EVALUATOR reads (V1 `let "a[$x]=1"`, V2 `printf -v "a[$i]"`, V3 `eval echo $x`, V4 a `local`; r1: V5 `x+=`, V6 `a[0]=`, V7 a shell\'s `-c` script) — UNKNOWN by its reason, no exact run, may run the CLI, never inert (base: exact-empty, may none)', e779);
+  const KEPT779 = {
+    lit: `"$HOME/bin/vibespace-channels" read lark/inbox`,
+    dir: `$(npm bin)/eslint x.js && ${CLIR}`,
+    braced: `\${HOME}/bin/x && ${CLIR}`,
+    real: `MSG=$(cat note.txt); vibespace-channels reply lark/oc_1 "$MSG"`,
+    plain: `x=abc; let "a[$x]=1"; ${CLIR}`,
+    // r1 finding 4: a value with a backtick or `$(` in its LITERAL text handed to a command that evaluates nothing
+    tick: "MSG='Fixed the `foo` bug'; vibespace-channels reply lark/oc_1 \"$MSG\"",
+    tickFile: "MSG='Fixed the `foo` bug'; echo \"$MSG\" > f && vibespace-channels reply lark/oc_1 --text-file f",
+    echoed: `x='$(not run)'; echo "$x"; ${CLIR}`,
+  };
+  const kept779 = Object.fromEntries(Object.entries(KEPT779).map(([k, l]) => [k, { unknown: unknownOf(T, l).map((u) => u.why), exact: T.channelsRuns(l).length }]));
+  ok(Object.values(kept779).every((x) => !x.unknown.length && x.exact === 1),
+    'B-e779 THE KEPT READINGS: a literal BASE after a computed directory (`"$HOME/bin/vibespace-channels"`, `$(npm bin)/eslint`, `${HOME}/bin/x`), a value a real substitution computed (`MSG=$(cat …)` — that substitution was read), a plain value read by a subscript; r1: a value with a backtick or `$(` in its literal text handed to commands that evaluate nothing (`reply … "$MSG"`, `echo "$MSG" > f`, `echo "$x"`) — each line keeps its exact run of the CLI', kept779);
+  const COST779 = `$PY x.py && ${CLIR}`;
+  ok(unknownOf(T, COST779).some((u) => u.why === 'param-head') && !T.channelsRuns(COST779).length && mayOf(T, COST779).length === 1,
+    'B-e779 THE COST, named: a parameter head elsewhere on the line (`$PY x.py && vibespace-channels read …`) makes the line UNKNOWN — the CLI\'s run is a may, no longer exact');
+  const noHead779 = sw('e779-head', "    if (paramHead(c, words[cw.k])) {", '    if (false) {');
+  const noVal779 = sw('e779-value', "    if (valueEvaluated(x.name, text, x.end, cmds)) { opaque('param-value', x.end); break; }", '    ');
+  const noSplit779 = sw('e779-split', "if (!raw.includes(CLI) && headReads(raw, assigned).includes(CLI)) heads.push(", 'if (false) heads.push(');
+  const lost779 = (M, ks) => ks.every((k) => !M.channelsMayRun(E779[k][1]).length);
+  ok(lost779(noHead779, ['H1', 'H2', 'H4', 'H5', 'H7', 'H8', 'H9', 'H10', 'H11', 'H12', 'H13']) && lost779(noVal779, ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7']) && lost779(noSplit779, ['H4', 'H5', 'H6', 'H12', 'H13']) && noSplit779.channelsMayRun(E779.H1[1]).length > 0,
+    'CONTROLS B-e779: the param-head reason off ⇒ H1 H2 H4 H5 H7–H13 may run nothing (the base\'s hole); the param-value reason off ⇒ V1–V7 may run nothing; the split name off ⇒ H4–H6 H12 H13 named none (H1 still named by the line)');
   // r15: THE COMPACT HEAD READS THE WHOLE COMMAND (the r14 verdict MINOR — commandHeadWords read a 2048-character cut: a
   // quote or a `$( … )` the cut left open made the line UNKNOWN since r14 — no exact run — and a long chained compose's head
   // the `vibespace-status` again, the r1 H1 shape)
@@ -3290,7 +3356,7 @@ await section('⑬', async () => {
   const noDash = sw('may-dash', "const MAY_RE = new RegExp(`(^|\\\\W)${CLI}", "const MAY_RE = new RegExp(`(^|[^\\\\w-])${CLI}");
   const dashLost = dashOf(noDash);
   ok(['U06', 'X03', 'X04', 'X05'].every((k) => !dashLost[k].may.length) && dashLost.X06.may.length === 1, 'CONTROL a name after «-» read as part of a longer word (r14\'s guard): U06, X03, X04, X05 may run nothing — X06\'s `:+` still named', dashLost);
-  const noLit = sw('literal-word', "quotedSubst(lit + v.slice(k), i0, pw); }", "}");
+  const noLit = sw('literal-word', "quotedSubst(lit, i0, pw); ls =", "ls =");
   ok(lostIn(noLit, "r15 L9: let \"a[\\$(C > /dev/null &)]=1\"", "r15 L10: let \"a[\\`C > /dev/null &\\`]=1\"", "r15 L11: let a[\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)]=1 (unquoted, escaped)", "r15 L12: printf -v \"a[\\$(C > /dev/null &)]\" x", "r14 L1: let 'a[$(C > /dev/null &)]=1'"), 'CONTROL a word\'s literal text never read (r1–r14 for the double quote and the escape; r14\'s single quote rides the same check): `let "a[\\$(C &)]=1"`, the escaped backtick, the unquoted `let a[\\$\\(…\\)]=1`, `printf -v "a[\\$(…)]"`, `let \'a[$(C &)]=1\'` — no run and no may: the builtin evaluates the subscript, the CLI runs');
   const noReal = sw('literal-real', "xp = (t) => { real.push(v.length); v += t; real.push(v.length); };", "xp = (t) => { v += t; };");
   ok(!noReal.channelsRuns(line("r15 L19 control: let \"a[$(C > /dev/null &)]=1\" (a substitution the shell runs first — exact)")).length && mayOf(noReal, line("r15 L19 control: let \"a[$(C > /dev/null &)]=1\" (a substitution the shell runs first — exact)")).length > 0, 'CONTROL every expansion read as literal text (no marks): L19\'s `let "a[$(C &)]=1"` — the substitution the shell runs first — reads may-run, never its exact run');
