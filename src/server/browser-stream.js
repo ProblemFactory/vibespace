@@ -1402,9 +1402,13 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (follow && viewer.xOwed) follow = false; // law 3: a follow that superseded the page's own ask answers it as the ask would
     const src = x && x.source;
     if (!src || src.source !== 'x') { viewer.xWait = null; return say({ ok: false, code: 'screencast', why: (src && src.why) || (x && x.why) || 'not-running', source: src || null }); }
-    const cur = xTicketOf(relay, viewer);
+    // cure r3 (主开发 22:36Z): a relay can OUTLIVE its browser's run (a restart keeps the leases; agent-browser's stream stays up), and a
+    // new Chrome hands out the same X ids under new CDP windows — the minted windows are kept PER RUN (the keeper's instance), and a
+    // ticket of another run is no ticket for the verdict: a new run's answer MINTS, never waits for an X id the old run owned
+    const inst = x.instance != null ? String(x.instance) : '';
+    const cur0 = xTicketOf(relay, viewer), cur = cur0 && String(cur0.inst || '') === inst ? cur0 : null;
     if (!relay.xCdpOfWid) relay.xCdpOfWid = new Map();
-    const verdict = PIC.xFollowVerdict({ ticket: cur, answer: x, tid, known: relay.xCdpOfWid });
+    const verdict = PIC.xFollowVerdict({ ticket: cur, answer: x, tid, known: relay.xCdpOfWid.get(inst) || null });
     if (follow && verdict === 'same') { // the same window holds the tab on show: the picture is right, nothing re-issued, nothing said
       viewer.xWait = null;
       if (cur && String(cur.targetId || '') !== String(tid || '')) { cur.targetId = tid; cur.foreign = foreignOf(relay, viewer, tid); noteXSeats(relay); }
@@ -1434,8 +1438,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const ticket = 'xt-' + crypto.randomBytes(18).toString('hex');
     if (xTickets.size > 256) { const oldest = xTickets.keys().next().value; xTickets.delete(oldest); }
     const cdpWin = x.windowId != null ? Number(x.windowId) : null;
-    if (cdpWin != null) { relay.xCdpOfWid.set(Number(x.wid), cdpWin); if (relay.xCdpOfWid.size > 64) relay.xCdpOfWid.delete(relay.xCdpOfWid.keys().next().value); }
-    xTickets.set(ticket, { relayKey: relay.key, viewerId: viewer.id, profileId: String(pid), dsId: String(src.displaySession), wid: x.wid, cdpWin, targetId: tid, foreign: foreignOf(relay, viewer, tid), at: now() });
+    if (cdpWin != null) { // per run: the current run's map, the older runs' dropped (one map per run, two at most)
+      if (!relay.xCdpOfWid.has(inst)) { relay.xCdpOfWid.set(inst, new Map()); while (relay.xCdpOfWid.size > 2) relay.xCdpOfWid.delete(relay.xCdpOfWid.keys().next().value); }
+      const m = relay.xCdpOfWid.get(inst); m.set(Number(x.wid), cdpWin); if (m.size > 64) m.delete(m.keys().next().value);
+    }
+    xTickets.set(ticket, { relayKey: relay.key, viewerId: viewer.id, profileId: String(pid), dsId: String(src.displaySession), wid: x.wid, cdpWin, inst, targetId: tid, foreign: foreignOf(relay, viewer, tid), at: now() });
     say({ ok: true, ticket, displaySession: src.displaySession, wid: x.wid, source: src, seat: xSeatFor(relay, viewer.id) });
     noteXSeats(relay); // the bridge (re)judges its sockets; every viewer of this relay hears its seat
   }

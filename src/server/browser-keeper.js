@@ -4613,7 +4613,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const again = await VP.windowBoundsOf(rec.cdpUrl, { windowId: win.windowId });
       m = PIC.xWindowOf({ bounds: again && again.bounds, rows: await xRowsOf(v.displaySession, { fresh: true }), profileDir: p && p.dir });
     }
-    return { ...m, windowId: win ? win.windowId : null, source: v };
+    return { ...m, windowId: win ? win.windowId : null, instance: WIN.instanceOf(rec), source: v }; // hotfix cure r3: the browser's RUN (its startedAt) — a new Chrome hands out the same X ids under new CDP windows
   }
   /** Chrome's own dialog WINDOWS over ONE holder's window (a GTK file chooser, a print dialog — PURE PIC.dialogsOver over the
    *  display's rows); [] off the X road or while its window cannot be told. The sign-in sheet is drawn INSIDE the window

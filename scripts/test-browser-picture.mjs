@@ -388,7 +388,7 @@ console.log("§8c the follow judges «moved» by the tab's CDP window, says its 
   ok(vrows.sameCdp === 'same' && vrows.staleRow === 'wait' && vrows.noRow === 'wait' && vrows.told === 'mint' && vrows.first === 'mint' && vrows.untoldCdpOther === 'wait' && vrows.untoldCdpSame === 'same',
     'PURE xFollowVerdict — «moved» by the tab\'s CDP window: the same CDP window ⇒ same (silently); a new CDP window answered with ANOTHER CDP window\'s row, or with no row ⇒ wait; its own row ⇒ mint; the CDP window untold ⇒ the ticket\'s own tab is the same, another tab\'s «same window» is never proof', vrows);
   /** the real bridge over a keeper whose answers the leg scripts: answer(targetId, fresh, n, sinceTabsMs) → wid (its CDP window is C[t]) */
-  async function rig(B, answer, { owners = null, delayMs = 0, waitBoundMs = 400 } = {}) {
+  async function rig(B, answer, { owners = null, delayMs = 0, waitBoundMs = 400, instance = null } = {}) {
     const upPort = await freePort();
     const up = new WebSocketServer({ port: upPort, host: '127.0.0.1' }); await new Promise((r) => up.on('listening', r));
     let upWs = null; up.on('connection', (ws) => { upWs = ws; ws.send(JSON.stringify({ type: 'status', connected: true, screencasting: true, viewportWidth: 1280, viewportHeight: 720 })); });
@@ -397,7 +397,7 @@ console.log("§8c the follow judges «moved» by the tab's CDP window, says its 
       setFor: () => ({ attachments: [{ profileId: 'bp-x1', alias: 'xwork', label: 'X', isDefault: true }] }), list: () => ({ profiles: [{ id: 'bp-x1', label: 'X', dir: '/tmp/x' }] }),
       streamPortFor: async () => ({ ok: true, port: upPort }), setViewportFor: async () => ({ ok: true }), inputStateFor: () => ({ input: 'agent' }),
       pictureSourceFor: () => ({ source: 'x', why: 'attach', displaySession: 'da-x1' }),
-      xWindowFor: async (pid, o) => { const t = o && o.targetId; calls.push({ targetId: t, fresh: !!(o && o.fresh), at: Date.now() }); if (delayMs) await sleep(delayMs); const wid = answer(t, !!(o && o.fresh), calls.length, Date.now() - tabsAt); return { wid, why: wid == null ? 'no-match' : 'bounds', windowId: t ? C[t] : 1, source: { source: 'x', why: 'attach', displaySession: 'da-x1' } }; },
+      xWindowFor: async (pid, o) => { const t = o && o.targetId; calls.push({ targetId: t, fresh: !!(o && o.fresh), at: Date.now() }); if (delayMs) await sleep(delayMs); const ans = answer(t, !!(o && o.fresh), calls.length, Date.now() - tabsAt); const wid = ans && typeof ans === 'object' ? ans.wid : ans; const windowId = ans && typeof ans === 'object' && 'windowId' in ans ? ans.windowId : (t ? C[t] : 1); return { wid, why: wid == null ? 'no-match' : 'bounds', windowId, ...(instance ? { instance: instance() } : {}), source: { source: 'x', why: 'attach', displaySession: 'da-x1' } }; },
       tabOwnersFor: async () => ({ ok: true, owners: owners || { [T1]: 'agent', [T2]: 'agent', [T3]: 'agent', [T4]: 'agent', [T5]: 'agent' } }),
       watchTabFor: async () => ({ ok: true, close() { } }),
     };
@@ -467,6 +467,18 @@ console.log("§8c the follow judges «moved» by the tab's CDP window, says its 
     R.close();
     return { answered: !!a, ok: a && a.ok };
   };
+  // CURE r3 (主开发 22:36Z) — A NEW BROWSER RUN: the relay outlives Chrome's restart (the leases are kept), and the new run's first
+  // window has the SAME X id under a NEW CDP window — a ticket is MINTED for it, never a wait for an id the old run owned
+  const restart = async (B) => {
+    let run = 'run-1'; const T6 = 'F6'.repeat(16);
+    const R = await rig(B, (t) => (t === T6 ? { wid: W1, windowId: 9 } : W1), { instance: () => run });
+    const n0 = R.answers().length;
+    run = 'run-2'; R.tabs([T6], T6);
+    const a = await until(() => R.answers().slice(n0).find((m) => m.ok || m.why === 'waiting-window'), 700);
+    const f = { first: a ? (a.ok ? 'ticket' : a.why) : null, wid: a ? a.wid : null };
+    R.close();
+    return f;
+  };
   // a BURST of tab flips is ONE keeper ask for the viewer (coalesced); a viewer that LEFT is skipped
   const burst = async (B) => {
     const R = await rig(B, (t) => (t === T2 ? W2 : W1));
@@ -480,12 +492,13 @@ console.log("§8c the follow judges «moved» by the tab's CDP window, says its 
     R.close();
     return { asks, afterLeft };
   };
-  const BStip = compileAt('src/server/browser-stream.js', 'const verdict = PIC.xFollowVerdict({ ticket: cur, answer: x, tid, known: relay.xCdpOfWid });', 'const verdict = PIC.xFollowVerdict({ ticket: cur, answer: { wid: x.wid, windowId: null }, tid: cur ? cur.targetId : tid, known: null }); // the tip: the X rows trusted');
+  const BStip = compileAt('src/server/browser-stream.js', 'const verdict = PIC.xFollowVerdict({ ticket: cur, answer: x, tid, known: relay.xCdpOfWid.get(inst) || null });', 'const verdict = PIC.xFollowVerdict({ ticket: cur, answer: { wid: x.wid, windowId: null }, tid: cur ? cur.targetId : tid, known: null }); // the tip: the X rows trusted');
   const BSl2 = compileAt('src/server/browser-stream.js', 'targetId: tid, foreign: foreignOf(relay, viewer, tid), at: now() });', 'targetId: tid, foreign: false, at: now() });');
   const BSl3 = compileAt('src/server/browser-stream.js', '    if (follow && viewer.xOwed) follow = false;', '    ');
+  const BSrun = compileAt('src/server/browser-stream.js', "    const inst = x.instance != null ? String(x.instance) : '';", "    const inst = ''; // the run ignored");
   const BSco = compileAt('src/server/browser-stream.js', "      if (!v || v.agent || !v.xWanted || relay.viewers.get(v.id) !== v || v.xFollowTimer) continue;\n", "      if (!v || v.agent || !v.xWanted || relay.viewers.get(v.id) !== v) continue; xTicketFor(relay, v, { follow: true }); continue;\n");
   // the scenes run SIDE BY SIDE (each its own bridge, ports and fake keeper): the section costs its longest scene, not their sum
-  const [l1, sw, st, sc, l2, c2, l3, c3, bu, cbu] = await Promise.all([law1(BS), sameWin(), stall(BS, 3500), stall(BStip, STALL_MS + 350), law2(BS), law2(BSl2), law3(BS), law3(BSl3), burst(BS), burst(BSco)]);
+  const [l1, sw, st, sc, l2, c2, l3, c3, bu, cbu, rs, crs] = await Promise.all([law1(BS), sameWin(), stall(BS, 3500), stall(BStip, STALL_MS + 350), law2(BS), law2(BSl2), law3(BS), law3(BSl3), burst(BS), burst(BSco), restart(BS), restart(BSrun)]);
   ok(l1.saidFirst === 'waiting-window' && l1.moved === W2 && !l1.connectedOnOld, `LAW 1 — a STALE first look (the old window's row for the new tab's CDP window): the wait is SAID («${l1.saidFirst}») and the fresh look moves the picture to its window ${l1.moved} — never a ticket for the old window`, l1);
   ok(l1.waitedFirst === 'waiting-window' && l1.untold && l1.untoldLooks >= 3, `LAW 1 — a tab whose window is never told: «waiting-window» said, ${l1.untoldLooks} looks, then «untold-tab» at the bound — the page stays on its own picture of the tab`, l1);
   ok(sw.answers === 0 && sw.looks === 1, `a tab in the SAME CDP window: ONE look (${sw.looks}), no ticket re-issued, nothing said (${sw.answers})`, sw);
@@ -496,6 +509,8 @@ console.log("§8c the follow judges «moved» by the tab's CDP window, says its 
   ok(l3.answered && l3.ok, `LAW 3 — the page's own ask, superseded by a follow that found the same window, is ANSWERED (${JSON.stringify(l3)})`, l3);
   ok(!c3.answered, `RED CONTROL — without law 3 the follow swallows the page's ask: no answer comes, the page stays «asking» for good (${JSON.stringify(c3)})`, c3);
   ok(bu.asks === 1 && bu.afterLeft === 0, `five tab flips in a burst are ONE keeper ask for the viewer (${bu.asks}); after the viewer LEFT a flip asks nothing for it (${bu.afterLeft})`, bu);
+  ok(rs.first === 'ticket' && rs.wid === W1, `CURE r3 — a NEW BROWSER RUN (the same X id ${W1} under a NEW CDP window): a ticket is MINTED (${rs.first}), never a wait for an id the old run owned`, rs);
+  ok(crs.first === 'waiting-window', `RED CONTROL — the run ignored: the old run's map says «${W1} is another CDP window's», the viewer WAITS (${crs.first}) and would be locked out of the X picture for the relay's life`, crs);
   ok(cbu.asks >= 4, `RED CONTROL — uncoalesced, the same burst is ${cbu.asks} keeper asks`, cbu);
   // the page SAYS its wait and an untold window in its status line (en / zh / ja), and an unmounted view never reads «connected»
   const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
