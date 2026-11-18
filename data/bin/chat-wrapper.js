@@ -674,13 +674,40 @@ function deliverHeldInterrupt(why) {
   log(`the second Stop held in the window delivered (${why})`);
   return true;
 }
+/** WHAT A FOLLOW-UP'S INIT SAYS ABOUT THE STAMPED FRAMES IT TOOK (B-fcd6). The init of a turn that took a stamped frame
+ *  names its uuid in `user_message_uuids`; the init of a turn that took NONE leaves the field OUT, never an empty list
+ *  (the real 2.1.308 / 2.1.312 recordings, scripts/fixtures/claude-cli/<v>-stamped.jsonl and 2.1.312-frames.jsonl — a
+ *  background-agent notification turn among them; the CLI's own init writer spreads the list it has, so an absent list
+ *  is no key at all — test-record-shape reads that writer). So an init without the field is a judgment, «this turn took
+ *  none of them» (a background task-notification follow-up), ONLY where this CLI is known to write the names: THIS
+ *  PROCESS has already read an init that named a frame (`initNamesSeen` — since B-437e every person frame is stamped, so
+ *  a session's first turn is the witness). No witness ⇒ null, «cannot say»: every rider stays kept, as before (a CLI
+ *  before 2.1.307, a build that stopped writing the field, a stand-in that never names — the wrong «kept» costs a
+ *  repeated message, a wrong «landed» tells the person the agent read words it never saw). The midturn-order r4 rule
+ *  read every omission as unknown and left a rider the model HAD read drawn «Unread when stopped». */
+let initNamesSeen = false;
+function initNames(msg, seen) {
+  if (Array.isArray(msg.user_message_uuids)) return msg.user_message_uuids.map(String);
+  return seen ? [] : null;
+}
+/** Every init this process reads: one that names a frame is the witness that this CLI writes the names. */
+function noteInitNames(msg) {
+  if (Array.isArray(msg.user_message_uuids) && msg.user_message_uuids.length) initNamesSeen = true;
+}
+/** A follow-up the Stop window interrupted on its init: remember who it named (every follow-up's, judged once at the settle). */
+function noteFollowUpNames(msg) {
+  const names = initNames(msg, initNamesSeen);
+  if (!names) return;
+  stopping.namesSaid = true;
+  for (const u of names) stopping.named.add(u);
+}
 /** A frame that RODE the tool result at Stop counted as held (the CLI may still hold it — r4); a window that closes with
  *  no follow-up turn proves the turn's last request took it: it is the turn's, as read — and the record says so. */
 // lane midturn-order r4 (m15): with follow-up turns, the riders are judged ONCE, here, when the window settles — against
 // EVERY uuid any follow-up's init named (`stopping.named`; the CLI may split what it held into several follow-ups, each
 // naming its own frames): a rider NO follow-up named went into the request built after its tool result (the model read
-// it) — landed; a rider some follow-up named was still the CLI's — kept. A CLI whose inits name nothing (before 2.1.307)
-// leaves every rider kept, as before.
+// it) — landed; a rider some follow-up named was still the CLI's — kept. A CLI whose inits cannot name (before 2.1.307)
+// leaves every rider kept, as before; once this CLI has named a frame, an init without the field named none (B-fcd6, initNames above).
 function landRiding(why) {
   if (!stopping || !stopping.riding || !stopping.riding.length) return;
   let read = stopping.riding;
@@ -1006,6 +1033,7 @@ function processLine(line) {
     }
     const busyWord = cliState === 'running' || cliState === 'requires_action';
     const starts = msg.type === 'system' && msg.subtype === 'init' && busyWord;
+    if (msg.type === 'system' && msg.subtype === 'init') noteInitNames(msg); // B-fcd6: the witness that this CLI names the frames a turn took
     const idle = msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'idle';
     // THE WITNESS (2.369.361): a handed frame rides the request the CLI builds after a tool result (not one Stop
     // rejected), and the model speaking after it is that request answered
@@ -1041,7 +1069,7 @@ function processLine(line) {
         // stamped frame the turn consumed, 2.1.307 on). Every follow-up's names are REMEMBERED — the CLI may split what it held
         // into several follow-ups — and the riders are judged once, when the window settles (landRiding): never at an init,
         // where a frame the next follow-up will name would be called read
-        if (Array.isArray(msg.user_message_uuids)) { stopping.namesSaid = true; for (const u of msg.user_message_uuids) stopping.named.add(String(u)); }
+        noteFollowUpNames(msg); // B-fcd6: a CLI that writes the names says «none» by leaving the field out
       } else if (cliOwesTurn) {
         // the CLI's own turn for what it was still holding: theirs now — a Stop in it stops a TURN, it keeps no message
         cliOwesTurn = false;

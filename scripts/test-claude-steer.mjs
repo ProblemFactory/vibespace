@@ -20,6 +20,9 @@
 //      the stop-late fact rides the follow-up's result and the page draws it once; answered / ran to its end / a second Stop
 //      (held by COUNT: the stand-in reads nothing until both interrupts wait) / a 2.1.308 CLI; the stall the other way tells
 //      nothing; RED CONTROLS: a wrapper that never looks reports a clean stop, a rebuild that drops the mark loses the fact
+//   §8 (B-fcd6) once this CLI process has named a frame, a follow-up init that leaves `user_message_uuids` out took none of
+//      the stamped frames (the real 2.1.308 / 2.1.312 recordings) — the rider the model read lands; RED: the r4 rule, and a
+//      rule without the witness (the race CLI's held rider called read)
 // THE REAL WRAPPER over the stand-in (the hand-over, the witness, Stop's follow-up interrupt, the RED legs on the 6428c67e
 // wrapper) is §0 of scripts/test-claude-steer-chrome.mjs — the fast tier's 910 s sum had 0.77 s left; §8 here is the one fast
 // exception (B-28b1: ten runs at once, 0.6 s on the test machine).
@@ -464,6 +467,62 @@ await guard('§8', async () => {
   ok([ZH, JA].every((D) => D.includes(`  "${CUT}": "`) && D.includes(`  "${RAN}": "`)), '§8 …in zh and ja');
   ok(cwSrc.includes("msg.message?.model !== '<synthetic>') stopping.followRun.answered = true;") && cwSrc.includes("const tokens = sum(result && result.usage, ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']);") && !/stopLateOf[\s\S]{0,1200}model_usage_since_last_result\s*;/.test(cwSrc),
     '§8 WIRING: the follow-up\'s OWN tokens only — its result\'s usage (a background agent\'s calls are in the since-last count, never in it), and a <synthetic> record is no answer');
+});
+await guard('§8 (B-fcd6) once this CLI has named a frame, a follow-up init without the names took NONE — the rider the model read lands', () => {
+  const w = read('data/bin/chat-wrapper.js');
+  const cut = (from, to, name) => {
+    const a = w.indexOf(from), b = a < 0 ? -1 : w.indexOf(to, a);
+    if (a < 0 || b < 0) throw new Error(`the anchor of the control «${name}» is not in the source`);
+    return w.slice(a, b);
+  };
+  const SRC = cut('let initNamesSeen = false;', '/** EVERY FRAME A STOP TOUCHED SETTLES ONCE', 'the wrapper slice');
+  const build = (src) => new Function('stopping', 'copies', 'record', 'settleCopies', 'log', src + '\nreturn { initNames, noteInitNames, noteFollowUpNames, landRiding };');
+  const swap = (src, from, to, name) => { if (!src.includes(from)) throw new Error(`the anchor of the control «${name}» is not in the source`); return src.replace(from, to); };
+  // THE MEASUREMENT FIRST — the real CLI, recorded through the real wrapper (lane claude-steer-inject r5): the init of a turn that
+  // took a stamped frame names it; the init of a turn that took none leaves the field OUT (never []); read IN ORDER, as the
+  // wrapper reads them, an omission before this process saw a naming init cannot say (null), after it says «none» ([])
+  for (const v of ['2.1.308-stamped', '2.1.312-stamped', '2.1.312-frames']) {
+    const inits = read(`scripts/fixtures/claude-cli/${v}.jsonl`).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((r) => r && r.type === 'system' && r.subtype === 'init');
+    const f = build(SRC)({ named: new Set() }, new Map(), () => { }, () => { }, () => { });
+    const read2 = [], seenAt = [];
+    let seen = false;
+    for (const r of inits) { read2.push(S(f.initNames(r, seen))); f.noteInitNames(r); if (Array.isArray(r.user_message_uuids) && r.user_message_uuids.length) seen = true; seenAt.push(seen); }
+    const first = inits.findIndex((r) => Array.isArray(r.user_message_uuids));
+    const want = inits.map((r, i) => Array.isArray(r.user_message_uuids) ? S(r.user_message_uuids) : (first >= 0 && i > first ? '[]' : 'null'));
+    ok(inits.length >= 2 && inits.every((r) => !Array.isArray(r.user_message_uuids) || r.user_message_uuids.length > 0) && S(read2) === S(want),
+      `${v} (the real CLI, recorded): no init writes an empty list; read in order, an omission before the first naming init cannot say, after it says «none» (${read2.join(' ')})`, { read2, want });
+  }
+  const PURE = [[{}, false, 'null'], [{}, true, '[]'], [{ user_message_uuids: ['u-1', 2] }, false, '["u-1","2"]'], [{ user_message_uuids: [] }, false, '[]'], [{ claude_code_version: '2.1.312' }, false, 'null']];
+  const helpers = build(SRC)({ named: new Set() }, new Map(), () => { }, () => { }, () => { });
+  const pureBad = PURE.filter(([m, seen, want]) => S(helpers.initNames(m, seen)) !== want);
+  ok(!pureBad.length, 'PURE initNames(init, witnessed): a list is read as written; no list ⇒ [] only with the witness, else null — a version alone proves nothing', pureBad);
+  // the Stop window's judgment, the REAL helpers over the wrapper's state (stubbed): rider m-b (its copy stamped u-b) rode the
+  // tool result at Stop, the CLI started follow-up(s) the window interrupted on the init, the window settles
+  const judge = (src, inits, { witness = true } = {}) => {
+    const recs = [];
+    const stopping = { riding: ['m-b'], follows: inits.length, namesSaid: false, named: new Set(), kept: [] };
+    const f = build(src)(stopping, new Map([['m-b', { cliUuid: 'u-b' }]]), (type, o) => recs.push({ type, ...o }), () => { }, () => { });
+    if (witness) f.noteInitNames({ type: 'system', subtype: 'init', claude_code_version: '2.1.312', user_message_uuids: ['u-a'] });   // the session's first turn: a stamped frame, named
+    for (const m of inits) { f.noteInitNames(m); f.noteFollowUpNames(m); }
+    f.landRiding('idle');
+    return recs.filter((r) => r.type === 'input_handover' && r.state === 'landed').flatMap((r) => r.msg_ids);
+  };
+  const TASK = { type: 'system', subtype: 'init', claude_code_version: '2.1.312' };   // a background task-notification follow-up: it took no stamped frame
+  ok(S(judge(SRC, [TASK])) === '["m-b"]', 'the verifier\'s case (r4, pre-existing): this CLI named a frame before, and the only follow-up\'s init leaves the names out ⇒ the rider the model read LANDS (it was drawn «Unread when stopped»)', judge(SRC, [TASK]));
+  ok(S(judge(SRC, [TASK], { witness: false })) === '[]', 'a CLI that never named a frame (scripts/fixtures/claude-race-cli.cjs: 2.1.312 by its word, no names — test-claude-steer-chrome ⑮ «riding is not landed») ⇒ the rider stays kept');
+  ok(S(judge(SRC, [{ ...TASK, user_message_uuids: ['u-b'] }])) === '[]', 'a follow-up that NAMES the rider (the CLI still held it) ⇒ kept, as before');
+  ok(S(judge(SRC, [TASK, { ...TASK, user_message_uuids: ['u-b'] }])) === '[]', 'two follow-ups, one naming none and one naming the rider ⇒ kept (every follow-up\'s names are judged together)');
+  // RED CONTROLS, each anchored on a line of the slice (a missing anchor fails by name)
+  const r4 = swap(SRC, '  return seen ? [] : null;\n', '  return null;\n', 'the r4 rule');
+  ok(S(judge(r4, [TASK])) === '[]', 'RED CONTROL the midturn-order r4 rule (no list ⇒ unknown) leaves the read rider kept');
+  const noWitness = swap(SRC, '  return seen ? [] : null;\n', '  return [];\n', 'no witness');
+  ok(S(judge(noWitness, [TASK], { witness: false })) === '["m-b"]', 'RED CONTROL a rule without the witness (every omission = none — this commit\'s first cut, keyed on the version) calls the race CLI\'s still-held rider read');
+  // THE WIRING: every init line feeds the witness; the Stop window's follow-up branch asks noteFollowUpNames(msg) — the ONE
+  // writer of namesSaid (dropHeldForStop only carries the flag over into a second Stop's window)
+  const branch = cut('      if (stopping && stopping.held > 0) {', '      } else if (cliOwesTurn) {', 'the follow-up branch');
+  ok(/\n\s+noteFollowUpNames\(msg\);/.test(branch) && (w.match(/noteFollowUpNames\(msg\);/g) || []).length === 1 && (w.match(/stopping\.namesSaid = true/g) || []).length === 1
+    && (w.match(/namesSaid = /g) || []).length === 1 && (w.match(/if \(msg\.type === 'system' && msg\.subtype === 'init'\) noteInitNames\(msg\);/g) || []).length === 1,
+    'the wiring: every init feeds the witness; the follow-up branch (inside the Stop window, before the owed-turn branch) calls noteFollowUpNames(msg), the ONE writer of namesSaid');
 });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
