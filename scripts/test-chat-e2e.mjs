@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, withoutVendorKeys, vncEnv } from './scratch.mjs';
 import { mintRoot, startHub } from './hub-boot.mjs';
+import { whyNoReply, maskText } from './chat-e2e-why.mjs';   // B-5a57: a missing reply says why (its legs: test-ci-gate)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter, isFixtureProjectDir, FIXTURE_STALE_MS } = require('../src/fixture-guard.js');
@@ -160,14 +161,17 @@ for (let i = 0; i < 180 && !replied; i++) {
 // guess: the ws frames carry the error result / API error text, and the
 // receiver counted the CLI's own api_error event.
 let apiErr = null;
+// B-5a57: the reason, kept — the CLI's result record from the session's buffer (the ws carries none), the frames' texts
+const why = replied ? null : whyNoReply({ frames, buffer: (() => { try { return fs.readFileSync(path.join(wt, 'data', 'session-buffers', `${sid}.buf`), 'utf8'); } catch { return ''; } })() });
+if (why) console.log(`  · the missing reply, read whole: ${JSON.stringify(why)}`);
 if (!replied) {
-  const hit = frames.find((s) => /"is_error":\s*true|API Error|rate.?limit|overloaded|"status":\s*(429|529)|usage limit|credit balance/i.test(s));
+  const hit = frames.find((s) => /"is_error":\s*true|API Error|rate.?limit|overloaded|"status":\s*(429|529)|usage limit|credit balance/i.test(s)) || (why.kind === 'limit' ? why.text || 'limit' : null);
   let ev = null; try { ev = (await (await fetch(`http://127.0.0.1:${PORT}/api/otel-stats`)).json())?.events || null; } catch { }
-  if (hit || (ev && ev.api_error > 0)) apiErr = { frame: (hit || '').slice(0, 220), otelApiErrors: ev?.api_error || 0 };
+  if (hit || (ev && ev.api_error > 0)) apiErr = { frame: maskText(hit || '').slice(0, 220), otelApiErrors: ev?.api_error || 0 };
 }
 if (replied) check('haiku inference round-trip: assistant reply flows back over ws (chat-wrapper → normalizer → push)', true);
 else if (apiErr) console.log(`  ⚠ SKIP: the billing account could not serve the haiku turn (API error / rate limit) — request sent, no reply to round-trip; nothing of ours disproven — ${JSON.stringify(apiErr)}`);
-else check('haiku inference round-trip: assistant reply flows back over ws (chat-wrapper → normalizer → push)', false, frames.slice(-3).join('\n').slice(0, 400));
+else check('haiku inference round-trip: assistant reply flows back over ws (chat-wrapper → normalizer → push)', false, `${why.kind}: ${JSON.stringify(why.result)} ${why.text} — last frames: ${maskText(frames.slice(-3).join('\n')).slice(0, 400)}`);
 
 // the turn must SETTLE (result processed — the /compact-class "stuck on thinking" regressions)
 let settled = false;
