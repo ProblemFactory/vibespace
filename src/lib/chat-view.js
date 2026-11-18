@@ -2218,11 +2218,19 @@ class ChatView {
     const put = this._chatInput?.putBack?.(a.prefillText || bound.text) || 'none';   // no words from the CLI: the message's own
     const n = Number(d.taken) || 0;
     // whole sentences, one key each (zh / ja join sentences without a space — a concatenation put one between them).
-    // 0 = an echo this view does not hold: the cut is drawn on a reload (the transcript row) — said, never «0 messages»
+    // 0 = an echo the hub does not hold: the transcript row draws the cut at the hub's next history REBUILD (the first attach
+    // after a hub restart or a resume, or opening it stopped — a page reload of a live conversation re-reads nothing) — said so
+    if (!n && d.already) {   // the cut was drawn already (a rebuild read the CLI's row first): a plain success
+      showToast(put === 'restored' ? t('Rewound to before your message. Your words are back in the box.')
+        : put === 'kept' ? t('Rewound to before your message. The box already had text, so your earlier words were not put back.')
+          : t('Rewound to before your message.'));
+      if (put === 'restored') this._chatInput?.focus?.();
+      return;
+    }
     if (!n) {
-      showToast(put === 'restored' ? t('Rewound to before your message — reload the conversation to see what was taken back. Your words are back in the box.')
-        : put === 'kept' ? t('Rewound to before your message — reload the conversation to see what was taken back. The box already had text, so your earlier words were not put back.')
-          : t('Rewound to before your message — reload the conversation to see what was taken back.'));
+      showToast(put === 'restored' ? t('Rewound to before your message. This window could not mark what was taken back; it is marked after VibeSpace restarts or this conversation is resumed. Your words are back in the box.')
+        : put === 'kept' ? t('Rewound to before your message. This window could not mark what was taken back; it is marked after VibeSpace restarts or this conversation is resumed. The box already had text, so your earlier words were not put back.')
+          : t('Rewound to before your message. This window could not mark what was taken back; it is marked after VibeSpace restarts or this conversation is resumed.'));
       if (put === 'restored') this._chatInput?.focus?.();
       return;
     }
@@ -2239,7 +2247,7 @@ class ChatView {
     const r = String(reason || '');
     const line = r === 'queued' || r === 'commands_queued' ? t('Messages are waiting in the queue — send or remove them first, then rewind.')
       : r === 'compacting' ? t('The conversation is being compacted — rewind when it is done.')
-        : r === 'no-target-id' ? t('The agent does not know this message by an id yet — reopen the conversation, then try again.')
+        : r === 'no-target-id' ? t('The agent does not know this message by an id yet — it gets one after VibeSpace restarts or this conversation is resumed; then try again.')
           : r === 'pending' ? t('A rewind is already on its way — wait for its answer.')
             : r === 'not-the-person' ? t('Only you can rewind a conversation, from its own window.')
               : r === 'changed-since' ? t('The conversation changed while you decided — nothing was taken back. Look again, then rewind.')

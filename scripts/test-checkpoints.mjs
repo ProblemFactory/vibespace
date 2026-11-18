@@ -443,6 +443,11 @@ function roadLaws(MM = createMessageManager) {
   if (struck(h2).length !== 2 || notices(h2).length !== 1 || !notices(h2)[0].content[0].rewindData.placed) bad.push('reload:leaf-only-cuts-after-anchor');
   const h3 = MM('claude', 'cp-h3'); h3.convertHistory([...rows, REC.answer('vsr-a', { rewound: true, targetMessageUuid: U(3), prefillText: 'second ask' }), REC.anchor({ leafUuid: U(2), rewound: true, cutUuid: U(3) }), REC.said('a new reply', U(5))]);
   if (struck(h3).length !== 2 || notices(h3).length !== 1 || h3.messages.find((m) => m.uuid === U(5))?.rewound) bad.push('reload:twins-cut-once');
+  // a rebuild drew the cut from the row FIRST; the live answer then finds it drawn: ONE rewind-answer saying `already`
+  const htw = MM('claude', 'cp-twin-answer'); htw.convertHistory([...rows, REC.anchor({ leafUuid: U(2), rewound: true, cutUuid: U(3) })]);
+  const otw = []; htw.onOp((o) => otw.push(o)); htw.processLive(REC.answer('vsr-tw', { rewound: true, targetMessageUuid: U(3), prefillText: 'second ask' }));
+  const atw = otw.filter((o) => o.op === 'meta' && o.subtype === 'rewind-answer');
+  if (atw.length !== 1 || atw[0].data.already !== true || atw[0].data.taken !== 0 || notices(htw).length !== 1) bad.push(`answer:a-twin-says-already (${JSON.stringify(atw.map((o) => o.data))})`);
   const h3c = MM('claude', 'cp-h3c'); h3c.convertHistory([...rows, REC.answer('vsr-c', { rewound: true, targetMessageUuid: U(3) }), REC.said('a hook card', U(9)), REC.anchor({ leafUuid: U(2), rewound: true }), REC.said('a new reply', U(5))]);
   if (struck(h3c).length !== 3 || notices(h3c).length !== 1 || h3c.messages.find((m) => m.uuid === U(9))?.rewound !== 'rollback' || h3c.messages.find((m) => m.uuid === U(5))?.rewound) bad.push(`reload:a-card-after-the-cut-is-no-second-rewind (${struck(h3c).length}, ${notices(h3c).length})`);
   const h3b = MM('claude', 'cp-h3b'); h3b.convertHistory([...rows, REC.answer('vsr-a', { rewound: true, targetMessageUuid: U(3) }), REC.anchor({ leafUuid: U(2), rewound: true }), REC.said('a new reply', U(5))]);
@@ -800,11 +805,15 @@ say('— §9 the page\'s door');
   said.length = 0; box._textarea.value = '';
   view._onRewindAnswer({ requestId: 'vsr-late', answer: { rewound: true, targetMessageUuid: U(31), prefillText: 'ask' }, taken: 3 });
   if (box._textarea.value !== 'ask' || !said.some((x) => /Rewound — 3 messages taken back\. Your words are back in the box\./.test(x[0])) || view._rewindBound.has('vsr-late')) bad.push('view:a-late-answer-binds');
-  // never «0 messages»: an echo the view did not hold cuts nothing here (the reload draws it) — said without a count; no
+  // never «0 messages»: an echo the hub does not hold cuts nothing live (the next history load draws it) — said so; no
   // words from the CLI ⇒ the message's own
   await press('vsr-zero', 4); said.length = 0; box._textarea.value = '';
   view._onRewindAnswer({ requestId: 'vsr-zero', answer: { rewound: true, targetMessageUuid: U(77), prefillText: null }, taken: 0 });
-  if (box._textarea.value !== 'ask' || !said.some((x) => /^Rewound to before your message — reload the conversation to see what was taken back\. Your words are back in the box\.$/.test(x[0])) || said.some((x) => /\b0 messages/.test(x[0])) || clock.timers.length) bad.push(`view:no-zero-count-and-the-message-words (${said.map((x) => x[0])}, «${box._textarea.value}»)`);
+  if (box._textarea.value !== 'ask' || !said.some((x) => /^Rewound to before your message\. This window could not mark what was taken back; it is marked after VibeSpace restarts or this conversation is resumed\. Your words are back in the box\.$/.test(x[0])) || said.some((x) => /\b0 messages/.test(x[0])) || clock.timers.length) bad.push(`view:no-zero-count-and-the-message-words (${said.map((x) => x[0])}, «${box._textarea.value}»)`);
+  // a twin's answer (the cut was drawn by a rebuild first): a plain success, never «could not mark»
+  await press('vsr-twin', 3); said.length = 0; box._textarea.value = '';
+  view._onRewindAnswer({ requestId: 'vsr-twin', answer: { rewound: true, targetMessageUuid: U(31), prefillText: 'ask' }, taken: 0, already: true });
+  if (!said.some((x) => /^Rewound to before your message\. Your words are back in the box\.$/.test(x[0])) || said.some((x) => /could not mark/.test(x[0]))) bad.push(`view:a-twin-answer-is-a-plain-success (${said.map((x) => x[0])})`);
   // BOUND BEFORE IT IS SENT: the result frame never comes (lost in a drop) — the CLI's answer under the page's own id binds
   view._yes = true; view._rewindInFlight = false; said.length = 0; view._rewindFromMessage(person); await tick();
   { const d = reqs[reqs.length - 1]; d.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: d.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2, files: false }); await tick(); }

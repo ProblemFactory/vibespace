@@ -1078,7 +1078,7 @@ class MessageManager extends MessageWindow {
     this._rewindAnswers = [...(this._rewindAnswers || []).slice(-15), requestId];
     const echo = body && body.rewound === true ? body.targetMessageUuid : null;
     const cut = echo && this.messages.some((m) => m && m.uuid === echo) ? this._processRewindCut({ targetUuid: echo }, emit) : null;
-    if (emit) this._emit({ op: 'meta', subtype: 'rewind-answer', data: { requestId, answer: body, taken: cut ? cut.taken : 0 } });
+    if (emit) this._emit({ op: 'meta', subtype: 'rewind-answer', data: { requestId, answer: body, taken: cut ? cut.taken : 0, already: !!(cut && cut.already) } });
   }
 
   // B-437e: a rewound:true row waits for the next record — the CLI's heal row (a plain explicit one) cancels it ⇒ kb-file-structure «rewind-door.js»
@@ -1106,7 +1106,7 @@ class MessageManager extends MessageWindow {
     if (c.already) { // a twin: its leftovers (a card drawn after the cut) join the cut it has — no second notice
       const left = c.ids.length ? applyRewound(this.messages, c.ids, 'rollback') : [];
       if (emit && left.length) this._emit(rewoundOp({ harness: 'claude', toMessageId: left[0], ids: left, kind: 'rollback', ts: this._currentTs }));
-      return { taken: 0 };
+      return { taken: 0, already: true };
     }
     const prompts = c.ids.filter((id) => isPersonPrompt(this.messageIndex.get(id))).length;
     const ids = applyRewound(this.messages, c.ids, 'rollback');
