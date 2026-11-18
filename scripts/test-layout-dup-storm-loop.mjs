@@ -1364,7 +1364,7 @@ async function r14Legs({ install = null, DM = RealDM, LM = RealLM, quiet = false
   // THE PHONE reconnects FIRST: booted on V (q1's read-only window built under its row's id, drawn full screen), X and Y never visited
   const P = pageOn(H2, install, 'desk-v', { DM, LM, attachMs: 300 });
   class Life {} install(Life);
-  for (const k of ['resumeSession', 'createSession', '_windowPending', '_snapshotWinBounds', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);
+  for (const k of ['resumeSession', 'createSession', '_windowPending', '_snapshotWinBounds', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);   // stale-pins: kept — _closeSecondView lives in src/lib/session-lifecycle.js (this copies SessionLifecycle's methods); only src/lib/user-todos-actions.js lost the token (the manager design's piece 4)
   Object.assign(P.app, { isMobile: true, _getBackendSessionDefaults: () => ({}) });
   // lane resume-all-paced (L1): «Resume all» is PACED — one create in flight, the next when the previous one's create has ENDED — so
   // the hub here answers each create as the restarted hub does (`created`: the conversation its live list names, new-i), 60 ms after
@@ -1432,7 +1432,7 @@ const r14bLive = (sid, i) => ({ action: 'attachSession', serverId: sid, backend:
 function r14Page(H, install, { phone, LM = RealLM }) {
   const P = pageOn(H, install, 'desk-v', { DM: RealDM, LM, attachMs: 300 });
   class Life {} install(Life);
-  for (const k of ['resumeSession', 'createSession', '_windowPending', '_snapshotWinBounds', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);
+  for (const k of ['resumeSession', 'createSession', '_windowPending', '_snapshotWinBounds', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);   // stale-pins: kept — _closeSecondView lives in src/lib/session-lifecycle.js (this copies SessionLifecycle's methods); only src/lib/user-todos-actions.js lost the token (the manager design's piece 4)
   Object.assign(P.app, { isMobile: phone, _getBackendSessionDefaults: () => ({}) });
   P.app.sidebar.getSessionConfig = () => ({}); P.app.sidebar._getSessionTasks = () => [];
   for (const [id, i] of [['v-q1', 1], ['v-q5', 5]]) Object.assign(P.wins.get(id), { type: 'chat', gridBounds: phone ? { left: 0, top: 0, width: 1, height: 1 } : R14GB(i), _attached: true, _readOnly: true, _openSpec: r14bLive('old-' + i, i) });

@@ -662,7 +662,7 @@ const PR_STOPPED = () => [
 function prPage(H, install, { DM = RealDM, LM = RealLM, phone = true, on = 'desk-v' } = {}) {
   const P = pageOn(H, install, on, { DM, LM, attachMs: 60000 });
   class Life {} install(Life);
-  for (const k of ['resumeSession', 'createSession', '_windowPending', '_snapshotWinBounds', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin', '_respawnAfterExit']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);
+  for (const k of ['resumeSession', 'createSession', '_windowPending', '_snapshotWinBounds', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin', '_respawnAfterExit']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);   // stale-pins: kept — _closeSecondView lives in src/lib/session-lifecycle.js (this copies SessionLifecycle's methods); only src/lib/user-todos-actions.js lost the token (the manager design's piece 4)
   Object.assign(P.app, { isMobile: phone, _getBackendSessionDefaults: () => ({}) });
   P.creates = []; P.answers = []; P.reqOpts = []; P.app.ws.request = (m, cb, o = {}) => { if (m && m.type === 'create') { P.creates.push(m); P.reqOpts.push(o); P.answers.push((msg) => (o.isAlive && !o.isAlive() ? false : cb(msg))); } return () => {}; }; // ws.js's rule: isAlive false ⇒ the answer is dropped; `reqOpts` — its watchdog (r4)
   P.app.sidebar.getSessionConfig = () => ({}); P.app.sidebar._getSessionTasks = () => [];
@@ -918,7 +918,7 @@ const closesDuring = async (P, fn) => {
   try { await fn(); } finally { wm.closeWindow = orig; }
   return out;
 };
-const fenced = (cl) => cl.every((c) => c.by === '_reopenWin' || c.by === '_closeSecondView');
+const fenced = (cl) => cl.every((c) => c.by === '_reopenWin' || c.by === '_closeSecondView');   // stale-pins: kept — «_closeSecondView» is the name src/lib/session-lifecycle.js's _fenceSays still writes; only src/lib/user-todos-actions.js lost the token
 /** THE FENCE'S DYNAMIC HALF IN THE PRODUCT (r4 N5): a door that tried to close a window in a resume's turn is refused AND journaled —
  *  a door leg also asserts the journal is empty (a door that closes nothing tries nothing) */
 const noFence = (P) => !(P.app._fenceRefused || []).length;
@@ -1492,7 +1492,7 @@ async function pr4Legs({ DM = RealDM, LM = RealLM, install = null, WSH = null, C
       P.app.resumeSession(PRC(1), '/srv/p1', 'Conv 1', { backend: 'claude', backendSessionId: PRC(1) });
       P.app._closeSecondView?.('v-f', { backend: 'claude', cid: PRC(1) });
       await tick(5);
-      leg(P.wins.has('v-f') && (P.app._fenceRefused || []).some((r) => r.win === 'v-f' && r.how === '_closeSecondView'),
+      leg(P.wins.has('v-f') && (P.app._fenceRefused || []).some((r) => r.win === 'v-f' && r.how === '_closeSecondView'),   // stale-pins: kept — «_closeSecondView» is the name src/lib/session-lifecycle.js's _fenceSays still writes; only src/lib/user-todos-actions.js lost the token
         '§PR4 (f5) N5 A SECOND VIEW IS OF THE CONVERSATION: _closeSecondView handed an unrelated window (v-f, a file) inside a resume ⇒ refused and journaled — v-f stays', { vf: P.wins.has('v-f'), refused: P.app._fenceRefused || [] });
     }
     {

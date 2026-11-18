@@ -290,7 +290,7 @@ await section('§1b THE DOOR — the real resumeSession → createSession over t
   const W = world({ records: { 'desk-w': [], 'desk-p': [named(5), named(6)], 'desk-r': [] }, active: 'desk-w', extra: {
     _hideWelcome() {}, _buildTitleMeta: () => ({}), _hostLabel: () => '', _getBackendSessionDefaults: () => ({}), _closeSidebarOnMobile() {},
   } });
-  for (const k of ['resumeSession', 'createSession', '_windowPending', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (proto[k]) W.app[k] = proto[k].bind(W.app);
+  for (const k of ['resumeSession', 'createSession', '_windowPending', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (proto[k]) W.app[k] = proto[k].bind(W.app);   // stale-pins: kept — _closeSecondView lives in src/lib/session-lifecycle.js (this copies SessionLifecycle's methods); only src/lib/user-todos-actions.js lost the token (the manager design's piece 4)
   W.app.ws.request = (msg) => { requests.push(msg); return () => {}; };
   W.app.sidebar.getSessionConfig = () => ({}); W.app.sidebar._getSessionTasks = () => [];
   W.app.resumeSession(CID(6), CWD(6), NAMES[6], { backend: 'claude', backendSessionId: CID(6), winBounds: { gridBounds: GB(6), desktopId: 'desk-p', winId: 'win-old-6' } });

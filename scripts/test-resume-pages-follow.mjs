@@ -32,7 +32,7 @@ function page(install, { on = 'desk-v', recs = { 'desk-x': [files('x-1', 1)], 'd
   const hb = H || hub(loadHandler(), DOC(recs), { alive: [] });
   const P = pageOn(hb, install, on, { attachMs: 60000 });
   class Life {} install(Life);
-  for (const k of ['_snapshotWinBounds', '_reopenRowOf', '_followResumed', '_attachInRow', '_reopenWin', '_closeSecondView', '_markResume', '_pendingResumeWin', 'attachSession', '_winIs', '_closeFenced', '_fenceSays']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);
+  for (const k of ['_snapshotWinBounds', '_reopenRowOf', '_followResumed', '_attachInRow', '_reopenWin', '_closeSecondView', '_markResume', '_pendingResumeWin', 'attachSession', '_winIs', '_closeFenced', '_fenceSays']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);   // stale-pins: kept — _closeSecondView lives in src/lib/session-lifecycle.js (this copies SessionLifecycle's methods); only src/lib/user-todos-actions.js lost the token (the manager design's piece 4)
   Object.assign(P.app, { isMobile: false });
   const w = P.wins.get('win-v-s');
   if (w && !live) w._readOnly = true;   // a STOPPED conversation's window: its read-only history (the boot restore's view)
@@ -153,7 +153,7 @@ console.log('— ⑤ the wiring');
 {
   const sb = read('src/lib/sidebar.js'), uta = read('src/lib/user-todos-actions.js'), sl = read('src/lib/session-lifecycle.js');
   ok(/if \(msg\.type === 'active-sessions'\) \{ this\._webuiSessions = msg\.sessions; this\._mergeAndRender\(\); patchStashHints\(this\.listEl, msg\.sessions\); try \{ this\.app\?\._followResumed\?\.\(msg\.sessions\); \} catch \{ \} \}/.test(sb), 'sidebar.js: the live list every page receives asks the follow (no new frame)');
-  ok(/row = app\._reopenRowOf\(c, r\.sessionId\)/.test(uta) && !/for \(const \[winId, term\] of \[\.\.\.app\.sessions\]\)/.test(uta) && (sl.match(/\} else this\._closeSecondView\(winId, \{ backend: c\.backend \|\| 'claude', cid: c\.backendSessionId \}\);/g) || []).length === 1,
+  ok(/row = app\._reopenRowOf\(c, r\.sessionId\)/.test(uta) && !/for \(const \[winId, term\] of \[\.\.\.app\.sessions\]\)/.test(uta) && (sl.match(/\} else this\._closeSecondView\(winId, \{ backend: c\.backend \|\| 'claude', cid: c\.backendSessionId \}\);/g) || []).length === 1,   // stale-pins: kept — a deliberate «gone» check: piece 4 took the walk over app.sessions out of user-todos-actions.js
     'the For-you reply\'s reopen and the follow share ONE row loop (_reopenRowOf) — not a copy');
 }
 

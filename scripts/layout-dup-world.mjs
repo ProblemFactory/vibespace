@@ -247,6 +247,6 @@ export function pageOn(H, install, active, { DM = RealDM, LM = RealLM, attachMs 
   const doc = H.layouts();
   const records = Object.fromEntries(Object.entries(doc.desktops).map(([d, v]) => [d, v.autoSave.windows]));
   const W = world({ records, active, H, DM, LM, attachMs, extra: { _hideWelcome() {}, _buildTitleMeta: () => ({}), _hostLabel: () => '', _closeSidebarOnMobile() {} } });
-  for (const k of ['attachSession', '_focusExistingSession', '_focusPendingAttach', '_windowPending', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (proto[k]) W.app[k] = proto[k].bind(W.app);
+  for (const k of ['attachSession', '_focusExistingSession', '_focusPendingAttach', '_windowPending', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (proto[k]) W.app[k] = proto[k].bind(W.app);   // stale-pins: kept — _closeSecondView lives in src/lib/session-lifecycle.js (this copies SessionLifecycle's methods); only src/lib/user-todos-actions.js lost the token (the manager design's piece 4)
   return W;
 }

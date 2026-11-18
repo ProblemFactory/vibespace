@@ -91,7 +91,7 @@ console.log('B · the catalog\'s ONE read of the binary carries the fact (src/se
   // RED: the early return as it was — after a boot the binary in use, read by an older reader, is never read once more
   const NE = '    if (st.key === key && l.current === key && l.binaries[key] && l.binaries[key].reader === CMC.READER_VERSION && !l.binaries[key].retry) return l.binaries[key];';
   if (src.split(NE).length !== 2) throw new Error('anchor missing: the early return');
-  const mB = mutantCopies('level-signal-b', REPO).load('src/server/cli-model-catalog.js', src.replace(NE, '    if (st.key === key && l.current === key && !(l.binaries[key] && l.binaries[key].retry)) return l.binaries[key];'), 'boot-skips-reread');
+  const mB = mutantCopies('level-signal-b', REPO).load('src/server/cli-model-catalog.js', src.replace(NE, '    if (st.key === key && l.current === key && !(l.binaries[key] && l.binaries[key].retry)) return l.binaries[key];'), 'boot-skips-reread');   // stale-pins: kept — the RED control re-creates the release's early return on purpose
   const d3b = path.join(dir, 'data3b'); fs.mkdirSync(d3b);
   fs.writeFileSync(path.join(d3b, CAT.LEDGER), JSON.stringify({ ...led, binaries: { [k]: { ...led.binaries[k], reader: 2, level: undefined } } }));
   mB.boot({ dataDir: d3b, event: () => { }, log: () => { } });

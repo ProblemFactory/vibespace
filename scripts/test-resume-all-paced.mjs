@@ -34,7 +34,7 @@ function page(install, { LM, answer = (i, m) => ({ type: 'created', sessionId: '
   const H = hub(loadHandler(), DOC(recs), { alive: [S, T] });
   const P = pageOn(H, install, on, { attachMs: 60000, ...(LM ? { LM } : {}) });
   class Life {} install(Life);
-  for (const k of ['resumeSession', 'createSession', '_windowPending', '_snapshotWinBounds', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin', '_respawnAfterExit']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);
+  for (const k of ['resumeSession', 'createSession', '_windowPending', '_snapshotWinBounds', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin', '_respawnAfterExit']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);   // stale-pins: kept — _closeSecondView lives in src/lib/session-lifecycle.js (this copies SessionLifecycle's methods); only src/lib/user-todos-actions.js lost the token (the manager design's piece 4)
   Object.assign(P.app, { isMobile: false, _getBackendSessionDefaults: () => ({}), _viewIntoWindow: () => null });   // a refused resume's view-only rescue: the rig has no ChatView (not this suite's law)
   P.app.sidebar.getSessionConfig = () => ({}); P.app.sidebar._getSessionTasks = () => [];
   P.creates = []; P.reqOpts = []; P.answered = 0; P.inFlightAtSend = []; P.answerNow = [];
