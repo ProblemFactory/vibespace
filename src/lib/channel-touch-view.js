@@ -248,7 +248,7 @@ export function createChannelTouchView(view) {
     cardEl.classList.remove('chat-channel-touched');
     const box = boxOf(cardEl, false);
     if (box && !box.hidden) { box.hidden = true; box.replaceChildren(); }
-    if (box) apiBoxes.delete(box);
+    if (box) { apiBoxes.delete(box); if (!apiBoxes.size) letGoApi(); }
     chatApiCards(null, cardEl, []);
     chatProposalCards(null, cardEl, []);
   }
@@ -300,7 +300,7 @@ export function createChannelTouchView(view) {
     fitStrip(box);
     watchBox(box);
     chatApiCards(view.app, cardEl, rows.filter((r) => r.ops && r.ops.api && r.proposalId).map((r) => r.proposalId));
-    if (rows.some(apiFiled)) { apiBoxes.add(box); if (!apiOff) apiOff = onApiCards(view.app, rewordApi); } else apiBoxes.delete(box);
+    if (rows.some(apiFiled)) { apiBoxes.add(box); if (!apiOff) apiOff = onApiCards(view.app, rewordApi); } else { apiBoxes.delete(box); if (!apiBoxes.size) letGoApi(); }
     // lane chat-proposal-card: the proposals THIS call filed — the card after the rows, a chip on its row; a decision
     // moves the run fold's count («· 1 条提案待批准»), so the ChatView re-words its heads
     chatProposalCards(view.app, cardEl, T.filedProposals(touches), { onCount: () => { if (typeof view._updateRuns === 'function') view._updateRuns(); } });
@@ -308,9 +308,12 @@ export function createChannelTouchView(view) {
   /** B-d3d3: a decision writes no touch (no rebind comes) — the boxes holding a raw API row that filed a proposal re-word
    *  those rows whenever the shared API records change (approve, reject, a run's end, the sweep). */
   function rewordApi() {
-    if (st.disposed) { if (apiOff) { apiOff(); apiOff = null; } return; }   // a window closed without dispose lets go here
+    if (st.disposed) { letGoApi(); return; }   // a window closed without dispose lets go here
     for (const box of rewordApiRows(apiBoxes, apiFateLookup())) fitStrip(box);
+    if (!apiBoxes.size) letGoApi();   // the readers' should (02:12Z): the last box with a filed API row gone ⇒ the view lets go
   }
+  /** B-d3d3: the view stops following the API records (renderBox follows them again when a box needs it). */
+  function letGoApi() { if (apiOff) { apiOff(); apiOff = null; } }
   /** The box's ONE "+N more" / "Show less" control (created on demand, keyed by its class; its click reads the box). */
   function moreOf(box, create) {
     let more = box.querySelector(':scope > .chat-channel-touches-more');
@@ -499,7 +502,7 @@ export function createChannelTouchView(view) {
     if (ro) ro.disconnect();
     if (fitFrame) cancelAnimationFrame(fitFrame);
     watched.clear(); fitDue.clear();
-    if (apiOff) { apiOff(); apiOff = null; }
+    letGoApi();
     apiBoxes.clear();
   }
   return { observe, onTouch, onAttached, noteTurn, dispose, rebind, state: () => ({ touches: st.touches.length, loaded: st.loaded, turnAt: turnAt(), chip: st.chipKey }) };

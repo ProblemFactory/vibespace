@@ -3230,8 +3230,10 @@ async function chatReadLegs(ENGmod, name) {
           const tv = srcOf('channel-touch-view.js'), sb = srcOf('chat-status-bar.js');
           const pins = {
             words: tv.includes("set('.cct-words', T.rowWords(r, t, { apiFateOf }));") && tv.includes('const apiFateOf = apiFateLookup();   // B-d3d3'),
-            follow: tv.includes('if (rows.some(apiFiled)) { apiBoxes.add(box); if (!apiOff) apiOff = onApiCards(view.app, rewordApi); } else apiBoxes.delete(box);') && tv.includes('for (const box of rewordApiRows(apiBoxes, apiFateLookup())) fitStrip(box);'),
-            dispose: /function dispose\(\) \{[\s\S]*?if \(apiOff\) \{ apiOff\(\); apiOff = null; \}\n    apiBoxes\.clear\(\);\n  \}/.test(tv),
+            follow: tv.includes('if (rows.some(apiFiled)) { apiBoxes.add(box); if (!apiOff) apiOff = onApiCards(view.app, rewordApi); } else { apiBoxes.delete(box); if (!apiBoxes.size) letGoApi(); }') && tv.includes('for (const box of rewordApiRows(apiBoxes, apiFateLookup())) fitStrip(box);'),
+            dispose: /function dispose\(\) \{[\s\S]*?letGoApi\(\);\n    apiBoxes\.clear\(\);\n  \}/.test(tv),
+            // the readers' should (02:12Z): the last box gone (re-worded away, cleared, re-rendered without an API row) ⇒ let go
+            letsGo: tv.includes('    if (!apiBoxes.size) letGoApi();   // the readers\' should (02:12Z)') && tv.includes('function letGoApi() { if (apiOff) { apiOff(); apiOff = null; } }') && tv.includes('if (box) { apiBoxes.delete(box); if (!apiBoxes.size) letGoApi(); }'),
             chipOpen: sb.includes('const apiFateOf = apiFateLookup();   // B-d3d3: one lookup for the menu') && sb.includes('words.textContent = channelRowWords(r, t, { apiFateOf });'),
             chipFollow: /_paintChannelRowStates\(\) \{[\s\S]*?const apiFateOf = apiFateLookup\(\);[\s\S]*?channelRowWords\(r, t, \{ apiFateOf \}\)/.test(sb),
             menuFollows: sb.includes('      this._channelMenu = dropdown;\n      this._paintChannelRowStates();\n      this._followApiRecords();'),
