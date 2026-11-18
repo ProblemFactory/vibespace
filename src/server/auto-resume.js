@@ -429,6 +429,10 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const r = Number(w.run.resetAt) || 0;
     return r > 0 && r <= Date.now() + (early ? 0 : WF_RESET_SLACK_MS) ? w.run : null;
   };
+  // THE CONTINUE'S OWN RECORD (B-3d90 item 2): every continue this core delivers — the single one and the batch's — is noted
+  // through this ONE writer, so a rebuild still says VibeSpace sent it (test-message-origin: one writer per send door). Each send
+  // site keeps its own `sendToSession(` call: the spend census judges a continue site where it stands, beside its gate
+  const sentNoted = (s2, text, sent) => { if (sent) require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(s2), text, kind: 'auto-resume' }); return sent; };
   const gateHeld = new Map();   // id → the token of the bulk resume's hold on an abandoned gate (only THAT hold frees _arFiring — U2 cure's should)
   const wfPending = new Map();   // id → when ITS ARM's read started (the arm's own bookkeeping: never two reads for one live arm; said once)
   const wfOut = new Set();       // every read still OUT — the cap's count (U3 cure 3: a read that has not returned stays counted until it returns, its arm gone or not)
@@ -790,7 +794,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         const prompt = bulkPromptFor(e.kind, switchedTo);
         const carried = { note: e.kind === 'overload' ? '模型过载后的批量恢复' : '因用量停止后的批量恢复' };
         let ok = false;
-        try { ok = deliverContinue(session, verb, prompt, (s2, text) => { const sent = sendToSession(e.id, s2, text, carried); if (sent) require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(s2), text, kind: 'auto-resume' }); return sent; }); }   // B-3d90: the batch's continue has its own record too
+        try { ok = deliverContinue(session, verb, prompt, (s2, text) => sentNoted(s2, text, sendToSession(e.id, s2, text, carried))); }   // B-3d90: the batch's continue has its own record too
         catch (err) { log(`[auto-resume] ${e.id}: the '${verb.form}' resume verb threw in the bulk resume: ${err.message}`); ok = false; }
         if (!ok) { giveBack(); rec.failed.push({ id: e.id, name: e.name, why: 'not-delivered' }); continue; }
         open.delete(e.id);   // delivered: its hold becomes the charge below
@@ -1385,7 +1389,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // notice survives only where no prompt reached the conversation (the
       // refusal / far-reset sentences, which have no card of their own).
       const carried = { note: note && note.text ? note.text : null };
-      try { ok = deliverContinue(session, verb, continuePromptFor(note, label2, freshRun(id, a2)), (s2, text) => { const sent = sendToSession(id, s2, text, carried); if (sent) require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(s2), text, kind: 'auto-resume' }); return sent; }); } // B-3d90 item 2: the continue's own record — a rebuild still says VibeSpace sent it
+      try { ok = deliverContinue(session, verb, continuePromptFor(note, label2, freshRun(id, a2)), (s2, text) => sentNoted(s2, text, sendToSession(id, s2, text, carried))); } // B-3d90 item 2: the continue's own record — a rebuild still says VibeSpace sent it
       catch (e) { log(`[auto-resume] ${id}: the '${verb.form}' resume verb threw: ${e.message}`); ok = false; }
       if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); giveBack(); return false; }
       if (session._stoppedBy && session._stoppedBy.at) session._stopContinuedAt = session._stoppedBy.at;   // this stop has had its continue (the switch never arms it again)

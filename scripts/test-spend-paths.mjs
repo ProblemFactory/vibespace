@@ -4882,7 +4882,7 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   const arSrc = read('src/server/auto-resume.js');
   const files = trackedServerSource();
   const rows = censusOver(REPO, files).filter((h) => h.file === 'src/server/auto-resume.js' && h.prim === 'continue-send');
-  const bulkLine = arSrc.split('\n').findIndex((l) => /deliverContinue\(session, verb, prompt, \(s2, text\) => sendToSession\(e\.id/.test(l)) + 1;
+  const bulkLine = arSrc.split('\n').findIndex((l) => /deliverContinue\(session, verb, prompt, \(s2, text\) => sentNoted\(s2, text, sendToSession\(e\.id/.test(l)) + 1;
   const bulkRow = rows.find((h) => h.line === bulkLine);
   ok('§13 CENSUS: auto-resume.js holds exactly TWO continue sites — the single continue and the bulk resume — both GATED', rows.length === 2 && rows.every((h) => h.gated), JSON.stringify(rows));
   ok('§13 CENSUS: …the bulk site is gated by its OWN batch authorization (authorizeSpendBatch), not by a neighbour', bulkRow && bulkRow.gated && /^gate@/.test(bulkRow.via) && /authorizeSpendBatch\(/.test(arSrc.split('\n')[Number(bulkRow.via.split('@')[1]) - 1]), JSON.stringify(bulkRow));

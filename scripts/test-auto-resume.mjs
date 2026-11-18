@@ -1430,7 +1430,7 @@ console.log('\n14b. the continue says what the CLI\'s reset time was and was not
   const named = /the account "([^"]*)"/.exec(evil);
   ok('14b. the account label rides the peer-text belt: a frame tag inert, a line break folded, a bidi override gone, ≤ 80', !!named && !/<system-reminder/.test(evil) && !/\n/.test(evil) && !/\u202E/.test(evil) && named[1].length <= 80, named && named[1]);
   ok('14b. …a "$&" in the label is the label, not a replacement pattern', CPF({ cls: 'switched' }, 'A$&B').includes('the account "A$&B"'));
-  ok('14b. WIRING: the ONE fire choke point delivers continuePromptFor(note, label2) — what unblocked us, and the label it lands on', /deliverContinue\(session, verb, continuePromptFor\(note, label2, freshRun\(id, a2\)\), \(s2, text\) => sendToSession\(/.test(read('src/server/auto-resume.js')));
+  ok('14b. WIRING: the ONE fire choke point delivers continuePromptFor(note, label2) — what unblocked us, and the label it lands on', /deliverContinue\(session, verb, continuePromptFor\(note, label2, freshRun\(id, a2\)\), \(s2, text\) => sentNoted\(s2, text, sendToSession\(id, s2, text, carried\)\)\)/.test(read('src/server/auto-resume.js')));
 }
 
 // ── 16. WHY A SESSION STOPPED — the fact, through the REAL engine (lane auto-resume-bulk, .349) ──────────────────────
@@ -1712,8 +1712,9 @@ await (async () => {
   const META = path.join(tmpF, 'meta'), BUF = path.join(tmpF, 'buffers'); fs.mkdirSync(META, { recursive: true }); fs.mkdirSync(BUF, { recursive: true });
   const anyFn = () => new Proxy(function () { }, { get: (t, k) => (k === 'then' || typeof k === 'symbol' ? undefined : anyFn()), apply: () => undefined });
   const engine = new Proxy({ _vsuPending: new Map() }, { get: (t, k) => (k in t ? t[k] : anyFn()), has: () => true });
+  const liveF = new Map();   // the store's live conversations (its owner rule refuses a meta only when ANOTHER LIVE one owns it)
   const so = require(path.join(REPO, 'src/server/session-stdout.js')).create({
-    rootDir: tmpF, BUFFERS_DIR: BUF, META_DIR: META, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(tmpF, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: new Map(), engine,
+    rootDir: tmpF, BUFFERS_DIR: BUF, META_DIR: META, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(tmpF, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: liveF, engine,
     checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { attrib++; }, daemonPtyShim: (h) => h,   // COUNTED: on a pooled hub it scans every session (a sync readlink inside)
     sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn(),
   });
@@ -1743,9 +1744,12 @@ await (async () => {
   const c5 = await flip(require(AR_PATH), curedPF, SETS[1]), c50 = await flip(require(AR_PATH), curedPF, SETS[2]);
   ok('17c. LAW 2: ONE flip ON + OFF over 5 and over 50 conversations makes the SAME number of synchronous file calls (the arms saved once per flip, no meta read, no directory check per write) — in the loop and after it; and a flag patch does NO usage attribution (on a pooled hub: a scan of every session per write)', c5.inLoop === c50.inLoop && c5.after === c50.after && c5.inLoop <= 8 && c5.attrib === 0 && c50.attrib === 0, JSON.stringify({ c5, c50 }));
   ok('17c. …and it still DID it: the stopped ones were armed by ON (the U1 switch), and the last flag on disk is OFF with the meta\'s other fields kept', c50.armedOn === 25 && c50.flag === false && c50.name === 'n49', JSON.stringify(c50));
+  liveF.set('w-own-1', {});   // the meta's owner is a LIVE conversation
   const okOther = await so.patchSessionMeta('fl-own-1', { autoResume: true }, { owner: 'w-someone-else' });
   const okMine = await so.patchSessionMeta('fl-own-1', { autoResume: true }, { owner: 'w-own-1' });
-  ok('17c. the patch names its OWNER: a meta another session owns is never patched with this one\'s choice (said as a collision); CONTROL: its own ⇒ patched', okOther === false && okMine === true, JSON.stringify({ okOther, okMine }));
+  liveF.delete('w-own-1');   // …and gone: its meta is the next conversation's to write (the chain's owner rule — U1 restack cure)
+  const okGone = await so.patchSessionMeta('fl-own-1', { autoResume: false }, { owner: 'w-someone-else' });
+  ok('17c. the patch names its OWNER: a meta another LIVE session owns is never patched with this one\'s choice (said as a collision); CONTROL: its own ⇒ patched; a gone owner\'s meta ⇒ patched', okOther === false && okMine === true && okGone === true, JSON.stringify({ okOther, okMine, okGone }));
   const mS = mutantAr([['    if (saveHeld) { saveOwed = true; return; }\n', '']]);
   const r5 = mS.mod ? await flip(mS.mod, oldPF, SETS[3]) : null, r50 = mS.mod ? await flip(mS.mod, oldPF, SETS[4]) : null;
   ok('17c. RED: the U2 tip\'s flip (the meta read + the owner check\'s read per conversation, a save per arm) grows with N', mS.hits === 1 && !!r5 && !!r50 && r50.inLoop > r5.inLoop + 40, mS.err || JSON.stringify({ r5, r50 }));

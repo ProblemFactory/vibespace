@@ -27,6 +27,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BC = require('../src/bulk-resume-cost.js');
 let failed = 0, passed = 0;
 const ok = (name, cond, extra) => {
+  if (typeof name !== 'string') throw new Error('ok(name, cond): the name comes first — a swapped call');
   if (cond) { passed++; console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra !== undefined ? `\n    ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : ''}`);
 };

@@ -43,7 +43,7 @@ const QUOTA_WORDS = bulkPromptFor('quota', null);   // one login: the wall on it
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome for the client'); process.exit(0); }
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } };
+const check = (n, c, e) => { if (typeof n !== 'string') throw new Error('check(name, cond): the name comes first — a swapped call'); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 30000, step = 250) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 const PNG_DIR = process.env.VIBESPACE_ARB_PNG_DIR || null;
@@ -123,7 +123,7 @@ const freshReading = () => {
 
 const baseEnv = { ...process.env }; delete baseEnv.DISPLAY; delete baseEnv.WAYLAND_DISPLAY; delete baseEnv.DBUS_SESSION_BUS_ADDRESS; delete baseEnv.ANTHROPIC_API_KEY;
 const srvEnv = { ...baseEnv, ...VNC_ENV, HOME: fakeHome, XDG_RUNTIME_DIR: RUNTIME, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: FAKE_CLAUDE, PATH: FAKE_BIN + ':' + (process.env.PATH || '') };
-const hub = startHub({ root, tree: wt, port: PORT, env: srvEnv, log: 'arb-hub' });
+const hub = startHub({ root, tree: wt, port: PORT, env: { ...srvEnv, HOME: fakeHome }, log: 'arb-hub' });   // the HOME named in startHub's own env (test-fixture-isolation)
 const client = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1100,800', `--user-data-dir=${scratch('arb-client')}`, 'about:blank'], { stdio: 'ignore', detached: true });
 let cleaned = false;
 const cleanup = () => {

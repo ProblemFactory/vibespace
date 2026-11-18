@@ -133,6 +133,16 @@
    "sites": 9
   },
   {
+   "id": "auto-resume-cap-family",
+   "file": "src/server/auto-resume.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "reads model-family: capDrawnBy asks projectCacheForFamily whether the request's model draws the model cap that stopped the conversation (the model-cap hold, lg-recovery chain) — a family it does not know keeps the cap (fail closed); no release for a new family",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-of",
+   "sites": 1
+  },
+  {
    "id": "pool-lock-alias",
    "file": "src/server/usage-pool-engine.js",
    "keyedOn": "model",
