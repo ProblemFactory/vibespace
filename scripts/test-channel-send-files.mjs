@@ -736,7 +736,7 @@ ok(rej.length === 0, `the words reach the agent (real engine over the Slack adap
   const NO_RETRY = '        if (!next.go) throw stoppedUpload(e, n, next.stop);';
   const OLD_A = '    let lastErr = null;\n', ASK_LINE = "u = await api('files.getUploadURLExternal', { filename: f.name, length: f.data.length }, { convId, windowOf: () => windowOf(ASK_WINDOW) });";
   const rows = [
-    ['a copy that retries the COMPLETING call', copy(SS, 'slack.js', "try { await api('files.completeUploadExternal', c, { convId }); }", "try { try { await api('files.completeUploadExternal', c, { convId }); } catch (e0) { if (!(e0 && e0.code === 'transport')) throw e0; await api('files.completeUploadExternal', c, { convId }); } }", 'retry-complete'), retrySlackJudge, ['⑬']],
+    ['a copy that retries the COMPLETING call', copy(SS, 'slack.js', "try { await api('files.completeUploadExternal', c, { convId, windowOf: completeWindow }); }", "try { try { await api('files.completeUploadExternal', c, { convId, windowOf: completeWindow }); } catch (e0) { if (!(e0 && e0.code === 'transport')) throw e0; await api('files.completeUploadExternal', c, { convId, windowOf: completeWindow }); } }", 'retry-complete'), retrySlackJudge, ['⑬']],
     ['a copy that retries a 403', copy(SS, 'slack.js', "if (!(e instanceof ChannelError) || e.code !== 'transport') throw e;   // a 429, a 403", "if (!(e instanceof ChannelError) || (e.code !== 'transport' && e.code !== 'forbidden')) throw e;   // a 429, a 403", 'retry-403'), retrySlackJudge, ['⑪']],
     ['a copy that re-POSTs to the OLD upload URL', copy(SS.includes(OLD_A) ? SS.replace(OLD_A, '    let lastErr = null, u0 = null;\n') : '', 'slack.js', ASK_LINE, `u = u0 || (u0 = ${ASK_LINE.slice(4, -1)});`, 'old-url'), retrySlackJudge, ['⑧']],
     ['slack: a copy with NO retry (= the base)', copy(SS, 'slack.js', NO_RETRY, '        throw e;', 'slack-no-retry'), retrySlackJudge, ['⑧', '⑨', '⑫', '⑮']],
@@ -876,16 +876,16 @@ async function budgetJudge(S, L, ENGm) {
   const out = {};
   const fail = (pin, m) => { (out[pin] = out[pin] || []).push(m); };
   const slowSlack = (c, k) => { if (isPost(c)) { k.t += SLOW; return jsonRes(504, GATEWAY); } return okSlack(c); };
-  // a 30 s budget, each 504 answered 13 s after it left: attempt 2 fits (window 16 s), attempt 3 does not ⇒ said at 27 s
+  // a 30 s budget, each 504 answered 13 s after it left: attempt 2 fits (window 11 s — r4: the bytes leave the completing call 5 s), attempt 3 does not ⇒ said at 27 s
   { const { a, calls, clock } = retryRig(S, 'slack', slowSlack, { random: half });
     const { e } = await sendB(a, 'C0FIXTURE', files().slice(0, 1), 'x', 30000);
     const Ps = calls.filter(isPost);
-    if (!(e && e.code === 'transport' && e.retryable === true && e.message === 'slack files.upload: HTTP 504 (after 2 attempts (budget))' && e.detail.stopped === 'budget' && e.detail.attempts === 2 && Ps.length === 2 && Ps[0].win === 60000 && Ps[1].win === 16000 && clock.t - T0 === 27000)) fail('F3·adapter', `slack, a 30 s budget: ${Ps.length} POSTs (windows ${Ps.map((c) => c.win).join(' / ')} ms), said at ${clock.t - T0} ms, ${e ? `"${e.message}"` : 'no throw'} (want 2 POSTs, windows 60000 / 16000, «(after 2 attempts (budget))» at 27000)`);
+    if (!(e && e.code === 'transport' && e.retryable === true && e.message === 'slack files.upload: HTTP 504 (after 2 attempts (budget))' && e.detail.stopped === 'budget' && e.detail.attempts === 2 && Ps.length === 2 && Ps[0].win === 60000 && Ps[1].win === 11000 && clock.t - T0 === 27000)) fail('F3·adapter', `slack, a 30 s budget: ${Ps.length} POSTs (windows ${Ps.map((c) => c.win).join(' / ')} ms), said at ${clock.t - T0} ms, ${e ? `"${e.message}"` : 'no throw'} (want 2 POSTs, windows 60000 / 11000, «(after 2 attempts (budget))» at 27000)`);
   }
   { const { a, calls, clock } = retryRig(L, 'lark', (c, k) => { if (isUp(c)) { k.t += SLOW; return jsonRes(504, GATEWAY); } return okLark(c); }, { random: half });
     const { e } = await sendB(a, 'oc_fixture', files().slice(1), '', 30000);
     const U = calls.filter(isUp);
-    if (!(e && e.message === 'lark upload file: HTTP 504 (504) (after 2 attempts (budget))' && e.detail.stopped === 'budget' && U.length === 2 && U[0].win === 60000 && U[1].win === 16000 && clock.t - T0 === 27000)) fail('F3·adapter', `lark, a 30 s budget: ${U.length} uploads (windows ${U.map((c) => c.win).join(' / ')} ms), said at ${clock.t - T0} ms, ${e ? `"${e.message}"` : 'no throw'} (want 2, 60000 / 16000, at 27000)`);
+    if (!(e && e.message === 'lark upload file: HTTP 504 (504) (after 2 attempts (budget))' && e.detail.stopped === 'budget' && U.length === 2 && U[0].win === 60000 && U[1].win === 11000 && clock.t - T0 === 27000)) fail('F3·adapter', `lark, a 30 s budget: ${U.length} uploads (windows ${U.map((c) => c.win).join(' / ')} ms), said at ${clock.t - T0} ms, ${e ? `"${e.message}"` : 'no throw'} (want 2, 60000 / 16000, at 27000)`);
   }
   // the outbox's own budget (120 s) ⇒ 3 attempts as R⑨, «(after 3 attempts)» at 43 s
   { const { a, calls, clock } = retryRig(S, 'slack', slowSlack, { random: half });
@@ -893,7 +893,8 @@ async function budgetJudge(S, L, ENGm) {
     if (!(e && e.message === 'slack files.upload: HTTP 504 (after 3 attempts)' && e.detail.stopped === 'count' && calls.filter(isPost).length === 3 && clock.t - T0 === 43000)) fail('F3·adapter', `slack, the outbox's 120 s: ${calls.filter(isPost).length} POSTs, said at ${clock.t - T0} ms, ${e ? `"${e.message}"` : 'no throw'} (want 3, «(after 3 attempts)» at 43000)`);
   }
   // THE LANES (a real engine): an agent's direct reply read inline (collect: the 20 s window − 2 s) ⇒ ONE attempt, the
-  // receipt inline at 13 s as the base answered; the CLI's own 30 s (− 2 s) ⇒ 2 attempts (window 14 s), answered at 27 s;
+  // receipt inline at 13 s as the base answered; the CLI's own 30 s (− 2 s): r4 — the 504 at 13 s leaves 14 s after the
+  // wait, under the 15 s a Slack retry's three requests need ⇒ ONE attempt «(after 1 attempt (budget))» at 13 s, as inline;
   // the owner's Approve (the outbox's 120 s) ⇒ 3 attempts, 43 s
   const reasonOf = (q) => String((q && q.reason) || '');
   { const v = await budgetLane(ENGm, S, 'collect');
@@ -901,8 +902,8 @@ async function budgetJudge(S, L, ENGm) {
     if (!ok1) fail('F3·engine', `an agent's direct reply read inline: ${v.err || `${v.q.state} ${JSON.stringify(reasonOf(v.q))}, inline ${v.r.receiptPending === false ? 'yes' : 'no'}, answered at ${v.took} ms, ${v.posts.length} POSTs`} (want partly sent «(after 1 attempt (budget))», the receipt inline at 13000, 2 POSTs)`);
   }
   { const v = await budgetLane(ENGm, S, 'cli');
-    const ok2 = !v.err && v.q.state === 'sent' && reasonOf(v.q).endsWith('(transport: slack files.upload: HTTP 504 (after 2 attempts (budget)))') && v.took === 27000 && v.took < CLI_MS && v.posts.length === 3 && v.posts[2].win === 14000;
-    if (!ok2) fail('F3·engine', `an agent's direct reply, the CLI's 30 s: ${v.err || `${v.q.state} ${JSON.stringify(reasonOf(v.q))}, answered at ${v.took} ms, ${v.posts.length} POSTs (windows ${v.posts.map((c) => c.win).join(' / ')})`} (want «(after 2 attempts (budget))» at 27000 < 30000, the retry's window 14000)`);
+    const ok2 = !v.err && v.q.state === 'sent' && reasonOf(v.q).endsWith('(transport: slack files.upload: HTTP 504 (after 1 attempt (budget)))') && v.took === 13000 && v.took < CLI_MS && v.posts.length === 2;
+    if (!ok2) fail('F3·engine', `an agent's direct reply, the CLI's 30 s: ${v.err || `${v.q.state} ${JSON.stringify(reasonOf(v.q))}, answered at ${v.took} ms, ${v.posts.length} POSTs (windows ${v.posts.map((c) => c.win).join(' / ')})`} (want r4's «(after 1 attempt (budget))» at 13000 — 14 s left after the wait, a retry needs 15 s —, 2 POSTs)`);
   }
   { const v = await budgetLane(ENGm, S, 'approved');
     const ok3 = !v.err && v.q.state === 'sent' && reasonOf(v.q).endsWith('(transport: slack files.upload: HTTP 504 (after 3 attempts))') && v.took === 43000 && v.posts.length === 4;
