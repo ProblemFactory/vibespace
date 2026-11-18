@@ -25,6 +25,7 @@ const UW = require('../usage-cache-write.js');
 let _W = null, _dropRun = null;
 const HUB = { pendingText: (f) => pendingText(f), pendingIn: (d) => pendingIn(d), handOff: (...a) => handOff(...a) };   // what the cache module's hook calls
 const _pending = new Map();   // file → { bytes, gen, v, bytesV, calls: [{v, at, args}] | null (a sidecar), reading, again, producedGen, producedV, landedGen, epoch }
+const REPLAY_CAP = 16;        // the cure 2: a re-merge replays at most this many calls — past it the pending bytes (which hold every call's effect) stand alone until the next good landing
 const PACED_MS = 60000;       // the R1 hand-off's pace: only the exit's net (the exit writes whatever is dirty) and a re-merge that never came — R2's urgent bytes come first
 const cloneData = (x) => (x == null || typeof x !== 'object' ? x : JSON.parse(JSON.stringify(x)));
 const readFileOffLoop = (f) => fs.promises.readFile(f, 'utf-8');
@@ -47,7 +48,12 @@ function handTo(file, p, { urgent = false } = {}) {
     produce: () => { p.producedGen = p.gen; p.producedV = p.bytesV; return p.bytes; },
     onWritten: (ok) => {
       dropRunNow();   // a landing inside a run (a synchronous flush): the memo may hold the file's older text
-      if (!ok || _pending.get(file) !== p) return;
+      if (_pending.get(file) !== p) return;
+      // A FAILED LANDING (the U6.5 cure 2 — 主开发 14:04Z: the storage refusing writes for an hour made every event replay every
+      // call on the main loop): no replay protects anything now — another process's write cannot land on a refusing mount either
+      // — and the pending bytes already hold every call's effect: the list goes, the bytes stand alone until the next good landing
+      if (!ok) { if (p.calls) { p.calls = []; p.noReplay = true; } return; }
+      p.noReplay = false;
       p.epoch++;   // what the file holds changed: a re-merge whose read began before this is over an older file
       if (p.calls) p.calls = p.calls.filter((c) => c.v > p.producedV);   // the calls these bytes held are on disk now
       p.landedGen = p.producedGen; settle(file, p);   // the NEWEST bytes landed, nothing to replay ⇒ the file is the reading again
@@ -58,10 +64,12 @@ function handOff(file, call, out, { sidecar = false } = {}) {
   let p = _pending.get(file);
   if (!p) { p = { bytes: null, gen: 0, v: 0, bytesV: 0, calls: sidecar ? null : [], reading: false, again: false, producedGen: 0, producedV: 0, landedGen: 0, epoch: 0 }; _pending.set(file, p); }
   p.v++; p.gen++; p.bytes = sidecar ? out : JSON.stringify(out); p.bytesV = p.v;
-  if (!sidecar) { const a = call.args; p.calls.push({ v: p.v, at: call.at, args: { ...a, obj: cloneData(a.obj), set: cloneData(a.set), absentWindows: cloneData(a.absentWindows), passiveAnswer: cloneData(a.passiveAnswer), refused: cloneData(a.refused), refusalMarks: cloneData(a.refusalMarks) } }); }   // cloned: a caller may change its objects after the write returns
+  if (!sidecar && p.noReplay) { /* a failed landing or the cap: the bytes carry this call (R1 merged it over them) */ }
+  else if (!sidecar) { const a = call.args; p.calls.push({ v: p.v, at: call.at, args: { ...a, obj: cloneData(a.obj), set: cloneData(a.set), absentWindows: cloneData(a.absentWindows), passiveAnswer: cloneData(a.passiveAnswer), refused: cloneData(a.refused), refusalMarks: cloneData(a.refusalMarks) } }); if (p.calls.length > REPLAY_CAP) { p.calls = []; p.noReplay = true; } }   // cloned: a caller may change its objects after the write returns
   dropRunNow();
   if (sidecar) { handTo(file, p, { urgent: true }); return; }
   handTo(file, p);
+  if (p.noReplay) return;   // the bytes stand alone until the next good landing: no re-merge (nothing to replay)
   if (!p.reading) { p.reading = true; setImmediate(() => remerge(file, p)); } else p.again = true;
 }
 /** R2: the file's own reading NOW (off the loop), every pending call replayed over it, the bytes handed as an act. A read the
@@ -73,7 +81,7 @@ function remerge(file, p) {
   Promise.resolve().then(() => _readFile(file)).then((t) => { try { return { base: JSON.parse(t) || null }; } catch { return { base: null } } }, (e) => (e && e.code === 'ENOENT' ? { base: null } : { refused: true })).then(({ base, refused }) => {
     if (_pending.get(file) !== p) return;
     p.reading = false;
-    if (refused || !p.calls.length) { next(); return; }
+    if (refused || !p.calls.length || p.noReplay) { next(); return; }
     if (p.epoch !== epoch0) { p.again = true; next(); return; }
     const v = p.v;
     let cur = base;
@@ -95,4 +103,7 @@ function remerge(file, p) {
   }).catch(() => { p.reading = false; try { next(); } catch { } });   // a body that threw strands neither the copy nor a queued «again»
 }
 
-module.exports = { useStoreWriter, pendingText, pendingIn };
+/** a suite's view of one pending copy (never the bytes): {calls, reading, again, noReplay} | null */
+function pendingInfo(file) { const p = _pending.get(file); return p ? { calls: p.calls ? p.calls.length : null, reading: p.reading, again: p.again, noReplay: !!p.noReplay } : null; }
+
+module.exports = { useStoreWriter, pendingText, pendingIn, pendingInfo, REPLAY_CAP };

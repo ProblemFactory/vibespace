@@ -421,7 +421,8 @@ await (async () => {
     r.durable = (f) => { r.durables.push(path.basename(f)); for (const w of r.waiting.splice(0)) w(); return Promise.resolve(true); };
     /** a FACT to wait on: the re-merge handed this file as an act (durable asked) — bounded by turns, never by a clock */
     r.urgent = (base) => Promise.race([new Promise((res) => { const chk = () => (r.durables.includes(base) ? res(true) : r.waiting.push(chk)); chk(); }), turns(4000).then(() => false)]);
-    r.land = () => { for (const [f, o] of [...r.owed]) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, o.produce()); r.owed.delete(f); r.landed++; if (o.onWritten) o.onWritten(true, null); } };
+    // ok=false: the storage REFUSES the write (ENOSPC): the writer took the bytes, nothing landed, the store stays owed
+    r.land = (ok = true) => { for (const [f, o] of [...r.owed]) { if (!ok) { o.produce(); if (o.onWritten) o.onWritten(false, Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })); continue; } fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, o.produce()); r.owed.delete(f); r.landed++; if (o.onWritten) o.onWritten(true, null); } };
     return r;
   };
   const fileOf = (dir, k) => UW.cacheFileFor(dir, k);
@@ -513,7 +514,7 @@ await (async () => {
       await until(() => gates.length === 2);   // the second re-merge's read: IN FLIGHT
       if (land === 'inRead') w.land();          // THE LANDING, inside that read
       gates[1].go();
-      if (land === 'inRead') { await until(() => gates.length === 3); if (gates[2]) gates[2].go(); }   // the landing made the read stale: one more re-merge, nothing left to replay
+      if (land === 'inRead') { await until(() => gates.length === 3 || M.pendingText(f) === null); if (gates[2]) gates[2].go(); }   // the landing trimmed every call: the re-merge in flight finds nothing to replay (a third read only on an older copy)
       else { await until(() => handed() >= 2); w.land(); }   // the landing AFTER the re-merges: the law asked at the landing
       await until(() => M.pendingText(f) === null);
       const stuck = M.pendingText(f) !== null;
@@ -533,6 +534,55 @@ await (async () => {
     ok(!h0.stuck && h0.answered === 44, '⑪ THE CURE: the newest bytes landing AFTER the re-merges leave no pending copy either (the law asked at the landing)', JSON.stringify(h0));
     const h3 = await held(loadAs(src.replace(aLand, 'p.landedGen = p.producedGen;')), 'red-land', { land: 'after' });
     ok(h3.stuck, '⑪ CURE CONTROL (leg (1)\'s check made able to fail): the landing NOT asking the law ⇒ the copy stays after its newest bytes are on disk', JSON.stringify(h3));
+    // (7) THE CURE 2 (主开发 14:04Z — a storage that refuses writes, the fault the owner's container met today): THE REPLAY HAS A
+    // BOUND. Landings that FAIL K = 8 times while N = 40 events arrive: no re-merge replays more than the cap; a good landing
+    // afterwards leaves no pending copy and the file holds every event's limits. RED copy: without the bound (no cap, no drop
+    // at a failed landing) every event replays every call on the main loop
+    const untilT = async (cond) => { for (let i = 0; i < 4000 && !cond(); i++) await new Promise((r) => setImmediate(r)); return cond(); };
+    const bound = async (M, tag) => {
+      const w = standIn(); M.useStoreWriter(w, { dropRun: () => { } });
+      const key = 'sub-F-' + tag, f = UW.cacheFileFor(d11, key);
+      const idle = () => { const i = M.pendingInfo(f); return !i || (!i.reading && !i.again); };
+      let replays = 0, maxPerEvent = 0;
+      const realMerge = UW.mergeCacheObject;
+      UW.mergeCacheObject = (...x) => { if (x[2] && x[2].quiet) replays++; return realMerge(...x); };   // a replay = a quiet merge (the hub's re-merge)
+      try {
+        for (let n = 0; n < 40; n++) {
+          replays = 0;
+          captureRateLimitEvent({ cacheDir: d11, key, identityIds: [key], ev: n % 2 ? ev('seven_day', 10 + n, 1787500000) : ev('five_hour', 10 + n, 1786900000), now: 10000 + n * 10 });
+          await untilT(idle);
+          maxPerEvent = Math.max(maxPerEvent, replays);
+          if (n % 5 === 4) w.land(false);   // the storage refuses the write
+        }
+        w.land(true); await untilT(() => M.pendingText(f) === null);
+        const onDisk = JSON.parse(fs.readFileSync(f, 'utf8'));
+        return { maxPerEvent, gone: M.pendingText(f) === null, five: util(onDisk, 'fiveHour'), seven: util(onDisk, 'sevenDay') };
+      } finally { UW.mergeCacheObject = realMerge; M.useStoreWriter(null); }
+    };
+    const b1 = await bound(HUB, 'cure');
+    ok(b1.maxPerEvent <= HUB.REPLAY_CAP && b1.gone && b1.five === 48 && b1.seven === 49,
+      `⑪ THE CURE 2: landings that FAIL 8 times while 40 events arrive — no re-merge replays more than ${HUB.REPLAY_CAP} calls (at most ${b1.maxPerEvent}); a good landing afterwards leaves no pending copy and the file holds the events' latest limits`, JSON.stringify(b1));
+    const aFail = 'if (!ok) { if (p.calls) { p.calls = []; p.noReplay = true; } return; }', aCap = ' if (p.calls.length > REPLAY_CAP) { p.calls = []; p.noReplay = true; } }';
+    ok(src.split(aFail).length === 2 && src.split(aCap).length === 2, '⑪ ANCHORS: the failed landing\'s drop and the cap');
+    const b2 = await bound(loadAs(src.replace(aFail, 'if (!ok) return;').replace(aCap, ' }')), 'red');
+    ok(b2.maxPerEvent > HUB.REPLAY_CAP, `⑪ CURE 2 CONTROL: without the bound (a mutant copy) the replay grows with every event (${b2.maxPerEvent} merges for one event) — the main loop held longer at each`, JSON.stringify(b2));
+    // (8) the opposite error, PINNED: an event that arrives AFTER the writer took the bytes and BEFORE their landing — the
+    // landing of the older bytes leaves the copy (a newer generation waits) and every reader still answers the newer reading
+    {
+      const w = standIn(); HUB.useStoreWriter(w, { dropRun: () => { } });
+      const key = 'sub-G', f = UW.cacheFileFor(d11, key);
+      const idle = () => { const i = HUB.pendingInfo(f); return !i || (!i.reading && !i.again); };
+      captureRateLimitEvent({ cacheDir: d11, key, identityIds: [key], ev: ev('five_hour', 15, 1786900000), now: 20000 });
+      await untilT(idle);
+      const o = w.owed.get(f), taken = o.produce();   // the writer TOOK these bytes
+      captureRateLimitEvent({ cacheDir: d11, key, identityIds: [key], ev: ev('seven_day', 25, 1787500000), now: 20100 });   // an event in between
+      fs.writeFileSync(f, taken); o.onWritten(true, null);   // …then the OLDER bytes land
+      const kept = HUB.pendingText(f) !== null && util(UW.readCacheJson(f), 'sevenDay') === 25;
+      await untilT(idle); w.land(); await untilT(() => HUB.pendingText(f) === null);
+      ok(kept && HUB.pendingText(f) === null && util(JSON.parse(fs.readFileSync(f, 'utf8')), 'sevenDay') === 25 && util(JSON.parse(fs.readFileSync(f, 'utf8')), 'fiveHour') === 15,
+        '⑪ PINNED: the older bytes landing after a newer event arrived leave the copy (the newer generation waits; the reader answers it) — its own landing then clears it with both limits on disk', JSON.stringify({ kept }));
+      HUB.useStoreWriter(null);
+    }
     // (4) a SIDECAR (the `.window-` stamp) is handed whole; its one reader sees it before it lands
     const w4 = standIn(); HUB.useStoreWriter(w4, { dropRun: () => { } });
     UW.writeSidecar(d11, '.window-sub-B', { sevenDay: { resetsAt: 1787500000 }, at: 5000 });
