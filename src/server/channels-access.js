@@ -2612,10 +2612,12 @@ function create(engineCtx) {
       if (gone.size || (hasUntagged && !live.size)) drop.push({ key: en.key, gone, untagged: hasUntagged && !live.size });
     }
     if (!drop.length) return;
-    await store.index.update((ix) => {
+    await store.index.update(() => {
+      const rows = store.index.rows();   // B-dfa4 cut 2 cure: read-only, a touch per row changed (reaching ix.conversations was a whole-map touch: every kept index rebuilt)
       for (const d of drop) {
-        const e2 = ix.conversations[d.key];
+        const e2 = rows[d.key];
         if (!e2) continue;
+        store.index.touch(d.key);
         healP2(e2);
         e2.pending = e2.pending.filter((x) => !(x && ((x.for && d.gone.has(x.for)) || (!x.for && d.untagged))));
         for (const pk of d.gone) delete e2.pendingElidedBy[pk];

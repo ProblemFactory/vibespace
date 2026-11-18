@@ -3146,8 +3146,8 @@ function create(deps = {}) {
     fk.odd.delete(mk);
     if (!en) return;
     if (String(en.key) !== mk) fk.odd.add(mk);
-    if (en.unlistedAt || en.adapterId == null) return;
-    const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk };
+    if (en.unlistedAt) return;   // a null / missing account id is a Map key too: the walk's byId.get finds a record whose id is that
+    const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };   // the RAW value: grouped as the walk groups (byId.get)
     let arr = fk.heads.get(acct); if (!arr) fk.heads.set(acct, (arr = []));
     arr.splice(headAt(arr, e), 0, e);
     fk.at.set(mk, { acct, e });
@@ -3164,7 +3164,7 @@ function create(deps = {}) {
         const en = liveIx[mk];
         if (!en) continue;
         if (String(en.key) !== mk) fk.odd.add(mk);
-        if (!en.unlistedAt && en.adapterId != null) { const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk }; let arr = fk.heads.get(acct); if (!arr) fk.heads.set(acct, (arr = [])); arr.push(e); fk.at.set(mk, { acct, e }); }
+        if (!en.unlistedAt) { const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk }; let arr = fk.heads.get(acct); if (!arr) fk.heads.set(acct, (arr = [])); arr.push(e); fk.at.set(mk, { acct, e }); }
         if (FO.candidateOf(en, ctx.outbox.get(en.key), t, null)) fk.facts.add(mk);
       }
       for (const arr of fk.heads.values()) arr.sort(headCmp);
@@ -3197,7 +3197,10 @@ function create(deps = {}) {
       if (listedAccount(rec) && FO.candidateOf(en, ctx.outbox.get(en.key), t, attention.judgedFor(en, rec))) cands.push(en);
     }
     const heads = new Map();
-    for (const id of byId.keys()) { const arr = firstKept.heads.get(String(id)) || []; const out = []; for (const e of arr) { if (out.length >= FO.HEAD_ROWS) break; const en = liveIx[e.mk]; if (en && !en.unlistedAt && String(en.adapterId) === String(id)) out.push(en); } heads.set(id, out); }   // the walk's own grouping, held at the read (a row the touch signal has not moved yet is never drawn under the wrong account)
+    // the walk's own grouping, held at the read: the RAW account value, compared as byId.get compares it (a damaged row whose
+    // account id is not a string but SPELLS an account's id is dropped by the walk — so here; a row the touch has not moved yet
+    // is never drawn under the wrong account)
+    for (const id of byId.keys()) { const arr = firstKept.heads.get(id) || []; const out = []; for (const e of arr) { if (out.length >= FO.HEAD_ROWS) break; const en = liveIx[e.mk]; if (en && !en.unlistedAt && en.adapterId === id) out.push(en); } heads.set(id, out); }
     return firstReadOf(byId, ctx, cands, heads, true);
   }
   /** THE WALK — the first read's DEFINITION (every row, every call): the gates hold the kept read to it (firstReadParity). */
@@ -9035,7 +9038,8 @@ function create(deps = {}) {
       return e.adapter.live.deliver(ev);
     },
     // B-f32b r2: the census's definition (every row at `t`) and the paced census's clock walks, for the gates
-    // B-dfa4 cut 2: the gates' oracle — the KEPT first read and the WALK (its definition) over the same instant and outbox
+    // B-dfa4 cut 2: the gates' oracle — the KEPT first read and the WALK (its definition) over the same instant and outbox. Its
+    // kept read is a digest's first read in effect: it re-derives the badge's kept attention rows (attnFromFirst) as one does
     firstReadParity: () => attention.walk(() => {
       const t = now(), recs = adapterRecords(), byId = new Map(recs.adapters.map((r) => [r.id, r])), liveIx = store.index.live(), ctx = viewCtx(t);
       const kept = firstRead(byId, liveIx, ctx), walk = firstReadWalk(byId, liveIx, ctx);

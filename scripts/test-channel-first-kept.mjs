@@ -9,13 +9,16 @@
 //   ① PARITY: after every step — a row write (the heads move), a row made a candidate by its own facts, an unlisted and a
 //      relisted row, a birth, an @-mention, an outbox proposal awaiting approval and then sent, a write whose touch fires
 //      BEFORE the row changes (entry() outside an update), the clock past a wake's 24 h window, the clock gone back, a judge
-//      label, a damaged row (its key not its own) and a proposal under its own key, a removal (a whole-map touch) — the kept answer is the walk's, field for
+//      label, a damaged row (its key not its own) and a proposal under its own key, a head row moved to another account, a
+//      damaged row whose account id is not a string but spells an account's (the walk drops it), the account disabled, its
+//      record removed and added again, a removal (a whole-map touch) — the kept answer is the walk's, field for
 //      field (conversations, heads, attention, the candidate keys).
 //   ② THE PRICE: across the row steps the kept read is NOT rebuilt (one build, then a rebuild only where the law says: the
 //      clock gone back, a whole-map touch) and re-reads a handful of rows per read, never the 4 000 of another account.
 //   ③ RED CONTROLS — an engine copy with ONE line gone each; its own step goes red (the kept answer ≠ the walk's): the touch
 //      not kept · the outbox not compared · the clock gone back not rebuilt · the judge's rows not read · the damaged rows not
-//      re-read; and the kept candidates not re-judged — the same answer (every kept key is judged at the read) but a set that
+//      re-read · cut 2's grouping through String (three lines: a damaged row whose account id spells an account's is kept and
+//      its view throws); and the kept candidates not re-judged — the same answer (every kept key is judged at the read) but a set that
 //      only grows (the clock never takes a row out), red against the price.
 // Per-pid scratch (scripts/scratch.mjs).
 import fs from 'node:fs';
@@ -86,6 +89,16 @@ async function run(E, tag) {
   look('an outbox proposal under the damaged row\'s own key (no map key of that name)');
   await ix.update(() => { const rows = ix.rows(); rows[`${A}/own_33`].adapterId = OTHER; ix.touch(`${A}/own_33`); });
   look('a head row moved to another account (its adapterId)');
+  await ix.update(() => { const rows = ix.rows(); rows[`${A}/own_8`].adapterId = [A]; ix.touch(`${A}/own_8`); });   // not a string, but it SPELLS the account's id
+  look('a damaged row whose account id is not a string but spells the account\'s id (the walk drops it)');
+  const recA = () => e.adapterRecords().adapters.find((r) => r.id === A);
+  await e.store.adapters.update(() => { recA().enabled = false; });
+  look('the account disabled');
+  let kept = null;
+  await e.store.adapters.update(() => { const ad = e.store.adapters.live(); kept = ad.adapters.find((r) => r.id === A); ad.adapters = ad.adapters.filter((r) => r.id !== A); });
+  look('the account removed (its record)');
+  await e.store.adapters.update(() => { const ad = e.store.adapters.live(); kept.enabled = true; ad.adapters.push(kept); });
+  look('the account added again');
   await ix.update((x) => { delete x.conversations[`${A}/own_2`]; });
   look('a removal (a whole-map touch)');
   try { await e.stop(); } catch { }
@@ -98,10 +111,10 @@ const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const got = await run(ENG, 'kept');
 for (const s of got) ok(s.same === true, `${s.why}: the kept answer is the walk's (${s.cands} candidates)`, s.diff);
 const steps = got.length;
-ok(steps === 17, `seventeen steps (${steps})`, got.map((s) => s.why));
+ok(steps === 21, `twenty-one steps (${steps})`, got.map((s) => s.why));
 // every step's plant TOOK: the walk's own answer moved (a step that changed nothing would be a parity leg about nothing)
 const still = got.slice(1).filter((s, i) => s.walkAt === got[i].walkAt).map((s) => s.why);
-ok(still.length === 0, `every step changed the walk's own answer (the plants took): ${still.length ? still.join(' · ') : 'all seventeen'}`, still);
+ok(still.length === 0, `every step changed the walk's own answer (the plants took; a disabled account's heads read «off»): ${still.length ? still.join(' · ') : 'all twenty-one'}`, still);
 
 console.log('\n② the price: no rebuild but where the law says, a handful of rows re-read per read');
 const at = (why) => got.find((s) => s.why.startsWith(why));
@@ -131,13 +144,26 @@ for (const [tag, line, repl, step] of PLANTS) {
   const i = c.findIndex((x) => x.why.startsWith(step)), s = c[i];
   ok(i > 0 && c[i - 1].same === true && s.same === false, `RED CONTROL (${tag}): green up to «${step}…», where the kept answer differs from the walk's — red`, { before: c[i - 1] && c[i - 1].same, at: s });
 }
+// THE OLD GROUPING (cut 2 as lined): the account compared through String in all three places — the build, the move, the read
+{
+  const PAIRS = [
+    ["    const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };   // the RAW value: grouped as the walk groups (byId.get)", "    const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk };"],   // stale-pins: kept (cut 2's grouping, the control's copy)
+    ["        if (!en.unlistedAt) { const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };", "        if (!en.unlistedAt && en.adapterId != null) { const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk };"],   // stale-pins: kept (cut 2's grouping, the control's copy)
+    ["const arr = firstKept.heads.get(id) || []; const out = []; for (const e of arr) { if (out.length >= FO.HEAD_ROWS) break; const en = liveIx[e.mk]; if (en && !en.unlistedAt && en.adapterId === id) out.push(en); }", "const arr = firstKept.heads.get(String(id)) || []; const out = []; for (const e of arr) { if (out.length >= FO.HEAD_ROWS) break; const en = liveIx[e.mk]; if (en && !en.unlistedAt && String(en.adapterId) === String(id)) out.push(en); }"],   // stale-pins: kept (cut 2's grouping, the control's copy)
+  ];
+  ok(PAIRS.every(([now]) => SRC.split(now).length === 2), 'control setup (string-account): the three lines of the grouping are present once each', PAIRS.map(([now]) => SRC.split(now).length - 1));
+  let old = SRC; for (const [now, before] of PAIRS) old = old.replace(now, before);
+  const c = await run(MC.load('src/server/channels-engine.js', old, 'string-account'), 'ctl-string-account');
+  const i = c.findIndex((x) => x.why.startsWith('a damaged row whose account id is not a string')), s0 = c[i];
+  ok(i > 0 && c[i - 1].same === true && s0.same === false, `RED CONTROL (string-account): cut 2's grouping through String — green up to the damaged row, where the kept read keeps it and its view ${s0 && s0.threw ? `throws («${s0.threw}»)` : 'differs'} — red`, { before: c[i - 1] && c[i - 1].same, threw: s0 && s0.threw });
+}
 // the kept set's pruning is the PRICE, not the answer (every kept key is judged again at the read): its control is the set's size
 {
   const line = "      const again = new Set(fk.facts);";
   ok(SRC.split(line).length === 2, 'control setup (no-recheck): the line is present once');
   const c = await run(MC.load('src/server/channels-engine.js', SRC.replace(line, '      const again = new Set();'), 'no-recheck'), 'ctl-no-recheck');
   const i = c.findIndex((x) => x.why.startsWith('the clock past'));
-  ok(i > 0 && c[i].same === true && c[i].facts >= c[i - 1].facts, `RED CONTROL (no-recheck): the kept set never re-judged keeps the rows the clock ended (${c[i - 1].facts} → ${c[i].facts}) — the same answer, a set that only grows, red against the price`, c.map((x) => x.facts));
+  ok(i > 0 && c[i].same === true && c[i].facts >= c[i - 1].facts, `RED CONTROL (no-recheck): the kept set never re-judged keeps the rows the clock ended (${c[i - 1].facts} → ${c[i].facts}) — the same answer, so the leg that goes red is ②'s «the kept candidates are re-judged: the clock alone takes rows out of the kept set»`, c.map((x) => x.facts));
 }
 
 // THE MASS WRITE: a burst of touched rows (more than an eighth of the map) is one walk, never as many array moves
@@ -156,7 +182,7 @@ for (const [tag, line, repl, step] of PLANTS) {
   ok(k.same && k.builds === 1, `a burst of 1 500 moved rows (half the map) is ONE rebuild by the walk (${k.builds}), the same answer`, k);
   const line = "    if (!fk.built || !(t >= fk.t) || fk.dirty.size > (fk.at.size >> 3) + 256) {";
   const c = await burst(MC.load('src/server/channels-engine.js', SRC.replace(line, '    if (!fk.built || !(t >= fk.t)) {'), 'no-mass-b'), 'burst-ctl');
-  ok(c.same && c.builds === 0, `RED CONTROL (no-mass): without the rule the burst is 1 500 array moves, no rebuild (${c.builds}) — red against the price`, c);
+  ok(c.same && c.builds === 0, `RED CONTROL (no-mass): without the rule the burst is 1 500 array moves, no rebuild (${c.builds}) — the same answer, so the leg that goes red is «a burst of 1 500 moved rows (half the map) is ONE rebuild»`, c);
 }
 
 report();
