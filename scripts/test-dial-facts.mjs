@@ -598,6 +598,8 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
     // lane device-bundle-signing (design q-042 D2): the agent bundle's digest + the hub's single-use local proof — never a pairing token
     { file: 'src/agentd/client.js', re: /const sha256 = crypto\.createHash\('sha256'\)\.update\(bytes \|\| fs\.readFileSync\(this\._bundlePath\)\)\.digest\('hex'\);/, why: 'the agent BUNDLE\'s digest (the signed release\'s identity) — the bytes of a file, not a token' },
     { file: 'src/agentd/agentd.js', re: /const h = \(x\) => crypto\.createHash\('sha256'\)\.update\(String\(x\)\)\.digest\(\);/, why: 'the local proof of an upgrade of the hub\'s OWN daemon (a single-use nonce, compared digest-to-digest in constant time) — not a pairing token' },
+    // B-c632 cure (batch 71's reader): the fold key of a REFUSED device act — a digest of the act's whole argv, never a pairing token
+    { file: 'src/agentd/client.js', re: /const argvIdOf = \(p\) => \(p && \(p\.cmd != null \|\| p\.shell != null\) \? crypto\.createHash\('sha256'\)/, why: 'a refused act fold key (B-c632): a digest of the act argv (cmd + args or the shell line, + cwd) that tells two long commands apart — the words of a command, not a token' },
   ];
   const exempt = (file, line) => EXEMPT.some((x) => x.file === file && x.re.test(line));
   function doorCensus(files) {
