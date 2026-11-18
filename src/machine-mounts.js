@@ -132,7 +132,7 @@ class MachineMounts {
 
   list() {
     return this._state.mounts.map((m) => m.dir === 'pull'
-      ? { id: m.id, dir: 'pull', hostId: m.hostId, remotePath: m.remotePath, mountpoint: m.mountpoint, live: this._live.has(m.id), online: this._online(m.hostId), createdAt: m.createdAt }
+      ? { id: m.id, dir: 'pull', hostId: m.hostId, remotePath: m.remotePath, mountpoint: m.mountpoint, live: this._live.has(m.id), online: this._online(m.hostId), createdAt: m.createdAt, error: (this._pullErrors && this._pullErrors.get(m.id)) || null }
       : { id: m.id, dir: 'push', hostId: m.hostId, folder: m.folder, mountpoint: m.mountpoint, mode: m.mode, os: m.os, method: m.method, via: m.tunnelPort ? 'tunnel' : 'public', mountedAt: m.mountedAt, remoteMounted: !this._pushDown?.has(m.id) });
   }
 
@@ -475,6 +475,9 @@ class MachineMounts {
   }
 
   async _up(rec) {
+    // the cure (the readers' 3): a boot release of THIS record still running is WAITED for — never raced
+    const rel = this._releasing && this._releasing.get(rec.id);
+    if (rel) { try { await rel; } catch { } }
     if (this._live.has(rec.id) || this._mounting.has(rec.id)) return;
     this._mounting.add(rec.id);
     try {
@@ -506,7 +509,13 @@ class MachineMounts {
       if (!this._online(rec.hostId)) { try { await h.teardown(); } catch { } throw new Error('the machine went offline while its folder was being mounted'); }
       entry = { teardown: h.teardown, mountpoint: rec.mountpoint, at: Date.now() };
       this._live.set(rec.id, entry);
+      if (this._pullErrors && this._pullErrors.delete(rec.id)) this._notify();
       this.log(`pull mount up: ${rec.hostId}:${rec.remotePath} → ${rec.mountpoint}`);
+    } catch (e) {
+      // the cure (the readers' 1): a release that HUNG is SAID where the row is read (list().error), once, and the record
+      // leaves the mounting set (the finally) so the next check may try again — never a silent forever-«mounting»
+      if (e && e.code === 'unmount_hung') { const said = this._pullErrors || (this._pullErrors = new Map()); if (said.get(rec.id) !== e.message) { said.set(rec.id, e.message); this._notify(); } }
+      throw e;
     } finally { this._mounting.delete(rec.id); }
   }
 
@@ -629,16 +638,28 @@ class MachineMounts {
   async restore() {
     this.gcOrphanTokens();
     const byHost = new Set(this._state.mounts.map((m) => m.hostId));
-    const released = [];
+    const offline = [];
     for (const hostId of byHost) {
       if (this._online(hostId)) { try { this.onMachineLinked(hostId); } catch { } }
       // B-fcc7: an offline machine's recorded pull may still be mounted by the LAST hub's rclone (detached, it outlived
       // that hub; its bridge died with it) — released now, not at the next mount: the reader meets an empty folder
-      else for (const rec of this._state.mounts.filter((m) => m.dir === 'pull' && m.hostId === hostId && !this._live.has(m.id) && !this._mounting.has(m.id))) {
-        released.push(DM.releaseStale(rec.mountpoint, { log: this.log }).catch(() => { }));
-      }
+      else offline.push(...this._state.mounts.filter((m) => m.dir === 'pull' && m.hostId === hostId && !this._live.has(m.id) && !this._mounting.has(m.id)));
     }
-    await Promise.all(released); // children and async /proc reads only (the boot's caller does not wait on restore)
+    // the cure (the readers' 3): ONE AFTER ANOTHER (never every release at once), each MARKED while it runs — a machine that
+    // dials in meanwhile waits for its record's release in _up instead of racing it (children and async /proc reads only;
+    // the boot's caller does not wait on restore)
+    // every one is MARKED at once (a dial-in during the first release must wait for ITS record's too), run one by one
+    this._releasing = this._releasing || new Map();
+    let prev = Promise.resolve();
+    for (const rec of offline) {
+      const p = prev.then(() => DM.releaseStale(rec.mountpoint, { log: this.log })).catch((e) => {
+        if (e && e.code === 'unmount_hung') { (this._pullErrors = this._pullErrors || new Map()).set(rec.id, e.message); this._notify(); }
+      });
+      this._releasing.set(rec.id, p);
+      p.then(() => { if (this._releasing.get(rec.id) === p) this._releasing.delete(rec.id); });
+      prev = p;
+    }
+    await prev;
   }
 
   /** The machine is being removed/unpaired — drop its mounts (records + live

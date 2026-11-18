@@ -1048,9 +1048,10 @@ export function installSidebarMounts(Sidebar) {
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
       if (m.dir === 'pull') {
-        const state = m.live ? 'ok' : (m.online ? 'off' : 'err');
+        // B-fcc7 cure: a pull whose folder could not be released says so here (the server's words, as a cloud mount's error)
+        const state = m.live ? 'ok' : (m.error ? 'err' : (m.online ? 'off' : 'err'));
         top.innerHTML = `
-          <span class="mounts-dot mounts-dot-${state}" title="${m.live ? escHtml(tr('Mounted')) : escHtml(tr('Pending — remounts when the machine is reachable'))}"></span>
+          <span class="mounts-dot mounts-dot-${state}" title="${m.live ? escHtml(tr('Mounted')) : m.error ? escHtml(m.error) : escHtml(tr('Pending — remounts when the machine is reachable'))}"></span>
           <b class="mounts-name" title="${escHtml(h.name || m.hostId)}:${escHtml(m.remotePath)} → ${escHtml(m.mountpoint)}">${escHtml(m.remotePath.split('/').pop() || m.remotePath)}</b>
           <span class="mounts-badge" title="${escHtml(tr('Mounted at {mp} (read-only, over the device link)', { mp: m.mountpoint }))}">⬇ ${escHtml(tr('from machine'))}</span>`;
         if (!m.live) {

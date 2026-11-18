@@ -124,20 +124,40 @@ async function killMountDaemons(mountpoint, { procRoot = '/proc', kill = null, s
  *  host — the repo's own image installs fuse3), fusermount when it is not on PATH; neither ⇒ said ONCE (adversarial r1 #3: a
  *  missing program silently released nothing while every row said offline). */
 let unmountMissingSaid = false;
-function lazyUnmount(mountpoint, { say = null } = {}) {
-  const ran = (c, r) => { c.on('exit', (code) => r(code === 0 ? 'ok' : 'no')); c.on('error', (e) => r(e && e.code === 'ENOENT' ? 'missing' : 'no')); };
+// THE BOUND (主开发's «taken» of batch 15, its readers' first small one): an unmount child that has not answered in
+// UNMOUNT_MS is ended by its handle and answers 'hung' — said once by its caller, never waited on for ever; while that child
+// has not exited (a stat stuck in the kernel keeps it alive), the mount point gets no second child (it answers 'hung' at once)
+const UNMOUNT_MS = 10000;
+const unmountStuck = new Set();
+function lazyUnmount(mountpoint, { say = null, ms = UNMOUNT_MS } = {}) {
+  if (unmountStuck.has(mountpoint)) return Promise.resolve('hung');
+  const ran = (c, r) => {
+    let done = false;
+    const end = (v) => { if (done) return; done = true; clearTimeout(t); r(v); };
+    const t = setTimeout(() => {
+      if (done) return;
+      unmountStuck.add(mountpoint); c.once('exit', () => unmountStuck.delete(mountpoint));
+      try { c.kill('SIGKILL'); } catch { }
+      end('hung');
+    }, ms);
+    if (t.unref) t.unref();
+    c.on('exit', (code) => end(code === 0 ? 'ok' : 'no'));
+    c.on('error', (e) => end(e && e.code === 'ENOENT' ? 'missing' : 'no'));
+  };
   const fuse3 = () => new Promise((r) => { try { ran(spawn('fusermount3', ['-uz', mountpoint], { stdio: 'ignore' }), r); } catch { r('missing'); } });
   const fuse2 = () => new Promise((r) => { try { ran(spawn('fusermount', ['-uz', mountpoint], { stdio: 'ignore' }), r); } catch { r('missing'); } });
   return fuse3().then((a) => (a === 'missing' ? fuse2() : a)).then((b) => {
     if (b === 'missing' && !unmountMissingSaid) { unmountMissingSaid = true; try { (say || ((l) => console.warn(l)))(`pull mount ${mountpoint}: neither fusermount3 nor fusermount is on PATH — a pull mount point cannot be released (install fuse3)`); } catch { } }
+    if (b === 'hung') { try { (say || ((l) => console.warn(l)))(`pull mount ${mountpoint}: could not release the folder — its unmount did not answer in ${Math.round(ms / 1000)} s (ended; tried again at the next check)`); } catch { } }
     return b;
   });
 }
 /** B-fcc7: release what a pull mount left on THIS machine — the lazy unmount, then the stale daemons of exactly that mount
  *  point (B-1ea6). The pre-clean of every mount, and the boot's answer for a recorded pull whose machine is offline: its
  *  last hub's rclone must not stay a FUSE entry whose every read fails ENOTCONN until the next mount. */
-async function releaseStale(mountpoint, { log = () => {} } = {}) {
-  await lazyUnmount(mountpoint, { say: log });
+async function releaseStale(mountpoint, { log = () => {}, ms = UNMOUNT_MS } = {}) {
+  // a release whose unmount HUNG is a failure by name (`unmount_hung`): nothing is mounted over a folder still held
+  if ((await lazyUnmount(mountpoint, { say: log, ms })) === 'hung') throw Object.assign(new Error(`could not release the folder ${mountpoint} — its unmount did not answer in ${Math.round(ms / 1000)} s`), { code: 'unmount_hung' });
   return killMountDaemons(mountpoint, { say: log }); // non-Linux: no /proc — the lazy unmount alone
 }
 
@@ -433,4 +453,4 @@ function waitMounted(mp, timeoutMs) {
   });
 }
 
-module.exports = { deviceFolderMount, heldRefresher, pullMountArgs, PULL_ROW, isMountDaemonOf, mountDaemonsOf, killMountDaemons, releaseStale, lazyUnmount };
+module.exports = { deviceFolderMount, heldRefresher, pullMountArgs, PULL_ROW, isMountDaemonOf, mountDaemonsOf, killMountDaemons, releaseStale, lazyUnmount, UNMOUNT_MS, unmountStuckOf: (mp) => unmountStuck.has(mp) };
