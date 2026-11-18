@@ -4668,20 +4668,40 @@ await section(async () => { const NAME_DIGESTS = new Set([
   const NAME_EXEMPT = {};   // none since .382 (int382 hygiene): the one same-letters local was renamed (src/design-viewer-entry.js) — the map stays for the next such word, pinned by its count
   const MEMO_BY_DIGESTS = new WeakMap();   // B-2c31: one memo per digest set — the five controls share theirs
   const nameCensus = (tree, digests, exempt) => {
-    if (!MEMO_BY_DIGESTS.has(digests)) MEMO_BY_DIGESTS.set(digests, { memo: new Map(), raw: new Map() });
-    const { memo, raw } = MEMO_BY_DIGESTS.get(digests), bad = [];
-    // B-2c31: memoised by the word AS WRITTEN (a repeat costs one lookup, no lower-casing) over its lower-cased digest; the runs are
-    // walked with one regex's exec, not an array of every word of a file (the tree is ~50 MB of text)
-    const RUN = /[A-Za-z]+/g;
+    if (!MEMO_BY_DIGESTS.has(digests)) MEMO_BY_DIGESTS.set(digests, { memo: new Map(), raw: new Map(), byBytes: new Map() });
+    const { memo, raw, byBytes } = MEMO_BY_DIGESTS.get(digests), bad = [];
+    // B-2c31: memoised by the word AS WRITTEN (a repeat costs one lookup, no lower-casing) over its lower-cased digest.
+    // B-128b: the runs are walked over each file's BYTES — an ASCII letter is one byte in UTF-8 and no byte of a multi-byte
+    // character is one, so the runs are the same as the decoded text's. A run is keyed by a small integer mixed from a hash of
+    // its bytes and its length (no number is made per run); the slot keeps the bytes of the word it was made for, and a run is
+    // that word only when every byte matches (a different word under the same key takes the string road below, exact as
+    // before). A word seen before makes no string at all. Measured on the test machine (one thread, 2 992 files, 138.8 MB):
+    // see the B-128b line.
     const hit = (w) => { let v = raw.get(w); if (v === undefined) { const k = w.toLowerCase(); v = memo.get(k); if (v === undefined) { v = digests.has(crypto.createHash('sha256').update(k).digest('hex')); memo.set(k, v); } raw.set(w, v); } return v; };
-    for (const [rel, t] of tree) { let n = 0, m; RUN.lastIndex = 0; while ((m = RUN.exec(t))) if (hit(m[0])) n++; if (n !== (exempt[rel] || 0)) bad.push(`${rel} (${n})`); }
+    const LETTER = new Uint8Array(256); for (let c = 65; c <= 90; c++) LETTER[c] = LETTER[c + 32] = 1;
+    for (const [rel, t] of tree) {
+      const b = typeof t === 'string' ? Buffer.from(t, 'utf8') : t, len = b.length;
+      let n = 0, i = 0;
+      while (i < len) {
+        if (LETTER[b[i]] === 0) { i++; continue; }
+        const s = i; let h = 0x811c9dc5;
+        do { h = Math.imul(h ^ b[i], 16777619); i++; } while (i < len && LETTER[b[i]] === 1);
+        const L = i - s, key = (h ^ Math.imul(L, 0x9e3779b1)) & 0x3fffffff;   // a small integer key: no number is made per run
+        const e = byBytes.get(key);
+        if (e !== undefined && e.L === L) { const wb = e.b; let j = 0; while (j < L && wb[j] === b[s + j]) j++; if (j === L) { if (e.v) n++; continue; } }
+        const w = b.toString('latin1', s, i), v = hit(w);
+        if (e === undefined) byBytes.set(key, { L, b: Buffer.from(w, 'latin1'), v });
+        if (v) n++;
+      }
+      if (n !== (exempt[rel] || 0)) bad.push(`${rel} (${n})`);
+    }
     return bad;
   };
   const ls = spawnSync('git', ['-C', REPO, 'ls-files', '-z', '-co', '--exclude-standard'], { encoding: 'utf-8', env: gitEnvFrom(process.env), maxBuffer: 64 * 1024 * 1024 });
   const tree = [];
   for (const rel of String(ls.stdout || '').split('\0').filter(Boolean)) {
     let b; try { b = fs.readFileSync(path.join(REPO, rel)); } catch { continue; }
-    if (!b.subarray(0, 8192).includes(0)) tree.push([rel, b.toString('utf8')]);
+    if (!b.subarray(0, 8192).includes(0)) tree.push([rel, b]);   // B-128b: the bytes — the census walks them, never a decoded copy
   }
   const bad = nameCensus(tree, NAME_DIGESTS, NAME_EXEMPT);
   ok(ls.status === 0 && tree.length > 1000 && bad.length === 0, `public repo hygiene: ${tree.length} text files carry none of the ${NAME_DIGESTS.size} listed real names (offenders: ${bad.join(', ') || 'none'}${ls.status === 0 ? '' : `; git ls-files exit ${ls.status}`})`);
@@ -4689,7 +4709,7 @@ await section(async () => { const NAME_DIGESTS = new Set([
   // planted in a scratch copy of one doc as a word, inside an id, before CJK and in capitals ⇒ red; one extra
   // same-letters word in an exempt file ⇒ red; the unplanted copy ⇒ green.
   const PLANT = 'quillonve', D = new Set([crypto.createHash('sha256').update(PLANT).digest('hex')]);
-  const doc = tree.find(([rel]) => rel === 'docs/kb-file-structure.md')?.[1] || '';
+  const doc = String(tree.find(([rel]) => rel === 'docs/kb-file-structure.md')?.[1] || '');
   const ctl = [
     ['the clean copy', [['docs/kb-file-structure.md', doc]], {}, false],
     ['a planted word', [['docs/kb-file-structure.md', `${doc}\nThe owner saw Quillonve here.\n`]], {}, true],
@@ -4698,7 +4718,13 @@ await section(async () => { const NAME_DIGESTS = new Set([
     ['one more in an exempt file', [['docs/kb-file-structure.md', `${doc}\nquillonve x quillonve\n`]], { 'docs/kb-file-structure.md': 1 }, true],
   ];
   const r = ctl.map(([n, files, ex, wantRed]) => ({ n, ok: doc.length > 0 && (nameCensus(files, D, ex).length > 0) === wantRed, wantRed }));
-  ok(r.every((x) => x.ok), `public repo hygiene CONTROLS: ${r.map((x) => `${x.n} (${x.ok ? (x.wantRed ? 'RED' : 'green') : 'WRONG'})`).join(', ')}`);
+  // B-128b: THE BYTE CHECK — two invented words of one length under the same key (found offline; the same mix proves it here): the
+  // listed one written AFTER the other is still counted, the other alone is not (a census that trusted the key would count the
+  // listed word as the other). Folded into this check: the suite's titles stay as they were.
+  const key128 = (w) => { let h = 0x811c9dc5; for (let i = 0; i < w.length; i++) h = Math.imul(h ^ w.charCodeAt(i), 16777619); return (h ^ Math.imul(w.length, 0x9e3779b1)) & 0x3fffffff; };
+  const [K1, K2] = ['zqqqaaglup', 'zqxqauwosz'], DK = new Set([crypto.createHash('sha256').update(K1).digest('hex')]);
+  const byteCheck = key128(K1) === key128(K2) && nameCensus([['docs/kb-file-structure.md', `${doc}\n${K2} ${K1}\n`]], DK, {}).length === 1 && nameCensus([['docs/kb-file-structure.md', `${doc}\n${K2}\n`]], DK, {}).length === 0;
+  ok(r.every((x) => x.ok) && byteCheck, `public repo hygiene CONTROLS: ${r.map((x) => `${x.n} (${x.ok ? (x.wantRed ? 'RED' : 'green') : 'WRONG'})`).join(', ')}`);
 });
 // §81 A FIXTURE NEVER NAMES A FIXED LOOPBACK ENDPOINT (lane fixture-ports, B-b6cd, 2026-10-06 — mirror-green-220). The
 // fake agent-browser of test-browser-ephemeral answered `get cdp-url` with the FIXED ws://127.0.0.1:19888 as its "dead"
