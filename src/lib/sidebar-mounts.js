@@ -283,17 +283,20 @@ export function installSidebarMounts(Sidebar) {
       // rclone powers every mount type — offer a one-click install when absent
       if (d.rcloneAvailable === false) {
         const warn = document.createElement('div');
-        warn.className = 'mounts-env-card mounts-rclone-warn';
-        warn.innerHTML = '<div class="mounts-env-head"><b>One-time setup needed</b><span>Connecting storage needs a small helper tool. Install it here — no terminal required.</span></div>';
+        // lane ui-phone-and-fit pick 1 (the hosted fit run — a runner with no rclone drew this card at 200–360 px with its sentence
+        // cut to «Connecting storage needs…» and «Install rclone» on two lines, in English on a zh page): the BUTTON BAR — the
+        // words wrap, the button wraps WHOLE to the next line — and every word in the person's language
+        warn.className = 'mounts-env-card mounts-rclone-warn btn-bar';
+        warn.innerHTML = `<div class="mounts-env-head btn-bar-text"><b>${escHtml(tr('One-time setup needed'))}</b><span>${escHtml(tr('Connecting storage needs a small helper tool. Install it here — no terminal required.'))}</span></div>`;
         const ib = document.createElement('button');
         ib.className = 'mounts-btn mounts-btn-primary';
-        ib.textContent = 'Install rclone';
+        ib.textContent = tr('Install rclone');
         ib.onclick = async () => {
-          ib.disabled = true; ib.textContent = 'Downloading…';
+          ib.disabled = true; ib.textContent = tr('Downloading…');
           try {
             const r = await api('/api/mounts/rclone/install', { method: 'POST' });
-            showToast(`rclone ${r.version} installed`);
-          } catch (e) { showToast(e.message || 'Install failed', { type: 'error' }); }
+            showToast(tr('rclone {version} installed', { version: r.version }));
+          } catch (e) { showToast(e.message || tr('Install failed'), { type: 'error' }); }
           this._renderMounts();
         };
         warn.appendChild(ib);

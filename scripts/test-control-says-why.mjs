@@ -154,7 +154,8 @@ ok(/const submitSays = pressSays\(submitBtn, \(\) => \{ const left = questions\.
     'new profile: a row nobody can pick here (a desktop window, a backend this version cannot use) is not drawn; a row that waits for the person (the consent, This computer) stays; the list says where a desktop window goes', JSON.stringify(r)); }
 ok(/\} else if \(v\.clusterWhyCode === 'no-preset' && v\.source !== 'cluster'\) \{/.test(IW) && /if \(choice\.childNodes\.length\) card\.appendChild\(choice\);/.test(IW),
   'integrations: no «用集群默认» radio pair where no cluster preset of the kind exists (the store\'s own code); a preset that went keeps its radio and its why');
-ok(/function makeSwitch\(on, \{ disabled = false, label, onChange \}\) \{\n  if \(disabled\) return null;/.test(PU) && /if \(sw\) row\.appendChild\(sw\);/.test(PU) && /if \(!cat\) \{ const none = document\.createElement\('span'\); none\.className = 'mounts-btn plugin-gear plugin-gear-none';/.test(PU) && !/b\.disabled = !cat/.test(PU),
+ok(/function makeSwitch\(on, \{ disabled = false, label, onChange \}\) \{\n  if \(disabled\) return null;/.test(PU) && (/if \(sw\) row\.appendChild\(sw\);/.test(PU) || (/controls: \[c, sw, install, gear\]/.test(PU) && /const list = \(controls \|\| \[\]\)\.filter\(Boolean\);/.test(read('src/lib/rail-row.js')))) &&   // the .407 move: ui-phone-and-fit's rail row draws the controls it is given and drops a null switch
+    /if \(!cat\) \{ const none = document\.createElement\('span'\); none\.className = 'mounts-btn plugin-gear plugin-gear-none';/.test(PU) && !/b\.disabled = !cat/.test(PU),
   'plugins: a switch that cannot be used is not drawn (the chip says why and is the door), a plugin with nothing to configure has no ⚙');
 
 // ── ⑦ one menu placement ──

@@ -606,7 +606,7 @@ export function installExplorerOps(FileExplorer) {
     const esc = (x) => String(x || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     body.innerHTML = `
       <label style="display:block;margin-bottom:8px">${t('Page name')}<input class="dialog-input" id="pp-name" value="${esc(existing?.name || name.replace(/\.html?$/i, ''))}"></label>
-      <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><input type="checkbox" id="pp-public" ${existing?.public ? 'checked' : ''}> ${t('Public — anyone with the link can view (no login)')}</label>
+      <label class="dialog-check-row" style="margin-bottom:10px"><input type="checkbox" id="pp-public" ${existing?.public ? 'checked' : ''}> ${t('Public — anyone with the link can view (no login)')}</label>
       ${existing ? `<div class="pp-url" style="font-size:12px;margin-bottom:10px;word-break:break-all;opacity:.8">${esc(absUrl(existing.url))}</div>` : ''}
       <div class="dialog-footer" style="display:flex;gap:8px;justify-content:flex-end">
         ${existing ? `<button class="btn-cancel" id="pp-unpub">${t('Unpublish')}</button><button class="btn-cancel" id="pp-copy">${t('Copy link')}</button><button class="btn-cancel" id="pp-open">${t('Open')}</button>` : ''}

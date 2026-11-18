@@ -259,6 +259,15 @@ export const LABEL_FIX_REVERT = [
   ['.dialog-body label.dap-row, .dap-row { display', '.dap-row { display'],
   ['.dialog-body label.exit-access-mode, .dialog-body label.exit-access-ask, .exit-access-mode, .exit-access-ask { display', '.exit-access-mode, .exit-access-ask { display'],
 ];
+/** ui-phone-and-fit pick 1: THE CHECK ROW — every dialog label whose own child is a checkbox or a radio is a row, so a dialog's own
+ *  selectors are no longer the only fix; a control that rebuilds a PRE-FIX sheet takes this back too (the rules kept, matching
+ *  nothing). Every N-radio / allow-row control spreads it: test-pair-dialog-ui, test-exit-access-ui, test-pair-dialog-polish. */
+export const CHECK_ROW_REVERT = [
+  ['.dialog-body label:where(:has(> input:is([type="checkbox"], [type="radio"]))) {', '.dialog-body label:where(.vs-pre-check-row) {'],
+  ['.dialog-body label:where(:has(> input:is([type="checkbox"], [type="radio"]))) > input {', '.dialog-body label:where(.vs-pre-check-row) > input {'],
+  ['.dialog-body label:where(:has(> input:is([type="checkbox"], [type="radio"]))) > :not(input)', '.dialog-body label:where(.vs-pre-check-row) > :not(input)'],
+];
+LABEL_FIX_REVERT.push(...CHECK_ROW_REVERT);
 /** JS that loads `cssText` IN PLACE of /style.css (the same cascade position) — a control's patched copy, then back. */
 export const swapStyleJs = (cssText) => `(() => { const old = document.getElementById('vs-pairing-css') || document.querySelector('link[rel=stylesheet][href*="/style.css"]'); if (!old) return false; const st = document.createElement('style'); st.id = 'vs-pairing-css'; st.textContent = ${JSON.stringify(cssText)}; old.replaceWith(st); return true; })()`;
 /** THE MACHINE ROW CENSUS (naive-user N-row) at the page's sidebar width: the machine's NAME is shown (≥ 30 px, or its

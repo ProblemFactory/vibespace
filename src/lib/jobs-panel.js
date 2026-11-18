@@ -2,6 +2,7 @@
 // docs/design-background-work.md §9). XSS LAW: every job-record string is
 // agent-/process-controlled and synced to all clients — EVERYTHING renders via
 // textContent; agent markup NEVER touches our DOM (panel md → sanitizeHtml, src/lib/safe-html.js).
+import { railRow } from './rail-row.js'; // lane ui-phone-and-fit M2: THE RAIL ROW
 import { escHtml, fetchJson, showConfirmDialog, showToast, createModalShell, showContextMenu } from './utils.js';
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a job's menu + the cleared sentence
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a family of cleared jobs is named by the stored key — worded here
@@ -27,6 +28,10 @@ const KIND_ICON = {
 // sidebar unification — the rail panel is THE surface now, so it must not
 // collapse what the user opened every time the engine broadcasts)
 const EXPANDED = new Set();
+// a unit name or a crontab line from outside the registry, at a narrow column (lane ui-phone-and-fit pick 1, test-ui-fit-chrome's
+// third claim: «snap.snapd-desktop-integration.…service» was cut inside «snapd» at the 200 px rail): it breaks at its OWN joints —
+// after . / _ @ : (a hyphen already is one) — and inside a run only when the run alone is wider than the line
+const escLine = (line) => { const e = document.createElement('div'); e.className = 'jobs-esc-line'; for (const part of String(line).split(/(?<=[./_@:])/)) e.append(part, document.createElement('wbr')); return e; };
 
 // ── TRIAGE state (design §13, 2026-09-14) ─────────────────────────────────
 // The user's fold choices live in user state (`jobsPanelFolds`, PATCH
@@ -294,8 +299,9 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
   const dot = document.createElement('span'); dot.className = 'jobs-dot'; dot.textContent = GLYPH[j.state] || '·';
   const name = document.createElement('span'); name.className = 'jobs-name' + (isCleared(j) ? ' rc-cleared' : ''); name.textContent = isCleared(j) ? clearedText() : j.name;
   const st = document.createElement('span'); st.className = 'jobs-state'; st.textContent = stateLine(j) + (archived ? ` · ${t('archived')}` : '');
-  const sp = document.createElement('span'); sp.style.flex = '1';
-  l1.append(dot, name, st, sp, ...(archived ? [rmButton(app, j, refresh)] : actionButtons(app, j, refresh, { compact })));
+  // lane ui-phone-and-fit M2 (the walk: «dev- / server», «failed / · 4d / 前 · / exit=1» in the rail): the line is THE RAIL ROW —
+  // the name and its state read whole, the buttons keep theirs (and drop to the next line when the column is narrow)
+  railRow({ row: l1, lead: dot, main: [name, st], controls: archived ? [rmButton(app, j, refresh)] : actionButtons(app, j, refresh, { compact }) });
   el.appendChild(l1);
   // a FAILED row says why (rule 4): the exit code rides stateLine, the last
   // non-empty log line is the actionable fact — shown in the compact rail too
@@ -508,13 +514,13 @@ export function openJobsWindow(app, opts = {}) {
   for (const [, w] of app.wm.windows) if (w.type === 'jobs') { app.wm.revealWindow(w.id, { replay: !!opts.syncId }); return w; }
   const winInfo = app.wm.createWindow({ title: t('Background Work'), type: 'jobs', syncId: opts.syncId, openSpec: { action: 'openJobs' }, width: 760, height: 540 });
   const shell = document.createElement('div'); shell.className = 'jobs-win';
-  const bar = document.createElement('div'); bar.className = 'jobs-toolbar';
-  const summary = document.createElement('span'); summary.className = 'jobs-summary';
-  const sp = document.createElement('span'); sp.style.flex = '1';
+  const bar = document.createElement('div'); bar.className = 'jobs-toolbar btn-bar'; // THE BUTTON BAR (lane ui-phone-and-fit #59: «新建» squeezed one character per line on a phone)
+  const summary = document.createElement('span'); summary.className = 'jobs-summary btn-bar-text';
+  const sp = document.createElement('span'); sp.style.display = 'none'; // (the summary's flex basis takes the room the spacer made)
   const btnNew = document.createElement('button'); btnNew.className = 'jobs-btn jobs-btn-ok'; btnNew.textContent = '＋ ' + t('New');
   btnNew.onclick = () => openCreateDialog(app, () => render());
   const btnRefresh = document.createElement('button'); btnRefresh.className = 'jobs-btn'; btnRefresh.textContent = '⟳';
-  const seenSlot = document.createElement('span'); seenSlot.className = 'jobs-seen-slot'; // the window-wide "Mark all seen" (2.369.121), filled per render
+  const seenSlot = document.createElement('span'); seenSlot.className = 'jobs-seen-slot btn-bar-group'; // the window-wide "Mark all seen" (2.369.121), filled per render
   bar.append(summary, sp, seenSlot, btnNew, btnRefresh);
   const root = document.createElement('div'); root.className = 'jobs-body';
   shell.append(bar, root);
@@ -543,7 +549,7 @@ export function openJobsWindow(app, opts = {}) {
     if (esc && (esc.systemd?.length || esc.crontab?.length)) {
       const h = document.createElement('div'); h.className = 'jobs-sec-head jobs-sec-esc'; h.textContent = t('Outside the registry (read-only)');
       root.appendChild(h);
-      for (const line of [...(esc.systemd || []), ...(esc.crontab || [])]) { const e = document.createElement('div'); e.className = 'jobs-esc-line'; e.textContent = line; root.appendChild(e); }
+      for (const line of [...(esc.systemd || []), ...(esc.crontab || [])]) root.appendChild(escLine(line));
     }
   }
   btnRefresh.onclick = render;
@@ -559,8 +565,8 @@ export function openJobsWindow(app, opts = {}) {
  *  registry escapes. Live updates come from sidebar-rail's jobs-updated
  *  panel rebuild (renders-once guard) — EXPANDED keeps cards open across it. */
 openJobsWindow.renderRail = (app, c) => {
-  const bar = document.createElement('div'); bar.className = 'jobs-rail-bar';
-  const summary = document.createElement('span'); summary.className = 'jobs-summary'; summary.style.flex = '1';
+  const bar = document.createElement('div'); bar.className = 'jobs-rail-bar btn-bar'; // THE BUTTON BAR (lane ui-phone-and-fit M2)
+  const summary = document.createElement('span'); summary.className = 'jobs-summary btn-bar-text';
   const btnNew = document.createElement('button'); btnNew.className = 'jobs-btn jobs-btn-ok'; btnNew.textContent = '＋ ' + t('New');
   const btnRefresh = document.createElement('button'); btnRefresh.className = 'jobs-btn'; btnRefresh.textContent = '⟳';
   bar.append(summary, btnNew, btnRefresh);
@@ -585,7 +591,7 @@ openJobsWindow.renderRail = (app, c) => {
     if (esc && (esc.systemd?.length || esc.crontab?.length)) {
       const h = document.createElement('div'); h.className = 'jobs-sec-head jobs-sec-esc'; h.textContent = t('Outside the registry (read-only)');
       root.appendChild(h);
-      for (const line of [...(esc.systemd || []), ...(esc.crontab || [])]) { const e = document.createElement('div'); e.className = 'jobs-esc-line'; e.textContent = line; root.appendChild(e); }
+      for (const line of [...(esc.systemd || []), ...(esc.crontab || [])]) root.appendChild(escLine(line));
     }
     if (focusId) { const el = root.querySelector(`[data-job="${CSS.escape(focusId)}"]`); el?.scrollIntoView({ block: 'center' }); el?.classList.add('jobs-focus'); }
   }

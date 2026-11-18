@@ -85,7 +85,7 @@ check('③ the landing is a door of its own, in words («Show it in the conversa
 check('③ the open strip floats over the chat on a spacer of its closed height (the transcript\'s size and scroll unchanged), at most half the view — its place read again when the view or the message box resizes',
   /_dockOver\(dock, on\) \{[\s\S]{0,900}?sp\.style\.height = h \+ 'px';[\s\S]{0,200}?dock\.before\(sp\);[\s\S]{0,900}?'--cad-max', Math\.max\(120, Math\.floor\(host\.clientHeight \* 0\.5\)\)/.test(NC)
   && /dock\.classList\.add\('cad-over'\);\s*place\(\);/.test(NC) /* out of the flow first, then measured (the claim's ㉓ r2) */
-  && /const ro = dock\._cadRO = new ResizeObserver\(place\);\s*ro\.observe\(host\);\s*for \(let n = dock\.nextElementSibling; n; n = n\.nextElementSibling\) ro\.observe\(n\);/.test(NC) && /dock\._cadRO\?\.disconnect\(\); dock\._cadRO = null;/.test(NC)
+  && /const ro = dock\._cadRO = new ResizeObserver\(place\);\s*const watch = \(\) => \{ ro\.disconnect\(\); ro\.observe\(host\); for \(let n = dock\.nextElementSibling; n; n = n\.nextElementSibling\) ro\.observe\(n\); \};\s*watch\(\);/.test(NC) && /dock\._cadRO\?\.disconnect\(\); dock\._cadRO = null;/.test(NC)
   && /\.chat-attn-dock\.cad-over \{ position: absolute;[^}]*bottom: var\(--cad-bottom, 0px\); max-height: var\(--cad-max, 50%\); overflow-y: auto;/.test(CC));
 check('③ law 7: the open item stays the strip\'s item while it waits (a newer arrival redraws around it); its detail is open',
   /const openKeep = dock\.classList\?\.contains\('cad-open'\) && this\._dockOpenId \? list\.find\(\(e\) => e\.item\.id === this\._dockOpenId\) : null;\s*if \(openKeep && entry && entry\.item\.id !== openKeep\.item\.id\) entry = \{ item: openKeep\.item \};/.test(NC) && /_dockDetail\(dock\) \{[^}]*if \(ex && !ex\.open\) ex\.open = true;/.test(NC)
@@ -110,7 +110,7 @@ const measured = (b, f) => { const h = b.indexOf('const host = dock.parentElemen
 check('③d the closed height is read before the strip leaves the flow, the place after it left and never inside it (the lost tap; the reader\'s M1 / M2)', measured(overBody, foldBody));
 const keeps = (p) => /if \(openKeep && entry && entry\.item\.id !== openKeep\.item\.id\) entry = \{ item: openKeep\.item \};\n/.test(p) && !/entry = d \? \{ item: d\.newest \} : entry/.test(p);
 check('③d the open item is never replaced by the newest after law 7 kept it (the reader\'s S1)', keeps(passBody));
-check('③d a close always runs the whole _dockOver(off) — the spacer and the observer gone (the reader\'s S2)', foldBody.includes('if (!open && was) this._dockOver(dock, false);') && /if \(!on\) \{ dock\.classList\.remove\('cad-over'\); dock\._cadRO\?\.disconnect\(\); dock\._cadRO = null; dock\._cadSpacer\?\.remove\(\);/.test(overBody));
+check('③d a close always runs the whole _dockOver(off) — the spacer and the observer gone (the reader\'s S2)', foldBody.includes('if (!open && was) this._dockOver(dock, false);') && /if \(!on\) \{ (dock\._cadMO\?\.disconnect\(\); dock\._cadMO = null; )?dock\.classList\.remove\('cad-over'\); dock\._cadRO\?\.disconnect\(\); dock\._cadRO = null; dock\._cadSpacer\?\.remove\(\);/.test(overBody));
 check('③d the detail is opened at the open AND at every pass while open (the reader\'s S3)', foldBody.includes('if (open) this._dockDetail(dock);') && passBody.includes("if (row && dock.classList?.contains('cad-open')) this._dockDetail(dock);"));
 // RED CONTROLS: the reader's mutants, planted in a copy of the source, each turn its leg red
 const M = {
@@ -124,6 +124,34 @@ const bodyOf = (x, head) => { const i = x.indexOf(head), j = x.indexOf('\n  }\n'
 const judge = { M1: (x) => measured(bodyOf(x, '  _dockOver(dock, on) {'), bodyOf(x, '  _dockFold(dock, open) {')), M2: (x) => measured(bodyOf(x, '  _dockOver(dock, on) {'), bodyOf(x, '  _dockFold(dock, open) {')), S1: (x) => keeps(bodyOf(x, '  _dockPass(waiting) {')), S2: (x) => bodyOf(x, '  _dockFold(dock, open) {').includes('if (!open && was) this._dockOver(dock, false);'), S3: (x) => bodyOf(x, '  _dockFold(dock, open) {').includes('if (open) this._dockDetail(dock);') };
 const caught = Object.entries(M).filter(([k, f]) => { const m = f(NC); return m !== NC && !judge[k](m); }).map(([k]) => k);
 check(`③d CONTROL: the reader's five behaviour mutants, planted in a copy, each turn its leg red (${caught.join(' ')})`, caught.length === 5, caught);
+// ③f THE .400 MERGED-TIP READ'S TWO CODE MINORS (B-d23d):
+//   (i) the For-you window's tip loop walks only the option BUTTONS — the row's «Reply:» label is no option
+const tipLoop = (x) => /for \(const o of c\.opts\.querySelectorAll\('\.iw-opt'\)\) \{ o\.disabled = sending; o\.title =/.test(x) && !/for \(const o of c\.opts\.children\)/.test(x);
+check('③f the For-you window gives a reply\'s tip (and the sending lock) to its option BUTTONS only — never to the row\'s «Reply:» label', tipLoop(IW));
+check('③f CONTROL: the loop over every child of the options row (cdfed28ee\'s) is refused', !tipLoop(IW.replace("for (const o of c.opts.querySelectorAll('.iw-opt'))", 'for (const o of c.opts.children)')));
+//   (ii) the open strip watches its COLUMN: a bar inserted below after the open (the resume bar, the sign-in card, a sub-agent
+//   note) re-observes what follows the strip and re-reads its place; the close disconnects that watch before the spacer goes
+const watchesColumn = (body) => /dock\._cadMO = new MutationObserver\(\(\) => \{ watch\(\); place\(\); \}\);/.test(body) && /dock\._cadMO\.observe\(host, \{ childList: true \}\);/.test(body)
+  && /const watch = \(\) => \{ ro\.disconnect\(\); ro\.observe\(host\); for \(let n = dock\.nextElementSibling; n; n = n\.nextElementSibling\) ro\.observe\(n\); \};/.test(body)
+  && /if \(!on\) \{ dock\._cadMO\?\.disconnect\(\); dock\._cadMO = null;[^\n]*dock\._cadSpacer\?\.remove\(\);/.test(body);
+check('③f the open strip re-reads its place when a bar arrives below it after the open (its column\'s children watched; the watch ends at the close)', watchesColumn(overBody));
+const noMO = overBody.replace(/\n      if \(typeof MutationObserver === 'function'\) \{[\s\S]*?\n      \}/, '');
+check('③f CONTROL: the strip that watches only what stood below it at the open (cdfed28ee\'s) is refused', noMO !== overBody && !watchesColumn(noMO));
+//   (iii) the opened item draws what the ask ATTACHED (its --artifact chips): the strip's hide rule keeps a list of parts, and the
+//   chips were never on it — opened, they are shown after the options (an order ≥ the options'), never before them
+const artsOpenRule = (rules) => rules.some((r) => selectorList(r.sel).some((x) => /\.cad-open\b/.test(x) && /\.cad-rows\b/.test(x) && /^\.ut-arts$/.test(lastCompound(x)))
+  && /display:\s*flex\s*!important/.test(r.body) && /(?:^|;)\s*order:\s*(\d+)/.test(r.body) && Number(/(?:^|;)\s*order:\s*(\d+)/.exec(r.body)[1]) >= 6);
+// …and NO rule that names the strip's .ut-arts hides it again (the closure verifier's iii-c: a later rule at equal specificity won)
+const artsHidden = (rules) => rules.filter((r) => selectorList(r.sel).some((x) => /\.(cad-rows|chat-attn-dock)\b/.test(x) && /^\.ut-arts$/.test(lastCompound(x).replace(/:[\w-]+(\([^)]*\))?/g, ''))) && /display:\s*none/.test(r.body)).map((r) => r.sel);
+const artsShown = (rules) => artsOpenRule(rules) && artsHidden(rules).length === 0;
+check('③f the opened strip draws the ask\'s attached chips (.ut-arts) after its options — display flex !important at an order ≥ the options\' 6', artsShown(RULES));
+check('③f CONTROL: without that rule (e0c3fcba2\'s sheet) the chips stay hidden in the opened item — refused', !artsShown(RULES.filter((r) => !/\.ut-arts\b/.test(r.sel) || !/\.cad-open\b/.test(r.sel))));
+check('③f CONTROL (the closure verifier\'s iii-c): a LATER rule that hides the opened strip\'s chips again is refused', !artsShown([...RULES, ...cssRules('.chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-arts { display: none !important; }', 'planted')]));
+// (iv) the view's stop() ends the opened strip's observers (the .400 closure, law c: no observer outlives its window)
+const stopBody = (x) => { const i = x.indexOf('  stop() {'), j = x.indexOf('\n  }\n', i); return i > 0 ? x.slice(i, j) : ''; };
+const stopEnds = (x) => /const d = this\.view\?\._attnDock; if \(d && \(d\._cadRO \|\| d\._cadMO\)\) this\._dockOver\(d, false\);/.test(stopBody(x));
+check('③f the view\'s stop() ends the OPENED strip\'s observers (its place and its column) — through _dockOver(off), as a close does', stopEnds(NC));
+check('③f CONTROL: a stop() that leaves them (a91f4bc8b\'s) is refused', !stopEnds(NC.replace(/\n    \/\/ the OPENED strip's own observers[^\n]*\n[^\n]*\n    try \{ const d = this\.view\?\._attnDock;[^\n]*\n/, '\n')));
 
 // ③b ONE ORDER wherever an item opens (主开发 13:34Z — the owner: «这样我都看不到推荐回复选项»): the question, its OPTIONS, then the detail
 check('③b ONE ORDER: the row (the tray, the mini inbox, the phone sheet, the strip, the card) draws its options BEFORE its detail fold',
@@ -131,6 +159,52 @@ check('③b ONE ORDER: the row (the tray, the mini inbox, the phone sheet, the s
 check('③b …the For-you window\'s pane: the options before the detail', /el\.append\(head, title, dl, arts, opts, detail, cutLine, replied, reach, reply, actions\);/.test(IW));
 check('③b …the opened strip: the options (order 6) before the detail (order 7), which scrolls below them',
   /\.chat-attn-dock\.cad-open \.cad-rows \.ut-item > \.ut-body > \.ut-detail-exp \{ display: block !important; order: 7;/.test(CC) && /\.cad-rows \.ut-body > \.ut-opts \{ order: 6;/.test(CC));
+// ③e ONE ORDER BY RULE, AT EVERY DOOR (the closure verifier's R1 / R2: a later rule that put the detail first stayed green —
+// ③b reads only the drawing order). For each door where an item opens, every rule of public/*.css that can reach that door's
+// options row or its detail is read: the detail's least `order` is never below the options' greatest, no rule reverses the
+// item's direction, and neither part is placed on a grid (order alone places them). A rule reaches a door unless it names
+// another door's own container (or excludes this one by :not); an :is() list reaches a door when one of its names does.
+const OWN = ['chat-attn-dock', 'cad-rows', 'cad-open', 'cad-over', '#user-todos-popup', '#phone-home', 'ut-mini-popover', 'cn-card'];
+const DOORS = [
+  { name: 'the opened strip', has: ['chat-attn-dock', 'cad-rows', 'cad-open', 'cad-over'], opts: /^\.ut-opts$/, det: /^\.ut-detail-exp$/, body: /^\.ut-body$/ },
+  { name: 'the tray', has: ['#user-todos-popup'], opts: /^\.ut-opts$/, det: /^\.ut-detail-exp$/, body: /^\.ut-body$/ },
+  { name: 'the phone page', has: ['#phone-home'], opts: /^\.ut-opts$/, det: /^\.ut-detail-exp$/, body: /^\.ut-body$/ },
+  { name: 'the mini inbox', has: ['ut-mini-popover'], opts: /^\.ut-opts$/, det: /^\.ut-detail-exp$/, body: /^\.ut-body$/ },
+  { name: 'the For-you window', has: [], opts: /^\.iw-opts$/, det: /^\.iw-detail$/, body: /^\.iw-item$/ },
+];
+// the selector's context (all but its styled compound) split into plain names, :is()/:where() choices and :not() exclusions
+const context = (sel) => {
+  const last = lastCompound(sel); let s = sel.slice(0, sel.length - last.length) + last.replace(/^[^:]*/, (h) => h.replace(/^[.#][\w-]+/, ''));
+  const groups = []; let m;
+  while ((m = /:(is|where|not|has)\(/.exec(s))) {
+    let d = 1, j = m.index + m[0].length; while (j < s.length && d) { if (s[j] === '(') d++; else if (s[j] === ')') d--; j++; }
+    groups.push({ kind: m[1], inner: s.slice(m.index + m[0].length, j - 1) }); s = s.slice(0, m.index) + ' ' + s.slice(j);
+  }
+  const names = (x) => (x.match(/[.#][\w-]+/g) || []).map((n) => (n[0] === '.' ? n.slice(1) : n)).filter((n) => OWN.includes(n));
+  return { plain: names(s), choices: groups.filter((g) => g.kind === 'is' || g.kind === 'where').map((g) => selectorList(g.inner).map(names)), nots: groups.filter((g) => g.kind === 'not').flatMap((g) => names(g.inner)) };
+};
+const reaches = (sel, door) => { const c = context(sel); const ok = (ns) => ns.every((n) => door.has.includes(n)); return ok(c.plain) && c.choices.every((alts) => alts.some(ok)) && !c.nots.some((n) => door.has.includes(n)); };
+const orderOf = (body) => { const all = [...body.matchAll(/(?:^|;)\s*order:\s*(-?\d+)/g)]; return all.length ? Number(all[all.length - 1][1]) : null; };
+const PARTS = /\.(ut-opts|ut-detail-exp|ut-body|iw-opts|iw-detail|iw-item)(?![\w-])/;   // read only the rules that name a part (the census stays O(parts))
+const orderFaults = (all) => { const rules = all.filter((r) => PARTS.test(r.sel)); return DOORS.flatMap((door) => {
+  const on = (re) => rules.flatMap((r) => selectorList(r.sel).filter((x) => re.test(lastCompound(x).replace(/:[\w-]+(\([^)]*\))?|\[[^\]]*\]/g, '')) && reaches(x, door)).map((x) => ({ r, x })));
+  const opts = on(door.opts), det = on(door.det), body = on(door.body);
+  const oMax = Math.max(0, ...opts.map(({ r }) => orderOf(r.body)).filter((n) => n !== null));
+  const dSet = det.map(({ r, x }) => ({ x, n: orderOf(r.body) })).filter((d) => d.n !== null);
+  const out = dSet.filter((d) => d.n < oMax).map((d) => `${door.name}: «${d.x}» orders the detail ${d.n}, before the options (${oMax})`);
+  if (!dSet.length && oMax > 0) out.push(`${door.name}: the options are ordered ${oMax} and the detail keeps 0 — the detail first`);
+  for (const { r, x } of body) if (/flex-direction:\s*(row|column)-reverse/.test(r.body)) out.push(`${door.name}: «${x}» reverses the item's direction`);
+  for (const { r, x } of [...opts, ...det]) if (/grid-(row|area|column)\s*:/.test(r.body)) out.push(`${door.name}: «${x}» places a part on a grid`);
+  return out;
+}); };
+const oNow = orderFaults(RULES);
+check(`③e ONE ORDER BY RULE at every door (${DOORS.map((d) => d.name).join(' · ')}): no rule orders a detail before its options, reverses an item or places either part on a grid`, oNow.length === 0, oNow);
+const R1 = '.chat-attn-dock.cad-open .cad-rows .ut-body > .ut-detail-exp { order: 5 !important; }';
+const R2 = ':is(#user-todos-popup, #phone-home) .ut-item > .ut-body { display: flex; flex-direction: column; } :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-detail-exp { order: -1; }';
+const R3 = '.iw-item { display: flex; flex-direction: column-reverse; }';
+const oRed = { R1: orderFaults([...RULES, ...cssRules(R1, 'planted')]), R2: orderFaults([...RULES, ...cssRules(R2, 'planted')]), R3: orderFaults([...RULES, ...cssRules(R3, 'planted')]) };
+check(`③e CONTROL (the closure verifier's R1 / R2 + a reversed window item): each planted rule is caught at its door — ${Object.entries(oRed).map(([k, v]) => `${k} ${v.length}`).join(' · ')}`,
+  oRed.R1.length >= 1 && oRed.R1.every((f) => f.startsWith('the opened strip')) && oRed.R2.length === 2 && oRed.R2.some((f) => f.startsWith('the tray')) && oRed.R2.some((f) => f.startsWith('the phone page')) && oRed.R3.length === 1 && oRed.R3[0].startsWith('the For-you window'), oRed);
 
 // ④ the ladder
 const L = await import(pathToFileURL(path.join(repo, 'scripts/lib/fit-ladder.mjs')).href);

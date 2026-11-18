@@ -2031,7 +2031,7 @@ export function installManageAgents(App, ctx = {}) {
       // Redesign (2.178.0): star + ⋯ menu, same as the Anthropic roster
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : CROWN}</span>
-        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(isPool ? a.current : a.loggedIn) ? creditsSlotHtml(this._codexAccountUsage?.[isPool ? a.current : a.id]) : ''}${!isPool && a.loggedIn ? resetSlot(a.id) : ''}</span></span>
+        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name" title="${escHtml(a.name)}">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(isPool ? a.current : a.loggedIn) ? creditsSlotHtml(this._codexAccountUsage?.[isPool ? a.current : a.id]) : ''}${!isPool && a.loggedIn ? resetSlot(a.id) : ''}</span></span>
         <span class="acct-usage-cell"${isPool ? (a.current ? ` data-usage-src="codex" data-usage-key="${escHtml(a.current)}"` : '') : (a.loggedIn ? ` data-usage-src="codex" data-usage-key="${escHtml(a.id)}"` : '')}>${usageCell}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
@@ -2046,8 +2046,8 @@ export function installManageAgents(App, ctx = {}) {
     left.innerHTML = `<div class="acct-list">${globalRow}${keyLines}</div>
       <div class="agents-note">${note}</div>`;
     markSoonRows(left.querySelector('.acct-list'));
-    const head = document.createElement('div'); head.className = 'acct-roster-head';
-    const title = document.createElement('b'); title.textContent = t('ChatGPT / OpenAI accounts');
+    const head = document.createElement('div'); head.className = 'acct-roster-head btn-bar';
+    const title = document.createElement('b'); title.className = 'btn-bar-text'; title.textContent = t('ChatGPT / OpenAI accounts');
     const addBtn = document.createElement('button'); addBtn.className = 'agent-btn acct-add' + (codexAccts.length ? '' : ' primary'); addBtn.textContent = '+ ' + t('Add ChatGPT account…');
     addBtn.title = t('Sign in another ChatGPT account — stored in VibeSpace (not on any one machine), switchable per session');
     addBtn.onclick = () => { done(); this._addCodexSubscription(); };
@@ -2199,7 +2199,7 @@ export function installManageAgents(App, ctx = {}) {
       const ident = a.loggedIn ? escHtml(a.email || t('logged in')) : `<span class="ob-warn">${t('not logged in')}</span>`;
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}">
         <span class="acct-type-icon" title="${escHtml(t('{login} account — runs on this machine', { login }))}">${CROWN}</span>
-        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span></span>
+        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name" title="${escHtml(a.name)}">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span></span>
         <span class="acct-usage-cell" data-usage-src="home" data-usage-key="${escHtml(a.id)}">${usageOf(a.id)}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
@@ -2208,8 +2208,8 @@ export function installManageAgents(App, ctx = {}) {
     }).join('');
     left.innerHTML = `<div class="acct-list">${globalRow}${lines}</div>
       <div class="agents-note">${escHtml(t('Each {cli} session can pick its {login} (New Session dialog / card ⚙). Each account is its own isolated login on this machine, switchable per session.', { cli: label, login }))}</div>`;
-    const head = document.createElement('div'); head.className = 'acct-roster-head';
-    const title = document.createElement('b'); title.textContent = t('{login} accounts', { login });
+    const head = document.createElement('div'); head.className = 'acct-roster-head btn-bar';
+    const title = document.createElement('b'); title.className = 'btn-bar-text'; title.textContent = t('{login} accounts', { login });
     const addBtn = document.createElement('button'); addBtn.className = 'agent-btn acct-add' + (list.length ? '' : ' primary'); addBtn.textContent = '+ ' + t('Add {login} account…', { login });
     addBtn.title = t('Sign in another {login} account for the {cli} — stored in VibeSpace, switchable per session', { login, cli: label });
     addBtn.onclick = () => { done(); this._addHomeSubscription(be); };
@@ -2520,7 +2520,7 @@ export function installManageAgents(App, ctx = {}) {
         if (!selectedHost && b.key === 'claude' && info.installed) {
           if (info.install && !info.install.userLocal && b.installCmd) {
             const warnRow = document.createElement('div');
-            warnRow.className = 'ob-cli-ephemeral';
+            warnRow.className = 'ob-cli-ephemeral btn-bar'; // the button-bar rule: «Install persistent copy» stays whole at the rail's 200 px
             warnRow.innerHTML = `<span class="usage-warn">⚠ ${escHtml(t('Installed in a system location ({path}) — in containerized deployments, updates to it are lost when the container is rebuilt.', { path: info.install.binPath }))}</span>`;
             const persistBtn = document.createElement('button'); persistBtn.className = 'agent-btn'; persistBtn.textContent = t('Install persistent copy');
             persistBtn.title = b.installCmd + ' — ' + t('installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)');
@@ -2797,7 +2797,7 @@ export function installManageAgents(App, ctx = {}) {
       // (the agent-injection fields, no longer dangling at the bottom). ──
       const tab = ['accounts', 'machines', 'instructions'].includes(localStorage.getItem('vibespace.agentsTab')) ? localStorage.getItem('vibespace.agentsTab') : 'accounts';
       const tabs = document.createElement('div');
-      tabs.className = 'agents-tabs';
+      tabs.className = 'agents-tabs btn-bar'; // THE BUTTON-BAR RULE: in the 200 px rail every tab keeps its whole word and the strip wraps
       for (const [k, label] of [['accounts', t('Accounts')], ['machines', t('Machines') + (hostsList.length ? ` (${hostsList.length})` : '')], ['instructions', t('Instructions')]]) {
         const b = document.createElement('button');
         b.className = 'agents-tab' + (k === tab ? ' active' : '');
@@ -2810,9 +2810,9 @@ export function installManageAgents(App, ctx = {}) {
       // never wire this to any timer). Not shown on the Instructions tab.
       if (tab !== 'instructions') {
         const head = document.createElement('div');
-        head.className = 'agents-overview-head';
+        head.className = 'agents-overview-head btn-bar';
         const headNote = document.createElement('span');
-        headNote.className = 'agents-note';
+        headNote.className = 'agents-note btn-bar-text';
         headNote.textContent = tab === 'accounts' ? t('Accounts & quota on this machine') : t('Accounts & quota by machine');
         const refreshAll = document.createElement('button');
         refreshAll.className = 'agent-btn agents-refresh-all';
@@ -3080,8 +3080,8 @@ export function installManageAgents(App, ctx = {}) {
 
       if (tab !== 'instructions') {
         const foot = document.createElement('div');
-        foot.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
-        const note = document.createElement('p'); note.className = 'agents-note';
+        foot.className = 'btn-bar agents-foot'; // lane ui-phone-and-fit pick 1 (test-ui-fit-chrome's first claim: «重新检查» squeezed to 48 px, one glyph a line, beside the note in a 128 px column) — THE BUTTON BAR: the note takes its 12 em, the button keeps its words and wraps whole
+        const note = document.createElement('p'); note.className = 'agents-note btn-bar-text';
         note.textContent = t('Actions open in a terminal window so you can see exactly what runs.');
         const recheck = document.createElement('button'); recheck.className = 'agent-btn'; recheck.textContent = t('Re-check');
         recheck.onclick = refresh;
@@ -3381,7 +3381,7 @@ export function installManageAgents(App, ctx = {}) {
       // modal AND panel; real screenshot report). Star stays direct: most-used.
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : isSub ? CROWN : KEY}</span>
-        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${creditsTag}${resetTag ? `<span class="acct-reset-slot">${resetTag}</span>` : ''}</span>${extrasTag}</span>
+        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name" title="${escHtml(a.name)}">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${creditsTag}${resetTag ? `<span class="acct-reset-slot">${resetTag}</span>` : ''}</span>${extrasTag}</span>
         <span class="acct-usage-cell"${usageStampAttrs}>${rowSnap ? usageHtml(rowSnap.u, rowSnap.est, probeNote) : isSub && !isPool && usageStamp && usageStamp.src === 'accounts' ? unreadUsageHtml() : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
@@ -3410,8 +3410,8 @@ export function installManageAgents(App, ctx = {}) {
       } catch { showToast(t('Save failed'), { type: 'error' }); }
       refresh();
     };
-    const head = document.createElement('div'); head.className = 'acct-roster-head';
-    const title = document.createElement('b'); title.textContent = t('Anthropic accounts');
+    const head = document.createElement('div'); head.className = 'acct-roster-head btn-bar';
+    const title = document.createElement('b'); title.className = 'btn-bar-text'; title.textContent = t('Anthropic accounts');
     const needsSetup = !selectedHost && (!sub.loggedIn || !claudeAccts.length);
     const importable = !selectedHost && acct.cliKey?.present && !acct.cliKey.imported;
     const addAcctBtn = document.createElement('button');

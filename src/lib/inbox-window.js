@@ -420,7 +420,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     if (c.why.textContent !== whyTxt) c.why.textContent = whyTxt;
     c.why.style.display = whyTxt ? '' : 'none';
     c.why.dataset.reopen = box.reopen ? '1' : '';
-    for (const o of c.opts.children) { o.disabled = sending; o.title = v.reply.enabled ? t('Reply with "{label}"', { label: o.textContent }) : box.reopen ? t('Reopen and send "{label}"', { label: o.textContent }) : whyTxt; }
+    // only the option BUTTONS — the row also holds its «Reply:» label (pick 0), which is no option and takes no reply's tip
+    for (const o of c.opts.querySelectorAll('.iw-opt')) { o.disabled = sending; o.title = v.reply.enabled ? t('Reply with "{label}"', { label: o.textContent }) : box.reopen ? t('Reopen and send "{label}"', { label: o.textContent }) : whyTxt; }
     const rb = c.actions.querySelector('[data-act="reply"]');
     if (rb) {
       rb.disabled = sending;

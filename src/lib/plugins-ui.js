@@ -2,6 +2,7 @@
 // login / status for host-level plugins (first: Tailscale). Modeled on the
 // Manage-Agents visual language; the login flow mirrors guided Drive OAuth
 // (server captures the auth URL, user opens it, we poll status until Running).
+import { railRow } from './rail-row.js'; // lane ui-phone-and-fit M2: THE RAIL ROW
 import { createModalShell, freshKey, fetchJson, showToast, showConfirmDialog, showContextMenu, escHtml, copyText } from './utils.js';
 import { BACKEND_META } from './agent-meta.js';
 import { t } from './i18n.js';
@@ -108,20 +109,15 @@ function makeSwitch(on, { disabled = false, label, onChange }) {
 /** one list row: icon dot · name + description [+ a readout line] · chip · switch · [install] · ⚙ — `fact` is a READOUT
  *  (a drawn element, not a control: the LLM plugin's money today, lane decision-spend-readout), under the description */
 function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, install, gear, fact = null }) {
-  const row = document.createElement('div');
-  row.className = 'plugin-row'; row.dataset.plugin = id;
-  const main = document.createElement('div'); main.className = 'plugin-row-main';
-  main.append(Object.assign(document.createElement('div'), { className: 'plugin-row-name', textContent: label }), Object.assign(document.createElement('div'), { className: 'plugin-row-desc', textContent: description || '' }));
-  if (fact) main.appendChild(fact);
-  main.title = description || '';
+  // lane ui-phone-and-fit M2: THE RAIL ROW (rail-row.js) — dot · the name (+ its description, + a readout) · the controls
+  // (the status chip — the plugin's entry when it is a button, so it never folds and is never cut —, the switch, [install], ⚙)
   const c = document.createElement(onChip ? 'button' : 'span');
-  c.className = 'plugin-chip' + (tone ? ' plugin-chip-' + tone : ''); c.textContent = chip; c.title = chipTitle ? `${chip} · ${chipTitle}` : chip; // the narrow rail clips the chip — its whole word on hover
-  if (onChip) c.onclick = onChip;
+  c.className = 'plugin-chip' + (tone ? ' plugin-chip-' + tone : ''); c.textContent = chip; c.title = chipTitle ? `${chip} · ${chipTitle}` : chip;
+  if (onChip) { c.onclick = onChip; c.dataset.railPrimary = '1'; }
   const dot = Object.assign(document.createElement('span'), { className: 'plugin-dot' + (tone === 'ok' ? ' ok' : tone === 'warn' ? ' warn' : tone === 'err' ? ' err' : '') });
-  row.append(dot, main, c);
-  if (sw) row.appendChild(sw);   // none when it cannot be used (makeSwitch)
-  if (install) row.appendChild(install);
-  row.appendChild(gear);
+  const row = railRow({ className: 'plugin-row', lead: dot, name: label, nameClass: 'plugin-row-name', desc: description || '', descClass: 'plugin-row-desc', mainClass: 'plugin-row-main', main: [fact], controls: [c, sw, install, gear] });
+  row.dataset.plugin = id;
+  row.querySelector('.rail-row-main').title = description || '';
   return row;
 }
 

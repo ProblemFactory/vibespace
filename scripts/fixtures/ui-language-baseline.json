@@ -519,10 +519,6 @@
   "src/lib/sidebar-mounts.js": [
    "Loading…",
    "Failed to load",
-   "One-time setup needed  Connecting storage needs a small helper tool. Install it here — no terminal required.",
-   "Install rclone",
-   "Downloading…",
-   "Install failed",
    "Share revoked",
    "Failed",
    "Create a link that lets another VibeSpace open a folder from this computer.",

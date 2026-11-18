@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { bootWorld, CHROME, sleep, rectCensusJs, labelRowCensusJs, swapStyleJs, REPO } from './pairing-ui-harness.mjs';
+import { bootWorld, CHROME, sleep, rectCensusJs, labelRowCensusJs, swapStyleJs, REPO, CHECK_ROW_REVERT } from './pairing-ui-harness.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 
@@ -261,7 +261,10 @@ try {
   const HELD_RULE = '#device-pair-dialog label.device-pair-allow-flag.is-held input { visibility: hidden; }';
   ok(realCss.split(HELD_RULE).length === 2, 'the held-box rule is in public/style.css once (the control\'s anchor)');
   const preRow = '\n#device-pair-dialog .device-pair-allow-flag { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; min-height: 28px; }\n';
-  const C = await sheetPage(isZh ? 'zh' : 'en', 'polish-ctl', { css: realCss.replace(HELD_RULE, '') + preRow });
+  ok(CHECK_ROW_REVERT.every(([fixed]) => realCss.split(fixed).length === 2), 'the check row\'s rules are in public/style.css once each (the control\'s anchors since pick 1)');
+  // + the check row taken back (ui-phone-and-fit pick 1 rows every dialog label that holds a box — beneath the planted pre-polish rule
+  //   it still set flex-direction: row, so the census saw 0 words under their boxes)
+  const C = await sheetPage(isZh ? 'zh' : 'en', 'polish-ctl', { css: CHECK_ROW_REVERT.reduce((x, [fixed, old]) => x.replace(fixed, old), realCss.replace(HELD_RULE, '')) + preRow });
   ok(!C.err, 'CONTROL page: the sheet under a patched style.css', C.err);
   if (!C.err) {
     await pickOs(C.P, 'Windows'); await sleep(200);

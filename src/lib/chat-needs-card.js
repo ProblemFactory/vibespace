@@ -162,6 +162,9 @@ export class NeedsCards {
     try { this._mo?.disconnect(); } catch { }
     try { this._dockRO?.disconnect(); } catch { }
     try { this._shortRO?.disconnect(); } catch { }
+    // the OPENED strip's own observers (its place's ResizeObserver, its column's MutationObserver) end with the view too — a window
+    // closed or a view replaced while the strip stood open (the .400 closure: law c, no observer outlives its window)
+    try { const d = this.view?._attnDock; if (d && (d._cadRO || d._cadMO)) this._dockOver(d, false); } catch { }
     clearTimeout(this._dockMarkT); // r11: the dock's mark
     this._mo = null;
   }
@@ -661,7 +664,7 @@ export class NeedsCards {
    *  the strip's closed height keeps its place in the column (the transcript's size, hence its scrollTop, unchanged), the strip
    *  stands on the same bottom edge and grows upward over the transcript, at most half the view (it scrolls inside). */
   _dockOver(dock, on) {
-    if (!on) { dock.classList.remove('cad-over'); dock._cadRO?.disconnect(); dock._cadRO = null; dock._cadSpacer?.remove(); dock.style.removeProperty('--cad-bottom'); dock.style.removeProperty('--cad-max'); return; }
+    if (!on) { dock._cadMO?.disconnect(); dock._cadMO = null; dock.classList.remove('cad-over'); dock._cadRO?.disconnect(); dock._cadRO = null; dock._cadSpacer?.remove(); dock.style.removeProperty('--cad-bottom'); dock.style.removeProperty('--cad-max'); return; }
     const host = dock.parentElement, h = dock.offsetHeight; // host = the view's own .chat-view (position: relative — chat.css) in every host of the view
     if (!host || !h) return;
     const sp = dock._cadSpacer || (dock._cadSpacer = document.createElement('div'));
@@ -682,8 +685,16 @@ export class NeedsCards {
     if (typeof ResizeObserver === 'function') {
       dock._cadRO?.disconnect();
       const ro = dock._cadRO = new ResizeObserver(place);
-      ro.observe(host);
-      for (let n = dock.nextElementSibling; n; n = n.nextElementSibling) ro.observe(n);
+      const watch = () => { ro.disconnect(); ro.observe(host); for (let n = dock.nextElementSibling; n; n = n.nextElementSibling) ro.observe(n); };
+      watch();
+      // THE COLUMN IS WATCHED TOO (the .400 merged-tip read): a bar inserted below AFTER the open — the resume bar, the sign-in
+      // card, a sub-agent note — moves the spacer's bottom edge with no resize of the view or of anything observed at the open:
+      // an arrival or a departure among the column's children re-observes what follows the strip and re-reads its place
+      if (typeof MutationObserver === 'function') {
+        dock._cadMO?.disconnect();
+        dock._cadMO = new MutationObserver(() => { watch(); place(); });
+        dock._cadMO.observe(host, { childList: true });
+      }
     }
   }
 

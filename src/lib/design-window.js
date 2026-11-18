@@ -84,7 +84,7 @@ export function openDesignPublishDialog(app, { host = '', dir = '', title = '' }
   const name = mk('input', 'dialog-input');
   name.value = title || baseName(dir);
   nameLab.appendChild(name);
-  const pubLab = mk('label', 'design-publish-public');
+  const pubLab = mk('label', 'design-publish-public dialog-check-row'); // the house check row (lane ui-phone-and-fit M6)
   const pub = mk('input');
   pub.type = 'checkbox';
   pubLab.append(pub, document.createTextNode(' ' + t('Public — anyone with the link can view (no login)')));

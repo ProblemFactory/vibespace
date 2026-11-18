@@ -154,7 +154,7 @@ function loginBoxEl(item) {
   const otpRow = mk('div', 'ut-login-otp');
   otpRow.append(f.fields[3], addCode);
   const allow = mk('input', 'ut-login-allow-box'); allow.type = 'checkbox'; allow.checked = item.action.grant === true;
-  const allowLab = mk('label', 'ut-login-allow');
+  const allowLab = mk('label', 'ut-login-allow dialog-check-row'); // the house check row: the box, then its words (lane ui-phone-and-fit M6)
   allowLab.append(allow, mk('span', null, t('Let {who} sign in to {site} with it', { who, site })));
   const allowSays = mk('div', 'ut-secret-note ut-login-says');
   const allowFence = mk('div', 'ut-secret-note ut-login-fence');
@@ -186,7 +186,7 @@ function totpBoxEl(item) {
   box.dataset.target = 'totp';
   const who = headParam(item, 'who') || t('The conversation that asked');
   const allow = mk('input', 'ut-login-allow-box'); allow.type = 'checkbox'; allow.checked = item.action.grant === true;
-  const allowLab = mk('label', 'ut-login-allow');
+  const allowLab = mk('label', 'ut-login-allow dialog-check-row'); // the house check row: the box, then its words (lane ui-phone-and-fit M6)
   allowLab.append(allow, mk('span', null, t('Let {who} read its current code — never the seed — while it runs', { who })));
   const allowSays = mk('div', 'ut-secret-note ut-login-says');
   const row = mk('div', 'ut-secret-row');
