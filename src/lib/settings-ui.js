@@ -4,7 +4,7 @@ import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-att
 import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLandedOnSave, carryUnsaved } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
-import { kernelDoors, kernelDownloadWords } from './browser-build-model.js'; // B-0bc7: the engine row's «Download kernel» doors and their answer in words
+import { kernelDoors, kernelDownloadWords, kernelPollDue } from './browser-build-model.js'; // B-0bc7: the engine row's «Download kernel» doors and their answer in words
 import { engineFactText, fillEngineSelect } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
@@ -733,38 +733,44 @@ class SettingsUI {
     Promise.resolve(fetchJson('/api/browser/engines')).then(paint, () => paint({ error: 'unreachable' }));
   }
   /** B-0bc7: «Download kernel» under the engine fact — one button per door (kernelDoors: an engine plugin whose kernel is not here, or
-   *  whose waiting kernel could not be read), drawn again with every answer; a press is _downloadKernel's; its answer in words beside
-   *  the buttons (a refusal by its code). */
+   *  whose waiting kernel could not be read), drawn again with every answer, each door's last answer in words beside it (a refusal by
+   *  its code). While any kernel downloads the row is asked again every 1.5 s — the card's progress (kernel.state), whoever started it,
+   *  until it ends (installed, or failed with its words and the door back): the POST answers when the download STARTS. */
   _paintKernelDoors(line, r, again) {
     const next = line.nextElementSibling;
     let box = next && next.classList && next.classList.contains('settings-engine-doors') ? next : null;
     const doors = kernelDoors(r);
     if (!this._kernelAsks) this._kernelAsks = new Set();
-    if (!doors.length && !this._kernelSaid) { if (box) box.remove(); return; }
-    if (!box) { box = document.createElement('div'); box.className = 'settings-engine-doors'; line.after(box); }
-    const kids = doors.map((d) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'settings-engine-download';
-      b.textContent = doors.length > 1 ? t('Download kernel: {plugin}', { plugin: d.label }) : t('Download kernel');
-      b.disabled = d.busy || this._kernelAsks.has(d.id);
-      b.onclick = () => this._downloadKernel(d.id, again);
-      return b;
-    });
-    if (this._kernelSaid) { const said = document.createElement('span'); said.className = 'settings-engine-said'; said.textContent = this._kernelSaid; kids.push(said); }
-    box.replaceChildren(...kids);
+    if (!this._kernelSaid) this._kernelSaid = new Map();
+    const said = doors.filter((d) => this._kernelSaid.get(d.id));
+    if (!doors.length) { if (box) box.remove(); } else {
+      if (!box) { box = document.createElement('div'); box.className = 'settings-engine-doors'; line.after(box); }
+      box.replaceChildren(...doors.flatMap((d) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'settings-engine-download';
+        b.textContent = doors.length > 1 ? t('Download kernel: {plugin}', { plugin: d.label }) : t('Download kernel');
+        b.disabled = d.busy || this._kernelAsks.has(d.id);
+        b.onclick = () => this._downloadKernel(d.id, again);
+        if (!said.includes(d)) return [b];
+        const w = document.createElement('span'); w.className = 'settings-engine-said'; w.textContent = this._kernelSaid.get(d.id);
+        return [b, w];
+      }));
+    }
+    if (kernelPollDue(r) && !line._kernelTick) line._kernelTick = setTimeout(() => { line._kernelTick = null; if (line.isConnected) again(); }, 1500); // the tick is the LINE's: a redrawn row asks on its own
   }
-  /** B-0bc7: a person's «Download kernel» — POST /api/browser/engines/:id/kernel (it answers when the download ends, or at once with a
-   *  refusal by name); while it runs the row is asked again every 1.5 s (the card's progress: kernel.state); one ask per engine. */
+  /** B-0bc7: a person's «Download kernel» — POST /api/browser/engines/:id/kernel: it answers when the download STARTS (or at once with a
+   *  refusal by name); the row is asked again then, and keeps asking while it downloads (_paintKernelDoors); one ask per engine. */
   async _downloadKernel(id, again) {
     if (!this._kernelAsks) this._kernelAsks = new Set();
+    if (!this._kernelSaid) this._kernelSaid = new Map();
     if (this._kernelAsks.has(id)) return;
-    this._kernelAsks.add(id); this._kernelSaid = '';
+    this._kernelAsks.add(id); this._kernelSaid.delete(id);
     again();
-    const tick = setInterval(again, 1500);
     let ans = null;
-    try { ans = await fetchJson(`/api/browser/engines/${encodeURIComponent(id)}/kernel`, { method: 'POST' }); } finally { clearInterval(tick); this._kernelAsks.delete(id); }
-    this._kernelSaid = kernelDownloadWords(ans, t);
+    try { ans = await fetchJson(`/api/browser/engines/${encodeURIComponent(id)}/kernel`, { method: 'POST' }); } finally { this._kernelAsks.delete(id); }
+    const words = kernelDownloadWords(ans, t);
+    if (words) this._kernelSaid.set(id, words);
     again();
   }
 

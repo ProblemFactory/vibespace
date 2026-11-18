@@ -1272,7 +1272,7 @@ console.log('— ㉞ (r8 s3) an unknown is said where the person looks — the c
 await leg('㉞ the card says it; the person\'s download fetches it again', async () => {
   const [a, b, c, d] = U;
   const unreadWords = `the waiting kernel ${VER.k3} could not be read (EIO) — it is kept beside its place and asked again at the next start`;
-  ok([a, b, c].every((x) => x.unread === 'EIO' && String(x.card).endsWith(` · ${unreadWords} · press «Download kernel» to fetch it again`) && !String(x.card).includes('serves the next browser start')), // B-0bc7: …and names its door
+  ok([a, b, c].every((x) => x.unread === 'EIO' && String(x.card).endsWith(` · ${unreadWords}`) && !String(x.card).includes('serves the next browser start')),
     `under ㉚'s unknown (the boot's sweep · a start · the cluster's download) the engine card read through the keeper says «${unreadWords}» — never «it serves the next browser start» while every start runs K2`, [a, b, c].map((x) => ({ road: x.road, unread: x.unread, card: x.card })));
   const fl = a.fleet || {};
   ok(fl.run === 'same' && fl.view && fl.view.state === 'staged' && fl.view.unread === 'EIO' && fl.said === 1 && fl.line === `The cluster's plugin ${EID}: its waiting kernel ${VER.k3} could not be read (EIO) — it is kept beside its place and asked again at the next start`,
