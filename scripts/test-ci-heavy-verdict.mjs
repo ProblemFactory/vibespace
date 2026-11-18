@@ -27,8 +27,9 @@
 //      it replaced agree on EVERY HEAD of that history (both run with ONE ancestry oracle in place of git; their decision code is real).
 //   §7b THE LAUNCH PATH (B-e381 part 2) — the tier a hook launches keeps the caller's env with a PATH that leaves out git's exec-path,
 //      the launching checkout's own data/bin, entries on a mount the guard REFUSES (storage), relative and empty entries; node's dir
-//      kept (by its real path), an NFS home's dirs kept; the launcher spawns with it, guarded and said. CONTROLS: no mount table and no
-//      checkout keep the dirs; a no-op seam reads red; the pre-fix spawn line fails the wiring pin.
+//      kept (by its resolved path; no entry is ever resolved), the launching checkout's mount is «home», an NFS home's dirs kept; the
+//      launcher spawns with it, guarded and said. CONTROLS: no mount table and no checkout keep the dirs; the pre-fix spawn line fails
+//      the wiring pin.
 //   §8 nothing left behind — every scratch dir removed, no child alive.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -652,14 +653,16 @@ console.log('§7b THE LAUNCH PATH (B-e381 part 2) — never the pushing shell\'s
     `…each drop said: ${born.dropped.map((x) => `${x.dir || '«»'} (${x.why})`).join(' · ')}`);
   const onMount = launchPath('/mnt/r/node/bin:/usr/bin', { mountinfo: MI, nodeDir: '/mnt/r/node/bin' });
   ok(onMount.path === '/mnt/r/node/bin:/usr/bin', 'node\'s own dir is kept even on a refused mount (the tier runs on it)');
-  const viaLink = launchPath('/opt/node-link/bin:/usr/bin', { mountinfo: MI, nodeDir: '/opt/node/bin', real: (d) => d.replace('/opt/node-link/', '/opt/node/') });
-  ok(viaLink.path === '/opt/node-link/bin:/usr/bin' && !viaLink.dropped.length, 'node\'s dir is matched by its REAL path (a symlinked version-manager dir is kept)');
+  // node's dir spelled through a link whose target sits on a refused mount: kept by its resolved spelling — and NO entry is ever resolved
+  const asked = [], viaLink = launchPath('/mnt/r/node/bin:/mnt/r/other/bin:/usr/bin', { mountinfo: MI, nodeDir: '/opt/node-link/bin', real: (d) => { asked.push(d); return d === '/opt/node-link/bin' ? '/mnt/r/node/bin' : d; } });
+  ok(viaLink.path === '/mnt/r/node/bin:/usr/bin' && JSON.stringify(asked) === JSON.stringify(['/opt/node-link/bin']), `node's dir is matched by its resolved path (a version-manager link onto a refused mount is kept) and only node's own dir is resolved — never an entry (asked: ${asked.join(', ')})`);
+  const SSHFS = MI + '39 22 0:35 / /home/u/workspace/sub rw - fuse.sshfs h:/x rw\n', SUBBIN = '/home/u/workspace/sub/tools/bin';
+  const homeRoot = launchPath(`${SUBBIN}:/usr/bin`, { mountinfo: SSHFS, repoDir: '/home/u/workspace/sub/vibespace' }), noRoot = launchPath(`${SUBBIN}:/usr/bin`, { mountinfo: SSHFS });
+  ok(homeRoot.path === `${SUBBIN}:/usr/bin` && noRoot.path === '/usr/bin', 'the launching checkout\'s own mount is the instance\'s «home» (the guard\'s class, never refused): an entry on it stays (CONTROL: with no checkout named, the same sshfs entry is storage and goes)');
   const bare = launchPath(HOOK_PATH, { mountinfo: '', gitExecPath: '/usr/lib/git-core', nodeDir: NODE });
   ok(bare.path.split(':').includes('/mnt/r/tools/bin') && bare.path.split(':').includes(PROD_BIN) && bare.judgedMounts === false,
     'CONTROL: with no mount table and no launching checkout the rclone dir and the data/bin stay — the two rules are what leave them out; the launch line then says the mounts were not judged');
-  // an EMPTIED seam is red: a launchEnvOf that hands the env back untouched fails the first leg's own predicate
-  const noop = (e) => ({ env: e, dropped: [] });
-  ok(noop(env).env.PATH !== born.env.PATH, 'CONTROL: a no-op launchEnvOf (the env handed back as given) would keep git\'s exec-path and the data/bin — the first leg reads it red');
+  // (an EMPTIED seam is red by the first leg itself: it drives the exported launchEnvOf and checks the exact PATH)
   // WIRING: the launcher's detached child is spawned with launchEnvOf's env, never the bare GIT_ENV, and a failure is said
   const launcher = (src) => { const i = src.indexOf('function heavyLaunch('); return i < 0 ? '' : src.slice(i, src.indexOf('\nexport function checkHeavy(', i)); };
   const wired = (src) => { const f = launcher(src); return /try \{ born = launchEnvOf\(GIT_ENV\); \} catch \(e\) \{ born = \{ env: GIT_ENV/.test(f) && /the tier's PATH was NOT rebuilt/.test(f) && /spawn\(process\.execPath, args, \{ cwd: repo, detached: true, stdio: \['ignore', fd, fd\], env: born\.env \}\)/.test(f) && !/detached: true[^\n]*env: GIT_ENV/.test(f); };

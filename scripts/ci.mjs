@@ -4712,17 +4712,20 @@ export function heavyAlreadyGreen({ markers = [], sha, full, commitTimeMs, scope
 let mpcLaunch = null;
 export function launchPath(pathStr, { mountinfo = '', gitExecPath = '', nodeDir = '', repoDir = '', real = (d) => d } = {}) {
   const MPC = mpcLaunch || (mpcLaunch = createRequire(import.meta.url)('../src/mount-path-class.js'));
-  const mountRoots = MPC.rootsOf({ mounts: MPC.parseMountinfo(mountinfo) });
+  // the guard's own classes, with the launching checkout as the instance's root (its mount is «home», never refused)
+  const mountRoots = MPC.rootsOf({ mounts: MPC.parseMountinfo(mountinfo), rootDir: repoDir || null });
   const norm = (d) => (d.length > 1 ? d.replace(/\/+$/, '') : d);
   const keep = [], dropped = [], seen = new Set();
-  const nodeReal = nodeDir ? real(norm(nodeDir)) : '', ownBin = repoDir ? norm(path.join(repoDir, 'data', 'bin')) : '';
+  // node's dir as spelled AND as resolved — resolved ONCE (its own dir: the running node); an entry is never resolved (an entry on a
+  // hung storage mount would hold the launcher in realpathSync)
+  const nodeDirs = nodeDir ? new Set([norm(nodeDir), norm(real(norm(nodeDir)))]) : new Set(), ownBin = repoDir ? norm(path.join(repoDir, 'data', 'bin')) : '';
   for (const raw of String(pathStr || '').split(':')) {
     if (!raw) { dropped.push({ dir: '', why: 'an empty entry (the cwd)' }); continue; }
     if (raw[0] !== '/') { dropped.push({ dir: raw, why: 'a relative entry' }); continue; }
     const d = norm(raw);
     if (seen.has(d)) continue;
     seen.add(d);
-    if (nodeReal && real(d) === nodeReal) { keep.push(d); continue; }
+    if (nodeDirs.has(d)) { keep.push(d); continue; }
     if (gitExecPath && d === norm(gitExecPath)) { dropped.push({ dir: d, why: "git's exec-path" }); continue; }
     if (ownBin && d === ownBin) { dropped.push({ dir: d, why: "the launching checkout's own data/bin" }); continue; }
     const row = MPC.rootOf(d, { mountRoots });
