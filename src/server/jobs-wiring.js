@@ -163,6 +163,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   const USER = { isUser: true, groups: new Set() };
   // B-6c1a: a record whose runs is not a list (a hand-edited or damaged store) lists with no runs — never a list that throws
   const runsOf = (j) => (Array.isArray(j.runs) ? j.runs : []).filter((r) => r && typeof r === 'object').map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger, lastLine: r.lastLine || '', memoryMb: r.memoryMb ?? null, memoryAskedMb: r.memoryAskedMb ?? null, memoryCap: r.memoryCap || null, memoryBound: r.memoryBound || null }));
+  // B-6c1a (its adversarial read r1): the DETAIL keeps whole run records (the panel's detail reads them) — a non-list or a null entry never reaches it
+  const runsWhole = (j) => (Array.isArray(j.runs) ? j.runs : []).filter((r) => r && typeof r === 'object');
   // the panel's fold groups one-shots by OWNER SESSION (§13 rule 3): the
   // conversation lineage id + the webui session id ride the user list only
   const ownerOf = (j) => ({ conversationId: (j.owner && j.owner.conversation && j.owner.conversation.id) || null, sessionId: (j.owner && j.owner.sessionId) || null });
@@ -214,10 +216,10 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       // READ-THROUGH to the archive (triage §13 rule 5): housekeeping must
       // never turn an id somebody holds into a 404
       const rec = jm.archivedById(req.params.id);
-      if (rec) return res.json({ job: { ...jm.snapshotArchived(rec, { tail }), access: rec.access, interaction: rec.interaction, runs: rec.runs } });
+      if (rec) return res.json({ job: { ...jm.snapshotArchived(rec, { tail }), access: rec.access, interaction: rec.interaction, runs: runsWhole(rec) } });
       return res.status(jm._unread && jm._unread.store ? 503 : 404).json(jm._unread && jm._unread.store ? unreadAnswer() : { error: 'no such job' });   // B-f276 cure r1: never «no such job» while the records are unread
     }
-    res.json({ job: { ...enrichPublished(jm.snapshot(job, { tail }), job), access: job.access, interaction: job.interaction, runs: job.runs } });
+    res.json({ job: { ...enrichPublished(jm.snapshot(job, { tail }), job), access: job.access, interaction: job.interaction, runs: runsWhole(job) } });
   });
   // BATCH ACKNOWLEDGE (2.369.121, owner: 批量已读): the panel's "Mark all seen"
   // sends every ackable id once; each terminal one-shot not yet seen is
