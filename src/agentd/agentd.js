@@ -735,6 +735,7 @@ function pidCmdline(pid) {
 const { reExecArgv, repointCurrent, handOver, listenWithRetry } = require('./reexec');
 // lane win-device-boot-hidden: the daemon's OWN launch on Windows — the console look + the logon task (PURE rules + texts)
 const HS = require('./hidden-start.js');
+const LH = require('./lock-holder.js'); // B-8475: whose agent a live pid in the lock is
 // THE RE-EXEC — the one site that starts this daemon's successor: the self-upgrade (beginUpgrade) and the console
 // self-heal at the start (lane win-device-boot-hidden). Each caller hands `reExecArgv(<script>)` (the script + EVERY
 // original flag); the successor is born sanitized (src/agent-env.js) with the caller's own names on top.
@@ -869,6 +870,7 @@ function acquireSingleton() {
         // fresh process table hands the new agent THE SAME pid; a reboot that repeats the number — and the check below read
         // «alive, our own name» and refused to start, for good.
         if (pid === process.pid) { fs.unlinkSync(LOCK); continue; }
+        if (LH.isOwnThread(pid)) { fs.unlinkSync(LOCK); continue; } // B-8475: …or one of this agent's own threads (the pid space is shared)
         let cmd = '';
         try { cmd = fs.readFileSync('/proc/' + pid + '/cmdline', 'utf-8').replace(/\0/g, ' '); } catch { }
         // no /proc (macOS/BSD): verify via ps — without this, a RECYCLED pid
@@ -882,7 +884,9 @@ function acquireSingleton() {
         // recognize our own daemon by EITHER the bundle name or the process
         // title (process.title='vibespace-device' overwrites /proc/cmdline on
         // Linux, so the old 'agentd'-only check could miss a live sibling)
-        if (alive && (cmd === '' || cmd.includes('agentd') || cmd.includes('vibespace-device'))) { blockingPid = pid; return false; } // genuine second instance
+        // B-8475: …and only when it is an agent of THIS root — in a container the lock outlives its agent on the home volume and
+        // the next container's pid numbers are fresh: the hub's own local agent may hold the dead pod's number (lock-holder.js)
+        if (alive && (cmd === '' || cmd.includes('agentd') || cmd.includes('vibespace-device')) && LH.holdsRoot(pid, ROOT) !== false) { blockingPid = pid; return false; } // genuine second instance
         fs.unlinkSync(LOCK); // stale (dead or recycled pid) — retry
       } catch { return false; }
     }

@@ -361,6 +361,84 @@ if [ -n "$DIAL_URL" ]; then
   echo "→ dial config persisted ($ROOT/state/dial.json)"
 fi
 
+# >>> B-8475 THE IMAGE'S USER BOOT HOOK — its functions (scripts/test-agent-lock.mjs runs this part in a real bash; the hub's
+# ssh unpair ships it, up to its end marker, on `bash -s` stdin and calls drop_hook_block) >>>
+# A container has no supervisor (the fleet image: no systemd), but its entrypoint (deploy/docker/entrypoint.sh, installed as
+# /usr/local/bin/vibespace-entrypoint) runs ~/.vibespace-init.sh at every start. There THIS installer registers the agent's
+# START — one marked block per root, right under the hook's `#!` line (a hand-written hook may end in `exit 0`) — so a
+# recreated container brings the agent back from its own files. A re-install replaces its own block; a retired older
+# install's block, a supervised re-install's and an ssh unpair's leave. The hook is written THROUGH its real file (a
+# symlinked hook keeps its link, the file its mode) and only a whole begin…end pair is ever removed. A block left behind
+# does nothing once its root is gone (it tests the agent's files first).
+HOOK="$HOME/.vibespace-init.sh"
+HOOK_RUNNER=/usr/local/bin/vibespace-entrypoint
+hook_runs_here() { # this image runs the user boot hook at every container start: its entrypoint is there and names the hook
+  [ -x "$HOOK_RUNNER" ] && grep -qF '.vibespace-init.sh' "$HOOK_RUNNER" 2>/dev/null
+}
+hook_block() { # the block for $KEY / $ROOT, at install time — the start in a clean environment, as a supervisor gives it. The
+  # whole block is a SUBSHELL that starts the agent and ends at once: the agent is never the hook's child (a person's hook
+  # that ends in `wait` returns; setsid does not fork inside a non-interactive shell's job) and no variable is left set
+  local R; R=$(printf '%q' "$ROOT")
+  cat <<HOOK_EOF
+# >>> vibespace-device $KEY >>> (written by its installer: the device agent's start at every container start)
+( R=$R
+  if [ -s "\$R/state/dial.json" ] && [ -e "\$R/current/vibespace-device.js" ]; then
+    N=\$(cat "\$R/state/node-path" 2>/dev/null); [ -x "\$N" ] || N=\$(command -v node)
+    S=nohup; command -v setsid >/dev/null 2>&1 && S=setsid
+    U=\$(id -un 2>/dev/null)
+    if [ -n "\$N" ]; then
+      env -i HOME="\$HOME" PATH="\$PATH" USER="\$U" LOGNAME="\$U" SHELL="\${SHELL:-/bin/sh}" LANG="\${LANG:-C.UTF-8}" \${TZ:+TZ="\$TZ"} VIBESPACE_DEVICE_ROOT="\$R" VIBESPACE_AGENTD_ROOT="\$R" "\$S" "\$N" "\$R/current/vibespace-device.js" </dev/null >>"\$R/state/agentd.out" 2>&1 &
+    fi
+  fi )
+# <<< vibespace-device $KEY <<<
+HOOK_EOF
+}
+hook_file() { # the hook's REAL file — a symlinked hook is written through its link
+  readlink -f "$HOOK" 2>/dev/null || printf '%s\n' "$HOOK"
+}
+hook_put() { # $1 = the new text, written beside $2 (the real file) → renamed over it, the old file's mode kept; a hook that
+  # belongs to ANOTHER user (a root `kubectl exec` over the person's file, a hook made root's on purpose) is never replaced
+  if [ -e "$2" ] && [ ! -O "$2" ]; then rm -f "$1"; echo "  ⚠ $HOOK belongs to another user — left as it is" >&2; return 1; fi
+  chmod --reference="$2" "$1" 2>/dev/null || chmod "$(stat -c %a "$2" 2>/dev/null || stat -f %Lp "$2" 2>/dev/null || echo 600)" "$1" 2>/dev/null || true
+  mv -f "$1" "$2" || { rm -f "$1"; return 1; }
+}
+drop_hook_block() { # $1 = a key — its whole begin…end block leaves; a begin without its end is LEFT, and said
+  [ -f "$HOOK" ] || return 0
+  grep -qF "# >>> vibespace-device $1 >>>" "$HOOK" || return 0   # nothing of this key's: a hand-written hook is never rewritten
+  local T rc=0; T=$(hook_file)
+  awk -v b="# >>> vibespace-device $1 >>>" -v e="# <<< vibespace-device $1 <<<" 'index($0, b) == 1 && !skip { skip = 1; next } skip && index($0, e) == 1 { skip = 0; next } !skip { print } END { if (skip) exit 3 }' "$T" > "$T.vs-tmp.$$" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$T.vs-tmp.$$"
+    if [ "$rc" -eq 3 ]; then echo "  ⚠ $HOOK holds the start of the vibespace-device $1 block but not its end — left as it is (remove that block by hand)" >&2
+    else echo "  ⚠ $HOOK could not be rewritten (nothing could be written beside $T) — left as it is" >&2; fi
+    return 1
+  fi
+  hook_put "$T.vs-tmp.$$" "$T"
+}
+register_boot_hook() { # this root's block, once, right under the hook's `#!` line (at the very top of a hook without one)
+  [ -O "$HOME" ] || { echo "  ⚠ $HOME belongs to another user — the start is not registered in its boot hook" >&2; return 1; }
+  if [ ! -e "$HOOK" ]; then ( umask 077; printf '#!/bin/bash\n# ~/.vibespace-init.sh: run by this container'"'"'s entrypoint at every start (the image'"'"'s user boot hook)\n' > "$HOOK" ) || return 1; fi
+  drop_hook_block "$KEY" || return 1
+  local T; T=$(hook_file)
+  hook_block > "$T.vs-blk.$$" || { rm -f "$T.vs-blk.$$"; return 1; }
+  awk -v f="$T.vs-blk.$$" 'function blk(  l) { while ((getline l < f) > 0) print l; close(f); put = 1 } NR == 1 && /^#!/ { print; blk(); next } NR == 1 { blk() } { print } END { if (!put) blk() }' "$T" > "$T.vs-tmp.$$" || { rm -f "$T.vs-blk.$$" "$T.vs-tmp.$$"; return 1; }
+  rm -f "$T.vs-blk.$$"
+  hook_put "$T.vs-tmp.$$" "$T"
+}
+root_of_pid() { # $1 = a live pid → the root its agent runs with, by the agent's own rule (src/agentd/lock-holder.js: DEVICE_ROOT,
+  # else AGENTD_ROOT, else <HOME>/.vibespace/agentd), or nothing when its environment cannot be read (no /proc; another user's)
+  [ -r "/proc/$1/environ" ] || return 0
+  tr '\0' '\n' 2>/dev/null < "/proc/$1/environ" | awk 'index($0, "VIBESPACE_DEVICE_ROOT=") == 1 && !sd { sd = 1; d = substr($0, 23) } index($0, "VIBESPACE_AGENTD_ROOT=") == 1 && !sa { sa = 1; a = substr($0, 23) } index($0, "HOME=") == 1 && !sh { sh = 1; h = substr($0, 6); sub(/\/+$/, "", h) } END { if (d != "") print d; else if (a != "") print a; else if (h != "") print h "/.vibespace/agentd" }' || true
+}
+same_root() { # $1 $2 = two roots → 0 when they are ONE folder: compared canonically (a symlinked spelling of a root is that root —
+  # the image's /home/vibe → /home/<name>); a folder that cannot be entered is compared as written, its trailing / dropped
+  local a b
+  a=$(cd -P "$1" 2>/dev/null && pwd -P) || a=${1%/}
+  b=$(cd -P "$2" 2>/dev/null && pwd -P) || b=${2%/}
+  [ "$a" = "$b" ]
+}
+# <<< B-8475 <<<
+
 # TAKE OVER from a daemon already running for THIS root (re-pair / identity
 # rotation): an OLD daemon keeps its old in-memory identity and holds the
 # singleton, so the new pairing never took effect ("already running" forever —
@@ -371,6 +449,8 @@ if [ -f "$ROOT/state/agentd.lock" ]; then
   OLDPID=$(cat "$ROOT/state/agentd.lock" 2>/dev/null || true)
   if [ -n "$OLDPID" ] && kill -0 "$OLDPID" 2>/dev/null; then
     OLDCMD=$(ps -p "$OLDPID" -o command= 2>/dev/null || true)
+    # B-8475: an agent of ANOTHER root at this pid (a recreated container's fresh pids) is not ours — never stopped; the lock is stale
+    OLDROOT=$(root_of_pid "$OLDPID"); if [ -n "$OLDROOT" ] && ! same_root "$OLDROOT" "$ROOT"; then OLDCMD="(an agent of another root)"; fi
     case "$OLDCMD" in
       *vibespace-device*|*agentd*)
         echo "→ replacing the running daemon for this root (pid $OLDPID)"
@@ -408,6 +488,7 @@ if [ -f "$ROOT/state/agentd.lock" ]; then
     rm -f "$ROOT/state/agentd.lock"
   fi
 fi
+
 
 # PERSISTENCE (the dead-Mac lesson: a daemon killed by a crash/reboot/upgrade
 # hiccup stayed dead forever — nothing restarted it). Register a supervisor:
@@ -494,6 +575,11 @@ if [ -z "$started" ]; then
     nohup "${START[@]}" </dev/null >>"$ROOT/state/agentd.out" 2>&1 &
   fi
   started="detached process (NO persistence — rerun after a reboot)"
+  # B-8475: a container whose image runs the user boot hook at every start — a DIAL pairing's start is registered there, once
+  # the agent is up (below: a failed install leaves no registered start)
+  HOOK_WANTED=; if hook_runs_here && [ -s "$ROOT/state/dial.json" ]; then HOOK_WANTED=1; fi
+else
+  drop_hook_block "$KEY" || true   # B-8475: a supervisor starts it now — an older container block of this root leaves
 fi
 
 # verify by the LOCK pid, not pgrep-by-path: the daemon rewrites its process
@@ -507,6 +593,7 @@ daemon_up() {
 }
 i=0; while [ $i -lt 8 ] && ! daemon_up; do sleep 1; i=$((i+1)); done
 if daemon_up; then
+  if [ -n "${HOOK_WANTED:-}" ] && register_boot_hook; then started="detached process — its start is registered in ~/.vibespace-init.sh, which this container runs at every start"; fi
   echo "✓ vibespace device agent running via $started (pid $(cat "$ROOT/state/agentd.lock" 2>/dev/null))"
   echo "  Output: $ROOT/state/agentd.out"
 else
@@ -566,12 +653,19 @@ retire_siblings() {
         if [ -n "$SP" ] && kill -0 "$SP" 2>/dev/null; then
           case "$(ps -p "$SP" -o command= 2>/dev/null || true)" in
             *vibespace-device*)
-              kill "$SP" 2>/dev/null || true
-              j=0; while [ $j -lt 5 ] && kill -0 "$SP" 2>/dev/null; do sleep 1; j=$((j+1)); done
-              if kill -0 "$SP" 2>/dev/null; then kill -9 "$SP" 2>/dev/null || true; fi
+              # B-8475: …and only when it is an agent of THAT root (a recreated container's fresh pids can give it to another)
+              SR=$(root_of_pid "$SP")
+              if [ -n "$SR" ] && ! same_root "$SR" "$HOME/.vibespace/$N"; then
+                echo "  ⚠ $N's lock names pid $SP, an agent of another root ($SR) — not stopped"
+              else
+                kill "$SP" 2>/dev/null || true
+                j=0; while [ $j -lt 5 ] && kill -0 "$SP" 2>/dev/null; do sleep 1; j=$((j+1)); done
+                if kill -0 "$SP" 2>/dev/null; then kill -9 "$SP" 2>/dev/null || true; fi
+              fi
               ;;
           esac
         fi
+        drop_hook_block "$K" || true   # B-8475: a retired install's start leaves the container's boot hook too
         RETIRED="$RETIRED${RETIRED:+, }$N"; NR=$((NR+1))
         ;;
       other) OTHER="$OTHER${OTHER:+, }$N" ;;

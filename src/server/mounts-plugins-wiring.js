@@ -397,8 +397,9 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
     if (h.transport === 'dial') return res.status(400).json({ error: 'already a dial device' });
     const sshRun = (script, timeout = 30000, input = null) => new Promise((resolve) => {
       const { execFile } = require('child_process');
-      execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
+      const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
         { env: hosts.sshEnv(), timeout, maxBuffer: 4 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || err?.message || '') }));
+      if (input != null) { child.stdin.on('error', () => { }); child.stdin.end(input); }   // B-8475: a script on stdin (`bash -s`)
       });
     if (req.body?.remove) {
       // best-effort remote teardown, ALWAYS clear the record (dead host must
@@ -406,9 +407,19 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
       const root = h.dialRoot || '';
       if (root && /^\$HOME\/[\w@.\/-]+$/.test(root)) {
         const key = require('path').basename(root).replace(/[^A-Za-z0-9.-]/g, '-').replace(/-+$/, '');
-        await sshRun(`systemctl --user disable --now "vibespace-device-${key}.service" 2>/dev/null; ` +
+        // B-8475: a container's boot-hook block of this key leaves FIRST, in the same one call — the installer's OWN functions
+        // (a whole begin…end pair only, written through the hook's real file) on `bash -s` stdin, whatever the login shell is;
+        // an installer that cannot be read here costs only the drop (the record is ALWAYS cleared)
+        let hookDrop = '';
+        try {
+          const inst = fs.readFileSync(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');
+          const h0 = inst.indexOf("# >>> B-8475 THE IMAGE'S USER BOOT HOOK"), h1 = inst.indexOf('# <<< B-8475 <<<');
+          if (key && h0 >= 0 && h1 > h0) hookDrop = `${inst.slice(h0, h1)}\ndrop_hook_block ${key} || true\n`;
+        } catch { }
+        const teardown = (`systemctl --user disable --now "vibespace-device-${key}.service" 2>/dev/null; ` +
           `launchctl bootout "gui/$(id -u)/cc.vibespace.device.${key}" 2>/dev/null; ` +
-          `pkill -f "${root}/" 2>/dev/null; sleep 1; rm -rf "${root}"; echo VS_REMOVED`, 30000);
+          `pkill -f "${root}/" 2>/dev/null; sleep 1; rm -rf "${root}"; echo VS_REMOVED`);
+        await (hookDrop ? sshRun('bash -s', 30000, hookDrop + teardown + '\n') : sshRun(teardown, 30000));
       }
       const devId = h.deviceId;
       hosts.ungraduateDial(h.id);
