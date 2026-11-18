@@ -82,6 +82,13 @@ console.log('③ THE CENSUS — every product sentence that names a place in Set
     { file: 'src/lib/settings-schema.js', re: /under the same unattended-spend ceiling \(Settings → Spending\)/, why: 'a Settings row\'s description naming the section beside it — Settings draws descriptions as text (debt: descriptions draw no link)' },
     { file: 'src/plugin-settings.js', re: /Settings › Spending show today/, why: 'the LLM plugin\'s budget description naming where its spend is shown — a description, drawn as text' },
     { file: 'src/lib/usage-source.js', re: /\(Settings → Spending\)/, why: 'a tooltip (title text) — no link can live there' },
+    // the restack on the train's checkpoint (lane login-request-card, 2026-11-18): bl-accounts batch 1, boarded BEFORE this unit, wrote
+    // four Spending sentences this census reads now — named here, each with its reason; their row links are owed to that row, not
+    // changed by a restack in the owner's money gate
+    { file: 'src/spend-authorizer.js', re: /^\s+ledger: 'This is VibeSpace failing closed, not a limit/, why: 'B-3b0f\'s unreadable-ledger door: «the limits in Settings → Spending cannot help here» — no value of the person\'s to change, so no row, by design' },
+    { file: 'src/spend-authorizer.js', re: /^\s+unset: 'A limit left empty refuses every turn nobody typed/, why: 'B-0a33 (3)\'s «a limit left empty» door — the empty row\'s link is owed (debt: a DOOR_LINK_WORDS.unset twin, as spending/overage have)' },
+    { file: 'src/spend-authorizer.js', re: /const unsetSaid = \(what\) => `no cap is set for/, why: 'B-0a33 (3)\'s agent-facing sentence for an empty cap — its row\'s link is owed (debt: the refusal\'s «The limit:» link, as a set cap has)' },
+    { file: 'src/stash-summary.js', re: /no limit is set for turns nobody typed/, why: 'B-0a33\'s «Not handed over — no limit is set» line (the stash summary) — its row\'s link is owed (debt: the summary\'s spending door draws no link yet)' },
   ];
   const rows = [];
   for (const f of files) {
