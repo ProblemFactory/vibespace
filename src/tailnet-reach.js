@@ -223,6 +223,7 @@ const WORDS = Object.freeze({
   en: {
     what: { name: 'name', address: 'address' }, through: ' through Tailscale',
     'plugin-off': '{host} is a Tailscale {what} — the Tailscale plugin is off: start it in ⚙ → Plugins → Tailscale',
+    system: '{host} is a Tailscale {what} — this machine runs its own Tailscale (managed outside VibeSpace), so VibeSpace\'s door stays off and the plugin cannot start here: the name opens only through that Tailscale', // B-05e8 ②: a system tailscaled — the plugin's start refuses there
     'no-plugin': '{host} is a Tailscale {what} — this instance has no Tailscale running: install and start it in ⚙ → Plugins → Tailscale',
     'signed-out': '{host} is a Tailscale {what} — Tailscale is not signed in yet: Log in in ⚙ → Plugins → Tailscale',
     setting: '{host} is a Tailscale {what} — reaching Tailscale devices from browsers is off: turn on «Reach tailnet hosts from browsers» in ⚙ → Plugins → Tailscale',
@@ -245,6 +246,7 @@ const WORDS = Object.freeze({
   zh: {
     what: { name: '名字', address: '地址' }, through: '经 Tailscale ',
     'plugin-off': '{host} 是 Tailscale 里的{what} — Tailscale 插件没有开：在 ⚙ → 插件 → Tailscale 里启动它',
+    system: '{host} 是 Tailscale 里的{what} — 这台机器运行着自己的 Tailscale（在 VibeSpace 之外管理），所以 VibeSpace 的通道保持关闭，插件在这里也无法启动：这个名字只能经那个 Tailscale 打开', // B-05e8 ②: a system tailscaled — the plugin's start refuses there
     'no-plugin': '{host} 是 Tailscale 里的{what} — 这个实例没有在运行 Tailscale：在 ⚙ → 插件 → Tailscale 里安装并启动它',
     'signed-out': '{host} 是 Tailscale 里的{what} — Tailscale 还没有登录：在 ⚙ → 插件 → Tailscale 里登录',
     setting: '{host} 是 Tailscale 里的{what} — 从浏览器访问 Tailscale 设备已关闭：在 ⚙ → 插件 → Tailscale 打开「从浏览器访问 tailnet 里的机器」',
@@ -267,6 +269,7 @@ const WORDS = Object.freeze({
   ja: {
     what: { name: '名前', address: 'アドレス' }, through: 'Tailscale 経由で',
     'plugin-off': '{host} は Tailscale の{what}です — Tailscale プラグインがオフです：⚙ → プラグイン → Tailscale で起動してください',
+    system: '{host} は Tailscale の{what}です — このマシンは独自の Tailscale（VibeSpace の外で管理）を動かしているため、VibeSpace の経路はオフのままで、ここではプラグインも起動できません：この名前はその Tailscale 経由でのみ開けます', // B-05e8 ②: a system tailscaled — the plugin's start refuses there
     'no-plugin': '{host} は Tailscale の{what}です — このインスタンスでは Tailscale が動いていません：⚙ → プラグイン → Tailscale でインストールして起動してください',
     'signed-out': '{host} は Tailscale の{what}です — Tailscale にまだログインしていません：⚙ → プラグイン → Tailscale でログインしてください',
     setting: '{host} は Tailscale の{what}です — ブラウザーから Tailscale のデバイスへの接続がオフです：⚙ → プラグイン → Tailscale で「ブラウザーから tailnet のマシンに接続」をオンにしてください',

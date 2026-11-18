@@ -32,7 +32,7 @@ const MAX_HEADER_BYTES = 16 * 1024;
  * @param allow  (host) => {allow, why|rule} — defaults to egressVerdict over `allowlist()`
  * @param allowlist  () => the current allowlist (string | array) — re-read per request so a setting change applies live
  */
-function create({ allowlist = () => '', allow = null, log = console, connectTimeoutMs = 10000, resolve = (h) => h, serve = null, tag = 'egress', failed = null } = {}) {
+function create({ allowlist = () => '', allow = null, log = console, connectTimeoutMs = 10000, resolve = (h) => h, serve = null, tag = 'egress', failed = null, cutGraceMs = 15000 } = {}) {
   // lane tailnet-names: `serve(req, res)` answers an ORIGIN-form request first (true = answered); `tag` names the journal lines;
   // r2: `failed(host, port, err)` hears an admitted host's upstream failure (→ {type, body} answers an absolute-form GET's 502)
   const heard = (host, port, e) => { try { return failed ? failed(host, port, e) || null : null; } catch { return null; } };
@@ -59,6 +59,11 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
   const recentRefusals = [];
   const noteRefused = (host, why) => { recentRefusals.push({ host: String(host || '').slice(0, 253), why: String(why || '').slice(0, 300), at: Date.now() }); if (recentRefusals.length > RECENT_MAX) recentRefusals.shift(); };
   let server = null;
+  // B-05e8 ① (the m2 law under concurrency): a socket whose verdict is STILL ASKED (its name looked up) is never cut by a
+  // close({ cut }) — it is marked, answered (a refusal read whole; an admission not dialled: the door closed) and ended then;
+  // a verdict that never comes is cut after `cutGraceMs` (15 s: past a resolver's own two 5 s tries); an admission's lookup
+  // FAILURE is an answer (its 502), never a cut; a refusal on a cut socket ends it once written (never a half-open wait)
+  const asking = new Set(), cutAfter = new Set();
 
   function refuse(res, v, host) {
     res.once('close', () => answered(v)); // r5: written, or its client gone
@@ -74,7 +79,13 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
     let target;
     try { target = new URL(req.url); } catch { res.writeHead(400, { Connection: 'close' }); res.end('egress proxy: absolute-form request required\n'); return; }
     if (target.protocol !== 'http:') { res.writeHead(400, { Connection: 'close' }); res.end('egress proxy: only http:// absolute-form requests or CONNECT\n'); return; }
+    const so = req.socket;
+    asking.add(so);
     decide(target.hostname, (v) => {
+      asking.delete(so);
+      const wasCut = cutAfter.delete(so);
+      if (wasCut && v.allow && !v.error) { try { so.destroy(); } catch { /* gone */ } return answered(v); } // B-05e8 ①: the door closed while it was asked — never dialled
+      if (wasCut) res.once('finish', () => { try { so.destroy(); } catch { /* gone */ } }); // its answer written: the socket ends with the door
       if (req.socket.destroyed) return answered(v); // lane tailnet-names r4: a client gone while the verdict was asked — nothing to dial
       if (!v.allow) return refuse(res, v, target.hostname);
       stats.allowed++;
@@ -103,6 +114,10 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
     const port = m ? Number(m[2]) : 0;
     sock.on('error', () => { /* a client gone while the verdict is asked: nothing to answer */ });
     const go = (v) => {
+      asking.delete(sock);
+      const wasCut = cutAfter.delete(sock);
+      if (wasCut && v.allow && port && !v.error) { try { sock.destroy(); } catch { /* gone */ } answered(v); return; } // B-05e8 ①: closed while asked — never dialled
+      if (wasCut) sock.once('finish', () => { try { sock.destroy(); } catch { /* gone */ } }); // its 403 / 502 written: the socket ends with the door
       if (!v.allow || !port) {
         if (sock.destroyed) answered(v); else { sock.once('finish', () => answered(v)); sock.once('close', () => answered(v)); } // r5: once the 403 is out
         stats.refused++;
@@ -132,14 +147,14 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
       sock.on('error', () => { try { up.destroy(); } catch { /* gone */ } });
       sock.on('close', () => { try { up.destroy(); } catch { /* gone */ } });
     };
-    if (host) decide(host, go); else go({ allow: false, why: 'malformed CONNECT target' });
+    if (host) { asking.add(sock); decide(host, go); } else go({ allow: false, why: 'malformed CONNECT target' });
   }
 
   /** Listen on 127.0.0.1 (port 0 = ephemeral). Returns the port. */
   async function listen({ port = 0 } = {}) {
     if (server) return server.address().port;
     server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, onRequest);
-    server.on('connection', (c) => { socks.add(c); c.on('close', () => socks.delete(c)); });
+    server.on('connection', (c) => { socks.add(c); c.on('close', () => { socks.delete(c); asking.delete(c); cutAfter.delete(c); }); });
     server.on('connect', onConnect);
     server.on('clientError', (e, sock) => { try { sock.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); } catch { /* gone */ } });
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', () => resolve()); });
@@ -149,7 +164,17 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
   const socks = new Set();
   /** stop listening; `cut` = end the open connections too (a CONNECT tunnel is no HTTP connection: close() alone waits for it) —
    *  lane tailnet-names r3: the tailnet door closes with the road */
-  async function close({ cut = false } = {}) { if (!server) return; const s = server; server = null; const done = new Promise((r) => s.close(() => r())); if (cut) for (const c of socks) { try { c.destroy(); } catch { /* gone */ } } await done; }
+  async function close({ cut = false } = {}) {
+    if (!server) return;
+    const s = server; server = null;
+    const done = new Promise((r) => s.close(() => r()));
+    if (cut) {
+      const marked = [];
+      for (const c of socks) { if (asking.has(c)) { cutAfter.add(c); marked.push(c); continue; } try { c.destroy(); } catch { /* gone */ } } // B-05e8 ①: one still asked answers first
+      if (marked.length) { const t = setTimeout(() => { for (const c of marked) { if (!cutAfter.has(c)) continue; cutAfter.delete(c); try { c.destroy(); } catch { /* gone */ } } }, cutGraceMs); if (t.unref) t.unref(); } // THIS close's own
+    }
+    await done;
+  }
 
   return { listen, close, port: portOf, stats, verdict, recent: () => recentRefusals.map((r) => ({ ...r })), url: () => (server ? `http://127.0.0.1:${server.address().port}` : null) };
 }
