@@ -69,15 +69,18 @@ if (!process.env.TASK_SCAN_CHILD) {
   ];
   fs.writeFileSync(fp, lines.join('\n') + '\n');
 
-  const { SessionMessages } = await import(path.join(repo, 'src', 'session-store.js')).then((m) => m.default || m);
+  const { SessionMessages, warmSessionJsonlAsync } = await import(path.join(repo, 'src', 'session-store.js')).then((m) => m.default || m);
   const mk = () => new SessionMessages({ backend: 'claude', backendSessionId: sid, claudeSessionId: sid, cwd }, null, { buffersDir: path.join(process.env.HOME, 'buf'), permissionModes: [] });
 
+  // B-299b A2: the scan runs in the transcript worker at the warm (the hub's road: the warm before every task-state answer)
+  await warmSessionJsonlAsync(sid, cwd);
   let todos = (mk().taskState() || {}).todos || [];
   check('one task, not the ancient TodoWrite snapshot', todos.length === 1 && todos[0].content === 'Ship it', JSON.stringify(todos));
   check('completed despite the compaction replay after it', todos[0]?.status === 'completed', JSON.stringify(todos[0]));
 
   // ── (c) incremental append: a GENUINE later reopen must apply ──
   fs.appendFileSync(fp, update('u9', '2026-07-16T09:00:00.000Z', 'in_progress') + '\n');
+  await warmSessionJsonlAsync(sid, cwd);
   todos = (mk().taskState() || {}).todos || [];
   check('appended (genuine) update picked up incrementally', todos[0]?.status === 'in_progress', JSON.stringify(todos[0]));
 

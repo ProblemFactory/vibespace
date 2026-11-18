@@ -135,6 +135,10 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
    *  after a restart processLive fills it with partial buffer data first, and
    *  serving that truncated history/search/turnmap to a handful of buffer
    *  messages) — else rebuild from the merged JSONL+buffer view. */
+  /** The harness's pre-read hook (S3 store.warmTranscript) for `r` — the live session when there is one. Never throws. */
+  async function warmOf(r, live) {
+    try { const warm = harnessOf(r.backend || 'claude').store?.warmTranscript; if (warm) await warm(r.sessionId, r.cwd, { remote: !!r.host, ...(live ? { session: live } : {}) }); } catch { }
+  }
   async function view(ref) {
     const r = norm(ref);
     await refreshRemote(r);
@@ -207,6 +211,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
       if (session?._permissionMode && viaDev.chatStatus && !viaDev.chatStatus.permissionMode) viaDev.chatStatus.permissionMode = session._permissionMode;
       return viaDev;
     }
+    await warmOf(r, session); // B-299b A2: the task-tool scan (claude) is read off the loop before taskState answers
     const sm = createSessionMessages(sessionShape(r, session));
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const chatStatus = sm.chatStatus();
@@ -221,7 +226,9 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     const viaDev = await tryDevice(r, 'taskState', {});
     if (viaDev) return viaDev;
     await refreshRemote(r);
-    const sm = createSessionMessages(sessionShape(r, liveSession(r)));
+    const live = liveSession(r);
+    await warmOf(r, live); // B-299b A2: GET /api/session-todos (a Properties window re-asks at every broadcast) — the scan off the loop
+    const sm = createSessionMessages(sessionShape(r, live));
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     return sm.taskState() || {};
   }

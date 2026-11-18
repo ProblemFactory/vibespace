@@ -80,6 +80,7 @@ function createSessionBroadcast({ limitBytes = LAGGED_LIMIT_BYTES, event = (name
     for (const [client, entry] of session.clients) {
       if (client.readyState !== WS_OPEN) continue;
       if (seq && entry && entry.lagged) continue; // cut: this client resumes by seq when it re-attaches
+      if (seq && entry && entry.pending) continue; // an attach in its pre-verdict waits (ws-handler, B-299b A2 r3): the verdict taken after them replays this frame or ships the slab
       if (seq && entry && entry.resumeArmed && hasOpSeqCap(entry)) {
         const v = laggedVerdict({ bufferedAmount: client.bufferedAmount, limitBytes });
         if (v.lagged) {

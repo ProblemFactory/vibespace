@@ -582,10 +582,12 @@ function jsonlCacheClear() { _jsonlCache.clear(); _jsonlResident = 0; }
 // plus the structured-clone of a whole tail — and the worker's full read
 // returns the same span entry, so the NEXT change is an append too.
 async function warmSessionJsonlAsync(claudeSessionId, cwd) {
+  let tasks = null;
   try {
     const fp = findSessionJsonlPath(claudeSessionId, cwd);
     if (!fp) return false;
     const stat = fs.statSync(fp);
+    tasks = warmTaskEvents(claudeSessionId, fp, stat); // B-299b A2: the task-tool scan, in the transcript worker, beside the tail's warm
     const cached = _jsonlCache.get(claudeSessionId);
     if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) { _jsonlCachePut(claudeSessionId, cached); return true; } // already warm (touched: the working set)
     const { readJsonlTail, readJsonlTailAsync } = require('./adapters/codex');
@@ -604,7 +606,7 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd) {
     _stampJsonlParse(r.bytes, performance.now() - t0);
     _jsonlCachePut(claudeSessionId, r.entry);
     return true;
-  } catch { return false; }
+  } catch { return false; } finally { if (tasks) await tasks; }
 }
 
 function parseSessionJsonl(claudeSessionId, cwd) {
@@ -759,58 +761,108 @@ function getSubagentMetas(claudeSessionId, cwd) {
 // byte-safe line splitting, incremental byte cursor so a live session only
 // scans appended bytes) with uuid dedup (kills replay copies), and let the
 // caller apply events in TIMESTAMP order.
-const _taskEventCache = new Map(); // fp → {offset, carry, seq, pending, events, uuids}
-function scanTaskEventsFull(fp) {
+//
+// OFF THE HUB'S LOOP (B-299b A2, lane bl-loop-a — 12.4 s over 3 holds measured: the 16 MB slabs read, copied, decoded and
+// split on the main thread at the first task-state answer of every conversation after a restart, and an open Properties
+// window re-asking at every broadcast): the BYTES are read in the transcript worker (`taskLinesSince`, op 'taskLines' — a
+// stateless reader: the task-tool lines past a byte offset, each parsed to its facts), the main thread keeps each
+// conversation's cursor and events (`_taskEventCache`, bounded) and applies the facts (dedup by uuid, a TaskCreate's id from
+// its result) exactly as the full scan did. The warm (warmSessionJsonlAsync — the descriptor's store.warmTranscript, awaited
+// before every task-state answer) scans what was appended; taskState() reads only the kept events — no transcript byte.
+const TASK_EVENT_CACHE_MAX = 256; // conversations whose task events are kept (least recently warmed out first)
+const _taskEventCache = new Map(); // conversation id → {fp, ino, offset, size, seq, pending, events, uuids}
+const _taskWarming = new Map();
+const TASK_NEEDLES = ['"TaskCreate"', '"TaskUpdate"', '"TodoWrite"', 'Task #'];
+/** THE WORKER'S READ (B-299b A2): the complete lines of `fp` from byte `offset` that may carry a task-tool event (the full
+ *  scan's own pre-filter), each parsed to its facts → {size, ino, next, reset, items: [{uuid, ts, type, blocks}]} | null (no
+ *  file). `next` = the byte after the last complete line (a line still being written is read next time); `reset` = the file
+ *  is shorter than `offset` (rewritten: read from 0). byte-safe: never toString across a slab edge. */
+function taskLinesSince(fp, offset = 0) {
   let st;
   try { st = fs.statSync(fp); } catch { return null; }
-  let c = _taskEventCache.get(fp);
-  if (!c || st.size < c.offset) c = { offset: 0, carry: Buffer.alloc(0), seq: 0, pending: new Map(), events: [], uuids: new Set() };
-  _taskEventCache.set(fp, c);
-  if (st.size === c.offset) return c.events;
-  let fd;
-  try { fd = fs.openSync(fp, 'r'); } catch { return c.events; }
-  try {
-    const CH = 16 * 1024 * 1024;
-    const buf = Buffer.allocUnsafe(CH);
-    while (c.offset < st.size) {
-      const n = fs.readSync(fd, buf, 0, Math.min(CH, st.size - c.offset), c.offset);
-      if (n <= 0) break;
-      c.offset += n;
-      // byte-safe line assembly: never toString across an arbitrary slab edge
-      // (a split multi-byte char corrupts the boundary line — the CJK/byte-
-      // offset lesson from usage-history)
-      const data = c.carry.length ? Buffer.concat([c.carry, buf.subarray(0, n)]) : Buffer.from(buf.subarray(0, n));
-      const cut = data.lastIndexOf(0x0a);
-      if (cut === -1) { c.carry = Buffer.from(data); continue; }
-      c.carry = Buffer.from(data.subarray(cut + 1));
-      for (const line of data.toString('utf-8', 0, cut).split('\n')) {
-        if (!line.includes('"TaskCreate"') && !line.includes('"TaskUpdate"') && !line.includes('"TodoWrite"') && !line.includes('Task #')) continue;
-        let rec; try { rec = JSON.parse(line); } catch { continue; }
-        if (rec.uuid) {
-          if (c.uuids.has(rec.uuid)) continue; // compaction replay copy
-          c.uuids.add(rec.uuid);
-        }
-        const content = rec.message?.content;
-        if (!Array.isArray(content)) continue;
-        const ts = Date.parse(rec.timestamp || '') || 0;
-        for (const b of content) {
-          if (!b || typeof b !== 'object') continue;
-          if (rec.type === 'assistant' && b.type === 'tool_use') {
-            if (b.name === 'TodoWrite' && b.input?.todos) c.events.push({ kind: 'todos', todos: b.input.todos, ts, seq: c.seq++ });
-            else if (b.name === 'TaskCreate') c.pending.set(b.id, b.input || {});
-            else if (b.name === 'TaskUpdate' && b.input?.taskId) c.events.push({ kind: 'update', input: b.input, ts, seq: c.seq++ });
-          } else if (rec.type === 'user' && b.type === 'tool_result' && c.pending.has(b.tool_use_id)) {
-            const inp = c.pending.get(b.tool_use_id);
-            c.pending.delete(b.tool_use_id);
-            const txt = typeof b.content === 'string' ? b.content : (Array.isArray(b.content) ? b.content.map((x) => x?.text || '').join(' ') : '');
-            const m = /Task #(\d+) created/.exec(txt);
-            if (m) c.events.push({ kind: 'create', id: m[1], subject: inp.subject || '', activeForm: inp.activeForm, ts, seq: c.seq++ });
+  const reset = offset > st.size, from = reset ? 0 : Math.max(0, Number(offset) || 0), items = [];
+  let next = from;
+  if (from < st.size) {
+    let fd;
+    try { fd = fs.openSync(fp, 'r'); } catch { return null; }
+    try {
+      const CH = 16 * 1024 * 1024, buf = Buffer.allocUnsafe(CH);
+      let pos = from, carry = Buffer.alloc(0);
+      while (pos < st.size) {
+        const n = fs.readSync(fd, buf, 0, Math.min(CH, st.size - pos), pos);
+        if (n <= 0) break;
+        pos += n;
+        const data = carry.length ? Buffer.concat([carry, buf.subarray(0, n)]) : buf.subarray(0, n);
+        const cut = data.lastIndexOf(0x0a);
+        if (cut === -1) { carry = Buffer.from(data); continue; }
+        next = pos - (data.length - cut - 1);
+        carry = Buffer.from(data.subarray(cut + 1));
+        for (const line of data.toString('utf-8', 0, cut).split('\n')) {
+          if (!TASK_NEEDLES.some((x) => line.includes(x))) continue;
+          let rec; try { rec = JSON.parse(line); } catch { continue; }
+          const content = rec && rec.message && rec.message.content, blocks = [];
+          if (Array.isArray(content)) for (const b of content) {
+            if (!b || typeof b !== 'object') continue;
+            if (rec.type === 'assistant' && b.type === 'tool_use') {
+              if (b.name === 'TodoWrite' && b.input && b.input.todos) blocks.push({ k: 'todos', todos: b.input.todos });
+              else if (b.name === 'TaskCreate') blocks.push({ k: 'call', id: b.id, input: b.input || {} });
+              else if (b.name === 'TaskUpdate' && b.input && b.input.taskId) blocks.push({ k: 'update', input: b.input });
+            } else if (rec.type === 'user' && b.type === 'tool_result') {
+              const txt = typeof b.content === 'string' ? b.content : (Array.isArray(b.content) ? b.content.map((x) => (x && x.text) || '').join(' ') : '');
+              const m = /Task #(\d+) created/.exec(txt);
+              blocks.push({ k: 'result', id: b.tool_use_id, n: m ? m[1] : null });
+            }
           }
+          items.push({ uuid: (rec && rec.uuid) || null, ts: Date.parse((rec && rec.timestamp) || '') || 0, type: rec && rec.type, array: Array.isArray(content), blocks });
         }
       }
+    } finally { try { fs.closeSync(fd); } catch { } }
+  }
+  return { size: st.size, ino: st.ino, next, reset, items };
+}
+/** The worker's facts applied to a conversation's kept state — the full scan's own rules (a uuid seen ⇒ a compaction replay
+ *  copy, skipped; a TaskCreate's id from ITS result). */
+function applyTaskItems(c, items) {
+  for (const it of items || []) {
+    if (it.uuid) { if (c.uuids.has(it.uuid)) continue; c.uuids.add(it.uuid); }
+    if (!it.array) continue;
+    for (const b of it.blocks) {
+      if (b.k === 'todos') c.events.push({ kind: 'todos', todos: b.todos, ts: it.ts, seq: c.seq++ });
+      else if (b.k === 'call') c.pending.set(b.id, b.input || {});
+      else if (b.k === 'update') c.events.push({ kind: 'update', input: b.input, ts: it.ts, seq: c.seq++ });
+      else if (b.k === 'result' && c.pending.has(b.id)) {
+        const inp = c.pending.get(b.id);
+        c.pending.delete(b.id);
+        if (b.n) c.events.push({ kind: 'create', id: b.n, subject: inp.subject || '', activeForm: inp.activeForm, ts: it.ts, seq: c.seq++ });
+      }
     }
-  } finally { try { fs.closeSync(fd); } catch { } }
-  return c.events;
+  }
+}
+function taskCachePut(id, c) {
+  _taskEventCache.delete(id); _taskEventCache.set(id, c);
+  while (_taskEventCache.size > TASK_EVENT_CACHE_MAX) _taskEventCache.delete(_taskEventCache.keys().next().value);
+}
+/** THE WARM'S TASK SCAN (B-299b A2): the bytes `fp` gained since the kept cursor, read in the transcript worker (its inline
+ *  road answers null on the main thread — nothing then, the kept events stand). `st` = the warm's own stat. Never throws. */
+function warmTaskEvents(id, fp, st) {
+  if (!id || !fp) return Promise.resolve(false);
+  const was = _taskEventCache.get(id);
+  if (was && was.fp === fp && st && was.ino === st.ino && was.size === st.size) { taskCachePut(id, was); return Promise.resolve(true); }
+  if (_taskWarming.has(id)) return _taskWarming.get(id);
+  const p = (async () => {
+    const c0 = _taskEventCache.get(id), ask = (offset) => require('./adapters/codex').transcriptWorkerCall('taskLines', { fp, offset }, () => null);
+    let same = !!(c0 && c0.fp === fp && (!st || c0.ino === st.ino));
+    let r = await ask(same ? c0.offset : 0);
+    if (r && same && !r.reset && r.ino !== c0.ino) { same = false; r = await ask(0); } // replaced between the stat and the read: from 0
+    if (!r || !Array.isArray(r.items)) return false;
+    const c = same && !r.reset ? c0 : { fp, ino: r.ino, offset: 0, size: 0, seq: 0, pending: new Map(), events: [], uuids: new Set() }; // a reset was read from 0
+    applyTaskItems(c, r.items);
+    c.offset = r.next; c.size = r.size; c.ino = r.ino;
+    taskCachePut(id, c);
+    return true;
+  })().catch(() => false).finally(() => _taskWarming.delete(id));
+  _taskWarming.set(id, p);
+  return p;
 }
 
 function getHistorySessionId(session) {
@@ -1180,13 +1232,14 @@ class SessionMessages {
     const taskList = new Map(); // taskId → {content, activeForm, status}
     // Prefer the FULL-FILE event scan applied in TIMESTAMP order — the tail
     // window misses old completions, and compaction replays stale records
-    // AFTER them (see scanTaskEventsFull). Falls back to the in-window walk
-    // when the transcript path can't be resolved.
+    // AFTER them (see taskLinesSince). B-299b A2: the events the warm
+    // scanned off the loop (no transcript byte read here); falls back to
+    // the in-window walk when none were kept (never warmed — the pool down).
     let fullApplied = false;
     try {
       const hid = getHistorySessionId(this._session);
-      const fp = hid ? findSessionJsonlPath(hid, this._session?.cwd) : null;
-      const events = fp ? scanTaskEventsFull(fp) : null;
+      const kept = hid ? (_taskEventCache.get(hid) || (this._session?.claudeSessionId && _taskEventCache.get(this._session.claudeSessionId))) : null;
+      const events = kept ? kept.events : null;
       if (events) {
         fullApplied = true;
         let lastTodoTs = -1, lastTaskTs = -1;
@@ -1553,6 +1606,7 @@ function dedupWebuiSockets(entries) {
 
 module.exports = { claudeTranscriptIndex, stuckSaid,
   warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus,
+  taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache,
   extractSessionMeta,
   SESSIONS_DIR,
   dedupWebuiSockets,

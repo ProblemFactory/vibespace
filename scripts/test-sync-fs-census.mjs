@@ -375,6 +375,7 @@ const ROWS = [
   ["src/telemetry.js", "*", 6, "local-only", "this.dir = <dataDir>/telemetry (server.js new Telemetry({dataDir: <checkout>/data})): events-/central- shards and .instance-id"],
   ["src/transcript-service.js", "createTranscriptService > gapInfo", 1, "local-only", "fp = harness store.locate: ~/.claude/projects/*/<id>.jsonl, ~/.codex/sessions, or <checkout>/data/remote-jsonl cache (cwd only names the projdir)."],
   ["src/transcript-service.js", "createTranscriptService > rescue", 8, "local-only", "fp = localTranscriptPath (~/.claude/projects, ~/.codex/sessions, data/remote-jsonl) and its .pre-rescue-/.rescue-tmp siblings."],
+  ["src/transcript-worker.js", "SHIPPED", 1, "local-only", "B-299b A2: <checkout>/src/transcript-worker.js itself — does this checkout ship the worker's script (the device agent's bundle does not); asked once, kept"],
   ["src/usage-reset-claim.js", "create", 1, "local-only", "data/usage-reset-claims.json — the claim store's own file (lane account-reset-door), read once at start; the store writes it off the loop"],
   ["src/usage-anchors.js", "*", 2, "local-only", "this._file(key) under this.dir = <rootDir>/data/usage-anchors (usage-pool-engine new UsageAnchors)"],
   ["src/usage-cache-write.js", "*", 6, "local-only", "cacheDir is always USAGE_CACHE_DIR = <checkout>/data/usage-cache (usage-routes, usage-pool-engine, cli-usage-door, migrations, reading-repair, weekly-lanes-unfold)"],

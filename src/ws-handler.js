@@ -220,7 +220,7 @@ const { attachWindowOpts } = require('./text-window.js');
 /** The clients-map entry's op-seq state (caps / armed / lagged) survives an
  *  entry rewrite that is not an attach (a resize, a subagent viewer's entry on
  *  the parent) — only a new attach starts it over. */
-const seqStateOf = (prev) => (prev ? { caps: prev.caps || null, resumeArmed: !!prev.resumeArmed, lagged: prev.lagged || null } : {});
+const seqStateOf = (prev) => (prev ? { caps: prev.caps || null, resumeArmed: !!prev.resumeArmed, lagged: prev.lagged || null, ...(prev.pending ? { pending: true } : {}) } : {});   // B-299b A2 r4: an attach still in its pre-verdict waits stays pending through a resize / a helper view's attach
 
 function execFileAsync(cmd, args, { input, timeout = 20000, maxBuffer = 8 * 1024 * 1024, encoding = 'buffer', env = process.env } = {}) {
   return new Promise((resolve, reject) => {
@@ -252,6 +252,18 @@ const WS_CTX_CONTRACT = [
   'getDesign', // the Design window's hub (src/server/design-engine.js): design-watch / design-unwatch, a socket's close unwatches
   'setCustomName', // lane peer-card-sender: rename-session writes user-state customNames (src/routes/persistence.js — the sidebar rename's store)
 ];
+
+// B-299b A2 r2: the attach's task-state warm, BOUNDED — a worker queue past ATTACH_TASK_WARM_MS never holds an attach (the
+// answer is then the state kept so far; the warm ends on its own and the next answer reads it). Never throws.
+const ATTACH_TASK_WARM_MS = 10000;
+async function warmTaskStateFor(session) {
+  let t = null;
+  try {
+    const wts = harnessOf(session.backend || 'claude').store?.warmTaskState;
+    if (!wts) return;
+    await Promise.race([Promise.resolve().then(() => wts(session.claudeSessionId || session.backendSessionId, session.cwd)).catch(() => { }), new Promise((r) => { t = setTimeout(r, ATTACH_TASK_WARM_MS); })]);
+  } catch { } finally { if (t) clearTimeout(t); }
+}
 
 function registerWsHandler(wss, ctx) {
   const missing = WS_CTX_CONTRACT.filter((k) => !(k in ctx));
@@ -1321,7 +1333,29 @@ function registerWsHandler(wss, ctx) {
             break;
           }
 
-          const session = activeSessions.get(data.sessionId);
+          // B-299b A2: EVERY attach answers taskState (the payload below), not only the first rebuild — the harness's task-state
+          // warm runs for it (claude: the task-tool lines the transcript gained, read in the transcript worker; a stat when
+          // nothing moved). r2 (its fixes' read): it runs BEFORE this socket joins session.clients — a live frame broadcast while
+          // it waits never reaches the socket ahead of `attached` (a resume by seq would skip the frames it replays), and from
+          // the join to the send stays synchronous as it always was; bounded (ATTACH_TASK_WARM_MS), the session read after it
+          // r3 (its re-read, S1 + S2): the socket joins PENDING before the waits — an unstamped live frame (a helper's status, a
+          // published file, the sign-in card) still reaches it, as on the release; a stamped one (`msg`) the choke point holds
+          // back from it (src/server/session-broadcast.js), and the verdict taken after the waits replays it or ships the slab.
+          // The kept copies' preload (a restore's) is waited for here too, never between the join and the verdict
+          let waitedFor = null;   // the session whose kept copies were waited for before the join (r4)
+          {
+            const s0 = activeSessions.get(data.sessionId);
+            if (s0 && s0.mode === 'chat') {
+              waitedFor = s0;
+              s0.clients.set(ws, { cols: 120, rows: 30, caps: clientCaps(data), pending: true }); attachedSessions.add(data.sessionId);
+              if (s0._keptLoad) { try { await s0._keptLoad; } catch { } }
+              await warmTaskStateFor(s0);
+              const left = activeSessions.get(data.sessionId) !== s0 || ws.readyState === 2 || ws.readyState === 3;   // replaced / ended, or the socket closing
+              if (left && s0.clients.get(ws)?.pending) s0.clients.delete(ws);
+              if (ws.readyState === 2 || ws.readyState === 3) break;   // closing / closed during the waits: nothing to attach to
+            }
+          }
+          const session = activeSessions.get(data.sessionId);   // read AFTER the warm: one that ended meanwhile is gone
           if (session) {
             // `caps` (perf lane chunk D): what this client can answer — `op-seq` =
             // it reads `seq`, resumes by `sinceSeq` and re-attaches on `lagged`.
@@ -1340,7 +1374,7 @@ function registerWsHandler(wss, ctx) {
                 }
                 catch (e) { console.error('remote jsonl fetch failed:', e.message); }
               }
-              if (session._keptLoad) { try { await session._keptLoad; } catch { } } // the copies' kept pictures, read off the loop at the restore (r6)
+              if (session._keptLoad && session !== waitedFor) { try { await session._keptLoad; } catch { } } // the copies' kept pictures, read off the loop at the restore (r6) — waited for before the join (B-299b A2 r4) unless the session was replaced meanwhile
               const sm = createSessionMessages(session, data.sessionId);
               // Initialize normalizer from full JSONL + buffer history on first attach.
               // Can't use total===0: PTY output via processLive may have populated the

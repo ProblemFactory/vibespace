@@ -20,6 +20,8 @@
 'use strict';
 
 const { parentPort, isMainThread } = require('worker_threads');
+let _shipped = null; // B-299b A2: does this checkout ship the transcript worker's script (the device bundle does not)
+const SHIPPED = () => (_shipped == null ? (_shipped = require('fs').existsSync(require('path').join(__dirname, 'transcript-worker.js'))) : _shipped);
 
 // The existing sync implementations — required lazily inside runOp so that
 // loading THIS module from the main thread (for the inline fallback + pool
@@ -115,6 +117,13 @@ function runOp(op, payload = {}) {
         .then((result) => ({ result }));
     }
     case 'pictureHeld': return { result: require('./transcript-picture.js').reader().held() };
+    case 'taskLines': { // B-299b A2: a claude transcript's task-tool lines past a byte offset, parsed to their facts (session-store
+      // taskLinesSince — the warm's task scan). On the main thread (the pool down) it answers null: never a read on the loop
+      // …except where no such worker ships (the device agent's bundle — its read's MUST-2): the device reads its own transcript
+      // in place, on its own loop, as the release did there (the hub's checkout always has this script)
+      if (isMainThread && SHIPPED()) return { result: null };
+      return { result: require('./session-store').taskLinesSince(payload.fp, payload.offset || 0) };
+    }
     case '__sleep': { // test hook (deadline/restart path)
       const until = Date.now() + (payload.ms || 1000);
       while (Date.now() < until) { /* burn */ }
