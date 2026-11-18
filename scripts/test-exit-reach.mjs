@@ -898,9 +898,9 @@ console.log('controls (patched copies)');
   // (f) the manager without stillGranted — a revoke during the wait no longer stops the run
   const msrc = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
   const ms = msrc.replace("if (answer === 'revoked') { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: 'not_granted', grant: 'run', h, has: j.has, cmd }); }", '')
-    .replace("const again = E.exitVerdict(this.access(h.id), 'run', ctxNow);", "const again = { ok: true, via: 'session' };")   // B-48a4 U3: run's stillGranted line (the membership once)
+    .replace("const again = E.exitVerdict(accNow, 'run', ctxNow);", "const again = { ok: true, via: 'session' };")   // B-48a4 U3 + (B): run's stillGranted line
     .replace("        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || !E.exitVerdict(this.access(k.hostId), 'run', this.ctxFor(s, k.sessionId)).ok) ? 'revoked' : null;", "        const kwhy = !s ? 'conversation-gone' : null;"); // verify-r3: setAccess re-judges through THE ONE rejudgeAll — its ask branch is what a revoke settles
-  ok(ms !== msrc && !ms.includes("? 'revoked' : null;"), '(f) the patch applies (all three edits)');
+  ok(ms !== msrc && !ms.includes("? 'revoked' : null;") && ms.includes("const again = { ok: true, via: 'session' };"), '(f) the patch applies (all three edits — run\'s stillGranted line among them: the plant proves itself first)');
   const MF = M.load('src/exit-proxy.js', ms, 'nostill').ExitProxyManager;
   const w = world({ Mgr: MF });
   const A2 = w.sessions.get('wa');

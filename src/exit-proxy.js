@@ -151,17 +151,28 @@ class ExitProxyManager {
   // ── context + facts ───────────────────────────────────────────────────────
   /** Who the caller IS (window-targets-engine's ctxOf): every key it answers to — a pending fork only its
    *  `webui:<id>` — and the Task Groups it belongs to RIGHT NOW (a throw ⇒ `unreadable`, never "no groups"). */
-  ctxFor(session, sessionId) {
+  ctxFor(session, sessionId, { groups = true } = {}) {   // B-48a4 (B): `groups: false` = the session's own facts only, no Task Group walk
     const s = session || {};
     const keys = addressableId(s) ? R.callerKeys(s, sessionId) : [`webui:${sessionId}`];
     let groupIds = [], unreadable = false;
-    if (typeof this.groupsOf === 'function') {
+    if (groups && typeof this.groupsOf === 'function') {
       try { groupIds = (this.groupsOf(s, sessionId) || []).map((g) => String(g && typeof g === 'object' ? g.id : g)); }
       catch (e) { unreadable = true; this.log(`group membership unreadable for ${sessionId}: ${e.message}`); }
     }
     // lane grants-unify: the same keys in the grant model's ONE spelling (the conversation id; `webui:<id>` before it has one)
     const conversationKeys = keys.map(GM.keyFromSessionKey).filter(Boolean);
     return { sessionKeys: keys, conversationKeys, groupIds, ...(unreadable ? { unreadable: true } : {}), ...(liveForkPending(s) ? { forkPending: true } : {}) };
+  }
+  /** B-48a4 (B) — THE MEMBERSHIP IS ASKED AGAIN EXACTLY WHEN IT CAN DECIDE. A verdict reads the Task Group membership (groupIds and
+   *  the unreadable flag) ONLY through a group named in the grant's lists, to or except (src/exit-reach.js exitVerdict → src/grant-model.js
+   *  admits; test-exit-cost ⑧ is the census over every principal kind). Its inputs are the Task Group store AND facts no store write
+   *  announces (a Context folder created or gone on disk, a mount added, dropped or blocked, a SafeFs fact arriving), so no counter
+   *  can stand for it: a verdict after the judge asks it again iff the lists it reads NOW name a group; otherwise the judge's walk
+   *  stands. The session's own facts (its keys, a pending fork) are read fresh every time — no walk. → a ctx */
+  _ctxAgain(session, sessionId, judged, grantNow) {
+    const namesGroup = !!grantNow && [...(Array.isArray(grantNow.who) ? grantNow.who : []), ...(Array.isArray(grantNow.except) ? grantNow.except : [])].some((e) => e && e.kind === 'group');
+    if (namesGroup) return this.ctxFor(session, sessionId);
+    return { ...this.ctxFor(session, sessionId, { groups: false }), groupIds: (judged && judged.groupIds) || [], ...(judged && judged.unreadable ? { unreadable: true } : {}) };
   }
   keyOf(session, sessionId) { return addressableId(session) ? R.sessionKeyOf(session, sessionId) : `webui:${sessionId}`; }
   /** lane grants-unify: a live session's key in the grant model's ONE spelling — its own conversation id, a pending
@@ -439,7 +450,6 @@ class ExitProxyManager {
    * with a non-enumerable `done` (the stops' device-side unserve).
    */
   rejudgeAll(why = 'task-groups', { goneSessions = [], goneHosts = [] } = {}) {
-    this._memberGen = (this._memberGen || 0) + 1;   // B-48a4 U3: a run in flight asks the membership again only after one of these
     const out = { stopped: [], settled: [], asks: [], hosts: [] };
     const stopping = [];
     if (/^hosts-/.test(String(why))) this.pruneLists();   // lane grants-unify: a hosts.json write that dropped a machine drops its lists
@@ -650,7 +660,6 @@ class ExitProxyManager {
     if (encoded && !encoded.ok) throw namedError('bad_command', E.refusalText('bad_command', { encoded }), { encoded: encoded.code });
     if (encoded && encoded.hidden.length) throw namedError('bad_command', E.refusalText('bad_command', { hidden: encoded.hidden, encoded }), { hidden: encoded.hidden, encoded: 'hidden' });
     const j = this._judge(session, sessionId, ref, 'run');
-    const gen0 = this._memberGen || 0;   // B-48a4 U3: the re-judges counted so far (the membership the judge asked is good until one runs)
     if (j.refusal) throw this._refused(session, sessionId, { code: j.refusal.code, grant: 'run', cmd, error: j.refusal.error });
     const h = j.h, machine = h.name || h.id;
     const card = (rec) => this._card(session, machine, rec);
@@ -681,12 +690,11 @@ class ExitProxyManager {
     // stillGranted: the verdict AGAIN after the await (a revoke during the wait refuses and the answer is not spent)
     // — and the CALLER again (verify-r2 ask-a): a conversation that died while its ask waited is nobody to run for
     if (!this._stillLive(session, sessionId)) throw this._refused(session, sessionId, { code: 'conversation_gone', grant: 'run', h, cmd });
-    // B-48a4 U3: the Task Group membership is asked ONCE per command (the judge's ctx) — again only when a re-judge ran since
-    // (rejudgeAll counts itself: every Task Group store change, a hosts.json write, an access change reach it), on the asked road
-    // or not; the lists are read fresh at every verdict (a revoke of a list is caught whatever the count)
-    const gen1 = this._memberGen || 0;
-    const ctxNow = gen1 !== gen0 ? this.ctxFor(session, sessionId) : j.ctx;
-    const again = E.exitVerdict(this.access(h.id), 'run', ctxNow);
+    // B-48a4 U3 + (B): the lists are read fresh at every verdict; the Task Group membership is asked again only when they name a
+    // group (the one way it can decide a verdict — _ctxAgain), else the judge's walk stands and the session's own facts are re-read
+    const accNow = this.access(h.id);
+    const ctxNow = this._ctxAgain(session, sessionId, j.ctx, accNow.run);
+    const again = E.exitVerdict(accNow, 'run', ctxNow);
     if (!again.ok) { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: again.code, grant: 'run', h, has: j.has, cmd }); }
     const t0 = this.now();
     let r, interpreter = XS.POSIX_SHELL, platform = null, outdated = null;
@@ -742,8 +750,9 @@ class ExitProxyManager {
       throw namedError('device_agent_outdated', E.refusalText('device_agent_outdated', { machine, cmd, agentVersion }), { grant: 'run', platform, agentVersion, needVersion: XS.RUN_SHELL_SINCE });
     }
     // a revoke DURING the daemon's run cannot stop the command (no cancel op; ≤ 30 s) — it is recorded as such
-    const ctxAfter = (this._memberGen || 0) !== gen1 ? this.ctxFor(session, sessionId) : ctxNow;   // B-48a4 U3: a group removal during the run is recorded too
-    const revokedDuringRun = !E.exitVerdict(this.access(h.id), 'run', ctxAfter).ok;
+    const accAfter = this.access(h.id);
+    const ctxAfter = this._ctxAgain(session, sessionId, ctxNow, accAfter.run);   // B-48a4 (B): a group removal during the run is recorded, whatever moved it
+    const revokedDuringRun = !E.exitVerdict(accAfter, 'run', ctxAfter).ok;
     const by = { key: this.keyOf(session, sessionId), name: (session && session.name) || '' };
     // lane-exit-run-output E2: the child NEVER STARTED (`cmd-result.spawnError`, the daemon's judge) — distinct from a
     // non-zero exit: the row, the audit line, the card and the agent all say WHY (pre-fix: "exit 1 · 0.0 s", a guess)

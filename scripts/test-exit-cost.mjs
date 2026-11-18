@@ -19,9 +19,13 @@
 //      queued (landed, its answer not back) once, and a queued id inside another line's text hides nothing
 //   ④ THE RING ON THE WRITER'S THREAD (the real store writer): 400 device acts at a 64 KiB bound ⇒ no synchronous call on the data dir,
 //      the live file and .1 each at most the bound, the newest line live; a stop's synchronous flush writes every queued line
-//   ⑤ U3 — THE MEMBERSHIP ONCE (a world granted to Task Group G): a command asks the membership ONCE, asked by the user or not; a
-//      removal from G during the run (its re-judge) is asked again and RECORDED (revokedDuringRun, the card); RED CONTROLS: U3's first
-//      form (never asked after the run) records nothing; today's two re-asks ⇒ 3 a command
+//   ⑤ U3 + (B) — THE MEMBERSHIP ASKED EXACTLY WHEN IT CAN DECIDE: a grant that names no group asks it ONCE a command (asked by the
+//      user or not); a grant that names a group asks it at each verdict, so a removal no store write announces (a folder gone, a mount
+//      dropped) is REFUSED during the ask and RECORDED during the run; RED CONTROLS: the judge's walk alone misses both; every verdict
+//      walking again ⇒ 3 asks a command
+//   ⑧ (B) THE CENSUS: over every grant that names no group (all modes × every list of the grant model's other principal kinds × six
+//      callers), the verdict is the same under every membership (groups, none, an unreadable store); a list naming a group is decided
+//      by it; the run's two later verdicts ask again exactly then (pin)
 //   ⑦ THE CURE (the readers' SHOULDs on the taken unit): (a) a save the store writer cannot make durable says why (whyNotDurable) and the
 //      person-act doors await it (pins); (b) a migration's reshape is ON DISK before its ledger says done; (c) a rotation's rename the storage
 //      refuses keeps the ring recording; (d) generateKey reads the key fresh (the kept facts dropped); (e) a removal from the group DURING
@@ -259,36 +263,45 @@ console.log('④ the ring on the writer\'s thread (the real store writer)');
 }
 
 // ═══ ⑤ ═══
-console.log('⑤ U3 — the Task Group membership is asked once per command');
+console.log('⑤ U3 + (B) — the Task Group membership is asked exactly when it can decide');
 {
-  /** one command on a world granted to Task Group G: `during(w)` runs while the device holds the run (the gate) */
-  const one = async (Mgr, { ask = false, during = null } = {}) => {
-    const w = await world({ Mgr, byGroup: true, ask });
-    if (ask) w.mgr._ask = async () => 'allowed';   // the user allows (the real ask only waits; it asks no membership)
+  /** one command: `byGroup` = the run list names Task Group G (else everyone); `during(w)` runs while the device holds the run (the
+   *  gate); `duringAsk(w)` while the user's ask is open (a stand-in ask that does not settle itself) */
+  const one = async (Mgr, { byGroup = false, ask = false, during = null, duringAsk = null } = {}) => {
+    const w = await world({ Mgr, byGroup, ask: ask || !!duringAsk });
+    let answer = null;
+    if (ask) w.mgr._ask = async () => 'allowed';
+    if (duringAsk) w.mgr._ask = () => new Promise((r) => { answer = r; });
     let open = null;
     if (during) w.gate.p = new Promise((r) => { open = r; });
     w.resetAsks();
-    const p = w.mgr.run(w.sessions.get('wa'), 'wa', 'standin', 'true');
+    const p = w.mgr.run(w.sessions.get('wa'), 'wa', 'standin', 'true').then((v) => ({ v }), (e) => ({ e }));
+    if (duringAsk) { for (let i = 0; i < 20 && !answer; i++) await tick(); await duringAsk(w); answer('allowed'); }
     if (during) { for (let i = 0; i < 20 && w.acts.length === 0; i++) await tick(); await during(w); open(); }
     const r = await p;
     await w.mgr.auditWritten(); await w.hm.deviceAudit.whenWritten();
-    return { asks: w.asks(), ran: !!r && r.code === 0, revoked: !!(r && r.revokedDuringRun), card: String((w.cards.at(-1) || {}).text || '') };
+    return { asks: w.asks(), ran: w.acts.length, code: r.e && r.e.code, revoked: !!(r.v && r.v.revokedDuringRun), card: String((w.cards.at(-1) || {}).text || '') };
   };
-  const removal = async (w) => { w.member.delete('A'); w.mgr.rejudgeAll('task-groups'); };   // the person removes the conversation from G
-  const plain = await one(ExitProxyManager), asked = await one(ExitProxyManager, { ask: true }), gone = await one(ExitProxyManager, { during: removal });
-  ok(plain.ran && plain.asks === 1 && asked.ran && asked.asks === 1, `an unasked command asks the membership ${plain.asks}×, an asked one ${asked.asks}× — once, when no re-judge ran meanwhile`, { plain, asked });
-  ok(gone.ran && gone.revoked && gone.asks === 2 && /\(access was removed while it ran\)/.test(gone.card), `a removal from the group DURING the run (its re-judge) is asked again and recorded: revokedDuringRun ${gone.revoked}, the card says so (${gone.asks} asks)`, gone);
-  const EPa = compileAt('src/exit-proxy.js', [   // U3's first form: the membership as judged, never asked again after the run
-    ["    const ctxAfter = (this._memberGen || 0) !== gen1 ? this.ctxFor(session, sessionId) : ctxNow;", "    const ctxAfter = ctxNow;"],
+  // a removal from G that NO store write announces (a Context folder gone on disk, a mount dropped): the walk answers otherwise, no re-judge
+  const silent = async (w) => { w.member.delete('A'); };
+  const plain = await one(ExitProxyManager), asked = await one(ExitProxyManager, { ask: true });
+  ok(plain.ran === 1 && plain.asks === 1 && asked.ran === 1 && asked.asks === 1, `a grant that names no group: the membership asked ONCE a command (${plain.asks}×), asked by the user or not (${asked.asks}×) — it cannot decide the verdict (⑧)`, { plain, asked });
+  const grp = await one(ExitProxyManager, { byGroup: true });
+  ok(grp.ran === 1 && grp.asks === 3, `a grant that names a group: asked at each verdict (${grp.asks}×: the judge, the verdict before the run, the record after it)`, grp);
+  const goneRun = await one(ExitProxyManager, { byGroup: true, during: silent }), goneAsk = await one(ExitProxyManager, { byGroup: true, duringAsk: silent });
+  ok(goneRun.ran === 1 && goneRun.revoked && /\(access was removed while it ran\)/.test(goneRun.card) && goneAsk.code === 'not_granted' && goneAsk.ran === 0,
+    `a removal no store write announces — during the run it is RECORDED (revokedDuringRun ${goneRun.revoked}), during the user's ask it is REFUSED (${goneAsk.code}, ${goneAsk.ran} run)`, { goneRun, goneAsk });
+  const EPj = compileAt('src/exit-proxy.js', [   // the judge's walk alone (never asked again — U3's first form)
+    ["    const ctxNow = this._ctxAgain(session, sessionId, j.ctx, accNow.run);", "    const ctxNow = j.ctx;"],
+    ["    const ctxAfter = this._ctxAgain(session, sessionId, ctxNow, accAfter.run);", "    const ctxAfter = ctxNow;"],
   ]);
-  const goneA = await one(EPa.ExitProxyManager, { during: removal });
-  ok(goneA.ran && !goneA.revoked, `CONTROL (RED): the membership never asked after the run ⇒ the removal during it is not recorded (revokedDuringRun ${goneA.revoked})`);
-  const EP3 = compileAt('src/exit-proxy.js', [   // today's re-asks: the stillGranted verdict and revokedDuringRun each ask again
-    ["    const ctxNow = gen1 !== gen0 ? this.ctxFor(session, sessionId) : j.ctx;", "    const ctxNow = this.ctxFor(session, sessionId);"],
-    ["    const ctxAfter = (this._memberGen || 0) !== gen1 ? this.ctxFor(session, sessionId) : ctxNow;", "    const ctxAfter = this.ctxFor(session, sessionId);"],
+  const jRun = await one(EPj.ExitProxyManager, { byGroup: true, during: silent }), jAsk = await one(EPj.ExitProxyManager, { byGroup: true, duringAsk: silent });
+  ok(!jRun.revoked && jAsk.ran === 1, `CONTROL (RED): the judge's walk alone ⇒ the removal is neither recorded (revokedDuringRun ${jRun.revoked}) nor refused (the command ran: ${jAsk.ran})`);
+  const EP3 = compileAt('src/exit-proxy.js', [   // today's: every verdict walks again
+    ["    if (namesGroup) return this.ctxFor(session, sessionId);", "    if (namesGroup || true) return this.ctxFor(session, sessionId);"],
   ]);
   const today = await one(EP3.ExitProxyManager);
-  ok(today.ran && today.asks === 3, `CONTROL (RED): today's re-asks ⇒ ${today.asks} membership asks a command`);
+  ok(today.ran === 1 && today.asks === 3, `CONTROL (RED): every verdict walking again ⇒ ${today.asks} membership asks for a grant that names no group`);
 }
 
 // ═══ ⑥ ═══
@@ -381,9 +394,41 @@ console.log('⑦ the cure — the readers\' SHOULDs');
     return { code: r.e && r.e.code, ran: w.acts.length };
   };
   const refused = await askRemoval(ExitProxyManager);
-  const EPn = compileAt('src/exit-proxy.js', [["    const ctxNow = gen1 !== gen0 ? this.ctxFor(session, sessionId) : j.ctx;", "    const ctxNow = j.ctx;"]]);
+  const EPn = compileAt('src/exit-proxy.js', [["    const ctxNow = this._ctxAgain(session, sessionId, j.ctx, accNow.run);", "    const ctxNow = j.ctx;"]]);
   const ranC = await askRemoval(EPn.ExitProxyManager);
   ok(refused.code === 'not_granted' && refused.ran === 0 && ranC.ran === 1, `a removal from the group during the user's ask ⇒ refused (${refused.code}, ${refused.ran} run); CONTROL (RED): the membership as judged ⇒ the command ran (${ranC.ran})`);
+}
+
+// ═══ ⑧ ═══
+console.log('⑧ (B) — THE CENSUS: the membership decides a verdict only through a group named in the lists');
+{
+  const E = require(path.join(REPO, 'src/exit-reach.js'));
+  const GMk = require(path.join(REPO, 'src/grant-model.js'));
+  // every principal kind the grant model knows, but the group: the lists a grant may hold without one
+  const kinds = GMk.PRINCIPAL_KINDS || ['everyone', 'group', 'conversation'];
+  ok(kinds.includes('group') && kinds.every((k) => ['everyone', 'group', 'conversation'].includes(k)), `the grant model's principal kinds are the census's (${kinds.join(', ')}) — a new kind is red here until the census reads it`);
+  const P = [{ kind: 'conversation', key: 'A' }, { kind: 'conversation', key: 'B' }, { kind: 'everyone' }];
+  const subsets = (xs) => xs.reduce((acc, x) => acc.concat(acc.map((a) => [...a, x])), [[]]);
+  const ctxs = [];
+  for (const keys of [['A'], ['B'], ['C']]) for (const fork of [false, true]) ctxs.push({ conversationKeys: keys, forkPending: fork });
+  const memberships = [{ groupIds: [] }, { groupIds: ['G'] }, { groupIds: ['G', 'H'] }, { groupIds: [], unreadable: true }, { groupIds: ['H'], unreadable: true }];
+  let shapes = 0, differs = 0;
+  for (const mode of ['everyone', 'only', 'nobody']) for (const who of subsets(P)) for (const except of subsets(P.slice(0, 2))) for (const c of ctxs) {
+    const access = E.exitAccessOf({ exit: { ask: false } }, { run: [{ door: 'exit', resource: 'h:run', to: mode === 'everyone' ? [{ kind: 'everyone' }, ...who] : mode === 'nobody' ? [] : who, except }], use: [] });
+    if (!access || access.mode === 'unknown') continue;
+    shapes++;
+    const seen = new Set(memberships.map((m) => JSON.stringify(E.exitVerdict(access, 'run', { ...c, ...m }))));
+    if (seen.size !== 1) differs++;
+  }
+  ok(shapes > 200 && differs === 0, `over ${shapes} grants that name no group × 6 callers: the verdict is the SAME under ${memberships.length} memberships (groups, none, an unreadable store) — ${differs} shape(s) differ`);
+  const gAccess = E.exitAccessOf({ exit: { ask: false } }, { run: [{ door: 'exit', resource: 'h:run', to: [{ kind: 'group', id: 'G' }], except: [] }], use: [] });
+  const gDiff = new Set(memberships.map((m) => JSON.stringify(E.exitVerdict(gAccess, 'run', { conversationKeys: ['A'], ...m })))).size;
+  const exceptG = E.exitAccessOf({ exit: { ask: false } }, { run: [{ door: 'exit', resource: 'h:run', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'G' }] }], use: [] });
+  const eDiff = new Set(memberships.map((m) => JSON.stringify(E.exitVerdict(exceptG, 'run', { conversationKeys: ['A'], ...m })))).size;
+  ok(gDiff > 1 && eDiff > 1, `…and a list that names a group (in to: ${gDiff} verdicts; in except: ${eDiff}) is decided by the membership — the census sees the difference it guards`);
+  const PX = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
+  ok(/const namesGroup = !!grantNow && \[\.\.\.\(Array\.isArray\(grantNow\.who\) \? grantNow\.who : \[\]\), \.\.\.\(Array\.isArray\(grantNow\.except\) \? grantNow\.except : \[\]\)\]\.some\(\(e\) => e && e\.kind === 'group'\);/.test(PX)
+    && (PX.match(/this\._ctxAgain\(session, sessionId, /g) || []).length === 2, 'the run\'s two verdicts after the judge ask the membership again exactly when the lists they read name a group (to or except)');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
