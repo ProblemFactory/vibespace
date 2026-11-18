@@ -123,6 +123,10 @@ console.log('— ③c a LONG real path steps a Context row down — and the row 
   const wrongLv = lv === 'index' ? 'names' : 'index', wrong = DEPTH_WORDS[lv] ? lLine.replace(`— told as ${DEPTH_WORDS[lv]} instead`, `— told as ${DEPTH_WORDS[wrongLv]} instead`) : '';
   ok(saysOwn(lLine) && wrong !== lLine && !saysOwn(wrong),
     `③c the line says «told as ${DEPTH_WORDS[lv] || '?'} instead» — the words of the row's own level («${lv || '?'}»), no other level's (${othersIn(lLine).join(' ') || 'none'}); control: the line with «${DEPTH_WORDS[wrongLv]}» in their place is refused`);
+  // …and the level itself: below «file names» there is only «the path and note only» (the adversarial read: the words agreeing with
+  // rows[0].level did not pin the level — only the byte bound kept an upward step out), and that step names the door to every file
+  ok(lv === 'note' && lLine.includes('told as the path and note only instead; `vibespace-task show --full` lists every file]'),
+    `③c the step is DOWN to «the path and note only» (level «${lv || '?'}»), and its line names the door to every file (\`vibespace-task show --full\`)`);
 }
 
 console.log('— ④ every pointer names a served manual; every surface has one');
