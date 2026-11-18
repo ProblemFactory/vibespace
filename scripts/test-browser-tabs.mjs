@@ -678,6 +678,27 @@ console.log('— ③b B-1626: the viewer\'s thaw is asked again with the tab the
   }
 }
 
+// ═══ ③c B-26bb: a view reconnected after a stop draws none of the stopped run's chips (主开发 09:08Z: A, clear) ═══
+console.log('— ③c B-26bb: no stale chip after a reconnect from a stop');
+{
+  const BTx = require('../src/browser-tabs.js');
+  const kept = [{ tabId: 't1', targetId: T(1), title: 'a', url: 'https://a.example/', active: false }, { tabId: 't2', targetId: T(2), title: 'b', url: 'https://b.example/', active: true }, { tabId: 't3', targetId: T(3), title: 'c', url: 'https://c.example/', active: false }];
+  const owners = { [T(1)]: 'agent', [T(2)]: 'agent', [T(3)]: 'agent' };
+  const judge = (B) => ({ stale: B.tabRowModel({ tabs: kept, owners, stale: true }).rows.length, fresh: B.tabRowModel({ tabs: kept, owners }).rows.length });
+  const j = judge(BTx);
+  ok(j.stale === 0 && j.fresh === 3, `B-26bb: the stopped run's three kept chips draw NOTHING while the reconnected view waits for the new run's tabs record (${j.stale}); the same tabs as this run's draw all three (${j.fresh}) — nothing stale to click`, j);
+  const tsrc = fs.readFileSync(path.join(REPO, 'src/browser-tabs.js'), 'utf8');
+  const ANCH = '  const list = (Array.isArray(tabs) && !stale ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId))';
+  if (!tsrc.includes(ANCH)) ok(false, 'the anchor of the control «B-26bb stale» is not in the source (src/browser-tabs.js)');
+  else {
+    const BTc = M.load('src/browser-tabs.js', tsrc.replace(ANCH, '  const list = (Array.isArray(tabs) ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId))'), 'b26bb-no-stale'); // stale-pins: kept — the release's line, planted back as this control's mutant
+    ok(judge(BTc).stale === 3, 'CONTROL (B-26bb, the release\'s row): the stopped run\'s chips drawn after the reconnect (3 stale chips a person can press) — RED', judge(BTc));
+  }
+  const w = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  ok(w.includes("if (st.stopped) { st.stopped = false; st.tabsStale = true; renderMode(); renderTabRow(); }") && w.includes("        st.tabsStale = false; // B-26bb: the new run's own tabs\n        st.tabs = Array.isArray(m.tabs)") && w.includes('tabRowModel({ tabs: st.tabs, stale: !!st.tabsStale,') && w.includes("st.tabs = []; st.tabsStale = false;"),
+    'B-26bb wiring: the reconnect after a stop marks the chips stale and redraws the row; the new run\'s first tabs record ends it; a view that switches starts clean');
+}
+
 // ═══ ④ THE WORDS ═════════════════════════════════════════════════════════════
 console.log('— ④ the words: every new key in zh + ja');
 {

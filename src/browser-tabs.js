@@ -279,8 +279,10 @@ function chipTitleTail(title, url) {
  * `tabs` record rows; `owners` = {targetId: OWNER_WORDS} (the bridge's `tab-owners`; a tab it has not judged yet is
  * `orphan` — nothing is drawn on it); `viewer` = {human}; `driving`; `mediated`; `adoptable` (his window: the orphans
  * are his to take). → {rows:[…], counts, anyAgent}
+ * B-26bb: `stale` = the tabs are a STOPPED run's (the view reconnected after a stop and the new run has sent no `tabs` record
+ * yet) — no chip is drawn (nothing stale to click; the status line says the moment).
  */
-function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, mediated = false, adoptable = false, titles = {}, names = {}, windows = {}, leases = [], me = null } = {}, tIn) {
+function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, mediated = false, adoptable = false, titles = {}, names = {}, windows = {}, leases = [], me = null, stale = false } = {}, tIn) {
   const t = tOf(tIn);
   const human = !!(viewer && viewer.human);
   const ow = isObj(owners) ? owners : {};
@@ -288,7 +290,7 @@ function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, med
   const tt = isObj(titles) ? titles : {}, nm = isObj(names) ? names : {};
   // accept-fixes-strip F7: the PAGE's title (CDP's, else the binary's — never an address dressed as one); F8: a blank
   // tab nobody holds is not drawn (the tab on show always is)
-  const list = (Array.isArray(tabs) ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId))
+  const list = (Array.isArray(tabs) && !stale ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId)) // B-26bb: a stopped run's tabs draw nothing
     .map((x) => ({ ...x, title: pageTitleOf(x, tt[idKey(x.targetId)]) }))
     .filter((x) => x.active || wordOf(x) !== 'orphan' || !BLANK_URL_RE.test(str(x.url).trim()));
   const counts = { agent: 0, you: 0, other: 0, orphan: 0 };
