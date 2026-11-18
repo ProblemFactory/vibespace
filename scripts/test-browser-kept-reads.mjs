@@ -224,7 +224,7 @@ async function forgetLeg(KS, tag) {
   ok(r.user === 'kept_unconfirmed' && r.agent === 'kept_unconfirmed' && !r.started, `④ the REAL keeper over a stalled folder check: the user's Resume and the agent's resume are refused by name (${r.user} / ${r.agent}) — nothing started, never «resumed»`, r);
   ok(r.released === 'not_managed', `④ …released, the door answers and the road goes on (this world gives no spawn pairs: ${r.released} — the start itself is the heavy suites')`, r);
   const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const KD = MUT.load('src/server/browser-keeper.js', cut(kSrc, "    if (ks && !reconnect && !adoptedLabelOf(bk) && typeof ks.checkThere === 'function' && typeof ks.has === 'function' && ks.has(bk)) await ks.checkThere(bk);", '    // (no door)', 'the keeper\'s door in resumeFor'), 'keeper-nodoor');
+  const KD = MUT.load('src/server/browser-keeper.js', cut(kSrc, "    if (ks && !reconnect && typeof ks.checkThere === 'function' && typeof ks.has === 'function' && ks.has(bk)) await ks.checkThere(bk);", '    // (no door)', 'the keeper\'s door in resumeFor'), 'keeper-nodoor');
   const c = await keeperLeg(KD, 'control');
   ok(c.user === 'not_managed', `CONTROL: a keeper without the door goes on past a folder nobody confirmed (the user's Resume answers ${c.user}) — ④ is RED on it`, c);
 }
@@ -233,6 +233,9 @@ console.log('⑤ the keeper\'s ephemeralFor builds one row');
 {
   const ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const fnFor = ks.slice(ks.indexOf('  function ephemeralFor(browserKey) {'), ks.indexOf('\n', ks.indexOf('  function ephemeralFor(browserKey) {')));
+  const rf = ks.slice(ks.indexOf('  async function resumeFor('), ks.indexOf('\n  }\n', ks.indexOf('  async function resumeFor(')));
+  const doorAt = rf.indexOf('await ks.checkThere(bk);'), labelAt = rf.indexOf('adoptedLabelOf(bk)');
+  ok(doorAt > 0 && labelAt > doorAt, '⑤ resumeFor asks the bounded door BEFORE it resolves the adopted label (that one reads real paths synchronously) — a hung disk refuses by name, never holds the loop (its verdict\'s should)', { doorAt, labelAt });
   ok(/return p \? ephRow\(p\) : null;/.test(fnFor) && !/ephemerals\(\)/.test(fnFor) && /return reg\.profiles\.filter\(isEph\)\.map\(ephRow\);/.test(ks), '⑤ ephemeralFor(bk) finds ONE profile and builds its row — never ephemerals() (a kept read per ephemeral profile for each lookup)');
 }
 for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { label: 'CONTROL: ' })) ok(r.pass, r.name, r.detail);

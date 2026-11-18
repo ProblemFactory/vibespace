@@ -3273,8 +3273,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // only reconnects the view (no folder is read), so it is not asked; the agent's reopen of its waiting tabs is.
     const e00 = ephemeralFor(bk);
     const reconnect = who === 'user' && !!(e00 && (e00.live || starting.has(e00.profileId)));
-    // (a folder adopted into a named profile is refused by its own name first — the door reads no disk for it)
-    if (ks && !reconnect && !adoptedLabelOf(bk) && typeof ks.checkThere === 'function' && typeof ks.has === 'function' && ks.has(bk)) await ks.checkThere(bk);
+    // (the door runs BEFORE the adopted label is resolved: adoptedLabelOf reads real paths synchronously, so on a disk that
+    // hangs the act is refused by name, bounded, and the loop is never held — its verdict's should)
+    if (ks && !reconnect && typeof ks.checkThere === 'function' && typeof ks.has === 'function' && ks.has(bk)) await ks.checkThere(bk);
     let entry0 = null; try { entry0 = ks ? ks.get(bk) : null; } catch { entry0 = null; }
     const e0 = ephemeralFor(bk);
     const running = !!(e0 && (e0.live || starting.has(e0.profileId)));
