@@ -64,7 +64,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, realClicker, runnerFontEnv } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, realClicker, runnerFontEnv, CHROME_STORE } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -103,7 +103,7 @@ process.stdin.on('data', () => {});
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...(fontDir ? (fs.mkdirSync(fontDir, { recursive: true }), runnerFontEnv(fontDir)) : {}), HOME: chromeHome } });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...(fontDir ? (fs.mkdirSync(fontDir, { recursive: true }), runnerFontEnv(fontDir)) : {}), HOME: chromeHome } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;

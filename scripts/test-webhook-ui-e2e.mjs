@@ -22,7 +22,7 @@ import crypto from 'node:crypto';
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePort, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePort, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

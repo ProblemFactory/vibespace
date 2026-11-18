@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePort, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 
 const VNC_ENV = await vncEnv();

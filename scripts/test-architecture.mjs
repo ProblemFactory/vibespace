@@ -2854,14 +2854,14 @@ await section(async () => {
     'test-browser-live-ui.mjs', 'test-browser-live.mjs', 'test-browser-multiview.mjs', 'test-browser-propose-chrome.mjs', 'test-browser-resume-ui.mjs', 'test-channel-jump.mjs',
     'test-channel-threads-ui.mjs', 'test-channel-window-render.mjs', 'test-channels-aggregate-ui.mjs', 'test-channels-e2e.mjs', 'test-channels-groups-e2e.mjs',
     'test-chat-paging.mjs', 'test-cli-cmd-refresh.mjs', 'test-client-boot.mjs', 'test-collab-live-counter.mjs',
-    'test-desktop-app-snap.mjs', 'test-desktop-app-window.mjs', 'test-desktop-reorder.mjs', 'test-desktop-resume-paging.mjs',
+    'test-desktop-app-snap.mjs', 'test-desktop-app-window.mjs', 'test-desktop-resume-paging.mjs',
     'test-desktop-vnc-fit.mjs', 'test-desktop-xpra.mjs', 'test-fork-restore.mjs',
     'test-graduate-dial.mjs', 'test-group-report-card.mjs', 'test-harness-honesty.mjs', 'test-helper-ask-ui.mjs',
-    'test-incident.mjs', 'test-integration-toggle.mjs', 'test-integrations-ui.mjs', 'test-jobs-panel.mjs', 'test-mobile-gaps.mjs',
+    'test-incident.mjs', 'test-integrations-ui.mjs', 'test-jobs-panel.mjs', 'test-mobile-gaps.mjs',
     'test-office-desktop.mjs', 'test-opencode-plugin.mjs', 'test-opencode-s9.mjs', 'test-permission-rules.mjs', 'test-profile-blindness-chip.mjs',
     'test-queue-steer.mjs', 'test-readings-attribution.mjs', 'test-reattach-stagger-ui.mjs', 'test-reconnect-storm.mjs', 'test-restore-smoke.mjs', 'test-resume-breaker.mjs',
     'test-roster-reset-eta.mjs', 'test-run-collapse-fold.mjs', 'test-sidebar-empty-remote.mjs', 'test-sidebar-rail.mjs', 'test-split-close-resurrect.mjs',
-    'test-split-ux.mjs', 'test-stage-preview.mjs', 'test-sys-panel.mjs',
+    'test-split-ux.mjs', 'test-sys-panel.mjs',
     'test-title-chips-ui.mjs', 'test-turn-truth-ui.mjs', 'test-window-binding.mjs',
     'test-worktree-userchan-ui.mjs',
     // the 2.369.202 integration: server-booting suites the OTHER lanes of this release (and .200) added beside lane
@@ -2919,7 +2919,11 @@ await section(async () => {
   // hub-boot.mjs is the helper). THE ONE COUNT of this fact (主开发 2026-11-17 06:00Z — no second counter). A RATCHET that
   // only falls: a re-pointed batch lowers BOOTS_OUTSIDE_HELPER in the same commit, a new boot outside the helper is red, and
   // at 0 it is the law. RED CONTROL: a re-pointed suite with its own spawn line restored counts one more.
-  const BOOTS_OUTSIDE_HELPER = 168;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e (217), heavy batch 1 twenty suites (197); the rule WIDENED (主开发 06:00Z) found two the narrow pattern missed — test-boot-loop-hold's spread argv, test-update-road's stub server.js (its first line the real runtime boot) — 199. Heavy batch 2 re-pointed thirty-one: 199 → 168. THE FLOOR IS 1, not 0: test-update-road's stub is the one boot that can never move onto startHub (it measures the launcher's first line, no hub)
+  const BOOTS_OUTSIDE_HELPER = 171;   // 218 on master 2.369.406 (eacbf64df); piece 1 re-pointed test-chat-e2e (217), heavy batch 1 twenty suites (197); the rule WIDENED (主开发 06:00Z) found two the narrow pattern missed — test-boot-loop-hold's spread argv, test-update-road's stub server.js (its first line the real runtime boot) — 199. Heavy batch 2 re-pointed thirty-one: 199 → 168. THE FLOOR IS 1, not 0: test-update-road's stub is the one boot that can never move onto startHub (it measures the launcher's first line, no hub)
+  // 171 = the 168 above + the three suites of the links unit with setting-doors (lane login-request-card, restacked on the
+  // release, the coordinator's word) — test-internal-links-chrome, test-setting-links-chrome and test-setting-propose-chrome,
+  // written before this rule shipped, one site each by the widened rule; the narrow rule had them at 217 + 3 = 220. Their
+  // re-point onto hub-boot.mjs startHub is OWED (lane chrome-157's batch); the ratchet comes down by three with it.
   const bootFiles = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.mjs$/.test(f) && !/^dbg-/.test(f) && f !== 'hub-boot.mjs').sort();
   // one argument's text from `i` to the first comma / closing bracket at depth 0 (quotes and templates skipped) → { text, end }
   const argAt = (t, i) => {

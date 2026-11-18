@@ -100,7 +100,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE, vncEnv, takeCspReports, realClicker } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, takeCspReports, realClicker, CHROME_STORE } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)

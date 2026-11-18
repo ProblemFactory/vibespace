@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, vncEnv } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
+import { skipVerdict, maskText } from './chat-e2e-why.mjs';   // B-5a57: a missing reply says why — a SKIP only on THIS turn's own failure (its legs: test-ci-gate)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter, isFixtureProjectDir, FIXTURE_STALE_MS } = require('../src/fixture-guard.js');

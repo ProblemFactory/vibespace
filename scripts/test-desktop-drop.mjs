@@ -36,7 +36,7 @@ execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 
 fs.mkdirSync(path.join(root, 'home'), { recursive: true }); // the hub's HOME lies in its root (hub-boot.mjs)
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: path.join(root, 'home') } });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', `--user-data-dir=${scratch('deskdrop-chrome')}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', `--user-data-dir=${scratch('deskdrop-chrome')}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
   try { fs.rmSync(scratch('deskdrop-chrome'), { recursive: true, force: true }); } catch {}

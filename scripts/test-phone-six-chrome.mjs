@@ -47,7 +47,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, runnerFontEnv, realClicker, stillPresser } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, runnerFontEnv, realClicker, stillPresser } from './scratch.mjs';
 import { mintRoot, startHub, DAEMON_ROOT_ENV } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (test-architecture §57c)
 import { armWatchdog } from './suite-watchdog.mjs';
 import { navTitleMinText } from '../src/lib/title-chips.js'; // the release's readable minimum (lane phone-titlebar-title) — the ladder's since 主开发 09:33Z
@@ -69,6 +69,7 @@ const [PORT, CDP_PORT] = await freePorts(2);
 const root = mintRoot('phone-six');
 const wt = path.join(root, 't');
 const fakeHome = path.join(root, 'home');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 // ⑦e's files window shows a folder NAMED AT LENGTH (the 2.369.411 checkpoint's red): the boot helper's home is «home» — four
 // letters that fit beside the list column with nothing yielded, so ⚙ never folded and ⋯ held no row to read. Before §57c the
@@ -77,7 +78,7 @@ for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace'
 const FILES_DIR = path.join(fakeHome, 'vs-phone-six-home-folder');
 fs.mkdirSync(FILES_DIR, { recursive: true });
 const chromeDir = scratch('phone-six-chrome');
-const stubDir = scratch('phone-six-stub');
+const stubDir = path.join(root, 'stub');
 const fontsDir = scratch('phone-six-fonts');
 const CWD = path.join(stubDir, 'work');
 const SHOTS = arg('--shots') ? path.resolve(arg('--shots')) : scratch('phone-six-shots');
@@ -110,7 +111,6 @@ process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 
 // ── throwaway server in a worktree (the tree under test's src/ + built public/) ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${TREE}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -119,13 +119,12 @@ const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome,
 for (const k of DAEMON_ROOT_ENV) delete srvEnv[k];   // a device root, if the caller's env names one, would lie outside the minted root
 const hub = startHub({ root, tree: wt, port: PORT, env: srvEnv });   // its output: <root>/hub.log
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
-  '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...FONT_ENV } });
+  '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...FONT_ENV, HOME: chromeHome } });   // HOME: rule nine
 const cleanup = () => {
+  // the helper's end ran first (registered at the mint): the hub, every process carrying the root's HOME (Chrome by rule nine, the
+  // stub CLI and the hub's terminals by the hub's HOME), the worktree through git, then the root — the kill by handle is a no-op by then
   try { chrome.kill('SIGKILL'); } catch { }
-  try { hub.stop(); } catch { }
-  for (const r of [stubDir, chromeDir]) { try { endRootedProcesses(r); } catch { } } // the stub and Chrome, outside the minted root (§57b); the helper ends the hub's own
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [chromeDir, fakeHome, stubDir, fontsDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
+  for (const d of [chromeDir, fontsDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 };
 process.on('exit', cleanup);   // a signal is the boot helper's (armed at mintRoot: each ends in exit, so this runs) — no signal line here
 const PENDS = new Map();
