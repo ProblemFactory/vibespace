@@ -619,7 +619,7 @@ console.log('— ⑥c on a profile a person shares with agents a lease never act
   const firstA = "      if (left.length) return { ...out, state: { ...st, began: left } };";
   const leaseA = "      if (OPEN && st.owner === a.key) return close('the lease ended');";
   const deliverA = "        const deliver = !!(guid && g.scope.downloads.has(guid) && conn.asked && conn.asked.get(msg.sessionId == null ? '' : String(msg.sessionId)) === true);";
-  const orderedA = "      const sent = r.state && r.state.phase === 'closing' && r.state.ordered && sendInternal(w.conn, 'Browser.setDownloadBehavior', { behavior: 'default', eventsEnabled: asked }, (ok) => { if (ok) done(true); else short(); }, w.sid);";
+  const orderedA = "      const sent = r.state && r.state.phase === 'closing' && r.state.ordered && sendInternal(w.conn, 'Browser.setDownloadBehavior', { behavior: 'default', eventsEnabled: asked }, (ok) => { if (ok) done(true, 'ordered'); else fallBack(); }, w.sid);";
   const settingA = "if (w && w.conn === conn && w.st && w.st.owner === g.key) stepWindow(g.profileId, { kind: 'connGone', key: g.key });";
   const ownA = "          if (own) g.scope.downloads.set(guid, { ended: false });";
   const scopeA = "  { const wp = wholeProfileVerdict(msg, scope, { road: SCOPE_MODE }); if (wp) return wp; }";
@@ -653,10 +653,10 @@ console.log('— ⑥c on a profile a person shares with agents a lease never act
   ok(h3m.heard.join() !== 'WillBegin@session,Progress@session', '⑥e CONTROL (S3): 831913e2c\'s put-back (browser-level, events on) with delivery on every channel hears the next download TWICE — the leg above is red on it', JSON.stringify(h3m));
   // the re-run's controls: F3 (a) a re-set moving the deadline; F3 (b) «once» removed; F3 (c) the FIRST channel kept; F6 the set not held; F1 no answer bound; F2 no one-state kind
   const reSetA = "      if (!st.began.length || st.pending) return { ...out, forward: true };   // S2 (c): a re-set never moves the deadline";
-  const onceA = "      const quiet = begun && to && to.toldBegin;";
+  const onceA = "      const quiet = begun && to && to.toldBegin instanceof Set && to.toldBegin.has(r.told);";
   const chanA = "      if (act.kind === 'set' && conn) { w.conn = conn; w.sid = sid; }";
   const holdA = "      if (pend && /\"Browser\\.setDownloadBehavior\"/.test(String(data))) {";
-  const boundA = "        const t = setTimeout(() => { const x = windows.get(pid); if (x && x.st && x.st.phase === 'closing' && x.st.ordered && x.st.n === n) stepWindow(pid, { kind: 'putBackLost', n }); }, windowAnswerMs);";
+  const boundA = "        const t = setTimeout(() => { const x = windows.get(pid); if (x === w && x.st && x.st.phase === 'closing' && x.st.ordered && x.st.n === n) stepWindow(pid, { kind: 'putBackLost', n }); }, windowAnswerMs);";
   const ssSrc = fs.readFileSync(path.join(REPO, 'src/session-status.js'), 'utf8'), oneA = "const ONE_STATE_KINDS = new Set(['browser-download-folder']);";
   ok(bmSrcW.split(reSetA).length === 2 && [onceA, chanA, holdA, boundA].every((x) => medSrcW.split(x).length === 2) && ssSrc.split(oneA).length === 2, '⑥e control setup (the re-run): each mutated line is spelled once');
   ok(await reSet(withM(bmSrcW.replace(reSetA, "      if (!st.began.length || st.pending) return { ...out, state: { ...st, deadline: (Number(a.now) || 0) + (Number(st.bound) || bound) }, forward: true };   /* MUTANT */"), 'reset-moves').MED) === 'open', '⑥e CONTROL (F3 a): a re-set that moves the deadline keeps the window open past the bound — the leg above is red on it');

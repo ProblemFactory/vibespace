@@ -177,6 +177,14 @@ function replayOnAdmit(withheld, targetId, { wasInScope = false } = {}) {
   withheld.delete(k);
   return wasInScope ? null : { method: 'Target.targetCreated', params: { targetInfo: seen } };
 }
+/** B-0645 (3): a target in a browser context of the lease's OWN (it created that context) is known by its own targetInfo wherever
+ *  that arrives — created, changed, auto-attached, listed — never only by a createTarget reply (a tab its page opened there, an
+ *  out-of-process frame); a download any of them begins saves where THAT context does, never in the person's profile's folder. */
+function noteCtxTarget(scope, info) {
+  if (!scope || !info || info.targetId == null || info.browserContextId == null || !scope.contexts || !scope.contexts.has(String(info.browserContextId))) return;
+  scope.ctxTargets = scope.ctxTargets || new Set();
+  if (scope.ctxTargets.size < FRAMES_MAX) scope.ctxTargets.add(String(info.targetId));
+}
 
 // ── the method tables — DERIVED from the census (verify S2 r4, 2026-09-26) ────
 // One source of truth: src/cdp-census.js classes EVERY method of the installed Chrome's protocol. The sets below are
@@ -469,6 +477,7 @@ function wholeProfileVerdict(msg, scope, { road = MEDIATED_MODE } = {}) {
  *          connection closed, or a download of its tab began while no folder of its was lent — it went to the profile's own place)
  */
 const WINDOW_BOUND_MS = 30000;   // the real driver's own download timeout (measured 30.0 s on 154 and 157)
+const WINDOW_PUTBACK_TRIES = 3;   // B-0645 (2): the hub's OWN put-back, unanswered, is sent again — this many times in all
 const WINDOW_BUSY_TEXT = "another conversation's download is in progress in this profile — try again in a moment (lane chrome-157: one download window per profile)";
 const WINDOW_CLOSING_TEXT = "this profile's download folder is being put back — try again in a moment";
 const NO_WINDOW_TOLD = 'a download your tab began while no download folder of yours was lent';
@@ -525,7 +534,12 @@ function windowStep(state, act) {
       if (st && st.phase === 'lapsed') return { ...out, state: null };
       return out;
     case 'putBackLost':   // F1: the ordered put-back's answer did not come within its bound — the hub puts it back on a connection of its own
-      if (st && st.phase === 'closing' && st.ordered && st.n === a.n) return { ...out, state: { ...st, ordered: false }, putBack: 'its put-back was not answered' };
+      if (st && st.phase === 'closing' && st.n === a.n && a.own) {   // B-0645 (2): the hub's OWN put-back unanswered — sent again, a bounded number of times
+        const tries = Number(st.tries) || 1;
+        if (tries < WINDOW_PUTBACK_TRIES) return { ...out, state: { ...st, ordered: false, tries: tries + 1 }, putBack: `its put-back was not answered — sent again (${tries + 1} of ${WINDOW_PUTBACK_TRIES})` };
+        return { ...out, state: st.then === 'lapsed' ? { phase: 'lapsed', owner: st.owner, n: st.n } : null, lost: true };   // given up: the journal says so; the window ends as one unanswered put-back always ended it
+      }
+      if (st && st.phase === 'closing' && st.ordered && st.n === a.n && !a.own) return { ...out, state: { ...st, ordered: false }, putBack: 'its put-back was not answered' };
       return out;
     case 'leaseEnd':
       if (st && st.phase === 'closing' && st.ordered && st.owner === a.key) return { ...out, state: { ...st, ordered: false }, putBack: 'the lease ended before its put-back was answered' };   // F1
@@ -536,8 +550,10 @@ function windowStep(state, act) {
       if (st && st.phase === 'closing' && st.ordered && st.owner === a.key) return { ...out, state: { ...st, ordered: false }, putBack: 'its connection ended before the put-back was answered' };   // F1: the answer can no longer come on it
       if (OPEN && st.owner === a.key) return close('its connection ended', { told: 'its connection ended' });   // S1: the window lives with the connection that set it
       return out;
-    case 'putBackDone':
-      if (st && st.phase === 'closing' && st.n === a.n) return { ...out, state: st.then === 'lapsed' ? { phase: 'lapsed', owner: st.owner, n: st.n } : null };
+    case 'putBackDone':   // B-0645 (1): `via` = which put-back answered — the hub's own always ends it; the ORDERED one only while it is still the one
+      // out (after putBackLost the hub's own is on its way: a late ordered answer must not end the window under it — a new set would
+      // be admitted and the hub's put-back land on it)
+      if (st && st.phase === 'closing' && st.n === a.n && (a.via !== 'ordered' || st.ordered)) return { ...out, state: st.then === 'lapsed' ? { phase: 'lapsed', owner: st.owner, n: st.n } : null };
       return out;
     case 'repoint':
       return { ...out, state: null };
@@ -918,7 +934,7 @@ function admitReply(reply, pending, scope, { explicit = false } = {}) {
     case 'Target.detachFromTarget': if (p.sessionId) scope.sessions.delete(String(p.sessionId)); break;
     case 'Target.disposeBrowserContext': if (p.browserContextId) scope.contexts.delete(String(p.browserContextId)); break;
     case 'Target.closeTarget': if (r && r.success !== false && p.targetId) scope.targets.delete(String(p.targetId)); break;
-    case 'Target.getTargets': if (r && Array.isArray(r.targetInfos)) { for (const ti of r.targetInfos) if (!inScope(scope, ti && ti.targetId) && admissible(scope, ti)) admitTarget(scope, ti.targetId); r.targetInfos = r.targetInfos.filter((ti) => inScope(scope, ti && ti.targetId)); } break;
+    case 'Target.getTargets': if (r && Array.isArray(r.targetInfos)) { for (const ti of r.targetInfos) { if (!inScope(scope, ti && ti.targetId) && admissible(scope, ti)) admitTarget(scope, ti.targetId); if (inScope(scope, ti && ti.targetId)) noteCtxTarget(scope, ti); } r.targetInfos = r.targetInfos.filter((ti) => inScope(scope, ti && ti.targetId)); } break;
     case 'Target.getBrowserContexts': if (r && Array.isArray(r.browserContextIds)) r.browserContextIds = r.browserContextIds.filter((c) => scope.contexts.has(String(c))); break;
     default: break;
   }
@@ -940,7 +956,7 @@ function filterEvent(ev, scope) {
     case 'Target.targetInfoChanged': {
       const info = p.targetInfo;
       if (!admissible(scope, info)) { remember(scope, info); return null; }
-      admitTarget(scope, info.targetId);
+      admitTarget(scope, info.targetId); noteCtxTarget(scope, info);
       return ev;
     }
     case 'Target.targetDestroyed':
@@ -953,7 +969,7 @@ function filterEvent(ev, scope) {
       const info = p.targetInfo;
       const viaParent = !!(evSid && scope.sessions.has(evSid));
       if (!viaParent && !admissible(scope, info)) return null;
-      if (info && info.targetId) admitTarget(scope, info.targetId);
+      if (info && info.targetId) { admitTarget(scope, info.targetId); noteCtxTarget(scope, info); }
       if (p.sessionId) scope.sessions.set(String(p.sessionId), info && info.targetId ? String(info.targetId) : null);
       return ev;
     }
@@ -978,6 +994,7 @@ function filterEvent(ev, scope) {
       if (evSid && !scope.sessions.has(evSid)) return null;
       const fid = ev.method === 'Page.frameAttached' ? p.frameId : (p.frame && p.frame.id);
       if (fid != null && scope.frames && scope.frames.size < FRAMES_MAX) scope.frames.add(String(fid));
+      { const t = evSid ? scope.sessions.get(evSid) : null; if (fid != null && t && scope.ctxTargets && scope.ctxTargets.has(String(t)) && scope.ctxTargets.size < FRAMES_MAX) scope.ctxTargets.add(String(fid)); }   // B-0645 (3): a frame of an own-context tab is of that context too
       return ev;
     }
     default:
@@ -1031,6 +1048,7 @@ function mediationSentence({ profileLabel = '', others = 0 } = {}) {
 }
 
 module.exports = {
+  WINDOW_PUTBACK_TRIES,
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX, withhold, replayOnAdmit, // B-70af: the out-of-band admission's replay
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words

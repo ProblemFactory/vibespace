@@ -302,6 +302,9 @@ class SessionStatusManager {
     if (!n || !NOTICE_RENDERERS[n.kind]) throw new Error(`pushNotice: unknown notice kind ${JSON.stringify(n && n.kind)} (one of ${Object.keys(NOTICE_RENDERERS).join('/')})`);
     const rec = this._state.statuses[key] || (this._state.statuses[key] = { state: null, urgency: null, reason: null, setBy: null, at: Date.now(), pendingNotices: [] });
     if (!Array.isArray(rec.pendingNotices)) rec.pendingNotices = [];
+    // B-0645 (5): a ONE-STATE notice the record already holds, word for word, is no news — nothing written, nobody notified (a
+    // retry loop that is told the same thing every 30 s made ~90 writes and broadcasts an hour for one pending line)
+    if (ONE_STATE_KINDS.has(n.kind) && rec.pendingNotices.some((x) => x && x.kind === n.kind && String(x.text || '') === String(n.text || ''))) return rec.pendingNotices.length;
     if (replaceKind || ONE_STATE_KINDS.has(n.kind)) rec.pendingNotices = rec.pendingNotices.filter((x) => !(x && x.kind === n.kind));
     // BOUNDED: a producer that fires faster than the user types must not grow
     // the record without limit; the newest notices are the ones that describe

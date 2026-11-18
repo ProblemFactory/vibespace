@@ -79,6 +79,7 @@ const ADOPT_WAIT_MS = ADOPT_TRIES * FETCH_MS + ADOPT_GAP_MS * (ADOPT_TRIES * (AD
 // a download's guid is kept a moment past its end so every copy the lease asked for (a page session's and the browser's) is delivered
 const DOWNLOAD_ENDED_KEEP_MS = 5000;
 // the reasons a lease is told about a download its own tab began (said once until its next set)
+const PUTBACK_GAP_MS = 500;   // B-0645 (2): between the hub's own put-back tries
 const BEGIN_TOLD = new Set([M.NO_WINDOW_TOLD, M.OTHER_WINDOW_TOLD, M.PLACE_UNKNOWN_TOLD, M.OWN_CONTEXT_TOLD]);
 /** lane chrome-157 r2 (主开发's MUST): what an agent's invented method names may cost — the grant's view lists at most
  *  UNCLASSIFIED_KEEP names (it rides the keeper's digest to every client), the journal says at most UNCLASSIFIED_SAY a run
@@ -807,15 +808,15 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     if (r.told) {
       const to = r.toldTo === 'actor' ? (g || owner) : (owner || g);
       const begun = BEGIN_TOLD.has(r.told);
-      const quiet = begun && to && to.toldBegin;   // a download of its tab with no folder of its own lent: said ONCE until its next set
+      const quiet = begun && to && to.toldBegin instanceof Set && to.toldBegin.has(r.told);   // a download of its tab with no folder of its own lent: said ONCE per reason until its next set (B-0645: never one reason silencing another)
       if (to && !quiet) {
-        if (begun) to.toldBegin = true;
+        if (begun) { if (!(to.toldBegin instanceof Set)) to.toldBegin = new Set(); to.toldBegin.add(r.told); }
         to.windowTold = { why: r.told, at: now() };
         for (const fn of toldListeners) { try { fn({ profileId: pid, browserKey: to.browserKey, why: r.told }); } catch (e) { log.warn?.(`[cdp-mediator] a told listener threw — ${e && e.message}`); } }
         log.log?.(`[cdp-mediator] ${to.browserKey} on ${pid}: told — ${r.told}`);
       }
     }
-    if (act.kind === 'set' && g && act.behavior !== 'default' && r.forward) g.toldBegin = false;
+    if (act.kind === 'set' && g && act.behavior !== 'default' && r.forward) g.toldBegin = null;
     if (w.timer) { clearTimeout(w.timer); w.timer = null; }
     if (r.state && r.state.phase === 'open') {
       w.timer = setTimeout(() => { const x = windows.get(pid); if (x) { x.timer = null; stepWindow(pid, { kind: 'bound', now: now() }); } }, Math.max(0, Number(r.state.deadline) - now()) + 5);
@@ -824,15 +825,21 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     if (r.putBack) {
       const n = r.state ? r.state.n : (was && was.n);
       const say = (ok) => log.log?.(`[cdp-mediator] ${w.browserKey || '?'} on ${pid}: the profile's download folder ${ok ? 'put back' : 'NOT put back (the browser did not answer)'} — ${r.putBack}`);
-      const done = (ok) => { say(ok); if (r.state && r.state.phase === 'closing') stepWindow(pid, { kind: 'putBackDone', n }); };
+      const mine = () => { const x = windows.get(pid); return x === w && x.st && x.st.phase === 'closing' && x.st.n === n ? x : null; };   // B-0645: THIS window's record (an n restarts at 1 once a record is gone — a stale callback never reaches a new window)
+      const done = (ok, via) => { say(ok); if (r.state && r.state.phase === 'closing' && mine()) stepWindow(pid, { kind: 'putBackDone', n, via }); };   // B-0645 (1): which put-back answered
+      // B-0645 (1): the ORDERED put-back answered with an error — the hub's own goes out through the step (state first: not ordered) only
+      // while the ordered one is still the one out; after its answer bound the hub's own is already on its way — nothing more is sent
+      const fallBack = () => { say(false); if (mine() && mine().st.ordered) queueMicrotask(() => { const x = mine(); if (x && x.st.ordered) stepWindow(pid, { kind: 'putBackLost', n }); }); };
+      // B-0645 (2): the hub's own put-back unanswered ⇒ the window step decides — sent again (bounded) or given up (said)
+      const lostOwn = () => { say(false); if (!mine()) return; const t2 = setTimeout(() => { if (!mine()) return; const q = stepWindow(pid, { kind: 'putBackLost', n, own: true }); if (q && q.lost) log.warn?.(`[cdp-mediator] ${w.browserKey || '?'} on ${pid}: the profile's download folder was NOT confirmed put back after ${M.WINDOW_PUTBACK_TRIES} tries — the browser did not answer; the person's own downloads may still land in the lent folder until it does`); }, PUTBACK_GAP_MS); if (t2.unref) t2.unref(); };   // a gap between tries (a browser restarting); a window that moved on meanwhile: nothing
       const asked = !!(w.conn && w.conn.asked && w.conn.asked.get(w.sid || '') === true);
-      const short = () => putBackDownloads(w.upstream).then(done);
+      const short = () => putBackDownloads(w.upstream).then((ok) => (ok ? done(true, 'own') : lostOwn()));
       // measured (154 + 157): a {behavior:'default'} on the page session that set the folder puts the WHOLE profile back, and that
       // session then hears only its own page's downloads — the ordered put-back goes there, as the lease asked its events
-      const sent = r.state && r.state.phase === 'closing' && r.state.ordered && sendInternal(w.conn, 'Browser.setDownloadBehavior', { behavior: 'default', eventsEnabled: asked }, (ok) => { if (ok) done(true); else short(); }, w.sid);
+      const sent = r.state && r.state.phase === 'closing' && r.state.ordered && sendInternal(w.conn, 'Browser.setDownloadBehavior', { behavior: 'default', eventsEnabled: asked }, (ok) => { if (ok) done(true, 'ordered'); else fallBack(); }, w.sid);
       if (!sent) short();
       else {   // F1: closing always ends — an answer that does not come in its bound is followed by the hub's own put-back
-        const t = setTimeout(() => { const x = windows.get(pid); if (x && x.st && x.st.phase === 'closing' && x.st.ordered && x.st.n === n) stepWindow(pid, { kind: 'putBackLost', n }); }, windowAnswerMs);
+        const t = setTimeout(() => { const x = windows.get(pid); if (x === w && x.st && x.st.phase === 'closing' && x.st.ordered && x.st.n === n) stepWindow(pid, { kind: 'putBackLost', n }); }, windowAnswerMs);
         if (t.unref) t.unref();
       }
     }
