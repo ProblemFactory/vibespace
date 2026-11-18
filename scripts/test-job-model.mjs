@@ -863,5 +863,22 @@ console.log('B-70f9 ② the notice at a person\'s end / archive; the stop-with-c
   const STALE = "// in-job (jbt_) or any viewer";   // stale-pins: kept — the control writes the stale comment back into a copy
   ok(!says(ar.replace(/\/\/ in-job \(jbt_\) or a holder of CONTROL[^\n]*/, STALE + ' — the watch-job "found something" verb')), 'CONTROL: the stale comment («any viewer») fails the check');
 }
+// ── B-0bda (batch 8): `vibespace-job run --name x bash /path/gate.sh` ran `sh -c bash` alone — refused by name, the quoted form given ──
+{
+  const ROOT0 = path.join(__dirname_jm, '..'), CLI0 = path.join(ROOT0, 'data/bin/vibespace-job');
+  const env0 = { PATH: process.env.PATH, VIBESPACE_API: 'http://127.0.0.1:9', VIBESPACE_SESSION_TOKEN: 'stand-in' };   // present, never used: the refusal comes before any call
+  const run0 = (file, args) => spawnSync(process.execPath, [file, ...args], { env: env0, encoding: 'utf8' });
+  const r1 = run0(CLI0, ['run', '--name', 'gate', 'bash', '/srv/lane/gate.sh']);
+  ok(r1.status === 2 && /the command must be ONE quoted string — 2 words were given \("bash" "\/srv\/lane\/gate\.sh"\) and only the first would run\. Type: vibespace-job run 'bash \/srv\/lane\/gate\.sh' \[flags\] — nothing was sent/.test(r1.stderr), 'B-0bda: an unquoted multi-word command is REFUSED by name (exit 2, nothing sent) with the quoted form to type — never a 0-second «ok» of its first word', r1.stderr);
+  const r2 = run0(CLI0, ['run', '--name', 'q', "it's", 'here']);
+  ok(r2.status === 2 && r2.stderr.includes("Type: vibespace-job run 'it'\\''s here' [flags]"), 'B-0bda: the form to type quotes a quote as a shell needs it', r2.stderr);
+  const CSRC = fs.readFileSync(CLI0, 'utf8'), REF = '      if (!isNotify && pos.length > 2) {';
+  ok(CSRC.split(REF).length === 2, 'B-0bda control setup: the refusal is one line in the CLI (the plant the control cuts)');
+  const MJ0 = mutantCopies('cli-multiword-0bda', ROOT0);
+  const copy = MJ0.write('data/bin/vibespace-job', CSRC.replace(REF, '      if (false /* MUTANT: the release — no refusal */) {'), 'release');
+  const r3 = run0(copy, ['run', '--name', 'gate', 'bash', '/srv/lane/gate.sh']);
+  ok(!/the command must be ONE quoted string/.test(r3.stderr) && /server unreachable|ECONNREFUSED|unreachable/.test(r3.stderr), 'B-0bda CONTROL (the release\'s CLI, in a copy): the same line goes on to SEND «bash» alone (here it meets no hub)', r3.stderr.slice(0, 200));
+  for (const r of copiesCensus(MJ0.files, MJ0.dir, ROOT0, { minCopies: 1, label: 'B-0bda ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -214,6 +214,9 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const vaultBad = vaultRefusal(flags.vault, isNotify);
       if (vaultBad) { console.error(vaultBad); process.exit(2); }
       const cmdStr = pos[1];
+      // B-0bda (fb-dd15343aa4): a command line with MORE positional words than the ONE command string ran its first word alone — 0 s, «ok»,
+      // a gate believed passed. Refused by name, with the quoted form to type; nothing is sent
+      if (!isNotify && pos.length > 2) { const q = (w) => "'" + String(w).replace(/'/g, "'\\''") + "'"; console.error(`vibespace-job run: the command must be ONE quoted string — ${pos.length - 1} words were given (${pos.slice(1, 4).map((w) => JSON.stringify(w)).join(' ')}${pos.length > 4 ? ' …' : ''}) and only the first would run. Type: vibespace-job run ${q(pos.slice(1).join(' '))} [flags] — nothing was sent`); process.exit(2); }
       if (!isNotify && !cmdStr) { console.error('usage: vibespace-job run "CMD" --name NAME [flags] — run with no args for full usage'); process.exit(1); }
       // --at forms: epoch ms | RELATIVE "+2m"/"+1h30m" (unambiguous — prefer
       // this) | ISO with Z/offset (exact) | bare datetime = SERVER-LOCAL time.
