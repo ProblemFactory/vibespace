@@ -2870,6 +2870,39 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   const MCf = mutantCopies('browser-builds-folder', REPO);
   const f0 = await folderRun(MCf.load('src/server/browser-keeper.js', ksrc.replace(sub, "  if (false) mediator.onFolder((ev) => {"), 'no-folder-notice'));
   ok(f0.once === 0 && f0.all === 0, 'CONTROL (B-0645 cure): a keeper that does not hear the folder signal tells the person nothing — the base\'s journal line only (RED for the leg above)', f0);
+  // B-0645 cure 2 (主开发 10:26Z): A HUB RESTART — the notices live in memory, the items in the For-you store; the keeper's first
+  // load takes an open one back (its browser alive ⇒ held, a later put-back ends it) or resolves it (its browser gone)
+  const restartRun = async (Kmod, tag) => {
+    const items = [], statuses = [];
+    const uT = { add: (k, it) => { const id = 'r' + (items.length + 1); items.push({ ...it, id, status: 'open' }); return { id }; }, setStatus: (id, st, by) => { statuses.push({ id, st, by }); const x = items.find((i) => i.id === id); if (x) x.status = st; },
+      get: (id) => items.find((i) => i.id === id) || null, openItems: () => items.filter((i) => i.status === 'open').map((i) => ({ ...i })) };
+    const dd = path.join(ROOT, 'data-folder-restart-' + tag);
+    fs.mkdirSync(dd, { recursive: true });
+    const mk = (cbBox) => Kmod.create({ dataDir: dd, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set([KEY_A]), install: false, tickMs: 3600e3,
+      log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: uT,
+      mediator: { available: () => false, repoint() { }, revoke() { }, admitTarget() { }, adopt: async () => { }, onTold: () => () => { }, onFolder: (fn) => { cbBox.cb = fn; return () => { }; } } });
+    const b1 = {}, k1 = mk(b1);
+    const pa = k1.createProfile({ label: 'Lent A' }), pb = k1.createProfile({ label: 'Lent B' });
+    await k1.start(pa.id, { why: 'test' });
+    b1.cb({ kind: 'lost', profileId: pa.id, browserKey: KEY_A });
+    // an item of a browser that is not running when the hub comes back (it ended while the hub was down)
+    const n = MED.folderLostNotice({ label: 'Lent B' });
+    uT.add('browser', { origin: 'browser', kind: 'action', text: n.text, i18n: n.i18n, action: { type: 'browser-restart', profileId: pb.id } });
+    const b2 = {}, k2 = mk(b2);
+    k2.list();   // the first load
+    const atLoad = statuses.map((x) => x.id + ':' + x.by).join();
+    if (b2.cb) b2.cb({ kind: 'back', profileId: pa.id, browserKey: KEY_A });
+    const out = { atLoad, after: statuses.map((x) => x.id + ':' + x.by).join(), open: uT.openItems().map((x) => x.id).join() };
+    await k2.stop(pa.id, { why: 'user' }).catch(() => { });
+    return out;
+  };
+  const rr = await restartRun(K, 'real');
+  ok(rr.atLoad === 'r2:browser-ended' && rr.after === 'r2:browser-ended,r1:put-back-confirmed' && rr.open === '',
+    'B-0645 cure 2: after a hub restart the keeper takes the open folder notices back — one of a browser that ended is resolved at the first load, one of a running browser is held and ended by its next confirmed put-back', rr);
+  const rcCut = "cliBoot(); reclaimFolderNotices(); } }";
+  if (!ksrc.includes(rcCut)) throw new Error('the anchor of the control «B-0645 cure 2: no reclaim» is not in the source');
+  const r0 = await restartRun(MCf.load('src/server/browser-keeper.js', ksrc.replace(rcCut, 'cliBoot(); } }'), 'no-reclaim'), 'mut');
+  ok(r0.atLoad === '' && r0.open.split(',').length === 2, 'CONTROL (B-0645 cure 2): a keeper that does not take them back leaves both open after a restart — the first one ends only by its Restart press (RED for the leg above)', r0);
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

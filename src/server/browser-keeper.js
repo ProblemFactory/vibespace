@@ -629,7 +629,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** What of the user's holders goes to disk (never the window's controls or the one-time token). */
   const humansForDisk = () => Object.fromEntries([...humans.values()].map((h) => [h.profileId, { key: h.key, profileId: h.profileId, since: h.since, launched: !!h.launched, ownTab: h.ownTab || null, adopted: Array.isArray(h.adopted) ? h.adopted.slice(-32) : [], state: h.state === 'driving' ? 'driving' : 'away', awaySince: h.awaySince || 0 }]));
-  function ensureLoaded() { if (!loaded) { load(); warmCliVersions(); cliBoot(); } }
+  function ensureLoaded() { if (!loaded) { load(); warmCliVersions(); cliBoot(); reclaimFolderNotices(); } }
   function save() {
     reg.humans = humansForDisk(); // BROWSE YOURSELF verify r1 (H4): mirrored at every write (the Map stays the truth)
     reg.host = os.hostname(); // lane profile-lock-roll (L1): the file names the machine that wrote it — the next pod's legacy witness
@@ -4458,6 +4458,21 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // B-0645 cure (主开发 09:07Z, as if a must): A FOLDER THAT COULD NOT BE CONFIRMED PUT BACK IS TOLD TO THE PERSON — ONE For-you
   // notice per browser (its door: Restart), filed when the mediator gives the hub's own put-back up on a browser still alive,
   // resolved when a later put-back is confirmed or the browser ends (a stop, a fresh start: emitLease)
+  /** B-0645 cure 2 (主开发 10:26Z): the notices are kept in memory, the items in the For-you store — at the first load after a
+   *  hub restart an OPEN item is taken back: its browser still alive ⇒ held again (a later put-back, stop or death ends it),
+   *  its browser gone ⇒ resolved now. Known by its words' key (FOLDER_LOST_WORDS.text). */
+  function reclaimFolderNotices() {
+    if (!userTodos || typeof userTodos.openItems !== 'function') return;
+    let open = [];
+    try { open = userTodos.openItems(); } catch { return; }
+    for (const it of open) {
+      const pid = it && it.i18n && it.i18n.text && it.i18n.text.key === M.FOLDER_LOST_WORDS.text && it.action ? String(it.action.profileId || '') : '';   // known by its words' key (no branch on the door's type: the For-you census)
+      if (!pid || folderNotices.has(pid)) continue;
+      const rec = reg.browsers[pid];
+      if (rec && B.isLiveBrowser(rec) && profile(pid)) { folderNotices.set(pid, { id: it.id, rec }); continue; }
+      if (typeof userTodos.setStatus === 'function') { try { userTodos.setStatus(it.id, 'done', 'browser-ended'); } catch { /* gone already */ } }
+    }
+  }
   function endFolderNotice(profileId, by) {
     const n = folderNotices.get(profileId);
     if (!n) return;
