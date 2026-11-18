@@ -4,8 +4,9 @@
 // sidebar list area, re-click collapses the sidebar, and turning the setting off
 // live-restores the classic tab bar (and back on again restores the rail).
 // + «Locate in sidebar» (lane think-tools-phone, 2026-11-17), pressed on the window's own menu (which offers «Fork…» too): ① the
-//   owner's case — the sidebar closed, the row drawn late — and ② the open list end OPEN on the sessions list with the row
-//   flashed; another panel too; the search box and an archived row are said with their doors, each door pressed.
+//   owner's case — the sidebar closed, the row in a zone that draws no card (History closed) — and ② the open list end OPEN on
+//   the sessions list with the row flashed; another panel and a row past its project's five too; the search box and an archived
+//   row are said with their doors, each door pressed.
 // Runs a THROWAWAY server in a git worktree (own data dir — never touches a
 // live instance) + headless chrome over raw CDP. Requires google-chrome.
 // Run: node scripts/test-sidebar-rail.mjs
@@ -290,7 +291,12 @@ try {
   // closed one misses at 60 ms).
   await evalJs(`(() => { const sb = app.sidebar; clearTimeout(sb._pollTimer); sb._poll = async () => {}; return true; })()`);
   const LOC = 'locate-fixture-1';
-  const plant = (extra = {}) => evalJs(`(() => { const sb = app.sidebar; sb._allSessions = [Object.assign({ sessionId: '${LOC}', name: 'locate me', cwd: '/srv/locate-fixture', status: 'stopped', backend: 'claude' }, ${JSON.stringify(extra)})]; sb._render(); return true; })()`);
+  // the sessions tab is the WORKBENCH (zones): a stopped row started an hour ago is in RECENT, drawn; `ageDays` past 7 puts it in
+  // HISTORY, closed until opened; `siblings` newer rows of the same project put it past Recent's five
+  const plant = (extra = {}, { ageDays = 0, siblings = 0 } = {}) => evalJs(`(() => { const sb = app.sidebar, now = Date.now();
+    const sib = Array.from({ length: ${siblings} }, (_, i) => ({ sessionId: 'locate-sib-' + i, name: 'sibling ' + i, cwd: '/srv/locate-fixture', status: 'stopped', backend: 'claude', startedAt: now - 60e3 * (i + 1) }));
+    sb._allSessions = [...sib, Object.assign({ sessionId: '${LOC}', name: 'locate me', cwd: '/srv/locate-fixture', status: 'stopped', backend: 'claude', startedAt: now - 3600e3 - ${ageDays} * 86400e3 }, ${JSON.stringify(extra)})];
+    sb._wbProjExpanded = new Set(); sb._wbHistoryOpen = false; sb._wbHistoryCap = 0; sb._render(); return true; })()`);
   const clearToasts = () => evalJs(`(() => { document.querySelectorAll('#global-toasts .global-toast').forEach((t) => t.remove()); document.querySelectorAll('.taskbar-context-menu').forEach((m) => m.remove()); return true; })()`);
   const STATE = `(() => { const sb = app.sidebar, c = [...document.querySelectorAll('#sidebar .session-item-card')].find((x) => x._sessionId === '${LOC}'); return { open: !!sb.isOpen, tab: sb._activeTab, card: !!c, flash: !!c && c.classList.contains('locate-flash'), toast: [...document.querySelectorAll('#global-toasts .global-toast')].map((t) => t.textContent.trim()).join(' | ') }; })()`;
   const shown = (r) => r.open && r.tab === 'folders' && r.card && r.flash && !r.toast;
@@ -306,18 +312,16 @@ try {
     return { ...(await evalJs(STATE)), pressed, rows };
   };
   await clearToasts();
-  // ① THE OWNER'S CASE: the sidebar CLOSED, the list drawn while it was closed (its folders pending), the observer's building
-  // entries held 400 ms — the row drawn late
-  await evalJs(`app.sidebar._railShow('folders')`); await sleep(300); await plant(); await sleep(200);
+  // ① THE OWNER'S CASE: the sidebar CLOSED, and the row drawn late — its zone draws no card until Locate opens it (the row in
+  // HISTORY, closed: the workbench's own default; the adversarial read: the release looked once and a closed zone was never opened)
+  await evalJs(`app.sidebar._railShow('folders')`); await sleep(300); await plant({}, { ageDays: 30 }); await sleep(200);
   await evalJs(`app.sidebar.toggle(false)`); await sleep(300);
-  await evalJs(`(() => { if (!window.__locateIO0) { const IO0 = window.IntersectionObserver; window.__locateIO0 = IO0; window.IntersectionObserver = class extends IO0 { constructor(cb, o) { super((entries, obs) => { const build = entries.filter((e) => e.isIntersecting), rest = entries.filter((e) => !e.isIntersecting); if (rest.length) cb(rest, obs); if (build.length) setTimeout(() => cb(build, obs), 400); }, o); } }; } app.sidebar._render(); return true; })()`);
-  await sleep(200);
+  const hidden1 = await evalJs(STATE);
   let L = await locate();
   check(`the window's menu offers «Locate in sidebar» and «Fork…» for its conversation (${JSON.stringify(L.rows)})`, Array.isArray(L.rows) && L.rows.includes('Locate in sidebar') && L.rows.includes('Fork…'), L.rows);
-  check(`① THE OWNER'S CASE — the sidebar CLOSED, Locate from the window's menu, the row drawn late: open on the sessions list, the row flashed, no toast (${JSON.stringify({ ...L, rows: undefined })})`, L.pressed && shown(L), L);
-  await evalJs(`(() => { if (window.__locateIO0) { window.IntersectionObserver = window.__locateIO0; delete window.__locateIO0; } return true; })()`);
+  check(`① THE OWNER'S CASE — the sidebar CLOSED, Locate from the window's menu, the row in a zone that drew no card (History closed): open on the sessions list, History opened, the row flashed, no toast (${JSON.stringify({ before: hidden1.card, ...L, rows: undefined, history: await evalJs('app.sidebar._wbHistoryOpen') })})`, !hidden1.card && L.pressed && shown(L) && await evalJs('app.sidebar._wbHistoryOpen === true'), L);
   // ② THE OPEN LIST with the row on screen (the release collapsed it here and said «not visible»)
-  await clearToasts(); await plant(); await sleep(600);
+  await clearToasts(); await evalJs(`app.sidebar._railShow('folders')`); await plant(); await sleep(600);
   const before = await evalJs(STATE);
   L = await locate();
   check(`② the OPEN sessions list, the row on screen (${JSON.stringify(before)}): Locate from the window's menu keeps it open and flashes the row, no toast (${JSON.stringify({ ...L, rows: undefined })})`, before.open && before.card && L.pressed && shown(L), L);
@@ -325,6 +329,11 @@ try {
   await clearToasts(); await evalJs(`app.sidebar._railShow('ports')`); await sleep(500); await plant();
   L = await locate();
   check(`Locate from another panel (Ports): back on the sessions list, the row flashed (${JSON.stringify({ ...L, rows: undefined })})`, L.pressed && shown(L), L);
+  // a row past its project's FIVE in Recent (the zone draws five until «N more»): Locate shows it
+  await clearToasts(); await evalJs(`app.sidebar._railShow('folders')`); await plant({}, { siblings: 6 }); await sleep(300);
+  const hidden5 = await evalJs(STATE);
+  L = await locate();
+  check(`a row past its project's five in Recent: not drawn before (${hidden5.card}), Locate expands the project and flashes the row, no toast (${JSON.stringify({ ...L, rows: undefined })})`, !hidden5.card && L.pressed && shown(L), L);
   // a row hidden by the SEARCH BOX: said, with the words searched and its door
   await clearToasts(); await plant();
   await evalJs(`(() => { const el = document.getElementById('session-filter'); el.value = 'zz-no-such-row'; app.sidebar._render(); return true; })()`);

@@ -664,7 +664,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     const card = await new Promise((resolve) => {
       const t0 = Date.now();
       const look = () => {
-        try { sb._openFolderOf?.(backendSessionId); } catch { }
+        try { if (sb._openZoneOf?.(backendSessionId) === 'render') sb._render?.(); sb._openFolderOf?.(backendSessionId); } catch { }   // the zone that holds it (the workbench's Recent / History / the column), then a grouped view's folder
         const c = [...(sb.listEl || document).querySelectorAll('.session-item-card')].find((x) => x._sessionId === backendSessionId);
         if (c || Date.now() - t0 > LOCATE_WAIT_MS) return resolve(c || null);
         requestAnimationFrame(look);

@@ -621,6 +621,36 @@ export function installSidebarWorkbench(Sidebar) {
       this._render();
     },
 
+    /** THE ZONE THAT HOLDS A CONVERSATION, OPENED (lane think-tools-phone — Locate's adversarial read: the sessions tab draws ZONES,
+     *  so a row in the list may be on no card: Recent is the last 7 days by project, FIVE cards each until «N more», or another
+     *  machine's list when its switcher points there; History is closed until opened, paged at HISTORY_PAGE, or another
+     *  machine's). A program asking to SHOW the row opens what hides it — for this page only: the person's saved switchers are not
+     *  rewritten (the next load shows their choice). The regular class's one column loads its next page (its sentinel scrolled).
+     *  → 'render' (zone state changed: draw, then look again) | 'scrolled' (the column asked for its next page) | false. */
+    _openZoneOf(sessionId) {
+      const s = (this._allSessions || []).find((x) => x.sessionId === sessionId);
+      if (!s) return false;
+      if (this._columnListWanted?.()) { const sen = this.listEl?.querySelector('.col-sentinel'); if (!sen) return false; sen.scrollIntoView({ block: 'end' }); return 'scrolled'; }
+      const isLive = (x) => x.status === 'live' || x.status === 'tmux' || x.status === 'external' || x.status === 'remote-running';
+      if (isLive(s)) return false;   // the Live zone draws every row
+      let opened = false;
+      const now = Date.now();
+      if (now - (s.startedAt || 0) < RECENT_MS) {
+        if (this._wbRecentHost) { this._wbRecentHost = ''; opened = true; }   // Recent shows another machine: this machine's, for this page
+        const cwd = s.cwd || '(unknown)';
+        if (!this._wbProjExpanded?.has(cwd)) { (this._wbProjExpanded = this._wbProjExpanded || new Set()).add(cwd); opened = true; }   // past the five
+      } else {
+        if (!this._wbHistoryOpen) { this._wbHistoryOpen = true; opened = true; }
+        if (this._wbHistoryHost) { this._wbHistoryHost = ''; opened = true; }
+        // its page: History lists its rows newest first; the row's place among EVERY older row is at least its place in the drawn
+        // (filtered) list, so a cap past it draws it
+        const older = (this._allSessions || []).filter((x) => !isLive(x) && now - (x.startedAt || 0) >= RECENT_MS).sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+        const at = older.findIndex((x) => x.sessionId === sessionId);
+        if (at >= (this._wbHistoryCap || HISTORY_PAGE)) { this._wbHistoryCap = Math.ceil((at + 1) / HISTORY_PAGE) * HISTORY_PAGE; opened = true; }
+      }
+      return opened ? 'render' : false;
+    },
+
     _renderWorkbench(sessions) {
       if (this._columnListWanted?.()) { this._renderColumnList(sessions); return; } // the regular class: ONE stream of rows (src/lib/sidebar-column.js)
       this._columnObserver?.disconnect?.(); this._columnObserver = null;

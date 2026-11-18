@@ -589,6 +589,7 @@ class Sidebar {
       this._activeView = null;
       if (btn('live-filter')) this._updateFilterBtn(btn('live-filter'));
     } else if (why === 'view') this._activeView = null;
+    this._renderQuickTabs?.();   // the quick-view row says ALL again (the ALL tab and showSessionsNamed do the same)
     this._render();
   }
 

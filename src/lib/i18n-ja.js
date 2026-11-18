@@ -3302,7 +3302,7 @@ export default {
   "Hidden by the status filter: {name}": "状態の絞り込みで非表示：{name}",
   "Show every status": "すべての状態を表示",
   "Hidden by the «{name}» view": "「{name}」ビューで非表示",
-  "The session list did not draw this conversation in time — press Locate again": "セッション一覧がこの会話を時間内に表示できませんでした——もう一度「場所を表示」を押してください",
+  "The session list did not draw this conversation in time — press Locate again": "セッション一覧がこの会話を時間内に表示できませんでした——もう一度「サイドバーで表示」を押してください",
   "Restart now to apply (Terminate + Resume)": "今すぐ再起動して適用（終了して再開）",
   "Restarting the session…": "セッションを再起動中…",
   "\"{name}\" exited unexpectedly at {time} and was restarted; say continue if you need it": "「{name}」は {time} に予期せず終了し、再起動されました。必要なら continue と送ってください",

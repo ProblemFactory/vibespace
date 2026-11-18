@@ -143,7 +143,7 @@ console.log('③ ONE SHOW DOOR: a program never goes through the rail\'s re-clic
   const walk = (dir) => { for (const e of fs.readdirSync(path.join(REPO, dir), { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p); else if (/\.(m?js|cjs)$/.test(e.name)) files.push(p); } };
   walk('src');
   const code = (line) => { const t = line.trim(); return t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') ? '' : line.replace(/\/\/.*$/, ''); };
-  const census = (text, file) => text.split('\n').map((l, i) => ({ file, n: i + 1, l: code(l) })).filter((x) => x.l.includes('_railGo('))
+  const census = (text, file) => text.split('\n').map((l, i) => ({ file, n: i + 1, l: code(l) })).filter((x) => /_railGo\s*(\?\.)?\s*\(/.test(x.l))
     .filter((x) => !(file === 'src/lib/sidebar-rail.js' && (/^\s*item\('(\w+)', tr\('[^']+'\), \(\) => this\._railGo\('\1'\)\),$/.test(x.l) || /^\s*_railGo\(id\) \{$/.test(x.l) || /^\s*if \(this\._railEl\) \{ this\._railGo\(id\); return; \}/.test(x.l))));
   const all = files.flatMap((f) => census(fs.readFileSync(path.join(REPO, f), 'utf-8'), f));
   ok(files.length > 250 && !all.length, `no \`_railGo(\` in ${files.length} src files but the rail's own items and _railShow's switch${all.length ? ' — ' + all.map((x) => `${x.file}:${x.n} ${x.l.trim()}`).join(' | ') : ''}`);
@@ -155,6 +155,8 @@ console.log('③ ONE SHOW DOOR: a program never goes through the rail\'s re-clic
   const jobs = fs.readFileSync(path.join(REPO, 'src/lib/jobs-panel.js'), 'utf-8');
   const planted = jobs.replace("sb._railShow('jobs');", "sb._railGo('jobs');");
   ok(planted !== jobs && census(planted, 'src/lib/jobs-panel.js').length === 1, 'RED CONTROL: the release\'s focusJobsPanel line (`sb._railGo(\'jobs\')`) put back is caught');
+  const plantedOpt = jobs.replace("sb._railShow('jobs');", "sb._railGo?.('jobs');");
+  ok(plantedOpt !== jobs && census(plantedOpt, 'src/lib/jobs-panel.js').length === 1, 'RED CONTROL: the optional call (`sb._railGo?.(\'jobs\')` — the form two release sites wore) is caught too');
 }
 
 console.log('④ LOCATE ON A MODEL OF THE RAIL AND THE LIST — the release\'s Locate as the red control');
@@ -182,23 +184,26 @@ const RELEASE_LOCATE = `locateSessionInSidebar(backendSessionId) {
   ok(/_railShow\(id\) \{/.test(railObj) && /_railGo\(id\) \{/.test(railObj), 'the real _railShow and _railGo are read off sidebar-rail.js');
   const store = { setItem() {}, getItem: () => null };
   const RAILM = new Function('localStorage', 'track', `return ({ ${railObj} });`)(store, () => {});
-  const FRAME = 16, IO_DELAY = 100;   // the model: a lazy folder near the view gets its cards when the observer reports it, after a frame or more
-  const world = ({ open, tab, folder = 'near', facts = SHOWN, never = false }) => {
+  const FRAME = 16;
+  // THE MODEL OF THE SESSIONS TAB (the adversarial read: it is the WORKBENCH — zones, built at once by _render): a row is on a card
+  // only while its ZONE is drawn (Recent within its project's five, History open, this machine's list); `zone: 'closed'` = a row
+  // the list holds and no zone draws until _openZoneOf opens it
+  const world = ({ open, tab, zone = 'drawn', facts = SHOWN, never = false }) => {
     const W = { ms: 0, q: [], n: 0, toasts: [], actions: [], flashes: 0, frames: 0, facts: { ...facts } };
     W.later = (fn, d) => W.q.push({ due: W.ms + Math.max(0, d || 0), k: ++W.n, fn });
     const card = { _sessionId: 'c1', classList: { add: (c) => { if (c === 'locate-flash') W.flashes++; }, remove() {}, contains: () => false }, scrollIntoView() { W.scrolled = (W.scrolled || 0) + 1; }, closest: () => null };
     const sb = Object.assign(Object.create(RAILM), {
-      isOpen: open, _activeTab: tab, _railEl: {}, _panelDispose: null, built: false, since: open && tab === 'folders' ? -1e9 : null,
-      _seen() { this.since = this.isOpen && this._activeTab === 'folders' ? W.ms : null; },
-      toggle(f) { this.isOpen = f !== undefined ? f : !this.isOpen; this._seen(); },
+      isOpen: open, _activeTab: tab, _railEl: {}, _panelDispose: null, zoneOpen: zone === 'drawn', drawn: zone === 'drawn',
+      toggle(f) { this.isOpen = f !== undefined ? f : !this.isOpen; },
       _updateTabs() {}, _railSync() {}, _railApplyTitle() {},
-      _render() { this.built = false; this._seen(); },   // every render resets each folder to an empty pending div (sidebar-render.js)
+      _render() { this.drawn = this.zoneOpen; },   // the workbench builds every zone's cards at once
       render() { this._render(); },
-      _openFolderOf() { if (never || !this.isOpen || this._activeTab !== 'folders') return false; this.built = true; return true; },
+      _openZoneOf() { if (never || this.zoneOpen) return false; this.zoneOpen = true; return 'render'; },
+      _openFolderOf() { return false; },   // no grouped view on this tab
       _locateFacts: () => W.facts, _locateName: (why, name) => name,
       _locateDoor(why) { W.doors = [...(W.doors || []), why]; W.facts = { ...SHOWN }; },
     });
-    const cards = () => (!sb.isOpen || sb._activeTab !== 'folders' ? [] : sb.built || (folder === 'near' && !never && sb.since != null && W.ms >= sb.since + IO_DELAY) ? [card] : []);
+    const cards = () => (sb.isOpen && sb._activeTab === 'folders' && sb.zoneOpen && sb.drawn && !never ? [card] : []);
     sb.listEl = { querySelectorAll: (sel) => (sel === '.session-item-card' ? cards() : []) };
     W.sb = sb;
     W.doc = { querySelectorAll: (sel) => (sel === '.session-item-card' ? cards() : []), getElementById: () => null };
@@ -217,7 +222,8 @@ const RELEASE_LOCATE = `locateSessionInSidebar(backendSessionId) {
     ['a COLLAPSED sidebar', { open: false, tab: 'folders' }],
     ['another panel open (Ports)', { open: true, tab: 'ports' }],
     ['a collapsed sidebar left on another panel (Background Work)', { open: false, tab: 'jobs' }],
-    ['the row\'s folder far below the fold (the observer never builds it)', { open: true, tab: 'folders', folder: 'far' }],
+    ['a row in a CLOSED ZONE (History closed, past its project\'s five, another machine\'s list) on an open list', { open: true, tab: 'folders', zone: 'closed' }],
+    ['THE OWNER\'S CASE: a collapsed sidebar AND the row in a closed zone', { open: false, tab: 'folders', zone: 'closed' }],
   ];
   for (const [name, w] of SCENES) {
     const r = await press(LOCATE, world(w));
@@ -227,10 +233,8 @@ const RELEASE_LOCATE = `locateSessionInSidebar(backendSessionId) {
   ok(!rel.open && rel.toasts.length === 1 && /Entry not visible/.test(rel.toasts[0]), `RED CONTROL (the release's Locate, verbatim) on the owner's open list: the list COLLAPSES and it says «not visible» (${J(rel)})`);
   const relOpen = await press(FIXED_CLASS, world(SCENES[0][1]));
   ok(!relOpen.open && relOpen.toasts.length === 1, `RED CONTROL (the release's Locate with the card's class corrected): an open list still collapses (${J(relOpen)})`);
-  const relClosed = await press(FIXED_CLASS, world(SCENES[1][1]));
-  ok(relClosed.open && relClosed.flashes === 0 && relClosed.toasts.length === 1, `RED CONTROL (class corrected): a closed one opens, looks at 60 ms, before the folder's cards are built, and MISSES (${J(relClosed)})`);
-  const relFar = await press(FIXED_CLASS, world({ open: false, tab: 'folders', folder: 'far' }));
-  ok(relFar.open && relFar.flashes === 0 && relFar.toasts.length === 1, `RED CONTROL (class corrected): a closed sidebar opens, but a row in a folder far below is never found — nothing opens the folder (${J(relFar)})`);
+  const relClosed = await press(FIXED_CLASS, world(SCENES[5][1]));
+  ok(relClosed.open && relClosed.flashes === 0 && relClosed.toasts.length === 1, `RED CONTROL (class corrected) on the owner's case: the sidebar opens, it looks once at 60 ms, and a row in a closed zone is never found — nothing opens the zone (${J(relClosed)})`);
   // a hidden row: said once, with its door; the door shows it
   const Wh = world({ open: true, tab: 'folders', facts: { ...SHOWN, term: 'zz', matchesTerm: false } });
   const h = await press(LOCATE, Wh);
@@ -254,14 +258,44 @@ const RELEASE_LOCATE = `locateSessionInSidebar(backendSessionId) {
     `a list that never draws the row: the wait ends at its bound (${Wn.frames} frames of ${FRAME} model ms ≈ LOCATE_WAIT_MS) with its own sentence, nothing left running`, J({ nv, frames: Wn.frames }));
 }
 
+console.log('④b THE ZONE THAT HOLDS THE ROW (sidebar-workbench.js _openZoneOf — the sessions tab is zones, not folders)');
+{
+  const WB = read('src/lib/sidebar-workbench.js');
+  const num = (name) => Function('return ' + (WB.match(new RegExp(`const ${name} = ([^;]+);`)) || [])[1])();
+  const RMS = num('RECENT_MS'), PAGE = num('HISTORY_PAGE');
+  const OPEN = new Function('RECENT_MS', 'HISTORY_PAGE', 'return ' + asFunction(methodText(WB, '    _openZoneOf(sessionId) {')))(RMS, PAGE);
+  const now = Date.now(), DAY = 86400e3;
+  const fake = (rows, st = {}) => Object.assign({ _allSessions: rows, _columnListWanted: () => false, listEl: null }, st);
+  const row = (id, ageDays, extra = {}) => ({ sessionId: id, status: 'stopped', cwd: '/p', startedAt: now - ageDays * DAY, ...extra });
+  const R = [];
+  let f = fake([row('a', 1)]); R.push(['a recent row past its project\'s five', OPEN.call(f, 'a') === 'render' && f._wbProjExpanded.has('/p')]);
+  f = fake([row('a', 1)], { _wbProjExpanded: new Set(['/p']) }); R.push(['…already expanded: nothing to open', OPEN.call(f, 'a') === false]);
+  f = fake([row('a', 1)], { _wbRecentHost: 'h1', _wbProjExpanded: new Set(['/p']) }); R.push(['Recent showing another machine: this machine\'s, for this page', OPEN.call(f, 'a') === 'render' && f._wbRecentHost === '']);
+  f = fake([row('o', 30)]); R.push(['History closed: opened', OPEN.call(f, 'o') === 'render' && f._wbHistoryOpen === true]);
+  f = fake([row('o', 30)], { _wbHistoryOpen: true, _wbHistoryHost: 'h1' }); R.push(['History showing another machine: this machine\'s', OPEN.call(f, 'o') === 'render' && f._wbHistoryHost === '']);
+  const many = Array.from({ length: 200 }, (_, i) => row('h' + i, 10 + i));
+  f = fake(many, { _wbHistoryOpen: true }); R.push([`a History row at place 130: the page reaches it (cap ${PAGE} → ${Math.ceil(131 / PAGE) * PAGE})`, OPEN.call(f, 'h130') === 'render' && f._wbHistoryCap === Math.ceil(131 / PAGE) * PAGE]);
+  f = fake([row('l', 30, { status: 'live' })]); R.push(['a live row: the Live zone draws it, nothing to open', OPEN.call(f, 'l') === false]);
+  let scrolled = 0; f = fake([row('a', 1)], { _columnListWanted: () => true, listEl: { querySelector: (q) => (q === '.col-sentinel' ? { scrollIntoView: () => { scrolled++; } } : null) } });
+  R.push(['the regular class\'s one column: its next page asked for (the sentinel scrolled)', OPEN.call(f, 'a') === 'scrolled' && scrolled === 1]);
+  const bad = R.filter(([, c]) => !c);
+  ok(!bad.length, `${R.length} rows: ${R.map(([n]) => n).join(' · ')}`, bad.map(([n]) => n).join(' | '));
+  ok(/if \(sb\._openZoneOf\?\.\(backendSessionId\) === 'render'\) sb\._render\?\.\(\);/.test(LIFE), 'Locate opens the zone each look and draws when it changed');
+  ok(/if \(id !== 'tasks'\) this\._mobileDrilldown = null;/.test(RAIL), 'the show door ends a Task Group\'s drill-down (the phone: it outlived a switch to Sessions)');
+}
+
 console.log('⑤ THE TWO SESSION MENUS AGREE — Fork on the window\'s menu, one table for every card command');
 {
   const CARD_FILE = 'src/lib/session-card.js', WIN_FILE = 'src/lib/taskbar.js';
   const block = (file, fn) => { const src = read(file); const s = src.indexOf(`export function ${fn}() {`), e = src.indexOf(`// end ${fn}`); if (s < 0 || e < 0) throw new Error(`${file}: no ${fn} block`); return src.slice(s, e).replace('export function', 'function'); };
   const CARD = block(CARD_FILE, 'registerSessionCardMenu'), WIN = block(WIN_FILE, 'registerWindowMenu');
   const cmdsOf = (text) => [...text.matchAll(/registerMenuItem\(\{\s*menu: M,[^\n]*?command: '([\w.]+)'/g)].map((m) => m[1]);
+  // + rows by ID with no command of their own (a submenu, an inline run) — in the block, and the card's rows other files register
+  const idRowsOf = (text, prefix) => [...text.matchAll(new RegExp(`id: '(${prefix}/[\\w-]+)'`, 'g'))].map((m) => m[1]).filter((id) => !new RegExp(`id: '${id}'[^\\n]*command: '`).test(text));
+  const LIB = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => read('src/lib/' + f)).join('\n');
+  const CARD_IDS = [...new Set(idRowsOf(LIB, 'session-card'))], WIN_IDS = idRowsOf(WIN, 'window');
   const tableVerdict = (cardText, winText, table) => {
-    const card = [...new Set(cmdsOf(cardText))], win = new Set(cmdsOf(winText)), problems = [];
+    const card = [...new Set([...cmdsOf(cardText), ...CARD_IDS])], win = new Set([...cmdsOf(winText), ...idRowsOf(winText, 'window')]), problems = [];
     for (const c of card) if (!table[c]) problems.push(`card command ${c} has no row`);
     for (const k of Object.keys(table)) if (!card.includes(k)) problems.push(`row ${k} names no card command`);
     for (const [k, r] of Object.entries(table)) {
@@ -272,6 +306,7 @@ console.log('⑤ THE TWO SESSION MENUS AGREE — Fork on the window\'s menu, one
     return { card, problems };
   };
   const T = tableVerdict(CARD, WIN, CARD_TO_WINDOW);
+  ok(CARD_IDS.includes('session-card/outbox') && CARD_IDS.includes('session-card/task-groups') && WIN_IDS.includes('window/task-groups'), `the card's rows with no command are read too — ${CARD_IDS.join(', ')} (one registered from channel-outbox.js)`);
   ok(T.card.length >= 20 && !T.problems.length, `all ${T.card.length} card commands have a row — ${Object.values(CARD_TO_WINDOW).filter((r) => r.window).length} on the window's menu, the rest not applicable with the reason`, T.problems.join(' | '));
   ok(CARD_TO_WINDOW['session.fork'] && CARD_TO_WINDOW['session.fork'].window === 'session.fork' && cmdsOf(WIN).includes('session.fork'), 'Fork is on the window\'s menu — the card\'s own command');
   const noFork = WIN.replace(/\n\s*registerMenuItem\(\{ menu: M, group: '2_session', order: 25, command: 'session\.fork'[^\n]*/, '');

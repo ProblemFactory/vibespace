@@ -3302,7 +3302,7 @@ export default {
   "Hidden by the status filter: {name}": "被状态筛选隐藏：{name}",
   "Show every status": "显示全部状态",
   "Hidden by the «{name}» view": "被「{name}」视图隐藏",
-  "The session list did not draw this conversation in time — press Locate again": "会话列表没能及时画出这个对话——请再点一次「定位」",
+  "The session list did not draw this conversation in time — press Locate again": "会话列表没能及时画出这个对话——请再点一次「在侧边栏中定位」",
   "Restart now to apply (Terminate + Resume)": "立即重启生效（终止并恢复）",
   "Restarting the session…": "正在重启会话…",
   "\"{name}\" exited unexpectedly at {time} and was restarted; say continue if you need it": "「{name}」于 {time} 意外退出，已自动重启；需要的话说 continue",

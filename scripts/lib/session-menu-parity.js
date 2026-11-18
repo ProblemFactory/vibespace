@@ -33,6 +33,9 @@ const CARD_TO_WINDOW = Object.freeze({
   'session.rescueTranscript': { na: 'for a stopped conversation, which has no window' },
   'session.properties': { window: 'session.properties' },
   'session.terminate': { window: 'window.terminateSession' },
+  // rows by ID — a card row with no command (its own run / a submenu), here or registered from another file (Locate's adversarial read)
+  'session-card/task-groups': { window: 'window/task-groups' },
+  'session-card/outbox': { na: "the conversation's own window carries its Outbox chip, the same filter (lane outbox-session-chip)" },
 });
 
 module.exports = { CARD_TO_WINDOW };
