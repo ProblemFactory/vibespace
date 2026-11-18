@@ -5211,7 +5211,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // (never «done»: in the tray's history an ask nobody answered must not read as answered). RIGHT ONLY WHILE THIS MODULE IS
   // CREATED ONCE PER HUB LIFE (src/server/mounts-plugins-wiring.js makes the one): a second create in the same life — a reload —
   // would close this life's LIVE asks too
-  try { const n = forYou && typeof forYou.sweep === 'function' ? forYou.sweep(PROMPT_FY_KEY, { status: 'dismissed', by: 'hub-restart' }) : 0; if (n) log.log?.(`[browser-dialog] ${n} sign-in For-you item(s) of a past hub life resolved — that hub's sign-in requests ended with it`); } catch { /* the tray's own failure */ }
+  try { const n = forYou && typeof forYou.sweepAs === 'function' ? forYou.sweepAs(PROMPT_FY_KEY, 'dismissed', 'hub-restart') : 0; if (n) log.log?.(`[browser-dialog] ${n} sign-in For-you item(s) of a past hub life resolved — that hub's sign-in requests ended with it`); } catch { /* the tray's own failure */ }
 
   if (logins && typeof logins.onVaultOpen === 'function') {
     unsubVaultOpen = logins.onVaultOpen(() => {
