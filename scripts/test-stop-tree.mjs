@@ -331,39 +331,57 @@ console.log('§5 THE CONVERSATION DOOR — wiring (read before the first signal;
 }
 
 console.log('§9 B-cac2 (batch 8): a START during a stop is remembered and done when the stop ends; restart = stop, wait, start');
-const restartScene = async (Mod, tag, how) => {
+// ONE real service a scene (its stop takes a moment — its own cleanup on SIGTERM: the window a second press lands in); the presses
+// run on it one after another. `press` → its answer, then a NEW live run once the stop ended (`comeback`); `settle` (the control)
+// reads the job AT THE RUN'S END instead — the release's comeback, if any, is the crash policy's timer (5 s on), never the start
+const svcScene = async (Mod, tag) => {
   const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true });
   fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), WRAP);
   const J = new Mod.JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log: () => { }, apiBase: 'http://127.0.0.1:9', memoryRungs: [] });
   J.init();
   const caller = { conversationId: 'conv-st', sessionId: 'sess-st', sessionCreatedAt: 1, groups: new Set() };
   const owner = { conversation: { backend: 'claude', id: 'conv-st' }, sessionId: 'sess-st', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
-  // a service whose stop takes a moment (its own cleanup on SIGTERM): the window a second press lands in
-  const r = J.create({ kind: 'service', name: 'svc-' + how, cmd: { argv: ['sh', '-c', 'trap "sleep 0.6; exit 0" TERM; while :; do sleep 0.1; done'] }, owner }, caller);
+  const r = J.create({ kind: 'service', name: 'svc-' + tag, cmd: { argv: ['sh', '-c', 'trap "sleep 0.3; exit 0" TERM; while :; do sleep 0.1; done'] }, owner }, caller);
   const job = J.jobs.get(r.job.id);
   const live = () => { const st = J._readStamp(job); return !!st && J._verifyAlive(st); };
-  await until(async () => { await J._sweep(); return live(); }, 8000);
-  const first = job.runs.length;
-  let answer;
-  if (how === 'restart') answer = J.restart(job);
-  else { J.stop(job); answer = J.start(job); }   // the second press, inside the stop's grace
-  const restarted = await until(async () => { await J._sweep(); return job.runs.length === first + 1 && live(); }, 8000);
-  const st = J._readStamp(job); if (st) mine.push(st, ...PI.treeOf([Number(st.pid)]));
-  const out = { answer, restarted, runs: job.runs.length, state: job.state };
-  try { J.stop(job, { force: true }); } catch { }
-  await until(async () => { await J._sweep(); return !live(); }, 4000);
-  J.shutdown(); return out;
+  const keep = () => { const st = J._readStamp(job); if (st) mine.push(st, ...PI.treeOf([Number(st.pid)])); };
+  const up = await until(async () => { await J._sweep(); return live(); }, 8000);
+  keep();
+  const fails = () => (job.supervise && job.supervise.consecutiveFails) || 0;
+  const press = async (how, { settle = false } = {}) => {
+    const first = job.runs.length, run = job.runs[first - 1];
+    let answer;
+    if (how === 'restart') answer = J.restart(job);
+    else { J.stop(job); answer = J.start(job); }   // the second press, inside the stop's grace
+    if (settle) {
+      const ended = await until(async () => { await J._sweep(); return !!run.endedAt; }, 8000);
+      return { answer, ended, state: job.state, newRuns: job.runs.length - first, fails: fails() };
+    }
+    const comeback = await until(async () => { await J._sweep(); return job.runs.length === first + 1 && live(); }, 8000);
+    keep();
+    return { answer, comeback, newRuns: job.runs.length - first, fails: fails(), state: job.state };
+  };
+  const end = async () => { try { J.stop(job, { force: true }); } catch { } await until(async () => { await J._sweep(); return !live(); }, 4000); J.shutdown(); };
+  return { up, press, end };
 };
 {
-  const sd = await restartScene(require(path.join(ROOT, 'src/jobs.js')), 'job-start-during-stop', 'start');
-  ok(sd.answer && sd.answer.pending === true && /^still stopping \(\d+ s left\) — it starts when the stop ends$/.test(sd.answer.words || '') && sd.restarted, 'B-cac2: a START pressed while the stop\'s grace runs answers «still stopping (k s left) — it starts when the stop ends» and DOES start when it ends (a new run, live)', sd);
-  const rs = await restartScene(require(path.join(ROOT, 'src/jobs.js')), 'job-restart', 'restart');
-  ok(rs.answer && rs.answer.pending === true && /it starts again when the stop ends/.test(rs.answer.words || '') && rs.restarted, 'B-cac2: restart = stop, wait, start — ONE answer, and a new live run after the stop ends', rs);
+  const S = await svcScene(require(path.join(ROOT, 'src/jobs.js')), 'job-start-during-stop');
+  const sd = await S.press('start');
+  ok(S.up && sd.answer && sd.answer.pending === true && /^still stopping \(\d+ s left\) — it starts when the stop ends$/.test(sd.answer.words || '') && sd.comeback && sd.fails === 0, 'B-cac2: a START pressed while the stop\'s grace runs answers «still stopping (k s left) — it starts when the stop ends» and DOES start when it ends (a new live run, no crash counted)', sd);
+  const rs = await S.press('restart');
+  ok(rs.answer && rs.answer.pending === true && /it starts again when the stop ends/.test(rs.answer.words || '') && rs.comeback && rs.fails === 0, 'B-cac2: restart = stop, wait, start — ONE answer, and a new live run after the stop ends (no crash counted)', rs);
+  await S.end();
   const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), PEND = '    if ((job._termAt || job._stopForce) && this._runLive(job, run0)) {';
-  ok(JSRC.split(PEND).length === 2, 'B-cac2 control setup: the remembered start is one line in jobs.js (the plant the control cuts)');
+  ok(JSRC.split(PEND).length === 2, 'B-cac2 control setup: the remembered start is one line in jobs.js (the plant the control cuts) — the anchor of the control is in the source');
   const MJ9 = mutantCopies('stop-tree-cac2', ROOT);
-  const rx = await restartScene(MJ9.load('src/jobs.js', JSRC.replace(PEND, '    if (false /* MUTANT: the release — a start during a stop is «already running» */) {'), 'release'), 'job-start-during-stop-mut', 'start');
-  ok(rx.answer && /is already running/.test(rx.answer.error || '') && !rx.restarted, 'B-cac2 CONTROL (the release, in a copy): the start answers «already running» and the service ends DOWN — a second start was needed', rx);
+  const R = await svcScene(MJ9.load('src/jobs.js', JSRC.replace(PEND, '    if (false /* MUTANT: the release — a start during a stop is «already running» */) {'), 'release'), 'job-start-during-stop-mut');
+  const rx = await R.press('start', { settle: true });
+  await R.end();
+  // the release (measured on the test machine, 2.369.411 base): its start sets desiredUp BEFORE the «already running» refusal, so at
+  // the stop's end the service is DOWN with no new run and the crash policy's timer brings it back 5 s on, COUNTED as a crash
+  // (six such presses park it); with `restart: 'never'` nothing brings it back — by reading src/job-model.js onServiceExit (the row's
+  // «a second start was needed»)
+  ok(R.up && rx.answer && /is already running/.test(rx.answer.error || '') && rx.ended && rx.state === 'down' && rx.newRuns === 0 && rx.fails === 1, 'B-cac2 CONTROL (the release, in a copy): the start answers «already running»; at the stop\'s end the service is DOWN with no new run, and what brings it back is the crash policy (counted: 1 toward the park) — never the start', rx);
   for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 1, label: 'B-cac2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
   ok(/const needsControl = \[[^\]]*'restart'[^\]]*\];/.test(ar) && /else if \(act === 'restart'\) r = a\.jm\.restart\(job\);/.test(ar) && /case 'restart': \{/.test(cli) && /vibespace-job restart <id>/.test(cli) && /else if \(r\.pending\) console\.log\(`not started yet: /.test(cli), 'WIRING: the agent route\'s restart needs control; the CLI has `restart <id>` (in its usage) and says a pending start as one');
