@@ -748,6 +748,7 @@ const CATALOG = {
   'src/server/mounts-plugins-wiring.js:vaultJobSecrets': { kind: 'eval', why: 'B-ef1b: the retired job-secrets notice\'s door, real over the scratch vault + data dir (its route is a person\'s)' },
   'src/server/mounts-plugins-wiring.js:vaultTotp': { kind: 'eval', why: 'the two-step codes, real over the scratch vault' },
   'src/server/mounts-plugins-wiring.js:browserLogins': { kind: 'eval', why: 'the website logins, real over the scratch vault' },
+  'src/server/mounts-plugins-wiring.js:browserProxyLogins': { kind: 'eval', why: 'B-8b87: a browser proxy\'s logins, real over the scratch vault (names only; its one reader is the keeper\'s forwarder, absent here) — no timer, no process, no network' },
   'src/server/mounts-plugins-wiring.js:automation': { kind: 'eval', why: 'THE automation keys engine, real over the scratch vault' },
   'src/server/mounts-plugins-wiring.js:vaultUseGrants': { kind: 'eval', why: 'the vault\'s use grants, real over THE grants store' },
   'src/server/mounts-plugins-wiring.js:vaultAttention': { kind: 'eval', why: 'the Vault window\'s «needs you» producers, real over THE For-you store' },
