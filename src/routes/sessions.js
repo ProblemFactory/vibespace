@@ -556,8 +556,8 @@ function setup(ctx) {
   let _sweepInFlight = null; // concurrent polls share ONE async sweep (2.242.0)
   // the sweep's -cure (B): rebuilds that failed IN A ROW while a list is served — from SWEEP_STALE_SAY_AFTER on, every answer
   // says so (listStale) and the page draws one line with its door; the first good sweep clears it
-  let _sweepFails = 0, _sweepFailWhy = '', _sessionsBuiltAt = 0;
-  _sweepFailsOf = () => ({ fails: _sweepFails, why: _sweepFailWhy, builtAt: _sessionsBuiltAt });
+  let _sweepFails = 0, _sweepFailWhy = '', _sessionsBuiltAt = 0, _sweepStartedAt = 0, _sweepFailDeadline = false;
+  _sweepFailsOf = () => ({ fails: _sweepFails, why: _sweepFailWhy, builtAt: _sessionsBuiltAt, triedAt: _sessionsCacheAt });   // triedAt: the last ATTEMPT (a failure moves it too)
 
   // The sweep body — ASYNC since 2.242.0. It ran execFileSync end-to-end and a
   // live V8 profile on the busiest fleet pod (22 live sessions, heavy claude
@@ -570,13 +570,16 @@ function setup(ctx) {
   // PARALLEL (wall = slowest single command, loop never blocks).
   // the sweep's -cure r2 (its read's M2): ANY failure of a rebuild while a list is in hand — the pool call, another harness's
   // discover, the kept metas — is counted and the last list stands; with none yet it throws (a 500, as before)
+  // the chain's -cure (主开发 12:08Z, (2)): a list that stopped refreshing is SAID IN SECONDS — a sweep that ran past its deadline
+  // is said at once (not at the second), and a sweep still in flight past SWEEP_LATE_SAY_MS says it while it runs
   const _runSessionsSweep = async () => {
-    try { return await _sweepOnce(); }
+    _sweepStartedAt = Date.now();
+    try { const r = await _sweepOnce(); _sweepFailDeadline = false; return r; }
     catch (e) {
       if (!_sessionsCache) throw e;
-      _sweepFails++; _sweepFailWhy = String((e && (e.code || e.message)) || 'error').slice(0, 120);
+      _sweepFails++; _sweepFailWhy = String((e && (e.code || e.message)) || 'error').slice(0, 120); _sweepFailDeadline = !!(e && e.deadline);
       sweepRoadSaid('stale', _sessionsCache.count, e); _sessionsCacheAt = Date.now(); return _sessionsCache;
-    }
+    } finally { _sweepStartedAt = 0; }
   };
   const _sweepOnce = async () => {
     // B-47e2 (R5's local leg, FLAG-GATED default OFF: agentd.localDiscovery):
@@ -637,18 +640,27 @@ function setup(ctx) {
     try { kept = typeof ctx.stoppedSessions === 'function' ? await ctx.stoppedSessions() : []; } catch (e) { console.warn('[sessions] the kept stopped metas:', e.message); }
     const active = [];
     for (const [id, s] of activeSessions) if (s && s.claudeSessionId) active.push([id, { claudeSessionId: s.claudeSessionId, _childPid: s._childPid || null }]);
+    // THE BOUND ON WHAT CROSSES THE THREAD (the readers' small (a)): in — the rows of the other harnesses and the kept metas,
+    // at most SWEEP_ROWS_IN_MAX (past it the sweep is refused here, said: the last list stands); out — the answer's bytes, at
+    // most SWEEP_ANSWER_MAX_BYTES (the worker refuses past it, said); the held rows are a subset of the rows
+    const rowsIn = kept.length + Object.values(others).reduce((n, a) => n + (Array.isArray(a) ? a.length : 0), 0);
+    if (rowsIn > SWEEP_ROWS_IN_MAX) throw Object.assign(new Error(`the sweep's input is ${rowsIn} rows (the bound is ${SWEEP_ROWS_IN_MAX})`), { code: 'sweep-input-too-big' });
     const payload = {
-      active, webuiPids: [...(webuiPids || [])], devSnap, order, offLoop, others, signInPids: [...signInPids], kept, bound,
+      active, webuiPids: [...(webuiPids || [])], devSnap, order, offLoop, others, signInPids: [...signInPids], kept, bound, maxBytes: _sweepTest.answerMaxBytes || SWEEP_ANSWER_MAX_BYTES,
       facts: { roots: SP.snapshot(), blocked: DOOR.snapshot() },
     };
     let out;
     // a FIRST sweep (no list yet) waits for the serial lane's turn briefly — a worker not running yet means the old road once
-    try { out = await sweepPool().call('sessionsSweep', payload, { timeoutMs: _sweepTest.timeoutMs || SWEEP_TIMEOUT_MS, waitMs: _sessionsCache ? SWEEP_QUEUE_MS : FIRST_QUEUE_MS }); }
+    try { out = await sweepPool().call('sessionsSweep', payload, { timeoutMs: _sweepTest.timeoutMs || SWEEP_TIMEOUT_MS, waitMs: _sessionsCache ? SWEEP_QUEUE_MS : (_sweepTest.firstQueueMs || FIRST_QUEUE_MS) }); }
     catch (e) {
       // the worker down (its respawn backing off), wedged past its deadline, throwing, or its pool closed: THE LAST ANSWER
-      // STANDS (the outer catch counts it — the page is told from the second failure in a row: listStale) — never a walk on
-      // the loop while there is one; with none yet (a first sweep), the old road ONCE, on this thread, said
+      // STANDS (the outer catch counts it, said) — never a walk on the loop while there is one. With none yet (a first
+      // sweep), the old road ONCE, on this thread, said — ONLY when no worker exists at all (主开发 12:08Z, (1)): SafeFs's wait
+      // ended with nothing that ran it (noWorker), or its inline door refused (sweep-pool-down). A sweep that RAN — past its
+      // deadline (the storage that held the worker), throwing, refused for its size — is said (a 500 with its words), and
+      // that storage is never walked again on the loop
       if (_sessionsCache) throw e;
+      if (!(e && (e.noWorker || e.code === 'sweep-pool-down'))) throw e;
       out = await require('../sessions-sweep.js').sweepInThread(payload);
     }
     const buf = Buffer.isBuffer(out.buf) ? out.buf : Buffer.from(out.buf.buffer, out.buf.byteOffset, out.buf.byteLength);
@@ -688,7 +700,10 @@ function setup(ctx) {
       // why) from the second failure on — the page draws one line with its Retry door
       const answer = (body) => {
         const warm = serverSetting?.('desktop.cacheWarmth') === true ? warmthDiff(activeSessions, ctx.cacheFactsOf) : null;
-        const stale = _sweepFails >= SWEEP_STALE_SAY_AFTER && _sessionsBuiltAt ? { listStale: { since: _sessionsBuiltAt, ageMs: Math.max(0, Date.now() - _sessionsBuiltAt), fails: _sweepFails, why: _sweepFailWhy } } : null;   // ageMs: the hub's own reading (a device's clock may be off)
+        const runFor = _sweepInFlight && _sweepStartedAt ? Date.now() - _sweepStartedAt : 0, late = runFor > (_sweepTest.lateSayMs || SWEEP_LATE_SAY_MS);   // the delta read (S1/S2): no «3 × the last sweep's cost» term — uncapped, it hid a hang behind one slow good sweep; a long healthy sweep's line says it is still being rebuilt
+        const why = discoveryPaused() ? `discovery is paused (a storage mount is not answering)${_sweepFailWhy ? ' — ' + _sweepFailWhy : ''}` : late && !_sweepFails ? `a rebuild has run ${Math.round(runFor / 1000)} s` : _sweepFailWhy;
+        const said = _sweepFails >= SWEEP_STALE_SAY_AFTER || (_sweepFails >= 1 && _sweepFailDeadline) || late;   // (2): a deadline at once; a long sweep while it runs
+        const stale = said && _sessionsBuiltAt ? { listStale: { since: _sessionsBuiltAt, ageMs: Math.max(0, Date.now() - _sessionsBuiltAt), fails: _sweepFails, why, ...(late ? { running: Math.round(runFor / 1000) } : {}), ...(discoveryPaused() ? { paused: true } : {}) } } : null;   // ageMs: the hub's own reading (a device's clock may be off)
         return sendSessions(res, body, warm || stale ? { ...(warm || {}), ...(stale || {}) } : null);
       };
       // the page's Retry (?rebuild=1): past the 4.5 s cache, now — and it WAITS for that sweep (its answer is the fresh list or
@@ -816,6 +831,9 @@ const LOOKUP_MS = 20e3;              // a lookup's own run, and its wait behind 
 // never laps the next one
 const POLL_WAIT_MS = 2000;
 const SWEEP_STALE_SAY_AFTER = 2;     // (B) failed rebuilds in a row before every answer says the list is out of date
+const SWEEP_LATE_SAY_MS = 15000;     // the chain's -cure (2): a sweep in flight this long is said while it runs (a deadline: at once)
+const SWEEP_ANSWER_MAX_BYTES = 64 * 1024 * 1024;   // the chain's -cure (a): the answer's bytes the worker hands back, at most (about 140 000 rows)
+const SWEEP_ROWS_IN_MAX = 200000;    // …and the rows handed in (the other harnesses' + the kept metas), at most
 const _sweepTest = {};               // the suite's seam: a stand-in worker script (a wedged / throwing / slow one), the sweep's deadline, a lookup's clock, a poll's wait, the cache's 4.5 s
 let _sweepPool = null, _sweepRoad = 'worker', _sweepStats = null, _warmthTag = 0, _sweepFailsOf = null;
 /** THE FALLBACK IS SAID (主开发 00:18Z): no worker and no list yet ⇒ the route runs the sweep ONCE on the main loop (sweepInThread) — the old road
@@ -885,7 +903,20 @@ async function askRows(op, payload) {
     return r && !r.none ? r : null;
   } catch { return null; }
 }
-async function sessionRow(sessionKey) { const r = await askRows('sessionsLookup', { sessionKey }); return (r && r.row) || null; }
+async function sessionRow(sessionKey) {
+  let r = await askRows('sessionsLookup', { sessionKey });
+  // the chain's -cure (b): a key the last sweep did not see may be NEWER than that sweep (a hub no page polls): ONE fresh sweep —
+  // bounded by LOOKUP_MS, never while discovery is paused, never when the last sweep is younger than the cache — then ask again
+  // its read (S5): spaced by the last ATTEMPT, not the last good sweep — sweeps that keep failing are not re-run at each reopen
+  const fo = _sweepFailsOf ? _sweepFailsOf() : null, lastAt = fo ? Math.max(fo.builtAt || 0, fo.triedAt || 0) : 0, lk = _sweepTest.lookupMs || LOOKUP_MS;
+  if (r && !r.row && _warmSweep && !(_pausedOf && _pausedOf()) && Date.now() - lastAt > (_sweepTest.cacheTtlMs ?? 4500)) {
+    let t = null;
+    await Promise.race([Promise.resolve(_warmSweep()).catch(() => null), new Promise((done) => { t = setTimeout(done, lk); })]);
+    if (t) clearTimeout(t);
+    r = await askRows('sessionsLookup', { sessionKey });
+  }
+  return (r && r.row) || null;
+}
 async function sessionRows(fields = []) { const r = await askRows('sessionsRows', { fields }); return (r && r.rows) || []; }
 /** THE ACCOUNT A RESUME THAT STATES NONE GOES TO (lane dead-socket-keeps-chat-meta r2 — src/ws-create.js's ONE seam, so
  *  every door: the page's Resume, the For-you reply reopen, an automation's open) → {accountId} | {refuse} | null, over the
@@ -957,4 +988,4 @@ async function boundElsewhereOf(backend, id, accountId, opts = {}) {
 /** B-a5a4 (1): a resume whose stored account is gone → {refuse} for an account-bound harness, else null (degrade, said). */
 const acctGoneOf = (backend) => (accountBoundOf(backend) ? { refuse: ACCT_GONE_BOUND } : null);
 
-module.exports = { router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, sendSessions, sweepPool, sessionRow, sessionRows, sweepStats: () => _sweepStats, sweepFails: () => (_sweepFailsOf ? _sweepFailsOf() : null), POLL_WAIT_MS, SWEEP_STALE_SAY_AFTER, _sweepTestSeam: (o) => { Object.assign(_sweepTest, o || {}); if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, closeSweepPool: () => { if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+module.exports = { SWEEP_LATE_SAY_MS, SWEEP_ANSWER_MAX_BYTES, SWEEP_ROWS_IN_MAX, router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, sendSessions, sweepPool, sessionRow, sessionRows, sweepStats: () => _sweepStats, sweepFails: () => (_sweepFailsOf ? _sweepFailsOf() : null), POLL_WAIT_MS, SWEEP_STALE_SAY_AFTER, _sweepTestSeam: (o) => { Object.assign(_sweepTest, o || {}); if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, closeSweepPool: () => { if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

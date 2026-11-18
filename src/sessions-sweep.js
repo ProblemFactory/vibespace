@@ -21,7 +21,7 @@ const A = require('./sessions-assemble.js');
 // (the search backfill) is answered from here — a reader on the loop never gets every row unless it asked for them
 let last = null;   // { rows, byKey: Map, at, ms }
 
-async function sweepInThread({ active = [], webuiPids = [], devSnap = null, order = [], offLoop = null, others = {}, signInPids = [], kept = [], facts = null, bound = [] } = {}) {
+async function sweepInThread({ active = [], webuiPids = [], devSnap = null, order = [], offLoop = null, others = {}, signInPids = [], kept = [], facts = null, bound = [], maxBytes = 0 } = {}) {
   const t0 = Date.now();
   if (facts && !isMainThread) A.setFacts(facts);
   const liveIds = new Map(active);   // the live sessions' two facts the walk reads (claudeSessionId, _childPid)
@@ -33,6 +33,8 @@ async function sweepInThread({ active = [], webuiPids = [], devSnap = null, orde
   const discovered = new Map();   // B-a5a4 follow-up met: the stopped rows AS DISCOVERED (before the kept merge), keyed
   const sessions = A.assembleSweep({ perHarness, signInPids, kept, discovered });
   const { buf, etag, count } = A.answerBytes(sessions);
+  // the stated bound on what crosses back (the chain's -cure (a)): an answer past it is refused, said — the last list stands
+  if (maxBytes > 0 && buf.length > maxBytes) throw Object.assign(new Error(`the session list is ${buf.length} bytes (the bound is ${maxBytes})`), { code: 'sweep-answer-too-big' });
   const ms = Date.now() - t0;
   last = { rows: sessions, byKey: new Map(sessions.map((r) => [r.sessionKey, r])), at: Date.now(), ms };
   const held = A.heldRowsOf(sessions, bound);

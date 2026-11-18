@@ -239,7 +239,7 @@ class SafeFs {
       };
       job.timer = setTimeout(() => leave(this._workers.some((r) => r.inflight.size)
         ? Object.assign(new Error(this._serial.busy.message), { status: 503, code: this._serial.busy.code })
-        : Object.assign(new Error('Storage not responding (operation timed out).'), { status: 503, safeFsTimeout: true })), opts.waitMs || timeoutMs);
+        : Object.assign(new Error('Storage not responding (operation timed out).'), { status: 503, safeFsTimeout: true, noWorker: !this._ran && !this._workers.some((r) => r.alive) })), opts.waitMs || timeoutMs);   // noWorker: no worker of this pool EVER took a call and none is alive (the sessions sweep's -cure: only then does its route walk on the loop — a wait that ends in a killed worker's respawn back-off is not that: the storage that held it is never walked on the loop)
       job.timer.unref?.();
       if (job.signal) { job.onAbort = () => leave(gone()); job.signal.addEventListener('abort', job.onAbort, { once: true }); }
       this._waiting.push(job);
@@ -268,6 +268,7 @@ class SafeFs {
 
   _send(rec, op, payload, timeoutMs) {
     const id = this._seq++;
+    this._ran = true;   // a worker of this pool TOOK a call — sticky: a killed worker's respawn wait is never «no worker» (the sessions sweep's -cure, its read's M1)
     const p = new Promise((resolve, reject) => {
       const timer = setTimeout(() => this._onTimeout(rec, id), timeoutMs);
       timer.unref?.();
@@ -300,6 +301,7 @@ class SafeFs {
     const e = new Error('Storage not responding (operation timed out).');
     e.status = 503;
     e.safeFsTimeout = true;
+    e.deadline = true;   // the call RAN in a worker and overran its deadline (never a missing worker)
     call.reject(e);
 
     const w = rec.worker;

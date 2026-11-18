@@ -1160,7 +1160,7 @@ class Sidebar {
           this._systemSessions = sessions;
           this._lastPollOkAt = Date.now();
           this._pollFails = 0; this._pollError = '';
-          const staleKey = (x) => (x ? String(x.since) : ''), staleMoved = staleKey(this._hubStale) !== staleKey(hubStale);   // r3 (S2): its presence + since, not its count
+          const staleKey = (x) => (x ? `${x.since}|${!!x.paused}|${x.running != null}` : ''), staleMoved = staleKey(this._hubStale) !== staleKey(hubStale);   // r3 (S2): its presence + since, not its count; the -cure's read (S4): + a pause or a running sweep starting / ending
           this._hubStalePolls = hubStale ? (this._hubStalePolls || 0) + 1 : 0;
           this._hubStale = hubStale;
           this._mergeAndRender();
@@ -1457,13 +1457,17 @@ class Sidebar {
       const row = document.createElement('div');
       row.className = 'empty-hint sidebar-poll-stale sidebar-hub-stale';
       const label = document.createElement('span');
-      label.textContent = tr('Session list is out of date — the hub could not rebuild it.') + ' ';
+      const stillRunning = this._hubStale.running != null && !this._hubStale.fails;   // the -cure's read (S2): a long sweep that has not failed is not «could not»
+      label.textContent = (stillRunning ? tr('The session list is still being rebuilt — new conversations may not appear yet.') : tr('Session list is out of date — the hub could not rebuild it.')) + ' ';
       const retry = document.createElement('button');
       retry.type = 'button'; retry.className = 'status-quick-tab'; retry.textContent = this._retrying ? tr('Retrying…') : tr('Retry');
       // one press at a time (r3, S1: a press holds one of the browser's few connections to the hub) — the door stays LIVE and says
       // so («Retrying…»); a press while one runs is answered by the one running (_retryRebuild returns)
       retry.onclick = () => this._retryRebuild();
-      row.append(label, hostStateChip('error', { text: tr('as of {ago}', { ago: agoText(this._hubStale.at) }), title: String(this._hubStale.why || '') }), ' ', retry);
+      // a paused discovery (a storage mount not answering) holds every rebuild — the chip's title names it and no door is offered
+      // that cannot act (the chain's -cure); the line stays
+      row.append(label, hostStateChip('error', { text: tr('as of {ago}', { ago: agoText(this._hubStale.at) }), title: String(this._hubStale.why || '') }));
+      if (!this._hubStale.paused && this._hubStale.running == null) row.append(' ', retry);   // no door that cannot act: a pause holds a rebuild, a running sweep would only be joined
       this.listEl.appendChild(row);
     }
   }
