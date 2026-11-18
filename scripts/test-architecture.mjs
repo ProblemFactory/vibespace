@@ -7781,6 +7781,7 @@ await section(async () => {
     ["src/adapters/codex.js", "`vibespace-zst-${uid}`", "per-user", "the zst cache is keyed by uid and judged before use (sock-path ensureSocketDir; a planted name is refused by name, B-3767 unit 2)"],
     ["src/hosts.js", "`vs-cm-${process.getuid", "per-user", "the ssh ControlMaster dir is keyed by uid and judged before use (ensureSocketDir; a planted name turns connection sharing off, said once, B-3767 unit 2)"],
     ["src/hosts.js", "'vs-agentd-stage-'", "unique", "mkdtemp"],
+    ["src/server/provider-test.js", "scratchRoot = os.tmpdir()", "unique", "the provider Test's run folder is an mkdtemp under it (vs-pvtest-…), removed after each run (lane lg-providers U4)"],
     ["src/local-index.js", "varTmp = '/var/tmp'", "read", "the index's place verdict (keyed by uid where it is used)"],
     ["src/memory-pressure.js", "tmpfs.mount || '/tmp'} is in RAM", "read", "words about a tmpfs"],
     ["src/memory-pressure.js", "mount: tmpfs.mount || '/tmp'", "read", "the same"],
