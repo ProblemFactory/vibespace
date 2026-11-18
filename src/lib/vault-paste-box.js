@@ -185,6 +185,7 @@ function loginBoxEl(item) {
  *  login's own by default); the words before the press (useLoginWords over the hub's site-words) say the exact address, its ASCII
  *  form, a look-alike, and by name who may then have it filled there; «Let … sign in» names every site of the login (the grant
  *  follows the login). «Type a new login instead» puts the card back as it was. `box.dataset.use` = the picked login's name. */
+const USE_TYPING_MS = 250;   // the pause after a keystroke before the words before the press are drawn again for the typed name
 function useSavedLoginEl({ box, site, who, origin, user, typed, allowText, sayAllow }) {
   const button = btn(t('Use a login you already saved…'), 'ut-login-use');
   const pane = mk('div', 'ut-login-use-pane'); pane.hidden = true;
@@ -241,7 +242,12 @@ function useSavedLoginEl({ box, site, who, origin, user, typed, allowText, sayAl
     mode(e, sites);
     await sayWords(e);
   });
-  user.addEventListener('change', () => { const e = (pick._list || []).find((x) => x.name === box.dataset.use); if (e) sayWords(e); });
+  // the name it signs in under there, edited after the pick: the words say THAT name — drawn again as it is TYPED (主开发 13:02Z (4),
+  // a short pause first), and at once when the field is left
+  let typing = null;
+  const redraw = () => { const e = (pick._list || []).find((x) => x.name === box.dataset.use); if (e) sayWords(e); };
+  user.addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(redraw, USE_TYPING_MS); });
+  user.addEventListener('change', () => { clearTimeout(typing); redraw(); });
   back.addEventListener('click', () => { mode(null); pane.hidden = true; button.hidden = false; pick.value = ''; says.textContent = ''; unlock.hidden = true; });
   return { button, pane };
 }
@@ -343,6 +349,9 @@ export async function submitSecretBox(model, item, box, answer) {
   return !!done;
 }
 
+/** A login answer's refusal in words — THE SAME sentence in the box and in its toast (the toast had said the hub's own English
+ *  word for the code, in any language — lane login-request-card, the use door's follow-up). */
+const loginSay = (code, r) => (['vault_not_set_up', 'ask_settled', 'ask_unknown'].includes(code) ? refusalSay(code, r) : loginRefusalWords(code, r));
 /** lane login-request-card: the login box's press — its fields through the model's ONE verb (the same door); the password field
  *  is emptied once answered, every other field kept on a refusal (said in the box by the add door's own words). */
 async function submitLoginBox(model, item, box, answer) {
@@ -351,7 +360,7 @@ async function submitLoginBox(model, item, box, answer) {
   const using = box.dataset.use || '';   // one login, several sites: the picked login — no password on this road
   const login = answer !== 'store' ? null : using ? { useLogin: using, username: user ? user.value.trim() : '', allow: !!(allow && allow.checked) }
     : { username: user ? user.value.trim() : '', loginPassword: pw ? pw.value : '', ...(otp && otp.value.trim() ? { totpName: otp.value.trim() } : {}), allow: !!(allow && allow.checked) };
-  const say = (code, r) => (['vault_not_set_up', 'ask_settled', 'ask_unknown'].includes(code) ? refusalSay(code, r) : loginRefusalWords(code, r));
+  const say = loginSay;
   box.dataset.busy = '1';
   box.querySelectorAll('button').forEach((b) => { b.disabled = true; });
   let done = false;
@@ -393,7 +402,7 @@ export async function postSecretAnswer(item, answer, { value = null, name, note,
   if (r && r.ok) { showToast(r.outcome === 'stored' ? t('Saved to the vault — the agent is told it is there, never the value') : t('Refused — the agent is told on its next turn')); return true; }
   const code = r && r.code;
   if (typeof onRefusal === 'function') { try { onRefusal(code, r); } catch { } }
-  showToast(refusalSay(code, r), { type: 'error' });
+  showToast(login ? loginSay(code, r) : refusalSay(code, r), { type: 'error' });   // a login's refusal: the box's own sentence
   return false;
 }
 

@@ -554,6 +554,14 @@ SENTINELS.push(S_LOGIN, S_LOGIN2, S_NL);
     ok(k.status === 200 && kEdited.status >= 400 && kEdited.json.code === 'login_site_exists' && kEdited.json.there === 'desk-owner' && kOpen && kSame.status === 200 && kSame.json.already === true && kSame.json.joined === true
       && rck.length === 1 && /https:\/\/desk\.example\.test was one of its sites already; it signs in there as desk-owner/.test(rck[0].text),
       'A SITE THE LOGIN HOLDS ALREADY: a different name typed on the card ⇒ refused by name (login_site_exists, the name it keeps there said), the item open; the same name ⇒ the login as it stands, the receipt naming the user it signs in with THERE', { kEdited: kEdited.json, kSame: kSame.json, rc: rck[0] && rck[0].text });
+    // (主开发 13:02Z (3)) THE LOGIN'S FIRST SITE cannot be removed from it (login_site_first): a different name there is refused with
+    // the ONE door that works — a new login — never «remove that site»
+    const fs1 = await S.agent(W.OTHER_TOKEN, { words: 'the shop itself', purpose: 'p', kind: 'login', hosts: SITE });
+    const fsE = await S.hit(`/api/vault/secret-requests/${fs1.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, username: 'someone-else', allow: true } });
+    const fsW = String((fsE.json && fsE.json.words) || '');
+    ok(fs1.status === 200 && fsE.status >= 400 && fsE.json.code === 'login_site_exists' && fsE.json.first === true && fsE.json.there === 'owner@shop.example' && !/remove that site/.test(fsW) && /type a new login/.test(fsW) && openReqs(W).some((i) => i.action.requestId === fs1.json.requestId),
+      'THE LOGIN\'S FIRST SITE under another name ⇒ refused with the one door that works there (a new login), never «remove that site» — the item open', fsE.json);
+    await S.hit(`/api/vault/secret-requests/${fs1.json.requestId}/answer`, { body: { answer: 'deny' } });
     // A PICKED LOGIN ON A LOCKED VAULT ⇒ vault_locked by name, before the use road; the item stays
     W.vault.lock('test');
     const lk = await S.agent(W.OTHER_TOKEN, { words: 'the shop, locked', purpose: 'p', kind: 'login', hosts: 'https://locked.example.test' });
@@ -946,7 +954,7 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
   // LOCKED vault with its unlock door, a read that failed); a tick whose grant could not be written is an ERROR toast
   const U_NAME = 'web-login:https://lms.b3.test#b3-own';
   const U_LIST = { ok: true, state: 'unlocked', entries: [{ name: U_NAME, origin: 'https://lms.b3.test', user: 'b3-own', sites: [{ origin: 'https://b3.example.test', user: 'b3-there' }] }] };
-  const useScene = async (M, list) => {
+  const useScene = async (M, list, { typing = false } = {}) => {
     const D = fakeDom(), prev = globalThis.document, r = { toasts: [], asked: [] };
     globalThis.document = D.document;
     globalThis.__b3 = {
@@ -956,7 +964,8 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
         const q = String(u); r.asked.push(q);
         if (q.startsWith('/api/vault/web-logins/site-words')) return { ok: true, user: 'b3-there', there: 'b3-there', widens: { login: [{ kind: 'group', id: 'g-b3', name: 'B3 crew' }] } };
         if (q === '/api/vault/web-logins') return list;
-        if (q.startsWith('/api/vault/secret-requests/')) return { ok: true, outcome: 'stored', joined: true, allowed: false, already: false };   // the tick's grant NOT written
+        if (q.startsWith('/api/vault/secret-requests/')) return r.refuse ? { ok: false, code: 'login_site_exists', site: 'https://b3.example.test', there: 'b3-there', first: true, error: 'that site is on this login already' }   // the hub's own English word in `error`
+          : { ok: true, outcome: 'stored', joined: true, allowed: false, already: false };   // the tick's grant NOT written
         return { ok: false, code: 'b3_stub' };
       },
       toast: (m, o) => { r.toasts.push({ m: String(m), type: (o && o.type) || null }); },
@@ -981,10 +990,19 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
         r.passHidden = !!field(pass) && field(pass).hidden === true;
         r.otpHidden = !!box.querySelector('.ut-login-otp') && box.querySelector('.ut-login-otp').hidden === true;
         r.wordsAsked = r.asked.find((u) => u.startsWith('/api/vault/web-logins/site-words')) || '';
+        if (typing) {   // (主开发 13:02Z (4)) the words are drawn again as the name is TYPED — not only when the field is left
+          user.value = 'b3-typed';
+          for (const fn of user.listeners.input || []) fn({ type: 'input', target: user });
+          await new Promise((res) => setTimeout(res, 320)); await settle();
+          r.typedAsked = r.asked.some((u) => u.startsWith('/api/vault/web-logins/site-words') && u.includes('&user=b3-typed'));
+          user.value = 'b3-there';   // the preset again, for the press below
+        }
         await M.submitSecretBox({ runAction: async (it, ans, o) => { r.sent = o && o.login; return true; } }, item, box, 'store');
         box.querySelector('.ut-login-use-back').click(); await settle();
         r.backUse = box.dataset.use || null; r.backUser = user.value; r.backPass = field(pass) ? field(pass).hidden : null;
         await M.postSecretAnswer(item, 'store', { login: { useLogin: list.entries[0].name, username: 'b3-there', allow: true } });
+        r.refuse = true;   // a refused login answer: its toast says the box's own sentence
+        await M.postSecretAnswer(item, 'store', { login: { useLogin: list.entries[0].name, username: 'someone-else', allow: true } });
       }
     } catch (e) { r.threw = String((e && e.stack) || e).slice(0, 400); }
     finally { if (prev === undefined) delete globalThis.document; else globalThis.document = prev; delete globalThis.__b3; }
@@ -992,12 +1010,14 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
   };
   const U_HIDES = 'a picked login HIDES the typed fields (password, two-step code) and the press sends useLogin with NO password — the name it signs in under THERE preset (b3-there, not the typed one)';
   const U_ERROR = 'a tick whose grant could not be written is an ERROR toast (as on the typed road) — never the toast of a box left unticked';
+  const U_TOAST = 'a refused login answer\'s toast says the box\'s own sentence (the first site\'s one door, in the page\'s words) — never the hub\'s English word for the code';
   const useChecks = (a, lk, bad) => [
     ['⑬c the use road\'s scene runs over the real box module (a list, a locked vault, a failed read)', !a.threw && !lk.threw && !bad.threw],
     [U_HIDES, a.use === U_NAME && a.passHidden && a.otpHidden && a.userNow === 'b3-there' && !!a.sent && a.sent.useLogin === U_NAME && !('loginPassword' in a.sent) && a.sent.username === 'b3-there'],
     ['the words before the press are asked for the name on the card (&user=b3-there) and say the site held already, its name there, and the Task Group BY NAME', /&user=b3-there/.test(a.wordsAsked || '') && /signs in there as b3-there/.test(a.words || '') && /B3 crew/.test(a.words || '')],
     ['«Type a new login instead» puts the card back as it was: the typed name back, the password field shown, no login picked', a.backUse === null && a.backUser === 'typed-name' && a.backPass === false],
     [U_ERROR, (a.toasts || []).some((x) => x.type === 'error' && /permission could not be written/.test(x.m))],
+    [U_TOAST, (a.toasts || []).some((x) => x.type === 'error' && /own first site and signs in there as b3-there/.test(x.m)) && !(a.toasts || []).some((x) => /that site is on this login already/.test(x.m))],
     ['an empty list is said for what it is: a LOCKED vault (its unlock door on the card) — never «none saved» — and a read that failed', /vault is locked/.test(lk.empty || '') && lk.unlock && /could not be read/.test(bad.empty || '') && !bad.unlock],
   ];
   const useRun = async (mutate) => { try { const M = mutate ? await bundleBox(mutate) : require(path.join(B3DIR, 'box-real.cjs')); return [await useScene(M, U_LIST), await useScene(M, { ok: true, state: 'locked', entries: [] }), await useScene(M, { ok: false, code: 'unreadable' })]; } catch (e) { const t = { threw: String((e && e.message) || e) }; return [t, t, t]; } };
@@ -1006,8 +1026,12 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
   const uHide = await useRun((s) => s.replace('    for (const n of typed) if (n) n.hidden = !!entry;\n', ''));
   const uErr = await useRun((s) => s.replace('    if (login.allow && !r.allowed) showToast(', '    if (false) showToast('));
   const redOf = (run) => useChecks(...run).filter(([, c]) => !c).map(([n]) => n);
-  ok(!uHide[0].threw && redOf(uHide).includes(U_HIDES) && !uErr[0].threw && redOf(uErr).includes(U_ERROR),
-    'MUTANTS ⑬c: the hide line gone ⇒ the password field stays (RED by name); the not-written tick toasted as a plain one ⇒ RED by name', { hide: redOf(uHide), err: redOf(uErr) });
+  const typeRun = async (mutate) => { try { return await useScene(mutate ? await bundleBox(mutate) : require(path.join(B3DIR, 'box-real.cjs')), U_LIST, { typing: true }); } catch (e) { return { threw: String((e && e.message) || e) }; } };
+  const uType = await typeRun(null), uTypeR = await typeRun((s) => s.replace("  user.addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(redraw, USE_TYPING_MS); });\n", ''));
+  ok(!uType.threw && uType.typedAsked === true && !uTypeR.threw && uTypeR.typedAsked === false, 'THE WORDS ARE DRAWN AGAIN AS THE NAME IS TYPED (after a short pause — not only when the field is left) — RED CONTROL: without the input listener they are not', { typed: uType.typedAsked, red: uTypeR.typedAsked, threw: uType.threw || uTypeR.threw });
+  const uToast = await useRun((s) => s.replace("  showToast(login ? loginSay(code, r) : refusalSay(code, r), { type: 'error' });", "  showToast(refusalSay(code, r), { type: 'error' });"));   // stale-pins: kept — a mutant that rebuilds the old toast line on purpose
+  ok(!uHide[0].threw && redOf(uHide).includes(U_HIDES) && !uErr[0].threw && redOf(uErr).includes(U_ERROR) && !uToast[0].threw && redOf(uToast).includes(U_TOAST),
+    'MUTANTS ⑬c: the hide line gone ⇒ the password field stays (RED by name); the not-written tick toasted as a plain one ⇒ RED by name; the refusal toasted in the hub\'s word ⇒ RED by name', { hide: redOf(uHide), err: redOf(uErr), toast: redOf(uToast) });
   fs.rmSync(B3DIR, { recursive: true, force: true });
 }
 

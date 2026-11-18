@@ -32,9 +32,17 @@ export function useLoginWords(w, { site = '', login = '', t }) {
     if (p && p.kind === 'group') return `${t('Task group')} ${String(p.id || '?')}`;
     return t('a conversation not running now ({key})', { key: String((p && (p.key || p.id)) || '?') });
   };
-  const seen = new Set(), names = [];
-  for (const p of [...(wd.login || []), ...(wd.anyAccount || []), ...(wd.anySite || [])]) { if (!p || typeof p !== 'object') continue; const k = idOf(p); if (seen.has(k)) continue; seen.add(k); names.push(nameOf(p)); }
-  if (wd.owner) names.unshift(t('the conversation that saved it ({key})', { key: String(wd.ownerName || wd.owner) }));
+  // ROW BY ROW: a row's principals, then its EXCEPTIONS said as exceptions (主开发 13:02Z: «Release crew (except X)» — the owner asked
+  // for exceptions by name); a principal an earlier row said is not said again
+  const seen = new Set(), names = [], ex = wd.except || {};
+  for (const k of ['login', 'anyAccount', 'anySite']) {
+    const who = [];
+    for (const p of wd[k] || []) { if (!p || typeof p !== 'object') continue; const id = idOf(p); if (seen.has(id)) continue; seen.add(id); who.push(nameOf(p)); }
+    if (!who.length) continue;
+    const out2 = (ex[k] || []).filter((p) => p && typeof p === 'object').map(nameOf);
+    names.push(out2.length ? t('{who} (except {names})', { who: who.join(', '), names: out2.join(', ') }) : who.join(', '));
+  }
+  if (wd.owner) names.unshift(wd.ownerName ? t('the conversation that saved it ({key})', { key: String(wd.ownerName) }) : t('the conversation that saved it, not running now ({key})', { key: String(wd.owner) }));
   out.push(names.length
     ? t('Then it may be filled on {site} by: {names}.', { site, names: names.join(', ') })
     : t('Nobody else may have it filled on {site} yet.', { site }));

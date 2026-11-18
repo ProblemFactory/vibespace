@@ -522,6 +522,8 @@ function loginAnswerOf({ username, password, totpName } = {}) {
 }
 /** lane login-request-card: a stored login's user (its entry name's — lower-cased by the add door's rule) | ''. */
 const loginUserOf = (name) => { const p = BL.parseName(name); return p ? p.user : ''; };
+/** lane login-request-card: a stored login's FIRST site (its entry name's origin) | ''. */
+const loginOriginOf = (name) => { const p = BL.parseName(name); return p ? p.origin : ''; };
 
 /** A FREE ENTRY's facts (the paste box's, and 「其他密钥或密码…」's in the Vault window) → { ok, label, note, kind } | a
  *  refusal: its words by THE words rule (wordsOf — a name, a one-paragraph description; lane vault-entry-description: was
@@ -549,6 +551,6 @@ module.exports = {
   ACTION_TYPE, REQUEST_ID_RE, ENTRY_PREFIX, FREE_ENTRY_RE, ENTRY_FIELD, LIMITS, QUIET_MS, ENTRY_KINDS, KIND_WORDS, WORDS, hostsOf,
   requestVerdict, targetOf, targetOfAction, wordsOfItem, intoOf, cardOf, receiptText, entryMetaOf, valueOf,
   WORDS_TYPE, PROPOSAL_ID_RE, wordsOf, withNote, wordsCardOf, proposalOfItem, wordsReceiptText, agentEntryWords, pendingWords, sharedNoteOf, privateNoteOf,   // lane vault-entry-description
-  LOGIN_KIND, LOGIN_USE, siteWords, loginAnswerOf, loginUserOf,   // lane login-request-card
+  LOGIN_KIND, LOGIN_USE, siteWords, loginAnswerOf, loginUserOf, loginOriginOf,   // lane login-request-card
   TOTP_KIND, TOTP_USE,   // lane totp-request-card
 };

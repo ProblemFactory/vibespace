@@ -393,8 +393,10 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const a = UW(near, { site: PORTAL, login: `${LMS} · jdoe`, t: tr }), b = UW(far, { site: OTHER, login: `${LMS} · jdoe`, t: tr });
     ok(a[0].includes(PORTAL) && a[0].includes(`${LMS} · jdoe`) && /nothing is typed again/.test(a[0]) && a.some((x) => /^Then it may be filled on .* by: .*conv-a/.test(x)) && !a.some((x) => /^Careful/.test(x)) && b.some((x) => /^Careful: lms-school\.example is not the domain of this login's other sites \(school\.test\)/.test(x)),
       'THE WORDS BEFORE THE PRESS on the login card (the page\'s, over the hub\'s real answer): what the press does, BY NAME who may then have it filled on that site (the login\'s own row: conv-a), and a look-alike said', { a, b });
-    const LOOP = "  for (const p of [...(wd.login || []), ...(wd.anyAccount || []), ...(wd.anySite || [])]) { if (!p || typeof p !== 'object') continue; const k = idOf(p); if (seen.has(k)) continue; seen.add(k); names.push(nameOf(p)); }";
-    const UWr = await load((src) => src.replace(LOOP, ''));
+    const must = (from, to) => (src) => { if (!src.includes(from)) throw new Error(`mutant anchor missing: ${from.slice(0, 80)}`); return src.replace(from, to); };
+    const PUSH = "    names.push(out2.length ? t('{who} (except {names})', { who: who.join(', '), names: out2.join(', ') }) : who.join(', '));";
+    const WHO = "    for (const p of wd[k] || []) { if (!p || typeof p !== 'object') continue; const id = idOf(p); if (seen.has(id)) continue; seen.add(id); who.push(nameOf(p)); }";
+    const UWr = await load(must(PUSH, ''));
     const ar = UWr(near, { site: PORTAL, login: `${LMS} · jdoe`, t: tr });
     ok(ar.some((x) => /^Nobody else may have it filled/.test(x)), 'RED CONTROL: words that leave out the grants say «nobody else» while conv-a may fill it — the leg above would read it', ar);
     // (主开发 12:17Z, the use door's MUST — the vault's law: a change that WIDENS who may use a login is said BY NAME before the press)
@@ -410,9 +412,26 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const gBare = UW(GW(), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
     ok(/by: Course helper/.test(conv) && !conv.includes('conv-a') && /by: Release crew\./.test(gNamed) && /by: Task group g-release\./.test(gBare) && !/Nobody else/.test(gNamed + gBare),
       'EVERY PRINCIPAL SAID BY NAME BEFORE THE PRESS: the hub names the conversation («Course helper», not its id) and the Task Group («Release crew») as the Vault window\'s chips do; a group whose name cannot be read is still said — «Task group g-release», never «Nobody else»', { conv, gNamed, gBare });
-    const UWold = await load((src) => src.replace(LOOP, "  names.push(...[...(wd.login || []), ...(wd.anyAccount || []), ...(wd.anySite || [])].map((p) => (p && p.kind === 'everyone' ? t('every conversation') : String((p && (p.name || p.key)) || ''))).filter(Boolean));"));
+    const UWold = await load(must(WHO, "    for (const p of wd[k] || []) { const n = p && p.kind === 'everyone' ? t('every conversation') : String((p && (p.name || p.key)) || ''); if (n) who.push(n); }"));
     const gOld = UWold(GW(), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
     ok(/Nobody else may have it filled on/.test(gOld), 'RED CONTROL: the old words (a name or a key, an empty one dropped) over a nameless group say «Nobody else» while the Task Group may fill it — the leg above would read it', gOld);
+    // (主开发 13:02Z (1), as if a must — the owner asked for exceptions by name) AN EXCEPT ROW IS SAID AS AN EXCEPTION: «Release crew
+    // (except Night shift)», read from the same public row through the same names call
+    const SUBJ2 = { sessions: [...SUBJ.sessions, { subject: 'session:conv-night', name: 'Night shift' }], groups: SUBJ.groups };
+    const wr = v.grants.set(BL.DOOR, `${WIKI}#jdoe`, { to: [{ kind: 'group', id: 'g-release' }], except: [{ kind: 'conversation', key: 'conv-night' }] }, 'user');
+    const exW = UW(GW({ subjects: SUBJ2 }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
+    ok(!!wr && wr.ok !== false && /by: Release crew \(except Night shift\)\./.test(exW), 'AN EXCEPT ROW IS SAID AS AN EXCEPTION before the press: «Release crew (except Night shift)» — the same public row, the same names call', { wr, exW });
+    const UWnoEx = await load(must("    const out2 = (ex[k] || []).filter((p) => p && typeof p === 'object').map(nameOf);", '    const out2 = [];'));
+    const exR = UWnoEx(GW({ subjects: SUBJ2 }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
+    ok(/by: Release crew\./.test(exR) && !/except/.test(exR), 'RED CONTROL: words that read only the row\'s principals name the whole group, the exception unsaid — the leg above would read it', exR);
+    // (2) A RUNNING CONVERSATION WHOSE GRANT WAS WRITTEN UNDER ITS PAGE ID is named, never «not running»: the pickers' subjects carry it
+    v.logins.grant(BL.entryName(WIKI, 'jdoe'), 'this-account', 'session:webui:pg-7');
+    const SUBJ3 = { sessions: [...SUBJ2.sessions, { subject: 'session:conv-pg', name: 'Page helper', webuiId: 'pg-7' }], groups: SUBJ.groups };
+    const pgW = UW(GW({ subjects: SUBJ3 }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
+    ok(/Page helper/.test(pgW) && !/not running now \(webui:pg-7\)/.test(pgW) && /except Night shift/.test(pgW), 'A RUNNING CONVERSATION GRANTED UNDER ITS PAGE ID is named («Page helper»), never «not running»; the exception still said', pgW);
+    // the owner of a login that is not running is said as such — never a bare id
+    const ownW = UW({ ok: true, user: 'jdoe', there: null, widens: { owner: 'conv-o' } }, { site: PORTAL, login: `${LMS} · jdoe`, t: tr }).join(' '), ownN = UW({ ok: true, user: 'jdoe', there: null, widens: { owner: 'conv-o', ownerName: 'Signup helper' } }, { site: PORTAL, login: `${LMS} · jdoe`, t: tr }).join(' ');
+    ok(/by: the conversation that saved it, not running now \(conv-o\)\./.test(ownW) && /by: the conversation that saved it \(Signup helper\)\./.test(ownN), 'THE OWNER who saved the login: by its name when running, «not running now» with its key when not — never a bare id', { ownW, ownN });
     // A SITE THE LOGIN HOLDS ALREADY is said with the name it signs in under THERE (the hub's `there`); a site it does not hold has none
     v.logins.addSite(BL.entryName(LMS, 'jdoe'), { site: PORTAL, user: 'jd-portal' }, { who: 'owner' });
     const tw = v.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), PORTAL), tWords = UW(tw, { site: PORTAL, login: `${LMS} · jdoe`, t: tr });
@@ -426,6 +445,10 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     vb.logins.grant(BL.entryName(WIKI, 'jdoe'), 'this-account', 'group:g-release');
     const gHub = UW(vb.logins.siteWordsFor(BL.entryName(WIKI, 'jdoe'), PORTAL, { subjects: SUBJ }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
     ok(!gHub.includes('Release crew') && gHub.includes('Task group g-release'), 'RED CONTROL: a hub that does not name the principals (no GM.namesNow over the pickers\' subjects) says the group by its id only — the leg above would read it', gHub);
+    const wikiOn = async (mutate) => { const x = await run(mutate); x.logins.addOwn({ origin: WIKI, username: 'jdoe', password: 'Wiki!' + 'w'.repeat(12) }, { who: 'owner' }); x.grants.set(BL.DOOR, `${WIKI}#jdoe`, { to: [{ kind: 'group', id: 'g-release' }], except: [{ kind: 'conversation', key: 'conv-night' }] }, 'user'); x.logins.grant(BL.entryName(WIKI, 'jdoe'), 'this-account', 'session:webui:pg-7'); return UW(x.logins.siteWordsFor(BL.entryName(WIKI, 'jdoe'), PORTAL, { subjects: SUBJ3 }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' '); };
+    const hubEx = await wikiOn(must("        except: { login: named2(exceptAt(`${p.origin}#${p.user}`)), anyAccount: named2(exceptAt(`${w.site}#*`)), anySite: named2(exceptAt('*')) },   // each row's exceptions, named the same way\n", ''));
+    const hubPg = await wikiOn(must("return cid ? { id: str(x.webuiId) || cid, name: str(x.name), backendSessionId: cid } : null;", "return cid ? { id: cid, name: str(x.name), backendSessionId: cid } : null;"));   // stale-pins: kept — a red control that rebuilds the roster keyed without the page id (the pre-follow-up line) on purpose
+    ok(!/except/.test(hubEx) && /not running now \(webui:pg-7\)/.test(hubPg) && !/Page helper/.test(hubPg), 'RED CONTROLS (the hub, LAST): a hub that reads no exceptions leaves them unsaid; a roster keyed without the page id calls the running conversation «not running» — the legs above would read them', { hubEx, hubPg });
     fs.rmSync(tmp, { recursive: true, force: true });
   }
   // (主开发 10:54Z, AS IF A MUST, with the first page door that adds a site) THE GRANT PICKER TOUCHES ONLY ITS OWN LOGIN'S ROWS ON ITS
@@ -454,14 +477,16 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
   // named) — a source pin each, and patched copies that turn each one red
   {
     const pins = (row, routes) => [/const rowOf = \(s\) => ownRowOf\(entry, s\);/.test(row), /chipSiteOf\(entry, g\)/.test(row), /siteWordsFor\([^\n]*subjects: subjects\(\)/.test(routes)];
-    const ROW = read('src/lib/vault-login-row.js'), RT = read('src/routes/vault.js');
+    const ROW = read('src/lib/vault-login-row.js'), RT = read('src/routes/vault.js'), WIRE = read('src/server/mounts-plugins-wiring.js');
     const real = pins(ROW, RT);
     const red = [
       pins(ROW.replace('const rowOf = (s) => ownRowOf(entry, s);', 'const rowOf = (s) => (entry.grants || []).find((g) => g.scope === s && !g.unknown);'), RT)[0],
       pins(ROW.replace(/chipSiteOf\(entry, g\)/g, 'null'), RT)[1],
       pins(ROW, RT.replace("{ user: String(req.query.user || ''), subjects: subjects() })", "{ user: String(req.query.user || '') })"))[2],   // stale-pins: kept — a red control that rebuilds the pre-cure route (no roster) on purpose
     ];
-    ok(real.every(Boolean) && red.every((x) => x === false), 'THE PICKER\'S WIRING, PINNED: its own row (ownRowOf), the added site\'s chip (chipSiteOf), the route\'s subjects to site-words — RED CONTROLS: a first-scope match, a chip with no site, a route without the roster', { real, red });
+    const pageId = (w) => /sessions\.push\(\{ subject: `session:\$\{cid\}`[^\n]*webuiId: String\(s\._webuiId \|\| id\)/.test(w);
+    real.push(pageId(WIRE)); red.push(pageId(WIRE.replace("webuiId: String(s._webuiId || id) /* lane login-request-card: a grant written under its page id names it too */, ", '')));
+    ok(real.every(Boolean) && red.every((x) => x === false), 'THE PICKER\'S WIRING, PINNED: its own row (ownRowOf), the added site\'s chip (chipSiteOf), the route\'s subjects to site-words, the subjects\' page id — RED CONTROLS: a first-scope match, a chip with no site, a route without the roster, subjects without the page id', { real, red });
   }
   // (AS IF A MUST) THE MERGE SAYS THE OTHER LOGIN'S PASSWORD IS NOT KEPT, and which of the two was set later — dates only
   {

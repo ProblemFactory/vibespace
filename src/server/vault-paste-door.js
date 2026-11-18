@@ -318,7 +318,11 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (already && typeof logins.siteWordsFor === 'function') { try { const sw = logins.siteWordsFor(name, q.target.origin); there = sw && sw.ok && typeof sw.there === 'string' && sw.there ? sw.there : null; } catch { there = null; } }
     const typed = typeof l.username === 'string' ? l.username.trim() : '';
     if (already && there && typed && typed.toLowerCase() !== there.toLowerCase()) {
-      return { ok: false, code: 'login_site_exists', site: q.target.origin, there, words: `${q.target.origin} is on this login already and signs in there as ${there} — to sign in there under another name, remove that site from the login in Vault ▸ Web logins first, or type a new login` };
+      // the login's FIRST site cannot be removed from it (login_site_first): there the one door is a new login (13:02Z (3))
+      const first = P.loginOriginOf(name) === q.target.origin;
+      return { ok: false, code: 'login_site_exists', site: q.target.origin, there, ...(first ? { first: true } : {}),
+        words: first ? `${q.target.origin} is this login's own first site and signs in there as ${there} — to sign in there under another name, type a new login`
+          : `${q.target.origin} is on this login already and signs in there as ${there} — to sign in there under another name, remove that site from the login in Vault ▸ Web logins first, or type a new login` };
     }
     const user = String((r && r.ok && r.user) || there || P.loginUserOf(name));
     let allowed = false;

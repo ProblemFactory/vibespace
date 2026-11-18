@@ -983,6 +983,8 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
   //    shown, logged or compared. THE GRANT FOLLOWS THE LOGIN: `siteWordsFor` says BY NAME, before the press, who may then have it
   //    filled on the new site (the login's own row, and by their own rows «any account on that site» / «any site»).
   const principalsAt = (resource) => { const [row] = rowsOf(resource); const pub = row ? GM.publicRow(row) : null; return pub && !pub.unknown ? (pub.to || []) : []; };
+  // the same public row's EXCEPTIONS (主开发 13:02Z: «Release crew, except X» — the owner asked for exceptions by name)
+  const exceptAt = (resource) => { const [row] = rowsOf(resource); const pub = row ? GM.publicRow(row) : null; return pub && !pub.unknown ? (pub.except || []) : []; };
   /** The grant pickers' subjects (the Vault window's chips: `{sessions:[{subject:'session:<cid>', name}], groups:[{subject:'group:<id>', name}]}`)
    *  → the roster GM.namesNow reads — so the words before the press name each principal as the person's chips do (主开发 12:17Z, the
    *  use door's must: a stored principal carries no name — a group's none at all). */
@@ -990,7 +992,8 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     const sj = subjects && typeof subjects === 'object' ? subjects : {};
     const tail = (x, head) => { const v = str(x && x.subject); return v.startsWith(head) ? v.slice(head.length) : ''; };
     return {
-      sessions: (Array.isArray(sj.sessions) ? sj.sessions : []).map((x) => { const cid = tail(x, 'session:'); return cid ? { id: cid, name: str(x.name), backendSessionId: cid } : null; }).filter(Boolean),
+      // id = its PAGE id when the subject carries it: a grant written under `webui:<id>` names a running conversation too (13:02Z (2))
+      sessions: (Array.isArray(sj.sessions) ? sj.sessions : []).map((x) => { const cid = tail(x, 'session:'); return cid ? { id: str(x.webuiId) || cid, name: str(x.name), backendSessionId: cid } : null; }).filter(Boolean),
       groups: (Array.isArray(sj.groups) ? sj.groups : []).map((x) => { const id = tail(x, 'group:'); return id ? { id, name: str(x.name) } : null; }).filter(Boolean),
     };
   };
@@ -1010,7 +1013,9 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     const owner = (metaOf(name) || {}).owner;
     const ownerName = owner ? (named2([{ kind: 'conversation', key: str(owner) }])[0] || {}).name || null : null;
     return { ok: true, name, ...w, user: str(user).trim() || o.rec.username, there: BL.userOnSite(o.rec, w.site),
-      widens: { login: named2(principalsAt(`${p.origin}#${p.user}`)), anyAccount: named2(principalsAt(`${w.site}#*`)), anySite: named2(principalsAt('*')), ...(owner ? { owner, ...(ownerName ? { ownerName } : {}) } : {}) } };   // its owner fills with no grant at all
+      widens: { login: named2(principalsAt(`${p.origin}#${p.user}`)), anyAccount: named2(principalsAt(`${w.site}#*`)), anySite: named2(principalsAt('*')),
+        except: { login: named2(exceptAt(`${p.origin}#${p.user}`)), anyAccount: named2(exceptAt(`${w.site}#*`)), anySite: named2(exceptAt('*')) },   // each row's exceptions, named the same way
+        ...(owner ? { owner, ...(ownerName ? { ownerName } : {}) } : {}) } };   // its owner fills with no grant at all
   }
   function addSite(name, { site, user = '' } = {}, { who = null } = {}) {
     if (!BL.parseName(name)) return named('not_found', 'no such web login');

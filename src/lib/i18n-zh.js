@@ -12734,6 +12734,9 @@ export default {
   "That site was on the saved login already — the agent may now sign in with it there; VibeSpace never hands it the password": "这个网站本来就在已保存的登录上 — 助手现在可以在那里用它登录；VibeSpace 绝不会把密码交给它",
   "That site was on the saved login already — nothing was changed": "这个网站本来就在已保存的登录上 — 没有任何改动",
   "{site} is on this login already and signs in there as {user} — to sign in there under another name, remove that site from the login in Vault ▸ Web logins first, or type a new login": "{site} 已在这个登录上，并在那里以 {user} 登录 — 要在那里用别的名字登录，请先在 保险库 ▸ 网站登录 中把这个网站从登录里移除，或填写一个新的登录",
+  "{who} (except {names})": "{who}（{names} 除外）", // lane login-request-card: the use door's follow-up (主开发 13:02Z) — exceptions said, an owner not running, the first site's one door
+  "the conversation that saved it, not running now ({key})": "保存它的对话，当前未运行（{key}）",
+  "{site} is this login's own first site and signs in there as {user} — to sign in there under another name, type a new login": "{site} 是这个登录自己的第一个网站，并在那里以 {user} 登录 — 要在那里用别的名字登录，请填写一个新的登录",
   "Let {who} read its current code — never the seed — while it runs": "允许 {who} 在运行期间读取它的当前验证码 — 绝不给出密钥",
   "{who} can read its current code (never the seed) while it runs — a restart of that conversation ends it; give it again in Vault ▸ Two-step codes ▸ Use for….": "{who} 在运行期间可以读取它的当前验证码（绝不给出密钥）— 那个对话重启后即失效；可在「保险库 ▸ 两步验证 ▸ 用于…」中再次授予。",
   "{who} cannot read its code until you give it in Vault ▸ Two-step codes ▸ Use for….": "在你于「保险库 ▸ 两步验证 ▸ 用于…」中授予之前，{who} 无法读取它的验证码。",

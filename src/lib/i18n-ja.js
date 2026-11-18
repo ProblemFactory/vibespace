@@ -12733,6 +12733,9 @@ export default {
   "That site was on the saved login already — the agent may now sign in with it there; VibeSpace never hands it the password": "そのサイトはもともと保存済みのログインにありました — エージェントはそこでこれを使ってサインインできるようになりました。VibeSpace はパスワードを渡しません",
   "That site was on the saved login already — nothing was changed": "そのサイトはもともと保存済みのログインにありました — 何も変わっていません",
   "{site} is on this login already and signs in there as {user} — to sign in there under another name, remove that site from the login in Vault ▸ Web logins first, or type a new login": "{site} はすでにこのログインにあり、そこでは {user} としてサインインします — 別の名前でサインインするには、先に 保管庫 ▸ ウェブログイン でそのサイトをログインから外すか、新しいログインを入力してください",
+  "{who} (except {names})": "{who}（{names} を除く）", // lane login-request-card: the use door's follow-up (主开发 13:02Z) — exceptions said, an owner not running, the first site's one door
+  "the conversation that saved it, not running now ({key})": "これを保存した会話、いまは動いていません（{key}）",
+  "{site} is this login's own first site and signs in there as {user} — to sign in there under another name, type a new login": "{site} はこのログイン自身の最初のサイトで、そこでは {user} としてサインインします — 別の名前でサインインするには、新しいログインを入力してください",
   "Let {who} read its current code — never the seed — while it runs": "{who} が実行中に現在のコードを読めるようにする — シードは決して渡しません",
   "{who} can read its current code (never the seed) while it runs — a restart of that conversation ends it; give it again in Vault ▸ Two-step codes ▸ Use for….": "{who} は実行中に現在のコードを読めます（シードは渡しません）— その会話が再起動すると終わります。もう一度渡すには「保管庫 ▸ 2 段階認証コード ▸ 使用先…」から。",
   "{who} cannot read its code until you give it in Vault ▸ Two-step codes ▸ Use for….": "「保管庫 ▸ 2 段階認証コード ▸ 使用先…」で渡すまで、{who} はコードを読めません。",
