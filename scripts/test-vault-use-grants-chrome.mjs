@@ -111,7 +111,12 @@ async function pageOf(t) {
   // proven at press time (a target that moved is re-aimed once), the landing checked; false = no press or a missed one (`.lastMiss` says why).
   // One door per page (its own socket); the copy's 100 ms pause before its press rides the door's beforePress.
   const RC = realClicker({ evalJs, cdp });
-  const realClick = (sel) => RC(sel, { beforePress: () => sleep(100) });
+  // A REAL PRESS IS MADE ON THE PAGE A PERSON IS LOOKING AT (the 2.369.410 train's hosted red, 主开发 14:10Z): this suite's second
+  // page (the storing page B, opened through /json/new and kept) leaves the first a BACKGROUND page, which paints no frames — so
+  // after ⑦'s reload the sidebar's 0.2 s slide (margin-left of #main-wrapper) never ended on its clock and the door, rightly, never
+  // saw the taskbar still («never held still in 3000 ms — no press»). The page is brought to the front before the door measures;
+  // the door's still check is untouched
+  const realClick = async (sel) => { try { await cdp('Page.bringToFront'); } catch { } return RC(sel, { beforePress: () => sleep(100) }); };
   const api = (method, p, body) => evalJs(`fetch(${JSON.stringify(p)}, { method: ${JSON.stringify(method)}, headers: { 'Content-Type': 'application/json' }${body ? `, body: ${JSON.stringify(JSON.stringify(body))}` : ''} }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }))`);
   const shot = async (name) => { if (!SHOTS) return; try { await cdp('Page.bringToFront'); } catch { } try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };   // round 4 (MINOR): bring the page to the FRONT first — a hidden page A (after page B opened via /json/new) stalled Page.captureScreenshot 1.5–3.5 min
   await cdp('Page.enable');
