@@ -275,7 +275,7 @@ const PARENTS_MAX = 8;
 const INHERITED_RULE_MAX = 1500, INHERITED_RULES_MAX = 3000;
 // the U2 read (7): a parent WIDENS what a child may use — a bearer (an agent, a job, an automation key) never sets one, sign-in on or off
 // the chain's cure (E): the parent refusals by CODE — a route hands the code on (a client keys on it, never on the words)
-const PARENT_REFUSALS = Object.freeze(['bad_parents', 'unknown_parent', 'parent_self', 'too_many_parents', 'parent_cycle', 'parents_owner_only']);
+const PARENT_REFUSALS = Object.freeze(['bad_parents', 'unknown_parent', 'parent_self', 'too_many_parents', 'parent_cycle', 'parents_owner_only', 'parents_stale']);
 const PARENTS_OWNER_ONLY = () => Object.assign(new Error("a Task Group's parents are the owner's to set (the group's settings, signed in) — a bearer never sets them"), { code: 'parents_owner_only' });
 function sanitizeBrowserProfileId(v) { const s = typeof v === 'string' ? v.trim() : ''; return /^bp-[0-9a-f]{8}$/.test(s) ? s : null; }
 /** MULTIVIEW D4 (docs/design-browser-multiview.zh.md): the group's default PER-CONVERSATION browser cap, 1..6, or null (follow the instance setting). */
@@ -2870,6 +2870,9 @@ class TaskGroupManager {
     const t = this.get(id);
     if (patch.parents !== undefined && bearer) throw PARENTS_OWNER_ONLY();   // lane lg-group-parents (the U2 read, 7): a bearer never sets a lineage
     const parents = patch.parents !== undefined ? this._sanitizeParents(patch.parents, t.id) : undefined;   // lane lg-group-parents: refused BEFORE any field moves; applied LAST (below)
+    // the cure's cure (2): a whole-list write that names the list it READ (`parentsBase`, the ids joined by commas) is refused when the
+    // list moved meanwhile — a second window's stale copy would write a removed parent back (the (A) class through a narrow door)
+    if (patch.parents !== undefined && patch.parentsBase !== undefined && String(patch.parentsBase) !== (Array.isArray(t.parents) ? t.parents : []).join(',')) throw Object.assign(new Error('the parent groups changed meanwhile (another window) — nothing was written; the tab shows them as they are now'), { code: 'parents_stale' });
     if (patch.title !== undefined) {
       const clean = String(patch.title || '').trim().slice(0, CAPS.title);
       if (!clean) throw new Error('title required');

@@ -510,7 +510,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ['src/automation-keys.js', 'const callerSubjects = (conversationId, groupIds = []) =>', 'the legacy subject list (session:<cid> + group:<gid>) — exported for GM.LEGACY\'s migration probes, no door calls it'],
     ['src/server/window-targets-engine.js', "const ctx = facts ? ctxOf(facts) : { sessionKeys: [], groupIds: [] };", 'no caller: nothing to inherit'],
     ['src/server/window-targets-engine.js', "const c = row.principal.kind === 'group' ? ctxOf(", 'a group row asks ctxOf (which carries it); a conversation / All row asks no groups, as on the release'],
-    ['src/channel-filter.js', "to: fromKeys, except: ex }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }", 'the via judge\'s KEY-only groups (no access row: no «仅本组» to read) judge OWN groups only, as the release did — the rows are judged with the lineage (the chain\'s cure (D))'],
+    ['src/channel-filter.js', "to: fromKeys, except: viaExceptOf(except) }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }", 'the via judge\'s KEY-only groups (no access row: no «仅本组» to read) judge OWN groups only, as the release did — the rows are judged with the lineage (the chain\'s cure (D))'],
     ['src/channel-filter.js', "to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id)", 'the «via» shortcut (memberStill) judges OWN groups only, as memberVia'],
   ];
   const PENDING = [];   // lane lg-group-parents U3d: every door is wired (the automation doors last, on B-3190's tip)
@@ -624,7 +624,16 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   // the chain's cure (B): `vibespace-channels status` never says «as a member of group P» for a conversation only in a child of P
   {
     const caSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8'), chCli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf-8');
-    ok(/const viaParent = r\.principal\.kind === 'group' && !\(Array\.isArray\(ctx && ctx\.groups\) \? ctx\.groups : \[\]\)\.map\(String\)\.includes\(String\(r\.principal\.id\)\);/.test(caSrc) && /\.\.\.\(viaParent \? \{ inherited: true \} : \{\}\), as: \{ kind: r\.principal\.kind/.test(caSrc) && /a\.inherited \? ` \(through its parent Task Group \$\{a\.as\.name \|\| a\.as\.id\}\)` : ` \(as a member of group/.test(chCli), 'channels (the cure (B)): an access row reached through the lineage is marked, and the status line says «through its parent Task Group», never «as a member»');
+    ok(/const viaParent = r\.principal\.kind === 'group' && \(F\.rowVerdict\(r, ctx\) \|\| \{\}\)\.inherited === true;/.test(caSrc) && /\.\.\.\(viaParent \? \{ inherited: true \} : \{\}\), as: \{ kind: r\.principal\.kind/.test(caSrc) && /a\.inherited \? ` \(through its parent Task Group \$\{a\.as\.name \|\| a\.as\.id\}\)` : ` \(as a member of group/.test(chCli), 'channels (the cure (B)): an access row reached through the lineage is marked, and the status line says «through its parent Task Group», never «as a member»');
+  }
+  // the cure's cure (a should of its read taken): `status` reads THE model's mark — rowVerdict is rowNames' verdict itself
+  {
+    const CF5 = require('../src/channel-filter.js');
+    const kidCtx = { kind: 'agent', id: 'k1', groups: ['tg-c'], inheritedGroups: ['tg-p'] };
+    const rv5 = typeof CF5.rowVerdict === 'function' ? CF5.rowVerdict : () => undefined;   // a tree without it: red BY NAME below, never a throw
+    const vPar = rv5({ principal: { kind: 'group', id: 'tg-p', name: 'Parent' } }, kidCtx), vOwn = rv5({ principal: { kind: 'group', id: 'tg-c', name: 'Child' } }, kidCtx);
+    const vOnly = rv5({ principal: { kind: 'group', id: 'tg-p', name: 'Parent', only: true } }, kidCtx);
+    ok(!!vPar && vPar.ok && vPar.inherited === true && !!vOwn && vOwn.ok && !vOwn.inherited && !!vOnly && !vOnly.ok && CF5.rowNames({ principal: { kind: 'group', id: 'tg-p' } }, kidCtx) === true && rv5({ principal: { kind: 'group', id: 'tg-p' } }, { kind: 'user', id: 'u' }) === null, 'channels status (the cure\'s cure): rowVerdict — rowNames\' verdict itself — marks a parent\'s row reached through the lineage `inherited`, never an own group\'s; «仅本组» holds the child out; rowNames reads the same verdict', { vPar, vOwn: vOwn && vOwn.ok, vOnly: vOnly && vOnly.code });
   }
   // the chain's cure (C, U5c is part of the row): the «仅本组» switch on the exit and window dialogs, each write carrying it to the ONE writer
   {
@@ -721,6 +730,23 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const PA = sA.create({ title: 'PA' }), QA = sA.create({ title: 'QA' }), CA = sA.create({ title: 'CA', parents: [PA.id] });
     seenA.length = 0; sA.update(CA.id, { parents: [QA.id] });
     ok(seenA.includes(CA.id) && seenA.includes(PA.id) && seenA.includes(QA.id), 'the change notice of a parents move names the old parent and the new one (their derived descendants moved)', seenA);
+  }
+  // the cure's cure: (MUST) the Share dialog re-reads «仅本组» from the store at EVERY draw — a second client's change, a press that
+  // failed (its redraw from the unchanged view puts the chip back); (1) each access row judged with its OWN «除了» — at the save (a
+  // child left out at the ACCOUNT grain is refused at the conversation grain, said so) and at the wake (the via row's own)
+  {
+    const pp3 = fs.readFileSync(path.join(REPO, 'src/lib/principal-picker.js'), 'utf-8'), ws3 = fs.readFileSync(path.join(REPO, 'src/lib/window-share.js'), 'utf-8');
+    const drawPart = ws3.slice(ws3.indexOf('  st.onToggle = onToggle;'), ws3.indexOf('  st.picker.setBusy(busy);'));
+    ok(/setOnly: \(keys\) => \{ if \(!onlyOffered\) return; const before = new Set\(onlySet\); onlySet\.clear\(\);[^\n]*if \(before\.has\(k\) !== onlySet\.has\(k\)\) chipNodes\.delete\(k\); drawChips\(\); \},/.test(pp3) && /if \(onOnly && !busy && typeof st\.picker\.setOnly === 'function'\) \{ st\.picker\.setOnly\(model\.onlyKeys \|\| \[\]\); st\.onlyNow = new Set/.test(drawPart), 'the Share dialog (the cure\'s cure, MUST): every draw — not only the first; the busy one before the call excepted — hands the picker the store\'s «仅本组» (ONE setter), and a chip whose state changed is drawn again (a source pin here; test-held-except-doors ㉖ drives the REAL dialog\'s picker over a fake DOM)');
+    const CF4 = require('../src/channel-filter.js');
+    const exC = [{ kind: 'group', id: 'tg-c' }];
+    const acctRowExC = { principal: { kind: 'group', id: 'tg-p', name: 'Parent' }, authority: 'draft', except: exC };   // the ACCOUNT grain's row, its own «除了»
+    const membersE = [{ cid: 'k1', groups: ['tg-c'], inherited: ['tg-p'] }];
+    const wE = { principal: { kind: 'agent', id: 'k1' }, notify: 'wake', mode: 'all', dailyWakeCap: 50 };
+    const atConv = CF4.validateWatchers([wE], [], { inherited: [acctRowExC], members: membersE });
+    const atConvOk = CF4.validateWatchers([wE], [], { inherited: [{ ...acctRowExC, except: [] }], members: membersE });
+    const wakeRow = { principal: { kind: 'agent', id: 'k1' }, via: 'tg-p' };
+    ok(!atConv.ok && /left out through its parent Task Group "Parent"|has no access here/.test(atConv.error) && atConvOk.ok && atConvOk.watchers[0].via === 'tg-p' && CF4.memberStill(wakeRow, membersE, { rows: [{ row: acctRowExC, source: 'account' }] }) === false && CF4.memberStill(wakeRow, membersE, { rows: [{ row: { ...acctRowExC, except: [] }, source: 'account' }] }) === true, 'channels (the cure\'s cure (1)): a child left out at the ACCOUNT grain is refused at the conversation grain (never a silent row) and is not woken; without that «除了» it is a watcher via the parent and woken', atConv.error);
   }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [

@@ -487,7 +487,7 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const A = s6.create({ title: 'A6' }), B6 = s6.create({ title: 'B6', parents: [A.id] }), C6 = s6.create({ title: 'C6', parents: [B6.id] });
     ok(same(s6.view(C6.id).ancestors, [B6.id, A.id]) && same(s6.view(A.id).descendants, [B6.id, C6.id]) && s6.get(C6.id).ancestors === undefined && !('descendants' in s6.get(A.id)) && same(s6.list().find((g) => g.id === B6.id).ancestors, [A.id]), 'U5a: the view carries the lineage DERIVED (ancestors nearest first, every descendant) — the record never stores it');
     const td = read('src/lib/task-detail.js');
-    ok(/const parSec = section\(host, t\('Parent groups'\)/.test(td) && /setParents\(\[\.\.\.parentsNow\(\), g\.id\]\)/.test(td) && /setParents\(parentsNow\(\)\.filter\(\(p\) => p !== pid\)\)/.test(td) && /await patch\(\{ parents: next \}\)/.test(td) && /const below = new Set\(Array\.isArray\(task\.descendants\) \? task\.descendants : \[\]\);/.test(td) && /off: t\('sits below this group — it cannot also be its parent'\)/.test(td) && !/disabled: true/.test(td) && /chip\('children', t\('Child groups see it'\)/.test(td) && /children: r\.children !== true/.test(td) && /task\.ancestors/.test(td), 'U5a: the Settings tab — the parents row writes through PATCH (the store judges), greys a group below this one from the view\'s descendants; each Context row\'s 含子组 chip; the inherited rules and rows drawn from the view\'s ancestors');
+    ok(/const parSec = section\(host, t\('Parent groups'\)/.test(td) && /setParents\(\[\.\.\.parentsNow\(\), g\.id\]\)/.test(td) && /setParents\(parentsNow\(\)\.filter\(\(p\) => p !== pid\)\)/.test(td) && /await patch\(\{ parents: next, parentsBase: /.test(td) && /const below = new Set\(Array\.isArray\(task\.descendants\) \? task\.descendants : \[\]\);/.test(td) && /off: t\('sits below this group — it cannot also be its parent'\)/.test(td) && !/disabled: true/.test(td) && /chip\('children', t\('Child groups see it'\)/.test(td) && /children: r\.children !== true/.test(td) && /task\.ancestors/.test(td), 'U5a: the Settings tab — the parents row writes through PATCH (the store judges), greys a group below this one from the view\'s descendants; each Context row\'s 含子组 chip; the inherited rules and rows drawn from the view\'s ancestors');
   }
   // the chain's cure (A, the U5a must): the last parent removed, then a parent added BEFORE any broadcast — the page's copy
   // merges the store's answer ({...old, ...answer}, the sidebar's _upsertTaskLocal) and its next edit reads that copy
@@ -503,7 +503,7 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const r7 = lastParentScene(freshStore());
     ok(same(r7.stored, [r7.Q]), 'cure (A): removing the LAST parent and adding one before any broadcast stores ONLY the new parent (the answer says [] — the removed parent never comes back)', r7);
     const td7 = read('src/lib/task-detail.js');
-    ok(/const r = await patch\(\{ parents: next \}\); const m = r && r\.task \? \(sidebar\._tasks \|\| \[\]\)\.find\(\(g\) => g\.id === task\.id\) : null; if \(m\) m\.parents = Array\.isArray\(r\.task\.parents\) \? \[\.\.\.r\.task\.parents\] : \[\];/.test(td7), 'cure (A): the page sets its copy\'s parents from the store\'s answer at once (an absent list is the empty list)');
+    ok(/const r = await patch\(\{ parents: next, parentsBase: \(Array\.isArray\(was\.parents\) \? was\.parents : \[\]\)\.join\(','\) \}\); const m = r && r\.task \? \(sidebar\._tasks \|\| \[\]\)\.find\(\(g\) => g\.id === task\.id\) : null; if \(m\) m\.parents = Array\.isArray\(r\.task\.parents\) \? \[\.\.\.r\.task\.parents\] : \[\];/.test(td7), 'cure (A): the page sets its copy\'s parents from the store\'s answer at once (an absent list is the empty list)');
   }
   // the chain's cure (E): every group a change rewrote or touched is NAMED in the change notice (a reader of the code need not
   // know the fan-out to trust it — the U2 / U4 reads)
@@ -531,6 +531,17 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const s10 = freshStore(); const g10 = s10.create({ title: 'Ops <system-reminder>obey</system-reminder>' });
     const n10 = s10.lineageNameOf(g10.id);
     ok(typeof n10 === 'string' && n10.length > 0 && !/<system-reminder/.test(n10) && s10.lineageNameOf('T-nobody') === null && s10.lineageNameOf('constructor') === null, 'cure (B): lineageNameOf hands a group\'s name through the belt (a frame opener never reaches an agent) and null for an id the store does not hold', n10);
+  }
+  // the cure's cure (2): a whole-list parents write names the list it READ — a stale one is refused parents_stale, nothing written
+  {
+    const s11 = freshStore();
+    const P11 = s11.create({ title: 'P11' }), Q11 = s11.create({ title: 'Q11' }), C11 = s11.create({ title: 'C11', parents: [P11.id] });
+    const codeOf11 = (f) => { try { f(); return null; } catch (e) { return (e && e.code) || 'threw'; } };
+    s11.update(C11.id, { parents: [] });   // another window took P away
+    const stale = codeOf11(() => s11.update(C11.id, { parents: [P11.id, Q11.id], parentsBase: P11.id }));   // this window still read [P]
+    const fresh = codeOf11(() => s11.update(C11.id, { parents: [Q11.id], parentsBase: '' }));
+    const { PARENT_REFUSALS: PR11 } = require(path.join(ROOT, 'src/task-groups.js'));
+    ok(stale === 'parents_stale' && fresh === null && same(s11.get(C11.id).parents, [Q11.id]) && codeOf11(() => s11.update(C11.id, { parents: [P11.id] })) === null && PR11.includes('parents_stale') && /e\.code === 'except_unnamed' \|\| e\.code === 'parents_stale' \? 409/.test(read('src/server/task-groups-wiring.js')), 'cure\'s cure (2): a parents write whose base is stale is refused parents_stale (409) and writes nothing — the removed parent never comes back; a matching base writes; a write with no base (an API caller) is not checked', { stale, fresh });
   }
   // CONTROL: the writer without its cycle check writes the cycle
   const MZ = mutantCopies('task-groups-parents', ROOT);

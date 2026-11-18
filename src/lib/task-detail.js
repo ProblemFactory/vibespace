@@ -517,7 +517,8 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     const parentsNow = () => { const cur = (sidebar._tasks || []).find((g) => g.id === task.id) || task; return (Array.isArray(cur.parents) ? cur.parents : []).filter((id) => byId.has(id)); };
     // the chain's cure (A): the copy the next edit reads is the store's ANSWER at once — an answer without the list is the empty
     // list, never the old one (the last parent removed then a parent added before the broadcast put the removed one back)
-    const setParents = async (next) => { if (parentsBusy) return; parentsBusy = true; parSec.classList.add('busy'); try { const r = await patch({ parents: next }); const m = r && r.task ? (sidebar._tasks || []).find((g) => g.id === task.id) : null; if (m) m.parents = Array.isArray(r.task.parents) ? [...r.task.parents] : []; } finally { parentsBusy = false; parSec.classList.remove('busy'); } };
+    // the cure's cure (2): the list the copy holds (the store's last answer) rides as the base — a stale one is refused parents_stale
+    const setParents = async (next) => { if (parentsBusy) return; parentsBusy = true; parSec.classList.add('busy'); try { const was = (sidebar._tasks || []).find((g) => g.id === task.id) || task; const r = await patch({ parents: next, parentsBase: (Array.isArray(was.parents) ? was.parents : []).join(',') }); const m = r && r.task ? (sidebar._tasks || []).find((g) => g.id === task.id) : null; if (m) m.parents = Array.isArray(r.task.parents) ? [...r.task.parents] : []; } finally { parentsBusy = false; parSec.classList.remove('busy'); } };
     const parList = document.createElement('div'); parList.className = 'task-parents-list';
     if (!parents.length) parList.innerHTML = `<span class="task-detail-hint">${escHtml(t('No parent group'))}</span>`;
     for (const pid of parents) {

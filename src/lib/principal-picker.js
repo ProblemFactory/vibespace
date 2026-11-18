@@ -487,6 +487,9 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     except: ({ held = null, nobody: nb = false } = {}) => (nb ? (Array.isArray(held) ? held.map(String).filter((k) => !dropped.has(k)) : []) : PM.exceptSaved(rows, sel, exSel, { held: Array.isArray(held) ? held.filter((k) => !dropped.has(String(k))) : held })),   // r2: less the ones ✕-ed on the kept line; r4: «Nobody» — the held ones less every one taken away
     /** r4: the door's list is «Nobody» — only the kept line is drawn (the rest of the picker hidden), until it is someone again. */
     setNobody: (on) => { nobody = !!on; root.classList.toggle('pp-nobody', nobody); syncExcept(); },
+    // the cure's cure (MUST): the switch's state as the STORE says it — ONE setter, each redraw of a door hands it (a second
+    // client's change, a press that failed); only a picked group can carry it; a chip whose face changed is drawn again
+    setOnly: (keys) => { if (!onlyOffered) return; const before = new Set(onlySet); onlySet.clear(); for (const k of (Array.isArray(keys) ? keys : []).map(String)) if (sel.includes(k)) onlySet.add(k); for (const k of new Set([...before, ...onlySet])) if (before.has(k) !== onlySet.has(k)) chipNodes.delete(k); drawChips(); },
     setExcept: (keys) => { exSel = (keys || []).map(String); heldAtOpen = exSel.slice(); dropped.clear(); if (exInner) exInner.setSelected(exSel); syncExcept(); },   // r2: the stored row re-drawn (window-share) — the kept line follows it
     /** The rows this picker has seen (live + the caller's extra) — what `PM.pickToRow` maps keys through. */
     knownRows: () => { const m = new Map(known); if (exInner) for (const r of exInner.knownRows()) if (!m.has(String(r.key))) m.set(String(r.key), r); return [...m.values()]; },

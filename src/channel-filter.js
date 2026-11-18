@@ -1233,13 +1233,17 @@ const viaExceptOf = (except) => (Array.isArray(except) ? except : []).map((x) =>
 // the via judge's two steps: the ROWS (each with its «仅本组») with the lineage; then the groups known only as KEYS (no flag to read)
 // by the member's own groups, as before — the first group that admits; the grain's «除了» applies to both
 function viaJudge(keys, s, cid, rows, except) {
-  const ex = viaExceptOf(except);
   const keyIds = new Set([...keys].filter((k) => /^group:/.test(k) && !k.includes(FAN_SEP)).map((k) => k.slice(6)));   // the access-holding groups' ids (one read of the key set)
-  const fromRows = viaRowOf(rows).filter((e) => keyIds.has(e.id)), rowIds = new Set(fromRows.map((e) => e.id));
+  // the cure's cure (1): each access row judged with its OWN «除了» — a wrapper's (the row being saved: this save's list), else the
+  // row's own (the account / rule rows above, the wake's rows), else this grain's — rule ③ per grain, the model's union of rows
+  const exOf = (r) => viaExceptOf(r && Array.isArray(r.except) && !r.principal ? r.except : r && r.row && Array.isArray(r.row.except) ? r.row.except : r && Array.isArray(r.except) ? r.except : except);
+  const parts = (Array.isArray(rows) ? rows : []).map((r) => ({ p: principalOfRow(r), ex: exOf(r) })).filter((x) => x.p && x.p.kind === 'group' && keyIds.has(str(x.p.id)));
+  const gmRows = parts.map((x) => ({ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(x.p.id), ...(x.p.only === true ? { only: true } : {}) }], except: x.ex }));
+  const rowIds = new Set(parts.map((x) => str(x.p.id)));
   const fromKeys = [...keyIds].filter((id) => !rowIds.has(id)).map((id) => ({ kind: 'group', id }));
-  const v1 = fromRows.length ? GM.admits([{ door: 'channel-reach', resource: '-', to: fromRows, except: ex }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [] }) : null;
+  const v1 = gmRows.length ? GM.admits(gmRows, { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [] }) : null;
   if (v1 && (v1.ok || v1.code === 'excepted')) return v1;
-  const v2 = fromKeys.length ? GM.admits([{ door: 'channel-reach', resource: '-', to: fromKeys, except: ex }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }) : null;
+  const v2 = fromKeys.length ? GM.admits([{ door: 'channel-reach', resource: '-', to: fromKeys, except: viaExceptOf(except) }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }) : null;
   return v2 && v2.ok ? v2 : v1 || v2;
 }
 function memberVia(keys, cid, members = [], { rows = null, except = [] } = {}) {
@@ -1255,8 +1259,9 @@ function memberVia(keys, cid, members = [], { rows = null, except = [] } = {}) {
 function memberStill(row, members = [], { rows = null, except = [] } = {}) {   // the chain's cure (D): + the grain's access rows (the wake's re-judge reads the via row's «仅本组» and the lineage)
   if (!row || !row.via || !row.principal || row.principal.kind !== 'agent') return true;
   const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(row.principal.id));
-  const viaRow = viaRowOf(rows).find((e) => e.id === str(row.via));
-  if (viaRow) return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [viaRow], except: viaExceptOf(except) }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [] }).ok;
+  const viaEnt = (Array.isArray(rows) ? rows : []).find((r) => { const pr = principalOfRow(r); return pr && pr.kind === 'group' && str(pr.id) === str(row.via); });   // the cure's cure (1): the via row WITH its own «除了»
+  const viaRow = viaEnt ? viaRowOf([viaEnt])[0] : null, viaEx = viaEnt && viaEnt.row && Array.isArray(viaEnt.row.except) ? viaEnt.row.except : viaEnt && Array.isArray(viaEnt.except) ? viaEnt.except : except;
+  if (viaRow) return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [viaRow], except: viaExceptOf(viaEx) }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [] }).ok;
   return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }).ok;   // lane lg-group-parents (the U3c read, MAJOR 4): own groups only, as memberVia
 }
 /** the chain's cure (D): why a member the via judge refused is refused, in the model's words (a parent's «仅本组» access) — '' when
@@ -1280,7 +1285,7 @@ function validateWatchers(list, access = [], { inherited = [], members = [], all
   // lane channel-agent-watch W3: access at THIS grain or ABOVE it (the account, a matching rule, a visible grant here)
   const keys = eligibleKeys({ access, inherited });
   // the chain's cure (D): the access ROWS (this grain's and above it) — the via judge reads each one's «仅本组» and the lineage
-  const accessRows = [...(Array.isArray(access) ? access : []), ...(Array.isArray(inherited) ? inherited.filter((x) => x && typeof x === 'object') : [])];
+  const accessRows = [...(Array.isArray(access) ? access : []).map((row) => ({ row, except })), ...(Array.isArray(inherited) ? inherited.filter((x) => x && typeof x === 'object') : [])];   // the cure's cure (1): this grain's rows with THIS save's «除了», the rows above with their own
   const rows = [];
   const seen = new Set();
   for (let i = 0; i < list.length; i++) {
@@ -1628,14 +1633,17 @@ function effectiveWatchers(input, facts) { const e = effectiveGrants(input, fact
 /** Is THIS principal (an agent ctx `{kind:'agent', id, groups}`) named by a
  *  row — itself, one of its groups, or every agent (an `everyone` row; a
  *  fan-out target names its own conversation only)? */
-function rowNames(row, ctx) {
+function rowNames(row, ctx) { const v = rowVerdict(row, ctx); return !!v && v.ok; }
+/** rowNames' VERDICT itself, or null (lane lg-group-parents, the cure's cure — a should of its read): a door that SAYS how a
+ *  row reached the conversation reads the model's own `inherited` mark, never re-derives the lineage from ctx.groups. */
+function rowVerdict(row, ctx) {
   const p = row && row.principal;
-  if (!p || !ctx || ctx.kind !== 'agent' || !ctx.id) return false;
-  if (p.target && str(p.target) !== str(ctx.id)) return false;   // a fan-out item names its own conversation only
+  if (!p || !ctx || ctx.kind !== 'agent' || !ctx.id) return null;
+  if (p.target && str(p.target) !== str(ctx.id)) return null;   // a fan-out item names its own conversation only
   // lane grants-unify: THE model over this row's principal, minus the row's `except` (a member left out of its group's
   // access / All agents is not named by it — its own row still is)
   const n = namedRowOf(p, row.except);
-  return !!n && GM.admits([n], namedFactsOf(ctx)).ok;
+  return n ? GM.admits([n], namedFactsOf(ctx)) : null;
 }
 // A CHECK IS A LOOKUP (lane grants-read-is-a-lookup — an agent's list asks this per listed row, per access row): the
 // principal's one-entry row is normalised ONCE per principal object (the channel door hands the same objects until its store
@@ -1944,5 +1952,5 @@ module.exports = {
   // lane channel-agent-watch: the delivery choice, who wrote a row, and THE eligibility rule (access over the grain and its ancestors)
   DELIVERY_MODES, WATCH_ORIGINS, deliveryModeOf, watchOriginOf, eligibleKeys, eligibleFor,
   memberVia, memberStill, REGEX_MAX, REGEX_FLAGS, REGEX_TEXT_MAX, REGEX_REFUSALS, regexVerdict, regexText, regexSpan,
-  splitAssignment, grainOf, grainRowsOf, grainAsFired, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, effectiveAccess, effectiveWatchers, rowNames, expectedWakesTotal, othersLine,
+  splitAssignment, grainOf, grainRowsOf, grainAsFired, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, effectiveAccess, effectiveWatchers, rowNames, rowVerdict, expectedWakesTotal, othersLine,
 };

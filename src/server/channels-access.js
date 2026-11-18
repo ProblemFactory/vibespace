@@ -2748,8 +2748,9 @@ function create(engineCtx) {
         for (const r of g.access) {
           if (!F.rowNames(r, ctx)) continue;
           const w = g.watchers.find((x) => pkOf(x.principal) === pkOf(r.principal)) || null;
-          // the chain's cure (B): a group row this conversation is NOT a member of reached it through its lineage — said so, never «as a member»
-          const viaParent = r.principal.kind === 'group' && !(Array.isArray(ctx && ctx.groups) ? ctx.groups : []).map(String).includes(String(r.principal.id));
+          // the chain's cure (B): a group row this conversation is NOT a member of reached it through its lineage — said so, never «as a member»;
+          // the cure's cure: the MODEL's mark (rowNames' verdict), never the lineage re-derived here from ctx.groups
+          const viaParent = r.principal.kind === 'group' && (F.rowVerdict(r, ctx) || {}).inherited === true;
           out.push({ adapterId: rec.id, adapter: label, grain, ...extra, via: r.principal.kind, ...(viaParent ? { inherited: true } : {}), as: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null }, authority: r.authority, watched: w ? { notify: w.notify, mode: w.mode, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap, receiptWake: !!w.receiptWake, wakes24h: ledgerView(w.stats, t).wakes24h } : null });
         }
       };

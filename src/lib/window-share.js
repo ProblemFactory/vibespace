@@ -149,6 +149,9 @@ export function renderPicker(container, { model, onToggle, onMode, onExcept = nu
   st.sel = items.filter((r) => r.checked).map((r) => r.key);
   st.picker.setSelected(st.sel);
   if (onExcept) st.picker.setExcept(exceptKeys);
+  // the cure's cure (MUST): the switch as the store says it NOW, at every draw (a second client's change, a press that failed) —
+  // but the BUSY draw (the one before the call) keeps the pressed face: the answer's draw decides it, never a flicker back and forth
+  if (onOnly && !busy && typeof st.picker.setOnly === 'function') { st.picker.setOnly(model.onlyKeys || []); st.onlyNow = new Set((model.onlyKeys || []).filter((k) => st.sel.includes(k))); }
   st.picker.refresh();
   st.picker.setBusy(busy);
   const root = container;

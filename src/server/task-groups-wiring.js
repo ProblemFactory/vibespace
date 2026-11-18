@@ -80,7 +80,7 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
   });
   app.patch('/api/tasks/:id', (req, res) => {
     try { onDisk(res, { success: true, task: tasks.update(req.params.id, req.body || {}, { bearer: !!require('../write-origin.js').pressBearer(req.headers) }) }); }
-    catch (e) { res.status(e.message === 'task not found' ? 404 : e.code === 'except_unnamed' ? 409 : e.code === 'parents_owner_only' ? 403 : 400).json({ error: e.message, ...(e.code === 'except_unnamed' || require('../task-groups.js').PARENT_REFUSALS.includes(e.code) ? { code: e.code } : {}) }); }   // lane held-except-doors: a 除了 left out unnamed · the chain's cure (E): + the parent refusals' code
+    catch (e) { res.status(e.message === 'task not found' ? 404 : e.code === 'except_unnamed' || e.code === 'parents_stale' ? 409 : e.code === 'parents_owner_only' ? 403 : 400).json({ error: e.message, ...(e.code === 'except_unnamed' || require('../task-groups.js').PARENT_REFUSALS.includes(e.code) ? { code: e.code } : {}) }); }   // lane held-except-doors: a 除了 left out unnamed · the chain's cure (E): + the parent refusals' code
   });
   app.delete('/api/tasks/:id', (req, res) => {
     try { tasks.remove(req.params.id); onDisk(res, { success: true }, { code: 'finishes-on-landing' }); }   // the moved2 cure 2: its Activity log and grant follow by themselves at the landing

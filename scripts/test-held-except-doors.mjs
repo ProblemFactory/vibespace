@@ -213,7 +213,7 @@ function stubOf(file) {
 async function bundleDoors() {
   const lib = path.join(REPO, 'src/lib');
   // the doors' OWN entry functions only (named — esbuild leaves the rest of the dialog modules' exports out: the fast tier's sum)
-  const NEED = [['browser-who-dialog', ['openWhoDialog']], ['channel-api-dialog', ['showApiAccessDialog']], ['channel-filter-editor', ['grantAccessBody', 'showGrantAccessDialog', 'showNotifyDialog']], ['exit-access-dialog', ['openExitAccessDialog']], ['vault-automation', ['showGrantPicker']], ['browser-who-model', ['pickerRows', 'draftExcept']], ['vault-use-row', ['showUseGrantDialog']]];   // r3: + the browser door's model, the vault «Who may use» door
+  const NEED = [['browser-who-dialog', ['openWhoDialog']], ['channel-api-dialog', ['showApiAccessDialog']], ['channel-filter-editor', ['grantAccessBody', 'showGrantAccessDialog', 'showNotifyDialog']], ['exit-access-dialog', ['openExitAccessDialog']], ['vault-automation', ['showGrantPicker']], ['browser-who-model', ['pickerRows', 'draftExcept']], ['vault-use-row', ['showUseGrantDialog']], ['window-share', ['renderPicker']]];   // r3: + the browser door's model, the vault «Who may use» door; lane lg-group-parents (the cure's cure, ㉖): + the window Share dialog's picker
   const entry = NEED.map(([m, names], i) => `import { ${names.join(', ')} } from ${J(path.join(lib, m + '.js'))};\nexport const D${i} = { ${names.join(', ')} };`).join('\n');
   const stubs = { name: 'page-edge', setup(b) {
     b.onResolve({ filter: /^\.\/(utils|i18n|principal-picker|build-version)\.js$/ }, (a) => (a.importer.startsWith(lib + path.sep) ? { path: path.join(lib, a.path.slice(2)), namespace: 'stub' } : undefined));
@@ -223,7 +223,7 @@ async function bundleDoors() {
   const out = path.join(SCR, 'doors.bundle.mjs');
   await esbuild.build({ stdin: { contents: entry, resolveDir: lib, loader: 'js' }, bundle: true, format: 'esm', platform: 'neutral', mainFields: ['module', 'main'], outfile: out, plugins: [stubs], logLevel: 'silent', minifyWhitespace: true, legalComments: 'none' });   // r2: whitespace-minified — 3 MB of comment-rich sources parse in less time (the fast tier's sum)
   const M = await import(pathToFileURL(out).href);
-  return { BW: M.D0, CA: M.D1, CF: M.D2, EX: M.D3, VA: M.D4, WM: M.D5, VU: M.D6 };
+  return { BW: M.D0, CA: M.D1, CF: M.D2, EX: M.D3, VA: M.D4, WM: M.D5, VU: M.D6, WS: M.D7 };
 }
 // r2: the channels engine's modules (legs ⑧–⑨) are required WHILE the bundle builds (esbuild works in its own process)
 const D_P = bundleDoors();
@@ -1657,6 +1657,31 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   const ownR = await dialogText(await bundleVU(swap(askPlant, '  body.append(askAgent);')), true);
   ok(/Let the agent ask/.test(ownR), '(m) RED — the dialog without the own-entry rule ⇒ an agent\'s own entry offers «Let the agent ask» (a road that is refused there)', ownR.slice(0, 200));
   globalThis.__hx.real = realWas;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ㉖ lane lg-group-parents — the cure's cure (主开发 13:30Z, the MUST): AN OPEN WINDOW SHARE DIALOG READS «仅本组» FROM THE STORE
+// AT EVERY DRAW. The REAL src/lib/window-share.js renderPicker over the REAL picker: a view whose only-set differs redraws the
+// chip's face (a second client's change); a press that FAILED is put back by the redraw from the unchanged view; the busy draw
+// before the call keeps the pressed face. RED on 5e33c0b59 by name (the switch was handed to the picker once, when it was built).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+console.log('㉖ lane lg-group-parents: the window Share dialog re-reads «this group only» from the store at every draw');
+{
+  newPage({ routes: async () => ({ ok: true }) });
+  const WR = require(path.join(REPO, 'src/window-reach.js'));
+  const recOf = (only) => ({ mode: 'auto', rows: [{ principal: { kind: 'group', id: 'tg-p', name: 'P', ...(only ? { only: true } : {}) }, by: 'user', grantedAt: 1 }], except: [] });
+  const host = document.createElement('div'), presses = [];
+  const draw = (only, busy = false) => D.WS.renderPicker(host, { model: WR.pickerModel({ sessions: [], groups: [{ id: 'tg-p', title: 'P' }], record: recOf(only) }), onToggle: () => { }, onMode: () => { }, onOnly: (r, on) => { presses.push(`${r.id}:${on}`); }, busy, showMode: false });
+  const sw = () => host.all.find((n) => n._cls.includes('pp-chip-only') && !!n.parentElement && n.parentElement.dataset.key === 'group:tg-p') || null;
+  const face = () => { const b = sw(); return b ? `${b.getAttribute('aria-pressed')}|${b._cls.includes('on')}` : 'no switch'; };
+  draw(true); const f1 = face();
+  draw(false); const f2 = face();   // a second client switched it off: the store's view now says «and its child groups»
+  draw(true); const f3 = face();    // …and on again
+  ok(f1 === 'true|true' && f2 === 'false|false' && f3 === 'true|true', '(a) a view whose «this group only» differs redraws the switch\'s face — on, off (another client\'s change), on again — never the face the dialog was built with', { f1, f2, f3 });
+  const b0 = sw(); if (b0) b0.click(); const f4 = face();   // this client presses it off: ONE call
+  draw(true, true); const f5 = face();   // the busy draw before the call answers: the pressed face kept
+  draw(true); const f6 = face();         // the call FAILED: the view is unchanged ⇒ the switch back
+  ok(!!b0 && f4 === 'false|false' && presses.join(',') === 'tg-p:false' && f5 === 'false|false' && f6 === 'true|true', '(b) a press is ONE call; the busy draw keeps the pressed face; a press that FAILED is put back by the redraw from the unchanged view (the chip says what the store says)', { f4, f5, f6, presses });
 }
 
 console.log(`\n${fail ? "FAILED" : "ALL PASS"} (${pass} passed, ${fail} failed) — ${Date.now() - T0} ms`);
