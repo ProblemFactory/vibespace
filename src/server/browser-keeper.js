@@ -2517,7 +2517,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // never counted as a failed relaunch — a restart (Stop, then the next command) runs the current CLI
       // B-7a30 unit 1': THE DOOR (a fresh judge, bounded) — the same answer the relaunch's own command would get; no answer
       // within the bound ⇒ no relaunch now and no failure counted (the next tick tries again)
-      { const c = await cliOptReady(rec); if (c && c.unconfirmed) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) — not healed now: ${c.unconfirmed}`); return null; } if (c && c.gone) { if (setClosed(rec, { code: 'browser_cli_gone', error: closedText(p, c.gone) })) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) and is NOT started again — ${c.gone}`); commit(); } return null; } }
+      { const c = await cliOptReady(rec); if (reg.browsers[p.id] !== rec || rec.state !== 'ready' || starting.has(p.id) || stopping.has(p.id) || switching.has(p.id)) return null; /* B-7a30: re-checked after the door's await */ if (c && c.unconfirmed) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) — not healed now: ${c.unconfirmed}`); return null; } if (c && c.gone) { if (setClosed(rec, { code: 'browser_cli_gone', error: closedText(p, c.gone) })) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) and is NOT started again — ${c.gone}`); commit(); } return null; } }
       // a browser launched with the provider's own flags (its own executable + arguments) is never relaunched by a bare
       // `get cdp-url` (a launch view without them would relaunch it as plain chromium on that directory): said, not guessed
       // (lane dc-browser-providers: the pre-r4 record rung — no flag, the provider said — is gone with the row's `launchFlags`)
@@ -3076,7 +3076,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
           commit();
           // verify r3 (F3): said in the journal on this row too (the named start's sentence; the ephemeral start said nothing)
           if (lr) { log.warn?.(`[browser] ephemeral ${profileId} "${p.label}": NOT started — ${lr.tookOver ? `a lock of this machine's previous name ${lr.tookOver} reached the launch (taken over now)` : 'the directory was taken while launching'}: ${lr.error}`); throw namedError(lr.code, lr.error, lr.holderPid ? { holderPid: lr.holderPid } : {}); }
-          throw namedError(/binary_absent/.test(text) ? 'binary_absent' : 'launch_failed', rec.lastError);
+          throw namedError(r.code === 'browser_cli_unconfirmed' ? r.code : /binary_absent/.test(text) ? 'binary_absent' : 'launch_failed', rec.lastError); // B-7a30: the door's refusal keeps its name
         }
         try { info = await rt.info(null, { extraEnv: env0 }); } catch { info = null; }
       }
@@ -4276,7 +4276,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // a key-bearing launch that fails on licence/concurrency is the THIRD
         // named refusal (§7.4, round 8 #3) — under a cluster default it says
         // the seats are shared fleet-wide and offers the one click out
-        const cls = intId ? SW.classifyLaunchFailure({ provider: p.provider, text, source: key ? key.source : 'none', integrationId: intId }) : { code: 'launch_failed', error: (B.launchFatalOf(r.stderr || r.error || r.stdout, { lineOf: ownConfigLine }) || {}).error || `the browser did not start: ${text}`, action: null };
+        const cls = r.code === 'browser_cli_unconfirmed' ? { code: r.code, error: String(r.error || r.code) } /* B-7a30: the door's refusal keeps its name */ : intId ? SW.classifyLaunchFailure({ provider: p.provider, text, source: key ? key.source : 'none', integrationId: intId }) : { code: 'launch_failed', error: (B.launchFatalOf(r.stderr || r.error || r.stdout, { lineOf: ownConfigLine }) || {}).error || `the browser did not start: ${text}`, action: null };
         rec.state = 'failed'; rec.endedAt = now(); rec.lastError = cls.error;
         commit();
         throw namedError(cls.code, cls.error, { provider: p.provider, action: cls.action || null });
@@ -6599,25 +6599,28 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const id = (await fileFactOf(p)).id;
     if (!id) return null;
     const m = cliVersions.get(p);
-    if (m && m.id === id) return m.version;
+    if (m && m.id === id && (m.version || now() - (m.at || 0) < CLI_FRESH_MS)) return m.version; // B-7a30: a silent answer is remembered for 10 s
     return await new Promise((resolve) => {
       try {
         require('child_process').execFile(p, ['--version'], { timeout: 8000, encoding: 'utf8', env: F.sanitizeProbeEnv({ ...(env() || {}), PATH: (env() || {}).PATH || process.env.PATH || '' }) }, (er, so, se) => {
           const v = F.versionFromProbe({ err: er, stdout: so, stderr: se }) || null; // verify r1 ⑦ + r2 ⑥: ONE probe table (browser-facts.versionFromProbe) — a crash names no version, a version on stdout counts whatever the exit
-          if (v) cliVersions.set(p, { id, version: v });
+          cliVersions.set(p, { id, version: v, at: now() }); // B-7a30: a silent one too (asked again after CLI_FRESH_MS)
           resolve(v);
         });
       } catch { resolve(null); }
     });
   }
   /** The version a binary said (no fork) — null when it was never asked or its file changed since (checked off the loop). */
-  async function knownVersionOf(p) { const m = p ? cliVersions.get(p) : null; if (!m) return null; return (await fileFactOf(p)).id === m.id ? m.version : null; }
+  async function knownVersionOf(p) { const m = p ? cliVersions.get(p) : null; if (!m || !m.version) return null; return (await fileFactOf(p)).id === m.id ? m.version : null; }
   /** THE CLI A LAUNCH RUNS NOW (the pin, else PATH) — stamped on the record before the launch. null = not knowable here (a
    *  fake runtime's bare name, a binary that would not say its version): the browser then follows the current CLI. */
   async function cliNow() {
     const p = typeof bf.binPath === 'function' ? bf.binPath() : null;
     if (!p || !String(p).startsWith('/')) return null;
-    const v = await cliVersionAt(p);
+    let timer = null;
+    const v = await Promise.race([cliVersionAt(p), new Promise((res) => { timer = setTimeout(() => setImmediate(() => res(CLI_UNANSWERED)), cliActMs); })]);
+    clearTimeout(timer);
+    if (v === CLI_UNANSWERED) { log.warn?.(`[browser] the CLI ${p} did not answer within ${cliActMs} ms — this launch is not stamped (it follows the current CLI)`); return null; } // B-7a30: bounded
     return v ? { version: v, path: p, id: (cliVersions.get(p) || {}).id || null, at: now() } : null; // the identity cliVersionAt just checked
   }
   /** An ADOPTED daemon's CLI (a daemon this keeper did not launch — an escaped command, a restart): the version it SAYS
@@ -6656,12 +6659,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   let cliSeq = 0;
   const cliSig = (rec) => { const c = rec && rec.cli; return c ? [c.version || '', c.path || '', c.id || '', isLocalRec(rec) ? 1 : 0].join('|') : ''; };
   const cliHung = (x) => !!x && (x.hung || Date.now() - x.since >= 3 * cliActMs); // REAL time: a door's timeout marked it, or 3 bounds passed (a loop held past one bound never reads a finished judge as hung)
-  const cliStuck = () => { for (const x of cliJudging.values()) if (cliHung(x)) return x; return null; };
+  // «stuck» is scoped to a CLI FILE: a judge hung on this record, or on another record that runs the same file — never another
+  // file's hang (a hang on one CLI path never refuses the browsers, or the restart, that run another)
+  const cliStuck = (rec) => { const path0 = rec && rec.cli ? rec.cli.path || '' : ''; for (const x of cliJudging.values()) if (cliHung(x) && (x.id === rec.profileId || (path0 && x.path === path0))) return x; return null; };
+  let cliNoteTimer = null; // the judges' notifications, batched (one broadcast per 250 ms however many records moved)
+  const cliChanged = () => { if (cliNoteTimer) return; cliNoteTimer = setTimeout(() => { cliNoteTimer = null; notify(); }, 250); if (cliNoteTimer.unref) cliNoteTimer.unref(); };
   const cliUnconfirmedWords = () => `this browser's CLI could not be checked within ${cliActMs >= 1000 ? Math.round(cliActMs / 1000) + ' s' : cliActMs + ' ms'} — nothing was run; try again in a moment`;
   /** ONE judge of `rec`, off the loop; a newer judgment is never overwritten by an older judge that lands after it. */
   function startCliJudge(rec) {
     const id = rec.profileId; const sig = cliSig(rec);
-    const job = { p: null, since: Date.now(), seq: ++cliSeq, hung: false };
+    const job = { p: null, since: Date.now(), seq: ++cliSeq, hung: false, id, sig, path: rec.cli && rec.cli.path || '', door: false };
     job.p = Promise.resolve().then(() => cliJudgeNow(rec)).then((j) => {
       if (cliJudging.get(id) === job) cliJudging.delete(id);
       const r = reg.browsers[id];
@@ -6669,9 +6676,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const k = cliKept.get(id);
       if (!k || k.sig !== sig || k.seq < job.seq) cliKept.set(id, { sig, j, at: now(), seq: job.seq });
       const shown = JSON.stringify(cliKept.get(id).j || null);
-      if (cliTold.has(id) && cliTold.get(id) !== shown) { cliTold.set(id, shown); notify(); } // it moved what a view drew: said once
+      if (cliTold.has(id) && cliTold.get(id) !== shown) { cliTold.set(id, shown); cliChanged(); } // it moved what a view drew: said once (batched)
       return j;
-    }, (e) => { if (cliJudging.get(id) === job) cliJudging.delete(id); log.warn?.(`[browser] ${id}: its CLI judge failed: ${e && e.message}`); return null; });
+    }, (e) => { if (cliJudging.get(id) === job) cliJudging.delete(id); log.warn?.(`[browser] ${id}: its CLI judge failed: ${e && e.message}`); return { unconfirmed: `this browser's CLI could not be judged (${String(e && e.message || e).slice(0, 120)}) — nothing was run; try again in a moment` }; }); // fails CLOSED (never «no stamp» ⇒ the current CLI)
     cliJudging.set(id, job);
     return job;
   }
@@ -6683,11 +6690,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function rejudgeClis() {
     if (cliPass) return cliPass;
     cliPass = (async () => {
-      for (const id of [...cliKept.keys()]) if (!reg.browsers[id]) { cliKept.delete(id); cliTold.delete(id); }
+      for (const id of new Set([...cliKept.keys(), ...cliTold.keys(), ...cliJudging.keys()])) if (!reg.browsers[id]) { cliKept.delete(id); cliTold.delete(id); cliJudging.delete(id); }
       for (const rec of Object.values(reg.browsers || {})) {
-        if (!rec || !rec.cli || !rec.cli.version || !isLocalRec(rec)) continue;
+        if (!rec || !rec.cli || !rec.cli.version || !isLocalRec(rec) || !B.isLiveBrowser(rec)) continue; // a stopped browser runs no CLI: its next start stamps its own
+        if (cliStuck(rec)) continue; // its file's judge hangs: not stacked
         const j = cliJudging.get(rec.profileId);
-        await (j ? j.p : startCliJudge(rec).p);
+        let t = null;
+        await Promise.race([(j ? j.p : startCliJudge(rec).p), new Promise((res) => { t = setTimeout(res, 3 * cliActMs); if (t.unref) t.unref(); })]); // a hung judge never holds the pass
+        clearTimeout(t);
       }
     })().finally(() => { cliPass = null; });
     return cliPass;
@@ -6696,6 +6706,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   let cliTimer = null;
   function cliBoot() {
     rejudgeClis().catch(() => { });
+    // the timer passes over LIVE records only (a pass with none live costs one loop over the records, no file check)
     if (!cliTimer && cliEveryMs > 0) { cliTimer = setInterval(() => { rejudgeClis().catch(() => { }); }, cliEveryMs); if (cliTimer.unref) cliTimer.unref(); }
   }
   /** THE VIEWS' answer (sync, never a file check): the kept judgment, `{checking: true}` while there is none for this stamp
@@ -6704,10 +6715,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function cliOptOf(rec) {
     const c = rec && rec.cli;
     if (!c || !c.version || !isLocalRec(rec)) return null;
+    if (!B.isLiveBrowser(rec)) return null; // a STOPPED browser runs no CLI — its view says the version it last ran, no judgment either way
     const id = rec.profileId; const sig = cliSig(rec);
     const k = cliKept.get(id); const has = !!(k && k.sig === sig);
     const old = !has || now() - k.at >= CLI_FRESH_MS;
-    const stuck = cliStuck();
+    const stuck = cliStuck(rec);
     if (old && !stuck) rejudgeClis().catch(() => { });
     const checking = !has || cliHung(cliJudging.get(id)) || (stuck && old);
     cliTold.set(id, checking ? 'checking' : JSON.stringify(k.j || null));
@@ -6719,8 +6731,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   async function cliOptReady(rec) {
     const c = rec && rec.cli;
     if (!c || !c.version || !isLocalRec(rec)) return null;
-    if (cliStuck()) return { unconfirmed: cliUnconfirmedWords() };
-    const job = startCliJudge(rec);
+    if (cliStuck(rec)) return { unconfirmed: cliUnconfirmedWords() };
+    const j0 = cliJudging.get(rec.profileId);
+    const job = j0 && j0.door && j0.sig === cliSig(rec) && Date.now() - j0.since < 1000 ? j0 : startCliJudge(rec); // a door's judge under a second old IS fresh for this one
+    job.door = true;
     let timer = null;
     // the bound is REF'D (a door in flight keeps the process up to its answer) and yields ONCE to finished I/O before it decides
     const r = await Promise.race([job.p, new Promise((res) => { timer = setTimeout(() => setImmediate(() => res(CLI_UNANSWERED)), cliActMs); })]);
@@ -7600,7 +7614,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const pairs = pairsOf(e.profileId);
       if (!pairs || !pairs.length) return { ok: false, port: null, code: 'not_managed', error: 'this helper\'s browser has no recorded pairs on this server — it cannot be viewed' };
       const r = await rt.streamPort(null, { extraEnv: S.pairsToEnv(pairs) });
-      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: r.code === 'browser_cli_gone' ? r.code : 'stream_unavailable', error: r.error };
+      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: (r.code === 'browser_cli_gone' || r.code === 'browser_cli_unconfirmed') ? r.code : 'stream_unavailable', error: r.error };
     }
     if (target.kind === 'ephemeral') {
       // lane H (measured on 0.32.0: `stream status` with no daemon STARTS one under the pairs): a conversation's
@@ -7625,7 +7639,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         if (!info || !info.active) return { ok: false, port: null, code: 'no-browser', state: 'not-started', error: 'this conversation has not opened its browser yet — its next command starts it' };
       }
       const r = await rt.streamPort(null, { extraEnv: S.pairsToEnv(target.envPairs) });
-      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: r.code === 'browser_cli_gone' ? r.code : 'stream_unavailable', error: r.error };
+      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: (r.code === 'browser_cli_gone' || r.code === 'browser_cli_unconfirmed') ? r.code : 'stream_unavailable', error: r.error };
     }
     const p = profile(target.profileId);
     if (!p) return { ok: false, port: null, code: 'not-found', error: `no profile ${target.profileId}` };
@@ -7657,14 +7671,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       sayRetiredSwitch();
       const g = await mediator.grantFor({ profileId: p.id, browserKey: bk, upstream: rec.cdpUrl, paused: () => inputStateFor(bk, p.id).input === 'user' });
       const r = await rt.streamPort(M.mediatedNamespace(p.id, bk), { session: target.sessionName, extraEnv: { AGENT_BROWSER_CDP: g.url, AGENT_BROWSER_IDLE_TIMEOUT_MS: String(idleMs()) } });
-      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: r.code === 'browser_cli_gone' ? r.code : 'stream_unavailable', error: r.error };
+      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: (r.code === 'browser_cli_gone' || r.code === 'browser_cli_unconfirmed') ? r.code : 'stream_unavailable', error: r.error };
     }
     // naive study 2: the lease's own session over the keeper browser's CDP url — never the directory (on 0.38.1 a
     // `stream status` under the lease's session with the directory STARTS a second Chrome, which dies on SingletonLock)
     const o = await leaseCliOpts(p.id, String(target.sessionName || '').replace(/^vs-/, ''));
     if (!o) return { ok: false, port: null, code: 'browser_no_cdp', error: noCdpError(p) };
     const r = await rt.streamPort(target.ns, { session: target.sessionName, extraEnv: o.extraEnv });
-    return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: r.code === 'browser_cli_gone' ? r.code : 'stream_unavailable', error: r.error };
+    return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: (r.code === 'browser_cli_gone' || r.code === 'browser_cli_unconfirmed') ? r.code : 'stream_unavailable', error: r.error };
   }
 
   /** lane J (inc-muhgv0fb-9i4u): the PAGE's own viewport reading for a live

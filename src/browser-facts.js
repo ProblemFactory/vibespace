@@ -657,7 +657,7 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
     async streamPort(ns, opts = {}) {
       const S = require('./browser-stream.js');
       const st0 = await this.streamStatus(ns, opts);
-      if (st0 && st0.code === 'browser_cli_gone') return { ok: false, port: null, code: st0.code, error: st0.error }; // verify r2 (H1): said by name
+      if (st0 && (st0.code === 'browser_cli_gone' || st0.code === 'browser_cli_unconfirmed')) return { ok: false, port: null, code: st0.code, error: st0.error }; // verify r2 (H1): said by name (B-7a30: the door's «unconfirmed» too)
       const first = S.parseStreamStatus(st0.json);
       let plan = S.streamPlan(first);
       if (plan.step === 'enable') {
