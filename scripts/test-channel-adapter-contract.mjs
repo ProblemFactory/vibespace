@@ -258,6 +258,43 @@ for (const { kind, caps } of REGISTERED) {
     'NEGATIVE CONTROL: an adapter answering WIDER than its own declaration is refused — the direction is load-bearing, or "we never verified sending on this platform" is undone by one optimistic per-conversation answer', e && e.message);
 }
 
+// ── ⑤b B-a0ae (r3 — the lane's adversarial read: the registry's bound had no leg of its own): THE PREPARED DECISION'S
+// BOUND keeps a TYPED mention (`raw`) only when its name is exactly its own id's token and passes the name door unchanged ──
+{
+  const bob = 'U0BOB0001';
+  const offered = [
+    { name: `<@${bob}>`, id: bob, raw: true },
+    { name: `<@${bob}|bob>`, id: bob, raw: true },
+    { name: '<@U0EVE0001>', id: bob, raw: true },
+    { name: `<@${bob}|${'x'.repeat(90)}>`, id: bob, raw: true },
+    { name: `<@${bob}|a‮b>`, id: bob, raw: true },
+    { name: 'Bob', id: bob },
+  ];
+  const modOf = (kind) => ({
+    kind, caps: { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', sendAs: ['user'], identityMarking: 'none', prepareSend: true },
+    create: () => ({
+      auth: { state: async () => ({ state: 'connected' }) },
+      listConversations: async () => ({ conversations: [], complete: true }),
+      convCaps: async () => ({ read: 'yes', sendAs: ['user'] }),
+      history: async () => ({ records: [], reachedAnchor: true, complete: true }),
+      send: async () => ({ ok: true }),
+      prepareSend: async () => ({ text: '', notifies: ['Bob'], unresolved: [], plain: [], mentions: offered.map((m) => ({ ...m })), tooLong: false, at: 1 }),
+    }),
+  });
+  const boundBy = async (M) => { const r = M.createChannelRegistry(); r.register(modOf('mention-bound')); const out = await r.create('mention-bound', {}).prepareSend('c', { text: 'x' }); return out.mentions; };
+  const got = await boundBy(CH);
+  const rawNames = got.filter((m) => m.raw === true).map((m) => m.name);
+  ok(JSON.stringify(rawNames) === JSON.stringify([`<@${bob}>`, `<@${bob}|bob>`]) && got.some((m) => m.name === 'Bob' && !m.raw) && !got.some((m) => m.raw && (m.name.includes('U0EVE0001') || m.name.length > 100 || m.name.includes('‮'))),
+    'B-a0ae THE BOUND: a typed `<@ID>` / `<@ID|label>` of its own id keeps its raw mark; another id\'s token, an over-long label and a label carrying a bidi mark never pass as raw; a plain @Name passes as before', got);
+  const M = mutantCopies('adapter-contract-a0ae', REPO);
+  const isrc = fs.readFileSync(path.join(REPO, 'src/channels/index.js'), 'utf8');
+  const KEEP = '(rawOk(x) ? { name: x.name, id: x.id, raw: true } : { name: peerName(x.name, 100), id: x.id })';
+  ok(isrc.split(KEEP).length === 2, 'CONTROL setup: the bound keeps the raw mark at ONE site');
+  const lost = await boundBy(M.load('src/channels/index.js', isrc.replace(KEEP, '({ name: peerName(x.name, 100), id: x.id })'), 'a0ae-bound'));
+  ok(!lost.some((m) => m.raw === true), 'CONTROL the bound without the raw keep (the base): every typed mention loses its mark — the send escapes it (the first real gate\'s red)', lost);
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: '⑤b ' })) ok(c.pass, c.name, c.detail);
+}
+
 // ── ⑥ registration is LOUD ──
 {
   const r4 = CH.createChannelRegistry();
