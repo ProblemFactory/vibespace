@@ -300,6 +300,8 @@ async function makeWorld(name, { patches = [] } = {}) {
    *  leg's secure viewer (origin 127.0.0.1 ⇒ its own device tag) left loaded, ④'s page followed a 1398×866 window of
    *  "another device" 3 runs of 3 (also on master b970f16d); with its target ended, 1398×835 and "your other tab". */
   W.closePage = async (P) => { try { P.close(); } catch { } await bcall('Target.closeTarget', { targetId: P.target.id }); await sleep(300); };
+  /** lane bl-windows (③'s B-46fc legs): the page's target is really gone (closeTarget's answer is not read above) */
+  W.targetGone = async (P) => { const r = await bcall('Target.getTargets'); return !((r && r.result && r.result.targetInfos) || []).some((t) => t.targetId === P.target.id); };
   const tab2Id = await W.newWindow(`http://127.0.0.1:${PORT}/api/version`);
   const clip = await cdpPage(outer.port, (x) => x.id === tab2Id);
   await clip.call('Browser.grantPermissions', { permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'], origin: `http://127.0.0.1:${PORT}` });
@@ -659,8 +661,51 @@ if (want('mac')) {
   ok(m.clip && m.clip.includes('mac text 苹果'), `⌘C copies the selection to the viewer's clipboard ("${String(m.clip).slice(-20)}")`);
   ok(m.cut && m.undo && m.redo, `⌘X cuts, ⌘Z undoes, ⌘⇧Z redoes (${JSON.stringify({ cut: m.cut, undo: m.undo, redo: m.redo })})`);
   ok(m.onA && m.caps, `lane browser-uppercase-keys: Shift+a, Shift+1, a French layout's Shift+& ("1") and & reach the page as the Mac typed them — "${m.capsGot}" (want "A!1&")`, JSON.stringify({ onA: m.onA, got: m.capsGot }));
-  await Mp.q(S1.sessionId, 'window.app.wm.closeWindow?.(w.id); return true;');
+  // B-46fc (lane bl-windows, batch 4 — «a page that leaves takes its last change with it»; 主开发 2026-11-18): the Mac page
+  // CLOSES its first window of the session — one the layout sync shares with the en page (one id on every page) — and ENDS
+  // inside its save's debounce. The release lost that close (the page left before its save ran): the en page kept the window
+  // and ④ stood on that LOST change. Now the close leaves at the page's leave and the en page's window goes — the multi-client law.
+  const enLive = (P) => P.ev(`[...window.app.wm.windows.values()].filter((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === ${JSON.stringify(S1.sessionId)}).map((x) => x.id)`).catch(() => null);
+  // the gates a save waits for (layout.js: the boot's 5 s, a switch's / an apply's cooldown)
+  const GATE = '(() => { const lm = window.app.layoutManager, dm = window.app.desktopManager; return !!(lm._restoring || (dm && dm._restoring)); })()';
+  const gateDown = (P, steadyMs) => { let since = 0; return until(async () => { const g = await P.ev(GATE).catch(() => true); if (g) { since = 0; return null; } since = since || Date.now(); return Date.now() - since >= steadyMs ? true : null; }, 20000, 100); };
+  // THE STALL (主开发's law: a race is proven by a stall placed in its window, never by the clock) — ONE page task: the window
+  // closed (`flushOff`: the release, whose leave sent nothing), the due save HELD — its timer kept but emptied (it stays due and
+  // never fires) and the page's every re-ask stopped (`scheduleAutoSave` a no-op: a deferral, a held-close resend, a refusal's
+  // re-arm, another window's redraw can no longer arm a fresh debounce) — and what the leave would send read as `_flushOnLeave`
+  // and `_doAutoSave` judge it. The leave's flush is then the close's ONLY road: in the fact leg it carries it; in the control
+  // nothing can.
+  const CLOSE_HELD = (flushOff) => `if (!w) return null; const lm = window.app.layoutManager, dm = window.app.desktopManager; ${flushOff ? 'lm._flushOnLeave = () => false; ' : ''}const id = w.id; window.app.wm.closeWindow?.(w.id); const held = !!lm._autoSaveTimer; if (held) { clearTimeout(lm._autoSaveTimer); lm._autoSaveTimer = setTimeout(() => {}, 600000); } lm.scheduleAutoSave = () => {}; return { id, held, due: held && lm._saveAskedAt > (lm._savedAt || 0), deferred: !!lm._deferT, dirty: !!lm._userDirty, fresh: !!lm._lastUserInputAt && Date.now() - lm._lastUserInputAt < 60000, pointer: !!lm._pointerDown, stale: !!lm._resyncStale, gate: !!(lm._restoring || (dm && dm._restoring)) };`;
+  const wouldSend = (r) => !!r && r.held && r.due && !r.deferred && r.dirty && r.fresh && !r.pointer && !r.stale && !r.gate;
+  const LEAVE_MS = 10000;
+  const macGate = await gateDown(Mp, 1200);
+  await Mp.key('Shift', { code: 'ShiftLeft', vk: 16 }); // a person's key: the close is a person's act (as the Mac legs' own keys made it)
+  const enBefore = (await enLive(E)) || [];
+  const mac = await Mp.q(S1.sessionId, CLOSE_HELD(false));
   await wd.closePage(Mp); // lane live-input-under-load (a): END the page — a loaded one stays a live client of the app
+  const enGone = await until(async () => { const l = await enLive(E); return l && !l.includes(mac && mac.id) ? true : null; }, LEAVE_MS, 200);
+  ok(!!macGate && wouldSend(mac) && enBefore.includes(mac.id) && !!enGone, `B-46fc through a real browser: the Mac page closed the session's window ${mac && mac.id} with its save HELD (due, a person's, no gate, never to fire by itself) and left; the en page's window ${mac && mac.id} is GONE within ${LEAVE_MS} ms — the leave's flush, the close's only road, carried it`, JSON.stringify({ macGate, mac, enBefore, after: await enLive(E) }));
+  // RED CONTROL — the release's behaviour, the same held close on a second page with NO flush at its leave: ④'s OWN window
+  // opened by the en page (a person's key there first, past its apply gate — a scripted open alone is never saved); a second
+  // en page that holds the hub's copy of it; past its boot gate (steady 1.2 s) a person's key there; the held close; the page
+  // ENDED (its target gone) ⇒ the en page KEEPS the window for the same ${LEAVE_MS} ms: nothing can carry the close, as nothing
+  // did before B-46fc
+  const enGate = await gateDown(E, 1200);
+  await E.key('Shift', { code: 'ShiftLeft', vk: 16 });
+  const opened = await E.openLive(S1.sessionId, { profileId: profId });
+  const own = E.opened[S1.sessionId];
+  ok(!!enGate && opened && !!own, `④'s own window: the en page (its gate down, a person's key) opened ${own} and it streams`);
+  const Pc = await wd.page({ lang: 'en' });
+  const held = await until(async () => (((await enLive(Pc)) || []).includes(own) ? true : null), 20000, 200);
+  ok(!!held, `the control's page holds the hub's copy of ${own} (the en page's open was saved as a person's)`, JSON.stringify({ own, pc: await enLive(Pc) }));
+  const pcGate = await gateDown(Pc, 1200);
+  await Pc.key('Shift', { code: 'ShiftLeft', vk: 16 });
+  const pc = held ? await Pc.q(S1.sessionId, CLOSE_HELD(true), own) : null;
+  await wd.closePage(Pc);
+  const pcGone = await wd.targetGone(Pc);
+  await sleep(LEAVE_MS);
+  const enAfter = (await enLive(E)) || [];
+  ok(!!pcGate && wouldSend(pc) && pc.id === own && pcGone && enAfter.includes(own), `RED CONTROL — the release's behaviour (no flush at the leave): the second page closed its copy of ${own} with its save HELD — the very state the fact leg's flush sends — and ended; the en page KEEPS it ${LEAVE_MS} ms later (without B-46fc the leg above is red on any machine)`, JSON.stringify({ pcGate, pc, pcGone, enAfter }));
 }
 
 // ═══ ④ THE FIT CHIP ═══════════════════════════════════════════════════════════
@@ -674,6 +719,9 @@ async function shootBar(P, sid, nth, file) {
 }
 if (want('fit')) {
   // the big window on the en page; a smaller pop-out on the same page; a small window on a zh page (another tab/window of this browser)
+  // lane bl-windows (B-46fc): ④ stands on ITS OWN window of the session — ③'s control opened it (the Mac page's close now reaches
+  // this page, as the multi-client law says); opened here when ④ runs without ③
+  if (!(await E.q(S1.sessionId, 'return !!w;'))) await E.openLive(S1.sessionId, { profileId: profId });
   await E.q(S1.sessionId, 'window.app.wm.revealWindow(w.id); return true;');
   await E.layout(S1.sessionId, [24, 12, 1400, 900]);
   await E.openLive(S1.sessionId, { profileId: profId, popOut: true, box: [1000, 520, 900, 420], nth: 1 });
