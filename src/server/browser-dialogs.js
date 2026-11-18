@@ -113,7 +113,6 @@ const WA = () => WAm || (WAm = require('../webauthn-sign.js'));
 let HMm = null;
 const HM = () => HMm || (HMm = require('../browser-human.js'));
 const PROMPT_FY_KEY = 'prompt-auth:'; // B-ebb7: a sign-in's For-you item is keyed — a past hub life's open ones are swept when a watch starts
-const THAW_PROBE_TABS = 4; // B-1626 cure 4: a viewer's thaw confirms its holder's window by at most this many of the tabs the keeper names its own (read at once)
 const REARM_MS = 2000; // a watch whose socket closed under the person's own browsing is opened again after this — doubled at each failed try (acceptance r1: a refused port looped every 2 s)
 const REARM_TRIES = 5; // then the watch stops trying and his fact says so (`gave-up`) until the next arm (his window, his press, a verb)
 const REARM_HEALTHY = 10; // a socket that stayed open this many REARM_MS was healthy: its close starts the backoff over
@@ -1060,10 +1059,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         // B-1626 cure 3 (its readers): the stamp is never trusted alone — a mediated lease keeps a previous run's windowId, and a
         // window id is a small number per Chrome run (it can name ANOTHER holder's window now). The window is the holder's only
         // while a tab the keeper names the holder's (its scope: its root, its witnessed tabs) sits in it at this thaw
-        // (cure 4: the probe is bounded — at most THAW_PROBE_TABS of the scope's tabs, read at once, each its own 1 s cap: a verb
-        // never waits behind a viewer's thaw for a second per tab)
+        // (the restack's small, 主开发 14:28Z: EVERY tab the keeper names the holder's is read, at once — each read its own 1 s cap,
+        // so the whole probe is a second however many tabs; a cap could judge a holder whose first tabs sit in another window
+        // (pop-ups, its root closed) «not in its window» though a later one is, and leave its front owed: blank)
         if (byWindow.length) {
-          const probe = (scope instanceof Set ? [...scope] : []).filter((t) => w.targets.has(t)).slice(0, THAW_PROBE_TABS);
+          const probe = (scope instanceof Set ? [...scope] : []).filter((t) => w.targets.has(t));
           const mine = probe.length > 0 && (await Promise.all(probe.map((t) => windowOfTarget(w, t)))).includes(ownWin);
           if (mine) {
             const unknown = byWindow.filter((tid) => w.targets.has(tid) && fw.get(tid) == null);
