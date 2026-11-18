@@ -210,6 +210,9 @@ class SafeFs {
     if (this._serial && opts.signal?.aborted) return Promise.reject(gone());
     if (this._serial && (!rec || rec.inflight.size || this._waiting.length)) return this._wait(op, payload, timeoutMs, opts);
     if (!rec) {
+      // B-55dc: a caller that must never read on the main thread (the membership facts) asks `noInline` — refused by
+      // name, and it reads again later
+      if (opts.noInline) return Promise.reject(Object.assign(new Error('no live SafeFs worker'), { code: 'no-worker' }));
       // No live worker at all — run inline in the main thread as a last resort
       // (no isolation, but keeps file browsing alive if the pool can't start).
       try { return Promise.resolve(this._inlineRun(op, payload)).then(r => r.result); }

@@ -35,14 +35,14 @@ const { ok, report } = checker();
 // ── a folder tree: dirs, a file, a missing path, a symlinked folder, a folder under home ─────────────────────────────────
 const P = (...a) => path.join(ROOT, ...a);
 const HOME = P('home');
-for (const d of ['home/hsub/y', 'A/sub/w', 'B/x', 'C']) fs.mkdirSync(P(d), { recursive: true });
+for (const d of ['home/hsub/y', 'home/sub/q', 'A/sub/w', 'B/x', 'C']) fs.mkdirSync(P(d), { recursive: true });   // home/sub: the WIDE candidate of a relative 'sub' (cure r1, MUST 2)
 fs.writeFileSync(P('F.txt'), 'x');
 fs.symlinkSync(P('B'), P('L'));   // a cwd under L/ resolves into B/
 
 // ONE REFRESH, to its end: a relative row reads its candidates in rounds (each landing starts the next), so «after one refresh»
 // = until no read is in flight
 const tick = () => new Promise((r) => setImmediate(() => setImmediate(r)));
-async function refresh(tg) { for (let i = 0; i < 12; i++) { await tg._mfacts.settled(); await tick(); if (!tg._mfacts.busy()) return; } }
+async function refresh(tg) { for (let i = 0; i < 12; i++) { await tg._mfacts.settled(); await tick(); if (!tg._mfacts.busy() && !tg._mmTimer) return; } }   // no read in flight AND the store's landing flush ran
 const ALL = [];   // every store this suite made (the count leg lets them all settle first: their landings run in its window)
 let dn = 0;
 function store(tasks, opts = {}) {
@@ -59,6 +59,7 @@ function store(tasks, opts = {}) {
 // realpathSync per new cwd (cached) — the only two places this change moved
 function releaseOf(tg) {
   tg._memberKindOf = (abs) => tg._kindOf(abs);
+  tg._memberRes = (t) => tg._res(t);   // the release's foldersOf resolved EVERY row through _res (its sync stat)
   const cache = new Map();
   tg._realOf = (cwd, realCwd) => {
     let real = realCwd;
@@ -89,6 +90,7 @@ const ASKS = [
   { cwd: P('M/z') }, { cwd: P('C') }, { cwd: '/opt/elsewhere' }, { sessionKey: 'claude:bound-1' },
   { sessionKey: 'claude:bound-1', cwd: P('L/x') }, { sessionKey: 'claude:none', cwd: P('A/sub/w'), initialGroupId: 'T-missing' },
   { cwd: P('L/x'), realCwd: P('B/x') },
+  { cwd: P('home/sub/q') },   // cure r1 (MUST 2): T-relprev's 'sub' must never fall to the HOME candidate while its base /A is still being read
 ];
 const view = (list) => JSON.stringify((list || []).map((t) => t));   // record by record, every field
 const ids = (list) => (list || []).map((t) => t.id).join(',');
@@ -114,9 +116,9 @@ const ids = (list) => (list || []).map((t) => t.id).join(',');
   }
   ok(bad.length === 0, `the DECIDING door at the first ask, and the DRAWING door after one refresh, answer as the release — record by record, ${ASKS.length} asks over rooted / relative / file / missing rows and a symlinked folder`, bad);
   // the drawing door's first answer before any read: exactly the places presence decides (the named degradation)
-  const want = [`{"cwd":"${P('A/sub/w')}"}`, `{"cwd":"${P('L/x')}"}`, `{"sessionKey":"claude:bound-1","cwd":"${P('L/x')}"}`, `{"sessionKey":"claude:none","cwd":"${P('A/sub/w')}","initialGroupId":"T-missing"}`];
+  const want = [`{"cwd":"${P('A/sub/w')}"}`, `{"cwd":"${P('L/x')}"}`, `{"cwd":"${path.join(HOME, 'hsub/y')}"}`, `{"sessionKey":"claude:bound-1","cwd":"${P('L/x')}"}`, `{"sessionKey":"claude:none","cwd":"${P('A/sub/w')}","initialGroupId":"T-missing"}`];
   const seen = degraded.map((d) => d.slice(0, d.indexOf(': [')));
-  ok(seen.length === want.length && want.every((w) => seen.includes(w)), `before its first read the DRAWING door differs only where presence decides — the relative row behind a folder not read yet, and the symlinked cwd without its realpath (${degraded.length} asks)`, degraded);
+  ok(seen.length === want.length && want.every((w) => seen.includes(w)), `before its first read the DRAWING door differs only where presence decides — a relative row admits nothing until its bases and its candidate are read, the symlinked cwd matches without its realpath (${degraded.length} asks)`, degraded);
   ok(notSubset.length === 0, `every «reading» answer over the fixture is a SUBSET of the release's answer (${ASKS.length} asks) — a grant asked during a read is refused at worst, never given to a non-member`, notSubset);
   ok(unflagged.length === 0, 'every first answer that differs from the release carries the drawing door\'s `unread` flag (a revoking site can see it)', unflagged);
   // the release's own spellings held: a file is no folder, a missing rooted row is one, a relative row after a file finds none
@@ -215,6 +217,51 @@ fs.realpathSync.native = real.native;
   ed.groupsForSession({ sessionKey: 'claude:new' });
   ed.update('T-rooted', { sessions: ['claude:new'] });
   ok(ids(ed.groupsForSession({ sessionKey: 'claude:new' })) === 'T-rooted', 'a store edit (a session bound) is seen at the very next ask');
+}
+
+// ── ⑥ A FAILED READ IS NOT A FACT (cure r1, MUST 1): a realpath whose read FAILS (a worker timeout) stays UNKNOWN — flagged,
+//      said in the journal by name, read again after a back-off — and then answers as the release; an ENOENT is a fact ──
+{
+  const MF = require(path.join(REPO, 'src/member-facts.js'));
+  const logs = [];
+  let calls = 0;
+  const flaky = { call: async (op, payload) => { if (op === 'realpath' && payload.path === P('L/x') && ++calls === 1) throw Object.assign(new Error('timed out'), { safeFsTimeout: true }); if (op === 'realpath') return { path: await fs.promises.realpath(payload.path) }; const st = await fs.promises.stat(payload.path); return { isDirectory: st.isDirectory(), isFile: st.isFile() }; } };
+  const { tg, signals } = store(tasksOf({ 'T-linked': GROUPS['T-linked'] }), { mirrorFs: () => flaky });
+  tg._mfacts = MF.create({ reader: () => flaky, onMoved: (op, p, v) => tg._memberMoved(op, p, v), log: (m) => logs.push(m), backoffMs: 30 });
+  const a = { cwd: P('L/x') };
+  const g0 = tg.groupsForSession(a);
+  await refresh(tg);
+  const g1 = tg.groupsForSession(a);   // the read failed: still unknown, still flagged — never «no realpath» for good
+  ok(ids(g0) === '' && ids(g1) === '' && g1.unread === true && tg._mfacts.unknown() === 1 && logs.some((l) => l.includes(`realpath of ${P('L/x')} could not be read (timeout) — UNKNOWN`)),
+    'a realpath read that TIMES OUT is UNKNOWN, not «no realpath»: the answer stays flagged, the journal names the path and the failure', { g1: ids(g1), unread: g1.unread, logs });
+  await new Promise((r) => setTimeout(r, 40)); tg.groupsForSession(a); await refresh(tg);   // past the back-off the next ask reads again
+  const g2 = tg.groupsForSession(a);
+  ok(ids(g2) === 'T-linked' && !g2.unread && calls === 2 && logs.some((l) => l.includes('read again after 1 failure(s)')) && signals.some((e) => Array.isArray(e.ids) && e.ids.join() === 'T-linked'),
+    `…read again after its back-off it answers as the release [${ids(g2)}], the recovery said, ONE signal naming the group it added`, { g2: ids(g2), calls, logs, signals });
+  const gone = store(tasksOf({ 'T-linked': GROUPS['T-linked'] }), { mirrorFs: () => ({ call: async (op) => { throw Object.assign(new Error('no such file'), { code: 'ENOENT' }); } }) });
+  gone.tg.groupsForSession({ cwd: P('L/y') }); await refresh(gone.tg);
+  ok(gone.tg._mfacts.real(P('L/y')) === null && gone.tg._mfacts.unknown() === 0, 'an ENOENT is a FACT (no realpath — the release\'s throwing realpathSync), kept, never retried');
+}
+
+// ── ⑦ THE SETTLE FIRES (cure r1, MUST 3): the landing that completes a flagged answer sends the settle signal even while the
+//      re-derive's own RE-READS of known facts are in flight (only first reads hold it) ──
+{
+  let hold = false; const held = [];
+  const reader = { call: (op, payload) => { const go = async () => { if (op === 'realpath') return { path: await fs.promises.realpath(payload.path) }; const st = await fs.promises.stat(payload.path); return { isDirectory: st.isDirectory(), isFile: st.isFile() }; }; return hold && op === 'stat' ? new Promise((res, rej) => held.push(() => go().then(res, rej))) : go(); } };
+  const MF = require(path.join(REPO, 'src/member-facts.js'));
+  let skew = 0; const clock = () => Date.now() + skew;
+  const { tg, signals } = store(tasksOf({ 'T-relprev': GROUPS['T-relprev'] }), { mirrorFs: () => reader });
+  tg._mfacts = MF.create({ reader: () => reader, onMoved: (op, p, v) => tg._memberMoved(op, p, v), now: clock });
+  tg.groupsForSession({ cwd: P('M/z') }); await refresh(tg); signals.length = 0;   // the rows read
+  skew = 5000; hold = true;                    // the rows' facts are now OLD: the next asks re-read them, and those re-reads hang
+  tg._mresCache && tg._mresCache.clear(); tg._rowsUnread = null;   // the store's derive caches run on the real clock: re-derive now
+  const b = { cwd: P('C/w2') };                // a NEW cwd: its realpath is a FIRST read, the answer handed out flagged
+  const ans = tg.groupsForSession(b);
+  await new Promise((r) => setTimeout(r, 30));
+  const reReads = tg._mfacts.busy() - tg._mfacts.pending();
+  ok(ans.unread === true && reReads > 0 && signals.length === 1 && Array.isArray(signals[0].ids) && signals[0].ids.length === 0,
+    `the realpath landed while ${reReads} RE-READ(s) of known facts were still in flight: the settle signal went out anyway (${JSON.stringify(signals)}) — only first reads hold it`, { unread: ans.unread, reReads, signals });
+  for (const f of held.splice(0)) f();
 }
 
 // ── ⑤ THE LAW: nobody loses anything on an answer still being read (the REAL exit re-judge, a stand-in holder) ─────────

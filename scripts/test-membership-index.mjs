@@ -280,8 +280,10 @@ const LEGS = {
       const tasks = {};
       for (let i = 0; i < N; i++) { const d = path.join(base, 'g' + i); fs.mkdirSync(d, { recursive: true }); tasks['T-c' + i] = { id: 'T-c' + i, title: 'g' + i, kind: 'task', createdAt: i + 1, sessions: [], ctx: [{ path: d, tags: ['discover'] }, { path: d, tags: ['notes'] }], progress: [] }; }
       tg._state.tasks = tasks; tg._save();
-      // B-55dc: membership asks no stat at all — what the cliff costs now is its resolver re-deriving: kinds asked per warm ask
-      let stats = 0; const kindOf = tg._memberKindOf.bind(tg); tg._memberKindOf = (a) => { stats++; return kindOf(a); };
+      // B-55dc: membership asks no stat for these rooted rows at all — what the cliff costs now is its resolver RE-DERIVING
+      // every group: the table resolutions per warm ask (the tree's own task-context module, the one task-groups calls)
+      const TCm = createRequire(path.join(T, 'package.json'))('./src/task-context.js');
+      let stats = 0; const resolveRows0 = TCm.resolveRows; TCm.resolveRows = (...a) => { stats++; return resolveRows0(...a); };
       const asks = Array.from({ length: 40 }, (_, i) => ({ sessionKey: 'claude:c' + i, cwd: path.join(base, 'g' + ((i * 7) % N), 'w') }));
       tg.groupsForSession(asks[0]);   // warm
       stats = 0;
@@ -289,7 +291,8 @@ const LEGS = {
       for (const a of asks) { const i = tg.groupsForSession(a); if (i.length !== 1) bad++; }
       const per = stats / asks.length;
       if (!(per === 0 && bad === 0)) okAll = false;
-      out.push(`${N} groups: ${per.toFixed(0)} kinds re-derived per warm ask${bad ? `, ${bad} wrong` : ''}`);
+      TCm.resolveRows = resolveRows0;
+      out.push(`${N} groups: ${per.toFixed(0)} tables re-derived per warm ask${bad ? `, ${bad} wrong` : ''}`);
     }
     return { ok: okAll, detail: out.join(' · ') + ' (each group its own discover + notes row)' };
   },
