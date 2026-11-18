@@ -11,10 +11,11 @@
 //                                 continues' progress until the outcome line («恢复了 29 个 · 跳过 8 个（仍在限额内）· 拒绝 0»).
 // Both are reached from Settings → Spending (the auto-resume row) and the session list's ⋯ menu.
 import { t } from './i18n.js';
-import { api, fetchJson, createModalShell, showToast } from './utils.js';
+import { api, fetchJson, createModalShell, showToast, toastWordsInto } from './utils.js';   // toastWordsInto: a sentence's settings link drawn as its door
 import { autoResumeAllWords, resumeButtonWords, waitingCount, skipGroups, summaryWords, refusedWords, memberWords } from '../stopped-by.js';
 import { costWords } from '../bulk-resume-cost.js';
 import { stampAt } from './page-time.js';   // the ONE formatter of a time a person reads
+import { spendRowLink } from '../spend-authorizer.js';   // PURE: the row a refusal names, as its link (test-setting-links: a sentence naming a ROW carries its link)
 import { autoResumeCapsFor } from './agent-meta.js';
 
 const POLL_MS = 1000;
@@ -73,7 +74,7 @@ function answerWords(r) {
 function capDoorWords(why) {
   const setting = why === 'hour-cap' ? t('Unattended turns per account per hour') : why === 'day-cap' ? t('Unattended turns per account per day') : why === 'instance-cap' ? t('Unattended turns for this instance per day')
     : why === 'overage-in-use' ? t('\u26a0 Allow unattended turns while an account bills paid overage') : null;   // form two: the door where the person changes it
-  return setting ? ' ' + t('Change it in Settings → Spending → «{setting}».', { setting }) : '';
+  return setting ? ' ' + t('Change it in Settings → Spending → «{setting}»: {link}', { setting, link: spendRowLink({ why }) }) : '';   // the ROW it names carries its link (lane setting-doors' census)
 }
 function batchRefusalWords(f) {
   if (!f) return '';
@@ -119,7 +120,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
       const li = el('li', 'resume-stopped-group');
       li.appendChild(el('div', 'resume-stopped-group-head', g.head));
       const door = g.rows[0] && g.rows[0].why === 'account-refused' ? capDoorWords(g.rows[0].reason).trim() : '';   // form two: where the person changes it
-      if (door) li.appendChild(el('div', 'dialog-hint', door));
+      if (door) { const d = el('div', 'dialog-hint'); toastWordsInto(d, door); li.appendChild(d); }   // the row's link drawn as its door
       const names = el('ul', 'resume-stopped-names');
       for (const s of g.rows) names.appendChild(el('li', null, s.until ? `${s.name || s.id} — ${t('until {time}', { time: stampAt(s.until, { now: Date.now(), words: true }) })}` : (s.name || s.id)));
       li.appendChild(names);
@@ -235,6 +236,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
       status.classList.add('done');
       if (rec && rec.refused) {
         const why = el('p', 'resume-stopped-refused', t('The whole batch was refused — nothing was resumed: {detail}', { detail: batchRefusalWords(rec.refused) }));
+        toastWordsInto(why, why.textContent);   // the row a refusal names: its link drawn as its door
         body.insertBefore(why, status.nextSibling);
       }
       all.remove();

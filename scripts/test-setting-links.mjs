@@ -108,6 +108,11 @@ console.log('③ THE CENSUS — every product sentence that names a place in Set
     // the restack on the train's checkpoint (lane login-request-card, 2026-11-18): bl-accounts batch 1, boarded BEFORE this unit, wrote
     // four Spending sentences this census reads now — named here, each with its reason (three of them paid since: the links unit's
     // follow-up on 2.369.410 links the empty row in the door line's twin, the agent's sentence and the hand-over toast; the ledger's stays, by design)
+    // lane lg-recovery's bulk resume (the checkpoint cure, 主开发 2026-11-18 22:14Z): its door line names a ROW and carries its link
+    // (bulk-resume.js capDoorWords — spendRowLink); these three name only the SECTION, each with its reason
+    { file: 'src/lib/bulk-resume.js', re: /reopen it from the session list’s ⋯ menu or Settings → Spending to stop it/, why: 'the bulk resume\'s Close toast says where its Stop door is reopened (the bulk row in the section) — no ceiling\'s value to change, no ONE row (debt: a door to the Spending section)' },
+    { file: 'src/lib/bulk-resume.js', re: /reopen this from the session list’s ⋯ menu or Settings → Spending to stop it/, why: 'the same, as the running dialog\'s hint — no ONE row (debt: a door to the Spending section)' },
+    { file: 'src/lib/bulk-resume.js', re: /This instance allows turns in paid overage \(Settings → Spending\)/, why: 'the bulk dialog\'s lead says where the instance\'s overage choice is made (the section) — a lead drawn as text (debt: a door from a dialog\'s lead)' },
     { file: 'src/spend-authorizer.js', re: /^\s+ledger: 'This is VibeSpace failing closed, not a limit/, why: 'B-3b0f\'s unreadable-ledger door: «the limits in Settings → Spending cannot help here» — no value of the person\'s to change, so no row, by design' },
   ];
   const rows = [];

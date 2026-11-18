@@ -5074,7 +5074,7 @@ export default {
   "Close — it keeps running": "关闭（它会继续运行）",
   "Closing leaves the resume running — reopen this from the session list’s ⋯ menu or Settings → Spending to stop it.": "关闭后恢复仍会继续 —— 要停止它，从会话列表的 ⋯ 菜单或 设置 → 花费 重新打开这里。",
   "The resume keeps running — reopen it from the session list’s ⋯ menu or Settings → Spending to stop it.": "恢复仍在继续 —— 要停止它，从会话列表的 ⋯ 菜单或 设置 → 花费 重新打开。",
-  "Change it in Settings → Spending → «{setting}».": "可在 设置 → 花费 →「{setting}」里修改。",
+  "Change it in Settings → Spending → «{setting}»: {link}": "可在 设置 → 花费 →「{setting}」里修改：{link}",
   "Could not stop it — try again.": "无法停止 —— 请重试。",
   "Every subscription is in the pool, including ones you add later": "全部订阅都在池里（包括以后新加的）",
   "Every ChatGPT account is in the pool, including ones you add later": "全部 ChatGPT 账号都在池里（包括以后新加的）",

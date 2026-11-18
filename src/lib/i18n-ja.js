@@ -5073,7 +5073,7 @@ export default {
   "Close — it keeps running": "閉じる（実行は続きます）",
   "Closing leaves the resume running — reopen this from the session list’s ⋯ menu or Settings → Spending to stop it.": "閉じても再開は続きます — 止めるには、セッション一覧の ⋯ メニューか 設定 → 支出 からここを開き直してください。",
   "The resume keeps running — reopen it from the session list’s ⋯ menu or Settings → Spending to stop it.": "再開は続いています — 止めるには、セッション一覧の ⋯ メニューか 設定 → 支出 から開き直してください。",
-  "Change it in Settings → Spending → «{setting}».": "設定 → 支出 →「{setting}」で変更できます。",
+  "Change it in Settings → Spending → «{setting}»: {link}": "設定 → 支出 →「{setting}」で変更できます：{link}",
   "Could not stop it — try again.": "止められませんでした — もう一度お試しください。",
   "Every subscription is in the pool, including ones you add later": "すべてのサブスクリプションがプールに入っています（今後追加するものも含む）",
   "Every ChatGPT account is in the pool, including ones you add later": "すべての ChatGPT アカウントがプールに入っています（今後追加するものも含む）",
