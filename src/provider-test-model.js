@@ -70,6 +70,7 @@ const REFUSAL_WORDS = Object.freeze({
   'no-key': i18nKey('This provider has no key — paste it again'),
   'model-none': i18nKey('Pick a model first — the test asks the provider with it'),
   'in-flight': i18nKey('A test of this provider is running already'),
+  changed: i18nKey('The key or the address changed while it was being tested — test it again'),   // lane lg-providers chain cure (its delta read, D2)
   human_only: i18nKey('Only a person on this page can run a test'),
   cross_site: i18nKey('Only a person on this page can run a test'),
 });

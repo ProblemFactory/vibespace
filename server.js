@@ -41,15 +41,15 @@ const { router: persistenceRouter, setup: setupPersistence } = require('./src/ro
 // are silently unpersisted — terminate + resume loses everything (verified on
 // CLI 2.1.199 by A/B env test). Strip the whole inherited set at startup so all
 // spawn paths (dtach spawn line, wrappers, probes) run top-level.
-if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION || require('./src/server/provider-spawn.js').inheritedPlanNames(process.env).length) {   // …or a provider conversation's shell of any harness (lane lg-providers U2 cure)
-  const stripped = [], plan = require('./src/server/provider-spawn.js').inheritedPlanNames(process.env);   // + a provider conversation's plan: its address, key, models, home
+if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION || Object.values(process.env).some((v) => String(v).split(path.sep).includes('provider-homes'))) {   // …or a provider conversation's shell of any harness: its plan's home is the fingerprint (lane lg-providers U2 cure)
+  const stripped = [], plan = require('./src/server/provider-spawn.js').inheritedPlanNames(process.env), inside = !!(process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION);   // the plan: only what a home proves; the CLI's own names: only inside Claude Code
   for (const k of Object.keys(process.env)) {
-    if (k === 'CLAUDECODE' || k === 'CLAUDE_EFFORT' || k.startsWith('CLAUDE_CODE_') || k.startsWith('CLAUDE_WEBUI_') || plan.includes(k)) {
+    if ((inside && (k === 'CLAUDECODE' || k === 'CLAUDE_EFFORT' || k.startsWith('CLAUDE_CODE_') || k.startsWith('CLAUDE_WEBUI_'))) || plan.includes(k)) {
       stripped.push(k);
       delete process.env[k];
     }
   }
-  console.warn(`[env] Server was started from inside an agent conversation — stripped inherited session env (${stripped.join(', ')}) so spawned CLIs run top-level. Without this, spawned sessions never write transcripts and their conversations are LOST on resume.`);
+  if (stripped.length) console.warn(`[env] Server was started from inside an agent conversation — stripped inherited session env (${stripped.join(', ')}) so spawned CLIs run top-level. Without this, spawned sessions never write transcripts and their conversations are LOST on resume.`);
 }
 
 // Optional persistent ops log (env-gated no-op without VIBESPACE_OPSLOG_DIR) —

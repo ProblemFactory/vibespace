@@ -144,6 +144,9 @@ export async function openProviderWizard({ backend, onDone = null } = {}) {   //
         if (st.busy) return;
         const other = body.querySelector('.pw-other') ? body.querySelector('.pw-other').value.trim() : '';
         const pick = body.querySelector('.pw-pick') ? body.querySelector('.pw-pick').value : '';
+        // nothing chosen and nothing to choose from (a listed provider whose list was never fetched): say what is missing — a
+        // press that sends nothing never says «ready» (the chain cure)
+        if (!other && !pick && !rows.length && !hasModel(st.provider)) { st.error = listed ? t('Get the model list first — {provider} has no model yet', { provider: p.label }) : t('Type a model id first — {provider} has no model yet', { provider: p.label }); draw(); return; }
         st.busy = true; dn.disabled = true;
         let r = { ok: true }, model = p.defaultModel;
         if (other && !rows.some((m) => m.id === other)) { r = await post(`/api/accounts/${encodeURIComponent(p.id)}/models`, { models: [...rows, { id: other }], aliases: p.aliases || {}, defaultModel: other }, 'PUT'); model = other; }

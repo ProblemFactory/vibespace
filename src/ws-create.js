@@ -718,7 +718,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           }
           // A THIRD-PARTY PROVIDER serves only ITS OWN rows (lane lg-providers U2 r1): the model this session starts with is
           // re-resolved against them — an alias onto its row, nothing ⇒ its default; one it does not serve is REFUSED by name
-          const pvModel = accounts && typeof accounts.providerModelFor === 'function' ? accounts.providerModelFor(data.accountId, backend, /^(instance|harness)$/.test(String(data._modelOrigin || '')) ? '' : data.model) : null;   // an instance / harness DEFAULT is no pick at a third party: its own default (U2 cure)
+          const pvModel = accounts && typeof accounts.providerModelFor === 'function' ? ((r) => (r && !r.ok && r.code === 'model-not-served' && /^(instance|harness)$/.test(String(data._modelOrigin || '')) ? accounts.providerModelFor(data.accountId, backend, '') : r))(accounts.providerModelFor(data.accountId, backend, data.model)) : null;   // an instance / harness DEFAULT the provider does not serve (through its aliases) is no pick at a third party: its own default (U2 cure)
           if (pvModel && !pvModel.ok) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: pvModel.code, message: pvModel.message })); break; }
           if (pvModel) data.model = pvModel.model;
           // B-6c55: A LOCKED CONVERSATION'S CONTEXT ASK rides the spawn — the saved fact (the person's, src/lock-context.js), else the
@@ -1529,11 +1529,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // (dtach → wrapper `env: process.env` → CLI), never argv — argv
                 // is world-readable in /proc/cmdline. No account → explicitly
                 // strip any ambient key so the CLI uses its global login.
+                for (const n of require('./server/provider-spawn.js').ambientPlanNames(backend, env, undefined, process.env)) delete env[n];   // lane lg-providers U2 cure: no start inherits a provider's plan (address, key, models — told by its home, so BEFORE the deletes below) from the hub's env; a provider start lays its own below
                 delete env.ANTHROPIC_API_KEY;
                 delete env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
                 delete env.CLAUDE_CODE_OAUTH_TOKEN;                 // top-precedence in the CLI — ambient copy = wrong billing
                 delete env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
-                for (const n of require('./server/provider-spawn.js').ambientPlanNames(backend, env)) delete env[n];   // lane lg-providers U2 cure: no start inherits a provider's plan (address, key, models) from the hub's env — a provider start lays its own just below
                 // Claude API key → ANTHROPIC_API_KEY; Claude subscription → its
                 // own CLAUDE_SECURESTORAGE_CONFIG_DIR (relocates ONLY the creds
                 // store, transcripts stay shared); Codex subscription → its own

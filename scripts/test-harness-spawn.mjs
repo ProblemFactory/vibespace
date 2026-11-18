@@ -278,7 +278,34 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
     'THE MUST — a claude start on the machine\'s own login, in a hub whose environment holds a provider conversation\'s plan: NONE of the plan\'s names (address, key, model names, its secret store) reach it', carried(m1, PLAN_C));
   ok(m2.spawned.length === 1 && carried(m2, PLAN_X).length === 0 && m2.spawned[0].env.CODEX_HOME !== PLAN_X.CODEX_HOME, 'THE MUST — a codex start the same: no provider key, not the provider\'s home', carried(m2, PLAN_X));
   ok(m3.spawned.length === 1 && e3.ANTHROPIC_BASE_URL === 'https://api.deepseek.com/anthropic' && e3.ANTHROPIC_MODEL === 'deepseek-chat' && e3.ANTHROPIC_AUTH_TOKEN === KEY, 'a provider start in such a hub: ITS OWN plan, laid after — never another\'s address or model names', { base: e3.ANTHROPIC_BASE_URL, model: e3.ANTHROPIC_MODEL });
-  const stripLine = src.split('\n').find((l) => l.includes("require('./server/provider-spawn.js').ambientPlanNames(backend, env)"));
+  // …and ONLY a plan's own fingerprint moves it (the coordinator, 10:28Z): a variable the person set on the hub ITSELF — their own
+  // gateway, a model name — carries no provider home and keeps reaching a start, as in the release
+  const HAND = () => ({ ANTHROPIC_BASE_URL: 'https://gateway.example.test', ANTHROPIC_MODEL: 'person-model', PATH: '/usr/bin' });
+  const hubClean = async (fn) => { const keep = {}; for (const n of ['CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CODEX_HOME']) { keep[n] = process.env[n]; delete process.env[n]; } try { return await fn(); } finally { for (const [n, v] of Object.entries(keep)) if (v !== undefined) process.env[n] = v; } };   // the suite's own env is no hub's (a runner started from a provider shell would hold a plan's home — the delta read, D4)
+  const mh = await hubClean(() => drive(wsCreate, { backend: 'claude' }, { accounts: am }, HAND));
+  const eh = (mh.spawned[0] || {}).env || {};
+  ok(mh.spawned.length === 1 && eh.ANTHROPIC_BASE_URL === 'https://gateway.example.test' && eh.ANTHROPIC_MODEL === 'person-model', 'a hub-wide ANTHROPIC_BASE_URL / ANTHROPIC_MODEL the person set by hand (no provider\'s home beside it) still reaches a claude start — only a plan is stripped', { base: eh.ANTHROPIC_BASE_URL, model: eh.ANTHROPIC_MODEL });
+  const PSS = fs.readFileSync(path.join(REPO, 'src/server/provider-spawn.js'), 'utf8');
+  const GATE = '  if (!homes.some((n) => inProviderHome(e[n]) || (hubEnv && inProviderHome(hubEnv[n])))) return [];\n';
+  if (PSS.split(GATE).length !== 2) throw new Error('the anchor of the control «the plan\'s fingerprint gate» is not in the source once');
+  const psNoGate = M.write('src/server/provider-spawn.js', PSS.replace(GATE, ''), 'pv-nogate');
+  const CALL = "require('./server/provider-spawn.js').ambientPlanNames(";
+  if (src.split(CALL).length !== 2) throw new Error('the anchor of the control «the spawn line\'s strip call» is not in the source once');
+  const wcNoGate = M.load('src/ws-create.js', src.replace(CALL, `require(${JSON.stringify(psNoGate)}).ambientPlanNames(`), 'pv-nogate-create');
+  const mh0 = await hubClean(() => drive(wcNoGate, { backend: 'claude' }, { accounts: am }, HAND));
+  ok(mh0.spawned.length === 1 && !('ANTHROPIC_BASE_URL' in mh0.spawned[0].env), 'CONTROL: a strip with no fingerprint test drops the person\'s own gateway from every claude start ⇒ the hand-set leg goes RED');
+  // THROUGH THE REAL AGENT DOOR (the chain cure's read, R1): it drops claude's secret-store variable (claude's declared
+  // spawnEnvVar), so the start's env no longer shows the plan's home — the fingerprint is read from the HUB's own env too
+  const AGENT_ENV = require(path.join(REPO, 'src/agent-env.js')), HARNESS_ENV = require(path.join(REPO, 'src/harness-env.js'));
+  const DOOR = () => AGENT_ENV.agentEnv(SEEDED(), { drop: HARNESS_ENV.agentCredentialEnvNames(H.list()) });
+  const viaHub = async (mod) => { const was = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR; process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = homeC; try { return await drive(mod, { backend: 'claude' }, { accounts: am }, DOOR); } finally { if (was === undefined) delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR; else process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = was; } };
+  const md = await viaHub(wsCreate);
+  ok(!('CLAUDE_SECURESTORAGE_CONFIG_DIR' in DOOR()) && 'ANTHROPIC_BASE_URL' in DOOR() && md.spawned.length === 1 && carried(md, PLAN_C).length === 0, 'THROUGH THE REAL AGENT DOOR (it drops the secret-store variable, keeps ANTHROPIC_*): the fingerprint is read from the hub\'s own env — the plan\'s address and key never reach a machine-login start', carried(md, PLAN_C));
+  const HUBARG = ", undefined, process.env)) delete env[n];";
+  if (src.split(HUBARG).length !== 2) throw new Error('the anchor of the control «the hub env\'s fingerprint» is not in the source once');
+  const md0 = await viaHub(M.load('src/ws-create.js', src.replace(HUBARG, ')) delete env[n];'), 'pv-nohubfp'));
+  ok(md0.spawned.length === 1 && carried(md0, PLAN_C).includes('ANTHROPIC_BASE_URL') && carried(md0, PLAN_C).includes('ANTHROPIC_AUTH_TOKEN'), 'CONTROL (R1): the strip reading the start\'s env alone never sees the fingerprint on the real road ⇒ the third party\'s address and key reach the start ⇒ the leg goes RED', carried(md0, PLAN_C));
+  const stripLine = src.split('\n').find((l) => l.includes("require('./server/provider-spawn.js').ambientPlanNames(backend, env"));
   if (!stripLine) throw new Error('the anchor of the control «the spawn line\'s plan strip» is not in the source');
   const kM = await drive(M.load('src/ws-create.js', src.replace(stripLine + '\n', ''), 'pv-nostrip'), { backend: 'claude' }, { accounts: am }, SEEDED);
   const kMx = await drive(M.load('src/ws-create.js', src.replace(stripLine + '\n', ''), 'pv-nostrip-codex'), { backend: 'codex', mode: 'chat' }, { accounts: am }, SEEDED);
@@ -291,7 +318,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   if (at < 0 || SJ.indexOf(SAN, at + 1) >= 0) throw new Error('the anchor of the sanitiser leg (server.js\'s start sanitiser) is not in the source once');
   const block = SJ.slice(at, SJ.indexOf('\n}\n', at) + 2);
   const sreq = createRequire(path.join(REPO, 'server.js'));
-  const sanitise = (code, env) => { const proc = { env: { ...env } }; new Function('process', 'require', 'console', code)(proc, sreq, { warn() { } }); return proc.env; };
+  const sanitise = (code, env) => { const proc = { env: { ...env } }; new Function('process', 'require', 'console', 'path', code)(proc, sreq, { warn() { } }, path); return proc.env; };
   const INSIDE = { CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', ...PLAN_C, CODEX_HOME: path.join(DATA, 'machine-codex-home'), PATH: '/usr/bin' };
   const after = sanitise(block, INSIDE);
   const left = Object.keys(PLAN_C).filter((n) => PLAN_C[n] !== '' && n in after);
@@ -308,7 +335,14 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const codexAfter = sanitise(block, CODEX_SHELL);
   ok(plainAfter.ANTHROPIC_BASE_URL === GATEWAY.ANTHROPIC_BASE_URL && plainAfter.ANTHROPIC_AUTH_TOKEN === GATEWAY.ANTHROPIC_AUTH_TOKEN && !('CLAUDECODE' in plainAfter), 'a hub started inside a PLAIN conversation (no plan\'s fingerprint) keeps a person\'s own gateway and token — only the CLI\'s own names go, as on the release', plainAfter);
   ok(!('VIBESPACE_PROVIDER_KEY' in codexAfter) && !('CODEX_HOME' in codexAfter) && codexAfter.ANTHROPIC_AUTH_TOKEN === GATEWAY.ANTHROPIC_AUTH_TOKEN && codexAfter.PATH === '/usr/bin', 'a hub started inside a CODEX provider conversation (its shell has no CLAUDECODE) drops codex\'s plan — the provider\'s key and home (the machine\'s ChatGPT login stays readable) — and only that plan', codexAfter);
-  const GATE_EXTRA = " || require('./src/server/provider-spawn.js').inheritedPlanNames(process.env).length) {";
+  const bed = sanitise(block, { ...CODEX_SHELL, CLAUDE_CODE_USE_BEDROCK: '1' });
+  const stray = sanitise(block, { OLDPWD: path.join(DATA, 'provider-homes', 'pv-x', 'claude'), CLAUDE_CODE_USE_BEDROCK: '1', ...GATEWAY, PATH: '/usr/bin' });
+  ok(bed.CLAUDE_CODE_USE_BEDROCK === '1' && !('VIBESPACE_PROVIDER_KEY' in bed) && stray.CLAUDE_CODE_USE_BEDROCK === '1' && stray.ANTHROPIC_BASE_URL === GATEWAY.ANTHROPIC_BASE_URL && Object.keys(stray).length === 5, 'outside Claude Code the sanitiser strips ONLY a plan (a codex provider shell keeps the person\'s own CLAUDE_CODE_USE_BEDROCK); a path that merely contains «provider-homes» (an OLDPWD) is no plan — nothing stripped (the read, R4)', { bed: bed.CLAUDE_CODE_USE_BEDROCK, stray: Object.keys(stray) });
+  const INSIDE_TEST = "(inside && (k === 'CLAUDECODE'";
+  if (block.split(INSIDE_TEST).length !== 2) throw new Error('the anchor of the control «the sanitiser\'s inside test» is not in the source once');
+  const bed0 = sanitise(block.replace(INSIDE_TEST, "((k === 'CLAUDECODE'"), { ...CODEX_SHELL, CLAUDE_CODE_USE_BEDROCK: '1' });
+  ok(!('CLAUDE_CODE_USE_BEDROCK' in bed0), 'CONTROL (R4): a sanitiser that strips the CLI\'s own names outside Claude Code too drops the person\'s CLAUDE_CODE_USE_BEDROCK after a codex shell\'s restart ⇒ the codex-shell leg goes RED');
+  const GATE_EXTRA = " || Object.values(process.env).some((v) => String(v).split(path.sep).includes('provider-homes'))) {";
   if (!block.includes(GATE_EXTRA)) throw new Error('the anchor of the control «the sanitiser\'s plan test» is not in the source');
   const codex0 = sanitise(block.replace(GATE_EXTRA, ') {'), CODEX_SHELL);
   ok(codex0.CODEX_HOME === PLAN_X.CODEX_HOME && codex0.VIBESPACE_PROVIDER_KEY === KEY, 'CONTROL: a sanitiser that runs only inside Claude Code keeps a codex provider conversation\'s key and home in the hub ⇒ the codex leg goes RED');
@@ -350,6 +384,16 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   await refused('a model the provider does not serve (a ChatGPT id a resume carried)', { backend: 'claude', accountId: ds.id, model: 'gpt-5.5' }, /DeepSeek does not serve the model “gpt-5.5”/, 'model-not-served');
   const bare = (await store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', wire: 'anthropic-messages', label: 'Bare' })).provider;
   await refused('a provider with no model at all (never the CLI\'s own default at a third party)', { backend: 'claude', accountId: bare.id }, /Bare has no model yet/, 'model-none');
+  // …but an instance default the provider DOES serve through its own aliases keeps that road (the reader of the U2 cure): opus ⇒
+  // the record's alias row, not the default
+  const dsWas = store.get(ds.id);
+  const dsRows = dsWas.models.map((m) => ({ id: m.id, label: m.label, context: m.context, caps: m.caps }));
+  const setA = store.setModels(ds.id, { models: dsRows, aliases: { opus: 'deepseek-reasoner' }, defaultModel: dsWas.defaultModel });
+  await store.durable();
+  const ca = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'opus', spawnOriginHint: { model: 'instance' } }, { accounts: am });
+  const caModel = (() => { const a = (ca.spawned[0] || { args: [] }).args; const i = a.indexOf('--model'); return i >= 0 ? a[i + 1] : null; })();
+  store.setModels(ds.id, { models: dsRows, aliases: dsWas.aliases || {}, defaultModel: dsWas.defaultModel }); await store.durable();   // what it found, put back (the read, R13)
+  ok(setA.ok && ca.spawned.length === 1 && caModel === 'deepseek-reasoner', 'an instance default the provider serves through ITS aliases (opus ⇒ deepseek-reasoner) is resolved as before; only an id it does not serve falls to its own default', { caModel, setA: setA.ok });
   const ci = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'opus', spawnOriginHint: { model: 'instance' } }, { accounts: am });
   ok(ci.spawned.length === 1 && (() => { const a = ci.spawned[0].args; const i = a.indexOf('--model'); return i >= 0 && a[i + 1] === 'deepseek-chat'; })(), 'the INSTANCE\'S default (claude.defaultModel = opus, the client says it is no pick) at a third party is no pick: the provider\'s own default, never a refusal of «opus» (U2 cure)', ci.sent.map((m) => m.type + (m.code ? ':' + m.code : '')));
   ok(PSP.modelFor(store, ds.id, '', 'opencode').code === 'provider-unfit' && /DeepSeek does not offer what OpenCode needs/.test(PSP.modelFor(store, ds.id, '', 'opencode').message) && PSP.modelFor(store, ds.id, '', 'claude').ok && PSP.modelFor(store, ds.id, '').ok, 'the fence refuses a harness the provider does not serve (a hand-made create on OpenCode: no spawn road — never its row id on the machine\'s own login)', PSP.modelFor(store, ds.id, '', 'opencode'));

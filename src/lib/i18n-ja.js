@@ -10356,6 +10356,7 @@ export default {
   "At most 512 characters": "最大 512 文字", // lane lg-providers
   "This is a Claude subscription login, not a provider’s key — it is never sent to a third party": "これは Claude サブスクリプションのログインで、プロバイダーのキーではありません——第三者には決して送られません", // lane lg-providers
   "An address starts with https:// (or http:// on your own network)": "アドレスは https:// で始まります（自分のネットワーク内なら http:// も可）", // lane lg-providers
+  "Type the address plainly — no spaces, no % sign, no backslash, no full-width or non-English characters": "アドレスはそのまま入力してください — 空白・% 記号・バックスラッシュ・全角や英語以外の文字は使えません", // lane lg-providers chain cure
   "This is an Anthropic key — add it as an Anthropic API account, not a third party": "これは Anthropic のキーです——サードパーティではなく Anthropic API アカウントとして追加してください", // lane lg-providers
   "Paste the key alone — without quotes or the name in front of it": "キーだけを貼り付けてください——引用符や前の名前は付けずに", // lane lg-providers
   "Outside your own network the address must start with https://": "自分のネットワークの外では、アドレスは https:// で始まる必要があります", // lane lg-providers
@@ -10389,6 +10390,12 @@ export default {
   "{provider} is saved. Each agent that can use it is tested once:": "{provider} を保存しました。使える各エージェントで 1 回ずつテストします：", // lane lg-providers
   "Which model answers in new conversations": "新しい会話でどのモデルが答えるか", // lane lg-providers
   "Get the model list from {provider}": "{provider} からモデル一覧を取得", // lane lg-providers
+  "Get the model list first — {provider} has no model yet": "先にモデル一覧を取得してください — {provider} にはまだモデルがありません", // lane lg-providers chain cure
+  "Type a model id first — {provider} has no model yet": "先にモデル ID を入力してください — {provider} にはまだモデルがありません", // lane lg-providers chain cure
+  "the provider could not be changed": "プロバイダーを変更できませんでした", // lane lg-providers chain cure
+  "the provider list could not be written": "プロバイダー一覧を書き込めませんでした", // lane lg-providers chain cure
+  "the models could not be written yet — the hub tries again": "モデルはまだ書き込まれていません — ハブが再試行します", // lane lg-providers chain cure
+  "the models could not be saved": "モデルを保存できませんでした", // lane lg-providers chain cure
   "Other model id (optional)": "その他のモデル ID（任意）", // lane lg-providers
   "{provider} is ready. It can be used by:": "{provider} の準備ができました。使えるもの：", // lane lg-providers
   "Pick it in the account row of New Session. It has no usage reading — you pay {provider} by use.": "「新しいセッション」のアカウント行で選んでください。使用量の表示はありません——{provider} に使った分だけ支払います。", // lane lg-providers
@@ -10416,6 +10423,7 @@ export default {
   "This provider does not offer what this agent needs": "このプロバイダーはこのエージェントが必要とするものを提供していません", // lane lg-providers
   "This provider has no key — paste it again": "このプロバイダーにはキーがありません——もう一度貼り付けてください", // lane lg-providers
   "A test of this provider is running already": "このプロバイダーのテストはすでに実行中です", // lane lg-providers
+  "The key or the address changed while it was being tested — test it again": "テスト中にキーまたはアドレスが変わりました — もう一度テストしてください", // lane lg-providers chain cure
   "Only a person on this page can run a test": "テストを実行できるのはこのページにいる人だけです", // lane lg-providers
   "Remove the model provider \"{name}\"?": "モデルプロバイダー「{name}」を削除しますか？", // lane lg-providers
   "Its key leaves the vault and the provider leaves every agent's account list. Conversations already running on it keep working until they restart.": "キーは保管庫から消え、プロバイダーはすべてのエージェントのアカウント一覧から外れます。すでに使っている会話は再起動するまで動き続けます。", // lane lg-providers

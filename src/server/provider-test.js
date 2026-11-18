@@ -25,6 +25,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const MP = require('../model-providers.js');
 const PT = require('../provider-test-model.js');
+const PI = require('../proc-identity.js');   // the pid identity (field-22 start times, a fresh bounded /proc scan): the after-exit proof
 
 const VENDOR_FAMILY = /^(?:ANTHROPIC_|CLAUDE_|OPENAI_|CODEX_|AWS_|AZURE_|GOOGLE_|GEMINI_|VERTEX|BEDROCK|OPENROUTER_|DEEPSEEK_|MOONSHOT_|ZHIPU|MINIMAX_)/;
 const EXIT_DRAIN_MS = 2000;   // after the leader exits, how long its pipes may stay open before the run settles
@@ -32,7 +33,7 @@ const EXIT_DRAIN_MS = 2000;   // after the leader exits, how long its pipes may 
 function create({ providers, harnessOf = (id) => require('../harnesses').get(id), harnesses = () => require('../harnesses').list(),
   cliFor = async () => null, agentEnv = () => ({}), credentialEnvNames = (ds) => require('../harness-env.js').credentialEnvNames(ds),
   redactSecrets = (s) => require('../secret-shapes.js').redactSecrets(s), spawnImpl = spawn,
-  scratchRoot = os.tmpdir(), timeoutMs = PT.TIMEOUT_MS, now = () => Date.now(), log = (m) => console.log(m) } = {}) {
+  scratchRoot = os.tmpdir(), timeoutMs = PT.TIMEOUT_MS, drainMs = EXIT_DRAIN_MS, now = () => Date.now(), log = (m) => console.log(m) } = {}) {
   const inFlight = new Set();
   /** the child's env: sanitized, every credential name gone, every harness home a fresh empty folder, the plan on top */
   async function childEnv(dir, sp) {
@@ -65,6 +66,7 @@ function create({ providers, harnessOf = (id) => require('../harnesses').get(id)
     if (!MP.fitsHarness(p, harness) || !h || !h.creds || typeof h.creds.providerSpawn !== 'function' || !h.creds.providerTest || typeof h.creds.providerTest.argv !== 'function') return { ok: false, code: 'unfit' };
     const slot = `${p.id}:${harness}`;
     if (inFlight.has(slot)) return { ok: false, code: 'in-flight' };
+    const gen0 = typeof providers.generationOf === 'function' ? providers.generationOf(p.id) : null;   // the key / address this run tests (a new one meanwhile ⇒ its verdict is not written)
     const k = providers.keyOf(p.id);
     if (!k.ok || !k.value) return { ok: false, code: k.ok ? 'no-key' : k.code };
     const model = MP.resolveModel(p, '') || '';
@@ -74,7 +76,7 @@ function create({ providers, harnessOf = (id) => require('../harnesses').get(id)
     try {
       let cmd = null;
       try { cmd = await cliFor(harness); } catch { cmd = null; }
-      if (!cmd) return { ok: true, harness, verdict: 'cli-missing', detail: '', at: now() };
+      if (!cmd) return { ok: true, harness, verdict: 'cli-missing', detail: '', at: now(), kept: false };   // nothing ran: no verdict is written
       dir = await fsp.mkdtemp(path.join(scratchRoot, 'vs-pvtest-'));
       const home = path.join(dir, 'cfg', 'PROVIDER_HOME');
       await fsp.mkdir(home, { recursive: true, mode: 0o700 });
@@ -91,16 +93,24 @@ function create({ providers, harnessOf = (id) => require('../harnesses').get(id)
         const take = (b) => { const s = String(b); out += s; if (out.length > PT.OUT_MAX) { dropped += out.length - PT.OUT_MAX; out = out.slice(-PT.OUT_MAX); } };
         child.stdout && child.stdout.on('data', take);
         child.stderr && child.stderr.on('data', take);
-        // the group we spawned is signalled only while its leader is not yet seen to exit (never a reaped pid's group)
-        var timer = setTimeout(() => { timedOut = true; if (!exited) { try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { } } } settle({ code: null, signal: 'SIGKILL', timedOut, out, dropped }); }, timeoutMs);
+        // BEFORE the leader's exit is seen the group we spawned is ours (the bound ends it, every member)
+        // AFTER the exit (Node reaped the leader; its number is free) the group is signalled ONLY on proof a member of OURS lives —
+        // cli-models-door's law: never while a live process holds that number (reused — not ours); then the pipe still held past
+        // the exit, or a member whose pgrp is our child's pid and whose start is at or after our child's (a fresh /proc scan)
+        const held = child.pid;
+        let since = null;
+        try { since = held ? PI.starttimeOf(held) : null; } catch { since = null; }
+        const afterExit = (pipeHeld) => { let st = null; try { st = PI.stateOf(held); } catch { st = null; } if (st && st !== 'Z') return; let members = []; try { members = since != null ? PI.membersOf({ pgid: held, since }) : []; } catch { members = []; } const proof = { ok: pipeHeld || members.length > 0 }; if (proof.ok) { try { process.kill(-held, 'SIGKILL'); } catch { } } };
+        var timer = setTimeout(() => { timedOut = true; if (!exited) { try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { } } } else afterExit(true); settle({ code: null, signal: 'SIGKILL', timedOut, out, dropped }); }, timeoutMs);
         child.on('error', (e) => settle({ spawnError: e.code || e.message, out }));
-        child.on('exit', (code, signal) => { exited = true; drain = setTimeout(() => settle({ code, signal, timedOut, out, dropped }), EXIT_DRAIN_MS); });
-        child.on('close', (code, signal) => settle({ code, signal, timedOut, out, dropped }));
+        child.on('exit', (code, signal) => { exited = true; drain = setTimeout(() => { afterExit(true); settle({ code, signal, timedOut, out, dropped }); }, drainMs); });   // the drain ran out: a child of the CLI still holds the pipes — the group ended once ON PROOF, before the scratch folder goes
+        child.on('close', (code, signal) => { if (exited) afterExit(false); settle({ code, signal, timedOut, out, dropped }); });   // a member that holds no pipe is ended too, on proof (cli-models-door's close road — the delta read, D5)
       });
       const verdict = PT.classify(end);
       const at = now();
-      try { const w = await providers.noteTested(p.id, harness, verdict, at); if (w && w.ok === false) log(`[provider-test] ${p.id}: the result could not be kept (${w.code})`); } catch (e) { log(`[provider-test] ${p.id}: the result could not be kept (${e.message})`); }
-      return { ok: true, harness, verdict, detail: verdict === 'ok' ? '' : PT.redact(end.out, k.value, redactSecrets), at };
+      let kept = true, changed = false;   // the verdict's write: a failed one is logged AND said in the answer (the chain cure)
+      try { const w = await providers.noteTested(p.id, harness, verdict, at, gen0); if (w && w.ok === false) { kept = false; changed = w.code === 'changed'; log(`[provider-test] ${p.id}: the result could not be kept (${w.code})`); } } catch (e) { kept = false; log(`[provider-test] ${p.id}: the result could not be kept (${e.message})`); }
+      return { ok: true, harness, verdict, detail: verdict === 'ok' ? '' : PT.redact(end.out, k.value, redactSecrets), at, kept, ...(changed ? { changed: true } : {}) };
     } finally {
       inFlight.delete(slot);
       if (dir) await fsp.rm(dir, { recursive: true, force: true }).catch(() => { });

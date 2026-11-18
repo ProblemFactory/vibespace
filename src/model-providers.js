@@ -254,7 +254,10 @@ function validateProvider(raw) {
   if (!p.label || p.label.length > LABEL_MAX) errors.push({ field: 'label', code: 'label-long' });
   if (k && !k.auths.includes(p.auth)) errors.push({ field: 'auth', code: 'auth-kind' });
   if (p.keyRef !== null && !KEY_REF.test(p.keyRef)) errors.push({ field: 'keyRef', code: 'key-ref' });
-  if (p.baseUrl !== null && (!/^https?:\/\/[^\s/]+(\/\S*)?$/.test(p.baseUrl) || /[\\%]/.test(p.baseUrl) || /[^\x21-\x7e]/.test(p.baseUrl))) errors.push({ field: 'baseUrl', code: 'base-url' });   // `\` / `%` / non-ASCII: a host the CLIs' URL parser reads otherwise (lane lg-providers U4 r1)
+  // `\` / `%` / a character outside printable ASCII (a full-width colon or dot from an input method): a host the CLIs' URL parser
+  // reads otherwise (lane lg-providers U4 r1) — ITS OWN words, judged FIRST, never the scheme's (the chain cure + its read, R3)
+  if (p.baseUrl !== null && (/[\\%]/.test(p.baseUrl) || /[^\x21-\x7e]/.test(p.baseUrl))) errors.push({ field: 'baseUrl', code: 'base-url-chars' });   // a space or a tab too (the delta read, D6)
+  else if (p.baseUrl !== null && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(p.baseUrl)) errors.push({ field: 'baseUrl', code: 'base-url' });
   // a user:password@ in the address would ride the command line (codex's -c table) and every log — the key has its own place
   else if (p.baseUrl !== null && /^https?:\/\/[^/]*@/.test(p.baseUrl)) errors.push({ field: 'baseUrl', code: 'base-url-credentials' });   // lane lg-providers U2
   // …nor a query or a fragment on a keyed record's address (a `?api-key=` would ride the command line too — r1)
@@ -462,7 +465,7 @@ const REFRESH_WORDS = Object.freeze({
 // (late 2025 ids), dated SHIPPED_AT = when written, not «current as of»: a moved address or a retired id is said by the Test
 // («unreachable» / «not served»), and the account dialog's 模型… edits the table. ──
 const SHIPPED_AT = '2026-11-17';
-const ship = (o) => Object.freeze({ ...o, ...(o.wires ? { wires: Object.freeze([...o.wires]) } : {}), bases: Object.freeze(o.bases.map((b) => Object.freeze({ ...b }))), models: Object.freeze(o.models.map((m) => Object.freeze({ caps: [], context: null, ...m, caps: Object.freeze(m.caps || []) }))) });
+const ship = (o) => Object.freeze({ ...o, ...(o.wires ? { wires: Object.freeze([...o.wires]) } : {}), bases: Object.freeze(o.bases.map((b) => Object.freeze({ ...b }))), models: Object.freeze(o.models.map((m) => Object.freeze({ context: null, ...m, caps: Object.freeze(m.caps || []) }))) });
 const SHIPPED = Object.freeze([
   ship({ id: 'deepseek', label: 'DeepSeek', kind: 'anthropic-compatible', auth: 'bearer', blurb: i18nKey('DeepSeek’s models, paid by use with your own key'),
     console: 'https://platform.deepseek.com', bases: [{ region: 'global', url: 'https://api.deepseek.com/anthropic' }],
@@ -594,6 +597,7 @@ const KEY_ERRORS = Object.freeze({
   'key-ref-foreign': i18nKey('This provider names another provider’s key'),
   'wire-kind': i18nKey('Only a self-hosted provider says which interface it speaks'),
   'base-url': i18nKey('An address starts with https:// (or http:// on your own network)'),
+  'base-url-chars': i18nKey('Type the address plainly — no spaces, no % sign, no backslash, no full-width or non-English characters'),
   'base-url-credentials': i18nKey('Put the key in the key field — not in the address'),
   'preset-unknown': i18nKey('Unknown provider'),
 });

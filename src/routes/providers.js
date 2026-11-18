@@ -49,7 +49,10 @@ function keyVarsOf(p, f) {
 }
 /** a record as the page reads it — no key (there is none in it), not where the vault keeps it, + which harnesses it serves */
 const pubOf = (providers) => (p) => { if (!p) return null; const { keyRef, ...rest } = p; const f = MP.fits(p); return { ...rest, hasKey: typeof providers.hasKey === 'function' ? providers.hasKey(p.id) : !!keyRef, fits: f, keyVars: keyVarsOf(p, f) }; };   // hasKey = the VAULT holds its entry (its names), not the record's reference
-const shippedPub = (s) => ({ ...s, fits: MP.fits({ kind: s.kind }) });
+// a SELF-HOSTED preset fits a harness when ONE of its interfaces does — the person names it on the next screen (the U5 pictures:
+// the «Other or self-hosted» card read «Not for Claude», judged with no interface; the chain cure)
+const shippedFits = (s) => (s.kind !== 'self-hosted' ? MP.fits({ kind: s.kind }) : Object.fromEntries(Object.entries(MP.fits({ kind: s.kind })).map(([h, f]) => [h, MP.WIRES.some((w) => MP.fitsHarness({ kind: s.kind, wire: w }, h)) ? { ok: true } : f])));
+const shippedPub = (s) => ({ ...s, fits: shippedFits(s) });
 
 function registerProviderRoutes(app, { providers, tester = null, onChange = () => { } }) {
   const pub = pubOf(providers);
@@ -97,8 +100,10 @@ function registerProviderRoutes(app, { providers, tester = null, onChange = () =
     let r;
     try { r = await tester.runProviderTest(String(req.params.id), String((req.body || {}).harness || ''), { by: 'human' }); } catch (e) { r = { ok: false, code: 'failed', error: e.message }; }
     if (!r.ok) return res.status(STATUS[r.code] || 409).json({ ok: false, code: r.code, error: PT.REFUSAL_WORDS[r.code] || WORDS[r.code] || r.error || r.code });
+    // the key or the address changed while it ran: what it tested is no longer there — said as a refusal with its words, never «Works»
+    if (r.changed) return res.status(409).json({ ok: false, code: 'changed', error: PT.REFUSAL_WORDS.changed });
     if (r.verdict !== 'cli-missing') changed('test', String(req.params.id));
-    res.json({ ok: true, harness: r.harness, verdict: r.verdict, words: PT.VERDICT_WORDS[r.verdict], detail: r.detail, at: r.at });
+    res.json({ ok: true, harness: r.harness, verdict: r.verdict, words: PT.VERDICT_WORDS[r.verdict], detail: r.detail, at: r.at, kept: r.kept !== false });   // kept: false ⇒ the verdict was not written (the page says so)
   }));
   app.delete('/api/providers/:id', door(async (req, res) => {
     if (!person(req, res)) return;

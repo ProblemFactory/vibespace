@@ -4,7 +4,8 @@
 // and calls NOBODY: it writes what it was handed — its argv, every env NAME, the provider's address and key variables, and
 // every file reachable under each home-like variable — to $FAKE_REPORT, then answers like a CLI for the address's host:
 //   refuse.* ⇒ a 401 · down.* ⇒ ECONNREFUSED · nomodel.* ⇒ a 404 not_found_error · slow.* ⇒ never ends · leak.* ⇒ prints
-//   the key, then fails · anything else ⇒ «ok», exit 0.
+//   the key, then fails · linger.* ⇒ «ok», exit 0 — leaving a child of its own (same group) holding the pipes for 15 s, its
+//   pid in $FAKE_REPORT.linger · anything else ⇒ «ok», exit 0.
 const fs = require('fs');
 const path = require('path');
 const argv = process.argv.slice(2);
@@ -23,4 +24,5 @@ if (/^down\./.test(host)) { process.stderr.write('Error: connect ECONNREFUSED 12
 if (/^nomodel\./.test(host)) { process.stderr.write('API Error: 404 {"type":"error","error":{"type":"not_found_error","message":"model: unknown"}}\n'); process.exit(1); }
 if (/^slow\./.test(host)) setInterval(() => { }, 1000);
 else if (/^leak\./.test(host)) { process.stderr.write(`request failed with key ${key} (debug)\n`); process.exit(2); }
+else if (/^linger\./.test(host)) { const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 15000) /* fake-cli linger */'], { stdio: ['ignore', 'inherit', 'inherit'] }); fs.writeFileSync(env.FAKE_REPORT + '.linger', String(c.pid)); process.stdout.write('ok\n'); process.exit(0); }
 else { process.stdout.write('ok\n'); process.exit(0); }

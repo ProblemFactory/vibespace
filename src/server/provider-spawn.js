@@ -87,12 +87,18 @@ function planNamesOf(desc) {
   return { names: [...names].sort(), homes: [...homes].sort() };
 }
 const inProviderHome = (v) => String(v || '').split(path.sep).includes('provider-homes');
-/** the names of `env` a start of `backend` must not inherit (its harness's plan) */
-function ambientPlanNames(backend, env, harnessOf = (id) => require('../harnesses').get(id)) {
+/** the names of `env` a start of `backend` must not inherit: its harness's plan — ONLY when the environment carries that plan's
+ *  FINGERPRINT (its home variable pointing into a provider's home: the plan always sets one). A variable a person set on the hub
+ *  itself (their own ANTHROPIC_BASE_URL gateway, a model name) carries no fingerprint and keeps reaching a start, as in the
+ *  release (the coordinator, 10:28Z). */
+function ambientPlanNames(backend, env, harnessOf = (id) => require('../harnesses').get(id), hubEnv = null) {
   let d = null;
   try { d = harnessOf(backend); } catch { d = null; }
   const e = env || {};
   const { names, homes } = planNamesOf(d);
+  // the fingerprint is read from the start's env AND the hub's own (`hubEnv`): the agent door already drops claude's secret-store
+  // variable from the first (it is claude's declared spawnEnvVar), so on the real road only the hub's env still shows it (R1)
+  if (!homes.some((n) => inProviderHome(e[n]) || (hubEnv && inProviderHome(hubEnv[n])))) return [];
   return [...names.filter((n) => Object.prototype.hasOwnProperty.call(e, n)), ...homes.filter((n) => inProviderHome(e[n]))];
 }
 /** the hub's own environment at its start (server.js's sanitiser): every harness's plan — ONLY when the environment carries
@@ -103,10 +109,7 @@ function ambientPlanNames(backend, env, harnessOf = (id) => require('../harnesse
 function inheritedPlanNames(env, descriptors = require('../harnesses').list()) {
   const e = env || {};
   const out = new Set();
-  for (const d of descriptors || []) {
-    if (!planNamesOf(d).homes.some((n) => inProviderHome(e[n]))) continue;   // this harness's plan left no fingerprint: none of it is inherited
-    for (const n of ambientPlanNames(d && d.id, e, () => d)) out.add(n);
-  }
+  for (const d of descriptors || []) for (const n of ambientPlanNames(d && d.id, e, () => d)) out.add(n);   // each plan only with its own fingerprint
   return [...out].sort();
 }
 

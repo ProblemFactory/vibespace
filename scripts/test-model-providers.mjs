@@ -216,7 +216,10 @@ try {
   const [, a3] = await get(key);
   ok(a2.provider.id === 'pv-openai-chatgpt' && eq(a2.provider.models.map((m) => m.id), ['gpt-5.5', 'gpt-5.5-codex', 'gpt-5.5-mini']) && a3.provider.id === 'pv-anthropic-api' && a3.provider.models.length === 11 && !JSON.stringify(a3).includes('qqqq'), 'a ChatGPT login names its provider with codex\'s catalog; the Console key names Anthropic API (and the answer carries no key)');
   const [s4, a4] = await get('pv-ds2');
-  ok(s4 === 200 && a4.account.type === 'provider' && a4.provider.kind === 'openai-chat' && a4.editable === true && !('keyRef' in a4.provider) && !('baseUrl' in a4.provider) && !('tail' in a4.provider), 'a projected third-party row (pv-…): its record, editable — never where the vault keeps its key, its address or its tail (a GET from the person\'s plain-http page carries no Origin: this door answers what anyone may read; U1 cure (B))');
+  ok(s4 === 200 && a4.account.type === 'provider' && a4.provider.kind === 'openai-chat' && a4.editable === true && !('keyRef' in a4.provider) && !('baseUrl' in a4.provider) && !('tail' in a4.provider) && a4.provider.refreshable === false, 'a projected third-party row (pv-…): its record, editable — never where the vault keeps its key, its address or its tail (a GET from the person\'s plain-http page carries no Origin: this door answers what anyone may read; U1 cure (B))');
+  store.put({ id: 'pv-lst1', kind: 'self-hosted', label: 'Lst', preset: 'other', baseUrl: 'https://llm.example.test/v1', keyRef: null, wire: 'openai-chat', modelsSource: 'listed', listedBy: 'provider-api' });
+  const [sl, al] = await get('pv-lst1');
+  ok(sl === 200 && al.provider.refreshable === true && !('baseUrl' in al.provider) && M.refreshable({ ...al.provider, refreshable: undefined }) === false, 'a LISTED self-hosted record (its own address): the GET answers refreshable true, decided on the server off the whole record — the stripped record alone would say false (the read, R7)', al.provider && al.provider.refreshable);
   const [s5, a5] = await put('pv-ds2', { models: [{ id: 'deepseek-chat' }, { id: '' }] });
   ok(s5 === 400 && a5.code === 'invalid' && eq(a5.errors, [{ index: 1, field: 'id', code: 'id-pattern' }]), 'PUT a row with an empty id ⇒ 400, the refusal at row 1 / field id (the dialog marks it)', a5);
   const [s6, a6] = await put('pv-ds2', { models: [{ id: 'deepseek-chat', context: '64k', caps: ['tools'] }, { id: 'deepseek-reasoner' }], aliases: { opus: 'deepseek-reasoner' } });
@@ -327,7 +330,7 @@ const OAT = ['sk-ant-', 'oat01-', 'q'.repeat(40)].join('');   // built at runtim
 const vk = (k) => codes(M.validateKey(k));
 const CONSOLE = ['sk-ant-', 'api03-', 'z'.repeat(40)].join('');
 ok(eq(vk(`"${OAT}"`), ['key-subscription']) && eq(vk(`ANTHROPIC_AUTH_TOKEN=${OAT}`), ['key-subscription']) && eq(vk(JSON.stringify({ claudeAiOauth: { accessToken: OAT } })), ['key-subscription']) && eq(vk(['sk-ant-', 'sid01-', 'w'.repeat(30)].join('')), ['key-subscription']) && eq(vk(CONSOLE), ['key-anthropic']) && eq(vk('"sk-provider-1234"'), ['key-shape']) && eq(vk('MY_KEY=sk-provider-1234'), ['key-shape']) && eq(vk('sk-or-v1-abc.def_ghi-123'), []), 'an Anthropic credential ANYWHERE in the paste: quoted, after NAME=, inside a JSON blob, a claude.ai session key ⇒ key-subscription; a Console key ⇒ key-anthropic (it belongs on an Anthropic API account); quotes or a NAME= around another key ⇒ key-shape (adversarial read r1)');
-ok(eq(vk(''), ['key-empty']) && eq(vk('   '), ['key-empty']) && eq(vk('abc def ghij'), ['key-space']) && eq(vk('short'), ['key-short']) && eq(vk('k'.repeat(513)), ['key-long']) && eq(vk(OAT), ['key-subscription']) && eq(vk(' sk-provider-key-1234 '), []) && Object.keys(M.KEY_ERRORS).length === 14, 'the key: empty, a space inside, too short, too long ⇒ by code; an ANTHROPIC SUBSCRIPTION LOGIN ⇒ key-subscription (never sent to a third party); a good key (trimmed) passes');
+ok(eq(vk(''), ['key-empty']) && eq(vk('   '), ['key-empty']) && eq(vk('abc def ghij'), ['key-space']) && eq(vk('short'), ['key-short']) && eq(vk('k'.repeat(513)), ['key-long']) && eq(vk(OAT), ['key-subscription']) && eq(vk(' sk-provider-key-1234 '), []) && Object.keys(M.KEY_ERRORS).length === 15, 'the key: empty, a space inside, too short, too long ⇒ by code; an ANTHROPIC SUBSCRIPTION LOGIN ⇒ key-subscription (never sent to a third party); a good key (trimmed) passes');
 const recA = (o) => ({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1', model: 'm1' }), id: 'pv-c3', keyRef: M.keyRefOf('pv-c3'), ...o });
 ok(codes(M.validateProvider(recA({ baseUrl: 'http://203.0.113.7/v1' }))).includes('base-url-plain') && codes(M.validateProvider(recA({ baseUrl: 'http://llm.example.test/v1' }))).includes('base-url-plain') && ['http://127.0.0.1/v1', 'http://192.168.1.20/v1', 'http://10.1.2.3/v1', 'http://172.20.0.4/v1', 'http://gpu-box:8000/v1', 'http://lab.local/v1', 'http://[::1]:9/v1'].every((u) => codes(M.validateProvider(recA({ baseUrl: u }))).length === 0) && codes(M.validateProvider(recA({ baseUrl: 'http://203.0.113.7/v1', keyRef: null }))).length === 0, 'a record that names a key: plain http only on the person\'s own network (loopback, private ranges, .local, a dotless name) — a public host must be https (a record with no key is not judged)');
 // a KEYED record's address carries no query and no fragment (U2 r1 NOTE 11 — a `?api-key=` would ride codex's command line);
@@ -335,6 +338,12 @@ ok(codes(M.validateProvider(recA({ baseUrl: 'http://203.0.113.7/v1' }))).include
 ok(codes(M.validateProvider(recA({ baseUrl: 'https://llm.example.test/v1?api-key=x' }))).includes('base-url-credentials') && codes(M.validateProvider(recA({ baseUrl: 'https://llm.example.test/v1#k' }))).includes('base-url-credentials') && codes(M.validateProvider(recA({ baseUrl: 'https://llm.example.test/v1?api-version=1', keyRef: null }))).length === 0, 'a record that names a KEY: no query, no fragment on its address (base-url-credentials — it would ride the command line); a keyless record\'s query is taken');
 const mQuery = mutant([["  else if (p.baseUrl !== null && p.keyRef !== null && /[?#]/.test(p.baseUrl)) errors.push({ field: 'baseUrl', code: 'base-url-credentials' });\n", '']]);
 ok(!codes(mQuery.validateProvider(recA({ baseUrl: 'https://llm.example.test/v1?api-key=x' }))).includes('base-url-credentials'), 'CONTROL: the record rules without the query rule take «?api-key=x» on a keyed record ⇒ the query leg goes RED');
+// an address refused for a % sign, a backslash or a non-ASCII character gets ITS OWN words — never the sentence about the
+// scheme (the chain cure, the coordinator's U4 point 2)
+const CHARS = ['https://llm%2Eexample.test/v1', 'https://llm.example.test\\v1', 'https://llm．example.test/v1', 'https\uff1a//llm.example.test/v1', 'https://llm\u3000x.test/v1', 'https://llm example.test/v1'];   // + a full-width colon and space: the shape check would have said «https://» (the read, R3)
+ok(CHARS.every((u) => eq(codes(M.validateProvider(recA({ baseUrl: u }))), ['base-url-chars'])) && eq(codes(M.validateProvider(recA({ baseUrl: 'ftp://llm.example.test' }))), ['base-url']) && typeof M.KEY_ERRORS['base-url-chars'] === 'string' && M.KEY_ERRORS['base-url-chars'] !== M.KEY_ERRORS['base-url'] && !/https?:/.test(M.KEY_ERRORS['base-url-chars']), 'a % sign, a backslash, a full-width dot, colon or space ⇒ base-url-chars with its own words, judged before the shape (no word about https://); a wrong scheme keeps base-url', CHARS.map((u) => codes(M.validateProvider(recA({ baseUrl: u })))));
+const mChars = mutant([["errors.push({ field: 'baseUrl', code: 'base-url-chars' })", "errors.push({ field: 'baseUrl', code: 'base-url' })"]]);
+ok(CHARS.every((u) => eq(codes(mChars.validateProvider(recA({ baseUrl: u }))), ['base-url'])), 'CONTROL: the rule folded back into base-url tells a person who typed a % sign to start with https:// ⇒ the words leg goes RED');
 // (A) THE PLAIN-HTTP RULE IS JUDGED ON THE PARSED ADDRESS (U1 cure — the coordinator's (A)): the platform's URL parser gives
 // the host, a literal is judged by its value. Shape 1 — a PUBLIC NAME that begins like a private range; shape 2 — the TEXT
 // and the parser disagree on the host (a user part, a `\` the parser reads as a path); shape 3 — an IPv6 group the parser
@@ -487,6 +496,30 @@ const storeMutant = (pairs) => { let t = fs.readFileSync(SSRC, 'utf-8'); for (co
   ok(had === true && pstore.hasKey(hid) === false && pstore.get(hid).keyRef === M.keyRefOf(hid) && pstore.hasKey('pv-anthropic-api') === false, '«has a key» asks the VAULT\'S NAMES (no key read): the record still names its entry, but the entry is gone ⇒ false');
   await pstore.remove(hid);
 }
+// A NEW KEY OR A NEW ADDRESS CLEARS «TESTED» (the chain cure, the coordinator's U4 point 1): the wizard never says «Works» for a
+// key or an address that was never tested; a rename keeps it
+{
+  const t0 = (await pstore.add({ preset: 'other', key: KEY, baseUrl: 'https://llm.example.test/v1', model: 'm1', wire: 'anthropic-messages', label: 'TestMe' })).provider;
+  await pstore.noteTested(t0.id, 'claude', 'ok', 1792500000100);
+  const a = pstore.get(t0.id);
+  await pstore.patch(t0.id, { label: 'TestMe2' });
+  const b = pstore.get(t0.id);
+  const rk2 = await pstore.rekey(t0.id, 'sk-provider-retest-key-31337');
+  const c = pstore.get(t0.id);
+  await pstore.noteTested(t0.id, 'claude', 'ok', 1792500000200);
+  const mv = await pstore.patch(t0.id, { baseUrl: 'https://llm2.example.test/v1', key: 'sk-provider-moved-key-424242' });
+  const d = pstore.get(t0.id);
+  ok(a.tested.claude && a.lastTestAt === 1792500000100 && b.tested.claude && b.lastTestAt === 1792500000100 && rk2.ok && !c.tested.claude && c.lastTestAt === null && mv.ok && !d.tested.claude && d.lastTestAt === null, 'a NEW KEY clears tested + lastTestAt, a NEW ADDRESS (with its key) clears them, a rename keeps them — «Works» only for what was tested', { a: a.tested, c: c.tested, d: d.tested });
+  const PSt = storeMutant([[', tested: {}, lastTestAt: null };   // a new key was never tested', ' };   // a new key was never tested']]);
+  const tdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvkey-t-'));
+  const tst = PSt.create({ dataDir: tdir, catalogOf, vault: () => vault, log: () => {} });
+  const x0 = (await tst.add({ preset: 'other', key: KEY, baseUrl: 'https://llm.example.test/v1', model: 'm1', wire: 'anthropic-messages', label: 'TestMe' })).provider;
+  await tst.noteTested(x0.id, 'claude', 'ok', 1792500000300);
+  await tst.rekey(x0.id, 'sk-provider-retest-key-31337');
+  ok(!!tst.get(x0.id).tested.claude, 'CONTROL: a new key that keeps the old «tested» lets the wizard say «Works» for a key nobody tested ⇒ the leg goes RED');
+  vault.secretDrop(M.keyEntryOf(x0.id)); fs.rmSync(tdir, { recursive: true, force: true });
+  await pstore.remove(t0.id);
+}
 const VIu = require(path.join(ROOT, 'src/vault-inventory.js'));
 const vrow = VIu.secretRowOf(vault.secretNames().find((n) => n.name === M.keyEntryOf(pid)), { providerName: (id) => pstore.get(id).label });
 ok(vrow && vrow.field === 'key' && vrow.kind === 'api-key' && vrow.label === 'Model provider key · My DeepSeek' && !JSON.stringify(vrow).includes('0042') && eq(VIu.doorsOf({ store: 'secrets', entry: M.keyEntryOf(pid), field: 'key' }).delete, { method: 'DELETE', path: `/api/providers/${pid}`, confirm: 'provider' }), 'the Vault window\'s row: «Model provider key · <its name>», no character of the key; its Remove = the provider\'s own DELETE (confirm words «provider»)', vrow);
@@ -543,6 +576,20 @@ try {
     const j = await r.json();
     ok(r.status === 200 && JSON.stringify(j).includes('My DeepSeek'), 'CONTROL (B): a list door without the person verdict hands a script with no page the provider\'s name and tail ⇒ the person leg goes RED');
   } finally { msrv.close(); }
+  // THE «OTHER OR SELF-HOSTED» CARD fits a harness when one of its interfaces does (the U5 pictures: it read «Not for Claude»)
+  {
+    const otherOf = async (Mod) => {
+      const a2 = express(); a2.use(express.json()); Mod.registerProviderRoutes(a2, { providers: pstore });
+      const s2 = await new Promise((res) => { const x = a2.listen(0, '127.0.0.1', () => res(x)); });
+      try { const r = await fetch(`http://127.0.0.1:${s2.address().port}/api/providers/list`, { method: 'POST', headers: SAME, body: '{}' }); return ((await r.json()).shipped || []).find((x) => x.id === 'other') || null; } finally { s2.close(); }
+    };
+    const FITS_LINE = 'const shippedPub = (s) => ({ ...s, fits: shippedFits(s) });';
+    if (rsrc.split(FITS_LINE).length !== 2) throw new Error('the anchor of the control «the self-hosted card\'s fit» is not in the source once');
+    const fm = new Module(RP); fm.filename = RP; fm.paths = Module._nodeModulePaths(path.dirname(RP)); fm._compile(rsrc.replace(FITS_LINE, 'const shippedPub = (s) => ({ ...s, fits: MP.fits({ kind: s.kind }) });'), RP);   // stale-pins: kept — the control's REPLACEMENT is the first cut's line, gone from the product on purpose
+    const other = await otherOf(require(RP)), other0 = await otherOf(fm.exports);
+    ok(!!other && other.fits.claude.ok && other.fits.codex.ok && !other.fits.opencode.ok, 'the «Other or self-hosted» card is offered to Claude Code AND Codex (the person names the interface on the next screen) — never «Not for Claude» for a service that can speak its interface', other && other.fits);
+    ok(!!other0 && !other0.fits.claude.ok, 'CONTROL: the card judged with no interface (the first cut) reads «Not for Claude» ⇒ the leg goes RED', other0 && other0.fits);
+  }
   // AN ACT THAT THROWS answers 500 with words — an async door's rejection never hangs the request (Express 4 answers none)
   const tapp2 = express(); tapp2.use(express.json());
   require(RP).registerProviderRoutes(tapp2, { providers: { thirdParty: () => [], hasKey: () => false, add: async () => { throw new Error('boom'); } } });
@@ -606,6 +653,9 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
 
   const c1 = await run(runner, P.ok.id, 'claude');
   const homes1 = c1.rep ? c1.rep.homes : {};
+  ok(c1.r.kept === true, 'the verdict was kept: the answer says so (kept)');
+  const kf = await run(mk(PTR, { providers: { ...tstore, noteTested: async () => ({ ok: false, code: 'write-failed' }) } }), P.ok.id, 'claude');
+  ok(kf.r.ok && kf.r.verdict === 'ok' && kf.r.kept === false && read('src/routes/providers.js').includes('kept: r.kept !== false'), 'a verdict whose write FAILED is said in the answer (kept: false — the door passes it on) and logged (the chain cure)', kf.r);
   ok(c1.r.ok && c1.r.verdict === 'ok' && c1.r.detail === '' && tstore.get(P.ok.id).tested.claude.verdict === 'ok' && tstore.get(P.ok.id).lastTestAt === c1.r.at, 'claude, a good third party: verdict ok, kept on the record (tested.claude + lastTestAt)', c1.r);
   ok(!!c1.rep && ['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CODEX_HOME'].every((h) => homes1[h] && !homes1[h].dir.startsWith(MACHINE) && homes1[h].files.length === 0), 'MUST 1 — as the fake saw it: HOME, XDG_CONFIG_HOME and EVERY harness\'s config variable are fresh EMPTY folders of the run\'s own (no sign-in file, no stored credential; the machine\'s planted login reachable from none)', homes1);
   ok(!!c1.rep && !c1.rep.envNames.includes('CLAUDE_CODE_OAUTH_TOKEN') && !c1.rep.envNames.includes('OPENAI_API_KEY') && c1.rep.keyVars.ANTHROPIC_API_KEY === null && !c1.rep.envNames.includes('VIBESPACE_PROVIDER_KEY') && c1.rep.keyVars.ANTHROPIC_AUTH_TOKEN === TKEY && c1.rep.base === 'https://llm.example.test/v1', 'MUST 1/4 — the sanitized env with every credential name stripped (the ambient OAuth token, Console key, OpenAI key, provider key gone); the provider\'s key ONLY in the variable the harness reads; the third party\'s address', c1.rep && { names: c1.rep.envNames.filter((n) => /KEY|TOKEN|OAUTH/.test(n)), base: c1.rep.base });
@@ -636,7 +686,7 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   await refuse('MUST 2: the vendor\'s host in capitals', runner, 'pv-vendor3', 'claude', 'vendor-own');
   await refuse('no model to ask with (never the CLI\'s own default id at a third party)', runner, nomod.id, 'claude', 'model-none');
   const bypass = ['https://api.anthropic.com\\x.test/v1', 'https://api%2Eanthropic%2Ecom/v1', 'https://api\uff0eanthropic\uff0ecom/v1'];
-  ok(bypass.every((u) => !PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: u }).ok) && bypass.every((u) => codes(M.validateProvider({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1', model: 'm' }), id: 'pv-x8', keyRef: M.keyRefOf('pv-x8'), baseUrl: u })).includes('base-url')) && PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: 'https://api.anthropic.com/v1' }).code === 'vendor-own', 'MUST 2 — the addresses a regex and the CLIs\' URL parser read differently (a backslash, %2E, full-width dots — each reaches api.anthropic.com) are refused, by the Test AND by the record rules', bypass.map((u) => PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: u })));
+  ok(bypass.every((u) => !PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: u }).ok) && bypass.every((u) => codes(M.validateProvider({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1', model: 'm' }), id: 'pv-x8', keyRef: M.keyRefOf('pv-x8'), baseUrl: u })).includes('base-url-chars')) && PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: 'https://api.anthropic.com/v1' }).code === 'vendor-own', 'MUST 2 — the addresses a regex and the CLIs\' URL parser read differently (a backslash, %2E, full-width dots — each reaches api.anthropic.com) are refused, by the Test AND by the record rules', bypass.map((u) => PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: u })));
   tvault.lock('door');
   await refuse('MUST 3: the vault locked (the key cannot be read — it never runs without one)', runner, P.ok.id, 'claude', 'vault_locked');
   await tvault.unlock(PW, {});
@@ -653,6 +703,20 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   fresh();
   const cm = await mk(PTR, { cliFor: async () => null }).runProviderTest(P.ok.id, 'claude', { by: 'human' });
   ok(cm.ok && cm.verdict === 'cli-missing' && report() === null, 'no CLI on this machine ⇒ verdict cli-missing, nothing spawned');
+  ok(cm.kept === false, 'no CLI ⇒ nothing ran: the answer says no verdict was kept (the read, R9)');
+  // A NEW KEY WHILE A TEST RUNS (the chain cure's read, R2): the run tested the OLD key — its verdict is not written onto the new one
+  const midRun = slowRunner.runProviderTest(P.slow.id, 'claude', { by: 'human' });
+  await tstore.rekey(P.slow.id, 'sk-third-party-rekeyed-midrun-2718');
+  const mr = await midRun;
+  ok(mr.ok && mr.kept === false && mr.changed === true && read('src/routes/providers.js').includes("if (r.changed) return res.status(409).json({ ok: false, code: 'changed', error: PT.REFUSAL_WORDS.changed });") && !tstore.get(P.slow.id).tested.claude, 'a NEW KEY while a Test runs (up to 60 s): the run tested the old key — its verdict is NOT written onto the new one (kept: false); the door answers it as a refusal with its own words («changed» — test it again), never «Works»', mr);
+  // THE DRAIN (the read, R5/R6): a CLI that exits leaving a CHILD of its own holding the pipes — ended on proof before the folder goes
+  const pLinger = await addOther('linger.example.test', 'anthropic-messages', 'Linger');
+  const aliveNow = (pid) => { try { return !/^\d+ \(.*\) Z /.test(fs.readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+  const goneWithin = async (pid, ms) => { for (const t0 = Date.now(); Date.now() - t0 < ms; await new Promise((r) => setTimeout(r, 50))) if (!aliveNow(pid)) return true; return !aliveNow(pid); };
+  fresh(); try { fs.rmSync(REPORT + '.linger'); } catch { }
+  const lg = await mk(PTR, { drainMs: 200 }).runProviderTest(pLinger.id, 'claude', { by: 'human' });
+  const gpid = (() => { try { return Number(fs.readFileSync(REPORT + '.linger', 'utf8')); } catch { return 0; } })();
+  ok(lg.ok && lg.verdict === 'ok' && gpid > 0 && await goneWithin(gpid, 2000), 'a CLI that exits leaving a CHILD of its own holding the pipes: the run settles at the drain and the child is ended (the group, on proof a member of ours lives — cli-models-door\'s law) — nothing outlives the scratch folder', { gpid, verdict: lg.verdict });
 
   // MUST 5 — the person's door
   const tapp = express(); tapp.use(express.json());
@@ -702,6 +766,19 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   const q2 = await noSlot.runProviderTest(P.slow.id, 'claude', { by: 'human' });
   await q1;
   ok(q2.ok && q2.verdict === 'timeout', 'CONTROL: without the in-flight slot a second press runs a second child (spends the key twice) ⇒ the in-flight leg goes RED', q2);
+  const noGen = mk(runnerMutant([[', gen0);', ');']]), { timeoutMs: 400 });
+  const ng = noGen.runProviderTest(P.slow.id, 'claude', { by: 'human' });
+  await tstore.rekey(P.slow.id, 'sk-third-party-rekeyed-again-3141');
+  const ngr = await ng;
+  ok(ngr.kept !== false && !!tstore.get(P.slow.id).tested.claude, 'CONTROL (R2): a run that does not say which key it tested writes its verdict onto the NEW key ⇒ the mid-run leg goes RED', ngr);
+  const noDrainEnd = mk(runnerMutant([['drain = setTimeout(() => { afterExit(true); settle(', 'drain = setTimeout(() => { settle(']]), { drainMs: 200 });
+  fresh(); try { fs.rmSync(REPORT + '.linger'); } catch { }
+  const xl = await noDrainEnd.runProviderTest(pLinger.id, 'claude', { by: 'human' });
+  const gp2 = (() => { try { return Number(fs.readFileSync(REPORT + '.linger', 'utf8')); } catch { return 0; } })();
+  const left = gp2 > 0 && aliveNow(gp2);
+  // end what the control left — the fake's OWN child (its command line names it), nothing else
+  try { if (gp2 > 0 && fs.readFileSync(`/proc/${gp2}/cmdline`, 'utf8').includes('fake-cli linger')) process.kill(gp2, 'SIGKILL'); } catch { }
+  ok(xl.ok && left, 'CONTROL (R6): a run that settles at the drain without ending the group leaves the CLI\'s child alive past the scratch folder ⇒ the drain leg goes RED', { gp2 });
   fs.rmSync(TDIR, { recursive: true, force: true });
 }
 
@@ -740,6 +817,7 @@ console.log('⑯ the wizard and the roster: rows per harness beside the accounts
   ok(ma2.includes("...(!selectedHost ? [{ label: t('Add a third-party model…'), action: () => { done(); openProviderWizard({ backend: 'claude', onDone: refresh }); } }] : []),") && ma2.includes("openProviderWizard({ backend: 'codex', onDone: refresh })") && (ma2.match(/if \(!selectedHost\) renderProviderRows\(body, '(claude|codex)', \{ refresh \}\)/g) || []).length === 2 && ma2.includes("a.backend === 'codex' && a.type !== 'provider'") && ma2.includes("(x.backend || 'claude') === 'claude' && x.type !== 'provider'") && ma2.includes("a.backend === be && a.type !== 'provider'"), 'Manage agents: ONE «Add a third-party model…» door per roster and the providers\' rows under each — this machine only; NO roster (Claude Code, Codex, the others) draws a provider row as one of its own accounts');
   ok((app2.match(/accounts: accountRowsOf\((msg|d)\)/g) || []).length === 2 && meta.includes('export function accountRowsOf(answer)') && /answer\.providerRows/.test(meta), 'the page\'s account cache merges the providers\' rows at BOTH places it is set (the push and the read) — New Session, Billing and the badge list them');
   ok(ros.includes("t('No usage reading'), t('paid by use')") && ['Test', 'Models…', 'Rename…', 'New key…', 'Remove…'].every((w) => ros.includes(`label: t('${w}')`)) && ros.includes("if (!rows.length || !sec.isConnected) { sec.remove(); return; }") && ros.indexOf('body.appendChild(sec);') > 0 && ros.indexOf('body.appendChild(sec);') < ros.indexOf("await fetchJson('/api/providers/list', { method: 'POST'") && !ros.includes("t('Add a third-party model…')") && ros.includes("key: id, title") && /\$\{DOTS\}/.test(ros), 'a roster row: «no usage reading · paid by use · tested …» and ⋯ (the roster\'s DOTS SVG) Test · Models… · Rename… · New key… · Remove…; its section takes its PLACE before the read (never drifts under another heading), leaves when no provider serves the harness, and adds no second add door; the new-key form is keyed by the provider\'s id');
+  ok(wiz.includes("if (!other && !pick && !rows.length && !hasModel(st.provider)) { st.error = listed ? t('Get the model list first — {provider} has no model yet'") && read('src/lib/session-card.js').includes(": a.type === 'provider' ? tr('{name} (third party)', { name: a.name }) + (s.host ? ' — ' + tr('this machine only') : '')") && read('src/lib/account-models.js').includes("typeof p.refreshable === 'boolean' ? p.refreshable : refreshable(p)"), 'the chain cure\'s page words: the model step\'s Done with nothing chosen says what is missing (never «ready»); the stopped conversation\'s resume popover names a provider row «(third party)» and «this machine only» on another machine, never «API …null»; the models dialog\'s Refresh is decided by the server off the whole record');
   const ap = read('src/lib/app.js'), sp = read('src/lib/session-props.js'), sl = read('src/lib/session-lifecycle.js'), ra = read('src/resume-account.js');
   ok(ap.includes("if (a.type === 'provider') { opts.push(onHost ? [a.id, t('{name} (third party)', { name: a.name }) + ' — ' + t('this machine only'), true]") && sp.includes("if (x.type === 'provider') return !!rHost;") && sl.includes("if (a.type === 'provider') return rHostId ? t('A third-party model runs on this machine only for now") && ra.includes("if (a.type === 'provider') return { ok: false, why: 'remote-cannot-ship', since: null };"), 'on ANOTHER machine a provider row is never offered as usable — New Session (disabled, «this machine only»), Session Properties, the billing switcher (it would end the session and the create refuse) and the resume bar');
 

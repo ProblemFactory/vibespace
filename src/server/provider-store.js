@@ -67,6 +67,10 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
     return { ok: false, code: 'write-failed' };
   };
   let chain = Promise.resolve();
+  // THE KEY'S GENERATION (the chain cure's read, R2): a new key or a new address bumps it; a Test that started on an older one
+  // writes no verdict (it tested what is no longer there) — memory only: a restart ends every Test anyway
+  const gen = new Map();
+  const bump = (id) => gen.set(id, (gen.get(id) || 0) + 1);
   const one = (fn) => { const run = chain.then(fn); chain = run.catch(() => { }); return run; };
   const put1 = (id, to) => (rs) => rs.map((r) => (r.id === id ? to : r));
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -91,7 +95,9 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
     file,
     durable,
     /** does the VAULT hold this record's key (its names, no key read — a locked vault answers too) */
-    hasKey(id) { try { const v = vault(); return !!v && typeof v.secretNames === 'function' && v.secretNames().some((n) => n.name === MP.keyEntryOf(id)); } catch { return false; } },
+    /** the record's key generation (the Test captures it at its start) */
+    generationOf: (id) => gen.get(id) || 0,
+    hasKey(id) { try { const v = vault(); if (!v) return false; if (typeof v.hasEntry === 'function') return !!v.hasEntry(MP.keyEntryOf(id)); return typeof v.secretNames === 'function' && v.secretNames().some((n) => n.name === MP.keyEntryOf(id)); } catch { return false; } },   // the entry asked by name (no list built per row)
     list: () => [...MP.PRESETS, ...records].map(filled),
     /** the third-party records only (the wizard's roster) */
     thirdParty: () => records.map(filled),
@@ -174,9 +180,10 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
       const old = store.keyOf(id);   // put back if the record's write fails (the tail must name the key the vault holds)
       const sealed = seal(id, key);
       if (!sealed.ok) return sealed;
-      const next = { ...p, keyRef: MP.keyRefOf(id), tail: MP.tailOf(key) };
+      bump(id);
+      const next = { ...p, keyRef: MP.keyRefOf(id), tail: MP.tailOf(key), tested: {}, lastTestAt: null };   // a new key was never tested (the chain cure: the wizard never says «Works» for it)
       const w = await commit(put1(id, next), undoOf(id, p, next));
-      if (!w.ok) { restoreKey(id, old, undoOf(id, next, p)); return w; }
+      if (!w.ok) { bump(id); restoreKey(id, old, undoOf(id, next, p)); return w; }   // the old key back: a Test pressed meanwhile tested the new one (the delta read, D3)
       return { ok: true, provider: filled(next) };
     }); },
     /** the roster's rename / the default model / a SELF-HOSTED one's address or interface — validated whole like put.
@@ -195,11 +202,11 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
       errors.push(...MP.validateProvider(raw));
       if (shipped && shipped.baseRequired && !raw.baseUrl) errors.push({ field: 'baseUrl', code: 'base-url' });
       if (errors.length) return { ok: false, code: 'invalid', errors };
-      const next = MP.normalizeProvider(moves ? { ...raw, tail: MP.tailOf(c.key) } : raw);
+      const next = MP.normalizeProvider(moves ? { ...raw, tail: MP.tailOf(c.key), tested: {}, lastTestAt: null } : raw);   // a new address (and its key) was never tested
       const old = moves ? store.keyOf(id) : null;
-      if (moves) { const sealed = seal(id, c.key); if (!sealed.ok) return sealed; }
+      if (moves) { const sealed = seal(id, c.key); if (!sealed.ok) return sealed; bump(id); }
       const w = await commit(put1(id, next), undoOf(id, p, next));
-      if (!w.ok) { if (moves) restoreKey(id, old, undoOf(id, next, p)); return w; }
+      if (!w.ok) { if (moves) { bump(id); restoreKey(id, old, undoOf(id, next, p)); } return w; }
       return { ok: true, provider: filled(next) };
     }); },
     /** the record, then its sealed key (a locked vault forgets too — secretDrop needs no key) */
@@ -226,9 +233,10 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
       return { ok: true, id, keyDropped };
     }); },
     /** THE TEST'S RESULT (lane lg-providers U4, src/server/provider-test.js): the verdict per harness + lastTestAt */
-    noteTested(id, harness, verdict, at) { return one(async () => {
+    noteTested(id, harness, verdict, at, generation = null) { return one(async () => {
       const p = thirdParty(id);
       if (!p) return { ok: false, code: 'unknown' };
+      if (generation !== null && generation !== (gen.get(id) || 0)) return { ok: false, code: 'changed' };   // a new key / address since the Test began
       const next = MP.normalizeProvider({ ...p, lastTestAt: at, tested: { ...(p.tested || {}), [harness]: { verdict, at } } });
       const w = await commit(put1(id, next), undoOf(id, p, next));
       return w.ok ? { ok: true, provider: filled(next) } : w;

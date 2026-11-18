@@ -950,7 +950,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           // the old else-branch labeled it "— API …undefined" (2.369.18, same
           // class as the New Session dialog's fix)
           ...acctList.map(a => ({ value: a.id, label: (a.pooled || a.type === 'pooled') ? a.name + (a.currentName ? ` → ${a.currentName}` : ' · ' + tr('pool'))
-            : a.type === 'subscription' ? `${a.name} (${tr('subscription')})` : `${a.name} — API …${a.tail}` })),
+            : a.type === 'provider' ? tr('{name} (third party)', { name: a.name }) + (s.host ? ' — ' + tr('this machine only') : '')   // lane lg-providers chain cure: as New Session / Session Properties name it
+            : a.type === 'subscription' ? `${a.name} (${tr('subscription')})` : (a.tail ? `${a.name} — API …${a.tail}` : a.name) })),
         ], 'account'));
       }
     };

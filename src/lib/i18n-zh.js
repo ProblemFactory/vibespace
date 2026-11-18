@@ -10357,6 +10357,7 @@ export default {
   "At most 512 characters": "最多 512 个字符", // lane lg-providers
   "This is a Claude subscription login, not a provider’s key — it is never sent to a third party": "这是 Claude 订阅的登录凭据，不是提供方的密钥——它绝不会发给第三方", // lane lg-providers
   "An address starts with https:// (or http:// on your own network)": "地址以 https:// 开头（在你自己的网络里也可以是 http://）", // lane lg-providers
+  "Type the address plainly — no spaces, no % sign, no backslash, no full-width or non-English characters": "直接输入地址——不要空格、% 号、反斜杠、全角或非英文字符", // lane lg-providers chain cure
   "This is an Anthropic key — add it as an Anthropic API account, not a third party": "这是 Anthropic 的密钥——请把它添加为 Anthropic API 账号，而不是第三方", // lane lg-providers
   "Paste the key alone — without quotes or the name in front of it": "只粘贴密钥本身——不要带引号，也不要带前面的名字", // lane lg-providers
   "Outside your own network the address must start with https://": "在你自己的网络之外，地址必须以 https:// 开头", // lane lg-providers
@@ -10390,6 +10391,12 @@ export default {
   "{provider} is saved. Each agent that can use it is tested once:": "{provider} 已保存。能用它的每个 agent 各测试一次：", // lane lg-providers
   "Which model answers in new conversations": "新对话用哪个模型回答", // lane lg-providers
   "Get the model list from {provider}": "从 {provider} 获取模型列表", // lane lg-providers
+  "Get the model list first — {provider} has no model yet": "请先获取模型列表——{provider} 还没有模型", // lane lg-providers chain cure
+  "Type a model id first — {provider} has no model yet": "请先输入模型 ID——{provider} 还没有模型", // lane lg-providers chain cure
+  "the provider could not be changed": "未能更改该提供方", // lane lg-providers chain cure
+  "the provider list could not be written": "未能写入提供方列表", // lane lg-providers chain cure
+  "the models could not be written yet — the hub tries again": "模型尚未写入——中枢会再试", // lane lg-providers chain cure
+  "the models could not be saved": "未能保存模型", // lane lg-providers chain cure
   "Other model id (optional)": "其他模型 id（可选）", // lane lg-providers
   "{provider} is ready. It can be used by:": "{provider} 已就绪。可以使用它的有：", // lane lg-providers
   "Pick it in the account row of New Session. It has no usage reading — you pay {provider} by use.": "在「新建对话」的账号行里选它。它没有用量读数——你按用量付费给 {provider}。", // lane lg-providers
@@ -10417,6 +10424,7 @@ export default {
   "This provider does not offer what this agent needs": "这个提供方不提供这个 agent 需要的接口", // lane lg-providers
   "This provider has no key — paste it again": "这个提供方没有密钥——请重新粘贴", // lane lg-providers
   "A test of this provider is running already": "这个提供方的测试已经在运行", // lane lg-providers
+  "The key or the address changed while it was being tested — test it again": "测试进行中密钥或地址已更改——请重新测试", // lane lg-providers chain cure
   "Only a person on this page can run a test": "只有在此页面上的人才能运行测试", // lane lg-providers
   "Remove the model provider \"{name}\"?": "移除模型提供方「{name}」？", // lane lg-providers
   "Its key leaves the vault and the provider leaves every agent's account list. Conversations already running on it keep working until they restart.": "它的密钥会离开保险库，这个提供方也会从每个 agent 的账号列表里消失。已经在用它的对话会继续工作，直到重启。", // lane lg-providers
