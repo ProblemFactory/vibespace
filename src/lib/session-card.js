@@ -125,8 +125,8 @@ export function registerSessionCardMenu() {
       const s = c.s;
       const ok = await showConfirmDialog({ title: tr('Terminate Session'), message: tr('Terminate session "{name}"? The running agent process will be killed.', { name: c.displayName }), confirmText: tr('Terminate'), danger: true });
       if (!ok) return;
-      if (s.webuiId) c.app.killSession(s.webuiId, undefined, { endTree: true });   // B-c134: a person's Terminate ends the background tree
-      else if (s.pid) c.app.killPid(s.pid, s.host);
+      if (s.webuiId) c.app.endConversation(s.webuiId, undefined, { endTree: true });   // B-70f9 ②: a person's Terminate — the kill, then the notice of its running jobs · B-c134: it ends the background tree
+      else if (s.pid) { c.app.killPid(s.pid, s.host); c.app.noticeOwnedJobs?.([s.sessionId]); }
     },
   });
   // ── the card's right-click menu, group by group (explicit separators) ──
@@ -996,8 +996,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       e.stopPropagation();
       const ok = await showConfirmDialog({ title: tr('Terminate Session'), message: tr('Terminate session "{name}"? The running agent process will be killed.', { name: displayName }), confirmText: tr('Terminate'), danger: true });
       if (!ok) return;
-      if (s.webuiId) app.killSession(s.webuiId, undefined, { endTree: true });   // B-c134: a person's Terminate ends the background tree
-      else if (s.pid) app.killPid(s.pid, s.host);
+      if (s.webuiId) app.endConversation(s.webuiId, undefined, { endTree: true });   // B-70f9 ②: a person's Terminate — the kill, then the notice of its running jobs · B-c134: it ends the background tree
+      else if (s.pid) { app.killPid(s.pid, s.host); app.noticeOwnedJobs?.([s.sessionId]); }
     };
     actionsDiv.appendChild(terminateBtn);
   }

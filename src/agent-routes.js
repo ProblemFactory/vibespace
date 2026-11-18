@@ -8,8 +8,7 @@
  * CLAUDE.md notes on renderContext/persisted-output before touching payloads.
  */
 const os = require('os');
-const fs = require('fs');
-const mountDoor = require('./mount-door.js'); // B-70f9: a job's folder on the hub is asked only through the blocked-path door
+const { jobWhere } = require('./server/job-where.js'); // B-70f9: where a job runs — a remote conversation's folder asked through the blocked-path door, bounded
 const path = require('path');
 const crypto = require('crypto');
 const OF = require('./server/owner-facts.js'); // lane agent-context-owner-facts (B-7960): the owner's clock + tray words — every time and tray sentence an agent reads here
@@ -2730,16 +2729,13 @@ app.post('/api/agent/jobs', async (req, res) => {
   else if (!spec.cmd && b.action && b.action.type === 'notify') { /* pure notify cron */ }
   else if (!spec.cmd) return res.status(400).json({ error: 'cmd required' });
   // B-70f9: A JOB RUNS ON THE HUB'S MACHINE. A conversation on ANOTHER machine (its session's host) asking for a folder the hub's
-  // machine does not have is refused NOW, by name — the folder asked off the loop, through the blocked-path door first
-  const hubMachine = os.hostname(), remoteHost = a.session && a.session.host ? String(a.session.hostName || a.session.host) : null;
-  const jobCwd = spec.cmd && typeof spec.cmd.cwd === 'string' && spec.cmd.cwd ? spec.cmd.cwd : null;
-  let cwdExists = null, cwdBlocked = false;
-  if (remoteHost && jobCwd) {
-    if (mountDoor.pathBlocked(jobCwd)) cwdBlocked = true;
-    else { try { cwdExists = (await fs.promises.stat(jobCwd)).isDirectory(); } catch { cwdExists = false; } }
-  }
-  const where = jobModel.jobWhereVerdict({ hubMachine, sessionMachine: remoteHost, cwd: jobCwd, cwdExists, cwdBlocked });
-  if (!where.ok) return res.status(400).json({ error: where.error, code: where.code, machine: hubMachine });
+  // machine does not have is refused NOW, by name — src/server/job-where.js (a task's folder or a schedule's task's; the blocked-path
+  // door first, one bounded stat off the loop; a relative folder refused). A check that throws is said — never a request left open
+  const hubMachine = os.hostname();
+  let where;
+  try { where = await jobWhere({ body: b, session: a.session, hubMachine }); }
+  catch (e) { return res.status(500).json({ error: `the folder check failed: ${(e && e.message) || e} — nothing was created`, code: 'where-failed', machine: hubMachine }); }
+  if (!where.ok) return res.status(where.code === 'folder-blocked' ? 503 : 400).json({ error: where.error, code: where.code, machine: hubMachine });
   const r = a.jm.create(spec, a.caller);
   if (r.error) return res.status(400).json({ error: r.error });
   // Tell the creating agent up front whether ITS conversation will hear back

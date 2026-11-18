@@ -1,6 +1,6 @@
 # Design: Background Work — agent-detachable Services, Long Tasks, and Cron
 
-Status: **IMPLEMENTED 2.342.0; B-70f9 DECIDED 2026-11-18 (the owner, option A — «推荐没问题»): jobs run on the hub's machine only.** Built for it: a job says where it runs and a remote conversation's folder the hub lacks is refused by name (§8a); ending or archiving a conversation names the jobs it still runs with «Stop these too» (§9). Decided NOT to be: cross-machine jobs (a job on a named paired machine, a job that follows its conversation — PARKED until the owner asks), the one-press import of system units and crontab lines, the second panel tier, the taskbar badge segment, more resource limits (none until an incident names one), the stored stop-with-owner flag (retired). This doc remains the authoritative spec for what IS built.
+Status: **IMPLEMENTED 2.342.0; B-70f9 DECIDED 2026-11-18 (the owner, option A — «推荐没问题»): jobs run on the hub's machine only.** Built for it: a job says where it runs and a remote conversation's folder the hub lacks is refused by name (§8, «Where a job runs»); ending or archiving a conversation names the jobs it still runs with «Stop these too» (§9). Decided NOT to be: cross-machine jobs (a job on a named paired machine, a job that follows its conversation — PARKED until the owner asks), the one-press import of system units and crontab lines, the second panel tier, the taskbar badge segment, more resource limits (none until an incident names one), the stored stop-with-owner flag (retired). This doc remains the authoritative spec for what IS built.
 v1→v2: three-lens red team (40 findings, 5 critical) incorporated.
 v2→v3 (owner decisions 2026-08-17): ① services must survive a pod rebuild via
 boot replay — that is sufficient; long tasks need NOT survive pod rebuilds.
@@ -97,7 +97,7 @@ broadcast `jobs-updated`), per-run logs `data/job-logs/<jobId>/<runTs>.log`.
   "name": "collect-x",              // unique per OWNER SCOPE (not global): collision
                                      // auto-suffixes with a warning; ids are the only
                                      // global handle (no existence oracle / squatting)
-  "note": "…", "hostId": null,       // null = this instance; machine id in M2
+  "note": "…", "hostId": null,       // null = this instance — always (B-70f9: a job runs on the hub's machine; cross-machine jobs not built)
 
   "cmd": { "argv": [...], "cwd": "/abs", "env": { /* NON-secret; values render to owner/user only, never in jobs-updated payloads */ } },
   "envFrom": [],                     // RETIRED (2.369.365, §7): records keep the empty list; a named one is refused `envfrom_retired`
@@ -140,7 +140,6 @@ broadcast `jobs-updated`), per-run logs `data/job-logs/<jobId>/<runTs>.log`.
                                      // agent defaults: view=group (an ungrouped creator's
                                      // job: its owner + the user only), control=session;
                                      // user locks stick (§7)
-  "stopWithOwner": false,
 
   "desiredUp": true,
   "state": "up|down|starting|failed|done|interrupted|unverified|scheduled|missed|awaiting-user",
@@ -316,7 +315,7 @@ line (covers curses-less simple scripts). Multi-round: post another panel.
 Everything renders escaped; the user's answers are visible to owner/user only
 (they may contain codes — never echoed in `list`).
 
-**Tier 2 (M3, only if tier 1 proves insufficient): sandboxed HTML app** — agent
+**Tier 2 (CLOSED by B-70f9, 2026-11-18 — not built): sandboxed HTML app** — agent
 writes an HTML file rendered in `<iframe sandbox="allow-scripts">` (no
 same-origin, no cookies) with a tiny postMessage bridge (`vsui.submit(obj)`,
 `vsui.progress(p)`); our DOM never touches agent markup. Deferred.
@@ -376,6 +375,8 @@ same-origin, no cookies) with a tiny postMessage bridge (`vsui.submit(obj)`,
 
 ## 8. CLI — full specification (`vibespace-job`, static tracked)
 
+**Where a job runs (B-70f9, the owner's option A, 2026-11-18).** A job runs on the HUB's machine — never on another. `run` answers `where: runs on <machine> in <folder>` and `show` names `machine:`. A conversation on ANOTHER machine names its folder as an absolute path (the CLI resolves `--cwd` where it runs); the hub asks that folder before anything is created — the blocked-path door first, one bounded stat off the loop (src/server/job-where.js) — and refuses by name: `wrong-machine` (not there), `folder-blocked` (a mount that does not answer, 503), `relative-cwd` (relative or none). A task's folder and a schedule's task's are both asked. Two same-named folders are never told apart: the machine and the path are said.
+
 Conventions: `<ref>` = job id (`jb-…`) or scoped name; durations accept
 `30s/10m/6h`; all verbs honor access scopes server-side; every error names the
 fix; no-args prints usage + the caller's visible jobs. From inside a job
@@ -392,14 +393,12 @@ CREATE (one verb; flags pick the kind)
       (a secret: from the vault only — design-vault-service-secret; the `--secret` / envFrom road never shipped in the CLI and is retired, `envfrom_retired`, §7)
       --view session|group|all     default group
       --control session|group|all  default session
-      --host MACHINE         M2; default local
     service (--keep-up):
       --keep-up              makes it a service
       --restart on-failure|always|never   default on-failure
       --health port:3000 | http://127.0.0.1:3000/healthz | cmd:"CMD"   optional
       --port N …             declared listeners (annotates port sweep)
       --publish              expose via forward/frp; URL shown in panel + `poll`
-      --stop-with-owner      opt-in coupling to the owning conversation
     task (default kind):
       --until "TEXT"         literal marker in output ⇒ completion (grace 30s then TERM)
       --timeout 6h           default unbounded

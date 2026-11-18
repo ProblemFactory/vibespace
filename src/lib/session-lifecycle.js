@@ -650,6 +650,8 @@ export function installSessionLifecycle(App, ctx = {}) {
   // the door's options ({ endTree }, B-c134) ride the kill
   endConversation(webuiId, backendSessionId, opts = {}) {
     if (!webuiId) return;
+    // a RESUME's own close (the fence: _reopenWin / _closeSecondView) is no person's end — the kill as before, no notice
+    if ((this._fenceOpen || 0) > 0) { this.killSession(webuiId, backendSessionId); return; }
     const all = this.sidebar?._allSessions || [];
     const s = all.find((x) => x.webuiId === webuiId);
     this.killSession(webuiId, backendSessionId, opts);
@@ -658,9 +660,16 @@ export function installSessionLifecycle(App, ctx = {}) {
   // A «Clear content…» is news here (the record-clear rule): a clear that lands while the list is on its way names its jobs by
   // id, never by the words it cleared, and one that lands while the notice shows takes the notice down. The toast history keeps
   // the head and the count alone — never the jobs' names; a failed press says how many, by count
-  async noticeOwnedJobs(cids) {
+  noticeOwnedJobs(cids) {
     const want = (cids || []).filter(Boolean);
     if (!want.length) return;
+    // a tab group's ✕ closes each of its tabs at once: the ends of one moment gather into ONE notice and ONE read of the list
+    const q = this._ownedNoticeQ || (this._ownedNoticeQ = { cids: new Set(), t: null });
+    for (const c of want) q.cids.add(c);
+    if (q.t) return;
+    q.t = setTimeout(() => { const list = [...q.cids]; this._ownedNoticeQ = null; this._noticeOwnedNow(list).catch(() => { }); }, 250);
+  },
+  async _noticeOwnedNow(want) {
     const clearedNow = new Set();
     let shown = null, ids = null;
     const off = this.ws?.onGlobal?.((m) => {
@@ -679,10 +688,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       const res = await Promise.all(n.jobs.map((j) => fetchJson(`/api/jobs/${encodeURIComponent(j.id)}/stop`, { method: 'POST' }).then((a) => ({ j, a }), () => ({ j, a: null }))));
       const bad = res.filter((x) => !x.a || x.a.error);
       if (bad.length) showToast(t('Could not stop {n} of these background jobs: {error}', { n: bad.length, error: (bad[0].a && bad[0].a.error) || t('no answer') }), { type: 'error' });
-      else showToast(t('Stopped {n} background jobs', { n: res.length }));
+      else showToast(res.length === 1 ? t('Stopping 1 background job') : t('Stopping {n} background jobs', { n: res.length }));   // a stop is asked: each ends within its grace
     };
     ids = new Set(n.jobs.map((j) => j.id));
-    shown = showToast(t(n.words.key, n.words.params), { duration: 12000, action: { label: t('Stop these too'), run: stopAll }, history: { m: t('A conversation ended; {n} of its background jobs keep running', { n: n.jobs.length }) } });
+    shown = showToast(t(n.words.key, n.words.params), { duration: 12000, action: { label: t('Stop these too'), run: stopAll }, history: { m: t('Background jobs keep running: {n}', { n: n.jobs.length }) } });
     setTimeout(done, 12500);
   },
   killSession(webuiId, backendSessionId) {

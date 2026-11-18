@@ -447,6 +447,7 @@ export function installSidebarState(SidebarClass) {
       this._dissolveFolderArchive(sessionOrKey, stateKey);
     } else if (stateKey) {
       this._archivedIds.add(stateKey);
+      if (sessionOrKey && typeof sessionOrKey === 'object') this.app.noticeOwnedJobs?.([sessionOrKey.sessionId || sessionOrKey.backendSessionId]);   // B-70f9 ②: the card's Archive — its jobs still run, named
     }
     this._pushUserState(); this._render(); this.app.updateTaskbar();
   };
@@ -501,6 +502,7 @@ export function installSidebarState(SidebarClass) {
     }
     this._pushUserState(); this._render(); this.app.updateTaskbar();
     showToast(tr('Archived {n} sessions — new sessions here start archived', { n }));
+    this.app.noticeOwnedJobs?.((sessions || []).map((s) => s.sessionId || s.backendSessionId));   // B-70f9 ②: Archive project — the jobs its conversations still run, ONE notice
   };
 
   proto.unarchiveProject = function(cwd, host) {
