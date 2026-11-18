@@ -2977,10 +2977,10 @@ console.log('㊴ A RECORD A CSS RULE HIDES WHOLE IS NO DRAWN RECORD (B-2adb — 
   // E — the follow-up ②: ONE LIST of what is hidden — the run fold (chat-view _updateRuns kindOf) reads the cards' hiddenRecord and
   // keeps no twin of its own (they agreed by luck: the fold's twin had no superseded record)
   const CVS = fs.readFileSync(path.join(ROOT, 'src/lib/chat-view.js'), 'utf8');
-  const oneOf = (cv) => ({ import: cv.includes("import { NeedsCards, hiddenRecord } from './chat-needs-card.js';"), reads: cv.includes("        if (hiddenRecord(el)) return 'skip';"), twins: (cv.match(/el\.classList\.contains\('(chat-empty-thinking|chat-msg-hook|chat-stop-hook-notice|chat-vs-note)'\)\) return 'skip';/g) || []).length, exported: /^export \{ hiddenRecord \};$/m.test(CARD) });
+  const oneOf = (cv) => ({ import: cv.includes("import { NeedsCards, hiddenRecord } from './chat-needs-card.js';"), reads: cv.includes("        if (hiddenRecord(el)) return 'skip';"), twins: (cv.match(/el\.classList\.contains\('(chat-empty-thinking|chat-msg-hook|chat-stop-hook-notice|chat-vs-note)'\)\) return 'skip';/g) || []).length, exported: /^export \{ hiddenRecord \};$/m.test(CARD) }); // stale-pins: kept (a deliberate absence check: the twin lines must stay gone)
   const one = oneOf(CVS);
   ok(one.import && one.reads && one.twins === 0 && one.exported, `RED-able (94f94988a: four twin lines in kindOf): the run fold reads the ONE list of hidden records (${J(one)})`, one);
-  const oneBase = oneOf(CVS.replace("        if (hiddenRecord(el)) return 'skip';", "        if (hooksHidden && el.classList.contains('chat-msg-hook')) return 'skip';"));
+  const oneBase = oneOf(CVS.replace("        if (hiddenRecord(el)) return 'skip';", "        if (hooksHidden && el.classList.contains('chat-msg-hook')) return 'skip';")); // stale-pins: kept (a RED control that plants a twin line back on purpose)
   ok(oneBase.twins === 1 && !oneBase.reads, `CONTROL (the follow-up ②): a twin line put back in kindOf reds the census (${J(oneBase)})`);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
