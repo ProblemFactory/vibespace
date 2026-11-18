@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // test-loop-census — lane hub-loop-stalls, unit loop-day-report M3 (+ cure r2, S2 «EVERY HUB-SIDE FILE HAS AN OWNER»): WHAT
 // THE MAIN LOOP SPENDS ITSELF ON, BY OWNER (FAST: PURE + a static census of the tree + the REAL watchdog thread in this
-// process for ~5 s, 1.6 s of it planted burns; src/loop-census.js, the census in src/server/sync-fs-witness-worker.js,
+// process for ~6 s, 2.2 s of it planted burns; src/loop-census.js, the census in src/server/sync-fs-witness-worker.js,
 // `census()` in src/server/sync-fs-witness.js).
 //   ① PURE — ownerOf over a real file per owner (+ the families two owners share, the helpers, files with no row);
 //      bookOf over the real shapes: a session's creation under the page handler books the conversation, the vault engine
@@ -15,7 +15,9 @@
 //      <scratch>/src/server/channels-burn.js ⇒ its busy ticks book «channels», the idle half books idle; the same burn inside
 //      a helper it calls ⇒ «channels» through a helper (viaHelper); 40 helper frames deep ⇒ outside + deep; the setting off
 //      ⇒ paused, nothing asked; a 0.8 s synchronous child under a 0.4 s hold bar ⇒ held, and THE HOLD TAKES the census's ask
-//      in flight (its first sample — never a wait behind it); a capture running ⇒ the census asks nothing; the take resets
+//      in flight (its first sample — never a wait behind it); a capture running ⇒ the census asks nothing; the take resets.
+//      B-518e (red only in packed runs): the idle half is waited for by its COUNT; a capture whose asks pass its cost bound
+//      stops early and the census asks again (d0, placed) — (d)'s own capture (1.5 s) carries bounds it cannot reach
 //   ④ the doors — no watchdog / the census off ⇒ census() answers null; the three takers through one function
 // MUTANTS (each run on a scratch COPY outside every worktree, each red here): the walk passing owned frames (①b), no vault
 // rule (①b ②), the helper not counted (①b ③a2), deep never said (①b ③a3), two owners' rules swapped (①a), a rule dropped
@@ -252,18 +254,31 @@ const SFW = require(path.join(REPO, 'src/server/sync-fs-witness.js'));
 const said = [];
 let samplingOn = true;
 const quiet = { warn: (l) => said.push(String(l)), log() {}, error() {}, info() {} };
+// the captures' own options (B-518e): handed to every capture as it starts (loop-holds spreads captureOpts into each ask) —
+// (d0) places the cost bound, (d) lifts it
+const CAP = {};
 const W = SFW.create({ rootDir: ROOT, armed: true, readMountinfo: () => '', fresh: true, beatMs: 50, holdMs: 400, noAnswerMs: 50, liveMs: 60000, censusEveryMs: 50, samplingOn: () => samplingOn,
-  log: quiet, holdsOptions: { eluEveryMs: 50, eluBeforeMs: 500, captureMs: 800, captureEveryMs: 20, autoCapture: false } }).start({ installHook: false });
+  log: quiet, holdsOptions: { eluEveryMs: 50, eluBeforeMs: 500, captureMs: 1500, captureEveryMs: 20, autoCapture: false, captureOpts: CAP } }).start({ installHook: false });
 const sumOf = (t) => Object.values(t.ticks).reduce((s, n) => s + n, 0) + Object.values(t.families).reduce((s, n) => s + n, 0);
 try {
   await sleep(400);   // the watchdog thread up
   ok(!!(await W.census()), 'census() answers the take of a running census');
-  // (a) half busy inside the channels owner, half idle
+  // (a) half busy inside the channels owner, half idle. B-518e: the idle half is WAITED FOR BY ITS COUNT — takes summed
+  // until 5 idle ticks (at most 80 tries of 100 ms, an end for a census that never ticks), never «≥ 5 in 400 ms» of a 50 ms
+  // timer: beside other suites the watchdog thread's own timer runs late (4 idle ticks in the 400 ms on the first test
+  // machine in a packed run, green alone). The burn's take is the busy half alone; what the idle takes book is printed
+  // (an ask in flight across a take books its later ticks on its answer's stack, so a tick of channels there is the law's)
   for (let i = 0; i < 4; i++) { B.burn(140); await sleep(1); }
-  await sleep(400);
   const a = await W.census(), fa = LC.censusFold(a), faCh = fa.shares.find((s) => s.family === 'channels') || {};
-  ok(a && a.families.channels >= 5 && faCh.share > 0.5 && fa.shares.every((s) => s === faCh || !(s.share > faCh.share)) &&a.ticks.idle >= 5 && a.asks >= 5 && a.askMaxMs > 0 && a.everyMs === 50 && a.viaHelper === 0 && a.deep === 0,
-    `(a) a burn inside src/server/channels-burn.js: «channels» books ${a && a.families.channels} of ${fa.busyTicks} busy ticks, the idle half ${a && a.ticks.idle} idle ticks; ${a && a.asks} asks, their own run ${a && a.askOwnMs.toFixed(2)} ms (largest ${a && a.askMaxMs.toFixed(3)} ms); none through a helper, none deep`, a);
+  let idleTicks = 0, idleChannels = 0, idleTakes = 0;
+  for (let i = 0; i < 80 && idleTicks < 5; i++) {
+    await sleep(100);
+    const take = await W.census();
+    if (!take) continue;
+    idleTakes++; idleTicks += take.ticks.idle; idleChannels += take.families.channels || 0;
+  }
+  ok(a && a.families.channels >= 5 && faCh.share > 0.5 && fa.shares.every((s) => s === faCh || !(s.share > faCh.share)) && idleTicks >= 5 && a.asks >= 5 && a.askMaxMs > 0 && a.everyMs === 50 && a.viaHelper === 0 && a.deep === 0,
+    `(a) a burn inside src/server/channels-burn.js: «channels» books ${a && a.families.channels} of ${fa.busyTicks} busy ticks; the idle half ${idleTicks} idle ticks over ${idleTakes} takes (${idleChannels} more on channels there); ${a && a.asks} asks, their own run ${a && a.askOwnMs.toFixed(2)} ms (largest ${a && a.askMaxMs.toFixed(3)} ms); none through a helper, none deep`, { a, idleTicks, idleChannels, idleTakes });
   // (a2) the same burn inside a HELPER the channels file calls: booked on channels, counted through a helper
   for (let i = 0; i < 4; i++) { B.viaHelper(100); await sleep(1); }
   const a2 = await W.census(), fa2 = LC.censusFold(a2);
@@ -287,15 +302,36 @@ try {
   const c = await W.census(), held = W.holds().ring().slice(h0);
   ok(c && held.length === 1 && held[0].samples >= 1 && c.ticks.held >= 1 && c.ticks.notSampled >= 1,
     `(c) a 0.8 s synchronous child: ${c && c.ticks.held} ticks held; the HOLD TOOK the census's ask in flight — its first sample «${held[0] && held[0].frame}» — and the census's waiting ticks are not sampled (${c && c.ticks.notSampled})`, { c, held });
-  // (d) a capture running: the census asks nothing (its busy ticks are not sampled); the capture samples
+  // (d0) B-518e — WHAT TURNED (d) RED IN A PACKED RUN, NAMED BY ELIMINATION AND PLACED: «7 asks — the capture took 2 samples»
+  // (the first test machine, the box's zone, green alone). The old leg printed no `stopped`, so the road is read off what
+  // could end the capture: its window (it began before (d)'s take, and that take lasted 421 ms of its 800), a debugger or
+  // the heap (the census paused nothing), a halved rate (it frees no census tick) — and its COST bound: its asks' own run
+  // past 2 % of the window, 16 ms here (an ask's own run is the main thread's, its first instruction to its note, so a
+  // thread that waits for a CPU inside an ask spends it). With the capture gone the census asks again. Placed here with the
+  // bound at 1 µs: the capture stops after its first answered ask, says «cost», and the census asks.
+  CAP.costMaxMs = 0.001;
+  const r0 = W.holds().startCapture({ auto: false });
+  await W.census();
+  for (let i = 0; i < 4; i++) { B.burn(100); await sleep(1); }
+  const d0 = await W.census();
+  for (let i = 0; i < 40 && (W.holds().captureReport().last || {}).id !== r0.id; i++) await sleep(100);   // its end and its names
+  const last0 = W.holds().captureReport().last;
+  ok(r0.ok && last0 && last0.id === r0.id && last0.stopped === 'cost' && d0 && d0.asks >= 1,
+    `(d0) a capture whose asks pass its cost bound stops early («${last0 && last0.stopped}», ${last0 && last0.samples} samples) and the census asks again (${d0 && d0.asks} asks) — the packed run's shape, placed`, { r0, d0, last0: last0 && { id: last0.id, samples: last0.samples, stopped: last0.stopped, costMs: last0.costMs } });
+  // (d) a capture running: the census asks nothing (its busy ticks are not sampled); the capture samples. This capture's cost
+  // bounds are lifted (one ask past 4 ms halving its rate, the sum past 2 % stopping it — the capture's own law, judged in
+  // test-cpu-capture-live) and its window is 1.5 s (was 0.8 s) for a take of ~0.4 s: what (d) judges is the census beside a
+  // capture that RUNS through the take, and a red says how the capture ended and how long the take was against its window
+  CAP.costMaxMs = 1e9; CAP.askBoundMs = 1e9;
   const r = W.holds().startCapture({ auto: false });
   await W.census();   // after the capture's message (one port, in order): this take's window lies inside the capture
   for (let i = 0; i < 4; i++) { B.burn(100); await sleep(1); }
   const d = await W.census();
-  for (let i = 0; i < 40 && !W.holds().captureReport().last; i++) await sleep(100);   // the capture's end (its 0.8 s window, then its names)
+  for (let i = 0; i < 40 && (W.holds().captureReport().last || {}).id !== r.id; i++) await sleep(100);   // the capture's end (its 1.5 s window, then its names)
   const last = W.holds().captureReport().last;
-  ok(r.ok && d && d.asks === 0 && d.ticks.notSampled >= 3 && last && last.samples >= 10,
-    `(d) while a capture runs the census asks nothing: ${d && d.ticks.notSampled} busy ticks not sampled, ${d && d.asks} asks — the capture took ${last && last.samples} samples`, { r, d, last: last && { samples: last.samples, split: last.split } });
+  const dSpan = d ? d.toM - d.fromM : null;
+  ok(r.ok && d && d.asks === 0 && d.ticks.notSampled >= 3 && last && last.id === r.id && !last.stopped && dSpan < last.windowMs && last.samples >= 10,
+    `(d) while a capture runs the census asks nothing: ${d && d.ticks.notSampled} busy ticks not sampled, ${d && d.asks} asks — the capture took ${last && last.samples} samples${last && last.stopped ? `, STOPPED «${last.stopped}»` : ''}; the take ${dSpan != null ? dSpan.toFixed(0) : '?'} ms of the capture's ${last && last.windowMs} ms window`, { r, d, last: last && { id: last.id, samples: last.samples, split: last.split, stopped: last.stopped, costMs: last.costMs, windowMs: last.windowMs } });
   // (e) the take resets: the next hour starts where it ended, from zero
   await sleep(250);
   const e1 = await W.census(), e2 = await W.census();
