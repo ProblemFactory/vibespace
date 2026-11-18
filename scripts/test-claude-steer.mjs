@@ -15,13 +15,14 @@
 //      after a restart — ONCE (the live send's msgId, the CLI's own later record of the same words claim it)
 //   §7 (r2) the strip draws no ⚡ on a row the wrapper marks `steerable: false`; each refusal says why in its own words
 //   §8 (B-28b1, the same row as B-1c04) THE STOP THAT CAME LATE: the REAL wrapper over the stand-in CLI with a stall PLACED in
-//      the window (the follow-up's request leaves 12 ms after its init, the stand-in reads the second interrupt at 80 ms):
+//      the window BY ORDER (the stand-in reads the wrapper's second interrupt only after its follow-up's request left / its answer
+//      was said / it ended — never by a clock):
 //      the stop-late fact rides the follow-up's result and the page draws it once; answered / ran to its end / a second Stop
 //      (held by COUNT: the stand-in reads nothing until both interrupts wait) / a 2.1.308 CLI; the stall the other way tells
 //      nothing; RED CONTROLS: a wrapper that never looks reports a clean stop, a rebuild that drops the mark loses the fact
 // THE REAL WRAPPER over the stand-in (the hand-over, the witness, Stop's follow-up interrupt, the RED legs on the 6428c67e
 // wrapper) is §0 of scripts/test-claude-steer-chrome.mjs — the fast tier's 910 s sum had 0.77 s left; §8 here is the one fast
-// exception (B-28b1: eight runs at once, 0.6 s on the test machine).
+// exception (B-28b1: ten runs at once, 0.6 s on the test machine).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -350,8 +351,10 @@ await guard('§r7 the hook bound is two facts: which hooks the CLI loads AND how
 // ── §8 THE STOP THAT CAME LATE (B-28b1 — the same row as B-1c04; the coordinator's ruling 2026-11-18 «TELL, DO NOT PRETEND») ──
 // A frame the CLI still held at Stop runs as a follow-up the wrapper interrupts on its init; on a loaded machine the CLI read that
 // second interrupt after its request had left (hosted: settle +57..66 ms). Proven with a STALL PLACED in the stand-in's window — a
-// fixed delay, never load: the follow-up's request leaves 12 ms after its init and the stand-in reads stdin again only at 80 ms.
-// Every other margin is wide (a 5 s tool, a 3 s follow-up, a 2 s request on the other side): Stop ends each run early.
+// placed by ORDER, never load or a clock (the coordinator's rule): the stand-in reads no stdin line after a follow-up's init until
+// its request has left (or its answer was said, or it ended) — so the wrapper's interrupt on that init is read only THEN; the other
+// direction gives the follow-up no request at all, so the interrupt is read first and ends it.
+// Every follow-up waits for ever unless its interrupt ends it (FOLLOW_MS 600 s) and the tool runs 5 s: Stop ends each run early.
 console.log('§8 the Stop that came late: the REAL chat-wrapper over the stand-in CLI, a stall placed in the window');
 await guard('§8', async () => {
   const { spawn } = await import('node:child_process');
@@ -402,32 +405,34 @@ await guard('§8', async () => {
   ok(cwSrc.split(TOK).length === 2, '§8 ANCHOR: the follow-up\'s own tokens (its result\'s usage), spelled once');
   const LANE = path.join(REPO, 'data/bin/chat-wrapper.js'), BLIND = mutantWrapper('blind', cwSrc.replace(MARK, '')), DROPS = mutantWrapper('drops', cwSrc.replace(CARRY, ' }; armBound(); }'));
   const SINCE = mutantWrapper('since', cwSrc.replace(TOK, "  const tokens = Object.values((result && result.model_usage_since_last_result) || {}).reduce((a, v) => a + sum(v, ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheCreationInputTokens']), 0);\n"));
-  const LATE = { STAND_IN_FOLLOW_REQ_MS: '12', STAND_IN_FOLLOW_STALL_MS: '80', STAND_IN_FOLLOW_MS: '3000' };
-  const AGENT = { STAND_IN_FOLLOW_REQ_MS: '2000', STAND_IN_FOLLOW_STALL_MS: '80', STAND_IN_FOLLOW_MS: '3000', STAND_IN_FOLLOW_AGENT_TOKENS: '900' };
+  // every follow-up waits for ever unless its interrupt ends it (FOLLOW_MS 600 s): the ORDER is the stand-in's own steps
+  const LATE = { STAND_IN_FOLLOW_REQ_MS: '12', STAND_IN_FOLLOW_HOLD_UNTIL: 'request', STAND_IN_FOLLOW_MS: '600000' };
+  const ONTIME = { STAND_IN_FOLLOW_MS: '600000' };   // no request at all: the interrupt is read first and ends the follow-up
+  const AGENT = { ...ONTIME, STAND_IN_FOLLOW_AGENT_TOKENS: '900' };
   let L, A, E, O, C, T2, M2, V, G, GS;
   try {
-    [L, A, E, O, C, T2, M2, V, G, GS] = await Promise.all([
-      run(LANE, 'late', LATE),                                                                                  // the request left, the interrupt read at 80 ms
-      run(LANE, 'answered', { ...LATE, STAND_IN_FOLLOW_REQ_MS: '5', STAND_IN_FOLLOW_ANSWER_MS: '10' }),         // …and the model spoke first
-      run(LANE, 'ran', { ...LATE, STAND_IN_FOLLOW_REQ_MS: '5', STAND_IN_FOLLOW_ANSWER_MS: '10', STAND_IN_FOLLOW_MS: '40' }),   // …and finished before 80 ms
-      run(LANE, 'ontime', { STAND_IN_FOLLOW_REQ_MS: '2000', STAND_IN_FOLLOW_STALL_MS: '80', STAND_IN_FOLLOW_MS: '3000' }),   // the stall the other way
+    [L, A, E, O, C, T2, M2, V, G, GS] = (await Promise.allSettled([
+      run(LANE, 'late', LATE),                                                                                  // the request left, THEN the interrupt read
+      run(LANE, 'answered', { ...LATE, STAND_IN_FOLLOW_REQ_MS: '5', STAND_IN_FOLLOW_ANSWER_MS: '10', STAND_IN_FOLLOW_HOLD_UNTIL: 'answer' }),   // …the model spoke, THEN
+      run(LANE, 'ran', { ...LATE, STAND_IN_FOLLOW_REQ_MS: '5', STAND_IN_FOLLOW_ANSWER_MS: '10', STAND_IN_FOLLOW_MS: '40', STAND_IN_FOLLOW_HOLD_UNTIL: 'end' }),   // …it ended, THEN
+      run(LANE, 'ontime', ONTIME),                                                                              // the other way: no request at all, the interrupt read first
       run(BLIND, 'blind', LATE),                                                                                // RED CONTROL: never looks
       run(LANE, 'second', { ...LATE, STAND_IN_FOLLOW_HOLD_INTERRUPTS: '2' }, { secondStop: true }),            // a second Stop during the follow-up (held by count)
       run(DROPS, 'drops', { ...LATE, STAND_IN_FOLLOW_HOLD_INTERRUPTS: '2' }, { secondStop: true }),            // RED CONTROL: the rebuild drops the mark
       run(LANE, 'old', { ...LATE, STAND_IN_CLI_VERSION: '2.1.308' }),                                           // a CLI before the per-result count: its `usage`
       run(LANE, 'agent', AGENT),                                                                                // on time, but an agent's tokens in the since-last count
       run(SINCE, 'since', AGENT),                                                                               // RED CONTROL: the since-last count tells falsely
-    ]);
+    ])).map((x) => { if (x.status === 'rejected') throw x.reason; return x.value; });   // every run ends (its finally kills its pair) before a throw
   } finally { for (const d of ctlDirs) fs.rmSync(d, { recursive: true, force: true }); }
   const rowsOf = (recs, live) => { const mm = createMessageManager('claude', 'stop-late'); if (live) { for (const r of recs) mm.processLive(r); } else mm.convertHistory(recs); return mm.messages.filter((m) => m.content?.[0]?.stopLate).map((m) => ({ status: m.status, text: m.content[0].text, late: m.content[0].stopLate })); };
   const S8 = (x) => ({ late: x.late, requests: x.requests, settled: x.settled, lateLines: x.lateLines });
   console.log(`    §8 agent tokens only — ${G.late.length} told (the since-last copy: ${GS.late.length})`);
   console.log(`    §8 leaked follow-ups (told) — late ${L.requests} (${L.late.length}) · answered ${A.requests} (${A.late.length}) · ran ${E.requests} (${E.late.length}) · on time ${O.requests} (${O.late.length}) · blind ${C.requests} (${C.late.length}) · second Stop ${T2.requests} (${T2.late.length}) · drops ${M2.requests} (${M2.late.length}) · 2.1.308 ${V.requests} (${V.late.length})`);
   ok(L.settled && L.requests === 1 && L.late.length === 1 && L.late[0].follow === 1 && L.late[0].how === 'billed' && L.late[0].cut === true && L.late[0].tokens > 0 && L.lateLines === 1,
-    '§8 the follow-up\'s request LEFT before the CLI read the second interrupt (stall 80 ms) ⇒ the stop-late fact rides ITS result (billed, cut off), one log line', S8(L));
+    '§8 the follow-up\'s request LEFT, THEN the CLI read the second interrupt (the stall placed by order) ⇒ the stop-late fact rides ITS result (billed, cut off), one log line', S8(L));
   ok(A.requests === 1 && A.late.length === 1 && A.late[0].how === 'answered' && A.late[0].cut === true, '§8 …the model answered before the interrupt was read ⇒ the fact says answered (cut off)', S8(A));
   ok(E.requests === 1 && E.late.length === 1 && E.late[0].how === 'answered' && E.late[0].cut === false, '§8 …the follow-up RAN TO ITS END before the interrupt was read ⇒ the fact says so (not cut off)', S8(E));
-  ok(O.settled && O.requests === 0 && O.late.length === 0 && O.lateLines === 0, '§8 the stall the other way (the interrupt read before the request): no request reached the model and NOTHING is told — no false alarm', S8(O));
+  ok(O.settled && O.requests === 0 && O.late.length === 0 && O.lateLines === 0, '§8 the other way (the follow-up sends no request at all; the interrupt is read first and ends it): nothing reached the model and NOTHING is told — no false alarm', S8(O));
   ok(C.settled && C.requests === 1 && C.late.length === 0 && C.lateLines === 0, '§8 RED CONTROL: the wrapper that never looks (the release\'s) — the same leaked request, and it reports a clean stop', S8(C));
   ok(T2.settled && T2.secondBeforeResult && T2.requests === 1 && T2.late.length === 1 && T2.late[0].how === 'billed', '§8 a SECOND Stop pressed while the follow-up runs (the wrapper saw it before the result — the stand-in held by count) rebuilds the window — the follow-up is still judged at its result and told', { ...S8(T2), secondBeforeResult: T2.secondBeforeResult });
   ok(M2.secondBeforeResult && M2.requests === 1 && M2.late.length === 0, '§8 RED CONTROL: a rebuild that drops the follow-up\'s mark — the second Stop (seen before the result) loses the fact', { ...S8(M2), secondBeforeResult: M2.secondBeforeResult });
@@ -438,7 +443,18 @@ await guard('§8', async () => {
   ok(rL.length === 1 && rL[0].status === 'interrupted' && rL[0].text === 'Interrupted' && rL[0].late.cut === true && JSON.stringify(rL) === JSON.stringify(rR),
     '§8 the page says it ONCE, in that Stop\'s own «Interrupted» line — live and after a reload the same (the fact rides the turn\'s record)', { live: rL, reload: rR });
   const rE = rowsOf(E.recs, false);
-  ok(rE.length === 1 && rE[0].status === 'interrupted' && rE[0].late.cut === false && /answered before the Stop reached it/.test(rE[0].text), '§8 …a follow-up that ran to its end gets the line of its own (no «Interrupted» to stand beside)', rE);
+  ok(rE.length === 1 && rE[0].status === 'interrupted' && rE[0].late.cut === false && rE[0].late.own === true && rE[0].text === '', '§8 …a follow-up that ran to its end gets the line as a row of its own (no «Interrupted» to stand beside) — the stored row holds NO words: the renderer says them in the reader\'s language', rE);
+  // the result shapes no recording shows, judged on the record alone: no subtype ⇒ its own row (it draws none); success with
+  // is_error ⇒ ONE row, the error row's (never the own row beside it)
+  const lone = (rec) => rowsOf([{ type: 'result', session_id: 'stop-late', ...rec }], false);
+  // the turn's meta (system/turn_duration) rides the follow-up's own answer, never the Stop's own late row after it
+  const mmT = createMessageManager('claude', 'stop-late-meta');
+  mmT.convertHistory([{ type: 'assistant', message: { id: 'msg_t1', role: 'assistant', content: [{ type: 'text', text: 'the answer' }] } }, { type: 'result', subtype: 'success', is_error: false, session_id: 'x', webui_stop_late: { follow: 1, how: 'answered', cut: false } }, { type: 'system', subtype: 'turn_duration', duration_ms: 1234, message_count: 2 }]);
+  const metaOn = mmT.messages.filter((m) => m.meta && m.meta.turn).map((m) => (m.content?.[0]?.stopLate ? 'late-row' : m.role));
+  ok(JSON.stringify(metaOn) === JSON.stringify(['assistant']), '§8 the turn\'s meta (its duration) rides the follow-up\'s answer, never the Stop\'s own late row — the skip reads the mark on the record', metaOn);
+  ok(read('src/lib/chat-renderers.js').includes("if (late && late.own) { const lel = this.appendSystem(stopLateLine(late));"), '§8 WIRING: the renderer draws the own row\'s words keyed on the record\'s `own` mark (the stored row holds none)');
+  const noSub = lone({ is_error: false, webui_stop_late: { follow: 1, how: 'billed', cut: true, tokens: 9 } }), errOk = lone({ subtype: 'success', is_error: true, webui_stop_late: { follow: 1, how: 'answered', cut: false } });
+  ok(noSub.length === 1 && noSub[0].late.own === true && noSub[0].text === '' && errOk.length === 1 && !errOk[0].late.own && errOk[0].status === 'error', '§8 a result with NO subtype carrying the fact gets its own row (it draws none); a success with is_error says it once, on its error row', { noSub, errOk });
   ok(rowsOf(O.recs, false).length === 0 && rowsOf(C.recs, false).length === 0, '§8 …and nothing is drawn where nothing was told');
   const CR = read('src/lib/chat-renderers.js'), ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
   const CUT = 'The Stop arrived after the message handed in earlier had already gone to the model — it was cut off at once, and it may be billed';

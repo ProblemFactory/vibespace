@@ -1468,7 +1468,7 @@ class MessageManager extends MessageWindow {
       for (let i = this.messages.length - 1; i >= 0; i--) {
         const m = this.messages[i];
         if (this._afloat.includes(m)) continue; // lane midturn-order: an afloat message is below the turn, never its start
-        if (m.stopLateRow) continue; // B-28b1: the Stop's late line is no part of the turn
+        if (m.content?.[0]?.stopLate?.own) continue; // B-28b1: the Stop's own late row is no part of the turn (the mark rides the record)
         if (m.role === 'user' && !m.synthetic) break; // the turn began here: nothing of ours precedes it
         if (m.role === 'assistant' || m.role === 'tool' || (m.role === 'system' && m.status !== 'complete')) {
           m.meta = { ...(m.meta || {}), turn };
@@ -2491,15 +2491,18 @@ class MessageManager extends MessageWindow {
     this.turnIndex++;
 
     // B-28b1 (TELL, DO NOT PRETEND): the wrapper's stop-late fact on a Stop's follow-up result — the follow-up still reached the
-    // model. Said ONCE, in that Stop's own line: beside «Interrupted», or (a follow-up that ran to its end) as its own line
+    // model. Said ONCE, in that Stop's own line: beside the result's own row («Interrupted», or any error row), else — a result
+    // that draws no row (one that ran to its end, one with no subtype) — as a row of its own. The stored row holds NO words
+    // (`text` empty, `stopLate.own`): the renderer says them in the reader's language, so search, an export or a preview never
+    // shows another language's sentence.
     const lateRaw = raw.webui_stop_late && typeof raw.webui_stop_late === 'object' ? raw.webui_stop_late : null;
+    const drawsRow = !!(raw.is_error || (raw.subtype && raw.subtype !== 'success'));
     const stopLate = lateRaw ? { how: lateRaw.how === 'answered' ? 'answered' : 'billed', cut: lateRaw.cut !== false } : null;
-    if (stopLate && !stopLate.cut) {
-      const lm = this._create({ role: 'system', status: 'interrupted', content: [{ type: 'system_info', text: 'The Stop arrived after the message handed in earlier had already gone to the model — it was answered before the Stop reached it, and it is billed', stopLate }] });
-      lm.stopLateRow = true;   // the turn's meta (duration, count) stays on the follow-up's own answer
+    if (stopLate && !drawsRow) {
+      const lm = this._create({ role: 'system', status: 'interrupted', content: [{ type: 'system_info', text: '', stopLate: { ...stopLate, own: true } }] });
       if (emit) this._emit({ op: 'create', message: lm });
     }
-    if (raw.is_error || (raw.subtype && raw.subtype !== 'success')) {
+    if (drawsRow) {
       const label = raw.subtype === 'error_during_execution' ? 'Interrupted'
         : raw.subtype === 'error_max_turns' ? 'Max turns reached'
         : raw.subtype === 'error_max_budget_usd' ? 'Budget exceeded'
@@ -2507,7 +2510,7 @@ class MessageManager extends MessageWindow {
       const text = raw.result ? `${label}: ${raw.result}` : label;
       const msg = this._create({
         role: 'system', status: raw.subtype === 'error_during_execution' ? 'interrupted' : 'error',
-        content: [{ type: 'system_info', text, ...(stopLate && stopLate.cut ? { stopLate } : {}) }],
+        content: [{ type: 'system_info', text, ...(stopLate ? { stopLate } : {}) }],
       });
       const errorKind = classifyResultError(raw.result);
       if (errorKind) msg.errorKind = errorKind;

@@ -2183,7 +2183,7 @@ class ChatRenderers {
     if (msg.status === 'error' || msg.status === 'interrupted') {
       if (msg.errorKind === 'prompt-too-long') return { el: this.appendContextFullCard(text), sideEffect: null };
       const late = msg.content?.[0]?.stopLate;
-      if (late && late.cut === false) { const lel = this.appendSystem(stopLateLine(late)); lel.classList.add('chat-stop-late'); return { el: lel, sideEffect: null }; }
+      if (late && late.own) { const lel = this.appendSystem(stopLateLine(late)); lel.classList.add('chat-stop-late'); return { el: lel, sideEffect: null }; }   // its own row: the words are said here
       const el = this.appendSystem(text);
       if (late) { const line = document.createElement('div'); line.className = 'chat-system chat-stop-late'; line.textContent = stopLateLine(late); el.appendChild(line); }
       // the usage wall's ONE added sentence (lane agy-wall-signal): another model group of this account has weekly room
