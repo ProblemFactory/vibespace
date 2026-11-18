@@ -924,6 +924,10 @@ This file is the engineers' record of every release: the lanes, the verification
 
 
 
+
+### bl-chat-a — B-b291: a cleared group message is not found by Search everything
+- CURE 2'S VERDICT (the coordinator's (1), as if a must) → cure 3: when the selected hit is no longer in a re-ask's answer, the place is LOST — Enter opens nothing and says «The selected hit is no longer in the results — pick another» (zh, ja) until an arrow key, a click or a new query; a person who never chose keeps Enter on the top hit. A walk a Rebuild overtook stops at once (`gen !== buildGen` in its loop). The migration's leg holds rows of a person's real key shapes (`u:<uuid>`, `h:<fnv>:<len>`): never marked.
+
 ## 2.369.409 — 2026-11-17
 
 ### lg-store-writes — B-0248: three more stores off the main thread (the store writer's next commits)
