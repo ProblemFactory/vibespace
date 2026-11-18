@@ -164,8 +164,27 @@ const quiet = { warn() {}, log() {}, error() {} };
   const a = await mk(P_CANCEL, 60000);
   const b = await mk(P_CANCEL, 60000);
   ok(ol.status(a.flowId).cancelled === 'superseded' && ol.status(b.flowId).running === true && ol.runningFor('lark').flowId === b.flowId, 'a second begin() for the same id SUPERSEDES the first (one running flow per id, gmail-sync\'s rule) — and the port moved with it');
-  ol.stopAll();
-  ok(ol.status(b.flowId).cancelled === 'shutdown' && (await portFreed(P_CANCEL)), 'stopAll() releases everything (the shutdown path)');
+  // B-cabe's remainder: stopAll() hands back its servers' own close events — the leg AWAITS them (every connection ended),
+  // then judges «free» by the same bounded re-ask as every release (the .367 mirror's 112/1 cause is still unnamed: the listener
+  // was already gone at close(), so the close event is no proof the port is free — the re-ask stays)
+  const stopped = ol.stopAll();
+  ok(stopped instanceof Promise, 'stopAll() hands back a promise of its servers\' close events (B-cabe)');
+  await stopped;
+  ok(ol.status(b.flowId).cancelled === 'shutdown' && (await portFreed(P_CANCEL)), 'stopAll() releases everything (the shutdown path) — its promise resolved, the port free by the bounded re-ask');
+  // CONTROL of the shape leg (its plant proves itself first: the line it replaces is in the tree): a copy whose stopAll() only
+  // closes (the old shape) hands back nothing to wait on — the «hands back a promise» leg is RED on it (the port leg is not a
+  // control of this change: the listener is gone at close() either way)
+  {
+    const src = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf8');
+    const NEW = "return Promise.all(sts.map((st) => st.closing || Promise.resolve())).then(() => undefined);";
+    ok(src.includes(NEW), 'B-cabe control: its plant is where it claims (stopAll\'s promise line is in src/oauth-loopback.js)');
+    const MC = mutantCopies('oauth-loopback-stopall', REPO);
+    const OL0 = src.includes(NEW) ? require(MC.write('src/oauth-loopback.js', src.replace(NEW, 'return undefined;'))) : null;
+    for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1 })) ok(c.pass, 'tree: ' + c.name, c.pass ? undefined : c.detail);
+    const old = OL0 ? OL0.createOAuthLoopback({ log: quiet }) : null;
+    const handed = old ? old.stopAll() : 'no copy';
+    ok(!!OL0 && !(handed instanceof Promise), 'CONTROL: a copy whose stopAll() only closes (the old shape) hands back no promise — the «hands back a promise» leg is RED on it', String(handed));
+  }
   // B-cabe PLACED: a listener that closes only once the FIRST probe has answered «held» (the probe's onTry) — a close landing after
   // the leg's probe. ONE probe reads «held» (the old leg's shape, red); the bounded re-ask reads free. NOTE (the adversarial read):
   // release() closes its server synchronously, so the .367 mirror's 112/1 is NOT proven to be this race — the cause stays unnamed
