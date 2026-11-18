@@ -211,7 +211,6 @@ console.log('§2 every failure is {ok:false, code, error} — nothing throws acr
   ok(rej === 'kaboom', 'CONTROL: without the catch the same throw REJECTS the runner (a throw across the wire)', rej);
 }
 
-console.log('§3 the daemon wiring (three-touch rule) and the SHARED tier');
 // (§3 the daemon wiring and the shared tier — MOVED to the fast scripts/test-desktop-serve-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 console.log('§4 the local rung is the hub keeper\'s own machine; desktop-access over fakes');

@@ -476,7 +476,7 @@ const ROWS = [
     b: [pin('src/routes/browser.js', /if \(row\.kind === 'attachment' && row\.owners > 0\) return res\.status\(409\)/, 'a browser shared with other conversations at the press is refused (409), nothing stopped'), pin('src/routes/browser.js', /humanRefusalText\('browsing_yourself', \{ label: row\.label, act: 'restart' \}\)/, 'the user browsing it himself at the press ⇒ browsing_yourself, nothing stopped (the .197 integration)')],
     c: [decl('the keeper\'s leases and the user\'s own browsing move freely — both are what (b) re-reads at the press; an agent token is refused (THE one guard, RESTART_IS_USERS)')],
     d: [decl('the banner\'s words are PURE stuckWords (textContent); the page\'s own text passes pageText (frame-inert, bounded)')],
-    gate: [['scripts/test-browser-stuck.mjs', 'token stops and restarts'], ['scripts/test-browser-human.mjs', 'THE TAB-RELEASE CENSUS (the .197 integration)']] },
+    gate: [['scripts/test-browser-stuck.mjs', 'token stops and restarts'], ['scripts/test-browser-human-pins.mjs', 'THE TAB-RELEASE CENSUS (the .197 integration)']] },
   // lane vault-use-grants (R4): the policy judge's RECORD — a notice of an approval the judge already gave, not an ask
   { id: 'vault-policy-approved', surface: 'lane vault-use-grants R4 — the For-you notice «<conversation>: a command with a stored secret was approved by the policy judge» (its door opens the entry\'s row in the Vault window, where 「Revoke」 lives)',
     doors: [['A', 'src/server/vault-run-door.js', /^vault-policy-approved$/]],

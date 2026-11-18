@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// THE EXIT FORENSICS' SOURCE PINS AND CENSUSES (fast, text only — lane text-legs, B-94d3). MOVED VERBATIM from the heavy
+// THE EXIT FORENSICS' SOURCE PINS AND CENSUSES (fast — source text, plus the few PURE in-process legs that sat inside the moved blocks; no browser, server or hub — lane text-legs, B-94d3). MOVED VERBATIM from the heavy
 // scripts/test-exit-forensics.mjs (its real-teardown legs, its stop / respawn legs and every mutant-copy CONTROL stay there): the
 // unexpected-exit wiring pins (server.js, src/lib/app.js, src/lib/session-lifecycle.js), § 5 THE WIRING PINS over the source
 // (src/server/session-stdout.js, src/proc-identity.js, src/kept-copies.js, src/harnesses/claude-transport.js, src/hosts.js and the
@@ -9,8 +9,7 @@
 // Run: node scripts/test-exit-forensics-pins.mjs
 import fs from 'node:fs';
 import path from 'node:path';
-import net from 'node:net';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);

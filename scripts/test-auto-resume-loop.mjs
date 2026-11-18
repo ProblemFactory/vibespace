@@ -578,7 +578,9 @@ if (!probe) {
   ok('PURE continue: a missing label degrades, never throws', C({ kind: 'now', armReason: null, label: null }).text === '账号池已切换到 可用账号，已自动继续这个任务。');
   // DRIFT GUARD: the arm reasons above are ENGINE strings — if the engine
   // renames one, the timed pool-switch card silently reverts to "限额已重置"
-  // (the near-arm DRIFT guard: MOVED to the fast scripts/test-auto-resume-loop-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
+  // (the near-arm DRIFT guard: COPIED to the fast scripts/test-auto-resume-loop-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
+  const engSrc = read('src/server/usage-pool-engine.js');   // …and kept HERE beside the fixture strings it guards (an engine rename must red this suite too)
+  ok('DRIFT: the two near-arm reasons the wording keys on are the ones the engine writes', /armIfEnabled\(id, session, Date\.now\(\) \+ 45000, `switched to a usable account \(/.test(engSrc) && /armIfEnabled\?\.\(id, session, Date\.now\(\) \+ 45000, 'account usable again'\)/.test(engSrc));
 }
 
 // ── §4 THE PRE-FIRE GATE IS NO LONGER BYPASSED BY THE IMMEDIATE PATH ───────

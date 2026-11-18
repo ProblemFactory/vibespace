@@ -183,8 +183,8 @@ eq(CN.filedLine({ origin: 'jobs', jobId: 'j-1', sessionKey: 'jobs', text: 'Appro
   eq(surfaceOf({ action: { type: 'hub-act-ask', askId: 'a-1' }, about: 'claude:a1', origin: 'machines' }).at, 'card', 'a group row filed with `about`: its card in the conversation it addresses');
   ok(Object.keys(CN.FILED || {}).sort().join() === 'card,notice,owner,tray,window', 'ONE words table, one line per surface (FILED)');
 }
-const SRC = { status: read('src/agent-routes/status.js'), access: read('src/server/channels-access.js'), vault: read('src/routes/vault.js'), ask: read('data/bin/vibespace-ask'), chan: read('data/bin/vibespace-channels'), vv: read('data/bin/vibespace-vault'), exit: read('data/bin/vibespace-exit') };
-// (⑥'s filed-line source pins and their census (SRC stays: ⑩ and ⑩b read it) MOVED to the fast scripts/test-conversation-needs-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
+
+// (⑥'s filed-line source pins and their census (with their SRC read) MOVED to the fast scripts/test-conversation-needs-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ── ⑦ THE STORE's `about` ────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑦ the store keeps `about` — the conversation an item filed under a group key addresses');

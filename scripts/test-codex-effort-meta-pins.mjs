@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// THE CODEX EFFORT's WIRING PINS (fast, text only — lane text-legs, B-94d3). MOVED VERBATIM from the heavy scripts/test-codex-effort-meta.mjs
+// THE CODEX EFFORT's WIRING PINS (fast — source text, plus the few PURE in-process legs that sat inside the moved blocks; no browser, server or hub — lane text-legs, B-94d3). MOVED VERBATIM from the heavy scripts/test-codex-effort-meta.mjs
 // (its REAL-wrapper legs over the stub app-server, its PURE ladders and its end-to-end resume stay there): the writer's effortNext pins
 // (src/server/stdout/codex-events.js), ⑧ the spawn / restore wiring, ⑨ the client wiring, ⑪c every resume / fork / restart entry
 // point and where the origin is stated, ⑫c both halves of the client-resolved wire and the placement hint. Each reads the file it

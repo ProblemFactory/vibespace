@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// THE PERSON'S OWN BROWSING — SOURCE PINS AND CENSUSES (fast, text only — lane text-legs, B-94d3 — its own row: «test-browser-human holds the
+// THE PERSON'S OWN BROWSING — SOURCE PINS AND CENSUSES (fast — source text, plus the few PURE in-process legs that sat inside the moved blocks; no browser, server or hub — lane text-legs, B-94d3 — its own row: «test-browser-human holds the
 // HOLDER census over the browser keeper's lease sites, met only by the .402 prep mirror (chrome-157 added one site)»). MOVED
 // VERBATIM from the heavy scripts/test-browser-human.mjs (the real keeper over the fake 0.38.1, the routes, the bridge and every
 // mutant-keeper CONTROL stay there): the HOLDER census and the TAB-RELEASE census over src/server/browser-keeper.js (with the
@@ -177,7 +177,7 @@ console.log('— ③ THE TAB-RELEASE CENSUS, its route pins and its CONTROLS');
     // lane browser-resume C (§3.9, the owner's ruling 3) — each judged by PURE src/browser-tabs.js BEFORE it runs:
     agentTabAct: 'the agent\'s own `tab close` of its OWN tab (the verdict first — another holder\'s tab is not_your_tab, nothing runs); its session answers the binary\'s own tab_gone after its current tab, said in the answer',
     userTabAct: 'the user\'s ✕ on the viewed agent\'s tab while THE PERSON drives it (never its last; its current tab first moves to a neighbour of its own) — recorded on the takeover\'s cycle, said at the handback; never another conversation\'s',
-    closeHumanTab: 'THEIR tab by id, never their last (their current tab first moves to another of their) — never a conversation\'s' };
+    closeHumanTab: 'THEIR tab by id, never their last (their current tab first moves to another of theirs) — never a conversation\'s' };
   // the paths the brief names, each walked to the site it releases through (caller → callee, both in the keeper)
   const PATHS = [
     ['the tick\'s drop / a session kill (the carrier grace)', 'tick', 'reconcile'], ['a restore (a restart without the conversation)', 'boot', 'reconcile'],

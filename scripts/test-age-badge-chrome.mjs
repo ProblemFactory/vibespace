@@ -38,7 +38,9 @@ const SHIPPED = '.usage-age-badge, .acct-donut-age { position: absolute; top: -5
 const MARK = '${escHtml(c.staleMark || c.staleAge)}';
 let chromes = [], srv = null;
 try {
-  // (the two source pins (the cure in public/style.css, the mark in src/lib/usage-meter.js): MOVED to the fast scripts/test-age-badge-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
+  // (the cure's source pin in public/style.css: MOVED to the fast scripts/test-age-badge-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
+  const UM_SRC = fs.readFileSync(path.join(REPO, 'src/lib/usage-meter.js'), 'utf8');   // the mark's premise STAYS here too: the full-words mutant below replaces MARK
+  ok(UM_SRC.includes(MARK), 'the taskbar badge draws the compact mark (its words stay in the tooltip)');
   const stub = { name: 'stub', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'bv', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
   const fullWords = { name: 'full-words', setup(b) { b.onLoad({ filter: /usage-meter\.js$/ }, (a) => ({ contents: fs.readFileSync(a.path, 'utf8').replace(MARK, '${escHtml(c.staleAge)}'), loader: 'js' })); } };
   const entry = `import { installUsageMeter } from './usage-meter.js';

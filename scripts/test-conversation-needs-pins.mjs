@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// THE CONVERSATION's NEEDS — SOURCE CENSUSES AND PINS (fast, text only — lane text-legs, B-94d3). MOVED VERBATIM from
+// THE CONVERSATION's NEEDS — SOURCE CENSUSES AND PINS (fast — source text, plus the few PURE in-process legs that sat inside the moved blocks; no browser, server or hub — lane text-legs, B-94d3). MOVED VERBATIM from
 // scripts/test-conversation-needs.mjs (heavy only for its time, 1.76 s: its PURE + in-process legs stay there): ① THE CENSUS (every
 // add() site a producer row of PURE src/foryou-actions.js, with its RED copies), ⑥'s filed-line pins and their census
 // (src/agent-routes/status.js, src/server/channels-access.js, src/routes/vault.js …), ⑦'s `about` pins (src/agent-routes.js,
@@ -16,7 +16,6 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CN = require(path.join(ROOT, 'src/foryou-actions.js'));
-const { UserTodoManager } = require(path.join(ROOT, 'src/user-todos.js'));
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), m, { got: a, want: b });
