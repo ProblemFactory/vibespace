@@ -168,6 +168,8 @@ function worldModule(kind, W, { budgetDefault = 100 } = {}) {
           if (s === 'forbidden') throw new CH.ChannelError('forbidden', `vendor refuses ${attachmentId}`);
           if (s === 'rate-limited') throw new CH.ChannelError('rate-limited', 'HTTP 429', { retryable: true, detail: { retryAfterSec: 9 } });
           if (s === 'recalled') throw new CH.ChannelError('not-found', 'vendor: the message was deleted or recalled', { retryable: false, detail: { recalled: true } });   // B-fbac
+          // B-fbac cure: the message it ANSWERS refused as deleted (Lark's alt road: named, the reply's own record untouched — no `recalled`)
+          if (s === 'parent-deleted') throw new CH.ChannelError('not-found', `lark resource: asking p-${messageId} (the message ${messageId} answers) for this attachment — Lark says message p-${messageId} was deleted or recalled (230110)`, { retryable: false, detail: { askedAnswered: `p-${messageId}`, notInMessage: true } });   // the shape src/channels/lark.js throws on that road
           if (W.byMsg && W.byMsg[messageId]) return W.byMsg[messageId];
           return { data: fake.fixturePng(attachmentId), mime: 'image/png', name: 'image' };
         },
@@ -627,6 +629,42 @@ console.log('\nB-fbac: a recalled message\'s attachment is said by name and the 
   const CLI = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8');
   ok(CLI.includes("const gone = !!m.recalledAt;") && CLI.includes("${gone ? ' — the message was recalled; its attachment is not fetched' : a.id && m.vendorId ? ` — id ${a.id}; fetch: vibespace-channels attachment"), 'the read command\'s line for a recalled message says so and prints NO fetch command');
   for (const x of [R, P]) { x.server.close(); try { x.eng.stop(); } catch {} }
+}
+
+// ── B-fbac cure (the verdict 08:40Z: the roads that had no leg): the 410 on BOTH attachment routes with the chip's words;
+//    the message a reply ANSWERS refusing as deleted never marks the reply recalled; the recall line is appended ONCE
+//    (a Retry after the TTL appends nothing new — the recheck site's guard).
+console.log('\nB-fbac cure: 410 on both routes with the chip\'s words; an answered message\'s deletion is not the reply\'s; the recall recorded once');
+{
+  const REV = require(path.join(REPO, 'src/channel-revisions.js'));
+  const fxOf = (R, msg) => R.eng.store.readSide('pics', 'room', { msgs: new Set([msg]) }).filter((x) => x && x.k === 'fx');
+  const R = await rig('recalled-cure');
+  R.W.script['pic-5'] = 'recalled';
+  const base = `http://127.0.0.1:${R.server.address().port}`;
+  const res = await fetch(`${base}/api/channels/pics/room/attachment/pic-5?msg=m5`);
+  const body = await res.json().catch(() => null);
+  // the agent route answers through its own table (src/agent-routes.js attAnswer) — read and run as it is in the tree
+  const AR = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
+  const tbl = AR.slice(AR.indexOf('const ATT_STATUS = Object.freeze('), AR.indexOf('\n', AR.indexOf('const ATT_STATUS = Object.freeze(')));
+  const ans = AR.slice(AR.indexOf('const attAnswer = (res, r) => {'), AR.indexOf('\n};\n', AR.indexOf('const attAnswer = (res, r) => {')) + 3);
+  const runAns = new Function(`${tbl}\n${ans}\nreturn attAnswer;`)();
+  const fake = { code: 0, body: null, headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(c) { this.code = c; return this; }, json(o) { this.body = o; return this; } };
+  runAns(fake, { ok: false, code: 'recalled', error: 'lark resource: Lark says message m5 was deleted or recalled (230110)' });
+  const CW = await import(path.join(REPO, 'src/lib/channel-words.js'));
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  ok(res.status === 410 && body && body.code === 'recalled' && fake.code === 410 && fake.body.code === 'recalled' && CW.attachmentReasonText('recalled') === 'recalled by the sender' && zh.includes('"recalled by the sender":') && ja.includes('"recalled by the sender":'), 'a recalled message\'s attachment: 410 `recalled` on the owner\'s route AND the agent\'s, the chip says «recalled by the sender» (zh / ja beside it)', JSON.stringify({ owner: res.status, agent: fake.code, chip: CW.attachmentReasonText('recalled') }));
+  // the message it answers was deleted: said by name, the REPLY is not recorded recalled
+  R.W.script['pic-6'] = 'parent-deleted';
+  const pd = await R.eng.attachment('pics', 'room', 'pic-6', { msg: 'm6' });
+  ok(pd && pd.ok === false && pd.code !== 'recalled' && /the message m6 answers/.test(pd.error) && /deleted or recalled \(230110\)/.test(pd.error) && fxOf(R, 'm6').length === 0, 'the message a reply ANSWERS refusing as deleted: said with its own words (whose message), and the reply is NOT recorded recalled', JSON.stringify({ code: pd && pd.code, error: pd && pd.error, fx: fxOf(R, 'm6').length }));
+  // the owner's Retry asks again: the recall line is not appended twice
+  await R.eng.attachment('pics', 'room', 'pic-5', { msg: 'm5', retry: true });
+  await R.eng.attachment('pics', 'room', 'pic-5', { msg: 'm5', retry: true });
+  ok(fxOf(R, 'm5').length === 1 && REV.recalledAtOf(fxOf(R, 'm5')) > 0, `the recall is recorded ONCE across the owner's Retries (${fxOf(R, 'm5').length} line)`, fxOf(R, 'm5').length);
+  // (no red control for the guard: MEASURED, an unguarded append also writes ONE line across three Retries — a recorded
+  //  recall leaves the message's fold without its attachment, so a Retry never reaches the vendor again; the guard is the
+  //  recheck site's own, kept as the same cheap defence)
+  for (const x of [R]) { x.server.close(); try { x.eng.stop(); } catch {} }
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

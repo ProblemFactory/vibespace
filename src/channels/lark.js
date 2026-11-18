@@ -1248,7 +1248,6 @@ function create(record = {}, deps = {}) {
 
   const meter = typeof deps.meter === 'function' ? deps.meter : () => {};   // 2026-09-26: one unit per request SENT
   const pace = typeof deps.pace === 'function' ? deps.pace : async () => {};   // lane R5: awaited BEFORE every request (drain rule 18's bucket)
-  const findStored = typeof deps.findRecord === 'function' ? deps.findRecord : () => null;   // B-fbac: a stored record (its replyTo / root) by its vendor id
   // lane lark-send-hold (B-efa0): THE ACCOUNT'S SEND HOLD. A 429 on any send request (the text, a reply, an upload, a
   // file's message) holds EVERY later send of this account until the vendor's reset (`x-ogw-ratelimit-reset`, else
   // SEND_HOLD_DEFAULT_SEC; at most vendor-hold's 15 min); a held send is refused BEFORE any request with the typed
@@ -2845,9 +2844,9 @@ function create(record = {}, deps = {}) {
       // root; the stored record names them), the same key (a key only answers its own message: never another picture).
       // None ⇒ refused in words that say where it was listed and what was tried.
       if (got.refused && got.code === RESOURCE_NOT_IN_MESSAGE) {
-        // what it answers: the engine's own record (a message only a vendor read showed too), else the stored one
-        let rel = Array.isArray(answers) ? answers : null;
-        if (!rel) { let rec0 = null; try { rec0 = findStored(convId, String(messageId)); } catch { rec0 = null; } rel = [rec0 && rec0.replyTo, rec0 && rec0.root]; }
+        // what it answers: the engine's own record names them (its parent, its thread root) — the caller passes them; no
+        // stored-log fallback (it would walk a whole log synchronously on the loop, and no caller leaves them out)
+        const rel = Array.isArray(answers) ? answers : [];
         const alts = [...new Set(rel.filter((x) => typeof x === 'string' && x && x !== String(messageId)))].slice(0, 2);
         const tried = [];
         for (const alt of alts) {

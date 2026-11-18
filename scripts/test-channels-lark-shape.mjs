@@ -967,25 +967,31 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   };
   const C = 'oc_ops_room_0001';
   const X = mk(lark);
-  const p1 = await X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_quoted', mime: 'image/*' });
+  // the engine hands the adapter what the message answers (its stored replyTo / root) — the cure dropped the adapter's own
+  // stored-log fallback, so the leg passes them as the engine does
+  const ans = (mid) => { const r = STORED[mid]; return r ? [r.replyTo, r.root].filter(Boolean) : []; };
+  const p1 = await X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_quoted', mime: 'image/*', answers: ans('om_reply') });
   ok(JF(X.got) === JF(['om_reply', 'om_parent']) && Buffer.isBuffer(p1.data) && p1.data.equals(JPEG) && X.metered.reduce((x, y) => x + y, 0) === 2, 'a reply\'s picture Lark says is not the reply\'s (234003) is fetched from the message it ANSWERS — one more ask (paced, metered), the same key', JF({ asked: X.got, metered: X.metered }));
   X.got.length = 0;
-  await X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_root', mime: 'image/*' });
+  const nf = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_quoted', mime: 'image/*' }));
+  ok(nf && JF(X.got) === JF(['om_reply']), 'the batch-23 cure: a caller that names no answered message gets ONE ask — the adapter keeps no stored-log fallback (a whole-log walk on the loop)', JF({ got: X.got, e: nf && nf.message }));
+  X.got.length = 0;
+  await X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_root', mime: 'image/*', answers: ans('om_reply') });
   ok(JF(X.got) === JF(['om_reply', 'om_parent', 'om_root']), '…else from its thread ROOT (at most the two it answers)', JF(X.got));
   X.got.length = 0;
-  await X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_own', mime: 'image/*' });
+  await X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_own', mime: 'image/*', answers: ans('om_reply') });
   ok(JF(X.got) === JF(['om_reply']), 'a picture that IS the reply\'s is one ask, as before', JF(X.got));
   X.got.length = 0;
-  const e1 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_nowhere', mime: 'image/*' }));
+  const e1 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_nowhere', mime: 'image/*', answers: ans('om_reply') }));
   ok(e1 && e1.code === 'vendor-error' && /not part of message om_reply, nor of the messages it answers \(om_parent, om_root\) \(234003: File not in message\)/.test(e1.message) && e1.detail && e1.detail.notInMessage === true && JF(X.got) === JF(['om_reply', 'om_parent', 'om_root']), 'owned by none: refused in WORDS — where it was listed, what was tried, Lark\'s code (never a bare vendor line)', e1 && e1.message);
   X.got.length = 0;
-  const e2 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_plain', attachmentId: 'img_nowhere', mime: 'image/*' }));
+  const e2 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_plain', attachmentId: 'img_nowhere', mime: 'image/*', answers: ans('om_plain') }));
   ok(e2 && e2.code === 'vendor-error' && /not part of message om_plain \(234003/.test(e2.message) && !/nor of/.test(e2.message) && JF(X.got) === JF(['om_plain']), 'a message that answers nothing: one ask, the words without «nor»', e2 && e2.message);
   X.got.length = 0;
-  const e3 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_forbidden', mime: 'image/*' }));
+  const e3 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_forbidden', mime: 'image/*', answers: ans('om_reply') }));
   ok(e3 && e3.code === 'forbidden' && /asking om_parent \(the message om_reply answers\) for this attachment — .*230002/.test(e3.message) && JF(X.got) === JF(['om_reply', 'om_parent']), 'another refusal on the way (230002) ends the walk NAMED as the answered message\'s — never passed off as the reply\'s own', e3 && `${e3.code} ${e3.message}`);
   X.got.length = 0;
-  const e4 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_gone', attachmentId: 'img_gone', mime: 'image/*' }));
+  const e4 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_gone', attachmentId: 'img_gone', mime: 'image/*', answers: ans('om_gone') }));
   ok(e4 && e4.code === 'not-found' && e4.detail && e4.detail.recalled === true && /was deleted or recalled \(230110\)/.test(e4.message) && JF(X.got) === JF(['om_gone']), 'Lark\'s 230110 (deleted / recalled) is said as such, flagged `recalled` (the engine records the recall) — no walk', e4 && e4.message);
   X.got.length = 0;
   await X.a.fetchAttachment(C, { messageId: 'om_unstored', attachmentId: 'img_quoted', mime: 'image/*', answers: ['om_parent'] });

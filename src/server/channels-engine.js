@@ -5141,17 +5141,23 @@ function create(deps = {}) {
         // B-fbac: an adapter that NAMED why (its words carry the message and what it tried) keeps them over «no such message»
         const named = !!(err && err.detail && (err.detail.notInMessage || err.detail.recalled));
         const error = owner.shown && code === 'not-found' && !named ? VENDOR_HAS_NONE : String((err && err.message) || err);
-        // B-fbac: the vendor says the message was deleted / recalled — said by name, and the recall is RECORDED (the revisions'
-        // own fact speller), so the read says «recalled» and offers no fetch from now on
-        if (err && err.detail && err.detail.recalled === true) {
-          try { appendSides(rec, convId, [{ k: 'fx', msg: String(owner.vendorId), at: now(), src: 'recheck', facts: Rev.recallFacts() }]); } catch (e2) { log.warn(`[channels] ${rec.id}/${convId}: the recall could not be recorded: ${(e2 && e2.message) || e2}`); }
-          attRefused.set(k, { code: 'recalled', error, retryAfterSec: null, until: now() + Att.negativeTtlMs('not-found') });
-          return { ok: false, code: 'recalled', error };
-        }
         // integration 2.369.192 (R3 × R5): a call the account's END aborted (R5's dropLive — a disable, a disconnect, a new
         // sign-in: "the account changed") is NOT the vendor's refusal — an answer that outlived its entry keeps nothing, the
         // negative cache included (else the next ask read a remembered `transport` before the account's own `disabled`)
         const ended = outlived(rec, e);
+        // B-fbac: the vendor says the message was deleted / recalled — said by name, and the recall is RECORDED (the revisions'
+        // own fact speller), so the read says «recalled» and offers no fetch from now on. Cure (the verdict): only when the
+        // answer did not outlive its entry, and ONCE (the recheck site's guard — a Retry after the TTL appends nothing new)
+        if (err && err.detail && err.detail.recalled === true) {
+          if (!ended) {
+            try {
+              const sides0 = store.readSide(rec.id, convId, { msgs: new Set([String(owner.vendorId)]) }).filter((x) => x && (x.k === 'rv' || x.k === 'fx'));
+              if (!Rev.recalledAtOf(sides0)) appendSides(rec, convId, [{ k: 'fx', msg: String(owner.vendorId), at: now(), src: 'recheck', facts: Rev.recallFacts() }]);
+            } catch (e2) { log.warn(`[channels] ${rec.id}/${convId}: the recall could not be recorded: ${(e2 && e2.message) || e2}`); }
+            attRefused.set(k, { code: 'recalled', error, retryAfterSec: null, until: now() + Att.negativeTtlMs('not-found') });
+          }
+          return { ok: false, code: 'recalled', error };
+        }
         if (ttl && !ended) attRefused.set(k, { code, error, retryAfterSec: Att.TRANSIENT.includes(code) || code === 'vendor-error' ? Math.ceil(ttl / 1000) : null, until: now() + ttl });
         // a rate limit is the ACCOUNT's, not this picture's: the other thumbnails of the render wait it out too
         if (code === 'rate-limited' && !ended) e.attBackoffUntil = now() + (ttl || Att.NEGATIVE_TTL.transient);
