@@ -137,8 +137,8 @@ for (const [w, h, mobile] of [[280, 700, true], [360, 780, true], [768, 900, fal
     radios: d.querySelectorAll('input[type=radio]').length, title: (d.textContent || '').includes('alice · shop.example.test'), picker: !!d.querySelector('.pp'),
     locked: lockedChip ? lockedChip.textContent : '', lockedX: lockedChip ? lockedChip.querySelectorAll('.pp-chip-x').length : -1, door: lockedChip && lockedChip.querySelector('.pp-chip-door') ? lockedChip.querySelector('.pp-chip-door').textContent : '',
     consequence: (d.querySelector('.vw-login-consequence') || {}).textContent || '' }; })()`);
-  ok(f.radios === 0 && f.title && f.picker && /经由：任何网站/.test(f.locked) && f.lockedX === 0 && f.door === '任何网站…' && /只在这个网站上/.test(f.consequence),
-    `${w}: no radio; its title names THIS login; the house picker; the star row's admit a LOCKED chip «经由：任何网站» with its door and NO ✕; the consequence speaks of this site only`, f);
+  ok(f.radios === 0 && f.title && f.picker && /经由：任何网站/.test(f.locked) && f.lockedX === 0 && f.door === '打开那份授权…' && /只在这个网站上/.test(f.consequence),
+    `${w}: no radio; its title names THIS login; the house picker; the star row's admit a LOCKED chip «经由：任何网站» with its door «打开那份授权…» (the act, not the grant's name again) and NO ✕; the consequence speaks of this site only`, f);
   const fi = await p.fit(LOGIN);
   ok(fits(fi), `${w}: the dialog is in the window and nothing inside it is wider than it or scrolls sideways`, fi);
   ok(await p.noRefusal(), `${w}: no refusal line and no refusal door are drawn before a refusal`);
@@ -148,7 +148,7 @@ for (const [w, h, mobile] of [[280, 700, true], [360, 780, true], [768, 900, fal
     const before = await p.ev(`document.querySelectorAll(${Q(LOGIN + ' .pp-chip')}).length`);
     const row = await p.ev(`(() => { const r = document.querySelector(${Q(ROW_B)}); if (!r) return null; r.click(); return { locked: r.classList.contains('pp-locked'), sel: r.getAttribute('aria-selected'), dis: r.getAttribute('aria-disabled'), door: (r.querySelector('.pp-lock-door') || {}).textContent || '' }; })()`);
     const after = await p.ev(`(() => ({ chips: document.querySelectorAll(${Q(LOGIN + ' .pp-chip')}).length, sel: (document.querySelector(${Q(ROW_B)}) || { getAttribute: () => '' }).getAttribute('aria-selected') }))()`);
-    ok(row && row.locked && row.sel === 'true' && row.dis === 'true' && row.door === '任何网站…' && before === after.chips && after.sel === 'true', 'the locked list row is ticked, inert, and names its door as its chip does — a press on the row changes nothing', { row, before, after });
+    ok(row && row.locked && row.sel === 'true' && row.dis === 'true' && row.door === '打开那份授权…' && before === after.chips && after.sel === 'true', 'the locked list row is ticked, inert, and names its door as its chip does — a press on the row changes nothing', { row, before, after });
     console.log('② the locked row\'s door opens «任何网站…» as its own dialog');
     await p.ev(`(document.querySelector(${Q(LOGIN + ' .pp-chip-locked .pp-chip-door')}).click(), true)`);
     const star = await p.until(`(() => { const t = ${textOf(LOGIN)}; return /在每个网站上/.test(t) ? t : null; })()`);

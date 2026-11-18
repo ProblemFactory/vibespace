@@ -21,7 +21,7 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 const post = (url, body = {}) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const siteOf = (origin) => String(origin || '').replace(/^https:\/\//, '');
 const throughWords = (scope) => (scope === 'any-site' ? t('through: any site') : t('through: any account on this site'));
-const doorWords = (scope) => (scope === 'any-site' ? t('Any site…') : t('Any account on this site…'));
+const doorWords = () => t('Open that grant…');   // a door's label names the ACT (主开发 03:26Z) — the «through» words beside it name the grant
 const stillWords = (scope) => (scope === 'any-site' ? t('still through: any site') : t('still through: any account on this site'));   // left out HERE, still admitted wider
 const alsoWords = (scope) => (scope === 'any-site' ? t('also through: any site') : t('also through: any account on this site'));
 const leftOutWords = (scope) => (scope === 'any-site' ? t('left out of Everyone — any site') : scope === 'any-account' ? t('left out of Everyone — any account on this site') : t('left out of Everyone — this account'));
@@ -165,7 +165,7 @@ export function showLoginTotpDialog(entry, { refresh, onSaved } = {}) {
   const { body, close, raised, ready } = createModalShell({ id: 'vault-login-totp', kind: 'form', key: entry.name, title: t('The two-step code «{login}» uses', { login }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-login-totp-dialog', escapeToClose: true,
     unsaved: { isDirty: () => start !== null && sel.value !== start, save: () => doSave() } });
   if (raised) return null;
-  body.append(el('div', 'vw-ak-hint', t('Hub types its code only on this login\'s site, into the field an agent names — no agent is ever shown the code or its seed.')));
+  body.append(el('div', 'vw-ak-hint', t('VibeSpace types its code only on this login\'s site, into the field an agent names — no agent is ever shown the code or its seed.')));
   const none = el('option', null, t('None — no two-step code'));
   none.value = '';
   sel.append(none);

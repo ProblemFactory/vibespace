@@ -11318,6 +11318,7 @@ export default {
   "except {names}": "{names} を除く", // the owner 2026-11-17: who may have a web login filled
   "still through: any site": "任意のサイト経由で引き続き可", // the owner 2026-11-17: who may have a web login filled
   "still through: any account on this site": "このサイトの任意のアカウント経由で引き続き可", // the owner 2026-11-17: who may have a web login filled
+  "Open that grant…": "その許可を開く…", // the owner 2026-11-17: who may have a web login filled
   "left out of Everyone — any site": "「すべて」から除外——任意のサイト", // the owner 2026-11-17: who may have a web login filled
   "left out of Everyone — any account on this site": "「すべて」から除外——このサイトの任意のアカウント", // the owner 2026-11-17: who may have a web login filled
   "left out of Everyone — this account": "「すべて」から除外——このアカウント", // the owner 2026-11-17: who may have a web login filled
@@ -11359,7 +11360,7 @@ export default {
   "Pending password kept": "確認待ちのパスワードを保持", // the owner 2026-11-17: who may have a web login filled
   "No two-step code of that name is in this vault any more — choose one from the list.": "その名前の 2 段階認証コードはもうこの保管庫にありません——一覧から選んでください。", // the owner 2026-11-17: who may have a web login filled
   "The two-step code «{login}» uses": "「{login}」が使う 2 段階認証コード", // the owner 2026-11-17: who may have a web login filled
-  "Hub types its code only on this login's site, into the field an agent names — no agent is ever shown the code or its seed.": "Hub はこのログインのサイトでだけ、エージェントが指定した欄にコードを入力します——エージェントにコードやシードが見せられることはありません。", // the owner 2026-11-17: who may have a web login filled
+  "VibeSpace types its code only on this login's site, into the field an agent names — no agent is ever shown the code or its seed.": "VibeSpace はこのログインのサイトでだけ、エージェントが指定した欄にコードを入力します——エージェントにコードやシードが見せられることはありません。", // the owner 2026-11-17: who may have a web login filled
   "None — no two-step code": "なし——2 段階認証コードを使わない", // the owner 2026-11-17: who may have a web login filled
   "This vault holds no two-step code yet — add one with Add… ▸ Two-step code…, then bind it here.": "この保管庫にはまだ 2 段階認証コードがありません——「追加… ▸ 2 段階認証コード…」で追加してから、ここで紐付けてください。", // the owner 2026-11-17: who may have a web login filled
   "Two-step code bound: {name}": "2 段階認証コードを紐付けました：{name}", // the owner 2026-11-17: who may have a web login filled

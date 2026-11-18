@@ -64,7 +64,7 @@ export function loginExtras(row, data, { refresh, show, doors: open = {} } = {})
         // a WIDER grant reaches this login: «through» it, NO ✕ here (it is taken back at its own door — never from one login's row)
         chip.classList.add('vw-ak-chip-through');
         chip.append(el('span', null, `${principalName(p, data)} · ${g.scope === 'any-site' ? t('through: any site') : t('through: any account on this site')}`));
-        const d = el('button', 'vw-ak-door', g.scope === 'any-site' ? t('Any site…') : t('Any account on this site…'));
+        const d = el('button', 'vw-ak-door', t('Open that grant…'));   // the label names the act; the «through» words name the grant
         d.type = 'button';
         d.onclick = () => (g.scope === 'any-site' ? open.anySite?.(data, { refresh }) : open.anyAccount?.(data, { refresh, site: entry.origin }));
         chip.append(d);

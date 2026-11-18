@@ -11319,6 +11319,7 @@ export default {
   "except {names}": "除了 {names}", // the owner 2026-11-17: who may have a web login filled
   "still through: any site": "仍经由：任何网站", // the owner 2026-11-17: who may have a web login filled
   "still through: any account on this site": "仍经由：这个网站的任何账号", // the owner 2026-11-17: who may have a web login filled
+  "Open that grant…": "打开那份授权…", // the owner 2026-11-17: who may have a web login filled
   "left out of Everyone — any site": "不在「全部」里——任何网站", // the owner 2026-11-17: who may have a web login filled
   "left out of Everyone — any account on this site": "不在「全部」里——这个网站的任何账号", // the owner 2026-11-17: who may have a web login filled
   "left out of Everyone — this account": "不在「全部」里——这个账号", // the owner 2026-11-17: who may have a web login filled
@@ -11330,23 +11331,23 @@ export default {
   "Not saved ({code}).": "未保存（{code}）。", // the owner 2026-11-17: who may have a web login filled
   "Not saved — the server did not answer.": "未保存——服务器没有回应。", // the owner 2026-11-17: who may have a web login filled
   "Search conversations and groups…": "搜索对话和任务组…", // the owner 2026-11-17: who may have a web login filled
-  "Who may have it filled": "谁可以让 Hub 填入", // the owner 2026-11-17: who may have a web login filled
+  "Who may have it filled": "谁可以让 VibeSpace 填入", // the owner 2026-11-17: who may have a web login filled
   "No conversation is running": "没有正在运行的对话", // the owner 2026-11-17: who may have a web login filled
   "every conversation on this instance, now and later": "这个实例上的每个对话，现在和以后的", // the owner 2026-11-17: who may have a web login filled
   "Ticked and locked: a wider grant already lets them — change it at its own door.": "已勾选并锁定：更宽的授权已经允许它们——请在那份授权自己的入口修改。", // the owner 2026-11-17: who may have a web login filled
-  "Who may have «{login}» filled": "谁可以让 Hub 填入「{login}」", // the owner 2026-11-17: who may have a web login filled
+  "Who may have «{login}» filled": "谁可以让 VibeSpace 填入「{login}」", // the owner 2026-11-17: who may have a web login filled
   "These conversations can sign in as you with this account, on this site only.": "这些对话可以用这个账号以你的身份登录，只在这个网站上。", // the owner 2026-11-17: who may have a web login filled
   "No web login is saved yet": "还没有保存任何网站登录", // the owner 2026-11-17: who may have a web login filled
-  "Who may have ANY web login filled — on every site": "谁可以让 Hub 填入「任何」网站登录——在每个网站上", // the owner 2026-11-17: who may have a web login filled
+  "Who may have ANY web login filled — on every site": "谁可以让 VibeSpace 填入「任何」网站登录——在每个网站上", // the owner 2026-11-17: who may have a web login filled
   "Every web login this vault holds, on every site — the ones added later too. Grant this only to conversations you would trust with all of them.": "这个保险库里的每一个网站登录，在每个网站上——以后添加的也算。只授权给你愿意把它们全部托付的对话。", // the owner 2026-11-17: who may have a web login filled
-  "Who may have any account of {site} filled": "谁可以让 Hub 填入 {site} 的任何账号", // the owner 2026-11-17: who may have a web login filled
+  "Who may have any account of {site} filled": "谁可以让 VibeSpace 填入 {site} 的任何账号", // the owner 2026-11-17: who may have a web login filled
   "Any login this vault holds for {site} — the ones added later too — and an agent may register a NEW account there through the vault.": "这个保险库为 {site} 保存的任何登录——以后添加的也算——而且智能体可以通过保险库在那里注册「新」账号。", // the owner 2026-11-17: who may have a web login filled
   "Any account on which site?": "哪个网站的任何账号？", // the owner 2026-11-17: who may have a web login filled
-  "Choose the site; its own dialog then says who may have any of its accounts filled.": "选择网站；接着它自己的对话框会写明谁可以让 Hub 填入它的任何账号。", // the owner 2026-11-17: who may have a web login filled
+  "Choose the site; its own dialog then says who may have any of its accounts filled.": "选择网站；接着它自己的对话框会写明谁可以让 VibeSpace 填入它的任何账号。", // the owner 2026-11-17: who may have a web login filled
   "{n} account(s)": "{n} 个账号", // the owner 2026-11-17: who may have a web login filled
   "granted": "已授权", // the owner 2026-11-17: who may have a web login filled
   "Any account on a site…": "某个网站的任何账号…", // the owner 2026-11-17: who may have a web login filled
-  "Who may have any account of one site filled": "谁可以让 Hub 填入某个网站的任何账号", // the owner 2026-11-17: who may have a web login filled
+  "Who may have any account of one site filled": "谁可以让 VibeSpace 填入某个网站的任何账号", // the owner 2026-11-17: who may have a web login filled
   "Any site: {who}": "任何网站：{who}", // the owner 2026-11-17: who may have a web login filled
   "Any account on: {sites}": "任何账号：{sites}", // the owner 2026-11-17: who may have a web login filled
   "Two-step code: {name}": "两步验证码：{name}", // the owner 2026-11-17: who may have a web login filled
@@ -11360,7 +11361,7 @@ export default {
   "Pending password kept": "保留着待确认的密码", // the owner 2026-11-17: who may have a web login filled
   "No two-step code of that name is in this vault any more — choose one from the list.": "这个保险库里已经没有这个名字的两步验证码——请从列表中选一个。", // the owner 2026-11-17: who may have a web login filled
   "The two-step code «{login}» uses": "「{login}」使用的两步验证码", // the owner 2026-11-17: who may have a web login filled
-  "Hub types its code only on this login's site, into the field an agent names — no agent is ever shown the code or its seed.": "Hub 只在这个登录的网站上、把验证码填进智能体指定的输入框——任何智能体都看不到验证码或它的种子。", // the owner 2026-11-17: who may have a web login filled
+  "VibeSpace types its code only on this login's site, into the field an agent names — no agent is ever shown the code or its seed.": "VibeSpace 只在这个登录的网站上、把验证码填进智能体指定的输入框——任何智能体都看不到验证码或它的种子。", // the owner 2026-11-17: who may have a web login filled
   "None — no two-step code": "无——不使用两步验证码", // the owner 2026-11-17: who may have a web login filled
   "This vault holds no two-step code yet — add one with Add… ▸ Two-step code…, then bind it here.": "这个保险库里还没有两步验证码——先用「添加… ▸ 两步验证…」添加一个，再回到这里绑定。", // the owner 2026-11-17: who may have a web login filled
   "Two-step code bound: {name}": "已绑定两步验证码：{name}", // the owner 2026-11-17: who may have a web login filled
