@@ -145,7 +145,14 @@ function create(engineCtx) {
       convKind: (p.key && store.index.live()[p.key] && store.index.live()[p.key].kind) || null,
       // lane lark-upload-preflight: an awaiting card whose files this account cannot carry WARNS on the chip and its
       // Approve says "Send without the file" (the digest covers it — a card drawn before the change approves nothing)
-      ...(() => { const fb = rec && p.state === 'awaiting-approval' && P.storedAttachments(p).length ? filesBlockedOf(filesOfferFor(rec, p.key && store.index.live()[p.key] ? effectiveConvCaps(rec, store.index.live()[p.key]) : null)) : null; return fb ? { filesBlocked: fb } : {}; })(),   // B-f467: the Outbox row draws the conversation's own avatar (a mail thread = the mail glyph)
+      ...(() => {
+        const fb = rec && p.state === 'awaiting-approval' && P.storedAttachments(p).length ? filesBlockedOf(filesOfferFor(rec, p.key && store.index.live()[p.key] ? effectiveConvCaps(rec, store.index.live()[p.key]) : null)) : null;
+        if (fb) return { filesBlocked: fb };
+        // B-09d2 follow-up (verdict 05:26Z, as if a must): a proposal stored BEFORE the submit check — files with a placement
+        // the row's files may not take — wears the same door («Send without the file»), its own words on the card
+        const c1 = rec && p.state === 'awaiting-approval' && P.storedAttachments(p).length ? registry.capsOf(rec.kind) : null, pl = c1 ? P.placementOf(p) : null;
+        return c1 && pl && !P.filePlacementsOf(c1).includes(pl) ? { filesBlocked: { why: 'with-files', requiredScopes: [] } } : {};
+      })(),   // B-f467: the Outbox row draws the conversation's own avatar (a mail thread = the mail glyph)
       // r3: how many agents approving this WAKES (a billed turn each) — the
       // card says it and echoes it with the Approve (`expectWakes`)
       wakes: !reactionKind && !recallKind && sendStartsTurn(rec) ? 1 : 0,

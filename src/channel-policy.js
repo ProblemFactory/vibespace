@@ -592,7 +592,7 @@ function placementRefusalText(r, { t = defaultT } = {}) {
   const x = r || {};
   if (x.why === 'parent-in-thread') return t('That message is inside a thread — a reply to it goes in the thread');
   if (x.why === 'no-replies') return t('This channel cannot answer a specific message — send it as a plain message');
-  if (x.why === 'with-files') return x.placement === 'thread+chat' ? t('Files cannot go with a thread reply that is also shown in the chat here — send them in the thread') : t('Files cannot go with this kind of reply here');
+  if (x.why === 'with-files') return t('Files cannot go with this kind of reply here — send it without the file, or reject it');   // follow-up: only the doors the card draws
   switch (x.placement) {
     case 'chat': return t('A plain message is not offered here');
     case 'quote': return t('A quoted reply is not offered here');

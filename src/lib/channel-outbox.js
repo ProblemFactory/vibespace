@@ -243,7 +243,7 @@ function appendAttachments(card, p, app = null) {
     box.appendChild(row);
   }
   if (blocked) {
-    const w = el('div', 'chan-prop-file-note chan-warn', t('This account’s sign-in ({account}) cannot send files — re-authorize it, or send without the file.', { account: p.adapterLabel || p.adapterId }));
+    const w = el('div', 'chan-prop-file-note chan-warn', p.filesBlocked.why === 'with-files' ? t('Files cannot go with a reply in a thread that is also shown in the chat here — send it without the file, or reject it.') : t('This account’s sign-in ({account}) cannot send files — re-authorize it, or send without the file.', { account: p.adapterLabel || p.adapterId }));   // B-09d2 follow-up: a stored proposal the placement rule refuses
     w.dataset.filesBlocked = (p.filesBlocked.requiredScopes || []).join(' ');
     if (w.dataset.filesBlocked) w.title = t('Needs one of: {scopes}', { scopes: (p.filesBlocked.requiredScopes || []).join(', ') });
     box.appendChild(w);

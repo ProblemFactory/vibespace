@@ -257,7 +257,7 @@ const contractHolds = (L) => !!(L.thread.o && L.thread.o.placement === 'thread' 
 // ── ⑤ THE ENGINE ─────────────────────────────────────────────────────────
 console.log('⑤ the engine: decided before a proposal exists, stored, sent, receipted');
 const engines = [];
-async function engineLeg() {
+async function engineLeg(ENGm = ENG, tag = 'engine') {   // follow-up: an engine copy (the Approve recheck's control) runs the same leg
   const T1 = Date.now() - 3600e3;
   const CID = 'ops';
   const mint = (A, vendorId, text, over = {}, i = 0) => REC.makeRecord({ adapterId: A, convId: CID, vendorId, at: T1 + i * 1000, author: { id: 'u-ada', name: 'Ada', isSelf: false, isBot: false }, text, threadKey: null, ...over });
@@ -282,12 +282,12 @@ async function engineLeg() {
   const registry = CH.createChannelRegistry();
   registry.register(modFor(LK, { read: 'vendor', replyInto: true, listing: 'inline', placements: ['chat', 'quote', 'thread'], rootReply: 'quote' }));
   registry.register(modFor(SK, { read: 'vendor', replyInto: true, listing: 'inline', placements: ['chat', 'thread', 'thread+chat'], filePlacements: ['chat', 'thread'], rootReply: 'thread' }));
-  const dir = path.join(ROOT, 'engine');
+  const dir = path.join(ROOT, tag);
   fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
   const row = (id) => ({ id, kind: id, label: id, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: null, scan: null });
   fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [row(LK), row(SK)] }));
   const ladder = { calls: [], stash: [], async deliverToConversation(cid, text, opts) { ladder.calls.push({ cid, text, opts }); return { ok: true, lane: 'message' }; }, stashFor(cid, env) { ladder.stash.push({ cid, ...env }); return { stored: true, why: null }; }, stashPeek(cid) { return ladder.stash.filter((x) => x.cid === cid); } };
-  const eng = ENG.create({ dataDir: dir, env: {}, registry, broadcast: () => { }, log: { log() { }, warn() { }, error() { } }, deliver: ladder, serverSetting: () => undefined, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }], now: () => Date.now() });
+  const eng = ENGm.create({ dataDir: dir, env: {}, registry, broadcast: () => { }, log: { log() { }, warn() { }, error() { } }, deliver: ladder, serverSetting: () => undefined, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }], now: () => Date.now() });
   engines.push(eng);
   const AGP = { kind: 'agent', id: 'agent-1', name: 'Worker' };
   const AG = { ...AGP, groups: [], msgLevelFor: () => 'none' };
@@ -320,7 +320,16 @@ async function engineLeg() {
     R.apOld = await eng.approve(sid);
     R.oldState = eng.store.outbox.snapshot().proposals[sid].state;
     R.oldSent = (sent[SK] || []).length - sent0;
-    await eng.store.outbox.update((ob) => { ob.proposals[sid].placement = 'thread'; });
+    // the follow-up (verdict 05:26Z, as if a must): THE OLD WAITING CARD HAS A DOOR — its view wears «Send without the file»
+    // (filesBlocked, why with-files) and that press sends the text alone, in its placement
+    const v0 = (eng.outboxView().proposals || []).find((x) => x.id === sid);
+    R.oldDoor = v0 && v0.filesBlocked ? v0.filesBlocked.why : null;
+    if (R.apOld && R.apOld.ok === false) {
+      const sent1 = (sent[SK] || []).length;
+      R.apWithout = await eng.approve(sid, { withoutFiles: true });
+      R.withoutSent = (sent[SK] || []).length - sent1;
+      R.withoutPlacement = R.withoutSent ? sent[SK][sent[SK].length - 1].placement : null;
+    }
   }
   // a proposal stored BEFORE the enum: only `inThread` (the alias) — read and sent as thread
   const legacyId = 'p-legacy-1';
@@ -341,6 +350,13 @@ async function engineLeg() {
     'B-09d2 THE ENGINE: a Slack-shaped reply with a file and thread+chat is refused at submit by name — NOTHING is created (no card offers an Approve that cannot send); the same file into the thread is filed', { both: R.sFilesBoth && { ok: R.sFilesBoth.ok, code: R.sFilesBoth.code, why: R.sFilesBoth.why, error: R.sFilesBoth.error }, created: R.filesCreatedOnRefusal, thread: R.sFilesThread && { ok: R.sFilesThread.ok, code: R.sFilesThread.code, error: R.sFilesThread.error } });
   ok(R.apOld && R.apOld.ok === false && R.apOld.code === 'placement-not-offered' && R.apOld.why === 'with-files' && R.oldState === 'awaiting-approval' && R.oldSent === 0,
     'B-09d2 r1 THE APPROVAL: a proposal stored before the submit check (files + thread+chat) is refused at Approve by the same rule — nothing sent, it still waits', { ap: R.apOld && { ok: R.apOld.ok, code: R.apOld.code, why: R.apOld.why }, state: R.oldState, sent: R.oldSent });
+  ok(R.oldDoor === 'with-files' && R.apWithout && R.apWithout.ok !== false && R.withoutSent === 1 && R.withoutPlacement === 'thread+chat',
+    'B-09d2 follow-up THE OLD CARD\'S DOOR: such a proposal\'s view wears «Send without the file» (filesBlocked, why with-files) and that press sends the text alone, in its placement', { door: R.oldDoor, ap: R.apWithout && { ok: R.apWithout.ok, code: R.apWithout.code, error: R.apWithout.error }, sent: R.withoutSent, placement: R.withoutPlacement });
+  // RED control (the follow-up): an engine copy without the Approve recheck SENDS the old proposal with its files
+  { const esrc9 = engineSource(REPO), CHECK = "    if (stored0.length && !withoutFiles && plNow && c && !P.filePlacementsOf(c).includes(plNow)) return {";
+    const MC9 = mutantCopies('placement-approve', REPO);
+    const Rc = esrc9.split(CHECK).length === 2 ? await engineLeg(require(MC9.write('src/server/channels-engine.js', esrc9.replace(CHECK, '    if (false) return {'), 'approve-recheck')), 'engine-norecheck') : null;
+    ok(!!Rc && Rc.apOld && Rc.apOld.ok !== false && Rc.oldSent === 1, 'CONTROL B-09d2 the Approve recheck removed: the stored proposal is approved and SENT with its files in the thread and the chat (what Slack refuses after the Approve — the row\'s report)', Rc && { ap: Rc.apOld && { ok: Rc.apOld.ok, code: Rc.apOld.code }, sent: Rc.oldSent }); }
   const q = R.quote.proposal, t = R.thread.proposal, pl = R.plain.proposal;
   ok(R.quote.ok && q.placement === 'quote' && q.placementDefaulted === 'root' && !q.inThread && q.replyQuote && q.replyQuote.text === 'a plain question' && q.placementText === 'as a quoted reply, in the chat', 'Lark-shaped, --to alone on a message OUTSIDE a thread ⇒ stored `quote` (the vendor\'s norm, said as the default), the answered message quoted for the card', J(q && { placement: q.placement, d: q.placementDefaulted, rq: q.replyQuote }));
   ok(R.thread.ok && t.placement === 'thread' && t.placementDefaulted === 'parent-in-thread' && t.inThread === true && t.threadKey === 'omt_t' && t.threadQuote && t.threadQuote.text === 'a reply inside' && t.replyQuote.text === 'a reply inside', '…on a message INSIDE a vendor thread ⇒ stored `thread` (it cannot be quoted from the main list), with inThread + threadKey + threadQuote as the alias', J(t && { placement: t.placement, d: t.placementDefaulted, key: t.threadKey }));
