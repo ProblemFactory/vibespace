@@ -1,21 +1,26 @@
 #!/usr/bin/env node
 // test-user-state-bounds (lane sidebar-echo-order, rounds 11–13) — THE OPS DOOR'S BOUNDS, ONE OVER EACH FROM ITS NUMBER; MASTER'S ROADS
-// TAKE WHAT MASTER TAKES; EACH DOOR'S WORST LEGAL REQUEST TIMED BESIDE A CONTROL MEASURED IN THIS RUN. Round 13's laws (主开发):
+// TAKE WHAT MASTER TAKES; EACH DOOR'S WORST LEGAL REQUEST JUDGED BY ITS COUNTED WORK (B-518e — it was timed beside a control
+// measured in the same run). Round 13's laws (主开发):
 //   1 — MASTER'S ROADS (the whole-key PATCH / POST, the import) take what master takes: a person's export of 500 / 25 000 / 100 000 ids,
 //       a value 6 deep, a 20 000-character name, a group of 25 000 imports with every section; an old tab saves over any stored state;
 //       an old tab's select-all of 25 000 lands (past 20 000 changed items: ONE record for the key, never a refusal) — their cost is
-//       measured here against the control, and the kb states it beside master's;
+//       COUNTED here (§W, B-518e), and the kb states it beside master's;
 //   2 — THE OPS DOOR is bounded and its bound cannot be stepped around: one byte over, through EVERY spelling the router accepts (any
 //       letter case, a trailing slash), with its length, chunked or gzip'd ⇒ 413 «too-large» before the handler (server.js skips its
 //       50 MB parser by the door parser's OWN match); every other bound one over refused by name;
-//   A — the ops door's worst legal request under 1.5× the control (the largest legal import, 12 MiB of config values — ≈ 90–150 ms on
-//       the lane's box: the 100 ms floor's order; a quadratic at 5 000 ops reads seconds — the kb states the law's numbers);
+//   A — the ops door's worst legal request (was: under 1.5× the control, the largest legal import of 12 MiB of config values; a
+//       quadratic at 5 000 ops reads seconds — the kb states the law's numbers);
 //   B — what the product's pages send: a select-all of 2 000 and of 20 000 (four requests, in act order, no part sent twice — also with
-//       its own answers and echoes coming back), the largest group, an import at 10× the owner's store in ONE request — each request
-//       under 2× the control (the 250 ms order).
+//       its own answers and echoes coming back), the largest group, an import at 10× the owner's store in ONE request (was: each
+//       request under 2× the control).
+//   B-518e (a fast leg's verdict is a count or an order, never a ratio of two wall clocks — these ratios were red ALONE on the serial
+//       lane): every request of A and B, master's roads and §6's select-all of 25 000 is judged by its WORK in §W — counted in a child
+//       (Set / Map inserts, the elements an includes / indexOf walked, the store's writes), linear in the items it carries and the
+//       keys it touches, ONE write; an old tab's one change on a big store a constant; three patched copies red. Times are printed.
 // THE NUMBERS ARE LITERALS here (2 097 152, 5 000, 524 288, 16 384, 4 096, depth 4, 20 000, a field name of 200, a batch of 1 048 576):
 // a constant that moves, or a bound removed, turns its leg red BY NAME — no leg hangs, runs out of memory or throws (every body past a
-// bound is streamed or small). Every time bound is relative to the control (scripts/wall-clock-census.mjs).
+// bound is streamed or small). No time is judged (B-518e): the control's import and every request's time are printed beside its work.
 // Round 14 (主开发: «an act is taken back only for a reason about ITS OWN item»): past 20 000 changed items the key's record keeps the
 // digests of the slots the write changed — an earlier act on an item it never touched still lands (§7); a stale whole key that only
 // OMITS takes back nothing at any size; the record survives a restart, keeps each write's time, and its runs past a week go.
@@ -51,15 +56,13 @@ const hub = ({ dir: dirIn = null, clock = null } = {}) => {   // (round 14: a hu
   // (one socket client, taking each frame's bytes as a real one does — the broadcast is part of a write's cost)
   P.setup({ dataDir: dir, wss: { clients: new Set([{ readyState: 1, send: (j) => { framed += j.length; } }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (clock ? clock.t : VNOW), userStateMono: () => (clock ? clock.t : VNOW) });
   const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
-  /** one request, timed: the handler alone, its body already parsed (as the door's parser hands it) */
-  // (int402: `spinMs` — the suite's own hook that makes a door TRULY slower: the CPU held inside the timed window, after the handler)
-  const timed = (method, p, body, { spinMs = 0 } = {}) => {
+  /** one request, timed: the handler alone, its body already parsed (as the door's parser hands it) — its time is PRINTED only (B-518e) */
+  const timed = (method, p, body) => {
     let status = 200, out = null;
     const res = { status(c) { status = c; return res; }, json(o) { out = o; return res; } };
     const fn = handler(method, p);
     const t = process.hrtime.bigint();
     fn({ body, query: {}, params: {}, headers: {} }, res, () => { });
-    if (spinMs > 0) { const until = process.hrtime.bigint() + BigInt(Math.round(spinMs * 1e6)); while (process.hrtime.bigint() < until) { } }
     return { ms: Number(process.hrtime.bigint() - t) / 1e6, status, body: out };
   };
   /** one request whose handler answers later (the export) — the answer, once given */
@@ -114,6 +117,82 @@ const exact = (make, n) => { const base = JSON.stringify(make('')).length; retur
 const fileLen = (v) => { const t = JSON.stringify(v, null, 2); return t.length + 8 * (t.split('\n').length - 1); };
 const OBJ = (() => { const mk = (n) => { const o = {}; for (let i = 0; i < n; i++) o['k' + String(i).padStart(5, '0')] = i % 10; return o; }; let lo = 0, hi = 4096; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (fileLen(mk(m)) <= VALUE) lo = m; else hi = m - 1; } return mk(lo); })();
 
+// B-518e — WORK, NEVER THE CLOCK (the coordinator's law: a fast leg's verdict is a count or an order, never a ratio of two wall
+// clocks; this suite's ratios were red ALONE on the serial lane, ×3.45 of 3). What a request DID is counted in a CHILD (a fresh
+// node, as B-518e's first leg: the wrapped built-ins never touch this process's own Sets): the hub's real route on a scratch
+// data dir, the scenario's pre-state imported first (uncounted), then each request with Set.prototype.add, Map.prototype.set,
+// the elements each Array.prototype.includes / indexOf walked, and the store's writes (a rename onto user-state.json) counted
+// around its handler alone — and (the cure's read) the elements the array passes walked (a filter / map / forEach / some /
+// every / find / findIndex / reduce / flatMap callback, a slice's cut) and the bytes JSON.stringify made against the bytes
+// written to the store. `items` = what the request carries (its ops, or the items of the keys it sends) + what the store held
+// in the keys it touches. `ops`: a patched copy of user-state-ops.js the route loads instead (a control).
+// BLIND, said: an object spread or Object.keys copy, a regex's own steps, a string built per item, a for…of / spread pass, a
+// second whole-state stringify inside the STRINGIFY bound — the old ceilings saw those as time; a count here does not.
+// → per scenario, per request: { status, sets, scans, walks, writes, strBytes, wrote, items (= carried + held), carried, held, applied }
+const WORK = [];   // the legs' scenarios, counted together in §W: [{ leg, law, pre, reqs: [[method, path, body]] }]
+const workLeg = (leg, law, pre, reqs) => WORK.push({ leg, law, pre, reqs });
+const workCounts = (scenarios, { ops = null } = {}) => {
+  const files = scenarios.map((sc, i) => { const f = path.join(TMP, `work-${i}.json`); fs.writeFileSync(f, JSON.stringify({ pre: sc.pre || null, reqs: sc.reqs })); return f; });
+  const code = `const fs = require('fs'), path = require('path'), Module = require('module');
+const REPO = ${JSON.stringify(REPO)}, TMP = ${JSON.stringify(TMP)}, VNOW = ${VNOW}, FILES = ${JSON.stringify(files)}, OPS = ${JSON.stringify(ops)};
+if (OPS) { const real = path.join(REPO, 'src/user-state-ops.js'), m = new Module(real); m.filename = real; m.loaded = true; m.exports = require(OPS); require.cache[real] = m; }
+const itemsOf = (v) => (Array.isArray(v) ? v.length : v && typeof v === 'object' ? Object.values(v).reduce((n, x) => n + 1 + (Array.isArray(x) ? x.length : 0), 0) : 0);
+const itemsIn = (p, b, st) => {
+  if (p === '/api/user-state/batches') { const ops = (b.batches || []).flatMap((x) => x.ops || []), keys = [...new Set(ops.map((o) => o.key))]; return [ops.length, keys.reduce((n, key) => n + itemsOf(st[key]), 0)]; }
+  const u = p === '/api/config/import' ? (((b.file || {}).sections || {}).userState || {}) : b;
+  return [Object.keys(u).reduce((n, key) => n + itemsOf(u[key]), 0), Object.keys(u).reduce((n, key) => n + itemsOf(st[key]), 0)];
+};
+const add = Set.prototype.add, mset = Map.prototype.set, inc = Array.prototype.includes, iof = Array.prototype.indexOf, ren = fs.renameSync, wfs = fs.writeFileSync, str = JSON.stringify, slc = Array.prototype.slice;
+const CB = ['filter', 'map', 'forEach', 'some', 'every', 'find', 'findIndex', 'reduce', 'flatMap'], cbOrig = CB.map((m) => Array.prototype[m]);
+let sets = 0, scans = 0, walks = 0, writes = 0, strBytes = 0, wrote = 0;
+const walked = (a, x, from) => { const s0 = Math.max(0, Math.trunc(Number(from) || 0)), i = iof.call(a, x, s0); return i < 0 ? Math.max(0, a.length - s0) : i - s0 + 1; };
+const on = () => { Set.prototype.add = function (v) { sets++; return add.call(this, v); }; Map.prototype.set = function (k, v) { sets++; return mset.call(this, k, v); };
+  Array.prototype.includes = function (x, from) { scans += walked(this, x, from); return inc.call(this, x, from); }; Array.prototype.indexOf = function (x, from) { scans += walked(this, x, from); return iof.call(this, x, from); };
+  fs.renameSync = function (a, b) { if (path.basename(String(b)) === 'user-state.json') writes++; return ren.call(fs, a, b); };
+  fs.writeFileSync = function (f, d, o) { if (path.basename(String(f)).startsWith('user-state.json')) wrote += typeof d === 'string' ? d.length : d && d.length ? d.length : 0; return wfs.call(fs, f, d, o); };
+  JSON.stringify = function (...a) { const t = str.apply(JSON, a); if (typeof t === 'string') strBytes += t.length; return t; };
+  CB.forEach((m, j) => { const o = cbOrig[j]; Array.prototype[m] = function (cb, ...a) { const f = typeof cb === 'function' ? function (...x) { walks++; return cb.apply(this, x); } : cb; return o.call(this, f, ...a); }; });
+  Array.prototype.slice = function (...a) { const r = slc.apply(this, a); walks += r.length; return r; }; };
+const off = () => { Set.prototype.add = add; Map.prototype.set = mset; Array.prototype.includes = inc; Array.prototype.indexOf = iof; fs.renameSync = ren; fs.writeFileSync = wfs; JSON.stringify = str;
+  CB.forEach((m, j) => { Array.prototype[m] = cbOrig[j]; }); Array.prototype.slice = slc; };
+const out = [];
+for (const f of FILES) {
+  const sc = JSON.parse(fs.readFileSync(f, 'utf8'));
+  for (const key of Object.keys(require.cache)) if (key.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[key];
+  const P = require(path.join(REPO, 'src/routes/persistence.js')), dir = fs.mkdtempSync(path.join(TMP, 'w-'));
+  P.setup({ dataDir: dir, wss: { clients: new Set([{ readyState: 1, send() { } }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => VNOW, userStateMono: () => VNOW });
+  const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
+  const call = (method, p, body) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; } }; handler(method, p)({ body, query: {}, params: {}, headers: {} }, res, () => { }); return { status, body: o }; };
+  if (sc.pre) call('post', '/api/config/import', sc.pre);
+  const rs = [];
+  for (const [m, p, b] of sc.reqs) {
+    const [carried, held] = itemsIn(p, b, call('get', '/api/user-state', {}).body || {}), items = carried + held;
+    sets = 0; scans = 0; walks = 0; writes = 0; strBytes = 0; wrote = 0; on();
+    let r; try { r = call(m, p, b); } finally { off(); }
+    rs.push({ status: r.status, sets, scans, walks, writes, strBytes, wrote, items, carried, held, applied: r.body && Array.isArray(r.body.applied) ? r.body.applied.length : null });
+  }
+  out.push(rs);
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }
+}
+process.stdout.write(JSON.stringify(out) + '\\n');`;
+  const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 240000, maxBuffer: 1 << 26 });
+  for (const f of files) { try { fs.unlinkSync(f); } catch { } }
+  try { return JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { return { err: `child: exit ${r.status} ${r.signal || ''} ${String(r.stderr || '').slice(-600)}` }; }
+};
+// THE LAWS (B-518e): a request's work is LINEAR in the items it carries and the items of the keys it touches — at most ITEM_WORK
+// inserts or scanned elements per item, beside a constant; a product of two sizes (a whole key into a Set per op, a scan of the
+// key per item — the shapes rounds 10 and 12 took out) reads thousands per item at these sizes. And a write that changes the
+// store is ONE write. An old tab's ONE change on a big store makes ONE pass over the key it CARRIES (the road's normalize puts
+// that key into its own Set once; the few-change diff looks the new item up in the old list once — the first probe on the test
+// machine read 66 675 inserts and 66 685 scanned for a key of 66 671) and a constant beyond it (≤ 64) — never round 12's two
+// more passes. Measured (the probe, 2026-11-18, inserts + scans): the linear legs read 0.9–82 an item (the worst a 32-value ops
+// row, 2 617 for 32), the product-of-sizes controls ~1 000; ITEM_WORK 200 = 2.4 × the worst (at 100 it was 1.3 ×) and the
+// array passes ride the same bound. The bytes stringified stay within STRINGIFY_K × the bytes written (a stringify per op or per
+// item reads thousands of times the file).
+const ITEM_WORK = 200, WORK_SLACK = 256, ONE_WORK = 64, STRINGIFY_K = 8, STRINGIFY_SLACK = 65536;
+const workOf = (q) => q.sets + q.scans + q.walks;
+const strOk = (q) => q.strBytes <= STRINGIFY_K * q.wrote + STRINGIFY_SLACK;
+
 console.log('§1 the control, and law A: each door\'s worst legal request (this run, this hub code)');
 // THE CONTROL — the largest legal import: config values at their bound filling the user-state section's 12 MiB
 const nCtl = Math.floor(12000000 / (JSON.stringify(OBJ).length + 80));
@@ -136,13 +215,14 @@ const xC = (ms) => `${ms.toFixed(0)} ms, ×${(ms / C).toFixed(2)} the control`;
     const bytes = JSON.stringify(body).length;
     const r = hub().timed('patch', '/api/user-state/batches', parsed(body));
     const applied = (r.body && r.body.applied || []).length;
-    ok(r.status === 200 && applied === body.batches.length && bytes <= OPS_BODY && r.ms < 1.5 * C,
-      `law A, the ops door: ${what} (${(bytes / 1048576).toFixed(2)} MiB) ⇒ ${applied} applied in ${xC(r.ms)} (ceiling 1.5×)`, { status: r.status, code: codeOf(r), applied, ms: r.ms, C });
+    ok(r.status === 200 && applied === body.batches.length && bytes <= OPS_BODY,
+      `law A, the ops door: ${what} (${(bytes / 1048576).toFixed(2)} MiB) ⇒ ${applied} applied (${xC(r.ms)} — printed, never judged: its WORK is judged in §W)`, { status: r.status, code: codeOf(r), applied, ms: r.ms, C });
+    workLeg(`law A, the ops door: ${what}`, 'linear', null, [['patch', '/api/user-state/batches', body]]);
   }
 }
 {
-  // master's roads, MEASURED (round 13: no bound there — the bench reads each against master's same door; here each against the
-  // control, under a regression ceiling of 2×): the whole-key door at ~12 MiB, and an old tab's ONE change on a big store — 10× the owner's
+  // master's roads (round 13: no bound there — the bench reads each against master's same door; here, since B-518e, each road's
+  // WORK, linear in the key it carries, §W): the whole-key door at ~12 MiB, and an old tab's ONE change on a big store — 10× the owner's
   // (and ~270 000 archived ids below, judged by a COUNT since B-518e: round 12 diffed the whole key through two Sets — ×2 master's write for
   // one archive; now the common head and tail are skipped and the change looked up)
   const tabName = (i) => (k(i) + '\t').padEnd(300, i % 2 ? '\t' : '\\');
@@ -152,57 +232,27 @@ const xC = (ms) => `${ms.toFixed(0)} ms, ×${(ms / C).toFixed(2)} the control`;
     ['20 000 renames of 560 characters', { customNames: Object.fromEntries(Array.from({ length: MOVES }, (_, i) => [k(i), 'r'.repeat(560)])) }],
     ['config values at depth 4 (4 MiB)', { sessionConfigs: Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [k(i), { d: Array.from({ length: 60 }, (_, j) => [[[j, 'deep']]]) }])) }],
   ];
-  // THE VERDICT OVER ROUNDS (int402 — the .402 prep mirror's fast attempt 1 was red here, «config values at their bound ⇒ 184 ms,
-  // ×2.16 the control», on a runner that was not slow; on the box the tip and 2.369.401 read ×1.24–1.52 over ten runs, the same spread:
-  // ONE sample of the road against ONE of its control let one moment decide a regression ceiling — B-d24c's ninth). Now ROUNDS rounds,
-  // each a control and every road on fresh hubs, back to back; a road's verdict is the MEDIAN of its samples over the MEDIAN of the
-  // control's samples taken IN THE SAME ROUNDS. Its controls, through the suite's own hook (timed's spinMs): a road made truly slower
-  // than twice its control is RED by name; one round of it delayed alone does not decide (green).
-  const ROUNDS = 3;
-  const med = (a) => { const v = [...a].sort((x, y) => x - y); return v[Math.floor(v.length / 2)]; };
-  const roundsVerdict = (roadMs, ctlMs, ceil) => { const r = med(roadMs), c = med(ctlMs); return { ok: r < ceil * c, r, c, x: r / c }; };
-  const texts = rows.map(([, content]) => JSON.stringify(content)), ctlText = JSON.stringify(IMPORT(ctlState));   // (serialized ONCE; each round parses its own fresh copy, as a parser hands it)
-  const ctlS = [], roadS = rows.map(() => []), stS = rows.map(() => []);
-  // AN OLD TAB'S ONE CHANGE ON 10× THE OWNER'S STORE, IN THE SAME ROUNDS (int403 — B2's third hosted run, fast attempt 2, on master's
-  // bytes for this leg: «10× the owner's store ⇒ 284 ms, ×1.18 the control (ceiling 1×)»; it decided on ONE sample against ONE control
-  // sample, so one held moment decided — B-d24c; a 60 ms pause placed in that one window was red twice). The leg keeps ONE hub holding
-  // the store; in every round below it sends an old tab's whole key with ONE more id than the hub holds; its verdict is the median of
-  // its samples over the median of the control's samples of the same rounds.
-  const owner10 = { archivedSessions: Array.from({ length: 66670 }, (_, i) => k(i)), customNames: Object.fromEntries(Array.from({ length: 7530 }, (_, i) => [k(i), 'a conversation name of forty characters!'])) };
-  const o10 = { n: 66670, h: hub(), head: JSON.stringify({ archivedSessions: owner10.archivedSessions }).slice(0, -2), ms: [], status: [] };
-  o10.h.timed('post', '/api/config/import', parsed(IMPORT(US(owner10))));
-  for (let rd = 0; rd < ROUNDS; rd++) {
-    const ctlBody = JSON.parse(ctlText); ctlS.push(hub().timed('post', '/api/config/import', ctlBody).ms);
-    texts.forEach((text, j) => { const b = JSON.parse(text); const r = hub().timed('patch', '/api/user-state', b); roadS[j].push(r.ms); stS[j].push(r.status); });
-    {   // (the body serialized from the head once, parsed per round, as a parser hands it: the store's ids + rd + 1 more)
-      const b = JSON.parse(o10.head + Array.from({ length: rd + 1 }, (_, i) => ',' + JSON.stringify(k(o10.n + 1 + i))).join('') + ']}');
-      const r = o10.h.timed('patch', '/api/user-state', b); o10.ms.push(r.ms); o10.status.push(r.status);
-    }
-  }
-  const ms0 = (a) => a.map((x) => x.toFixed(0)).join(' / ');
-  rows.forEach(([what, content], j) => {
-    const bytes = texts[j].length, v = roundsVerdict(roadS[j], ctlS, 2);
-    ok(stS[j].every((st) => st === 200) && bytes <= BIG && v.ok,
-      `law A, master's road (the whole-key door, measured over ${ROUNDS} rounds): ${what} (${(bytes / 1048576).toFixed(1)} MiB) ⇒ 200 in ${v.r.toFixed(0)} ms (median), ×${v.x.toFixed(2)} the control's median ${v.c.toFixed(0)} ms (a regression ceiling: 2×) — the road ${ms0(roadS[j])}, the control ${ms0(ctlS)}`, { status: stS[j], roadMs: roadS[j], ctlMs: ctlS });
+  // (int402 judged these roads over ROUNDS rounds, the median over the control's median — still a ratio of two clocks: B-518e's
+  // verdict read such a ratio red ALONE on the serial lane. Each road now runs ONCE here for what it answers and lands, its time
+  // printed; its WORK is judged in §W — linear in the key it carries, ONE write)
+  rows.forEach(([what, content]) => {
+    const text = JSON.stringify(content), bytes = text.length;
+    const r = hub().timed('patch', '/api/user-state', JSON.parse(text));
+    ok(r.status === 200 && bytes <= BIG, `law A, master's road (the whole-key door): ${what} (${(bytes / 1048576).toFixed(1)} MiB) ⇒ ${r.status} (${xC(r.ms)} — printed, never judged: its WORK in §W)`, { status: r.status, code: codeOf(r) });
+    workLeg(`law A, master's road: ${what}`, 'linear', null, [['patch', '/api/user-state', content]]);
   });
+  // AN OLD TAB'S ONE CHANGE ON 10× THE OWNER'S STORE (int403's ×1.18 of its 1× ceiling on a hosted run — one sample): it lands,
+  // ONE op; its WORK through the whole road is ONE pass over the key it carries and a constant beyond it (§W), never a pass more
+  const owner10 = { archivedSessions: Array.from({ length: 66670 }, (_, i) => k(i)), customNames: Object.fromEntries(Array.from({ length: 7530 }, (_, i) => [k(i), 'a conversation name of forty characters!'])) };
   {
-    // THE CEILING STILL BITES, AND ONE SLOW SAMPLE DOES NOT DECIDE — the depth-4 road (the cheapest), through the hook: two rounds of it
-    // held past twice the control and two plain ones, measured once and shared — [held, held, plain] is RED by its median (a road truly
-    // slower), [held, plain, plain] is green (one slow round)
-    const j = rows.length - 1, Cm = med(ctlS);
-    const held = [0, 1].map(() => hub().timed('patch', '/api/user-state', JSON.parse(texts[j]), { spinMs: 2.3 * Cm }).ms);
-    const plain = [0, 1].map(() => hub().timed('patch', '/api/user-state', JSON.parse(texts[j])).ms);
-    const slow = [held[0], held[1], plain[0]], one = [held[0], plain[0], plain[1]];
-    const vs = roundsVerdict(slow, ctlS, 2), v1 = roundsVerdict(one, ctlS, 2);
-    ok(!vs.ok, `CONTROL: a road truly slower than twice its control (+${(2.3 * Cm).toFixed(0)} ms held in two of ${ROUNDS} rounds) is RED by its median: ×${vs.x.toFixed(2)} — ${ms0(slow)}`, { slow, ctlS });
-    ok(v1.ok && held[0] >= 2 * Cm, `CONTROL: one round of the road held past twice the control (${held[0].toFixed(0)} ms) does not decide — the median ×${v1.x.toFixed(2)} stays under the ceiling — ${ms0(one)}`, { one, ctlS });
-  }
-  // (10× the owner's store is PINNED under the control — round 13's law: within 1.25 of master or under 100 ms there; past it the numbers
-  // are the kb's, and ~270 000 ids carries a COUNT of its shape since B-518e — the leg below)
-  {
-    const onDisk = (JSON.parse(o10.h.file()).archivedSessions || []).length, v = roundsVerdict(o10.ms, ctlS, 1);
-    ok(o10.status.every((st) => st === 200) && onDisk === o10.n + ROUNDS && v.ok,
-      `law A, master's road: an old tab archives ONE more on 10× the owner's store (its whole key, measured over ${ROUNDS} rounds, ${o10.n + 1} to ${o10.n + ROUNDS} ids) ⇒ 200 in ${v.r.toFixed(0)} ms (median), ×${v.x.toFixed(2)} the control's median ${v.c.toFixed(0)} ms (ceiling 1×), ${onDisk} on disk — the leg ${ms0(o10.ms)}, the control ${ms0(ctlS)}`, { status: o10.status, ms: o10.ms, ctl: ctlS, onDisk });
+    const n10 = owner10.archivedSessions.length, h = hub();
+    h.timed('post', '/api/config/import', parsed(IMPORT(US(owner10))));
+    const more = { archivedSessions: [...owner10.archivedSessions, k(n10 + 1)] };
+    const r = h.timed('patch', '/api/user-state', parsed(more));
+    const onDisk = (JSON.parse(h.file()).archivedSessions || []).length;
+    ok(r.status === 200 && onDisk === n10 + 1,
+      `law A, master's road: an old tab archives ONE more on 10× the owner's store (its whole key, ${n10 + 1} ids) ⇒ ${r.status}, ${onDisk} on disk (${xC(r.ms)} — printed, never judged: its WORK in §W)`, { status: r.status, onDisk });
+    workLeg(`law A, master's road: an old tab archives ONE more on 10× the owner's store (${n10 + 1} ids)`, 'one', IMPORT(US(owner10)), [['patch', '/api/user-state', more]]);
   }
   // B-518e (the test machine's wide run under eight lanes read this leg ×3.05 against its 3× ceiling — ONE sample against ONE control,
   // a RATIO OF TWO WALL CLOCKS; the coordinator's law: a fast leg's verdict is a count or an order). What the ceiling guarded is the
@@ -244,7 +294,7 @@ process.stdout.write(JSON.stringify({ n, ops: out.length, op: out[0] }));`;
   }
 }
 
-console.log('§2 law B: what the product\'s own pages send — each request under 2× the control (the 250 ms order on the lane\'s box)');
+console.log('§2 law B: what the product\'s own pages send — in act order, every part once; each request\'s WORK judged in §W (B-518e: its time printed, never judged)');
 /** the page's engine against a hub: every request the engine sends, timed at the hub, answered — until nothing waits. `echo`: each
  *  answer comes back on a later turn and the hub's state follows it as an echo (round 13: round 12 re-sent the part in flight at every
  *  echo and every answer — 18 requests for a select-all of 20 000) */
@@ -254,7 +304,7 @@ const drive = async (h, pageId, ops, echo = false) => {
   // (with answers on a later turn, the engine's own timers run at their own length — squeezed, a 15 s send bound would call a part late
   // while it is being answered, and re-send it)
   const eng = UO.createSync({ pageId, setTimer: (fn, ms) => setTimeout(fn, echo ? ms : Math.min(ms, 5)), clearTimer: (t) => clearTimeout(t), say: (key) => words.push(key), onView: (v, why) => views.push(why),
-    send: (body) => { const r = h.timed('patch', '/api/user-state/batches', parsed(body)); reqs.push({ ms: r.ms, ops: body.batches.reduce((n, b) => n + b.ops.length, 0), bytes: JSON.stringify(body).length, ids: body.batches.map((b) => b.batch), applied: (r.body.applied || []).length });
+    send: (body) => { const r = h.timed('patch', '/api/user-state/batches', parsed(body)); reqs.push({ body: parsed(body), ms: r.ms, ops: body.batches.reduce((n, b) => n + b.ops.length, 0), bytes: JSON.stringify(body).length, ids: body.batches.map((b) => b.batch), applied: (r.body.applied || []).length });
       const ans = ({ ok: r.status === 200, status: r.status, rev: r.body.rev, epoch: r.body.epoch, refused: r.body.refused, old: r.body.old, applied: r.body.applied, held: r.body.held, superseded: r.body.superseded, dropped: r.body.dropped }); if (!echo) return Promise.resolve(ans); inflight++; maxInflight = Math.max(maxInflight, inflight); return new Promise((res) => setImmediate(() => { inflight--; res(ans); setImmediate(() => { try { eng.apply(h.timed('get', '/api/user-state', {}).body); } catch { } }); })); } });
   eng.apply(h.timed('get', '/api/user-state', {}).body);
   eng.record(ops);
@@ -269,16 +319,18 @@ for (const [n, echo] of [[2000, false], [20000, false], [20000, true]]) {
   const h = hub();
   const d = await drive(h, 'pgselectal' + (n === 2000 ? '2' : echo ? '4' : '3'), Array.from({ length: n }, (_, i) => ({ key: 'archivedSessions', item: k(i), value: true })), echo);
   const onDisk = (JSON.parse(h.file()).archivedSessions || []).length;
-  ok(onDisk === n && d.reqs.length === Math.ceil(n / OPS) && d.reqs.every((q) => q.ops <= OPS && q.bytes <= OPS_BODY && q.applied > 0) && d.inOrder && !d.dups && d.maxInflight <= 1 && !d.words.length && d.answers <= d.reqs.length && d.worst < 2 * C,
+  ok(onDisk === n && d.reqs.length === Math.ceil(n / OPS) && d.reqs.every((q) => q.ops <= OPS && q.bytes <= OPS_BODY && q.applied > 0) && d.inOrder && !d.dups && d.maxInflight <= 1 && !d.words.length && d.answers <= d.reqs.length,
     `law B: a select-all of ${n}${echo ? ' (its answers and echoes coming back)' : ''} ⇒ ${d.reqs.length} request${d.reqs.length > 1 ? 's' : ''} of ≤ ${OPS} ops (${d.reqs.map((q) => q.ms.toFixed(0)).join(' / ')} ms; the worst ×${(d.worst / C).toFixed(2)} the control), all ${onDisk} on disk in act order, ${d.dups} parts sent twice, at most ${d.maxInflight} in flight, ${d.answers} repaints for ${d.reqs.length} answers, no word`, { reqs: d.reqs.map((q) => ({ ms: q.ms, ops: q.ops, applied: q.applied })), onDisk, words: d.words, answers: d.answers });
+  workLeg(`law B: a select-all of ${n}${echo ? ' (its answers and echoes coming back)' : ''} — ${d.reqs.length} requests`, 'linear', null, d.reqs.map((q) => ['patch', '/api/user-state/batches', q.body]));
 }
 const groupHub = hub();
 {
   // the largest group the product builds: 20 000 members added in one act (the Manage dialog's) — four requests, the last into 15 000
   const d = await drive(groupHub, 'pggroupbig1', Array.from({ length: GROUP }, (_, i) => ({ key: 'sessionGroups', item: 'the big group', member: k(i), value: true })));
   const g = (JSON.parse(groupHub.file()).sessionGroups || {})['the big group'] || [];
-  ok(g.length === GROUP && d.reqs.length === 4 && d.inOrder && !d.words.length && d.worst < 2 * C,
+  ok(g.length === GROUP && d.reqs.length === 4 && d.inOrder && !d.words.length,
     `law B: the largest group (${GROUP} members, one act) ⇒ ${d.reqs.length} requests (${d.reqs.map((q) => q.ms.toFixed(0)).join(' / ')} ms — the last adds 5 000 to a group of 15 000; the worst ×${(d.worst / C).toFixed(2)} the control), ${g.length} members on disk in order, no word`, { reqs: d.reqs.map((q) => ({ ms: q.ms, applied: q.applied })), n: g.length });
+  workLeg(`law B: the largest group (${GROUP} members, one act) — 4 requests, the last into ${GROUP - OPS}`, 'linear', null, d.reqs.map((q) => ['patch', '/api/user-state/batches', q.body]));
 }
 for (const door of ['patch', 'post']) {
   // an OLD TAB's select-all of 20 000 through its whole key (a page from before the ops door): it lands
@@ -286,13 +338,15 @@ for (const door of ['patch', 'post']) {
   const ids = Array.from({ length: MOVES }, (_, i) => k(i));
   const r = h.timed(door, '/api/user-state', parsed(door === 'post' ? US({ archivedSessions: ids }) : { archivedSessions: ids }));
   const onDisk = (JSON.parse(h.file()).archivedSessions || []).length;
-  ok(r.status === 200 && onDisk === MOVES && r.ms < 2 * C, `law B: an old tab's select-all of ${MOVES} through its whole key (${door.toUpperCase()} /api/user-state) ⇒ ${r.status}, ${onDisk} on disk, in ${xC(r.ms)}`, { status: r.status, code: codeOf(r), onDisk });
+  ok(r.status === 200 && onDisk === MOVES, `law B: an old tab's select-all of ${MOVES} through its whole key (${door.toUpperCase()} /api/user-state) ⇒ ${r.status}, ${onDisk} on disk (${xC(r.ms)} — printed, never judged: its WORK in §W)`, { status: r.status, code: codeOf(r), onDisk });
+  workLeg(`law B: an old tab's select-all of ${MOVES} through its whole key (${door.toUpperCase()})`, 'linear', null, [[door, '/api/user-state', door === 'post' ? US({ archivedSessions: ids }) : { archivedSessions: ids }]]);
 }
 {
   // an import at 10× the owner's store (6 667 archived, 753 names, 32 configs — the shape of data/user-state.json, sizes only) in ONE request
   const st = US({ archivedSessions: Array.from({ length: 66670 }, (_, i) => k(i)), customNames: Object.fromEntries(Array.from({ length: 7530 }, (_, i) => [k(i), 'a conversation name of forty characters!'])), sessionConfigs: Object.fromEntries(Array.from({ length: 320 }, (_, i) => [k(i), { model: 'claude-opus-5-5', effort: 'high', account: 'acct-0001' }])) });
   const r = hub().timed('post', '/api/config/import', parsed(IMPORT(st)));
-  ok(r.status === 200 && r.ms < 2 * C, `law B: an import at 10× the owner's store (${(JSON.stringify(st).length / 1048576).toFixed(1)} MiB) in one request ⇒ ${r.status} in ${xC(r.ms)}`, { status: r.status, code: codeOf(r) });
+  ok(r.status === 200, `law B: an import at 10× the owner's store (${(JSON.stringify(st).length / 1048576).toFixed(1)} MiB) in one request ⇒ ${r.status} (${xC(r.ms)} — printed, never judged: its WORK in §W)`, { status: r.status, code: codeOf(r) });
+  workLeg(`law B: an import at 10× the owner's store in one request`, 'linear', null, [['post', '/api/config/import', IMPORT(st)]]);
 }
 
 console.log('§3 law C at the ops door: its bound binds what is READ, through every spelling the router accepts — refused by name before the handler');
@@ -481,8 +535,9 @@ console.log('§6 MASTER\'S ROADS TAKE WHAT MASTER TAKES (round 13): a person\'s 
     const ids = Array.from({ length: 25000 }, (_, i) => k(i));
     const r = h.timed(door, '/api/user-state', parsed(door === 'post' ? US({ archivedSessions: ids }) : { archivedSessions: ids }));
     const st = JSON.parse(h.file()), facts = Object.keys(st[UO.FACTS_KEY] || {});
-    ok(r.status === 200 && (st.archivedSessions || []).length === 25000 && facts.length === 1 && facts[0] === keySet('archivedSessions') && runsOf(st, 'archivedSessions').join() === '25000' && r.ms < 1.5 * C,
-      `an old tab's select-all of 25 000 through its whole key (${door.toUpperCase()}) ⇒ ${r.status}, ${(st.archivedSessions || []).length} on disk, ${facts.length} fact (the key's record: ${runsOf(st, 'archivedSessions').join('+')} digests) in ${xC(r.ms)}`, { status: r.status, facts: facts.slice(0, 3) });
+    ok(r.status === 200 && (st.archivedSessions || []).length === 25000 && facts.length === 1 && facts[0] === keySet('archivedSessions') && runsOf(st, 'archivedSessions').join() === '25000',
+      `an old tab's select-all of 25 000 through its whole key (${door.toUpperCase()}) ⇒ ${r.status}, ${(st.archivedSessions || []).length} on disk, ${facts.length} fact (the key's record: ${runsOf(st, 'archivedSessions').join('+')} digests) (${xC(r.ms)} — printed, never judged: its WORK in §W)`, { status: r.status, facts: facts.slice(0, 3) });
+    workLeg(`an old tab's select-all of 25 000 through its whole key (${door.toUpperCase()})`, 'linear', null, [[door, '/api/user-state', door === 'post' ? US({ archivedSessions: ids }) : { archivedSessions: ids }]]);
   }
 }
 
@@ -616,6 +671,56 @@ console.log('§7 ROUND 14: a whole key past 20 000 changed items takes back an e
   }
   ok(slots > 3000 && slotBad === 0 && listBad === 0,
     `ROUND 14 — THE RECORD'S CHEAP PATHS ARE THE PLAIN ONES: ${slots} random slots fed part by part, ${slotBad} digests differ from the slot string's; ${lists} random lists with duplicates diffed by their middles, ${listBad} differ from two whole Sets`, { slotBad, listBad });
+}
+
+console.log('§W B-518e — WORK, NEVER THE CLOCK: what each request above DID (counted in a child: Set / Map inserts, the elements an includes / indexOf walked, the store\'s writes)');
+{
+  const WR = workCounts(WORK);
+  ok(Array.isArray(WR) && WR.length === WORK.length, `the counting child answered for ${Array.isArray(WR) ? WR.length : 0} of ${WORK.length} scenarios`, Array.isArray(WR) ? undefined : WR);
+  if (Array.isArray(WR)) WORK.forEach((sc, i) => {
+    const rs = WR[i] || [], per = rs.map((q) => `${workOf(q)} (${q.sets} inserts, ${q.scans} scanned, ${q.walks} walked) for ${q.items} items, ${q.writes} write${q.writes === 1 ? '' : 's'}, ${q.strBytes} B stringified of ${q.wrote} written`).join(' · ');
+    if (sc.law === 'one') {
+      const q = rs[0] || {};
+      ok(rs.length === 1 && q.status === 200 && q.sets <= q.carried + ONE_WORK && q.scans <= q.carried + ONE_WORK && workOf(q) <= ITEM_WORK * q.items + WORK_SLACK && strOk(q) && q.writes === 1,
+        `${sc.leg}: one Set pass and one scan pass over the ${q.carried} items it carries and a constant — ${q.sets} Set / Map inserts and ${q.scans} scanned elements (each ≤ ${q.carried} + ${ONE_WORK}), never a pass more over the store's ${q.held}; ${q.walks} walked; ${q.strBytes} B stringified of ${q.wrote} written (≤ ${STRINGIFY_K} ×); ONE write`, rs);
+    } else {
+      ok(rs.length === sc.reqs.length && rs.every((q) => q.status === 200 && workOf(q) <= ITEM_WORK * q.items + WORK_SLACK && strOk(q) && q.writes === 1),
+        `${sc.leg}: each request's WORK linear in its items (≤ ${ITEM_WORK} an item + ${WORK_SLACK}), its stringify within ${STRINGIFY_K} × what it wrote, ONE write — ${per}`, rs);
+    }
+  });
+  // THE CONTROLS (each red here): the shapes the laws exist for, in patched copies of user-state-ops.js, counted the same way
+  const srcOps = fs.readFileSync(path.join(REPO, 'src/user-state-ops.js'), 'utf8');
+  const ORD_ADD = '    add(x) { if (at.has(x)) return; at.set(x, order.length); order.push(x); },';
+  const LD_HEAD = 'function listDiff(bl, al, gone, came) {\n  const nb = bl.length, na = al.length;';
+    if (srcOps.includes(ORD_ADD)) {
+    // (1) a product of sizes ON the member-add road: ordered()'s add looks the member up by scanning the list (an includes),
+    // not its Map — 2 000 adds into a group of 2 000 (the first probe's «a Set per op» copy read the tree's own count: that
+    // Set is built once per request on this road, so it was no control)
+    const pathA = mutantCopies('usb-ordered-scan', REPO).write('src/user-state-ops.js', srcOps.replace(ORD_ADD, ORD_ADD.replace('if (at.has(x)) return;', 'if (order.includes(x)) return;')));
+    const g0 = Array.from({ length: 2000 }, (_, i) => k(i));
+    const body = batches('pgworkctl01', 1, () => Array.from({ length: 2000 }, (_, i) => ({ key: 'sessionGroups', item: 'g', member: k(5000 + i), value: true })));
+    const sc = { pre: IMPORT(US({ sessionGroups: { g: g0 } })), reqs: [['patch', '/api/user-state/batches', body]] };
+    const real = workCounts([sc]), mut = workCounts([sc], { ops: pathA });
+    const qr = (real[0] || [])[0] || {}, qm = (mut[0] || [])[0] || {};
+    ok(qr.status === 200 && workOf(qr) <= ITEM_WORK * qr.items + WORK_SLACK && qm.status === 200 && workOf(qm) > ITEM_WORK * qm.items + WORK_SLACK,
+      `CONTROL: 2 000 member adds into a group of 2 000 — the tree's ${workOf(qr)} for ${qr.items} items (green); ordered()'s add as a scan of the list (a patched copy) ${workOf(qm)} — RED by the law`, { real, mut });
+  } else ok(false, 'CONTROL: ordered()\'s add line is not in src/user-state-ops.js — the control cannot be made', null);
+  if (srcOps.includes(LD_HEAD)) {
+    // (2) the whole key scanned per item: listDiff as two includes loops — an old tab's whole key of 2 001 over a store of 2 000
+    const pathB = mutantCopies('usb-listdiff-scan', REPO).write('src/user-state-ops.js', srcOps.replace(LD_HEAD, 'function listDiff(bl, al, gone, came) {\n  { for (const x of bl) if (!al.includes(x)) gone(x); for (const x of al) if (!bl.includes(x)) came(x); return; }\n  const nb = bl.length, na = al.length;'));
+    // (3) round 12's shape: the whole key into two Sets — ONE more id on a store of 66 670
+    const pathC = mutantCopies('usb-listdiff-round12', REPO).write('src/user-state-ops.js', srcOps.replace(LD_HEAD, 'function listDiff(bl, al, gone, came) {\n  { const as = new Set(al), bs = new Set(bl); for (const x of bl) if (!as.has(x)) gone(x); for (const x of al) if (!bs.has(x)) came(x); return; }\n  const nb = bl.length, na = al.length;'));
+    const ids = Array.from({ length: 2000 }, (_, i) => k(i));
+    const scB = { pre: IMPORT(US({ archivedSessions: ids })), reqs: [['patch', '/api/user-state', { archivedSessions: [k(9999), ...ids.slice(0, 1000), k(9998), ...ids.slice(1000)] }]] };
+    const ids10 = Array.from({ length: 66670 }, (_, i) => k(i));
+    const scC = { pre: IMPORT(US({ archivedSessions: ids10 })), reqs: [['patch', '/api/user-state', { archivedSessions: [...ids10, k(66671)] }]] };
+    const realB = workCounts([scB, scC]), mutB = workCounts([scB], { ops: pathB }), mutC = workCounts([scC], { ops: pathC });
+    const rb = (realB[0] || [])[0] || {}, rc = (realB[1] || [])[0] || {}, mb = (mutB[0] || [])[0] || {}, mc = (mutC[0] || [])[0] || {};
+    ok(rb.status === 200 && workOf(rb) <= ITEM_WORK * rb.items + WORK_SLACK && mb.status === 200 && workOf(mb) > ITEM_WORK * mb.items + WORK_SLACK,
+      `CONTROL: an old tab's whole key of 2 002 over a store of 2 000 (two new ids in its middle) — the tree's ${workOf(rb)} for ${rb.items} items (green); the key scanned per item (listDiff as two includes loops, a patched copy) ${workOf(mb)} — RED by the law`, { realB, mutB });
+    ok(rc.status === 200 && rc.sets <= rc.carried + ONE_WORK && rc.scans <= rc.carried + ONE_WORK && mc.status === 200 && mc.sets > mc.carried + ONE_WORK && mc.sets - rc.sets >= 2 * 66670 - ONE_WORK,
+      `CONTROL: ONE more id on a store of 66 670 — the tree's ${rc.sets} inserts and ${rc.scans} scanned for the ${rc.carried} it carries (green); round 12's shape, the whole key into two Sets (a patched copy), ${mc.sets} inserts — two passes more (${mc.sets - rc.sets} beyond the tree's, ≥ 2 × 66 670 − ${ONE_WORK}) — RED by the law`, { rc, mc });
+  } else ok(false, 'CONTROL: listDiff\'s head is not in src/user-state-ops.js — the controls cannot be made', null);
 }
 
 console.log(`\n${fail ? `FAILED (${pass} passed, ${fail} failed)` : `ALL PASS (${pass})`}`);

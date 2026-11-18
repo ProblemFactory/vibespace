@@ -650,17 +650,20 @@ console.log('⑪ round 4 — the smaller items');
 // performance.now span) already holds any wait inside the spin; the hold's lower bound is the beat gap less one beat, so its
 // excess over the truth is the gap's time OUTSIDE the spin — a wait for a CPU there, or the main thread's own run (its
 // timers, the hold's asks, a collection) — and an ask that lands while the thread waits reads «not in JavaScript». So the
-// CLASS is judged only when the witness measured NO wait for a CPU over its window (waitMs 0, as the row asks: a hold whose
-// wait is not zero is not judged on its class — no scheduler facts included); otherwise the hold must be SAMPLED (its own
-// count, a class read off a sample). The range may pass the truth by at most the window's measured wait (+1 ms) — a
-// lenient reading (the wait is the window's, from the reading before the hold to the one after), not a law of the hold;
-// the hour bound (< 3 × the truth, the clock mutant's) is not relaxed
+// CLASS is excused only when the WITNESS'S OWN RULE says the thread waited (LH.waitedMuch: a wait of a fifth of the hold or
+// more, the share at which its line says «it also waited N s for a CPU» — the three packed reds waited 100 ms and more of
+// ~300); below that share the class is JUDGED («JavaScript»), and so it is when the wait cannot be read (no scheduler
+// facts — said by name). An excused hold must still be SAMPLED (its own count, a class read off a sample). The range may
+// pass the truth by at most the window's measured wait (+1 ms) — a lenient reading (the wait is the window's, from the
+// reading before the hold to the one after), not a law of the hold; the hour bound (< 3 × the truth) is not relaxed.
+// NOT cured, said (B-518e-loop's readers): a watchdog thread starved through the whole hold reads samples 0 («not sampled»)
+// whatever the wait, and the main thread's own run in the gap after the spin is not in the wait — both rare, both red
 const NOT_SAMPLED = [LH.V.unsampled, LH.V.unknown, LH.V.cpu];
+const excused12 = (x) => !!x && x.waitMs != null && LH.waitedMuch({ wallMs: x.msHi || x.ms, waitMs: x.waitMs });   // (the witness's own window is at least the hold's upper bound)
 function judge12(x, truth) {
   if (!x) return false;
-  const quiet = x.waitMs === 0;
   return x.ms <= truth + 1 + (x.waitMs > 0 ? x.waitMs : 0) && (x.msHi || x.ms) + 40 >= truth && (x.msHi || x.ms) < 3 * truth
-    && (quiet ? x.verdict === LH.V.js : x.samples >= 1 && !NOT_SAMPLED.includes(x.verdict));
+    && (excused12(x) ? x.samples >= 1 && !NOT_SAMPLED.includes(x.verdict) : x.verdict === LH.V.js);
 }
 console.log('⑫ round 5 — the monotonic clock, by behaviour (a date step inside a real hold)');
 {
@@ -680,7 +683,7 @@ console.log('⑫ round 5 — the monotonic clock, by behaviour (a date step insi
   const hs = (rep.holds || []).filter((h) => h.ms >= 100);
   const h = hs[0];
   ok(hs.length === 1 && judge12(h, truth),
-    `⑫ a real ${truth.toFixed(0)} ms hold with the date stepped +1 h inside it, the witness with its default clock: ONE hold of ${h && h.ms}–${h && h.msHi} ms (the truth inside; the thread's own wait for a CPU, as the witness measured it: ${h && h.waitMs} ms), «${h && h.verdict}»${h && h.waitMs !== 0 ? ` — a wait (or no scheduler facts), so judged SAMPLED (${h && h.samples} samples), not on its class` : ''}`, { holds: (rep.holds || []).map((x) => [x.ms, x.msHi, x.verdict, x.waitMs, x.samples, x.line]) });
+    `⑫ a real ${truth.toFixed(0)} ms hold with the date stepped +1 h inside it, the witness with its default clock: ONE hold of ${h && h.ms}–${h && h.msHi} ms (the truth inside; the thread's own wait for a CPU, as the witness measured it: ${h && h.waitMs} ms), «${h && h.verdict}»${h && excused12(h) ? ` — it waited a fifth of the hold or more (the witness's own rule), so judged SAMPLED (${h.samples} samples), not on its class` : h && h.waitMs == null ? ' — NO SCHEDULER FACTS on this machine: the class judged' : ''}`, { holds: (rep.holds || []).map((x) => [x.ms, x.msHi, x.verdict, x.waitMs, x.samples, x.line]) });
 }
 // ⑫b B-518e — THE JUDGE OVER FIXED HOLDS (pure; the leg's controls). ⑫ was red THREE times on the first test machine in
 // packed runs, green alone: «302–322 ms, native code or garbage collection» (truth 302; run 2ae16d9e9, the box's zone),
@@ -699,12 +702,25 @@ console.log('⑫ round 5 — the monotonic clock, by behaviour (a date step insi
     ['the clock mutant: an hour', { ms: 3600301, msHi: 3600321, verdict: LH.V.js, waitMs: 100, samples: 2 }, 300],
     ['the clock mutant: not sampled', { ms: 301, msHi: 321, verdict: LH.V.unsampled, waitMs: 100, samples: 0 }, 300],
     ['a scheduler verdict, no sample (waiting)', { ms: 301, msHi: 321, verdict: LH.V.waiting, waitMs: 200, samples: 0 }, 300],
-    ['a scheduler verdict, no sample (blocked)', { ms: 301, msHi: 321, verdict: LH.V.blocked, waitMs: 5, samples: 0 }, 300],
-    ['no sample and no scheduler facts', { ms: 301, msHi: 321, verdict: LH.V.unknown, waitMs: null, samples: 0 }, 300],
+    ['a scheduler verdict, no sample (blocked; excused, so judged on its samples)', { ms: 301, msHi: 321, verdict: LH.V.blocked, waitMs: 100, samples: 0 }, 300],
+    ['a sample counted but a not-sampled class (excused)', { ms: 301, msHi: 321, verdict: LH.V.cpu, waitMs: 100, samples: 1 }, 300],
+    ['no sample and no scheduler facts (the class judged: «not sampled»)', { ms: 301, msHi: 321, verdict: LH.V.unknown, waitMs: null, samples: 0 }, 300],
     ['past the truth by more than its wait', { ms: 360, msHi: 380, verdict: LH.V.js, waitMs: 20, samples: 2 }, 300],
+    // A PLANTED MISCLASSIFICATION ON A QUIET RUN (the 06:13Z verdict's «as if a must»): a quiet machine waits a millisecond or
+    // a few too — the class is judged there, so a wrong class is caught; and with no scheduler facts it is judged too
+    ['a wrong class at a 1 ms wait (a quiet machine)', { ms: 301, msHi: 321, verdict: LH.V.native, waitMs: 1, samples: 3 }, 300],
+    ['a wrong class at a 5 ms wait', { ms: 301, msHi: 321, verdict: LH.V.runnable, waitMs: 5, samples: 3 }, 300],
+    ['a wrong class just under a fifth of the hold (63 ms of 321)', { ms: 301, msHi: 321, verdict: LH.V.native, waitMs: 63, samples: 3 }, 300],
+    ['a wrong class with no scheduler facts', { ms: 301, msHi: 321, verdict: LH.V.native, waitMs: null, samples: 3 }, 300],
   ];
-  ok(RED.every(([, x, truth]) => !judge12(x, truth)) && judge12({ ms: 301, msHi: 321, verdict: LH.V.js, waitMs: 0, samples: 3 }, 300) && judge12({ ms: 301, msHi: 321, verdict: LH.V.js, waitMs: null, samples: 3 }, 300),
-    `⑫b red: ${RED.map(([w]) => w).join(' · ')}; green: a quiet hold read «JavaScript» (no wait measured), and a sampled hold with no scheduler facts`, RED.filter(([, x, truth]) => judge12(x, truth)).map(([w]) => w));
+  const GREEN = [
+    ['a quiet hold read «JavaScript» (0 ms of wait)', { ms: 301, msHi: 321, verdict: LH.V.js, waitMs: 0, samples: 3 }, 300],
+    ['«JavaScript» at a 5 ms wait (the class judged, and right)', { ms: 301, msHi: 321, verdict: LH.V.js, waitMs: 5, samples: 3 }, 300],
+    ['«JavaScript» with no scheduler facts (the class judged, and right)', { ms: 301, msHi: 321, verdict: LH.V.js, waitMs: null, samples: 3 }, 300],
+    ['a fifth of the hold waited (65 ms of 321): excused, sampled', { ms: 301, msHi: 321, verdict: LH.V.native, waitMs: 65, samples: 2 }, 300],
+  ];
+  ok(RED.every(([, x, truth]) => !judge12(x, truth)) && GREEN.every(([, x, truth]) => judge12(x, truth)),
+    `⑫b red: ${RED.map(([w]) => w).join(' · ')}; green: ${GREEN.map(([w]) => w).join(' · ')}`, { red: RED.filter(([, x, truth]) => judge12(x, truth)).map(([w]) => w), green: GREEN.filter(([, x, truth]) => !judge12(x, truth)).map(([w]) => w) });
 }
 
 // «THE NUMBER» (lane hub-loop-stalls, 2026-11-16 — the owner's hub: «725 holds and 2455 s in the kernel (blocked)», counted by
