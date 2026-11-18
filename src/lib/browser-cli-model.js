@@ -37,6 +37,7 @@ export function cliRowWords(f, t) {
   // until it stops; the row says how many still do, and how many run on a version no longer here (refused until restarted)
   const run = f.running && typeof f.running === 'object' ? f.running : {};
   const prev = Number(run.previous) || 0, gone = Number(run.gone) || 0;
+  if (Number(run.checking) > 0) parts.push(t(i18nKey('checking…'))); // B-7a30: a running browser whose CLI is not judged yet — said, never counted as fine
   if (prev === 1) parts.push(t(i18nKey('1 browser still on the previous CLI — it switches when it stops')));
   else if (prev > 1) parts.push(t(i18nKey('{n} browsers still on the previous CLI — they switch when they stop'), { n: prev }));
   if (gone === 1) { parts.push(t(i18nKey('1 browser runs on a CLI that is no longer installed — restart it to use the current one'))); warn = true; }

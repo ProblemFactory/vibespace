@@ -591,6 +591,8 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
     // TMPDIR — the keeper's data/browser-env/tmp (a getter: made on first use), never the RAM-backed /tmp
     { let td = null; try { td = typeof tmpDir === 'function' ? tmpDir() : tmpDir; } catch { td = null; } if (typeof td === 'string' && td.startsWith('/')) e.TMPDIR = td; }
     if (cli && typeof cli.gone === 'string') { resolve({ ok: false, code: 'browser_cli_gone', stdout: '', stderr: '', json: null, error: `browser_cli_gone: ${cli.gone}` }); return; }
+    // B-7a30: the keeper's door could not judge this browser's CLI within its bound (a disk that did not answer) — nothing runs
+    if (cli && typeof cli.unconfirmed === 'string') { resolve({ ok: false, code: 'browser_cli_unconfirmed', stdout: '', stderr: '', json: null, error: `browser_cli_unconfirmed: ${cli.unconfirmed}` }); return; }
     const bin = cli && typeof cli.path === 'string' && cli.path ? cli.path : binOf();
     if (!bin) { resolve({ ok: false, code: 'ENOENT', stdout: '', stderr: '', json: null, error: 'binary_absent: the browser CLI is not installed on this machine (only the VibeSpace shim is on PATH, or nothing)' }); return; }
     // lane L r5 F1 (b): EVERY call runs in the private directory (any call may START the daemon — `open`,

@@ -278,6 +278,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // lane browser-resume (§3.9): a Forget of nothing kept / of a browser that runs / that could not remove its directory
   not_kept: 404, kept_live: 409, forget_failed: 500,
   kept_unconfirmed: 503, // B-7a30 r2: an act's fresh check of its kept folder got no answer within its bound (nothing was done)
+  browser_cli_unconfirmed: 503, // B-7a30 unit 1': the door's fresh judgment of the browser's CLI got no answer within its bound (failVerdict)
   // lane browser-resume B (ruling 2): a Resume's refusals (a helper's browser is never kept; its directory became a named
   // profile; the conversation is not running) and the hand-back's (a browser this conversation does not hold; the stash)
   child_not_kept: 409, resume_adopted: 409, no_live_session: 409, not_yours: 403, stash_refused: 503,
@@ -457,7 +458,7 @@ function agentBrowserOf(b) {
   const { launchEnv, ...rest } = b; // eslint-disable-line no-unused-vars
   // verify r2 (H1): the CLI the browser runs, by VERSION (the agent's CLI finds that version on its own machine) + the words
   // when it left this machine — never the program's path
-  const cli = b.cli && typeof b.cli === 'object' && b.cli.version ? { version: String(b.cli.version), ...(typeof b.cli.gone === 'string' ? { gone: b.cli.gone } : {}) } : null;
+  const cli = b.cli && typeof b.cli === 'object' && b.cli.version ? { version: String(b.cli.version), ...(typeof b.cli.gone === 'string' ? { gone: b.cli.gone } : {}), ...(b.cli.checking ? { checking: true } : {}) } : null; // B-7a30: not judged yet ⇒ said
   return { ...rest, cli, ...(b.browserChoice ? { browserChoice: require('../browser-builds.js').agentChoiceView(b.browserChoice) } : {}) };
 }
 /** verify r2 (H1): a browser whose CLI version is no longer on this machine runs no command — refused by name BEFORE the
@@ -466,6 +467,8 @@ async function cliGoneVerdict(k, browser) {
   // verify r3 (Y1): the keeper's doors' fact — a binary of an unproven version is ASKED before the browser is refused
   // (a same-version re-install at the same path was refused once, "no longer installed", with a remedy that loses its tabs)
   if (browser && typeof browser === 'object' && browser.profileId && k && typeof k.cliFactReady === 'function') { try { const f = await k.cliFactReady(browser.profileId); if (f || browser.cli) browser.cli = f; } catch { /* the view's own reading stands */ } }
+  const u = browser && browser.cli && typeof browser.cli.unconfirmed === 'string' ? browser.cli.unconfirmed : null;
+  if (u) return { code: 'browser_cli_unconfirmed', error: u, remedy: 'run the command again in a moment — nothing was run' }; // B-7a30: the door's bound passed (never «runs» unjudged)
   const g = browser && browser.cli && typeof browser.cli.gone === 'string' ? browser.cli.gone : null;
   return g ? { code: 'browser_cli_gone', error: g, remedy: 'ask the user to restart this browser (Agent browser panel → Stop; the next command starts it on the current CLI)' } : null;
 }

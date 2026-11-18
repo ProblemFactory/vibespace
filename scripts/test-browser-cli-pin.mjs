@@ -407,6 +407,10 @@ async function h1Leg(KK, tag, { cliSrc = null } = {}) {
     out.newLaunch = { cli: r3.browser.cli && r3.browser.cli.version, v: (log1('launches.log').at(-1) || {}).version };
     // the pinned 0.38.0 REMOVED while the first browser runs on it
     fs.rmSync(path.join(T, 'agent-browser-0.38.0'), { recursive: true, force: true });
+    // B-7a30 (主开发's law): the row is a VIEW — it reads what the last judge found; the keeper's own timer re-judges every
+    // CLI_FRESH_MS (10 s): its pass is awaited here, and the DOORS below (the stream port, the agent's command) judge at once
+    out.factsBefore = (await kh.cliFacts()).running;
+    await kh.rejudgeClis();
     out.facts2 = (await kh.cliFacts()).running;
     const nc3 = log1('calls.log').length;
     out.stream2 = await kh.streamPortFor({ ok: true, kind: 'ephemeral', ns: 'vs-' + H1_KEY, envPairs: h1Pairs(H1_KEY) });
@@ -479,7 +483,7 @@ const h1 = await h1Leg(K, 'real');
   ok(h1.nextCalls.some((c) => c.verb === 'get title' && c.v === '0.38.0') && !h1.nextCalls.some((c) => c.verb === 'get title' && c.v !== '0.38.0'), 'the conversation\'s NEXT command (the shipped CLI over the real /resolve) runs 0.38.0 — VibeSpace\'s verified install of the version its browser runs', { next: h1.nextCalls, se: h1.next.se.slice(-300) });
   ok(h1.restarts.length === 0 && h1.pidAfter === h1.launch.pid && !/version mismatch/i.test(h1.next.se), 'no "Daemon version mismatch, restarting…": the daemon (and the Chrome it owns) is the one it launched', { restarts: h1.restarts, pid: [h1.launch.pid, h1.pidAfter] });
   ok(h1.newLaunch.cli === '0.38.1' && h1.newLaunch.v === '0.38.1', 'a NEW launch after the switch runs the current CLI (0.38.1)', h1.newLaunch);
-  ok(h1.facts2.gone === 1 && h1.facts2.previous === 0, 'the pinned 0.38.0 removed while its browser runs: the row counts it as on a CLI no longer installed', h1.facts2);
+  ok(h1.facts2.gone === 1 && h1.facts2.previous === 0 && h1.factsBefore.gone === 0, 'the pinned 0.38.0 removed while its browser runs: the row (a view) counts it as on a CLI no longer installed once the keeper\'s own pass has judged it (B-7a30: before it, the row still reads the last judgment — within 10 s)', { before: h1.factsBefore, after: h1.facts2 });
   ok(h1.stream2 && h1.stream2.ok === false && /browser_cli_gone/.test(String(h1.stream2.error)) && /restart it to use the current CLI/.test(String(h1.stream2.error)), '…the keeper\'s calls on it are refused BY NAME (browser_cli_gone, "restart it to use the current CLI")', h1.stream2);
   ok(h1.gone.code === 1 && /\[browser_cli_gone\]/.test(h1.gone.se) && /restart it to use the current CLI/.test(h1.gone.se) && /remedy: ask the user to restart this browser/.test(h1.gone.se), '…the agent\'s command too: [browser_cli_gone] with its way out', h1.gone.se.slice(-400));
   ok(h1.goneCalls.length === 0 && h1.restarts2.length === 0 && h1.daemonAlive, '…and NOTHING ran (no silent fall to PATH): its daemon untouched', { goneCalls: h1.goneCalls, restarts: h1.restarts2 });
@@ -583,7 +587,8 @@ console.log('— ⑥ controls');
   ok(hc.nextCalls.some((c) => c.verb === 'get title' && c.v === '0.38.1') && hc.restarts.length > 0 && /version mismatch/i.test(hc.next.se), 'control (i): …the conversation\'s next command ran 0.38.1 and printed "Daemon version mismatch detected, restarting..." — exactly what ⑤b\'s next-command leg catches', { next: hc.nextCalls, restarts: hc.restarts.length });
   // verify r3 (Y1): a keeper whose doors judge off the sync reading (a never-asked binary = "gone") ⇒ the same version put
   // back at the same path is refused once
-  const noAsk = ks.replace("    if (!(j && j.unknown)) return j;\n    await Promise.all(", "    return cliOptOf(rec);\n    await Promise.all(");
+  // (B-7a30: the asking moved into the ONE async judge — the cut is its line there)
+  const noAsk = ks.replace("    for (const x of cands) if (x.version == null && x.path) x.version = await cliVersionAt(x.path).catch(() => null);\n", "");
   ok(noAsk !== ks, 'control (j): the patch (the doors refuse an unasked binary instead of asking it) applies');
   const hj = await sameVersionLeg(MUT.load('src/server/browser-keeper.js', noAsk, 'no-ask'), require('../src/routes/browser.js'), 'no-ask');
   ok(hj.stream && hj.stream.code === 'browser_cli_gone' && hj.streamCalls.length === 0, 'control (j): …the keeper\'s call on a browser whose binary was re-installed (the same version) was refused browser_cli_gone — exactly what the r3 (Y1) leg catches', { stream: hj.stream && hj.stream.code, calls: hj.streamCalls });

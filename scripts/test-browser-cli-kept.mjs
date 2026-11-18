@@ -1,0 +1,197 @@
+#!/usr/bin/env node
+// B-7a30 unit 1' (the owner's hub witness, 2026-11-17: 23.8 s held in 16 holds — the keeper's cliJudge stat'ed each stamped record's
+// CLI file and, on a mismatch, read the pinned install's package.json and stat'ed its candidates, on EVERY list(), digest and
+// commit). THE LAW (主开发): a browser's CLI judgment is a KEPT FACT (src/server/browser-keeper.js) — set by the keeper's own acts
+// (a launch, an adoption), judged again OFF the loop by one async judge on the keeper's own timer; a VIEW reads what the last judge
+// found, a DOOR (a command about to run) judges fresh, bounded. In-process, a real keeper, no server, no driver:
+//   ① THE COUNT: one list() makes 0 sync fs calls on a CLI file or the CLI folders at 5 and at 50 stamped records
+//      CONTROL: today's keeper with the release's lines planted back (c39de1224's sync cliJudge as the view) — its calls grow
+//      with the records ⇒ ① RED (a patched copy: no git object is read — test-architecture §75)
+//   ② a view never shows a CLI as fine before it was judged since the boot: `checking` (the CLI row's words «checking…»), and
+//      the first judge that lands redraws it (one notification)
+//      CONTROL: a keeper whose view answers an unjudged record as fine ⇒ ② RED
+//   ③ a judgment that changes notifies ONCE; one that changes nothing sends nothing
+//      CONTROL: a keeper that notifies at every judge ⇒ ③ RED
+//   ④ THE DOOR: a stall PLACED in the judge's file check (never load) — the /resolve door answers `unconfirmed` by name past the
+//      bound (5 s in the product, ACT_MS here); while a judge hangs a second door is refused at once with no second check; a view
+//      says `checking`; released, the door answers; the runtime refuses a call carrying it by name, nothing spawned
+//      CONTROL: a door without the bound never answers over the stall ⇒ ④ RED
+//   ⑤ wiring pins: the heal reads the door, an `info` read goes on, a view asks for THE pass (never a judge per record)
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+let pass = 0, fail = 0;
+const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const quiet = { log() { }, warn() { }, error() { } };
+const ROOT = scratch('cli-kept');
+fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
+const ACT_MS = 150; // the doors' bound handed to the keeper here (cliActMs = 5 s in the product)
+const K = require('../src/server/browser-keeper.js');
+const F = require('../src/browser-facts.js');
+const CM = await import('../src/lib/browser-cli-model.js');
+const MUT = mutantCopies('cli-kept', REPO);
+const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+const cut = (text, anchor, by, what) => { ok(text.includes(anchor), `control setup: ${what} is where the control cuts`); return text.replace(anchor, by); };
+const idOf = (p) => { const st = fs.statSync(p); return `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}`; };
+// every sync fs call naming a CLI file or a CLI folder while `fn` runs
+const SYNC = Object.keys(fs).filter((k) => k.endsWith('Sync') && typeof fs[k] === 'function');
+// (held open until `fn`'s promise settles: the judges a list STARTS are counted to their end)
+async function cliCalls(fn, prefixes) {
+  const real = {}; const hits = []; let all = 0;
+  for (const k of SYNC) { real[k] = fs[k]; fs[k] = function (a, ...r) { all++; const s = typeof a === 'string' ? a : ''; if (prefixes.some((x) => s.startsWith(x)) || s.includes('/browser-tools/')) hits.push(k + ' ' + s); return real[k].call(this, a, ...r); }; }
+  try { await fn(); } finally { for (const k of SYNC) fs[k] = real[k]; }
+  return { n: hits.length, all, hits: hits.slice(0, 6) };
+}
+// THE RELEASE'S LINES (c39de1224's cliJudge, verbatim but for knownVersionAt inlined) planted back as the view — a patched copy
+const RELEASE_VIEW = `  function cliOptOf(rec) {
+    const c = rec && rec.cli;
+    if (!c || !c.version || !isLocalRec(rec)) return null;
+    const knownVersionAt = (p) => { const m = p ? cliVersions.get(p) : null; return m && m.id === cliIdOf(p) ? m.version : null; };
+    if (c.path && usableExe(c.path) && (!c.id || cliIdOf(c.path) === c.id)) return { path: c.path };
+    const cands = [];
+    const cur = typeof bf.binPath === 'function' ? bf.binPath() : null;
+    if (cur) cands.push({ path: cur, version: knownVersionAt(cur), how: 'current' });
+    try { const i = installedCliOf(c.version); if (i.ok) cands.push({ path: i.path, version: c.version, how: 'installed' }); } catch { /* not a version */ }
+    const onPath = typeof bfPath.binPath === 'function' ? bfPath.binPath() : null;
+    if (onPath && onPath !== cur) cands.push({ path: onPath, version: knownVersionAt(onPath), how: 'path' });
+    const v = VERBS.cliForBrowser({ want: c.version, candidates: cands, current: cur ? knownVersionAt(cur) : null });
+    if (v.ok) return v.path ? { path: v.path } : null;
+    return { gone: v.error };
+  }
+`;
+/** A real keeper in its own scratch world. `stall` PLACES a stall in the judge's file check (until released). */
+function world(Kmod, tag, { stall = null } = {}) {
+  const W = path.join(ROOT, 'w-' + tag); const H = path.join(W, 'home'); const D = path.join(W, 'data'); const BIN = path.join(W, 'bin'); const CLI = path.join(W, 'cli');
+  for (const d of [path.join(H, '.agent-browser'), D, BIN, CLI]) fs.mkdirSync(d, { recursive: true });
+  const cliFile = path.join(CLI, 'agent-browser'); fs.writeFileSync(cliFile, '#!/bin/sh\necho 0.38.1\n', { mode: 0o755 });
+  const rtE = { PATH: BIN, HOME: H };
+  const msgs = [];
+  const kp = Kmod.create({ dataDir: D, homeDir: H, env: () => rtE, liveKeys: () => new Set(), runtime: F.createBrowserRuntime({ env: rtE }), facts: F.createBrowserFacts({ env: rtE }), log: quiet, tickMs: 3600e3, install: false,
+    broadcast: (m) => msgs.push(m), cliEveryMs: 0, cliActMs: ACT_MS, ...(stall ? { cliFileFact: stall.fileFact } : {}) });
+  const stamp = (n, id) => { const ids = []; for (let i = 0; i < n; i++) { const pr = kp.createProfile({ label: `Cli ${tag} ${i}` }, { owner: { kind: 'instance', id: null } }); kp._reg().browsers[pr.id] = { profileId: pr.id, state: 'stopped', launch: 'attach', cli: { version: '0.38.1', path: cliFile, id, at: 1 }, endedAt: 1 }; ids.push(pr.id); } return ids; };
+  const sent = () => msgs.filter((m) => m && m.type === 'browser-profiles-updated').length;
+  return { kp, W, D, BIN, CLI, cliFile, stamp, sent, done: () => { try { kp.shutdown && kp.shutdown(); } catch { /* none */ } } };
+}
+function staller() {
+  const pend = []; let on = false, checks = 0;
+  return { fileFact: async (p) => { checks++; if (on) await new Promise((r) => pend.push(r)); let exe = false, id = null; try { fs.accessSync(p, fs.constants.X_OK); exe = true; id = idOf(p); } catch { exe = false; id = null; } return { exe, id }; },
+    on: () => { on = true; }, release: () => { on = false; for (const f of pend.splice(0)) f(); }, checks: () => checks };
+}
+
+console.log('① THE COUNT: sync fs calls on a CLI file for one list()');
+async function countAt(Kmod, n, tag) {
+  const X = world(Kmod, tag + '-' + n);
+  X.stamp(n, '1:2:3:4'); // a stamp whose file does not match: the release's judge falls through to every candidate
+  X.kp.list(); await X.kp.rejudgeClis(); // warm: every record judged once (off the loop)
+  // one list() and a whole pass of the judge (the keeper's own tick), counted to the pass's end
+  const c = await cliCalls(async () => { X.kp.list(); await X.kp.rejudgeClis(); }, [X.CLI, X.BIN]); // the CLI file, PATH's folder, and (by name) any browser-tools path
+  X.done();
+  return c;
+}
+{
+  const a = await countAt(K, 5, 'now'), b = await countAt(K, 50, 'now');
+  ok(a.n === 0 && b.n === 0, `① THE COUNT: one list() and a whole pass of the judge make ${a.n} sync fs calls on a CLI file or folder at 5 stamped records and ${b.n} at 50 — 0 (all sync calls of the list, other readers included: ${a.all} / ${b.all})`, { a, b });
+  const vi = kSrc.indexOf('  function cliOptOf(rec) {'), vj = kSrc.indexOf("  /** THE DOORS' answer");
+  ok(vi > 0 && vj > vi, 'control setup: the view (cliOptOf) is where the release\'s lines are planted');
+  const KR = MUT.load('src/server/browser-keeper.js', kSrc.slice(0, vi) + RELEASE_VIEW + kSrc.slice(vj), 'release');
+  const ra = await countAt(KR, 5, 'release'), rb = await countAt(KR, 50, 'release');
+  ok(ra.n >= 5 && rb.n >= 50 && rb.n > ra.n, `CONTROL: the release's lines as the view — one list() makes ${ra.n} sync calls on a CLI file or folder at 5 records and ${rb.n} at 50 (${rb.hits.slice(0, 3).join(' | ')}): they grow with the records, ① is RED on it`, { ra, rb });
+}
+
+console.log('② a view never shows a CLI as fine before it was judged');
+async function firstLeg(Kmod, tag) {
+  const X = world(Kmod, tag);
+  const [id] = X.stamp(1, idOf(X.cliFile)); // its own file, matching: the judge will find it fine
+  const v1 = X.kp.list().browsers[id].cli; const s0 = X.sent();
+  if (X.kp.rejudgeClis) await X.kp.rejudgeClis();
+  await sleep(20);
+  const v2 = X.kp.list().browsers[id].cli; const sent = X.sent() - s0;
+  X.done();
+  return { v1, v2, sent };
+}
+{
+  const r = await firstLeg(K, 'first');
+  ok(r.v1 && r.v1.checking === true && !r.v1.gone, '② a stamped record never judged since the boot: its view says `checking` — never «runs» unjudged', r.v1);
+  ok(r.v2 && !r.v2.checking && !r.v2.gone && r.sent === 1, `② …the first judge lands: the view redraws (no checking, not gone) with ONE notification (${r.sent})`, r);
+  const words = CM.cliRowWords({ table: '0.38.1', choice: { mode: 'path' }, onPath: { version: '0.38.1' }, inUse: { version: '0.38.1' }, install: {}, running: { previous: 0, gone: 0, checking: 1 } }, (s) => s);
+  ok(/checking…/.test(words.text), `② the CLI row says the page's own «checking…» for a running browser whose CLI is not judged yet (${JSON.stringify(words.text)})`);
+  const KC = MUT.load('src/server/browser-keeper.js', cut(kSrc, '    return checking ? { checking: true } : k.j;', '    return k ? k.j : null;', 'the view\'s «checking» answer'), 'nochecking');
+  const c = await firstLeg(KC, 'first-control');
+  ok(c.v1 && !c.v1.checking, `CONTROL: a keeper whose view answers an unjudged record as fine says ${JSON.stringify(c.v1)} — ② is RED on it`, c.v1);
+}
+
+console.log('③ a judgment that changes notifies once; one that changes nothing sends nothing');
+async function notifyLeg(Kmod, tag) {
+  const X = world(Kmod, tag);
+  const [id] = X.stamp(1, idOf(X.cliFile));
+  X.kp.list(); await X.kp.rejudgeClis(); X.kp.list(); // judged, and a view drew «fine»
+  const s0 = X.sent();
+  await X.kp.rejudgeClis(); await sleep(20);
+  const same = X.sent() - s0;
+  fs.rmSync(X.cliFile, { force: true }); // its CLI removed: the next judge finds it gone
+  await X.kp.rejudgeClis(); await sleep(20);
+  const moved = X.sent() - s0 - same; const v = X.kp.list().browsers[id].cli;
+  const s1 = X.sent(); await X.kp.rejudgeClis(); await sleep(20);
+  const again = X.sent() - s1;
+  X.done();
+  return { same, moved, again, gone: !!(v && v.gone) };
+}
+{
+  const r = await notifyLeg(K, 'notify');
+  ok(r.same === 0 && r.moved === 1 && r.again === 0 && r.gone, `③ a judge that found what the view drew sends nothing (${r.same}); its CLI removed — the next judge sends ONE notification (${r.moved}) and the view says gone; the next, the same answer: nothing (${r.again})`, r);
+  const KN = MUT.load('src/server/browser-keeper.js', cut(kSrc, "      if (cliTold.has(id) && cliTold.get(id) !== shown) { cliTold.set(id, shown); notify(); }", '      if (true) { cliTold.set(id, shown); notify(); }', 'the landing\'s «moved what a view drew» test'), 'everyjudge');
+  const c = await notifyLeg(KN, 'notify-control');
+  ok(c.same > 0 || c.again > 0, `CONTROL: a keeper that notifies at every judge sends for judges that changed nothing (same ${c.same}, again ${c.again}) — ③ is RED on it`, c);
+}
+
+console.log('④ THE DOOR: bounded, and never answers what it did not judge');
+async function doorLeg(Kmod, tag) {
+  const st = staller(); const X = world(Kmod, tag, { stall: st });
+  const [id, id2] = X.stamp(2, idOf(X.cliFile));
+  X.kp.list(); await X.kp.rejudgeClis(); // judged fine before the stall
+  st.on();
+  const t0 = Date.now();
+  const sentinel = new Promise((r) => setTimeout(() => r('no answer'), ACT_MS * 6));
+  const d1 = await Promise.race([X.kp.cliFactReady(id), sentinel]);
+  const waited = Date.now() - t0;
+  const checks1 = st.checks();
+  const d2 = await Promise.race([X.kp.cliFactReady(id2), new Promise((r) => setTimeout(() => r('no answer'), ACT_MS * 6))]);
+  const checks2 = st.checks();
+  const view = X.kp.list().browsers[id].cli;
+  st.release(); await X.kp.rejudgeClis();
+  const d3 = await X.kp.cliFactReady(id);
+  X.done();
+  return { d1, waited, checks1, d2, checks2, view, d3 };
+}
+{
+  const r = await doorLeg(K, 'door');
+  ok(r.d1 && typeof r.d1.unconfirmed === 'string' && /could not be checked within/.test(r.d1.unconfirmed) && r.waited >= ACT_MS - 20, `④ a stall placed in the judge's file check: the /resolve door answers «unconfirmed» by name past the bound (after ${r.waited} ms, bound ${ACT_MS} ms) — never «runs» over a CLI nobody judged`, r.d1);
+  ok(r.d2 && typeof r.d2.unconfirmed === 'string' && r.checks2 === r.checks1, `④ while that judge hangs a second door is refused at once with NO second check (${r.checks1} → ${r.checks2})`, r);
+  ok(r.view && r.view.checking === true, `④ while the judge hangs a view says «checking» (${JSON.stringify(r.view)})`);
+  ok(r.d3 && !r.d3.unconfirmed && !r.d3.gone && r.d3.version === '0.38.1', '④ released, the judge answers: the door says the CLI it runs', r.d3);
+  const rt = F.createBrowserRuntime({ env: { PATH: '/nonexistent-b7a30', HOME: ROOT } });
+  const ran = await rt.streamStatus('vs-b7a30', { cli: { unconfirmed: 'not judged in time' } });
+  ok(ran && ran.ok === false && ran.code === 'browser_cli_unconfirmed' && /not judged in time/.test(ran.error), `④ the runtime refuses a call that carries the door's «unconfirmed» by name before anything runs (${ran && ran.code})`, ran);
+  const KD = MUT.load('src/server/browser-keeper.js', cut(kSrc, '    const r = await Promise.race([job.p, new Promise((res) => { timer = setTimeout(() => setImmediate(() => res(CLI_UNANSWERED)), cliActMs); })]);', '    const r = await job.p;', 'the door\'s bound'), 'unbounded');
+  const c = await doorLeg(KD, 'door-control');
+  ok(c.d1 === 'no answer', `CONTROL: a door without the bound gives no answer over the stall (${JSON.stringify(c.d1)} after ${ACT_MS * 6} ms) — ④ is RED on it`, c.d1);
+}
+
+console.log('⑤ wiring');
+{
+  const heal = kSrc.slice(kSrc.indexOf('  function healBrowser(rec, p, seenBy'), kSrc.indexOf('  function healBrowser(rec, p, seenBy') + 6000);
+  ok(heal.includes('const c = await cliOptReady(rec); if (c && c.unconfirmed)') && !heal.includes('const c = cliOptOf(rec)'), '⑤ the heal reads the DOOR (a fresh judge, bounded) — never the view; unconfirmed ⇒ no relaunch, no failure counted');
+  ok(kSrc.includes("if (!c || ((c.gone || c.unconfirmed) && m === 'info')) return opts;"), '⑤ an `info` read (liveness / adoption) goes on with the current CLI when the door is unconfirmed — it never restarts a daemon');
+  const view = kSrc.slice(kSrc.indexOf('  function cliOptOf(rec) {'), kSrc.indexOf('  async function cliOptReady(rec) {'));
+  ok(view.includes('rejudgeClis()') && !view.includes('startCliJudge(') && !/fs\.|usableExe|cliIdOf|installedCliOf\(/.test(view), '⑤ a view never checks a file and never starts a judge of its own — it asks for THE pass (one at a time, one judge at a time)');
+}
+for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { label: 'CONTROL: ' })) ok(r.pass, r.name, r.detail);
+fs.rmSync(ROOT, { recursive: true, force: true });
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

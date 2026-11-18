@@ -143,6 +143,8 @@ function keeper() { return installed; }
  *   facts / runtime / limits / log / now / tickMs / guardSampleMs — injectable for the gate
  */
 function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined,
+  // B-7a30 unit 1': the CLI judge's one file check (injectable: the gate PLACES a stall in it), the doors' bound, the re-judge period
+  cliFileFact = null, cliActMs = 5 * 1000, cliEveryMs = 10 * 1000,
   serverNotice = null, getTelemetry = () => null, liveKeys: sessionLiveKeys = () => new Set(), remoteKeys = () => new Set(), userTodos = null,
   stderrPipeProbe = null, // lane browser-stderr-pipe: the /proc facts of a hung Chrome (default BE.probeStderrPipe; a fixture in the fast gate)
   tailnet = null, // lane tailnet-names: the tailnet door ({launch, missFor} — default the hub's shared one, src/server/tailnet-door.js)
@@ -280,7 +282,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // verify r3 (Y1): a binary never asked its version is ASKED before the call is judged (cliOptReady) — a same-version
       // re-install at the same path used to be refused once, "no longer installed"
       const c = await cliOptReady(browserRecordForCall(ns, opts.extraEnv && typeof opts.extraEnv === 'object' ? opts.extraEnv : {}));
-      if (!c || (c.gone && m === 'info')) return opts;
+      if (!c || ((c.gone || c.unconfirmed) && m === 'info')) return opts; // B-7a30: an `info` read never restarts a daemon — it goes on
       return { ...opts, cli: c };
     };
     // lane one-browser-b1: a call in the namespace of a browser on the ATTACH road (the keeper's own session or a lease's) —
@@ -626,7 +628,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** What of the user's holders goes to disk (never the window's controls or the one-time token). */
   const humansForDisk = () => Object.fromEntries([...humans.values()].map((h) => [h.profileId, { key: h.key, profileId: h.profileId, since: h.since, launched: !!h.launched, ownTab: h.ownTab || null, adopted: Array.isArray(h.adopted) ? h.adopted.slice(-32) : [], state: h.state === 'driving' ? 'driving' : 'away', awaySince: h.awaySince || 0 }]));
-  function ensureLoaded() { if (!loaded) { load(); warmCliVersions(); } }
+  function ensureLoaded() { if (!loaded) { load(); warmCliVersions(); cliBoot(); } }
   function save() {
     reg.humans = humansForDisk(); // BROWSE YOURSELF verify r1 (H4): mirrored at every write (the Map stays the truth)
     reg.host = os.hostname(); // lane profile-lock-roll (L1): the file names the machine that wrote it — the next pod's legacy witness
@@ -2513,7 +2515,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // verify r2 (H1): the heal is a `get cdp-url` in the SAME daemon — it runs the daemon's own CLI version; that version
       // gone from this machine ⇒ closed BY NAME (a binary of another version would replace the daemon and its identity),
       // never counted as a failed relaunch — a restart (Stop, then the next command) runs the current CLI
-      { const c = cliOptOf(rec); if (c && c.gone) { if (setClosed(rec, { code: 'browser_cli_gone', error: closedText(p, c.gone) })) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) and is NOT started again — ${c.gone}`); commit(); } return null; } }
+      // B-7a30 unit 1': THE DOOR (a fresh judge, bounded) — the same answer the relaunch's own command would get; no answer
+      // within the bound ⇒ no relaunch now and no failure counted (the next tick tries again)
+      { const c = await cliOptReady(rec); if (c && c.unconfirmed) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) — not healed now: ${c.unconfirmed}`); return null; } if (c && c.gone) { if (setClosed(rec, { code: 'browser_cli_gone', error: closedText(p, c.gone) })) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) and is NOT started again — ${c.gone}`); commit(); } return null; } }
       // a browser launched with the provider's own flags (its own executable + arguments) is never relaunched by a bare
       // `get cdp-url` (a launch view without them would relaunch it as plain chromium on that directory): said, not guessed
       // (lane dc-browser-providers: the pre-r4 record rung — no flag, the provider said — is gone with the row's `launchFlags`)
@@ -3063,6 +3067,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         rec.display = await displays.factFor({ baseFile: env0[VERBS.CONFIG_KEY] || ephemeralConfigFor(env0), prev: prev && prev.display, mode: noDisplayMode(), preference: headedSetting() });
         sayDisplay(rec.display, `ephemeral ${profileId} "${p.label}"`);
         rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
+        cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now
         const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: { ...env0, ...rec.display.env } });
         if (!r.ok) {
           const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
@@ -3083,7 +3088,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       rec.pid = info.pid; rec.starttime = await launchStart(info.pid); rec.socketDir = info.socketDir;
       if (info.pid && rec.starttime == null && F.startsReadable()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = unrecordedLaunch(info.pid); commit(); throw namedError('launch_failed', rec.lastError); }
       // verify r2 (H1): an ADOPTED daemon runs the CLI it says; a launched one is cross-checked against its own answer
-      if (adopted || !rec.cli || (info.version && info.version !== rec.cli.version)) rec.cli = cliOfDaemon(info) || rec.cli || null;
+      if (adopted || !rec.cli || (info.version && info.version !== rec.cli.version)) { const cd = cliOfDaemon(info); rec.cli = cd || rec.cli || null; if (cd && cd.path) cliKeptByLaunch(rec); } // B-7a30: the daemon's own program (/proc/<pid>/exe) is its answer
       captureBrowser(rec, p.dir || null); // r2 M1: the browser it launched (the binary's temp dir on rung N) — ended if its daemon dies
       rec.state = 'ready';
       if (adopted) rec.adoptedAt = now();
@@ -4261,6 +4266,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       rec.browserChoice = recordedChoice(p, buildEnv); // what this launch was asked to run (the running build is `cdpBrowser`, the browser's own answer; lane engine-plugin: + an engine's version)
       const stamp0 = F.dirLaunchStamp(p.dir); // r5 MAJOR 1 (iii): the directory before this launch
       rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
+      cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now
       const r = await rt.launch(ns, { dir: p.dir, idleMs: 0, headed: headed0, extraEnv: { ...vendorEnv, ...providerEnv, ...rec.display.env }, argvPrefix });   // the .197 integration: the provider pair + the display fact's env (last: DISPLAY / XAUTHORITY are the machine's)
       if (!r.ok) {
         const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
@@ -4278,7 +4284,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const info = await rt.info(ns, { dir: p.dir });
       rec.pid = info.pid; rec.starttime = await launchStart(info.pid); rec.socketDir = info.socketDir;
       if (info.pid && rec.starttime == null && F.startsReadable()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = unrecordedLaunch(info.pid); commit(); throw namedError('launch_failed', rec.lastError); }
-      if (!rec.cli || (info.version && info.version !== rec.cli.version)) rec.cli = cliOfDaemon(info) || rec.cli || null; // verify r2 (H1): the daemon's own answer decides
+      if (!rec.cli || (info.version && info.version !== rec.cli.version)) { const cd = cliOfDaemon(info); rec.cli = cd || rec.cli || null; if (cd && cd.path) cliKeptByLaunch(rec); } // verify r2 (H1): the daemon's own answer decides // B-7a30: the daemon's own program (/proc/<pid>/exe) is its answer
       captureBrowser(rec, p.dir); // r2 M1: the Chrome it launched on the profile dir — ended if this daemon dies
       const cdp = await rt.cdpUrl(ns, { dir: p.dir, extraEnv: { ...launchEnv, ...vendorEnv } });
       rec.cdpUrl = cdp.ok ? cdp.url : null;
@@ -4523,6 +4529,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     rec.browserChoice = recordedChoice(p, engineLaunch);
     rec.launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' };
     rec.cli = await cliNow(); // the CLI every later call of this browser runs (it attaches; it never launches)
+    cliKeptByLaunch(rec); // B-7a30: the keeper's own act — that file is the answer, kept now
     commit();
     const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? ENG.engineArgs(engineLaunch) : []; // lane engine-plugin: the engine's own arguments, censused by the builder (lane engine-spi-egress: + the keeper's proxy arguments when wrapped)
     if (rec.tailnet && rec.tailnet.arg) engineArgs.push(rec.tailnet.arg); // lane tailnet-names: the keeper's tailnet PAC (never on an engine's launch) — IN through the builder
@@ -6502,6 +6509,25 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!w || w.version !== String(version) || w.path !== f.path) return { ok: false, why: w ? 'not verified (its folder changed since it was verified)' : 'not verified (an install that did not finish, or whose program did not say the version)' };
     return f;
   }
+  /** B-7a30 unit 1': THE SAME INSTALL read OFF THE LOOP (the judge's): its package.json and witness read async, its program
+   *  checked by the judge's one file check. → as installedCliOf. */
+  let muslKnown = null;
+  async function installedCliOfNow(version) {
+    let prefix; try { prefix = cliPrefix(String(version)); } catch { return { ok: false, why: 'not a version' }; }
+    const pkgDir = path.join(prefix, 'node_modules', VERBS.CLI_PACKAGE);
+    let pkg = null; try { pkg = JSON.parse(await fs.promises.readFile(path.join(pkgDir, 'package.json'), 'utf8')); } catch { return { ok: false, why: 'not installed' }; }
+    if (!pkg || pkg.version !== String(version)) return { ok: false, why: `its folder holds ${pkg && pkg.version ? pkg.version : 'another package'}` };
+    if (muslKnown === null) muslKnown = process.platform === 'linux' && ((await fileFactOf('/lib/ld-musl-x86_64.so.1')).id !== null || (await fileFactOf('/lib/ld-musl-aarch64.so.1')).id !== null);
+    const native = VERBS.cliNativeName({ platform: process.platform, arch: process.arch, musl: muslKnown });
+    const nat = native ? path.join(pkgDir, 'bin', native) : null;
+    const rel = SW.binFromPackageJson(pkg, VERBS.CLI_PACKAGE);
+    const launcher = rel ? path.join(pkgDir, rel) : null;
+    const exe = nat && (await fileFactOf(nat)).exe ? nat : (launcher && (await fileFactOf(launcher)).exe ? launcher : null);
+    if (!exe) return { ok: false, why: 'its program cannot be run' };
+    let w = null; try { const x = JSON.parse(await fs.promises.readFile(cliWitnessOf(prefix), 'utf8')); w = x && typeof x === 'object' && typeof x.path === 'string' && typeof x.version === 'string' ? x : null; } catch { w = null; }
+    if (!w || w.version !== String(version) || w.path !== exe) return { ok: false, why: w ? 'not verified (its folder changed since it was verified)' : 'not verified (an install that did not finish, or whose program did not say the version)' };
+    return { ok: true, version: String(version), path: exe, prefix };
+  }
   /** THE PIN: `{mode: path|pinned|version, version, path|null, installed, why, invalid}` — recomputed when the setting moves or
    *  an install ends (never per command), mirrored to cli-pin.json on a change. */
   function cliPin() {
@@ -6537,13 +6563,44 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // daemon restarts itself and its Chrome for a client of another version — measured); it applies at the next launch.
   // That version gone from this machine ⇒ `browser_cli_gone` by name (never a silent fall to PATH).
   const cliIdOf = (p) => { try { const st = fs.statSync(p); return st.isFile() ? `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}` : null; } catch { return null; } };
+  // ── B-7a30 unit 1' (the owner's hub witness: 23.8 s held in 16 holds — cliJudge stat'ed each stamped record's CLI file and,
+  // on a mismatch, read the pinned install's package.json + witness and stat'ed every candidate, on EVERY list(), digest and
+  // commit): A BROWSER'S CLI JUDGMENT IS A KEPT FACT. ONE async judge (`cliJudgeNow`) computes the whole answer OFF the loop —
+  // every file check async (`fileFactOf`, injectable `cliFileFact`), a candidate never asked its version asked there (a fork
+  // once per file identity) — kept per record (`cliKept`, keyed by the record's stamp). A VIEW (the row, list(), the digests,
+  // the CLI row's counts) reads the kept answer: a record never judged since the boot (or newly stamped by no launch of this
+  // keeper), or whose judge hangs past `cliActMs`, reads `{checking}` («checking…», never «runs»). The keeper's own timer
+  // re-judges every stamped record each CLI_FRESH_MS, one at a time; a judgment that moves what a view drew notifies ONCE. A
+  // DOOR (a command about to run: `configured`, the /resolve refusals, the heal) judges FRESH and waits at most `cliActMs` (5 s):
+  // past it — or while a judge already hangs — the command is refused by name `browser_cli_unconfirmed` (an `info` read goes on).
+  const CLI_FRESH_MS = 10 * 1000;
+  const CLI_UNANSWERED = Symbol('unanswered');
+  const checkFile = typeof cliFileFact === 'function' ? cliFileFact : async (p) => {
+    let exe = false, id = null;
+    try { await fs.promises.access(p, fs.constants.X_OK); exe = true; } catch { exe = false; }
+    try { const st = await fs.promises.stat(p); if (st.isFile()) id = `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}`; else exe = false; } catch { exe = false; id = null; }
+    return { exe, id };
+  };
+  async function fileFactOf(p) {
+    let f = null; try { f = await checkFile(String(p)); } catch { f = null; }
+    return { exe: !!(f && f.exe && f.id), id: (f && f.id) || null };
+  }
+  /** THE CURRENT CLI for the judge, off the loop: the hub's runtime answers the pin's program while its memo names one that is
+   *  runnable (checked here, async), else PATH's (the resolver's own memo); an injected runtime (the gate's) answers itself.
+   *  A pin never resolved since the boot is resolved once (cliPin — the act every runtime call already makes). */
+  async function cliCurNow() {
+    if (facts) return typeof bf.binPath === 'function' ? bf.binPath() : null;
+    let m = cliMemo; if (!m) { try { cliPin(); } catch { /* PATH answers */ } m = cliMemo; }
+    if (m && m.pin && m.pin.path && (await fileFactOf(m.pin.path)).exe) return m.pin.path;
+    return typeof bfPath.binPath === 'function' ? bfPath.binPath() : null;
+  }
   const cliVersions = new Map(); // path → {id, version} — `--version` of ONE binary file, asked again only when the file changed
-  function cliVersionAt(p) {
-    const id = cliIdOf(p);
-    if (!id) return Promise.resolve(null);
+  async function cliVersionAt(p) {
+    const id = (await fileFactOf(p)).id;
+    if (!id) return null;
     const m = cliVersions.get(p);
-    if (m && m.id === id) return Promise.resolve(m.version);
-    return new Promise((resolve) => {
+    if (m && m.id === id) return m.version;
+    return await new Promise((resolve) => {
       try {
         require('child_process').execFile(p, ['--version'], { timeout: 8000, encoding: 'utf8', env: F.sanitizeProbeEnv({ ...(env() || {}), PATH: (env() || {}).PATH || process.env.PATH || '' }) }, (er, so, se) => {
           const v = F.versionFromProbe({ err: er, stdout: so, stderr: se }) || null; // verify r1 ⑦ + r2 ⑥: ONE probe table (browser-facts.versionFromProbe) — a crash names no version, a version on stdout counts whatever the exit
@@ -6553,15 +6610,15 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       } catch { resolve(null); }
     });
   }
-  /** The version a binary said (no fork) — null when it was never asked or the file changed since. */
-  const knownVersionAt = (p) => { const m = p ? cliVersions.get(p) : null; return m && m.id === cliIdOf(p) ? m.version : null; };
+  /** The version a binary said (no fork) — null when it was never asked or its file changed since (checked off the loop). */
+  async function knownVersionOf(p) { const m = p ? cliVersions.get(p) : null; if (!m) return null; return (await fileFactOf(p)).id === m.id ? m.version : null; }
   /** THE CLI A LAUNCH RUNS NOW (the pin, else PATH) — stamped on the record before the launch. null = not knowable here (a
    *  fake runtime's bare name, a binary that would not say its version): the browser then follows the current CLI. */
   async function cliNow() {
     const p = typeof bf.binPath === 'function' ? bf.binPath() : null;
     if (!p || !String(p).startsWith('/')) return null;
     const v = await cliVersionAt(p);
-    return v ? { version: v, path: p, id: cliIdOf(p), at: now() } : null;
+    return v ? { version: v, path: p, id: (cliVersions.get(p) || {}).id || null, at: now() } : null; // the identity cliVersionAt just checked
   }
   /** An ADOPTED daemon's CLI (a daemon this keeper did not launch — an escaped command, a restart): the version it SAYS
    *  (`session info`, launch-free and never a restart) and the program it runs (/proc/<pid>/exe; a deleted file is none). */
@@ -6573,50 +6630,111 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (exe && v) cliVersions.set(exe, { id: cliIdOf(exe), version: v });
     return { version: v, path: exe, id: exe ? cliIdOf(exe) : null, at: now(), adopted: true };
   }
-  /** The binary ONE call of `rec`'s browser runs → `{path}` | `{gone: words}` | null (no record / no stamp / not local: the
-   *  current CLI, as before). Same version only: the launch's own file, the current CLI, VibeSpace's verified install of
-   *  that version, PATH's — never a binary of another version. */
-  function cliJudge(rec) {
+  /** THE JUDGE (B-7a30 unit 1': async, off the loop): the binary ONE call of `rec`'s browser runs → `{path}` | `{gone: words}` |
+   *  null (no record / no stamp / not local: the current CLI, as before). Same version only: the launch's own file, the current
+   *  CLI, VibeSpace's verified install of that version, PATH's — never a binary of another version. A candidate never asked its
+   *  version is asked here (verify r3 Y1: a same-version re-install is not «gone»); asked and silent ⇒ unproven ⇒ gone. */
+  async function cliJudgeNow(rec) {
     const c = rec && rec.cli;
     if (!c || !c.version || !isLocalRec(rec)) return null;
-    // the launch's own file while its identity holds — the answer on every call but the rare one (a stat or two, no read)
-    if (c.path && usableExe(c.path) && (!c.id || cliIdOf(c.path) === c.id)) return { path: c.path };
+    if (c.path) { const own = await fileFactOf(c.path); if (own.exe && (!c.id || own.id === c.id)) return { path: c.path }; }
     const cands = [];
-    const cur = typeof bf.binPath === 'function' ? bf.binPath() : null;
-    if (cur) cands.push({ path: cur, version: knownVersionAt(cur), how: 'current' });
-    try { const i = installedCliOf(c.version); if (i.ok) cands.push({ path: i.path, version: c.version, how: 'installed' }); } catch { /* not a version */ }
+    const cur = await cliCurNow();
+    if (cur) cands.push({ path: cur, version: await knownVersionOf(cur), how: 'current' });
+    try { const i = await installedCliOfNow(c.version); if (i.ok) cands.push({ path: i.path, version: c.version, how: 'installed' }); } catch { /* not a version */ }
     const onPath = typeof bfPath.binPath === 'function' ? bfPath.binPath() : null;
-    if (onPath && onPath !== cur) cands.push({ path: onPath, version: knownVersionAt(onPath), how: 'path' });
-    const v = VERBS.cliForBrowser({ want: c.version, candidates: cands, current: cur ? knownVersionAt(cur) : null });
+    if (onPath && onPath !== cur) cands.push({ path: onPath, version: await knownVersionOf(onPath), how: 'path' });
+    for (const x of cands) if (x.version == null && x.path) x.version = await cliVersionAt(x.path).catch(() => null);
+    const curV = cur ? (cands.find((x) => x.how === 'current') || {}).version || null : null;
+    const v = VERBS.cliForBrowser({ want: c.version, candidates: cands, current: curV });
     if (v.ok) return v.path ? { path: v.path } : null;
-    // verify r3 (Y1): a candidate never asked its version (a keeper fresh from a restart; a binary replaced in place — an
-    // `npm i -g` over PATH's, the SAME version put back) is not "gone": the answer is NOT KNOWN YET
-    const unknown = cands.filter((x) => x.version == null && x.path).map((x) => x.path);
-    return unknown.length ? { unknown, gone: v.error } : { gone: v.error };
+    return { gone: v.error };
   }
-  /** The sync answer (the row, a view): an unproven binary is asked now and this reading says "gone" until it has said its
-   *  version — every DOOR that runs a command or refuses an agent waits for it instead (`cliOptReady`). */
+  const cliKept = new Map(); // profileId → {sig, j, at, seq} — THE KEPT JUDGMENT (pruned when its record goes)
+  const cliJudging = new Map(); // profileId → the judge in flight {p, since, seq, hung}
+  const cliTold = new Map(); // profileId → what a view last read (the judgment's JSON | 'checking'): a judge notifies only when it moves it
+  let cliSeq = 0;
+  const cliSig = (rec) => { const c = rec && rec.cli; return c ? [c.version || '', c.path || '', c.id || '', isLocalRec(rec) ? 1 : 0].join('|') : ''; };
+  const cliHung = (x) => !!x && (x.hung || Date.now() - x.since >= 3 * cliActMs); // REAL time: a door's timeout marked it, or 3 bounds passed (a loop held past one bound never reads a finished judge as hung)
+  const cliStuck = () => { for (const x of cliJudging.values()) if (cliHung(x)) return x; return null; };
+  const cliUnconfirmedWords = () => `this browser's CLI could not be checked within ${cliActMs >= 1000 ? Math.round(cliActMs / 1000) + ' s' : cliActMs + ' ms'} — nothing was run; try again in a moment`;
+  /** ONE judge of `rec`, off the loop; a newer judgment is never overwritten by an older judge that lands after it. */
+  function startCliJudge(rec) {
+    const id = rec.profileId; const sig = cliSig(rec);
+    const job = { p: null, since: Date.now(), seq: ++cliSeq, hung: false };
+    job.p = Promise.resolve().then(() => cliJudgeNow(rec)).then((j) => {
+      if (cliJudging.get(id) === job) cliJudging.delete(id);
+      const r = reg.browsers[id];
+      if (!r || cliSig(r) !== sig) return j; // the record moved on (another launch): its own judge follows
+      const k = cliKept.get(id);
+      if (!k || k.sig !== sig || k.seq < job.seq) cliKept.set(id, { sig, j, at: now(), seq: job.seq });
+      const shown = JSON.stringify(cliKept.get(id).j || null);
+      if (cliTold.has(id) && cliTold.get(id) !== shown) { cliTold.set(id, shown); notify(); } // it moved what a view drew: said once
+      return j;
+    }, (e) => { if (cliJudging.get(id) === job) cliJudging.delete(id); log.warn?.(`[browser] ${id}: its CLI judge failed: ${e && e.message}`); return null; });
+    cliJudging.set(id, job);
+    return job;
+  }
+  /** THE KEEPER'S OWN ACT (a launch stamped the CLI it ran): that file IS the answer — kept now, no check needed. */
+  function cliKeptByLaunch(rec) { if (rec && rec.profileId && rec.cli && rec.cli.version && rec.cli.path && isLocalRec(rec)) cliKept.set(rec.profileId, { sig: cliSig(rec), j: { path: rec.cli.path }, at: now(), seq: ++cliSeq }); }
+  /** THE TICK (B-7a30): every stamped local record re-judged OFF the loop, ONE at a time (a hung disk holds one judge, never a
+   *  pile); a pass still waiting starts no other; a record gone is pruned. → the promise of the pass (the gate awaits it). */
+  let cliPass = null;
+  function rejudgeClis() {
+    if (cliPass) return cliPass;
+    cliPass = (async () => {
+      for (const id of [...cliKept.keys()]) if (!reg.browsers[id]) { cliKept.delete(id); cliTold.delete(id); }
+      for (const rec of Object.values(reg.browsers || {})) {
+        if (!rec || !rec.cli || !rec.cli.version || !isLocalRec(rec)) continue;
+        const j = cliJudging.get(rec.profileId);
+        await (j ? j.p : startCliJudge(rec).p);
+      }
+    })().finally(() => { cliPass = null; });
+    return cliPass;
+  }
+  /** The first pass at once (the views say «checking…» until it lands), then the keeper's own timer (unref'd; `cliEveryMs`). */
+  let cliTimer = null;
+  function cliBoot() {
+    rejudgeClis().catch(() => { });
+    if (!cliTimer && cliEveryMs > 0) { cliTimer = setInterval(() => { rejudgeClis().catch(() => { }); }, cliEveryMs); if (cliTimer.unref) cliTimer.unref(); }
+  }
+  /** THE VIEWS' answer (sync, never a file check): the kept judgment, `{checking: true}` while there is none for this stamp
+   *  (or its judge hangs, or a judge hangs and it is past its bound). A read past the bound asks for THE pass (one at a time,
+   *  one judge at a time) — never a judge per record read, so a list of fifty never starts fifty checks on one disk. */
   function cliOptOf(rec) {
-    const j = cliJudge(rec);
-    if (j && j.unknown) { for (const x of j.unknown) cliVersionAt(x).catch(() => null); return { gone: j.gone }; }
-    return j;
+    const c = rec && rec.cli;
+    if (!c || !c.version || !isLocalRec(rec)) return null;
+    const id = rec.profileId; const sig = cliSig(rec);
+    const k = cliKept.get(id); const has = !!(k && k.sig === sig);
+    const old = !has || now() - k.at >= CLI_FRESH_MS;
+    const stuck = cliStuck();
+    if (old && !stuck) rejudgeClis().catch(() => { });
+    const checking = !has || cliHung(cliJudging.get(id)) || (stuck && old);
+    cliTold.set(id, checking ? 'checking' : JSON.stringify(k.j || null));
+    return checking ? { checking: true } : k.j;
   }
-  /** verify r3 (Y1): THE DOORS' answer — a candidate of an unproven version is ASKED (`--version`, once per file identity)
-   *  before the browser is judged; asked and silent ⇒ unproven ⇒ refused by name. Reproduced before: the same 0.38.1
-   *  re-installed at the same path ⇒ the next command refused "no longer installed here" with a remedy that loses the tabs. */
+  /** THE DOORS' answer (a command about to run, a refusal, the heal): a FRESH judge — never one already in flight that may
+   *  predate a change — bounded at `cliActMs`; past it, or while a judge already hangs (no second one stacked on a hung disk),
+   *  `{unconfirmed: words}` (refused by name `browser_cli_unconfirmed`). */
   async function cliOptReady(rec) {
-    const j = cliJudge(rec);
-    if (!(j && j.unknown)) return j;
-    await Promise.all(j.unknown.map((x) => cliVersionAt(x).catch(() => null)));
-    const j2 = cliJudge(rec);
-    return j2 && j2.unknown ? { gone: j2.gone } : j2;
+    const c = rec && rec.cli;
+    if (!c || !c.version || !isLocalRec(rec)) return null;
+    if (cliStuck()) return { unconfirmed: cliUnconfirmedWords() };
+    const job = startCliJudge(rec);
+    let timer = null;
+    // the bound is REF'D (a door in flight keeps the process up to its answer) and yields ONCE to finished I/O before it decides
+    const r = await Promise.race([job.p, new Promise((res) => { timer = setTimeout(() => setImmediate(() => res(CLI_UNANSWERED)), cliActMs); })]);
+    clearTimeout(timer);
+    if (r === CLI_UNANSWERED) { job.hung = true; log.warn?.(`[browser] ${rec.profileId}: its CLI judge did not answer within ${cliActMs} ms — the command is refused (browser_cli_unconfirmed)`); return { unconfirmed: cliUnconfirmedWords() }; }
+    return r;
   }
   /** The fact of one browser's CLI for an answer that REFUSES on it (the three /resolve forms): the candidates asked first. */
   async function cliFactReady(profileId) {
     ensureLoaded();
     const rec = reg.browsers[profileId];
     if (!rec) return null;
-    await cliOptReady(rec);
+    const d = await cliOptReady(rec);
+    if (d && d.unconfirmed && rec.cli && rec.cli.version) return { version: rec.cli.version, unconfirmed: d.unconfirmed }; // B-7a30: the door's own answer, by name
     return cliFactOf(rec);
   }
   /** verify r3 (Y1): the versions the sync readers need, kept warm — a stat per tick, a fork only when a file changed. */
@@ -6628,17 +6746,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function cliFactOf(rec) {
     if (!rec || !rec.cli || !rec.cli.version) return null;
     const o = cliOptOf(rec);
-    return { version: rec.cli.version, ...(o && o.gone ? { gone: o.gone } : {}) };
+    return { version: rec.cli.version, ...(o && o.gone ? { gone: o.gone } : {}), ...(o && o.checking ? { checking: true } : {}) }; // B-7a30: not judged yet ⇒ said
   }
   function runningClis(inUseV) {
-    let previous = 0, gone = 0; const versions = new Set();
+    let previous = 0, gone = 0, checking = 0; const versions = new Set();
     for (const rec of Object.values(reg.browsers || {})) {
       if (!rec || !B.isLiveBrowser(rec) || !isLocalRec(rec) || !rec.cli || !rec.cli.version) continue;
       const o = cliOptOf(rec);
+      if (o && o.checking) { checking++; continue; } // B-7a30: not judged yet — counted as neither
       if (o && o.gone) { gone++; versions.add(rec.cli.version); continue; }
       if (inUseV && rec.cli.version !== inUseV) { previous++; versions.add(rec.cli.version); }
     }
-    return { previous, gone, versions: [...versions].sort() };
+    return { previous, gone, checking, versions: [...versions].sort() };
   }
   const reattached = installs.reattach();
   /** The directory's own `Last Version` stamp (read-only): the major that
@@ -7426,7 +7545,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { stopTimer(); disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
+  function shutdown() { stopTimer(); if (cliTimer) { clearInterval(cliTimer); cliTimer = null; } disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 
@@ -7790,7 +7909,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     engineFactOf, engineRowsView, defaultEngineNow, // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy
     installEngineKernel: (id) => { const d = eds(); if (!d) throw namedError('browser_engine_missing', 'this instance does not download browser engine kernels'); return d.installKernel(id, { by: 'user' }); }, // lane engine-distribution: a person's «Download kernel»
     restartProfile, askAnswer: (id, by) => { ensureLoaded(); const rec = reg.browsers[id]; return askAnswer(rec, profile(id), by); }, // lane browser-unresponsive: THE recovery + one ask (the gate's seam)
-    cliPin, cliFactReady, _reattached: () => reattached, // cliFacts + installCli: the CLI row, in ...installs.api
+    cliPin, cliFactReady, rejudgeClis /* B-7a30: the CLI judge's pass (the gate awaits it) */, _reattached: () => reattached, // cliFacts + installCli: the CLI row, in ...installs.api
     ...installs.api, // rv-browser F7 (lane dc-browser-installs): every install row's own routes (lane chrome-builds-download (design 004): Download another build…) // lane browser-admin 2b: the browser CLI VibeSpace drives (verify r3: cliFactReady = the doors' fact, the candidates asked first)
     machineDisplay, machineDisplayCached, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
     reshapeStore: (fn) => { ensureLoaded(); const r = fn(reg); commit(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save

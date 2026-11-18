@@ -2059,7 +2059,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     } else ok(false, '⑥ r3 M1 (a) CONTROL: the recaptureBrowser anchor was not found in src/server/browser-keeper.js');
     // (5) r3 LOW 3 (launch half) pre-fix: the named start's unread-starttime check neutered — the record is `ready` with no identity
     // (verify r2: the named start stamps the CLI its daemon runs between the check and the capture — the anchor carries that line)
-    const CLI_STAMP = "      if (!rec.cli || (info.version && info.version !== rec.cli.version)) rec.cli = cliOfDaemon(info) || rec.cli || null; // verify r2 (H1): the daemon's own answer decides\n";
+    const CLI_STAMP = "      if (!rec.cli || (info.version && info.version !== rec.cli.version)) { const cd = cliOfDaemon(info); rec.cli = cd || rec.cli || null; if (cd && cd.path) cliKeptByLaunch(rec); } // verify r2 (H1): the daemon's own answer decides // B-7a30: the daemon's own program (/proc/<pid>/exe) is its answer\n";
     const LC = "      if (info.pid && rec.starttime == null && F.startsReadable()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = unrecordedLaunch(info.pid); commit(); throw namedError('launch_failed', rec.lastError); }\n" + CLI_STAMP + "      captureBrowser(rec, p.dir);";
     if (k6src.includes(LC)) {
       const cu = await launchLeg(M6.load('src/server/browser-keeper.js', k6src.replace(LC, CLI_STAMP + '      captureBrowser(rec, p.dir);'), 'launch-unread'), 'ctl-unread');
