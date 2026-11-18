@@ -33,6 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -88,15 +89,16 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
   const routes = {};
   const app = { get: (p, h) => { routes[`GET ${p}`] = h; }, post: (p, h) => { routes[`POST ${p}`] = h; }, put() { }, patch() { }, delete() { }, use() { } };
   const metaM = new Map();
-  AR.setupAgentRoutes({
-    app, activeSessions, tasks,
+  const AR_DEPS = {   // B-8bd5's control mounts a copy of the routes over the same deps
+    activeSessions, tasks,
     sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], dropNotices: () => { }, rekey: () => { }, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
     SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
     userTodos: { rekey: () => { }, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
     sessionStatusKey: (s, id) => `claude:${id}`, serverSetting: () => undefined, integrationEnabled: () => true,
     scheduleCtxSync: () => { }, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => jm, getGroups: () => null,
     getSessionMetaStore: () => ({ readSessionMeta: (k) => metaM.get(k) || null, writeSessionMeta: (k, v) => metaM.set(k, v) }),
-  });
+  };
+  AR.setupAgentRoutes({ app, ...AR_DEPS });
   const hook = (route, who) => { let out = null; const res = { json: (o) => { out = o; }, status: () => res }; hush(() => routes[`GET ${route}`]({ headers: { authorization: 'Bearer vsst_' + who }, query: {}, body: {} }, res)); return (out && out.context) || ''; };
   const server = http.createServer((req, res) => {
     let raw = ''; req.on('data', (c) => { raw += c; });
@@ -163,6 +165,26 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
   const fb = hook('/api/agent/prompt-context', 'A');
   jm.updatesFor = real;
   ok(fb.includes(OWN_ONLY) && !fb.includes('zzzz') && activeSessions.get('A')._jobsEventsSeenTs === 9e15, 'the route (r3): the block with the count does not fit the room left ⇒ the OWN lines ride now (r2: the whole block waited a prompt), the marker moves with them', fb.slice(-300));
+  // B-8bd5 (its adversarial read r1): WHO MAY WITHDRAW a job's question — the one that filed it (the job itself, its owner
+  // conversation); a CONTROL grant (B holds it here) never closes the person's question; the withdraw is recorded in the answers
+  const PANEL_W = { title: 'Digest', blocks: [{ type: 'md', text: 'is the digest stale?' }, { type: 'buttons', options: [{ id: 'ok', label: 'OK' }] }] };
+  job.access = { ...(job.access || {}), control: 'group' };   // B may stop / start it…
+  jm.ask(job, PANEL_W);
+  const wB = await cli('B', ['withdraw', job.id]);
+  const stillOpen = !!(job.interaction && job.interaction.pending);
+  const wA = await cli('A', ['withdraw', job.id]);
+  ok(wB.code !== 0 && stillOpen && wA.code === 0 && !(job.interaction && job.interaction.pending) && (job.interaction.answers || []).some((x) => x && x.withdrawn === true),
+    'B-8bd5: a groupmate holding CONTROL cannot withdraw the job\'s question (refused, it stays open); its owner can — and the answers record the withdraw', { B: [wB.code, wB.err.slice(0, 160)], A: [wA.code, wA.err.slice(0, 160)] });
+  const ARSRC = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8'), WD = "  if (!a.selfJob && act === 'withdraw' && !jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });\n";
+  ok(ARSRC.split(WD).length === 2, 'B-8bd5 control setup: the anchor of the control «only the filer withdraws» is in the source');
+  const MJW = mutantCopies('jobs-addressed-withdraw', REPO);
+  const ARX = MJW.load('src/agent-routes.js', ARSRC.replace(WD, "  if (!a.selfJob && act === 'withdraw' && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });   /* MUTANT: batch 8's first cut — a control grant withdraws */\n"), 'control-gate');
+  const routesX = {};
+  hush(() => ARX.setupAgentRoutes({ app: { get: (p, h) => { routesX[`GET ${p}`] = h; }, post: (p, h) => { routesX[`POST ${p}`] = h; }, put() { }, patch() { }, delete() { }, use() { } }, ...AR_DEPS }));
+  jm.ask(job, PANEL_W);
+  const xr = await new Promise((resolve) => { let code = 200; const R = { status(c) { code = c; return R; }, json(o) { resolve({ code, o }); return R; } }; Promise.resolve(routesX['POST /api/agent/jobs/:ref/:act']({ headers: { authorization: 'Bearer vsst_B' }, body: {}, query: {}, params: { ref: job.id, act: 'withdraw' } }, R)).catch((e) => resolve({ code: 500, o: { error: e.message } })); });
+  ok(xr.code === 200 && !(job.interaction && job.interaction.pending), 'B-8bd5 CONTROL (the gate by control, in a copy): the groupmate holding control WITHDRAWS the person\'s question', xr);
+  for (const r of copiesCensus(MJW.files, MJW.dir, REPO, { minCopies: 1, label: 'B-8bd5 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
   server.close();
 }
 

@@ -79,7 +79,7 @@ const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — th
 // and the server's own answer (answerFromRecord, F6) withhold it by the same rule. helper-ask imports nothing.
 const { hiddenCharsOf } = require('./helper-ask.js');
 
-const JOB_VERBS = Object.freeze(['list', 'show', 'poll', 'answers', 'logs', 'progress', 'ask', 'docs', 'stop', 'rm', 'notify', 'notify-cron', 'announce', 'subscribe', 'unsubscribe']);
+const JOB_VERBS = Object.freeze(['list', 'show', 'poll', 'answers', 'logs', 'progress', 'ask', 'withdraw', 'docs', 'stop', 'rm', 'notify', 'notify-cron', 'announce', 'subscribe', 'unsubscribe']);   // bl-jobs B-8bd5: + withdraw (a job's own panel)
 /** vibespace-page's pre-approved verbs (r2): `publish` is held AND an ask rule. */
 const PAGE_VERBS = Object.freeze(['list']);
 /** vibespace-design's pre-approved verbs (lane design-core): every verb but `publish`, which is held AND an ask rule
@@ -671,6 +671,7 @@ function toolStep(tool, args) {
       if (verb === 'rm' || verb === 'stop') return S(i18nKey('Stop or remove one of its background jobs'));
       if (verb === 'notify-cron') return S(i18nKey('Schedule a reminder that wakes this conversation'));
       if (verb === 'access') return S(i18nKey('Let others see or control one of its background jobs'));
+      if (verb === 'withdraw') return S(i18nKey('Close a question one of its background jobs asked you'));   // bl-jobs B-8bd5
       return S(i18nKey('Check on a background job'));
     default: return null;
   }

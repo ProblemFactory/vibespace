@@ -5306,6 +5306,7 @@ export default {
   "Stop or remove one of its background jobs": "バックグラウンドジョブを停止または削除",
   "Schedule a reminder that wakes this conversation": "この会話を起こすリマインダーを予約",
   "Let others see or control one of its background jobs": "ほかの人にバックグラウンドジョブの閲覧や操作を許可",
+  "Close a question one of its background jobs asked you": "バックグラウンドジョブがあなたに尋ねた質問を閉じる",
   "List the pages it published": "公開したページを一覧表示",
   "Publishing a page asks every time — Always Allow is not offered.": "ページの公開は毎回確認されます — 「常に許可」はありません。",
   "Always Allow is not offered for this line: it can run any command, and only a single exact command line can be remembered.": "この行には「常に許可」がありません：どんなコマンドでも実行できるため、記憶できるのは完全に同じ 1 行のコマンドだけです。",

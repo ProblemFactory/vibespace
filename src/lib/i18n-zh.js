@@ -5307,6 +5307,7 @@ export default {
   "Stop or remove one of its background jobs": "停止或删除它的一个后台任务",
   "Schedule a reminder that wakes this conversation": "安排一个会唤醒本对话的提醒",
   "Let others see or control one of its background jobs": "允许他人查看或控制它的一个后台任务",
+  "Close a question one of its background jobs asked you": "关闭它的一个后台任务向你提出的问题",
   "List the pages it published": "列出它发布的页面",
   "Publishing a page asks every time — Always Allow is not offered.": "发布页面每次都会询问——不提供“始终允许”。",
   "Always Allow is not offered for this line: it can run any command, and only a single exact command line can be remembered.": "这一行不提供“始终允许”：它可以运行任何命令，而只有单条完全相同的命令行才能被记住。",

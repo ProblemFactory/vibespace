@@ -2837,7 +2837,10 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   }
   const selfActs = ['progress', 'ask', 'withdraw', 'announce'];   // B-8bd5: a job withdraws ITS OWN panel
   if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress, ask (or withdraw its ask), or announce' });
-  const needsControl = ['stop', 'start', 'restart', 'rm', 'announce', 'withdraw']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
+  const needsControl = ['stop', 'start', 'restart', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
+  // B-8bd5 (its adversarial read r1): the panel is withdrawn only by the one that FILED it — the job itself (its jbt_) or its owner
+  // conversation's lineage; a control grant (--control all) never closes the person's question
+  if (!a.selfJob && act === 'withdraw' && !jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
   if (!a.selfJob && needsControl.includes(act) && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
   if (!a.selfJob && (act === 'access' || act === 'notify' || act === 'memory')) {
     if (!jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });

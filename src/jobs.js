@@ -3377,6 +3377,10 @@ class JobManager {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     const p = job.interaction && job.interaction.pending;
     if (!p) return { ok: true, already: 'no panel of this job is open' };
+    // its adversarial read r1: the withdraw is a RECORD in the answers (as an expiry is) — a loop waiting on `answers --wait` learns
+    // the panel is gone, whoever closed it
+    job.interaction.answers = job.interaction.answers || [];
+    job.interaction.answers.push({ withdrawn: true, version: p.version, ts: now() });
     job.interaction.pending = null;
     if (job.state === 'awaiting-user') job.state = 'up';
     this._resolveAns(job);

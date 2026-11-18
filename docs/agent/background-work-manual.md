@@ -181,6 +181,12 @@ answers with `vibespace-job answers [--wait 100]`; with `--stdin-open` they
 also stream to your stdin as JSONL. The owner conversation is notified when
 the panel is posted AND when the user answers.
 
+Its cause gone (the alarm cleared, the mirror fresh again)? `vibespace-job withdraw`
+(inside the job: its own panel; from the owner conversation: `withdraw <id>`)
+closes it and resolves its For-you item; `answers` then holds `{"withdrawn": true}`
+for that panel, as an unanswered one holds `{"expired": true}`. Only the job that
+filed it, or its owner conversation, may withdraw it — a control grant may not.
+
 Example panel.json:
 ```json
 { "title": "Need the 2FA code", "timeoutS": 1800, "blocks": [

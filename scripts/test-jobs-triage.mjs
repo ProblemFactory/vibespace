@@ -1107,11 +1107,11 @@ console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause
     const w = J.withdrawAsk(job);
     const woke = await Promise.race([waiting, new Promise((r) => setImmediate(() => r('still waiting')))]);
     const again = J.withdrawAsk(job);
-    const out = { posted: posted.version, asked, w, state: job.state, pending: job.interaction && job.interaction.pending, resolved, woke, again };
+    const out = { posted: posted.version, asked, w, state: job.state, pending: job.interaction && job.interaction.pending, resolved, woke, again, recorded: ((job.interaction && job.interaction.answers) || []).filter((x) => x && x.withdrawn === true).map((x) => x.version) };
     J.shutdown(); return out;
   };
   const r = await scene({ JobManager }, 'jobs-triage-withdraw');
-  ok(r.asked === 'awaiting-user' && r.w.ok && r.w.version === r.posted && r.pending === null && r.state === 'up' && r.resolved.join() === 'jb-8bd50001' && r.woke === 'woken', 'B-8bd5: a job WITHDRAWS its own panel — closed, its For-you item resolved, a waiting `answers --wait` woken, back to «up»', r);
+  ok(r.asked === 'awaiting-user' && r.w.ok && r.w.version === r.posted && r.pending === null && r.state === 'up' && r.resolved.join() === 'jb-8bd50001' && r.woke === 'woken' && r.recorded.join() === String(r.posted), 'B-8bd5: a job WITHDRAWS its own panel — closed, its For-you item resolved, a waiting `answers --wait` woken (the answers record the withdraw, as an expiry), back to «up»', r);
   ok(r.again.ok && /no panel of this job is open/.test(r.again.already || ''), 'B-8bd5: withdrawn twice — answered, nothing changed');
   const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), RES = "    try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { }\n    this._touch(job, { what: `withdrew its panel #${p.version} (its cause is gone)`, verb: 'answers' });\n";
   ok(JSRC.split(RES).length === 2, 'B-8bd5 control setup: the withdraw\'s resolve is one place in jobs.js (the plant the control cuts)');
@@ -1120,7 +1120,7 @@ console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause
   ok(rx.resolved.length === 0, 'B-8bd5 CONTROL (the withdraw without its resolve, in a copy): the For-you item STAYS open — what the row reported', rx.resolved);
   for (const rr of copiesCensus(MJ8.files, MJ8.dir, ROOT, { minCopies: 1, label: 'B-8bd5 ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
-  ok(/const selfActs = \['progress', 'ask', 'withdraw', 'announce'\];/.test(ar) && /const needsControl = \[[^\]]*'withdraw'[^\]]*\];/.test(ar) && /else if \(act === 'withdraw'\) r = a\.jm\.withdrawAsk\(job\);/.test(ar) && /case 'withdraw': \{/.test(cli) && /vibespace-job withdraw \(its cause is gone\)/.test(cli), 'WIRING: a job token withdraws its OWN panel (a conversation needs control); the CLI has `withdraw` (in its usage)');
+  ok(/const selfActs = \['progress', 'ask', 'withdraw', 'announce'\];/.test(ar) && !/const needsControl = \[[^\]]*'withdraw'[^\]]*\];/.test(ar) && /if \(!a\.selfJob && act === 'withdraw' && !jobModel\.canEdit\(job, a\.caller\)\) return res\.status\(404\)/.test(ar) && /else if \(act === 'withdraw'\) r = a\.jm\.withdrawAsk\(job\);/.test(ar) && /case 'withdraw': \{/.test(cli) && /vibespace-job withdraw \(its cause is gone\)/.test(cli), 'WIRING: a job token withdraws its OWN panel; a conversation only as its owner — a control grant never withdraws (its route leg: test-jobs-addressed §0); the CLI has `withdraw` (in its usage)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
