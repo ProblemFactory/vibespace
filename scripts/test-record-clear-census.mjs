@@ -2070,6 +2070,7 @@ const I_RECV = {
   'src/lib/channel-thread-pane.js|r.proposal': ['channel proposal', 'the outbox engine\'s failure reason for a send (the channel\'s own error words) — no record of the five kinds'],
   'src/lib/manage-agents.js|said': ['pool verdict', 'the gather route\'s answer worded by PURE gatherWords (members and counts) — lane pool-pin'],
   'src/lib/session-lifecycle.js|r': ['account', 'a pool member row (the conversation\'s pin menu) — lane pool-pin'],
+  'src/lib/session-lifecycle.js|sw': ['host', 'Locate in sidebar\'s switch record (lane think-tools-phone): the machine a Recent / History zone showed before Locate switched it to Local — `sw.name` is that machine\'s name (sidebar-workbench.js _locateSaid: the hosts list\'s name, else its id), never a record\'s words'],
   'src/server/usage-pool-engine.js|wake': ['pool verdict', 'a member wake\'s own reason (the engine\'s verdict words)'],
   'src/server/usage-pool-engine.js|lv': ['pool verdict', 'the pre-fire gate\'s last check — the link member\'s verdict reason (the engine\'s own words: buckets, a member\'s name) — lane pool-silent-members acceptance r3'],
   'src/server/usage-pool-engine.js|owed': ['account', 'the line a cross-provider switch owes the resumed conversation (q-053 P0b): the members\' and providers\' names and two model ids — the engine\'s own words'],
