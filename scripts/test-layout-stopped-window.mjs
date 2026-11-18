@@ -1025,9 +1025,21 @@ await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL 
       return out;
     };
     const o = await owedScene(LM), u = await owedScene(LM, { user: true });
+    const staleScene = async (Lm) => { const W = world({ records: { 'desk-w': [files('w-0', 0)], 'desk-p': [], 'desk-r': [] }, active: 'desk-w', Lm });
+      let recipes = 0; W.lm._saveOwedRecipes = () => { recipes++; }; W.lm._owedDesks = () => new Set(['desk-p']);
+      W.lm._userDirty = false; W.lm._lastUserInputAt = Date.now(); W.lm._savedAt = Date.now() - 5000;
+      const fired = setTimeout(() => {}, 1); clearTimeout(fired); W.lm._deferUserAt = Date.now() - 2000; W.lm._deferUserT = fired; // a person's deferral that fired on its own; its save never left
+      W.lm._deferT = setTimeout(() => {}, 200); // now an owed-recipe deferral is the pending one
+      const n0 = W.syncs('desk-w').length; W.lm._flushOnLeave('pagehide');
+      const out = { recipes, full: W.syncs('desk-w').length - n0 }; clearTimeout(W.lm._deferT); W.lm._deferT = null; clearTimeout(W.lm._autoSaveTimer); return out; };
+    const st = await staleScene(LM);
+    ok(st.recipes === 1 && st.full === 0, '§9 …a person\'s stamp left by a deferral that fired on its own does not speak for a LATER owed-recipe deferral: recipes only (cure 2 — the stamp belongs to its timer)', st);
+    const { LayoutManager: LMs } = await mutantEsm('src/lib/layout.js', 'deferred && this._deferUserT === this._deferT && this._deferUserAt != null', 'deferred && this._deferUserAt != null'); // stale-pins: kept — the control writes the cure's first form back on purpose
+    const st0 = await staleScene(LMs);
+    ok(st0.full === 1 && st0.recipes === 0, '§9 CONTROL: the stamp without its timer (the cure\'s first form) re-arms the stale act — a whole save (the leg above goes RED)', st0);
     ok(o.recipes === 1 && o.full === 0 && o.dirty === false, '§9 …a deferral that owed only RECIPES sends only them (_doAutoSave\'s own road) — never a whole desktop, the dirty bit never set for it', o);
     ok(u.full === 1, '§9 …a deferral that holds a PERSON\'s act (an apply cleared its dirty bit) re-arms it and the act leaves — also with a recipe owed on another desktop (the verdict\'s reader: `owed` anywhere lost it)', u);
-    const { LayoutManager: LMo } = await mutantEsm('src/lib/layout.js', 'const act = this._userDirty || (deferred && this._deferUserAt != null && !(this._savedAt > this._deferUserAt));', 'const act = this._userDirty || (deferred && !!this._lastUserInputAt && !(this._savedAt > this._lastUserInputAt));');
+    const { LayoutManager: LMo } = await mutantEsm('src/lib/layout.js', 'const act = this._userDirty || (deferred && this._deferUserT === this._deferT && this._deferUserAt != null && !(this._savedAt > this._deferUserAt));', 'const act = this._userDirty || (deferred && !!this._lastUserInputAt && !(this._savedAt > this._lastUserInputAt));');
     const o0 = await owedScene(LMo);
     ok(o0.recipes === 0 && o0.full === 1, '§9 CONTROL: a re-arm that ignores the deferral\'s kind (the first cut) turns the owed-only deferral into a whole save (the recipes leg goes RED)', o0);
   }

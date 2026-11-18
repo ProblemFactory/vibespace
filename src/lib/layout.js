@@ -1746,10 +1746,10 @@ class LayoutManager {
     const dm = this.app.desktopManager;
     if (this._restoring || dm?._restoring) return false; // no save in the middle of a restore (above)
     // the person's act a deferral holds and an apply cleared the dirty bit of: re-armed — never for the owed-recipe kind
-    const act = this._userDirty || (deferred && this._deferUserAt != null && !(this._savedAt > this._deferUserAt));
+    const act = this._userDirty || (deferred && this._deferUserT === this._deferT && this._deferUserAt != null && !(this._savedAt > this._deferUserAt));
     clearTimeout(this._autoSaveTimer); this._autoSaveTimer = null;
     if (deferred) { clearTimeout(this._deferT); this._deferT = null; }
-    this._deferUserAt = null;
+    this._deferUserAt = null; this._deferUserT = null;
     if (act && !this._userDirty) this._userDirty = true;
     const before = this._savedAt;
     this._doAutoSave();
@@ -1772,6 +1772,7 @@ class LayoutManager {
       if (!this._userDirty && !(this._savedAt > at)) { this._userDirty = true; this._lastUserInputAt = Math.max(this._lastUserInputAt || 0, at); }
       this.scheduleAutoSave();
     }, 1100);
+    this._deferUserT = this._deferT; // the stamp speaks only while THIS timer is the one pending (a later owed-recipe deferral is not it)
   }
 
   /** THE VIEWPORT CLASS this page writes as (§6b guard 10) — app.isMobile, the one predicate: a `phone` never writes
