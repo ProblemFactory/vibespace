@@ -5,24 +5,38 @@
 // The module imports nothing, so a fast suite reads it as it is.
 
 /** `w` = the hub's answer (or a refusal); `site` = the request's site; `login` = the picked login as the picker drew it (site · user);
- *  `t` = the page's translator. → [sentence, …] (the first always says what the press does). */
+ *  `t` = the page's translator. → [sentence, …] (the first always says what the press does).
+ *  THE VAULT'S LAW (主开发 12:17Z, the use door's must): a change that WIDENS who may use a login is said BY NAME before the press —
+ *  every principal of the hub's answer is said, none dropped: its name (the hub reads it as the Vault window's chips do), else a
+ *  Task Group by its id, a conversation not running now by its key. */
 export function useLoginWords(w, { site = '', login = '', t }) {
-  const out = [t('Adds {site} to the login {login} — it is filled there with that login\'s one password; nothing is typed again.', { site, login })];
-  if (!w || w.ok === false) {
+  const ok = !!w && w.ok !== false;
+  const out = [ok && w.there
+    ? t('{site} is one of this login\'s sites already — it signs in there as {user}; the press changes only who may have it filled.', { site, user: String(w.there) })
+    : t('Adds {site} to the login {login} — it is filled there with that login\'s one password; nothing is typed again.', { site, login })];
+  if (!ok) {
     out.push(t('What it changes could not be read ({code}) — the press says why.', { code: String((w && w.code) || 'error') }));
     return out;
   }
+  if (!w.there && w.user) out.push(t('It signs in there as {user}.', { user: String(w.user) }));
   if (w.unicode && w.ascii) out.push(t('The address is {unicode} — written {ascii} in plain letters.', { unicode: w.unicode, ascii: w.ascii }));
   if (w.lookalike && w.lookalike.domain) {
     out.push(t('Careful: {domain} is not the domain of this login\'s other sites ({mine}).', { domain: w.lookalike.domain, mine: (w.lookalike.loginDomains || []).join(', ') }));
   }
   const wd = w.widens || {};
-  const nameOf = (p) => (p && p.kind === 'everyone' ? t('every conversation') : String((p && (p.name || p.key)) || ''));
-  const names = [...(wd.login || []), ...(wd.anyAccount || []), ...(wd.anySite || [])].map(nameOf).filter(Boolean);
-  if (wd.owner) names.unshift(t('the conversation that saved it ({key})', { key: String(wd.owner) }));
-  const uniq = [...new Set(names)];
-  out.push(uniq.length
-    ? t('Then it may be filled on {site} by: {names}.', { site, names: uniq.join(', ') })
+  const idOf = (p) => (p && p.kind === 'everyone' ? 'everyone' : p && p.kind === 'group' ? `group:${p.id}` : `${(p && p.kind) || '?'}:${(p && (p.key || p.id)) || ''}`);
+  const nameOf = (p) => {
+    if (p && p.kind === 'everyone') return t('every conversation');
+    const n = p && typeof p.name === 'string' ? p.name.trim() : '';
+    if (n) return n;
+    if (p && p.kind === 'group') return `${t('Task group')} ${String(p.id || '?')}`;
+    return t('a conversation not running now ({key})', { key: String((p && (p.key || p.id)) || '?') });
+  };
+  const seen = new Set(), names = [];
+  for (const p of [...(wd.login || []), ...(wd.anyAccount || []), ...(wd.anySite || [])]) { if (!p || typeof p !== 'object') continue; const k = idOf(p); if (seen.has(k)) continue; seen.add(k); names.push(nameOf(p)); }
+  if (wd.owner) names.unshift(t('the conversation that saved it ({key})', { key: String(wd.ownerName || wd.owner) }));
+  out.push(names.length
+    ? t('Then it may be filled on {site} by: {names}.', { site, names: names.join(', ') })
     : t('Nobody else may have it filled on {site} yet.', { site }));
   return out;
 }

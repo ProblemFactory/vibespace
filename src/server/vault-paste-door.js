@@ -312,7 +312,15 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     catch (e) { log(`${q.requestId}: the site could not be added to the login (${(e && e.code) || 'error'})`); return named('store_failed'); }
     const already = !!(r && r.ok === false && r.code === 'login_site_exists');
     if (!r || (!r.ok && !already)) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (r && r.error) || MORE_WORDS[c] || P.WORDS[c] || c }; }
-    const user = String((r && r.user) || P.loginUserOf(name));
+    // a site the login holds ALREADY signs in under the name it keeps THERE (主开发 12:17Z, small): a different name typed on the card
+    // is refused by name — never ignored without a word — and the receipt names the user it really signs in with there
+    let there = null;
+    if (already && typeof logins.siteWordsFor === 'function') { try { const sw = logins.siteWordsFor(name, q.target.origin); there = sw && sw.ok && typeof sw.there === 'string' && sw.there ? sw.there : null; } catch { there = null; } }
+    const typed = typeof l.username === 'string' ? l.username.trim() : '';
+    if (already && there && typed && typed.toLowerCase() !== there.toLowerCase()) {
+      return { ok: false, code: 'login_site_exists', site: q.target.origin, there, words: `${q.target.origin} is on this login already and signs in there as ${there} — to sign in there under another name, remove that site from the login in Vault ▸ Web logins first, or type a new login` };
+    }
+    const user = String((r && r.ok && r.user) || there || P.loginUserOf(name));
     let allowed = false;
     if (l.allow === true && q.conv && typeof logins.grant === 'function') {
       try { const g = logins.grant(name, 'this-account', `session:${q.conv}`, { by: String(by).slice(0, 40) }); allowed = !!(g && g.ok); if (!allowed) log(`${q.requestId}: the sign-in grant was not written (${(g && g.code) || 'error'}) — the site is on the login`); }
@@ -321,7 +329,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     try { vault.contentsChanged && vault.contentsChanged('paste'); } catch { }
     audit('vault-secret-stored', { by: String(by).slice(0, 40), conv: q.scope, requestId: id, place: name, allowed, joined: true });
     mark();
-    settle(q, 'stored', { login: { user, updated: false, allowed, asked: l.allow === true, joined: true } });
+    settle(q, 'stored', { login: { user, updated: false, allowed, asked: l.allow === true, joined: true, already } });
     return { ok: true, outcome: 'stored', entry: name, joined: true, already, allowed };
   }
 

@@ -983,7 +983,18 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
   //    shown, logged or compared. THE GRANT FOLLOWS THE LOGIN: `siteWordsFor` says BY NAME, before the press, who may then have it
   //    filled on the new site (the login's own row, and by their own rows «any account on that site» / «any site»).
   const principalsAt = (resource) => { const [row] = rowsOf(resource); const pub = row ? GM.publicRow(row) : null; return pub && !pub.unknown ? (pub.to || []) : []; };
-  function siteWordsFor(name, site, { user = '' } = {}) {
+  /** The grant pickers' subjects (the Vault window's chips: `{sessions:[{subject:'session:<cid>', name}], groups:[{subject:'group:<id>', name}]}`)
+   *  → the roster GM.namesNow reads — so the words before the press name each principal as the person's chips do (主开发 12:17Z, the
+   *  use door's must: a stored principal carries no name — a group's none at all). */
+  const rosterOf = (subjects) => {
+    const sj = subjects && typeof subjects === 'object' ? subjects : {};
+    const tail = (x, head) => { const v = str(x && x.subject); return v.startsWith(head) ? v.slice(head.length) : ''; };
+    return {
+      sessions: (Array.isArray(sj.sessions) ? sj.sessions : []).map((x) => { const cid = tail(x, 'session:'); return cid ? { id: cid, name: str(x.name), backendSessionId: cid } : null; }).filter(Boolean),
+      groups: (Array.isArray(sj.groups) ? sj.groups : []).map((x) => { const id = tail(x, 'group:'); return id ? { id, name: str(x.name) } : null; }).filter(Boolean),
+    };
+  };
+  function siteWordsFor(name, site, { user = '', subjects = null } = {}) {
     const p = BL.parseName(name);
     if (!p) return named('not_found', 'no such web login');
     if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then add the site');
@@ -992,8 +1003,14 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     if (!o.rec) return named('not_found', 'no such web login');
     const w = BL.siteWords(o.rec, site, { decode: (h) => { try { return require('node:url').domainToUnicode(h); } catch { return null; } } });
     if (!w) return named('login_bad_origin', 'a website address (https://host[:port]) — exactly the site');
-    return { ok: true, name, ...w, user: str(user).trim() || o.rec.username,
-      widens: { login: principalsAt(`${p.origin}#${p.user}`), anyAccount: principalsAt(`${w.site}#*`), anySite: principalsAt('*'), ...((metaOf(name) || {}).owner ? { owner: metaOf(name).owner } : {}) } };   // its owner fills with no grant at all
+    // every principal NAMED by the roster (a live conversation's / a listed group's current name; an absent one keeps its id and is
+    // marked absent — never dropped); the owner too. `there` = the name the login already signs in under on that site (null: not one
+    // of its sites yet) — the card says it, and the answer refuses a different typed name by name
+    const roster = rosterOf(subjects), named2 = (list) => GM.namesNow(list, roster);
+    const owner = (metaOf(name) || {}).owner;
+    const ownerName = owner ? (named2([{ kind: 'conversation', key: str(owner) }])[0] || {}).name || null : null;
+    return { ok: true, name, ...w, user: str(user).trim() || o.rec.username, there: BL.userOnSite(o.rec, w.site),
+      widens: { login: named2(principalsAt(`${p.origin}#${p.user}`)), anyAccount: named2(principalsAt(`${w.site}#*`)), anySite: named2(principalsAt('*')), ...(owner ? { owner, ...(ownerName ? { ownerName } : {}) } : {}) } };   // its owner fills with no grant at all
   }
   function addSite(name, { site, user = '' } = {}, { who = null } = {}) {
     if (!BL.parseName(name)) return named('not_found', 'no such web login');

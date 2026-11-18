@@ -9872,16 +9872,16 @@ button.vw-chip { cursor: pointer; }
 .ut-login-allow > input { margin: 0; flex: none; }
 /* lane login-request-card (one login, several sites): «Use a login you already saved…» — a picked login HIDES the typed fields (their own
    display rules beat [hidden]); the pick wears the card's input (.vault-pw), its two buttons the card's small buttons */
-.ut-secret-login :is(.vault-secret-field, .ut-login-otp, .vw-ak-hint, .ut-login-use, .ut-login-use-pane, .ut-login-use-pick)[hidden] { display: none; }
+.ut-secret-login :is(.vault-secret-field, .ut-login-otp, .vw-ak-hint, .ut-login-use, .ut-login-use-pane, .ut-login-use-pick, .ut-login-use-unlock)[hidden] { display: none; }
 .ut-login-use-pane { display: flex; flex-direction: column; gap: 4px; }
-.ut-secret-login :is(.ut-login-use, .ut-login-use-back) { align-self: flex-start; height: 26px; font-size: 11px; padding: 0 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
+.ut-secret-login :is(.ut-login-use, .ut-login-use-back, .ut-login-use-unlock) { align-self: flex-start; height: 26px; font-size: 11px; padding: 0 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {   /* :is(#…) — the phone tray's own rules are id-level (#phone-home .ut-act …) */
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login :is(.vault-secret-field, .vault-secret-label, .vw-ak-hint, .ut-secret-note, .ut-secret-state, .ut-secret-words, .ut-login-allow, .ut-login-allow > span) { font-size: 16px; }
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login .vault-pw { min-height: 44px; font-size: 16px; }
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login :is(.ut-act, .ut-secret-totp, .ut-secret-state button) { min-height: 44px; font-size: 16px; }
   .ut-login-allow { min-height: 44px; }
   .ut-login-allow > input { width: 24px; height: 24px; }
-  :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login :is(.ut-login-use, .ut-login-use-back) { min-height: 44px; font-size: 16px; }
+  :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login :is(.ut-login-use, .ut-login-use-back, .ut-login-use-unlock) { min-height: 44px; font-size: 16px; }
   /* the touch tray's floor is `#user-todos-popup * { font-size: max(14px, 1em) !important }` (each element ≥ its parent): the
      card's ROOT at 16 px carries every text inside it to 16 through that same floor */
   :is(#user-todos-popup, #phone-home, .cn-card, .ut-mini-popover) .ut-secret-login { font-size: 16px !important; }

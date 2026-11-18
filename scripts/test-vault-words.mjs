@@ -97,7 +97,10 @@ const ROWS = {
   ],
   // lane vault-paste-request: the paste box's own state line INSIDE its For-you item (and the ⑥ dialog's verdict) — a field verdict
   // while the person is at the box, its 解锁… button beside it (the box IS the For-you item: the telling and the door in one place)
-  'src/lib/vault-paste-box.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the paste box\'s state line inside its For-you item (its 解锁… button beside the words — the door), the refusal said in the same line, and 「其他密钥或密码…」\'s save-time verdict — a field verdict while the person is in the box, not a background refusal (lane vault-entry-description: + the words rule\'s refusals — the box and the Vault window\'s Edit…)', { count: 4 }]],
+  'src/lib/vault-paste-box.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the paste box\'s state line inside its For-you item (its 解锁… button beside the words — the door), the refusal said in the same line, and 「其他密钥或密码…」\'s save-time verdict — a field verdict while the person is in the box, not a background refusal (lane vault-entry-description: + the words rule\'s refusals — the box and the Vault window\'s Edit…)', { count: 4 }],
+    // lane login-request-card, the use door's cure (主开发 12:17Z): «Use a login you already saved…» on a LOCKED vault says so — never «none saved»
+    ['The vault is locked — unlock it to pick one of its saved logins.', 'label', 'the use-a-login pick\'s empty list said for what it is: a field verdict in the card while the person is in it, its «Unlock the vault» button beside the words — the door'],
+    ['Unlock the vault', 'label', 'that button itself — the unlock door on the card (THE unlock dialog, showUnlock), its words the door\'s name']],
   'src/server/vault-hooks.js': [
     ['The vault locked after a restart', 'foryou', 'THE FOR-YOU ITEM after a restart (place 2) — the item IS the telling'],
     ['The vault is locked — agents that need a credential will be refused until you unlock it', 'foryou', 'THE FOR-YOU ITEM the moment it locks (lane vault-locked-loud, int332) — the item IS the telling; the door sentence follows'],

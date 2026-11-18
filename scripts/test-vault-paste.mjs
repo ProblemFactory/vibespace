@@ -542,13 +542,33 @@ SENTINELS.push(S_LOGIN, S_LOGIN2, S_NL);
     const clash = await S.hit(`/api/vault/secret-requests/${v.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, username: 'second-user', allow: false } });
     ok(clash.status >= 400 && clash.json.code === 'login_exists' && openReqs(W).some((i) => i.action.requestId === v.json.requestId), 'a site whose user is ANOTHER login\'s there ⇒ login_exists by name (merge them instead), the item stays open', clash.json);
     await S.hit(`/api/vault/secret-requests/${v.json.requestId}/answer`, { body: { answer: 'deny' } });
+    // (主开发 12:17Z, small) A SITE THE LOGIN HOLDS ALREADY: the login as it stands — a DIFFERENT name typed on the card is refused by
+    // name (never ignored without a word), the item open; the same name ⇒ stored, and the receipt names the user it signs in with THERE
+    const DESK = 'https://desk.example.test';
+    W.logins.addSite(PICK, { site: DESK, user: 'desk-owner' }, { who: 'owner' });
+    const k = await S.agent(W.OTHER_TOKEN, { words: 'the shop desk', purpose: 'p', kind: 'login', hosts: DESK });
+    const kEdited = await S.hit(`/api/vault/secret-requests/${k.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, username: 'someone-else', allow: true } });
+    const kOpen = openReqs(W).some((i) => i.action.requestId === k.json.requestId);
+    const kSame = await S.hit(`/api/vault/secret-requests/${k.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, username: 'desk-owner', allow: true } });
+    const rck = stashOf('cid-other-2').filter((e) => e.ref === k.json.requestId);
+    ok(k.status === 200 && kEdited.status >= 400 && kEdited.json.code === 'login_site_exists' && kEdited.json.there === 'desk-owner' && kOpen && kSame.status === 200 && kSame.json.already === true && kSame.json.joined === true
+      && rck.length === 1 && /https:\/\/desk\.example\.test was one of its sites already; it signs in there as desk-owner/.test(rck[0].text),
+      'A SITE THE LOGIN HOLDS ALREADY: a different name typed on the card ⇒ refused by name (login_site_exists, the name it keeps there said), the item open; the same name ⇒ the login as it stands, the receipt naming the user it signs in with THERE', { kEdited: kEdited.json, kSame: kSame.json, rc: rck[0] && rck[0].text });
+    // A PICKED LOGIN ON A LOCKED VAULT ⇒ vault_locked by name, before the use road; the item stays
+    W.vault.lock('test');
+    const lk = await S.agent(W.OTHER_TOKEN, { words: 'the shop, locked', purpose: 'p', kind: 'login', hosts: 'https://locked.example.test' });
+    const lka = await S.hit(`/api/vault/secret-requests/${lk.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, allow: true } });
+    const lkOpen = openReqs(W).some((i) => i.action.requestId === lk.json.requestId);
+    const unl = await W.vault.unlock(PW);
+    ok(unl.ok && lk.status === 200 && lka.status === 423 && lka.json.code === 'vault_locked' && lkOpen, 'A PICKED LOGIN ON A LOCKED VAULT ⇒ 423 vault_locked by name (before the use road), the item stays', { lk: lk.status, lka: lka.json });
+    await S.hit(`/api/vault/secret-requests/${lk.json.requestId}/answer`, { body: { answer: 'deny' } });
     // RED CONTROL: a door without the use road treats the pick as a new login with no password — refused, the site never joins
     const MUT = mutant('src/server/vault-paste-door.js', "    if (typeof l.useLogin === 'string' && l.useLogin) return answerUseLogin(q, id, l, { by, mark });   // one login, several sites\n", '');
     const md = MUT.create({ vault: W.vault, integrations: W.integrations, userTodos: W.userTodos, deliver: W.deliver, vaultRun: W.vaultRun, logins: W.logins });
     const mq = md.request({ caller: { conversationId: 'cid-mut-7', scope: 'w7', name: 'Mut lane' }, words: 'w', purpose: 'p', kind: 'login', hosts: 'https://mut.example.test' });
     const ma = mq.ok ? md.answer(mq.requestId, { answer: 'store', by: 'user', person: true, login: { useLogin: PICK, allow: true } }) : mq;
     const rec2 = (() => { const x = W.vault.secretGet(PICK); return x && x.ok && x.value ? JSON.parse(x.value.toString('utf8')) : null; })();
-    ok(mq.ok === true && ma.ok === false && !!rec2 && !(rec2.origins || []).includes('https://mut.example.test'), 'RED CONTROL: a door with no use road refuses the pick (no password) and the site never joins the login — the legs above would read it', { asked: mq.ok || mq.code, answered: ma });
+    ok(mq.ok === true && ma.ok === false && ma.code === 'value_required' && !!rec2 && !(rec2.origins || []).includes('https://mut.example.test'), 'RED CONTROL: a door with no use road reads the pick as a typed login with NO password (value_required) and the site never joins the login — the legs above would read it', { asked: mq.ok || mq.code, answered: ma });
     if (mq.ok) md.answer(mq.requestId, { answer: 'deny' });
   }
   // LOCKED: a lock act withdraws; an ask while locked is filed; the owner's answer ⇒ 423, the item stays; unlocked ⇒ stored
@@ -823,7 +843,7 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
   };
   const STUBS = {
     'i18n.js': `export const t = (s, p) => (p ? String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s);`,
-    'utils.js': `export const createModalShell = (o) => globalThis.__b3.shell(o); export const fetchJson = async () => ({ ok: false, code: 'b3_stub' }); export const showToast = () => {}; export const latestRender = (c, build) => { let gen = 0; return async () => { const mine = ++gen; const out = document.createElement('div'); await build(out); if (mine !== gen) return false; c.replaceChildren(...out.childNodes); return true; }; }; export const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => '&#' + c.charCodeAt(0) + ';');`,
+    'utils.js': `export const createModalShell = (o) => globalThis.__b3.shell(o); export const fetchJson = async (u, o) => (globalThis.__b3 && globalThis.__b3.fetch ? globalThis.__b3.fetch(u, o) : ({ ok: false, code: 'b3_stub' })); export const showToast = (m, o) => { if (globalThis.__b3 && globalThis.__b3.toast) globalThis.__b3.toast(m, o); }; export const latestRender = (c, build) => { let gen = 0; return async () => { const mine = ++gen; const out = document.createElement('div'); await build(out); if (mine !== gen) return false; const kids = [...out.childNodes]; while (c.firstChild) c.removeChild(c.firstChild); for (const n of kids) c.appendChild(n); return true; }; }; export const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => '&#' + c.charCodeAt(0) + ';');`,
     'vault-unlock.js': `export const vaultFacts = () => ({ state: 'unlocked', setup: true }); export const showUnlock = () => {}; export const showSetup = () => {};`,
     'vault-totp-row.js': `export const showTotpAddDialog = (o) => globalThis.__b3.totp(o); export const loadTotp = () => Promise.resolve({ entries: [] }); export const totpFields = () => ({ nodes: [], wipe() {}, doSave: async () => false });`,   // totpFields: lane totp-request-card (the two-step field set — a two-step card's, unused by a login scene)
   };
@@ -836,7 +856,7 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
         if (mutate) b.onLoad({ filter: /vault-paste-box\.js$/ }, (a) => { const s = fs.readFileSync(a.path, 'utf8'), m = mutate(s); if (m === s) throw new Error('the mutant changed nothing'); return { contents: m, loader: 'js', resolveDir: path.dirname(a.path) }; });
       } }],
     });
-    const f = path.join(B3DIR, `box-${mutate ? 'mutant' : 'real'}.cjs`);
+    const f = path.join(B3DIR, `box-${mutate ? `mutant-${crypto.randomBytes(4).toString('hex')}` : 'real'}.cjs`);   // each mutant its own file: require caches a path
     fs.writeFileSync(f, out.outputFiles[0].text);
     return require(f);
   };
@@ -919,6 +939,75 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
   try { mut = scene(await bundleBox((s) => s.replace('  if (!moved()) return null;\n', '  return null;\n'))); } catch (e) { mut = { threw: String((e && e.message) || e) }; }
   const red = b3Checks(mut).filter(([, c]) => !c).map(([n]) => n);
   ok(!mut.threw && red.includes(B3_REDRAW) && mut.afterRedraw === 2, `MUTANT the away line returns nothing (awayBoxEl ⇒ null) ⇒ the surface's redraw draws a SECOND, empty, submittable box (${mut.afterRedraw} submittable, the redraw drew ${mut.drawn}) — RED by name: «${red[0] || 'none'}»${red.length > 1 ? ` + ${red.length - 1} more` : ''}`, { red, mut });
+
+  // ⑬c THE USE ROAD ON THE CARD — the REAL box module over the fake DOM (the readers, 2026-11-18: the card's client half had no leg):
+  // a pick HIDES the typed fields and sends useLogin with NO password, the name it signs in under THERE preset; the words ask for the
+  // typed name and say the Task Group by name; «Type a new login instead» restores the card; an empty list is said for what it is (a
+  // LOCKED vault with its unlock door, a read that failed); a tick whose grant could not be written is an ERROR toast
+  const U_NAME = 'web-login:https://lms.b3.test#b3-own';
+  const U_LIST = { ok: true, state: 'unlocked', entries: [{ name: U_NAME, origin: 'https://lms.b3.test', user: 'b3-own', sites: [{ origin: 'https://b3.example.test', user: 'b3-there' }] }] };
+  const useScene = async (M, list) => {
+    const D = fakeDom(), prev = globalThis.document, r = { toasts: [], asked: [] };
+    globalThis.document = D.document;
+    globalThis.__b3 = {
+      shell: () => { const d = D.el('div'), b = D.el('div'); d.append(b); D.body.append(d); return { dialog: d, body: b, close: () => d.remove(), raised: false }; },
+      totp: () => {},
+      fetch: async (u) => {
+        const q = String(u); r.asked.push(q);
+        if (q.startsWith('/api/vault/web-logins/site-words')) return { ok: true, user: 'b3-there', there: 'b3-there', widens: { login: [{ kind: 'group', id: 'g-b3', name: 'B3 crew' }] } };
+        if (q === '/api/vault/web-logins') return list;
+        if (q.startsWith('/api/vault/secret-requests/')) return { ok: true, outcome: 'stored', joined: true, allowed: false, already: false };   // the tick's grant NOT written
+        return { ok: false, code: 'b3_stub' };
+      },
+      toast: (m, o) => { r.toasts.push({ m: String(m), type: (o && o.type) || null }); },
+    };
+    const settle = async () => { for (let i = 0; i < 8; i++) await new Promise((res) => setImmediate(res)); };
+    const field = (inp) => { for (let n = inp; n; n = n.parentNode) if (n.classList && n.classList.contains('vault-secret-field')) return n; return null; };
+    try {
+      const id = 'sr-' + crypto.randomBytes(6).toString('hex');
+      const item = { id: 'ut-b3u', text: 'Odd jobs asks you for a website login on b3.example.test — it is typed only on that site', detail: '', action: { type: 'secret-request', requestId: id, kind: 'login', hosts: 'https://b3.example.test', grant: false }, i18n: { text: { params: { who: 'Odd jobs', site: 'b3.example.test' } } } };
+      const host = D.el('div', 'ut-popup'); D.body.append(host);
+      const box = M.secretBoxEl(item); host.append(box);
+      const user = box.querySelector('input.vault-login-user'), pass = box.querySelector('input.vault-login-pass');
+      user.value = 'typed-name'; pass.value = 'typed-pw';
+      box.querySelector('.ut-login-use').click(); await settle();
+      const pick = box.querySelector('.ut-login-use-pick'), says = box.querySelector('.ut-login-use-says'), unlock = box.querySelector('.ut-login-use-unlock');
+      r.empty = says.textContent; r.unlock = !!unlock && !unlock.hidden;
+      if (list.ok && (list.entries || []).length) {
+        pick.value = list.entries[0].name;
+        for (const fn of pick.listeners.change || []) await fn({ type: 'change', target: pick });
+        await settle();
+        r.use = box.dataset.use || null; r.userNow = user.value; r.words = says.textContent;
+        r.passHidden = !!field(pass) && field(pass).hidden === true;
+        r.otpHidden = !!box.querySelector('.ut-login-otp') && box.querySelector('.ut-login-otp').hidden === true;
+        r.wordsAsked = r.asked.find((u) => u.startsWith('/api/vault/web-logins/site-words')) || '';
+        await M.submitSecretBox({ runAction: async (it, ans, o) => { r.sent = o && o.login; return true; } }, item, box, 'store');
+        box.querySelector('.ut-login-use-back').click(); await settle();
+        r.backUse = box.dataset.use || null; r.backUser = user.value; r.backPass = field(pass) ? field(pass).hidden : null;
+        await M.postSecretAnswer(item, 'store', { login: { useLogin: list.entries[0].name, username: 'b3-there', allow: true } });
+      }
+    } catch (e) { r.threw = String((e && e.stack) || e).slice(0, 400); }
+    finally { if (prev === undefined) delete globalThis.document; else globalThis.document = prev; delete globalThis.__b3; }
+    return r;
+  };
+  const U_HIDES = 'a picked login HIDES the typed fields (password, two-step code) and the press sends useLogin with NO password — the name it signs in under THERE preset (b3-there, not the typed one)';
+  const U_ERROR = 'a tick whose grant could not be written is an ERROR toast (as on the typed road) — never the toast of a box left unticked';
+  const useChecks = (a, lk, bad) => [
+    ['⑬c the use road\'s scene runs over the real box module (a list, a locked vault, a failed read)', !a.threw && !lk.threw && !bad.threw],
+    [U_HIDES, a.use === U_NAME && a.passHidden && a.otpHidden && a.userNow === 'b3-there' && !!a.sent && a.sent.useLogin === U_NAME && !('loginPassword' in a.sent) && a.sent.username === 'b3-there'],
+    ['the words before the press are asked for the name on the card (&user=b3-there) and say the site held already, its name there, and the Task Group BY NAME', /&user=b3-there/.test(a.wordsAsked || '') && /signs in there as b3-there/.test(a.words || '') && /B3 crew/.test(a.words || '')],
+    ['«Type a new login instead» puts the card back as it was: the typed name back, the password field shown, no login picked', a.backUse === null && a.backUser === 'typed-name' && a.backPass === false],
+    [U_ERROR, (a.toasts || []).some((x) => x.type === 'error' && /permission could not be written/.test(x.m))],
+    ['an empty list is said for what it is: a LOCKED vault (its unlock door on the card) — never «none saved» — and a read that failed', /vault is locked/.test(lk.empty || '') && lk.unlock && /could not be read/.test(bad.empty || '') && !bad.unlock],
+  ];
+  const useRun = async (mutate) => { try { const M = mutate ? await bundleBox(mutate) : require(path.join(B3DIR, 'box-real.cjs')); return [await useScene(M, U_LIST), await useScene(M, { ok: true, state: 'locked', entries: [] }), await useScene(M, { ok: false, code: 'unreadable' })]; } catch (e) { const t = { threw: String((e && e.message) || e) }; return [t, t, t]; } };
+  const uReal = await useRun(null);
+  for (const [n, c] of useChecks(...uReal)) ok(c, n, uReal[0]);
+  const uHide = await useRun((s) => s.replace('    for (const n of typed) if (n) n.hidden = !!entry;\n', ''));
+  const uErr = await useRun((s) => s.replace('    if (login.allow && !r.allowed) showToast(', '    if (false) showToast('));
+  const redOf = (run) => useChecks(...run).filter(([, c]) => !c).map(([n]) => n);
+  ok(!uHide[0].threw && redOf(uHide).includes(U_HIDES) && !uErr[0].threw && redOf(uErr).includes(U_ERROR),
+    'MUTANTS ⑬c: the hide line gone ⇒ the password field stays (RED by name); the not-written tick toasted as a plain one ⇒ RED by name', { hide: redOf(uHide), err: redOf(uErr) });
   fs.rmSync(B3DIR, { recursive: true, force: true });
 }
 

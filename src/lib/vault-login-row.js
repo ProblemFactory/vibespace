@@ -136,7 +136,9 @@ export function loginFields({ site = '', fixed = false } = {}) {
 /** The add door's refusals in words — the dialog's and the card's (one map; the card's own codes too). */
 export function loginRefusalWords(code, r) {
   return code === 'login_bad_origin' ? t('Give the site\'s address over https (http only for this machine\'s localhost)') : code === 'login_bad_user' ? t('Give the user name (no spaces, no #)') : code === 'value_required' ? t('Type its password') : code === 'bad_totp' ? t('The two-step code\'s name, as it is listed in this vault') : code === 'vault_locked' ? t('The vault is locked (vault_locked) — unlock it, then save')
-    : code === 'login_totp_unknown' ? t('No two-step code of that name is in this vault — pick one from its list, or add it with «Two-step code…»') : code === 'login_password_lines' ? t('A password holds no line break — type or paste it again') : failWords(r);   // lane login-request-card
+    : code === 'login_totp_unknown' ? t('No two-step code of that name is in this vault — pick one from its list, or add it with «Two-step code…»') : code === 'login_password_lines' ? t('A password holds no line break — type or paste it again')
+    : code === 'login_site_exists' && r && r.there ? t('{site} is on this login already and signs in there as {user} — to sign in there under another name, remove that site from the login in Vault ▸ Web logins first, or type a new login', { site: String(r.site || ''), user: String(r.there) })   // one login, several sites: the use road's own refusal
+    : failWords(r);   // lane login-request-card
 }
 
 /** 添加 → 网站登录…: the owner's own login (by: owner). The password field is taken off the body by the route (`loginPassword`). */

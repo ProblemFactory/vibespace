@@ -303,7 +303,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     // ONE act (the secret never shown). The words before an add say the exact address, its ASCII form, a look-alike, and BY NAME
     // who may then have it filled there. A refusal keeps its own sentence in `why` (which login, which site).
     const whyL = (r) => (r && r.ok === false && r.error && !r.why ? { ...r, why: r.error } : r);
-    app.get('/api/vault/web-logins/site-words', noStoreL(person((req) => whyL(logins.siteWordsFor(String(req.query.name || ''), String(req.query.site || ''), { user: String(req.query.user || '') })))));
+    app.get('/api/vault/web-logins/site-words', noStoreL(person((req) => whyL(logins.siteWordsFor(String(req.query.name || ''), String(req.query.site || ''), { user: String(req.query.user || ''), subjects: subjects() })))));   // subjects: every principal NAMED as the Vault window's chips name it (主开发 12:17Z)
     app.post('/api/vault/web-logins/sites', noStoreL(person((req) => { const b = bodyL(req); return whyL(logins.addSite(String(b.name || ''), { site: String(b.site || ''), user: String(b.user || '') }, { who: whoL(req) })); })));
     app.post('/api/vault/web-logins/sites/remove', noStoreL(person((req) => { const b = bodyL(req); return whyL(logins.removeSite(String(b.name || ''), String(b.site || ''), { who: whoL(req) })); })));
     // the merge's words BEFORE the press (主开发 23:01Z, must 2): the sites that join, the two-step code dropped, the owner that loses its fill, who may then have it filled

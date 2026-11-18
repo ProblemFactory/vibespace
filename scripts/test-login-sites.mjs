@@ -113,18 +113,18 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
   const eng = VE.create({ dataDir: DATA, kdf: { N: 1024, r: 8, p: 1 }, log: { log() { }, warn() { }, error() { } }, idleTimer: false });
   const UNLOCK = 'Sites#' + crypto.randomBytes(6).toString('hex');
   await eng.setup(UNLOCK);
-  const world = (mutate = null) => {
+  const world = (mutate = null, { now = null } = {}) => {   // now: the store's clock, injected where a leg orders two writes in time
     const grants = GS.create({ memory: true });
     const M = mutate ? loadMutated('src/server/browser-logins.js', mutate) : Lm;
-    return { grants, logins: M.create({ vault: eng, grants: () => grants, totpCode: (n) => (n === 'school-2fa' ? { ok: true, code: '482910' } : { ok: false }), forYou: { add() { return null; }, resolve() { }, list() { return []; } }, log: () => { } }) };
+    return { grants, logins: M.create({ vault: eng, grants: () => grants, totpCode: (n) => (n === 'school-2fa' ? { ok: true, code: '482910' } : { ok: false }), forYou: { add() { return null; }, resolve() { }, list() { return []; } }, log: () => { }, ...(now ? { now } : {}) }) };
   };
   const PW1 = 'LmsPw!' + crypto.randomBytes(8).toString('hex'), PW2 = 'SsoPw!' + crypto.randomBytes(8).toString('hex');
   const audit = () => (fs.existsSync(path.join(DATA, 'vault-audit.jsonl')) ? fs.readFileSync(path.join(DATA, 'vault-audit.jsonl'), 'utf8') : '');
   const fill = (lg, tab, spec, conv) => lg.resolveFill({ tabOrigin: tab, spec, conv, actor: conv, facts: { conversationKeys: [conv] } });
   // the owner's picture: one account saved twice — for the school's course site, and (today, through the login card) for its sign-in site
-  const run = async (mutate = null) => {
+  const run = async (mutate = null, opts = {}) => {
     for (const n of (eng.secretNames() || []).map((x) => x.name).filter((n) => n.startsWith('web-login:'))) eng.secretDrop(n);
-    const w = world(mutate);
+    const w = world(mutate, opts);
     eng.secretPut('totp:school-2fa', 'JBSWY3DPEHPK3PXP');
     w.logins.addOwn({ origin: LMS, username: 'jdoe', password: PW1, totpName: 'school-2fa' }, { who: 'owner' });
     w.logins.addOwn({ origin: SSO, username: 'jdoe@school.test', password: PW2 }, { who: 'owner' });
@@ -393,9 +393,39 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const a = UW(near, { site: PORTAL, login: `${LMS} · jdoe`, t: tr }), b = UW(far, { site: OTHER, login: `${LMS} · jdoe`, t: tr });
     ok(a[0].includes(PORTAL) && a[0].includes(`${LMS} · jdoe`) && /nothing is typed again/.test(a[0]) && a.some((x) => /^Then it may be filled on .* by: .*conv-a/.test(x)) && !a.some((x) => /^Careful/.test(x)) && b.some((x) => /^Careful: lms-school\.example is not the domain of this login's other sites \(school\.test\)/.test(x)),
       'THE WORDS BEFORE THE PRESS on the login card (the page\'s, over the hub\'s real answer): what the press does, BY NAME who may then have it filled on that site (the login\'s own row: conv-a), and a look-alike said', { a, b });
-    const UWr = await load((src) => src.replace("  const names = [...(wd.login || []), ...(wd.anyAccount || []), ...(wd.anySite || [])].map(nameOf).filter(Boolean);", '  const names = [];'));
+    const LOOP = "  for (const p of [...(wd.login || []), ...(wd.anyAccount || []), ...(wd.anySite || [])]) { if (!p || typeof p !== 'object') continue; const k = idOf(p); if (seen.has(k)) continue; seen.add(k); names.push(nameOf(p)); }";
+    const UWr = await load((src) => src.replace(LOOP, ''));
     const ar = UWr(near, { site: PORTAL, login: `${LMS} · jdoe`, t: tr });
     ok(ar.some((x) => /^Nobody else may have it filled/.test(x)), 'RED CONTROL: words that leave out the grants say «nobody else» while conv-a may fill it — the leg above would read it', ar);
+    // (主开发 12:17Z, the use door's MUST — the vault's law: a change that WIDENS who may use a login is said BY NAME before the press)
+    // EVERY PRINCIPAL IS SAID: the hub names each as the Vault window's chips do (the pickers' subjects); a Task Group too — and one
+    // whose name cannot be read is still said («Task group <id>»), never dropped into «Nobody else»
+    const SUBJ = { sessions: [{ subject: 'session:conv-a', name: 'Course helper' }], groups: [{ subject: 'group:g-release', name: 'Release crew' }] };
+    const conv = UW(v.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), PORTAL, { subjects: SUBJ }), { site: PORTAL, login: `${LMS} · jdoe`, t: tr }).join(' ');
+    const WIKI = 'https://wiki.school.test';
+    v.logins.addOwn({ origin: WIKI, username: 'jdoe', password: 'Wiki!' + 'w'.repeat(12) }, { who: 'owner' });
+    v.logins.grant(BL.entryName(WIKI, 'jdoe'), 'this-account', 'group:g-release');   // ONLY a Task Group may fill this login
+    const GW = (o) => v.logins.siteWordsFor(BL.entryName(WIKI, 'jdoe'), PORTAL, o);
+    const gNamed = UW(GW({ subjects: SUBJ }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
+    const gBare = UW(GW(), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
+    ok(/by: Course helper/.test(conv) && !conv.includes('conv-a') && /by: Release crew\./.test(gNamed) && /by: Task group g-release\./.test(gBare) && !/Nobody else/.test(gNamed + gBare),
+      'EVERY PRINCIPAL SAID BY NAME BEFORE THE PRESS: the hub names the conversation («Course helper», not its id) and the Task Group («Release crew») as the Vault window\'s chips do; a group whose name cannot be read is still said — «Task group g-release», never «Nobody else»', { conv, gNamed, gBare });
+    const UWold = await load((src) => src.replace(LOOP, "  names.push(...[...(wd.login || []), ...(wd.anyAccount || []), ...(wd.anySite || [])].map((p) => (p && p.kind === 'everyone' ? t('every conversation') : String((p && (p.name || p.key)) || ''))).filter(Boolean));"));
+    const gOld = UWold(GW(), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
+    ok(/Nobody else may have it filled on/.test(gOld), 'RED CONTROL: the old words (a name or a key, an empty one dropped) over a nameless group say «Nobody else» while the Task Group may fill it — the leg above would read it', gOld);
+    // A SITE THE LOGIN HOLDS ALREADY is said with the name it signs in under THERE (the hub's `there`); a site it does not hold has none
+    v.logins.addSite(BL.entryName(LMS, 'jdoe'), { site: PORTAL, user: 'jd-portal' }, { who: 'owner' });
+    const tw = v.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), PORTAL), tWords = UW(tw, { site: PORTAL, login: `${LMS} · jdoe`, t: tr });
+    const tFar = v.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), OTHER);
+    ok(tw.ok && tw.there === 'jd-portal' && /is one of this login's sites already — it signs in there as jd-portal/.test(tWords[0]) && tFar.ok && tFar.there === null && /^It signs in there as jdoe\.$/.test(UW(tFar, { site: OTHER, login: `${LMS} · jdoe`, t: tr })[1]),
+      'A SITE THE LOGIN HOLDS ALREADY is said with the name it signs in under there (the press then changes only who may fill it); on a new site the words say the name it will sign in under', { tw: tw.there, tWords, tFar: tFar.there });
+    // RED CONTROL (the hub — LAST here: it re-makes the logins in the shared vault): a hub that does not name the principals leaves the
+    // group's name unsaid even with the roster in hand — only its id
+    const vb = await run((src) => src.replace("const roster = rosterOf(subjects), named2 = (list) => GM.namesNow(list, roster);", "const roster = rosterOf(subjects), named2 = (list) => list;"));
+    vb.logins.addOwn({ origin: WIKI, username: 'jdoe', password: 'Wiki!' + 'w'.repeat(12) }, { who: 'owner' });
+    vb.logins.grant(BL.entryName(WIKI, 'jdoe'), 'this-account', 'group:g-release');
+    const gHub = UW(vb.logins.siteWordsFor(BL.entryName(WIKI, 'jdoe'), PORTAL, { subjects: SUBJ }), { site: PORTAL, login: `${WIKI} · jdoe`, t: tr }).join(' ');
+    ok(!gHub.includes('Release crew') && gHub.includes('Task group g-release'), 'RED CONTROL: a hub that does not name the principals (no GM.namesNow over the pickers\' subjects) says the group by its id only — the leg above would read it', gHub);
     fs.rmSync(tmp, { recursive: true, force: true });
   }
   // (主开发 10:54Z, AS IF A MUST, with the first page door that adds a site) THE GRANT PICKER TOUCHES ONLY ITS OWN LOGIN'S ROWS ON ITS
@@ -409,20 +439,36 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     eng.secretDrop(BL.entryName(SSO, 'jdoe@school.test'));
     v.logins.addOwn({ origin: SSO, username: 'bob', password: 'Bob!' + 'b'.repeat(12) }, { who: 'owner' });
     v.logins.grant(BL.entryName(SSO, 'bob'), 'any-account', 'session:conv-q');   // «any account on sso» — it reaches the course login there too
+    v.logins.grant(BL.entryName(LMS, 'jdoe'), 'any-site', 'session:conv-z');   // a real «any site» row: its chip names no site (the leg below reads a row that exists)
     const A = v.logins.list().entries.find((e) => e.name === BL.entryName(LMS, 'jdoe'));
     const M = await load();
     const own = M.ownRowOf(A, 'any-account'), other = (A.grants || []).find((g) => g.resource === `${SSO}#*`);
     const R = await load((src) => src.replace("  return want ? ((e.grants || []).find((g) => g && !g.unknown && g.scope === scope && g.resource === want) || null) : null;", "  return want ? ((e.grants || []).find((g) => g && !g.unknown && g.scope === scope) || null) : null;"));
     const ownR = R.ownRowOf(A, 'any-account');
-    ok(other && own === null && M.chipSiteOf(A, other) === 'sso.school.test' && M.chipSiteOf(A, (A.grants || []).find((g) => g.resource === '*') || { site: null }) === null && ownR && ownR.resource === `${SSO}#*`,
+    ok(other && own === null && M.chipSiteOf(A, other) === 'sso.school.test' && (A.grants || []).some((g) => g.resource === '*') && M.chipSiteOf(A, (A.grants || []).find((g) => g.resource === '*')) === null && ownR && ownR.resource === `${SSO}#*`,
       'THE GRANT PICKER READS ITS OWN ROW ON ITS OWN SITE: another login\'s «any account on sso» row rides this login\'s list, the picker\'s «any account» reads the course site\'s row (none here) and the chip of that row names sso — RED CONTROL: a first-scope match reads (and could untick) the other site\'s row', { own, ownR: ownR && ownR.resource, other: other && other.resource });
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  // (the readers' should) THE PICKER'S WIRING, PINNED: the Vault window's grant picker reads the login's OWN row (ownRowOf), a chip
+  // of an added site's row names that site (chipSiteOf), and the site-words route hands the hub the pickers' subjects (every principal
+  // named) — a source pin each, and patched copies that turn each one red
+  {
+    const pins = (row, routes) => [/const rowOf = \(s\) => ownRowOf\(entry, s\);/.test(row), /chipSiteOf\(entry, g\)/.test(row), /siteWordsFor\([^\n]*subjects: subjects\(\)/.test(routes)];
+    const ROW = read('src/lib/vault-login-row.js'), RT = read('src/routes/vault.js');
+    const real = pins(ROW, RT);
+    const red = [
+      pins(ROW.replace('const rowOf = (s) => ownRowOf(entry, s);', 'const rowOf = (s) => (entry.grants || []).find((g) => g.scope === s && !g.unknown);'), RT)[0],
+      pins(ROW.replace(/chipSiteOf\(entry, g\)/g, 'null'), RT)[1],
+      pins(ROW, RT.replace("{ user: String(req.query.user || ''), subjects: subjects() })", "{ user: String(req.query.user || '') })"))[2],   // stale-pins: kept — a red control that rebuilds the pre-cure route (no roster) on purpose
+    ];
+    ok(real.every(Boolean) && red.every((x) => x === false), 'THE PICKER\'S WIRING, PINNED: its own row (ownRowOf), the added site\'s chip (chipSiteOf), the route\'s subjects to site-words — RED CONTROLS: a first-scope match, a chip with no site, a route without the roster', { real, red });
   }
   // (AS IF A MUST) THE MERGE SAYS THE OTHER LOGIN'S PASSWORD IS NOT KEPT, and which of the two was set later — dates only
   {
     const pw = async (mutate = null) => {
-      const v = await run(mutate);
-      await new Promise((r) => setTimeout(r, 15));
+      let clock = 1_790_000_000_000;   // the store's clock: the school's change is written a minute after the two logins
+      const v = await run(mutate, { now: () => clock });
+      clock += 60_000;
       v.logins.addOwn({ origin: SSO, username: 'jdoe@school.test', password: 'Newer!' + 'n'.repeat(12) }, { who: 'owner' });   // the school changed it later
       return v.logins.mergeWordsFor(BL.entryName(LMS, 'jdoe'), BL.entryName(SSO, 'jdoe@school.test'));
     };
