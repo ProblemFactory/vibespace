@@ -909,7 +909,7 @@ function registerWsHandler(wss, ctx) {
         // harness's request in src/server/rewind-requests.js; the answer rides the conversation's stream (`rewind-answer`)
         case 'rewind': {
           const session = activeSessions.get(data.sessionId);
-          const r = require('./server/rewind-requests.js').requestRewind({ session, msgId: data.msgId, lastSeenUuid: data.lastSeenUuid, by: ws._personPage === true ? byOfWs(ws) : null, dryRun: data.dryRun === true, expectTaken: Number.isFinite(data.expectTaken) ? data.expectTaken : null });
+          const r = require('./server/rewind-requests.js').requestRewind({ session, msgId: data.msgId, lastSeenUuid: data.lastSeenUuid, by: ws._personPage === true ? byOfWs(ws) : null, reqId: typeof data.reqId === 'string' ? data.reqId : null, dryRun: data.dryRun === true, expectTaken: Number.isFinite(data.expectTaken) ? data.expectTaken : null });
           try { ws.send(JSON.stringify({ type: 'rewind-result', sessionId: data.sessionId, reqId: data.reqId ?? null, msgId: data.msgId ?? null, ...r })); } catch { }
           break;
         }

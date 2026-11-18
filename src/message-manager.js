@@ -1068,15 +1068,14 @@ class MessageManager extends MessageWindow {
     if (emit) this._emit({ op: 'edit', id: m.id, fields: { uuid } });
   }
 
-  // B-437e: one rewind at a time (src/server/rewind-requests.js notes it; the answer or 30 s clears it)
-  noteRewindAsked(requestId) { this._rewindOut = { id: String(requestId), at: Date.now() }; }
-  rewindPending(now = Date.now()) { return !!this._rewindOut && now - this._rewindOut.at < 30000; }
+  // B-437e: which of OUR requests the CLI answered (the server's one-at-a-time mark reads it; a rebuild replays the answers)
+  rewindAnswered(requestId) { return !!this._rewindAnswers && this._rewindAnswers.includes(String(requestId)); }
 
   // B-437e: the CLI's answer to OUR request (vsr-): the cut at its echo when held, ONE rewind-answer with the reply as it came ⇒ kb-file-structure «rewind-door.js»
   _processRewindAnswer(resp, emit) {
     const requestId = String((resp && resp.request_id) || '');
     const body = resp && resp.subtype === 'error' ? { error: String(resp.error || 'error') } : (resp && resp.response) || null;
-    if (this._rewindOut && this._rewindOut.id === requestId) this._rewindOut = null;
+    this._rewindAnswers = [...(this._rewindAnswers || []).slice(-15), requestId];
     const echo = body && body.rewound === true ? body.targetMessageUuid : null;
     const cut = echo && this.messages.some((m) => m && m.uuid === echo) ? this._processRewindCut({ targetUuid: echo }, emit) : null;
     if (emit) this._emit({ op: 'meta', subtype: 'rewind-answer', data: { requestId, answer: body, taken: cut ? cut.taken : 0 } });
@@ -1092,7 +1091,7 @@ class MessageManager extends MessageWindow {
   // fork hand-off — name none of it)
   _namesThePendingCut(leafUuid) {
     if (typeof leafUuid !== 'string' || !leafUuid) return false;
-    const c = cutOf(this.messages.filter((m) => m && m.noticeKind !== 'rewound'), this._pendingRowCut);
+    const c = cutOf(this.messages, this._pendingRowCut);
     return c.ids.some((id) => { const m = this.messageIndex.get(id); return !!m && m.uuid === leafUuid; });
   }
   _flushRowCut(emit) {
@@ -1103,9 +1102,12 @@ class MessageManager extends MessageWindow {
 
   // B-437e: the cut — struck in place (rollback), ONE notice; a twin record cuts nothing; an unheld anchor is said ⇒ kb-file-structure «rewind-door.js»
   _processRewindCut({ targetUuid = null, leafUuid = undefined } = {}, emit) {
-    const live = this.messages.filter((m) => m && m.noticeKind !== 'rewound');
-    const c = cutOf(live, { targetUuid, leafUuid });
-    if (c.already) return { taken: 0 };
+    const c = cutOf(this.messages, { targetUuid, leafUuid });
+    if (c.already) { // a twin: its leftovers (a card drawn after the cut) join the cut it has — no second notice
+      const left = c.ids.length ? applyRewound(this.messages, c.ids, 'rollback') : [];
+      if (emit && left.length) this._emit(rewoundOp({ harness: 'claude', toMessageId: left[0], ids: left, kind: 'rollback', ts: this._currentTs }));
+      return { taken: 0 };
+    }
     const prompts = c.ids.filter((id) => isPersonPrompt(this.messageIndex.get(id))).length;
     const ids = applyRewound(this.messages, c.ids, 'rollback');
     if (c.placed && !ids.length) return { taken: 0 };

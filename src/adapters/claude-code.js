@@ -523,17 +523,17 @@ class ClaudeCodeAdapter extends BackendAdapter {
   }
 
   // B-437e: rewind_conversation {target_message_uuid, last_seen_user_message_uuid} under a vsr- id, never interrupt_if_running ⇒ kb-file-structure «rewind-door.js»
-  static buildRewind({ targetUuid, lastSeenUuid = null } = {}) {
+  static buildRewind({ targetUuid, lastSeenUuid = null, id = null } = {}) {
     if (typeof targetUuid !== 'string' || !targetUuid) throw new Error('rewind: no target uuid');
-    const { REWIND_REQUEST_PREFIX } = require('../rewind-cut.js'); // (the small module: the device agent bundles this adapter)
+    const { REWIND_REQUEST_PREFIX, REWIND_LIFE_MS } = require('../rewind-cut.js'); // (the small module: the device agent bundles this adapter)
     return {
       type: 'control_request',
-      request_id: REWIND_REQUEST_PREFIX + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
-      request: { subtype: 'rewind_conversation', target_message_uuid: targetUuid, ...(typeof lastSeenUuid === 'string' && lastSeenUuid ? { last_seen_user_message_uuid: lastSeenUuid } : {}), expires_at: new Date(Date.now() + 60000).toISOString() },
+      request_id: REWIND_REQUEST_PREFIX + (typeof id === 'string' && /^[\w-]{4,40}$/.test(id) ? id : Date.now().toString(36) + Math.random().toString(36).slice(2, 8)),
+      request: { subtype: 'rewind_conversation', target_message_uuid: targetUuid, ...(typeof lastSeenUuid === 'string' && lastSeenUuid ? { last_seen_user_message_uuid: lastSeenUuid } : {}), expires_at: new Date(Date.now() + REWIND_LIFE_MS).toISOString() },
     };
   }
-  static rewindRequest(plan) {
-    const req = ClaudeCodeAdapter.buildRewind({ targetUuid: plan && plan.targetId, lastSeenUuid: plan && plan.lastSeenUuid });
+  static rewindRequest(plan, { id = null } = {}) {
+    const req = ClaudeCodeAdapter.buildRewind({ targetUuid: plan && plan.targetId, lastSeenUuid: plan && plan.lastSeenUuid, id });
     return { line: JSON.stringify(req), requestId: req.request_id };
   }
 

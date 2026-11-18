@@ -9,7 +9,7 @@
 // Gated on the harness's `checkpoints` row (src/backend-caps.js), never on a backend id.
 
 const { capsOf } = require('../backend-caps.js');
-const { rewindPlanOf, REWIND_REFUSALS } = require('../rewind-door.js');
+const { rewindPlanOf, REWIND_REFUSALS, REWIND_LIFE_MS } = require('../rewind-door.js');
 const { conversationInTurn } = require('../account-pool-auto.js'); // PURE: a turn paused on the person is still a turn
 const { rewindRoad } = require('../harnesses/index.js');            // the descriptor's road (B-437e entry condition 3)
 
@@ -36,7 +36,15 @@ function personOfUpgrade(req) {
 /** One press — or its DRY RUN (`dryRun`: the plan's words for the confirm, nothing written). Returns the frame for the
  *  page that pressed: `{ ok: true, requestId?, dryRun?, taken, turns, files }`, or `{ ok: false, reason, cls }`. Writes
  *  nothing on a refusal or a dry run. `by` = who asks (only the person: {kind:'human'}). */
-function requestRewind({ session, msgId, lastSeenUuid, by, dryRun = false, expectTaken = null, roadOf = rewindRoad }) {
+/** ONE REWIND AT A TIME: the request out, until its answer or REWIND_LIFE_MS. On the session — a history rebuild (a new
+ *  normalizer) and a re-attached client keep it, a new spawn is a new session; a hub restart forgets it (docs/kb-features.md). */
+function rewindOut(session, now = Date.now()) {
+  const o = session && session._rewindOut;
+  if (!o || now - o.at >= REWIND_LIFE_MS) return null;
+  return session._normalizer && session._normalizer.rewindAnswered?.(o.id) ? null : o;
+}
+
+function requestRewind({ session, msgId, lastSeenUuid, by, dryRun = false, expectTaken = null, roadOf = rewindRoad, now = Date.now(), reqId = null }) {
   const no = (reason) => ({ ok: false, reason, cls: REWIND_REFUSALS[reason] || 'cannot' });
   // WHO: the person's own press through the owner's road (/ws takes the owner's cookie only). A rewind destroys later
   // turns — no conversation, job or automation credential may ask it (refused by name; no other door names it)
@@ -48,7 +56,7 @@ function requestRewind({ session, msgId, lastSeenUuid, by, dryRun = false, expec
   const messages = session._normalizer && Array.isArray(session._normalizer.messages) ? session._normalizer.messages : null;
   if (!messages) return no('stopped');
   if (session._rebuildPromise) return no('rebuilding');  // the history is being rebuilt: the array is not whole yet
-  if (session._normalizer.rewindPending?.()) return no('pending'); // one rewind at a time
+  if (rewindOut(session, now)) return no('pending');     // one rewind at a time
   // the page names the newest message IT shows: a conversation that moved past it is refused, never cut unseen
   const plan = rewindPlanOf(row, messages, String(msgId || ''), { ...rewindStateOf(session), pageLastSeenUuid: typeof lastSeenUuid === 'string' ? lastSeenUuid : null });
   if (!plan.ok) return no(plan.reason);
@@ -61,10 +69,10 @@ function requestRewind({ session, msgId, lastSeenUuid, by, dryRun = false, expec
   // the press carries the numbers its confirm said: a conversation that changed between the two is refused, never cut
   if (Number.isFinite(expectTaken) && expectTaken !== plan.count) return no('changed-since');
   let out;
-  try { out = road.request(plan); } catch { return no('no-target-id'); }
+  try { out = road.request(plan, { id: typeof reqId === 'string' ? reqId : null }); } catch { return no('no-target-id'); } // the page's own id: it binds it before it sends
   try { session.pty.write(out.line + '\n'); } catch { return no('stopped'); }
-  try { session._normalizer.noteRewindAsked?.(out.requestId); } catch { } // one rewind at a time (rewindPending)
+  session._rewindOut = { id: out.requestId, at: now }; // one rewind at a time (rewindOut)
   return { ok: true, requestId: out.requestId, ...said };
 }
 
-module.exports = { rewindStateOf, requestRewind, personOfUpgrade };
+module.exports = { rewindStateOf, requestRewind, personOfUpgrade, rewindOut };

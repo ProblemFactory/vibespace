@@ -90,6 +90,36 @@
    "retry": true
   }
  },
+ "expiry": {
+  "field": "expires_at",
+  "form": "string",
+  "pattern": "^\\d{4}-\\d{2}-\\d{2}[Tt ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:[zZ]|[+-]\\d{2}:?\\d{2})$",
+  "parse": "Date.parse",
+  "outcomes": [
+   "unparseable",
+   "no_service_time",
+   "refused",
+   "in_time"
+  ],
+  "comparedWith": [
+   "serviceNow",
+   "newestFrameAt"
+  ],
+  "refusesOn": [
+   "refused",
+   "the hard age"
+  ],
+  "noRefusalOn": [
+   "unparseable",
+   "no_service_time"
+  ],
+  "localIo": "UOe",
+  "localIoWhen": "no sdkUrl",
+  "localTransportClocks": "none",
+  "localOutcome": "no_service_time",
+  "hardAgeMs": 1800000,
+  "hardAgeCountedFrom": "session_stream_created_at"
+ },
  "persist": {
   "row": "last-prompt",
   "fields": [
@@ -142,6 +172,21 @@
   "ordinaryRowExplicit": false
  },
  "excerpts": {
+  "expiry": "let Ee=LL(Ht(K),K.request.expires_at);if(Ee!==void 0){Dt(K,Ee);continue}let Ae=K.request.target_message_uuid,Fe=()=>{let",
+  "expiryCheck": "function LL(e,n,r){let s=n===void 0?void 0:aY(e,n);if(s!==void 0){switch(s.outcome){case\"refused\":case\"in_time\":g(\"rewind_expires_at\",{refused:s.outcome===\"refused\",frame_time_only:s.frameTimeOnly,sec",
+  "expiryParse": "function aY({storedAt:e,serviceNow:n,newestFrameAt:r},s){let h=typeof s===\"string\"?nTe(s):Number.NaN;if(Number.isNaN(h))return{outcome:\"unparseable\"};let y=n??r;if(y===void 0)return{outcome:\"no_service_time\"};return{outcome:y>h?\"refused\":\"i",
+  "expiryForm": "var d=/^\\d{4}-\\d{2}-\\d{2}[Tt ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:[zZ]|[+-]\\d{2}:?\\d{2})$/;function nTe(t){return d.test(t)?Date.parse(t):Number.NaN}·export{nTe};··//",
+  "expiryClocks": "Ht=(K)=>({storedAt:pZn(K),serviceNow:n.sessionServiceNow(),newestFrameAt:n.newestSessionStreamCreatedAt(),machineNow:Date.now()}),Wn=()=>sn.holdingParkedPermission()&&!Je.running,Cr=()=>iS()&&Mqe(w())",
+  "expiryReturn": "return y||s?.outcome===\"refused\"?ap(\"expired\"):void 0}function ap(e,n){return{rewound:!1,prefillText:null,precedingAssis",
+  "expiryLocalIo": "if(!n.sdkUrl)return new UOe(S??Wvi(y===void 0?[]:[y]),n.replayUserMessages,n.sessionState);let{environmentKind:R,workerE",
+  "expiryLocalClass": "class UOe{input;replayUserMessages;maxLineChars;isRemoteTransport(){return!1}uiS",
+  "expiryLocal": "sessionServiceNow(){return}sessionServiceNowAtMost(){return}readStreamFrameAt(){return}sessionStreamJoinedAt(){return}newestSessionStreamCreatedAt(){return}withdrawQueuedRequest(e){return!1}flushDeliv",
+  "expiryAge": "function i4t({storedAt:e,serviceNow:n,newestFrameAt:r,machineNow:s}){if(e===void 0)return;return(n??Math.max(s,r??s))-e}",
+  "expiryAgeUse": "let h=i4t(e),y=h!==void 0&&h>iY;if(y)l(\"tengu_rewind_conversation_expired\",{age_",
+  "expiryAgeAlias": "iY=BYr;function aY({storedAt:e,serviceNo",
+  "expiryAgeLimit": "BYr=1800000,jr=4096,$r=200,ut=16,Gr=16;function i4t({storedA",
+  "expiryStored": "function pZn(e){if(!Object.hasOwn(e,Se))return;let n=Reflect.get(e,Se);if(typeof n!==\"string\")return;let r=Date.parse(n)",
+  "expiryStoredKey": "Se=\"session_stream_created_at\",Ke=\"session_stream_started_at",
   "handler": "nW,...oe})}else if(K.request.subtype===\"rewind_conversation\"){if(typeof K.request.target_message_uuid!==\"string\"){_t(K,\"rewind_conversation: target_message_uuid",
   "done": "{rewound:!0,targetMessageUuid:kn,prefillText:Or,precedingAssistantUuid:Rr,...ho!==void 0&&{resolution:ho}})}}}}else if(K.request.subtype===\"fork_conversation\"){",
   "order": "!await qL(Rn.cut,Ro,Lr))Zc(Rn,\"persist_failed\"),yn(\"persist_failed\");else if(jL(yi,Ro,Rn.cut)||!Eh(vt,Rn.cut,i_r()))await QL(Ro,Lr),Zc(Rn,\"state_changed\"),yn(\"state_changed\");else{let Yn={messages:vt,appendToConversation:gs,readFileState:bo",

@@ -6,6 +6,9 @@
 
 /** OUR rewind requests carry this request_id prefix: the CLI's answer is known as ours by it. */
 const REWIND_REQUEST_PREFIX = 'vsr-';
+/** The one number the rewind's three clocks read: the `expires_at` we state, the hub's «one at a time» mark, the page's
+ *  watchdog. A LOCAL 2.1.322 never expires a request (⇒ kb-file-structure «rewind-door.js»). */
+const REWIND_LIFE_MS = 60000;
 
 /** Is this one of the person's OWN turn-starting messages? Not: a notice, an agent card, a message taken back, one still
  *  afloat (held — it reached no turn), a mid-turn steer, a companion / synthetic line, a record somebody else wrote
@@ -16,12 +19,18 @@ function isPersonPrompt(msg) {
     && !msg.afloat && !msg.midTurn && !msg.batchOf && msg.startsTurn !== false && typeof msg.id === 'string';
 }
 
+/** A record that STARTS A TURN — the person's or one somebody else opened (the plan counts these; a twin has none left). */
+function startsATurn(m) {
+  return !!m && m.role === 'user' && !m.noticeKind && !m.afloat && !m.midTurn && !m.batchOf && m.startsTurn !== false;
+}
+
 /** The ids a record's cut takes back, over the messages as they stand when it is read (record order). `targetUuid` =
  *  the person's message the rewind went back to — it, the earlier members of its batch, and everything after go;
  *  else `leafUuid` = the last message KEPT (everything after it; null = nothing kept). `placed: false` = an anchor this
  *  view does not hold (mark nothing, say it); `already: true` = this rewind is cut already (its twin record). */
 function cutOf(messages, { targetUuid = null, leafUuid = undefined } = {}) {
   const list = Array.isArray(messages) ? messages : [];
+  const notice = (m) => !!m && m.noticeKind === 'rewound';     // a rewind's own notice: never taken back, never an anchor
   let from = -1;
   if (typeof targetUuid === 'string' && targetUuid) {
     from = list.findIndex((m) => m && !m.rewound && m.uuid === targetUuid);
@@ -32,10 +41,11 @@ function cutOf(messages, { targetUuid = null, leafUuid = undefined } = {}) {
     for (let i = list.length - 1; i >= 0; i--) if (list[i] && list[i].uuid === leafUuid) { from = i + 1; break; }
   }
   if (from < 0) return { ids: [], placed: false, already: false };
-  if (targetUuid == null && list.slice(from).some((m) => m && m.rewound)) return { ids: [], placed: true, already: true };
-  const ids = [];
-  for (let i = from; i < list.length; i++) if (list[i] && !list[i].rewound) ids.push(list[i].id);
-  return { ids, placed: true, already: false };
+  const take = [];
+  for (let i = from; i < list.length; i++) if (list[i] && !list[i].rewound && !notice(list[i])) take.push(list[i]);
+  // the leaf road's twin: no TURN left after the leaf; a card left there went with the cut (no second notice) ⇒ kb
+  if (targetUuid == null && from < list.length && !take.some(startsATurn)) return { ids: take.map((m) => m.id), placed: true, already: true };
+  return { ids: take.map((m) => m.id), placed: true, already: false };
 }
 
-module.exports = { REWIND_REQUEST_PREFIX, isPersonPrompt, cutOf };
+module.exports = { REWIND_REQUEST_PREFIX, REWIND_LIFE_MS, isPersonPrompt, startsATurn, cutOf };

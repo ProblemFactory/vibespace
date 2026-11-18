@@ -279,7 +279,7 @@ const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
 const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
 const H = require(path.join(REPO, 'src/harnesses/index.js'));
 const HUMAN = Object.freeze({ kind: 'human', actBy: null });
-const { requestRewind } = require(path.join(REPO, 'src/server/rewind-requests.js'));
+const { requestRewind, rewindOut } = require(path.join(REPO, 'src/server/rewind-requests.js'));
 const U = (n) => `e2e00000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const REC = {
   send: (text, msgId) => ({ type: 'user', message: { role: 'user', content: text }, msgId, timestamp: '2026-11-17T23:00:00.000Z', _fromWebui: true }),
@@ -364,25 +364,43 @@ function roadLaws(MM = createMessageManager) {
     roadOf: (id) => (id === 'test-checkpoints-plug' ? { request: () => ({ line: 'THE-PLUGIN-REQUEST', requestId: 'vsr-plug' }) } : null) });
   delete caps.BACKEND_CAPS['test-checkpoints-plug'];
   if (!pr.ok || JSON.stringify(plugWrites) !== '["THE-PLUGIN-REQUEST\\n"]') bad.push(`door:a-plugin-is-sent-its-own-request (${JSON.stringify(plugWrites)})`);
-  mm._rewindOut = null;
+  session._rewindOut = null;
   // THE WORDS BEFORE THE PRESS (entry condition 5): a dry run answers the plan's count, turns and the row's files fact,
   // and writes nothing
   const dr = requestRewind({ by: HUMAN, session, msgId: p2 && p2.id, lastSeenUuid: U(3), dryRun: true });
-  if (!dr.ok || dr.dryRun !== true || dr.files !== false || dr.turns !== 1 || dr.taken !== rewindPlan(mm, p2).count || written.length || mm.rewindPending()) bad.push(`door:dry-run-says-the-plan (${JSON.stringify(dr)})`);
+  if (!dr.ok || dr.dryRun !== true || dr.files !== false || dr.turns !== 1 || dr.taken !== rewindPlan(mm, p2).count || written.length || rewindOut(session)) bad.push(`door:dry-run-says-the-plan (${JSON.stringify(dr)})`);
   // the press carries the numbers its confirm said: a conversation that changed in between is refused, nothing written
   const cs = requestRewind({ by: HUMAN, session, msgId: p2 && p2.id, lastSeenUuid: U(3), expectTaken: dr.taken + 1 });
   if (cs.ok || cs.reason !== 'changed-since' || written.length) bad.push(`door:changed-since (${cs.reason})`);
   const plan = rewindPlan(mm, p2);
-  const r = requestRewind({ by: HUMAN, session, msgId: p2 && p2.id, lastSeenUuid: U(3), expectTaken: dr.taken });
+  const T0 = Date.now();
+  const r = requestRewind({ by: HUMAN, session, msgId: p2 && p2.id, lastSeenUuid: U(3), expectTaken: dr.taken, now: T0, reqId: 'rw-t0press' });
   const r2 = requestRewind({ by: HUMAN, session, msgId: p1 && p1.id, lastSeenUuid: U(3) });
   if (r2.ok || r2.reason !== 'pending') bad.push(`door:one-at-a-time (${r2.reason})`);
+  // ONE LIFE (REWIND_LIFE_MS): the mark holds to its last ms and lapses at it; it is the SESSION's (a history rebuild's
+  // new normalizer keeps it until that normalizer replays the answer); a new process is never held by an old request
+  const LIFE = door.REWIND_LIFE_MS;
+  const dryAt = (ms, sess = session) => requestRewind({ by: HUMAN, session: sess, msgId: p1 && p1.id, lastSeenUuid: U(3), dryRun: true, now: T0 + ms });
+  if (dryAt(LIFE - 1).reason !== 'pending' || !dryAt(LIFE).ok) bad.push(`door:the-mark-lives-one-life (${dryAt(LIFE - 1).reason}, ${dryAt(LIFE).reason})`);
+  const rebuilt = { ...session, _normalizer: MM('claude', 'cp-rebuilt') };
+  if (!rewindOut(rebuilt, T0 + 5)) bad.push('door:the-mark-survives-a-rebuild');
+  rebuilt._normalizer.processLive(REC.answer(r.requestId, { rewound: false, reason: 'state_changed', error: 'state changed' }));
+  if (rewindOut(rebuilt, T0 + 5)) bad.push('door:the-rebuilt-normalizer-replays-the-answer');
+  if (!rewindOut({ ...session, pty: { write() { } } }, T0 + 5)) bad.push('door:a-reattached-client-is-the-same-cli');
+  if (r.requestId !== door.REWIND_REQUEST_PREFIX + 'rw-t0press') bad.push(`door:the-request-is-named-by-the-page-id (${r.requestId})`);
   let req = null; try { req = JSON.parse(written[0]); } catch { }
   if (!r.ok || written.length !== 1 || !req || req.type !== 'control_request' || req.request.subtype !== 'rewind_conversation'
     || req.request.target_message_uuid !== U(3) || req.request.last_seen_user_message_uuid !== U(3) || req.request.interrupt_if_running !== undefined
     || req.request_id !== r.requestId || !r.requestId.startsWith(door.REWIND_REQUEST_PREFIX)
-    || !(Date.parse(req.request.expires_at) > Date.now() + 30000 && Date.parse(req.request.expires_at) < Date.now() + 90000)
+    || !new RegExp(CAPTURE.expiry.pattern).test(String(req.request.expires_at)) || Math.abs(Date.parse(req.request.expires_at) - (T0 + LIFE)) > 2000
     || Object.keys(req.request).some((k) => k !== 'subtype' && !CAPTURE.request.fields.includes(k))) bad.push(`door:writes-one-request (${written[0]})`);
   if (r.taken !== plan.count || r.turns !== 1 || r.files !== false) bad.push(`door:says-the-plan (${r.taken}/${plan.count}, ${r.turns}, ${r.files})`);
+  // a road that cannot build the request, a pipe that cannot take it: refused by name, NO mark noted
+  const sx = { ...session, _rewindOut: null };
+  const rNoReq = requestRewind({ by: HUMAN, session: sx, msgId: p2 && p2.id, lastSeenUuid: U(3), roadOf: () => ({ request: () => { throw new Error('no uuid'); } }) });
+  const sw = { ...session, _rewindOut: null, pty: { write() { throw new Error('EPIPE'); } } };
+  const rNoPipe = requestRewind({ by: HUMAN, session: sw, msgId: p2 && p2.id, lastSeenUuid: U(3) });
+  if (rNoReq.ok || rNoReq.reason !== 'no-target-id' || sx._rewindOut || rNoPipe.ok || rNoPipe.reason !== 'stopped' || sw._rewindOut) bad.push(`door:an-unwritable-press-notes-nothing (${rNoReq.reason}, ${rNoPipe.reason})`);
   // the CLI's answer
   const before = ops.length;
   mm.processLive(REC.answer(r.requestId, { rewound: true, targetMessageUuid: U(3), prefillText: 'second ask', precedingAssistantUuid: U(2) }));
@@ -394,7 +412,7 @@ function roadLaws(MM = createMessageManager) {
   const an = after.filter((o) => o.op === 'meta' && o.subtype === 'rewind-answer');
   const aw = an[0] ? door.rewindAnswerOf('message', an[0].data.answer) : null;
   if (an.length !== 1 || an[0].data.requestId !== r.requestId || !aw || aw.ok !== true || aw.prefillText !== 'second ask' || an[0].data.taken !== plan.count) bad.push('answer:rewind-answer');
-  if (mm.rewindPending()) bad.push('answer:clears-the-pending-press');
+  if (rewindOut(session, T0 + 5)) bad.push('answer:clears-the-pending-press');
   if (!p1 || p1.rewound) bad.push('answer:keeps-before-target');
   // the same answer read again (a rebuild reads the buffer) cuts nothing more
   mm.processLive(REC.answer(r.requestId, { rewound: true, targetMessageUuid: U(3), prefillText: 'second ask' }));
@@ -403,10 +421,10 @@ function roadLaws(MM = createMessageManager) {
   // cuts NOTHING live and says no notice (a rebuild's transcript row cuts it) — an answer never guesses
   const { mm: me } = liveTwo(MM, 'cp-echo');
   const pe = me.messages.find((m) => m.webuiMsgId === 'm-2');
-  const se = { ...session, _normalizer: me, pty: { write: () => { } } };
+  const se = { ...session, _rewindOut: null, _normalizer: me, pty: { write: () => { } } }; // its own conversation: no mark of the press above
   const re = requestRewind({ by: HUMAN, session: se, msgId: pe && pe.id, lastSeenUuid: U(3) });
   me.processLive(REC.answer(re.requestId, { rewound: true, targetMessageUuid: U(55), prefillText: 'second ask' }));
-  if (!re.ok || !pe || pe.rewound || notices(me).length !== 0 || me.rewindPending()) bad.push('answer:an-unheld-echo-cuts-nothing-live');
+  if (!re.ok || !pe || pe.rewound || notices(me).length !== 0 || rewindOut(se)) bad.push('answer:an-unheld-echo-cuts-nothing-live');
   // a refusal, an error, an answer that is not ours
   const { mm: m2, ops: o2 } = liveTwo(MM, 'cp-refuse');
   m2.processLive(REC.answer('vsr-r1', { rewound: false, prefillText: null, precedingAssistantUuid: null, error: 'turn running', reason: 'turn_running' }));
@@ -425,8 +443,15 @@ function roadLaws(MM = createMessageManager) {
   if (struck(h2).length !== 2 || notices(h2).length !== 1 || !notices(h2)[0].content[0].rewindData.placed) bad.push('reload:leaf-only-cuts-after-anchor');
   const h3 = MM('claude', 'cp-h3'); h3.convertHistory([...rows, REC.answer('vsr-a', { rewound: true, targetMessageUuid: U(3), prefillText: 'second ask' }), REC.anchor({ leafUuid: U(2), rewound: true, cutUuid: U(3) }), REC.said('a new reply', U(5))]);
   if (struck(h3).length !== 2 || notices(h3).length !== 1 || h3.messages.find((m) => m.uuid === U(5))?.rewound) bad.push('reload:twins-cut-once');
+  const h3c = MM('claude', 'cp-h3c'); h3c.convertHistory([...rows, REC.answer('vsr-c', { rewound: true, targetMessageUuid: U(3) }), REC.said('a hook card', U(9)), REC.anchor({ leafUuid: U(2), rewound: true }), REC.said('a new reply', U(5))]);
+  if (struck(h3c).length !== 3 || notices(h3c).length !== 1 || h3c.messages.find((m) => m.uuid === U(9))?.rewound !== 'rollback' || h3c.messages.find((m) => m.uuid === U(5))?.rewound) bad.push(`reload:a-card-after-the-cut-is-no-second-rewind (${struck(h3c).length}, ${notices(h3c).length})`);
   const h3b = MM('claude', 'cp-h3b'); h3b.convertHistory([...rows, REC.answer('vsr-a', { rewound: true, targetMessageUuid: U(3) }), REC.anchor({ leafUuid: U(2), rewound: true }), REC.said('a new reply', U(5))]);
   if (struck(h3b).length !== 2 || notices(h3b).length !== 1) bad.push('reload:leaf-only-twin-cuts-once');
+  const two = [...rows, REC.anchor({ leafUuid: U(2), rewound: true }), REC.person('third ask', U(5)), REC.said('reply three', U(6)), REC.anchor({ leafUuid: U(2), rewound: true })];
+  const hb = MM('claude', 'cp-h-second'); hb.convertHistory(two);
+  const cutIds = (h, ...us) => us.map((u) => h.messages.find((m) => m.uuid === u)?.rewound);
+  if (notices(hb).length !== 2 || JSON.stringify(cutIds(hb, U(3), U(4), U(5), U(6))) !== '["rollback","rollback","rollback","rollback"]' || cutIds(hb, U(1), U(2)).some(Boolean))
+    bad.push(`reload:a-second-rewind-to-the-same-leaf (${notices(hb).length} notices, ${cutIds(hb, U(3), U(4), U(5), U(6))})`);
   const h4 = MM('claude', 'cp-h4'); h4.convertHistory([...rows, REC.anchor({ leafUuid: U(77), rewound: true })]);
   if (struck(h4).length !== 0 || notices(h4).length !== 1 || notices(h4)[0].content[0].rewindData.placed !== false) bad.push('reload:unplaced-said-not-guessed');
   const h5 = MM('claude', 'cp-h5'); h5.convertHistory([...rows, REC.anchor({ leafUuid: null, rewound: true })]);
@@ -463,6 +488,8 @@ say('— §6 the claude road');
   ok(bad.length === 0, 'the road holds: stamp → uuid on the bubble (once, never re-pointed), the door refuses by name and writes nothing, ONE request naming the target + the newest uuid, the answer cuts exactly the plan (one notice, one rewound op, one rewind-answer with the composer words), twice cuts once, a refusal / an error keep reason + text, not-ours unread; the reload cuts the same from the transcript row (cutUuid, leaf-only, twins once, unplaced said, to the start), a plain last-prompt row is still no card', bad.join(' | '));
   let threw = false; try { ClaudeCodeAdapter.rewindRequest({ targetId: null }); } catch { threw = true; }
   ok(threw, 'the claude request refuses to be built with no target uuid');
+  const named = ClaudeCodeAdapter.rewindRequest({ targetId: U(3) }, { id: 'rw-ok123' }).requestId, own = ClaudeCodeAdapter.rewindRequest({ targetId: U(3) }, { id: 'bad id!' }).requestId;
+  ok(named === door.REWIND_REQUEST_PREFIX + 'rw-ok123' && /^vsr-[a-z0-9]+$/.test(own), 'the request is named by the page\'s own id (so the page binds it before it sends); a malformed id is never sent — the adapter names its own', `${named} · ${own}`);
   // THE ROAD IS THE DESCRIPTOR'S: every built-in row on ⇔ its descriptor names a road; validate() refuses a row on without one
   const roads = H.chatHarnessIds().map((id) => [id, caps.capsOf(id).checkpoints.conversation === true, !!H.rewindRoad(id)]);
   let refused = null;
@@ -477,6 +504,7 @@ say('— §6 the claude road');
   const verbs = require(path.join(REPO, 'src/automation-keys.js')).VERBS || [];
   const routeHits = spawnSync('git', ['-C', REPO, 'grep', '-l', '-i', '-F', 'rewind', '--', 'src/routes', 'src/server/automation-engine.js', 'data/bin/vibespace-msg', 'data/bin/vibespace-task'], { encoding: 'utf8' }).stdout.trim();
   ok(JSON.stringify(callers.sort()) === JSON.stringify(['src/server/rewind-requests.js', 'src/ws-handler.js']) && /by: ws\._personPage === true \? byOfWs\(ws\) : null/.test(wsCase)
+    && /reqId: typeof data\.reqId === 'string' \? data\.reqId : null/.test(wsCase)
     && /ws\._personPage = require\('\.\/server\/rewind-requests\.js'\)\.personOfUpgrade\(req\)/.test(read('src/ws-handler.js'))
     && verbs.length > 5 && !verbs.some((v) => /rewind/i.test(v)) && routeHits === '',
     'the door\'s ONE caller is the owner\'s /ws case with the socket\'s person (byOfWs, only on a socket personOfUpgrade proved at its handshake); no automation verb, no route and no agent CLI names a rewind', `${callers.join(',')} | verbs ${verbs.filter((v) => /rewind/i.test(v))} | ${routeHits}`);
@@ -514,7 +542,7 @@ async function wrapperLaws(wrapperFile) {
     const f2 = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'h two' }] }, webui_msg_id: 'm-h2' };
     w.stdin.write(JSON.stringify(f1) + '\n' + JSON.stringify(f2) + '\n');
     await until(() => capLines().length >= 5 && results() >= 5, 4000);
-    await new Promise((res) => setTimeout(res, 150)); // the stamp record follows the frame's write
+    await until(() => outRecs().filter((r) => r.type === 'frame_stamp').length >= 3, 3000); // m-idle, m-h1, m-h2: the records, not a sleep
     const got = capLines().map((l) => { try { return JSON.parse(l); } catch { return null; } });
     const recs = outRecs(), st = recs.filter((r) => r.type === 'frame_stamp');
     const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -569,16 +597,22 @@ say('— §8 red controls (U2)');
     ['last-prompt left ignored', "      case 'last-prompt': return this._processLastPrompt(raw, emit);", "      case 'last-prompt-x': return this._processLastPrompt(raw, emit);", 'reload:cuts-from-cutUuid'],
     ['the CLI\'s heal row not read', "    if (this._pendingRowCut && raw.explicit === true && raw.rewound !== true && this._namesThePendingCut(raw.leafUuid)) { this._pendingRowCut = null; return; }", '', 'reload:heal-row-cancels'],
     ['the stamp is not read', "      case 'frame_stamp': return this._processFrameStamp(raw, emit);", "      case 'frame_stamp-x': return this._processFrameStamp(raw, emit);", 'stamp:uuid-on-bubble'],
+    ['an earlier rewind\'s struck run reads as a twin', "  if (targetUuid == null && from < list.length && !take.some(startsATurn)) return { ids: take.map((m) => m.id), placed: true, already: true };",
+      "  if (targetUuid == null && list.slice(from).some((m) => m && m.rewound)) return { ids: [], placed: true, already: true };", 'reload:a-second-rewind-to-the-same-leaf', 'src/rewind-cut.js'], // stale-pins: kept — the mutant PLANTS the old rule
+    ['a card after the cut reads as a second rewind', "  if (targetUuid == null && from < list.length && !take.some(startsATurn)) return { ids: take.map((m) => m.id), placed: true, already: true };",
+      "  if (targetUuid == null && from < list.length && !take.length) return { ids: [], placed: true, already: true };", 'reload:a-card-after-the-cut-is-no-second-rewind', 'src/rewind-cut.js'],
   ];
   // ONE scratch copy of src/ (37 MB), re-patched per mutant with the copy's modules dropped from the require cache
   const M = path.join(T, 'mut');
   fs.cpSync(path.join(REPO, 'src'), path.join(M, 'src'), { recursive: true });
   for (const f of ['package.json', 'node_modules']) { try { fs.symlinkSync(path.join(REPO, f), path.join(M, f)); } catch { } }
   const mreq = createRequire(path.join(M, 'package.json'));
-  for (const [name, from, to, law] of NM) {
-    if (MSRC.split(from).length !== 2) { ok(false, `mutant «${name}»: its anchor is in src/message-manager.js exactly once`); continue; }
+  for (const [name, from, to, law, file = 'src/message-manager.js'] of NM) {
+    const FSRC = read(file);
+    if (FSRC.split(from).length !== 2) { ok(false, `mutant «${name}»: its anchor is in ${file} exactly once`); continue; }
     for (const key of Object.keys(mreq.cache)) if (key.startsWith(M + path.sep)) delete mreq.cache[key];
-    fs.writeFileSync(path.join(M, 'src/message-manager.js'), MSRC.split(from).join(to));
+    for (const f of new Set(NM.map((x) => x[4] || 'src/message-manager.js'))) fs.writeFileSync(path.join(M, f), read(f)); // the others as they are
+    fs.writeFileSync(path.join(M, file), FSRC.split(from).join(to));
     const MM = mreq('./src/normalizers.js').createMessageManager;
     let bad;
     try { bad = roadLaws(MM); } catch (e) { bad = [`threw: ${e.message}`]; }
@@ -608,7 +642,8 @@ say('— §9 the page\'s door');
     return e;
   };
   const doc = { createElement: () => el() };
-  const metaCaps = (b) => ({ checkpoints: caps.capsOf(b).checkpoints });
+  const TURN_ROW = Object.freeze({ conversation: true, files: false, granularity: 'turn', redo: false, verb: 'thread/rollback' });
+  const metaCaps = (b) => ({ checkpoints: b === 'turn-harness' ? TURN_ROW : caps.capsOf(b).checkpoints });
   const R = lift('src/lib/chat-renderers.js', '  addRewindBtn(el, msg) {', '  extractMsgText(msg) {',
     { rewindPointOf: door.rewindPointOf, backendFeatureCaps: metaCaps, UI_ICONS: { rewind: '<svg/>' }, t: T, document: doc });
   const r = new R();
@@ -636,9 +671,16 @@ say('— §9 the page\'s door');
     m.batchOf = U(33); r.patchRewindBtn(host, m);
     if (!b1 || n1 !== 1 || host.querySelector(':scope > .chat-rewind-btn')) bad.push('button:follows-the-uuid-and-the-batch'); }
   // the view: the click, the confirm, the frame, the answer, the refusals
+  const clock = { now: 0, timers: [], n: 0 };
+  const stubSet = (fn, ms) => { const id = ++clock.n; clock.timers.push({ id, fn, at: clock.now + ms, ms }); return id; };
+  const stubClear = (id) => { clock.timers = clock.timers.filter((x) => x.id !== id); };
+  const advance = (ms) => { clock.now += ms; for (const x of clock.timers.filter((y) => y.at <= clock.now)) { stubClear(x.id); x.fn(); } };
+  let held = null;   // view._yes === 'hold': the confirm stays open until held(yes)
   const V = lift('src/lib/chat-view.js', '  _rewindFromMessage(msg) {', '  // Fork a new session from a specific assistant message (the chat fork button).',
     { backendFeatureCaps: metaCaps, rewindPointOf: door.rewindPointOf, rewindPlanOf: door.rewindPlanOf, rewindAnswerOf: door.rewindAnswerOf, t: T,
-      showToast: (m, o) => said.push([m, o && o.type]), showConfirmDialog: (o) => { said.push(['confirm', o]); return Promise.resolve(view._yes); } });
+      REWIND_LIFE_MS: door.REWIND_LIFE_MS, POINT_FIELDS: door.POINT_FIELDS, REWIND_REQUEST_PREFIX: door.REWIND_REQUEST_PREFIX, setTimeout: stubSet, clearTimeout: stubClear,
+      showToast: (m, o) => said.push([m, o && o.type]),
+      showConfirmDialog: (o) => { said.push(['confirm', o]); return view._yes === 'hold' ? new Promise((res) => { held = res; }) : Promise.resolve(view._yes); } });
   const reqs = [];
   const view = new V();
   // the real ChatInput.putBack, lifted, over a fake textarea
@@ -672,7 +714,8 @@ say('— §9 the page\'s door');
   said.length = 0; view._rewindFromMessage(person); await tick();
   if (reqs.length !== 2 || !said.length || !/already on its way/.test(said[0][0])) bad.push('view:one-at-a-time');
   const matched = q && q.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: q.msg.reqId, ok: true, requestId: 'vsr-1', taken: 3, prompts: 2 });
-  if (!matched || !view._pendingRewind || view._pendingRewind.requestId !== 'vsr-1') bad.push('view:result-arms-the-answer');
+  const wd = clock.timers.find((x) => x.ms === door.REWIND_LIFE_MS);
+  if (!matched || !view._rewindBound?.has('vsr-1') || view._rewindLive !== 'vsr-1' || !wd) bad.push('view:result-arms-the-answer-for-one-life');
   if (q && q.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: 'someone-else' })) bad.push('view:another-result-is-not-ours');
   view._onRewindAnswer({ requestId: 'vsr-other', answer: { rewound: true, prefillText: 'x' }, taken: 3 });
   if (box._textarea.value) bad.push('view:another-answer-is-not-ours');
@@ -680,12 +723,12 @@ say('— §9 the page\'s door');
   view._onRewindAnswer({ requestId: 'vsr-1', answer: { rewound: true, targetMessageUuid: U(31), prefillText: 'ask' }, taken: 3 });
   if (box._textarea.value !== 'ask' || view._rewindInFlight || !said.some((x) => /Rewound — 3 messages taken back\. Your words are back in the box\./.test(x[0]))) bad.push('view:answer-puts-words-back');
   // the box was in use: the real putBack keeps it, and the toast says so
-  view._pendingRewind = { requestId: 'vsr-2' }; box._textarea.value = 'typing'; said.length = 0;
+  view._rewindBound.set('vsr-2', { taken: 1, text: 'ask', granularity: 'message' }); box._textarea.value = 'typing'; said.length = 0;
   view._onRewindAnswer({ requestId: 'vsr-2', answer: { rewound: true, prefillText: 'ask' }, taken: 1 });
   if (box._textarea.value !== 'typing' || !said.some((x) => /1 message taken back\. The box already had text/.test(x[0]))) bad.push('view:busy-box-kept');
   box._textarea.value = '';
   // the CLI refused: its reason, its words
-  view._pendingRewind = { requestId: 'vsr-3' }; said.length = 0;
+  view._rewindBound.set('vsr-3', { taken: 1, text: 'ask', granularity: 'message' }); said.length = 0;
   view._onRewindAnswer({ requestId: 'vsr-3', answer: { rewound: false, reason: 'unseen_later_turn', error: 'unseen later turn', prefillText: null }, taken: 0 });
   if (!said[0] || !/changed meanwhile/.test(said[0][0])) bad.push('view:cli-refusal-said');
   // EVERY reason, its OWN words (a fallback line is not words)
@@ -741,6 +784,69 @@ say('— §9 the page\'s door');
   if (!said[0] || !/changed meanwhile — nothing was taken back\.$/.test(said[0][0])) bad.push(`view:no-try-again-when-not-resendable (${said[0] && said[0][0]})`);
   const n1 = reqs.length; view._rewindInFlight = false; view._rewindFromMessage(person); await tick();
   if (reqs.length !== n1) bad.push('view:a-closed-view-sends-nothing');
+  view._disposed = false;
+  // ONE LIFE on the page: the watchdog fires at REWIND_LIFE_MS (not before), SAYS it, frees the door — and the press stays
+  // BOUND: an answer after the life still says the success and puts the words back (a local CLI never expires a request)
+  const press = async (requestId, taken = 3, msg = person) => {
+    view._yes = true; view._rewindInFlight = false; said.length = 0; view._rewindFromMessage(msg); await tick();
+    const d = reqs[reqs.length - 1]; d.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: d.msg.reqId, ok: true, dryRun: true, taken, turns: 2, files: false }); await tick();
+    const pq = reqs[reqs.length - 1]; pq.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: pq.msg.reqId, ok: true, requestId, taken, prompts: 2 });
+  };
+  await press('vsr-late');
+  said.length = 0; advance(door.REWIND_LIFE_MS - 1);
+  if (said.length || !view._rewindInFlight) bad.push('view:no-word-before-the-life-ends');
+  advance(1);
+  if (!said.some((x) => /No answer to the rewind within a minute — nothing has been taken back yet/.test(x[0])) || view._rewindInFlight || !view._rewindBound.has('vsr-late')) bad.push('view:the-life-ends-said-and-still-bound');
+  said.length = 0; box._textarea.value = '';
+  view._onRewindAnswer({ requestId: 'vsr-late', answer: { rewound: true, targetMessageUuid: U(31), prefillText: 'ask' }, taken: 3 });
+  if (box._textarea.value !== 'ask' || !said.some((x) => /Rewound — 3 messages taken back\. Your words are back in the box\./.test(x[0])) || view._rewindBound.has('vsr-late')) bad.push('view:a-late-answer-binds');
+  // never «0 messages»: an echo the view did not hold cuts nothing here (the reload draws it) — said without a count; no
+  // words from the CLI ⇒ the message's own
+  await press('vsr-zero', 4); said.length = 0; box._textarea.value = '';
+  view._onRewindAnswer({ requestId: 'vsr-zero', answer: { rewound: true, targetMessageUuid: U(77), prefillText: null }, taken: 0 });
+  if (box._textarea.value !== 'ask' || !said.some((x) => /^Rewound to before your message — reload the conversation to see what was taken back\. Your words are back in the box\.$/.test(x[0])) || said.some((x) => /\b0 messages/.test(x[0])) || clock.timers.length) bad.push(`view:no-zero-count-and-the-message-words (${said.map((x) => x[0])}, «${box._textarea.value}»)`);
+  // BOUND BEFORE IT IS SENT: the result frame never comes (lost in a drop) — the CLI's answer under the page's own id binds
+  view._yes = true; view._rewindInFlight = false; said.length = 0; view._rewindFromMessage(person); await tick();
+  { const d = reqs[reqs.length - 1]; d.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: d.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2, files: false }); await tick(); }
+  const ql = reqs[reqs.length - 1]; ql.opts.onTimeout(); said.length = 0; box._textarea.value = '';
+  view._onRewindAnswer({ requestId: door.REWIND_REQUEST_PREFIX + ql.msg.reqId, answer: { rewound: true, targetMessageUuid: U(31), prefillText: 'ask' }, taken: 3 });
+  if (box._textarea.value !== 'ask' || !said.some((x) => /Rewound — 3 messages taken back\./.test(x[0])) || view._rewindInFlight || clock.timers.length) bad.push('view:bound-before-it-is-sent');
+  {
+    view._yes = true; view._rewindInFlight = false; view._rewindFromMessage(person); await tick();
+    const d = reqs[reqs.length - 1]; d.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: d.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2, files: false }); await tick();
+    const qa = reqs[reqs.length - 1];
+    view._onRewindAnswer({ requestId: door.REWIND_REQUEST_PREFIX + qa.msg.reqId, answer: { rewound: true, prefillText: 'ask' }, taken: 3 });
+    view._yes = 'hold'; view._rewindFromMessage(person); await tick();      // the next press's dry run is out
+    const qn = reqs[reqs.length - 1]; said.length = 0;
+    qa.opts.onTimeout();                                                      // the answered press's own wait ends
+    if (!qa.done || qn.done || said.length || !view._rewindInFlight) bad.push('view:an-answered-press-timeout-touches-nothing-else');
+    qn.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: qn.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2, files: false }); await tick();
+    held && held(false); await tick();
+  }
+  // the answer is read by the ROW's granularity: a press through a 'turn' row (its JSON-RPC error keeps its words)
+  const turnMsg = { id: 'pt', role: 'user', turnId: 'T-1', content: [{ type: 'text', text: 'turn ask' }] };
+  const keepIds = view._getSessionIds, keepMsgs = view._messages;
+  view._getSessionIds = () => ({ backend: 'turn-harness' }); view._messages = [turnMsg];
+  await press('vsr-turn', 1, turnMsg); said.length = 0;
+  view._onRewindAnswer({ requestId: 'vsr-turn', answer: { error: { message: 'boom' } }, taken: 0 });
+  if (!said[0] || !/refused the rewind: boom/.test(said[0][0])) bad.push(`view:read-by-the-row-granularity (${said[0] && said[0][0]})`);
+  view._getSessionIds = keepIds; view._messages = keepMsgs;
+  // while the confirm stands open the door is one in flight: a second door opens no second dialog
+  view._yes = 'hold'; view._rewindInFlight = false; said.length = 0; view._rewindFromMessage(person); await tick();
+  const qh = reqs[reqs.length - 1]; qh.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: qh.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2, files: false }); await tick();
+  const nh = reqs.length; view._rewindFromMessage(person); await tick();
+  if (said.filter((x) => x[0] === 'confirm').length !== 1 || reqs.length !== nh || !said.some((x) => /already on its way/.test(x[0]))) bad.push('view:one-confirm-at-a-time');
+  held && held(false); await tick();
+  if (view._rewindInFlight) bad.push('view:a-cancelled-confirm-frees-the-door');
+  // a plan that SAYS files roll back carries no caveat (the files===true branch)
+  view._yes = false; said.length = 0; view._rewindFromMessage(person); await tick();
+  const qy = reqs[reqs.length - 1]; qy.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: qy.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2, files: true }); await tick();
+  const cy = said.find((x) => x[0] === 'confirm');
+  if (!cy || /Files on disk/.test(cy[1].message) || !/2 turns\. The agent will no longer remember them\.$/.test(cy[1].message)) bad.push('view:files-roll-back-no-caveat');
+  // the button is re-asked on an edit to ANY field a point is judged on — the door's list is what its two readers read
+  const readers = read('src/rewind-cut.js').split('function isPersonPrompt(msg) {')[1].split('\n}\n')[0] + read('src/rewind-door.js').split('function targetIdOf(checkpoints, msg) {')[1].split('\n}\n')[0];
+  const readFields = [...new Set([...readers.matchAll(/\bmsg\.([a-zA-Z]+)/g)].map((m) => m[1]))];
+  if (readFields.some((f) => !door.POINT_FIELDS.includes(f)) || readFields.length < 8) bad.push(`view:point-fields-cover-the-readers (${readFields.filter((f) => !door.POINT_FIELDS.includes(f))})`);
   ok(bad.length === 0, 'the page\'s door: the button only on a rewind point (not without a uuid, an agent card, a peer\'s message, a struck one, a batch member, a harness whose row is off, a sub-agent viewer, a gap slab\'s copy, a read-only view), follows the uuid and the batch; busy and read-only say so with no dialog; the confirm names the count and that files stay (danger); ONE ws.request (self-unhooking, 15 s said) carrying the page\'s newest uuid; one at a time; only OUR answer acts — the REAL putBack fills only an empty box; the CLI\'s refusal is worded; every reason has its own pinned words; cancel and a closed view send nothing', bad.join(' | '));
   // the WIRING the lifted methods hang on (each a line of the product; a removed one is red here)
   const cv = read('src/lib/chat-view.js'), cr = read('src/lib/chat-renderers.js');
@@ -748,7 +854,7 @@ say('— §9 the page\'s door');
     ['the renderer draws the door with the other message buttons', /this\.addForkBtn\(el, msg\);\n    this\.addRewindBtn\(el, msg\);/.test(cr)],
     ['the view hands the renderer its click and its live gate', /onRewind: \(msg\) => this\._rewindFromMessage\(msg\)/.test(cv) && /canRewind: \(\) => !this\._readOnly/.test(cv)],
     ['the stream\'s answer reaches the view', /if \(op\.subtype === 'rewind-answer'\) \{ this\._onRewindAnswer\(op\.data\); return; \}/.test(cv)],
-    ['a uuid or a batch arriving later redraws the door', /if \('uuid' in fields \|\| 'batchOf' in fields\) this\._renderers\.patchRewindBtn\(this\._elements\.get\(id\), msg\);/.test(cv)],
+    ['an edit to a field a point is judged on (a uuid, a batch, …) redraws the door', /if \(POINT_FIELDS\.some\(\(k\) => k in fields\)\) this\._renderers\.patchRewindBtn\(this\._elements\.get\(id\), msg\);/.test(cv)],
     ['a struck message loses its door', /_markRewoundEl\(el, kind\) \{\n    el\?\.querySelector\?\.\(':scope > \.chat-rewind-btn'\)\?\.remove\(\);/.test(cv)],
     ['a read-only view loses every door', /this\._readOnly = true;\n    this\._messageList\?\.querySelectorAll\?\.\('\.chat-rewind-btn'\)\.forEach\(\(b\) => b\.remove\(\)\);/.test(cv)],
     ['a closed view stops its answer timer and its request', /dispose\(\) \{\n    this\._statusBar\?\.dispose\?\.\(\);\n    clearTimeout\(this\._rewindAnswerTimer\); this\._rewindCancel\?\.\(\);/.test(cv)],

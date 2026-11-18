@@ -27,7 +27,7 @@
 // PURE: imports only src/rewind-cut.js (PURE → PURE: the person rule, the cut and the request prefix — the part the
 // normalizer, and so the device agent, carries); touches no I/O.
 
-const { REWIND_REQUEST_PREFIX, isPersonPrompt, cutOf } = require('./rewind-cut.js');
+const { REWIND_REQUEST_PREFIX, REWIND_LIFE_MS, isPersonPrompt, startsATurn, cutOf } = require('./rewind-cut.js');
 
 // Our refusal reasons, each with its CLASS — the page words a class (busy: after the turn; resume: start the
 // conversation first; cannot: this point cannot be taken back; moved: the conversation changed under the press).
@@ -98,6 +98,10 @@ function rewindVerdict(checkpoints, msg, state = {}) {
   return { ok: true, reason: null, cls: null };
 }
 
+/** The message fields a rewind POINT is judged on (isPersonPrompt + targetIdOf): an edit to any of them re-asks the
+ *  page's button (test-checkpoints holds the list to the two readers). */
+const POINT_FIELDS = Object.freeze(['role', 'id', 'uuid', 'turnId', 'batchOf', 'noticeKind', 'rewound', 'originKind', 'synthetic', 'afloat', 'midTurn', 'startsTurn']);
+
 /** Does the page draw the door on this message? The verdict's STATIC half: the harness has the door and the message is
  *  a point the harness knows — a button that is drawn may still be refused (stopped / busy), and says why. */
 function rewindPointOf(checkpoints, msg) {
@@ -126,7 +130,7 @@ function rewindPlanOf(checkpoints, messages, targetId, state = {}) {
     if (isPersonPrompt(m)) prompts++;
     // EVERY turn that goes — the person's, and the ones somebody else opened (a task notification, a peer's message,
     // the auto-resume continue): the confirm says how many turns the agent forgets
-    if (m.role === 'user' && !m.noticeKind && !m.afloat && !m.midTurn && !m.batchOf && m.startsTurn !== false) turns++;
+    if (startsATurn(m)) turns++;
   }
   let lastSeenUuid = null;
   if (checkpoints.granularity === 'message') {
@@ -168,8 +172,8 @@ function rewindAnswerOf(granularity, reply) {
     if (reply.rewound === true) {
       return { ok: true, reason: null, cls: null, retry: false, text: null,
         prefillText: typeof reply.prefillText === 'string' ? reply.prefillText : null,
-        // the CLI names the cut's own echo of the target (2.1.322: `targetMessageUuid: cut.echoUuid`) — the caller cuts by
-        // it and, where it is not held, by the uuid it asked for
+        // the CLI names the cut's own echo of the target (2.1.322: `targetMessageUuid: cut.echoUuid`) — the normalizer cuts
+        // by it; one it does not hold is left to the transcript row (src/message-manager.js)
         targetUuid: typeof reply.targetMessageUuid === 'string' ? reply.targetMessageUuid : null };
     }
     const why = typeof reply.reason === 'string' ? reply.reason : null;
@@ -189,4 +193,4 @@ function rewindAnswerOf(granularity, reply) {
   return { ok: false, reason: 'not-offered', cls: 'cannot', retry: false, text: null, prefillText: null };
 }
 
-module.exports = { REWIND_REFUSALS, DOOR_REASONS, CLAUDE_REWIND_REASONS, ANSWER_CLASSES, GRANULARITIES, REWIND_REQUEST_PREFIX, targetIdOf, isPersonPrompt, rewindVerdict, rewindPointOf, rewindPlanOf, rewindAnswerOf, cutOf, textOf };
+module.exports = { REWIND_REFUSALS, DOOR_REASONS, CLAUDE_REWIND_REASONS, ANSWER_CLASSES, GRANULARITIES, REWIND_REQUEST_PREFIX, REWIND_LIFE_MS, POINT_FIELDS, targetIdOf, isPersonPrompt, rewindVerdict, rewindPointOf, rewindPlanOf, rewindAnswerOf, cutOf, textOf };
