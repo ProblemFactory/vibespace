@@ -91,6 +91,9 @@ function defaultCursorFile() {
 // transcript in a project dir shares one project by construction). Every read
 // is a bounded window (a transcript can be hundreds of MB) and memoized.
 const CWD_WINDOW_BYTES = 128 * 1024;
+// usage-cpu U2: the hooked walk hands the loop back every WALK_OPS directory reads + stats too, not only every budget of
+// bytes — a walk over unchanged transcripts read no byte, so it statted every file ever written in ONE turn (11.8 s held)
+const WALK_OPS = 256;
 const encodeCwd = (c) => String(c).replace(/[/._]/g, '-');
 function makeProjectCwdReader() {
   const winMemo = new Map();   // fp|tail → [cwd…]
@@ -161,8 +164,8 @@ function makeProjectCwdReader() {
  *  a hook inside the single implementation — the walk is a generator whose
  *  `yield`s mark budget points, driven straight through (sync) or across an
  *  `await onBudget()` per yield (hooked). A yield happens only AFTER a whole
- *  line was consumed and its bytes added to the cursor, so a suspended walk's
- *  cursors are always valid ones. B-6ded: they are the WALK'S OWN copies — a
+ *  line was consumed and its bytes added to the cursor — or (usage-cpu U2) between two files or directories, every
+ *  WALK_OPS reads and stats — so a suspended walk's cursors are always valid ones. B-6ded: they are the WALK'S OWN copies — a
  *  `cursors` map handed in is never written (nor any entry of it); the caller
  *  installs the returned map at its commit point, so a walk that never gets
  *  there leaves the caller's map as it found it. scripts/test-usage-walk-parity.mjs pins the
@@ -171,7 +174,7 @@ function makeProjectCwdReader() {
 function runUsageWalk(opts = {}) {
   const hooked = typeof opts.onBudget === 'function';
   const budget = hooked && Number(opts.budgetBytes) > 0 ? Number(opts.budgetBytes) : Infinity;
-  const steps = walkSteps(opts, { spent: 0, budget });
+  const steps = walkSteps(opts, { spent: 0, budget, ops: 0, opsBudget: hooked ? (Number(opts.budgetOps) > 0 ? Number(opts.budgetOps) : WALK_OPS) : Infinity });
   if (!hooked) { let r; do { r = steps.next(); } while (!r.done); return r.value; }
   return driveYielding(steps, opts.onBudget);
 }
@@ -195,6 +198,15 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
   // daemon/scan-op call shape byte-identical.
   projectsDir = null, codexSessionsDir = null, cursors: injectedCursors = null, onEvent = null } = {}, meter) {
   const PROJECTS = projectsDir || path.join(home, '.claude', 'projects');
+  // a directory read or a stat: counted, a yield every opsBudget — and after a yield the folder's mount is asked again (a
+  // mount that stopped answering meanwhile is never read: the walk leaves that folder, said once) → true = leave it
+  const op = function* (dir) {
+    if (++meter.ops < meter.opsBudget) return false;
+    meter.ops = 0; yield;
+    if (!dir || !DOOR.blocked(dir)) return false;
+    if (!_saidBlocked.has(dir)) { _saidBlocked.add(dir); console.warn(`[usage] walk left ${dir}: its storage stopped answering mid-walk`); }
+    return true;
+  };
   // B-6ded: THE WALK'S CURSORS ARE ITS OWN until its caller commits them. A map handed in (the hub's live store) is never
   // written, nor any entry of it — the walk advances copies and RETURNS them — so a walk stopped at a budget point (the
   // mount gate) or one that throws leaves the caller's map exactly as it found it, and the next walk re-reads from there
@@ -283,6 +295,7 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
     if (DOOR.blocked(pdAbs)) { if (!_saidBlocked.has(pdAbs)) { _saidBlocked.add(pdAbs); console.warn(`[usage] walk skipped ${pdAbs}: its storage is not answering`); } continue; }
     _saidBlocked.delete(pdAbs);
     let entries = [];
+    if (yield* op(pdAbs)) continue;
     try { entries = fs.readdirSync(pdAbs); } catch { continue; }
     // Top-level transcripts PLUS subagent/workflow agent transcripts (the
     // 2.265.0 walk — workflow agents' usage exists ONLY there); events
@@ -290,24 +303,30 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
     // came from (`origin`, 2026-09-10).
     const files = []; // {fp, sid, origin, wf?, agent?}
     const mains = []; // top-level transcript paths — the project-cwd fallback
-    for (const fn of entries) {
+    let left = false;
+    collect: for (const fn of entries) {
       if (fn.endsWith('.jsonl')) { files.push({ fp: path.join(pdAbs, fn), sid: fn.replace(/\.jsonl$/, ''), origin: 'main' }); mains.push(path.join(pdAbs, fn)); continue; }
       if (!/^[0-9a-f-]{36}$/i.test(fn)) continue; // session dirs only
       const subDir = path.join(pdAbs, fn, 'subagents');
+      if (yield* op(pdAbs)) { left = true; break collect; }
       let subs = []; try { subs = fs.readdirSync(subDir); } catch { continue; }
       for (const sf of subs) {
         if (sf.endsWith('.jsonl')) { files.push({ fp: path.join(subDir, sf), sid: fn, origin: 'subagent', agent: sf.replace(/\.jsonl$/, '') }); continue; }
         if (sf !== 'workflows') continue;
+        if (yield* op(pdAbs)) { left = true; break collect; }
         let wfs = []; try { wfs = fs.readdirSync(path.join(subDir, 'workflows')); } catch { continue; }
         for (const wf of wfs) {
+          if (yield* op(pdAbs)) { left = true; break collect; }
           let afs = []; try { afs = fs.readdirSync(path.join(subDir, 'workflows', wf)); } catch { continue; }
           for (const af of afs) if (af.startsWith('agent-') && af.endsWith('.jsonl')) files.push({ fp: path.join(subDir, 'workflows', wf, af), sid: fn, origin: 'workflow', wf, agent: af.replace(/\.jsonl$/, '') });
         }
       }
     }
+    if (left) continue;
     mains.sort(); // the sibling fallback must pick the SAME file in both spellings
     for (const { fp, sid, origin, wf, agent } of files) {
       if (isFixtureSid(sid)) continue; // synthetic conversation id — no request ever happened
+      if (yield* op(pdAbs)) break;
       let st; try { st = fs.statSync(fp); } catch { continue; }
       if (!st.isFile()) continue;
       const cur = Object.assign({}, cursors[fp] || { offset: 0, lastRid: null }); // a copy: never the caller's entry (B-6ded)
@@ -343,6 +362,7 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
     if (!m) continue;
     if (isFixtureSid(m[1])) continue; // synthetic thread id — same rule, both harnesses
     const fp = path.join(codexDir, String(rel));
+    if (yield* op(codexDir)) break;
     let st; try { st = fs.statSync(fp); } catch { continue; }
     if (!st.isFile()) continue;
     const zst = !!m[2];

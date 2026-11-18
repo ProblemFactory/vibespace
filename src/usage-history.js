@@ -209,6 +209,7 @@ const SCAN_BUDGET_BYTES = 1024 * 1024;
 const WARM_SLICE_BYTES = SCAN_BUDGET_BYTES; // the boot warm's slice (B-1319): the same MiB a walk tick takes
 const HOT_HEADROOM = 8; // usage-cpu U1: past the byte ceiling the hot window is cut to (1 − 1/8) of it
 const LATE_ROWS_PLACED = 64; // usage-cpu U1: up to this many late rows are placed in the sorted view by binary search (more: the linear merge)
+const META_SLICE = 16; // usage-cpu U2: session-meta files parsed per loop turn on the scan's road
 const TRIM_BATCH_ROWS = 16384; // …and its window slide, row visits per step (the test machine, 300 000 hot rows: a pass step 3 to 9 ms)
 // a row STAGED cold costs this many visits of the step (measured there: 3.7 µs staged vs 0.3 µs passed — one step of 16 288 staged
 // rows held 60.7 ms; weighed, a stage step is 1 024 rows, about 4 ms)
@@ -536,9 +537,27 @@ class UsageHistory {
     for (const fn of files) {
       if (!fn.endsWith('.json')) continue;
       let m; try { m = JSON.parse(fs.readFileSync(path.join(this.metaDir, fn), 'utf-8')); } catch { continue; }
-      const sid = m.claudeSessionId || m.backendSessionId;
-      if (!sid) continue;
-      map[sid] = { acct: m.accountId || m._accountId || null, mode: m.mode || null, host: m.host || null, backend: m.backend || 'claude', name: m.name || null };
+      this._metaRow(map, m);
+    }
+    this._metaMapCache = { at: Date.now(), map };
+    return map;
+  }
+  _metaRow(map, m) {
+    const sid = m && (m.claudeSessionId || m.backendSessionId);
+    if (sid) map[sid] = { acct: m.accountId || m._accountId || null, mode: m.mode || null, host: m.host || null, backend: m.backend || 'claude', name: m.name || null };
+  }
+  /** …the scan's road (usage-cpu U2 — the sync map read + parsed every meta file in one turn: 2.0 s held at a cold memo): the
+   *  same map from the same files in the same order, the reads off the loop (fs.promises), META_SLICE files parsed a loop
+   *  turn (the scan's own yield between slices), the same 60 s memo. */
+  async _metaMapAsync() {
+    if (this._metaMapCache && Date.now() - this._metaMapCache.at < 60000) return this._metaMapCache.map;
+    const map = {};
+    let files = [];
+    try { files = (await fs.promises.readdir(this.metaDir)).filter((fn) => fn.endsWith('.json')); } catch {}
+    for (let i = 0; i < files.length; i += META_SLICE) {
+      const texts = await Promise.all(files.slice(i, i + META_SLICE).map((fn) => fs.promises.readFile(path.join(this.metaDir, fn), 'utf-8').catch(() => null)));
+      for (const t of texts) { if (t === null) continue; let m; try { m = JSON.parse(t); } catch { continue; } this._metaRow(map, m); }
+      if (typeof this._scanYield === 'function' && i + META_SLICE < files.length) await this._scanYield();
     }
     this._metaMapCache = { at: Date.now(), map };
     return map;
@@ -642,7 +661,7 @@ class UsageHistory {
   async _walkAndAppend() {
     let added = 0, filesTouched = 0;
     try {
-      const meta = this._metaMap();
+      const meta = await this._metaMapAsync();
       this._lastMetaMap = meta; // reused by aggregate() for session-name labels
       const attrib = this._attribMap();
       const shardBuffers = {}; // shardPath → [lines]

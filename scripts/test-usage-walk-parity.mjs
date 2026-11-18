@@ -1022,6 +1022,78 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   fs.rmSync(b6Root, { recursive: true, force: true });
 }
 
+// usage-cpu U2: THE WALK YIELDS BY WORK, AND THE SCAN'S METAS A SLICE A TURN. A walk over UNCHANGED transcripts reads no byte, so
+// the byte budget never handed the loop back: every readdir + stat of every transcript ever written in ONE turn (11.8 s held on
+// the hub). Now every 256 directory reads / stats count as a budget point — at 1 000 and 10 000 unchanged transcripts the work
+// between two yields is ≤ 256 (a count), and the walk ends where the sync walk ends. The scan's session metas (2.0 s held at a
+// cold memo) are read off the loop and parsed 16 a turn, the same map. Controls: the release's byte-only yield (a planted
+// copy) ⇒ every stat in one turn; the sync map ⇒ every meta in one run.
+{
+  const { runUsageWalk: walkU } = require(path.join(REPO, 'src/usage-walker.js'));
+  const uRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-ops-'));
+  const hexU = (k, w) => (k * 2654435761 >>> 0).toString(16).padStart(8, '0').slice(0, w);
+  const sidU = (k) => `${hexU(k, 8)}-${hexU(k + 1, 4)}-4${hexU(k + 2, 3)}-8${hexU(k + 3, 3)}-${hexU(k + 4, 8)}${hexU(k + 5, 4)}`;
+  const homeOf = (n) => {
+    const h = path.join(uRoot, 'h' + n), cursors = {};
+    for (let k = 0; k < n; k++) {
+      const d = path.join(h, '.claude', 'projects', '-srv-work-p' + (k % 10)); if (k < 10) fs.mkdirSync(d, { recursive: true });
+      const fp = path.join(d, sidU(k + 1) + '.jsonl'), body = JSON.stringify({ type: 'user', timestamp: '2026-09-24T00:00:00.000Z', cwd: '/srv/work' }) + '\n';
+      fs.writeFileSync(fp, body); cursors[fp] = { offset: Buffer.byteLength(body), lastRid: null };
+    }
+    return { h, cursors, noCx: path.join(h, 'no-codex') };
+  };
+  const opsBetween = async (walkFn, n) => {
+    const { h, cursors, noCx } = homeOf(n);
+    let ops = 0, max = 0, yields = 0;
+    const st0 = fs.statSync, rd0 = fs.readdirSync;
+    fs.statSync = function (...a) { ops++; return st0.apply(this, a); };
+    fs.readdirSync = function (...a) { ops++; return rd0.apply(this, a); };
+    let w;
+    try { w = await walkFn({ home: h, codexSessionsDir: noCx, cursors: JSON.parse(JSON.stringify(cursors)), budgetBytes: 1 << 20, onBudget: () => { yields++; max = Math.max(max, ops); ops = 0; return new Promise(setImmediate); } }); }
+    finally { fs.statSync = st0; fs.readdirSync = rd0; }
+    max = Math.max(max, ops);
+    const s = walkU({ home: h, codexSessionsDir: noCx, cursors: JSON.parse(JSON.stringify(cursors)) });
+    return { n, max, yields, same: w.events.length === 0 && JSON.stringify(w.cursors) === JSON.stringify(s.cursors) && w.filesTouched === s.filesTouched };
+  };
+  for (const n of [1000, 10000]) {
+    const r = await opsBetween(walkU, n);
+    ok(r.max <= 256 + 2 && r.yields >= Math.floor(n / 256) && r.same, `U2 ${n} unchanged transcripts: at most ${r.max} directory reads + stats between two yields (${r.yields} yields), the cursors = the sync walk's`);
+  }
+  { // the op yields among CHANGED files too (a small budget): the same events and cursors as the sync walk
+    const h = path.join(uRoot, 'changed'), d = path.join(h, '.claude', 'projects', '-srv-work-c'); fs.mkdirSync(d, { recursive: true });
+    for (let k = 0; k < 20; k++) fs.writeFileSync(path.join(d, sidU(900 + k) + '.jsonl'), JSON.stringify({ type: 'assistant', requestId: 'req_c' + k, timestamp: '2026-09-24T00:00:0' + (k % 10) + '.000Z', cwd: '/srv/work', message: { id: 'msg_c' + k, model: 'claude-fable-5-1', usage: { input_tokens: 10 + k, output_tokens: 3 } } }) + '\n');
+    let y = 0; const w = await walkU({ home: h, codexSessionsDir: path.join(h, 'no-codex'), cursors: {}, budgetBytes: 1 << 20, budgetOps: 3, onBudget: () => { y++; return new Promise(setImmediate); } });
+    const sw = walkU({ home: h, codexSessionsDir: path.join(h, 'no-codex'), cursors: {} });
+    ok(y >= 6 && w.events.length === 20 && JSON.stringify(w.events) === JSON.stringify(sw.events) && JSON.stringify(w.cursors) === JSON.stringify(sw.cursors), `U2 among 20 changed transcripts a 3-op budget yields ${y} times: the same 20 events and cursors as the sync walk`);
+    // after a yield the folder's mount is asked again: blocked meanwhile ⇒ the walk leaves it (no read into it)
+    const DOOR = require(path.join(REPO, 'src/mount-door.js')), b0 = DOOR.blocked; let asked = 0, blockAt = 2;
+    DOOR.blocked = (p0) => { if (String(p0) === d) { asked++; return asked >= blockAt; } return b0(p0); };
+    let rd = 0; const rd0 = fs.readdirSync, st0 = fs.statSync;
+    fs.statSync = function (p0, ...a) { if (String(p0).startsWith(d + path.sep)) rd++; return st0.call(this, p0, ...a); };
+    let wb; try { wb = await walkU({ home: h, codexSessionsDir: path.join(h, 'no-codex'), cursors: {}, budgetBytes: 1 << 20, budgetOps: 3, onBudget: () => new Promise(setImmediate) }); } finally { DOOR.blocked = b0; fs.statSync = st0; }
+    ok(wb && wb.events.length < 20 && rd < 20, `U2 a folder whose mount is blocked mid-walk is left after the yield: ${rd} of its 20 files statted, ${wb && wb.events.length} events (the next walk reads on from the cursors)`);
+  }
+  const uSrc = fs.readFileSync(path.join(REPO, 'src/usage-walker.js'), 'utf-8');
+  const byteOnly = uSrc.replace('if (++meter.ops < meter.opsBudget) return false;\n    meter.ops = 0; yield;', 'if (true) return false;\n    meter.ops = 0; yield;');
+  const { runUsageWalk: walkBytes } = mutantCopies('walkpar-ops', REPO).load('src/usage-walker.js', byteOnly, 'byte-only');
+  const rc = await opsBetween(walkBytes, 1000);
+  ok(byteOnly !== uSrc && rc.max > 1000 && rc.yields === 0, `control (the release's byte-only yield): ${rc.max} directory reads + stats in ONE turn, ${rc.yields} yields ⇒ RED`);
+  // the scan's metas: the same map, 16 parsed between two of the scan's yields
+  const mData = path.join(uRoot, 'data'), mDir = path.join(mData, 'session-meta'); fs.mkdirSync(mDir, { recursive: true });
+  for (let k = 0; k < 1000; k++) fs.writeFileSync(path.join(mDir, `m${k}.json`), JSON.stringify({ claudeSessionId: sidU(k + 1), accountId: k % 3 ? 'acc-' + (k % 7) : null, mode: k % 2 ? 'plan' : null, host: k % 5 ? null : 'H1', name: 'n' + k }));
+  fs.writeFileSync(path.join(mDir, 'bad.json'), '{not json');
+  let parsed = 0, maxRun = 0;
+  const mu = new UsageHistory({ dataDir: mData, homeDir: uRoot, scanYield: () => { maxRun = Math.max(maxRun, parsed); parsed = 0; return new Promise(setImmediate); } });
+  const row0 = mu._metaRow.bind(mu); mu._metaRow = (map, m) => { parsed++; return row0(map, m); };
+  const asyncMap = await mu._metaMapAsync(); maxRun = Math.max(maxRun, parsed);
+  const runAsync = maxRun; mu._metaMapCache = null; parsed = 0; maxRun = 0;
+  const syncMap = mu._metaMap(); const runSync = Math.max(maxRun, parsed);
+  ok(JSON.stringify(asyncMap) === JSON.stringify(syncMap) && Object.keys(syncMap).length === 1000 && runAsync <= 16, `U2 the scan's session metas: the same ${Object.keys(asyncMap).length}-row map, at most ${runAsync} parsed between two of the scan's yields`);
+  ok(runSync === 1000, `control (the sync map, the release's scan road): ${runSync} metas parsed in one run ⇒ RED`);
+  ok(/const meta = await this\._metaMapAsync\(\);/.test(fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8')), 'U2 the scan (_walkAndAppend) takes the metas on their own road');
+  fs.rmSync(uRoot, { recursive: true, force: true });
+}
+
 fs.rmSync(home, { recursive: true, force: true });
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
