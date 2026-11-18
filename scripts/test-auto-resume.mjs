@@ -1835,7 +1835,7 @@ await (async () => {
   const ov = await run(real, { overageAfter: 'a' });
   const ovSkip = ov.rec.skipped.find((x) => x.id === 'b');
   ok('17b. LAW 1: overage turns «in use» after the first continue ⇒ the second is NOT continued and NOT charged — skipped by name with the authorizer\'s own reason, its hold back', ov.L.sent.join() === 'a' && !!ovSkip && ovSkip.why === 'refused' && ovSkip.reason === 'overage-in-use' && !ov.L.charge.some((x) => x.startsWith('b@')) && ov.L.release.includes('h2'), JSON.stringify(ov));
-  const m3 = mutantAr([['        try { v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }]) : null; }', "        try { v2 = !moved ? { ok: true, holds: [{ sessionId: e.id, identity: bill, hold: 'kept' }] } : authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }]) : null; } /* PRE-CURE: an unmoved slot is never asked again */"]]);
+  const m3 = mutantAr([['        try { v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }], paid.spendReason) : null; }', "        try { v2 = !moved ? { ok: true, holds: [{ sessionId: e.id, identity: bill, hold: 'kept' }] } : authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }], paid.spendReason) : null; } /* PRE-CURE: an unmoved slot is never asked again */"]]);
   const c3 = m3.mod ? await run(m3.mod, { overageAfter: 'a' }) : null;
   ok('17b. LAW 1 RED: the loop that asks again only when the gate MOVED the conversation continues b onto paid overage and charges it', m3.hits === 1 && !!c3 && c3.L.sent.join() === 'a,b' && c3.L.charge.some((x) => x.startsWith('b@A')), m3.err || JSON.stringify(c3 && c3.L));
   // ── LAW 3: A RUNNING BATCH CAN BE STOPPED — before every conversation and after every gate; «off for every session» stops it too
@@ -1883,16 +1883,56 @@ await (async () => {
   const mH = mutantAr([["const tok = {}; gateHeld.set(e.id, tok); const free = () => { clearTimeout(t2); if (gateHeld.get(e.id) === tok) { gateHeld.delete(e.id); session._arFiring = false; } };", 'const free = () => { clearTimeout(t2); session._arFiring = false; };   /* the cure\'s form: frees whatever flag is up */']]);
   const hsRed = mH.mod ? await holdScene(mH.mod) : null;
   ok('17b. the gate hold frees only ITS hold: after its bound the flag is down, a single continue raises it for its own gate, the abandoned gate\'s late settle leaves it UP; RED: the cure\'s form takes it down', hs.down && hs.up && hs.after === true && hs.asked === 2 && mH.hits === 1 && !!hsRed && hsRed.up && hsRed.after === false, mH.err || JSON.stringify({ hs, hsRed }));
-  // the refusal carries the K that fits every account (fitK, the guard's) to the dialog
+  // FORM TWO (主开发 2026-11-18 16:20Z): one account of the press refused (paid overage …) — ITS conversations are left stopped,
+  // BY NAME, and the rest resume; said BEFORE the press (the plan) as well as at it (an account refused only at the press); a
+  // press every account refuses starts nothing and names each
   {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkfit-'));
-    const at = Date.now() - 60000;
-    const active = new Map([['a', { backend: 'claude', mode: 'chat', pty: {}, name: 'A1', _slot: 'A', _stoppedBy: { kind: 'quota', at, resetsAt: Date.now() - 1000 } }], ['b', { backend: 'claude', mode: 'chat', pty: {}, name: 'B1', _slot: 'B', _stoppedBy: { kind: 'quota', at: at + 1, resetsAt: Date.now() - 1000 } }]]);
-    const ar = create({ dataDir: dir, activeSessions: active, serverSetting: () => false, sendToSession: () => true, fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
-      authorizeSpendBatch: () => ({ ok: false, why: 'hour-cap', detail: 'A is full', identity: { key: 'A', name: 'A' }, n: 2, need: 1, left: 1, fitK: 0 }), wallVerdict: () => ({ usable: true, blockedUntil: 0 }) });
-    const rf = ar.resumeBatch({});
-    fs.rmSync(dir, { recursive: true, force: true });
-    ok('17b. a refused batch hands the dialog the guard\'s fitK beside the bucket\'s left (0 here: the first item is the full account\'s)', !!rf.refused && rf.refused.fitK === 0 && rf.refused.left === 1, JSON.stringify(rf.refused));
+    const PRESS2 = require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
+    const world = async ({ preview = null, authorize }) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkf2-'));
+      const S2 = (slot, ago) => ({ backend: 'claude', mode: 'chat', pty: {}, name: slot + ago, _slot: slot, _stoppedBy: { kind: 'overload', at: Date.now() - ago * 3600e3 } });
+      const active = new Map([['a1', S2('A', 3)], ['b1', S2('B', 2)], ['a2', S2('A', 1)]]);
+      const sent = [];
+      const ar = create({ dataDir: dir, activeSessions: active, serverSetting: () => false, sendToSession: (id) => { sent.push(id); return true; }, fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+        previewSpendBatch: preview, authorizeSpendBatch: authorize, noteBatchSpend: () => { }, renewSpend: () => { }, releaseSpend: () => { }, wallVerdict: () => ({ usable: true, blockedUntil: 0 }), bulkPaceMs: 5 });
+      const plan = ar.stoppedPlan();
+      const r0 = ar.resumeBatch({ pressed: PRESS2 });
+      const until = Date.now() + 3000;
+      while (Date.now() < until && !(ar.batchStatus(r0.batchId) || {}).done) await new Promise((r) => setTimeout(r, 5));
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { plan, rec: ar.batchStatus(r0.batchId), sent: sent.join() };
+    };
+    const B_OVER = { identity: { key: 'B', name: 'B' }, why: 'overage-in-use', detail: 'B is billing paid overage', n: 1 };
+    const okRows = (items) => ({ ok: true, attended: true, holds: items.filter((x) => x.identity.key !== 'B').map((x) => ({ sessionId: x.id, identity: x.identity, hold: null })), skipped: items.filter((x) => x.identity.key === 'B').map((x) => ({ sessionId: x.id, identity: x.identity, why: 'overage-in-use' })) });
+    const pre = await world({ preview: () => ({ refusedSlots: [B_OVER] }), authorize: (items) => okRows(items) });
+    const pSkip = pre.plan.skipped.find((x) => x.id === 'b1');
+    ok('17b. FORM TWO, BEFORE the press: the plan leaves B\'s conversation stopped BY NAME (account-refused, overage-in-use, B) — the eligible set (the dialog\'s N and its cost) is A\'s two', pre.plan.eligible.map((e) => e.id).join() === 'a1,a2' && !!pSkip && pSkip.why === 'account-refused' && pSkip.reason === 'overage-in-use' && pSkip.member === 'B', JSON.stringify(pre.plan));
+    ok('17b. …and the press resumes A\'s two, B\'s stays stopped and named in the record', pre.sent === 'a1,a2' && !pre.rec.refused && pre.rec.skipped.some((x) => x.id === 'b1' && x.why === 'account-refused' && x.member === 'B'), JSON.stringify(pre.rec));
+    const at = await world({ preview: () => ({ refusedSlots: [] }), authorize: (items) => okRows(items) });
+    ok('17b. FORM TWO AT the press: an account the guard refuses only at the press (overage since the plan) — its conversation is SKIPPED by name, the planned count drops, the rest resume', at.plan.eligible.length === 3 && at.sent === 'a1,a2' && at.rec.planned === 2 && at.rec.skipped.some((x) => x.id === 'b1' && x.why === 'account-refused' && x.reason === 'overage-in-use' && x.member === 'B') && !at.rec.refused, JSON.stringify(at.rec));
+    const none = await world({ authorize: () => ({ ok: false, why: 'overage-in-use', detail: 'A is billing paid overage', identity: { key: 'A', name: 'A' }, refusedSlots: [{ identity: { key: 'A', name: 'A' }, why: 'overage-in-use', n: 2 }, B_OVER] }) });
+    ok('17b. FORM TWO: every account refused at the press ⇒ it starts NOTHING and the refusal names each account', none.sent === '' && !!none.rec.refused && (none.rec.refused.slots || []).map((x) => x.name + ':' + x.why).join() === 'A:overage-in-use,B:overage-in-use', JSON.stringify(none.rec));
+  }
+  // THE OWNER'S RULING 2026-11-18 (B): the bulk press is the person's own act — the press its door minted selects the ATTENDED
+  // reason for the batch's authorization, its every re-ask and its every charge; no press, or a press-shaped object no door
+  // minted, is the gated twin (auto-resume) all through
+  {
+    const PRESS = require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
+    const reasonsOf = async (pressed) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkpress-'));
+      const asked = [], noted = [];
+      const active = new Map([['a', { backend: 'claude', mode: 'chat', pty: {}, name: 'A1', _slot: 'A', _stoppedBy: { kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() - 1000 } }]]);
+      const ar = create({ dataDir: dir, activeSessions: active, serverSetting: () => false, sendToSession: () => true, fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+        authorizeSpendBatch: (items, reason) => { asked.push(reason); return { ok: true, holds: items.map((x) => ({ sessionId: x.id, identity: x.identity, hold: null })) }; },
+        noteBatchSpend: (id, s2, identity, hold, reason) => { noted.push(reason); }, renewSpend: () => { }, releaseSpend: () => { }, wallVerdict: () => ({ usable: true, blockedUntil: 0 }), bulkPaceMs: 5 });
+      const r0 = ar.resumeBatch({ pressed });
+      const until = Date.now() + 3000;
+      while (Date.now() < until && !(ar.batchStatus(r0.batchId) || {}).done) await new Promise((r) => setTimeout(r, 5));
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { asked: asked.join(), noted: noted.join() };
+    };
+    const withPress = await reasonsOf(PRESS), without = await reasonsOf(null), forged = await reasonsOf({ at: Date.now(), route: 'POST /api/sessions/resume-stopped', reqId: 1 });
+    ok('17b. THE PRESS: the batch its door pressed is authorized, re-asked and charged as `bulk-resume` (attended); no press and a forged one are the gated twin `auto-resume` all through', withPress.asked === 'bulk-resume,bulk-resume' && withPress.noted === 'bulk-resume' && without.asked === 'auto-resume,auto-resume' && without.noted === 'auto-resume' && forged.asked === 'auto-resume,auto-resume', JSON.stringify({ withPress, without, forged }));
   }
   const mA = mutantAr([["        if (rec.stopAsked) { stopRest(i); break; }   // …and after EVERY gate (a stop during the gate's wait ends the wait)\n", '']]);
   const cA = mA.mod ? await run(mA.mod, { hangGate: true }) : null;

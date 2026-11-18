@@ -193,5 +193,15 @@ console.log('§6 wiring pins');
   ok('PURE: src/stopped-by.js requires nothing and names no harness id', !/require\(/.test(read('src/stopped-by.js').replace(/^\s*\/\/.*$/gm, '')) && !/'(claude|codex|shell|opencode|antigravity)'/.test(read('src/stopped-by.js').replace(/^\s*\/\/.*$/gm, '')));
 }
 
+// FORM TWO (主开发 2026-11-18 16:20Z): a conversation left stopped because the press is refused on ITS account — one group per
+// account, the account NAMED in the rule: «left stopped (B is billing paid overage) — 10»
+{
+  const rows = [{ id: 'b1', why: 'account-refused', reason: 'overage-in-use', member: 'B' }, { id: 'b2', why: 'account-refused', reason: 'overage-in-use', member: 'B' }, { id: 'c1', why: 'account-refused', reason: 'overage-in-use', member: 'C' }];
+  const en = SB.skipGroups(rows, null).map((g) => g.head), zhW = SB.skipGroups(rows, tZh).map((g) => g.head);
+  ok('FORM TWO: one group per refused ACCOUNT, the account named in the rule (en)', en.join(' | ') === 'left stopped (B is billing paid overage) — 2 | left stopped (C is billing paid overage) — 1', JSON.stringify(en));
+  ok('FORM TWO: the machine\'s own login is named in words, never by its ledger key', SB.skipGroups([{ id: 'g1', why: 'account-refused', reason: 'overage-in-use', member: '__global__' }], null)[0].head === 'left stopped (This machine’s own login is billing paid overage) — 1' && /本机自己的登录/.test(SB.skipGroups([{ id: 'g1', why: 'account-refused', reason: 'overage-in-use', member: '__global__' }], tZh)[0].head), JSON.stringify(SB.skipGroups([{ id: 'g1', why: 'account-refused', reason: 'overage-in-use', member: '__global__' }], tZh)));
+  ok('FORM TWO: …and in zh (the account named in the rule)', /^留在停止状态.*B 正在使用付费超额.*2 个$/.test(zhW[0]), JSON.stringify(zhW));
+}
+
 console.log(`\n${failed ? 'FAILED' : 'ALL PASS'} (${passed} passed, ${failed} failed)`);
 process.exit(failed ? 1 : 0);

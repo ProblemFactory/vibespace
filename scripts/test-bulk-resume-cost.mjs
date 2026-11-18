@@ -7,15 +7,14 @@
 //      cache reads makes the batch's share several times smaller (the understatement the rule exists to refuse)
 //   §2 contextOf — the newest MAIN-thread request (subagents ignored), the status bar's own formula
 //   §3 estimateBatch — the dollar SUM (the cache-WRITE price × cold tokens — input where the row has none — + the nominal output allowance), one line per member,
-//      a member with no basis says so (never a made-up percent) while the dollars still show; the K cut (earliest stop
-//      first, every measured member kept at or under the soft band). CONTROLS: the price read off the wrong field, the
-//      cut ignoring the band — each a patched copy that turns a leg red
+//      a member with no basis says so (never a made-up percent) while the dollars still show; no K cut (the owner's ruling
+//      2026-11-18). CONTROL: the price read off the wrong field — a patched copy that turns a leg red
 //   §4 the price ROW is the live table's (src/usage-history.js priceRowFor over DEFAULT_PRICING — no second table)
 //   §5 the words, en + zh through the real dictionary («按本窗口实测 1 % ≈ 36 k tokens», «无法估算：本窗口还没有实测比例»,
-//      «若现在全部恢复：≈ $… · ≈ 34 % 的 5 h 窗口», «只恢复前 K 个（按最早停止优先）») + the zh/ja census
+//      «若现在全部恢复：≈ $… · ≈ 34 % 的 5 h 窗口», «全部恢复 (n)» — no «only the first K»: the owner's ruling 2026-11-18) + the zh/ja census
 //   §6 the ORCH gather (src/server/bulk-resume-routes.js estimateFor) over a fake ledger / cache / sessions: a
 //      conversation's context from ITS sid, a member's window from ITS acct since resetsAt − 5 h up to the reading,
-//      an unresolved host bucket left out, the soft band = account-pool-auto's own THRESH.fiveHour.hot
+//      an unresolved host bucket left out
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -74,7 +73,7 @@ console.log('§2 contextOf (the conversation\'s newest main-thread request)');
 }
 
 // ── §3 THE ESTIMATE ─────────────────────────────────────────────────────────
-console.log('§3 estimateBatch (the sum, the members, the K cut)');
+console.log('§3 estimateBatch (the sum, the members)');
 const items = [
   { id: 'a', name: 'A', at: 10, model: 'claude-opus-5-5', contextTokens: 400000, member: { key: 'm1', name: 'Max A' } },
   { id: 'b', name: 'B', at: 30, model: 'claude-opus-5-5', contextTokens: 800000, member: { key: 'm1', name: 'Max A' } },
@@ -82,7 +81,7 @@ const items = [
   { id: 'd', name: 'D', at: 40, model: 'claude-opus-5-5', contextTokens: null, member: { key: 'm3', name: 'Max C' } },
 ];
 const members = { m1: { name: 'Max A', pctNow: 61, ratio: { tokensPerPct: 36000 } }, m2: { name: 'Max B', pctNow: 20, ratio: { tokensPerPct: 50000 } }, m3: { name: 'Max C', pctNow: null, ratio: null } };
-const est = BC.estimateBatch({ items, priceOf: () => OPUS, members, softBandPct: 90 });
+const est = BC.estimateBatch({ items, priceOf: () => OPUS, members });
 {
   const want = (1500000 * 6.25 + 4 * 2000 * 25) / 1e6;
   ok('DOLLARS = Σ cold tokens × the CACHE-WRITE price (what a cold resume is billed — the ledger prices it so) + the nominal output allowance per session', Math.abs(est.usd - want) < 1e-9 && est.coldTokens === 1500000 && est.outputAllowance === BC.OUTPUT_ALLOWANCE, { usd: est.usd, want });
@@ -92,19 +91,13 @@ const est = BC.estimateBatch({ items, priceOf: () => OPUS, members, softBandPct:
   ok('…Max B ≈ 6 % (300 k ÷ 50 k), 20 % ⇒ 26 %', m2.addPct === 6 && m2.afterPct === 26, m2);
   ok('…Max C has NO basis: no percent at all (null), and it is listed as unconstrained', m3.addPct === null && m3.afterPct === null && est.unconstrained.includes('m3'), m3);
   ok('the order is EARLIEST STOP FIRST', est.order.join() === 'a,c,b,d', est.order);
-  ok('K = 2: a + c fit (61+11.1 ≤ 90, 20+6 ≤ 90); b would take Max A to ~94 % ⇒ the cut stops there', est.k === 2, est.k);
-  ok('K = N when nothing crosses the band', BC.estimateBatch({ items: items.slice(0, 1), priceOf: () => OPUS, members, softBandPct: 90 }).k === 1);
-  ok('K = 0 when the first item\'s member is already over the band', BC.estimateBatch({ items: items.slice(0, 1), priceOf: () => OPUS, members: { m1: { pctNow: 95, ratio: { tokensPerPct: 36000 } } }, softBandPct: 90 }).k === 0);
   ok('an unpriced model costs 0 and is COUNTED as unpriced (said, never invented)', BC.estimateBatch({ items: items.slice(0, 1), priceOf: () => null, members }).unpriced === 1);
   const NOWRITE = { label: 'gpt', input: 2, output: 8, cacheRead: 0.2 };   // a vendor with no cache-write premium
   ok('a row with NO cache-write price is priced at its input rate', Math.abs(BC.estimateBatch({ items: items.slice(0, 1), priceOf: () => NOWRITE, members }).usd - (400000 * 2 + 2000 * 8) / 1e6) < 1e-9);
   ok('priceOf is asked per ITEM (its member\'s account and its context size choose the row)', (() => { const seen = []; BC.estimateBatch({ items: items.slice(0, 2), priceOf: (m, it) => { seen.push(it && it.member && it.member.key); return OPUS; }, members }); return seen.join() === 'm1,m1'; })());
   const mP = mutant([["const unit = row ? (num(row.cacheWrite5m) > 0 ? num(row.cacheWrite5m) : num(row.input)) : 0", 'const unit = row ? num(row.input) : 0']]);
   ok('CONTROL: the price patch applies', !mP.err, mP.err);
-  if (mP.mod) ok('CONTROL: pricing the cold read at the INPUT rate (the branch\'s first form) turns the dollar leg red', Math.abs(mP.mod.estimateBatch({ items, priceOf: () => OPUS, members, softBandPct: 90 }).usd - want) > 1);
-  const mK = mutant([['if ((m.pctNow || 0) + next > softBandPct) break;', 'if (false) break;']]);
-  ok('CONTROL: the cut patch applies', !mK.err, mK.err);
-  if (mK.mod) ok('CONTROL: a cut that ignores the band turns the K leg red (K = 4 ≠ 2)', mK.mod.estimateBatch({ items, priceOf: () => OPUS, members, softBandPct: 90 }).k === 4);
+  if (mP.mod) ok('CONTROL: pricing the cold read at the INPUT rate (the branch\'s first form) turns the dollar leg red', Math.abs(mP.mod.estimateBatch({ items, priceOf: () => OPUS, members }).usd - want) > 1);
 }
 
 // ── §4 THE PRICE TABLE ──────────────────────────────────────────────────────
@@ -133,9 +126,8 @@ const tZh = (s, p) => fill(zh[s] !== undefined ? zh[s] : s, p);
   ok('zh member line + its basis: «… 61 % ⇒ 之后约 94 %» / «按本窗口实测 1 % ≈ 36 k tokens»', /现在 61 % ⇒ 之后约 94 %/.test(z.members[0].line) && z.members[0].basis === '按本窗口实测 1 % ≈ 36 k tokens', z.members[0]);
   ok('zh no basis: «Max C：无法估算：本窗口还没有实测比例» — and no percent anywhere on that line', z.members[2].line === 'Max C：无法估算：本窗口还没有实测比例' && z.members[2].basis === null, z.members[2]);
   ok('zh passive line: «若现在全部恢复：≈ $… · ≈ 33 % 的 5 h 窗口» (the cache-write dollars, the largest member share)', z.passive === `若现在全部恢复：≈ $${usdW} · ≈ 33 % 的 5 h 窗口`, z.passive);
-  ok('zh buttons: «全部恢复 (4)» + «只恢复前 2 个（按最早停止优先）»', z.allButton === '全部恢复 (4)' && z.kButton === '只恢复前 2 个（按最早停止优先）', z);
+  ok('zh button: «全部恢复 (4)» — and no «only the first K» (the owner\'s ruling 2026-11-18: one press starts all N)', z.allButton === '全部恢复 (4)' && !('kButton' in z) && !('k' in est) && !('softBandPct' in est), z);
   ok('the machine\'s own login is NAMED in the person\'s words, never by its ledger key', BC.costWords(BC.estimateBatch({ items: [{ id: 'g', at: 1, model: 'opus', contextTokens: 1, member: { key: '__global__', name: '__global__' } }], priceOf: () => OPUS, members: {} }), tZh).members[0].line === '本机自己的登录：无法估算：本窗口还没有实测比例');
-  ok('no K button when nothing is cut (K = N) or nothing fits (K = 0)', BC.costWords(BC.estimateBatch({ items: items.slice(0, 1), priceOf: () => OPUS, members, softBandPct: 90 }), null).kButton === null);
   ok('with no basis anywhere the passive line keeps the dollars and SAYS the share cannot be estimated', /cannot be estimated yet/.test(BC.costWords(BC.estimateBatch({ items: items.slice(3), priceOf: () => OPUS, members }), null).passive));
   ok('U2 cure: an item with no price is SAID («1 个会话的模型没有价格，未计入», the passive line «… · 1 个未定价») — never added as if it cost nothing in silence', (() => { const e = BC.estimateBatch({ items: items.slice(0, 2), priceOf: (m, it) => (it.id === 'a' ? OPUS : null), members }); const w = BC.costWords(e, tZh); return e.unpriced === 1 && w.unpriced === '1 个会话的模型没有价格，未计入' && / · 1 个未定价$/.test(w.passive); })(), JSON.stringify(BC.costWords(BC.estimateBatch({ items: items.slice(0, 2), priceOf: (m, it) => (it.id === 'a' ? OPUS : null), members }), tZh)));
   ok('U2 cure: every item priced ⇒ no such line', BC.costWords(BC.estimateBatch({ items: items.slice(0, 2), priceOf: () => OPUS, members }), null).unpriced === null);
@@ -146,9 +138,7 @@ const tZh = (s, p) => fill(zh[s] !== undefined ? zh[s] : s, p);
 // ── §6 THE ORCH GATHER ──────────────────────────────────────────────────────
 console.log('§6 the gather (bulk-resume-routes estimateFor over a fake ledger / cache / sessions)');
 {
-  const { THRESH } = require('../src/account-pool-auto.js');
   const R = require('../src/server/bulk-resume-routes.js');
-  ok('the soft band is the pool\'s own line: 100 − THRESH.fiveHour.hot', R.softBandPct() === 100 - THRESH.fiveHour.hot, R.softBandPct());
   const now = Date.now(), resetSec = Math.floor((now + 2 * 3600e3) / 1000), wStart = resetSec * 1000 - BC.FIVE_HOUR_MS;
   const events = [
     { ts: now - 60e3, sid: 'conv-a', origin: 'main', acct: 'm1', be: 'claude', model: 'claude-opus-5-5', i: 1000, cr: 399000, cw5: 0, cw1: 0 },

@@ -17,10 +17,8 @@
 //                window's whole Δ% to the counted tokens errs the other way — toward a LARGER share — which is the
 //                direction a warning may err in. No basis (a fresh window, < MIN_PCT used, no counted tokens) ⇒ the
 //                percent says «无法估算» — never a made-up number; the dollars still show.
-//   (c) K        «只恢复前 K 个（按最早停止优先）» — the largest prefix of the batch (earliest stop first) that keeps every
-//                member with a basis at or under the soft band (account-pool-auto THRESH.fiveHour.hot: the pool's own
-//                "hot" line, as % USED = 100 − hot). A member with no basis constrains nothing it cannot measure — the
-//                words say which.
+//   (no K cut: the owner's ruling 2026-11-18 — the bulk press is the person's own act and starts all N; the cost is said
+//                before it, and Stop stays at hand while it runs)
 // PURE: imports nothing; the ORCH (src/server/bulk-resume-routes.js) reads the ledger, the caches and the price table.
 
 const OUTPUT_ALLOWANCE = 2000;   // tokens of first output assumed per resumed session (nominal — said under the number)
@@ -58,8 +56,8 @@ function contextOf(rows = []) {
  *  priceOf (model, item) => {input, output, cacheWrite5m, label} USD per million — the live price table's row for that item
  *          (its account, its context size), or null
  *  members {[key]: {name, pctNow (0..100 | null), ratio: windowRatio(...) | null}}
- *  softBandPct  the % USED a window must stay at or under for «只恢复前 K 个» */
-function estimateBatch({ items = [], priceOf = () => null, members = {}, softBandPct = 90, outputAllowance = OUTPUT_ALLOWANCE } = {}) {
+ *  (no «only the first K» cut: the owner's ruling 2026-11-18 — one press starts all N, the cost said before it) */
+function estimateBatch({ items = [], priceOf = () => null, members = {}, outputAllowance = OUTPUT_ALLOWANCE } = {}) {
   const list = (Array.isArray(items) ? items : []).filter((x) => x && x.id).slice().sort((a, b) => num(a.at) - num(b.at) || (String(a.id) < String(b.id) ? -1 : 1));
   const perModel = new Map(), perMember = new Map();
   let usd = 0, coldTokens = 0, unknown = 0, unpriced = 0;
@@ -90,23 +88,11 @@ function estimateBatch({ items = [], priceOf = () => null, members = {}, softBan
     const addPct = ratio ? m.coldTokens / ratio.tokensPerPct : null;
     return { ...m, pctNow, basis: ratio ? { tokensPerPct: ratio.tokensPerPct } : null, addPct, afterPct: addPct !== null && pctNow !== null ? pctNow + addPct : null };
   });
-  // THE K CUT: earliest stop first, every member with a basis kept at or under the soft band
-  const add = new Map(), ratioOf = new Map(memberRows.map((m) => [m.key, m]));
-  let k = 0;
-  for (const it of priced) {
-    const m = ratioOf.get(it.key);
-    if (m && m.basis) {
-      const next = (add.get(it.key) || 0) + it.tokens / m.basis.tokensPerPct;
-      if ((m.pctNow || 0) + next > softBandPct) break;
-      add.set(it.key, next);
-    }
-    k++;
-  }
   const measured = memberRows.filter((m) => m.basis);
   return {
     n: priced.length, usd, coldTokens, outputAllowance, unknownContext: unknown, unpriced,
     perModel: [...perModel.values()], perMember: memberRows,
-    order: priced.map((p) => p.id), k, softBandPct,
+    order: priced.map((p) => p.id),
     // the Settings row's one number: the largest member share (several members ⇒ the dialog has one line each)
     topAddPct: measured.length ? Math.max(...measured.map((m) => m.addPct)) : null,
     unconstrained: memberRows.filter((m) => !m.basis).map((m) => m.key),
@@ -120,7 +106,7 @@ const money = (x) => (x >= 100 ? x.toFixed(0) : x >= 10 ? x.toFixed(1) : x.toFix
 const tok = (x) => (x >= 1e6 ? (x / 1e6).toFixed(2) + ' M' : x >= 1e3 ? Math.round(x / 1e3) + ' k' : String(Math.round(x)));
 const pctText = (x) => (x >= 10 ? Math.round(x) : Math.round(x * 10) / 10);
 
-/** {dollars, allowance, members:[{line, basis}], passive, allButton, kButton|null, unknown|null, unpriced|null} — an item
+/** {dollars, allowance, members:[{line, basis}], passive, allButton, unknown|null, unpriced|null} — an item
  *  with no price row is SAID («n not priced»; the dollars are the priced ones'), never added as if it cost nothing (U2 cure) */
 function costWords(est, tIn) {
   const t = tOf(tIn);
@@ -150,10 +136,9 @@ function costWords(est, tIn) {
   const passive = (est.topAddPct !== null
     ? t('If you resumed them all now: ≈ ${usd} · ≈ {pct} % of the 5 h window', { usd: money(est.usd), pct: pctText(est.topAddPct) })
     : t('If you resumed them all now: ≈ ${usd} · the 5 h share cannot be estimated yet', { usd: money(est.usd) })) + notPriced;
-  const kButton = est.k > 0 && est.k < est.n ? t('Resume only the first {k} (earliest stopped first)', { k: est.k }) : null;
   const unknown = est.unknownContext ? t('{n} sessions have no known context size — not counted', { n: est.unknownContext }) : null;
   const unpriced = est.unpriced ? t('{n} sessions have no price for their model — not counted', { n: est.unpriced }) : null;
-  return { dollars, allowance, members, passive, allButton: t('Resume all ({n})', { n: est.n }), kButton, unknown, unpriced };
+  return { dollars, allowance, members, passive, allButton: t('Resume all ({n})', { n: est.n }), unknown, unpriced };
 }
 
 const WORD_KEYS = Object.freeze([
@@ -162,7 +147,7 @@ const WORD_KEYS = Object.freeze([
   '≈ {add} % of the 5 h window of {member}; it is at {now} % now ⇒ ~{after} % after', '≈ {add} % of the 5 h window of {member}',
   'measured in this window: 1 % ≈ {tokens} tokens', '{member}: cannot estimate — this window has no measured ratio yet',
   'If you resumed them all now: ≈ ${usd} · ≈ {pct} % of the 5 h window', 'If you resumed them all now: ≈ ${usd} · the 5 h share cannot be estimated yet',
-  'Resume only the first {k} (earliest stopped first)', '{n} sessions have no known context size — not counted', 'Resume all ({n})',
+  '{n} sessions have no known context size — not counted', 'Resume all ({n})',
   'This machine’s own login', 'an unknown model (the default price)',
   '{n} sessions have no price for their model — not counted', '{n} not priced',
 ]);

@@ -61,7 +61,7 @@ const TABLES = {
     [m.zoomStep(1.3172, -1), 1.25, 'fit width 131.7% → − → 125% (the next rung down)'],
     [m.zoomStep(1.04, -1), 1, '104% → − → 100%, not 90%'],
     [m.zoomStep(m.ZOOM_MIN, -1), m.ZOOM_MIN, 'the floor holds'],
-    [m.zoomStep(m.ZOOM_MAX, +1), m.ZOOM_MAX, 'the ceiling holds'],
+    [m.zoomStep(m.ZOOM_MAX, +1), m.ZOOM_MAX, 'the ceiling holds'],   // stale-pins: kept — the zoom's own words, not a pin on the bulk dialog
     [m.zoomStep(0.26, -1), 0.25, '26% → − → 25%'],
     [m.zoomStep(2, 0), 2, 'no direction = unchanged'],
   ],

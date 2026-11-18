@@ -22,15 +22,13 @@
 // (the member's 5 h utilization and reset) and the live PRICE table (usage-history priceRowFor) — and decided by PURE
 // src/bulk-resume-cost.js. No vendor call.
 const BC = require('../bulk-resume-cost.js');
-const { THRESH, bucketRemaining } = require('../account-pool-auto.js');
+const { bucketRemaining } = require('../account-pool-auto.js');
 const { globalUsageKeyOf } = require('../backend-caps.js');
 
-const { pressBearer, pageVerdict, ownOriginOf } = require('../write-origin.js');   // EVERY bearer — an agent's vsst_ / jbt_ AND an automation key's vsak_; and a person's own page for the two acts
+const { pressBearer, pressOf, pageVerdict, ownOriginOf } = require('../write-origin.js');   // EVERY bearer — an agent's vsst_ / jbt_ AND an automation key's vsak_; and a person's own page for the two acts
 const LEDGER_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;  // a conversation's last request is looked for this far back
 const ESTIMATE_TTL_MS = 30 * 1000;                     // the Settings row and the dialog may ask in a burst
 
-/** % USED the pool's own "hot" line allows on a 5 h window (account-pool-auto THRESH: % remaining). */
-const softBandPct = () => 100 - ((THRESH && THRESH.fiveHour && Number(THRESH.fiveHour.hot)) || 10);
 
 function create({ activeSessions, getAutoResume = () => null, getUsageHistory = () => null, readCacheFor = () => null, sessionModelFor = () => null, log = () => { } }) {
   let cache = { sig: null, at: 0, est: null };
@@ -89,7 +87,7 @@ function create({ activeSessions, getAutoResume = () => null, getUsageHistory = 
     const memberFacts = {};
     for (const [k, m] of Object.entries(members)) memberFacts[k] = { name: m.name, pctNow: m.pctNow, ratio: BC.windowRatio({ rows: m.rows, pctNow: m.pctNow }) };
     const est = BC.estimateBatch({
-      items, members: memberFacts, softBandPct: softBandPct(),
+      items, members: memberFacts,
       priceOf: (model, it) => { try { return uh && typeof uh.priceRowFor === 'function' ? uh.priceRowFor(model, { acct: (it && it.member && it.member.key) || null, prompt: (it && Number(it.contextTokens)) || 0 }) : null; } catch { return null; } },
     });
     cache = { sig, at: now, est };
@@ -137,6 +135,9 @@ function create({ activeSessions, getAutoResume = () => null, getUsageHistory = 
     });
     app.post('/api/sessions/resume-stopped', (req, res) => {
       try {
+        // THE PERSON'S OWN PRESS (the owner's ruling 2026-11-18): every bearer refused FIRST, then the page — and the press
+        // minted here rides the batch (attended: none counted; write-origin pressOf, test-spend-paths §2b derives this door)
+        if (pressBearer(req.headers)) return res.status(403).json({ error: 'the owner’s bulk act — never a bearer’s route (an agent or an automation key)', code: 'agent_forbidden' });
         if (!person(req, res)) return;
         const b = req.body || {};
         const ar = getAutoResume();
@@ -144,7 +145,7 @@ function create({ activeSessions, getAutoResume = () => null, getUsageHistory = 
         const limit = b.limit === undefined || b.limit === null ? null : Number(b.limit);
         if (limit !== null && !(Number.isInteger(limit) && limit >= 0)) return res.status(400).json({ error: '`limit` must be a whole number' });
         const ids = Array.isArray(b.ids) ? b.ids.map(String).slice(0, 2000) : null;
-        const r = ar.resumeBatch({ limit, ids });
+        const r = ar.resumeBatch({ limit, ids, pressed: pressOf(req) });
         if (r && r.ok === false && r.why === 'in-flight') return res.status(409).json({ ...r, error: 'a resume of the stopped sessions is already running', code: 'in_flight' });
         res.json(r);
       } catch (e) { res.status(500).json({ error: (e && e.message) || String(e) }); }
@@ -172,4 +173,4 @@ function create({ activeSessions, getAutoResume = () => null, getUsageHistory = 
   return { register, stopped, estimateFor };
 }
 
-module.exports = { create, softBandPct, LEDGER_LOOKBACK_MS, ESTIMATE_TTL_MS };
+module.exports = { create, LEDGER_LOOKBACK_MS, ESTIMATE_TTL_MS };

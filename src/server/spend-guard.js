@@ -390,9 +390,18 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     if (!v.ok) {
       const g0 = (v.groups && v.groups[0]) || v;
       // a re-ask of ONE continue (the batch's loop, before each deliver) names ITS conversation in the journal, never «a batch of
-      // 1»; «only the first K» fits every slot of THIS batch's order (A.fitPrefix — U2 cure's shoulds)
-      const one = list.length === 1 ? list[0] : null, fitK = A.fitPrefix(resolved.map((it) => it.identity.key), v.fit);
-      return { fitK, ...sayRefusal({ reason, sessionId: one ? one.sessionId || 'a batch of 1' : `a batch of ${list.length}`, sessionName: one ? one.sessionName || null : null, identity: g0.identity || null, key: g0.identity && g0.identity.key, v: { ...g0, ...v, counts: g0.counts || { hour: 0, day: 0, instanceDay: 0 }, limits: g0.limits || limits(), identity: g0.identity || null }, now, inbox: false }) };
+      // 1» (U2 cure's should)
+      const one = list.length === 1 ? list[0] : null;
+      return sayRefusal({ reason, sessionId: one ? one.sessionId || 'a batch of 1' : `a batch of ${list.length}`, sessionName: one ? one.sessionName || null : null, identity: g0.identity || null, key: g0.identity && g0.identity.key, v: { ...g0, ...v, counts: g0.counts || { hour: 0, day: 0, instanceDay: 0 }, limits: g0.limits || limits(), identity: g0.identity || null }, now, inbox: false });
+    }
+    // AN ATTENDED BATCH HOLDS NOTHING (the owner's ruling 2026-11-18 — the bulk press is the person's own act): one row per
+    // item, no hold — `note()` turns each delivered continue into the attended tally, never a stamp
+    // …and an account it refused (form two — 主开发 16:20Z) hands back its items as SKIPPED rows, by name: the rest go on
+    if (v.attended) {
+      const off = new Map((v.refusedSlots || []).filter((r) => r && r.identity && r.identity.key).map((r) => [String(r.identity.key), r]));
+      for (const r of off.values()) log(`[spend] bulk-resume: ${r.n} on ${r.identity.name || r.identity.key} left stopped — ${r.why}: ${r.detail || ''}`);
+      return { ...v, holds: resolved.filter((it) => !off.has(it.identity.key)).map((it) => ({ sessionId: it.sessionId || null, identity: it.identity, hold: null })),
+        skipped: resolved.filter((it) => off.has(it.identity.key)).map((it) => ({ sessionId: it.sessionId || null, identity: it.identity, why: off.get(it.identity.key).why })) };
     }
     const holds = resolved.map((it) => {
       const hold = `h${++holdSeq}`;
@@ -400,6 +409,19 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       return { sessionId: it.sessionId || null, identity: it.identity, hold };
     });
     return { ...v, holds };
+  }
+
+  /** A QUIET LOOK at what a batch's authorization WOULD answer, per account (the bulk dialog's plan, BEFORE the press — 主开发
+   *  16:20Z: «… 10 on account B are left stopped: B is billing paid overage» is said before as well as after): nothing held,
+   *  nothing journalled, nothing filed, nothing granted. `refusedSlots` = [{identity, why, detail, n}]. */
+  function previewBatch({ reason, items = [], now = Date.now() } = {}) {
+    const resolved = (Array.isArray(items) ? items.filter(Boolean) : []).map((it) => ({ ...it, identity: identityFor(it.session || null, it.identity || null) })).filter((it) => it.identity && it.identity.key);
+    if (!resolved.length) return { refusedSlots: [] };
+    const byKey = new Map();
+    for (const it of resolved) { const g = byKey.get(it.identity.key) || { identity: it.identity, n: 0 }; g.n++; byKey.set(it.identity.key, g); }
+    const v = A.authorizeUnattendedBatch({ reason, groups: [...byKey.values()], state, limits: limits(), overagePolicy: overagePolicy(), pending, now,
+      ofKey: (k) => ({ overage: overageFor(k), credential: credentialFor(k), spendControl: spendControlFor(k) }) });
+    return { refusedSlots: Array.isArray(v.refusedSlots) ? v.refusedSlots : v.ok ? [] : [{ identity: v.identity || null, why: v.why, detail: v.detail, n: resolved.length }] };
   }
 
   /** Renew the batch's holds it has not reached yet (spend-authorizer renewPending) — see authorizeBatch. */
@@ -481,7 +503,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   }
 
   return {
-    authorize, authorizeBatch, renewHolds, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
+    authorize, authorizeBatch, previewBatch, renewHolds, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
     reservationState: (rid) => A.reservationState(state, rid),   // lane queued-is-not-woke round 3: 'converted' | 'reserved' | null
     // B-0a33 round 1: queued-wakes ends the ones no live entry holds. B-0a33 (2): the answer also carries `overCap` (read
     // lazily) — the waiting reservations no cap holds now: server.js wires this ONE function into the ladder, so the

@@ -1006,6 +1006,7 @@ const CONTROL_DOORS = [
   ['src/routes/browser.js', "router.post('/api/browser/takeovers/:id/done'"],
   ['src/routes/browser.js', "router.post('/api/browser/proposals/:id/approve'"],   // r3: the person's Approve (tellProposal) — r1's row, dropped by r2 (accept-r2 confirmed[1])
   ['server.js', "app.post('/api/user-todos/:id'"],   // r2: the 15th door (accept-r1 claim run (a))
+  ['src/server/bulk-resume-routes.js', "app.post('/api/sessions/resume-stopped'"],   // the bulk press (the owner's ruling 2026-11-18: attended)
   ['src/server/browser-stream.js', 'onViewerMessage'],   // r2: the live view's own socket (its Hand back) — r3: the MESSAGE mints, never the handshake
 ];
 // A door refuses EVERY bearer when its first act (after `try {` and the host guard — `refuseHost` / `forHost`, which only
@@ -4788,10 +4789,12 @@ console.log('\n§12 the per-path wake budget on the wake door');
   ok('§12 CONTROL: the budget moved AFTER the pace is RED by the same order check', !(mb > i && mp > mb));
 }
 
-// §13 lane auto-resume-bulk (.349): «恢复所有因用量/过载停止的会话» — ONE owner click, N billed turns, ONE authorization
-// over the WHOLE batch. The PURE batch decision (every slot's share and the instance total against charges AND holds;
-// the first refusal refuses all), the guard's batch gate (N holds that bind every concurrent producer; a refusal holds
-// nothing and is said once), and the census: the bulk site is a GATED row, and without its batch gate it is UNWIRED.
+// §13 lane auto-resume-bulk (.349): «恢复所有因用量/过载停止的会话» — ONE press, N billed turns, ONE authorization over the
+// WHOLE batch. THE OWNER'S RULING 2026-11-18 (B): the press IS THE PERSON'S OWN ACT — reason `bulk-resume` is ATTENDED (none
+// of the N counted, no hold, no stamp; paid overage still refused BY NAME). The batch door's arithmetic is kept and driven on
+// the press-less twin (`auto-resume`, gated — a batch no door pressed is N automatic continues): every slot's share and the
+// instance total against charges AND holds, the first refusal refuses all, N holds that bind every concurrent producer, a
+// refusal holds nothing and is said once. The census: the bulk site is a GATED row, without its batch gate UNWIRED.
 console.log('\n§13 the bulk resume: one authorization for N turns (all or nothing)');
 {
   const L = { perIdentityHour: 5, perIdentityDay: 50, perInstanceDay: 8, noticePct: 0 };
@@ -4799,7 +4802,17 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   const stamps = (k, n, now) => Array.from({ length: n }, (_, i) => ({ at: now - (i + 1) * 60e3, reason: 'auto-resume' }));
   const now = Date.now();
   const state = { v: 1, identities: { 'sub-a': stamps('sub-a', 2, now) }, instance: stamps('i', 2, now), notices: {} };
-  const B = (groups, extra = {}) => A.authorizeUnattendedBatch({ reason: 'bulk-resume', groups, state, limits: L, now, ...extra });
+  const TWIN = 'auto-resume';   // the press-less twin: the batch door's arithmetic, on a gated reason
+  const B = (groups, extra = {}) => A.authorizeUnattendedBatch({ reason: TWIN, groups, state, limits: L, now, ...extra });
+  // THE ATTENDED PRESS (the owner's ruling 2026-11-18): far over every cap, it is still allowed — and the brakes that bind a press bind it
+  ok('§13 PURE: `bulk-resume` is a row of the spend reasons marked ATTENDED', A.SPEND_REASONS['bulk-resume'] && A.SPEND_REASONS['bulk-resume'].attended === true);
+  const att = (groups, extra = {}) => A.authorizeUnattendedBatch({ reason: 'bulk-resume', groups, state, limits: L, now, ...extra });
+  ok('§13 PURE ATTENDED: 40 on A + 40 on B (A\'s hour 2 of 5, the instance\'s day 2 of 8) is ALLOWED — none counted against the caps', (() => { const v = att([{ identity: IA, n: 40 }, { identity: IB, n: 40 }]); return v.ok === true && v.attended === true; })());
+  // FORM TWO (主开发 2026-11-18 16:20Z — «an ACCOUNT already in paid overage is still refused: the account, not the press»)
+  ok('§13 PURE ATTENDED: paid overage in use on B refuses B BY NAME — and A\'s share goes on (the account, not the press)', (() => { const v = att([{ identity: IA, n: 3 }, { identity: IB, n: 2 }], { ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.ok === true && v.attended === true && v.groups.length === 1 && v.refusedSlots.length === 1 && v.refusedSlots[0].identity.key === 'sub-b' && v.refusedSlots[0].why === 'overage-in-use' && v.refusedSlots[0].n === 2 && /B/.test(v.refusedSlots[0].detail); })());
+  ok('§13 PURE ATTENDED: …EVERY account in overage ⇒ the press starts nothing, refused, each account named', (() => { const v = att([{ identity: IA, n: 1 }, { identity: IB, n: 1 }], { ofKey: () => ({ overage: { inUse: 'yes' } }) }); return v.ok === false && v.why === 'overage-in-use' && v.refusedSlots.map((r) => r.identity.key).join() === 'sub-a,sub-b'; })());
+  ok('§13 PURE CONTROL: the gated twin stays ALL OR NOTHING — overage on B refuses its whole batch', (() => { const v = B([{ identity: IA, n: 1 }, { identity: IB, n: 1 }], { ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.ok === false && v.why === 'overage-in-use' && !v.refusedSlots; })());
+  ok('§13 PURE CONTROL: the same 40 + 40 on the gated twin is refused by the hour cap', B([{ identity: IA, n: 40 }, { identity: IB, n: 40 }]).why === 'hour-cap');
   ok('§13 PURE: A holds 2 of 5 this hour ⇒ a share of 3 on A + 2 on B fits (instance 2 + 5 = 7 ≤ 8)', B([{ identity: IA, n: 3 }, { identity: IB, n: 2 }]).ok === true);
   const r1 = B([{ identity: IA, n: 4 }, { identity: IB, n: 1 }]);
   ok('§13 PURE: a share of 4 on A (2 + 4 > 5) refuses the WHOLE batch, naming the bucket and the slot', r1.ok === false && r1.why === 'hour-cap' && r1.identity && r1.identity.key === 'sub-a' && /this batch needs 4 more/.test(r1.detail) && r1.n === 5, JSON.stringify(r1));
@@ -4818,40 +4831,45 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   const settings = { 'spend.unattendedPerIdentityHour': 3, 'spend.unattendedPerInstanceDay': 100 };
   const g = guardMod.create({ dataDir: dir, serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: (k, it) => { todos.push(it); } }), log: () => { } });
   const sess = (slot, id) => ({ session: { _slot: slot, name: id }, sessionId: id, sessionName: id });
-  const ok1 = g.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'a1'), sess('A', 'a2'), sess('B', 'b1')] });
+  { // THE ATTENDED PRESS ON THE GUARD: no hold, nothing bound, no stamp — the attended tally sees each delivered continue
+    const gA = guardMod.create({ dataDir: tmpdir('vs-spend-bulkatt-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
+    const many = Array.from({ length: 10 }, (_, i) => sess('A', 'p' + i));
+    const vA = gA.authorizeBatch({ reason: 'bulk-resume', items: many });
+    ok('§13 GUARD ATTENDED: a press of 10 on A (cap 3 an hour) is allowed with one row per item and NO hold — nothing booked', vA.ok === true && vA.attended === true && vA.holds.length === 10 && vA.holds.every((h) => h.hold === null && h.identity.key === 'A') && gA.snapshot().holdsOpen === 0, JSON.stringify({ ok: vA.ok, why: vA.why, holds: (vA.holds || []).length, open: gA.snapshot().holdsOpen }));
+    for (const h of vA.holds) gA.note({ reason: 'bulk-resume', identity: h.identity, hold: h.hold });
+    const b0 = gA.snapshot().budget;
+    ok('§13 GUARD ATTENDED: the 10 delivered continues write NO stamp to the unattended ledger — 10 in the attended tally', (b0.identities.A || []).length === 0 && (b0.instance || []).length === 0 && (b0.attended || []).filter((x) => x.reason === 'bulk-resume').length === 10, JSON.stringify({ a: (b0.identities.A || []).length, att: (b0.attended || []).length }));
+    const x3 = [0, 1, 2].map(() => gA.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }));
+    ok('§13 GUARD ATTENDED: …and A\'s hourly room is whole for its OWN automatic continues (3 of 3 still authorized)', x3.every((x) => x.ok === true), JSON.stringify(x3.map((x) => x.why)));
+  }
+  { // FORM TWO on the guard: B in paid overage — A's items go on, B's come back SKIPPED by name; the plan's preview is QUIET
+    const logsB = [], todosB = [];
+    const gB = guardMod.create({ dataDir: tmpdir('vs-spend-bulkov-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, readCacheFor: (k) => (k === 'B' ? { overage: { inUse: true, asOf: Date.now() - 60e3 } } : null), getUserTodos: () => ({ add: (k, it) => { todosB.push(it); } }), log: (l) => logsB.push(String(l)) });
+    const items = [sess('A', 'a1'), sess('B', 'b1'), sess('A', 'a2'), sess('B', 'b2')];
+    const pv = gB.previewBatch({ reason: 'bulk-resume', items });
+    const quiet = logsB.length === 0 && todosB.length === 0 && gB.snapshot().holdsOpen === 0;
+    ok('§13 GUARD previewBatch: B named (overage-in-use, 2 conversations) — and QUIET: nothing held, nothing journalled, nothing filed', pv.refusedSlots.length === 1 && pv.refusedSlots[0].identity.key === 'B' && pv.refusedSlots[0].why === 'overage-in-use' && pv.refusedSlots[0].n === 2 && quiet, JSON.stringify({ pv, logsB, todosB }));
+    const vB = gB.authorizeBatch({ reason: 'bulk-resume', items });
+    ok('§13 GUARD ATTENDED FORM TWO: the press holds rows for A\'s two only; B\'s two come back SKIPPED, by name and rule; the journal names B; no For-you item', vB.ok === true && vB.holds.map((h) => h.sessionId).join() === 'a1,a2' && vB.skipped.map((x) => `${x.sessionId}:${x.identity.key}:${x.why}`).join() === 'b1:B:overage-in-use,b2:B:overage-in-use' && logsB.some((l) => /bulk-resume: 2 on B left stopped — overage-in-use/.test(l)) && todosB.length === 0, JSON.stringify({ vB, logsB }));
+  }
+  const ok1 = g.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), sess('A', 'a2'), sess('B', 'b1')] });
   ok('§13 GUARD: an allowed batch opens ONE hold per item, each on the slot it will bill', ok1.ok && ok1.holds.length === 3 && ok1.holds.filter((h) => h.identity.key === 'A').length === 2 && g.snapshot().holdsOpen === 3, JSON.stringify(ok1.holds));
   ok('§13 GUARD: …and those holds BIND a concurrent single producer (A has 2 held of 3 ⇒ one more fits, two do not)', (() => { const x = g.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }); const y = g.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }); g.release({ hold: x.hold }); return x.ok && !y.ok && y.why === 'hour-cap'; })());
-  for (const h of ok1.holds) g.note({ reason: 'bulk-resume', identity: h.identity, hold: h.hold });
-  ok('§13 GUARD: each delivered turn converts its hold into ONE stamp under bulk-resume (no double count)', g.snapshot().holdsOpen === 0 && (g.snapshot().budget.identities.A || []).filter((s) => s.reason === 'bulk-resume').length === 2);
-  const no = g.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'a3'), sess('A', 'a4')] });
+  for (const h of ok1.holds) g.note({ reason: TWIN, identity: h.identity, hold: h.hold });
+  ok('§13 GUARD (the twin): each delivered turn converts its hold into ONE stamp under its reason (no double count)', g.snapshot().holdsOpen === 0 && (g.snapshot().budget.identities.A || []).filter((s) => s.reason === TWIN).length === 2);
+  const no = g.authorizeBatch({ reason: TWIN, items: [sess('A', 'a3'), sess('A', 'a4')] });
   ok('§13 GUARD: a batch that does not fit is refused WHOLE — no hold opened, its bucket + slot named', no.ok === false && no.why === 'hour-cap' && !no.holds && g.snapshot().holdsOpen === 0 && /A has spent 2/.test(no.detail), JSON.stringify(no));
   ok('§13 a refusal made by HOLDS alone promises no instant (retryAfter 0 — never «Next allowed after 12/31/1969»)', /Next allowed after 12\/31\/1969|1970/.test(todos.map((x) => x.text).join()) === false && A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IA, state: A.emptyBudget(), limits: L, now, pending: Array.from({ length: 5 }, (_, i) => ({ id: 'p' + i, key: 'sub-a', at: now })) }).retryAfter === 0, JSON.stringify(todos.map((x) => x.text)));
   ok('§13 the refusal carries the bucket\'s numbers for the person\'s words: A has LEFT 1 of 3 this hour, the batch NEEDS 2', no.left === 1 && no.need === 2, JSON.stringify({ left: no.left, need: no.need }));
-  ok('§13 …and the K that fits THIS batch (fitK): A has room for 1 ⇒ the first 1', no.fitK === 1, JSON.stringify({ fitK: no.fitK }));
-  // «ONLY THE FIRST K» FITS EVERY ACCOUNT (主开发's should on the U2 cure, 2026-11-18 11:47Z): K was the FIRST refusing slot's
-  // room alone — over two accounts, A (room 3) and B (room 1), in the order A B B A A A, that K = 3 takes A B B and B refuses
-  // the second press too; the K that fits every slot and the instance is 2
-  {
-    const st2 = { v: 1, identities: { 'sub-a': stamps('sub-a', 2, now), 'sub-b': stamps('sub-b', 4, now) }, instance: stamps('i', 2, now), notices: {} };
-    const keys = ['sub-a', 'sub-b', 'sub-b', 'sub-a', 'sub-a', 'sub-a'];
-    const grp = (ks) => { const m = new Map(); for (const k of ks) m.set(k, (m.get(k) || 0) + 1); return [...m].map(([k, n]) => ({ identity: k === 'sub-a' ? IA : IB, n })); };
-    const BB = (ks) => A.authorizeUnattendedBatch({ reason: 'bulk-resume', groups: grp(ks), state: st2, limits: L, now });
-    const r = BB(keys), K = A.fitPrefix(keys, r.fit), again = BB(keys.slice(0, r.left || 0));
-    ok('§13 PURE fitPrefix: A room 3, B room 1, the order A B B A A A ⇒ the first 2 fit every slot — and THAT batch is allowed', r.ok === false && r.identity && r.identity.key === 'sub-a' && r.left === 3 && K === 2 && BB(keys.slice(0, K)).ok === true, JSON.stringify({ fit: r.fit, K, left: r.left }));
-    ok('§13 CONTROL: the old K (the first refusal\'s room alone, 3) is refused AGAIN — by B: the second press the should named', again.ok === false && again.identity && again.identity.key === 'sub-b', JSON.stringify({ why: again.why, who: again.identity }));
-    ok('§13 PURE fitPrefix: the instance\'s room bounds it too; a slot with no room named has none; no fit ⇒ null', A.fitPrefix(['sub-a', 'sub-a'], { byKey: { 'sub-a': 5 }, instance: 1 }) === 1 && A.fitPrefix(['x'], { byKey: {}, instance: 9 }) === 0 && A.fitPrefix(['sub-a'], null) === null);
-    ok('§13 PURE: a refusal that is not a cap\'s (paid overage on B) leaves B no room — the K stops before B\'s first item', (() => { const v = A.authorizeUnattendedBatch({ reason: 'bulk-resume', groups: [{ identity: IA, n: 1 }, { identity: IB, n: 1 }], state, limits: L, now, ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.why === 'overage-in-use' && v.fit.byKey['sub-b'] === 0 && A.fitPrefix(['sub-a', 'sub-b'], v.fit) === 1; })());
-    ok('§13 the dialog\'s «Resume only the first K» after a refusal reads fitK, never the first refusal\'s room alone', /Number\.isFinite\(rec\.refused\.fitK\) \? Math\.min\(rec\.refused\.fitK, p\.eligible\.length\)/.test(read('src/lib/bulk-resume.js')) && !/Math\.min\(rec\.refused\.left/.test(read('src/lib/bulk-resume.js')));   // stale-pins: kept — an absence check: the first refusal's room alone is gone on purpose
-  }
   // A RE-ASK OF ONE CONTINUE NAMES ITS CONVERSATION in the journal (the U2 cure's should): the batch's loop asks again before each
   // deliver with a batch of one — its refusal line said «for a batch of 1»
   {
     const logs9 = [];
     const g9 = guardMod.create({ dataDir: tmpdir('vs-spend-bulk9-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: (l) => logs9.push(String(l)) });
-    const full = g9.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'x1'), sess('A', 'x2'), sess('A', 'x3')] });
-    for (const h of full.holds || []) g9.note({ reason: 'bulk-resume', identity: h.identity, hold: h.hold });
-    const solo = g9.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'solo')] });
-    ok('§13 GUARD: a refused batch of ONE names its conversation in the journal («for solo»), never «a batch of 1»', solo.ok === false && solo.why === 'hour-cap' && logs9.some((l) => /refused bulk-resume for solo on A/.test(l)) && !logs9.some((l) => /a batch of 1\b/.test(l)), JSON.stringify(logs9));
+    const full = g9.authorizeBatch({ reason: TWIN, items: [sess('A', 'x1'), sess('A', 'x2'), sess('A', 'x3')] });
+    for (const h of full.holds || []) g9.note({ reason: TWIN, identity: h.identity, hold: h.hold });
+    const solo = g9.authorizeBatch({ reason: TWIN, items: [sess('A', 'solo')] });
+    ok('§13 GUARD: a refused batch of ONE names its conversation in the journal («for solo»), never «a batch of 1»', solo.ok === false && solo.why === 'hour-cap' && logs9.some((l) => /refused auto-resume for solo on A/.test(l)) && !logs9.some((l) => /a batch of 1\b/.test(l)), JSON.stringify(logs9));
   }
   // RENEWAL (U2 cure, the adversarial read's MUST 1): a batch opens its holds at once and delivers them paced behind bounded
   // gates — a batch longer than RESERVE_TTL_MS must not lose the holds it has not reached yet
@@ -4859,11 +4877,11 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   {
     const t0 = Date.now(), TTL = A.RESERVE_TTL_MS;
     const mk3 = () => guardMod.create({ dataDir: tmpdir('vs-spend-bulk3-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
-    const g3 = mk3(), b3 = g3.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'r1'), sess('A', 'r2')], now: t0 });
+    const g3 = mk3(), b3 = g3.authorizeBatch({ reason: TWIN, items: [sess('A', 'r1'), sess('A', 'r2')], now: t0 });
     g3.renewHolds(b3.holds.map((h) => h.hold), t0 + TTL - 10000);
     const x1 = g3.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20000 }), x2 = g3.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20001 });
     ok('§13 GUARD: RENEWED batch holds outlive their first lifetime and still BIND (2 held of 3 ⇒ one more fits, a second does not)', b3.ok && x1.ok === true && x2.ok === false && x2.why === 'hour-cap', JSON.stringify({ x1: x1.ok, x2: x2.why }));
-    const g4 = mk3(); g4.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'r1'), sess('A', 'r2')], now: t0 });
+    const g4 = mk3(); g4.authorizeBatch({ reason: TWIN, items: [sess('A', 'r1'), sess('A', 'r2')], now: t0 });
     const y1 = g4.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20000 }), y2 = g4.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' }, now: t0 + TTL + 20001 });
     ok('§13 CONTROL: the same batch NOT renewed loses its holds past the lifetime — two more fit (the leg above would go red)', y1.ok === true && y2.ok === true);
   }
@@ -4871,11 +4889,11 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   const todos2 = [];
   const logs2 = [];
   const g2 = guardMod.create({ dataDir: tmpdir('vs-spend-bulk2-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: (k, it) => { todos2.push(it); } }), log: (l) => logs2.push(String(l)) });
-  g2.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'a1'), sess('A', 'a2'), sess('A', 'a3'), sess('A', 'a4')] });
-  ok('§13 GUARD: a BATCH refusal is answered in the person\'s own dialog — NO For-you item (its words would say what the bucket used, not what the batch needs); the journal says it once', todos2.length === 0 && logs2.filter((l) => /refused bulk-resume/.test(l)).length === 1 && logs2.some((l) => /this batch needs 4 more/.test(l)), JSON.stringify({ todos2, logs2 }));
-  g2.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'a1'), sess('A', 'a2'), sess('A', 'a3'), sess('A', 'a4')] });
+  g2.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), sess('A', 'a2'), sess('A', 'a3'), sess('A', 'a4')] });
+  ok('§13 GUARD: a BATCH refusal is answered in the person\'s own dialog — NO For-you item (its words would say what the bucket used, not what the batch needs); the journal says it once', todos2.length === 0 && logs2.filter((l) => /refused auto-resume/.test(l)).length === 1 && logs2.some((l) => /this batch needs 4 more/.test(l)), JSON.stringify({ todos2, logs2 }));
+  g2.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), sess('A', 'a2'), sess('A', 'a3'), sess('A', 'a4')] });
   ok('§13 GUARD: …and a second press of the same refusal files nothing either', todos2.length === 0);
-  const un = g.authorizeBatch({ reason: 'bulk-resume', items: [sess('B', 'b2'), { session: { name: 'ghost' }, sessionId: 'g', sessionName: 'ghost' }] });
+  const un = g.authorizeBatch({ reason: TWIN, items: [sess('B', 'b2'), { session: { name: 'ghost' }, sessionId: 'g', sessionName: 'ghost' }] });
   ok('§13 GUARD FAIL CLOSED: one conversation whose slot cannot be named refuses the batch (no hold for the others)', un.ok === false && un.why === 'identity-unknown' && g.snapshot().holdsOpen === 0, JSON.stringify(un));
 
   // the census: the bulk site is a GATED row; without its batch gate it reads UNWIRED
@@ -4889,11 +4907,25 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   const mDir = tmpdir('vs-spend-bulkmut-');
   fs.mkdirSync(path.join(mDir, 'src', 'server'), { recursive: true });
   const from = '      v = authorizeSpendBatch\n        ? authorizeSpendBatch(chosen.map(';
-  const fromMoved = 'v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }]) : null;';   // the per-continue re-ask on the slot that bills (lg-recovery U2 cure: every item, moved or not)
-  fs.writeFileSync(path.join(mDir, 'src/server/auto-resume.js'), arSrc.replace(from, '      v = authorizeSpendBatch\n        ? ((x) => ({ ok: true, holds: x }))(chosen.map(').replace(fromMoved, 'v2 = ((x) => ({ ok: true, holds: x }))([{ sessionId: e.id, identity: bill, hold: null }]);'));
+  const fromMoved = 'v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }], paid.spendReason) : null;';   // the per-continue re-ask on the slot that bills (lg-recovery U2 cure: every item, moved or not)
+  fs.writeFileSync(path.join(mDir, 'src/server/auto-resume.js'), arSrc.replace(from, '      v = authorizeSpendBatch\n        ? ((x) => ({ ok: true, holds: x }))(chosen.map(').replace(fromMoved, 'v2 = ((x) => ({ ok: true, holds: x }))([{ sessionId: e.id, identity: bill, hold: null }], paid.spendReason);'));
   const mRows = censusOver(mDir, ['src/server/auto-resume.js']).filter((h) => h.prim === 'continue-send');
   ok('§13 CENSUS MUTANT: the same file without its two batch gates (the batch\'s, the per-continue re-ask\'s) reads the bulk site UNWIRED (and the single one still GATED)', arSrc.includes(from) && arSrc.includes(fromMoved) && mRows.length === 2 && mRows.filter((h) => !h.gated).length === 1 && mRows.find((h) => !h.gated).line === bulkLine, JSON.stringify(mRows));
-  ok('§13 WIRING: server.js hands the core the REAL batch gate and the batch charge, under the declared reason', /authorizeSpendBatch: \(items\) => spendGuard\.authorizeBatch\(\{ reason: 'bulk-resume'/.test(read('server.js')) && /renewSpend: \(holds\) => spendGuard\.renewHolds\(holds\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold\) => spendGuard\.note\(\{ reason: 'bulk-resume'/.test(read('server.js')));
+  ok('§13 WIRING: server.js hands the core the REAL batch gate and the batch charge, under the reason the core chose', /authorizeSpendBatch: \(items, reason\) => spendGuard\.authorizeBatch\(\{ reason, items: items\.map\(/.test(read('server.js')) && /renewSpend: \(holds\) => spendGuard\.renewHolds\(holds\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold, reason\) => spendGuard\.note\(\{ reason, session: s, identity, hold \}\)/.test(read('server.js')));
+  ok('§13 THE PRESS (the owner\'s ruling 2026-11-18): the core selects the attended reason ONLY on the press its door minted (else the gated twin), and that reason rides the batch\'s authorization, every re-ask and every charge', /const paid = isPress\(pressed\) \? \{ spendReason: 'bulk-resume' \} : \{ spendReason: 'auto-resume' \};/.test(arSrc) && (arSrc.match(/paid\.spendReason/g) || []).length === 3);
+  { const rt = read('src/server/bulk-resume-routes.js'), h = rt.indexOf("app.post('/api/sessions/resume-stopped'"), body = rt.slice(h, rt.indexOf('app.post(', h + 10));
+    ok('§13 THE DOOR: POST /api/sessions/resume-stopped refuses EVERY bearer first, then the page, and mints the press it hands the batch (pressOf(req))', h > 0 && /try \{\s*(?:\/\/[^\n]*\n\s*)*if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(body) && /ar\.resumeBatch\(\{ limit, ids, pressed: pressOf\(req\) \}\)/.test(body)); }
+  { // THE REAL DOOR, driven (the read's should): a person's page reaches the batch WITH a press; every bearer is refused first; a header-less local request is not a press
+    const R = require(path.join(REPO, 'src/server/bulk-resume-routes.js'));
+    const seen = [], routes = {};
+    const arStub = { resumeBatch: (o) => { seen.push(WO.isPress(o && o.pressed)); return { ok: true, batchId: 'rb-door', planned: 0, done: true }; } };
+    R.create({ activeSessions: new Map(), getAutoResume: () => arStub }).register({ get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; } });
+    const hit = (headers) => { let st = 200, body = null; const res = { status: (c) => { st = c; return res; }, json: (o) => { body = o; return res; } }; routes['POST /api/sessions/resume-stopped']({ headers, body: {}, socket: {} }, res); return { st, code: body && body.code }; };
+    const page = hit({ 'sec-fetch-site': 'same-origin' });
+    const bearers = ['vsst_t', 'jbt_t', 'vsak_t'].map((k) => hit({ authorization: 'Bearer ' + k, 'sec-fetch-site': 'same-origin' }));
+    const bare = hit({});
+    ok('§13 THE REAL DOOR: a person\'s page (same-origin) reaches the batch WITH a press (attended); vsst_ / jbt_ / vsak_ bearers are 403 agent_forbidden even beside a page header; a header-less request is 403 not_a_page — the batch never hears either', page.st === 200 && seen.join() === 'true' && bearers.every((b) => b.st === 403 && b.code === 'agent_forbidden') && bare.st === 403 && bare.code === 'not_a_page', JSON.stringify({ page, bearers, bare, seen }));
+  }
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);

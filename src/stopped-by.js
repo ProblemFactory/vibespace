@@ -99,7 +99,7 @@ function stillWalled(sb, verdict = null, now = Date.now()) {
 }
 
 /** THE BATCH'S PLAN. rows: [{id, name, stoppedBy, live, streaming, canResume, quarantined, verdict}] → who is resumed,
- *  in which order (EARLIEST STOP FIRST — the order «只恢复前 K 个» cuts), and who is skipped and why. Skip reasons:
+ *  in which order (EARLIEST STOP FIRST), and who is skipped and why. Skip reasons:
  *    walled       its wall has not reset (`until` = when it does, null = not known)
  *    running      it is already running a turn — nothing to resume
  *    gone         no live process to continue (a resume of a stopped process is a respawn, not a continue)
@@ -189,6 +189,7 @@ const SKIP_KEYS = Object.freeze({
   pending: 'a continue onto it is already on its way',
   'moved-refused': 'the account it moved to refused the spend',
   refused: 'the spend guard refused it now',   // U2 cure (law 1): the authorizer re-asked before THIS continue said no
+  'account-refused': 'left stopped',            // form two (主开发 2026-11-18 16:20Z): the press is refused on ITS account — named
 });
 /** The authorizer's OWN reasons (src/spend-authorizer.js `why`) in a person's words — a skipped row says WHICH rule refused
  *  it (U2 cure, law 1). A reason not listed says the skip alone (never a raw code). */
@@ -200,14 +201,24 @@ const REFUSED_KEYS = Object.freeze({
   'day-cap': 'its account used its turns nobody typed today',
   'instance-cap': 'this VibeSpace used its turns nobody typed today',
 });
+/** …the same refusals with the ACCOUNT named (form two — 主开发 2026-11-18 16:20Z: «B is billing paid overage»). */
+const REFUSED_NAMED_KEYS = Object.freeze({
+  'overage-in-use': '{member} is billing paid overage',
+  'identity-cannot-serve': '{member} cannot serve a turn now',
+  'spend-control-reached': '{member} reached the spend control set with its vendor',
+});
+/** An account in a person's words: the machine's own login (its ledger key `__global__…`) is never shown as its key. */
+function memberWords(m, tIn) { const t = tOf(tIn); return /^__global/.test(String(m || '')) ? t('This machine’s own login') : String(m || ''); }
 /** The authorizer's reason in a person's words, or null (a reason not in the table) — the dialog's refusal line reads it. */
 function refusedWords(why, tIn) { const k = REFUSED_KEYS[why]; return k ? tOf(tIn)(k) : null; }
 /** One skipped row's words: «仍在限额内，至 14:00». */
 function skipWords(s, tIn, { now = Date.now(), clock = isoClock } = {}) {
   const t = tOf(tIn);
   let why = t(SKIP_KEYS[s && s.why] || 'skipped');
+  const named = s && s.member && s.reason ? REFUSED_NAMED_KEYS[s.reason] : null;   // the account BY NAME (form two)
   const r = s && s.reason ? REFUSED_KEYS[s.reason] : null;
-  if (r) why = t('{why} ({reason})', { why, reason: t(r) });
+  if (named) why = t('{why} ({reason})', { why, reason: t(named, { member: memberWords(s.member, t) }) });
+  else if (r) why = t('{why} ({reason})', { why, reason: t(r) });
   return s && s.until ? t('{why} until {time}', { why, time: clock(s.until, now) }) : why;
 }
 /** THE SKIPPED ROWS GROUPED BY REASON (U2 cure: never cut with «and n more» — every row, under its reason with its count):
@@ -217,9 +228,9 @@ function skipGroups(rows, tIn) {
   const by = new Map();
   for (const x of Array.isArray(rows) ? rows : []) {
     if (!x) continue;
-    const key = `${x.why || ''}|${x.reason || ''}`;
+    const key = `${x.why || ''}|${x.reason || ''}|${x.member || ''}`;   // one group per refused ACCOUNT (form two)
     let g = by.get(key);
-    if (!g) { g = { key, words: skipWords({ why: x.why, reason: x.reason }, t), rows: [] }; by.set(key, g); }
+    if (!g) { g = { key, words: skipWords({ why: x.why, reason: x.reason, member: x.member }, t), rows: [] }; by.set(key, g); }
     g.rows.push(x);
   }
   return [...by.values()].map((g) => ({ ...g, n: g.rows.length, head: t('{why} — {n}', { why: g.words, n: g.rows.length }) }));
@@ -251,11 +262,11 @@ const WORD_KEYS = Object.freeze([
   'Resume every session a usage limit or overload stopped ({n})', 'No sessions stopped by a limit', 'The stopped session cannot be resumed now', 'None of the {m} stopped sessions can be resumed now',
   ...Object.values(SKIP_KEYS), 'skipped', '{why} until {time}',
   'Resumed {n}', 'skipped {n} (still inside a limit)', 'skipped {n} ({w} still inside a limit)', 'skipped {n}', 'refused {n}', 'could not deliver {n}', 'not reached {n}',
-  ...Object.values(REFUSED_KEYS), '{why} ({reason})', '{why} — {n}', 'stopped {n}',
+  ...Object.values(REFUSED_KEYS), ...Object.values(REFUSED_NAMED_KEYS), 'This machine’s own login', '{why} ({reason})', '{why} — {n}', 'stopped {n}',
 ]);
 
 module.exports = {
-  STOP_KINDS, SAID_MAX, SKIP_KEYS, REFUSED_KEYS, WORD_KEYS,
+  STOP_KINDS, SAID_MAX, SKIP_KEYS, REFUSED_KEYS, REFUSED_NAMED_KEYS, WORD_KEYS,
   boundSaid, isOverloadError, stopVerdict, normalizeStoppedBy, liveFactOf, isStoppedBy, stillWalled, planBatch,
-  chipWords, filterWords, autoResumeAllWords, resumeButtonWords, waitingCount, skipWords, skipGroups, summaryWords, refusedWords,
+  chipWords, filterWords, autoResumeAllWords, resumeButtonWords, waitingCount, skipWords, skipGroups, summaryWords, refusedWords, memberWords,
 };

@@ -44,6 +44,7 @@ const path = require('path');
 const { windowOpened } = require('../auto-resume-signal.js'); // PURE: does this reading say the wall is gone?
 const harnesses = require('../harnesses');                    // the descriptor registry: THE resume verb lives there
 const { toAgentText } = require('../peer-text.js');          // PURE: the one belt on a name an agent reads (the account label)
+const { isPress } = require('../write-origin.js');           // the bulk press is ATTENDED only on a press its door minted (the owner's ruling 2026-11-18)
 const { familyOfModel, projectCacheForFamily } = require('../model-family.js');   // PURE: does a request's model draw a model cap (capDrawnBy — the ONE family door)
 
 // THE CONTINUE AN AGENT READS (lane resume-words, the owner 2026-10-29: «agent 都会优先理解那个 claude 自己的 reset
@@ -391,17 +392,21 @@ function writeJsonAtomic(file, obj) {
  */
 /**
  * THE BULK ACTS (lane auto-resume-bulk, .349) — deps:
- * @param deps.authorizeSpendBatch (items:[{id, session, identity}]) => {ok, why, detail, holds:[{sessionId, identity, hold}]}
- *        THE BATCH GATE: one owner click that opens N billed continues is ONE authorization (spend-guard
- *        authorizeBatch, reason 'bulk-resume'). Absent = the batch is REFUSED (fail closed — there is no "absent means
- *        a test" here: a batch with no gate is a money road nobody wired).
+ * @param deps.authorizeSpendBatch (items:[{id, session, identity}], reason) => {ok, why, detail, holds:[{sessionId, identity, hold}]}
+ *        THE BATCH GATE: one press that opens N billed continues is ONE authorization (spend-guard authorizeBatch) under
+ *        the reason the press selected — 'bulk-resume', ATTENDED (the owner's ruling 2026-11-18: none counted, no hold;
+ *        paid overage still refused by name), or, with no press, its gated twin 'auto-resume'. Absent = the batch is
+ *        REFUSED (fail closed — there is no "absent means a test" here: a batch with no gate is a money road nobody wired).
+ * @param deps.previewSpendBatch (items:[{id, session, identity}]) => {refusedSlots:[{identity, why, detail, n}]} — the guard's QUIET
+ *        look (nothing held, said or granted) at the press's authorization: the plan leaves a refused account's conversations
+ *        stopped, by name, BEFORE the press (主开发 2026-11-18 16:20Z — form two).
  * @param deps.workflowRunAtWall (id, session, {fireAt}) => Promise<{runId, unfinished}|null> — B-3437: the Workflow run this
  *        conversation's usage wall cut short (src/server/auto-resume-workflow.js: off the main loop, bounded), asked every two
  *        minutes while the wall's arm stands; the continue names only a fresh answer.
  * @param deps.renewSpend (holds:[holdId]) => void — the holds the batch has not reached yet are renewed on every pass (a
  *        batch can outlive one hold's lifetime; an expired hold would let another producer into the budget it charges).
- * @param deps.noteBatchSpend (id, session, identity, hold) => void — a DELIVERED batch continue is charged (reason
- *        'bulk-resume'), converting the hold the batch authorization opened for it; an undelivered one is released.
+ * @param deps.noteBatchSpend (id, session, identity, hold, reason) => void — a DELIVERED batch continue is noted under the
+ *        batch's reason: attended ⇒ the attended tally (no stamp, no hold); its gated twin ⇒ the hold converted into the stamp.
  * @param deps.wallVerdict (id, session) => {usable, blockedUntil}|null — the pool's LIVE answer for this conversation
  *        (the engine's quotaVerdictFor): a quota-stopped session whose wall has not reset is SKIPPED, never retried.
  * @param deps.clearStopped (id, session, why) => void — the stop fact is cleared when a continue starts the turn.
@@ -413,7 +418,7 @@ function writeJsonAtomic(file, obj) {
  * @param deps.onListChange () => void — ONE list broadcast per bulk act (never one per session).
  */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
-  modelOf = null, workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
+  modelOf = null, previewSpendBatch = null, workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
@@ -649,20 +654,40 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     return rows;
   }
   /** The plan as the Settings row / the dialog shows it BEFORE anything runs. */
+  /** A conversation left stopped because the press is refused on ITS account — the row names the account and the rule. */
+  const accountSkip = (e, r) => ({ id: e.id, name: e.name, kind: e.kind, at: e.at, why: 'account-refused', until: null, reason: String((r && r.why) || 'refused').slice(0, 60), member: String((r && r.identity && (r.identity.name || r.identity.key)) || '').slice(0, 80) || null });
   function stoppedPlan(now = Date.now()) {
     const rows = stoppedRows(now);
     const plan = planBatch(rows, { now });
     const byId = new Map(rows.map((r) => [r.id, r]));
     plan.eligible = plan.eligible.map((e) => ({ ...e, identity: byId.get(e.id) ? byId.get(e.id).identity : null }));
+    // THE ACCOUNT, NOT THE PRESS — SAID BEFORE IT (主开发 2026-11-18 16:20Z): an account the press would be refused on (paid
+    // overage, a credential that cannot serve, the spend control) — its conversations leave the eligible set for the skipped
+    // one, BY NAME, so the dialog's N, its cost and its list are what the press will do; the press asks the guard again
+    if (previewSpendBatch && plan.eligible.length) {
+      let pv = null;
+      try { pv = previewSpendBatch(plan.eligible.map((e) => ({ id: e.id, session: activeSessions.get(e.id) || null, identity: e.identity || null }))); } catch (e) { pv = null; log('[auto-resume] the bulk plan\'s spend preview threw: ' + e.message); }
+      const off = new Map(((pv && pv.refusedSlots) || []).filter((r) => r && r.identity && r.identity.key).map((r) => [String(r.identity.key), r]));
+      if (off.size) {
+        const keep = [];
+        for (const e of plan.eligible) { const r = e.identity && off.get(String(e.identity.key)); if (r) plan.skipped.push(accountSkip(e, r)); else keep.push(e); }
+        plan.eligible = keep;
+      }
+    }
     return { ...plan, total: rows.length, running: batchRunning };
   }
   function batchStatus(batchId) { const b = batches.get(batchId); return b ? JSON.parse(JSON.stringify(b)) : null; }
   const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, Math.max(0, ms)); if (t.unref) t.unref(); });
 
-  /** THE BATCH. `limit` = «只恢复前 K 个» (earliest stops first); `ids` narrows to the rows the dialog showed. Returns the
-   *  batch record at once (refused / nothing to do ⇒ already `done`); the paced continues run after it and fill it in. */
-  function resumeBatch({ limit = null, ids = null } = {}) {
+  /** THE BATCH. `limit` = at most this many, earliest stops first (the dialog sends none); `ids` narrows to the rows the
+   *  dialog showed; `pressed` = the press its door minted (write-origin pressOf). Returns the batch record at once (refused /
+   *  nothing to do ⇒ already `done`); the paced continues run after it and fill it in. */
+  function resumeBatch({ limit = null, ids = null, pressed = null } = {}) {
     if (batchRunning) return { ok: false, why: 'in-flight', batchId: batchRunning };
+    // THE PERSON'S OWN ACT (the owner's ruling 2026-11-18, B): the press starts all N, ATTENDED — none counted against the
+    // unattended caps, no stamp; every slot still asked before each continue (paid overage refused by name). A batch no door
+    // pressed is N automatic continues: its gated twin, each counted like any auto-resume
+    const paid = isPress(pressed) ? { spendReason: 'bulk-resume' } : { spendReason: 'auto-resume' };
     const now = Date.now();
     const plan = stoppedPlan(now);
     let take = plan.eligible;
@@ -680,12 +705,24 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     let v = null;
     try {
       v = authorizeSpendBatch
-        ? authorizeSpendBatch(chosen.map((e) => ({ id: e.id, session: activeSessions.get(e.id) || null, identity: e.identity || null })))
+        ? authorizeSpendBatch(chosen.map((e) => ({ id: e.id, session: activeSessions.get(e.id) || null, identity: e.identity || null })), paid.spendReason)
         : { ok: false, why: 'no-gate', detail: 'the batch spend gate is not wired' };
     } catch (e) { v = { ok: false, why: 'gate-error', detail: (e && e.message) || String(e) }; try { global.__vsEvent?.('spend-gate-error', 'bulk-resume:threw'); } catch { } }
+    // FORM TWO at the press (an account turned to overage since the plan): the guard hands back its items as SKIPPED — by name
+    const preSkip = v && v.ok !== false && Array.isArray(v.skipped) ? v.skipped : [];
+    if (v && v.ok !== false && Array.isArray(v.holds) && v.holds.length + preSkip.length === chosen.length && preSkip.length) {
+      for (const x of preSkip) {
+        const ix = chosen.findIndex((e) => e.id === String(x.sessionId));
+        if (ix < 0) continue;
+        const [e] = chosen.splice(ix, 1);
+        rec.skipped.push(accountSkip(e, { why: x.why, identity: x.identity }));
+      }
+      rec.planned = chosen.length;
+      log(`[auto-resume] bulk resume ${batchId}: ${preSkip.length} left stopped — their account is refused (${[...new Set(preSkip.map((x) => (x.identity && (x.identity.name || x.identity.key)) || '?'))].join(', ')})`);
+    }
     if (!v || v.ok === false || !Array.isArray(v.holds) || v.holds.length !== chosen.length) {
       if (v && v.ok !== false && Array.isArray(v.holds) && releaseSpend) for (const h of v.holds) { try { releaseSpend(h.sessionId, null, h.hold); } catch { } }
-      rec.refused = { why: (v && v.why) || 'refused', detail: (v && v.detail) || null, identity: (v && v.identity) || null, retryAfter: (v && v.retryAfter) || 0, n: chosen.length, need: v && Number.isFinite(v.need) ? v.need : null, left: v && Number.isFinite(v.left) ? v.left : null, fitK: v && Number.isFinite(v.fitK) ? v.fitK : null };
+      rec.refused = { why: (v && v.why) || 'refused', detail: (v && v.detail) || null, identity: (v && v.identity) || null, retryAfter: (v && v.retryAfter) || 0, n: chosen.length, need: v && Number.isFinite(v.need) ? v.need : null, left: v && Number.isFinite(v.left) ? v.left : null, slots: v && Array.isArray(v.refusedSlots) ? v.refusedSlots.map((r) => ({ name: (r.identity && (r.identity.name || r.identity.key)) || null, why: r.why })) : null };
       rec.done = true;
       log(`[auto-resume] bulk resume of ${chosen.length} refused by the spend gate — ${rec.refused.why}: ${rec.refused.detail || ''} (none resumed)`);
       return batchStatus(batchId);
@@ -765,7 +802,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         if (!verb) { skip('no-verb'); continue; }
         const ident2 = identityFor(e.id, session) || ident;
         // EVERY CONTINUE OF A BATCH IS ASKED LIKE A SINGLE CONTINUE (U2 cure 2, 主开发's law 1). The press's ONE authorization
-        // reserved the COUNT; it does not answer for what the account BECAME while the batch ran — paid overage in use, a
+        // (attended — the owner's ruling 2026-11-18: it counts nothing; the twin's reserved the count) does not answer for what
+        // the account BECAME while the batch ran — paid overage in use, a
         // credential that cannot serve, the spend control reached. So before EACH deliver the authorizer is asked AGAIN, on the
         // slot that will bill — the gate may have MOVED the conversation (the pool's switch), or not — exactly as attemptFire
         // asks spendOk after its gate. Synchronously, with nothing between: this item's hold goes back and the SAME authorizer
@@ -779,7 +817,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         if (h && releaseSpend) { try { releaseSpend(e.id, null, h.hold); } catch (err) { log('[auto-resume] releasing a batch hold failed: ' + err.message); } }
         holdOf.delete(e.id); open.delete(e.id); h = null;
         let v2 = null;
-        try { v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }]) : null; } catch (err) { v2 = null; log(`[auto-resume] ${e.id}: re-asking the spend gate on ${(bill && (bill.name || bill.key)) || '?'} threw: ${err.message}`); try { global.__vsEvent?.('spend-gate-error', 'bulk-resume:re-ask threw'); } catch { } }
+        try { v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }], paid.spendReason) : null; } catch (err) { v2 = null; log(`[auto-resume] ${e.id}: re-asking the spend gate on ${(bill && (bill.name || bill.key)) || '?'} threw: ${err.message}`); try { global.__vsEvent?.('spend-gate-error', 'bulk-resume:re-ask threw'); } catch { } }
         if (!v2 || v2.ok === false || !Array.isArray(v2.holds) || v2.holds.length !== 1) {
           if (v2 && v2.ok !== false && Array.isArray(v2.holds) && releaseSpend) for (const hx of v2.holds) { try { releaseSpend(e.id, null, hx && hx.hold); } catch { } }   // a malformed answer's holds go back too
           const why = (v2 && v2.why) || 'refused';
@@ -800,7 +838,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         open.delete(e.id);   // delivered: its hold becomes the charge below
         // DELIVERED: the hold becomes the charge (on the slot the BATCH authorized for it), the breaker learns a continue
         // went out (a walled answer quarantines that slot like any fire), a wait it superseded is dropped, the fact clears
-        if (noteBatchSpend) { try { noteBatchSpend(e.id, session, (h && h.identity) || ident2 || null, h ? h.hold : null); } catch (err) { log('[auto-resume] spend accounting failed: ' + err.message); } }
+        if (noteBatchSpend) { try { noteBatchSpend(e.id, session, (h && h.identity) || ident2 || null, h ? h.hold : null, paid.spendReason); } catch (err) { log('[auto-resume] spend accounting failed: ' + err.message); } }
         noteFired(e.id, ident2 ? ident2.key : null, 'timed', Date.now());
         if (armed.has(e.id)) { armed.delete(e.id); _cancelArmNotify(e.id); }
         save();

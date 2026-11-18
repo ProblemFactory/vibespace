@@ -24,7 +24,8 @@
 //   desk 1100 (en) · the same confirm in English, from the session list's ⋯
 //   phone 390 (zh) · the marks + the filter pill in the drawer; the confirm inside the viewport
 //   desk (zh) · «全部恢复 (3)» ⇒ «恢复了 3 个 · 跳过 0 个 · 拒绝 0»: the fake CLI received each continue (the overload with
-//     ITS words), the spend ledger holds 3 bulk-resume stamps, every mark and the pill are gone
+//     ITS words), the press is ATTENDED (the owner's ruling 2026-11-18): no stamp in the spend ledger, 3 in its attended
+//     tally; every mark and the pill are gone
 //   an agent bearer is refused by name on the four routes (cookie only)
 // PNGs: $VIBESPACE_ARB_PNG_DIR/{desk-marks,desk-filter,desk-settings,desk-dialog,en-dialog,phone-marks,phone-dialog,desk-done}.png
 import { spawn, execSync } from 'node:child_process';
@@ -134,6 +135,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
 const turnsOf = (sid) => { try { return fs.readFileSync(path.join(TURNS, sid), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+const tallyOf = () => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); const b = j.budget || j; return { stamps: Object.values(b.identities || {}).flat().filter((x) => x && (x.reason === 'bulk-resume' || x.reason === 'auto-resume')).length, attended: (b.attended || []).filter((x) => x && x.reason === 'bulk-resume').length }; } catch { return { stamps: -1, attended: -1 }; } };
 const stamps = () => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); const b = j.budget || j; return Object.values(b.identities || {}).flat().filter((x) => x && x.reason === 'bulk-resume').length; } catch { return -1; } };
 
 try {
@@ -302,8 +304,8 @@ try {
   check('desk: each stopped CLI received ONE continue — the walls the usage-limit words, the overload ITS words; the normal one nothing', turns[0].length === 2 && turns[0][1] === QUOTA_WORDS && turns[1][1] === QUOTA_WORDS && turns[2].length === 2 && turns[2][1] === CONTINUE_PROMPT_OVERLOAD && turns[3].length === 1, turns);
   const gaps = (() => { const at = hub.log().split('\n').filter((l) => /continued by the bulk resume/.test(l)); return at.length; })();
   check('desk: the server says it: ONE batch authorization for the three, 3 continues, done', /bulk resume rb-[^:]+: 3 authorized as one batch, 0 skipped/.test(hub.log()) && gaps === 3 && /done: resumed 3 · skipped 0 · not delivered 0/.test(hub.log()), hub.log().split('\n').filter((l) => /bulk/.test(l)));
-  const st3 = await until(() => (stamps() === 3 ? 3 : null), 5000, 200); // the ledger is written on a 500 ms debounce
-  check('desk: the spend ledger holds 3 bulk-resume stamps (charged what was delivered)', st3 === 3, String(stamps()));
+  const st3 = await until(() => { const x = tallyOf(); return x.attended === 3 ? x : null; }, 5000, 200); // the ledger is written on a 500 ms debounce
+  check('desk: the press is ATTENDED (the owner\'s ruling 2026-11-18): NO stamp in the spend ledger, 3 in its attended tally', !!st3 && st3.stamps === 0 && st3.attended === 3, JSON.stringify(tallyOf()));
   const gone = await until(() => D.ev(`(() => { const m = ${marks}; const p = ${pill}; return Object.values(m).every((x) => x && !x.mark) && !p ? m : null; })()`), 15000, 200);
   check('desk: every mark is gone (the sessions ran again) and so is the filter pill', !!gone, { m: await D.ev(marks), p: await D.ev(pill) });
   const pDone = await shot(D.S, 'desk-done.png');

@@ -6,13 +6,13 @@
 //                                 in ONE push, so a later resume keeps the choice. The instance default for NEW sessions
 //                                 (Settings → `claude.autoResumeOnLimit`) is never changed by it.
 //   openResumeStoppedDialog(app)  «恢复所有因用量/过载停止的会话 (N)» — the confirm says the batch's expected COST before
-//                                 anything runs (src/bulk-resume-cost.js: dollars + the 5 h window share per member +
-//                                 «只恢复前 K 个»), then ONE POST (one spend authorization for the batch) and the paced
+//                                 anything runs (src/bulk-resume-cost.js: dollars + the 5 h window share per member),
+//                                 then ONE POST (the person's own press — attended, the owner's ruling 2026-11-18) and the paced
 //                                 continues' progress until the outcome line («恢复了 29 个 · 跳过 8 个（仍在限额内）· 拒绝 0»).
 // Both are reached from Settings → Spending (the auto-resume row) and the session list's ⋯ menu.
 import { t } from './i18n.js';
 import { api, fetchJson, createModalShell, showToast } from './utils.js';
-import { autoResumeAllWords, resumeButtonWords, waitingCount, skipGroups, summaryWords, refusedWords } from '../stopped-by.js';
+import { autoResumeAllWords, resumeButtonWords, waitingCount, skipGroups, summaryWords, refusedWords, memberWords } from '../stopped-by.js';
 import { costWords } from '../bulk-resume-cost.js';
 import { stampAt } from './page-time.js';   // the ONE formatter of a time a person reads
 import { autoResumeCapsFor } from './agent-meta.js';
@@ -71,18 +71,21 @@ function answerWords(r) {
 /** The spend ceiling's refusal of a WHOLE batch, in the person's words: the bucket, what it has left, what the batch needs. */
 /** …and WHERE that ceiling is changed (U2 cure: a refusal that names a value names its door — the Settings row's own label). */
 function capDoorWords(why) {
-  const setting = why === 'hour-cap' ? t('Unattended turns per account per hour') : why === 'day-cap' ? t('Unattended turns per account per day') : why === 'instance-cap' ? t('Unattended turns for this instance per day') : null;
+  const setting = why === 'hour-cap' ? t('Unattended turns per account per hour') : why === 'day-cap' ? t('Unattended turns per account per day') : why === 'instance-cap' ? t('Unattended turns for this instance per day')
+    : why === 'overage-in-use' ? t('\u26a0 Allow unattended turns while an account bills paid overage') : null;   // form two: the door where the person changes it
   return setting ? ' ' + t('Change it in Settings → Spending → «{setting}».', { setting }) : '';
 }
 function batchRefusalWords(f) {
   if (!f) return '';
-  const who = (f.identity && f.identity.name) || t('this account');
+  const who = (f.identity && f.identity.name) ? memberWords(f.identity.name, t) : t('this account');   // the machine's own login in words, never its key
   const left = Number.isFinite(f.left) ? f.left : null, need = Number.isFinite(f.need) ? f.need : f.n;
   const where = capDoorWords(f.why);
+  // EVERY account refused (form two): the press starts nothing and names each one
+  if (Array.isArray(f.slots) && f.slots.length > 1) return f.slots.map((x) => t('The spend guard refused it on {member} ({why}).', { member: x.name ? memberWords(x.name, t) : t('this account'), why: refusedWords(x.why, t) || x.why || '?' })).join(' ') + capDoorWords(f.slots.some((x) => x.why === 'overage-in-use') ? 'overage-in-use' : null);
   if (f.why === 'hour-cap' && left !== null) return t('{member} can take {left} more turns nobody typed this hour; this batch needs {need}.', { member: who, left, need }) + where;
   if (f.why === 'day-cap' && left !== null) return t('{member} can take {left} more turns nobody typed today; this batch needs {need}.', { member: who, left, need }) + where;
   if (f.why === 'instance-cap' && left !== null) return t('This VibeSpace can take {left} more turns nobody typed today; this batch needs {need}.', { left, need }) + where;
-  return t('The spend guard refused it ({why}).', { why: refusedWords(f.why, t) || f.why || '?' }) + where;
+  return t('The spend guard refused it on {member} ({why}).', { member: who, why: refusedWords(f.why, t) || f.why || '?' }) + where;   // the account BY NAME (paid overage, a credential, the spend control)
 }
 
 /** The confirm → the batch → its outcome. Resolves with the final batch record (null = nothing ran). */
@@ -94,7 +97,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
     closed = true;
     if (runningId) showToast(t('The resume keeps running — reopen it from the session list’s ⋯ menu or Settings → Spending to stop it.'));
     try { resolveOuter && resolveOuter(null); } catch { }
-  } }); // decision: a consent — N billed turns nobody typed go out when the person says so, after the cost is shown
+  } }); // decision: a consent — N billed turns go out when the person presses (their own act, the owner's ruling 2026-11-18), after the cost is shown
   const { body, dialog, close } = shell;
   const footer = el('div', 'dialog-footer');
   dialog.appendChild(footer);
@@ -115,6 +118,8 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
     for (const g of skipGroups(rows, t)) {
       const li = el('li', 'resume-stopped-group');
       li.appendChild(el('div', 'resume-stopped-group-head', g.head));
+      const door = g.rows[0] && g.rows[0].why === 'account-refused' ? capDoorWords(g.rows[0].reason).trim() : '';   // form two: where the person changes it
+      if (door) li.appendChild(el('div', 'dialog-hint', door));
       const names = el('ul', 'resume-stopped-names');
       for (const s of g.rows) names.appendChild(el('li', null, s.until ? `${s.name || s.id} — ${t('until {time}', { time: stampAt(s.until, { now: Date.now(), words: true }) })}` : (s.name || s.id)));
       li.appendChild(names);
@@ -130,7 +135,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
     footer.appendChild(cancel);
     return null;
   }
-  if (n) body.appendChild(el('p', 'resume-stopped-lead', t('{n} sessions will be continued, earliest stopped first — each one is a billed turn, authorized together against your spend limits.', { n })));
+  if (n) body.appendChild(el('p', 'resume-stopped-lead', t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed; an account in paid overage is still refused, and you can stop the rest at any time.', { n })));
   const cw = costWords(p.estimate, t);
   if (cw) {
     const cost = el('div', 'resume-stopped-cost');
@@ -166,15 +171,14 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
     catch (e) { stopping = false; status.textContent = answerWords(e) || t('Could not stop it — try again.'); if (runningId) footer.prepend(stopBtn); }
   };
   const all = el('button', 'btn-create resume-stopped-all', cw ? cw.allButton : t('Resume all ({n})', { n }));
-  const firstK = cw && cw.kButton ? el('button', 'btn-cancel resume-stopped-k', cw.kButton) : null;
-  footer.append(...[firstK, all, cancel].filter(Boolean));
+  footer.append(all, cancel);   // one press starts all N (the owner's ruling 2026-11-18) — no «only the first K»
   setTimeout(() => all.focus(), 0);
   return await new Promise((resolve) => {
     resolveOuter = resolve;
     // ONE press runs: while a batch is asked for or running, its two buttons are not drawn (a choice nobody can make now)
     let busy = false;
-    const hideActs = () => { all.remove(); if (firstK) firstK.remove(); };
-    const showActs = () => { footer.prepend(...[firstK, all].filter(Boolean)); };
+    const hideActs = () => { all.remove(); };
+    const showActs = () => { footer.prepend(all); };
     const run = async (limit) => {
       if (busy) return;
       busy = true; hideActs();
@@ -214,7 +218,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
       }
       if (closed) { resolve(rec); return; }
       hideRunning();
-      if (lost) { status.textContent = t('The batch was lost (VibeSpace restarted) — reopen this to see which sessions are still stopped.'); status.classList.add('done'); all.remove(); if (firstK) firstK.remove(); cancel.textContent = t('Done'); resolve(rec); return; }
+      if (lost) { status.textContent = t('The batch was lost (VibeSpace restarted) — reopen this to see which sessions are still stopped.'); status.classList.add('done'); all.remove(); cancel.textContent = t('Done'); resolve(rec); return; }
       const refused = rec && rec.refused ? rec.refused.n || rec.planned || 0 : 0;
       const done = (rec && rec.resumed || []).length, failedN = (rec && rec.failed || []).length, stoppedN = (rec && rec.stopped || []).length;
       // the batch's OWN skips = its skipped list past the plan's (the record says how many the plan skipped — a batch another page
@@ -227,23 +231,16 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
       status.textContent = line;
       status.classList.add('done');
       if (rec && rec.refused) {
-        const why = el('p', 'resume-stopped-refused', t('The spend limit refused the whole batch — nothing was resumed: {detail}', { detail: batchRefusalWords(rec.refused) }));
+        const why = el('p', 'resume-stopped-refused', t('The whole batch was refused — nothing was resumed: {detail}', { detail: batchRefusalWords(rec.refused) }));
         body.insertBefore(why, status.nextSibling);
-        const k = Number.isFinite(rec.refused.fitK) ? Math.min(rec.refused.fitK, p.eligible.length) : 0;   // every account's room in this order (U2 cure's should), never the first refusal's alone
-        if (k > 0 && k < p.eligible.length) {   // the earliest K the ceiling holds — one press, the same road
-          const fit = el('button', 'btn-create resume-stopped-fit', t('Resume only the first {k} (earliest stopped first)', { k }));
-          fit.onclick = () => { fit.remove(); why.remove(); status.classList.remove('done'); cancel.textContent = t('Close'); busy = false; run(k); };
-          footer.prepend(fit);
-        }
       }
-      all.remove(); if (firstK) firstK.remove();
+      all.remove();
       cancel.textContent = t('Done');
       showToast(line, { type: rec && rec.refused ? 'error' : 'info' });
       try { onDone && onDone(rec); } catch { }
       if (!(rec && rec.refused)) resolve(rec);
     };
     all.onclick = () => run(null);
-    if (firstK) firstK.onclick = () => run(p.estimate.k);
     cancel.addEventListener('click', () => resolve(null), { once: true });
     if (p.running) {
       // ONE batch at a time: a resume already running (another tab, another press) is followed, never doubled

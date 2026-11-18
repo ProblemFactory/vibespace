@@ -49,7 +49,8 @@
 // writes no stamp, only the `attended` tally (the census and the snapshot still see every press). The credential,
 // spend-control and paid-overage refusals still bind — a press is not an opt-in to paying overage. Each attended
 // reason's AUTOMATIC twin keeps its own gated reason (stash-handover ↔ stash-retry, browser-handback ↔
-// browser-handback-idle, outbox-wake-now ↔ channel-receipt, owner-group-wake / owner-channel-send ↔ peer-message).
+// browser-handback-idle, outbox-wake-now ↔ channel-receipt, owner-group-wake / owner-channel-send ↔ peer-message,
+// bulk-resume ↔ auto-resume).
 // On an instance nobody signs in to the press still passes the write-origin verdict and the owner routes' wake PACER
 // (the groups engine's `mayWake`) — only the BUDGET is exempt. scripts/test-spend-paths.mjs §2b: every attended
 // reason's site is a cookie-only door.
@@ -123,11 +124,14 @@ const SPEND_REASONS = Object.freeze({
   // `channel-message`. Declared HERE first; its ONE site is wired by wake-approve-card — test-spend-paths §2b's DEFERRED
   // census row names that lane, and goes red the day the site exists without the row being retired.
   'held-deliver': { turn: true, attended: true, what: 'a held channel digest the user chose to deliver now' },
-  // lane auto-resume-bulk (.349, a fleet power user): «恢复所有因用量/过载停止的会话» — ONE owner click for N continues.
-  // The click is one decision about N billed turns nobody typed one by one, so it is ONE authorization over the whole
-  // batch (authorizeUnattendedBatch: every slot's budget must hold ALL of its share, or NONE is resumed) and N charges.
-  // Producer: src/server/auto-resume.js resumeBatch (POST /api/sessions/resume-stopped, cookie only).
-  'bulk-resume': { turn: true, what: 'the resume of every conversation a usage limit or an overloaded model stopped' },
+  // lane auto-resume-bulk (.349, a fleet power user): «恢复所有因用量/过载停止的会话» — ONE press for N continues. THE
+  // OWNER'S RULING 2026-11-18 (B): that press IS THE PERSON'S OWN ACT — ATTENDED: none of the N is counted against the
+  // unattended caps and none is stamped (the attended tally sees them); the account's hourly room stays for its own
+  // automatic continues. Still binding, slot by slot, before the attended answer: paid overage in use (refused BY NAME),
+  // a credential that cannot serve, the spend control. Producer: src/server/auto-resume.js resumeBatch, selected on the
+  // press (POST /api/sessions/resume-stopped mints it — the owner's cookie door, every bearer refused first); its gated
+  // twin there is 'auto-resume' (a batch no door pressed is N automatic continues, each counted).
+  'bulk-resume': { turn: true, attended: true, what: 'the resume of every conversation a usage limit or an overloaded model stopped' },
 });
 /** Is this reason ATTENDED (see the header of SPEND_REASONS)? Read off the table — never a second list. */
 const isAttended = (reason) => !!(reason && Object.prototype.hasOwnProperty.call(SPEND_REASONS, reason) && SPEND_REASONS[reason].attended === true);
@@ -676,9 +680,8 @@ function authorizeUnattendedBatch({
   const total = list.reduce((a, g) => a + Math.floor(Number(g.n)), 0);
   const no = (why, detail, extra = {}) => ({ ok: false, why, detail, retryAfter: 0, identity: null, reason, n: total, groups: [], ...extra });
   if (!list.length || !total) return no('empty-batch', 'the batch names no turn to authorize');
-  const out = [], fit = { byKey: {}, instance: null };   // THE ROOM (U2 cure's should): what each slot and the instance can still take
-  let first = null;
-  const room = (x) => (Number.isFinite(x) ? Math.max(0, Math.floor(x)) : 0);
+  const out = [], refusedSlots = [];
+  const attended = isAttended(reason);
   for (const g of list) {
     const key = g.identity && g.identity.key ? String(g.identity.key) : null;
     let facts = {};
@@ -688,40 +691,27 @@ function authorizeUnattendedBatch({
       overage: facts.overage || null, credential: facts.credential || null, spendControl: facts.spendControl || null,
       need: Math.floor(Number(g.n)), instanceNeed: total,
     });
-    const c = v.counts || {}, f = v.inFlight || {}, L = v.limits || {};
-    // EVERY slot's room, not only the first refusal's (主开发's should on the U2 cure): «only the first K» must fit each account
-    // in the batch and the instance, or the K press is refused again by the next one. A refusal that is not a cap's (overage,
-    // a credential, the ledger) leaves its slot no room at all
-    const capWhy = v.ok || v.why === 'hour-cap' || v.why === 'day-cap' || v.why === 'instance-cap';
-    if (key) fit.byKey[key] = capWhy ? Math.min(room(L.perIdentityHour - (c.hour || 0) - (f.identity || 0)), room(L.perIdentityDay - (c.day || 0) - (f.identity || 0))) : 0;
-    if (fit.instance === null && v.counts && v.limits) fit.instance = room(L.perInstanceDay - (c.instanceDay || 0) - (f.instance || 0));
-    if (!v.ok && !first) {
+    // THE ACCOUNT, NOT THE PRESS (主开发 2026-11-18 16:20Z, the owner's ruling's own words — «an ACCOUNT already in paid
+    // overage is still refused»): an ATTENDED batch skips each refusing slot's conversations BY NAME and the rest go on — the
+    // per-continue re-ask's rule, at the start too. A gated batch (the twin) is all or nothing, as ever
+    if (!v.ok && attended) { refusedSlots.push({ identity: v.identity || g.identity || null, why: v.why, detail: v.detail, n: Math.floor(Number(g.n)) }); continue; }
+    if (!v.ok) {
       // the bucket's headroom, for the person's words (U2 cure: the batch's own numbers)
+      const c = v.counts || {}, f = v.inFlight || {}, L = v.limits || {};
       const left = v.why === 'hour-cap' ? L.perIdentityHour - (c.hour || 0) - (f.identity || 0) : v.why === 'day-cap' ? L.perIdentityDay - (c.day || 0) - (f.identity || 0)
         : v.why === 'instance-cap' ? L.perInstanceDay - (c.instanceDay || 0) - (f.instance || 0) : null;
-      first = { ...v, n: total, need: v.why === 'instance-cap' ? total : Math.floor(Number(g.n)), left: left === null ? null : Math.max(0, Math.floor(left)), groups: [v] };
+      return { ...v, n: total, need: v.why === 'instance-cap' ? total : Math.floor(Number(g.n)), left: left === null ? null : Math.max(0, Math.floor(left)), groups: [v] };
     }
     out.push(v);
   }
-  if (first) return { ...first, fit };   // the FIRST refusal is the batch's answer and its words; `fit` is every slot's room
-  return { ok: true, why: null, detail: null, retryAfter: 0, identity: null, reason, n: total, groups: out };
-}
-
-/** PURE. «RESUME ONLY THE FIRST K» THAT FITS (主开发's should on the U2 cure): the longest prefix of the batch, in its order
- *  (earliest stop first), whose items of EACH slot stay inside that slot's room and whose count stays inside the instance's.
- *  `keys` = each item's billing slot in batch order; `fit` = a refusal's `{byKey, instance}`. A slot with no room named has
- *  none. null when there is no `fit` (a refusal that is not about room). */
-function fitPrefix(keys, fit) {
-  if (!fit || !fit.byKey || !Array.isArray(keys)) return null;
-  const used = new Map();
-  let k = 0;
-  for (const key of keys) {
-    const u = (used.get(key) || 0) + 1;
-    const cap = Number.isFinite(fit.byKey[key]) ? fit.byKey[key] : 0;
-    if (u > cap || (Number.isFinite(fit.instance) && k + 1 > fit.instance)) break;
-    used.set(key, u); k++;
+  // …and when EVERY slot refuses, the press starts nothing and says each one
+  if (attended && refusedSlots.length && !out.length) {
+    const r0 = refusedSlots[0];
+    return { ok: false, why: r0.why, detail: r0.detail, retryAfter: 0, identity: r0.identity, reason, n: total, need: null, left: null, groups: [], refusedSlots };
   }
-  return k;
+  // AN ATTENDED BATCH (the owner's ruling 2026-11-18 — the bulk press): every slot was still asked what binds a press
+  // (overage, a credential, the spend control — above), and none of the caps; the guard takes no hold for it
+  return { ok: true, ...(attended ? { attended: true } : {}), why: null, detail: null, retryAfter: 0, identity: null, reason, n: total, groups: out, ...(refusedSlots.length ? { refusedSlots } : {}) };
 }
 
 /** PURE. Record a spend that ACTUALLY happened (two-phase, like the loop
@@ -1030,7 +1020,6 @@ function noticeText(warn) {
 module.exports = {
   SPEND_ROW_KEYS, DOOR_LINK_WORDS, spendRowOf, spendRowLink, warnRowOf,
   authorizeUnattendedBatch, // lane auto-resume-bulk: ONE authorization for N turns (the resume of every wall-stopped session)
-  fitPrefix,   // «only the first K» that fits every slot's room (U2 cure's should)
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
   budgetLimits, capUnset, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText,

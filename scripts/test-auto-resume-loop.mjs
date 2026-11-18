@@ -1618,13 +1618,16 @@ if (!probe) {
 }
 
 // ── §8 THE BULK RESUME (lane auto-resume-bulk, .349 — a fleet power user's dozens of wall-stopped sessions) ─────────
-// «恢复所有因用量/过载停止的会话»: ONE owner click, N billed continues. Driven through the REAL module and the REAL
+// «恢复所有因用量/过载停止的会话»: ONE owner press, N billed continues. Driven through the REAL module and the REAL
 // spend guard (scratch ledger) over stub channels: ONE authorization names the whole batch, the continues go out PACED
 // and earliest-stop-first through the harness's verb, a wall that has not reset is SKIPPED and said, the pre-fire gate
-// decides each one at its moment, a refusal resumes NONE (all-or-nothing, the boundary exact), every hold settles.
+// decides each one at its moment. THE OWNER'S RULING 2026-11-18 (B): the press is the person's own act — ATTENDED: no
+// hold, no stamp, the account's room untouched. A batch no door pressed is the gated twin: a refusal resumes NONE
+// (all-or-nothing, the boundary exact), every hold settles.
 {
   console.log('\n§8 the bulk resume: N continues under ONE spend authorization, paced, walls skipped, a refusal resumes none');
   const SG = require(path.join(REPO, 'src/server/spend-guard.js'));
+  const PRESS = require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });   // a door's press (the person's own act)
   const { CONTINUE_PROMPT_OVERLOAD } = arMod;
   const NOW0 = Date.now(), H = 3600e3;
   const PACE = 40;
@@ -1644,16 +1647,17 @@ if (!probe) {
       fireIdentity: (id, s) => (s && s._slot ? { key: s._slot, name: s._slot } : null),
       beforeFire: async (id, s) => { if (s._onGate) s._onGate.call(s, ar); return s._gate !== false; },
       wallVerdict: (id, s) => s._verdict || null,
-      authorizeSpendBatch: authorize === 'absent' ? null : (items) => { batchCalls++; batchItems = items.length; if (authorize) return authorize(items); return guard.authorizeBatch({ reason: 'bulk-resume', items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }); },
-      noteBatchSpend: (id, s, identity, hold) => guard.note({ reason: 'bulk-resume', identity, hold }),
+      authorizeSpendBatch: authorize === 'absent' ? null : (items, reason) => { batchCalls++; batchItems = items.length; if (authorize) return authorize(items); return guard.authorizeBatch({ reason, items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }); },
+      noteBatchSpend: (id, s, identity, hold, reason) => guard.note({ reason, identity, hold }),
       releaseSpend: (id, s, hold) => guard.release({ hold }),
       clearStopped: (id, s) => { s._stoppedBy = null; cleared.push(id); },
       onListChange: () => { listChanges++; },
       bulkPaceMs: PACE,
     });
     const settle = async (rec) => { for (let i = 0; i < 200 && rec && !rec.done; i++) { await new Promise((r) => setTimeout(r, 15)); rec = ar.batchStatus(rec.batchId); } return rec; };
-    const stamps = () => { const b = guard.snapshot().budget; return Object.values(b.identities || {}).flat().filter((x) => x && x.reason === 'bulk-resume').length; };
-    return { ar, guard, active, sent, cleared, settle, stamps, counts: () => ({ batchCalls, batchItems, listChanges }) };
+    const stamps = () => { const b = guard.snapshot().budget; return Object.values(b.identities || {}).flat().filter((x) => x && (x.reason === 'bulk-resume' || x.reason === 'auto-resume')).length; };
+    const tally = () => (guard.snapshot().budget.attended || []).filter((x) => x && x.reason === 'bulk-resume').length;
+    return { ar, guard, active, sent, cleared, settle, stamps, tally, counts: () => ({ batchCalls, batchItems, listChanges }) };
   };
   const S = (slot, stoppedBy, extra = {}) => ({ backend: 'claude', mode: 'chat', name: extra.name || slot, _slot: slot, _stoppedBy: stoppedBy, pty: {}, _isStreaming: false, ...extra });
   const quota = (agoH, resetIn = -0.1) => ({ kind: 'quota', at: NOW0 - agoH * H, resetsAt: NOW0 + resetIn * H, said: "You've hit your limit" });
@@ -1667,7 +1671,7 @@ if (!probe) {
   const plan = w.ar.stoppedPlan();
   ok('§8 the PLAN before anything runs: 4 eligible earliest-first (q1, ov, q2, gateNo); walled + busy skipped and named', plan.eligible.map((e) => e.id).join() === 'q1,ov,q2,gateNo' && plan.skipped.map((s) => s.id + ':' + s.why).sort().join() === 'busy:running,walled:walled', JSON.stringify(plan));
   const t0 = Date.now();
-  let rec = w.ar.resumeBatch();
+  let rec = w.ar.resumeBatch({ pressed: PRESS });
   ok('§8 the press answers at once with the batch (planned 4) — the continues run after it', rec && rec.planned === 4 && !rec.refused, JSON.stringify(rec));
   ok('§8 a SECOND press while it runs is refused by name (in-flight) — never a second batch', w.ar.resumeBatch().why === 'in-flight');
   rec = await w.settle(rec);
@@ -1679,17 +1683,21 @@ if (!probe) {
   ok('§8 an overload is continued with ITS words, a wall with the usage-limit words', w.sent.find((x) => x.id === 'ov').text === CONTINUE_PROMPT_OVERLOAD && w.sent.find((x) => x.id === 'q1').text === CONTINUE_PROMPT);
   ok('§8 the gate that still reads a wall SKIPS that one and says until when (never retried blindly)', rec.skipped.some((s) => s.id === 'gateNo' && s.why === 'walled' && s.until === NOW0 + H), JSON.stringify(rec.skipped));
   ok('§8 the outcome: resumed 3 · skipped 3 · refused none · nothing undelivered', rec.done && rec.resumed.length === 3 && rec.skipped.length === 3 && !rec.refused && !rec.failed.length, JSON.stringify(rec));
-  ok('§8 CHARGED what was delivered: 3 ledger stamps under bulk-resume, every hold settled (0 open)', w.stamps() === 3 && w.guard.snapshot().holdsOpen === 0, JSON.stringify({ stamps: w.stamps(), open: w.guard.snapshot().holdsOpen }));
+  ok('§8 ATTENDED (the owner\'s ruling 2026-11-18): the 3 delivered continues wrote NO ledger stamp and held nothing — 3 in the attended tally', w.stamps() === 0 && w.tally() === 3 && w.guard.snapshot().holdsOpen === 0, JSON.stringify({ stamps: w.stamps(), tally: w.tally(), open: w.guard.snapshot().holdsOpen }));
   ok('§8 a delivered continue CLEARS the mark (the turn starts) and the breaker remembers it fired', w.cleared.join() === 'q1,ov,q2' && !!(w.ar._fires.get('q1') && w.ar._fires.get('q1').last), JSON.stringify(w.cleared));
   ok('§8 ONE list broadcast at the end of the batch', w.counts().listChanges === 1, JSON.stringify(w.counts()));
   ok('§8 the batch ran in ~pace × (n−1), not n × a gate storm', Date.now() - t0 < 5000);
 
-  // B — ALL OR NOTHING: three continues on slot A against a cap of 2 ⇒ the WHOLE batch refused
+  // B — THE PRESS-LESS TWIN, ALL OR NOTHING: three continues on slot A against a cap of 2 ⇒ the WHOLE batch refused
+  // (and the same three PRESSED at that cap: all land, attended — the cap is the automatic continues', not the person's)
   const mk3 = (cap) => mkWorld({ cap, sessions: { a1: S('A', quota(3)), a2: S('A', quota(2)), a3: S('A', quota(1)) } });
   const r2 = mk3(2);
   let rr = await r2.settle(r2.ar.resumeBatch());
   ok('§8 a refusal resumes NONE: 3 on slot A at an hour cap of 2 ⇒ refused by name (hour-cap, slot A), 0 delivered, 0 holds, 0 stamps', rr.refused && rr.refused.why === 'hour-cap' && /A/.test(rr.refused.detail) && r2.sent.length === 0 && r2.guard.snapshot().holdsOpen === 0 && r2.stamps() === 0, JSON.stringify({ rr, sent: r2.sent.length }));
   ok('§8 …the marks stay (nothing ran) — the person can raise the cap and press again', [...r2.active.values()].every((s) => s._stoppedBy));
+  const r2p = mk3(2);
+  const rp = await r2p.settle(r2p.ar.resumeBatch({ pressed: PRESS }));
+  ok('§8 ATTENDED: the same 3 PRESSED at an hour cap of 2 all land — 0 stamps, 3 in the attended tally, and slot A\'s hour still whole for an automatic continue', !rp.refused && rp.resumed.length === 3 && r2p.stamps() === 0 && r2p.tally() === 3 && r2p.guard.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }).ok === true, JSON.stringify(rp));
   const r3 = mk3(3);
   rr = await r3.settle(r3.ar.resumeBatch());
   ok('§8 CONTROL (the boundary is exact): at a cap of 3 the same batch is authorized and all 3 land', !rr.refused && rr.resumed.length === 3 && r3.stamps() === 3, JSON.stringify(rr));
