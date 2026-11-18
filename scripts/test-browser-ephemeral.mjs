@@ -790,8 +790,7 @@ console.log('— ④ lane H: the managed ephemeral browser is a holder row, its 
   // …and the words: the PURE overlap rule the tool card uses, and its wiring (chat-view routes the status to the loader)
   const gw = { from: 1000, to: 5000 };
   ok(TR.armGapFor(gw, { code: 'arm_failed', at: 4000, until: 34000, error: 'x' })?.until === 34000 && TR.armGapFor({ from: 40000, to: 41000 }, { code: 'arm_failed', at: 4000, until: 34000 }) === null && TR.armGapFor(gw, { code: 'armed', at: 4000 }) === null && TR.armGapFor(gw, null) === null, '④ r2 L5: armGapFor — a card window overlapping [at, until] of an arm_failed status gets the gap; a later window, `armed`, or no status gets none');
-  const cvSrc = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), tvSrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-  ok((cvSrc.match(/msg\.type === 'browser-trace-status'\) \{\n\s*(?:\/\/[^\n]*\n\s*)?this\._browserTrace\?\.onStatus\?\.\(msg\)/g) || []).length === 2 && /gap: armGapFor\(w, st\.armFail\)/.test(tvSrc) && /else if \(gap\) sum\.textContent = t\('not recorded until \{time\}: \{why\}'/.test(tvSrc), '④ r2 L5: WIRING — both chat-view handlers hand `browser-trace-status` to the loader, whose empty card reads "not recorded until {time}: {why}"');
+  // (④ r2 L5 the trace-status wiring pin — MOVED to the fast scripts/test-browser-ephemeral-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const ML = mutantCopies('browser-ephemeral-l1', REPO);
   const tsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-trace.js'), 'utf8');
   const tmut = tsrc.replace("if (ev.kind === 'verb') return armOnVerb(ev);", "if (ev.kind === 'verb') return armEphemeral(ev);");
@@ -1762,9 +1761,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     ok(hk[0] && /keeps closing/.test(hk[0].why || '') && hk[0].browserClosed === 'browser_unstable', '⑥ r5: the Agent browser panel row says the browser keeps closing (not "attached"/"running" alone)', hk[0]);
     const hkf = TRc.housekeepingVerdict({ profiles: [{ id: 'bp-00000001', label: 'Bank', provider: 'chromium', dir: '/x/vs-bp-00000001' }], leases: [{ profileId: 'bp-00000001', browserKey: 'bk-00000001' }], browsers: { 'bp-00000001': { state: 'ready', browser: null, closed: { code: 'browser_unstable', error: 'x', unstable: 'failing' } } }, now: 1 });
     ok(hkf[0] && /could not be started/.test(hkf[0].why || '') && !/keeps closing/.test(hkf[0].why || '') && hkf[0].browserClosed === 'browser_unstable', '⑥ r6: …and a browser whose relaunch asks kept FAILING says it could not be started (never "keeps closing")', hkf[0]);
-    const tv = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-    const pr = tv.slice(tv.indexOf('  function profileRow('), tv.indexOf('  function ephemeralRow('));
-    ok(/bprof-stop/.test(pr) && /\/stop`/.test(pr) && /r\.live/.test(pr), '⑥ r5: a NAMED profile row carries a Stop while its browser is live — the unstable remedy the notice names is one click', pr.length);
+    // (⑥ r5 the profile row's Stop pin — MOVED to the fast scripts/test-browser-ephemeral-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
   // (i) VERIFY r4 LOW 4 — a wrapper that does not exec between the daemon and the chrome (its argv carries the chrome's
   //     flags): the record names the LOCK's holder (the chrome), so a daemon SIGKILL ends the chrome — never "ended" the

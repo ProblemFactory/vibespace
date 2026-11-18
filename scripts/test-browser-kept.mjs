@@ -641,12 +641,7 @@ console.log('— ⑥ the routes: GET / DELETE /api/browser/kept, the housekeepin
   ok(hu.status === 200 && hu.body.kept.some((k) => k.tabs.length === 1) && ha.status === 200 && ha.body.kept.every((k) => k.tabs.length === 0 && Number.isInteger(k.tabCount)) && !JSON.stringify(ha.body).includes('secret.test'), 'the housekeeping answer: the user sees the kept tabs; an agent\'s token gets the counts only (no title, no url)', ha.body.kept);
 }
 
-// verify r2 (Y2): the kept sweep's report (the bound held open by running conversations) is READ by the panel, not only journalled
-{
-  const tv = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-  const bt = fs.readFileSync(path.join(REPO, 'src/server/browser-trace.js'), 'utf8');
-  ok(/keptSweep/.test(bt) && /v\.keptSweep/.test(tv) && /conversation is running/.test(tv) && /Forget frees one/.test(tv), 'the housekeeping view carries the kept sweep and the Agent browser panel SAYS the total bound held open by running conversations (what frees it: Forget) — never a report that reaches only the journal');
-}
+// (verify r2 (Y2) the panel reads the kept sweep's report — MOVED to the fast scripts/test-browser-kept-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ═══ ⑦ patched-copy controls ══════════════════════════════════════════════
 console.log('— ⑦ controls: each leg catches its pre-fix / broken copy');

@@ -160,20 +160,7 @@ if (mod) {
   }
 }
 
-// ═══ ② wiring pins ══════════════════════════════════════════════════════════
-console.log('\n② wiring');
-{
-  const server = read('server.js'), cliEnv = read('src/server/cli-env.js'), wsCreate = read('src/ws-create.js');
-  ok(!/function resolveCmd\s*\(/.test(server) && /const \{ resolveCmd \} = require\('\.\/src\/server\/cli-cmd\.js'\)/.test(server),
-    'server.js holds no resolver of its own — it imports THE one (boot and spawn share one lookup)');
-  ok(/cliCmds\.register\('claude'/.test(cliEnv) && /cliCmds\.register\('codex'/.test(cliEnv) && /for \(const id of Object\.keys\(ACP_COMMANDS\)\)[\s\S]{0,40}cliCmds\.register\(id/.test(cliEnv),
-    'cli-env registers claude, codex and every ACP harness where they are resolved');
-  const at = wsCreate.indexOf('try { spawnCmd = await cliCmds.forSpawn(backend, spawnCmd); } catch (e) {');
-  const argv = wsCreate.indexOf('const r6Line = sessionSpawnLine('); // lane antigravity-spawn-argv: THE line (src/spawn/line.js)
-  ok(at > 0 && argv > at && (wsCreate.match(/const r6Line = sessionSpawnLine\(/g) || []).length === 1 && (wsCreate.match(/cliCmds\.forSpawn\(/g) || []).length === 1,
-    'ws-create re-checks the command ONCE, right BEFORE the ONE local argv every local spawn runs (pty terminal, chat wrapper, daemon pipe)');
-  ok(/'cliCmds'/.test(read('src/ws-handler.js')), 'cliCmds is in WS_CTX_CONTRACT');
-}
+// (② the wiring pins — MOVED to the fast scripts/test-cli-cmd-refresh-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ═══ ③ a real scratch server ════════════════════════════════════════════════
 console.log('\n③ a scratch server: the fake claude renamed away and back between spawns');

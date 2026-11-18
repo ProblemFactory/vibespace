@@ -387,11 +387,7 @@ if (baseView) {
   await loop.close();
 }
 
-console.log('§7 the launcher hands its own close to the machine\'s dialog (the Apps dialog closes with it)');
-{
-  const src = fs.readFileSync(path.join(REPO, 'src/lib/desktop-app-launcher.js'), 'utf8');
-  ok(/showMachineDesktopDialog\(app, m, \{[^}]*closeOpener: close,/.test(src) && /const \{ overlay, body, close(?:, raised)?(?:, ready, live)? \} = createModalShell\(\{ id: 'desktop-launch-dialog'/.test(src), 'desktop-app-launcher.js passes the Apps dialog\'s close as closeOpener');
-}
+// (§7 the launcher's close pin — MOVED to the fast scripts/test-mac-ard-signin-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
