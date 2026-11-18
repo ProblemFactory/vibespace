@@ -66,7 +66,7 @@ function writeJob(m, fs = FS) {
       // order with every append of the file, before these bytes — never on the main loop or the fs threadpool; the old `.1` goes
       if (m.rotateAt > 0 && size0 > 0 && size0 + (m.parts || []).reduce((n, b) => n + (typeof b === 'string' ? Buffer.byteLength(b) : (b && b.byteLength) || 0), 0) > m.rotateAt) {
         const was = fd; fd = null; fs.closeSync(was);
-        fs.renameSync(m.file, m.file + '.1');
+        try { fs.renameSync(m.file, m.file + '.1'); } catch { /* a rename the storage refuses (a hand-placed .1, EACCES): the ring keeps RECORDING past its bound, as the release's main-thread code did — a line is worth more than the bound */ }
         fd = openA();
         size0 = fs.fstatSync(fd).size;
       }

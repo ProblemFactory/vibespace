@@ -40,6 +40,15 @@ function agentOr401(req, res) {
   if (!e) { res.status(401).json({ error: 'missing or unknown session token', code: 'session_token_required' }); return null; }
   return e;
 }
+/** B-48a4 cure: A PERSON'S ACT ON A MACHINE IS ON DISK BEFORE THE ANSWER (hosts.json is the store writer's since B-48a4 U2 — the
+ *  writeFileSync that threw into the route is gone). Not durable ⇒ 503 `not_durable` with the writer's words: the change is kept and
+ *  the writer keeps trying, so the person knows a restart before it lands would lose it. → true when it answered */
+async function notDurable(res) {
+  if (typeof hosts.persisted !== 'function' || await hosts.persisted()) return false;   // a hosts without a store (a suite's stand-in) answers as before
+  const w = (typeof hosts.whyNotDurable === 'function' && hosts.whyNotDurable()) || {};
+  res.status(503).json({ error: `the change is kept, but hosts.json is not on disk yet (${w.why === 'queued' ? `queued behind ${w.ahead || 'other'} write(s)` : w.code || w.why || 'the storage did not answer'}) — the hub keeps trying; a restart before it lands would lose it`, code: 'not_durable' });
+  return true;
+}
 const STATUS = { not_granted: 403, excepted: 403, ask_denied: 403, ask_changed: 409, ask_expired: 403, ask_unfiled: 409, groups_unreadable: 409, fork_pending: 409, ask_pending: 409, no_machine: 404, no_exits: 404, ambiguous: 400, offline: 503, run_failed: 502, spawn_failed: 502, bad_command: 400, unknown_shape: 409, conversation_gone: 410, remote_session: 409,
   // lane exit-transfer: pull / push refusals
   too_big: 413, not_a_file: 409, local_path_refused: 403, exists: 409, hash_mismatch: 502, transfer_failed: 502, bad_path: 400, target_busy: 409,
@@ -143,6 +152,7 @@ app.patch('/api/hosts/:id/exit-access', async (req, res) => {
       if (Array.isArray(b[g].except)) b[g] = E.rekeyForkExcept({ ...b[g], except: b[g].except.map(live) }, keyOfSession);
     }
     const out = await exitProxy.setAccess(req.params.id, b, { by: 'user' });
+    if (await notDurable(res)) return;   // B-48a4 cure
     res.json({ ...out, resolved });
   } catch (e) { cookieFail(res, e); }
 });
@@ -258,6 +268,7 @@ app.post('/api/hosts', async (req, res) => {
     delete b.keyPassphrase; // consumed here and nowhere else
     const id = hosts.add(b);
     bcastAll({ type: 'hosts-updated' });
+    if (await notDurable(res)) return;   // B-48a4 cure
     res.json({ success: true, id, key: key && { type: key.type, fingerprint: key.fingerprint, wasEncrypted: key.wasEncrypted } });
   } catch (e) {
     // `code` drives the client's localized message (server prose is for logs
@@ -294,6 +305,7 @@ app.delete('/api/hosts/:id', async (req, res) => {
     try { exitProxy.onMachineUnpaired(h.id); } catch { }
     hosts.remove(req.params.id);
     bcastAll({ type: 'hosts-updated' });
+    if (await notDurable(res)) return;   // B-48a4 cure
     res.json({ success: true });
   }
   catch (e) { res.status(400).json({ error: e.message }); }

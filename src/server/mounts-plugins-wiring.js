@@ -354,6 +354,7 @@ async function graduateHostToDial(h, { serverUrl, viaRelay, by = 'system:graduat
     const gradDevice = hosts.get(h.id).deviceId;
     const dialUrl = `${base.replace(/^http/, 'ws')}/api/device-dial?device=${gradDevice}`;
     const pair = agentdMintDialPair(gradDevice, { host: require('../dial-facts.js').hostOf(dialUrl), base, by, from });
+    if (typeof hosts.persisted === 'function' && !(await hosts.persisted())) throw Object.assign(new Error('the pairing is minted, but hosts.json is not on disk yet — the hub keeps trying; try the graduation again once it lands'), { code: 'not_durable' });   // B-48a4 cure: its dial token's hash on disk before the installer ships it
     // ship + run the installer over ssh STDIN — the installer AND its arguments (verify-r3 B-grad): the tokens used to
     // ride `ssh … -- 'bash -s -- … --dial-token vsdt_… --host-token vsht_…'`, i.e. the argv of the LOCAL ssh (readable
     // by every user of this machine through /proc/<pid>/cmdline for the whole install, ≤ 300 s) and the remote shell's
@@ -486,6 +487,8 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
     try { pair = agentdMintDialPair(deviceId, { host: DF.hostOf(dialUrl), base, keepLink: pushV.push, by: actBy, from: (req.socket && req.socket.remoteAddress) || '' }); }
     catch (e) { return res.status(e && e.code === 'vault_locked' ? 423 : 400).json({ error: e.message, code: e && e.code === 'vault_locked' ? 'vault_locked' : /collides/.test(e.message) ? 'collision' : 'mint_failed' }); }
     bcastAll({ type: 'hosts-updated' });
+    // B-48a4 cure: the pairing command is handed out only once its dial token's hash is on disk (a restart before would leave the device unable to dial)
+    if (typeof hosts.persisted === 'function' && !(await hosts.persisted())) return res.status(503).json({ error: 'the pairing is minted, but hosts.json is not on disk yet — the hub keeps trying; mint it again once it lands', code: 'not_durable' });
     let updatedInPlace = false;
     let lockedOut = !!pair.lockedOut;
     if (pushV.push) {

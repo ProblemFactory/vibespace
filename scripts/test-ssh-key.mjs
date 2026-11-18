@@ -188,10 +188,10 @@ try {
       else scan.push([fp, fs.readFileSync(fp)]);
     }
   };
+  hm.flushThrottled();   // B-48a4: hosts.json is written by the store writer's thread — what it owes, on disk BEFORE the scan of every file
   walk(DATA);
   const hits = scan.filter(([, buf]) => buf.includes(needle)).map(([f]) => f);
   ok(`no file under the dataDir contains the passphrase (${scan.length} files scanned)`, hits.length === 0, hits.join(','));
-  hm.flushThrottled();   // B-48a4: hosts.json is written by the store writer's thread — what it owes, on disk now
   const hostsJson = fs.readFileSync(path.join(DATA, 'hosts.json'), 'utf-8');
   ok('hosts.json has no keyPassphrase field', !/passphrase/i.test(hostsJson));
 

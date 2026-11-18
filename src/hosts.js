@@ -215,6 +215,8 @@ class HostManager {
     W.durable(this._file).catch(() => { });
   }
   persisted() { return (this._storeWriter || require('./store-writer.js').storeWriter()).durable(this._file); }
+  /** B-48a4 cure: why the last save is not on disk yet (the writer's own words: queued behind N writes, or its failure) — null when it is */
+  whyNotDurable() { const W = this._storeWriter || require('./store-writer.js').storeWriter(); return (typeof W.whyNotDurable === 'function' && W.whyNotDurable(this._file)) || null; }
 
   list() {
     // dial hosts carry a live `online` field (server wires dialOnline to the
@@ -308,6 +310,7 @@ class HostManager {
   reshapeStore(fn) {
     const rep = fn(this._state);
     this._save();
+    this.flushThrottled();   // B-48a4 cure: a migration's reshape is ON DISK before its ledger says done (a boot-time kill leaves no unmigrated file under a stamped ledger)
     this._reachChanged('reshape');
     return rep;
   }

@@ -22,6 +22,10 @@
 //   ⑤ U3 — THE MEMBERSHIP ONCE (a world granted to Task Group G): a command asks the membership ONCE, asked by the user or not; a
 //      removal from G during the run (its re-judge) is asked again and RECORDED (revokedDuringRun, the card); RED CONTROLS: U3's first
 //      form (never asked after the run) records nothing; today's two re-asks ⇒ 3 a command
+//   ⑦ THE CURE (the readers' SHOULDs on the taken unit): (a) a save the store writer cannot make durable says why (whyNotDurable) and the
+//      person-act doors await it (pins); (b) a migration's reshape is ON DISK before its ledger says done; (c) a rotation's rename the storage
+//      refuses keeps the ring recording; (d) generateKey reads the key fresh (the kept facts dropped); (e) a removal from the group DURING
+//      the user's ask is refused at the stillGranted verdict — each with its red control
 //   ⑥ U3 — THE AMPLIFIER LAW (a slow hub is never sent more requests because it is slow): the REAL CLI `vibespace-exit run` against a
 //      stand-in hub that answers the run only after the 1 s note was said ⇒ ONE request; RED CONTROL: today's note (a copy outside the
 //      tree, scripts/mutant-copy.mjs), side by side ⇒ a second request, GET /api/agent/exit (causal: the hub answers its run after it)
@@ -329,6 +333,57 @@ console.log('⑥ U3 — the amplifier law: a slow hub is never sent more request
   ok(now.code === 0 && nowAsked.length === 1 && nowAsked[0] === 'POST /api/agent/exit/run' && NOTE.test(now.err) && /ok/.test(now.out), `a call that outlives a second sends ONE request (${nowAsked.join(', ')}) and still says its note`, now.err.slice(0, 300));
   ok(old.code === 0 && oldAsked.length === 2 && oldAsked.includes('GET /api/agent/exit'), `CONTROL (RED): today's note asks the hub to word itself ⇒ ${oldAsked.length} requests for one command (${oldAsked.join(', ')})`);
   srv.close();
+}
+
+// ═══ ⑦ ═══
+console.log('⑦ the cure — the readers\' SHOULDs');
+{
+  // (a) not durable ⇒ the words, and the person-act doors await it
+  const wa = await world();
+  wa.hm._storeWriter = { dirty: () => { }, durable: async () => false, whyNotDurable: () => ({ why: 'queued', ahead: 2 }), flushSync: () => ({ written: [], left: [] }) };
+  wa.hm._save();
+  const pa = await wa.hm.persisted(), why = wa.hm.whyNotDurable();
+  const ER = fs.readFileSync(path.join(REPO, 'src/server/exit-routes.js'), 'utf8'), MPW = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  ok(pa === false && why && why.why === 'queued' && (ER.match(/if \(await notDurable\(res\)\) return;/g) || []).length === 3 && (MPW.match(/typeof hosts\.persisted === 'function' && !\(await hosts\.persisted\(\)\)/g) || []).length === 2,
+    'a save the writer cannot make durable says why; the doors that take a person\'s act on a machine (add, remove, the exit-access PATCH; the pairing mint and the graduation) answer only once it is on disk', { pa, why });
+  // (b) a migration's reshape on disk before its ledger says done (read in the same tick: no wait)
+  const wb = await world(); await wb.hm.persisted();
+  wb.hm.reshapeStore((st) => { st.hosts[0].name = 'reshaped'; return { n: 1 }; });
+  const nb = JSON.parse(fs.readFileSync(path.join(wb.dataDir, 'hosts.json'), 'utf8')).hosts[0].name;
+  const HMr = compileAt('src/hosts.js', [["    this._save();\n    this.flushThrottled();   // B-48a4 cure: a migration's reshape", "    this._save();\n    // (control) // B-48a4 cure: a migration's reshape"]]);
+  const wbc = await world({ HM: HMr.HostManager }); await wbc.hm.persisted();
+  wbc.hm.reshapeStore((st) => { st.hosts[0].name = 'reshaped'; return { n: 1 }; });
+  const nbc = JSON.parse(fs.readFileSync(path.join(wbc.dataDir, 'hosts.json'), 'utf8')).hosts[0].name;
+  ok(nb === 'reshaped' && nbc !== 'reshaped', `a migration's reshape is on disk before its ledger stamps (read at once: «${nb}»); CONTROL (RED): without the flush the file still says «${nbc}»`);
+  await wbc.hm.persisted();
+  // (c) a rotation's rename refused ⇒ the ring keeps recording (the worker's own job, a stand-in fs refusing the rename)
+  const { writeJob } = require(path.join(REPO, 'src/store-writer-worker.js'));
+  const fc = path.join(SCR, 'ring-refused.jsonl'); fs.writeFileSync(fc, 'x'.repeat(2000) + '\n');
+  const refusing = new Proxy(fs, { get: (t, k) => (k === 'renameSync' ? () => { throw Object.assign(new Error('refused'), { code: 'EACCES' }); } : t[k]) });
+  let thrown = null; try { writeJob({ file: fc, append: true, parts: [Buffer.from('new line\n')], rotateAt: 1000 }, refusing); } catch (e) { thrown = e; }
+  const WKr = compileAt('src/store-writer-worker.js', [["        try { fs.renameSync(m.file, m.file + '.1'); } catch {", "        { fs.renameSync(m.file, m.file + '.1'); } if (0) {"]]);
+  let thrownC = null; try { WKr.writeJob({ file: fc, append: true, parts: [Buffer.from('control line\n')], rotateAt: 1000 }, refusing); } catch (e) { thrownC = e; }
+  ok(!thrown && fs.readFileSync(fc, 'utf8').endsWith('new line\n') && thrownC && thrownC.code === 'EACCES', `a rotation's rename the storage refuses keeps the ring recording past its bound; CONTROL (RED): without the fallback the append fails (${thrownC && thrownC.code})`);
+  // (d) generateKey reads the key fresh: the kept facts are dropped
+  const wd = await world();
+  const k1 = wd.hm.keyInfo().publicKey;
+  fs.writeFileSync(path.join(wd.dataDir, 'ssh', 'id_ed25519.pub'), 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStandInKeyTwo vibespace\n');
+  const kept = wd.hm.keyInfo().publicKey, made = (await wd.hm.generateKey()).publicKey, after = wd.hm.keyInfo().publicKey;
+  ok(kept === k1 && /KeyTwo/.test(made) && /KeyTwo/.test(after), 'the key\'s facts are kept between calls, and generateKey reads the key fresh (a key placed meanwhile is never overwritten — ssh-keygen would ask)', { k1, kept, made, after });
+  // (e) a removal from the group DURING the user's ask is refused at the stillGranted verdict (the ask stand-in does not settle itself)
+  const askRemoval = async (Mgr) => {
+    const w = await world({ Mgr, byGroup: true, ask: true });
+    let answer; w.mgr._ask = () => new Promise((r) => { answer = r; });
+    const p = w.mgr.run(w.sessions.get('wa'), 'wa', 'standin', 'true').then((v) => ({ v }), (e) => ({ e }));
+    for (let i = 0; i < 20 && !answer; i++) await tick();
+    w.member.delete('A'); w.mgr.rejudgeAll('task-groups'); answer('allowed');
+    const r = await p; await w.mgr.auditWritten(); await w.hm.deviceAudit.whenWritten();
+    return { code: r.e && r.e.code, ran: w.acts.length };
+  };
+  const refused = await askRemoval(ExitProxyManager);
+  const EPn = compileAt('src/exit-proxy.js', [["    const ctxNow = gen1 !== gen0 ? this.ctxFor(session, sessionId) : j.ctx;", "    const ctxNow = j.ctx;"]]);
+  const ranC = await askRemoval(EPn.ExitProxyManager);
+  ok(refused.code === 'not_granted' && refused.ran === 0 && ranC.ran === 1, `a removal from the group during the user's ask ⇒ refused (${refused.code}, ${refused.ran} run); CONTROL (RED): the membership as judged ⇒ the command ran (${ranC.ran})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

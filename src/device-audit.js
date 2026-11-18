@@ -52,8 +52,9 @@ function durationMs(s) {
  *  lines is ONE append of at most half the bound). THE RING is the same thread's (`rotateAt`: past the bound the live file
  *  moves to `.1` before the append — store-writer-worker.js), so nothing here stats or renames, on the loop or the threadpool,
  *  and `produce()` hands every queued line to the writer whenever it asks — the hub's exit flush writes the queue, a stop
- *  loses nothing (a SIGKILL loses the lines not yet written, said here). A failed append keeps its lines for the writer's
- *  retry; the writer says the failure (its own law, every store); past QUEUE_MAX the oldest unwritten lines go — never one an
+ *  loses nothing.
+ *  WHAT A CRASH CAN LOSE (a SIGKILL, an OOM kill — a stop writes the queue): the lines queued since the last landed append — the writer's pace for the ring (at least 0.5 s, store-pace's floor; on a slow mount its last measured write), up to QUEUE_MAX (4 MB) while the storage does not answer; the run route answers the agent before its line is on disk, so a kill right after a command can drop that command's line from the owner's Commands list (its card and the agent's reply said it ran).
+ *  A failed append keeps its lines for the writer's retry; the writer says the failure (its own law, every store); past QUEUE_MAX the oldest unwritten lines go — never one an
  *  append in flight carries, never the newest — said once until a line lands. `pending()` = the lines not known on disk yet
  *  (oldest first): every reader judges them FIRST (the newest) and judges each record ONCE by its own id (a line that landed
  *  but whose answer is not back, a rotation between two reads of the ring). `whenWritten()` = every line queued before it on
@@ -62,7 +63,7 @@ function durationMs(s) {
  *  the store writer, under its timed-sync row's LITERAL name (test-architecture §72) — never a name computed here.
  *  → { append(text, {id}), pending(), whenWritten(), file } */
 const QUEUE_MAX = 4 * 1024 * 1024;   // the unwritten lines' bound (a storage that never answers keeps at most this much in memory)
-const JOURNALS = new Map();          // file → its one journal
+const JOURNALS = new Map();          // file → its one journal: a SECOND journal() of a file gets the FIRST one (its ask, durable and bound — a second caller's are not used; the hub has one manager of each file, only a suite could build two)
 function journal({ file, bound = AUDIT_MAX_BYTES, mode = null, ask, durable, log = () => {} } = {}) {
   if (JOURNALS.has(file)) return JOURNALS.get(file);
   const batchMax = Math.max(1, Math.floor(bound / 2));
