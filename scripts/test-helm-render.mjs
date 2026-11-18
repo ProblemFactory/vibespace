@@ -19,7 +19,7 @@
 //   override list; no gdriveClientSecret key, no env.
 // E presets.volume=false ⇒ the env form, as before (+ byte-identical to the
 //   pre-lane chart at 2.369.199 when the history is present — else SKIP said;
-//   the two ephemeral-storage lines of J aside, as in every byte leg below).
+//   the two ephemeral-storage lines of J and R's probe block aside, as in every byte leg below).
 // F clusterSecret / mountPath named ⇒ the source and the mount follow.
 // G THE POD TEMPLATE IS THE SAME for A, B, C, D: the item list never depends
 //   on the values, so changing an override is a Secret-only upgrade — no roll.
@@ -50,8 +50,8 @@
 //   private file written before this chart) keeps both (helm merges nested
 //   maps); `=null` drops one; the fuse / tun device limits stay beside it;
 //   priorityClassName empty ⇒ no field, set ⇒ the pod's. Against the
-//   2.369.277 chart (when the history is present) those two lines are the
-//   WHOLE diff.
+//   2.369.277 chart (when the history is present) those two lines (and R's
+//   probe block) are the WHOLE diff.
 // K THE ROLLOUT RECIPE, modelled: `helm upgrade --reuse-values` swaps the new
 //   chart's values.yaml for the release's OLD coalesced values (helm's
 //   reuseValues: chart.Values = oldVals) — so an old release upgraded with it
@@ -77,6 +77,11 @@
 // P THE FLEET'S CUSTOM BROWSER KERNEL (lane engine-plugin, design-custom-browser-plugin §1.4): customBrowser.enabled ⇒ the
 //   override Secret's `fleet` gains ONE key `browserEngine` {plugin, default, source, kernel} (the app's own reader round-trips it
 //   into the default policy); off ⇒ byte-identical; the Deployment never changes; presets.volume=false ⇒ nothing.
+// R THE PROBES (bl-machines-b, B-b1f7 — the owner's decision 2026-11-18): a startup probe for the boot, liveness over ten
+//   minutes and never under the startup budget, readiness takes a held hub out of the load balancer; every number from
+//   values (probes.*), the chart's and values.yaml's comments state the render's arithmetic, the render refuses a short
+//   window; controls: no startup probe, the liveness as it was, the refusals removed, a comment out of step. Older charts'
+//   byte legs read R's block as one more stated difference (noProbes). NOTHING here is applied to a cluster.
 // CONTROLS (chart copies in scratch): the relay env back in the template, the fleet items rendered only when a relay is
 //   set (a pod roll per relay change), the old key not aliased — each turns its L assert red; a subPath mount, a source without
 //   optional, an env rendered beside the volume — each turns its assert red;
@@ -103,7 +108,11 @@ const PRE_EPH_SHA = 'f174d5b88';        // 2.369.277 — the last chart without 
 const noEph = (out) => out.replace(/^ {14}ephemeral-storage: \S+\n/gm, '');
 /** lane oauth-relay-one-source: a render with L's two fleet.json projection items taken out — what the byte legs compare against older charts. */
 const noFleet = (out) => out.replace(/^ {20}- \{ key: fleet, path: (?:override\/)?fleet\.json \}\n/gm, '');
-const older = (out) => noFleet(noEph(out));
+/** bl-machines-b B-b1f7 (R): a render whose probe block (a startup probe, values-driven numbers, their arithmetic) is put back
+ *  to the one every older chart rendered — what the byte legs compare against older charts. */
+const OLD_PROBES = "          readinessProbe:\n            httpGet: { path: /login, port: 3456 }\n            initialDelaySeconds: 10\n            periodSeconds: 10\n            timeoutSeconds: 5\n          # Last-resort self-healing: a SUSTAINED wedge (threadpool livelock —\n          # the process is up but unresponsive, so Restart-on-crash never\n          # fires) restarts the container after ~5min of failures. Generous on\n          # purpose: a restart kills in-pod dtach sessions, so only a truly\n          # dead instance should trip it.\n          livenessProbe:\n            httpGet: { path: /login, port: 3456 }\n            initialDelaySeconds: 60\n            periodSeconds: 30\n            timeoutSeconds: 5\n            failureThreshold: 10\n";
+const noProbes = (out) => out.replace(/^ {10}# THE PROBES \(B-b1f7[^\n]*\n(?: {10}#[^\n]*\n)*(?: {10}(?:startup|readiness|liveness)Probe:\n(?: {12}\S[^\n]*\n){4}){3}/m, OLD_PROBES);
+const older = (out) => noProbes(noFleet(noEph(out)));
 const REL_OV = 'vibespace-alice-preset-override';
 const ROOT = scratch('cpr');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
@@ -204,7 +213,7 @@ ok(envNames(docOf(rED, 'Deployment')).includes('VIBESPACE_GDRIVE_CLIENT_ID') && 
     const tar = execFileSync('git', ['-C', REPO, 'archive', BASE_SHA, 'deploy/helm/vibespace-user'], { env: gitEnvFrom(process.env), maxBuffer: 16 << 20 });
     spawnSync('tar', ['-x', '-C', baseDir], { input: tar });
     const baseChart = path.join(baseDir, 'deploy/helm/vibespace-user');
-    for (const [name, v] of [['A', A], ['C', C], ['D', D]]) ok(render(baseChart, v) === noEph(render(CHART, v, ['--set', 'presets.volume=false'])), `presets.volume=false renders ${name} BYTE-IDENTICAL to the ${BASE_SHA} chart, J's ephemeral-storage lines aside (an operator who opts out sees no other change)`);
+    for (const [name, v] of [['A', A], ['C', C], ['D', D]]) ok(render(baseChart, v) === noProbes(noEph(render(CHART, v, ['--set', 'presets.volume=false']))), `presets.volume=false renders ${name} BYTE-IDENTICAL to the ${BASE_SHA} chart, J's ephemeral-storage lines and R's probe block aside (an operator who opts out sees no other change)`);
     const diffA = render(baseChart, A) !== rA;
     ok(diffA, `(and the default render of A differs from ${BASE_SHA} — the switch is real)`);
   }
@@ -317,10 +326,10 @@ const say = (b) => (b.length ? ' — ' + b.join('; ') : '');
     const preDir = path.join(ROOT, 'preappsys'); fs.mkdirSync(preDir, { recursive: true });
     spawnSync('tar', ['-x', '-C', preDir], { input: execFileSync('git', ['-C', REPO, 'archive', PRE_APPSYS_SHA, 'deploy/helm/vibespace-user'], { env: gitEnvFrom(process.env), maxBuffer: 16 << 20 }) });
     const PRE = path.join(preDir, 'deploy/helm/vibespace-user');
-    ok([A, C, D].every((v) => render(PRE, v) === older(render(CHART, v))), `off renders A, C, D BYTE-IDENTICAL to the ${PRE_APPSYS_SHA} chart, J's ephemeral-storage lines and L's fleet.json items aside — a release that never sets it sees no other change on upgrade`);
+    ok([A, C, D].every((v) => render(PRE, v) === older(render(CHART, v))), `off renders A, C, D BYTE-IDENTICAL to the ${PRE_APPSYS_SHA} chart, J's ephemeral-storage lines, L's fleet.json items and R's probe block aside — a release that never sets it sees no other change on upgrade`);
     const noComments = (o) => o.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
     const shapes = [['fuse', ['--set', 'fuse.enabled=true']], ['cephfs', ['--set', 'cephfs.mons=10.0.0.1', '--set', 'cephfs.secret=k']], ['tun', ['--set', 'tun.enabled=true']]];
-    ok(shapes.every(([, x]) => noComments(render(PRE, C, x)) === noComments(older(render(CHART, C, x)))), `fuse / cephfs / tun alone render as the ${PRE_APPSYS_SHA} chart did, comment lines, J's ephemeral-storage lines and L's fleet.json items aside (the shared securityContext essay grew)`);
+    ok(shapes.every(([, x]) => noComments(render(PRE, C, x)) === noComments(older(render(CHART, C, x)))), `fuse / cephfs / tun alone render as the ${PRE_APPSYS_SHA} chart did, comment lines, R's probe block, J's ephemeral-storage lines and L's fleet.json items aside (the shared securityContext essay grew)`);
   }
   const rOn = render(CHART, C, ON);
   const vOn = appSysVerdict(rOn, { on: true, caps: ['SYS_ADMIN'] });
@@ -385,7 +394,7 @@ const cpuMem = (out) => { const r = resourcesOf(out); return [r.requests.cpu, r.
     const PRE = path.join(preDir, 'deploy/helm/vibespace-user');
     const shapes = [['A', A, []], ['C', C, []], ['D', D, []], ['C+appSystem', C, ON], ['C+fuse+tun', C, ['--set', 'fuse.enabled=true', '--set', 'tun.enabled=true', '--set', 'tun.mode=device-plugin']], ['A env form', A, ['--set', 'presets.volume=false']]];
     const off = shapes.filter(([, v, x]) => { const now = render(CHART, v, x); return render(PRE, v, x) !== older(now) || ephVerdict(now).length; }).map(([n]) => n);
-    ok(!off.length, `against the ${PRE_EPH_SHA} chart the two ephemeral-storage lines (and L's two fleet.json items) are the WHOLE diff (${shapes.map(([n]) => n).join(' · ')})${off.length ? ' — differs: ' + off.join(', ') : ''}`);
+    ok(!off.length, `against the ${PRE_EPH_SHA} chart the two ephemeral-storage lines (and L's two fleet.json items, and R's probe block) are the WHOLE diff (${shapes.map(([n]) => n).join(' · ')})${off.length ? ' — differs: ' + off.join(', ') : ''}`);
   }
 }
 
@@ -609,5 +618,81 @@ ok(ingressVerdict(render(extraRule, C, ING)).some((b) => /rules \(want|pod itsel
 const noPod = chartCopy('ingress-selects-nothing', (s) => s.replace(/(name: \{\{ \$name \}\}-ingress[\s\S]*?app\.kubernetes\.io\/name: )vibespace/, '$1vibespace-x'));
 ok(ingressVerdict(render(noPod, C, ING)).some((b) => /the policy selects/.test(b)), 'CONTROL: a policy whose selector matches no pod of the Deployment (it protects nothing) is RED');
 
+console.log('R THE PROBES (bl-machines-b, B-b1f7 — the owner\'s decision 2026-11-18: a startup probe for the boot, liveness over ten minutes)');
+// a liveness kill restarts the container and ends EVERY conversation in the pod (2026-11-16: a hub held for minutes was killed six
+// times in 36 minutes); readiness only takes a held hub out of the load balancer. A probe flips at its failureThreshold-th failure
+// in a row: (failureThreshold − 1) × periodSeconds after its first failure. NOTHING here is applied to a cluster.
+const PROBE_KEYS = ['httpGet', 'periodSeconds', 'timeoutSeconds', 'failureThreshold'];
+const probeOf = (dep, kind) => {
+  const m = new RegExp(`^ {10}${kind}Probe:\\n((?: {12}\\S[^\\n]*\\n?)+)`, 'm').exec(dep); if (!m) return null;
+  const num = (k) => { const x = new RegExp(`^ {12}${k}: (\\d+)$`, 'm').exec(m[1]); return x ? Number(x[1]) : null; };
+  const keys = [...m[1].matchAll(/^ {12}(\w+):/gm)].map((x) => x[1]);
+  return { get: /^ {12}httpGet: \{ path: \/login, port: 3456 \}$/m.test(m[1]), period: num('periodSeconds'), timeout: num('timeoutSeconds'), fail: num('failureThreshold'), keys };
+};
+const flip = (p) => (p.fail - 1) * p.period;   // the seconds from a probe's first failure to the one that flips it
+/** The probes' verdict, as named failures ([] = good): the boot's budget, the load balancer's exit, the kill's wait (seconds). */
+function probesVerdict(out, { boot = 900, lbOut = 20, held = 900, timeouts = [5, 5, 5] } = {}) {
+  const dep = depOf(out); const bad = [];
+  const s = probeOf(dep, 'startup'), r = probeOf(dep, 'readiness'), l = probeOf(dep, 'liveness');
+  for (const [name, p, t] of [['startup', s, timeouts[0]], ['readiness', r, timeouts[1]], ['liveness', l, timeouts[2]]]) {
+    if (!p) { bad.push(`no ${name} probe${name === 'startup' ? ' (the boot meets liveness)' : ''}`); continue; }
+    if (!p.get) bad.push(`the ${name} probe does not ask GET /login on 3456`);
+    if (p.keys.join() !== PROBE_KEYS.join()) bad.push(`the ${name} probe holds ${p.keys.join(', ')} (want ${PROBE_KEYS.join(', ')})`);
+    if (p.timeout !== t) bad.push(`the ${name} probe's timeout is ${p.timeout} s (want ${t})`);
+  }
+  if (s) { if (flip(s) !== boot) bad.push(`the startup probe gives a boot ${flip(s)} s (want ${boot})`); if (!(flip(s) > 600)) bad.push(`the startup probe restarts a boot after ${flip(s)} s — ten minutes or less`); }
+  if (r && flip(r) !== lbOut) bad.push(`readiness takes a held hub out ${flip(r)} s after its first failure (want ${lbOut})`);
+  if (l) {
+    if (!(flip(l) > 600)) bad.push(`liveness kills a hub held ${flip(l)} s — ten minutes or less`);
+    if (flip(l) !== held) bad.push(`liveness lets a hub be held ${flip(l)} s (want ${held})`);
+    if (s && flip(l) < flip(s)) bad.push(`liveness (${flip(l)} s) is shorter than the startup budget (${flip(s)} s)`);
+  }
+  return bad;
+}
+const rP = render(CHART, C);
+{ const vP = probesVerdict(rP); ok(!vP.length, `R the default: startup restarts a boot that never answers at (91 − 1) × 10 s = 900 s; readiness takes a held hub out of the load balancer at (3 − 1) × 10 s = 20 s after its first failure and never kills; liveness kills only after (31 − 1) × 30 s = 900 s of continuous failure — over ten minutes, and not under the startup budget (${vP.join('; ') || 'clean'})`); }
+/** the chart's comment AND values.yaml's state the render's own arithmetic: [] = good */
+function saidVerdict(chart) {
+  const bad = []; const dep = depOf(render(chart, C));
+  for (const f of ['templates/main.yaml', 'values.yaml']) {
+    const txt = fs.readFileSync(path.join(chart, f), 'utf-8');
+    for (const kind of ['startup', 'readiness', 'liveness']) {
+      const m = new RegExp(`# - ${kind}:[\\s\\S]*?\\((\\d+) − 1\\) × (\\d+) s = (\\d+) s`).exec(txt); const p = probeOf(dep, kind);
+      if (!m) { bad.push(`${f}: no arithmetic for ${kind}`); continue; }
+      const [fl, pe, sum] = m.slice(1).map(Number);
+      if ((fl - 1) * pe !== sum) bad.push(`${f}: ${kind} says (${fl} − 1) × ${pe} s = ${sum} s`);
+      if (!p || p.fail !== fl || p.period !== pe) bad.push(`${f}: ${kind} says ${fl} × ${pe} s, the render has ${p && p.fail} × ${p && p.period} s`);
+    }
+  }
+  return bad;
+}
+{ const sv = saidVerdict(CHART); ok(!sv.length, `R the chart's comment and values.yaml's state the render's own arithmetic, probe by probe (${sv.join('; ') || 'clean'})`); }
+ok(depOf(render(CHART, C, ['--set', 'probes=null'])) === depOf(rP), 'R a values set with no probes block (a --reuse-values upgrade from an older release) renders the SAME probes: the template\'s defaults are values.yaml\'s, no nil error');
+const err = (probes) => renderErr({ ...C, probes });
+const e270 = err({ liveness: { failureThreshold: 10 } });
+ok(!!e270 && /probes\.liveness: \(failureThreshold − 1\) × periodSeconds = 270 s, ten minutes \(600 s\) or less/.test(e270), 'R the old window, (10 − 1) × 30 s = 270 s, set by values ⇒ the render REFUSES, named with its arithmetic', e270);
+const e600 = err({ liveness: { failureThreshold: 21 } }), eBoot = err({ startup: { failureThreshold: 6 } }), eBoot600 = err({ startup: { failureThreshold: 61 } }), eUnder = err({ liveness: { failureThreshold: 25 } });
+ok(!!e600 && /probes\.liveness: [^\n]*= 600 s, ten minutes/.test(e600), 'R the edge: a liveness of exactly (21 − 1) × 30 s = 600 s is refused', e600);
+ok(!!eBoot && /probes\.startup: \(failureThreshold − 1\) × periodSeconds = 50 s, ten minutes \(600 s\) or less/.test(eBoot), 'R a startup budget of (6 − 1) × 10 s = 50 s ⇒ REFUSED (a startup failure restarts the container too: a boot resuming its conversations would loop)', eBoot);
+ok(!!eBoot600 && /probes\.startup: [^\n]*= 600 s, ten minutes/.test(eBoot600), 'R the startup edge: a budget of exactly (61 − 1) × 10 s = 600 s is refused', eBoot600);
+ok(!!eUnder && /probes\.liveness: 720 s is shorter than the startup budget 900 s/.test(eUnder), 'R a liveness of (25 − 1) × 30 s = 720 s under the default startup budget of 900 s ⇒ REFUSED (an in-place restart boots under liveness alone)', eUnder);
+ok(!probesVerdict(render(CHART, { ...C, probes: { startup: { failureThreshold: 62 }, liveness: { failureThreshold: 22 } } }), { boot: 610, held: 630 }).length, 'R just over the edges renders: startup (62 − 1) × 10 s = 610 s, liveness (22 − 1) × 30 s = 630 s');
+const NINE = { startup: { periodSeconds: 60, timeoutSeconds: 7, failureThreshold: 16 }, readiness: { periodSeconds: 5, timeoutSeconds: 8, failureThreshold: 6 }, liveness: { periodSeconds: 20, timeoutSeconds: 9, failureThreshold: 46 } };
+{
+  const dep = depOf(render(CHART, { ...C, probes: NINE }));
+  const got = Object.fromEntries(['startup', 'readiness', 'liveness'].map((k) => { const p = probeOf(dep, k); return [k, p && { periodSeconds: p.period, timeoutSeconds: p.timeout, failureThreshold: p.fail }]; }));
+  ok(JSON.stringify(got) === JSON.stringify(NINE) && !probesVerdict(render(CHART, { ...C, probes: NINE }), { boot: 900, lbOut: 25, held: 900, timeouts: [7, 8, 9] }).length, 'R all nine numbers ride values, each to its own line (startup (16 − 1) × 60 s, readiness (6 − 1) × 5 s, liveness (46 − 1) × 20 s; timeouts 7 / 8 / 9)', JSON.stringify(got));
+}
+ok((depOf(rP).match(/^ {10}(startup|readiness|liveness)Probe:$/gm) || []).length === 3 && (depOf(rP).match(/^ {10}startupProbe:$/gm) || []).length === 1, 'R the Deployment carries three probes, each once (no probe twice)');
+const noStartup = chartCopy('probes-no-startup', (x) => x.replace(/ {10}startupProbe:\n(?: {12}[^\n]*\n){4}/, ''));
+ok(probesVerdict(render(noStartup, C)).some((b) => /no startup probe/.test(b)), 'CONTROL: the chart without its startup probe (a boot meets liveness) is RED');
+const asWas = chartCopy('probes-liveness-as-was', (x) => x.replace(/( {10}livenessProbe:\n {12}httpGet: \{ path: \/login, port: 3456 \}\n) {12}periodSeconds: \{\{ \$lPeriod \}\}\n( {12}timeoutSeconds: [^\n]*\n) {12}failureThreshold: \{\{ \$lFail \}\}\n/, '$1            initialDelaySeconds: 60\n            periodSeconds: 30\n$2            failureThreshold: 10\n'));
+ok(probesVerdict(render(asWas, C)).some((b) => /kills a hub held 270 s/.test(b)), 'CONTROL: the liveness block as it was (a 60 s delay, then (10 − 1) × 30 s = 270 s: a hub held 4.5 min is killed) is RED');
+const noGuard = chartCopy('probes-no-guard', (x) => x.replace(/(?: {10}\{\{- if (?:le|lt) \$[a-zA-Z]+ [^\n]*\{\{ fail [^\n]*\n){3}/, ''));
+ok(probesVerdict(render(noGuard, { ...C, probes: { liveness: { failureThreshold: 10 } } }), { held: 270 }).some((b) => /ten minutes or less/.test(b)), 'CONTROL: without the render\'s refusals, a values set under ten minutes renders a killing liveness — RED (the refusal is what holds the law)');
+const offStep = chartCopy('probes-comment-off', (x) => x.replace('(31 − 1) × 30 s = 900 s', '(25 − 1) × 30 s = 720 s'));
+ok(saidVerdict(offStep).some((b) => /templates\/main\.yaml: liveness says 25 × 30 s/.test(b)), 'CONTROL: the chart\'s comment out of step with the render (the first cut\'s 25) is RED');
+const offValues = chartCopy('probes-values-comment-off', (x) => x.replace('(31 − 1) × 30 s = 900 s', '(25 − 1) × 30 s = 720 s'), 'values.yaml');
+ok(saidVerdict(offValues).some((b) => /values\.yaml: liveness says 25 × 30 s/.test(b)), 'CONTROL: values.yaml\'s comment out of step with the render is RED');
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

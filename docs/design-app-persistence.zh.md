@@ -25,7 +25,7 @@ SteamDeck 式"不可变系统 + 持久 overlay 上层"这条路，三位评审�
 | 用户 `vibe` uid 1000 非 root，**免密 sudo**（pod 内 root 等价）；容器以 root 起 → `runuser` 降权（fleet 镜像启动时把 `vibe` 改名为实例名，`/home/vibe` 留作兼容软链） | Dockerfile、`boot-root.sh` |
 | **CAP_SYS_ADMIN + AppArmor Unconfined** 在 `fuse.enabled` 或 `cephfs.mons` 任一设置时授予；`/dev/fuse` 走 device plugin。没有 privileged、没有 loop 设备、没有 user namespace 设置、seccomp 未设（kubelet 默认 = 无过滤，P1 实测 `Seccomp: 0`） | `main.yaml` 97–115, 276–278；P1 |
 | pod **已经从内部做内核挂载**：`sudo -n mount -t ceph …`（My storage）、rclone FUSE、tailscaled（tun）。⇒ 在有 SYS_ADMIN 的 pod 里 `mount(2)` 可用是**已证事实** | `src/mounts.js`、`src/opslog.js`、`src/plugins.js` |
-| 今天系统包唯一的"持久化"约定 = `~/.vibespace-init.sh` **每次启动同步重放**（apt 跑在 node 起来之前；liveness 约 5.5 min 兜底；失败忽略）。产品代码不写不管它 | `entrypoint.sh` 39–44 |
+| 今天系统包唯一的"持久化"约定 = `~/.vibespace-init.sh` **每次启动同步重放**（apt 跑在 node 起来之前；startup 探针 15 min 兜底（B-b1f7；此前 liveness 约 5.5 min）；失败忽略）。产品代码不写不管它 | `entrypoint.sh` 39–44 |
 | 已有的"产品安装通道"：桌面应用的 **xpra 安装计划**（先出计划 → `sudo -n sh -c` → setsid 分离 + pidfile 槽 + flock → 流式日志 → 重连不重跑）；插件系统的 **boot replay**（意图在 `data/plugins.json`，二进制在 PVC，启动时按 enabled+desiredUp 拉起） | `src/desktop-apps.js` 1111–1298、`src/server/desktop-access.js`、`src/plugins.js` |
 | agent 工具模式：`data/bin/vibespace-*` 静态 CLI（AGENT_TOOLS 随会话下发），`VIBESPACE_API` + `vsst_` token → `/api/agent/*`；人类门 = For you 托盘的一个条目 + cookie 路由（agent bearer 一律 403） | `src/agent-routes.js`、`src/hosts.js` |
 | 桌面应用目录是代码固定的 `DEFAULT_REGISTRY`，规则"exec 是人的，不是 agent 的"（`vibespace-window open` 只认目录 id） | `src/desktop-apps.js` 950–960 |

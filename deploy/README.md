@@ -163,6 +163,19 @@ added since that release's chart — use it only after a render diff.
   `helm get manifest u-<user>` only in the two `ephemeral-storage` lines (and
   `priorityClassName`); anything else in the diff is an older chart's change
   arriving with it — read it before you roll.
+- **The probes (B-b1f7)**: from this chart on, the dry-run diff also shows a
+  `startupProbe`, both `initialDelaySeconds` gone and the liveness
+  `failureThreshold` 10 → 31 (a kill only after 15 min of failure; a held hub
+  leaves the load balancer instead), readiness stating `failureThreshold: 3`
+  (the Kubernetes default: no change) and the new comment block above them. `--reuse-values` needs no `--set` for them
+  (the template's defaults equal values.yaml's), and the render refuses a
+  `probes.*` set under the chart's floors. A boot may take up to 15 min before
+  its first answer, past the Deployment's default progress deadline (600 s):
+  `kubectl rollout status` can report a slow boot as failed while the pod is
+  still starting — read the pod, not the deadline. `helm upgrade --wait` gives
+  up at its own `--timeout` (5m by default): pass `--timeout 16m`, and never
+  `--atomic` (its rollback recreates the pod — the booting hub and every
+  conversation it was resuming — and brings back the old liveness).
 - **Check the Deployment, not the helm values** (they drift):
   `kubectl -n vibespace get deploy vibespace-<user> -o jsonpath='{.spec.template.spec.containers[0].resources}'`.
 

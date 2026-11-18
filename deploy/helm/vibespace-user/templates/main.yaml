@@ -358,22 +358,50 @@ spec:
             - name: nettun
               mountPath: /dev/net/tun
             {{- end }}
+          # THE PROBES (B-b1f7 — the owner's decision 2026-11-18: a STARTUP probe for the boot, liveness over
+          # ten minutes). A liveness kill restarts the container and ends EVERY conversation in the pod
+          # (2026-11-16: a hub alive but held for minutes was killed six times in 36 minutes). Each probe asks
+          # GET /login on the app port; the numbers are probes.* in values.yaml (whole seconds). A probe flips at
+          # its failureThreshold-th failure in a row: (failureThreshold − 1) × periodSeconds after its first
+          # failure, which comes within periodSeconds + timeoutSeconds of a hold's start. At the defaults:
+          # - startup: liveness and readiness wait for its first answer. A boot that never answers is
+          #   restarted at (91 − 1) × 10 s = 900 s (15 min) from the container's start (a boot that resumed
+          #   ~80 conversations held /login ~4 min, 2026-11-05).
+          # - readiness: a held hub LEAVES the load balancer at (3 − 1) × 10 s = 20 s after its first failed
+          #   probe (20–35 s after the hold began) and comes back at its first answer. It never kills.
+          # - liveness: the last resort, for a hub that never comes back: a kill only after
+          #   (31 − 1) × 30 s = 900 s (15 min) of continuous failure. Never shorter than the startup budget: a
+          #   hub that restarts itself inside the container (an update, a crash) boots under liveness alone.
+          # The render REFUSES a startup or a liveness window of 600 s or less, and a liveness window shorter
+          # than the startup budget.
+          {{- $probes := .Values.probes | default dict }}
+          {{- $sp := $probes.startup | default dict }}
+          {{- $rp := $probes.readiness | default dict }}
+          {{- $lp := $probes.liveness | default dict }}
+          {{- $sPeriod := $sp.periodSeconds | default 10 | int }}
+          {{- $sFail := $sp.failureThreshold | default 91 | int }}
+          {{- $sBoot := mul (sub $sFail 1) $sPeriod }}
+          {{- $lPeriod := $lp.periodSeconds | default 30 | int }}
+          {{- $lFail := $lp.failureThreshold | default 31 | int }}
+          {{- $lHeld := mul (sub $lFail 1) $lPeriod }}
+          {{- if le $lHeld 600 }}{{ fail (printf "probes.liveness: (failureThreshold − 1) × periodSeconds = %d s, ten minutes (600 s) or less — a held hub must live over ten minutes before a kill ends every conversation in the pod (B-b1f7)" $lHeld) }}{{ end }}
+          {{- if le $sBoot 600 }}{{ fail (printf "probes.startup: (failureThreshold − 1) × periodSeconds = %d s, ten minutes (600 s) or less — a boot that resumes its conversations holds /login for minutes, and a startup failure restarts the container too (B-b1f7)" $sBoot) }}{{ end }}
+          {{- if lt $lHeld $sBoot }}{{ fail (printf "probes.liveness: %d s is shorter than the startup budget %d s — a hub that restarts itself inside the container (an update, a crash) boots under liveness alone (B-b1f7)" $lHeld $sBoot) }}{{ end }}
+          startupProbe:
+            httpGet: { path: /login, port: 3456 }
+            periodSeconds: {{ $sPeriod }}
+            timeoutSeconds: {{ $sp.timeoutSeconds | default 5 | int }}
+            failureThreshold: {{ $sFail }}
           readinessProbe:
             httpGet: { path: /login, port: 3456 }
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 5
-          # Last-resort self-healing: a SUSTAINED wedge (threadpool livelock —
-          # the process is up but unresponsive, so Restart-on-crash never
-          # fires) restarts the container after ~5min of failures. Generous on
-          # purpose: a restart kills in-pod dtach sessions, so only a truly
-          # dead instance should trip it.
+            periodSeconds: {{ $rp.periodSeconds | default 10 | int }}
+            timeoutSeconds: {{ $rp.timeoutSeconds | default 5 | int }}
+            failureThreshold: {{ $rp.failureThreshold | default 3 | int }}
           livenessProbe:
             httpGet: { path: /login, port: 3456 }
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 10
+            periodSeconds: {{ $lPeriod }}
+            timeoutSeconds: {{ $lp.timeoutSeconds | default 5 | int }}
+            failureThreshold: {{ $lFail }}
           resources:
             requests: {{- toYaml .Values.resources.requests | nindent 14 }}
             limits:

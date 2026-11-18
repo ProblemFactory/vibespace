@@ -58,6 +58,22 @@ resources:
   requests: { cpu: "1", memory: "4Gi", ephemeral-storage: "2Gi" }
   limits:   { cpu: "8", memory: "32Gi", ephemeral-storage: "20Gi" }
 
+# THE PROBES (B-b1f7, the owner's decision 2026-11-18). Each asks GET /login on the app port; whole seconds. A
+# liveness kill restarts the container and ends EVERY conversation in the pod, so liveness is the last resort only.
+# A probe flips at its failureThreshold-th failure in a row, (failureThreshold − 1) × periodSeconds after its first:
+# - startup: liveness and readiness wait for its first answer; a boot that never answers is restarted at
+#   (91 − 1) × 10 s = 900 s (15 min) from the container's start (a boot resuming ~80 conversations held /login ~4 min).
+# - readiness: a hub that stops answering leaves the load balancer at (3 − 1) × 10 s = 20 s after its first failed
+#   probe and comes back at its first answer; nothing is killed.
+# - liveness: a kill only after (31 − 1) × 30 s = 900 s (15 min) of continuous failure, never shorter than the
+#   startup budget (a hub that restarts itself inside the container boots under liveness alone).
+# The render refuses a startup or a liveness window of 600 s or less, and a liveness window under the startup budget.
+# templates/main.yaml states the same arithmetic beside the probes; test-helm-render (R) holds both to the render.
+probes:
+  startup: { periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 91 }
+  readiness: { periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 3 }
+  liveness: { periodSeconds: 30, timeoutSeconds: 5, failureThreshold: 31 }
+
 # Scheduling AND eviction priority. An interactive workspace that gets
 # preempted mid-session loses the user's terminal state, so a shared cluster
 # running batch/CI beside VibeSpace should give these pods a priority class
