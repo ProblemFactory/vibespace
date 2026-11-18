@@ -970,7 +970,7 @@ await leg('㉚ the Save\'s new-host end', async () => {
   const r4 = S && S({ was: null, hosts: ['c.example'], endId: 'keep', now }), r5 = S && S({ was: { scopes: [host('a.example', null)] }, hosts: ['a.example', 'c.example'], endId: '8h', now });
   ok(!!(r4 && endIn(r4, 'c.example') === now + 30 * DAY && r5 && endIn(r5, 'a.example') === now + 8 * 3600e3 && endIn(r5, 'c.example') === now + 8 * 3600e3), '㉚d a member new to the row the same (30 days); an explicit choice («8 hours») gives every scope that end', { r4, r5 });
   const src = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8');
-  ok(/const plan = saveScopesOf\(\{ was, hosts: h, cmds, endId: endSel\.value, endFrom: endsFrom\(\) \}\)/.test(src) && /const plan = planOf\(\);/.test(src) && /t\('What Save writes:'\)/.test(src) && /hostsIn\.addEventListener\('input', drawPreview\)/.test(src), '㉚e the dialog\'s Save AND its «What Save writes:» line (redrawn as the hosts, the end or who change) both go through saveScopesOf — the end a new host gets is on the screen before Save');
+  ok(/const plan = saveScopesOf\(\{ was, hosts: h, cmds, endId: endSel\.value, endFrom: endsFrom\(\) \}\)/.test(src) && /const plan = planNow\(\);/.test(src) && /t\('What Save writes:'\)/.test(src) && /hostsIn\.addEventListener\('input', drawPreview\)/.test(src), '㉚e the dialog\'s Save AND its «What Save writes:» line (redrawn as the hosts, the end or who change) both go through saveScopesOf — the end a new host gets is on the screen before Save');
   // r6 (the r5 review F2 — «Math.min → Math.max» survived 119/119: no leg had two FINITE live ends)
   const H8 = now + 8 * 3600e3;
   const r6 = S && S({ was: { scopes: [host('a.example', D5), host('b.example', H8), host('d.example', null)] }, hosts: ['a.example', 'b.example', 'd.example', 'c.example'], endId: 'keep', now });
@@ -1078,6 +1078,41 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
     const ms = mutant(', opened: prior.opened, touched: prior.touched });', ', opened: prior.opened });', 'nostamps');   // stale-pins: kept — a RED control: the pre-B-be21 restore (no stamps) restored on purpose
     const rs = ms ? await pressLeg(ms) : null;
     ok(!!(ms && rs && rs.F0on && rs.stamp1 !== rs.stamp0), '㉝b RED control: the restore without the stamps (the r12 shape) ⇒ F0 is back ON with its place in the order lost', rs && { stamp0: rs.stamp0, stamp1: rs.stamp1 });
+  });
+}
+
+console.log('㉞ r13 should (the readers of batch 52 — B-a14b × the standing answer): AN ENDED APPROVAL IS DROPPED BY THE KEY IT IS KEPT UNDER');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('vsr-r13', REPO), DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+  // an end is kept under the SCOPE × the entry (noteEnded: the grant's conv = the caller's scope). A caller whose scope is not its
+  // conversation's id (a fork borrows its parent's): the standing answer dropped the end by the conversation's id and missed it.
+  // While the switch is ON neither the run nor `uses` shows it (the reader: no harm today), so the leg reads the door's own record
+  // (its `_ended` seam, beside `_grants`)
+  const standingLeg = async (doorMod) => {
+    const t8 = [];
+    const hold8 = { set: (fn, ms) => { if (ms > 3600e3) { t8.push(fn); return { held8: true }; } return setTimeout(fn, ms); }, clear: (h) => { if (!(h && h.held8)) clearTimeout(h); } };
+    const w = await world({ timers: hold8, doorMod });
+    const cs = { ...w.caller('conv-fork'), scope: 'webui-parent' };
+    const endOf = () => [...w.door._ended.values()].some((e) => e.conv === 'webui-parent' && e.id === w.e.id);
+    const q8 = await w.door.request({ caller: cs, entry: w.e.ref, purpose: 'read the TTS status', cwd: w.work });
+    const g8 = q8 && q8.askId ? w.door.answerRequest(q8.askId, { answer: '8h', reauthed: true, person: true }) : null;
+    for (const fn of t8.splice(0)) fn();   // its 8 hours ran out (the door's timer, held by hand)
+    const ended = endOf();
+    w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
+    const qs = await w.door.request({ caller: cs, entry: w.e.ref, purpose: 'transcribe', standing: true, command: 'python3 transcribe.py', cwd: w.work });
+    const yes = qs && qs.askId ? w.door.answerRequest(qs.askId, { answer: 'standing', reauthed: true, person: true }) : null;
+    return { g8: !!(g8 && g8.ok), ended, standing: !!(yes && yes.ok && yes.grantedFor === 'standing'), endAfter: endOf() };
+  };
+  await leg('㉞ the standing answer drops the end by its key', async () => {
+    const r = await standingLeg(DOOR);
+    ok(r.g8 && r.ended && r.standing && !r.endAfter, '㉞ a caller whose scope is not its conversation\'s id: its 8 hours ran out (the end kept under the scope), then the owner allows it standing ⇒ the old end is gone', r);
+    const plant = '      endedGrants.delete(q.quietPair);';
+    const n = DSRC.split(plant).length - 1;
+    ok(n === 1, '㉞ the RED control\'s plant is where it claims: the standing answer\'s delete by q.quietPair, once', n);
+    const mq = n === 1 ? MC.load('src/server/vault-run-door.js', DSRC.replace(plant, '      endedGrants.delete(pairOf(q.conv, q.id));'), 'r13-quiet') : null;   // stale-pins: kept — a RED control: the batch's delete by the conversation's id restored on purpose
+    const rq = mq ? await standingLeg(mq) : null;
+    ok(!!(mq && rq && rq.standing && rq.endAfter), '㉞ RED control: the delete by the conversation\'s id (the batch\'s shape) ⇒ the old end outlives the standing answer', rq);
   });
 }
 

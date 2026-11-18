@@ -1743,7 +1743,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (!so.ok && so.judged) { settleRequest(q, 'denied', so.why); return so.judged; }
       if (!so.ok) { settleRequest(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
       audit('vault-grant', { ...said, answer: 'standing', grants: so.grants, ...(q.hosts.length ? { hosts: q.hosts } : {}), ...(q.commandWords ? { command: q.commandWords } : {}), changes: auditChangesOf(so.changes) });   // r4 (D): what the write added, replaced and ended — the write's own result, never the card's guess
-      endedGrants.delete(pairOf(q.conv, q.id));   // B-a14b: a standing approval of the pair — the old end is no longer the news
+      endedGrants.delete(q.quietPair);   // B-a14b: a standing approval of the pair — the old end is no longer the news; r13 should: keyed as the record is, the SCOPE × the entry (q.quietPair = pairOf(scope, id)) — q.conv is the conversation's own id, which a fork's scope is not
       settleRequest(q, 'granted', 'answered', { ...(mark() || {}), grantedFor: 'standing', until: null });
       return { ok: true, outcome: 'granted', grantedFor: 'standing', grant: so.grants[0] || null };
     }
@@ -2022,7 +2022,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (sealedTool && shape.routeHosts.length > 1) { const hs = [...shape.routeHosts]; note('two_hosts', { ...head }); return named('two_hosts', { hosts: hs, words: `this command names two hosts it could contact — ${hs.join(' and ')}: a URL in a positional points to one and -R / GH_HOST (or a repo spec) to another. A sealed credential tool homes the token to only one host, so which one receives it cannot be told — nothing ran. Name a single host (drop the URL, or point -R at the URL's host).` }); }
     // lane vault-agent-own: ANOTHER conversation's agent entry is refused by name (no switch opens it) — B-bc3b: unless the owner
     // SHARED it through its grant row («Who may use it…»: this caller, for this run's hosts — judged below by the grant door's
-    // PURE verdict, read before any fact of the entry); with no grant door at all it is refused here, before anything is read
+    // PURE verdict; the row's stored hosts and the command's token are read for that verdict, and a missing, unshared or wrong-host
+    // run answers alike); with no grant door at all it is refused here, before anything is read
     const foreignRefs = spec.refs.filter((r) => VR.agentScopeOf(r) && !VR.ownsAgentEntry(r, caller));
     if (foreignRefs.length && !useGrants) { note('use_not_granted', { ...head, ref: foreignRefs[0].ref }); return named('use_not_granted', { ref: foreignRefs[0].ref }); }
     const dest = VR.destinationsOf(shape);   // lane vault-use-grants round 2 (BLOCKER): the grant covers the run's DESTINATIONS, judged by the reader the card uses
@@ -2071,7 +2072,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const ended = e0 && !(suspended && (offAt.get(r.id) || 0) >= e0.grantAt) ? e0 : null;   // B-a14b: an approval that ended — said as itself; an OFF that came AFTER the approval was given is the owner's news (a grant given after the OFF, then used, is said as used)
       let bytes = 0;
       if (row && (open || own)) { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } }
-      entries.push({ id: r.id, exists: !!row, open, bytes, on: sw, ...(own ? { own: true, prov: pv.prov === 'minted' ? 'minted' : 'stored', forHost: pv.forHost || null } : {}), ...(ended ? { ended: { by: ended.endedBy, at: new Date(ended.endedAt).toISOString() } } : {}) });
+      entries.push({ id: r.id, exists: !!row, open, bytes, on: sw, ...(own ? { own: true, prov: pv.prov === 'minted' ? 'minted' : 'stored', forHost: pv.forHost || null } : {}), ...(ended ? { ended: { by: ended.endedBy, at: new Date(ended.endedAt).toISOString(), ...(suspended ? { off: true } : {}) } } : {}) });   // r13 should: `off` — the owner had switched the entry OFF before this approval, and it still is
     }
     // lane vault-use-grants round 5 (item 3): when «Always» is offered on an entry that is NOT already switched on, the card
     // says pressing «Always» (with 验证是你) ALSO opens it for agent runs — the switch flips in the same act (option b).
@@ -2456,7 +2457,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
   return { run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
-    listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet,
+    listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet, _ended: endedGrants,
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce, _hostPasses: hostPasses };
 }
 

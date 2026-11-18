@@ -547,6 +547,30 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
   const changed = await editing.answer('move');
   ok(changed.code === 'job_secrets_changed' && freeNames(W).length === f3 && jsHere(W), 'the file EDITED while the move ran (its size moved) ⇒ job_secrets_changed — the values sealed meanwhile dropped again, the file kept', { code: changed.code, sealed: freeNames(W).length - f3 });
   fs.unlinkSync(jsf);
+  // r13 (three readers): «its change time» — a SAME-SIZE edit whose modification time is set back (the plant's mtime a whole second,
+  // so it is restored exactly) moves only the ctime: the door compares the ctime ⇒ job_secrets_changed, nothing sealed, the file kept
+  const sameSize = async (doorMod) => {
+    plantJS(W, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+    const T = Math.floor(Date.now() / 1000) - 60; fs.utimesSync(jsf, T, T);
+    await new Promise((r) => setTimeout(r, 30));   // the read: a kernel without fine-grained file times moves the ctime in 1–4 ms ticks — the edit lands in a later one
+    const before = new Set(freeNames(W).map((x) => x.name)); let edited = false, ctMoved = null;
+    const d = doorMod.create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: { addEntry: (o) => { if (!edited) { edited = true; const c0 = fs.statSync(jsf).ctimeMs; fs.writeFileSync(jsf, fs.readFileSync(jsf, 'utf8').replace('FIRST_ONE', 'FIRST_TWO')); fs.utimesSync(jsf, T, T); const st = fs.statSync(jsf); ctMoved = st.ctimeMs !== c0 && st.mtimeMs === T * 1000; } return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) } });
+    const r = await d.answer('move');
+    const fresh = freeNames(W).filter((x) => !before.has(x.name));   // secretNames comes sorted by name: the new ones by difference
+    const out = { code: r.code, sealed: fresh.length, kept: jsHere(W), ctMoved };
+    for (const x of fresh) { try { W.paste.dropEntry(x.name.slice('secret:'.length), { by: 'suite' }); } catch { } }   // the RED's sealed values go again
+    if (jsHere(W)) fs.unlinkSync(jsf);
+    return out;
+  };
+  const ss = await sameSize(require(path.join(REPO, 'src/server/job-secrets-door.js')));
+  ok(ss.ctMoved === true, 'r13: the plant is where it claims — the edit moved the ctime and left the mtime where it was', ss);
+  ok(ss.code === 'job_secrets_changed' && ss.sealed === 0 && ss.kept, 'r13: the file edited at the SAME size with its modification time set back ⇒ job_secrets_changed (the change time moved) — nothing sealed, the file kept', ss);
+  const jsdAbs = path.join(REPO, 'src/server/job-secrets-door.js'), jsdSrc = fs.readFileSync(jsdAbs, 'utf8'), ctPlant = 'now0.ctimeMs !== lst.ctimeMs';
+  ok(jsdSrc.split(ctPlant).length === 2, 'the RED control\'s plant is where it claims: the door\'s ctime comparison, once', jsdSrc.split(ctPlant).length - 1);
+  const mtCopy = new Module(jsdAbs, null); mtCopy.filename = jsdAbs; mtCopy.paths = Module._nodeModulePaths(path.dirname(jsdAbs));
+  mtCopy._compile(jsdSrc.replace(ctPlant, 'now0.mtimeMs !== lst.mtimeMs'), jsdAbs);   // stale-pins: kept — a RED control: the batch's mtime comparison restored on purpose
+  const ssRed = await sameSize(mtCopy.exports);
+  ok(ssRed.ctMoved === true && ssRed.code !== 'job_secrets_changed' && !ssRed.kept, 'RED control: the modification time compared (the batch\'s shape) ⇒ the edited file passes as the one read and is deleted', ssRed);
   ok(require(path.join(REPO, 'src/server/job-secrets-door.js')).RETIRED === require(path.join(REPO, 'src/server/migrations.js')).JOB_SECRETS_RETIRED && require(path.join(REPO, 'src/server/job-secrets-door.js')).ITEM === require(path.join(REPO, 'src/server/migrations.js')).JOB_SECRETS_ITEM,
     'the door\'s file and notice key ARE the migration\'s (one name each)');
 }
@@ -1203,7 +1227,8 @@ S.srv.close();
 console.log('⑫ MUTANTS — each RED');
 function mutant(rel, from, to) {   // a declaration (hoisted): section ⑩b's use-a-login red control calls it before this section runs
   const abs = path.join(REPO, rel), src = fs.readFileSync(abs, 'utf8');
-  if (!src.includes(from)) throw new Error(`mutant anchor missing in ${rel}: ${from.slice(0, 80)}`);
+  const n = src.split(from).length - 1;   // r13 (rule (b)): the plant where it claims — EXACTLY once, never the first of two
+  if (n !== 1) throw new Error(`mutant anchor ${n ? 'not unique' : 'missing'} in ${rel} (${n}×): ${from.slice(0, 80)}`);
   const m = new Module(abs, null); m.filename = abs; m.paths = Module._nodeModulePaths(path.dirname(abs));
   m._compile(src.replace(from, to), abs);
   return m.exports;

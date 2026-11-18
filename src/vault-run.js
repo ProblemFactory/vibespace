@@ -161,6 +161,12 @@ function endedWhy(ended) {
   if (ended && ended.by === 'lock') return `a lock of the vault ended it at ${at} (a lock ends every approval)`;
   return `it ended at ${at}`;
 }
+/** B-a14b (r13 should): the end in the agent's words, and the switch as it IS — an approval the user gave while the entry was
+ *  switched OFF ends with the entry still off (the door's `off`): never «the entry was not switched off» there */
+function grantExpiredWords(ended) {
+  const w = WORDS.grant_expired.replace(' — nothing ran;', ` (${endedWhy(ended)}) — nothing ran;`);
+  return ended && ended.off === true ? w.replace('; the entry was not switched off:', '; the entry itself is switched off (it already was when they approved):') : w;
+}
 const refusalOf = refuse;   // the door's refusals in the same shape (one spelling of a code and its words)
 
 // ── THE REFERENCE ──
@@ -1502,7 +1508,7 @@ function runVerdict({ state, plan, shape = null, entries = [], granted = false, 
     const e = facts.get(r.id);
     if (!e || !e.exists) return refuse('entry_unknown', { ref: r.ref });
     if (e.open !== true && e.own !== true) return e.ended   // B-a14b: an approval that ENDED is said as itself, with how and when
-      ? refuse('grant_expired', { ref: r.ref, ended: e.ended, words: WORDS.grant_expired.replace(' — nothing ran;', ` (${endedWhy(e.ended)}) — nothing ran;`) })
+      ? refuse('grant_expired', { ref: r.ref, ended: e.ended, words: grantExpiredWords(e.ended) })
       : refuse('entry_not_runnable', { ref: r.ref });   // lane vault-agent-own: its own entry is open to its conversation by construction
     if (!(Number(e.bytes) >= MIN_MASK_BYTES)) return refuse('entry_too_short_to_mask', { ref: r.ref });
   }

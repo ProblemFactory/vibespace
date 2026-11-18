@@ -68,9 +68,10 @@ const windowWords = (s) => `${t('any destination')} · ${s.expired ? t('expired'
  *  had not swept it yet — a restart or a lock inside the hour drops the hour-end prune) is `pruned`: sent with no scope, the
  *  hub prunes it (one it still holds LIVE it keeps) — never a refusal; `refused` = nothing to send and no window (the dialog
  *  names that member).
- *  B-f212 (r11's second follow-up): `endFrom` = the instant a chosen end counts from — the dialog pins it at its OPEN, so a
- *  repeated Save (the row landed, the policy did not) posts the SAME ends, never the row again with later ones; `now` still
- *  judges what has ended.
+ *  B-f212 (r11's second follow-up): `endFrom` = the instant a chosen end counts from — the dialog pins it at the Save that
+ *  LANDED (before one: the press's own instant), so a repeated Save (the row landed, the policy did not) posts the SAME ends,
+ *  never the row again with later ones; a Save that CHANGES the row counts from its own press (r13); `now` still judges what
+ *  has ended.
  *  → { scopes, fresh: [index of each new scope], kept: [{kind: 'window', until}], pruned, refused } */
 const KEEP_DEFAULT = '30d';
 export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep', now = Date.now(), endFrom = now } = {}) {
@@ -256,9 +257,11 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // the row as a Save LANDED it (`landedRow`: the hub's answer names it — null for an older hub's answer: every next Save then
   // posts the row whole); `held` = its 除了 as picker keys (r10)
   let snap = { to: members, except: u.except || [] }, held = stored.except;
-  // B-f212: the instant a chosen end counts from — the press's own now, then the FIRST Save that landed (a repeated Save posts the
-  // same ends, never later ones; the read: pinned at the open, a dialog left open an hour posted «8 hours» as seven, a day as one past)
-  let endPin = null, saveAt = null;
+  // B-f212: the instant a chosen end counts from — the press's own now, then the Save that LANDED (a repeated Save posts the same
+  // ends, never later ones; the read: pinned at the open, a dialog left open an hour posted «8 hours» as seven, a day as one past).
+  // r13: the pin holds only while the OWNER'S inputs (who, 除了, the hosts, the end) are what landed — planNow, for the preview and
+  // the Save alike
+  let endPin = null, saveAt = null, landedInputs = null;
   const endsFrom = () => (saveAt != null ? saveAt : endPin != null ? endPin : Date.now());
   let picker = null;
   // the unsaved guard (test-dialog-unsaved-census): who, the hosts and the end as the dialog opened — a close with a change asks
@@ -351,8 +354,18 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     const removed = exceptRemovedOf(snap ? snap.except : u.except || [], pick.except);   // r10: every exception this Save takes away — said, and named to the hub
     return { to, fresh, kept, gone, pick, removed, changed: !snap || rowChanged(snap, { to, except: pick.except }) };
   };
+  // r13 (the readers of B-f212): the owner's own inputs — a change the hub made (a row answered without `use`, a 1-hour window
+  // that ended meanwhile) is no reason to count the ends anew
+  const inputsOf = () => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except({ held }).slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '']);
+  // the plan as THIS press would post it: the ends from the landed pin; a Save whose inputs differ from what landed counts from now
+  const planNow = () => {
+    saveAt = endPin != null ? endPin : Date.now();
+    let p = planOf();
+    if (endPin != null && !p.error && p.changed && inputsOf() !== landedInputs) { saveAt = Date.now(); p = planOf(); }
+    return p;
+  };
   const drawPreview = () => {
-    let plan = null; try { plan = planOf(); } catch { plan = null; }
+    let plan = null; try { plan = planNow(); } catch { plan = null; }   // r13: the preview says what the Save would post
     preview.textContent = '';
     if (!plan || plan.error || !(plan.to.length || plan.removed.length)) { preview.hidden = true; return; }
     preview.hidden = false;
@@ -385,8 +398,9 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   };
   async function doSave() {
     err.textContent = '';
-    saveAt = endPin != null ? endPin : Date.now();   // B-f212: this press's instant — every end of its plan counts from it
-    const plan = planOf();
+    // B-f212: every end of this press's plan counts from the landed pin; r13: a Save the OWNER changed since (another end, a member
+    // added, hours later in the same open dialog) counts from THIS press, never a past one
+    const plan = planNow();
     if (plan.error) { err.textContent = plan.error; return false; }
     const { to, pick, removed, changed } = plan;
     const polWas = (u.policy && u.policy.text) || '', polNow = polIn.value.trim();
@@ -397,7 +411,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     if (changed) {
       r = await send();
       if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
-      if (r && r.ok) { rowSaved = true; landedRow(r, pick.except, polWas); if (endPin == null) endPin = saveAt; previewNow(); }   // B-f212: the landed row's instant pins the next Save's ends; the preview redrawn over the picker as landed (the read's nit: setSelected fires no onChange)
+      if (r && r.ok) { rowSaved = true; landedRow(r, pick.except, polWas); endPin = saveAt; landedInputs = inputsOf(); previewNow(); }   // B-f212: the landed row's instant pins the next Save's ends (r13: every landing moves it, with the inputs it landed); the preview redrawn over the picker as landed (the read's nit: setSelected fires no onChange)
     }
     if (r && r.ok && polNow !== polWas) {   // R4: the policy rides the same Save (a non-empty one asks 验证是你 too)
       const sendP = () => post('/api/vault/use-policy', { id: row.id, text: polNow }, revealLeftMs() ? revealHeaders() : {});

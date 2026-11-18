@@ -1127,6 +1127,29 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     const mf2 = SRCf.split(g0).length === 2 && SRCf.split(f0).length === 2 ? M.load('src/server/vault-run-door.js', SRCf.replace(g0, '').replace(f0, ''), 'firstend-off') : null;
     const fr2 = mf2 ? await firstEnd(mf2) : null;
     ok(!!(mf2 && fr2 && fr2.offList === 1), 'RED control: no first-end guard AND no «an OFF after the approval» filter ⇒ the timer\'s «its 8 hours ran out» is listed over the owner\'s OFF', fr2);
+    // r13 should (the readers of batch 52): an approval the user gave while the entry was ALREADY switched OFF — its end is said
+    // as itself (the OFF came before it: not the news) AND the switch as it is: «the entry itself is switched off (it already was
+    // when they approved)», never «the entry was not switched off» (the door's `off` on the ended fact)
+    const offFirst = async (mod) => {
+      const wo = await world(), heldO = [];
+      wo.door = wo.mk(mod, { timers: { set: (fn, ms) => { heldO.push({ fn, ms }); return heldO.length; }, clear: () => { } } });
+      openRow(wo); wo.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });   // the owner switched the entry OFF first
+      await sleep(5);   // the approval comes AFTER the OFF (offAt < the grant's at)
+      const qo = wo.door.request({ caller: c8, entry: M1, purpose: 'one upload' });
+      wo.door.answerRequest(qo.askId, { answer: 'once', reauthed: true, person: true });
+      const ro = await runAnswered(wo, ENV('env'), { caller: c8 });
+      const again = await wo.door.run({ caller: c8, args: ENV('env'), cwd: wo.work });
+      return { ran: !!(ro.r && ro.r.ok), code: again.code, words: again.words || '' };
+    };
+    const of1 = await offFirst(DOOR);
+    ok(of1.ran && of1.code === 'grant_expired' && /its one run was used at \d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(of1.words) && /the entry itself is switched off \(it already was when they approved\): ask them again/.test(of1.words) && !/was not switched off/.test(of1.words),
+      'r13: a once-approval given while the entry was OFF, then spent ⇒ grant_expired says the end AND «the entry itself is switched off (it already was when they approved)» — never «the entry was not switched off»', of1);
+    const offPlant = ', ...(suspended ? { off: true } : {})';
+    const offN = SRCf.split(offPlant).length - 1;
+    ok(offN === 1, 'the RED control\'s plant is where it claims: the door\'s `off` on the ended fact, once', offN);
+    const mo = offN === 1 ? M.load('src/server/vault-run-door.js', SRCf.replace(offPlant, ''), 'endoff') : null;
+    const ro2 = mo ? await offFirst(mo) : null;
+    ok(!!(mo && ro2 && ro2.code === 'grant_expired' && /the entry was not switched off/.test(ro2.words)), 'RED control: the door without `off` (the batch\'s shape) ⇒ the agent reads «the entry was not switched off» over an entry that IS off', ro2);
   }
   openRow(w); w.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });
   ok(!w.door._grants.size, 'switching the entry OFF ends its grants too (OFF = closed for every conversation)');

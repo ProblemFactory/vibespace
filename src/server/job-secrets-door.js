@@ -93,7 +93,9 @@ function create({ dataDir, vault, paste, userTodos = null, log = () => {} } = {}
     // its inode moved) keeps every byte: nothing moved, press again
     let now0 = null;
     try { now0 = await fsp.lstat(file); } catch { now0 = null; }
-    if (!now0 || !now0.isFile() || now0.size !== lst.size || now0.mtimeMs !== lst.mtimeMs || now0.ino !== lst.ino) { undo(); return named('job_secrets_changed'); }
+    // r13 (three readers): the CHANGE time, as the words say — a write moves it whatever the size and the modification time say
+    // afterwards (a same-size edit whose mtime was set back moved only the ctime; the batch compared the mtime)
+    if (!now0 || !now0.isFile() || now0.size !== lst.size || now0.ctimeMs !== lst.ctimeMs || now0.ino !== lst.ino) { undo(); return named('job_secrets_changed'); }
     try { await fsp.unlink(file); } catch (e) {
       if (!(e && e.code === 'ENOENT')) { undo(); return named('job_secrets_undeletable'); }   // the file stays as it was, and so does the vault — a second press is the same press
     }

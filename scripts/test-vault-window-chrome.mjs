@@ -30,7 +30,7 @@
 //   PNG of the header in each state (vw-head-*.png).
 //   ⑥c (lane vault-agent-own — the owner: 「它自己存的使用为啥还要我的允许？」): an agent's own rows (a value it PUT, a seed it added
 //      with `totp add`) sealed while the hub was down: the agent row's meta says the rule «Its own conversation uses it directly
-//      · other conversations cannot use it» + who kept it, and carries NO «Usable by agent runs» switch (the owner's rows keep
+//      · another one only as you share it («Who may use it…»)» (B-bc3b) + who kept it, and carries NO «Usable by agent runs» switch (the owner's rows keep
 //      theirs); its chip says «stored by an agent» (a PUT is never «never shown»); the seed's row says «· other conversations
 //      need a grant»; «Kept by agents» says its rule under its name; ⑧ the same words in Chinese (本对话可直接使用 · …)
 //   V2 (lane vault-window-v2, design q-047 §3): ②b the RAIL — 全部 + the nine purposes, each count = its rows in the list =
