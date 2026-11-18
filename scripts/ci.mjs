@@ -132,6 +132,12 @@
 //                                        slice of them with --shard), comma-joined
 //                                        for --only; scripts/ci-remote.mjs runs
 //                                        another slice on a second machine
+//                                        --tier=fast: the fast suites instead;
+//                                        --rules: one line per suite — its name,
+//                                        the ONE rule that selected it (own ·
+//                                        closure · names · boot · reads · table ·
+//                                        global · always · unlisted) and the input
+//                                        file — and the count per rule on stderr
 //                                        --why (here and on --heavy --affected):
 //                                        per SHARED file the rule used
 //                                        (scripts/affected-model.mjs) + the
@@ -961,7 +967,7 @@ export const SUITES = [
   { name: 'test-usage-probe-log', tier: 'fast', why: 'in-process · 175 ms' }, // the raw /usage probe ring (2.369.109): PURE clip/rotate/read + the panel rung through the REAL setupUsage with a fake claude (written / spawn-failed / no-buckets) + the control rung through the REAL engine (written / timeout / unparsed) + wiring pins
   { name: 'test-quota-source', tier: 'fast', why: 'in-process · 237 ms (restated 2026-10-20, was 2.2 s)' }, // harness S4: per-harness QuotaSignalSource (normalize/signalFromStream/probe/classifyAuthFailure on real shapes) + the caps-routed probe dispatcher (no claude spawn for codex identities) + wiring pins
   { name: 'test-server-globals', tier: 'fast', why: 'PURE · 1.7 s (restated 2026-10-20, was 467 ms)' },
-  { name: 'test-changelog-style', tier: 'fast', why: 'in-process · 389 ms (the three changelogs linted whole + parity + 20 controls + the real /api/changelog-diff over a fixture canonical)' }, // the user changelog's style gate: CHANGELOG.md / .zh.md / .ja.md lint clean whole (src/changelog-style.js — the rules of docs/changelog-style.md), the translations have the English structure, every version from 2.369.198 on heads a section in docs/changelog-engineering.md, the newest entry is package.json's or the next patch; planted copies RED by the rule they break, patched copies of the module without that rule let the plant through; the Update dialog's route serves each entry in the device's language or says it fell back to English
+  { name: 'test-changelog-style', tier: 'fast', reads: ['package.json'], why: 'in-process · 389 ms (the three changelogs linted whole + parity + 20 controls + the real /api/changelog-diff over a fixture canonical)' }, // the user changelog's style gate: CHANGELOG.md / .zh.md / .ja.md lint clean whole (src/changelog-style.js — the rules of docs/changelog-style.md), the translations have the English structure, every version from 2.369.198 on heads a section in docs/changelog-engineering.md, the newest entry is package.json's or the next patch; planted copies RED by the rule they break, patched copies of the module without that rule let the plant through; the Update dialog's route serves each entry in the device's language or says it fell back to English
   { name: 'test-peer-messaging', tier: 'fast', why: 'in-process · 443 ms' },
   { name: 'test-notify-retry', tier: 'fast', why: 'in-process · 5.2 s' }, // lane notify-retry (2026-10-01): ONE 5-second attempt decided for ever — the primitive's phases / the loop-stall spurious timeout / transient classes over real stubs; the ladder's retry park with a stub registry (parked ⇒ delivered at turn end with ONE wake billed, dead pid ⇒ not-running, backoff bounds, a restart keeps it once, the hold's TTL re-judged, fail closed); the jobs bookkeeping + the words
   { name: 'test-paced-wake-retry', tier: 'fast', why: 'in-process · 4.2 s' }, // lane paced-wake-retry (r9: 563 checks, measured 4.14–4.28 s over five solo runs) (2026-11-07, the owner: «节流时间到了会自动发出吗？»): a wake the PACE refused is a wake OWED — the REAL groups engine + store + ladder + park over a stub inbox and a manual clock: sent when the window ends (once, over a REAL inbox socket to a stub that stays idle), a turn first ⇒ cancelled, two paced ⇒ ONE frame, the slot, the pace re-asked, ONE authorization held, the REAL spend guard's For-you item, the ladder road, a restart keeps the debt and never the words; a HARD BOUND with a wake at the end of it; a frame that never lands is said (paced-out); the caller census; controls = patched copies
@@ -979,7 +985,7 @@ export const SUITES = [
   { name: 'test-ci-gate', tier: 'fast', why: 'LAW architecture · 16.8 s (B-a2c9, restated 2026-11-18 in the box\'s scale: 19.9 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 13.9–19.7 s); was 6.6 s) — the gate\'s own gate, part 1/7: §1 the census, §2 tier hygiene + THIS rule (§2b) + §2e the wall-clock census + §2f the apt installs + §2h every setup step bounded, the ONE fonts road + §2i a red names its legs + §2j a suite reads no history master does not have (B-4291) (the rest: test-ci-gate-push / -tiers / -shards / -reaper / -hang / -watchdog)', over: 'slow: it grew with the gate\'s own legs (the false-row judge in a scratch repository, the fast parts\' plans over the whole table, §2f\'s stub apt-gets with their bounded stalls) on a part that read 12.6 s already in 2.369.403\'s tiers — next-list item B-54a9: profile by section and cut it back under 10 s, or move it heavy' },
   { name: 'test-suite-files-parse', tier: 'fast', why: 'in-process · 4.1 s — EVERY SUITE FILE PARSES (the coordinator\'s law, the train int402, 2026-11-14): every *.mjs / *.cjs / *.js under scripts/ (node_modules aside) is parsed ONCE in-process by acorn as the module kind Node gives it (.mjs a module, .cjs CommonJS as Node wraps it, .js by the nearest package.json or Node\'s detection); an unparseable file is red by its name and line. Born of a hosted-only heavy that had not parsed since a lane\'s first pick, which only the mirror would have met; the controls are a scratch tree with six planted reds' },
   { name: 'test-ci-gate-push', tier: 'fast', why: 'LAW architecture · 6.3 s — the gate\'s own gate, part 2/7: §3 the block rule over real commits, §4 the real pre-push hook end to end, §5 the detached child\'s git environment (a real git worktree add, the damage as the control)', allow: ['checkout'] },
-  { name: 'test-ci-gate-tiers', tier: 'fast', why: 'LAW architecture · 6.0 s (restated 2026-11-17, lane bl-tests-e: 5.50–5.97 s on the test machine with §7b) — the gate\'s own gate, part 3/7: §6 machine-global fixtures + no-verdict honesty, §7 no literal date, §7b a leg never passes by its name (B-1747: the swap census over every script, ~0.4 s), §8 lanes / the serial table / the impact scope (a real git worktree add), §8d the xpra window family', allow: ['checkout'] },
+  { name: 'test-ci-gate-tiers', tier: 'fast', why: 'LAW architecture · 6.8 s (restated 2026-11-18 by arithmetic, the selector\'s restack on 2.369.410: the release\'s 6.0 s + §8g\'s 0.8 s, measured side by side at 5de10e38d — 7.46 s vs 8.22 s; before it, restated 2026-11-17, lane bl-tests-e: 5.50–5.97 s on the test machine with §7b) — the gate\'s own gate, part 3/7: §6 machine-global fixtures + no-verdict honesty, §7 no literal date, §7b a leg never passes by its name (B-1747: the swap census over every script, ~0.4 s), §8 lanes / the serial table / the impact scope (a real git worktree add), §8d the xpra window family', allow: ['checkout'] },
   { name: 'test-ci-gate-shards', tier: 'fast', why: 'LAW architecture · 5.5 s (B-a2c9, restated 2026-11-18 in the box\'s scale: 6.51 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 4.6–6.4 s); was 4.2 s) — the gate\'s own gate, part 4/7: §8b every heavy suite in exactly one shard, §8c the self-hosted batch + the hosted shards partition the tier' },
   { name: 'test-ci-gate-reaper', tier: 'fast', why: 'LAW architecture · 1.5 s — the gate\'s own gate, part 5/7: §9 the scratch-orphan reaper, §9b the singleton Desktop\'s X server, §9c a scratch root off the arguments, §9d the directory sweep, §10 the launcher once for real (a stub repository)' },
   { name: 'test-ci-gate-hang', tier: 'fast', why: 'LAW architecture · 5.2 s — the gate\'s own gate, part 6/7: §11 a hang leaves a report (five planted suites under a 3 s budget, at once)' },
@@ -2936,6 +2942,26 @@ export function hostFilter(suites, want, { sourceOf = () => '' } = {}) {
 // rule, one layer down). A FULL run is still owed once per 24 h — the launcher
 // decides which to start (fullTierDue) and `ci:status` says which comes next.
 const GLOBAL_INPUTS = ['package.json', 'package-lock.json'];
+// A RELEASE'S VERSION BUMP IS NOT A DEPENDENCY CHANGE (主开发 2026-11-17, the owner's «开发和测试太慢»: the cut of 2.369.407 ran the
+// whole fast tier because the bump moved package.json). A range that moves ONLY the version — package.json `version`, the lock's
+// `version` and `packages[""].version` — is no global input and selects nothing by itself: only a suite whose row declares `reads:`
+// the file (test-changelog-style judges the version against the changelogs) — never the 197 fast suites whose product modules load
+// it for the version they print. Any other change in either file, a text that is not JSON, or a range with no single base keeps the
+// global rule.
+export function versionOnlyChange(file, oldText, newText) {
+  let a, b;
+  try { a = JSON.parse(oldText); b = JSON.parse(newText); } catch { return false; }
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) || Array.isArray(b)) return false;
+  const strip = (j) => { const c = JSON.parse(JSON.stringify(j)); delete c.version; if (file === 'package-lock.json' && c.packages && c.packages[''] && typeof c.packages[''] === 'object') delete c.packages[''].version; return JSON.stringify(c); };
+  return strip(a) === strip(b);
+}
+const versionOnlyAt = (range, f, gitRoot) => {
+  const ends = /^(.+)\.\.(.+)$/.exec(range || '');
+  if (!ends) return false;
+  const show = (rev) => spawnSync('git', ['-C', gitRoot, 'show', `${rev}:${f}`], { encoding: 'utf-8', env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 });
+  const a = show(ends[1]), b = show(ends[2]);
+  return a.status === 0 && b.status === 0 && versionOnlyChange(f, a.stdout, b.stdout);
+};
 const BOOT_INPUTS = ['server.js', 'src/', 'public/', 'data/bin/'];
 const BOOTS_THE_PRODUCT = /server\.js|npm run build|esbuild|worktree add|bundle\.js|scratchHome\(/;
 // A repo-relative literal, with or without a leading '/' — `REPO + '/src/x.js'`
@@ -3164,8 +3190,10 @@ export function sharedTableRules({ range, files, suites, root = repo, gitRoot = 
  *  (`why` lists the names). */
 export function affectedSuites({ range, suites, root = repo, gitRoot = root, changed, memo = new Map(), env = process.env, why: whyNames = false, reach: useReach = true } = {}) {
   const ch = Array.isArray(changed) ? { files: changed } : changedFiles(range, gitRoot);
-  const why = new Map();
-  const pick = (s, reason) => { if (!why.has(s.name)) why.set(s.name, reason); };
+  const why = new Map(), ruleOf = new Map();   // ruleOf: name → { rule, file } — the ONE rule that selected it (--rules)
+  const pick = (s, reason, rule = 'other', file = null) => { if (!why.has(s.name)) { why.set(s.name, reason); ruleOf.set(s.name, { rule, file }); } };
+  const VIA_RULE = { suite: 'own', import: 'closure', literal: 'names', boot: 'boot', reads: 'reads' };
+  const viaOf = (s, f) => { const { files, prefixes, via } = inputsOf.get(s.name); const p = files.has(f) ? f : [...prefixes].find((pre) => f.startsWith(pre)); return VIA_RULE[via.get(p)] || 'names'; };
   // the old rule for ONE file: how `s` depends on `f` (null = it does not)
   const inputsOf = new Map();
   const oldHow = (s, f) => {
@@ -3175,29 +3203,32 @@ export function affectedSuites({ range, suites, root = repo, gitRoot = root, cha
     const p = [...prefixes].find((pre) => f.startsWith(pre));
     return p ? dependsHow(via.get(p), f, p) : null;
   };
-  const global = ch.files === null ? [] : ch.files.filter((f) => GLOBAL_INPUTS.includes(f));
+  const versionOnly = ch.files === null ? [] : ch.files.filter((f) => GLOBAL_INPUTS.includes(f) && versionOnlyAt(range, f, gitRoot));
+  const global = ch.files === null ? [] : ch.files.filter((f) => GLOBAL_INPUTS.includes(f) && !versionOnly.includes(f));
   const tables = ch.files === null || global.length ? new Map() : sharedTableRules({ range, files: ch.files, suites: suites.filter((s) => !s.always), root, gitRoot, memo, env });
   // STATIC REACH (reachContext): a dependency that is only the BOOT (the boot prefixes, or the graph behind a boot
   // entry) selects a suite iff its reach meets the file's attribution — AFTER the table rules, never adding a suite
   const rc = ch.files === null || global.length || !useReach ? null : reachContext({ suites, root, memo });
   const dropped = new Map(); // name → why the reach rule dropped a suite the old rule selects (the ✗ lines)
-  if (ch.files === null) for (const s of suites) pick(s, `the changed files could not be listed (${ch.error}) — everything runs`);
+  if (ch.files === null) for (const s of suites) pick(s, `the changed files could not be listed (${ch.error}) — everything runs`, 'unlisted');
   else {
     for (const s of suites) {
-      if (s.always) { pick(s, s.name === RM.SENTINEL ? 'always (the boot sentinel: a real boot, every GET route, every window type)' : 'always: true (a boot/restore smoke runs on every push)'); continue; }
-      if (global.length) { pick(s, `${global[0]} changed (a global input — dependencies)`); continue; }
+      if (s.always) { pick(s, s.name === RM.SENTINEL ? 'always (the boot sentinel: a real boot, every GET route, every window type)' : 'always: true (a boot/restore smoke runs on every push)', 'always'); continue; }
+      if (global.length) { pick(s, `${global[0]} changed (a global input — dependencies)`, 'global', global[0]); continue; }
       for (const f of ch.files) {
+        if (versionOnly.includes(f)) { if ((s.reads || []).includes(f)) { pick(s, `declares reads: ${f} (only its version moved — not a global input)`, 'reads', f); break; } continue; }
         const t = tables.get(f);
         // a rule only NARROWS: the old reach is its ceiling (a suite that never loads the file cannot be changed by it)
-        let how;
-        if (t && t.attributable) { if (!(t.picks.has(s.name) && oldHow(s, f))) continue; how = t.picks.get(s.name); }
+        let how, rule;
+        if (t && t.attributable) { if (!(t.picks.has(s.name) && oldHow(s, f))) continue; how = t.picks.get(s.name); rule = 'table'; }
         else if (!(how = oldHow(s, f))) continue;
+        else rule = viaOf(s, f);
         if (rc && !rc.own(s, f)) {
           const v = rc.verdict(s, f);
           if (!v.hit) { if (!dropped.has(s.name)) dropped.set(s.name, v.why); continue; }
           how += ` — ${v.why}`;
         }
-        pick(s, how); break;
+        pick(s, how, rule, f); break;
       }
     }
     for (const n of why.keys()) dropped.delete(n);
@@ -3205,7 +3236,7 @@ export function affectedSuites({ range, suites, root = repo, gitRoot = root, cha
   const selected = suites.filter((s) => why.has(s.name));
   const head = ch.files === null
     ? `[ci:heavy] impact scope ${range}: the changed files could not be listed (${ch.error}) — running EVERYTHING (could not tell ≠ nothing changed)`
-    : `[ci:heavy] impact scope ${range}: ${ch.files.length} changed file(s) ⇒ ${selected.length} of ${suites.length} heavy suites${selected.length < suites.length ? ` (${suites.length - selected.length} unaffected: not run, not judged)` : ''}`;
+    : `[ci:heavy] impact scope ${range}: ${ch.files.length} changed file(s) ⇒ ${selected.length} of ${suites.length} ${suites.length && suites.every((s) => s.tier === 'fast') ? 'fast' : 'heavy'} suites${selected.length < suites.length ? ` (${suites.length - selected.length} unaffected: not run, not judged)` : ''}`;
   // THE SHARED FILES, said: each modeled file's rule against the old rule (what it reached alone), and the kept ones
   const rules = [];
   for (const [f, t] of tables) {
@@ -3232,7 +3263,7 @@ export function affectedSuites({ range, suites, root = repo, gitRoot = root, cha
     : selected.map((s) => `    · ${s.name} ← ${why.get(s.name)}`);
   const reachHead = rc && dropped.size ? [`[ci:heavy] static reach: ${dropped.size} booting suite(s) the old rule selects are outside every changed file's attribution (not run — --why lists them)`] : [];
   const summary = [head, ...reachHead, ...tableLines, ...kept, ...reachLines, ...lines].join('\n');
-  return { selected, why, changed: ch.files, error: ch.error || null, summary, rules, dropped };
+  return { selected, why, ruleOf, changed: ch.files, error: ch.error || null, summary, rules, dropped };
 }
 /** Is a FULL heavy run owed? The 24 h safety net behind the affected tier is a
  *  full (not partial, not affected) green that JUDGED EVERY SUITE IT NAMED
@@ -5055,8 +5086,8 @@ function writeShardTimings(logs) {
 // list for a tree (its selectSlice — test-ci-remote pins the two equal), so the hub half
 // `--heavy --only=$(node scripts/ci.mjs --list-affected --range=… --shard 1/2)` and the second machine's
 // `ci-remote.mjs --shard 2/2` split one selection with no suite in both and none in neither.
-export function listAffected({ range, shard = null, dir, root = repo, changed, why = false, host = null } = {}) {
-  const all = SUITES.filter((s) => s.tier === 'heavy');
+export function listAffected({ range, shard = null, dir, root = repo, changed, why = false, host = null, tier = 'heavy', rules = false } = {}) {
+  const all = SUITES.filter((s) => s.tier === tier);
   const a = range ? affectedSuites({ range, suites: all, root, changed, why }) : { selected: all, summary: `[ci:heavy] the full tier: ${all.length} heavy suites` };
   let picked = a.selected, summary = a.summary;
   if (host) {
@@ -5072,7 +5103,17 @@ export function listAffected({ range, shard = null, dir, root = repo, changed, w
   }
   const timings = previousTimings(markerDir(dir));
   const idx = new Map(all.map((s, i) => [s.name, i]));
-  return { names: picked.map((s) => s.name).sort((x, y) => ((timings[y] ?? -1) - (timings[x] ?? -1)) || (idx.get(y) - idx.get(x))), summary };
+  const names = picked.map((s) => s.name).sort((x, y) => ((timings[y] ?? -1) - (timings[x] ?? -1)) || (idx.get(y) - idx.get(x)));
+  // --rules (主开发 2026-11-17: «nobody can say WHY a unit's list is 480 suites wide»): per suite the ONE rule that selected it and its
+  // input file, then the count per rule — own · closure · names · boot · reads · table · global · always · unlisted
+  return rules ? { names, summary, ...rulesReport(names, a.ruleOf, { range }) } : { names, summary };
+}
+/** PURE: the --rules report — one «name · rule · file» line per suite (tab-separated) and the count per rule. */
+export function rulesReport(names, ruleOf, { range = null } = {}) {
+  const ro = (n) => (ruleOf && ruleOf.get(n)) || { rule: range ? 'other' : 'full', file: null };
+  const ruleCount = {};
+  for (const n of names) ruleCount[ro(n).rule] = (ruleCount[ro(n).rule] || 0) + 1;
+  return { ruleLines: names.map((n) => `${n}\t${ro(n).rule}\t${ro(n).file || '-'}`), ruleCount };
 }
 
 
@@ -5088,13 +5129,13 @@ export function exitFlushed(code) {
 // THE FLAGS ci.mjs KNOWS (lane claude-steer-inject r6, the acceptance's «node scripts/ci.mjs --help»: ci.mjs ignored an unknown
 // flag and ran the WHOLE fast tier — test-chat-e2e billed a real turn on the CI OAT in a shared scratch). Anything else —
 // --help included — prints the usage and exits 2 before a suite starts.
-const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'false-rows', 'fast-part', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'keep-going', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'why']);
+const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'false-rows', 'fast-part', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'keep-going', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'rules', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'tier', 'why']);
 const CI_USAGE = `usage: node scripts/ci.mjs [mode] [options]
   (no mode)            the FAST tier on this working tree (--isolate [--sha=<x>]: on a commit · --keep-going: every red listed, not the first · --fast-part=<i>/<n>: one part, the hosted fast jobs)
   --heavy              the heavy tier (--only=a,b · --affected --range=<old>..<new> · --shard=<i>/<n> · --host=<name> · --why)
   --heavy-launch <x>   a heavy run handed to a background child · --check-heavy / --status: the markers' verdict
   --heavy-verdict <sha> --gh-run <id> --markers=<dir>   the CI mirror's green run of exactly <sha>, verified through gh, as the HOSTED half's listed green (B-e381)
-  --list-affected      the heavy suites a --range touches · --census · --hosts · --shard-timings <files…>
+  --list-affected      the heavy suites a --range touches (--tier=fast: the fast ones · --rules: each with the rule that selected it) · --census · --hosts · --shard-timings <files…>
   --false-rows         the fast rows read ≥ 10 s at ≥ ×1.5 their statement in this checkout's two newest whole tiers (exit 1 names them)
   --reap [--dry-run]   the scratch reaper
   ops: --markers=<dir> --head=<sha> --lock=<file> --lock-wait-ms=<n> --pid-file=<f> --serial-overlap=<n> --dirty-ok --allow-hub-full
@@ -5145,7 +5186,7 @@ function main(argv) {
   if (arg('census')) return exitFlushed(census());
   if (arg('hosts')) return exitFlushed(hostsReport());
   if (arg('shard-timings') !== undefined) return exitFlushed(writeShardTimings(argv.filter((a) => !a.startsWith('--'))));
-  if (arg('list-affected')) { const l = listAffected({ range: rangeArg || null, shard, dir, why: !!arg('why'), host }); console.error(l.summary); console.log(l.names.join(',')); return exitFlushed(0); }
+  if (arg('list-affected')) { const l = listAffected({ range: rangeArg || null, shard, dir, why: !!arg('why'), host, tier: str('tier') === 'fast' ? 'fast' : 'heavy', rules: !!arg('rules') }); console.error(l.summary); if (l.ruleLines) { console.error(`[ci] rules: ${Object.entries(l.ruleCount).sort((x, y) => y[1] - x[1]).map(([r, n]) => `${r} ${n}`).join(' · ')}`); console.log(l.ruleLines.join('\n')); } else console.log(l.names.join(',')); return exitFlushed(0); }
   if (arg('status')) return exitFlushed(status({ dir, head }));
   if (arg('check-heavy')) return exitFlushed(checkHeavy({ dir, head }));
   if (arg('heavy-verdict') !== undefined) {

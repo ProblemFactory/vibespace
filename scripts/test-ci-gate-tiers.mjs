@@ -788,6 +788,49 @@ console.log('\n§8f a red fast suite runs once more — green again is FLAKY and
     && /const line = rerunRecord\(\{ sha, suite: s\.name, lane, first, again \}\);/.test(src),
     'WIRING: fastGate keeps its ledger in data/ci-fast/reruns.jsonl, a retry\'s hang report is named by its try, and the heavy tier writes the same rerunRecord');
 }
+// ── §8g A VERSION BUMP IS NO DEPENDENCY CHANGE · EVERY SELECTION SAYS ITS ONE RULE (主开发 2026-11-17, the owner's «开发和测试太慢») ──
+console.log('\n§8g a version-only bump is no global input; --rules names the one rule behind each selection');
+{
+  const { affectedSuites, versionOnlyChange, rulesReport } = await import('./ci.mjs');
+  // ONE commit per state (a git spawn per file cost ~2 s here)
+  const state = (repo, files, msg) => { for (const [f, body] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }); fs.writeFileSync(path.join(repo, f), body); } git(repo, ['add', '-f', ...Object.keys(files)]); git(repo, ['commit', '-q', '-m', msg]); return git(repo, ['rev-parse', 'HEAD']); };
+  const pj = (o = {}) => JSON.stringify({ name: 'x', version: '1.0.0', dependencies: { a: '1.0.0' }, scripts: { build: 'b' }, engines: { node: '>=22' }, ...o }, null, 2) + '\n';
+  const lk = (v, dep = '1.0.0') => JSON.stringify({ name: 'x', version: v, lockfileVersion: 3, packages: { '': { name: 'x', version: v, dependencies: { a: dep } }, 'node_modules/a': { version: dep } } }, null, 2) + '\n';
+  ok(versionOnlyChange('package.json', pj(), pj({ version: '1.0.1' })) && versionOnlyChange('package-lock.json', lk('1.0.0'), lk('1.0.1')),
+    'PURE: a diff that moves only package.json\'s version — or the lock\'s two mirrored version lines — is version-only');
+  ok(!versionOnlyChange('package.json', pj(), pj({ version: '1.0.1', dependencies: { a: '1.0.1' } })) && !versionOnlyChange('package.json', pj(), pj({ scripts: { build: 'c' } })) && !versionOnlyChange('package.json', pj(), pj({ engines: { node: '>=24' } }))
+    && !versionOnlyChange('package-lock.json', lk('1.0.0'), lk('1.0.1', '1.0.1')) && !versionOnlyChange('package.json', pj(), '{ not json'),
+    'PURE CONTROLS: a dependency, a script or an engine moved with the version, a lock whose dependency moved, a text that is not JSON — never version-only');
+  // A REAL RANGE: the bump alone selects only the suite that DECLARES reads: package.json — never one whose product module loads it
+  const vrepo = makeRepo('version');
+  const v0 = state(vrepo, { 'src/a.js': "const v = require('../package.json').version;\nmodule.exports = v;\n", 'scripts/test-a.mjs': "import a from '../src/a.js';\nconsole.log(a);\n", 'scripts/test-b.mjs': "console.log('b');\n", 'package-lock.json': lk('1.0.0'), 'package.json': pj() }, 'the tree: a reads the version, test-a loads it');
+  const v1 = state(vrepo, { 'package-lock.json': lk('1.0.1'), 'package.json': pj({ version: '1.0.1' }) }, 'the bump: package.json and its lock, the version only');
+  const VS = [{ name: 'test-a' }, { name: 'test-b' }, { name: 'test-reads', reads: ['package.json'] }];
+  const bump = affectedSuites({ range: `${v0}..${v1}`, suites: VS, root: vrepo });
+  ok(bump.selected.map((s) => s.name).join() === 'test-reads' && bump.ruleOf.get('test-reads').rule === 'reads' && bump.ruleOf.get('test-reads').file === 'package.json',
+    `a version-only bump of package.json AND its lock selects ONLY the suite that declares reads: package.json — not test-a, whose product module loads it (${bump.selected.map((s) => s.name).join() || 'nothing'})`);
+  const v2 = state(vrepo, { 'package.json': pj({ version: '1.0.2', dependencies: { a: '2.0.0' } }) }, 'a dependency bump with the version');
+  const dep = affectedSuites({ range: `${v1}..${v2}`, suites: VS, root: vrepo });
+  ok(dep.selected.length === 3 && [...dep.ruleOf.values()].every((r) => r.rule === 'global' && r.file === 'package.json'), 'RED CONTROL: a dependency bump (with the version) still selects the WHOLE tier — every suite by the global rule');
+  ok(affectedSuites({ range: v1, suites: VS, root: vrepo }).selected.length === 3, 'a lone-sha range has no single base to diff against: the global rule stands');
+  // --rules: ONE rule per selected suite — own · closure · names · boot · reads · always (and global above)
+  const rrepo = makeRepo('rules');
+  const r0 = state(rrepo, { 'src/a.js': 'module.exports = 1;\n', 'src/b.js': 'module.exports = 2;\n', 'src/c.js': 'module.exports = 3;\n', 'scripts/test-closure.mjs': "import a from '../src/a.js';\nconsole.log(a);\n",
+    'scripts/test-names.mjs': "const f = 'src/b.js';\nconsole.log(f);\n", 'scripts/test-boot.mjs': "const s = 'server.js';\nconsole.log(s);\n", 'scripts/test-own.mjs': "console.log(1);\n", 'scripts/test-reads.mjs': "console.log(1);\n" }, 'the suites');
+  const r1 = state(rrepo, { 'src/a.js': 'module.exports = 11;\n', 'src/b.js': 'module.exports = 22;\n', 'src/c.js': 'module.exports = 33;\n', 'scripts/test-own.mjs': "console.log(2);\n" }, 'a, b, c and test-own move');
+  const RS = [{ name: 'test-closure' }, { name: 'test-names' }, { name: 'test-boot' }, { name: 'test-own' }, { name: 'test-reads', reads: ['src/c.js'] }, { name: 'test-al', always: true }];
+  const ru = affectedSuites({ range: `${r0}..${r1}`, suites: RS, root: rrepo, reach: false });
+  const said = RS.map((s) => `${s.name}=${(ru.ruleOf.get(s.name) || {}).rule}`).join(' ');
+  ok(said === 'test-closure=closure test-names=names test-boot=boot test-own=own test-reads=reads test-al=always' && ru.ruleOf.get('test-closure').file === 'src/a.js',
+    `every selected suite carries the ONE rule that selected it and its input file (${said})`);
+  const rep = rulesReport(['test-closure', 'test-own', 'test-al'], ru.ruleOf, { range: `${r0}..${r1}` });
+  ok(JSON.stringify(rep.ruleLines) === JSON.stringify(['test-closure\tclosure\tsrc/a.js', 'test-own\town\tscripts/test-own.mjs', 'test-al\talways\t-']) && JSON.stringify(rep.ruleCount) === '{"closure":1,"own":1,"always":1}',
+    'the --rules report: one «name · rule · file» line per suite and the count per rule');
+  const ciSrc = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
+  ok(/const all = SUITES\.filter\(\(s\) => s\.tier === tier\);/.test(ciSrc) && /return rules \? \{ names, summary, \.\.\.rulesReport\(names, a\.ruleOf, \{ range \}\) \} : \{ names, summary \};/.test(ciSrc)
+    && /tier: str\('tier'\) === 'fast' \? 'fast' : 'heavy', rules: !!arg\('rules'\)/.test(ciSrc) && /if \(l\.ruleLines\) \{[^\n]*console\.log\(l\.ruleLines\.join\('\\n'\)\); \} else console\.log\(l\.names\.join\(','\)\);/.test(ciSrc),
+    'WIRING: --list-affected --tier=fast lists the FAST rows; --rules prints the report (the count on stderr); without it the comma-joined names as before');
+}
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }

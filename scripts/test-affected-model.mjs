@@ -294,7 +294,8 @@ console.log('\n§3 the wiring (ci.mjs affectedSuites, real git)');
   ok(sel(run(`${c7}..${c8}`)) === 'test-widget,test-zh', `one range, two tables: the union of each file's verdict (${sel(run(`${c7}..${c8}`))})`);
   const ciSrc = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
   // `, host` (lane ci-aidev-desktop-batch): --list-affected also takes the --host cut
-  ok(/listAffected\(\{ range: rangeArg \|\| null, shard, dir, why: !!arg\('why'\)(?:, host)? \}\)/.test(ciSrc) && /affectedSuites\(\{ range, suites: all, root: runRoot, gitRoot: repo, why \}\)/.test(ciSrc),
+  // `, tier: …, rules: …` (主开发 2026-11-17, the rule behind each selection): --tier=fast and --rules ride the same call
+  ok(/listAffected\(\{ range: rangeArg \|\| null, shard, dir, why: !!arg\('why'\)(?:, host(?:, tier: [^,]+, rules: !!arg\('rules'\))?)? \}\)/.test(ciSrc) && /affectedSuites\(\{ range, suites: all, root: runRoot, gitRoot: repo, why \}\)/.test(ciSrc),
     'WIRING: --why reaches --list-affected and the heavy gate\'s selection');
 }
 
