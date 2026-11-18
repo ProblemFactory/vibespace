@@ -6794,6 +6794,7 @@ export default {
   "How much all kept conversation browsers may take together. Over it, whole kept browsers are removed, the one used longest ago first. A browser that is running is never removed. Default 4096 MB (4 GB), at least 256 MB.": "保持中の会話ブラウザ全体で使える量です。超えると、最も長く使われていないものから保持ブラウザを丸ごと削除します。実行中のブラウザは削除されません。既定 4096 MB（4 GB）、最小 256 MB。",
   "Stop this browser now — its logins and tabs are kept; the conversation's next command starts it again": "このブラウザを今すぐ停止します — ログインとタブは保持され、会話の次のコマンドで再び起動します",
   "Stop this browser now — its tabs are kept, a login in it is not; the conversation's next command starts it again": "このブラウザを今すぐ停止します — タブは保持されますが中のログインは保持されません。会話の次のコマンドで再び起動します",
+  "Stop this browser now — the conversation's next command starts it again (what it keeps is still being checked)": "このブラウザを今すぐ停止します — 会話の次のコマンドで再び起動します（保持している内容はまだ確認中です）",
   "released after its turn": "ターン終了後に解放",
   "its browser was restarted": "ブラウザが再起動された",
   "its session ended": "セッションが終了した",

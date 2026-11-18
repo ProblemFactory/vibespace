@@ -350,7 +350,7 @@ const S_DATA = path.join(ROOT, 's-data'); fs.mkdirSync(S_DATA, { recursive: true
   // B-7a30 (主开发's law 2): a VIEW never shows «present» for a folder not checked since the boot — it says «checking…» until the
   // first check lands (the tick's first pass; the boot runs it at once)
   const g2 = s2.get(KEY_A), b2 = s2.brief(KEY_A), l2 = s2.list().find((x) => x.browserKey === KEY_A);
-  ok(g2 && g2.kind === 'checking' && g2.dir === null && b2.kind === 'checking' && l2 && l2.kind === 'checking' && l2.hasDir === null, 'B-7a30: a second instance (a restart) has not checked the folder yet — get / brief / list say «checking» (no directory, hasDir unknown), never «its logins»', { g2, b2, l2 });
+  ok(g2 && g2.kind === 'checking' && g2.dir === null && b2.kind === 'checking' && l2 && l2.kind === 'checking' && l2.checking === true, 'B-7a30: a second instance (a restart) has not checked the folder yet — get / brief / list say «checking» (no directory), never «its logins»', { g2, b2, l2 });
   await s2.recheckAll();
   ok(s2.get(KEY_A) && s2.get(KEY_A).tabs.length === 2 && s2.get(KEY_A).dir === dirA && s2.get(KEY_A).kind === 'full', 'a second instance (a restart) reads the same entry back — its directory derived again (once its first check landed)');
   // a user stop: kept, not reopened

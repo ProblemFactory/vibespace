@@ -4,9 +4,10 @@
 // folder's PRESENCE is a KEPT FACT (src/server/browser-kept.js) — set by the keeper's own acts, checked again OFF the loop on its own
 // tick (10 s); a VIEW reads what the last check found, an ACT awaits a fresh check through ONE door. In-process, no server:
 //   ① THE COUNT: one list() calls 0 sync fs functions at 5 and at 50 kept folders (brief + get of each: 0)
-//      CONTROL: the release's store (git show c39de1224) — one sync call per kept folder (5 / 50) ⇒ ① RED
+//      CONTROL: today's store with the release's lines planted back (c39de1224's dirThere: a statSync at every read) — one
+//      sync call per kept folder (5 / 50) ⇒ ① RED (a patched copy: no git object is read — test-architecture §75)
 //   ② a view never shows «present» for a folder never checked since the boot: «checking» (the page's own words «checking…»),
-//      and the first check that lands redraws it (one notification)
+//      and the first check that lands redraws it (one notification); a stop the hub only FOUND at its boot sets no presence
 //      CONTROL: a store whose judgement skips «checking» says «its logins» unchecked ⇒ ② RED
 //   ③ a check that changes the answer notifies ONCE; a check that changes nothing sends nothing (a first pass no view drew too)
 //      CONTROL: a store that notifies at every check ⇒ ③ RED
@@ -19,7 +20,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -40,6 +40,14 @@ function syncCalls(fn) {
   const real = {}; let n = 0; const seen = [];
   for (const k of SYNC) { real[k] = fs[k]; fs[k] = function (...a) { n++; seen.push(k); return real[k].apply(this, a); }; }
   try { fn(); } finally { for (const k of SYNC) fs[k] = real[k]; }
+  return { n, seen: [...new Set(seen)] };
+}
+// the same count held open until `fn`'s promise settles: the checks a read STARTS are counted too (a check that statSync'd
+// inside its microtask would escape the synchronous count)
+async function syncCallsUntil(fn) {
+  const real = {}; let n = 0; const seen = [];
+  for (const k of SYNC) { real[k] = fs[k]; fs[k] = function (...a) { n++; seen.push(k); return real[k].apply(this, a); }; }
+  try { await fn(); } finally { for (const k of SYNC) fs[k] = real[k]; }
   return { n, seen: [...new Set(seen)] };
 }
 const stoppedKeeper = () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false });
@@ -73,26 +81,24 @@ async function countAt(KS, n, tag) {
   const X = world(KS, dir);
   const keys = keptFolders(X.S, n);
   X.S.list(); if (X.S.recheckAll) await X.S.recheckAll(); // warm: the file loaded, every folder checked once
-  X.step(60 * 1000); // past the bound: a read now starts its checks — off the loop
-  const l = syncCalls(() => { X.S.list(); });
-  const b = syncCalls(() => { for (const k of keys) { X.S.brief(k); X.S.get(k); } });
-  if (X.S.recheckAll) await X.S.recheckAll();
+  X.step(60 * 1000); // past the bound: a read now asks for the pass — off the loop
+  const l = await syncCallsUntil(async () => { X.S.list(); if (X.S.recheckAll) await X.S.recheckAll(); }); // the list + the checks it started
+  X.step(60 * 1000);
+  const b = await syncCallsUntil(async () => { for (const k of keys) { X.S.brief(k); X.S.get(k); } if (X.S.recheckAll) await X.S.recheckAll(); });
   X.S.shutdown();
   return { list: l, each: b };
 }
 for (const n of [5, 50]) {
   const c = await countAt(KEPT, n, 'now');
-  ok(c.list.n === 0 && c.each.n === 0, `① THE COUNT at ${n} kept folders: one list() calls ${c.list.n} sync fs functions, a brief + a get of each ${c.each.n} — 0`, c);
+  ok(c.list.n === 0 && c.each.n === 0, `① THE COUNT at ${n} kept folders: one list() — and the checks it starts, counted to their end — calls ${c.list.n} sync fs functions, a brief + a get of each ${c.each.n} — 0`, c);
 }
 {
-  let base = null; try { base = execFileSync('git', ['-C', REPO, 'show', 'c39de1224:src/server/browser-kept.js'], { encoding: 'utf8' }); } catch { base = null; }
-  if (!base) ok(false, 'CONTROL setup: the release\'s browser-kept.js is readable from git (c39de1224)');
-  else {
-    const KR = MUT.load('src/server/browser-kept.js', base, 'release');
-    for (const n of [5, 50]) {
-      const c = await countAt(KR, n, 'release');
-      ok(c.list.n >= n, `CONTROL: the release's store — one list() at ${n} kept folders calls ${c.list.n} sync fs functions (${c.list.seen.join(', ')}): one per folder, ① is RED on it`, c);
-    }
+  // the release's lines (c39de1224's dirThere) planted back into today's judgement — a patched copy, no git object read
+  const RELEASE = "    const v = (() => { try { return fs.statSync(dirOf(e.browserKey)).isDirectory(); } catch { return false; } })(); // c39de1224's dirThere: a statSync at every read";
+  const KR = MUT.load('src/server/browser-kept.js', cut(ksSrc, '    const v = presenceFor(e.browserKey);', RELEASE, 'the store\'s judgement (for the release\'s lines)'), 'release');
+  for (const n of [5, 50]) {
+    const c = await countAt(KR, n, 'release');
+    ok(c.list.n >= n, `CONTROL: the release's lines — one list() at ${n} kept folders calls ${c.list.n} sync fs functions (${c.list.seen.join(', ')}): one per folder, ① is RED on it`, c);
   }
 }
 
@@ -111,12 +117,25 @@ async function restartLeg(KS, tag) {
 {
   const KC = MUT.load('src/server/browser-kept.js', cut(ksSrc, "    if (v === null) return { ...e, checking: true };", '    if (v === null) return e;', 'the store\'s «checking» judgement'), 'nochecking');
   const [r, c] = await Promise.all([restartLeg(KEPT, 'now'), restartLeg(KC, 'control')]); // two worlds, their settle waits overlapped
-  ok(r.g && r.g.kind === 'checking' && r.g.dir === null && r.b.kind === 'checking' && r.l && r.l.kind === 'checking' && r.l.hasDir === null, '② a restart, its folder not checked yet: get / brief / list say «checking» (no directory, hasDir unknown) — never «its logins»', { g: r.g && r.g.kind, b: r.b && r.b.kind, l: r.l && r.l.kind });
+  ok(r.g && r.g.kind === 'checking' && r.g.dir === null && r.b.kind === 'checking' && r.l && r.l.kind === 'checking' && r.l.checking === true && r.l.hasDir === true, '② a restart, its folder not checked yet: get / brief / list say «checking» (no directory; hasDir stays the entry\'s word for the readers that need «may hold a profile») — never «its logins»', { g: r.g && r.g.kind, b: r.b && r.b.kind, l: r.l && { kind: r.l.kind, checking: r.l.checking, hasDir: r.l.hasDir } });
   ok(r.after === 'full' && r.sent === 1, `② …the first check lands: the view redraws to «its logins» with ONE notification (${r.sent})`, r);
   const fact = { own: { state: 'stopped', kept: { kind: 'checking', tabs: 0 } } };
+  // a stop the hub only FOUND at its boot (`restart`: a browser that died while it was down) observed no folder
+  const bootLeg = async (KS, tag) => {
+    const dir = path.join(ROOT, 'boot-' + tag); const k = keyOf(77); fs.mkdirSync(path.join(dir, 'browser-profiles', k), { recursive: true });
+    const X = world(KS, dir); X.S.noteStop(k, { why: 'restart', hasDir: true, tabs: [{ url: 'https://boot.test/' }] });
+    const before = X.S.get(k).kind; await X.S.recheckAll(); const after = X.S.get(k).kind; X.S.shutdown();
+    return { before, after };
+  };
+  const KB2 = MUT.load('src/server/browser-kept.js', cut(ksSrc, "    if (dirKept && w !== 'restart') setThere(bk, true);", '    if (dirKept) setThere(bk, true);', 'the stop\'s «a boot saw no folder» rule'), 'bootbit');
+  const [bt, bc] = await Promise.all([bootLeg(KEPT, 'now'), bootLeg(KB2, 'control')]);
+  ok(bt.before === 'checking' && bt.after === 'full', `② a stop found at a boot (\`restart\`) says «checking» until the first check (${bt.before} → ${bt.after}) — never «its logins» off the file`, bt);
+  ok(bc.before === 'full', `CONTROL: a store whose boot-found stop sets the presence says «${bc.before}» unchecked — ② is RED on it`, bc);
+  const KBN = require('../src/browser-kept.js');
+  ok(/its logins are still there/.test(KBN.keptNoteText({ why: 'user', tabs: 2 })) && !/logins/.test(KBN.keptNoteText({ why: 'user', tabs: 2, logins: false })), '② the agent\'s «kept» note names its logins only for a folder the last check found (a folder still being checked, fenced or tabs only: not said)');
   ok(BF.KEPT_KINDS.includes('checking') && BF.keptLineWords(fact, (s) => s) === 'checking…' && BF.ownResumable(fact) === false && BF.ownResumable({ own: { state: 'stopped', kept: { kind: 'checking', tabs: 2 } } }) === true, '② the live view\'s kept line says the page\'s own words «checking…»; its Resume is drawn only for what is surely kept (its tabs), never for unchecked logins');
   const tv = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-  ok(tv.includes("if (k.kind === 'checking') ident.appendChild(el('span', 'bprof-chip', t('checking…')));") && tv.includes("e.kept && e.kept.kind === 'checking' ? t('checking…')"), '② the Agent browser panel: a kept row\'s chip and a running row\'s Stop say «checking…» for an unchecked folder (source pin)');
+  ok(tv.includes("if (k.kind === 'checking') ident.appendChild(el('span', 'bprof-chip', t('checking…')));") && tv.includes("e.kept && e.kept.kind === 'checking' ? t('Stop this browser now — the conversation\\'s next command starts it again (what it keeps is still being checked)')"), '② the Agent browser panel: a kept row\'s chip says «checking…»; a running row\'s Stop still says what Stop does and that what it keeps is being checked (source pin)');
   ok(c.g && c.g.kind === 'full', `CONTROL: a store whose judgement skips «checking» says «${c.g && c.g.kind}» for a folder nobody checked since the boot — ② is RED on it`, c.g && c.g.kind);
 }
 
@@ -153,24 +172,27 @@ async function forgetLeg(KS, tag) {
   const dir = path.join(ROOT, 'door-' + tag); const st = staller();
   const X = world(KS, dir, { stall: st });
   const [k, k2] = keptFolders(X.S, 2);
+  const k3 = keyOf(50); X.S.noteStop(k3, { why: 'idle', hasDir: false, tabs: [{ url: 'https://tabs-only.test/' }] }); // tabs only: no folder kept
   const t0 = Date.now();
   const f1 = await threw(() => X.S.forget(k));
   const waited = Date.now() - t0;
   const stats1 = st.stats();
   const f2 = await threw(() => X.S.forget(k2)); // while the first check hangs: refused at once, no second stat
   const stats2 = st.stats();
+  const f4 = await threw(() => X.S.forget(k3)); // no folder to confirm: never refused for another folder's disk
   const gv = X.S.get(k); const view = gv ? gv.kind : null;
   const kept1 = X.S.has(k) && fs.existsSync(X.S.dirOf(k));
   st.release(); await X.S.recheckAll();
   const f3 = await threw(() => X.S.forget(k));
   const gone = !X.S.has(k);
   X.S.shutdown();
-  return { f1: f1 && f1.code, words: f1 && f1.message, waited, stats1, f2: f2 && f2.code, stats2, view, kept1, f3: f3 && f3.code, gone };
+  return { f1: f1 && f1.code, words: f1 && f1.message, waited, stats1, f2: f2 && f2.code, words2: f2 && f2.message, stats2, f4: f4 && f4.code, view, kept1, f3: f3 && f3.code, gone };
 }
 {
   const r = await forgetLeg(KEPT, 'now');
   ok(r.f1 === 'kept_unconfirmed' && /did not answer within/.test(r.words) && r.waited >= ACT_MS - 20 && r.kept1, `④ a stall placed in the folder check: forget is refused by name past the bound (kept_unconfirmed after ${r.waited} ms, bound ${ACT_MS} ms) — the entry and its folder untouched`, r);
-  ok(r.f2 === 'kept_unconfirmed' && r.stats2 === r.stats1, `④ while that check hangs a second act is refused at once with NO second stat (${r.stats1} → ${r.stats2}) — never a stack of stuck threads`, r);
+  ok(r.f2 === 'kept_unconfirmed' && /the disk that holds the kept browsers is not answering/.test(r.words2) && r.stats2 === r.stats1, `④ while that check hangs a second act is refused at once, in the disk's words (never «its folder» for one nobody asked), with NO second stat (${r.stats1} → ${r.stats2})`, r);
+  ok(r.f4 === null, `④ a forget of an entry with no kept folder (tabs only) is never refused for the disk (${r.f4})`, r);
   ok(r.view === 'checking', `④ while the check hangs a view says «checking» (${r.view}) — a hung disk is never read as «its logins»`, r);
   ok(r.f3 === null && r.gone, '④ released, the check answers: the forget goes through', r);
   const KF = MUT.load('src/server/browser-kept.js', cut(ksSrc, "    await checkThere(key); // B-7a30 r2: the act's door", "    // (no door) //", 'forget\'s door'), 'nodoor');
@@ -202,7 +224,7 @@ async function forgetLeg(KS, tag) {
   ok(r.user === 'kept_unconfirmed' && r.agent === 'kept_unconfirmed' && !r.started, `④ the REAL keeper over a stalled folder check: the user's Resume and the agent's resume are refused by name (${r.user} / ${r.agent}) — nothing started, never «resumed»`, r);
   ok(r.released === 'not_managed', `④ …released, the door answers and the road goes on (this world gives no spawn pairs: ${r.released} — the start itself is the heavy suites')`, r);
   const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const KD = MUT.load('src/server/browser-keeper.js', cut(kSrc, "    if (ks && !reconnect && typeof ks.checkThere === 'function' && typeof ks.has === 'function' && ks.has(bk)) await ks.checkThere(bk);", '    // (no door)', 'the keeper\'s door in resumeFor'), 'keeper-nodoor');
+  const KD = MUT.load('src/server/browser-keeper.js', cut(kSrc, "    if (ks && !reconnect && !adoptedLabelOf(bk) && typeof ks.checkThere === 'function' && typeof ks.has === 'function' && ks.has(bk)) await ks.checkThere(bk);", '    // (no door)', 'the keeper\'s door in resumeFor'), 'keeper-nodoor');
   const c = await keeperLeg(KD, 'control');
   ok(c.user === 'not_managed', `CONTROL: a keeper without the door goes on past a folder nobody confirmed (the user's Resume answers ${c.user}) — ④ is RED on it`, c);
 }

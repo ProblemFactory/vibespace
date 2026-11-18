@@ -6795,6 +6795,7 @@ export default {
   "How much all kept conversation browsers may take together. Over it, whole kept browsers are removed, the one used longest ago first. A browser that is running is never removed. Default 4096 MB (4 GB), at least 256 MB.": "所有保留的对话浏览器合计最多可占用多少空间。超出时整个删除保留的浏览器，最久没用的先删。正在运行的浏览器绝不会被删除。默认 4096 MB（4 GB），最少 256 MB。",
   "Stop this browser now — its logins and tabs are kept; the conversation's next command starts it again": "立即停止这个浏览器——它的登录和标签页会保留；该对话的下一条命令会重新启动它",
   "Stop this browser now — its tabs are kept, a login in it is not; the conversation's next command starts it again": "立即停止这个浏览器——它的标签页会保留，其中的登录不会；该对话的下一条命令会重新启动它",
+  "Stop this browser now — the conversation's next command starts it again (what it keeps is still being checked)": "立即停止这个浏览器——该对话的下一条命令会重新启动它（它保留的内容还在检查中）",
   "released after its turn": "回合结束后已释放",
   "its browser was restarted": "它的浏览器被重启过",
   "its session ended": "它的会话已结束",

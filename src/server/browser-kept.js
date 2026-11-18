@@ -193,7 +193,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     // lane B: a run that opened no web page keeps the tabs still WAITING from the stop before it (nothing is lost to an empty start)
     if (!kept.length && prev && prev.stoppedAt == null && prev.waiting && prev.waiting.tabs.length) kept = prev.waiting.tabs.map((x) => ({ ...x }));
     const dirKept = hasDir !== undefined ? !!hasDir : !!(prev && prev.hasDir);
-    if (dirKept) setThere(bk, true); // B-7a30: it ran on its folder until now — the kept bit is that fact
+    if (dirKept && w !== 'restart') setThere(bk, true); // B-7a30: it ran on its folder until now — the kept bit is that fact (a stop found at a boot saw no folder: the first check says)
     if (!prev && !dirKept && !kept.length) { latest.delete(bk); return null; }
     const auto = K.restoreKindFor(w) === 'auto' && kept.length > 0;
     // lane B: a restore the USER wrote (a Resume, "Hand back and continue") is STICKY until the agent's next command is told
@@ -229,7 +229,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   const statDir = typeof checkDir === 'function' ? checkDir : (p) => fs.promises.stat(p).then((st) => st.isDirectory(), () => false);
   const setThere = (bk, ok) => { there.set(String(bk), { ok: !!ok, at: now(), seq: ++checkSeq }); };
   // a check's age is REAL time (a hang is a wall-clock fact; the store's own `now` may be a gate's stepped clock)
-  const hung = (c) => !!c && (c.hung || Date.now() - c.since >= thereActMs); // `hung`: an act already waited it out
+  const hung = (c) => !!c && (c.hung || Date.now() - c.since >= 3 * thereActMs); // `hung`: an act waited it out (its own bound), or nobody did and it is 3 bounds old
   const hungCheck = () => { for (const c of checking.values()) if (hung(c)) return c; return null; };
   /** ONE check of a key's folder, off the loop. A newer answer is never overwritten by an older check that lands after it. → the
    *  check's record ({p: the promise of the presence}). */
@@ -265,13 +265,13 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   /** WHAT A VIEW READS for a key's folder (B-7a30, 主开发's ruling: a VIEW reads what the last check found): true / false, or null =
    *  STILL CHECKING — never checked since the boot, a check of it unanswered past THERE_ACT_MS, or the disk not answering (a check
    *  hangs) while its bit is past THERE_FRESH_MS: a hung mount is never read as «present». A read never touches the disk; a read of
-   *  a key never checked (or past its bound) starts ONE check off the loop — none while a check hangs (no stack of stuck threads) —
-   *  and the tick checks every kept folder each THERE_FRESH_MS. */
+   *  a key never checked (or past its bound) asks for THE pass (recheckAll: one folder at a time, so a list of fifty never starts
+   *  fifty stats on one disk) — none while a check hangs — and the tick runs it each THERE_FRESH_MS. */
   function presenceFor(bk) {
     const k = String(bk); const t = there.get(k);
     const old = !t || now() - t.at >= THERE_FRESH_MS;
     const stuck = hungCheck();
-    if (old && !checking.has(k) && !stuck) startCheck(k);
+    if (old && !checking.has(k) && !stuck) recheckAll().catch(() => { }); // THE pass (one folder at a time) — never a check per key read
     const v = !t || hung(checking.get(k)) || (stuck && old) ? null : t.ok;
     told.set(k, v);
     return v;
@@ -282,14 +282,22 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
    *  folder nobody confirmed. → the presence (true / false). */
   async function checkThere(bk) {
     const k = String(bk || '');
-    if (!k || !load().entries[k]) return false;
-    const unconfirmed = () => { log.warn?.(`[browser-kept] ${k}: its kept folder did not answer within ${thereActMs} ms — the act is refused (kept_unconfirmed)`); return namedError('kept_unconfirmed', `its kept folder did not answer within ${thereActMs >= 1000 ? Math.round(thereActMs / 1000) + ' s' : thereActMs + ' ms'} — nothing was done; try again in a moment`); };
-    if (hungCheck()) throw unconfirmed();
+    const e = k ? load().entries[k] : null;
+    if (!e) return false;
+    if (!e.hasDir) return false; // no folder is kept for it (fenced / tabs only): nothing to confirm, nothing refused
+    const bound = thereActMs >= 1000 ? Math.round(thereActMs / 1000) + ' s' : thereActMs + ' ms';
+    const unconfirmed = (other) => {
+      log.warn?.(`[browser-kept] ${k}: ${other ? `the kept folders' disk is not answering (another folder's check has waited past ${thereActMs} ms)` : `its kept folder did not answer within ${thereActMs} ms`} — the act is refused (kept_unconfirmed)`);
+      return namedError('kept_unconfirmed', other ? `the disk that holds the kept browsers is not answering (a check has waited more than ${bound}) — nothing was done; try again in a moment` : `its kept folder did not answer within ${bound} — nothing was done; try again in a moment`);
+    };
+    if (hungCheck()) throw unconfirmed(true);
     let timer = null;
     const rec = startCheck(k);
-    const r = await Promise.race([rec.p, new Promise((res) => { timer = setTimeout(() => res(UNANSWERED), thereActMs); if (timer.unref) timer.unref(); })]);
+    // the bound is REF'D (an act in flight keeps the process up to its answer) and, when it fires, yields ONCE so a check that
+    // finished while the loop was held answers first — never «unanswered» for a stat that did answer
+    const r = await Promise.race([rec.p, new Promise((res) => { timer = setTimeout(() => setImmediate(() => res(UNANSWERED)), thereActMs); })]);
     clearTimeout(timer);
-    if (r === UNANSWERED) { rec.hung = true; throw unconfirmed(); }
+    if (r === UNANSWERED) { rec.hung = true; throw unconfirmed(false); }
     return r;
   }
   function judged(e) {
@@ -336,7 +344,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     const s = load();
     let carried = new Set(); try { const v = liveKeys(); carried = v instanceof Set ? v : new Set(v || []); } catch { carried = new Set(); }
     return Object.values(s.entries).sort((a, b) => b.lastUsedAt - a.lastUsedAt || (a.browserKey < b.browserKey ? -1 : 1)).map(judged).map((e) => ({
-      browserKey: e.browserKey, label: e.label, kind: K.keptKindOf(e), hasDir: e.checking ? null : e.hasDir, fenced: e.fenced, tabs: e.tabs.map((t) => ({ ...t })), tabsAt: e.tabsAt,
+      browserKey: e.browserKey, label: e.label, kind: K.keptKindOf(e), hasDir: e.hasDir, checking: !!e.checking, fenced: e.fenced, tabs: e.tabs.map((t) => ({ ...t })), tabsAt: e.tabsAt,
       startedAt: e.startedAt, stoppedAt: e.stoppedAt, stoppedWhy: e.stoppedWhy, restore: e.restore ? { mode: e.restore.mode, by: e.restore.by, at: e.restore.at } : null, waiting: e.waiting ? e.waiting.tabs.length : 0,
       lastUsedAt: e.lastUsedAt, bytes: e.bytes, cacheBytes: e.cacheBytes, bytesAt: e.bytesAt, trimmedAt: e.trimmedAt,
       live: liveOf(e.browserKey), carried: carried.has(e.browserKey), sessionId: e.sessionId,

@@ -432,8 +432,9 @@ function helperNotKeptText() {
   return 'this helper\'s browser keeps nothing: a login made in it ends with it (only the conversation\'s own browser — a command without a handle — keeps its logins and tabs after it closes)';
 }
 /** …when its tabs are kept and were NOT reopened (a deliberate stop, D2): the verb that reopens them. */
-function keptNoteText({ why = null, tabs = 0 } = {}) {
-  return `your browser was closed (${stopWhyWords(why)}); its ${tabs} tab(s) are kept — \`vibespace-browser resume\` reopens them (its logins are still there either way)`;
+function keptNoteText({ why = null, tabs = 0, logins = true } = {}) {
+  // B-7a30: «its logins» only when the kept entry said so off a checked folder (a folder not checked yet, fenced, tabs only: not said)
+  return `your browser was closed (${stopWhyWords(why)}); its ${tabs} tab(s) are kept — \`vibespace-browser resume\` reopens them${logins ? ' (its logins are still there either way)' : ''}`;
 }
 
 module.exports = {

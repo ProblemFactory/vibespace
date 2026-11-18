@@ -3191,7 +3191,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         const res = await restoreTabs(p, plan, { boundMs: resume === 'user' ? KB.RESUME_BOUND_USER_MS : KB.RESUME_BOUND_AGENT_MS, seenBy: resume === 'user' ? 'the user\'s Resume' : (resume === 'agent' ? 'the agent\'s resume' : 'the start') });
         try { ks.afterReopen(bk, res.skipped.filter((x) => x.late)); } catch (e) { log.warn?.(`[browser] ${bk}: the reopened tabs were not noted — ${e && e.message}`); }
         out = { kind: 'restored', why: entry0.stoppedWhy || null, opened: res.opened.length, tabs: res.opened.map((x) => ({ url: x.url, title: x.title })), skipped: res.skipped.map((x) => ({ url: x.url, why: x.why })), current: res.current };
-      } else if (tabs.length) out = { kind: 'kept', why: entry0.stoppedWhy || null, tabs: tabs.length };
+      } else if (tabs.length) out = { kind: 'kept', why: entry0.stoppedWhy || null, tabs: tabs.length, logins: entry0.kind === 'full' }; // B-7a30: «its logins» said only for a folder the last check found
     }
     if (resume === 'user') {
       // the user's Resume: the agent's next command is told (sticky until then) — never a note of his (he wrote none)
@@ -3273,7 +3273,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // only reconnects the view (no folder is read), so it is not asked; the agent's reopen of its waiting tabs is.
     const e00 = ephemeralFor(bk);
     const reconnect = who === 'user' && !!(e00 && (e00.live || starting.has(e00.profileId)));
-    if (ks && !reconnect && typeof ks.checkThere === 'function' && typeof ks.has === 'function' && ks.has(bk)) await ks.checkThere(bk);
+    // (a folder adopted into a named profile is refused by its own name first — the door reads no disk for it)
+    if (ks && !reconnect && !adoptedLabelOf(bk) && typeof ks.checkThere === 'function' && typeof ks.has === 'function' && ks.has(bk)) await ks.checkThere(bk);
     let entry0 = null; try { entry0 = ks ? ks.get(bk) : null; } catch { entry0 = null; }
     const e0 = ephemeralFor(bk);
     const running = !!(e0 && (e0.live || starting.has(e0.profileId)));

@@ -1900,7 +1900,7 @@ function keptAnswerOf(kept) {
   const KB = require('../browser-kept.js');
   if (kept.kind === 'resumed') return { resumed: { handedBack: !!kept.handedBack, tabs: Array.isArray(kept.tabs) ? kept.tabs.length : 0, current: (Array.isArray(kept.tabs) && kept.tabs[kept.currentIndex]) || null, text: KB.resumedNoteText({ note: kept.note || '', tabs: kept.tabs || [], currentIndex: kept.currentIndex, handedBack: !!kept.handedBack, drove: !!kept.drove }) } };
   if (kept.kind === 'restored') return { restored: { opened: kept.opened || 0, skipped: Array.isArray(kept.skipped) ? kept.skipped : [], current: kept.current || null, text: KB.restoredNoteText({ why: kept.why, opened: kept.opened || 0, skipped: kept.skipped || [], current: kept.current || null }) } };
-  if (kept.kind === 'kept') return { kept: { tabs: kept.tabs || 0, why: kept.why || null, text: KB.keptNoteText({ why: kept.why, tabs: kept.tabs || 0 }) } };
+  if (kept.kind === 'kept') return { kept: { tabs: kept.tabs || 0, why: kept.why || null, text: KB.keptNoteText({ why: kept.why, tabs: kept.tabs || 0, logins: kept.logins !== false }) } };
   return {};
 }
 /** lane browser-resume B: `vibespace-browser resume` — THIS conversation's own browser, started (if it is not) with its
