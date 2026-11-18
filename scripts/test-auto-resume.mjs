@@ -2081,21 +2081,34 @@ await (async () => {
   const mP = mutantAr([['        if (now < fireAt - WF_LEAD_MS || wfPending.has(id)) continue;', '        if (now < fireAt - WF_LEAD_MS) continue;   // PRE-AMEND: no in-flight test']]);
   const soloReal = await solo(real), soloRed = mP.mod ? await solo(mP.mod) : -1;
   ok('18. THE MODULE: ONE arm whose read never settles, ticked a re-read apart ⇒ asked ONCE (never doubled); RED: without the in-flight test it is asked again', soloReal === 1 && mP.hits === 1 && soloRed === 2, mP.err || JSON.stringify({ soloReal, soloRed }));
-  const freed = async (mod) => {
-    const asks = [], sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18g-'));
-    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: (id) => { asks.push(id); return id === 'z' ? Promise.resolve(null) : new Promise(() => { }); } });   // four reads hang (a stalled mount)
+  // U3 cure 3 (主开发's law): THE CAP COUNTS READS STILL OUT — ten arms, each asked then fired (its arm gone), every read hangs:
+  // at most the cap is ever out; the reads beyond it are not asked; RED: cure 2's form (the cap counted arms) asks all ten
+  const outScene = async (mod) => {
+    const asks = [], sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18o-'));
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: (id) => { asks.push(id); return new Promise(() => { }); } });
     const T = Date.now(), r0 = T + 60 * 60000;
-    for (const k of ['h0', 'h1', 'h2', 'h3']) { sessions.set(k, sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled(k, sessions.get(k), r0, 'usage limit'); }
-    ar.tick(r0 - 5 * 60000);
-    for (const k of ['h0', 'h1', 'h2', 'h3']) ar.forget(k);   // their arms are GONE (continued, turned off, the session ended)
-    sessions.set('z', sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled('z', sessions.get('z'), r0, 'usage limit');
-    ar.tick(r0 - 5 * 60000 + 1000);
+    for (let i = 0; i < 10; i++) { const k = 'o' + i; sessions.set(k, sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled(k, sessions.get(k), r0, 'usage limit'); ar.tick(r0 - 5 * 60000 + i * 1000); ar.forget(k); }
     fs.rmSync(dir, { recursive: true, force: true });
-    return asks.includes('z');
+    return asks.length;
   };
-  const mH = mutantAr([["      for (const k of [...wfPending.keys()]) if (!armed.has(k)) { wfPending.delete(k); wfHungSaid.delete(k); }", '      // PRE-CURE 2: a hung read holds its place forever']]);
-  const frReal = await freed(real), frRed = mH.mod ? await freed(mH.mod) : 'no mutant';
-  ok('18. THE MODULE: four reads that hang for arms that are then GONE free the cap — a fifth conversation\'s run is still asked; RED: the cap counting them forever asks nothing more', frReal === true && mH.hits === 1 && frRed === false, mH.err || JSON.stringify({ frReal, frRed }));
+  const mO = mutantAr([['        if (wfOut.size >= WF_INFLIGHT_MAX) break;', '        if (wfPending.size >= WF_INFLIGHT_MAX) break;   // CURE 2: the cap counted ARMS']]);
+  const oReal = await outScene(real), oRed = mO.mod ? await outScene(mO.mod) : -1;
+  ok('18. THE MODULE: ten arms asked and fired one after another, every read hangs — at most WF_INFLIGHT_MAX reads are ever OUT (the stalled mount holds no more of the pool); RED: cure 2\'s form (the cap counted arms) asks all ten', oReal === WF_INFLIGHT_MAX && mO.hits === 1 && oRed === 10, mO.err || JSON.stringify({ oReal, oRed }));
+  { const rs = [], asks = [], logs = [], sentH = [], sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18h-'));
+    const ar = create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: (id) => { sentH.push(id); return true; }, log: (l) => logs.push(String(l)), workflowRunAtWall: (id) => { asks.push(id); return id === 'z' ? Promise.resolve(null) : new Promise((r) => rs.push(r)); } });   // the g reads never return; z's answers once asked
+    const T = Date.now(), r0 = T + 60 * 60000;
+    for (const k of ['g0', 'g1', 'g2', 'g3']) { sessions.set(k, sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled(k, sessions.get(k), r0, 'usage limit'); }
+    ar.tick(r0 - 5 * 60000);
+    for (const k of ['g0', 'g1', 'g2', 'g3']) ar.forget(k);   // their arms go; their four reads stay OUT
+    sessions.set('z', sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled('z', sessions.get('z'), Date.now() + 1000, 'usage limit');
+    ar.tick(Date.now() + 1000 + GRACE_MS + 1);   // z is DUE, the cap full of hung reads, z has no answer of its own
+    const held = sentH.length === 0 && ar.statusFor('z').armed && logs.some((l) => /z: not read: the folder's storage does not answer/.test(l));
+    rs[0](null); await new Promise((r) => setImmediate(r));   // ONE read returns (late, its arm long gone)
+    const outAfter = ar._wfOut.size;
+    ar.tick(Date.now() + 1000 + GRACE_MS + 2); await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));   // z is asked now (one unit back) and answered
+    ar.tick(Date.now() + 1000 + GRACE_MS + 3);
+    fs.rmSync(dir, { recursive: true, force: true });
+    ok('18. THE MODULE: the cap full of reads that never return ⇒ a DUE arm with no answer is NOT fired — «not read: the folder\'s storage does not answer»; a late answer frees EXACTLY one unit; the arm is asked, answered and continued', held && outAfter === 3 && asks.includes('z') && sentH.join() === 'z', JSON.stringify({ held, outAfter, asks, sentH, logs: logs.filter((l) => /not read/.test(l)) })); }
   const fair = async (mod) => {
     const asked = new Set(), sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18f-'));
     const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: async (id) => { asked.add(id); return null; } });

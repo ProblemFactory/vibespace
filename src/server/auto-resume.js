@@ -70,7 +70,7 @@ const { RUN_ID_RE: RUN_ID_FORM } = require('../workflow-disk.js');   // PURE: th
 const WF_REREAD_MS = 2 * 60 * 1000;     // B-3437: the run a usage wall cut short is asked about every two minutes…
 const WF_FRESH_MS = 5 * 60 * 1000;      // …and only an answer this fresh is named by the continue
 const WF_LEAD_MS = 6 * 60 * 1000;       // …asked only in the six minutes before a TIMED fire (U3 cure: never for an arm's whole life)
-const WF_INFLIGHT_MAX = 4;              // …reads in flight at once, every arm together (a hung mount holds at most this many)
+const WF_INFLIGHT_MAX = 4;              // …READS STILL OUT, counted until each returns — whatever became of its arm (a stalled mount holds at most this many of the hub's pool threads)
 const WF_RESET_SLACK_MS = 5 * 60 * 1000; // …named only when the continue really goes no earlier than the run's limit reset (− this)
 /** PURE (B-3437): the sentence for a Workflow run the limit cut short, or '' — only a run id of its own form that the peer-text
  *  belt leaves unchanged, and a count of 1..9999; anything else (a hostile record) says nothing. */
@@ -401,7 +401,9 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const r = Number(w.run.resetAt) || 0;
     return r > 0 && r <= Date.now() + (early ? 0 : WF_RESET_SLACK_MS) ? w.run : null;
   };
-  const wfPending = new Map();   // id → when its read started (a hung read is never doubled; the cap counts them all; said once)
+  const wfPending = new Map();   // id → when ITS ARM's read started (the arm's own bookkeeping: never two reads for one live arm; said once)
+  const wfOut = new Set();       // every read still OUT — the cap's count (U3 cure 3: a read that has not returned stays counted until it returns, its arm gone or not)
+  const wfNotReadSaid = new Set();   // arms held «not read: the folder's storage does not answer» (said once)
   const WF_HUNG_MS = 5 * 60 * 1000, wfHungSaid = new Set();
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
@@ -1236,6 +1238,17 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   function attemptFire(id, session, a, kind, why, cause = null, origin = null, { claim = false } = {}) {
     const now = Date.now();
     if (session._arFiring) return false;   // a gate is already running for this session (also breaks fireNow ⇄ beforeFire re-entry)
+    // THE FOLDER'S STORAGE DOES NOT ANSWER (U3 cure 3 — 主开发's law): every read the cap allows is out and none returned, and THIS
+    // arm of a usage wall has no answer of its own — it is NOT fired (not continuing is the safe mistake; the arm stays and fires
+    // when a read answers again); said once
+    if (workflowRunAtWall && wfOut.size >= WF_INFLIGHT_MAX && session._stoppedBy && session._stoppedBy.kind === 'quota') {
+      const w = wfOf.get(id);
+      if (!(w && w.rec === a && w.at && now - w.at <= WF_FRESH_MS)) {
+        if (!wfNotReadSaid.has(id)) { wfNotReadSaid.add(id); log(`[auto-resume] ${id}: not read: the folder's storage does not answer (${wfOut.size} reads still out) — not continued now; it continues when a read answers`); }
+        return false;
+      }
+    }
+    wfNotReadSaid.delete(id);
     const ident = identityFor(id, session);
     const key = ident ? ident.key : null;
     const label = ident ? ident.name : null;
@@ -1467,12 +1480,13 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         if (now < fireAt - WF_LEAD_MS || wfPending.has(id)) continue;
         const w0 = wfOf.get(id);
         if (w0 && w0.rec === a && now - (w0.ask || 0) < WF_REREAD_MS) continue;
-        if (wfPending.size >= WF_INFLIGHT_MAX) break;
+        if (wfOut.size >= WF_INFLIGHT_MAX) break;   // the reads still OUT (the hung ones of gone arms too) — never more threads than this
         const s1 = activeSessions.get(id);
         if (!s1 || !s1._stoppedBy || s1._stoppedBy.kind !== 'quota') continue;   // a wall's arm only (never a hold's)
         const w = { rec: a, run: w0 && w0.rec === a ? w0.run : null, at: w0 && w0.rec === a ? w0.at : 0, ask: now };
         wfOf.set(id, w); wfPending.set(id, now);
-        const t0 = now, settle = () => { if (wfPending.get(id) === t0) { wfPending.delete(id); wfHungSaid.delete(id); } };   // only ITS entry (a dropped read answering late never frees a newer one)
+        const t0 = now, out = {}; wfOut.add(out);
+        const settle = () => { wfOut.delete(out); if (wfPending.get(id) === t0) { wfPending.delete(id); wfHungSaid.delete(id); } };   // the read's unit returns when IT returns (exactly one); only ITS arm entry
         try { Promise.resolve(workflowRunAtWall(id, s1, { fireAt })).then((r) => { settle(); if (wfOf.get(id) !== w || armed.get(id) !== a) return; const had = !!w.run; w.run = r ? { runId: r.runId, unfinished: r.unfinished, resetAt: Number(r.resetAt) || 0 } : null; w.at = Date.now(); if (r && !had) log(`[auto-resume] ${id}: the limit cut a Workflow run short (${r.unfinished} agent(s) unfinished) — its continue names it`); }, settle); } catch { settle(); }
       }
     }
@@ -1543,7 +1557,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     bulkCounts, setEnabledAll, stoppedPlan, resumeBatch, batchStatus, stopBatch, // lane auto-resume-bulk: the two bulk acts + the plan the dialog shows first
     noteQuotaReading, // the fresh-window edge: a reading that says the wall is gone continues the session NOW
     noteFireOutcome, recentFireFailures, canFire, noteNoPoolTarget, // the loop breaker's seams (engine: walled turn ⇒ ok:false; per-session switch ⇒ exclude + its own no-target verdict)
-    _armed: armed, _fires: fires, _wfOf: wfOf, _wfPending: wfPending,
+    _armed: armed, _fires: fires, _wfOf: wfOf, _wfPending: wfPending, _wfOut: wfOut,
   };
 }
 
