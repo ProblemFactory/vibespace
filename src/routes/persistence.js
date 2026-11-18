@@ -81,13 +81,17 @@ function ringStampMs(name) {
 }
 /** The writer's sequence suffix of a rollback point name (base 36) — the order inside one millisecond; -1 when it has none. */
 function ringSeq(name) {
-  const m = /Z-([0-9a-z]+)(?:\.json)?$/.exec(String(name || ''));
+  const m = /Z-([0-9a-z]+)(?:\.restart)?(?:\.json)?$/.exec(String(name || ''));
   return m ? parseInt(m[1], 36) : -1;
+}
+/** PURE: rollback point names in time order (the stamp, then the writer's sequence; a name with no stamp first). */
+function ringSort(names) {
+  const at = (f) => { const t = ringStampMs(f); return Number.isFinite(t) ? t : -Infinity; };
+  return [...new Set((names || []).map(String))].sort((a, b) => (at(a) - at(b)) || (ringSeq(a) - ringSeq(b)) || (a < b ? -1 : a > b ? 1 : 0));
 }
 /** PURE: the rollback point file names to KEEP (a Set) out of `names` (any order); `pinned` = a name or a list of names. */
 function ringKeep(names, { pinned = null, last = RING_KEEP.last, hours = RING_KEEP.hours, days = RING_KEEP.days } = {}) {
-  const at = (f) => { const t = ringStampMs(f); return Number.isFinite(t) ? t : -Infinity; };
-  const all = [...new Set((names || []).map(String))].sort((a, b) => (at(a) - at(b)) || (ringSeq(a) - ringSeq(b)) || (a < b ? -1 : a > b ? 1 : 0));
+  const all = ringSort(names);
   const newest = (a, n) => a.slice(Math.max(0, a.length - n)); // n = 0 keeps none (a bare slice(-0) is the whole list)
   const keep = new Set(newest(all.filter((f) => Number.isFinite(ringStampMs(f))), last));
   for (const p of [].concat(pinned || [])) if (all.includes(String(p))) keep.add(String(p));
@@ -206,10 +210,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   let _histSeq = 0;
   let _histWarned = false;
   // «BEFORE THIS RESTART» (B-b05e): the first point this process writes holds the layout as the restart found it (the first
-  // write's previous state is what is ON DISK); its meta says so (`restart`). The newest RING_KEEP.boots such points are
-  // PINNED (`_boots`: read once off the ring's metas at the first prune, then kept) — no burst pushes one out, and a second
-  // restart after a bad one keeps the point before the first. The rollback dialog names exactly those (listLayoutHistory).
-  let _bootPending = true, _boots = null;
+  // write's previous state is what is ON DISK); its FILE NAME says so (`layout-<stamp>-<seq>.restart.json`, its meta too). The
+  // newest RING_KEEP.boots such points are PINNED — read off the names the prune lists anyway (the cure of the batch-4 verdict: a
+  // first prune that read every meta synchronously held the main loop where data/ is a network mount) — no burst pushes one out,
+  // and a second restart after a bad one keeps the point before the first. The rollback dialog names exactly those.
+  let _bootPending = true;
   // CRITICAL (adversarial review): readLayouts() hands out the LIVE cache
   // object and EVERY production caller mutates it in place before calling
   // writeLayouts (ws layout-sync, desktop create/delete/rename/reorder,
@@ -264,14 +269,15 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           const stamp = new Date().toISOString().replace(/[:.]/g, '-') + '-' + (_histSeq++).toString(36);
           const total = Object.values(before).reduce((a, b) => a + b, 0);
           const at = Date.now();
-          if (restart) { seen.restart = true; if (_boots) _boots.push(`layout-${stamp}.json`); }
+          if (restart) seen.restart = true;
+          const file = `layout-${stamp}${restart ? '.restart' : ''}.json`; // the restart's point is named so (the prune reads no meta)
           // atomic like layouts.json next door — a torn rollback point fails
           // exactly when it is finally needed
-          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.json`), { at, summary: before, totalWindows: total, change, ...seen, layouts: snap });
+          writeJsonAtomic(path.join(HISTORY_DIR, file), { at, summary: before, totalWindows: total, change, ...seen, layouts: snap });
           // tiny sidecar header: listing must not parse 40 whole layouts on the
           // panic-button path
-          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.meta.json`), { at, summary: before, totalWindows: total, change, ...seen });
-          pruneHistory();
+          writeJsonAtomic(path.join(HISTORY_DIR, file.replace(/\.json$/, '.meta.json')), { at, summary: before, totalWindows: total, change, ...seen });
+          pruneHistory().catch(() => {}); // off the loop (above)
         } catch (e) {
           // never silent: the UI asserts this protection exists
           if (!_histWarned) { _histWarned = true; console.warn('[layout-history] snapshot FAILED — rollback points are not being written:', e.message); }
@@ -285,15 +291,19 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // i.e. the only ones worth having. The oldest-10 tier that followed kept the
   // FIRST points ever written and let a burst evict every day since (B-b05e):
   // the keep is spread over time now (ringKeep) + this boot's point pinned.
-  function pruneHistory() {
-    const files = fs.readdirSync(HISTORY_DIR).filter((f) => /^layout-.*\.json$/.test(f) && !f.endsWith('.meta.json')).sort();
-    if (!_boots) _boots = listLayoutHistory().filter((e) => e.wasRestart).map((e) => e.id).reverse(); // oldest first (the list is newest first)
-    const keep = ringKeep(files, { pinned: _boots.slice(-RING_KEEP.boots) });
-    _boots = _boots.filter((f) => keep.has(f));
+  // OFF THE LOOP (the cure of the batch-4 verdict: data/ is a network mount on the owner's hub, where a synchronous call holds the
+  // main loop): the listing and the unlinks are fs.promises — the main loop waits on none of them; two prunes that overlap unlink
+  // the same file once (the other's ENOENT is swallowed). The restarts' points are known by NAME — no meta is read here.
+  async function pruneHistory() {
+    let names;
+    try { names = await fs.promises.readdir(HISTORY_DIR); } catch { return; }
+    const files = names.filter((f) => /^layout-.*\.json$/.test(f) && !f.endsWith('.meta.json')).sort();
+    const boots = ringSort(files.filter((f) => f.endsWith('.restart.json'))); // the restarts' points, by NAME — no meta read here
+    const keep = ringKeep(files, { pinned: boots.slice(-RING_KEEP.boots) });
     for (const f of files) {
       if (keep.has(f)) continue;
-      try { fs.unlinkSync(path.join(HISTORY_DIR, f)); } catch {}
-      try { fs.unlinkSync(path.join(HISTORY_DIR, f.replace(/\.json$/, '.meta.json'))); } catch {}
+      await fs.promises.unlink(path.join(HISTORY_DIR, f)).catch(() => {});
+      await fs.promises.unlink(path.join(HISTORY_DIR, f.replace(/\.json$/, '.meta.json'))).catch(() => {});
     }
   }
   const detach = (o) => { try { return structuredClone(o); } catch { try { return JSON.parse(JSON.stringify(o)); } catch { return null; } } };
@@ -349,11 +359,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           // layouts.json each) is read only when actually restoring
           try {
             const m = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f.replace(/\.json$/, '.meta.json')), 'utf-8'));
-            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows, change: m.change || null, ...(m.writer ? { writer: m.writer } : {}), ...(m.refused ? { refused: m.refused } : {}), ...(m.restart ? { wasRestart: true } : {}) };
+            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows, change: m.change || null, ...(m.writer ? { writer: m.writer } : {}), ...(m.refused ? { refused: m.refused } : {}), ...(m.restart || f.endsWith('.restart.json') ? { wasRestart: true } : {}) };
           } catch {}
           try {
             const j = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f), 'utf-8'));
-            return { id: f, at: j.at, summary: j.summary, totalWindows: j.totalWindows, change: j.change || null, ...(j.restart ? { wasRestart: true } : {}) };
+            return { id: f, at: j.at, summary: j.summary, totalWindows: j.totalWindows, change: j.change || null, ...(j.restart || f.endsWith('.restart.json') ? { wasRestart: true } : {}) };
           } catch { return null; } // unparseable → omit, never a 1970/0-window row
         }).filter(Boolean)
         // the dialog names the PINNED «before a restart» points (the newest RING_KEEP.boots — B-b05e), not every older one
@@ -1300,4 +1310,4 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   return router;
 }
 
-module.exports = { router, setup, wordlessTitles, WORDLESS_TITLES, ringKeep, ringStampMs, ringSeq, RING_KEEP };
+module.exports = { router, setup, wordlessTitles, WORDLESS_TITLES, ringKeep, ringStampMs, ringSeq, ringSort, RING_KEEP };

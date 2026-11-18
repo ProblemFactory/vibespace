@@ -162,7 +162,7 @@ const ROWS = [
   ["src/routes/files.js", "crossHostTransfer > isDir", 1, "guarded", "safePath(src) = the local source a person picked in a cross-host copy/move (POST body)"],
   ["src/routes/files.js", "crossHostTransfer > exists", 1, "guarded", "safePath(dest) = the local destination a person picked in a cross-host copy/move (POST body)"],
   ["src/routes/files.js", "crossHostTransfer", 12, "guarded", "dParent / stageLocal / dPath / part / src all derive from the request body's src/dest (safePath) — a person's chosen local folder, mounts included"],
-  ["src/routes/persistence.js", "*", 10, "local-only", "every path is under dataDir = <checkout>/data (setupPersistence, server.js): layouts, layout-history/, settings, user-state — or ~/.claude, ~/.codex creds"],
+  ["src/routes/persistence.js", "*", 8, "local-only", "every path is under dataDir = <checkout>/data (setupPersistence, server.js): layouts, layout-history/, settings, user-state — or ~/.claude, ~/.codex creds"],
   ["src/routes/sessions.js", "realCwdOf", 1, "guarded", "a session cwd's realpath on every /api/sessions rebuild (cached): never on a STORAGE mount (storageRootOf ⇒ null) nor a blocked one; a local / home cwd once"],
   ["src/routes/sessions.js", "setup > route:GET /api/subagent-messages", 4, "local-only", "under ~/.claude/projects (os.homedir()); cwd only via cwdToProjectDir (dashed name); query ids pick entries (claudeSessionId/agentId not regex-checked)"],
   ["src/routes/sessions.js", "setup > findWorkflowSnapshot > tryPath", 1, "local-only", "p = ~/.claude/projects/<projDir>/<sid>/workflows/<runId>.json (cwd only via cwdToProjectDir)"],
