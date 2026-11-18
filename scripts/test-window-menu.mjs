@@ -94,8 +94,12 @@ try {
   await evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })' /* in-page poll (2.369.118): the heavy tier went red with "no app" in two chrome lanes at once — one probe 1.5 s after navigate is a bet on load speed */);
 
   // two overlapping terminals + one far-away file explorer
+  // the EXCLUDED package (2026-11-17, its run alone on the test machine): the second terminal opens in its OWN folder, so its
+  // switch entry is told apart by its title («Terminal — <cwd>»): a title set by hand was overwritten by the shell's own title
+  // (the entry read «Terminal — /tmp/…» and the click found nothing)
+  const zwei = path.join(wt, 'zwei-term'); fs.mkdirSync(zwei, { recursive: true });
   await evalJs(`app.openShellTerminal(${JSON.stringify(wt)})`);
-  await evalJs(`app.openShellTerminal(${JSON.stringify(wt)})`);
+  await evalJs(`app.openShellTerminal(${JSON.stringify(zwei)})`);
   let ids = [];
   for (let i = 0; i < 40 && ids.length < 2; i++) {
     ids = await evalJs(`[...app.wm.windows.values()].filter(w => w.type === 'terminal').map(w => w.id)`);
@@ -108,14 +112,20 @@ try {
     a.gridBounds = { left: 0.1, top: 0.1, width: 0.4, height: 0.4 }; app.wm._applyGridBounds(a);
     b.gridBounds = { left: 0.3, top: 0.3, width: 0.4, height: 0.4 }; app.wm._applyGridBounds(b); // overlaps a
     return true; })()`);
-  // rename w2's session so its menu entry is recognizable
-  await evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(w2)}); app.wm.setTitle(w.id, 'ZWEI-TERM'); return true; })()`);
+  // Rename and Task Groups are offered only for a window whose SESSION the sidebar lists (taskbar.js sessionForWin — the same
+  // rule): the first menu was opened before the sidebar had listed the new shell sessions (its first run alone: no Rename, then
+  // Task Groups a second later). Wait for both, bounded, by that rule.
+  const bothListed = await evalJs(`new Promise((res) => { const t0 = Date.now(); (function look() {
+    const ok = [${JSON.stringify(w1)}, ${JSON.stringify(w2)}].every((id) => { const w = app.wm.windows.get(id); const sp = (w && w._openSpec) || {};
+      return (app.sidebar?._allSessions || []).some((s) => (sp.backendSessionId && s.sessionId === sp.backendSessionId) || (sp.serverId && s.webuiId === sp.serverId)); });
+    if (ok || Date.now() - t0 > 15000) return res(ok); setTimeout(look, 250); })(); })`);
+  check('both terminals are sessions the sidebar lists (Rename / Task Groups follow them)', bothListed);
 
   // ── title-bar menu, default scope (overlap) ──
   const m1 = await openTitleMenu(w1);
   check('title-bar right-click opens a menu', !!m1, JSON.stringify(m1));
   check('menu has Switch window submenu', !!m1?.sub, JSON.stringify(m1?.top));
-  check('overlap scope lists the overlapping terminal', (m1?.sub || []).some((s) => s.includes('ZWEI-TERM')), JSON.stringify(m1?.sub));
+  check('overlap scope lists the overlapping terminal', (m1?.sub || []).some((s) => s.includes('zwei-term')), JSON.stringify(m1?.sub));
   check('menu has Rename', (m1?.top || []).some((s) => s.includes('Rename')), JSON.stringify(m1?.top));
   check('menu keeps Move/Minimize/Close', ['Move', 'Minimize', 'Close'].every((k) => (m1?.top || []).some((s) => s.includes(k))), JSON.stringify(m1?.top));
 
@@ -129,17 +139,17 @@ try {
   await evalJs(`(() => { const b = app.wm.windows.get(${JSON.stringify(w2)});
     b.gridBounds = { left: 0.72, top: 0.72, width: 0.22, height: 0.22 }; app.wm._applyGridBounds(b); return true; })()`);
   const mOv = await openTitleMenu(w1);
-  check('moved apart: overlap scope no longer lists it', !(mOv?.sub || []).some((s) => s.includes('ZWEI-TERM')), JSON.stringify(mOv?.sub));
+  check('moved apart: overlap scope no longer lists it', !(mOv?.sub || []).some((s) => s.includes('zwei-term')), JSON.stringify(mOv?.sub));
   await evalJs(`app.settings.set('window.titlebarSwitchScope', 'all')`);
   await sleep(300);
   const mAll = await openTitleMenu(w1);
-  check('scope=all lists the non-overlapping terminal', (mAll?.sub || []).some((s) => s.includes('ZWEI-TERM')), JSON.stringify(mAll?.sub));
+  check('scope=all lists the non-overlapping terminal', (mAll?.sub || []).some((s) => s.includes('zwei-term')), JSON.stringify(mAll?.sub));
 
   // clicking the entry focuses the target window
   await evalJs(`(() => {
     const menu = document.querySelector('[data-popover]');
     const subEl = [...menu.children].find((el) => (el.firstChild?.textContent || '').includes('Switch window'));
-    const entry = [...subEl.querySelectorAll('div > div')].find((el) => el.textContent.includes('ZWEI-TERM'));
+    const entry = [...subEl.querySelectorAll('div > div')].find((el) => el.textContent.includes('zwei-term'));
     entry.click(); return true; })()`);
   await sleep(300);
   check('clicking the submenu entry focuses the window', await evalJs(`app.wm.activeWindowId === ${JSON.stringify(w2)}`));
