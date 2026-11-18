@@ -7,7 +7,7 @@
 // Run: node scripts/test-permission-rules-pins.mjs
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { gitEnvFrom } from './git-env.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let passed = 0, failed = 0;
@@ -52,8 +52,15 @@ console.log('— Part 2: the server reader + the oracle runner');
   const ce = fs.readFileSync(path.join(REPO, 'src/server/stdout/codex-events.js'), 'utf8');
   check('the codex stdout consumer no longer promises a live broadcast to other windows (nothing on the client reads this record)',
     /permission_rules/.test(ce) && !/second window watching the same session sees the same tree/.test(ce));
-  check('…and no client module consumes a permission_rules record, which is why that promise had to go',
-    execSync(`grep -rl "permission_rules" ${JSON.stringify(path.join(REPO, 'src/lib'))} || true`, { encoding: 'utf8' }).trim() === '');
+  // B-94d3 cure (the 03:53Z verdict): this was `grep -rl … || true`, which passed when grep was missing or the path was
+  // wrong (no output either way). Now a walk over the tracked src/lib files, said non-empty, with its own control: the
+  // same search finds the record name in the one file above that carries it.
+  const libFiles = execFileSync('git', ['-C', REPO, 'ls-files', '--', 'src/lib'], { env: gitEnvFrom(process.env), encoding: 'utf8' }).split('\n').filter(Boolean);
+  const carriers = (files) => files.filter((f) => fs.readFileSync(path.join(REPO, f), 'utf8').includes('permission_rules'));
+  const libCarriers = carriers(libFiles);
+  check(`…and no client module consumes a permission_rules record, which is why that promise had to go (${libFiles.length} tracked src/lib files read)`,
+    libFiles.length > 0 && libCarriers.length === 0, libCarriers.join(', '));
+  check('…CONTROL: the same search finds the record name where it is (src/server/stdout/codex-events.js)', carriers(['src/server/stdout/codex-events.js']).length === 1);
 }
 {
   // ⑤ STANDING SWEEP: every module that builds mk() refs, not just this one.

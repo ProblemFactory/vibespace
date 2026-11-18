@@ -24,8 +24,8 @@ ok(real2.late === 1, 're-created singleton receives subsequent writes');
 // `ref?.` happily passes — two consumers shipped `ref()?.method(...)` inside a
 // `try`, one of them with a bare `catch {}`, and the answers were dropped for
 // every session. Property access is the ONLY calling convention.
-// scripts/test-permission-rules.mjs carries the drift guard over
-// src/server/stdout/; this is the property it depends on.
+// scripts/test-permission-rules-pins.mjs carries the drift guard (the standing
+// sweep) over src/server/stdout/; this is the property it depends on.
 let threw = null;
 try { proxy(); } catch (e) { threw = e.message; }
 ok(/is not a function/.test(threw || ''), 'a lazy ref is NOT callable — `ref()` throws (consumers must use `ref?.method?.()`)');

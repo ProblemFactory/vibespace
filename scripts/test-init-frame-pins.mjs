@@ -56,10 +56,17 @@ console.log('— wiring pins');
   // chat-renderers, the handler in chat-view — round 1 gated only the button,
   // so the first harness to gain the row would have shown a dead control.
   const forkHandler = cv.slice(cv.indexOf('_forkFromMessage(uuid, msg) {'), cv.indexOf('_forkFromMessage(uuid, msg) {') + 600);
+  const forkGateOk = (h) => /backendFeatureCaps\(backend\)\.forkAtMessage/.test(h) && !/backend !== 'claude'/.test(h);
   ok('the per-message fork HANDLER gates on caps.forkAtMessage, like the button — no backend id left',
-    /backendFeatureCaps\(backend\)\.forkAtMessage/.test(forkHandler) && !/backend !== 'claude'/.test(forkHandler), forkHandler.split('\n').slice(0, 6).join(' / '));
+    forkGateOk(forkHandler), forkHandler.split('\n').slice(0, 6).join(' / '));
   ok('…and a click that cannot proceed SPEAKS (no-silent-failures) instead of returning silently', /showToast\(t\('Session id not known yet/.test(forkHandler));
-  ok('…NEGATIVE CONTROL: the checker catches a planted backend-id gate', /backend !== 'claude'/.test(forkHandler + "\n if (backend !== 'claude') return;"));
+  // B-94d3 cure (the 03:53Z verdict): this control used to test the regex on the very text it had just appended, so it
+  // could not fail. Now the gate is planted INSIDE the real handler and the SAME checker the leg above uses must refuse
+  // it; its own control: a checker without the backend-id half passes that plant, so the control measures the checker.
+  const forkOpener = '_forkFromMessage(uuid, msg) {';
+  const plantedFork = forkHandler.replace(forkOpener, forkOpener + "\n    if (backend !== 'claude') return;");
+  ok('…NEGATIVE CONTROL: the checker refuses a backend-id gate planted inside the real handler', plantedFork !== forkHandler && !forkGateOk(plantedFork));
+  ok('…and that control can fail: a checker without its backend-id half passes the same plant', /backendFeatureCaps\(backend\)\.forkAtMessage/.test(plantedFork));
 
   // ROUND 5 r2 — THE CLAMP IS SINGLE, STRUCTURALLY. showDropdown owns width
   // AND placement, because it decides them from the same two numbers; a caller
