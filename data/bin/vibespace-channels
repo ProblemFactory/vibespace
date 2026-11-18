@@ -285,6 +285,7 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
                                                    ← a webhook path: ONE proposal per caller (read prints the callers); a reply
                                                      to a caller's record is 'reply webhook/<path> "…" --to <record id>'; no verb
                                                      makes a path or a caller token — propose one to the user with vibespace-ask
+  vibespace-channels resend <proposalId>   ← YOUR sent proposal whose files did not all land: proposes ONLY those, for the user's approval
   vibespace-channels withdraw <proposalId | wr-…> [--why "…"]   ← also YOUR open wake request (a wr- id), when its reply already came
   long or quoted text (reply / compose / request): --text-file <path> or --text - (stdin, a heredoc) instead of "text"; the CLI refuses
       stray words (a message is ONE argument: a word after it ⇒ exit 2, nothing sent) and answers sent: N characters
@@ -665,6 +666,15 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   }
   // 2026-09-27: the agent takes back its OWN proposal (never somebody else's,
   // never one the user already decided, is sending, or whose outcome is lost)
+  // lane bl-msg B-da74: the files of a SENT proposal that did not land, proposed again (the user approves «the rest»)
+  if (verb === 'resend') {
+    const id = chText(1);
+    if (!id || id.startsWith('--')) { console.error('usage: vibespace-channels resend <proposalId>'); process.exit(1); }
+    const r = await call('POST', `/api/agent/channels/proposals/${encodeURIComponent(id)}/resend`, {});
+    const p = r.proposal || {};
+    console.log(`proposed — proposal ${p.id || '?'} carries only the files of ${id} that did not land; it is ${p.state || 'proposed'} (the user approves it)`);
+    return;
+  }
   if (verb === 'withdraw') {
     const id = chText(1);   // lane cli-one-text-arg: a word after the id (a --why whose quote closed early) ⇒ exit 2
     if (!id || id.startsWith('--')) { console.error('usage: vibespace-channels withdraw <proposalId | wake request wr-…> [--why "…"]'); process.exit(1); }

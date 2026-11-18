@@ -1307,6 +1307,17 @@ router.post('/api/channels/outbox/:id/approve', async (req, res) => {
     answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: d.deliver, shown: b.shown, withoutFiles: b.withoutFiles === true, ...wakeGuards(b), pressed: press }));
   } catch (e) { fail(res, e); }
 });
+// lane bl-msg B-da74: «SEND THE REST» — the owner sends again ONLY the files of a sent proposal that did not land (an own send: the press
+// is the approval); refused by name when it landed whole, was sent again already, or its kept files are gone
+router.post('/api/channels/outbox/:id/resend', async (req, res) => {
+  try {
+    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
+    forHost(req);
+    const press = pressOf(req);
+    const b = req.body || {};
+    answer3(res, await engine().resendRest(req.params.id, { ctx: { kind: 'user' }, pressed: press, guards: wakeGuards(b) }));
+  } catch (e) { fail(res, e); }
+});
 router.post('/api/channels/outbox/:id/reject', async (req, res) => {
   try {
     if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;

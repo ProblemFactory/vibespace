@@ -2378,6 +2378,21 @@ app.post('/api/agent/channels/proposals/:id/withdraw', async (req, res) => {
   try { chanAnswer(res, await eng.withdrawProposal({ proposalId: String(req.params.id), why: typeof b.why === 'string' ? b.why : null, by })); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// lane bl-msg B-da74: the DRAFTING agent asks to send the rest of its sent proposal — the files that did not land, as a NEW
+// proposal the user approves (never sent by the agent itself); the same caller rules as withdraw
+app.post('/api/agent/channels/proposals/:id/resend', async (req, res) => {
+  if (!/^Bearer\s+\S/i.test(String(req.headers.authorization || '')) && !(req.body && req.body.token) && (req.headers.cookie || req.headers['sec-fetch-site'])) return res.status(403).json({ error: 'only the agent that drafted it can ask to resend — the user uses «Send the rest» on the card' });
+  const who = msgCaller(req, res);
+  if (!who) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.resendRest !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  if (who.s && !who.job) { const ownW = ownConversationIdOf(who.s); if (!ownW.cid) return res.status(409).json({ error: ownW.why, code: 'bad-member' }); }
+  const by = who.s ? channelPrincipal(who.s, who.id) : (who.cid ? { kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [] } : null);
+  if (!by) return res.status(409).json({ error: NO_CID_YET, code: 'bad-member' });
+  try { chanAnswer(res, await eng.resendRest(String(req.params.id), { ctx: by })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 // R4: SEARCH the messages the agent can SEE (reach filters every hit; the
 // local logs only — never a vendor call)
 app.get('/api/agent/channels/search', async (req, res) => {

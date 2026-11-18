@@ -8546,7 +8546,7 @@ function create(deps = {}) {
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
-    approve, reject, onProposal, withdrawProposal, replaceProposal, noteReceiptStash, noteReceiptWakeFell, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces,
+    approve, reject, onProposal, withdrawProposal, resendRest, replaceProposal, noteReceiptStash, noteReceiptWakeFell, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces,
     receipt, expireSweep, pointerSync, learnSentFiles, filesOfferFor, releaseHeld, stopHeld, collectReceipt, stopCollect,
   } = Object.assign(engineCtx, ChannelsOutbound.create(engineCtx));
   const {
@@ -8981,7 +8981,7 @@ function create(deps = {}) {
     propose, approve: (id, o) => onProposal(id, () => approve(id, o)), reject: (id, o) => onProposal(id, () => reject(id, o)), outboxView, expireSweep, pointerSync, receipt,
     filesSweep, outboxAttachment,   // design 005 §2.B (B-fd1f): attachments retention + the owner's file
     // 2026-09-27: the agent withdraws / replaces its OWN proposal (a decision of the user waits for a replace in flight)
-    withdrawProposal, replaceProposal, reconcileReceiptFates,
+    withdrawProposal, resendRest, replaceProposal, reconcileReceiptFates,   // lane bl-msg B-da74: «Send the rest»
     // P4: reconcile / the boot sweep / the per-channel honesty switch
     reconcile: (id, o) => onProposal(id, () => reconcile(id, o)), sweepSending, sweepReplaces, releaseHeld, setSenderHonesty, honestyLineFor, deprecatedReceiptWakes,   // verify r2: two Check-outcome presses ask the adapter ONCE
     collectReceipt,   // lane channel-direct-send-sync: the drafting CLI reads a direct send's receipt inline (GET status?id&collect=1)

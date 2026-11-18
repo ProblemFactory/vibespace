@@ -271,6 +271,55 @@ ok(rcj.length === 0, `lark: the text's answer lost ⇒ unknown ⇒ reconciled SE
 // through the SAME store + adapter path as an agent's: out at once (no card, the attachment guard is for agents), the
 // record keeps name/size/sha256, a refused upload is "partly sent" + ONE For-you item, a file changed on disk between the
 // store and the send is refused by name (attachment-changed), nothing sent
+async function restJudge(ENGm) {
+  const out = [];
+  const fake = require(path.join(REPO, 'src/channels/fake.js'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-send-files-rest-'));
+  const calls = []; let refuse = true;
+  const fetchFn = async (url, init = {}) => {
+    const c = { url: String(url), method: init.method || 'GET', form: init.body instanceof FormData }; calls.push(c);
+    if (c.method === 'GET') return jsonRes(200, { code: 0, data: { items: [], has_more: false } });
+    if (refuse && c.form && c.url.includes('/im/v1/files')) return jsonRes(400, LF.answers.scopeRefusal);
+    return c.form ? jsonRes(200, LF.answers.image) : jsonRes(200, LF.answers.message);
+  };
+  const A = lark.create({ id: 'l', options: {} }, { resolveIntegration: () => CRED, fetch: fetchFn, now: () => T0, tokens: tokens({ access_token: 'u-fixture-user-token', expiresAt: T0 + 3600e3, refresh_token: 'r', refreshExpiresAt: T0 + 30 * 86400e3, scopes: ['im:message', 'im:message.send_as_user', 'im:resource'] }) });
+  const mod = { kind: 'lark-own', caps: { ...fake.fakePoll.caps, idempotency: lark.caps.idempotency, sendAttachments: lark.caps.sendAttachments, sendAttachmentsWhy: null, budget: undefined, pace: undefined },
+    create(record, deps) { return Object.assign(Object.create(fake.fakePoll.create(record, { ...deps })), { send: (c, o) => A.send(c, o) }); } };
+  const registry = CH.createChannelRegistry(); registry.register(mod);
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'la', kind: 'lark-own', label: 'la', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false }, options: {} }] }));
+  const todos = [];
+  try {
+    const eng = ENGm.create({ dataDir, registry, env: {}, now: () => T0, broadcast: () => {}, serverSetting: (k) => ({ 'channels.guardAttachmentsReview': true })[k], liveSessions: () => [], userTodos: { add: (key, item) => { todos.push(item); return { id: `t${todos.length}` }; } }, log: { log() {}, warn() {}, error() {} } });
+    await eng.pass('la', { force: true });
+    const conv = Object.keys(eng.store.index.live()).find((k) => k.startsWith('la/')).slice(3);
+    const att = () => files().map((f) => ({ name: f.name, data: f.data.toString('base64') }));
+    // lane bl-msg B-da74: the owner's send of 2 files, the second refused ⇒ partly sent; «Send the rest» sends ONLY it, once
+    const pr = await eng.propose({ kind: 'user' }, 'la', conv, { text: 'the report', attachments: att(), direct: true });
+    const id = pr.ok ? pr.proposal.id : null;
+    const q0 = id ? eng.store.outbox.snapshot().proposals[id] : null;
+    if (!(q0 && q0.state === 'sent' && /^partly sent/.test(q0.reason || ''))) { out.push(`the first send is not partly sent (${q0 && q0.state} ${q0 && q0.reason})`); return out; }
+    const v0 = (eng.outboxView().proposals || []).find((x) => x.id === id) || {};
+    if (v0.restLeft !== 1) out.push(`the card does not offer «Send the rest» for the one file left (restLeft ${v0.restLeft})`);
+    const nobody = await eng.resendRest(id, { ctx: { kind: 'agent', id: 'agent-x' } });
+    if (!(nobody && nobody.ok === false && nobody.code === 'not-found')) out.push(`an agent that did not draft it could ask a resend (${JSON.stringify(nobody).slice(0, 120)})`);
+    refuse = false;
+    const before = calls.length;
+    const r = await eng.resendRest(id, { ctx: { kind: 'user' } });
+    const q1 = r && r.ok && r.proposal ? eng.store.outbox.snapshot().proposals[r.proposal.id] : null;
+    const names = q1 ? (q1.attachments || []).map((x) => x.name) : null;
+    if (!(q1 && q1.state === 'sent' && JSON.stringify(names) === JSON.stringify(['b.pdf']) && !String(q1.text || '').trim() && q1.restOf === id)) out.push(`the rest is not ONE new sent proposal with only b.pdf and no text (${JSON.stringify({ ok: r && r.ok, state: q1 && q1.state, names, text: q1 && q1.text, restOf: q1 && q1.restOf, code: r && r.code })})`);
+    if (calls.slice(before).filter((c) => c.form && c.url.includes('/im/v1/images')).length) out.push('the resend uploaded the image that had already landed');
+    const q0b = eng.store.outbox.snapshot().proposals[id];
+    const v1 = (eng.outboxView().proposals || []).find((x) => x.id === id) || {};
+    if (!(q0b.restSentAs === (q1 && q1.id) && !v1.restLeft)) out.push(`the first card still offers the rest (${JSON.stringify({ restSentAs: q0b.restSentAs, restLeft: v1.restLeft })})`);
+    const again = await eng.resendRest(id, { ctx: { kind: 'user' } });
+    if (!(again && again.ok === false && again.code === 'already')) out.push(`a second «Send the rest» was not refused by name (${JSON.stringify(again).slice(0, 120)})`);
+    const whole = q1 ? await eng.resendRest(q1.id, { ctx: { kind: 'user' } }) : null;
+    if (!(whole && whole.ok === false && whole.code === 'nothing-left')) out.push(`a proposal that landed whole offered a rest (${JSON.stringify(whole).slice(0, 120)})`);
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+  return out;
+}
 async function ownerJudge(ENGm) {
   const out = [];
   const fake = require(path.join(REPO, 'src/channels/fake.js'));
@@ -317,6 +366,12 @@ async function ownerJudge(ENGm) {
   return out;
 }
 console.log('⑨ the owner\'s own send (POST …/send) carries files through the same path');
+// lane bl-msg B-da74 («Send the rest»): a SENT proposal whose second file was refused sends ONLY that file again, as a new message —
+// once, from the owner's door; another agent cannot ask; a whole one has no rest; RED CONTROL = the rest never found
+const rest = await restJudge(ENG);
+ok(rest.length === 0, `«Send the rest»: a partly sent proposal (b.pdf refused) is offered the rest, the owner's press sends ONLY b.pdf as one new message, the image is not uploaded again, the first card stops offering it, a second press and a whole one are refused by name${rest.length ? ' — ' + rest.join(' · ') : ''}`);
+const restRed = await mutantEngine("parts.forEach((x, k) => { if (!x.ok && x.code !== 'left-out'", "parts.forEach((x, k) => { if (false && !x.ok && x.code !== 'left-out'", restJudge, 'no-rest');
+ok(Array.isArray(restRed) && restRed.length > 0, `RED CONTROL (the rest never found): the leg goes red (${restRed ? restRed.length : 'the control missed its line'})`);
 const own = await ownerJudge(ENG);
 ok(own.length === 0, `the owner's send with 2 files: out at once as the owner, the record keeps name/size/sha256, a refused upload "partly sent" + ONE For-you item, a changed file refused attachment-changed${own.length ? ` — ${own.join('; ')}` : ''}`);
 

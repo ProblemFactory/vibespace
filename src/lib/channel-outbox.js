@@ -670,6 +670,23 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
     act.appendChild(chk);
     card.appendChild(act);
   }
+  // lane bl-msg B-da74: «SEND THE REST» — a sent proposal whose files did not all land (`restLeft`, the engine's count) sends ONLY
+  // those again as a new message (an own send: this press is the approval); once — the engine refuses a second by name
+  if (p.state === 'sent' && Number(p.restLeft) > 0) {
+    const act = el('div', 'chan-prop-actions');
+    const rest = btn(t('Send the rest'), null, 'mounts-btn-primary');
+    rest.dataset.resend = '1';
+    rest.title = t('Sends only the {n} files that did not land, as a new message', { n: Number(p.restLeft) });
+    rest.onclick = armedOnly(card, async () => {
+      rest.disabled = true;
+      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/resend`, {});
+      if (!r) { rest.disabled = false; return; }
+      const sent = !!(r.proposal && r.proposal.state === 'sent');
+      showToast(sent ? t('Sent the rest') : t('Not sent: {why}', { why: (r.proposal && r.proposal.reason) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
+    });
+    act.appendChild(rest);
+    card.appendChild(act);
+  }
   // lane channel-window-tidy: a SENT proposal is a message of the thread now — its card takes the reader there
   const sentVid = p.state === 'sent' && p.result && p.result.vendorMessageId ? String(p.result.vendorMessageId) : '';
   if (sentVid && typeof onJump === 'function') {

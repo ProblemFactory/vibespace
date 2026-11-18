@@ -132,6 +132,17 @@ function create(engineCtx) {
   // agent's answer names it, and the card's Approve asks once more while another is still open
   const ALSO_STATES = new Set(['proposed', 'awaiting-approval', 'sending', 'unknown', 'sent']);
   const ALSO_MAX = 8;
+  /** lane bl-msg B-da74: «THE REST» of a SENT proposal — the attachment parts that did not land (the vendor refused a file, the
+   *  chain stopped), each aligned with its stored file by position; a file the owner approved WITHOUT (`left-out`: the account
+   *  carries none) is not the rest. → [{ n, name }] */
+  function restOf(p) {
+    if (!p || p.state !== 'sent' || p.kind) return [];
+    const parts = (p.result && Array.isArray(p.result.parts) ? p.result.parts : []).filter((x) => x && x.part === 'attachment');
+    const atts = Array.isArray(p.attachments) ? p.attachments : [];
+    const out = [];
+    parts.forEach((x, k) => { if (!x.ok && x.code !== 'left-out' && atts[k] && (!x.name || x.name === atts[k].name)) out.push({ n: k, name: atts[k].name }); });
+    return out;
+  }
   function alsoView(p) {
     if (!Array.isArray(p.alsoFor) || !p.alsoFor.length) return null;
     const all = store.outbox.snapshot().proposals || {};
@@ -156,6 +167,7 @@ function create(engineCtx) {
     return {
       ...p, ...(p.convId && conversationName(p.adapterId, p.convId) ? { title: conversationName(p.adapterId, p.convId) } : {}),   // B-c127: the conversation's name NOW (a proposal froze its title — or the raw id — when it was drafted)
       ...(also ? { also } : {}),   // lane bl-msg B-9b9c: the other replies to this message, resolved now
+      ...(!p.restSentAs && !p.attachmentsGoneAt && restOf(p).length ? { restLeft: restOf(p).length } : {}),   // lane bl-msg B-da74: «Send the rest» is offered
       adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, identityWarning: c ? caps.identityWarning(c) : null, ttlAt, canDecide: p.state === 'awaiting-approval',
       convKind: (p.key && store.index.live()[p.key] && store.index.live()[p.key].kind) || null,
       // lane lark-upload-preflight: an awaiting card whose files this account cannot carry WARNS on the chip and its
@@ -1286,6 +1298,35 @@ function create(engineCtx) {
   }
   /** WITHDRAW (the agent's own verb). `by` = the caller's principal as the
    *  route resolved it (`{kind:'agent', id, name, groups}`). */
+  /** lane bl-msg B-da74 («Send the rest», userW inc-mw35tppf-jrvo follow-up): a SENT proposal whose files did not all land is sent
+   *  again for ONLY those files — a NEW proposal built from the kept bytes (sent ones are kept KEEP_MS), answering the same message,
+   *  no new draft. The OWNER's door is an own send (the press is the approval); the DRAFTING agent's (`vibespace-channels resend`)
+   *  proposes it for the owner's review. Once per proposal (`restSentAs`). → propose()'s answer | a refusal by name */
+  async function resendRest(id, { ctx = null, pressed = null, guards = {} } = {}) {
+    const p = store.outbox.snapshot().proposals[String(id || '')];
+    const agent = !!(ctx && ctx.kind === 'agent');
+    if (!p || (agent && !(p.draftedBy && p.draftedBy.kind === 'agent' && p.draftedBy.id === ctx.id))) return { ok: false, code: 'not-found', error: 'no such proposal of yours' };
+    if (p.state !== 'sent') return { ok: false, code: 'bad-state', error: `proposal ${p.id} is ${p.state} — only a sent one has a rest to send`, state: p.state };
+    if (p.restSentAs) return { ok: false, code: 'already', error: `the rest of ${p.id} was sent again already — proposal ${p.restSentAs}`, proposalId: p.restSentAs };
+    const rest = restOf(p);
+    if (!rest.length) return { ok: false, code: 'nothing-left', error: `proposal ${p.id} landed whole — nothing is left to send` };
+    const gone = { ok: false, code: 'files-gone', error: `the files of ${p.id} are no longer kept — attach them again in a new reply` };
+    if (p.attachmentsGoneAt) return gone;
+    const files = [];
+    for (const r of rest) {
+      const f = OF.fileOf(store.dir, p.id, r.n);
+      let data = null; try { data = f ? await require('fs').promises.readFile(f) : null; } catch { data = null; }
+      if (!data) return gone;
+      files.push({ name: r.name, data: data.toString('base64') });
+    }
+    const input = { text: '', attachments: files, ...(p.replyTo ? { replyTo: p.replyTo } : {}), ...(p.placement && p.placement !== 'chat' ? { placement: p.placement } : {}), ...(p.why ? { why: p.why } : {}), ...(!agent ? { direct: true, ...(pressed ? { pressed } : {}) } : {}) };
+    const r = await propose(agent ? ctx : { kind: 'user' }, p.adapterId, p.convId, input, guards);
+    if (r && r.ok && r.proposal && r.proposal.id) {
+      await store.outbox.update((ob) => { const q = ob.proposals[r.proposal.id]; if (q) q.restOf = p.id; const q0 = ob.proposals[p.id]; if (q0) q0.restSentAs = r.proposal.id; });
+      notifyOutbox([p.id, r.proposal.id]);
+    }
+    return r;
+  }
   function withdrawProposal({ proposalId, why = null, by = null } = {}) {
     const id = String(proposalId || '');
     if (!id) return Promise.resolve({ ok: false, code: 'bad-request', error: 'a proposal id is required' });
@@ -2310,7 +2351,7 @@ function create(engineCtx) {
 
   return {
     honestyLineFor, sendIdentityFor, proposalsFor, agentProposalView, stashAbout, stashGate, outboxView, notifyOutbox, sendStartsTurn,
-    outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach, approve, reject, onProposal, withdrawProposal, replaceProposal,
+    outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach, approve, reject, onProposal, withdrawProposal, resendRest, replaceProposal,
     noteReceiptStash, noteReceiptWakeFell, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces, receipt, expireSweep, pointerSync, learnSentFiles,
     filesOfferFor,   // lane owner-composer-attach: the owner's composer judges its chips by the same offer the send reads
     releaseHeld, stopHeld,   // lane lark-send-hold: the held sends of an account go out at its reset; stop drops the timers
