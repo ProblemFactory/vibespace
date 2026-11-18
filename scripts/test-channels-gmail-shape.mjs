@@ -767,10 +767,11 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   const unmarkedRefresh = srcMain.replace('// ungated: token-refresh', '');
   M.write('src/channels/gmail.js', unmarkedRefresh, 'unmarked-refresh');
   ok(gateCensus(unmarkedRefresh, { gateRe: GATE, ungatedIds: ids }).problems.some((x) => /no marker/.test(x) && /gmail token refresh/.test(x)), 'CONTROL: the token refresh with its marker removed is RED (a comment is not a call, and a call is not a comment)');
-  // the pre-fix build (the r3 tree): three unmarked sites — best effort, a depth-1 checkout cannot show the ref
-  let pre = null; try { pre = execFileSync('git', ['-C', REPO, 'show', '6f1aad6d:src/channels/gmail.js'], { encoding: 'utf-8', env: gitEnvFrom(process.env), stdio: ['ignore', 'pipe', 'ignore'] }); } catch { pre = null; }
-  if (pre) { const cp = gateCensus(pre + '\n' + srcLive, { gateRe: GATE, ungatedIds: ids }); ok(cp.problems.filter((x) => /no marker/.test(x)).length >= 3, `CONTROL (the r3 tree 6f1aad6d): ${cp.problems.filter((x) => /no marker/.test(x)).length} unmarked outbound calls (the refresh, the consent exchange, the consent profile) — the census would have been red on every round before this one`); }
-  else ok(true, 'SKIP control on the r3 tree: `git show 6f1aad6d:src/channels/gmail.js` is not available here (a depth-1 checkout) — the four patched-copy controls above carry the leg');
+  // the pre-fix build (the r3 tree): three unmarked sites. B-3642 (lane bl-tests-e): 6f1aad6df is a lane commit master never held — the
+  // leg ran only where that branch was fetched (the push gate) and SKIPPED everywhere else; its four outbound call lines are FROZEN
+  // once in scripts/fixtures/off-master/ and read on every checkout
+  const pre = fs.readFileSync(path.join(REPO, 'scripts/fixtures/off-master/6f1aad6df-gmail-calls.txt'), 'utf-8');
+  { const cp = gateCensus(pre + '\n' + srcLive, { gateRe: GATE, ungatedIds: ids }); ok(cp.problems.filter((x) => /no marker/.test(x)).length >= 3, `CONTROL (the r3 tree 6f1aad6df, frozen): ${cp.problems.filter((x) => /no marker/.test(x)).length} unmarked outbound calls (the refresh, the consent exchange, the consent profile) — the census would have been red on every round before this one`); }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(r.pass, r.name, r.detail);
 
   // ── THE RUNTIME HALF: the real adapter over the recorded vendor ──

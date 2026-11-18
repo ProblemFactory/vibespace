@@ -1,0 +1,7 @@
+// FROZEN (B-3642, lane bl-tests-e, 2026-11-17): the four outbound call lines of src/channels/gmail.js at 6f1aad6df (2026-09-26, the r3 tree — a lane
+// commit master never held), lines 466 / 483 / 607 / 611: the token refresh, the api() send, the consent exchange and the profile read — three
+// of them with NO marker. test-channels-gmail-shape's r3-tree control reads THIS file, never the object.
+      d = await callJson(fetchFn, TOKEN_URL, { method: 'POST', what: 'gmail token refresh', form: { grant_type: 'refresh_token', client_id: cred.values.clientId, client_secret: cred.values.clientSecret, refresh_token: token.refresh_token } });
+    return callJson(fetchFn, `${API}${pathq}`, { ...opts, headers: { Authorization: `Bearer ${at}`, ...(opts.headers || {}) } });
+            const d = await callJson(fetchFn, TOKEN_URL, { method: 'POST', what: 'gmail token exchange', form: { code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' } });
+              const me = await callJson(fetchFn, `${API}/profile`, { what: 'gmail profile', headers: { Authorization: `Bearer ${tok.access_token}` } });
