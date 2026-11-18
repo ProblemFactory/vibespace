@@ -42,28 +42,28 @@ export const ROWS = Object.freeze([
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'crossMoveNow', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'gatherPlan', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'linkMemberOf', 'pool', 1],
-  ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'live', 'pool', 1],
+  ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'refreshCodexForPerson', 'readings', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'maybePoolAutoSwitchForPool', 'pool', 2],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'notePoolAuthFailure', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'poolAlternativeFor', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'setConversationPin', 'pool', 1],
-  ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'stay', 'pool', 1],
+  ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'memberRemoved', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'sweepNonMemberLinks', 'pool', 1],
   ['poolMemberOfSession', 'src/server/usage-pool-engine.js', 'poolMemberOfSessionFor', 'pool', 1],
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'crossMoveNow', 'pool', 1],
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'gatherPlan', 'pool', 1],
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'maybePoolAutoSwitchForPool', 'pool', 2],
-  ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'proj', 'pool', 1],
+  ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'quotaVerdictFor', 'spend', 1],   // the verdict that authorises a billed continue (its own comment: «authorises money»)
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'projectionBillingIndex', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'liveQuotaKeyFor', 'readings', 1],   // the key a live quota probe reads
   ['readingSlotFor', 'src/server/usage-pool-engine.js', 'markLimitBannerNow', 'readings', 1],
-  ['readingSlotFor', 'src/server/usage-pool-engine.js', 'nameCap', 'readings', 1],
+  ['readingSlotFor', 'src/server/usage-pool-engine.js', 'recordRateLimitEventNow', 'readings', 1],
   ['readingSlotFor', 'src/server/usage-pool-engine.js', 'writeCodexReading', 'readings', 1],
   ['rejectionSlotFor', 'src/server/usage-pool-engine.js', 'markLimitBannerNow', 'readings', 1],
-  ['rejectionSlotFor', 'src/server/usage-pool-engine.js', 'nameCap', 'readings', 1],
+  ['rejectionSlotFor', 'src/server/usage-pool-engine.js', 'recordRateLimitEventNow', 'readings', 1],
   ['requestSlotFor', 'src/server/usage-pool-engine.js', 'noteTurnAsk', 'readings', 1],
   ['requestSlotFor', 'src/server/usage-pool-engine.js', 'turnAskedFamily', 'readings', 1],
-  ['resolveUsageKey', 'src/server/usage-pool-engine.js', 'detail', 'readings', 1],
+  ['resolveUsageKey', 'src/server/usage-pool-engine.js', 'probeUsageForAccountKey', 'readings', 1],
   ['resolveUsageKey', 'src/server/usage-pool-engine.js', 'logControlProbe', 'readings', 1],
   ['resolveUsageKey', 'src/server/usage-pool-engine.js', 'onRecord', 'readings', 1],
   ['resolveUsageKey', 'src/server/usage-pool-engine.js', 'probeUsageViaSession', 'readings', 2],
@@ -71,14 +71,14 @@ export const ROWS = Object.freeze([
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'demoteWalledAccount', 'readings', 1],
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'linkHold', 'readings', 1],
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'scheduleWallProbe', 'readings', 1],
-  ['validateBillingSlot', 'src/server/usage-pool-engine.js', 'postCheck', 'readings', 1],
+  ['validateBillingSlot', 'src/server/usage-pool-engine.js', 'recordRateLimitEventNow', 'readings', 1],
   ['wallSlotFor', 'src/server/usage-pool-engine.js', 'noteOatFileGen', 'readings', 1],
   ['wallSlotFor', 'src/server/usage-pool-engine.js', 'wallKeyFor', 'readings', 1],
   ['poolMemberOfSession', 'server.js', 'poolAuth', 'routes', 1],
   ['poolMemberOfSession', 'src/routes/provider-models.js', 'accountOfSession', 'routes', 1],
-  ['poolMemberOfSession', 'src/server/account-usage-routes.js', 'ownLink', 'routes', 1],
+  ['poolMemberOfSession', 'src/server/account-usage-routes.js', '(module)', 'routes', 1],
   ['resolveUsageKey', 'src/server/session-brain.js', 'claudeSideEffects', 'routes', 1],
-  ['resolveUsageKey', 'src/server/stdout/claude-stream-json.js', 'applyWorktreeVerdict', 'routes', 1],
+  ['resolveUsageKey', 'src/server/stdout/claude-stream-json.js', 'attach', 'routes', 1],
   ['fireIdentityFor', 'server.js', 'fireIdentity', 'spend', 1],   // auto-resume's dependency row on server.js's wiring line
   ['fireIdentityFor', 'src/server/usage-pool-engine.js', 'identityOf', 'spend', 1],
   ['fireIdentityFor', 'src/server/usage-pool-engine.js', 'onMemberReadingFresh', 'spend', 2],
@@ -92,12 +92,38 @@ const DEP = /(\w+)\s*:\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>/g;   // a dependenc
 /** the function that encloses the call at line `i` (its text before the call = `before`): the call's OWN line first — the last
  *  dependency row before it (a wiring line hands many), a one-line function or a same-line arrow encloses its call (the
  *  adversarial read: the scan began a line above, so those were filed under the function before them) — then upward */
+// WALKING UP from the call (the confirming read: a one-line function, an inner arrow or an `if` block closed or open between
+// the call and its function named the wrong caller): each `}` met waits for its `{`; a `{` with none waiting opens a block that
+// is still open at the call. The caller is the nearest FUNCTION HEAD whose own brace is such a block (a multi-line head: the
+// `) {` line's brace, claimed by the head above it); an `if` / a callback / an object literal is passed by. Strings, template
+// text and a line comment are set aside first — a census's approximation.
+const STR = /'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g;
+function openersOf(text, st) {
+  const t = String(text).replace(STR, '""').replace(/\/\/.*$/, '');
+  let opened = 0;
+  for (let k = t.length - 1; k >= 0; k--) {
+    const c = t[k];
+    if (c === '}') st.depth++;
+    else if (c === '{') { if (st.depth > 0) st.depth--; else opened++; }
+  }
+  return opened;
+}
 function enclosing(L, i, before) {
   const deps = [...before.matchAll(DEP)];
   if (deps.length) return deps[deps.length - 1][1];
-  const own = FN.exec(before) || HEAD.exec(before);
-  if (own) { const g = own.slice(1).find(Boolean); if (!KW.has(g)) return g; }
-  for (let j = i - 1; j >= 0; j--) { const m = FN.exec(L[j]); if (m) { const g = m.slice(1).find(Boolean); if (KW.has(g)) continue; return g; } }
+  const st = { depth: 0 };
+  const openHere = openersOf(before, st);
+  const fn = FN.exec(before), own = fn || HEAD.exec(before);
+  const arrow = !!(fn && fn[2]);   // a same-line arrow encloses its expression body; a function only while its brace is open
+  if (own) { const g = own.slice(1).find(Boolean); if (!KW.has(g) && (arrow || openHere > 0)) return g; }
+  let headPending = false;   // a `) {` line's open brace, waiting for the head above it
+  for (let j = i - 1; j >= 0; j--) {
+    const opened = openersOf(L[j], st);
+    const m = FN.exec(L[j]);
+    const g = m ? m.slice(1).find(Boolean) : null;
+    if (m && !KW.has(g) && (opened > 0 || headPending)) return g;
+    if (opened > 0) headPending = /^\s*\)/.test(L[j]) && !(m && KW.has(g));
+  }
   return '(module)';
 }
 /** THE CENSUS over `files` (repo-relative) read through `readOf` → Map key «resolver|file|caller» → count */
@@ -152,11 +178,13 @@ ok(total >= 60, `the census reads the tree, not nothing (${total} calls)`);
   // three consumers on their own line — a one-line function, a same-line arrow, a wiring line's dependency row (the shapes the
   // first scan filed under the function above them): each is red BY NAME
   const ENG = 'src/server/usage-pool-engine.js';
-  const plant = '\nfunction plantedConsumer(s) { return wallSlotFor(s); }\nconst plantedArrow = (s) => sessionBillingMember(s, null);\nconst plantedWiring = { log: () => null, plantedDep: (s) => fireIdentityFor(s) };\n';
+  const plant = '\nfunction plantedConsumer(s) { return wallSlotFor(s); }\nconst plantedArrow = (s) => sessionBillingMember(s, null);\nconst plantedWiring = { log: () => null, plantedDep: (s) => fireIdentityFor(s) };\n'
+    // (the confirming read) a call inside an `if`, below a one-line arrow already closed, inside a function: the FUNCTION is its caller
+    + 'function plantedOuter(s) {\n  const helper = (x) => { return x; };\n  if (s) {\n    return requestSlotFor(helper(s));\n  }\n}\n';
   const planted = (f) => (f === ENG ? read(f) + plant : read(f));
   const dp = diff(census(scope(ENG), planted), want);
-  const wantFresh = [`wallSlotFor|${ENG}|plantedConsumer ×1`, `sessionBillingMember|${ENG}|plantedArrow ×1`, `fireIdentityFor|${ENG}|plantedDep ×1`];
-  ok(dp.fresh.length === 3 && wantFresh.every((x) => dp.fresh.includes(x)) && dp.dead.length === 0, 'CONTROL: planted consumers (a one-line function, a same-line arrow, a wiring row) are red BY NAME (resolver, file, caller)', dp);
+  const wantFresh = [`wallSlotFor|${ENG}|plantedConsumer ×1`, `sessionBillingMember|${ENG}|plantedArrow ×1`, `fireIdentityFor|${ENG}|plantedDep ×1`, `requestSlotFor|${ENG}|plantedOuter ×1`];
+  ok(dp.fresh.length === 4 && wantFresh.every((x) => dp.fresh.includes(x)) && dp.dead.length === 0, 'CONTROL: planted consumers (a one-line function, a same-line arrow, a wiring row, a call under a closed one-liner and an `if`) are red BY NAME (resolver, file, caller)', dp);
   const removed = (f) => (f === 'src/server/usage-attribution.js' ? read(f).replace('accounts.poolCurrentFor(', 'accounts.poolCurrentForGone(') : read(f));
   const dr = diff(census(scope('src/server/usage-attribution.js'), removed), want);
   ok(dr.dead.length === 1 && /^poolCurrentFor\|src\/server\/usage-attribution\.js\|recordUsageAttribution ×1$/.test(dr.dead[0]), 'CONTROL: a consumer that left (the cost record moved off the link) shows as a dead row until the table says so', dr);
