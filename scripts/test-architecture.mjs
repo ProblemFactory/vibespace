@@ -2997,7 +2997,7 @@ await section(async () => {
     || outsideData(t, /^import\s*\{([^}]*)\}\s*from\s*['"]\.\/scratch\.mjs['"]/gm).some((m) => OLD_ENDS.test(m[1]));
   const bothEnds = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f)).filter((f) => { const t = fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'); return onHelperSrc(t) && callsOldEnd(t); });
   const onHelperN = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && onHelperSrc(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'))).length;
-  ok(onHelperN >= 53 && bothEnds.length === 0, `§57d no suite on the boot helper (${onHelperN}; the floor 53 = test-chat-e2e, test-hub-boot, batch 1's twenty and batch 2's thirty-one) calls or imports an old rooted end (endRootedProcesses / endDaemonsOf / endDaemonsAndWait) — the helper IS the rooted end${bothEnds.length ? ' — ' + bothEnds.join(', ') : ''}`);
+  ok(onHelperN >= 54 && bothEnds.length === 0, `§57d no suite on the boot helper (${onHelperN}; the floor 54 = test-chat-e2e, test-hub-boot, batch 1's twenty, batch 2's thirty-one and test-ui-fit-chrome — on the helper since 2.369.410, under rule nine since restack-411) calls or imports an old rooted end (endRootedProcesses / endDaemonsOf / endDaemonsAndWait) — the helper IS the rooted end${bothEnds.length ? ' — ' + bothEnds.join(', ') : ''}`);
   const hbImp = "import { mintRoot, startHub } from './hub-boot.mjs';\n";
   ok(callsOldEnd(hbImp + 'try { endRootedProcesses(chromeDir); } catch {}') && callsOldEnd(hbImp + 'endDaemonsOf(dev);') && callsOldEnd(hbImp + 'await endDaemonsAndWait(dev);')
     && callsOldEnd(hbImp + "import { freePorts, endRootedProcesses as endAllOf } from './scratch.mjs';\nendAllOf(dir);")

@@ -27,7 +27,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 import { mintRoot, startHub, DAEMON_ROOT_ENV } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (test-architecture §57c)
 import { armWatchdog } from './suite-watchdog.mjs';
 import { clientSources, checkLabelSites } from './ui-fit-census.mjs';
@@ -46,9 +46,10 @@ const [PORT, CDP_PORT, SVC_PORT] = await freePorts(3);
 const root = mintRoot('ui-fit');
 const wt = path.join(root, 't');
 const fakeHome = path.join(root, 'home');
+const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser and sleeper carry a HOME in the root, so the helper ends them before the root goes
 for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeDir = scratch('ui-fit-chrome');
-const stubDir = scratch('ui-fit-stub');
+const stubDir = path.join(root, 'stub');
 const CWD = path.join(stubDir, 'work');
 const SHOTS = arg('--shots') ? path.resolve(arg('--shots')) : scratch('ui-fit-shots');
 for (const d of [stubDir, CWD, SHOTS]) fs.mkdirSync(d, { recursive: true });
@@ -69,7 +70,6 @@ fs.writeFileSync(path.join(SHAPE_DIR, 'login-shell'), `#!/bin/sh\nPATH='${CLI_BI
 const hubPath = (process.env.PATH || '').split(':').filter((d) => d && !['claude', 'codex'].some((n) => fs.existsSync(path.join(d, n)))).join(':');
 
 // ── throwaway server in a worktree, its data/ seeded with the jobs fixture ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -83,24 +83,23 @@ const fx = makeFixture(FIX_NOW);
 const strip = (o) => JSON.parse(JSON.stringify(o, (k, v) => (k.startsWith('_') ? undefined : v)));
 fs.writeFileSync(path.join(dataDir, 'jobs.json'), JSON.stringify(fx.jobs.map(strip)));
 fs.writeFileSync(path.join(dataDir, 'job-notifications.json'), JSON.stringify(fx.notifs));
-const sleeper = spawn('sleep', ['900'], { stdio: 'ignore' });
+const sleeper = spawn('sleep', ['900'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });   // HOME: rule nine
 for (const id of [fx.ids.running, fx.ids.awaiting]) writeAliveStamp(fs, path, dataDir, fx.jobs.find((j) => j.id === id), sleeper.pid);
 const svc = await new Promise((res) => { const s = http.createServer((q, r) => r.end('<!doctype html><title>svc</title>')); s.listen(SVC_PORT, '127.0.0.1', () => res(s)); });
 const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOST: '127.0.0.1', HOME: fakeHome, PATH: hubPath, SHELL: path.join(SHAPE_DIR, 'login-shell'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1', VS_NO_REAL_CLI: '1' };
 for (const k of ['CLAUDE_CMD', 'CODEX_CMD', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY']) delete srvEnv[k];
 for (const k of DAEMON_ROOT_ENV) delete srvEnv[k];   // a device root, if the caller's env names one, would lie outside the minted root
 const hub = startHub({ root, tree: wt, port: PORT, env: srvEnv });   // its output: <root>/hub.log
-const chromeEnv = { ...process.env }; delete chromeEnv.DBUS_SESSION_BUS_ADDRESS; delete chromeEnv.DISPLAY;
+const chromeEnv = { ...process.env, HOME: chromeHome }; delete chromeEnv.DBUS_SESSION_BUS_ADDRESS; delete chromeEnv.DISPLAY;
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
   '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
 const cleanup = () => {
+  // the helper's end ran first (registered at the mint): the hub, every process carrying the root's HOME (Chrome and the sleeper
+  // by rule nine, the hub's terminals by its HOME), the worktree through git, then the root — the kills by handle are no-ops by then
   try { chrome.kill('SIGKILL'); } catch { }
-  try { hub.stop(); } catch { }
   try { sleeper.kill('SIGKILL'); } catch { }
   try { svc.close(); } catch { }
-  for (const r of [stubDir, chromeDir]) { try { endRootedProcesses(r); } catch { } } // what this suite roots outside the minted root (§57b); the helper ends the hub's own
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [chromeDir, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
+  for (const d of [chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 };
 process.on('exit', cleanup);   // a signal is the boot helper's (armed at mintRoot: each ends in exit, so this runs) — no signal line here
 const PENDS = new Map();
