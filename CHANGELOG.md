@@ -14,6 +14,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An Antigravity account’s usage is read once after a stretch of work (5 quiet minutes, at most every 30 minutes); its own Settings row can turn that off.
 - An Antigravity account’s row says how many times its usage was read today; hover it to see who asked.
 - Manage agents → Add a third-party model…: Claude Code on DeepSeek, Kimi, GLM or MiniMax, Codex on OpenRouter or your own service, with your own key.
+- Settings → Default browser engine offers «Download kernel» for an engine whose kernel is missing or unreadable, with progress and why a download was refused.
+- For you now says when a storage stopped answering and was disconnected (it reconnects by itself), and when files written meanwhile were moved aside.
 
 ### Changed
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
@@ -26,6 +28,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The usage popup draws an estimate between readings only where this hub’s own record shows it lands closer than the last reading, as “about Y%”.
 - Elsewhere the popup shows the reading and how many requests ran here since, and the account pool reads an estimate only where it has proven itself.
 - Codex and Antigravity usage estimates learn only from their own readings, never from Claude’s quota sizes.
+- Your channel messages are kept in a folder only your own account on this computer can open; only your channel sign-ins are locked in the vault.
 
 ### Fixed
 - On a busy machine, VibeSpace no longer freezes for up to half a minute at startup while it checks which agent programs are running.
@@ -54,6 +57,24 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If VibeSpace restarts while delivering held channel messages, their card now says some may already have reached the agent; you choose to resend or discard.
 - When two agents propose a reply to the same message, each card now names the other, and Approve asks once more before a second reply is sent.
 - A usage wall seen again after a restart no longer reads the Antigravity account a second time.
+- On slow storage, putting a browser engine's previous kernel back no longer leaves browser starts and downloads waiting forever; each answers within 30 seconds.
+- A browser engine that asks for -disable-sync with one dash is now treated like the two-dash form: it is left out, so the browser can still sign in to Google.
+- The live view of an idle agent browser that two conversations share no longer stays blank when you open it: it shows its own tab.
+- After a Resume, the live view no longer shows the stopped browser's old tabs as if they were open; its tabs appear once the browser lists them.
+- A conversation's own browser and a sub-agent's child browser now start with Chrome's logging off, as profile browsers already did.
+- VibeSpace's own memory no longer grows when a terminal or chat attached to a machine that dials in stops reading its output.
+- A storage whose listing keeps hanging while its provider answers stays disconnected, with Reconnect in For you, instead of reconnecting and hanging again.
+- The hub no longer pauses at every storage check on a machine running many processes.
+- A machine's conversation or terminal that writes faster than its window reads now waits instead of filling the machine's memory (after its agent updates).
+- Chinese or Japanese typed or pasted into a terminal on a machine that dials in no longer turns into replacement marks now and then (after its agent updates).
+- Diagnostics → Main loop held says «no frame of ours» with Node's own frames when a stack holds no VibeSpace code, never VibeSpace's own measuring.
+- An agent browser found stopped soon after it started no longer says it «idled out»: it says it was found gone before its idle timeout.
+- When an agent's approval to use a vault entry has ended, the agent is told when and how to ask again, instead of that the entry was never opened.
+- The Vault no longer turns off the entry you just switched on after the clock moves back, and a refused allow no longer leaves a false «switched off» notice.
+- In Integrations, the Plugin Git repository card offers its Test once a repository from its host is installed; before that the card says when.
+
+### Security
+- A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
 
 ## 2.369.410 — 2026-11-18
 
@@ -125,7 +146,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On Slack, a reply with files set to go in a thread and also show in the chat is now refused with its reason when proposed, not after you approve it.
 - On Slack, an agent's reply that mentions someone by full name (@First Last) or by Slack member id now notifies that person instead of going out as plain text.
 - When a file upload to Slack or Lark is retried, the send now ends within its time limit, and gives up at once when a retry cannot fit.
-- A chat row that opens search results no longer just says a draft is awaiting your approval; it says the draft waits in the Outbox.
 - After an agent browser's helper restarts, its open live view watches the browser again by itself instead of saying VibeSpace is not watching it.
 - In a chat, a compaction summary, the marker of a stopped turn and a scheduled wake-up prompt show as system notes, not as messages you typed.
 - In Chinese and Japanese, each row of a machine's group now says a command's exit code in your language, with the same word as the card and the group's head.
