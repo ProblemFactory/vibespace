@@ -8,11 +8,13 @@
 //     main-process start per call
 //  ② THE STARTER NEVER OUTLIVES THE HUB: the hub's end of its pipe closed ⇒ the starter ends by itself (code 0, no
 //     signal) and its held child with it, nothing signalled; RED a starter without its end-of-pipe rule stays
-//  ③ THE KILL LAW: the two files signal only what they hold (no process.kill, no pattern, no bare pid); a kill request
-//     for an id the starter does not hold changes nothing
+//  ③ THE KILL LAW: the two files signal only what they hold (no process.kill, no pattern, no bare pid); a request of an op
+//     the starter does not know changes nothing
 //  ④ A DEAD OR SLOW STARTER IS «unknown», never «the mount is down»: a starter that answers nothing ⇒ the probe answers
 //     unknown; replaced ONCE; a second fault puts the old road back (a direct start), said ONCE in the journal; RED the
 //     probe that reads no answer as an exit ⇒ «error»
+//  ④d–④h THE CURE: no answer / a hang keeps an access or auth banner; a reused pid is not the held child, a live one is;
+//     one more guard while the starter lives; the old road re-armed (said once across it); a stray pipe line ignored
 //  ⑤ HYGIENE: the starter is born with the service env (a secret of the hub's env is not in it, nor in what it starts,
 //     nor on any request line); a request's secret-shaped name is dropped; the X tool gets its site's DISPLAY and PATH
 //  ⓪ THE HUB INJECTS IT: loading src/server/desktop-app-keeper.js hands desktop-display the hub's starter (a belt call then starts
@@ -90,7 +92,7 @@ try {
   const now = await tick({ MountManager }, { PortForwardManager }, D);
   const MC = mutantCopies('hub-program-starts', REPO);
   const msrc = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf8'), psrc = fs.readFileSync(path.join(REPO, 'src/port-forward.js'), 'utf8'), dsrc = fs.readFileSync(path.join(REPO, 'src/desktop-display.js'), 'utf8');
-  const M_NEW = "    return require('./server/child-starter').childStarter().run('ls', verb === 'attr' ? ['-d', mp] : [mp], { timeoutMs, onTimeout: (pid) => heldMap.set(key, { t0, pid }), onLateExit: () => heldMap.delete(key) })";
+  const M_NEW = "    return require('./server/child-starter').childStarter().run('ls', verb === 'attr' ? ['-d', mp] : [mp], { timeoutMs, onTimeout: (pid) => heldMap.set(key, { t0, pid, start: pid ? ((procStat(pid) || [])[1] || null) : null }), onLateExit: () => heldMap.delete(key) })";
   const M_OLD = "    return new Promise((resolve) => { const c = require('child_process').spawn('ls', verb === 'attr' ? ['-d', mp] : [mp], { stdio: 'ignore' }); c.on('exit', (code) => resolve({ code })); c.on('error', () => resolve({ code: 1 })); })";
   const P_NEW = "    const out = await require('./server/child-starter').childStarter().run('sh', ['-c', PORT_SCAN], { timeoutMs: 8000, maxBuffer: 4 * 1024 * 1024, capture: true })";
   const P_OLD = "    const out = await new Promise((resolve) => require('child_process').execFile('sh', ['-c', PORT_SCAN], { timeout: 8000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve({ stdout })))";
@@ -113,7 +115,7 @@ try {
     const ended = new Promise((r) => sp.once('exit', (code, signal) => r({ code, signal })));
     const k0 = kills;
     S2.closePipe();
-    const how = await Promise.race([ended, sleep(3000).then(() => null)]);
+    const how = await Promise.race([ended, sleep(800).then(() => null)]);   // the starter ends in ms; one that has not by 800 ms stays
     const goneOrZombie = (pid) => { try { const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return / Z /.test(s.slice(s.lastIndexOf(')'), s.lastIndexOf(')') + 4)); } catch { return true; } };
     const out = { ended: how, signalled: kills - k0, kidGone: kid ? await until(() => goneOrZombie(kid), 3000) : null, kid };
     if (!how) { try { sp.kill('SIGKILL'); } catch { } }   // the RED copy's starter: ended by this suite (the one it holds)
@@ -131,28 +133,28 @@ try {
   const lh = law(hubSrc), lp = law(psSrc);
   const S3 = CS.createChildStarter();
   await S3.run(process.execPath, ['-e', '0'], { timeoutMs: 10000 });
-  S3._proc().stdin.write(JSON.stringify({ op: 'kill', id: 999999 }) + '\n');   // an id it never held
+  S3._proc().stdin.write(JSON.stringify({ op: 'kill', id: 999999 }) + '\n');   // an op it does not know (the starter has no kill verb: it kills only at a bound or at its end)
   const after = await S3.run(process.execPath, ['-e', 'process.stdout.write("still")'], { timeoutMs: 10000, capture: true });
   S3.closePipe();
   ok(!lh.bare && !lh.pattern && lh.held > 0 && lh.held === lh.ofHeld && !lp.bare && !lp.pattern && lp.held > 0 && lp.held === lp.ofHeld && after.stdout === 'still',
-    `no process.kill, no pattern, no bare pid in either file — every kill is of a held ChildProcess (hub ${lh.ofHeld}/${lh.held}, starter ${lp.ofHeld}/${lp.held}); a kill for an id it never held changed nothing (it answered «${after.stdout}» after it)`, { lh, lp });
+    `no process.kill, no pattern, no bare pid in either file — every kill is of a held ChildProcess (hub ${lh.ofHeld}/${lh.held}, starter ${lp.ofHeld}/${lp.held}); an op it does not know changed nothing (it answered «${after.stdout}» after it)`, { lh, lp });
 
   console.log('④ a dead or slow starter is «unknown», never «the mount is down»; replaced once; then the old road, said once');
   const SILENT = path.join(T, 'silent-starter.js');
   fs.writeFileSync(SILENT, 'process.stdin.resume();\n');   // reads its pipe, answers nothing
   const said = [];
-  const S4 = CS.createChildStarter({ script: SILENT, guardMs: 200, log: { warn: (s) => said.push(String(s)) } }); CS.setChildStarter(S4);
+  const S4 = CS.createChildStarter({ script: SILENT, guardMs: 100, log: { warn: (s) => said.push(String(s)) } }); CS.setChildStarter(S4);
   const mm4 = Object.create(MountManager.prototype);
-  const p1 = await mm4._probeMountpoint(T, 300, 'attr');
+  const p1 = await mm4._probeMountpoint(T, 150, 'attr');
   const st1 = S4.stats();
-  const p2 = await mm4._probeMountpoint(T, 300, 'attr');
+  const p2 = await mm4._probeMountpoint(T, 150, 'attr');
   const st2 = S4.stats();
   const d3 = await counting(async () => { mm4.p3 = await mm4._probeMountpoint(T, 3000, 'attr'); });
   const p4 = await mm4._probeMountpoint(T, 3000, 'attr');
   const UNK = "        if (r.unknown) return { health: 'unknown', ms: Date.now() - t0 };\n";
   const RU = MC.load('src/mounts.js', msrc.replace(UNK, () => ''), 'red-unknown');
-  const S4r = CS.createChildStarter({ script: SILENT, guardMs: 200, log: { warn: () => { } } }); CS.setChildStarter(S4r);
-  const pr = await Object.create(RU.MountManager.prototype)._probeMountpoint(T, 300, 'attr');
+  const S4r = CS.createChildStarter({ script: SILENT, guardMs: 100, log: { warn: () => { } } }); CS.setChildStarter(S4r);
+  const pr = await Object.create(RU.MountManager.prototype)._probeMountpoint(T, 150, 'attr');
   ok(msrc.split(UNK).length === 2 && p1.health === 'unknown' && st1.faults === 1 && st1.restarted && !st1.direct && p2.health === 'unknown' && st2.faults === 2 && st2.direct && mm4.p3.health === 'ok' && d3 === 1 && p4.health === 'ok' && said.length === 1 && /the old road/.test(said[0]) && pr.health === 'error',
     `a starter that answers nothing: the probe answers «${p1.health}» (no strike, no heal); replaced once, a second fault ⇒ the old road (the next probe «${mm4.p3.health}», ${d3} start from the main process), said ${said.length} time(s); RED (no answer read as an exit): «${pr.health}»`, { p1, st1, p2, st2, p3: mm4.p3, d3, p4, said, pr });
   // the liveness table is not asked on an unknown witness (the verdict stands): its source says so where it returns
@@ -165,13 +167,19 @@ try {
   fs.writeFileSync(BURST, "let b='';process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))>=0){const l=b.slice(0,i);b=b.slice(i+1);let m;try{m=JSON.parse(l)}catch{continue}if(m.op!=='run')continue;process.stdout.write([{id:m.id,ev:'started',pid:1},{id:m.id,ev:'timeout'},{id:m.id,ev:'exit',code:null,signal:'SIGKILL',timedOut:true}].map((x)=>JSON.stringify(x)).join('\\n')+'\\n')}});process.stdin.on('end',()=>process.exit(0));\n");
   const SB = CS.createChildStarter({ script: BURST }); CS.setChildStarter(SB);
   const burst = async (M) => { const mm = Object.create(M.MountManager.prototype); const r = await mm._probeMountpoint(T, 2000, 'attr'); await sleep(50); return { health: r.health, held: mm._heldProbes.size }; };
-  const ON_T = "{ timeoutMs, onTimeout: (pid) => heldMap.set(key, { t0, pid }), onLateExit: () => heldMap.delete(key) })";
+  const ON_T = "{ timeoutMs, onTimeout: (pid) => heldMap.set(key, { t0, pid, start: pid ? ((procStat(pid) || [])[1] || null) : null }), onLateExit: () => heldMap.delete(key) })";
   const HUNG_NOW = "        if (r.timedOut) return { health: 'hung', ms: Date.now() - t0 };";
   const RB = MC.load('src/mounts.js', msrc.replace(ON_T, () => "{ timeoutMs, onLateExit: () => heldMap.delete(key) })").replace(HUNG_NOW, () => "        if (r.timedOut) { heldMap.set(key, { t0 }); return { health: 'hung', ms: Date.now() - t0 }; }"), 'red-late-mark');
   const b1 = await burst({ MountManager }), b1r = await burst(RB);
   SB.closePipe();
   ok(msrc.split(ON_T).length === 2 && msrc.split(HUNG_NOW).length === 2 && b1.health === 'hung' && b1.held === 0 && b1r.health === 'hung' && b1r.held === 1,
     `a timeout and its exit in one chunk: the probe says hung and the mark is CLEARED by the exit (${b1.held} held); RED (the mark made after the answer — 63ca24c36): ${b1r.held} held for good`, { b1, b1r });
+  const TALIVE = path.join(T, 'talive-starter.js');   // a child that timed out and LIVES (its pid: the stand-in's own, alive)
+  fs.writeFileSync(TALIVE, "let b='';process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))>=0){const l=b.slice(0,i);b=b.slice(i+1);let m;try{m=JSON.parse(l)}catch{continue}if(m.op!=='run')continue;process.stdout.write(JSON.stringify({id:m.id,ev:'started',pid:process.pid})+'\\n'+JSON.stringify({id:m.id,ev:'timeout'})+'\\n')}});process.stdin.on('end',()=>process.exit(0));\n");
+  const alive2 = async (M) => { const st = CS.createChildStarter({ script: TALIVE }); CS.setChildStarter(st); const mm = Object.create(M.MountManager.prototype); const r1 = await mm._probeMountpoint(T, 2000, 'attr'); const r2 = await mm._probeMountpoint(T, 2000, 'attr'); st.closePipe(); return `${r1.health}${r1.held ? '/held' : ''} → ${r2.health}${r2.held ? '/held' : ''}`; };
+  const REC = "start: pid ? ((procStat(pid) || [])[1] || null) : null";
+  const t2 = await alive2({ MountManager }), t2r = await alive2(MC.load('src/mounts.js', msrc.replace(REC, () => "start: pid ? 'not-the-field' : null"), 'red-rec'));
+  ok(msrc.split(REC).length === 2 && t2 === 'hung → hung/held' && t2r === 'hung → hung', `a child that timed out and lives: the next probe says held («${t2}») — its recorded start time is the live child's; RED (the wrong field recorded): «${t2r}» — a second probe stacked`);
   const gone = await new Promise((r) => { const c = CP.spawn('true', [], { stdio: 'ignore' }); c.on('exit', () => r(c.pid)); });
   const S6 = CS.createChildStarter(); CS.setChildStarter(S6);
   const lost = async (M) => { const mm = Object.create(M.MountManager.prototype); mm._heldProbes = new Map([['attr:' + T, { t0: Date.now() - 1000, pid: gone }]]); return (await mm._probeMountpoint(T, 5000, 'attr')).health; };
@@ -198,6 +206,59 @@ try {
   const c1 = await conn({ MountManager }), c1r = await conn(MC.load('src/mounts.js', msrc.replace(UNKB, () => ''), 'red-conn'));
   ok(msrc.split(UNKB).length === 2 && c1 > 0 && c1 <= 65 && c1r > 900,
     `a connect probe with no answer: the path is blocked ${c1} s more (the next sweep decides — the table's own 65 s); RED (the connect block kept): ${c1r} s`);
+
+  console.log('④d–④h the cure (its readers\' shoulds)');
+  { // ④d an access error's re-probe that got no answer keeps the banner (undefined: «leave it as it is»), never «accessible»
+    const acc = async (M, again) => { const f = Object.create(M.MountManager.prototype); Object.assign(f, { _revocable: () => false, _oauthBacked: () => false, _probeMountpoint: async () => ({ health: again, ms: 1 }), _probeBackendAccess: async () => 'ok', _accessErrorMsg: () => 'denied' }); return f._accessErrorFor({ id: 'm1' }, T, 'error'); };
+    const AU = "      if (again === 'unknown' || again === 'hung') return undefined;";
+    const RA = MC.load('src/mounts.js', msrc.replace(AU, () => ''), 'red-acc');
+    const a1 = [await acc({ MountManager }, 'unknown'), await acc({ MountManager }, 'hung'), await acc({ MountManager }, 'ok')], a1r = [await acc(RA, 'unknown'), await acc(RA, 'hung')];
+    ok(msrc.split(AU).length === 2 && a1[0] === undefined && a1[1] === undefined && a1[2] === null && a1r[0] === null && a1r[1] === null, `an access error whose re-probe got no answer or hung: the banner stands (${a1[0]}, ${a1[1]}); a listing clears it (${a1[2]}); RED (anything but «error» read as «lists now»): ${a1r.join(', ')} — the error cleared`);
+    const auth = async (M, said) => { const f = Object.create(M.MountManager.prototype); Object.assign(f, { _revocable: () => false, _oauthBacked: () => true, _errors: new Map([['m1', 'the sign-in expired — re-authorize the mount']]), _probeBackendAccess: async () => said, _probeBackendRead: async () => 'ok', _accessErrorMsg: () => 'denied' }); return f._accessErrorFor({ id: 'm1' }, T, 'ok'); };
+    const AUTH = "        if (showingAuthErr && acc !== 'ok') return undefined;";
+    const RO = MC.load('src/mounts.js', msrc.replace(AUTH, () => ''), 'red-auth');
+    const o1 = [await auth({ MountManager }, 'unknown'), await auth({ MountManager }, 'hung'), await auth({ MountManager }, 'ok')], o1r = await auth(RO, 'unknown');
+    ok(msrc.split(AUTH).length === 2 && o1[0] === undefined && o1[1] === undefined && o1[2] === null && o1r === null, `an auth error showing, a backend probe with no answer or hung: it stays (${o1[0]}, ${o1[1]}); a probe that reads fine clears it (${o1[2]}); RED: ${o1r} — cleared for up to 10 min`);
+  }
+  { // ④e a pid the kernel gave to another process (another start time) is not the held child
+    const reused = async (M) => { const mm = Object.create(M.MountManager.prototype); mm._heldProbes = new Map([['attr:' + T, { t0: Date.now() - 1000, pid: process.pid, start: 'not-its-start' }]]); return (await mm._probeMountpoint(T, 5000, 'attr')).health; };
+    const SC = CS.createChildStarter(); CS.setChildStarter(SC);
+    const START = "(!!held.start && st[1] !== held.start)";
+    const e1 = await reused({ MountManager }), e1r = await reused(MC.load('src/mounts.js', msrc.replace(START, () => 'false'), 'red-reuse'));
+    SC.closePipe();
+    ok(msrc.split(START).length === 2 && e1 === 'ok' && e1r === 'hung', `a held mark whose pid now runs another process (its start time differs): asked again («${e1}»); RED (the pid alone): «${e1r}» for good`);
+  }
+  { // ④f a starter that answers AFTER its first guard (a whole-box stall) is given one more guard — no fault, its answer used
+    const LATE = path.join(T, 'late-starter.js');
+    fs.writeFileSync(LATE, "let b='',n=0;process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))>=0){const l=b.slice(0,i);b=b.slice(i+1);let m;try{m=JSON.parse(l)}catch{continue}if(m.op!=='run')continue;const late=n++?800:0;process.stdout.write(JSON.stringify({id:m.id,ev:'started',pid:1})+'\\n');setTimeout(()=>process.stdout.write(JSON.stringify({id:m.id,ev:'exit',code:0,signal:null,stdout:'late'})+'\\n'),late)}});process.stdin.on('end',()=>process.exit(0));\n");
+    // the first request warms the stand-in (its boot is never inside the window); the second is answered 800 ms after it: past its bound + one guard (600), inside the second guard (1 100)
+    const lateRun = async (M) => { const s = M.createChildStarter({ script: LATE, guardMs: 500, log: { warn: () => { } } }); await s.run('true', [], { timeoutMs: 5000, capture: true }); const r = await s.run('true', [], { timeoutMs: 100, capture: true }); const st = s.stats(); s.closePipe(); return { out: r.stdout || null, unknown: !!r.unknown, faults: st.faults }; };
+    const csrc = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8'), GRACE = 'if (!q.grace && proc) {';
+    const f1 = await lateRun(CS), f1r = await lateRun(MC.load('src/server/child-starter.js', csrc.replace(GRACE, () => 'if (false) {'), 'red-grace'));
+    ok(csrc.split(GRACE).length === 2 && f1.out === 'late' && f1.faults === 0 && f1r.unknown && f1r.faults === 1, `an answer after the first guard (100 ms + 500, answered at 800): one more guard, the answer used («${f1.out}», ${f1.faults} faults); RED (no grace): unknown, ${f1r.faults} fault`, { f1, f1r });
+  }
+  { // ④g the old road is not for good: a fresh starter is tried again after its re-arm time
+    const rearm = async (M) => {
+      const said2 = [];
+      const SR = M.createChildStarter({ script: SILENT, guardMs: 40, rearmMs: 200, log: { warn: (s) => said2.push(s) } });
+      await SR.run('true', [], { timeoutMs: 20 }); await SR.run('true', [], { timeoutMs: 20 });
+      const st0 = SR.stats(); await SR.run('true', [], { timeoutMs: 20 }); const stD = SR.stats();
+      await sleep(230); await SR.run('true', [], { timeoutMs: 20 }); const stA = SR.stats();   // re-armed: a fresh starter, which faults…
+      await SR.run('true', [], { timeoutMs: 20 }); const stB = SR.stats();                     // …twice: the old road again, for the hour
+      SR.closePipe();
+      return { st0, stD, stA, stB, said: said2.length };
+    };
+    const csrc2 = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8'), REARM = "    if (direct && Date.now() - directAt >= rearmMs) {";
+    const g = await rearm(CS), gr = await rearm(MC.load('src/server/child-starter.js', csrc2.replace(REARM, () => '    if (false) {'), 'red-rearm'));
+    ok(csrc2.split(REARM).length === 2 && g.st0.direct && g.stD.starts === g.st0.starts && g.stA.starts === g.st0.starts + 1 && g.stA.rearmed === 1 && g.stB.direct && g.said === 1 && gr.stA.starts === gr.st0.starts && gr.stA.direct,
+      `after two faults the old road (${g.stD.starts} starts while it lasts); past its re-arm time a fresh starter is tried (${g.stA.starts}, re-armed ${g.stA.rearmed}), its faults put the old road back (${g.stB.direct}), said ${g.said} time in all; RED (no re-arm): the old road for good (${gr.stA.starts} starts)`, { g, gr });
+  }
+  { // ④h a stray line on the pipe (`null`, a number) is no answer and never throws in the hub's handler
+    const STRAY = path.join(T, 'stray-starter.js');
+    fs.writeFileSync(STRAY, "let b='';process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))>=0){const l=b.slice(0,i);b=b.slice(i+1);let m;try{m=JSON.parse(l)}catch{continue}if(m.op!=='run')continue;process.stdout.write('null\\n7\\n\"x\"\\n'+JSON.stringify({id:m.id,ev:'started',pid:1})+'\\n'+JSON.stringify({id:m.id,ev:'exit',code:0,signal:null,stdout:'ok'})+'\\n')}});process.stdin.on('end',()=>process.exit(0));\n");
+    const SS = CS.createChildStarter({ script: STRAY }); const r = await SS.run('true', [], { timeoutMs: 2000, capture: true }); SS.closePipe();
+    ok(r.stdout === 'ok' && r.code === 0, `stray lines (null, 7, "x") before the answer: ignored, the answer used («${r.stdout}»)`);
+  }
 
   console.log('⑤ hygiene: the service env, no secret on a request line, the site\'s own names');
   const S5 = CS.createChildStarter(); CS.setChildStarter(S5); D.useStarter(S5);

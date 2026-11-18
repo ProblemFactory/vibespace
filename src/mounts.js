@@ -77,6 +77,15 @@ process.stdout.write(JSON.stringify(out));`;
 const PROVIDERS = require('./mount-providers/index.js');   // lane dc-mount-providers: a storage provider = its row file + one list line
 /** A record's storage-provider ROW (src/mount-providers/): every per-provider fact and branch is asked of it. A module
  *  function, not a method — suites call the manager's predicates on a bare `this`. */
+/** B-91aa: a process's /proc stat as [state, starttime] (null when it is gone; undefined when /proc cannot be read) — the held
+ *  probe child's witness: its start time is kept at the timeout, so a pid the kernel gave to another process is not the held `ls`.
+ *  Not src/proc-identity.js: that reader answers a process's identity (its argv, its owner); this one needs the state letter and the
+ *  start time from the same one read, sync (a libuv pool thread may be held by the very mount it watches). Named apart from B-e783's
+ *  async procStat (met at 2.369.411's second checkpoint): that one walks /proc for the daemons, this one witnesses ONE held child */
+function heldProcStat(pid) {
+  try { const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); const f = s.slice(s.lastIndexOf(')') + 2).split(' '); return [f[0], f[19]]; }
+  catch (e) { return e && (e.code === 'ENOENT' || e.code === 'ESRCH') ? null : undefined; }
+}
 const UNKNOWN_BLOCK_MS = 65000;   // B-91aa: a connect probe that got no answer blocks its path until the next sweep re-checks it (the liveness table's own slowBlockMs, src/mount-liveness.js), never longer
 const healthOf = (r) => (r && typeof r === 'object') ? r.health : r;   // a probe answers {health, ms} (a stub may answer the bare word)
 const rowOf = (m) => PROVIDERS.rowOf(m && m.type);                 // lane cluster-presets: ONE parser for the file and the env
@@ -1519,9 +1528,9 @@ class MountManager {
     // procfs (r4: an async read waits for a libuv pool thread, which a hung FUSE mount can hold; every other /proc read of the
     // sweep is sync); only «no such process» (ENOENT) is gone — a /proc we cannot read says nothing, the mark stays
     if (held && held.pid) {
-      let gone = false;
-      try { const s = fs.readFileSync(`/proc/${held.pid}/stat`, 'utf8'); gone = / Z /.test(s.slice(s.lastIndexOf(')'), s.lastIndexOf(')') + 4)); }
-      catch (e) { gone = !!(e && e.code === 'ENOENT'); }
+      // the cure (its readers): a pid the kernel gave to another process (its start time differs) is gone too
+      const st = heldProcStat(held.pid);
+      const gone = st === null || (!!st && (st[0] === 'Z' || (!!held.start && st[1] !== held.start)));
       if (!gone) return Promise.resolve({ health: 'hung', ms: Date.now() - held.t0, held: true });
       if (heldMap.get(key) === held) heldMap.delete(key);
       return this._probeMountpoint(mp, timeoutMs, verb);
@@ -1533,7 +1542,7 @@ class MountManager {
     // B-e783 (met at 2.369.411's second checkpoint): a child that NEVER STARTED (the starter's spawn error) is `spawnErr` —
     // _zombieAt answers nothing for it, never «dead»; its `ls` is resolved on the hub's PATH as the direct spawn resolved it
     const t0 = Date.now();
-    return require('./server/child-starter').childStarter().run('ls', verb === 'attr' ? ['-d', mp] : [mp], { timeoutMs, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => heldMap.set(key, { t0, pid }), onLateExit: () => heldMap.delete(key) })
+    return require('./server/child-starter').childStarter().run('ls', verb === 'attr' ? ['-d', mp] : [mp], { timeoutMs, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => heldMap.set(key, { t0, pid, start: pid ? ((procStat(pid) || [])[1] || null) : null }), onLateExit: () => heldMap.delete(key) })
       .then((r) => {
         if (r.unknown) return { health: 'unknown', ms: Date.now() - t0 };
         if (r.timedOut) return { health: 'hung', ms: Date.now() - t0 };   // marked at the timeout itself (its read, M1)
@@ -1957,7 +1966,9 @@ class MountManager {
           if (rd === 'denied') return 'connected but file downloads are rejected while listings work — disconnect and reconnect the mount to pick up the updated rclone; if it persists, check the account';
           if (showingAuthErr) return null; // recovered — clear it
         }
-        // unknown: not proof either way — fall through to generic handling
+        // unknown: not proof either way — fall through to generic handling; the cure's read: an auth error SHOWING stays until a
+        // probe proves it gone (a backend probe that got no answer, or hung, is not that proof)
+        if (showingAuthErr && acc !== 'ok') return undefined;
       } else if (showingAuthErr) {
         return undefined; // keep the auth error until a probe proves otherwise
       }
@@ -1966,7 +1977,9 @@ class MountManager {
       // User-owned backend (SMB/NAS, SFTP, own S3): a single non-zero ls is
       // NOT proof of denial. Re-probe; if it lists now it was transient, and
       // if the backend itself lists fine the ls error was a benign quirk.
-      if (healthOf(await this._probeMountpoint(mp)) !== 'error') return null;
+      const again = healthOf(await this._probeMountpoint(mp));
+      if (again === 'unknown' || again === 'hung') return undefined;   // B-91aa (its readers): no answer, or a hang, is no proof either way — the banner stands; only a listing clears it
+      if (again !== 'error') return null;
       if ((await this._probeBackendAccess(m)) === 'ok') return null;
       return this._accessErrorMsg(m); // persistently broken → honest message
     }

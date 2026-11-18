@@ -13,8 +13,9 @@
  *  · THE KILL LAW: the hub signals only the starter it spawned and holds (its ChildProcess, by identity); the starter
  *    signals only the children it spawned and holds (by request id). No pattern, no bare pid.
  *  · A DEAD OR SLOW STARTER IS NEVER «the mount is down»: a request whose start was never confirmed, or that got no
- *    answer by its own bound + GUARD_MS, answers `unknown` (never «hung», never «error»). That starter is replaced ONCE;
- *    a second fault puts the old road back (a direct start from this process, the site's own env) — said once.
+ *    answer by its own bound + GUARD_MS — + one more GUARD_MS while the starter lives (a whole-box stall) — answers
+ *    `unknown` (never «hung», never «error»). That starter is replaced ONCE; a second fault puts the old road back (a direct
+ *    start from this process, the site's own env) — said once; a fresh starter is tried again at most once an hour (REARM_MS).
  *  · HYGIENE: the starter is born with serviceEnv (the service list, never the hub's secrets); a request carries the
  *    names its site sets (`envAdd`: DISPLAY / XAUTHORITY / a locale / DOCKER_*), never a secret-shaped name; argv as the
  *    site had it. A child gets the starter's env + those names — never more than the site gave before.
@@ -26,12 +27,13 @@ const { serviceEnv, SECRET_SHAPE } = require('../agent-env');
 const STARTER_SCRIPT = path.join(__dirname, 'child-starter-proc.js');
 const GUARD_MS = 2000;            // a request's answer may come this long after its own bound (the starter's turn, the pipe)
 const NO_BOUND_MS = 60000;        // a request with no bound of its own is answered `unknown` past this
+const REARM_MS = 60 * 60000;      // the old road is not for the process's life: a fresh starter is tried again AT MOST once an hour (a fault after a re-arm falls back for the hour)
 const SECRET_NAME = SECRET_SHAPE;   // its read (S): THE one secret shape (src/agent-env.js), never a second, weaker copy
 
-function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = GUARD_MS } = {}) {
-  let proc = null, seq = 0, restarted = false, direct = false, said = false, buf = '';
+function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = GUARD_MS, rearmMs = REARM_MS } = {}) {
+  let proc = null, seq = 0, restarted = false, direct = false, directAt = 0, said = false, buf = '';
   const pending = new Map();      // id → { resolve, settled, onTimeout, onLateExit, timer, started, pid }
-  const stats = { starts: 0, requests: 0, unknown: 0, faults: 0, direct: 0 };
+  const stats = { starts: 0, requests: 0, unknown: 0, faults: 0, direct: 0, rearmed: 0 };
 
   function start() {
     stats.starts++;
@@ -51,6 +53,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
   function settle(id, r) { const q = pending.get(id); if (!q || q.settled) return; q.settled = true; clearTimeout(q.timer); if (r.timedOut) { try { q.onTimeout?.(q.pid || 0); } catch { } } if (!q.onLateExit || !r.timedOut) pending.delete(id); q.resolve({ ...r, pid: q.pid || 0 }); refs(); }
   function onLine(line) {
     let m; try { m = JSON.parse(line); } catch { return; }
+    if (!m || typeof m !== 'object') return;   // only an object is an answer (a stray `null` / number never throws in the pipe's handler)
     const q = pending.get(m.id); if (!q) return;
     if (m.ev === 'started') { q.started = true; q.pid = Number(m.pid) || 0; return; }
     if (m.ev === 'timeout') { settle(m.id, { started: true, timedOut: true, code: null, signal: 'SIGKILL', stdout: '', stderr: '' }); return; }
@@ -67,7 +70,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
     for (const [id, q] of pending) { if (!q.settled) { stats.unknown++; settle(id, { unknown: true, why }); } else pending.delete(id); }
     if (!restarted) { restarted = true; return; }
     if (!direct) {
-      direct = true;
+      direct = true; directAt = Date.now();
       if (!said) { said = true; try { log.warn?.(`[child-starter] the starter failed twice (${why}) — the timer sites start their programs from the hub's process again (the old road)`); } catch { } }
     }
   }
@@ -75,6 +78,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
    *  `env` is the site's own env, used ONLY on the old road; `envAdd` the names it sets, the only ones sent to the starter. */
   function run(cmd, args = [], o = {}) {
     stats.requests++;
+    if (direct && Date.now() - directAt >= rearmMs) { direct = false; restarted = false; stats.rearmed++; }   // a fresh starter, tried again (a whole-box stall is not for good)
     if (direct) return runDirect(cmd, args, o);
     if (!proc) { try { start(); } catch (e) { fault('the starter could not be started'); return direct ? runDirect(cmd, args, o) : Promise.resolve({ unknown: true, why: 'no starter' }); } }
     const id = ++seq, add = {};
@@ -84,7 +88,10 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
       const q = { resolve, settled: false, started: false, pid: 0, onTimeout: o.onTimeout || null, onLateExit: o.onLateExit || null, timer: null };
       // its read (S): a timer runs before the loop reads its pipe — a hub held past the bound would fault a working starter; the
       // check waits one turn (setImmediate runs after the poll phase), so an answer already in the pipe is read first
-      q.timer = setTimeout(() => setImmediate(() => { if (!q.settled) fault(q.started ? 'the starter did not answer in time' : 'the starter never started it'); }), bound);
+      // + ONE more guard while the starter lives (its readers: a whole-box stall freezes both processes — the hub's timer fires on
+      // resume, before the starter has written its line), then the fault
+      const check = () => { if (q.settled) return; if (!q.grace && proc) { q.grace = true; q.timer = setTimeout(() => setImmediate(check), guardMs); return; } fault(q.started ? 'the starter did not answer in time' : 'the starter never started it'); };
+      q.timer = setTimeout(() => setImmediate(check), bound);
       pending.set(id, q); refs();
       const p = proc;
       if (!p.stdin.listenerCount('error')) p.stdin.on('error', () => { });   // a pipe the starter closed is never an uncaught 'error' (§101)

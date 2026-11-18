@@ -2,7 +2,7 @@
 /**
  * THE STARTER PROCESS (B-91aa; the hub's half is src/server/child-starter.js). A small node process the hub makes once:
  * it starts the programs of the hub's timer sites so the 5 GB hub never forks for them. One JSON line a request on
- * stdin — {op:'run', id, cmd, args, env (the names the site sets), timeoutMs, maxBuffer, capture} or {op:'kill', id} —
+ * stdin — {op:'run', id, cmd, args, env (the names the site sets), timeoutMs, maxBuffer, capture} —
  * and one JSON line an event on stdout: started (its pid) · timeout (killed at its bound; the child may stay in D state
  * on a dead FUSE mount) · exit (code, signal, the captured output, capped). Its OWN env was built by the hub's
  * serviceEnv: a child gets it + the request's names, nothing else.
@@ -25,7 +25,6 @@ function bye() {
 function handle(line) {
   let m; try { m = JSON.parse(line); } catch { return; }
   if (!m || typeof m !== 'object') return;
-  if (m.op === 'kill') { const c = held.get(m.id); if (c) { try { c.kill('SIGKILL'); } catch { } } return; }
   if (m.op !== 'run') return;
   const id = m.id, max = Number(m.maxBuffer) > 0 ? Number(m.maxBuffer) : 1048576, capture = !!m.capture;
   const cmd = String(m.cmd || ''), args = Array.isArray(m.args) ? m.args.map(String) : [];
