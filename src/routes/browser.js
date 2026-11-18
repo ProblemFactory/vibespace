@@ -286,12 +286,18 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   already_handed_back: 409,
   // lane browser-resume C (§3.9, ruling 3): tabs — nothing ran (the verdict precedes every exec); the act itself failed
   no_such_tab: 404, take_over_first: 409, last_tab: 409, mediated_tabs: 409, tab_failed: 502, window_busy: 409 }; // verify r2 T1: window_busy — the holder's window lives but took no tab right now (retry)
+/** B-a470 cure (主开发 09:07Z): what an AGENT's caller is answered carries no absolute path of the hub — the plugin's own error
+ *  keeps its code and words, never `resource` (what Node denied it: a path on this machine), in the field or in the sentence. */
+const AGENT_PATH_WORDS = 'a path on the hub';
+function agentFailed(f) { const { resource, ...rest } = f || {}; return rest; }
+function agentSafeText(s, f) { const r = f && typeof f.resource === 'string' && f.resource ? f.resource : null; return r ? String(s).split(r).join(AGENT_PATH_WORDS) : String(s); }
 function fail(res, e) {
   const code = e?.code || null;
+  const agentRoad = /^\/api\/agent\//.test(String((res.req && res.req.path) || ''));   // B-a470 cure: the agent's route (the step's own test)
   // B-f7ab verify r2 (LOW): a key minted by THIS call rides a refused answer too (`res.locals.minted`, set by needKey) — the
   // agent's first command may be refused (not_owner, launch_failed…) and it still needs to know nothing needs restarting
   // lane remote-profile-start: a machine's refusal keeps the user's one command (`step`) — never on an agent's route
-  res.status(STATUS[code] || 500).json({ error: String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}), ...(e?.step && !/^\/api\/agent\//.test(String((res.req && res.req.path) || '')) ? { step: e.step } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}),
+  res.status(STATUS[code] || 500).json({ error: agentRoad ? agentSafeText(String(e?.message || e), e?.failed) : String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}), ...(e?.step && !/^\/api\/agent\//.test(String((res.req && res.req.path) || '')) ? { step: e.step } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}),
     // P4 (§7.4): a refusal carries its ACTIONABLE way out (`action.openIntegration`), the ways out of a refused downgrade, and whether one human confirmation would do
     // MULTIVIEW D4: WHICH cap refused (this conversation's own, or the machine's) + the counts — never another session's name
     ...(e?.scope ? { scope: e.scope } : {}), ...(Number.isFinite(e?.others) ? { others: e.others } : {}), ...(Number.isFinite(e?.capOwn) ? { own: e.capOwn, cap: e.capOf } : {}),
@@ -303,7 +309,7 @@ function fail(res, e) {
     ...(typeof e?.restored === 'boolean' ? { restored: e.restored, from: e.from || null, to: e.to || null } : {}),
     // lane browser-profile-clone: a refused copy names its source, the size it measured and the fs code a failed copy hit
     ...(typeof e?.source === 'string' ? { source: e.source } : {}), ...(Number.isFinite(e?.bytes) ? { bytes: e.bytes } : {}), ...(e?.fsCode ? { fsCode: e.fsCode } : {}),
-    ...(e?.failed && typeof e.failed === 'object' ? { failed: e.failed } : {}), // B-a470: an engine plugin's OWN error (its code, message, what Node denied it) — every door quotes it
+    ...(e?.failed && typeof e.failed === 'object' ? { failed: agentRoad ? agentFailed(e.failed) : e.failed } : {}), // B-a470: an engine plugin's OWN error (its code, message, what Node denied it) — every door quotes it; an agent's, without the hub's path
     ...rulingExtras(e), ...(res.locals && res.locals.recipe ? { recipe: res.locals.recipe } : {}) });
 }
 /** Owner ruling A: the extras a refusal on the sharing paths carries — a holder's NAME where a refusal names one + the
@@ -2864,4 +2870,4 @@ router.post('/api/agent/browser/site-hint', (req, res) => {
   try { res.json({ hint: k.addSiteHint({ host: req.body?.site || req.body?.url, tier: req.body?.tier, backend: req.body?.backend, why: req.body?.why, by: 'agent' }) }); } catch (e) { fail(res, e); }
 });
 
-module.exports = { router, setup, setWindowEngine, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs, keyForPickedSession, exceptKeyForPicked, sessionFacts, pinAnswer, STATUS }; // + "Who can use it": the ONE resolver of a picked live session (the trace routes' PATCH calls it) // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins
+module.exports = { router, setup, fail, AGENT_PATH_WORDS, setWindowEngine, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs, keyForPickedSession, exceptKeyForPicked, sessionFacts, pinAnswer, STATUS }; // + "Who can use it": the ONE resolver of a picked live session (the trace routes' PATCH calls it) // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins

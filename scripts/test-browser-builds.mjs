@@ -1016,6 +1016,23 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   ok(!prF.ok && prF.failed && prF.failed.resource === '/usr/bin/python3' && /ERR_ACCESS_DENIED: Access to this API/.test(prF.error) && /denied file system read of \/usr\/bin\/python3/.test(prF.error)
     && efF.failed && efF.failed.code === 'ERR_ACCESS_DENIED' && rvF && rvF.failed && rvF.failed.resource === '/usr/bin/python3' && esF && esF.code === 'browser_engine_protocol' && /ERR_ACCESS_DENIED/.test(esF.message) && esF.failed && esF.failed.resource === '/usr/bin/python3',
     'B-a470 over the real loader: the fixture\'s probe answering 500 {error, code, permission, resource} ⇒ the registry quotes it (deniedWords), the keeper\'s fact and the engines view carry `failed`, a start is refused naming ERR_ACCESS_DENIED', { prF: prF.error, esF: esF && esF.message });
+  // B-a470 cure (主开发 09:07Z): what an AGENT's caller is answered on that refusal carries no absolute path of the hub — the
+  // plugin's code and words stay; `resource` goes, from the field and from the sentence. The owner's own road keeps it
+  {
+    const RB = require('../src/routes/browser.js');
+    const fres = (p) => ({ req: { path: p }, locals: {}, status(c) { this.code = c; return this; }, json(o) { this.body = o; return this; } });
+    const answer = (Rm, p) => { const r = fres(p); Rm.fail(r, esF); return r.body || {}; };
+    const ag = answer(RB, '/api/agent/browser/start'), ow = answer(RB, '/api/browser/profiles/x/start');
+    ok(esF && esF.failed && esF.failed.resource === '/usr/bin/python3' && ag.failed && ag.failed.code === 'ERR_ACCESS_DENIED' && !('resource' in ag.failed) && !String(ag.error).includes('/usr/bin/python3') && String(ag.error).includes(RB.AGENT_PATH_WORDS) && /ERR_ACCESS_DENIED/.test(ag.error)
+      && ow.failed && ow.failed.resource === '/usr/bin/python3' && String(ow.error).includes('/usr/bin/python3'),
+      'B-a470 cure: an agent\'s start refusal quotes the plugin\'s own error WITHOUT the hub\'s path (neither the field nor the sentence); the owner\'s road keeps it', { ag, ow: ow.error });
+    const rSrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
+    const rCut = "{ failed: agentRoad ? agentFailed(e.failed) : e.failed }";
+    if (!rSrc.includes(rCut)) throw new Error('the anchor of the control «B-a470 cure: the agent\'s path» is not in the source');
+    const MCr = mutantCopies('browser-builds-a470-cure', REPO);
+    const RBm = MCr.load('src/routes/browser.js', rSrc.replace(rCut, '{ failed: e.failed }'), 'agent-gets-path');   // stale-pins: kept — the base's line, written back by this RED control
+    ok(answer(RBm, '/api/agent/browser/start').failed.resource === '/usr/bin/python3', 'CONTROL (B-a470 cure): the base\'s answer hands the agent the hub\'s path (RED for the leg above)');
+  }
   setMode(null);
   if (ke.profile(pe.id).buildMissing) { await ke.start(pe.id, { why: 'test' }); await ke.stop(pe.id, { why: 'user' }); } // clear the mark the two refusals above left
   // B-cf42 THE REAL KEEPER: the dialog watch's answer (noteEngineLive) marks the profile, files ONE For-you item per engine version,
