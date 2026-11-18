@@ -10,6 +10,7 @@
 const DAY_ONE = require('./day-one.js');   // lane door-day-one-landing: SIGN_IN — a sign-in terminal is not a session row
 const LOCKCTX = require('./lock-context.js'); // B-6c55: the context a lock keeps (PURE)
 const SFW = require('./settings-file-words.js'); // B-8dcf item two: a person's own settings file at a start (PURE; loaded with the create, never on a pass)
+const MANAGED = require('./managed-claude-settings.js'); // lane lg-providers (主开发 23:45Z): a managed key helper outranks every setting a start passes
 const BILLPICK = require('./billing-pick.js'); // unit «billing pick alive»: a subscription pick sets the machine's key helper aside (PURE)
 const { ensureGitIdentity } = require('./server/git-identity.js');   // lane door-day-one-landing: git's name / email default from the sign-in's account
 const { MessageManager } = require('./message-manager');
@@ -105,7 +106,7 @@ function resumePoolPin(data, accounts, backend = 'claude') {
 }
 
 function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
-  execFileAsync, pickCodexThreadCandidate, getSessionKey, normalizeComparablePath, helperFactMs = 8000 }) {
+  execFileAsync, pickCodexThreadCandidate, getSessionKey, normalizeComparablePath, helperFactMs = 8000, managedClaudeDir = null }) {   // managedClaudeDir: the factory's seam for a suite (a stand-in managed folder) — never a ctx key
   const {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
@@ -764,6 +765,18 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           const pvModel = accounts && typeof accounts.providerModelFor === 'function' ? ((r) => { if (!(r && !r.ok && r.code === 'model-not-served' && /^(instance|harness)$/.test(String(data._modelOrigin || '')))) return r; const bare = String(data.model || '').replace(/\[1m\]$/i, ''); const a = bare !== String(data.model || '') ? accounts.providerModelFor(data.accountId, backend, bare) : null; return a && a.ok ? a : accounts.providerModelFor(data.accountId, backend, ''); })(accounts.providerModelFor(data.accountId, backend, data.model)) : null;   // an instance / harness DEFAULT the provider does not serve (through its aliases) is no pick at a third party: its own default (U2 cure)
           if (pvModel && !pvModel.ok) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: pvModel.code, message: pvModel.message })); break; }
           if (pvModel) data.model = pvModel.model;
+          // A MACHINE WHOSE MANAGED CLAUDE SETTINGS SET A KEY HELPER, OR AN ANTHROPIC CREDENTIAL OR ADDRESS (主开发 23:45Z, as if a must —
+          // read from the CLI itself, src/managed-claude-settings.js): the CLI applies the managed source over the inline override and
+          // the spawn's env, so a third-party provider's start would hand the organisation's credential to the provider's address —
+          // REFUSED BY NAME before anything spawns; what cannot be told refuses too. Only Claude Code (creds.keyHelper)
+          if (pvModel && harness && harness.creds && harness.creds.keyHelper) {
+            const mh = await MANAGED.managedHelperFact({ dir: typeof managedClaudeDir === 'string' ? managedClaudeDir : null });
+            if (mh.named !== false) {
+              const said = MANAGED.refusalOf(mh, (() => { try { return accounts?.providerRecordOf?.(data.accountId)?.label || data.accountId; } catch { return data.accountId; } })());
+              ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: said.code, message: said.message, i18n: said.i18n }));
+              break;
+            }
+          }
           // B-6c55: A LOCKED CONVERSATION'S CONTEXT ASK rides the spawn — the saved fact (the person's, src/lock-context.js), else the
           // spawn's own model when it names [1m]. The TARGET (data.model, the lock, _spawnModel, the pool's request model) stays as it
           // was (law b): only the --model the CLI is COMMANDED with gains [1m]. A CLI whose own catalog says the model has no long

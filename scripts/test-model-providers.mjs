@@ -653,7 +653,8 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   const AMB = { PATH: process.env.PATH, FAKE_REPORT: REPORT, HOME: MACHINE, CLAUDE_CONFIG_DIR: path.join(MACHINE, '.claude'), CLAUDE_SECURESTORAGE_CONFIG_DIR: path.join(MACHINE, '.claude'), CODEX_HOME: path.join(MACHINE, '.codex'),
     CLAUDE_CODE_OAUTH_TOKEN: 'ambient-oat', ANTHROPIC_API_KEY: 'ambient-console', ANTHROPIC_AUTH_TOKEN: 'ambient-token', OPENAI_API_KEY: 'ambient-openai', VIBESPACE_PROVIDER_KEY: 'ambient-provider',
     CLAUDE_CODE_USE_FOUNDRY: '1', ANTHROPIC_CUSTOM_HEADERS: 'x-planted: 1', AWS_SECRET_ACCESS_KEY: 'ambient-aws', LANG: 'C.UTF-8' };
-  const mk = (Mod = PTR, o = {}) => Mod.create({ providers: tstore, cliFor: async () => FAKE, agentEnv: () => ({ ...AMB }), scratchRoot: TDIR, timeoutMs: 8000, ...o });
+  const NO_MDIR = fs.mkdtempSync(path.join(TDIR, 'managed-none-'));   // the machine's managed Claude settings folder, stood in EMPTY (never the box's own)
+  const mk = (Mod = PTR, o = {}) => Mod.create({ providers: tstore, cliFor: async () => FAKE, agentEnv: () => ({ ...AMB }), scratchRoot: TDIR, timeoutMs: 8000, managedDir: NO_MDIR, ...o });
   const slowRunner = mk(PTR, { timeoutMs: 400 });   // only the timeout leg runs on a short bound (a loaded machine never flakes the rest)
   const runner = mk();
   const report = () => { try { return JSON.parse(fs.readFileSync(REPORT, 'utf8')); } catch { return null; } };
@@ -714,6 +715,27 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   const cm = await mk(PTR, { cliFor: async () => null }).runProviderTest(P.ok.id, 'claude', { by: 'human' });
   ok(cm.ok && cm.verdict === 'cli-missing' && report() === null, 'no CLI on this machine ⇒ verdict cli-missing, nothing spawned');
   ok(cm.kept === false, 'no CLI ⇒ nothing ran: the answer says no verdict was kept (the read, R9)');
+  // THE MACHINE'S MANAGED CLAUDE SETTINGS NAME A KEY HELPER (主开发 23:45Z): the test's empty homes do not reach that folder and
+  // it outranks every setting the test passes — the CLI would send the organisation's credential to the provider. Refused by name,
+  // nothing spawned, the slot freed (a stand-in managed folder)
+  const MDIR = fs.mkdtempSync(path.join(TDIR, 'managed-'));
+  fs.writeFileSync(path.join(MDIR, 'managed-settings.json'), JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' }));
+  fresh();
+  let keyReads = 0;
+  const counting = { ...tstore, keyOf: (id) => { keyReads++; return tstore.keyOf(id); } };
+  const mhRunner = mk(PTR, { managedDir: MDIR, providers: counting });   // ONE runner: its slot must be free again after a refusal
+  const mh1 = await mhRunner.runProviderTest(P.ok.id, 'claude', { by: 'human' });
+  const mhRan = report(), mhKeyReads = keyReads;
+  fs.rmSync(path.join(MDIR, 'managed-settings.json'));
+  fresh();
+  const mh2 = await mhRunner.runProviderTest(P.ok.id, 'claude', { by: 'human' });
+  ok(!mh1.ok && mh1.code === 'managed-helper' && mhRan === null && mhKeyReads === 0 && !!PTM.REFUSAL_WORDS['managed-helper'] && mh2.ok && report() !== null && keyReads === 1,
+    'the machine\'s managed Claude settings set a key helper: the test is refused by name (managed-helper), NOTHING spawned and the vault key NEVER read; the managed file gone, the SAME runner tests again (its slot was freed)', { mh1, mh2: mh2.verdict, mhKeyReads, keyReads });
+  fs.writeFileSync(path.join(MDIR, 'managed-settings.json'), JSON.stringify({ apiKeyHelper: '/opt/org/key-helper' }));
+  fresh();
+  const ptrPatched = (pairs) => { let s = fs.readFileSync(PTRF, 'utf-8'); for (const [from, to] of pairs) { if (s.split(from).length !== 2) throw new Error('control anchor not in provider-test.js once: ' + from.slice(0, 70)); s = s.replace(from, to); } const m = new Module(PTRF); m.filename = PTRF; m.paths = Module._nodeModulePaths(path.dirname(PTRF)); m._compile(s, PTRF); return m.exports; };   // compiled in memory beside the real file (this block runs before the suite's runnerMutant)
+  const mhx = await mk(ptrPatched([["      if (h.creds.keyHelper) { const mh = await MANAGED.managedHelperFact({ dir: managedDir }); if (mh.named !== false) return { ok: false, code: 'managed-helper', where: mh.where }; }\n", '']]), { managedDir: MDIR }).runProviderTest(P.ok.id, 'claude', { by: 'human' });
+  ok(mhx.ok && report() !== null, 'CONTROL: the test without the managed-settings check spawns the CLI under the managed helper ⇒ the leg above goes RED', mhx.verdict);
   // A NEW KEY WHILE A TEST RUNS (the chain cure's read, R2): the run tested the OLD key — its verdict is not written onto the new one
   const midRun = slowRunner.runProviderTest(P.slow.id, 'claude', { by: 'human' });
   await tstore.rekey(P.slow.id, 'sk-third-party-rekeyed-midrun-2718');

@@ -98,7 +98,7 @@
    "keyedOn": "model",
    "needsReleaseOnOrdinaryUpdate": false,
    "road": "a THIRD-PARTY provider conversation only (lane lg-providers U2): the CLI's own family env names (ANTHROPIC_DEFAULT_<FAMILY>_MODEL, ANTHROPIC_SMALL_FAST_MODEL) set to the PROVIDER's rows — its alias or its default; a new Claude version needs nothing here; a family a later CLI adds is asked of the provider under the provider's key and address — the third party answers or refuses it, never a claude-* account billed",
-   "suite": "test-claude-update-needs-nothing",
+   "suite": "test-harness-spawn",
    "match": "family-key",
    "sites": 1
   },

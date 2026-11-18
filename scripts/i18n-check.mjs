@@ -52,6 +52,7 @@ export const noticeKeyTables = () => {
     // B-8dcf item two: what a person's own settings file met at a claude start — the hub's notices, worded by t() on the page
     { name: 'src/settings-file-words.js SETTINGS_FILE_WORDS', keys: Object.values(req('../src/settings-file-words.js').SETTINGS_FILE_WORDS) },
     { name: 'src/settings-file-words.js PROVIDER_BILLING_WORDS', keys: Object.values(req('../src/settings-file-words.js').PROVIDER_BILLING_WORDS) },   // lane lg-providers: a provider start's two billing kinds
+    { name: 'src/managed-claude-settings.js MANAGED_HELPER_WORDS', keys: Object.values(req('../src/managed-claude-settings.js').MANAGED_HELPER_WORDS) },   // lane lg-providers: a provider start refused under a managed key helper
     // B-6c55: a locked conversation's resume that cannot keep its 1M ask — the hub's notice, worded by t() on the page
     { name: 'src/lock-context.js NO_LONG_CONTEXT', keys: [req('../src/lock-context.js').NO_LONG_CONTEXT] },
     // B-c9ed: THE picture rule's refusal words — a table of keys, worded by t() at the picture door (src/lib/image-attach.js)

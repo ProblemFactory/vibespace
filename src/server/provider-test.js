@@ -25,6 +25,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const MP = require('../model-providers.js');
 const PT = require('../provider-test-model.js');
+const MANAGED = require('../managed-claude-settings.js');   // a managed key helper outranks every setting the test passes (主开发 23:45Z)
 const PI = require('../proc-identity.js');   // the pid identity (field-22 start times, a fresh bounded /proc scan): the after-exit proof
 
 const VENDOR_FAMILY = /^(?:ANTHROPIC_|CLAUDE_|OPENAI_|CODEX_|AWS_|AZURE_|GOOGLE_|GEMINI_|VERTEX|BEDROCK|OPENROUTER_|DEEPSEEK_|MOONSHOT_|ZHIPU|MINIMAX_)/;
@@ -32,7 +33,7 @@ const EXIT_DRAIN_MS = 2000;   // after the leader exits, how long its pipes may 
 
 function create({ providers, harnessOf = (id) => require('../harnesses').get(id), harnesses = () => require('../harnesses').list(),
   cliFor = async () => null, agentEnv = () => ({}), credentialEnvNames = (ds) => require('../harness-env.js').credentialEnvNames(ds),
-  redactSecrets = (s) => require('../secret-shapes.js').redactSecrets(s), spawnImpl = spawn,
+  redactSecrets = (s) => require('../secret-shapes.js').redactSecrets(s), spawnImpl = spawn, managedDir = null,
   scratchRoot = os.tmpdir(), timeoutMs = PT.TIMEOUT_MS, drainMs = EXIT_DRAIN_MS, now = () => Date.now(), log = (m) => console.log(m) } = {}) {
   const inFlight = new Set();
   /** the child's env: sanitized, every credential name gone, every harness home a fresh empty folder, the plan on top */
@@ -67,13 +68,17 @@ function create({ providers, harnessOf = (id) => require('../harnesses').get(id)
     const slot = `${p.id}:${harness}`;
     if (inFlight.has(slot)) return { ok: false, code: 'in-flight' };
     const gen0 = typeof providers.generationOf === 'function' ? providers.generationOf(p.id) : null;   // the key / address this run tests (a new one meanwhile ⇒ its verdict is not written)
-    const k = providers.keyOf(p.id);
-    if (!k.ok || !k.value) return { ok: false, code: k.ok ? 'no-key' : k.code };
     const model = MP.resolveModel(p, '') || '';
     if (!model) return { ok: false, code: 'model-none' };   // never the CLI's own default id at a third party (as the spawn road)
     inFlight.add(slot);   // taken BEFORE the first await: a second press can never slip in while this one looks for its CLI
     let dir = null;
     try {
+      // the machine's MANAGED Claude settings set a key helper or an Anthropic credential or address (or what they set cannot be told):
+      // the empty homes do not reach them, the CLI applies them over the settings the test passes, and the organisation's credential
+      // would go to the provider — refused by name
+      if (h.creds.keyHelper) { const mh = await MANAGED.managedHelperFact({ dir: managedDir }); if (mh.named !== false) return { ok: false, code: 'managed-helper', where: mh.where }; }
+      const k = providers.keyOf(p.id);   // the key is read only AFTER the managed check (its reader's note: never opened for a test that cannot run)
+      if (!k.ok || !k.value) return { ok: false, code: k.ok ? 'no-key' : k.code };
       let cmd = null;
       try { cmd = await cliFor(harness); } catch { cmd = null; }
       if (!cmd) return { ok: true, harness, verdict: 'cli-missing', detail: '', at: now(), kept: false };   // nothing ran: no verdict is written
