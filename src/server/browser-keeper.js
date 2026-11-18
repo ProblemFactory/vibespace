@@ -1762,7 +1762,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         const e = B.exceptEntryOf(p, { conversationKeys, taskIds, groupsUnreadable });
         out.push({ ...base, ok: false, code: 'excepted', ...(e ? { except: e } : {}) });
       } else if (v.code === 'groups_unreadable') out.push({ ...base, ok: false, code: 'groups_unreadable' });
-      else if (v.code === 'not_owner' && !B.grantRowOf(p)) out.push({ ...base, ok: false, code: 'unknown_shape' });
+      else if (v.code === 'not_owner' && (v.unknown || !B.grantRowOf(p))) out.push({ ...base, ok: false, code: 'unknown_shape' });   // B-e630: a row this release cannot read is said as that, never «not open»
+      else if (v.code === 'not_owner') out.push({ ...base, ok: false, code: 'not_open' });   // B-e630 (ONE HOME): a profile whose READABLE grant row does not open it to this conversation is listed too — the person's door to it is here
     }
     return out;
   }

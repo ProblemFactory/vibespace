@@ -17,7 +17,8 @@
  *                `request: true` ⇒ it may only ASK for it (a channel reach row at level «may request» — cure r1, MUST 2):
  *                its own state, never «may use»
  *     ok false ⇒ `code` excepted (a 「除了」 took it out: `except` names it) | groups_unreadable (its Task Groups could not be
- *                read: UNKNOWN, never «none») | unknown_shape (the door cannot read the row) | vault_locked; any other refusal
+ *                read: UNKNOWN, never «none») | unknown_shape (the door cannot read the row) | vault_locked | not_open (B-e630:
+ *                a browser profile whose readable row does not name it — listed «closed» with its door); any other refusal
  *                is «not granted» and is never listed
  *     parent   ⇒ the row it sits under (a channel grain under its account: `account:<adapterId>`)
  * TWO DOORS ARE NOT SHOWN (NOT_SHOWN): automation-key-reach and group-visibility judge this conversation as a TARGET (which
@@ -51,11 +52,11 @@ const UNCUT = Object.freeze(['exits', 'windows']);
  *  exit-reach session / group / everyone, window-reach session / self-open / group / everyone, the model conversation /
  *  group / everyone). */
 const VIA = Object.freeze({ conversation: 'self', own: 'self', session: 'self', self: 'self', 'self-open': 'self', task: 'group', group: 'group', all: 'everyone', everyone: 'everyone' });
-const LISTED_REFUSALS = Object.freeze(['excepted', 'groups_unreadable', 'unknown_shape', 'vault_locked']);
+const LISTED_REFUSALS = Object.freeze(['excepted', 'groups_unreadable', 'unknown_shape', 'vault_locked', 'not_open']);
 const RANK = Object.freeze({ self: 0, group: 1, everyone: 2 });
 const str = (v) => (v === undefined || v === null ? '' : String(v));
 
-/** One answer as the view keeps it — null when it is not listed (a refusal other than the four, a door not shown). */
+/** One answer as the view keeps it — null when it is not listed (a refusal outside LISTED_REFUSALS, a door not shown). */
 function rowOf(a) {
   if (!a || typeof a !== 'object' || !DOOR_KIND[a.door]) return null;
   const base = { door: a.door, resource: str(a.resource), name: str(a.name) || str(a.resource), ...(a.detail && typeof a.detail === 'object' ? { detail: a.detail } : {}), ...(a.parent ? { parent: str(a.parent) } : {}) };
@@ -65,12 +66,13 @@ function rowOf(a) {
     return { ...base, state: a.request === true ? 'request' : 'ok', via, ...(via === 'group' && a.groupId ? { groupId: str(a.groupId) } : {}) };
   }
   if (!LISTED_REFUSALS.includes(a.code)) return null;
+  if (a.code === 'not_open') return { ...base, state: 'closed' };   // B-e630: a resource this conversation may not use (its grant row names others) — listed with its door
   if (a.code === 'excepted') return { ...base, state: 'excepted', ...(a.except && typeof a.except === 'object' ? { except: { kind: a.except.kind === 'group' ? 'group' : 'conversation', id: str(a.except.id || a.except.key) } } : {}) };
   return { ...base, state: 'unknown', code: a.code };
 }
 /** The order inside one list: its own, then a Task Group's, then everyone's; then what it may only ask for; then the ones a
  *  「除了」 takes out; the unknown last — each by name. */
-const rankOf = (r) => (r.state === 'ok' ? RANK[r.via] : r.state === 'request' ? 3 : r.state === 'excepted' ? 4 : 5);
+const rankOf = (r) => (r.state === 'ok' ? RANK[r.via] : r.state === 'request' ? 3 : r.state === 'excepted' ? 4 : r.state === 'closed' ? 6 : 5);   // B-e630: a closed one after the unknown (an unreadable row stays named)
 function byRank(a, b) { return rankOf(a) - rankOf(b) || (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : 0) || (a.resource < b.resource ? -1 : a.resource > b.resource ? 1 : 0); }
 /** Each standing bounded on its own — NAMED_MAX of what it may use, of what it may ask for, of what is left out or unknown —
  *  the rest of each counted; `max` Infinity ⇒ never cut. */
@@ -134,4 +136,16 @@ function viewOf({ facts = {}, answers = [], accounts = [] } = {}) {
   return { facts: f, kinds };
 }
 
-module.exports = { KINDS, DOOR_KIND, NOT_SHOWN, NAMED_MAX, UNCUT, VIA, LISTED_REFUSALS, rowOf, byRank, bounded, viewOf };
+/** B-e630 (主开发's ruling, 2026-11-18): THE CONNECT FORM'S FOLD for a channel whose capability row says a browser sign-in can
+ *  stand for it (`browserSignIn` — the adapter contract's entry): a line and its door when THIS conversation cannot use at least one
+ *  of the person's browser profiles. The GRANT facts only (the may-use view's browser rows); never a profile's name or label — the
+ *  person recognises the profile by its own name in the profiles' list. → null | {n} (how many it may not use). */
+function browserSignInFold(browserSignIn, view) {
+  if (browserSignIn !== true || !view || !Array.isArray(view.kinds)) return null;
+  const br = view.kinds.find((k) => k && k.kind === 'browser');
+  if (!br || br.remote || !Array.isArray(br.profiles)) return null;
+  const n = br.profiles.filter((r) => r && (r.state === 'closed' || r.state === 'excepted')).length;   // KNOWN not usable — an unknown row (a part that failed, groups unreadable) claims nothing
+  return n > 0 ? { n } : null;
+}
+
+module.exports = { KINDS, DOOR_KIND, NOT_SHOWN, NAMED_MAX, UNCUT, VIA, LISTED_REFUSALS, rowOf, byRank, bounded, viewOf, browserSignInFold };

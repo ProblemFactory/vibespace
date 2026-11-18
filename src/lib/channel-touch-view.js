@@ -74,12 +74,12 @@ const clock = (at) => { const d = new Date(Number(at) || 0); return `${String(d.
  *  hits were nowhere to be seen); a read opens the conversation; a row that names a proposal the Outbox — lane outbox-chip-door:
  *  `filter` = the chat's own «drafted by <this conversation>» (ChatView._outboxFilter), `show` = that proposal, `inside` = this door
  *  is INSIDE a conversation: it never clears a filter the person opened. */
-export function openTouchRow(app, row, { filter = null } = {}) {
+export function openTouchRow(app, row, { filter = null, conversation = null } = {}) {
   if (!app || !row) return;
   if (row.ops && row.ops.api) { showApiAccessDialog(app, row.adapterId); return; }   // B-2198: a raw API call row opens its credential's API access (the waiting card, the log)
   const v = T.openVerdict(row, { filter, recordOf: heldProposalLookup() });
   if (v.open === 'search' && typeof app.openChannelSearch === 'function') app.openChannelSearch({ adapterIds: [v.adapterId], q: v.query, convId: v.convId, convTitle: v.title, hits: v.hits, memo: v.memo, searchedAt: v.searchedAt });
-  else if (v.open === 'connect') { if (typeof app.openChannelConnect === 'function') app.openChannelConnect(v.kind); }   // lane pod-oauth-callback: the agent's «Connect <type>» — the Connect dialog on that type
+  else if (v.open === 'connect') { if (typeof app.openChannelConnect === 'function') app.openChannelConnect(v.kind, { conversation }); }   // B-e630: + the conversation it was asked in   // lane pod-oauth-callback: the agent's «Connect <type>» — the Connect dialog on that type
   else if (v.open !== 'outbox') app.openChannel(v.adapterId, v.convId);
   else if (typeof app.openChannelOutbox === 'function') app.openChannelOutbox({ inside: true, ...(v.filter ? { filter: v.filter } : {}), ...(v.show ? { show: v.show } : {}) });
 }
@@ -277,7 +277,7 @@ export function createChannelTouchView(view) {
         rowEl.dataset.key = r.key;
         const g = el('span', 'cct-glyph'); g.dataset.glyph = '';
         rowEl.append(g, el('span', 'cct-name', ''), el('span', 'cct-words chat-status-dim', ''), el('span', 'cct-time chat-status-dim', ''));
-        rowEl.addEventListener('click', (ev) => { ev.stopPropagation(); openTouchRow(view.app, rowEl._row, { filter: view._outboxFilter?.() || null }); });
+        rowEl.addEventListener('click', (ev) => { ev.stopPropagation(); openTouchRow(view.app, rowEl._row, { filter: view._outboxFilter?.() || null, conversation: view._connectConversation?.() || null }); });
       }
       rowEl._row = r;
       const openV = T.openVerdict(r, { recordOf });

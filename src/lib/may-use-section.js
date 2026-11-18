@@ -56,6 +56,7 @@ export function mountMayUse(app, getRef) {
     if (r.state === 'ok') return r.via === 'self' ? t('itself') : r.via === 'group' ? t('through Task Group {name}', { name: quoted([groupNameOf(app, r.groupId)]) }) : t('all agents');
     if (r.state === 'request') return t('may ask for it — the request comes to you');   // a reach row at «may request»: never «may see»
     if (r.state === 'excepted') return t('left out — Except: {name}', { name: r.except ? exceptName(r.except) : t('this conversation') });
+    if (r.state === 'closed') return t('not open to this conversation');   // B-e630: its door («Who can use it») is on the row
     return r.code === 'groups_unreadable' ? t('unknown — its Task Groups could not be read') : t('cannot be read by this release');
   }
   function exceptName(p) {

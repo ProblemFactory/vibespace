@@ -310,6 +310,7 @@ const caps = Object.freeze({
   // is the listing walk (threads.list pages), never a read per thread.
   changeFeed: Object.freeze({ via: 'history', authority: 'authoritative', scope: SCOPE, pagesPerPass: 1, perMin: 6 }),
   scanSources: null,
+  browserSignIn: true,   // B-e630: its own web app works in a signed-in browser profile
   scanLatency: null,
   history: 'page',
   historyBySource: null,

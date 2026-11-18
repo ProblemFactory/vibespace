@@ -428,5 +428,54 @@ console.log('— ⑰ B-460d + B-70f9: Session Properties holds the CPU priority 
     '⑰ both units stand in Session Properties: the CPU priority row in the identity section (B-460d), the may-use section of its own after it, mounted once per window');
 }
 
+// B-e630 (主开发's ruling 2026-11-18): ONE HOME + THE CONNECT FORM'S FOLD, from the GRANT facts only. A profile whose grant row does
+// not open it to this conversation is LISTED (state closed, its «Who can use it» door on the row); the Connect form of a type whose
+// capability row says a browser sign-in can stand for it draws its line + door when this conversation cannot use at least one
+// profile — never by a profile's name or label
+{
+  const row = (name, ok, code) => ({ door: 'browser-profile', resource: 'bp-' + name.toLowerCase().replace(/\W+/g, ''), name, ...(ok ? { ok: true, via: 'self' } : { ok: false, code }) });
+  const view = (answers, facts = {}) => M.viewOf({ facts: { live: true, ...facts }, answers, accounts: [] });
+  const closed = M.rowOf(row('Work', false, 'not_open'));
+  ok(closed && closed.state === 'closed' && M.LISTED_REFUSALS.includes('not_open'), 'B-e630 ONE HOME: a profile not open to this conversation (not_open) is a LISTED row, state closed', closed);
+  const bOf = (v) => v.kinds.find((k) => k.kind === 'browser');
+  const both = bOf(view([row('Mine', true), row('Lark (company login)', false, 'not_open')]));
+  ok(both.profiles.map((r) => r.state).join() === 'ok,closed', 'B-e630: the usable profile first, the closed one after it — each by its own name', both.profiles);
+  const F = M.browserSignInFold;
+  const cases = {
+    none: F(true, view([])),
+    allUsable: F(true, view([row('Mine', true), row('Lark (company login)', true)])),
+    oneClosed: F(true, view([row('Mine', true), row('Work', false, 'not_open')])),
+    labelSaysLarkButUsable: F(true, view([row('Lark (company login)', true)])),
+    noSuchCaps: F(false, view([row('Work', false, 'not_open')])),
+    remote: F(true, view([row('Work', false, 'not_open')], { remote: true })),
+    unknownOnly: F(true, view([row('Groups', false, 'groups_unreadable'), row('Odd', false, 'unknown_shape')])),
+    leftOut: F(true, view([row('Kept', false, 'excepted')])),
+  };
+  ok(cases.none === null && cases.allUsable === null && cases.oneClosed && cases.oneClosed.n === 1 && cases.labelSaysLarkButUsable === null && cases.noSuchCaps === null && cases.remote === null && cases.unknownOnly === null && cases.leftOut && cases.leftOut.n === 1,
+    'B-e630 THE FOLD: no profile — no line; every profile usable — no line; one it may not use — the line (n 1) whatever its name; a type without browserSignIn, a conversation on another machine, rows only UNKNOWN (a part that failed, groups unreadable) — no line; one left out by an Except — the line', cases);
+  // RED: a fold drawn from a profile's LABEL (the ruling's named wrong road) answers the label, not the grant
+  const src = fs.readFileSync(path.join(REPO, 'src/may-use-model.js'), 'utf8');
+  const cut = "  const n = br.profiles.filter((r) => r && (r.state === 'closed' || r.state === 'excepted')).length;   // KNOWN not usable — an unknown row (a part that failed, groups unreadable) claims nothing";
+  ok(src.includes(cut), 'control setup (B-e630): the grant count is where the control cuts');
+  const MCe = mutantCopies('may-use-e630', REPO);
+  const Ml = require(MCe.write('src/may-use-model.js', src.replace(cut, "  const n = br.profiles.filter((r) => /lark|飞书/i.test(String(r.name || ''))).length;"), 'by-label'));
+  const lab = { closedNoLabel: Ml.browserSignInFold(true, Ml.viewOf({ facts: { live: true }, answers: [row('Work', false, 'not_open')], accounts: [] })), usableWithLabel: Ml.browserSignInFold(true, Ml.viewOf({ facts: { live: true }, answers: [row('Lark (company login)', true)], accounts: [] })) };
+  ok(lab.closedNoLabel === null && lab.usableWithLabel && lab.usableWithLabel.n === 1, 'CONTROL (B-e630): a fold drawn from a profile\'s label misses the closed profile named «Work» and offers a door for a usable one named Lark (RED for the leg above)', lab);
+  // the wiring: the keeper lists not_open, the contract validates the entry, the three web adapters declare it, the dialog draws the fold
+  const keeper = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), contract = fs.readFileSync(path.join(REPO, 'src/channels/index.js'), 'utf8');
+  const dlg = fs.readFileSync(path.join(REPO, 'src/lib/channel-account-dialogs.js'), 'utf8'), eng = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const declared = ['lark', 'slack', 'gmail'].filter((a) => /\n  browserSignIn: true,/.test(fs.readFileSync(path.join(REPO, `src/channels/${a}.js`), 'utf8')));
+  const notLark = ['src/lib/channel-account-dialogs.js', 'src/may-use-model.js'].filter((f) => /['"]lark['"]/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
+  ok(/else if \(v\.code === 'not_owner'\) out\.push\(\{ \.\.\.base, ok: false, code: 'not_open' \}\);/.test(keeper) && /c\.browserSignIn !== undefined && typeof c\.browserSignIn !== 'boolean'/.test(contract)
+    && declared.join() === 'lark,slack,gmail' && /browserSignIn: !!m\.caps\.browserSignIn/.test(eng) && /if \(k\.browserSignIn && conversation && conversation\.sessionKey\) fields\.push\(\{ key: `bsi\$\{sfx\}`, type: 'node', node: browserSignInNode\(app, k, conversation, mayUseFacts\), when: is\(k\.kind\) \}\);/.test(dlg) && (dlg.match(/fetchJson\(`\/api\/may-use/g) || []).length === 1
+    && /const fold = r && r\.ok \? browserSignInFold\(true, r\.view\) : null;/.test(dlg) && /app\.openSessionProps\(s, \{ section: 'may-use' \}\)/.test(dlg) && !/browser-trace-view/.test(dlg) && /else if \(v\.code === 'not_owner' && \(v\.unknown \|\| !B\.grantRowOf\(p\)\)\) out\.push\(\{ \.\.\.base, ok: false, code: 'unknown_shape' \}\);/.test(keeper) && !notLark.length,
+    'B-e630 wiring: the keeper lists a not-open profile (an unreadable row stays unknown); the adapter contract validates browserSignIn and lark / slack / gmail declare it; the kinds carry it; the Connect dialog reads the facts ONCE, draws the fold from them, its door the conversation\'s own What it may use; no generic file names an adapter', { declared, notLark });
+  const BP = require(path.join(REPO, 'src/browser-profiles.js'));
+  const unread = BP.mayAttach({ id: 'bp-0000e630', label: 'Lark (company login)', grantUse: { unknown: true } }, { browserKey: 'bk-0000e630', conversationKeys: ['claude:e630'] });
+  const others = BP.mayAttach({ id: 'bp-0000e631', label: 'Lark (company login)', grantUse: { to: ['claude:someone-else'], except: [] } }, { browserKey: 'bk-0000e630', conversationKeys: ['claude:e630'] });
+  ok(unread && unread.code === 'not_owner' && unread.unknown === true && others && others.ok === false && others.code === 'not_owner' && !others.unknown,
+    'B-e630: an unreadable «Who can use it» answers not_owner WITH unknown (the keeper says it unknown); a readable row naming others answers not_owner without it (the keeper lists it «not open»)', { unread, others });
+}
+
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(fail ? 1 : 0);

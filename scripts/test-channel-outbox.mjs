@@ -3754,7 +3754,7 @@ async function chatReadLegs(ENGmod, name) {
         });
         await legOSC('OCD the wiring: the chip\'s rows and the tool-card rows reach the ONE door WITH the chat\'s filter; the row\'s state words come through the chat', () => {
           const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf-8'), tv = fs.readFileSync(path.join(REPO, 'src/lib/channel-touch-view.js'), 'utf-8'), sb = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf-8');
-          return [cv.includes('onChannelOpen: (row) => openTouchRow(this.app, row, { filter: this._outboxFilter() })') && tv.includes('openTouchRow(view.app, rowEl._row, { filter: view._outboxFilter?.() || null })') && cv.includes('channelRowWords: rowProposalWords') && sb.includes('this._paintChannelRowStates();\n    const face = outboxChipFace(v);'), 'wiring'];
+          return [cv.includes('onChannelOpen: (row) => openTouchRow(this.app, row, { filter: this._outboxFilter(), conversation: this._connectConversation() })') && tv.includes('openTouchRow(view.app, rowEl._row, { filter: view._outboxFilter?.() || null, conversation: view._connectConversation?.() || null })') && cv.includes('channelRowWords: rowProposalWords') && sb.includes('this._paintChannelRowStates();\n    const face = outboxChipFace(v);'), 'wiring'];
         });
       }
     } finally { Date.now = realNow; }

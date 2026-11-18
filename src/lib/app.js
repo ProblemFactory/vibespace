@@ -2506,10 +2506,10 @@ class App {
   openChannelSearch(opts) { return openSearchResults(this, opts || {}); }
   /** lane pod-oauth-callback (study 1 L1 / study 2 M2): the Connect an account dialog OPEN ON ONE TYPE — the chat's
    *  «Connect <type>» row (an agent's `vibespace-channels connect <kind>`); the types are the panel's own (`kinds`). */
-  async openChannelConnect(kind, { flowId = null } = {}) {   // B-8edd: `flowId` = the landed sign-in a For-you item names
+  async openChannelConnect(kind, { flowId = null, conversation = null } = {}) {   // B-8edd: `flowId` = the landed sign-in a For-you item names; B-e630: `conversation` {sessionKey, webuiId} — the chat it was opened from (its browser-profile fold)
     const d = await fetchJson('/api/channels?scope=accounts');
     if (!d || d.error) { showToast(t('Channels are not available on this instance'), { type: 'error' }); return null; }
-    return showConnectAccountDialog(this, d.kinds || [], { kind: typeof kind === 'string' ? kind : null, flowId: typeof flowId === 'string' && flowId ? flowId : null });
+    return showConnectAccountDialog(this, d.kinds || [], { kind: typeof kind === 'string' ? kind : null, flowId: typeof flowId === 'string' && flowId ? flowId : null, conversation: conversation && conversation.sessionKey ? conversation : null });
   }
   /** THE For-you window (design-user-inbox-reply §9) — a singleton kind; `{itemId, sessionKey, syncId}`:
    *  select that item / scope to that session; an open window is revealed and re-pointed (a replay never re-points). */

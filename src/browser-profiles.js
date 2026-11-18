@@ -1711,7 +1711,7 @@ function mayAttach(profile, { browserKey, conversationKeys = null, taskIds = [],
     return { ok: false, code: 'not_attachable', error: `"${profile.label}" is another conversation's own temporary browser — it is never shared` };
   }
   const row = grantRowOf(profile);
-  if (!row) return { ok: false, code: 'not_owner', error: `profile "${profile.label}"'s "Who can use it" cannot be read by this release — ask the user to set it again (or to "All agents") in the Agent browser panel` };
+  if (!row) return { ok: false, code: 'not_owner', unknown: true, error: `profile "${profile.label}"'s "Who can use it" cannot be read by this release — ask the user to set it again (or to "All agents") in the Agent browser panel` };
   // THE ONE ADMISSION (src/grant-model.js admits) over the store's row: the asker by its conversation key(s) — the keeper
   // maps its browser key to them; one it cannot map is judged by its browser key itself (every conversation may ⇒ it may) —
   // and its live Task Groups, minus the members the user left out
@@ -1720,7 +1720,7 @@ function mayAttach(profile, { browserKey, conversationKeys = null, taskIds = [],
   if (v.ok) return v.via === 'everyone' ? { ok: true, via: 'all' } : v.via === 'conversation' ? { ok: true, via: 'conversation' } : { ok: true, via: 'task', taskId: v.entry.id };
   if (v.code === 'groups_unreadable') return groupsUnreadableRefusal({ label: profile.label });
   if (v.code === 'excepted') return exceptedRefusal({ label: profile.label });
-  if (v.code === 'unknown_shape') return { ok: false, code: 'not_owner', error: `profile "${profile.label}"'s "Who can use it" cannot be read by this release — ask the user to set it again (or to "All agents") in the Agent browser panel` };
+  if (v.code === 'unknown_shape') return { ok: false, code: 'not_owner', unknown: true, error: `profile "${profile.label}"'s "Who can use it" cannot be read by this release — ask the user to set it again (or to "All agents") in the Agent browser panel` };
   return notOwnerRefusal({ label: profile.label });
 }
 /**

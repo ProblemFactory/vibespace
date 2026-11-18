@@ -1300,7 +1300,7 @@ console.log('lane vault-paste-request: an agent\'s request for a secret — the 
     const actSrc = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8'), appSrc = fs.readFileSync(path.join(ROOT, 'src/lib/app.js'), 'utf8'), dlgSrc = fs.readFileSync(path.join(ROOT, 'src/lib/channel-account-dialogs.js'), 'utf8');
     const PINS = [
       [actSrc, "if (btn && btn.door === 'connect') return !!(await app.openChannelConnect(String(rec.action.kind || ''), { flowId: typeof rec.action.flowId === 'string' ? rec.action.flowId : null }));"],
-      [appSrc, "return showConnectAccountDialog(this, d.kinds || [], { kind: typeof kind === 'string' ? kind : null, flowId: typeof flowId === 'string' && flowId ? flowId : null });"],
+      [appSrc, "return showConnectAccountDialog(this, d.kinds || [], { kind: typeof kind === 'string' ? kind : null, flowId: typeof flowId === 'string' && flowId ? flowId : null, conversation: conversation && conversation.sessionKey ? conversation : null });"], // the restack's meeting of B-8edd (flowId) with B-e630 (the chat's conversation): one options object
       [dlgSrc, "if (askedFlow && k.kind === kind) { try { st = await capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?flowId=${enc(askedFlow)}`); } catch { st = null; } }"],
     ];
     const door = ((FA0.ROW_OF['channel-connect'] || {}).buttons || [])[0] || {};

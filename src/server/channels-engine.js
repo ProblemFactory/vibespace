@@ -3949,7 +3949,7 @@ function create(deps = {}) {
       // lane channel-row-notices: the push lane's setup steps (the setup card's «Real-time push (optional)», Diagnostics)
       pushSetup: m.pushSetup && Array.isArray(m.pushSetup.steps) ? { steps: m.pushSetup.steps.map((s) => ({ words: s.words, code: s.code || null })), after: m.pushSetup.after || null } : null,
       optionsSchema: (m.OPTIONS || []).map((o) => ({ key: o.key, label: o.label, help: o.help || '', default: o.default === undefined ? '' : o.default, placeholder: o.placeholder || '', choices: Array.isArray(o.choices) ? o.choices.slice() : null, choiceLabels: o.choiceLabels && typeof o.choiceLabels === 'object' ? { ...o.choiceLabels } : null, usedWhen: o.usedWhen && typeof o.usedWhen === 'object' ? JSON.parse(JSON.stringify(o.usedWhen)) : null, ...(o.signIn === true ? { signIn: true } : {}), ...(o.presetFact === true ? { presetFact: true } : {}) })),   // lane oauth-setup-instructions: `signIn` = read at each sign-in; lane gmail-connect-wall: `presetFact` = a preset's admin states it
-      receive: m.caps.receive, sendAs: m.caps.sendAs, pushOptIn: !!m.caps.pushOptIn,
+      receive: m.caps.receive, sendAs: m.caps.sendAs, pushOptIn: !!m.caps.pushOptIn, browserSignIn: !!m.caps.browserSignIn,   // B-e630
     };
   }
   /** This conversation's outbox counts (the digest half; the list is the
