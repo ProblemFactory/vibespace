@@ -12,6 +12,7 @@ const fs = require('fs');
 const SP = require('../sent-provenance.js'); // B-9a2e (PURE): a scan's own conversation rows, handed as data
 const os = require('os');
 const crypto = require('crypto');
+const SOCK = require('../sock-path.js');   // B-3767 unit 2: THE folder verdict (ensureSocketDir) for the zst cache
 // S3: the codex naming rule + zstd rollout readers live in discovery-facts
 // (the tiny module the daemon bundle and every discovery collector share)
 const { deriveCodexSessionName, classifyCodexThread, deriveCodexAgentName, ZSTD_SUPPORTED, isZstPath, isZstBuffer, zstdDecompressFrames, readHeadText, CODEX_ROLLOUT_RE } = require('../discovery-facts');
@@ -32,14 +33,18 @@ const CODEX_SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
 // reader fails with a NAMED error instead of a >512MB string.
 const ZST_MAX_PLAIN = 256 * 1024 * 1024;
 const ZST_CACHE_MAX = 24;
+// B-3767 unit 2 (主开发 11:40Z): the cache folder is judged before use — sock-path's ensureSocketDir (made 0700; a folder, not a link,
+// this uid's, no group/other bits). A folder another user planted is refused BY NAME with the way out (a coded error, as the
+// reader's other refusals are), never written through; a refusal is not kept, so a removed folder is used at the next read
 let _zstCacheDir = null;
 function zstCacheDir() {
   if (_zstCacheDir) return _zstCacheDir;
   let uid = '';
   try { uid = String(os.userInfo().uid); } catch { uid = 'u'; }
-  _zstCacheDir = path.join(os.tmpdir(), `vibespace-zst-${uid}`);
-  try { fs.mkdirSync(_zstCacheDir, { recursive: true, mode: 0o700 }); } catch { }
-  return _zstCacheDir;
+  const dir = path.join(os.tmpdir(), `vibespace-zst-${uid}`);
+  const v = SOCK.ensureSocketDir(dir);
+  if (!v.ok) throw Object.assign(new Error(`the compressed-transcript cache ${dir} is refused: ${String(v.why).split(' — a socket')[0]} (the way out: remove that folder if this hub did not make it, or start the hub with TMPDIR set to a private folder)`), { code: 'EZSTCACHE' });
+  return (_zstCacheDir = dir);
 }
 function fileIsZst(fp) {
   if (isZstPath(fp)) return true;

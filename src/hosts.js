@@ -16,6 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const SOCK = require('./sock-path.js');   // B-3767 unit 2: THE folder verdict (ensureSocketDir) for the ssh control folder
 const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
 const { parseReceiptLines } = require('./harness-config'); // CFG| receipt lines from the shipped helper (design-harness-settings §6)
 const { execFile } = require('child_process');
@@ -146,7 +147,12 @@ class HostManager {
     // + cm-<40hex>.<tmpsuffix> overflowed), so masters live in a short
     // per-uid tmp dir instead.
     this._cmDir = path.join(os.tmpdir(), `vs-cm-${process.getuid ? process.getuid() : 'u'}`);
-    try { fs.mkdirSync(this._cmDir, { recursive: true, mode: 0o700 }); } catch { }
+    // B-3767 unit 2 (主开发 11:40Z): the folder is judged before use — sock-path's ensureSocketDir (made 0700; a folder, not a link,
+    // this uid's, no group/other bits). A folder another user planted is refused BY NAME, once, with the way out, and ssh runs
+    // WITHOUT connection sharing — never a control socket in somebody else's folder (before: a mkdir in a catch, then used)
+    const cm = SOCK.ensureSocketDir(this._cmDir);
+    this._cmRefused = cm.ok ? null : `${this._cmDir}: ${cm.why}`;
+    if (this._cmRefused) console.warn(`[hosts] ssh connection sharing is off — its control folder is refused: ${this._cmRefused} (the way out: remove that folder if this hub did not make it, or start the hub with TMPDIR set to a private folder)`);
     this._state = { hosts: [] };
     this._discoveryCache = new Map(); // hostId -> {at, sessions}
     // LAST-KNOWN discovery results, persisted across restarts (2.124.0): the
@@ -700,7 +706,7 @@ class HostManager {
     if (h && h.transport === 'dial') throw new Error(`"${h.name}" is a dial-out device — it has no ssh; this operation must ride the device link`);
     const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22), ...this._tailnetOpts(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
-    if (multiplex) {
+    if (multiplex && !this._cmRefused) {
       args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
     }
     if (tty) args.push('-t');
@@ -725,8 +731,8 @@ class HostManager {
   sshCmd(h) {
     const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22), ...this._tailnetOpts(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
-    // rsync transports are short-lived per-op — ride the shared master too
-    args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
+    // rsync transports are short-lived per-op — ride the shared master too (unless its folder was refused)
+    if (!this._cmRefused) args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
     return 'ssh ' + args.map((a) => (/[\s"']/.test(a) ? JSON.stringify(a) : a)).join(' ');
   }
 

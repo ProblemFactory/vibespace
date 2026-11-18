@@ -1909,6 +1909,58 @@ console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, 
   const op0 = procWalks(() => TW0.runOp('codexOpenThreads', {}));
   ok(op0.n >= 1, 'CONTROL (B-f64b): the op without its guard walks /proc on the main thread (RED for the leg above)', { n: op0.n });
 }
+// ⑦ B-3767 unit 2 (主开发 11:40Z): THE TWO PER-USER FOLDERS ARE JUDGED BEFORE USE (sock-path ensureSocketDir — 0700, a folder, not
+// a link, this uid's, no group/other bits). A link planted at the per-user name (a stray, or another user's) is refused BY NAME
+// with the way out, and nothing goes through it: the zst cache throws EZSTCACHE and writes no twin there; the ssh control folder
+// turns connection sharing off (no ControlPath into it). RED controls: the release's mkdir-in-a-catch, then used.
+console.log('⑦ the zst cache and the ssh control folder are judged before use (B-3767 unit 2)');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('zst-own', REPO);
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-zst-own-')), away = path.join(T, 'away'), good = path.join(T, 'good');
+  fs.mkdirSync(away); fs.mkdirSync(good, { mode: 0o700 });
+  const uid = process.getuid();
+  fs.symlinkSync(away, path.join(T, `vibespace-zst-${uid}`)); fs.symlinkSync(away, path.join(T, `vs-cm-${uid}`));
+  const prevT = process.env.TMPDIR, warn0 = console.warn, warned = [];
+  try {
+    process.env.TMPDIR = T;
+    // the zst cache
+    const cxSrc = read('src/adapters/codex.js');
+    const CXA = '  const v = SOCK.ensureSocketDir(dir);\n';
+    const NEW = M.load('src/adapters/codex.js', cxSrc, 'own');
+    let err = null; try { NEW.plainJsonlPath(zstPath); } catch (e) { err = e; }
+    const awayAfterNew = fs.readdirSync(away).length;
+    ok(cxSrc.includes(CXA) && !!err && err.code === 'EZSTCACHE' && err.message.includes(path.join(T, `vibespace-zst-${uid}`)) && /SYMLINK/.test(err.message) && /the way out/.test(err.message) && awayAfterNew === 0,
+      `B-3767 unit 2: a link at the zst cache's per-user name is refused by name with the way out, and no twin is written through it (${err ? err.code + ': ' + err.message.slice(0, 160) : 'no error'}; ${awayAfterNew} file(s) behind the link)`);
+    const OLD = M.load('src/adapters/codex.js', cxSrc.replace(CXA, '  const v = { ok: true }; try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { }\n'), 'old');
+    let oldTwin = null; try { oldTwin = OLD.plainJsonlPath(zstPath); } catch { }
+    ok(!!oldTwin && fs.realpathSync(oldTwin).startsWith(fs.realpathSync(away) + '/'), `CONTROL B-3767 unit 2: the release's mkdir-in-a-catch wrote the twin through the planted link (red): ${oldTwin}`);
+    for (const f of fs.readdirSync(away)) fs.rmSync(path.join(away, f), { force: true });
+    // the ssh control folder
+    console.warn = (...a) => { warned.push(a.join(' ')); };
+    const hostsSrc = read('src/hosts.js');
+    const HA = '    const cm = SOCK.ensureSocketDir(this._cmDir);\n';
+    const h = { id: 'host-own', host: 'example.invalid', user: 'u', port: 22 };
+    const dataA = path.join(T, 'data-a'); fs.mkdirSync(dataA);
+    const HM1 = M.load('src/hosts.js', hostsSrc, 'own').HostManager;
+    const refused = new HM1({ dataDir: dataA });
+    const argsRefused = refused.sshArgs(h, { multiplex: true }).join(' ');
+    const warnOnce = warned.filter((w) => /ssh connection sharing is off/.test(w));
+    process.env.TMPDIR = good;
+    const fine = new HM1({ dataDir: path.join(T, 'data-b') });
+    const argsFine = fine.sshArgs(h, { multiplex: true }).join(' ');
+    ok(hostsSrc.includes(HA) && !/ControlMaster|ControlPath/.test(argsRefused) && !/ControlPath/.test(refused.sshCmd(h)) && warnOnce.length === 1 && warnOnce[0].includes(path.join(T, `vs-cm-${uid}`)) && /the way out/.test(warnOnce[0]) && /ControlPath=/.test(argsFine) && argsFine.includes(path.join(good, `vs-cm-${uid}`)),
+      `B-3767 unit 2: a link at the ssh control folder's name turns connection sharing OFF (no ControlPath into it), said once with the path and the way out; a private folder keeps it (${JSON.stringify({ refusedHasCM: /ControlMaster/.test(argsRefused), warned: warnOnce.length })})`);
+    process.env.TMPDIR = T;
+    const HM0 = M.load('src/hosts.js', hostsSrc.replace(HA, '    const cm = { ok: true }; try { fs.mkdirSync(this._cmDir, { recursive: true, mode: 0o700 }); } catch { }\n'), 'old').HostManager;
+    const oldArgs = new HM0({ dataDir: path.join(T, 'data-c') }).sshArgs(h, { multiplex: true }).join(' ');
+    ok(oldArgs.includes(`ControlPath=${path.join(T, `vs-cm-${uid}`)}`), 'CONTROL B-3767 unit 2: the release put its ControlPath into the planted link (red)');
+  } finally {
+    console.warn = warn0;
+    if (prevT === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prevT;
+    try { fs.rmSync(T, { recursive: true, force: true }); } catch { }
+  }
+}
 try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
