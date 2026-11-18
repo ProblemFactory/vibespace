@@ -210,9 +210,12 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
    *  ends those connections first, so the promise cannot wait on a lingering one — TRUE ONLY for a flow still running at the
    *  stop (cancel() releases it with the drop) and on a Node that has closeAllConnections (≥ 18.2; without it the drop is
    *  skipped and the promise waits for the connections' own end). A flow that had ended before the stop released its server
-   *  without the drop: its promise is the close of whatever connection it still held (Node ≥ 19's close() ends the IDLE
-   *  ones itself; one whose response is still being written ends when it is written). The promise is made on EVERY release
-   *  (a cancel, a timeout, a finished exchange) and read only by stopAll(): a promise nobody awaits holds nothing — harmless */
+   *  without the drop: its promise is the close of whatever connection it still held — close() ends the IDLE ones itself
+   *  (Node ≥ 19), but keeps one whose response is not yet written (closeIdleConnections skips it on Node 22 and 24): a chain
+   *  page answers after its exchange and its report, so that connection ends when the page is written — on a flow cancelled
+   *  DURING its exchange, after the vendor answers (a later stopAll() cannot drop it: cancel() refuses an ended flow). The
+   *  promise is made by the release that closes a server and read only by stopAll(): a promise nobody awaits holds nothing —
+   *  harmless */
   function release(st, { drop = false } = {}) {
     if (st.server) {
       const srv = st.server;
