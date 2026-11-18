@@ -268,8 +268,8 @@ function commandTouchesChannels(cmd) { return channelsRuns(cmd).length > 0; }
 const inertRun = (x) => !x.execs && (!!x.lookup || INERT_COMMANDS.includes(x.base));
 /** r3: does a command line send work to the BACKGROUND that outlives the call — a non-inert command ended by `&` (r4: a
  *  group's commands too) whose job the line does not end itself (r6: `ended` — a FOREGROUND `wait` / `kill` of that job,
- *  shell-words endJobs), or a `vibespace-job run` / `start`? */
-const backgrounds = (ran) => ran.some((x) => (x.bg && !x.ended && !inertRun(x)) || (x.base === 'vibespace-job' && (x.verb === 'run' || x.verb === 'start'))) || (ran.unknown.length > 0 && !!ran.mayBg);   // r14: an UNKNOWN line with a single `&` may leave a job running
+ *  shell-words endJobs), or a `vibespace-job run` / `start` / `restart` (bl-jobs batch 8, B-cac2)? */
+const backgrounds = (ran) => ran.some((x) => (x.bg && !x.ended && !inertRun(x)) || (x.base === 'vibespace-job' && (x.verb === 'run' || x.verb === 'start' || x.verb === 'restart'))) || (ran.unknown.length > 0 && !!ran.mayBg);   // r14: an UNKNOWN line with a single `&` may leave a job running
 
 /** lane touch-chip-cause r2: a command line every command word of which RUNS NOTHING ELSE (RUNS_NOTHING) — it could not
  *  have run the CLI. An empty line runs nothing; r3: a line with BLIND text (cut off, an unclosed heredoc) could run; r14:

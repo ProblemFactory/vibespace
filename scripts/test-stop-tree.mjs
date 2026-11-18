@@ -341,27 +341,36 @@ const svcScene = async (Mod, tag) => {
   J.init();
   const caller = { conversationId: 'conv-st', sessionId: 'sess-st', sessionCreatedAt: 1, groups: new Set() };
   const owner = { conversation: { backend: 'claude', id: 'conv-st' }, sessionId: 'sess-st', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
-  const r = J.create({ kind: 'service', name: 'svc-' + tag, cmd: { argv: ['sh', '-c', 'trap "sleep 0.3; exit 0" TERM; while :; do sleep 0.1; done'] }, owner }, caller);
+  // READY once its trap is set (the box-zone gate of c8e92613b: a stop that landed before the trap — the run outlived the 8 s wait); a
+  // press waits for it, and every wait for a run's end covers the kill step (~11 s): a stop ends the run, by its TERM or its kill
+  const ready = path.join(dd, 'ready');
+  const r = J.create({ kind: 'service', name: 'svc-' + tag, cmd: { argv: ['sh', '-c', `trap "sleep 0.3; exit 0" TERM; : > '${ready}'; while :; do sleep 0.1; done`] }, owner }, caller);
   const job = J.jobs.get(r.job.id);
   const live = () => { const st = J._readStamp(job); return !!st && J._verifyAlive(st); };
   const keep = () => { const st = J._readStamp(job); if (st) mine.push(st, ...PI.treeOf([Number(st.pid)])); };
-  const up = await until(async () => { await J._sweep(); return live(); }, 8000);
+  const up = await until(async () => { await J._sweep(); return live() && fs.existsSync(ready); }, 8000);
   keep();
   const fails = () => (job.supervise && job.supervise.consecutiveFails) || 0;
   const press = async (how, { settle = false } = {}) => {
+    await until(async () => fs.existsSync(ready), 8000); fs.rmSync(ready, { force: true });   // its trap is set: the stop's window is the trap's
     const first = job.runs.length, run = job.runs[first - 1];
     let answer;
+    let flagAfter;
     if (how === 'restart') answer = J.restart(job);
+    else if (how === 'start-stop') { J.stop(job); answer = J.start(job); J.stop(job); flagAfter = job.startAfterStop; }   // the person changes their mind
     else { J.stop(job); answer = J.start(job); }   // the second press, inside the stop's grace
+    if (how === 'start-stop' && !settle) return { answer, flagAfter };
     if (settle) {
-      const ended = await until(async () => { await J._sweep(); return !!run.endedAt; }, 8000);
-      return { answer, ended, state: job.state, newRuns: job.runs.length - first, fails: fails() };
+      const ended = await until(async () => { await J._sweep(); return !!run.endedAt; }, 20000);
+      await new Promise((r) => setImmediate(r)); await J._sweep();   // a start the run's end scheduled has had its turn
+      return { answer, ended, flagAfter, state: job.state, newRuns: job.runs.length - first, fails: fails() };
     }
-    const comeback = await until(async () => { await J._sweep(); return job.runs.length === first + 1 && live(); }, 8000);
+    const comeback = await until(async () => { await J._sweep(); return job.runs.length === first + 1 && live() && fs.existsSync(ready); }, 20000);
     keep();
     return { answer, comeback, newRuns: job.runs.length - first, fails: fails(), state: job.state };
   };
-  const end = async () => { try { J.stop(job, { force: true }); } catch { } await until(async () => { await J._sweep(); return !live(); }, 4000); J.shutdown(); };
+  const end = async () => { delete job.startAfterStop; try { J.stop(job, { force: true }); } catch { }   // never a start left behind (a control's copy keeps it)
+    await until(async () => { await J._sweep(); return !live(); }, 4000); J.shutdown(); };
   return { up, press, end };
 };
 {
@@ -370,8 +379,11 @@ const svcScene = async (Mod, tag) => {
   ok(S.up && sd.answer && sd.answer.pending === true && /^still stopping \(\d+ s left\) — it starts when the stop ends$/.test(sd.answer.words || '') && sd.comeback && sd.fails === 0, 'B-cac2: a START pressed while the stop\'s grace runs answers «still stopping (k s left) — it starts when the stop ends» and DOES start when it ends (a new live run, no crash counted)', sd);
   const rs = await S.press('restart');
   ok(rs.answer && rs.answer.pending === true && /it starts again when the stop ends/.test(rs.answer.words || '') && rs.comeback && rs.fails === 0, 'B-cac2: restart = stop, wait, start — ONE answer, and a new live run after the stop ends (no crash counted)', rs);
+  // the adversarial read r1 (MUST 1): stop, start (remembered), then STOP again — the person changed their mind: nothing starts
+  const ss = await S.press('start-stop', { settle: true });
+  ok(ss.answer && ss.answer.pending === true && ss.flagAfter === undefined && ss.ended && ss.state === 'down' && ss.newRuns === 0, 'B-cac2: a STOP pressed after the remembered start clears it — the service ends DOWN, no new run (the CLI\'s «stopped» is true)', ss);
   await S.end();
-  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), PEND = '    if ((job._termAt || job._stopForce) && this._runLive(job, run0)) {';
+  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), PEND = '    if ((job._termAt || job._stopForce || job._stopRequested) && this._runLive(job, run0)) {';
   ok(JSRC.split(PEND).length === 2, 'B-cac2 control setup: the remembered start is one line in jobs.js (the plant the control cuts) — the anchor of the control is in the source');
   const MJ9 = mutantCopies('stop-tree-cac2', ROOT);
   const R = await svcScene(MJ9.load('src/jobs.js', JSRC.replace(PEND, '    if (false /* MUTANT: the release — a start during a stop is «already running» */) {'), 'release'), 'job-start-during-stop-mut');
@@ -382,7 +394,14 @@ const svcScene = async (Mod, tag) => {
   // (six such presses park it); with `restart: 'never'` nothing brings it back — by reading src/job-model.js onServiceExit (the row's
   // «a second start was needed»)
   ok(R.up && rx.answer && /is already running/.test(rx.answer.error || '') && rx.ended && rx.state === 'down' && rx.newRuns === 0 && rx.fails === 1, 'B-cac2 CONTROL (the release, in a copy): the start answers «already running»; at the stop\'s end the service is DOWN with no new run, and what brings it back is the crash policy (counted: 1 toward the park) — never the start', rx);
-  for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 1, label: 'B-cac2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  // its control: the line that clears it cut (a copy) — the remembered start survives the second stop (read off the record, no wait)
+  const CLR = '    delete job.startAfterStop;   // B-cac2: a stop pressed after a remembered start (or a restart) means stopped — it starts no more\n';
+  ok(JSRC.split(CLR).length === 2, 'B-cac2 control setup: the anchor of the control «a later stop clears the remembered start» is in the source');
+  const C = await svcScene(MJ9.load('src/jobs.js', JSRC.replace(CLR, '    /* MUTANT: a later stop leaves the remembered start */\n'), 'no-clear'), 'job-start-stop-mut');
+  const cx = await C.press('start-stop');
+  await C.end();
+  ok(C.up && cx.answer && cx.answer.pending === true && typeof cx.flagAfter === 'number', 'B-cac2 CONTROL (the clear cut, in a copy): the remembered start SURVIVES the second stop — it would start when the run ends', cx);
+  for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 2, label: 'B-cac2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
   ok(/const needsControl = \[[^\]]*'restart'[^\]]*\];/.test(ar) && /else if \(act === 'restart'\) r = a\.jm\.restart\(job\);/.test(ar) && /case 'restart': \{/.test(cli) && /vibespace-job restart <id>/.test(cli) && /else if \(r\.pending\) console\.log\(`not started yet: /.test(cli), 'WIRING: the agent route\'s restart needs control; the CLI has `restart <id>` (in its usage) and says a pending start as one');
 }

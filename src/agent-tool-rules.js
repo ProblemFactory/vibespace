@@ -134,6 +134,7 @@ const AGENT_TOOL_RULES = Object.freeze([
     held: Object.freeze({
       run: 'runs an arbitrary shell command (sh -c) outside the CLI\'s own Bash check',
       start: 're-runs a job\'s stored shell command',
+      restart: 're-runs a job\'s stored shell command (stop, wait, start — bl-jobs B-cac2)',
       access: 'widens who may view or control a job — a grant is the user\'s',
       memory: 'moves a job\'s memory bound — the line that keeps one job from taking the whole instance down is the user\'s to move (lane jobs-memory-bound)',
     }),
@@ -666,7 +667,7 @@ function toolStep(tool, args) {
       if (verb === 'ask') return S(i18nKey('Ask you a few questions before drawing a design'));
       return S(i18nKey('Draft a design and show it in the Design window'));
     case 'vibespace-job':
-      if (verb === 'run' || verb === 'start') return S(i18nKey('Start a background shell command'));
+      if (verb === 'run' || verb === 'start' || verb === 'restart') return S(i18nKey('Start a background shell command'));
       if (verb === 'rm' || verb === 'stop') return S(i18nKey('Stop or remove one of its background jobs'));
       if (verb === 'notify-cron') return S(i18nKey('Schedule a reminder that wakes this conversation'));
       if (verb === 'access') return S(i18nKey('Let others see or control one of its background jobs'));

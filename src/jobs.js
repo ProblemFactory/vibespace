@@ -2557,6 +2557,8 @@ class JobManager {
   _finalizeRun(job, run, exit, why) {
     if (run.endedAt) return; // ONE JUDGE PER RUN END (round 5): a run is judged once — a second caller (an overlapping pass) returns
     run.endedAt = exit.endedAt || now();
+    // B-cac2: a start asked while this run's stop ran (or a restart) is taken HERE, at the run's end, on every road out below
+    const startAsked = !!job.startAfterStop; delete job.startAfterStop;
     // lane jobs-browser (B-dbc1): the run is over — what it held as its conversation (its browser lease + window) is released
     try { this.d.onRunEnded?.(job, run); } catch { }
     run.exit = exit.code;
@@ -2622,7 +2624,7 @@ class JobManager {
       // log's own output (under a forced stop / OOM the process's last words —
       // the wrapper's exit marker only when the wrapper outlived the group)
       run.lastLine = job.clearedAt && !((run.startedAt || 0) > job.clearedAt) ? null : this._lastLogLine(job, run);
-      if (memPark && memPark.park) { this._parkForMemory(job, run); return; } // lane jobs-memory-bound: the park says the end (once)
+      if (memPark && memPark.park) { this._parkForMemory(job, run); this._startAskedAtStop(job, startAsked); return; } // lane jobs-memory-bound: the park says the end (once); B-cac2: an asked start is the person's explicit one
       // quiet-success is the DEFAULT, not a law (2.346.0, owner decision): the
       // creating agent opts scheduled successes into events+notify with
       // --notify-ok (job.notifyOk, inherited by the cron child via the
@@ -2641,11 +2643,18 @@ class JobManager {
     }
     // round 5 (the ruling): a service keeps what its run left only while it runs — stopped or parked, they are stopped too
     if (job.kind === 'service' && left && left.kept && (!job.desiredUp || job.state === 'failed')) this._clearKept(job, run).then(() => this._cutSaid(job, run)).catch(() => { });
-    // B-cac2: a start asked while this run's stop ran (or a restart) is done now that the run has ended — once
-    if (job._startAfterStop) {
-      delete job._startAfterStop;
-      setImmediate(() => { const r = this.start(job); this.d.log(`[jobs] ${job.id}: the start asked during its stop — ${r && r.error ? `refused: ${r.error}` : 'started'}`); });
-    }
+    this._startAskedAtStop(job, startAsked);   // B-cac2: done now that the run has ended — once
+  }
+  /** B-cac2: THE START ASKED DURING A STOP, done when the run ended (an explicit start: it un-parks like one). Kept in the record
+   *  (`startAfterStop`, never a view field) — a hub restarted inside the stop's grace keeps the promise; any later stop clears it.
+   *  A start that cannot be done is SAID where the person and the owner look (the job's events, the owner conversation) */
+  _startAskedAtStop(job, asked) {
+    if (!asked) return;
+    setImmediate(() => {
+      let r; try { r = this.start(job); } catch (e) { r = { error: (e && e.message) || String(e) }; }
+      this.d.log(`[jobs] ${job.id}: the start asked during its stop — ${r && r.error ? `refused: ${r.error}` : 'started'}`);
+      if (r && r.error) { const what = `the start asked during its stop was not done: ${r.error}`; this._touch(job, { what, alarm: true }); this._notifyOwner(job, { what }); this._save(); }
+    });
   }
   /** round 10: A CUT WALK OF THE PARK'S OR THE STOP'S OWN CLEAR IS SAID AT ONCE — never only when someone presses start (round 9
    *  stamped it silently; the base said it): a parked service by the doubt's door (its journal line, ONE For-you notice — a later
@@ -3223,12 +3232,14 @@ class JobManager {
     if (!this._runLive(job, run)) return this.start(job);
     const s = this.stop(job);
     if (s && s.error) return s;
-    if (!s.hadProc && !s.already) return this.start(job);
-    job._startAfterStop = true;
+    // a live run whose stop reached no process yet (no pid stamp; its wrapper gone, not judged yet) still ends: the sweep honours
+    // the stop once the stamp exists, or judges the run — the start waits for that end too (never «already running»)
+    job.startAfterStop = now(); this._save();
     return { ok: true, pending: true, words: 'stopping — it starts again when the stop ends' };
   }
   stop(job, { force } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
+    delete job.startAfterStop;   // B-cac2: a stop pressed after a remembered start (or a restart) means stopped — it starts no more
     if (job.kind === 'service' || job.kind === 'cron') { job.desiredUp = false; }
     job._stopRequested = true;
     if (job.kind === 'service') this._teardownPublish(job);
@@ -3261,10 +3272,11 @@ class JobManager {
     // B-cac2 (fb-f4a0c70a84): a START while a STOP's grace runs is no «already running» (the service then ended down and a second
     // start was needed) — it is REMEMBERED and done when the stop ends (_finalizeRun), said with the grace left
     const run0 = job.runs && job.runs[job.runs.length - 1];
-    if ((job._termAt || job._stopForce) && this._runLive(job, run0)) {
-      job._startAfterStop = true;
+    if ((job._termAt || job._stopForce || job._stopRequested) && this._runLive(job, run0)) {
+      job.startAfterStop = now(); this._save();
       this.d.log(`[jobs] ${job.id}: a start asked while its stop runs — it starts when the stop ends`);
-      return { ok: true, pending: true, words: `still stopping (${Math.max(0, Math.ceil(((job._termAt || now()) + this._killStepMs() - now()) / 1000))} s left) — it starts when the stop ends` };
+      const left = job._termAt ? Math.max(0, Math.ceil((job._termAt + this._killStepMs() - now()) / 1000)) : null;   // a forced / not-yet-reached stop has no grace clock
+      return { ok: true, pending: true, words: left != null ? `still stopping (${left} s left) — it starts when the stop ends` : 'still stopping — it starts when the stop ends' };
     }
     job.desiredUp = true;
     job.supervise = { consecutiveFails: 0, parkedAt: null };

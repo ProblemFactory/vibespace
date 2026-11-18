@@ -242,7 +242,10 @@ URL — share the new one.
   before the clear is withheld (`logs` says so) — runs after it log normally;
   a panel it was waiting on is withdrawn with the clear (`answers --wait`
   returns nothing for it — ask again if you still need the answer)
-- `stop <id> [--force]` · `start <id>` (revive parked) · `rm <id> [--stop]`
+- `stop <id> [--force]` · `start <id>` (revive parked) · `restart <id>` (stop, wait, start —
+  one answer; it asks the user first like `start`) · `rm <id> [--stop]`. A `start`
+  pressed while a stop's grace runs answers «still stopping (k s left) — it starts when
+  the stop ends» and does start then; a later `stop` cancels that start
 - `access <id> --view session|group|all --control session|group|all` —
   owner-only; the user can lock access against agent edits
 
