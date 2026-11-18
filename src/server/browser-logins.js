@@ -726,9 +726,11 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     c.shown = shownOf(c);
     const site = BL.hostOf(o) || o;
     const text = existing ? 'Update the saved login {user} on {site}?' : 'Save the login {user} on {site} to the vault?';
-    const detail = existing ? 'You signed in with a different password in the agent browser. Update keeps the old one in the entry for one revision.' : 'You signed in by hand in the agent browser. Saved logins can be filled on that site for conversations you allow — VibeSpace never hands them the password, and its fence guards against accidental reads and wrong sites.';
+    const others = holder && existing ? BL.sitesOf(ex.rec).map((x) => BL.hostOf(x.origin) || x.origin) : null;   // one login, several sites: the update reaches each
+    const detail = others && others.length > 1 ? 'You signed in on {site} with a different password. {site} is one of this login\'s sites ({sites}) — Update changes its one password for every one of them and keeps the old one for one revision.'
+      : existing ? 'You signed in with a different password in the agent browser. Update keeps the old one in the entry for one revision.' : 'You signed in by hand in the agent browser. Saved logins can be filled on that site for conversations you allow — VibeSpace never hands them the password, and its fence guards against accidental reads and wrong sites.';
     if (forYou && typeof forYou.add === 'function') {
-      try { c.item = forYou.add(profileId, { origin: 'browser', kind: 'action', urgency: 'normal', text: text.replace('{user}', c.username).replace('{site}', site), detail, i18n: { text: { key: text, params: { user: c.username, site } }, detail: [{ key: detail }] }, action: { type: 'save-login', id, shown: c.shown, update: !!existing } }); } catch (e) { say(`[browser-login] the save card was not filed — ${e && e.message}`); }
+      try { c.item = forYou.add(profileId, { origin: 'browser', kind: 'action', urgency: 'normal', text: text.replace('{user}', c.username).replace('{site}', site), detail: others && others.length > 1 ? detail.split('{site}').join(site).replace('{sites}', others.join(', ')) : detail, i18n: { text: { key: text, params: { user: c.username, site } }, detail: [others && others.length > 1 ? { key: detail, params: { site, sites: others.join(', ') } } : { key: detail }] }, action: { type: 'save-login', id, shown: c.shown, update: !!existing } }); } catch (e) { say(`[browser-login] the save card was not filed — ${e && e.message}`); }
     }
     c.timer = setTimeout(() => dropCard(id), cardMs);
     if (c.timer.unref) c.timer.unref();
@@ -961,13 +963,16 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     const prevPendingItemId = ex && ex.ok && ex.rec && ex.rec.pending ? ex.rec.pending.itemId : null;
     // THE ROWS FIRST, each answer read (the store never throws on a failed write): a stop between loses a grant, never leaves one behind
     const own = [`${p.origin}#${p.user}`, ...(ex && ex.ok && ex.rec ? BL.sitesOf(ex.rec).slice(1).map((x) => `${x.origin}#${BL.userOf(x.user)}`) : [])];   // + its added sites' own rows (one login, several sites)
+    const gone = [];   // the rows already removed — a refusal after them says so (lost permissions are named)
+    const goneWords = () => (gone.length ? `; its grant row${gone.length === 1 ? '' : 's'} ${gone.join(', ')} ${gone.length === 1 ? 'was' : 'were'} removed already` : '');
     for (const res of own) {
       let rr = null;
       try { const g = store(); if (g && g.rowsFor(BL.DOOR, res).length) rr = g.remove(BL.DOOR, res, 'user'); } catch (e) { rr = { ok: false, error: e && e.message }; }
-      if (rr && rr.ok === false) return named(rr.code || 'not_written', `the login's grant row ${res} could not be removed (${rr.error || 'not written'}) — the login was not removed`);
+      if (rr && rr.ok === false) return named(rr.code || 'not_written', `the login's grant row ${res} could not be removed (${rr.error || 'not written'}) — the login was not removed${goneWords()}`);
+      if (rr && rr.ok) gone.push(res);
     }
     const r = vault.secretDrop(name);
-    if (r && r.ok === false) return named(r.code || 'not_written', r.error || 'not removed');
+    if (r && r.ok === false) return named(r.code || 'not_written', `${r.error || 'not removed'} — the login was not removed${goneWords()}`);
     resolvePendingItemsForName(name, prevPendingItemId);
     try { vault.audit?.('vault-web-login-removed', { why: name, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
     return { ok: true, name };
@@ -1052,13 +1057,17 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     const dropsTotp = k.rec.totpName && x.rec.totpName && x.rec.totpName !== k.rec.totpName ? x.rec.totpName : null;
     const ownerLoses = xm && xm.owner && xm.owner !== (km && km.owner) ? xm.owner : null;
     const kp = BL.parseName(keepName);
-    return { ok: true, v, k, x, joined: v.joined.map((s) => ({ origin: s.origin, user: s.user })), ...(dropsTotp ? { dropsTotp } : {}), ...(ownerLoses ? { ownerLoses } : {}),
+    // (主开发 10:54Z, as if a must) the other login's password is NOT kept — said before the press and in the answer, with which of
+    // the two was set later: DATES only, no byte compared or shown (a person who keeps the older login loses the newer password)
+    const kAt = Number(k.rec.current && k.rec.current.setAt) || 0, xAt = Number(x.rec.current && x.rec.current.setAt) || 0;
+    const otherPassword = { kept: false, setAt: xAt || null, keptSetAt: kAt || null, later: kAt && xAt ? (xAt > kAt ? 'other' : xAt < kAt ? 'kept' : 'same') : null };
+    return { ok: true, v, k, x, joined: v.joined.map((s) => ({ origin: s.origin, user: s.user })), ...(dropsTotp ? { dropsTotp } : {}), ...(ownerLoses ? { ownerLoses } : {}), otherPassword,
       widens: { login: principalsAt(`${kp.origin}#${kp.user}`), ...(km && km.owner ? { owner: km.owner } : {}) } };   // its owner fills with no grant at all
   }
   function mergeWordsFor(keepName, otherName) {
     const m = mergePlan(keepName, otherName);
     if (!m.ok) return m;
-    return { ok: true, keep: keepName, other: otherName, joined: m.joined, ...(m.dropsTotp ? { dropsTotp: m.dropsTotp } : {}), ...(m.ownerLoses ? { ownerLoses: m.ownerLoses } : {}), widens: m.widens };
+    return { ok: true, keep: keepName, other: otherName, joined: m.joined, ...(m.dropsTotp ? { dropsTotp: m.dropsTotp } : {}), ...(m.ownerLoses ? { ownerLoses: m.ownerLoses } : {}), otherPassword: m.otherPassword, widens: m.widens };
   }
   function merge(keepName, otherName, { who = null } = {}) {
     const m = mergePlan(keepName, otherName);
@@ -1072,7 +1081,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
         if (!w.ok) throw Object.assign(new Error(w.error || w.code), { code: w.code });
         const d = vault.secretDrop(otherName);
         if (d && d.ok === false) throw Object.assign(new Error(d.error || d.code), { code: d.code || 'not_written' });
-        out = { ok: true, name: keepName, merged: otherName, joined: m.joined, ...(m.dropsTotp ? { dropsTotp: m.dropsTotp } : {}), ...(m.ownerLoses ? { ownerLoses: m.ownerLoses } : {}), widens: m.widens };
+        out = { ok: true, name: keepName, merged: otherName, joined: m.joined, ...(m.dropsTotp ? { dropsTotp: m.dropsTotp } : {}), ...(m.ownerLoses ? { ownerLoses: m.ownerLoses } : {}), otherPassword: m.otherPassword, widens: m.widens };
       });
     } catch (e) { return named(str(e && e.code) === 'vault_locked' ? 'vault_locked' : 'not_written', `the merge was not written (${(e && e.message) || 'not written'}) — both logins are as they were`); }
     resolvePendingItemsForName(otherName, xPending);

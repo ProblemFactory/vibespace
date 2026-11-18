@@ -9,6 +9,7 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { loadTotp } from './vault-totp-row.js';   // lane vault-totp-add: the two-step field lists the vault's own codes
+import { chipSiteOf } from './use-login-words.js';   // lane login-request-card: one login, several sites — a chip's site (the picker's own row: vault-login-grants.js)
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const failWords = (r) => t('Not done — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') });
@@ -53,9 +54,10 @@ export function loginExtras(row, data, { refresh, show, doors: open = {} } = {})
     for (const g of grants) for (const p of g.to || []) {
       const chip = el('span', 'vw-ak-chip');
       chip.dataset.scope = g.scope || '';
+      const on = chipSiteOf(entry, g);   // one login, several sites: a row of an added site names that site
       if (g.scope === 'this-account') {
         // this login's OWN grant: taken back here
-        chip.append(el('span', null, principalName(p, data)));
+        chip.append(el('span', null, on ? `${principalName(p, data)} · ${on}` : principalName(p, data)));
         const x = el('button', 'vw-ak-x', '✕');
         x.type = 'button'; x.title = t('Take this grant back'); x.setAttribute('aria-label', x.title);
         x.onclick = async () => { const r = await post('/api/vault/web-logins/ungrant', { resource: g.resource, principal: keyOfEntry(p) }); if (!r || !r.ok) showToast(failWords(r), { type: 'error' }); refresh?.(); };
@@ -63,10 +65,10 @@ export function loginExtras(row, data, { refresh, show, doors: open = {} } = {})
       } else {
         // a WIDER grant reaches this login: «through» it, NO ✕ here (it is taken back at its own door — never from one login's row)
         chip.classList.add('vw-ak-chip-through');
-        chip.append(el('span', null, `${principalName(p, data)} · ${g.scope === 'any-site' ? t('through: any site') : t('through: any account on this site')}`));
+        chip.append(el('span', null, `${principalName(p, data)} · ${g.scope === 'any-site' ? t('through: any site') : t('through: any account on this site')}${on ? ` · ${on}` : ''}`));
         const d = el('button', 'vw-ak-door', t('Open that grant…'));   // the label names the act; the «through» words name the grant
         d.type = 'button';
-        d.onclick = () => (g.scope === 'any-site' ? open.anySite?.(data, { refresh }) : open.anyAccount?.(data, { refresh, site: entry.origin }));
+        d.onclick = () => (g.scope === 'any-site' ? open.anySite?.(data, { refresh }) : open.anyAccount?.(data, { refresh, site: g.site || entry.origin }));   // an added site's row: ITS site's dialog
         chip.append(d);
       }
       chips.append(chip);

@@ -518,6 +518,39 @@ SENTINELS.push(S_LOGIN, S_LOGIN2, S_NL);
   await S.hit(`/api/vault/secret-requests/${d.json.requestId}/answer`, { body: { answer: 'deny' } });
   const d2 = await S.agent(W.SESSION_TOKEN, { words: 'the bank login', purpose: 'p', kind: 'login', hosts: 'https://bank.example.test' });
   ok(d2.status === 429 && d2.json.code === 'request_quiet' && stashOf('cid-asker-1').some((e) => e.ref === d.json.requestId && /REFUSED/.test(e.text)), 'Refuse ⇒ the receipt says REFUSED; the same site again ⇒ 429 request_quiet', d2.json);
+  // ONE LOGIN, SEVERAL SITES — «Use a login you already saved…» (lane login-request-card, step F's last part): the person picks a saved
+  // login; the request's site is ADDED to it (no second login, no password on this road); the grant follows the LOGIN
+  {
+    const PICK = `web-login:${SITE}#owner@shop.example`, PAY = 'https://pay.example.test';
+    const u = await S.agent(W.OTHER_TOKEN, { words: 'the shop sign-in site', purpose: 'sign in to pay', kind: 'login', hosts: PAY });
+    const bearerU = await S.hit(`/api/vault/secret-requests/${u.json.requestId}/answer`, { headers: { ...S.PAGE, authorization: 'Bearer ' + W.OTHER_TOKEN }, body: { answer: 'store', useLogin: PICK, allow: true } });
+    const nope = await S.hit(`/api/vault/secret-requests/${u.json.requestId}/answer`, { body: { answer: 'store', useLogin: `web-login:${SITE}#nobody`, allow: true } });
+    const su = await S.hit(`/api/vault/secret-requests/${u.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, allow: true } });
+    const g = W.vault.secretGet(PICK), rec = g && g.ok && g.value ? JSON.parse(g.value.toString('utf8')) : null;
+    const rcu = stashOf('cid-other-2').filter((e) => e.ref === u.json.requestId);
+    ok(bearerU.status === 403 && nope.status >= 400 && nope.json.ok === false && su.status === 200 && su.json.outcome === 'stored' && su.json.joined === true && su.json.entry === PICK && su.json.allowed === true
+      && rec && (rec.origins || []).includes(PAY) && rec.password === S_LOGIN2 && !W.vault.secretNames().some((x) => x.name === `web-login:${PAY}#owner@shop.example`)
+      && rcu.length === 1 && /chose a website login already in the vault and added https:\/\/pay\.example\.test to its sites/.test(rcu[0].text) && /as owner@shop\.example with that login's one password/.test(rcu[0].text) && !rcu[0].text.includes(S_LOGIN2),
+      'USE A LOGIN YOU ALREADY SAVED: a bearer ⇒ 403, a login that is not there ⇒ refused (the item open); the person\'s pick ADDS the request\'s site to that login — no second login, no password on this road; the receipt says so (the user named: granted), never the password', { su: su.json, nope: nope.json, rc: rcu[0] && rcu[0].text });
+    // THE GRANT FOLLOWS THE LOGIN: the asking conversation fills it on the new site AND on its first site (the card said so)
+    const fill = (tab, spec) => W.logins.resolveFill({ tabOrigin: tab, spec, conv: 'cid-other-2', actor: 'cid-other-2', facts: { conversationKeys: ['cid-other-2'] } });
+    const onPay = fill(PAY, 'pay.example.test#owner@shop.example/password'), onShop = fill(SITE, `${SITE.replace('https://', '')}#owner@shop.example/password`);
+    ok(onPay.ok && onPay.value === S_LOGIN2 && onShop.ok && onShop.value === S_LOGIN2 && W.grants.rowsFor('browser-login', `${SITE}#owner@shop.example`).some((r) => GM.publicRow(r).to.some((x) => x.key === 'cid-other-2')),
+      '«Let it sign in» ⇒ the asking conversation on the picked LOGIN\'s own row — it fills on the added site and on every site of that login (the grant follows the login)', { onPay: onPay.ok || onPay.code, onShop: onShop.ok || onShop.code });
+    // a site another login holds under the same user ⇒ refused by name (one pair, one login), the item open
+    const v = await S.agent(W.SESSION_TOKEN, { words: 'the forum again', purpose: 'p', kind: 'login', hosts: 'https://forum.example.test' });
+    const clash = await S.hit(`/api/vault/secret-requests/${v.json.requestId}/answer`, { body: { answer: 'store', useLogin: PICK, username: 'second-user', allow: false } });
+    ok(clash.status >= 400 && clash.json.code === 'login_exists' && openReqs(W).some((i) => i.action.requestId === v.json.requestId), 'a site whose user is ANOTHER login\'s there ⇒ login_exists by name (merge them instead), the item stays open', clash.json);
+    await S.hit(`/api/vault/secret-requests/${v.json.requestId}/answer`, { body: { answer: 'deny' } });
+    // RED CONTROL: a door without the use road treats the pick as a new login with no password — refused, the site never joins
+    const MUT = mutant('src/server/vault-paste-door.js', "    if (typeof l.useLogin === 'string' && l.useLogin) return answerUseLogin(q, id, l, { by, mark });   // one login, several sites\n", '');
+    const md = MUT.create({ vault: W.vault, integrations: W.integrations, userTodos: W.userTodos, deliver: W.deliver, vaultRun: W.vaultRun, logins: W.logins });
+    const mq = md.request({ caller: { conversationId: 'cid-mut-7', scope: 'w7', name: 'Mut lane' }, words: 'w', purpose: 'p', kind: 'login', hosts: 'https://mut.example.test' });
+    const ma = mq.ok ? md.answer(mq.requestId, { answer: 'store', by: 'user', person: true, login: { useLogin: PICK, allow: true } }) : mq;
+    const rec2 = (() => { const x = W.vault.secretGet(PICK); return x && x.ok && x.value ? JSON.parse(x.value.toString('utf8')) : null; })();
+    ok(mq.ok === true && ma.ok === false && !!rec2 && !(rec2.origins || []).includes('https://mut.example.test'), 'RED CONTROL: a door with no use road refuses the pick (no password) and the site never joins the login — the legs above would read it', { asked: mq.ok || mq.code, answered: ma });
+    if (mq.ok) md.answer(mq.requestId, { answer: 'deny' });
+  }
   // LOCKED: a lock act withdraws; an ask while locked is filed; the owner's answer ⇒ 423, the item stays; unlocked ⇒ stored
   W.vault.lock('test');
   const e = await S.agent(W.SESSION_TOKEN, { words: 'the mail login', purpose: 'p', kind: 'login', hosts: 'https://mail.example.test' });
@@ -790,7 +823,7 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
   };
   const STUBS = {
     'i18n.js': `export const t = (s, p) => (p ? String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s);`,
-    'utils.js': `export const createModalShell = (o) => globalThis.__b3.shell(o); export const fetchJson = async () => ({ ok: false, code: 'b3_stub' }); export const showToast = () => {}; export const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => '&#' + c.charCodeAt(0) + ';');`,
+    'utils.js': `export const createModalShell = (o) => globalThis.__b3.shell(o); export const fetchJson = async () => ({ ok: false, code: 'b3_stub' }); export const showToast = () => {}; export const latestRender = (c, build) => { let gen = 0; return async () => { const mine = ++gen; const out = document.createElement('div'); await build(out); if (mine !== gen) return false; c.replaceChildren(...out.childNodes); return true; }; }; export const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => '&#' + c.charCodeAt(0) + ';');`,
     'vault-unlock.js': `export const vaultFacts = () => ({ state: 'unlocked', setup: true }); export const showUnlock = () => {}; export const showSetup = () => {};`,
     'vault-totp-row.js': `export const showTotpAddDialog = (o) => globalThis.__b3.totp(o); export const loadTotp = () => Promise.resolve({ entries: [] }); export const totpFields = () => ({ nodes: [], wipe() {}, doSave: async () => false });`,   // totpFields: lane totp-request-card (the two-step field set — a two-step card's, unused by a login scene)
   };
@@ -910,13 +943,13 @@ function sweep(texts, values = SENTINELS) {
 S.srv.close();
 
 console.log('⑫ MUTANTS — each RED');
-const mutant = (rel, from, to) => {
+function mutant(rel, from, to) {   // a declaration (hoisted): section ⑩b's use-a-login red control calls it before this section runs
   const abs = path.join(REPO, rel), src = fs.readFileSync(abs, 'utf8');
   if (!src.includes(from)) throw new Error(`mutant anchor missing in ${rel}: ${from.slice(0, 80)}`);
   const m = new Module(abs, null); m.filename = abs; m.paths = Module._nodeModulePaths(path.dirname(abs));
   m._compile(src.replace(from, to), abs);
   return m.exports;
-};
+}
 async function runRoad(name, { door, routes } = {}) {
   STASH.length = 0; const a0 = ANSWERS.length, f0 = FRAMES.length, l0 = LOGS.length;
   const w = makeWorld(name, { door, routes });

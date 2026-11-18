@@ -15,6 +15,7 @@ import { principalPicker } from './principal-picker.js';
 import { rowToPick, pickToRow } from './principal-picker-model.js';
 import { showUnlock } from './vault-unlock.js';
 import { loadTotp } from './vault-totp-row.js';
+import { ownRowOf } from './use-login-words.js';   // lane login-request-card: one login, several sites — a login's OWN row per scope (its first site)
 import { SCOPES, EVERYONE_KEY, rosterFromSubjects, drawPlan, rowAt, savePlan, sitesOf, wideSummary, principalKeyOf, pickKeyOf, heldFacts } from './login-grant-model.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -61,10 +62,12 @@ function grantDialog({ id, scope, resource, name, title, head = null, consequenc
   body.append(el('div', 'vw-ak-hint vw-login-consequence', consequence));
   // THE ONE DRAWING (主开发 00:28Z — login-grant-model drawPlan): from «by what» and THIS login's own rows, nothing else. The rows at
   // this scope and wider only (a narrower row is another dialog's); no fallback to other logins' rows (another site's origin#* row).
-  const loginRows = (((data && data.entries) || []).find((e) => e.name === name) || {}).grants || [];
   const at = SCOPES.indexOf(scope);
   const rowsBy = {};
-  for (const sc of SCOPES) if (SCOPES.indexOf(sc) > at) { const g = loginRows.find((x) => x && !x.unknown && x.scope === sc); rowsBy[sc] = g ? { to: g.to || [], except: g.except || [] } : null; }
+  // one login, several sites (lane login-request-card): the list carries the rows of EVERY site of a login — a wider row is read at
+  // the login's FIRST site (ownRowOf: `<origin>#*`, `*`), never an added site's row of the same scope
+  const loginEntry = ((data && data.entries) || []).find((e) => e.name === name) || {};
+  for (const sc of SCOPES) if (SCOPES.indexOf(sc) > at) { const g = ownRowOf(loginEntry, sc); rowsBy[sc] = g ? { to: g.to || [], except: g.except || [] } : null; }
   rowsBy[scope] = stored;
   // the subjects: Everyone, the Task Groups, the running conversations — and a stopped one a row names (in its «to» or its «除了»)
   const subjects = [{ key: 'everyone', groupIds: [] }, ...roster.map((r) => ({ key: r.kind === 'group' ? `group:${r.id}` : `conversation:${r.id}`, groupIds: r.kind === 'group' ? [] : (r.groupIds || []) }))];

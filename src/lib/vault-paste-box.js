@@ -13,9 +13,10 @@
 // add-a-website-login fields here (src/lib/vault-login-row.js loginFields — the site fixed by the ask), the answer rides the same
 // door with the password as `loginPassword` (taken off the body), and lands ONE web-login entry through the add door's writer.
 import { t } from './i18n.js';
-import { createModalShell, fetchJson, showToast } from './utils.js';
+import { createModalShell, fetchJson, showToast, latestRender } from './utils.js';
 import { vaultFacts, showUnlock, showSetup } from './vault-unlock.js';
 import { loginFields, loginRefusalWords } from './vault-login-row.js';   // lane login-request-card: THE add door's fields and words
+import { useLoginWords } from './use-login-words.js';   // lane login-request-card: one login, several sites — the words before «Use a login you already saved…»
 import { linkedHtml, maskedLinkNote } from './foryou-links.js';   // lane login-request-card r3: THE item's words renderer in the dialog (a masked link = its words + THE note)
 import { escHtml } from './utils.js';
 import { showTotpAddDialog, totpFields } from './vault-totp-row.js';   // lane login-request-card: «Two-step code…» = THE 两步验证… dialog · lane totp-request-card: its field set (THE two-step card)
@@ -155,23 +156,78 @@ function loginBoxEl(item) {
   otpRow.append(f.fields[3], addCode);
   const allow = mk('input', 'ut-login-allow-box'); allow.type = 'checkbox'; allow.checked = item.action.grant === true;
   const allowLab = mk('label', 'ut-login-allow dialog-check-row'); // the house check row: the box, then its words (lane ui-phone-and-fit M6)
-  allowLab.append(allow, mk('span', null, t('Let {who} sign in to {site} with it', { who, site })));
+  const allowText = mk('span', null, t('Let {who} sign in to {site} with it', { who, site }));
+  allowLab.append(allow, allowText);
   const allowSays = mk('div', 'ut-secret-note ut-login-says');
   const allowFence = mk('div', 'ut-secret-note ut-login-fence');
   const row = mk('div', 'ut-secret-row');
   const save = btn('', 'ut-act ut-secret-save'), deny = btn(t('Refuse'), 'ut-act ut-secret-deny');
   const sayAllow = () => {
-    allowSays.textContent = allow.checked ? t('{who} can sign in as you on {site} with it until you remove it in Vault ▸ Web logins ▸ Use for… — there is no time limit.', { who, site }) : t('{who} cannot sign in with it until you allow it in Vault ▸ Web logins ▸ Use for….', { who });
+    const using = !!box.dataset.use;   // one login, several sites: the grant follows the LOGIN — every site of it
+    allowSays.textContent = allow.checked && using ? t('{who} can sign in with it on every site of this login until you remove it in Vault ▸ Web logins ▸ Use for… — there is no time limit.', { who })
+      : allow.checked ? t('{who} can sign in as you on {site} with it until you remove it in Vault ▸ Web logins ▸ Use for… — there is no time limit.', { who, site }) : t('{who} cannot sign in with it until you allow it in Vault ▸ Web logins ▸ Use for….', { who });
     allowFence.textContent = allow.checked ? t('VibeSpace never hands the password to the agent and types it only on {site} into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls.', { site }) : '';
     allowFence.style.display = allowFence.textContent ? '' : 'none';
-    save.textContent = allow.checked ? t('Save and allow') : t('Save only');
+    save.textContent = using ? (allow.checked ? t('Add the site and allow') : t('Add the site only')) : (allow.checked ? t('Save and allow') : t('Save only'));
   };
   allow.addEventListener('change', sayAllow); sayAllow();
   row.append(save, deny);
   const note = mk('div', 'ut-secret-note', t('Wrong site? Refuse — the agent can ask again with the right one.'));
-  box.append(f.fields[0], f.fields[1], kept, f.fields[2], otpRow, f.otpNames, f.hint, allowLab, allowSays, allowFence, row, note, stateEl());
+  const use = useSavedLoginEl({ box, site, who, origin: String(item.action.hosts || ''), user: f.user, typed: [f.fields[2], otpRow, f.otpNames, f.hint], allowText, sayAllow });
+  box.append(f.fields[0], use.button, use.pane, f.fields[1], kept, f.fields[2], otpRow, f.otpNames, f.hint, allowLab, allowSays, allowFence, row, note, stateEl());
   applySecretBox(box);
   return box;
+}
+
+/** ONE LOGIN, SEVERAL SITES (lane login-request-card, step F's last part): «Use a login you already saved…» on the login card. The
+ *  person picks one of the vault's web logins (site · user — never a value); the box then sends no password: the hub ADDS the
+ *  request's site to that login (logins.addSite, the person's act). The user field becomes the name it signs in under there (the
+ *  login's own by default); the words before the press (useLoginWords over the hub's site-words) say the exact address, its ASCII
+ *  form, a look-alike, and by name who may then have it filled there; «Let … sign in» names every site of the login (the grant
+ *  follows the login). «Type a new login instead» puts the card back as it was. `box.dataset.use` = the picked login's name. */
+function useSavedLoginEl({ box, site, who, origin, user, typed, allowText, sayAllow }) {
+  const button = btn(t('Use a login you already saved…'), 'ut-login-use');
+  const pane = mk('div', 'ut-login-use-pane'); pane.hidden = true;
+  const pick = mk('select', 'ut-login-use-pick vault-pw');   // the card's own input look
+  const says = mk('div', 'ut-secret-note ut-login-use-says');
+  const back = btn(t('Type a new login instead'), 'ut-login-use-back');
+  pane.append(pick, says, back);
+  let typedUser = '';
+  const mode = (entry, sites) => {
+    if (entry) box.dataset.use = entry.name; else delete box.dataset.use;
+    for (const n of typed) if (n) n.hidden = !!entry;
+    if (entry) { if (!box.dataset.useUser) typedUser = user.value; user.value = entry.user; box.dataset.useUser = '1'; }
+    else if (box.dataset.useUser) { user.value = typedUser; delete box.dataset.useUser; }
+    allowText.textContent = entry ? t('Let {who} sign in with it on every site of this login ({sites})', { who, sites }) : t('Let {who} sign in to {site} with it', { who, site });
+    sayAllow();
+  };
+  // ONE LATEST RENDER (utils.js latestRender): two presses close together never draw the list twice
+  let built = [];
+  const drawPick = latestRender(pick, async (out) => {
+    const r = await fetchJson('/api/vault/web-logins');
+    built = r && r.ok && Array.isArray(r.entries) ? r.entries : [];
+    if (!built.length) return;
+    const none = mk('option', null, t('Pick the saved login')); none.value = ''; out.append(none);
+    for (const e of built) { const o = mk('option', null, `${e.origin} · ${e.user}`); o.value = e.name; out.append(o); }
+  });
+  button.addEventListener('click', async () => {
+    button.hidden = true; pane.hidden = false; says.textContent = '';
+    if (!(await drawPick())) return;   // a newer draw since (it says), or the card is gone
+    pick._list = built;
+    pick.hidden = !built.length;
+    if (!built.length) says.textContent = t('No website login is saved yet — type this one below.');
+  });
+  pick.addEventListener('change', async () => {
+    const e = (pick._list || []).find((x) => x.name === pick.value) || null;
+    if (!e) { mode(null); says.textContent = ''; return; }
+    const sites = [...new Set([e.origin, ...((e.sites || []).map((x) => x.origin)), origin].filter(Boolean))].join(', ');
+    mode(e, sites);
+    const w = await fetchJson(`/api/vault/web-logins/site-words?name=${encodeURIComponent(e.name)}&site=${encodeURIComponent(origin)}`);
+    if (box.dataset.use !== e.name) return;   // another pick since
+    says.textContent = useLoginWords(w, { site, login: `${e.origin} · ${e.user}`, t }).join(' ');
+  });
+  back.addEventListener('click', () => { mode(null); pane.hidden = true; button.hidden = false; pick.value = ''; says.textContent = ''; });
+  return { button, pane };
 }
 
 /** lane totp-request-card (fb-251bb41646): THE TWO-STEP CARD's box — THE 两步验证… dialog's own field set (totpFields: the two
@@ -276,7 +332,9 @@ export async function submitSecretBox(model, item, box, answer) {
 async function submitLoginBox(model, item, box, answer) {
   const q = (s) => box.querySelector(s);
   const user = q('input.vault-login-user'), pw = q('input.vault-login-pass'), otp = q('input.vault-login-otp'), allow = q('input.ut-login-allow-box');
-  const login = answer === 'store' ? { username: user ? user.value.trim() : '', loginPassword: pw ? pw.value : '', ...(otp && otp.value.trim() ? { totpName: otp.value.trim() } : {}), allow: !!(allow && allow.checked) } : null;
+  const using = box.dataset.use || '';   // one login, several sites: the picked login — no password on this road
+  const login = answer !== 'store' ? null : using ? { useLogin: using, username: user ? user.value.trim() : '', allow: !!(allow && allow.checked) }
+    : { username: user ? user.value.trim() : '', loginPassword: pw ? pw.value : '', ...(otp && otp.value.trim() ? { totpName: otp.value.trim() } : {}), allow: !!(allow && allow.checked) };
   const say = (code, r) => (['vault_not_set_up', 'ask_settled', 'ask_unknown'].includes(code) ? refusalSay(code, r) : loginRefusalWords(code, r));
   box.dataset.busy = '1';
   box.querySelectorAll('button').forEach((b) => { b.disabled = true; });
@@ -308,6 +366,7 @@ export async function postSecretAnswer(item, answer, { value = null, name, note,
   const body = answer === 'store' ? (totp ? { answer, totpLink: totp.uri, totpSeed: totp.seed, totp: { name: totp.name, digits: totp.digits, period: totp.period, algorithm: totp.algorithm }, allow: totp.allow === true } : login ? { answer, ...login } : { answer, value, ...(typeof name === 'string' ? { name } : {}), ...(typeof note === 'string' ? { note } : {}) }) : { answer };   // name / note: lane vault-entry-description · login: lane login-request-card (its password as `loginPassword` — the route takes it off the body)
   const r = await fetchJson(`/api/vault/secret-requests/${encodeURIComponent(item.action.requestId)}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (r && r.ok && totp && r.outcome === 'stored') { showToast(r.allowed ? t('Saved «{name}» — the agent may read its current code while it runs; it never sees the seed', { name: r.name }) : totp.allow ? t('Saved «{name}», but its code was not given — that conversation was not running; give it in Vault ▸ Two-step codes ▸ Use for…', { name: r.name }) : t('Saved «{name}» — the agent cannot read its code until you give it', { name: r.name }), totp.allow && !r.allowed ? { type: 'error' } : undefined); return true; }   // lane totp-request-card
+  if (r && r.ok && login && r.outcome === 'stored' && r.joined) { showToast(r.allowed ? t('Added the site to the saved login — the agent may sign in with it there; VibeSpace never hands it the password') : t('Added the site to the saved login — the agent may not sign in with it until you allow it in Vault ▸ Web logins ▸ Use for…')); return true; }   // one login, several sites
   if (r && r.ok && login && r.outcome === 'stored') { showToast(r.allowed ? t('Saved to the vault — the agent may sign in with it on that site; VibeSpace never hands it the password') : login.allow ? t('Saved to the vault, but the permission could not be written — allow it in Vault ▸ Web logins ▸ Use for…') : t('Saved to the vault — the agent cannot sign in with it until you allow it'), login.allow && !r.allowed ? { type: 'error' } : undefined); return true; }   // lane login-request-card
   if (r && r.ok) { showToast(r.outcome === 'stored' ? t('Saved to the vault — the agent is told it is there, never the value') : t('Refused — the agent is told on its next turn')); return true; }
   const code = r && r.code;

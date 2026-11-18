@@ -479,7 +479,8 @@ function loginReceiptText(head, o, piece) {
   const origin = piece(t.origin, 300), user = l.allowed && l.user ? piece(l.user, 160) : '';
   const rc = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
   const on = `${origin}${user ? ` (user ${user})` : ''}`;
-  const what = l.updated ? `UPDATED — the website login for ${on} in the vault now has the password the user typed (the old one is kept one revision)` : `STORED — a website login for ${on} is in the vault`;
+  const what = l.joined ? `STORED — the user chose a website login already in the vault and added ${origin} to its sites; it signs in there${user ? ` as ${user}` : ''} with that login's one password`
+    : l.updated ? `UPDATED — the website login for ${on} in the vault now has the password the user typed (the old one is kept one revision)` : `STORED — a website login for ${on} is in the vault`;
   const use = LOGIN_USE.replace(/\{origin\}/g, () => origin).replace(/\{user\}/g, () => (user ? `#${user}` : ''));
   // r3 (law D): THREE outcomes, three sentences — granted · not ticked · ticked but the permission could not be written
   const may = l.allowed

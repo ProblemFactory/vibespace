@@ -381,6 +381,82 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
     const ldR = await lockedDrop((src) => src.replace("    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then remove the login", "    if (false) return named('vault_locked', 'the vault is locked — unlock it, then remove the login"));
     ok(ld.d.ok === false && ld.d.code === 'vault_locked' && ld.stays && ldR.d.ok === true && !ldR.stays, 'A LOCKED VAULT\'S REMOVE IS REFUSED BY NAME (its sites cannot be read, so their rows could not go with it) — RED CONTROL: without it the login goes and its added sites\' rows stay', { d: ld.d, red: ldR.d });
   }
+  // THE WORDS BEFORE «Use a login you already saved…» on the login card (src/lib/use-login-words.js — PURE, the page's `t` handed in),
+  // over the store's REAL site-words answer: what the press does, BY NAME who may then have it filled there, a look-alike said
+  {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-login-words-'));
+    const load = async (mut) => { const src = read('src/lib/use-login-words.js'); const f = path.join(tmp, `w-${crypto.randomBytes(4).toString('hex')}.mjs`); fs.writeFileSync(f, mut ? mut(src) : src); return (await import(f)).useLoginWords; };
+    const tr = (k, p = {}) => k.replace(/\{(\w+)\}/g, (_, n) => (n in p ? String(p[n]) : `{${n}}`));
+    const v = await run();
+    const near = v.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), PORTAL), far = v.logins.siteWordsFor(BL.entryName(LMS, 'jdoe'), OTHER);
+    const UW = await load();
+    const a = UW(near, { site: PORTAL, login: `${LMS} · jdoe`, t: tr }), b = UW(far, { site: OTHER, login: `${LMS} · jdoe`, t: tr });
+    ok(a[0].includes(PORTAL) && a[0].includes(`${LMS} · jdoe`) && /nothing is typed again/.test(a[0]) && a.some((x) => /^Then it may be filled on .* by: .*conv-a/.test(x)) && !a.some((x) => /^Careful/.test(x)) && b.some((x) => /^Careful: lms-school\.example is not the domain of this login's other sites \(school\.test\)/.test(x)),
+      'THE WORDS BEFORE THE PRESS on the login card (the page\'s, over the hub\'s real answer): what the press does, BY NAME who may then have it filled on that site (the login\'s own row: conv-a), and a look-alike said', { a, b });
+    const UWr = await load((src) => src.replace("  const names = [...(wd.login || []), ...(wd.anyAccount || []), ...(wd.anySite || [])].map(nameOf).filter(Boolean);", '  const names = [];'));
+    const ar = UWr(near, { site: PORTAL, login: `${LMS} · jdoe`, t: tr });
+    ok(ar.some((x) => /^Nobody else may have it filled/.test(x)), 'RED CONTROL: words that leave out the grants say «nobody else» while conv-a may fill it — the leg above would read it', ar);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  // (主开发 10:54Z, AS IF A MUST, with the first page door that adds a site) THE GRANT PICKER TOUCHES ONLY ITS OWN LOGIN'S ROWS ON ITS
+  // OWN SITE: with added sites in the list, another login's «any account on this site» row rides this login's grants — the picker
+  // reads the row at the login's FIRST site (where it writes), and a chip of another site's row names that site
+  {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-own-row-'));
+    const load = async (mut) => { const src = read('src/lib/use-login-words.js'); const f = path.join(tmp, `o-${crypto.randomBytes(4).toString('hex')}.mjs`); fs.writeFileSync(f, mut ? mut(src) : src); return await import(f); };
+    const v = await run();
+    v.logins.addSite(BL.entryName(LMS, 'jdoe'), { site: SSO, user: 'jdoe' }, { who: 'owner' });   // jdoe on sso is the course login's
+    eng.secretDrop(BL.entryName(SSO, 'jdoe@school.test'));
+    v.logins.addOwn({ origin: SSO, username: 'bob', password: 'Bob!' + 'b'.repeat(12) }, { who: 'owner' });
+    v.logins.grant(BL.entryName(SSO, 'bob'), 'any-account', 'session:conv-q');   // «any account on sso» — it reaches the course login there too
+    const A = v.logins.list().entries.find((e) => e.name === BL.entryName(LMS, 'jdoe'));
+    const M = await load();
+    const own = M.ownRowOf(A, 'any-account'), other = (A.grants || []).find((g) => g.resource === `${SSO}#*`);
+    const R = await load((src) => src.replace("  return want ? ((e.grants || []).find((g) => g && !g.unknown && g.scope === scope && g.resource === want) || null) : null;", "  return want ? ((e.grants || []).find((g) => g && !g.unknown && g.scope === scope) || null) : null;"));
+    const ownR = R.ownRowOf(A, 'any-account');
+    ok(other && own === null && M.chipSiteOf(A, other) === 'sso.school.test' && M.chipSiteOf(A, (A.grants || []).find((g) => g.resource === '*') || { site: null }) === null && ownR && ownR.resource === `${SSO}#*`,
+      'THE GRANT PICKER READS ITS OWN ROW ON ITS OWN SITE: another login\'s «any account on sso» row rides this login\'s list, the picker\'s «any account» reads the course site\'s row (none here) and the chip of that row names sso — RED CONTROL: a first-scope match reads (and could untick) the other site\'s row', { own, ownR: ownR && ownR.resource, other: other && other.resource });
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  // (AS IF A MUST) THE MERGE SAYS THE OTHER LOGIN'S PASSWORD IS NOT KEPT, and which of the two was set later — dates only
+  {
+    const pw = async (mutate = null) => {
+      const v = await run(mutate);
+      await new Promise((r) => setTimeout(r, 15));
+      v.logins.addOwn({ origin: SSO, username: 'jdoe@school.test', password: 'Newer!' + 'n'.repeat(12) }, { who: 'owner' });   // the school changed it later
+      return v.logins.mergeWordsFor(BL.entryName(LMS, 'jdoe'), BL.entryName(SSO, 'jdoe@school.test'));
+    };
+    const w1 = await pw();
+    const w1r = await pw((src) => src.replace("...(m.ownerLoses ? { ownerLoses: m.ownerLoses } : {}), otherPassword: m.otherPassword, widens: m.widens };\n  }\n  function merge(", "...(m.ownerLoses ? { ownerLoses: m.ownerLoses } : {}), widens: m.widens };\n  }\n  function merge("));   // stale-pins: kept — a red control whose mutant REBUILDS the words without the password line
+    ok(w1.ok && w1.otherPassword && w1.otherPassword.kept === false && w1.otherPassword.later === 'other' && w1.otherPassword.setAt > w1.otherPassword.keptSetAt && !JSON.stringify(w1).includes('Newer!') && w1r.ok && w1r.otherPassword === undefined,
+      'THE MERGE SAYS, BEFORE THE PRESS, THE OTHER LOGIN\'S PASSWORD IS NOT KEPT and that IT was set later (dates only, no byte shown) — RED CONTROL: words without it', { w1: w1.otherPassword, red: w1r.otherPassword });
+  }
+  // (small) a drop that fails AFTER some grant rows went names them — lost permissions are said
+  {
+    const dropFail = async (mutate = null) => {
+      const v = await run();
+      v.logins.addSite(BL.entryName(LMS, 'jdoe'), { site: PORTAL }, { who: 'owner' });
+      v.logins.grant(BL.entryName(LMS, 'jdoe'), 'this-account', 'session:conv-z');
+      const failing = Object.create(eng); failing.secretDrop = () => ({ ok: false, code: 'not_written', error: 'disk full (test)' });
+      const st = (mutate ? loadMutated('src/server/browser-logins.js', mutate) : Lm).create({ vault: failing, grants: () => v.grants, forYou: { add() { return null; }, resolve() { }, list() { return []; } }, log: () => { } });
+      return st.drop(BL.entryName(LMS, 'jdoe'), { who: 'owner' });
+    };
+    const df = await dropFail();
+    const dfR = await dropFail((src) => src.replace("    if (r && r.ok === false) return named(r.code || 'not_written', `${r.error || 'not removed'} — the login was not removed${goneWords()}`);", "    if (r && r.ok === false) return named(r.code || 'not_written', r.error || 'not removed');"));   // stale-pins: kept — a red control whose mutant REBUILDS the bare «not removed»
+    ok(df.ok === false && /the login was not removed; its grant row https:\/\/lms\.school\.test#jdoe was removed already/.test(df.error) && dfR.ok === false && !/removed already/.test(dfR.error), 'A DROP THAT FAILS after its grant rows went NAMES THEM («removed already») — RED CONTROL: the bare «not removed»', { df: df.error, red: dfR.error });
+  }
+  // (small) THE SAVE CARD on a held added site says the login's other sites change too
+  {
+    const items = [];
+    const v = await run();
+    v.logins.addSite(BL.entryName(LMS, 'jdoe'), { site: PORTAL }, { who: 'owner' });
+    const st = Lm.create({ vault: eng, grants: () => v.grants, forYou: { add(_p, it) { items.push(it); return { id: 'fy-1' }; }, resolve() { }, list() { return []; } }, log: () => { } });
+    const o = st.offerOwnerSaveCard({ origin: PORTAL, username: 'jdoe', password: 'Hand!' + 'q'.repeat(12) });
+    const it = items[0] || {};
+    const d = (it.i18n && it.i18n.detail && it.i18n.detail[0]) || {};
+    ok(o.ok && o.update === true && /one of this login's sites/.test(d.key || '') && d.params && /lms\.school\.test/.test(d.params.sites) && /portal\.school\.test/.test(d.params.sites) && /every one of them/.test(it.detail || ''),
+      'THE SAVE CARD ON A HELD ADDED SITE says the update changes the login\'s ONE password on every one of its sites (named)', { key: d.key, params: d.params });
+  }
   // (d) the four new verbs on a LOCKED vault — refused by name, nothing written
   {
     const v = await run();

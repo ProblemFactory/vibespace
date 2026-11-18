@@ -269,6 +269,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!logins || typeof logins.addOwn !== 'function') return named('login_no_door');
     const st = vault.state();
     if (st !== 'unlocked') return named(st === 'locked' ? 'vault_locked' : 'vault_not_set_up');
+    if (typeof l.useLogin === 'string' && l.useLogin) return answerUseLogin(q, id, l, { by, mark });   // one login, several sites
     const v = P.loginAnswerOf(l);
     if (!v.ok) return v;
     if (v.totpName) { let names = []; try { names = vault.secretNames() || []; } catch { names = []; } if (!names.some((s) => s && s.name === `totp:${v.totpName}`)) return named('login_totp_unknown'); }
@@ -294,6 +295,34 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     mark();
     settle(q, 'stored', { login: { user, updated: !!r.updated, allowed, asked: l.allow === true } });   // asked: the owner's tick (law D — granted / not ticked / ticked but not written)
     return { ok: true, outcome: 'stored', entry, updated: !!r.updated, allowed };
+  }
+
+  /** ONE LOGIN, SEVERAL SITES (lane login-request-card, step F's last part — B-a681's card): «Use a login you already saved…». The
+   *  person picks one of the vault's web logins; the request's site is ADDED to it through the web-login store's one writer
+   *  (logins.addSite — the person's act: an exact origin, one (site, user) pair per login, refused by name otherwise), signing in there
+   *  under the login's own user or the card's typed name. Nothing is typed twice: no password crosses this road. A site the login
+   *  already holds is the answer as it stands. «Let it sign in» grants the asking conversation the PICKED login's own row — the grant
+   *  follows the login (every site of it; the card said so before the press). The receipt is the stored one (law A: the user named
+   *  only with the grant), saying the site was added to a login already in the vault. Every refusal keeps the item open. */
+  function answerUseLogin(q, id, l, { by, mark }) {
+    if (typeof logins.addSite !== 'function') return named('login_no_door');
+    const name = String(l.useLogin).slice(0, 600);
+    let r = null;
+    try { r = logins.addSite(name, { site: q.target.origin, user: typeof l.username === 'string' ? l.username : '' }, { who: String(by).slice(0, 40) }); }
+    catch (e) { log(`${q.requestId}: the site could not be added to the login (${(e && e.code) || 'error'})`); return named('store_failed'); }
+    const already = !!(r && r.ok === false && r.code === 'login_site_exists');
+    if (!r || (!r.ok && !already)) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (r && r.error) || MORE_WORDS[c] || P.WORDS[c] || c }; }
+    const user = String((r && r.user) || P.loginUserOf(name));
+    let allowed = false;
+    if (l.allow === true && q.conv && typeof logins.grant === 'function') {
+      try { const g = logins.grant(name, 'this-account', `session:${q.conv}`, { by: String(by).slice(0, 40) }); allowed = !!(g && g.ok); if (!allowed) log(`${q.requestId}: the sign-in grant was not written (${(g && g.code) || 'error'}) — the site is on the login`); }
+      catch (e) { log(`${q.requestId}: the sign-in grant was not written (${(e && e.code) || 'error'}) — the site is on the login`); }
+    }
+    try { vault.contentsChanged && vault.contentsChanged('paste'); } catch { }
+    audit('vault-secret-stored', { by: String(by).slice(0, 40), conv: q.scope, requestId: id, place: name, allowed, joined: true });
+    mark();
+    settle(q, 'stored', { login: { user, updated: false, allowed, asked: l.allow === true, joined: true } });
+    return { ok: true, outcome: 'stored', entry: name, joined: true, already, allowed };
   }
 
   /** lane totp-request-card (fb-251bb41646): THE OWNER ADDS A TWO-STEP CODE on the card → THE two-step add door's ONE writer
