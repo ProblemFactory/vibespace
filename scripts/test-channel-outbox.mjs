@@ -4434,5 +4434,43 @@ console.log('§bl-msg B-9b9c two replies to ONE message — both cards name the 
   ok(!ids(r.v1).length && !ids(r.v2).length && !(r.p2 && r.p2.also), 'RED CONTROL (no cross-link): neither card nor the answer names the other reply — the B-9b9c legs go red');
 }
 
+// lane bl-msg B-ae13 (fb-4d94c275a2): the agent that filed a wake request takes it back once its reply came — the request ends
+// `withdrawn`, its For-you item «withdrawn by the agent»; another agent cannot, a decided one cannot, approval stays the person's click
+console.log('§bl-msg B-ae13 the asker withdraws its own open wake request — nobody else, never a decided one');
+{
+  const run = async (ENGM, name) => {
+    const W13 = mkEngine({ name, engine: ENGM, live: [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }, { cid: 'agent-2', name: 'Helper', groups: ['g1'] }] });
+    const { eng, userTodos } = W13;
+    await prime(eng);
+    const P1 = { kind: 'agent', id: 'agent-1', name: 'Worker' }, P2 = { kind: 'agent', id: 'agent-2', name: 'Helper' };
+    await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: P1, authority: 'draft' }, { principal: P2, authority: 'draft' }] });
+    const AG2 = { kind: 'agent', id: 'agent-2', name: 'Helper', groups: ['g1'], msgLevelFor: () => 'none' };
+    const wk = await eng.agentWatch(AGENT, KEY, { delivery: 'wake', keywords: ['outage'], why: 'on call' });
+    const id = wk && wk.request && wk.request.id;
+    const other = id ? await eng.withdrawWatchRequest({ requestId: id, by: { kind: 'agent', id: 'agent-2' } }) : null;
+    const reqOf = () => (eng.store.index.table('watchRequests') || []).find((r) => r && r.id === id) || {};
+    const todoId = reqOf().todoId;
+    const mine = id ? await eng.withdrawWatchRequest({ requestId: id, by: { kind: 'agent', id: 'agent-1' }, why: 'the reply came' }) : null;
+    const after = { status: reqOf().status, decidedBy: reqOf().decidedBy, item: todoId && userTodos.get(todoId) ? { status: userTodos.get(todoId).status, by: userTodos.get(todoId).resolvedBy } : null };
+    const again = id ? await eng.withdrawWatchRequest({ requestId: id, by: { kind: 'agent', id: 'agent-1' } }) : null;
+    const wk2 = await eng.agentWatch(AG2, KEY, { delivery: 'wake' });
+    await (wk2 && wk2.request ? eng.decideRequest(wk2.request.id, true, 'user') : null);
+    const decided = wk2 && wk2.request ? await eng.withdrawWatchRequest({ requestId: wk2.request.id, by: { kind: 'agent', id: 'agent-2' } }) : null;
+    return { wk, other, mine, after, again, decided };
+  };
+  const g = await run(ENG, 'bae13');
+  ok(g.wk && g.wk.proposed && g.other && g.other.ok === false && g.other.code === 'not-found', 'another agent cannot withdraw it (the same uniform not-found)', JSON.stringify(g.other));
+  ok(g.mine && g.mine.ok && g.after.status === 'withdrawn' && g.after.decidedBy === 'agent' && g.after.item && g.after.item.status !== 'open' && g.after.item.by === 'agent',
+    'THE ASKER withdraws its open wake request: the request ends withdrawn (by the agent), its For-you item «withdrawn by the agent»', JSON.stringify(g.after));
+  ok(g.again && g.again.ok === false && g.again.code === 'bad-state' && g.decided && g.decided.ok === false && g.decided.code === 'bad-state', 'twice, or once the person decided it ⇒ refused by name (a decision is final)', JSON.stringify({ again: g.again, decided: g.decided }));
+  // RED CONTROL: the withdraw that never ends the person's item ⇒ the card would sit in For you — the leg above goes red
+  const src = engineSource(REPO);
+  const RES = "try { userTodos.resolveAnswered([r0.todoId], 'agent'); } catch { }";
+  ok(src.split(RES).length === 2, 'the control finds its line');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const r = await run(mutantCopies('blm-ae13', REPO).load('src/server/channels-engine.js', src.replace(RES, ''), 'ae13-no-resolve'), 'bae13-red');
+  ok(r.after.status === 'withdrawn' && !(r.after.item && r.after.item.status !== 'open'), 'RED CONTROL (the item never ended): the request is withdrawn but the person\'s card stays open — the leg above goes red', JSON.stringify(r.after));
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

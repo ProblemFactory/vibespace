@@ -1641,6 +1641,28 @@ function create(engineCtx) {
    *  The engine runs it at boot (reconcileAsks) and on its minute sweep; an ask filed before the lifetime (no `expiresAt`, its
    *  item lasting) ends here too. Either road (this, or the store's sweep of the item through the hook) ends in the same
    *  state. → the ids expired. */
+  /** lane bl-msg B-ae13 (fb-4d94c275a2): THE ASKER TAKES ITS OWN WAKE REQUEST BACK — only the agent that filed it (`watch`, the
+   *  principal is that agent), only while it is OPEN; the request ends `withdrawn` (decidedBy 'agent', audited `watch-withdraw`) and
+   *  its For-you item ends «withdrawn by the agent» (the row's own end — its approval stays the person's click). → {ok, request} | refusal. */
+  async function withdrawWatchRequest({ requestId, by = null, why = null } = {}) {
+    const id = String(requestId || '');
+    const mine = (r) => !!(r && r.kind === 'watch' && r.principal && r.principal.kind === 'agent' && by && by.kind === 'agent' && String(r.principal.id) === String(by.id));
+    const r0 = (store.index.table('watchRequests') || []).find((r) => r && r.id === id);
+    if (!mine(r0)) return { ok: false, code: 'not-found', error: `no wake request of yours with id ${id} — vibespace-channels watch --mode wake files one` };
+    if (r0.status !== 'open') return { ok: false, code: 'bad-state', error: `wake request ${id} is ${r0.status} — only an open one can be withdrawn`, state: r0.status };
+    const t = now();
+    let applied = false;
+    await store.index.update((ix) => {
+      const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === id);
+      if (!mine(r2) || r2.status !== 'open') return;
+      applied = true; r2.status = 'withdrawn'; r2.decidedAt = t; r2.decidedBy = 'agent';
+    }, { durable: true });
+    if (!applied) return { ok: false, code: 'bad-state', error: `wake request ${id} was decided a moment ago (in another window)` };
+    try { store.audit({ kind: 'acl', op: 'watch-withdraw', principal: r0.principal, scope: r0.scope, requestId: id, at: t, by: 'agent', ...(typeof why === 'string' && why.trim() ? { why: why.trim().slice(0, 200) } : {}) }); } catch { }
+    if (r0.todoId && userTodos && typeof userTodos.resolveAnswered === 'function') { try { userTodos.resolveAnswered([r0.todoId], 'agent'); } catch { } }
+    notify([]);
+    return { ok: true, request: { id, status: 'withdrawn', decidedAt: t } };
+  }
   async function expireWatchRequests(t = now()) {
     const due = new Set((store.index.table('watchRequests') || []).filter((r) => r && r.status === 'open' && askEndOf(r) <= t).map((r) => r.id));
     if (!due.size) return [];
@@ -2935,7 +2957,7 @@ function create(engineCtx) {
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
   };
 }
 

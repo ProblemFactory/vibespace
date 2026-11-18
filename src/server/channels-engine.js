@@ -8542,7 +8542,7 @@ function create(deps = {}) {
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
@@ -8986,7 +8986,7 @@ function create(deps = {}) {
     reconcile: (id, o) => onProposal(id, () => reconcile(id, o)), sweepSending, sweepReplaces, releaseHeld, setSenderHonesty, honestyLineFor, deprecatedReceiptWakes,   // verify r2: two Check-outcome presses ask the adapter ONCE
     collectReceipt,   // lane channel-direct-send-sync: the drafting CLI reads a direct send's receipt inline (GET status?id&collect=1)
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
-    expireWatchRequests, reconcileAsks,   // lane wake-approve-card r3: a wake ask's lifetime + the asks' boot reconcile (suites drive them)
+    expireWatchRequests, withdrawWatchRequest, reconcileAsks,   // lane bl-msg B-ae13: the asker takes its own wake request back; lane wake-approve-card r3: a wake ask's lifetime + the asks' boot reconcile (suites drive them)
     wakeHeldAt,   // lane wake-approve-card r4: does this grain hold a wake? (the routes ask it before EVERY grain write — wakeRefused)
     grainReadAt,   // r5: THE one reader of a grain (the access above it included; every stored row, active or inert) — «held» reads it
     resurfacePointers, openAccessPointers,   // r4: the 2026-10-closed-access-pointers-hidden migration (src/server/migrations.js) goes through these

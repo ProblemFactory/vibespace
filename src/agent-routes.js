@@ -2373,6 +2373,8 @@ app.post('/api/agent/channels/proposals/:id/withdraw', async (req, res) => {
   const by = who.s ? channelPrincipal(who.s, who.id) : (who.cid ? { kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [] } : null);
   if (!by) return res.status(409).json({ error: NO_CID_YET, code: 'bad-member' });
   const b = req.body || {};
+  // lane bl-msg B-ae13: a WAKE REQUEST id (wr-…) is the asker's own request, taken back the same way (approval stays the person's click)
+  if (/^wr-/.test(String(req.params.id)) && typeof eng.withdrawWatchRequest === 'function') { try { return chanAnswer(res, await eng.withdrawWatchRequest({ requestId: String(req.params.id), why: typeof b.why === 'string' ? b.why : null, by })); } catch (e) { return res.status(500).json({ error: e.message }); } }
   try { chanAnswer(res, await eng.withdrawProposal({ proposalId: String(req.params.id), why: typeof b.why === 'string' ? b.why : null, by })); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
