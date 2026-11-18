@@ -8586,6 +8586,13 @@ export default {
   "The page asks for a file": "网页要一个文件", // lane browser-ui-prompts
   "No file window opens here — the agent uploads it with vibespace-browser upload": "这里不会弹出文件窗口 — agent 用 vibespace-browser upload 上传", // lane browser-ui-prompts
   "The page asks you to sign in": "网页要求你登录", // lane browser-ui-prompts
+  "A sign-in is answered by a person — a view opened with a token cannot answer it": "登录只能由人来回答 — 用令牌打开的视图不能回答", // B-b56d
+  "The sign-in was not sent: answer it from VibeSpace’s own page": "登录没有发送：请在 VibeSpace 自己的页面上回答", // B-b56d
+  "A proxy asks you to sign in": "代理服务器要求你登录", // B-b56d
+  "Nobody answered the sign-in for {host} within {min} min — VibeSpace cancelled it, so the page shows its own refusal": "{host} 的登录在 {min} 分钟内没有人回答 — VibeSpace 已取消它，网页显示它自己的拒绝页", // B-b56d
+  "Nobody answered the proxy sign-in for {host} within {min} min — VibeSpace cancelled it, so the page shows its own refusal": "代理服务器 {host} 的登录在 {min} 分钟内没有人回答 — VibeSpace 已取消它，网页显示它自己的拒绝页", // B-b56d
+  "VibeSpace cannot show this browser’s sign-in requests here — if a page asks you to sign in, Chrome shows its own sheet: open it in Desktop and answer it there": "VibeSpace 无法在这里显示这个浏览器的登录请求 — 如果网页要求你登录，Chrome 会显示它自己的登录框：请在桌面中打开，在那里回答", // B-b56d
+  "VibeSpace cannot see this browser’s sign-in requests right now — a page that asks you to sign in may wait without showing anything here": "VibeSpace 现在看不到这个浏览器的登录请求 — 要求你登录的网页可能会一直等待，这里不会显示任何内容", // B-b56d
   "Sent to this page only — never to the agent, never written down": "只发给这个网页 — 不给 agent，也不记录", // lane browser-ui-prompts
   "A page in the agent browser asks you to sign in ({host})": "Agent 浏览器里的网页要求你登录（{host}）", // lane browser-ui-prompts
   "Open its live view and type the username and password there — the agent never sees them.": "打开它的实时画面，在那里输入用户名和密码 — agent 看不到。", // lane browser-ui-prompts

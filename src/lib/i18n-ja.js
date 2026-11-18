@@ -8585,6 +8585,13 @@ export default {
   "The page asks for a file": "ページがファイルを求めています", // lane browser-ui-prompts
   "No file window opens here — the agent uploads it with vibespace-browser upload": "ここではファイル選択画面は開きません — エージェントが vibespace-browser upload でアップロードします", // lane browser-ui-prompts
   "The page asks you to sign in": "ページがサインインを求めています", // lane browser-ui-prompts
+  "A sign-in is answered by a person — a view opened with a token cannot answer it": "サインインは人が応答するものです — トークンで開いたビューからは応答できません", // B-b56d
+  "The sign-in was not sent: answer it from VibeSpace’s own page": "サインインは送信されませんでした：VibeSpace 自身のページから応答してください", // B-b56d
+  "A proxy asks you to sign in": "プロキシがサインインを求めています", // B-b56d
+  "Nobody answered the sign-in for {host} within {min} min — VibeSpace cancelled it, so the page shows its own refusal": "{host} のサインインに {min} 分以内に誰も応答しなかったため、VibeSpace が取り消しました — ページには拒否の表示が出ます", // B-b56d
+  "Nobody answered the proxy sign-in for {host} within {min} min — VibeSpace cancelled it, so the page shows its own refusal": "プロキシ {host} のサインインに {min} 分以内に誰も応答しなかったため、VibeSpace が取り消しました — ページには拒否の表示が出ます", // B-b56d
+  "VibeSpace cannot show this browser’s sign-in requests here — if a page asks you to sign in, Chrome shows its own sheet: open it in Desktop and answer it there": "VibeSpace はこのブラウザのサインイン要求をここに表示できません — ページがサインインを求めると、Chrome が独自のシートを表示します：デスクトップで開いてそこで応答してください", // B-b56d
+  "VibeSpace cannot see this browser’s sign-in requests right now — a page that asks you to sign in may wait without showing anything here": "VibeSpace は現在このブラウザのサインイン要求を確認できません — サインインを求めるページは、ここに何も表示しないまま待ち続けることがあります", // B-b56d
   "Sent to this page only — never to the agent, never written down": "このページにだけ送られます — エージェントには渡らず、記録もされません", // lane browser-ui-prompts
   "A page in the agent browser asks you to sign in ({host})": "エージェントブラウザのページがサインインを求めています（{host}）", // lane browser-ui-prompts
   "Open its live view and type the username and password there — the agent never sees them.": "ライブビューを開いてユーザー名とパスワードを入力してください — エージェントには見えません。", // lane browser-ui-prompts

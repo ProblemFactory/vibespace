@@ -1001,9 +1001,11 @@ function promptAckWords(m, t = fillWords) {
   if (code === 'native_sheet') return t('Chrome shows its own sign-in sheet for this page — open it in Desktop and answer it there');
   if (code === 'not_watched') return t('VibeSpace is not watching this browser now, so the sign-in was not sent — try again in a moment');
   if (code === 'bad_request') return t('Enter a username to sign in');
+  if (code === 'agent_forbidden') return t('A sign-in is answered by a person — a view opened with a token cannot answer it'); // B-b56d (law 2)
+  if (code === 'not_your_page') return t('The sign-in was not sent: answer it from VibeSpace’s own page'); // B-b56d (law 2)
   return t('The sign-in was not sent: {why}', { why: String(m.error || code || 'refused').slice(0, 200) });
 }
-const PROMPT_ACK_CODES = Object.freeze(['no_prompt', 'native_sheet', 'not_watched', 'bad_request']);   // the codes with their own words (any other: the server's sentence)
+const PROMPT_ACK_CODES = Object.freeze(['no_prompt', 'native_sheet', 'not_watched', 'bad_request', 'agent_forbidden', 'not_your_page']);   // the codes with their own words (any other: the server's sentence)
 
 module.exports = {
   promptAckWords, PROMPT_ACK_CODES, // B-37a1 cure: the sign-in form's refused answer, said

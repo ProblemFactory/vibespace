@@ -236,7 +236,7 @@ const surfaces = { lines, events, forYou: fy, facts: w.factFor({ ...tgt, consume
 ok(!JSON.stringify(surfaces).includes(PW), 'no log line, event, fact, note, For-you item or answer carries the password');
 const dsrc = read('src/server/browser-dialogs.js'), ssrc = read('src/server/browser-stream.js'), lsrc = read('src/lib/browser-live-window.js');
 const dLines = dsrc.split('\n').filter((l) => /\bpassword\b/.test(l));
-ok(dLines.length > 0 && dLines.every((l) => !/say\(|log\.|console\.|emit\(|push\(/.test(l.replace(/w\.promptNotes\.push\(\{ id: rec\.id, prompt: rec, how, by, at: now\(\), targetId: rec\.targetId \}\)/, ''))), 'the watch: no line naming the password logs, emits or keeps it', dLines);
+ok(dLines.length > 0 && dLines.every((l) => !/say\(|log\.|console\.|emit\(|push\(/.test(l.replace(/w\.promptNotes\.push\(\{ id: rec\.id, prompt: rec, how, by, at: now\(\), targetId: rec\.targetId, person: w\.mode === 'person' \}\)/, ''))), 'the watch: no line naming the password logs, emits or keeps it', dLines);
 const sFn = (ssrc.match(/function answerPromptFor[\s\S]*?\n {2}\}\n/) || [''])[0];
 ok(sFn && !/console\.|say\(|trace|record\(/.test(sFn) && /prompt-ack/.test(sFn) && !/password[^:]*\}\)\)$/.test(sFn), 'the stream: answerPromptFor never logs or traces the message; the ack carries no credential');
 ok(/msg\.type === 'prompt-answer'\) \{ answerPromptFor\(relay, viewer, msg\); return; \}/.test(ssrc) && ssrc.indexOf("msg.type === 'prompt-answer'") < ssrc.indexOf('function onViewerMessage') + 600, 'the stream hands prompt-answer off first thing (before any later handler sees it)');
@@ -347,6 +347,239 @@ const cli = read('data/bin/vibespace-browser'), rsrc = read('src/routes/browser.
 ok(/\$\{pmWake \? '&prompt=1' : ''\}/.test(cli) && /if \(w\.prompt && pmWake\) \{ promptHit = w\.prompt;/.test(cli) && /console\.error\('\[page_prompt\]'\)/.test(cli) && /prompt: String\(req\.query\.prompt \|\| ''\) === '1'/.test(rsrc), 'the CLI asks `prompt=1` and ends its verb with THE SENTENCE [page_prompt]; the route passes it to the seam');
 ok(/router\.post\('\/api\/agent\/browser\/permission'/.test(rsrc) && /verbName === 'permission'/.test(cli) && /tapDialogAct\(\{ sessionId, profileId = null, action, dialog = null, permission = null(?:, passkey = null)? \}/.test(ssrc), 'the permission verb: CLI → route → the watch, its trace row through the dialog act\'s tap');
 ok(/a page waiting on a permission: decide it with `permission`/.test(read('docs/agent/browser-manual.md')), 'the browser manual §0 recipe');
+
+// ═══ ⑥ B-b56d (the owner's ruling B, 2026-11-18): THE PERSON'S OWN BROWSING TAKES OVER AN HTTP SIGN-IN — the watch's half ═══
+// Chrome hands a challenge to DevTools only on a request it paused (Fetch.enable refuses handleAuthRequests with no pattern), so the
+// person's hook is the agent's: DOCUMENT requests at the Request stage, each continued at once. Law 6: armed only while a window of the
+// person shows the browser (a sign-in it holds keeps the hook until answered or cancelled); law 1: the typed values reach Chrome only;
+// law 3: who asks (the challenge's own origin, a proxy named as one; page text); law 4: Cancel and the bound answer CancelAuth and the
+// bound is SAID; law 5: a refused hook is told to the person's window
+console.log('⑥ B-b56d: the person\'s own browsing — a sign-in taken over while a window of the person shows it');
+function fakeChromeP() {
+  const calls = []; const sessions = new Map(); let n = 0; const o = { refuseFetch: false };
+  const wss = new WebSocketServer({ noServer: true });
+  const srv = http.createServer((q, r) => { r.statusCode = 404; r.end(); });
+  srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, (ws) => wss.emit('connection', ws)));
+  wss.on('connection', (ws) => ws.on('message', (d) => {
+    const m = JSON.parse(d); calls.push(m); const reply = (x) => ws.send(JSON.stringify({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), ...x }));
+    if (m.method === 'Target.getTargets') return reply({ result: { targetInfos: [{ targetId: 'T1', type: 'page', url: 'http://signin.example.test:8080/', title: 't' }] } });
+    if (m.method === 'Target.attachToTarget') { const sid = `S-${m.params.targetId}-${++n}`; sessions.set(sid, ws); return reply({ result: { sessionId: sid } }); }
+    if (m.method === 'Fetch.enable' && o.refuseFetch) return reply({ error: { code: -32000, message: 'refused by the stand-in' } });
+    if (m.method === 'Fetch.continueWithAuth' && o.goneIds && o.goneIds.has(m.params.requestId)) return reply({ error: { code: -32602, message: 'Invalid InterceptionId.' } });
+    return reply({ result: {} });
+  }));
+  return { calls, o, emit(method, params) { for (const [sid, ws] of sessions) ws.send(JSON.stringify({ sessionId: sid, method, params })); },
+    async listen() { await new Promise((r) => srv.listen(0, '127.0.0.1', r)); this.url = `ws://127.0.0.1:${srv.address().port}/devtools/browser/fake`; return this; },
+    async close() { for (const c of wss.clients) c.terminate(); await new Promise((r) => srv.close(() => r())); } };
+}
+const PID6 = 'bp-0000b56d', HK6 = 'hu-0000b56d', CONV6 = 'bk-0000b56d';
+const PW6 = ['b56d', 'Pw', '4471'].join('-');
+const ORIGIN6 = 'http://signin.example.test:8080';
+const auth6 = (id, extra = {}) => ({ requestId: id, authChallenge: { origin: ORIGIN6, realm: 'Team', scheme: 'Basic', source: 'Server', ...extra } });
+const until6 = async (pred, ms = 1500) => { const t0 = Date.now(); for (;;) { const v = pred(); if (v) return v; if (Date.now() - t0 > ms) return v; await sleep(10); } };
+async function scene6(Dm, { stop = 'end', road = 'screencast', agentFirst = false, windowsAtMove = 1, askMs = 60, withM0 = false } = {}) {
+  const chp = await fakeChromeP().listen();
+  const lines6 = [], ev6 = [], fy6 = [];
+  const log6 = { warn: (l) => lines6.push(String(l)), log: (l) => lines6.push(String(l)), error: (l) => lines6.push(String(l)) };
+  const holders = [...(agentFirst ? [{ browserKey: CONV6, sessionId: 's-6', ephemeral: false }] : []), { browserKey: HK6, sessionId: null, ephemeral: false, human: true }];
+  const wp = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: chp.url }), pictureSourceFor: () => ({ source: road }) }, log: log6, holdersOf: () => holders,
+    forYou: { add: (pid, it) => { fy6.push(it); return 'todo-6-' + fy6.length; }, resolve() {} }, promptAskMs: askMs, authHoldMaxMs: 300 }); // (the bound leaves room for a held sign-in's steps on a loaded machine)
+  wp.onChange((e) => ev6.push(e));
+  const of = (m) => chp.calls.filter((x) => x.method === m);
+  const cwa = () => of('Fetch.continueWithAuth').map((m) => ({ id: m.params.requestId, r: m.params.authChallengeResponse.response, u: m.params.authChallengeResponse.username, p: m.params.authChallengeResponse.password }));
+  const out = { lines6, ev6, fy6 };
+  const end = async () => { out.census = JSON.stringify({ lines6, ev6, fy6, st: wp.personPromptStateOf(HK6), f: wp.stuckForKey(HK6), ans: out.ans || null }); wp.shutdown(); await chp.close(); return out; };
+  if (agentFirst) { // a conversation drives first: its watch holds a sign-in; then the conversation lets go and the person browses alone
+    await wp.arm(PID6); await until6(() => of('Fetch.enable').length);
+    if (withM0) { chp.emit('Fetch.authRequired', auth6('M0')); await until6(() => cwa().some((x) => x.id === 'M0')); } // the CONVERSATION'S sign-in, cancelled at its bound (its note is the agent's) — the S2 leg's scene only
+    chp.emit('Fetch.authRequired', auth6('M1')); await until6(() => (wp.factFor({ profileId: PID6, browserKey: CONV6, consume: false }).prompt || {}).type === 'http-auth');
+    holders.shift(); wp.personWindows(PID6, windowsAtMove);
+    await wp.arm(PID6, { by: 'person' }); await until6(() => of('Page.setInterceptFileChooserDialog').some((m) => m.params.enabled === false), 600); // the person's policies (the chooser hook off) — the move is done
+    out.moved = { cwa: cwa().filter((x) => x.id !== 'M0'), form: (wp.stuckForKey(HK6) || {}).prompt || null, ended: (wp.personPromptStateOf(HK6) || {}).ended || null };
+    if (out.moved.form) out.ans = await wp.answerPrompt({ profileId: PID6, browserKey: HK6 }, { username: 'ann', password: PW6, by: 'user' });
+    out.movedAfter = cwa();
+    return end();
+  }
+  await wp.arm(PID6, { by: 'person' }); await until6(() => of('Page.enable').length, 600); await sleep(20); // the tab enabled (its first sync runs right after: no window yet, no hook)
+  out.noWindow = { fetch: of('Fetch.enable').length };
+  if (stop === 'nowindow') return end();
+  wp.personWindows(PID6, 1); await until6(() => of('Fetch.enable').length, stop === 'window' ? 300 : 1500); // (the base-rule control never sees one: it stops after a short wait)
+  const fe = of('Fetch.enable')[0];
+  out.window = { fe: fe ? fe.params : null, chooser: of('Page.setInterceptFileChooserDialog').filter((m) => m.params.enabled).length, perm: of('Browser.setPermission').length, state: wp.personPromptStateOf(HK6) };
+  if (stop === 'window') return end();
+  chp.emit('Fetch.requestPaused', { requestId: 'P1', resourceType: 'Document', request: { url: ORIGIN6 + '/' } }); await until6(() => of('Fetch.continueRequest').length);
+  out.paused = { cont: of('Fetch.continueRequest').filter((m) => m.params.requestId === 'P1').length, fail: of('Fetch.failRequest').length };
+  chp.emit('Fetch.authRequired', auth6('A1', { realm: '<b>Team</b>‮' })); await until6(() => (wp.stuckForKey(HK6) || {}).prompt);
+  const f1 = wp.stuckForKey(HK6); out.form = f1 && f1.prompt ? f1.prompt : null;
+  out.ans = await wp.answerPrompt({ profileId: PID6, browserKey: HK6 }, { username: 'ann', password: PW6, by: 'user' });
+  if (road === 'x') { out.cwa = cwa(); return end(); }
+  if (stop !== 'off') { // (the settle control needs only the held sign-in below)
+  chp.emit('Fetch.authRequired', auth6('A2')); await until6(() => (wp.stuckForKey(HK6) || {}).prompt);
+  await wp.answerPrompt({ profileId: PID6, browserKey: HK6 }, { cancel: true, by: 'user' });
+  chp.emit('Fetch.authRequired', auth6('A3')); await until6(() => cwa().some((x) => x.id === 'A3')); await until6(() => ev6.some((e) => e.kind === 'prompt-ended'));
+  }
+  out.ended = wp.personPromptStateOf(HK6).ended; out.endedEv = ev6.some((e) => e.kind === 'prompt-ended' && e.how === 'expired');
+  // the last window closes while a sign-in is held: the hook stays until it is answered, then goes — after Chrome has the answer
+  const mark = chp.calls.length; // (the person's first sync turned an unknown mode 'off' — counted from here)
+  chp.emit('Fetch.authRequired', auth6('A4')); await until6(() => (wp.stuckForKey(HK6) || {}).prompt);
+  wp.personWindows(PID6, 0); await sleep(60); // (a NEGATIVE check: nothing may happen — a short wait, then the count)
+  out.heldKeeps = chp.calls.slice(mark).filter((m) => m.method === 'Fetch.disable').length;
+  await wp.answerPrompt({ profileId: PID6, browserKey: HK6 }, { username: 'ann', password: PW6, by: 'user' }); await until6(() => chp.calls.slice(mark).some((m) => m.method === 'Fetch.disable'), 600);
+  out.offAfter = chp.calls.slice(mark).map((m) => (m.method === 'Fetch.continueWithAuth' && m.params.requestId === 'A4' ? 'A4' : m.method === 'Fetch.disable' ? 'off' : null)).filter(Boolean);
+  if (stop === 'off') return end();
+  out.cwa = cwa();
+  // law 5: a hook Chrome refused is told; a hook that comes back is told too
+  chp.o.refuseFetch = true; wp.personWindows(PID6, 1); await until6(() => ev6.some((e) => e.kind === 'prompt-hook' && e.armed === false));
+  out.refused = { hook: wp.personPromptStateOf(HK6).hook, ev: ev6.filter((e) => e.kind === 'prompt-hook').map((e) => e.armed) };
+  chp.o.refuseFetch = false; wp.personWindows(PID6, 1); await until6(() => ev6.filter((e) => e.kind === 'prompt-hook').slice(-1)[0]?.armed === true);
+  out.repaired = { hook: wp.personPromptStateOf(HK6).hook, ev: ev6.filter((e) => e.kind === 'prompt-hook').map((e) => e.armed) };
+  // its read (S1): (a) a held sign-in the page ABANDONS (its tab commits another page) is dropped — no CancelAuth, no note, never
+  // «cancelled»; (b) at the bound, an answer Chrome REFUSES (the request was gone) writes no note and says nothing
+  const endedBefore = JSON.stringify(wp.personPromptStateOf(HK6).ended);
+  chp.emit('Fetch.authRequired', auth6('A5')); await until6(() => (wp.stuckForKey(HK6) || {}).prompt);
+  chp.emit('Page.frameNavigated', { frame: { id: 'T1', url: ORIGIN6 + '/elsewhere', loaderId: 'L-else' } }); await until6(() => !(wp.stuckForKey(HK6) || {}).prompt);
+  out.abandoned = { form: (wp.stuckForKey(HK6) || {}).prompt || null, cwa: cwa().filter((x) => x.id === 'A5'), endedSame: JSON.stringify(wp.personPromptStateOf(HK6).ended) === endedBefore };
+  chp.o.goneIds = new Set(['A6']);
+  const endedEvs = ev6.filter((e) => e.kind === 'prompt-ended').length;
+  chp.emit('Fetch.authRequired', auth6('A6')); await until6(() => cwa().some((x) => x.id === 'A6')); await sleep(40);
+  out.refusedAtBound = { cwa: cwa().filter((x) => x.id === 'A6').map((x) => x.r), endedSame: JSON.stringify(wp.personPromptStateOf(HK6).ended) === endedBefore, evs: ev6.filter((e) => e.kind === 'prompt-ended').length - endedEvs };
+  return end();
+}
+const s6 = await scene6(D);
+ok(s6.noWindow.fetch === 0, 'B-b56d (law 6): the person browses with NO window of theirs open — no hook at all (a browser nobody watches changes nothing)', s6.noWindow);
+ok(s6.window.fe && s6.window.fe.handleAuthRequests === true && s6.window.fe.patterns.length === 1 && s6.window.fe.patterns[0].resourceType === 'Document' && s6.window.fe.patterns[0].requestStage === 'Request' && s6.window.chooser === 0 && s6.window.perm === 0 && s6.window.state.hook && s6.window.state.hook.armed === true,
+  '…a window of the person opens ⇒ sign-ins hooked on Document requests only; the agent\'s other policies stay off (no file chooser hook, no permission decided) and the window is told the hook is armed', s6.window);
+ok(s6.paused.cont === 1 && s6.paused.fail === 0, 'B-b56d (law 6): a paused Document request with no challenge is continued at once — never failed, never held', s6.paused);
+ok(s6.form && s6.form.type === 'http-auth' && !s6.form.native && s6.form.origin === ORIGIN6 && s6.form.realm === '<b>Team</b>' && !/‮/.test(s6.form.realm),
+  'B-b56d (law 3): the challenge becomes the person\'s form — WHO ASKS is the challenge\'s own origin and realm, page text (a bidi character dropped; markup kept as text — the window draws it with textContent)', s6.form);
+ok(s6.ans && s6.ans.ok && s6.cwa[0] && s6.cwa[0].id === 'A1' && s6.cwa[0].r === 'ProvideCredentials' && s6.cwa[0].u === 'ann' && s6.cwa[0].p === PW6,
+  'B-b56d (law 1): the person\'s answer ⇒ continueWithAuth ProvideCredentials on the paused request, nothing else', s6.cwa[0] && { ...s6.cwa[0], p: s6.cwa[0].p === PW6 ? '(the password)' : 'OTHER' });
+ok(s6.cwa.some((x) => x.id === 'A2' && x.r === 'CancelAuth') && s6.cwa.some((x) => x.id === 'A3' && x.r === 'CancelAuth'), 'B-b56d (law 4): Cancel ⇒ CancelAuth; nobody answers within the bound ⇒ CancelAuth (the page is never left hanging)', s6.cwa.map((x) => x.id + ':' + x.r));
+ok(s6.ended && s6.ended.how === 'expired' && s6.ended.origin === ORIGIN6 && s6.ended.boundMs === 300 && s6.endedEv, 'B-b56d (law 4): …and the bound is SAID — the person\'s state names the cancelled sign-in, and an event moves the window', s6.ended);
+ok(s6.heldKeeps === 0 && s6.offAfter.join() === 'A4,off', 'B-b56d (law 6 / law 4): the last window closes while a sign-in is held ⇒ the hook stays until it is answered; then it goes, AFTER Chrome has the answer', s6.offAfter);
+ok(s6.refused.hook && s6.refused.hook.armed === false && s6.refused.hook.why === 'refused' && s6.refused.ev.includes(false) && s6.repaired.hook && s6.repaired.hook.armed === true && s6.repaired.ev[s6.repaired.ev.length - 1] === true,
+  'B-b56d (law 5): a hook Chrome refused is told to the person\'s window (armed false, why refused) and its return is told too — never a silent dead end', { refused: s6.refused, repaired: s6.repaired });
+ok(!s6.census.includes(PW6), 'B-b56d (law 1): the typed password is in no log line, event, For-you item, state, fact or answer of the person\'s road');
+ok(s6.abandoned.form === null && s6.abandoned.cwa.length === 0 && s6.abandoned.endedSame, 'B-b56d (its read, S1): a held sign-in the page ABANDONS (its tab commits another page) is dropped — no CancelAuth to a request that is gone, no note, never said as «cancelled»', s6.abandoned);
+ok(s6.refusedAtBound.cwa.join() === 'CancelAuth' && s6.refusedAtBound.endedSame && s6.refusedAtBound.evs === 0, 'B-b56d (its read, S1): at the bound, a CancelAuth Chrome REFUSES (the request was gone) writes no note and moves no window — the window never says «VibeSpace cancelled it» of a sign-in it did not cancel', s6.refusedAtBound);
+ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO For-you item for a sign-in left unanswered past the ask clock (the person\'s window shows the form, and the bound is said there)', s6.fy6);
+{ // the X road: the person alone gets what the agent's road gives there — Chrome's own sheet (Default at once) and its «Open in Desktop» door
+  const sx = await scene6(D, { road: 'x' });
+  ok(sx.cwa.length === 1 && sx.cwa[0].id === 'A1' && sx.cwa[0].r === 'Default' && sx.form && sx.form.native === true && sx.ans.code === 'native_sheet', 'B-b56d: on the X road the person\'s sign-in is Chrome\'s own sheet — Default at once, the native record the window\'s door reads, no form answers it', { cwa: sx.cwa, form: sx.form, ans: sx.ans });
+}
+{ // a conversation drove; the person now browses alone with a window open: the held sign-in is the person's to answer (never handed to an invisible sheet)
+  const sm = await scene6(D, { agentFirst: true, windowsAtMove: 1, withM0: true });
+  ok(sm.moved.ended === null, 'B-b56d (its read, S2): a sign-in the CONVERSATION\'S watch cancelled at its bound is never said in the person\'s window (only the person\'s road\'s own notes)', sm.moved.ended);
+  ok(sm.moved.cwa.length === 0 && sm.moved.form && sm.moved.form.type === 'http-auth' && sm.ans && sm.ans.ok && sm.movedAfter.some((x) => x.id === 'M1' && x.r === 'ProvideCredentials'),
+    'B-b56d: a sign-in held while a conversation drove stays held when the person takes the browser with a window open — the person\'s form answers it', { moved: sm.moved.cwa, after: sm.movedAfter.map((x) => x.id + ':' + x.r) });
+  const s0 = await scene6(D, { agentFirst: true, windowsAtMove: 0 });
+  ok(s0.moved.cwa.some((x) => x.id === 'M1' && x.r === 'Default') && !s0.moved.form, '…with NO window of the person open it is handed back to Chrome (Default), as before', s0.moved.cwa);
+}
+{ // its read (S3): a window of the person open and NO watch (its endpoint refused) — the state says the sign-ins cannot be seen; no window: nothing
+  const wu = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: false, code: 'unavailable', error: 'the stand-in refuses' }) }, log: { warn() {}, log() {}, error() {} }, holdersOf: () => [{ browserKey: HK6, sessionId: null, ephemeral: false, human: true }] });
+  await wu.arm(PID6, { by: 'person' });
+  const none = wu.personPromptStateOf(HK6); wu.personWindows(PID6, 1); const unw = wu.personPromptStateOf(HK6);
+  ok(none === null && unw && unw.hook && unw.hook.armed === false && unw.hook.why === 'unwatched' && ST.personPromptLines(unw, tFor('en')).hook, 'B-b56d (its read, S3): no open watch while a window of the person shows the browser ⇒ «cannot see sign-in requests» is said (beside the passkey line, never hidden by it); with no window open, nothing', { none, unw });
+  const lw6 = read('src/lib/browser-live-window.js');
+  ok(/if \(prLine && prLine\.hook\) \{ const line = document\.createElement\('span'\); line\.className = 'browser-live-dialog-body browser-live-prompt-unhooked'/.test(lw6) && /const prl = H && !d && !stuck && !blind && !pkElse \? personPromptLines/.test(lw6), '…the window draws the sign-in line in the passkey «unknown» branch too');
+  ok(ST.personPromptLines({ hook: { armed: false, why: 'kernel', x: false } }, tFor('en')).hook === null && ST.personPromptLines({ hook: { armed: null, why: 'connecting' } }, tFor('en')).hook === null, 'B-b56d (its read): a kernel (its own road) and a watch still connecting draw no standing line — only a refused hook and no watch at all are said');
+  wu.shutdown();
+}
+{ // its read (M1): THE PERSON TYPES INTO THE FORM — the window always drives its own tab, so the keys belong to the page unless a box is the
+  // window's OWN: the address row and (B-b56d) the sign-in form's two boxes, in each of the four keyboard handlers (keys, paste, input, focus)
+  const lw7 = read('src/lib/browser-live-window.js');
+  const ownLine = (lw7.match(/^ {2}const ownBox = \(el\) => [^\n]*$/m) || [''])[0];
+  const mk = (cls, inBar) => ({ classList: { contains: (c) => c === cls }, _inBar: inBar });
+  const bar = { contains: (el) => !!(el && el._inBar) };
+  const build = (line, H) => new Function('H', 'addrInput', 'dialogBar', `${line}\nreturn ownBox;`)(H, ADDR, bar);
+  const ADDR = { classList: { contains: () => false } };
+  const user = mk('browser-live-prompt-user', true), pass = mk('browser-live-prompt-pass', true), stray = mk('browser-live-prompt-pass', false), other = mk('browser-live-dialog-input', true);
+  const own = ownLine ? build(ownLine, { key: HK6 }) : null, conv = ownLine ? build(ownLine, null) : null;
+  ok(own && own(user) && own(pass) && own(ADDR) && !own(stray) && !own(other) && !conv(user) && !conv(pass) && !conv(ADDR),
+    'B-b56d (its read, M1): the person\'s window\'s OWN boxes are its address row and the sign-in form\'s two boxes (in its dialog bar only); a conversation\'s view keeps none (the agent\'s road unchanged)', ownLine.slice(0, 120));
+  ok((lw7.match(/ownBox\(e\.target\)/g) || []).length === 4 && !/e\.target === addrInput/.test(lw7), '…and all four keyboard handlers (keys, paste, beforeinput, focusin) leave them alone — no handler keeps the old address-row-only test');   // stale-pins: kept — a deliberate check that the base's test is gone
+  const base = new Function('H', 'addrInput', 'e', 'return (H && e.target === addrInput);');   // stale-pins: kept — the base's test, the control below
+  ok(!base({ key: HK6 }, ADDR, { target: user }) && !base({ key: HK6 }, ADDR, { target: pass }), 'CONTROL (M1): the base\'s test (the address row only) hands the form\'s boxes to the page — what the person typed went to the page (RED for the leg above)');
+}
+{ // law 3 + 4 + 5 words: who asks (a proxy named as one), the bound said, the hook-off lines — en / zh / ja, a site's text as page text
+  const pw = ST.promptWords({ type: 'http-auth', origin: 'http://proxy.example.test:3128', realm: 'Corp', proxy: true }, tFor('en'));
+  const lines = ['en', 'zh', 'ja'].map((lang) => ST.personPromptLines({ ended: { id: 'e1', how: 'expired', origin: ORIGIN6, boundMs: 600000 }, hook: { armed: false, why: 'refused', x: false } }, tFor(lang)));
+  const lx = ST.personPromptLines({ hook: { armed: false, why: 'unwatched', x: true } }, tFor('en'));
+  const lp = ST.personPromptLines({ ended: { id: 'e2', how: 'expired', origin: 'http://proxy.example.test:3128', proxy: true, boundMs: 600000 } }, tFor('en'));
+  ok(pw.title === 'A proxy asks you to sign in' && /proxy\.example\.test:3128 — Corp/.test(pw.body) && ST.promptWords({ type: 'http-auth', origin: ORIGIN6, realm: 'Team' }, tFor('en')).title === 'The page asks you to sign in',
+    'B-b56d (law 3): the form says who asks — a proxy\'s challenge is titled as a proxy\'s, its origin and realm in the body', pw);
+  ok(lines.every((l) => l.ended && l.ended.line.includes('signin.example.test') && l.ended.line.includes('10') && l.hook && l.hook.line) && /cancelled it/.test(lines[0].ended.line) && /may wait/.test(lines[0].hook.line) && /open it in Desktop/.test(lx.hook.line) && /proxy sign-in/.test(lp.ended.line) && ST.personPromptLines({ hook: { armed: true } }, tFor('en')).hook === null,
+    'B-b56d (laws 4 / 5): the person\'s window\'s two lines — the bound said with its host and minutes, a refused hook said (the X road\'s names Desktop) — every one in en / zh / ja; an armed hook says nothing', { en: lines[0], lx: lx.hook, lp: lp.ended });
+  const lsrc6 = read('src/lib/browser-live-window.js');
+  const blk = (lsrc6.match(/\} else if \(prLine\) \{[\s\S]*?\n {4}\}\n/) || [''])[0];
+  ok(blk && /prLine\.ended\.line/.test(blk) && /prLine\.hook\.line/.test(blk) && (blk.match(/textContent = /g) || []).length === 2 && !/innerHTML/.test(blk) && /st\.prEnded = m\.ended && typeof m\.ended === 'object'/.test(lsrc6),
+    'B-b56d (law 3): the person\'s window draws both lines as TEXT (textContent, never innerHTML) from its relay record', blk.length);
+}
+{ // LAW 8 (主开发 15:42Z): THE HUB'S TURN ON A PAUSED PAGE LOAD — the round trip over the real watch on an idle loop (median and worst
+  // of a stated count, printed: numbers, never a bound), and with a stall PLACED in the loop inside the continue's window (Atomics.wait:
+  // the thread sleeps, no load): the request is continued once the loop turns again — never failed, never dropped
+  // its read: the fake Chrome runs in its OWN thread (a Worker) — the hub's loop is this thread, so a stall placed here is one the
+  // fake's clock sees (the page's side), never one that stalls both ends alike
+  const { Worker } = await import('node:worker_threads');
+  const WORKER_SRC = `
+    const { parentPort, workerData } = require('node:worker_threads'); const http = require('node:http'); const { WebSocketServer } = require(workerData.ws);
+    const sessions = new Map(); let n = 0; const waits = new Map(); const counts = new Map(); let fails = 0;
+    const wss = new WebSocketServer({ noServer: true }); const srv = http.createServer((q, r) => { r.statusCode = 404; r.end(); });
+    srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, (ws) => wss.emit('connection', ws)));
+    wss.on('connection', (ws) => ws.on('message', (d) => {
+      const m = JSON.parse(d); const reply = (x) => ws.send(JSON.stringify({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), ...x }));
+      if (m.method === 'Target.getTargets') return reply({ result: { targetInfos: [{ targetId: 'T1', type: 'page', url: 'http://signin.example.test:8080/', title: 't' }] } });
+      if (m.method === 'Target.attachToTarget') { const sid = 'S-' + m.params.targetId + '-' + (++n); sessions.set(sid, ws); return reply({ result: { sessionId: sid } }); }
+      if (m.method === 'Fetch.failRequest') fails++;
+      if (m.method === 'Fetch.continueRequest') { const id = m.params.requestId; counts.set(id, (counts.get(id) || 0) + 1); const w = waits.get(id); if (w) { waits.delete(id); parentPort.postMessage({ kind: 'continued', id, ms: performance.now() - w }); } }
+      if (m.method === 'Fetch.enable') parentPort.postMessage({ kind: 'fetch-enable', params: m.params });
+      return reply({ result: {} });
+    }));
+    parentPort.on('message', (c) => {
+      if (c.cmd === 'pause') { waits.set(c.id, performance.now()); for (const [sid, ws] of sessions) ws.send(JSON.stringify({ sessionId: sid, method: 'Fetch.requestPaused', params: { requestId: c.id, resourceType: 'Document', request: { url: c.url } } })); }
+      if (c.cmd === 'counts') parentPort.postMessage({ kind: 'counts', counts: [...counts.entries()], fails });
+      if (c.cmd === 'close') { for (const x of wss.clients) x.terminate(); srv.close(() => parentPort.postMessage({ kind: 'closed' })); }
+    });
+    srv.listen(0, '127.0.0.1', () => parentPort.postMessage({ kind: 'up', port: srv.address().port }));`;
+  const wk = new Worker(WORKER_SRC, { eval: true, workerData: { ws: require.resolve('ws') } });
+  const inbox = [], waiting = new Set();
+  wk.on('message', (x) => { for (const w of waiting) if (w.pred(x)) { waiting.delete(w); clearTimeout(w.t); w.res(x); return; } inbox.push(x); });
+  const next = (pred, ms = 5000) => { const i = inbox.findIndex(pred); if (i >= 0) return Promise.resolve(inbox.splice(i, 1)[0]); return new Promise((res) => { const w = { pred, res }; w.t = setTimeout(() => { waiting.delete(w); res(null); }, ms); waiting.add(w); }); };
+  const up = await next((x) => x.kind === 'up');
+  const holders = [{ browserKey: HK6, sessionId: null, ephemeral: false, human: true }];
+  const wq = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: `ws://127.0.0.1:${up.port}/devtools/browser/fake` }) }, log: { warn() {}, log() {}, error() {} }, holdersOf: () => holders, forYou: { add: () => 'x', resolve() {} } });
+  await wq.arm(PID6, { by: 'person' }); await sleep(30); wq.personWindows(PID6, 1);
+  const armed = await next((x) => x.kind === 'fetch-enable' && x.params.handleAuthRequests === true);
+  const N8 = 200, spans = [];
+  for (let i = 0; i < N8; i++) { wk.postMessage({ cmd: 'pause', id: 'L8-' + i, url: ORIGIN6 + '/p' + i }); const c = await next((x) => x.kind === 'continued' && x.id === 'L8-' + i); if (c) spans.push(c.ms); }
+  const sorted = [...spans].sort((a, b) => a - b), med = sorted[Math.floor(sorted.length / 2)], worst = sorted[sorted.length - 1];
+  wk.postMessage({ cmd: 'pause', id: 'L8-stall', url: ORIGIN6 + '/stall' }); // the worker sends the pause on its own thread while this one is held:
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); // THE PLACED STALL — the hub's loop held 400 ms with the pause on its socket (the thread sleeps: no load)
+  const stall = await next((x) => x.kind === 'continued' && x.id === 'L8-stall');
+  wk.postMessage({ cmd: 'counts' }); const cnt = await next((x) => x.kind === 'counts');
+  const counts = new Map(cnt ? cnt.counts : []);
+  console.log(`    law 8 numbers (the hub's own turn — the real watch, the fake Chrome in its own thread over a loopback socket — ${N8} paused Document requests on an idle loop): median ${med !== undefined ? med.toFixed(2) : '?'} ms, worst ${worst !== undefined ? worst.toFixed(2) : '?'} ms; the hub's loop held 400 ms in the continue's window: the page's request waited ${stall ? stall.ms.toFixed(0) : '?'} ms, then went on`);
+  ok(!!armed && spans.length === N8 && Array.from({ length: N8 }, (_, i) => counts.get('L8-' + i)).every((k) => k === 1) && !!stall && counts.get('L8-stall') === 1 && cnt && cnt.fails === 0,
+    `B-b56d (law 8): ${N8} paused Document requests on an idle loop — each continued exactly once; a stall placed in the hub's loop holds the page's request for as long as it lasts (the page's clock, another thread), then it is continued once — never failed, never dropped (the numbers printed above)`, { n: spans.length, stall, fails: cnt && cnt.fails });
+  wq.shutdown(); wk.postMessage({ cmd: 'close' }); await next((x) => x.kind === 'closed', 2000); await wk.terminate();
+}
+{ // CONTROLS — the same scene over copies of the watch, each built from an anchor that throws by name when it is gone
+  const dsrc6 = read('src/server/browser-dialogs.js');
+  const cut = (needle, repl) => { if (dsrc6.split(needle).length !== 2) throw new Error(`B-b56d control setup: the anchor ${JSON.stringify(needle.slice(0, 70))} is not found once in src/server/browser-dialogs.js`); return dsrc6.replace(needle, repl); };
+  const WIN = "    if ((personViews.get(w.profileId) || 0) > 0) return true;\n";
+  const RESYNC = "    if (w.mode === 'person') { const e = w.targets.get(rec.targetId); if (e && e.sid && e.enabled) syncTabFetchMode(w, e); }";
+  const KEEP = "      if (rec.type === 'http-auth' && w.authReq.has(rec.id) && !w.kernel && (personViews.get(w.profileId) || 0) > 0) continue;";
+  const M6 = mutantCopies('uiprompts-b56d', REPO);
+  const c1 = await scene6(M6.load('src/server/browser-dialogs.js', cut("    if (w.mode !== 'person') return true;\n" + WIN, "    if (w.mode !== 'person') return true;\n    return false;\n"), 'person-never'), { stop: 'window' });
+  ok(!c1.window.fe, 'CONTROL (B-b56d): the base\'s rule (the person\'s watch never hooks a sign-in) — a window of the person open, and no hook (RED for the leg above)', c1.window);
+  const c2 = await scene6(M6.load('src/server/browser-dialogs.js', cut(WIN, '    return true;\n'), 'person-always'), { stop: 'nowindow' });
+  ok(c2.noWindow.fetch > 0, 'CONTROL (B-b56d): a rule without the window count hooks the person\'s browser with NO window open (RED for law 6\'s leg)', c2.noWindow);
+  const c3 = await scene6(M6.load('src/server/browser-dialogs.js', cut(RESYNC, ''), 'no-resync'), { stop: 'off' });
+  ok(c3.offAfter.join() === 'A4', 'CONTROL (B-b56d): a settled sign-in that does not read its tab\'s hook again leaves the person\'s browser hooked with no window open (RED for the leg above)', c3.offAfter);
+  const c4 = await scene6(M6.load('src/server/browser-dialogs.js', cut(KEEP, ''), 'hand-back'), { agentFirst: true, windowsAtMove: 1 });
+  ok(c4.moved.cwa.some((x) => x.id === 'M1' && x.r === 'Default'), 'CONTROL (B-b56d): the base\'s hand-back gives the held sign-in to Chrome even with the person\'s window open (RED for the leg above)', c4.moved.cwa);
+  for (const c of copiesCensus(M6.files, M6.dir, REPO, { label: '⑥ B-b56d controls: ' })) ok(c.pass, c.name, c.detail);
+}
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

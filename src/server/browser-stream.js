@@ -102,7 +102,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const KA = require('../ws-keepalive.js'); // lane stream-ping: the ONE keepalive rule every *-stream.js bridge arms
 const S = require('../browser-stream.js');
 const T = require('../browser-takeover.js');
-const { pressBearer, pressOf, pageOfUpgrade } = require('../write-origin.js');   // lane owner-press-attended r2: the live view's Hand back is a person's door (r3: a press per MESSAGE)
+const { pressBearer, pressOf, pageOfUpgrade, pageVerdict, ownOriginOf } = require('../write-origin.js');   // lane owner-press-attended r2: the live view's Hand back is a person's door (r3: a press per MESSAGE)
 const FIT = require('../browser-fit.js');
 const crypto = require('crypto'); // lane browser-x-in-window: the X picture's ticket (a per-viewer secret)
 const WIN = require('../browser-windows.js'); // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames // lane S4: the pane → page viewport rules, the agent-set flag, the fresh-frame clocks
@@ -283,10 +283,14 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function promptRecordOf(relay) {
     if (!isHuman(relay) || !dialogs || typeof dialogs.stuckForKey !== 'function') return null;
     let f = null; try { f = dialogs.stuckForKey(relay.browserKey); } catch { f = null; }
-    return { type: 'prompt-fact', fact: f && f.state === 'prompt' && f.prompt ? f : null, profileId: relayProfileId(relay) };
+    // B-b56d (the owner's ruling B, 2026-11-18): + what the person's window says beside it — a sign-in cancelled at its bound (law 4)
+    // and a sign-in hook that could not be armed (law 5); never a typed value
+    let ps = null; try { ps = typeof dialogs.personPromptStateOf === 'function' ? dialogs.personPromptStateOf(relay.browserKey) : null; } catch { ps = null; }
+    return { type: 'prompt-fact', fact: f && f.state === 'prompt' && f.prompt ? f : null, profileId: relayProfileId(relay), ended: (ps && ps.ended) || null, hook: (ps && ps.hook) || null };
   }
-  /** The prompt fact's digest: the WHOLE prompt block (a prompt that keeps its id while its words change is told again). */
-  const promptDigestOf = (rec) => (rec && rec.fact ? JSON.stringify(rec.fact.prompt) : '');
+  /** The prompt fact's digest: the WHOLE prompt block (a prompt that keeps its id while its words change is told again) — B-b56d: and
+   *  the person's window's two lines beside it. */
+  const promptDigestOf = (rec) => (rec && (rec.fact || rec.ended || rec.hook) ? JSON.stringify([rec.fact ? rec.fact.prompt : null, rec.ended || null, rec.hook || null]) : '');
   function pushPrompt(relay) {
     if (relays.get(relay.key) !== relay) return false;
     const rec = promptRecordOf(relay);
@@ -337,6 +341,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function answerPromptFor(relay, viewer, msg) {
     const pid = relayProfileId(relay);
     const ack = (o) => send(viewer.ws, { type: 'prompt-ack', id: String(msg.id || '').slice(0, 80), ...o });
+    // B-b56d (the owner's ruling B, law 2): ON THE PERSON'S OWN WINDOW a sign-in is the person's to answer — a window whose handshake
+    // carried a bearer token (any bearer) never answers one, and the window must be THIS instance's own page (its handshake's
+    // write-origin page verdict — never a header-less script). The agent's road (a conversation's view) is unchanged by this unit
+    if (isHuman(relay) && (viewer.bearer || viewer.agent)) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in is the user\'s to answer — a view opened with a bearer token cannot answer it' });
+    if (isHuman(relay) && !(viewer.page && pageVerdict(viewer.page.headers, ownOriginOf(viewer.page.headers, { encrypted: !!(viewer.page.socket && viewer.page.socket.encrypted) })).ok)) return ack({ ok: false, code: 'not_your_page', error: 'a sign-in is answered from VibeSpace\'s own page only' });
     if (!dialogs || !pid || typeof dialogs.answerPrompt !== 'function') return ack({ ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' });
     dialogs.answerPrompt({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relayEph(relay), promptId: msg.id ? String(msg.id).slice(0, 80) : null },
       { cancel: msg.cancel === true, username: typeof msg.username === 'string' ? msg.username : '', password: typeof msg.password === 'string' ? msg.password : '', by: 'user' })
@@ -392,7 +401,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (browse && /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''))) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, (ws) => {
       // BROWSE YOURSELF (B-6ae8): a third query shape — the user's own browsing window (cookie auth as above)
-      const go = browse ? attachHumanViewer(ws, { key: browse, fresh }) : attachViewer(ws, { sessionId, profileRef, agent: /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || '')), bearer: pressBearer(req.headers), page: pageOfUpgrade(req) }); // lane browser-x-in-window: an agent's token never gets the X picture's ticket
+      const go = browse ? attachHumanViewer(ws, { key: browse, fresh, bearer: pressBearer(req.headers), page: pageOfUpgrade(req) }) : attachViewer(ws, { sessionId, profileRef, agent: /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || '')), bearer: pressBearer(req.headers), page: pageOfUpgrade(req) }); // lane browser-x-in-window: an agent's token never gets the X picture's ticket
       go.catch((e) => { log.warn?.(`[browser-live] viewer attach failed: ${e && e.message}`); refuse(ws, 'internal', String(e && e.message)); });
     });
   }
@@ -441,14 +450,14 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
    * keeper decides whether THIS window takes his tab's controls (PURE humanAttachVerdict: the window his last press opened
    * — its `fresh` token — claims them; another live window of his keeps them; else this one takes them).
    */
-  async function attachHumanViewer(ws, { key, fresh = '' }) {
+  async function attachHumanViewer(ws, { key, fresh = '', bearer = false, page = null }) {
     if (!keeper || typeof keeper.humanTargetFor !== 'function') return refuse(ws, 'unavailable', 'browsing a profile yourself is not available on this server');
     const target = keeper.humanTargetFor(key);
     if (!target || !target.ok) return refuse(ws, (target && target.code) || 'not-found', (target && target.error) || 'not a browsing window of yours', target && target.state ? { browserState: String(target.state) } : {});
     const rk = 'human:' + target.key;
     let relay = relays.get(rk);
     if (!relay) { relay = createRelay(rk, null, target); relays.set(rk, relay); }
-    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null, watch: null, watchSeq: 0 };
+    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null, watch: null, watchSeq: 0, bearer: !!bearer, page }; // B-b56d: law 2 reads its handshake
     relay.viewers.set(viewer.id, viewer);
     armBg(relay); // lane browser-windows (U0b): a view of a tab that paints nothing is never silent
     noteViewers(relay);
@@ -476,7 +485,14 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
    *  its browserKey) name the SAME browser and share ONE relay — the session's own browser otherwise. */
   function relayKeyFor(sessionId, target) { if (target.kind === 'human') return 'human:' + target.key; return `${sessionId}|${target.kind === 'attachment' ? target.profileId : target.kind === 'child' ? 'child:' + target.handle : target.child ? 'child:' + target.browserKey : 'ephemeral'}`; }
   /** MULTIVIEW B-325a: the keeper releases no browser somebody is watching — tell it how many watch this pair. */
-  function noteViewers(relay) { try { keeper?.noteViewers?.(relay.browserKey, relay.target.profileId || null, relay.viewers.size); } catch { /* optional */ } }
+  function noteViewers(relay) { try { keeper?.noteViewers?.(relay.browserKey, relay.target.profileId || null, relay.viewers.size); } catch { /* optional */ } if (isHuman(relay)) tellPersonWindows(relayProfileId(relay)); }
+  /** B-b56d (the owner's ruling B, law 6): the person's own windows of a browser, counted over every relay of theirs on it — the watch
+   *  hooks a sign-in on the person's browsing only while one is open */
+  function tellPersonWindows(pid) {
+    if (!pid || !dialogs || typeof dialogs.personWindows !== 'function') return;
+    let n = 0; for (const r of relays.values()) if (isHuman(r) && relayProfileId(r) === pid) n += r.viewers.size;
+    try { dialogs.personWindows(pid, n); } catch { /* the watch says why in its own journal */ }
+  }
   function createRelay(key, sessionId, target) {
     const f = sessionFacts(sessionId) || {};
     // MULTIVIEW §4: a HELPER's relay is keyed on ITS handle (its takeover pauses

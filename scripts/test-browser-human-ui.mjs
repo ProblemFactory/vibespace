@@ -31,6 +31,14 @@
 //   (a2) lane passkey-browse-yourself (the owner 2026-10-30 in «自己浏览», «还是没有 passkey 提示»): his page (his address row)
 //       waits for a passkey ⇒ HIS window shows the banner a conversation's live view shows; a real click on its Cancel ends
 //       HIS page's request (the page sees AbortError) and the banner goes.
+//   (g) B-b56d (the owner's ruling B, 2026-11-18): a profile ONLY THE PERSON browses (their press launched it — the watch is theirs) and a
+//       stand-in site on an example name (the host rule maps *.example.test to the loopback — never a real site) that asks for
+//       an HTTP sign-in ⇒ VibeSpace's form in THE PERSON'S window, naming who asks (its realm drawn as text); their Sign in commits the
+//       page (the site saw their answer), their Cancel commits the site's own 401 body; a page with no challenge loses no request
+//       while the hook is armed (every one reaches the site once); the typed password is in no journal line and no data file;
+//       law 8 (主开发 15:42Z): the page-load numbers with the hook armed and with none, a stall placed in the hub's loop
+//       (SIGSTOP of this suite's own scratch hub) while a request is paused, and the hub ENDED mid-pause (Chrome releases the
+//       request by itself) — the LAST step of the suite: the hub is gone after it.
 // SKIPs (with the reason) without dtach, the real agent-browser ≥ 0.37 + an installed Chrome, or a viewer chrome.
 // Scratch only (/tmp/vs-browseself-<pid>): never ~/.agent-browser (the machine's own Chrome serves both the agent's
 // browser and the viewer), never `close --all`, never the production data/.
@@ -129,7 +137,8 @@ for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) fs.c
 fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(INST, 'node_modules'));
 // the agent's browser: the machine's own Chrome — agent-browser falls back to it with an empty scratch HOME (how U1 / U3
 // were measured); nothing of ~/.agent-browser is read (no download, no profile, no socket)
-fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: '--no-sandbox,--disable-blink-features=AutomationControlled,--disable-gpu,--disable-gpu-shader-disk-cache' }));
+// B-b56d (g): + the host rule that maps the stand-in site's example name to the loopback (never a real site is asked)
+fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: '--no-sandbox,--disable-blink-features=AutomationControlled,--disable-gpu,--disable-gpu-shader-disk-cache,--host-resolver-rules=MAP *.example.test 127.0.0.1' }));
 const SID = crypto.randomUUID();
 const hook = JSON.stringify({ type: 'system', subtype: 'hook_started', session_id: SID, hook_name: 'SessionStart' });
 const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: SID, cwd: CWD, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });
@@ -137,8 +146,30 @@ fs.writeFileSync(path.join(BIN, 'claude'), `#!/bin/sh\ncase " $* " in *" --outpu
 const reports = new Map();
 // lane passkey-browse-yourself: a page that starts a passkey ceremony at load (rpId localhost — loopback only) and reports its outcome
 const PK_PAGE = `<!doctype html><meta charset=utf-8><title>pk</title><p>Verifying it's you — use your passkey</p><script>let st='pending';const ch=new Uint8Array(32);crypto.getRandomValues(ch);navigator.credentials.get({publicKey:{challenge:ch,rpId:'localhost',userVerification:'preferred',timeout:120000}}).then(()=>{st='ok'},(e)=>{st=e.name});setInterval(()=>fetch('/st',{method:'POST',body:JSON.stringify({n:'pk',a:st,b:'',act:''}),keepalive:true}).catch(()=>{}),150);</script>`;
+// B-b56d (g): the stand-in site — /auth asks for an HTTP Basic sign-in (realm with markup in it: a site's own text), answers the
+// right one with a page that reports in, and the 401's own body reports `refused`; /plain + /img: a page with no challenge whose
+// every request is counted
+const PWG = ['b56d', 'Heavy', 'Pw'].join(''); // letters and digits: typed key by key
+const hits = new Map();
+const reportPage = (n, o) => `<!doctype html><meta charset=utf-8><title>${n}</title><p>${n}</p><script>fetch('/st',{method:'POST',body:JSON.stringify(Object.assign({n:${JSON.stringify(n)}},${JSON.stringify(o)})),keepalive:true});</script>`;
+const GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+// LAW 8 (主开发 15:42Z): /gate waits on /go (released by the suite) and then starts a /chain of page loads; each chain page reports
+// its own Navigation Timing (requestStart − fetchStart holds the pause before the request leaves Chrome) and loads the next by itself
+const gates = new Map(); const releaseGate = (n) => { const r = gates.get(n); gates.delete(n); if (r) { r.statusCode = 204; r.end(); } else gates.set(n, 'open'); };
+const chainPage = (n, i, k) => `<!doctype html><meta charset=utf-8><title>${n}-${i}</title><script>addEventListener('load',()=>{const e=performance.getEntriesByType('navigation')[0];fetch('/st',{method:'POST',body:JSON.stringify({n:${JSON.stringify(n)}+'-'+${i},wait:+(e.requestStart-e.fetchStart).toFixed(1),total:+(e.responseEnd-e.startTime).toFixed(1)}),keepalive:true}).finally(()=>{if(${i}+1<${k})location.href='/chain?n='+encodeURIComponent(${JSON.stringify(n)})+'&i='+(${i}+1)+'&k='+${k};});});</script>`;
 const col = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
+  if (u.pathname === '/auth') { // B-b56d (g)
+    const n = u.searchParams.get('n') || '';
+    if (String(req.headers.authorization || '') === 'Basic ' + Buffer.from('ann:' + PWG).toString('base64')) { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(reportPage(n, { ok: true, user: 'ann' })); return; }
+    res.statusCode = 401; res.setHeader('WWW-Authenticate', 'Basic realm="Lane <b>Realm</b>"'); res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(reportPage(n, { refused: true })); return;
+  }
+  if (u.pathname === '/plain') { const n = u.searchParams.get('n') || ''; hits.set(n, (hits.get(n) || 0) + 1); res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(`<!doctype html><meta charset=utf-8><title>${n}</title>${Array.from({ length: 12 }, (_, i) => `<img src="/img?n=${encodeURIComponent(n)}&i=${i}" width=1 height=1>`).join('')}<script>addEventListener('load',()=>fetch('/st',{method:'POST',body:JSON.stringify({n:${JSON.stringify(n)},loaded:true,imgs:[...document.images].filter((i)=>i.complete&&i.naturalWidth===1).length}),keepalive:true}));</script>`); return; }
+  if (u.pathname === '/keys') { const n = u.searchParams.get('n') || ''; res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(`<!doctype html><meta charset=utf-8><title>keys ${n}</title><input id=k autofocus><script>let k=0;const N=${JSON.stringify(n)};const say=()=>fetch('/st',{method:'POST',body:JSON.stringify({n:N,keys:k}),keepalive:true});addEventListener('keydown',()=>{k++;say();},true);say();</script>`); return; } // its read (M1): a page that counts every key it is sent
+  if (u.pathname === '/gate') { const n = u.searchParams.get('n') || '', k = Number(u.searchParams.get('k')) || 1; res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(`<!doctype html><meta charset=utf-8><title>gate ${n}</title><script>fetch('/st',{method:'POST',body:JSON.stringify({n:'gate-'+${JSON.stringify(n)}}),keepalive:true});fetch('/go?n='+encodeURIComponent(${JSON.stringify(n)})).then(()=>{location.href='/chain?n='+encodeURIComponent(${JSON.stringify(n)})+'&i=0&k='+${k};});</script>`); return; }
+  if (u.pathname === '/go') { const n = u.searchParams.get('n') || ''; if (gates.get(n) === 'open') { gates.delete(n); res.statusCode = 204; res.end(); } else gates.set(n, res); return; }
+  if (u.pathname === '/chain') { const n = u.searchParams.get('n') || '', i = Number(u.searchParams.get('i')) || 0, k = Number(u.searchParams.get('k')) || 1; res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(chainPage(n, i, k)); return; }
+  if (u.pathname === '/img') { const n = u.searchParams.get('n') || ''; hits.set(n, (hits.get(n) || 0) + 1); res.setHeader('Content-Type', 'image/gif'); res.end(GIF); return; }
   if (u.pathname === '/q') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(innerPage(u.searchParams.get('n') || '')); return; }
   if (u.pathname === '/pk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(PK_PAGE); return; } // lane passkey-browse-yourself
   if (u.pathname === '/st' && req.method === 'POST') { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { try { const o = JSON.parse(b); o.at = Date.now(); reports.set(o.n, o); } catch { } res.statusCode = 204; res.end(); }); return; }
@@ -450,6 +481,90 @@ for (const lang of ['en', 'zh', 'ja']) {
   if (lang !== 'en') ok(!/Close|Quit the whole browser|You are browsing/.test(m.words), `${lang}: the bar speaks ${lang} (no English left)`, m.words);
   await P.h('window.app.wm.closeWindow(w.id); return true;');
   P.close();
+}
+// ═══ (g) B-b56d — THE OWNER'S RULING B (2026-11-18): THE PERSON BROWSES ALONE, A SITE ASKS FOR A SIGN-IN ⇒ VIBESPACE'S FORM IN THEIR WINDOW ═══
+console.log('— (g) B-b56d: a profile only the person browses; a stand-in site asks for an HTTP sign-in ⇒ the form in their window, Sign in and Cancel');
+{
+  const mk = await api('POST', '/api/browser/profiles', { label: 'alone' });
+  const PID2 = mk.json && mk.json.profile ? mk.json.profile.id : null;
+  const A = await page({ lang: 'en' });
+  if (ok(!!PID2 && A.ready, `a profile no conversation uses ("alone", ${PID2}) and a viewer page`, JSON.stringify(mk.json))) {
+    await A.ev(`window.app.browseYourself(${JSON.stringify(PID2)}, { label: 'alone' }); true`);
+    const liveA = await until(() => A.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 60000, 200);
+    if (ok(!!liveA, 'the person browses "alone" — its browser launched by their press, no conversation holds it (the watch is the person\'s)')) {
+      const typeA = async (url) => { await A.h('const i = L.el().querySelector(".browser-live-address-input"); if (!i) return false; i.focus(); i.select(); return true;'); await A.call('Input.insertText', { text: url }); await A.key('Enter', { code: 'Enter', vk: 13, text: '\r' }); };
+      const SITE = `http://signin.example.test:${CP}`;
+      // its read (M1): the page under the form counts every key it is sent — the person types into the FORM, never into the page
+      await typeA(`${SITE}/keys?n=k1`);
+      const k1 = await innerUntil('k1', () => true, 20000);
+      const formNow = 'const b = L.el().querySelector(".browser-live-dialog"); return b && b.style.display !== "none" && b.querySelector(".browser-live-prompt-user") ? { text: b.textContent, bold: !!b.querySelector("b"), dialog: !!b.querySelector(".browser-live-prompt-pass") } : null;';
+      await typeA(`${SITE}/auth?n=sign1`);
+      const bar1 = await until(() => A.h(formNow).catch(() => null), 30000, 200);
+      ok(bar1 && /The page asks you to sign in/.test(bar1.text) && bar1.text.includes(`signin.example.test:${CP}`) && bar1.text.includes('Lane <b>Realm</b>') && !bar1.bold && bar1.dialog,
+        `the site asks ⇒ VibeSpace's sign-in form in THE PERSON'S window, naming who asks — the host and the realm, the realm drawn as TEXT ("${String(bar1 && bar1.text).slice(0, 120)}")`, JSON.stringify(bar1));
+      // a REAL click on each box and real keys (Input.dispatchKeyEvent into the app page), one by one
+      const clickedU = await A.clickSel('.browser-live-prompt-user'); for (const ch of 'ann') await A.key(ch);
+      const clickedP = await A.clickSel('.browser-live-prompt-pass'); for (const ch of PWG) await A.key(ch);
+      const boxes = await A.h('const u = L.el().querySelector(".browser-live-prompt-user"), p = L.el().querySelector(".browser-live-prompt-pass"); return u && p ? { user: u.value, passLen: p.value.length, focus: document.activeElement === p } : null;').catch(() => null);
+      ok(!!k1 && clickedU && clickedP && boxes && boxes.user === 'ann' && boxes.passLen === PWG.length && boxes.focus && (reports.get('k1') || {}).keys === 0,
+        'its read (M1): a real click on each box and real keys land IN THE FORM (the user name, every character of the password) — the page under it was sent NO key', JSON.stringify({ boxes, k1: reports.get('k1') }));
+      ok(await A.clickSel('.browser-live-prompt-signin'), 'a real click on Sign in');
+      const signed = await innerUntil('sign1', (r) => r.ok === true, 20000);
+      const gone1 = await until(() => A.h('const b = L.el().querySelector(".browser-live-dialog"); return !b || b.style.display === "none" || !b.querySelector(".browser-live-prompt-user");').catch(() => null), 10000, 200);
+      ok(!!signed && signed.user === 'ann' && !!gone1 && (reports.get('k1') || {}).keys === 0, 'their Sign in reaches the site — the page commits (the site saw the user name and password), the form goes, and the page under it never got a key', JSON.stringify({ signed, gone1, k1: reports.get('k1') }));
+      // law 6, AFTER the form proved the hook armed on this tab (its read, S4): a page with no challenge loses no request
+      await typeA(`${SITE}/plain?n=plain1`);
+      const plain = await innerUntil('plain1', (r) => r.loaded === true, 30000);
+      ok(plain && plain.imgs === 12 && hits.get('plain1') === 13, `law 6: a page with no challenge, the sign-in hook armed on this tab (the form just came through it) — the page and its 12 images each reach the site ONCE and the page loads (${hits.get('plain1')} requests)`, JSON.stringify({ plain, hits: hits.get('plain1') }));
+      // Cancel on ANOTHER host (its read, M2: Chrome sends the answer it just used to the same site by itself — no challenge there)
+      await typeA(`http://cancel.example.test:${CP}/auth?n=sign2`);
+      const bar2 = await until(() => A.h(formNow).catch(() => null), 30000, 200);
+      ok(!!bar2 && await A.clickSel('.browser-live-prompt-cancel'), 'the next sign-in: the form again, and a real click on its Cancel');
+      const refused = await innerUntil('sign2', (r) => r.refused === true, 20000);
+      ok(!!refused, 'their Cancel ⇒ the page commits the site\'s own 401 body — the page is never left hanging', JSON.stringify(refused));
+      const dataHits = []; const walk = (d, depth = 0) => { if (depth > 8) return; let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p, depth + 1); else if (e.isFile()) { try { const st = fs.statSync(p); if (st.size < 32 * 1024 * 1024 && fs.readFileSync(p).includes(PWG)) dataHits.push(p); } catch { } } } };
+      walk(path.join(INST, 'data'));
+      ok(!journal.includes(PWG) && dataHits.length === 0, 'law 1: the typed password is in no journal line of the hub and in no file of its data folder (it went to that browser\'s answer only)', JSON.stringify(dataHits));
+      // LAW 8 (主开发 15:42Z): WHAT THE ARMED HOOK COSTS A PAGE LOAD — the same chain of loads with the hook armed (the window open) and
+      // with none (the window walked away: the tab stays, the hook goes), median and worst, printed (numbers, never a bound); a stall
+      // PLACED in the hub's loop (SIGSTOP of the scratch hub this suite started — no load) while a request is paused; and the hub's
+      // socket to Chrome ENDING mid-pause (the hub killed): Chrome releases the request by itself
+      const K8 = 12;
+      const med8 = (xs) => { const s = [...xs].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
+      const worst8 = (xs) => [...xs].sort((a, b) => a - b)[xs.length - 1];
+      const chainOf = (n) => { const xs = []; for (let i = 0; i < K8; i++) { const r = reports.get(`${n}-${i}`); if (!r) return null; xs.push(r.wait); } return xs; };
+      await typeA(`${SITE}/chain?n=hk&i=0&k=${K8}`);
+      const hooked = await until(() => chainOf('hk'), 90000, 150);
+      await typeA(`${SITE}/gate?n=un&k=${K8}`);
+      const gateUn = await innerUntil('gate-un', () => true, 20000);
+      await A.h('window.app.wm.closeWindow(w.id); return true;');
+      await sleep(1500);
+      releaseGate('un');
+      const unhooked = await until(() => chainOf('un'), 90000, 150);
+      console.log(`    law 8 numbers (${K8} page loads each, requestStart − fetchStart): the hook armed — median ${hooked ? med8(hooked) : '?'} ms, worst ${hooked ? worst8(hooked) : '?'} ms; no hook — median ${unhooked ? med8(unhooked) : '?'} ms, worst ${unhooked ? worst8(unhooked) : '?'} ms`);
+      ok(!!hooked && !!gateUn && !!unhooked, `law 8: ${K8} page loads with the sign-in hook armed and ${K8} with no hook (the window walked away, the tab kept) — every one loaded (the numbers printed above)`, JSON.stringify({ hooked, unhooked }));
+      await A.ev(`window.app.browseYourself(${JSON.stringify(PID2)}, { label: 'alone' }); true`);
+      const again = await until(() => A.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 40000, 200);
+      await sleep(1000);
+      await typeA(`${SITE}/gate?n=st&k=1`);
+      const gateSt = again ? await innerUntil('gate-st', () => true, 20000) : null;
+      const STALL_MS = 2000;
+      let stalled = false;
+      if (gateSt) { process.kill(srv.pid, 'SIGSTOP'); stalled = true; releaseGate('st'); await sleep(STALL_MS); process.kill(srv.pid, 'SIGCONT'); }
+      const st = stalled ? await innerUntil('st-0', () => true, 30000) : null;
+      console.log(`    law 8: the hub's loop held ${STALL_MS} ms (SIGSTOP) while the page's request was paused — the page's request waited ${st ? st.wait : '?'} ms, then the page loaded`);
+      ok(!!st, 'law 8: a stall PLACED in the hub\'s loop while the person\'s page load is paused — the page waits for it, then loads (no error page)', JSON.stringify({ again: !!again, gateSt: !!gateSt, st }));
+      ok(!journal.includes(PWG), 'law 1 (again, before the hub ends below): the typed password is in no journal line');
+      await typeA(`${SITE}/gate?n=rl&k=1`);
+      const gateRl = await innerUntil('gate-rl', () => true, 20000);
+      let before = null;
+      if (gateRl) { process.kill(srv.pid, 'SIGSTOP'); releaseGate('rl'); await sleep(1500); before = reports.has('rl-0'); process.kill(srv.pid, 'SIGKILL'); procs.delete(srv); }
+      const rl = gateRl ? await innerUntil('rl-0', () => true, 30000) : null;
+      ok(before === false && !!rl, 'law 8: the hub\'s socket to Chrome ENDS while the page\'s request is paused (the hub held, then killed) — Chrome releases the request by itself and the page loads', JSON.stringify({ before, rl }));
+    }
+    try { await api('POST', `/api/browser/browse/${HM.humanKeyFor(PID2)}/quit`); } catch { }
+  }
+  try { A.close(); } catch { }
 }
 try { await api('POST', `/api/browser/browse/${HK}/close`); } catch { }
 try { wsMain.close(); } catch { } try { bws.close(); } catch { } outer.close(); col.close();

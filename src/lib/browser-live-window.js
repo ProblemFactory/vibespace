@@ -164,7 +164,7 @@ import { ownResumable, keptLineWords } from '../browser-fact.js'; // lane browse
 import { receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts } from '../browser-stream.js'; // lane S2: every input has a receipt
 import { restartRefusalWords } from './browser-build-model.js'; // B-53df: the Restart's refusal by its code (PURE words)
 import { humanEndChoices, humanRefusalText, humanSyncId, addressVerdict, humanShareLine, LAUNCH_CODES } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the user's own browsing — its end buttons, its refusals, the address row (PURE)
-import { dialogWords, answeredWords, stuckWords, promptWords, permissionWords, printWords } from '../browser-stuck.js'; // lane browser-stuck: a page dialog / an unresponsive page in words (PURE)
+import { dialogWords, answeredWords, stuckWords, promptWords, permissionWords, printWords, personPromptLines } from '../browser-stuck.js'; // lane browser-stuck: a page dialog / an unresponsive page in words (PURE)
 import { surfaceWords } from '../browser-surfaces.js'; // lane browser-surfaces: a browser kernel's prompt in words — its answers are the buttons (PURE)
 import { createLoopBanner } from './browser-loop-banner.js';
 import { patchPasskeyButtons } from './browser-proposal-card.js'; // lane passkey-ui: the passkey_ask banner's choices = the card's (one approve route)
@@ -1210,10 +1210,14 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     if (dialogBar.dataset.passkey) { delete dialogBar.dataset.passkey; st.passkeyCancelling = false; }
     const sv = d && d.kind && d.kind !== 'js-dialog' ? d : !d && !stuck && st.surfaces.size ? [...st.surfaces.values()].pop() : null; // lane browser-surfaces
     if (sv) { renderSurfaceCard(sv); return; }
+    // B-b56d (the owner's ruling B, 2026-11-18): the person's own window — a sign-in cancelled at its bound (law 4) and a sign-in hook
+    // that could not be armed (law 5): quiet lines, below every other state
+    const prl = H && !d && !stuck && !blind && !pkElse ? personPromptLines({ ended: st.prEnded && String(st.prEnded.id || '') !== st.prEndedSeen ? st.prEnded : null, hook: st.prHook }, t) : null; // (a Dismiss holds for this window; the line itself lasts an hour at most — no storage key of its own)
+    const prLine = prl && (prl.ended || prl.hook) ? prl : null;
     dialogBar.textContent = '';
-    dialogBar.style.display = d || stuck || blind || pkElse || pkUnknown ? '' : 'none';
+    dialogBar.style.display = d || stuck || blind || pkElse || pkUnknown || prLine ? '' : 'none';
     dialogBar.classList.toggle('stuck', !!stuck);
-    dialogBar.classList.toggle('blind', !!blind || (!stuck && (!!pkElse || !!pkUnknown)));
+    dialogBar.classList.toggle('blind', !!blind || (!stuck && (!!pkElse || !!pkUnknown || !!prLine)));
     if (d) {
       const w = dialogWords(d, t);
       const title = document.createElement('div'); title.className = 'browser-live-dialog-title'; title.textContent = w.title;
@@ -1256,6 +1260,14 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-passkey-unknown'; line.textContent = pkUnknown.line;
       dialogBar.append(line);
       if (pkUnknown.retry) dialogBar.append(textBtn(pkUnknown.retry, () => send({ type: 'passkey-retry' }), 'browser-live-dialog-restart browser-live-passkey-retry')); // acceptance r2: the re-arms stopped — his door (his clicks on the page never re-arm)
+      if (prLine && prLine.hook) { const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-prompt-unhooked'; line.textContent = prLine.hook.line; dialogBar.append(line); } // B-b56d (its read, S3): the sign-in line beside the passkey one, never hidden by it
+    } else if (prLine) { // B-b56d: said as text — a site's host is never markup
+      if (prLine.ended) {
+        const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-prompt-ended'; line.textContent = prLine.ended.line;
+        const seen = String(prLine.ended.id || '');
+        dialogBar.append(line, textBtn(prLine.ended.dismiss, () => { st.prEndedSeen = seen; renderDialog(); }, 'browser-live-dialog-dismiss browser-live-prompt-ended-dismiss'));
+      }
+      if (prLine.hook) { const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-prompt-unhooked'; line.textContent = prLine.hook.line; dialogBar.append(line); }
     }
   };
   /** lane browser-surfaces: A KERNEL PROMPT'S CARD — the actor + verb + object as ONE title (the kind's words), the page's words,
@@ -2227,7 +2239,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       case 'confirmation-resolved': if (m.id && st.confirmations.delete(m.id)) renderConfirms(); break;
       case 'page-note': pageNote(m.permission || null); break; // lane browser-ui-prompts-r2: the bar's one line (a permission decided, a print closed)
       case 'dialog': onDialogRecord(m); break; // lane browser-stuck: a page dialog opened / closed on the tab this view shows
-      case 'prompt-fact': st.prRelay = m.fact && typeof m.fact === 'object' && m.fact.state === 'prompt' ? m.fact : null; renderDialog(); break; // B-37a1: the person's window's native-prompt fact (the banner + the Desktop door)
+      case 'prompt-fact': st.prRelay = m.fact && typeof m.fact === 'object' && m.fact.state === 'prompt' ? m.fact : null; st.prEnded = m.ended && typeof m.ended === 'object' ? m.ended : null; st.prHook = m.hook && typeof m.hook === 'object' ? m.hook : null; renderDialog(); break; // B-37a1: the person's window's native-prompt fact (the banner + the Desktop door)
       case 'passkey': st.pkRelay = m.fact && typeof m.fact === 'object' ? m.fact : null; st.pkPid = typeof m.profileId === 'string' && m.profileId ? m.profileId : (st.pkRelay && st.pkRelay.profileId) || null; renderDialog(); break; // lane passkey-browse-yourself: the relay's passkey fact (acceptance r1: + the browser on show)
       case 'surface': onSurfaceRecord(m); break; // lane browser-surfaces: a kernel's NOTED prompt (it never holds the page)
       case 'passkey-ack': if (!m.ok) { st.passkeyCancelling = false; renderDialog(); showToast(t('The passkey request could not be cancelled: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); } else if (m.failed) { st.passkeyCancelling = false; renderDialog(); showToast(t('VibeSpace could not cancel the page\'s passkey request — the page did not take the cancel, so it is still waiting. Closing the tab ends it.'), { type: 'error' }); } else if (m.ended) { st.passkeyCancelling = false; st.pkRelay = null; renderDialog(); showToast(t('The passkey wait had already ended'), { duration: 3000 }); } break; // B-97ae round 3: a cancel the page did not take keeps the banner and says so // lane browser-passkey — acceptance r1 of lane passkey-browse-yourself: a Cancel whose wait is gone says so (the bridge sends the current fact after it)
@@ -2647,8 +2659,11 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // does nothing otherwise — a view that does not drive leaves every key exactly where it was going.
   const capture = { capture: true, signal: winInfo._listenerCtl?.signal };
   const appMode = () => (app._commandMode && app._commandMode._cmdMode ? 'command' : null);
+  /** BROWSE YOURSELF: the person's window's OWN text boxes — its address row and (B-b56d, the owner's ruling B) the sign-in form's two
+   *  boxes in its dialog bar: typed in, never sent to the page, never reclaimed (the window always drives its own tab) */
+  const ownBox = (el) => !!H && !!el && (el === addrInput || (!!el.classList && (el.classList.contains('browser-live-prompt-user') || el.classList.contains('browser-live-prompt-pass')) && dialogBar.contains(el)));
   const onDocKey = (e) => {
-    if (H && e.target === addrInput) return; // BROWSE YOURSELF: the address row is typed in, never sent to the page
+    if (ownBox(e.target)) return; // BROWSE YOURSELF: the address row (B-b56d: and the sign-in form's boxes) is typed in, never sent to the page
     // lane dialog-keys: a key the APP takes — typed into a dialog the user opened (its Enter may open the next one), or a
     // reserved chord / command mode — is his own act on the app: the opener evidence of a dialog opening right after. Read in
     // EVERY view before the owner test (each view judges the next dialog by its own record); a key the page gets never is
@@ -2712,7 +2727,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     sendInput(r.record, true, { receipt: true, receiptMs: textReceiptMs(r.chunks) });
   }
   document.addEventListener('paste', (e) => {
-    if (!iOwn() || (H && e.target === addrInput)) return;
+    if (!iOwn() || ownBox(e.target)) return;
     if (xOn()) { // lane browser-x-in-window: the X picture's field pastes into the window itself; a paste elsewhere in the view is sent there
       if (e.target === xp.view.ime) return;
       e.preventDefault(); e.stopPropagation(); if (e.stopImmediatePropagation) e.stopImmediatePropagation();
@@ -2725,7 +2740,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // nothing is ever INSERTED into an editable element while the view owns the keyboard: the sink's own text is
   // forwarded (dictation, an emoji picker — anything that inserts without a key), every other target is refused
   document.addEventListener('beforeinput', (e) => {
-    if (!iOwn() || (H && e.target === addrInput)) return;
+    if (!iOwn() || ownBox(e.target)) return;
     if (xOn() && e.target === xp.view.ime) return; // lane browser-x-in-window: the X picture's own field (its composition, its paste)
     if (e.target === kbd) {
       if (e.inputType === 'insertCompositionText' || e.isComposing) return;      // compositionend forwards the result
@@ -2780,7 +2795,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // focuses its container — or <body>, with no focusin) — the chip re-reads where the keys are
   document.addEventListener('focusout', () => { if (st.claimed && ky.yielded) setTimeout(() => { if (!st.closed) renderKbd(); }, 0); }, capture);
   document.addEventListener('focusin', (e) => {
-    if (!st.claimed || st.copying || (H && e.target === addrInput)) return; // lane live-input: the copy's own scratch textarea is not a place you typed into; BROWSE YOURSELF: nor his address row (his own, never a reclaim nor a yield)
+    if (!st.claimed || st.copying || ownBox(e.target)) return; // lane live-input: the copy's own scratch textarea is not a place you typed into; BROWSE YOURSELF: nor the person's own boxes (the address row; B-b56d: the sign-in form's) — never a reclaim nor a yield
     // lane takeover-keyboard: the user's OWN press on this text box (PURE userPressFocus → focusVerdict, in keyboard-yield.js)
     // YIELDS the keys to it — every driving view yields (per claim), the takeover continues; a focus NOBODY pressed for
     // (an attach, a reconnect, a message arriving — lane J r2's password case) is reclaimed by THE owner, silently as before
