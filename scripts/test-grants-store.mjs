@@ -665,6 +665,10 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   const BWM = await import(new URL('../src/lib/browser-who-model.js', import.meta.url).href).catch(() => null);
   const pr = BWM && BWM.pickerRows({ use: { mode: 'only', who: [{ kind: 'task', id: 'tg-p', title: 'P', only: true }] } }, { groups: [{ id: 'tg-p', title: 'P' }] });
   ok(!!pr && pr.wire.get('task:tg-p') && pr.wire.get('task:tg-p').only === true, 'U5b: the dialog\'s wire of a stored «仅本组» group carries it', pr && [...pr.wire]);
+  // the chain's cure (B1): the agent-browser panel's «Who can use it» chip says what a Task Group entry admits (and its tooltip)
+  const wc = BWM && BWM.whoChips({ mode: 'only', who: [{ kind: 'task', id: 'tg-p', title: 'Parent' }, { kind: 'task', id: 'tg-q', title: 'Q', only: true }] }, { t: (x) => x, taskOf: () => null });
+  const tvSrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf-8');
+  ok(!!wc && wc.chips[0].only === false && /in its child groups, now or later/.test(wc.chips[0].tooltip) && wc.chips[1].only === true && /its child groups are not included/.test(wc.chips[1].tooltip) && /if \(c\.kind === 'task' && !c\.dead\) n\.appendChild\(chromeEl\('span', 'bprof-who-reach', c\.only \? t\('this group only'\) : t\('and its child groups'\)\)\);/.test(tvSrc), 'the panel (the cure (B1)): a Task Group chip says «and its child groups» / «this group only», its tooltip what it admits', wc && wc.chips.map((c) => [c.only, c.tooltip]));
   // U3c: the channel doors — reach (the ACL over the ONE store's rows), watch (the wake admission), a group's members (round-robin / via)
   const ACL = require('../src/channel-acl.js');
   const chLevel = (to, except, ctx) => { const s2 = GS.create({ memory: true }); s2.set('channel-reach', 'conversation:a1/c1', { to, except }); return ACL.effective(ctx, { key: 'a1/c1', adapterId: 'a1' }, CGM.create({ grants: s2 }).conversationGrants('a1/c1')).level; };

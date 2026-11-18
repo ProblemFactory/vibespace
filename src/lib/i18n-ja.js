@@ -6368,7 +6368,6 @@ export default {
   "Switch to {name}…": "{name} に切り替え…",
   // "Who can use it" is a LIST (2026-09-27): the Agent browser panel's cell, its dialog, the picker labels
   "A conversation that is not running now": "現在は実行されていない会話",
-  "Task Group — every conversation in it, now or later": "タスクグループ — 今ある会話もこれから加わる会話も",
   "a deleted Task Group": "削除されたタスクグループ",
   "Task Group — archived: its conversations can’t use this now": "タスクグループ — アーカイブ済み：その会話は今は使えません",
   "Nobody can use it now: the Task Group it was limited to was deleted": "今はどの会話も使えません：限定していたタスクグループが削除されました",
@@ -11792,6 +11791,8 @@ export default {
   "Every child Task Group (and theirs) is told this row, read-only": "すべての子タスクグループ（その子も）にこの行が読み取り専用で伝わります",
   "Rows inherited from parent groups (read-only here — change them in the parent)": "親グループから継承した行（ここでは読み取り専用——親で変更してください）",
   "this group only": "このグループのみ",
+  "Task Group — only the conversations in this group itself, now or later (its child groups are not included)": "タスクグループ——このグループ自身の会話のみ（今後も含む。子グループは含みません）",
+  "Task Group — every conversation in it and in its child groups, now or later": "タスクグループ——このグループと子グループのすべての会話（今後も含む）",
   "and its child groups": "子グループも含む",
   "and its child groups, always": "子グループも含む（常に）",
   "Only conversations in this group itself — its child groups are not included (press to include them)": "このグループ自身の会話のみ——子グループは含みません（押すと含めます）",

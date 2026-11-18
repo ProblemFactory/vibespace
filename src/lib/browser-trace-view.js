@@ -694,7 +694,7 @@ export function whoCell(app, { onChange = null } = {}) {
   const setText = (n, v) => { if (n.textContent !== v) n.textContent = v; };
   function chipNode(c) {
     let n = nodes.get(c.key);
-    const sig = JSON.stringify([c.kind, c.name, c.live, c.amber, c.tooltip, c.backend]);
+    const sig = JSON.stringify([c.kind, c.name, c.live, c.amber, c.tooltip, c.backend, !!c.only]);
     if (n && n.dataset.sig === sig) return n;
     if (!n) { n = chromeEl('span', 'bprof-who-chip'); n.dataset.key = c.key; nodes.set(c.key, n); }
     n.dataset.sig = sig;
@@ -704,6 +704,7 @@ export function whoCell(app, { onChange = null } = {}) {
     else if (c.live) { const bi = createBackendIcon(c.backend || 'claude', { className: 'bprof-who-glyph' }); bi.setAttribute('aria-hidden', 'true'); n.appendChild(bi); }
     else n.appendChild(chromeEl('span', 'bprof-who-dot'));
     n.appendChild(chromeEl('span', 'bprof-who-name', c.name));
+    if (c.kind === 'task' && !c.dead) n.appendChild(chromeEl('span', 'bprof-who-reach', c.only ? t('this group only') : t('and its child groups')));   // the chain's cure (B1)
     n.title = c.tooltip ? c.name + ' — ' + c.tooltip : c.name;
     return n;
   }

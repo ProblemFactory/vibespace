@@ -6369,7 +6369,6 @@ export default {
   "Switch to {name}…": "换成 {name}…",
   // "Who can use it" is a LIST (2026-09-27): the Agent browser panel's cell, its dialog, the picker labels
   "A conversation that is not running now": "一个当前未运行的会话",
-  "Task Group — every conversation in it, now or later": "任务组 — 它里面现在和以后的每个会话",
   "a deleted Task Group": "已删除的任务组",
   "Task Group — archived: its conversations can’t use this now": "任务组 — 已归档：它里面的会话现在不能使用它",
   "Nobody can use it now: the Task Group it was limited to was deleted": "现在没有会话能使用它：限定给它的任务组已被删除",
@@ -11793,6 +11792,8 @@ export default {
   "Every child Task Group (and theirs) is told this row, read-only": "每个子任务组（以及它们的子组）都会收到这一行，只读",
   "Rows inherited from parent groups (read-only here — change them in the parent)": "从父组继承的行（此处只读——请在父组里修改）",
   "this group only": "仅本组",
+  "Task Group — only the conversations in this group itself, now or later (its child groups are not included)": "任务组——只含本组自己的对话，现在及以后（不含其子组）",
+  "Task Group — every conversation in it and in its child groups, now or later": "任务组——组内及其所有子组中的每个对话，现在及以后",
   "and its child groups": "含子组",
   "and its child groups, always": "含子组（始终）",
   "Only conversations in this group itself — its child groups are not included (press to include them)": "只含本组自己的对话——不含子组（点按以包含子组）",

@@ -69,8 +69,9 @@ export function whoChips(use, { t = (s) => s, nameOfConversation = () => '', tas
     // THE STORE HELD UNREAD (lane bl-windows): the hub could not read its Task Groups — the group is UNKNOWN, never «deleted»
     if (w.unreadable === true && !title) return { key: chipKeyOf(w), kind: 'task', name: t("a Task Group (the list cannot be read right now)"), live: false, dead: false, amber: true, tooltip: t("Task Groups cannot be read right now — For you says why") };
     if (deleted) return { key: chipKeyOf(w), kind: 'task', name: t('a deleted Task Group'), live: false, dead: true, deleted: true, amber: true, tooltip: t('Nobody gets access through it any more — remove it with Change…') };
-    return { key: chipKeyOf(w), kind: 'task', name: title || String(w.id), live: false, dead: archived, archived, amber: archived,
-      tooltip: archived ? t('Task Group — archived: its conversations can’t use this now') : t('Task Group — every conversation in it, now or later') };
+    // the chain's cure (B1): the chip says what the entry ADMITS (rule ②: the group and its child groups, unless «仅本组»)
+    return { key: chipKeyOf(w), kind: 'task', name: title || String(w.id), live: false, dead: archived, archived, amber: archived, only: w.only === true,
+      tooltip: archived ? t('Task Group — archived: its conversations can’t use this now') : w.only === true ? t('Task Group — only the conversations in this group itself, now or later (its child groups are not included)') : t('Task Group — every conversation in it and in its child groups, now or later') };
   });
   // NOBODY, said by name (never "everyone"): every row is a Task Group that can no longer admit anyone. A stopped
   // conversation is NOT attrition — it resumes under the same key.
