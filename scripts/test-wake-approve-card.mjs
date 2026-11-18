@@ -306,10 +306,10 @@ const DOORS = {
   // r4: the vault's grant request (Allow once / For 8 hours / Deny) — the third vault card in the same chat
   'vault-grant-ask': { client: ['src/lib/user-todos-actions.js', '/api/vault/request/asks/'], server: ['src/routes/vault.js', "app.post('/api/vault/request/asks/:askId'"], verdict: 'person((req)', engine: /run\.answerRequest\(/, mark: 'person: true' },
   // lane login-request-card (the proposal card's cure, law 6): an agent's proposal — the person's Terminate / Allow, nothing else closes it
-  'end-proposal': { client: ['src/lib/user-todos-actions.js', '/api/end-proposals/'], server: ['src/routes/end-proposals.js', "app.post('/api/end-proposals/:id/answer'"], verdict: 'personVerdict(req)', engine: /proposals\.answer\(/ },
+  'end-proposal': { client: ['src/lib/user-todos-actions.js', '/api/end-proposals/'], server: ['src/routes/end-proposals.js', "app.post('/api/end-proposals/:id/answer'"], verdict: 'personVerdict(req)', engine: /proposals\.answer\(/ },   // stale-pins: kept — the route file's PATH, read by this suite — a comment of end-proposals.js once named it; not a pin of that file's text
 };
 /** THE person verdict each door's file asks — routes/vault.js's own, never a local copy */
-const VERDICT_FROM = { 'src/routes/channels.js': /const \{ personVerdict \} = require\('\.\/vault\.js'\);/, 'src/routes/end-proposals.js': /const \{ personVerdict \} = require\('\.\/vault\.js'\);/, 'src/server/exit-routes.js': /const \{ personVerdict \} = require\('\.\.\/routes\/vault\.js'\);/, 'src/routes/vault.js': /const person = \(fn\) => async \(req, res\) => \{\n    const v = personVerdict\(req\);/ };
+const VERDICT_FROM = { 'src/routes/channels.js': /const \{ personVerdict \} = require\('\.\/vault\.js'\);/, 'src/routes/end-proposals.js': /const \{ personVerdict \} = require\('\.\/vault\.js'\);/, 'src/server/exit-routes.js': /const \{ personVerdict \} = require\('\.\.\/routes\/vault\.js'\);/, 'src/routes/vault.js': /const person = \(fn\) => async \(req, res\) => \{\n    const v = personVerdict\(req\);/ };   // stale-pins: kept — the route file's PATH, read by this suite — a comment of end-proposals.js once named it; not a pin of that file's text
 function doorProblems(rows, files) {
   const out = [];
   for (const ty of rows) {

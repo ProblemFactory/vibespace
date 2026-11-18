@@ -285,7 +285,7 @@ console.log('③ THE STORE — one card per proposer (a second proposal ADDS); a
   const belted = async (mutate) => { const w = world({}, mutate); w.rows.set('claude:aaaa', raw('claude:aaaa')); w.rows.set('claude:eeee', raw('claude:eeee', { state: 'ended', name: evil })); const p = await w.store.propose({ targets: 'claude:aaaa,claude:eeee', why: 'idle' }, { caller: CALLER, reach }); return { w, p }; };
   const b = await belted();
   ok(b.p.ok && b.p.alreadyEnded.length === 1 && b.p.alreadyEnded[0] === PT.toAgentText(evil, { kind: 'line', max: 120 }) && b.p.alreadyEnded[0] !== evil, 'A NAME TOWARD THE AGENT PASSES THE BELT (law 11): the already-ended names in the verb\'s answer', b.p.alreadyEnded);
-  const br = await belted((src) => src.replace("if (r.state === 'ended') { ended.push(line(r.name || r.key)); continue; }", "if (r.state === 'ended') { ended.push(r.name || r.key); continue; }"));
+  const br = await belted((src) => src.replace("if (r.state === 'ended') { ended.push(line(r.name || r.key)); continue; }", "if (r.state === 'ended') { ended.push(r.name || r.key); continue; }"));   // stale-pins: kept — a red control whose mutant REBUILDS the old unbelted line
   ok(br.p.alreadyEnded[0] === evil, 'RED CONTROL: without the belt the raw name (a hidden direction mark, a terminal escape, a frame) reaches the agent', JSON.stringify(br.p.alreadyEnded));
   b.w.deliver.failStash = true;
   const id = openProps(b.w)[0];
@@ -480,13 +480,13 @@ console.log('④c THE OWNER BY ITS OWN ID — the REAL reader over piece 7\'s RE
   const a = await scene();
   ok(a.p.ok && a.drawn && a.drawn.key === 'codex:c0c0' && a.drawn.name === 'Coder' && a.drawn.self === true && a.r && a.r.ok && a.r.moved.length === 0 && a.r.granted.length === 1 && a.E[DW.GRANT_FIELD] === true && a.E.wakeGrantBy.kind === 'person',
     'A CODEX CONVERSATION ENDED BEFORE THE PRESS: the REAL reader finds no live session for it, and the press judges by its id — the grant is WRITTEN (not «moved»), as the person', { drawn: a.drawn, r: a.r && { moved: a.r.moved.length, granted: a.r.granted.length } });
-  const aR = await scene((src) => src.replace('      if (r.owner && ownId(o) !== ownId(r.owner)) { out.moved.push(r); continue; }', '      if (r.owner && o.key !== r.owner.key) { out.moved.push(r); continue; }'));
+  const aR = await scene((src) => src.replace('      if (r.owner && ownId(o) !== ownId(r.owner)) { out.moved.push(r); continue; }', '      if (r.owner && o.key !== r.owner.key) { out.moved.push(r); continue; }'));   // stale-pins: kept — a red control whose mutant REBUILDS the old key compare (the «moved» law)
   ok(aR.r && aR.r.moved.length === 1 && aR.r.granted.length === 0 && aR.E[DW.GRANT_FIELD] !== true && /another conversation/.test(aR.said),
     'RED CONTROL: a press that compares the guessed key (the reader says claude for an owner not live) calls the ended codex conversation «moved», writes nothing and tells a false reason — the leg above would read it', { moved: aR.r && aR.r.moved.length, said: aR.said });
   const b = await scene(null, { endedAtDrawing: true });
   ok(b.p.ok && b.drawn && b.drawn.key === 'codex:c0c0' && b.drawn.name === 'Coder' && b.r && b.r.granted.length === 1,
     'AN OWNER NOT LIVE AT THE DRAWING is keyed and NAMED from the list by its id (codex:c0c0 «Coder»), never a guessed key with no name', b.drawn);
-  const bR = await scene((src) => src.replace("        owner: { key: keyById.get(ownId(o)) || o.key, name: (names.get(keyById.get(ownId(o)) || o.key) || '').slice(0, 120) || null,", "        owner: { key: o.key, name: (names.get(o.key) || '').slice(0, 120) || null,"), { endedAtDrawing: true });
+  const bR = await scene((src) => src.replace("        owner: { key: keyById.get(ownId(o)) || o.key, name: (names.get(keyById.get(ownId(o)) || o.key) || '').slice(0, 120) || null,", "        owner: { key: o.key, name: (names.get(o.key) || '').slice(0, 120) || null,"), { endedAtDrawing: true });   // stale-pins: kept — a red control whose mutant REBUILDS the old drawing by the guessed key
   ok(bR.drawn && bR.drawn.key === 'claude:c0c0' && bR.drawn.name === null, 'RED CONTROL: a drawing keyed by the reader\'s guess names an owner not live as claude:c0c0 with no name — the leg above would read it', bR.drawn);
 
   // THE HELD PROPOSAL (the should, its choice named: HELD): a proposal landing while the press answers its card waits for that answer,
@@ -692,7 +692,7 @@ console.log('⑤ THE PERSON-ONLY DOOR (src/routes/end-proposals.js) — through 
   const serve = async (mutate) => {
     const app = express(); app.use(express.json());
     const seen = [];
-    const R = mutate ? loadMutated('src/routes/end-proposals.js', mutate) : require(path.join(REPO, 'src/routes/end-proposals.js'));
+    const R = mutate ? loadMutated('src/routes/end-proposals.js', mutate) : require(path.join(REPO, 'src/routes/end-proposals.js'));   // stale-pins: kept — the route file's PATH, read by this suite — a comment of end-proposals.js once named it; not a pin of that file's text
     R.registerEndProposalRoutes(app, { proposals: { answer: async (id, body, by, o) => { seen.push({ id, body, by, minted: o !== undefined }); return { ok: true }; } } });
     const srv = await new Promise((res) => { const s = app.listen(0, '127.0.0.1', () => res(s)); });
     const port = srv.address().port;
