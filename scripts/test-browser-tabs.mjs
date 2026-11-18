@@ -745,18 +745,18 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
   ok(stamped && olderOk && hA && hA.windowId === 1 && hB && hB.windowId === 2 && hB0 && hB0.windowId === null,
     'the KEEPER hands a viewer\'s thaw its conversation\'s own window (the lease\'s, this browser run) — never asked of the bridge; a lease still in the shared window of an older run hands none', { hA, hB, hB0 });
   // (2) THE WATCH'S HALF, the real watch over a stand-in browser: A's blank root + A's page in window 1, B's page in window 2. THE
-  //     STALL: the bridge's answer is HELD (the viewer's relay has read no tabs record yet) and the keeper names only A's root —
-  //     A's page by no witness and no grant. The thaw must still show A's page, and only A's
-  const TA0 = T(0x80), TA = T(0x81), TB = T(0x82);
+  //     STALL: the bridge's answer is HELD (the viewer's relay has read no tabs record yet) and the keeper names only each one's
+  //     root (A's blank, B's blank) — A's page by no witness and no grant. The thaw must still show A's page, and only A's
+  const TA0 = T(0x80), TA = T(0x81), TB = T(0x82), TB0 = T(0x83);
   const { WebSocketServer: WSS } = require('ws');
   const standIn = async () => {
-    const winOf = new Map([[TA0, 1], [TA, 1], [TB, 2]]), vis = new Map([[TA0, 'hidden'], [TA, 'visible'], [TB, 'visible']]);
+    const winOf = new Map([[TA0, 1], [TA, 1], [TB, 2], [TB0, 2]]), vis = new Map([[TA0, 'hidden'], [TA, 'visible'], [TB, 'visible'], [TB0, 'hidden']]);
     const st = { last: null, acts: [], made: [] };
     const wss = new WSS({ port: 0, host: '127.0.0.1' }); await new Promise((r) => wss.once('listening', r));
     wss.on('connection', (sock) => sock.on('message', (raw) => {
       let m; try { m = JSON.parse(String(raw)); } catch { return; }
       const p = m.params || {}; const re = (result) => { try { sock.send(JSON.stringify({ id: m.id, result })); } catch { /* closed */ } };
-      if (m.method === 'Target.getTargets') return re({ targetInfos: [TA0, TA, TB].map((t) => ({ targetId: t, type: 'page', title: '', url: t === TA0 ? 'about:blank' : `https://${t === TA ? 'a' : 'b'}.example/`, attached: false })) });
+      if (m.method === 'Target.getTargets') return re({ targetInfos: [TA0, TA, TB, TB0].map((t) => ({ targetId: t, type: 'page', title: '', url: t === TA0 || t === TB0 ? 'about:blank' : `https://${t === TA ? 'a' : 'b'}.example/`, attached: false })) });
       if (m.method === 'Target.attachToTarget') return re({ sessionId: 'S' + p.targetId });
       if (m.method === 'Runtime.evaluate' && p.expression === 'document.visibilityState') return re({ result: { type: 'string', value: vis.get(String(m.sessionId || '').slice(1)) || 'hidden' } });
       if (m.method === 'Browser.getWindowForTarget') return re({ windowId: winOf.has(p.targetId) ? winOf.get(p.targetId) : null });
@@ -769,7 +769,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
   const watchLeg = async (Dmod, holders) => {
     const SI = await standIn(); const PID = 'bp-0000c23a';
     const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: quiet, leaseCountOf: () => 2,
-      tabsOf: (q) => (String(q && q.browserKey) === KA ? [TA0] : []) }); // the bridge's half held (empty), the keeper's: A's root only
+      tabsOf: (q) => (String(q && q.browserKey) === KA ? [TA0] : String(q && q.browserKey) === KB ? [TB0] : []) }); // the bridge's half held (empty), the keeper's: each one's root only
     const shownOf = (x) => (x && Array.isArray(x.shown) ? x.shown.map((s) => s.targetId) : null);
     try {
       await D.arm(PID, { budgetMs: 3000 });
@@ -786,16 +786,25 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
   };
   const DD = require('../src/server/browser-dialogs.js');
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
-  const WANCH = '    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid));';
+  const WANCH = '    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid) && (w.frontWin || new Map()).get(tid) === ownWin);';
+  const CANCH = '          if (mine) for (const tid of byWindow) if (w.targets.has(tid)) need.push(tid);';
+  if (!dsrc.includes(CANCH)) ok(false, 'the anchor of the control «B-1626 cure 3 the window confirmed» is not in the source (src/server/browser-dialogs.js)');
+  const DDs = dsrc.includes(CANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(CANCH, '          for (const tid of byWindow) if (w.targets.has(tid)) need.push(tid); // the stamp trusted alone'), 'k23-stamp-alone') : null;
   if (!dsrc.includes(WANCH)) ok(false, 'the anchor of the control «B-1626 K23 the window rule» is not in the source (src/server/browser-dialogs.js)');
   const DDc = dsrc.includes(WANCH) ? M.load('src/server/browser-dialogs.js', dsrc.replace(WANCH, '    const byWindow = []; // the release: no window rule'), 'k23-no-window') : null;
   const strip = (h) => { const { windowId, ...rest } = h || {}; return rest; }; // the release's keeper line: the holder carries no window
   const H = { a: hA || { browserKey: KA, windowId: 1 }, b: hB || { browserKey: KB, windowId: 2 } };
-  const [r, c1, c2] = await Promise.all([watchLeg(DD, H), watchLeg(DD, { a: strip(H.a), b: strip(H.b) }), DDc ? watchLeg(DDc, H) : Promise.resolve(null)]);
+  // B-1626 cure 3 (its readers): a mediated lease keeps a previous run's windowId — A's viewer arriving with a STALE id that names
+  // B's window now (window ids are small numbers per Chrome run) shows nothing of B's: the window is A's only while A's own root sits in it
+  const Hs = { a: { ...H.a, windowId: 2 }, b: H.b };
+  const [r, c1, c2, st, c3] = await Promise.all([watchLeg(DD, H), watchLeg(DD, { a: strip(H.a), b: strip(H.b) }), DDc ? watchLeg(DDc, H) : Promise.resolve(null),
+    watchLeg(DD, Hs), DDs ? watchLeg(DDs, Hs) : Promise.resolve(null)]);
   ok(r.fz && r.fz.ok && r.fz.fronts === 2 && J(r.a) === J([TA]) && r.hiddenA === 1 && J(r.b) === J([TB]) && r.hiddenB === 0,
     'B-1626 / K23 (its cure 2): a viewer attaching to A — the bridge\'s answer held, A\'s page named by no witness and no grant — shows A\'s frozen front (in A\'s own window) and only it; B\'s front stays owed until B\'s own viewer shows it', r);
   ok(c1 && c1.fz && c1.fz.ok && J(c1.a) === J([]) && c1.hiddenA === 2, 'CONTROL (the release\'s keeper: the viewer\'s holder carries no window): A\'s front stays owed — a hidden page draws no frame, the live view stays blank (K23) — RED', c1);
   if (DDc) ok(c2 && c2.fz && c2.fz.ok && J(c2.a) === J([]) && c2.hiddenA === 2, 'CONTROL (the release\'s watch: no window rule): A\'s front stays owed — RED', c2);
+  ok(st && st.fz && st.fz.ok && J(st.a) === J([]) && st.hiddenA === 2 && J(st.b) === J([TB]), 'B-1626 cure 3: A\'s viewer with a STALE window id (a previous run\'s, naming B\'s window now) shows nothing — B\'s front is shown only by B\'s own viewer', st);
+  if (DDs) ok(c3 && c3.fz && c3.fz.ok && J(c3.a) === J([TB]), 'CONTROL (the stamp trusted alone): A\'s viewer shows B\'s page in B\'s window — the cell heavy hidden-paint e guards — RED', c3);
 }
 
 // ═══ ④ THE WORDS ═════════════════════════════════════════════════════════════

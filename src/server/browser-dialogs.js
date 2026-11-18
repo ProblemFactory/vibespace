@@ -1017,9 +1017,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const tabs = [...w.targets.values()].filter((e) => e.sid);
     const fronts = []; const t0 = now();
     for (const e of tabs) { const v = await settle(call(w, 'Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, e.sid, 1000)); if (v && v.result && v.result.result && v.result.result.value === 'visible') fronts.push(e.targetId); }
+    // B-1626 cure 3 (its readers): each front's window, read ONCE here — a viewer's thaw then knows at once whether a front sits in
+    // its holder's own window (no round of window reads for a front that is another holder's)
+    const wins = new Map(); for (const tid of fronts) wins.set(tid, await windowOfTarget(w, tid));
     if (w.thawing || (w.lastVerbAt || 0) >= t0) return { ok: false }; // a verb arrived while the fronts were read
     // r2: a front another conversation has not shown again since the last freeze stays owed to it (it is hidden now, not visible)
     const owed = [...(w.hiddenFronts || [])].filter((tid) => w.targets.has(tid));
+    w.frontWin = new Map([...[...(w.frontWin || new Map())].filter(([tid]) => owed.includes(tid)), ...wins]);
     w.paint = 'frozen'; w.fronts = fronts; w.hiddenFronts = new Set([...owed, ...fronts]); w.frozenAt = now();
     for (const e of tabs) await settle(call(w, 'Page.setWebLifecycleState', { state: 'frozen' }, e.sid, 1000));
     return { ok: true, tabs: tabs.length, fronts: fronts.length };
@@ -1042,14 +1046,21 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     // read a tabs record, and the witness and the grant can miss a tab. Its window is read off Chrome at the thaw; a front in
     // another holder's window stays owed (heavy test-browser-hidden-paint e)
     const ownWin = holder && holder.windowId != null ? holder.windowId : null;
-    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid));
+    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid) && (w.frontWin || new Map()).get(tid) === ownWin);
     if (w.paint !== 'frozen' && !need.length && !byWindow.length) return Promise.resolve({ ok: true, thawed: false });
     w.thawing = (async () => {
       try {
         if (w.paint === 'frozen') { for (const e of w.targets.values()) if (e.sid) await settle(call(w, 'Page.setWebLifecycleState', { state: 'active' }, e.sid, 1000)); w.paint = 'active'; w.thawedAt = now(); }
-        for (const tid of byWindow) if (w.targets.has(tid) && (await windowOfTarget(w, tid)) === ownWin) need.push(tid);
+        // B-1626 cure 3 (its readers): the stamp is never trusted alone — a mediated lease keeps a previous run's windowId, and a
+        // window id is a small number per Chrome run (it can name ANOTHER holder's window now). The window is the holder's only
+        // while a tab the keeper names the holder's (its scope: its root, its witnessed tabs) sits in it at this thaw
+        if (byWindow.length) {
+          let mine = false;
+          for (const t of (scope instanceof Set ? [...scope] : [])) if (w.targets.has(t) && (await windowOfTarget(w, t)) === ownWin) { mine = true; break; }
+          if (mine) for (const tid of byWindow) if (w.targets.has(tid)) need.push(tid);
+        }
         const shown = [];
-        for (const tid of need) { w.hiddenFronts.delete(tid); if (w.targets.has(tid)) shown.push(await showFront(w, tid)); }
+        for (const tid of need) { w.hiddenFronts.delete(tid); if (w.frontWin) w.frontWin.delete(tid); if (w.targets.has(tid)) shown.push(await showFront(w, tid)); }
         return { ok: true, thawed: true, shown };
       } finally { w.fronts = []; w.thawing = null; }
     })();
@@ -1061,7 +1072,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
    *  plain create lands), a blank opened, its window read off Chrome (getWindowForTarget), closed, the front activated. A
    *  blank that landed elsewhere (another holder's activation raced it) is closed at once and journaled — never kept. */
   async function showFront(w, tid) {
-    const winOf = async (id) => { const r = await settle(call(w, 'Browser.getWindowForTarget', { targetId: id }, null, 1000)); return r && r.result ? r.result.windowId : null; };
+    const winOf = (id) => windowOfTarget(w, id);
     w.flipping = (w.flipping || 0) + 1;
     try {
       const want = await winOf(tid);
