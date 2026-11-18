@@ -21,6 +21,7 @@ import { t } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
 import { micStep, micAskCode, micRoadWords, micDefaultDoors, MIC_CONSTRAINTS } from '../mic-model.js';
 import { soundStep, SOUND_KEY, soundRemembered, rememberSound, soundRefusalKey, soundConsentKeys } from '../sound-model.js';
+import { agentUpdateDoor, agentUpdateAction, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» where the stream's agent is too old for the microphone
 import { ffmpegDoor, ffmpegNeedCode } from './ffmpeg-door.js'; // lane machine-needs-at-pairing pick 2: 「取得 FFmpeg …」 where the voice / the sound needs it
 import { settingsDoor } from './machine-settings-door.js'; // lane machine-needs-at-pairing pick 2: the settings page's door on the line that states the need
 
@@ -105,7 +106,7 @@ export function createMicToggle({ hostId, machine = null, strip, before = null, 
       if (view) view.setMic(null).catch?.(() => { });
       stopTrack();
     }
-    if (st.state === 'refused' || st.state === 'unavailable') { const w = micRefusalText(st.code); if (w !== said) { said = w; showToast(w, { type: 'error' }); } } else said = '';
+    if (st.state === 'refused' || st.state === 'unavailable') { const w = micRefusalText(st.code); if (w !== said) { said = w; showToast(w, { type: 'error', action: isAgentOld(st.code) ? agentUpdateAction(hostId) : undefined }); } } else said = '';
     draw();
   }
   b.onclick = () => run(micStep(st, { type: 'press', ready: !!(view && view.micReady), code: view ? 'no_mline' : 'no_mline' }));
@@ -153,6 +154,7 @@ export function createMicCard({ hostId, machine, install = null } = {}) {
     if (!r || r.error) {
       if (r && r.code === 'not_desktop_machine') { row.hidden = true; return; }
       line.textContent = r && r.code === 'host_needs_daemon' ? t('The VibeSpace agent on {machine} is too old for the microphone — reconnect it to upgrade', { machine }) : t('Could not read the microphone: {why}', { why: (r && r.error) || t('server unreachable') });
+      if (r && isAgentOld(r.code)) line.append(' ', agentUpdateDoor(hostId, { cls: 'file-tool-btn agent-update-door' })); // B-bd27 X1
       line.classList.toggle('is-bad', true); return;
     }
     const st = r.state || {}, doors = r.doors || micDefaultDoors(st, r.facts && r.facts.previous);
@@ -228,7 +230,7 @@ export function createSoundToggle({ hostId, platform = null, strip, before = nul
       });
     } else if (r.action === 'stop') { seq++; if (v) { v.mute(); v.setSound(false); } }
     else if (r.action === 'mute') { seq++; if (v) v.mute(); }
-    if (st.state === 'refused' || (st.state === 'tap' && st.code === 'autoplay')) { const w = soundRefusalText(st.code); if (w !== said) { said = w; showToast(w, { type: st.state === 'refused' ? 'error' : 'info' }); } } else said = '';
+    if (st.state === 'refused' || (st.state === 'tap' && st.code === 'autoplay')) { const w = soundRefusalText(st.code); if (w !== said) { said = w; showToast(w, { type: st.state === 'refused' ? 'error' : 'info', action: isAgentOld(st.code) ? agentUpdateAction(hostId) : undefined }); } } else said = '';
     draw();
   }
   const press = () => { if (disposed) return; pressed = true; run(soundStep(st, { type: 'press' })); };

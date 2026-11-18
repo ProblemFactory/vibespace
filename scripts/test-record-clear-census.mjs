@@ -810,6 +810,7 @@ const STORAGE = {
   'src/lib/manage-agents.js|localStorage|\'vibespace.quotaRefreshAck\'': ['marker', 'the quota-refresh explanation was acknowledged'],
   'src/lib/manage-agents.js|localStorage|\'vibespace.agentsTab\'': ['pref', 'the Agents dialog tab'],
   'src/lib/user-todos-actions.js|localStorage|\'vibespace.agentsTab\'': ['pref', 'the Agents dialog tab a Machines item opens on (lane device-upgrade-stuck) — a tab name, never an item\'s words'],
+  'src/lib/agent-update-door.js|localStorage|\'vibespace.agentsTab\'': ['pref', 'the Agents dialog tab «Update its agent…» opens on for a machine with no pairing sheet (B-bd27) — a tab name, never an item\'s words'],
   'src/lib/manage-agents.js|localStorage|\'vibespace.agentsMachOpen\'': ['ids', 'which machine rows are expanded (host ids)'],
   'src/lib/plugin-client.js|localStorage|storagePrefix + String(k)': ['plugin', 'a trusted plugin module\'s own key-value storage (vsp_<id>_ prefix)'],
   'src/lib/plugin-client.js|localStorage|k': ['plugin', 'a sandboxed iframe plugin\'s storage bridge (prefix + its key)'],

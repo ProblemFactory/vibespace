@@ -9,6 +9,7 @@
 import { t } from './i18n.js';
 import { createModalShell, fetchJson, showToast } from './utils.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
+import { agentUpdateDoor, isAgentOld } from './agent-update-door.js'; // B-bd27 X1
 
 const BASE = '/api/desktop/machine-desktop/handover';
 const post = (url, body) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -101,7 +102,7 @@ export function createHandover({ app, hostId, machine, strip, before = null, pan
       const cur = streamOf();
       const r = await post(BASE, { host: hostId, key: cur && cur.key, principal: chosen[0] }).catch((e) => ({ error: String((e && e.message) || e) }));
       ok.disabled = false;
-      if (!r || !r.ok) { why.textContent = giveRefusalText(r, machine); why.hidden = false; return; }
+      if (!r || !r.ok) { why.textContent = giveRefusalText(r, machine); why.hidden = false; if (r && isAgentOld(r.code)) why.append(' ', agentUpdateDoor(hostId, { app, before: close })); return; } // B-bd27 X1: «too old for a hand-over» ⇒ its door
       close();
       draw({ ...r.lease, state: r.lease.input });
       showToast(t('{name} drives {machine}’s desktop — any key or click of yours pauses it', { name: (r.lease.holder && r.lease.holder.name) || t('The agent'), machine }));

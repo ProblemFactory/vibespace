@@ -22,6 +22,7 @@ import { ROW_OF as FORYOU_ROW_OF, buttonsOf } from '../foryou-actions.js';   // 
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
 import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launcher.js';
+import { agentUpdateAction, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: a refusal for an old agent carries its door as the toast's action
 import { appRefusalText } from './app-install-dialog.js'; // a refusal code → the user's words (busy, a decided proposal…)
 import { shownDigest, openRowOf } from './app-card-model.js'; // design 009: the digest of the card pressed; the row an Installed card opens // Layer 0 apps: THE install dialog an agent's install proposal opens (the same component as "Install xpra on {machine}…")
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one reset-credit confirm dialog (design-reset-credits p2): the ask-mode item's button
@@ -594,7 +595,7 @@ export function inboxModel(app) {
         const r = await fetchJson(`/api/apps/proposals/${encodeURIComponent(id)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: shownDigest(rec.card) }) });
         if (r && r.ok) return true; // the card follows the run (the store's broadcast)
         const code = r && r.code;
-        showToast(code === 'plan_changed' ? t('The plan changed — take another look.') : (code && appRefusalText(code)) || (r && r.error) || t('server unreachable'), { type: 'error' });
+        showToast(code === 'plan_changed' ? t('The plan changed — take another look.') : (code && appRefusalText(code)) || (r && r.error) || t('server unreachable'), { type: 'error', action: isAgentOld(code) ? agentUpdateAction(host, { app }) : undefined });
         return false;
       }
       showInstallDialog({ hostId: host, label: host !== 'local' ? host : null }, { what: 'app', proposalId: id }); // an item filed before the one card

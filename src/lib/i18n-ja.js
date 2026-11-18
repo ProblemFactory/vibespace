@@ -6150,6 +6150,8 @@ export default {
   "A new command for \"{id}\" — the device that was connected has been disconnected; it holds the previous command, which no longer works. Run this on the device:": "\"{id}\" の新しいコマンド — 接続していたデバイスは切断されました。以前のコマンドはもう使えません。デバイスで実行してください:",
   "A new command for \"{id}\" — the one you generated before stops working now. Run this on the device:": "\"{id}\" の新しいコマンド — 以前のものは今から無効です。デバイスで実行してください:",
   "Pairing command — \"{name}\"": "ペアリングコマンド — \"{name}\"",
+  "Update its agent…": "エージェントを更新…",
+  "VibeSpace sends the agent its update each time the machine connects. If the agent stays old, run the pairing command on that machine again: it installs the agent anew.": "VibeSpace はマシンが接続するたびにエージェントへ更新を送ります。古いままなら、そのマシンでペアリングコマンドをもう一度実行してください。エージェントが入れ直されます。",
   "Last run: {cmd} — {who}, {when}, not run — agent {v} cannot run commands on Windows; rerun the install command (Pairing command)": "前回の実行：{cmd} — {who}、{when}、実行されず — エージェント {v} は Windows でコマンドを実行できません。インストールコマンドを再実行してください（ペアリングコマンド）",
   "Agent {from} — its update to {to} failed, so commands cannot run here; rerun the install command (Pairing command)": "エージェント {from} — {to} への更新に失敗したため、ここではコマンドを実行できません。インストールコマンドを再実行してください（ペアリングコマンド）",
   "Agent {from} — its update to {to} failed; rerun the install command (Pairing command)": "エージェント {from} — {to} への更新に失敗しました。インストールコマンドを再実行してください（ペアリングコマンド）",

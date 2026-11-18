@@ -99,6 +99,7 @@ import { installPlace } from '../app-witness.js'; // lane apps-launcher-witness:
 import { SHOW_SYSTEM_KEY } from '../app-witness.js'; // lane apps-dialog-fast: the person's "Show them" (user state)
 import { appPlanBlock, appSummaryBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall, openAppSearch, openAgentHelp, appsBannerModel } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
 import { enterSubmits } from './chat-enter-keys.js';
+import { agentUpdateDoor, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» where a refusal says the machine's agent is too old
 const AGENT_BROWSER_ORIGIN = 'agent-browser'; // src/server/window-targets-engine.js AGENT_BROWSER_ORIGIN
 /** lane e2a r3 (verify r1 #11): a record the agent launched through its own door — the chip / the running row words. */
 export function agentBrowserText(rec) { return rec && rec.origin === AGENT_BROWSER_ORIGIN ? t('Agent browser ({name})', { name: (rec.by && rec.by.name) || t('an agent') }) : ''; }
@@ -675,17 +676,20 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
     b.onclick = () => { iclose(); openAgentHelp(launcherApp, m, { request: (pkgs || []).join(' ') }); };
     actions.replaceChildren(b);
   };
+  // B-bd27 X1: a refusal that says the machine's agent is too old draws its door beside the words (kept beside the actions)
+  const agentDoor = (code) => { if (isAgentOld(code) && !actions.querySelector('.agent-update-door')) actions.append(agentUpdateDoor(m, { before: () => iclose() })); };
   const q = m.hostId === 'local' ? '' : `?host=${encodeURIComponent(m.hostId)}`;
   const r = isApp
     ? await fetchJson('/api/apps/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proposalId ? { proposalId } : { host: m.hostId || 'local', request }) })
     : await fetchJson(`/api/desktop/install-plan${q}${xp ? '' : `${q ? '&' : '?'}what=${encodeURIComponent(what)}`}${vm ? `&lang=${encodeURIComponent(resolveLang())}` : ''}`); // lane stream-mic-road: the Mac dialog's text in this page's language
-  if (!r || r.error) { note.textContent = (r && ((isApp && appRefusalText(r.code)) || (vm && micInstallRefusalText(r.code)) || r.error)) || t('Could not read the install plan'); note.classList.add('is-bad'); return; }
+  if (!r || r.error) { note.textContent = (r && ((isApp && appRefusalText(r.code)) || (vm && micInstallRefusalText(r.code)) || r.error)) || t('Could not read the install plan'); note.classList.add('is-bad'); agentDoor(r && r.code); return; }
   let plan = r.plan || {};
   let shownDigest = r.digest || null; // verify-r6 I1: the press names the plan these commands are
   if (isApp && r.request) { const h = ib.closest('.dialog')?.querySelector('.dialog-title, h3, .modal-title'); if (h) h.textContent = appDialogTitle(r.request, name); }
   if (!plan.ok) {
     note.textContent = isApp ? (appRefusalText(plan.code) || plan.error || '') : vm ? (micInstallRefusalText(plan.code) || plan.error || '') : (installRefusalText(plan.code, what) || plan.error || ''); // design 009 §B5: ONE sentence, ours
     note.classList.add('is-bad');
+    agentDoor(plan.code);
     if (isApp) handOff(plan.code, (r.request || request || {}).packages);
     return;
   }
@@ -720,7 +724,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
         body: JSON.stringify(isApp ? (proposalId ? { proposalId, planDigest: shownDigest } : { host: m.hostId || 'local', request: r.request || request, planDigest: shownDigest }) : xp ? { host: m.hostId, planDigest: shownDigest } : { host: m.hostId, what, planDigest: shownDigest }) });
     }
     catch (e) { note.textContent = t('Could not start the install: {why}', { why: e.message }); note.classList.add('is-bad'); goBtn.disabled = false; return; }
-    if (!res.ok || !res.body) { let j = null; try { j = await res.json(); } catch { j = null; } note.textContent = (j && ((isApp ? appRefusalText(j.code) : vm ? micInstallRefusalText(j.code, !!plan.adminDialog) : installRefusalText(j.code, what)) || j.error)) || t('Could not start the install'); note.classList.add('is-bad'); goBtn.disabled = false; return; }
+    if (!res.ok || !res.body) { let j = null; try { j = await res.json(); } catch { j = null; } note.textContent = (j && ((isApp ? appRefusalText(j.code) : vm ? micInstallRefusalText(j.code, !!plan.adminDialog) : installRefusalText(j.code, what)) || j.error)) || t('Could not start the install'); note.classList.add('is-bad'); agentDoor(j && j.code); goBtn.disabled = false; return; }
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ''; let end = null;
     // lane dialog-yield r5: A RUNNING INSTALL IS NEVER CLOSED BY A NEIGHBOUR — while its log streams, the person's next app request on
     // this machine opens BESIDE it (37c1b566: Remove… on inkscape closed the running gimp install's window, its log gone mid-run)
@@ -752,7 +756,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
       showToast(installRefusalText('plan_changed', what), { type: 'error' });
       goBtn.disabled = false; copyBtn.disabled = false;
     }
-    else { note.textContent = (end && ((isApp ? appRefusalText(end.code) : vm ? micInstallRefusalText(end.code, !!plan.adminDialog) : installRefusalText(end.code, what)) || end.error)) || t('The install ended without an answer — the log above says what ran'); note.classList.add('is-bad'); showToast(vm ? t('The virtual microphone did not finish on {machine} — the dialog says why', { machine: name }) : isApp ? t('It did not finish on {machine} — the dialog says why', { machine: name }) : xp ? t('The xpra install on {machine} failed', { machine: name }) : t('The LibreOffice install on {machine} failed', { machine: name }), { type: 'error' }); goBtn.disabled = false; copyBtn.disabled = false; }
+    else { note.textContent = (end && ((isApp ? appRefusalText(end.code) : vm ? micInstallRefusalText(end.code, !!plan.adminDialog) : installRefusalText(end.code, what)) || end.error)) || t('The install ended without an answer — the log above says what ran'); note.classList.add('is-bad'); agentDoor(end && end.code); showToast(vm ? t('The virtual microphone did not finish on {machine} — the dialog says why', { machine: name }) : isApp ? t('It did not finish on {machine} — the dialog says why', { machine: name }) : xp ? t('The xpra install on {machine} failed', { machine: name }) : t('The LibreOffice install on {machine} failed', { machine: name }), { type: 'error' }); goBtn.disabled = false; copyBtn.disabled = false; }
   };
   void iclose;
 }
@@ -860,6 +864,7 @@ export async function showLaunchDialog(app, opts = {}) {
     const note = document.createElement('p'); note.className = 'desktop-launch-file-note';
     const said = refusal && refusal.code !== 'app-absent' ? (openWithRefusalText(refusal.code, { file: doc.label, machine: doc.hostLabel || null }) || refusal.error || '') : '';
     note.textContent = said; note.style.display = said ? '' : 'none';
+    if (refusal && isAgentOld(refusal.code)) note.append(' ', agentUpdateDoor(machineOf(host), { app, before: close })); // B-bd27 X1
     intro?.after(note);
     $('.desktop-launch-browsers-sec').style.display = 'none';
     $('.desktop-launch-adv').style.display = 'none';
@@ -1177,6 +1182,7 @@ export async function showLaunchDialog(app, opts = {}) {
     if (!seenOnly) cardKey = cardSig(data && data.apps); // lane app-launch-singleton: the instance set these cards show
     const mName = host === 'local' ? null : machineName(machineOf(host));
     availEl.textContent = listError ? machineErrorText(listError.code, mName || machineName(null), listError.error) : availabilityText(data && data.availability, mName);
+    if (listError && isAgentOld(listError.code)) availEl.append(' ', agentUpdateDoor(machineOf(host), { app, before: close })); // B-bd27 X1
     const availBad = !!listError || !!(data && data.availability && !data.availability.backend);
     availEl.classList.toggle('desktop-launch-avail-bad', availBad);
     // design 009 §B3: a backend that works is footer small print; one that is missing or fell back is said at the top
@@ -1330,6 +1336,7 @@ export async function showLaunchDialog(app, opts = {}) {
     if (!regEl.children.length) regEl.innerHTML = doc
       ? `<div class="desktop-launch-empty">${escHtml(listError ? '' : t('LibreOffice is not offered by {machine} — its VibeSpace agent may be too old; reconnect it to upgrade', { machine: machineInSentence(machineOf(host)) }))}</div>`
       : `<div class="desktop-launch-empty">${escHtml(t('No known applications were found on this machine — use “Advanced” below to run any program.'))}</div>`;
+    if (doc && !listError && regEl.firstElementChild && regEl.firstElementChild.classList.contains('desktop-launch-empty')) regEl.firstElementChild.append(' ', agentUpdateDoor(machineOf(host), { app, before: close })); // B-bd27 X1: «may be too old» ⇒ its door
     renderRunning();
     // ── advanced: recents + the form ──
     recEl.innerHTML = '';

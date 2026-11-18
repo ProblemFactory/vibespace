@@ -30,6 +30,7 @@ import { launchDpr, launchUiScale, showLaunchDialog, showInstallDialog, openWith
 import { SCALE_PREF_KEY, launchScaleChoice } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, appPrefsReady } from './desktop-app-prefs.js';
 import { relayFileChanged } from './file-changed.js';
+import { agentUpdateLabel, agentUpdateAction, openAgentUpdate, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: an old agent's door in the menu and the toast
 
 export const AVAIL_TTL_MS = 60000;
 /** Codes the launch dialog's FILE MODE says (with the machine picker and the install offer); anything else is a toast. */
@@ -62,7 +63,8 @@ export function officeMenuItems(app, verdict, { host = null, file = '' } = {}) {
     ];
   }
   if (verdict && verdict.ok === false && verdict.code === 'host_needs_daemon') {
-    return [{ key: 'office-note', note: true, label: openWithRefusalText('host_needs_daemon', { machine }) }];
+    return [{ key: 'office-note', note: true, label: openWithRefusalText('host_needs_daemon', { machine }) },
+      { key: 'office-agent-door', label: agentUpdateLabel(), action: () => openAgentUpdate(hostOf(host) || 'local', { app }) }]; // B-bd27 X1
   }
   const open = { key: 'office-open', label: t('Open with LibreOffice'), action: () => app.openWithDesktopApp({ file, host }) };
   // B-04da ②: LibreOffice is there but the Calibri / Cambria look-alikes are not — a .docx lays out in other faces
@@ -161,7 +163,7 @@ export async function openWithDesktopApp(app, { catalogId = null, file, host = n
     showLaunchDialog(app, { file: { path: fv.file, host: h, module: fv.module, label: fv.label, hostLabel: h ? machine : null }, refusal: { code, error: (r && r.error) || '' } });
     return null;
   }
-  showToast(openWithRefusalText(code, { file: fv.label, machine, app: OFFICE_MODULES[fv.module].label }) || (r && r.error) || t('Could not open the document in LibreOffice'), { type: 'error' });
+  showToast(openWithRefusalText(code, { file: fv.label, machine, app: OFFICE_MODULES[fv.module].label }) || (r && r.error) || t('Could not open the document in LibreOffice'), { type: 'error', action: isAgentOld(code) ? agentUpdateAction(h || 'local', { app }) : undefined });
   return null;
 }
 

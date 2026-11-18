@@ -8,6 +8,10 @@
 //      model's words count for the surface that draws them: `via`) carries the door's marker in its source
 //   ③ CONTROLS: a new «needs X» sentence no row claims is RED by name; a surface stating a present-door need without its door is
 //      RED by name (the base's machine-app.js, stripped of the door, is caught)
+//   ⑤ EVERY NEED HAS ITS DOOR OR ITS WHY (B-bd27): no row deferred; THE OLD AGENT'S DOOR (src/lib/agent-update-door.js, «Update
+//      its agent…») — every code an agent-version sentence is keyed on opens it, the pairing sheet for a paired dial device and
+//      Manage agents › Machines otherwise, as a button and as a toast's action; CONTROLS: the door's code check emptied ⇒ the codes
+//      leg RED; the runs dialog stripped of its door ⇒ the surface leg RED
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -79,6 +83,60 @@ console.log('④ WHAT IT IS — a net, and what it cannot see (the reader\'s ite
   const kb = fs.readFileSync(path.join(REPO, 'docs/kb-features.md'), 'utf8');
   ok(/A NET, NOT A PROOF/.test(head) && /a MACHINE word AND a NEED word/.test(head) && /IT CANNOT SEE/.test(head) && /A DEVICE'S OWN REFUSAL STRINGS/.test(head), 'the census\'s header says what it is (a net over sentences carrying a machine word and a need word) and what it cannot see (a need worded past them, a device\'s own refusal strings, a log line)');
   ok(/It is a NET, not a proof/.test(kb) && /a device's own refusal strings/.test(kb), 'the kb says the same where a person reads about the census');
+}
+
+console.log('⑤ EVERY NEED HAS ITS DOOR OR ITS WHY — and the old agent\'s door (B-bd27)');
+{
+  const deferred = MN.NEEDS.filter((r) => r.door.deferred).map((r) => r.id);
+  ok(deferred.length === 0, 'no row is deferred any more: every machine need has its door, or a NONE that says why (B-bd27 — X1 the agent\'s version, X2 Node, X3 agent-browser, H the hub machine)', deferred);
+  const DOOR = 'src/lib/agent-update-door.js', src = sources.get(DOOR);
+  if (!src) ok(false, `the old agent's door exists (${DOOR})`);
+  else {
+    // the client module, read as it is: its one import (the words) stood in, its exports returned — no bundler, no DOM library
+    const loadDoor = (text) => {
+      const body = text.replace("import { t } from './i18n.js';", 'const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && k in p ? String(p[k]) : m));').replace(/^export (const|function) /gm, '$1 ');
+      if (/^import /m.test(body)) throw new Error('the door imports more than its words');
+      const names = [...text.matchAll(/^export (?:const|function) ([A-Za-z_]+)/gm)].map((m) => m[1]);
+      return new Function(`${body}\nreturn { ${names.join(', ')} };`)();
+    };
+    const D = loadDoor(src);
+    // every code an agent-version sentence is keyed on (the comparison on the sentence's own line) opens the door
+    const av = C.rows.get('agent-version');
+    const keyed = [];
+    for (const sn of av.sentences) for (const f of words.get(sn)) for (const line of (sources.get(f) || '').split('\n').filter((l) => l.includes(sn.slice(0, 36)))) for (const m of line.matchAll(/\b(?:code|refusal|c)\s*===\s*'([a-z_]+)'|\bcase '([a-z_]+)'/g)) keyed.push([f, m[1] || m[2]]);
+    const missing = (Dm) => keyed.filter(([, c]) => !Dm.isAgentOld(c));
+    ok(keyed.length >= 8 && missing(D).length === 0, `every code an «agent too old» sentence is keyed on opens the door (${[...new Set(keyed.map(([, c]) => c))].sort().join(', ')} — ${keyed.length} sites)`, missing(D));
+    ok(['pairing', 'machines', 'machines', 'machines'].join() === [{ id: 'd1', transport: 'dial', deviceId: 'dev-1' }, { id: 's1', transport: 'ssh' }, { id: 'd2', transport: 'dial' }, null].map(D.agentDoorTarget).join(), 'the door leads to the machine\'s PAIRING SHEET for a paired dial device (its command, run again, installs the agent anew), to Manage agents › Machines for any other machine or none');
+    const HOSTS = [{ id: 'd1', name: 'WIN-DESK1', transport: 'dial', deviceId: 'dev-1' }, { id: 's1', name: 'box', transport: 'ssh' }];
+    ok(D.hostRowOf('d1', HOSTS) === HOSTS[0] && D.hostRowOf({ hostId: 's1' }, HOSTS) === HOSTS[1] && D.hostRowOf('WIN-DESK1', HOSTS) === HOSTS[0] && D.hostRowOf(HOSTS[1], []) === HOSTS[1] && D.hostRowOf('nope', HOSTS) === null && D.hostRowOf(null, HOSTS) === null, 'a surface names its machine as it holds it — an id, {hostId}, the name, the row — and the door finds the page\'s row');
+    const opened = [], store = {};
+    const app = { sidebar: { _hostsData: { hosts: HOSTS }, _showDevicePairDialog: (h) => opened.push(['pairing', h && h.id]) }, _showAgentsDialog: () => opened.push(['machines', store['vibespace.agentsTab']]) };
+    const hadLS = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', { value: { setItem: (k, v) => { store[k] = v; } }, configurable: true, writable: true });
+    const hadDoc = globalThis.document;
+    globalThis.document = { createElement: (tag) => ({ tagName: String(tag).toUpperCase(), dataset: {}, className: '', textContent: '', title: '', type: '', onclick: null }) };
+    try {
+      const r1 = D.openAgentUpdate({ hostId: 'd1' }, { app }), r2 = D.openAgentUpdate('s1', { app }), r3 = D.openAgentUpdate('d1', { app: null });
+      ok(r1 === 'pairing' && r2 === 'machines' && r3 === 'machines' && JSON.stringify(opened) === JSON.stringify([['pairing', 'd1'], ['machines', 'machines']]), 'opening it: the dial device\'s pairing sheet with ITS row; an ssh host ⇒ Manage agents on the Machines tab; no page app ⇒ nothing thrown', opened);
+      opened.length = 0;
+      const order = [];
+      const b = D.agentUpdateDoor('d1', { app, before: () => order.push('before') });
+      b.onclick({ preventDefault() { }, stopPropagation() { } });
+      ok(b.tagName === 'BUTTON' && b.type === 'button' && b.textContent === 'Update its agent…' && /pairing command on that machine again/.test(b.title) && b.dataset.agentDoor === '1' && order.join() === 'before' && JSON.stringify(opened) === JSON.stringify([['pairing', 'd1']]), 'THE BUTTON «Update its agent…» says in its title what lands (the update at each connection; else the pairing command again) and a press closes its surface first, then opens the sheet', { text: b.textContent, title: b.title, opened });
+      opened.length = 0;
+      const a = D.agentUpdateAction('s1', { app });
+      a.run();
+      ok(a.label === 'Update its agent…' && JSON.stringify(opened) === JSON.stringify([['machines', 'machines']]), 'the same door as a toast\'s action (a refusal said in a toast)', opened);
+    } finally {
+      if (hadLS) Object.defineProperty(globalThis, 'localStorage', hadLS); else delete globalThis.localStorage;
+      if (hadDoc === undefined) delete globalThis.document; else globalThis.document = hadDoc;
+    }
+    // CONTROLS
+    const mut = loadDoor(src.replace("export const isAgentOld = (code) => AGENT_OLD_CODES.includes(String(code || ''));", 'export const isAgentOld = () => false;'));
+    ok(src.includes("export const isAgentOld = (code) => AGENT_OLD_CODES.includes(String(code || ''));") && missing(mut).length === keyed.length, `CONTROL: the door's code check emptied ⇒ the codes leg is RED (${missing(mut).length} of ${keyed.length} sites unopened)`);
+    const strippedRuns = (f) => (f === 'src/lib/exit-runs-dialog.js' ? (sources.get(f) || '').replace(/agentUpdateDoor\(/g, 'gone(') : sources.get(f) || '');
+    ok(JSON.stringify(doorless(av, strippedRuns)) === JSON.stringify(['src/lib/exit-runs-dialog.js']), 'CONTROL: the runs dialog stating «too old to run commands» with its door taken out is RED by name', doorless(av, strippedRuns));
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

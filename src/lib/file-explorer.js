@@ -2,6 +2,7 @@ import { hostParam } from './file-download.js';
 import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast, collectDroppedFiles, uiScale } from './utils.js';
 import { installExplorerUploads } from './file-explorer-uploads.js';
 import { installExplorerOps, fsErrorText } from './file-explorer-ops.js';
+import { agentUpdateDoor, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: the listing's old-agent refusal keeps its door
 import { pathField } from './path-field.js'; // lane path-field: THE path field (the path bar)
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
@@ -723,7 +724,7 @@ class FileExplorer {
           const info = await infoRes.json();
           if (!info.isDirectory) { this.app.openFile(dirPath, dirPath.split('/').pop(), { host: this._host || undefined }); return; }
         }
-        throw new Error(fsErrorText(data)); // verify-r2: a refusal in the reader's language
+        throw Object.assign(new Error(fsErrorText(data)), { agentOld: isAgentOld(data.code) }); // verify-r2: a refusal in the reader's language; B-bd27 X1: an old agent's refusal keeps its door
       }
       if (this.currentPath !== data.path) { this._selection.clear(); this._selAnchor = null; if (this._selectMode) this._exitSelectMode(); }
       this.currentPath = data.path; this.pathInput.value = data.path; this.items = data.items;
@@ -736,6 +737,7 @@ class FileExplorer {
     } catch (err) {
       if (seq !== this._navSeq) return; // superseded — its error is not this view's truth
       this.listEl.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(err.message)}</div>`;
+      if (err && err.agentOld && this.listEl.firstElementChild) this.listEl.firstElementChild.append(' ', agentUpdateDoor(this._host, { cls: 'file-tool-btn agent-update-door', app: this.app })); // B-bd27 X1
     } finally { donePending(); }
   }
 

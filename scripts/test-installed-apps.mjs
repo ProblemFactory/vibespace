@@ -319,9 +319,12 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   await checkBtn.onclick(); await tick();
   const note = body.find('machine-apps-note')[0];
   ok(note.textContent === 'The list needs WIN-DESK1’s VibeSpace agent updated (it updates itself; check again in a minute)' && note.classList.contains('is-bad') && rowsNow().length === 1 && !jaspNode.parent, 'an old agent: the update words, the list as it was; a row gone from the list is removed');
+  const doorSlot = body.find('machine-apps-door')[0], doorBtn = doorSlot && doorSlot.children[0];
+  ok(!!doorBtn && doorBtn.textContent === 'Update its agent…' && String(doorBtn.className).includes('agent-update-door') && doorSlot.parent === note.parent, 'B-bd27 X1: an old agent\'s list draws «Update its agent…» in its own slot beside the note (the note keeps its words)', doorSlot && doorSlot.textContent);
   answer = { hostId: 'win-a', platform: 'win32', rows: Array.from({ length: 500 }, (_, i) => ({ name: 'A' + i, launch: `start "" "C:\\a${i}.exe"`, source: 'start-menu', seenAt: 3 })), total: 812, truncated: true, listedAt: 3 };
   await checkBtn.onclick(); await tick();
   ok(note.textContent === 'WIN-DESK1 has 812 apps — the first 500 are listed; filter to find one', 'a machine past the cap says how many it has');
+  ok(doorSlot && doorSlot.children.length === 0, 'B-bd27 X1: …and the door leaves with the old agent (the next list)');
   answer = { hostId: 'win-a', platform: 'win32', rows: [{ name: 'TightVNC Server 2.8.85', launch: null, source: 'install', pending: true, seenAt: 4 }], total: 1, truncated: false, listedAt: 4 };
   await checkBtn.onclick(); await tick();
   ok(rowsNow().length === 1 && rowsNow()[0].disabled && rowsNow()[0].lastChild.textContent === 'just installed — being listed', 'a just-installed (pending) row shows, greyed, until the machine lists it');

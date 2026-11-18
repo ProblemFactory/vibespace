@@ -12,6 +12,7 @@ import { createModalShell, showToast, copyText } from './utils.js';
 import { runRow, spawnFailureText, platformLabel, RUNS_DEFAULT, EXIT_RUN_TIMEOUT_MS, fmtBytes } from '../exit-reach.js';
 import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-fold: a PowerShell -EncodedCommand row reads as its script
 import { revealHidden } from '../hidden-chars.js';
+import { agentUpdateDoor, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: a run refused for an old agent carries its door
 
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 /** lane exit-runs-dialog-fit (2.369.209): a run's duration in tenths — one that rounds to nothing reads "<0.1 s", never "0.0 s". */
@@ -70,6 +71,7 @@ export function paintRow(node, r) {
   const main = el('div', 'exit-runs-main');
   const outcome = el('div', 'exit-runs-outcome');
   outcome.append(el('span', 'exit-runs-verdict', runVerdictText(r)), ' · ', el('span', 'exit-runs-ms', durationText(r.ms)));
+  if (r.outcome === 'refused' && isAgentOld(r.refusal)) outcome.append(' ', agentUpdateDoor(r.hostId, { cls: 'file-tool-btn agent-update-door' })); // B-bd27 X1
   main.append(el('code', 'exit-runs-cmd', flat.length > CMD_HEAD ? flat.slice(0, CMD_HEAD - 1) + '…' : flat), outcome);
   sum.append(main);
   let body = node.querySelector(':scope > .exit-runs-out');

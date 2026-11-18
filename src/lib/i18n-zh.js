@@ -6151,6 +6151,8 @@ export default {
   "A new command for \"{id}\" — the device that was connected has been disconnected; it holds the previous command, which no longer works. Run this on the device:": "\"{id}\" 的新命令 — 原本连着的设备已被断开；它持有的上一条命令已失效。在设备上运行这条：",
   "A new command for \"{id}\" — the one you generated before stops working now. Run this on the device:": "\"{id}\" 的新命令 — 之前生成的那条现在已失效。在设备上运行这条：",
   "Pairing command — \"{name}\"": "配对命令 — \"{name}\"",
+  "Update its agent…": "更新它的 agent…",
+  "VibeSpace sends the agent its update each time the machine connects. If the agent stays old, run the pairing command on that machine again: it installs the agent anew.": "VibeSpace 会在这台机器每次连接时把更新发给它的 agent。如果 agent 仍然过旧，请在那台机器上再运行一次配对命令：它会重新安装 agent。",
   "Last run: {cmd} — {who}, {when}, not run — agent {v} cannot run commands on Windows; rerun the install command (Pairing command)": "上次运行：{cmd} — {who}，{when}，未运行 — 代理 {v} 无法在 Windows 上运行命令；请重新运行安装命令（配对命令）",
   "Agent {from} — its update to {to} failed, so commands cannot run here; rerun the install command (Pairing command)": "代理 {from} — 升级到 {to} 失败，因此这里无法运行命令；请重新运行安装命令（配对命令）",
   "Agent {from} — its update to {to} failed; rerun the install command (Pairing command)": "代理 {from} — 升级到 {to} 失败；请重新运行安装命令（配对命令）",

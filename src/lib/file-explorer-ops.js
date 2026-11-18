@@ -1,5 +1,6 @@
 import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, freshKey, attachPopoverClose, placeMenu, absUrl as absUrlShared } from './utils.js';
 import { t } from './i18n.js';
+import { agentUpdateAction, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» on a refusal for an old agent
 import { stampAt as when, num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { startFileDownload } from './file-download.js';
 import { isOfficeFile } from '../office-open.js'; // §7.9: which files offer "Open with LibreOffice" (the PURE table)
@@ -18,6 +19,8 @@ const WIN_UNSUPPORTED = {
   'archive-extract': () => t('extracting an archive is not available on Windows machines yet'),
   'make-archive': () => t('making an archive (.zip / .tar) is not available on Windows machines yet'),
 };
+/** B-bd27 X1: a refusal that says the machine's agent is too old carries its door as the toast's action (undefined otherwise). */
+export const fsErrorAction = (d, host = null) => (d && isAgentOld(d.code) ? agentUpdateAction(host || (d.params && d.params.machine) || null) : undefined);
 export function fsErrorText(d) {
   const p = (d && d.params) || {};
   if (d && d.code === 'device_agent_outdated') return t("this machine's agent is {version}, too old to browse files on Windows — rerun the device's install command (Remote → {machine} → Pairing command)", { version: p.version || t('an older version'), machine: p.machine || '?' });
@@ -41,7 +44,7 @@ export function installExplorerOps(FileExplorer) {
       // Show WHY (the server appends e.g. a read-only-mount hint) — the bare
       // "failed" toast hid the actual cause (real report).
       const d = await r?.json().catch(() => null);
-      showToast(t('Create file failed') + (d?.error ? `: ${fsErrorText(d)}` : ''), { type: 'error' });
+      showToast(t('Create file failed') + (d?.error ? `: ${fsErrorText(d)}` : ''), { type: 'error', action: fsErrorAction(d, here.host) });
     }
     this.refresh();
   },
@@ -53,7 +56,7 @@ export function installExplorerOps(FileExplorer) {
     const r = await fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(here.hb({ path: here.path(n.trim()) })) }).catch(() => null);
     if (!r?.ok) {
       const d = await r?.json().catch(() => null);
-      showToast(t('Create folder failed') + (d?.error ? `: ${fsErrorText(d)}` : ''), { type: 'error' });
+      showToast(t('Create folder failed') + (d?.error ? `: ${fsErrorText(d)}` : ''), { type: 'error', action: fsErrorAction(d, here.host) });
     }
     this.refresh();
   },
@@ -430,7 +433,7 @@ export function installExplorerOps(FileExplorer) {
     // r === null = network-level failure (server restart mid-compress): the
     // zip/tar child can outlive the server and complete anyway (#28)
     if (!r) showToast(t('Compress failed: server unreachable — it may still have completed'), { type: 'error' });
-    else if (!r.ok) showToast(t('Compress failed: {msg}', { msg: (d?.error && fsErrorText(d)) || t('unknown error') }), { type: 'error' });
+    else if (!r.ok) showToast(t('Compress failed: {msg}', { msg: (d?.error && fsErrorText(d)) || t('unknown error') }), { type: 'error', action: fsErrorAction(d, here.host) });
     else showToast(t('Created {name} ({size})', { name: out.trim(), size: formatSize(d.size || 0) }));
     this.refresh();
   },
@@ -453,15 +456,15 @@ export function installExplorerOps(FileExplorer) {
     // pre-2.111.18 bug, surviving remote-only.
     const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(at.hb({ path: src, dest, overwrite: false, progress: 1 })) }).catch(() => null);
     const dd = await r?.json().catch(() => ({}));
-    if (!r?.ok) { showToast(t('Extract failed: {msg}', { msg: (dd?.error && fsErrorText(dd)) || t('unknown error') }), { type: 'error' }); return; }
-    if (dd.opId) { this._trackExtractOp(dd.opId, name, dest); return; }
+    if (!r?.ok) { showToast(t('Extract failed: {msg}', { msg: (dd?.error && fsErrorText(dd)) || t('unknown error') }), { type: 'error', action: fsErrorAction(dd, at.host) }); return; }
+    if (dd.opId) { this._trackExtractOp(dd.opId, name, dest, at.host); return; }
     showToast(here ? t('Extracted here') : t('Extracted to {name}', { name: dest.split('/').pop() }));
     this.refresh();
   },
 
   // Poll a server-side extraction op and surface it as a persistent inline
   // progress row (same machinery as uploads: list row + button ring + popover).
-  _trackExtractOp(opId, name, dest) {
+  _trackExtractOp(opId, name, dest, host = null) { // B-bd27 X1: `host` = the machine frozen before the dialog (its door)
     const label = t('Extracting {name}\u2026', { name });
     const upload = {
       xhr: { abort: () => fetch('/api/archive/extract-status?id=' + encodeURIComponent(opId), { method: 'DELETE' }).catch(() => {}) },
@@ -485,7 +488,7 @@ export function installExplorerOps(FileExplorer) {
       // may have died mid-file (the server-side journal forces a repairing
       // overwrite on the next extract into this dest) or completed (#28)
       else if (!st) showToast(t('Extract status lost (server restarted) — it may still have completed'), { type: 'error' });
-      else if (st.status !== 'cancelled') showToast(t('Extract failed: {msg}', { msg: (st.error && fsErrorText(st)) || t('unknown error') }), { type: 'error' });
+      else if (st.status !== 'cancelled') showToast(t('Extract failed: {msg}', { msg: (st.error && fsErrorText(st)) || t('unknown error') }), { type: 'error', action: fsErrorAction(st, host) });
       setTimeout(() => { this._activeUploads.delete(key); this._updateUploadRing(); this.refresh(); }, ok ? 1200 : 4000);
     };
     const poll = setInterval(async () => {

@@ -35,6 +35,7 @@ import { createStreamStats } from './stream-stats.js'; // lane stream-window-fix
 import { machineDesktopId } from '../machine-desktop-model.js';
 import { cropLayout, paneToMachine, clampToBox } from '../machine-window.js';
 import { windowViewSize, windowHeldDoor } from '../stream-window.js';
+import { agentUpdateDoor, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» on the line that says the agent is too old
 import { ffmpegDoor, ffmpegNeedCode } from './ffmpeg-door.js'; // lane machine-needs-at-pairing pick 2: 「取得 FFmpeg …」 on the window's own line
 import { settingsDoor } from './machine-settings-door.js'; // lane machine-needs-at-pairing pick 2: the settings page's door on the line that states the need
 
@@ -144,11 +145,12 @@ export function openMachineApp(app, m, { cmd = '', track = {}, view: viewOpts = 
     pinBtn.style.display = other ? '' : 'none';
     shareText.textContent = other ? t('{machine} has one screen: “{title}” is kept on top there, so it may cover this app', { machine, title: pin.title || t('another app') }) : mine ? t('Kept on top of the other windows on {machine}', { machine }) : '';
   }
-  function showSay(text, { desk = true, again = true } = {}) {
+  function showSay(text, { desk = true, again = true, need = null } = {}) {
     say.style.display = text ? 'flex' : 'none';
     sayText.textContent = text || '';
     sayActs.replaceChildren();
     if (!text) return;
+    if (isAgentOld(need)) sayActs.append(agentUpdateDoor(m, { cls: 'btn-create agent-update-door' })); // B-bd27 X1: first on the line
     if (desk && openDesktop) sayActs.append(btn('file-tool-btn', t('Open its whole desktop'), () => openDesktop()));
     if (again && runAgain) sayActs.append(btn('btn-create', t('Run again'), () => { app.wm.closeWindow(winInfo.id); runAgain(); }));
     for (const b of sayActs.children) b.style.cssText = 'width:auto;height:auto;min-height:28px;padding:4px 12px;white-space:nowrap'; // words, not the 24 px icon box
@@ -157,7 +159,7 @@ export function openMachineApp(app, m, { cmd = '', track = {}, view: viewOpts = 
     answer = a || answer;
     const found = answer && answer.state === 'found';
     if (found && answer.title) { lastTitle = answer.title; app.wm.setTitle(winInfo.id, t('{app} on {machine}', { app: answer.title, machine })); }
-    if (!found) { share.style.display = 'none'; showSay(machineAppStateText({ ...answer, title: answer && answer.title ? answer.title : lastTitle }, m, cmd)); place(); return; }
+    if (!found) { share.style.display = 'none'; showSay(machineAppStateText({ ...answer, title: answer && answer.title ? answer.title : lastTitle }, m, cmd), { need: answer && answer.code }); place(); return; }
     place();
     if (!layout && canvasOf()?.width) showSay(t('“{title}” is not on the screen {machine} shares (minimized, or on another display)', { title: answer.title || cmd, machine }), { again: false });
     else showSay('');
@@ -316,6 +318,7 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
     sayActs.replaceChildren();
     if (!text || quiet) return; // quiet: words only (THE LOCK — nothing to press, the picture comes back by itself)
     // lane machine-needs-at-pairing pick 2: no ffmpeg that passes on this Windows machine ⇒ 「取得 FFmpeg …」 first on the same line
+    if (need && isAgentOld(need)) sayActs.append(agentUpdateDoor(m, { cls: 'btn-create agent-update-door' })); // B-bd27 X1: the window's agent too old
     if (need && ffmpegNeedCode(need) && m.setup === 'win32') sayActs.append(ffmpegDoor(m.hostId, { machine: nameOf(m), say: (x) => { sayText.textContent = x; }, onDone: () => connect() }));
     // the Mac's switch or its helper (M3 / M5): the right pane — or the Command Line Tools' installer — on the same line
     const macPane = m.setup !== 'darwin' ? null : need === 'no_helper' ? 'clt' : need === 'accessibility_permission' ? 'accessibility' : (need === 'screen_permission' || need === 'helper_changed_regrant' || need === 'helper_signed_regrant') ? 'screen' : null;

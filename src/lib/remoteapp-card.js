@@ -16,6 +16,7 @@ import { t } from './i18n.js';
 import { createModalShell, fetchJson, showToast, copyText } from './utils.js';
 import { ALLOWLIST_COMMAND, GPU_COMMAND } from '../remoteapp.js';
 import { enterSubmits } from './chat-enter-keys.js';
+import { agentUpdateDoor } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» where the agent cannot read the settings
 import { settingsDoor } from './machine-settings-door.js'; // lane machine-needs-at-pairing pick 2: the settings page's door on the line that states the need
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -58,6 +59,7 @@ export function openRemoteappSettings(app, m) {
   const lead = el('p', 'ra-lead', t('Open {machine}’s apps as their own windows through Remote Desktop. Set it up once here.', { machine }));
   const factsHead = el('div', 'ra-head', t('What {machine} needs', { machine }));
   const factsBox = el('div', 'ra-facts');
+  const factsDoor = el('div', 'ra-facts-door'); // B-bd27 X1: the old agent's door, beside the facts (their words stay theirs)
   const recheck = btn('file-tool-btn ra-recheck', t('Check again'), () => loadFacts());
   const takeover = el('p', 'ra-takeover', consoleTakeoverWords());
   takeover.dataset.sentence = 'console-takeover';
@@ -74,7 +76,7 @@ export function openRemoteappSettings(app, m) {
   const fold = el('details', 'ra-tech'); fold.dataset.fold = 'tech';
   const foldBody = el('div', 'ra-tech-body');
   fold.append(el('summary', null, t('Technical details')), foldBody);
-  body.append(lead, factsHead, factsBox, recheck, takeover, signHead, fu.l, fd.l, fp.l, sealedNote, save, certHead, certLine, trust, fold);
+  body.append(lead, factsHead, factsBox, factsDoor, recheck, takeover, signHead, fu.l, fd.l, fp.l, sealedNote, save, certHead, certLine, trust, fold);
 
   let setup = null, facts = null, factsAnswer = null;
   const tech = () => {
@@ -91,10 +93,10 @@ export function openRemoteappSettings(app, m) {
   };
   const copyAndSay = (cmd) => { copyText(cmd).then(() => showToast(t('Copied — paste it into an administrator PowerShell on {machine}', { machine }))); };
   function drawFacts() {
-    factsBox.replaceChildren();
+    factsBox.replaceChildren(); factsDoor.replaceChildren();
     const a = factsAnswer;
     if (!a) { factsBox.append(el('p', 'ra-note', t('Reading {machine}’s Remote Desktop settings…', { machine }))); return; }
-    if (a.code === 'agent_too_old') { factsBox.append(el('p', 'ra-todo-line', a.have ? t('{machine}’s agent ({have}) cannot read these settings; it needs version {need} or later', { machine, have: a.have, need: a.need }) : t('{machine}’s agent cannot read these settings; it needs version {need} or later', { machine, need: a.need }))); return; }
+    if (a.code === 'agent_too_old') { factsBox.append(el('p', 'ra-todo-line', a.have ? t('{machine}’s agent ({have}) cannot read these settings; it needs version {need} or later', { machine, have: a.have, need: a.need }) : t('{machine}’s agent cannot read these settings; it needs version {need} or later', { machine, need: a.need }))); factsDoor.append(agentUpdateDoor(m, { app, before: close })); return; }
     if (!a.ok) { factsBox.append(el('p', 'ra-todo-line', remoteappCardRefusal(a, machine))); return; }
     for (const row of a.rows || []) {
       const w = factWords(row, machine, a.facts);

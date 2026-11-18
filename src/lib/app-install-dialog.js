@@ -20,6 +20,7 @@ import { t, tc, resolveLang } from './i18n.js';
 import { cardWords } from './app-card-model.js'; // design 009: THE words of an install's one card — the dialog leads with them
 import { createModalShell, fetchJson, showContextMenu, showToast } from './utils.js';
 import { showInstallDialog, machineName, machineInSentence } from './desktop-app-launcher.js';
+import { agentUpdateDoor, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» where the apps cannot be read or searched on an old agent
 import { fmtBytes } from '../app-manifest.js';
 import { kindRow } from '../app-kinds/index.js'; // PURE — an app kind is its own file: its title, plan rows and words (lane dc-app-kinds)
 
@@ -273,18 +274,21 @@ export function renderAppsSection(app, root, { host = 'local', machine = null, o
   bHelp.onclick = () => openAgentHelp(app, m);
   actions.append(bInstall, bDeb, bSrc, bHelp);
   const status = el('div', 'app-sec-status');
+  const statusDoor = el('div', 'app-sec-door'); // B-bd27 X1: the old agent's door, beside the status words
   const back = el('div', 'app-sec-back'); // verify-r1 F4: apps root keeps that are not on this machine — the user's door to put them back
   const props = el('div', 'app-sec-proposals');
   const drift = el('div', 'app-sec-drift');
   const list = el('div', 'app-sec-list');
-  root.replaceChildren(actions, status, sysRow, back, props, drift, list, rebaseRow, foot);
+  root.replaceChildren(actions, status, statusDoor, sysRow, back, props, drift, list, rebaseRow, foot);
   const render = (st) => {
     if (!alive || !root.isConnected) return;
+    statusDoor.replaceChildren(); // B-bd27 X1: the door shows only while the status says the agent is too old
     try { onState?.(st && !st.error ? st : null); } catch { } // design 009 §C: the dialog's banner reads the same state
     if (!st || st.error) {
       chip.textContent = ''; foot.style.display = 'none'; rebaseRow.replaceChildren();
       status.textContent = st && st.code === 'host_needs_daemon' ? appRefusalText('host_needs_daemon') : t('Could not read the apps on {machine}: {why}', { machine: name(), why: (st && st.error) || t('server unreachable') });
       status.classList.add('is-bad');
+      statusDoor.replaceChildren(...(st && isAgentOld(st.code) ? [agentUpdateDoor(host, { app })] : []));
       back.replaceChildren(); props.replaceChildren(); drift.replaceChildren(); list.replaceChildren();
       return;
     }
@@ -395,8 +399,9 @@ export function openAppSearch(app, m, { onDone = null } = {}) {
   const go = btn(t('Search'), 'btn-create app-search-go'); go.type = 'submit';
   form.append(input, go);
   const note = el('div', 'desktop-install-note app-search-note');
+  const noteDoor = el('div', 'app-search-door'); // B-bd27 X1
   const results = el('div', 'app-search-results');
-  body.append(intro, form, note, results);
+  body.append(intro, form, note, noteDoor, results);
   const pick = (pkg) => { close(); showInstallDialog(m, { what: 'app', request: { kind: 'apt', packages: [pkg] }, onDone }); };
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -405,7 +410,8 @@ export function openAppSearch(app, m, { onDone = null } = {}) {
     go.disabled = true; note.textContent = t('Searching…'); note.classList.remove('is-bad'); results.replaceChildren();
     const r = await fetchJson(`/api/apps/search?${q({ host: m.hostId, q: words })}`);
     go.disabled = false;
-    if (!r || r.error) { note.textContent = appRefusalText(r && r.code) || (r && r.error) || t('server unreachable'); note.classList.add('is-bad'); return; }
+    noteDoor.replaceChildren();
+    if (!r || r.error) { note.textContent = appRefusalText(r && r.code) || (r && r.error) || t('server unreachable'); note.classList.add('is-bad'); if (r && isAgentOld(r.code)) noteDoor.append(agentUpdateDoor(m, { app, before: close })); return; }
     const exact = /^[a-z0-9][a-z0-9+.-]{1,63}$/.test(words);
     note.textContent = r.results.length ? t('{n} found — pick one to see its plan', { n: r.results.length }) : t('The package sources of {machine} have no “{q}”', { machine: machineInSentence(m), q: words });
     if (!r.results.length) { // design 009 §B5: a dead end hands the words to an agent (it finds the vendor's own installer and proposes it)

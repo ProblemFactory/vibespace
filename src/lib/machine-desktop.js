@@ -42,6 +42,7 @@ import { enterSubmits } from './chat-enter-keys.js';
 import { endingVerdict, NEVER_SILENT, STREAM_LIMITS } from '../stream-model.js'; // lane stream-fallback-never-silent: a played stream never falls to the VNC picture by itself
 import { createHandover } from './machine-desktop-handover.js'; // lane desktop-handover: 「交给 agent」 — the stream to ONE agent conversation
 import { createMicToggle, createMicCard, createSoundToggle, createSoundCard } from './stream-mic-strip.js'; // lane stream-mic-road: 「麦克风」 — the viewer's voice to the machine's apps; lane speaker-passthrough-v1: 「声音」 — the machine's sound here
+import { agentUpdateDoor, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» where the list needs a newer agent
 import { ffmpegDoor, ffmpegNeedCode } from './ffmpeg-door.js'; // lane machine-needs-at-pairing pick 2: 「取得 FFmpeg …」 on the line that states the need
 import { micDefaultDoors, micRoadWords } from '../mic-model.js'; // lane stream-mic-road: the Machines card's microphone row
 import { HDR_DECODE_QUERY, DYNAMIC_RANGE_QUERY, hdrViewerVerdict, hdrMachineVerdict, HDR_KEY, hdrRemembered, rememberHdr } from '../hdr-viewer.js'; // lane stream-hdr-passthrough: 「HDR 直通」
@@ -900,8 +901,9 @@ function installedList(m, { onPick }) {
   filter.placeholder = t('Filter'); filter.setAttribute('aria-label', t('Filter the installed apps'));
   head.append(title, filter);
   const note = el('p'); note.className = 'machine-apps-note';
+  const noteDoor = el('div'); noteDoor.className = 'machine-apps-door'; // B-bd27 X1: the door's own slot — the note keeps its words
   const list = el('div'); list.className = 'machine-apps-list'; list.setAttribute('role', 'list');
-  box.append(head, note, list);
+  box.append(head, note, noteDoor, list);
   const nodes = new Map(); // key → the row's button
   let ans = { rows: [], loading: true }, off = false;
   function draw() {
@@ -918,6 +920,7 @@ function installedList(m, { onPick }) {
       : ans.truncated ? t('{machine} has {total} apps — the first {n} are listed; filter to find one', { machine, total: ans.total, n: rows.length })
       : q && !shown.length ? t('Nothing matches “{q}”', { q: filter.value.trim() }) : '';
     note.textContent = words;
+    noteDoor.replaceChildren(...(!ans.loading && isAgentOld(ans.code) ? [agentUpdateDoor(m, { cls: 'file-tool-btn agent-update-door' })] : [])); // B-bd27 X1
     note.classList.toggle('is-bad', ans.code === 'host_needs_daemon' || (!!ans.code && ans.code !== 'offline'));
     filter.hidden = !rows.length;
     const keyOf = (r) => r.launch || `pending:${r.name}`;
