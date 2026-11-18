@@ -12250,6 +12250,15 @@ export default {
   "For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.": "1 時間、この会話はこのシークレットを確認なしで使います。使うたびに通知が出ます（「あなた宛て」には入りません）。その後はまた確認します。", // lane vault-standing-request r7 («Allow for 1 hour»)
   // lane foryou-dock-layout: «Allow for 1 hour»'s consequence, shortest form — the strip's ONE dim line under its answers
   "For 1 hour in this conversation: no more asking; a notice at each use; then it asks again": "この会話は 1 時間確認なし・使うたびに通知・その後また確認",
+  // B-d868: who started the turn asking, beside «Allow for 1 hour»
+  "The turn running when this asked was started by you": "この依頼が出たときに実行中のターンは、あなたが始めました",
+  "The turn running when this asked was started by another session, «{name}»": "この依頼が出たときに実行中のターンは、別のセッション「{name}」が始めました",
+  "The turn running when this asked was started by a VibeSpace notification ({name})": "この依頼が出たときに実行中のターンは、VibeSpace の通知（{name}）で始まりました",
+  "The turn running when this asked was started by a group report": "この依頼が出たときに実行中のターンは、グループの報告で始まりました",
+  "The turn running when this asked was started by a background task finishing": "この依頼が出たときに実行中のターンは、バックグラウンドタスクの終了で始まりました",
+  "The turn running when this asked was started by a delivered message, not typed here": "この依頼が出たときに実行中のターンは、届いたメッセージで始まりました（ここで入力されたものではありません）",
+  "Who started this turn is not recorded": "このターンを誰が始めたかは記録されていません",
+  "Who started this is not recorded: background work another turn started is still running": "誰が始めたかは記録されていません：別のターンが始めたバックグラウンドの作業がまだ実行中です",
   "Allow for 1 hour": "1 時間許可", // lane vault-standing-request r7 («Allow for 1 hour»)
   "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "この会話を 1 時間許可しました — 使うたびに通知が出ます。保管庫ウィンドウで取り消せます", // lane vault-standing-request r7 («Allow for 1 hour»)
   "any destination": "すべての宛先", // lane vault-standing-request r7 («Allow for 1 hour»)

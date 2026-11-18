@@ -1492,7 +1492,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const at = q.command && !q.always ? facts.always.command : facts.always;
       if (at && typeof at === 'object') { if (cf.length) at.changes = cf; else delete at.changes; }
     }
-    if (facts && q.window) facts.window = windowFactsOf(wList, wUntil, q.entries, { switchOn: !!q.plan.wswitch });   // r7; r8: + the switch
+    if (facts && q.window) { const tb0 = facts.window && facts.window.turnBy; facts.window = windowFactsOf(wList, wUntil, q.entries, { switchOn: !!q.plan.wswitch }); if (tb0) facts.window.turnBy = tb0; }   // r7; r8: + the switch; B-d868: a redraw keeps who started the turn (the ask's fact, never re-read)
     if (facts) facts.redrawn = { at: at0 };
     let stored = detail;
     if (q.todoId && userTodos) {
@@ -2150,6 +2150,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         const wplan0 = winUntil ? changesOf(caller.conversationId, ids, { window: winUntil, source: 'card' }) : [];
         let wfacts = winUntil ? windowFactsOf(wplan0, winUntil, ids, { switchOn: wSwitch }) : null;   // r8 (MINOR 3): the window's words — their OWN bound, never DETAIL_MAX
         if (wfacts && JSON.stringify(wfacts).length > WINDOW_FACTS_MAX) { winUntil = null; wfacts = null; }   // words that cannot be shown whole: no «Allow for 1 hour»
+        // B-d868: who started the turn this ask came from — the conversation's kept fact, copied AFTER the window's own bound (a
+        // short line of its own size: it never withdraws «Allow for 1 hour»); a conversation it cannot read ⇒ «unrecorded»
+        if (wfacts) { let tb = null; try { tb = (useFacts(caller) || {}).turnBy; } catch { tb = null; } wfacts.turnBy = tb && typeof tb === 'object' && typeof tb.by === 'string' ? { by: tb.by.slice(0, 20), ...(typeof tb.name === 'string' && tb.name ? { name: tb.name.slice(0, 80) } : {}), ...(tb.why === 'background' ? { why: 'background' } : {}) } : { by: 'unrecorded' }; }
         const lead = [detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [], command: !!cmdToken }), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(cmdToken && !shape.always ? [COMMAND_ALWAYS_LINE] : [])];
         const trail = [...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${dest.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : []), ...(switchNote ? [switchNote] : []), ...policyNotes];
         const shown = [...lead, ...changeLines(plan0, planMs, { many }).map(fill), ...trail].join('\n');   // r8 (MINOR 3): no window line — its words ride facts.window   // lane vault-agent-own: + who stored each entry, why it asks   // lane vault-use-grants: + the standing approvals, the «Always» line and the policy judge's word (int361: only where a card is drawn)   // r4: + one line per scope of its own the «Always» replaces, on every entry

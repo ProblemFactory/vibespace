@@ -12251,6 +12251,15 @@ export default {
   "For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.": "1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。", // lane vault-standing-request r7 («Allow for 1 hour»)
   // lane foryou-dock-layout: «Allow for 1 hour»'s consequence, shortest form — the strip's ONE dim line under its answers
   "For 1 hour in this conversation: no more asking; a notice at each use; then it asks again": "这个对话 1 小时内不再问；每次使用提示一条；到期再问",
+  // B-d868: who started the turn asking, beside «Allow for 1 hour»
+  "The turn running when this asked was started by you": "提出这个请求时正在运行的这一轮由你发起",
+  "The turn running when this asked was started by another session, «{name}»": "提出这个请求时正在运行的这一轮由另一个会话「{name}」发起",
+  "The turn running when this asked was started by a VibeSpace notification ({name})": "提出这个请求时正在运行的这一轮由一条 VibeSpace 通知（{name}）发起",
+  "The turn running when this asked was started by a group report": "提出这个请求时正在运行的这一轮由一份群报告发起",
+  "The turn running when this asked was started by a background task finishing": "提出这个请求时正在运行的这一轮由一个结束的后台任务发起",
+  "The turn running when this asked was started by a delivered message, not typed here": "提出这个请求时正在运行的这一轮由一条送达的消息发起（不是在这里输入的）",
+  "Who started this turn is not recorded": "没有记录这一轮是谁发起的",
+  "Who started this is not recorded: background work another turn started is still running": "由谁发起没有记录：另一轮启动的后台工作仍在运行",
   "Allow for 1 hour": "允许 1 小时", // lane vault-standing-request r7 («Allow for 1 hour»)
   "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "已允许这个对话 1 小时 — 每次使用都会弹一条提示；可在保险库窗口收回", // lane vault-standing-request r7 («Allow for 1 hour»)
   "any destination": "任何目的地", // lane vault-standing-request r7 («Allow for 1 hour»)

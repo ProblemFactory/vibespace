@@ -955,7 +955,7 @@ function runCardOf(item, { t = fmt } = {}) {
   const cmd = full && !/\u2026$/.test(cmd0) ? cmd0 + '\u2026' : cmd0;   // the body's cut is drawn as one
   const cutText = !full ? null : !foldCut ? t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: total, m: shown, fold: t('Technical details') })
     : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: full.length, m: shown });   // r12: the cut point is what ARRIVED (the store's 4 096) — no producer states a total past it
-  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, changes, output: f.masking ? said(RUN_MASKING, f.masking) : null, always: { offered: a.offered === true && !alwaysGone, hint }, window: win ? { offered: true, hint: [{ text: t(WINDOW_HINT_WORDS) }], short: [{ text: t(WINDOW_SHORT_WORDS) }], lines: winLines } : { offered: false, hint: null, ...(winOff.length ? { excepted: [{ text: t(WINDOW_EXCEPTED_WORDS, { entry: winOff.join('”, “') }) }] } : {}) }, fold };   // r7: `window` — «Allow for 1 hour» and its words; r8: `excepted` — why it is not offered
+  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, changes, output: f.masking ? said(RUN_MASKING, f.masking) : null, always: { offered: a.offered === true && !alwaysGone, hint }, window: win ? { offered: true, hint: [{ text: t(WINDOW_HINT_WORDS) }], short: [{ text: t(WINDOW_SHORT_WORDS) }], ...(win.turnBy && typeof win.turnBy === 'object' ? { by: [{ text: turnByWords(win.turnBy, t) }] } : {}), lines: winLines } : { offered: false, hint: null, ...(winOff.length ? { excepted: [{ text: t(WINDOW_EXCEPTED_WORDS, { entry: winOff.join('”, “') }) }] } : {}) }, fold };   // r7: `window` — «Allow for 1 hour» and its words; r8: `excepted` — why it is not offered
 }
 /** lane vault-standing-request r2 (VISUAL — 主开发's read of the standing card's shots: PROSE, the raw vault:// reference in
  *  its first line and half linkified on the phone; the run card already had the right shape): AN AGENT'S STANDING REQUEST
@@ -998,7 +998,26 @@ function windowWords(w, t = fmt) {
   const until = clockWords(Number(w.until)), entries = (Array.isArray(w.entries) ? w.entries : []).filter((x) => typeof x === 'string' && x);
   return [t(WINDOW_WRITES_WORDS, { entry: entries.join('”, “'), until }),
     ...(Array.isArray(w.changes) ? w.changes : []).filter((c) => c && typeof c === 'object').map((c) => t(c.expired === true ? WINDOW_ENDED_WORDS : WINDOW_REPLACES_WORDS, { entry: s(c.entry), when: clockWords(Number(c.until)), until })),
-    ...(w.switchOn === true ? [t(WINDOW_SWITCH_WORDS)] : [])];   // r8: the switch it turns on (the detail used to say it)
+    ...(w.switchOn === true ? [t(WINDOW_SWITCH_WORDS)] : []),   // r8: the switch it turns on (the detail used to say it)
+    ...(w.turnBy && typeof w.turnBy === 'object' ? [turnByWords(w.turnBy, t)] : [])];   // B-d868: who started the turn asking (a card from before says nothing)
+}
+/** B-d868: who started the turn that asks — the door's kept fact (claude-stream-json `_turnBy`, read off the CLI's own record
+ *  and the wrapper's stamp of a person's frame) in words; anything unproved says «not recorded», never «you» */
+const TURN_BY_WORDS = Object.freeze({
+  person: i18nKey('The turn running when this asked was started by you'),
+  peer: i18nKey('The turn running when this asked was started by another session, «{name}»'),
+  notification: i18nKey('The turn running when this asked was started by a VibeSpace notification ({name})'),
+  group: i18nKey('The turn running when this asked was started by a group report'),
+  task: i18nKey('The turn running when this asked was started by a background task finishing'),
+  server: i18nKey('The turn running when this asked was started by a delivered message, not typed here'),
+  unrecorded: i18nKey('Who started this turn is not recorded'),
+});
+const TURN_BY_BACKGROUND_WORDS = i18nKey('Who started this is not recorded: background work another turn started is still running');
+function turnByWords(tb, t = fmt) {
+  const by = tb && typeof tb.by === 'string' && Object.prototype.hasOwnProperty.call(TURN_BY_WORDS, tb.by) ? tb.by : 'unrecorded';
+  const name = tb && typeof tb.name === 'string' && tb.name ? tb.name : '';
+  if (by === 'unrecorded' && tb && tb.why === 'background') return t(TURN_BY_BACKGROUND_WORDS);
+  return (by === 'peer' || by === 'notification') && !name ? t(by === 'peer' ? TURN_BY_WORDS.server : TURN_BY_WORDS.unrecorded) : t(TURN_BY_WORDS[by], { name });
 }
 const END_DAYS_WORDS = i18nKey('for {n} days'), END_HOURS_WORDS = i18nKey('for {n} hours'), END_NONE_WORDS = i18nKey('with no end');
 /** One change (vault-run-door changeFactsOf: {scope, until, expired?, entry?, end: {days} | {hours} | {none}}) in words. */

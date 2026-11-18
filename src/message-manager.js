@@ -222,6 +222,46 @@ function peerOriginOf(origin, text) {
   const report = NOTICE_AT_START_RE.test(s) ? null : readReport(s);
   return report ? { name: null, via: null, report } : { name: null, via: null };
 }
+/** B-d868 — WHO STARTED A TURN, read off the CLI's OWN RECORD of the command that opened it (a kept fact with its source,
+ *  never guessed afterwards): → {by, name?, kind?}
+ *    'person'       the record is a frame the wrapper STAMPED as the person's (chat-wrapper frame_stamp: a turn-opening frame
+ *                   with a message id and no origin) — `stamped`; the person typed it
+ *    'peer'         a peer record naming its sender (another session, vibespace-msg — peerOriginOf's name)
+ *    'notification' VibeSpace's own Background Work notice (peerOriginOf via 'notification')
+ *    'group'        a group report the server posted (peerOriginOf's report)
+ *    'task'         a background task's own notification (origin.kind 'task-notification')
+ *    'server'       any other origin VibeSpace or the CLI wrote (its kind kept)
+ *    'unrecorded'   no record, or a record nothing names — NEVER «the person» unproved (主开发, 2026-11-18 09:01Z) */
+function turnOpenerOf(rec, { stamped = false } = {}) {
+  if (stamped) return { by: 'person' };
+  if (!rec || rec.type !== 'user') return { by: 'unrecorded' };
+  const o = rec.origin;
+  if (!o || typeof o !== 'object') return { by: 'unrecorded' };
+  if (o.kind === 'task-notification') return { by: 'task' };
+  if (o.kind === 'peer') {
+    const c = rec.message && rec.message.content;
+    const text = typeof c === 'string' ? c : (Array.isArray(c) ? c.map((b) => (b && b.text) || '').join('\n') : '');
+    const po = peerOriginOf(o, text);
+    if (po.report) return { by: 'group' };
+    if (po.via === 'notification') return { by: 'notification', name: String(po.name || '').slice(0, 80) };
+    if (po.name) return { by: 'peer', name: String(po.name).slice(0, 80) };
+    return { by: 'server' };
+  }
+  return { by: 'server', ...(typeof o.kind === 'string' && o.kind ? { kind: o.kind.slice(0, 40) } : {}) };
+}
+/** B-d868 (the delta read's must): the fact a vault ASK reads. The ask is answered by the turn running when it arrives — but a
+ *  BACKGROUND task a turn launched (a helper agent, a background command) may ask after that turn ended, while a turn somebody
+ *  else opened runs. `background` = the openers of the turns that launched the background tasks still running (claude-stream-json
+ *  keeps them as opener KEYS `by|name`, the turn each task's own task_started came in — «unknown» when that attach never saw it
+ *  start). Any of them other than this turn's opener ⇒ «not recorded» (why: background) —
+ *  never the running turn's «you» for words a helper of another turn asked. PURE. */
+function turnByForAsk(tb, background = []) {
+  if (!tb || typeof tb !== 'object' || typeof tb.by !== 'string') return null;
+  const by = tb.by.slice(0, 20), name = typeof tb.name === 'string' && tb.name ? tb.name.slice(0, 80) : '';
+  const key = by + (name ? '|' + name : '');   // the opener's key: its kind AND its name (a helper of peer A asking in peer B's turn is not B's)
+  if ((Array.isArray(background) ? background : []).some((b) => b !== key)) return { by: 'unrecorded', why: 'background' };
+  return { by, ...(name ? { name } : {}) };
+}
 /** The words the CLI RECORDED for a peer card whose text was re-drawn from them (a framed group report) — what the
  *  rebuild's card matching reads (normalizers `recordedTextOf`); a symbol, so it never rides a message to a client. */
 const PEER_RECORDED = Symbol('peerRecorded');
@@ -2911,4 +2951,4 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'ui_placed',              // the plugin UI host: the conversation's PLACED rows {rows:[{plugin, id, request_id, after_uuid?}]} (where each «Placed» ui_render sits) — a LOCAL stream-json session gets one whenever a plugin calls $.ui.place (2.1.314 Yd()); card-less: display-only (the binary: «no message carries these rows»), drawn only by a ui_render surface, which VibeSpace does not serve
 ]);
 
-module.exports = { splitToolResultContent, pictureBaseOf, pictureOrdinalsOf, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, applyPeerOrigin, userRecordOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };
+module.exports = { turnOpenerOf, turnByForAsk, splitToolResultContent, pictureBaseOf, pictureOrdinalsOf, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, applyPeerOrigin, userRecordOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };

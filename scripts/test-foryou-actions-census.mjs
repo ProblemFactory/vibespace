@@ -265,6 +265,37 @@ console.log('⑤d THE ARRIVAL\'s words (B-99f7) — a run ask\'s toast and annou
   ok(!!wm && new Set(wm).size === 1, `CONTROL (B-99f7): the mutant whose arrival says the record's words makes the three asks read alike (${J(wm && wm[0])}) — the leg goes red`, wm);
 }
 
+// B-d868: the run card says WHO STARTED THE TURN asking, beside «Allow for 1 hour» — the door's kept fact in words
+console.log('⑤e WHO STARTED THE TURN (B-d868) — the «Allow for 1 hour» lines end with the door\'s kept fact in words; unproved ⇒ «not recorded»');
+{
+  const J = JSON.stringify, FXV = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/vault-run-card-facts.json'), 'utf8')).variants, base = FXV.find((v) => v.name === 'hosts-unknown').facts, T0 = 1_800_000_000_000;
+  const card = (turnBy) => FA.runCardOf({ id: 'ut-d868', status: 'open', kind: 'action', origin: 'vault', sessionKey: 'claude:ops', text: 'x', createdAt: T0, expiresAt: T0 + 60e3, action: { type: 'vault-run-ask', askId: 'a'.repeat(32), always: false, window: true, tool: 'x' },
+    facts: { ...base, window: { offered: true, until: T0 + 3600e3, entries: ['Router'], switchOn: false, ...(turnBy === undefined ? {} : { turnBy }) } } });
+  const last = (tb) => { const v = card(tb); const l = v && v.window && v.window.lines; return Array.isArray(l) ? l[l.length - 1] : null; };
+  const got = { person: last({ by: 'person' }), peer: last({ by: 'peer', name: 'Sender Session' }), task: last({ by: 'task' }), unrecorded: last({ by: 'unrecorded' }), odd: last({ by: 'person-ish' }), nameless: last({ by: 'peer' }) };
+  const before = card(undefined), beforeLines = before && before.window ? before.window.lines : null;
+  ok(got.person === 'The turn running when this asked was started by you' && got.peer === 'The turn running when this asked was started by another session, «Sender Session»' && got.task === 'The turn running when this asked was started by a background task finishing' && got.unrecorded === 'Who started this turn is not recorded' && got.odd === 'Who started this turn is not recorded' && got.nameless === 'The turn running when this asked was started by a delivered message, not typed here' && Array.isArray(beforeLines) && !beforeLines.some((x) => /This turn was started|not recorded/.test(x)),
+    `RED-able (fe1d59c41: the card said nothing of it): the window's lines end with who started the turn — ${J(got)}; a card filed before the fact says nothing of it`, { got, beforeLines });
+  const VD = fs.readFileSync(path.join(ROOT, 'src/server/vault-run-door.js'), 'utf8'), WI = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  const iBound = VD.indexOf("        if (wfacts && JSON.stringify(wfacts).length > WINDOW_FACTS_MAX) { winUntil = null; wfacts = null; }"), iTurn = VD.indexOf("        if (wfacts) { let tb = null; try { tb = (useFacts(caller) || {}).turnBy; } catch { tb = null; } wfacts.turnBy = ");
+  ok(iBound > 0 && iTurn > iBound && /wfacts\.turnBy = tb && typeof tb === 'object' && typeof tb\.by === 'string' \? [^\n]* : \{ by: 'unrecorded' \}; \}/.test(VD) && WI.includes("turnBy: tb ? require('../message-manager.js').turnByForAsk({ ...tb, by: String(tb.by || 'unrecorded') }, s._turnByBackground) : null };")
+    && VD.includes("const tb0 = facts.window && facts.window.turnBy; facts.window = windowFactsOf(wList, wUntil, q.entries, { switchOn: !!q.plan.wswitch }); if (tb0) facts.window.turnBy = tb0;"),
+    'the door copies the conversation\'s kept fact into the window\'s facts AFTER their own size bound (it never withdraws «Allow for 1 hour»; a conversation it cannot read ⇒ «unrecorded»), a redraw keeps the ask\'s fact; the wiring reads it off the session claude-stream-json keeps it on');
+  // the reader's should (the owner's know / operate rule): on the For-you strip the window's lines are the fold's — who started
+  // the turn rides the fold's SUMMARY, always shown (a phone never opens a title)
+  const vb = card({ by: 'person' }), ROW = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8');
+  ok(!!vb && Array.isArray(vb.window.by) && vb.window.by[0].text === 'The turn running when this asked was started by you' && !('by' in (card(undefined) || { window: {} }).window)
+    && ROW.includes("<summary>${win.by ? `<span class=\"ut-run-hint ut-run-hint-window\">${segHtml(win.by)}</span> ` : ''}${win.short ? `<span class=\"ut-run-hint ut-run-hint-window ut-run-hint-short\">${segHtml(win.short)}</span> ` : ''}") && ROW.includes("(win.lines || []).filter((l) => !win.by || l !== segText(win.by))")
+    && last({ by: 'unrecorded', why: 'background' }) === 'Who started this is not recorded: background work another turn started is still running',
+    'the strip: the card hands its window `by` (the same words) and the strip draws it in the fold\'s summary, beside the hour\'s short words — seen without opening anything', vb && vb.window);
+  const FS = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8'), from = "    ...(w.turnBy && typeof w.turnBy === 'object' ? [turnByWords(w.turnBy, t)] : [])];";
+  const k = FS.split(from).length - 1;
+  ok(k === 1, `the anchor of the control B-d868 card-line is in the source (once)`, `found ${k} times`);
+  if (k === 1) { const { mutantCopies } = await import('./mutant-copy.mjs'); const FAx = require(mutantCopies('d868fa', ROOT).write('src/foryou-actions.js', FS.replace(from, '    ];'), 'no-turn-line'));
+    const v = FAx.runCardOf({ id: 'ut-d868', status: 'open', kind: 'action', origin: 'vault', sessionKey: 'claude:ops', text: 'x', createdAt: T0, expiresAt: T0 + 60e3, action: { type: 'vault-run-ask', askId: 'a'.repeat(32), always: false, window: true, tool: 'x' }, facts: { ...base, window: { offered: true, until: T0 + 3600e3, entries: ['Router'], switchOn: false, turnBy: { by: 'person' } } } });
+    ok(!!v && !v.window.lines.some((x) => /The turn running when this asked was started/.test(x)), `CONTROL (B-d868): the copy without the line says nothing of who started the turn — the leg goes red`, v && v.window && v.window.lines); }
+}
+
 // ── ⑥ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑥ bandDoorsOf\'s types are rows; every field from its closed set; the CLI line each row declares');
 {

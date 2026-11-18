@@ -123,7 +123,8 @@ const vaultUseFacts = (caller) => {
     let groupIds = [], groupsUnreadable = false;
     const tasks = getTasks && getTasks();
     if (tasks && sessionStatusKey) { try { groupIds = tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id); } catch { groupsUnreadable = true; } }
-    return { conversationKeys: require('../grant-model.js').conversationKeysOf(s, s._webuiId || id), groupIds, groupsUnreadable };
+    const tb = s._turnBy && typeof s._turnBy === 'object' ? s._turnBy : null;   // B-d868: who started the turn now running (claude-stream-json's kept fact)
+    return { conversationKeys: require('../grant-model.js').conversationKeysOf(s, s._webuiId || id), groupIds, groupsUnreadable, turnBy: tb ? require('../message-manager.js').turnByForAsk({ ...tb, by: String(tb.by || 'unrecorded') }, s._turnByBackground) : null };   // B-d868: background work of another turn ⇒ «not recorded»
   }
   return { conversationKeys: caller && caller.conversationId ? [caller.conversationId] : [] };
 };

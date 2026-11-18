@@ -382,6 +382,67 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
      *  prompt (no origin), a task-notification, or a server-posted body-less
      *  origin is not this carrier's business — the lookup stops at the record.
      *  Local sessions only: a remote host's transcript is not on this disk. */
+    // B-d868 — WHO STARTED THIS TURN, a kept fact with its source (`session._turnBy`), decided ONCE per turn at the turn's own
+    // `init`, from the CLI's records — never at a command start: a send to an idle CLI has no command_lifecycle at all (the
+    // real 2.1.312, scripts/fixtures/claude-cli/2.1.312-stamped.jsonl), a steer's start is inside a turn, and after a hub
+    // restart the first start seen may be a steer. (1) the init names a frame the wrapper stamped as the person's
+    // (user_message_uuids ∩ frame_stamp) ⇒ the person; (2) else the command the CLI started since the last result (a queued
+    // peer message, a notification, a held frame) ⇒ the CLI's own record of it, read by the peer card's lookup below (ONE
+    // read of the transcript, never a second); (3) else the turn's first record (its uuid a stamp ⇒ the person; its own
+    // origin) ⇒ PURE message-manager turnOpenerOf. Nothing proves it ⇒ 'unrecorded', NEVER «the person»; the result ends the
+    // fact. A remote host's transcript is not on this disk: (2) reads nothing there, (1) and (3) still do.
+    const personUuids = new Set();
+    const cmdRecs = new Map();   // command uuid → the opener its CLI record names (null: the lookup gave up), from peerCommandCard — a verdict, never the record
+    // the delta reads' must: a BACKGROUND task keeps the opener of the turn that LAUNCHED it — the live turn its own
+    // `task_started` came in, as THIS attach saw it (never the turn running when the level set names it: the set names a task
+    // before its task_started, drops and re-names one around its phase changes, and is not repeated after a hub restart).
+    // The CLI's own level set (background_tasks_changed) says which still run; one this attach never saw start is «unknown».
+    // session._turnByBackground = their opener keys (by|name); turnByForAsk: any other than the running turn's ⇒ «not recorded»
+    const launched = new Map();   // task id → the opener key of the live turn its task_started came in
+    let bgLive = [];
+    const openerKey = (tb) => (tb && typeof tb.by === 'string' && tb.source !== 'pending' ? tb.by + (tb.name ? '|' + tb.name : '') : 'unrecorded');
+    const sayBackground = () => { session._turnByBackground = [...new Set(bgLive.map((k) => launched.get(k) || 'unknown'))]; };
+    const noteBackground = (tasks) => { bgLive = tasks.filter((t) => t && typeof t === 'object' && t.task_id != null).map((t) => String(t.task_id).slice(0, 64)).slice(0, 100); sayBackground(); };
+    const noteTaskStarted = (msg) => {
+      const k = String(msg.task_id).slice(0, 64);
+      if (!launched.has(k)) { launched.set(k, turnOpen.live ? openerKey(session._turnBy) : 'unrecorded'); if (launched.size > 200) launched.delete(launched.keys().next().value); }
+      if (bgLive.includes(k)) sayBackground();
+    };
+    const turnOpen = { live: false, cmd: null, first: null, waitCmd: null };   // live: an init without its result yet
+    const setTurnBy = (v) => { const f = { ...v, at: Date.now() }; session._turnBy = f; return f; };
+    const byVerdict = (fact, v, source) => {
+      if (session._turnBy !== fact) return;   // a newer turn owns the fact (by identity — never by the clock)
+      session._turnBy = { ...(v || { by: 'unrecorded' }), at: fact.at, source };
+    };
+    const byRecord = (fact, rec, stamped) => byVerdict(fact, require('../../message-manager.js').turnOpenerOf(rec, { stamped }), stamped ? 'frame-stamp' : (rec ? 'cli-record' : 'no-record'));
+    const noteCmdRecord = (cmdUuid, rec) => {
+      const v = rec ? require('../../message-manager.js').turnOpenerOf(rec) : null;
+      cmdRecs.set(cmdUuid, v);
+      if (cmdRecs.size > 32) cmdRecs.delete(cmdRecs.keys().next().value);
+      if (turnOpen.waitCmd && turnOpen.waitCmd.cmd === cmdUuid) { const w = turnOpen.waitCmd; turnOpen.waitCmd = null; byVerdict(w.fact, v, v ? 'cli-record' : 'no-record'); }
+    };
+    const noteTurnInit = (msg) => {
+      turnOpen.live = true;
+      const cmd = turnOpen.cmd;
+      turnOpen.cmd = null; turnOpen.first = null; turnOpen.waitCmd = null;
+      const names = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String) : [];
+      if (names.some((u) => personUuids.has(u)) || (cmd && personUuids.has(cmd))) { setTurnBy({ by: 'person', source: 'frame-stamp' }); return; }
+      const fact = setTurnBy({ by: 'unrecorded', source: 'pending' });
+      if (cmd && !session.host) { if (cmdRecs.has(cmd)) byVerdict(fact, cmdRecs.get(cmd), cmdRecs.get(cmd) ? 'cli-record' : 'no-record'); else turnOpen.waitCmd = { cmd, fact }; return; }
+      turnOpen.first = fact;
+    };
+    const noteTurnRecord = (msg) => {
+      if (!turnOpen.first) return;
+      const c = msg.message && msg.message.content;
+      if (msg.type === 'user' && Array.isArray(c) && c.some((b) => b && b.type === 'tool_result')) return;
+      const fact = turnOpen.first; turnOpen.first = null;
+      if (msg.type === 'user') byRecord(fact, msg, typeof msg.uuid === 'string' && personUuids.has(msg.uuid));
+      else byRecord(fact, null, false);   // the model spoke first: nothing in the turn said who opened it
+    };
+    const noteTurnEnded = () => {
+      turnOpen.live = false; turnOpen.cmd = null; turnOpen.first = null; turnOpen.waitCmd = null;
+      setTurnBy({ by: 'unrecorded', source: 'turn-ended' });
+    };
     const peerCmdSeen = new Set();
     const PEER_CMD_RETRY_MS = [0, 150, 600, 2000];
     const peerCommandCard = (cmdUuid) => {
@@ -389,7 +450,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
       peerCmdSeen.add(cmdUuid);
       if (peerCmdSeen.size > 200) peerCmdSeen.delete(peerCmdSeen.values().next().value);
       let attempt = 0;
-      const schedule = () => { if (attempt >= PEER_CMD_RETRY_MS.length) return; setTimeout(tryOnce, PEER_CMD_RETRY_MS[attempt++]); };
+      const schedule = () => { if (attempt >= PEER_CMD_RETRY_MS.length) { noteCmdRecord(cmdUuid, null); return; } setTimeout(tryOnce, PEER_CMD_RETRY_MS[attempt++]); };   // B-d868: the turn's opener waits on this lookup
       const tryOnce = () => {
         if (!activeSessions.has(id) || !session.claudeSessionId) return;
         let fp = null;
@@ -408,6 +469,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             try { const r = JSON.parse(line); if (r && r.uuid === cmdUuid) { rec = r; break; } } catch { }
           }
           if (!rec) return schedule();                       // not written yet — the write races the frame
+          noteCmdRecord(cmdUuid, rec);                       // B-d868: the CLI's own record of a started command (the turn's opener reads it)
           if (rec.type !== 'user') return;
           const o = rec.origin;
           if (!o || o.kind !== 'peer' || typeof o.body !== 'string' || !o.body.trim()) return;
@@ -1282,6 +1344,14 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // TURN BOUNDARY (2.369.0 wall machine): classifies walled/normal,
           // runs the per-turn pool eval, arms/disarms — one owner.
           if (msg.type === 'command_lifecycle' && msg.state === 'started' && typeof msg.command_uuid === 'string' && msg.command_uuid && !session.host) peerCommandCard(msg.command_uuid);
+          // B-d868: the wrapper's stamp on a person's own frame; the turn's opener is decided at its init (noteTurnInit above)
+          if (msg.type === 'frame_stamp' && typeof msg.cli_uuid === 'string' && msg.cli_uuid) { personUuids.add(msg.cli_uuid); if (personUuids.size > 64) personUuids.delete(personUuids.values().next().value); }
+          if (msg.type === 'command_lifecycle' && msg.state === 'started' && typeof msg.command_uuid === 'string' && msg.command_uuid && !turnOpen.live) turnOpen.cmd = msg.command_uuid;   // started BETWEEN turns: the next init's command
+          if (msg.type === 'system' && msg.subtype === 'task_started' && msg.task_id != null) noteTaskStarted(msg);
+          if (msg.type === 'system' && msg.subtype === 'background_tasks_changed' && Array.isArray(msg.tasks)) noteBackground(msg.tasks);
+          if (msg.type === 'system' && msg.subtype === 'init') noteTurnInit(msg);
+          else if (msg.type === 'user' || msg.type === 'assistant') noteTurnRecord(msg);
+          if (msg.type === 'result') noteTurnEnded();
           if (msg.type === 'result') { try { require('../model-ask.js').noteRefusal(session, msg, { readSessionMeta, writeSessionMeta }); } catch { } }   // the API's 404 naming the ask: the pressing page says it once (round 15: it writes nothing a person set)
           if (msg.type === 'result') { try { noteTurnEnd?.(session, msg); } catch { } }
           // THE LIVE LOGIN WALL (lane signin-card-real-screen, real 2.1.308): the CLI no longer DIES not-logged-in —

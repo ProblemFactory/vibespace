@@ -224,6 +224,146 @@ console.log('— wiring pins (the unstaged-wiring class)');
   ok('ci.mjs runs this suite', /'test-peer-command-card'/.test(read('scripts/ci.mjs')));
 }
 
+console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (session._turnBy), decided at the turn\'s init, the REAL consumer');
+{
+  const T = (uuid, origin, content = 'x') => ({ type: 'user', uuid, message: { role: 'user', content }, ...(origin ? { origin } : {}), timestamp: new Date().toISOString() });
+  const init = (names) => ({ type: 'system', subtype: 'init', session_id: 'x', claude_code_version: '2.1.312', ...(names ? { user_message_uuids: names } : {}) });
+  const said = (s) => ({ ...(s._turnBy || { by: 'unrecorded', source: 'none' }) });
+  const assistant = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } };
+  const { s, p, jsonl } = mkSession('w-turnby');
+  const U = (k) => 'd8680000-0000-4000-8000-00000000000' + k, M3 = 'cccccccc-0000-4000-8000-000000000003';
+  fs.writeFileSync(jsonl, J(peerRecord(U(3), M3)));
+  // (1) the person sends to an idle CLI: the wrapper stamps the frame (frame_stamp), the CLI opens the turn with NO command start
+  // (the real 2.1.312 — scripts/fixtures/claude-cli/2.1.312-stamped.jsonl) and its init names the stamp
+  p.data(J({ type: 'frame_stamp', msg_id: 'web-1', cli_uuid: U(1) })); p.data(J(init([U(1)]))); p.data(J(T(U(1), null, 'typed words')));
+  const person = said(s);
+  p.data(J({ type: 'frame_stamp', msg_id: 'web-2', cli_uuid: U(2) })); p.data(J(started(U(2)))); await sleep(30);   // a steer: a command start INSIDE the turn
+  const steered = said(s);
+  p.data(J(result(M3)));
+  const ended = said(s);
+  // (2) a queued peer message: its command starts BETWEEN turns, the init names nothing — read off the CLI's own record (the
+  // peer card's ONE lookup)
+  p.data(J(started(U(3)))); p.data(J(init(null))); await sleep(300);
+  const peer = said(s);
+  p.data(J(result(M3)));
+  // (3) the reader's must 1: a background task's turn the CLI opens by itself — no command start, no names; the turn's first
+  // record says it (never the previous turn's «you»)
+  p.data(J(init(null))); p.data(J(T(U(4), { kind: 'task-notification' }, '<task-notification>done</task-notification>')));
+  const task = said(s);
+  p.data(J(result(M3)));
+  // (4) a typed-looking frame the wrapper never stamped, and a turn whose model speaks first
+  p.data(J(init(null))); p.data(J(T(U(5), null, 'typed, never stamped')));
+  const unstamped = said(s);
+  p.data(J(result(M3))); p.data(J(init(null))); p.data(J(assistant));
+  const silent = said(s);
+  p.data(J(result(M3)));
+  // (5) the reader's note 8: a lookup that answers after its turn ended never writes over the newer turn's fact
+  p.data(J(started(U(7)))); p.data(J(init(null))); p.data(J(result(M3)));
+  p.data(J(init(null))); p.data(J(T(U(8), { kind: 'task-notification' })));
+  fs.appendFileSync(jsonl, J(peerRecord(U(7), M3))); await sleep(800);
+  const late = said(s);
+  ok(`B-d868 RED-able (fe1d59c41: no such fact): the person's send to an idle CLI ⇒ «person» from the init's names (${JSON.stringify(person)}); a steer inside that turn changes nothing (${steered.by}); the result ends the fact (${ended.by}, ${ended.source})`,
+    person.by === 'person' && person.source === 'frame-stamp' && steered.by === 'person' && steered.at === person.at && ended.by === 'unrecorded' && ended.source === 'turn-ended', JSON.stringify({ person, steered, ended }));
+  ok(`B-d868: a queued peer message ⇒ «peer» with its sender's name, read off the CLI's own record (${JSON.stringify(peer)}); a background task's own turn (no command start) ⇒ «task» from its first record (${task.by}, ${task.source})`,
+    peer.by === 'peer' && peer.name === 'Sender Session' && peer.source === 'cli-record' && task.by === 'task' && task.source === 'cli-record', JSON.stringify({ peer, task }));
+  ok(`B-d868 — NEVER «you» UNPROVED (主开发 09:01Z): an unstamped typed-looking record ⇒ «unrecorded» (${unstamped.by}); a turn whose model speaks first ⇒ «unrecorded» (${silent.by}, ${silent.source}); a late lookup leaves the newer turn's fact (${late.by})`,
+    unstamped.by === 'unrecorded' && silent.by === 'unrecorded' && silent.source === 'no-record' && late.by === 'task', JSON.stringify({ unstamped, silent, late }));
+  // (7) the delta read's must: a background task a peer's turn launched still runs when the person's own turn asks — the ask
+  // reads «not recorded», never the running turn's «you»; once the set no longer names it, the turn's own opener again
+  p.data(J(result(M3)));   // (5) left a turn running
+  fs.appendFileSync(jsonl, J(peerRecord(U('a'), M3)));
+  p.data(J(started(U('a')))); p.data(J(init(null))); await sleep(300);
+  // the real order (2.1.312-frames lines 14–15): the level set names the helper BEFORE its own task_started
+  const BG = { task_id: 'bg-1', task_type: 'local_agent', description: 'helper' };
+  p.data(J({ type: 'system', subtype: 'background_tasks_changed', tasks: [BG] }));
+  p.data(J({ type: 'system', subtype: 'task_started', task_id: 'bg-1', tool_use_id: 'toolu_bg_1', description: 'helper', is_backgrounded: true, task_type: 'local_agent' }));
+  const bgPeer = said(s);
+  p.data(J(result(M3)));
+  p.data(J({ type: 'frame_stamp', msg_id: 'web-b', cli_uuid: U('b') })); p.data(J(init([U('b')])));
+  const MM0 = require(path.join(REPO, 'src/message-manager.js'));
+  const askDuring = MM0.turnByForAsk(s._turnBy, s._turnByBackground);
+  // the CLI drops a member for a record or two around its phase changes and names it again (message-manager's own note) —
+  // the re-named helper is STILL the peer's, never the running turn's
+  p.data(J({ type: 'system', subtype: 'background_tasks_changed', tasks: [] })); p.data(J({ type: 'system', subtype: 'background_tasks_changed', tasks: [BG] }));
+  const askBlip = MM0.turnByForAsk(s._turnBy, s._turnByBackground);
+  p.data(J({ type: 'system', subtype: 'background_tasks_changed', tasks: [] }));
+  const askAfter = MM0.turnByForAsk(s._turnBy, s._turnByBackground);
+  p.data(J(result(M3)));
+  ok(`B-d868 (the delta reads' must): a helper a peer's turn launched still runs when the person's turn asks ⇒ «${askDuring && askDuring.by}» (${askDuring && askDuring.why}), never «you» — also after the set drops and re-names it (${askBlip && askBlip.by}); the set empties ⇒ «${askAfter && askAfter.by}»`,
+    bgPeer.by === 'peer' && askDuring && askDuring.by === 'unrecorded' && askDuring.why === 'background' && askBlip && askBlip.by === 'unrecorded' && askAfter && askAfter.by === 'person', JSON.stringify({ bgPeer, askDuring, askBlip, askAfter, bg: s._turnByBackground }));
+  // a FRESH attach (a hub restart): the set names a task this attach never saw start ⇒ «unknown» ⇒ the person's turn asks «not recorded»
+  const fr = mkSession('w-turnby-fresh');
+  fr.p.data(J({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'bg-old', task_type: 'local_agent' }] }));
+  fr.p.data(J({ type: 'frame_stamp', msg_id: 'web-f', cli_uuid: U('f') })); fr.p.data(J(init([U('f')])));
+  const askFresh = MM0.turnByForAsk(fr.s._turnBy, fr.s._turnByBackground);
+  ok(`B-d868: after a restart, a helper nobody saw start is «unknown» ⇒ the person's turn asks «${askFresh && askFresh.by}», never «you» (${JSON.stringify(fr.s._turnByBackground)})`, fr.s._turnBy.by === 'person' && askFresh && askFresh.by === 'unrecorded' && JSON.stringify(fr.s._turnByBackground) === '["unknown"]', JSON.stringify({ tb: fr.s._turnBy, bg: fr.s._turnByBackground }));
+  // (8) the REAL record order (the delta read's should): the real 2.1.312's own task-notification turn — init, the model, its
+  // result, no user record on stdout (scripts/fixtures/claude-cli/2.1.312-frames.jsonl lines 23–25) ⇒ «not recorded»
+  const real = fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.312-frames.jsonl'), 'utf8').split('\n').slice(22, 24);
+  for (const l of real) p.data(l + '\n');
+  const realTask = said(s);
+  p.data(J(result(M3)));
+  ok(`B-d868: the real CLI's own task-notification turn (init → the model, no stdout user record) reads «${realTask.by}» (${realTask.source}) — honest, never a guess`, realTask.by === 'unrecorded' && realTask.source === 'no-record' && real.length === 2 && /"subtype":"init"/.test(real[0]), JSON.stringify(realTask));
+  const PURE2 = [MM0.turnByForAsk({ by: 'person' }, []), MM0.turnByForAsk({ by: 'person' }, ['person']), MM0.turnByForAsk({ by: 'person' }, ['peer|N']), MM0.turnByForAsk({ by: 'peer', name: 'N' }, ['peer|N']), MM0.turnByForAsk({ by: 'peer', name: 'B' }, ['peer|A']), MM0.turnByForAsk({ by: 'person' }, ['unknown']), MM0.turnByForAsk(null, ['peer|N'])];
+  ok(`B-d868 PURE turnByForAsk: no background, or only this opener's (its kind AND name) ⇒ the opener; another opener's, another peer's, or an unknown one ⇒ «not recorded» (background); no fact ⇒ null (${JSON.stringify(PURE2)})`,
+    JSON.stringify(PURE2) === '[{"by":"person"},{"by":"person"},{"by":"unrecorded","why":"background"},{"by":"peer","name":"N"},{"by":"unrecorded","why":"background"},{"by":"unrecorded","why":"background"},null]', JSON.stringify(PURE2));
+  // (6) the reader's must 2: a hub restart mid-turn — a FRESH consumer, the turn already running, and the person steers
+  const r = mkSession('w-turnby-restart');
+  r.p.data(J({ type: 'frame_stamp', msg_id: 'web-6', cli_uuid: U(6) })); r.p.data(J(started(U(6)))); r.p.data(J(assistant)); await sleep(30);
+  const restarted = said(r.s);
+  ok(`B-d868: after a restart mid-turn a steer is never the opener — the turn says «unrecorded» until its own init (${restarted.by})`, restarted.by !== 'person', JSON.stringify(restarted));
+  // the PURE classifier and its controls (anchors that fail BY NAME — the 06:25Z rule)
+  const MMsrc = fs.readFileSync(path.join(REPO, 'src/message-manager.js'), 'utf8'), MM = require(path.join(REPO, 'src/message-manager.js'));
+  const pure = typeof MM.turnOpenerOf === 'function' ? [MM.turnOpenerOf(null, { stamped: true }).by, MM.turnOpenerOf(T('a', null)).by, MM.turnOpenerOf(null).by, MM.turnOpenerOf(T('b', { kind: 'peer', from: 'unknown' }, 'body-less')).by, MM.turnOpenerOf(T('c', { kind: 'something-new' })).kind] : null;
+  ok(`B-d868 PURE turnOpenerOf: stamped ⇒ person; no origin, no record ⇒ unrecorded; a name-less server post ⇒ server; an unknown origin keeps its kind (${JSON.stringify(pure)})`, JSON.stringify(pure) === '["person","unrecorded","unrecorded","server","something-new"]', JSON.stringify(pure));
+  const { mutantCopies } = await import('./mutant-copy.mjs'), MU = mutantCopies('d868', REPO);
+  const anchor = (src, from, name) => { const k = src.split(from).length - 1; ok(`the anchor of the control ${name} is in the source (once)`, k === 1, `found ${k} times`); return k === 1; };
+  const fromMM = "  if (!o || typeof o !== 'object') return { by: 'unrecorded' };";
+  if (anchor(MMsrc, fromMM, 'B-d868 never-you')) {
+    const MMx = require(MU.write('src/message-manager.js', MMsrc.replace(fromMM, "  if (!o || typeof o !== 'object') return { by: 'person' };"), 'unproved-you'));
+    ok(`CONTROL (B-d868): the copy that calls an unproved record «the person» answers ${MMx.turnOpenerOf(T('a', null)).by} — the leg goes red`, MMx.turnOpenerOf(T('a', null)).by === 'person');
+  }
+  const CSsrc = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8');
+  const fromBg = "  if ((Array.isArray(background) ? background : []).some((b) => b !== key)) return { by: 'unrecorded', why: 'background' };";
+  if (anchor(MMsrc, fromBg, 'B-d868 background')) {
+    const MMb = require(MU.write('src/message-manager.js', MMsrc.replace(fromBg, ''), 'no-background'));
+    ok(`CONTROL (B-d868): the copy that ignores the background answers «${MMb.turnByForAsk({ by: 'person' }, ['peer']).by}» for a peer's helper — the leg goes red`, MMb.turnByForAsk({ by: 'person' }, ['peer']).by === 'person');
+  }
+  ok('B-d868: the opener lookups keep a VERDICT, never the transcript record (the delta read: up to 32 whole records); the background set is read off the CLI\'s own level set and each task\'s own start', CSsrc.includes('      cmdRecs.set(cmdUuid, v);') && !CSsrc.includes('cmdRecs.set(cmdUuid, rec)') && CSsrc.includes("if (msg.type === 'system' && msg.subtype === 'background_tasks_changed' && Array.isArray(msg.tasks)) noteBackground(msg.tasks);") && CSsrc.includes("if (msg.type === 'system' && msg.subtype === 'task_started' && msg.task_id != null) noteTaskStarted(msg);"));
+  const fromStart = "msg.command_uuid && !turnOpen.live) turnOpen.cmd = msg.command_uuid;", fromEnd = "      setTurnBy({ by: 'unrecorded', source: 'turn-ended' });\n";
+  ok(`B-d868 wiring: the stamp is kept; a command start counts only BETWEEN turns; the init decides; the turn's records and the result follow`, CSsrc.includes("if (msg.type === 'frame_stamp' && typeof msg.cli_uuid === 'string' && msg.cli_uuid) { personUuids.add(msg.cli_uuid);") && CSsrc.includes(fromStart)
+    && CSsrc.includes("if (msg.type === 'system' && msg.subtype === 'init') noteTurnInit(msg);") && CSsrc.includes("else if (msg.type === 'user' || msg.type === 'assistant') noteTurnRecord(msg);") && CSsrc.includes("if (msg.type === 'result') noteTurnEnded();")
+    && CSsrc.includes('noteCmdRecord(cmdUuid, rec);') && (CSsrc.match(/findSessionJsonlPath\(/g) || []).length === 1, 'the opener reads the peer card\'s ONE transcript lookup (one findSessionJsonlPath in the file, as at the base — the reader\'s should 6: no second sync read per turn)');
+  const consumer = (src, name) => {
+    const CSx = require(MU.write('src/server/stdout/claude-stream-json.js', src, name));
+    const ax = CSx.create({ activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'command_lifecycle']), _seenStreamTypes: new Set(), USAGE_SCANNER_PATH: path.join(tmp, 'none'), checkClaudeGoalStatus() { }, noteModelSeen() { }, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null } });
+    const cid = 'c1d00000-0000-4000-8000-99999999999' + name.length % 10, sx = { mode: 'chat', backend: 'claude', name: 'x', cwd: CWD, host: null, claudeSessionId: cid, backendSessionId: cid, sockName: 'cw-' + name, buffer: '', createdAt: Date.now() };
+    sx._normalizer = createMessageManager('claude', 'w-' + name); activeSessions.set('w-' + name, sx); const px = fakePty(); ax.attach(sx, 'w-' + name, px, helpers);
+    return { sx, px, done: () => activeSessions.delete('w-' + name) };
+  };
+  if (anchor(CSsrc, fromStart, 'B-d868 decide-at-the-start')) {
+    const c = consumer(CSsrc.replace(fromStart, 'msg.command_uuid) { turnOpen.cmd = msg.command_uuid; noteTurnInit({}); }'), 'at-start');
+    c.px.data(J({ type: 'frame_stamp', msg_id: 'web-9', cli_uuid: U(9) })); c.px.data(J(started(U(9)))); c.px.data(J(assistant));
+    ok(`CONTROL (B-d868): the copy that decides at a command's start calls the steer after a restart «${c.sx._turnBy && c.sx._turnBy.by}» — the leg goes red`, !!c.sx._turnBy && c.sx._turnBy.by === 'person');
+    c.done();
+  }
+  if (anchor(CSsrc, fromEnd, 'B-d868 the result ends it')) {
+    const c = consumer(CSsrc.replace(fromEnd, ''), 'no-end');
+    c.px.data(J({ type: 'frame_stamp', msg_id: 'web-a', cli_uuid: U(1) })); c.px.data(J(init([U(1)]))); c.px.data(J(result(M3)));
+    ok(`CONTROL (B-d868): the copy whose result does not end the fact still says «${c.sx._turnBy && c.sx._turnBy.by}» between turns — the leg goes red`, !!c.sx._turnBy && c.sx._turnBy.by === 'person');
+    c.done();
+  }
+  const fromSay = "    const sayBackground = () => { session._turnByBackground = [...new Set(bgLive.map((k) => launched.get(k) || 'unknown'))]; };";
+  if (anchor(CSsrc, fromSay, 'B-d868 the opener at launch')) {
+    const c = consumer(CSsrc.replace(fromSay, "    const sayBackground = () => { session._turnByBackground = [...new Set(bgLive.map(() => openerKey(session._turnBy)))]; };"), 'at-the-set');
+    c.px.data(J({ type: 'frame_stamp', msg_id: 'web-c', cli_uuid: U('c') })); c.px.data(J(init([U('c')])));
+    c.px.data(J({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'bg-x', task_type: 'local_agent' }] }));
+    const v = require(path.join(REPO, 'src/message-manager.js')).turnByForAsk(c.sx._turnBy, c.sx._turnByBackground);
+    ok(`CONTROL (B-d868): the copy that gives a running task the opener of the turn running when the set names it says «${v && v.by}» for a helper nobody saw start — the leg goes red`, !!v && v.by === 'person');
+    c.done();
+  }
+}
+
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
