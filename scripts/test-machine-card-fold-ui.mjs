@@ -332,7 +332,7 @@ try {
   const lc1 = await evalJs(liveCount);
   await evalJs(`(async () => { const v = ${VIEW}; v._onEditMessage('xc-live', { status: 'complete', content: [{ type: 'tool_result', toolCallId: 'toolu_live', toolName: 'Bash', input: { command: ${JSON.stringify(LC)} }, output: ${JSON.stringify(' 10:41:02 up 3 days\n' + E.cliLine({ outcome: 'ran', code: 0, ms: 300 }, { machine: XM }))}, status: 'success' }] }); await new Promise((r) => setTimeout(r, 300)); return true; })()`);
   const lc2 = await evalJs(liveCount);
-  check('⑤ live: running = a Bash card; the server\'s upgrade = the SAME message drawn as the machine card; its result = still ONE card, the same words', lc0.calls === 5 && lc0.bash === 1 && lc1.calls === 6 && lc1.bash === 0 && lc1.cards === 0 && lc2.calls === 6 && lc2.bash === 0 && lc2.cards === 0 && lc2.text.includes('uptime') && lc2.text.includes('exit 0'), { lc0, lc1, lc2 });
+  check('⑤ live: running = a Bash card; the server\'s upgrade = the SAME message drawn as the machine card; its result = still ONE card, the same words', lc0.calls === 5 && lc0.bash === 1 && lc1.calls === 6 && lc1.bash === 0 && lc1.cards === 0 && lc2.calls === 6 && lc2.bash === 0 && lc2.cards === 0 && lc2.text.includes('uptime') && lc2.text.includes('退出码 0'), { lc0, lc1, lc2 });   // the zh page says 退出码 on the row, the card and the head (lane phone-run-box, 主开发's look 2026-11-18 02:34Z)
   // ── ⑥ lane exit-card-margin (the owner 2026-10-18: 「这个卡片的 margin 有点问题」 + the standing 「No raw strings in cards」):
   //    a LONE run card — the owner's Macbook card, in the default compact chat — every row starts on the card's own padding;
   //    the words say actor + verb + object; the command (its length, its paths) only inside ONE closed 技术细节 fold, as text ──
