@@ -10,7 +10,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PINNED = 'src/incident.js';   // the file these legs read, BY NAME: the moved legs build its path with path.join, which ci.mjs's affected rule cannot see
 void PINNED;
 let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
+const check = (n, c, e) => { if (typeof n !== 'string') throw new TypeError('a leg\'s name is not a string — its arguments are swapped (test-ci-gate-tiers §7b)'); if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
 
 console.log('— src/incident.js reads the harness rows (source pins)');
 {

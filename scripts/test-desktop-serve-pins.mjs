@@ -16,7 +16,7 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const DS = require(path.join(REPO, 'src/desktop-serve.js'));
 let pass = 0, fail = 0;
 
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 300) : '')); } };
+const ok = (c, n, d) => { if (typeof n !== 'string') throw new TypeError('a leg\'s name is not a string — its arguments are swapped (test-ci-gate-tiers §7b)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 300) : '')); } };
 
 console.log('§1 the census — the runner names every op of its table (source)');
 const OPS = DS.DESKTOP_SERVE_OPS;

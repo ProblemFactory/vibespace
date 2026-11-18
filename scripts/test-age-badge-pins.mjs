@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
-const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : '')); } };
+const ok = (c, msg, extra) => { if (typeof msg !== 'string') throw new TypeError('a leg\'s name is not a string — its arguments are swapped (test-ci-gate-tiers §7b)'); if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : '')); } };
 const CSS = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
 const CURE = /\.usage-age-badge, \.acct-donut-age \{ position: absolute; right: -7px;([^}]*)white-space: nowrap; \}\n(?:\/\*[\s\S]*?\*\/\n)?\.acct-donut-age \{ top: -7px; \}\n\.usage-age-badge \{ top: -9px; \}/;
 const MARK = '${escHtml(c.staleMark || c.staleAge)}';

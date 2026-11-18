@@ -6,7 +6,7 @@
 import fs from 'node:fs'; import path from 'node:path';
 const ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log('  ✓ ' + n); } else { failed++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const check = (n, c, e) => { if (typeof n !== 'string') throw new TypeError('a leg\'s name is not a string — its arguments are swapped (test-ci-gate-tiers §7b)'); if (c) { passed++; console.log('  ✓ ' + n); } else { failed++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 
 console.log('— ONE placement (source pin)');
 {
