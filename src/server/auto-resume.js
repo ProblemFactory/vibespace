@@ -69,6 +69,9 @@ const CONTINUE_ACCOUNT_MAX = 80;   // an account label is ONE inline piece, boun
 const { RUN_ID_RE: RUN_ID_FORM } = require('../workflow-disk.js');   // PURE: the run id's own form (one definition)
 const WF_REREAD_MS = 2 * 60 * 1000;     // B-3437: the run a usage wall cut short is asked about every two minutes…
 const WF_FRESH_MS = 5 * 60 * 1000;      // …and only an answer this fresh is named by the continue
+const WF_LEAD_MS = 6 * 60 * 1000;       // …asked only in the six minutes before a TIMED fire (U3 cure: never for an arm's whole life)
+const WF_INFLIGHT_MAX = 4;              // …reads in flight at once, every arm together (a hung mount holds at most this many)
+const WF_RESET_SLACK_MS = 5 * 60 * 1000; // …named only when the continue really goes no earlier than the run's limit reset (− this)
 /** PURE (B-3437): the sentence for a Workflow run the limit cut short, or '' — only a run id of its own form that the peer-text
  *  belt leaves unchanged, and a count of 1..9999; anything else (a hostile record) says nothing. */
 function workflowRunLine(run) {
@@ -387,7 +390,19 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
   const wfOf = new Map(); // B-3437: webuiId -> {rec, run, at, ask} — the Workflow run the wall cut short, kept OFF the arm record (never persisted)
-  const freshRun = (id, a) => { const w = wfOf.get(id); return w && w.rec === a && w.run && Date.now() - (w.at || 0) <= WF_FRESH_MS ? w.run : null; };
+  // named only FRESH and only when the continue really goes after the run's proven limit lifted: a fire BEFORE its arm's own
+  // reset (a pool move, a claim, the fresh-window edge) gets NO slack — the run's reset must already be behind it, else
+  // today's words (the read's MUST 1: an early fire minutes before the reset named a run whose limit still stood); the
+  // banner's rounding slack is the TIMED fire's only
+  const freshRun = (id, a) => {
+    const w = wfOf.get(id);
+    if (!(w && w.rec === a && w.run && Date.now() - (w.at || 0) <= WF_FRESH_MS)) return null;
+    const own = Number(a && a.resetsAt) || 0, early = !(own > 0) || Date.now() < own;
+    const r = Number(w.run.resetAt) || 0;
+    return r > 0 && r <= Date.now() + (early ? 0 : WF_RESET_SLACK_MS) ? w.run : null;
+  };
+  const wfPending = new Map();   // id → when its read started (a hung read is never doubled; the cap counts them all; said once)
+  const WF_HUNG_MS = 5 * 60 * 1000, wfHungSaid = new Set();
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
     for (const [k, v] of Object.entries(raw && raw.armed ? raw.armed : {})) armed.set(k, v);
@@ -1438,19 +1453,26 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   function tick(now = Date.now()) {
     let fired = 0;
     // B-3437: the Workflow run a usage wall cut short is judged NEAR THE FIRE, never once at the arm (the run goes on after
-    // the walled turn — its agents' retries, a hot switch); asked every two minutes for a wall's arm (a watch too), the
+    // the walled turn — its agents' retries, a hot switch); asked every two minutes in the six minutes before a wall's TIMED
+    // fire (a watch is never fired by the clock — never asked), one read in flight per arm and WF_INFLIGHT_MAX for all; the
     // answer kept beside the arm (wfOf, never persisted) and named by the fire only while it is fresh
     if (workflowRunAtWall) {
       for (const k of [...wfOf.keys()]) if (!armed.has(k)) wfOf.delete(k);
-      for (const [id, a] of armed) {
-        if (!a || a.fired) continue;
+      for (const [k, t0] of wfPending) if (now - t0 > WF_HUNG_MS && !wfHungSaid.has(k)) { wfHungSaid.add(k); log(`[auto-resume] ${k}: its Workflow-run read has not answered in ${Math.round((now - t0) / 60000)} min — its continue says today's words`); }
+      // FAIR ORDER (the read's should): the arm asked longest ago (never ⇒ first) goes first, so the cap never starves the rest
+      const due0 = [...armed].filter(([, a]) => a && !a.fired && !a.watch && Number(a.resetsAt) > 0).sort((x, y) => ((wfOf.get(x[0]) || {}).ask || 0) - ((wfOf.get(y[0]) || {}).ask || 0));
+      for (const [id, a] of due0) {
+        const fireAt = Number(a.resetsAt) + GRACE_MS;
+        if (now < fireAt - WF_LEAD_MS || wfPending.has(id)) continue;
         const w0 = wfOf.get(id);
         if (w0 && w0.rec === a && now - (w0.ask || 0) < WF_REREAD_MS) continue;
+        if (wfPending.size >= WF_INFLIGHT_MAX) break;
         const s1 = activeSessions.get(id);
         if (!s1 || !s1._stoppedBy || s1._stoppedBy.kind !== 'quota') continue;   // a wall's arm only (never a hold's)
         const w = { rec: a, run: w0 && w0.rec === a ? w0.run : null, at: w0 && w0.rec === a ? w0.at : 0, ask: now };
-        wfOf.set(id, w);
-        try { Promise.resolve(workflowRunAtWall(id, s1, { fireAt: (Number(a.resetsAt) || 0) + GRACE_MS })).then((r) => { if (wfOf.get(id) !== w || armed.get(id) !== a) return; const had = !!w.run; w.run = r ? { runId: r.runId, unfinished: r.unfinished } : null; w.at = Date.now(); if (r && !had) log(`[auto-resume] ${id}: the limit cut a Workflow run short (${r.unfinished} agent(s) unfinished) — its continue names it`); }, () => { }); } catch { }
+        wfOf.set(id, w); wfPending.set(id, now);
+        const settle = () => { wfPending.delete(id); wfHungSaid.delete(id); };
+        try { Promise.resolve(workflowRunAtWall(id, s1, { fireAt })).then((r) => { settle(); if (wfOf.get(id) !== w || armed.get(id) !== a) return; const had = !!w.run; w.run = r ? { runId: r.runId, unfinished: r.unfinished, resetAt: Number(r.resetAt) || 0 } : null; w.at = Date.now(); if (r && !had) log(`[auto-resume] ${id}: the limit cut a Workflow run short (${r.unfinished} agent(s) unfinished) — its continue names it`); }, settle); } catch { settle(); }
       }
     }
     for (const [id, a] of due(now)) {
@@ -1520,12 +1542,12 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     bulkCounts, setEnabledAll, stoppedPlan, resumeBatch, batchStatus, stopBatch, // lane auto-resume-bulk: the two bulk acts + the plan the dialog shows first
     noteQuotaReading, // the fresh-window edge: a reading that says the wall is gone continues the session NOW
     noteFireOutcome, recentFireFailures, canFire, noteNoPoolTarget, // the loop breaker's seams (engine: walled turn ⇒ ok:false; per-session switch ⇒ exclude + its own no-target verdict)
-    _armed: armed, _fires: fires, _wfOf: wfOf,
+    _armed: armed, _fires: fires, _wfOf: wfOf, _wfPending: wfPending,
   };
 }
 
 module.exports = {
-  create, CONTINUE_PROMPT, continuePromptFor, workflowRunLine, WF_REREAD_MS, WF_FRESH_MS, BULK_GATE_HOLD_MS, CONTINUE_PROMPT_OVERLOAD, bulkPromptFor, BULK_PACE_MS, BULK_GATE_WAIT_MS, TICK_MS, GRACE_MS, MAX_WAIT_MS,
+  create, CONTINUE_PROMPT, continuePromptFor, workflowRunLine, WF_REREAD_MS, WF_FRESH_MS, WF_LEAD_MS, WF_INFLIGHT_MAX, BULK_GATE_HOLD_MS, CONTINUE_PROMPT_OVERLOAD, bulkPromptFor, BULK_PACE_MS, BULK_GATE_WAIT_MS, TICK_MS, GRACE_MS, MAX_WAIT_MS,
   FIRE_WINDOW_MS, FIRE_BACKOFF_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, NO_TARGET_FRESH_MS, EDGE_HOLD_MS,
   refusalNoticeFor, continueNoticeFor, claimContinueNotice, armNoticeFor, // PURE: what the conversation is told, and when
 };

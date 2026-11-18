@@ -23,7 +23,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
-const { create, CONTINUE_PROMPT, continuePromptFor, GRACE_MS, MAX_WAIT_MS } = require(path.join(REPO, 'src/server/auto-resume.js'));
+const { create, CONTINUE_PROMPT, continuePromptFor, GRACE_MS, MAX_WAIT_MS, WF_REREAD_MS, WF_INFLIGHT_MAX } = require(path.join(REPO, 'src/server/auto-resume.js'));
 // lane resume-words: the continue is CONTINUE_PROMPT's head + facts + the CLI's own sentence (continuePromptFor)
 const IS_CONTINUE = (t) => typeof t === 'string' && !!CONTINUE_PROMPT && typeof CONTINUE_PROMPT.cli === 'string' && t.endsWith(' ' + CONTINUE_PROMPT.cli) && t.includes(' ' + CONTINUE_PROMPT.facts + ' ');
 const CPF = typeof continuePromptFor === 'function' ? continuePromptFor : () => '';
@@ -1891,7 +1891,11 @@ await (async () => {
   const hh = (ms) => { const h = new Date(ms).getUTCHours(); return `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`; };
   const banner = (at, { reset = true } = {}) => `You've hit your session limit · resets ${hh(at + 2 * 3600e3)}${reset ? ' (UTC)' : ''}`;   // its reset: one to two hours after the record (never minutes)
   const rec = (at, { model = '<synthetic>', text = banner(at), error = 'rate_limit' } = {}) => JSON.stringify({ type: 'assistant', isSidechain: true, timestamp: new Date(at).toISOString(), message: { model, role: 'assistant', content: [{ type: 'text', text }] }, ...(error ? { error } : {}) });
+  const { ClaudeCodeAdapter: CCA } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+  const resetOf = (at) => CCA.parseBannerResetMs(banner(at), at);   // the reset a planted banner states (the wall's, on the same window)
+  let lastAt = LIM;
   const plant = (runId, { journal = cut, tail = (at) => rec(at), at = LIM, mtime = LIM, snapshot = undefined, root = path.join(proj, sid), link = false } = {}) => {
+    lastAt = at;
     const d = path.join(root, 'subagents', 'workflows', runId); fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true });
     if (link) { const elsewhere = path.join(home, `elsewhere-${runId}.jsonl`); fs.writeFileSync(elsewhere, journal); fs.symlinkSync(elsewhere, path.join(d, 'journal.jsonl')); }
     else fs.writeFileSync(path.join(d, 'journal.jsonl'), journal);
@@ -1901,13 +1905,67 @@ await (async () => {
     for (const f of fs.readdirSync(d)) { try { fs.utimesSync(path.join(d, f), mtime / 1000, mtime / 1000); } catch { } }
     return d;
   };
-  const look = (o = {}) => AW.runAtWall({ home, cwd, sid, wallAt: WALL, fireAt: FIRE, now: NOW, ...o });
+  const look = (o = {}) => AW.runAtWall({ home, cwd, sid, wallAt: WALL, wallResetAt: resetOf(lastAt), fireAt: FIRE, now: NOW, ...o });
   ok('18. READER: no run folder ⇒ none', (await look()) === null);
   plant('wf_old-1', { at: WALL - 8 * 3600e3, mtime: WALL - 8 * 3600e3 });
   ok('18. READER: a run cut short LONG before this wall (another wall) is not this limit\'s ⇒ none', (await look()) === null);
   plant('wf_new-2', { mtime: LIM + 1000 });
   const r2 = await look();
   ok('18. READER: two runs ⇒ the newest, the one this wall fell in: its id, 2 unfinished (the agents\' LAST records are the banner, its reset before the fire)', !!r2 && r2.runId === 'wf_new-2' && r2.unfinished === 2, r2);
+  // ── U3 CURE (主开发's law 07:17Z): «THAT LIMIT» IS THIS WALL'S LIMIT — an agent's limit counts only if its stated reset is NOT
+  // BEFORE the conversation's wall (still standing when the conversation itself walled). Two scenes, each with its RED.
+  const AW_SRC = read('src/server/auto-resume-workflow.js');
+  const GUARD = 'if (!(resetAt > 0) || resetAt < Number(wallAt) || ';
+  const SAME = '      if (Math.abs(resetAt - Number(wallResetAt)) > RESET_SLACK_MS) continue;';
+  const mutAw = (edits) => { let src = AW_SRC; for (const [from, to] of edits) { if (src.split(from).length !== 2) return { err: 'needle missing: ' + from.slice(0, 60), hits: 0 }; src = src.split(from).join(to); } return { mod: MUTX.load('src/server/auto-resume-workflow.js', src), hits: edits.length }; };
+  const awNo = mutAw([[GUARD, 'if (!(resetAt > 0) || '], [SAME, '      // PRE-CURE: no same-limit test']]), awInv = mutAw([[GUARD, 'if (!(resetAt > 0) || resetAt >= Number(wallAt) || ']]), awNoSame = mutAw([[SAME, '      // PRE-CURE: no same-limit test']]);
+  const lookWith = (M, o = {}) => M.runAtWall({ home, cwd, sid, wallAt: WALL, wallResetAt: resetOf(lastAt), fireAt: FIRE, now: NOW, ...o });
+  const earlier = (at) => rec(at, { text: `You've hit your session limit · resets ${hh(WALL - 3 * 3600e3)} (UTC)` });   // an EARLIER limit: it reset three hours before this wall
+  plant('wf_new-2', { at: WALL - 4 * 3600e3, mtime: WALL - 4 * 3600e3, tail: earlier });
+  const sceneA = await look({ wallResetAt: resetOf(LIM) }), sceneAred = awNo.mod ? await lookWith(awNo.mod, { wallResetAt: resetOf(LIM) }) : 'no mutant';
+  ok('18. THE LAW, scene one: agents limited FOUR hours before the wall on a limit that RESET three hours before it (an earlier limit, lifted, the run long dead) ⇒ NOTHING named; RED: the reader without the wall\'s guards names it', sceneA === null && awNo.hits === 2 && !!sceneAred && sceneAred.runId === 'wf_new-2', awNo.err || JSON.stringify({ sceneA, sceneAred }));
+  // the read's MUST 2: a limit STILL STANDING at the wall but not this wall's (another model's, another account's — reset an
+  // hour after the wall while the wall's own is two hours after it), the agents dead four hours ⇒ NOTHING; RED: no same-limit test
+  const other = (at) => rec(at, { text: `You've hit your session limit · resets ${hh(WALL + 3600e3)} (UTC)` });
+  plant('wf_new-2', { at: WALL - 4 * 3600e3, mtime: WALL - 4 * 3600e3, tail: other });
+  const sceneC = await look({ wallResetAt: WALL + 2 * 3600e3 }), sceneCred = awNoSame.mod ? await lookWith(awNoSame.mod, { wallResetAt: WALL + 2 * 3600e3 }) : 'no mutant';
+  ok('18. THE LAW, the same limit by the record: agents cut four hours before the wall on ANOTHER limit still standing at it (its reset an hour after the wall, the wall\'s own two) ⇒ NOTHING named; RED: the reader without the same-reset test names it', sceneC === null && awNoSame.hits === 1 && !!sceneCred && sceneCred.runId === 'wf_new-2', awNoSame.err || JSON.stringify({ sceneC, sceneCred }));
+  ok('18. a wall that stated no reset names nothing', (await look({ wallResetAt: 0 })) === null);
+  plant('wf_new-2', { at: WALL - 3 * 60000, mtime: WALL - 3 * 60000 });   // minutes before the wall, the SAME window (its reset after the wall)
+  const sceneB = await look(), sceneBred = awInv.mod ? await lookWith(awInv.mod) : 'no mutant';
+  ok('18. THE LAW, scene two: agents limited MINUTES before the wall on the same window (its reset after the wall, before the fire) ⇒ named, with that reset; RED: the guard turned the wrong way names nothing', !!sceneB && sceneB.runId === 'wf_new-2' && sceneB.unfinished === 2 && sceneB.resetAt >= WALL && sceneB.resetAt <= FIRE + 5 * 60000 && awInv.hits === 1 && sceneBred === null, awInv.err || JSON.stringify({ sceneB, sceneBred }));
+  // the shoulds' own legs: the CLI's folder as ws-create reads it; every folder on the way lstat'ed; a blind journal
+  { const was = process.env.CLAUDE_CONFIG_DIR; let viaEnv = null, dEnv = null, dHome = null;
+    try { process.env.CLAUDE_CONFIG_DIR = path.join(home, '.claude'); viaEnv = await AW.runAtWall({ cwd, sid, wallAt: WALL, wallResetAt: resetOf(lastAt), fireAt: FIRE, now: NOW }); dEnv = AW.claudeDirOf(null); delete process.env.CLAUDE_CONFIG_DIR; dHome = AW.claudeDirOf(null); }
+    finally { if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = was; }
+    ok('18. READER: the CLI\'s folder is $CLAUDE_CONFIG_DIR when the hub has one (as ws-create reads it), else ~/.claude', !!viaEnv && viaEnv.runId === 'wf_new-2' && dEnv === path.join(home, '.claude') && dHome === path.join(os.homedir(), '.claude'), JSON.stringify({ viaEnv, dEnv, dHome })); }
+  { const sid2 = '0123abcd-0000-4000-8000-000000000002', real2 = path.join(home, 'real-sid2');
+    plant('wf_lk-2', { root: real2, mtime: LIM + 1000 }); fs.symlinkSync(real2, path.join(proj, sid2));
+    const viaLink = await look({ sid: sid2 }); fs.rmSync(path.join(proj, sid2), { force: true }); fs.cpSync(real2, path.join(proj, sid2), { recursive: true });
+    for (const f2 of fs.readdirSync(path.join(proj, sid2, 'subagents', 'workflows', 'wf_lk-2'))) fs.utimesSync(path.join(proj, sid2, 'subagents', 'workflows', 'wf_lk-2', f2), (LIM + 1000) / 1000, (LIM + 1000) / 1000);
+    const viaReal = await look({ sid: sid2 });
+    ok('18. READER: a conversation folder that is a SYMLINK is never followed ⇒ none; CONTROL: the same run in a real folder ⇒ named', viaLink === null && !!viaReal && viaReal.runId === 'wf_lk-2', JSON.stringify({ viaLink, viaReal }));
+    fs.rmSync(path.join(proj, sid2), { recursive: true, force: true }); }
+  { const snapReal = path.join(home, 'snap-elsewhere'); fs.mkdirSync(snapReal, { recursive: true }); fs.writeFileSync(path.join(snapReal, 'wf_new-2.json'), JSON.stringify({ status: 'failed' }));
+    plant('wf_new-2', { mtime: LIM + 1000 }); fs.rmSync(path.join(proj, sid, 'workflows'), { recursive: true, force: true }); fs.symlinkSync(snapReal, path.join(proj, sid, 'workflows'));
+    const viaLinkSnap = await look(); fs.rmSync(path.join(proj, sid, 'workflows'), { force: true });
+    plant('wf_new-2', { mtime: LIM + 1000, snapshot: { status: 'failed' } });
+    const realSnap = await look();
+    ok('18. READER: a workflows/ folder that is a SYMLINK is never read through (its snapshot proves nothing) ⇒ none; CONTROL: the same «failed» snapshot in a real folder ⇒ named', viaLinkSnap === null && !!realSnap, JSON.stringify({ viaLinkSnap, realSnap }));
+    const snapF = path.join(proj, sid, 'workflows', 'wf_new-2.json'); fs.rmSync(snapF, { force: true }); fs.symlinkSync(path.join(snapReal, 'wf_new-2.json'), snapF);
+    const viaLinkFile = await look(); fs.rmSync(snapF, { force: true }); fs.mkdirSync(snapF);
+    const viaDir = await look(); fs.rmSync(snapF, { recursive: true, force: true });
+    ok('18. READER: a snapshot that is THERE but cannot be read (a link to a «failed» one, a folder in its name) proves nothing ⇒ none — only «no such file» is «no snapshot»', viaLinkFile === null && viaDir === null, JSON.stringify({ viaLinkFile, viaDir }));
+    plant('wf_new-2', { mtime: LIM + 1000 }); }
+  { const blindJ = J([{ type: 'launched' }, { type: 'started', key: 'k1', agentId: 'a1' }, { type: 'result', key: 'k1', agentId: 'a1', result: 'ok' }, { type: 'started', key: 'k2', agentId: 'a2' }, { type: 'started', key: 'k3', agentId: 'a3' }, { type: 'result', key: 'k3', result: 'x'.repeat(700), agentId: 'a3' }]);
+    plant('wf_new-2', { journal: blindJ, mtime: LIM + 1000 });
+    const blind = await look();
+    plant('wf_new-2', { journal: blindJ.replace(`{"type":"result","key":"k3","result":"${'x'.repeat(700)}","agentId":"a3"}`, `{"type":"result","key":"k3","agentId":"a3","result":"${'x'.repeat(700)}"}`), mtime: LIM + 1000 + 2000 });
+    const seen = await look();
+    ok('18. READER: an agent\'s journal line whose head does not name the agent (a big field first) makes the journal BLIND ⇒ none (never a count it cannot prove); CONTROL: the same line agent first ⇒ named with the true count, 1', blind === null && !!seen && seen.unfinished === 1, JSON.stringify({ blind, seen }));
+    plant('wf_new-2', { journal: blindJ.replace(`{"type":"result","key":"k3","result":"${'x'.repeat(700)}","agentId":"a3"}`, `{"result":"${'x'.repeat(700)}","type":"result","key":"k3","agentId":"a3"}`), mtime: LIM + 1000 + 4000 });
+    ok('18. READER: …and a line whose cut head shows NO type at all (its big field before everything) is blind too ⇒ none', (await look()) === null);
+    plant('wf_new-2', { mtime: LIM + 1000 }); }
   plant('wf_new-2', { mtime: LIM + 1000, tail: (at) => rec(at, { text: banner(at, { reset: false }) }) });
   ok('18. READER: a banner whose reset cannot be read is no proof ⇒ none', (await look()) === null);
   plant('wf_new-2', { mtime: LIM + 1000 });
@@ -1931,7 +1989,7 @@ await (async () => {
   const pad = cut + J(Array.from({ length: 60 }, (_, i) => ({ type: 'started', key: 'p' + i, agentId: 'b' + i }))) + J(Array.from({ length: 60 }, (_, i) => ({ type: 'result', key: 'p' + i, agentId: 'b' + i, result: 'x'.repeat(100) })));
   plant('wf_new-2', { journal: pad, mtime: LIM + 1000 });
   ok('18. READER: a VALID cut journal over the byte bound is not read ⇒ none; CONTROL: under the default bound the same run is named', (await look({ journalMax: 2048 })) === null && ((await look()) || {}).unfinished === 2);
-  const S0 = { cwd, backend: 'claude', claudeSessionId: sid, _stoppedBy: { kind: 'quota', at: WALL } };
+  const S0 = { cwd, backend: 'claude', claudeSessionId: sid, _stoppedBy: { kind: 'quota', at: WALL, resetsAt: resetOf(LIM) } };
   const runs = [{ runId: 'wf_lnk-7', dir: path.join(proj, sid, 'subagents', 'workflows', 'wf_lnk-7'), sid, at: NOW }];
   fs.rmSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_new-2'), { recursive: true, force: true }); fs.rmSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_old-1'), { recursive: true, force: true });
   plant('wf_lnk-7', { mtime: LIM + 1000 });
@@ -1967,23 +2025,81 @@ await (async () => {
     let file = '';
     if (rearm) { ar.armIfEnabled('s1', sessions.get('s1'), resets + 1000, 'usage limit'); try { file = fs.readFileSync(path.join(dir, 'auto-resume.json'), 'utf8'); } catch { } }   // a save after the answer landed
     const n = ar.tick(resets + GRACE_MS + 1);
+    fs.rmSync(dir, { recursive: true, force: true });
     return { n, sent, asks, resets, file };
   };
   const real = { create };
-  const named = await fire(real, async () => ({ runId: 'wf_ab12-cd', unfinished: 2 }));
+  const ANS = () => ({ runId: 'wf_ab12-cd', unfinished: 2, resetAt: Date.now() });   // the reader's answer: its agents' limit has reset by the fire
+  const named = await fire(real, async () => ANS());
   ok('18. THE MODULE: asked while the wall\'s arm stands, with the fire instant; the fresh answer ⇒ the ONE continue names the run', named.asks.length >= 1 && named.asks[0] === named.resets + GRACE_MS && named.n === 1 && named.sent.length === 1 && named.sent[0].includes(' ' + SENT + ' ' + CONTINUE_PROMPT.cli), named);
   const none = await fire(real, async () => null);
   ok('18. THE MODULE: no run ⇒ the continue is today\'s, word for word', none.n === 1 && none.sent.length === 1 && none.sent[0] === CPF({ cls: 'reset' }, null), none.sent);
-  const stale = await fire(real, async () => ({ runId: 'wf_ab12-cd', unfinished: 2 }), { stale: true });
+  const stale = await fire(real, async () => ANS(), { stale: true });
   ok('18. THE MODULE: an answer no longer fresh is not named (today\'s words)', stale.n === 1 && stale.sent[0] === CPF({ cls: 'reset' }, null));
-  const hold = await fire(real, async () => ({ runId: 'wf_ab12-cd', unfinished: 2 }), { stop: null });
+  const hold = await fire(real, async () => ANS(), { stop: null });
   ok('18. THE MODULE: an arm with no usage-wall stop (a hold) asks nothing and names nothing', hold.asks.length === 0 && hold.sent[0] === CPF({ cls: 'reset' }, null));
   const thrown = await fire(real, async () => { throw new Error('EIO'); });
   ok('18. THE MODULE: a read that fails ⇒ today\'s words (the continue still goes)', thrown.n === 1 && thrown.sent[0] === CPF({ cls: 'reset' }, null));
-  const kept = await fire(real, async () => ({ runId: 'wf_ab12-cd', unfinished: 2 }), { rearm: true });
+  const kept = await fire(real, async () => ANS(), { rearm: true });
   ok('18. THE MODULE: the answer is kept OFF the arm record — a save after it landed writes no run to auto-resume.json', kept.file.length > 0 && !kept.file.includes('wf_ab12-cd') && !/"wf(Run|At|Ask)"/.test(kept.file), kept.file.slice(0, 200));
+  // U3 cure (shoulds taken): an IMMEDIATE fire before the run's proven reset says today's words — the proof was for the timed
+  // fire; RED: a freshRun that does not ask the reset names the run on a pool move
+  const early = async (mod) => {
+    const sent = [], sessions = new Map([['s1', sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 3600e3 } })]]), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18e-'));
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: (id, s2, text) => { sent.push(text); return true; }, workflowRunAtWall: async () => ({ runId: 'wf_ab12-cd', unfinished: 2, resetAt: Date.now() + 2 * 60000 }) });   // two minutes out: inside the timed fire's rounding slack
+    const resets = Date.now() + 10 * 60000;
+    ar.armIfEnabled('s1', sessions.get('s1'), resets, 'usage limit');
+    ar.tick(resets - 5 * 60000); await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    const had = !!(ar._wfOf && ar._wfOf.get('s1') && ar._wfOf.get('s1').run);
+    ar.fireNow('s1', 'a pool move'); await new Promise((r) => setImmediate(r));
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { had, sent };
+  };
+  const e0 = await early(real);
+  const mE = mutantAr([['    return r > 0 && r <= Date.now() + (early ? 0 : WF_RESET_SLACK_MS) ? w.run : null;', '    return r > 0 && r <= Date.now() + WF_RESET_SLACK_MS ? w.run : null;   // PRE-AMEND: the slack for every fire']]);
+  const e1 = mE.mod ? await early(mE.mod) : null;
+  ok('18. THE MODULE: an IMMEDIATE fire (a pool move) two minutes before the run\'s limit reset — a fresh answer in hand — says today\'s words (no rounding slack for a fire before its arm\'s reset); RED: the slack for every fire names the run', e0.had && e0.sent.length === 1 && IS_CONTINUE(e0.sent[0]) && !e0.sent[0].includes('Workflow') && mE.hits === 1 && !!e1 && e1.sent.length === 1 && e1.sent[0].includes('Workflow'), mE.err || JSON.stringify({ e0, e1 }));
+  const solo = async (mod) => {
+    const asks = [], sessions = new Map([['s1', sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 3600e3 } })]]), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18s-'));
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: (id) => { asks.push(id); return new Promise(() => { }); } });
+    const T = Date.now(), r0 = T + 60 * 60000;
+    ar.armIfEnabled('s1', sessions.get('s1'), r0, 'usage limit');
+    ar.tick(r0 - 5 * 60000); ar.tick(r0 - 5 * 60000 + WF_REREAD_MS + 1000);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return asks.length;
+  };
+  const mP = mutantAr([['        if (now < fireAt - WF_LEAD_MS || wfPending.has(id)) continue;', '        if (now < fireAt - WF_LEAD_MS) continue;   // PRE-AMEND: no in-flight test']]);
+  const soloReal = await solo(real), soloRed = mP.mod ? await solo(mP.mod) : -1;
+  ok('18. THE MODULE: ONE arm whose read never settles, ticked a re-read apart ⇒ asked ONCE (never doubled); RED: without the in-flight test it is asked again', soloReal === 1 && mP.hits === 1 && soloRed === 2, mP.err || JSON.stringify({ soloReal, soloRed }));
+  const fair = async (mod) => {
+    const asked = new Set(), sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18f-'));
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: async (id) => { asked.add(id); return null; } });
+    const T = Date.now(), r0 = T + 60 * 60000;
+    for (let i = 0; i < 6; i++) { sessions.set('f' + i, sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled('f' + i, sessions.get('f' + i), r0, 'usage limit'); }
+    ar.tick(r0 - 5 * 60000); await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    ar.tick(r0 - 5 * 60000 + WF_REREAD_MS + 1000); await new Promise((r) => setImmediate(r));
+    fs.rmSync(dir, { recursive: true, force: true });
+    return asked.size;
+  };
+  const mF = mutantAr([['.filter(([, a]) => a && !a.fired && !a.watch && Number(a.resetsAt) > 0).sort((x, y) => ((wfOf.get(x[0]) || {}).ask || 0) - ((wfOf.get(y[0]) || {}).ask || 0));', '.filter(([, a]) => a && !a.fired && !a.watch && Number(a.resetsAt) > 0);   // PRE-AMEND: insertion order']]);
+  const fairReal = await fair(real), fairRed = mF.mod ? await fair(mF.mod) : -1;
+  ok('18. THE MODULE: six arms on one reset under a cap of four — two re-reads apart EVERY arm has been asked (the longest-unasked first); RED: in insertion order the last two are never asked', fairReal === 6 && mF.hits === 1 && fairRed === 4, mF.err || JSON.stringify({ fairReal, fairRed }));
+  { const asks = [], sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18c-'));
+    const ar = create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: (id) => { asks.push(id); return new Promise(() => { }); } });   // a read that never settles (a hung mount)
+    const T0 = Date.now(), far = T0 + 60 * 60000;
+    for (let i = 0; i < 7; i++) { sessions.set('s' + i, sess({ _stoppedBy: { kind: 'quota', at: T0 - 3600e3 } })); ar.armIfEnabled('s' + i, sessions.get('s' + i), far, 'usage limit'); }
+    const wAsks = [], wSessions = new Map([['w', sess({ _stoppedBy: { kind: 'quota', at: T0 - 3600e3 } })]]);
+    const arW = create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18w-')), activeSessions: wSessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: (id) => { wAsks.push(id); return Promise.resolve(null); } });
+    const wReset = T0 + 40 * 3600e3; arW.armIfEnabled('w', wSessions.get('w'), wReset, 'usage limit', { lane: 'claude', bucket: 'sevenDay' });
+    const watchArmed = !!(arW._armed.get('w') && arW._armed.get('w').watch);
+    arW.tick(T0); arW.tick(wReset - 5 * 60000); arW.tick(wReset - 60000);
+    ar.tick(T0); const farAsks = asks.length;
+    ar.tick(far - 5 * 60000); const nearAsks = asks.length;
+    ar.tick(far - 5 * 60000 + WF_REREAD_MS + 1000); const againAsks = asks.length;
+    fs.rmSync(dir, { recursive: true, force: true });
+    ok('18. THE MODULE: an arm an hour from its fire is not asked; in the six minutes before it, at most WF_INFLIGHT_MAX reads at once (the cap holds while they hang); a WATCH is never asked', farAsks === 0 && nearAsks === WF_INFLIGHT_MAX && againAsks === WF_INFLIGHT_MAX && watchArmed && wAsks.length === 0, JSON.stringify({ farAsks, nearAsks, againAsks, watchArmed, wAsks })); }
   const mW = mutantAr([['continuePromptFor(note, label2, freshRun(id, a2))', 'continuePromptFor(note, label2)']]);
-  const ctl = mW.mod ? await fire(mW.mod, async () => ({ runId: 'wf_ab12-cd', unfinished: 2 })) : null;
+  const ctl = mW.mod ? await fire(mW.mod, async () => ANS()) : null;
   ok('18. CONTROL: a fire that does not hand the run over says today\'s words — the naming leg goes red', mW.hits === 1 && !!ctl && ctl.sent.length === 1 && !ctl.sent[0].includes('Workflow'), mW.err || (ctl && ctl.sent));
 })();
 

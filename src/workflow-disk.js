@@ -240,7 +240,8 @@ const ENDED_STATUSES = Object.freeze(['completed', 'killed', 'cancelled', 'cance
 /** PURE (lg-recovery U3, B-3437 — the owner's ruling 2026-11-18): DID THIS LIMIT CUT THIS RUN SHORT? Only what the run's own
  *  record proves, asked near the FIRE (the Workflow tool returns at its launch — the run goes on after the parent's turn):
  *    · its id in its own form;
- *    · `limitProven`: an unfinished agent's LAST assistant record is the CLI's limit banner whose own stated reset is no
+ *    · `limitProven`: an unfinished agent's LAST assistant record is the CLI's limit banner whose own stated reset is NOT
+ *      BEFORE the conversation's wall (THIS wall's limit, still standing when the conversation walled — U3 cure) and no
  *      later than this continue's fire (the reader decides; a banner with no readable reset is no proof — a run another,
  *      longer limit killed is not resumed into that limit again); `limitAt` = that record's own instant, within
  *      CUT_BEFORE_MS before the conversation's wall and CUT_AFTER_MS after it;
