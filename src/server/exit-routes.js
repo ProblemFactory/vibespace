@@ -351,7 +351,7 @@ app.delete('/api/hosts/:id', async (req, res) => {
     if (await notDurable(res)) return;   // B-48a4 cure
     res.json({ success: true });
   }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.code === 'mounts-unread' ? { code: e.code } : {}) }); }   // the B-f276 remainder: a held store's refusal keeps its status
 });
 // Bootstrap: progress streams to ALL clients over WS (host-bootstrap events);
 // the HTTP response returns when the run completes.

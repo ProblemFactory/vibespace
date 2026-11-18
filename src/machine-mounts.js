@@ -23,6 +23,7 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
 const { execFile, spawn } = require('child_process');
 const MW = require('./mount-error-words.js'); // B-af94: every refusal and row words BY CODE — the page words them in its language
 const DM = require('./device-mount'); // the pull chain (B-fcc7: read at each call — test-pull-refresh §15 drives the manager over a stub chain)
@@ -72,6 +73,8 @@ function realpathChild(p, { ms = 6000, onExit = null } = {}) {   // r6: onExit �
 
 const RCLONE_PIN = 'v1.69.3'; // ≥1.66 brings `rclone nfsmount` (macOS without macFUSE); 2.369.12
 
+const STORE_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);   // machine-mounts.json: {mounts: [...]}
+
 class MachineMounts {
   /** @param deps { hosts, mountTokens, publicUrl:()=>string|null, localPort:()=>number|null, rcloneBin:()=>string, broadcast, log } */
   constructor({ dataDir, hosts, mountTokens, publicUrl, localPort, rcloneBin, broadcast, log }) {
@@ -84,14 +87,9 @@ class MachineMounts {
     this.broadcast = broadcast || (() => {});
     this.log = log || (() => {});
     this._file = path.join(dataDir, 'machine-mounts.json');
-    try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); }
-    catch {
-      // an unparseable store is backed up, never silently overwritten — its
-      // records include live vsmt_ tokenIds (review hardening)
-      try { if (fs.existsSync(this._file)) fs.copyFileSync(this._file, this._file + '.corrupt-' + Date.now()); } catch { }
-      this._state = { mounts: [] };
-      this._migrateLegacy();
-    }
+    let read;
+    try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
+    this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));
     // one-time hygiene: strip trailing slashes off legacy pull remotePaths —
     // slashed records predate the 2.168.0 intake normalization, never
     // dedup-match a re-added clean path (duplicate records on one mountpoint
@@ -167,7 +165,74 @@ class MachineMounts {
     if (migrated) this.log(`migrated ${migrated} legacy mount record(s) into machine-mounts.json`);
   }
 
+  /** remainder of B-f276 (bl-jobs, the store-read law over machine-mounts.json — every mount of a paired machine, each push
+   *  record's vsmt_ tokenId): data → loaded · missing → empty, then the one-time legacy ingest (as before) · torn bytes → backed
+   *  up (a copy), then empty and the ingest, as before · a read that FAILED (EIO, EACCES, a timeout on network storage) →
+   *  HELD: no mount is listed, NOTHING is written over the file (_save refuses; the legacy ingest — which saves — never runs),
+   *  the orphan-token sweep revokes nothing (every push token would read as an orphan), a person's mount / unmount / remount is
+   *  refused by name, and the file is read again off the loop; read, the boot's restore runs then */
+  _loadAnswer(a) {
+    if (a.state === 'unreadable') return this._unreadHold(a);
+    if (a.state === 'corrupt') {
+      let aside = null;
+      try { aside = this._asideName(); fs.copyFileSync(this._file, aside, fs.constants.COPYFILE_EXCL); } catch { aside = null; }
+      const b = SR.afterSetAside(a, aside);
+      if (b.state !== 'missing') return this._unreadHold(b);   // its only copy: never written over
+      this.log(`machine-mounts.json did not parse (${a.why}) — its bytes are kept in ${path.basename(aside)}; the mounts list starts empty`);
+    }
+    this._state = a.state === 'data' ? a.value : { mounts: [] };
+    if (!Array.isArray(this._state.mounts)) this._state.mounts = [];
+    if (a.state !== 'data') this._migrateLegacy();
+  }
+  _asideName() { return this._file + '.corrupt-' + Date.now(); }   // ONE set-aside name: the boot's and a read again's (the census counts the names)
+  _unreadHold(a) {
+    this._unread = { code: a.code, why: a.why, at: (this._unread && this._unread.at) || Date.now() };
+    this._state = { mounts: [] };
+    if (!this._unreadSaid) { this._unreadSaid = true; this.log(`machine-mounts.json could not be read (${a.code}: ${a.why}) — held: nothing is written over it, no token is swept, and it is read again off the main loop`); }
+    this._unreadRetrySoon();
+  }
+  /** the words a person reads while machine-mounts.json is held (the mounts list, a refused change) */
+  unreadWords() {
+    return this._unread ? `machine-mounts.json in VibeSpace's data folder could not be read (${this._unread.code}); VibeSpace reads it again every few minutes. No mount is lost: nothing is written over it, and changes to mounts wait until it reads.` : null;
+  }
+  _refuseIfUnread(what) {
+    if (this._unread) throw Object.assign(new Error(`${what}: ${this.unreadWords()}`), { code: 'mounts-unread', status: 503 });
+  }
+  _unreadRetrySoon() {
+    if (this._unreadT || this._unreadStopped) return;
+    const n = this._unreadTries = (this._unreadTries || 0) + 1;
+    const t = this._unreadT = setTimeout(() => { this._unreadT = null; this._unreadRetry().catch((e) => { this.log('machine-mounts.json read again failed: ' + (e && e.message)); this._unreadRetrySoon(); }); }, SR.retryDelay(n));
+    t.unref?.();
+  }
+  /** one read again, off this thread; ONE in flight; a «missing» answer right after an unreadable one is read once more */
+  async _unreadRetry() {
+    if (!this._unread) return;
+    this._unreadRetrySoon();   // its read r1 (M2): the next try is armed FIRST (jobs.js's order) — a try that meets one in flight, or a read that fails, never ends the tries
+    if (this._unreadP) return;
+    const mine = this._unreadSeq = (this._unreadSeq || 0) + 1;   // its read r2 (X2): only the NEWEST try may lift the hold — r3 (Y3): counted once a try READS
+    const p = this._unreadP = fs.promises.readFile(this._file, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
+    const read = await p; this._unreadP = null;
+    if (!this._unread) return;
+    let a = SR.storeAnswer(read, { valid: STORE_SHAPE });
+    if (a.state === 'unreadable') { this._unread.code = a.code; this._unreadMissingAt = 0; return; }
+    if (a.state === 'missing' && !this._unreadMissingAt) { this._unreadMissingAt = Date.now(); return; }
+    if (a.state === 'corrupt') {   // its read r1 (N1): torn bytes now are copied aside OFF the loop first — no place for them, the hold stands
+      const aside = this._asideName();
+      let ok = false; try { await fs.promises.copyFile(this._file, aside, fs.constants.COPYFILE_EXCL); ok = true; } catch { }
+      if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands
+      a = SR.afterSetAside(a, ok ? path.basename(aside) : null);
+      if (a.state === 'unreadable') { this._unread.code = a.code; return; }
+    }
+    const was = this._unread; this._unread = null; this._unreadMissingAt = 0; this._unreadTries = 0; this._unreadSaid = false; this._unreadSaveSaid = false;
+    if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }
+    this._loadAnswer(a);
+    this.log(`machine-mounts.json read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${this._state.mounts.length} mount(s)` : a.setAside ? `torn bytes, kept aside as ${a.setAside} — the mounts list starts empty` : 'the file is GONE — the mounts list starts empty'}`);
+    this._notify();
+    this.restore().catch(() => { });   // the boot's heal, which met an empty list while held
+  }
+
   _save() {
+    if (this._unread) { if (!this._unreadSaveSaid) { this._unreadSaveSaid = true; this.log('a machine-mounts.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return; }
     try { const t = this._file + '.tmp'; fs.writeFileSync(t, JSON.stringify(this._state, null, 2), { mode: 0o600 }); fs.renameSync(t, this._file); } catch { }
   }
   _notify() { this.broadcast({ type: 'machine-mounts-updated', mounts: this.list() }); }
@@ -321,6 +386,7 @@ class MachineMounts {
   }
 
   async mountPush(hostId, opts = {}) {
+    this._refuseIfUnread('adding a push mount');   // remainder of B-f276: a held machine-mounts.json takes no change
     console.log(`[machine-mounts] push mount request → ${hostId} folder=${opts.folder || '~'} mode=${opts.mode || 'ro'}`);
     const t0 = Date.now();
     try {
@@ -489,6 +555,7 @@ class MachineMounts {
   // ═══ PULL direction (the machine's folder → this workspace) ═══
 
   async mountPull(hostId, opts = {}) {
+    this._refuseIfUnread('adding a mount');   // remainder of B-f276: a held machine-mounts.json takes no change
     console.log(`[machine-mounts] pull mount request → ${hostId} path=${opts.remotePath || '~'}`);
     const t0 = Date.now();
     try {
@@ -670,6 +737,7 @@ class MachineMounts {
 
   /** Manual remount (the pull row's ↻ — e.g. after a failed heal). */
   async remount(id) {
+    this._refuseIfUnread('mounting again');   // remainder of B-f276: a held machine-mounts.json takes no change
     const rec = this._state.mounts.find((m) => m.id === id);
     if (!rec) throw MW.refusal('unknown_mount');
     if (!this._online(rec.hostId)) throw this.hosts.held?.() ? Object.assign(new Error(`mounting again: ${this.hosts.unreadWords()}`), { code: 'hosts-unread', status: 503 }) : MW.refusal('machine_offline_start');   // the B-f276 remainder (H21): held, not offline — beside B-af94's coded refusal (the move onto 921c0de17)
@@ -692,6 +760,7 @@ class MachineMounts {
   // ═══ shared lifecycle ═══
 
   async unmount(id) {
+    this._refuseIfUnread('removing a mount');   // remainder of B-f276: a held machine-mounts.json takes no change
     const i = this._state.mounts.findIndex((m) => m.id === id);
     if (i < 0) throw MW.refusal('unknown_mount');
     const rec = this._state.mounts[i];
@@ -981,6 +1050,7 @@ class MachineMounts {
    *  Records are the source of truth; a token without one can't be re-owned,
    *  displayed meaningfully, or torn down through the app. */
   gcOrphanTokens() {
+    if (this._unread) return 0;   // remainder of B-f276: a held store knows no record — every push token would read as an orphan
     let n = 0;
     try {
       const referenced = new Set(this._state.mounts.filter((m) => m.dir === 'push').map((m) => m.tokenId));

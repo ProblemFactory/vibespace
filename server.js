@@ -1118,7 +1118,7 @@ const machineMounts = new MachineMounts({
   log: (m) => console.log('[machine-mounts]', m),
 });
 setTimeout(() => { machineMounts.restore().catch(() => {}); }, 5000); // heal pull mounts + re-own push tunnel ports
-app.get('/api/machine-mounts', (req, res) => res.json({ mounts: machineMounts.list() }));
+app.get('/api/machine-mounts', (req, res) => res.json({ mounts: machineMounts.list(), ...(machineMounts.unreadWords() ? { unread: machineMounts.unreadWords() } : {}) }));   // B-f276 remainder: why the list is empty while held
 app.post('/api/machine-mounts/:hostId', async (req, res) => {
   try {
     const b = req.body || {};

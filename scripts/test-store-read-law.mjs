@@ -305,5 +305,141 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
   'WIRING (its read r1): a dial met while held is a 503 the device retries (never «pair again»), an export that asks for the machines is refused with its reason, an import adds no exit lists for machines it skipped, both token sweeps wait for the read, the lift is broadcast');
 }
 
+console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of a paired machine, each push record\'s token id');
+{
+  const MSRC = fs.readFileSync(path.join(ROOT, 'src/machine-mounts.js'), 'utf8');
+  const LOAD = '    this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));\n';
+  ok(MSRC.split(LOAD).length === 2, 'control setup: the anchor of the control «the release\'s load» is in machine-mounts.js (one storeAnswer call in the constructor)');
+  const RELEASE = MJ.load('src/machine-mounts.js', MSRC.replace(LOAD, "    try { this._state = JSON.parse(read.text); } catch { try { if (fs.existsSync(this._file)) fs.copyFileSync(this._file, this._file + '.corrupt-' + Date.now()); } catch { } this._state = { mounts: [] }; this._migrateLegacy(); }   /* MUTANT: the release — any failure starts EMPTY and ingests the legacy stores */\n"), 'release-mounts');
+  // ONE push record (a push mount is only re-owned at restore, never released on this machine — the scene runs nothing outside)
+  const rec = { id: 'mm-0001', dir: 'push', hostId: 'h-0001', folder: '/srv/share', mode: 'ro', mountpoint: '/mnt/share', tokenId: 'tok-0001', createdAt: 1 };
+  const body = JSON.stringify({ mounts: [rec] }), legacy = JSON.stringify({ mounts: [{ id: 'old-0001', hostId: 'h-0002', folder: '/x', mountpoint: '/y' }] });
+  const deps = (d, revoked, logs) => ({ dataDir: d, hosts: { get: () => null, findByDeviceId: () => null }, mountTokens: { list: () => [{ id: 'tok-0001', kind: 'reverse-mount' }], revoke: (id) => revoked.push(id) }, broadcast() { }, log: (m) => logs.push(String(m)) });
+  const scene = async (Mod, name) => {
+    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+    const F = path.join(d, 'machine-mounts.json'), LEG = path.join(d, 'host-mounts.json');
+    plant(F, body); fs.writeFileSync(LEG, legacy);
+    const revoked = [], logs = [];
+    const M = new Mod.MachineMounts(deps(d, revoked, logs));
+    clearInterval(M._sweep);
+    const held = !!(M.unreadWords && M.unreadWords()), listedWhileHeld = M.list().length;
+    M.gcOrphanTokens();   // the boot's restore runs it 5 s on
+    const revokedWhileHeld = revoked.slice();
+    let refused = null; try { await M.unmount('mm-0001'); } catch (e) { refused = e; }
+    const legacyKept = fs.existsSync(LEG) && !fs.existsSync(LEG + '.migrated');
+    const kept = bodyOf(F) === (asRoot ? '(a folder)' : body);
+    if (!asRoot) fs.chmodSync(F, 0o000);
+    unplant(F, body);   // the storage answers again
+    if (M._unreadRetry) await M._unreadRetry();
+    await new Promise((r) => setImmediate(r));
+    return { held, listedWhileHeld, revokedWhileHeld, refused: refused ? { code: refused.code, msg: String(refused.message) } : null, legacyKept, kept, back: M.list().map((m) => m.id).join(), words: M.unreadWords ? M.unreadWords() : null, revokedAfter: revoked.slice() };
+  };
+  const r = await scene(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-held');
+  ok(r.held && r.listedWhileHeld === 0 && r.revokedWhileHeld.length === 0 && !!r.refused && r.refused.code === 'mounts-unread' && /^removing a mount: machine-mounts\.json in VibeSpace's data folder could not be read \((EACCES|EISDIR)\); VibeSpace reads it again every few minutes\. No mount is lost: nothing is written over it/.test(r.refused.msg) && r.legacyKept,
+    'machine-mounts.json unreadable at boot: HELD — no mount listed, the orphan-token sweep revokes NOTHING, a removal is refused by name, the legacy stores are not ingested over it', r);
+  ok(r.kept && r.back === 'mm-0001' && r.words === null && r.revokedAfter.length === 0, 'nothing was written over machine-mounts.json while held; read again, its mount is back and the restore that runs then keeps its token (it has its record)', r);
+  const rx = await scene(RELEASE, 'mounts-release');
+  ok(!rx.held && rx.revokedWhileHeld.includes('tok-0001') && !(rx.refused && rx.refused.code === 'mounts-unread') && (asRoot || (!rx.legacyKept && !rx.kept)), 'CONTROL (the release\'s load, in a copy): a failed read starts EMPTY — the sweep REVOKES the push mount\'s token, and the legacy ingest WRITES OVER machine-mounts.json (under root the stand-in is a folder no save can replace)', rx);
+  // torn bytes: kept aside (a copy), the list starts empty and the one-time ingest runs — as the release did, now through the law
+  {
+    const d = path.join(D, 'mounts-torn'); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'machine-mounts.json'), '{"mounts": [');
+    const M = new (require(path.join(ROOT, 'src/machine-mounts.js')).MachineMounts)(deps(d, [], []));
+    clearInterval(M._sweep);
+    const asides = fs.readdirSync(d).filter((n) => /^machine-mounts\.json\.corrupt-\d+$/.test(n));
+    ok(!M.unreadWords() && M.list().length === 0 && asides.length === 1 && fs.readFileSync(path.join(d, asides[0]), 'utf8') === '{"mounts": [', 'torn bytes are KEPT aside (a copy) and the mounts list starts empty — never a hold');
+  }
+  // «missing» right after an unreadable answer: read once more before anything is written there
+  {
+    const d = path.join(D, 'mounts-gone'); fs.mkdirSync(d, { recursive: true });
+    const F = path.join(d, 'machine-mounts.json'); plant(F, body);
+    const M = new (require(path.join(ROOT, 'src/machine-mounts.js')).MachineMounts)(deps(d, [], []));
+    clearInterval(M._sweep);
+    if (asRoot) fs.rmdirSync(F); else fs.rmSync(F, { force: true });
+    await M._unreadRetry();
+    const heldAfterOne = !!M.unreadWords();
+    await M._unreadRetry();
+    ok(heldAfterOne && !M.unreadWords() && M.list().length === 0, 'a «missing» answer right after an unreadable one is READ ONCE MORE (the hold stands); missing again, the list starts empty', { heldAfterOne });
+  }
+  // its read r1 (M2): the next try armed FIRST — a try that meets a read in flight arms the next, and the read that then fails leaves it
+  const armM = async (Mod, name) => {
+    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+    const F = path.join(d, 'machine-mounts.json'); plant(F, body);
+    const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
+    const prf = fs.promises.readFile; let release = null, armedMeeting = false, armedAfter = false, armedAfterFail = false;
+    fs.promises.readFile = function (f, ...a) { if (String(f) === F) return new Promise((res, rej) => { release = () => rej(Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' })); }); return prf.call(this, f, ...a); };
+    try {
+      const first = M._unreadRetry();
+      clearTimeout(M._unreadT); M._unreadT = null;   // the timer that fires the next try clears itself first
+      await M._unreadRetry(); armedMeeting = !!M._unreadT;
+      if (release) release(); await first; armedAfter = !!M._unreadT;
+      clearTimeout(M._unreadT); M._unreadT = null;   // its read r2 (X5): a try whose own read fails at once arms the next too
+      fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' })); return prf.call(this, f, ...a); };
+      await M._unreadRetry(); armedAfterFail = !!M._unreadT;
+    } finally { fs.promises.readFile = prf; }
+    clearTimeout(M._unreadT); M._unreadT = null; if (!asRoot) fs.chmodSync(F, 0o644);
+    return { armedMeeting, armedAfter, armedAfterFail, held: !!M.unreadWords() };
+  };
+  const am = await armM(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-arm');
+  ok(am.held && am.armedMeeting && am.armedAfter && am.armedAfterFail, 'its read r1 (M2) / r2 (X5): a try that meets a read in flight arms the next, so does the read that then fails, and so does a try whose own read fails at once — the tries never end while held', am);
+  const ARMM = '    this._unreadRetrySoon();   // its read r1 (M2): the next try is armed FIRST (jobs.js\'s order) — a try that meets one in flight, or a read that fails, never ends the tries\n    if (this._unreadP) return;\n';
+  ok(MSRC.split(ARMM).length === 2, 'control setup: the anchor of the control «the next try armed first» is in machine-mounts.js');
+  const amx = await armM(MJ.load('src/machine-mounts.js', MSRC.replace(ARMM, '    if (this._unreadP) return;   /* MUTANT: the first cut\'s order */\n    this._unreadRetrySoon();\n'), 'arm-order-mounts'), 'mounts-arm-mut');
+  ok(amx.held && !amx.armedMeeting, 'CONTROL (the first cut\'s order, in a copy): the try that meets a read in flight arms NOTHING', amx);
+  const amy = await armM(MJ.load('src/machine-mounts.js', MSRC.replace(ARMM, '    if (this._unreadP) { this._unreadRetrySoon(); return; }   /* MUTANT: armed only on a meeting */\n'), 'arm-meeting-only-mounts'), 'mounts-arm-mut2');
+  ok(amy.held && amy.armedMeeting && !amy.armedAfterFail, 'CONTROL (r2 X5 — armed only on a meeting, in a copy): a try whose own read fails arms NOTHING', amy);
+  // its read r2 (X2): an OLDER try whose torn-bytes copy lands after a NEWER try lifted the hold never loads the mounts EMPTY
+  const raceM = async (Mod, name) => {
+    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+    const F = path.join(d, 'machine-mounts.json'); plant(F, body);
+    const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
+    const prf = fs.promises.readFile, pcf = fs.promises.copyFile; let land = null, after = null, olderErr = null;
+    fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.resolve('{"mounts": ['); return prf.call(this, f, ...a); };
+    fs.promises.copyFile = function (src, ...a) { if (String(src) === F) return new Promise((res) => { land = res; }); return pcf.call(this, src, ...a); };
+    try {
+      const older = M._unreadRetry().catch((e) => { olderErr = String(e && e.message); });
+      await new Promise((r) => setImmediate(r));
+      fs.promises.readFile = prf; unplant(F, body);
+      await M._unreadRetry();
+      const lifted = M.list().map((m) => m.id).join();
+      if (land) land(); await older;
+      after = { lifted, list: M.list().map((m) => m.id).join(), held: !!M.unreadWords(), olderErr };
+    } finally { fs.promises.readFile = prf; fs.promises.copyFile = pcf; }
+    clearTimeout(M._unreadT); M._unreadT = null; return after;
+  };
+  const raceMHeld = async (Mod, name) => {   // its read r3 (Y4): the NEWER try reads EIO — the hold stands — then the older's copy lands
+    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+    const F = path.join(d, 'machine-mounts.json'); plant(F, body);
+    const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
+    const prf = fs.promises.readFile, pcf = fs.promises.copyFile; let land = null, out = null;
+    fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.resolve('{"mounts": ['); return prf.call(this, f, ...a); };
+    fs.promises.copyFile = function (src, ...a) { if (String(src) === F) return new Promise((res) => { land = res; }); return pcf.call(this, src, ...a); };
+    try {
+      const older = M._unreadRetry().catch(() => { });
+      await new Promise((r) => setImmediate(r));
+      fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' })); return prf.call(this, f, ...a); };
+      await M._unreadRetry();
+      if (land) land(); await older;
+      out = { held: !!M.unreadWords(), listed: M.list().length };
+    } finally { fs.promises.readFile = prf; fs.promises.copyFile = pcf; }
+    clearTimeout(M._unreadT); M._unreadT = null; if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } } return out;
+  };
+  const rmh = await raceMHeld(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-race-held');
+  const SEQM = '      if (!this._unread || mine !== this._unreadSeq) return;';
+  const rmhx = await raceMHeld(MJ.load('src/machine-mounts.js', MSRC.replace(SEQM, '      if (!this._unread) return;   /* MUTANT: the seq half cut */'), 'race-seq-half-mounts'), 'mounts-race-held-mut');
+  ok(!!rmh && rmh.held && !!rmhx && !rmhx.held, 'its read r3 (Y4): the newer try read EIO (the hold stands) and the older try\'s copy lands — the hold STANDS; CONTROL (the seq half cut, in a copy): the older try lifts it as EMPTY', { rmh, rmhx });
+  const rm2 = await raceM(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-race');
+  ok(!!rm2 && rm2.lifted === 'mm-0001' && rm2.list === 'mm-0001' && !rm2.held && !rm2.olderErr, 'its read r2 (X2): an older try whose copy of torn bytes lands AFTER a newer try lifted the hold changes nothing — the mount stays loaded', rm2);
+  const RACEM = '      if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands\n';
+  ok(MSRC.split(RACEM).length === 2, 'control setup: the anchor of the control «only the newest try lifts» is in machine-mounts.js');
+  const rmx = await raceM(MJ.load('src/machine-mounts.js', MSRC.replace(RACEM, '      /* MUTANT: no re-check after the copy */\n'), 'no-race-check-mounts'), 'mounts-race-mut');
+  ok(!!rmx && (rmx.list === '' || !!rmx.olderErr), 'CONTROL (no re-check after the copy, in a copy): the older try loads the mounts EMPTY over the lifted list (or throws on a hold already gone)', rmx);
+  const DPM = fs.readFileSync(path.join(ROOT, 'src/server/dial-pairing.js'), 'utf8'), ERM = fs.readFileSync(path.join(ROOT, 'src/server/exit-routes.js'), 'utf8');
+  ok(/async function unpairDialDevice\(deviceId\) \{\n(?:  \/\/[^\n]*\n)*  if \(machineMounts\.unreadWords && machineMounts\.unreadWords\(\)\) throw /.test(DPM) && /res\.status\(e && e\.status === 503 \? 503 : 400\)/.test(ERM),
+    'WIRING (its read r1, M3): removing a dial machine while machine-mounts.json is held is refused BEFORE any side effect (its push tokens would never be revoked) — 503 with the words');
+  const SV = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+  ok(SV.includes("app.get('/api/machine-mounts', (req, res) => res.json({ mounts: machineMounts.list(), ...(machineMounts.unreadWords() ? { unread: machineMounts.unreadWords() } : {}) }));"), 'WIRING: the mounts list answers WHY it is empty while held (GET /api/machine-mounts `unread`)');
+}
+
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'store-read-law ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 report();
