@@ -109,6 +109,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The Restart buttons in the Agent browser panel, its live view and For you now say why a restart was refused in your language, for every reason.
 - A browser engine plugin that fails its check now shows its own error on its Custom kernel row, such as a path it may not use, instead of a protocol message.
 - When a custom kernel's running browser answers otherwise than its plugin says, its Agent browser and Custom kernel rows say so; For you tells once per version.
+- A locked conversation that you started with the 1M context keeps it after a resume or a model fallback, instead of silently dropping to the standard context.
+- When the API stops taking the effort per turn, the conversation says so: changing the effort then costs a fresh prompt-cache write.
+- Starting a conversation with your own --settings file no longer drops it silently: VibeSpace's own values step aside, and you are told which.
 
 ### Security
 - A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.
