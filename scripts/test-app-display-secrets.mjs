@@ -112,13 +112,19 @@ const env = { PATH: process.env.PATH, HOME: home, XDG_RUNTIME_DIR: run };
 const facts = await D.appSecretsFacts({ env, mode: 'on', dataDir, id: 'da-sec1' });
 const realPlan = M.portalPlan({ dir: appDir, display: ':199', authFile: null, bins: D.portalBins({ env }), why: 'browser' });
 // the probe's OWN import, tried first (the client is the test's, not the feature's: the feature's needs are judged after it)
+const clientProbe = spawnSync('python3', ['-c', "import gi; gi.require_version('Secret', '1'); from gi.repository import Secret"], { env: { PATH: process.env.PATH }, encoding: 'utf8', timeout: 15000 });
+// a probe that HANGS is not a missing capability: a red, never a silent skip (the readers' should, 2026-11-17)
+check('the client probe answers (it did not hang 15 s)', !(clientProbe.error && clientProbe.error.code === 'ETIMEDOUT'), clientProbe.error ? clientProbe.error.code : '');
 const clientWhy = (() => {
-  const r = spawnSync('python3', ['-c', "import gi; gi.require_version('Secret', '1'); from gi.repository import Secret"], { env: { PATH: process.env.PATH }, encoding: 'utf8', timeout: 15000 });
-  if (r.error) return `the test's own client: python3 did not start (${r.error.code || r.error.message})`;
-  if (r.status !== 0) return `the test's own client: libsecret's introspection for python3-gi is missing (package gir1.2-secret-1) — «${String(r.stderr || '').trim().split('\n').pop().slice(0, 120)}»`;
-  return null;
+  const r = clientProbe, tail = String(r.stderr || '').trim().split('\n').pop().slice(0, 120);
+  if (r.error) return r.error.code === 'ETIMEDOUT' ? null : `the test's own client: python3 did not start (${r.error.code || r.error.message})`;
+  if (r.status === 0) return null;
+  // the package BY NAME: no python3-gi at all is another package than gi's missing Secret namespace
+  return /No module named ['"]?gi\b/.test(String(r.stderr || '')) ? `the test's own client: python3-gi is missing (package python3-gi) — «${tail}»`
+    : `the test's own client: libsecret's introspection for python3-gi is missing (package gir1.2-secret-1) — «${tail}»`;
 })();
-const capWhy = clientWhy || (!realPlan.ok ? `portalPlan: ${realPlan.why}` : /^python3 /.test(facts.why || '') ? `appSecretsFacts: ${facts.why}` : null);
+// EVERY rung that is missing is said (a hosted runner without the portal AND the client still reads «no xdg-desktop-portal»)
+const capWhy = [clientWhy, !realPlan.ok ? `portalPlan: ${realPlan.why}` : null, /^python3 /.test(facts.why || '') ? `appSecretsFacts: ${facts.why}` : null].filter(Boolean).join('; ') || null;
 if (capWhy) { // a machine capability, never a red: the plan's shape is proven in ① over the fixture table
   console.log(`  SKIP: ${capWhy} — ③ the real bus + libsecret road runs only where they exist`);
   fs.rmSync(tmp, { recursive: true, force: true });
