@@ -958,6 +958,7 @@
 - (2026-11-15) A READING WAS FILED ON THE ACCOUNT A CONVERSATION HAD JUST LEFT (the owner's screen; lane readings-attribution-2) — 不变量 = a reading lands on the account its request went out on
 - (2026-11-16) A CONVERSATION'S 437 BROWSER RECORDS RETIRED IN ONE LOOP TURN, A PROGRAM START EACH (keeper-sweep-yields, .407). 不变量 = a walk over a conversation's records costs the loop one record per turn and the store one write per piece; a daemon SEEN gone starts no program ⇒ kb-bugfix-invariants
 - (2026-11-17) A GMAIL RE-AUTHORIZE AFTER A DISCONNECT NEVER READ THE MAIL ADDED TO KNOWN THREADS (B-2f6c: the wipe took the cursor). 不变量 = every lifecycle verb resumes from the kept cursor; a walk that cannot judge a thread reads it ⇒ kb-bugfix-invariants
+- (2026-11-18) THE CHANNELS WALKS HELD THE HUB'S LOOP — THE JUDGE'S SETTINGS REBUILT PER ROW, EVERY ACCOUNT'S ROWS WALKED (B-dfa4). 不变量 = what cannot change inside one synchronous walk is read once per walk; a pass is priced by what is due or touched ⇒ kb-bugfix-invariants
 
 - (2026-11-17) «LOCATE IN SIDEBAR» SAID «NOT VISIBLE» ABOUT A ROW ON SCREEN, AND COLLAPSED THE LIST (think-tools-phone): a dead class, the rail's re-click, a look at 60 ms. 不变量 = Locate ends open with the row shown; «not visible» only when true, with its door ⇒ kb-bugfix-invariants
 
@@ -981,6 +982,12 @@
 - **Pins:** scripts/test-channels-gmail-shape.mjs ㉔ (fast): all four roads over the REAL engine, the cursor on the record after the Disconnect, 16/16 read on each, an unbound record, an expired history; RED CONTROLS — the wipe restored (the defence still reads all), the wipe plus the old walk line (the release: the 10 known-thread adds unread), `named` for `held`, the old restore line. scripts/test-channel-caps.mjs: the words table and the card's wiring.
 - **Not done:** mail already lost is not re-read (a thread that got later mail healed itself); whether the incident's account went through Disconnect is in its journal.
 - **Limit:** a lost cursor over more than CHANGED_CAP (5 000) held INBOX threads overflows into the CHANGED_CAP walk, which judges against the reseed's own cursor — no worse than before.
+
+## THE CHANNELS WALKS HELD THE HUB'S LOOP — THE JUDGE'S SETTINGS REBUILT PER ROW, EVERY ACCOUNT'S ROWS WALKED PER ACCOUNT (2026-11-18, lane bl-mail, B-dfa4)
+- **Seen:** the owner's hub, every hold over one second for five hours, mapped by readers (int359/loopw/map-digest.md): the attention judge's «is it switched on» rebuilt the LLM plugin's settings once per indexed conversation per walk (11.6 s in 3 holds); recheckDueFor (13.4 s), revisionsPass + describeFeedBorn (7.1 s) and the due index's rebuild (2.6 s) walked EVERY account's index rows on every pass of one account. Pure CPU and GC.
+- **Fix (U1):** src/server/channels-attention.js reads the judge's switch and threshold once per WALK — a scope its caller marks (`attention.walk(fn)`: digest, attnCount, firstRead, rows, clockCensus, attentionTail); outside a walk every read is fresh (a value kept to the next microtask missed a write made earlier in the same tick).
+- **Invariant:** what cannot change inside one synchronous walk is read once per walk; a pass is priced by what is due or touched, never by the rows kept (the B-7978 law).
+- **Pins:** scripts/test-decision-attention.mjs ⑫ (RED CONTROL: the release's per-row on()).
 
 ## A CONVERSATION'S 437 BROWSER RECORDS RETIRED IN ONE LOOP TURN, A PROGRAM START EACH (2026-11-16, lane keeper-sweep-yields, 2.369.407)
 - **Seen:** on a fleet instance (2.369.387), one conversation held 437 ephemeral CHILD browser records (one per sub-agent that had used a browser). When it went away the keeper's reconcile retired them all in ONE loop turn, about a second per record on the main thread; the hub's witness said «pipe_read in read». The liveness probe killed the hub after six minutes, six times in a row; each boot removed some records and the count persisted, so the sixth finished the list. Every conversation running there died at the first restart.

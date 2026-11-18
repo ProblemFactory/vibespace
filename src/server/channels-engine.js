@@ -530,7 +530,7 @@ function create(deps = {}) {
     policy: () => FO.attentionPolicy((k) => serverSetting(k)),   // lane attention-policy: the owner's switches (the judge sees what they let go)
     viewNow: (key) => { const en = store.index.live()[key]; const rec = en && !en.unlistedAt && adapterRecords().adapters.find((r) => r.id === en.adapterId); return rec ? rowView(rec, en) : null; },
     accountNever: (id) => { const r = adapterRecords().adapters.find((x) => x.id === id); return !!(r && r.judge === 'never'); },
-    tailOf: (v, o) => attentionTail(v, o),
+    tailOf: (v, o) => attention.walk(() => attentionTail(v, o)),   // B-dfa4 U1: one walk (attention.walk)
     // lane decision-attention-facts: the facts of ONE scan (built once per drain) + the row's read line / own newest message
     facts: () => attentionScanFacts(),
     rowState: (key) => { const en = store.index.live()[key]; return en ? { readAt: Number(en.readAt) || 0, selfAt: Number(en.selfAt) || 0, lastAt: Number(en.lastAt) || 0 } : null; } });
@@ -2887,7 +2887,8 @@ function create(deps = {}) {
    * `keys` = the partial broadcast's changed rows, unchanged. Every other row is read by key from `rows()`
    * (GET /api/channels/rows).
    */
-  function digest({ keys = null, scope = 'first' } = {}) {
+  function digest(...args) { return attention.walk(() => digestWalk(...args)); }   // B-dfa4 U1: ONE walk — the judge's switch and threshold are read once inside it (attention.walk)
+  function digestWalk({ keys = null, scope = 'first' } = {}) {
     const t = now();
     if (!keys && scope === 'totals') return { ...totalsNow(t), scope: 'totals', at: t };
     const recs = adapterRecords();
@@ -3028,7 +3029,8 @@ function create(deps = {}) {
     attnRederive(keys, t, { views, liveIx, byId });
   }
   /** THE BADGE'S NUMBER (`needsMe`): the kept conversations in bands 1–4 under the owner's switches. */
-  function attnCount(t = now()) {
+  function attnCount(...args) { return attention.walk(() => attnCountWalk(...args)); }   // B-dfa4 U1: one walk (attention.walk)
+  function attnCountWalk(t = now()) {
     try {
       if (!attnKept.rows) {
         const recs = adapterRecords(), byId = new Map(recs.adapters.map((r) => [r.id, r])), liveIx = store.index.live(), ctx = viewCtx(t);
@@ -3059,7 +3061,8 @@ function create(deps = {}) {
    * watcher — at most FO.ATTENTION_MAX, drawn newest first; past it the LEAST urgent (FO.TAG_ORDER), then the oldest,
    * are cut (`attention.cut`, counted).
    */
-  function firstRead(byId, liveIx, ctx) {
+  function firstRead(...args) { return attention.walk(() => firstReadWalk(...args)); }   // B-dfa4 U1: one walk (attention.walk)
+  function firstReadWalk(byId, liveIx, ctx) {
     const t = ctx.t;
     viewStats.firstReads++;
     const listed = new Map();   // adapterId → its listed entries (the heads are chosen per account)
@@ -3101,7 +3104,8 @@ function create(deps = {}) {
    * rows; `conv` reads a conversation id across accounts (a chat card's link). `limit` 1…FO.PAGE_MAX, default
    * FO.PAGE_ROWS. Answers `{ok, rows, next, total}` or a refusal by name.
    */
-  function rows({ view = 'all', adapter = null, q = '', before = null, limit = FO.PAGE_ROWS, keys = null, conv = null } = {}) {
+  function rows(...args) { return attention.walk(() => rowsWalk(...args)); }   // B-dfa4 U1: one walk (attention.walk)
+  function rowsWalk({ view = 'all', adapter = null, q = '', before = null, limit = FO.PAGE_ROWS, keys = null, conv = null } = {}) {
     const bad = (error) => ({ ok: false, code: 'bad-request', error });
     const t = now();
     const recs = adapterRecords();
@@ -4081,7 +4085,8 @@ function create(deps = {}) {
   const censusTimed = new Map();   // adapterId → { at, hot, warm, cold, due, timer }
   const censusCount = new Map();   // adapterId → clock walks (the gates)
   let censusTrailing = false;
-  function clockCensus(rec, t) {
+  function clockCensus(...args) { return attention.walk(() => clockCensusWalk(...args)); }   // B-dfa4 U1: one walk (attention.walk)
+  function clockCensusWalk(rec, t) {
     let c = censusTimed.get(rec.id);
     if (c && t >= c.at && t - c.at < censusEveryMs) {
       if (!c.timer && !censusTrailing && !stopped) c.timer = censusTimer(() => censusTrail(rec.id), c.at + censusEveryMs - t);
@@ -6456,7 +6461,7 @@ function create(deps = {}) {
    *  backward read (`limit`, ≤ 50 — never the whole log); with the read line known (`since`) the records past it when any,
    *  else the last 8; each with its instant and its FLAGS for the facts line — an @ of the owner (`FO.mentionsSelf`, the
    *  at-you rule's predicate), a reply to one of the owner's messages in the read, the mail's `automated` level. */
-  function attentionTail(v, { since = 0, limit = 8 } = {}) {
+  function attentionTail(v, { since = 0, limit = 8 } = {}) {   // B-dfa4 U1: its ONE caller (tailOf) marks the walk — the record-clear census declares this name as the reader
     if (!v || !store.index.has(`${v.adapterId}/${v.id}`)) return [];
     const rec = adapterRecords().adapters.find((r) => r.id === v.adapterId);
     const selfId = rec ? selfIdOf(rec) : null;

@@ -365,5 +365,51 @@ console.log('⑪ IMPLICIT LABELS (decision.implicitLabels): a reply ⇒ "needs",
   delete settings['decision.implicitLabels'];
 }
 
+console.log('⑫ B-dfa4: the judge\'s switch is read ONCE PER WALK — a walk over N rows rebuilt the plugin\'s settings N times (11.6 s in 3 holds on the owner\'s hub)');
+{
+  const walkRig = (mod) => {
+    const dir = path.join(ROOT, `walk-${Math.random().toString(36).slice(2, 8)}`); fs.mkdirSync(dir, { recursive: true });
+    const counted = { plug: { enabled: true, config: { attention: true } }, calls: 0 };
+    const d = DE.create({ dataDir: dir, integrations: { resolveIntegration: () => ({ values: { provider: 'openai', apiKey: 'sk-dummy-SECRET-123456', model: '' }, source: 'user' }) }, fetchImpl: fakeFetch, now, log: quiet });
+    d.attachPlugin({ peek: () => counted.plug, settings: () => { counted.calls++; return counted.plug.config || {}; } });
+    const a = mod.create({ dataDir: dir, decision: d, now, log: quiet });
+    return { a, counted, d };
+  };
+  const rows = Array.from({ length: 500 }, (_, i) => ({ key: `im/w${i}`, adapterId: 'im', lastAt: 1000 + i }));
+  const walk = (a) => a.walk(() => { for (const en of rows) a.judgedFor(en); });   // a walk is a scope its caller marks (the engine's digest, attnCount, firstRead, rows, clockCensus, attentionTail)
+  const ATT = require(path.join(REPO, 'src/server/channels-attention.js'));
+  const R = walkRig(ATT);
+  const k0 = R.counted.calls; R.d.settings(); const perCall = R.counted.calls - k0;   // what ONE settings read costs here
+  await Promise.resolve(); await new Promise((r) => setImmediate(r));
+  const c0 = R.counted.calls;
+  walk(R.a);
+  const one = R.counted.calls - c0;
+  await Promise.resolve(); await new Promise((r) => setImmediate(r));
+  R.counted.plug = { enabled: true, config: { attention: false } };   // a settings write BETWEEN two walks
+  const c1 = R.counted.calls;
+  walk(R.a);
+  const two = R.counted.calls - c1;
+  ok(perCall >= 1 && one === perCall && two === perCall && R.a.on() === false, `a walk over ${rows.length} rows reads the plugin's settings ONCE (${one} call${one === 1 ? '' : 's'} — one settings read is ${perCall}); the next walk reads again and sees a write made between them (${two}, switched off)`, JSON.stringify({ one, two }));
+  // OUTSIDE a walk every read is fresh: a write and a read in the SAME tick see the write (the first cure kept the
+  // switch to the next microtask — this suite's threshold and feature-off legs went red on the test machine)
+  R.counted.plug = { enabled: true, config: { attention: true } };
+  const sameTick = R.a.on();
+  R.counted.plug = { enabled: true, config: { attention: false } };
+  const sameTick2 = R.a.on();
+  const inWalk = R.a.walk(() => { const x = R.a.on(); R.counted.plug = { enabled: true, config: { attention: true } }; return [x, R.a.on()]; });
+  ok(sameTick === true && sameTick2 === false && inWalk[0] === false && inWalk[1] === false && R.a.on() === true, 'outside a walk a settings write and a read in the same tick see the write; inside ONE walk the switch is read once (a write inside it is seen by the next read after the walk)', { sameTick, sameTick2, inWalk });
+  // CONTROL: the release's on() (asked per row)
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-attention.js'), 'utf8');
+  const ON = '  function on() { return walkRead().on; }\n';
+  ok(SRC.split(ON).length === 2, 'control setup: the walk-kept on() is present once');
+  const MW = mutantCopies('att-walk', REPO);
+  const Pre = MW.load('src/server/channels-attention.js', SRC.replace(ON, '  function on() { return onNow(); }\n'), 'per-row-on');
+  const P = walkRig(Pre);
+  const p0 = P.counted.calls;
+  walk(P.a);
+  ok(P.counted.calls - p0 >= rows.length * perCall, `RED CONTROL: the release's on() rebuilds the plugin's settings per row (${P.counted.calls - p0} for ${rows.length}) — the leg above is red on it`);
+  for (const x of copiesCensus(MW.files, MW.dir, REPO, { minCopies: 1, label: '⑫ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

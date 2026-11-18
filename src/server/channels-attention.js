@@ -88,13 +88,32 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     fs.renameSync(tmp, FILE);
   }
   const setting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
-  const threshold = () => M.attentionThreshold(setting('decision.threshold'));
+  // B-dfa4 (the owner's hub, every hold over a second for five hours: the plugin's settings rebuilt once PER INDEXED
+  // CONVERSATION per walk — 11.6 s in 3 holds, from firstRead / attnCount / the focus filter / clockCensus / attentionTail):
+  // WHAT CANNOT CHANGE INSIDE ONE SYNCHRONOUS WALK IS READ ONCE PER WALK. A walk is a SCOPE its caller marks
+  // (`walk(fn)`: fn runs synchronously, the judge's switch and threshold are read once inside it and dropped when it
+  // returns or throws); every read outside a walk is fresh — a settings write and a read in the same tick see the write
+  // (the first cure kept them to the next microtask: a write between two reads of one tick was missed — the suite's
+  // threshold and feature-off legs, red on the test machine)
+  let walkDepth = 0, walkKept = null;
+  const walkRead = () => {
+    if (walkDepth && walkKept) return walkKept;
+    const v = { on: onNow(), threshold: M.attentionThreshold(setting('decision.threshold')) };
+    if (walkDepth) walkKept = v;
+    return v;
+  };
+  function walk(fn) {
+    walkDepth++;
+    try { return fn(); } finally { walkDepth--; if (!walkDepth) walkKept = null; }
+  }
+  const threshold = () => walkRead().threshold;
   const userBlock = () => M.userBlockOf(setting('decision.attentionBlock'));
   const hasBlock = () => userBlock().trim() !== '';
   /** Is the attention use switched on (the plugin + its feature)? The key and the budget are the engine's to judge. */
-  function on() {
+  function onNow() {
     try { const s = decision && typeof decision.settings === 'function' ? decision.settings() : null; return !!(s && s.pluginOn && s.features && s.features.attention); } catch { return false; }
   }
+  function on() { return walkRead().on; }
   const memoParts = (key, lastAt) => ({ id: key, lastAt, userBlock: hash16(userBlock()), examples: hash16(JSON.stringify(M.examplesForInput(examples))) });
   const labelOf = (key, lastAt) => { const x = examples.find((e) => e.key === key); return x && x.lastAt === lastAt ? x.verdict : null; };
 
@@ -267,7 +286,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   }
 
   const status = () => ({ on: !!decision && on(), queued: queue.size, inFlight, ...stats, why: lastWhy, examples: examples.length, threshold: threshold(), today: { ...todayNow() } });
-  return { note, viewOf, judgedFor, label, draft, learnAvailable, learnDraft, status, learn, on: () => !!decision && on(), examples: () => examples.slice(), idle: () => !queue.size && !inFlight && !timer, file: FILE };
+  return { note, viewOf, judgedFor, walk, label, draft, learnAvailable, learnDraft, status, learn, on: () => !!decision && on(), examples: () => examples.slice(), idle: () => !queue.size && !inFlight && !timer, file: FILE };
 }
 
 module.exports = { create, CONCURRENCY, PER_HOUR, STOP, LEARN_EVERY_MS };
