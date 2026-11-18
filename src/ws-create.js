@@ -124,11 +124,27 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
   // start), a regular file under 1 MiB, else cannot be read; no such file names nothing.
   // BOTH roads are bounded (its reader's S1: a config dir on a stuck mount never holds a start): no answer in HELPER_FACT_MS = cannot be read
   const HELPER_FACT_MS = Number(helperFactMs) > 0 ? Number(helperFactMs) : 8000;   // (helperFactMs: the factory's seam for a suite — the bound's own leg; never a ctx key)
-  const readHelperFactOf = async ({ hostId, backend, creds, env }) => {
+  // (a stuck mount: the race below frees the START at the bound, never the libuv threadpool thread a hung open holds — named in the kb)
+  const readHelperFactOf = async ({ hostId, backend, creds, env, cwd = null, ownFile = null }) => {
     const row = creds && creds.keyHelper;
     if (hostId) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId), backend);
     const file = BILLPICK.settingsFileOf(row, { creds, env, home: (env && env.HOME) || os.homedir() });
     if (!file) return null;
+    // cure 2 (主开发 11:18Z): every file the CLI reads a helper from on this machine — its config dir's, the project's two, the person's own
+    const files = [file, ...BILLPICK.projectSettingsFilesOf(cwd, ownFile)];
+    return BILLPICK.combinedFact(await Promise.all(files.map((f) => readOneFactOnce(f, row))));
+  };
+  // ONE READ IN FLIGHT PER FILE across starts (cure 2, its readers' should): a start that finds a read of the same file still pending
+  // joins it — a hung open on a stuck mount holds ONE threadpool thread, never one more per start; the entry leaves when the read ends
+  const factReadsInFlight = new Map();
+  const readOneFactOnce = (file, row) => {
+    const had = factReadsInFlight.get(file);
+    if (had) return had;
+    const p = readOneFact(file, row).finally(() => factReadsInFlight.delete(file));
+    factReadsInFlight.set(file, p);
+    return p;
+  };
+  const readOneFact = async (file, row) => {
     let fh = null;
     try {
       fh = await fs.promises.open(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
@@ -970,7 +986,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // start without one never waits on a machine); the spawn's own env places the CLI's settings (agentEnv + the account's env)
           let helperFactP = null;
           const helperFact = () => (helperFactP = helperFactP || readHelperFact({ hostId: data.hostId || null, backend, creds: harness && harness.creds,
-            env: { ...agentEnv(), ...((spawnAccount && spawnAccount.localEnv) || {}) } }));
+            env: { ...agentEnv(), ...((spawnAccount && spawnAccount.localEnv) || {}) },
+            cwd, ownFile: typeof adapter.ownSettingsFile === 'function' ? adapter.ownSettingsFile(extraArgs) : null }));
           // (an ADOPTED process — keeperSid known here — keeps the argv it started with: nothing is asked, and its record reads the file as
           // GOVERNING — false — so no later push to the running CLI writes over a file it may hold; its reader's m1)
           const keyHelperNamed = keyHelperOff && typeof adapter.ownSettingsFile === 'function' && adapter.ownSettingsFile(extraArgs) !== null ? (data.keeperSid ? false : await helperFact()) : undefined;

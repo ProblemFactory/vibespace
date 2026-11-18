@@ -44,15 +44,28 @@ function setsHelperAside({ creds = null, account = null, linked = null } = {}) {
 }
 
 /** the settings FILE whose helper the rule sets aside on THIS machine: the CLI's config dir (its descriptor's `homeEnvVar` in the
- *  spawn's env — CLAUDE_CONFIG_DIR — else ~/.claude) + the row's file. Not read: a project's own .claude/settings files (a
- *  helper there is set aside too, but not said) and the machine's managed settings (they outrank the inline flag: a helper there
- *  is NOT set aside, and the notice may then be wrong — both named in the unit's line). */
+ *  spawn's env — CLAUDE_CONFIG_DIR — else ~/.claude) + the row's file. The project's own files and the person's own file are read
+ *  beside it (projectSettingsFilesOf). Not read: the machine's managed settings (they outrank the inline flag: a helper there is NOT
+ *  set aside, and the notice may then be wrong — named in the unit's line). */
 function settingsFileOf(row, { creds = null, env = {}, home = '' } = {}) {
   if (!row || typeof row.file !== 'string' || !row.file) return null;
   const v = creds && typeof creds.homeEnvVar === 'string' && env ? env[creds.homeEnvVar] : '';
   const dir = typeof v === 'string' && v.trim() ? v.trim() : (home ? `${String(home).replace(/\/+$/, '')}/.claude` : '');
   return dir ? `${dir.replace(/\/+$/, '')}/${row.file}` : null;
 }
+
+/** THE OTHER FILES THE CLI READS A HELPER FROM on this machine (cure 2, 主开发 11:18Z: «the fact must be the one the CLI will act
+ *  on»): the project's own `.claude/settings.json` and `.claude/settings.local.json` in the conversation's cwd, and the person's own
+ *  `--settings` file (a relative path is the cwd's, as the CLI opens it). A cwd that is not absolute reads no project file. */
+function projectSettingsFilesOf(cwd, ownFile = null) {
+  const base = typeof cwd === 'string' && cwd.startsWith('/') ? cwd.replace(/\/+$/, '') : '';
+  const out = base ? [`${base}/.claude/settings.json`, `${base}/.claude/settings.local.json`] : [];
+  const f = typeof ownFile === 'string' ? ownFile.trim() : '';
+  if (f) { if (f.startsWith('/')) out.push(f); else if (base) out.push(`${base}/${f}`); }
+  return out;
+}
+/** ONE start's fact over every file read: a helper named in ANY ⇒ true; else one that cannot be read ⇒ null (billing wins); else false */
+const combinedFact = (facts) => (facts.some((f) => f === true) ? true : facts.some((f) => f !== false) ? null : false);
 
 /** does a settings object name a helper the CLI would use? (the file's JSON, parsed; anything else = no) */
 function namesHelper(settings, row) {
@@ -103,4 +116,4 @@ function helperNotice({ name, account, accountId, host = null, hostId = null } =
   return { key: noticeKey(accountId, hostId), words, params, text };
 }
 
-module.exports = { setsHelperAside, settingsFileOf, namesHelper, localHelperFact, remoteHelperFact, HELPER_SET_ASIDE, noticeKey, helperNotice };
+module.exports = { setsHelperAside, settingsFileOf, projectSettingsFilesOf, combinedFact, namesHelper, localHelperFact, remoteHelperFact, HELPER_SET_ASIDE, noticeKey, helperNotice };

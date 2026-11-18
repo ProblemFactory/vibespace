@@ -112,17 +112,20 @@ const SOCK = scratchDir('bpick-sock'), BUF = scratchDir('bpick-buf'), CWD = scra
 // own continuation — judge, then say or not — runs first)
 function factSpy({ hangOpen = false } = {}) {
   let done = null; const settled = new Promise((r) => { done = r; });
+  // every open the create makes is a read of THE FACT (ws-create opens no other file through fs.promises.open) — since cure 2 one start
+  // reads several files at once (the config dir's, the project's two, the person's own): the fact is settled when ALL have finished
+  let pending = 0;
   const turn = () => setImmediate(() => setImmediate(done));
+  const end = () => { if (--pending === 0) turn(); };
   const reads = [];
   const open = async (file, ...rest) => {
-    const watched = /settings\.json$/.test(String(file));
-    if (watched) reads.push(String(file));
-    if (watched && hangOpen) return new Promise(() => { });   // a config dir on a stuck mount: the open never answers
+    reads.push(String(file));
+    if (hangOpen) return new Promise(() => { });   // a config dir on a stuck mount: the open never answers
+    pending++;
     let fh;
-    try { fh = await fs.promises.open(file, ...rest); } catch (e) { if (watched) turn(); throw e; }
-    if (!watched) return fh;
+    try { fh = await fs.promises.open(file, ...rest); } catch (e) { end(); throw e; }
     const close = fh.close.bind(fh);
-    fh.close = async () => { try { return await close(); } finally { turn(); } };
+    fh.close = async () => { try { return await close(); } finally { end(); } };
     return fh;
   };
   const promises = new Proxy(fs.promises, { get: (t, k) => (k === 'open' ? open : t[k]) });
@@ -245,7 +248,7 @@ const saidKind = (x, k) => x.notices.filter((n) => n.key.startsWith(`settings-fi
   const l = lineOf(x);
   ok(neutralized(l) && !l.line.includes('/home/u/my-settings.json') && x.notices.some((n) => n.key.startsWith('settings-file-billing-') && n.i18n && /set its billing to «CLI login»/.test(n.i18n.key) && /name an apiKeyHelper/.test(n.i18n.key)),
     'a pick + the person\'s settings file on a machine whose settings NAME a helper: the file is set aside for that start (the neutralizer rides the one inline flag) and that is SAID — why, and the CLI-login door', [l.settings, x.notices.map((n) => n.key)]);
-  ok(x.reads.length === 1, 'the fact was read ONCE for that start (before the build; the notice reuses it)', x.reads);
+  ok(x.reads.filter((f) => f === SETTINGS).length === 1 && new Set(x.reads).size === x.reads.length, 'the fact was read ONCE for that start (before the build; the notice reuses it) — each of its files once', x.reads);
   for (const [what, state, want] of [['names NO helper', false, 'whole'], ['has no settings file at all', 'missing', 'whole'], ['has an EMPTY settings file (it names nothing)', 'empty', 'whole'], ['has a settings file that is not JSON', 'garbled', 'unread']]) {
     helperOn(state);
     const y = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: FILE, outputStyle: 'Explanatory' });
@@ -327,24 +330,78 @@ console.log('— ⑤ SAID ONCE, where the person looks');
     helperOn(state);
     const none = await drive(wsCreate, { accountId: 'sub-a1' });
     const settled = await within(none.factDone);   // THE FACT: the create's read of the settings file settled (never a fixed window)
-    ok(settled && none.reads.length === 1 && neutralized(lineOf(none)) && none.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 0, `${what}: the read settled, the line still carries the neutralizer (harmless), and nothing is said`, { settled, reads: none.reads, notices: none.notices });
+    ok(settled && none.reads.includes(SETTINGS) && neutralized(lineOf(none)) && none.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 0, `${what}: the read settled, the line still carries the neutralizer (harmless), and nothing is said`, { settled, reads: none.reads, notices: none.notices });
   }
   helperOn(true);
+  // CURE 2 (主开发 11:18Z: «read them into the fact on this machine — the fact must be the one the CLI will act on»): the PROJECT's own
+  // .claude/settings.json and .claude/settings.local.json (the conversation's cwd) and the person's own --settings file are read beside
+  // the machine's; a helper named in ANY of them is named — the machine's own settings naming none
+  {
+    const PROJ = path.join(CWD, '.claude');
+    fs.mkdirSync(PROJ, { recursive: true });
+    const OWN = path.join(CWD, 'own-settings.json'), OWNARG = ['--settings', OWN];
+    const clear = () => { for (const f of ['settings.json', 'settings.local.json']) fs.rmSync(path.join(PROJ, f), { force: true }); fs.rmSync(OWN, { force: true }); };
+    helperOn(false);
+    for (const [what, write, arg] of [
+      ['the project\'s .claude/settings.json', () => fs.writeFileSync(path.join(PROJ, 'settings.json'), JSON.stringify({ apiKeyHelper: '/opt/proj-helper' })), FILE],
+      ['the project\'s .claude/settings.local.json', () => fs.writeFileSync(path.join(PROJ, 'settings.local.json'), JSON.stringify({ apiKeyHelper: '/opt/proj-helper' })), FILE],
+      ['the person\'s own settings file itself', () => fs.writeFileSync(OWN, JSON.stringify({ apiKeyHelper: '/opt/own-helper', hooks: {} })), OWNARG],
+    ]) {
+      clear(); write();
+      const y = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: arg });
+      const m = lineOf(y);
+      ok(neutralized(m) && !m.line.includes(arg[1]) && saidKind(y, 'billing') === 1 && y.reads.includes(SETTINGS),
+        `a picked subscription, the machine's settings naming none, ${what} NAMING a helper: the helper is named — the person's file is set aside and the pick bills, said «billing»`, { line: m.line, notes: y.notices.map((n) => n.key), reads: y.reads });
+    }
+    clear(); fs.writeFileSync(path.join(PROJ, 'settings.json'), '{ "apiKeyHelper": ');
+    const g = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: FILE });
+    ok(neutralized(lineOf(g)) && saidKind(g, 'billingUnread') === 1, 'a project settings file that does not parse: the fact cannot be read — billing wins, said «billingUnread»', g.notices.map((n) => n.key));
+    clear(); fs.writeFileSync(path.join(PROJ, 'settings.json'), JSON.stringify({ apiKeyHelper: '/opt/proj-helper' }));
+    const n = await drive(wsCreate, { accountId: 'sub-a1' }, { wait: 5000 });
+    ok(neutralized(lineOf(n)) && n.notices.filter((k) => k.key === 'billing-pick-helper-sub-a1-local').length === 1, 'no person\'s file, a project helper: the inline override rides (as always) and the helper notice is said', n.notices.map((k) => k.key));
+    clear();
+    const w = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: FILE });
+    ok(fileKept(lineOf(w)) && saidKind(w, 'billing') + saidKind(w, 'billingUnread') === 0 && w.reads.includes(path.join(PROJ, 'settings.json')) && w.reads.includes(path.join(PROJ, 'settings.local.json')),
+      'no helper in ANY file the CLI reads (the machine\'s, the project\'s two, the person\'s own): the person\'s file applies whole — all four read', w.reads);
+    // RED: the tip before cure 2 (the machine's file alone): a project helper under a pick leaves the person's file whole — the helper bills
+    const ONLY = '    const files = [file, ...BILLPICK.projectSettingsFilesOf(cwd, ownFile)];';
+    ok(SRC.split(ONLY).length === 2, 'setup: the files the fact reads are ONE list (the control edits it)');
+    const machineOnly = M.load('src/ws-create.js', SRC.replace(ONLY, '    const files = [file];'), 'machine-file-only');
+    fs.writeFileSync(path.join(PROJ, 'settings.json'), JSON.stringify({ apiKeyHelper: '/opt/proj-helper' }));
+    const r = await drive(machineOnly, { accountId: 'sub-a1', extraArgs: FILE });
+    ok(fileKept(lineOf(r)) && saidKind(r, 'billing') === 0, 'RED CONTROL: the fact read from the machine\'s file alone (the tip before cure 2) leaves the person\'s file whole under a project helper — the pick would bill the helper; the legs above can go red', lineOf(r).line);
+    clear(); fs.rmSync(PROJ, { recursive: true, force: true });
+    helperOn(true);
+  }
   // THE BOUND (its reader's S1): a config dir on a stuck mount — the open never answers — never holds the start; billing wins, said so
   {
     const p = makeCreate(wsCreate, { hangOpen: true, helperFactMs: 300 }).create({ accountId: 'sub-a1', extraArgs: FILE });
     const done = await within(p, 4000), y = done ? await p : null;
     ok(done && !!y && neutralized(lineOf(y)) && saidKind(y, 'billingUnread') === 1, 'this machine\'s settings read never answers (a stuck mount): the start goes on at the bound — billing wins, the file set aside, said «billingUnread»', { done, notes: y && y.notices.map((n) => n.key) });
+    // ONE READ IN FLIGHT PER FILE (cure 2, its readers' should): a second start against the same stuck files JOINS the hung reads — no new
+    // open, so no more threadpool threads tied up — and goes on at its own bound
+    const run2 = async (mod) => {
+      const one = makeCreate(mod, { hangOpen: true, helperFactMs: 300 });
+      const p1 = one.create({ accountId: 'sub-a1', extraArgs: FILE }); await within(p1, 4000);
+      const p2 = one.create({ accountId: 'sub-a1', extraArgs: FILE }); const d2 = await within(p2, 4000);
+      return { d2, b: d2 ? await p2 : null };
+    };
+    const j = await run2(wsCreate);
+    ok(j.d2 && j.b.reads.length === 0 && saidKind(j.b, 'billingUnread') === 1, 'a second start against the same stuck files opens NOTHING (it joins the reads in flight) and goes on at its bound, said «billingUnread»', j.b && j.b.reads);
+    const JOIN = '    return BILLPICK.combinedFact(await Promise.all(files.map((f) => readOneFactOnce(f, row))));';
+    ok(SRC.split(JOIN).length === 2, 'setup: the fact\'s reads go through ONE joiner (the control edits it)');
+    const jr = await run2(M.load('src/ws-create.js', SRC.replace(JOIN, JOIN.replace('readOneFactOnce(f, row)', 'readOneFact(f, row)')), 'no-join'));
+    ok(jr.d2 && jr.b.reads.length > 0, 'RED CONTROL: without the joiner every start opens the stuck files again (one more hung thread each) — the leg above can go red', jr.b && jr.b.reads);
   }
   // SAID ONCE through ONE handler (one hub run): the second start of the same pick on the same machine says nothing and ASKS nothing
   {
     const one = makeCreate(wsCreate);
     // (a read the create starts is begun before the create returns — the reader's open is its first step — so `reads` is the fact)
     const a = await one.create({ accountId: 'sub-a1' }, { wait: 5000 }), b = await one.create({ accountId: 'sub-a1' });
-    ok(a.notices.filter((n) => n.key === 'billing-pick-helper-sub-a1-local').length === 1 && b.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 0 && a.reads.length === 1 && b.reads.length === 0 && neutralized(lineOf(b)),
+    ok(a.notices.filter((n) => n.key === 'billing-pick-helper-sub-a1-local').length === 1 && b.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 0 && a.reads.includes(SETTINGS) && b.reads.length === 0 && neutralized(lineOf(b)),
       'one hub run, two starts of the same pick on the same machine: said at the first; the second says nothing and reads no settings file (a said key asks no machine again) — its line still neutralized', { a: a.notices.map((n) => n.key), b: b.notices.map((n) => n.key), reads: b.reads });
     const c = await one.create({ accountId: 'pool-p1' }, { wait: 5000 });
-    ok(c.notices.filter((n) => n.key === 'billing-pick-helper-pool-p1-local').length === 1 && c.reads.length === 1, '…another pick in the same run is its own first time (read, said)', c.notices.map((n) => n.key));
+    ok(c.notices.filter((n) => n.key === 'billing-pick-helper-pool-p1-local').length === 1 && c.reads.includes(SETTINGS), '…another pick in the same run is its own first time (read, said)', c.notices.map((n) => n.key));
   }
   // the CLI's config dir (CLAUDE_CONFIG_DIR) is where its settings live — as the SPAWN's own env places it (the cure: never the hub's
   // process env): a helper named THERE is the one set aside, and said; the hub's own config dir is not the spawn's
@@ -353,13 +410,13 @@ console.log('— ⑤ SAID ONCE, where the person looks');
   fs.writeFileSync(path.join(CFG, 'settings.json'), JSON.stringify({ apiKeyHelper: '/opt/helper' }));
   helperOn(false);
   const viaDir = await drive(wsCreate, { accountId: 'sub-a1' }, { wait: 5000, env: { CLAUDE_CONFIG_DIR: CFG } });
-  ok(viaDir.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 1 && viaDir.reads[0] === path.join(CFG, 'settings.json'),
+  ok(viaDir.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 1 && viaDir.reads.includes(path.join(CFG, 'settings.json')) && !viaDir.reads.includes(SETTINGS),
     'the spawn\'s env places the CLI\'s config dir (CLAUDE_CONFIG_DIR) where a helper is named — ~/.claude naming none, the hub\'s env naming no dir — it is read there, and said', { reads: viaDir.reads, notices: viaDir.notices.map((n) => n.key) });
   process.env.CLAUDE_CONFIG_DIR = CFG;
   const hubOnly = await drive(wsCreate, { accountId: 'sub-a1' });
   const hubSettled = await within(hubOnly.factDone);
   delete process.env.CLAUDE_CONFIG_DIR;
-  ok(hubSettled && hubOnly.reads[0] === SETTINGS && hubOnly.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 0,
+  ok(hubSettled && hubOnly.reads.includes(SETTINGS) && !hubOnly.reads.includes(path.join(CFG, 'settings.json')) && hubOnly.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 0,
     '…and the reverse: the HUB\'s env names that dir, the spawn\'s does not — the spawn\'s ~/.claude is read (naming none), nothing said', { reads: hubOnly.reads });
   helperOn(true);
 }
@@ -484,10 +541,10 @@ console.log('— ⑥ RED CONTROLS');
     ['the file set aside at every pick (the unit before its cure)', ['            keyHelperNamed,\n', ''],
       async (mod) => { helperOn(false); const l = lineOf(await drive(mod, { accountId: 'sub-a1', extraArgs: FILE })); helperOn(true); return !fileKept(l); }],
     ['the said-once memo dropped', ['            if (said && !helperSaidKeys.has(said.key)) try { helperFact().then((on) => {', '            if (said) try { helperFact().then((on) => {'],
-      async (mod) => { const one = makeCreate(mod); await one.create({ accountId: 'sub-a1' }, { wait: 5000 }); const b = await one.create({ accountId: 'sub-a1' }, { wait: 5000 }); return b.reads.length === 1; }],
+      async (mod) => { const one = makeCreate(mod); await one.create({ accountId: 'sub-a1' }, { wait: 5000 }); const b = await one.create({ accountId: 'sub-a1' }, { wait: 5000 }); return b.reads.length > 0; }],
     ['«cannot be read» read as «names none» (the file applies whole where billing must win)', ['(data.keeperSid ? false : await helperFact())', '(data.keeperSid ? false : (await helperFact()) === true)'],
       async (mod) => { helperOn('garbled'); const l = lineOf(await drive(mod, { accountId: 'sub-a1', extraArgs: FILE })); helperOn(true); return fileKept(l); }],
-    ['the notice reading the hub\'s env', ['            env: { ...agentEnv(), ...((spawnAccount && spawnAccount.localEnv) || {}) } }));', '            env: process.env }));'],
+    ['the notice reading the hub\'s env', ['            env: { ...agentEnv(), ...((spawnAccount && spawnAccount.localEnv) || {}) },', '            env: process.env,'],
       async (mod) => { helperOn(false); const CFG = path.join(HOME, 'cfg-dir'); const x = await drive(mod, { accountId: 'sub-a1' }, { wait: 5000, env: { CLAUDE_CONFIG_DIR: CFG } }); helperOn(true); return helperSaid(x).length === 0; }],
   ];
   for (const [name, [from, to], red] of MUT) {
