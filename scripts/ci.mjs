@@ -2637,7 +2637,9 @@ export function shardTimings(root = repo) {
 // one — so an untimed long suite does not start after its shard's one-second ones.
 export const orderTimings = (marked, checkedIn, stated = {}) => ({ ...(stated || {}), ...(checkedIn || {}), ...(marked || {}) });
 /** PURE: the time a row's why states — its first «N ms | s | min» — in ms, or null. */
-export const statedMsOf = (row) => { const m = /(\d+(?:\.\d+)?)\s*(ms|s|min)\b/.exec((row && row.why) || ''); return m ? Math.round(Number(m[1]) * (m[2] === 'ms' ? 1 : m[2] === 's' ? 1000 : 60000)) : null; };
+// a row's STATEMENT is its «· N s» (the fast tier's form, often a heavy row's tail too — «a 50 ms census … · 45 s» is 45 s);
+// a why without one gives its first «N ms | s | min» (batch 31's read: the first time alone could be an inner leg's)
+export const statedMsOf = (row) => { const w = (row && row.why) || '', m = /·\s*(\d+(?:\.\d+)?)\s*(ms|s|min)\b/.exec(w) || /(\d+(?:\.\d+)?)\s*(ms|s|min)\b/.exec(w); return m ? Math.round(Number(m[1]) * (m[2] === 'ms' ? 1 : m[2] === 's' ? 1000 : 60000)) : null; };
 // The same file's `desktop` block (lane xpra-window-split): self-hosted suites' walls measured ALONE on the hub under a
 // private display — the order ci-remote --batch falls back to for a suite the box has no marker time for; null when none.
 export function batchTimings(root = repo) {

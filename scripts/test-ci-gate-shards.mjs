@@ -163,8 +163,8 @@ console.log('\n§8c hosts — the self-hosted desktop batch + the 7 hosted shard
     const ordOf = (timings) => C.scheduleLanes(fx, { timings }).parallel.map((s) => s.name).join();
     ok(ordOf(OT({}, times, statedFx)) === 'd,a,c,b', `a fresh runner (no marker) starts the LONGEST first: the checked-in times, and a suite with none by the time its row states (d, 1200 s) — ${ordOf(OT({}, times, statedFx))}`);
     ok(ordOf(times) !== ordOf({}) && ordOf({}) === 'd,c,b,a', `CONTROL — markers only, the base: the table read backwards (${ordOf({})}), the 900 s suite LAST`);
-    ok(ordOf(OT({ b: 2000e3 }, times, statedFx)) === 'b,d,a,c' && has && C.statedMsOf({ why: 'chrome — ~503 s measured' }) === 503000 && C.statedMsOf({ why: 'in-process · 250 ms' }) === 250 && C.statedMsOf({ why: 'a census over 2.369.403\'s rows' }) === null,
-      'a suite\'s own marker time wins; statedMsOf reads the first «N ms | s | min» of a why (a version number is no time)');
+    ok(ordOf(OT({ b: 2000e3 }, times, statedFx)) === 'b,d,a,c' && has && C.statedMsOf({ why: 'chrome — ~503 s measured' }) === 503000 && C.statedMsOf({ why: 'a 50 ms census over every row · 45 s' }) === 45000 && C.statedMsOf({ why: 'in-process · 250 ms' }) === 250 && C.statedMsOf({ why: 'a census over 2.369.403\'s rows' }) === null,
+      'a suite\'s own marker time wins; statedMsOf reads a why\'s «· N s» statement, else its first «N ms | s | min» (a version number is no time)');
     const lead = lp.shards.map((sh) => {
       const statedSh = Object.fromEntries(sh.map((s) => [s.name, has ? C.statedMsOf(s) : null]).filter(([, ms]) => ms !== null));
       const par = C.scheduleLanes(sh, { timings: OT({}, tm || {}, statedSh), sourceOf: srcOf }).parallel;

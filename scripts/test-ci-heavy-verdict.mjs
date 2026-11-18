@@ -79,6 +79,7 @@ ok(refused(judge({ jobs: jobsOf(undefined, { [hj(5)]: 'skipped' }) }), new RegEx
 ok(refused(judge({ jobs: jobsOf(undefined, { [hj(N)]: null }) }), new RegExp(`no job «heavy ${N}/${N}»`)), 'a MISSING shard is refused');
 ok(refused(judge({ jobs: jobsOf(undefined, { heavy: null }) }), /no job «heavy»/), 'a missing heavy GATE is refused');
 ok(refused(judge({ jobs: jobsOf(undefined, { [FAST_JOBS[FAST_JOBS.length - 1]]: 'failure' }) }), new RegExp(`«${FAST_JOBS[FAST_JOBS.length - 1]}» is failure`)), `a failed fast job is refused (${FAST_JOBS[FAST_JOBS.length - 1]})`);
+ok(refused(judge({ jobs: jobsOf(undefined, { [FAST_JOBS[0]]: 'failure' }) }), new RegExp(`«${FAST_JOBS[0]}» is failure`)), `…and so is the FIRST part failed alone (${FAST_JOBS[0]})`);
 // B-7353 THE FAST TIER IN PARTS: the verdict reads the fast jobs from the workflow AT THE SHA — a part missing is refused; a
 // workflow of ONE fast job (every commit before the split) still needs exactly «fast»
 ok(FP && FP.n === 2 && FP.slots.join() === '1,2', `the workflow in this tree runs the fast tier as the jobs fast 1/2 and fast 2/2 (its parser reads ${JSON.stringify(FP)})`);
