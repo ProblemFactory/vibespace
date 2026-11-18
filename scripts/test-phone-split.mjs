@@ -209,5 +209,53 @@ console.log('⑨ the switcher row yields (主开发 2026-11-17, ruling B on the 
   ok(/"Billing: \{name\}": "计费：\{name\}"/.test(read('src/lib/i18n-zh.js')) && /"Billing: \{name\}": "課金：\{name\}"/.test(read('src/lib/i18n-ja.js')), 'the billing row\'s words in zh / ja');
 }
 
+// ⑧ THE RESTACK ONTO 2.369.410 (lane bl-chat-a, a hand; 主开发 20:03Z): the release has NO search door in the phone bar — the
+// chat status strip's step two left with it (#mobile-nav-search and mobile-nav.js _shownChat are gone) — so phone-six's cure
+// carried no line that names one. Two legs: (a) the phone title PAINTS on the release's bar (the real updateTitle / _paintHead
+// / _titleWin, compiled from mobile-nav.js over stand-ins; a page with exactly the release's element ids) and nothing throws;
+// (b) a CENSUS that can fail: every `this._x(` the bar's module calls is a method its class makes, every getElementById('<id>')
+// names an element the page or the module makes. RED controls, each proving its plant first: the cure's line put back.
+console.log('⑧ the release\'s phone bar — no search door: the title paints, and the module names nothing the page lacks');
+{
+  const MN = read('src/lib/mobile-nav.js'), PAGE = read('public/index.html');
+  const sliceOf = (src, name) => { const a = src.indexOf(`\n  ${name}(`); const b = a < 0 ? -1 : src.indexOf('\n  }\n', a); return a < 0 || b < 0 ? null : src.slice(a + 1, b + 4); };
+  const MIN_OF = (/^const minimizedOf = [^\n]+$/m.exec(MN) || [null])[0];
+  const CURE = "    { const sb = document.getElementById('mobile-nav-search'); if (sb) sb.classList.toggle('on', !this.app.phoneHome?.shown?.() && !!this._shownChat()?._search); }\n";
+  const PAINT = '    this._paintHead();\n';
+  const paint = (updateSrc, ids) => {
+    const Probe = new Function('t', 'headName', 'nameFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle',
+      `${MIN_OF}\nreturn class Probe {\n${updateSrc}\n${sliceOf(MN, '_paintHead')}\n${sliceOf(MN, '_titleWin')}\n};`);
+    const nav = { dataset: {}, style: {} };
+    const doc = { getElementById: (id) => (ids.has(id) ? (id === 'mobile-nav' ? nav : { classList: { toggle() { } }, dataset: {} }) : null), createElement: () => ({ style: {}, getBoundingClientRect: () => ({ width: 10 }), remove() { } }) };
+    const P = Probe((x) => x, H ? H.headName : (x) => x, () => true, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }));
+    const el = { textContent: '', title: '', classList: { toggle() { } }, removeAttribute() { }, setAttribute() { }, appendChild() { }, getBoundingClientRect: () => ({ width: 200 }), scrollWidth: 200 };
+    const win = { id: 1, title: 'Fix the login page — /w/demo', element: { classList: { contains: () => false } } };
+    const p = Object.assign(Object.create(P.prototype), { _noteShown() { }, _titleEl: el, _shown: {}, bar: null, split: null, updateDesktopsDoor() { },
+      app: { wm: { windows: new Map([[1, win]]), activeWindowId: 1 }, viewportClass: () => 'compact', phoneHome: { shown: () => false }, desktopManager: { activeDesktopId: '' } } });
+    try { p.updateTitle(); return { threw: null, title: el.textContent }; } catch (e) { return { threw: String(e && e.message), title: el.textContent }; }
+  };
+  const PAGE_IDS = new Set([...PAGE.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+  const UPDATE = sliceOf(MN, 'updateTitle');
+  ok(!!UPDATE && !!MIN_OF && !!sliceOf(MN, '_paintHead') && !!sliceOf(MN, '_titleWin'), 'the three methods and minimizedOf are read whole out of mobile-nav.js');
+  const a = paint(UPDATE, PAGE_IDS);
+  ok(a.threw === null && a.title.startsWith('Fix the login page'), `(a) the phone title paints on the release's bar (its element ids only — ${PAGE_IDS.has('mobile-nav-search') ? 'WITH' : 'no'} search door) and nothing throws («${a.title}»)`, a);
+  // RED (a): the cure's line put back, on a page that HAS the door (the shape a chain bringing the door back without its method would make)
+  ok(UPDATE.split(PAINT).length === 2, 'CONTROL (a) proves its plant first: «this._paintHead();» is in updateTitle once');
+  const ra = paint(UPDATE.replace(PAINT, CURE + PAINT), new Set([...PAGE_IDS, 'mobile-nav-search']));
+  ok(!!ra.threw && /_shownChat/.test(ra.threw), `CONTROL (a): the cure's line with the door on the page and no _shownChat throws — the leg can go RED («${ra.threw}»)`, ra);
+  const census = (src) => {
+    const made = new Set([...src.matchAll(/^  (?:async |static |get |set )?(_?[A-Za-z0-9_$]+)\s*\(/gm)].map((m) => m[1]).concat([...src.matchAll(/this\.(_[A-Za-z0-9_$]+)\s*=(?!=)/g)].map((m) => m[1])));
+    const calls = [...new Set([...src.matchAll(/this\.(_[A-Za-z0-9_$]+)\(/g)].map((m) => m[1]))];
+    const ids = [...new Set([...src.matchAll(/getElementById\('([^']+)'\)/g)].map((m) => m[1]))];
+    const inPage = (id) => PAGE_IDS.has(id) || src.includes(`id="${id}"`) || src.includes(`.id = '${id}'`) || src.includes(`id: '${id}'`);
+    return { calls: calls.length, ids: ids.length, notMade: calls.filter((c) => !made.has(c)), notOnPage: ids.filter((id) => !inPage(id)) };
+  };
+  const c = census(MN);
+  ok(c.calls > 10 && c.ids > 5 && c.notMade.length === 0 && c.notOnPage.length === 0, `(b) mobile-nav.js calls only methods its class makes and names only elements the page makes (${c.calls} private calls, ${c.ids} element ids)`, c);
+  ok(MN.split(PAINT).length === 2, 'CONTROL (b) proves its plant first: «this._paintHead();» is in mobile-nav.js once');
+  const rc = census(MN.replace(PAINT, CURE + PAINT));
+  ok(rc.notMade.includes('_shownChat') && rc.notOnPage.includes('mobile-nav-search'), `CONTROL (b): the cure's line put back names a method and an element the release does not have — the census goes RED (${JSON.stringify({ notMade: rc.notMade, notOnPage: rc.notOnPage })})`, rc);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
