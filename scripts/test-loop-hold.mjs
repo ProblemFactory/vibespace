@@ -1068,5 +1068,47 @@ console.log('⑯ the train\'s close (主开发 2026-11-18 12:37Z; test-loop-hold
     `RED CONTROLS (the tip as it was): the driver read as the first frame OF OURS forgets the script outside the repo («${rd && rd.words}») and skips the plugin for our frame past it («${rp && rp.words}»); a forged id taken as the runtime's own: «${rf && rf.words}»`, { rd, rp, rf });
 }
 
+console.log('⑰ B-9f0c — the runtime\'s own ids, WHOLE: its bootstrap scripts and a lazily loaded module are the runtime\'s own; a forged id is not');
+{
+  const RT = LH.runtimeIdsOf({ bind: () => process.binding('natives'), argv: [], nodeOptions: '' });
+  const ids = new Set(RT.ids), loadedList = (process.moduleLoadList || []).filter((x) => x.startsWith('NativeModule ')).map((x) => x.slice(13));
+  ok(RT.why === null && ids.size > 300 && ids.has('internal/bootstrap/node') && ids.has('internal/bootstrap/realm') && ids.has('internal/deps/undici/undici') && !ids.has('internal/forged'),
+    `${process.version}: the runtime's own ids (${ids.size}) hold its bootstrap scripts (realm: the loader's frames; node: hrtimeBigInt) and the lazy dependency undici — never a forged id`, { n: ids.size });
+  // the watchdog's question as it asks it now (the loaded list ∪ the whole list) against the loaded list alone (before B-9f0c)
+  const whole = new Set([...loadedList, ...ids]), only = new Set(loadedList);
+  const ask = (frames, set) => { const sm = LH.sampleOf(enc(frames), ROOT, null, null, (id) => set.has(id)); return LH.framesAnswer(sm.frames, sm.form, sm.cut); };
+  const D2 = [['hrtimeBigInt', 'node:internal/bootstrap/node', 436], ['outsideHog', '/tmp/lh-outside.js', 1], ['runInThisContext', 'node:vm', 316], ['listOnTimeout', 'node:internal/timers', 594]];
+  const LAZY = [['__require', 'node:internal/deps/undici/undici', 6], ['compileForInternalLoader', 'node:internal/bootstrap/realm', 398], ['requireBuiltin', 'node:internal/bootstrap/realm', 429], ['lazyMessageEvent', 'node:internal/worker/io', 108], ['onMessageEvent', 'node:internal/worker/io', 320]];
+  const FORGED = [['forgedInternal', 'node:internal/forged', 1], ['runInThisContext', 'node:vm', 316]];
+  const w2 = ask(D2, whole), wl = ask(LAZY, whole), wf = ask(FORGED, whole);
+  ok(w2.words === 'node’s own code — bootstrap, driven by (outside the repo)' && wl.words.startsWith('node’s own code — undici, ') && wl.key === '(node’s own code — undici)' && !/node’s own code/.test(wf.words) && /node:internal\/forged:1/.test(wf.words),
+    `with the whole list the live shapes read as ruled: «${w2.words}» · «${wl.words}» · a forged id by its location «${wf.words}»`, { w2, wl, wf });
+  const o2 = ask(D2, only), ol = ask(LAZY, only);
+  const listsBootstrap = only.has('internal/bootstrap/node') && only.has('internal/bootstrap/realm');
+  ok(listsBootstrap || (!/driven by \(outside the repo\)/.test(o2.words) && ol.key !== '(node’s own code — undici)'),
+    listsBootstrap ? `${process.version}'s loaded list already names its bootstrap scripts — the control is moot on this Node` : `RED CONTROL (the loaded list alone, as before B-9f0c): «${o2.words}» · «${ol.words}» — the runtime's own frames read as not loaded`, { o2: o2.words, ol: ol.words });
+  // THE BOX'S RED AT 25ef02f08 (主开发 13:35Z): a module the runtime loads AFTER the witness started — zlib, the pbkdf2 file —
+  // is in the whole list and not in a start-time snapshot: the run goes THROUGH it and the driver is the hog
+  const ZL = [['slice', 'node:buffer', 1], ['processChunkSync', 'node:zlib', 463], ['zlibBufferSync', 'node:zlib', 182], ['syncBufferWrapper', 'node:zlib', 816], ['zlibHog', ROOT + '/src/hogs.js', 9]];
+  const PB = [['from', 'node:buffer', 300], ['pbkdf2Sync', 'node:internal/crypto/pbkdf2', 83], ['pbkdfHog', ROOT + '/src/hogs.js', 72]];
+  const atStart = new Set([...loadedList.filter((x) => x !== 'zlib' && x !== 'internal/crypto/pbkdf2'), 'buffer']);   // the witness started before both loaded
+  const atStartWhole = new Set([...atStart, ...ids]);
+  const z = ask(ZL, atStartWhole), pk = ask(PB, atStartWhole), zr = ask(ZL, atStart), pr = ask(PB, atStart);
+  ok(ids.has('zlib') && ids.has('internal/crypto/pbkdf2') && z.words === 'node’s own code — zlib, driven by zlibHog (src/hogs.js:9)' && z.key === 'src/hogs.js:9' && pk.words === 'node’s own code — crypto, driven by pbkdfHog (src/hogs.js:72)' && pk.key === 'src/hogs.js:72',
+    `a sync zlib hold and a pbkdf2 hold whose modules loaded AFTER the witness started: the run goes through them, the hog drives — «${z.words}» · «${pk.words}»`, { z, pk });
+  ok(zr.words === 'node’s own code — buffer, driven by node:zlib:463' && pr.words === 'node’s own code — buffer, driven by node:internal/crypto/pbkdf2:83',
+    `RED CONTROL (the tip's list: the start-time snapshot alone): the box's two red lines word for word — «${zr.words}» · «${pr.words}»`, { zr: zr.words, pr: pr.words });
+  // the flags: under --pending-deprecation the call prints DEP0111 (measured on Node 24.22.1 / 22.23.4) — never made there
+  const never = () => { throw new Error('the binding was called'); };
+  const f = [LH.runtimeIdsOf({ bind: never, argv: ['--pending-deprecation'] }), LH.runtimeIdsOf({ bind: never, nodeOptions: '--max-old-space-size=96 --pending-deprecation' }), LH.runtimeIdsOf({ bind: never }), LH.runtimeIdsOf({ bind: () => ({}) }), LH.runtimeIdsOf({ bind: () => ({ 'internal/x': 1 }), nodeOptions: '--pending-deprecations' })];
+  ok(f[0].why === 'pending-deprecation' && f[1].why === 'pending-deprecation' && f[2].why === 'unavailable' && f[3].why === 'unavailable' && f[4].why === null && f[4].ids[0] === 'internal/x' && LH.RUNTIME_IDS_WORDS[f[0].why] && LH.RUNTIME_IDS_WORDS[f[2].why],
+    'the call is never made under --pending-deprecation (argv or NODE_OPTIONS); a call that throws or answers nothing falls back by its fixed word', f.map((x) => x.why));
+  const WK = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8'), SWS = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness.js'), 'utf8');
+  ok(/const RUNTIME_IDS = LH\.runtimeIdsOf\(\{ bind: \(\) => process\.binding\('natives'\), argv: process\.execArgv, nodeOptions: process\.env\.NODE_OPTIONS \}\);/.test(WK) && /\.\.\.RUNTIME_IDS\.ids\]\);/.test(WK)
+    && /if \(RUNTIME_IDS\.why\) \{ try \{ parentPort && parentPort\.postMessage\(\{ ev: 'idsFallback', why: RUNTIME_IDS\.why \}\); \} catch \{ \} \}/.test(WK)
+    && /if \(m && m\.ev === 'idsFallback'\) \{ const w = LH\.RUNTIME_IDS_WORDS\[m\.why\]; if \(w\) \{ try \{ log\.warn\?\.\(`\[sync-fs\] the watchdog names node frames from the modules loaded at its start/.test(SWS),
+    'the watchdog thread asks the whole list with its own flags and says a fallback ONCE; the witness turns it into ONE journal line of fixed words');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

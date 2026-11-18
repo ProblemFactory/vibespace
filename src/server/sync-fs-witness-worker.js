@@ -107,9 +107,14 @@ const NAME_BUDGET_MS = 200, SLOW_READ_MS = 100, SLOW_HOLD_MS = 10 * 60000;
 let rootReal, slowUntil = 0, naming = null;
 const remember = (m, k, v, max) => { if (m.size >= max) m.delete(m.keys().next().value); m.set(k, v); };
 const cachedLine = (rel, n) => { const lines = sources.get(rel); return lines && n >= 1 && n <= lines.length ? lines[n - 1] : null; };
-// a node: frame keeps its name only when its id is one of Node's OWN loaded modules — the main thread's list at the
-// witness's start and this thread's own (a vm script named «node:…» is said by its location alone)
-const INTERNALS = new Set([...(workerData && Array.isArray(workerData.internals) ? workerData.internals : []), ...((process.moduleLoadList || []).filter((x) => x.startsWith('NativeModule ')).map((x) => x.slice(13)))]);
+// a node: frame keeps its name — and is the runtime's own code (src/loop-hold.js frameOf `notLoaded`, nodeOwnOf) — only when its
+// id is one of Node's OWN modules: the main thread's list at the witness's start, this thread's own, AND (B-9f0c) every builtin
+// id the runtime CARRIES (LH.runtimeIdsOf: the bootstrap scripts never enter moduleLoadList, a lazily loaded module — undici —
+// is one of them before it loads). A vm script named «node:internal/forged» is not: it is said by its location alone. A
+// fallback to the loaded lists is said ONCE (the witness's journal line)
+const RUNTIME_IDS = LH.runtimeIdsOf({ bind: () => process.binding('natives'), argv: process.execArgv, nodeOptions: process.env.NODE_OPTIONS });
+const INTERNALS = new Set([...(workerData && Array.isArray(workerData.internals) ? workerData.internals : []), ...((process.moduleLoadList || []).filter((x) => x.startsWith('NativeModule ')).map((x) => x.slice(13))), ...RUNTIME_IDS.ids]);
+if (RUNTIME_IDS.why) { try { parentPort && parentPort.postMessage({ ev: 'idsFallback', why: RUNTIME_IDS.why }); } catch { } }
 const isInternal = (id) => INTERNALS.has(id);
 /** what this thread knows WITHOUT reading: a file checked before, a source line read before; anything else UNREAD */
 const NO_READ = { isInternal, isRepoFile: (rel) => (!rootDir ? true : realFiles.has(rel) ? realFiles.get(rel) : LH.UNREAD), lineOf: (rel, n) => (!rootDir ? null : sources.has(rel) ? cachedLine(rel, n) : LH.UNREAD) };

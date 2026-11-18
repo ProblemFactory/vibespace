@@ -379,6 +379,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
         require('../worker-memory').trackWorker('sync-fs-witness', worker);
         worker.on('message', (m) => {   // the census's answer, or a hold the watchdog measured (one turn later: the collections are in)
           if (m && m.ev === 'memory') return;
+          if (m && m.ev === 'idsFallback') { const w = LH.RUNTIME_IDS_WORDS[m.why]; if (w) { try { log.warn?.(`[sync-fs] the watchdog names node frames from the modules loaded at its start — ${w}: a lazily loaded module and the loader's own frames are said by their location`); } catch { } } return; }   // B-9f0c: said ONCE (the thread sends it once)
           if (m && m.ev === 'hold' && holds) setImmediate(() => { try { holds.onHold(m.hold); } catch { } });
           if (m && m.ev === 'holdsLost' && holds && typeof holds.onLost === 'function') { try { holds.onLost(m.n); } catch { } }
           if (m && m.ev === 'captured' && holds && typeof holds.onCaptured === 'function') { try { holds.onCaptured(m.c); } catch { } }   // commit 3: a CPU capture's result

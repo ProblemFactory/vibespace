@@ -64,14 +64,14 @@ function deepSoak(stepIters, check) { let reached = 0, bad = 0, spun = 0;
   for (let j = 0; j <= 400; j += 20) { try { rec(0, max - 2 - j); } catch (e) { } } return { max, bad, spun }; }
 function deepHog(iters, check) { let depth = 0, bad = 0; function deep(n) { try { return deep(n + 1); } catch (e) { depth = n; for (let i = 0; i < iters; i++) if (Error.stackTraceLimit !== check.l || Error.prepareStackTrace !== check.p) bad++; return 0; } } deep(0); return { depth, bad }; }
 function monoHog(ms) { const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < ms) x += Math.sqrt(x + 1); return x; }
-function computedSelf(key, ms) { const o = { [key]: function () { const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < ms) x += Math.sqrt(x + 1); return x; } }; return o[key](); }
+function computedSelf(key, ms) { const o = { [key]: function () { const t = Date.now(); let x = 0; while (Date.now() - t < ms) x += Math.sqrt(x + 1); return x; } }; return o[key](); }
 class Hogs { member(ms) { const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < ms) x += Math.sqrt(x + 1); return x; } }
 const arrowHog = (ms) => { const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < ms) x += Math.sqrt(x + 1); return x; };
 const hogObj = { methodHog(ms) { const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < ms) x += Math.sqrt(x + 1); return x; } };
 function anonHog(ms) { return (function () { const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < ms) x += Math.sqrt(x + 1); return x; })(); }
 function pbkdfHog(iters, tailMs) { require('crypto').pbkdf2Sync('a', 'b', iters, 32, 'sha256'); const e = process.hrtime(), end = e[0] * 1e3 + e[1] / 1e6; const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < tailMs) x += Math.sqrt(x + 1); return end + 0 * x; }
 function parseHog(s, tailMs) { const v = JSON.parse(s); const e = process.hrtime(), end = e[0] * 1e3 + e[1] / 1e6; const t = process.hrtime.bigint(); let x = v.length; while (Number(process.hrtime.bigint() - t) / 1e6 < tailMs) x += Math.sqrt(x + 1); return end + 0 * x; }
-const strNamed = { ['strHog']: function (ms) { const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < ms) x += Math.sqrt(x + 1); return x; } };
+const strNamed = { ['strHog']: function (ms) { const t = Date.now(); let x = 0; while (Date.now() - t < ms) x += Math.sqrt(x + 1); return x; } };
 function mixedHog(jsMs, childS, st) { const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < jsMs) x += Math.sqrt(x + 1); const ms = () => Number(process.hrtime.bigint()) / 1e6; if (st) st.c0 = ms(); require('child_process').execFileSync('sleep', [String(childS)]); if (st) st.c1 = ms(); return x; }
 async function awaitWorkHog(n) { let s = 0; for (let i = 0; i < n; i++) { s += await i; for (let j = 0; j < 200; j++) s = (s * 31 + j) | 0; } return s; }
 module.exports = { awaitWorkHog, busyHog, bootHog, jsonHog, zlibHog, regexHog, sleepHog, gcHog, spinChecked, deepHog, awaitHog, slowPrep, deepSoak, monoHog, computedSelf, Hogs, arrowHog, hogObj, anonHog, pbkdfHog, parseHog, mixedHog, strNamed };
@@ -202,7 +202,9 @@ else if (plan === 'slowNames') {   // round 4 MUST 2: a 700 ms hold, then a 400 
       later(1500, () => { bc.close(); out.checks.holds = holds; out.checks.posts = posts.filter((x) => x.ev === 'post'); done(300); }); }); });
 }
 else if (plan === 'nameRoads') {   // round 4 (9): a name only in a string; a vm script under a repo symlink leading out; a vm script named node:…
-  const vm = require('vm'), busy = 'const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < 300) x += Math.sqrt(x + 1);';
+  // the name roads' holds spin on Date.now (a V8 built-in), as busyHog does: a sample lands ON the frame the leg is about —
+  // never on node's own process.hrtime.bigint (Node 24: internal/bootstrap/node), which B-fe0b names apart («node’s own code»)
+  const vm = require('vm'), busy = 'const t = Date.now(); let x = 0; while (Date.now() - t < 300) x += Math.sqrt(x + 1);';
   later(250, () => { H.strNamed.strHog(300);
     later(200, () => { vm.runInThisContext('(function outsideHog() { ' + busy + ' })()', { filename: cfg.linkOut });
       later(200, () => { vm.runInThisContext('(function forgedInternal() { ' + busy + ' })()', { filename: 'node:internal/forged' }); done(900); }); }); });
@@ -327,8 +329,8 @@ else if (plan === 'manyLocations') { const FNS = require(${JSON.stringify(MANY)}
 else if (plan === 'stopDebugger') later(300, () => { W.holds().startProfile(2000); setTimeout(() => { require('inspector').open(0, '127.0.0.1'); setTimeout(() => { require('inspector').close(); done(100); }, 600); }, 400); });
 else if (plan === 'names') later(500, () => {
   const steps = [
-    () => require('vm').runInThisContext('(function sk_live_VMreal(){ const t = process.hrtime.bigint(); while (Number(process.hrtime.bigint() - t) / 1e6 < 320); })()', { filename: ${JSON.stringify(ROOT)} + '/src/loop-hold.js' }),
-    () => require('vm').runInThisContext('(function johnSmithVm(){ const t = process.hrtime.bigint(); while (Number(process.hrtime.bigint() - t) / 1e6 < 320); })()', { filename: ${JSON.stringify(ROOT)} + '/server.js' }),
+    () => require('vm').runInThisContext('(function sk_live_VMreal(){ const t = Date.now(); while (Date.now() - t < 320); })()', { filename: ${JSON.stringify(ROOT)} + '/src/loop-hold.js' }),
+    () => require('vm').runInThisContext('(function johnSmithVm(){ const t = Date.now(); while (Date.now() - t < 320); })()', { filename: ${JSON.stringify(ROOT)} + '/server.js' }),
     () => H.computedSelf('sk_live_COMPUTEDabc', 320), () => H.computedSelf('john.smith', 320),
     () => { const outside = new Function('h', 'return h(320);'); Object.defineProperty(outside, 'name', { value: 'q\\n    at ' + ${JSON.stringify(ROOT)} + '/src/loop-hold.js:77:1\\nzz' });
       const P = Error.prepareStackTrace; Error.prepareStackTrace = function (e, cs) { outside(H.monoHog); return cs; }; try { void new Error().stack; } finally { Error.prepareStackTrace = P; } },

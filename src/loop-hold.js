@@ -327,7 +327,7 @@ const keyWords = (frames) => { const rf = repoFrame(frames); const f = rf || (fr
  *    Every empty answer is still the hold's end — round 4's law («JavaScript» only from an answer with a frame), kept
  *    here; telling the two apart (an empty answer more than a beat before the hold's end) is a ruling to ask for.
  *  · ANY OTHER sample whose first frame past V8's built-ins is node's own (a node: id) ran held code: «node's own code —
- *    <module>», JavaScript for the verdict, then «, driven by <the first frame of ours below it>» or «, with no frame of
+ *    <module>», JavaScript for the verdict, then «, driven by <the first frame below the run>» or «, with no frame of
  *    ours below it» — or «, the stack cut before any frame of ours» when the answer is SAMPLE_FRAMES long. <module>: a
  *    bundled dependency in that run of node frames (node:internal/deps/<x> — undici's lazy load for a channel's first
  *    MessageEvent, whose stack also runs crypto, tls, net and http under node's loader), else the module node's own
@@ -351,7 +351,7 @@ function isDelivery(frames) {
 }
 /** PURE: a node: id → its module word (node:internal/deps/undici/undici ⇒ undici, node:zlib ⇒ zlib, node:_http_agent ⇒ http_agent) */
 const moduleOf = (file) => String(file || '').replace(/^node:/, '').replace(/^internal\//, '').replace(/^deps\//, '').split('/')[0].replace(/^_+/, '') || 'node';
-/** PURE: a sample whose first frame past the built-ins is node's own → { module, driver (the first repo frame below the run, or null) }, else null */
+/** PURE: a sample whose first frame past the built-ins is node's own → { module, driver (the first frame below the run, or null) }, else null */
 /** THE TRAIN'S CLOSE (主开发 2026-11-18 12:37Z, test-loop-hold-live (D) red at 01a4d9a73), round 4's two laws kept:
  *  (a) ONLY AN ID THE RUNTIME ITSELF LOADED IS THE RUNTIME'S OWN CODE — a frame the reader marked `notLoaded` (a vm script
  *  calling itself «node:internal/…») is neither in the run nor its module: it is said by its location alone, as before;
@@ -359,6 +359,23 @@ const moduleOf = (file) => String(file || '').replace(/^node:/, '').replace(/^in
  *  script under a symlink leading out), a not-loaded id by its location; never a deeper frame of ours past it, and «with no
  *  frame of ours below it» only when nothing lies below. */
 const runtimeOwn = (f) => !!f && f.cls === 'node' && f.notLoaded !== true;
+/** B-9f0c (主开发 2026-11-18 12:55Z, as if a must for 2.369.411): THE RUNTIME'S OWN IDS, WHOLE — what the watchdog's
+ *  `isInternal` asks. process.moduleLoadList never lists the bootstrap scripts (internal/bootstrap/realm: the loader's own
+ *  frames; internal/bootstrap/node: hrtimeBigInt) and lists a module only once it loaded (undici's lazy load), so the list of
+ *  the witness's start read the runtime's own frames as not loaded. Every builtin id the runtime CARRIES is the old-style
+ *  binding's keys (measured: 393 ids on Node 24.22.1, 360 on 22.23.4, 0.3 ms in a worker; bootstrap and undici in, a forged
+ *  id out). PURE: `bind` reads it (in a try), `argv` / `nodeOptions` are the thread's flags — under --pending-deprecation
+ *  the call prints DEP0111 (measured on both Nodes; never with no flag nor --throw-deprecation), so it is not made there.
+ *  → { ids, why }: why = null, or the fixed word the watchdog says ONCE when it falls back to the loaded list. */
+const PENDING_DEP_RE = /(?:^|\s)--pending-deprecation(?=\s|=|$)/;
+function runtimeIdsOf({ bind = null, argv = [], nodeOptions = '' } = {}) {
+  if ((Array.isArray(argv) && argv.some((a) => a === '--pending-deprecation' || String(a).startsWith('--pending-deprecation='))) || PENDING_DEP_RE.test(String(nodeOptions || ''))) return { ids: [], why: 'pending-deprecation' };
+  let o = null;
+  try { o = typeof bind === 'function' ? bind() : null; } catch { return { ids: [], why: 'unavailable' }; }
+  const ids = o && typeof o === 'object' ? Object.keys(o).filter((k) => /^[\w/-]+$/.test(k)) : [];
+  return ids.length ? { ids, why: null } : { ids: [], why: 'unavailable' };
+}
+const RUNTIME_IDS_WORDS = Object.freeze({ 'pending-deprecation': '--pending-deprecation is set (the call would print a deprecation warning)', unavailable: 'the runtime gave no list' });
 function nodeOwnOf(frames) {
   if (!Array.isArray(frames)) return null;
   let i = 0;
@@ -988,7 +1005,7 @@ function profileLine(p) {
     (p.notSampledPct && p.notSampledWords ? ` — ${p.notSampledWords}` : '') + (p.tooLarge ? ' — its frames could not be kept (too large)' : '');
 }
 
-module.exports = { partsOf, PART_SHARE, waitedMuch, RUNNING_KERNEL_WORDS, WOKE_WORDS, unseenWhy, unsampledWords, cutWords,
+module.exports = { runtimeIdsOf, RUNTIME_IDS_WORDS, partsOf, PART_SHARE, waitedMuch, RUNNING_KERNEL_WORDS, WOKE_WORDS, unseenWhy, unsampledWords, cutWords,
   profileOf, profileLine, foldProfileBy, sharesOf, heapFillOf, nodeArgv, PROFILE_MS, PROFILE_EVERY_MS, PROFILE_NOTE, PROFILE_HEAP_SHARE, PROFILE_KEEP, PROFILE_TOP, PROFILE_WORD_MAX,
   PROFILE_STOPPED, PROFILE_STOPPED_ANY, PROFILE_UNSAMPLED, PROFILE_UNSAMPLED_ANY, PROFILE_REFUSED, PROFILE_REFUSED_ANY, STOPPED_LATE_SHARE, STOPPED_RUN_SHARE, HOOK_KEY, ASK_WORDS, OUTSIDE_WORDS,
   frameOf, frameText, frameLoc, parseSample, sampleOf, instrumentTrim, INSTRUMENT_FILES, SYNC_FS_URL, stringFrame, spelledIn, repoFrame, chainWords, keyFrame, keyWords, isDelivery, nodeOwnOf, nodeOwnWords, framesAnswer, NODE_OWN, SAMPLE_FRAMES, HELPER_MODULE, sampleExpr, codeOf, thrownOf, stepRefusalOf, landedOf, isUnseenHold, isHoldOf, isGapHold, insideOf, notInsideWords,
