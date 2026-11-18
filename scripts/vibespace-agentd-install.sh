@@ -375,7 +375,7 @@ HOOK_RUNNER=/usr/local/bin/vibespace-entrypoint
 hook_runs_here() { # this image runs the user boot hook at every container start: its entrypoint is there and names the hook
   [ -x "$HOOK_RUNNER" ] && grep -qF '.vibespace-init.sh' "$HOOK_RUNNER" 2>/dev/null
 }
-hook_block() { # the block for $KEY / $ROOT, at install time — the start in a clean environment, as a supervisor gives it. The
+hook_block() { # the block for $KEY / $ROOT, at install time — the start under THE DEVICE AGENT'S OWN ENV RULE (below). The
   # whole block is a SUBSHELL that starts the agent and ends at once: the agent is never the hook's child (a person's hook
   # that ends in `wait` returns; setsid does not fork inside a non-interactive shell's job) and no variable is left set
   local R; R=$(printf '%q' "$ROOT")
@@ -385,9 +385,16 @@ hook_block() { # the block for $KEY / $ROOT, at install time — the start in a 
   if [ -s "\$R/state/dial.json" ] && [ -e "\$R/current/vibespace-device.js" ]; then
     N=\$(cat "\$R/state/node-path" 2>/dev/null); [ -x "\$N" ] || N=\$(command -v node)
     S=nohup; command -v setsid >/dev/null 2>&1 && S=setsid
-    U=\$(id -un 2>/dev/null)
+    # the device agent's env rule (src/agent-env.js daemonEnv: a DENY list — the hub's own agent is born so): the
+    # entrypoint's proxy, CA store, locale stay; VIBESPACE_* but the agent's own, npm_*, AGENT_BROWSER_* and these go
+    for V in \$(env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do
+      case "\$V" in
+        VIBESPACE_API|VIBESPACE_SESSION_TOKEN|VIBESPACE_TASK_ID|VIBESPACE_REMOTE_SID|VIBESPACE_REMOTE_RETRY|VIBESPACE_KEEPER_DIR|VIBESPACE_INSTANCE_NAME|VIBESPACE_DEVICE_ROOT|VIBESPACE_AGENTD_ROOT|VIBESPACE_NODE_MODULES|VIBESPACE_AGENTD_VERSION|VIBESPACE_INPUT_STUB_FILE|VIBESPACE_MIC_HELPER|VIBESPACE_SOUND_FFMPEG|VIBESPACE_NODE_MIRROR|VIBESPACE_RUNTIME_SWITCH|VIBESPACE_RUNTIME_REEXEC) ;;
+        VIBESPACE_*|npm_*|AGENT_BROWSER_*|PORT|HOST|NODE_ENV|NODE_OPTIONS|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR) unset "\$V" ;;
+      esac
+    done
     if [ -n "\$N" ]; then
-      env -i HOME="\$HOME" PATH="\$PATH" USER="\$U" LOGNAME="\$U" SHELL="\${SHELL:-/bin/sh}" LANG="\${LANG:-C.UTF-8}" \${TZ:+TZ="\$TZ"} VIBESPACE_DEVICE_ROOT="\$R" VIBESPACE_AGENTD_ROOT="\$R" "\$S" "\$N" "\$R/current/vibespace-device.js" </dev/null >>"\$R/state/agentd.out" 2>&1 &
+      VIBESPACE_DEVICE_ROOT="\$R" VIBESPACE_AGENTD_ROOT="\$R" "\$S" "\$N" "\$R/current/vibespace-device.js" </dev/null >>"\$R/state/agentd.out" 2>&1 &
     fi
   fi )
 # <<< vibespace-device $KEY <<<

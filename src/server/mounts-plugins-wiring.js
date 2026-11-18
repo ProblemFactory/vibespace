@@ -412,14 +412,16 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
         // an installer that cannot be read here costs only the drop (the record is ALWAYS cleared)
         let hookDrop = '';
         try {
-          const inst = fs.readFileSync(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');
+          const inst = await fs.promises.readFile(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8'); // off the loop (the checkout may sit on a network mount)
           const h0 = inst.indexOf("# >>> B-8475 THE IMAGE'S USER BOOT HOOK"), h1 = inst.indexOf('# <<< B-8475 <<<');
           if (key && h0 >= 0 && h1 > h0) hookDrop = `${inst.slice(h0, h1)}\ndrop_hook_block ${key} || true\n`;
         } catch { }
         const teardown = (`systemctl --user disable --now "vibespace-device-${key}.service" 2>/dev/null; ` +
           `launchctl bootout "gui/$(id -u)/cc.vibespace.device.${key}" 2>/dev/null; ` +
           `pkill -f "${root}/" 2>/dev/null; sleep 1; rm -rf "${root}"; echo VS_REMOVED`);
-        await (hookDrop ? sshRun('bash -s', 30000, hookDrop + teardown + '\n') : sshRun(teardown, 30000));
+        // one call; a host whose non-login PATH has no bash (the run never says VS_REMOVED) gets the teardown alone, as before
+        const ran = hookDrop ? await sshRun('bash -s', 30000, hookDrop + teardown + '\n') : null;
+        if (!ran || !String(ran.out || '').includes('VS_REMOVED')) await sshRun(teardown, 30000);
       }
       const devId = h.deviceId;
       hosts.ungraduateDial(h.id);

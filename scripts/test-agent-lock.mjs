@@ -173,7 +173,7 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   const H = path.join(T, 'home'); fs.mkdirSync(H, { recursive: true });
   const HOOK = path.join(H, '.vibespace-init.sh');
   const mkDev = (name, withFiles = true) => { const R = path.join(H, '.vibespace', name); fs.mkdirSync(path.join(R, 'state'), { recursive: true }); fs.mkdirSync(path.join(R, 'current'), { recursive: true }); if (withFiles) { fs.writeFileSync(path.join(R, 'state', 'dial.json'), '{"url":"wss://hub.invalid/api/device-dial"}'); fs.writeFileSync(path.join(R, 'current', 'vibespace-device.js'), '// stand-in'); } return R; };
-  const node = path.join(T, 'node'); fs.writeFileSync(node, `#!/bin/sh\necho "STARTED $VIBESPACE_DEVICE_ROOT env=\${VS_HUB_ONLY:-clean}" >> ${JSON.stringify(path.join(T, 'started'))}\n`, { mode: 0o755 });
+  const node = path.join(T, 'node'); fs.writeFileSync(node, `#!/bin/sh\necho "STARTED $VIBESPACE_DEVICE_ROOT env=\${VIBESPACE_HUB_ONLY:-clean}" >> ${JSON.stringify(path.join(T, 'started'))}\nenv > "$VIBESPACE_DEVICE_ROOT/state/agent.env"\n`, { mode: 0o755 });
   const R1 = mkDev('device@a'), R2 = mkDev('device@b'), R3 = mkDev('device@c', false);
   for (const R of [R1, R2, R3]) fs.writeFileSync(path.join(R, 'state', 'node-path'), node);
   const fns = (fnsText) => { const f = path.join(T, 'fns-' + (fns.n = (fns.n || 0) + 1) + '.sh'); fs.writeFileSync(f, fnsText); return f; };
@@ -193,12 +193,27 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   ok(`registered once per root, right under the hook's #! line; the owner's lines and its final «exit 0» stay, last — ${[r1, r1b, r2, r3].map((r) => r.status).join(',')}`,
     [r1, r1b, r2, r3].every((r) => r.status === 0) && blocks('device-a') === 1 && blocks('device-b') === 1 && text.startsWith('#!/bin/bash\n# >>> vibespace-device ') && text.trimEnd().endsWith('echo own-line\nexit 0'), text.slice(0, 400));
   fs.rmSync(path.join(T, 'started'), { force: true });
-  const boot = spawnSync('bash', [HOOK], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: H, VS_HUB_ONLY: 'leaked' } });
+  const tok = ['CLAUDE', 'CODE', 'OAUTH', 'TOKEN'].join('_');   // a credential NAME, built at runtime (no secret-shaped fixture)
+  const BOOT_ENV = { PATH: process.env.PATH, HOME: H, LANG: 'C.UTF-8', VIBESPACE_HUB_ONLY: 'leaked', VIBESPACE_INSTANCE_NAME: 'pod-1', HTTPS_PROXY: 'http://proxy.invalid:3128', NODE_EXTRA_CA_CERTS: '/etc/ssl/company-ca.pem', npm_config_cache: '/tmp/npm', PORT: '3456', NODE_OPTIONS: '--max-old-space-size=64', [tok]: 'x', AGENT_BROWSER_PROFILE: 'p' };
+  const boot = spawnSync('bash', [HOOK], { encoding: 'utf8', env: BOOT_ENV });
   let started = ''; for (let t = 0; t < 40 && started.split('\n').filter(Boolean).length < 2; t++) { await sleep(50); try { started = fs.readFileSync(path.join(T, 'started'), 'utf8'); } catch { } }
   ok(`the hook run as the entrypoint runs it STARTS each registered agent from its own files (the stand-in node), and skips a root without them — ${JSON.stringify(started)} · own-line ${/own-line/.test(boot.stdout)}`,
     boot.status === 0 && /own-line/.test(boot.stdout) && started.includes(`STARTED ${R1}`) && started.includes(`STARTED ${R2}`) && !started.includes(R3), { started, status: boot.status });
-  ok('…in a CLEAN environment, as a supervisor gives it: a variable of the entrypoint\'s own (the hub\'s) never reaches the agent',
+  ok('…and a VIBESPACE_* name of the entrypoint\'s own (the hub\'s) never reaches the agent',
     started.split('\n').filter(Boolean).length === 2 && !started.includes('env=leaked') && (started.match(/env=clean/g) || []).length === 2, started);
+  // ONE ENVIRONMENT RULE FOR THE AGENT'S START (主开发's B-8475 verdict, as if a must): the boot start carries what the product's
+  // own rule for the device agent keeps (src/agent-env.js daemonEnv — a DENY list: the proxy, the CA store, the locale stay;
+  // the hub's VIBESPACE_*, npm_*, AGENT_BROWSER_* and the operational / credential names go) — name for name
+  const AGE = require(path.join(REPO, 'src/agent-env.js'));
+  const envOfAgent = (R) => { const o = {}; try { for (const l of fs.readFileSync(path.join(R, 'state', 'agent.env'), 'utf8').split('\n')) { const i = l.indexOf('='); if (i > 0) o[l.slice(0, i)] = l.slice(i + 1); } } catch { } return o; };
+  const parity = (got) => { const want = AGE.daemonEnv(BOOT_ENV), off = []; for (const k of Object.keys(BOOT_ENV)) if ((k in got) !== (k in want)) off.push(`${k}: agent ${k in got ? 'has' : 'lacks'}, rule ${k in want ? 'keeps' : 'drops'}`); if (got.VIBESPACE_DEVICE_ROOT !== R1) off.push('root'); return off; };
+  const g1 = envOfAgent(R1), off1 = parity(g1);
+  ok(`the boot start carries what the device agent's own env rule keeps (daemonEnv), name for name: the proxy, the CA store, the locale kept; the hub's VIBESPACE_*, npm_*, AGENT_BROWSER_*, PORT, NODE_OPTIONS and the credential name dropped — ${off1.length ? off1.join(' · ') : 'all ' + Object.keys(BOOT_ENV).length + ' names agree'}`, Object.keys(g1).length > 0 && off1.length === 0 && g1.HTTPS_PROXY === BOOT_ENV.HTTPS_PROXY && g1.NODE_EXTRA_CA_CERTS === BOOT_ENV.NODE_EXTRA_CA_CERTS, off1);
+  const caseLine = (re) => { const m = re.exec(FNS); return m ? m[1].split('|') : null; };
+  const shKeep = caseLine(/\n\s+(VIBESPACE_API\|[A-Z_|]+)\) ;;\n/), shDrop = caseLine(/\n\s+VIBESPACE_\*\|npm_\*\|AGENT_BROWSER_\*\|([A-Z_|]+)\) unset /);
+  const sameSet = (a, b) => !!a && a.length === b.length && b.every((x) => a.includes(x));
+  ok(`census: the boot block's kept names ARE DAEMON_ENV_KEEP (${shKeep ? shKeep.length : 0}) and its dropped names AGENT_ENV_DROP (${shDrop ? shDrop.length : 0}) — one rule, spelled from src/agent-env.js`, sameSet(shKeep, [...AGE.DAEMON_ENV_KEEP]) && sameSet(shDrop, [...AGE.AGENT_ENV_DROP]), { shKeep, shDrop });
+  ok('CONTROL: a census that lost one kept name goes red', !sameSet(shKeep && shKeep.slice(1), [...AGE.DAEMON_ENV_KEEP]));
   const before = fs.readFileSync(HOOK, 'utf8');
   const d1 = bashIn(F, 'drop_hook_block device-a'), dNone = bashIn(F, 'drop_hook_block device-zz');
   const after = fs.readFileSync(HOOK, 'utf8');
@@ -210,7 +225,8 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   const MPW = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   ok('the ssh unpair ships the installer\'s functions (its own markers) on `bash -s` stdin and calls drop_hook_block with the key; its sshRun writes that stdin; no sed range on the hook',
     MPW.includes(`inst.indexOf(${JSON.stringify(B0)}), h1 = inst.indexOf('${B1}')`) && MPW.includes("hookDrop = `${inst.slice(h0, h1)}\\ndrop_hook_block ${key} || true\\n`;")
-    && MPW.includes("await (hookDrop ? sshRun('bash -s', 30000, hookDrop + teardown + '\\n') : sshRun(teardown, 30000));")
+    && MPW.includes("const ran = hookDrop ? await sshRun('bash -s', 30000, hookDrop + teardown + '\\n') : null;\n        if (!ran || !String(ran.out || '').includes('VS_REMOVED')) await sshRun(teardown, 30000);")
+    && MPW.includes("const inst = await fs.promises.readFile(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');")
     && MPW.includes('if (input != null) { child.stdin.on(\'error\', () => { }); child.stdin.end(input); }') && !/sed -i[^\n]*vibespace-device/.test(MPW));
   const un = spawnSync('bash', ['-s'], { input: `${SH.slice(i0, i1)}\ndrop_hook_block device-b || true\necho TEARDOWN-RAN\n`, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: H } });
   const afterUn = fs.readFileSync(HOOK, 'utf8');
@@ -268,6 +284,14 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   const got = [rootOf(pD.pid), rootOf(pH.pid), rootOf(2 ** 22 + 7)];
   for (const c of [pD, pH]) { try { process.kill(c.pid, 'SIGTERM'); } catch { } }   // ours: we started them and hold their pids
   ok(`root_of_pid: DEVICE_ROOT first, else <HOME>/.vibespace/agentd; a pid with no readable block ⇒ nothing — ${JSON.stringify(got)}`, got[0] === '/d' && got[1] === '/h/.vibespace/agentd' && got[2] === '');
+  {   // RED CONTROL: the boot start with the short ALLOW list (2310a79ac) — the proxy and the CA store are lost after a restart
+    const AL = ANCHOR(FNS, '    if [ -n "\\$N" ]; then\n      VIBESPACE_DEVICE_ROOT=', 'allow-list start');
+    const FA = AL ? fns(FNS.split(AL).join('    if [ -n "\\$N" ]; then\n      exec env -i HOME="\\$HOME" PATH="\\$PATH" LANG="\\${LANG:-C.UTF-8}" VIBESPACE_DEVICE_ROOT=')) : null;
+    fs.writeFileSync(HOOK, handWritten); fs.rmSync(path.join(R1, 'state', 'agent.env'), { force: true });
+    if (FA) { reg(FA, R1, 'device-a'); spawnSync('bash', [HOOK], { env: BOOT_ENV }); for (let t = 0; t < 40 && !fs.existsSync(path.join(R1, 'state', 'agent.env')); t++) await sleep(50); }
+    const gA = envOfAgent(R1);
+    ok(`RED CONTROL: the start with the short allow list (the tip before this) — the agent comes back WITHOUT the proxy and the CA store (${gA.HTTPS_PROXY ? 'has' : 'lacks'} HTTPS_PROXY)`, !!FA && Object.keys(gA).length > 0 && !gA.HTTPS_PROXY && parity(gA).length > 0, parity(gA));
+  }
   // RED CONTROL: a registration that writes no block — the container start starts nothing
   const A = ANCHOR(FNS, 'hook_block > "$T.vs-blk.$$"', 'no block written');
   const FR = A ? fns(FNS.split(A).join(': > "$T.vs-blk.$$"')) : null;
