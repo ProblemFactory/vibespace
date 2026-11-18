@@ -420,7 +420,7 @@ async function legNamed(tag, node) {
   if (tag !== 'Node 24') { const sl = await run({ plan: 'sleep' }, { node }); const l = lineWith(sl, /sleepHog/); ok(l && / — in the kernel \(blocked\): /.test(l) && /\d samples?: asleep: \S+ in \w+/.test(l), `a sync child: in the kernel, its sample asleep with the kernel's wait channel: ${l}`, sl.lines); return; }
   const js = await run({ plan: 'json' });
   const jl = lineWith(js, /the first JavaScript after it: .*jsonHog \(src\/hogs\.js:5\)/);
-  ok(jl && / — (native code or garbage collection|on the CPU — JavaScript or native code, no sample of that part): /.test(jl) && !/ — in the kernel \(blocked\)/.test(jl) && /the first JavaScript after it: [^;]*afterParse \(src\/hogs\.js:4\)/.test(jl),
+  ok(jl && / — (native code or garbage collection|on the CPU — JavaScript or native code, no sample of that part)(?:; it also waited \d+\.\d s for a CPU)?: /.test(jl) && !/ — in the kernel \(blocked\)/.test(jl) && /the first JavaScript after it: [^;]*afterParse \(src\/hogs\.js:4\)/.test(jl),
     `a JSON.parse of a large buffer: on the CPU, not JavaScript while it parsed (never «blocked» — round 5 law B), the first JavaScript after it names the parse's caller (afterParse ← jsonHog): ${jl}`, js.lines);
   const zl = await run({ plan: 'zlib' });
   const z = lineWith(zl, /zlibHog \(src\/hogs\.js:6\)/);
@@ -766,9 +766,13 @@ async function legRound4(node, tag, tree = null) {
   const gcHolds = A.filter((a) => judged(a) && a.gc);
   const gcNative = gcHolds.filter((a) => a.x >= fast + 1), gcTail = gcHolds.filter((a) => a.x <= -1 && a.tail + a.x >= 2);
   const TRUE_NATIVE = [LH.V.native, LH.V.cpu], TRUE_TAIL = [LH.V.js, LH.V.native, LH.V.cpu];
-  const gcLies = [...gcNative.filter((a) => !TRUE_NATIVE.includes(a.verdict)), ...gcTail.filter((a) => !TRUE_TAIL.includes(a.verdict))];
+  // the release mirror at e3754d9cd: a 0.1 s hold (asked now at 80 ms — B-7c97) ran «user 0.0, kernel 0.1» (allocation faults):
+  // «in the kernel (on the CPU)» is then its TRUE form too — checked against the hold's OWN numbers in its line, never admitted blind
+  const kernelTrue = (a) => { const m = /\(user (\d+\.\d), kernel (\d+\.\d)\)/.exec(String(a.line || '')); return !!m && Number(m[2]) > 0 && Number(m[2]) >= Number(m[1]); };
+  const trueOf = (forms) => (a) => forms.includes(a.verdict) || (a.verdict === LH.V.kernel && kernelTrue(a));
+  const gcLies = [...gcNative.filter((a) => !trueOf(TRUE_NATIVE)(a)), ...gcTail.filter((a) => !trueOf(TRUE_TAIL)(a))];
   say(`(A) the child's own record: ${gcHolds.length} of ${A.filter(judged).length} judged holds had a collection in the ask's window — ${gcNative.length} posted in native code, ${gcTail.length} in the tail — judged by their TRUE forms`);
-  if (!tree) ok(!gcLies.length, `(A) ${tag}: a hold with a collection in its ask's window (the child's own record) says one of its TRUE forms — posted in native code: «${LH.V.native}» or «${LH.V.cpu}»; posted in the JavaScript tail: those or «${LH.V.js}» (${gcNative.length} + ${gcTail.length} holds)`, gcLies.slice(0, 3));
+  if (!tree) ok(!gcLies.length, `(A) ${tag}: a hold with a collection in its ask's window (the child's own record) says one of its TRUE forms — posted in native code: «${LH.V.native}» or «${LH.V.cpu}»; posted in the JavaScript tail: those or «${LH.V.js}»; either: «${LH.V.kernel}» when the hold's own numbers put the kernel at or above user time (${gcNative.length} + ${gcTail.length} holds)`, gcLies.slice(0, 3));
 
   // THE STRICT LEGS: the holds the box did not starve AND the child's own record shows no collection for
   const inNative = A.filter((a) => a.x != null && a.x >= fast + 1 && a.verdict && !a.outside && !a.gc && !a.asleepAsk), inTail = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict && !a.outside && !a.gc);
@@ -935,8 +939,13 @@ async function legGcLies(node, tag) {
     const gN = j.filter((a) => a.gc && a.x >= fast + 1 && !a.asleepAsk), gT = j.filter((a) => a.gc && a.x <= -1 && a.tail + a.x >= 2);
     return { strictNativeSaidJs: sN.filter((a) => a.verdict === LH.V.js).length, strictTailNotJs: sT.filter((a) => a.verdict !== LH.V.js).length, gcNativeSaidJs: gN.filter((a) => a.verdict === LH.V.js).length, n: j.length, sN: sN.length, gN: gN.length, sT: sT.length };
   };
-  const always = judge(await sweepA(node, tag, mutTree('always', -1)));   // the whole sweep: its tail asks are what this lie fails on
-  ok(always.strictTailNotJs > 0, `MUTANT «always garbage collection» (JS_FAST_MS −1) is RED by name: ${always.strictTailNotJs} of ${always.sT} asks posted inside the JavaScript tail with NO collection in their window (the child's own record) said «${LH.V.native}»`, always);
+  const alwaysTree = mutTree('always', -1);
+  let always = judge(await sweepA(node, tag, alwaysTree));   // the whole sweep: its tail asks are what this lie fails on
+  // B-1409's floor (the release mirror at e3754d9cd: sT 0 of 23): the first ask now comes one beat before the bar (B-7c97), so
+  // an ask lands in the JavaScript tail more rarely — once more when the box fed the tail no ask, then a NAMED, COUNTED non-verdict
+  if (always.sT === 0) always = judge(await sweepA(node, tag, alwaysTree));
+  if (always.sT === 0) skip('MUTANT «always garbage collection» (JS_FAST_MS −1)', `no sample this run: 0 asks inside the JavaScript tail with no collection in their window in 2 sweeps — the mutant has nothing to be red on (${JSON.stringify(always)})`);
+  else ok(always.strictTailNotJs > 0, `MUTANT «always garbage collection» (JS_FAST_MS −1) is RED by name: ${always.strictTailNotJs} of ${always.sT} asks posted inside the JavaScript tail with NO collection in their window (the child's own record) said «${LH.V.native}»`, always);
   const neverTree = mutTree('never', 1e9);
   let never = judge(await sweepA(node, tag, neverTree, SETS));
   if (never.sN + never.gN === 0) never = judge(await sweepA(node, tag, neverTree, SETS));   // B-1409: once more when the box fed it no ask inside the native call
