@@ -139,6 +139,7 @@ const ROWS = [
   ["src/mounts.js", "MountManager._placeCache", 2, "guarded", "mkdir of the placed vfs cache dir (data/, ~/.cache or the override): an override on a storage mount is refused by the guard"],
   ["src/mounts.js", "MountManager._mountGmail", 1, "guarded", "mkdir of a gmail row's folder (filesystem:false: a LOCAL folder, never a storage root); under a FUSE mount the guard refuses it"],
   ["src/mounts.js", "MountManager._mintViaMc", 2, "local-only", "policyFile = os.tmpdir()/vs-policy-<rand>.json, written and removed by the hub itself"],
+  ["src/mounts.js", "MountManager._cpuTicks", 1, "local-only", "`${procRoot || '/proc'}/<pid>/stat` — /proc (procRoot only a test's planted root; B-e783: one stat line, no memory-map lock)"],
   ["src/node-runtime.js", "*", 7, "local-only", "root = the instance data dir (data/runtime, runtime-boot.js) or the agentd device root; provision runs in runtime-check.mjs / agentd"],
   ["src/opencode-serve.js", "writeJsonAtomic", 3, "local-only", "only caller writeRecord passes recordPath = <dataDir>/opencode-serve.json; dataDir = <checkout>/data (cli-env.js:234)."],
   ["src/opencode-serve.js", "ensureServeCwd", 4, "local-only", "dir = <dataDir>/opencode-serve/cwd (+ .git); dataDir = <checkout>/data (cli-env.js:234)."],

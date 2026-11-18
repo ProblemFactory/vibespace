@@ -82,7 +82,6 @@ export const ROWS = [
   ['src/hosts.js', 'kill -TERM ${p} && echo VS_OK', 'scan', 'vs_is_cli \\$\\{p\\}', 'a remote CLI the owner named (vs_is_cli, same shell)'],
   ['src/mounts.js', "if (verdict) { try { process.kill(pid, 'SIGKILL')", 'scan', '_cpuTicks\\(pid\\)', 'its own rclone (spawn pid, polled every tick)', 14],
   ['src/mounts.js', 'try { process.kill(pid, 0); return Math.floor(process.uptime() * 100); }', 'probe', 'cpu-ticks fallback on no-/proc', 'nothing'],
-  ['src/mounts.js', "try { process.kill(+pid, 'SIGKILL'); } catch {}", 'scan', "readdirSync\\('/proc'\\)", 'an rclone mount/authorize daemon (fresh /proc cmdline scan)', 8, 2],
   ['src/opencode-serve.js', "try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }", 'probe', 'the serve record\'s liveness (verdict reads cmdline beside it)', 'nothing'],
   ['src/opencode-serve.js', '(killPid || ((p, s) => process.kill(p, s)))(pid, sig)', 'legacy', 'PI\\.legacyOnce\\(`opencode serve', 'a recorded opencode serve (signalServe; with a birth it is PI.signalIdentity)', 4, 1, `the serve record's start + bootId (written beside the pid at the spawn tick, carried by adopt) go through signalIdentity; a record from before 2.369.242 falls to the cmdline+uid verdict its caller read, said once — ${RETIRE}`],
   ['src/peer-messaging.js', "try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }", 'probe', 'a peer\'s lock liveness', 'nothing'],

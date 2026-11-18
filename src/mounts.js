@@ -29,6 +29,17 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+// B-e783: the daemons' /proc walk is async and bounded (below); every kill goes through PI.signalIdentity (a recycled pid is
+// never signalled)
+const PI = require('./proc-identity.js');
+// B-e783: one process's stat line → { state, start, comm } or { err } (no memory-map lock: safe for a process asleep in the kernel)
+const procStat = async (root, pid) => { let s; try { s = await fs.promises.readFile(`${root}/${pid}/stat`, 'utf8'); } catch (e) { return { err: e }; } const rest = s.slice(s.lastIndexOf(')') + 2).split(' '); return { state: rest[0], start: Number(rest[19]), comm: s.slice(s.indexOf('(') + 1, s.lastIndexOf(')')) }; };
+const notOurs = (e) => !!e && ['ENOENT', 'ESRCH', 'EACCES', 'EPERM'].includes(e.code);   // ended, or another user's (hidepid): not ours
+const READ_MS = 2000;   // B-e783: one /proc read that has not answered — the walk gives up («can't tell») and never asks that process again
+const CANT_TELL_GAP_MS = 30 * 60e3;   // r9: a «can't tell» entry this old is an episode long over — the next one waits again
+const CANT_TELL_MS = 60000;   // B-e783 r8: a connect waits at most this long on «can't tell» (a sleeper it cannot read may be ANY rclone: a pull mount's, another instance's) — then it connects, said
+const hasProcMemo = new Map();   // no /proc (a hub on macOS): «can't tell» — the walks' callers keep their old answer; asked once per root
+const hasProc = (opts) => { const k = (opts && opts.procRoot) || ''; if (!hasProcMemo.has(k)) hasProcMemo.set(k, PI.hasProc(opts)); return hasProcMemo.get(k); };
 const crypto = require('crypto');
 const { spawn, execFile, execFileSync } = require('child_process');
 // At-rest encryption is THE shared primitive (src/secret-box.js, design
@@ -995,6 +1006,7 @@ class MountManager {
     if (m.parked) this._unpark(m, 'removed');   // B-5ce7: its For-you item resolves with it
     this._killedSaid?.delete(id); try { this.onAnswered?.(m); } catch { }
     try { this.onRemoved?.(m); } catch { }   // its stranded-files notice too (the cap counts live records)
+    this._mountGen?.delete(id); this._cantTell?.delete(mpRemoved);   // B-e783: its generation and any «can't tell» wait leave with the record (after the unmount, which moves it)
     this._state.mounts = this._state.mounts.filter(x => x.id !== id);
     setTimeout(() => this._cleanupEmptyMountpoint(mpRemoved), 1500);
     this._errors.delete(id);
@@ -1202,6 +1214,8 @@ class MountManager {
     // STARTING (2.369.213): a connect while the daemon still rebuilds its
     // cache index JOINS it — never a second daemon, never a kill.
     if (this._starting?.has(id)) return 'starting';
+    this._bumpGen(id);   // B-e783: a connect that really starts — a sweep or probe that walked meanwhile drops its verdict (a press on a mounted or starting record moves nothing)
+    const myGen = this._mountGen.get(id);   // r9: this connect's own turn — the person's Unmount during its walk moves it
     // A row with its OWN mount (Gmail = a sync WORKER writing .eml files; CephFS = a native kernel mount) — not rclone.
     const prow = rowFor(this, m);
     if (prow.mount) return prow.mount(id, this);
@@ -1209,8 +1223,15 @@ class MountManager {
     // mid-scan, a Connect after the old 5 s verdict) is ADOPTED and watched
     // like a fresh spawn: killing it restarted its scan from zero (the
     // owner's three Connect clicks at 16:52, 2026-10-04).
-    let pid0 = 0;
-    try { pid0 = this._daemonPids(this.pathOf(m))[0] || 0; } catch {}
+    const pid0 = await this._adoptable(this.pathOf(m), id);
+    if (pid0 === null) {   // B-e783: a second daemon on one folder is worse than a wait — bounded (CANT_TELL_MS), the ask kept: an edit's or a
+      if (this._mountGen?.get(id) !== myGen || !this._state.mounts.some((x) => x.id === id)) { this._cantTell?.delete(this.pathOf(m)); return false; }   // r9: unmounted or removed meanwhile — the person's word stands, nothing written (the wait the walk wrote back ends too)
+      m.desired = 'mounted'; this._save();   // re-authorize's bounce unmounted first, so the sweep's backoff must ask again
+      const ct = (this._cantTell && this._cantTell.get(this.pathOf(m))) || {};
+      console.warn(`[mounts] mount ${id}: «can't tell» — process ${(ct.pids || []).join(', ') || '(a read that stalled)'} did not answer; waiting, at most ${Math.round(CANT_TELL_MS / 1000)} s from the first`);   // the pids here, never in the row's words (the backoff's auth test reads digits)
+      this._errors.set(id, 'could not tell whether this storage’s previous connection still runs (a process did not answer) — it is tried again by itself');
+      this._notify(); return false;
+    }
     if (pid0) { m.desired = 'mounted'; this._save(); return this._watchStart(m, this.pathOf(m), pid0, opts); }
     // The row's own pre-flight (OneDrive resolves its drive through Graph; a VibeSpace bridge refuses a token THIS
     // instance minted — a self-mount deadlocks the server): `undefined` = go on, anything else is the answer.
@@ -1287,10 +1308,10 @@ class MountManager {
     // still serves this mountpoint (survived a lazy detach), kill it first,
     // or the new spawn either fails or shadows a daemon that keeps failing.
     let rcQueue = null; // the outgoing daemon's LIVE dirty witness (rc vfs/queue) — asked before it is killed
-    if (this._daemonAlive(mp)) {
+    if (await this._daemonAlive(mp, { witness: false })) {
       rcQueue = (await this._rcStats(m)).queue || { error: 'no answer' };
       console.warn(`[mounts] stale daemon still on ${mp} at mount time — killing it`);
-      this._killMountDaemon(mp);
+      await this._killMountDaemon(mp);
       await new Promise((r) => setTimeout(r, 300));
     }
     // WHERE the cache lives is decided HERE, at a remount, after the outgoing daemon is gone (lane vfs-cache-local)
@@ -1300,6 +1321,7 @@ class MountManager {
     const log = this._openMountLog(m.id);
     const child = spawn(this.rcloneBin(), args, { env, detached: true, stdio: ['ignore', log, log] });
     child.unref();
+    this._seedDaemonId(mp, child.pid);   // B-e783: known from its first moment — judged by its stat line, killed without a walk
     fs.closeSync(log);
     m.desired = 'mounted';
     this._errors.delete(id);
@@ -1345,11 +1367,12 @@ class MountManager {
     const T = this._startingT || MountManager.STARTING;
     return new Promise((resolve) => {
       const t0 = Date.now();
-      let mark = this._cpuTicks(pid), markAt = t0;
-      const tick = () => {
+      let mark = null, markAt = t0;   // B-e783: the first tick takes the mark (it runs at t0)
+      const tick = async () => {
         if (this.isMounted(m)) return resolve('mounted');
-        const cpu = this._cpuTicks(pid);
+        const cpu = await this._cpuTicks(pid);
         if (cpu == null) return resolve('died');
+        if (mark == null) mark = cpu;
         const now = Date.now();
         if (cpu - mark >= T.progressTicks) { mark = cpu; markAt = now; }
         const verdict = now - markAt >= T.hungMs ? 'hung' : now - t0 >= T.ceilingMs ? 'ceiling' : null;
@@ -1361,9 +1384,9 @@ class MountManager {
   }
 
   /** utime+stime (clock ticks) of a live process; null when gone/zombie. */
-  _cpuTicks(pid) {
+  _cpuTicks(pid) {   // ONE stat line (no memory-map lock): read as the release did — a pool parked by a wedged mount never stalls a tick (B-e783 r6)
     try {
-      const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf-8');
+      const s = fs.readFileSync(`${(this._procOpts && this._procOpts.procRoot) || '/proc'}/${pid}/stat`, 'utf-8');
       const f = s.slice(s.lastIndexOf(')') + 2).split(' ');
       return (f[0] === 'Z' || f[0] === 'X') ? null : Number(f[11]) + Number(f[12]);
     } catch {
@@ -1406,7 +1429,7 @@ class MountManager {
         ? `rclone made no progress for ${Math.round(T.hungMs / 1000)} s and never mounted — stopped it; will retry`
         : `still not mounted after ${Math.round(T.ceilingMs / 60e3)} min of starting — stopped it; will retry`;
       console.warn(`[mounts] ${r} daemon on ${mp} (never mounted) — killed`);
-      this._killMountDaemon(mp);
+      await this._killMountDaemon(mp);
       this._noteReconnectBackoff(id);
       this._saidKilled(m);   // B-5ce7 (merged B-f230): the STARTING state too — a daemon stopped while it was coming up is said
     }
@@ -1485,7 +1508,7 @@ class MountManager {
       const c = spawn('ls', verb === 'attr' ? ['-d', mp] : [mp], { stdio: 'ignore' });
       const t = setTimeout(() => { this._heldProbes.set(key, { t0 }); try { c.kill('SIGKILL'); } catch {} resolve({ health: 'hung', ms: Date.now() - t0 }); }, timeoutMs);
       c.on('exit', (code) => { clearTimeout(t); this._heldProbes.delete(key); resolve({ health: code === 0 ? 'ok' : 'error', ms: Date.now() - t0 }); });
-      c.on('error', () => { clearTimeout(t); this._heldProbes.delete(key); resolve({ health: 'error', ms: Date.now() - t0 }); });
+      c.on('error', () => { clearTimeout(t); this._heldProbes.delete(key); resolve({ health: 'error', ms: Date.now() - t0, spawnErr: true }); });
     });
   }
   /** Back-compat: true only when the mountpoint HANGS. */
@@ -1568,36 +1591,203 @@ class MountManager {
    *  daemon leaves a ZOMBIE fuse entry in /proc/mounts ("Transport endpoint
    *  is not connected") — isMounted() lies, so recovery must key off the
    *  PROCESS (same exact-argv /proc scan as _killMountDaemon). */
-  _daemonAlive(mp) {
-    try { return this._daemonPids(mp).length > 0; }
-    catch { return true; } // no /proc (non-Linux) — can't tell, assume alive
+  _bumpGen(id) { (this._mountGen || (this._mountGen = new Map())).set(id, ((this._mountGen.get(id)) || 0) + 1); }
+
+  /** Is a daemon serving this mount point? B-e783: «not found» means «dead» in this manager, so the walk's «can't tell» (a
+   *  process it could not read, a read that did not answer) is never «dead» by itself: the sweep (`witness`) then asks the mount
+   *  point itself — a FUSE entry whose daemon is gone fails `ls -d` (ENOTCONN) — and the teardown roads never wait on it (no 4 s
+   *  loop, no false «survived», no rc question for an unknown). No /proc (a hub on macOS): alive, as the release. */
+  async _daemonAlive(mp, { witness = true, attrMs = 0 } = {}) {
+    const st = await this._daemonState(mp);
+    if (st === 'alive' || st === 'noproc') return true;
+    if (st === 'dead') return false;
+    return witness ? !(await this._zombieAt(mp, attrMs)) : false;
   }
 
-  /** Pids of the rclone daemons serving a mountpoint (exact argv); throws without /proc. */
-  _daemonPids(mp) {
-    const out = [];
-    for (const pid of fs.readdirSync('/proc').filter(d => /^\d+$/.test(d))) {
-      let argv;
-      try { argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0'); } catch { continue; }
-      if (argv.includes('mount') && argv.includes(mp) && /rclone/.test(argv[0] || '')) out.push(+pid);
+  /** → 'alive' | 'dead' | 'unknown' | 'noproc'. The daemon RECORDED for this mount point (at its spawn, its adopt, or the last
+   *  walk that named it) is judged first by its stat line — one read, no walk (PI.aliveIdentity: the start time; a recycled pid
+   *  is not it) — then the walk. */
+  async _daemonState(mp) {
+    if (!hasProc(this._procOpts)) return 'noproc';
+    if (this._recordedAlive(mp)) return 'alive';
+    let w; try { w = await this._walk({ mp }); } catch { return 'unknown'; }
+    if (w.ids.length) return 'alive';
+    return w.unread > 0 ? 'unknown' : 'dead';
+  }
+
+  /** The mount point's own answer: a FUSE entry whose daemon is gone fails `ls -d` (ENOTCONN) — a child with the row's own
+   *  patience (the probe's: the held child is shared by its key); a child that never started (`spawnErr`) answers nothing. */
+  async _zombieAt(mp, ms) { try { const r = await this._probeMountpoint(mp, ms || LIVENESS.probeCell(null).attrMs, 'attr'); return !!r && r.health === 'error' && !r.spawnErr; } catch { return false; } }
+
+  /** The recorded daemon of `mp` when its stat line still says it is that process (any state but a zombie); clears a stale one. */
+  _recordedAlive(mp) {
+    const rec = this._daemonIds && this._daemonIds.get(mp);
+    if (!rec) return null;
+    const o = this._procOpts && this._procOpts.procRoot ? { procRoot: this._procOpts.procRoot } : undefined;
+    const a = PI.aliveIdentity(rec, o);
+    if (a === true) return rec;
+    if (a === false) this._daemonIds.delete(mp);
+    return null;
+  }
+  _record(mp, id) { (this._daemonIds || (this._daemonIds = new Map())).set(mp, { pid: id.pid, starttime: id.starttime }); }
+
+  /** The daemon THIS hub spawned is known from its first moment: the pid and its start time — ONE stat line, read at once (no
+   *  memory-map lock; never through the pool, which a wedged mount may hold — the record is what judges and kills with no walk). */
+  _seedDaemonId(mp, pid) {
+    if (!pid) return;
+    const st = PI.starttimeOf(pid, this._procOpts && this._procOpts.procRoot ? { procRoot: this._procOpts.procRoot } : undefined);
+    if (st != null) this._record(mp, { pid, starttime: st });
+  }
+
+  /** B-e783: the daemon a connect ADOPTS — its pid, 0 (none: spawn; no /proc: spawn, as the release), or null («can't tell»: a
+   *  process the walk could not read, a read that stalled before it named one — neither adopt nor spawn, for CANT_TELL_MS at most:
+   *  the sleeper may be any rclone, a pull mount's or another instance's, so the wait ends and the connect goes on, said). */
+  async _adoptable(mp, id = '') {
+    const ct = this._cantTell || (this._cantTell = new Map());
+    let pids;
+    try { const p = (await this._daemonPids(mp, { strict: true }))[0] || 0; ct.delete(mp); return p; }
+    catch (e) {
+      if (e && e.partial && e.partial.length) { ct.delete(mp); return e.partial[0].pid; }
+      if (e && e.code === 'no_proc') return 0;
+      pids = (e && e.unreadPids) || [];
+    }
+    const was = ct.get(mp), now = Date.now();   // r8: «can't tell» may be ANY rclone asleep (a pull mount's, another instance's) — bounded
+    const since = was && now - was.at < CANT_TELL_GAP_MS ? was.since : now;   // r9: from the FIRST refusal of this episode
+    ct.set(mp, { since, at: now, pids });
+    if (now - since < (this._cantTellMs ?? CANT_TELL_MS)) return null;
+    ct.delete(mp);
+    console.warn(`[mounts] mount ${id}: «can't tell» for ${Math.round((Date.now() - since) / 1000)} s (unread: ${pids.join(', ') || 'a read that stalled'}) — connecting`);   // the record id, never its name
+    return 0;
+  }
+
+  /** Pids of the rclone daemons serving a mountpoint — the recorded one if it still runs, else the walk; throws without /proc
+   *  (`strict`: also when the walk named none but could not read a process — `walk_unknown`). */
+  async _daemonPids(mp, { strict = false } = {}) {
+    if (!hasProc(this._procOpts)) throw Object.assign(new Error('no /proc'), { code: 'no_proc' });
+    const rec = this._recordedAlive(mp);
+    if (rec) return [rec.pid];
+    const w = await this._walk({ mp });
+    if (w.ids.length) this._record(mp, w.ids[0]);
+    else if (strict && w.unread > 0) throw Object.assign(new Error('a process could not be read'), { code: 'walk_unknown', partial: [], unreadPids: w.unreadPids });
+    return w.ids.map((x) => x.pid);
+  }
+
+  /** B-e783: THE walk of /proc for the daemons of a mount point (or, `authorize`, for orphaned rclone authorize processes) —
+   *  ASYNC, one process at a time, BOUNDED per read. Its rules, each the answer to a read that refuted an earlier round:
+   *  · OUR daemons are named by what they HOLD: the spawn gives each the mount's own log as stdout (<logDir>/<id>.log, .log.1
+   *    after a rotation, « (deleted)» after a second), so readlink(/proc/<pid>/fd/1) says whose record it serves — in ANY state
+   *    (stat and readlink take no memory-map lock): an rclone by its comm, of a record on this mount point.
+   *  · Any OTHER process is judged by the release's rule (its argv: an rclone, «mount», the mount point) — an rclone by its comm
+   *    only, and only while NO thread of it sleeps in the kernel (a command line read takes the memory map's lock and parks a
+   *    pool thread for as long as a sleeper holds it). An rclone it cannot read safely is `unread` (the caller's «can't tell»).
+   *  · fd/1 refused (EACCES/EPERM): another user's process is not ours; ours (its /proc dir is our uid — a non-dumpable rclone)
+   *    is judged by its argv. A process that ended is not ours; any other read error is `unread`.
+   *  · Every read has READ_MS: one that does not answer ends the walk (a throw carrying what it named so far, `partial`) and its
+   *    process is never read again while it lives; the walk stops there. A daemon this manager SIGKILLed is never named again
+   *    while it lingers (never adopted). `_procOpts` = a suite's planted /proc and kill. → { ids: [{pid, starttime, state}], unread } */
+  async _walk({ mp = null, authorize = false } = {}) {
+    if (!hasProc(this._procOpts)) throw new Error('no /proc');
+    const root = (this._procOpts && this._procOpts.procRoot) || '/proc';
+    let owners = new Map();   // log path as readlink states it → record id (asked inside the walk: its read is bounded too)
+    const here = new Set(authorize ? [] : this._state.mounts.filter((x) => { try { return this.pathOf(x) === mp; } catch { return false; } }).map((x) => x.id));
+    const killed = this._killed || (this._killed = new Map()), skip = this._unreadable || (this._unreadable = new Map());
+    const myUid = typeof process.getuid === 'function' ? process.getuid() : null;
+    const ids = [], seen = new Set();
+    let unread = 0, inFlight = null, stalled = null, timer = null, stopped = false;
+    const unreadPids = [], cant = (pid) => { unread++; unreadPids.push(Number(pid)); };
+    const read = (key, p) => { inFlight = key; clearTimeout(timer); timer = setTimeout(() => stalled && stalled(), this._readMs || READ_MS); if (timer.unref) timer.unref(); return p.finally(() => { inFlight = null; clearTimeout(timer); }); };
+    const stall = new Promise((_, rej) => { stalled = () => rej(Object.assign(new Error('a /proc read did not answer'), { code: 'walk_stalled' })); });
+    const work = (async () => {
+      if (!authorize) owners = await this._logOwners(read);
+      if (stopped) return;
+      const pids = (await read(null, fs.promises.readdir(root))).filter((n) => /^\d+$/.test(n) && Number(n) !== process.pid);
+      for (const pid of pids) {
+        if (stopped) return;
+        seen.add(pid);
+        if (!authorize) {
+          let to = null;
+          try { to = String(await read(null, fs.promises.readlink(`${root}/${pid}/fd/1`))).replace(/ \(deleted\)$/, ''); }
+          catch (e) {
+            if (e && (e.code === 'EACCES' || e.code === 'EPERM')) {   // another user's — or ours made non-dumpable (an rclone given file caps): its owner says
+              const o = await read(null, fs.promises.stat(`${root}/${pid}`)).catch(() => null);
+              if (!o || myUid == null || o.uid !== myUid) continue;
+            }
+          }
+          if (stopped) return;
+          if (to && owners.has(to)) {
+            if (!here.has(owners.get(to))) continue;   // another record's daemon: never this mount point's, never «can't tell»
+            const st = await read(null, procStat(root, pid));
+            if (st.err || !/rclone/.test(st.comm) || st.state === 'Z' || st.state === 'X' || killed.has(pid + ':' + st.start)) continue;   // a child holding the log (a sleep) is no daemon
+            ids.push({ pid: Number(pid), starttime: st.start, state: st.state });
+            continue;
+          }
+        }
+        const st = await read(null, procStat(root, pid));
+        if (stopped) return;
+        if (st.err) { if (!notOurs(st.err)) cant(pid); continue; }
+        if (!/rclone/.test(st.comm) || st.state === 'Z' || st.state === 'X') continue;
+        const key = pid + ':' + st.start;
+        if (killed.has(key)) continue;
+        if (skip.has(key) || st.state === 'D' || await this._threadAsleep(root, pid, read)) { cant(pid); continue; }
+        if (stopped) return;
+        let argv;
+        try { argv = String(await read(key, fs.promises.readFile(`${root}/${pid}/cmdline`, 'utf8'))).split('\0'); } catch (e) { if (!notOurs(e)) cant(pid); continue; }
+        const bin = /rclone/.test(path.basename(String(argv[0] || '')));
+        if (bin && (authorize ? argv.includes('authorize') : (argv.includes('mount') && argv.includes(mp)))) ids.push({ pid: Number(pid), starttime: st.start, state: st.state });
+      }
+    })();
+    try { await Promise.race([work, stall]); }
+    catch (e) {
+      stopped = true;
+      if (e && e.code === 'walk_stalled' && inFlight) skip.set(inFlight, Date.now());
+      work.catch(() => { });
+      throw Object.assign(e, { partial: ids.slice(), unreadPids: unreadPids.concat(inFlight ? [Number(String(inFlight).split(':')[0])] : []) });
+    }
+    finally { clearTimeout(timer); }
+    for (const k of [...skip.keys()]) if (!seen.has(k.split(':')[0])) skip.delete(k);   // that process is gone: forgotten
+    const now = Date.now();
+    for (const [k, at] of killed) if (now - at > 60000) killed.delete(k);   // a killed daemon is gone well within a minute
+    return { ids, unread, unreadPids };
+  }
+
+  /** Any thread of `pid` asleep in the kernel (its tasks' stat lines — no memory-map lock): its command line must not be read. */
+  async _threadAsleep(root, pid, read) {
+    let tasks = [];
+    try { tasks = await read(null, fs.promises.readdir(`${root}/${pid}/task`)); } catch { return false; }
+    for (const t of tasks) { const st = await read(null, procStat(`${root}/${pid}/task`, t)); if (!st.err && st.state === 'D') return true; }
+    return false;
+  }
+
+  /** Every record's own log — its daemon's stdout — as readlink states it (the log dir and its real path, the rotation): → id. */
+  async _logOwners(read = (k, p) => p) {
+    if (!this._logDirReal) this._logDirReal = await read(null, fs.promises.realpath(this._logDir)).catch(() => null);   // a dir not made yet: asked again; bounded like every read of the walk
+    const out = new Map();
+    for (const m of this._state.mounts) {
+      for (const d of new Set([this._logDir, this._logDirReal].filter(Boolean))) { const f = path.join(d, `${m.id}.log`); out.set(f, m.id); out.set(f + '.1', m.id); }
     }
     return out;
   }
 
-  /** Kill the detached rclone daemon serving a mountpoint (a WEDGED daemon
-   *  survives fusermount -uz and keeps dial-retrying forever). Exact-argv
-   *  match via /proc — pkill -f patterns can't safely quote arbitrary paths. */
-  _killMountDaemon(mp) {
-    try {
-      for (const pid of fs.readdirSync('/proc').filter(d => /^\d+$/.test(d))) {
-        let argv;
-        try { argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0'); } catch { continue; }
-        if (argv.includes('mount') && argv.includes(mp) && /rclone/.test(argv[0] || '')) {
-          try { process.kill(+pid, 'SIGKILL'); } catch {}
-        }
-      }
-    } catch {} // non-Linux: no /proc — daemon exits with the unmount anyway
+  // B-e783: the kill of a mount point's daemons — the RECORDED one first (judged by its stat line at the kill: no walk, so a pool
+  // parked by a wedged mount never keeps it alive), then every one the walk names (awake or asleep in the kernel: a FUSE wait is
+  // killable; what a stalled walk named so far still counts), each as itself (PI.signalIdentity), and remembered so the next
+  // mount never adopts it while it lingers. → the pids signalled; non-Linux: no /proc — [] (the daemon exits with the unmount)
+  async _killMountDaemon(mp) {
+    const o = this._procOpts || {}, hit = [];
+    const opts = { ...(o.procRoot ? { procRoot: o.procRoot } : {}), ...(o.kill ? { kill: o.kill } : {}), what: 'the daemon of a storage mount point' };
+    const sig = (id) => {
+      if (!id || hit.includes(id.pid)) return;
+      const r = PI.signalIdentity(id, 'SIGKILL', opts);
+      if (r.ok) { hit.push(id.pid); (this._killed || (this._killed = new Map())).set(id.pid + ':' + id.starttime, Date.now()); }
+    };
+    if (!hasProc(this._procOpts)) return hit;
+    sig(this._daemonIds && this._daemonIds.get(mp));
+    let ids = []; try { ids = (await this._walk({ mp })).ids; } catch (e) { ids = (e && e.partial) || []; }
+    for (const id of ids) sig(id);
+    if (hit.length && this._daemonIds) this._daemonIds.delete(mp);
+    return hit;
   }
+
 
   /** Gather ONE sweep's witnesses for a mounted record and apply the table's verdict (lane mount-liveness): attr =
    *  `ls -d` (liveness — answered without a backend call), list = `ls` (readiness), backend = a fresh `rclone lsf` only
@@ -1605,8 +1795,9 @@ class MountManager {
   async _probeLiveness(m, mp) {
     const row = rowFor(this, m), P = LIVENESS.probeCell(row);
     let pid = 0;
-    try { pid = row.daemon === false ? 0 : (this._daemonPids(mp)[0] || 0); } catch {}
-    const cpu0 = pid ? this._cpuTicks(pid) : null;
+    const gen0 = this._mountGen?.get(m.id);   // B-e783: a teardown is never applied to a mount that moved while the witnesses were gathered
+    try { pid = row.daemon === false ? 0 : ((await this._daemonPids(mp))[0] || 0); } catch {}
+    const cpu0 = pid ? await this._cpuTicks(pid) : null;
     const st = (r) => { const x = typeof r === 'object' && r ? r : { health: r }; return { state: x.health || 'skipped', ms: x.ms || 0, held: !!x.held }; };
     const attr = st(await this._probeMountpoint(mp, P.attrMs, 'attr'));
     const list = attr.state === 'hung' ? st('skipped') : st(await this._probeMountpoint(mp, P.listMs));
@@ -1616,9 +1807,9 @@ class MountManager {
       const said = await this._probeBackendAccess(m);   // ok · denied (an answer: the vendor is reachable) · hung · unknown (inconclusive)
       backend = { state: said === 'ok' ? 'ok' : said === 'denied' ? 'error' : said === 'hung' ? 'hung' : 'skipped', ms: Date.now() - t0, held: false };
     }
-    const cpu1 = pid ? this._cpuTicks(pid) : null;
+    const cpu1 = pid ? await this._cpuTicks(pid) : null;
     const T = this._startingT || MountManager.STARTING;
-    const w = { daemonAlive: true, attr, list, backend, cpuTicks: cpu0 != null && cpu1 != null ? cpu1 - cpu0 : null, progressTicks: T.progressTicks, now: Date.now() };
+    const w = { daemonAlive: true, attr, list, backend, cpuTicks: cpu0 != null && cpu1 != null ? cpu1 - cpu0 : null, progressTicks: T.progressTicks, now: Date.now(), gen0 };
     const v = await this._livenessApply(m, mp, w);
     return { ...v, health: list.state };
   }
@@ -1628,6 +1819,7 @@ class MountManager {
   async _livenessApply(m, mp, w) {
     this._liveness = this._liveness || new Map();
     const v = LIVENESS.livenessStep(this._liveness.get(m.id)?.state, w, rowFor(this, m));
+    if (!this._state.mounts.some((x) => x.id === m.id) || (w && 'gen0' in w && this._mountGen?.get(m.id) !== w.gen0)) return { ...v, verdict: 'moved', teardown: false, park: false, dropped: true };   // B-e783: removed, or moved while its witnesses were gathered — dropped whole (no strikes, no words, no teardown; its callers see no verdict to act on)
     this._liveness.set(m.id, { state: v.state, verdict: v.verdict, strikes: v.strikes.n, lastMs: Math.round((w.list && w.list.state !== 'skipped' ? w.list.ms : w.attr?.ms) || 0), at: Date.now(), seq: (this._livenessSeq = (this._livenessSeq || 0) + 1) });   // `seq`: B-5ce7's Reconnect reads only a verdict of THIS connect (a counter, never the clock: two verdicts in one millisecond are told apart)
     if (v.verdict === 'alive') {
       if (v.unblock) this.unblockPath(mp);
@@ -1647,7 +1839,7 @@ class MountManager {
       // B-5ce7: unless the verdict PARKS (a wedge: the reconnect re-wedges — the flap loop): kept disconnected, said, a For-you
       // item with the Reconnect door; nothing automatic connects it again
       await this.unmount(m.id, { internal: true });
-      this._killMountDaemon(mp);
+      await this._killMountDaemon(mp);
       this._forgetHeldProbes(mp);   // r1 #11: a stuck `ls` of the OLD daemon must not read «hung (still)» on the next mount
       // r1 #10: the teardown awaited up to seconds — a person's Unmount / Remove in that window wins (no park, no backoff)
       const live = this._state.mounts.find((x) => x.id === m.id);
@@ -1768,7 +1960,11 @@ class MountManager {
         // would read the zombie's ENOTCONN as an access error, poisoning the
         // record with a "revoked?" message that blocks auto-remount (found by
         // the 2.110.0 e2e). Overwrite any stale error and reconnect NOW.
-        if (rowFor(this, m).daemon !== false && !this._daemonAlive(mp)) {
+        const gen0 = this._mountGen?.get(m.id);
+        if (rowFor(this, m).daemon !== false && !(await this._daemonAlive(mp, { attrMs: LIVENESS.probeCell(rowFor(this, m)).attrMs }))) {
+          // B-e783: the walk was awaited — a mount that began STARTING or CONNECTING meanwhile, that the person unmounted or
+          // connected again (its generation moved), is not dead
+          if (this._starting?.has(m.id) || this._connecting?.has(m.id) || !this.isMounted(m) || this._mountGen?.get(m.id) !== gen0) continue;
           this._livenessApply(m, mp, { daemonAlive: false, now: Date.now() });
           await this.unmount(m.id, { internal: true }); // clears the zombie entry
           if (m.desired === 'mounted') await this._maybeAutoRemount(m);
@@ -2246,6 +2442,7 @@ class MountManager {
 
   unmount(id, opts = {}) {
     const m = this._get(id);
+    if (!(opts && opts.internal)) { this._bumpGen(id); this._cantTell?.delete(this.pathOf(m)); }   // B-e783: the person's Unmount — a sweep that walked meanwhile drops its verdict; a «can't tell» wait ends
     const mp = this.pathOf(m);
     // internal teardown (hang defense / reconnect cycle) must NOT rewrite the
     // user's intent — only an explicit user Unmount clears desired.
@@ -2277,10 +2474,10 @@ class MountManager {
       // promise resolves — bounce callers mount() right after, and a kill
       // fired later would murder the fresh daemon instead.
       const ensureDaemonGone = async (ok) => {
-        for (let i = 0; i < 8 && this._daemonAlive(mp); i++) await new Promise((r) => setTimeout(r, 500));
-        if (this._daemonAlive(mp)) {
+        for (let i = 0; i < 8 && (await this._daemonAlive(mp, { witness: false })); i++) await new Promise((r) => setTimeout(r, 500));
+        if (await this._daemonAlive(mp, { witness: false })) {
           console.warn(`[mounts] daemon survived lazy unmount of ${mp} — killing it`);
-          this._killMountDaemon(mp);
+          await this._killMountDaemon(mp);
           await new Promise((r) => setTimeout(r, 300));
         }
         resolve(finish(ok));
@@ -2521,21 +2718,25 @@ class MountManager {
   // "did not produce an auth URL" until someone kills it by hand. Sweep
   // leftovers by exact /proc cmdline match (the _killMountDaemon pattern)
   // before each spawn; our own live child is nulled by cancelDriveAuth first.
-  _killOrphanAuthorize() {
-    try {
-      for (const pid of fs.readdirSync('/proc').filter(d => /^\d+$/.test(d))) {
-        let argv;
-        try { argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0'); } catch { continue; }
-        if (argv.includes('authorize') && /rclone/.test(argv[0] || '')) {
-          try { process.kill(+pid, 'SIGKILL'); } catch {}
-        }
-      }
-    } catch {} // non-Linux: no /proc — the orphan clears with the machine
+  // B-e783: off the loop — the same walk asked for an rclone AUTHORIZE (its argv), each kill re-checked and through
+  // PI.signalIdentity; non-Linux: no /proc — [] (the orphan clears with the machine)
+  async _killOrphanAuthorize() {   // silent, as the release's
+    const o = this._procOpts || {}, hit = [];
+    let ids = []; try { ids = (await this._walk({ authorize: true })).ids; } catch (e) { ids = (e && e.partial) || []; }
+    for (const id of ids) {
+      const r = PI.signalIdentity(id, 'SIGKILL', { ...(o.procRoot ? { procRoot: o.procRoot } : {}), ...(o.kill ? { kill: o.kill } : {}), what: 'an orphaned rclone authorize' });
+      if (r.ok) hit.push(id.pid);
+    }
+    return hit;
   }
 
-  startDriveAuth({ backend = 'drive', clientId, clientSecret, clientPreset } = {}) {
+
+  async startDriveAuth({ backend = 'drive', clientId, clientSecret, clientPreset } = {}) {
     this.cancelDriveAuth();
-    this._killOrphanAuthorize();
+    const gen = this._driveAuthGen;
+    await this._killOrphanAuthorize();   // B-e783: the orphans are gone BEFORE the spawn (the authorize port)
+    // r2: a Cancel, or a newer press, while the sweep ran — that one decides; this press spawns nothing
+    if (gen !== this._driveAuthGen) return { error: 'the sign-in was cancelled or started again' };
     this._driveAuthPreset = clientPreset || null;
     // `rclone authorize "<backend>" [<id> <secret>]`. For drive, no explicit
     // client falls back to the instance-preset client (VIBESPACE_GDRIVE_*);
@@ -2701,6 +2902,7 @@ class MountManager {
   }
 
   cancelDriveAuth() {
+    this._driveAuthGen = (this._driveAuthGen || 0) + 1;   // B-e783 r2: a press still sweeping its orphans spawns nothing
     const st = this._driveAuth;
     if (st) { clearTimeout(st.timer); try { st.child.kill(); } catch {} }
     this._driveAuth = null;

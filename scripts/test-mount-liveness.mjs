@@ -416,7 +416,7 @@ async function killedLegs(MM, tag) {   // the merged B-f230: a hung process stop
   ok(!K.err && JSON.stringify(K.answered) === JSON.stringify([['killed', 'od'], ['answered', 'od']]), '⑦ (B-f230) …reconnected by itself (no park), and the notice resolves at its next answer', JSON.stringify(K.answered || K.err));
   ok(!K.err && K.stranded && K.stranded[0] === 'stranded' && K.stranded[2] === '/x/od.stranded-20261117T2340' && typeof K.stranded[3] === 'string' && K.stranded[3].length > 0, '⑦ (B-f230) stranded files moved aside ⇒ the producer told where (kept in For-you, not a toast only)', JSON.stringify(K.stranded || K.err));
   const msrc = fs.readFileSync(MOUNTS, 'utf8');
-  ok(/console\.warn\(`\[mounts\] \$\{r\} daemon on \$\{mp\} \(never mounted\) — killed`\);\n\s*this\._killMountDaemon\(mp\);\n\s*this\._noteReconnectBackoff\(id\);\n\s*this\._saidKilled\(m\);/.test(msrc)
+  ok(/console\.warn\(`\[mounts\] \$\{r\} daemon on \$\{mp\} \(never mounted\) — killed`\);\n\s*await this\._killMountDaemon\(mp\);\n\s*this\._noteReconnectBackoff\(id\);\n\s*this\._saidKilled\(m\);/.test(msrc)
     && /if \(v\.verdict === 'dead' \|\| v\.verdict === 'unreachable'\) this\._saidKilled\(live\);/.test(msrc) && /const dest = await this\._ensureMountpointDir\(mp, \{ quarantine: true \}\);[^\n]*\n\s*if \(dest\) this\._noteStranded\(m, dest\);/.test(msrc),
     '⑦ (B-f230) every road that stops a mount\'s process says it: the STARTING hung / ceiling kill, the dead and the unreachable-ceiling teardowns; a CephFS mount\'s stranded files too (r1 #4, #19)');
   const os = require('node:os');
