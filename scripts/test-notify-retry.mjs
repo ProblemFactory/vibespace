@@ -27,8 +27,9 @@ import { scratchDir } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const skip = (n) => { skipped++; console.log('  - SKIP ' + n); };   // B-7f97 cure: a skip is NEVER a pass — named, and counted apart in the summary
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** block THIS loop synchronously — the shape of a busy server (load 100+ on the owner's box) */
 const stall = (ms) => { const sab = new SharedArrayBuffer(4); Atomics.wait(new Int32Array(sab), 0, 0, ms); };
@@ -107,7 +108,7 @@ const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createSer
 {
   // (e) a FULL backlog — the listener is alive and not accepting (a CLI that stopped accepting): EAGAIN, transient
   const s = await stub('full', () => { });
-  if (s.skip) ok(true, '(e) SKIP — ' + s.skip);
+  if (s.skip) skip('(e) ' + s.skip);
   else {
     const r = await PM.postToPeer(peerOf(s), 'x', { timeoutMs: 500 });
     ok(r.ok === false && r.transient === true && r.phase === 'connect' && r.code === 'EAGAIN', '(e) a full backlog: EAGAIN at once, transient, phase connect (measured: never a hang)', JSON.stringify(r));
@@ -123,12 +124,19 @@ const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createSer
   // its own bound (STALL_MS, judged after the loop's pending phase — a write that completed is never read as a stall). The
   // frame is twice that + 1 MB; a peer that takes CAP without a stall says so and the two legs SKIP by name.
   const CHUNK = 64 * 1024, CAP = 16 * 1024 * 1024, STALL_MS = 150;
-  const takesBeforeStall = async (st) => {
+  const takesBeforeStall = async (st, cap = CAP) => {
     const c = net.connect(st.sockPath); let err = null; c.on('error', (e) => { err = e; });
-    await new Promise((res) => { c.once('connect', res); setTimeout(res, 2000).unref(); });
+    await new Promise((res) => { const t = setTimeout(res, 2000); t.unref(); c.once('connect', () => { clearTimeout(t); res(); }); });
     const buf = Buffer.alloc(CHUNK, 0x79); let took = 0, stalled = false;
-    while (!err && !stalled && took < CAP) {
-      const done = await new Promise((res) => { let answered = false; const t = setTimeout(() => setImmediate(() => res(answered)), STALL_MS); c.write(buf, (e) => { answered = !e; if (e) err = err || e; if (answered) { clearTimeout(t); res(true); } }); });
+    while (!err && !stalled && took < cap) {
+      // a stall = no answer within STALL_MS, CONFIRMED by a second STALL_MS (each judged after the loop's pending phase): one slow
+      // write on a loaded box is not a stall, so the measure never comes out short of the peer's real take
+      const done = await new Promise((res) => {
+        let answered = false, t = null;
+        const judge = (second) => setImmediate(() => { if (answered) res(true); else if (second) res(false); else t = setTimeout(() => judge(true), STALL_MS); });
+        t = setTimeout(() => judge(false), STALL_MS);
+        c.write(buf, (e) => { if (e) err = err || e; else { answered = true; clearTimeout(t); res(true); } });
+      });
       if (done) took += CHUNK; else stalled = !err;
     }
     c.destroy();
@@ -140,8 +148,8 @@ const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createSer
   const s = await stub('noread', (c) => { c.pause(); });
   if (m.err) ok(false, `(f) the measuring socket failed (${m.err}) — nothing measured`);
   else if (!m.stalled) {
-    ok(true, `(f) SKIP — a never-reading peer here took ${MB(CAP)} MB without a stall: no frame this leg builds can stall the write on this machine`);
-    ok(true, '(f) SKIP — …and so no `late` to measure');
+    skip(`(f) a never-reading peer here took ${MB(CAP)} MB without a stall: no frame this leg builds can stall the write on this machine`);
+    skip('(f) …and so no `late` to measure');
   } else {
     const frameBytes = 2 * m.took + (1 << 20);
     const big = 'y'.repeat(frameBytes);
@@ -157,7 +165,7 @@ const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createSer
   const BIG = 6 * 1024 * 1024;
   const lateStub = () => stub('late-pause', (c) => { let got = 0; c.on('data', (d) => { got += d.length; if (got >= BIG) c.pause(); }); });
   const sb = await lateStub();
-  const mb = await takesBeforeStall(sb); sb.close();
+  const mb = await takesBeforeStall(sb, CAP + BIG); sb.close();   // its OWN bound: that peer takes BIG more than a never-reading one
   const [sf, ss] = [await lateStub(), await lateStub()];
   const [fixed, sized] = await Promise.all([
     PM.postToPeer(peerOf(sf), 'y'.repeat(4 * 1024 * 1024), { timeoutMs: 3000 }),
@@ -165,7 +173,9 @@ const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createSer
   ]);
   sf.close(); ss.close();
   ok(fixed.ok === true, `(f) CONTROL: the fixed 4 MB frame over a peer that takes 6 MB is delivered (${fixed.phase}) — the leg as it was is red where the buffers are larger (red)`, JSON.stringify(fixed));
-  ok(mb.stalled && mb.took >= BIG && !!sized && sized.ok === false && sized.reason === 'timeout' && sized.phase === 'write', `(f) CONTROL: …and the frame sized by the measurement there (${MB(2 * mb.took + (1 << 20))} MB over the ${MB(mb.took)} MB that peer takes) still times out in the write phase`, JSON.stringify({ mb, sized }));
+  // B-7f97 cure (主开发 09:15Z, three readers): the machine the skip exists for skips HERE too — never a red on its buffers
+  if (!mb.err && !mb.stalled) skip(`(f) CONTROL — a peer that reads 6 MB here took ${MB(CAP + BIG)} MB without a stall: no sized frame can stall the write on this machine`);
+  else ok(mb.stalled && mb.took >= BIG && !!sized && sized.ok === false && sized.reason === 'timeout' && sized.phase === 'write', `(f) CONTROL: …and the frame sized by the measurement there (${MB(2 * mb.took + (1 << 20))} MB over the ${MB(mb.took)} MB that peer takes) still times out in the write phase`, JSON.stringify({ mb, sized }));
 }
 {
   // (g) the frame flushed, then the peer RESETS: the frame is in the kernel — never a failure, the reset NAMED
@@ -1926,5 +1936,5 @@ console.log('\n§W wiring pins');
   }
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${pass} passed, ${fail} failed${skipped ? ` (${skipped} skipped, each named above)` : ''}`);
 process.exit(fail ? 1 : 0);
