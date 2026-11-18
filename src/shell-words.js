@@ -919,10 +919,13 @@ const EVAL_ARITH = new Set(['let', 'integer', 'float']);
 const DECLARERS = new Set(['declare', 'typeset', 'local', 'export', 'readonly']);
 const ARITH_TESTS = new Set(['-eq', '-ne', '-lt', '-le', '-gt', '-ge']);
 /** B-e779: is `name` read by an evaluator in `text` past `from` — inside a SUBSCRIPT's span (`a[$x]`, `"a[$i]"`), inside
- *  arithmetic (`(( … ))`, `$(( … ))`, `$[ … ]`), or by an evaluating command (`cmds`)? A name is a name, never a part of
- *  a word (`MSG.txt`, `my-MSG`). Linear: each span read once. */
+ *  arithmetic (`(( … ))`, `$(( … ))`, `$[ … ]`), or by an evaluating command (`cmds`)? Linear: each span read once. LEFT, named:
+ *  `source` / `.` no longer count (a value handed to `source <(echo "$x")` runs unread); zsh's `[` / `test` evaluates its
+ *  `-eq` operands arithmetically (bash's does not) — not counted. */
 function valueEvaluated(name, text, from, cmds) {
-  const re = new RegExp(`(^|[^A-Za-z0-9_./-])${name}(?![A-Za-z0-9_./-])`), ref = new RegExp(`\\$\\{?[=~^]*${name}(?![A-Za-z0-9_])`);
+  // the follow-up's regression (verdict 02:27Z): in a subscript, arithmetic and the arithmetic commands the dash and the slash
+  // are OPERATORS (`x-1`, `x/2`) — the bare name is bounded by name characters only there, never by `.` / `/` / `-`
+  const re = new RegExp(`(^|[^A-Za-z0-9_])${name}(?![A-Za-z0-9_])`), ref = new RegExp(`\\$\\{?[=~^]*${name}(?![A-Za-z0-9_])`);
   const t = text.slice(from);
   let seen = -1;
   for (const m of t.matchAll(SUB_START)) {

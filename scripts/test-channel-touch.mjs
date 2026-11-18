@@ -3315,10 +3315,13 @@ await section('⑬', async () => {
     // the readers' should (00:05Z): the arithmetic evaluators — the declare family's integer form, `[[`'s arithmetic operand
     V8: ['param-value', `x='$(${CLIR} &)'; declare -i n=$x`],
     V9: ['param-value', `x='$(${CLIR} &)'; [[ $x -eq 0 ]]`],
+    // the follow-up's regression (verdict 02:27Z): in arithmetic the dash and the slash are operators — the name is seen
+    V10: ['param-value', `x='$(${CLIR} &)'; echo $((x-1))`],
+    V11: ['param-value', `x='$(${CLIR} &)'; let y=x/2`],
   };
   const e779 = Object.fromEntries(Object.entries(E779).map(([k, [why, l]]) => [k, { why: unknownOf(T, l).map((u) => u.why), exact: T.channelsRuns(l).length, may: mayOf(T, l).length, inert: T.runsNothing(l) }]));
   ok(Object.entries(E779).every(([k, [why]]) => e779[k].why.includes(why) && !e779[k].exact && (k === 'H3' ? e779[k].may === 0 : e779[k].may > 0) && !e779[k].inert),
-    'B-e779 THE ROW\'S SHAPES: a parameter in command position (H1 `${x:-vibespace-channels} read …`, H2 `CMD=vibespace-channels; $CMD read …`, H3 `"${CMD}" read …` — H3 names nothing: could run, never inert; H4 / H5 / H6 a name a default or a literal SPLITS — named by the head\'s readings; r1: H7 / H8 under `find -exec` / `-execdir`, H9–H11 zsh\'s `$=` `$~` `$^`, H12 a split behind a quote, H13 an alternate `:+`) and a value with a literal substitution an EVALUATOR reads (V1 `let "a[$x]=1"`, V2 `printf -v "a[$i]"`, V3 `eval echo $x`, V4 a `local`; r1: V5 `x+=`, V6 `a[0]=`, V7 a shell\'s `-c` script; the readers\' should: V8 `declare -i`, V9 `[[ $x -eq 0 ]]`) — UNKNOWN by its reason, no exact run, may run the CLI, never inert (base: exact-empty, may none)', e779);
+    'B-e779 THE ROW\'S SHAPES: a parameter in command position (H1 `${x:-vibespace-channels} read …`, H2 `CMD=vibespace-channels; $CMD read …`, H3 `"${CMD}" read …` — H3 names nothing: could run, never inert; H4 / H5 / H6 a name a default or a literal SPLITS — named by the head\'s readings; r1: H7 / H8 under `find -exec` / `-execdir`, H9–H11 zsh\'s `$=` `$~` `$^`, H12 a split behind a quote, H13 an alternate `:+`) and a value with a literal substitution an EVALUATOR reads (V1 `let "a[$x]=1"`, V2 `printf -v "a[$i]"`, V3 `eval echo $x`, V4 a `local`; r1: V5 `x+=`, V6 `a[0]=`, V7 a shell\'s `-c` script; the readers\' should: V8 `declare -i`, V9 `[[ $x -eq 0 ]]`; the follow-up\'s regression: V10 `$((x-1))`, V11 `let y=x/2`) — UNKNOWN by its reason, no exact run, may run the CLI, never inert (base: exact-empty, may none)', e779);
   const KEPT779 = {
     lit: `"$HOME/bin/vibespace-channels" read lark/inbox`,
     dir: `$(npm bin)/eslint x.js && ${CLIR}`,
@@ -3344,8 +3347,8 @@ await section('⑬', async () => {
   const noVal779 = sw('e779-value', "    if (valueEvaluated(x.name, text, x.end, cmds)) { opaque('param-value', x.end); break; }", '    ');
   const noSplit779 = sw('e779-split', "if (!raw.includes(CLI) && headReads(raw, assigned).includes(CLI)) heads.push(", 'if (false) heads.push(');
   const lost779 = (M, ks) => ks.every((k) => !M.channelsMayRun(E779[k][1]).length);
-  ok(lost779(noHead779, ['H1', 'H2', 'H4', 'H5', 'H7', 'H8', 'H9', 'H10', 'H11', 'H12', 'H13']) && lost779(noVal779, ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9']) && lost779(noSplit779, ['H4', 'H5', 'H6', 'H12', 'H13']) && noSplit779.channelsMayRun(E779.H1[1]).length > 0,
-    'CONTROLS B-e779: the param-head reason off ⇒ H1 H2 H4 H5 H7–H13 may run nothing (the base\'s hole); the param-value reason off ⇒ V1–V9 may run nothing; the split name off ⇒ H4–H6 H12 H13 named none (H1 still named by the line)');
+  ok(lost779(noHead779, ['H1', 'H2', 'H4', 'H5', 'H7', 'H8', 'H9', 'H10', 'H11', 'H12', 'H13']) && lost779(noVal779, ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10', 'V11']) && lost779(noSplit779, ['H4', 'H5', 'H6', 'H12', 'H13']) && noSplit779.channelsMayRun(E779.H1[1]).length > 0,
+    'CONTROLS B-e779: the param-head reason off ⇒ H1 H2 H4 H5 H7–H13 may run nothing (the base\'s hole); the param-value reason off ⇒ V1–V11 may run nothing; the split name off ⇒ H4–H6 H12 H13 named none (H1 still named by the line)');
   // r15: THE COMPACT HEAD READS THE WHOLE COMMAND (the r14 verdict MINOR — commandHeadWords read a 2048-character cut: a
   // quote or a `$( … )` the cut left open made the line UNKNOWN since r14 — no exact run — and a long chained compose's head
   // the `vibespace-status` again, the r1 H1 shape)
