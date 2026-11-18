@@ -183,6 +183,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import { gitEnvFrom } from './git-env.mjs';
 import { procStat, procBootMs, procBornMs, machineBootId, readRunRecord, runOwnerState, stampScratchRun } from './scratch-run.mjs';
 import { sweepScratchDirs, sweepDue, sweepPaceLine } from './scratch-sweep.mjs';
@@ -4268,6 +4269,46 @@ export function heavyAlreadyGreen({ markers = [], sha, full, commitTimeMs, scope
   const age = ageMs < 120 * 60000 ? `${Math.round(ageMs / 60000)} min old` : `${Math.round(ageMs / 3600000)} h old`;
   return { skip: true, marker: g, ageMs, age, why: markerFull ? 'a FULL green' : `an AFFECTED green over the same range ${range}` };
 }
+// THE LAUNCH PATH (B-e381 part 2). The tier a push hook launches was born with the PUSHING shell's PATH: git's exec-path in
+// front (a hook puts it there) and the pushing checkout's own data/bin. The FULL tier launched for 160045063 (2026-11-01) logged
+// 26 mount-guard refusals and 183 FAILED lines on a sha the mirror ran green; some of the refusals were binOnPath statSync over that
+// data/bin (the production checkout sits on the workspace mount). The child keeps the caller's env (the tier's own switches ride
+// it) with THIS PATH: git's exec-path, the launching checkout's own data/bin (another tree's programs — the tier runs its
+// isolated tree's), every entry on a mount the guard REFUSES (a storage mount — src/mount-path-class.js, the guard's own table;
+// a network or passthrough view it only watches stays, so a home on NFS keeps its ~/.local/bin), and relative or empty entries
+// dropped; node's own dir always kept; each drop said. PURE: the mountinfo text, git's exec-path and the dirs are handed in.
+let mpcLaunch = null;
+export function launchPath(pathStr, { mountinfo = '', gitExecPath = '', nodeDir = '', repoDir = '', real = (d) => d } = {}) {
+  const MPC = mpcLaunch || (mpcLaunch = createRequire(import.meta.url)('../src/mount-path-class.js'));
+  const mountRoots = MPC.rootsOf({ mounts: MPC.parseMountinfo(mountinfo) });
+  const norm = (d) => (d.length > 1 ? d.replace(/\/+$/, '') : d);
+  const keep = [], dropped = [], seen = new Set();
+  const nodeReal = nodeDir ? real(norm(nodeDir)) : '', ownBin = repoDir ? norm(path.join(repoDir, 'data', 'bin')) : '';
+  for (const raw of String(pathStr || '').split(':')) {
+    if (!raw) { dropped.push({ dir: '', why: 'an empty entry (the cwd)' }); continue; }
+    if (raw[0] !== '/') { dropped.push({ dir: raw, why: 'a relative entry' }); continue; }
+    const d = norm(raw);
+    if (seen.has(d)) continue;
+    seen.add(d);
+    if (nodeReal && real(d) === nodeReal) { keep.push(d); continue; }
+    if (gitExecPath && d === norm(gitExecPath)) { dropped.push({ dir: d, why: "git's exec-path" }); continue; }
+    if (ownBin && d === ownBin) { dropped.push({ dir: d, why: "the launching checkout's own data/bin" }); continue; }
+    const row = MPC.rootOf(d, { mountRoots });
+    if (row && row.kind === 'storage') { dropped.push({ dir: d, why: `on the ${row.fstype || 'storage'} mount ${row.root} (the guard refuses it)` }); continue; }
+    keep.push(d);
+  }
+  return { path: keep.join(':'), dropped, judgedMounts: !!String(mountinfo || '').trim() };
+}
+/** the detached tier's env: the caller's, with launchPath's PATH. The mountinfo / exec-path / dirs are injectable (test-ci-heavy-
+ *  verdict §7b drives THIS function, so an emptied seam is red). */
+export function launchEnvOf(env, { mountinfo, gitExecPath, nodeDir = path.dirname(process.execPath), repoDir = repo } = {}) {
+  if (mountinfo === undefined) { mountinfo = ''; try { mountinfo = fs.readFileSync('/proc/self/mountinfo', 'utf8'); } catch { } }
+  if (gitExecPath === undefined) gitExecPath = env.GIT_EXEC_PATH || (spawnSync('git', ['--exec-path'], { env, encoding: 'utf8', timeout: 5000 }).stdout || '').trim();
+  const real = (d) => { try { return fs.realpathSync(d); } catch { return d; } };
+  const lp = launchPath(env.PATH, { mountinfo, gitExecPath, nodeDir, repoDir, real });
+  return { env: { ...env, PATH: lp.path }, dropped: lp.dropped, judgedMounts: lp.judgedMounts };
+}
+
 function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   const d = markerDir(dir);
   try { reapScratchOrphans({ log: (m) => console.error(m) }); } catch (e) { console.error(`[ci:heavy] scratch reaper skipped: ${e && e.message}`); }
@@ -4343,7 +4384,12 @@ function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   // pid 0 = a placeholder nobody reads as in flight (`inFlight` needs a pid).
   const stamp = (pid) => fs.writeFileSync(pidPath, JSON.stringify({ sha, pid, cmd: '--heavy --sha=' + sha, startedAt: Date.now() }) + '\n');
   stamp(0);
-  const child = spawn(process.execPath, args, { cwd: repo, detached: true, stdio: ['ignore', fd, fd], env: GIT_ENV });
+  // B-e381 part 2: never the pushing shell's PATH (launchPath) — and never a launch that dies unsaid: a failure keeps the caller's PATH, said
+  let born;
+  try { born = launchEnvOf(GIT_ENV); } catch (e) { born = { env: GIT_ENV, dropped: [], judgedMounts: true }; console.error(`[ci:heavy] the tier's PATH was NOT rebuilt (the caller's is kept): ${e && e.message}`); }
+  if (born.dropped.length) console.error(`[ci:heavy] the tier's PATH leaves out ${born.dropped.map((x) => `${x.dir || '«»'} (${x.why})`).join(', ')}`);
+  if (!born.judgedMounts) console.error("[ci:heavy] no mount table here — the tier's PATH entries were not judged for storage mounts");
+  const child = spawn(process.execPath, args, { cwd: repo, detached: true, stdio: ['ignore', fd, fd], env: born.env });
   child.unref();
   fs.closeSync(fd);
   // `cmd` is a fragment of the child's OWN argv: it is what lets a later

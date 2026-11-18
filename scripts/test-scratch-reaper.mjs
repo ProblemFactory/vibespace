@@ -863,7 +863,10 @@ console.log('\n§8 wiring');
   const sibs = [...ci.matchAll(/^import [^\n]* from '\.\/([^']+)';$/gm)].map((m) => m[1]).sort();
   const stubbers = ['ci-gate-kit.mjs', 'test-ci-heavy-launch.mjs'] /* lane fast-tier-ratchet: test-ci-gate's stub builder moved to its parts' kit */.map((f) => [f, fnBody(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'), 'function stubGateRepo(')]);
   const copies = (b, s) => b.includes(`'${s}'`) || b.includes(`'scripts/${s}'`); // a builder names a sibling bare or by its repo path (B-60d2's loop)
-  ok(sibs.includes('scratch-run.mjs') && stubbers.every(([, b]) => sibs.every((s) => copies(b, s))), `both stub builders copy every sibling ci.mjs imports (${sibs.join(', ')})`, stubbers.map(([f, b]) => [f, sibs.filter((s) => !copies(b, s))]));
+  // B-e381: a LAZY `createRequire(import.meta.url)('../src/x.js')` is a sibling too (launchPath's mount table) — a stub without it
+  // throws at --heavy-launch, after the pid file and before the spawn
+  for (const m of ci.matchAll(/createRequire\(import\.meta\.url\)\(\s*'\.\.\/([^']+)'\s*\)/g)) sibs.push(m[1]);
+  ok(sibs.includes('src/mount-path-class.js') && sibs.includes('scratch-run.mjs') && stubbers.every(([, b]) => sibs.every((s) => copies(b, s) || b.includes(`'${s}'`))), `both stub builders copy every sibling ci.mjs imports or requires (${sibs.join(', ')})`, stubbers.map(([f, b]) => [f, sibs.filter((s) => !copies(b, s))]));
   ok(/^\.vs-run\.json$/m.test(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8')), '.vs-run.json is gitignored (the isolated worktree\'s record is never a change)');
   // verify r2 (R6): the launcher's pre-launch sweep SAYS a refused seam (r1 K7 replaced a bare `catch { }`) — nothing gated
   // that print (the revert table found it uncaught); a launcher's stderr is the one place a pusher sees the refusal before the tier

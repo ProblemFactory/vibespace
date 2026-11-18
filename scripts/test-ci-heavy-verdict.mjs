@@ -23,13 +23,17 @@
 //      --check-heavy names an unreadable red, BLOCKS on a marker path it cannot read, is CLEAR with no directory.
 //   §7 PARITY — production's 30 markers (shapes, scripts/fixtures/ci-heavy-markers-prod-2026-11-10.json): the union reader and the reader
 //      it replaced agree on EVERY HEAD of that history (both run with ONE ancestry oracle in place of git; their decision code is real).
+//   §7b THE LAUNCH PATH (B-e381 part 2) — the tier a hook launches keeps the caller's env with a PATH that leaves out git's exec-path,
+//      the launching checkout's own data/bin, entries on a mount the guard REFUSES (storage), relative and empty entries; node's dir
+//      kept (by its real path), an NFS home's dirs kept; the launcher spawns with it, guarded and said. CONTROLS: no mount table and no
+//      checkout keep the dirs; a no-op seam reads red; the pre-fix spawn line fails the wiring pin.
 //   §8 nothing left behind — every scratch dir removed, no child alive.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW } from './ci.mjs';
+import { launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW } from './ci.mjs';
 import { REPO, ok, git, writeMarker, report } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
@@ -440,6 +444,43 @@ console.log('§7 PARITY — production\'s 30 markers: the union reader and the r
   }
   ok(FIX.markers.length === 30 && diff.length === 0, `on production's 30 markers (${FIX.markers.filter((m) => m.kind === 'red').length} red, ${FIX.markers.filter((m) => m.kind === 'green').length} green, ${FIX.markers.filter((m) => m.scope === 'affected').length} affected) the verdict of all ${heads.length} HEADs is UNCHANGED${diff.length ? ' — ' + JSON.stringify(diff.slice(0, 3)) : ''}`);
   ok(blockedAt.length > 0 && blockedAt[blockedAt.length - 1] === pos[pos.length - 1] + 1000, `…and today's master (a descendant of every marker) is BLOCKED by both, as production is (${blockedAt.length} blocked HEADs)`); }
+
+console.log('§7b THE LAUNCH PATH (B-e381 part 2) — never the pushing shell\'s PATH');
+{
+  // the measured shape (2026-11-01, the FULL tier a hook launched for 160045063): git's exec-path in front, the launching
+  // checkout's own data/bin (on the workspace — a bindfs view over NFS), node from a version manager, the system dirs; plus a
+  // home's ~/.local/bin on NFS (watched by the guard, never refused — it must stay) and a dir on an rclone mount (refused — it goes)
+  const MI = [
+    '22 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw',
+    '36 22 0:32 / /srv/ws-nfs rw,relatime shared:9 - nfs4 store:/export rw,vers=4.2',
+    '37 22 0:33 / /home/u/workspace rw,relatime shared:10 - fuse.bindfs /srv/ws-nfs rw,user_id=0',
+    '38 22 0:34 / /mnt/r rw,relatime shared:11 - fuse.rclone remote: rw',
+  ].join('\n') + '\n';
+  const REPO_DIR = '/home/u/workspace/vibespace', PROD_BIN = REPO_DIR + '/data/bin', NODE = '/home/u/.nvm/versions/node/v24/bin', HOMEBIN = '/srv/ws-nfs/u/.local/bin';
+  const HOOK_PATH = ['/usr/lib/git-core', PROD_BIN, NODE, HOMEBIN, '/usr/local/bin', '/usr/bin', '', '.', '/usr/bin/', '/mnt/r/tools/bin', '/bin'].join(':');
+  const env = { PATH: HOOK_PATH, GIT_EXEC_PATH: '/usr/lib/git-core', VS_NO_REAL_CLI: '1' };
+  const born = launchEnvOf(env, { mountinfo: MI, nodeDir: NODE, repoDir: REPO_DIR });
+  const why = (d) => (born.dropped.find((x) => x.dir === d) || {}).why || '';
+  ok(born.env.PATH === [NODE, HOMEBIN, '/usr/local/bin', '/usr/bin', '/bin'].join(':') && born.env.VS_NO_REAL_CLI === '1' && born.env.GIT_EXEC_PATH === '/usr/lib/git-core',
+    `launchEnvOf: the hook's PATH is born as node + an NFS home's ~/.local/bin + the system dirs, the rest of the env kept (${born.env.PATH})`);
+  ok(/exec-path/.test(why('/usr/lib/git-core')) && /launching checkout's own data\/bin/.test(why(PROD_BIN)) && /fuse\.rclone mount \/mnt\/r \(the guard refuses it\)/.test(why('/mnt/r/tools/bin')) && /relative/.test(why('.')) && /empty/.test(why('')) && !why(HOMEBIN),
+    `…each drop said: ${born.dropped.map((x) => `${x.dir || '«»'} (${x.why})`).join(' · ')}`);
+  const onMount = launchPath('/mnt/r/node/bin:/usr/bin', { mountinfo: MI, nodeDir: '/mnt/r/node/bin' });
+  ok(onMount.path === '/mnt/r/node/bin:/usr/bin', 'node\'s own dir is kept even on a refused mount (the tier runs on it)');
+  const viaLink = launchPath('/opt/node-link/bin:/usr/bin', { mountinfo: MI, nodeDir: '/opt/node/bin', real: (d) => d.replace('/opt/node-link/', '/opt/node/') });
+  ok(viaLink.path === '/opt/node-link/bin:/usr/bin' && !viaLink.dropped.length, 'node\'s dir is matched by its REAL path (a symlinked version-manager dir is kept)');
+  const bare = launchPath(HOOK_PATH, { mountinfo: '', gitExecPath: '/usr/lib/git-core', nodeDir: NODE });
+  ok(bare.path.split(':').includes('/mnt/r/tools/bin') && bare.path.split(':').includes(PROD_BIN) && bare.judgedMounts === false,
+    'CONTROL: with no mount table and no launching checkout the rclone dir and the data/bin stay — the two rules are what leave them out; the launch line then says the mounts were not judged');
+  // an EMPTIED seam is red: a launchEnvOf that hands the env back untouched fails the first leg's own predicate
+  const noop = (e) => ({ env: e, dropped: [] });
+  ok(noop(env).env.PATH !== born.env.PATH, 'CONTROL: a no-op launchEnvOf (the env handed back as given) would keep git\'s exec-path and the data/bin — the first leg reads it red');
+  // WIRING: the launcher's detached child is spawned with launchEnvOf's env, never the bare GIT_ENV, and a failure is said
+  const launcher = (src) => { const i = src.indexOf('function heavyLaunch('); return i < 0 ? '' : src.slice(i, src.indexOf('\nexport function checkHeavy(', i)); };
+  const wired = (src) => { const f = launcher(src); return /try \{ born = launchEnvOf\(GIT_ENV\); \} catch \(e\) \{ born = \{ env: GIT_ENV/.test(f) && /the tier's PATH was NOT rebuilt/.test(f) && /spawn\(process\.execPath, args, \{ cwd: repo, detached: true, stdio: \['ignore', fd, fd\], env: born\.env \}\)/.test(f) && !/detached: true[^\n]*env: GIT_ENV/.test(f); };
+  const PRE = SRC.replace("env: born.env });", "env: GIT_ENV });");
+  ok(wired(SRC) && PRE !== SRC && !wired(PRE), 'WIRING: heavyLaunch spawns its detached tier with launchEnvOf(GIT_ENV), guarded and said (CONTROL: the pre-fix spawn line, env: GIT_ENV, fails the pin)');
+}
 
 console.log('§8 nothing left behind');
 fs.rmSync(ROOT, { recursive: true, force: true });
