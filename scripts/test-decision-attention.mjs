@@ -376,7 +376,7 @@ console.log('⑫ B-dfa4: the judge\'s switch is read ONCE PER WALK — a walk ov
     return { a, counted, d };
   };
   const rows = Array.from({ length: 500 }, (_, i) => ({ key: `im/w${i}`, adapterId: 'im', lastAt: 1000 + i }));
-  const walk = (a) => a.walk(() => { for (const en of rows) a.judgedFor(en); });   // a walk is a scope its caller marks (the engine's digest, attnCount, firstRead, rows, clockCensus, attentionTail)
+  const walk = (a) => a.walk(() => { for (const en of rows) a.judgedFor(en); });   // a walk is a scope its caller marks (the engine marks digest and rows — ⑬)
   const ATT = require(path.join(REPO, 'src/server/channels-attention.js'));
   const R = walkRig(ATT);
   const k0 = R.counted.calls; R.d.settings(); const perCall = R.counted.calls - k0;   // what ONE settings read costs here
@@ -409,6 +409,62 @@ console.log('⑫ B-dfa4: the judge\'s switch is read ONCE PER WALK — a walk ov
   walk(P.a);
   ok(P.counted.calls - p0 >= rows.length * perCall, `RED CONTROL: the release's on() rebuilds the plugin's settings per row (${P.counted.calls - p0} for ${rows.length}) — the leg above is red on it`);
   for (const x of copiesCensus(MW.files, MW.dir, REPO, { minCopies: 1, label: '⑫ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+console.log('⑬ B-dfa4 (verdict): the law through the engine\'s OWN roads — a digest and a rows read the plugin\'s settings once over every row; a census holds every judge reader to a walk or to one row');
+{
+  // the judge is read PER ROW on two roads only: digest() (its first read, the needs-me count, the patch of kept rows —
+  // all inside digest's walk) and rows() (the focus filter); every other reader reads ONE row
+  const N = 80;
+  const roadRig = async (mod, tag) => {
+    const R = await engines(`roads-${tag}`, world(), mod);
+    const ix = R.eng.store.index;
+    await ix.update(() => { for (let i = 0; i < N; i++) Object.assign(ix.entry('im', `extra${i}`), { title: `Extra ${i}`, kind: 'group', lastAt: clock - (i + 10) * 60e3, unread: 1, readAt: 0 }); });
+    let calls = 0;
+    R.decision.attachPlugin({ peek: () => plug, settings: () => { calls++; return plug.config || {}; } });
+    await Promise.resolve(); await new Promise((r) => setImmediate(r));
+    const count = (fn) => { const c0 = calls; fn(); return calls - c0; };
+    const out = { digest: count(() => R.eng.digest()), focus: count(() => R.eng.rows({ view: 'focus' })), all: count(() => R.eng.rows({ view: 'all' })), single: count(() => R.eng.attention.on()) };
+    try { R.eng.stop(); } catch { }
+    return out;
+  };
+  const got = await roadRig(ENG, 'real');
+  ok(got.digest === got.single && got.focus === got.single && got.all <= got.single && got.single >= 1, `over ${N + 6} rows, ONE digest reads the plugin's settings as often as one read of the switch (${got.digest} = ${got.single}); one rows() of the focus view too (${got.focus}), of every row at most that (${got.all})`, got);
+  const ESRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const MR = mutantCopies('att-roads', REPO);
+  const WRAPS = [['digest', "  function digest(...args) { return attention.walk(() => digestWalk(...args)); }", "  function digest(...args) { return digestWalk(...args); }"], ['rows', "  function rows(...args) { return attention.walk(() => rowsWalk(...args)); }", "  function rows(...args) { return rowsWalk(...args); }"]];
+  for (const [road, wrap, bare] of WRAPS) {
+    ok(ESRC.split(wrap).length === 2, `control setup: ${road}'s walk wrapper is present once`);
+    const c = await roadRig(MR.load('src/server/channels-engine.js', ESRC.replace(wrap, bare), `no-${road}-walk`), `no-${road}`);
+    const n = road === 'digest' ? c.digest : c.focus;
+    ok(n >= N, `RED CONTROL: ${road}'s walk wrapper removed — one ${road} reads the plugin's settings ${n} times over ${N + 6} rows (per row)`, c);
+  }
+  // THE CENSUS: every engine function that reads the judge (attention.judgedFor / viewOf / on) or builds a row view
+  // (rowView, which reads it) is a row of this table — a walk its road marks, a step reached only inside digest's walk
+  // (its callers checked), or one row. A new reader is red until it says which.
+  const ROADS = { digestWalk: 'walk', rowsWalk: 'walk', attnCount: 'in-digest', firstRead: 'in-digest', attnRederive: 'in-digest', rowView: 'one-row', viewNow: 'one-row', conversationView: 'one-row', labelJudged: 'one-row' };
+  const INSIDE = new Set(['digestWalk', 'attnCount', 'attnPatch', 'totalsNow', 'attnRederive', 'firstRead']);
+  const census = (src) => {
+    const L = src.split('\n');
+    const owner = (i) => { for (let j = i; j >= 0; j--) { const m = /^  (?:async )?function (\w+)\(/.exec(L[j]) || /^    (\w+): (?:async )?\(/.exec(L[j]); if (m) return m[1]; } return '?'; };
+    const callers = (name) => { const re = new RegExp(`(?:[^\\w.]|\\.\\.\\.)${name}\\(`);   // a call, a spread call (`...totalsNow(t)`)
+    const out = new Set(); L.forEach((l, i) => { if (re.test(l) && !new RegExp(`function ${name}\\(`).test(l)) out.add(owner(i)); }); return [...out]; };
+    const readers = new Set(); L.forEach((l, i) => { if (/attention\.(judgedFor|viewOf|on)\(|[^\w.]rowView\(/.test(l) && !/function rowView\(/.test(l)) readers.add(owner(i)); });
+    const bad = [];
+    for (const r of readers) if (!ROADS[r]) bad.push(`${r}: reads the judge per call and is no row of the census`);
+    for (const [name, road] of Object.entries(ROADS)) {
+      if (!readers.has(name)) bad.push(`${name}: a census row that reads nothing (dead)`);
+      if (road === 'in-digest') for (const c of callers(name)) if (!INSIDE.has(c)) bad.push(`${name}: called from ${c}, outside digest's walk`);
+    }
+    for (const via of ['attnPatch', 'totalsNow']) for (const c of callers(via)) if (!INSIDE.has(c)) bad.push(`${via}: called from ${c}, outside digest's walk`);
+    return { readers: [...readers].sort(), bad };
+  };
+  const real = census(ESRC);
+  ok(!real.bad.length && real.readers.length === Object.keys(ROADS).length, `CENSUS: the ${real.readers.length} engine functions that read the judge are each a walk (digest, rows), a step inside digest's walk, or one row`, real);
+  const stray = census(ESRC.replace("  function attentionTail(", "  function strayScan() { for (const en of Object.values(store.index.live())) attention.judgedFor(en, null); }\n  function attentionTail("));
+  const leak = census(ESRC.replace("const pol = due.length || sig !== attnKept.sig ? attnRederive(due, t) : attnPolicies();", "const pol = due.length || sig !== attnKept.sig ? attnRederive(due, t) : attnPolicies(); function leakOut() { return firstRead(new Map(), {}, null); } leakOut;").replace("  function attentionTail(", "  function leakOut2() { return firstRead(new Map(), {}, null); }\n  function attentionTail("));
+  ok(stray.bad.some((b) => b.startsWith('strayScan:')) && leak.bad.some((b) => b.startsWith('firstRead: called from leakOut2')), 'RED CONTROLS: a new function reading the judge row by row is named; a step of digest\'s walk called from outside it is named', { stray: stray.bad, leak: leak.bad });
+  for (const x of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 2, label: '⑬ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

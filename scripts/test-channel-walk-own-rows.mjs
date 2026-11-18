@@ -224,8 +224,16 @@ async function pricedRun(E, tag) {
   const r1 = cost().revisionRows;
   try { await e.revisionsPassOf(A); } catch (err) { revErr = String(err && err.message || err); }
   const revRows2 = cost().revisionRows - r1;
+  // (verdict) fresh objects: a caller that edits the answer never edits the kept one
+  const a1 = e.recheckDueOf(A, t) || []; if (a1[0]) a1[0].key = 'edited-by-a-caller';
+  const a2 = e.recheckDueOf(A, t) || [];
+  const freshObjects = !!(a1.length && a2[0] && a2[0].key !== 'edited-by-a-caller');
+  // (verdict) a removed account drops its kept sets — its removal is a whole-map touch (the store's fire(null))
+  const keptBefore = cost().kept;
+  let removed = null; try { removed = await e.remove(A); } catch (err) { removed = String(err && err.message || err); }
+  const keptAfter = cost().kept;
   try { await e.stop(); } catch { }
-  return { turns, wrong, revRows, revRows2, revErr, listing, N, FRESH };
+  return { turns, wrong, revRows, revRows2, revErr, listing, N, FRESH, freshObjects, keptBefore, keptAfter };
 }
 {
   const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
@@ -237,8 +245,9 @@ async function pricedRun(E, tag) {
   ok(byWhy('a turn after a write that makes nothing due')[0].rows === 1 && byWhy('a turn after a write that makes nothing due')[0].kept === 1, 'a write that makes nothing due: the turn reads THAT row alone and keeps its answer', byWhy('a turn after a write that makes nothing due'));
   ok(!p.wrong.length, `every one of the ${p.turns.length} answers equals the PURE verdict over all the account's rows at that instant — incl. a row that became a candidate by a write, a row the clock took out, and a clock that went back`, p.wrong.slice(0, 3));
   ok(p.revRows === p.FRESH && p.revRows2 === p.FRESH + 1, `the revisions recheck of a pass reads the ${p.FRESH} rows fresh within 24 h, not the account's ${p.N + p.FRESH + 1} (read ${p.revRows}); a write that makes a row fresh brings it in (${p.revRows2})`, p);
+  ok(p.freshObjects && p.keptBefore >= 2 && p.keptAfter === 0, `a caller editing the recheck list leaves the kept answer whole; removing the account drops its kept sets (${p.keptBefore} → ${p.keptAfter})`, { freshObjects: p.freshObjects, keptBefore: p.keptBefore, keptAfter: p.keptAfter });
   const SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-  const MEMO = '      if (stands && t < kr.memo.next) { walkCost.recheckKept++; return kr.memo.due.slice(); }\n';
+  const MEMO = '      if (stands && t < kr.memo.next) { walkCost.recheckKept++; return kr.memo.due.map((d) => ({ ...d })); }';
   const FRESHSET = '    for (const k of kept.set) {\n      const en = ix[k];\n      walkCost.revisionRows++;\n';
   ok(SRC.split(MEMO).length === 2 && SRC.split(FRESHSET).length === 2, 'control setup: the kept answer and the fresh set\'s walk are present once');
   const old = SRC.replace(MEMO, '').replace(FRESHSET, '    for (const k of store.index.keysOf(rec.id)) {\n      const en = ix[k];\n      walkCost.revisionRows++;\n');
@@ -253,6 +262,10 @@ async function pricedRun(E, tag) {
   ok(nr.wrong.some((w) => w.why === 'a turn after a row that was no candidate became one') && nr.revRows2 === nr.FRESH, `CONTROL: a write that re-judges nothing — the row that became a candidate is missing from the answer, the row made fresh is not read (${nr.wrong.length} answers wrong, revisions read ${nr.revRows2}) — red`, nr.wrong.slice(0, 2));
   const nb = await pricedRun(MC.load('src/server/channels-engine.js', SRC.replace(BACKCLK, ') {\n'), 'no-backclock'), 'no-backclock');
   ok(nb.wrong.some((w) => w.why === 'a turn after the clock went back'), `CONTROL: a clock gone back that rebuilds nothing — the row the clock took out stays out — red`, nb.wrong.slice(0, 2));
+  const FRESHOBJ = '{ walkCost.recheckKept++; return kr.memo.due.map((d) => ({ ...d })); }';
+  ok(SRC.split(FRESHOBJ).length === 2, 'control setup: the kept answer is handed out as fresh objects once');
+  const sh = await pricedRun(MC.load('src/server/channels-engine.js', SRC.replace(FRESHOBJ, '{ walkCost.recheckKept++; return kr.memo.due.slice(); }'), 'shared-due'), 'shared-due');   // stale-pins: kept (the old hand-out, restored by the red control)
+  ok(!sh.freshObjects, 'RED CONTROL: the kept answer handed out as the same objects — a caller\'s edit reaches the next turn', sh.freshObjects);
 }
 
 console.log(`\ntest-channel-walk-own-rows: ${pass} passed, ${fail} failed`);

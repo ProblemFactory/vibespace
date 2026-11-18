@@ -530,7 +530,7 @@ function create(deps = {}) {
     policy: () => FO.attentionPolicy((k) => serverSetting(k)),   // lane attention-policy: the owner's switches (the judge sees what they let go)
     viewNow: (key) => { const en = store.index.live()[key]; const rec = en && !en.unlistedAt && adapterRecords().adapters.find((r) => r.id === en.adapterId); return rec ? rowView(rec, en) : null; },
     accountNever: (id) => { const r = adapterRecords().adapters.find((x) => x.id === id); return !!(r && r.judge === 'never'); },
-    tailOf: (v, o) => attention.walk(() => attentionTail(v, o)),   // B-dfa4 U1: one walk (attention.walk)
+    tailOf: (v, o) => attentionTail(v, o),
     // lane decision-attention-facts: the facts of ONE scan (built once per drain) + the row's read line / own newest message
     facts: () => attentionScanFacts(),
     rowState: (key) => { const en = store.index.live()[key]; return en ? { readAt: Number(en.readAt) || 0, selfAt: Number(en.selfAt) || 0, lastAt: Number(en.lastAt) || 0 } : null; } });
@@ -2117,7 +2117,7 @@ function create(deps = {}) {
         if (v.due) { stands = false; break; }
         if (v.next < kr.memo.next) kr.memo.next = v.next;
       }
-      if (stands && t < kr.memo.next) { walkCost.recheckKept++; return kr.memo.due.slice(); }
+      if (stands && t < kr.memo.next) { walkCost.recheckKept++; return kr.memo.due.map((d) => ({ ...d })); }   // fresh objects: a caller never edits the kept answer
     }
     const rows = [];
     for (const k of kr.set) {
@@ -2128,7 +2128,7 @@ function create(deps = {}) {
     }
     const due = Drain.recheckDue(rows, { now: t, everyMs });
     kr.memo = { at: t, next: Drain.recheckNextAt(rows, { now: t, everyMs }), due, dueKeys: new Set(due.map((d) => d.key)) };
-    return due.slice();
+    return due.map((d) => ({ ...d }));
   }
   /**
    * THE RECENT-ROOTS RECHECK (lane lark-threads A2 — the owner's post, a thread born after its root was stored): ONE
@@ -3094,8 +3094,7 @@ function create(deps = {}) {
     attnRederive(keys, t, { views, liveIx, byId });
   }
   /** THE BADGE'S NUMBER (`needsMe`): the kept conversations in bands 1–4 under the owner's switches. */
-  function attnCount(...args) { return attention.walk(() => attnCountWalk(...args)); }   // B-dfa4 U1: one walk (attention.walk)
-  function attnCountWalk(t = now()) {
+  function attnCount(t = now()) {   // B-dfa4: reached only inside digest's walk (digest, totalsNow) — test-decision-attention ⑬'s census holds it
     try {
       if (!attnKept.rows) {
         const recs = adapterRecords(), byId = new Map(recs.adapters.map((r) => [r.id, r])), liveIx = store.index.live(), ctx = viewCtx(t);
@@ -3126,8 +3125,7 @@ function create(deps = {}) {
    * watcher — at most FO.ATTENTION_MAX, drawn newest first; past it the LEAST urgent (FO.TAG_ORDER), then the oldest,
    * are cut (`attention.cut`, counted).
    */
-  function firstRead(...args) { return attention.walk(() => firstReadWalk(...args)); }   // B-dfa4 U1: one walk (attention.walk)
-  function firstReadWalk(byId, liveIx, ctx) {
+  function firstRead(byId, liveIx, ctx) {   // B-dfa4: reached only inside digest's walk — test-decision-attention ⑬'s census holds it
     const t = ctx.t;
     viewStats.firstReads++;
     const listed = new Map();   // adapterId → its listed entries (the heads are chosen per account)
@@ -4150,8 +4148,7 @@ function create(deps = {}) {
   const censusTimed = new Map();   // adapterId → { at, hot, warm, cold, due, timer }
   const censusCount = new Map();   // adapterId → clock walks (the gates)
   let censusTrailing = false;
-  function clockCensus(...args) { return attention.walk(() => clockCensusWalk(...args)); }   // B-dfa4 U1: one walk (attention.walk)
-  function clockCensusWalk(rec, t) {
+  function clockCensus(rec, t) {
     let c = censusTimed.get(rec.id);
     if (c && t >= c.at && t - c.at < censusEveryMs) {
       if (!c.timer && !censusTrailing && !stopped) c.timer = censusTimer(() => censusTrail(rec.id), c.at + censusEveryMs - t);
@@ -6540,7 +6537,7 @@ function create(deps = {}) {
    *  backward read (`limit`, ≤ 50 — never the whole log); with the read line known (`since`) the records past it when any,
    *  else the last 8; each with its instant and its FLAGS for the facts line — an @ of the owner (`FO.mentionsSelf`, the
    *  at-you rule's predicate), a reply to one of the owner's messages in the read, the mail's `automated` level. */
-  function attentionTail(v, { since = 0, limit = 8 } = {}) {   // B-dfa4 U1: its ONE caller (tailOf) marks the walk — the record-clear census declares this name as the reader
+  function attentionTail(v, { since = 0, limit = 8 } = {}) {
     if (!v || !store.index.has(`${v.adapterId}/${v.id}`)) return [];
     const rec = adapterRecords().adapters.find((r) => r.id === v.adapterId);
     const selfId = rec ? selfIdOf(rec) : null;
@@ -8900,7 +8897,7 @@ function create(deps = {}) {
     // lane channel-feed-authority: the scheduler's due rows of one account (the census legs) and the due index's counters
     dueListOf: (adapterId, { all = false } = {}) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const e = rec && live.get(rec.id); return rec ? dueList(rec, e || { dueNow: new Set() }, now(), { all }) : null; },
     dueIndexStats: () => ({ ...dueStats }),
-    walkCostStats: () => ({ ...walkCost }),   // B-dfa4 U3: rows the recheck / revisions walks read, and the recheck turns answered kept
+    walkCostStats: () => ({ ...walkCost, kept: keptRows.size }),   // B-dfa4 U3: rows the recheck / revisions walks read, and the recheck turns answered kept
     recheckDueOf: (adapterId, t = null) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? recheckDueFor(rec, t == null ? now() : t) : null; },   // B-dfa4 U3: the drain turn's recheck list (the leg)
     revisionsPassOf: async (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const e = rec ? adapterFor(rec) : null; return e ? revisionsPass(rec, e) : null; },   // B-dfa4 U3: one revisions recheck of an account (the leg)
     cadenceOf: (adapterId, convId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const en = store.index.peek(`${adapterId}/${convId}`); return rec && en ? cadenceOf(rec, en) : null; },

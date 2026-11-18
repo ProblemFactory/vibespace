@@ -85,7 +85,8 @@ function planRecheck({ now, items = [], last = new Map(), spent = [], perPass = 
     due.push({ key: it.key, woke: wokeIn, at, l });
   }
   // woken-for first, then the least recently checked (never-checked first), then the newest
-  due.sort((a, b) => (Number(b.woke) - Number(a.woke)) || (a.l - b.l) || (b.at - a.at));
+  // B-dfa4 cure: the key last — a TOTAL order, so the picked items never depend on the order the rows were read in
+  due.sort((a, b) => (Number(b.woke) - Number(a.woke)) || (a.l - b.l) || (b.at - a.at) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   return due.slice(0, room).map((d) => d.key);
 }
 

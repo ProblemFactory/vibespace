@@ -58,6 +58,19 @@ const p1 = Rev.planRecheck({ now: T, items });
 ok(p1.join() === 'c\nwoke,c\na,c\nb'.replace(/\\n/g, '\n'), 'windows: < 24 h fresh, a woken-for message for 7 d (first), never past them; a recalled message is done', J(p1));
 ok(Rev.planRecheck({ now: T, items, last: new Map([['c\na', T - 30 * 60e3]]) }).join() === ['c\nwoke', 'c\nb'].join(), 'cadence: at most one request per message per hour');
 ok(Rev.planRecheck({ now: T, items, last: new Map([['c\na', T - 30e3]]), forced: true }).includes('c\na') && !Rev.planRecheck({ now: T, items, last: new Map([['c\na', T - 2e3]]), forced: true }).includes('c\na'), `the owner's Refresh re-asks after ${Rev.RECHECK_FORCED_MS / 1000} s (never a flood)`);
+// B-dfa4 cure (the verdict's should): the plan's order is TOTAL — the key decides an exact tie (no woke, never checked,
+// the same instant), so the rows' read order (the engine's kept fresh set since B-dfa4 U3) never changes what is picked
+{
+  const tie = Array.from({ length: Rev.RECHECK_PER_PASS + 4 }, (_, i) => it(`c\nt${String(i).padStart(2, '0')}`, T - 60e3));
+  const fwd = Rev.planRecheck({ now: T, items: tie }), back = Rev.planRecheck({ now: T, items: tie.slice().reverse() });
+  ok(fwd.length === Rev.RECHECK_PER_PASS && fwd.join() === back.join() && fwd.join() === tie.slice(0, Rev.RECHECK_PER_PASS).map((x) => x.key).join(), 'B-dfa4 cure: an exact tie is picked by key — the same items read in either order pick the same ones', J({ fwd, back }));
+  const RSRC = fs.readFileSync(path.join(REPO, 'src/channel-revisions.js'), 'utf8');
+  const KEYED = " || (b.at - a.at) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));";
+  ok(RSRC.split(KEYED).length === 2, 'control setup: the plan\'s key tiebreak is present once');
+  const Old = mutantCopies('rev-tiebreak', REPO).load('src/channel-revisions.js', RSRC.replace(KEYED, ' || (b.at - a.at));'), 'no-tiebreak');   // stale-pins: kept (the old sort, restored by the red control)
+  const of = Old.planRecheck({ now: T, items: tie }), ob = Old.planRecheck({ now: T, items: tie.slice().reverse() });
+  ok(of.join() !== ob.join(), 'RED CONTROL: without the key the read order decides the tie — the leg above is red on it', J({ of, ob }));
+}
 const many = Array.from({ length: 50 }, (_, i) => it(`c\nm${i}`, T - i * 60e3));
 ok(Rev.planRecheck({ now: T, items: many }).length === Rev.RECHECK_PER_PASS && Rev.planRecheck({ now: T, items: many, spent: Array(Rev.RECHECK_PER_HOUR - 3).fill(T - 60e3) }).length === 3 && Rev.planRecheck({ now: T, items: many, spent: Array(Rev.RECHECK_PER_HOUR).fill(T - 60e3) }).length === 0, `budget: ≤ ${Rev.RECHECK_PER_PASS} a pass, ≤ ${Rev.RECHECK_PER_HOUR} an account-hour (the sliding hour)`);
 ok(Rev.planRecheck({ now: T, items: many, spent: Array(Rev.RECHECK_PER_HOUR).fill(T - H - 1) }).length === Rev.RECHECK_PER_PASS, 'spent instants older than the hour free their room');
