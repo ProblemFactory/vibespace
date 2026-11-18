@@ -161,8 +161,7 @@
    "Archive all",
    "? New sessions in this folder will start archived too (nothing is deleted; find them under the Archived filter).",
    "Archive all",
-   "New session here",
-   "Show more ("
+   "New session here"
   ],
   "src/vault-inventory.js": [
    "Accounts",

@@ -401,7 +401,7 @@ export function installSidebarWorkbench(Sidebar) {
       if (!all.length) {
         const hidden = this._wbKindHidden(st.sessions);
         if (hidden) this._kindHiddenRow(hidden, hostLabelFallback);
-        else empty('No sessions found on ' + hostLabelFallback);
+        else empty(tr('No sessions found on {host}', { host: hostLabelFallback }));
         return;
       }
       if (!sessions.length) { empty(tr('Nothing in the last 7 days on {host} — check History below', { host: hostLabelFallback })); return; }
@@ -886,7 +886,7 @@ export function installSidebarWorkbench(Sidebar) {
           const hidden = histHost && !(searchingH && histHost === (this._wbRecentHost || ''))
             ? this._wbKindHidden(histState?.sessions, s => (s.mtime || 0) < cutoffH && s.status !== 'remote-running') : 0;
           if (hidden) this._kindHiddenRow(hidden, histLabel);
-          else this._wbEmptyRow(histHost ? `No sessions older than 7 days on ${histLabel}` : 'No older sessions');
+          else this._wbEmptyRow(histHost ? tr('No sessions older than 7 days on {host}', { host: histLabel }) : tr('No older sessions'));   // in the person's language (主开发's look at the zh Locate pictures)
         }
         const cap = this._wbHistoryCap || HISTORY_PAGE;
         for (const s of histList.slice(0, cap)) {
@@ -904,7 +904,7 @@ export function installSidebarWorkbench(Sidebar) {
         if (histList.length > cap) {
           const more = document.createElement('button');
           more.className = 'wb-more';
-          more.textContent = `Show more (${histList.length - cap} left)`;
+          more.textContent = tr('Show more ({n} left)', { n: histList.length - cap });
           more.onclick = () => { this._wbHistoryCap = cap + HISTORY_PAGE * 4; this._render(); };
           this.listEl.appendChild(more);
         }
