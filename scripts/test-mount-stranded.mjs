@@ -103,7 +103,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stranded-'));
 {
   const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const tgw = fs.readFileSync(path.join(REPO, 'src/server/task-groups-wiring.js'), 'utf8'); // the store's construction, «make room» 2026-11-17: moved whole out of server.js
-  ok(/isPathShadowed: \(p\) => \{ try \{ return mounts\(\)\.shadowedBy\(p\); \} catch \{ return null; \} \}/.test(tgw) && /task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bmounts: \(\) => mounts\b/.test(sv), 'server.js hands the task store a LAZY shadow getter (mounts wire up later — TDZ-safe like getPortForwards; the store is built in src/server/task-groups-wiring.js, handed `mounts: () => mounts`)');
+  ok(/isPathShadowed: \(p\) => \{ let s = null; try \{ s = mounts\(\)\.shadowedBy\(p\); \} catch \{ s = null; \} if \(s\) return s; try \{ return require\('\.\.\/machine-mounts\.js'\)\.pullShadowOf\(p, \{ writer: true \}\); \} catch \{ return null; \} \}/.test(tgw) && /task-groups-wiring\.js'\)\.createStore\(\{[^}\n]*\bmounts: \(\) => mounts\b/.test(sv), 'server.js hands the task store a LAZY shadow getter (mounts wire up later — TDZ-safe like getPortForwards; the store is built in src/server/task-groups-wiring.js, handed `mounts: () => mounts`)');
   ok(/onMountsUpdated: \(\) => tasks\.syncAllContextMd\(\)/.test(sv), 'server.js wires mounts-updated → syncAllContextMd');
   const w = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   ok(/msg\?\.type === 'mounts-updated'\) \{ try \{ onMountsUpdated\?\.\(\);/.test(w), 'the wiring tees every mounts-updated broadcast into the resync');

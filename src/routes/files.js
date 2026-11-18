@@ -130,6 +130,41 @@ router.use((req, res, next) => {
   }
   next();
 });
+// B-fcc7 (the remainder): a machine's PULL folder while it is not mounted (its machine offline, a heal pending) is a bare local
+// folder — an empty one that reads as «the machine's files are gone», a write there stranded under the next mount. Refused with
+// the row's state, as a code the client words in the reader's language (fsErrorText); its own pass, so it never waits on the
+// storage manager above. EVERY path the request names (its read 2: a copy, a move or a compress FROM the bare folder succeeded
+// empty when only its destination was asked) — a remote side (?host, srcHost, destHost) is not this machine's; an upload's
+// multipart destDir is read inside its route, so an upload is not refused here
+router.use((req, res, next) => {
+  const q = req.query || {}, b = req.body || {};
+  if (q.host || b.host) return next();
+  // what the request READS or takes away — a folder probed empty is refused (one holding files shows them, a stray can be
+  // deleted or moved out) — and what it ADDS there: refused under ANY such folder (read 4: hidden under the next mount, or
+  // blocking it). A POST's / PUT's `path` is where it writes; a GET's or a DELETE's is what it reads or removes
+  const route = String(req.path || '').replace(/\/+$/, '').toLowerCase();   // as express matches it: no trailing slash, any case (read 6)
+  const writes = req.method === 'POST' && (PATH_WRITES.has(route) || /^\/api\/tasks\/[^/]+\/export$/.test(route));   // read 5: only the routes whose `path` IS what they write (an archive's path is read); read 6: a task group's export writes its path
+  const reads = [q.path, q.dir, b.oldPath, ...(Array.isArray(b.paths) ? b.paths : []), b.srcHost ? null : b.src, writes ? null : b.path];
+  const adds = [b.newPath, b.destHost ? null : b.dest, b.destHost ? null : b.destDir, writes ? b.path : null];
+  // read 5: a removal or a move OUT of such a folder (a stray cleared) has it probed again once it answered — never the sweep's wait
+  if (req.method !== 'GET' && req.method !== 'HEAD') res.on('finish', () => { if (res.statusCode < 300) for (const raw of reads) { if (typeof raw === 'string' && raw) { try { require('../machine-mounts.js').pullTouched(safePath(raw)); } catch { } } } });
+  for (const [list, writer] of [[reads, false], [adds, true]]) {
+    for (const raw of list) {
+      if (typeof raw !== 'string' || !raw) continue;
+      let p; try { p = safePath(raw); } catch { continue; }
+      const pull = require('../machine-mounts.js').pullShadowOf(p, { writer });
+      if (pull) return res.status(503).json(pullShadowBody(pull));
+    }
+  }
+  next();
+});
+const PATH_WRITES = new Set(['/api/mkdir', '/api/file/write']);   // the routes whose body `path` is what they CREATE
+function pullShadowBody(s) {
+  const params = { machine: s.machine };
+  return s.offline
+    ? { error: `“${s.machine}” is offline — this folder shows its files only while the machine is connected`, code: 'machine_offline', params }
+    : { error: `“${s.machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row`, code: 'machine_folder_down', params };
+}
 
 router.get('/api/home', async (req, res) => {
   const R = rfs(req);
@@ -623,6 +658,10 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
     const results = [];
     let destRoot = path.resolve(expandTilde(destDir)); // chat.uploadDir may be ~/Downloads
     if (keepWithConv && underTempRoot(destRoot, req.app.locals.chatTempRoots || TEMP_ROOTS())) { keptFrom = destRoot; destRoot = path.join(req.app.locals.chatAttachmentsRoot || ATTACH_ROOT, conv, 'files'); }   // road a: kept with the conversation (a gate's root: app.locals.chatAttachmentsRoot)
+    // B-fcc7 (read 5): an upload ADDS to its folder — a machine's pull folder that is not mounted refuses it (its multipart destDir
+    // is read only here, after multer: the router's pass above saw an empty body); the catch below lets the temp files go
+    const pullUp = require('../machine-mounts.js').pullShadowOf(destRoot, { writer: true });
+    if (pullUp) throw Object.assign(new Error(pullShadowBody(pullUp).error), { status: 503, pullBody: pullShadowBody(pullUp) });
     // dest side may be a mount → all dest-touching fs ops go through SafeFs.
     // The multer temp files live in /tmp (fast, local) — their unlink stays fs.
     await sfs(req).call('mkdir', { path: destRoot }); // ensure target exists (plain-file uploads to a fresh dir)
@@ -662,7 +701,7 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
   } catch (err) {
     // Clean up remaining multer temp files on failure (they leaked in /tmp)
     for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }
-    res.status(err.status || 400).json({ error: err.message });
+    res.status(err.status || 400).json(err.pullBody || { error: err.message });   // B-fcc7: a pull folder's refusal keeps its code
   }
 });
 
@@ -1051,7 +1090,7 @@ router.post('/api/archive/extract', async (req, res) => {
       R.fs.archiveExtract(R.host, remotePath(ap), remotePath(dest))
         .then(() => { if (op.status !== 'cancelled') op.status = 'done'; })
         .catch((e) => { if (op.status !== 'cancelled') { op.status = 'error'; op.error = String(e.message || e).split('\n')[0]; Object.assign(op, fsErrorBody(e), { error: op.error }); } })
-        .finally(() => setTimeout(() => extractOps.delete(opId), 5 * 60 * 1000));
+        .finally(() => setTimeout(() => extractOps.delete(opId), 5 * 60 * 1000).unref());   // unref: a finished op's table entry never holds a process (B-fcc7's find)
       return;
     }
     try { return res.json(await R.fs.archiveExtract(R.host, remotePath(ap), remotePath(dest))); } catch (e) { return res.status(400).json(fsErrorBody(e)); }
@@ -1096,7 +1135,7 @@ router.post('/api/archive/extract', async (req, res) => {
         const ok = code === 0 || (type === 'zip' && code === 1) || (type !== 'zip' && !effOverwrite && /(already |: File )exists/i.test(errTail));
         if (ok) { op.status = 'done'; if (op.total) op.done = op.total; clearExtractMark(fp, destDir); }
         else { op.status = 'error'; op.error = (errTail.split('\n').filter(Boolean)[0] || `exit ${code}`); }
-        setTimeout(() => extractOps.delete(opId), 5 * 60 * 1000);
+        setTimeout(() => extractOps.delete(opId), 5 * 60 * 1000).unref();
       });
     };
     // total pass: streamed entry count (never buffers the listing)
@@ -1176,7 +1215,7 @@ function opSink(op, opId) {
     if (op.status === 'cancelled') return;
     if (o && o.error) { op.status = 'error'; op.error = o.error; op.dest = o.dest || op.dest; if (o.code) { op.code = o.code; op.params = o.params; } }
     else { op.status = 'done'; op.dest = o?.dest || op.dest; if (op.total) op.done = op.total; }
-    setTimeout(() => transferOps.delete(opId), 5 * 60 * 1000);
+    setTimeout(() => transferOps.delete(opId), 5 * 60 * 1000).unref();   // unref: a finished op's table entry never holds a process (B-fcc7's find: a suite lived 5 min past its verdict)
   };
   return { json: done, status: () => ({ json: done }) };
 }
@@ -1192,8 +1231,8 @@ function startTransferOp(req, res, body) {
   res.json({ success: true, opId });
   Promise.resolve(body(req, opSink(op, opId))).catch((e) => {
     if (op.status === 'running') { op.status = 'error'; op.error = e.message; }
-    setTimeout(() => transferOps.delete(opId), 5 * 60 * 1000);
-  });
+    setTimeout(() => transferOps.delete(opId), 5 * 60 * 1000).unref();
+  }).then(() => { const src = req.body?.src; if (typeof src === 'string' && src && !req.body?.srcHost) { try { require('../machine-mounts.js').pullTouched(safePath(src)); } catch { } } });   // B-fcc7 (read 6): a stray moved OUT of a pull folder — probed once the move ENDED (its reply came first)
 }
 
 // Cross-host transfer relay: stream src (local or remote) → dest (local or

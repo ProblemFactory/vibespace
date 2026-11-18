@@ -25,7 +25,7 @@ function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRou
   const tasks = new TaskGroupManager({
     dataDir: dataDir, grants, // lane grants-unify: a group's outside visibility is its row of the ONE grants store
     readUserState: () => persistenceRouter.readUserState(),
-    getSetting: (k) => serverSetting(k), isPathShadowed: (p) => { try { return mounts().shadowedBy(p); } catch { return null; } }, mirrorFs: () => app.locals.safeFs || null, isLiveKey: (k) => { for (const [id, s] of activeSessions) { const sk = sessionStatusKey(s, id); if (sk === k || sk.endsWith(':' + k)) return true; } return false; }, // lane cli-call-timeouts: TASK.md is mirrored through SafeFs, off the store write; lane task-group-fanout: an archived conversation still RUNNING keeps its groups until it ends
+    getSetting: (k) => serverSetting(k), isPathShadowed: (p) => { let s = null; try { s = mounts().shadowedBy(p); } catch { s = null; } if (s) return s; try { return require('../machine-mounts.js').pullShadowOf(p, { writer: true }); } catch { return null; } }, mirrorFs: () => app.locals.safeFs || null, isLiveKey: (k) => { for (const [id, s] of activeSessions) { const sk = sessionStatusKey(s, id); if (sk === k || sk.endsWith(':' + k)) return true; } return false; }, // lane cli-call-timeouts: TASK.md is mirrored through SafeFs, off the store write; lane task-group-fanout: an archived conversation still RUNNING keeps its groups until it ends
     onChange: (ch) => {
       try { taskFanout.note(ch && ch.ids); } catch { } // lane task-group-fanout: THE broadcast = a coalesced DELTA of the groups this write named (src/server/task-fanout.js); the store never travels whole (GET /api/tasks only)
       try { exitProxy().rejudgeAll('task-groups'); } catch { } try { channelsWiring().rosterChanged(); } catch { } /* lane roster-per-pass: the live roster's Task Groups half moved */ // verify-r2: a group change is a revoke too — open exit connections judged NOW (exitProxy is built later: a boot-time change is a caught TDZ)
@@ -45,6 +45,9 @@ function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRou
     },
   });
   const taskFanout = require('./task-fanout.js').create({ list: () => tasks.list(), send: (json) => wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } }) }); // lane task-group-fanout: the ONE tasks-updated broadcaster ({epoch, base, seq} — a client off `base` re-fetches)
+  // B-fcc7 (read 6): a TASK.md skipped while a machine's pull folder was away (isPathShadowed) is written once the pull is up again —
+  // the cloud storages' mounts-updated does it for theirs
+  require('../machine-mounts.js').onPullLive(() => { try { tasks.syncAllContextMd(); } catch { } });
   return { tasks, taskFanout };
 }
 

@@ -390,16 +390,17 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   // at once — the lazy unmount (a child), the bridge closed, the device's folder server let go — and the owner told
   // (onGone: the row says its state; the heal remounts). Never a zombie FUSE entry whose every read fails ENOTCONN.
   let rcGone = false;
+  let released = null;   // B-fcc7: the lazy unmount's own promise — a probe of the bare folder waits for it
   rc.on('exit', (code, sig) => {
     rcGone = true;
     if (tornDown || !refresher) return; // not up yet: the wait below answers it
     tornDown = true;
     refresher.stop();
     log(`pull refresh stopped: rclone for ${mountpoint} exited (${sig || code}) — the mount is gone until it is healed (unmounted, lazy)`);
-    lazyUnmount(mountpoint, { say: log }).catch(() => { });
+    released = lazyUnmount(mountpoint, { say: log }).catch(() => 'no');
     try { bridge.close(); } catch { }
     Promise.resolve().then(() => device.unserveFolder(devicePort)).catch(() => { });
-    if (typeof onGone === 'function') { try { onGone({ why: 'rclone-exit', code, sig }); } catch { } }
+    if (typeof onGone === 'function') { try { onGone({ why: 'rclone-exit', code, sig, released }); } catch { } }
   });
 
   // wait for the mount to appear (rclone forks; poll the mountpoint)
@@ -407,10 +408,10 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   if (!ok || rcGone) { // B-fcc7: an rclone that exited while we waited is a failed mount too (an empty directory lists fine)
     tornDown = true;
     if (!rcGone) { try { process.kill(-rc.pid, 'SIGKILL'); } catch {} }
-    lazyUnmount(mountpoint, { say: log }).catch(() => { }); // r1 #1: a mount that came up BROKEN (its listing failed) is a FUSE entry too — released
+    const releasedF = lazyUnmount(mountpoint, { say: log }).catch(() => 'no'); // r1 #1: a mount that came up BROKEN (its listing failed) is a FUSE entry too — released (B-fcc7: its promise rides the error)
     try { bridge.close(); } catch {}
     try { await device.unserveFolder(devicePort); } catch {}
-    throw new Error((rcGone ? 'rclone webdav mount exited: ' : 'rclone webdav mount did not come up: ') + (stderr.slice(-300) || (rcGone ? 'no message' : 'timeout')));
+    throw Object.assign(new Error((rcGone ? 'rclone webdav mount exited: ' : 'rclone webdav mount did not come up: ') + (stderr.slice(-300) || (rcGone ? 'no message' : 'timeout'))), { released: releasedF });
   }
   log(`device folder ${remotePath} mounted at ${mountpoint} (device:${devicePort} ↔ bridge:${bridgePort})`);
   refresher = heldRefresher({
@@ -447,12 +448,12 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
     if (tornDown) return; // B-fcc7: rclone's exit already released it all (the lazy unmount, the bridge, the device's server)
     tornDown = true;
     refresher.stop();
-    lazyUnmount(mountpoint, { say: log }).catch(() => {});
+    released = lazyUnmount(mountpoint, { say: log }).catch(() => 'no');
     setTimeout(() => { try { if (rc.exitCode === null && rc.signalCode === null) process.kill(rc.pid, 'SIGTERM'); } catch {} }, 300);
     setTimeout(() => { try { bridge.close(); } catch {} }, 500);
     try { await device.unserveFolder(devicePort); } catch {}
   };
-  return { mountpoint, devicePort, bridgePort, teardown };
+  return { mountpoint, devicePort, bridgePort, teardown, released: () => released };   // released(): the lazy unmount's promise once begun (B-fcc7)
 }
 
 function waitMounted(mp, timeoutMs) {

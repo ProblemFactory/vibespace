@@ -18,6 +18,7 @@ function create({ rootDir, AGENTD_DIR, agentdHostToken, dropHostToken = (id) => 
   const mounts = mk(getMounts);
   const machineMounts = mk(getMachineMounts);
   require('./cwd-wait.js').register({ getHosts, getMachineMounts });   // B-864f: a pulled machine folder that waits is PENDING, never gone
+  require('../machine-mounts.js').registerPullDoor(getMachineMounts);   // B-fcc7: the files route asks the pull manager (server.js takes no line)
   const portForwards = mk(getPortForwards);
   const exitProxy = mk(getExitProxy);
   const _agentdInstalled = new Map(); // hostId → version

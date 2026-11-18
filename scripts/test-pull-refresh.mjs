@@ -745,6 +745,184 @@ try {
     else check('CONTROL (the release\'s machine-mounts.js): the boot releases nothing, a heal never releases first, an unreachable ssh machine keeps its mount, there is no unlink door, the chain is not told to say its exit, a mount made while the link closed stays live and the sweep skips an offline mount (red)',
       oc.up === true && oc.bootReleased === false && oc.releaseFirst === false && oc.sshReleased === false && oc.unlinked === 'no such door' && oc.offline.live === true && oc.rcExit.said === false && oc.rcExit.live === true && oc.inflight.live === true && oc.sweep.live === true && oc.hung.error == null, JSON.stringify(oc));
   }
+  console.log('§16 B-fcc7 (the remainder): the file window meets the row\'s state, never the empty folder of a pull that is not mounted');
+  {
+    const MMx = require('../src/machine-mounts.js'), DMX = require('../src/device-mount.js');
+    const dataDir = path.join(tmp, 'fcc7-shadow'); fs.mkdirSync(dataDir, { recursive: true });
+    const base = path.join(tmp, 'fcc7-shadow-mp'), mpMac = path.join(base, 'mac'), mpMacbook = path.join(base, 'macbook'), mpIn = path.join(base, 'macbook', 'inner'), mpGone = path.join(base, 'removed'), mpOwn = path.join(base, 'own'), mpTwo = path.join(base, 'two'), mpNew = path.join(base, 'new'), mpNE = path.join(base, 'ne');
+    for (const d of [mpMac, mpMacbook, mpIn, mpGone, mpOwn, mpTwo, mpNew, mpNE]) fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(mpOwn, 'my-notes.txt'), 'mine');   // a person's own folder picked as a mount point
+    fs.writeFileSync(path.join(dataDir, 'machine-mounts.json'), JSON.stringify({ mounts: [
+      { id: 'mm-mac', dir: 'pull', hostId: 'h-mac', remotePath: '/Users/a', mountpoint: mpMac, createdAt: 1 },
+      { id: 'mm-mb', dir: 'pull', hostId: 'h-mb', remotePath: '/Users/b', mountpoint: mpMacbook, createdAt: 1 },
+      { id: 'mm-in', dir: 'pull', hostId: 'h-ssh', remotePath: '/srv', mountpoint: mpIn, createdAt: 1 },
+      { id: 'mm-gone', dir: 'pull', hostId: 'h-removed', remotePath: '/r', mountpoint: mpGone, createdAt: 1 },
+      { id: 'mm-own', dir: 'pull', hostId: 'h-mac', remotePath: '/o', mountpoint: mpOwn, createdAt: 1 },
+      { id: 'mm-two-old', dir: 'pull', hostId: 'h-removed', remotePath: '/t', mountpoint: mpTwo, createdAt: 1 },   // a removed machine's record kept…
+      { id: 'mm-two', dir: 'pull', hostId: 'h-mb', remotePath: '/t', mountpoint: mpTwo, createdAt: 3 },   // …and the machine added again: the same folder
+      { id: 'mm-new', dir: 'pull', hostId: 'h-mb', remotePath: '/n', mountpoint: mpNew, createdAt: 5 },
+      { id: 'mm-ne', dir: 'pull', hostId: 'h-mb', remotePath: '/e', mountpoint: mpNE, createdAt: 5 },
+      { id: 'mm-push', dir: 'push', hostId: 'h-mac', folder: '/x', mountpoint: path.join(base, 'pushed'), mode: 'ro', createdAt: 1 },   // its mount point is on the OTHER machine
+    ] }));
+    const online = { 'd-mac': false, 'd-mb': true };
+    const HOSTS = { 'h-mac': { id: 'h-mac', name: 'Studio Mac', transport: 'dial', deviceId: 'd-mac' }, 'h-mb': { id: 'h-mb', name: 'Laptop', transport: 'dial', deviceId: 'd-mb' }, 'h-ssh': { id: 'h-ssh', name: 'build box', transport: 'ssh' } };
+    const hosts = { get: (id) => { if (!HOSTS[id]) throw new Error('host not found'); return HOSTS[id]; }, dialOnline: (d) => !!online[d], deviceBounded: async () => ({}), findByDeviceId: () => null };
+    const mm = new MMx.MachineMounts({ dataDir, hosts, rcloneBin: () => 'rclone', broadcast: () => { }, log: () => { } });
+    clearInterval(mm._sweep);
+    const sh = (q) => mm.shadowedBy(q);
+    const live = (id, mpX) => mm._live.set(id, { teardown: async () => { }, mountpoint: mpX, at: Date.now() });
+    const recOf = (id) => mm._state.mounts.find((m) => m.id === id);
+    // THE PROBE (a child `ls -A` over the real folders): empty / not empty / unreadable / skipped while live
+    const pMac = await mm._probeBare(recOf('mm-mac')), pOwn = await mm._probeBare(recOf('mm-own'));
+    const ghost = { id: 'mm-ghost', dir: 'pull', hostId: 'h-mb', mountpoint: path.join(base, 'no-such-folder') }; mm._state.mounts.push(ghost);
+    const pGhost = await mm._probeBare(ghost); mm._state.mounts.pop();
+    live('mm-new', mpNew); const pLive = await mm._probeBare(recOf('mm-new')); mm._live.delete('mm-new');
+    check('§16 THE PROBE: an empty bare folder → empty; a person\'s own folder with files → not empty; a folder that cannot be read → no verdict (shown as before); a live pull is never probed', pMac === 'empty' && pOwn === 'not-empty' && pGhost === null && !mm._bare.has('mm-ghost') && pLive === null && !mm._bare.has('mm-new'), JSON.stringify({ pMac, pOwn, pGhost, pLive }));
+    for (const id of ['mm-mb', 'mm-in', 'mm-gone', 'mm-two-old', 'mm-two']) mm._bare.set(id, 'empty');   // (the predicate's legs: probed empty)
+    const a = sh(path.join(mpMac, 'Documents', 'a.txt'));
+    check('§16 a path under an OFFLINE machine\'s pull folder, probed empty, not mounted → that record: offline, the machine by name, its mount point', !!a && a.id === 'mm-mac' && a.offline === true && a.machine === 'Studio Mac' && a.name === 'Studio Mac' && a.mountpoint === mpMac, JSON.stringify(a));
+    check('§16 the mount point itself is shadowed too', sh(mpMac)?.id === 'mm-mac');
+    const b = sh(path.join(mpMacbook, 'f'));
+    check('§16 a whole path segment: …/macbook is not under …/mac — its own record answers (online, not mounted)', !!b && b.id === 'mm-mb' && b.offline === false && b.machine === 'Laptop', JSON.stringify(b));
+    const c = sh(path.join(mpIn, 'x'));
+    check('§16 the INNERMOST pull answers (one nested under another\'s folder); an ssh machine is never «offline» by itself', !!c && c.id === 'mm-in' && c.offline === false && c.machine === 'build box', JSON.stringify(c));
+    check('§16 never shadowed: a removed machine\'s record (no words would be true); a folder holding files of its own (a person\'s, picked as a mount point); a folder not probed yet', sh(path.join(mpGone, 'z')) === null && sh(path.join(mpOwn, 'my-notes.txt')) === null && sh(mpNew) === null);
+    const wNew = mm.shadowedBy(mpNew, { writer: true }), wOwn = mm.shadowedBy(path.join(mpOwn, 'x.txt'), { writer: true }), wGone = mm.shadowedBy(path.join(mpGone, 'z'), { writer: true });
+    check('§16 the WRITER\'s question (what a request adds, the TASK.md writer): ANY folder not live of an existing machine — one not probed yet, one holding files of its own — never a removed machine\'s', wNew?.id === 'mm-new' && wOwn?.id === 'mm-own' && wGone === null && sh(mpNew) === null && sh(mpOwn) === null, JSON.stringify({ wNew: wNew?.id, wOwn: wOwn?.id, wGone }));
+    const t = sh(path.join(mpTwo, 'f'));
+    check('§16 two records on one folder (a removed machine\'s kept, the machine added again): the existing machine\'s answers', !!t && t.id === 'mm-two' && t.machine === 'Laptop', JSON.stringify(t));
+    check('§16 a push record (its folder is on the other machine), an unrelated path, a relative or an empty one: nothing', sh(path.join(base, 'pushed', 'q')) === null && sh(path.join(tmp, 'elsewhere')) === null && sh('mac/a') === null && sh('') === null && sh(null) === null);
+    live('mm-mac', mpMac); live('mm-mb', mpMacbook); live('mm-two-old', mpTwo);
+    check('§16 under ANY live pull\'s folder nothing is shadowed: a mounted one, a nested record under a live one (what shows is the machine\'s own), a second record on a live folder', sh(path.join(mpMac, 'Documents', 'a.txt')) === null && sh(path.join(mpIn, 'x')) === null && sh(path.join(mpTwo, 'f')) === null);
+    mm._live.clear();
+    // a mount clears the verdict; the link closing releases it and PROBES it again (the stub chain: the module's own DM seams)
+    const realRel = DMX.releaseStale, realMount = DMX.deviceFolderMount;
+    DMX.releaseStale = async () => [];
+    DMX.deviceFolderMount = async ({ mountpoint }) => ({ mountpoint, devicePort: 1, bridgePort: 1, teardown: async () => { } });
+    const road = {};
+    try {
+      let relOpen; const relP = new Promise((r) => { relOpen = r; });
+      DMX.deviceFolderMount = async ({ mountpoint }) => ({ mountpoint, devicePort: 1, bridgePort: 1, teardown: () => new Promise(() => { }), released: () => relP });   // its lazy unmount HELD; its teardown NEVER settles (its unserveFolder rides a dead link)
+      mm._bare.set('mm-new', 'empty');
+      const heard = []; const offLive = MMx.onPullLive((mpX) => heard.push(mpX));
+      await mm._up(recOf('mm-new'));
+      offLive(); road.heard = heard.length === 1 && heard[0] === mpNew;   // who skipped the folder meanwhile is told (the TASK.md writer)
+      road.mounted = mm._live.has('mm-new') && !mm._bare.has('mm-new') && sh(mpNew) === null;
+      mm.onMachineUnlinked('h-mb');
+      road.heldNoProbe = (await quiet(() => mm._bare.get('mm-new') || 'none', 4000, 200)) === 'none' && !mm._live.has('mm-new');   // no probe while its unmount runs
+      relOpen('ok');
+      road.reprobed = await until(() => mm._bare.get('mm-new') === 'empty', 3000);
+      DMX.deviceFolderMount = async ({ mountpoint }) => ({ mountpoint, devicePort: 1, bridgePort: 1, teardown: async () => { } });
+      road.shadowed = sh(mpNew)?.id === 'mm-new';
+      // a mount refused «not empty» (a file a writer left in the bare folder): its words; the probe shows its files
+      await mm._probeBare(recOf('mm-ne'));
+      road.planted = sh(mpNE)?.id === 'mm-ne';   // the plant: an empty, released folder IS shadowed
+      fs.writeFileSync(path.join(mpNE, 'stray.txt'), 'left while the machine was away');
+      DMX.deviceFolderMount = async ({ mountpoint }) => { throw new Error(`rclone webdav mount exited: Fatal error: directory is not empty: "${mountpoint}"`); };
+      let threw = ''; try { await mm._up(recOf('mm-ne')); } catch (e) { threw = e.message; }
+      road.notEmpty = /not empty/.test(threw) && await until(() => mm._bare.get('mm-ne') === 'not-empty', 3000) && sh(path.join(mpNE, 'stray.txt')) === null;
+      road.words = (mm.list().find((r) => r.id === 'mm-ne') || {}).error || '';
+      fs.rmSync(path.join(mpNE, 'stray.txt'));
+      DMX.deviceFolderMount = async ({ mountpoint }) => ({ mountpoint, devicePort: 1, bridgePort: 1, teardown: async () => { } });
+      await mm._up(recOf('mm-ne'));
+      road.cleared = mm._live.has('mm-ne') && !mm._bare.has('mm-ne') && !(mm.list().find((r) => r.id === 'mm-ne') || {}).error;
+      mm._live.delete('mm-ne'); await mm._probeBare(recOf('mm-ne'));
+      road.again = sh(mpNE)?.id === 'mm-ne';
+    } finally { DMX.releaseStale = realRel; DMX.deviceFolderMount = realMount; mm._live.clear(); }
+    check('§16 a mount clears the bare verdict; the link closing releases the folder and probes it again ONLY once its lazy unmount ended (held: no probe) — never waiting on the teardown (here it never settles): shadowed once more', !!(road.mounted && road.heard && road.heldNoProbe && road.reprobed && road.shadowed), JSON.stringify(road));
+    check('§16 a mount refused «not empty» — the plant first (an empty released folder IS shadowed), then the stray file: the failed mount PROBES it (once its mounting mark is gone) and the folder SHOWS (its files can be moved out); the row says why', !!(road.planted && road.notEmpty && /not empty.*move its files out, then press Remount now/.test(road.words)), JSON.stringify(road));
+    check('§16 …the stray moved out, a mount clears the words; released again it is shadowed', !!(road.cleared && road.again), JSON.stringify(road));
+    check('§16 the door: nothing is shadowed before a manager registers (a worker, a process with none), and a throwing getter answers nothing', (MMx.registerPullDoor(null), MMx.pullShadowOf(mpMac) === null) && (MMx.registerPullDoor(() => { throw new Error('x'); }), MMx.pullShadowOf(mpMac) === null) && (MMx.registerPullDoor(() => mm), MMx.pullShadowOf(mpMac)?.id === 'mm-mac'));
+    // the REAL files route in-process (as test-dir-complete serves it), no cloud storage registered
+    const express = require('express');
+    const app = express(); app.use(express.json());
+    app.locals.mounts = { pathBlocked: () => false, shadowedBy: () => null };
+    app.use(require('../src/routes/files.js'));
+    const server = require('http').createServer(app); await new Promise((res) => server.listen(0, '127.0.0.1', res));
+    const at = `http://127.0.0.1:${server.address().port}`;
+    const ls = async (q) => { const res = await fetch(`${at}/api/files?path=${encodeURIComponent(q)}`); return { status: res.status, body: await res.json() }; };
+    const write = async (q) => { const res = await fetch(`${at}/api/file/write`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: q, content: 'x' }) }); return { status: res.status, body: await res.json().catch(() => null) }; };
+    try {
+      MMx.registerPullDoor(() => mm);
+      const off = await ls(mpMac);
+      check('§16 the file window over an offline machine\'s pull folder: 503 machine_offline, the machine by name — never an empty listing', off.status === 503 && off.body.code === 'machine_offline' && off.body.params?.machine === 'Studio Mac' && /“Studio Mac” is offline/.test(off.body.error) && !('items' in off.body), JSON.stringify(off));
+      const dn = await ls(path.join(mpMacbook, 'sub'));
+      check('§16 …an online machine whose pull is not mounted: 503 machine_folder_down', dn.status === 503 && dn.body.code === 'machine_folder_down' && dn.body.params?.machine === 'Laptop', JSON.stringify(dn));
+      const own = await ls(mpOwn);
+      check('§16 …a folder holding files of its own (a person\'s) lists them (200)', own.status === 200 && (own.body.items || []).some((i) => i.name === 'my-notes.txt'), JSON.stringify(own).slice(0, 200));
+      const wOwnR = await write(path.join(mpOwn, 'added.txt'));
+      fs.writeFileSync(path.join(mpOwn, 'stray.txt'), 'left there');
+      const del = await fetch(`${at}/api/file?path=${encodeURIComponent(path.join(mpOwn, 'stray.txt'))}`, { method: 'DELETE' });
+      check('§16 …but nothing is ADDED there while it is not mounted (a write refused, machine_offline), and a file in it can be DELETED (a stray moved out)', wOwnR.status === 503 && wOwnR.body?.code === 'machine_offline' && !fs.existsSync(path.join(mpOwn, 'added.txt')) && del.status === 200 && !fs.existsSync(path.join(mpOwn, 'stray.txt')), JSON.stringify({ w: wOwnR.status, del: del.status }));
+      const wr = await write(path.join(mpMac, 'new.txt'));
+      check('§16 a write into the bare folder is refused the same way (machine_offline) — nothing written', wr.status === 503 && wr.body?.code === 'machine_offline' && !fs.existsSync(path.join(mpMac, 'new.txt')), JSON.stringify(wr));
+      const post = async (u, body) => { const res = await fetch(`${at}${u}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: res.status, body: await res.json().catch(() => null) }; };
+      const cp = await post('/api/file/copy', { src: mpMac, dest: path.join(tmp, 'fcc7-backup', 'mac') });
+      const zip = await post('/api/archive', { paths: [mpMac], dest: path.join(tmp, 'fcc7-backup', 'mac.zip') });
+      const rn = await post('/api/rename', { oldPath: path.join(tmp, 'fcc7-elsewhere.txt'), newPath: path.join(mpMac, 'moved-in.txt') });
+      check('§16 EVERY path a request names: a copy FROM the bare folder, a compress of it, a rename INTO it — refused (never an empty copy that says it worked); nothing written', cp.status === 503 && cp.body?.code === 'machine_offline' && zip.status === 503 && zip.body?.code === 'machine_offline' && rn.status === 503 && rn.body?.code === 'machine_offline' && !fs.existsSync(path.join(tmp, 'fcc7-backup')) && !fs.existsSync(path.join(mpMac, 'moved-in.txt')), JSON.stringify({ cp, zip: zip.status, rn: rn.status }).slice(0, 300));
+      // an UPLOAD: multer's own folder is fixed in the route (read from its source) — where this machine cannot write it (the test
+      // machine's second box), the live drive cannot reach the route at all, so the route's ORDER is pinned from its source instead
+      const fjU = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/routes/files.js'), 'utf8');
+      const upDir = (fjU.match(/multer\(\{ dest: '([^']+)' \}\)/) || [])[1] || '';
+      const upOk = !!upDir && (() => { try { fs.accessSync(upDir, fs.constants.W_OK); return true; } catch (e) { if (e.code !== 'ENOENT') return false; try { fs.accessSync(path.dirname(upDir.replace(/\/+$/, '')), fs.constants.W_OK); return true; } catch { return false; } } })();
+      if (upOk) {
+        const fd = new FormData(); fd.append('destDir', mpMac); fd.append('fileNames', JSON.stringify(['up.txt'])); fd.append('files', new Blob(['uploaded']), 'up.txt');
+        const upR = await fetch(`${at}/api/upload`, { method: 'POST', body: fd }); const up1 = { status: upR.status, body: await upR.json().catch(() => null) };
+        check('§16 an UPLOAD into the bare folder is refused too (its multipart destDir, read after multer) — machine_offline, nothing written', up1.status === 503 && up1.body?.code === 'machine_offline' && !fs.existsSync(path.join(mpMac, 'up.txt')), JSON.stringify(up1).slice(0, 200));
+      } else {
+        console.log(`  · the upload's live drive needs multer's folder ${upDir || '(not found)'} writable — it is not on this machine; the route's order is pinned from its source`);
+        const iRef = fjU.indexOf("const pullUp = require('../machine-mounts.js').pullShadowOf(destRoot, { writer: true });"), iMk = fjU.indexOf("await sfs(req).call('mkdir', { path: destRoot });");
+        check('§16 an UPLOAD (source order, where multer\'s folder cannot be written here): the pull refusal comes BEFORE the route makes or writes anything, and its catch answers the refusal\'s own body', iRef > 0 && iMk > iRef && /res\.status\(err\.status \|\| 400\)\.json\(err\.pullBody \|\| \{ error: err\.message \}\)/.test(fjU), JSON.stringify({ iRef, iMk }));
+      }
+      const viaDir = await fetch(`${at}/api/no-such-route?dir=${encodeURIComponent(mpMac)}`), viaOld = await post('/api/rename', { oldPath: path.join(mpMac, 'x'), newPath: path.join(tmp, 'fcc7-out-x') }), viaDest = await post('/api/no-such-route', { destDir: path.join(mpMac, 'sub') });
+      check('§16 …reached by ?dir=, a rename\'s oldPath and a body destDir alike', viaDir.status === 503 && viaOld.status === 503 && viaDest.status === 503, JSON.stringify([viaDir.status, viaOld.status, viaDest.status]));
+      const readPost = await post('/api/archive/extract-entry', { path: path.join(mpOwn, 'a.zip'), entry: 'x' });
+      check('§16 a POST that only READS its path (an archive\'s entry) under a folder holding files is not refused as a write', readPost.status !== 503, JSON.stringify(readPost).slice(0, 160));
+      const remoteSrc = await post('/api/file/copy', { src: mpMac, srcHost: 'h-remote', dest: path.join(mpMacbook, 'x') });
+      check('§16 …a remote side is not this machine\'s (srcHost): only the local destination is asked', remoteSrc.status === 503 && remoteSrc.body?.code === 'machine_folder_down', JSON.stringify(remoteSrc).slice(0, 200));
+      fs.writeFileSync(path.join(mpNE, 'stray2.txt'), 'left there'); await mm._probeBare(recOf('mm-ne'));
+      const neBefore = mm._bare.get('mm-ne');
+      const delNE = await fetch(`${at}/api/file?path=${encodeURIComponent(path.join(mpNE, 'stray2.txt'))}`, { method: 'DELETE' });
+      const reprobed = await until(() => mm._bare.get('mm-ne') === 'empty', 3000);
+      check('§16 a stray DELETED through the route has its folder probed again at once (not the sweep\'s 90 s): empty, so shadowed again', neBefore === 'not-empty' && delNE.status === 200 && reprobed && sh(mpNE)?.id === 'mm-ne', JSON.stringify({ neBefore, del: delNE.status, reprobed }));
+      for (const n of ['s3.txt', 's4.txt', 's5.txt']) fs.writeFileSync(path.join(mpNE, n), n);
+      await mm._probeBare(recOf('mm-ne'));
+      const ne2 = mm._bare.get('mm-ne');
+      const dels = await Promise.all(['s3.txt', 's4.txt', 's5.txt'].map((n) => fetch(`${at}/api/file?path=${encodeURIComponent(path.join(mpNE, n))}`, { method: 'DELETE' })));
+      const emptyAfterDels = await until(() => mm._bare.get('mm-ne') === 'empty' && !mm._probing?.has('mm-ne'), 4000);
+      check('§16 three strays DELETED at once (a multi-select delete): a probe asked while one runs is run again once it ended — the folder reads EMPTY at last, shadowed again', ne2 === 'not-empty' && dels.every((d) => d.status === 200) && emptyAfterDels && sh(mpNE)?.id === 'mm-ne', JSON.stringify({ ne2, d: dels.map((d) => d.status), emptyAfterDels }));
+      fs.writeFileSync(path.join(mpNE, 's6.txt'), 's6'); await mm._probeBare(recOf('mm-ne'));
+      const ne3 = mm._bare.get('mm-ne');
+      const mv = await post('/api/file/move', { src: path.join(mpNE, 's6.txt'), dest: path.join(tmp, 'fcc7-moved-s6.txt'), progress: 1 });
+      const moved = await until(() => !fs.existsSync(path.join(mpNE, 's6.txt')), 3000);
+      const emptyAfterMove = await until(() => mm._bare.get('mm-ne') === 'empty', 3000);
+      check('§16 a stray MOVED OUT with progress (cut / paste: the reply comes BEFORE the move) is probed again once the move ENDED: empty', ne3 === 'not-empty' && mv.status === 200 && !!mv.body?.opId && moved && emptyAfterMove, JSON.stringify({ ne3, mv: mv.status, moved, emptyAfterMove }));
+      const mk = await post('/api/MKDIR/', { path: path.join(mpOwn, 'made') });
+      check('§16 a write route as express matches it (any case, a trailing slash) is a writer: /api/MKDIR/ refused, nothing made', mk.status === 503 && !fs.existsSync(path.join(mpOwn, 'made')), JSON.stringify(mk).slice(0, 160));
+      const keep = app.locals.mounts; delete app.locals.mounts;
+      const bare = await ls(mpMac);
+      app.locals.mounts = keep;
+      check('§16 its own pass: refused with no storage manager registered too', bare.status === 503 && bare.body.code === 'machine_offline', JSON.stringify(bare));
+      live('mm-mac', mpMac);
+      const up = await ls(mpMac);
+      check('§16 a mounted pull lists as before (200, its items)', up.status === 200 && Array.isArray(up.body.items), JSON.stringify(up).slice(0, 200));
+      mm._live.delete('mm-mac');
+      MMx.registerPullDoor(null);
+      const ctl = await ls(mpMac), ctlW = await write(path.join(mpMac, 'stranded.txt'));
+      const landed = fs.existsSync(path.join(mpMac, 'stranded.txt')); try { fs.rmSync(path.join(mpMac, 'stranded.txt'), { force: true }); } catch { }
+      check('CONTROL §16 (no pull door: the release) — the plant first (the record offline, not mounted), then the folder lists EMPTY, a 200, and a write LANDS in the bare folder (red)', sh(mpMac)?.offline === true && ctl.status === 200 && Array.isArray(ctl.body.items) && ctl.body.items.length === 0 && ctlW.status === 200 && landed, JSON.stringify({ ctl, ctlW: ctlW.status, landed }).slice(0, 240));
+    } finally { MMx.registerPullDoor(null); await new Promise((res) => server.close(res)); }
+    // the words: the client words both codes (en = the server's sentence), zh / ja rows exist; the hub registers the door
+    const R = (rel) => fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', rel), 'utf8');
+    const ops = R('src/lib/file-explorer-ops.js'), zh = R('src/lib/i18n-zh.js'), ja = R('src/lib/i18n-ja.js'), fj = R('src/routes/files.js'), dp = R('src/server/dial-pairing.js'), tgw = R('src/server/task-groups-wiring.js');
+    const enOf = (code) => (fj.match(new RegExp(`error: \`([^\`]*)\`, code: '${code}'`)) || [])[1];
+    const keyOf = (code) => (ops.match(new RegExp(`d\\.code === '${code}'\\) return t\\('([^']*)'`)) || [])[1];
+    const same = (code) => { const e = enOf(code), k = keyOf(code); return !!e && !!k && e.replace(/\$\{s\.machine\}/g, '{machine}') === k && zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'); };
+    check('§16 the client words machine_offline and machine_folder_down in the reader\'s language: its key = the server\'s English, a zh and a ja row each', same('machine_offline') && same('machine_folder_down'));
+    const iCloud = fj.indexOf('const shadow = mounts.shadowedBy?.(p);'), iPull = fj.search(/const pull = require\('\.\.\/machine-mounts\.js'\)\.pullShadowOf\(p, \{ writer \}\);\n\s+if \(pull\) return res\.status\(503\)\.json\(pullShadowBody\(pull\)\);/);
+    check('§16 wiring: the hub\'s dial wiring registers the ONE pull manager (server.js takes no line); the files router asks it in its own pass, after the cloud storages\' refusal', /require\('\.\.\/machine-mounts\.js'\)\.registerPullDoor\(getMachineMounts\);/.test(dp) && iCloud > 0 && iPull > iCloud && fj.split('pullShadowOf(').length === 3 && /pullShadowOf\(destRoot, \{ writer: true \}\)/.test(fj) && /onPullLive\(\(\) => \{ try \{ tasks\.syncAllContextMd\(\); \} catch \{ \} \}\)/.test(tgw));
+  }
 } finally {
   process.env.PATH = PATH0;
   for (const c of kids) { if (c.exitCode === null && c.signalCode === null) { try { c.kill('SIGKILL'); } catch { } } }   // r1 #7: by the handle, only while it runs
@@ -753,3 +931,4 @@ try {
 }
 if (failed) { console.error(`\ntest-pull-refresh: ${passed} passed, ${failed} failed`); process.exit(1); }
 console.log(`\ntest-pull-refresh: ALL PASS (${passed})`);
+

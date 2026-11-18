@@ -13117,6 +13117,8 @@ export default {
   "this file is on the storage «{mount}», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there": "このファイルはストレージ「{mount}」上にあります。この種類のプレビューは、ストレージ上のファイルにはまだ表示できません — ダウンロードするか、ローカルフォルダーにコピーしてから開いてください",
   "this file is on a storage, and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there": "このファイルはストレージ上にあります。この種類のプレビューは、ストレージ上のファイルにはまだ表示できません — ダウンロードするか、ローカルフォルダーにコピーしてから開いてください",
   "another document is being parsed — try again in a moment": "別のドキュメントを解析中です——しばらくしてからもう一度お試しください",
+  "“{machine}” is offline — this folder shows its files only while the machine is connected": "「{machine}」はオフラインです——このフォルダーはマシンの接続中にだけそのファイルを表示します",
+  "“{machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row": "「{machine}」のフォルダーは現在マウントされていません——このフォルダーがその表示場所です。自動で再試行されます。行の「今すぐ再マウント」も使えます",
   "Showing part of this workbook: {list}": "このブックの一部だけを表示しています：{list}",
   "the first {n} rows": "先頭の {n} 行",
   "the first {n} columns": "先頭の {n} 列",

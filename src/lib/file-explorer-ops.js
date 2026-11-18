@@ -31,6 +31,9 @@ export function fsErrorText(d) {
   if (d && d.code === 'parse_busy') return t('another document is being parsed — try again in a moment'); // the parse lane's turn never came (src/safe-fs.js LANES)
   // B-5ce7's cure: a PARKED storage's folder — its name and its doors, in the reader's language (src/routes/files.js storage_parked)
   if (d && d.code === 'storage_parked') return t('“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.', { name: p.name || '' });
+  // B-fcc7: a pull mount's folder while it is not mounted (src/routes/files.js pullShadowBody) — the row's state, never an empty folder
+  if (d && d.code === 'machine_offline') return t('“{machine}” is offline — this folder shows its files only while the machine is connected', { machine: p.machine || '?' });
+  if (d && d.code === 'machine_folder_down') return t('“{machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row', { machine: p.machine || '?' });
   if (d && d.code === 'windows_no_shell') return t('this needs a POSIX shell ({shell}), and this Windows machine has none — not available on Windows machines without one yet', { shell: p.shell || 'sh' });
   return String((d && d.error) || '');
 }

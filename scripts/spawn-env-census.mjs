@@ -321,7 +321,7 @@ export const ROWS = Object.freeze([
   ['src/incident.js', 'cmd', 'probe', 1, PROBE + ' (the incident capture helpers, 8 s)'],
   ['src/installed-apps.js', 'argv[0]', 'default', 1, "listInstalled's default; agentd hands spawnEnv() (daemonEnv), the hub its display env"],
   ['src/machine-mounts.js', "'sh'", 'probe', 1, PROBE + ' (a mount path check, 6 s)'],
-  ['src/machine-mounts.js', "'ls'", 'probe', 1, PROBE + ' (the mount liveness read)'],
+  ['src/machine-mounts.js', "'ls'", 'probe', 1, PROBE + ' (the mount liveness read, and a released pull folder\'s emptiness — B-fcc7: one site, lsChild)'],
   ['src/machine-probes.js', 'cmd', 'probe', 1, PROBE + ' (the machine facts probes)'],
   ['src/server/child-starter-proc.js', 'cmd', 'upstream', 1, "B-91aa THE STARTER: the hub's timer sites' programs (the mount liveness `ls`, the port scan's `sh`, the belt's X tools) — the starter was BORN of serviceEnv (src/server/child-starter.js) and adds only the names a request carries (the X / locale names, DOCKER_*)"],
   ['src/mounts.js', "'sh'", 'probe', 2, PROBE + ' (the rclone binary copy, the modprobe shim)'],

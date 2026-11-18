@@ -23,7 +23,7 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const DM = require('./device-mount'); // the pull chain (B-fcc7: read at each call — test-pull-refresh §15 drives the manager over a stub chain)
 // cure 4 (the readers' should): a pull the person REMOVED while the mount it was asked for waited is refused to the caller
 // that asked (mountPull / remount) with these words — whatever road the removal took (the boot's mark, the release, the
@@ -31,6 +31,23 @@ const DM = require('./device-mount'); // the pull chain (B-fcc7: read at each ca
 // (logs, the suite); the routes answer the words (server.js takes no line)
 const removedWhileMounting = () => Object.assign(new Error('this pull mount was removed while it was being mounted — nothing of it stays mounted'), { code: 'mount_removed' });
 const { rcloneMountArgs, shellWords, SSH_HOST_WEBDAV_ROW } = require('./mount-argv.js');   // THE mount argv (B-069b: the push mount's too)
+
+/** THE one `ls` child of this file (spawn-env-census: one probe site) — never node fs on a mount point. `names` asks `ls -A`
+ *  for the folder's entries (B-fcc7: is a released pull's bare folder empty?). Bounded (8 s), ended by its handle.
+ *  → { ok, empty } (empty: null unless `names`). */
+function lsChild(mp, { names = false, ms = 8000 } = {}) {   // → ok: true / false (no answer in time, an error) / null (it could not start); exited: the child's own end
+  let exitedRes; const exited = new Promise((r) => { exitedRes = r; });
+  return new Promise((res) => {
+    let out = '', done = false, spawned = false, t = null;
+    const end = (v) => { if (!done) { done = true; clearTimeout(t); res({ ...v, exited }); } };
+    let c; try { c = spawn('ls', names ? ['-A', mp] : [mp], { stdio: ['ignore', names ? 'pipe' : 'ignore', 'ignore'] }); } catch { exitedRes(); return end({ ok: null, empty: null }); }   // could not start: no verdict
+    t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } end({ ok: false, empty: null }); }, ms);
+    c.on('spawn', () => { spawned = true; });
+    if (names) c.stdout.on('data', (d) => { if (out.length < 4096) out += d; });
+    c.on('close', (code) => { exitedRes(); end({ ok: code === 0, empty: names && code === 0 ? out.length === 0 : null }); });   // a name of spaces is a name
+    c.on('error', () => { exitedRes(); end({ ok: spawned ? false : null, empty: null }); });   // an error before it started (EAGAIN, ENOENT): no verdict
+  });
+}
 
 const RCLONE_PIN = 'v1.69.3'; // ≥1.66 brings `rclone nfsmount` (macOS without macFUSE); 2.369.12
 
@@ -500,6 +517,7 @@ class MachineMounts {
     if (!this._state.mounts.some((m) => m.id === rec.id)) return;
     if (this._live.has(rec.id) || this._mounting.has(rec.id)) return;
     this._mounting.add(rec.id);
+    let failed = null;
     try {
       // B-fcc7 (adversarial r1 #2): release what the LAST chain left FIRST, before the machine is asked anything — a heal that
       // fails (an ssh machine unreachable: _online() is always true for ssh; a folder server refused) never leaves the old FUSE
@@ -519,18 +537,21 @@ class MachineMounts {
         // sweep's pending branch remounts while the machine is linked (only THIS chain's entry: a newer one is left alone).
         // r1 #5: a chain that died YOUNG keeps the sweep's 5-min backoff (no remount every sweep, each one a folder server
         // asked of the device)
-        onGone: () => {
+        onGone: (gone = {}) => {
           if (!entry || this._live.get(rec.id) !== entry) return;
           this._live.delete(rec.id);
           if (Date.now() - entry.at < 60000) (this._pullRetryAt = this._pullRetryAt || new Map()).set(rec.id, Date.now() + 5 * 60000);
           this._notify();
+          Promise.resolve(gone.released).catch(() => { }).then(() => this._probeBare(rec)).catch(() => { });   // B-fcc7: once its lazy unmount ended
         },
       });
       // r1 #4: the machine's link closed while this mount was being made (onMachineUnlinked saw no live chain) — let it go now
       if (!this._online(rec.hostId)) { try { await h.teardown(); } catch { } throw new Error('the machine went offline while its folder was being mounted'); }
       if (!this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }   // cure 2: removed while it was being mounted
-      entry = { teardown: h.teardown, mountpoint: rec.mountpoint, at: Date.now() };
+      entry = { teardown: h.teardown, released: h.released, mountpoint: rec.mountpoint, at: Date.now() };
       this._live.set(rec.id, entry);
+      this._bare?.delete(rec.id);   // B-fcc7: mounted — its bare folder's verdict goes (shadowedBy)
+      for (const f of pullLiveListeners) { try { f(rec.mountpoint); } catch { } }   // B-fcc7 (read 6): who skipped the folder while it was away writes now
       if (this._pullErrors && this._pullErrors.delete(rec.id)) this._notify();
       this.log(`pull mount up: ${rec.hostId}:${rec.remotePath} → ${rec.mountpoint}`);
     } catch (e) {
@@ -538,8 +559,21 @@ class MachineMounts {
       // leaves the mounting set (the finally) so the next check may try again — never a silent forever-«mounting»
       // cure-2 read #6: said only while the record exists — a pull removed during its release gets no words back
       if (e && e.code === 'unmount_hung' && this._state.mounts.some((m) => m.id === rec.id)) { const said = this._pullErrors || (this._pullErrors = new Map()); if (said.get(rec.id) !== e.message) { said.set(rec.id, e.message); this._notify(); } }
+      // B-fcc7 (its reads 2–3): a mount refused because its folder is NOT EMPTY (rclone's «directory is not empty», fusermount's
+      // «mountpoint is not empty») — a file a writer left in the bare folder while the machine was away: the row says why (that
+      // failure's own evidence); the folder is probed again (shadowedBy shows a non-empty one, so its files can be moved out)
+      if (e && /(directory|mountpoint) is not empty/i.test(String(e.message || '')) && this._state.mounts.some((m) => m.id === rec.id)) {
+        const said = this._pullErrors || (this._pullErrors = new Map()), words = 'this folder is not empty, so the machine\'s folder cannot be mounted over it — move its files out, then press Remount now';
+        if (said.get(rec.id) !== words) { said.set(rec.id, words); this._notify(); }
+      }
+      failed = e || true;
       throw e;
-    } finally { this._mounting.delete(rec.id); }
+    } finally {
+      this._mounting.delete(rec.id);
+      // B-fcc7: a failed mount released its folder (deviceFolderMount's failure path) — probed now, the mounting mark gone
+      // first (read 4: inside the catch the mark still stood and the probe skipped itself)
+      if (failed && this._state.mounts.some((m) => m.id === rec.id)) Promise.resolve(failed.released).catch(() => { }).then(() => this._probeBare(rec)).catch(() => { });   // once the failure's own lazy unmount ended
+    }
   }
 
   /** Manual remount (the pull row's ↻ — e.g. after a failed heal). */
@@ -573,6 +607,7 @@ class MachineMounts {
       const live = this._live.get(id);
       if (live) { try { await live.teardown(); } catch { } this._live.delete(id); }
       this._pullErrors?.delete(id);   // cure 2: its words go with its record
+      this._bare?.delete(id);
     } else {
       await this._unmountPush(rec);
       this._pushTunnelOwned.delete(id);
@@ -619,6 +654,64 @@ class MachineMounts {
     }
   }
 
+  /** B-fcc7 (the remainder — a reader in the file window met an EMPTY FOLDER where an offline machine's files belong): the
+   *  pull record whose mount point holds p while its folder is NOT mounted (released: the machine offline or its rclone
+   *  gone; being mounted again; waiting for its heal). The mount point is then a bare local folder: an empty one that
+   *  reads as «the files are gone», and a write there is stranded under the next mount. A walk of the records — no fs,
+   *  nothing waits. Shadowed ONLY when its bare folder was probed EMPTY (`_probeBare`: a child `ls -A`, at each release and
+   *  in the sweep — the reads' findings): a folder holding files of its own (a person's own folder picked as a mount point,
+   *  a file a writer left there while the machine was away) shows them, so nothing is hidden and they can be moved out; a
+   *  folder not probed yet is shown as before. Never shadowed either: a path under ANY live pull's folder (two records on
+   *  one folder, a nested one — what shows there is a machine's own); a removed machine's record (no words would be true).
+   *  The innermost record answers. `writer`: the question of a request that ADDS to the folder (a write, a copy's or a move's
+   *  destination, the TASK.md writer) — ANY folder not live, whatever its probe (read 4: «unknown» must not mean «write»). → { id, hostId, machine, name (= machine: the shape the TASK.md writer reads), mountpoint, offline } | null */
+  shadowedBy(p, { writer = false } = {}) {
+    const rp = typeof p === 'string' ? p : '';
+    if (!rp.startsWith('/')) return null;
+    let best = null;
+    for (const m of this._state.mounts) {
+      if (m.dir !== 'pull' || typeof m.mountpoint !== 'string' || !m.mountpoint) continue;
+      const mp = path.resolve(m.mountpoint);
+      if (mp === '/' || (rp !== mp && !rp.startsWith(mp + '/'))) continue;   // a whole path segment (…/mac is not …/macbook)
+      if (this._live.has(m.id)) return null;
+      let h = null; try { h = this.hosts.get(m.hostId); } catch { h = null; }
+      if (!h || (!writer && this._bare?.get(m.id) !== 'empty')) continue;   // a READER: probed empty only (a folder with files of its own shows them); a WRITER: any folder not live (what it adds is hidden under the next mount, or blocks it)
+      if (!best || mp.length > best.mp.length) best = { m, mp, h };
+    }
+    if (!best) return null;
+    const machine = String(best.h.name || best.m.hostId || '');
+    return { id: best.m.id, hostId: best.m.hostId, machine, name: machine, mountpoint: best.mp, offline: !this._online(best.m.hostId) };
+  }
+  /** B-fcc7 (read 5): a file under a pull folder that is not live was removed or moved out — probe that folder again now (its
+   *  «not empty» verdict and words go once it is empty), never waiting for the sweep. */
+  touched(p) {
+    const rp = typeof p === 'string' ? p : '';
+    let best = null;
+    for (const m of this._state.mounts) {
+      if (m.dir !== 'pull' || typeof m.mountpoint !== 'string' || !m.mountpoint || this._live.has(m.id)) continue;
+      const mp = path.resolve(m.mountpoint);
+      if (mp !== '/' && (rp === mp || rp.startsWith(mp + '/')) && (!best || mp.length > best.mp.length)) best = { m, mp };
+    }
+    if (best) this._probeBare(best.m).catch(() => { });
+  }
+  /** B-fcc7: is this pull's BARE folder empty? A child `ls -A` (never node fs: a folder whose release hung may still be a dead
+   *  FUSE entry), skipped while it is live, being mounted, or its unmount is stuck. → 'empty' | 'not-empty', or the verdict
+   *  dropped (not readable, timed out: shown as before). */
+  async _probeBare(rec) {
+    this._bare = this._bare || new Map(); this._probing = this._probing || new Set();
+    const pending = !!rec && !!this._releasing && this._releasing.has(path.resolve(String(rec.mountpoint || '')));   // the boot's release of it still runs
+    if (rec && this._probing.has(rec.id)) { (this._reprobe = this._reprobe || new Set()).add(rec.id); return this._bare.get(rec.id) || null; }   // asked while one runs: again once that child exits (read 6: a multi-select delete)
+    if (!rec || rec.dir !== 'pull' || this._live.has(rec.id) || this._mounting.has(rec.id) || pending || DM.unmountStuckOf?.(rec.mountpoint)) return this._bare.get(rec && rec.id) || null;
+    this._probing.add(rec.id);   // one probe child per folder while it LIVES (a wedged `ls` is not stacked by every sweep)
+    const r = await lsChild(rec.mountpoint, { names: true });
+    Promise.resolve(r.exited).then(() => { this._probing.delete(rec.id); if (this._reprobe?.delete(rec.id)) this._probeBare(rec).catch(() => { }); });
+    if (this._live.has(rec.id) || this._mounting.has(rec.id) || !this._state.mounts.some((m) => m.id === rec.id)) return null;   // it moved meanwhile
+    if (r.ok === null) return this._bare.get(rec.id) || null;   // ls could not start: the verdict stands
+    if (r.ok) this._bare.set(rec.id, r.empty ? 'empty' : 'not-empty'); else this._bare.delete(rec.id);
+    if (r.ok && r.empty && this._pullErrors && /not empty/.test(this._pullErrors.get(rec.id) || '')) { this._pullErrors.delete(rec.id); this._notify(); }   // its files were moved out: the «not empty» words go
+    return this._bare.get(rec.id) || null;
+  }
+
   /** B-fcc7: the machine's link closed (its dial-in ended; the sweep's belt for a missed close). Each LIVE pull of it is
    *  torn down at once — the lazy unmount, in a child — so a reader of the mount point meets an empty folder and the row
    *  says the machine is offline (list(): live false, online false), never a zombie FUSE entry whose every read fails
@@ -631,7 +724,9 @@ class MachineMounts {
       if (!live) continue;
       this._live.delete(rec.id); n++;
       this.log(`pull mount ${rec.mountpoint}: its machine went offline — unmounted until it is back`);
-      Promise.resolve().then(() => live.teardown()).catch(() => { });
+      let td; try { td = Promise.resolve(live.teardown()).catch(() => { }); } catch { td = Promise.resolve(); }   // its sync part starts the lazy unmount (released())
+      // B-fcc7 (read 5): probed once its LAZY UNMOUNT ended — never after the whole teardown, whose unserveFolder rides the dead link
+      Promise.resolve((typeof live.released === 'function' && live.released()) || td).catch(() => { }).then(() => this._probeBare(rec)).catch(() => { });
     }
     if (n) this._notify();
     return n;
@@ -687,6 +782,8 @@ class MachineMounts {
     }
     for (const hostId of linked) { try { this.onMachineLinked(hostId); } catch { } }
     await prev;
+    // B-fcc7: every pull not live has its bare folder probed now (shadowedBy) — a hub restart knows nothing of before
+    for (const rec of this._state.mounts.filter((m) => m.dir === 'pull' && !this._live.has(m.id) && !this._mounting.has(m.id))) await this._probeBare(rec).catch(() => { });
   }
 
   /** The machine is being removed/unpaired — drop its mounts (records + live
@@ -699,7 +796,6 @@ class MachineMounts {
   }
 
   async _healthSweep() {
-    const { spawn } = require('child_process');
     // Recorded-but-not-live pulls retry here too (review finding: ssh machines
     // have no dial-in event, so a failed boot heal previously stayed 'Pending'
     // forever). 5min backoff per record so an unreachable machine isn't
@@ -712,6 +808,9 @@ class MachineMounts {
       this._pullRetryAt.set(rec.id, Date.now() + 5 * 60000);
       this._up(rec).then(() => { this._pullRetryAt.delete(rec.id); this._notify(); }).catch(() => {});
     }
+    // B-fcc7: every pull not live has its bare folder probed again (a file a writer left there since; a folder emptied) —
+    // after the heals above, never one whose boot release is pending (_probeBare skips it)
+    for (const rec of this._state.mounts.filter((m) => m.dir === 'pull' && !this._live.has(m.id) && !this._mounting.has(m.id))) await this._probeBare(rec).catch(() => { });
     // PUSH honesty (real report: user umounted on the Mac, the row stayed
     // green "on machine" and offered no way back): while the machine is
     // linked, ask it whether the mountpoint is still in its mount table —
@@ -769,12 +868,9 @@ class MachineMounts {
       const rec = this._state.mounts.find((m) => m.id === id);
       if (!rec) continue;
       if (!this._online(rec.hostId)) { this.onMachineUnlinked(rec.hostId); continue; } // B-fcc7: the belt for a missed link close
-      const responsive = await new Promise((res) => {
-        const c = spawn('ls', [h.mountpoint], { stdio: 'ignore' });
-        const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch {} res(false); }, 8000);
-        c.on('exit', (code) => { clearTimeout(t); res(code === 0); });
-        c.on('error', () => { clearTimeout(t); res(false); });
-      });
+      const lr = await lsChild(h.mountpoint);
+      if (lr.ok === null) continue;   // ls could not start: no verdict (the old read threw out of the sweep — never a teardown)
+      const responsive = lr.ok;
       if (!responsive) {
         this.log(`pull mount ${rec.mountpoint} hung — remounting`);
         try { await h.teardown(); } catch {}
@@ -785,4 +881,20 @@ class MachineMounts {
   }
 }
 
-module.exports = { MachineMounts };
+// B-fcc7 (the remainder): THE pull manager a reader with no handle on it asks (src/routes/files.js). src/server/dial-pairing.js
+// registers the hub's one manager — the one wiring that already holds its getter (server.js takes no line); before that, and in
+// a process with none, nothing is shadowed.
+let _pullDoor = null;
+const pullLiveListeners = new Set();   // B-fcc7 (read 6): told when a pull comes up (src/server/task-groups-wiring.js: the TASK.md writer)
+function onPullLive(f) { if (typeof f === 'function') pullLiveListeners.add(f); return () => pullLiveListeners.delete(f); }
+function registerPullDoor(get) { _pullDoor = typeof get === 'function' ? get : null; }
+/** The pull record whose folder holds p while it is not mounted (MachineMounts#shadowedBy), or null — never a throw. */
+function pullShadowOf(p, { writer = false } = {}) {
+  if (!_pullDoor || !p) return null;
+  try { const mm = _pullDoor(); return mm && typeof mm.shadowedBy === 'function' ? mm.shadowedBy(String(p), { writer }) || null : null; } catch { return null; }
+}
+
+/** A file under a pull folder was removed or moved out (MachineMounts#touched) — never a throw. */
+function pullTouched(p) { if (!_pullDoor || !p) return; try { const mm = _pullDoor(); if (mm && typeof mm.touched === 'function') mm.touched(String(p)); } catch { } }
+
+module.exports = { MachineMounts, registerPullDoor, pullShadowOf, pullTouched, onPullLive };
