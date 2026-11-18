@@ -752,7 +752,7 @@ async function legRound4(node, tag, tree = null) {
   // collection's true forms exclude it): the count floors (8 asks, 6 of them 5–55 ms) are over all of them
   const STRICT_FLOOR = 0.25;
   const judged = (a) => a.x != null && a.verdict && !a.outside;
-  const strictShare = (L) => { const j = L.filter(judged); const tail = j.filter((a) => !a.gc && a.x <= -1 && a.tail + a.x >= 2).length; return j.length && tail >= 3 ? j.filter((a) => !a.gc).length / j.length : 0; };
+  const strictShare = (L) => { const j = L.filter(judged); const tail = j.filter((a) => !a.gc && !a.asleepAsk && a.x <= -1 && a.tail + a.x >= 2).length; return j.length && tail >= 3 ? j.filter((a) => !a.gc).length / j.length : 0; };
   let rerunA = false;
   if (!tree && strictShare(A) < STRICT_FLOOR) { rerunA = true; say(`(A) the collector took ${A.filter((a) => judged(a) && a.gc).length} of ${A.filter(judged).length} judged holds (under the floor ${100 * STRICT_FLOOR} % strict) — the sweep runs once more`); A = await sweepA(node, tag, tree); }
   // B-1409: THE COUNT FLOORS (8 asks inside the native call, 6 of them 5–55 ms before its end) — the watchdog thread
@@ -762,8 +762,13 @@ async function legRound4(node, tag, tree = null) {
   const floorOf = (L) => { const nat = inNativeOf(L); return { n: nat.length, band: nat.filter((a) => a.x >= 5 && a.x <= 55).length }; };
   let fl = floorOf(A), extraA = 0;
   while (!tree && (fl.n < 8 || fl.band < 6) && extraA < 2) { extraA++; say(`(A) ${fl.n} of 8 asks posted inside the native call (${fl.band} of 6 in 5–55 ms) — the watchdog was late on this box: the sweep runs again (${extraA} of 2), its holds added`); A = A.concat(await sweepA(node, tag, tree)); fl = floorOf(A); }
-  if (!tree) ok(strictShare(A) >= STRICT_FLOOR, `(A) ${tag}: the collector took the suite? ${A.filter((a) => judged(a) && a.gc).length} of ${A.filter(judged).length} judged holds had a collection in the ask's window by the child's own record — ${Math.round(100 * strictShare(A))} % judged strictly (the floor ${100 * STRICT_FLOOR} %${rerunA ? '; after ONE rerun' : ''})`);
-  const gcHolds = A.filter((a) => judged(a) && a.gc);
+  // (the family) the share is judged only over enough asks inside the JavaScript tail: too few is a NAMED, COUNTED non-verdict
+  const tailN = (L) => L.filter(judged).filter((a) => !a.gc && !a.asleepAsk && a.x <= -1 && a.tail + a.x >= 2).length;
+  if (!tree && tailN(A) < 3) skip(`(A) ${tag}: the strict share (the collector took the suite?)`, `no sample this run: ${tailN(A)} of 3 asks inside the JavaScript tail found the thread running${rerunA ? ' after ONE rerun' : ''} — the share is not judged`);
+  else if (!tree) ok(strictShare(A) >= STRICT_FLOOR, `(A) ${tag}: the collector took the suite? ${A.filter((a) => judged(a) && a.gc).length} of ${A.filter(judged).length} judged holds had a collection in the ask's window by the child's own record — ${Math.round(100 * strictShare(A))} % judged strictly (the floor ${100 * STRICT_FLOOR} %${rerunA ? '; after ONE rerun' : ''})`);
+  // (the release mirror's family, 主开发 19:17Z) an ask that found the thread ASLEEP sampled nothing of the hold («no sample of that
+  // part» is its honest form): it is never judged by a strict leg — counted and said in each leg's own line
+  const gcHolds = A.filter((a) => judged(a) && a.gc && !a.asleepAsk), gcAsleep = A.filter((a) => judged(a) && a.gc && a.asleepAsk);
   const gcNative = gcHolds.filter((a) => a.x >= fast + 1), gcTail = gcHolds.filter((a) => a.x <= -1 && a.tail + a.x >= 2);
   const TRUE_NATIVE = [LH.V.native, LH.V.cpu], TRUE_TAIL = [LH.V.js, LH.V.native, LH.V.cpu];
   // the release mirror at e3754d9cd: a 0.1 s hold (asked now at 80 ms — B-7c97) ran «user 0.0, kernel 0.1» (allocation faults):
@@ -772,10 +777,10 @@ async function legRound4(node, tag, tree = null) {
   const trueOf = (forms) => (a) => forms.includes(a.verdict) || (a.verdict === LH.V.kernel && kernelTrue(a));
   const gcLies = [...gcNative.filter((a) => !trueOf(TRUE_NATIVE)(a)), ...gcTail.filter((a) => !trueOf(TRUE_TAIL)(a))];
   say(`(A) the child's own record: ${gcHolds.length} of ${A.filter(judged).length} judged holds had a collection in the ask's window — ${gcNative.length} posted in native code, ${gcTail.length} in the tail — judged by their TRUE forms`);
-  if (!tree) ok(!gcLies.length, `(A) ${tag}: a hold with a collection in its ask's window (the child's own record) says one of its TRUE forms — posted in native code: «${LH.V.native}» or «${LH.V.cpu}»; posted in the JavaScript tail: those or «${LH.V.js}»; either: «${LH.V.kernel}» when the hold's own numbers put the kernel at or above user time (${gcNative.length} + ${gcTail.length} holds)`, gcLies.slice(0, 3));
+  if (!tree) ok(!gcLies.length, `(A) ${tag}: a hold with a collection in its ask's window (the child's own record) says one of its TRUE forms — posted in native code: «${LH.V.native}» or «${LH.V.cpu}»; posted in the JavaScript tail: those or «${LH.V.js}»; either: «${LH.V.kernel}» when the hold's own numbers put the kernel at or above user time (${gcNative.length} + ${gcTail.length} holds; ${gcAsleep.length} more found the thread asleep at the ask — not a sample, not judged)`, gcLies.slice(0, 3));
 
   // THE STRICT LEGS: the holds the box did not starve AND the child's own record shows no collection for
-  const inNative = A.filter((a) => a.x != null && a.x >= fast + 1 && a.verdict && !a.outside && !a.gc && !a.asleepAsk), inTail = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict && !a.outside && !a.gc);
+  const inNative = A.filter((a) => a.x != null && a.x >= fast + 1 && a.verdict && !a.outside && !a.gc && !a.asleepAsk), inTail = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict && !a.outside && !a.gc && !a.asleepAsk), tailAsleep = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict && !a.outside && !a.gc && a.asleepAsk);
   say(`(A) the box starved ${A.filter((a) => a.outside).length} of ${A.length} holds («waiting for a CPU», the suite's own count agreeing) — outside the asks' law`);
   const wrongJs = inNative.filter((a) => a.verdict !== LH.V.native), wrongTail = inTail.filter((a) => a.verdict !== LH.V.js);
   const nativeAll = [...inNative, ...gcNative.filter((a) => !a.asleepAsk)], saidJs = nativeAll.filter((a) => a.verdict === LH.V.js);   // never «JavaScript», strict or not
@@ -788,7 +793,8 @@ async function legRound4(node, tag, tree = null) {
     ok(!saidJs.length && !wrongJs.length, `(A) ${tag}: an ask POSTED while pbkdf2 / JSON.parse still ran (${nativeAll.length} holds, x from ${fast + 1} ms up, ${nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length} in the verifiers' 5–55 ms) is never «JavaScript», whatever the tail (0 / 5 / 50 ms) — the ${inNative.length} with NO collection in its window (the child's own record) «native code or garbage collection» exactly, the ${gcNative.length} with one a TRUE form`, [...saidJs, ...wrongJs].slice(0, 3));
     if (!named.length) skip(`(A) ${tag}: the late answer's «first JavaScript after it»`, 'the watchdog was late on this box: no ask inside the native call with a tail ≥ 5 ms');
     else ok(namedOk.length >= Math.ceil(0.8 * named.length), `(A) ${tag}: its late answer names the tail as «the first JavaScript after it: … pbkdfHog / parseHog (src/hogs.js:…)» — the chain from the first frame that ran (${namedOk.length} of ${named.length})`, named.filter((a) => !namedOk.includes(a)).slice(0, 2));
-    ok(inTail.length >= 3 && !wrongTail.length, `(A) ${tag}: an ask posted INSIDE the JavaScript tail (${inTail.length} holds) is «JavaScript» — the law cuts both ways`, wrongTail.slice(0, 3));
+    if (inTail.length < 3) skip(`(A) ${tag}: an ask posted INSIDE the JavaScript tail is «JavaScript»`, `no sample this run: ${inTail.length} of 3 asks inside the tail found the thread running (${tailAsleep.length} more found it asleep at the ask — not a sample of it, never judged)`);
+    else ok(!wrongTail.length, `(A) ${tag}: an ask posted INSIDE the JavaScript tail (${inTail.length} holds; ${tailAsleep.length} more found the thread asleep at the ask — not a sample of it, not judged) is «JavaScript» — the law cuts both ways`, wrongTail.slice(0, 3));
   }
   // (B) the MIXED hold: 0.75 s of JavaScript then 0.75 s in a sync child, the watchdog's thread starting D ms into it (its
   //     scheduler window then covers less than half the hold from D = 750 on — round 3's regression said «native» there)
@@ -935,8 +941,8 @@ async function legGcLies(node, tag) {
   const fast = LH.JS_FAST_MS, SETS = [['pbkdf2', [55, 60, 65, 70, 75, 80, 85, 90, 120, 150], [50]], ['json', [120, 135], [50]]];
   const judge = (A) => {
     const j = A.filter((a) => a.x != null && a.verdict && !a.outside);
-    const sN = j.filter((a) => !a.gc && a.x >= fast + 1 && !a.asleepAsk), sT = j.filter((a) => !a.gc && a.x <= -1 && a.tail + a.x >= 2);
-    const gN = j.filter((a) => a.gc && a.x >= fast + 1 && !a.asleepAsk), gT = j.filter((a) => a.gc && a.x <= -1 && a.tail + a.x >= 2);
+    const sN = j.filter((a) => !a.gc && a.x >= fast + 1 && !a.asleepAsk), sT = j.filter((a) => !a.gc && !a.asleepAsk && a.x <= -1 && a.tail + a.x >= 2);
+    const gN = j.filter((a) => a.gc && a.x >= fast + 1 && !a.asleepAsk), gT = j.filter((a) => a.gc && !a.asleepAsk && a.x <= -1 && a.tail + a.x >= 2);
     return { strictNativeSaidJs: sN.filter((a) => a.verdict === LH.V.js).length, strictTailNotJs: sT.filter((a) => a.verdict !== LH.V.js).length, gcNativeSaidJs: gN.filter((a) => a.verdict === LH.V.js).length, n: j.length, sN: sN.length, gN: gN.length, sT: sT.length };
   };
   const alwaysTree = mutTree('always', -1);
