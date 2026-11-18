@@ -478,6 +478,9 @@ class MachineMounts {
     // the cure (the readers' 3): a boot release of THIS record still running is WAITED for — never raced
     const rel = this._releasing && this._releasing.get(rec.id);
     if (rel) { try { await rel; } catch { } }
+    // cure 2 (主开发's «as if a must»): the wait can last minutes — a pull the person REMOVED meanwhile is never mounted
+    // (an rclone and a live entry with no row and no door)
+    if (!this._state.mounts.some((m) => m.id === rec.id)) return;
     if (this._live.has(rec.id) || this._mounting.has(rec.id)) return;
     this._mounting.add(rec.id);
     try {
@@ -485,6 +488,7 @@ class MachineMounts {
       // fails (an ssh machine unreachable: _online() is always true for ssh; a folder server refused) never leaves the old FUSE
       // entry for the next try five minutes on
       await DM.releaseStale(rec.mountpoint, { log: this.log });
+      if (this._pullErrors && this._pullErrors.delete(rec.id)) this._notify();   // cure 2: the folder IS released now — its words go, whatever the mount does next
       const device = await this.hosts.deviceBounded(rec.hostId, 10000); // ssh: daemon over --stdio; dial: the dialed-in link
       // normalize a stored trailing slash so an EXISTING record (minted before
       // the mountPull fix) works without a daemon update (the serve-folder
@@ -507,6 +511,7 @@ class MachineMounts {
       });
       // r1 #4: the machine's link closed while this mount was being made (onMachineUnlinked saw no live chain) — let it go now
       if (!this._online(rec.hostId)) { try { await h.teardown(); } catch { } throw new Error('the machine went offline while its folder was being mounted'); }
+      if (!this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }   // cure 2: removed while it was being mounted
       entry = { teardown: h.teardown, mountpoint: rec.mountpoint, at: Date.now() };
       this._live.set(rec.id, entry);
       if (this._pullErrors && this._pullErrors.delete(rec.id)) this._notify();
@@ -549,6 +554,7 @@ class MachineMounts {
     if (rec.dir === 'pull') {
       const live = this._live.get(id);
       if (live) { try { await live.teardown(); } catch { } this._live.delete(id); }
+      this._pullErrors?.delete(id);   // cure 2: its words go with its record
     } else {
       await this._unmountPush(rec);
       this._pushTunnelOwned.delete(id);
@@ -652,7 +658,7 @@ class MachineMounts {
     this._releasing = this._releasing || new Map();
     let prev = Promise.resolve();
     for (const rec of offline) {
-      const p = prev.then(() => DM.releaseStale(rec.mountpoint, { log: this.log })).catch((e) => {
+      const p = prev.then(() => DM.releaseStale(rec.mountpoint, { log: this.log })).then(() => { if (this._pullErrors && this._pullErrors.delete(rec.id)) this._notify(); }).catch((e) => {
         if (e && e.code === 'unmount_hung') { (this._pullErrors = this._pullErrors || new Map()).set(rec.id, e.message); this._notify(); }
       });
       this._releasing.set(rec.id, p);
