@@ -648,7 +648,13 @@ function deadlineOf(item, { t = fmt, now = Date.now(), clock = 'hub' } = {}) {  
   const marked = !!(item.action && item.action.late);   // the PRODUCER says the deadline passed and the card still answers
   const at = Number(item.expiresAt), from = Number(item.createdAt);
   if (!marked && !(Number.isFinite(at) && Number.isFinite(from) && at > from && at - from <= DEADLINE_LIVE_MS)) return null;
-  const left = Number.isFinite(at) ? at - now : 0, total = Number.isFinite(at) && Number.isFinite(from) ? at - from : 0;
+  const total = Number.isFinite(at) && Number.isFinite(from) ? at - from : 0;
+  // B-ba7b (hardening): never more time left than the deadline's whole length. On the product's road the hub's `now` is noted
+  // before any draw (setTodos → noteHubClock) and every createdAt is at or before it, so «now» does not fall before a card's
+  // stamp — but a device clock that steps back between the note and a tick, or the 'device' clock (an older hub sends no `now`),
+  // can: then «left» read past the whole length («61 sec left» for a 60 s ask). A card before its own stamp shows its whole
+  // length, unmoving, until the stamp passes (scripts/test-deadline-clock.mjs)
+  const left = Number.isFinite(at) ? (total > 0 ? Math.min(at - now, total) : at - now) : 0;
   const state = marked ? 'late' : left <= 0 ? 'due' : 'live';
   const lost = marked && item.action.restartLost === true;   // r8: a restart since — an Allow would mint nothing (r23); said, and not offered
   const dev = clock === 'device' ? '-device' : '';
