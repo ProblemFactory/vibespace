@@ -10,7 +10,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings, FAST_SUM_CAP_MS } from './ci.mjs';
+import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, extraRootPatterns, scratchRootOf, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings, FAST_SUM_CAP_MS } from './ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
@@ -523,6 +523,40 @@ console.log('\n§9d the directory sweep (B-60d2)');
   ok(JSON.stringify(vp) === '[50,51,52]' && j.spared.some((o) => o.pid === 53), `a stale private session bus rooted only by XDG_RUNTIME_DIR under a record-less scratch root is reaped (dbus-run-session / xdg-desktop-portal / gvfsd); the name still narrows (sleep spared): ${vp}`);
   const preBus = await mutant9('no-bus', "ROOT_ENV.push('XDG_RUNTIME_DIR');", '');
   ok(!preBus.scratchOrphans({ procRoot: proc9d, now: NOW, self: 999999 }).length, 'CONTROL: without XDG_RUNTIME_DIR as a root the session bus names no root — nothing reaped, its dir held for ever (red)');
+  // B-f397: AN ACCEPTANCE'S SCRATCH ROOTS, BY CONFIGURATION — a lanes box's acceptance boots its hubs and Chromes inside its own
+  // worktree (`…/wt-accept-<lane>/.rev-shell/`, `…/.chrome-<n>/`); VIBESPACE_CI_SCRATCH_ROOTS names those patterns and the reaper
+  // judges them by their directory (dir-gone) and their record's owner (owner-gone) — NEVER the record-less name rule: an acceptance
+  // in flight looks exactly like its stray (detached, hours old, parented to the user manager). RED control: unset (the old
+  // reaper) — not one of them names a root. Bad patterns are refused by name; a root holding the checkout is never one
+  {
+    const acc = fs.mkdtempSync(path.join(os.tmpdir(), 'cigate9d-accept-')); tmpDirs.push(acc);   // NOT /tmp/vs-*: the built-in shape must not claim it
+    const rev = path.join(acc, 'wt-accept-x', '.rev-shell'), chr = path.join(acc, 'wt-accept-x', '.chrome-1'), rec = path.join(acc, 'wt-accept-z', '.rev-rec');
+    for (const d of [path.join(rev, 'run'), chr, path.join(rec, 'run')]) fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(rec, '.vs-run.json'), JSON.stringify({ v: 1, run: 'acc-dead', pid: 999990, starttime: 12345, bootId: null, createdAt: NOW - 3 * 3600 * 1000 }));   // its owner is in no table: gone
+    mkp(60, { name: 'dtach', ppid: 1, cwd: path.join(rev, 'run') }); mkp(61, { name: 'node', ppid: 60, cwd: path.join(rev, 'run') });
+    mkp(62, { name: 'chrome', ppid: 1 }); fs.writeFileSync(path.join(proc9d, '62', 'cmdline'), `/usr/bin/chrome\0--user-data-dir=${chr}\0`);
+    mkp(63, { name: 'sleep', ppid: 1, cwd: path.join(rev, 'run') });
+    mkp(64, { name: 'node', ppid: 1, cwd: path.join(acc, 'wt-accept-y', '.rev-gone', 'run') });
+    mkp(65, { name: 'sleep', ppid: 1, cwd: path.join(rec, 'run') });
+    const mine = (j) => j.victims.filter((o) => o.pid >= 60 && o.pid <= 65).map((o) => `${o.pid}:${o.rule}`).sort().join(' ');
+    const prev = process.env.VIBESPACE_CI_SCRATCH_ROOTS;
+    try {
+      delete process.env.VIBESPACE_CI_SCRATCH_ROOTS;
+      const before = judgeScratch({ procRoot: proc9d, now: NOW, self: 999999 });
+      process.env.VIBESPACE_CI_SCRATCH_ROOTS = `${acc}/wt-accept-*/.rev-*:${acc}/wt-accept-*/.chrome-*`;
+      const after = judgeScratch({ procRoot: proc9d, now: NOW, self: 999999 });
+      const spared = [60, 61, 62, 63].every((pid) => after.spared.some((o) => o.pid === pid && /configured root .* no run record/.test(o.why)));
+      ok(mine(after) === '64:dir-gone 65:owner-gone' && spared,
+        `B-f397: VIBESPACE_CI_SCRATCH_ROOTS's roots are judged by their directory and their record — an orphan under a GONE root and one under a root whose record's owner is gone (any name) are listed; a record-less root's dtach + chat-wrapper + Chrome (an acceptance in flight looks the same) are spared and said: ${mine(after)}`);
+      ok(mine(before) === '' && ![60, 61, 62, 63, 64, 65].some((pid) => [...before.spared, ...before.ignored].some((o) => o.pid === pid)), `CONTROL B-f397: unset (the old reaper), not one of them names a root (red): «${mine(before)}»`);
+      const ex = extraRootPatterns(`rel/x-*:/a/*:/srv/l/wt-accept-*/fixed:/srv/../x/*:${acc}/wt-accept-x/*:/srv/l/wt-accept-*/.rev-*`);
+      ok(ex.ok.length === 1 && ex.refused.map((r) => r.why.split(' (')[0]).join('|') === 'not absolute|fewer than three segments|no * in its last segment|a . or .. segment|no name of two characters before the * of its last segment',
+        `B-f397: a pattern that is relative, too short, without a * last, with a .. or with a bare * last is refused by name: ${JSON.stringify(ex.refused.map((r) => r.why))}`);
+      const ck = path.resolve(REPO);
+      process.env.VIBESPACE_CI_SCRATCH_ROOTS = `${path.dirname(ck)}/${path.basename(ck).slice(0, 2)}*`;
+      ok(extraRootPatterns().ok.length === 1 && scratchRootOf(path.join(ck, 'scripts')) === null, `B-f397: a configured root that IS this checkout is never a root (${process.env.VIBESPACE_CI_SCRATCH_ROOTS})`);
+    } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_SCRATCH_ROOTS; else process.env.VIBESPACE_CI_SCRATCH_ROOTS = prev; }
+  }
 }
 
 // ── §10 THE LAUNCHER, ONCE, FOR REAL (B-f4cb, 2026-09-27) ────────────────

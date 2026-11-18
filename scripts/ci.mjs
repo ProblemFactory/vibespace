@@ -169,6 +169,8 @@
 // rows since its last sweep (a skipped row never counts), always at its end, and at the heavy launch (sweepDue, one
 // `[ci] dir sweep due — <why>` line per sweep); `off` skips every tier's sweep (a lane on a box whose reap is the
 // owner's; `--reap` by hand still judges); `every` = the pre-.280 sweep after every row, a skipped one too.
+// VIBESPACE_CI_SCRATCH_ROOTS: ':'-separated absolute root PATTERNS (`*` = one name inside a segment) the scratch reaper
+// judges like /tmp/vs-* — a box's acceptance worktrees' scratch hubs and Chromes (B-f397; extraRootPatterns).
 // Exit codes: 0 green · 1 red · 2 refused (dirty tree / bad --only) · 3 the
 // tier did not run (never got the machine lock) · 4 ABORTED (superseded, the
 // lock taken, or terminated from outside — it stopped mid-tier). 0 and 1 are
@@ -1674,6 +1676,53 @@ export const SCRATCH_ROOT_RE = /^\/tmp\/vs-[A-Za-z0-9._-]+/;
 // ('scratch dir gone' after a tmp cleaner, 'orphaned' by name when not). That exact shape is excluded here, and
 // scripts/scratch.mjs refuses to mint it (`scratch('ab')`), so no suite can ever hide under it either.
 export const PRODUCT_ROOT_RE = /^\/tmp\/vs-ab-(?:\d+|u)$/;
+// B-f397 (lane bl-scratch, 2026-11-17): SCRATCH ROOTS OUTSIDE /tmp/vs-*, BY CONFIGURATION. An acceptance run on a lanes box boots
+// its scratch hubs and Chromes inside its own worktree (`…/wt-accept-<lane>/.rev-shell/`, `…/.chrome-<n>/`), never under /tmp/vs-*:
+// a dtach + chat-wrapper pair and a headless Chrome outlived their runs by hours there, and no census listed them. The box's gate
+// names those roots in VIBESPACE_CI_SCRATCH_ROOTS — ':'-separated absolute PATTERNS, `*` = one name ([A-Za-z0-9._-]+) inside one
+// path segment (`/srv/lanes/wt-accept-*/.rev-*`) — and the reaper judges a process naming one exactly as one naming /tmp/vs-*: its
+// run record, its owner (owner-gone), its directory (dir-gone) — never the record-less name rule: an acceptance in flight looks
+// exactly like its stray, so a configured root with no record is spared and said. Unset (the default, every runner): nothing changes.
+// Never the directory sweep's units (a root here is a worktree's folder, removed by whoever made it) and never a test seam's
+// table root (procRootSeam keeps /tmp/vs-*), never the deleted-cwd stat (a configured root may sit on a slow mount). A pattern that
+// is not absolute, has an empty, `.` or `..` segment, fewer than three segments, no `*` in its last segment, no two-character
+// name before that `*` or a character outside the name set is refused and said, once per value; a root that is, holds or lies
+// inside the home, the checkout or the gate's cwd is never a root.
+export const SCRATCH_ROOTS_ENV = 'VIBESPACE_CI_SCRATCH_ROOTS';
+/** The patterns of a VIBESPACE_CI_SCRATCH_ROOTS value: { ok: [{ pattern, re }], refused: [{ pattern, why }] } (PURE). */
+export function extraRootPatterns(v = process.env[SCRATCH_ROOTS_ENV]) {
+  const ok = [], refused = [];
+  for (const pattern of String(v || '').split(':').map((x) => x.trim()).filter(Boolean)) {
+    const segs = pattern.split('/');
+    const why = !pattern.startsWith('/') ? 'not absolute' : segs.slice(1).some((x) => !x) ? 'an empty segment'
+      : segs.some((x) => x === '.' || x === '..') ? 'a . or .. segment' : segs.length < 4 ? 'fewer than three segments'
+        : !segs[segs.length - 1].includes('*') ? 'no * in its last segment' : !/^[^*]{2,}\*/.test(segs[segs.length - 1]) ? 'no name of two characters before the * of its last segment (a bare * claims every folder there)'
+          : !segs.every((x) => /^[A-Za-z0-9._*-]*$/.test(x)) ? 'a character outside [A-Za-z0-9._-] and *' : null;
+    if (why) refused.push({ pattern, why });
+    else ok.push({ pattern, re: new RegExp('^' + segs.map((x) => x.replace(/\./g, '\\.').replace(/\*/g, '[A-Za-z0-9._-]+')).join('/')) });
+  }
+  return { ok, refused };
+}
+let extraRootsSeen = { v: null, res: [] };
+const extraRootRes = () => {
+  const v = process.env[SCRATCH_ROOTS_ENV] || '';
+  if (extraRootsSeen.v !== v) {
+    const p = extraRootPatterns(v);
+    for (const r of p.refused) console.error(`[ci] scratch reaper: ${SCRATCH_ROOTS_ENV} pattern «${r.pattern}» refused — ${r.why}`);
+    extraRootsSeen = { v, res: p.ok.map((x) => x.re) };
+  }
+  return extraRootsSeen.res;
+};
+/** The scratch root a (normalized) path begins with — `/tmp/vs-<name>`, else a VIBESPACE_CI_SCRATCH_ROOTS root — or null. A
+ *  configured root that IS, holds or lies inside the account's home, this checkout or the gate's cwd is never one. */
+export function scratchRootOf(s) {
+  const m = SCRATCH_ROOT_RE.exec(s); if (m) return m[0];
+  const extras = extraRootRes(); if (!extras.length) return null;
+  const near = (a, b) => a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
+  const kept = [os.homedir(), process.env.HOME, path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), process.cwd()].filter(Boolean).map((p) => path.resolve(p));
+  for (const re of extras) { const x = re.exec(s); if (x && !kept.some((k) => near(x[0], k))) return x[0]; }
+  return null;
+}
 /** LANE H VERIFY r2 (L3): a Chrome that rewrote its process title has ONE space-joined /proc cmdline (a CfT build: no
  *  NUL at all, measured on this box) — the flag is read off the joined string too, both spellings. VERIFY r3 (MINOR 2):
  *  ONLY off such a cmdline — a NUL-separated argv is read exactly (the value is the whole element, a space in it
@@ -1704,12 +1753,19 @@ function argvScratchClaims(argv = [], { joined = argv.length <= 1 } = {}) {
     if (joined) { for (const tok of s.split(/\s+/)) for (const m of normArg(tok).matchAll(/(?:^|=)(\/tmp\/vs-[A-Za-z0-9._-]+)(\/|$)/g)) take(m[1], m[2]); }
     else { const m = /^(?:[^\s=]+=)?(\/tmp\/vs-[A-Za-z0-9._-]+)(\/|$)/.exec(normArg(s)); if (m) take(m[1], m[2]); }
   }
+  // B-f397: a configured root is read off the same places — an element (or, title-rewritten, a word) that starts with it or
+  // is a `<flag>=<root>` — and only at a segment boundary
+  const extras = extraRootRes();
+  if (extras.length) for (const a of argv) for (const tok of (joined ? String(a || '').split(/\s+/) : [String(a || '')])) {
+    const n = normArg(tok), v = n.startsWith('/') ? n : (/^[^\s=]+=/.test(n) ? n.slice(n.indexOf('=') + 1) : '');
+    for (const re of extras) { const x = re.exec(v); if (x) { const nx = v.charAt(x[0].length); if (!nx || nx === '/') take(x[0], nx); } }
+  }
   return out;
 }
 /** The scratch roots named in the arguments (lane N), in order, de-duplicated. */
 export function argvScratchRoots(argv = [], opts = {}) {
   const out = [];
-  for (const c of argvScratchClaims(argv, opts)) { const r = SCRATCH_ROOT_RE.exec(c.p)[0]; if (!out.includes(r)) out.push(r); }
+  for (const c of argvScratchClaims(argv, opts)) { const r = scratchRootOf(c.p); if (r && !out.includes(r)) out.push(r); }
   return out;
 }
 export const REAP_NAMES = new Set(['node', 'npm', 'claude', 'codex', 'opencode', 'agy', 'Xvfb', 'Xvnc', 'Xtigervnc', 'x11vnc', 'xmessage', 'esbuild', 'dtach']); // Xtigervnc (lane N 2026-09-25, the heavy RED on 69720f2b): the singleton Desktop's X server by its own argv[0] (`Xvnc` is only Debian's symlink) — a leaked `Xtigervnc :7` under a GONE scratch dir held the machine-global :7/5901 for the next run to adopt (observed: cwd a deleted /tmp/vs-deskapp-smoke-*, adopted 40 s later by another run's server; test-ci-gate §9b)
@@ -1747,7 +1803,7 @@ export function scratchRootClaims({ cwd = '', cwdGone = null, env = {}, argv = [
   cands.push(...argvScratchClaims(argv, { joined })); // lane N: a root named only in the arguments (dtach / pty-wrapper)
   const out = [];
   for (const c of cands) {
-    const s = normPath(c.p), m = SCRATCH_ROOT_RE.exec(s); // verify r2 (R4): the shape is read off the normalized path
+    const s = normPath(c.p), r0 = scratchRootOf(s), m = r0 && [r0]; // verify r2 (R4): the shape is read off the normalized path (B-f397: or a configured root)
     if (!m || PRODUCT_ROOT_RE.test(m[0])) continue;
     // verify r1 (K1): the shape ends at a path-segment boundary. `/tmp/vs-a+b/sub` (an EXISTING directory whose name goes on
     // with a character the shape excludes) used to claim the root `/tmp/vs-a` — gone, cwd-proven — and a reparented process
@@ -1978,6 +2034,11 @@ export function judgeScratch({ procRoot = defaultProcRoot(), now = Date.now(), s
           else if (ageOf(i) < staleMs) kept.push(at(i, { why: `young: ${fmtAge(Math.max(0, ageOf(i)))} < the ${fmtAge(staleMs)} stale floor (a run in flight, or a stray planted on purpose)` }));
           else out.push(at(i, { why, rule: ri.kind === 'gone' ? 'dir-gone' : 'owner-gone', owner }));
         }
+      } else if (!SCRATCH_ROOT_RE.test(root)) {
+        // B-f397: a CONFIGURED root with no run record is NEVER judged by the name rule — an acceptance in flight looks exactly
+        // like its own stray (detached hubs, dtach sessions, hours old, parented to the user manager); it is judged once it is
+        // gone (above) or by its record's owner (stamp one: scripts/scratch-run.mjs stampScratchRun)
+        for (const i of members) kept.push(at(i, { why: `a configured root (${SCRATCH_ROOTS_ENV}) with no run record — judged only once it is gone, or by a record's owner` }));
       } else {
         // an existing directory WITHOUT a run record: only when NO member is owned and all are stale — and then
         // only the executables a suite starts (the owner is unknown, so the name is the one extra fact)
@@ -2008,7 +2069,7 @@ export function liveScratchPaths({ procRoot = defaultProcRoot() } = {}) {
   for (const pid of pids) {
     const i = procInfo(procRoot, pid, bootMs); if (!i || i.state === 'Z') continue;
     const cands = [String(i.cwd || '').replace(/ \(deleted\)$/, ''), ...ROOT_ENV.map((k) => i.env[k]), ...i.argv.flatMap((a) => String(a || '').split(/\s+/).map((w) => w.slice(w.startsWith('/') ? 0 : w.indexOf('=') + 1)))];
-    for (const c of cands) { const n = normPath(c); if (SCRATCH_ROOT_RE.test(n)) out.add(n.length > 1 ? n.replace(/\/+$/, '') : n); }
+    for (const c of cands) { const n = normPath(c); if (scratchRootOf(n)) out.add(n.length > 1 ? n.replace(/\/+$/, '') : n); }
   }
   return [...out];
 }
