@@ -121,6 +121,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A custom kernel's notice that it runs as standard Chrome now closes once it answers as the kernel again, and a stopped profile no longer shows the warning.
 - When «Open the session list» from a window that lost its conversation finds hidden matches, the list says how many; archived ones get a «Show archived» button.
 - A reopened conversation no longer shows VibeSpace's own «continue» as yours; in Codex, what you sent through VibeSpace is never filed as another session's.
+- While the job list cannot be read, the Jobs panel and agents say so; once read whole, For you says nothing was lost — or that the file is gone.
+- A one-time scheduled job's run leaves the list a day after it ran, like other finished jobs; it used to stay for good.
 
 ### Security
 - A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.
