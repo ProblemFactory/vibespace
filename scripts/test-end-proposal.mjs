@@ -509,7 +509,7 @@ console.log('④c THE OWNER BY ITS OWN ID — the REAL reader over piece 7\'s RE
   const h = await held();
   ok(h.r.ok && h.r.granted.length === 1 && h.q.ok && h.open.length === 1 && h.open[0].id !== h.first && h.open[0].card.rows.map((x) => x.id).join() === h.F2.id && h.F1[DW.GRANT_FIELD] === true,
     'A PROPOSAL DURING A PRESS IS HELD: it waits for the answer, then is filed as a NEW card (the press closed the first) — the person sees it, the proposer was told the truth', { q: h.q, open: h.open.map((x) => ({ id: x.id, rows: x.card.rows.map((y) => y.id) })) });
-  const hR = await held((src) => src.replace("  async function freeOf(proposerKey, kind) {\n", "  async function freeOf(proposerKey, kind) {\n    return {};\n").replace("    if (open && inFlight.has(open.id)) return depth >= HELD_MAX ? BUSY : proposeWakeGrant(caller, { rows: given, why }, depth + 1);\n", ''));
+  const hR = await held((src) => src.replace("  async function freeOf(proposerKey, kind, deadline) {\n", "  async function freeOf(proposerKey, kind, deadline) {\n    return {};\n").replace("    if ((open && inFlight.has(open.id)) || (pressSeq.get(proposerKey) || 0) !== seq0) return depth >= HELD_MAX ? BUSY : proposeWakeGrant(caller, { rows: given, why }, depth + 1, deadline, true);\n", ''));
   ok(hR.q.ok && hR.open.length === 0 && hR.F2[DW.GRANT_FIELD] !== true, 'RED CONTROL: a store that merges into the card a press is closing tells the proposer «added» and the row is closed away unseen — the leg above would read it', { q: hR.q, open: hR.open.length });
   // the reader's LIVE branch, pinned: a live codex session gives its own backend; once it ends the reader says live:false, the id kept
   const readerAt = (M) => M.jobOwnerReader({ getJobs: () => jm, sessions: () => live.values(), addressableId });
@@ -534,8 +534,8 @@ console.log('④c THE OWNER BY ITS OWN ID — the REAL reader over piece 7\'s RE
     return { q, row: open.length ? open[0].card.rows[0] : null, granted: F1[DW.GRANT_FIELD] === true };
   };
   const rg = await regrant();
-  ok(rg.q.ok && rg.granted && rg.row && rg.row.grant === true, 'A HELD WAKE PROPOSAL READS ITS ROWS AGAIN after the wait: the job the press just granted is drawn granted, never «not granted»', rg);
-  const rgR = await regrant((src) => src.replace("    if (free.waited && typeof wakeRowsNow === 'function') {", "    if (false) {"));
+  ok(rg.q.ok && rg.q.already === true && /granted it just now; nothing was filed/.test(rg.q.why) && rg.granted && rg.row === null, 'A HELD WAKE PROPOSAL READS ITS ROWS AGAIN after the wait: the job the press just granted answers «already granted» (cure r4) — never a card drawing it «not granted»', rg);
+  const rgR = await regrant((src) => src.replace("    if ((free.waited || stale) && typeof wakeRowsNow === 'function') {", "    if (false) {"));
   ok(rgR.row && rgR.row.grant === false && rgR.granted, 'RED CONTROL: rows read before the wait draw the job the press just granted as not granted — the leg above would read it', rgR.row);
   // cure r3 (the readers 23:37Z): TWO proposals held on one press make ONE card — the final read is synchronous with the filing
   const twoHeld = async (mutate) => {
@@ -556,7 +556,7 @@ console.log('④c THE OWNER BY ITS OWN ID — the REAL reader over piece 7\'s RE
   const t2 = await twoHeld();
   ok(t2.a1.ok && t2.b1.ok && t2.open.length === 1 && t2.open[0].card.rows.map((x) => x.id).sort().join() === [t2.F2.id, t2.F3.id].sort().join(),
     'TWO PROPOSALS HELD ON ONE PRESS make ONE new card holding both (one card per proposer) — the final read is synchronous with the filing', t2.open.map((x) => x.card.rows.map((y) => y.id)));
-  const t2r = await twoHeld((src) => src.replace("    const free = await freeOf(proposerKey, WAKE);   // held: the rows are drawn AFTER a press on this proposer's card\n    if (free.busy) return BUSY;\n", "    const free = await freeOf(proposerKey, WAKE);   // held: the rows are drawn AFTER a press on this proposer's card\n    if (free.busy) return BUSY;\n    const early = openOf(proposerKey, WAKE);\n").replace("    const open = openOf(proposerKey, WAKE);\n    if (open && inFlight.has(open.id)) return depth >= HELD_MAX ? BUSY : proposeWakeGrant(caller, { rows: given, why }, depth + 1);\n", '    const open = early;\n'));
+  const t2r = await twoHeld((src) => src.replace("    const free = await freeOf(proposerKey, WAKE, deadline);   // held: the rows are drawn AFTER a press on this proposer's card\n    if (free.busy) return BUSY;\n", "    const free = await freeOf(proposerKey, WAKE, deadline);   // held: the rows are drawn AFTER a press on this proposer's card\n    if (free.busy) return BUSY;\n    const early = openOf(proposerKey, WAKE);\n").replace("    const open = openOf(proposerKey, WAKE);\n    if ((open && inFlight.has(open.id)) || (pressSeq.get(proposerKey) || 0) !== seq0) return depth >= HELD_MAX ? BUSY : proposeWakeGrant(caller, { rows: given, why }, depth + 1, deadline, true);\n", '    const open = early;\n'));
   ok(t2r.open.length === 2, 'RED CONTROL: a store that reads the open card BEFORE an await files two cards for one proposer — the leg above would read it', t2r.open.length);
   // a press whose door never returns: a proposal waits no longer than heldWaitMs, then answers BUSY by name
   const stuck = async (mutate) => {
@@ -576,6 +576,87 @@ console.log('④c THE OWNER BY ITS OWN ID — the REAL reader over piece 7\'s RE
   ok(sk && sk.ok === false && sk.code === 'answering' && /nothing was proposed/.test(sk.why), 'A PRESS WHOSE DOOR NEVER RETURNS: the held proposal answers BUSY by name at its deadline (heldWaitMs) — it never hangs the proposer\'s verb', sk);
   const skR = await stuck((src) => src.replace("      try { got = await Promise.race([inFlight.get(o.id), late]); }", "      try { got = await inFlight.get(o.id); }"));
   ok(skR === 'still waiting', 'RED CONTROL: a wait with no deadline still hangs after 250 ms — the leg above would read it', skR);
+  // cure r4 (主开发 06:53Z): ONE DEADLINE FOR THE WHOLE CALL — a press that STARTS during the list read sends the proposal round again;
+  // the re-entry keeps the first entry's deadline, so the call answers BUSY at its limit, never after its command gave up
+  const listStall = (w, gate) => ({ list: async () => { if (gate.p) await gate.p; return { conversations: [...w.rows.values()].map((r) => CF.shapeRow(r)) }; } });
+  const dl = async (mutate) => {
+    const F1 = mk('deadline one'), F2 = mk('deadline two');
+    const gate = { p: null };
+    let w = null; w = build(mutate, { heldWaitMs: 300, listFacts: { list: (...a) => listStall(w, gate).list(...a) } });
+    liveCoder(); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder' }));
+    const p = await w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'one' });
+    let openList = null; gate.p = new Promise((r) => { openList = r; });
+    const qp = w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F2]), why: 'two' });   // passes the wait (no press yet), stalls in the list read
+    await tick();
+    let release = null; slow = new Promise((r) => { release = r; });
+    const pr = press(w, p.id, { grant: [F1.id] });   // a press starts DURING the list read and stalls at the door
+    await tick();
+    setTimeout(() => { gate.p = null; openList(); }, 200);
+    setTimeout(() => { release(); slow = null; }, 400);   // between the call's deadline (300) and a re-entry's own (200 + 300): 100 ms each side
+    const q = await qp; await pr;
+    return { q };
+  };
+  const d1 = await dl();
+  ok(d1.q.ok === false && d1.q.code === 'answering', 'ONE DEADLINE FOR THE WHOLE CALL: the re-entry after a press that started in the list read keeps the first deadline — BUSY by name at the limit, the press still running', d1.q);
+  const d1r = await dl((src) => src.replace("propose({ targets, why }, { caller, reach }, depth + 1, deadline);", "propose({ targets, why }, { caller, reach }, depth + 1);").replace("proposeWakeGrant(caller, { rows: given, why }, depth + 1, deadline, true);", "proposeWakeGrant(caller, { rows: given, why }, depth + 1, 0, true);"));   // stale-pins: kept — a red control whose mutant REBUILDS the old re-entry (its own deadline)
+  ok(d1r.q.ok === true, 'RED CONTROL: a re-entry that starts its own deadline waits past the limit and FILES after the command gave up — the leg above would read it', d1r.q);
+  // a press that STARTS AND ENDS inside the list read is seen (the proposer's presses counted before and after) — here it granted
+  // the very job proposed: «already granted», no card drawing it «not granted»
+  const inside = async (mutate) => {
+    const F1 = mk('inside one');
+    const gate = { p: null };
+    let w = null; w = build(mutate, { listFacts: { list: (...a) => listStall(w, gate).list(...a) } });
+    liveCoder(); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder' }));
+    const p = await w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'one' });
+    let openList = null; gate.p = new Promise((r) => { openList = r; });
+    const qp = w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'again' });   // read before the press: F1 not granted
+    await tick();
+    const pr = await press(w, p.id, { grant: [F1.id] });   // the whole press runs inside the read: F1 granted, the card closed
+    gate.p = null; openList();
+    const q = await qp;
+    const open = openProps(w).map((id) => w.todos.get(id));
+    return { q, pr, open, granted: F1[DW.GRANT_FIELD] === true };
+  };
+  const in1 = await inside();
+  ok(in1.pr.ok && in1.granted && in1.q.ok && in1.q.already === true && in1.open.length === 0, 'A PRESS THAT STARTS AND ENDS INSIDE THE LIST READ IS SEEN: the rows are read again — the job it granted answers «already granted», no card', { q: in1.q, open: in1.open.length });
+  const in1r = await inside((src) => src.replace("    if ((open && inFlight.has(open.id)) || (pressSeq.get(proposerKey) || 0) !== seq0) return depth >= HELD_MAX ? BUSY : proposeWakeGrant(", "    if ((open && inFlight.has(open.id))) return depth >= HELD_MAX ? BUSY : proposeWakeGrant("));
+  ok(in1r.open.length === 1 && in1r.open[0].card.rows[0].grant === false, 'RED CONTROL: a store that does not count the presses files a card drawing the job the person just granted as «not granted» — the leg above would read it', in1r.open.map((x) => x.card.rows));
+  // a job REMOVED during the wait is named — «not found», never «name at least one job»
+  const goneW = async (mutate) => {
+    const F1 = mk('gone one'), F2 = mk('gone two');
+    const w = build(mutate);
+    liveCoder(); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder' }));
+    const p = await w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'one' });
+    let release = null; slow = new Promise((r) => { release = r; });
+    const pr = press(w, p.id, { grant: [F1.id] });
+    await tick();
+    const qp = w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F2]), why: 'two' });   // held behind the press
+    await tick();
+    hush(() => jm.rm(F2, { stop: true }));
+    release(); slow = null;
+    const [, q] = await Promise.all([pr, qp]);
+    return { q, F2 };
+  };
+  const g1 = await goneW();
+  ok(g1.q.ok === false && g1.q.code === 'not_found' && g1.q.why.includes(g1.F2.id) && /removed while the person answered your card/.test(g1.q.why), 'A JOB REMOVED DURING THE WAIT is named — not found, by its id; nothing filed', g1.q);
+  const g1r = await goneW((src) => src.replace("        if (gone.length) return { ok: false, code: 'not_found',", "        if (false) return { ok: false, code: 'not_found',"));
+  ok(g1r.q.ok === false && g1r.q.code === 'bad_args', 'RED CONTROL: without it the proposer hears «name at least one job» for a job that was there — the leg above would read it', g1r.q);
+  // a card declined BEFORE r3 kept its marks with the owner's whole key — they still match (no card filed again)
+  const oldMark = async (mutate) => {
+    const F1 = mk('old mark');
+    const w = build(mutate);
+    liveCoder(); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder' }));
+    const p = await w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'one' });
+    const k = await press(w, p.id, {});   // «Keep all as they are»
+    const it = w.todos.get(p.id);
+    w.todos.setCard(p.id, { ...it.card, decided: { at: (it.card.decided && it.card.decided.at) || Date.now(), kept: [`${F1.id}|codex:c0c0|0`] } });   // the mark as r2 wrote it
+    const q = await w.store.proposeWakeGrant(CODEX, { rows: jm.wakeRowsOf([F1]), why: 'again' });
+    return { k, q, open: openProps(w).length };
+  };
+  const o1 = await oldMark();
+  ok(o1.k.ok && o1.q.ok === false && o1.q.code === 'declined' && o1.open === 0, 'A DECLINE KEPT IN THE OLD KEY FORM STILL MATCHES: the same job proposed again is «declined», no card filed again', o1);
+  const o1r = await oldMark((src) => src.replace("  const jobMarks = (r) => [jobMark(r), `${r.id}|${(r.owner && r.owner.key) || ''}|${r.grant === true ? 1 : 0}`];", '  const jobMarks = (r) => [jobMark(r)];'));
+  ok(o1r.q.ok === true && o1r.open === 1, 'RED CONTROL: a match on the new form only files the declined card again — the leg above would read it', o1r);
   try { jm.shutdown(); } catch { }
 }
 
@@ -600,7 +681,7 @@ console.log('④d THE HELD END PROPOSAL — waits for the press on its card, the
   const e1 = await endHeld();
   ok(e1.r.ok && e1.q.ok && e1.open.length === 1 && e1.open[0].id !== e1.first && e1.open[0].card.rows.map((d) => d.key).join() === 'claude:bbbb' && Array.isArray(e1.q.alreadyEnded) && e1.q.alreadyEnded.length === 1,
     'AN END PROPOSAL DURING A PRESS IS HELD AND JUDGED AFTER IT: a NEW card with the live row only — the one the press just ended is said as already ended, never drawn live', { q: e1.q, open: e1.open.map((x) => x.card.rows.map((d) => d.key)) });
-  const e1r = await endHeld((src) => src.replace("    const free = await freeOf(proposerKey, 'end');   // held: the rows are judged AFTER a press on this proposer's card\n    if (free.busy) return BUSY;\n", '').replace("    if (open && inFlight.has(open.id)) return depth >= HELD_MAX ? BUSY : propose({ targets, why }, { caller, reach }, depth + 1);\n", ''));
+  const e1r = await endHeld((src) => src.replace("    const free = await freeOf(proposerKey, 'end', deadline);   // held: the rows are judged AFTER a press on this proposer's card\n    if (free.busy) return BUSY;\n", '').replace("    if ((open && inFlight.has(open.id)) || (pressSeq.get(proposerKey) || 0) !== seq0) return depth >= HELD_MAX ? BUSY : propose({ targets, why }, { caller, reach }, depth + 1, deadline);\n", ''));
   ok(e1r.open.length === 0 || e1r.open.some((x) => x.card.rows.some((d) => d.key === 'claude:aaaa')), 'RED CONTROL: an end store with no hold merges into the card the press is closing (the proposal closed away unseen) or draws the ended row live — the leg above would read it', e1r.open.map((x) => x.card.rows.map((d) => d.key)));
 }
 

@@ -1704,6 +1704,7 @@ async function proposeWake(a, job, why) {
   try { r = await door({ sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, conversationId: cid, name: s.name || null }, { rows: a.jm.wakeRowsOf([target]), why: text }); }
   catch (e) { r = { ok: false, code: 'failed', why: (e && e.message) || String(e) }; }
   if (!r || r.ok === false || r.error) return { status: 400, body: { error: (r && (r.why || r.error)) || 'the proposal was not filed', code: (r && r.code) || 'failed' } };
+  if (r.already) return { status: 200, body: { success: true, already: true, job: target.id, note: r.why || 'it already has the grant — nothing was filed' } };   // cure r4: the press it waited for granted it
   return { status: 200, body: { success: true, job: target.id, proposed: true, wakesSelf: !!(cid && target.owner.conversation.id === cid), ...(r.id ? { proposal: r.id } : {}), note: 'filed for the person — one press approves; the answer reaches this conversation at its next turn' } };   // wakesSelf: the cure's law 1 — the tool says WHICH conversation the job would wake
 }
 function jobAuth(req, res) {
