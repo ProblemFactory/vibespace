@@ -640,7 +640,7 @@ async function lupLegs(R) {
   // controls: each rule removed in a patched copy turns its leg red
   const C1 = await lupRig('lup-c1', engCopy('lup-propose', "    if (fb) return { ok: false, answer: { ok: false, code: 'bad-proposal', why: 'attachments-not-sendable'", "    if (false) return { ok: false, answer: { ok: false, code: 'bad-proposal', why: 'attachments-not-sendable'"));
   ok(legRed(await lupLegs(C1), /propose refused by name/), 'control: an engine whose propose does not refuse the file is red (propose not refused)');
-  const C2 = await lupRig('lup-c2', engCopy('lup-card', 'return fb ? { filesBlocked: fb } : {}; })(),', 'return {}; })(),'));
+  const C2 = await lupRig('lup-c2', engCopy('lup-card', '        if (fb) return { filesBlocked: fb };', '        if (false) return { filesBlocked: fb };'));
   ok(legRed(await lupLegs(C2), /approve card: the files row turned/), 'control: an approve card without the warning is red');
   const C3 = await lupRig('lup-c3', engCopy('lup-foryou', "    if (to === 'sent') await speakPartial(p1);\n", ''));
   ok(legRed(await lupLegs(C3), /ONE For-you item/), 'control: a partial send without the For-you item is red');
