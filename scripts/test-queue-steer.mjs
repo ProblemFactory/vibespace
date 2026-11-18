@@ -3975,19 +3975,22 @@ console.log('— ⑫ no commit on this branch carries conflict markers (a clean 
         if (files.length) dirty.push(`${c.slice(0, 8)} → ${files.join(', ')}`);
       }
       ok(`every one of the ${commits.length} commit(s) in ${baseRef}..HEAD is marker-free, so the chain bisects${dirty.length ? '' : ''}`, dirty.length === 0, dirty);
-      // …and the SAME scan against the commit the reviewer named, when this
-      // checkout still has it: the defect, reproduced by the shipped detector.
-      let known = null;
-      try { known = git(['rev-parse', '--verify', '--quiet', '817550d4^{commit}']).trim(); } catch { }
-      if (!known) {
-        console.log('  SKIP: 817550d4 (the pre-repair pick commit) is not in this object store — the historical positive control cannot run here');
-      } else {
-        let hits = '';
-        try { hits = git(['grep', '-I', '-l', '-E', '^(<<<<<<< |>>>>>>> )', known, '--', 'docs/kb-file-structure.md']); } catch { hits = ''; }
-        ok('positive control: the ORIGINAL pick commit 817550d4 does trip this scan (docs/kb-file-structure.md) — the check is the one that would have caught it',
-          /kb-file-structure\.md/.test(hits), hits.slice(0, 200));
-      }
     }
+  }
+  // …and the SAME scan against the commit the reviewer named: the defect, reproduced by the shipped detector — on EVERY checkout
+  // (outside the «no branch commits» skip: a depth-1 runner and a pushed HEAD run it too). B-4075 (lane
+  // bl-tests-e): 817550d4 is a lane commit master never held — the leg ran only where that branch was fetched and SKIPPED
+  // everywhere else. Its two marker lines are FROZEN in two pieces each (scripts/fixtures/off-master/817550d4b-kb-markers.json —
+  // no file of the tree carries a marker); joined into a scratch copy of the file, the same `git grep -E` trips on it.
+  {
+    const fx = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/off-master/817550d4b-kb-markers.json'), 'utf8'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-qs-markers-')), f = path.join(dir, 'kb-file-structure.md');
+    fs.writeFileSync(f, ['the text above the conflict', ...Object.values(fx.lines).map((pieces) => pieces.join('')), 'the text below it', ''].join('\n'));
+    let hits = '';
+    try { hits = execFileSync('git', ['grep', '--no-index', '-I', '-l', '-E', '^(<<<<<<< |>>>>>>> )', '--', path.basename(f)], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch { hits = ''; }
+    fs.rmSync(dir, { recursive: true, force: true });
+    ok('positive control: the ORIGINAL pick commit 817550d4 does trip this scan (docs/kb-file-structure.md, its two marker lines frozen) — the check is the one that would have caught it',
+      /kb-file-structure\.md/.test(hits), hits.slice(0, 200));
   }
 }
 

@@ -789,7 +789,6 @@ console.log('\n§2j a suite reads no history master does not have');
   const READS_OFF_MASTER = Object.freeze({ // sha → the scripts that read it (2026-11-01, B-4291's census — each a backlog row)
     '296a748f': ['test-windows-device-fs.mjs'], // lane device-upgrade-stuck 2026-10-03: const BASE, cat-file -e `${BASE}^{commit}` [B-8390]
     '7b6fa3c7b': ['test-plugin-settings.mjs', 'test-plugins-grammar.mjs'], // the LLM plugin's card row 2026-10-12: the base's plugin file at its old path [B-43a0]
-    '817550d4': ['test-queue-steer.mjs'], // the pre-repair pick commit: a historical positive control [B-4075]
     'f36369057': ['test-phone-desktop-sync.mjs'], // lane phone-arrangement-local 2026-10-12: ⑩–⑬'s base TREE (a worktree at it) — no master ancestor holds captureForViewport without captureBuilt [B-44c5]
   });
   // B-1388 (lane bl-tests-e, 2026-11-17 — the B-4291 r2 acceptance's six latent forms, each blind on a planted file while a plain

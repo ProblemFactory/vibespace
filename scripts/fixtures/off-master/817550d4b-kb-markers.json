@@ -1,0 +1,14 @@
+{
+ "//": "FROZEN (B-4075, lane bl-tests-e, 2026-11-17): the two conflict-marker lines of docs/kb-file-structure.md at 817550d4b (2026-09-06, the pre-repair pick commit — a lane commit master never held), lines 405 and 419. Each line is kept in two PIECES so no file of the tree carries a marker (the suite's own scan and the repo's guards read the tree); test-queue-steer joins them and runs the same detector on the joined text.",
+ "from": "817550d4b:docs/kb-file-structure.md",
+ "lines": {
+  "405": [
+   "<<<<<<<",
+   " HEAD"
+  ],
+  "419": [
+   ">>>>>>>",
+   " b5590ecb (codex 队列动词 round-2 对抗验证: 6 条真缺陷 (2 major + 4 minor))"
+  ]
+ }
+}
