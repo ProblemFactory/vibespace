@@ -35,7 +35,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker } from './ci.mjs';
+import { launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, runSuiteAsync } from './ci.mjs';
 import { REPO, ok, git, writeMarker, report } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
@@ -111,7 +111,10 @@ const R = makeRepo('verdict');
 git(R, ['remote', 'add', 'origin', `git@github.com:${SLUG}.git`]);
 const base = commit(R, 'base.txt', 'base\n', 'base');
 const tip = commit(R, MIRROR_WORKFLOW, WF, 'the ci workflow');
-const ghFor = (run, jobs, calls, total) => (p) => { calls && calls.push(p); return /\/jobs\?/.test(p) ? { json: { total_count: total ?? jobs.length, jobs } } : { json: run }; };
+// B-479e (1): every heavy shard job carries ONE «ci-heavy-self-skipped» annotation — `notes(path)` answers a job's annotations (default: none skipped)
+// one note per shard job, each beginning with its job's name (the writer matches it); the fixture answers every job with all of them
+const NOTE0 = Array.from({ length: N }, (_, k) => ({ title: SELF_SKIP_TITLE, message: `heavy ${k + 1}/${N} (0):`, annotation_level: 'notice' }));
+const ghFor = (run, jobs, calls, total, notes = () => NOTE0) => (p) => { calls && calls.push(p); return /\/annotations\?/.test(p) ? notes(p) && notes(p).err ? notes(p) : { json: notes(p) } : /\/jobs\?/.test(p) ? { json: { total_count: total ?? jobs.length, jobs } } : { json: run }; };
 const empty = (d) => !fs.existsSync(d) || fs.readdirSync(d).length === 0;
 { const dir = scratch('mk'), calls = [];
   const v = heavyVerdict({ sha: tip, runId: '42745258349', repoRoot: R, dir, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf(), calls), now: 1794280000000, by: 'gate' });
@@ -120,8 +123,41 @@ const empty = (d) => !fs.existsSync(d) || fs.readdirSync(d).length === 0;
   ok(rec.scope === 'hosted' && rec.source === 'mirror' && rec.hosts === 'hosted' && JSON.stringify(rec.selected) === JSON.stringify(HOSTED) && JSON.stringify(rec.partial) === JSON.stringify(HOSTED)
     && rec.ghRun === 42745258349 && rec.attempt === 1 && rec.verifiedAt === 1794280000000 && rec.result === 'green' && rec.scope !== 'full',
     'the marker LISTS what the mirror ran — { scope: hosted, source: mirror, selected = partial = the hosted names } — never «full»; `partial` keeps a reader that predates the union from counting it');
-  ok(calls.length === 2 && calls[0] === `repos/${SLUG}/actions/runs/42745258349` && calls[1] === `repos/${SLUG}/actions/runs/42745258349/jobs?filter=latest&per_page=100`,
-    'two bounded GETs on THIS repository\'s path; the jobs call asks filter=latest explicitly'); }
+  const notesAsked = calls.slice(2);
+  ok(calls[0] === `repos/${SLUG}/actions/runs/42745258349` && calls[1] === `repos/${SLUG}/actions/runs/42745258349/jobs?filter=latest&per_page=100`
+    && notesAsked.length === N && notesAsked.every((c) => new RegExp(`^repos/${SLUG}/check-runs/[^/]+/annotations\\?per_page=100$`).test(c)),
+    `bounded GETs on THIS repository's path: the run, its jobs (filter=latest), then ONE annotations read per heavy shard job (B-479e: ${notesAsked.length} of ${N}) — ${calls.length} in all`); }
+// B-479e (1) A SUITE THAT SKIPPED ITSELF ON THE RUNNER IS NOT ON THE LIST: every shard job's «ci-heavy-self-skipped» note is read
+{ const notesWith = (names) => () => [{ title: 'another note', message: 'x' }, ...NOTE0.slice(1), { title: SELF_SKIP_TITLE, message: `heavy 1/${N} ${selfSkipBody(names)}` }];
+  const d1 = scratch('mk-skip'), v1 = heavyVerdict({ sha: tip, runId: '11', repoRoot: R, dir: d1, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf(), null, undefined, notesWith([HOSTED[1]])) });
+  ok(v1.ok && JSON.stringify(v1.rec.selected) === JSON.stringify([HOSTED[0]]) && JSON.stringify(v1.rec.partial) === JSON.stringify([HOSTED[0]]) && JSON.stringify(v1.rec.skippedOnRunner) === JSON.stringify([HOSTED[1]]),
+    `a hosted suite that SKIPPED ITSELF on the runner leaves the mirror green's list — selected = partial = ${JSON.stringify(v1.rec && v1.rec.selected)}, skippedOnRunner ${JSON.stringify(v1.rec && v1.rec.skippedOnRunner)}`);
+  const refusedW = (notes) => { const d = scratch('mk-skip-no'); const v = heavyVerdict({ sha: tip, runId: '12', repoRoot: R, dir: d, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf(), null, undefined, notes) }); return { v, empty: empty(d) }; };
+  const nNone = refusedW(() => [{ title: 'another note', message: 'x' }]), nErr = refusedW(() => ({ err: 'gh failed: HTTP 404' })), nBad = refusedW(() => [...NOTE0.slice(1), { title: SELF_SKIP_TITLE, message: `heavy 1/${N} (2): only-one` }]);
+  const nNested = refusedW(() => [...NOTE0, { title: SELF_SKIP_TITLE, message: `heavy 1/${N} (0):` }]), nOther = refusedW(() => NOTE0.slice(1));
+  const nAll = refusedW(notesWith(HOSTED));
+  ok(!nNested.v.ok && /2 «ci-heavy-self-skipped» annotations for heavy 1\//.test(nNested.v.why) && !nOther.v.ok && /no «ci-heavy-self-skipped» annotation for heavy 1\//.test(nOther.v.why),
+    'a job whose note is not ITS OWN (none naming its shard, or two — a nested run\'s note in a red tail) is refused');
+  ok(!nNone.v.ok && /no «ci-heavy-self-skipped» annotation/.test(nNone.v.why) && nNone.empty && !nErr.v.ok && /annotations could not be read \(gh failed: HTTP 404\)/.test(nErr.v.why) && nErr.empty
+    && !nBad.v.ok && /counts 2 but names 1/.test(nBad.v.why) && nBad.empty && !nAll.v.ok && /every hosted heavy suite skipped itself/.test(nAll.v.why) && nAll.empty,
+    'a shard job with NO self-skip note, one whose notes cannot be read, an unreadable note, and a run where every hosted suite skipped: each REFUSED, nothing written');
+  ok(selfSkippedInNotes([{ title: SELF_SKIP_TITLE, message: 'heavy 2/7 (0):' }], 'heavy 2/7').names.length === 0 && selfSkippedInNotes([{ title: SELF_SKIP_TITLE, message: 'heavy 2/7 (1): test-a' }, { title: SELF_SKIP_TITLE, message: 'heavy 2/7 (0):' }], 'heavy 2/7').err && selfSkippedInNotes({}, 'heavy 2/7').err
+    && selfSkippedInNotes([{ title: SELF_SKIP_TITLE, message: 'heavy 3/7 (1): test-a' }], 'heavy 2/7').err && selfSkippedInNotes([{ title: SELF_SKIP_TITLE, message: 'heavy 2/7 (1): test-a' }], 'heavy 2/7').names.join() === 'test-a'
+    && selfSkipBody(['test-b', 'test-a']) === '(2): test-a test-b' && selfSkipBody([]) === '(0):', 'PURE: the note is «heavy i/n (k): names sorted», read for ITS job only; two notes, another shard\'s, or notes that are no list are a job that cannot be verified');
+  // the runner side: a green suite whose LAST line begins «SKIP» skipped itself (the tree's convention), the gate says so ONCE
+  const sr = scratch('selfskip-root'); fs.mkdirSync(path.join(sr, 'scripts'));
+  fs.writeFileSync(path.join(sr, 'scripts', 'test-zz-skips.mjs'), "console.log('§1 nothing to do here');\nconsole.log('SKIP: no chrome/chromium on this machine');\n");
+  fs.writeFileSync(path.join(sr, 'scripts', 'test-zz-runs.mjs'), "console.log('SKIP: one leg skipped');\nconsole.log('ALL PASS (3)');\n");
+  fs.writeFileSync(path.join(sr, 'scripts', 'test-zz-skipped.mjs'), "console.log('SKIPPED (evidence above)');\n");
+  fs.writeFileSync(path.join(sr, 'scripts', 'test-zz-zero.mjs'), "console.log('SKIP: no chrome');\nconsole.log('ALL PASS (0) — SKIPPED');\n");
+  const run1 = (name) => runSuiteAsync({ name, tier: 'heavy', why: 'slow — 1 s' }, { root: sr });
+  const rs = await run1('test-zz-skips'), rr = await run1('test-zz-runs'), rk = await run1('test-zz-skipped'), rz = await run1('test-zz-zero');
+  ok(rs.ok && /^SKIP: no chrome/.test(rs.selfSkip || '') && rk.ok && /^SKIPPED/.test(rk.selfSkip || '') && rz.ok && /^ALL PASS \(0\)/.test(rz.selfSkip || '') && rr.ok && rr.selfSkip === undefined,
+    `a green suite whose last line says SKIP / SKIPPED / ALL PASS (0) skipped ITSELF (the tree's three endings); one that skipped a leg and then passed did not`);
+  const CI = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  ok(/if \(r\.ok && r\.selfSkip\) selfSkipped\.push\(s\.name\);/.test(CI) && /skipped: selfSkipped\.length \? selfSkipped\.slice\(\)\.sort\(\) : undefined,/.test(CI)
+    && /console\.log\(`\$\{SELF_SKIP_TAG\} \$\{selfSkipBody\(selfSkipped\)\}`\);\n\s*if \(process\.env\.GITHUB_ACTIONS\) console\.log\(`::notice title=\$\{SELF_SKIP_TITLE\}::\$\{shard \? `heavy \$\{shard\.i\}\/\$\{shard\.n\}` : 'heavy'\} \$\{selfSkipBody\(selfSkipped\)\}`\);/.test(CI),
+    'WIRING: the heavy gate collects the self-skipped names into its marker, prints them ONCE, and on the Actions runner as ONE annotation the writer reads'); }
 { const dir = scratch('mk-abbr');
   const v = heavyVerdict({ sha: tip.slice(0, 12), runId: '7', repoRoot: R, dir, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf()) });
   ok(v.ok && v.rec.sha === tip, 'an abbreviated sha on the command line is resolved to the full 40 hex BEFORE it is compared'); }
@@ -442,6 +478,28 @@ console.log('§4f the guard follow-ups (on r4): the writer, identity by file nam
   const notDir = path.join(scratch('fu-status-file'), 'markers'); fs.writeFileSync(notDir, 'x');
   const st = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--status', `--markers=${notDir}`], { cwd: REPO, encoding: 'utf-8', timeout: 60000 });
   ok(st.status === 1 && /marker directory .* cannot be read \(ENOTDIR\)/.test(st.stderr) && !/\n\s+at /.test(st.stderr), `--status on a marker path that is a FILE: a named line and exit 1, no stack trace (exit ${st.status}: ${st.stderr.trim().slice(0, 100)})`); }
+
+console.log('§4g THE TABLE A FULL GREEN WAS RUN BY (B-479e) — it covers a failed suite only if that table knew it');
+{ const T = makeRepo('table'); const a = commit(T, 'scripts/test-new.mjs', '// a suite\n', 'A adds test-new'), b = commit(T, 'b.txt', 'b\n', 'B'), h = commit(T, 'h.txt', 'h\n', 'HEAD');
+  const dirOf = (green, failed = ['test-new'], extra = null) => { const d = scratch('tbl'); fs.writeFileSync(path.join(d, `${a}.red`), JSON.stringify(goodRec(a, 'red', { failed })));
+    fs.writeFileSync(path.join(d, `${b}.green`), JSON.stringify(goodRec(b, 'green', green))); if (extra) fs.writeFileSync(path.join(d, `${h}.green`), JSON.stringify(goodRec(h, 'green', extra))); return d; };
+  const knows = { table: { digest: 'x', heavy: ['test-new', 'test-old'] } }, older = { table: { digest: 'y', heavy: ['test-old'] } };
+  ok(blockedBy(dirOf(older), h, T) === a, 'a FULL green whose table never knew the failed suite (an OLDER table — it never ran it) does NOT clear the red');
+  ok(blockedBy(dirOf(knows), h, T) === null && blockedBy(dirOf({}), h, T) === null, '…one whose table knew it clears it; one with NO table (written before this) is read as before — it clears');
+  ok(blockedBy(dirOf({ table: { heavy: 'test-new' } }), h, T) === a && blockedBy(dirOf({ table: null }), h, T) === a, '…a table that is not a list of names covers no failed name (fail closed)');
+  ok(blockedBy(dirOf(older, ['test-new', 'test-old'], { scope: 'affected', selected: ['test-new'] }), h, T) === null, '…and the UNION still holds: the older FULL green covers test-old, an affected green listing test-new covers the rest');
+  ok(blockedBy(dirOf(older, ['test-gone']), h, T) === null && blockedBy(dirOf(older, ['npm run build']), h, T) === null,
+    '…but a failed name that is NO suite at the green\'s commit (renamed or deleted since, or «npm run build») has nothing left to run: the FULL green covers it — else no run of the current tree could ever clear it');
+  ok(blockedBy(dirOf({ ...knows, skipped: ['test-new'] }), h, T) === a && blockedBy(dirOf(older, ['test-new'], { scope: 'affected', selected: ['test-new'], skipped: ['test-new'] }), h, T) === a,
+    '…and a green in which the suite SKIPPED ITSELF does not vouch for it (B-479e (1) on the box\'s own markers): neither a FULL green nor a list');
+  const du = scratch('tbl-u'); fs.writeFileSync(path.join(du, `${a}.red`), 'null'); fs.writeFileSync(path.join(du, `${b}.green`), JSON.stringify(goodRec(b, 'green', older)));
+  ok(blockedBy(du, h, T) === null, '…an UNREADABLE red (no failed list to ask about) is still cleared by a FULL green, whatever its table (LAW B)');
+  const t1 = heavyTableOf([{ name: 'test-b', tier: 'heavy' }, { name: 'test-a', tier: 'heavy' }, { name: 'test-f', tier: 'fast' }]), t2 = heavyTableOf([{ name: 'test-a', tier: 'heavy' }, { name: 'test-b', tier: 'heavy' }]);
+  ok(t1.heavy.join() === 'test-a,test-b' && /^[0-9a-f]{16}$/.test(t1.digest) && t1.digest === t2.digest && heavyTableOf([{ name: 'test-a', tier: 'heavy' }]).digest !== t1.digest,
+    'PURE heavyTableOf: the heavy names sorted (fast rows left out) and one digest per table, whatever the table order');
+  const CIT = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  ok(/table: scope !== 'affected' && !only && !shard && !host \? heavyTableOf\(SUITES\) : undefined,/.test(CIT) && /const covers = \(g, f\) => ranIn\(g, f\) && \(\(fullOf\(g\) && tableKnows\(g, f\)\) \|\| listOf\(g\)\.includes\(f\)\);/.test(CIT),
+    'WIRING: a FULL box run writes the table it ran by into its marker; the gate asks it before a FULL green covers a failed suite'); }
 
 console.log('§5 NEGATIVE CONTROLS — the per-job check, and r1\'s FULL marker');
 const M = mutantCopies('ci-heavy-verdict', REPO);

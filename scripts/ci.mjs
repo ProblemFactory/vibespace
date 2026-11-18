@@ -2444,7 +2444,10 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       // the box's 1-min loadavg when the suite started → when it ended, on EVERY suite line (q-038 ④: a red under load
       // carries its load as evidence — a timing leg's verdict is read beside it, never instead of it)
       const load = [l0, load1()], ld = `load ${load[0]}→${load[1]}`;
-      if (status === 0) { resolve({ ok: true, ms, load, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(stdout.trim().split('\n').pop() || 'ok').slice(0, 80)}`] }); return; }
+      // a green suite whose LAST line begins «SKIP» skipped ITSELF (the tree's convention — `SKIP: no chrome …`): it ran nothing (B-479e (1))
+      // (the tree's endings: «SKIP: …», «SKIPPED (…)», and «ALL PASS (0)» — zero legs ran — with or without a «— SKIPPED» after it)
+      const last = (stdout.trim().split('\n').pop() || '').trim(), selfSkip = /^SKIP/.test(last) || /^ALL PASS \(0\)/.test(last) ? last.slice(0, 160) : undefined;
+      if (status === 0) { resolve({ ok: true, ms, load, selfSkip, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(last || 'ok').slice(0, 80)}`] }); return; }
       const r = { status, signal, error };
       // the hang report rides INSIDE the ✗ line's entry, and so do its ✗ lines (failLegs): lines[1] / lines[2] stay the stdout tail / stderr the rerun ledger reads
       const hl = asked ? readHangReport(asked, { root, envExcluded: hr.envExcluded }) : null, digest = hl && hl.lines.length ? '\n' + hl.lines.join('\n') : '';
@@ -3188,6 +3191,11 @@ const shortSha = (s) => String(s || '').slice(0, 8);
 // of it still BLOCKS (as a red whose failures are unknown — only a FULL green on a descendant clears it). `failed` / `selected` /
 // `partial` / `absent` that are not lists of names are no list.
 const strList = (x) => Array.isArray(x) && x.every((v) => typeof v === 'string');
+/** PURE: the heavy table a run was judged by (B-479e (2)) — its heavy names, sorted, and their digest; a FULL green carries it. */
+export function heavyTableOf(suites) {
+  const heavy = suites.filter((s) => s.tier === 'heavy').map((s) => s.name).sort();
+  return { digest: createHash('sha256').update(heavy.join('\n')).digest('hex').slice(0, 16), heavy };
+}
 export function markerShapeWhy(rec, kind, nameSha, mirror = false) {
   if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return `not a JSON object (${rec === null ? 'null' : Array.isArray(rec) ? 'an array' : typeof rec})`;
   if (typeof rec.sha !== 'string' || !/^[0-9a-f]{7,40}$/.test(rec.sha) || !(rec.sha.startsWith(nameSha) || nameSha.startsWith(rec.sha))) return `its sha (${typeof rec.sha === 'string' ? rec.sha.slice(0, 12) : typeof rec.sha}) is not the file's commit`;
@@ -3497,8 +3505,12 @@ export function heavyBlocker({ dir, head, repoRoot = repo, resolveShort, peelFul
   // LAW B (r4, 主开发's ruling 2026-11-10 05:34Z): `absent` is subtracted from LIST-scoped greens only — there the list claims a name
   // that did not run. A FULL green says every suite the runner's table knows at that commit ran green: it clears EVERY kind of red (a
   // list-less one, an unreadable one), exactly as 2056c98de does, whatever its `absent`. A list-scoped green whose `absent` is not a
-  // list of names counts for nothing (fail closed, like failed / selected / partial). The gap this leaves (a FULL green from an OLDER
-  // table never ran the suites added since) is said in the kb and B-479e, not built.
+  // list of names counts for nothing (fail closed, like failed / selected / partial).
+  // THE TABLE A FULL GREEN WAS RUN BY (B-479e (2), lane bl-ci 2026-11-17): a FULL green says «every suite MY table knows ran green» —
+  // a green run by an OLDER table (the box's checkout behind the commit it gated in a scratch worktree) never ran the suites the commit
+  // added since. The box writer now records its table in a FULL green (`table: { digest, heavy }` — heavyTableOf), and a FULL green
+  // covers a failed name only if its table knew that suite; a red with no failed list still clears by a FULL green (LAW B). A FULL green
+  // with no `table` (written before this) is read as before; one whose `table` is not a list of names covers no failed name (fail closed).
   const greens = all.filter((m) => m.kind === 'green' && !m.unreadable && m.commit);
   const fullOf = (g) => !g.partial && g.scope !== 'affected' && g.scope !== 'hosted' && g.source !== 'mirror';
   const listOf = (g) => {
@@ -3506,7 +3518,14 @@ export function heavyBlocker({ dir, head, repoRoot = repo, resolveShort, peelFul
     const absent = new Set(g.absent || []);
     return [].concat(strList(g.selected) ? g.selected : [], strList(g.partial) ? g.partial : []).filter((f) => !absent.has(f));
   };
-  const covers = (g, f) => fullOf(g) || listOf(g).includes(f);
+  // …and a name that is NO suite at the green's commit (renamed, split or deleted since — or no suite at all, «npm run build») has
+  // nothing left to run: a FULL green covers it (B-479e's adversarial read: else such a red could never clear). One `git cat-file -e`
+  // per name asked, memoised.
+  const suiteAt = new Map(), isSuiteAt = (c, f) => { const k = `${c}:${f}`; if (!suiteAt.has(k)) suiteAt.set(k, /^test-[\w.-]+$/.test(f) && gitIn(repoRoot, ['cat-file', '-e', `${c}:scripts/${f}.mjs`]) !== null); return suiteAt.get(k); };
+  const tableKnows = (g, f) => g.table === undefined || (!!g.table && strList(g.table.heavy) && g.table.heavy.includes(f)) || (!!g.table && strList(g.table.heavy) && !isSuiteAt(g.commit, f));
+  // a suite that SKIPPED ITSELF in a green (B-479e (1), the box's own markers) ran nothing: the green does not vouch for it
+  const ranIn = (g, f) => !(strList(g.skipped) && g.skipped.includes(f));
+  const covers = (g, f) => ranIn(g, f) && ((fullOf(g) && tableKnows(g, f)) || listOf(g).includes(f));
   for (const red of reds) {
     if (!isAncestor(red.commit, HEAD)) continue;
     const desc = greens.filter((g) => g.commit !== red.commit && isAncestor(red.commit, g.commit) && isAncestor(g.commit, HEAD));   // COMMITS, never names
@@ -3539,11 +3558,28 @@ export function heavyBlocker({ dir, head, repoRoot = repo, resolveShort, peelFul
 // every `heavy i/n` the workflow AT THE SHA defines + the `heavy` gate are each
 // success (every job of a needed name; a missing, skipped or duplicate-failed
 // one refuses). gh absent / unauthenticated / 403 / timing out = «cannot
-// verify»: two bounded GETs, no retry, never on a timer. The list is read from
+// verify»: bounded GETs — the run, its jobs, and one annotations read per heavy shard job (B-479e) — no retry, never on a timer. The list is read from
 // the COMMIT (its ci.mjs = the running one, byte for byte; its suite sources by
 // git cat-file). «Verified, never typed» is the WRITER's promise; the reader
 // opens the gate only on a marker it can read as a record of its kind (LAW A).
 export const MIRROR_WORKFLOW = '.github/workflows/ci.yml';
+// B-479e (1): the heavy runner's line naming the suites that skipped THEMSELVES (green by exit code, their last line «SKIP…»). On the
+// Actions runner it is also a `::notice` ANNOTATION titled SELF_SKIP_TITLE — the verdict writer reads it as JSON, per job.
+export const SELF_SKIP_TAG = '[ci:heavy] SKIPPED BY THEMSELVES';
+export const SELF_SKIP_TITLE = 'ci-heavy-self-skipped';
+/** `(n): a b c` — the self-skip line's body (n names, sorted). */
+export const selfSkipBody = (names) => `(${names.length}):${names.length ? ' ' + names.slice().sort().join(' ') : ''}`;
+/** PURE: a heavy job's annotations → { names } | { err } — the ONE note of THIS job (its message begins with the job's name, `heavy i/n`:
+ *  a nested run's note in a suite's red tail names no shard); none, two, or an unreadable one is a job the writer cannot verify. */
+export function selfSkippedInNotes(notes, jobName) {
+  if (!Array.isArray(notes)) return { err: 'its annotations are not a list' };
+  const mine = notes.filter((n) => n && n.title === SELF_SKIP_TITLE && String(n.message || '').trim().startsWith(`${jobName} (`));
+  if (mine.length !== 1) return { err: mine.length ? `${mine.length} «${SELF_SKIP_TITLE}» annotations for ${jobName}` : `no «${SELF_SKIP_TITLE}» annotation for ${jobName}` };
+  const m = /^\((\d+)\):((?: [\w.-]+)*)$/.exec(String(mine[0].message || '').trim().slice(jobName.length + 1));
+  if (!m) return { err: `an unreadable «${SELF_SKIP_TITLE}» annotation` };
+  const names = m[2].trim() ? m[2].trim().split(' ') : [];
+  return names.length === Number(m[1]) ? { names } : { err: `«${SELF_SKIP_TITLE}» counts ${m[1]} but names ${names.length}` };
+}
 /** owner/name of a GitHub remote URL (ssh or https), or null. */
 export function repoSlugOf(url) {
   const m = /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https:\/\/github\.com\/)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(String(url || '').trim());
@@ -3653,8 +3689,22 @@ export function heavyVerdict({ sha, runId, repoRoot = repo, dir, ghJson = ghApiJ
   if (!j || j.err || !j.json) return no(`cannot verify: ${(j && j.err) || 'gh gave nothing'}`);
   const v = judgeMirrorRun({ sha: full, slug, run: r.json, jobs: j.json.jobs, totalJobs: j.json.total_count, workflow });
   if (!v.ok) return v;
-  const list = names.slice().sort();
+  // B-479e (1): a hosted suite that SKIPPED ITSELF on the runner (exit 0, its last line «SKIP…») ran nothing — every heavy shard job's
+  // annotations are read (one bounded GET each) and its self-skipped names leave the list; a job whose annotations cannot be read,
+  // or carry no «ci-heavy-self-skipped» note, is a shard this writer cannot verify: it refuses and writes nothing
+  const skipped = new Set();
+  for (const job of (j.json.jobs || []).filter((x) => x && /^heavy \d+\/\d+$/.test(x.name || ''))) {
+    const cr = (/\/check-runs\/(\d+)$/.exec(String(job.check_run_url || '')) || [])[1] || job.id;   // an Actions job IS a check run
+    const a = ghJson(`repos/${slug}/check-runs/${cr}/annotations?per_page=100`);
+    if (!a || a.err || a.json === undefined) return no(`cannot verify ${job.name}'s suites: its annotations could not be read (${(a && a.err) || 'gh gave nothing'})`);
+    const sk = selfSkippedInNotes(a.json, job.name);
+    if (sk.err) return no(`cannot verify ${job.name}'s suites: ${sk.err}`);
+    for (const n of sk.names) skipped.add(n);
+  }
+  const list = names.filter((n) => !skipped.has(n)).sort();
+  if (!list.length) return no('every hosted heavy suite skipped itself on the runner — nothing ran to vouch for');
   const rec = { sha: full, result: 'green', failed: [], scope: 'hosted', source: 'mirror', hosts: 'hosted', selected: list, partial: list, ghRun: Number(runId), attempt: r.json.run_attempt,
+    skippedOnRunner: skipped.size ? [...skipped].sort() : undefined,
     jobs: v.jobs, repo: slug, workflow: MIRROR_WORKFLOW, verifiedAt: now, startedAt: Date.parse(r.json.run_started_at) || now, endedAt: now, by };
   const file = path.join(d, `${full}.mirror.green`);
   try { fs.mkdirSync(d, { recursive: true }); } catch (e) { return no(`the markers path ${d} cannot be used: ${e.code || e.message}`); } // only now: a refusal leaves no directory behind
@@ -4315,7 +4365,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // the round-2 supersede cost one step earlier.
     let abandonedWhy = abandoned();
     const build = abandonedWhy ? { ok: false } : noteChildResult(runBuild({ cwd: runRoot, reuse: !isolate }));   // a built IN-PLACE tree is not rebuilt (THE BUILD STAMP); an --isolate checkout is fresh: no stamp asked, nothing hashed
-    const failed = [], flaky = [], timings = [], absent = [];
+    const failed = [], flaky = [], timings = [], absent = [], selfSkipped = [];
     let laneN = 0, serialNames = [];
     const dirPace = dirSweepPacer();
     // The build is the first thing a supersede kill lands on, so ask before
@@ -4400,6 +4450,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
           console.log(rerunSaid('ci:heavy', s.name, first, again, path.join(d, 'reruns.jsonl')));
         }
         timings.push({ name: s.name, ms: r.ms, ok: r.ok, lane: String(lane), load: r.load });
+        if (r.ok && r.selfSkip) selfSkipped.push(s.name); // B-479e (1): green by its exit code, but it ran nothing
         if (par) { parInFlight--; overlapCheck(); }
       }
     };
@@ -4438,6 +4489,12 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       if (!abandonedWhy) console.log(`[ci:heavy] lanes: ${laneN} parallel (${Math.round(parMs / 1000)}s) + serial (${overlapped ? `overlapped, ${Math.round((Date.now() - tPar) / 1000)}s wall in all` : `${Math.round((Date.now() - tPar - parMs) / 1000)}s`}); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
     }
     dirPace.boundary("the heavy tier's end"); // B-9ec9: whatever the pace left since its last sweep
+    // B-479e (1) — ONE line, always (0 too), and on the Actions runner ONE annotation: the mirror's verdict writer reads it from every
+    // hosted shard job, and a job without it is a shard it cannot verify (it refuses). The names: green by exit code, ran nothing.
+    if (!abandonedWhy) {
+      console.log(`${SELF_SKIP_TAG} ${selfSkipBody(selfSkipped)}`);
+      if (process.env.GITHUB_ACTIONS) console.log(`::notice title=${SELF_SKIP_TITLE}::${shard ? `heavy ${shard.i}/${shard.n}` : 'heavy'} ${selfSkipBody(selfSkipped)}`);   // the job's own name first: the writer matches it
+    }
     const rec = {
       sha, result: failed.length ? 'red' : 'green', failed,
       flaky: flaky.length ? flaky : undefined,
@@ -4462,6 +4519,9 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       lanes: laneN || undefined,
       serial: serialNames.length ? serialNames : undefined,
       timings: timings.sort((a, b) => b.ms - a.ms),
+      skipped: selfSkipped.length ? selfSkipped.slice().sort() : undefined, // B-479e (1): the suites that skipped THEMSELVES (exit 0, ran nothing)
+      // B-479e (2): a FULL run's table — what «every suite» meant (the reader asks whether this table knew a red's failed suite)
+      table: scope !== 'affected' && !only && !shard && !host ? heavyTableOf(SUITES) : undefined,
     };
     // A marker is a CLAIM about a commit, so it is only written when the run
     // can honestly make it. THREE refusals: a run that was abandoned (killed by
