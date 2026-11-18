@@ -627,6 +627,9 @@ function parseSessionJsonl(claudeSessionId, cwd) {
 
 // Session metadata cache (cwd + first user message)
 const _sessionMetaCache = new Map();
+// B-891e: the memo's cap is at least the last walk's transcript count (+ room) — a fixed 8 192 under the owner's 12 543 evicted
+// every entry before the next sweep reached it, so EVERY sweep re-parsed EVERY head; entries the last walk did not visit go
+let _metaCap = 8192;
 const META_SCAN_CHUNK = 65536;
 const META_SCAN_MAX = 2 * 1024 * 1024;
 
@@ -648,11 +651,11 @@ function readCliTitle(filePath, size) {
   } catch { return null; }
 }
 
-function extractSessionMeta(filePath) {
-  let st = null;
-  try { st = fs.statSync(filePath); } catch {}
+function extractSessionMeta(filePath, st0 = null) {   // st0 (B-891e): the walk's own stat of this file — ONE stat, no parse, for an unchanged transcript
+  let st = st0;
+  if (!st) { try { st = fs.statSync(filePath); } catch {} }
   const cached = _sessionMetaCache.get(filePath);
-  if (cached && st && cached.mtimeMs === st.mtimeMs) return cached.meta;
+  if (cached && st && cached.mtimeMs === st.mtimeMs && cached.size === st.size) return cached.meta;   // the memo: path + mtime + size
   // A HEAD WITH NO NAME YET IS RESUMED (lane peer-card-sender): a delivery never names a session (discovery-facts
   // nameFromUserRecord), so a worker whose every user record is a wake has no name in its head — and a live file's
   // mtime moves on every write. The scan continues where it stopped (the same file, grown) instead of re-reading
@@ -711,7 +714,7 @@ function extractSessionMeta(filePath) {
   const meta = { cwd, name, cliTitle: readCliTitle(filePath, st ? st.size : 0) };
   try {
     _sessionMetaCache.set(filePath, { mtimeMs: st ? st.mtimeMs : fs.statSync(filePath).mtimeMs, size: st ? st.size : 0, ino: st ? st.ino : 0, pos, meta });
-    if (_sessionMetaCache.size > 8192) _sessionMetaCache.delete(_sessionMetaCache.keys().next().value);
+    if (_sessionMetaCache.size > _metaCap) _sessionMetaCache.delete(_sessionMetaCache.keys().next().value);
   } catch {}
   return meta;
 }
@@ -1393,6 +1396,7 @@ async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), d
 
   // Step 2: Scan JSONL files, match with running locks
   const sessions = [];
+  const visited = new Set();   // B-891e: the transcripts this walk read — the memo's floor and its prune
   const sessionMap = new Map(); // sessionId → index in sessions[] (dedup: running wins over stopped)
   if (snapByDir || fs.existsSync(projectsDir)) {
     for (const projDir of (snapByDir ? [...snapByDir.keys()] : fs.readdirSync(projectsDir))) {
@@ -1412,10 +1416,10 @@ async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), d
       const jsonls = (snapFiles ? [...snapFiles.keys()]
         : fs.readdirSync(projPath).filter(f => f.endsWith('.jsonl') && !f.startsWith('agent-')))
         .filter(f => !isFixtureSid(f.replace(/\.jsonl$/, ''))); // synthetic conversation id, wherever it landed
-      const statMap = new Map();
+      const statMap = new Map(), stOf = new Map();   // stOf (B-891e): the stat itself, handed to extractSessionMeta — one stat per transcript
       for (const f of jsonls) {
         if (snapFiles) { statMap.set(f, snapFiles.get(f)?.mtimeMs || 0); continue; }
-        try { statMap.set(f, fs.statSync(path.join(projPath, f)).mtimeMs); } catch { statMap.set(f, 0); }
+        try { const st = fs.statSync(path.join(projPath, f)); statMap.set(f, st.mtimeMs); stOf.set(f, st); } catch { statMap.set(f, 0); }
       }
       // Sort by mtime desc (display recency; claiming no longer relies on it alone)
       jsonls.sort((a, b) => (statMap.get(b) || 0) - (statMap.get(a) || 0));
@@ -1449,7 +1453,7 @@ async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), d
         const filePath = path.join(projPath, f);
         const mtime = statMap.get(f) || 0;
 
-        const meta = extractSessionMeta(filePath);
+        const meta = extractSessionMeta(filePath, stOf.get(f) || null); visited.add(filePath);
         const firstRunning = runningEntries.find(e => !e.assigned);
         const cwd = (firstRunning?.lock.cwd) || meta.cwd || recoverCwdFromProjDir(projDir);
 
@@ -1517,6 +1521,10 @@ async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), d
         });
       }
     }
+  }
+  if (visited.size) {   // B-891e: the memo holds every transcript this walk read, and only those (a deleted one leaves it)
+    _metaCap = Math.max(8192, visited.size + 1024);
+    if (_sessionMetaCache.size > visited.size + 1024) for (const k of [..._sessionMetaCache.keys()]) if (!visited.has(k)) _sessionMetaCache.delete(k);
   }
   return sessions;
 }

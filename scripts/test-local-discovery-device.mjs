@@ -140,7 +140,9 @@ sessionsMod.setup(ctx);
 const call = () => new Promise((resolve, reject) => {
   const layer = sessionsMod.router.stack.find((l) => l.route?.path === '/api/sessions');
   const req = { query: {} };
-  const res = { json: (b) => resolve(b), status: () => res, send: reject };
+  // B-891e: the route sends the sweep's bytes (res.type + res.set + res.send) — read back as JSON; a status() then send is an error
+  let code = 200;
+  const res = { json: (b) => resolve(b), status: (c) => { code = c; return res; }, type: () => res, set: () => res, send: (b) => { if (code !== 200) return reject(new Error(String(b))); try { resolve(JSON.parse(Buffer.isBuffer(b) ? b.toString('utf8') : String(b))); } catch (e) { reject(e); } } };
   layer.route.stack[0].handle(req, res).catch?.(reject);
 });
 

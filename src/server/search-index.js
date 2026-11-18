@@ -350,8 +350,9 @@ function wire({ app, rootDir, activeSessions, buffersDir, log = console }) {
     const out = [], seen = new Set();
     const add = (c) => { const k = (c.host || '') + '|' + c.sid; if (c.sid && c.backend && !seen.has(k)) { seen.add(k); out.push(c); } };
     try {
-      const r = await require('../routes/sessions').warmSessions();
-      for (const e of (r && r.sessions) || []) add({ sid: e.backendSessionId || e.sessionId, backend: e.backend, cwd: e.cwd || e.projectPath || '', host: e.host || '', name: e.name || e.title || e.summary || null });
+      // B-891e: the sweep's rows live in its worker — asked for, cut to the fields read here (never parsed on the loop)
+      const rows = await require('../routes/sessions').sessionRows(['backendSessionId', 'sessionId', 'backend', 'cwd', 'projectPath', 'host', 'name', 'title', 'summary']);
+      for (const e of rows) add({ sid: e.backendSessionId || e.sessionId, backend: e.backend, cwd: e.cwd || e.projectPath || '', host: e.host || '', name: e.name || e.title || e.summary || null });
     } catch { }
     try {
       const ci = JSON.parse(fs.readFileSync(path.join(dataDir, 'conversation-index.json'), 'utf-8'));

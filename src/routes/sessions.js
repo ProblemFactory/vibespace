@@ -25,62 +25,13 @@ const { parseRunDir, journalAttemptsFromText, treeAlive } = require('../workflow
 // store.discover lists its own sessions (claude lock-first sweep in
 // session-store, codex worker-side rollout walk); no backend ternary here.
 const { list: listHarnesses } = require('../harnesses');
-const { onOtherMachine } = require('../task-membership.js'); // B-df5f: the ONE «another machine» predicate (withSessionKey)
 const { findSessionJsonlPath } = require('../session-store');
 const { collectCodexThreadMetasAsync } = require('../codex-session-store');
 const { findCodexSessionJsonlPath, jsonlGapInfo, jsonlGapInfoAsync, readJsonlLineRange, readJsonlLineRangeAsync, scanJsonlUserTurns, scanJsonlUserTurnsAsync, searchJsonlFull, searchJsonlFullStream } = require('../adapters/codex');
 
-function getSessionKey(session = {}) {
-  const backend = session.backend || 'claude';
-  const backendSessionId = session.backendSessionId || session.sessionId || session.claudeSessionId || null;
-  return backendSessionId ? `${backend}:${backendSessionId}` : '';
-}
-
-// Symlink-resolved cwd (cached): a session opened under a symlinked path (e.g.
-// claude-code-webui → vibespace) must still match a Task-Group folder set on the
-// real path. Only stored when it actually differs from cwd.
-const _realCwdCache = new Map();
-function realCwdOf(cwd) {
-  if (!cwd) return null;
-  if (_realCwdCache.has(cwd)) return _realCwdCache.get(cwd);
-  if (DOOR.blocked(cwd)) return null;   // B-afc4: a sync realpath into a dead FUSE would hang the event loop (not cached)
-  if (SP.storageRootOf(cwd)) return null;   // lane hub-fuse-sync-guard: nor into a live storage mount — this runs on every /api/sessions rebuild
-  let rp = null;
-  try { const r = fs.realpathSync(cwd); if (r && r !== cwd) rp = r; } catch { /* gone/unreadable */ }
-  _realCwdCache.set(cwd, rp);
-  if (_realCwdCache.size > 4096) _realCwdCache.delete(_realCwdCache.keys().next().value);
-  return rp;
-}
-// B-df5f cure (THE BOARD AND THE SERVER ANSWER THE SAME MEMBERSHIP): the HUB's real path is a fact of the hub's own folders,
-// so a row that names another machine is never stamped with it. A GUARD: no producer of this route hands such a row today
-// (discovery rows are local, kept-stopped rows are local metas); the road where the page met another machine's conversation
-// with the hub's real path is its own merge, closed by task-membership membershipCwds
-const namesOtherMachine = (s) => [s.host, s.hostId].some(onOtherMachine);
-function withSessionKey(session = {}) {
-  const rc = namesOtherMachine(session) ? null : realCwdOf(session.cwd);
-  return {
-    ...session,
-    sessionKey: session.sessionKey || getSessionKey(session),
-    ...(rc ? { realCwd: rc } : {}),
-  };
-}
-/** THE READ-BACK (lane dead-socket-keeps-chat-meta), PURE over rows: the metas a boot kept for dead local sessions (ctx
- *  .stoppedSessions — boot-restore) merged into the discovered rows, `rows` grown in place. A harness's own STOPPED row of
- *  the same conversation takes why it stopped and when, and the name / account / mode the session had (the name the person
- *  knew wins over a CLI title; a row's own account stays); a live or external row is the conversation running — the meta
- *  adds nothing; no row (a harness with no discover, an index not read yet) ⇒ the meta's own row. */
-function mergeKeptStopped(rows, kept) {
-  const keyOf = (r) => `${r.backend || 'claude'}:${r.backendSessionId || r.sessionId}`;
-  const byKey = new Map(rows.map((r) => [keyOf(r), r]));
-  for (const k of kept || []) {
-    if (k.forkPending) continue; // r2: a pending fork's copy carries its PARENT's id — never the parent's row, its name or its account
-    const r = byKey.get(keyOf(k));
-    if (!r) { const n = withSessionKey(k); rows.push(n); byKey.set(keyOf(k), n); continue; }
-    if (r.status !== 'stopped') continue;
-    Object.assign(r, { stopReason: k.stopReason, stoppedAt: k.stoppedAt, kept: k.kept, name: k.name || r.name, accountId: r.accountId || k.accountId || null, mode: r.mode || k.mode });
-  }
-  return rows;
-}
+// B-360d / B-891e: the row key, the realpath'd cwd, the keyed row and the kept metas' read-back live in
+// src/sessions-assemble.js — ONE copy for this thread and the sweep's worker
+const { getSessionKey, mergeKeptStopped, withSessionKey } = require('../sessions-assemble.js');   // B-df5f cure's guard rides the builder there
 
 /** Setup session routes. Requires ctx object with dependencies. */
 function setup(ctx) {
@@ -644,8 +595,6 @@ function setup(ctx) {
     // wins (claude before codex, exactly the old order). A harness without a
     // store (shell) has nothing to discover. Unknown backends cannot appear:
     // only registered descriptors are iterated.
-    const sessions = [];
-    const seenSessionKeys = new Set();
     // lane door-day-one-landing: the processes under a SIGN-IN terminal (its shell, the claude it runs, one level more) —
     // the claude a login started in $HOME showed as an ACTIVE session named after the account (its folder); never a row
     const signInPids = new Set();
@@ -657,25 +606,46 @@ function setup(ctx) {
       signInPids.add(root);
       for (const k of readChildPids(root)) { signInPids.add(k); for (const g of readChildPids(k)) signInPids.add(g); }
     }
+    // B-891e (the sweep held the loop 1.35 s per poll at 12 543 transcripts): every harness but claude discovers HERE, as
+    // before; claude's walk, the merge (the registry's order — the first to name a key wins), the kept metas, the sort and
+    // the answer's bytes run in the «sessions-sweep» worker (src/sessions-sweep.js), which gets only what this thread
+    // alone knows. NO ROW OF CLAUDE'S IS BUILT ON THIS THREAD — the pool down ⇒ SafeFs's inline fallback, the old road.
+    const order = [], others = {}, bound = [];
+    let offLoop = null;   // the ONE harness whose discover the worker runs (its descriptor's store.discoverInSweep — claude's)
     for (const h of listHarnesses()) {
       if (!h.store || typeof h.store.discover !== 'function') continue;
-      const entries = await h.store.discover({ activeSessions, webuiPids, devSnap });
-      for (const entry of entries) {
-        if (entry && entry.pid && signInPids.has(entry.pid)) continue;   // a sign-in's own claude (lane door-day-one-landing)
-        const key = `${entry.backend || h.id}:${entry.backendSessionId || entry.sessionId}`;
-        if (seenSessionKeys.has(key)) continue;
-        seenSessionKeys.add(key);
-        sessions.push(withSessionKey(entry));
-      }
+      order.push(h.id);
+      if (h.store.accountBound === true) bound.push(h.id);
+      if (h.store.discoverInSweep === true && !offLoop) offLoop = h.id;
+      else others[h.id] = await h.store.discover({ activeSessions, webuiPids, devSnap });
     }
-    let keptNow = [];
-    try { keptNow = typeof ctx.stoppedSessions === 'function' ? await ctx.stoppedSessions() : []; } catch (e) { console.warn('[sessions] the kept stopped metas:', e.message); }
-    try { sweepMerge(sessions, keptNow); } catch (e) { console.warn('[sessions] the kept stopped metas:', e.message); }   // B-a5a4 follow-up r2/r3: the seam's rows, then the merge
-
-    sessions.sort((a, b) => b.startedAt - a.startedAt);
-    _sessionsCache = { sessions };
+    let kept = [];
+    try { kept = typeof ctx.stoppedSessions === 'function' ? await ctx.stoppedSessions() : []; } catch (e) { console.warn('[sessions] the kept stopped metas:', e.message); }
+    const active = [];
+    for (const [id, s] of activeSessions) if (s && s.claudeSessionId) active.push([id, { claudeSessionId: s.claudeSessionId, _childPid: s._childPid || null }]);
+    const payload = {
+      active, webuiPids: [...(webuiPids || [])], devSnap, order, offLoop, others, signInPids: [...signInPids], kept, bound,
+      facts: { roots: SP.snapshot(), blocked: DOOR.snapshot() },
+    };
+    let out;
+    try { out = await sweepPool().call('sessionsSweep', payload, { timeoutMs: SWEEP_TIMEOUT_MS }); }
+    catch (e) {
+      // the worker down (its respawn backing off) or the sweep past its deadline: THE LAST ANSWER STANDS, said — never a
+      // walk on the loop while there is one; with none yet (a first sweep), the old road ONCE, on this thread, said
+      if (_sessionsCache) { sweepRoadSaid('stale', _sessionsCache.count, e); _sessionsCacheAt = Date.now(); return _sessionsCache; }
+      out = await require('../sessions-sweep.js').sweepInThread(payload);
+    }
+    const buf = Buffer.isBuffer(out.buf) ? out.buf : Buffer.from(out.buf.buffer, out.buf.byteOffset, out.buf.byteLength);
+    sweepRoadSaid(out.onLoop ? 'loop' : 'worker', out.count);
+    _sweepStats = { ms: out.ms, rows: out.count, at: Date.now(), road: out.onLoop ? 'loop' : 'worker' };
+    try { global.__vsMetric?.('sessions-sweep-ms', out.ms); } catch { }
+    _sessionsCache = { buf, etag: out.etag, count: out.count };
     _sessionsCacheAt = Date.now();
-    _heldRows = sessions; // heldAccountOf's rows (ws-create's resume seam: its fallback when the kept copies cannot be read in time)
+    _heldRows = out.held; // heldAccountOf's rows (ws-create's resume seam; heldAccountOfNow's fallback when the kept copies cannot be read in time): the stopped rows that name an account or an account-bound harness
+    // B-a5a4 follow-up r2/r3 met (the seam merges the kept copies NOW into the last sweep's stopped rows AS DISCOVERED): the sweep
+    // hands the HELD keys' rows as discovered (out.heldDisc) — every other key's discovered row names no account (a merge only
+    // fills one) and a kept copy is a stopped row, so merging the copies into it or into nothing answers alike; no round trip
+    _sweptStopped = Array.isArray(out.heldDisc) ? out.heldDisc : null;
     return _sessionsCache;
   };
 
@@ -695,14 +665,15 @@ function setup(ctx) {
       // answer stands (never an empty list); with no answer yet it runs
       // lane cache-warmth-tiles: each answer carries the live conversations' prompt-cache facts, built per answer
       // (the sweep's 4.5 s cache never ages them) and only while the person's switch is on — off costs nothing
-      const answer = (body) => (serverSetting?.('desktop.cacheWarmth') === true ? { ...body, ...warmthDiff(activeSessions, ctx.cacheFactsOf) } : body);
-      if (_sessionsCache && (Date.now() - _sessionsCacheAt < 4500 || discoveryPaused())) return res.json(answer(_sessionsCache));
+      // B-360d rank 9: the sweep's answer is SERIALISED ONCE (sendSessions) — every page polling it shares the bytes
+      const answer = (body) => sendSessions(res, body, serverSetting?.('desktop.cacheWarmth') === true ? warmthDiff(activeSessions, ctx.cacheFactsOf) : null);
+      if (_sessionsCache && (Date.now() - _sessionsCacheAt < 4500 || discoveryPaused())) return answer(_sessionsCache);
       // coalesce: N clients missing the cache together share ONE sweep — the
       // sync handler serialized them for free; the async one must do it itself
       if (!_sweepInFlight) {
         _sweepInFlight = _runSessionsSweep().finally(() => { _sweepInFlight = null; });
       }
-      res.json(answer(await _sweepInFlight));
+      answer(await _sweepInFlight);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -783,12 +754,58 @@ function warmthDiff(activeSessions, factsOf, now = Date.now()) {
   return { warmth, serverNow: now };
 }
 
+/** B-360d rank 9 — THE SESSION LIST IS SERIALISED ONCE PER SWEEP. Measured on a scratch hub with 12 543 transcripts: the
+ *  answer is 5.75 MB, and every page's poll re-serialised it (stringify, encode, the ETag's hash) — ten views opening at
+ *  once were ONE 268 ms hold of the loop over a cached sweep. The sweep's worker makes the bytes and their weak ETag once
+ *  (src/sessions-assemble.js answerBytes); every answer of that sweep sends them. The cache-warmth switch's per-answer
+ *  diff (`warmth`, `serverNow`) is joined in after the sweep's keys — the same keys, in the same order, as
+ *  `{ ...body, ...diff }` — and its answer carries no shared ETag.
+ *  cache = { buf, etag } */
+function sendSessions(res, cache, extra = null) {
+  res.type('application/json');
+  if (!extra) { res.set('ETag', cache.etag); return res.send(cache.buf); }
+  res.set('ETag', `${cache.etag.slice(0, -1)}-w${(++_warmthTag).toString(36)}"`);   // its own tag: Express never hashes the 5.75 MB on the loop
+  const x = Buffer.from(JSON.stringify(extra));
+  return res.send(cache.buf.length > 2 ? Buffer.concat([cache.buf.subarray(0, cache.buf.length - 1), Buffer.from(','), x.subarray(1)]) : x);
+}
+/** THE SWEEP'S POOL (B-891e): src/sessions-sweep-worker.js on a pool of one — a sweep never waits behind a transcript
+ *  read, nor holds one, and the device daemon's bundle never carries it; a deadline + respawn. */
+const SWEEP_TIMEOUT_MS = 5 * 60e3;   // a cold walk of 12 543 transcripts on a slow home is CPU and reads, not a wedged mount
+let _sweepPool = null, _sweepRoad = 'worker', _sweepStats = null, _warmthTag = 0;
+/** THE FALLBACK IS SAID (主开发 00:18Z): the pool down ⇒ SafeFs runs the sweep inline, on the main loop — the old road
+ *  (about a second a poll at the owner's 12 543 transcripts). Said ONCE per outage where the owner looks (the journal,
+ *  the telemetry event Diagnostics counts; a hold it makes is named by its own frames in the [loop-hold] line), and its
+ *  end said once too — never a silent return to the loop. */
+function sweepRoadSaid(road, rows, err = null) {
+  if (road === _sweepRoad) return;
+  const was = _sweepRoad; _sweepRoad = road;
+  if (road === 'loop') {
+    console.warn(`[sessions] the sessions sweep's worker is not running and no list was kept — the session list (${rows} rows) was built ON THE MAIN LOOP (the old road: it holds the loop)`);
+    try { global.__vsEvent?.('sessions-sweep-on-loop', String(rows)); } catch { }
+  } else if (road === 'stale') {
+    console.warn(`[sessions] the sessions sweep failed (${String((err && (err.code || err.message)) || 'unknown').slice(0, 120)}) — the last list (${rows} rows) is served until a sweep answers again; nothing is walked on the main loop`);
+    try { global.__vsEvent?.('sessions-sweep-stale', String((err && err.code) || 'error').slice(0, 40)); } catch { }
+  } else console.log(`[sessions] the sessions sweep runs off the main loop again (after ${was === 'stale' ? 'serving the last list' : 'the old road'})`);
+}
+function sweepPool() {
+  if (_sweepPool) return _sweepPool;
+  const { SafeFs } = require('../safe-fs');
+  const { runOp } = require('../sessions-sweep-worker');
+  // no worker alive ⇒ a SWEEP is refused here (the route serves the last list, or runs the old road once when it has none) —
+  // never SafeFs's inline walk on the loop at every poll of a respawn's backoff; a lookup of the kept rows runs inline
+  const inlineRun = (op, payload) => { if (op === 'sessionsSweep') throw Object.assign(new Error('the sessions sweep worker is not running'), { code: 'sweep-pool-down' }); return runOp(op, payload); };
+  _sweepPool = new SafeFs({ workerPath: path.join(__dirname, '..', 'sessions-sweep-worker.js'), name: 'sessions-sweep', poolSize: 1, inlineRun, timeouts: { default: SWEEP_TIMEOUT_MS } });
+  return _sweepPool;
+}
+
 let _warmSweep = null;
 let _keptRead = null;   // unit what-it-may-use (cure r1, SHOULD a): the rows the last sweep KEPT, and whether discovery is paused — read, never a new sweep
 let _heldRows = null;
 let _sweptStopped = null;   // B-a5a4 follow-up r2: the last sweep's stopped rows AS DISCOVERED (heldAccountOfNow merges the kept copies into them)
 /** B-a5a4 follow-up r3: the sweep's merge AND what it hands the seam — the stopped rows AS DISCOVERED (copies), then the kept
  *  copies merged into `rows` in place (the page's rows). One function, so the order is a fact a leg drives. */
+// (B-891e: the sweep's rows are built in its worker — sessions-assemble keeps them as discovered before the same merge and the
+// worker hands the held keys' ones back (out.heldDisc); this is the same order on this thread, the one the seam's legs drive)
 function sweepMerge(rows, kept) {
   const discovered = rows.filter((r) => r && r.status === 'stopped').map((r) => ({ ...r }));
   mergeKeptStopped(rows, kept);
@@ -800,6 +817,20 @@ const { NO_TRANSCRIPT_HERE } = require('../inbox-reopen.js');   // B-a5a4 (6): O
 // B-a5a4 (1): a RESUME whose billing account was deleted degrades to the default login (ws-create) — never for a harness that
 // keeps a conversation in its account's OWN store (`store.accountBound`): the default's store does not hold it
 const ACCT_GONE_BOUND = 'the account this conversation lived in was deleted — its conversation stays in that account\'s own store, so it cannot be resumed on another login';
+/** B-891e: THE ROWS FOR A READER ON THE LOOP, asked where they were built (the sweep's worker keeps the last sweep's rows):
+ *  `sessionRow(key)` → one row | null (a For-you reply's reopen); `sessionRows(fields)` → the rows cut to `fields` (the
+ *  search backfill — the one reader that wants them all, and asks rarely). A worker that holds no sweep yet (a respawn)
+ *  is answered after one. */
+async function askRows(op, payload) {
+  if (!_warmSweep) return null;
+  try {
+    let r = await sweepPool().call(op, payload, { timeoutMs: 20000 });
+    if (r && r.none) { await _warmSweep(); r = await sweepPool().call(op, payload, { timeoutMs: 20000 }); }
+    return r && !r.none ? r : null;
+  } catch { return null; }
+}
+async function sessionRow(sessionKey) { const r = await askRows('sessionsLookup', { sessionKey }); return (r && r.row) || null; }
+async function sessionRows(fields = []) { const r = await askRows('sessionsRows', { fields }); return (r && r.rows) || []; }
 /** THE ACCOUNT A RESUME THAT STATES NONE GOES TO (lane dead-socket-keeps-chat-meta r2 — src/ws-create.js's ONE seam, so
  *  every door: the page's Resume, the For-you reply reopen, an automation's open) → {accountId} | {refuse} | null, over the
  *  last sweep's rows: the conversation's STOPPED row names its account (a kept meta's; the account root whose index lists
@@ -837,6 +868,9 @@ async function heldAccountOfNow(backend, id, { rows, merged, stopped = _stoppedO
   // (mergeKeptStopped: a stopped row's own account stays, the kept copy fills what it lacks) over a COPY of the sweep's
   // STOPPED rows; a stale snapshot's live row is no fact about now (a live conversation is the keeper check's, above the seam)
   const stoppedRows = (swept || []).filter((r) => r && r.status === 'stopped').map((r) => ({ ...r }));
+  // B-891e (the sweep hands the held keys' rows): only the ASKED key's copies are merged — the answer is the same (a copy fills
+  // its own key's row alone) and a resume builds no row (a realpath each) for every other kept copy
+  if (Array.isArray(kept)) { const ask = `${backend || 'claude'}:${id}`; kept = kept.filter((k) => k && `${k.backend || 'claude'}:${k.backendSessionId || k.sessionId}` === ask); }
   return heldAccountOf(backend, id, mergeKeptStopped(stoppedRows, Array.isArray(kept) ? kept : []));
 }
 // B-a5a4 r1 (1): an account-bound harness's conversation lives in ONE account's store — an account the door STATES that is not
@@ -867,4 +901,4 @@ async function boundElsewhereOf(backend, id, accountId, opts = {}) {
 /** B-a5a4 (1): a resume whose stored account is gone → {refuse} for an account-bound harness, else null (degrade, said). */
 const acctGoneOf = (backend) => (accountBoundOf(backend) ? { refuse: ACCT_GONE_BOUND } : null);
 
-module.exports = { router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+module.exports = { router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, sendSessions, sweepPool, sessionRow, sessionRows, sweepStats: () => _sweepStats, closeSweepPool: () => { if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

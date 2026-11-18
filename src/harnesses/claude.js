@@ -216,6 +216,7 @@ module.exports = {
   // detection: locks + tmux + webui pids; moved verbatim into session-store).
   store: {
     discover: store.discoverClaudeSessions,        // async ({activeSessions, webuiPids, devSnap}) → session entries
+    discoverInSweep: true,   // B-891e: the route runs this discover OFF the loop, in the sessions sweep's worker (src/sessions-sweep.js)
     locate: (id, cwd) => store.findSessionJsonlPath(id, cwd), // (sessionId, cwd) → path|null
     locateIsProof: true, // a null from locate PROVES no transcript is here (a conversation IS its .jsonl) — the transcript worker's `locate` op
     // lane chat-attachments-persist (the cut): WHERE A PICTURE SITS IN THIS HARNESS'S RECORD — src/transcript-picture.js reads

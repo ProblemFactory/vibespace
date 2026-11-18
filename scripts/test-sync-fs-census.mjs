@@ -162,7 +162,7 @@ const ROWS = [
   ["src/routes/files.js", "crossHostTransfer > exists", 1, "guarded", "safePath(dest) = the local destination a person picked in a cross-host copy/move (POST body)"],
   ["src/routes/files.js", "crossHostTransfer", 12, "guarded", "dParent / stageLocal / dPath / part / src all derive from the request body's src/dest (safePath) — a person's chosen local folder, mounts included"],
   ["src/routes/persistence.js", "*", 8, "local-only", "every path is under dataDir = <checkout>/data (setupPersistence, server.js): layouts, layout-history/, settings, user-state — or ~/.claude, ~/.codex creds"],
-  ["src/routes/sessions.js", "realCwdOf", 1, "guarded", "a session cwd's realpath on every /api/sessions rebuild (cached): never on a STORAGE mount (storageRootOf ⇒ null) nor a blocked one; a local / home cwd once"],
+  ["src/sessions-assemble.js", "realCwdOf", 1, "guarded", "a session cwd's realpath on every /api/sessions rebuild (cached): never on a STORAGE mount (storageRootOf ⇒ null) nor a blocked one; a local / home cwd once"],
   ["src/routes/sessions.js", "setup > route:GET /api/subagent-messages", 4, "local-only", "under ~/.claude/projects (os.homedir()); cwd only via cwdToProjectDir (dashed name); query ids pick entries (claudeSessionId/agentId not regex-checked)"],
   ["src/routes/sessions.js", "setup > findWorkflowSnapshot > tryPath", 1, "local-only", "p = ~/.claude/projects/<projDir>/<sid>/workflows/<runId>.json (cwd only via cwdToProjectDir)"],
   ["src/routes/sessions.js", "setup > findWorkflowSnapshot", 1, "local-only", "base = ~/.claude/projects/<dir> (the CLI's transcript tree)"],
@@ -540,7 +540,7 @@ console.log('④ the conversions: a storage path is never read on the main threa
   // the other hot sites ask the one answer BEFORE their sync call (pins)
   const src = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
   const PINS = [
-    ['src/routes/sessions.js', /if \(SP\.storageRootOf\(cwd\)\) return null;[^\n]*\n\s*let rp = null;\n\s*try \{ const r = fs\.realpathSync\(cwd\)/],
+    ['src/sessions-assemble.js', /if \(SP\.storageRootOf\(cwd\)\) return null;[^\n]*\n\s*let rp = null;\n\s*try \{ const r = fs\.realpathSync\(cwd\)/],
     ['src/task-groups.js', /else if \(SP\.storageRootOf\(cwd\)\) real = null;[^\n]*\n\s*else \{ const r = this\._mfacts\.real\(cwd\);/],   // B-55dc: before the OFF-LOOP fact (no sync call left)
     ['src/server/browser-env.js', /if \(SP\.storageRootOf\(p\)\) \{ project\.path = p; project\.error = [^\n]*\n\s*try \{ raw = fs\.readFileSync\(p, 'utf8'\)/],
     ['src/ws-handler.js', /if \(!pe\.host && !SP\.storageRootOf\(pe\.filePath\)\) \{ try \{ live = fs\.existsSync\(pe\.filePath\)/],

@@ -34,5 +34,7 @@ function refusal(mp) {
 /** THE sentence a reader answers for a blocked p (round 2 of the cure: every door asks this, none spells SENTENCE itself) —
  *  a parked mount's own words, else the blocked path's. */
 function sentenceFor(p) { const pk = parked(blocked(p) || p); return pk ? parkedSentence(pk.name) : SENTENCE; }
+/** B-891e: the blocked roots [[mountpoint, until]], for a worker that asks blocked() the same way (src/sessions-assemble.js setFacts). */
+function snapshot() { const m = _mgr && _mgr._blockedPaths; return m && typeof m.entries === 'function' ? [...m.entries()] : []; }
 
-module.exports = { register, blocked, parked, refusal, sentenceFor, SENTENCE, PARKED, parkedSentence };
+module.exports = { register, blocked, parked, refusal, sentenceFor, SENTENCE, PARKED, parkedSentence, snapshot };

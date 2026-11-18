@@ -249,7 +249,7 @@ console.log('⑩ wiring');
   ok(/if \(isSignInRow\(ws\)\) continue;/.test(read('src/lib/sidebar.js')), 'the sidebar lists no row for a sign-in terminal');
   ok(/_purpose: data\.purpose === DAY_ONE\.SIGN_IN \? DAY_ONE\.SIGN_IN : null/.test(read('src/ws-create.js')) && /purpose: session\._purpose \|\| undefined/.test(read('src/ws-create.js')), 'the server marks + persists a sign-in terminal');
   ok(/purpose: s\._purpose \|\| undefined/.test(read('server.js')), 'the live list carries it');
-  ok(/if \(entry && entry\.pid && signInPids\.has\(entry\.pid\)\) continue;/.test(read('src/routes/sessions.js')), 'the claude a sign-in terminal runs is no discovered row');
+  ok(/if \(entry && entry\.pid && signIn\.has\(entry\.pid\)\) continue;/.test(read('src/sessions-assemble.js')) && /signInPids: \[\.\.\.signInPids\]/.test(read('src/routes/sessions.js')), 'the claude a sign-in terminal runs is no discovered row (B-891e: the route hands the sign-in pids to the sweep\'s merge, src/sessions-assemble.js)');
   const ma = read('src/lib/manage-agents.js');
   ok((ma.match(/this\.openSignInTerminal\(/g) || []).length === 9 && /run\(selectedHost && b\.remoteLoginCmd \? b\.remoteLoginCmd : absCmd\(b\.loginCmd\), \{ signIn: true \}\)/.test(ma), 'every Manage Agents login terminal is a sign-in terminal (8 + the machine-wide Log in)');
   ok(/if \(!session\.host\) ensureGitIdentity\(\)\.catch\(\(\) => \{\}\);/.test(read('src/ws-create.js')), 'a local spawn asks for git’s identity (once)');

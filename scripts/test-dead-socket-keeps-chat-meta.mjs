@@ -648,7 +648,10 @@ await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one pr
   const s3 = await seamOf(RS, discovered, keptNow, 'claude', CID(7)), s3m = await seamOf(RS, mergedOld, keptNow, 'claude', CID(7));
   ok(s3 && s3.accountId === 'sub-aaaaaaaaaaaa' && s3.accountId === pageSays(discovered, keptNow, CID(7)) && s3m && s3m.accountId === 'sub-bbbbbbbbbbbb',
     '§11 (1) r2: over the DISCOVERED claude row the seam takes the copy kept now (A, the page\'s next merge); over an already merged row the older copy (B) would win — so the sweep hands the seam its rows BEFORE the merge', { s3, s3m });
-  ok(RSRC.split('    try { sweepMerge(sessions, keptNow); }').length === 2 && RSRC.includes('  const swept = rows === undefined ? _sweptStopped : rows;'), 'WIRING (§11 (1) r2/r3): the sweep goes through sweepMerge, and the seam reads its rows by default');
+  // B-891e (the sweep's rows are built in its worker): the order lives in sessions-assemble — the stopped rows kept AS DISCOVERED,
+  // then the kept copies merged — and the route hands the held keys' discovered rows to the seam (out.heldDisc)
+  const ASM = fs.readFileSync(path.join(REPO, 'src/sessions-assemble.js'), 'utf8'), iD = ASM.indexOf('(discovered.get(k) || discovered.set(k, []).get(k)).push(seamFieldsOf(r))'), iM = ASM.indexOf('try { mergeKeptStopped(sessions, kept); }', Math.max(0, iD));
+  ok(iD > 0 && iM > iD && RSRC.includes('  const swept = rows === undefined ? _sweptStopped : rows;') && RSRC.includes('_sweptStopped = Array.isArray(out.heldDisc) ? out.heldDisc : null;'), 'WIRING (§11 (1) r2/r3): the sweep keeps its rows as discovered BEFORE the merge, and the seam reads them by default (the held keys\' ones, handed back by the sweep)');
   // r3: the SWEEP's own order, driven — sweepMerge hands the seam the rows AS DISCOVERED, then merges the copies in
   RS.sweepMerge(discovered.map((r) => ({ ...r })), [kr('sub-bbbbbbbbbbbb')]);
   const s4 = await RS.heldAccountOfNow('claude', CID(7), { stopped: async () => keptNow });

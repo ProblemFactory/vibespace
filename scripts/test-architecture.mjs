@@ -523,6 +523,9 @@ const SHARED = new Set(['src/storage-path.js' /* lane hub-fuse-sync-guard: THE O
   'src/codex-message-manager.js', 'src/message-window.js', 'src/adapters/base.js', 'src/adapters/claude-code.js', 'src/adapters/codex.js',
   'src/adapters/shell.js', 'src/adapters/index.js', 'src/usage-estimator.js', 'src/usage-anchors.js', 'src/safe-fs.js',
   'src/transcript-worker.js', 'src/ssh-key.js', 'src/migration-runner.js', 'src/peer-messaging.js',
+  // B-891e: THE SESSIONS SWEEP off the loop — its assembly (the row key, the realpath'd cwd, the merge, the bytes) and its
+  // run, required by the transcript worker's sessionsSweep op and by the route (fs/crypto + mount-door + storage-path + session-store)
+  'src/sessions-assemble.js', 'src/sessions-sweep.js', 'src/sessions-sweep-worker.js',
   // rate-limit-capture is fs/path-only by design ("so the device daemon can bundle it") — SHARED, not ORCH
   'src/rate-limit-capture.js',
   // harness descriptors (docs/design-harness-plugins.md §2.2): declarations + pure hooks over SHARED parsers;

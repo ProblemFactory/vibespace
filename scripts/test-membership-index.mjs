@@ -429,7 +429,9 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
 {
   const req = createRequire(import.meta.url);
   const TM = req(path.join(REPO, 'src/task-membership.js'));
-  const SRC = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
+  // B-891e (the sweep, met at 2.369.411's second checkpoint): the row builder lives in src/sessions-assemble.js — ONE copy for
+  // the hub's thread and the sweep's worker; src/routes/sessions.js re-exports it (the guard rides the builder there)
+  const SRC = fs.readFileSync(path.join(REPO, 'src/sessions-assemble.js'), 'utf8');
   const PAGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-tasks.js'), 'utf8'), MERGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8'), APP = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
   const base = path.join(ROOT, 'board'), D = path.join(base, 'folder');
   fs.mkdirSync(path.join(D, 'sub', 'w'), { recursive: true });
@@ -475,10 +477,10 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
     ok(!far.realCwd && here.realCwd === realW, `B-df5f cure: the row builder stamps no hub real path on a row that names another machine (${JSON.stringify(far.realCwd || null)}), a row of the hub keeps its own (${JSON.stringify(here.realCwd || null)}) — a guard: no producer of the route makes such a row today`);
     const A = "const rc = namesOtherMachine(session) ? null : realCwdOf(session.cwd);";
     let red = null;
-    if (ok(SRC.split(A).length === 2, 'the anchor of the control «hub-real-on-remote-row» is in src/routes/sessions.js once')) {
+    if (ok(SRC.split(A).length === 2, 'the anchor of the control «hub-real-on-remote-row» is in src/sessions-assemble.js once')) {
       const { mutantCopies } = await import('./mutant-copy.mjs');
       const MUT = mutantCopies('member-index-rows', REPO);
-      const copy = MUT.write('src/routes/sessions.js', SRC.replace(A, 'const rc = realCwdOf(session.cwd);'), 'hub-real-on-remote-row');   // the checkpoint's line, on purpose — stale-pins: kept
+      const copy = MUT.write('src/sessions-assemble.js', SRC.replace(A, 'const rc = realCwdOf(session.cwd);'), 'hub-real-on-remote-row');   // the checkpoint's line, on purpose — stale-pins: kept
       red = rowsOf(req(copy).withSessionKey)[0].realCwd || null;
     }
     ok(red === realW, `RED CONTROL: the row builder without the guard (the checkpoint) stamps the hub's real path on another machine's row — ${JSON.stringify(red)}`);

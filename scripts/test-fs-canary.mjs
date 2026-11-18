@@ -454,7 +454,7 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
   ok(refused('p', path.join(P, 'f')) === P && rowAt(P).name === 'Pview' && rowAt(P).kind === 'storage' && line('p').endsWith(`the mount «${P}»`), `CONTROL: a product storage row on a bindfs (over the same NFS) stays storage — refused, named as the product row it is: ${line('p')}`);
   // (c) EVERY storageRootOf CALLER, as a row: after the move a project path answers what it answered before (null)
   const CALLERS = [
-    ['src/routes/sessions.js', 'realCwdOf — the realpath of a session\'s cwd', PROJ],
+    ['src/sessions-assemble.js', 'realCwdOf — the realpath of a session\'s cwd (B-891e: built in the sessions sweep worker)', PROJ],
     ['src/task-groups.js', '_realOf (membership) / _listContextFiles / _kindOf / _stat / _readText (a context row)', PROJ],
     ['src/session-store.js', 'probeCandidate — the transcript-folder decode', PROJ],
     ['src/server/browser-env.js', 'a project\'s agent-browser.json', path.join(PROJ, 'agent-browser.json')],

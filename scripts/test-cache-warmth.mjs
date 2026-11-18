@@ -66,7 +66,9 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const code = (f) => read(f).split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n'); // a `//` comment never satisfies a pin
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skips = 0;
+// a leg that cannot run here is COUNTED as a skip, never a pass (the hosted mirror is a depth-one clone)
+const skip = (n) => { skips++; console.log('  - SKIP ' + n); };
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } return !!c; };
 
 let CW = null; try { CW = require(path.join(REPO, 'src/cache-warmth.js')); } catch (e) { CW = { why: e.message.split('\n')[0] }; }
@@ -187,9 +189,30 @@ console.log('— ④ the session-list diff');
   ok('THE TURN LAW, BOUNDED (round 3): a conversation with a request in flight and no stamp yet IS sent — `inFlight: true` + its `turnStartedAt` (the pool holds it — the list agrees); idle or paused with nothing stamped stays out (unknown)',
     JSON.stringify(dT.warmth) === JSON.stringify({ 'sess-turn': { lastRequestAt: null, cacheTtlSec: 3600, lost: false, inFlight: true, turnStartedAt: 4 } }), JSON.stringify(dT));
   const rt = code('src/routes/sessions.js');
-  ok('WIRING: the 5 s poll\'s answer (cached AND fresh sweep) carries the diff ONLY while desktop.cacheWarmth is on — off is not even computed',
-    /const answer = \(body\) => \(serverSetting\?\.\('desktop\.cacheWarmth'\) === true \? \{ \.\.\.body, \.\.\.warmthDiff\(activeSessions, ctx\.cacheFactsOf\) \} : body\);/.test(rt)
-    && /return res\.json\(answer\(_sessionsCache\)\);/.test(rt) && /res\.json\(answer\(await _sweepInFlight\)\);/.test(rt) && (rt.match(/res\.json\(_sessionsCache\)|res\.json\(await _sweepInFlight\)/g) || []).length === 0);
+  ok('WIRING: the 5 s poll\'s answer (cached AND fresh sweep) carries the diff ONLY while desktop.cacheWarmth is on — off is not even computed (B-360d rank 9: through sendSessions, the sweep\'s bytes made once)',
+    /const answer = \(body\) => sendSessions\(res, body, serverSetting\?\.\('desktop\.cacheWarmth'\) === true \? warmthDiff\(activeSessions, ctx\.cacheFactsOf\) : null\);/.test(rt)
+    && /return answer\(_sessionsCache\);/.test(rt) && /answer\(await _sweepInFlight\);/.test(rt) && (rt.match(/res\.json\(_sessionsCache\)|res\.json\(await _sweepInFlight\)|res\.json\(answer\(/g) || []).length === 0);
+  // B-360d rank 9: THE SESSION LIST IS SERIALISED ONCE PER SWEEP — by the sweep's worker (src/sessions-assemble.js
+  // answerBytes); every answer of that sweep sends those bytes and their ETag, nothing serialised on this thread; with the
+  // switch on, the diff is joined after the sweep's keys (the spread's bytes). RED: the release's route serialised per answer
+  {
+    const A = require(path.join(REPO, 'src/sessions-assemble.js'));
+    const fakeRes = () => { const r = { headers: {}, body: null, type(t) { r.headers['content-type'] = t; return r; }, set(k, v) { r.headers[k.toLowerCase()] = v; return r; }, send(b) { r.body = b; return r; } }; return r; };
+    const sweep = Array.from({ length: 300 }, (_, i) => ({ sessionId: 's' + i, name: 'a row ' + i, cwd: '/srv/work/p' + (i % 7), status: i % 3 ? 'stopped' : 'running', startedAt: 1e12 + i }));
+    const realStringify = JSON.stringify; let made = 0;
+    JSON.stringify = function (v, ...a) { if (v && v.sessions === sweep) made++; return realStringify.call(this, v, ...a); };
+    let cache, outs;
+    try { cache = A.answerBytes(sweep); made = 0; outs = Array.from({ length: 10 }, () => R.sendSessions(fakeRes(), cache)); } finally { JSON.stringify = realStringify; }
+    const want = realStringify({ sessions: sweep });
+    ok('B-360d rank 9: the sweep\'s bytes are made once (answerBytes); ten answers send them as they are — nothing serialised on this thread, typed JSON, one weak ETag',
+      made === 0 && cache.buf.toString() === want && cache.count === 300 && outs.every((r) => r.body === cache.buf && r.headers['content-type'] === 'application/json' && r.headers.etag === cache.etag) && /^W\/"[0-9a-f]+-/.test(cache.etag), { made });
+    const diff = R.warmthDiff(live, factsOf, 1000000), withDiff = R.sendSessions(fakeRes(), cache, diff);
+    ok('…with the switch on: the diff joined after the sweep\'s keys — the spread\'s bytes, under a tag of its own (never the shared one; Express never hashes the bytes on the loop)', withDiff.body.toString() === realStringify({ sessions: sweep, ...diff }) && !!withDiff.headers.etag && withDiff.headers.etag !== cache.etag);
+    let base = '';
+    try { base = require('node:child_process').execFileSync('git', ['-C', REPO, 'show', 'b06f36e90:src/routes/sessions.js'], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { base = ''; }
+    if (!base) skip('control (the release\'s route, b06f36e90): the release is not in this clone (a depth-one mirror) — the bytes-made-once leg above needs no other commit');
+    else ok('control (the release\'s route, b06f36e90): res.json per answer — the rows serialised again for every view ⇒ RED', (base.match(/res\.json\(answer\(/g) || []).length === 2 && !/sendSessions\(/.test(base));
+  }
   const srv = code('server.js');
   ok('WIRING: server.js hands the engine\'s cacheFactsOf to the session routes, and both feeds\' engine literals carry the request stamp\'s writer (noteModelRequest)',
     /setupSessions\(\{[^\n]*\bcacheFactsOf\b/.test(srv) && (srv.match(/\bnoteModelRequest\b/g) || []).length === 3);
@@ -800,5 +823,5 @@ console.log('— ⑫ the strip\'s blink law (lane desktop-blink-colour): a waiti
   ok('CONTROL: a NEW waiting blink planted (a phone row\'s ::after) reds THE CENSUS until it is judged in the table', !by(newBlink, 'census:set').pass, by(newBlink, 'census:set').detail);
 }
 
-console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
+console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skips ? ', ' + skips + ' SKIPPED' : '') + ')' : 'ALL PASS (' + pass + ')' + (skips ? ' · ' + skips + ' SKIPPED (counted, never a pass)' : '')}`);
 process.exit(fail ? 1 : 0);

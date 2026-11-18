@@ -20,4 +20,7 @@ function setRoots(roots, { rootDir = null, dataDir = null, home = null, cwd = nu
 function rootOf(p) { return state.roots.length ? MPC.rootOf(p, CTX) : null; }
 function storageRootOf(p) { const r = rootOf(p); return r && r.kind === 'storage' ? r : null; }
 
-module.exports = { setRoots, rootOf, storageRootOf, roots: () => state.roots.slice() };
+// B-891e: the whole state, for a worker that answers this module's questions the same way (src/sessions-assemble.js setFacts)
+const snapshot = () => ({ roots: state.roots.slice(), rootDir: state.rootDir, dataDir: state.dataDir, home: state.home, cwd: state.cwd });
+
+module.exports = { setRoots, rootOf, storageRootOf, roots: () => state.roots.slice(), snapshot };
