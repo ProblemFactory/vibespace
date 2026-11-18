@@ -80,7 +80,7 @@ const D = 'dddddddd-4444-4000-8000-000000000004';
 const E = 'eeeeeeee-5555-4000-8000-000000000005';
 const T0 = Date.UTC(2026, 8, 22, 10, 0, 0);
 // §3g2's control (B-b17f): the boot warm-up as 2.369.407 shipped it, verbatim
-const OLD_WARM_B17F = `  // warm the unread memo off the boot path, a few groups per turn of the loop
+const OLD_WARM_B17F = /* stale-pins: kept — the release's warm-up, planted back as the red control */ `  // warm the unread memo off the boot path, a few groups per turn of the loop
   (function warm() {
     let ids = null, i = 0;
     const step = () => {

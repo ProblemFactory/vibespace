@@ -2487,7 +2487,7 @@ await leg(147, async () => { // the census by behaviour + the plants, in copies 
     ok(!oneFilter(src), '(xxxvii) CONTROL: the ended count\'s own kind filter (22e26c659\'s) is named by the census');
   }
   { // (xxxviii) the badge with its own reading
-    const src = swap(geSrc15, '    const take = unreceivedFor(g, who);\n    const n = readLog(g.id)', "    const take = (r) => ((r.raw && r.raw.kind) || 'message') === 'message' || true;\n    const n = readLog(g.id)");
+    const src = swap(geSrc15, '    const take = unreceivedFor(g, who);\n    const n = (log || readLog(g.id))', "    const take = (r) => ((r.raw && r.raw.kind) || 'message') === 'message' || true;\n    const n = (log || readLog(g.id))");
     ok(!oneFilter(src), '(xxxviii) CONTROL: the unread count reading its own filter is named by the census');
   }
 });

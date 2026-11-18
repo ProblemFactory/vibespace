@@ -447,8 +447,10 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
   {
     const d6 = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-part-'));
     const st0 = createChannelStore({ dir: path.join(d6, 'channels') });
-    let failAsync = false, asyncReads = 0;
-    const st6 = new Proxy(st0, { get: (t, k) => (k === 'readTailAsync' ? async (...a) => { asyncReads++; if (failAsync) throw Object.assign(new Error('an unreadable log (stand-in)'), { code: 'EIO' }); return t.readTailAsync(...a); } : t[k]) });
+    // asyncReads = the asks' reads (originalsOfAsync: the whole log, limit 1e7); a boot's unread warm-up (B-b17f) reads each
+    // group's log async too, a window of LOG_READ records — counted apart (warmReads), never in the asks' count
+    let failAsync = false, asyncReads = 0, warmReads = 0;
+    const st6 = new Proxy(st0, { get: (t, k) => (k === 'readTailAsync' ? async (...a) => { if (a[2] && Number(a[2].limit) >= 1e7) asyncReads++; else warmReads++; if (failAsync) throw Object.assign(new Error('an unreadable log (stand-in)'), { code: 'EIO' }); return t.readTailAsync(...a); } : t[k]) });
     let t6 = 2e12;
     const mk6 = () => require(path.join(REPO, GE_REL)).create({ store: st6, deliver: null, broadcast() { }, now: () => (t6 += 60000), roster: () => ROSTER, groupSetting: () => 'none', log: quiet });
     const ge6 = mk6();
@@ -459,7 +461,7 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     failAsync = true; const r1 = await ge7.clearedCopiesAsync();
     failAsync = false; const r2 = await ge7.clearedCopiesAsync();
     ok(r1.partial.includes(g6) && !r1.groups[g6] && r2.partial.length === 0 && r2.groups[g6] && r2.groups[g6].keys.length === 1 && asyncReads === 2,
-      `a group whose log could not be read is named partial, not cached, and read again at the next ask (${asyncReads} async reads)`, { r1, r2 });
+      `a group whose log could not be read is named partial, not cached, and read again at the next ask (${asyncReads} async reads by the asks; the boot warm-up's ${warmReads} apart)`, { r1, r2, warmReads });
     st0.close();
   }
   // the wiring (channels-wiring: the ONE place the engine and the index meet) + the device words the sentence
