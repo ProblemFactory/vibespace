@@ -213,6 +213,26 @@ const routeHub = async (TaskStore, mirrorOpts) => {
   }
 }
 
+// ── ⑤ lane lg-store-writes, the U4/U5 cure (主开发's as-if-must 3): «NOT ON DISK» REACHES THE AGENT — a hub answer carrying
+// `notOnDisk: true` prints ONE line on stderr whatever the CLI does with the rest (every CLI's call comes through call()) ──
+console.log('⑤ an answer whose act is not on disk yet is SAID on stderr (once), never silent');
+{
+  ok(CC.notOnDiskLine(Buffer.from('{"success":true,"notOnDisk":true}'), 'vibespace-job') === 'vibespace-job: done, but not on disk yet — the hub keeps the change in memory and writes it when its storage answers; a restart of the hub before then loses it'
+    && CC.notOnDiskLine(Buffer.from('{"success":true}'), 'vibespace-job') === '' && CC.notOnDiskLine(Buffer.from('{"notOnDisk":false}'), 'x') === ''
+    && CC.notOnDiskLine(Buffer.from('{"items":[{"notOnDisk":true}]}'), 'x') === '' && CC.notOnDiskLine(Buffer.from('not json "notOnDisk":true'), 'x') === '',
+    '⑤ notOnDiskLine: the line for a top-level notOnDisk:true only (not a nested field, not false, not a body that is not JSON)');
+  const said = [];
+  const realErr = process.stderr.write;
+  const url = await hub((req, res) => { res.setHeader('content-type', 'application/json'); res.end(req.url === '/saved' ? '{"success":true}' : '{"success":true,"notOnDisk":true}'); });
+  let a, b;
+  process.stderr.write = (chunk, ...rest) => { said.push(String(chunk)); return true; };
+  try { a = await CC.call(url + '/act', { method: 'POST', body: '{}', tool: 'vibespace-job' }); b = await CC.call(url + '/saved', { method: 'POST', body: '{}', tool: 'vibespace-job' }); }
+  finally { process.stderr.write = realErr; }
+  const bodyA = a ? await a.json() : null;
+  ok(said.length === 1 && /^vibespace-job: done, but not on disk yet — /.test(said[0]) && bodyA && bodyA.notOnDisk === true && b && b.status === 200,
+    '⑤ call(): an answer with notOnDisk prints the line ONCE on stderr (the body still reaches the CLI whole); an answer without it prints nothing', { said, bodyA });
+}
+
 for (const s of servers) { try { s.closeAllConnections?.(); s.close(); } catch { } }
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 console.log(failed ? `\n${failed} FAILED, ${passed} passed` : `\nALL PASS (${passed})`);

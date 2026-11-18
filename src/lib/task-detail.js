@@ -1,4 +1,4 @@
-import { escHtml, showConfirmDialog, showToast, autoTaskColor, showContextMenu, markLanded, fetchJson } from './utils.js';
+import { escHtml, showConfirmDialog, showToast, autoTaskColor, showContextMenu, markLanded, fetchJson, sayNotOnDisk } from './utils.js';
 import { t, tc } from './i18n.js';
 import { techFoldHtml } from './plain-words.js'; // lane ui-plain-words: the budget's rule under ONE fold
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -783,7 +783,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       try {
         const res = await fetch('/api/tasks/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
         const d = await res.json().catch(() => ({}));
-        if (res.ok) showToast(t('Imported {id}', { id: d.task?.id || '' })); else showToast(d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Import failed')), { type: 'error' });
+        if (res.ok) { showToast(t('Imported {id}', { id: d.task?.id || '' })); sayNotOnDisk(d); } else showToast(d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (d.error || t('Import failed')), { type: 'error' });
       } catch { showToast(t('Import failed — server unreachable'), { type: 'error' }); }
     };
     repoWrap.append(repoPf.el, exportBtn, importBtn);

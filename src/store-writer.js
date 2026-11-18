@@ -80,7 +80,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   const syncBound = P.syncBoundMs(graceMs);
   const stores = new Map();
   let waitsTimedOut = 0;
-  let worker = null, S = null, seq = 0, posted = 0, inflight = null, timer = null, timerAt = 0, exiting = false, exited = false, stopped = false;
+  let worker = null, S = null, seq = 0, posted = 0, inflight = null, timer = null, timerAt = 0, exiting = false, exited = false, exitAnswered = false, stopped = false;
   let mainOnly = false, lastCls = null;   // round 3 (law 1): the class of the write just started — the two classes alternate
   const restarts = [];
   const say = (line) => { try { log.warn?.(line); } catch { } };
@@ -141,7 +141,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
    *  at a stop), `allowEmpty` (an empty file is a valid state of it), `makeDir` (channel-store-off-loop cure r1: the ONE
    *  store that may make its missing parent directory — a new account's people.json; any other store whose directory is
    *  gone fails its write ENOENT, said, as before). */
-  function dirty(file, { name, produce, debounceMs, mode, onWritten, rank, allowEmpty, makeDir, rotateAt } = {}) {
+  function dirty(file, { name, produce, debounceMs, mode, onWritten, rank, allowEmpty, makeDir, rotateAt, urgent = false } = {}) {
     const s = store(file);
     if (s.forgotten) s.forgotten = false;   // a new owner of the file: the pending unlink after the write in flight is off
     if (name) s.name = name;
@@ -155,6 +155,9 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (Number.isFinite(rotateAt) && rotateAt > 0) s.rotateAt = rotateAt;   // B-48a4: an append store that is a RING — the thread moves the live file to `.1` past this size, before the append
     if (typeof onWritten === 'function') s.onWritten = onWritten;
     if (!s.dirty) { s.dirty = true; s.dirtySince = now(); }
+    // `urgent`: an act nobody waits on here (its answer waits through durable() elsewhere, or none does) — the writer's next
+    // writes, as durable() asks, without a waiter or its timer (lane lg-store-writes, the U4/U5 cure)
+    if (urgent) { s.urgent = true; s.rank = 0; }
     schedule();
   }
   const backoffEnd = (s) => (s.failures > 0 && Number.isFinite(s.failedAt) ? s.failedAt + P.retryMs(s.failures) : -Infinity);
@@ -248,20 +251,49 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   }
   /** A PERSON'S ACT IS DURABLE BEFORE THE ANSWER — without holding the loop: the store's current state is the NEXT write
    *  after the one in flight (its pace set aside — never its failure backoff), and the promise resolves when it is on
-   *  disk (false: the write failed and stays owed — the caller says so). */
-  function durable(file, { timeoutMs = durableMs } = {}) {
+   *  disk (false: the write failed and stays owed — the caller says so).
+   *  `answer(ok)` — THE SYNCHRONOUS ROAD (lane lg-store-writes, the U4/U5 cure: an act answered is an act answered at the
+   *  stop): called ONCE, inside the writer's own settle — the write landing, its failure, the bound, the exit's flush —
+   *  never a microtask later. The hub's exit runs exitFlush and process.exit in ONE synchronous run (server.js), so a
+   *  route answering from a promise's .then never answered there and its caller repeated the act (a second job); a route
+   *  answering from `answer` sends its answer inside the exit's flush. After the exit's last pass nothing more is written:
+   *  a durable() asked then answers at once with what the disk holds. */
+  function durable(file, { timeoutMs = durableMs, answer = null } = {}) {
     const s = stores.get(file);
-    if (!s || (!s.dirty && !(inflight && inflight.name === file) && s.writtenVersion >= s.version)) return Promise.resolve(true);
+    const now1 = (ok) => { if (answer) { try { answer(ok); } catch (e) { answerThrew(s ? s.name : path.basename(file), e); } } return Promise.resolve(ok); };
+    if (!s || (!s.dirty && !(inflight && inflight.name === file) && s.writtenVersion >= s.version)) return now1(true);
+    if (exitAnswered) return now1(false);   // the exit's last pass is over: owed now = not on disk, and nothing writes it
     const want = s.version;
     if (s.dirty) { s.urgent = true; s.rank = 0; }
     return new Promise((resolve) => {
+      let said = false;
       // NOT unref'd: an answer awaiting the disk keeps the process up until the write lands, fails, or the timeout
       // round 4 (true words 4): at the timeout a write still QUEUED is said as waiting — never «its write failed»
-      const t = setTimeout(() => { s.waiters = s.waiters.filter((x) => x.resolve !== done); s.notDurable = { why: 'queued', ahead: aheadOf(s), lastMs: s.lastMs || null }; resolve(false); }, timeoutMs);
-      const done = (ok) => { clearTimeout(t); resolve(ok); };
+      const t = setTimeout(() => { s.waiters = s.waiters.filter((x) => x.resolve !== done); s.notDurable = { why: 'queued', ahead: aheadOf(s), lastMs: s.lastMs || null }; done(false); }, timeoutMs);
+      const done = (ok) => { if (said) return; said = true; clearTimeout(t); resolve(ok); if (answer) { try { answer(ok); } catch (e) { answerThrew(s.name, e); } } };
       s.waiters.push({ version: want, resolve: done });
       schedule();
     });
+  }
+  /** ONE answer for a store kept in several files (the jobs store and its notifications): `answer(ok)` once, when every
+   *  file's state owed now is on disk — false when any of them failed, passed the bound or was left by the exit — on
+   *  durable()'s synchronous road; the promise resolves with the same `ok` */
+  function whenDurable(files, { timeoutMs = durableMs } = {}, answer = null) {
+    const list = [...new Set(files || [])];
+    return new Promise((resolve) => {
+      let n = list.length, all = true;
+      const end = () => { resolve(all); if (answer) { try { answer(all); } catch (e) { answerThrew(list.map((f) => path.basename(f)).join('+'), e); } } };
+      if (!n) { end(); return; }
+      const one = (ok) => { if (!ok) all = false; if (--n === 0) end(); };
+      for (const f of list) { let asked = false; try { durable(f, { timeoutMs, answer: (ok) => { asked = true; one(ok); } }); } catch { if (!asked) one(false); } }   // a durable() that THREW counts as not on disk — the answer is never lost
+    });
+  }
+  /** an answer that THREW is SAID — once a store (a route's res.json that failed: its caller sees no answer, so the hub's
+   *  log names it) */
+  const answerThrewSaid = new Set();
+  function answerThrew(name, e) {
+    if (answerThrewSaid.has(name)) return; answerThrewSaid.add(name);
+    try { say(`[store-write] an answer waiting on ${name} threw (${(e && (e.code || e.message)) || e}) — its caller got no answer`); } catch { }
   }
   /** the writes CERTAINLY ahead of this store's (round 6, smaller 2 — a lower bound, never more): the one in flight of
    *  another store + the urgent stores DUE NOW (not in their failure backoff) whose place in the urgent order comes first
@@ -276,9 +308,10 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function whyNotDurable(file) { const s = stores.get(file); return s && s.notDurable ? { ...s.notDurable } : null; }
   function fail(s, since, err) {
     s.failures++; s.failedAt = now(); s.notDurable = { why: 'failed', code: (err && (err.code || err.message)) || null };
-    // the waiters hear it NOW (false — the change stays owed and the writer retries; the caller says so)
-    if (s.waiters.length) { const ws = s.waiters; s.waiters = []; for (const w of ws) { try { w.resolve(false); } catch { } } }
     if (!s.dirty) { s.dirty = true; s.dirtySince = since != null ? since : now(); } else if (since != null && since < s.dirtySince) s.dirtySince = since;
+    // the waiters hear it NOW (false — the change stays owed and the writer retries; the caller says so) — AFTER the store is
+    // owed again (the U4/U5 cure's own read: an answer that asks durable() again finds it dirty, so urgent)
+    if (s.waiters.length) { const ws = s.waiters; s.waiters = []; for (const w of ws) { try { w.resolve(false); } catch { } } }
     const code = (err && (err.code || err.message)) || String(err);
     const why = err && (err.code === 'EBADBYTES' || err.code === 'EEMPTY') ? `${err.message} — its store gave no bytes to write` : code;
     // round 6's amend: at the exit there is no «retrying in 1 s» — the rank-0 pass's failure gets the exit's last pass, the
@@ -453,6 +486,13 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const rank0 = only === 'rank0';
     if (!rank0) exited = true;
     const r = flushSync(null, { deadline: Infinity, only: rank0 ? (s) => s.rank === 0 : null, waitedBy: 'the exit' });
+    if (!rank0) {
+      // THE ANSWERS GO OUT BEFORE THE PROCESS LEAVES (lane lg-store-writes, the U4/U5 cure): the caller ends the process in
+      // this same synchronous run — every waiter still here is answered NOW on durable()'s synchronous road: true when its
+      // version reached the disk, false when it did not (its write failed, or it changed again past the last pass)
+      exitAnswered = true;
+      for (const s of stores.values()) if (s.waiters.length) { const ws = s.waiters; s.waiters = []; for (const w of ws) { try { w.resolve(w.version <= s.writtenVersion); } catch { } } }
+    }
     const from = crashAt != null ? crashAt : exitFrom;   // the crash road says its time from the crash (a crash after a stop too)
     r.fromStartMs = now() - from; r.debtMs = debtMs; r.part = rank0 ? 'rank0' : 'rest';
     publishExit();
@@ -480,6 +520,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const t = now();
     return [...stores.values()].map((s) => ({ name: s.name, writes: s.writes, bytes: s.bytes, bytesWritten: s.bytesWritten, lastMs: Math.round(s.lastMs), maxMs: Math.round(s.maxMs), slow: s.slow,
       failures: s.failures, dirty: s.dirty, inflight: !!(inflight && inflight.name === s.file), file: s.file, oldestAgeMs: s.dirty ? Math.round(t - s.dirtySince) : 0,
+      version: s.version,   // the store's change count (dirty() bumps it): a caller tells «changed since» by it (the boot's migrations)
       // round 3: maxAgeMs is MEASURED (the oldest change's age when a write of it landed, or the one still owed now) —
       // never the designed bound; the bound the queue keeps is store-pace.js's, in writes
       gapMs: Math.max(P.minGapMs(s.bytes, pace), Math.round(s.lastMs)), maxAgeMs: Math.round(Math.max(s.ageMaxMs || 0, s.dirty ? t - s.dirtySince : 0)), urgent: !!s.urgent }));
@@ -488,7 +529,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function stop() { stopped = true; if (timer) clearTimeout(timer); timer = null; const w = worker; worker = null; try { w && w.terminate(); } catch { } const k = keeperT; keeperT = null; try { k && k.terminate(); } catch { } }
   if (keeperOn) startKeeper();   // a suite's own writer may ask for one; the server's is started by bootKeeper() at its boot
   const waits = () => ({ timedOut: waitsTimedOut });   // round 6's amend: waits that ended by their poll, not the write's end
-  return { dirty, durable, whyNotDurable, flushSync, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, stop, graceMs, _now: now };
+  return { dirty, durable, whenDurable, whyNotDurable, flushSync, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, stop, graceMs, _now: now };
 }
 
 /** THE process's writer (one thread, one queue for every store) */
@@ -509,4 +550,12 @@ function bootKeeper({ log = console } = {}) {
   if (GRACE.refused) { try { log.warn?.(`[store-write] ${GRACE.refused}`); } catch { } }
   return w;
 }
-module.exports = { create, storeWriter, bootKeeper, partsOf, GRACE, SLOW_MS, RESTARTS_MAX };
+/** AN HTTP ANSWER MADE WHILE THE HUB STOPS GOES OUT UNENCODED (the U4/U5 cure's own read): the hub's compression() middleware
+ *  gzips a body of 1 KB or more through an ASYNCHRONOUS zlib stream — process.exit, in the exit flush's own run, comes first
+ *  and the answer is lost; `Cache-Control: no-transform` makes compression() pass it through as written. A no-op before the
+ *  stop's signal (and for a process without the shared writer). Every route answering on durable()'s road calls it. */
+function identityAtExit(res) {
+  try { if (shared && shared.exitStartedAt() != null && res && !res.headersSent && typeof res.setHeader === 'function') res.setHeader('Cache-Control', 'no-transform'); } catch { }
+}
+
+module.exports = { create, storeWriter, bootKeeper, partsOf, identityAtExit, GRACE, SLOW_MS, RESTARTS_MAX };

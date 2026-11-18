@@ -202,7 +202,12 @@ function call(url, opts = {}) {
         }
         const chunks = [];
         r.on('data', (d) => chunks.push(d));
-        r.on('end', () => { if (piped) { try { piped.destroy(); } catch { /* ended */ } } settle(resolve, responseOf(r, Buffer.concat(chunks), method)); });
+        r.on('end', () => {
+          if (piped) { try { piped.destroy(); } catch { /* ended */ } }
+          const buf = Buffer.concat(chunks);
+          const said = notOnDiskLine(buf, tool); if (said && !settled) { try { process.stderr.write(said + '\n'); } catch { /* best-effort */ } }
+          settle(resolve, responseOf(r, buf, method));
+        });
         r.on('error', (e) => settle(reject, e));
       });
       req.on('socket', (s) => { if (!s.connecting) seen.connected = true; else s.once('connect', () => { seen.connected = true; }); });
@@ -220,6 +225,18 @@ function call(url, opts = {}) {
   });
 }
 
+/** «NOT ON DISK» REACHES THE AGENT (lane lg-store-writes, the U4/U5 cure — 主开发's as-if-must): a hub answer carrying
+ *  `notOnDisk: true` (an act applied in the hub's memory whose store file it could not write inside its bound — the store
+ *  writer keeps trying) prints ONE line on stderr, whatever the CLI does with the rest of the answer: every CLI's call comes
+ *  through here. → the line, or '' */
+const NOT_ON_DISK = Buffer.from('"notOnDisk":true');
+function notOnDiskLine(buf, tool) {
+  if (!buf || !Buffer.isBuffer(buf) || !buf.includes(NOT_ON_DISK)) return '';
+  let o = null; try { o = JSON.parse(buf.toString('utf8')); } catch { return ''; }
+  if (!o || typeof o !== 'object' || o.notOnDisk !== true) return '';
+  return `${tool || CONF.tool || 'vibespace'}: done, but not on disk yet — the hub keeps the change in memory and writes it when its storage answers; a restart of the hub before then loses it`;
+}
+
 // ── the hub's half ──
 /** Before a route waits on a step of its own that can be slow (a worker's compaction, a folder on a mount), it NAMES it:
  *  a 103 informational answer carrying `X-VibeSpace-Step: <key>` — the final status stays free, a client that does not
@@ -230,4 +247,4 @@ function stepAhead(res, key) {
   try { res.writeEarlyHints({ link: '</api/agent/docs>; rel=preconnect', [STEP_HEADER]: k }); return true; } catch { return false; }
 }
 
-module.exports = { cliStart, stepAhead, BUDGETS, EXPIRED_EXIT, STEP_HEADER, STEP_WORDS, stepWords, parseDuration, takeTimeout, budgetOf, classOf, phaseOf, expiryLine, configure, call };
+module.exports = { cliStart, stepAhead, BUDGETS, EXPIRED_EXIT, STEP_HEADER, STEP_WORDS, stepWords, parseDuration, takeTimeout, budgetOf, classOf, phaseOf, expiryLine, notOnDiskLine, configure, call };

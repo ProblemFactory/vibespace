@@ -35,19 +35,26 @@ function registerRecordClearRoutes(app, { recordClear }) {
   app.post('/api/records/clear', async (req, res) => {
     try {
       if (isAgentBearer(req)) return fail(res, RC.refuse('agent_forbidden'));
-      const r = await recordClear.clear(itemOf(req.body || {}), { caller: OWNER });
-      if (!r.ok) return fail(res, r);
-      res.json({ ok: true, cleared: r.cleared, already: r.already, ...(r.archiveUnread ? { archiveUnread: true } : {}) });   // B-20b6: the archived records left uncleared are said
-    } catch (e) { res.status(500).json({ error: e.message, code: 'failed' }); }
+      // lane lg-store-writes, the U4/U5 cure: the answer rides the clear's own — once its stores are on disk, on the store
+      // writer's synchronous road (a clear still waiting at the hub's stop answers inside the exit's flush); not landed ⇒
+      // notOnDisk, which the page says
+      await recordClear.clear(itemOf(req.body || {}), { caller: OWNER, answer: (r) => { try {
+        if (!r.ok) return void fail(res, r);
+        require('../store-writer.js').identityAtExit(res);   // an answer made while the hub stops goes out unencoded (compression's zlib is asynchronous)
+        res.json({ ok: true, cleared: r.cleared, already: r.already, ...(r.notOnDisk ? { notOnDisk: true } : {}), ...(r.archiveUnread ? { archiveUnread: true } : {}) });   // B-20b6: the archived records left uncleared are said
+      } catch { } } });
+    } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message, code: 'failed' }); }
   });
   app.post('/api/records/clear-many', async (req, res) => {
     try {
       if (isAgentBearer(req)) return fail(res, RC.refuse('agent_forbidden'));
       const items = req.body && req.body.items;
-      const r = await recordClear.clearMany(Array.isArray(items) ? items.map(itemOf) : items, { caller: OWNER });
-      if (!r.ok) return fail(res, r);
-      res.json({ ok: true, cleared: r.cleared, already: r.already, unknown: r.unknown, refused: [...r.refused, ...r.ambiguous].map((x) => ({ kind: x.kind, id: x.id, code: x.code, error: x.why })), ...(r.archiveUnread ? { archiveUnread: true } : {}) });   // B-20b6
-    } catch (e) { res.status(500).json({ error: e.message, code: 'failed' }); }
+      await recordClear.clearMany(Array.isArray(items) ? items.map(itemOf) : items, { caller: OWNER, answer: (r) => { try {
+        if (!r.ok) return void fail(res, r);
+        require('../store-writer.js').identityAtExit(res);   // an answer made while the hub stops goes out unencoded (compression's zlib is asynchronous)
+        res.json({ ok: true, cleared: r.cleared, already: r.already, unknown: r.unknown, refused: [...r.refused, ...r.ambiguous].map((x) => ({ kind: x.kind, id: x.id, code: x.code, error: x.why })), ...(r.notOnDisk ? { notOnDisk: true } : {}), ...(r.archiveUnread ? { archiveUnread: true } : {}) });   // B-20b6
+      } catch { } } });   // the same road as /api/records/clear (the U4/U5 cure)
+    } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message, code: 'failed' }); }
   });
 }
 

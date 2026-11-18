@@ -10,6 +10,9 @@
 //   ⑧ true words 5 — the journal-bound line after the index LANDED; the load SAYS a partial row and a wrong-type table
 //   ROUND 6's AMEND — a wait for a write ends when the write ends (20 runtime flushSync: no wait ended by its poll — counted);
 //      the exit's last pass writes what its callbacks dirtied and names a store that keeps changing; the exit's words
+//   ⑨ lane lg-store-writes, the U4/U5 cure — durable()'s `answer` is called inside the writer's settle (the exit's flush too):
+//      an answer waiting on its write goes out before the process leaves (in process, and a real HTTP child); every waiter
+//      left by the exit's last pass is answered (false); whenDurable answers once for several files; RED: the microtask copy
 // Run: node scripts/test-store-writer-r4.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -297,6 +300,123 @@ console.log('round 6\'s amend: a wait for a write ends when the write ends; the 
   }
   fs.rmSync(T, { recursive: true, force: true });
 }
+
+// ── ⑨ THE U4/U5 CURE (lane lg-store-writes, 主开发's as-if-must 2): AN ACT ANSWERED IS AN ACT ANSWERED AT THE STOP ─────────────
+// The hub's exit runs exitFlush and process.exit in ONE synchronous run (server.js shutdownNow): an answer waiting on its
+// write through a promise's .then never ran there — the agent's command saw a reset and repeated the act (a second job).
+// durable()'s `answer` is called INSIDE the writer's settle; the exit's last pass answers every waiter left; a durable()
+// asked after it answers at once. RED: a mutant copy whose answer rides a microtask (the promise road).
+console.log('⑨ the U4/U5 cure — an answer waiting on its write goes out inside the exit\'s flush (the process leaves in that run)');
+await (async () => {
+  const Module = require('module'), http = require('http'), { spawn } = require('child_process');
+  const SWF = path.join(REPO, 'src/store-writer.js');
+  const real = fs.readFileSync(SWF, 'utf8');
+  const loadAs = (src) => { const m = new Module(SWF, null); m.filename = SWF; m.paths = Module._nodeModulePaths(path.dirname(SWF)); m._compile(src, SWF); return m.exports; };
+  const aSync = 'const done = (ok) => { if (said) return; said = true; clearTimeout(t); resolve(ok); if (answer) { try { answer(ok); } catch (e) { answerThrew(s.name, e); } } };';
+  const aLate = 'const done = (ok) => { if (said) return; said = true; clearTimeout(t); resolve(ok); if (answer) Promise.resolve().then(() => answer(ok)); };';
+  ok(real.split(aSync).length === 2, '⑨ ANCHOR: durable()\'s one settle line (its answer called in place)');
+  const T9 = fs.mkdtempSync(path.join(os.tmpdir(), 'store-r4-cure-'));
+  const quiet = { warn: () => { }, log: () => { } };
+  // (a) an act handed over, its answer waiting; THE STOP (beginExit, the rank-0 pass, the rest) in ONE synchronous run
+  const scene = (SW, tag) => {
+    const w = SW.create({ log: quiet });
+    const f = path.join(T9, `act-${tag}.json`);
+    w.dirty(f, { name: 'act.write', rank: 0, produce: () => '{"act":1}' });
+    let answered = null; w.durable(f, { answer: (v) => { answered = v; } });
+    w.beginExit(); w.exitFlush({ only: 'rank0' }); w.exitFlush({});
+    const atExit = answered;   // read in the exit's own run — where server.js calls process.exit
+    w.stop();
+    return { atExit, onDisk: fs.existsSync(f) };
+  };
+  const a = scene(require(SWF), 'cure');
+  ok(a.atExit === true && a.onDisk, '⑨ (a) an act\'s answer waiting on its write is answered (true) INSIDE the exit\'s flush — before the run that calls process.exit ends', a);
+  const aRed = scene(loadAs(real.replace(aSync, aLate)), 'red');
+  ok(aRed.atExit === null && aRed.onDisk, '⑨ (a) CONTROL: the answer on a microtask (the promise road, a mutant copy) ⇒ written, but NOT answered when the process leaves', aRed);
+  // (b) a waiter whose version never lands (a store that changes again at every write of it, asked again each time): the
+  // exit's last pass answers EVERY waiter before it returns — the last one false; a durable() asked after it answers at once
+  {
+    const w = require(SWF).create({ log: quiet });
+    const c = path.join(T9, 'again.json'); let n = 0; const answers = [];
+    w.dirty(c, { name: 'again.write', rank: 0, produce: () => `{"n":${++n}}`, onWritten: (ok2) => { if (ok2) { w.dirty(c, { name: 'again.write' }); w.durable(c, { answer: (v) => answers.push(v) }); } } });
+    w.beginExit(); w.exitFlush({ only: 'rank0' }); w.exitFlush({});
+    const atExit = answers.slice();
+    let after = null; w.durable(c, { answer: (v) => { after = v; } });
+    let clean = null; w.durable(path.join(T9, 'never-handed.json'), { answer: (v) => { clean = v; } });
+    w.stop();
+    ok(atExit.length >= 2 && atExit.length === n && atExit.slice(0, -1).every((v) => v === true) && atExit[atExit.length - 1] === false,
+      `⑨ (b) every waiter is answered before exitFlush returns — ${atExit.length} asked, each landed one true, the change left by the last pass FALSE`, { atExit, writes: n });
+    ok(after === false && clean === true, '⑨ (b) a durable() asked AFTER the exit\'s last pass answers at once — false for a change still owed (nothing writes it now), true for a file owing nothing', { after, clean });
+  }
+  // (c) whenDurable: ONE answer for several files — false when any failed (a directory where the file goes), true once all land
+  {
+    const w = require(SWF).create({ log: quiet });
+    const f1 = path.join(T9, 'one.json'), f2 = path.join(T9, 'is-a-dir.json'); fs.mkdirSync(f2); fs.writeFileSync(path.join(f2, 'x'), '1');
+    w.dirty(f1, { name: 'one.write', produce: () => '{"one":1}' }); w.dirty(f2, { name: 'dir.write', produce: () => '{"dir":1}' });
+    const calls = []; const v1 = await w.whenDurable([f1, f2], { timeoutMs: 5000 }, (v) => calls.push(v));
+    w.dirty(f1, { name: 'one.write', produce: () => '{"one":2}' });
+    const calls2 = []; const v2 = await w.whenDurable([f1], { timeoutMs: 5000 }, (v) => calls2.push(v));
+    w.stop();
+    ok(v1 === false && calls.length === 1 && calls[0] === false && v2 === true && calls2.length === 1 && calls2[0] === true && fs.readFileSync(f1, 'utf8') === '{"one":2}',
+      '⑨ (c) whenDurable answers ONCE for several files — false when one write failed, true once every file holds its state', { v1, calls, v2, calls2 });
+  }
+  // (e) THE REAL STOP, end to end: a child process answers an HTTP request from the writer's answer and, in the same run,
+  // exits as server.js does — the client READS the answer; RED (the microtask copy): the connection ends with no answer
+  const CHILD = path.join(T9, 'exit-answer.cjs');
+  fs.writeFileSync(CHILD, `'use strict';
+const Module = require('module'), path = require('path'), fs = require('fs'), http = require('http');
+const [SWF, mode, dir] = process.argv.slice(2);
+let src = fs.readFileSync(SWF, 'utf8');
+if (mode === 'late') src = src.replace(${JSON.stringify(aSync)}, ${JSON.stringify(aLate)});
+const m = new Module(SWF, null); m.filename = SWF; m.paths = Module._nodeModulePaths(path.dirname(SWF)); m._compile(src, SWF);
+const SW = m.exports, W = SW.storeWriter();   // the process's shared writer (identityAtExit reads its exit)
+const f = path.join(dir, 'job-' + mode + '.json');
+if (mode === 'failed') { fs.mkdirSync(f); fs.writeFileSync(path.join(f, 'x'), '1'); }   // a directory where the store goes: its write FAILS
+const route = (req, res) => {
+  W.dirty(f, { name: 'act.write', rank: 0, produce: () => '{"act":1}' });
+  W.durable(f, { answer: (saved) => { try {
+    if (mode === 'gzip') SW.identityAtExit(res);
+    // a body over compression()'s 1 KB threshold (a job record, a Task Group)
+    res.json ? res.json({ success: true, saved, ...(mode.startsWith('gzip') ? { pad: 'x'.repeat(4096) } : {}) }) : (res.setHeader('content-type', 'application/json'), res.end(JSON.stringify({ success: true, saved })));
+  } catch { } } });
+  // THE STOP, as server.js's shutdownNow: beginExit, the rank-0 pass, the rest, process.exit — ONE synchronous run
+  W.beginExit(); W.exitFlush({ only: 'rank0' }); W.exitFlush({}); process.exit(0);
+};
+let srv;
+if (mode.startsWith('gzip')) {   // the hub's own stack: express + compression() (server.js mounts it before every route)
+  const rq = Module.createRequire(SWF), express = rq('express'), compression = rq('compression');
+  const app = express(); app.use(compression()); app.get('/act', route); srv = http.createServer(app);
+} else srv = http.createServer(route);
+srv.listen(0, '127.0.0.1', () => process.stdout.write(srv.address().port + '\\n'));
+`);
+  const ask = (mode) => new Promise((resolve) => {
+    const ch = spawn(process.execPath, [CHILD, SWF, mode, T9], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '', asked = false, over = false;
+    ch.stderr.on('data', (d) => { err += d; });
+    const end = (v) => { if (over) return; over = true; clearTimeout(timer); try { ch.kill('SIGKILL'); } catch { } resolve(err ? { ...v, stderr: err.slice(0, 400) } : v); };
+    const timer = setTimeout(() => end({ error: 'no answer and no end in 10 s' }), 10000);
+    ch.stdout.on('data', (d) => {
+      out += d; if (asked || !out.includes('\n')) return; asked = true;
+      const rq = http.request({ host: '127.0.0.1', port: Number(out.trim()), method: 'GET', path: '/act', headers: { 'accept-encoding': 'gzip' } }, (rs) => { let b = ''; rs.on('data', (x) => { b += x; }); rs.on('end', () => end({ status: rs.statusCode, enc: rs.headers['content-encoding'] || null, body: b })); rs.on('aborted', () => end({ error: 'aborted mid-answer', status: rs.statusCode })); rs.on('error', (e) => end({ error: e.code || e.message })); });
+      rq.on('error', (e) => end({ error: e.code || e.message }));
+      rq.end();
+    });
+  });
+  const e1 = await ask('cure');
+  ok(e1.status === 200 && e1.body === '{"success":true,"saved":true}', '⑨ (e) a real HTTP answer waiting on its write REACHES the client when the process stops in the answer\'s own run (beginExit → exitFlush → process.exit)', e1);
+  const e2 = await ask('late');
+  ok(!e2.status && !!e2.error, '⑨ (e) CONTROL: the answer on a microtask (a mutant copy) ⇒ the client sees the connection end with NO answer — the reset an agent\'s command repeated', e2);
+  // 主开发 (11:16Z): the answer that goes out at the exit says the TRUTH — a write that did not land answers «not on disk»
+  const e3 = await ask('failed');
+  ok(e3.status === 200 && e3.body === '{"success":true,"saved":false}', '⑨ (e) the answer at the stop says the TRUTH: a write that FAILED at the exit answers saved:false (the routes say notOnDisk) — never a plain success', e3);
+  // (f) the hub's own stack (express + compression()) with a client that accepts gzip and a body over 1 KB: compression's zlib
+  // is asynchronous, so an answer made inside the exit's flush must go out unencoded (identityAtExit) — RED: without it, lost
+  const full = (r) => { try { const o = JSON.parse(r.body); return r.status === 200 && o.saved === true && o.pad.length === 4096; } catch { return false; } };
+  const f1 = await ask('gzip');
+  ok(full(f1) && !f1.enc, '⑨ (f) through express + compression() with gzip accepted: the answer made at the stop goes out UNENCODED and WHOLE (identityAtExit)', { status: f1.status, enc: f1.enc, len: (f1.body || '').length, error: f1.error });
+  const f2 = await ask('gzip-red');
+  ok(!full(f2), '⑨ (f) CONTROL: the same answer without identityAtExit ⇒ compression\'s asynchronous zlib loses it when the process leaves', { status: f2.status, enc: f2.enc, len: (f2.body || '').length, error: f2.error });
+  fs.rmSync(T9, { recursive: true, force: true });
+})();
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

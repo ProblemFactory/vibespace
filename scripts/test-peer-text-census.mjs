@@ -843,6 +843,8 @@ const PRINTS = {
   // a step KEY the hub's 103 named (stepKey: [a-z0-9-] ≤ 40, worded by STEP_WORDS) and the caller's OWN typed value
   ...rows('src/cli-call.js', {
     'line': `${V}:THE expiry line (expiryLine — our words around a budget number, the hub's own address, an HTTP status number and a step KEY worded by STEP_WORDS; stderr)`,
+    // lane lg-store-writes, the U4/U5 cure: an answer carrying notOnDisk prints ONE line of our own words around the CLI's own name
+    'said': `${V}:THE not-on-disk line (notOnDiskLine — our words around the CLI's own name; printed only for an answer whose top-level notOnDisk is true, never a field of it; stderr)`,
     'seen.step': `${V}:the step KEY the hub's own 103 named (X-VibeSpace-Step — stepKey cuts it to [a-z0-9-] ≤ 40, STEP_WORDS words it; an unknown key prints as that word)`,
     'i.headers': `${V}:the hub's 103 beacon — only its X-VibeSpace-Step key is read (the row above)`,
     'u.host': `${V}:the hub's own address (VIBESPACE_API, the env the hub gave this session)`,

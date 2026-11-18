@@ -1601,14 +1601,15 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     // lane hub-loop-stalls commit 2: the live ledger's cursors are written by the store writer — an owed write is settled
     // before any migration reads or rewrites _cursors.json (never an older state landing after a migration's own)
     try { const uh0 = typeof usageHistory === 'function' ? usageHistory() : usageHistory; if (uh0 && typeof uh0.settleCursors === 'function') uh0.settleCursors(); } catch { }
-    // lane lg-store-writes (B-0248 U5): what THESE migrations hand the store writer lands before the ledger is stamped — the stores
-    // dirtied while they ran (a store already owed before them is not theirs: never waited on here); a flush deferred by an exit
-    // counts as not landed
-    let SWm = null, owedBefore = new Set();
-    try { SWm = require('../store-writer.js').storeWriter(); owedBefore = new Set(SWm.stats().filter((s) => s.dirty || s.inflight).map((s) => s.file)); } catch { SWm = null; }
+    // lane lg-store-writes (B-0248 U5): what THESE migrations hand the store writer lands before the ledger is stamped — every
+    // store a migration DIRTIED while they ran: its change count moved since the start (the U4/U5 cure — by version, never by
+    // «owed before»: a store with an unrelated save queued before the run that a migration then reshaped is landed too); a
+    // store owed before and not touched since is not theirs (never waited on here); a flush deferred by an exit counts as not landed
+    let SWm = null, before = new Map();
+    try { SWm = require('../store-writer.js').storeWriter(); before = new Map(SWm.stats().map((s) => [s.file, s.version])); } catch { SWm = null; }
     const landStores = () => {
       if (!SWm) return [];
-      const owed = SWm.stats().filter((s) => (s.dirty || s.inflight) && s.file && !owedBefore.has(s.file)).map((s) => s.file);
+      const owed = storesToLand(before, SWm.stats());
       if (!owed.length) return [];
       const r = SWm.flushSync(owed);
       return r.deferred ? owed.map((f) => ({ file: f, name: path.basename(f), why: 'the hub is exiting' })) : (r.left || []);
@@ -1661,4 +1662,10 @@ function agyReadsFollowClaudeOff(store) {
   return { changed: true, why: "Claude's row was Off — Antigravity's automatic usage reads are Off too (antigravity.autoUsageReads = off)" };
 }
 
-module.exports = { AGY_READS_MIGRATION_ID, agyReadsFollowClaudeOff, create, beforeBrowserBoot, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS, CLOAK_PLUGIN_ID, CLOAK_MIGRATION_ID, CLOAK_PLUGIN_WORDS, JOB_SECRETS_ACTION };
+/** THE STORES THE BOOT'S MIGRATIONS LAND BEFORE THEIR STAMP (lane lg-store-writes, the U4/U5 cure) — PURE: owed now (dirty or
+ *  in flight) AND their change count moved since `before` (file → the store's version when the migrations started; a store
+ *  new since then counts as moved). A store owed before the run and untouched since is not the migrations' (never waited on);
+ *  one owed before AND reshaped by a migration is. → files */
+function storesToLand(before, stats) { return (stats || []).filter((s) => (s.dirty || s.inflight) && s.file && s.version !== before.get(s.file)).map((s) => s.file); }
+
+module.exports = { AGY_READS_MIGRATION_ID, agyReadsFollowClaudeOff, create, storesToLand, beforeBrowserBoot, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS, CLOAK_PLUGIN_ID, CLOAK_MIGRATION_ID, CLOAK_PLUGIN_WORDS, JOB_SECRETS_ACTION };

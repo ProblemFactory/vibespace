@@ -341,6 +341,12 @@ console.log('— the ONE migration: owner-shaped fixtures (masked) —');
   // RED CONTROL: before the migration the store reads NO old field — the same cwd joins nothing (the leg is not vacuous)
   ok('CONTROL (RED without it): before the migration the old folders[] are no longer read — a cwd under g1\'s folder joins nothing', m.groupsForSession({ cwd: path.join(W1, 'src') }).length === 0);
   const rep = m.migrateContextRows();
+  // lane lg-store-writes, the U4/U5 cure (should 4): the migration's BOOT save is on disk when it returns — asked of the writer
+  // BEFORE any landing (a plain save would still be owed here, whatever its thread did meanwhile: pending until the main thread
+  // hears of the write), and the file read before the suite lands anything
+  const SWu5 = require('../src/store-writer.js').storeWriter();
+  const owedAfterMigrate = SWu5.pending(path.join(d, 'task-groups.json'));
+  const diskAtMigrate = JSON.parse(fs.readFileSync(path.join(d, 'task-groups.json'), 'utf8'));
   ok('the migration reports what it did (6 groups, 10 rows, 6 auto-join rows, 5 notes, 1 merged, 1 non-recursive)', rep.groups === 6 && rep.rows === 10 && rep.folders === 6 && rep.notes === 5 && rep.merged === 1 && rep.nonRecursive === 1, rep);
   ok('folders[] → rows told 文件名, tagged 自动发现会话 (a bare string too)', JSON.stringify(m.get('T-260705-g2').ctx) === JSON.stringify([{ path: W2a, note: '', tell: 'names', tags: ['discover'], share: null }, { path: W2b, note: '', tell: 'names', tags: ['discover'], share: null }]), m.get('T-260705-g2').ctx);
   ok('contextDir → a row told 文件名, tagged agent 在这里记笔记 (after the folders)', JSON.stringify(m.get('T-260705-g1').ctx.map((r) => [r.path, r.tell, r.tags])) === JSON.stringify([[W1, 'names', ['discover']], [path.join(W1, 'SharedContext/notes'), 'names', ['notes']]]), m.get('T-260705-g1').ctx);
@@ -350,9 +356,11 @@ console.log('— the ONE migration: owner-shaped fixtures (masked) —');
   // int346: lane open-task-binds' folder rule (PURE folderOf) — a stored glob tail is the recursive switch, never part of the
   // path; this group's folder now MATCHES (a cwd at it / under it joins) — the row is the folder, not its printed glob
   ok('a folder stored with a literal /** becomes the folder itself, recursive (lane open-task-binds\' folderOf — the glob is the switch; this fixture folder is absent here, so the row says so)', m.get('T-261002-g6').ctx[0].path === '/var/tmp/lanes-x' && m.list().find((g) => g.id === 'T-261002-g6').ctxRes[0].kind === 'missing', m.get('T-261002-g6').ctx[0]);
-  const landedU5 = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5: the store writer's owed writes land before the file is read
-  landedU5();
-  const disk = JSON.parse(fs.readFileSync(path.join(d, 'task-groups.json'), 'utf8'));
+  // lane lg-store-writes U5: the store writer's owed writes land before the file is read — LOUDLY (the U4/U5 cure, should 6: a
+  // landing that left a write throws, never a swallowed error under a check that then reads an old file)
+  const landedU5 = () => { const r = SWu5.flushSync(); if (r.left && r.left.length) throw new Error(`the store writer left owed writes: ${JSON.stringify(r.left)}`); };
+  ok('the migration\'s boot save is ON DISK when migrateContextRows returns — nothing owed, the rows in the file before any landing', !owedAfterMigrate && Array.isArray(diskAtMigrate.tasks['T-260705-g1'].ctx) && diskAtMigrate.tasks['T-260705-g1'].ctx.length === 2, { owedAfterMigrate });
+  const disk = diskAtMigrate;
   ok('the old fields stay in the FILE one release (an older build still reads them)', JSON.stringify(disk.tasks['T-260705-g1'].folders) === JSON.stringify(legacy.tasks['T-260705-g1'].folders) && disk.tasks['T-260705-g1'].contextDir === legacy.tasks['T-260705-g1'].contextDir && Array.isArray(disk.tasks['T-260705-g1'].ctx));
   const again = m.migrateContextRows();
   ok('a second run finds nothing to do', again.groups === 0 && again.skipped === 6, again);
@@ -378,9 +386,10 @@ console.log('— the bundle and the export —');
 {
   /** a store writer stand-in: it lands NOTHING until told (flushSync), records every hand-off */
   const standIn = () => {
-    const r = { dirties: [], durables: [], flushes: [], owed: new Map(), answer: true };
-    r.dirty = (f, o) => { r.dirties.push({ f: path.basename(f), name: o.name, rank: o.rank }); r.owed.set(f, o); };
-    r.durable = (f) => { r.durables.push(path.basename(f)); return Promise.resolve(r.answer); };
+    const r = { dirties: [], durables: [], opts: [], flushes: [], owed: new Map(), answer: true };
+    r.dirty = (f, o) => { r.dirties.push({ f: path.basename(f), name: o.name, rank: o.rank, urgent: !!o.urgent }); r.owed.set(f, o); };
+    // durable() answers `r.answer` — IN PLACE to its `answer` (the writer's synchronous road, the U4/U5 cure) and as the promise
+    r.durable = (f, o) => { r.durables.push(path.basename(f)); r.opts.push(o || {}); if (o && typeof o.answer === 'function') o.answer(r.answer); return Promise.resolve(r.answer); };
     r.pending = (f) => r.owed.has(f);
     r.flushSync = (files) => { r.flushes.push(files.map((f) => path.basename(f)).join('+')); for (const f of files) { const o = r.owed.get(f); if (!o) continue; fs.writeFileSync(f, o.produce()); r.owed.delete(f); if (o.onWritten) o.onWritten(true, null); } return { written: files, left: [] }; };
     return r;
@@ -397,16 +406,22 @@ console.log('— the bundle and the export —');
   };
   const a = scene(TaskGroupManager, 'moved');
   const acts = a.rec.dirties.filter((x) => x.f === 'task-groups.json');
-  ok('U5: a create and a progress note hand task-groups.json to the store writer by name, rank 0 + durable() (urgent) — the FILE is not written on the main thread at the change',
-    a.unchanged && acts.length >= 2 && acts.every((x) => x.name === 'task-groups.write' && x.rank === 0) && a.rec.durables.filter((f) => f === 'task-groups.json').length >= 2, { unchanged: a.unchanged, acts, durables: a.rec.durables });
+  ok('U5: a create and a progress note hand task-groups.json to the store writer by name, rank 0 + URGENT (the writer\'s own flag — the U4/U5 cure: no durable() timer asked at a save) — the FILE is not written on the main thread at the change',
+    a.unchanged && acts.length >= 2 && acts.every((x) => x.name === 'task-groups.write' && x.rank === 0 && x.urgent) && a.rec.durables.length === 0, { unchanged: a.unchanged, acts, durables: a.rec.durables });
   const bytes = JSON.parse(a.rec.owed.get(a.F).produce());
   ok('U5: the bytes are the store when the write is due — the note made after the create rides the same write', !!bytes.tasks[a.t.id] && (bytes.tasks[a.t.id].progress || []).some((p) => p.note === 'u5 note'), Object.keys(bytes.tasks));
+  const f0 = a.rec.flushes.length;   // (the scene's own constructor flushed its fresh store's boot save — counted from here: the should-5 cure)
   const m2 = new TaskGroupManager({ dataDir: a.d, homeDir: home, writer: a.rec });
-  ok('U5: a store made AGAIN in the same process while its write is owed lands it first, then reads it (the group and its note)', a.rec.flushes.includes('task-groups.json') && !!m2.get(a.t.id) && m2.get(a.t.id).progress.some((p) => p.note === 'u5 note'), { flushes: a.rec.flushes });
+  ok('U5: a store made AGAIN in the same process while its write is owed lands it first (ONE flush of that file), then reads it (the group and its note)', a.rec.flushes.length === f0 + 1 && a.rec.flushes[f0] === 'task-groups.json' && !!m2.get(a.t.id) && m2.get(a.t.id).progress.some((p) => p.note === 'u5 note'), { flushes: a.rec.flushes.slice(f0) });
   const saved = await a.m.persisted();
   a.rec.answer = false;
   const notSaved = await a.m.persisted();
   ok('U5: persisted() — what an act\'s route waits on — true once on disk, FALSE when the write did not land (the route says notOnDisk)', saved === true && notSaved === false, { saved, notSaved });
+  // the U4/U5 cure: the route's answer rides the writer's SYNCHRONOUS road (answered in place — the hub's exit leaves in its
+  // flush's own run), bounded UNDER the CLI's write budget (src/cli-call.js — a stalled mount answers «notOnDisk» in time)
+  const BUDGET_W = require('../src/cli-call.js').BUDGETS.write;
+  let inPlace = null; a.m.persisted((v) => { inPlace = v; });
+  ok(`U5 cure: persisted(answer) answers IN PLACE through durable()'s answer, bounded under the CLI's ${BUDGET_W / 1000} s write budget`, inPlace === false && a.rec.opts.length === 3 && a.rec.opts.every((o) => o.timeoutMs > 0 && o.timeoutMs < BUDGET_W && typeof o.answer !== 'undefined'), a.rec.opts.map((o) => ({ timeoutMs: o.timeoutMs, answer: typeof o.answer })));
   // a BOOT save (the legacy tasks.json migrated forward) is on disk when the constructor returns
   const dB = path.join(root, 'u5-boot'); fs.mkdirSync(dB, { recursive: true });
   fs.writeFileSync(path.join(dB, 'tasks.json'), JSON.stringify({ version: 1, tasks: { 'T-1-u5': { id: 'T-1-u5', title: 'legacy u5', sessions: [], progress: [] } } }));
@@ -422,7 +437,7 @@ console.log('— the bundle and the export —');
   ok('U5 CONTROL: the old synchronous save (the writer bypassed) ⇒ task-groups.json is written on the main thread at the change — the first check above would be red', !r.unchanged);
 }
 
-try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }   // lane lg-store-writes U5: owed writes land before the scratch root goes
+{ const rEnd = require('../src/store-writer.js').storeWriter().flushSync(); if (rEnd.left && rEnd.left.length) ok('the store writer\'s owed writes land before the scratch root goes', false, rEnd.left); }   // lane lg-store-writes U5 (loud: the U4/U5 cure, should 6)
 fs.rmSync(root, { recursive: true, force: true });
 console.log(`\n${failed ? failed + ' FAILED' : 'all passed'} (${passed} passed)`);
 process.exit(failed ? 1 : 0);

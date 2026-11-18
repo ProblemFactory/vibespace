@@ -72,7 +72,8 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
   app.get('/api/tasks', (req, res) => { const at = taskFanout.mark(); const unread = tasks.unreadState?.() || null; res.json({ tasks: tasks.list(), ...at, ...(unread ? { unread } : {}) }); }); require('./task-context-routes.js').mount(app, { tasks, serverSetting }); // lane task-group-context: the Context table's preview + path probe (no new line — the size ratchet)
   // lane lg-store-writes U5 (B-0248): an act's answer follows the STORE write (task-groups.json through the store writer — the
   // loop never waits); a write not landed is SAID in the answer (notOnDisk: the act stays applied in memory, the writer retries)
-  const onDisk = (res, body) => { const p = typeof tasks.persisted === 'function' ? tasks.persisted() : Promise.resolve(true); p.then((saved) => { try { res.json(saved ? body : { ...body, notOnDisk: true }); } catch { } }, () => { try { res.json(body); } catch { } }); };
+  // (the U4/U5 cure: on the writer's SYNCHRONOUS road — an answer still waiting when the hub stops goes out inside its exit flush)
+  const onDisk = (res, body) => { if (typeof tasks.persisted !== 'function') { res.json(body); return; } tasks.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json(saved ? body : { ...body, notOnDisk: true }); } catch { } }); };
   app.post('/api/tasks', (req, res) => {
     try { onDisk(res, { success: true, task: tasks.create(req.body || {}) }); }
     catch (e) { res.status(400).json({ error: e.message }); }

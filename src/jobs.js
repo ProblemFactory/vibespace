@@ -302,25 +302,36 @@ class JobManager {
   /** the process's store writer (src/store-writer.js) — or a suite's (deps.writer) */
   _writer() { return this.d.writer || require('./store-writer.js').storeWriter(); }
   /** a write that must be ON DISK before what follows (the run's intent before its child exists; the boot's recovered
-   *  skeletons): the main thread WAITS for that one file's write (a named wait — test-store-write-census WAITS). A write that
-   *  did not land is said, and what follows goes on, as the release's swallowed write did. */
+   *  skeletons; a notifications claim / drain): the main thread WAITS for that one file's write (a named wait —
+   *  test-store-write-census WAITS — behind the writer's write in flight, if any, which lands first). → {ok, why}: a write
+   *  that did not land inside the writer's bound, failed, or was DEFERRED to the exit's flush (a flush asked between the
+   *  hub's beginExit and its exitFlush) is SAID — the caller decides: the run's intent refuses its child (_spawn) */
   _onDisk(file, what) {
-    try { const r = this._writer().flushSync([file]); const miss = r.left.find((x) => x.file === file); if (miss) this.d.log(`[jobs] ${what}: ${path.basename(file)} not on disk yet (${miss.why}) — kept in memory, the store writer retries`); }
-    catch (e) { this.d.log(`[jobs] ${what}: ${e.message}`); }
+    try {
+      const r = this._writer().flushSync([file]);
+      if (r && r.deferred) { const why = 'the hub is stopping — its exit flush writes it next'; this.d.log(`[jobs] ${what}: ${path.basename(file)} deferred to the exit's flush (${why})`); return { ok: false, why }; }
+      const miss = r.left.find((x) => x.file === file);
+      if (miss) { this.d.log(`[jobs] ${what}: ${path.basename(file)} not on disk yet (${miss.why}) — kept in memory, the store writer retries`); return { ok: false, why: miss.why }; }
+      return { ok: true, why: null };
+    } catch (e) { this.d.log(`[jobs] ${what}: ${e.message}`); return { ok: false, why: e.message }; }
   }
   /** THE ANSWER OF A PERSON'S ACT WAITS FOR THE STORE (lane lg-store-writes U4): true once jobs.json and job-notifications.json
-   *  hold every change made so far (false: a write failed or is still queued at the writer's bound — said by the writer); the
-   *  loop never waits — only the route's answer */
-  persisted() {
-    if (this.readOnly) return Promise.resolve(true);
+   *  hold every change made so far (false: a write failed, is still queued at the bound, or the exit left it — said by the
+   *  writer); the loop never waits — only the route's answer. `answer(saved)` — the route's answer, on the writer's
+   *  SYNCHRONOUS road (the U4/U5 cure): called inside the writer's own settle, so an answer still waiting when the hub stops
+   *  goes out inside the exit's flush (server.js leaves in that same run — a promise's .then never ran there, the CLI saw a
+   *  reset and repeated the act). The promise resolves with the same value (record-clear). */
+  persisted(answer = null) {
+    if (this.readOnly) { if (answer) { try { answer(true); } catch { } } return Promise.resolve(true); }
     // bounded 20 s: under the CLI's 30 s call budget (src/cli-call.js) — a stalled mount answers «notOnDisk» in time, never «no
     // answer» (an agent that retried a create would make a second job)
-    try { const W = this._writer(); return Promise.all([W.durable(this.file, { timeoutMs: 20000 }), W.durable(this.notifsFile, { timeoutMs: 20000 })]).then(([a, b]) => a && b, () => false); }
-    catch { return Promise.resolve(false); }
+    try { return this._writer().whenDurable([this.file, this.notifsFile], { timeoutMs: 20000 }, answer); }
+    catch { if (answer) { try { answer(false); } catch { } } return Promise.resolve(false); }
   }
   /** a store write's outcome (the writer's onWritten): a failure said once until one lands; the exit's lock released once landed */
   _storeWritten(ok, e) {
     if (!ok) { if (!this._storeOwedSaid) { this._storeOwedSaid = true; this.d.log(`[jobs] save failed: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } return; }
+    this._intentHeldAt = null;   // the U4/U5 cure: a start refused for a held store may wait for its write again
     if (this._storeOwedSaid) { this._storeOwedSaid = false; this.d.log('[jobs] the store is on disk again'); }
     if (this._unlockWhenLanded) { this._unlockWhenLanded = false; this._unlockNow(); }   // armed only at the hub's exit (no other engine in this process)
   }
@@ -672,13 +683,13 @@ class JobManager {
       const W = this._writer();
       // B-f276: an UNREAD store is never written over (its records are on disk, not here) — the notifications are their own file
       if (!this._unread.store) {
-        W.dirty(this.file, { name: 'jobs.write', ...(paced ? {} : { rank: 0 }), produce: () => storeBytes([...this.jobs.values()]), onWritten: (ok, e) => this._storeWritten(ok, e) });
-        if (!paced) W.durable(this.file).catch(() => { });
+        // an act is URGENT by the writer's own flag (the U4/U5 cure: no durable() asked here — its 60 s timer and promise
+        // served no answer; the route that answers waits through persisted())
+        W.dirty(this.file, { name: 'jobs.write', ...(paced ? {} : { rank: 0, urgent: true }), produce: () => storeBytes([...this.jobs.values()]), onWritten: (ok, e) => this._storeWritten(ok, e) });
       }
       if (storeOnly) return;
       if (!this._notifsUnread) {   // the B-f276 remainder: a held notifications file is never written over
-        W.dirty(this.notifsFile, { name: 'jobs-notifs.write', ...(paced ? {} : { rank: 0 }), produce: () => storeBytes(Object.fromEntries(this.pendingNotifs)) });
-        if (!paced) W.durable(this.notifsFile).catch(() => { });
+        W.dirty(this.notifsFile, { name: 'jobs-notifs.write', ...(paced ? {} : { rank: 0, urgent: true }), produce: () => storeBytes(Object.fromEntries(this.pendingNotifs)) });
       }
       this._dirty = false;
     } catch (e) { this.d.log('[jobs] save failed:', e.message); }
@@ -2532,6 +2543,7 @@ class JobManager {
     const ctl = this._ctlDir(job, runTs);
     fs.mkdirSync(ctl, { recursive: true, mode: 0o700 });
     fs.chmodSync(ctl, 0o700); // the run's dir holds its spec file and its log — the owner's alone (mkdir's mode is umask-masked)
+    const stateBefore = job.state;   // the U4/U5 cure: what a refused start (its run not on disk) gives back
     job.state = 'starting';
     delete job.ack; // a NEW run is a new claim on the user's attention (triage §13)
     delete job._stopRequested; delete job._termAt; delete job._stopForce; delete job._forced; // round 5: a stop said to an ENDED run never stops the next
@@ -2544,8 +2556,33 @@ class JobManager {
     const mem = M.memoryMbOf(job, this._memoryCtx()); // the record's, until the wrapper says the bound it proved (_adoptBound)
     const hub = M.memoryMbOf(job, this._memoryCtx({ hub: true })); // the spec's: the rlimit / none rungs live inside the hub's own cgroup
     job.runs.push({ startedAt: runTs, trigger, log: path.join(ctl, 'current.log'), memoryMb: mem.mb, memoryAskedMb: mem.askedMb !== undefined ? mem.askedMb : mem.mb, ...(mem.cap ? { memoryCap: mem.cap } : {}) }); // round 3: both numbers (asked, effective), and the instance's cap when it lowered the bound
-    if (job.runs.length > 20) job.runs.splice(0, job.runs.length - 20);
-    this._save(); this._onDisk(this.file, 'the run\'s intent'); // intent-before-spawn, flushed — lane lg-store-writes U4: jobs.json ALONE waits (the notifications follow on the writer)
+    this._save();
+    // A CHILD THE DISK DOES NOT HOLD IS NEVER STARTED (lane lg-store-writes, the U4/U5 cure — 主开发's as-if-must): the run's
+    // intent waits for jobs.json ALONE (the notifications follow on the writer); a write that did not land inside the
+    // writer's bound (a stalled mount), failed, or was deferred to the exit's flush ⇒ NO child — a kill before the store
+    // landed would leave a child no record knows (and a schedule could fire it twice). The run is REFUSED BY NAME: its entry
+    // taken back, the record failed with the reason (said to its owner), the start answers the error; a schedule fires
+    // again at its next time
+    // While a refused intent's store is STILL owed (the storage holds its write), the next start is refused AT ONCE — never a
+    // second wait of the writer's bound on the main thread for the same held write (the cure's own adversarial read); a
+    // landed store clears it (_storeWritten)
+    let W0 = null; try { W0 = this._writer(); } catch { }
+    const intent = this._intentHeldAt != null && W0 && W0.pending(this.file)
+      ? { ok: false, why: `the storage still holds the store's earlier write (${Math.round((now() - this._intentHeldAt) / 1000)} s since a start was refused for it)` }
+      : this._onDisk(this.file, 'the run\'s intent');
+    if (!intent.ok) {
+      if (this._intentHeldAt == null && !/deferred|stopping/.test(intent.why || '')) this._intentHeldAt = now();
+      job.runs.pop();
+      // a person's start, or a record that had no state before this start, is FAILED; a restart, a replay, a rerun or a
+      // schedule's existing child keeps what it was (a service stays 'down' — the boot's replay or a person's start starts
+      // it; an interrupted task stays 'interrupted') — said, with an alarm, either way
+      job.state = trigger === 'manual' || !stateBefore || stateBefore === 'starting' ? 'failed' : stateBefore;
+      const what = `not started (${trigger}): its run could not be recorded on disk first (${intent.why}) — no process was started`;
+      this._touch(job, { what, alarm: true });
+      this._save();
+      throw Object.assign(new Error(what), { code: 'EVSNOTONDISK' });
+    }
+    if (job.runs.length > 20) job.runs.splice(0, job.runs.length - 20);   // after the check: a refused start never costs the oldest run its entry
     // accept-fixes-jobs F6: the job's OWN directory (its cmd.cwd — never the server's cwd fallback) is exported as
     // VIBESPACE_JOB_CWD: vibespace-browser's write fence lets a job save a screenshot / download there
     const spec = {
@@ -3366,7 +3403,16 @@ class JobManager {
             continue;
           }
         }
-        this._fireCron(job, isCatchUp ? 'boot' : 'cron');
+        try { this._fireCron(job, isCatchUp ? 'boot' : 'cron'); }
+        catch (e) {
+          if (!e || e.code !== 'EVSNOTONDISK') throw e;
+          // A REFUSED FIRE (the U4/U5 cure: its run could not be recorded on disk first — the child said why, with an alarm): a
+          // recurring schedule moves to its NEXT slot (never a re-fire at every 30 s tick); a one-shot is parked, said
+          if (job.schedule.at) { job.state = 'failed'; job.desiredUp = false; job.nextFireAt = null; this._touch(job, { what: `its scheduled run was refused — ${e.message}`, alarm: true }); continue; }
+          job.nextFireAt = M.nextFire(job.schedule, now(), undefined, job.nextFireAt);
+          this._touch(job);
+          continue;
+        }
         job.nextFireAt = job.schedule.at ? null : M.nextFire(job.schedule, now(), undefined, job.nextFireAt); // lane int361: the slot it fired for — a fall-back's repeated time never fires twice
         if (job.schedule.at) { job.state = 'done'; }
         this._touch(job);

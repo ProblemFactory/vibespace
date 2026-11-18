@@ -556,8 +556,10 @@ class TaskGroupManager {
   /** the document on disk: the held old fields ride back beside each record (one release — see _holdLegacy) */
   _docForDisk() { return !this._legacy.size ? this._state : { ...this._state, tasks: Object.fromEntries(Object.entries(this._state.tasks).map(([id, t]) => [id, this._legacy.has(id) ? { ...t, ...this._legacy.get(id) } : t])) }; }
   /** THE ANSWER OF AN ACT WAITS FOR THE STORE (lane lg-store-writes U5): true once task-groups.json holds every change made so
-   *  far (false: a write failed or is still queued at the writer's bound — said by the writer); the loop never waits */
-  persisted() { try { return this._writer().durable(this._file, { timeoutMs: 20000 }).catch(() => false); } catch { return Promise.resolve(false); } }   // 20 s: under the CLI's 30 s write budget (src/cli-call.js), so a stalled mount answers «notOnDisk» in time, never «no answer»
+   *  far (false: a write failed, is still queued at the writer's bound, or the exit left it — said by the writer); the loop
+   *  never waits. `answer(saved)` — the route's answer on the writer's SYNCHRONOUS road (the U4/U5 cure): called inside the
+   *  writer's own settle, so an answer still waiting when the hub stops goes out inside the exit's flush */
+  persisted(answer = null) { try { return this._writer().durable(this._file, { timeoutMs: 20000, answer }).catch(() => false); } catch { if (answer) { try { answer(false); } catch { } } return Promise.resolve(false); } }   // 20 s: under the CLI's 30 s write budget (src/cli-call.js), so a stalled mount answers «notOnDisk» in time, never «no answer»
   /** THE STORE'S SAVE GOES THROUGH THE STORE WRITER (lane lg-store-writes, B-0248 U5): task-groups.json (every group's record,
    *  its backlog and Activity log, pretty-printed) was written whole — temp + rename — on the main thread at every progress
    *  note, bind and update (6.6 s of holds in five hours on the production hub, 3.1 s the longest). Now its bytes are handed
@@ -569,9 +571,10 @@ class TaskGroupManager {
     this._rev = (this._rev || 0) + 1;
     try {
       const W = this._writer();
-      W.dirty(this._file, { name: 'task-groups.write', rank: 0, produce: () => JSON.stringify(this._docForDisk(), null, 2), onWritten: (ok, e) => this._storeWritten(ok, e) });
+      // an act is URGENT by the writer's own flag (the U4/U5 cure: no durable() asked here — the route that answers waits
+      // through persisted())
+      W.dirty(this._file, { name: 'task-groups.write', rank: 0, urgent: !boot, produce: () => JSON.stringify(this._docForDisk(), null, 2), onWritten: (ok, e) => this._storeWritten(ok, e) });
       if (boot) { const r = W.flushSync([this._file]); const miss = r.left.find((x) => x.file === this._file); if (miss) console.warn(`[tasks] task-groups.json not on disk at the boot (${miss.why}) — kept in memory, the store writer retries`); }
-      else W.durable(this._file).catch(() => { });
     } catch (e) { console.warn(`[tasks] save failed: ${e.message}`); }
     // Keep every context folder's generated TASK.md in lockstep with the
     // store (content-compare guard makes this a no-op for unchanged tasks)

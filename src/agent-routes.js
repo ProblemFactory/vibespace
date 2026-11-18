@@ -458,12 +458,18 @@ function bookkept(s) { if (s) s._bookkeptAt = Date.now(); }
 async function clearAsAgent(hit, item, res) {
   const rc = getRecordClear && getRecordClear();
   if (!rc) return res.status(503).json({ error: 'clearing records is not available on this instance', code: 'unavailable' });
-  let r;
-  try { r = await rc.clear(item, { caller: agentClearCaller(hit) }); }
-  catch (e) { return res.status(500).json({ error: e.message, code: 'failed' }); }
-  if (!r.ok) return res.status(r.status || 400).json({ error: r.why || 'refused', code: r.code });
-  bookkept(hit[0]);
-  return res.json({ success: true, cleared: r.cleared, already: r.already });
+  // the answer rides the clear's own (the U4/U5 cure): once the stores it changed are on disk, on the store writer's
+  // synchronous road — a clear still waiting when the hub stops answers inside the exit's flush; not landed ⇒ notOnDisk
+  const answer = (r) => {
+    try {
+      if (!r.ok) return void res.status(r.status || 400).json({ error: r.why || 'refused', code: r.code });
+      bookkept(hit[0]);
+      require('./store-writer.js').identityAtExit(res);
+      res.json({ success: true, cleared: r.cleared, already: r.already, ...(r.notOnDisk ? { notOnDisk: true } : {}) });
+    } catch { }
+  };
+  try { await rc.clear(item, { caller: agentClearCaller(hit), answer }); }
+  catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message, code: 'failed' }); }
 }
 // Resolve the calling agent's session from its per-session bearer token.
 // Returns [session, id] or replies 401/403 and returns null.
@@ -1383,7 +1389,16 @@ app.get('/api/agent/task', function taskShowRoute(req, res) {
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
 // lane lg-store-writes U5 (B-0248): an agent's Task Group verb (progress, backlog, the group admin) hands the store to the
-// writer as an ACT (urgent — its next writes) and ANSWERS AT ONCE: the CLI's own bound stays the call's, never a disk's
+// writer as an ACT (urgent — its next writes) and ANSWERS AT ONCE: the CLI's own bound stays the call's, never a disk's —
+// EXCEPT (the U4/U5 cure, 主开发's as-if-musts) an act that TAKES ACCESS AWAY (a group-admin unbind; an update — it can narrow
+// the folders or the context folder, or archive the group) and a backlog CLAIM (two agents are never both told they own a
+// row): those answer once task-groups.json holds them, on the writer's synchronous road (bounded 20 s, under the CLI's 30 s;
+// not landed ⇒ notOnDisk in the answer — the act stays applied in memory and the writer retries). An act that only ADDS
+// (create, bind) answers at once: a kill that loses it gives less access, never more.
+function answerOnDisk(res, body) {
+  if (typeof tasks.persisted !== 'function') return void res.json(body);
+  tasks.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json(saved ? body : { ...body, notOnDisk: true }); } catch { } });
+}
 app.post('/api/agent/task-progress', function taskProgressRoute(req, res) {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -1569,7 +1584,9 @@ app.post('/api/agent/task-backlog', function taskBacklogRoute(req, res) {
       const n = backlogNudge(updated.backlog, key, { threshold: nudgeThreshold(raw) });
       if (n) nudge = { text: nudgeText(n, String(req.query?.group || req.body?.group || '').trim() ? `--group ${gid} ` : ''), owned: n.owned, stale: n.stale, threshold: n.threshold };
     }
-    res.json({
+    // the U4/U5 cure: a CLAIM answers once on disk (a claim lost at a kill would let a second agent claim the row); every
+    // other backlog verb answers at once
+    (claim !== undefined ? answerOnDisk : (r0, b0) => r0.json(b0))(res, {
       success: true,
       backlog: sortBacklog(updated.backlog.filter((b) => b.status === 'open')).map(taskItemAnswer),   // verify r4 F1: through the belt
       ...(acted ? { item: taskItemAnswer(acted), others: (acted.claimedBy || []).filter((k) => k !== key), alreadyMine } : {}),
@@ -1646,7 +1663,7 @@ app.post('/api/agent/group-admin', (req, res) => {
       if (!Object.keys(patch).length) throw new Error('nothing to update — send title/objective/contextDir/folders/color/archived');
       tasks.update(update.id, patch);
       audit(update.id, `[group-admin] ${Object.keys(patch).join('+')} updated by manager agent`);
-      return res.json({ success: true, group: brief(tasks.view(update.id)) });
+      return answerOnDisk(res, { success: true, group: brief(tasks.view(update.id)) });   // the U4/U5 cure: may narrow access — durable before its answer
     }
     if (bind && bind.id) {
       const sk = String(bind.sessionKey || key);
@@ -1658,7 +1675,7 @@ app.post('/api/agent/group-admin', (req, res) => {
       const sk = String(unbind.sessionKey || key);
       tasks.unbind(unbind.id, sk);
       audit(unbind.id, `[group-admin] session ${sk} unbound by manager agent`);
-      return res.json({ success: true, group: brief(tasks.view(unbind.id)) });
+      return answerOnDisk(res, { success: true, group: brief(tasks.view(unbind.id)) });   // the U4/U5 cure: takes access away — durable before its answer
     }
     return res.status(400).json({ error: 'need create, update, bind, unbind, or list' });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -2832,7 +2849,7 @@ app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req
   // piece 7: --propose-wake "why" files the grant's proposal for the NEW job (its answer rides this one; the job exists either way)
   // lane lg-store-writes U4: the answer waits for the store, never the loop (a write not landed is said: notOnDisk)
   Promise.resolve(b.proposeWake !== undefined ? proposeWake(a, a.jm.jobs.get(r.job.id), b.proposeWake) : null).catch((e) => ({ body: { error: (e && e.message) || String(e), code: 'failed' } })).then((pw) =>
-    a.jm.persisted().then((saved) => { try { res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(pw ? { wakeProposal: pw.body } : {}), ...(saved ? {} : { notOnDisk: true }) }); } catch { } }));
+    a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(pw ? { wakeProposal: pw.body } : {}), ...(saved ? {} : { notOnDisk: true }) }); } catch { } }));
 }));
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
@@ -2931,7 +2948,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     else if (act === 'access') {
       for (const k of ['view', 'control']) if (req.body?.[k] && ['session', 'group', 'all'].includes(req.body[k])) job.access[k] = req.body[k];
       a.jm._touch(job); a.jm._save(); r = { ok: true };
-      return void a.jm.persisted().then((saved) => { try { res.json({ success: true, access: job.access, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // an authority change: answered once on disk
+      return void a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, access: job.access, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // an authority change: answered once on disk
     }
     else if (act === 'subscribe') r = a.jm.subscribe(job, a.caller, { filter: req.body?.filter });   // canView already proven by findVisible
     else if (act === 'unsubscribe') r = a.jm.unsubscribe(job, a.caller);
@@ -2943,13 +2960,13 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
       if (!['on', 'off', 'inherit'].includes(v)) return res.status(400).json({ error: 'value must be on|off|inherit' });
       job.notify = v === 'inherit' ? undefined : v;
       a.jm._touch(job); a.jm._save();
-      return void a.jm.persisted().then((saved) => { try { res.json({ success: true, notify: job.notify || 'inherit', preview: (() => { try { return a.jm.notifyPreview(job); } catch { return null; } })(), ...(saved ? {} : { notOnDisk: true }) }); } catch { } });
+      return void a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, notify: job.notify || 'inherit', preview: (() => { try { return a.jm.notifyPreview(job); } catch { return null; } })(), ...(saved ? {} : { notOnDisk: true }) }); } catch { } });
     }
     else if (act === 'memory') r = a.jm.setMemory(job, req.body?.value ?? null, { byUser: false }); // lane jobs-memory-bound: owner conversation only (canEdit above)
     else return res.status(400).json({ error: `unknown action "${act}"` });
     if (r.error) return res.status(400).json({ error: r.error });
     if (act === 'progress' || act === 'announce') return res.json({ success: true, ...r });   // a job's own frequent verbs: paced, answered at once
-    a.jm.persisted().then((saved) => { try { res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries
+    a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 }

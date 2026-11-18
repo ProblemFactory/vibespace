@@ -1916,11 +1916,24 @@ function refusalWords(body) {
   return body && typeof body === 'object' && body.error === 'cross-site' ? { ...body, code: 'cross-site', error: t('This action came from another site and was refused') } : body;
 }
 
+/** «NOT ON DISK» REACHES THE PERSON (lane lg-store-writes, the U4/U5 cure — 主开发's as-if-must): an answer carrying
+ *  `notOnDisk: true` (the act is applied in the hub's memory; its store's file was not written inside the bound — the store
+ *  writer keeps trying) is SAID once per answer, in the release's own sentence (the status route's, the channels index's —
+ *  zh / ja beside it). fetchJson and api() ask it of every answer; a helper of its own (the Task Groups' _taskApi, the
+ *  import button) asks it too. → whether it was said */
+export function sayNotOnDisk(body) {
+  if (!body || typeof body !== 'object' || body.notOnDisk !== true) return false;
+  try { showToast(t('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.'), { type: 'error', duration: 12000 }); } catch { }
+  return true;
+}
+
 /** Fetch JSON with silent error handling. Returns null on failure. */
 export async function fetchJson(url, opts) {
   try {
     const res = await fetch(url, opts);
-    return refusalWords(await res.json());
+    const body = refusalWords(await res.json());
+    sayNotOnDisk(body);
+    return body;
   } catch { return null; }
 }
 
@@ -1956,6 +1969,7 @@ export async function api(url, opts) {
   try { body = refusalWords(await res.json()); } catch { body = null; }
   if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText || 'request failed'}`);
   if (body && typeof body === 'object' && body.error) throw new Error(String(body.error));
+  sayNotOnDisk(body);
   return body;
 }
 

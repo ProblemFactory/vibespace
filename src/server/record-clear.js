@@ -47,12 +47,42 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
     return null;
   }
 
-  async function clearMany(items, { caller } = {}) {
+  /** THE CLEAR'S ANSWER WAITS FOR ITS STORES' FILES (lane lg-store-writes U4/U5, the cure): the stores a clear changed whose
+   *  writes go through the store writer (the Task Groups', the jobs') — ONE wait for all of them at the end (never one per
+   *  container, one after another: K groups cost K writes), on the writer's SYNCHRONOUS road: `answer(res)` runs inside the
+   *  writer's settle, so a clear still waiting when the hub stops answers inside the exit's flush (server.js leaves in that
+   *  run). A store not on disk inside its bound is SAID (logged, `notOnDisk` in the answer); the clear stays applied in memory. */
+  function whenStored(touched, done) {
+    const stores = [...touched].map((name) => [name, name === 'tasks' ? tasks : name === 'jobs' ? (getJobs && getJobs()) : null]).filter(([, st]) => st && typeof st.persisted === 'function');
+    if (!stores.length) { done(true); return; }
+    let n = stores.length; const left = [];
+    for (const [name, st] of stores) {
+      st.persisted((ok) => {
+        if (!ok) left.push(name === 'tasks' ? 'the Task Groups\' store' : 'the jobs store');
+        if (--n) return;
+        if (left.length) log(`[clear] cleared in memory, ${left.join(' and ')} not on disk yet — the store writer retries`);
+        done(!left.length);
+      });
+    }
+  }
+  /** → a promise of the result; `answer(result)` (a route's) is called once, on the writer's synchronous road (whenStored) */
+  async function clearMany(items, { caller, answer = null } = {}) {
+    let res, touched;
+    try { ({ res, touched } = await clearAll(items, { caller })); }
+    catch (e) { if (answer) { try { answer({ ok: false, code: 'failed', why: e && e.message, status: 500 }); } catch { } } throw e; }
+    return new Promise((resolve) => whenStored(touched, (saved) => {
+      if (!saved && res.ok) res.notOnDisk = true;
+      resolve(res);
+      if (answer) { try { answer(res); } catch { } }
+    }));
+  }
+  async function clearAll(items, { caller } = {}) {
+    const touched = new Set();
     const bad = badShape(items);
-    if (bad) return bad;
+    if (bad) return { res: bad, touched };
     // the caller is judged BEFORE any lookup (a job token never learns whether an id exists)
     const pre = RC.clearVerdict({ kind: 'activity', caller, record: {} });
-    if (!pre.ok && (pre.code === 'no_caller' || pre.code === 'job_token')) return pre;
+    if (!pre.ok && (pre.code === 'no_caller' || pre.code === 'job_token')) return { res: pre, touched };
     const res = { ok: true, cleared: 0, already: 0, unknown: [], refused: [], ambiguous: [], ids: [] };
     const by = byOf(caller);
     const at = now();
@@ -72,7 +102,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
       if (r.error) { for (const id of ids) res.refused.push({ kind, id, ...pick(r.error) }); continue; }
       res.cleared += r.cleared.length;
       res.already += r.already.length;
-      if (r.notOnDisk) res.notOnDisk = true;   // lane lg-store-writes U5: cleared in memory, its store's file not on disk yet (logged; the writer retries)
+      if (r.store) touched.add(r.store);   // the U4/U5 cure: a store whose file the answer waits for — once, at the end (whenStored)
       res.ids.push(...r.cleared.map((id) => ({ kind, id: String(id) })));
       for (const id of r.unknown) res.unknown.push({ kind, id: String(id) });
       if (r.archiveUnread) res.archiveUnread = true;   // B-20b6: the job store could not reach its ARCHIVED records — their words were not cleared; said to the person
@@ -85,7 +115,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
         journal('todo', `(of ${kind} ${ids.slice(0, 3).join(', ')})`, r.cascade.cleared, by);
       }
     }
-    return res;
+    return { res, touched };
   }
   const pick = (v) => ({ code: v.code, why: v.why, status: v.status });
 
@@ -97,9 +127,8 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
       try { r = tasks.clearProgress(container, ids, { by, at, allow: verdictFor('activity', caller) }); }
       catch (e) { if (/not found/.test(e.message)) return { error: RC.refuse('not_found') }; throw e; }
       // lane lg-store-writes U5: the answer waits until the cleared words are gone from the FILE (the store writer's write — the
-      // loop never waits); a write that did not land is SAID (logged and in the result), the clear stays applied in memory
-      if (typeof tasks.persisted === 'function' && !(await tasks.persisted())) { log(`[clear] activity ${ids.join(', ')}: cleared in memory, the Task Groups' store not on disk yet — the store writer retries`); return { ...r, notOnDisk: true }; }
-      return r;
+      // loop never waits) — ONCE for every store the clear touched (clearMany's whenStored, the U4/U5 cure)
+      return { ...r, store: 'tasks' };
     }
     if (kind === 'todo') {
       if (!userTodos) return { error: RC.refuse('unavailable') };
@@ -119,7 +148,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
       if (userTodos && userTodos.isHeldUnread?.()) return { error: RC.refuse('todos_unread') };
       const r = jm.clearJobs(ids, { by, at, allow: verdictFor('job', caller) });
       if (r.error) { log(`[clear] job ${ids.join(', ')} — FAILED: ${r.error}`); return { error: RC.refuse('failed') }; }
-      if (typeof jm.persisted === 'function' && !(await jm.persisted())) { log(`[clear] job ${ids.join(', ')}: cleared in memory, the jobs store not on disk yet — the store writer retries`); r.notOnDisk = true; }   // lane lg-store-writes U4/U5: the cleared job's words gone from the FILE before the answer (said when not)
+      r.store = 'jobs';   // lane lg-store-writes U4/U5: the cleared job's words gone from the FILE before the answer — ONCE, at the end (clearMany's whenStored)
       // THE CASCADE: a job's For-you items carry its name ("<name> needs your input", "· via <name>",
       // the job's name in their label) — cleared through the For-you door under the same caller
       if (r.cleared.length && userTodos) {
@@ -158,14 +187,16 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
     return { error: RC.refuse('bad_kind') };
   }
 
-  /** ONE record: the single-item answer (a refusal by its own status). */
-  async function clear(item, { caller } = {}) {
-    const r = await clearMany([item], { caller });
-    if (!r.ok) return r;
-    if (r.refused.length) { const x = r.refused[0]; return { ok: false, code: x.code, why: x.why, status: x.status }; }
-    if (r.ambiguous.length) return { ok: false, ...pick(RC.refuse('ambiguous')) };
-    if (r.unknown.length) return { ok: false, ...pick(RC.refuse(r.archiveUnread ? 'archive_unread' : 'not_found')) };   // B-20b6's smalls (1): an id only in a held archive is the archive's refusal
-    return { ok: true, cleared: r.cleared, already: r.already, ids: r.ids, ...(r.archiveUnread ? { archiveUnread: true } : {}) };
+  /** ONE record: the single-item answer (a refusal by its own status); `answer` as clearMany's (the same synchronous road) */
+  async function clear(item, { caller, answer = null } = {}) {
+    const one = (r) => {
+      if (!r.ok) return r;
+      if (r.refused.length) { const x = r.refused[0]; return { ok: false, code: x.code, why: x.why, status: x.status }; }
+      if (r.ambiguous.length) return { ok: false, ...pick(RC.refuse('ambiguous')) };
+      if (r.unknown.length) return { ok: false, ...pick(RC.refuse(r.archiveUnread ? 'archive_unread' : 'not_found')) };   // B-20b6's smalls (1): an id only in a held archive is the archive's refusal
+      return { ok: true, cleared: r.cleared, already: r.already, ids: r.ids, ...(r.notOnDisk ? { notOnDisk: true } : {}), ...(r.archiveUnread ? { archiveUnread: true } : {}) };
+    };
+    return one(await clearMany([item], { caller, answer: answer ? (r) => answer(one(r)) : null }));
   }
 
   return { clear, clearMany, MAX_ITEMS };

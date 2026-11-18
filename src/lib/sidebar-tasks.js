@@ -1,4 +1,4 @@
-import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, seqTaskColor, stripCwdHostLabel, fetchJson } from './utils.js';
+import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, seqTaskColor, stripCwdHostLabel, fetchJson, sayNotOnDisk } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
@@ -402,6 +402,7 @@ export function installSidebarTasks(SidebarClass) {
       });
       const raw = await res.text().catch(() => '');
       let data = {}; try { data = raw ? JSON.parse(raw) : {}; } catch { }
+      if (res.ok) sayNotOnDisk(data);   // lane lg-store-writes, the U4/U5 cure: an act applied but not on disk yet is SAID
       if (!res.ok) {
         // NEVER a bare "operation failed" (2.227.12): a body with no `error`
         // key (an HTML 502 from the ingress, a body-parser 413, a proxy

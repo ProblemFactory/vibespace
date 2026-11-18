@@ -1144,8 +1144,11 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   /** a store writer stand-in: it lands NOTHING until told (land / flushSync), records every hand-off */
   const standIn = () => {
     const r = { dirties: [], durables: [], flushes: [], owed: new Map(), exitAt: null };
-    r.dirty = (f, o) => { r.dirties.push({ f: path.basename(f), name: o.name, rank: o.rank }); r.owed.set(f, o); };
+    r.dirty = (f, o) => { r.dirties.push({ f: path.basename(f), name: o.name, rank: o.rank, urgent: !!o.urgent }); r.owed.set(f, o); };
     r.durable = (f) => { r.durables.push(path.basename(f)); return Promise.resolve(true); };
+    // the writer's synchronous answer road (the U4/U5 cure): records what it was asked, answers `r.answer` IN PLACE
+    r.answer = true; r.waits = [];
+    r.whenDurable = (files, o, ans) => { r.waits.push({ files: files.map((f) => path.basename(f)), timeoutMs: o && o.timeoutMs }); const v = r.answer; if (ans) ans(v); return Promise.resolve(v); };
     r.pending = (f) => r.owed.has(f);
     r.flushSync = (files) => { r.flushes.push(files.map((f) => path.basename(f)).join('+')); for (const f of files) { const o = r.owed.get(f); if (!o) continue; fs.writeFileSync(f, o.produce()); r.owed.delete(f); if (o.onWritten) o.onWritten(true, null); } return { written: files, left: [] }; };
     r.land = () => r.flushSync([...r.owed.keys()]);
@@ -1166,11 +1169,11 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   const a = scene({ JobManager }, 'moved');
   const acts = a.rec.dirties.slice();
   ok(a.unchanged && acts.some((x) => x.f === 'jobs.json' && x.name === 'jobs.write' && x.rank === 0) && acts.some((x) => x.f === 'job-notifications.json' && x.name === 'jobs-notifs.write' && x.rank === 0)
-    && a.rec.durables.includes('jobs.json') && a.rec.durables.includes('job-notifications.json'),
-    'U4: a direct save (an act) hands jobs.json and job-notifications.json to the writer by name, rank 0 + durable() (urgent) — the file is NOT written on the main thread at the change', { unchanged: a.unchanged, acts, durables: a.rec.durables });
+    && acts.every((x) => x.urgent) && a.rec.durables.length === 0,
+    'U4: a direct save (an act) hands jobs.json and job-notifications.json to the writer by name, rank 0 + URGENT (the writer\'s own flag — the U4/U5 cure: no durable() timer asked at a save) — the file is NOT written on the main thread at the change', { unchanged: a.unchanged, acts, durables: a.rec.durables });
   a.rec.dirties.length = 0; a.rec.durables.length = 0;
   a.J._dirty = true; a.J._save({ paced: true });   // the 2 s tick
-  ok(a.rec.dirties.length === 2 && a.rec.dirties.every((x) => x.rank === undefined) && a.rec.durables.length === 0, 'U4: the 2 s tick hands both files PACED — no rank, no durable()', a.rec.dirties);
+  ok(a.rec.dirties.length === 2 && a.rec.dirties.every((x) => x.rank === undefined && !x.urgent) && a.rec.durables.length === 0, 'U4: the 2 s tick hands both files PACED — no rank, not urgent, no durable()', a.rec.dirties);
   const bytes = JSON.parse(a.rec.owed.get(a.F).produce());
   ok(bytes.length === 1 && bytes[0].name === 'u4 renamed' && !JSON.stringify(bytes).includes('"_'), 'U4: the bytes are the records when the write is due — a later change rides the same write, runtime-only `_` keys never persisted', bytes);
   // a new engine in the same process while the writes are owed: its load lands them first
@@ -1192,10 +1195,17 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   c.J.shutdown();
   ok(!c.rec.pending(c.F) && JSON.parse(fs.readFileSync(c.F, 'utf-8'))[0].name === 'u4 renamed' && !fs.existsSync(c.J.lockFile), 'U4: a shutdown outside the hub\'s exit lands the store at once (the next engine reads it), then removes the lock', { lock: fs.existsSync(c.J.lockFile) });
   let done = false; const p = c.J.persisted().then((v) => { done = v; }); await p;
-  ok(done === true, 'U4: persisted() — what an act\'s route waits on — resolves once both files are on disk');
-  c.rec.durable = () => Promise.resolve(false);
+  ok(done === true, 'U4: persisted() — what an act\'s route waits on — resolves with the writer\'s answer for both files (the real writer\'s whenDurable: test-store-writer-r4 ⑨ (c))');
+  c.rec.answer = false;
   const notSaved = await c.J.persisted();
   ok(notSaved === false, 'U4: persisted() answers FALSE when a write did not land (the route says notOnDisk — the act stays applied in memory)');
+  // the U4/U5 cure: the route's answer rides the writer's SYNCHRONOUS road (called in place, never a microtask later — the
+  // hub's exit leaves in its flush's own run), for BOTH files, bounded UNDER the CLI's write budget (a stalled mount answers
+  // «notOnDisk» before the command gives up — never a reset that makes an agent repeat a create)
+  const BUDGET_W = require(path.join(ROOT, 'src/cli-call.js')).BUDGETS.write;
+  let inPlace = null; c.J.persisted((v) => { inPlace = v; });
+  ok(inPlace === false && c.rec.waits.length >= 3 && c.rec.waits.every((w) => w.files.join('+') === 'jobs.json+job-notifications.json' && w.timeoutMs > 0 && w.timeoutMs < BUDGET_W),
+    `U4 cure: persisted(answer) answers IN PLACE through the writer's whenDurable — both files, bounded under the CLI's ${BUDGET_W / 1000} s write budget (src/cli-call.js)`, c.rec.waits);
   // a CLAIM (a hand-over's stamp) is ON DISK when claimNotifs returns — the exactly-once law (verify r2), through the writer
   const k = scene({ JobManager }, 'claim');
   k.J.pendingNotifs.set('conv-u4', [{ jobId: 'jb-0248a401', what: 'done', at: T0 }]);
@@ -1204,6 +1214,74 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   const claimedOnDisk = (() => { try { return (JSON.parse(fs.readFileSync(path.join(k.d, 'job-notifications.json'), 'utf-8'))['conv-u4'] || [])[0].ho === 'ho-u4'; } catch { return false; } })();
   ok(claimedOnDisk && k.rec.flushes.slice(flushesK).includes('job-notifications.json'), 'U4: a notifications CLAIM is on disk when claimNotifs returns (its one file waited for through the writer) — a kill after it never delivers twice', { claimedOnDisk, flushes: k.rec.flushes.slice(flushesK) });
   k.J.shutdown();
+  // THE U4/U5 CURE (1) — A CHILD THE DISK DOES NOT HOLD IS NEVER STARTED: the run's intent not on disk inside the writer's
+  // bound (a stalled mount), or deferred to the exit's flush ⇒ NO child; the start refused by name, the record failed
+  const stalled = (how) => {
+    const r = standIn();
+    r.flushSync = (files) => { r.flushes.push(files.map((f) => path.basename(f)).join('+')); return how === 'deferred' ? { written: [], left: [], deferred: true } : { written: [], left: files.map((f) => ({ file: f, name: 'jobs.write', why: 'its write was still held by the storage at the bound (30.0 s)' })) }; };
+    return r;
+  };
+  const spawnScene = (JMod, tag, rec) => {
+    const d = mkDir('jobs-triage-u4-spawn-' + tag), F = path.join(d, 'jobs.json');
+    fs.writeFileSync(F, JSON.stringify([{ ...seedRec('jb-0248a402'), cmd: { argv: ['/bin/true'], cwd: d } }]));
+    const said = [];
+    const J = new JMod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: (...x) => said.push(x.join(' ')), archivePolicy: () => policy, writer: rec });
+    J.init();
+    const job = J.jobs.get('jb-0248a402'), runs0 = (job.runs || []).length;
+    let threw = null; try { J._spawn(job, 'manual'); } catch (e) { threw = e.message; }
+    return { J, threw, state: job.state, proc: job.proc || null, runs: (job.runs || []).length - runs0, said: said.filter((l) => /the run's intent/.test(l)) };
+  };
+  for (const how of ['held', 'deferred']) {
+    const s1 = spawnScene({ JobManager }, how, stalled(how));
+    ok(/^not started \(manual\): its run could not be recorded on disk first/.test(s1.threw || '') && s1.state === 'failed' && !s1.proc && s1.runs === 0 && s1.said.length === 1,
+      `U4 cure (1): the run's intent NOT on disk (${how === 'held' ? 'held past the writer\'s bound' : 'deferred to the exit\'s flush'}) ⇒ NO child — the start refused by name, the record failed, its run entry taken back, said once`, { threw: s1.threw, state: s1.state, proc: s1.proc, runs: s1.runs, said: s1.said });
+    s1.J.shutdown();
+  }
+  const jsrcSp = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+  const aSp = '    if (!intent.ok) {';
+  ok(jsrcSp.split(aSp).length === 2, 'U4 cure ANCHOR: the run\'s intent check (_spawn)');
+  const NoCheck = mutantCopies('jobs-triage-u4-spawn', ROOT).load('src/jobs.js', jsrcSp.replace(aSp, '    if (false) {'), 'no-intent-check');
+  const s2 = spawnScene(NoCheck, 'red', stalled('held'));
+  ok(!s2.threw && !!s2.proc, 'U4 cure (1) CONTROL: the check removed (a mutant copy) ⇒ a child IS started while its run is not on disk — the check above would be red', { threw: s2.threw, proc: s2.proc });
+  try { if (s2.proc && s2.proc.pid) process.kill(s2.proc.pid, 'SIGKILL'); } catch { }
+  s2.J.shutdown();
+  // the cure's own adversarial read: (a) a REFUSED cron fire moves the schedule to its NEXT slot — never a re-fire at every
+  // 30 s tick (each would wait the writer's bound again); (b) a refused restart / replay keeps what the record was (a service
+  // stays 'down'), a person's start is 'failed'; (c) while the refused intent's store is still held, the next start is refused
+  // AT ONCE — no second wait on the main thread. RED: the cron's catch removed ⇒ its next fire stays in the past
+  const cronScene = (JMod, tag) => {
+    const d = mkDir('jobs-triage-u4-cron-' + tag), F = path.join(d, 'jobs.json'), rec = stalled('held');
+    const due = Date.now() - 1000;
+    fs.writeFileSync(F, JSON.stringify([{ id: 'jb-0248a403', kind: 'cron', name: 'u4 cron', state: 'scheduled', desiredUp: true, owner: {}, access: ACC, schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['/bin/true'], cwd: d } } }, nextFireAt: due, runs: [], createdAt: T0 - H }]));
+    const J = new JMod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: rec });
+    J.init();   // its first cron tick runs inside init: the fire, refused
+    const cron = J.jobs.get('jb-0248a403'), child = [...J.jobs.values()].find((x) => x.cronParent === 'jb-0248a403') || null;
+    return { J, rec, cron, child, due, next: cron.nextFireAt };
+  };
+  const c1 = cronScene({ JobManager }, 'cure');
+  const flushesAfterFire = c1.rec.flushes.length;
+  await c1.J._cronTick();
+  ok(c1.child && c1.child.state === 'failed' && !c1.child.proc && c1.next > Date.now() && c1.rec.flushes.length === flushesAfterFire,
+    'U4 cure (1): a cron fire whose run is not on disk ⇒ no child, said; the schedule moves to its NEXT slot — the next tick fires nothing again', { child: c1.child && c1.child.state, next: c1.next, due: c1.due, flushes: c1.rec.flushes.length - flushesAfterFire });
+  c1.J.shutdown();
+  const jsrcCr = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+  const cA = "        try { this._fireCron(job, isCatchUp ? 'boot' : 'cron'); }\n        catch (e) {\n", cB = "        job.nextFireAt = job.schedule.at ? null : M.nextFire(job.schedule, now(), undefined, job.nextFireAt); // lane int361";
+  ok(jsrcCr.split(cA).length === 2 && jsrcCr.indexOf(cB) > jsrcCr.indexOf(cA), 'U4 cure ANCHOR: the cron tick\'s refused-fire catch');
+  const NoCatch = mutantCopies('jobs-triage-u4-cron', ROOT).load('src/jobs.js', jsrcCr.slice(0, jsrcCr.indexOf(cA)) + "        this._fireCron(job, isCatchUp ? 'boot' : 'cron');\n" + jsrcCr.slice(jsrcCr.indexOf(cB)), 'no-cron-catch');   // stale-pins: kept — the negative control rebuilds the cron tick as it was before the cure
+  const c2 = cronScene(NoCatch, 'red');
+  ok(c2.next === c2.due, 'U4 cure (1) CONTROL: the catch removed (a mutant copy) ⇒ the refused fire leaves the schedule in the past — it fires again at every 30 s tick', { next: c2.next, due: c2.due });
+  c2.J.shutdown();
+  {
+    const d = mkDir('jobs-triage-u4-svc'), F = path.join(d, 'jobs.json'), rec = stalled('held'), said = [];
+    fs.writeFileSync(F, JSON.stringify([{ id: 'jb-0248a404', kind: 'service', name: 'u4 svc', state: 'down', desiredUp: true, owner: {}, access: ACC, cmd: { argv: ['/bin/true'], cwd: d }, runs: [], supervise: { consecutiveFails: 0, parkedAt: null }, createdAt: T0 - H }]));
+    const J = new JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: (...x) => said.push(x.join(' ')), archivePolicy: () => policy, writer: rec });
+    J.init();   // the boot's replay of a 'down' service: refused
+    const svc = J.jobs.get('jb-0248a404'), st1 = svc.state, f1 = rec.flushes.length;
+    let threw = null; try { J._spawn(svc, 'manual'); } catch (e) { threw = e.message; }
+    ok(st1 === 'down' && !svc.proc && /still holds the store's earlier write/.test(threw || '') && rec.flushes.length === f1 && svc.state === 'failed',
+      'U4 cure (1): a refused boot replay keeps the service DOWN (said); while the store is still held the next start is refused AT ONCE — no second wait — and a person\'s start is failed', { st1, threw, flushes: rec.flushes.length - f1, state: svc.state });
+    J.shutdown();
+  }
   // RED CONTROL: the change removed — the old synchronous save (the writer bypassed)
   const jsrcU4 = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
   const aU4 = "  _writer() { return this.d.writer || require('./store-writer.js').storeWriter(); }";

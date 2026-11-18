@@ -45,6 +45,37 @@ try {
   const led = JSON.parse(fs.readFileSync(ledger, 'utf-8'));
   ok(led.applied.a && !led.applied.b, 'ledger records success only');
 
+  // ── lane lg-store-writes, the U4/U5 cure (U5 reader 3's should 0): `landStores` — what the migrations that ran handed the
+  // store writer lands before the ledger is stamped; a reshape NOT on disk is not recorded (it runs again next boot), said ──
+  {
+    const lsl = path.join(tmp, 'ledger-land.json');
+    const filed = [], asked = [];
+    const todos = { add: (k, it) => filed.push(it.itemKey), idsWhere: () => [], setStatus: () => { } };
+    const mig2 = [{ id: 'land-a', run: () => { } }, { id: 'land-b', run: () => { } }];
+    const rL = runMigrations({ ledgerPath: lsl, migrations: mig2, log: () => { }, warn: () => { }, todos, landStores: () => { asked.push(1); return [{ name: 'task-groups.write', file: 'x', why: 'its write was still held by the storage at the bound (30.0 s)' }]; } });
+    const ledL = JSON.parse(fs.readFileSync(lsl, 'utf8'));
+    ok(asked.length === 1 && !ledL.applied['land-a'] && !ledL.applied['land-b'] && rL.length === 2 && rL.every((x) => x.status === 'failed' && /^task-groups\.write not on disk yet \(its write was still held/.test(x.error)) && filed.join() === 'land-a,land-b',
+      'U4/U5 cure: a reshape whose store did not land is NOT recorded — every migration that ran comes off the ledger, failed by name, its For-you row opened (it runs again next boot)', { asked, applied: ledL.applied, rL, filed });
+    const rOk = runMigrations({ ledgerPath: lsl, migrations: mig2, log: () => { }, warn: () => { }, todos, landStores: () => [] });
+    ok(rOk.every((x) => x.status === 'ran') && !!JSON.parse(fs.readFileSync(lsl, 'utf8')).applied['land-a'], 'U4/U5 cure CONTROL: the same migrations with their stores landed ([]) are recorded', rOk);
+    const rThrow = runMigrations({ ledgerPath: path.join(tmp, 'ledger-land-throw.json'), migrations: [{ id: 'land-c', run: () => { } }], log: () => { }, warn: () => { }, landStores: () => { throw new Error('the writer is gone'); } });
+    ok(rThrow.length === 1 && rThrow[0].status === 'failed' && /^the store writer not on disk yet \(the writer is gone\)/.test(rThrow[0].error), 'U4/U5 cure: a landing that THREW counts as a store not on disk (failed by name, not recorded)', rThrow);
+    const rNoRun = runMigrations({ ledgerPath: lsl, migrations: mig2, log: () => { }, warn: () => { }, landStores: () => { asked.push(2); return []; } });
+    ok(rNoRun.every((x) => x.status === 'already') && !asked.includes(2), 'U4/U5 cure: a boot where no migration ran asks the store writer nothing', { rNoRun, asked });
+    // which stores the hub's boot lands (src/server/migrations.js storesToLand — the selector runLocalMigrations' landStores uses)
+    const { storesToLand } = require('../src/server/migrations.js');
+    const before = new Map([['/d/owed-touched.json', 3], ['/d/owed-untouched.json', 5], ['/d/clean-touched.json', 1]]);
+    const now = [
+      { file: '/d/owed-touched.json', version: 4, dirty: true },        // owed before the run AND reshaped by a migration ⇒ landed
+      { file: '/d/owed-untouched.json', version: 5, dirty: true },      // owed before, untouched since ⇒ not the migrations'
+      { file: '/d/clean-touched.json', version: 2, inflight: true },    // clean before, written by a migration (in flight) ⇒ landed
+      { file: '/d/new.json', version: 1, dirty: true },                 // a store new since the start ⇒ landed
+      { file: '/d/landed.json', version: 9, dirty: false },             // moved but already on disk ⇒ nothing to wait for
+    ];
+    ok(JSON.stringify(storesToLand(before, now)) === JSON.stringify(['/d/owed-touched.json', '/d/clean-touched.json', '/d/new.json']),
+      'U4/U5 cure: the boot lands every store a migration DIRTIED — told by its change count (one owed before AND reshaped lands too); one owed before and untouched, or already on disk, is not waited on', storesToLand(before, now));
+  }
+
   // ── a STEPPED migration (lane ledger-dedup-law): its run() returns a promise — the boot goes on at once, the ledger records
   // it when it ENDS; a restart before that records nothing (it runs again); a rejection is a failure like any other ──
   {

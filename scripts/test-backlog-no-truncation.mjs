@@ -39,6 +39,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-backlog-notrunc-'));
 fs.copyFileSync(path.join(REPO, 'src/agent-cli-text.js'), path.join(tmp, 'agent-cli-text.js'));
 fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(tmp, 'cli-call.js'));   // lane cli-call-timeouts: THE ONE CALL rides beside it too
 const tasks = new TaskGroupManager({ dataDir: tmp, onChange: () => {} });
+// lane lg-store-writes U5 + the U4/U5 cure: the store writer's owed writes landed — LOUDLY (a landing that left a write throws)
+const landOwed = () => { const r = require('../src/store-writer.js').storeWriter().flushSync(); if (r.left && r.left.length) throw new Error(`the store writer left owed writes: ${JSON.stringify(r.left)}`); };
 const cwd = path.join(tmp, 'work'); fs.mkdirSync(cwd, { recursive: true });
 const g = tasks.create({ title: 'big', objective: 'obj', folders: [cwd] });
 
@@ -54,7 +56,7 @@ check('statuses kept (open count)', after.filter((b) => b.status === 'open').len
 // +1 on top of a big store: the new item is stored, everything else stays
 const plusOne = tasks.update(g.id, { backlog: [...after, { text: 'the 2001st', status: 'open', addedBy: 'claude:y', claimedBy: ['claude:y'], addedAt: Date.now() }] }).backlog;
 check('adding to a 2000-item store keeps 2001 (nothing sliced)', plusOne.length === N + 1 && plusOne[N].text === 'the 2001st');
-try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }   // lane lg-store-writes U5: task-groups.json is the store writer's — landed before the file is read
+landOwed();   // lane lg-store-writes U5: task-groups.json is the store writer's — landed before the file is read (loudly: the U4/U5 cure, should 6)
 const stored = JSON.parse(fs.readFileSync(path.join(tmp, 'task-groups.json'), 'utf8'));
 const onDisk = Object.values(stored.tasks).find((t) => t.id === g.id).backlog;
 check('the store on disk carries all 2001', onDisk.length === N + 1);
@@ -79,12 +81,16 @@ setupAgentRoutes({
   remoteCtxBaseFor: () => null,
 });
 tasks.update(g.id, { backlog: Array.from({ length: 600 }, (_, i) => mk(i)) });
+// lane lg-store-writes, the U4/U5 cure: a CLAIM answers once task-groups.json holds it (on the store writer's synchronous
+// road) — a route not answered in its own run is answered when the suite LANDS the writer's owed writes (landOwed, above)
 const post = (body) => {
   let out, code = 200;
   const req = { headers: { authorization: 'Bearer vsst_test' }, query: {}, body };
   const res = { json: (o) => { out = o; }, status: (c) => { code = c; return res; } };
   routes['POST /api/agent/task-backlog'](req, res);
-  return { out, code };
+  const inRun = out !== undefined;
+  if (!inRun) landOwed();
+  return { out, code, inRun };
 };
 {
   tasks.update(g.id, { backlog: plusOne });
@@ -107,6 +113,10 @@ check('a second add gets its own fresh id', r2.out && r2.out.item && r2.out.item
 const target = tasks.get(g.id).backlog[3];
 const rc = post({ claim: target.id });
 check('claim echoes the item by id', rc.out && rc.out.item && rc.out.item.id === target.id && rc.out.item.claimedBy.includes('claude:sess1'), JSON.stringify(rc.out).slice(0, 200));
+// the U4/U5 cure (主开发's as-if-must): a claim is NOT answered while task-groups.json does not hold it (two agents are never
+// both told they own a row) — answered once the writer landed it; an add answers in its own run (it only adds)
+check('a CLAIM is answered only once task-groups.json holds it (not in the route\'s own run; answered when the store landed)', rc.inRun === false && !!rc.out && JSON.parse(fs.readFileSync(path.join(tmp, 'task-groups.json'), 'utf8')).tasks[g.id].backlog.find((b) => b.id === target.id).claimedBy.includes('claude:sess1'), { inRun: rc.inRun });
+check('an ADD answers in its own run (it gives the caller a row nobody else holds — never waits on the disk)', r.inRun === true && r2.inRun === true, { add: r.inRun, add2: r2.inRun });
 
 // (3b) B-31d7 (2026-09-26, B-4ffb stored twice): the store keeps an item's ONE LINE to 500 characters
 // (CAPS.backlogItem) and its detail to 6000. A 600-character title was stored CLIPPED, the identity

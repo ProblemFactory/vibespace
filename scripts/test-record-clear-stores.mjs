@@ -1420,6 +1420,44 @@ console.log('§7 wiring pins');
   ok(/createModalShell\(/.test(ui) && !/\bconfirm\(/.test(ui.replace(/confirmClear|confirm-/g, '')) && /textContent = w \?/.test(ui), 'the ONE confirm dialog: createModalShell, no native confirm, the record\'s words as TEXT');
 }
 
+// ── lane lg-store-writes, the U4/U5 cure: THE CLEAR WAITS ONCE FOR THE STORES IT TOUCHED, ITS ANSWER RIDES THE STORE'S OWN SETTLE ──
+// (U5 reader 2's should 2: one wait per container, one after another, cost K writes; reader 3's should 2: nothing tested the
+// clear's notOnDisk; 主开发's as-if-must: the answer at the hub's stop — the exit's flush settles the store, the process
+// leaves in that run, so the route answers INSIDE the settle, never a microtask later)
+console.log('U4/U5 cure: a clear waits ONCE for its stores; its answer goes out inside the store\'s settle, carrying notOnDisk');
+{
+  const sceneU = async (Routes, route = '/api/records/clear-many') => {
+    const waits = []; let settle = null;
+    const fakeTasks = { clearProgress: (gid, ids) => ({ cleared: ids.slice(), already: [], unknown: [], refused: [] }), persisted: (answer) => { waits.push('tasks'); settle = answer; return new Promise(() => { }); } };
+    const rcU = ORCH.create({ tasks: fakeTasks, log: () => { } });
+    const app = { routes: {}, post(p0, h) { this.routes[p0] = h; } };
+    Routes.registerRecordClearRoutes(app, { recordClear: rcU });
+    let out = null;
+    const res = { headersSent: false, status() { return this; }, json(o) { out = o; this.headersSent = true; return this; } };
+    const items = ['T-u45-1', 'T-u45-2', 'T-u45-3'].map((g, i) => ({ kind: 'activity', groupId: g, id: 'P-u45' + i }));
+    const pr = app.routes[route]({ headers: {}, body: route.endsWith('clear-many') ? { items } : items[0] }, res);
+    for (let k = 0; k < 50 && !settle; k++) await new Promise((r) => setImmediate(r));
+    const before = out;
+    if (settle) settle(false);   // the store's write did not land inside its bound (or the exit left it)
+    const inRun = out;           // read in the SAME run as the store's settle — where the hub's exit calls process.exit
+    for (let k = 0; k < 5; k++) await new Promise((r) => setImmediate(r));
+    return { waits, before, inRun, later: out, pr };
+  };
+  const u = await sceneU({ registerRecordClearRoutes });
+  ok(u.waits.length === 1 && u.before === null, 'a clear-many over THREE Task Groups waits ONCE for the store (never one write per group, one after another) — and is not answered while it is owed', { waits: u.waits, before: u.before });
+  ok(u.inRun && u.inRun.ok === true && u.inRun.cleared === 3 && u.inRun.notOnDisk === true, 'its answer goes out INSIDE the store\'s settle (the exit\'s flush answers it before the process leaves) and carries notOnDisk — the page says it', u.inRun);
+  const u1 = await sceneU({ registerRecordClearRoutes }, '/api/records/clear');
+  ok(u1.waits.length === 1 && u1.before === null && u1.inRun && u1.inRun.ok === true && u1.inRun.cleared === 1 && u1.inRun.notOnDisk === true, 'the ONE-record clear (/api/records/clear) rides the same road: not answered while owed, answered inside the settle with notOnDisk (the route dropped it before the cure)', { waits: u1.waits, before: u1.before, inRun: u1.inRun });
+  const RSRC = fs.readFileSync(path.join(ROOT, 'src/routes/records-clear.js'), 'utf8');
+  const aNew = "      await recordClear.clearMany(Array.isArray(items) ? items.map(itemOf) : items, { caller: OWNER, answer: (r) => { try {\n        if (!r.ok) return void fail(res, r);\n";
+  const iEnd = RSRC.indexOf("      } catch { } } });   // the same road as /api/records/clear (the U4/U5 cure)\n");
+  ok(RSRC.split(aNew).length === 2 && iEnd > 0, 'U4/U5 cure ANCHOR: the clear-many route\'s answer on the clear\'s own road');
+  const resLine = RSRC.slice(RSRC.indexOf(aNew) + aNew.length, iEnd).trim();
+  const oldRoad = RSRC.slice(0, RSRC.indexOf(aNew)) + "      const r = await recordClear.clearMany(Array.isArray(items) ? items.map(itemOf) : items, { caller: OWNER });\n      if (!r.ok) return fail(res, r);\n      " + resLine + "\n" + RSRC.slice(iEnd + "      } catch { } } });   // the same road as /api/records/clear (the U4/U5 cure)\n".length);   // stale-pins: kept — the negative control rebuilds the route as it was before the cure (the await road)
+  const v = await sceneU(MUT.load('src/routes/records-clear.js', oldRoad, 'clear-await-road'));
+  ok(v.inRun === null && v.later && v.later.notOnDisk === true, 'U4/U5 cure CONTROL: the route on the AWAIT road (a mutant copy) is answered a microtask LATER — not in the settle\'s run: at the hub\'s stop it never answers', { inRun: v.inRun, later: !!v.later });
+}
+
 console.log('tree: the patched copies never touch the tree');
 for (const r of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 2 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 

@@ -322,7 +322,7 @@ for (const mode of ['password', 'clerk', 'open']) {
   const u = readRepo('src/lib/utils.js'), zh = readRepo('src/lib/i18n-zh.js'), ja = readRepo('src/lib/i18n-ja.js');
   const EN = 'This action came from another site and was refused';
   ok(/body\.error === 'cross-site' \? \{ \.\.\.body, code: 'cross-site', error: t\('This action came from another site and was refused'\) \}/.test(u)
-    && /return refusalWords\(await res\.json\(\)\);/.test(u) && /body = refusalWords\(await res\.json\(\)\);/.test(u)
+    && /export async function fetchJson\(url, opts\) \{[\s\S]{0,200}?const body = refusalWords\(await res\.json\(\)\);/.test(u) && (u.match(/body = refusalWords\(await res\.json\(\)\);/g) || []).length === 2   // lane lg-store-writes, the U4/U5 cure: fetchJson keeps the body to say its notOnDisk (sayNotOnDisk) before it returns it
     && zh.includes(`"${EN}": "这次操作来自别的站点，已拒绝"`) && ja.includes(`"${EN}": "`),
     'a page that meets the refusal says it in words: fetchJson and api() turn {error:\'cross-site\'} into 「这次操作来自别的站点，已拒绝」 (zh / ja / en), the code kept');
 }

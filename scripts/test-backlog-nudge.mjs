@@ -152,6 +152,9 @@ const mkRoutes = (mod, settingKeyReads = []) => {
     let out, code = 200;
     const res = { json: (o) => { out = o; return res; }, status: (c) => { code = c; return res; } };
     routes[`${method} ${p}`]({ headers: { authorization: `Bearer ${tok}` }, query: {}, body: body || {} }, res);
+    // lane lg-store-writes, the U4/U5 cure: a CLAIM answers once task-groups.json holds it (the store writer's synchronous road)
+    // — a route not answered in its own run is answered when the suite lands the writer's owed writes, LOUDLY
+    if (out === undefined) { const r = require('../src/store-writer.js').storeWriter().flushSync(); if (r.left && r.left.length) throw new Error(`the store writer left owed writes: ${JSON.stringify(r.left)}`); }
     return { out, code };
   };
   return { routes, call };
