@@ -763,6 +763,19 @@ class AcpMessageManager extends MessageWindow {
 
 /** Store-side reader over the wrapper journal (no on-disk transcript exists
  *  for an ACP agent — the live buffer + sidecar are the whole truth). */
+// THE STATUS WITHOUT A SECOND CONVERSION (B-299b A3, lane bl-loop-a — 8.1 s in one hold measured: chatStatus converted the
+// whole history AGAIN into a throwaway manager at every attach, right after the rebuild had converted it): the status is the
+// conversation's own normalizer's when it holds the history (the attach's rebuild, a live session); else a STATUS-ONLY pass —
+// only the records that write the status (session / config / usage, and these five updates) go through a manager, in order.
+const STATUS_UPDATES = new Set(['available_commands_update', 'usage_update', 'current_mode_update', 'config_option_update', 'session_info_update']);
+const writesStatus = (r) => !!r && r.type === 'acp' && (r.kind === 'session' || r.kind === 'config' || r.kind === 'usage' || (r.kind === 'update' && !!r.update && STATUS_UPDATES.has(r.update.sessionUpdate)));
+/** The status a full conversion of `records` ends with, from the status records alone. */
+function statusOf(records, id = 'status') {
+  const mm = new AcpMessageManager(id);
+  mm.convertHistory((Array.isArray(records) ? records : []).filter(writesStatus));
+  return mm.status();
+}
+
 class AcpSessionMessages {
   constructor(session, sessionId, { buffersDir } = {}) {
     this._session = session;
@@ -790,9 +803,8 @@ class AcpSessionMessages {
   }
   chatStatus() {
     const meta = this.wrapperMeta();
-    const mm = new AcpMessageManager(this._sessionId || 'status');
-    mm.convertHistory(this.raw());
-    const st = mm.status();
+    const own = this._session && this._session._historyLoaded ? this._session._normalizer : null; // B-299b A3: the history it already converted
+    const st = own instanceof AcpMessageManager ? own.status() : statusOf(this.raw(), this._sessionId || 'status');
     const status = {
       model: st.model || meta?.model || '',
       permissionMode: st.permissionMode || meta?.agentMode || meta?.modes?.currentModeId || '',
@@ -819,4 +831,4 @@ class AcpSessionMessages {
 
 AcpMessageManager._seenUnknownUpdates = new Set();
 
-module.exports = { AcpMessageManager, AcpSessionMessages, parseAcpBufferRecords, collapseKindOf, toolNameOf };
+module.exports = { AcpMessageManager, AcpSessionMessages, parseAcpBufferRecords, collapseKindOf, toolNameOf, statusOf };

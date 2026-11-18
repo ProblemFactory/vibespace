@@ -96,6 +96,46 @@ ok(old && old.totalUsage.total_tokens === 717237 && old.totalUsage.cached_input_
 fs.writeFileSync(path.join(BUF, 'sess-acp.json'), J({ backend: 'opencode', usage: { used: 5000, size: 128000 } }));
 ok(new AcpSessionMessages({ buffer: buffer.split('\n')[0] + '\n' }, 'sess-acp', { buffersDir: BUF }).chatStatus().totalUsage === null, 'an ACP sidecar\'s {used, size} is no running total (no odometer invented)');
 
+// ②b B-299b A3 (lane bl-loop-a): THE STATUS WITHOUT A SECOND CONVERSION — chatStatus converted the whole history AGAIN at every
+// attach (8.1 s in one hold measured). A counter on the manager's record handling: the attach (the rebuild's normalizer holds
+// the history) converts 0 records for the status; a reader with no loaded normalizer (a reload, a stopped conversation) only
+// the status records; the answer equals a full conversion's. RED: the release's chatStatus (the whole history again).
+{
+  const long = [{ type: 'acp', kind: 'session', sessionId: REC.sessionId, cwd: '/w', how: 'new', model: 'gemini-4-argon-high', modeValues: ['default', 'plan'] }];
+  for (let k = 0; k < 40; k++) {
+    long.push({ type: 'acp', kind: 'user', msgId: `u${k}`, content: [{ type: 'text', text: `ask ${k}` }] });
+    long.push({ type: 'acp', kind: 'update', update: { sessionUpdate: 'agent_message_chunk', messageId: `m${k}`, content: { type: 'text', text: `answer ${k}` } } });
+    if (k % 10 === 3) long.push({ type: 'acp', kind: 'update', update: { sessionUpdate: 'current_mode_update', modeId: k % 20 === 3 ? 'plan' : 'default' } });
+    if (k % 10 === 7) long.push({ type: 'acp', kind: 'update', update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: `cmd${k}`, description: 'd' }] } });
+    if (k % 10 === 9) long.push({ ...REC, ts: `2026-10-21T14:${10 + k}:00Z` });
+  }
+  long.push({ type: 'acp', kind: 'update', update: { sessionUpdate: 'session_info_update', title: 'A long one' } });
+  const lbuf = long.map((r) => J(r)).join('\n') + '\n';
+  let seen = 0; const pr = AcpMessageManager.prototype._processRecord;
+  AcpMessageManager.prototype._processRecord = function (...a) { seen++; return pr.apply(this, a); };
+  const count = (fn) => { const n0 = seen; const v = fn(); return { v, n: seen - n0 }; };
+  let attach, reload, rel, full;
+  try {
+    const sess = { buffer: lbuf };
+    const built = new AcpMessageManager('sess-long'); built.convertHistory(new AcpSessionMessages(sess, 'sess-long', { buffersDir: BUF }).raw());
+    sess._normalizer = built; sess._historyLoaded = true;                       // what the attach's rebuild leaves
+    attach = count(() => new AcpSessionMessages(sess, 'sess-long', { buffersDir: BUF }).chatStatus());
+    reload = count(() => new AcpSessionMessages({ buffer: lbuf }, 'sess-long', { buffersDir: BUF }).chatStatus());
+    const src = fs.readFileSync(path.join(REPO, 'src/acp-message-manager.js'), 'utf8'), NEW = "const st = own instanceof AcpMessageManager ? own.status() : statusOf(this.raw(), this._sessionId || 'status');";
+    const R = mutantCopies('acp-status-release', REPO).load('src/acp-message-manager.js', src.replace(NEW, "const mm = new AcpMessageManager(this._sessionId || 'status'); mm.convertHistory(this.raw()); const st = mm.status();"), 'release');
+    const rs = { buffer: lbuf }; rs._normalizer = built; rs._historyLoaded = true;
+    let rseen = 0; const rpr = R.AcpMessageManager.prototype._processRecord; R.AcpMessageManager.prototype._processRecord = function (...a) { rseen++; return rpr.apply(this, a); };
+    rel = { v: new R.AcpSessionMessages(rs, 'sess-long', { buffersDir: BUF }).chatStatus(), n: rseen, once: src.split(NEW).length === 2 };
+    full = new AcpMessageManager('full'); full.convertHistory(long);
+  } finally { AcpMessageManager.prototype._processRecord = pr; }
+  const statusRecs = long.filter((r) => r.kind === 'session' || r.kind === 'usage' || (r.kind === 'update' && /^(?:current_mode|available_commands|session_info)_update$/.test(r.update.sessionUpdate))).length;
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  ok(attach.n === 0 && reload.n === statusRecs && reload.n < long.length / 5 && rel.once && rel.n >= long.length,
+    `the status's record handling: the attach ${attach.n} (its rebuild's normalizer answers), a reload ${reload.n} of ${long.length} (the status records only); RED the release's chatStatus: ${rel.n} (the whole history again)`);
+  ok(same(attach.v, rel.v) && same(reload.v, rel.v) && same(require(path.join(REPO, 'src/acp-message-manager.js')).statusOf(long), full.status()) && attach.v.permissionMode === 'default' && attach.v.slashCommands.join() === 'cmd37' && attach.v.lastUsage.input_tokens === 2379,
+    'the answers equal the release\'s full conversion (the mode, the commands, the usage — the last of each)', { attach: attach.v, rel: rel.v });
+}
+
 console.log('— ③ THE REAL BAR (a fake DOM) per harness, gated on its declared row');
 class FakeEl {
   constructor(tag) { this.tagName = String(tag).toUpperCase(); this.attrs = new Map(); this.childNodes = []; this.parentNode = null; this._html = ''; this.style = {}; this.dataset = {}; }
