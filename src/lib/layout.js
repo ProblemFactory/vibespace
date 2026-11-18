@@ -2026,15 +2026,15 @@ class LayoutManager {
     b.hidden = !show;
     b.textContent = show ? t('Resume all {n}', { n }) : '';
   }
-  paintOfferDoors() {
+  /** Every door repainted; `judge` (the sidebar's merges only — never an offer kept, a press, a door's birth): a door whose bar left
+   *  the page (the window closed or resumed), or never stood on it at two such merges in a row, is dropped (B-6352 cure 2: any
+   *  paint used to judge, so a bar detached across an offer's repaints lost its door). */
+  paintOfferDoors({ judge = false } = {}) {
     if (!this._offerDoors || !this._offerDoors.size) return;
     const left = this._offerLeft();
     for (const b of this._offerDoors) {
-      if (b.isConnected) b._shown = true;
-      // its bar left the page (the window closed or resumed) — or never stood on it at two of THESE paints (the sidebar's merges, an
-      // offer kept; never offerDoor's own): dropped (B-6352 cure — a door whose window closed before any paint stayed for the page's life)
-      else if (b._shown || b._seenOff) { this._offerDoors.delete(b); continue; }
-      else b._seenOff = true;
+      if (b.isConnected) { b._shown = true; b._seenOff = false; }
+      else if (judge) { if (b._shown || b._seenOff) { this._offerDoors.delete(b); continue; } b._seenOff = true; }
       this._paintDoor(b, left);
     }
   }
