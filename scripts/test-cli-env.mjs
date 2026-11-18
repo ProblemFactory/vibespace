@@ -27,10 +27,13 @@
 //      provisional one at the first spawn (+ its PATH rides the spawn), a cached shell path costs no ask, a person's
 //      Re-check re-asks (a newer install adopted), a gone path re-asks, a timeout keeps the provisional path AND names
 //      it, found-nothing / an alias REFUSE by name (CliMissing: cli, shell, looked, hint), the route's census fields;
+//   ⑥b THE HARNESS FILTER'S FACT (B-544d: /api/home `cli`, the Settings window's `when: { harness }`): the login shell's
+//      verdict once asked (no program ⇒ absent, though the boot path is absolute), the boot fact before; a read never asks;
 // real-cli-env: NO agent CLI runs here — `command -v codex` above is prose; every shell is a scratch sh script, every CLI a
 // scratch `exit 0` file, and the vendor keys planted in ⑤ exist to prove the shell ask strips them.
 //   ⑦ MUTANTS: fail-closed removed ⇒ the refusal legs RED; the sentinel parse removed ⇒ the banner becomes the answer
-//      (RED); the env unsanitized ⇒ the token leg RED; the bound removed ⇒ the timeout leg RED.
+//      (RED); the env unsanitized ⇒ the token leg RED; the bound removed ⇒ the timeout leg RED; the filter reading the
+//      boot path only (the shell's verdict ignored, B-544d) ⇒ ⑥b's after-none leg RED.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -306,6 +309,7 @@ console.log('③ wiring');
   ok('…and hands a descriptor\'s machineStatus the CHECKED path (never the boot answer)', /machineStatus\(\{ cmd: cmdOf\(h\.id\) \}\)/.test(rt) && !/machineStatus\(\{ cmd: cliCmds\?\.current/.test(rt));
   ok('forSpawn and check share ONE single-flight lookup (`lookup`: one shell ask, one hub walk)', (cc.match(/await lookup\(backend, e\)/g) || []).length === 1 && (cc.match(/return lookup\(backend, e\)/g) || []).length >= 1 && (cc.match(/await askOf\(e\.name\)/g) || []).length === 1 && (cc.match(/await resolve\(e\.name\)/g) || []).length === 1);
   ok('nothing checks on a timer (no setInterval; the ONE setTimeout is the shell ask\'s bound — it ENDS an ask, never starts one; the route is the only caller of check)', !/setInterval/.test(cc) && (cc.match(/setTimeout\(/g) || []).length === 1 && /timer = setTimeout\(\(\) => done\(\{ kind: 'unanswered', why: 'timeout' \}\), timeoutMs\);/.test(cc) && (rt.match(/cliCmds\.check\(/g) || []).length === 1);
+  ok('B-544d: /api/home\'s harness filter (`cli`) reads THE ONE fact (cliCmds.resolvedHere — the shell\'s verdict, never an ask), not the boot path / ACP_COMMANDS', /row\.cli = cliCmds\.resolvedHere\(h\.id, \{ unaskedBare: !!\(h\.acp \|\| h\.exe\) \}\);/.test(ce) && /installed: \(h\.acp \|\| h\.exe\) \? !!ACP_COMMANDS\[h\.id\] && !\(cliCmds\.census\(h\.id\) \|\| \{\}\)\.missing : true/.test(ce) && !/row\.cli = \(h\.acp \|\| h\.exe\) \? !!ACP_COMMANDS/.test(ce) && /const missing = missingOf\(e\);/.test(cc));
   ok('cli-env still registers claude, codex and every ACP / exe harness (the CLIs a read checks)', /cliCmds\.register\('claude'/.test(ce) && /cliCmds\.register\('codex'/.test(ce) && /for \(const id of Object\.keys\(ACP_COMMANDS\)\)[\s\S]{0,40}cliCmds\.register\(id/.test(ce));
   ok('Manage agents: Install and Re-check mark the next local status read as a person\'s (`?recheck=1`), once', /instBtn\.onclick = \(\) => \{ if \(!selectedHost\) this\._cliRecheckDue = true; run\(b\.installCmd\); \};/.test(ma) && /reBtn\.onclick = \(\) => \{ this\._cliRecheckDue = true; refresh\(\); \};/.test(ma) && /if \(recheck\) this\._cliRecheckDue = false;/.test(ma) && /`\/api\/backend-status\$\{recheck \? '\?recheck=1' : ''\}`/.test(ma));
   ok('…and the account ⋯ Re-check of an isolated-home roster forces it too', /this\._cliRecheckDue = true; \/\/ the refresh below also looks for the CLI again/.test(ma));
@@ -512,6 +516,40 @@ if (LSmod && typeof CLI.loginShellOf === 'function') {
 console.log('⑥ the registry on the real default road (SHELL = a scratch shell)');
 for (const r of await registryLegs(CLI)) ok(r.name, r.pass, r.detail);
 
+/** ⑥b THE HARNESS FILTER'S FACT (B-544d) — rows over a module (the real one or a mutant copy); no file, no shell: the ask,
+ *  the hub's walk and the access are stubs, so a copy runs beside ⑦'s others on no shared state. */
+async function filterLegs(mod) {
+  const out = [];
+  const leg = (name, pass, detail) => out.push({ name, pass: !!pass, detail });
+  const HUBP = '/hub/bin/codex', NVMP = '/u/.nvm/bin/opencode';
+  let asked = 0;
+  const c = mod.createCliCmds({ ask: async () => { asked++; return { kind: 'none', shell: '/bin/zsh', shellPath: '/u/bin' }; }, resolve: async () => HUBP, usable: async (p) => p === HUBP, looked: () => ['/hub/bin'], log: () => {} });
+  c.register('codex', { name: 'codex', current: HUBP }); // the boot walk found it on the hub's PATH
+  c.register('opencode', { name: 'opencode', current: 'opencode' }); // the boot walk found nothing (the bare name)
+  c.register('claude', { name: '/opt/x/claude', current: '/opt/x/claude' }); // an operator's absolute command
+  const before = ['codex', 'opencode', 'claude', 'shell'].map((id) => (typeof c.resolvedHere === 'function' ? c.resolvedHere(id) : 'no resolvedHere'));
+  leg('THE FILTER before any ask = the boot fact: an absolute path here, the bare name not, an operator\'s path here, a harness with no CLI (shell) here — and the reads ask nothing', JSON.stringify(before) === '[true,false,true,true]' && asked === 0, JSON.stringify(before));
+  const acpBare = typeof c.resolvedHere === 'function' ? c.resolvedHere('opencode', { unaskedBare: true }) : 'no resolvedHere';
+  leg('…an ACP / exe harness\'s bare name NOT ASKED YET stays here (unaskedBare — its section shown until its shell says; a program only the person\'s shell finds is the case the law is for)', acpBare === true && asked === 0, String(acpBare));
+  let refused = null;
+  try { await c.forSpawn('codex', HUBP); } catch (e) { refused = e; }
+  const after = typeof c.resolvedHere === 'function' ? c.resolvedHere('codex') : 'no resolvedHere';
+  leg('THE FILTER after the login shell found NO program: absent — though the boot path is absolute and still runs (the create was refused the same way; the census says missing)', !!refused && refused.code === 'cli-missing' && c.current('codex') === HUBP && after === false && c.census('codex').missing === true, `after=${after} refused=${refused && refused.code}`);
+  const n = asked;
+  for (let i = 0; i < 5; i++) { if (typeof c.resolvedHere === 'function') c.resolvedHere('codex'); }
+  leg('…a read NEVER asks the shell (five reads, no ask — a page load is not a person\'s press)', asked === n && n === 1, `asks ${n} → ${asked}`);
+  try { await c.forSpawn('opencode', 'opencode'); } catch { /* refused: the shell holds none */ }
+  const acpAfter = typeof c.resolvedHere === 'function' ? c.resolvedHere('opencode', { unaskedBare: true }) : 'no resolvedHere';
+  leg('…and once ITS shell found no program, the ACP harness is not here either (unaskedBare applies only before the ask)', acpAfter === false && c.census('opencode').missing === true, String(acpAfter));
+  const c2 = mod.createCliCmds({ ask: async () => ({ kind: 'path', path: NVMP, via: 'program', shell: '/bin/zsh', shellPath: '/u/.nvm/bin' }), resolve: async () => null, usable: async () => true, log: () => {} });
+  c2.register('opencode', { name: 'opencode', current: 'opencode' });
+  const got = await c2.forSpawn('opencode', 'opencode');
+  leg('THE FILTER after the shell FOUND it (the hub\'s walk had not): here', got === NVMP && typeof c2.resolvedHere === 'function' && c2.resolvedHere('opencode') === true);
+  return out;
+}
+console.log('⑥b the harness filter\'s fact (B-544d): the shell\'s verdict, read, never asked');
+for (const r of await filterLegs(CLI)) ok(r.name, r.pass, r.detail);
+
 // ⑦'s mutants START here and run beside ⑧–⑩ (disjoint scratch state); their rows print after ⑩
 const SEVEN = (() => {
   const cc = read('src/server/cli-cmd.js');
@@ -519,6 +557,7 @@ const SEVEN = (() => {
     ['fail-closed removed (found nothing ⇒ spawn the old path)', '      if (p) return p;\n      const r = refusal(backend, e);', '      if (p || true) return p || cmd;\n      const r = refusal(backend, e);', (m) => registryLegs(m, { slow: false }), /FAIL CLOSED|REFUSED by that word|refused too/],
     ['sentinel parse removed (the first printed line is the answer)', '      const p = LS.parseShellAnswer(out);', "      const p = { complete: true, pathDone: true, cv: out.split('\\n').map((l) => l.trim()).filter(Boolean)[0] || '', path: null };", (m) => rungLegs(m, { groups: ['noisy'] }), /LAST pair wins|kind:none/],
     ['env unsanitized (the hub\'s process.env handed to the shell)', "env: serviceEnv(env, { keep: ['USER', 'LOGNAME'], add: { SHELL: shell, TERM: 'dumb', VIBESPACE_SHELL_PROBE: '1' } })", "env: { ...env, SHELL: shell }", (m) => rungLegs(m, { groups: ['env'] }), /SANITIZED ENV/],
+    ['filter boot-only (B-544d: the shell\'s verdict ignored — the pre-fix /api/home)', '      if (missingOf(e)) return false;\n      return isAbs(e.current) || (!e.answer && !!unaskedBare);', '      return isAbs(e.current) || !!unaskedBare;', (m) => filterLegs(m), /^THE FILTER after the login shell found NO program/],
     ['the bound removed (its timer ends nothing)', "    timer = setTimeout(() => done({ kind: 'unanswered', why: 'timeout' }), timeoutMs);", '    timer = setTimeout(() => { }, timeoutMs);', (m) => rungLegs(m, { groups: ['sleepy'], boundGuardMs: 40 }), /unanswered:timeout/],
   ];
   const runs = MUT.map(([label, from, to, legs]) => cc.includes(from)
@@ -722,7 +761,7 @@ console.log('⑦ mutants of the shell rung (patched copies outside the tree, jud
     const red = reds[i];
     ok(`mutant «${label}» ⇒ RED (${red.length} red: ${red.slice(0, 2).join(' | ').slice(0, 160)})`, red.some((n) => want.test(n)), red.join(' | ').slice(0, 300));
   });
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 7 })) ok(r.name, r.pass, r.detail); // ④'s 3 + ⑦'s 4
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(r.name, r.pass, r.detail); // ④'s 3 + ⑦'s 5
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);

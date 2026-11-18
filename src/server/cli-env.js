@@ -178,14 +178,14 @@ for (const id of Object.keys(ACP_COMMANDS)) {
  *  verdict instead of shipping a guess. */
 function harnessAvailability() {
   return listHarnesses().map((h) => {
-    const row = { id: h.id, label: h.label, kind: h.kind, installed: (h.acp || h.exe) ? !!ACP_COMMANDS[h.id] : true, ...(h.acp ? { caps: { fork: !!capsOf(h.id).fork } } : {}) };
+    // B-544d: an ACP / exe harness the login shell found NO program for leaves the New Session picker too (a create is refused)
+    const row = { id: h.id, label: h.label, kind: h.kind, installed: (h.acp || h.exe) ? !!ACP_COMMANDS[h.id] && !(cliCmds.census(h.id) || {}).missing : true, ...(h.acp ? { caps: { fork: !!capsOf(h.id).fork } } : {}) };
     // `cli` (B-df40 part 2): did this harness's CLI RESOLVE on this machine? `installed` keeps claude/codex/shell
     // listed in the New Session picker whatever the PATH says; the Settings window hides a harness's section
-    // (`when: { harness }`) only on this fact. cliCmds holds the boot-resolved path (an absolute one) or, when
-    // nothing resolved, the bare name — and a later spawn that re-resolves it updates it. A harness with no
-    // registered command (shell) counts as present.
-    const cur = cliCmds.current(h.id);
-    row.cli = (h.acp || h.exe) ? !!ACP_COMMANDS[h.id] : cur == null || String(cur).startsWith('/');
+    // (`when: { harness }`) only on this fact. B-544d: THE LOGIN SHELL'S VERDICT once it was asked (it found no
+    // program ⇒ absent, though the boot path is absolute), else the boot fact (an absolute path; an ACP / exe harness's
+    // bare name stays present until its shell is asked, as before) — read, never asked, here (cli-cmd.js resolvedHere).
+    row.cli = cliCmds.resolvedHere(h.id, { unaskedBare: !!(h.acp || h.exe) });
     // A harness whose STORE is BROKEN must say so where the user looks (the
     // 2.369.42 runaway burned for two hours in silence) — the ONE predicate,
     // shared with the live push below (see storeFailureReason).

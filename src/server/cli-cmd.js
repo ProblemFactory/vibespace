@@ -234,6 +234,9 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
   const adoptedHooks = [];
   const adopted = (backend, p) => { for (const fn of adoptedHooks) { try { fn(backend, p); } catch { } } };
   const isAbs = (p) => typeof p === 'string' && p.startsWith('/');
+  // MISSING (the one predicate the census and the harness filter share): the person's login shell was asked and holds no
+  // program for the word — an operator's absolute command is never asked, so it is never missing by the shell
+  const missingOf = (e) => !isAbs(e.name) && !!e.answer && e.answer.kind === 'none';
   const said = (a) => (a && a.shell ? `your ${LS.shellName(a.shell)}` : 'your login shell');
   // THE ONE LOOKUP (single-flight: forSpawn and check share it — callers that land together share ONE ask, one adapter
   // hand-off, one journal line). Released the moment it settles, so a CLI that stays missing is asked about again by the
@@ -374,12 +377,24 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
       if (force && await usable(e.current)) return e.current;
       return lookup(backend, e);
     },
+    /** THE HARNESS FILTER'S FACT (B-544d: the Settings window's `when: { harness }` and /api/home's `cli`): is this CLI here?
+     *  A READ of what is known, NEVER an ask (a page load is not a person's press): the login shell found no program ⇒ NOT
+     *  here, whatever path the hub's boot walk holds (a create is refused by name the same way); otherwise the boot fact —
+     *  an absolute path ⇒ here; the bare name (the hub's walk found none, the shell not asked yet) ⇒ `unaskedBare` (the
+     *  caller's boot fact: an ACP / exe harness's section stays shown until its shell says — a program only the person's
+     *  shell finds is the case the shell law exists for). A harness with no registered CLI (shell) ⇒ here. */
+    resolvedHere(backend, { unaskedBare = false } = {}) {
+      const e = entries.get(backend);
+      if (!e) return true;
+      if (missingOf(e)) return false;
+      return isAbs(e.current) || (!e.answer && !!unaskedBare);
+    },
     /** THE OBSERVED ROW (Manage agents' census line; /api/backend-status): where the CLI was found and by whom. */
     census(backend) {
       const e = entries.get(backend);
       if (!e) return null;
       const a = e.answer;
-      const missing = !isAbs(e.name) && !!a && a.kind === 'none';
+      const missing = missingOf(e);
       return {
         provenance: e.provenance,
         shell: a && a.shell ? LS.shellName(a.shell) : null,
