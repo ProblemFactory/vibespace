@@ -279,7 +279,7 @@ async function restJudge(ENGm) {
   const fetchFn = async (url, init = {}) => {
     const c = { url: String(url), method: init.method || 'GET', form: init.body instanceof FormData }; calls.push(c);
     if (c.method === 'GET') return jsonRes(200, { code: 0, data: { items: [], has_more: false } });
-    if (refuse && c.form && c.url.includes('/im/v1/files')) return jsonRes(400, LF.answers.scopeRefusal);
+    if (c.form && c.url.includes('/im/v1/files')) return refuse ? jsonRes(400, LF.answers.scopeRefusal) : jsonRes(200, LF.answers.file);   // r4: a FILE upload answers a file_key (the image answer failed the rest's own send)
     return c.form ? jsonRes(200, LF.answers.image) : jsonRes(200, LF.answers.message);
   };
   const A = lark.create({ id: 'l', options: {} }, { resolveIntegration: () => CRED, fetch: fetchFn, now: () => T0, tokens: tokens({ access_token: 'u-fixture-user-token', expiresAt: T0 + 3600e3, refresh_token: 'r', refreshExpiresAt: T0 + 30 * 86400e3, scopes: ['im:message', 'im:message.send_as_user', 'im:resource'] }) });
