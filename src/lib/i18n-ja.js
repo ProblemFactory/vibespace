@@ -12452,7 +12452,7 @@ export default {
   "replaced": "差し替え済み",
   "The agent replaced this draft with a newer one — click to see it": "エージェントが新しい下書きに差し替えました — クリックで表示",
   "Send the rest": "残りを送信",
-  "Sends only the {n} files that did not land, as a new message": "届かなかった {n} 個のファイルだけを新しいメッセージとして送ります",
+  "Sends only the files that did not land ({n}), as a new message": "届かなかったファイル（{n} 個）だけを新しいメッセージとして送ります",
   "Sent the rest": "残りを送信しました",
   "Another reply to this message is waiting — drafted by {who}": "このメッセージへの別の返信が承認待ちです — {who} の下書き",
   "Another reply to this message is being sent — drafted by {who}": "このメッセージへの別の返信を送信中です — {who} の下書き",

@@ -2092,7 +2092,7 @@ const chanAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   if (r && r.badSpec) return res.status(400).json({ ...r, error: r.error || 'refused', code });   // lane agent-watch-parity: a watch row the dialog's validators refuse (src/channel-watch-spec.js) — a request to fix, never a retry
-  const status = code === 'not-found' ? 404 : code === 'not-yours' ? 403 : code === 'send-not-available' || code === 'account-changed' || code === 'compose-not-available' || code === 'not-withdrawable' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' || code === 'bad-filter' ? 400 : code === 'stopped' ? 503 : code === 'no-access' || code === 'excepted' ? 403 : code === 'except_conflicts' || code === 'except_unnamed' ? 409 : code === 'not-watching' ? 404 : code === 'watcher-needs-access' ? 400 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503; R4: an adapter that cannot start a conversation a 409; 2026-09-27: somebody else's proposal a 403, one past withdrawing a 409
+  const status = code === 'not-found' ? 404 : code === 'not-yours' ? 403 : code === 'send-not-available' || code === 'account-changed' || code === 'compose-not-available' || code === 'not-withdrawable' || code === 'not-sent' || code === 'already' || code === 'nothing-left' || code === 'files-gone' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' || code === 'bad-filter' ? 400 : code === 'stopped' ? 503 : code === 'no-access' || code === 'excepted' ? 403 : code === 'except_conflicts' || code === 'except_unnamed' ? 409 : code === 'not-watching' ? 404 : code === 'watcher-needs-access' ? 400 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503; R4: an adapter that cannot start a conversation a 409; 2026-09-27: somebody else's proposal a 403, one past withdrawing a 409
   if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
   return res.status(status).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
 };
@@ -2390,7 +2390,7 @@ app.post('/api/agent/channels/proposals/:id/resend', async (req, res) => {
   if (who.s && !who.job) { const ownW = ownConversationIdOf(who.s); if (!ownW.cid) return res.status(409).json({ error: ownW.why, code: 'bad-member' }); }
   const by = who.s ? channelPrincipal(who.s, who.id) : (who.cid ? { kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [] } : null);
   if (!by) return res.status(409).json({ error: NO_CID_YET, code: 'bad-member' });
-  try { chanAnswer(res, await eng.resendRest(String(req.params.id), { ctx: by })); }
+  try { const r = await eng.resendRest(String(req.params.id), { ctx: by }); if (r && r.ok && r.proposal) { try { touchChannel(who.id, [{ op: 'reply', adapterId: r.proposal.adapterId, convId: r.proposal.convId, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id, placement: r.proposal.placement || null }]); } catch { } } chanAnswer(res, r); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // R4: SEARCH the messages the agent can SEE (reach filters every hit; the

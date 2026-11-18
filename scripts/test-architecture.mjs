@@ -3485,13 +3485,16 @@ await section(async () => {
   const GATE = /\b(?:ACL\.canSee\(|reachFor\(ctx\b|reachOf\(rec, en\)|stillSees\((?:ctx|\{)|agentProposalView\((?:ctx|by)\b|mayHear\(|stillInEffect\(|stillWatched\b|drafterSees\(|withdrawRefusal\(|F\.rowNames\(r, ctx\))/g;
   const DATA = /\b(?:store\.(?:readTail|readSide|search|findRecord)\(|withView\(|threadRead\(|reactionsFor\(|proposalView\b|deliver\.(?:stashFor|deliverToConversation)\()/;
   // lane channel-attach-read: an agent's attachment hands EVERY answer to agentAttachmentAnswer, which asks reach again
-  const FOLLOW = { withdrawProposal: ['withdrawNow'], attachment: ['agentAttachmentAnswer'] };
+  const FOLLOW = { withdrawProposal: ['withdrawNow'], attachment: ['agentAttachmentAnswer'], resendRest: ['resendRestNow'] };   // lane bl-msg B-da74: one press per proposal, the body judged as its own row
   // lane pod-oauth-callback: an answer about an account TYPE — no conversation's facts, so no reach to ask (judged by name)
   const NO_CONVERSATION = {
+    withdrawWatchRequest: 'lane bl-msg B-ae13: the asker\'s OWN wake request taken back — its id and «withdrawn», nothing a conversation produced',
     connectOffer: 'the Connect row an agent puts in the chat: a vendor TYPE\'s label, glyph, whether a company app is offered, how many accounts of it hold a sign-in — no conversation, nothing of one',
     connectOffers: 'the types no account of which holds a sign-in (`list`\'s not-connected line) — each connectOffer above',
   };
   const EXEMPT_AWAIT = {
+    withdrawWatchRequest: 'lane bl-msg B-ae13: answers the caller\'s own request record; the await is that record\'s index write',
+    resendRestNow: 'lane bl-msg B-da74: answers propose()\'s own answer (propose asks reach again itself) or a refusal about the caller\'s own sent proposal; the awaits are the kept files\' check and the stamp write',
     request: 'answers the caller\'s OWN request record (its reason, the conversation key it named) — nothing the conversation produced; the await is the index write of that record',
     withdrawProposal: 'hands its answer to withdrawNow (judged as its own row)',
     attachment: 'an agent\'s answer after the fetch / the join / the held write goes through agentAttachmentAnswer, which asks reach AGAIN (judged as its own row); the owner\'s window calls it with no principal',

@@ -12453,7 +12453,7 @@ export default {
   "replaced": "已被替换",
   "The agent replaced this draft with a newer one — click to see it": "agent 用一条更新的草稿替换了它 — 点击查看",
   "Send the rest": "发送其余部分",
-  "Sends only the {n} files that did not land, as a new message": "只把未送达的 {n} 个文件作为一条新消息再发送",
+  "Sends only the files that did not land ({n}), as a new message": "只把未送达的文件（{n} 个）作为一条新消息再发送",
   "Sent the rest": "其余部分已发送",
   "Another reply to this message is waiting — drafted by {who}": "对这条消息的另一条回复正在等待 — 由 {who} 起草",
   "Another reply to this message is being sent — drafted by {who}": "对这条消息的另一条回复正在发送 — 由 {who} 起草",

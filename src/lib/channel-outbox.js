@@ -676,13 +676,15 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
     const act = el('div', 'chan-prop-actions');
     const rest = btn(t('Send the rest'), null, 'mounts-btn-primary');
     rest.dataset.resend = '1';
-    rest.title = t('Sends only the {n} files that did not land, as a new message', { n: Number(p.restLeft) });
+    rest.title = t('Sends only the files that did not land ({n}), as a new message', { n: Number(p.restLeft) });
     rest.onclick = armedOnly(card, async () => {
       rest.disabled = true;
       const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/resend`, {});
       if (!r) { rest.disabled = false; return; }
-      const sent = !!(r.proposal && r.proposal.state === 'sent');
-      showToast(sent ? t('Sent the rest') : t('Not sent: {why}', { why: (r.proposal && r.proposal.reason) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
+      const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;   // r2: the outcome's own words (held / lost / partly), as Approve says them
+      const sent = !!(r.proposal && r.proposal.state === 'sent') && !(o && o.kind === 'partial');
+      if (!sent && o && (o.kind === 'held' || r.proposal.state === 'unknown' || o.kind === 'partial')) showToast(P.outcomeText(o, { t }), { type: 'info' });
+      else showToast(sent ? t('Sent the rest') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText, sendWhyText: chanCaps.sendWhyText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
     });
     act.appendChild(rest);
     card.appendChild(act);

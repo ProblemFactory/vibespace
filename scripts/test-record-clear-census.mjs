@@ -407,6 +407,7 @@ const ROUTES = {
   'POST /api/agent/channels/reply': 'meta',
   'POST /api/agent/channels/compose': 'meta',
   'POST /api/agent/channels/proposals/:id/withdraw': 'meta',
+  'POST /api/agent/channels/proposals/:id/resend': 'meta',   // lane bl-msg B-da74: the drafting agent proposes the rest
   'GET /api/agent/channels/search': 'meta',
   'GET /api/agent/channels/status': 'meta',
   'GET /api/agent/channels/watches': 'meta',           // lane agent-watch-parity: the caller's own notification rows read back (msgCaller identity) — no store's text
@@ -419,6 +420,7 @@ const ROUTES = {
   'POST /api/channels/:adapterId/:convId/send': 'meta',
   'POST /api/channels/outbox/:id/approve': 'meta',
   'POST /api/channels/outbox/:id/reject': 'meta',
+  'POST /api/channels/outbox/:id/resend': 'meta',   // lane bl-msg B-da74: the owner's «Send the rest»
   'DELETE /api/mounts/:id': 'meta',                    // mounts-plugins-wiring: the browser keeper's deps (getTasks → group ids / browserProfileId) sit lexically after this registration
   // ── the .197 integration: the other lanes' routes the derived census now sees ──
   'POST /api/ports/kill-orphan': 'meta',               // server.js: ends a port's orphan pid; the store tokens are lane-pairing's ExitProxyManager construction (userTodos / tasks.groupsForSession) that sits lexically after this registration

@@ -396,7 +396,7 @@ for (const mode of ['password', 'open']) {
   ];
   ok(pins.every((p) => p[1]), `every cookie door of the upgrade dispatcher and the per-mount / per-page doors ask auth.requestAuthed (${pins.length} pins)`, pins.filter((p) => !p[1]).map((p) => p[0]));
   const raw = [];
-  const WITHDRAW = /\(req\.headers\.cookie \|\| req\.headers\['sec-fetch-site'\]\)\) return res\.status\(403\)\.json\(\{ error: 'only the agent that proposed it can withdraw/;
+  const WITHDRAW = /\(req\.headers\.cookie \|\| req\.headers\['sec-fetch-site'\]\)\) return res\.status\(403\)\.json\(\{ error: 'only the agent that (?:proposed it can withdraw|drafted it can ask to resend)/;   // lane bl-msg B-da74: the resend route's role refusal, the same declared shape
   for (const f of hubFiles()) { if (f === 'src/auth.js') continue; codeLines(readRepo(f)).forEach((l, i) => { if (/\bcookieToken\(|\.checkToken\(|headers\.cookie\b|headers\[['"]cookie['"]\]/.test(l) && !(f === 'src/agent-routes.js' && WITHDRAW.test(l))) raw.push(`${f}:${i + 1}`); }); }
   ok(raw.length === 0, 'no file but src/auth.js reads the session cookie (cookieToken / checkToken / the Cookie header) — every cookie decision passes the verdict; the withdraw route\'s presence check is the declared role refusal (⑥)', raw);
 }
@@ -535,7 +535,7 @@ function beforeGate(src) {
   // no second origin rule: who reads Sec-Fetch-Site / Origin in the hub tree, and why
   const READERS = [
     ['src/write-origin.js', 'THE rule'],
-    ['src/agent-routes.js', /req\.headers\['sec-fetch-site'\]\)\) return res\.status\(403\)\.json\(\{ error: 'only the agent that proposed it can withdraw/, 'a ROLE refusal, not an origin rule: a browser (the owner\'s own tab too) holds no agent identity — withdraw is the drafting agent\'s verb, refused by name (verify r2 LOW 6, test-channels-engine)'],
+    ['src/agent-routes.js', /req\.headers\['sec-fetch-site'\]\)\) return res\.status\(403\)\.json\(\{ error: 'only the agent that (?:proposed it can withdraw|drafted it can ask to resend)/, 'a ROLE refusal, not an origin rule: a browser (the owner\'s own tab too) holds no agent identity — withdraw is the drafting agent\'s verb, refused by name (verify r2 LOW 6, test-channels-engine)'],
     ['src/server/mounts-plugins-wiring.js', /const origin = req\.headers\.origin \|\| /, 'a FACT, not a rule: the browser\'s Origin is the first dial-address row (test-dial-facts\' receiver census)'],
     ['src/routes/channels.js', /const o = req\.headers && req\.headers\.origin;/, 'a FACT, not a rule: the address the browser used, carried in the Slack consent state so the relay sends the browser back (slack-manifest judges it again)'],
   ];

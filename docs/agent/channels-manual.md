@@ -50,7 +50,8 @@ vibespace-channels unreact <conv> <msg id> <emoji key> [--why "…"]
                                                  # PROPOSE a reaction (the user approves it unless the account's policy is direct)
 vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"] [--attach <path>]… [--replaces <proposalId>]
                                                  # PROPOSE a NEW message (needs access to the whole account)
-vibespace-channels withdraw <proposalId> [--why "…"]
+vibespace-channels withdraw <proposalId> [--why "…"]   — also YOUR open wake request (its wr- id), once its reply came
+vibespace-channels resend <proposalId>   — YOUR sent proposal whose files did not all land: proposes ONLY those, for the user's approval
                                                  # take back YOUR proposal the user has not decided yet
 vibespace-channels proposals [--all]             # YOUR proposals here, one line each: id · kind · conversation · what it says · state (default: awaiting the user)
 vibespace-channels recall <conv> <msg id> [--why "…"]
