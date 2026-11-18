@@ -1180,7 +1180,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             _lockedModel: data.modelLock ? (data.lockModel || data.model || null) : null,
             _lockedContext: data._lockContext || null,   // B-6c55: the person's context ask beside the target (the repin sends both)
             _spawnContext: data._spawnContext || null,   // B-6c55: the context the spawn's --model carried
-            _settingsFileGoverns: sessionSpec && sessionSpec.settingsFileGoverns ? [...SFW.GOVERNED_KINDS] : [],   // B-8dcf item two: what the person's settings file governs (running-CLI pushes skip it)
+            _settingsFileGoverns: sessionSpec && sessionSpec.settingsFileGoverns ? [...SFW.GOVERNED_KINDS] : [],   // B-8dcf item two: what the person's settings file governs (running-CLI pushes skip it) — EVERY kind it covers (batch 21's cure)
             // Claude --fork-session mints a NEW session id at startup; this arms
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.

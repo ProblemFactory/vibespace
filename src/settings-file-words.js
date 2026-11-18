@@ -31,9 +31,8 @@ const SETTINGS_FILE_WORDS = Object.freeze({
   billingUnread: '{name} bills the subscription chosen for it, and whether the Claude settings of its machine name an apiKeyHelper could not be read, so your settings file was set aside for this start, all of it — to use the file, set its billing to «CLI login»',
 });
 const SETTINGS_FILE_KINDS = Object.freeze(Object.keys(SETTINGS_FILE_WORDS));
-/** the kinds a governing file covers (the three; billing is a set-aside, never a governing) */
-const GOVERNED_KINDS = Object.freeze(['outputStyle', 'noFallback', 'jobNotices']);
 /** the kinds a governing file covers (the three; the two billing kinds are a set-aside, never a governing) */
+const GOVERNED_KINDS = Object.freeze(['outputStyle', 'noFallback', 'jobNotices']);
 /** does the person's settings file govern `kind` for this running session? */
 const fileGoverns = (session, kind) => !!(session && Array.isArray(session._settingsFileGoverns) && session._settingsFileGoverns.includes(kind));
 /** the live settings row a kind stands for (harness-config-sync's push) */
