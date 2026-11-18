@@ -12,8 +12,10 @@
 //   ⑤ WHAT THE LOGIN HOLDS (主开发 20:28Z — the bound two-step code first, with a door to change or unbind it): BL.totpBoundRecord and
 //      the store's bindTotp over the real vault — the password, its slots and `rev` untouched; refusals by name. RED: the only road
 //      before was the add door, which cannot change the binding without the password. The row module still imports no dialog.
-//   ⑦ THE WALK (主开发 00:28Z): ONE drawing (drawPlan) and what a person reads from it (pageSays) held equal to the fill's verdict for
-//      every small case of the three rows — 2187 cases, 13122 subjects; RED controls = the follow-up's two faults compiled back in.
+//   ⑦ THE WALK (主开发 00:28Z; 03:08Z): ONE drawing (drawPlan) and what a person reads from it (pageSays) held equal to the GRANT MODEL's
+//      own admits, asked row by row (a second oracle, never byWhatOf — which is held to it too), for every case of 18 row shapes per
+//      row (two principals, two exceptions, the left-out one named directly, an except-only row, a stopped conversation): 17496
+//      cases; the marks «不在「全部」里» and «仍经由» held too; RED controls = six faults compiled back in.
 //   ⑥ THE CURE (主开发 22:41Z, three musts + shoulds): «by what» names Everyone and its Task Groups (RED: the empty-facts probe); the
 //      dialog's plan — Everyone as ONE line, its own grant removable beside a wider one, a stopped conversation a wider row holds;
 //      the agent's three refusals name the header's doors; the picker skips a locked row; a hidden press in the dialogs stays hidden.
@@ -215,63 +217,102 @@ console.log('⑥ THE CURE (主开发 22:41Z): Everyone and its groups by «by wh
     'MUST 2: the dialogs are form windows outside the Vault window\'s `.vw [hidden]` — their own rule keeps a hidden press hidden (.vw-btn sets display)');
 }
 
-console.log('⑦ THE WALK (主开发 00:28Z): for EVERY small case of the three rows, what the page says about each subject equals the fill\'s verdict');
+console.log('⑦ THE WALK (主开发 00:28Z; 03:08Z): for EVERY case of the three rows, what the page says about each subject equals the grant model\'s own admits');
 {
-  // THE CASES: each of the three rows (this account · any account on the site · any site) is nobody, one conversation (A), Everyone
-  // (with no «除了», or D, or M, or the Task Group G), or G (with no «除了», or M — its member — or D) — 9 × 9 × 9 = 729 cases, each
-  // drawn as each of the three dialogs. THE SUBJECTS: Everyone, G, A, D, M (a member of G), S (a stranger).
-  const A = conv('conv-a'), D = conv('conv-d'), Mm = conv('conv-m'), G = group('g1');
-  const OPTIONS = [null, { to: [A], except: [] }, ...[[], [D], [Mm], [G]].map((ex) => ({ to: [everyone], except: ex })), ...[[], [Mm], [D]].map((ex) => ({ to: [G], except: ex }))];
+  // THE ROW SHAPES (03:08Z: + two principals, two exceptions, the left-out conversation or member named directly, an except-only
+  // row, a stopped conversation): nobody · A · D · M · X (stopped) · A+G · Everyone+A · {} except D · Everyone except (none, D, M, G,
+  // X, D+M) · G except (none, M, D, M+D) — 18 per row, 18³ = 5832 shapes, each drawn as each of the three dialogs.
+  // THE SUBJECTS: Everyone, G, A, D, M (a member of G), S (a stranger), and X — a stopped conversation, a subject only where a row
+  // names it (as the dialog draws it).
+  const A = conv('conv-a'), D = conv('conv-d'), Mm = conv('conv-m'), G = group('g1'), X = conv('conv-x');
+  const OPTIONS = [null, ...[A, D, Mm, X].map((p) => ({ to: [p], except: [] })), { to: [A, G], except: [] }, { to: [everyone, A], except: [] }, { to: [], except: [D] },
+    ...[[], [D], [Mm], [G], [X], [D, Mm]].map((ex) => ({ to: [everyone], except: ex })), ...[[], [Mm], [D], [Mm, D]].map((ex) => ({ to: [G], except: ex }))];
   const SUBJ = { sessions: ['a', 'd', 'm', 's'].map((x) => ({ subject: `session:conv-${x}`, name: x.toUpperCase(), groupIds: x === 'm' ? ['g1'] : [] })), groups: [{ subject: 'group:g1', name: 'G' }] };
   const probes = BL.byWhatSubjects(SUBJ);
-  const SUBJECTS = [{ key: 'everyone', groupIds: [] }, { key: 'group:g1', groupIds: [] }, ...['a', 'd', 'm', 's'].map((x) => ({ key: `conversation:conv-${x}`, groupIds: x === 'm' ? ['g1'] : [] }))];
+  const BASE_SUBJECTS = [{ key: 'everyone', groupIds: [] }, { key: 'group:g1', groupIds: [] }, ...['a', 'd', 'm', 's'].map((x) => ({ key: `conversation:conv-${x}`, groupIds: x === 'm' ? ['g1'] : [] }))];
+  const XS = { key: 'conversation:conv-x', groupIds: [] };
   const RES = { 'this-account': LOGIN, 'any-account': `${ORIGIN}#*`, 'any-site': '*' };
-  const walk = (Mod) => {
+  // THE SECOND ORACLE (03:08Z): the grant model's own admits, asked row by row with a probe of the walk's own — never byWhatOf
+  const WALK_PROBE = '#walk-oracle';
+  const factsOf = (s) => (s.key === 'everyone' ? { conversationKey: WALK_PROBE } : s.key.startsWith('group:') ? { conversationKey: WALK_PROBE, groupIds: [s.key.slice(6)] } : { conversationKey: s.key.slice(13), groupIds: s.groupIds });
+  const named = (o, p) => !!o && [...o.to, ...o.except].some((q) => q === p);
+  // THE CASES, computed ONCE (they do not depend on the drawing): the rows, «by what», the oracle per scope and subject
+  const CASES = [];
+  let byWhatAgrees = 0, byWhatDiffers = 0; const differs = [];
+  for (const ta of OPTIONS) for (const aa of OPTIONS) for (const as of OPTIONS) {
+    const all = { 'this-account': ta, 'any-account': aa, 'any-site': as };
+    const raw = (sc) => (all[sc] ? [row(RES[sc], all[sc].to, all[sc].except)] : []);
+    const bw = BL.byWhatOf({ rows: { thisAccount: raw('this-account'), anyAccount: raw('any-account'), anySite: raw('any-site') }, subjects: probes });
+    for (const scope of M.SCOPES) {
+      const at = M.SCOPES.indexOf(scope);
+      const rows = {};
+      for (const sc of M.SCOPES) if (M.SCOPES.indexOf(sc) >= at) rows[sc] = all[sc] || (sc === scope ? { to: [], except: [] } : null);
+      const subjects = M.SCOPES.some((sc) => M.SCOPES.indexOf(sc) >= at && named(all[sc], X)) ? [...BASE_SUBJECTS, XS] : BASE_SUBJECTS;
+      const oracle = {};
+      for (const s of subjects) {
+        oracle[s.key] = M.SCOPES.filter((sc) => M.SCOPES.indexOf(sc) >= at && all[sc] && GM.admits(raw(sc), factsOf(s)).ok);
+        const viaBw = M.SCOPES.filter((sc) => M.SCOPES.indexOf(sc) >= at && (bw[s.key] || []).includes(sc));
+        if (JSON.stringify(viaBw) === JSON.stringify(oracle[s.key])) byWhatAgrees++; else { byWhatDiffers++; if (differs.length < 3) differs.push({ all, scope, subject: s.key, viaBw, oracle: oracle[s.key] }); }
+      }
+      CASES.push({ all, scope, at, rows, subjects, bw, oracle });
+    }
+  }
+  const outOf = (o, s) => !!o && o.except.some((p) => M.principalKeyOf(p) === s.key || (s.groupIds || []).some((g) => M.principalKeyOf(p) === `group:${g}`));
+  const holdsEveryone = (o) => !!o && o.to.some((p) => p.kind === 'everyone');
+  const walk = (Mod, stopAfter = Infinity) => {
     let cases = 0, checks = 0, wrong = 0; const first = [];
-    for (const ta of OPTIONS) for (const aa of OPTIONS) for (const as of OPTIONS) {
-      const all = { 'this-account': ta, 'any-account': aa, 'any-site': as };
-      const raw = (sc) => (all[sc] ? [row(RES[sc], all[sc].to, all[sc].except)] : []);
-      const bw = BL.byWhatOf({ rows: { thisAccount: raw('this-account'), anyAccount: raw('any-account'), anySite: raw('any-site') }, subjects: probes });
-      for (const scope of M.SCOPES) {
-        const at = M.SCOPES.indexOf(scope);
-        const rows = {};
-        for (const sc of M.SCOPES) if (M.SCOPES.indexOf(sc) >= at) rows[sc] = all[sc] || (sc === scope ? { to: [], except: [] } : null);
-        const plan = Mod.drawPlan({ byWhat: bw, scope, rows, subjects: SUBJECTS });
-        cases++;
-        for (const s of SUBJECTS) {
-          // THE VERDICT: the fill's own (GM.admits over each row) — at this dialog's scope and wider, narrowest first
-          const verdict = M.SCOPES.filter((sc) => M.SCOPES.indexOf(sc) >= at && (bw[s.key] || []).includes(sc));
-          const page = Mod.pageSays(plan, s);
-          const ownHere = (rows[scope].to || []).map(M.principalKeyOf).includes(s.key);
-          let good = page.admitted === (verdict.length > 0) && (!page.admitted || page.through === verdict[0]);
-          // the drawing ticks as THIS row's own exactly what the row holds — never a member admitted through its Task Group / Everyone
-          if (good) good = plan.selected.includes(s.key) === ownHere;
-          // a subject this row holds says ALSO the narrowest wider row that admits it — Everyone included (MUST 1)
-          if (good && ownHere) good = (page.also || null) === (verdict.filter((sc) => sc !== scope)[0] || null);
-          // Everyone admitted wider: the drawing names THAT row's exceptions (on its line, or beside its own chip)
-          if (good && s.key === 'everyone' && verdict.some((sc) => sc !== scope)) {
-            const x = verdict.find((sc) => sc !== scope);
-            good = !!plan.everyone && plan.everyone.through === x && JSON.stringify([...plan.everyone.except].sort()) === JSON.stringify((rows[x].except || []).map(M.principalKeyOf).sort());
-          }
-          checks++;
-          if (!good) { wrong++; if (first.length < 3) first.push({ scope, rows: all, subject: s.key, verdict, page }); }
+    for (const c of CASES) {
+      const plan = Mod.drawPlan({ byWhat: c.bw, scope: c.scope, rows: c.rows, subjects: c.subjects });
+      cases++;
+      for (const s of c.subjects) {
+        const verdict = c.oracle[s.key];
+        const page = Mod.pageSays(plan, s);
+        const ownHere = (c.rows[c.scope].to || []).map(M.principalKeyOf).includes(s.key);
+        let good = page.admitted === (verdict.length > 0) && (!page.admitted || page.through === verdict[0]);
+        if (good) good = plan.selected.includes(s.key) === ownHere;
+        if (good && ownHere) good = (page.also || null) === (verdict.filter((sc) => sc !== c.scope)[0] || null);
+        if (good && s.key === 'everyone' && verdict.some((sc) => sc !== c.scope)) {
+          const x = verdict.find((sc) => sc !== c.scope);
+          good = !!plan.everyone && plan.everyone.through === x && JSON.stringify([...plan.everyone.except].sort()) === JSON.stringify((c.rows[x].except || []).map(M.principalKeyOf).sort());
         }
+        // «不在「全部」里» (03:08Z): never on an admitted subject; on one no row admits exactly when a row holding Everyone leaves it
+        // out (itself or its Task Group) — naming the narrowest such row
+        if (good) {
+          const wantLeft = verdict.length ? null : (M.SCOPES.find((sc) => M.SCOPES.indexOf(sc) >= c.at && holdsEveryone(c.rows[sc]) && outOf(c.rows[sc], s)) || null);
+          good = (plan.leftOut[s.key] || null) === wantLeft;
+        }
+        // «仍经由» (03:08Z): a locked line says «still» exactly when THIS row leaves the subject out (itself or its Task Group)
+        if (good) { const lk = plan.locked.find((l) => l.key === s.key); if (lk) good = lk.still === outOf(c.rows[c.scope], s); }
+        checks++;
+        if (!good) { wrong++; if (first.length < 3) first.push({ scope: c.scope, rows: c.all, subject: s.key, verdict, page }); if (wrong >= stopAfter) return { cases, checks, wrong, first }; }
       }
     }
     return { cases, checks, wrong, first };
   };
+  ok(byWhatDiffers === 0 && byWhatAgrees > 100000, `THE TWO ORACLES AGREE: «by what» (the hub's byWhatOf) equals the grant model's own admits asked row by row in every one of ${byWhatAgrees} subject verdicts`, differs);
   const w = walk(M);
-  ok(w.cases === 2187 && w.checks === 13122 && w.wrong === 0, `THE INVARIANT, by exhaustion: ${w.cases} cases, ${w.checks} subjects — what the page says (admitted or not, through which row, «also» and the Everyone line's exceptions) equals the fill's verdict in every one`, w.first);
+  ok(w.cases === 17496 && w.wrong === 0, `THE INVARIANT, by exhaustion: ${w.cases} cases, ${w.checks} subjects — what the page says (admitted or not, through which row, its own chips, «also», the Everyone line's exceptions, «不在「全部」里», «仍经由») equals the grant model's own admits in every one`, w.first);
   // THE RED CONTROLS — this round's two faults, compiled back in
   const F1 = await esMutant('src/lib/login-grant-model.js', "if (held.has(k)) { if (w.length) plan.also[k] = w[0]; continue; }", "if (held.has(k)) { if (w.length && k !== 'everyone') plan.also[k] = w[0]; continue; }");
-  const r1 = walk(F1);
+  const r1 = walk(F1, 3);
   ok(r1.wrong > 0 && r1.first.some((f) => f.subject === 'everyone'), `RED CONTROL (MUST 1 — Everyone held here and wider, its «also through» not drawn): the walk names it (${r1.wrong} wrong)`, r1.first[0]);
   const F2 = await esMutant('src/lib/login-grant-model.js', "if (k !== 'everyone' && !outHere && plan.everyone", "if (k !== 'everyone' && plan.everyone");
-  const r2 = walk(F2);
+  const r2 = walk(F2, 3);
   ok(r2.wrong > 0 && r2.first.some((f) => f.page.admitted === false && f.verdict.length > 0), `RED CONTROL (MUST 2 — a conversation THIS row leaves out folded away while a wider row admits it): the page says «left out», the fill admits it (${r2.wrong} wrong)`, r2.first[0]);
   const F3 = await esMutant('src/lib/login-grant-model.js', "const held = new Set(keys(here.to)), exceptHere", "const held = new Set(Object.keys(byWhat).filter((x) => (byWhat[x] || []).includes(scope))), exceptHere");
-  const r3 = walk(F3);
+  const r3 = walk(F3, 3);
   ok(r3.wrong > 0, `RED CONTROL (the «also» test as it was — «by what»'s own scope stands for the row's own grant): a member admitted through its Task Group is drawn as this row's own chip; the walk names it (${r3.wrong} wrong)`, r3.first[0]);
+  const F4 = await esMutant('src/lib/login-grant-model.js', "if (ordered(k).includes(scope)) continue;", "");
+  const r4 = walk(F4, 3);
+  ok(r4.wrong > 0, 'RED CONTROL (03:08Z — a subject admitted HERE through a held Everyone or Task Group falls through to the wider rows): the walk names it', r4.first[0]);
+  const F5 = await esMutant('src/lib/login-grant-model.js', "plan.locked.push({ key: k, through: w[0], still: outHere });", "plan.locked.push({ key: k, through: w[0], still: false });");
+  const r5 = walk(F5, 3);
+  ok(r5.wrong > 0 && r5.first.some((f) => true), 'RED CONTROL (03:08Z — a locked line that says «经由» where THIS row leaves the subject out, «仍经由»): the walk names it', r5.first[0]);
+  const F6 = await esMutant('src/lib/login-grant-model.js', "if (by) plan.leftOut[k] = by;", "plan.leftOut[k] = by || 'any-site';");
+  const r6 = walk(F6, 3);
+  ok(r6.wrong > 0, 'RED CONTROL (03:08Z — «不在「全部」里» drawn where no row holding Everyone leaves the subject out): the walk names it', r6.first[0]);
+  const GS2 = fs.readFileSync(path.join(REPO, 'src/lib/vault-login-grants.js'), 'utf8');
+  ok(/\+ \(isStopped\(l\.key\) \? ` · \$\{words\.notRunning\}` : ''\)/.test(GS2), '(4) a stopped conversation drawn locked says «not running now» in the lock\'s own words (a locked row hides the row\'s own hint)');
   // the dialog draws from the plan and nothing else
   const G2 = fs.readFileSync(path.join(REPO, 'src/lib/vault-login-grants.js'), 'utf8');
   ok(/const plan = drawPlan\(\{ byWhat: byWhat \|\| \{\}, scope, rows: rowsBy, subjects \}\);/.test(G2) && /hint: hintOf\.get\(EVERYONE_KEY\) \|\|/.test(G2) && !/lockedFor\(|lockedPlan\(/.test(G2)

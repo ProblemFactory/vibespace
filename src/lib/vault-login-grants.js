@@ -74,12 +74,14 @@ function grantDialog({ id, scope, resource, name, title, head = null, consequenc
   const pk = (k) => pickKeyOf(k, EVERYONE_KEY);
   const nameOfKey = (k) => { const r = roster.find((x) => x.key === pk(k)); return r ? r.name : String(named.get(k) || k.replace(/^(conversation|group):/, '')).slice(0, 12); };
   const evWords = plan.everyone && plan.everyone.except.length ? ` · ${t('except {names}', { names: plan.everyone.except.map(nameOfKey).join(', ') })}` : '';
-  const locked = plan.locked.map((l) => ({ key: pk(l.key), why: (l.still ? stillWords(l.through) : throughWords(l.through)) + (l.key === 'everyone' ? evWords : ''), door: { label: doorWords(l.through), run: () => openWider && openWider(l.through) } }));
+  const own = [...roster, ...extra.filter((x) => !roster.some((r) => r.key === x.key))];
+  const isStopped = (k) => k.startsWith('conversation:') && !own.some((r) => r.key === pk(k));
+  // a stopped conversation's lock says so in its OWN words (a locked row hides the row's own hint, «not running now» among them)
+  const locked = plan.locked.map((l) => ({ key: pk(l.key), why: (l.still ? stillWords(l.through) : throughWords(l.through)) + (l.key === 'everyone' ? evWords : '') + (isStopped(l.key) ? ` · ${words.notRunning}` : ''), door: { label: doorWords(l.through), run: () => openWider && openWider(l.through) } }));
   const hintOf = new Map();
   for (const [k, sc] of Object.entries(plan.also)) hintOf.set(pk(k), alsoWords(sc) + (k === 'everyone' ? evWords : ''));
   for (const [k, sc] of Object.entries(plan.leftOut)) hintOf.set(pk(k), leftOutWords(sc));
   // a stopped conversation the plan speaks of has its row too — «not running now» (its name as the row stored it)
-  const own = [...roster, ...extra.filter((x) => !roster.some((r) => r.key === x.key))];
   const spoken = [...plan.locked.map((l) => l.key), ...Object.keys(plan.also), ...Object.keys(plan.leftOut)];
   const stopped = [...new Set(spoken)].filter((k) => k.startsWith('conversation:') && !own.some((r) => r.key === pk(k)))
     .map((k) => ({ key: pk(k), kind: 'agent', id: k.slice(13), name: nameOfKey(k), hint: words.notRunning, groupIds: [], groupNames: [] }));
