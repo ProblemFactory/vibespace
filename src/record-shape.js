@@ -539,10 +539,7 @@ const DECLARED_UPSTREAM_UNSEEN = Object.freeze({
     turn_preempted: '@internal the CLI stopped the turn to answer a rapid follow-up — a dim notice',
     cloud_session_delta: '@internal cloud-hosted session state delta — card-less',
     upgrade_relay_marker: '@internal relay marker — card-less',
-    // NEW in 2.1.281 (2026-09-23). Left on this list so the fall-back Unknown-event card shows it until a
-    // consumer exists — it is a COST fact the user may need: from the retried request on, an effort switch
-    // rewrites the cached prefix (full-price cache writes) for every model, until a later system/init.
-    per_turn_effort_changed: '@internal the CLI stopped sending effort per turn after the server refused it (sent once, before the retried request) — an effort switch now rewrites the prompt cache: a dim notice + the effort picker\'s cache-rewrite warning (not built)',
+    // (per_turn_effort_changed LEFT this list on 2026-11-18, B-8dcf ①: a consumer exists — the dim notice in src/message-manager.js)
     // NEW in 2.1.312 (2026-10-27, lane claude-steer-inject r3) — the CLI's own words: «A cloud worker's report, before its first
     // turn, of which asks it inherited and keeps. Any ask stored before this event that it does not name is over.»
     inherited_asks_settled: '@internal a cloud worker\'s report, before its first turn, of the permission asks it inherited from an earlier worker and keeps answerable (kept_request_ids; any older ask it does not name is over) — 2.1.312 writes it only on the REMOTE transport (reportKept = isRemoteTransport() && holdsInputBehindPrompt()), never on the stdio stream-json the wrapper speaks (MEASURED: a 2.1.312 killed with an ask unanswered and resumed said nothing of it); were it to arrive: close the permission cards it does not name',

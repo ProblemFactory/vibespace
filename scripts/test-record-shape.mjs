@@ -578,10 +578,28 @@ console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six field
   const recJsonl = { parentUuid: 'p', isSidechain: false, userType: 'external', cwd: '/w', sessionId: 's1', version: '2.1.288', gitBranch: 'main', type: 'system', subtype: 'session_title_changed', title: 'Fix the login', uuid: 'u2', timestamp: '2026-10-05T00:00:00Z' };
   ok('the measured 2.1.288 record (live + JSONL envelope) is clean; a field it grows is still named (the pin is strict)', R.shapeKeyOf('claude', 'stream', recLive) === 'claude:stream:system/session_title_changed' && R.shapeKeyOf('claude', 'transcript', recJsonl) === 'claude:transcript:system/session_title_changed' && R.unknownFields('claude', 'stream', recLive) === null && R.unknownFields('claude', R.carrierOf('claude', recJsonl), recJsonl) === null && R.unknownFields('claude', 'stream', { ...recLive, emoji: 'x' })?.fields.join() === 'emoji');
   const U = R.DECLARED_UPSTREAM_UNSEEN.system, IGN = MM.KNOWN_IGNORED_SYSTEM_SUBTYPES, H = MM.HANDLED_SYSTEM_SUBTYPES;
-  ok('…and sits on DECLARED_UPSTREAM_UNSEEN with a disposition that names the COST (neither handled nor ignored — a user may need to see it)', 'per_turn_effort_changed' in U && /cache/.test(U.per_turn_effort_changed) && !IGN.has('per_turn_effort_changed') && !H.has('per_turn_effort_changed'));
+  // B-8dcf ① (2026-11-18): the record left DECLARED_UPSTREAM_UNSEEN — a consumer exists (the cost fact as ONE dim notice in our words)
+  ok('…and is HANDLED now (B-8dcf ①): on the normalizer\'s handled list, on no other list', !('per_turn_effort_changed' in U) && !IGN.has('per_turn_effort_changed') && H.has('per_turn_effort_changed'));
   const mm = createMessageManager('claude', 'test-shape-281');
   mm.processLive({ type: 'system', subtype: 'per_turn_effort_changed', per_turn_effort_active: false, uuid: 'u-pte', session_id: 's' });
-  ok('a live per_turn_effort_changed renders the fall-back Unknown-event card — and no drift card on top of it', unknownCards(mm).length === 1 && driftCards(mm).length === 0, mm.messages.map((m) => m.noticeKind));
+  const pteNote = mm.messages.filter((m) => m.noticeKind === 'harness-informational');
+  ok('a live per_turn_effort_changed (active false) renders ONE dim harness notice in OUR words (say per-turn-effort-off, level notice) — no Unknown-event card, no drift card', pteNote.length === 1 && mm.messages.length === 1 && pteNote[0].content[0].say === 'per-turn-effort-off' && pteNote[0].content[0].level === 'notice' && /rewrites the prompt cache/.test(pteNote[0].content[0].text) && unknownCards(mm).length === 0 && driftCards(mm).length === 0, mm.messages.map((m) => m.noticeKind));   // stale-pins: kept — the words moved from record-shape.js's comment to message-manager.js, where this reads them
+  const mt = createMessageManager('claude', 'test-shape-281-on');
+  mt.processLive({ type: 'system', subtype: 'per_turn_effort_changed', per_turn_effort_active: true, uuid: 'u-pte-on', session_id: 's' });
+  ok('…its `true` (nothing changed for the person) is card-less', mt.messages.length === 0, mt.messages.map((m) => m.noticeKind));
+  {
+    const crx = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
+    const KEY = 'The API stopped taking the effort per turn — from now on, changing the effort rewrites the prompt cache (its next request pays the full cache write)';
+    ok('…the renderer words it through t() (escaped) on the dim card; zh + ja carry the line', crx.includes("b.say === 'per-turn-effort-off' ? escHtml(t(" + JSON.stringify(KEY).replace(/^"|"$/g, "'")) && ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => fs.readFileSync(path.join(REPO, f), 'utf8').includes(JSON.stringify(KEY) + ':')));
+    let base = ''; try { base = (await import('node:child_process')).execFileSync('git', ['show', 'b06f36e90:src/message-manager.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
+    if (base) {
+      const { mutantCopies } = await import('./mutant-copy.mjs');
+      const MB = mutantCopies('record-shape-pte', REPO).load('src/message-manager.js', base, 'release-mm');
+      const rb = new MB.MessageManager('test-shape-281-rel');
+      rb.processLive({ type: 'system', subtype: 'per_turn_effort_changed', per_turn_effort_active: false, uuid: 'u-pte-r', session_id: 's' });
+      ok('RED control: the release b06f36e90\'s normalizer drew the red Unknown-event card for it (the latent card the row names)', unknownCards(rb).length === 1 && !rb.messages.some((m) => m.noticeKind === 'harness-informational'), rb.messages.map((m) => m.noticeKind));
+    } else console.log('  · SKIP: the release b06f36e90 is not in this clone');
+  }
   const mi = createMessageManager('claude', 'test-shape-281-init');
   mi.processLive({ type: 'system', subtype: 'init', cwd: '/w/proj', session_id: 's', uuid: 'u-i', tools: [], mcp_servers: [], model: 'claude-fable-5-1', permissionMode: 'default', slash_commands: [], apiKeySource: 'none', claude_code_version: '2.1.281', output_style: 'default', skills: [], plugins: [], per_turn_effort_active: true, view_mode: 'default' });
   ok('a 2.1.281 init carrying per_turn_effort_active + view_mode is clean (no drift card)', driftCards(mi).length === 0 && unknownCards(mi).length === 0, mi.messages.map((m) => m.noticeKind));

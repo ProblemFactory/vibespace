@@ -72,6 +72,7 @@ const HANDLED_SYSTEM_SUBTYPES = new Set([
   'instruction_size_warning', // 2.1.288 (lane cli-2-1-288-records): CLAUDE.md + rules + imports over the model's limit → the dim harness notice "the CLI warns the instructions are large: N characters (limit M)" — never red
   'session_writes_lost', // 2.1.319 (lane cli-2-1-319-records): the transcript and/or ~/.claude.json lost writes to a full disk or a used-up quota, sent once as the CLI exits 0 → a WARNING line in our words with the door (free up space) — the binary calls it «safe to ignore», the person must still hear it
   'file_attachments_missing', // 2.1.296 (lane record-oracle-2-1-296): the files an inbound user message's file_attachments named that did not arrive → ONE plain dim line "N of M attached files did not reach Claude" (the reason codes on hover) — never red
+  'per_turn_effort_changed', // 2.1.281 (B-8dcf ①): the API refused effort per turn and the CLI stopped sending it (sent once, before the retried request) → ONE dim notice in our words: from here on an effort switch rewrites the prompt cache (until a later init says per_turn_effort_active again); `true` is card-less
   'informational',           // the CLI's text banner → a dim card, its words verbatim at `level`; the SAFETY STOP line (src/safety-stop.js) + its model-only nudge → ONE worded stop card (lane classifier-stop-card — was the red Unknown-event card)
 ]);
 
@@ -1364,6 +1365,17 @@ class MessageManager extends MessageWindow {
     // stream's snake_case and the transcript row carry the same two fields.
     // BYPASS ANSWERED THE CLI'S OWN ASK (lane bypass-no-prompts): VibeSpace's own record, never the CLI's
     if (raw.subtype === 'vs_auto_allow') { this._autoAllowLine(raw, emit); return; }
+    // EFFORT NO LONGER SENT PER TURN (`system`/`per_turn_effort_changed`, 2.1.281 — B-8dcf ①): the server refused the per-turn effort, so
+    // the CLI stopped sending it — from the retried request on, switching the effort rewrites the cached prefix (a full-price cache
+    // write) for every model, until a later system/init carries per_turn_effort_active again. A COST fact the person may need: the
+    // same dim harness notice, in OUR words (`say` → the client's t() line); the record's `true` is card-less (nothing changed for them).
+    if (raw.subtype === 'per_turn_effort_changed') {
+      if ((raw.per_turn_effort_active ?? raw.perTurnEffortActive) !== false) return;
+      const text = 'The API stopped taking the effort per turn — from now on, changing the effort rewrites the prompt cache (its next request pays the full cache write)';
+      const msg = this._create({ role: 'system', status: 'complete', noticeKind: 'harness-informational', content: [{ type: 'harness_informational', text, level: 'notice', say: 'per-turn-effort-off' }] });
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
     // INSTRUCTIONS TOO LARGE (`system`/`instruction_size_warning`, 2.1.288 — lane cli-2-1-288-records): the CLI
     // measured CLAUDE.md + rules + imports over the model's limit. The same dim harness notice, in OUR words
     // (`say` → the client's i18n line; `text` = the English fallback). Numbers only — no file path rides the record.

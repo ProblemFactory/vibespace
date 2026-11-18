@@ -371,6 +371,7 @@ export default {
   "Harness notification · {priority}": "ハーネス通知 · {priority}",
   "Recap — while you were away": "要約 — 離席中の出来事",
   "A safety check stopped the reply above — the rest was withheld and the agent was told not to repeat it": "安全チェックが上の返信を止めました — 残りは保留され、エージェントには繰り返さないよう伝えてあります",
+  "The API stopped taking the effort per turn — from now on, changing the effort rewrites the prompt cache (its next request pays the full cache write)": "API がターンごとの推論強度を受け付けなくなりました——今後、推論強度を切り替えるとプロンプトキャッシュが書き直されます（次のリクエストでキャッシュ書き込みの全額がかかります）",
   "The CLI warns the instructions are large: {chars} characters (limit {limit})": "CLI の警告：指示ファイルが大きすぎます（{chars} 文字、上限 {limit}）",
   "Auto-allowed (bypass): {tool} — {head}": "自動許可（bypass）：{tool} — {head}",
   "Auto-allowed (bypass), but the CLI did not run it: {tool} — {why}": "自動許可（bypass）しましたが、CLI は実行しませんでした：{tool} — {why}",

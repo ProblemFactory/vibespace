@@ -371,6 +371,7 @@ export default {
   "Harness notification · {priority}": "Harness 通知 · {priority}",
   "Recap — while you were away": "回顾——你离开期间",
   "A safety check stopped the reply above — the rest was withheld and the agent was told not to repeat it": "安全检查拦下了上面这条回复——其余内容已被扣下，agent 已被告知不要重复",
+  "The API stopped taking the effort per turn — from now on, changing the effort rewrites the prompt cache (its next request pays the full cache write)": "API 不再按轮接收推理强度——从现在起，切换推理强度会重写提示缓存（下一次请求要支付完整的缓存写入费用）",
   "The CLI warns the instructions are large: {chars} characters (limit {limit})": "CLI 提示指令文件过大：{chars} 个字符（上限 {limit}）",
   "Auto-allowed (bypass): {tool} — {head}": "自动放行（bypass）：{tool} — {head}",
   "Auto-allowed (bypass), but the CLI did not run it: {tool} — {why}": "已自动放行（bypass），但 CLI 没有执行：{tool} — {why}",
