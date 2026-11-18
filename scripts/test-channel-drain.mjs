@@ -1571,6 +1571,33 @@ const R22 = {
   ok(J(due.map((d) => d.key)) === J(['acct/a', 'acct/b']), 'rule 22a recheckDue: due = live + separately listed + not a topic group + walked once + active within 14 d + not rechecked within the hour — never rechecked first, then the oldest; a paused / inline / topic / never-walked / quiet / silent row, a clock gone backwards and junk are not due', J(due));
   ok(D0.recheckDue(Array.from({ length: 500 }, (_, i) => row('acct/k' + i)), { now: NOW, max: 7 }).length === 7 && D0.recheckDue([row('acct/a', { lastRecheckAt: NOW - 61e3 })], { now: NOW, everyMs: 1 }).length === 1 && D0.recheckDue([row('acct/a', { lastRecheckAt: NOW - 59e3 })], { now: NOW, everyMs: 1 }).length === 0, 'rule 22a recheckDue: at most `max`; the cadence is never under a minute (a setting of 1 ms reads as 60 s)');
   ok(D0.recheckOnPress(0, NOW) && D0.recheckOnPress(NOW - 61e3, NOW) && !D0.recheckOnPress(NOW - 30e3, NOW) && D0.recheckOnPress(NOW + 5e3, NOW) && D0.RECHECK_FLOOR_MS === 60e3, 'rule 22b recheckOnPress: the owner\'s press re-lists unless the conversation was rechecked within 60 s (a clock gone backwards never blocks it)');
+  // B-dfa4 U3: THE DUE LIST'S NEXT INSTANT — before it the clock alone never changes the answer (the engine keeps the
+  // answer to it and reads no row); recheckMay is false only for a row no later hour makes due (the kept candidates drop it)
+  {
+    const H = 3600e3, DAY = 86400e3;
+    const nextLaw = (D) => {
+      let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+      // case 0, fixed: ONE due row that leaves the 14-day window in 30 minutes (the next instant is its leaving)
+      const cases = [[row('acct/leaving', { lastAt: NOW - 14 * DAY + 30 * 60e3 })]];
+      for (let c = 0; c < 200; c++) cases.push(Array.from({ length: 6 }, (_, i) => row(`acct/r${i}`, { lastRecheckAt: rnd() < 0.2 ? 0 : Math.round(NOW - rnd() * 3 * H + (rnd() < 0.1 ? 2 * H : 0)), lastAt: Math.round(NOW - rnd() * 16 * DAY), live: rnd() > 0.1 })));
+      const bad = [];
+      cases.forEach((rows, c) => {
+        const due0 = J(D.recheckDue(rows, { now: NOW, everyMs: H }));
+        const next = D.recheckNextAt(rows, { now: NOW, everyMs: H });
+        const span = Number.isFinite(next) ? next - NOW : 20 * DAY;
+        for (let k = 1; k <= 12; k++) { const tk = NOW + Math.floor(span * k / 13); if (tk >= next) break; if (J(D.recheckDue(rows, { now: tk, everyMs: H })) !== due0) { bad.push({ c, at: tk - NOW, next: next - NOW }); break; } }
+        if (c === 0 && !(J(D.recheckDue(rows, { now: NOW + H, everyMs: H })) !== due0 && next <= NOW + H)) bad.push({ c, why: 'the leaving row: its leaving is the next instant', next: next - NOW });
+        for (const x of rows) { const may = D.recheckMay(x, { now: NOW, everyMs: H }); const ever = [0, 1, 2, 30].some((h) => D.recheckDue([x], { now: NOW + h * H, everyMs: H }).length > 0); if (!may && ever) bad.push({ c, key: x.key, may }); }
+      });
+      return { n: cases.length, bad };
+    };
+    const law = nextLaw(D0);
+    ok(law.n === 201 && !law.bad.length, `B-dfa4 U3 recheckNextAt: over ${law.n} account states the due list, sampled 12 times before its next instant, never changes by the clock alone; a row leaving the 14-day window is a next instant; recheckMay is false only for a row no later hour makes due`, J(law.bad.slice(0, 3)));
+    const GONE = '  return { due: true, dueAt: last, next: gone };';
+    ok(SRC.split(GONE).length === 2, 'control setup: the due row\'s leaving instant is present once');
+    const lawM = nextLaw(M.load(MODEL, SRC.replace(GONE, '  return { due: true, dueAt: last, next: Infinity };'), 'next-no-leaving'));
+    ok(lawM.bad.some((b) => b.c === 0), `CONTROL: a next instant that forgets a due row's leaving keeps an answer the clock changed — red (${lawM.bad.length} states wrong)`, J(lawM.bad.slice(0, 2)));
+  }
   const o = R22.order(D0);
   ok(J(o.log) === J(['f:c0003', 'f:c0000', 'f:c0001', 'recheck:c0002', 'recheck:c0003', 'recheck:c0000']) && o.end.ok && o.v.length === 0, 'rule 22 ORDER: the owner\'s request, then the due rows, then — nothing else pending — the armed rechecks in their order (the lowest priority: a recheck never delays a human or a due row)', J(o.log));
   const bd = R22.bound(D0);

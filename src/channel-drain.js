@@ -897,6 +897,19 @@ const RECHECK_EVERY_MS = 3600e3;
 const RECHECK_ACTIVE_MS = 14 * 86400e3;
 const RECHECK_FLOOR_MS = 60e3;
 const RECHECK_DUE_MAX = 200;
+// B-dfa4 U3: ONE rule per row, read by the due list AND by its next instant — `{due, dueAt}` now, and `next`: the first
+// instant after `t` at which this row's verdict can change by the clock alone (Infinity: only a write changes it)
+function recheckRowAt(r, t, every, activeMs) {
+  if (!r || typeof r.key !== 'string' || !r.key) return { due: false, next: Infinity };
+  if (r.live !== true || r.separate !== true || r.mode === 'topic' || r.walked !== true) return { due: false, next: Infinity };
+  const lastAt = Number(r.lastAt) || 0;
+  if (!(lastAt > 0) || t - lastAt > activeMs) return { due: false, next: Infinity };   // the clock only ages it further
+  const gone = lastAt + activeMs + 1;   // the instant it leaves the active window
+  const last = Number(r.lastRecheckAt) || 0;
+  if (last > t) return { due: false, next: Math.min(last, gone) };   // a clock that went backwards rechecks nothing — until it passes `last`
+  if (last && t - last < every) return { due: false, next: Math.min(last + every, gone) };
+  return { due: true, dueAt: last, next: gone };
+}
 /**
  * RULE 22a's DUE LIST. rows = [{key, live, separate, mode, walked, lastRecheckAt, lastAt}] (the engine's index read).
  * → [{key, dueAt}] — the due ones, oldest recheck first (never rechecked = 0), at most `max`.
@@ -906,17 +919,36 @@ function recheckDue(rows, { now = 0, everyMs = RECHECK_EVERY_MS, activeMs = RECH
   const every = Math.max(60e3, Number(everyMs) || RECHECK_EVERY_MS);
   const out = [];
   for (const r of Array.isArray(rows) ? rows : []) {
-    if (!r || typeof r.key !== 'string' || !r.key) continue;
-    if (r.live !== true || r.separate !== true || r.mode === 'topic' || r.walked !== true) continue;
-    const lastAt = Number(r.lastAt) || 0;
-    if (!(lastAt > 0) || t - lastAt > activeMs) continue;
-    const last = Number(r.lastRecheckAt) || 0;
-    if (last > t) continue;   // a clock that went backwards rechecks nothing
-    if (last && t - last < every) continue;
-    out.push({ key: r.key, dueAt: last });
+    const v = recheckRowAt(r, t, every, activeMs);
+    if (v.due) out.push({ key: r.key, dueAt: v.dueAt });
   }
   out.sort((a, b) => a.dueAt - b.dueAt || (a.key < b.key ? -1 : 1));
   return out.slice(0, Math.max(0, Math.floor(Number(max) || 0)));
+}
+/** B-dfa4 U3 — ONE row's verdict at `now`: `{due, next}` (next = the first instant the clock alone can change it) — the
+ *  engine re-judges a written row against its kept answer with it. */
+function recheckRowVerdict(r, { now = 0, everyMs = RECHECK_EVERY_MS, activeMs = RECHECK_ACTIVE_MS } = {}) {
+  const v = recheckRowAt(r, Number(now) || 0, Math.max(60e3, Number(everyMs) || RECHECK_EVERY_MS), activeMs);
+  return { due: !!v.due, next: v.next };
+}
+/** B-dfa4 U3 — can this row be on the due list without a WRITE to it (due now, or the clock alone may make it due)?
+ *  false = only a write brings it back: the engine's kept candidates drop it. */
+function recheckMay(r, { now = 0, everyMs = RECHECK_EVERY_MS, activeMs = RECHECK_ACTIVE_MS } = {}) {
+  const v = recheckRowAt(r, Number(now) || 0, Math.max(60e3, Number(everyMs) || RECHECK_EVERY_MS), activeMs);
+  return v.due || v.next < Infinity;
+}
+/**
+ * B-dfa4 U3 — THE DUE LIST'S NEXT INSTANT: the first instant after `now` at which `recheckDue(rows)` can differ from
+ * its answer at `now` by the clock alone (a recheck that comes due, a row that leaves the 14-day window, a clock that
+ * went backwards passing a row's stamp); Infinity = only a write to a row changes it. The engine keeps the answer to
+ * this instant (or to a write of one of the account's rows) and walks no row before it.
+ */
+function recheckNextAt(rows, { now = 0, everyMs = RECHECK_EVERY_MS, activeMs = RECHECK_ACTIVE_MS } = {}) {
+  const t = Number(now) || 0;
+  const every = Math.max(60e3, Number(everyMs) || RECHECK_EVERY_MS);
+  let next = Infinity;
+  for (const r of Array.isArray(rows) ? rows : []) { const v = recheckRowAt(r, t, every, activeMs); if (v.next < next) next = v.next; }
+  return next;
 }
 /** RULE 22b — may the owner's press re-list this conversation now? (never twice inside RECHECK_FLOOR_MS) */
 function recheckOnPress(lastRecheckAt, now, floorMs = RECHECK_FLOOR_MS) {
@@ -961,7 +993,7 @@ function cursorRefused(err) {
 
 module.exports = {
   LISTING_VERDICTS, listingVerdict, discoveryOf, discoveryRecord, cursorRefused,
-  RECHECK_PER_PASS, RECHECK_EVERY_MS, RECHECK_ACTIVE_MS, RECHECK_FLOOR_MS, RECHECK_DUE_MAX, recheckDue, recheckOnPress,
+  RECHECK_PER_PASS, RECHECK_EVERY_MS, RECHECK_ACTIVE_MS, RECHECK_FLOOR_MS, RECHECK_DUE_MAX, recheckDue, recheckNextAt, recheckMay, recheckRowVerdict, recheckOnPress,
   REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, STREAK_MAX, ORIGINS, REFUSAL_CODES, ANSWER_OUTCOMES, PACE_WAIT_MAX_MS, FEED_PAGES_PER_PASS,
   OLDER_FLOOR_MS, OLDER_MEMORY_MS, OLDER_EVENTS,
   empty, admit, withdraw, census, hasRequests, takenRequests, queueAsk,

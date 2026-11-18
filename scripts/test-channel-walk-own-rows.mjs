@@ -16,6 +16,15 @@
 //      whole map (a Proxy over `live()` names the caller of every whole-map iteration, one stack per iteration);
 //      CONTROL: an engine copy with the five walks restored to `Object.values(store.index.live())` — each of the five is
 //      seen iterating the map (the pass reached every walk: the leg is not vacuous), red
+//   ③ PRICED BY WHAT IS DUE (B-dfa4 U3): an account of 2 000 rows (separate listing, walked, active, rechecked within
+//      the hour) — the first recheck turn reads its candidates, the next 20 turns read NO row (answered kept), a write to
+//      one row makes the next turn read again, a turn past the next instant reads again; EVERY answer equals the PURE
+//      verdict over all the account's rows at that instant (Drain.recheckDue). The revisions recheck (a pass's end) reads
+//      the rows FRESH within 24 h (5), not the account's 2 005. CONTROLS: the recheck without its kept answer reads every row
+//      at every turn; the revisions walk over every row reads 2 005 — red. Then: a write that makes nothing due reads
+//      that row alone and keeps the answer; a row made a candidate by a write, a row the clock took out, a clock gone
+//      back — each answer still the PURE verdict over all rows; a write that makes a row fresh brings it into the
+//      revisions. CONTROLS: a write that re-judges nothing, a clock gone back that rebuilds nothing — wrong answers, red
 // Per-pid scratch (scripts/scratch.mjs); the copies through scripts/mutant-copy.mjs.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -155,15 +164,95 @@ async function enginePass(E, tag) {
       '      for (const en of Object.values(store.index.live())) {\n'],
     ['    const live = store.index.live();\n    for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 U2: this account\'s rows only\n      const en = live[k];\n',
       '    for (const en of Object.values(store.index.live())) {\n'],
-    ['    const live = store.index.live();\n    for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 U2: this account\'s rows only (13.4 s a day on the owner\'s map, every account\'s rows)\n      const en = live[k];\n',
-      '    for (const en of Object.values(store.index.live())) {\n'],
-    ['    for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 U2: this account\'s keys only (the test below unchanged)\n      const en = ix[k];\n',
-      '    for (const [k, en] of Object.entries(ix)) {\n'],
+    // recheckDueFor and revisionsPass read their KEPT rows since U3 (the kept answer is the whole map's walk when it is
+    // built — restored to the whole map here, so the walk is seen)
+    ['    const rows = [];\n    for (const k of kr.set) {\n      const en = live[k];\n',
+      '    const rows = [];\n    for (const [k, en] of Object.entries(store.index.live())) {\n'],
+    ['    for (const k of kept.set) {\n      const en = ix[k];\n',
+      '    for (const [k, en] of Object.entries(ix)) {\n'],   // stale-pins: kept (the old walk, restored by the control)
   ];
   ok(BACK.every(([now]) => SRC.split(now).length === 2), 'control setup: each of the five walks is present once as it reads now', BACK.map(([now]) => SRC.split(now).length - 1));
   let old = SRC; for (const [now, before] of BACK) old = old.replace(now, before);
   const ctl = await enginePass(MC.load('src/server/channels-engine.js', old, 'whole-map'), 'whole-map');
   ok(ctl.ok && WALKS.every((w) => ctl.seen[w] > 0), `CONTROL: the five walks restored to the whole map — each is seen iterating it (${WALKS.map((w) => `${w} ×${ctl.seen[w] || 0}`).join(', ')}) — red`, ctl);
+}
+
+// ── ③ PRICED BY WHAT IS DUE (U3) ──────────────────────────────────────────────────────────────────────────────────
+console.log('\n③ the recheck and the revisions read what can be due, not every row');
+async function pricedRun(E, tag) {
+  const T0 = Date.UTC(2026, 10, 18, 4, 0, 0), H = 3600e3;
+  let t = T0;
+  const e = E.create({ dataDir: path.join(ROOT, `priced-${tag}`), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, now: () => t, log: quiet, censusTimer: () => ({ cancel() {} }) });
+  const A = 'fake-poll', ix = e.store.index;
+  const D = require(path.join(REPO, 'src/channel-drain.js'));
+  const N = 2000, FRESH = 5;
+  await ix.update(() => {
+    for (let i = 0; i < N; i++) Object.assign(ix.entry(A, `thr_${i}`), { title: `t ${i}`, kind: 'group', lastAt: T0 - 3 * 86400e3 - i * 60e3, unread: 0, walkedAt: T0 - 86400e3, threadRecheckAt: T0 - (10 + (i % 40)) * 60e3, convCaps: { at: T0, read: 'yes', sendAs: [], why: null } });
+    for (let i = 0; i < FRESH; i++) Object.assign(ix.entry(A, `fresh_${i}`), { title: `f ${i}`, kind: 'group', lastAt: T0 - 600e3, unread: 0, convCaps: { at: T0, read: 'yes', sendAs: [], why: null } });
+    // due now and LEAVING the 14-day window 20 minutes on: the clock takes it out — and a clock that goes back must bring it in
+    Object.assign(ix.entry(A, 'old_0'), { title: 'old', kind: 'group', lastAt: T0 - 14 * 86400e3 + 20 * 60e3, unread: 0, walkedAt: T0 - 86400e3, convCaps: { at: T0, read: 'yes', sendAs: [], why: null } });
+  });
+  ix.flush();
+  const rec = e.adapterRecords().adapters.find((r) => r.id === A);
+  // the oracle: the PURE verdict over EVERY row of the account at that instant (the engine's own row shape)
+  const oracle = (at) => {
+    const rows = Object.values(ix.live()).filter((en) => en && en.adapterId === A).map((en) => ({ key: en.key, live: !en.unlistedAt && !(en.refresh && en.refresh.every === 'paused') && !(en.lane && en.lane.lastError && (en.lane.lastError.code === 'forbidden' || en.lane.lastError.code === 'not-found')), separate: true, mode: ((en.convCaps || {}).threads || {}).mode || null, walked: !!(en.anchor || en.walkedAt), lastRecheckAt: Number(en.threadRecheckAt) || 0, lastAt: Number(en.lastAt) || 0 }));
+    return J(D.recheckDue(rows, { now: at, everyMs: 3600 * 1000 }));
+  };
+  const cost = () => (e.walkCostStats ? e.walkCostStats() : { recheckRows: 0, recheckKept: 0, revisionRows: 0 });
+  const turns = [], wrong = [];
+  const turn = (why) => { const c0 = cost(); const got = e.recheckDueOf(A, t); const c1 = cost(); turns.push({ why, rows: c1.recheckRows - c0.recheckRows, kept: c1.recheckKept - c0.recheckKept }); if (J(got) !== oracle(t)) wrong.push({ why, got: (got || []).length, want: JSON.parse(oracle(t)).length }); };
+  turn('the first turn');
+  for (let k = 0; k < 20; k++) { t += 1000; turn('a turn with nothing written'); }
+  await ix.update(() => { ix.entry(A, 'thr_7', { create: false }).threadRecheckAt = 0; });   // one row written: it is due again
+  turn('a turn after a write');
+  t += 1000; turn('a turn with nothing written after it');
+  await ix.update(() => { ix.entry(A, 'thr_100', { create: false }).title = 'renamed'; });   // a write that makes nothing due
+  t += 1000; turn('a turn after a write that makes nothing due');
+  await ix.update(() => { ix.entry(A, 'fresh_0', { create: false }).walkedAt = t; });   // NO candidate before: now walked, never rechecked ⇒ due
+  t += 1000; turn('a turn after a row that was no candidate became one');
+  t = T0 + 51 * 60e3; turn('a turn past the next instant (a recheck came due)');
+  t = T0 + 5 * 60e3; turn('a turn after the clock went back');
+  const listing = rec && e.recheckDueOf(A, t) !== null;
+  // the revisions recheck of the account (what a pass runs at its end); the rows it read — the second one, past the build
+  let revErr = null;
+  try { await e.revisionsPassOf(A); } catch (err) { revErr = String(err && err.message || err); }
+  const r0 = cost().revisionRows;
+  try { await e.revisionsPassOf(A); } catch (err) { revErr = String(err && err.message || err); }
+  const revRows = cost().revisionRows - r0;
+  await ix.update(() => { ix.entry(A, 'thr_9', { create: false }).lastAt = t; });   // a message now: the row is fresh — a write brings it IN
+  const r1 = cost().revisionRows;
+  try { await e.revisionsPassOf(A); } catch (err) { revErr = String(err && err.message || err); }
+  const revRows2 = cost().revisionRows - r1;
+  try { await e.stop(); } catch { }
+  return { turns, wrong, revRows, revRows2, revErr, listing, N, FRESH };
+}
+{
+  const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
+  const p = await pricedRun(ENG, 'kept');
+  const byWhy = (w) => p.turns.filter((x) => x.why === w);
+  const idle = byWhy('a turn with nothing written');
+  ok(p.listing && p.turns[0].rows >= p.N && idle.length === 20 && idle.every((x) => x.rows === 0 && x.kept === 1), `the first recheck turn reads the ${p.turns[0].rows} candidates; the next 20 turns with nothing written read NO row (each answered kept)`, p.turns.slice(0, 3));
+  ok(byWhy('a turn after a write')[0].rows > 0 && byWhy('a turn with nothing written after it')[0].rows === 0 && byWhy('a turn past the next instant (a recheck came due)')[0].rows > 0, 'a write to one row makes the next turn read again, the turn after it reads none; a turn past the next instant reads again', p.turns.slice(-3));
+  ok(byWhy('a turn after a write that makes nothing due')[0].rows === 1 && byWhy('a turn after a write that makes nothing due')[0].kept === 1, 'a write that makes nothing due: the turn reads THAT row alone and keeps its answer', byWhy('a turn after a write that makes nothing due'));
+  ok(!p.wrong.length, `every one of the ${p.turns.length} answers equals the PURE verdict over all the account's rows at that instant — incl. a row that became a candidate by a write, a row the clock took out, and a clock that went back`, p.wrong.slice(0, 3));
+  ok(p.revRows === p.FRESH && p.revRows2 === p.FRESH + 1, `the revisions recheck of a pass reads the ${p.FRESH} rows fresh within 24 h, not the account's ${p.N + p.FRESH + 1} (read ${p.revRows}); a write that makes a row fresh brings it in (${p.revRows2})`, p);
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const MEMO = '      if (stands && t < kr.memo.next) { walkCost.recheckKept++; return kr.memo.due.slice(); }\n';
+  const FRESHSET = '    for (const k of kept.set) {\n      const en = ix[k];\n      walkCost.revisionRows++;\n';
+  ok(SRC.split(MEMO).length === 2 && SRC.split(FRESHSET).length === 2, 'control setup: the kept answer and the fresh set\'s walk are present once');
+  const old = SRC.replace(MEMO, '').replace(FRESHSET, '    for (const k of store.index.keysOf(rec.id)) {\n      const en = ix[k];\n      walkCost.revisionRows++;\n');
+  const c = await pricedRun(MC.load('src/server/channels-engine.js', old, 'unpriced'), 'unpriced');
+  const cIdle = c.turns.filter((x) => x.why === 'a turn with nothing written');
+  ok(cIdle.every((x) => x.rows >= c.N) && c.revRows >= c.N + c.FRESH && !c.wrong.length, `CONTROL: without the kept answer every idle turn reads every candidate (${cIdle[0] && cIdle[0].rows}), the revisions walk over every row reads ${c.revRows} — the same answers, priced by the rows kept — red`, { idle: cIdle.slice(0, 2), revRows: c.revRows });
+  // CONTROLS the correctness legs need: a write that re-judges nothing, a clock gone back that rebuilds nothing — each WRONG
+  const REJUDGE = '      for (const k of kr.dirty) { if (judge(k, live[k])) kr.set.add(k); else kr.set.delete(k); }\n';
+  const BACKCLK = ' || !(t >= kr.at)) {\n';
+  ok(SRC.split(REJUDGE).length === 2 && SRC.split(BACKCLK).length === 2, 'control setup: the written rows\' re-judge and the clock-gone-back rebuild are present once');
+  const nr = await pricedRun(MC.load('src/server/channels-engine.js', SRC.replace(REJUDGE, '      // (the mutant: a write re-judges nothing)\n'), 'no-rejudge'), 'no-rejudge');
+  ok(nr.wrong.some((w) => w.why === 'a turn after a row that was no candidate became one') && nr.revRows2 === nr.FRESH, `CONTROL: a write that re-judges nothing — the row that became a candidate is missing from the answer, the row made fresh is not read (${nr.wrong.length} answers wrong, revisions read ${nr.revRows2}) — red`, nr.wrong.slice(0, 2));
+  const nb = await pricedRun(MC.load('src/server/channels-engine.js', SRC.replace(BACKCLK, ') {\n'), 'no-backclock'), 'no-backclock');
+  ok(nb.wrong.some((w) => w.why === 'a turn after the clock went back'), `CONTROL: a clock gone back that rebuilds nothing — the row the clock took out stays out — red`, nb.wrong.slice(0, 2));
 }
 
 console.log(`\ntest-channel-walk-own-rows: ${pass} passed, ${fail} failed`);

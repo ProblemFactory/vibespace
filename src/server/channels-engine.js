@@ -2051,6 +2051,44 @@ function create(deps = {}) {
       notify([key], { full: false });
     }
   }
+  // ── B-dfa4 U3: THE WALKS PRICED BY WHAT IS DUE ──
+  // Per account and purpose, the rows that can matter, KEPT: built once from the account's keys (U2); a later write of
+  // one of its rows re-judges that row alone at the next walk (the index's touch signal); a whole-map touch drops them
+  // all. A row the clock alone can only take OUT of a set is dropped when the walk reads it; the clock alone brings no
+  // row IN (only a write does — and a write re-judges it). A row whose key is not its own account's (a damaged act line,
+  // the store's `odd` keys) makes every touch re-judge every kept set.
+  const keptRows = new Map();   // `${purpose}\n${adapterId}` → { id, sig, set: Set<key>, dirty: Set<key>, memo }
+  const walkCost = { recheckRows: 0, recheckKept: 0, revisionRows: 0 };   // rows each walk READ, and the turns answered kept (the leg's counts)
+  store.index.onTouch((k) => {
+    if (k === null) { keptRows.clear(); return; }
+    const odd = keptRows.size && store.index.keysStats().odd > 0;
+    // a touched row is re-judged at the next walk (its kept set, and the recheck's kept answer against that row alone)
+    for (const kr of keptRows.values()) if (odd || k.startsWith(`${kr.id}/`) || kr.set.has(k)) kr.dirty.add(k);
+  });
+  function keptFor(purpose, rec, sig, judge, t) {
+    const id = `${purpose}\n${rec.id}`;
+    const live = store.index.live();
+    let kr = keptRows.get(id);
+    // a clock that went BACK may make fresh again a row the clock took out: the set is built again
+    if (!kr || kr.sig !== sig || !(t >= kr.at)) {
+      kr = { id: rec.id, sig, set: new Set(), dirty: new Set(), memo: null, at: t, touched: [] };
+      for (const k of store.index.keysOf(rec.id)) if (judge(k, live[k])) kr.set.add(k);
+      keptRows.set(id, kr);
+    } else if (kr.dirty.size) {
+      for (const k of kr.dirty) { if (judge(k, live[k])) kr.set.add(k); else kr.set.delete(k); }
+    }
+    kr.touched = [...kr.dirty];   // the rows written since the last walk (a rebuild has none: its answer is built fresh)
+    kr.dirty.clear();
+    kr.at = t;
+    return kr;
+  }
+  function recheckRowOf(rec, en) {
+    const paused = !!(en.refresh && en.refresh.every === 'paused');
+    // verify r1 F4: a conversation the vendor REFUSED the owner (its last read 403d, or gone) is not re-listed — its own
+    // cadence keeps probing it and a read that succeeds clears `lane.lastError` (ingest), which lets the recheck back in
+    const refused = !!(en.lane && en.lane.lastError && (en.lane.lastError.code === 'forbidden' || en.lane.lastError.code === 'not-found'));
+    return { key: en.key, live: !en.unlistedAt && !paused && !refused, separate: true, mode: ((effectiveConvCaps(rec, en) || {}).threads || {}).mode || null, walked: !!(en.anchor || en.walkedAt), lastRecheckAt: Number(en.threadRecheckAt) || 0, lastAt: Number(en.lastAt) || 0 };
+  }
   /**
    * RULE 22a's ROWS (lane lark-threads A2): the account's conversations as the PURE `Drain.recheckDue` reads them — live
    * (never paused, never unlisted), the adapter's replies listed separately (the CAPABILITY row), the conversation's mode
@@ -2059,18 +2097,38 @@ function create(deps = {}) {
    */
   function recheckDueFor(rec, t = now()) {
     if (threadsRow(registry.capsOf(rec.kind)).listing !== 'separate') return [];
-    const rows = [];
+    const everyMs = setting('channels.threadRecheckSec') * 1000;
+    // B-dfa4 U3: called at EVERY drain turn — the rows that can come due are kept, and the answer is kept to its next
+    // instant (PURE Drain.recheckNextAt) or to a write of one of the account's rows: a turn with nothing new reads no row
+    const may = (k, en) => !!(en && en.adapterId === rec.id) && Drain.recheckMay(recheckRowOf(rec, en), { now: t, everyMs });
+    const kr = keptFor('recheck', rec, `${everyMs}|${credentialChangedAt(rec) || 0}`, may, t);
     const live = store.index.live();
-    for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 U2: this account's rows only (13.4 s a day on the owner's map, every account's rows)
-      const en = live[k];
-      if (!en || en.adapterId !== rec.id) continue;
-      const paused = !!(en.refresh && en.refresh.every === 'paused');
-      // verify r1 F4: a conversation the vendor REFUSED the owner (its last read 403d, or gone) is not re-listed — its own
-      // cadence keeps probing it and a read that succeeds clears `lane.lastError` (ingest), which lets the recheck back in
-      const refused = !!(en.lane && en.lane.lastError && (en.lane.lastError.code === 'forbidden' || en.lane.lastError.code === 'not-found'));
-      rows.push({ key: en.key, live: !en.unlistedAt && !paused && !refused, separate: true, mode: ((effectiveConvCaps(rec, en) || {}).threads || {}).mode || null, walked: !!(en.anchor || en.walkedAt), lastRecheckAt: Number(en.threadRecheckAt) || 0, lastAt: Number(en.lastAt) || 0 });
+    if (kr.memo && t >= kr.memo.at && t < kr.memo.next) {
+      // a write re-judges ITS row against the kept answer (verify r1: a pass touches every row it fetched — dropping the
+      // answer at any write re-read every candidate after each pass): the answer stands while no written row was on it,
+      // none is due now, and each comes due no earlier than the answer's next instant (else the list is read again)
+      let stands = true;
+      for (const k of kr.touched) {
+        walkCost.recheckRows++;
+        if (kr.memo.dueKeys.has(k)) { stands = false; break; }
+        const en = live[k];
+        if (!(en && en.adapterId === rec.id)) continue;
+        const v = Drain.recheckRowVerdict(recheckRowOf(rec, en), { now: t, everyMs });
+        if (v.due) { stands = false; break; }
+        if (v.next < kr.memo.next) kr.memo.next = v.next;
+      }
+      if (stands && t < kr.memo.next) { walkCost.recheckKept++; return kr.memo.due.slice(); }
     }
-    return Drain.recheckDue(rows, { now: t, everyMs: setting('channels.threadRecheckSec') * 1000 });
+    const rows = [];
+    for (const k of kr.set) {
+      const en = live[k];
+      walkCost.recheckRows++;
+      if (!may(k, en)) { kr.set.delete(k); continue; }   // the clock took it out: only a write brings it back
+      rows.push(recheckRowOf(rec, en));
+    }
+    const due = Drain.recheckDue(rows, { now: t, everyMs });
+    kr.memo = { at: t, next: Drain.recheckNextAt(rows, { now: t, everyMs }), due, dueKeys: new Set(due.map((d) => d.key)) };
+    return due.slice();
   }
   /**
    * THE RECENT-ROOTS RECHECK (lane lark-threads A2 — the owner's post, a thread born after its root was stored): ONE
@@ -5853,12 +5911,16 @@ function create(deps = {}) {
     const t = now();
     const ix = store.index.live();
     const items = [], recs = new Map();
-    for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 U2: this account's keys only (the test below unchanged)
+    // B-dfa4 U3: the rows FRESH within the window (a message in the last 24 h, or woken for in the last 7 days), kept —
+    // a write re-judges its row, the clock only takes one out — instead of judging every row of the account each pass
+    const fresh = (k, en) => !!en && k.startsWith(`${rec.id}/`) && (Number(en.lastAt) > t - Rev.RECHECK_FRESH_MS || (Array.isArray(en.wokeFor) && en.wokeFor.some((w) => w && Number(w.at) > t - Rev.RECHECK_WOKE_MS)));
+    const kept = keptFor('revisions', rec, '', fresh, t);
+    for (const k of kept.set) {
       const en = ix[k];
-      if (!k.startsWith(`${rec.id}/`) || !en) continue;
+      walkCost.revisionRows++;
+      if (!fresh(k, en)) { kept.set.delete(k); continue; }   // aged out: only a write brings it back
       const convId = k.slice(rec.id.length + 1);
       const woke = Array.isArray(en.wokeFor) ? en.wokeFor.filter((w) => w && Number(w.at) > t - Rev.RECHECK_WOKE_MS) : [];
-      if (!(Number(en.lastAt) > t - Rev.RECHECK_FRESH_MS) && !woke.length) continue;
       let tail = [];
       try { tail = store.readTail(rec.id, convId, { limit: 40 }) || []; } catch { tail = []; }
       for (const r of tail) if (r && r.vendorId && Number(r.at) > t - Rev.RECHECK_FRESH_MS && r.kind !== 'system') { const key = `${convId}\n${r.vendorId}`; recs.set(key, r); items.push({ key, at: r.at }); }
@@ -8828,6 +8890,9 @@ function create(deps = {}) {
     // lane channel-feed-authority: the scheduler's due rows of one account (the census legs) and the due index's counters
     dueListOf: (adapterId, { all = false } = {}) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const e = rec && live.get(rec.id); return rec ? dueList(rec, e || { dueNow: new Set() }, now(), { all }) : null; },
     dueIndexStats: () => ({ ...dueStats }),
+    walkCostStats: () => ({ ...walkCost }),   // B-dfa4 U3: rows the recheck / revisions walks read, and the recheck turns answered kept
+    recheckDueOf: (adapterId, t = null) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? recheckDueFor(rec, t == null ? now() : t) : null; },   // B-dfa4 U3: the drain turn's recheck list (the leg)
+    revisionsPassOf: async (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const e = rec ? adapterFor(rec) : null; return e ? revisionsPass(rec, e) : null; },   // B-dfa4 U3: one revisions recheck of an account (the leg)
     cadenceOf: (adapterId, convId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const en = store.index.peek(`${adapterId}/${convId}`); return rec && en ? cadenceOf(rec, en) : null; },
     budgetOf: (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? budgetView(rec, live.get(rec.id) || paceCarry.get(rec.id) || null) : null; },
     // R4: one scope digest per WATCHER — `pk` (`kind:id`) names it; without one, every watcher of that grain is flushed
