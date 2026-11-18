@@ -6410,6 +6410,7 @@ export default {
   "REFUSED": "被拒绝",
   "Pairing command — see the dial state, pick an address, generate a new command (keeps the row)": "配对命令 — 查看拨号状态、选择地址、生成新命令（保留这一行）",
   "Who can use \"{name}\" as an exit…": "谁能把 \"{name}\" 当出口使用…",
+  "Who can use \"{name}\" as an exit: {summary}": "谁能把 \"{name}\" 当出口使用：{summary}",
   "dial-out device": "拨出式设备",
   "Send the new command to the connected device over its link (it keeps working without running anything)": "把新命令通过它的连接发给当前已连上的设备（无需在设备上运行任何东西，它会继续工作）",
   "Unchecked: the connected device is disconnected now and its command stops working — run the new command on the device yourself.": "不勾选：当前连着的设备会立即断开，它的命令随即失效 — 请你自己在设备上运行新命令。",

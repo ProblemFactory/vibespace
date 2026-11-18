@@ -820,7 +820,13 @@ function summaryOf(access) {
   const x = (g) => (g.mode === 'nobody' ? 0 : (g.except || []).length);   // lane grants-unify: how many are left out
   return { use: { mode: access.use.mode, n: access.use.who.length, x: x(access.use) }, run: { mode: access.run.mode, n: access.run.who.length, x: x(access.run), ask: !!access.run.ask } };
 }
-/** Is anybody granted anything (the row's accent)? */
+/** Is anybody granted anything (the row's accent)? B-cb72: the row door's accent, read through the SAME reader as the row's
+ *  words — a list that cannot be read (`unknown`, a mode this build does not know) never wears it. PURE. */
+function grantedOf(view) {
+  const s = summaryOf(accessOfView(view));
+  const open = (g) => !!g && g.mode !== 'nobody' && g.mode !== 'unknown';
+  return !s.unknown && (open(s.use) || open(s.run));
+}
 
 // ── the migration (2026-09-exit-access-lists) ───────────────────────────────
 /** ONE record: `exit` present ⇒ kept; `allowExit === true` ⇒ everyone / everyone (behaviour unchanged — every
@@ -840,7 +846,7 @@ module.exports = {
   sessionKeyOf, callerKeys, principalsNow, cmdBytes, hiddenOrderOf, askDetailOf,
   encodedCommandOf, commandHeadOf,   // lane machine-card-fold
   exitAccessOf, accessOfView, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit, exitRows, exitView, whoPrincipal, rekeyForkExcept,
-  askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, migrateExitAccess,
+  askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, grantedOf, migrateExitAccess,
   spawnErrorOf, spawnMsOf, outputHeads, outputPreview, cardOutput, cmdFold, cleanLines, runRow, platformLabel, interpreterOf, knownInterpreter, spawnFailureText,
   TRANSFER_VERBS, TRANSFER_WINDOW_BYTES, TRANSFER_SETTING, TRANSFER_MAX_DEFAULT_MB, TRANSFER_MAX_MB, PATH_MAX_BYTES, PUSH_SINCE, PUSH_CAP,
   transferMaxOf, fmtBytes, statFacts, transferPathVerdict, transferVerdict, transferLine, transferCardText, transferCliLine, verifiedText,

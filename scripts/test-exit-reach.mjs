@@ -168,6 +168,12 @@ console.log('the SERVED view round-trips (GET /api/hosts → the row\'s summary,
   ok(back.every((b, i) => !b.mode && J(E.summaryOf(b)) === J(E.summaryOf(shapes[i])) && E.exitStamp(b) === E.exitStamp(shapes[i])), 'exitView → accessOfView is the identity on every shape (summary and stamp alike) — a spelled-out default hub included', back.map((b) => b.mode || 'ok'));
   const { hub: _h, ...noHub } = E.exitView(shapes[1]);
   ok(J(E.summaryOf(E.accessOfView(noHub))) === J(E.summaryOf(shapes[1])) && E.accessOfView(noHub).hub.mode === 'default', 'a view WITHOUT a hub (the hosts row omits an unset one) reads back the same (the instance\'s default)');
+  // B-cb72: the row door's accent through the ONE reader — nobody at rest, a grant open to someone lit, a list that cannot be read never lit
+  const gNobody = { use: { mode: 'nobody' }, run: { mode: 'nobody' } }, gEvery = { use: { mode: 'everyone' }, run: { mode: 'nobody' } }, gBogus = { use: { mode: 'everyone' }, run: { mode: 'bogus' } };
+  ok(typeof E.grantedOf === 'function' && E.grantedOf(gNobody) === false && E.grantedOf(gEvery) === true && E.grantedOf({ mode: 'unknown' }) === false && E.grantedOf(gBogus) === false && E.grantedOf(null) === false,
+    'B-cb72 grantedOf: nobody ⇒ at rest; a grant open to someone ⇒ the accent; «unknown», an unknown mode or no view ⇒ never the accent (the words say «unreadable» there)');
+  const rawReader = (x) => !!(x && ((x.use && x.use.mode && x.use.mode !== 'nobody') || (x.run && x.run.mode && x.run.mode !== 'nobody')));   // the first cut's raw read
+  ok(rawReader(gBogus) === true, 'CONTROL: the raw-mode read (the first cut) lights a list the words call «unreadable» — the leg above tells them apart');
 }
 console.log('agentView · stamp · base · patch');
 {

@@ -1153,11 +1153,14 @@ export function installSidebarMounts(Sidebar) {
         ex.type = 'button';
         ex.className = 'mounts-exit-line mounts-exit-door' + (exitGranted(h.exit) ? ' mounts-exit-door-open' : '');
         ex.title = tr('Who can use "{name}" as an exit…', { name: h.name });
+        // cure: the NAME a screen reader hears says what the door OPENS and joins the status words («Who can use NAME as an
+        // exit: network — …, commands — …») — one label, its own dictionary key (zh / ja)
+        ex.setAttribute('aria-label', tr('Who can use "{name}" as an exit: {summary}', { name: h.name, summary: exitSummaryText(h.exit) }));
         const exG = document.createElement('span'); exG.className = 'mounts-exit-door-glyph'; exG.setAttribute('aria-hidden', 'true'); exG.innerHTML = MI.exit;
         const exT = document.createElement('span'); exT.className = 'mounts-exit-door-text'; exT.textContent = exitSummaryText(h.exit);
         const exC = document.createElement('span'); exC.className = 'mounts-exit-door-chev'; exC.setAttribute('aria-hidden', 'true'); exC.innerHTML = UI_ICONS.chevronRight;
         ex.append(exG, exT, exC);
-        ex.onclick = () => { openExitAccessDialog(this.app, { hostId: h.id, name: h.name }); };
+        ex.onclick = (e) => { e.stopPropagation(); openExitAccessDialog(this.app, { hostId: h.id, name: h.name }); }; // never also a row's own press
         row.appendChild(ex);
         { const lr = this._lastRunLine(h); if (lr) row.appendChild(lr); } // B-a31a: the same line the row patch replaces in place
         // lane device-upgrade-stuck: the agent's failed update stays on the row until the device reports the version

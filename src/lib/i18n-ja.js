@@ -6409,6 +6409,7 @@ export default {
   "REFUSED": "拒否",
   "Pairing command — see the dial state, pick an address, generate a new command (keeps the row)": "ペアリングコマンド — ダイヤル状態を確認し、アドレスを選び、新しいコマンドを生成（行は保持）",
   "Who can use \"{name}\" as an exit…": "\"{name}\" を出口として使える会話…",
+  "Who can use \"{name}\" as an exit: {summary}": "\"{name}\" を出口として使える会話：{summary}",
   "dial-out device": "発信式デバイス",
   "Send the new command to the connected device over its link (it keeps working without running anything)": "新しいコマンドを接続中のデバイスにそのリンク経由で送る（デバイス側で何も実行せずに動き続けます）",
   "Unchecked: the connected device is disconnected now and its command stops working — run the new command on the device yourself.": "未チェック: 接続中のデバイスは今すぐ切断され、そのコマンドは無効になります — 新しいコマンドをデバイスで自分で実行してください。",

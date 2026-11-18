@@ -8846,7 +8846,7 @@ button.mounts-exit-last { width: 100%; box-sizing: border-box; margin: 0; paddin
 button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: underline; }
 /* B-cb72 (the owner's pick A): the summary of who may use a machine IS its door — a full-width button with a button's skin at
    rest, the exit glyph at its head, a chevron at its end, accent while a grant is not nobody; theme variables only */
-button.mounts-exit-door { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; margin: 3px 0 2px; padding: 3px 6px; min-height: 24px; font: inherit; font-size: 10px; line-height: 1.35; text-align: left; color: var(--text-secondary); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+button.mounts-exit-door { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; margin: 3px 0 2px; padding: 3px 6px; min-height: 24px; font: inherit; font-size: 10px; line-height: 1.35; text-align: left; color: var(--text-secondary); background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 button.mounts-exit-door:hover { border-color: var(--text-dim); color: var(--text); }
 button.mounts-exit-door:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }

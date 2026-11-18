@@ -126,6 +126,7 @@ try {
   ok(await P.waitFor(`!!${exitIcon}`, 15000), 'the machine row\'s summary line IS the door "谁能把 … 当出口使用…" (B-cb72: a button, no strip icon)');
   ok(await P.evalJs(`/^出口：网络 — 没有人 · 命令 — 没有人$/.test(${rowOf}.querySelector('.mounts-exit-line')?.textContent || '')`), 'the row says 出口：网络 — 没有人 · 命令 — 没有人 (the migration default: nobody)');
   ok(await P.evalJs(`!${exitIcon}.classList.contains('mounts-exit-door-open') && !${rowOf}.querySelector('.mounts-row-actions button[title*="出口"], .mounts-row-actions button[title*="as an exit"]')`), 'B-cb72: nobody ⇒ the door at rest (no accent), and no strip icon carries the exit title any more');
+  ok(await P.evalJs(`${exitIcon}.getAttribute('aria-label') === '谁能把 "exmac" 当出口使用：出口：网络 — 没有人 · 命令 — 没有人'`), 'B-cb72 cure: the NAME a screen reader hears says what the door opens AND its status (谁能把 "exmac" 当出口使用：出口：网络 — 没有人 · 命令 — 没有人)', await P.evalJs(`${exitIcon}.getAttribute('aria-label')`));
   // ① the row's copy HELD stale: the page stops repainting the panel, the server's list moves on
   await P.evalJs(`(() => { const s = app.sidebar; s.__realRender = s._renderMounts; s._renderMounts = async () => {}; return true; })()`);
   const w1 = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { use: { mode: 'everyone' } });
@@ -212,7 +213,11 @@ try {
   ok(await P.waitFor(`/已选 2 个（每次问我）/.test(${rowOf}?.querySelector('.mounts-exit-line')?.textContent || '')`, 10000), '…and the first page\'s row repainted from the broadcast');
   ok(await P2.evalJs(`${exitIcon}.classList.contains('mounts-exit-door-open')`), 'B-cb72: a grant that is not nobody ⇒ the door wears the accent');
   // B-cb72: the KEYBOARD reaches the door and Enter presses it (a button; no row handler swallows the key)
-  ok(await P.evalJs(`(() => { const d = ${exitIcon}; d.focus(); return document.activeElement === d; })()`), 'B-cb72: the door takes keyboard focus');
+  // reached by TAB (real key presses from the page's start), never by a script's focus
+  await P.evalJs(`(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); return true; })()`);
+  let tabbed = false;
+  for (let i = 0; i < 160 && !tabbed; i++) { await P.key('Tab', { vk: 9 }); tabbed = await P.evalJs(`document.activeElement === ${exitIcon}`); }
+  ok(tabbed, 'B-cb72: Tab presses from the page\'s start reach the door (keyboard focus, no script)');
   await P.key('Enter', { vk: 13, text: '\r' });
   ok(await P.waitFor(`!!document.querySelector('${sec('use')}')`, 8000), 'B-cb72: Enter on the focused door opens 谁能使用 exmac？');
   await P.key('Escape', { vk: 27 });
