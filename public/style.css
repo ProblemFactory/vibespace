@@ -4505,7 +4505,7 @@ label.cfg-row {
 .mounts-path-text::before { content: '\200e'; content: '\200e' / ""; } /* LTR mark — leading '~'/neutrals reorder to the end under rtl otherwise */
 .mounts-errline { padding-left: 14px; font-size: 10px; color: var(--red, #e55); line-height: 1.4; }
 /* B-a31a: a slow hub is SAID above the list it gave last — never a blank «Failed to load»; it stays in view (sticky) however far the list is scrolled */
-.mounts-slow { position: sticky; top: 0; z-index: 2; background: var(--bg-sidebar); margin: 6px 8px; padding: 6px 10px; border: 1px solid var(--yellow); border-radius: 6px; color: var(--warn-text); font-size: 12px; line-height: 1.4; }
+.mounts-slow { position: sticky; top: 0; z-index: 2; background: var(--bg-sidebar); margin: 6px 8px; padding: 6px 10px; border: 1px solid var(--yellow); border-radius: var(--radius-sm); color: var(--warn-text); font-size: 12px; line-height: 1.4; }
 .mounts-slow .mounts-slow-retry, .mounts-loading .mounts-slow-retry { margin-left: 6px; }
 .mounts-btn {
   border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);

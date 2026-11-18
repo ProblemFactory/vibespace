@@ -186,6 +186,10 @@ export function installSidebarMounts(Sidebar) {
     _initMountsSync() {
       if (this._mountsSyncInit) return;
       this._mountsSyncInit = true;
+      // B-a31a cure: frames sent while the page's connection was down are lost — the open panel asks ONCE when it comes back
+      // (the coalesced, single-flight refresh); the dots' timer starts again when the page is shown again
+      this.app.ws.onStateChange?.((up) => { if (up && this._activeTab === 'mounts') this._renderMountsSoon(); });
+      document.addEventListener?.('visibilitychange', () => { if (!document.hidden && this._activeTab === 'mounts') this._mountsDotsTick(); });
       this.app.ws.onGlobal((msg) => {
         // B-a31a: a RECORDED command is its row's new fact, patched in place (coalesced); a record's own change refreshes ONCE
         // (coalesced, single-flight) — never a whole refetch and redraw per pushed frame
@@ -215,6 +219,11 @@ export function installSidebarMounts(Sidebar) {
     },
 
     async _renderMounts() {
+      // B-a31a cure: NEVER A BLANK PANEL — a list with no panel (a tab change while a refresh is held) says «Loading…» at once,
+      // before it joins the flight (the trailing run may wait up to its 20-s bound behind the held one)
+      if (this.listEl && !this.listEl.querySelector(':scope > .mounts-panel') && !this.listEl.querySelector(':scope > .mounts-loading')) {
+        const l = document.createElement('div'); l.className = 'mounts-loading'; l.textContent = tr('Loading…'); this.listEl.replaceChildren(l);
+      }
       // B-a31a: ONE render in flight and ONE trailing — a burst of pushes never stacks overlapping redraws
       if (!this._mountsFlight) this._mountsFlight = singleFlight(() => this._renderMountsOnce());
       return this._mountsFlight();
@@ -231,6 +240,7 @@ export function installSidebarMounts(Sidebar) {
       // older than this frame — overlayLastRuns keeps the newer `at` when that list lands)
       noteLastRun(this._hostsData && this._hostsData.hosts, hostId, lastRun);
       if (lastRun) (this._lastRunSeen || (this._lastRunSeen = new Map())).set(hostId, lastRun);
+      else if (this._lastRunSeen) this._lastRunSeen.delete(hostId); // a host with no run: an older pushed one is never put back
       (this._lastRunDue || (this._lastRunDue = new Set())).add(hostId);
       if (!this._lastRunPaint) {
         this._lastRunPaint = coalesce(() => {
@@ -276,6 +286,23 @@ export function installSidebarMounts(Sidebar) {
       again.onclick = () => { words.textContent = tr('Retrying…'); again.disabled = true; this._renderMounts(); };
       box.append(words, ' ', again);
       panel.prepend(box);
+      // B-a31a cure: ONE bounded self-retry while the note shows (never a loop) — a held hub that recovered is seen without a
+      // press; a later failure keeps the note (and its Retry), a landed refresh takes it away with the panel it replaces
+      setTimeout(() => { if (box.isConnected && this._activeTab === 'mounts') this._renderMounts(); }, 15000);
+    },
+    /** B-a31a cure (a) A STATUS DOT DOES NOT LIE BY AGE: ONE timer for the panel while the Remote tab shows and the page is
+     *  visible — the ssh rows are re-probed on their own 2-minute rule (_autoTestHosts skips a fresher one). It stops when the
+     *  tab or the page is hidden; a paint or the page shown again starts it. */
+    _mountsDotsTick() {
+      if (this._mountsDotsT) return;
+      this._mountsDotsT = setTimeout(() => {
+        this._mountsDotsT = null;
+        if (this._activeTab !== 'mounts' || document.hidden || !this.listEl) return;
+        const hlist = this._mountsHostList;
+        const hs = this._hostsData && Array.isArray(this._hostsData.hosts) ? this._hostsData.hosts.filter((h) => h.transport !== 'dial') : [];
+        if (hlist && hlist.isConnected && hs.length) this._autoTestHosts(hs, hlist);
+        this._mountsDotsTick();
+      }, 60000);
     },
     async _renderMountsOnce() {
       this._initMountsSync();
@@ -338,6 +365,7 @@ export function installSidebarMounts(Sidebar) {
           }
         }
         root.appendChild(hlist);
+        this._mountsHostList = hlist; // B-a31a cure (a): the dots' timer re-probes THIS list's stale rows
         this._autoTestHosts(hd.hosts.filter((h) => h.transport !== 'dial'), hlist);
       }
       // Orphan mounts: mounts whose machine was removed (or none listed).
@@ -505,6 +533,7 @@ export function installSidebarMounts(Sidebar) {
       root.appendChild(note);
       this.listEl.appendChild(root);
       scrollers.forEach((el, i) => { if (keepScroll[i]) el.scrollTop = keepScroll[i]; });
+      this._mountsDotsTick(); // B-a31a cure (a)
     },
 
     _buildMountRow(m) {

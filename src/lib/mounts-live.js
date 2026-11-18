@@ -9,6 +9,8 @@
 //   noteLastRun(hosts, id, lastRun) — the page's cached hosts list takes a pushed last run
 //   overlayLastRuns(hosts, seen)    — a fetched list that is OLDER than a pushed last run (a refresh in flight when the run
 //                            landed) keeps the pushed one: the newer `at` wins; entries the list caught up with leave `seen`
+//   rerenderVerdict(state)  — what a SIDEBAR re-render does to the panel: a healthy panel is KEPT (no storm), a panel saying
+//                            «the server is slow» is not healthy (ONE coalesced refresh), no panel yet is painted
 /** fn runs once per `ms` window, however many calls arrive in it. */
 export function coalesce(fn, ms, { setTimer = setTimeout } = {}) {
   let pending = false;
@@ -69,4 +71,12 @@ export function overlayLastRuns(hosts, seen) {
     if (h && lr && atOf(lr) > atOf(listed)) { noteLastRun(hosts, id, lr); kept.push(id); } else seen.delete(id);
   }
   return kept;
+}
+/** What a sidebar re-render does to the Remote panel (B-a31a cure, the verdict of 07:52Z): another tab ⇒ 'other'; no panel
+ *  showing ⇒ 'paint' (the first paint, a tab change); a panel showing the slow note is NOT healthy ⇒ 'refresh' (one coalesced,
+ *  single-flight refresh — the note leaves when it lands); a healthy panel ⇒ 'keep' (nothing: the storm stays cured). */
+export function rerenderVerdict({ tab, shown, slow } = {}) {
+  if (tab !== 'mounts') return 'other';
+  if (!shown) return 'paint';
+  return slow ? 'refresh' : 'keep';
 }

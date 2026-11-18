@@ -46,6 +46,9 @@
 //      (src/lib/sidebar.js), the builder and the patch draw the same line; the slow note's CSS reads theme variables only.
 //      CONTROLS: (h) the release's listener, (i) a coalescer with no window, (j) the row rebuilt whole, (k) no single-flight
 //      guard, (l) the release's sidebar re-render (the wipe), (m) an overlay that takes the older list — each goes red
+//      THE CURE (07:52Z): ten re-renders over a healthy panel ⇒ 0 refreshes, the slow note + the recovery edge ⇒ 1, the
+//      connection back ⇒ 1; the wiring (reconnect hook, ONE self-retry, «Loading…» first, the dots' one timer, a null run
+//      forgets); CONTROLS (n) the tip before the cure (a slow panel «healthy»), (o) no reconnect hook
 // Run: node scripts/test-exit-runs-dialog.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -387,11 +390,16 @@ const wiring = (src) => ({
   keep: /if \(had\) \{ this\._mountsSlow\(\); return; \}/.test(src) && /setTimeout\(\(\) => this\._mountsSlow\(\), 4000\)/.test(src) && /await Promise\.race\(\[Promise\.all\(\[api\('\/api\/mounts'\)/.test(src) && /no\(new Error\('held'\)\), 20000\)/.test(src),
   overlay: /overlayLastRuns\(hd && hd\.hosts, this\._lastRunSeen\);/.test(src) && /const rows = rowsByHost\(this\.listEl\);/.test(src),
   same: /\{ const lr = this\._lastRunLine\(h\); if \(lr\) row\.appendChild\(lr\); \}/.test(src),
+  reconnect: /this\.app\.ws\.onStateChange\?\.\(\(up\) => \{ if \(up && this\._activeTab === 'mounts'\) this\._renderMountsSoon\(\); \}\);/.test(src),
+  oneRetry: /setTimeout\(\(\) => \{ if \(box\.isConnected && this\._activeTab === 'mounts'\) this\._renderMounts\(\); \}, 15000\);/.test(src),
+  loadingFirst: /l\.className = 'mounts-loading'; l\.textContent = tr\('Loading…'\); this\.listEl\.replaceChildren\(l\);[\s\S]{0,200}if \(!this\._mountsFlight\)/.test(src),
+  dots: /_mountsDotsTick\(\) \{[\s\S]{0,200}if \(this\._activeTab !== 'mounts' \|\| document\.hidden \|\| !this\.listEl\) return;[\s\S]{0,300}this\._autoTestHosts\(hs, hlist\);[\s\S]{0,60}\}, 60000\);/.test(src) && /this\._mountsDotsTick\(\); \/\/ B-a31a cure \(a\)/.test(src),
+  nullForgets: /else if \(this\._lastRunSeen\) this\._lastRunSeen\.delete\(hostId\);/.test(src),
 });
 const SB = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
-const GUARD = "if (this._activeTab === 'mounts' && this.listEl.querySelector(':scope > .mounts-panel')) return;";
+const GUARD = "const v = rerenderVerdict({ tab: this._activeTab, shown: !!shown, slow: !!(shown && shown.querySelector(':scope > .mounts-slow')) });\n      if (v === 'keep') return;\n      if (v === 'refresh') { this._renderMountsSoon?.(); return; }";
 const guarded = (src) => { const rail = src.indexOf("{ this._renderRailPanel?.(); return; }"), g = src.indexOf(GUARD), w = g < 0 ? -1 : src.indexOf("this.listEl.innerHTML = '';", g); return rail > 0 && g > rail && w > g && w - g < 600; };
-ok(guarded(SB), 'a sidebar re-render never wipes a Remote panel that shows (src/lib/sidebar.js: the guard sits before the list\'s wipe, after the rail panels\' own)');
+ok(guarded(SB) && /^import \{ rerenderVerdict \} from '\.\/mounts-live\.js';/m.test(SB), 'a sidebar re-render never wipes a Remote panel that shows — it asks rerenderVerdict (src/lib/sidebar.js: before the list\'s wipe, after the rail panels\' own)');
 const wr = wiring(SM);
 ok(Object.values(wr).every(Boolean), 'the wiring: host-last-run → the row patch (coalesced); a list frame → ONE coalesced, single-flight refresh, never a direct whole redraw; a failed or held refresh keeps the panel and says so; the builder and the patch draw the same line', wr);
 const slowCss = rule(STY, '.mounts-slow');
@@ -405,6 +413,29 @@ const a6PK = patched('src/lib/mounts-live.js', 'if (cur) return next || (next = 
 ok(a6PI.applies && a6PJ.applies && a6PK.applies && a6PM.applies, 'the §6 patches apply');
 ok(!guarded(SB.replace(GUARD, '')) && SB.includes(GUARD), 'CONTROL (l): the release\'s sidebar re-render (no guard: every digest change wipes the panel to «Loading…») — §6 goes red');
 ok(!cacheCase(await bundle('src/lib/mounts-live.js', a6PM)).overlay, 'CONTROL (m): an overlay that takes the older list (a run pushed during a refresh drawn away) — §6 goes red');
+
+// THE CURE (主开发 07:52Z): THE PANEL IS TRUE AGAIN BY ITSELF, WITHOUT A STORM — counts over the verdict + the coalesced refresh
+const rerenderCase = (M) => {
+  const timers = []; let refreshes = 0;
+  const soon = M.coalesce(() => { refreshes++; }, 250, { setTimer: (fn) => timers.push(fn) });
+  const drain = () => { timers.splice(0).forEach((f) => f()); };
+  const rr = (st) => { const v = M.rerenderVerdict({ tab: 'mounts', ...st }); if (v === 'refresh') soon(); return v; };
+  const healthy = Array.from({ length: 10 }, () => rr({ shown: true, slow: false })); drain();
+  const afterHealthy = refreshes;
+  const slow = [rr({ shown: true, slow: true }), rr({ shown: true, slow: true })]; drain(); // the poll's recovery edge (twice inside one window)
+  const afterSlow = refreshes;
+  const reconnect = () => soon(); [1, 2, 3].forEach(reconnect); drain();               // one outage that flapped: three «up» edges in a window
+  return { healthy, afterHealthy, slow, afterSlow, afterReconnect: refreshes - afterSlow, paint: M.rerenderVerdict({ tab: 'mounts', shown: false }), other: M.rerenderVerdict({ tab: 'folders', shown: true }) };
+};
+const rc5 = rerenderCase(ML);
+ok(rc5.healthy.every((v) => v === 'keep') && rc5.afterHealthy === 0, 'TEN sidebar re-renders over a HEALTHY panel ⇒ ZERO refreshes (the storm\'s leg stays)', rc5);
+ok(rc5.slow.every((v) => v === 'refresh') && rc5.afterSlow === 1, 'a panel SAYING the server is slow is not healthy: the recovery edge\'s re-render ⇒ exactly ONE refresh (the note leaves when it lands)', rc5);
+ok(rc5.afterReconnect === 1, 'the page\'s connection back (three «up» edges inside one window) ⇒ exactly ONE refresh', rc5);
+ok(rc5.paint === 'paint' && rc5.other === 'other', 'no panel yet ⇒ paint (a tab change); another tab ⇒ not the panel\'s business', rc5);
+const pn = patched('src/lib/mounts-live.js', "return slow ? 'refresh' : 'keep';", "return 'keep'; // CONTROL: the tip before the cure");
+ok(pn.applies && (rerenderCase(await bundle('src/lib/mounts-live.js', pn))).afterSlow === 0, 'CONTROL (n): the tip before the cure (a showing panel is always «healthy») — the slow note never leaves by itself: the recovery leg goes red');
+const noReconnect = SM.replace("this.app.ws.onStateChange?.((up) => { if (up && this._activeTab === 'mounts') this._renderMountsSoon(); });", '');
+ok(noReconnect !== SM && !wiring(noReconnect).reconnect, 'CONTROL (o): no refresh when the connection comes back (the tip before the cure) — the wiring census goes red');
 ok((coalesceCase(await bundle('src/lib/mounts-live.js', a6PI))).set1 === 60, 'CONTROL (i): a coalescer with no window — 60 frames, 60 paints: §6 goes red');
 ok(!patchCase(await bundle('src/lib/mounts-live.js', a6PJ)).replaced, 'CONTROL (j): the row rebuilt whole (new nodes) — §6\'s in-place leg goes red');
 ok((await flightCase(await bundle('src/lib/mounts-live.js', a6PK))).most > 1, 'CONTROL (k): no single-flight guard — refreshes overlap: §6 goes red');
