@@ -19,6 +19,9 @@
 //   ⑤ CONTROL (what the runner stumbled into): the REAL table, a floor it pins with its REAL sums (v22.23.4 today), a node
 //     below it, a mirror serving other bytes ⇒ refused (sums-disagree) before the download, nothing flipped, the update
 //     still ends 0 — on every box (the base it judges is set through runtime-check's own seam, VIBESPACE_RUNTIME_BASE)
+//   ⑥ B-f6fd THE UPDATE THAT SHIPS A STEP RUNS IT: origin's commit adds a step to scripts/update.sh AFTER its pull line; the
+//     update that pulls it runs that step (the old script exec's the new one --after-pull: no second pull, the lock kept);
+//     an update that pulls nothing never re-execs. On the base it is the measured bug: the step is skipped
 // Run: node scripts/test-update-road.mjs
 //      VS_UPDATE_ROAD_NODE=v22.23.3 node scripts/test-update-road.mjs — PRETEND the running node is v22.23.3 (the update's
 //      check judges it through VIBESPACE_RUNTIME_BASE); ③ (the real binary's swap) runs only on the real node
@@ -185,6 +188,18 @@ try {
       && link() === null && !fs.existsSync(path.join(CHECKOUT, 'data', 'runtime', `node-${PIN.v}`)) && hits.slice(from).join() === `/${PIN.v}/SHASUMS256.txt`,
       `node ${PIN.base} below the real floor ${PIN.v}, whose line this repo pins (${PIN.sha.slice(0, 12)}…): a mirror whose SHASUMS256.txt names other bytes ⇒ refused (sums-disagree) before the download, nothing flipped, the update still ends 0`, { l5, hits: hits.slice(from), link: link() });
   }
+
+  console.log('— ⑥ B-f6fd: the update that ships a step runs it (bash keeps the old script\'s inode after the pull)');
+  const us = fs.readFileSync(path.join(W, 'scripts/update.sh'), 'utf8');
+  const MARK = 'echo "== npm install"\n';
+  ok(us.split(MARK).length === 2, '⑥ the step\'s anchor (the npm install line after the pull) is in scripts/update.sh');
+  fs.writeFileSync(path.join(W, 'scripts/update.sh'), us.replace(MARK, 'echo "== a step this release ships (B-f6fd)"\n' + MARK));
+  git(W, 'commit', '-qam', 'update.sh: a step after the pull'); git(W, 'push', '-q', 'origin', 'master');
+  const u6 = await update();
+  ok(u6.code === 0 && /Fast-forward|files? changed/.test(u6.out) && u6.out.includes('== a step this release ships (B-f6fd)') && (u6.out.match(/== VibeSpace update:/g) || []).length === 2 && (u6.out.match(/Fast-forward|Already up to date/g) || []).length === 1,
+    '⑥ the update that PULLS a new step runs it — the old script hands over to the new one right after its pull (one pull, the new script\'s step said)', u6.out.split('\n').filter((l) => /^==|Fast-forward|Already/.test(l)));
+  const u7 = await update();
+  ok(u7.code === 0 && !u7.out.includes('== continuing with the updated script') && u7.out.includes('== a step this release ships (B-f6fd)'), '⑥ …an update that pulls nothing never hands over (one run of the script) — and the step is simply there', u7.out.split('\n').filter((l) => /^==/.test(l)));
 } finally { mirror.close(); }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);

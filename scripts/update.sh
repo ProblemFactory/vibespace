@@ -11,7 +11,11 @@ cd "$(dirname "$0")/.."
 # runs git as ROOT against a uid-1000-owned repo → "dubious ownership" aborts
 # every update (real regression report). Trust this repo regardless of who runs
 # the update — single-user container, and the exec is already privileged.
-git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
+# B-f6fd: `--after-pull` = the NEW script, exec'd by the old one right after its pull (below): the pull is done — everything
+# after the pull runs from the script the pull brought; the lock is re-taken on the inherited fd 9 (the same open file: it
+# holds), or taken anew when the mode was typed by hand
+AFTER_PULL=; [ "${1:-}" = "--after-pull" ] && AFTER_PULL=1
+[ -n "$AFTER_PULL" ] || git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
 # Single-flight guard: the update restarts the server, whose fresh in-memory
 # pid map can't see this still-running script — a second POST /api/self-update
 # (another tab / re-click) would interleave a concurrent git pull/npm install.
@@ -29,7 +33,7 @@ if [ -e data/.update.lock ] && [ ! -w data/.update.lock ]; then
   }
 fi
 if command -v flock >/dev/null 2>&1; then
-  exec 9>data/.update.lock
+  { [ -n "$AFTER_PULL" ] && { true >&9; } 2>/dev/null; } || exec 9>data/.update.lock
   flock -n 9 || { echo "Another update is already running — aborting this one."; exit 1; }
 fi
 # Ownership preflight (same incident, the bigger half): a root-run update
@@ -86,6 +90,8 @@ git checkout HEAD -- src/agentd/version.js 2>/dev/null || true
 git ls-files -m data/bin/ 2>/dev/null | xargs -r -n1 git checkout HEAD -- 2>/dev/null || true
 # Last-resort belt: if the tree is STILL dirty enough to block a ff pull, stash
 # the leftover noise away (kept, not dropped) so the pull can proceed.
+PRE_PULL="$(git rev-parse HEAD)"
+if [ -z "$AFTER_PULL" ]; then # B-f6fd: the new script (--after-pull) never pulls again
 if ! git pull --ff-only; then
   git stash push -u -m "vibespace-update-autostash" >/dev/null 2>&1 || true
   if ! git pull --ff-only; then
@@ -107,6 +113,16 @@ if ! git pull --ff-only; then
     echo "== upstream history was rewritten — realigning (old HEAD kept as a local tag)"
     git tag -f "pre-realign-$(date +%Y%m%d%H%M%S)" HEAD
     git reset --hard "origin/$BR"
+  fi
+fi
+fi # the --after-pull guard
+# B-f6fd: THE UPDATE THAT SHIPS A STEP RUNS IT. bash goes on reading THIS file's old inode after the pull replaced it, so a
+# step a release adds below this line was skipped on the very update that brought it (measured 2026-10-22: .342's runtime
+# step never ran on the pods). The pull moved HEAD ⇒ the rest runs from the script it brought.
+if [ -z "$AFTER_PULL" ] && [ "$(git rev-parse HEAD)" != "$PRE_PULL" ]; then
+  if [ -f "$(pwd)/scripts/update.sh" ]; then
+    echo "== continuing with the updated script"
+    exec "${BASH:-bash}" "$(pwd)/scripts/update.sh" --after-pull
   fi
 fi
 echo "== npm install"
