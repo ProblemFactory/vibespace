@@ -671,7 +671,7 @@ console.log('⑤ wiring: every dialog maps the All row onto its model\'s own spe
   // lane grants-unify: the stored list is drawn through the picker model's rowToPick (`everyone` an entry of `to` ⇒ the All key)
   ok(/if \(all\) g\.mode = 'everyone';/.test(XD) && /rowToPick\(\{ to: \[\.\.\.\(g\.mode === 'everyone' \? \[\{ kind: 'everyone' \}\] : \[\]\)/.test(XD) && /everyoneKey: EVERYONE_KEY/.test(XD) && !/value: 'everyone'|\['nobody', 'everyone', 'only'\]/.test(XD), 'exit access: the picker\'s All row IS mode everyone (the radio is gone — one spelling); the rows beside it ride along');
   const BW = read('src/lib/browser-who-dialog.js');
-  ok(/everyone: \{ key: EVERYONE_KEY \}/.test(BW) && /const use0 = draftUse\(d\.sel, model\.wire\);/.test(BW) && !/bwho-radio|radiogroup/.test(BW), 'browser who-can-use: one picker, All first, mapped through draftUse (the radios are gone)');
+  ok(/everyone: \{ key: EVERYONE_KEY \}/.test(BW) && /const use0 = draftUse\(d\.sel, wire\);/.test(BW) && !/bwho-radio|radiogroup/.test(BW), 'browser who-can-use: one picker, All first, mapped through draftUse (the radios are gone)');
   const RT = read('src/routes/browser-trace.js');
   ok(/patch\.use = sv\.mode === 'all' \? \(rows\.length \? \{ mode: 'all', who: rows, \.\.\.ex \} : \{ mode: 'all', \.\.\.ex \}\)/.test(RT), 'the browser PATCH route carries the rows kept beside All (resolved like a list\'s)');
   const WT = read('src/server/window-targets-engine.js');

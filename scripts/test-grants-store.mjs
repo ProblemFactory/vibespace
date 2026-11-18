@@ -555,6 +555,18 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   const lr = (rows) => (res) => (res === 'https://shop.example.test#*' ? rows : []);
   const fill = (rows, inh) => BLg.fillVerdict({ tabOrigin: 'https://shop.example.test', spec, entries: [{ origin: 'https://shop.example.test', user: 'alice', hasCurrent: true }], grantRows: lr(rows), facts: { conversationKeys: ['k1'], groupIds: ['tg-c'], inheritedGroupIds: inh }, vaultState: 'unlocked' }).ok;
   ok(fill([{ door: 'browser-login', resource: 'https://shop.example.test#*', to: [P], except: [] }], ['tg-p']) && !fill([{ door: 'browser-login', resource: 'https://shop.example.test#*', to: [PO], except: [] }], ['tg-p']), 'browser-login: a parent\'s web-login row fills for the child; «仅本组» does not');
+  // U5b: the browser profile door carries «仅本组» from the PATCH to the row and back to the dialog
+  const usv = B.useShapeVerdict({ mode: 'only', who: [{ kind: 'task', id: 'T-p1', only: true }, { kind: 'task', id: 'T-p2', only: false }, { kind: 'task', id: 'T-p3' }], except: [{ kind: 'task', id: 'T-p4', only: true }] });
+  ok(usv.ok && usv.rows[0].only === true && usv.rows[1].only === false && !('only' in usv.rows[2]) && !('only' in (usv.except[0] || {})), 'U5b: the browser PATCH shape keeps a picked group\'s switch (true / false / unsaid) and never puts it on an exception', usv);
+  const wv = B.whoMayUse({ id: 'bp-0000d009', label: 'x', grantUse: B.useOfRows([{ door: 'browser-profile', resource: 'bp-0000d009', to: [PO], except: [] }]) });
+  ok(JSON.stringify(wv).includes('"only":true'), 'U5b: the panel\'s reading of a stored «仅本组» group keeps the flag (the dialog draws the switch on from it)', wv);
+  const stOf = (to) => B.useStamp({ id: 'bp-0000d00a', label: 'x', grantUse: B.useOfRows([{ door: 'browser-profile', resource: 'bp-0000d00a', to, except: [] }]) });
+  ok(stOf([PO]) !== stOf([P]) && stOf([P]) === stOf([{ kind: 'group', id: 'tg-p' }]), 'the U5b read (BLOCKER 2): the list\'s change stamp sees «仅本组» (a flag-only change writes; a row without it keeps its bytes)');
+  const trSrc = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf-8');
+  ok(/else rows\.push\(\{ kind: 'task', id: r\.id, \.\.\.\(r\.only === true \|\| r\.only === false \? \{ only: r\.only \} : \{\}\) \}\);/.test(trSrc) && /unreadable: f === undefined, \.\.\.\(w\.only === true \? \{ only: true \} : \{\}\) \};/.test(trSrc), 'the U5b read (BLOCKERS 1, 3): the dialog\'s own PATCH route carries the switch to the store, and its view carries the stored flag back');
+  const BWM = await import(new URL('../src/lib/browser-who-model.js', import.meta.url).href).catch(() => null);
+  const pr = BWM && BWM.pickerRows({ use: { mode: 'only', who: [{ kind: 'task', id: 'tg-p', title: 'P', only: true }] } }, { groups: [{ id: 'tg-p', title: 'P' }] });
+  ok(!!pr && pr.wire.get('task:tg-p') && pr.wire.get('task:tg-p').only === true, 'U5b: the dialog\'s wire of a stored «仅本组» group carries it', pr && [...pr.wire]);
   // U3c: the channel doors — reach (the ACL over the ONE store's rows), watch (the wake admission), a group's members (round-robin / via)
   const ACL = require('../src/channel-acl.js');
   const chLevel = (to, except, ctx) => { const s2 = GS.create({ memory: true }); s2.set('channel-reach', 'conversation:a1/c1', { to, except }); return ACL.effective(ctx, { key: 'a1/c1', adapterId: 'a1' }, CGM.create({ grants: s2 }).conversationGrants('a1/c1')).level; };

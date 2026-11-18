@@ -290,7 +290,7 @@ function useViewOf(p, live, cache = {}) {
       return { kind: 'session', key: w.id, conversationId: (l && l.conversationId) || own || convOf(w.id) || w.conversationKey || null, live: !!l, sessionId: l ? l.sessionId : null, name: l ? l.name : null, backend: l ? l.backend : null };
     }
     const f = k && typeof k.taskInfo === 'function' ? k.taskInfo(w.id) : undefined;
-    return { kind: 'task', id: w.id, title: f ? String(f.title || '') || null : null, deleted: f === null, archived: !!(f && f.archived), unreadable: f === undefined };
+    return { kind: 'task', id: w.id, title: f ? String(f.title || '') || null : null, deleted: f === null, archived: !!(f && f.archived), unreadable: f === undefined, ...(w.only === true ? { only: true } : {}) };   // lane lg-group-parents (the U5b read, BLOCKER 3): the dialog draws the switch from it
   }
   const ex = exceptOf();
   return {
@@ -404,7 +404,7 @@ router.patch('/api/browser/profiles/:id', async (req, res) => {
           const rs = remoteHolderOf(r.key);
           if (rs) return res.status(STATUS.no_browser_key).json({ error: `"${rs.name}" runs on another machine — the Agent browser runs on this machine only`, code: 'no_browser_key', why: 'remote', key: r.key, name: rs.name });
           rows.push({ kind: 'session', key: r.key });
-        } else rows.push({ kind: 'task', id: r.id });
+        } else rows.push({ kind: 'task', id: r.id, ...(r.only === true || r.only === false ? { only: r.only } : {}) });   // lane lg-group-parents (the U5b read, BLOCKER 1): the dialog's PATCH is THIS route — «仅本组» rides
       }
       // lane grants-unify — «除了»: a member left out is named by its conversation (`cid:<key>`), never given a browser key
       const except = [];

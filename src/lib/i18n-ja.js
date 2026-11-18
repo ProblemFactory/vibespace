@@ -11791,6 +11791,10 @@ export default {
   "Child groups see it": "子グループにも",
   "Every child Task Group (and theirs) is told this row, read-only": "すべての子タスクグループ（その子も）にこの行が読み取り専用で伝わります",
   "Rows inherited from parent groups (read-only here — change them in the parent)": "親グループから継承した行（ここでは読み取り専用——親で変更してください）",
+  "this group only": "このグループのみ",
+  "+ child groups": "子グループも",
+  "Only conversations in this group itself — its child groups are not included (press to include them)": "このグループ自身の会話のみ——子グループは含みません（押すと含めます）",
+  "This group and every child group under it (press for this group only)": "このグループと配下のすべての子グループ（押すとこのグループのみ）",
   "No other Task Group to reference yet": "参照できる他のタスクグループはまだありません", // lane task-group-context
   "rows go in table order; one that does not fit steps down a level: contents → names + key files → names → note only": "表の順に入れます。入りきらない行は一段下げます：内容 → ファイル名 + 主要ファイルの内容 → ファイル名 → 説明だけ", // lane task-group-context
   "What a new conversation receives": "新しい会話が受け取るもの", // lane task-group-context

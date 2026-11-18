@@ -1709,7 +1709,7 @@ function useOfRows(rows, { browserKeyOf = () => null } = {}) {
 }
 /** A row entry in the panel's spelling: a conversation by its browser key (`cid:<id>` while it has none), a Task Group. */
 function whoOfEntry(e) {
-  if (e.kind === 'group') return { kind: 'task', id: e.id };
+  if (e.kind === 'group') return { kind: 'task', id: e.id, ...(e.only === true ? { only: true } : {}) };   // lane lg-group-parents U5b
   return { kind: 'session', id: isBrowserKey(e.browserKey) ? e.browserKey : `cid:${e.key}`, conversationKey: e.key };
 }
 /**
@@ -1756,7 +1756,7 @@ function scopeOf(p) {
 }
 /** The digest's `use`: keys and ids only (it is the broadcast) — `{mode:'all'[, who: the kept rows]}` |
  *  `{mode:'only', who:[{kind,key|id}]}`. */
-const digestRow = (w) => (w.kind === 'session' ? { kind: 'session', key: w.id, ...(w.conversationKey ? { conversationId: w.conversationKey } : {}) } : { kind: 'task', id: w.id });
+const digestRow = (w) => (w.kind === 'session' ? { kind: 'session', key: w.id, ...(w.conversationKey ? { conversationId: w.conversationKey } : {}) } : { kind: 'task', id: w.id, ...(w.only === true ? { only: true } : {}) });   // lane lg-group-parents (the U5b read, 6)
 function useDigestOf(p) {
   const U = whoMayUse(p);
   if (!U) return null;
@@ -2031,7 +2031,7 @@ function agentAnswerView(body, { me = null, foreign = null, echoes = null } = {}
 function useStamp(p) {
   const U = whoMayUse(p) || { mode: 'unknown' };
   const lines = [JSON.stringify(['m', U.mode === 'all' ? 'all' : U.mode === 'only' ? 'only' : 'unknown'])];
-  for (const w of U.mode === 'only' ? U.who : U.mode === 'all' ? (U.kept || []) : []) lines.push(JSON.stringify([w.kind === 'session' ? 's' : 't', w.id]));
+  for (const w of U.mode === 'only' ? U.who : U.mode === 'all' ? (U.kept || []) : []) { lines.push(JSON.stringify([w.kind === 'session' ? 's' : 't', w.id])); if (w.kind !== 'session' && w.only === true) lines.push(JSON.stringify(['o', w.id])); }   // lane lg-group-parents (the U5b read, BLOCKER 2): «仅本组» is a fact of the list — a flag-only change writes, and a base read before it is stale (a row without the flag keeps its bytes)
   for (const w of U.except || []) lines.push(JSON.stringify(['x', `${w.kind === 'session' ? 's' : 't'}:${w.id}`]));   // lane grants-unify: an exception is a fact of the list
   return lines.sort().join('\n');
 }
@@ -2042,7 +2042,7 @@ function useBaseVerdict(profile, base) {
   if (typeof base !== 'string') return { ok: false, code: 'bad-request', error: 'base must be the stamp the reader was given (a string)' };
   const now = useStamp(profile);
   if (now === base) return { ok: true };
-  const NAMES = { s: 'session', t: 'task', m: 'mode', x: 'except' };
+  const NAMES = { s: 'session', t: 'task', m: 'mode', x: 'except', o: 'only' };   // lane lg-group-parents: + a group's «仅本组»
   const keysOf = (stamp) => new Set(String(stamp).split('\n').map((l) => { try { const v = JSON.parse(l); return Array.isArray(v) && NAMES[v[0]] ? NAMES[v[0]] + ':' + v[1] : null; } catch { return null; } }).filter(Boolean));
   const was = keysOf(base), is = keysOf(now);
   return {
@@ -2068,7 +2068,7 @@ function useShapeVerdict(use) {
   if (use.mode !== 'only' && use.mode !== 'all') return bad(`use.mode "${String(use.mode)}" is not a value — one of all, only`);
   const rowOf = (r, what) => {
     if (!r || typeof r !== 'object') return { error: `every row of use.${what} is {kind:"task", id} or {kind:"session", key|session}` };
-    if (r.kind === 'task') { const id = String(r.id == null ? '' : r.id); if (!TASK_ID_RE.test(id)) return { error: `task id ${JSON.stringify(r.id)} is not an id` }; return { row: { kind: 'task', id } }; }
+    if (r.kind === 'task') { const id = String(r.id == null ? '' : r.id); if (!TASK_ID_RE.test(id)) return { error: `task id ${JSON.stringify(r.id)} is not an id` }; return { row: { kind: 'task', id, ...(what !== 'except' && (r.only === true || r.only === false) ? { only: r.only } : {}) } }; }   // lane lg-group-parents U5b: «仅本组» (true) / switched off (false) rides a picked group
     if (r.kind === 'session') {
       if (typeof r.session === 'string' && r.session && r.key === undefined) return { row: { kind: 'session', session: r.session } };
       const raw = String(r.key == null ? '' : r.key);
@@ -2127,7 +2127,7 @@ function usePatchVerdict({ profile, use, knownTask = () => false, knownKey = () 
       const known = had.has('task:' + r.id) ? true : knownTask(r.id);
       if (known && typeof known === 'object') { if (known.refusal) return { refusal: { ...known.refusal, ok: false, taskId: r.id } }; return { refusal: { ok: false, code: 'unknown_task', error: `there is no Task Group ${r.id}`, taskId: r.id } }; }   // any other object is no «known»
       if (!known) return { refusal: { ok: false, code: 'unknown_task', error: `there is no Task Group ${r.id}`, taskId: r.id } };
-      return { entry: { kind: 'group', id: r.id }, wire: { kind: 'task', id: r.id } };
+      return { entry: { kind: 'group', id: r.id, ...(r.only === true || r.only === false ? { only: r.only } : {}) }, wire: { kind: 'task', id: r.id, ...(r.only === true ? { only: true } : {}) } };   // lane lg-group-parents U5b: the ONE writer widens only on an explicit false
     }
     if (r.session !== undefined) return { refusal: { ok: false, code: 'bad-request', error: 'a picked session must be resolved to its conversation before the list is written' } };
     if (!had.has('session:' + r.key) && !knownKey(r.key)) return { refusal: { ok: false, code: 'unknown_conversation', error: `${r.key} is not a conversation this profile knows (not in its list, not running, not the one that made it, not using it)`, key: r.key } };

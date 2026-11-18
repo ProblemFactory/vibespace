@@ -62,7 +62,8 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   // lane dialog-unsaved-guard: a pick changed and not saved ⇒ ✕ / Esc / the backdrop asks (the picker is drawn right below)
   const shell = createModalShell({ id: DIALOG_ID, key: profileId, title: t('Who can use {label}?', { label: title }), dialogClass: 'bwho-dialog', bodyClass: 'bwho-body', escapeToClose: true,
     onClose: () => { closed = true; try { picker.close(); } catch { /* none */ } },
-    unsaved: { isDirty: () => picker.selected().slice().sort().join('\n') !== initial.slice().sort().join('\n') || picker.except({ held: initialExcept }).slice().sort().join('\n') !== initialExcept.slice().sort().join('\n'), save: () => doSave() }, kind: 'form' });
+    // lane lg-group-parents (the U5b read, 4): a «仅本组» press is a change too (unsaved: isDirty below)
+    unsaved: { isDirty: () => picker.selected().slice().sort().join('\n') !== initial.slice().sort().join('\n') || picker.except({ held: initialExcept }).slice().sort().join('\n') !== initialExcept.slice().sort().join('\n') || ((typeof picker.onlyKeys === 'function' ? picker.onlyKeys() : null) || []).slice().sort().join('\n') !== onlyAtOpen.filter((k) => picker.selected().includes(k)).slice().sort().join('\n'), save: () => doSave() }, kind: 'form' });
   if (shell.raised) return null;   // raised: the same subject's form, as it was
   shell.dialog.dataset.profileId = id;
   const body = shell.body;
@@ -94,6 +95,8 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   const keptPk = new Map(initialExcept.filter((k) => model.exceptPk.has(k)).map((k) => [k, model.exceptPk.get(k)]));
   const exceptModel = () => ({ ...model, exceptWire: new Map([...model.exceptWire, ...keptWire]), exceptPk: new Map([...model.exceptPk, ...keptPk]) });
   const pickWrap = el('div', 'bwho-pick');
+  // lane lg-group-parents U5b: the picker keys of the groups the stored list holds «仅本组» (the panel's `who` entries carry it)
+  const onlyAtOpen = [...(model.wire || new Map())].filter(([, w]) => w && w.kind === 'task' && w.only === true).map(([k]) => k);
   const picker = principalPicker({
     items: () => rowsNow(), app, multi: true, selected: initial,
     placeholder: t('Add a conversation or Task Group…'), label: t('Who can use it'),
@@ -102,6 +105,7 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
     everyone: { key: EVERYONE_KEY },
     onChange: () => refresh(),
     except: { selected: initialExcept, extra: () => model.exceptExtra },   // «除了» — members left out of a picked Task Group / All agents
+    only: { keys: onlyAtOpen },   // lane lg-group-parents U5b: «仅本组» on a picked Task Group (the stored ones drawn on)
   });
   pickWrap.appendChild(picker.el);
   const remoteLine = el('div', 'bwho-remote chat-status-dim', t('Conversations on other machines are not listed — the Agent browser runs on this machine only.'));
@@ -163,7 +167,11 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
 
   async function doSave() {
     const d = draft();
-    const use0 = draftUse(d.sel, model.wire);   // ALL AGENTS ⇒ {mode:'all'} (+ the rows kept beside it); nothing ⇒ refused
+    // lane lg-group-parents U5b: each picked group carries its switch — on ⇒ only:true; stored on and switched off ⇒ only:false
+    // (the ONE writer widens only on an explicit false); a group the switch never touched is written as the wire holds it
+    const onNow = new Set((typeof picker.onlyKeys === 'function' ? picker.onlyKeys() : null) || []), wasOn = new Set(onlyAtOpen);
+    const wire = new Map([...(model.wire || new Map())].map(([k, w]) => [k, w && w.kind === 'task' ? (onNow.has(k) ? { ...w, only: true } : wasOn.has(k) ? { ...w, only: false } : (({ only, ...rest }) => rest)(w)) : w]));
+    const use0 = draftUse(d.sel, wire);   // ALL AGENTS ⇒ {mode:'all'} (+ the rows kept beside it); nothing ⇒ refused
     const xm = exceptModel();   // r4: the kept ones by the keys captured at open
     const except = draftExcept(d.exceptPicks, xm);   // lane grants-unify: «除了» (lane held-except-doors: the stored ones kept unless shown as removed)
     const removeExcept = d.removed.map((k) => xm.exceptPk.get(k)).filter(Boolean);   // …and each one taken away NAMED (the writer refuses an unnamed drop)

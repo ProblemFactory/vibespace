@@ -98,7 +98,7 @@ export function rosterFromApp(app, { agents = true, groups = true } = {}) {
  * the roster's broadcasts when `app` is given). Returns
  * `{el, selected(), setSelected(keys), refresh(), focus(), close()}`.
  */
-export function principalPicker({ items = [], app = null, multi = false, compact = false, selected = [], placeholder = '', label = '', emptyText = '', autofocus = false, onChange = null, cls = '', everyone = null, except = null, chipPrefix = '', locked = null } = {}) {
+export function principalPicker({ items = [], app = null, multi = false, compact = false, selected = [], placeholder = '', label = '', emptyText = '', autofocus = false, onChange = null, cls = '', everyone = null, except = null, chipPrefix = '', locked = null, only = null } = {}) {
   const id = `pp-${++seq}`;
   const raw = typeof items === 'function' ? items : () => items;
   // THE ALL-AGENTS ROW (the caller's key and words; the device's words by default) — first, unless the roster
@@ -140,12 +140,28 @@ export function principalPicker({ items = [], app = null, multi = false, compact
 
   const everyoneKeys = () => rows.filter((r) => PM.isEveryone(r)).map((r) => String(r.key));
   const glyphOf = (r) => (PM.isEveryone(r) ? 'everyone' : r.kind === 'group' ? 'users' : null);
+  // lane lg-group-parents U5b: «仅本组» on a picked Task Group (the owner's rule ②) — a door that offers it passes `only` =
+  // {keys: the stored «仅本组» group keys}; its group chips then carry the switch (off = the group AND its child groups)
+  const onlyOffered = !!(only && typeof only === 'object');
+  const onlySet = new Set(onlyOffered && Array.isArray(only.keys) ? only.keys.map(String) : []);
   function chipOf(r) {
     const c = el('span', 'pp-chip' + (PM.isEveryone(r) ? ' pp-chip-everyone' : ''));
     c.dataset.key = String(r.key);
     if (chipPrefix) c.appendChild(el('span', 'pp-chip-prefix', chipPrefix));   // lane grants-unify: «除了：» on an exception chip
     c.appendChild(avatar({ name: r.name, key: PM.identityOf(r), glyph: glyphOf(r) }, 18, 'pp-chip-av'));
     c.appendChild(el('span', 'pp-chip-name', r.name));
+    if (onlyOffered && r.kind === 'group') {
+      const k = String(r.key), on = onlySet.has(k);
+      const o = document.createElement('button');
+      o.type = 'button'; o.className = 'pp-chip-only' + (on ? ' on' : '');
+      o.textContent = on ? t('this group only') : t('+ child groups');
+      o.title = on ? t('Only conversations in this group itself — its child groups are not included (press to include them)') : t('This group and every child group under it (press for this group only)');
+      // the U5b read, 7: ONE accessible name whatever the face («this group only», pressed or not) — and the focus follows the
+      // redrawn chip's switch (a press never drops it to the page)
+      o.setAttribute('aria-label', t('this group only')); o.setAttribute('aria-pressed', on ? 'true' : 'false');
+      o.onclick = (ev) => { ev.stopPropagation(); if (onlySet.has(k)) onlySet.delete(k); else onlySet.add(k); chipNodes.delete(k); drawChips(); fire(null); const n = chipNodes.get(k); const b = n && n.querySelector('.pp-chip-only'); if (b) { try { b.focus({ preventScroll: true }); } catch { } } };
+      c.appendChild(o);
+    }
     const x = document.createElement('button');
     x.type = 'button'; x.className = 'pp-chip-x';
     x.title = t('Remove {name}', { name: r.name }); x.setAttribute('aria-label', x.title);
@@ -190,7 +206,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
       if (lk.has(k)) continue;   // held by a wider grant too: its locked chip says so
       const r = m.get(k) || known.get(k) || { key: k, kind: k.startsWith('group:') ? 'group' : 'agent', name: k };
       let c = chipNodes.get(k);
-      if (!c || c.dataset.name !== r.name) { c = chipOf(r); c.dataset.name = r.name; chipNodes.set(k, c); }
+      if (!c || c.dataset.name !== r.name) { c = chipOf(r); c.dataset.name = r.name; chipNodes.set(k, c); }   // (a «仅本组» press drops the cached chip)
       out.push(c);
     }
     for (const k of [...chipNodes.keys()]) if (!sel.includes(k)) chipNodes.delete(k);
@@ -453,6 +469,8 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   const api = {
     el: root,
     selected: () => sel.slice(),
+    /** lane lg-group-parents U5b: the picked group keys switched to «仅本组» (null when the door does not offer it) */
+    onlyKeys: () => (onlyOffered ? sel.filter((k) => onlySet.has(k)) : null),
     selectedRows: () => { const m = byKey(); return sel.map((k) => m.get(k)).filter(Boolean); },
     setSelected: (keys) => { sel = (keys || []).map(String); drawChips(); drawList({ byPerson: false }); syncExcept(); },
     // the roster's broadcast: rows patched in place, the highlight kept by KEY (gone ⇒ nothing highlighted)

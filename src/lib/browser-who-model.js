@@ -188,6 +188,8 @@ export function pickerRows(view, { sessions = [], groups = [], groupsOfSession =
     exceptWire.set(key, { kind: 'session', key: w.key });
     exceptSelected.push(key); if (pk) exceptPk.set(key, pk);
   }
+  // lane lg-group-parents U5b: a stored group entry «仅本组» keeps the flag on its wire (the dialog draws the switch on from it)
+  for (const w of listed) if (w && w.kind === 'task' && w.only === true && wire.has(`task:${w.id}`)) wire.set(`task:${w.id}`, { ...wire.get(`task:${w.id}`), only: true });
   return { rows, selected, remote, wire, keyOfPick, exceptSelected, exceptExtra, exceptWire, exceptPk };
 }
 /** lane grants-unify — «除了»: the picker's exception keys → the PATCH's `except` rows (a live conversation as a live pick —

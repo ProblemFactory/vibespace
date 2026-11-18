@@ -226,6 +226,22 @@ console.log('③ controls: a patched copy per rule turns its own leg red');
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(x.pass, 'tree: ' + x.name, x.detail);
 }
 
+// lane lg-group-parents U5b: «仅本组» rides the pick ↔ row mapping
+console.log('⑭ lane lg-group-parents U5b: «仅本组» (only) on a picked Task Group — the pick writes it, a stored row draws it');
+{
+  const G = ROSTER.find((r) => r.kind === 'group');
+  if (G) {
+    const on = PM.pickToRow(ROSTER, [G.key], [], { only: [G.key] }).to[0];
+    const off = PM.pickToRow(ROSTER, [G.key], [], { only: [], onlyWas: [G.key] }).to[0];
+    const silent = PM.pickToRow(ROSTER, [G.key], []).to[0];
+    ok(on.only === true && off.only === false && !('only' in silent), 'pickToRow: switched on ⇒ only:true; stored on and switched off ⇒ only:false (the writer widens only then); a door that does not offer it says nothing');
+    const drawn = PM.rowToPick({ to: [{ kind: 'group', id: G.id, only: true }], except: [] }, ROSTER);
+    ok(JSON.stringify(drawn.only) === JSON.stringify([G.key]) && JSON.stringify(PM.rowToPick({ to: [{ kind: 'group', id: G.id }] }, ROSTER).only) === '[]', 'rowToPick: a stored «仅本组» group entry is drawn into `only` by its picker key');
+  } else ok(false, 'the roster fixture holds a Task Group row');
+  const ppSrc = fs.readFileSync(path.join(REPO, 'src/lib/principal-picker.js'), 'utf-8');
+  ok(/const onlyOffered = !!\(only && typeof only === 'object'\);/.test(ppSrc) && /if \(onlyOffered && r\.kind === 'group'\)/.test(ppSrc) && /onlyKeys: \(\) => \(onlyOffered \? sel\.filter\(\(k\) => onlySet\.has\(k\)\) : null\)/.test(ppSrc), 'the picker: the switch only on a door that offers it, only on group chips; onlyKeys() answers the picked groups switched on (null when not offered)');
+}
+
 console.log(`\n(${Date.now() - t0} ms)`);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

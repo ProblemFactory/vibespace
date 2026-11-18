@@ -11792,6 +11792,10 @@ export default {
   "Child groups see it": "含子组",
   "Every child Task Group (and theirs) is told this row, read-only": "每个子任务组（以及它们的子组）都会收到这一行，只读",
   "Rows inherited from parent groups (read-only here — change them in the parent)": "从父组继承的行（此处只读——请在父组里修改）",
+  "this group only": "仅本组",
+  "+ child groups": "含子组",
+  "Only conversations in this group itself — its child groups are not included (press to include them)": "只含本组自己的对话——不含子组（点按以包含子组）",
+  "This group and every child group under it (press for this group only)": "本组及其下所有子组（点按改为仅本组）",
   "No other Task Group to reference yet": "还没有别的任务组可以引用", // lane task-group-context
   "rows go in table order; one that does not fit steps down a level: contents → names + key files → names → note only": "按本表顺序装；装不下的退一档：内容 → 文件名 + 关键文件内容 → 文件名 → 只说明", // lane task-group-context
   "What a new conversation receives": "新对话会收到", // lane task-group-context

@@ -257,10 +257,15 @@ export function principalOfRow(r) {
 }
 /** What a pick WRITES: `{to, except}` in the grant model's spelling (rows by key; unknown keys dropped). `held` (r10): the
  *  stored row's exception keys — kept verbatim while the «除了» row is not offered (minus a member picked itself). */
-export function pickToRow(rows, selected, except = [], { held = null } = {}) {
+export function pickToRow(rows, selected, except = [], { held = null, only = null, onlyWas = null } = {}) {
   const byKey = new Map((Array.isArray(rows) ? rows : []).filter((r) => r && r.key != null).map((r) => [String(r.key), r]));
   const map = (keys) => (Array.isArray(keys) ? keys : []).map((k) => principalOfRow(byKey.get(String(k)))).filter(Boolean);
-  return { to: map(selected), except: map(exceptSaved([...byKey.values()], selected, except, { held })) };   // lane held-except-doors: the one rule, exceptSaved's
+  // lane lg-group-parents U5b: «仅本组» — a picked group whose key is in `only` is written `only: true`; one the stored row had
+  // «仅本组» (`onlyWas`) and the person switched off is written `only: false` (the ONE writer widens only on an explicit false);
+  // `only` null = the door does not offer the switch (nothing written about it — the writer keeps a stored flag)
+  const on = only ? new Set([...only].map(String)) : null, was = onlyWas ? new Set([...onlyWas].map(String)) : null;
+  const to = (Array.isArray(selected) ? selected : []).map((k) => { const p = principalOfRow(byKey.get(String(k))); if (!p || p.kind !== 'group' || !on) return p; return on.has(String(k)) ? { ...p, only: true } : was && was.has(String(k)) ? { ...p, only: false } : p; }).filter(Boolean);
+  return { to, except: map(exceptSaved([...byKey.values()], selected, except, { held })) };   // lane held-except-doors: the one rule, exceptSaved's
 }
 /** r11: an entry carrying its principal's KEY (`principal` — a published member) → that principal (its name kept); else the
  *  entry as it is. */
@@ -315,7 +320,9 @@ export function rowToPick(row, rows, { everyoneKey = 'everyone:*', notRunning = 
   const r = row && typeof row === 'object' ? row : {};
   const selected = (Array.isArray(r.to) ? r.to : []).map(keyOf).filter(Boolean);
   const except = (Array.isArray(r.except) ? r.except : []).map(keyOf).filter(Boolean);
-  return { selected: [...new Set(selected)], except: [...new Set(except)], extra, storedKey };
+  // lane lg-group-parents U5b: the picker keys of the group entries stored «仅本组»
+  const only = (Array.isArray(r.to) ? r.to : []).filter((e) => e && e.kind === 'group' && e.only === true).map(keyOf).filter(Boolean);
+  return { selected: [...new Set(selected)], except: [...new Set(except)], extra, storedKey, only: [...new Set(only)] };
 }
 
 /** LOCKED SELECTIONS (the owner 2026-11-17 — «who may have a web login filled»): subjects a WIDER grant already admits, shown GRANTED

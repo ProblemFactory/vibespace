@@ -605,7 +605,7 @@ async function resolveUseRows(use) {
       if (!kr || !kr.ok) return { ok: false, status: STATUS[kr && kr.code] || 409, body: { error: (kr && kr.error) || 'that conversation could not be added', code: (kr && kr.code) || 'no_browser_key', session: r.session, name: (kr && kr.name) || null, ...(kr && kr.why ? { why: kr.why } : {}) } };
       rows.push({ kind: 'session', key: kr.key }); knownKeys.push(kr.key);
     } else if (r.kind === 'session') rows.push({ kind: 'session', key: r.key });
-    else rows.push({ kind: 'task', id: r.id });
+    else rows.push({ kind: 'task', id: r.id, ...(r.only === true || r.only === false ? { only: r.only } : {}) });   // lane lg-group-parents U5b: «仅本组» rides
   }
   return { ok: true, use: { mode: sv.mode, who: rows, ...ex }, knownKeys };
 }
