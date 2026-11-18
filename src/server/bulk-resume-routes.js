@@ -10,6 +10,8 @@
 //   POST /api/sessions/resume-stopped          {limit?, ids?} — «恢复所有因用量/过载停止的会话» (the core's resumeBatch:
 //                                              ONE spend authorization for the batch, paced continues, walls skipped)
 //   GET  /api/sessions/resume-stopped/:batchId  the batch as it goes (the dialog polls it until `done`)
+//   POST /api/sessions/resume-stopped/:batchId/stop  THE STOP DOOR (U2 cure, law 3): nothing more is started — what the batch
+//                                              has not reached is neither continued nor charged («stopped»); the person only
 // OWNER COOKIE ONLY: every bearer is refused by name (pressBearer — vsst_ / jbt_ / vsak_; the branch refused only the first two). The automation-key verb table (src/automation-keys.js) does NOT
 // get these two acts — its one spend identity (`automation:<keyId>`) bills the conversation a key OPENS, while a resume
 // bills the session's OWN slot (fireIdentityFor), and no row defines how a key caller's batch maps onto those slots;
@@ -144,6 +146,15 @@ function create({ activeSessions, getAutoResume = () => null, getUsageHistory = 
         const ids = Array.isArray(b.ids) ? b.ids.map(String).slice(0, 2000) : null;
         const r = ar.resumeBatch({ limit, ids });
         if (r && r.ok === false && r.why === 'in-flight') return res.status(409).json({ ...r, error: 'a resume of the stopped sessions is already running', code: 'in_flight' });
+        res.json(r);
+      } catch (e) { res.status(500).json({ error: (e && e.message) || String(e) }); }
+    });
+    app.post('/api/sessions/resume-stopped/:batchId/stop', (req, res) => {
+      try {
+        if (!person(req, res)) return;
+        const ar = getAutoResume();
+        const r = ar && typeof ar.stopBatch === 'function' ? ar.stopBatch(String(req.params.batchId), 'the person (Stop)') : null;
+        if (!r) return res.status(404).json({ error: 'no such batch' });
         res.json(r);
       } catch (e) { res.status(500).json({ error: (e && e.message) || String(e) }); }
     });

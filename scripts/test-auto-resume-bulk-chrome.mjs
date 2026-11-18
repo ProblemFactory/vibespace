@@ -19,7 +19,7 @@
 //     (the server + the resume carrier agree); Settings → the auto-resume row: «将开启 3 个会话；已开启 1 个» ⇒
 //     «对所有会话开启自动继续» ⇒ «将开启 0 个会话；已开启 4 个» (every card's toggle on, every carrier written) ⇒
 //     «全部关闭»; the passive cost line; «恢复所有因用量上限/过载停止的会话 (3)» ⇒ the confirm says the cost FIRST
-//     («≈ $4.92（按 opus-5-5 输入价 $4/M，冷读 1.20 M tokens）», «本机自己的登录：无法估算：本窗口还没有实测比例» —
+//     («≈ $6.12（按 opus-5-5 缓存写入价 $5/M，冷读 1.20 M tokens）» — a cold read is priced as cache WRITES, U2's cost cure, «本机自己的登录：无法估算：本窗口还没有实测比例» —
 //     never a made-up percent) beside «全部恢复 (3)»
 //   desk 1100 (en) · the same confirm in English, from the session list's ⋯
 //   phone 390 (zh) · the marks + the filter pill in the drawer; the confirm inside the viewport
@@ -140,14 +140,14 @@ try {
   const up = await until(async () => { if (hub.child.exitCode !== null) return 'dead'; await fetch(`http://127.0.0.1:${PORT}/api/home`); return 'up'; }, 120000, 250);
   check('the scratch server answers (private HOME + runtime dir)', up === 'up', hub.log().slice(-600));
   if (up !== 'up') throw new Error('no server');
-  // COOKIE ONLY: an agent bearer is refused by name on all four doors
+  // COOKIE ONLY: an agent bearer is refused by name on all five doors (U2 cure: the Stop door is one)
   const bearer = { Authorization: 'Bearer vsst_not-the-owner', 'Content-Type': 'application/json' };
   const codes = [];
-  for (const [m, u, b] of [['GET', '/api/sessions/stopped'], ['POST', '/api/sessions/auto-resume-all', { enabled: true }], ['POST', '/api/sessions/resume-stopped', {}], ['GET', '/api/sessions/resume-stopped/rb-x']]) {
+  for (const [m, u, b] of [['GET', '/api/sessions/stopped'], ['POST', '/api/sessions/auto-resume-all', { enabled: true }], ['POST', '/api/sessions/resume-stopped', {}], ['GET', '/api/sessions/resume-stopped/rb-x'], ['POST', '/api/sessions/resume-stopped/rb-x/stop', {}]]) {
     const r = await fetch(`http://127.0.0.1:${PORT}${u}`, { method: m, headers: bearer, body: b ? JSON.stringify(b) : undefined });
     codes.push(r.status + ':' + ((await r.json().catch(() => ({}))).code || ''));
   }
-  check('an agent bearer is refused BY NAME on the four bulk doors (owner cookie only)', codes.every((c) => c === '403:agent_forbidden'), codes);
+  check('an agent bearer is refused BY NAME on the five bulk doors (owner cookie only)', codes.length === 5 && codes.every((c) => c === '403:agent_forbidden'), codes);
 
   const ver = await until(async () => (await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).json(), 30000);
   const cdp = new WebSocket(ver.webSocketDebuggerUrl);
@@ -229,7 +229,7 @@ try {
   await D.ev(`(app._settingsUI.open({ category: 'Spending' }), true)`);
   const row = await until(() => D.ev(`(() => { const b = document.querySelector('.auto-resume-bulk'); if (!b) return null; const btn = [...b.querySelectorAll('button')].map((x) => x.textContent); const counts = (b.querySelector('.auto-resume-bulk-counts') || {}).textContent || ''; if (!btn.length) return null; b.scrollIntoView({ block: 'center' }); return { counts, btn, passive: (b.querySelector('.auto-resume-bulk-passive') || {}).textContent || '', note: (b.querySelector('.auto-resume-bulk-note') || {}).textContent || '' }; })()`), 15000, 250);
   check(`desk: Settings — the auto-resume row says «${row?.counts}» with its three buttons`, !!row && row.counts === '将开启 3 个会话；已开启 1 个' && row.btn.join('|') === '对所有会话开启自动继续|全部关闭|恢复所有因用量上限/过载停止的会话 (3)', row);
-  check(`desk: …the passive cost line «${row?.passive}» (the dollars; the share SAID to be unknown — no measured ratio)`, !!row && row.passive === '若现在全部恢复：≈ $4.92 · 5 h 窗口占比暂无法估算', row);
+  check(`desk: …the passive cost line «${row?.passive}» (the dollars; the share SAID to be unknown — no measured ratio)`, !!row && row.passive === '若现在全部恢复：≈ $6.12 · 5 h 窗口占比暂无法估算', row);
   check('desk: …and it says the default above still decides for NEW sessions', !!row && /新会话仍按上面的默认值/.test(row.note), row);
   const pSettings = await shot(D.S, 'desk-settings.png');
   await press(D.S, D.ev, '.auto-resume-bulk .auto-resume-all-on');
@@ -246,8 +246,8 @@ try {
   await press(D.S, D.ev, '.auto-resume-bulk .resume-stopped-open');
   const dlg = await until(() => D.ev(dialogFacts), 8000, 150);
   check(`desk: the confirm — «${dlg?.lead?.slice(0, 40)}…»`, !!dlg && dlg.title === '恢复因用量上限/过载停止的会话' && dlg.lead.startsWith('将继续 3 个会话（最早停止的优先）'), dlg);
-  if (!dlg || !/4\.92/.test(dlg.dollars)) console.error('    (the plan the server answered:', JSON.stringify(await D.ev(`fetch('/api/sessions/stopped').then((r) => r.json())`)).slice(0, 1500) + ')');
-  check(`desk: …the cost said BEFORE anything runs: «${dlg?.dollars}»`, !!dlg && dlg.dollars === '≈ $4.92（按 opus-5-5 输入价 $4/M，冷读 1.20 M tokens）' && dlg.basis.includes('含每个会话名义上 2000 个输出 tokens'), dlg);
+  if (!dlg || !/6\.12/.test(dlg.dollars)) console.error('    (the plan the server answered:', JSON.stringify(await D.ev(`fetch('/api/sessions/stopped').then((r) => r.json())`)).slice(0, 1500) + ')');
+  check(`desk: …the cost said BEFORE anything runs: «${dlg?.dollars}»`, !!dlg && dlg.dollars === '≈ $6.12（按 opus-5-5 缓存写入价 $5/M，冷读 1.20 M tokens）' && dlg.basis.includes('含每个会话名义上 2000 个输出 tokens'), dlg);
   check(`desk: …the login's share is NOT made up — «${dlg?.member?.[0]}» (named in the person's words, never its ledger key)`, !!dlg && dlg.member.length === 1 && dlg.member[0] === '本机自己的登录：无法估算：本窗口还没有实测比例' && !dlg.basis.some((b) => /未知/.test(b)), dlg && { member: dlg.member, basis: dlg.basis });
   check('desk: …«全部恢复 (3)» + 关闭 (no «只恢复前 K 个»: nothing measured, nothing to cut)', !!dlg && dlg.btns.map((b) => b.text).join('|') === '全部恢复 (3)|关闭', dlg && dlg.btns);
   const pDialog = await shot(D.S, 'desk-dialog.png');
@@ -265,7 +265,7 @@ try {
   check('en: the session list\'s ⋯ holds the two bulk acts (with SVG icons) beside its refresh entry', !!emenu && emenu.map((x) => x.text).join('|') === 'Refresh all live sessions…|Turn auto-continue on for every session|Turn auto-continue off for every session|Resume every session a usage limit or overload stopped (3)…' && emenu.every((x) => x.svg), emenu);
   await press(E.S, E.ev, "JS:[...document.querySelectorAll('.context-menu-item')].find((n) => /Resume every session/.test(n.textContent))");
   const edlg = await until(() => E.ev(dialogFacts), 8000, 150);
-  check(`en: the confirm's numbers — «${edlg?.dollars}» / «${edlg?.member?.[0]}»`, !!edlg && edlg.dollars === '≈ $4.92 at opus-5-5 input $4/M, 1.20 M cold tokens' && edlg.member[0] === 'This machine’s own login: cannot estimate — this window has no measured ratio yet' && edlg.btns.map((b) => b.text).join('|') === 'Resume all (3)|Close', edlg);
+  check(`en: the confirm's numbers — «${edlg?.dollars}» / «${edlg?.member?.[0]}»`, !!edlg && edlg.dollars === '≈ $6.12 at opus-5-5 cache-write $5/M, 1.20 M cold tokens' && edlg.member[0] === 'This machine’s own login: cannot estimate — this window has no measured ratio yet' && edlg.btns.map((b) => b.text).join('|') === 'Resume all (3)|Close', edlg);
   const pEn = await shot(E.S, 'en-dialog.png');
   await press(E.S, E.ev, '#resume-stopped-dialog .btn-cancel');
 

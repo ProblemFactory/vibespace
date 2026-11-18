@@ -1733,11 +1733,11 @@ if (!probe) {
     const MD = path.join(scratch('arl-bulk-mut'));
     fs.mkdirSync(MD, { recursive: true });
     let src = read('src/server/auto-resume.js');
-    const needle = '        let gate = true;\n        session._arFiring = true;\n';
+    const needle = '        let gate = true, gateP = null;\n        session._arFiring = true;\n';   // (lg-recovery U2 cure: the gate's own promise is kept)
     const applies = src.includes(needle);
     ok('§8 CONTROL: the re-entry patch applies to the real file', applies);
     if (applies) {
-      src = src.replace(needle, '        let gate = true;\n').replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`);
+      src = src.replace(needle, '        let gate = true, gateP = null;\n').replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`);
       const f = path.join(MD, 'auto-resume-mut.js'); fs.writeFileSync(f, src);
       const bad = await reentry(require(f));
       // (the post-gate `_isStreaming` re-check on both roads still keeps it to ONE send — defence in depth — but the

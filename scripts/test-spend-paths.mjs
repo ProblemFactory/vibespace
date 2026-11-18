@@ -4863,10 +4863,10 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   const mDir = tmpdir('vs-spend-bulkmut-');
   fs.mkdirSync(path.join(mDir, 'src', 'server'), { recursive: true });
   const from = '      v = authorizeSpendBatch\n        ? authorizeSpendBatch(chosen.map(';
-  const fromMoved = 'v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: ident2 }]) : null;';   // the slot a moved session lands on
-  fs.writeFileSync(path.join(mDir, 'src/server/auto-resume.js'), arSrc.replace(from, '      v = authorizeSpendBatch\n        ? ((x) => ({ ok: true, holds: x }))(chosen.map(').replace(fromMoved, 'v2 = ((x) => ({ ok: true, holds: x }))([{ sessionId: e.id, identity: ident2, hold: null }]);'));
+  const fromMoved = 'v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }]) : null;';   // the per-continue re-ask on the slot that bills (lg-recovery U2 cure: every item, moved or not)
+  fs.writeFileSync(path.join(mDir, 'src/server/auto-resume.js'), arSrc.replace(from, '      v = authorizeSpendBatch\n        ? ((x) => ({ ok: true, holds: x }))(chosen.map(').replace(fromMoved, 'v2 = ((x) => ({ ok: true, holds: x }))([{ sessionId: e.id, identity: bill, hold: null }]);'));
   const mRows = censusOver(mDir, ['src/server/auto-resume.js']).filter((h) => h.prim === 'continue-send');
-  ok('§13 CENSUS MUTANT: the same file without its two batch gates (the batch\'s, the landing slot\'s) reads the bulk site UNWIRED (and the single one still GATED)', arSrc.includes(from) && arSrc.includes(fromMoved) && mRows.length === 2 && mRows.filter((h) => !h.gated).length === 1 && mRows.find((h) => !h.gated).line === bulkLine, JSON.stringify(mRows));
+  ok('§13 CENSUS MUTANT: the same file without its two batch gates (the batch\'s, the per-continue re-ask\'s) reads the bulk site UNWIRED (and the single one still GATED)', arSrc.includes(from) && arSrc.includes(fromMoved) && mRows.length === 2 && mRows.filter((h) => !h.gated).length === 1 && mRows.find((h) => !h.gated).line === bulkLine, JSON.stringify(mRows));
   ok('§13 WIRING: server.js hands the core the REAL batch gate and the batch charge, under the declared reason', /authorizeSpendBatch: \(items\) => spendGuard\.authorizeBatch\(\{ reason: 'bulk-resume'/.test(read('server.js')) && /renewSpend: \(holds\) => spendGuard\.renewHolds\(holds\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold\) => spendGuard\.note\(\{ reason: 'bulk-resume'/.test(read('server.js')));
 }
 

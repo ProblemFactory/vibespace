@@ -80,6 +80,7 @@ const BULK_PACE_MS = 2500;  // the bulk resume's spacing between two continues �
 // …and how long ONE pre-fire gate may take inside the batch. The gate probes quota (a CLI spawn on the claude rung); a
 // probe that never answers must not hold the batch — and its N spend holds — open: that session is SKIPPED by name
 // ('no-answer'), its hold given back, and the batch goes on. Fail closed: no answer is never a go.
+const BULK_GATE_HOLD_MS = 5 * 60 * 1000;   // a gate the bulk resume stopped waiting for keeps its conversation «in flight» until it settles — at most this long
 const BULK_GATE_WAIT_MS = 90 * 1000;
 const { planBatch, normalizeStoppedBy } = require('../stopped-by.js'); // PURE: the batch's plan (who, in which order, who is skipped and why)
 /** PURE: the continue the BULK resume delivers (lane auto-resume-bulk). An overload stop takes its twin above (no usage
@@ -355,7 +356,10 @@ function writeJsonAtomic(file, obj) {
  *        (the engine's quotaVerdictFor): a quota-stopped session whose wall has not reset is SKIPPED, never retried.
  * @param deps.clearStopped (id, session, why) => void — the stop fact is cleared when a continue starts the turn.
  * @param deps.persistFlag (id, session) => void — the per-session `autoResume` is written to the session's meta so a
- *        deploy restart does not silently turn the bulk ON back off (boot-restore reads it back).
+ *        deploy restart does not silently turn the bulk ON back off (boot-restore reads it back). It READS NOTHING on the
+ *        caller's road (U2 cure, law 2: server.js hands the store's patchSessionMeta — a pending copy patched in memory,
+ *        else the file read off the loop; the version it read is the owner check's): a flip over N conversations costs
+ *        the loop a constant.
  * @param deps.onListChange () => void — ONE list broadcast per bulk act (never one per session).
  */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
@@ -390,7 +394,9 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
    *  paths census reads the site there: the single continue's spendOk, the batch's authorizeSpendBatch). */
   function deliverContinue(session, verb, prompt, sendChatInput) { return !!verb.deliver(session, prompt, { sendChatInput }); }
 
+  let saveHeld = 0, saveOwed = false;   // U2 cure (law 2): a bulk flip holds every save and writes the arms' store ONCE after its loop
   const save = () => {
+    if (saveHeld) { saveOwed = true; return; }
     try {
       // prune breaker records that can no longer refuse anything (their
       // window rolled over and nothing is pending) so the file stays bounded
@@ -505,17 +511,25 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   function setEnabledAll(on) {
     const before = bulkCounts();
     let changed = 0, written = 0;
-    for (const [id, s] of activeSessions) {
-      if (!s || s.isTmuxView || !verbFor(s)) continue;
-      if (s._autoResume === !!on) continue;            // already its explicit choice
-      const flips = enabledFor(s) !== !!on;            // a session that only FOLLOWED the default gets the explicit choice too,
-      setEnabled(id, !!on, { quiet: true });           // but is not counted as turned on/off when nothing it does changes
-      written++; if (flips) changed++;
-    }
+    // «TURN IT OFF FOR ALL» ALSO STOPS A RUNNING BULK RESUME (U2 cure, law 3): a person who presses it expects nothing more
+    // to continue by itself — the batch stops before its next conversation (its holds go back, the rest are «stopped»)
+    const stoppedBatch = !on && batchRunning ? (stopBatch(batchRunning, 'auto-continue turned off for every session'), batchRunning) : null;
+    // THE FLIP COSTS THE LOOP A CONSTANT (U2 cure, law 2): every setEnabled below arms or disarms in memory; the arms' store is
+    // written ONCE after the loop (saveHeld), and each conversation's flag goes through persistFlag, which reads nothing here
+    saveHeld++;
+    try {
+      for (const [id, s] of activeSessions) {
+        if (!s || s.isTmuxView || !verbFor(s)) continue;
+        if (s._autoResume === !!on) continue;            // already its explicit choice
+        const flips = enabledFor(s) !== !!on;            // a session that only FOLLOWED the default gets the explicit choice too,
+        setEnabled(id, !!on, { quiet: true });           // but is not counted as turned on/off when nothing it does changes
+        written++; if (flips) changed++;
+      }
+    } finally { saveHeld--; if (!saveHeld && saveOwed) { saveOwed = false; save(); } }
     const after = bulkCounts();
     log(`[auto-resume] bulk: turned ${on ? 'ON' : 'OFF'} for ${changed} session(s) (${before.on}/${before.total} → ${after.on}/${after.total} on${written !== changed ? `; ${written - changed} more now hold it explicitly` : ''})`);
     if (written && onListChange) { try { onListChange(); } catch { } }
-    return { on: !!on, changed, written, before, after };
+    return { on: !!on, changed, written, before, after, stoppedBatch };
   }
 
   // ── THE BULK RESUME (lane auto-resume-bulk) ─────────────────────────────
@@ -528,6 +542,19 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   const batches = new Map();   // batchId → the batch's record (newest 8 kept; the dialog polls it)
   let batchSeq = 0;
   let batchRunning = null;
+  const stopWakers = new Map();   // batchId → wakes the loop's wait on a gate when a stop is asked (U2 cure, law 3)
+  /** THE STOP DOOR (U2 cure, law 3): a running batch stops before its next conversation and after the gate it waits on —
+   *  what it has not reached is neither continued nor charged and its hold goes back (`stopped` on the record). → the record */
+  function stopBatch(batchId, by = 'the person') {
+    const b = batches.get(String(batchId));
+    if (!b) return null;
+    if (!b.done && !b.stopAsked) {
+      b.stopAsked = { at: Date.now(), by: String(by).slice(0, 80) };
+      log(`[auto-resume] bulk resume ${b.batchId}: stop asked (${b.stopAsked.by}) — nothing more is started`);
+      const w = stopWakers.get(b.batchId); if (w) { try { w(); } catch { } }
+    }
+    return batchStatus(b.batchId);
+  }
   /** The loop breaker's quarantine, READ ONLY (canFire would mint a breaker record for a plan). */
   function quarantinedUntil(id, key, now) { const h = fireHoldOf(id, key, now); return h ? h.until : 0; }
   /** …and WHY: a continue onto this slot was just rejected ('quarantined'), or one is on its way ('pending'). */
@@ -572,7 +599,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const k = limit === null || limit === undefined || limit === '' ? take.length : Math.max(0, Math.floor(Number(limit)) || 0);
     const chosen = take.slice(0, k);
     const batchId = `rb-${(++batchSeq).toString(36)}-${now.toString(36)}`;
-    const rec = { ok: true, batchId, at: now, planned: chosen.length, left: take.length - chosen.length, resumed: [], skipped: plan.skipped.slice(), failed: [], refused: null, done: false };
+    const rec = { ok: true, batchId, at: now, planned: chosen.length, left: take.length - chosen.length, resumed: [], skipped: plan.skipped.slice(), planSkipped: plan.skipped.length, failed: [], stopped: [], stopAsked: null, refused: null, done: false };
     batches.set(batchId, rec);
     while (batches.size > 8) batches.delete(batches.keys().next().value);
     if (!chosen.length) { rec.done = true; return batchStatus(batchId); }
@@ -597,14 +624,28 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const renew = () => { if (renewSpend && open.size) { try { renewSpend([...open.values()].map((x) => x.hold)); } catch (err) { log('[auto-resume] renewing the batch holds failed: ' + err.message); } } };
     batchRunning = batchId;
     log(`[auto-resume] bulk resume ${batchId}: ${chosen.length} authorized as one batch, ${plan.skipped.length} skipped — continuing paced (${bulkPaceMs} ms apart)`);
+    // STOPPED (U2 cure, law 3): every conversation from `from` on is neither continued nor charged — its hold goes back now
+    const stopRest = (from) => {
+      for (let j = from; j < chosen.length; j++) {
+        const x = chosen[j], hx = holdOf.get(x.id);
+        if (hx && releaseSpend) { try { releaseSpend(x.id, null, hx.hold); } catch (err) { log('[auto-resume] releasing a batch hold failed: ' + err.message); } }
+        holdOf.delete(x.id); open.delete(x.id);
+        rec.stopped.push({ id: x.id, name: x.name, kind: x.kind, at: x.at });
+      }
+      log(`[auto-resume] bulk resume ${batchId}: stopped — ${chosen.length - from} not started, their holds given back`);
+    };
+    let wakeStop = null;
+    const stopped = new Promise((r) => { wakeStop = r; });
+    stopWakers.set(batchId, () => wakeStop('stopped'));
     (async () => {
       for (let i = 0; i < chosen.length; i++) {
-        if (i > 0) await sleep(bulkPaceMs);
+        if (i > 0) await Promise.race([sleep(bulkPaceMs), stopped]);
+        if (rec.stopAsked) { stopRest(i); break; }   // looked at before EVERY conversation
         const e = chosen[i];
         let h = holdOf.get(e.id) || null;
         renew();   // every hold not reached yet lives on while this one waits its turn (U2 cure: a batch outlives one hold's TTL)
-        const giveBack = () => { open.delete(e.id); if (h && releaseSpend) { try { releaseSpend(e.id, null, h.hold); } catch (err) { log('[auto-resume] releasing a batch hold failed: ' + err.message); } } };
-        const skip = (why, until = null) => { giveBack(); rec.skipped.push({ id: e.id, name: e.name, kind: e.kind, at: e.at, why, until }); };
+        const giveBack = () => { open.delete(e.id); holdOf.delete(e.id); if (h && releaseSpend) { try { releaseSpend(e.id, null, h.hold); } catch (err) { log('[auto-resume] releasing a batch hold failed: ' + err.message); } } h = null; };
+        const skip = (why, until = null, reason = null) => { giveBack(); rec.skipped.push({ id: e.id, name: e.name, kind: e.kind, at: e.at, why, until, ...(reason ? { reason: String(reason).slice(0, 60) } : {}) }); };
         const session = activeSessions.get(e.id);
         if (!session) { skip('gone'); continue; }
         if (session._isStreaming || session._arFiring) { skip('running'); continue; }   // working, or its own continue is in flight
@@ -619,17 +660,24 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         // wall still stands (the engine re-armed an enabled session to the new reset) — skipped and said, not retried.
         // The in-flight flag is raised BEFORE the gate, exactly as attemptFire raises it: the gate runs the pool's switch,
         // which calls fireNow for an ARMED session — and that continue plus this one would be two turns for one stop.
-        let gate = true;
+        let gate = true, gateP = null;
         session._arFiring = true;
         try {
           if (beforeFire) {
             let timer = null;
             const late = new Promise((r) => { timer = setTimeout(() => r('no-answer'), bulkGateWaitMs); if (timer.unref) timer.unref(); });
-            try { gate = await Promise.race([Promise.resolve(beforeFire(e.id, session)), late]); }
+            try { gateP = Promise.resolve(beforeFire(e.id, session)); gate = await Promise.race([gateP, late, stopped]); }
             catch (err) { log(`[auto-resume] ${e.id}: pre-fire gate threw in the bulk resume — skipping (fail closed): ${(err && err.message) || err}`); gate = false; }
             finally { clearTimeout(timer); }
           }
-        } finally { session._arFiring = false; }
+        } finally {
+          // A GATE THE LOOP STOPPED WAITING FOR (a Stop, the wait bound) STILL RUNS (U2 cure, the read's should): its pool switch
+          // calls fireNow on an armed session, and the single continue would continue a conversation the batch just said it
+          // stopped or skipped — the in-flight flag stays up until THE GATE ITSELF settles (bounded: BULK_GATE_HOLD_MS)
+          if (gateP && (gate === 'stopped' || gate === 'no-answer')) { let t2 = null; const free = () => { clearTimeout(t2); session._arFiring = false; }; t2 = setTimeout(free, BULK_GATE_HOLD_MS); if (t2.unref) t2.unref(); gateP.then(free, free); }
+          else session._arFiring = false;
+        }
+        if (rec.stopAsked) { stopRest(i); break; }   // …and after EVERY gate (a stop during the gate's wait ends the wait)
         if (gate === 'no-answer') { log(`[auto-resume] ${e.id}: the pre-fire gate gave no answer in ${Math.round(bulkGateWaitMs / 1000)} s — skipped (fail closed)`); skip('no-answer'); continue; }
         if (gate === false) {
           let w = null;
@@ -643,20 +691,30 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         const verb = verbFor(session);
         if (!verb) { skip('no-verb'); continue; }
         const ident2 = identityFor(e.id, session) || ident;
-        // THE SLOT IT WILL BILL (U2 cure): the gate runs the pool's switch, which may have moved this conversation onto another
-        // member — the hold was authorized on the slot named BEFORE it. Exactly as attemptFire re-checks after its gate: the
-        // old hold goes back, the breaker is asked about the NEW slot, and the new slot is authorized (a batch of one, same
-        // reason) — a refusal there skips this session and says so. The charge below names the slot that bills.
-        if (ident2 && ident2.key && !(h && h.identity && h.identity.key === ident2.key)) {
-          const fh2 = fireHoldOf(e.id, ident2.key, Date.now());
-          if (fh2) { skip(fh2.why, fh2.until); continue; }
-          let v2 = null;
-          try { v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: ident2 }]) : null; } catch (err) { v2 = null; log(`[auto-resume] ${e.id}: re-authorizing on ${ident2.name || ident2.key} threw: ${err.message}`); }
-          if (!v2 || v2.ok === false || !Array.isArray(v2.holds) || v2.holds.length !== 1) { skip('moved-refused'); continue; }
-          if (h && releaseSpend) { try { releaseSpend(e.id, null, h.hold); } catch { } }
-          h = v2.holds[0]; holdOf.set(e.id, h); open.set(e.id, h);
-          log(`[auto-resume] ${e.id}: the gate moved it onto ${ident2.name || ident2.key} — re-authorized there for the bulk resume`);
+        // EVERY CONTINUE OF A BATCH IS ASKED LIKE A SINGLE CONTINUE (U2 cure 2, 主开发's law 1). The press's ONE authorization
+        // reserved the COUNT; it does not answer for what the account BECAME while the batch ran — paid overage in use, a
+        // credential that cannot serve, the spend control reached. So before EACH deliver the authorizer is asked AGAIN, on the
+        // slot that will bill — the gate may have MOVED the conversation (the pool's switch), or not — exactly as attemptFire
+        // asks spendOk after its gate. Synchronously, with nothing between: this item's hold goes back and the SAME authorizer
+        // is asked for a batch of one (same reason, same rules), so no other producer slips in. A refusal skips it BY NAME with
+        // the authorizer's own reason, charges nothing (its hold is already back), and the dialog counts it.
+        const moved = !!(ident2 && ident2.key && !(h && h.identity && h.identity.key === ident2.key));
+        // the breaker on the slot that will bill, AFTER the gate, moved or not (the read's should: moved is judged against the
+        // press's slot, and a session the pool moved away and the gate moved back would skip its slot's quarantine) — read-only
+        { const fh2 = ident2 && ident2.key ? fireHoldOf(e.id, ident2.key, Date.now()) : null; if (fh2) { skip(fh2.why, fh2.until); continue; } }
+        const bill = ident2 || (h && h.identity) || null;
+        if (h && releaseSpend) { try { releaseSpend(e.id, null, h.hold); } catch (err) { log('[auto-resume] releasing a batch hold failed: ' + err.message); } }
+        holdOf.delete(e.id); open.delete(e.id); h = null;
+        let v2 = null;
+        try { v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }]) : null; } catch (err) { v2 = null; log(`[auto-resume] ${e.id}: re-asking the spend gate on ${(bill && (bill.name || bill.key)) || '?'} threw: ${err.message}`); try { global.__vsEvent?.('spend-gate-error', 'bulk-resume:re-ask threw'); } catch { } }
+        if (!v2 || v2.ok === false || !Array.isArray(v2.holds) || v2.holds.length !== 1) {
+          if (v2 && v2.ok !== false && Array.isArray(v2.holds) && releaseSpend) for (const hx of v2.holds) { try { releaseSpend(e.id, null, hx && hx.hold); } catch { } }   // a malformed answer's holds go back too
+          const why = (v2 && v2.why) || 'refused';
+          log(`[auto-resume] ${e.id}: the spend gate refused this continue of the bulk resume ${batchId} on ${(bill && (bill.name || bill.key)) || '?'} — ${why} (skipped, nothing charged)`);
+          skip(moved ? 'moved-refused' : 'refused', null, why); continue;
         }
+        h = v2.holds[0]; holdOf.set(e.id, h); open.set(e.id, h);
+        if (moved) log(`[auto-resume] ${e.id}: the gate moved it onto ${ident2.name || ident2.key} — re-authorized there for the bulk resume`);
         // the words say what unblocked it (the release's continue, lane resume-words): the gate moved it onto another
         // account ⇒ «the pool now serves this conversation from X», else the wall on its account lifted; an overload, its twin
         const switchedTo = ident2 && ident && ident2.key !== ident.key ? (ident2.name || null) : null;
@@ -684,8 +742,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         // every hold that never became a turn goes back — including the ones a crash in the loop left behind
         const settled = new Set([...rec.resumed.map((r) => r.id)]);
         for (const [sid, h] of holdOf) if (!settled.has(sid) && releaseSpend) { try { releaseSpend(sid, null, h.hold); } catch { } }
-        rec.done = true; batchRunning = null;
-        log(`[auto-resume] bulk resume ${batchId} done: resumed ${rec.resumed.length} · skipped ${rec.skipped.length} · not delivered ${rec.failed.length}`);
+        rec.done = true; batchRunning = null; stopWakers.delete(batchId);
+        log(`[auto-resume] bulk resume ${batchId} done: resumed ${rec.resumed.length} · skipped ${rec.skipped.length} · not delivered ${rec.failed.length}${rec.stopped.length ? ` · stopped ${rec.stopped.length}` : ''}`);
         if (onListChange) { try { onListChange(); } catch { } }
       });
     return batchStatus(batchId);
@@ -1422,7 +1480,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   return {
     armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, fireNowOnClaim, armedIds, tick, start, stop, CONTINUE_PROMPT, continuePromptFor,
     refreshStatus: (id) => emit(id), // lane cli-self-measure: a check that ended re-says every armed conversation's status (its chip drops «checking»)
-    bulkCounts, setEnabledAll, stoppedPlan, resumeBatch, batchStatus, // lane auto-resume-bulk: the two bulk acts + the plan the dialog shows first
+    bulkCounts, setEnabledAll, stoppedPlan, resumeBatch, batchStatus, stopBatch, // lane auto-resume-bulk: the two bulk acts + the plan the dialog shows first
     noteQuotaReading, // the fresh-window edge: a reading that says the wall is gone continues the session NOW
     noteFireOutcome, recentFireFailures, canFire, noteNoPoolTarget, // the loop breaker's seams (engine: walled turn ⇒ ok:false; per-session switch ⇒ exclude + its own no-target verdict)
     _armed: armed, _fires: fires,
@@ -1430,7 +1488,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
 }
 
 module.exports = {
-  create, CONTINUE_PROMPT, continuePromptFor, CONTINUE_PROMPT_OVERLOAD, bulkPromptFor, BULK_PACE_MS, BULK_GATE_WAIT_MS, TICK_MS, GRACE_MS, MAX_WAIT_MS,
+  create, CONTINUE_PROMPT, continuePromptFor, BULK_GATE_HOLD_MS, CONTINUE_PROMPT_OVERLOAD, bulkPromptFor, BULK_PACE_MS, BULK_GATE_WAIT_MS, TICK_MS, GRACE_MS, MAX_WAIT_MS,
   FIRE_WINDOW_MS, FIRE_BACKOFF_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, NO_TARGET_FRESH_MS, EDGE_HOLD_MS,
   refusalNoticeFor, continueNoticeFor, claimContinueNotice, armNoticeFor, // PURE: what the conversation is told, and when
 };

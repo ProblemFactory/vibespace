@@ -12,7 +12,7 @@
 // Both are reached from Settings → Spending (the auto-resume row) and the session list's ⋯ menu.
 import { t } from './i18n.js';
 import { api, fetchJson, createModalShell, showToast } from './utils.js';
-import { autoResumeAllWords, resumeButtonWords, skipWords, summaryWords } from '../stopped-by.js';
+import { autoResumeAllWords, resumeButtonWords, skipGroups, summaryWords, refusedWords } from '../stopped-by.js';
 import { costWords } from '../bulk-resume-cost.js';
 import { stampAt } from './page-time.js';   // the ONE formatter of a time a person reads
 import { autoResumeCapsFor } from './agent-meta.js';
@@ -55,32 +55,46 @@ export function planWords(plan) {
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 
+/** A door's refusal code (a plan read keeps it; a refused POST reaches here through api() as its message alone). */
+function codeOf(r) {
+  const msg = r && r.message ? String(r.message) : '';
+  return (r && r.code) || (msg === 'a resume of the stopped sessions is already running' ? 'in_flight' : msg === 'auto-continue is not running' ? 'not_running' : msg === 'the bulk acts are pressed on this instance’s own page' ? 'not_a_page' : null);
+}
 /** A door's refusal in the person's words, by its code (never the hub's English sentence). */
 function answerWords(r) {
-  // the door's code (a plan read keeps it); a refused POST reaches here through api() as its message alone
-  const msg = r && r.message ? String(r.message) : '';
-  const code = (r && r.code) || (msg === 'a resume of the stopped sessions is already running' ? 'in_flight' : msg === 'auto-continue is not running' ? 'not_running' : msg === 'the bulk acts are pressed on this instance’s own page' ? 'not_a_page' : null);
+  const code = codeOf(r);
   if (code === 'not_running') return t('Auto-continue is not running on this hub — reopen VibeSpace and try again.');
   if (code === 'in_flight') return t('A resume of these sessions is already running — following it here.');
   if (code === 'not_a_page') return t('The bulk acts are pressed on this VibeSpace page only.');
   return null;
 }
 /** The spend ceiling's refusal of a WHOLE batch, in the person's words: the bucket, what it has left, what the batch needs. */
+/** …and WHERE that ceiling is changed (U2 cure: a refusal that names a value names its door — the Settings row's own label). */
+function capDoorWords(why) {
+  const setting = why === 'hour-cap' ? t('Unattended turns per account per hour') : why === 'day-cap' ? t('Unattended turns per account per day') : why === 'instance-cap' ? t('Unattended turns for this instance per day') : null;
+  return setting ? ' ' + t('Change it in Settings → Spending → «{setting}».', { setting }) : '';
+}
 function batchRefusalWords(f) {
   if (!f) return '';
   const who = (f.identity && f.identity.name) || t('this account');
   const left = Number.isFinite(f.left) ? f.left : null, need = Number.isFinite(f.need) ? f.need : f.n;
-  if (f.why === 'hour-cap' && left !== null) return t('{member} can take {left} more turns nobody typed this hour; this batch needs {need}.', { member: who, left, need });
-  if (f.why === 'day-cap' && left !== null) return t('{member} can take {left} more turns nobody typed today; this batch needs {need}.', { member: who, left, need });
-  if (f.why === 'instance-cap' && left !== null) return t('This VibeSpace can take {left} more turns nobody typed today; this batch needs {need}.', { left, need });
-  return t('The spend guard refused it ({why}).', { why: f.why || '?' });
+  const where = capDoorWords(f.why);
+  if (f.why === 'hour-cap' && left !== null) return t('{member} can take {left} more turns nobody typed this hour; this batch needs {need}.', { member: who, left, need }) + where;
+  if (f.why === 'day-cap' && left !== null) return t('{member} can take {left} more turns nobody typed today; this batch needs {need}.', { member: who, left, need }) + where;
+  if (f.why === 'instance-cap' && left !== null) return t('This VibeSpace can take {left} more turns nobody typed today; this batch needs {need}.', { left, need }) + where;
+  return t('The spend guard refused it ({why}).', { why: refusedWords(f.why, t) || f.why || '?' }) + where;
 }
 
 /** The confirm → the batch → its outcome. Resolves with the final batch record (null = nothing ran). */
 export async function openResumeStoppedDialog(app, { plan = null, onDone = null } = {}) {
   const p = plan || await fetchStoppedPlan();
   let closed = false, resolveOuter = null;   // Escape / Close / the backdrop: the poll below stops, the promise settles
-  const shell = createModalShell({ id: 'resume-stopped-dialog', title: t('Resume sessions a limit or overload stopped'), dialogClass: 'resume-stopped-dialog', escapeToClose: true, kind: 'decision', onClose: () => { closed = true; try { resolveOuter && resolveOuter(null); } catch { } } }); // decision: a consent — N billed turns nobody typed go out when the person says so, after the cost is shown
+  let runningId = null;                      // a batch this dialog follows that has not ended (U2 cure, law 3: Close SAYS it keeps running)
+  const shell = createModalShell({ id: 'resume-stopped-dialog', title: t('Resume sessions a limit or overload stopped'), dialogClass: 'resume-stopped-dialog', escapeToClose: true, kind: 'decision', onClose: () => {
+    closed = true;
+    if (runningId) showToast(t('The resume keeps running — reopen it from the session list’s ⋯ menu or Settings → Spending to stop it.'));
+    try { resolveOuter && resolveOuter(null); } catch { }
+  } }); // decision: a consent — N billed turns nobody typed go out when the person says so, after the cost is shown
   const { body, dialog, close } = shell;
   const footer = el('div', 'dialog-footer');
   dialog.appendChild(footer);
@@ -92,24 +106,31 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
     return null;
   }
   const n = p.eligible.length;
+  // EVERY skipped row, grouped by its reason with the count (U2 cure: never cut with «and n more»; the box scrolls)
   const skippedList = (rows) => {
     if (!rows || !rows.length) return null;
     const box = el('div', 'resume-stopped-skipped');
     box.appendChild(el('div', 'resume-stopped-sub', t('Skipped ({n}):', { n: rows.length })));
-    const ul = el('ul', 'dialog-list');
-    for (const s of rows.slice(0, 40)) ul.appendChild(el('li', null, `${s.name || s.id} — ${skipWords(s, t, { clock: (ms, now) => stampAt(ms, { now }) })}`));
-    if (rows.length > 40) ul.appendChild(el('li', null, t('…and {n} more', { n: rows.length - 40 })));
+    const ul = el('ul', 'dialog-list resume-stopped-groups');
+    for (const g of skipGroups(rows, t)) {
+      const li = el('li', 'resume-stopped-group');
+      li.appendChild(el('div', 'resume-stopped-group-head', g.head));
+      const names = el('ul', 'resume-stopped-names');
+      for (const s of g.rows) names.appendChild(el('li', null, s.until ? `${s.name || s.id} — ${t('until {time}', { time: stampAt(s.until, { now: Date.now(), words: true }) })}` : (s.name || s.id)));
+      li.appendChild(names);
+      ul.appendChild(li);
+    }
     box.appendChild(ul);
     return box;
   };
-  if (!n) {
+  if (!n && !p.running) {   // (a batch RUNNING with nothing left to plan still gets its Stop door and its progress — below)
     // NOTHING GREYED WITH A HINT: an empty set SAYS so (and why the ones it has are not resumable now)
     body.appendChild(el('p', 'resume-stopped-empty', resumeButtonWords(0, t)));
     const sk = skippedList(p.skipped); if (sk) body.appendChild(sk);
     footer.appendChild(cancel);
     return null;
   }
-  body.appendChild(el('p', 'resume-stopped-lead', t('{n} sessions will be continued, earliest stopped first — each one is a billed turn, authorized together against your spend limits.', { n })));
+  if (n) body.appendChild(el('p', 'resume-stopped-lead', t('{n} sessions will be continued, earliest stopped first — each one is a billed turn, authorized together against your spend limits.', { n })));
   const cw = costWords(p.estimate, t);
   if (cw) {
     const cost = el('div', 'resume-stopped-cost');
@@ -120,11 +141,30 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
       if (m.basis) cost.appendChild(el('div', 'resume-stopped-basis', m.basis));
     }
     if (cw.unknown) cost.appendChild(el('div', 'resume-stopped-basis', cw.unknown));
+    if (cw.unpriced) cost.appendChild(el('div', 'resume-stopped-basis', cw.unpriced));
     body.appendChild(cost);
   }
-  const sk = skippedList(p.skipped); if (sk) body.appendChild(sk);
+  let skBox = skippedList(p.skipped); if (skBox) body.appendChild(skBox);
   const status = el('p', 'resume-stopped-status');
   body.appendChild(status);
+  // WHILE A BATCH RUNS (U2 cure, law 3): a Stop door, and Close says in words that it keeps running and where to stop it
+  const stopBtn = el('button', 'btn-create resume-stopped-stop', t('Stop the rest'));
+  const keepHint = el('p', 'dialog-hint resume-stopped-keep', t('Closing leaves the resume running — reopen this from the session list’s ⋯ menu or Settings → Spending to stop it.'));
+  let stopping = false;
+  const showRunning = (batchId) => {
+    runningId = batchId;
+    if (!stopping && !stopBtn.isConnected) footer.prepend(stopBtn);
+    cancel.textContent = t('Close — it keeps running');
+    if (!keepHint.isConnected) body.insertBefore(keepHint, status.nextSibling);
+  };
+  const hideRunning = () => { runningId = null; stopBtn.remove(); keepHint.remove(); };
+  stopBtn.onclick = async () => {
+    if (!runningId || stopping) return;
+    stopping = true; stopBtn.remove();
+    status.textContent = t('Stopping — nothing more is started.');
+    try { await api('/api/sessions/resume-stopped/' + encodeURIComponent(runningId) + '/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); }
+    catch (e) { stopping = false; status.textContent = answerWords(e) || t('Could not stop it — try again.'); if (runningId) footer.prepend(stopBtn); }
+  };
   const all = el('button', 'btn-create resume-stopped-all', cw ? cw.allButton : t('Resume all ({n})', { n }));
   const firstK = cw && cw.kButton ? el('button', 'btn-cancel resume-stopped-k', cw.kButton) : null;
   footer.append(...[firstK, all, cancel].filter(Boolean));
@@ -144,6 +184,16 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
         const ids = p.eligible.slice(0, limit === null || limit === undefined ? p.eligible.length : limit).map((e) => e.id);   // exactly the rows shown, earliest first
         rec = await api('/api/sessions/resume-stopped', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
       } catch (e) {
+        // A RETRY THAT MEETS A BATCH ALREADY RUNNING FOLLOWS IT (U2 cure): the words say «following it here» — and it does
+        if (codeOf(e) === 'in_flight') {
+          let p2 = null; try { p2 = await fetchStoppedPlan(); } catch { p2 = null; }
+          if (p2 && p2.ok && p2.running) {
+            status.textContent = answerWords(e);   // «following it here» — said only when it IS followed (it may have ended meanwhile)
+            let r2 = null; try { r2 = await fetchJson('/api/sessions/resume-stopped/' + encodeURIComponent(p2.running)); } catch { r2 = null; }
+            await follow(r2 && !r2.error ? r2 : { batchId: p2.running, done: false, planned: 0 });
+            return;
+          }
+        }
         status.textContent = answerWords(e) || t('Could not start the resume — try again.');
         busy = false; showActs();
         return;
@@ -154,7 +204,8 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
     const follow = async (rec) => {
       let misses = 0, lost = false;
       while (rec && !rec.done && !closed) {
-        status.textContent = t('Resuming… {done} of {n} continued', { done: (rec.resumed || []).length, n: rec.planned });
+        showRunning(rec.batchId);
+        status.textContent = rec.stopAsked || stopping ? t('Stopping — nothing more is started.') : t('Resuming… {done} of {n} continued', { done: (rec.resumed || []).length, n: rec.planned });
         await new Promise((r) => setTimeout(r, POLL_MS));
         const next = await fetchJson('/api/sessions/resume-stopped/' + encodeURIComponent(rec.batchId));
         if (next && !next.error) { rec = next; misses = 0; continue; }
@@ -162,11 +213,17 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
         if (++misses >= 10) { lost = true; break; }
       }
       if (closed) { resolve(rec); return; }
+      hideRunning();
       if (lost) { status.textContent = t('The batch was lost (VibeSpace restarted) — reopen this to see which sessions are still stopped.'); status.classList.add('done'); all.remove(); if (firstK) firstK.remove(); cancel.textContent = t('Done'); resolve(rec); return; }
       const refused = rec && rec.refused ? rec.refused.n || rec.planned || 0 : 0;
-      const done = (rec && rec.resumed || []).length, failedN = (rec && rec.failed || []).length;
-      const notReached = rec && !rec.refused ? Math.max(0, (rec.planned || 0) - done - failedN - (rec.skipped || []).filter((x) => !(p.skipped || []).some((y) => y.id === x.id)).length) : 0;
-      const line = summaryWords({ resumed: done, skipped: rec ? rec.skipped : [], refused, failed: failedN, notReached }, t);
+      const done = (rec && rec.resumed || []).length, failedN = (rec && rec.failed || []).length, stoppedN = (rec && rec.stopped || []).length;
+      // the batch's OWN skips = its skipped list past the plan's (the record says how many the plan skipped — a batch another page
+      // started has another plan than this page's)
+      const ownSkips = Number.isFinite(rec && rec.planSkipped) ? Math.max(0, (rec.skipped || []).length - rec.planSkipped) : (rec && rec.skipped || []).filter((x) => !(p.skipped || []).some((y) => y.id === x.id)).length;
+      const notReached = rec && !rec.refused ? Math.max(0, (rec.planned || 0) - done - failedN - stoppedN - ownSkips) : 0;
+      const line = summaryWords({ resumed: done, skipped: rec ? rec.skipped : [], refused, failed: failedN, notReached, stopped: stoppedN }, t);
+      // the batch's OWN skips (a refusal re-asked before its continue, a wall that stood) join the list — every one, by reason
+      if (rec && Array.isArray(rec.skipped) && rec.skipped.length) { const nb = skippedList(rec.skipped); if (nb) { if (skBox) skBox.replaceWith(nb); else body.insertBefore(nb, status); skBox = nb; } }
       status.textContent = line;
       status.classList.add('done');
       if (rec && rec.refused) {
@@ -190,7 +247,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
     cancel.addEventListener('click', () => resolve(null), { once: true });
     if (p.running) {
       // ONE batch at a time: a resume already running (another tab, another press) is followed, never doubled
-      busy = true; hideActs();
+      busy = true; hideActs(); showRunning(p.running);
       status.textContent = t('A resume of these sessions is already running — following it here.');
       fetchJson('/api/sessions/resume-stopped/' + encodeURIComponent(p.running)).then((rec) => follow(rec && !rec.error ? rec : { batchId: p.running, done: false, planned: 0 }));
     }
@@ -216,7 +273,7 @@ export function renderAutoResumeBulk(container, app) {
       flipping = true;
       try {
         const r = await setAutoResumeForAll(app, on);
-        showToast(on ? t('Auto-continue is on for {n} more sessions', { n: r.changed || 0 }) : t('Auto-continue is off for {n} sessions', { n: r.changed || 0 }));
+        showToast(on ? t('Auto-continue is on for {n} more sessions', { n: r.changed || 0 }) : t('Auto-continue is off for {n} sessions', { n: r.changed || 0 }) + (r.stoppedBatch ? ' ' + t('The running resume of stopped sessions was stopped.') : ''));
       } catch (e) { showToast(t('Could not change auto-continue: {why}', { why: e.message }), { type: 'error' }); }
       paint();
     };

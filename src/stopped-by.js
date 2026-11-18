@@ -182,16 +182,45 @@ const SKIP_KEYS = Object.freeze({
   resumed: 'it has run again since',
   pending: 'a continue onto it is already on its way',
   'moved-refused': 'the account it moved to refused the spend',
+  refused: 'the spend guard refused it now',   // U2 cure (law 1): the authorizer re-asked before THIS continue said no
 });
+/** The authorizer's OWN reasons (src/spend-authorizer.js `why`) in a person's words — a skipped row says WHICH rule refused
+ *  it (U2 cure, law 1). A reason not listed says the skip alone (never a raw code). */
+const REFUSED_KEYS = Object.freeze({
+  'overage-in-use': 'its account is billing paid overage',
+  'identity-cannot-serve': 'its account cannot serve a turn now',
+  'spend-control-reached': 'its account reached the spend control set with its vendor',
+  'hour-cap': 'its account used its turns nobody typed this hour',
+  'day-cap': 'its account used its turns nobody typed today',
+  'instance-cap': 'this VibeSpace used its turns nobody typed today',
+});
+/** The authorizer's reason in a person's words, or null (a reason not in the table) — the dialog's refusal line reads it. */
+function refusedWords(why, tIn) { const k = REFUSED_KEYS[why]; return k ? tOf(tIn)(k) : null; }
 /** One skipped row's words: «仍在限额内，至 14:00». */
 function skipWords(s, tIn, { now = Date.now(), clock = isoClock } = {}) {
   const t = tOf(tIn);
-  const why = t(SKIP_KEYS[s && s.why] || 'skipped');
+  let why = t(SKIP_KEYS[s && s.why] || 'skipped');
+  const r = s && s.reason ? REFUSED_KEYS[s.reason] : null;
+  if (r) why = t('{why} ({reason})', { why, reason: t(r) });
   return s && s.until ? t('{why} until {time}', { why, time: clock(s.until, now) }) : why;
 }
+/** THE SKIPPED ROWS GROUPED BY REASON (U2 cure: never cut with «and n more» — every row, under its reason with its count):
+ *  [{key, words, n, head «仍在限额内 —— 8 个», rows}] in the order the reasons first appear. */
+function skipGroups(rows, tIn) {
+  const t = tOf(tIn);
+  const by = new Map();
+  for (const x of Array.isArray(rows) ? rows : []) {
+    if (!x) continue;
+    const key = `${x.why || ''}|${x.reason || ''}`;
+    let g = by.get(key);
+    if (!g) { g = { key, words: skipWords({ why: x.why, reason: x.reason }, t), rows: [] }; by.set(key, g); }
+    g.rows.push(x);
+  }
+  return [...by.values()].map((g) => ({ ...g, n: g.rows.length, head: t('{why} — {n}', { why: g.words, n: g.rows.length }) }));
+}
 /** The dialog's outcome line: «恢复了 29 个 · 跳过 8 个（仍在限额内）· 拒绝 0». `refused` = the number the spend guard
- *  refused (a refusal resumes NONE, so it is all of the planned set or 0). */
-function summaryWords({ resumed = 0, skipped = [], refused = 0, failed = 0, notReached = 0 } = {}, tIn) {
+ *  refused (a refusal resumes NONE, so it is all of the planned set or 0); `stopped` = the ones a Stop left unstarted. */
+function summaryWords({ resumed = 0, skipped = [], refused = 0, failed = 0, notReached = 0, stopped = 0 } = {}, tIn) {
   const t = tOf(tIn);
   const list = Array.isArray(skipped) ? skipped : [];
   const walled = list.filter((s) => s && s.why === 'walled').length;
@@ -202,6 +231,7 @@ function summaryWords({ resumed = 0, skipped = [], refused = 0, failed = 0, notR
       : t('skipped {n}', { n: list.length }));
   parts.push(t('refused {n}', { n: refused }));
   if (failed) parts.push(t('could not deliver {n}', { n: failed }));
+  if (stopped) parts.push(t('stopped {n}', { n: stopped }));
   if (notReached) parts.push(t('not reached {n}', { n: notReached }));
   return parts.join(' · ').replace(/） · /g, '）· '); // a full-width paren carries its own space
 }
@@ -215,10 +245,11 @@ const WORD_KEYS = Object.freeze([
   'Resume every session a usage limit or overload stopped ({n})', 'No sessions stopped by a limit',
   ...Object.values(SKIP_KEYS), 'skipped', '{why} until {time}',
   'Resumed {n}', 'skipped {n} (still inside a limit)', 'skipped {n} ({w} still inside a limit)', 'skipped {n}', 'refused {n}', 'could not deliver {n}', 'not reached {n}',
+  ...Object.values(REFUSED_KEYS), '{why} ({reason})', '{why} — {n}', 'stopped {n}',
 ]);
 
 module.exports = {
-  STOP_KINDS, SAID_MAX, SKIP_KEYS, WORD_KEYS,
+  STOP_KINDS, SAID_MAX, SKIP_KEYS, REFUSED_KEYS, WORD_KEYS,
   boundSaid, isOverloadError, stopVerdict, normalizeStoppedBy, liveFactOf, isStoppedBy, stillWalled, planBatch,
-  chipWords, filterWords, autoResumeAllWords, resumeButtonWords, skipWords, summaryWords,
+  chipWords, filterWords, autoResumeAllWords, resumeButtonWords, skipWords, skipGroups, summaryWords, refusedWords,
 };

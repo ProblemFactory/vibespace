@@ -136,6 +136,8 @@ const tZh = (s, p) => fill(zh[s] !== undefined ? zh[s] : s, p);
   ok('the machine\'s own login is NAMED in the person\'s words, never by its ledger key', BC.costWords(BC.estimateBatch({ items: [{ id: 'g', at: 1, model: 'opus', contextTokens: 1, member: { key: '__global__', name: '__global__' } }], priceOf: () => OPUS, members: {} }), tZh).members[0].line === '本机自己的登录：无法估算：本窗口还没有实测比例');
   ok('no K button when nothing is cut (K = N) or nothing fits (K = 0)', BC.costWords(BC.estimateBatch({ items: items.slice(0, 1), priceOf: () => OPUS, members, softBandPct: 90 }), null).kButton === null);
   ok('with no basis anywhere the passive line keeps the dollars and SAYS the share cannot be estimated', /cannot be estimated yet/.test(BC.costWords(BC.estimateBatch({ items: items.slice(3), priceOf: () => OPUS, members }), null).passive));
+  ok('U2 cure: an item with no price is SAID («1 个会话的模型没有价格，未计入», the passive line «… · 1 个未定价») — never added as if it cost nothing in silence', (() => { const e = BC.estimateBatch({ items: items.slice(0, 2), priceOf: (m, it) => (it.id === 'a' ? OPUS : null), members }); const w = BC.costWords(e, tZh); return e.unpriced === 1 && w.unpriced === '1 个会话的模型没有价格，未计入' && / · 1 个未定价$/.test(w.passive); })(), JSON.stringify(BC.costWords(BC.estimateBatch({ items: items.slice(0, 2), priceOf: (m, it) => (it.id === 'a' ? OPUS : null), members }), tZh)));
+  ok('U2 cure: every item priced ⇒ no such line', BC.costWords(BC.estimateBatch({ items: items.slice(0, 2), priceOf: () => OPUS, members }), null).unpriced === null);
   const miss = BC.WORD_KEYS.filter((k) => zh[k] === undefined || ja[k] === undefined);
   ok(`every word key (${BC.WORD_KEYS.length}) is in zh AND ja`, !miss.length, miss);
 }

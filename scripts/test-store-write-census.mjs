@@ -642,7 +642,8 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
 {
   const M = [
     ['server.js', 'persistAskedAt', 0, 2, 'first-seen stamps of an ask (the inbox clock)'], ['server.js', 'persistSessionMeta', 0, 1, 'browser facts — the binding itself is written synchronously to browser-bindings; the meta is its copy'],
-    ['server.js', 'persistFlag', 0, 1, 'the per-session auto-continue choice (lane auto-resume-bulk) — its restart copy: the page writes the same choice into its resume carrier in the same act'],
+    ['server.js', 'persistFlag', 0, 1, 'the per-session auto-continue choice (lane auto-resume-bulk) — its restart copy, through the store\'s patch (lg-recovery U2 cure); the page writes the same choice into its resume carrier in the same act'],
+    ['src/server/session-stdout.js', 'create > patchMetaOnce', 0, 2, 'ONE field patched (lg-recovery U1 + U2 cures — the stop fact and the per-session auto-continue choice): its pending copy, else the file read OFF the loop; one chain per file, a give-up\'s keys ride the next patch — paced'],
     ['server.js', 'rebindSessionMeta', 0, 1, 're-runs the binding hook (the bindings store is synchronous)'], ['server.js', 'route:POST /api/sessions/:id/msg-reachability', 1, 0, 'the person\'s reach level — answered after the disk'],
     ['src/agent-routes.js', 'setupAgentRoutes > persistSeenMarks', 0, 1, 'a seen mark — lost, one injection is sent again'],
     ['src/routes/editor.js', 'registerEditorRoutes > route:POST /api/editor/open', 1, 0, 'the only record of an edit in flight — on disk before the editor opens'], ['src/routes/editor.js', 'registerEditorRoutes > route:POST /api/editor/signal', 0, 1, 'the clear — a stale record heals itself at the next attach'],
@@ -659,7 +660,7 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
     ['src/server/stdout/codex-events.js', 'create > attach', 1, 0, 'a codex thread id — a binding'],
     ['src/server/usage-pool-engine.js', 'create > noteServedModel > writeSessionMeta', 0, 1, 'the served fact handed to model-ask (its persist, paced — above)'],
     ['src/server/usage-pool-engine.js', 'create > persistFallbackStamp', 0, 1, 'derived — the next served record retires it'], ['src/server/usage-pool-engine.js', 'create > persistHeldStamp', 0, 1, 'a held-member stamp the ledger re-derives'],
-    ['src/server/session-stdout.js', 'create > patchMetaOnce', 0, 2, 'ONE field patched (lg-recovery U1 cure: the stop fact, usage-pool-engine persistStoppedBy; one chain per file): its pending copy, else the file read OFF the loop — paced like the mark it carries'],
+    ['src/server/usage-pool-engine.js', 'create > persistStoppedBy', 0, 1, 'why a session stopped (lg-recovery U1 + cures) — through the store\'s patch (its owed keys ride the next patch); the next turn end restates or clears it'],
     ['src/server/usage-pool-engine.js', 'create > persistPoolPin', 1, 0, 'the owner\'s pin'], ['src/server/usage-pool-engine.js', 'create > persistRequestStamp', 0, 1, 'request stamps'],
     ['src/ws-create.js', 'createWsCreateHandler > createBody > onAdopt', 1, 0, 'the claude conversation id after new / fork — a binding'], ['src/ws-create.js', 'createWsCreateHandler > createBody > tryCapture', 1, 0, 'a codex thread id — a binding'],
     ['src/ws-create.js', 'createWsCreateHandler > createBody', 0, 1, 'a new socket\'s FIRST version — written synchronously by construction'],
@@ -671,12 +672,12 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
     const got = new Map();
     for (const rel of META_FILES) {
       const src = over[rel] !== undefined ? over[rel] : fs.readFileSync(path.join(REPO, rel), 'utf8');
-      if (!/writeSessionMeta/.test(src)) continue;
+      if (!/writeSessionMeta|patchSessionMeta/.test(src)) continue;
       let ast; try { ast = AC2.parse(src.replace(/^#!.*/, ''), { ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, locations: true, sourceType: 'script' }); } catch { continue; }
       walk(ast, (n, parents) => {
         if (n.type !== 'CallExpression') return;
         const nm = n.callee.type === 'Identifier' ? n.callee.name : n.callee.type === 'MemberExpression' && !n.callee.computed ? n.callee.property.name : null;
-        if (nm !== 'writeSessionMeta') return;
+        if (nm !== 'writeSessionMeta' && nm !== 'patchSessionMeta') return;   // lg-recovery U2 cure: a patch's caller is a row too (a person's act routed through it is never invisible)
         const a = n.arguments[2], d = !!a && a.type === 'ObjectExpression' && a.properties.some((q) => q.key && (q.key.name === 'durable' || q.key.name === 'sync') && q.value.type === 'Literal' && q.value.value === true);
         const k = `${rel}|${scopeOf(parents)}`, r = got.get(k) || [0, 0];
         r[d ? 0 : 1]++; got.set(k, r);

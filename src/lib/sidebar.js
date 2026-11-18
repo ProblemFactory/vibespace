@@ -372,7 +372,7 @@ class Sidebar {
         const flipAll = async (on) => {
           try {
             const r = await setAutoResumeForAll(this.app, on);
-            showToast(on ? tr('Auto-continue is on for {n} more sessions', { n: r.changed || 0 }) : tr('Auto-continue is off for {n} sessions', { n: r.changed || 0 }));
+            showToast(on ? tr('Auto-continue is on for {n} more sessions', { n: r.changed || 0 }) : tr('Auto-continue is off for {n} sessions', { n: r.changed || 0 }) + (r.stoppedBatch ? ' ' + tr('The running resume of stopped sessions was stopped.') : ''));   // lg-recovery U2 cure: the flip stopped a running batch — said
           } catch (err) { showToast(tr('Could not change auto-continue: {why}', { why: err.message }), { type: 'error' }); }
         };
         const ROWS = {

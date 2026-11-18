@@ -1698,6 +1698,60 @@ await (async () => {
   ok('16d. the owner check runs on the copy already read (no second read of the mount); a patch that gives up writes nothing', /writeSessionMeta\(sockName, \{ \.\.\.m, \.\.\.patch \}, \{ prev: m, flagOnly \}\)/.test(ssSrc) && /sessionMetaOwnerConflict\(sockName, meta, prev\)/.test(ssSrc) && /tries > 0 \? patchMetaOnce\(sockName, fp, patch, tries - 1, owner, tok\) : false/.test(ssSrc));
 })();
 
+// ── 17c. THE FLIP COSTS THE LOOP A CONSTANT (lg-recovery U2 cure — 主开发's law 2): «turn auto-continue on/off for every
+// session» flipped every conversation through setEnabled, and each made a synchronous meta READ (persistFlag) plus the owner
+// check's second read, and every armed one rewrote data/auto-resume.json — 2-3 file calls a conversation on the loop. Now the
+// flag is PATCHED by the store (its pending copy, else a read off the loop; the version read is the owner check's) and the
+// arms are saved ONCE after the loop. Counted: every synchronous fs call across one ON + OFF flip over N conversations — the
+// SAME at 5 and at 50. The REAL meta store over a scratch folder, server.js's own persistFlag (pinned verbatim).
+await (async () => {
+  console.log('\n17c. the bulk flip costs the loop a constant');
+  const { create } = require(AR_PATH);
+  const tmpF = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-flip17c-'));
+  let attrib = 0;
+  const META = path.join(tmpF, 'meta'), BUF = path.join(tmpF, 'buffers'); fs.mkdirSync(META, { recursive: true }); fs.mkdirSync(BUF, { recursive: true });
+  const anyFn = () => new Proxy(function () { }, { get: (t, k) => (k === 'then' || typeof k === 'symbol' ? undefined : anyFn()), apply: () => undefined });
+  const engine = new Proxy({ _vsuPending: new Map() }, { get: (t, k) => (k in t ? t[k] : anyFn()), has: () => true });
+  const so = require(path.join(REPO, 'src/server/session-stdout.js')).create({
+    rootDir: tmpF, BUFFERS_DIR: BUF, META_DIR: META, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(tmpF, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: new Map(), engine,
+    checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { attrib++; }, daemonPtyShim: (h) => h,   // COUNTED: on a pooled hub it scans every session (a sync readlink inside)
+    sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn(),
+  });
+  const SRV_PF = 'persistFlag: (id, s) => { if (s && s.sockName) { try { patchSessionMeta(s.sockName, { autoResume: s._autoResume === undefined ? undefined : !!s._autoResume }, { owner: id }).then((ok) => { if (!ok) console.warn(`[auto-resume] ${id}: the auto-continue choice is kept in memory only — its meta could not be patched (a restart would forget it)`); }); } catch { } } }';
+  ok('17c. PIN: server.js hands the core the store\'s patch as persistFlag (no read of the meta on the caller\'s road)', read('server.js').includes(SRV_PF) && /const \{ setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta, patchSessionMeta,/.test(read('server.js')));
+  const curedPF = (id, s2) => { if (s2 && s2.sockName) { try { so.patchSessionMeta(s2.sockName, { autoResume: s2._autoResume === undefined ? undefined : !!s2._autoResume }, { owner: id }); } catch { } } };   // = SRV_PF (its log aside)
+  const oldPF = (id, s2) => { if (s2 && s2.sockName) { try { so.writeSessionMeta(s2.sockName, { ...(so.readSessionMeta(s2.sockName) || {}), autoResume: s2._autoResume === undefined ? undefined : !!s2._autoResume }); } catch { } } };   // the U2 tip's
+  const SYNC = ['readFileSync', 'writeFileSync', 'renameSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync', 'openSync', 'writeSync', 'closeSync', 'fsyncSync', 'mkdirSync', 'unlinkSync', 'rmSync', 'appendFileSync', 'copyFileSync', 'accessSync', 'realpathSync', 'readSync', 'fstatSync'];
+  let calls = 0; const orig = {};
+  const count = async (fn) => { calls = 0; for (const k of SYNC) { orig[k] = fs[k]; fs[k] = function (...a) { calls++; return orig[k].apply(this, a); }; } try { await fn(); } finally { for (const k of SYNC) fs[k] = orig[k]; } return calls; };
+  // every conversation's meta is ON DISK before the store first lists its folder (as a hub's are at boot): a patch then takes
+  // the store's paced road — a file made behind its back would be its «first version», written here and now by design
+  fs.writeFileSync(path.join(META, 'fl-own-1.json'), JSON.stringify({ sockName: 'fl-own-1', webuiSessionId: 'w-own-1', backend: 'claude' }));
+  const SETS = [2, 5, 50, 5, 50].map((N, k) => { const t = 't' + (k + 1); for (let i = 0; i < N; i++) { const sock = `fl-${t}-${i}`; fs.writeFileSync(path.join(META, sock + '.json'), JSON.stringify({ sockName: sock, webuiSessionId: `w-${t}-${i}`, backend: 'claude', name: 'n' + i })); } return { t, N }; });
+  const flip = async (mod, pf, { t, N }) => {
+    const dir = path.join(tmpF, 'ar-' + t); fs.mkdirSync(dir);
+    const active = new Map();
+    for (let i = 0; i < N; i++) active.set(`w-${t}-${i}`, { backend: 'claude', mode: 'chat', pty: {}, sockName: `fl-${t}-${i}`, ...(i % 2 ? { _stoppedBy: { kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 3600e3 } } : {}) });
+    const ar = mod.create({ dataDir: dir, activeSessions: active, sendToSession: () => true, log: () => { }, serverSetting: () => false, resumeVerb: () => ({ form: 'message', deliver: () => true }), persistFlag: pf, onListChange: () => { } });
+    let armedOn = 0; const a0 = attrib;
+    const inLoop = await count(async () => { ar.setEnabledAll(true); armedOn = [...active.keys()].filter((id) => ar.statusFor(id).armed).length; ar.setEnabledAll(false); });
+    const after = await count(() => new Promise((r) => setTimeout(r, 500)));   // the reads off the loop land, the writer's thread writes
+    const last = JSON.parse(fs.readFileSync(path.join(META, `fl-${t}-${N - 1}.json`), 'utf8'));
+    return { inLoop, after, armedOn, flag: last.autoResume, name: last.name, attrib: attrib - a0 };
+  };
+  await flip(require(AR_PATH), curedPF, SETS[0]);   // warm: the meta folder is listed once per process (the store's first-version rule)
+  const c5 = await flip(require(AR_PATH), curedPF, SETS[1]), c50 = await flip(require(AR_PATH), curedPF, SETS[2]);
+  ok('17c. LAW 2: ONE flip ON + OFF over 5 and over 50 conversations makes the SAME number of synchronous file calls (the arms saved once per flip, no meta read, no directory check per write) — in the loop and after it; and a flag patch does NO usage attribution (on a pooled hub: a scan of every session per write)', c5.inLoop === c50.inLoop && c5.after === c50.after && c5.inLoop <= 8 && c5.attrib === 0 && c50.attrib === 0, JSON.stringify({ c5, c50 }));
+  ok('17c. …and it still DID it: the stopped ones were armed by ON (the U1 switch), and the last flag on disk is OFF with the meta\'s other fields kept', c50.armedOn === 25 && c50.flag === false && c50.name === 'n49', JSON.stringify(c50));
+  const okOther = await so.patchSessionMeta('fl-own-1', { autoResume: true }, { owner: 'w-someone-else' });
+  const okMine = await so.patchSessionMeta('fl-own-1', { autoResume: true }, { owner: 'w-own-1' });
+  ok('17c. the patch names its OWNER: a meta another session owns is never patched with this one\'s choice (said as a collision); CONTROL: its own ⇒ patched', okOther === false && okMine === true, JSON.stringify({ okOther, okMine }));
+  const mS = mutantAr([['    if (saveHeld) { saveOwed = true; return; }\n', '']]);
+  const r5 = mS.mod ? await flip(mS.mod, oldPF, SETS[3]) : null, r50 = mS.mod ? await flip(mS.mod, oldPF, SETS[4]) : null;
+  ok('17c. RED: the U2 tip\'s flip (the meta read + the owner check\'s read per conversation, a save per arm) grows with N', mS.hits === 1 && !!r5 && !!r50 && r50.inLoop > r5.inLoop + 40, mS.err || JSON.stringify({ r5, r50 }));
+  fs.rmSync(tmpF, { recursive: true, force: true });
+})();
+
 // ── 16b. TURNED ON AFTER THE WALL (lane auto-resume-bulk, U1 cure — the adversarial read's MUST 2): the card's switch says
 // «continues by itself when its limit resets»; before, only a wall seen WITH auto-continue on armed anything, so a press
 // after the wall kept no promise. Now the stop's OWN stated reset arms it; a passed reset or an overload arms nothing.
@@ -1727,7 +1781,7 @@ await (async () => {
 await (async () => {
   console.log('\n17b. the bulk resume\'s loop: renewal, a session that ran since, a session the gate moved');
   const { create } = require(AR_PATH);
-  const run = async (mod, { moveTo = null, refuseMoved = false, ranSince = false } = {}) => {
+  const run = async (mod, { moveTo = null, refuseMoved = false, ranSince = false, overageAfter = null, stopAfter = null, offAfter = null, hangGate = null, armB = false, fireBAfter = false, badReask = false } = {}) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulk17b-'));
     const at = Date.now() - 60000;
     const active = new Map([
@@ -1735,40 +1789,72 @@ await (async () => {
       ['b', { backend: 'claude', mode: 'chat', pty: {}, name: 'B1', _slot: 'A', _stoppedBy: { kind: 'quota', at: at + 1, resetsAt: Date.now() - 1000 } }],
     ]);
     const L = { auth: [], renew: [], release: [], charge: [], sent: [] };
-    let seq = 0;
-    const ar = mod.create({
+    let seq = 0, overage = false, r0 = null, ar = null, bGates = 0;
+    ar = mod.create({
       dataDir: dir, activeSessions: active, serverSetting: () => false,
-      sendToSession: (id) => { L.sent.push(id); return true; },
+      sendToSession: (id) => { L.sent.push(id); if (overageAfter === id) overage = true; if (stopAfter === id) ar.stopBatch(r0.batchId); if (offAfter === id) ar.setEnabledAll(false); if (hangGate && id === 'a') setTimeout(() => ar.stopBatch(r0.batchId), 30); return true; },
       fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
-      beforeFire: (id, s2) => { if (moveTo && id === 'b') s2._slot = moveTo; return true; },
-      authorizeSpendBatch: (items) => { L.auth.push(items.map((x) => `${x.id}@${x.identity && x.identity.key}`).join()); if (refuseMoved && items.length === 1) return { ok: false, why: 'hour-cap' }; return { ok: true, holds: items.map((x) => ({ sessionId: x.id, identity: x.identity, hold: 'h' + (++seq) })) }; },
+      beforeFire: (id, s2) => { if (hangGate && id === 'b' && !(bGates++)) return new Promise(() => { }); if (moveTo && id === 'b') s2._slot = moveTo; return true; },   // the batch's gate for b hangs; a LATER gate (a single continue's) answers
+      // THE AUTHORIZER'S STATE RULES as a stand-in: paid overage in use refuses every unattended producer (a batch of one too)
+      authorizeSpendBatch: (items) => { L.auth.push(items.map((x) => `${x.id}@${x.identity && x.identity.key}`).join()); if (overage) return { ok: false, why: 'overage-in-use' }; if (badReask && items.length === 1) return { ok: true, holds: [0, 1].map(() => ({ sessionId: items[0].id, identity: items[0].identity, hold: 'h' + (++seq) })) }; if (refuseMoved && items.length === 1 && items[0].identity && items[0].identity.key === 'C') return { ok: false, why: 'hour-cap' }; return { ok: true, holds: items.map((x) => ({ sessionId: x.id, identity: x.identity, hold: 'h' + (++seq) })) }; },
       renewSpend: (holds) => L.renew.push(holds.join()),
       releaseSpend: (id, s2, hold) => L.release.push(hold),
       noteBatchSpend: (id, s2, identity, hold) => L.charge.push(`${id}@${identity && identity.key}:${hold}`),
       wallVerdict: () => ({ usable: true, blockedUntil: 0 }),
-      bulkPaceMs: 5, bulkGateWaitMs: 2000,
+      bulkPaceMs: 5, bulkGateWaitMs: hangGate ? 3600e3 : 2000,   // a hung gate waits an HOUR unless a Stop ends the wait
     });
-    const r0 = ar.resumeBatch({});
+    if (armB) { const sb = active.get('b'); sb._autoResume = true; ar.armIfEnabled('b', sb, Date.now() + 3600e3, 'usage limit'); }   // b ARMED: the pool's switch would fireNow it
+    r0 = ar.resumeBatch({});
     if (ranSince) active.get('b')._stoppedBy = null;   // the person typed into b before the batch reached it
     const until = Date.now() + 5000;
     while (Date.now() < until && !(ar.batchStatus(r0.batchId) || {}).done) await new Promise((r) => setTimeout(r, 10));
+    if (fireBAfter) { ar.fireNow('b', 'the pool moved it (the abandoned gate\'s switch)'); await new Promise((r) => setTimeout(r, 80)); }
     return { rec: ar.batchStatus(r0.batchId), L };
   };
   const real = { create };
   const n = await run(real);
-  ok('17b. both continued, each charged on the slot its hold was opened for; the hold not reached yet was RENEWED while the first ran', n.rec.done && n.L.sent.join() === 'a,b' && n.L.charge.join() === 'a@A:h1,b@A:h2' && n.L.renew.some((x) => x.split(',').includes('h2')), JSON.stringify(n));
+  ok('17b. both continued — each ASKED AGAIN before its continue (a batch of one on its slot, the press\'s hold given back) and charged on that answer\'s hold; the hold not reached yet was RENEWED while the first ran', n.rec.done && n.L.sent.join() === 'a,b' && n.L.auth.join('|') === 'a@A,b@A|a@A|b@A' && n.L.release.includes('h1') && n.L.release.includes('h2') && n.L.charge.join() === 'a@A:h3,b@A:h4' && n.L.renew.some((x) => x.split(',').includes('h2')), JSON.stringify(n));
   const r1 = await run(real, { ranSince: true });
   ok('17b. a session that RAN since the plan is skipped («it has run again since»), never continued twice; its hold goes back', r1.L.sent.join() === 'a' && r1.rec.skipped.some((x) => x.id === 'b' && x.why === 'resumed') && r1.L.release.includes('h2'), JSON.stringify(r1));
   const m1 = mutantAr([["        if (!stillSame()) { skip('resumed'); continue; }\n", ''], ["        if (!stillSame()) { skip('resumed'); continue; }   // the gate's own pool switch may have continued it (fireNow on an armed session)\n", '']]);
   const c1 = m1.mod ? await run(m1.mod, { ranSince: true }) : null;
   ok('17b. CONTROL: without the two re-checks the same batch continues b a second time — the leg above goes red', m1.hits === 2 && !!c1 && c1.L.sent.join() === 'a,b', m1.err || JSON.stringify(c1 && c1.L));
   const mv = await run(real, { moveTo: 'C' });
-  ok('17b. the gate MOVED b onto slot C ⇒ re-authorized on C (a batch of one), its A hold given back, charged on C', mv.L.auth.join('|') === 'a@A,b@A|b@C' && mv.L.release.includes('h2') && mv.L.charge.join() === 'a@A:h1,b@C:h3' && mv.L.sent.join() === 'a,b', JSON.stringify(mv.L));
+  ok('17b. the gate MOVED b onto slot C ⇒ re-authorized on C (a batch of one), its A hold given back, charged on C', mv.L.auth.join('|') === 'a@A,b@A|a@A|b@C' && mv.L.release.includes('h2') && mv.L.charge.join() === 'a@A:h3,b@C:h4' && mv.L.sent.join() === 'a,b', JSON.stringify(mv.L));
   const rf = await run(real, { moveTo: 'C', refuseMoved: true });
   ok('17b. …and when C refuses, b is skipped («the account it moved to refused the spend»), nothing sent or charged for it', rf.L.sent.join() === 'a' && rf.rec.skipped.some((x) => x.id === 'b' && x.why === 'moved-refused') && !rf.L.charge.some((x) => x.startsWith('b@')), JSON.stringify(rf));
-  const m2 = mutantAr([['        if (ident2 && ident2.key && !(h && h.identity && h.identity.key === ident2.key)) {', '        if (false) {']]);
+  const m2 = mutantAr([['        const bill = ident2 || (h && h.identity) || null;', '        const bill = (h && h.identity) || ident2 || null;   // PRE-CURE: the slot the press authorized']]);
   const c2 = m2.mod ? await run(m2.mod, { moveTo: 'C' }) : null;
-  ok('17b. CONTROL: without the landing-slot check b is charged on A, the slot it never billed — the move leg goes red', m2.hits === 1 && !!c2 && c2.L.charge.includes('b@A:h2'), m2.err || JSON.stringify(c2 && c2.L));
+  ok('17b. CONTROL: asked on the slot the press named instead of the one that bills, b is charged on A, the slot it never billed — the move leg goes red', m2.hits === 1 && !!c2 && c2.L.charge.some((x) => x.startsWith('b@A:')), m2.err || JSON.stringify(c2 && c2.L));
+  // ── LAW 1 (主开发's U2 verdict): EVERY CONTINUE OF A BATCH IS ASKED LIKE A SINGLE CONTINUE — paid overage turns «in use»
+  // between item one and item two: item two is not continued and not charged, skipped BY NAME with the authorizer's reason
+  const ov = await run(real, { overageAfter: 'a' });
+  const ovSkip = ov.rec.skipped.find((x) => x.id === 'b');
+  ok('17b. LAW 1: overage turns «in use» after the first continue ⇒ the second is NOT continued and NOT charged — skipped by name with the authorizer\'s own reason, its hold back', ov.L.sent.join() === 'a' && !!ovSkip && ovSkip.why === 'refused' && ovSkip.reason === 'overage-in-use' && !ov.L.charge.some((x) => x.startsWith('b@')) && ov.L.release.includes('h2'), JSON.stringify(ov));
+  const m3 = mutantAr([['        try { v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }]) : null; }', "        try { v2 = !moved ? { ok: true, holds: [{ sessionId: e.id, identity: bill, hold: 'kept' }] } : authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }]) : null; } /* PRE-CURE: an unmoved slot is never asked again */"]]);
+  const c3 = m3.mod ? await run(m3.mod, { overageAfter: 'a' }) : null;
+  ok('17b. LAW 1 RED: the loop that asks again only when the gate MOVED the conversation continues b onto paid overage and charges it', m3.hits === 1 && !!c3 && c3.L.sent.join() === 'a,b' && c3.L.charge.some((x) => x.startsWith('b@A')), m3.err || JSON.stringify(c3 && c3.L));
+  // ── LAW 3: A RUNNING BATCH CAN BE STOPPED — before every conversation and after every gate; «off for every session» stops it too
+  const st = await run(real, { stopAfter: 'a' });
+  ok('17b. LAW 3: Stop after the first ⇒ the rest is neither continued nor charged, its hold goes back, the record counts it «stopped»', st.rec.done && st.L.sent.join() === 'a' && (st.rec.stopped || []).map((x) => x.id).join() === 'b' && !st.L.charge.some((x) => x.startsWith('b@')) && st.L.release.includes('h2') && !!st.rec.stopAsked, JSON.stringify(st));
+  const m4 = mutantAr([['        if (rec.stopAsked) { stopRest(i); break; }   // looked at before EVERY conversation\n', ''], ['        if (rec.stopAsked) { stopRest(i); break; }   // …and after EVERY gate (a stop during the gate\'s wait ends the wait)\n', '']]);
+  const c4 = m4.mod ? await run(m4.mod, { stopAfter: 'a' }) : null;
+  ok('17b. LAW 3 RED: without the two looks at the stop the batch continues b anyway', m4.hits === 2 && !!c4 && c4.L.sent.join() === 'a,b', m4.err || JSON.stringify(c4 && c4.L));
+  const offB = await run(real, { offAfter: 'a' });
+  ok('17b. LAW 3: «turn auto-continue off for every session» pressed while the batch runs STOPS it — b is not continued', offB.L.sent.join() === 'a' && (offB.rec.stopped || []).some((x) => x.id === 'b') && /auto-continue turned off/.test((offB.rec.stopAsked || {}).by || ''), JSON.stringify(offB));
+  const hang = await run(real, { hangGate: true });
+  // the cure's own read: the gate the Stop abandoned STILL RUNS — its pool switch fires the single continue on an ARMED session;
+  // the in-flight flag stays up until that gate settles, so the stopped conversation is not continued behind the batch's back
+  const ab = await run(real, { hangGate: true, armB: true, fireBAfter: true });
+  const mG = mutantAr([["          if (gateP && (gate === 'stopped' || gate === 'no-answer')) { let t2 = null; const free = () => { clearTimeout(t2); session._arFiring = false; }; t2 = setTimeout(free, BULK_GATE_HOLD_MS); if (t2.unref) t2.unref(); gateP.then(free, free); }\n          else session._arFiring = false;", '          session._arFiring = false;   // PRE-AMEND: cleared while the abandoned gate still runs']]);
+  const cG = mG.mod ? await run(mG.mod, { hangGate: true, armB: true, fireBAfter: true }) : null;
+  ok('17b. a conversation the Stop left in its gate is NOT continued by that gate\'s pool switch (the in-flight flag held until the gate settles); RED: the flag cleared at once lets the single continue through', ab.L.sent.join() === 'a' && (ab.rec.stopped || []).some((x) => x.id === 'b') && mG.hits === 1 && !!cG && cG.L.sent.join() === 'a,b', mG.err || JSON.stringify({ ab: ab.L.sent, cG: cG && cG.L.sent }));
+  const mA = mutantAr([["        if (rec.stopAsked) { stopRest(i); break; }   // …and after EVERY gate (a stop during the gate's wait ends the wait)\n", '']]);
+  const cA = mA.mod ? await run(mA.mod, { hangGate: true }) : null;
+  ok('17b. LAW 3 RED for the look AFTER the gate alone: without it, the conversation whose gate a Stop interrupted is continued anyway', mA.hits === 1 && !!cA && cA.L.sent.join() === 'a,b', mA.err || JSON.stringify(cA && cA.L));
+  const bad = await run(real, { badReask: true });
+  ok('17b. a re-ask that answers with the wrong number of holds is a refusal — nothing continued, and EVERY hold it handed out goes back', bad.L.sent.length === 0 && ['h3', 'h4', 'h5', 'h6'].every((x) => bad.L.release.includes(x)) && bad.rec.skipped.filter((x) => x.why === 'refused').length === 2, JSON.stringify(bad.L));
+  ok('17b. LAW 3: a Stop while the batch WAITS ON A GATE ends that wait — the batch is DONE (its gate\'s wait is an hour here), b stopped, never continued', !!hang.rec.done && hang.L.sent.join() === 'a' && (hang.rec.stopped || []).some((x) => x.id === 'b'), JSON.stringify({ rec: hang.rec }));
 })();
 
 // ── 15. THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

@@ -120,7 +120,8 @@ const money = (x) => (x >= 100 ? x.toFixed(0) : x >= 10 ? x.toFixed(1) : x.toFix
 const tok = (x) => (x >= 1e6 ? (x / 1e6).toFixed(2) + ' M' : x >= 1e3 ? Math.round(x / 1e3) + ' k' : String(Math.round(x)));
 const pctText = (x) => (x >= 10 ? Math.round(x) : Math.round(x * 10) / 10);
 
-/** {dollars, allowance, members:[{line, basis}], passive, allButton, kButton|null, unknown|null} */
+/** {dollars, allowance, members:[{line, basis}], passive, allButton, kButton|null, unknown|null, unpriced|null} — an item
+ *  with no price row is SAID («n not priced»; the dollars are the priced ones'), never added as if it cost nothing (U2 cure) */
 function costWords(est, tIn) {
   const t = tOf(tIn);
   if (!est || !est.n) return null;
@@ -145,12 +146,14 @@ function costWords(est, tIn) {
       basis: t('measured in this window: 1 % ≈ {tokens} tokens', { tokens: tok(m.basis.tokensPerPct) }),
     }
     : { line: t('{member}: cannot estimate — this window has no measured ratio yet', { member: who(m) }), basis: null });
-  const passive = est.topAddPct !== null
+  const notPriced = est.unpriced ? ' · ' + t('{n} not priced', { n: est.unpriced }) : '';
+  const passive = (est.topAddPct !== null
     ? t('If you resumed them all now: ≈ ${usd} · ≈ {pct} % of the 5 h window', { usd: money(est.usd), pct: pctText(est.topAddPct) })
-    : t('If you resumed them all now: ≈ ${usd} · the 5 h share cannot be estimated yet', { usd: money(est.usd) });
+    : t('If you resumed them all now: ≈ ${usd} · the 5 h share cannot be estimated yet', { usd: money(est.usd) })) + notPriced;
   const kButton = est.k > 0 && est.k < est.n ? t('Resume only the first {k} (earliest stopped first)', { k: est.k }) : null;
   const unknown = est.unknownContext ? t('{n} sessions have no known context size — not counted', { n: est.unknownContext }) : null;
-  return { dollars, allowance, members, passive, allButton: t('Resume all ({n})', { n: est.n }), kButton, unknown };
+  const unpriced = est.unpriced ? t('{n} sessions have no price for their model — not counted', { n: est.unpriced }) : null;
+  return { dollars, allowance, members, passive, allButton: t('Resume all ({n})', { n: est.n }), kButton, unknown, unpriced };
 }
 
 const WORD_KEYS = Object.freeze([
@@ -161,6 +164,7 @@ const WORD_KEYS = Object.freeze([
   'If you resumed them all now: ≈ ${usd} · ≈ {pct} % of the 5 h window', 'If you resumed them all now: ≈ ${usd} · the 5 h share cannot be estimated yet',
   'Resume only the first {k} (earliest stopped first)', '{n} sessions have no known context size — not counted', 'Resume all ({n})',
   'This machine’s own login', 'an unknown model (the default price)',
+  '{n} sessions have no price for their model — not counted', '{n} not priced',
 ]);
 
 module.exports = { OUTPUT_ALLOWANCE, MIN_PCT, FIVE_HOUR_MS, WORD_KEYS, windowRatio, contextOf, estimateBatch, costWords };
