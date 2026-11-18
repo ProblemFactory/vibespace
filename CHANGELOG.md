@@ -50,7 +50,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Settings no longer shows an agent's section when your login shell finds no program for it, which starting a conversation with that agent already says.
 - A command's «Technical details» or «Show output» on a Machines card now stays open while the chat redraws; it closed by itself before.
 - A command's short output on a Machines card is shown without its leading spaces (e.g. «42», not «      42»); Copy still copies it exactly.
-- A coordinator no longer renames or ends conversations its key is also granted to at «Only the conversations it opens»; widen the reach in the Vault if wanted.
+- An automation key at «Only the conversations it opens» now acts only on what it opened and on itself, not on conversations another grant of the key names.
 - A conversation that names no key now uses the key granted to it directly before a Task Group's or All agents' key.
 - Later changes to the Cache warmth colours now reach the custom themes you save, unless you changed those colours yourself.
 - After your home folder is renamed, a second VibeSpace install on the same home now updates its own saved folder paths too.
@@ -92,6 +92,15 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A Gmail account keeps working when the OAuth client it signed in with is replaced under the same name; a refusal for the wrong client now says so.
 - An agent's channel watch keeps a number such as 4,995 as one keyword, and says when a keyword is so short it matches almost every message.
 - A Lark picture in a reply is also looked for in the message it answers; one that still cannot be opened says why, and a recalled one says so.
+- A page left open across an update now reloads into the new version by itself, even when the server takes long to start; it waits while you type.
+- An Antigravity conversation now resumes on the account that holds it, and a resume asked on another account names that account.
+- The browser list no longer checks every browser's command-line tool on each update; the CLI row says «checking…» until it has looked.
+- A coordinator no longer renames or ends conversations its key is also granted to at «Only the conversations it opens»; widen the reach in the Vault if wanted.
+- The Diagnostics badge no longer counts the browser's harmless «ResizeObserver loop» notice as an error.
+- After the browser suspends the page, «caught up now» appears only when something actually arrived while it slept.
+- An Antigravity helper agent's card now shows its result even when the result is written a moment after the helper finishes.
+- In For you, a link that an agent ended with «…» at the end of a line is a link again, not plain words.
+- Diagnostics no longer says Claude Code 2.1.322 is newer than VibeSpace's record table: the table now includes that version.
 
 ### Security
 - A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.
