@@ -7,12 +7,15 @@
 // own, unique — GET /api/vault/totp answers names). This file decides what that list shows and what a key does; the DOM is
 // the field's (src/lib/vault-otp-field.js).
 //   · entriesOf(answer)         — the names the list can show (a malformed or repeated one dropped)
-//   · listState(facts)          — what the list is: 'loading' | 'failed' | 'empty' | 'rows'
+//   · listState(facts)          — what the list is: 'loading' | 'locked' (said with its Unlock… door) | 'failed' | 'empty' | 'rows'
 //   · rowsOf(names, query)      — the rows, in order: the typed text's matches first (the exact name, then a name it begins,
 //                                 then a name holding it — case-blind), the rest after: typing NEVER empties the list (a name
 //                                 typed by hand that matches nothing is said at the field)
 //   · typedVerdict(facts, text) — the typed name: 'none' (nothing typed) | 'listed' | 'unlisted' (said at the field at once)
-//                                 | 'unknown' (the list is not read: nothing is said — the add door's own check stands)
+//                                 | 'unknown' (the list is not read, failed, or the vault is locked: nothing is said — the add
+//                                 door's own check stands)
+//   · typedSettled(names, text) — the typed text IS a listed name and begins no other: the choice is made, the list closes (so
+//                                 the usual road — a known name typed, then Save — never has the list open over Save)
 //   · keyStep(state, key, n)    — the list's keys: ArrowDown opens / moves, ArrowUp moves, Enter picks the highlighted row,
 //                                 Escape closes an open list and is TAKEN (never the form's), Tab leaves
 
@@ -27,9 +30,13 @@ export function entriesOf(answer) {
   return out;
 }
 
-/** What the list is now. facts = { loaded, failed, names }. */
-export function listState({ loaded = false, failed = false, names = [] } = {}) {
+/** What the list is now. facts = { loaded, failed, locked (the route refused: vault_locked), state (the vault's), names }.
+ *  A LOCKED vault is never «empty» and never «could not be read»: it is locked, and the list says so with its door. */
+export function listState({ loaded = false, failed = false, locked = false, state = null, names = [] } = {}) {
   if (!loaded) return 'loading';
+  // LOCKED only when the vault SAYS locked and lists nothing (its names are readable while locked once it has loaded them) — a
+  // vault never set up is no «locked» one: it lists nothing, and the empty list's door is the one that helps (cure round 2)
+  if (locked || (state === 'locked' && !names.length)) return 'locked';
   if (failed) return 'failed';
   return names.length ? 'rows' : 'empty';
 }
@@ -47,11 +54,13 @@ export function rowsOf(names, query = '') {
 }
 
 /** The typed name against the list: the add door's own rule (src/server/vault-paste-door.js: the trimmed name, exactly). */
-export function typedVerdict({ loaded = false, failed = false, names = [] } = {}, text = '') {
+export function typedVerdict(facts = {}, text = '') {
   const v = String(text == null ? '' : text).trim();
   if (!v) return 'none';
-  if (!loaded || failed) return 'unknown';
-  return names.includes(v) ? 'listed' : 'unlisted';
+  if (facts.reading) return 'unknown';   // a read in flight (the list re-reads at every opening): no word until it lands
+  const st = listState(facts);
+  if (st !== 'rows' && st !== 'empty') return 'unknown';   // not read yet, failed, or locked: the list cannot say «no such name»
+  return (facts.names || []).includes(v) ? 'listed' : 'unlisted';
 }
 
 /** One key in the field. state = { open, active (row index or -1) }, n = the rows shown. → { open, active, pick (index |
@@ -76,4 +85,11 @@ export function keyStep({ open = false, active = -1 } = {}, key, n = 0) {
   }
   if (key === 'Tab') return { open: false, active: -1, pick: null, taken: false };
   return { open, active, pick: null, taken: false };
+}
+
+/** The typed text is a listed name, exactly, and the start of no other listed name: nothing is left to choose. */
+export function typedSettled(names, text = '') {
+  const v = String(text == null ? '' : text).trim();
+  if (!v || !(names || []).includes(v)) return false;
+  return !(names || []).some((n) => n !== v && n.startsWith(v));
 }

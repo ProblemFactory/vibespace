@@ -1071,7 +1071,7 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
       querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
     }
     D.root = new El('html'); D.body = new El('body'); D.root.append(D.body);
-    D.document = { createElement: (t) => new El(t), createTextNode: (s) => new Txt(s), body: D.body, documentElement: D.root, querySelector: (s) => D.root.querySelector(s), querySelectorAll: (s) => D.root.querySelectorAll(s), addEventListener() {}, removeEventListener() {}, get activeElement() { return D.focused; } };
+    D.document = { createElement: (t) => new El(t), createElementNS: (ns, t) => new El(t), createTextNode: (s) => new Txt(s), body: D.body, documentElement: D.root, querySelector: (s) => D.root.querySelector(s), querySelectorAll: (s) => D.root.querySelectorAll(s), addEventListener() {}, removeEventListener() {}, get activeElement() { return D.focused; } };
     D.el = (tag, cls, text) => { const e = new El(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
     return D;
   };

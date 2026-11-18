@@ -12886,6 +12886,7 @@ export default {
   "Reading the two-step codes in this vault…": "正在读取保险库里的两步验证码…",
   "The two-step codes in this vault could not be read": "无法读取保险库里的两步验证码",
   "No two-step code in this vault yet": "保险库里还没有两步验证码",
+  "The vault is locked, so its two-step codes cannot be read": "保险库已锁定，暂时读不到它的两步验证码",
   "A password holds no line break — type or paste it again": "密码里不能有换行 — 请重新输入或粘贴",
   "The conversation that asked": "提出请求的对话",
   "Saved as «{user}» — the vault keeps user names in lower case": "将保存为「{user}」— 保险库里的用户名一律小写",

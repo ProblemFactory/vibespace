@@ -9528,12 +9528,13 @@ button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
 .vault-pw { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
 .vault-pw:focus { outline: none; border-color: var(--border-active); }
 /* lane vault-2fa-pick: the two-step field's OWN list (src/lib/vault-otp-field.js) — the field's mark at its right end, the list
-   in the flow under the field (headed; a row per code by its name), the note of a name that lists nothing */
+   UNDER the field taking NO room in the flow (cure: a list in the flow moved Save under a press), headed, a row per code by its
+   name; the note of a name that lists nothing (in the flow, under the field) */
 .vault-otp-wrap { position: relative; display: flex; align-items: center; min-width: 0; }
 .vault-otp-wrap > .vault-pw.vault-login-otp { flex: 1 1 auto; width: auto; min-width: 0; padding-right: 30px; }   /* fills its row everywhere (the card's own .vault-pw is width: auto) — the mark sits INSIDE the field */
 .vault-otp-open { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; padding: 0; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--text-dim); font: inherit; font-size: 13px; line-height: 1; cursor: pointer; }
 .vault-otp-open:hover, .vault-otp-wrap > .vault-pw[aria-expanded="true"] + .vault-otp-open { color: var(--text); background: var(--bg-hover); }
-.vault-otp-list { margin-top: 3px; border: 1px solid var(--border-active); border-radius: var(--radius-sm); background: var(--bg-input); padding: 4px; max-height: 220px; overflow: auto; }
+.vault-otp-list { position: absolute; left: 0; right: 0; top: calc(100% + 3px); z-index: 30; box-sizing: border-box; border: 1px solid var(--border-active); border-radius: var(--radius-sm); background: var(--bg-input); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); padding: 4px; max-height: 220px; overflow: auto; font-weight: normal; }
 .vault-otp-list[hidden], .vault-otp-note[hidden], .vault-otp-state[hidden] { display: none; }
 .vault-otp-head { padding: 2px 6px 4px; color: var(--text-dim); font-size: 11px; }
 .vault-otp-rows { display: flex; flex-direction: column; }
@@ -9541,7 +9542,7 @@ button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
 .vault-otp-row:hover, .vault-otp-row.active { background: var(--bg-hover); }
 .vault-otp-name { overflow-wrap: anywhere; }
 .vault-otp-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 6px; color: var(--text-secondary); font-size: 12px; }
-.vault-otp-add { height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
+.vault-otp-add, .vault-otp-unlock { height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
 .vault-otp-note { margin-top: 3px; color: var(--bad-text); font-size: 12px; line-height: 1.4; }
 .vault-err { min-height: 1.3em; color: var(--bad-text); font-size: 12px; }
 /* lane vault-slow-load: a vault wait is SAID — a spinner and the step's name, from the press to the answer */
@@ -9961,7 +9962,7 @@ button.vw-chip { cursor: pointer; }
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login :is(.vault-secret-field, .vault-secret-label, .vw-ak-hint, .ut-secret-note, .ut-secret-state, .ut-secret-words, .ut-login-allow, .ut-login-allow > span) { font-size: 16px; }
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login .vault-pw { min-height: 44px; font-size: 16px; }
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-login :is(.ut-act, .ut-secret-totp, .ut-secret-state button) { min-height: 44px; font-size: 16px; }
-  .vault-otp-row, .vault-otp-add { min-height: 44px; font-size: 16px; }   /* lane vault-2fa-pick: the list's rows are phone targets */
+  .vault-otp-row, .vault-otp-add, .vault-otp-unlock { min-height: 44px; font-size: 16px; }   /* lane vault-2fa-pick: the list's rows are phone targets */
   .vault-otp-open { width: 44px; height: 44px; right: 0; font-size: 16px; }
   .vault-otp-wrap > .vault-pw.vault-login-otp { padding-right: 48px; }
   :is(.vault-otp-head, .vault-otp-state, .vault-otp-note) { font-size: 16px; }

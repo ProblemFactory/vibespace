@@ -284,10 +284,10 @@ export function stillPresser({ evalJs, cdp, log = (line) => console.log(line), s
       const on = (type, key) => { const f = (ev) => { if (!S[key]) S[key] = rec[key](ev); document.removeEventListener(type, f, true); }; document.addEventListener(type, f, true); };
       on('pointerdown', 'down'); on('pointerup', 'up'); on('click', 'click'); return true; })()`;
   };
-  /** press(sel, {touch, timeoutMs, click, gate, aim}) → true | false (press.last says what it saw); `gate: false` = the
+  /** press(sel, {touch, timeoutMs, click, gate, aim, hold}) → true | false (`hold` = ms between the mouse's down and its up) (press.last says what it saw); `gate: false` = the
    *  mutant road (no still gate — a RED control's): it presses the first look that is under its point; `aim(look)` = a test
    *  hook between the look and the press that may hand back another point (a RED control's stale aim: where it WAS). */
-  const press = async (sel, { touch = false, timeoutMs = 5000, click = true, gate = true, aim = null } = {}) => {
+  const press = async (sel, { touch = false, timeoutMs = 5000, click = true, gate = true, aim = null, hold = 0 } = {}) => {
     const t0 = Date.now();
     let prev = null, now = null, verdict = 'gone', looks = 0;
     while (Date.now() - t0 < timeoutMs) {
@@ -305,7 +305,7 @@ export function stillPresser({ evalJs, cdp, log = (line) => console.log(line), s
     await evalJs(ARM(sel));
     const { x, y } = aim ? ((await aim(now)) || now) : now;
     if (touch) { await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }); await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); }
-    else { await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }); await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 }); await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 }); }
+    else { await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }); await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 }); if (hold > 0) await sleep(hold); await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 }); }   // hold (lane vault-2fa-pick): a person's press lasts tens of ms — what moves between the down and the up is judged by the release
     let seen = null;
     for (let i = 0; i < 40; i++) { seen = await evalJs('window.__vsStillSeen || null'); if (seen && seen.down && (seen.click || !click)) break; await sleep(25); }
     const landed = landingVerdict(seen, { click });

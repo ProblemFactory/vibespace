@@ -12885,6 +12885,7 @@ export default {
   "Reading the two-step codes in this vault…": "保管庫の 2 段階認証コードを読み込み中…",
   "The two-step codes in this vault could not be read": "保管庫の 2 段階認証コードを読み込めませんでした",
   "No two-step code in this vault yet": "保管庫にはまだ 2 段階認証コードがありません",
+  "The vault is locked, so its two-step codes cannot be read": "保管庫がロックされているため、2 段階認証コードを読めません",
   "A password holds no line break — type or paste it again": "パスワードに改行は含められません — もう一度入力するか貼り付けてください",
   "The conversation that asked": "依頼した会話",
   "Saved as «{user}» — the vault keeps user names in lower case": "「{user}」として保存されます — 保管庫はユーザー名を小文字で保存します",

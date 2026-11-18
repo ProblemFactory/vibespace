@@ -127,12 +127,16 @@ export function loginFields({ site = '', fixed = false, addCode = null } = {}) {
   const otp = input('vault-login-otp', 'text', t('Optional — the name of its two-step code in this vault'));
   // lane vault-totp-add: the field offers the two-step codes the vault holds (names only — GET /api/vault/totp). lane
   // vault-2fa-pick (the owner: «只弹出了我截图里那个浏览器的推荐输入，没有vibespace自己的下拉框»): through THE PAGE's own list —
-  // headed, a row per code with its issuer / account — never the browser's native list, which every platform draws as its own
+  // headed, a row per code BY NAME (the vault's own names — no record is unsealed to decorate a row: the owner's word,
+  // 2026-11-17 20:36Z) — never the browser's native list, which every platform draws as its own
   // suggestion (src/lib/vault-otp-field.js)
   const otpPick = otpField(otp, { addCode });
   const hint = el('div', 'vw-ak-hint', t('Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.'));
   const values = () => ({ origin: s.value.trim(), username: user.value.trim(), loginPassword: pw.value, ...(otp.value.trim() ? { totpName: otp.value.trim() } : {}) });
-  return { site: s, user, pw, otp, otpPick, otpList: otpPick.el, hint, field, values, fields: [field(t('Site'), s), field(t('User name'), user), field(t('Password'), pw), field(t('Two-step code'), otpPick.wrap)] };
+  const otpRow = field(t('Two-step code'), otpPick.wrap);   // (not «otpField»: that is the imported field maker above — a local of that name put the maker's call in its dead zone)
+  const otpWords = otpRow.querySelector('.vault-secret-label');   // the open list sits inside this <label>: the field is named by the label's words alone
+  if (otpWords) { otpWords.id = `${otp.getAttribute('aria-controls')}-label`; otp.setAttribute('aria-labelledby', otpWords.id); }
+  return { site: s, user, pw, otp, otpPick, otpList: otpPick.el, hint, field, values, fields: [field(t('Site'), s), field(t('User name'), user), field(t('Password'), pw), otpRow] };
 }
 /** The add door's refusals in words — the dialog's and the card's (one map; the card's own codes too). */
 export function loginRefusalWords(code, r) {
@@ -151,7 +155,7 @@ export function showLoginAddDialog({ refresh = () => {} } = {}) {
     unsaved: { isDirty: () => !!(f && (f.site.value || f.user.value || f.pw.value)), save: () => saveNow(), discard: () => { if (f) f.pw.value = ''; } }, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   // lane vault-2fa-pick: an empty vault's list offers THE 两步验证… dialog; the name it saves fills the field (the list re-read)
-  f = loginFields({ addCode: () => showTotpAddDialog({ refresh: (r) => { if (r && typeof r.name === 'string' && r.name) f.otpPick.added(r.name); } }) });
+  f = loginFields({ addCode: () => showTotpAddDialog({ refresh: (r) => { if (r && typeof r.name === 'string' && r.name) { f.otpPick.added(r.name); try { refresh(); } catch { } } } }) });   // …and the Vault window lists the new code at once
   const err = el('div', 'vault-secret-error'); err.setAttribute('role', 'status');
   const foot = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));

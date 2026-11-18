@@ -332,6 +332,43 @@ const otpF5 = await until(`(() => { const n = document.querySelector('.vault-log
 check('a typed name that lists nothing is said UNDER THE FIELD at once (before any Save)', /No two-step code of that name is in this vault/.test(String(otpF5 || '')), otpF5);
 await otpKey('Escape', 'Escape', 27);
 await click('.vault-login-add-dialog .btn-cancel');
+// THE CURE's PROOF (主开发 2026-11-18 00:02Z, MUST 1 + the cure round's own read): the open list takes NO room in the flow and a
+// press that moves the focus closes it only after its click has landed — so a press on Save with the list OPEN lands. (a) a
+// PREFIX typed (the list open): the line after the field stands where it stood with the list closed; (b) ONE held press on Save
+// through THE still door lands — the add door ran: it refuses the unfinished name in the dialog's own line, by name; (c) the full
+// listed name typed SETTLES the choice (the list closes) and Save saves the login. RED: the list drawn back IN THE FLOW (a style
+// this control injects) moves that line down when it opens.
+const listFlow = async (tag, { inFlow = false, name = 'github-own', expectSave = false } = {}) => {
+  if (!(await openAdd('Website login…'))) await until(visible('.vault-login-add-dialog'), { timeout: 5000 });
+  if (inFlow) await evalJs(`(() => { const st = document.createElement('style'); st.id = 'vs-otp-in-flow'; st.textContent = '.vault-otp-list { position: static !important; }'; document.head.append(st); return true; })()`);
+  await typeInto('.vault-login-add-dialog .vault-login-site', `https://${tag}.example.test`);
+  await typeInto('.vault-login-add-dialog .vault-login-user', `${tag}-person@example.test`);
+  await typeInto('.vault-login-add-dialog .vault-login-pass', ['pw', tag, Date.now()].join('-'));
+  const hintTop = () => evalJs(`(() => { const h = document.querySelector('.vault-login-add-dialog .vw-ak-hint'); return h ? Math.round(h.getBoundingClientRect().top) : null; })()`);
+  await evalJs(`(() => { const i = document.querySelector(${JSON.stringify(OTP)}); i.blur(); return true; })()`);
+  await until(`!document.querySelector(${JSON.stringify(OTPL)})`, { timeout: 2000 });
+  const closedTop = await hintTop();
+  await evalJs(`(() => { const i = document.querySelector(${JSON.stringify(OTP)}); i.focus(); i.value = ''; return true; })()`);
+  await cdp('Input.insertText', { text: name });
+  await new Promise((r) => setTimeout(r, 400));
+  const listOpen = await evalJs(`(() => { const l = document.querySelector(${JSON.stringify(OTPL)}); return !!l && l.querySelectorAll('.vault-otp-row').length > 0; })()`);
+  const openTop = await hintTop();
+  const pressed = await otpPress('.vault-login-add-dialog .btn-create', { hold: 120 });
+  const saved = expectSave ? !!(await until(`fetch('/api/vault/web-logins').then((r) => r.json()).then((j) => JSON.stringify(j.entries || []).includes(${JSON.stringify(tag + '.example.test')}))`, { timeout: 8000 })) : false;
+  const refused = expectSave ? '' : String(await until(`(() => { const e = document.querySelector('.vault-login-add-dialog .vault-secret-error'); return e && e.textContent ? e.textContent : null; })()`, { timeout: 5000 }) || '');
+  const out = { listOpen, closedTop, openTop, pressed, saved, refused, landed: otpPress.last && otpPress.last.landed, dialog: await evalJs(`!!document.querySelector('.vault-login-add-dialog')`) };
+  if (inFlow) await evalJs(`(() => { document.getElementById('vs-otp-in-flow')?.remove(); return true; })()`);
+  if (out.dialog) await click('.vault-login-add-dialog .btn-cancel');
+  await until(`!document.querySelector('.vault-login-add-dialog')`, { timeout: 3000 });
+  return out;
+};
+const cureOpen = await listFlow('otp-list-open');
+check('THE CURE (a): a prefix typed opens the list, and the line after the field stands where it stood with the list closed (the open list takes NO room in the flow)', cureOpen.listOpen && cureOpen.closedTop !== null && cureOpen.openTop === cureOpen.closedTop, cureOpen);
+check('THE CURE (b): with the list OPEN, ONE held press on Save lands — the add door ran and refused the unfinished name by name in the dialog\'s own line', cureOpen.pressed && /No two-step code of that name/.test(cureOpen.refused) && cureOpen.dialog, cureOpen);
+const cureSave = await listFlow('otp-list-settled', { name: 'github-owner', expectSave: true });
+check('THE CURE (c): the full listed name typed SETTLES the choice (the list closes) and Save saves the login', !cureSave.listOpen && cureSave.pressed && cureSave.saved && !cureSave.dialog, cureSave);
+const redFlow = await listFlow('otp-list-flow', { inFlow: true });
+check('RED: the list drawn back IN THE FLOW takes room — the line after the field moves down when it opens', redFlow.listOpen && redFlow.openTop > redFlow.closedTop, redFlow);
 
 console.log('⑥b a phone (375 × 812): the dialog fits the screen, its press targets ≥ 36 px');
 await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 2, mobile: true });
