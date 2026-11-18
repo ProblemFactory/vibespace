@@ -68,15 +68,18 @@ const windowWords = (s) => `${t('any destination')} · ${s.expired ? t('expired'
  *  had not swept it yet — a restart or a lock inside the hour drops the hour-end prune) is `pruned`: sent with no scope, the
  *  hub prunes it (one it still holds LIVE it keeps) — never a refusal; `refused` = nothing to send and no window (the dialog
  *  names that member).
+ *  B-f212 (r11's second follow-up): `endFrom` = the instant a chosen end counts from — the dialog pins it at its OPEN, so a
+ *  repeated Save (the row landed, the policy did not) posts the SAME ends, never the row again with later ones; `now` still
+ *  judges what has ended.
  *  → { scopes, fresh: [index of each new scope], kept: [{kind: 'window', until}], pruned, refused } */
 const KEEP_DEFAULT = '30d';
-export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep', now = Date.now() } = {}) {
+export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep', now = Date.now(), endFrom = now } = {}) {
   const wasSc = was ? scopesOfM(was) : [];
   const ended = (s) => !!s.expired || (Number(s.until) > 0 && Number(s.until) <= now);
   const live = wasSc.filter((s) => !ended(s) && s.kind !== 'window'), finite = live.map((s) => Number(s.until)).filter((u) => u > 0);   // r7: a 1-hour window is no «now» a new host keeps
-  const keepNew = !live.length ? now + (ENDS.find(([id]) => id === KEEP_DEFAULT) || [])[1] : finite.length ? Math.min(...finite) : null;
+  const keepNew = !live.length ? endFrom + (ENDS.find(([id]) => id === KEEP_DEFAULT) || [])[1] : finite.length ? Math.min(...finite) : null;
   const endMs = (ENDS.find(([id]) => id === endId) || [])[1];
-  const endFor = (s0) => (endId === 'keep' ? (s0 ? (Number(s0.until) > 0 ? Number(s0.until) : null) : keepNew) : endMs ? now + endMs : null);
+  const endFor = (s0) => (endId === 'keep' ? (s0 ? (Number(s0.until) > 0 ? Number(s0.until) : null) : keepNew) : endMs ? endFrom + endMs : null);
   const cmdKey = (c) => JSON.stringify([c.program, preOf(c), c.arg == null ? null : c.arg, c.sha || null, c.psha || null]);
   const scopes = [], fresh = [];
   for (const host of hosts) {
@@ -251,6 +254,10 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // the row as a Save LANDED it (`landedRow`: the hub's answer names it — null for an older hub's answer: every next Save then
   // posts the row whole); `held` = its 除了 as picker keys (r10)
   let snap = { to: members, except: u.except || [] }, held = stored.except;
+  // B-f212: the instant a chosen end counts from — the press's own now, then the FIRST Save that landed (a repeated Save posts the
+  // same ends, never later ones; the read: pinned at the open, a dialog left open an hour posted «8 hours» as seven, a day as one past)
+  let endPin = null, saveAt = null;
+  const endsFrom = () => (saveAt != null ? saveAt : endPin != null ? endPin : Date.now());
   let picker = null;
   // the unsaved guard (test-dialog-unsaved-census): who, the hosts and the end as the dialog opened — a close with a change asks
   let start = null, saveNow = () => false;
@@ -331,7 +338,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       const was = had.get(pkOf(p));
       const h = hosts.length ? hosts : was ? (was.hosts || []) : [];
       const cmds = was && Array.isArray(was.commands) ? was.commands : [];   // lane vault-standing-request: a member's command shapes ride the Save unchanged
-      const plan = saveScopesOf({ was, hosts: h, cmds, endId: endSel.value });   // r8: no window in it — the hub keeps the live one (`kept`)
+      const plan = saveScopesOf({ was, hosts: h, cmds, endId: endSel.value, endFrom: endsFrom() });   // r8: no window in it — the hub keeps the live one (`kept`); B-f212: the ends from the press (then the first landed Save)
       // r9 (主开发's acceptance of r8, MINOR C): a member whose only scope is an ENDED 1-hour window the hub has not swept yet is
       // sent with none (`plan.pruned` — the hub prunes it); never a refusal for a scope the hub failed to sweep. A refusal that
       // remains names the member.
@@ -369,10 +376,14 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     const lu = r && r.use && Array.isArray(r.use.to) ? r.use : null;
     snap = lu ? { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] } : null;
     held = rowToPick({ to: [], except: snap ? snap.except : sent }, picker.knownRows(), pickWords()).except;
+    // B-f212 (r11's first follow-up): a member the hub SWEPT at this Save (an ended 1-hour window it pruned) leaves the picker
+    // too — kept there, the next Save posted it as a member new to the row and asked for its hosts
+    if (lu) picker.setSelected(rowToPick({ to: snap.to, except: [] }, picker.knownRows(), pickWords()).selected);
     start = stateOf(polWas);
   };
   async function doSave() {
     err.textContent = '';
+    saveAt = endPin != null ? endPin : Date.now();   // B-f212: this press's instant — every end of its plan counts from it
     const plan = planOf();
     if (plan.error) { err.textContent = plan.error; return false; }
     const { to, pick, removed, changed } = plan;
@@ -384,7 +395,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     if (changed) {
       r = await send();
       if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
-      if (r && r.ok) { rowSaved = true; landedRow(r, pick.except, polWas); }
+      if (r && r.ok) { rowSaved = true; landedRow(r, pick.except, polWas); if (endPin == null) endPin = saveAt; previewNow(); }   // B-f212: the landed row's instant pins the next Save's ends; the preview redrawn over the picker as landed (the read's nit: setSelected fires no onChange)
     }
     if (r && r.ok && polNow !== polWas) {   // R4: the policy rides the same Save (a non-empty one asks 验证是你 too)
       const sendP = () => post('/api/vault/use-policy', { id: row.id, text: polNow }, revealLeftMs() ? revealHeaders() : {});
