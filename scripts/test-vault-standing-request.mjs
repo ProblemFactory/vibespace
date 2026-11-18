@@ -95,7 +95,7 @@ const VALUE = ['tts', 'api', 'key', crypto.randomBytes(8).toString('hex')].join(
 const CID = 'cid-transcriber-1';
 
 let worldN = 0;
-async function world({ instance = 'cluster', timers, bin = BIN } = {}) {
+async function world({ instance = 'cluster', timers, bin = BIN, entryMax = 0, now = null, doorMod = DOOR } = {}) {   // B-be21: a small run-list bound, a stand-in clock, a mutant door
   const dir = path.join(ROOT, 'w' + (++worldN)); const dataDir = path.join(dir, 'data'), work = path.join(dir, 'work'), runRoot = path.join(dir, 'run');
   for (const d of [dataDir, work, runRoot]) fs.mkdirSync(d, { recursive: true });
   fs.writeFileSync(path.join(work, 'transcribe.py'), 'import os, sys\nprint("segment", sys.argv[1:])\n');
@@ -109,7 +109,7 @@ async function world({ instance = 'cluster', timers, bin = BIN } = {}) {
   const useGrants = UG.create({ grants: () => grants, vault, dataDir, log: (m) => logs.push(String(m)) });
   const sources = { secrets: () => VC.secretSource({ vault }) };
   const facts = (caller) => ({ conversationKeys: [caller.conversationId], groupIds: [] });
-  const door = DOOR.create({ dataDir, vault, userTodos, sources, instanceKind: () => instance, runRoot: () => runRoot, home: os.homedir(), agentEnv: () => ({ ...process.env, PATH: bin + ':' + process.env.PATH }), killGraceMs: 400, pipeGraceMs: 300, liveOf: () => true, log: (m) => logs.push(String(m)), useGrants, useFacts: facts, isRootOwned: (p) => p === bin || String(p).startsWith(bin + '/'), ...(timers ? { timers } : {}) });
+  const door = doorMod.create({ dataDir, vault, userTodos, sources, ...(entryMax ? { entryMax } : {}), ...(now ? { now } : {}), instanceKind: () => instance, runRoot: () => runRoot, home: os.homedir(), agentEnv: () => ({ ...process.env, PATH: bin + ':' + process.env.PATH }), killGraceMs: 400, pipeGraceMs: 300, liveOf: () => true, log: (m) => logs.push(String(m)), useGrants, useFacts: facts, isRootOwned: (p) => p === bin || String(p).startsWith(bin + '/'), ...(timers ? { timers } : {}) });
   const caller = (cid = CID, name = 'Transcriber') => ({ conversationId: cid, sessionKey: `claude:${cid}`, name, cwd: work, scope: cid });
   const name = 'secret:' + crypto.randomBytes(5).toString('hex');
   const put = vault.secretPut(name, VALUE, { prov: 'owner', label: 'TTS API key', kind: 'api-key', hosts: [] });
@@ -1018,6 +1018,68 @@ await leg('㉜ a throw mid-press', async () => {
   const vE1 = w.useGrants.verdictFor(w.e.id, { conversationKeys: [CID], groupIds: [] }, { hosts: ['new.example'], destinationKnown: true });
   ok(!!(r && r.a && r.a.ok === false && r.a.code === 'not_written' && row1 === row0 && vE1 && !vE1.ok && w.logs.some((l) => /a press's write for .* threw/.test(l))), '㉜ the second entry\'s write THROWS: the press answers `not_written` (never a throw out of the door), the first entry\'s row is exactly as before (new.example not admitted), and the hub\'s log names it', { a: r && r.a, row0, row1, vE1: vE1 && vE1.code });
 });
+
+console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two eviction minors): THE TOGGLE ORDER ONLY MOVES FORWARD; A PRESS THAT FAILS LEAVES NO FALSE «SWITCHED OFF»');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('vsr-be21', REPO), DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+  const mutant = (from, to, tag) => (DSRC.split(from).length === 2 ? MC.load('src/server/vault-run-door.js', DSRC.replace(from, to), tag) : null);
+  const storeOf = (w) => JSON.parse(fs.readFileSync(path.join(w.dataDir, DOOR.STORE_FILE), 'utf8'));
+  const mk = (w, label) => { const nm = 'secret:' + crypto.randomBytes(5).toString('hex'); const r = w.vault.secretPut(nm, VALUE, { prov: 'owner', label, kind: 'api-key', hosts: [] }); if (!r.ok) throw new Error('secretPut ' + r.code); return `secrets:${nm}#secret`; };
+  // (r12 minor 2) a run list of 3 (the door's entryMax seam): three ON, the clock steps back an hour, a fourth switched ON
+  const clockLeg = async (doorMod) => {
+    let clock = Date.now();
+    const w = await world({ entryMax: 3, now: () => clock, doorMod });
+    const F = [mk(w, 'F0'), mk(w, 'F1'), mk(w, 'F2')];
+    for (const id of F) { clock += 10; w.door.setRunnable({ id, on: true, reauthed: true }); }
+    clock -= 3600e3;   // an NTP correction / a resumed box: the wall clock went BACK
+    const E = mk(w, 'E'); const sr = w.door.setRunnable({ id: E, on: true, reauthed: true });
+    const disk = storeOf(w);
+    return { open: sr.open, kept: disk.runnable.includes(E), evicted: sr.evicted || [], F0gone: !disk.runnable.includes(F[0]), n: disk.runnable.length };
+  };
+  await leg('㉝a the toggle order after a backward clock step', async () => {
+    const c = await clockLeg(DOOR);
+    ok(c.open && c.kept && c.F0gone && c.n === 3, '㉝a a backward clock step: the entry switched on AFTER it stays ON (its toggle is the newest), the OLDEST toggle (F0) is the one the bound turns off', c);
+    const m = mutant('[key]: Math.max(now(), tNewest + 1) };', '[key]: now() };', 'rawclock');
+    const r = m ? await clockLeg(m) : null;
+    ok(!!(m && r && !r.kept && r.evicted.length === 1), '㉝a RED control: the raw wall clock as the stamp (the r12 shape) ⇒ the entry JUST switched on is the one evicted', r);
+  });
+  // (r12 minor 1 — the r12 harness's road, repro/accept-r12/always-restore-notice.mjs) a run list of 3, all ON (F0, F1 and E1 — E1's
+  // member for this conversation covers another host); E2 (this world's entry) closed but OPEN to it by an 8-hour grant (the
+  // request card), its member already at the host bound; a run naming both to a host neither member covers ⇒ the card, answered
+  // «Always»: the press switches E2 ON (the bound turns F0 off), then E2's member write is REFUSED ⇒ the whole press is put back
+  const pressLeg = async (doorMod) => {
+    let clock = Date.now();
+    const w = await world({ entryMax: 3, now: () => clock, doorMod });
+    const F = [mk(w, 'F0'), mk(w, 'F1')];
+    for (const id of F) { clock += 10; w.door.setRunnable({ id, on: true, reauthed: true }); }
+    const nm1 = 'secret:' + crypto.randomBytes(5).toString('hex'); if (!w.vault.secretPut(nm1, VALUE, { prov: 'owner', label: 'E1', kind: 'api-key', hosts: [] }).ok) throw new Error('secretPut E1');
+    const E1 = { id: `secrets:${nm1}#secret`, ref: `vault://secrets/${nm1}/secret` };
+    clock += 10; w.door.setRunnable({ id: E1.id, on: true, reauthed: true });
+    const stamp0 = (storeOf(w).touched || {})[F[0]];
+    w.useGrants.addMember(E1.id, { kind: 'conversation', key: CID, name: 'Transcriber' }, { hosts: ['a.example'] });
+    w.useGrants.addMember(w.e.id, { kind: 'conversation', key: CID, name: 'Transcriber' }, { hosts: Array.from({ length: 16 }, (_, i) => `h${i}.example`) });
+    const q = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'read the TTS status' });
+    const g8 = q && q.askId ? w.door.answerRequest(q.askId, { answer: '8h', reauthed: true }) : null;
+    if (!(g8 && g8.ok)) throw new Error('the 8-hour grant on E2 did not land: ' + JSON.stringify(g8 || q));
+    clock += 10;
+    const ra = await runAnswered(w, ['--env', `T1=${E1.ref}`, '--env', `T2=${w.e.ref}`, '--', 'curl', 'https://b.example/x'], { answer: 'always', reauthed: true, ttl: '30d' });
+    const disk = storeOf(w);
+    const notice = (w.userTodos.snapshot().open || []).find((i) => i.origin === 'vault' && /switched off/.test(i.text || ''));
+    return { asked: !!ra.card, refused: !!(ra.a && !ra.a.ok), code: ra.a && ra.a.code, F0on: disk.runnable.includes(F[0]), Eon: disk.runnable.includes(w.e.id), stamp0, stamp1: (disk.touched || {})[F[0]], notice: notice ? notice.detail : null };
+  };
+  await leg('㉝b a refused press leaves no false notice and keeps the order', async () => {
+    const p = await pressLeg(DOOR);
+    ok(p.asked && p.refused && p.F0on && !p.Eon && !p.notice, '㉝b the press is REFUSED (its member at the host bound) and put back: F0 is ON again and NO «switched off» notice says otherwise', p);
+    ok(p.stamp0 && p.stamp1 === p.stamp0, '㉝b …and F0 keeps its place in the toggle order (its stamp put back — the next bound judges it as before the press)', { stamp0: p.stamp0, stamp1: p.stamp1 });
+    const mn = mutant('if (r.evicted && r.evicted.length && !quietEvict) noteEvicted(r.evicted);', 'if (r.evicted && r.evicted.length) noteEvicted(r.evicted);', 'loudpress');   // stale-pins: kept — a RED control: the pre-B-be21 press (a notice at the switch) restored on purpose
+    const rn = mn ? await pressLeg(mn) : null;
+    ok(!!(mn && rn && rn.refused && rn.F0on && rn.notice), '㉝b RED control: the notice filed at the switch (the r12 shape) ⇒ For you says F0 was switched off while F0 is ON', rn);
+    const ms = mutant(', opened: prior.opened, touched: prior.touched });', ', opened: prior.opened });', 'nostamps');   // stale-pins: kept — a RED control: the pre-B-be21 restore (no stamps) restored on purpose
+    const rs = ms ? await pressLeg(ms) : null;
+    ok(!!(ms && rs && rs.F0on && rs.stamp1 !== rs.stamp0), '㉝b RED control: the restore without the stamps (the r12 shape) ⇒ F0 is back ON with its place in the order lost', rs && { stamp0: rs.stamp0, stamp1: rs.stamp1 });
+  });
+}
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(fail ? 1 : 0);

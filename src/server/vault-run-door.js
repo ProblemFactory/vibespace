@@ -361,6 +361,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   now = () => Date.now(), log = () => {}, spawnImpl = spawn, killGraceMs = KILL_GRACE_MS, pipeGraceMs = PIPE_GRACE_MS,
   timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes,
   useGrants = null, useFacts = () => null,
+  entryMax = 256,   // B-be21: the run list's bound (a suite seam — the product keeps 256)
   notice = () => 0,   // r7: server.js serverNotice (key, text, {level, i18n}) → how many open clients got it — the 1-hour window's per-use toast
   policyJudge = null, policyOn = () => false,   // lane vault-use-grants (R4): (parts, {policy, memo}) → the decision engine's judge answer; the switch vault.policyJudge   // lane vault-use-grants: the vault-use writer (src/server/vault-use-grants.js) + a caller's admission facts ({conversationKeys, groupIds, groupsUnreadable})
   isRootOwned = rootOwnedNoWrite, toolDigest = sha256Fd, sealDir = sealDirReal, hasProcFd = HAS_PROC_FD, toolSealed = sealedToolReal, probeGit = probeGitReal } = {}) {   // round 12/13/14: the ownership predicate, the fd-digest hasher, the PATH realpath-sealer, the tool-sealed (chain root-owned + fstat) check, the git-on-seal probe — injectable test seams (defaults are the real checks)
@@ -488,7 +489,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // lane vault-use-grants round 3 (MAJOR item 2): every list the store serializes is CAPPED HERE (the canonical body), so what
   // is marked is always the capped form and the reader reproduces it byte-for-byte — a write that is unbounded while the reader
   // slices wiped the whole store (the mark stopped verifying) in round 2. Each list drops the OLDEST past its cap.
-  const AP_MAX = 256, REVOKE_MAX = 512, ENTRY_MAX = 256;
+  const AP_MAX = 256, REVOKE_MAX = 512, ENTRY_MAX = Number.isInteger(entryMax) && entryMax > 0 ? entryMax : 256;
   // round 9 (MINOR): ONE bound for `runnable` AND `opened`. r7 sliced `opened` to ENTRY_MAX but wrote `runnable` UNCAPPED, so an
   // entry past the cap reloaded as ON with no `opened` record = OWNER-opened = every member usable (fail OPEN — the opposite of
   // the audit's «fail closed»). Now `runnable` is capped too and `opened` holds ONLY kept-runnable entries: an entry past the cap
@@ -503,7 +504,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // that rides the mark and covers runnable AND suspended — NOT `opened[id].at` (r11 read that, but a MANUAL ON deletes the
   // `opened` record, so its stamp was 0 ⇒ sorted oldest ⇒ the entry the owner just switched on was evicted at the cap while
   // setRunnable answered open:true, and every suspended entry — `opened` is runnable-only — had stamp 0 so its trim kept the
-  // largest ids, not the newest). `setRunnable` stamps `touched[id] = now()` on EVERY toggle (press ON, manual ON, OFF), so the
+  // largest ids, not the newest). `setRunnable` stamps `touched[id]` on EVERY toggle (press ON, manual ON, OFF) — B-be21: the later of now() and one past the newest stamp kept, an order that only moves forward — so the
   // entry an action just touched is the NEWEST and is never the one that action evicts; a no-toggle-yet entry (a pre-r12 store)
   // is stamp 0 and sorts by id. The serialized array stays sorted lexicographically so the mark verifies.
   const stampAt = (at, id) => (at && Number(at[id])) || 0;
@@ -771,7 +772,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  member added while OFF is held too). A MANUAL ON (the owner's own switch) opens it for EVERYONE — the owner's deliberate
    *  full restore (test ⑬) — by dropping the `opened` record. «Always» passes `keepPaused`: it opens the switch as a PRESS
    *  (an `opened` record), so only the members it then RESUMES are usable; the grants the owner paused stay paused. */
-  function setRunnable({ id, on, reauthed = false, by = 'user', keepPaused = false } = {}) {
+  function setRunnable({ id, on, reauthed = false, by = 'user', keepPaused = false, quietEvict = false } = {}) {
     const st = vaultState();
     if (st !== 'unlocked') return named(st === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
     const key = String(id || ''), ref = VI.parseRef(key);   // `<store>:<entry>#<field>` (src/vault-inventory.js — the row's id)
@@ -786,7 +787,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!!on === wasRun && !on === wasSusp && !(on && !keepPaused && pressOpened(d, key))) return { ok: true, id: key, open: wasRun, already: true };   // a MANUAL ON of a press-opened entry still runs (it converts it to owner-opened)
     const runnable = new Set(d.runnable), suspended = new Set(d.suspended);
     let opened = d.opened || {};
-    const touched = { ...(d.touched || {}), [key]: now() };   // round 12 (MAJOR M3): stamp the LAST toggle (press ON, manual ON, OFF) for EVERY entry — never 0, so this entry is the NEWEST and keepNewest never evicts the one the owner just touched
+    // B-be21: the stamp is an ORDER that only moves forward — the later of the clock and one past the newest stamp kept, so a
+    // backward clock step (an NTP correction, a suspended box) never makes the entry just toggled the OLDEST, and evicts it
+    const tNewest = Object.values(d.touched || {}).reduce((m, v) => (Number(v) > m ? Number(v) : m), 0);
+    const touched = { ...(d.touched || {}), [key]: Math.max(now(), tNewest + 1) };   // round 12 (MAJOR M3): stamp the LAST toggle (press ON, manual ON, OFF) for EVERY entry — never 0, so this entry is the NEWEST and keepNewest never evicts the one the owner just touched
     if (on) {
       runnable.add(key); suspended.delete(key);
       if (keepPaused) { if (!opened[key]) opened = { ...opened, [key]: { at: now(), resumed: {} } }; }   // «Always»: a PRESS opens it — only the members it resumes are usable
@@ -803,7 +807,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const r = save({ runnable, suspended, always, opened, touched });
     if (!r.ok) return r;
     audit('vault-run-switch', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, open: !!on });
-    if (r.evicted && r.evicted.length) noteEvicted(r.evicted);   // round 12 (MAJOR M3): the cap turned some OTHER entry OFF to keep this one — tell the owner (never silent), and the answer below reads the truth AFTER the trim
+    if (r.evicted && r.evicted.length && !quietEvict) noteEvicted(r.evicted);   // B-be21: a press files its notice only once it holds (standOpen); round 12 (MAJOR M3): the cap turned some OTHER entry OFF to keep this one — tell the owner (never silent), and the answer below reads the truth AFTER the trim
     try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // lane vault-use-grants: every open Vault window shows the switch
     return { ok: true, id: key, open: !!(db && db.runnable.has(key)), ...(r.evicted && r.evicted.length ? { evicted: r.evicted } : {}) };   // round 12 (MAJOR M3): the TRUTH after the trim — `db` is the trimmed memory store, so `open` is never a false success for an entry the cap dropped (r11 answered `!!on` though the just-toggled entry was evicted)
   }
@@ -998,7 +1002,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function standOpen(ids, principal, grant, by) {
     for (const id of ids) { const ref = VI.parseRef(id), row = ref && rowOf(ref), c = ref && classOf(ref, row); if (!row || !c || !c.runnable) return { ok: false, why: 'entry_unknown', judged: c && !c.runnable ? named('entry_has_its_own_door', { door: c.door }) : named('entry_unknown') }; }
     const d0 = load();
-    const prior = { runnable: new Set(d0.runnable), suspended: new Set(d0.suspended), opened: d0.opened || {} };
+    const prior = { runnable: new Set(d0.runnable), suspended: new Set(d0.suspended), opened: d0.opened || {}, touched: { ...(d0.touched || {}) } };   // B-be21: the toggle stamps too
     // r4 (C — the acceptance P4: the restore went through setRow, judged against the row the partial write had left, so a
     // replaced legacy wildcard could not be put back and its {ok:false} was never read — a REFUSED press left a no-end grant
     // written): each entry's row AS IT IS (useGrants.snapshotRow — its verified members, its exceptions), put back RAW on a
@@ -1006,14 +1010,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // press BY NAME (`restore_failed`), never a silent half-write
     const rowSnap = new Map();
     for (const id of ids) { let s = null; try { s = useGrants.snapshotRow(id); } catch { s = null; } if (!s || !s.ok) return { ok: false, code: (s && s.code) || 'failed' }; rowSnap.set(id, s); }
-    const touched = [], made = [], changes = []; let failCode = null;
+    const touched = [], made = [], changes = [], evicted = []; let failCode = null;   // B-be21: what the cap dropped, told only if the press holds
     for (const id of ids) {
       touched.push(id);
       // r5 (the r4 acceptance's press probe C3: a write that THREW — not {ok:false} — left E1 written, no restore, no line): a throw
       // anywhere in an entry's write is a failed write like any, restored below by the same road
       try {
-        const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40), keepPaused: true });
+        const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40), keepPaused: true, quietEvict: true });
         if (!sr.ok) { failCode = sr.code; break; }
+        if (sr.evicted) evicted.push(...sr.evicted);
         const w = useGrants.addMember(id, principal, grant, { by: String(by).slice(0, 40) });
         if (!w.ok) { failCode = w.code; break; }
         made.push(w.grant); changes.push({ id, ...(w.changes || {}) });
@@ -1023,12 +1028,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (failCode) {
       const failed = [];
       for (const id of touched) { let r = null; try { r = useGrants.restoreRow(id, rowSnap.get(id), { by: String(by).slice(0, 40) }); } catch (e) { r = { ok: false, code: 'not_written', error: e.message }; } if (!r || !r.ok) failed.push({ entry: id, code: (r && r.code) || 'not_written' }); }   // every row back to what it WAS, raw (never resumes a member)
-      let sw = null; try { sw = save({ runnable: prior.runnable, suspended: prior.suspended, always: (load() || {}).always || [], opened: prior.opened }); } catch (e) { sw = { ok: false, code: 'not_written' }; }   // every switch + every press marker back to its prior state
+      let sw = null; try { sw = save({ runnable: prior.runnable, suspended: prior.suspended, always: (load() || {}).always || [], opened: prior.opened, touched: prior.touched }); } catch (e) { sw = { ok: false, code: 'not_written' }; }   // B-be21: the stamps back too (an evicted entry put back keeps its place in the order); no eviction notice was filed   // every switch + every press marker back to its prior state
       if (!sw || !sw.ok) failed.push({ entry: 'switches', code: (sw && sw.code) || 'not_written' });
+      if (!sw || !sw.ok) { const dd = load(); const off = evicted.filter((k) => !(dd && dd.runnable.has(k))); if (off.length) noteEvicted(off); }   // B-be21 (the adversarial read): the switches could not be put back — what the cap turned off STAYS off, so the owner is told
       try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // PUSH the restore like the flip was pushed — open Vault windows show the switch as it is on disk
       if (failed.length) { log(`[vault-run] a press failed (${failCode}) and ${failed.length} of what it wrote could not be put back: ${failed.map((f) => `${f.entry}: ${f.code}`).join(', ')}`); audit('vault-restore-failed', { by: String(by).slice(0, 40), cause: failCode, failed }); return { ok: false, code: 'restore_failed', cause: failCode, failed }; }
       return { ok: false, code: failCode };
     }
+    { const dd = load(); const off = evicted.filter((k) => !(dd && dd.runnable.has(k))); if (off.length) noteEvicted(off); }   // B-be21: the press HELD — now the owner is told what the cap turned off
     return { ok: true, grants: made, changes };
   }
   function ask({ caller, run, shape, key, exactKey = null, exactParts = null, detail, facts = null, signal, always = null, command = null, plan = null, window = false }) {
