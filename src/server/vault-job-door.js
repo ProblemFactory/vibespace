@@ -68,6 +68,16 @@ function programOf(cmd = {}) {
     for (const d of PATH.split(':').filter(Boolean)) { const r = realOf(path.join(path.resolve(cwd, d), n)); if (r && isFile(r)) return r; }
     return null;
   };
+  // a WRAPPER runs the program (`timeout 3600 python3 bot.py`, `nohup`, `nice -n 5`, `env A=1 …` — the second adversarial read):
+  // the program on the card is the one it runs; the wrapper's own options, durations and NAME=value words are skipped
+  const WRAPS = new Set(['timeout', 'nohup', 'nice', 'env', 'setsid', 'stdbuf', 'ionice', 'chrt', 'taskset', 'time', 'unbuffer']);
+  const whole = argv.slice();   // the command as it runs — the card shows it whole
+  let at = 0;
+  for (let guard = 0; guard < 4 && at < argv.length && WRAPS.has(VR.toolNameOf(argv[at] || '')); guard++) {
+    at++;
+    while (at < argv.length && (/^-/.test(argv[at]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[at]) || /^\d+(\.\d+)?[smhd]?$/.test(argv[at]))) at++;
+  }
+  if (at > 0 && at < argv.length) argv.splice(0, at);
   const real = find(argv[0]);
   const tool = VR.toolNameOf(argv[0] || '', real).replace(/[\d.]+$/, '');
   let script = null;
@@ -87,7 +97,7 @@ function programOf(cmd = {}) {
     }
   }
   const mask = (s) => SS.redactSecrets(String(s)).text;
-  return { program: { path: mask(real || String(argv[0] || '')), writable: !(real && chainRootOwned(real)) }, script: script ? { ...script, path: mask(script.path) } : null, folder: mask(cwd), command: mask(argv.map((a) => (a === '' || /[\s'"\\$`]/.test(a) ? JSON.stringify(a) : a)).join(' ')) };
+  return { program: { path: mask(real || String(argv[0] || '')), writable: !(real && chainRootOwned(real)) }, script: script ? { ...script, path: mask(script.path) } : null, folder: mask(cwd), command: mask(whole.map((a) => (a === '' || /[\s'"\\$`]/.test(a) ? JSON.stringify(a) : a)).join(' ')) };
 }
 
 /**
@@ -111,6 +121,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     try { return g && typeof g.rowsFor === 'function' ? g.rowsFor(VJ.DOOR, id) : []; } catch { return []; }   // an unreadable store approves nothing
   }
   const refusal = (code, key) => ({ ok: false, code, words: VJ.WORDS[code] || code, ...(key ? { key } : {}) });   // key = the --vault NAME
+  let narrowing = 0;   // lane vault-job-approval: >0 while THIS door writes a narrowing (no re-judge — see `narrow`)
 
   function gate(job) { return VJ.verdictOf(job, { state: stateOf(), entryOf, rowsFor }); }
 
@@ -148,7 +159,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   function onChange(fn) {
     try { vault.onUnlock(() => fn('vault-unlocked')); } catch { }
     const g = store();
-    try { if (g && typeof g.onChange === 'function') g.onChange((c) => { if (c && c.door === VJ.DOOR) fn('vault-approved'); }); } catch { }
+    try { if (g && typeof g.onChange === 'function') g.onChange((c) => { if (c && c.door === VJ.DOOR && !narrowing) fn('vault-approved'); }); } catch { }
   }
 
   // ── THE APPROVAL CARD (lane vault-job-approval) ───────────────────────────────────────────────────────────────────────────
@@ -236,7 +247,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
       let it = null;
       try {
         it = userTodos.add(o.conv ? `claude:${o.conv}` : 'vault', {
-          origin: 'vault', kind: 'action', urgency: 'normal', by: 'agent', sessionName: who || null,   // NO expiresAt: a job waits for its owner (design D1)
+          origin: 'vault', kind: 'action', urgency: 'normal', by: 'agent', sessionName: who || null, jobId,   // NO expiresAt: a job waits for its owner (design D1); jobId: the job's Clear content clears this card's words too (src/server/record-clear.js — its cascade finds a job's items by it; resolveByJob never closes a decision row)
           text: card.text, detail: card.detail, i18n: card.i18n, facts: card.facts,
           action: { type: 'vault-job-ask', askId, jobId, entry: r.id, ref: r.ref, name: r.name, conv },   // = VJ.ASK_TYPE (spelled for the approval census's grep) — ids and references only
         });
@@ -283,7 +294,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     if (!entryOf({ store: 'secrets', field: 'secret', entry: (VR.parseRef(q.ref) || {}).entry })) return over('entry_unknown');
     const g = store();
     if (!g || typeof g.set !== 'function') return named('not_written');
-    const next = VJ.memberWith(rowsFor(q.entry)[0] || null, q.conv, q.jobId);
+    const next = VJ.memberWith(rowsFor(q.entry)[0] || null, q.conv, q.jobId, { keep: (x) => !!(jm && jm.jobs.has(x)) });   // the ids of jobs gone (archived, collected) leave as it is written
     if (!next) return named('too_many_jobs');
     answering.add(id);   // the row's write starts the job synchronously (onChange): its start closes the job's OTHER cards, never this one
     try {
@@ -323,13 +334,16 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     });
   }
 
-  // ── TAKEN BACK (lane vault-job-approval, decision ④ — revoke / delete STOPS; a lock stops nothing: no onLock road here) ──
+  // ── TAKEN BACK (lane vault-job-approval, decision ④ — revoke / delete STOPS; a lock stops nothing: this file has no lock hook) ──
   const JOB_RE = /^jb-[0-9a-f]{8}$/;
+  // a NARROWING write (a take-back, a removed job, a deleted entry) re-judges nothing: it can start no job, and a re-judge
+  // there would file again the cards of the very job being removed or stopped (the second adversarial read)
+  const narrow = (fn) => { narrowing++; try { return fn(); } finally { narrowing--; } };
   const write = (id, next, by) => {
     const g = store();
     if (!g || typeof g.set !== 'function') return named('not_written');
     let w = null;
-    try { w = g.set(VJ.DOOR, id, { to: next.to, except: next.except }, by); } catch (e) { w = { ok: false, code: 'not_written', error: (e && e.message) || 'write failed' }; }
+    try { w = narrow(() => g.set(VJ.DOOR, id, { to: next.to, except: next.except }, by)); } catch (e) { w = { ok: false, code: 'not_written', error: (e && e.message) || 'write failed' }; }
     return w && w.ok ? { ok: true } : { ok: false, code: (w && w.code) || 'not_written', error: (w && w.error) || 'the approval could not be changed — nothing changed' };
   };
   /** THE PERSON TAKES IT BACK (✕ on the Vault row's job chip or the job card — src/routes/vault.js person()): the job leaves the
@@ -338,7 +352,13 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   function revoke(entry, jobId, { by = 'user' } = {}) {
     const id = String(entry || ''), j = String(jobId || '');
     if (!VJ.entryOfRow(id) || !JOB_RE.test(j)) return named('bad_revoke');
-    const next = VJ.memberWithout(rowsFor(id)[0] || null, j);
+    const row0 = rowsFor(id)[0] || null;
+    if (row0 && !Array.isArray(row0.to)) {   // an unreadable grants store (its fail-closed row): no approval can start the job — and the ✕ still STOPS it (decision ④), said
+      let stopped = false;
+      try { stopped = !!(jm && jm.vaultRevoked(j, VJ.stopWords('revoked', entryLabelOf(VJ.entryOfRow(id))))); } catch { }
+      return { ok: false, code: 'store_unreadable', stopped, error: 'the approvals could not be read (data/grants.json) — the job was stopped; nothing was written' };
+    }
+    const next = VJ.memberWithout(row0, j);
     if (!next.changed) return named('not_approved');
     const w = write(id, next, String(by || 'user').slice(0, 40));
     if (!w.ok) return w;
@@ -359,38 +379,47 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     const g = store();
     if (!g || typeof g.remove !== 'function') return named('not_written');
     let w = null;
-    try { w = g.remove(VJ.DOOR, id, String(by || 'user').slice(0, 40)); } catch (e) { w = { ok: false, code: 'not_written', error: (e && e.message) || 'write failed' }; }
+    try { w = narrow(() => g.remove(VJ.DOOR, id, String(by || 'user').slice(0, 40))); } catch (e) { w = { ok: false, code: 'not_written', error: (e && e.message) || 'write failed' }; }
     if (!w || !w.ok) return { ok: false, code: (w && w.code) || 'not_written', error: (w && w.error) || 'the approvals of that entry could not be removed — nothing was deleted' };
     audit({ op: 'drop', entry: id, jobs, by: String(by || 'user').slice(0, 40) });
     return { ok: true, jobs };
   }
-  function entryGone(entry, { label = null } = {}) {
+  function entryGone(entry, { label = null, why = 'deleted' } = {}) {
     const id = String(entry || '');
     if (!jm || !VJ.entryOfRow(id)) return 0;
-    const words = VJ.stopWords('deleted', label || VJ.entryOfRow(id));
+    const words = VJ.stopWords(why === 'revoked' ? 'revoked' : 'deleted', label || VJ.entryOfRow(id));
     let n = 0;
+    const names = (job) => VJ.refsOf(job).some((r) => { const p = VR.parseRef(r.ref); return !!p && p.id === id; });
     for (const job of [...jm.jobs.values()]) {
-      if (!VJ.refsOf(job).some((r) => { const p = VR.parseRef(r.ref); return !!p && p.id === id; })) continue;
+      if (!names(job)) continue;
+      const parent = job.cronParent ? jm.jobs.get(job.cronParent) : null;
+      if (parent && names(parent) && parent.state !== 'failed' && parent.desiredUp !== false) continue;   // its cron stops it (and its owner is told once — the cron's)
       try { if (jm.vaultEntryGone(job.id, words)) n++; } catch (e) { log(`[vault-job] ${job.id}: its deleted entry could not stop it (${(e && e.message) || e})`); }
     }
     return n;
   }
   /** A JOB REMOVED OR ITS CONTENT CLEARED (the engine's rm / clearJobs): its id leaves every vault-job row (a later job — a new id —
    *  asks again; a cleared one's next start asks again) → the rows changed */
-  function jobGone(jobId) {
-    const j = String(jobId || '');
+  function jobGone(jobIds) {
+    const ids = (Array.isArray(jobIds) ? jobIds : [jobIds]).map(String).filter((x) => JOB_RE.test(x));
     const g = store();
-    if (!JOB_RE.test(j) || !g || typeof g.rowsOfDoor !== 'function') return 0;
+    if (!ids.length || !g || typeof g.rowsOfDoor !== 'function') return 0;
     let rows = [];
     try { rows = g.rowsOfDoor(VJ.DOOR) || []; } catch { rows = []; }
-    let n = 0;
+    // every row the ids leave, in ONE landed write (the second adversarial read: one write per row per id was a storm of
+    // synchronous grants.json writes for a clear of many jobs)
+    const changes = [];
     for (const row of rows) {
-      const next = VJ.memberWithout(row, j);
-      if (!next.changed) continue;
-      const w = write(row.resource, next, 'hub');
-      if (w.ok) { n++; audit({ op: 'gone', job: j, entry: row.resource }); } else log(`[vault-job] ${j}: its approval on ${row.resource} could not be removed (${w.code})`);
+      let cur = row, changed = false;
+      for (const j of ids) { const next = VJ.memberWithout(cur, j); if (next.changed) { cur = { ...cur, to: next.to, except: next.except }; changed = true; } }
+      if (changed) changes.push({ door: VJ.DOOR, resource: row.resource, to: cur.to, except: cur.except });
     }
-    return n;
+    if (!changes.length) return 0;
+    let w = null;
+    try { w = narrow(() => (typeof g.setMany === 'function' ? g.setMany(changes, 'hub') : changes.reduce((r, c) => (r && r.ok ? g.set(c.door, c.resource, c, 'hub') : r), { ok: true }))); } catch (e) { w = { ok: false, code: 'not_written', error: (e && e.message) || 'write failed' }; }
+    if (!w || !w.ok) { log(`[vault-job] ${ids.join(', ')}: their approvals could not be removed (${(w && w.code) || 'error'})`); return 0; }
+    for (const c of changes) audit({ op: 'gone', jobs: ids, entry: c.resource, by: 'hub' });
+    return changes.length;
   }
 
   // ── WHAT THE OWNER SEES (lane vault-job-approval, L2 — design-vault-service-secret) ─────────────────────────────────────────

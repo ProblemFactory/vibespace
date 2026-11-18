@@ -1145,8 +1145,7 @@ const STANDING_ENDS_WORDS = i18nKey('Until you revoke it — the same as «Who m
 const JOB_LABEL = Object.freeze({ job: i18nKey('Background job'), secret: i18nKey('Secret'), program: i18nKey('Program'), folder: i18nKey('Working folder'), hosts: i18nKey('Sends to'), lock: i18nKey('When the vault locks') });
 const JOB_KIND_WORDS = Object.freeze({
   service: i18nKey('a service — it starts again by itself when it stops, and after a VibeSpace restart once the vault is unlocked; each start gets the secret'),
-  'service-on-failure': i18nKey('a service — it starts again by itself when it fails, and after a VibeSpace restart once the vault is unlocked; each start gets the secret'),   // the facts' restart policy (src/vault-job.js askCardOf)
-  'service-never': i18nKey('a service that is not restarted by itself — each start gets the secret'),
+  'service-never': i18nKey('a service that is not restarted by itself — each start gets the secret'),   // the facts' restart policy (src/vault-job.js askCardOf): every other policy restarts it at any exit
   cron: i18nKey('a scheduled job — each run on its schedule gets the secret'),
   task: i18nKey('a task — it runs once and gets the secret once'),
 });
@@ -1158,19 +1157,21 @@ function jobCardOf(item, { t = fmt } = {}) {
   // §93: the facts' job words are the door's — its name came through the engine's ONE accessor (labelOf) when the card was filed
   const said = o(f.job), entry = o(f.entry), prog = o(f.program), script = f.script && typeof f.script === 'object' && str(f.script.path) ? f.script : null;
   const kind0 = ['service', 'cron', 'task'].includes(said.kind) ? said.kind : 'task';
-  const kind = kind0 === 'service' && said.restart === 'never' ? 'service-never' : kind0 === 'service' && said.restart === 'on-failure' ? 'service-on-failure' : kind0;
-  const title = str(said.name) || str(said.id), who = str(f.who) || t('a conversation');
+  const kind = kind0 === 'service' && said.restart === 'never' ? 'service-never' : kind0;
+  const title = str(said.name) || str(said.id), who = str(f.who);   // an unknown asker: its own headline (a sentence that starts with it)
   const rows = [
     { key: 'job', lines: [[{ text: title }, ...(str(said.id) && str(said.id) !== title ? [{ text: ' ' }, { aside: `(${str(said.id)})` }] : [])], [{ text: t(JOB_KIND_WORDS[kind]) }]] },
-    { key: 'secret', lines: [[{ text: str(entry.label) || str(entry.ref) }], [{ text: t('its program reads it once from the descriptor ${var} names — never from its environment, its command line or a file', { var: str(entry.var) }) }]] },
-    { key: 'program', lines: [[{ mono: str(prog.path) }], ...(prog.writable === true ? [[{ text: t('An agent can change this program.') }]] : []),
+    // `strip` (the second adversarial read): the conversation's dock draws a card's strip — the secret and the program ride it too
+    // (n = its first n lines), so Allow is never offered there without naming what and who
+    { key: 'secret', strip: 1, lines: [[{ text: str(entry.label) || str(entry.ref) }], [{ text: t('its program reads it once from the descriptor ${var} names — never from its environment, its command line or a file', { var: str(entry.var) }) }]] },
+    { key: 'program', strip: 4, lines: [[{ mono: str(prog.path) }], ...(prog.writable === true ? [[{ text: t('An agent can change this program.') }]] : []),
       ...(script ? [[{ mono: str(script.path) }], ...(script.writable === true ? [[{ text: t('An agent can change this script.') }]] : [])] : [])] },
     { key: 'folder', lines: [[{ mono: str(f.folder) }]] },
     { key: 'hosts', lines: [[{ text: t('unknown — VibeSpace cannot read where a program connects') }]] },
     { key: 'lock', lines: [[{ text: t('it keeps running; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it') }], [{ text: t('Taking it back — ✕ on its Vault row or on the job card — stops it at once.') }]] },
-  ].map((r) => ({ key: r.key, label: t(JOB_LABEL[r.key]), lines: r.lines, warn: false }));
+  ].map((r) => ({ key: r.key, label: t(JOB_LABEL[r.key]), lines: r.lines, warn: false, ...(r.strip ? { strip: r.strip } : {}) }));
   const fold = [...(str(entry.ref) ? [{ label: t('Reference'), lines: [[{ code: str(entry.ref) }]] }] : [])];   // a vault reference is never a link: code, under the fold
-  return { headline: t('{who} asks to let the Background job «{name}» use a stored secret', { who, name: title }), cmd: str(f.command), cut: null, again: null, rows, changes: null, always: { offered: false, hint: null }, fold };
+  return { headline: who ? t('{who} asks to let the Background job «{name}» use a stored secret', { who, name: title }) : t('A conversation asks to let the Background job «{name}» use a stored secret', { name: title }), cmd: str(f.command), cut: null, again: null, rows, changes: null, always: { offered: false, hint: null }, fold };
 }
 function standingCardOf(item, { t = fmt } = {}) {
   const f = item && item.action && item.action.type === 'vault-grant-ask' && item.facts && typeof item.facts === 'object' && item.facts.v === 1 && item.facts.kind === 'standing' ? item.facts : null;
@@ -1234,7 +1235,7 @@ function runStripOf(card, { t = (s) => s } = {}) {
   };
   const hosts = card.rows.find((r) => r.key === 'hosts');
   const fits = !hosts || hosts.label.length + 1 + hosts.lines.map(words).join(', ').length <= RUN_STRIP_MAX;
-  const rows = card.rows.filter((r) => r.key === 'hosts' || r.warn).map((r) => (r.key === 'hosts' ? { ...r, out: !fits } : { ...r, lines: r.lines.map(short) }));
+  const rows = card.rows.filter((r) => r.key === 'hosts' || r.warn || r.strip > 0).map((r) => (r.key === 'hosts' ? { ...r, out: !fits } : { ...r, lines: (r.strip > 0 ? r.lines.slice(0, r.strip) : r.lines).map(short) }));   // lane vault-job-approval: + a row the card marks for its strip (`strip`: its first n lines)
   const again = card.again && words(card.again).length > RUN_STRIP_LINE ? [{ text: words(card.again).slice(0, RUN_STRIP_LINE - 1) + '\u2026' }] : card.again;
   return { rows, again, cut: !!card.cut, fits };
 }

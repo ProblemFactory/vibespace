@@ -1018,6 +1018,7 @@ class JobManager {
       return { archived: [], failed: 'archive-write', kept: moved.length, error: w.error };
     }
     for (const m of moved) { this.jobs.delete(m.id); this.waiters.delete(m.id); this.ansWaiters.delete(m.id); }
+    this._vaultGone(moved); // lane vault-job-approval: an archived one-shot runs no more — its approval leaves the row (it would hold one of the member's 64 places for ever)
     this._dirty = true; // a failed flush retries on the 2 s timer; a boot re-archive is idempotent (see above)
     this._save();
     if (dropped.length) this._logsWhole(dropped.map((d) => d.id)); // lane job-logs-sweep: off the main thread (the remover's worker)
@@ -1184,7 +1185,7 @@ class JobManager {
     // themselves when the storage answers late (the route's reply says «not on disk yet»: record-clear's persisted); a kill first
     // leaves the old record, the question still asked
     if (askGone.length) this._ride(this.file, 'the cleared asks', () => { for (const j of askGone) { this._resolveAns(j); try { this.d.resolveJobAsk && this.d.resolveJobAsk(j.id); } catch { } } });
-    for (const id of gone) this._vaultGone(id); // lane vault-job-approval: a cleared job's approval goes with its words — its next start asks again
+    this._vaultGone([...liveHits, ...archHits].filter((j) => gone.has(j.id))); // lane vault-job-approval: a cleared job's approval goes with its words — its next start asks again (ONE write)
     if (out.cleared.length) { try { this.d.broadcast('jobs-updated', { cleared: out.cleared }); } catch { } }
     return out;
   }
@@ -2825,6 +2826,9 @@ class JobManager {
     if (this.readOnly) return false;
     const job = this.jobs.get(String(jobId || ''));
     if (!job || !this._vaultLive(job)) return false;
+    // a SCHEDULE's approval is the cron's (D4): its run that is up holds the value too — stopped with it (the second adversarial
+    // read: stop() of a cron settles only its WAITING runs)
+    if (job.kind === 'cron') for (const k of [...this.jobs.values()]) if (k.cronParent === job.id && ['up', 'starting', 'awaiting-user'].includes(k.state)) this.stop(k);
     this.stop(job);
     this._touch(job, { what: String(words || 'stopped: its vault value was taken back'), alarm: true });
     this._notifyOwner(job, { what: String(words || 'stopped: its vault value was taken back') });
@@ -2851,11 +2855,14 @@ class JobManager {
     if (['up', 'starting', 'waiting', 'scheduled', 'awaiting-user'].includes(job.state)) return true;
     return (job.kind === 'service' || job.kind === 'cron') && job.desiredUp !== false && job.state !== 'failed';
   }
-  /** lane vault-job-approval: a job removed or its content cleared — its id leaves every `vault-job` row (the door's jobGone) */
-  _vaultGone(id) {
+  /** lane vault-job-approval: jobs removed, cleared or archived — their ids leave every `vault-job` row in ONE write (the door's
+   *  jobGone); a job with no `--vault` costs nothing (`jobs` = records) */
+  _vaultGone(jobs) {
     const door = this._vaultJob || this.d.vaultJob || null;
     if (!door || typeof door.jobGone !== 'function') return;
-    try { door.jobGone(String(id)); } catch (e) { this.d.log(`[jobs] ${id}: its vault approvals could not be removed:`, e.message); }
+    const ids = (Array.isArray(jobs) ? jobs : [jobs]).filter((j) => j && VJ.refsOf(j).length).map((j) => String(j.id));
+    if (!ids.length) return;
+    try { door.jobGone(ids); } catch (e) { this.d.log(`[jobs] ${ids.join(', ')}: their vault approvals could not be removed:`, e.message); }
   }
   /** its approval cards are over (removed, stopped, refused): the door closes each `ask-over` — a later start asks again */
   _vaultAskOver(job) {
@@ -4530,8 +4537,8 @@ class JobManager {
     const last = job.runs && job.runs[job.runs.length - 1];
     if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was removed'); // lane vault-job-road: a removed cron's waiting run never starts
     this._vaultAskOver(job); // lane vault-job-approval: a removed job leaves no open approval card…
-    this._vaultGone(job.id); // …and no approval: its id leaves every vault-job row (a new job asks again)
     this.jobs.delete(job.id); this._dirty = true; this._save();
+    this._vaultGone([job]); // …and no approval: its id leaves every vault-job row (a new job asks again) — AFTER it left the registry, so nothing re-judges it
     (this._removalOwed || (this._removalOwed = new Map())).set(job.id, job);   // its logs stay in the sweep's keep set until the landing
     // lane lg-store-writes (the moved2 cure 2 — THE STEP RIDES THE LANDING, no roll back): what cannot be undone — its kept processes
     // ended, its For-you items resolved — runs once jobs.json holds the removal; a kill first brings the job back whole. The

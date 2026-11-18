@@ -13256,6 +13256,7 @@ export default {
   "Allowed — the entry carries the new words": "已允许 — 条目已换上新的文字",
   // lane vault-job-approval (design-vault-service-secret L1b): a Background job's approval card and its answer
   "{who} asks to let the Background job «{name}» use a stored secret": "{who} 请求让后台任务「{name}」使用保险库里的一个密钥",
+  "A conversation asks to let the Background job «{name}» use a stored secret": "一个对话请求让后台任务「{name}」使用保险库里的一个密钥",
   "Job: {name} ({id})": "后台任务：{name}（{id}）",
   "A service: it starts again by itself when it stops, and again after a VibeSpace restart once the vault is unlocked — each start gets the secret.": "这是一个 service：停了会自己再启动，VibeSpace 重启后、保险库解锁时也会再启动——每次启动都会拿到这个密钥。",
   "A scheduled job: each run on its schedule gets the secret.": "这是一个定时任务：按计划的每一次运行都会拿到这个密钥。",
@@ -13273,7 +13274,6 @@ export default {
   "Allowed — the job starts with the secret": "已允许 — 后台任务带着密钥启动",
   "Denied — the job was not started": "已拒绝 — 后台任务没有启动",
   "The job that asked is gone — nothing was written": "提出请求的后台任务已经不在了 — 什么都没写入",
-  "A service: it starts again by itself when it fails, and again after a VibeSpace restart once the vault is unlocked — each start gets the secret.": "这是一个 service：失败了会自己再启动，VibeSpace 重启后、保险库解锁时也会再启动——每次启动都会拿到这个密钥。",
   "A service that is not restarted by itself — each start gets the secret.": "这是一个不会自己重启的 service——每次启动都会拿到这个密钥。",
   "Allowed — it still waits for another of its approvals": "已允许——它还在等另一项批准",
   "Allowed — it starts once the vault is unlocked": "已允许——保险库解锁后它就启动",
@@ -13286,7 +13286,6 @@ export default {
   "a task — it runs once and gets the secret once": "一个一次性任务——只运行一次，只拿到一次密钥",
   "An agent can change this program.": "agent 能改这个程序。",
   "An agent can change this script.": "agent 能改这个脚本。",
-  "a service — it starts again by itself when it fails, and after a VibeSpace restart once the vault is unlocked; each start gets the secret": "一个 service——失败了会自己再启动，VibeSpace 重启后保险库解锁时也会再启动；每次启动都会拿到这个密钥",
   "a service that is not restarted by itself — each start gets the secret": "一个不会自己重启的 service——每次启动都会拿到这个密钥",
   "its program reads it once from the descriptor ${var} names — never from its environment, its command line or a file": "程序从 ${var} 指定的描述符读它一次——绝不经过环境变量、命令行或文件",
   "unknown — VibeSpace cannot read where a program connects": "未知——VibeSpace 读不出一个程序会连到哪里",

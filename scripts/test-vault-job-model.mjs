@@ -161,9 +161,9 @@ console.log('⑦ THE APPROVAL CARD (lane vault-job-approval, design-vault-servic
   const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
   ok(c.i18n.detail.every((l) => typeof l.key === 'string' && l.key.length > 0) && c.i18n.detail.map(fill).join('\n') === c.detail && fill(c.i18n.text) === c.text, 'the i18n lines ARE the detail and the text (every surface draws them in the viewer\'s language — never a sentence of its own)');
   const never = VJ.askCardOf({ job: { kind: 'service', restart: 'never' } }), onFail = VJ.askCardOf({ job: { kind: 'service', restart: 'on-failure' } }), anon = VJ.askCardOf({});
-  ok(/^A service that is not restarted by itself — each start gets the secret\.$/m.test(never.detail) && never.facts.job.restart === 'never' && /^A service: it starts again by itself when it fails,/m.test(onFail.detail) && !/when it stops/.test(never.detail + onFail.detail),
-    'the adversarial read: a service\'s line follows its restart policy — `never` does not «start again by itself», `on-failure` restarts when it fails', [never.detail.split('\n')[1], onFail.detail.split('\n')[1]]);
-  ok(anon.facts.who === '' && /^a conversation asks to let/.test(anon.text) && Math.max(...[c, never, onFail, anon].map((x) => x.i18n.detail.length)) <= 12, 'an unknown asker is left to the viewer\'s words (facts.who empty); no card is past the store\'s 12 i18n lines (src/user-todos.js normalizeI18n)', { who: anon.facts.who, lines: c.i18n.detail.length });
+  ok(/^A service that is not restarted by itself — each start gets the secret\.$/m.test(never.detail) && never.facts.job.restart === 'never' && /^A service: it starts again by itself when it stops,/m.test(onFail.detail) && !/when it stops/.test(never.detail),
+    'the adversarial reads: a service\'s line follows its restart policy — `never` does not «start again by itself»; any other policy restarts it at ANY exit (src/jobs.js onServiceExit reads no exit code), so «when it stops»', [never.detail.split('\n')[1], onFail.detail.split('\n')[1]]);
+  ok(anon.facts.who === '' && /^A conversation asks to let/.test(anon.text) && !anon.i18n.text.params.who && Math.max(...[c, never, onFail, anon].map((x) => x.i18n.detail.length)) <= 12, 'an unknown asker is left to the viewer\'s words (facts.who empty); no card is past the store\'s 12 i18n lines (src/user-todos.js normalizeI18n)', { who: anon.facts.who, lines: c.i18n.detail.length });
   const cron = VJ.askCardOf({ job: { kind: 'cron' } }), odd = VJ.askCardOf({ job: { kind: 'rocket' } });
   ok(/^A scheduled job: each run on its schedule gets the secret\.$/m.test(cron.detail) && odd.facts.job.kind === 'task' && /^A task: it runs once/m.test(odd.detail), 'a schedule says each run gets it; a kind outside the closed set is drawn as a task (never an unknown code on the card)');
   const long = VJ.askCardOf({ command: 'x'.repeat(5000), folder: 'a\nb\u0007c' });
@@ -180,6 +180,19 @@ console.log('⑦ THE APPROVAL CARD (lane vault-job-approval, design-vault-servic
   ok(GM.validateWrite('vault-job', 'secrets:secret:k1#secret', { to: m2.to, except: m2.except }, { at: 1, by: 'user' }).ok, 'what memberWith writes is a row the ONE grant model accepts (door vault-job, the job ids its `jobs` field)');
   ok(VJ.ASK_TYPE === 'vault-job-ask' && VJ.ASKS_PER_CONV === 4 && VJ.ASKS_MAX === 64 && VJ.DENY_QUIET_MS === 600000 && VJ.ASK_ID_RE.test('vj-0123456789abcdef') && !VJ.ASK_ID_RE.test('vj-0123') && VJ.askJobIdOf({ id: 'jb-0000aaaa', cronParent: 'jb-0000bbbb' }) === 'jb-0000bbbb' && VJ.askJobIdOf({ id: 'jb-0000aaaa' }) === 'jb-0000aaaa', 'the card\'s numbers (4 per conversation, 64 on the hub, 10 minutes after a Deny), its id, and a scheduled run\'s approval is its cron\'s');
   ok(['vault_denied', 'ask_quiet', 'too_many_asks', 'too_many_asks_hub', 'ask_unfiled', 'ask_closed'].every((k) => typeof VJ.WORDS[k] === 'string' && /not started/.test(VJ.WORDS[k])), 'every refusal of the card says the job was not started (never a silent wait)');
+}
+
+console.log('⑧ TAKEN BACK — the member without the job, the row\'s entry, the notices (lane vault-job-approval)');
+{
+  const row = { to: [{ kind: 'conversation', key: 'conv-a', jobs: ['jb-0000aaaa', 'jb-0000bbbb'] }, { kind: 'conversation', key: 'conv-b', jobs: ['jb-0000aaaa'] }, { kind: 'conversation', key: 'conv-c', jobs: ['jb-0000cccc'] }], except: [{ kind: 'conversation', key: 'conv-x' }] };
+  const w = VJ.memberWithout(row, 'jb-0000aaaa'), none = VJ.memberWithout(row, 'jb-0000dddd');
+  ok(w.changed && JSON.stringify(w.to) === '[{"kind":"conversation","key":"conv-a","jobs":["jb-0000bbbb"]},{"kind":"conversation","key":"conv-c","jobs":["jb-0000cccc"]}]' && JSON.stringify(w.except) === '[{"kind":"conversation","key":"conv-x"}]' && !none.changed && none.to.length === 3,
+    'memberWithout: the job leaves EVERY member naming it, a member left with none leaves, every other member and every exception kept; a job named nowhere changes nothing', w);
+  ok(VJ.entryOfRow('secrets:secret:k1#secret') === 'secret:k1' && VJ.entryOfRow('secrets:agent:conv-a/tok#secret') === 'agent:conv-a/tok' && VJ.entryOfRow('mounts:m1#secretKey') === null && VJ.entryOfRow('') === null, 'entryOfRow: a vault-job row\'s entry name — none for another store');
+  const long = 'L'.repeat(150), rv = VJ.stopWords('revoked', long), dl = VJ.stopWords('deleted', long);
+  ok(rv.length <= 200 && dl.length <= 200 && /a value it read cannot be taken back/.test(rv) && /a start asks again$/.test(rv) && /cannot start again with it$/.test(dl), 'the take-back notices stay within the 200 characters the owner\'s notice keeps (src/job-model.js agentPiece) whatever the entry\'s name — what cannot be undone, and that a start asks again, never cut', [rv.length, dl.length]);
+  const pr = VJ.memberWith({ to: [{ kind: 'conversation', key: 'conv-a', jobs: ['jb-dead0001', 'jb-0000cccc'] }] }, 'conv-a', 'jb-0000aaaa', { keep: (id) => id !== 'jb-dead0001' });
+  ok(JSON.stringify(pr.to[0].jobs) === '["jb-0000cccc","jb-0000aaaa"]' && pr.same === false, 'memberWith keep: the ids of jobs gone leave the member as it is written', pr);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

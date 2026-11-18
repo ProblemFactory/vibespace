@@ -1154,12 +1154,13 @@ console.log('lane vault-job-approval (L2): a Background job\'s approval card is 
   // THE REAL FILING (src/server/vault-job-door.js ask over a real store) rendered by the REAL row under the minimal DOM, in en / zh / ja
   const noop = () => {};
   const mkEl = () => ({ dataset: {}, className: '', innerHTML: '', querySelector: () => null, querySelectorAll: () => [], appendChild: noop, addEventListener: noop, setAttribute: noop, classList: { add: noop, remove: noop, toggle: noop }, style: {} });
-  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener };
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener, removeEventListener: globalThis.removeEventListener };
   globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
   globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
   globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl(), head: mkEl() };
   const os = await import('node:os');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-vjcard-'));
+  let todos = null;
   try {
     const { pathToFileURL } = await import('node:url');
     const { createRequire } = await import('node:module');
@@ -1169,7 +1170,7 @@ console.log('lane vault-job-approval (L2): a Background job\'s approval card is 
     const { UserTodoManager } = req(path.join(ROOT, 'src/user-todos.js'));
     const VJD = req(path.join(ROOT, 'src/server/vault-job-door.js')), GS = req(path.join(ROOT, 'src/server/grants-store.js'));
     const ZH = (await import(pathToFileURL(path.join(ROOT, 'src/lib/i18n-zh.js')).href)).default, JA = (await import(pathToFileURL(path.join(ROOT, 'src/lib/i18n-ja.js')).href)).default;
-    const todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
+    todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
     const vault = { state: () => 'unlocked', secretNames: () => [], audit() { }, noteUse() { }, blocked: () => false, onUnlock() { } };
     const door = VJD.create({ vault, grants: () => GS.create({ memory: true }), userTodos: todos, nameOf: () => 'Chat A' });
     fs.writeFileSync(path.join(dir, 'bot.js'), '// a scratch script\n');
@@ -1185,11 +1186,15 @@ console.log('lane vault-job-approval (L2): a Background job\'s approval card is 
     const prog = fs.realpathSync(process.execPath);
     ok(asked.ok && !!card && /bot\.js --port 8080$/.test(card.cmd) && card.rows.map((r) => r.key).join() === 'job,secret,program,folder,hosts,lock' && card.rows.every((r) => r.warn === false) && card.always.offered === false && card.fold.some((x) => x.lines.some((l) => l.some((s) => s.code === 'vault://secrets/secret:k1/secret'))),
       'the card model (foryou-actions jobCardOf over the door\'s facts): job · secret · program · folder · where it sends · what a lock does — no warn accent on any row, no «Always», the reference under the fold', card && card.rows.map((r) => [r.key, r.warn]));
-    ok(answersOf(en).join() === 'allow,deny' && en.includes('<pre class="ut-run-cmd">') && en.includes('bot.js --port 8080</pre>') && en.includes(prog) && /data-fact="program"/.test(en) && en.includes('An agent can change this program.') && !/ut-run-warn/.test(en) && !en.includes('Where it sends the secret:'),
-      'the row draws the FACTS: the command in its mono box, the program\'s real path, «An agent can change this program.» as a plain line (no warn class), 允许 / 拒绝 — never the server\'s prose lines', { answers: answersOf(en), html: en.slice(0, 600) });
-    ok(zh.includes('后台任务') && zh.includes('锁上保险库时') && zh.includes('agent 能改这个程序。') && zh.includes('未知——VibeSpace 读不出一个程序会连到哪里') && !/When the vault locks|An agent can change this program|Background job</.test(zh)
-      && ja.includes('バックグラウンドジョブ') && ja.includes('保管庫をロックしたとき') && ja.includes('agent がこのプログラムを変更できます。') && !/When the vault locks|An agent can change this program/.test(ja),
+    ok(answersOf(en).join() === 'allow,deny' && en.includes('<pre class="ut-run-cmd">') && en.includes('bot.js --port 8080</pre>') && en.includes(prog) && /data-fact="program"/.test(en) && en.includes('An agent can change this script.') && !/ut-run-warn/.test(en) && !en.includes('Where it sends the secret:'),
+      'the row draws the FACTS: the command in its mono box, the program\'s real path, «An agent can change this script.» as a plain line (no warn class — the scratch script is ours, whoever owns node), 允许 / 拒绝 — never the server\'s prose lines', { answers: answersOf(en), html: en.slice(0, 600) });
+    ok(zh.includes('后台任务') && zh.includes('锁上保险库时') && zh.includes('agent 能改这个脚本。') && zh.includes('未知——VibeSpace 读不出一个程序会连到哪里') && !/When the vault locks|An agent can change this script|Background job</.test(zh)
+      && ja.includes('バックグラウンドジョブ') && ja.includes('保管庫をロックしたとき') && ja.includes('agent がこのスクリプトを変更できます。') && !/When the vault locks|An agent can change this script/.test(ja),
       'in Chinese and in Japanese the card is drawn in that language — its labels and every fact\'s words from the dictionary (closed codes, never a sentence from the server)', { zh: zh.slice(0, 500), ja: ja.slice(0, 300) });
+    // the second adversarial read: the conversation's DOCK draws the card's strip — the secret and the program ride it, so Allow is never offered there without them
+    const strip = item ? R.runFactsHtml(item, tr(null), { strip: true }) : '';
+    ok(/data-fact="secret"/.test(strip) && strip.includes('secret:k1') && /data-fact="program"/.test(strip) && strip.includes('bot.js') && strip.includes('An agent can change this script.') && /data-fact="hosts"/.test(strip) && answersOf(strip).join() === 'allow,deny',
+      'the DOCK\'s strip of the card names the secret and the program (and that an agent can change its script) beside «Sends to: unknown» and 允许 / 拒绝', strip.slice(0, 600));
     // RED CONTROL: the dispatch removed (a copy of foryou-actions compiled at its real path) ⇒ no card model: the row falls back to the prose
     const FAP = path.join(ROOT, 'src/foryou-actions.js'), src = fs.readFileSync(FAP, 'utf8');
     const AT = "  if (item && item.action && item.action.type === 'vault-job-ask') return jobCardOf(item, { t });";
@@ -1197,7 +1202,7 @@ console.log('lane vault-job-approval (L2): a Background job\'s approval card is 
     let copy = null;
     if (src.split(AT).length === 2) { m.filename = FAP; m.paths = Mod._nodeModulePaths(path.dirname(FAP)); m._compile(src.replace(AT, ''), FAP); copy = m.exports; }
     ok(!!copy && copy.runCardOf(item, { t: tr(null) }) === null, 'CONTROL — the job card\'s dispatch removed: no card model (the row would draw the server\'s prose) — RED on the copy', copy ? 'the copy drew a card' : 'the copy could not be built (its anchor is missing)');
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
+  } finally { try { if (todos) todos.stop(); } catch { } fs.rmSync(dir, { recursive: true, force: true }); for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }
 console.log('lane-pairing naive-user N-ask: an exit ask\'s Allow / Deny are their own line, never in the hover-dimmed action bar');
 {

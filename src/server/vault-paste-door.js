@@ -436,7 +436,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     try { const s = (vault.secretNames() || []).find((x) => x && x.name === entry); const row = s ? VI.secretRowOf(s) : null; if (row && row.label) label = String(row.label); } catch { }
     if (vaultJob) { let jd = null; try { jd = vaultJob.dropRow(rowId, { by }); } catch (e) { log(`${entry}: its Background-job approvals could not be removed — ${e.message}`); return named('store_failed'); } if (jd && !jd.ok) return named('store_failed'); }
     const r = vault.secretDrop(entry);
-    if (!r || !r.ok) return named('store_failed');
+    if (!r || !r.ok) { if (vaultJob) { try { vaultJob.entryGone(rowId, { label, why: 'revoked' }); } catch { } } return named('store_failed'); }   // the second adversarial read: its approvals are gone already — its jobs stop (taken back), never run on unapproved
     if (r.already) return named('entry_unknown_id');
     audit('vault-secret-deleted', { by: String(by).slice(0, 40), entry });
     if (vaultJob) { try { vaultJob.entryGone(rowId, { label }); } catch (e) { log(`${entry}: its Background jobs could not be stopped — ${e.message}`); } }   // every job that names it stops (a waiting one is refused)

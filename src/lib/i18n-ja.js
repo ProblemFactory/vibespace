@@ -13255,6 +13255,7 @@ export default {
   "Allowed — the entry carries the new words": "許可しました — エントリに新しい文言が入りました",
   // lane vault-job-approval (design-vault-service-secret L1b): a Background job's approval card and its answer
   "{who} asks to let the Background job «{name}» use a stored secret": "{who} がバックグラウンドジョブ「{name}」に保管庫のシークレットを使わせることを求めています",
+  "A conversation asks to let the Background job «{name}» use a stored secret": "ある会話がバックグラウンドジョブ「{name}」に保管庫のシークレットを使わせることを求めています",
   "Job: {name} ({id})": "ジョブ: {name}（{id}）",
   "A service: it starts again by itself when it stops, and again after a VibeSpace restart once the vault is unlocked — each start gets the secret.": "service です: 止まると自分でまた起動し、VibeSpace の再起動後も保管庫のロック解除時にまた起動します — 起動のたびにこのシークレットを受け取ります。",
   "A scheduled job: each run on its schedule gets the secret.": "スケジュールされたジョブです: スケジュールどおりの実行ごとにこのシークレットを受け取ります。",
@@ -13272,7 +13273,6 @@ export default {
   "Allowed — the job starts with the secret": "許可しました — ジョブはシークレットを持って起動します",
   "Denied — the job was not started": "拒否しました — ジョブは起動しませんでした",
   "The job that asked is gone — nothing was written": "求めたジョブはもうありません — 何も書き込まれませんでした",
-  "A service: it starts again by itself when it fails, and again after a VibeSpace restart once the vault is unlocked — each start gets the secret.": "service です: 失敗すると自分でまた起動し、VibeSpace の再起動後も保管庫のロック解除時にまた起動します — 起動のたびにこのシークレットを受け取ります。",
   "A service that is not restarted by itself — each start gets the secret.": "自分では再起動しない service です — 起動のたびにこのシークレットを受け取ります。",
   "Allowed — it still waits for another of its approvals": "許可しました — まだ別の承認を待っています",
   "Allowed — it starts once the vault is unlocked": "許可しました — 保管庫のロックが解除されると起動します",
@@ -13285,7 +13285,6 @@ export default {
   "a task — it runs once and gets the secret once": "タスク — 一度だけ実行され、シークレットを一度だけ受け取ります",
   "An agent can change this program.": "agent がこのプログラムを変更できます。",
   "An agent can change this script.": "agent がこのスクリプトを変更できます。",
-  "a service — it starts again by itself when it fails, and after a VibeSpace restart once the vault is unlocked; each start gets the secret": "service — 失敗すると自分でまた起動し、VibeSpace の再起動後も保管庫のロック解除時に起動します。起動のたびにこのシークレットを受け取ります",
   "a service that is not restarted by itself — each start gets the secret": "自分では再起動しない service — 起動のたびにこのシークレットを受け取ります",
   "its program reads it once from the descriptor ${var} names — never from its environment, its command line or a file": "プログラムは ${var} が示すディスクリプタから一度だけ読みます — 環境変数・コマンドライン・ファイルは通りません",
   "unknown — VibeSpace cannot read where a program connects": "不明 — VibeSpace はプログラムの接続先を読み取れません",

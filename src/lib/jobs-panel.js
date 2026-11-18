@@ -367,9 +367,9 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
 function vaultLine(app, j, { compact = false } = {}) {
   const uses = Array.isArray(j.vaultUses) ? j.vaultUses.filter((x) => x && typeof x === 'object') : [];
   const waits = j.state === 'waiting' && (j.waitFor === 'vault' || j.waitFor === 'approval') ? j.waitFor : null;
-  if (!waits && (compact || !uses.length)) return null;
+  if (!waits && !uses.length) return null;
   const row = document.createElement('div'); row.className = 'jobs-card-vault';
-  if (uses.length && !compact) {
+  if (uses.length) {   // the rail's compact card too (the pictures: the rail is where a person sees their jobs) — the chips wrap
     const head = document.createElement('span'); head.className = 'jobs-vault-head'; head.textContent = t('Uses from the vault:');
     row.appendChild(head);
     for (const x of uses) {

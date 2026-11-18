@@ -158,9 +158,9 @@ function composeReply(item, replyText, { now = Date.now() } = {}) {
 function replyVerdict({ item, session } = {}) {
   const it = item || {};
   const no = (code) => ({ ok: false, code, why: REPLY_WHY[code] });
+  if (it.action && typeof it.action === 'object' && ANSWER_ACTION_TYPES.includes(it.action.type)) return no('exit_ask');   // lane vault-job-approval: an item answered by ITS OWN buttons says so first — a job's approval card carries its jobId (the Clear content cascade) and is answered here, by Allow / Deny, never «in the job panel»
   if (it.jobId) return no('job_item');
   if (it.action && typeof it.action === 'object' && CARD_ACTION_TYPES.includes(it.action.type) && cardReplyRefused()) return no('card_item');
-  if (it.action && typeof it.action === 'object' && ANSWER_ACTION_TYPES.includes(it.action.type)) return no('exit_ask');
   const key = typeof it.sessionKey === 'string' ? it.sessionKey : '';
   if (!key || SERVER_KEYS.includes(key) || !key.includes(':')) return no('no_session');
   if (!session || session.live === false) return no('no_live_session');

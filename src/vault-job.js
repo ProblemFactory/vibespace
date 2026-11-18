@@ -247,13 +247,13 @@ const askJobIdOf = (job) => String((job && (job.cronParent || job.id)) || '');
 const i18nKey = (s) => s;   // the extractor's marker (scripts/i18n-extract.mjs): a declared human-visible string — the card's lines are t()'d by the client
 const KIND_LINES = Object.freeze({
   service: i18nKey('A service: it starts again by itself when it stops, and again after a VibeSpace restart once the vault is unlocked — each start gets the secret.'),
-  'service-on-failure': i18nKey('A service: it starts again by itself when it fails, and again after a VibeSpace restart once the vault is unlocked — each start gets the secret.'),
   'service-never': i18nKey('A service that is not restarted by itself — each start gets the secret.'),
   cron: i18nKey('A scheduled job: each run on its schedule gets the secret.'),
   task: i18nKey('A task: it runs once and gets the secret once.'),
 });
-/** the kind's line by its restart policy (the adversarial read: a `never` service does not «start again by itself») */
-const kindKeyOf = (kind, restart) => (kind === 'service' ? (restart === 'never' ? 'service-never' : restart === 'on-failure' ? 'service-on-failure' : 'service') : kind === 'cron' ? 'cron' : 'task');
+/** the kind's line by its restart policy (the adversarial reads: a `never` service does not «start again by itself»; every
+ *  other policy restarts it at ANY exit — src/jobs.js onServiceExit reads no exit code — so it is «when it stops») */
+const kindKeyOf = (kind, restart) => (kind === 'service' ? (restart === 'never' ? 'service-never' : 'service') : kind === 'cron' ? 'cron' : 'task');
 // THE ONE HIDDEN-CHARACTER DOOR (src/hidden-chars.js — the approval census §1d): a job's name, a path and a command are the
 // agent's — a reordering / invisible character is SHOWN as ⟦U+XXXX⟧ (never drawn), a line break or a tab becomes a space
 const cardClip = (s) => { const t = HC.revealHidden(String(s == null ? '' : s)).replace(/[\u0000-\u001f\u007f]/g, ' '); return t.length > CARD_LINE_MAX ? `${t.slice(0, CARD_LINE_MAX - 1)}…` : t; };
@@ -283,7 +283,8 @@ function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null
     { key: i18nKey('Locking the vault stops nothing that runs; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it.') },
     { key: i18nKey('Taking it back — ✕ on its Vault row or on the job card — stops it at once.') },   // lane vault-job-approval L2: the ✕ exists (both surfaces)
   ];
-  const text = { key: i18nKey('{who} asks to let the Background job «{name}» use a stored secret'), params: { who: f.who || 'a conversation', name: f.job.name } };
+  // an unknown asker has its own key (never an English «a conversation» param inside a translated sentence)
+  const text = f.who ? { key: i18nKey('{who} asks to let the Background job «{name}» use a stored secret'), params: { who: f.who, name: f.job.name } } : { key: i18nKey('A conversation asks to let the Background job «{name}» use a stored secret'), params: { name: f.job.name } };
   return { text: fillLine(text), detail: lines.map(fillLine).join('\n'), i18n: { text, detail: lines }, facts: f };
 }
 
@@ -291,13 +292,17 @@ function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null
  *  owner conversation (`key`) gains `jobId`; every other member and every exception is kept as it is. `row` = the entry's
  *  `vault-job` row | null. → `{to, except, same}` (`same`: the member names the job already — nothing to write) | null (the
  *  member names MEMBER_JOBS_MAX jobs already). */
-function memberWith(row, key, jobId) {
+function memberWith(row, key, jobId, { keep = null } = {}) {
   const to = Array.isArray(row && row.to) ? row.to.map((m) => (m && typeof m === 'object' ? { ...m } : m)) : [];
   const except = Array.isArray(row && row.except) ? row.except.slice() : [];
   const m = to.find((x) => x && typeof x === 'object' && x.kind === 'conversation' && x.key === key);
   if (!m) { to.push({ kind: 'conversation', key, jobs: [jobId] }); return { to, except, same: false }; }
-  const jobs = Array.isArray(m.jobs) ? m.jobs.map(String) : [];
-  if (jobs.includes(jobId)) return { to, except, same: true };
+  // `keep(id)`: the ids of jobs that still exist (the adversarial read: an archived or collected job's id would hold one of the 64
+  // places for ever) — the member is pruned as it is written
+  const all = Array.isArray(m.jobs) ? m.jobs.map(String) : [];
+  const jobs = typeof keep === 'function' ? all.filter((id) => id === jobId || keep(id)) : all;
+  if (jobs.length !== all.length) m.jobs = jobs;
+  if (jobs.includes(jobId)) return { to, except, same: jobs.length === all.length };
   if (jobs.length >= MEMBER_JOBS_MAX) return null;
   m.jobs = [...jobs, jobId];
   return { to, except, same: false };
@@ -321,9 +326,10 @@ function memberWithout(row, jobId) {
 const entryOfRow = (id) => { const m = /^secrets:(.+)#secret$/.exec(String(id || '')); return m ? m[1] : null; };
 /** What the owner conversation is told ONCE when the person takes a running job's value back (`revoked`) or deletes its entry
  *  (`deleted`) — and the job's own event line. Names only; what cannot be undone said plainly (a value already read). */
-const stopWords = (why, label) => (why === 'deleted'
-  ? `stopped: the user deleted its vault entry «${String(label || '').slice(0, 120)}» — the job is stopped and cannot start again with it`
-  : `stopped: the user took back its use of the vault entry «${String(label || '').slice(0, 120)}» — the job is stopped; a value it already read cannot be taken back (rotate the key at its provider); \`vibespace-job start\` asks the user again`);
+// ≤ 200 characters whatever the label (the owner notice cuts its words there — src/job-model.js agentPiece): the label ≤ 40
+const stopWords = (why, label) => { const l = String(label || '').slice(0, 40); return why === 'deleted'
+  ? `stopped: the user deleted its vault entry «${l}» — it cannot start again with it`
+  : `stopped: the user took back its vault entry «${l}»; a value it read cannot be taken back (rotate the key); a start asks again`; };
 
 /** The job's state line while it waits. */
 const waitWords = (w) => (w === 'approval' ? WORDS.wait_approval : WORDS.wait_vault);
