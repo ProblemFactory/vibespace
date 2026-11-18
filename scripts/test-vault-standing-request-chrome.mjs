@@ -278,7 +278,7 @@ try {
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
   const OWN_ROW = `[...document.querySelectorAll('.vw-list .vw-row')].find((r) => r.isConnected && String(r.dataset.id || '').startsWith('secrets:agent:') && String(r.dataset.id).includes('/tts-own#'))`;
   const own = await A.until(`(() => { const r = ${OWN_ROW}; const c = r && r.querySelector('.vw-use-chip'); if (!c) return null; c.scrollIntoView({ block: 'center' }); const g = r.querySelector('.vw-use-grant'); return { chip: c.textContent, x: !!c.querySelector('.vw-use-x'), add: !!(g && !g.hidden && g.getBoundingClientRect().width > 0) }; })()`, { timeout: 15000 });
-  check(`its Vault row now SHOWS the member: «Transcriber · 命令 ${PYN} transcribe.py · 无限期 · 已用 1 次 · 卡片上的总是 · HH:MM ✕» — with its ✕, and no «谁可以用…» (only its conversation may use it)`, !!own && new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期(?: · 已用 \\d+ 次)? · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(own.chip) && own.x && !own.add, own);
+  check(`its Vault row now SHOWS the member: «Transcriber · 命令 ${PYN} transcribe.py · 无限期 · 已用 1 次 · 卡片上的总是 · HH:MM ✕» — with its ✕, and «谁可以用…» (B-bc3b: the owner shares it from here)`, !!own && new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期(?: · 已用 \\d+ 次)? · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(own.chip) && own.x && own.add, own);   // B-bc3b: the own row draws «谁可以用…» too (the owner shares it)
   await sleep(300);
   await A.shot('vsr-7-own-entry-row-desktop.png');
   await A.evalJs(`(() => { const r = ${OWN_ROW}; const x = r && r.querySelector('.vw-use-chip .vw-use-x'); if (x) x.click(); return !!x; })()`);

@@ -10373,10 +10373,10 @@ export default {
   "Integrations & channels": "連携とチャネル", // lane vault-window-v2
   "Machines & relay": "マシンとリレー", // lane vault-window-v2
   "Kept by agents": "エージェントの保管", // lane vault-window-v2
-  "Its own conversation uses it directly · other conversations cannot use it": "保存した会話はそのまま使える · 他の会話は使えない",
+  "Its own conversation uses it directly · another one only as you share it («Who may use it…»)": "この会話は直接使えます · ほかの会話はあなたが共有したときだけ（「誰が使えるか…」）",
   "Its own conversation uses it directly · other conversations need a grant": "保存した会話はそのまま使える · 他の会話は許可が必要",
   "kept by {name}": "{name} が保存",
-  "What an agent kept itself: the conversation that kept it uses it without asking you; other conversations cannot use it": "エージェントが自分で保存したもの：保存した会話はあなたに聞かずに使えます。他の会話は使えません",
+  "What an agent kept itself: the conversation that kept it uses it without asking you; another conversation only as you share it": "エージェントが自分で保存したもの：保存した会話はあなたに聞かずに使います。ほかの会話はあなたが共有したときだけ使えます",
   "Added by an agent itself — the agent saw the seed": "エージェントが自分で追加 · シードを見ている",
   "By you": "自分", // lane vault-window-v2
   "Scanned · by you": "スキャン · 自分", // lane vault-window-v2
@@ -12125,6 +12125,8 @@ export default {
   "used {n}× by {m} conversations": "{m} 件の会話で {n} 回使用", // lane vault-use-grants
   "Who may use «{name}»": "「{name}」を誰が使えるか", // lane vault-use-grants
   "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.": "下のホスト向けなら、毎回カードなしでこれを使ってコマンドを実行できます（vibespace-vault run）。値そのものは見えません。別のホストや、送り先を判断できないコマンド（シェル、スクリプト）は引き続き確認します。", // lane vault-use-grants
+  "Share it: let another conversation or a Task Group run commands with it for the hosts you name. Another host is refused — an agent's own value goes only where you say.": "共有する：別の会話またはタスクグループが、指定したホストに対してこれを使ってコマンドを実行できるようにします。ほかのホストは拒否されます——エージェントが保存した値は、あなたが指定した先にだけ送られます。",
+  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told, is refused: an agent's own value goes only where you say.": "彼らはこれを使ってコマンドを実行します（vibespace-vault run）。下のホストには毎回カードを出しません。値は見えません。ほかのホスト、または送り先が判断できないコマンドは拒否されます：エージェントが保存した値は、あなたが指定した先にだけ送られます。",
   "Who may use it": "誰が使えるか", // lane vault-use-grants
   "Who": "誰に", // lane vault-use-grants
   "For which hosts": "どのホスト向けか", // lane vault-use-grants
@@ -12540,6 +12542,7 @@ export default {
   "“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」は開き直せません。閉じるとこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
   "{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.": "このうち {n} 個は開き直せません（{names}）。閉じるとこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
   "A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.": "ホストとは、コマンドがこれを持って接続する先です——例：API キーなら api.openai.com、ルーターなら 192.168.1.1。VibeSpace が送り先を読めないプログラム（スクリプト）は、実行カードからコマンド単位で許可します。", // lane vault-standing-request
+  "A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. Another conversation sends an agent's value only to the hosts you name here; a command whose destination cannot be told is refused.": "ホストとは、コマンドがこれを使って接続する先です——例：API キーなら api.openai.com、ルーターなら 192.168.1.1。ほかの会話はエージェントの値を、ここに書いたホストにだけ送ります。送り先が判断できないコマンドは拒否されます。",
   "A standing approval for this command — the Vault window lists it; a changed program or script asks again": "このコマンドを常設で許可しました——保管庫ウィンドウに表示されます。プログラムやスクリプトが変わればまた確認します", // lane vault-standing-request
   "A standing approval for this command: this conversation runs it with these secrets without asking until you take it back — VibeSpace cannot see where it sends them; a changed program or script asks again. Asks for the second password first": "このコマンドの常設許可：取り消すまで、この会話はこれらのシークレットで確認なしに実行します——VibeSpace は送り先を見られません。プログラムやスクリプトが変わればまた確認します。先に第 2 パスワードを求めます", // lane vault-standing-request
   "A standing grant, the same as «Who may use it…» on its row — until you take it back there; asks for the second password first": "常設の許可。その行の「誰が使えるか…」と同じです——そこで取り消すまで有効。先に第 2 パスワードを求めます", // lane vault-standing-request

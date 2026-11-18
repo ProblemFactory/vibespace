@@ -548,7 +548,7 @@ console.log('⑨ AGENT-OWNED SECRETS — provenance rows (q-043 §9, lane vault-
   ok(fr && fr.provenance.forHost === 'api.example.com' && tr && tr.kind === 'totp' && tr.provenance && tr.provenance.prov === 'agent-typed' && tr.provenance.owner === 'conv-INV' && tr.provenance.actor === 'Build chat' && VI.provenanceOf(tr) === 'agent-put' && tr.detail === 'Added by an agent itself — the agent saw the seed' && VI.purposeOf(tr) === 'two-step',
     'a mint\'s --for rides its provenance; an agent\'s own two-step seed: kind totp, provenance agent-typed + its owner, the «stored by an agent» chip, under Two-step codes', [fr && fr.provenance, tr && tr.provenance]);
   const ag = VI.PURPOSES.find((p) => p.id === 'agents');
-  ok(ag && /uses it without asking you/.test(ag.help) && /other conversations cannot use it/.test(ag.help) && VI.PURPOSES.filter((p) => p.help).length === 1, '«Kept by agents» carries its rule as its help sentence (the only purpose with one)', ag);
+  ok(ag && /uses it without asking you/.test(ag.help) && /another conversation only as you share it/.test(ag.help) && VI.PURPOSES.filter((p) => p.help).length === 1, '«Kept by agents» carries its rule as its help sentence (the only purpose with one)', ag);
   ea.close();
 }
 

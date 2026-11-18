@@ -564,7 +564,8 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
     const pr = require('../vault-run.js').parseRef(typeof b.entry === 'string' ? b.entry.trim() : '');
     const list = caller.job ? null : run.runnableFor(caller);
-    const seen = !!(pr && list && list.ok && Array.isArray(list.entries) && list.entries.some((e) => e && e.ref === pr.ref));
+    const VRm = require('../vault-run.js'), foreignAgent = !!(pr && VRm.agentScopeOf(pr) && !VRm.ownsAgentEntry(pr, caller));   // B-bc3b (the read): a conversation the owner SHARED an agent's entry with uses it — it never proposes its words (only its own conversation does)
+    const seen = !foreignAgent && !!(pr && list && list.ok && Array.isArray(list.entries) && list.entries.some((e) => e && e.ref === pr.ref));
     const pc = pasteCallerIn(activeSessions, req) || {};   // r2 (MINOR c): the paste door's ONE resolver — a pending fork has no id of its own and is refused, never filed under its parent
     const r = paste.propose({ caller: { job: !!pc.job, conversationId: pc.conversationId || null, sessionKey: pc.sessionKey || null, scope: pc.scope, name: pc.name }, entry: pr && pr.store === 'secrets' ? pr.entry : null, ref: pr ? pr.ref : '', seen, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined });
     if (!r || !r.ok) return res.status(paste.statusOf((r && r.code) || 'unfiled')).json({ ok: false, code: (r && r.code) || 'unfiled', error: (r && r.words) || paste.words((r && r.code) || 'unfiled'), ...(r && r.until ? { until: r.until } : {}) });

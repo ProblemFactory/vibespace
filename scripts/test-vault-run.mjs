@@ -361,6 +361,72 @@ console.log('②b AN AGENT\'S OWN ENTRY (vault-mint-put\'s mint / put) — opene
   ok(other.code === 'use_not_granted' && !cardsOf(w).length, 'ANOTHER conversation ⇒ use_not_granted, by name — no card, nothing read', other.code);
 }
 
+console.log('②c B-bc3b — the owner SHARES an agent\'s own entry through its grant row («Who may use it…»): another conversation runs it ONLY as the row says');
+{
+  const VUG = R('src/server/vault-use-grants.js'), GS = R('src/server/grants-store.js');
+  const ID = 'secrets:agent:conv-1/gh-token#secret', REF = 'vault://agent:conv-1/gh-token';
+  async function shareWorld(doorMod = DOOR) {
+    const w = await world({ doorMod, askMs: 50 });   // the read: a mutant that lets a card through ends it in 50 ms, never the real 60 s
+    const gs = GS.create({ memory: true }), groups = new Map();
+    const ug = VUG.create({ grants: () => gs, vault: w.vault, dataDir: w.dataDir, log: (m) => w.logs.push(String(m)) });
+    const door = w.mk(doorMod, { useGrants: ug, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: groups.get(c.conversationId) || [] }) });
+    const as = (cid) => ({ ...w.caller, conversationId: cid, sessionKey: `claude:${cid}`, name: `Lane ${cid}` });
+    const runAs = (cid, args) => door.run({ caller: as(cid), args, cwd: w.work });
+    return { w, ug, groups, door, as, runAs };
+  }
+  const TO = (host) => ['--env', `T=${REF}`, '--', 'curl', '-s', `https://${host}/v1/items`];
+  const s = await shareWorld();
+  const f0 = s.door.rowFacts({ id: ID });
+  ok(f0.own === true && f0.can === false && f0.use && f0.use.own === true && !(f0.use.to || []).length, 'the agent\'s row carries its `use` with NO member — the window draws «Who may use it…» on it (the owner shares it there); still no switch', f0);
+  const before = await s.runAs('conv-2', TO('api.example.com'));
+  ok(before.code === 'use_not_granted' && !cardsOf(s.w).length, 'NOT shared ⇒ another conversation is refused use_not_granted, by name — no card (as before)', before.code);
+  const add = s.ug.addMember(ID, { kind: 'conversation', key: 'conv-2', name: 'Lane conv-2' }, { hosts: ['api.example.com'] });
+  const shared = await s.runAs('conv-2', TO('api.example.com'));
+  ok(add && add.ok && shared.ok && shared.by === 'grant' && !cardsOf(s.w).length && !leaks(shared.stdout + shared.stderr, 'agent-minted-value-0123456789').length,
+    'SHARED with conv-2 for api.example.com ⇒ conv-2 runs it there BY THE GRANT, no card — the value scrubbed from what comes back', { add: add && add.ok, ok: shared.ok, by: shared.by, code: shared.code });
+  const away = await s.runAs('conv-2', TO('elsewhere.example.test'));
+  const blind = await s.runAs('conv-2', ['--env', `T=${REF}`, '--', NODE, PRINTER, 'env']);
+  const third = await s.runAs('conv-3', TO('api.example.com'));
+  ok(away.code === 'use_not_granted' && blind.code === 'use_not_granted' && third.code === 'use_not_granted' && !cardsOf(s.w).length,
+    '…ONLY as the row says: another host, a command whose destination cannot be told, a conversation the row does not name ⇒ use_not_granted, no card (what an agent stored never reaches anyone by a card)', { away: away.code, blind: blind.code, third: third.code });
+  const own = await s.runAs('conv-1', TO('api.example.com'));
+  ok(own.ok && own.by === 'own', 'its own conversation still runs it by construction (own)', own.code || own.by);
+  const l2 = s.door.runnableFor(s.as('conv-2')), l3 = s.door.runnableFor(s.as('conv-3'));
+  const e2 = (l2.entries || []).find((x) => x.ref === REF);
+  ok(e2 && e2.by === 'standing' && !e2.paused && (e2.hosts || []).includes('api.example.com') && !(l3.entries || []).some((x) => x.ref === REF), 'the list: conv-2 SEES the shared entry (standing, its hosts — not «paused»: no switch is its), conv-3 does not', { e2, l3: (l3.entries || []).map((x) => x.ref) });
+  s.groups.set('conv-4', ['g-team']);
+  s.ug.addMember(ID, { kind: 'group', id: 'g-team', name: 'Team' }, { hosts: ['api.example.com'] });
+  const viaGroup = await s.runAs('conv-4', TO('api.example.com'));
+  ok(viaGroup.ok && viaGroup.by === 'grant', 'shared with a Task Group ⇒ its member conv-4 runs it for the row\'s host', viaGroup.code || viaGroup.by);
+  // the read (r1): a MIXED run — the shared entry + a free entry the owner switched ON but granted conv-2 nothing for — never draws
+  // a card (an «Always» there would write conv-2 a member the owner never gave): use_not_granted by name
+  s.door.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });
+  const MIXED = ['--env', `T=${REF}`, '--env', 'U=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/items'];
+  const mixed = await s.runAs('conv-2', MIXED);
+  ok(mixed.code === 'use_not_granted' && !cardsOf(s.w).length, 'a MIXED run naming the shared entry (+ a free entry with no grant for conv-2) ⇒ use_not_granted, NO card — a card there could widen the share', { code: mixed.code, cards: cardsOf(s.w).length });
+  const rv = s.ug.revoke(ID, 'conversation:conv-2');
+  const after = await s.runAs('conv-2', TO('api.example.com'));
+  ok(rv && rv.ok && after.code === 'use_not_granted', 'the owner\'s ✕ takes it back ⇒ conv-2 is refused again', { rv: rv && rv.ok, code: after.code });
+  // RED CONTROLS — patched copies of the door
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+  const patch = (from, to, tag) => { const n = SRC.split(from).length - 1; return n === 1 ? M.load('src/server/vault-run-door.js', SRC.replace(from, to), tag) : null; };
+  const oldEarly = patch('if (foreignRefs.length && !useGrants) {', 'if (foreignRefs.length) {', 'bc3b-early');
+  let r1 = null;
+  if (oldEarly) { const m = await shareWorld(oldEarly); m.ug.addMember(ID, { kind: 'conversation', key: 'conv-2' }, { hosts: ['api.example.com'] }); r1 = await m.runAs('conv-2', TO('api.example.com')); }
+  ok(!!oldEarly && r1 && r1.code === 'use_not_granted', 'RED — the door before B-bc3b (another conversation refused before its grant is read): the SHARED conv-2 is refused — the share leg above goes red there', r1 && r1.code);
+  // an admit on ANY verdict alone is still refused there by the no-card rule (each guard alone refuses conv-3 — the restack's tb
+  // run showed the one-guard copy refusing): this RED takes BOTH away; the mixed-run RED below shows the no-card rule's own
+  const SRC2 = SRC.replace('      if (!verdict.ok && verdict.ask && sharedIds.size) {', '      if (false) {');
+  const anyRow = SRC2 !== SRC && SRC2.split("if (!(v && v.ok === true)) { note('use_not_granted'").length === 2 ? M.load('src/server/vault-run-door.js', SRC2.replace("if (!(v && v.ok === true)) { note('use_not_granted'", "if (!v) { note('use_not_granted'"), 'bc3b-anyrow') : null;
+  let r2 = null;
+  if (anyRow) { const m = await shareWorld(anyRow); m.ug.addMember(ID, { kind: 'conversation', key: 'conv-2' }, { hosts: ['api.example.com'] }); r2 = await m.runAs('conv-3', TO('api.example.com')); r2 = { code: r2.code, ok: r2.ok, cards: cardsOf(m.w).length }; }
+  ok(!!anyRow && r2 && !(r2.code === 'use_not_granted' && !r2.cards), 'RED — a door that admits on ANY verdict (the row exists for someone) AND draws cards for a shared entry: conv-3, whom the row does not name, reaches a card naming it — the «only as the row says» leg goes red there', r2);
+  const cardOk = patch('      if (!verdict.ok && verdict.ask && sharedIds.size) {', '      if (false) {', 'bc3b-card');
+  let r3 = null;
+  if (cardOk) { const m = await shareWorld(cardOk); m.ug.addMember(ID, { kind: 'conversation', key: 'conv-2' }, { hosts: ['api.example.com'] }); m.door.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true }); const x = await m.runAs('conv-2', MIXED); r3 = { code: x.code, cards: cardsOf(m.w).length + (m.w.userTodos.snapshot().resolved || []).filter((i) => i.action && i.action.type === 'vault-run-ask').length }; }
+  ok(!!cardOk && r3 && r3.cards > 0, 'RED — the door without «never a card for a shared entry»: the mixed run DRAWS a card naming the shared entry (where «Always» would widen the share)', r3);
+}
+
 console.log('③ THE CARD — a NEW shape draws the card; cluster asks every time, local allows a SEEN shape; «always»');
 /** THE LEG the card mutant is judged by: a NEW shape on a LOCAL instance (the default that allows) must draw the card. */
 async function newShapeCards(doorMod) {

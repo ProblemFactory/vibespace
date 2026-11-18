@@ -734,14 +734,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** r2 (MAJOR 3 — the acceptance: «Always (this command)» on the agent's OWN minted entry wrote a vault-use member the Vault
    *  window never drew, so the owner could neither see nor ✕ it and the next run passed with no card for ever; the base's
    *  host «Always» road wrote the same hidden member): A STANDING GRANT EXISTS ONLY WHERE THE OWNER CAN SEE AND REVOKE IT — an
-   *  agent's own entry draws the members it holds (each chip its source and ✕; no «Who may use it…» — only its conversation
-   *  may use it, so there is nobody to add). → the row's `use` facts (as rowFacts' own) | null (no member: nothing to draw). */
+   *  agent's own entry draws the members it holds (each chip its source and ✕). B-bc3b: and «Who may use it…» — the owner SHARES
+   *  it with another conversation or a Task Group (给谁 / 除了, their hosts), the deliberate widening the owner's rule asks for
+   *  (2026-10-26: what an agent stored is its own; others need it) — so the row carries its `use` with no member too (the door
+   *  is drawn). → the row's `use` facts (as rowFacts' own) | null (no grant door). */
   function ownUseOf(row, ref) {
     if (!useGrants || !row) return null;
     try {
       const r = ref && VR.refFor(ref.store, ref.entry, ref.field), counts = typeof vault.useCounts === 'function' ? vault.useCounts() : {};
       const p = useGrants.publicFor(row.id, r ? counts[r.ref] : null);
-      if (!p || (!(p.to || []).length && !(p.except || []).length)) return null;
+      if (!p) return null;
       return { ...p, own: true, entryHosts: [], used: r && counts[r.ref] ? { uses: counts[r.ref].uses, convs: counts[r.ref].convs } : { uses: 0, convs: 0 }, ref: r ? r.ref : null, policy: null, judge: 'off', approved: null };
     } catch { return null; }
   }
@@ -958,13 +960,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     for (const id of [...ids].sort()) {
       const ref = VI.parseRef(id), row = ref && rowOf(ref);
       if (!row || !classOf(ref, row).runnable) continue;
-      if (VR.agentScopeOf(ref) && !owns(ref)) continue;   // another conversation's own entry is never listed (its switch opens nothing to this one)
+      const sharedHere = VR.agentScopeOf(ref) && !owns(ref) && held.has(id);   // B-bc3b: another conversation's entry the owner SHARED with this one (its grant row)
+      if (VR.agentScopeOf(ref) && !owns(ref) && !sharedHere) continue;   // another conversation's own entry is never listed otherwise (its switch opens nothing to this one)
       const r = VR.refFor(ref.store, ref.entry, ref.field);   // the canonical spelling (the review: encodeURIComponent left !'()* raw)
       const g = d.runnable.has(id) || !scope ? null : grantOf(scope, id);
       const hd = held.get(id);
       const onNow = !refused && d.runnable.has(id);
       const memberPaused = !!(hd && onNow && pressOpened(d, id) && !memberUsable(d, id, hd.grant));   // round 7 (MAJOR item 2, invariant iii): the entry is ON by another conversation's PRESS and THIS member was never resumed — the list reads the SAME `opened` fact the judge does, so it can never say «yours to use» while the door refuses it
-      const paused = memberPaused || (!onNow && !g && (refused || !!(d.suspended && d.suspended.has(id)) || !!hd));   // round 3 (A6): say PAUSED for a turned-OFF entry; round 4 (A7 + item 4): a standing grant is PAUSED until the switch is ON (never «yours to use» without it)
+      const paused = sharedHere ? refused : memberPaused || (!onNow && !g && (refused || !!(d.suspended && d.suspended.has(id)) || !!hd));   // B-bc3b: a shared agent entry has no switch — only a refused store pauses it   // round 3 (A6): say PAUSED for a turned-OFF entry; round 4 (A7 + item 4): a standing grant is PAUSED until the switch is ON (never «yours to use» without it)
       const pv = (owns(ref) && row.provenance) || {};
       const ew = wordsOfRow(row);   // lane vault-entry-description: its name and description (another agent's or the owner's words — belted)
       out.push({ ref: r ? r.ref : null, store: ref.store, label: ew.name, ...(ew.note ? { note: ew.note } : {}), kind: row.kind, field: ref.field, ...(paused ? { paused: true } : {}), ...(owns(ref) ? { by: 'own', ...(pv.prov === 'minted' ? { minted: true, for: VR.forHostOf(pv.forHost) } : {}) } : g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : hd ? { by: 'standing', grant: hd.grant, hosts: hd.hosts, commands: (hd.commands || []).map((c) => VUG.commandWords(c)), scopes: scopesWordsOf(hd.scopes), source: hd.source || null, ...(hd.at ? { since: new Date(hd.at).toISOString() } : {}), paused, ...(hd.until ? { until: new Date(hd.until).toISOString() } : {}) } : {}) });   // lane vault-standing-request: the scope (hosts / commands), who wrote it, since when
@@ -2017,9 +2020,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // which host gets the token cannot be told; refuse rather than silently send GH_ENTERPRISE_TOKEN to the URL's host (the r15
     // leak: the URL host was dropped from routeHosts, so the verdict saw only the -R host and approved ok:own with no card).
     if (sealedTool && shape.routeHosts.length > 1) { const hs = [...shape.routeHosts]; note('two_hosts', { ...head }); return named('two_hosts', { hosts: hs, words: `this command names two hosts it could contact — ${hs.join(' and ')}: a URL in a positional points to one and -R / GH_HOST (or a repo spec) to another. A sealed credential tool homes the token to only one host, so which one receives it cannot be told — nothing ran. Name a single host (drop the URL, or point -R at the URL's host).` }); }
-    // lane vault-agent-own: ANOTHER conversation's agent entry is refused by name before any fact of it is read (no switch opens it)
-    const foreign = spec.refs.find((r) => VR.agentScopeOf(r) && !VR.ownsAgentEntry(r, caller));
-    if (foreign) { note('use_not_granted', { ...head, ref: foreign.ref }); return named('use_not_granted', { ref: foreign.ref }); }
+    // lane vault-agent-own: ANOTHER conversation's agent entry is refused by name (no switch opens it) — B-bc3b: unless the owner
+    // SHARED it through its grant row («Who may use it…»: this caller, for this run's hosts — judged below by the grant door's
+    // PURE verdict, read before any fact of the entry); with no grant door at all it is refused here, before anything is read
+    const foreignRefs = spec.refs.filter((r) => VR.agentScopeOf(r) && !VR.ownsAgentEntry(r, caller));
+    if (foreignRefs.length && !useGrants) { note('use_not_granted', { ...head, ref: foreignRefs[0].ref }); return named('use_not_granted', { ref: foreignRefs[0].ref }); }
     const dest = VR.destinationsOf(shape);   // lane vault-use-grants round 2 (BLOCKER): the grant covers the run's DESTINATIONS, judged by the reader the card uses
     // lane vault-standing-request: where NO host can be read (an interpreter + its script, a program outside the tool table), the
     // run's COMMAND TOKEN — what a standing grant on «this command» names (the program's real path, the script's real path + the
@@ -2037,6 +2042,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const facts = { ...uf, conversationKeys: [...new Set([caller.conversationId, ...(Array.isArray(uf.conversationKeys) ? uf.conversationKeys : [])].filter(Boolean).map(String))], groupIds: Array.isArray(uf.groupIds) ? uf.groupIds : [], groupsUnreadable: !!uf.groupsUnreadable };
       for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: dest.hosts, destinationKnown: !!shape.destKnown, entryHosts: row.hosts || [], tool: shape.name, command: cmdToken })); } catch { /* unreadable: no standing approval */ } } }   // round 3 (item 5): `tool` scopes a wildcard default to its CLI; round 9 (seam ruling C): a standing grant covers the run when the reader READ every destination (`destKnown`), NOT when «always» would be offered (`shape.always`) — the two are decoupled so a keyed routing flag whose host is read is still coverable by a grant naming it
     }
+    // B-bc3b: ANOTHER conversation's agent entry runs ONLY as the owner shared it — its grant row admits THIS caller for EVERY host
+    // of this run (a refused run store refuses it too: fail closed); anything less is refused by name as before (no card: what an
+    // agent stored is its own — another may use it only by the owner's deliberate widening)
+    const sharedIds = new Set();
+    for (const r of foreignRefs) {
+      const v = standing.get(r.id);
+      if (!(v && v.ok === true)) { note('use_not_granted', { ...head, ref: r.ref }); return named('use_not_granted', { ref: r.ref }); }
+      sharedIds.add(r.id);
+    }
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
     const d = load();
     const refused = !!(d && d.refused);   // round 3 (MAJOR item 2): the store failed its mark — fail CLOSED (every standing grant paused)
@@ -2052,7 +2066,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (g) purposes.set(r.id, g.purpose);
       if (g && !sw) admitted.push({ pair: pairOf(scope, r.id), g });
       const suspended = refused || !!(row && d && d.suspended && d.suspended.has(r.id));   // round 2 MAJOR: the owner turned this entry OFF — every grant is suspended while it is (kept, not deleted); round 3: a refused store suspends EVERYTHING
-      const open = sw || !!g;   // round 4 (MAJOR item 4): ON is an ALLOW-LIST — only the owner's switch (`runnable`, trusted store) or the once-grant his answer wrote opens the entry; a standing vault-use grant is honoured ONLY when the switch is ON too (a refused / wiped / replayed store lists nothing ON ⇒ fail closed; an entry with a grant but never switched ON is PAUSED — A7)
+      const open = sw || !!g || (sharedIds.has(r.id) && !refused);   // B-bc3b: an agent's entry the owner SHARED with this caller (its grant row, judged above) — no switch is its; round 4 (MAJOR item 4): ON is an ALLOW-LIST — only the owner's switch (`runnable`, trusted store) or the once-grant the owner's answer wrote opens the entry; a standing vault-use grant is honoured ONLY when the switch is ON too (a refused / wiped / replayed store lists nothing ON ⇒ fail closed; an entry with a grant but never switched ON is PAUSED — A7)
       const e0 = !open && row && !own && !refused ? endedOf(scope, r.id) : null;
       const ended = e0 && !(suspended && (offAt.get(r.id) || 0) >= e0.grantAt) ? e0 : null;   // B-a14b: an approval that ended — said as itself; an OFF that came AFTER the approval was given is the owner's news (a grant given after the OFF, then used, is said as used)
       let bytes = 0;
@@ -2068,7 +2082,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const remembered = stored && (stored.until == null || stored.until > now()) ? stored : short && short.until > now() ? { until: short.until } : null;
     // granted: P0 has no who-may-use list — the owner's per-row switch and the card ARE the grant (P1 vault-use-reach narrows it
     // to whom); an AGENT's own entry (`agent:<scope>/<name>`) is its conversation's only
-    const granted = spec.refs.every((r) => !VR.agentScopeOf(r) || VR.ownsAgentEntry(r, caller));   // a mint's scope: the conversation's registered id, or (lane vault-agent-own) its durable one
+    const granted = spec.refs.every((r) => !VR.agentScopeOf(r) || VR.ownsAgentEntry(r, caller) || sharedIds.has(r.id));   // B-bc3b: + one the owner shared with it   // a mint's scope: the conversation's registered id, or (lane vault-agent-own) its durable one
     const passes = () => [...hostPasses.values()].filter((p) => p.scope === scope).map((p) => ({ id: p.id, host: p.host }));   // lane vault-agent-own: the hosts the owner let a minted value go to
     // round 14/15: the digest is taken after the PER-CALLER cap (round 15: a refused call never hashes) and memoised per inode
     // identity; no await sits between the hub-wide cap check and runs.add (20 parallel calls see callerRuns grow and 16 get
@@ -2117,7 +2131,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // no card after it until the vault locked): a run a LIVE 1-hour window admits (every entry admitted, a window on one) is
       // judged BEFORE the local instance's `seen` pass — every use inside the hour is a window use (one notice each) and the
       // hour's end asks again, on a local instance as on a cluster
-      const winAdmits = !!useGrants && !refused && spec.refs.length > 0 && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && memberUsable(d, r.id, standing.get(r.id).id)) && spec.refs.some((r) => standing.get(r.id).scope === 'window');
+      const winAdmits = !!useGrants && !refused && spec.refs.length > 0 && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && (memberUsable(d, r.id, standing.get(r.id).id) || sharedIds.has(r.id))) && spec.refs.some((r) => standing.get(r.id).scope === 'window');
       let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair) && !winAdmits, instance: instanceKind(), policy: policy(), passes: passes(), now: now() });
       let whyAgain = null;
       if (!verdict.ok && verdict.ask) {   // lane vault-agent-own r20b/r23: a late «allow once» pass runs this EXACT command ONCE with no card (consumed); an open late card re-asks the one card
@@ -2128,7 +2142,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const policyNotes = [];   // int361: the policy judge's word for the card — joined where a card is drawn (vault-agent-own r19: card_too_long binds only a CARD)
       // lane vault-use-grants: A STANDING APPROVAL SHORT-CIRCUITS THE CARD — every entry admitted for every host of the run (the
       // verdict's own refusals stand: a lock, an unknown entry, a too-short value, another conversation's own entry)
-      if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && memberUsable(d, r.id, (standing.get(r.id) || {}).id))) {   // round 4 (MAJOR item 4): a grant short-circuits the card ONLY when the entry is listed ON (an allow-list, trusted store); round 7 (MAJOR item 2): `memberUsable` IS that allow-list read AND the pause fact in one — the entry ON, and either the owner opened it (everyone usable) or a PRESS did and THIS member is in the resumed set. A member a press left paused draws the card (never a silent by:grant).
+      if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && (memberUsable(d, r.id, (standing.get(r.id) || {}).id) || sharedIds.has(r.id)))) {   // B-bc3b: a shared agent entry has no switch — its grant row is the allow
+        // round 4 (MAJOR item 4): a grant short-circuits the card ONLY when the entry is listed ON (an allow-list, trusted store); round 7 (MAJOR item 2): `memberUsable` IS that allow-list read AND the pause fact in one — the entry ON, and either the owner opened it (everyone usable) or a PRESS did and THIS member is in the resumed set. A member a press left paused draws the card (never a silent by:grant).
         for (const r of spec.refs) standingIds.set(r.id, standing.get(r.id).id);
         verdict = { ok: true, by: 'grant', grants: [...new Set(standingIds.values())] };
         head.grants = verdict.grants;
@@ -2143,6 +2158,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
           verdict.window = { until: end, left, who: String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80), entry: wins.map((r) => nameById[r.id] || r.ref).join('”, “'), program: toolName || path.basename(String(spec.tool || '')), where: shape.destKnown && dest.hosts.length ? dest.hosts.join(', ') : null };
         }
       }
+      // B-bc3b (the read): a run that names an entry SHARED with this caller never draws a card — the owner shared it for the hosts
+      // the row names, nothing more; a card here (a mixed run: + an own minted value bound elsewhere, + a free entry not covered)
+      // would let «Allow once» fail on it and «Always» / «Allow for 1 hour» write this caller a member the owner never gave
+      if (!verdict.ok && verdict.ask && sharedIds.size) { const r0 = spec.refs.find((r) => sharedIds.has(r.id)); note('use_not_granted', { ...head, ref: r0.ref, why: 'shared-card' }); return named('use_not_granted', { ref: r0.ref }); }
       // lane vault-use-grants round 7 (MINOR): AN 8-HOUR PASTE GRANT is HOST-SCOPED — it admits a run with no card ONLY for the
       // HOSTS the request named (the Settings words «may use it in commands to those hosts for 8 hours» now match the code). A run
       // whose destinations are not ALL covered — another host, an opaque route, or a paste that named no hosts — draws its card.

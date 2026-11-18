@@ -10374,10 +10374,10 @@ export default {
   "Integrations & channels": "集成与频道", // lane vault-window-v2
   "Machines & relay": "机器与中继", // lane vault-window-v2
   "Kept by agents": "agent 存放", // lane vault-window-v2
-  "Its own conversation uses it directly · other conversations cannot use it": "本对话可直接使用 · 其他对话不能使用",
+  "Its own conversation uses it directly · another one only as you share it («Who may use it…»)": "本对话可直接使用 · 其他对话只能按你的共享使用（「谁可以用…」）",
   "Its own conversation uses it directly · other conversations need a grant": "本对话可直接使用 · 其他对话需授权",
   "kept by {name}": "由 {name} 保存",
-  "What an agent kept itself: the conversation that kept it uses it without asking you; other conversations cannot use it": "agent 自己存的：存它的那个对话直接使用，不用问你；其他对话不能使用",
+  "What an agent kept itself: the conversation that kept it uses it without asking you; another conversation only as you share it": "agent 自己存的：存它的那个对话直接使用，不用问你；其他对话只能按你的共享使用",
   "Added by an agent itself — the agent saw the seed": "agent 自己添加 · agent 见过种子",
   "By you": "我自己", // lane vault-window-v2
   "Scanned · by you": "扫码 · 我自己", // lane vault-window-v2
@@ -12126,6 +12126,8 @@ export default {
   "used {n}× by {m} conversations": "已被 {m} 个对话使用 {n} 次", // lane vault-use-grants
   "Who may use «{name}»": "谁可以用「{name}」", // lane vault-use-grants
   "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.": "他们可以用它运行命令（vibespace-vault run），发往下面的主机时不再每次弹卡片；他们永远看不到它。其他主机，或无法判断发往何处的命令（shell、脚本），仍会问你。", // lane vault-use-grants
+  "Share it: let another conversation or a Task Group run commands with it for the hosts you name. Another host is refused — an agent's own value goes only where you say.": "共享它：让另一个会话或任务组，在你指定的主机上用它运行命令。其他主机会被拒绝——代理自己存放的值只去你说的地方。",
+  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told, is refused: an agent's own value goes only where you say.": "他们用它运行命令（vibespace-vault run），对下面的主机每次都不弹卡片；他们看不到它的值。其他主机，或无法判断去向的命令，会被拒绝：代理自己存放的值只去你说的地方。",
   "Who may use it": "谁可以用", // lane vault-use-grants
   "Who": "给谁", // lane vault-use-grants
   "For which hosts": "用于哪些主机", // lane vault-use-grants
@@ -12541,6 +12543,7 @@ export default {
   "“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」无法重新打开：关闭会把它从这个桌面的布局中永久删除。只有更早的回滚点（恢复之前的布局…）还保留着它。",
   "{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.": "其中 {n} 个无法重新打开（{names}）：关闭会把它们从这个桌面的布局中永久删除。只有更早的回滚点（恢复之前的布局…）还保留着它们。",
   "A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.": "主机就是命令带着它连去的地方——比如 API 密钥连 api.openai.com，路由器连 192.168.1.1。VibeSpace 读不出去向的程序（脚本）改为按命令放行，在它的运行卡片上点「总是（这条命令）」。", // lane vault-standing-request
+  "A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. Another conversation sends an agent's value only to the hosts you name here; a command whose destination cannot be told is refused.": "主机是命令用它连接的地方——例如 API 密钥对应 api.openai.com，路由器对应 192.168.1.1。其他对话只会把 agent 存的值发到你在这里写的主机；无法判断去向的命令会被拒绝。",
   "A standing approval for this command — the Vault window lists it; a changed program or script asks again": "已为这条命令设为常驻授权——保险库窗口里能看到它；换了程序或脚本会再问", // lane vault-standing-request
   "A standing approval for this command: this conversation runs it with these secrets without asking until you take it back — VibeSpace cannot see where it sends them; a changed program or script asks again. Asks for the second password first": "这条命令的常驻授权：这个对话用这些密钥运行它不再问你，直到你收回——VibeSpace 看不到它把密钥发往哪里；换了程序或脚本会再问。会先要第二密码", // lane vault-standing-request
   "A standing grant, the same as «Who may use it…» on its row — until you take it back there; asks for the second password first": "常驻授权，和它那一行的「谁可以用…」一样——直到你在那里收回；会先要第二密码", // lane vault-standing-request

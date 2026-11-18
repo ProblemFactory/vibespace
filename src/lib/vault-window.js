@@ -391,7 +391,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     // lane vault-agent-own: what an agent kept itself says its rule — its own conversation uses it with no switch, no card —
     // on its OWN line under the meta (the meta is one clipped line: words past its width were never read)
     const pv = row.provenance && row.provenance.by === 'agent' ? row.provenance : null;
-    const ruleWords = row.run && row.run.own ? t('Its own conversation uses it directly · other conversations cannot use it') : pv && pv.owner ? t('Its own conversation uses it directly · other conversations need a grant') : null;
+    const ruleWords = row.run && row.run.own ? t('Its own conversation uses it directly · another one only as you share it («Who may use it…»)') : pv && pv.owner ? t('Its own conversation uses it directly · other conversations need a grant') : null;
     const ownRule = ruleWords ? vwEl('div', 'vw-own-rule', pv && pv.actor ? `${ruleWords} · ${t('kept by {name}', { name: pv.actor })}` : ruleWords) : null;
     // lane vault-key-row-compact: an automation key's head is ONE line — its kind is the chip and a minted value's length says
     // nothing, so the meta line goes; the name's title keeps when it was made

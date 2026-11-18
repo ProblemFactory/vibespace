@@ -170,6 +170,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
   const host = el('div', 'vw-use-host');
   const useB = el('button', 'vw-btn vw-use-grant', t('Who may use it…'));
   useB.type = 'button';
+  const ownTitle = t('Share it: let another conversation or a Task Group run commands with it for the hosts you name. Another host is refused — an agent\'s own value goes only where you say.');   // B-bc3b: an agent's OWN entry (no card for another host: it is refused)
   useB.title = t('Let a conversation, a Task Group or all agents run commands with it for the hosts you name — no card each time. Another host still asks you.');
   let cur = row;
   useB.onclick = () => showUseGrantDialog(cur, { app, refresh });
@@ -177,7 +178,8 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
     cur = r;
     host.textContent = '';
     const u = (r && r.run && r.run.use) || null;
-    useB.hidden = !!(u && u.own);   // lane vault-standing-request r2 (MAJOR 3): an agent's OWN entry shows the standing grants it holds (chips + ✕) — nobody else may use it, so there is no «Who may use it…» to add with
+    if (u && u.own) useB.title = ownTitle;
+    useB.hidden = false;   // lane vault-standing-request r2 (MAJOR 3): an agent's OWN entry shows the standing grants it holds (chips + ✕); B-bc3b: and «Who may use it…» — the owner shares it with another conversation or a Task Group (the run door admits them only as the row says)
     if (!u) return;
     if (u.unknown) { host.append(el('div', 'vw-use-bad', t('Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.'))); return; }
     const live = (u.to || []).filter(Boolean);
@@ -266,14 +268,14 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     unsaved: { isDirty: () => start !== null && stateOf() !== start, save: () => saveNow() } });
   if (raised) return null;   // raised: the same entry's «Who may use» form, as it was (int361, dialog-yield §103 r3: key = the entry)
   let ownBox = null, hostsIn = null, endSel = null, polIn = null, previewNow = () => {};
-  body.append(el('div', 'vw-ak-hint', t('They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.')));
+  body.append(el('div', 'vw-ak-hint', u.own ? t('They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told, is refused: an agent\'s own value goes only where you say.') : t('They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.')));   // B-bc3b: an agent's own entry — another host is REFUSED there, never a card
   picker = principalPicker({ items: () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))], app, multi: true, selected: stored.selected, placeholder: t('Search sessions and groups…'), label: t('Who may use it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, except: { selected: stored.except, extra, onChange: () => previewNow() }, onChange: () => previewNow() });
   body.append(el('div', 'vw-ak-sec', t('Who')), picker.el);
   // THE HOSTS: one list for the members this save writes; the entry's own («the hosts it was stored for») when it has them
   const common = (() => { if (!members.length) return null; const k = JSON.stringify(members[0].hosts || []); return members.every((m) => JSON.stringify(m.hosts || []) === k) ? members[0].hosts || [] : null; })();
   body.append(el('div', 'vw-ak-sec', t('For which hosts')));
   // lane vault-standing-request (B-eba2 — the owner: 「主机是什么东西？我该怎么填」): what a host IS, said where it is typed
-  body.append(el('div', 'vw-ak-hint vw-use-hosts-what', t('A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.')));
+  body.append(el('div', 'vw-ak-hint vw-use-hosts-what', u.own ? t('A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. Another conversation sends an agent\'s value only to the hosts you name here; a command whose destination cannot be told is refused.') : t('A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.')));   // B-bc3b (the read): an agent's own entry — no card for a grantee
   if (entryHosts.length) {
     const lab = el('label', 'vw-ak-pick vw-use-own');
     ownBox = el('input'); ownBox.type = 'checkbox';
@@ -289,7 +291,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // «让 agent 自己申请» (B-eba2): right under the field the owner could not fill — the agent can ask for exactly this grant, one card to allow
   const askAgent = el('div', 'vw-ak-hint vw-use-ask-agent');
   askAgent.append(el('b', null, t('Not sure what to fill in? Let the agent ask.')), document.createTextNode(' ' + t('It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.', { ref: u.ref || 'vault://…' })));
-  body.append(askAgent);
+  if (!u.own) body.append(askAgent);   // B-bc3b (the read): an agent's own entry — another conversation's --standing ask is refused there (use_not_granted), its own needs none
   const syncOwn = () => { hostsIn.hidden = !!(ownBox && ownBox.checked); };
   if (ownBox) { ownBox.onchange = syncOwn; syncOwn(); }
   // THE END
