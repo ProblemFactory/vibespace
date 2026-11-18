@@ -13,6 +13,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A sent message whose files did not all arrive offers «Send the rest» on its card: only the missing files go, as a new message; an agent can propose it too.
 - An Antigravity account’s usage is read once after a stretch of work (5 quiet minutes, at most every 30 minutes); its own Settings row can turn that off.
 - An Antigravity account’s row says how many times its usage was read today; hover it to see who asked.
+- Manage agents → Add a third-party model…: Claude Code on DeepSeek, Kimi, GLM or MiniMax, Codex on OpenRouter or your own service, with your own key.
 
 ### Changed
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.

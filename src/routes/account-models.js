@@ -37,6 +37,7 @@ function registerAccountModelRoutes(app, { accounts, providers }) {
     if (!t) return res.status(404).json({ error: 'unknown account', code: 'unknown' });
     if (!t.provider) return res.status(409).json({ error: 'this account has no model provider', code: 'no_provider' });
     const r = providers.setModels(t.provider.id, req.body || {});
+    if (r.ok && /^pv-/.test(String(t.provider.id))) { try { if (typeof accounts.providersChanged === 'function') accounts.providersChanged(); } catch { } }   // lane lg-providers U5 r1: every page re-reads the provider's rows
     if (r.ok) return res.json({ ok: true, provider: r.provider });
     if (r.code === 'invalid') return res.status(400).json({ error: 'some rows are not valid', code: 'invalid', errors: r.errors });
     return res.status(409).json({ error: 'these models are listed by the harness or the provider — they are not entered here', code: r.code });

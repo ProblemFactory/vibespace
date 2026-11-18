@@ -510,6 +510,12 @@ export function defaultIdFields() {
  *  harness's field, null when unset. Lane antigravity-card-fixes (the owner 2026-10-20: the ★ never moved to an
  *  Antigravity account): the cache copied two hand-picked fields (claude's + codex's), so the server stored
  *  defaultAntigravityAccountId and every roster / New Session read of it saw undefined — the machine login stayed ★. */
+/** THE PAGE'S ACCOUNT ROWS from a server answer (lane lg-providers U5): the accounts + the third-party providers' rows the
+ *  server carries beside them (`providerRows`: one per harness a provider fits, type 'provider') — one list for every
+ *  surface that picks an account (New Session, Session Properties → Billing, the badge). */
+export function accountRowsOf(answer) {
+  return [...((answer && Array.isArray(answer.accounts)) ? answer.accounts : []), ...((answer && Array.isArray(answer.providerRows)) ? answer.providerRows : [])];
+}
 export function accountDefaultsOf(answer) {
   return Object.fromEntries(defaultIdFields().map((f) => [f, (answer && answer[f]) || null]));
 }

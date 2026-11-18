@@ -90,7 +90,7 @@ import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser
 import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
 import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27: a browser session's replay (window type browser-replay)
 import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
-import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, hasEffortMenu, uiRow, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly, accountDefaultsOf } from './agent-meta.js';
+import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, hasEffortMenu, uiRow, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly, accountDefaultsOf, accountRowsOf } from './agent-meta.js';
 import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
 import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off); lane voice-follows-focus: dictation follows the focus
 import { enterSubmits } from './chat-enter-keys.js';
@@ -338,7 +338,7 @@ class App {
         this._applyCustomThemesFromServer(msg.themes);
       }
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
-        this._accounts = { ...(this._accounts || {}), accounts: msg.accounts, ...accountDefaultsOf(msg) }; // every harness's default field (agent-meta)
+        this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(msg), ...accountDefaultsOf(msg) }; // every harness's default field (agent-meta) + the providers' rows (lane lg-providers U5)
         // Live-re-render an OPEN Manage Agents surface — without this the
         // roster only updated on the next manual reopen, so adding an account
         // (esp. one never logged in) left the page unchanged (inc-msl890ua).
@@ -2113,6 +2113,9 @@ class App {
         : t('checking {host}…', { host: hostName });
       const uncertainIds = new Set(); // disabled only because the probe hasn't answered
       for (const a of list) {
+        // a THIRD-PARTY provider (lane lg-providers U5 r1): its own words; on another machine it is not offered as usable
+        // (its spawn road runs on this machine only — the create would refuse it)
+        if (a.type === 'provider') { opts.push(onHost ? [a.id, t('{name} (third party)', { name: a.name }) + ' — ' + t('this machine only'), true] : [a.id, t('{name} (third party)', { name: a.name })]); continue; }
         // Pooled pseudo-account: neither an API key (the old else-branch
         // labeled it "— API key …undefined") nor a plain subscription.
         // Local-only by design (directory-symlink mechanics).
@@ -2496,7 +2499,7 @@ class App {
   // list fresh between refreshes.
   refreshAccounts() {
     return fetchJson('/api/accounts').then(d => {
-      if (d) this._accounts = { accounts: d.accounts || [], ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {} }; // every harness's default field (agent-meta)
+      if (d) this._accounts = { accounts: accountRowsOf(d), ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {} }; // every harness's default field (agent-meta)
       if (d?.hostNames) this._hostNamesKnown = d.hostNames; // id→name for chips (2.244.1)
       return this._accounts;
     }).catch(() => this._accounts);

@@ -34,11 +34,21 @@ const STATUS = Object.freeze({ invalid: 400, unknown: 404, 'built-in': 409, vaul
   'no-address': 409, 'vendor-own': 409, unfit: 409, 'in-flight': 409, 'no-key': 409, failed: 500 });
 const WORDS = Object.freeze({
   invalid: 'some fields are not valid', unknown: 'unknown provider', 'built-in': 'a built-in provider is not changed here',
-  vault_locked: 'unlock the vault first — the provider’s key is kept there', vault_not_set_up: 'set up the vault first — the provider’s key is kept there',
+  vault_locked: 'Unlock the vault first — the provider’s key is kept there', vault_not_set_up: 'Set up the vault first — the provider’s key is kept there',   // the dictionary's own keys (the page words them)
   'key-unreadable': 'the vault could not keep the key', 'write-failed': 'the provider list could not be written',
 });
+/** the variable each harness it serves reads the key from — its descriptor's own plan, asked with no key (the wizard's
+ *  technical details; lane lg-providers U5) */
+function keyVarsOf(p, f) {
+  const out = {};
+  for (const [h, x] of Object.entries(f)) {
+    if (!x.ok) continue;
+    try { const d = require('../harnesses').get(h); const sp = d && d.creds && typeof d.creds.providerSpawn === 'function' ? d.creds.providerSpawn({ provider: p, key: '', home: null }) : null; if (sp && sp.secret && sp.secret.var) out[h] = sp.secret.var; } catch { }
+  }
+  return out;
+}
 /** a record as the page reads it — no key (there is none in it), not where the vault keeps it, + which harnesses it serves */
-const pub = (p) => { if (!p) return null; const { keyRef, ...rest } = p; return { ...rest, hasKey: !!keyRef, fits: MP.fits(p) }; };
+const pub = (p) => { if (!p) return null; const { keyRef, ...rest } = p; const f = MP.fits(p); return { ...rest, hasKey: !!keyRef, fits: f, keyVars: keyVarsOf(p, f) }; };
 const shippedPub = (s) => ({ ...s, fits: MP.fits({ kind: s.kind }) });
 
 function registerProviderRoutes(app, { providers, tester = null, onChange = () => { } }) {

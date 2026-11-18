@@ -29,6 +29,8 @@ import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
 import { permissionRulesCaps, resetCreditCapable, scopedCapsReadOnDemand, billingRow, getBackendMeta } from './agent-meta.js';
 import { rosterResetOffer } from '../reset-credit.js'; // PURE (design-reset-credits p2): what a row says about stored reset credits
+import { renderProviderRows } from './provider-roster.js'; // lane lg-providers U5 (B-d578): a third party's rows under the roster
+import { openProviderWizard } from './provider-wizard.js'; // lane lg-providers U5: Add a third-party model… (four screens)
 import { openAccountModelsDialog } from './account-models.js'; // lane provider-record (q-053 §3): ⋯ → 模型… — the account's provider and the models it may use
 import { openOatShapeDialog } from './oat-shape-dialog.js';
 import { shapeName } from '../plan-names.js'; // PURE (lane oat-add-door, acceptance r1): a plan by the table's CURRENT names on the row's line // lane oat-add-door: the guided door — sign in once, or choose the subscription type
@@ -1969,7 +1971,7 @@ export function installManageAgents(App, ctx = {}) {
     const { body, selectedHost, done, run, refresh, st } = ctx;
     let accts;
     try { accts = await this.refreshAccounts(); } catch { return; }
-    const codexAccts = (accts.accounts || []).filter(a => a.backend === 'codex')
+    const codexAccts = (accts.accounts || []).filter(a => a.backend === 'codex' && a.type !== 'provider') // a third party's row is drawn by its own section (provider-roster.js)
       .sort(rosterSort); // type-order parity with the claude roster: pool → ChatGPT login
     // st is already machine-scoped: /api/hosts/<id>/backend-status on a host.
     const gLoggedIn = !!(st?.codex?.loggedIn);
@@ -2075,6 +2077,7 @@ export function installManageAgents(App, ctx = {}) {
     addBtn.title = t('Sign in another ChatGPT account — stored in VibeSpace (not on any one machine), switchable per session');
     addBtn.onclick = () => { done(); this._addCodexSubscription(); };
     head.append(title, addBtn);
+    if (!selectedHost) { const pvBtn = document.createElement('button'); pvBtn.className = 'agent-btn acct-add'; pvBtn.textContent = '+ ' + t('Add a third-party model…'); pvBtn.onclick = () => { done(); openProviderWizard({ backend: 'codex', onDone: refresh }); }; head.append(pvBtn); } // lane lg-providers U5
     // codex pool (P2, cold-switch): same pseudo-account model as claude's —
     // needs ≥1 logged-in ChatGPT subscription to point at
     if (!selectedHost && codexAccts.some((x) => x.type === 'subscription' && x.loggedIn)) {
@@ -2086,6 +2089,7 @@ export function installManageAgents(App, ctx = {}) {
     if (ctx.stale?.()) return; // a newer refresh took over mid-await
     row.append(head, left);
     body.appendChild(row);
+    if (!selectedHost) renderProviderRows(body, 'codex', { refresh }).catch(() => { }); // lane lg-providers U5: this machine's third-party providers that serve Codex
     left.onclick = async (e) => {
       const keyRow = e.target.closest?.('.acct-key-row');
       if (!keyRow) return;
@@ -2205,7 +2209,7 @@ export function installManageAgents(App, ctx = {}) {
     const label = getBackendMeta(be).label;
     const login = t(bill.accountLogin || bill.globalLogin); // the ACCOUNT word (antigravity: 'Google'); the machine row says globalLogin
     const machineLogin = t(bill.globalLogin);
-    const list = (accts.accounts || []).filter((a) => a.backend === be).sort(rosterSort);
+    const list = (accts.accounts || []).filter((a) => a.backend === be && a.type !== 'provider').sort(rosterSort);   // lane lg-providers: a provider row is never an account row here
     const defId = accts[bill.defaultIdField] || null;
     const st = ctx.st?.[be] || {};
     const { CROWN, GLOBE, STAR_F, STAR_O, DOTS } = ROSTER_ICONS;
@@ -3177,7 +3181,7 @@ export function installManageAgents(App, ctx = {}) {
     // (the umbrella identities you actually pick), then subscriptions, then
     // API keys; name-sorted within a type so the list stays predictable as
     // accounts come and go.
-    const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude').sort(rosterSort);
+    const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude' && x.type !== 'provider').sort(rosterSort); // a third party's row is drawn by its own section (provider-roster.js — lane lg-providers U5 r1)
     // §ban-safety: on a REMOTE host a subscription can't run unless the opt-in
     // is set (its creds would ship to the host's — likely datacenter — IP). Its
     // rows render disabled with guidance; API keys are unaffected.
@@ -3508,6 +3512,8 @@ export function installManageAgents(App, ctx = {}) {
       items.push(
         { label: t('Add Console account…'), action: () => { done(); this._addConsoleAccount(); } },
         { label: t('Add API key…'), action: addApiKey },
+        // lane lg-providers U5 (B-d578): a THIRD PARTY's model (DeepSeek, Kimi, GLM, MiniMax, OpenRouter, your own) — this machine only
+        ...(!selectedHost ? [{ label: t('Add a third-party model…'), action: () => { done(); openProviderWizard({ backend: 'claude', onDone: refresh }); } }] : []),
       );
       // Pooled pseudo-account (local only): one switchable identity over the
       // logged-in subscriptions. Needs at least one to point at.
@@ -3530,6 +3536,7 @@ export function installManageAgents(App, ctx = {}) {
     if (ctx.stale?.()) return; // a newer refresh took over mid-await
     row.append(head, left);
     body.appendChild(row);
+    if (!selectedHost) renderProviderRows(body, 'claude', { refresh }).catch(() => { }); // lane lg-providers U5: this machine's third-party providers that serve Claude Code
     // Per-key row actions (event delegation on the section)
     // The login chip is role=button: Enter/Space must do what a click does.
     left.onkeydown = (e) => { const c = (e.key === 'Enter' || e.key === ' ') && e.target.closest?.('.acct-login-chip'); if (c) { e.preventDefault(); c.click(); } };

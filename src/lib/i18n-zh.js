@@ -10365,7 +10365,44 @@ export default {
   "Model provider key": "模型提供方密钥", // lane lg-providers
   "VibeSpace hands it to the agent CLI it starts for this provider": "VibeSpace 把它交给为这个提供方启动的 agent CLI", // lane lg-providers
   "Put the key in the key field — not in the address": "请把密钥填在密钥框里——不要写进地址", // lane lg-providers
+  "Not for {harness}": "不能用于 {harness}", // lane lg-providers
+  "This provider’s model runs the agent’s tools in its conversations — pick one you trust": "这个提供方的模型会在对话里操作 agent 的工具——请选你信任的", // lane lg-providers
+  "Paste the key again": "重新粘贴密钥", // lane lg-providers
+  "Save the key and test again": "保存密钥并重新测试", // lane lg-providers
+  "A third-party model runs on this machine only for now — start the conversation here": "第三方模型目前只能在本机运行——请在本机开始这段对话", // lane lg-providers
+  "Something went wrong": "出了点问题", // lane lg-providers
   "Pick a model first — the test asks the provider with it": "请先选一个模型——测试要用它向提供方发问", // lane lg-providers
+  "Add a third-party model": "添加第三方模型", // lane lg-providers
+  "Pick who serves the model — you pay them by use, with your own key": "选一家提供模型的服务——用你自己的密钥，按用量付给他们", // lane lg-providers
+  "Could not read the providers — {reason}": "无法读取提供方——{reason}", // lane lg-providers
+  "How the key reaches the program": "密钥怎样交给程序", // lane lg-providers
+  "an environment variable of that conversation only, never its command line": "只是那段对话的一个环境变量，从不出现在命令行里", // lane lg-providers
+  "Codex sends this provider its installation id and session id with each request": "Codex 每次请求都会把它的安装 id 和会话 id 发给这个提供方", // lane lg-providers
+  "Where your account is": "你的账号在哪里", // lane lg-providers
+  "Address of your service": "你的服务的地址", // lane lg-providers
+  "What it speaks": "它用的接口", // lane lg-providers
+  "Paste your {provider} key": "粘贴你的 {provider} 密钥", // lane lg-providers
+  "Where to get a key": "去哪里拿密钥", // lane lg-providers
+  "Key": "密钥", // lane lg-providers
+  "The key is kept in the vault. The test sends the provider one short message with it — it costs a fraction of a cent.": "密钥存放在保险库里。测试会用它给提供方发一句很短的话——花费不到一分钱。", // lane lg-providers
+  "Save and test": "保存并测试", // lane lg-providers
+  "{provider} is saved. Each agent that can use it is tested once:": "{provider} 已保存。能用它的每个 agent 各测试一次：", // lane lg-providers
+  "Which model answers in new conversations": "新对话用哪个模型回答", // lane lg-providers
+  "Get the model list from {provider}": "从 {provider} 获取模型列表", // lane lg-providers
+  "Other model id (optional)": "其他模型 id（可选）", // lane lg-providers
+  "{provider} is ready. It can be used by:": "{provider} 已就绪。可以使用它的有：", // lane lg-providers
+  "Pick it in the account row of New Session. It has no usage reading — you pay {provider} by use.": "在「新建对话」的账号行里选它。它没有用量读数——你按用量付费给 {provider}。", // lane lg-providers
+  "tested {ago}": "{ago}测试过", // lane lg-providers
+  "last test: {words}": "上次测试：{words}", // lane lg-providers
+  "not tested yet": "尚未测试", // lane lg-providers
+  "No usage reading": "无用量读数", // lane lg-providers
+  "paid by use": "按量付费", // lane lg-providers
+  "New key for {name}": "{name} 的新密钥", // lane lg-providers
+  "Third-party models": "第三方模型", // lane lg-providers
+  "Add a third-party model…": "添加第三方模型…", // lane lg-providers
+  "{name} (third party)": "{name}（第三方）", // lane lg-providers
+  "New key…": "换新密钥…", // lane lg-providers
+  "The new key is kept in the vault": "新密钥已存放在保险库里", // lane lg-providers
   "Works": "可用", // lane lg-providers
   "The key was refused — check it in the provider’s console": "密钥被拒绝——去提供方的控制台看看", // lane lg-providers
   "This provider does not serve the model, or not what this agent needs": "这个提供方不提供这个模型，或者不提供这个 agent 需要的接口", // lane lg-providers

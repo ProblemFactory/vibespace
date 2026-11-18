@@ -540,6 +540,24 @@ function draftOf(presetId, { region = null, baseUrl = null, label = null, model 
     wire: s.wires && s.wires.includes(wire) ? wire : null,
   };
 }
+// ── THE ROSTER ROWS (lane lg-providers U5, q-045 §2.2): a third-party record PROJECTED as an account row on every harness
+// it fits — { id: the record's own (pv-…), name, type: 'provider', backend, tail, model, … } — carried BESIDE the accounts
+// (list().providerRows), never inside them: the hub's account readers keep seeing only accounts.json's records; the page
+// merges both into its own cache (agent-meta accountRowsOf). ONE record, one row per harness it fits. ──
+function rosterRowsOf(records, { usable = true } = {}) {   // usable = the key can be read now (the vault open)
+  const out = [];
+  for (const p of Array.isArray(records) ? records : []) {
+    if (!p || presetOf(p.id) || !/^pv-/.test(String(p.id || ''))) continue;
+    const f = fits(p);
+    for (const h of FIT_HARNESSES) {
+      if (!f[h] || !f[h].ok) continue;
+      out.push({ id: p.id, name: p.label, type: 'provider', backend: h, provenance: 'third-party', loggedIn: !!usable, localOnly: true, tail: p.tail || null,
+        model: resolveModel(p, '') || '', preset: p.preset || null, kind: p.kind, providerId: p.id, tested: (p.tested && p.tested[h]) || null, lastTestAt: p.lastTestAt || null, createdAt: p.createdAt || null });
+    }
+  }
+  return out;
+}
+
 const KEY_ERRORS = Object.freeze({
   'key-empty': i18nKey('Paste the key'),
   'key-space': i18nKey('A key has no spaces or line breaks'),
@@ -577,6 +595,6 @@ module.exports = {
   kindOf, presetOf, accountProviderId, listerOf, parseContext, formatContext, validateModelRow, normalizeModelRow, validateModels,
   normalizeProvider, validateProvider, listedRows, withListed, sameModel, namedModel, MODEL_NAME_MAX, resolveModel, servesModel, modelsOf, sourceOf,
   MENU_EMPTY, menuOf, resolvePick, REFRESH, LISTABLE_KINDS, REFRESH_WORDS, modelsEndpointOf, refreshable, refreshVerdict, authHeaders, parseListed,
-  SHIPPED, SHIPPED_AT, shippedOf, REGIONS, FIT_HARNESSES, fits, fitsHarness, FIT_WORDS, WIRES,
-  keyEntryOf, keyRefOf, providerOfKeyRef, validateKey, tailOf, draftOf, KEY_ERRORS,
+  SHIPPED, SHIPPED_AT, shippedOf, REGIONS, REGION_WORDS, FIT_HARNESSES, fits, fitsHarness, FIT_WORDS, WIRES,
+  keyEntryOf, keyRefOf, providerOfKeyRef, validateKey, tailOf, draftOf, KEY_ERRORS, rosterRowsOf,
 };

@@ -269,6 +269,10 @@ export const CENSUS = [
   ['vault-window.js', 'select', 'choice', 'the sort select; the header\'s Lock after idle'],
   // lane takeover-census-fast (B-aacd, 2026-10-20): the .329 base was RED again — two surfaces the heavy road hid (int328 + int329), each
   // read in its file and classed by the census's own rules; from this lane on the census runs in every fast gate
+  ['provider-roster.js', 'input', 'text', 'New key…: a third-party provider\'s key, a password box (lane lg-providers U5)'],
+  ['provider-wizard.js', 'details', 'control', 'Add a third-party model…: the «Technical details» fold under screens ② – ④ (lane lg-providers U5)'],
+  ['provider-wizard.js', 'input', 'text', 'Add a third-party model…: the key (a password box), a self-hosted address and model id, the region radios, the other model id (lane lg-providers U5)'],
+  ['provider-wizard.js', 'select', 'choice', 'Add a third-party model…: the interface a self-hosted service speaks, the model new conversations use (lane lg-providers U5)'],
   ['account-models.js', 'input', 'text', '模型…\'s rows on Manage agents: a configured provider\'s model id / display name / context boxes (template inputs; the new row\'s id box takes the focus — design q-053 r1, lane provider-record; joined at the 2.369.329 integration)'],
   ['vault-totp-row.js', 'input', 'control', '「用于…」\'s grant picker: a checkbox per running conversation / Task Group (el(\'input\') + type checkbox — design q-047 L1, lane vault-totp; joined at the 2.369.328 integration) · lane vault-totp-add: 添加… ▸ 两步验证…\'s masked link and seed fields (type password, a 显示 toggle) and its name'],
   ['vault-totp-row.js', 'details', 'control', '添加… ▸ 两步验证…\'s 「高级」 fold (digits · period · algorithm) — lane vault-totp-add'],

@@ -345,6 +345,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     const hostLinked = (x) => { const v = vOf(x); if (v) return v.usable && v.how === 'host-login'; return bill.hostLogin && !!hostOwnEmail && acctEmailOf(x) === hostOwnEmail; };
     const hostSubHeld = (x) => { const v = vOf(x); if (v) return v.usable && v.how === 'host-held'; return bill.hostLogin && (app._hostSubsKnown?.[rHost] || []).includes(x.id); };
     const subBlocked = (x) => {
+      if (x.type === 'provider') return !!rHost;   // a third-party provider runs on this machine only (lane lg-providers U5 r1)
       const v = vOf(x);
       if (v) return !v.usable; // verdict is authoritative — the same call the spawn makes
       return (x.oat && !(x.oatDaysLeft <= 0)) ? false : (rHost

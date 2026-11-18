@@ -35,6 +35,7 @@ function rowServes(a, { host = null, verdicts = null, logins = null } = {}) {
   if (host) {
     // a pool switches a credentials dir on THIS machine — it never runs on a host (evaluateOnHost 'pool-local-only')
     if (isPool(a)) return { ok: false, why: 'remote-cannot-ship', since: null };
+    if (a.type === 'provider') return { ok: false, why: 'remote-cannot-ship', since: null };   // a third-party provider runs on this machine only (lane lg-providers U5 r1)
     const v = verdicts && verdicts[a.id];
     if (!v) return { ok: true, unjudged: true }; // the host has not answered yet: no claim (the create judges)
     if (v.usable) return { ok: true };

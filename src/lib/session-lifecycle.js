@@ -1647,6 +1647,9 @@ export function installSessionLifecycle(App, ctx = {}) {
     // Manage-Agents visit to that machine; the server re-verifies at spawn.
     const hostSubHeld = (a) => { const v = vOf(a); if (v) return v.usable && v.how === 'host-held'; return bill.hostLogin && rHostId && (this._hostSubsKnown?.[rHostId] || []).includes(a.id); };
     const subBlock = (a) => {
+      // a THIRD-PARTY provider runs on this machine only — never offered to a session on another one (the switch would
+      // end the session first and the create refuse it — lane lg-providers U5 r1)
+      if (a.type === 'provider') return rHostId ? t('A third-party model runs on this machine only for now — start the conversation here') : null;
       const isSub = !bill.apiKeys || (a.type || 'api') === 'subscription';
       if (!isSub) return null; // API keys always ship
       const v = vOf(a);

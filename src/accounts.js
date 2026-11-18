@@ -351,7 +351,10 @@ class AccountManager {
   // read-only identity probe (email/plan/loggedIn) from their creds dir.
   list() {
     let offerOnce = null;   // the guided door's offer, read once per roster (lane oat-add-door: oatShapeOffer)
+    let providerRows = [];
+    try { providerRows = this._providerRows ? this._providerRows() || [] : []; } catch { providerRows = []; }
     return {
+      providerRows,   // lane lg-providers U5: BESIDE `accounts`, never in it (the hub's account readers see records only)
       ...Object.fromEntries(this._defaultIdFields().map((f) => [f, this._state[f] || null])), // defaultAccountId, defaultCodexAccountId, defaultAntigravityAccountId …
       accounts: this._state.accounts.map((a) => {
         const type = this._acctType(a);
@@ -1720,6 +1723,8 @@ class AccountManager {
   setProviderLookup(fn) { this._providerLookup = typeof fn === 'function' ? fn : null; }
   /** (lane lg-providers) a third-party provider was added / changed / removed: every page re-reads the account lists */
   providersChanged() { this._notify(); }
+  /** (lane lg-providers U5) the third-party providers' roster rows (model-providers rosterRowsOf) — list().providerRows */
+  setProviderRows(fn) { this._providerRows = typeof fn === 'function' ? fn : null; }
   /** (lane lg-providers U2) the third-party provider spawn road: `(id, backend, opts) → spawn account | throws by name` */
   setProviderSpawn(fn, modelFor = null) { this._providerSpawn = typeof fn === 'function' ? fn : null; this._providerModel = typeof modelFor === 'function' ? modelFor : null; }
   /** (lane lg-providers U2 r1) a provider record by its id (the badge's name and tail) — null for anything else */

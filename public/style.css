@@ -6199,6 +6199,31 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* THE ACCOUNT DIALOG'S MODEL SECTION (lane provider-record, design q-053 §3 — src/lib/account-models.js): the provider line,
    the rows (id · label · context · caps · 测试), each refusal under its field; a phone stacks each row */
 .am-body { display: flex; flex-direction: column; gap: 8px; }
+/* lane lg-providers U5 (B-d578): the third-party provider wizard + the roster's provider rows — theme variables only */
+#provider-wizard .pw-lead { margin: 0 0 10px; }
+#provider-wizard .pw-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+#provider-wizard .pw-card { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-input); color: var(--text); cursor: pointer; }
+#provider-wizard .pw-card:hover, #provider-wizard .pw-card:focus-visible { border-color: var(--accent); }
+#provider-wizard .pw-card span, #provider-wizard .pw-note, .acct-provider-line { color: var(--text-dim); font-size: 0.9em; }
+#provider-wizard .pw-field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+#provider-wizard .pw-field input[type="password"], #provider-wizard .pw-field input[type="text"], #provider-wizard .pw-field input[type="url"], #provider-wizard .pw-field select { min-height: 32px; }
+#provider-wizard .pw-error { color: var(--red); min-height: 1.2em; }
+#provider-wizard .pw-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+#provider-wizard .pw-fit { margin: 6px 0; }
+#provider-wizard .pw-detail { white-space: pre-wrap; max-height: 8em; overflow: auto; font-size: 0.85em; background: var(--bg-input); border-radius: var(--radius-sm); padding: 6px; }
+#provider-wizard .pw-tech { margin-top: 12px; color: var(--text-dim); font-size: 0.9em; }
+#provider-wizard .pw-tech-row { margin: 4px 0; overflow-wrap: anywhere; }
+.acct-providers-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.acct-provider-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 0; }
+.acct-provider-row .acct-provider-line { flex-basis: 100%; }
+.acct-provider-icon { display: inline-flex; color: var(--text-dim); }
+.acct-provider-row .acct-name { font-weight: 600; }
+.acct-provider-row .acct-tail, .acct-provider-row .acct-model-chip { font-size: 0.9em; color: var(--text-dim); }
+.acct-provider-row .acct-model-chip { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 6px; }
+.acct-provider-more { display: inline-flex; align-items: center; margin-left: auto; }
+#provider-wizard .pw-radio { display: inline-flex; align-items: center; gap: 4px; margin-right: 12px; }
+#provider-wizard .pw-card-off { opacity: 0.75; }
+#provider-wizard .pw-card em { font-style: normal; font-size: 0.85em; color: var(--text-dim); }
 .am-prov { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .am-kind { font-weight: 600; color: var(--text); }
 .am-kind-of { font-weight: 400; font-size: 11px; color: var(--text-dim); }

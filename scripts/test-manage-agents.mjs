@@ -73,7 +73,7 @@ const { fetchJson } = await import(path.join(REPO, 'src/lib/utils.js'));
 const APP = read('src/lib/app.js');
 const RA = /\n  refreshAccounts\(\) \{\n([\s\S]*?)\n  \}\n/.exec(APP);
 const PRE_LINE = "      if (d) this._accounts = { accounts: d.accounts || [], defaultAccountId: d.defaultAccountId || null, defaultCodexAccountId: d.defaultCodexAccountId || null, subscription: d.subscription || {}, cliKey: d.cliKey || {} };";
-const refreshFrom = (body) => new Function('fetchJson', 'accountDefaultsOf', `return function refreshAccounts() {\n${body}\n}`)(fetchJson, AM.accountDefaultsOf);
+const refreshFrom = (body) => new Function('fetchJson', 'accountDefaultsOf', 'accountRowsOf', `return function refreshAccounts() {\n${body}\n}`)(fetchJson, AM.accountDefaultsOf, AM.accountRowsOf);   // accountRowsOf: lane lg-providers U5 (the providers' rows beside the accounts)
 const PUSH = /if \(msg\.type === 'accounts-updated' && Array\.isArray\(msg\.accounts\)\) \{\n\s*(this\._accounts = [^\n]*)\n/.exec(APP);
 
 /** ② ③ ④ as rows, over a roster module and a refreshAccounts body. */
@@ -125,7 +125,7 @@ async function starLegs(Mod, raBody) {
   if (PUSH) {
     const self = { _accounts: { accounts: [], subscription: { x: 1 } } };
     const msg = { type: 'accounts-updated', ...am.list() };
-    new Function('msg', 'accountDefaultsOf', PUSH[1]).call(self, msg, AM.accountDefaultsOf);
+    new Function('msg', 'accountDefaultsOf', 'accountRowsOf', PUSH[1]).call(self, msg, AM.accountDefaultsOf, AM.accountRowsOf);   // accountRowsOf: lane lg-providers U5 (the push carries the providers' rows too)
     leg('the accounts-updated push keeps antigravity\'s field (and the fields it does not carry)', self._accounts.defaultAntigravityAccountId === g1.id && self._accounts.subscription?.x === 1, JSON.stringify(self._accounts));
   } else leg('the accounts-updated push line is found in app.js', false);
   am.setDefault(null, 'antigravity');

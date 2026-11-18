@@ -10364,7 +10364,44 @@ export default {
   "Model provider key": "モデルプロバイダーのキー", // lane lg-providers
   "VibeSpace hands it to the agent CLI it starts for this provider": "VibeSpace はこのプロバイダー用に起動するエージェント CLI にこれを渡します", // lane lg-providers
   "Put the key in the key field — not in the address": "キーはキーの欄に入れてください——アドレスには入れないでください", // lane lg-providers
+  "Not for {harness}": "{harness} では使えません", // lane lg-providers
+  "This provider’s model runs the agent’s tools in its conversations — pick one you trust": "このプロバイダーのモデルは会話の中でエージェントのツールを動かします——信頼できるものを選んでください", // lane lg-providers
+  "Paste the key again": "キーをもう一度貼り付けてください", // lane lg-providers
+  "Save the key and test again": "キーを保存してもう一度テスト", // lane lg-providers
+  "A third-party model runs on this machine only for now — start the conversation here": "サードパーティのモデルは今のところこのマシンでのみ動きます——会話はここで始めてください", // lane lg-providers
+  "Something went wrong": "問題が発生しました", // lane lg-providers
   "Pick a model first — the test asks the provider with it": "先にモデルを選んでください——テストはそのモデルでプロバイダーに問い合わせます", // lane lg-providers
+  "Add a third-party model": "サードパーティのモデルを追加", // lane lg-providers
+  "Pick who serves the model — you pay them by use, with your own key": "モデルを提供するサービスを選んでください——自分のキーで、使った分だけ支払います", // lane lg-providers
+  "Could not read the providers — {reason}": "プロバイダーを読み込めませんでした——{reason}", // lane lg-providers
+  "How the key reaches the program": "キーがプログラムに渡る方法", // lane lg-providers
+  "an environment variable of that conversation only, never its command line": "その会話だけの環境変数で、コマンドラインには決して出ません", // lane lg-providers
+  "Codex sends this provider its installation id and session id with each request": "Codex はリクエストごとにインストール ID とセッション ID をこのプロバイダーに送ります", // lane lg-providers
+  "Where your account is": "アカウントのある地域", // lane lg-providers
+  "Address of your service": "サービスのアドレス", // lane lg-providers
+  "What it speaks": "対応するインターフェース", // lane lg-providers
+  "Paste your {provider} key": "{provider} のキーを貼り付けてください", // lane lg-providers
+  "Where to get a key": "キーの入手先", // lane lg-providers
+  "Key": "キー", // lane lg-providers
+  "The key is kept in the vault. The test sends the provider one short message with it — it costs a fraction of a cent.": "キーは保管庫に保存されます。テストではこのキーでプロバイダーに短いメッセージを 1 回送ります——費用はごくわずかです。", // lane lg-providers
+  "Save and test": "保存してテスト", // lane lg-providers
+  "{provider} is saved. Each agent that can use it is tested once:": "{provider} を保存しました。使える各エージェントで 1 回ずつテストします：", // lane lg-providers
+  "Which model answers in new conversations": "新しい会話でどのモデルが答えるか", // lane lg-providers
+  "Get the model list from {provider}": "{provider} からモデル一覧を取得", // lane lg-providers
+  "Other model id (optional)": "その他のモデル ID（任意）", // lane lg-providers
+  "{provider} is ready. It can be used by:": "{provider} の準備ができました。使えるもの：", // lane lg-providers
+  "Pick it in the account row of New Session. It has no usage reading — you pay {provider} by use.": "「新しいセッション」のアカウント行で選んでください。使用量の表示はありません——{provider} に使った分だけ支払います。", // lane lg-providers
+  "tested {ago}": "{ago}にテスト済み", // lane lg-providers
+  "last test: {words}": "前回のテスト：{words}", // lane lg-providers
+  "not tested yet": "まだテストしていません", // lane lg-providers
+  "No usage reading": "使用量の表示なし", // lane lg-providers
+  "paid by use": "従量課金", // lane lg-providers
+  "New key for {name}": "{name} の新しいキー", // lane lg-providers
+  "Third-party models": "サードパーティのモデル", // lane lg-providers
+  "Add a third-party model…": "サードパーティのモデルを追加…", // lane lg-providers
+  "{name} (third party)": "{name}（サードパーティ）", // lane lg-providers
+  "New key…": "新しいキー…", // lane lg-providers
+  "The new key is kept in the vault": "新しいキーを保管庫に保存しました", // lane lg-providers
   "Works": "使えます", // lane lg-providers
   "The key was refused — check it in the provider’s console": "キーが拒否されました——プロバイダーのコンソールで確認してください", // lane lg-providers
   "This provider does not serve the model, or not what this agent needs": "このプロバイダーはこのモデル、またはこのエージェントが必要とするものを提供していません", // lane lg-providers

@@ -33,6 +33,8 @@
 //      key only where the harness reads it, nothing in argv; the verdicts; the redaction; every refusal by name with NOTHING
 //      spawned (a vendor's own host, no address, the vault locked, the key gone, not a person, unfit, in flight); the door;
 //      RED controls: the runner without its fresh homes / its address verdict / its key check / its person check
+//   ⑯ THE WIZARD AND THE ROSTER (lane lg-providers U5): rosterRowsOf (one row per fitting harness), list().providerRows
+//      beside the accounts, THE FIRST SCREEN's words census (RED: a card naming ANTHROPIC_BASE_URL), the wiring pins
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -539,6 +541,45 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   await q1;
   ok(q2.ok && q2.verdict === 'timeout', 'CONTROL: without the in-flight slot a second press runs a second child (spends the key twice) ⇒ the in-flight leg goes RED', q2);
   fs.rmSync(TDIR, { recursive: true, force: true });
+}
+
+// ── ⑯ THE WIZARD AND THE ROSTER (lane lg-providers, B-d578 U5) ───────────────────────────────────────────────────
+console.log('⑯ the wizard and the roster: rows per harness beside the accounts, the first screen\'s words, the wiring');
+{
+  const dsRec = M.normalizeProvider({ ...M.draftOf('deepseek'), id: 'pv-r1', keyRef: M.keyRefOf('pv-r1'), tail: 'ab12', createdAt: 1 });
+  const cxRec = M.normalizeProvider({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1', model: 'm-1', wire: 'openai-responses' }), id: 'pv-r2', keyRef: M.keyRefOf('pv-r2'), tested: { codex: { verdict: 'ok', at: 5 } } });
+  const noneRec = M.normalizeProvider({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1', model: 'm-1' }), id: 'pv-r3', keyRef: M.keyRefOf('pv-r3') });
+  const rows = M.rosterRowsOf([dsRec, cxRec, noneRec, M.presetOf('pv-anthropic-api')]);
+  ok(eq(rows.map((r) => `${r.id}:${r.backend}`), ['pv-r1:claude', 'pv-r2:codex']) && rows[0].localOnly === true && M.rosterRowsOf([dsRec], { usable: false })[0].loggedIn === false && rows[0].loggedIn === true && rows[0].type === 'provider' && rows[0].name === 'DeepSeek' && rows[0].tail === 'ab12' && rows[0].model === 'deepseek-chat' && rows[0].provenance === 'third-party' && eq(rows[1].tested, { verdict: 'ok', at: 5 }) && !JSON.stringify(rows).includes('secrets:provider'), 'rosterRowsOf: ONE row per harness a provider fits (DeepSeek → Claude Code, a Responses service → Codex; a self-hosted one that said nothing → none; a built-in → none), type provider, its tail and model and last test — never where its key is');
+  const RDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvrows-'));
+  const am2 = new AccountManager({ dataDir: RDIR });
+  am2.add({ name: 'Console', key: 'sk-ant-api03-' + 'r'.repeat(40) });
+  am2.setProviderRows(() => rows);
+  const L = am2.list();
+  ok(eq(L.providerRows, rows) && L.accounts.length === 1 && L.accounts.every((a) => a.type !== 'provider'), 'accounts.list(): the provider rows ride BESIDE the accounts (providerRows) — list().accounts, which 43 hub readers walk, holds only accounts.json\'s records');
+  fs.rmSync(RDIR, { recursive: true, force: true });
+  const TECH = /https?:|ANTHROPIC_|OPENAI_|base[_ ]?url|\bapi\b|\benv\b|token|\bwire\b|responses|\bcli\b/i;
+  const wizSrc = read('src/lib/provider-wizard.js');
+  // the words screen ① DRAWS, read off the wizard's own pick block (every t('…') literal in it) + what its cards carry
+  const pickBlock = wizSrc.slice(wizSrc.indexOf("if (st.step === 'pick') {"), wizSrc.indexOf("if (st.step === 'key') {"));
+  const pickLits = [...pickBlock.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]);
+  const zhD = read('src/lib/i18n-zh.js'), jaD = read('src/lib/i18n-ja.js');
+  const tr = (dict, k) => { const m = new RegExp('\\n  ' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': ("(?:[^"\\\\]|\\\\.)*")').exec(dict); return m ? JSON.parse(m[1]) : null; };
+  const screen1 = (X) => ['Add a third-party model', ...pickLits, ...X.SHIPPED.flatMap((p) => [p.label, p.blurb])];
+  ok(pickLits.length >= 2 && pickLits.includes('Pick who serves the model — you pay them by use, with your own key') && pickLits.includes('Not for {harness}') && !/pw-tech|fold\(/.test(pickBlock), 'screen ①\'s words are read off the wizard\'s own pick block (its lead, «Not for …» on a card the opening agent cannot use) — no technical fold there', pickLits);
+  ok(screen1(M).every((w) => [w, tr(zhD, w), tr(jaD, w)].filter(Boolean).every((x) => !TECH.test(x))), 'and in Chinese and Japanese too: no technical word on screen ①', screen1(M).filter((w) => [tr(zhD, w), tr(jaD, w)].some((x) => x && TECH.test(x))));
+  ok(screen1(M).every((w) => !TECH.test(w)), 'THE FIRST SCREEN SAYS NO TECHNICAL WORD: its title, its lead and every card (name + one sentence) — no address, no variable, no interface name', screen1(M).filter((w) => TECH.test(w)));
+  const mBlurb = mutant([["blurb: i18nKey('DeepSeek’s models, paid by use with your own key')", "blurb: i18nKey('Set ANTHROPIC_BASE_URL to DeepSeek’s address')"]]);
+  ok(screen1(mBlurb).some((w) => TECH.test(w)), 'CONTROL: a card that tells the person to set ANTHROPIC_BASE_URL ⇒ the first-screen census goes RED');
+  const wiz = wizSrc, ros = read('src/lib/provider-roster.js'), ma2 = read('src/lib/manage-agents.js'), app2 = read('src/lib/app.js'), meta = read('src/lib/agent-meta.js');
+  ok(wiz.includes('${escHtml(t(s.label))}</b><span>${escHtml(t(s.blurb))}</span>') && wiz.includes("createModalShell({ id: 'provider-wizard', key: backend,") && wiz.includes('if (!live()) return;\n      st.tests[h] = { busy: true };'), 'the cards draw each preset\'s name and sentence; the form is keyed by its SUBJECT (the harness it was opened for — §103: never a literal key); no test is started once the form is closed');
+  ok(['/api/providers\', { preset: s.id, key', '/api/providers/${encodeURIComponent(p.id)}/test`, { harness: h }', "/api/accounts/${encodeURIComponent(p.id)}/models`, { models:", '/api/providers/${encodeURIComponent(p.id)}`, { defaultModel: pick }, \'PATCH\''].every((x) => wiz.includes(x)) && wiz.includes('type="password"') && /<details class="pw-tech">/.test(wiz), 'the wizard asks only the doors that exist (add, the test per harness, the models save, the default) — the key in a password field, the technical details folded');
+  ok(ma2.includes("...(!selectedHost ? [{ label: t('Add a third-party model…'), action: () => { done(); openProviderWizard({ backend: 'claude', onDone: refresh }); } }] : []),") && ma2.includes("openProviderWizard({ backend: 'codex', onDone: refresh })") && (ma2.match(/if \(!selectedHost\) renderProviderRows\(body, '(claude|codex)', \{ refresh \}\)/g) || []).length === 2 && ma2.includes("a.backend === 'codex' && a.type !== 'provider'") && ma2.includes("(x.backend || 'claude') === 'claude' && x.type !== 'provider'") && ma2.includes("a.backend === be && a.type !== 'provider'"), 'Manage agents: ONE «Add a third-party model…» door per roster and the providers\' rows under each — this machine only; NO roster (Claude Code, Codex, the others) draws a provider row as one of its own accounts');
+  ok((app2.match(/accounts: accountRowsOf\((msg|d)\)/g) || []).length === 2 && meta.includes('export function accountRowsOf(answer)') && /answer\.providerRows/.test(meta), 'the page\'s account cache merges the providers\' rows at BOTH places it is set (the push and the read) — New Session, Billing and the badge list them');
+  ok(ros.includes("t('No usage reading'), t('paid by use')") && ['Test', 'Models…', 'Rename…', 'New key…', 'Remove…'].every((w) => ros.includes(`label: t('${w}')`)) && ros.includes("if (!rows.length || !sec.isConnected) { sec.remove(); return; }") && ros.indexOf('body.appendChild(sec);') < ros.indexOf("await fetchJson('/api/providers')") && !ros.includes("t('Add a third-party model…')") && ros.includes("key: id, title") && /\$\{DOTS\}/.test(ros), 'a roster row: «no usage reading · paid by use · tested …» and ⋯ (the roster\'s DOTS SVG) Test · Models… · Rename… · New key… · Remove…; its section takes its PLACE before the read (never drifts under another heading), leaves when no provider serves the harness, and adds no second add door; the new-key form is keyed by the provider\'s id');
+  const ap = read('src/lib/app.js'), sp = read('src/lib/session-props.js'), sl = read('src/lib/session-lifecycle.js'), ra = read('src/resume-account.js');
+  ok(ap.includes("if (a.type === 'provider') { opts.push(onHost ? [a.id, t('{name} (third party)', { name: a.name }) + ' — ' + t('this machine only'), true]") && sp.includes("if (x.type === 'provider') return !!rHost;") && sl.includes("if (a.type === 'provider') return rHostId ? t('A third-party model runs on this machine only for now") && ra.includes("if (a.type === 'provider') return { ok: false, why: 'remote-cannot-ship', since: null };"), 'on ANOTHER machine a provider row is never offered as usable — New Session (disabled, «this machine only»), Session Properties, the billing switcher (it would end the session and the create refuse) and the resume bar');
+
 }
 
 fs.rmSync(dir, { recursive: true, force: true });
