@@ -430,12 +430,16 @@ console.log('D · the musts of the acceptance, each with its red control');
     conversations: [CF.shapeRow({ key: KEY_A, name: 'A', turn: 'idle', window: null, windowWhy: 'the stored layout is still being read — ask again' })], beyondReach: 0 };
   const w = API.listWords(d, 1794880000000);
   ok(w.includes('desktops: unknown (the stored layout is still being read') && w.includes('browsers: unknown (listed by the keeper') && w.includes('window unknown (the stored layout'), 'MUST 6 the CLI prints desktops, browsers and window as «unknown (<why>)» — never nothing', w);
-  let old = null; try { old = require('node:child_process').execFileSync('git', ['-C', REPO, 'show', '370570f37:data/bin/vibespace-api'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { old = null; }
+  // the RED: the CLI before MUST 6 — a patched copy of TODAY's file with its three lines as they were (no lane commit is read:
+  // a literal sha of a lane branch is not an ancestor once the stack is restacked — test-ci-gate's census)
+  const OLD6 = [["  out.push('desktops: ' + (Array.isArray(d.desktops) ? (d.desktops.map((x) => `${x.name || x.id} ${x.link}`).join(' · ') || 'none') : `unknown (${d.desktopsWhy || 'the hub did not say why'})`));\n", "  if (Array.isArray(d.desktops)) out.push('desktops: ' + (d.desktops.map((x) => `${x.name || x.id} ${x.link}`).join(' · ') || 'none'));\n"], ["    const where = r.desktop ? `on ${r.desktop.name || r.desktop.id}` : r.window === false ? 'no window' : (r.window === null || r.window === undefined) ? `window unknown (${r.windowWhy || 'the hub did not say why'})` : 'no desktop';\n", "    const where = r.desktop ? `on ${r.desktop.name || r.desktop.id}` : r.window === false ? 'no window' : r.window === null ? 'window unknown' : 'no desktop';\n"], ["  if (!Array.isArray(d.browsers)) out.push(`browsers: unknown (${d.browsersWhy || 'the hub did not say why'})`);\n", ""]];
+  let old = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-api'), 'utf8');
+  for (const [from, to] of OLD6) { if (old.split(from).length !== 2) throw new Error('anchor missing: MUST 6\'s CLI line ' + from.slice(0, 60)); old = old.replace(from, () => to); }
   if (old) {
     const MO = mutantCopies('conversation-facts-m6', REPO).load('data/bin/vibespace-api', old.replace(/^#!.*\n/, ''), 'old-cli');
     const wo = MO.listWords(d, 1794880000000);
-    ok(!/desktops: unknown|browsers: unknown/.test(wo) && /window unknown/.test(wo) && !/window unknown \(/.test(wo), 'MUST 6 RED: today\'s CLI (370570f37) prints no line for the unknown desktops and browsers, and «window unknown» with no why', wo);
-  } else console.log('  ○ SKIP MUST 6 RED — 370570f37 is not in this checkout (a shallow clone); the leg above still ran');
+    ok(!/desktops: unknown|browsers: unknown/.test(wo) && /window unknown/.test(wo) && !/window unknown \(/.test(wo), 'MUST 6 RED: the CLI before MUST 6 (today\'s file with its three lines as they were) prints no line for the unknown desktops and browsers, and «window unknown» with no why', wo);
+  }
 }
 {
   // MUST 7 — a read error other than «no such file» leaves the cache UNTOUCHED; RED: today's (any error ⇒ the empty layout, cached)

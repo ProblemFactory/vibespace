@@ -752,6 +752,9 @@ const CATALOG = {
   'src/server/mounts-plugins-wiring.js:automation': { kind: 'eval', why: 'THE automation keys engine, real over the scratch vault' },
   'src/server/mounts-plugins-wiring.js:vaultUseGrants': { kind: 'eval', why: 'the vault\'s use grants, real over THE grants store' },
   'src/server/mounts-plugins-wiring.js:vaultAttention': { kind: 'eval', why: 'the Vault window\'s «needs you» producers, real over THE For-you store' },
+  // the manager design's piece 4 (conversations.resume) — its ONE line and its kept-record reader, met when the stack was restacked onto the train
+  'src/server/mounts-plugins-wiring.js:resumeLine': { kind: 'make', why: 'THE resume line (resume-line.js createResumeLine) starts real resumes — a stand-in that starts nothing: every submit refuses by name (the census resumes no conversation), the line is empty', make: (w) => standIn(w, 'resumeLine', { submit: () => ({ ok: false, code: 'census_no_resume' }), state: () => ({ running: 0, waiting: 0, open: true }) }) },
+  'src/server/mounts-plugins-wiring.js:resumeFactsOf': { kind: 'make', why: 'the kept-record READER (resume-line.js factsReaderOver), real, over no road: the census world keeps no ended conversation, so every key reads the reader\'s own «nothing kept» (goal unknown)', make: (w) => R('src/server/resume-line.js').factsReaderOver({ buffersDir: path.join(w.data, 'buffers'), road: null, readJson: async () => null }) },
   // ── src/server/apps-wiring.js / window-live-wiring.js ──
   'src/server/apps-wiring.js:engine': { kind: 'eval', why: 'THE apps engine, real (apps-engine.js) on the scratch data dir — its access stand-in installs nothing' },
   'src/server/window-live-wiring.js:engine': { kind: 'eval', why: 'THE window targets engine, real (window-targets-engine.js) on the scratch data dir — no window is open' },

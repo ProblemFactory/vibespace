@@ -1922,6 +1922,8 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
     endConversation: async ({ webuiId }) => { ends.push(webuiId); sessions.delete(webuiId); return { ok: true, sessionId: webuiId }; },
   };
   const verbs = OPS.automationVerbs({ activeSessions: sessions, groupsOf: (s, id) => (id === 'sess-6-4' ? ['T-6'] : []), ops: fakeOps, waitMs: 2000, sleep: async () => {},
+    // the manager stack (piece 3, restacked onto the train): an end is judged by the conversation's facts row — this world's lanes are idle (piece 3's own world above gives the same row)
+    listFacts: { rowOf: () => require(path.join(ROOT, 'src/conversation-facts.js')).shapeRow({ state: 'running', turn: 'idle', background: [], heldPrompts: 0, asks: 0, goal: 'none', continue: { armed: false }, timers: 'none-seen', browser: null, handover: false, jobs: { running: 0, schedules: 0, nextFireAt: null, items: [] } }) },
     archive: () => ({ ok: true, already: false }), asksOf: () => [], resolveAsks: () => ({ changed: [] }), turnOf: () => 'idle', deadOf: () => null });
   const w = await mkWorld('b3190', { verbs });
   const m = w.engine.mint({ name: 'dispatch6', scopes: ['conversations.open', 'conversations.end', 'conversations.status'], limits: OPEN_LIMITS, by: 'user' });
