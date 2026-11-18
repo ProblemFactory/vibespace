@@ -450,7 +450,7 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
   const M = mutantCopies('blm', REPO);
   const SRC = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
   const v = () => crypto.randomBytes(6).toString('hex');            // a value per leg, built at runtime
-  const TAIL = 'and the rest of the brief arrives ' + v();              // what the seven sightings lost
+  const TAIL = 'and the rest of the brief arrives whole';               // what the seven sightings lost (plain words: what a message keeps)
   // the sightings as the row tells them (each: the text, the value that must go, the name that must stay)
   const SIGHT = (V) => ({
     '1st: the session word glued to its token': [`Step 3: NO key.grant line for session:${V} must appear, ${TAIL}`, V, 'session:'],
@@ -458,7 +458,7 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
     '6th: a suite name ending in schema, a colon, a quoted leg': [`test-session-schema: «${V} passes» ${TAIL}`, V, 'test-session-schema:'],
     'a lane name ending in shield, a colon': [`agent-credential-shield: ${V} is stood down, ${TAIL}`, V, 'agent-credential-shield:'],
     'a dotenv token mid-sentence': [`set it with DB_PASSWORD=${V} then ${TAIL}`, V, 'DB_PASSWORD='],
-    'a CJK sentence (no blank after the value)': [`会话 session:${V}，${TAIL}`, V, 'session:'],
+    'a CJK sentence (no blank after the value)': [`会话 session:${V}，然后 ${TAIL}`, V, 'session:'],
     'a value in parentheses (the closer is the prose\'s)': [`the value (token=${V}) ${TAIL}`, V, 'token='],
   });
   const S1 = SIGHT(v());
@@ -468,8 +468,8 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
   ok(bad.length === 0, `MESSAGE MODE: all ${msg.length} sightings keep the REST of the message, hide the value, keep the name${bad.length ? ' — off: ' + bad.map((x) => x.n + ' → ' + J(x.o.text)).join(' · ') : ''}`);
   ok(msg.every((x) => x.said.includes(x.name)), `MESSAGE MODE: \`said\` names each trigger as written (${msg.map((x) => x.said.join('+')).join(' · ')})`);
   ok(msg.every((x) => SS.redactSecrets(x.o.text, { message: true }).text === x.o.text), 'MESSAGE MODE is idempotent: a masked message masks to itself (the group log\'s second belt pass finds nothing)');
-  ok(SS.redactSecrets(`(token=${S1['1st: the session word glued to its token'][1]}).`, { message: true }).text === `(token=${REDACTED}).` && SS.redactSecrets(`session: ${'z'.repeat(9)} rest`, { message: true }).text === `session:${REDACTED} rest`,
-    'MESSAGE MODE: the prose\'s own closer + a sentence-final dot stay outside; a no-break blank after the head is no escape');
+  { const X = S1['1st: the session word glued to its token'][1], a = SS.redactSecrets(`(token=${X}). more`, { message: true }).text, b = SS.redactSecrets(`session:\u00A0${'z'.repeat(9)}7 rest`, { message: true }).text;
+    ok(!a.includes(X) && a.endsWith(' more') && !b.includes('zzzz') && b.endsWith(' rest'), 'MESSAGE MODE: a value glued to a closer is hidden with it, the plain rest stays; a no-break blank after the head is no escape', J([a, b])); }
   // a STORED head keeps the line-end extent (exit output, a job log: hides more, never less)
   const line = run(SS, {});
   ok(line.every((x) => !x.o.text.includes(x.V) && !x.o.text.includes(TAIL)), 'the LINE MODE (no option — exit output, a job log) still hides to the line end: the stored head is unchanged');
@@ -481,8 +481,9 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
   ok(hdr.every((t) => !t.includes(BT) && !t.includes(DG)), `MESSAGE MODE: a header (any scheme), a cookie list, a one-line key block and a credential word with its token are hidden (${hdr.map(J).join(' · ')})`);
   // r2 (F6 / F7): a scheme or credential word in PROSE takes one more word, never the rest; a mention is never a value
   const prose2 = [[`auth: token rotation is broken, ${TAIL}`, TAIL], [`Session: basic checks pass, ${TAIL}`, TAIL]].map(([t, k]) => SS.redactSecrets(t, { message: true }).text.includes(k));
-  const at = [`key: @beta please ${TAIL}`, `the password @beta knows ${TAIL}`].map((t) => SS.redactSecrets(t, { message: true }).text === t);
-  ok(prose2.every(Boolean) && at.every(Boolean), 'MESSAGE MODE: «auth: token rotation…» keeps its rest; «key: @beta …» and «the password @beta …» keep the mention (the @-scan reads the kept words)');
+  const at = [`key: @beta please ${TAIL}`].map((t) => SS.redactSecrets(t, { message: true, mentions: ['beta'] }).text === t && SS.redactSecrets(t, { message: true }).text !== t);   // a MEMBER's @ only (the caller's names); a sink with none spares no @
+  const atV = [`DB_PASSWORD=@${BT}x then`, `key=@beta then`, `secret: @${BT}#x rest`].map((t) => !SS.redactSecrets(t, { message: true }).text.includes(t.split(/[=:] ?/)[1].split(' ')[0]));
+  ok(prose2.every(Boolean) && at.every(Boolean) && atV.every(Boolean), 'MESSAGE MODE: «auth: token rotation…» keeps its rest; a MENTION in its own shape under a `:` head stays (the @-scan wakes it); an @ value under `=`, or one naming no member, is masked (the cure of batch 6)');
   // multi-line shapes keep their own rules in a message: a YAML continuation, a JSON object, a quoted value with blanks
   const PW = v();
   const multi = [`notes\npassword:\n  ${PW}\nback`, `{"password": "${PW} x", "user": "u"}`, `password: "${PW} two words"`, `-----BEGIN PRIVATE KEY-----\n${PW}\n-----END PRIVATE KEY-----`].map((t) => SS.redactSecrets(t, { message: true }).text);
@@ -495,13 +496,15 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
     `A KNOWN FLAG: --password-store=basic stays in both modes and the scan walks on past it (the next --api-key is masked); --password-store=<other> is masked (${fl.map((f) => J(f.keep)).join(' · ')})`);
   // RED CONTROLS (patched copies through the SAME legs)
   const cut = (src, from, to, name) => { ok(src.includes(from), `the control «${name}» finds its line`); return M.load('src/secret-shapes.js', src.replace(from, to), name); };
-  const MSG_LINE = 'if (message && !closed && !LINE_HEADS.has(String(m[4]).toLowerCase())) {';
+  const MSG_LINE = 'if (message && !q && !LINE_HEADS.has(String(m[4]).toLowerCase())) {';
   const noMsg = cut(SRC, MSG_LINE, 'if (false) {', 'no-message-mode');
   ok(run(noMsg, { message: true }).every((x) => !x.o.text.includes(TAIL)), 'RED CONTROL (the message mode removed): every sighting loses its rest again — the MESSAGE MODE leg goes red');
-  const noHeads = cut(SRC, MSG_LINE, 'if (message && !closed) {', 'no-line-heads');
-  ok(noHeads.redactSecrets(`Authorization: Bot ${BT} x`, { message: true }).text.includes(BT) && noHeads.redactSecrets(`Cookie: a=1; PHPSESSID=${DG}`, { message: true }).text.includes(DG), 'RED CONTROL (the header list removed): a Bot credential and a session cookie are left in clear — the header leg goes red');
-  const noTwo = cut(SRC, 'if (AUTH_SCHEMES.has(w) || SECRET_WORDS.has(w)) {', 'if (false) {', 'no-two-token');
-  ok(noTwo.redactSecrets(`auth: password ${BT} then`, { message: true }).text.includes(BT) && noTwo.redactSecrets(`token: Bearer ${BT} ok`, { message: true }).text.includes(BT), 'RED CONTROL (the credential word takes no token): «auth: password …» and «token: Bearer …» leave the secret in clear — the header leg goes red');
+  ok(!SS.redactSecrets('Authorization: Bot hunter x', { message: true }).text.includes('hunter'), 'MESSAGE MODE: a header keeps the line rule whole — a plain-looking credential after an unlisted scheme is hidden too');
+  const noHeads = cut(SRC, MSG_LINE, 'if (message && !q) {', 'no-line-heads');
+  ok(noHeads.redactSecrets('Authorization: Bot hunter x', { message: true }).text.includes('hunter'), 'RED CONTROL (the header list removed): a plain-looking credential after an unlisted scheme is left in clear — the header leg goes red');
+  const noTwo = cut(SRC, 'takeNext = !keep && (AUTH_SCHEMES.has(w) || SECRET_WORDS.has(w));', 'takeNext = false;', 'no-two-token');
+  ok(!SS.redactSecrets('auth: password hunter then', { message: true }).text.includes('hunter') && !SS.redactSecrets('token: Bearer abc ok', { message: true }).text.includes('abc'), 'MESSAGE MODE: a credential / scheme word takes its next token even when that one looks plain');
+  ok(noTwo.redactSecrets('auth: password hunter then', { message: true }).text.includes('hunter') && noTwo.redactSecrets('token: Bearer abc ok', { message: true }).text.includes('abc'), 'RED CONTROL (the credential word takes no token): «auth: password …» and «token: Bearer …» leave the secret in clear — the header leg goes red');
   const noFlag = cut(SRC, 'if (flagEnd >= 0) {', 'if (false) {', 'no-flag');
   ok(!noFlag.redactSecrets('chrome --password-store=basic x', { message: true }).text.includes('--password-store=basic'), 'RED CONTROL (the known-flag check removed): --password-store=basic is masked again — the flag leg goes red');
   // the belt carries the mode + the collector to the shapes (the group log and the stash ask it)
@@ -510,6 +513,108 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
     'THE BELT: maskForSink(text, { message: true, said }) keeps the rest and says what it masked; without it the line mode stays');
 }
 function fnOf2(x) { return x && typeof x.get === 'function' ? x : null; }
+
+console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message keeps only plain words of what the line rule hides');
+{
+  const SS = r('src/secret-shapes.js'), J = JSON.stringify;
+  const SRC = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('blm-cure6', REPO);
+  // heads (a JSON key, a YAML key, a wrapper-opened key among them) CROSSED with the separators that open a head (a blank, none, a
+  // full-width colon or equals open none — both modes then match by construction, so they prove nothing and are left out)
+  const HEADS = ['session', 'password', 'token', 'api_key', 'DB_PASSWORD', 'X-Auth-Token', 'test-session-schema', '"password"', '    password', '`DB_PASSWORD'];
+  const SEPS = [':', '=', ': ', '= ', ' : '];
+  const PAIRS = { '(': ')', '[': ']', '{': '}', '「': '」', '『': '』', '（': '）', '【': '】', '〔': '〕', '〈': '〉', '《': '》', '«': '»', '‘': '’', '“': '”' };
+  // every opener class, glued to the value — and the marks that come with a blank (`=> `, `:= `, `- `, `( `: the value is the NEXT word)
+  const OPENERS = ['', 'a', '7', ...'!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~', ...'「『（【〔〈《«‘“，、。：；！？', '=> ', ':= ', '- ', '( ', ': ', '「 '];
+  const rnd = (n, alpha) => Array.from(crypto.randomBytes(n), (x) => alpha[x % alpha.length]).join('');
+  const LET = 'abcdefghijklmnopqrstuvwxyz', UP = LET.toUpperCase(), MIX = LET + UP + '0123456789';
+  // the core of a value and the tokens that must never stay where the line rule hid them (`w` / `groups`: only when the value's first
+  // chunk is what the shape says — no opener glued in front)
+  const SHAPES = [
+    () => { const v = 'Xk9' + rnd(9, MIX); return { core: v, must: [v] }; },
+    () => { const v = crypto.randomBytes(16).toString('hex'); return { core: v, must: [v] }; },
+    () => { const w = 'Pz' + rnd(6, LET); return { core: `${w} horse battery`, must: [w] }; },     // a passphrase: its FIRST word (the said cost: its later plain words stay)
+    () => { const v = 'Q7' + rnd(14, MIX); return { core: `Bot ${v}`, must: [v] }; },               // a scheme nobody listed, then the value
+    () => { const v = rnd(8, MIX) + '#9'; return { core: `@${v}`, must: [v] }; },                  // an @ that is no mention
+    () => { const w = rnd(7, LET); return { core: `Bearer ${w}`, must: [], w: [w] }; },             // a scheme word, then a plain-looking value
+    () => { const w = rnd(7, LET); return { core: `password ${w}`, must: [], w: [w] }; },           // a credential word, then a plain-looking value
+    () => { const v = rnd(6, LET) + rnd(6, UP); return { core: `x ${v}`, must: [v] }; },           // a letters-only token of mixed case, after the value
+    () => { const g = [0, 1, 2, 3].map(() => rnd(4, LET)); return { core: g.join(' '), must: [g[0]], w: g.slice(1) }; },   // an app password: four groups
+    () => { const g = [0, 1, 2, 3].map(() => rnd(4, UP + '234567')); return { core: g.join(' '), must: [g[0]], w: g.slice(1) }; },   // a TOTP key in groups
+  ];
+  const TAILS = [   // what follows: plain words; secrets after a stop, a bracket, a plain word; a SECOND head in every spelling it has
+    () => ({ t: '', must: [] }), () => ({ t: ' and the rest of it', must: [] }), () => ({ t: '，然后继续', must: [] }),
+    () => { const v = 'Q9' + rnd(8, MIX); return { t: `，${v}`, must: [v] }; },
+    () => { const v = rnd(8, MIX) + '#7'; return { t: ` （备用：${v}）`, must: [v] }; },
+    () => { const v = 'Z8' + rnd(10, MIX); return { t: ` then ${v} ok`, must: [v] }; },
+    () => { const v = 'W6' + rnd(9, MIX); return { t: `「${v}」 end`, must: [v] }; },
+    ...[(w) => ` and password: ${w}`, (w) => ` {"password": "${w}"}`, (w) => ` and password = ${w}`, (w) => ` password : ${w}`, (w) => `, auth: password ${w}`, (w) => `; Authorization: Bot ${w}`, (w) => `; secret: "correct ${w} battery"`, (w) => ` {'user': 'app', 'password': '${w}'}`,
+      (w) => `，然后 password：${w}`, (w) => `，password : ${w}`, (w) => ` run --api-key=${w}`, (w) => ` and \`DB_PASSWORD=${w}\` then`]
+      .map((f) => () => { const w = rnd(7, LET); return { t: f(w), must: [w] }; }),
+    // r5 (the read's F2): a second head whose OWN rule ends early (a closed quote, a JSON value), then more secrets; a head glued in a chunk
+    ...[(w, v) => ` and password: "${w}" then ${v}`, (w, v) => ` {"secret": "${w}", "recovery": "${v}"}`, (w, v) => ` id=7,password=${v} hi ${w}x9`]
+      .map((f) => () => { const w = rnd(7, LET), v = 'R5' + rnd(10, MIX); return { t: f(w, v), must: [w, v] }; }),
+  ];
+  const STOPS = '、。，；：！？「」『』（）【】《》〈〉';
+  const chunks = (t) => t.split(new RegExp(`[\\s${STOPS}]+`, 'u')).filter(Boolean);
+  // an INDEPENDENT, stricter plain word than the module's: lowercase ≤ 12, Capitalized ≤ 12, an acronym ≤ 3, or a run of CJK, with
+  // edge marks from a short list; a head's own name stays in both. A chunk the module keeps that this calls not plain is a loosening
+  const EDGE = '.,;:!?()[]{}"\'«»“”‘’—-…=`〔〕';
+  const HEADWORDS = new Set(['password', 'auth', 'Authorization', 'secret', 'user', 'app', 'redacted']);
+  const ownShape = (c) => c.includes('«redacted»') && c.split('«redacted»').every((x) => !x || /^[`"'*<({\[,;:=/)\]}»«]{1,3}$/.test(x) || /^[`"'*<({\[,;]{0,3}-{0,2}[A-Za-z_][A-Za-z0-9_.-]{0,80}[:=][({\[«「『（【‘“`"']{0,2}$/.test(x) || plainT(x));   // r8: a head glued to its value's opener («api_key:(«redacted»)»)
+  const plainT = (c) => { if (ownShape(c)) return true; let a0 = 0, b0 = c.length; while (a0 < b0 && EDGE.includes(c[a0])) a0++; while (b0 > a0 && EDGE.includes(c[b0 - 1])) b0--; const core = c.slice(a0, b0);
+    return core === '' ? c.length <= 3 : HEADWORDS.has(core) || /^(?:[a-z]{1,12}|[A-Z][a-z]{1,11}|[A-Z]{1,3})$/.test(core) || /^[぀-ヿ㐀-鿿]+$/u.test(core); };
+  const judge = (SSx, { stopAtFirst = false, rev = false } = {}) => {   // a control stops at its first leak (and walks the openers from the end)
+    const leaks = [], loose = [], nonIdem = []; let lines = 0, n0 = 0;
+    const one = (L, op, must, opt, allowed = []) => {
+      const lo = SSx.redactSecrets(L).text, mo = SSx.redactSecrets(L, { message: true, ...opt }).text;
+      lines++;
+      if (!stopAtFirst && SSx.redactSecrets(mo, { message: true, ...opt }).text !== mo) nonIdem.push(L + ' ⇒ ' + mo);   // r5: a second pass changes nothing
+      if (must.some((t) => !lo.includes(t) && mo.includes(t))) leaks.push({ L, op, mo });
+      const lt = chunks(lo), extra = chunks(mo).filter((x) => { const at = lt.indexOf(x); if (at >= 0) { lt.splice(at, 1); return false; } return true; });
+      if (extra.some((x) => !plainT(x) && !allowed.includes(x))) loose.push(L + ' ⇒ ' + mo);
+    };
+    const ops = rev ? [...OPENERS].reverse() : OPENERS;
+    for (const op of ops) for (const closed of PAIRS[op.trim()] ? [false, true] : [false]) for (const h of HEADS) for (const sep of SEPS) {
+      if (stopAtFirst && leaks.length) return { leaks, loose, lines, nonIdem };
+      const sh = SHAPES[n0 % SHAPES.length](), tl = TAILS[(n0 * 7 + 3) % TAILS.length](); n0++;
+      const must = [...sh.must, ...tl.must, ...(sh.w && op === '' ? sh.w : [])];
+      one(h + sep + op + sh.core + (closed ? PAIRS[op.trim()] : '') + (h.startsWith('`') ? '`' : '') + tl.t, op, must, {});
+    }
+    for (const sh0 of SHAPES) for (const tlf of TAILS) for (const h of HEADS) {   // the product of shapes × tails on every head, no opener
+      if (stopAtFirst && leaks.length) return { leaks, loose, lines, nonIdem };
+      const sh = sh0(), tl = tlf();
+      one(h + ': ' + sh.core + (h.startsWith('`') ? '`' : '') + tl.t, '', [...sh.must, ...tl.must, ...(sh.w || [])], {});
+    }
+    // a MEMBER's mention under a `:` head is kept (the caller names its members) — and every secret after it is still hidden
+    for (const h of HEADS) for (const sep of [':', ': ']) for (const tlf of TAILS) { const tl = tlf(), L = `${h}${sep}@beta${tl.t}`; one(L, '@', tl.must, { mentions: ['beta'] }, ['@beta']); if (!stopAtFirst && !SSx.redactSecrets(L, { message: true, mentions: ['beta'] }).text.includes('@beta')) leaks.push({ L: L + ' (the member\'s @ was lost)', op: '@', mo: '' }); }   // r6: the member's @ survives too
+    return { leaks, loose, lines, nonIdem };
+  };
+  const g = judge(SS);
+  ok(g.lines > 5000 && g.leaks.length === 0, `THE LAW, a differential over ${g.lines} generated lines (every opener class × ${HEADS.length} heads × ${SEPS.length} separators, closed and open pairs; ${SHAPES.length} value shapes × ${TAILS.length} tails on every head — secrets after stops, brackets, plain words, a second head in 8 spellings, letters-only and grouped secrets; a member's mention): where the line rule hides a token, the message mode hides it too${g.leaks.length ? ' — LEAKS: ' + g.leaks.slice(0, 4).map((x) => J(x.L + ' ⇒ ' + x.mo)).join(' · ') : ''}`);
+  ok(g.loose.length === 0, `…and every chunk the message mode keeps beyond the line rule is a plain word by a STRICTER, independent rule (or the member's @)${g.loose.length ? ' — ' + g.loose.slice(0, 3).map(J).join(' · ') : ''}`);
+  ok(g.nonIdem.length === 0, `…and a second message pass over its own output changes nothing, on all ${g.lines} lines (the group log belts twice)${g.nonIdem.length ? ' — ' + g.nonIdem.slice(0, 3).map(J).join(' · ') : ''}`);
+  // r5 (the read's F1): a message mode that FAILS is the line rule — never the partial text a throw left (a control throws on purpose)
+  { const TH = M.load('src/secret-shapes.js', SRC.replace('function messageValue(text, s, e, {', 'function messageValue(text, s, e, {') .replace("  let out = '', i = s, first = !later,", "  if (text.includes('THROWME')) throw new Error('control'); let out = '', i = s, first = !later,"), 'throws');
+    const L = 'session: THROWME ghp_' + 'A'.repeat(36) + ' and Bearer ' + 'b'.repeat(30), a = TH.redactSecrets(L, { message: true }).text, b0 = TH.redactSecrets(L).text;
+    ok(a === b0 && !a.includes('A'.repeat(36)), 'a message mode that throws gives the LINE result whole (the token after it hidden, not skipped)', J(a)); }
+  // RED CONTROLS: this round's musts compiled back in — each must find a leak OF ITS OWN SCENE (the opener of the line that leaked)
+  const W1 = 'if (MESSAGE_STOPS.has(text.charCodeAt(j))) { if (first) return null;', W1B = '      if (ce < 0) return null;', W2 = 'else if (sepColon && isMention(chunk, mentions)) keep = true;';
+  ok(SRC.split(W1).length === 2 && SRC.split(W1B).length === 2 && SRC.split(W2).length === 2, 'the three controls find their lines');
+  const r1 = judge(M.load('src/secret-shapes.js', SRC.replace(W1, 'if (MESSAGE_STOPS.has(text.charCodeAt(j))) { if (first) { out += text.slice(i, e); return { out, end: e }; }'), 'must1'), { stopAtFirst: true, rev: true });
+  ok(r1.leaks.length > 0 && '，、。：；！？'.includes(r1.leaks[0].op), `RED CONTROL (must 1 — a value that opens on a CJK stop stays in clear): the corpus finds it on a stop opener, e.g. ${J(r1.leaks[0] ? r1.leaks[0].L : '')}`);
+  const r1b = judge(M.load('src/secret-shapes.js', SRC.replace(W1B, '      if (ce < 0) { out += text.slice(i, e); return { out, end: e }; }'), 'must1b'), { stopAtFirst: true, rev: true });
+  ok(r1b.leaks.length > 0 && PAIRS[r1b.leaks[0].op.trim()], `RED CONTROL (must 1, its bracket half — an open pair stays in clear): the corpus finds it on a pair opener, e.g. ${J(r1b.leaks[0] ? r1b.leaks[0].L : '')}`);
+  const r2 = judge(M.load('src/secret-shapes.js', SRC.replace(W2, 'else if (chunk.charCodeAt(0) === 64) keep = true;'), 'must2'), { stopAtFirst: true });
+  ok(r2.leaks.length > 0 && /(?:^|[:=] ?)@/.test(r2.leaks[0].L), `RED CONTROL (must 2 — any @ value is a mention): the corpus finds it on an @ value, e.g. ${J(r2.leaks[0] ? r2.leaks[0].L : '')}`);
+  // the main loop's guard: a COUNT of steps, never a clock — every message-mode loop is marked, each character read a bounded number of times
+  ok(SRC.split('/*msg-step*/').length - 1 >= 9, 'the step marks are in every message-mode loop');
+  const ST = M.load('src/secret-shapes.js', SRC.split('/*msg-step*/').join('globalThis.__msgSteps = (globalThis.__msgSteps || 0) + 1;'), 'steps');
+  const HOSTILE = ['password: ' + 'a'.repeat(100000), 'token: x ' + '"\''.repeat(50000), 'token: x ' + 'token: ('.repeat(8000), 'key: ' + 'x9 '.repeat(20000), 'secret: x' + '「'.repeat(60000), 'token: a9 ' + '.'.repeat(60000) + 'x', 'token: x @' + '!'.repeat(60000) + 'x', 'token: (' + 'a'.repeat(60000), 'token: x ' + '{"a":'.repeat(12000)];
+  const steps = HOSTILE.map((t) => { globalThis.__msgSteps = 0; ST.redactSecrets(t, { message: true, mentions: ['beta'] }); return { len: Math.min(t.length, INPUT_MAX), n: globalThis.__msgSteps }; });
+  ok(steps.every((x) => x.n <= 6 * x.len) && steps.every((x) => x.n > 1000), `LINEAR BY COUNT: ${steps.map((x) => `${x.n} steps / ${x.len} chars`).join(' · ')} — each ≤ 6 × its length, each loop seen`);
+}
 
 console.log('lane bl-msg B-be02: a secret NAME=value INSIDE a prose line — the head before it no longer eats its opener');
 {

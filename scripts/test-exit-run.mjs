@@ -925,18 +925,18 @@ await section('§7 controls (patched copies)', async () => {
   const SSg = M.load('src/secret-shapes.js', ssMutG, 'valuecut');
   ok(/SSSSSSSS/.test(SSg.redactSecrets('TOKEN=' + 'S'.repeat(10240)).text), 'CONTROL (g): a cut at 4096 inside the value keeps its tail — the long-value rows go red (the verify r1 shape)');
   // (h) verify r2 F3: the continuation pass removed — the next-line rows go red
-  const ssMutH = ssSrc.replace('    const cont = redactContinuations(text); text = cont.text; n += cont.n;', '');
+  const ssMutH = ssSrc.replace("    const cont = redactContinuations(text, say); text = cont.text; n += cont.n;   // verify r2 F3: before R2 (R2 then hides the head's own value)", '');
   ok(ssMutH !== ssSrc, '(h) the patch applies');
   const SSh = M.load('src/secret-shapes.js', ssMutH, 'nocont');
   ok(/hunter2/.test(SSh.redactSecrets('password:\n  hunter2').text) && /AAAA1/.test(SSh.redactSecrets('Private-Lines: 1\nAAAA1').text), 'CONTROL (h): without the continuation pass a YAML value on the next line and a .ppk keep their material — the §2b next-line rows go red (the verify r1 shape)');
   // (i) verify r2 W6: EVERY rule removed on its own reddens the §2b table — a copy per rule, the table re-run over it
   const RULES = {
-    R1: ['    const pem = redactPem(text); text = pem.text; n += pem.n;', ''],
-    R2: ['    const kv = redactKv(text); text = kv.text; n += kv.n;', ''],
-    R3: ["    text = text.replace(HTTP_RE, (m, bearer, basic) => { n++; return `${bearer || basic}${REDACTED}`; });", ''],
-    R4: ["    text = text.replace(PREFIX_RE, (m) => { n++; const h = PREFIX_HEAD.exec(m); return `${h ? h[1] : ''}${REDACTED}`; });", ''],
-    R5: ["    text = text.replace(WORD_NEXT_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });\n    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });", ''],
-    R6: ["    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; return `${ind}${name}${sep}${REDACTED}`; });", ''],
+    R1: ["    const pem = redactPem(text, say); text = pem.text; n += pem.n;", ''],   // lane bl-msg: the rules' lines as they are now (the `say` collector, the message mode)
+    R2: ["    const kv = redactKv(text, { message: !!message, say, mentions: mset && mset.size ? mset : null }); text = kv.text; n += kv.n;", ''],
+    R3: ["    text = text.replace(HTTP_RE, (m, bearer, basic) => { n++; if (say) say(bearer || basic); return `${bearer || basic}${REDACTED}`; });", ''],
+    R4: ["    text = text.replace(PREFIX_RE, (m) => { n++; const h = PREFIX_HEAD.exec(m); if (say) say(`${h ? h[1] : ''}…`); return `${h ? h[1] : ''}${REDACTED}`; });", ''],
+    R5: ["    text = text.replace(WORD_NEXT_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });   // the cure of batch 6: no mention exemption here (a mention is spared only under a `:` head)\n    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });", ''],
+    R6: ["    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; if (say) say(name); return `${ind}${name}${sep}${REDACTED}`; });   // verify r4 F7: before R5", ''],
   };
   let ruleCopies = 0;
   for (const [rule, [from, to]] of Object.entries(RULES)) {
@@ -1019,7 +1019,7 @@ await section('§7 controls (patched copies)', async () => {
   const SSu = M.load('src/secret-shapes.js', ssMutU, 'quotedunbounded');
   { const t = 'password: "\n' + '  line\n'.repeat(300) + 'next: 1\n'; ok((SSu.redactSecrets(t).text.match(/«redacted»/g) || []).length === 300 && /other: 1/.test(SS.redactSecrets('password: "abc\n  def"\n  other: 1\n').text) && !/other: 1/.test(SSu.redactSecrets('password: "abc\n  def"\n  other: 1\n').text), 'CONTROL (u): without the bounds 300 of 300 deeper lines go and the line after the closing quote too — the §2d F5 rows go red (the verify r3 shape)'); }
   // (v) verify r4 F7: R5 before R6 again, without the REG_ guard — the two-blank reg row keeps its value
-  const ssMutV = ssSrc.replace("    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; return `${ind}${name}${sep}${REDACTED}`; });   // verify r4 F7: before R5\n", '').replace("    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });\n", "    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });\n    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; return `${ind}${name}${sep}${REDACTED}`; });\n").replace('(?!«)(?!REG_(?:SZ|EXPAND_SZ|BINARY|MULTI_SZ|DWORD|QWORD|LINK|NONE)\\b)\\S{1,65536}/gi;', '(?!«)\\S{1,65536}/gi;');
+  const ssMutV = ssSrc.replace("    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; if (say) say(name); return `${ind}${name}${sep}${REDACTED}`; });   // verify r4 F7: before R5\n", '').replace("    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });\n", "    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });\n    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; return `${ind}${name}${sep}${REDACTED}`; });\n").replace('(?!«)(?!REG_(?:SZ|EXPAND_SZ|BINARY|MULTI_SZ|DWORD|QWORD|LINK|NONE)\\b)\\S{1,65536}/gi;', '(?!«)\\S{1,65536}/gi;');
   ok(ssMutV !== ssSrc && !ssMutV.includes('(?!REG_)') && ssMutV.indexOf('REG_RE, (m') > ssMutV.indexOf('WORD_RUN_RE, (m'), '(v) the patch applies');
   const SSv = M.load('src/secret-shapes.js', ssMutV, 'r5first');
   ok(/hunter2/.test(SSv.redactSecrets('  Password  REG_SZ  hunter2\n').text) && !/hunter2/.test(SSv.redactSecrets('    Password    REG_SZ    hunter2\n').text), 'CONTROL (v): with R5 first a two-blank reg row keeps hunter2 (the four-blank one is hidden) — the §2d F7 row goes red');

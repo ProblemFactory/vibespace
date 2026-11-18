@@ -95,7 +95,7 @@ function compiledFor(v, vr) {
  * message mode (a bare value is ONE token, the rest of the line arrives); `said: []` collects what triggered each mask, so
  * the sender's answer names it instead of reading a shorter count as a cut.
  */
-function maskForSink(text, { dataDir, message = false, said = null } = {}) {
+function maskForSink(text, { dataDir, message = false, said = null, mentions = null } = {}) {
   let s = String(text == null ? '' : text);
   if (!s) return s;
   const vr = vaultRun();
@@ -105,7 +105,7 @@ function maskForSink(text, { dataDir, message = false, said = null } = {}) {
       if (forms && forms.size) { const was = s.split('[vault:').length; s = vr.maskText(s, forms); if (Array.isArray(said) && s.split('[vault:').length > was && !said.includes('a vault value')) said.push('a vault value'); }
     } catch { /* the shape census below still runs — the belt never loses the write */ }
   }
-  try { s = redactSecrets(s, { message: !!message, said }).text; } catch { /* redactSecrets is internally guarded; this is belt-and-braces */ }
+  try { s = redactSecrets(s, { message: !!message, said, mentions }).text; } catch { /* redactSecrets is internally guarded; this is belt-and-braces */ }
   return s;
 }
 

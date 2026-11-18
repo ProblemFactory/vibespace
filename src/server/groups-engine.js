@@ -404,11 +404,13 @@ function create({
 
   /** Append ONE record to the group's log, inside the groups door (the caller
    *  holds it): unique `at` per group, log FIRST, summary SECOND. */
+  /** the cure of batch 6: the words a member's @ answers to (display names + conversation ids) — the belt spares only these */
+  const memberWords = (g) => (g && Array.isArray(g.members) ? g.members.flatMap((m) => [m.member, displayName(g, m.member)]).filter(Boolean).map(String) : []);
   function appendIn(g, { author, text, mentions = [], raw: raw0 }) {
     const prevLastAt = Number(g.lastAt) || 0;
     const at = Math.max(now(), prevLastAt + 1);
     const raw = typeof raw0 === 'function' ? raw0(at) : raw0;   // B-eba8: an await's `until` is reckoned from the record's own instant
-    if (raw && raw.kind === 'message') text = belt.maskForSink(String(text == null ? '' : text), { dataDir, message: true });   // agent-output-sinks: belt a MEMBER's message only — never a system event (create/invite/kick/leave/rename/archive/closed/ended); lane bl-msg B-3e61: the MESSAGE mode (the rest of a line arrives)
+    if (raw && raw.kind === 'message') text = belt.maskForSink(String(text == null ? '' : text), { dataDir, message: true, mentions: memberWords(g) });   // agent-output-sinks: belt a MEMBER's message only — never a system event (create/invite/kick/leave/rename/archive/closed/ended); lane bl-msg B-3e61: the MESSAGE mode (the rest of a line arrives)
     const rec = makeRecord({
       adapterId: A, convId: g.id, vendorId: `${raw.kind === 'message' ? 'gm' : 'gs'}-${at.toString(36)}-${(++seq).toString(36)}`, at,
       author: { id: author, name: displayName(g, author), isSelf: author === G.OWNER, isBot: false },
@@ -1171,12 +1173,13 @@ function create({
     // mask before it moves it), and `masked` = what was masked (the head as written), told to the sender; appendIn's belt is the
     // sink's own and finds nothing more (idempotent)
     const masked = [];
-    const body = belt.maskForSink(given, { dataDir, message: true, said: masked });
+    const mw = memberWords(getGroup(rg.group.id));
+    const body = belt.maskForSink(given, { dataDir, message: true, said: masked, mentions: mw });
     // the owner's @-picker places (start / end on the words as typed) moved by what the belt masked before each — its prefix, masked
     const picks = body === given || !Array.isArray(picked) ? picked : picked.map((x) => {
       const ps = Number(x && x.start), pe = Number(x && x.end);
       if (!Number.isInteger(ps) || !Number.isInteger(pe) || ps < 0 || pe > given.length) return x;
-      const d = belt.maskForSink(given.slice(0, ps), { dataDir, message: true }).length - ps;
+      const d = belt.maskForSink(given.slice(0, ps), { dataDir, message: true, mentions: mw }).length - ps;
       return { ...x, start: ps + d, end: pe + d };
     });
     const res = await store.groups.update((gr) => {

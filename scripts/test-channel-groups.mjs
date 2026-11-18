@@ -2540,7 +2540,7 @@ console.log('§bl-msg B-3e61 a message arrives whole — the value masked, the r
     '…the @ places sit on the KEPT words: a scanned @ after a mask, and the owner\'s picked place moved by the mask before it', JSON.stringify([live.atB, live.atPick]));
   // RED CONTROLS (patched copies of the engine through the SAME drive)
   const M = mutantCopies('blmsg-ge', REPO);
-  const LATE = 'const body = belt.maskForSink(given, { dataDir, message: true, said: masked });';
+  const LATE = 'const body = belt.maskForSink(given, { dataDir, message: true, said: masked, mentions: mw });';
   ok(src.split(LATE).length === 2 && src.split('message: true').length === 4, 'the controls find their lines (the post\'s mask, the three MESSAGE-mode asks)');
   const late = await drive('blmsg-late', M.load('src/server/groups-engine.js', src.replace(LATE, 'const body = given;'), 'late-mask'));
   ok(late.p.ok && late.atB !== '@beta' && !(late.p.masked || []).length, 'RED CONTROL (the mask only at the append, after the @-scan): the @ place misses its @ and the answer names nothing — the SEND legs go red', JSON.stringify(late.atB));
