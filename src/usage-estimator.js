@@ -589,7 +589,7 @@ class UsageEstimator {
     // the max instead of being dropped (first-wins under-counted the live
     // part). File-tail feeders re-reading ranges stay idempotent either way.
     const prev = this._liveRids.get(rid);
-    if (prev) { if (usd > prev.usd) { prev.usd = usd; prev.cwUsd = Math.max(prev.cwUsd || 0, cwUsd || 0); prev.crUsd = Math.max(prev.crUsd || 0, crUsd || 0); this._estMemo.clear(); } return; }
+    if (prev) { if (usd > prev.usd) { prev.usd = usd; prev.cwUsd = Math.max(prev.cwUsd || 0, cwUsd || 0); prev.crUsd = Math.max(prev.crUsd || 0, crUsd || 0); this._estDrop(prev.acct); } return; }
     const m = String(model || '').toLowerCase();
     const fam = m.includes('fable') ? 'fable' : m.includes('opus') ? 'opus' : m.includes('sonnet') ? 'sonnet' : m.includes('haiku') ? 'haiku' : 'other';
     const entry = { rid, acct: accountId || '__global__', fam, usd, cwUsd: Number(cwUsd) || 0, crUsd: Number(crUsd) || 0, ts };
@@ -603,8 +603,13 @@ class UsageEstimator {
       this._liveOutOfOrder = ring.some((e, i) => i > 0 && !(e.ts >= ring[i - 1].ts));
     }
     // freshest signal there is — estimates must not serve a pre-burn memo
-    this._estMemo.clear();
+    this._estDrop(entry.acct);
   }
+  /** usage-cpu U3: a streamed record moves only the estimates whose cost READ its account — a memo entry keeps the account
+   *  ids its cost read (`ids`); every other member's memo stands its 30 s (the whole memo was cleared per record, so with
+   *  many conversations streaming every pool pass re-estimated every member: 10.6 s held). An entry with no cost (no rates,
+   *  no anchor) read no row of the ring. */
+  _estDrop(acct) { for (const [k, m] of this._estMemo) if (m.ids && m.ids.includes(acct)) this._estMemo.delete(k); }
   // Un-ledgered live cost for a set of account ids within [fromMs, nowMs] —
   // entries whose rid the ledger ALREADY holds are skipped (scan caught up).
   _liveDelta(accountIds, fromMs, nowMs) {
@@ -1126,7 +1131,7 @@ class UsageEstimator {
   invalidate(identityKey) {
     const c = this._rateCache.get(identityKey); if (c) c.stale = true; // served while the relearn folds (usage-relearn-stepped)
     const f = this._folds && this._folds.get(identityKey); if (f) f.dirty = true; // round 2 (MUST 3): it goes on; what it lands is stale at once
-    this._estMemo.clear(); // the line cache stays: lines() reads a grown file by its tail and a rewritten one whole (its stat says which)
+    for (const [k, m] of this._estMemo) if (m.ik === identityKey) this._estMemo.delete(k); // usage-cpu U3: that identity's estimates only. The line cache stays: lines() reads a grown file by its tail and a rewritten one whole (its stat says which)
   }
   /** The ledger this estimator reads is still loading past its takeover bound (the boot's stepped warm) → {bytesLeft, at},
    *  else null (lane ledger-dedup-law r2): a cost read now is part of the ledger. */
@@ -1227,7 +1232,7 @@ class UsageEstimator {
     // lane ledger-dedup-law r2: no estimate from a partial ledger — the cost since the anchor would be part of it (the
     // newest month loads last); null = the reading stands (every caller's no-estimate road), nothing memoized
     if (this._ledgerLoading()) return null;
-    let est = null, baseFetchedAt = 0, ik = null, rv = 0, rates0 = null;
+    let est = null, baseFetchedAt = 0, ik = null, rv = 0, rates0 = null, ids = null;
     try {
       const ident = this.resolveIdentity(accountId);
       if (ident?.identityKey) {
@@ -1253,14 +1258,14 @@ class UsageEstimator {
           baseFetchedAt = anchor.fetchedAt; rv = this._ratesVerOf(ik); // a fold that landed inside this ask: its version
           anchor = claimRebase(anchor, rawCache);   // lane account-reset-door: the claim's view of the anchor (baseFetchedAt stays the pre-claim anchor's)
           if (rates0) {
-            const accountIds = this.accountIdsFor(ident.identityKey, [accountId || '__global__']); est = estimateBuckets({ anchor, rates: rates0, costFn: this._costFn(accountIds), nowMs, lagS: this.lagS });
+            const accountIds = ids = this.accountIdsFor(ident.identityKey, [accountId || '__global__']); est = estimateBuckets({ anchor, rates: rates0, costFn: this._costFn(accountIds), nowMs, lagS: this.lagS });
             const rc = this._rateCache.get(ik); if (est && rc && rc.seeded && rc.rates === rates0) est.ratesSeeded = true; // round 5: built on the last run's rates (rates.json) until its relearn lands — marked
             if (est && this._aloneSaid && this._aloneSaid.has(ik)) this._sayBack(ik);
           }
         }
       }
     } catch (e) { est = null; if (ik && rates0) this._sayAlone(ik, String((e && e.message) || e).slice(0, 120), 0, 'estimate'); } // round 5: a failed estimate is named (read raw, as the release does)
-    this._estMemo.set(memoKey, { at: nowMs, est, baseFetchedAt, ik, rv });
+    this._estMemo.set(memoKey, { at: nowMs, est, baseFetchedAt, ik, rv, ids });
     return ownEstimate(est, rawCache); // read through the member's own «no 5h limit» on EVERY return (the memo is the identity's)
   }
   /** THE VERDICT OF ONE SOURCE'S LANE ON THIS INSTANCE (usage-predict; the hold of the look of 2026-11-15): the WALK over the

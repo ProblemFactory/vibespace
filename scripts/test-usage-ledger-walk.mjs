@@ -326,6 +326,33 @@ const getCount = (TREE) => {
   rmWorld(w);
 }
 
+{
+  // usage-cpu U3: A STREAMED RECORD MOVES ONLY ITS OWN IDENTITY'S ESTIMATES — the whole memo was cleared per record (10.6 s held:
+  // with conversations streaming the memo never held, so every pool pass re-estimated every member). Four members, their
+  // estimates memoized; a record streams for sub-a: the next asks recompute sub-a's ONLY (0 for the three others) and every
+  // answer = a fresh estimator's; an identity's invalidation drops only its own. Control: the release's whole clear ⇒ 4.
+  const run = (release) => {
+    const w = world(REPO, { seed: 9, rows: 1500, pairs: [200, 100, 60, 100] }); // small: this suite sits near the fast tier's 10 s
+    if (release) w.est._estDrop = function () { this._estMemo.clear(); };
+    const M = ['sub-a', 'sub-b', 'sub-c', 'sub-d'], T = NOW + 5000;
+    const before = M.map((m) => JSON.stringify(w.est.estimateFor(m, null, T))); // memoized at T (the estimator's 30 s memo)
+    let n = 0; const ri = w.est.resolveIdentity; w.est.resolveIdentity = (a) => { n++; return ri(a); };
+    w.est.noteLive({ rid: 'msg_u3', accountId: 'sub-a', model: 'claude-opus-5-5', usd: 0.05, ts: T });
+    const after = M.map((m) => JSON.stringify(w.est.estimateFor(m, null, T + 1000)));
+    const live = n; n = 0;
+    w.est.invalidate('email:b@x'); for (const m of M) w.est.estimateFor(m, null, T + 2000);
+    const inv = n; w.est.resolveIdentity = ri;
+    const fresh = M.map((m) => { w.est._estMemo.clear(); return JSON.stringify(w.est.estimateFor(m, null, T + 1000)); });
+    rmWorld(w);
+    // the recomputed member = a fresh estimator's; the others answer what they answered at T — their memo, as with no record at
+    // all (the release served the same memo between records; the r1 oracle compared them with a fresh answer 1 s later)
+    return { live, inv, same: after[0] === fresh[0] && after.slice(1).every((x, i) => x === before[i + 1]), withEst: after.filter((x) => x !== 'null').length };
+  };
+  const r = run(false), c = run(true);
+  ok(r.live === 1 && r.inv === 1 && r.same && r.withEst >= 3, `U3 a record streamed for sub-a recomputes ${r.live} estimate of 4 (${r.withEst} members with one), an invalidation of email:b@x ${r.inv}; sub-a's answer = a fresh estimator's, the three others' = theirs before the record (their memo, as with none)`, r);
+  ok(c.live === 4, `control (the release's whole clear per record): ${c.live} of 4 recomputed ⇒ RED`, c);
+}
+
 console.log('§3 RATCHET — the work of one relearn over every pair, against the pairs it holds (a count, never the clock)');
 {
   const w = world(REPO, { seed: 7, pairs: [2400, 50, 30, 60] });
