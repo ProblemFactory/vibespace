@@ -505,7 +505,6 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   const EXEMPT = [
     ['src/msg-acl.js', 'groupIds: (target.groups || []).filter(Boolean)', 'rule ④: group-visibility and «the same group» stay own groups only'],
     ['src/server/grants-migration.js', '*', 'the one migration\'s legacy-equivalence probes (pre-lineage readers by design)'],
-    ['src/server/mounts-plugins-wiring.js', 'const conversationSubjects = ', 'the automation picker\'s roster (display, not a verdict)'],
     ['src/server/vault-run-door.js', 'const facts = { ...uf, conversationKeys:', 'spreads vaultUseFacts — its inheritedGroupIds ride in `...uf`'],
     ['src/automation-keys.js', 'const callerSubjects = (conversationId, groupIds = []) =>', 'the legacy subject list (session:<cid> + group:<gid>) — exported for GM.LEGACY\'s migration probes, no door calls it'],
     ['src/server/window-targets-engine.js', "const ctx = facts ? ctxOf(facts) : { sessionKeys: [], groupIds: [] };", 'no caller: nothing to inherit'],
@@ -794,6 +793,29 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     await w8.ingest(2);
     ok(!!a8 && a8.ok === true && !!c8 && c8.ok === true && !!sx8 && sx8.ok === false && /left out through its parent Task Group "Parent"|has no access here/.test(String(sx8.error || '')) && !!sy8 && sy8.ok === true && w8.ladder.calls.includes('ky') && !w8.ladder.calls.includes('kx'), 'cure 3 (the save and the wake on ONE real engine): P on the account and on the conversation with X left out — a member of X is refused at the save by name; a member of Y is saved via P and woken', { a8: a8 && a8.ok, c8: c8 && c8.ok, sx8, sy8: sy8 && sy8.ok, calls: w8.ladder.calls });
     try { w8.e.stop(); } catch { }
+  }
+  // restack 411 (主开发 20:18Z, the meeting ruled (A)): the release's web-login «by what» facts carry the ancestors — a child's
+  // conversation and a child group are drawn admitted by the parent's row; a row for «this group only» does not admit them
+  {
+    const BLw = require('../src/browser-login.js');
+    const subjW = { sessions: [{ subject: 'session:k1', groupIds: ['tg-c'], inheritedGroupIds: ['tg-p'] }], groups: [{ subject: 'group:tg-c', inheritedGroupIds: ['tg-p'] }] };
+    const rowsW = (entry) => ({ thisAccount: [{ door: BLw.DOOR, resource: 'https://shop.example.test#ada', to: [entry], except: [] }], anyAccount: [], anySite: [] });
+    const bw = BLw.byWhatOf({ rows: rowsW({ kind: 'group', id: 'tg-p' }), subjects: BLw.byWhatSubjects(subjW) });
+    const bwOnly = BLw.byWhatOf({ rows: rowsW({ kind: 'group', id: 'tg-p', only: true }), subjects: BLw.byWhatSubjects(subjW) });
+    ok(J(bw['conversation:k1']) === J(['this-account']) && J(bw['group:tg-c']) === J(['this-account']) && !bwOnly['conversation:k1'] && !bwOnly['group:tg-c'], 'web logins «by what» (restack 411, ruled (A)): a child\'s conversation and a child group are drawn admitted by the parent\'s row; a row for «this group only» admits neither', { bw, bwOnly });
+    const mpw = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8');
+    ok(/\.\.\.\(\(r\) => \(\{ groupIds: r\.ids, inheritedGroupIds: Array\.isArray\(r\.inherited\) \? r\.inherited : \[\] \}\)\)\(automationGroupsRead\(s, id\)\)/.test(mpw) && /name: t\.title \|\| t\.id, inheritedGroupIds: tasks\.grantGroupsOf\(\[t\.id\]\)\.inherited \}\)\)/.test(mpw), 'web logins «by what»: the subjects producer hands each session its ancestors and each group its own, from the ONE reader');
+    // CONTROL — it proves its plant first: «by what» without the session's ancestors draws the child conversation as NOT admitted
+    const MW = mutantCopies('restack-by-what', REPO);
+    try {
+      const bsrc = fs.readFileSync(path.join(REPO, 'src/browser-login.js'), 'utf-8');
+      const CUTW = ', inheritedGroupIds: Array.isArray(s.inheritedGroupIds) ? s.inheritedGroupIds.map(String) : [] } });';
+      const mutW = bsrc.split(CUTW).join(' } });');
+      ok(bsrc.split(CUTW).length === 2 && mutW !== bsrc && !mutW.includes('s.inheritedGroupIds'), 'CONTROL plant: the session facts\' ancestors are cut, exactly once — the plant is where it claims');
+      const BLx = MW.load('src/browser-login.js', mutW, 'by-what-own-groups');
+      const bx = BLx.byWhatOf({ rows: rowsW({ kind: 'group', id: 'tg-p' }), subjects: BLx.byWhatSubjects(subjW) });
+      ok(!bx['conversation:k1'] && J(bx['group:tg-c']) === J(['this-account']), 'CONTROL: «by what» without the session\'s ancestors draws the child conversation as NOT admitted by the parent\'s row — the leg above would be red', bx);
+    } finally { try { fs.rmSync(MW.dir, { recursive: true, force: true }); } catch { } }
   }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [

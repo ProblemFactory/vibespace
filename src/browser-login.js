@@ -1135,12 +1135,13 @@ function byWhatOf({ rows = {}, subjects = [] } = {}) {
  *  «by what» never named Everyone, so a login's dialog drew Everyone unticked while the star row held it). */
 const BY_WHAT_PROBE = '#by-what';
 /** The subjects of the Vault's grant dialogs (the hub's `subjects()`: sessions with their Task Groups, the groups) → [{ key, facts }] for
- *  byWhatOf — a conversation by its own key and groups; a group as a member of it that no row names; Everyone as such a caller in no
+ *  byWhatOf — a conversation by its own key and groups (+ their ancestors: lane lg-group-parents, a parent's «含子组» row admits a
+ *  child's conversation at fill time); a group as a member of it that no row names (+ its own ancestors); Everyone as such a caller in no
  *  group. The verdict is still the grant model's own. */
 function byWhatSubjects(subjects = {}) {
   const out = [];
-  for (const s of (subjects && subjects.sessions) || []) { const k = GM.keyFromSubject(s && s.subject); if (k) out.push({ key: `conversation:${k}`, facts: { conversationKey: k, groupIds: Array.isArray(s.groupIds) ? s.groupIds : [], ...(s.groupsUnreadable === true ? { groupsUnreadable: true } : {}) } }); }   // the follow-owed read: Task Groups held ⇒ the grant model refuses an except-row unknown, never «admitted»
-  for (const g of (subjects && subjects.groups) || []) { const m = /^group:(.+)$/.exec(str(g && g.subject)); if (m) out.push({ key: `group:${m[1]}`, facts: { conversationKey: BY_WHAT_PROBE, groupIds: [m[1]] } }); }
+  for (const s of (subjects && subjects.sessions) || []) { const k = GM.keyFromSubject(s && s.subject); if (k) out.push({ key: `conversation:${k}`, facts: { conversationKey: k, groupIds: Array.isArray(s.groupIds) ? s.groupIds : [], inheritedGroupIds: Array.isArray(s.inheritedGroupIds) ? s.inheritedGroupIds.map(String) : [], ...(s.groupsUnreadable === true ? { groupsUnreadable: true } : {}) } }); }   // the follow-owed read: Task Groups held ⇒ the grant model refuses an except-row unknown, never «admitted»
+  for (const g of (subjects && subjects.groups) || []) { const m = /^group:(.+)$/.exec(str(g && g.subject)); if (m) out.push({ key: `group:${m[1]}`, facts: { conversationKey: BY_WHAT_PROBE, groupIds: [m[1]], inheritedGroupIds: Array.isArray(g.inheritedGroupIds) ? g.inheritedGroupIds.map(String) : [] } }); }
   out.push({ key: 'everyone', facts: { conversationKey: BY_WHAT_PROBE } });
   return out;
 }
