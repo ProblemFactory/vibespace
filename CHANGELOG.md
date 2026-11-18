@@ -19,11 +19,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The agent update a paired machine downloads is about a fifth smaller.
 - A web login’s «Use for…» now covers that login only; «Any site…» and «Any account on a site…» sit on the Web logins header.
 - A wider grant shows on a login as «through» and is changed at its own door.
-- The chat window's status bar is arranged by what you need: one row on a wide window, the same two rows on a narrow one, nothing hidden behind «⋯».
-- The model and its thinking level are one button, tasks and workflows one «Background work» button, and rarely changed settings sit in «Conversation settings».
-- The Context button holds the cache, the token total, the turn time and the spend; the spend shows on the button only when you are billed per use.
-- The status bar shows names instead of raw ids: the model as «Fable 1M», the thinking level as «Ultra», the permission mode as «Allow all».
-- A tool that did not start is listed in Session Properties and ⚙ Diagnostics, and on a phone or tablet the search button sits in the top bar.
 
 ### Fixed
 - After you disconnect a Gmail account in Channels and sign in again, mail that arrived in between is read, also replies in conversations you already had.

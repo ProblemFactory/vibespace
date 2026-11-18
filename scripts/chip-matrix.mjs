@@ -74,9 +74,7 @@ function chipOfBar(bar) {
   const el = (bar.element?.children || []).find((e) => e.getAttribute('data-chip') === 'model');
   if (!el) return { label: null, amber: false, locked: false, title: '', lockTip: '' };
   const t = el.title || '', cut = t.indexOf(' · ');
-  // (lane mask-value-shape) the model door's face is the model, then « · » and its thinking level — the label is what precedes it
-  // (the cure of 644a67ec2, MUST 4) the face is worded; the raw label the door shows is its data-raw
-  return { label: (((el.innerHTML.match(/class="chat-status-model-label" data-raw="([^"]*)"/) || [])[1]) || '').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&amp;/g, '&').trim(), amber: /chat-status-model-fallback/.test(el.className), locked: /chat-status-model-locked/.test(el.className), title: cut < 0 ? t : t.slice(0, cut), lockTip: cut < 0 ? '' : t.slice(cut + 3) };
+  return { label: el.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), locked: /chat-status-model-locked/.test(el.className), title: cut < 0 ? t : t.slice(0, cut), lockTip: cut < 0 ? '' : t.slice(cut + 3) };
 }
 
 function arrowOf(src, head) {

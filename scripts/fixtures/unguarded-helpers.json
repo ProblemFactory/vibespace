@@ -859,8 +859,6 @@
   "test-stream-sound-op.mjs": 1,
   "test-stream-stats.mjs": 1,
   "test-stream-window.mjs": 1,
-  "test-strip-ladder-chrome.mjs": 1,
-  "test-strip-table.mjs": 1,
   "test-suite-files-parse.mjs": 2,
   "test-sync-arrival.mjs": 1,
   "test-sync-fs-census.mjs": 1,

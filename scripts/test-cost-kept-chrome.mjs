@@ -129,9 +129,8 @@ const evalJs = async (expr) => {
 const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch {} await sleep(150); } try { return await evalJs(expr); } catch { return false; } };
 const waitApp = () => evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })');
 const VIEW = (sid) => `[...app.sessions.values()].find((v) => v && v.sessionId === ${JSON.stringify(sid)})`;
-// the spend's figure as the page draws it («This chat ≈ $4.45 · …») — lane mask-value-shape (the strip's step two): a ROW of the
-// context door (the bar's door rows, its panel), on the door's face only when billed per use; the figure is the row's own
-const FIGURE = (sid) => `(() => { const r = ((${VIEW(sid)})?._statusBar?._doorRows || []).find((x) => x.key === 'cost'); const m = r && String(r.value || '').match(/\\$([0-9,]+\\.[0-9]{2})/); return m ? m[1] : null; })()`;
+// the cost chip's figure as the page draws it («This chat ≈ $4.45 · …»)
+const FIGURE = (sid) => `(() => { const e = (${VIEW(sid)})?._statusBar?.element?.querySelector('.chat-status-cost'); const m = e && e.textContent.match(/\\$([0-9,]+\\.[0-9]{2})/); return m ? m[1] : null; })()`;
 const figure = async (sid) => { try { return await evalJs(FIGURE(sid)); } catch { return null; } };
 const figureIs = (sid, want, ms = 15000) => waitFor(`${FIGURE(sid)} === ${JSON.stringify(want)}`, ms);
 

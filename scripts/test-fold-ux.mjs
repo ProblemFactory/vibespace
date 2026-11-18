@@ -1038,13 +1038,11 @@ const f5card = await evaljs(`(async () => {
   window.__f5 = { cv, a, b, c };
   const sb = cv._statusBar;
   return { stalled: read(a), live: read(b), wfChip: !!sb._workflows?.has('wf_e2e0foldlive'), stalledTracked: !!sb._workflows?.get('wf_e2e0foldstall')?.stalled,
-    running: [...sb._workflows.values()].filter((w) => !w.stalled).map((w) => w.runId),
-    // (lane mask-value-shape) the running workflows are rows of the «后台» door's panel now — its press, its rows' runs
-    chipRun: (() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); sb.element.querySelector('.chat-status-tasks')?.click(); const r = [...document.querySelectorAll('.chat-status-dropdown .chat-status-wf-row')].map((e) => e.dataset.wfRun); document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); return r; })() };
+    running: [...sb._workflows.values()].filter((w) => !w.stalled).map((w) => w.runId), chipRun: [...document.querySelectorAll('.chat-status-wf')].map((e) => e.dataset.wfRun || 'multi') };
 })()`);
-check('F5 card: the SAME verdict reaches the chat card — the stalled run\'s chip reads 已中断 (warn) with the last-activity sentence as its tooltip; the status bar keeps the stalled run TRACKED (re-asked every 15 s) but its «后台» door names only the live run',
+check('F5 card: the SAME verdict reaches the chat card — the stalled run\'s chip reads 已中断 (warn) with the last-activity sentence as its tooltip; the status bar keeps the stalled run TRACKED (re-asked every 15 s) but its running ⛭ chip names only the live run',
   f5card?.stalled?.text === '已中断' && /\bwarn\b/.test(f5card.stalled.cls) && /最后活动 2 天前；1 个 agent 未完成/.test(f5card.stalled.tip) && f5card.stalledTracked === true
-  && JSON.stringify(f5card.running) === '["wf_e2e0foldlive"]' && f5card.chipRun.includes('wf_e2e0foldlive') && !f5card.chipRun.includes('wf_e2e0foldstall'), JSON.stringify(f5card));
+  && JSON.stringify(f5card.running) === '["wf_e2e0foldlive"]' && !f5card.chipRun.includes('wf_e2e0foldstall'), JSON.stringify(f5card));
 check('CONTROL (a run written just now): its card keeps ⟳ 运行中 and stays in the status bar\'s running chip — the verdict is the files\', not a blanket rule',
   f5card?.live?.text === '⟳ 运行中' && !/\bwarn\b/.test(f5card.live.cls) && f5card.wfChip === true, JSON.stringify(f5card));
 // lane Q verify (2026-09-26): THE CARD COMES BACK. A stalled run writes again (a quiet stretch ended, a

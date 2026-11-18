@@ -212,7 +212,7 @@ const runTree = async (label, srv) => {
     await sleep(500);
 
     // ⑤ THE MODEL PICKER (P2-17)
-    await tap('.chat-view .chat-status-model .chat-status-model-label');   // the model's own label (lane mask-value-shape: the model door also holds the thinking level)
+    await tap('.chat-view .chat-status-model');
     await waitFor(`!!document.querySelector('.chat-status-dropdown')`, 5000); await sleep(400);
     const dd = await evalJs(`(() => { ${RECT} const d = document.querySelector('.chat-status-dropdown'); if (!d) return null; const r = R(d), nav = document.getElementById('mobile-nav'), nb = nav && nav.getClientRects().length ? R(nav).b : 0;
       return { r: [r.l, r.t, r.r, r.b].map(Math.round), nav: Math.round(nb), inView: r.t >= nb - 0.5 && r.b <= innerHeight + 0.5 && r.l >= -0.5 && r.r <= innerWidth + 0.5, scrolls: d.scrollHeight > d.clientHeight + 4, sh: d.scrollHeight, ch: d.clientHeight, rows: d.querySelectorAll('.chat-status-dropdown-item').length }; })()`);

@@ -601,8 +601,7 @@ try {
   check(`⑦ THE STRIP's question at 375 touch (r10 — the chip's place): a ≥ 44 × 44 target by hit-testing (${hp && hp.hitW}×${hp && hp.hitH}; box ${hp && hp.box}, the bar ${hp && hp.bar} px)`, !!hp && hp.centre && hp.hitW >= 44 && hp.hitH >= 44 && /waiting for you · 6 questions/.test(hp.text), hp);
   // acceptance round 3 (m3): the bar grew 40 → 44 the instant a filing landed (the composer 4 px under a finger) — it keeps its
   // 40 px (the one-line bar of test-turn-truth-ui) with the chip on show, the 44 px hit area reaching past its edges
-  // (lane mask-value-shape, the strip's step two: the phone bar is the strip's TWO rows now — ≤ 84 px, test-turn-truth-ui's bound)
-  check(`m3 the phone's status bar stays ${hp && hp.bar} px (the strip's two rows, ≤ 84 — r10: nothing that waits on the person rides it; the strip above the message box carries it), the strip's target 44 tall`, !!hp && hp.bar <= 84 && hp.hitH >= 44, hp);
+  check(`m3 the phone's status bar stays ${hp && hp.bar} px (≤ 40 — r10: nothing that waits on the person rides it; the strip above the message box carries it), the strip's target 44 tall`, !!hp && hp.bar <= 40 && hp.hitH >= 44, hp);
   await A.evalJs(`document.querySelector('.cn-card[data-item="${q(1)}"]')?.scrollIntoView({ block: 'start' }); true`); await sleep(300);
   await A.shot('phone-375-accordion.png');
   const a3 = await aimAt(A, q(3)); await sleep(250);

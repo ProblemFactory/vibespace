@@ -120,15 +120,7 @@ class FakeEl {
 const { ChatStatusBar } = await import(pathToFileURL(path.join(repo, 'src/lib/chat-status-bar.js')).href);
 const { t: tApp } = await import(pathToFileURL(path.join(repo, 'src/lib/i18n.js')).href); // the t the renderers use
 const mkBar = (Klass) => new Klass({ send() {} }, 'sid-billing', { backend: 'claude', getToolMsg: () => null, openSubagentViewer() {}, openInTempEditor() {} });
-// lane mask-value-shape (the strip's step two, page §4 «the phone's account»): the billing pill is a ROW of «⚙ 对话设置» (the
-// bar's door rows) — a live handle on THAT row (its html, its title), null while the bar holds none
-const HANDLES = new WeakMap();
-const billingEl = (bar) => {
-  const row = () => (bar._doorRows || []).find((x) => x.key === 'billing') || null;
-  if (!row()) return null;
-  if (!HANDLES.has(bar)) HANDLES.set(bar, { get _html() { return row()?.html || ''; }, get textContent() { return (row()?.html || '').replace(/<[^>]*>/g, ''); }, getAttribute: (k) => (k === 'title' ? row()?.title ?? null : (row()?.attrs || {})[k] ?? null), get rows() { return (bar._doorRows || []).filter((x) => x.key === 'billing').length; } });
-  return HANDLES.get(bar);
-};
+const billingEl = (bar) => bar.element.children.find((el) => el.getAttribute('data-chip') === 'billing') || null;
 globalThis.document = { createElement: (t) => new FakeEl(t) };
 
 // ── §2 the phone's chip ──────────────────────────────────────────────────
@@ -144,14 +136,14 @@ function walkBar(Klass) {
   const el0 = billingEl(bar), text0 = pillFull(el0);
   bar.setBilling(POOL(TO_B), () => {}); // the next active-sessions broadcast: the SAME pool, another member
   const el1 = billingEl(bar);
-  const r = { bar, el0, text0, el1, text1: pillFull(el1), oneRow: !!el1 && el1.rows === 1 };   // (the handle is per bar: a same-handle check would be true by construction — the ROW count is the fact)
+  const r = { bar, el0, text0, el1, text1: pillFull(el1), sameNode: !!el0 && el0 === el1 };
   return r;
 }
 {
   const w = walkBar(ChatStatusBar);
   ok(w.text0 === '⣿ 全部 → Alpha Max', `the phone chip first names the member the conversation runs on (${JSON.stringify(w.text0)})`);
   ok(w.text1 === '⣿ 全部 → Beta Max', `after a per-session switch (same pool, member B) the chip names B (${JSON.stringify(w.text1)}) — the owner's phone kept A`);
-  ok(w.oneRow, `the account stays ONE row of «⚙ 对话设置» after the switch (one billing row under its one key — the keyed-row law; ${w.el1 && w.el1.rows} rows)`);
+  ok(w.sameNode, 'the chip is patched IN PLACE (the same <span data-chip="billing"> node — the keyed-chip law)');
   ok(/currently billing Beta Max \(automatic\)/.test(w.el1.getAttribute('title')), `its tooltip names B and how it was placed (${w.el1.getAttribute('title')})`);
   const bar = w.bar, el = w.el1;
   bar.setBilling(POOL({ ...TO_B, placement: 'pinned', pinned: 'Beta Max', pinnedId: 'acct-b' }));

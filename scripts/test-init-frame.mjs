@@ -1001,15 +1001,20 @@ if (!CHROME) {
       // the ChatView seam, verbatim: rows in from the ONE classifier
       if (frame) window.__bar.setInitHealth(VS.AM.initHealthIssues(frame));
       window.__bar.render();
-      // lane mask-value-shape (the strip's step two, page §4 — «the health mark gone»): the rows are held by the bar for their
-      // position-free home, Session Properties' «At its start» (initHealthRows); the strip draws no mark for them
-      const rows = window.__bar.initHealthRows();
+      const chip = document.querySelector('.chat-status-health');
+      const cs = chip ? getComputedStyle(chip) : null;
+      const barCs = getComputedStyle(document.querySelector('.chat-status-bar'));
       return {
         cards: list.querySelectorAll('.chat-msg-init').length,
         initRecordsInSlab: ${repeatSlabJson}.filter((m) => m.content && m.content[0] && m.content[0].initData).length,
         recordFrames,
-        rows,
-        onStrip: !!document.querySelector('.chat-status-bar .chat-status-health'),
+        chip: !!chip,
+        chipText: chip ? chip.textContent.replace(/\s+/g, ' ').trim() : '',
+        chipTitle: chip ? chip.getAttribute('title') : '',
+        chipVisible: !!(chip && cs.display !== 'none' && cs.visibility !== 'hidden' && chip.getBoundingClientRect().width > 0),
+        chipColor: cs ? cs.color : '', barColor: barCs.color,
+        chipSvg: !!(chip && chip.querySelector('svg')),
+        chipHtml: chip ? chip.innerHTML : '',
       };
     })()`);
     await setViewport(1280, 800);
@@ -1019,16 +1024,17 @@ if (!CHROME) {
       hBroken.cards === 0 && hBroken.initRecordsInSlab >= 1, hBroken);
     ok('…and those card-less RECORDS still carry the frame — initFrameOf reads it straight off the record, so the facts survive a suppressed card (round 5: the renderer is no longer in this path at all, because it also runs for replays)',
       hBroken.recordFrames >= 1, hBroken.recordFrames);
-    ok(`THE FIX, held off the strip: the same window's bar HOLDS the ${hBroken.rows.length} rows for Session Properties' «At its start» (the position-free home — page §4), and draws no strip mark for them`,
-      hBroken.rows.length === 4 && !hBroken.onStrip, hBroken);
-    ok('…every row VERBATIM (the protocol status is never translated or mapped)',
-      /MCP github — failed/.test(hBroken.rows.join('\n')) && /MCP drive — needs-auth/.test(hBroken.rows.join('\n'))
-      && /MCP notes — url_missing_type/.test(hBroken.rows.join('\n')) && /plugin old-helper — unsatisfied_dependency/.test(hBroken.rows.join('\n')), hBroken.rows);
+    ok(`THE FIX, measured: the same window shows a VISIBLE "${hBroken.chipText}" chip in warning colour (computed ${hBroken.chipColor}, bar text ${hBroken.barColor}) with an inline SVG (never an emoji)`,
+      hBroken.chip && hBroken.chipVisible && /4/.test(hBroken.chipText) && hBroken.chipColor !== hBroken.barColor && hBroken.chipSvg
+      && !/[\u{1F300}-\u{1FAFF}]/u.test(hBroken.chipHtml), hBroken);
+    ok('…its tooltip names every row VERBATIM (the protocol status is never translated or mapped)',
+      /MCP github — failed/.test(hBroken.chipTitle) && /MCP drive — needs-auth/.test(hBroken.chipTitle)
+      && /MCP notes — url_missing_type/.test(hBroken.chipTitle) && /plugin old-helper — unsatisfied_dependency/.test(hBroken.chipTitle), hBroken.chipTitle);
     const hClean = await chipProbe(cleanFrameJson);
-    ok('NEGATIVE CONTROL: an all-connected frame holds NO row (a gauge that cannot fall is not a gauge) — same code path, same slab, only the frame changed',
-      hClean.rows.length === 0 && hClean.cards === 0, hClean);
+    ok('NEGATIVE CONTROL: an all-connected frame draws NO chip (a gauge that cannot fall is not a gauge) — same code path, same slab, only the frame changed',
+      !hClean.chip && hClean.cards === 0, hClean);
     const hNone = await chipProbe('null');
-    ok('NEGATIVE CONTROL: never told (codex/ACP/older CLI — no frame at all) holds no row either, so nothing ever claims "all healthy"', hNone.rows.length === 0, hNone);
+    ok('NEGATIVE CONTROL: never told (codex/ACP/older CLI — no frame at all) draws no chip either, so nothing ever claims "all healthy"', !hNone.chip, hNone);
     // ABSENT ≠ CLEAN at the seam: a later status WITHOUT a frame must not
     // erase what a live init already reported.
     const hKeep = await evaljs(`(() => {
@@ -1036,25 +1042,27 @@ if (!CHROME) {
       ${mkBar};
       window.__bar.setInitHealth(VS.AM.initHealthIssues(frame));
       window.__bar.render();
-      const had = window.__bar.initHealthRows().length > 0;
+      const had = !!document.querySelector('.chat-status-health');
       // ChatView._applyInitHealth's guard, verbatim: a falsy frame returns
       // before touching the chip.
       const frame2 = null; if (frame2) window.__bar.setInitHealth(VS.AM.initHealthIssues(frame2));
       window.__bar.render();
-      return { had, still: window.__bar.initHealthRows().length > 0 };
+      return { had, still: !!document.querySelector('.chat-status-health') };
     })()`);
-    ok('a later status carrying NO frame leaves the rows standing (ABSENT ≠ CLEAN — an attach that cannot see the frame must not silently declare the session healthy)', hKeep.had && hKeep.still, hKeep);
-    // Touch has no hover: the rows are READ in words where a person opens them — Session Properties, told by the bar's event
+    ok('a later status carrying NO frame leaves the chip standing (ABSENT ≠ CLEAN — an attach that cannot see the frame must not silently declare the session healthy)', hKeep.had && hKeep.still, hKeep);
+    // Touch has no hover: the rows must be reachable by CLICK.
     const hClick = await evaljs(`(() => {
       const frame = ${frameJson};
       ${mkBar};
-      const told = []; const on = (e) => told.push(e.detail && e.detail.sessionId); window.addEventListener('vs-start-facts', on);
+      window.__bar.popupContainer = document.getElementById('host');
       window.__bar.setInitHealth(VS.AM.initHealthIssues(frame));
-      window.removeEventListener('vs-start-facts', on);
-      return { rows: window.__bar.initHealthRows(), told };
+      window.__bar.render();
+      document.querySelector('.chat-status-health').click();
+      const rows = [...document.querySelectorAll('.chat-status-health-row')].map((r) => r.textContent.replace(/\s+/g, ' ').trim());
+      return { rows, note: (document.querySelector('.chat-status-dropdown-note') || {}).textContent || '', esc: !!document.querySelector('.chat-status-dropdown[data-popover]') };
     })()`);
-    ok(`the bar TELLS an open Properties window when its rows change ('vs-start-facts', this conversation's id) — touch has no hover, so the rows live where a person reads them in words`,
-      hClick.rows.length === 4 && /MCP github — failed/.test(hClick.rows.join(' | ')) && hClick.told.length === 1 && !!hClick.told[0], hClick);
+    ok(`clicking the chip lists all 4 rows (touch has no hover — the tooltip alone would be unreadable on the surface where the card is hardest to reach) and joins the app-wide Escape protocol`,
+      hClick.rows.length === 4 && /MCP github — failed/.test(hClick.rows.join(' | ')) && hClick.esc && /start frame/.test(hClick.note), hClick);
 
     // ── ≤768px (375×667): the standing rule ──
     await setViewport(375, 667);
@@ -1086,10 +1094,8 @@ if (!CHROME) {
         text: chip.textContent.replace(/\s+/g, ' ').trim(),
         clipped: chip.scrollWidth > chip.clientWidth + 1,
         shrink: ccs.flexShrink, barWrap: bcs.flexWrap, barOverflowX: bcs.overflowX, fold: !!bar.querySelector('.chat-status-more'),
-        // reachable = fully on screen now, inside the bar's rows (the strip's arrangement — lane mask-value-shape: no swipe)
+        // reachable = fully on screen now, or scrollable into view by a swipe
         onScreen: chip.getBoundingClientRect().right <= innerWidth + 1,
-        inBar: (() => { const b = bar.getBoundingClientRect(), c = chip.getBoundingClientRect(); return c.left >= b.left - 0.5 && c.right <= b.right + 0.5 && c.top >= b.top - 0.5 && c.bottom <= b.bottom + 0.5; })(),
-        row2: !!bar.firstElementChild && chip.getBoundingClientRect().top >= bar.firstElementChild.getBoundingClientRect().bottom - 0.5,
         barScrollable: bar.scrollWidth > bar.clientWidth,
         index: [...bar.children].indexOf(chip),
         children: bar.children.length,
@@ -1100,9 +1106,11 @@ if (!CHROME) {
       m.before.cardW <= m.vw + 1 && m.before.warnRight <= m.vw + 1 && m.before.listScrollW <= m.before.listClientW + 1, m);
     ok(`375×667: the summary is a WRAPPING row, and at this width it does not overflow its own box (flex-wrap ${m.before.sumWrap}, scrollWidth ${m.before.sumScrollW} ≤ ${m.before.sumClientW}, height ${Math.round(m.before.sumH)}px) — a longer style name or a bigger count wraps to a second line instead of clipping`,
       m.before.sumWrap === 'wrap' && m.before.sumScrollW <= m.before.sumClientW + 1, m.before);
-    // lane mask-value-shape (the strip's step two — page §4, «the health mark gone»): the strip carries NO health mark at 375;
-    // the start card's own strip says it (the legs above), Session Properties' «At its start» holds it position-free
-    ok(`375×667: the strip carries no health mark — the start card's strip above says it, Session Properties holds it (no chip: ${!m.chip})`, !m.chip, m.chip);
+    ok(`375×667: the health chip keeps its FULL label on the narrow bar (${m.chip && Math.round(m.chip.w)}px, text "${m.chip && m.chip.text}", not clipped by its own box) and never shrinks away — the ≤768px bar is a single swipeable nowrap row (flex-wrap ${m.chip && m.chip.barWrap}, overflow-x ${m.chip && m.chip.barOverflowX}) so it is reachable ${m.chip && m.chip.onScreen ? 'without scrolling' : 'by a horizontal swipe'}`,
+      !!m.chip && m.chip.w > 0 && !m.chip.clipped && m.chip.shrink === '0' && m.chip.barWrap === 'nowrap' && (m.chip.barOverflowX === 'auto' || (m.chip.fold && m.chip.barOverflowX === 'hidden'))
+      && (m.chip.onScreen || m.chip.barScrollable), m.chip);
+    ok(`375×667: it sits near the FRONT of the bar (child ${m.chip && m.chip.index} of ${m.chip && m.chip.children}) — a warning parked behind eight chips on a 375px row is a warning nobody swipes to`,
+      !!m.chip && m.chip.index >= 0 && m.chip.index <= 2, m.chip);
     ok(`375×667 expanded: the inventory wraps too — long verbatim lists break instead of pushing the transcript sideways (body right ${Math.round(m.after.bodyRight)} ≤ ${m.vw}, scrollWidth ${m.after.listScrollW} ≤ ${m.after.listClientW}, body ${Math.round(m.after.bodyH)}px tall)`,
       m.after.bodyRight <= m.vw + 1 && m.after.listScrollW <= m.after.listClientW + 1 && m.after.bodyH > 0, m.after);
 
@@ -1122,12 +1130,11 @@ if (!CHROME) {
     //      hanging off it could not be scrolled to by any gesture.
     // Both are measured here as CONSEQUENCES (computed style + geometry), each
     // with a same-run negative control that puts the pre-fix value back.
-    const ddProbe = async (sel, label, extra = '') => evaljs(`(() => {
+    const ddProbe = async (sel, label) => evaljs(`(() => {
       const frame = ${frameJson};
       ${mkBar};
       window.__bar.setInitHealth(VS.AM.initHealthIssues(frame));
       window.__bar.setModel('claude-fable-5');
-      ${extra}
       window.__bar.render();
       const anchor = document.querySelector(${JSON.stringify(sel)});
       if (!anchor) return { missing: true };
@@ -1160,11 +1167,8 @@ if (!CHROME) {
         overflow: getComputedStyle(dd).overflow, nRows: rows.length, wsAll, longest, after, unclamped, preFix, label: ${JSON.stringify(label)} };
     })()`);
 
-    // (lane mask-value-shape) the health panel is gone with its chip; the panel of LONG rows is the context door's now — the
-    // window line and each detail's own sentence (the cache's is ~110 characters)
-    const CTX_STATE = "window.__bar.applyStatus({ model: 'claude-fable-5', contextWindow: 200000, lastUsage: { input_tokens: 21000, cache_read_input_tokens: 2500 }, total_cost_usd: 0.5 });";
-    const ddH = await ddProbe('.chat-status-ctx', 'context', CTX_STATE);
-    ok(`375×667: every context-panel row computes white-space NORMAL and none of them clips (worst overflow ${ddH.after && ddH.after.worstOverflow}px over ${ddH.nRows} rows; longest "${ddH.longest && ddH.longest.t.slice(0, 60)}…" ${ddH.longest && ddH.longest.sw}/${ddH.longest && ddH.longest.cw}) — the panel is overflow:hidden, so a row that cannot fit must WRAP, never clip`,
+    const ddH = await ddProbe('.chat-status-health', 'health');
+    ok(`375×667: every health row computes white-space NORMAL and none of them clips (worst overflow ${ddH.after && ddH.after.worstOverflow}px over ${ddH.nRows} rows; longest "${ddH.longest && ddH.longest.t.slice(0, 60)}…" ${ddH.longest && ddH.longest.sw}/${ddH.longest && ddH.longest.cw}) — the panel is overflow:hidden, so a row that cannot fit must WRAP, never clip`,
       !!ddH.after && ddH.wsAll.length === 1 && ddH.wsAll[0] === 'normal' && ddH.after.worstOverflow <= 1, ddH);
     ok(`NEGATIVE CONTROL: forcing the rows back to the cascade's PRE-FIX value (white-space: nowrap) clips them again by ${ddH.preFix && ddH.preFix.worstOverflow}px inside the same overflow:hidden panel — so the assert above measures the cascade, not the text`,
       !!ddH.preFix && ddH.preFix.worstOverflow > 20, ddH.preFix);
@@ -1197,23 +1201,20 @@ if (!CHROME) {
       bar.setModel('claude-fable-5');
       bar.setPermMode('default');
       ${extra}
-      // the strip's real two rows (lane mask-value-shape — was the ⋯ fold opened and one forced nowrap row): every door on
-      // screen; «⚙ 对话设置» is row 2's LAST — the right end the clamp exists for
+      // lane phone-chat-composer: on a phone these chips sit behind ⋯ — open it, as the person does, and keep the census's
+      // one-row geometry (chips past the right edge are what the clamp exists for; the open phone bar wraps them instead)
+      bar._foldOpen = true; bar.render(); bar.element.style.flexWrap = 'nowrap'; bar.element.style.overflowX = 'auto';
       bar.render();
       window.__bar = bar;
       return true;
     })()`;
     // `neuter` = the pre-fix behaviour of ONE mechanism, restored on the live
     // panel so the assert above it is measured against its own absence.
-    // `sel` = a mark on the strip, or «door|row» — a mark inside a door (lane mask-value-shape): its door opens, then its
-    // row is pressed, and ITS panel opens at the door, as the person does it
     const censusProbe = async (sel, extra, neuter = '') => evaljs(`(() => {
       ${mkBarFull(extra)};
-      const anchor = document.querySelector(${JSON.stringify(sel.split('|')[0])});
+      const anchor = document.querySelector(${JSON.stringify(sel)});
       if (!anchor) return { missing: true };
       anchor.click();
-      const row = ${JSON.stringify(sel.split('|')[1] || '')};
-      if (row) { const r = document.querySelector('.chat-status-dropdown [data-row="' + row + '"]'); if (!r) return { noRow: true }; r.click(); }
       const dd = document.querySelector('.chat-status-dropdown');
       if (!dd) return { noDropdown: true };
       ${neuter}
@@ -1229,7 +1230,7 @@ if (!CHROME) {
       // string and hand the rest of it to the parser as code.)
       const panelOverflow = dd.scrollWidth - dd.clientWidth;
       return { vw: innerWidth, docScrollW: document.documentElement.scrollWidth, docClientW: document.documentElement.clientWidth,
-        left: +r.left.toFixed(2), right: +r.right.toFixed(2), width: +r.width.toFixed(2), rows: rows.length, panelOverflow, aLeft: +anchor.getBoundingClientRect().left.toFixed(2),
+        left: +r.left.toFixed(2), right: +r.right.toFixed(2), width: +r.width.toFixed(2), rows: rows.length, panelOverflow,
         styleMinW: dd.style.minWidth, styleMaxW: dd.style.maxWidth, overflow: getComputedStyle(dd).overflow, worst,
         fits: r.right <= innerWidth - 8 + 0.5 && r.left >= -0.5 };
     })()`);
@@ -1239,26 +1240,25 @@ if (!CHROME) {
       ['.chat-status-model', 'model', ''],
       ['.chat-status-effort', 'effort', "bar.setEffort('xhigh', 'xhigh');"],
       ['.chat-status-perm', 'permission mode', ''],
-      ['.chat-status-settings|style', 'response style', ''],
-      ['.chat-status-ctx', 'context', "window.__bar.applyStatus({ model: 'claude-fable-5', contextWindow: 200000, lastUsage: { input_tokens: 21000, cache_read_input_tokens: 2500 }, total_cost_usd: 0.5 });"],   // lane mask-value-shape: the context door (the health panel is gone)
-      ['.chat-status-settings', 'conversation settings', ''],
-      ['.chat-status-artifacts', 'design', ''],   // in 产出 (no file yet: its press is the design panel)
-      ['.chat-status-settings|goal', 'set-a-goal', ''],
-      ['.chat-status-settings|goal', 'active goal', "bar.setGoal('ship the release when every test in scripts/ passes', 5000); bar.setGoalStatus('active');"],
+      ['.chat-status-style', 'response style', ''],
+      ['.chat-status-health', 'session health', ''],
+      ['.chat-status-design', 'design', ''],
+      ['.chat-status-goal', 'set-a-goal', ''],
+      ['.chat-status-goal', 'active goal', "bar.setGoal('ship the release when every test in scripts/ passes', 5000); bar.setGoalStatus('active');"],
       ['.chat-status-tasks', 'background tasks', "bar.setTasks({ t1: { status: 'running', description: 'a background task with a fairly long description' } });"],
-      ['.chat-status-tasks', 'workflows', "bar.trackWorkflow('wf_a', 'alpha'); bar.trackWorkflow('wf_b', 'beta');"],   // in «后台»
+      ['.chat-status-wf-multi', 'workflows', "bar.trackWorkflow('wf_a', 'alpha'); bar.trackWorkflow('wf_b', 'beta');"],
     ];
     const census = [];
     for (const [sel, name, extra] of CENSUS) {
       const d = await censusProbe(sel, extra);
       census.push([name, d]);
       ok(`375×667 CENSUS — the ${name} panel opens and lands fully on screen (left ${d.left} → right ${d.right} ≤ ${d.vw} − 8, ${d.width}px wide over ${d.rows} row(s))`,
-        !d.missing && !d.noDropdown && !d.noRow && d.fits && d.docScrollW === d.docClientW, { sel, ...d });
+        !d.missing && !d.noDropdown && d.fits && d.docScrollW === d.docClientW, { sel, ...d });
       ok(`375×667 CENSUS — …and nothing in the ${name} panel is CLIPPED by the squeeze (worst row ${d.worst ? d.worst.o : 0}px over ${d.rows} row(s), panel content ${d.panelOverflow}px, inside an ${d.overflow} box${d.worst ? `, longest "${d.worst.t}"` : ''}) — the panel has no scroller of its own, so anything wider than it is content nobody can read`,
         !d.missing && !d.noDropdown && (!d.worst || d.worst.o <= 1) && d.panelOverflow <= 1, { sel, worst: d.worst, panelOverflow: d.panelOverflow, width: d.width });
     }
     ok(`the census covered every chip that opens a panel (${census.length}) — the three that state a width INTENT (design / active goal / set-a-goal) are IN it, which is the whole point: they are exactly the ones the old two-entry belt loop could not have caught`,
-      census.length === CENSUS.length && census.every(([, d]) => !d.missing && !d.noDropdown && !d.noRow),
+      census.length === CENSUS.length && census.every(([, d]) => !d.missing && !d.noDropdown),
       census.map(([n, d]) => `${n}:${d.right}`).join(' '));
 
     // NEGATIVE CONTROL ① — the DEFECT, replayed whole. The pre-fix path is
@@ -1278,11 +1278,10 @@ if (!CHROME) {
       dd.style.maxWidth = Math.max(preMin, host.width - preLeft - 8) + 'px';
       dd.style.minWidth = '${minW}'; dd.style.maxWidth = '${maxW}';   // …then the caller, after the fact
       void preMin;`;
-    // (lane mask-value-shape) the two goal panels open at «⚙ 对话设置», row 2's LAST — the right end, where the defect replays;
-    // the design panel opens at 产出, row 2's FIRST, where the pre-fix placement fits too — no defect left to replay there
     for (const [sel, name, extra, minW, maxW] of [
-      ['.chat-status-settings|goal', 'set-a-goal', '', '280px', '420px'],
-      ['.chat-status-settings|goal', 'active goal', "bar.setGoal('ship the release when every test in scripts/ passes', 5000); bar.setGoalStatus('active');", '240px', '400px'],
+      ['.chat-status-design', 'design', '', '300px', '440px'],
+      ['.chat-status-goal', 'set-a-goal', '', '280px', '420px'],
+      ['.chat-status-goal', 'active goal', "bar.setGoal('ship the release when every test in scripts/ passes', 5000); bar.setGoalStatus('active');", '240px', '400px'],
     ]) {
       const d = await censusProbe(sel, extra, PRE_FIX(minW, maxW));
       ok(`NEGATIVE CONTROL: the PRE-FIX path replayed whole for the ${name} panel (place against the 130px CSS min-width, then the caller writes minWidth ${minW} / maxWidth ${maxW}) puts it back at left ${d.left} → right ${d.right} — ${Math.round(d.right - d.vw)}px past a ${d.vw}px screen that does not scroll sideways. A clamp cannot see a width its caller has not stated yet`,
@@ -1292,9 +1291,8 @@ if (!CHROME) {
     // be indistinguishable from "ignored", and the panels would silently lose
     // the width they ask for on every desktop too.
     const dsn = census.find(([n]) => n === 'design')[1];
-    const sg = census.find(([n]) => n === 'set-a-goal')[1];   // (lane mask-value-shape) the right-end door is «⚙ 对话设置» now — 产出, the design's, is row 2's FIRST
-    ok(`…and the intent is not merely swallowed: on this 375px container the design panel still got its full 300px (min-width ${dsn.styleMinW}, max-width ${dsn.styleMaxW}, on screen), and the set-a-goal panel its 280px (min-width ${sg.styleMinW}) — the clamp spent that intent by moving the panel LEFT of its door (${sg.left}px < ${sg.aLeft}px: «⚙ 对话设置» sits at the right end of the bar), which is what the caller actually asked for`,
-      parseFloat(dsn.styleMinW) === 300 && dsn.width >= 300 - 0.5 && dsn.fits && parseFloat(sg.styleMinW) === 280 && sg.width >= 280 - 0.5 && sg.left < sg.aLeft, { dsn, sg });
+    ok(`…and the intent is not merely swallowed: on this 375px container the design panel still got its full 300px (min-width ${dsn.styleMinW}, max-width ${dsn.styleMaxW}) — the clamp spent the intent by moving the panel LEFT (${dsn.left}px, its chip sits at the right end of the bar), which is what the caller actually asked for`,
+      parseFloat(dsn.styleMinW) === 300 && dsn.width >= 300 - 0.5 && dsn.left < 237, dsn);
 
     // A container with NO measurable width is the one place a clamp can do
     // more harm than the thing it prevents: bounds computed off a zero rect

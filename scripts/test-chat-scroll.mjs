@@ -263,42 +263,35 @@ try {
   const say = (text) => ws.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text }));
 
   // ── ① ──
-  console.log('① the record kinds this CLI added are never drawn in the chat — said in Session Properties (no strip chip; ⚙ Diagnostics holds their cause)');
+  console.log('① the record kinds this CLI added are never drawn in the chat — one quiet chip, → ⚙ Diagnostics');
   say('Check the numbers please');
   const played = await waitFor(`/LAST-LINE-1/.test(${LIST}.textContent)`, 60000);
   check('the stub\'s long turn rendered live (its last line is on screen)', played);
   await sleep(1200);
-  // lane mask-value-shape (the strip's step two, page §4): the kinds are no strip chip — the bar holds them (addedKindsWords) for
-  // Session Properties' «At its start» row
-  const c1 = await evalJs(`(() => { const l = ${LIST}; const kw = (${VIEW})?._statusBar?.addedKindsWords?.();
+  const c1 = await evalJs(`(() => { const l = ${LIST}; const chip = document.querySelector('.chat-view .chat-status-kinds'); const cs = chip ? getComputedStyle(chip) : null;
+    const red = (() => { const p = document.createElement('span'); p.style.color = 'var(--red, #e55)'; document.body.appendChild(p); const c = getComputedStyle(p).color; p.remove(); return c; })();
     return { fails: window.__fails, unknown: l.querySelectorAll('.chat-unknown-event, .chat-unknown-fields').length, words: /Unknown event|New fields on a known record/.test(l.innerText),
-      chip: kw ? kw.text : null, title: kw ? kw.title : '', onStrip: !!document.querySelector('.chat-view .chat-status-kinds') }; })()`);
+      chip: chip ? chip.textContent : null, title: chip ? chip.title : '', color: cs ? cs.color : null, red }; })()`);
   check('zero failed ops while the turn streamed (every live unknown record used to throw: the create op said `msg`)', c1.fails === 0, c1);
   check('no «Unknown event» / «New fields on a known record» card and none of their words in the chat', c1.unknown === 0 && !c1.words, c1);
-  check('ONE line says «3 record kinds this version added — Diagnostics» (two invented record kinds, the grown result) — and the strip draws no chip for it', c1.chip === '3 record kinds this version added — Diagnostics' && /later-build-blob/.test(c1.title) && /result: new fields/.test(c1.title) && !c1.onStrip, c1);
+  check('ONE chip in the status bar says «3 record kinds this version added — Diagnostics» (two invented record kinds, the grown result)', c1.chip === '3 record kinds this version added — Diagnostics' && /later-build-blob/.test(c1.title) && /result: new fields/.test(c1.title), c1);
+  check('…quiet: never the red of an error', !!c1.color && c1.color !== c1.red, c1);
   await png('1-turn-and-bar');
-  // its home: Session Properties' «At its start» section says it (opened as the person does, from the conversation)
-  await evalJs(`app.openSessionProps(window.__sid); true`);
-  const sp = (await waitFor(`!!document.querySelector('.session-props-start')`, 8000)) ? await evalJs(`document.querySelector('.session-props-start').innerText`) : null;
-  check('…and Session Properties says it in «At its start» (the kinds\' home off the strip; ⚙ Diagnostics holds the builds without a record table)', !!sp && /3 record kinds this version added/.test(sp), sp);
-  await evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x._sessionPropsKey); if (w) app.wm.closeWindow(w.id); return true; })()`);
+  await evalJs(`document.querySelector('.chat-view .chat-status-kinds')?.click(); true`);
+  check('…and a press opens ⚙ Diagnostics', (await evalJs('window.__diag || 0')) === 1);
 
   // ── ② ──
   console.log('② the cost says what it is');
-  // lane mask-value-shape (the strip's step two): the spend is a ROW of the context door (its panel), on the door's face only
-  // when billed per use — read from the bar's door rows, and whether the face carries it
-  const COSTROW = `((${VIEW})?._statusBar?._doorRows || []).find((x) => x.key === 'cost')`;
-  const cost = () => evalJs(`(() => { const r = ${COSTROW}; if (!r) return null; const face = (${VIEW})._statusBar.element.querySelector('.chat-status-ctx .chat-status-cost'); return { text: r.value, title: r.title, color: r.style, onFace: !!face }; })()`);
-  await waitFor(`/subscription/.test((${COSTROW})?.value || '')`, 8000);
+  const cost = () => evalJs(`(() => { const c = document.querySelector('.chat-view .chat-status-cost'); return c ? { text: c.textContent, title: c.title, color: c.getAttribute('style') } : null; })()`);
+  await waitFor(`/subscription/.test(document.querySelector('.chat-view .chat-status-cost')?.textContent || '')`, 8000);
   const k1 = await cost();
-  check('a subscription conversation: «This chat ≈ $0.47 · included in your subscription», quiet (the dim colour) — in the context door\'s panel, never on its face', k1 && k1.text === 'This chat ≈ $0.47 · included in your subscription' && /--text-dim/.test(k1.color) && /nothing is billed per use/.test(k1.title) && !k1.onFace, k1);
+  check('a subscription conversation: «This chat ≈ $0.47 · included in your subscription», quiet (the dim colour)', k1 && k1.text === 'This chat ≈ $0.47 · included in your subscription' && /--text-dim/.test(k1.color) && /nothing is billed per use/.test(k1.title), k1);
   await evalJs(`${VIEW}.setCostBasis?.({ source: 'api-key' }); true`);
   const k2 = await cost();
-  check('an API key: «This chat ≈ $0.47 · billed per use (API key)» in a tier colour — and on the context door\'s face', k2 && k2.text === 'This chat ≈ $0.47 · billed per use (API key)' && /--green/.test(k2.color) && k2.onFace, k2);
+  check('an API key: «This chat ≈ $0.47 · billed per use (API key)» in a tier colour', k2 && k2.text === 'This chat ≈ $0.47 · billed per use (API key)' && /--green/.test(k2.color), k2);
   await evalJs(`${VIEW}.setCostBasis?.(null); true`);
   const k3 = await cost();
-  // (主开发's ruling on the strip's cure: a spend whose billing basis is UNKNOWN is inside the context panel and SAID as unknown there)
-  check('nobody knows: «This chat ≈ $0.47 · whether it is billed is not known» — the figure, said as unknown (in the panel, off the face)', k3 && k3.text === 'This chat ≈ $0.47 · whether it is billed is not known' && /depends on the account/.test(k3.title) && !k3.onFace, k3);
+  check('nobody knows: «This chat ≈ $0.47» — the figure with its words, no claim', k3 && k3.text === 'This chat ≈ $0.47' && /depends on the account/.test(k3.title), k3);
   await evalJs(`${VIEW}.setCostBasis?.({ source: 'subscription' }); true`);
 
   // ── ③ ──

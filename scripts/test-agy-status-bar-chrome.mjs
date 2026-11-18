@@ -149,11 +149,7 @@ const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date
 const waitApp = () => evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })');
 const viewOf = (sidVar) => `([...(window.app.sessions?.values?.() || [])].find((v) => v && v._messageList && v.sessionId === window.${sidVar}))`;
 // the bar's facts, as a person reads them: each chip's visible text + its title
-// lane mask-value-shape (the strip's step two): the details (⚡ cache, Σ, the turn time, «not reported») are ROWS of the context
-// door now (the bar's _doorRows, drawn in its panel); the context door's face is the ring + «Context» + %, its [used/total] in data-*
-const facts = (sidVar) => evalJs(`(() => { const v = ${viewOf(sidVar)}; const el = v && v._statusBar && v._statusBar.element; if (!el) return null; const c = (k) => { const e = el.querySelector('[data-chip="' + k + '"]'); return e ? { text: e.textContent.replace(/\\s+/g, ' ').trim(), title: e.getAttribute('title') || '', used: e.getAttribute('data-used'), total: e.getAttribute('data-total') } : null; };
-  const rows = v._statusBar._doorRows || []; const r = (k) => { const x = rows.find((y) => y.key === k); if (!x) return null; const d = document.createElement('div'); d.innerHTML = x.html; return { text: d.textContent.replace(/\\s+/g, ' ').trim(), title: x.title || '' }; };
-  return { ctx: c('ctx'), unknown: c('ctx-unknown'), cache: r('cache'), odometer: r('odometer'), time: r('turn-time'), model: c('model'), unreported: r('unreported'), artifacts: el.querySelector('.chat-status-artifacts-text')?.textContent || null }; })()`);
+const facts = (sidVar) => evalJs(`(() => { const v = ${viewOf(sidVar)}; const el = v && v._statusBar && v._statusBar.element; if (!el) return null; const c = (k) => { const e = el.querySelector('[data-chip="' + k + '"]'); return e ? { text: e.textContent.replace(/\\s+/g, ' ').trim(), title: e.getAttribute('title') || '' } : null; }; return { ctx: c('ctx'), unknown: c('ctx-unknown'), cache: c('cache'), odometer: c('odometer'), time: c('turn-time'), model: c('model'), unreported: c('unreported'), artifacts: el.querySelector('.chat-status-artifacts-text')?.textContent || null }; })()`);
 let liveWs = null;
 const createChat = async (sidVar, opts) => {
   const before = await evalJs(`[...app.sessions.values()].filter((v) => v && v._messageList).map((v) => v.sessionId)`);
@@ -181,21 +177,14 @@ try {
   const agySid = await createChat('__agy', { cwd: CWD, name: 'agy-facts', mode: 'chat', backend: 'antigravity', model: 'gemini-4-argon-high' });
   check('an Antigravity chat is created through the page\'s own createSession (the fake agy behind the real agy-wrapper)', !!agySid);
   check('the turn played (the fake agy wrote reports/summary.md)', await turn(agySid, '__agy', 'please write the summary', /Antigravity \(gemini-4-argon-high/) && fs.existsSync(SUMMARY));
-  await waitFor(`(() => { const v = ${viewOf('__agy')}; const el = v && v._statusBar && v._statusBar.element; return !!el && !!(v._statusBar._doorRows || []).some((y) => y.key === 'odometer') && !!el.querySelector('[data-chip="ctx"]') && !!el.querySelector('.chat-status-artifacts-text'); })()`, 15000);
+  await waitFor(`(() => { const v = ${viewOf('__agy')}; const el = v && v._statusBar && v._statusBar.element; return !!el && !!el.querySelector('[data-chip="odometer"]') && !!el.querySelector('[data-chip="ctx"]') && !!el.querySelector('.chat-status-artifacts-text'); })()`, 15000);
   const a = await facts('__agy');
-  check('context: a % of the model\'s DOCUMENTED window (1.0m, gemini-4-argon) — the title names the window\'s source (the door\'s face the %, its [used/total] in data-*)', a?.ctx && /\d+%/.test(a.ctx.text) && a.ctx.total === '1.0m' && /^\d+(\.\d+)?k?$/.test(a.ctx.used || '') && /documented window/.test(a.ctx.title) && !a.unknown, a);
-  check('⚡ the cache hit rate of the turn\'s last call (a row of the context door)', a?.cache && /\d+%/.test(a.cache.text) && /Prompt cache hit rate/.test(a.cache.title), a?.cache);
-  check('Σ the conversation\'s token total, as agy counts it, with the thinking share (a row of the context door)', a?.odometer && /^Σ\d+$/.test(a.odometer.text) && /thinking \d+ = \d+% of the total/.test(a.odometer.title), a?.odometer);
+  check('context: a % of the model\'s DOCUMENTED window (1.0m, gemini-4-argon) — the title names the window\'s source', a?.ctx && /^\S+ \d+%\[\d+\/1\.0m\]$|\d+%\s*\[\d+\/1\.0m\]/.test(a.ctx.text) && /documented window/.test(a.ctx.title) && !a.unknown, a);
+  check('⚡ the cache hit rate of the turn\'s last call', a?.cache && /\d+%/.test(a.cache.text) && /Prompt cache hit rate/.test(a.cache.title), a?.cache);
+  check('Σ the conversation\'s token total, as agy counts it, with the thinking share', a?.odometer && /^Σ\d+$/.test(a.odometer.text) && /thinking \d+ = \d+% of the total/.test(a.odometer.title), a?.odometer);
   check('the model it ran on + the turn\'s own time', a?.model && /gemini-4-argon-high/.test(a.model.text) && a?.time && /\d+s/.test(a.time.text) && /^The last turn took \d+s · it spent \d+ tokens \(in \d+, cached \d+, out \d+\) over (one model call|\d+ model calls)$/.test(a.time.title), { model: a?.model, time: a?.time });
   check('the Artifacts chip lists the file agy wrote (write_file, its absolute Path)', a?.artifacts === 'Artifacts · 1', a?.artifacts);
-  check('…and no «not reported» row: agy reports all five', !!a && !a.unreported && !!a.cache, a?.unreported);
-  { // the person's road to them: a press on the context door opens its panel — the window, then ⚡, Σ and the turn time
-    const v = viewOf('__agy');
-    await evalJs(`(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); ${v}._statusBar.element.querySelector('[data-chip="ctx"]').click(); return true; })()`);
-    const p = await evalJs(`(() => { const d = document.querySelector('.chat-status-dropdown'); return d ? [...d.querySelectorAll('.chat-status-ctx-row')].map((x) => x.className.replace(/.*chat-status-ctx-row /, '') + '=' + x.textContent.trim()) : null; })()`);
-    check('the context door\'s panel says the window, then the cache, Σ and the turn time — each its own sentence (moved, not lost)', !!p && /^chat-status-ctx-window=/.test(p[0]) && ['cache', 'odometer', 'turn-time'].every((k) => p.some((x) => x.startsWith('chat-status-ctx-' + k + '=') && /\d/.test(x))), p);
-    await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); true`);
-  }
+  check('…and no «not reported» chip: agy reports all five', !a?.unreported, a?.unreported);
   const listed = await evalJs(`fetch('/api/artifacts?sessionId=' + encodeURIComponent(window.__agy)).then((r) => r.json()).then((j) => JSON.stringify(j)).catch((e) => String(e))`);
   check('the server\'s Artifacts list names reports/summary.md (the ONE registry)', listed.includes('summary.md'), listed.slice(0, 400));
   if (process.env.VS_AGY_BAR_PNG) {
@@ -210,18 +199,18 @@ try {
   await sleep(1000);
   // this harness restores no window on a reload (test-artifacts-chrome's precedent): the chat is re-attached by hand
   await evalJs(`window.__agy = ${JSON.stringify(agySid)}; if (!${viewOf('__agy')}) app.attachSession(${JSON.stringify(agySid)}, 'agy-facts', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'antigravity' }); true`);
-  await waitFor(`(() => { const v = ${viewOf('__agy')}; const el = v && v._statusBar && v._statusBar.element; return !!el && !!(v._statusBar._doorRows || []).some((y) => y.key === 'odometer') && !!el.querySelector('[data-chip="ctx"]'); })()`, 20000);
+  await waitFor(`(() => { const v = ${viewOf('__agy')}; const el = v && v._statusBar && v._statusBar.element; return !!el && !!el.querySelector('[data-chip="odometer"]') && !!el.querySelector('[data-chip="ctx"]'); })()`, 20000);
   const b = await facts('__agy');
-  check('after the reload: the same context %, cache, Σ and turn time', !!b?.cache && !!b?.odometer && !!b?.time && b?.ctx?.text === a?.ctx?.text && b?.ctx?.used === a?.ctx?.used && b?.cache?.text === a?.cache?.text && b?.odometer?.text === a?.odometer?.text && b?.time?.text === a?.time?.text, { before: a, after: b });
+  check('after the reload: the same context %, cache, Σ and turn time', b?.ctx?.text === a?.ctx?.text && b?.cache?.text === a?.cache?.text && b?.odometer?.text === a?.odometer?.text && b?.time?.text === a?.time?.text, { before: a, after: b });
 
   console.log('③ a claude chat: its context + cache, and «not reported» for what its stream does not give the bar');
   const clSid = await createChat('__cl', { cwd: CWD, name: 'claude-facts', mode: 'chat', backend: 'claude' });
   check('a claude chat is created (stub CLI behind the real chat-wrapper)', !!clSid);
   check('its turn played', await turn(clSid, '__cl', 'hello', /Claude answered/));
-  await waitFor(`(() => { const v = ${viewOf('__cl')}; const el = v && v._statusBar && v._statusBar.element; return !!el && !!el.querySelector('[data-chip="ctx"]') && !!(v._statusBar._doorRows || []).some((y) => y.key === 'unreported'); })()`, 15000);
+  await waitFor(`(() => { const v = ${viewOf('__cl')}; const el = v && v._statusBar && v._statusBar.element; return !!el && !!el.querySelector('[data-chip="ctx"]') && !!el.querySelector('[data-chip="unreported"]'); })()`, 15000);
   const c = await facts('__cl');
   check('claude: context 25% of the window its result names, ⚡96%', c?.ctx && /25%/.test(c.ctx.text) && c?.cache && /96%/.test(c.cache.text), c);
-  check('claude: ONE «not reported» row naming the token total and the turn time — no Σ, no time row', c?.unreported?.text === 'not reported' && c.unreported.title === 'Not reported by this harness: token total, turn time' && !c.odometer && !c.time, c);
+  check('claude: ONE «not reported» chip naming the token total and the turn time — no Σ, no time chip', c?.unreported?.text === 'not reported' && c.unreported.title === 'Not reported by this harness: token total, turn time' && !c.odometer && !c.time, c);
 
   console.log('④ a card shows an expander only where there is something to open (the owner 2026-10-24: 「这俩为啥无法展开」)');
   // the newest Read card of a chat over summary.md, as a person meets it: its status line, where it sits, its caret
@@ -290,7 +279,7 @@ try {
   // the chip as a person meets it: its window raised, its box on screen; a REAL press opens the menu
   const permChip = (sidVar) => evalJs(`(() => { const v = ${viewOf(sidVar)}; const el = v && v._statusBar && v._statusBar.element; const c = el && el.querySelector('[data-chip="perm"]'); if (!c) return null;
     for (const [id, w] of app.wm.windows) if (w.element && w.element.contains(v._messageList)) { app.wm.focusWindow(id); break; }
-    c.scrollIntoView({ block: 'nearest' }); const r = c.getBoundingClientRect(); return { text: c.textContent.replace(/\\s+/g, ' ').trim(), raw: c.getAttribute('data-raw'), x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width }; })()`);   // raw = the mode (its face is worded — the cure of 644a67ec2)
+    c.scrollIntoView({ block: 'nearest' }); const r = c.getBoundingClientRect(); return { text: c.textContent.replace(/\\s+/g, ' ').trim(), x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width }; })()`);
   const openMenu = async (sidVar) => {
     await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); true`);
     const c = await permChip(sidVar);
@@ -299,7 +288,7 @@ try {
     await waitFor(`!!document.querySelector('.chat-status-dropdown')`, 3000);
     return { chip: c, items: await evalJs(`(() => { const d = document.querySelector('.chat-status-dropdown'); return d ? [...d.querySelectorAll('.chat-status-dropdown-item')].map((i) => (i.querySelector('.chat-status-perm-value') || i).textContent.trim()) : null; })()`) };
   };
-  const chipSays = (sidVar, re) => waitFor(`(() => { const v = ${viewOf(sidVar)}; const c = v && v._statusBar && v._statusBar.element && v._statusBar.element.querySelector('[data-chip="perm"]'); return !!c && ${re}.test(c.getAttribute('data-raw') || c.textContent); })()`, 20000);
+  const chipSays = (sidVar, re) => waitFor(`(() => { const v = ${viewOf(sidVar)}; const c = v && v._statusBar && v._statusBar.element && v._statusBar.element.querySelector('[data-chip="perm"]'); return !!c && ${re}.test(c.textContent); })()`, 20000);
   const mSid = await createChat('__agym', { cwd: CWD, name: 'agy-mode', mode: 'chat', backend: 'antigravity', model: 'gemini-4-argon-high' });
   check('an Antigravity chat for the mode (the fake agy behind the real agy-wrapper)', !!mSid);
   await waitFor(`(() => { const v = ${viewOf('__agym')}; return !!v && !!v._statusBar?.element?.querySelector('[data-chip="perm"]') && !!${JSON.stringify(mSid)} && true; })()`, 15000);
@@ -321,7 +310,7 @@ try {
   await evalJs(`window.__agym = ${JSON.stringify(mSid)}; if (!${viewOf('__agym')}) app.attachSession(${JSON.stringify(mSid)}, 'agy-mode', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'antigravity' }); true`);
   await chipSays('__agym', '/bypassPermissions/');
   const m2 = await openMenu('__agym');
-  check(`after a RELOAD over the cut journal: the chip says «${m2.chip && m2.chip.text}» and a real press opens the four (the attach's chatStatus reads the sidecar)`, /bypassPermissions/.test(m2.chip?.raw || m2.chip?.text || '') && JSON.stringify(m2.items) === JSON.stringify(FOUR), m2);
+  check(`after a RELOAD over the cut journal: the chip says «${m2.chip && m2.chip.text}» and a real press opens the four (the attach's chatStatus reads the sidecar)`, /bypassPermissions/.test(m2.chip?.text || '') && JSON.stringify(m2.items) === JSON.stringify(FOUR), m2);
   await evalJs(`(() => { const v = ${viewOf('__agym')}; v._statusBar.applyStatus({ permissionModes: [] }); v._statusBar.render(); return true; })()`);
   const m3 = await openMenu('__agym');
   check('a status saying permissionModes: [] (what a cut journal used to send) leaves the declared list: a real press still opens the four', JSON.stringify(m3.items) === JSON.stringify(FOUR), m3);
@@ -342,8 +331,8 @@ try {
   check('…a NEW session (its own sidecar, another wid) whose sidecar says bypassPermissions — read from the conversation\'s mode file {mode: bypassPermissions}, never from the old session', rSid !== mSid && sideOf(rSid)?.agentMode === 'bypassPermissions' && sideOf(rSid)?.sessionId === cid && fact?.mode === 'bypassPermissions', { resumed: sideOf(rSid) && { agentMode: sideOf(rSid).agentMode, sessionId: sideOf(rSid).sessionId }, fact, oldSidecarOnDisk: fs.existsSync(path.join(BUFS, mSid + '.json')) });
   await chipSays('__agyr', '/bypassPermissions/');
   const rc = await permChip('__agyr');
-  const said = /bypassPermissions/.test(rc?.raw || rc?.text || '') ? null : await evalJs(`fetch('/api/session-messages?backend=antigravity&backendSessionId=' + encodeURIComponent(${JSON.stringify(cid)}) + '&cwd=' + encodeURIComponent(${JSON.stringify(CWD)}) + '&withStatus=1').then((r) => r.json()).then((j) => ({ status: j.chatStatus, n: (j.messages || []).length, bar: (() => { const v = ${viewOf('__agyr')}; return v ? { perm: v._statusBar._statusPermMode, list: v._statusBar._permissionModes } : null; })() })).catch((e) => String(e))`);
-  check(`the resumed chat's chip says «${rc && rc.text}» — its own mode, never «default»`, /bypassPermissions/.test(rc?.raw || rc?.text || ''), { rc, said, sidecars: fs.readdirSync(BUFS).filter((f) => f.endsWith('.json')).map((f) => [f, sideOf(f.slice(0, -5))?.agentMode, sideOf(f.slice(0, -5))?.sessionId === cid]) });
+  const said = /bypassPermissions/.test(rc?.text || '') ? null : await evalJs(`fetch('/api/session-messages?backend=antigravity&backendSessionId=' + encodeURIComponent(${JSON.stringify(cid)}) + '&cwd=' + encodeURIComponent(${JSON.stringify(CWD)}) + '&withStatus=1').then((r) => r.json()).then((j) => ({ status: j.chatStatus, n: (j.messages || []).length, bar: (() => { const v = ${viewOf('__agyr')}; return v ? { perm: v._statusBar._statusPermMode, list: v._statusBar._permissionModes } : null; })() })).catch((e) => String(e))`);
+  check(`the resumed chat's chip says «${rc && rc.text}» — its own mode, never «default»`, /bypassPermissions/.test(rc?.text || ''), { rc, said, sidecars: fs.readdirSync(BUFS).filter((f) => f.endsWith('.json')).map((f) => [f, sideOf(f.slice(0, -5))?.agentMode, sideOf(f.slice(0, -5))?.sessionId === cid]) });
   check('…and agy really runs with every tool approved: the next reply comes under always-proceed (--dangerously-skip-permissions)', await turn(rSid, '__agyr', 'after the resume', /always-proceed\): [\s\S]*after the resume/));
   check('…and the chat says why, ONE line: «Resumed in this conversation\'s own mode: bypassPermissions»', await waitFor(`(() => { const v = ${viewOf('__agyr')}; return !!v && (v._messageList.textContent.match(/Resumed in this conversation's own mode: bypassPermissions/g) || []).length === 1; })()`, 8000));
   console.log('⑥ the models Antigravity reported (the New Session field + a chat\'s model menu)');
@@ -355,7 +344,7 @@ try {
   await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); window.__cm.length = 0; true`);
   // the Antigravity chat on screen (⑤'s resumed one is in front by now; ①'s may be off screen): its window raised, its model
   // chip the topmost thing at its own centre — the press is a person's, where they would press
-  const mc = await evalJs(`(() => { for (const sv of ['__agyr', '__agym', '__agy']) { const v = window[sv] && ${viewOf('__SV__')}; const el = v && v._statusBar && v._statusBar.element; const c0 = el && el.querySelector('[data-chip="model"]'); const c = c0 && (c0.querySelector('.chat-status-model-label') || c0); if (!c) continue;   // the model's own label: the model door also holds the thinking level (lane mask-value-shape)
+  const mc = await evalJs(`(() => { for (const sv of ['__agyr', '__agym', '__agy']) { const v = window[sv] && ${viewOf('__SV__')}; const el = v && v._statusBar && v._statusBar.element; const c = el && el.querySelector('[data-chip="model"]'); if (!c) continue;
     for (const [id, w] of app.wm.windows) if (w.element && w.element.contains(v._messageList)) { app.wm.focusWindow(id); break; }
     c.scrollIntoView({ block: 'nearest' }); const r = c.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const at = document.elementFromPoint(x, y);
     if (r.width && at && c.contains(at)) return { sv, x, y, w: r.width }; } return null; })()`.replace("window.__SV__", "window[sv]"));

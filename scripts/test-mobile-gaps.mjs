@@ -639,12 +639,10 @@ try {
     check('a live claude chat session is created through the real spawn path (stub CLI behind the real wrapper)', !!sid, frames.slice(-3).map((f) => JSON.stringify(f).slice(0, 200)).join('\n'));
     if (sid) {
       await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'live stub', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
-      // lane mask-value-shape (the strip's step two, page §4): the magnifier lives on the phone's TOP bar now, where the
-      // conversation's name lives — never on the strip
-      check('the live window attaches on the phone (composer present)', await waitFor(`!!document.querySelector('.window-active .chat-view .chat-input') && !!document.querySelector('#mobile-nav-search.on')`, 20000));
-      const mag = await evalJs(`(() => { const s = document.querySelector('#mobile-nav-search'); if (!s) return null; const r = s.getBoundingClientRect(); return { display: getComputedStyle(s).display, w: Math.round(r.width), h: Math.round(r.height), svg: !!s.querySelector('svg') }; })()`);
-      check(`the phone's top bar carries the search magnifier as a ≥ 36×36 SVG button, and the strip none (${mag?.display}, ${mag?.w}×${mag?.h})`, mag && mag.display !== 'none' && mag.w >= 36 && mag.h >= 36 && mag.svg && !(await evalJs(`!!document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-search')`)), mag);
-      await evalJs(`document.querySelector('#mobile-nav-search').click(); true`); await sleep(250);
+      check('the live window attaches on the phone (composer present)', await waitFor(`!!document.querySelector('.window-active .chat-view .chat-input') && !!document.querySelector('.window-active .chat-view .chat-status-search')`, 20000));
+      const mag = await evalJs(`(() => { const s = document.querySelector('.window-active .chat-view .chat-status-search'); if (!s) return null; const r = s.getBoundingClientRect(); return { display: getComputedStyle(s).display, w: Math.round(r.width), h: Math.round(r.height), svg: !!s.querySelector('svg') }; })()`);
+      check(`the live status bar carries the search magnifier as a ≥ 36×36 SVG chip (${mag?.display}, ${mag?.w}×${mag?.h})`, mag && mag.display !== 'none' && mag.w >= 36 && mag.h >= 36 && mag.svg, mag);
+      await evalJs(`document.querySelector('.window-active .chat-view .chat-status-search').click(); true`); await sleep(250);
       check('tapping the magnifier opens the search bar (Ctrl+F\'s touch face, the same open())', await evalJs(`(() => { const b = document.querySelector('.window-active .chat-view .chat-search-bar'); return !!b && !b.classList.contains('hidden') && getComputedStyle(b).display !== 'none'; })()`));
       // r2: the bar's own prev / next / close were 24×17 / 24×17 / 20×20
       const sbBtns = await evalJs(rectsOf('.window-active .chat-view .chat-search-bar button'));
@@ -660,29 +658,28 @@ try {
       console.log('billing chip on the phone follows the member');
       const poolAuth = (member, id, extra = {}) => ({ source: 'pooled', name: '全部', poolTarget: member, poolTargetId: id, placement: 'automatic', priorityRank: null, pinned: null, pinnedId: null, poolDefault: 'Alpha Max', ...extra });
       const feed = (auth) => `(() => { const base = app.sidebar._webuiSessions || []; if (!base.some((r) => r.id === ${JSON.stringify(sid)})) return false; app.ws.ws.onmessage({ data: JSON.stringify({ type: 'active-sessions', sessions: base.map((r) => (r.id === ${JSON.stringify(sid)} ? { ...r, auth: ${JSON.stringify(auth)} } : r)) }) }); return true; })()`;
-      // lane mask-value-shape (the strip's step two, page §4): the phone's account is a ROW of «⚙ 对话设置» — its value the full
-      // words (the bar's door rows; the person's road: a tap on the door, its row)
-      const BAR = `([...app.sessions.values()].find((x) => x && x._statusBar && x._statusBar.element.closest('.window-active'))?._statusBar)`;
-      const chipNow = `(() => { const r = ((${BAR})?._doorRows || []).find((x) => x.key === 'billing'); return r ? { text: r.value, title: r.title, pooled: /\\bpooled\\b/.test(r.cls) } : null; })()`;
+      const chipNow = `(() => { const el = document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-billing'); if (!el) return null; const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return { text: ([...el.querySelectorAll(':scope > span')].filter((s) => getComputedStyle(s).display !== 'none').map((s) => s.textContent).join('') || el.textContent), title: el.getAttribute('title') || '', pooled: el.classList.contains('pooled'), w: Math.round(r.width), l: Math.round(r.left), r: Math.round(r.right), display: cs.display, clipped: el.scrollWidth > el.clientWidth + 1 }; })()`;
       const realRows = await evalJs(`JSON.stringify(app.sidebar._webuiSessions || [])`);
       const walk = await evalJs(`(() => {
         const fed0 = ${feed(poolAuth('Alpha Max', 'acct-a'))};
+        const el0 = document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-billing');
         const a = ${chipNow};
         const fed1 = ${feed(poolAuth('Beta Max', 'acct-b'))};
+        const el1 = document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-billing');
         const b = ${chipNow};
-        return { fed: fed0 && fed1, a, b, onStrip: !!document.querySelector('.window-active .chat-view .chat-status-bar > .chat-status-billing') };
+        return { fed: fed0 && fed1, a, b, same: !!el0 && el0 === el1 };
       })()`);
-      check(`a stub active-sessions frame through the page's own socket puts the pooled identity on the phone's account row (${JSON.stringify(walk.a?.text)})`, walk.fed && walk.a && walk.a.pooled && walk.a.text === '⣿ 全部 → Alpha Max' && !walk.onStrip, walk);
-      check(`after a per-session switch (the SAME pool, member B) the row names B (${JSON.stringify(walk.b?.text)}) — the owner's phone kept A`, walk.b && walk.b.text === '⣿ 全部 → Beta Max' && /currently billing Beta Max/.test(walk.b.title), walk);
-      // the person's road: a tap on «⚙ 对话设置», its «Who pays» row says B, inside the phone's viewport
-      await evalJs(`(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); return true; })()`);
-      await tap('.window-active .chat-view .chat-status-settings'); await sleep(400);
+      check(`a stub active-sessions frame through the page's own socket puts the pooled identity on the phone chip (${JSON.stringify(walk.a?.text)})`, walk.fed && walk.a && walk.a.pooled && walk.a.text === '⣿ 全部 → Alpha Max', walk);
+      check(`after a per-session switch (the SAME pool, member B) the chip names B (${JSON.stringify(walk.b?.text)}) — the owner's phone kept A`, walk.b && walk.b.text === '⣿ 全部 → Beta Max' && /currently billing Beta Max/.test(walk.b.title), walk);
+      check('…patched IN PLACE: the same chip node (the keyed-chip law)', walk.same && walk.b.display !== 'none', walk);
+      // the phone's status bar scrolls sideways (chat.css ≤768px): bring the chip into view as a finger would
+      await evalJs(`document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-billing').scrollIntoView({ block: 'nearest', inline: 'nearest' }); true`);
+      await sleep(400); // a frame for the look
       await shot('billing-chip-member-b.png');
-      const after = await evalJs(`(() => { const row = document.querySelector('.chat-status-dropdown .chat-status-settings-row[data-row="billing"]'); if (!row) return null; const r = row.getBoundingClientRect(); return { text: (row.querySelector('.chat-status-settings-value') || row).textContent.replace(/\\s*›$/, '').trim(), l: Math.round(r.left), r: Math.round(r.right) }; })()`);
-      check(`the screenshot's «Who pays» row reads B, inside the ${VW} px viewport (${JSON.stringify(after?.text)} at ${after?.l}–${after?.r}; ${SHOTS}/billing-chip-member-b.png)`, after && after.text === '⣿ 全部 → Beta Max' && after.l >= 0 && after.r <= VW, after);
-      await evalJs(`(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); return true; })()`);
+      const after = await evalJs(chipNow);
+      check(`the screenshot's chip still reads B, inside the ${VW} px viewport (${JSON.stringify(after?.text)} at ${after?.l}–${after?.r}; ${SHOTS}/billing-chip-member-b.png)`, after && after.text === '⣿ 全部 → Beta Max' && after.l >= 0 && after.r <= VW, after);
       await evalJs(`(() => { const sessions = JSON.parse(${JSON.stringify(realRows)}); app.ws.ws.onmessage({ data: JSON.stringify({ type: 'active-sessions', sessions }) }); return true; })()`);
-      check('the real list put back: the row no longer claims a pool', await waitFor(`!(${chipNow})?.pooled`, 3000));
+      check('the real list put back: the chip no longer claims a pool', await waitFor(`!document.querySelector('.window-active .chat-view .chat-status-billing')?.classList.contains('pooled')`, 3000));
     }
     try { liveWs.close(); } catch {}
   }
@@ -734,10 +731,10 @@ try {
       // the phone page, its Lock row tapped for real. The frames the phone's bar sends are recorded at its socket.
       const B = `(${VIEW})._statusBar`;
       await evalJs(`(() => { const b = ${B}; const send = b._ws.send.bind(b._ws); window.__f52sent = []; b._ws.send = (f) => { window.__f52sent.push(JSON.parse(JSON.stringify(f))); return send(f); }; return true; })()`);
-      const facts = () => evalJs(`(() => { const b = ${B}; const el = b.element.querySelector('[data-chip="model"]'); const lab = el.querySelector('.chat-status-model-label') || el; return { text: (lab.dataset.raw ?? lab.textContent).trim(),   /* the raw label (its face is worded — the cure of 644a67ec2) */ amber: /chat-status-model-fallback/.test(el.className), ask: b._statusModel, locked: !!b._modelLocked, lockedModel: b._lockedModel, askSeq: b._askSeq, servedSeq: b._servedSeq, served: b._servedModel }; })()`);
+      const facts = () => evalJs(`(() => { const b = ${B}; const el = b.element.querySelector('[data-chip="model"]'); return { text: el.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), ask: b._statusModel, locked: !!b._modelLocked, lockedModel: b._lockedModel, askSeq: b._askSeq, servedSeq: b._servedSeq, served: b._servedModel }; })()`);
       const tapLock = async () => {
         await evalJs(`(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); return true; })()`);
-        await tap('.window-active .chat-view .chat-status-model .chat-status-model-label'); await sleep(300);   // the model's own label (lane mask-value-shape: the door also holds the thinking level)
+        await tap('.window-active .chat-view .chat-status-model'); await sleep(300);
         await tap('.chat-status-dropdown .chat-status-dropdown-lock'); await sleep(900);
       };
       const lockFrames = async () => (await evalJs('window.__f52sent')).filter((f) => f && f.type === 'set-model');

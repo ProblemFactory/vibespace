@@ -140,16 +140,12 @@ class FakeEl {
   const chip = (backend, status) => {
     const bar = new ChatStatusBar({ send() {} }, 'sid-effort', { backend, getToolMsg: () => null, openSubagentViewer() {}, openInTempEditor() {} });
     if (status) bar.applyStatus(status);
-    // lane mask-value-shape (the strip's step two): the thinking level is a PART of the model door (its own span, its own menu);
-    // its face is the level's WORD (page §4: «超强推理» — the cure of 644a67ec2), the raw value in data-raw and first in its title
-    const m = bar.element.children.find((c) => c.getAttribute('data-chip') === 'model');
-    const x = m && /<span class="chat-status-effort[^"]*" data-door-part="effort" data-raw="([^"]*)" title="([^"]*)">([^<]*)<\/span>/.exec(m.innerHTML);
-    const un = (v) => v.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-    return x ? { text: un(x[3]), raw: un(x[1]), title: un(x[2]) } : null;
+    const el = bar.element.children.find((c) => c.getAttribute('data-chip') === 'effort');
+    return el ? { text: el.textContent, title: el.title } : null;
   };
   const asked = chip('antigravity', { model: 'gemini-4-argon-high', effort: 'high' });
-  ok(asked && asked.text === 'High' && asked.raw === 'high' && /^high — Reasoning effort as asked at start \(the CLI reports no per-turn effort\)/.test(asked.title),
-    'antigravity, effort asked at start: the face says its WORD («High»), the raw value «high» first in its title and in data-raw — «as asked at start (the CLI reports no per-turn effort)» (was «?» territory)', asked);
+  ok(asked && asked.text === 'high' && /^Reasoning effort as asked at start \(the CLI reports no per-turn effort\)/.test(asked.title),
+    'antigravity, effort asked at start: the chip says it VERBATIM (protocol values ruling) — «as asked at start (the CLI reports no per-turn effort)» (was «?» territory)', asked);
   const none = chip('antigravity', { model: 'gemini-4-argon-high' });
   ok(none && none.text === 'effort: not reported' && /^No effort was asked at start and the CLI reports none/.test(none.title),
     'antigravity, nothing asked: «effort: not reported» (was «?», lane ui-language) — and its title says why (nothing asked, nothing reported, agy\'s own default)', none);
@@ -218,14 +214,14 @@ async function permMenu(mod, backend, status) {
   const dd = box.children.find((c) => c.className === 'chat-status-dropdown');
   // a row = the mode VERBATIM + its words as the hint (protocol values ruling, 主开发 2026-11-14): the row's MODE is its value span
   const modeOf = (i) => (i.children.find((c) => c.className === 'chat-status-perm-value') || i.children[0] || i).textContent;
-  return { label: chip.textContent.trim(), raw: (chip.getAttribute && chip.getAttribute('data-raw')) || '', items: dd ? dd.children.map(modeOf) : null, active: dd ? dd.children.filter((i) => /\bactive\b/.test(i.className)).map(modeOf) : null, list: bar.permissionModes };
+  return { label: chip.textContent.trim(), items: dd ? dd.children.map(modeOf) : null, active: dd ? dd.children.filter((i) => /\bactive\b/.test(i.className)).map(modeOf) : null, list: bar.permissionModes };
 }
 {
   const mod = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-status-bar.js')).href);
   const FOUR = am.BACKEND_META.antigravity.permissionModes;
   const cut = await permMenu(mod, 'antigravity', { model: 'gemini-4-argon-high', permissionMode: 'bypassPermissions', permissionModes: [] });
-  ok(!!cut && J(FOUR) === J(['accept-edits', 'auto', 'plan', 'bypassPermissions']) && J(cut.items) === J(FOUR) && J(cut.active) === J(['bypassPermissions']) && cut.raw === 'bypassPermissions' && /Allow all$/.test(cut.label),
-    'antigravity, a status with permissionModes [] (its journal head cut): the chip still holds bypassPermissions (its data-raw; its FACE «Allow all» — the cure of 644a67ec2) and its click opens agy\'s FOUR declared modes, the current one marked', cut);
+  ok(!!cut && J(FOUR) === J(['accept-edits', 'auto', 'plan', 'bypassPermissions']) && J(cut.items) === J(FOUR) && J(cut.active) === J(['bypassPermissions']) && /bypassPermissions$/.test(cut.label),
+    'antigravity, a status with permissionModes [] (its journal head cut): the chip still says bypassPermissions (verbatim) and its click opens agy\'s FOUR declared modes, the current one marked', cut);
   const told = await permMenu(mod, 'antigravity', { permissionMode: 'plan', permissionModes: ['plan', 'auto'] });
   ok(!!told && J(told.items) === J(['plan', 'auto']) && J(told.list) === J(['plan', 'auto']), 'a status that NAMES modes still replaces the seed (the live list wins)', told);
 }

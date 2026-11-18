@@ -118,12 +118,6 @@ export class MobileNav {
       const head = e.target.closest?.('.window.window-active > .window-titlebar');
       if (head && !e.target.closest('button, input, textarea, select, .window-controls')) this._showWindowSwitcher(head);
     });
-    // THE SEARCH'S HOME (lane mask-value-shape, the strip's step two — page §4 «search → the window's title bar»; the design's
-    // author 2026-11-17: search lives where the conversation's NAME lives, never on the strip): a ≥ 36 px magnifier at the bar's
-    // right end, before the ⋯ — shown while the window on show is a conversation with a search bar; it never folds (no row of
-    // NAV_FOLD_ORDER), the title gives up its room first
-    const searchBtn = document.getElementById('mobile-nav-search');
-    if (searchBtn) { searchBtn.innerHTML = UI_ICONS.search; searchBtn.title = t('Search this conversation'); searchBtn.setAttribute('aria-label', searchBtn.title); searchBtn.onclick = (e) => { e.stopPropagation(); this._shownChat()?._search?.open?.(); }; }
     this._setupGestures();
     this.desktopsBtn = this._buildDesktopsDoor();
     this.bar = installTrailingBar(app); // the regular class's buttons (shown by the stylesheet there only)
@@ -599,18 +593,9 @@ export class MobileNav {
       : this.app.viewportClass?.() === 'regular' ? String(win?.title || 'VibeSpace').split(' — ')[0]
       : (win?.title || 'VibeSpace') + (count > 1 ? ` (${count})` : '');
     this._titleEl.classList.toggle('arrived', [...wm.windows.values()].some((w) => w.element.classList.contains('window-arrived'))); // an agent placed a window (never shown in front of this one)
-    { const sb = document.getElementById('mobile-nav-search'); if (sb) sb.classList.toggle('on', !this.app.phoneHome?.shown?.() && !!this._shownChat()?._search); }
     this.bar?.update?.();
     this.updateDesktopsDoor();
     this._scheduleFit?.();
-  }
-
-  /** The conversation on show (its chat view), or null — the search's door asks it. */
-  _shownChat() {
-    const id = this.app.wm?.activeWindowId;
-    if (id == null) return null;
-    for (const v of (this.app.sessions?.values?.() || [])) if (v && v.winInfo && v.winInfo.id === id && v._messageList) return v;
-    return null;
   }
 
   _showWindowSwitcher(anchor = this._titleEl) {

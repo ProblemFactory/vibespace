@@ -415,14 +415,13 @@ await (async () => {
   const chipAt = (scroll) => Ph.evaluate(`(async () => { ${barQ} bar.scrollLeft = ${scroll === 'end' ? 'bar.scrollWidth' : scroll === 'mid' ? 'bar.scrollWidth / 2' : '0'}; await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const b = bar.getBoundingClientRect(), c = chip.getBoundingClientRect(); return { bar: [Math.round(b.left), Math.round(b.right)], chip: [Math.round(c.left), Math.round(c.right)], inside: c.left >= b.left - 1 && c.right <= b.right + 1 && c.width > 20, overflow: bar.scrollWidth - bar.clientWidth, text: chip.textContent.trim().slice(0, 60) }; })()`);
   if (ok(hasChip, 'the phone\'s chat status bar carries the "Agent browser" chip')) {
     const at = { rest: await chipAt(0), mid: await chipAt('mid'), end: await chipAt('end') };
-    // lane mask-value-shape (the strip's step two): the phone bar is the strip's two WRAPPING rows — nothing to swipe any more
-    ok(at.rest.overflow <= 0, `the phone bar wraps — no horizontal overflow (${at.rest.overflow} px), nothing to swipe: the shape the chip went off-screen in is gone`, JSON.stringify(at.rest));
+    ok(at.rest.overflow > 0, `the bar really overflows the phone (${at.rest.overflow} px to swipe) — the shape the chip went off-screen in`, JSON.stringify(at.rest));
     ok(at.rest.inside && at.mid.inside && at.end.inside, `the "Agent browser" chip stays INSIDE the visible bar at rest ${JSON.stringify(at.rest.chip)}, mid-swipe ${JSON.stringify(at.mid.chip)} and swiped to the end ${JSON.stringify(at.end.chip)} (the bar ${JSON.stringify(at.rest.bar)})`, JSON.stringify(at));
-    // CONTROL: the pre-fix phone bar put back (ONE swiped nowrap line, the chip unpinned) ⇒ outside the bar at one end
-    await Ph.evaluate(`(() => { const s = document.createElement('style'); s.id = 's4-unpin'; s.textContent = '.chat-status-bar { flex-wrap: nowrap !important; overflow-x: auto !important; } .chat-status-bar > .chat-status-browser { position: static !important; max-width: none !important; }'; document.head.appendChild(s); return true; })()`);
+    // CONTROL: the pre-fix CSS (the chip unpinned) ⇒ outside the bar at one end
+    await Ph.evaluate(`(() => { const s = document.createElement('style'); s.id = 's4-unpin'; s.textContent = '.chat-status-bar > .chat-status-browser { position: static !important; max-width: none !important; }'; document.head.appendChild(s); return true; })()`);
     const ctl = { rest: await chipAt(0), end: await chipAt('end') };
     await Ph.evaluate(`(() => { document.getElementById('s4-unpin').remove(); return true; })()`);
-    ok(!ctl.rest.inside || !ctl.end.inside, `CONTROL: the old one swiped line with the chip unpinned (the pre-fix CSS) puts it outside the visible bar at ${!ctl.rest.inside ? `rest ${JSON.stringify(ctl.rest.chip)} — the study's x≈403 of 390` : `the swiped end ${JSON.stringify(ctl.end.chip)}`}`, JSON.stringify(ctl));
+    ok(!ctl.rest.inside || !ctl.end.inside, `CONTROL: the chip unpinned (the pre-fix CSS) is outside the visible bar at ${!ctl.rest.inside ? `rest ${JSON.stringify(ctl.rest.chip)} — the study's x≈403 of 390` : `the swiped end ${JSON.stringify(ctl.end.chip)}`}`, JSON.stringify(ctl));
   }
   // ═══ verify r1: the chip census under zh / ja with DejaVu Sans forced (the .185 pattern — the runner's fallback font) ═══
   console.log('— verify r1 (D): the chip under zh / ja, DejaVu Sans forced');

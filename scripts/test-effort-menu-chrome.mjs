@@ -114,14 +114,14 @@ try {
     bar.applyStatus(${J(status)});
     const chip = bar.element.querySelector('.chat-status-effort');
     if (!chip) return { chip: null };
-    const out = { chip: chip.textContent.trim(), raw: chip.dataset.raw || '', title: chip.title };   // (the cure of 644a67ec2) the face is the level's WORD, the raw value in data-raw and first in the title
+    const out = { chip: chip.textContent.trim(), title: chip.title };
     chip.click();
     let dd = null;
     for (let i = 0; i < 100; i++) { dd = document.querySelector('.chat-status-dropdown'); if (dd && !dd.querySelector('.chat-status-dim')) break; await new Promise((r) => setTimeout(r, 50)); }
     const items = dd ? [...dd.querySelectorAll('.chat-status-dropdown-item')] : [];
     out.rows = dd ? items.map((x) => x.textContent.trim()) : null;
     const want = ${J(pick || '')};
-    if (want) { const it = items.find((x) => x.textContent.trim() === want); if (it) it.click(); out.sent = sent.filter((m) => m.type === 'set-effort').map((m) => m.effort); out.chipAfter = bar.element.querySelector('.chat-status-effort')?.dataset.raw; out.faceAfter = bar.element.querySelector('.chat-status-effort')?.textContent.trim(); }
+    if (want) { const it = items.find((x) => x.textContent.trim() === want); if (it) it.click(); out.sent = sent.filter((m) => m.type === 'set-effort').map((m) => m.effort); out.chipAfter = bar.element.querySelector('.chat-status-effort')?.textContent.trim(); }
     document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove());
     return out;
   })()`);
@@ -133,8 +133,8 @@ try {
   const a = await probe('antigravity', { model: 'gemini-4-argon-high', effort: 'high' }, 'max');
   ok(J(words(a.rows)) === J(['默认（重置）', ...FIVE]), 'the menu = 默认（重置） + low … max — agy\'s five, NO ultracode', a.rows);
   ok(asked.slice(n0).includes('?backend=antigravity'), 'the bar asked /api/session-options for ITS backend', asked.slice(n0));
-  ok(a.chip === '高' && a.raw === 'high' && a.title.startsWith('high — 推理强度（启动时指定的值 — 该 CLI 不报告每轮的强度）'), 'the thinking level shows the COMMANDED effort as its WORD («高»), its raw value «high» first in its title, titled «as asked at start (the CLI reports no per-turn effort)»', [a.chip, a.raw, a.title]);
-  ok(J(a.sent) === '["max"]' && a.chipAfter === 'max' && a.faceAfter === '最高', 'picking max sends set-effort max and the level follows («最高», raw max)', [a.sent, a.chipAfter, a.faceAfter]);
+  ok(a.chip === 'high' && a.title.startsWith('推理强度（启动时指定的值 — 该 CLI 不报告每轮的强度）'), 'the «推理强度» chip shows the COMMANDED effort, titled «as asked at start (the CLI reports no per-turn effort)»', [a.chip, a.title]);
+  ok(J(a.sent) === '["max"]' && a.chipAfter === 'max', 'picking max sends set-effort max and the chip follows', [a.sent, a.chipAfter]);
   const q = await probe('antigravity', { model: 'gemini-4-argon-high' });
   ok(q.chip === '推理强度：未报告' && q.title.startsWith('启动时未指定推理强度，CLI 也不报告'), '«推理强度：未报告» only when nothing was asked (was «推理强度：?» — lane ui-language: the absence in words) — and the title says agy\'s own default applies', [q.chip, q.title]);
   console.log('— ② claude');

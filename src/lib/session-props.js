@@ -4,7 +4,7 @@ import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // 
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow, hasEffortMenu } from './agent-meta.js';
 import { loadInto, renderInto } from './permission-rules-view.js';
-import { t, tc, deviceLocale } from './i18n.js';
+import { t, deviceLocale } from './i18n.js';
 import { stampAt as when, stampAt as whenAt } from './page-time.js';
 import { valueWord } from './value-words.js'; // lane ui-language: an unknown board state is shown through the door too
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
@@ -87,14 +87,6 @@ export function statusNowHtml(st) {
   return meta
     ? `<span style="color:${meta.color};font-weight:600">${escHtml(meta.label)}${urgMark ? ' ' + urgMark : ''}</span>${st.reason ? ` <span style="color:var(--text-dim)"${isCleared(st) ? ' class="rc-cleared"' : ''}>— ${escHtml(isCleared(st) ? clearedText() : st.reason)}</span>` : ''} <span class="sp-dim-note">(${st.setBy === 'agent' ? escHtml(t('agent')) : escHtml(t('you'))})</span>${st.reason && !isCleared(st) ? maskNoteHtml(st.reason) : ''}${st.detail ? `<details class="sp-status-detail"><summary>${escHtml(t('detail'))}</summary><div>${escHtml(st.detail)}${maskNoteHtml(st.detail)}</div></details>` : ''}`
     : `<span style="color:var(--text-dim)">${escHtml(t('none declared'))}</span>`;
-}
-
-/** THIS conversation's open chat view's status bar — where its start facts (a tool that did not start, the record kinds
- *  its CLI added) are held; null when no view of it is open (lane mask-value-shape). */
-function startBarOf(app, s) {
-  const ids = [s && s.webuiId, s && s.sessionId].filter(Boolean);
-  for (const v of (app.sessions?.values?.() || [])) if (v && v._statusBar && ids.includes(v.sessionId)) return v._statusBar;
-  return null;
 }
 
 export function openSessionProps(app, sessionRef, { syncId } = {}) {
@@ -284,21 +276,6 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     if (histHeld) histList.style.minHeight = histHeld + 'px';
     stSec.appendChild(histList);
     fillHistory(histList, s);
-
-    // ── AT ITS START (lane mask-value-shape, the strip's step two — page §4: the details' homes off the chat window's strip): a
-    // tool that did not start (the init frame's health rows, the start card's own words) and the kinds of record the agent's
-    // CLI added — read from this conversation's open chat view (its status bar holds them; absent ≠ clean: nothing said) ──
-    {
-      const bar = startBarOf(app, s);
-      const health = bar?.initHealthWords?.() || [], kinds = bar?.addedKindsWords?.() || null;
-      if (health.length || kinds) {
-        const startSec = section(t('At its start'));
-        startSec.classList.add('session-props-start');
-        for (const h of health) { const hr = row(startSec, h.kind === 'plugin' ? tc('session-props', 'Plugin') : tc('session-props', 'Tool'), escHtml(h.words), { wrap: true }); hr.title = h.row; }   // the page's plain words; the protocol row one hover away
-        if (health.length) { const n = document.createElement('div'); n.className = 'empty-hint session-props-start-note'; n.textContent = t('Reported by the harness in this session\u2019s start frame.'); startSec.appendChild(n); }
-        if (kinds) { const kr = row(startSec, t('New records'), escHtml(kinds.text), { wrap: true }); kr.title = kinds.title; }
-      }
-    }
 
     // ── Billing ──
     const bilSec = section(t('Billing'));
@@ -921,11 +898,6 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     renderTimer = setTimeout(() => { renderTimer = null; render(); }, 300);
   };
   app.ws.onGlobal(onMsg);
-  // a start fact of THIS conversation changed (its status bar's 'vs-start-facts'): the «At its start» section re-reads it
-  window.addEventListener('vs-start-facts', (e) => {
-    const s = findSession(); if (!s || !e.detail || (e.detail.sessionId !== s.webuiId && e.detail.sessionId !== s.sessionId)) return;
-    clearTimeout(renderTimer); renderTimer = setTimeout(() => { renderTimer = null; render(); }, 300);
-  }, { signal: winInfo._listenerCtl?.signal });
   // lane S2 (naive study 2, T5: "Esc does not close it"): Esc closes the Properties window when focus is inside it
   // and nothing of its own is open — a floating popover / an open <select> list takes the key first (the global
   // `data-popover` protocol in app.js runs on the same keydown and removes those; a composing IME keeps it)
