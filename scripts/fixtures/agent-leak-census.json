@@ -17,7 +17,8 @@
     "req.method === 'GET' && /^\\/api\\/channels\\/oauth\\/cb\\/[^/]+$/.test(p)": "other: the Slack consent landing — the signed state is the credential",
     "/^\\/hook(?:\\/|$)/.test(p) || (req.method === 'GET' && /^\\/api\\/channels\\/webhook\\/[a-z0-9][a-z0-9-]{0,62}\\/replies$/.test(p)) || (req.method === 'POST' && /^\\/api\\/channels\\/webhook\\/[a-z0-9][a-z0-9-]{0,62}\\/pair$/.test(p))": "other: webhook callers — their own token or signature (src/routes/webhook.js); the pairing code",
     "!this.enabled": "other: a hub nobody signs in to — every route is open there to any caller (said by the census, not swept: it reads the signed-in hub)",
-    "p === '/login' || p === '/api/login' || p === '/api/clerk-login' || p === '/api/logout' || p === '/favicon.ico'": "other: the login flow"
+    "p === '/login' || p === '/api/login' || p === '/api/clerk-login' || p === '/api/logout' || p === '/favicon.ico'": "other: the login flow",
+    "this.checkToken(tok)": "other: the owner's cookie (the signed-in owner's pass: a valid session cookie, slid) — every other request ends at the 401 below it"
   },
   "dynamic": {
     "src/routes/desktop-apps.js router.get(XPRA_UI_RE)": "other: the xpra HTML5 client's files under the desktop-apps prefix — cookie-gated (no bearer door matches it)",
@@ -28,5 +29,183 @@
     "/api/agent/browser src/routes/browser.js": "the agent belt (agentBelt): every /api/agent/browser* answer passes browser-profiles agentAnswerView — another conversation's browser identifiers are cut from what an agent reads",
     "/api/agent/vault src/routes/vault.js": "the vault doors' timing belt (with /api/vault): a slow answer is logged by its route shape, never a value; it changes no answer"
   },
-  "routes": {}
+  "routes": {
+    "POST /api/agent/vault/lock": {
+      "last": true,
+      "why": "an agent may lock the vault (vibespace-vault lock): swept after every other write, so the vault routes before it read an unlocked vault"
+    },
+    "POST /api/agent/automation/:verb": {
+      "bare": true,
+      "body": {},
+      "why": "a verb's arguments are a closed set (the bag is refused bad_args): swept bare — :verb is feedback.list, the maintainer key's own verb"
+    },
+    "POST /api/agent/user-todo": {
+      "bodies": [
+        {
+          "list": true
+        },
+        {
+          "show": "$B.todo"
+        },
+        {
+          "resolve": "$B.todo"
+        },
+        {
+          "clear": "$B.todo"
+        }
+      ],
+      "why": "the For-you verb: A lists its own items, then names B's item to show, resolve and clear (each must refuse)"
+    },
+    "POST /api/agent/msg/group": {
+      "bodies": [
+        {
+          "op": "invite",
+          "group": "$B.group",
+          "target": "$B.sid"
+        },
+        {
+          "op": "leave",
+          "group": "$B.group"
+        },
+        {
+          "op": "rename",
+          "group": "$B.group",
+          "name": "census"
+        }
+      ],
+      "why": "the agent-group verbs on B's Task Group (A is no member): invite, leave, rename"
+    },
+    "POST /api/agent/pages/visibility": {
+      "bodies": [
+        {
+          "ref": "$B.page",
+          "visibility": "public"
+        }
+      ],
+      "why": "A makes B's page public (must refuse: a page is its publisher's)"
+    },
+    "POST /api/agent/pages/unpublish": {
+      "bodies": [
+        {
+          "ref": "$B.page"
+        }
+      ],
+      "why": "A unpublishes B's page (must refuse)"
+    }
+  },
+  "shallow": {
+    "/api/agent/browser/": {
+      "n": 27,
+      "why": "the browser keeper starts Chrome and is not in the world (its catalog row is null — the product's own «browser profiles are not available on this server»): every browser route answers that refusal (a job token's size crashes past it on the null keeper's job handle); the agent belt (agentAnswerView) is the browser answers' own leak law, its suites own it"
+    },
+    "/api/agent/window/open": {
+      "n": 1,
+      "why": "opening a window needs a live desktop (the inert desktop keeper): the open crashes past its door; the other window routes answer by the real engine"
+    }
+  },
+  "depth": {
+    "A": 29
+  },
+  "open": {},
+  "findings": {
+    "POST /api/agent/automation/:verb · maintainer · bName": "LISTED for the coordinator (B-1fe9 U3): feedback.list (src/server/feedback-store.js — it judges no caller) answers EVERY conversation's open feedback report with the filing conversation's name and its words, to whoever may run the verb: the maintainer key (vsmk_, the fleet-feedback-marks design) and any conversation an automation key carrying feedback.list is granted to (its own session token + the key, the default reach — the verb has no target to reach). A's granted key also MARKS B's report handled (feedback.handled: an act on another conversation's report). Judged by the owner, not fixed here",
+    "POST /api/agent/automation/:verb · maintainer · bPrompt": "LISTED for the coordinator (B-1fe9 U3): feedback.list (src/server/feedback-store.js — it judges no caller) answers EVERY conversation's open feedback report with the filing conversation's name and its words, to whoever may run the verb: the maintainer key (vsmk_, the fleet-feedback-marks design) and any conversation an automation key carrying feedback.list is granted to (its own session token + the key, the default reach — the verb has no target to reach). A's granted key also MARKS B's report handled (feedback.handled: an act on another conversation's report). Judged by the owner, not fixed here",
+    "GET /api/agent/task-context · A-related · bGroup": "ALLOWED BY MEMBERSHIP (B-1fe9 U3, the related pass): A put in B's Task Group reads the group's objective and progress — its members' own context (vibespace-task); listed so a change to who reads a group shows here",
+    "GET /api/agent/task-context · A-related · bProgress": "ALLOWED BY MEMBERSHIP (B-1fe9 U3, the related pass): A put in B's Task Group reads the group's objective and progress — its members' own context (vibespace-task); listed so a change to who reads a group shows here",
+    "GET /api/agent/task · A-related · bGroup": "ALLOWED BY MEMBERSHIP (B-1fe9 U3, the related pass): A put in B's Task Group reads the group's objective and progress — its members' own context (vibespace-task); listed so a change to who reads a group shows here",
+    "GET /api/agent/task · A-related · bProgress": "ALLOWED BY MEMBERSHIP (B-1fe9 U3, the related pass): A put in B's Task Group reads the group's objective and progress — its members' own context (vibespace-task); listed so a change to who reads a group shows here",
+    "GET /api/agent/msg/peers · A-related · bName": "ALLOWED BY MEMBERSHIP (B-1fe9 U3, the related pass): a fellow member of a Task Group is a peer A may message, by its name (vibespace-msg peers)",
+    "GET /api/agent/jobs · A-related · bJob": "LISTED for the coordinator (B-1fe9 U3, the related pass): with A in B's Task Group, A's job list and `vibespace-job show` read B's job — its name and note — through the group's reach (the jobs view's viewerOf: a subscriber's groups); no token, no output was seen. Allowed by membership as built; the owner judges a job's words to the group",
+    "GET /api/agent/jobs · A-related · bJobNote": "LISTED for the coordinator (B-1fe9 U3, the related pass): with A in B's Task Group, A's job list and `vibespace-job show` read B's job — its name and note — through the group's reach (the jobs view's viewerOf: a subscriber's groups); no token, no output was seen. Allowed by membership as built; the owner judges a job's words to the group",
+    "GET /api/agent/jobs/:ref · A-related · bJob": "LISTED for the coordinator (B-1fe9 U3, the related pass): with A in B's Task Group, A's job list and `vibespace-job show` read B's job — its name and note — through the group's reach (the jobs view's viewerOf: a subscriber's groups); no token, no output was seen. Allowed by membership as built; the owner judges a job's words to the group",
+    "GET /api/agent/jobs/:ref · A-related · bJobNote": "LISTED for the coordinator (B-1fe9 U3, the related pass): with A in B's Task Group, A's job list and `vibespace-job show` read B's job — its name and note — through the group's reach (the jobs view's viewerOf: a subscriber's groups); no token, no output was seen. Allowed by membership as built; the owner judges a job's words to the group",
+    "POST /api/agent/automation/feedback.list · A-key · bName": "LISTED for the coordinator (B-1fe9 U3): feedback.list (src/server/feedback-store.js — it judges no caller) answers EVERY conversation's open feedback report with the filing conversation's name and its words, to whoever may run the verb: the maintainer key (vsmk_, the fleet-feedback-marks design) and any conversation an automation key carrying feedback.list is granted to (its own session token + the key, the default reach — the verb has no target to reach). A's granted key also MARKS B's report handled (feedback.handled: an act on another conversation's report). Judged by the owner, not fixed here",
+    "POST /api/agent/automation/feedback.list · A-key · bPrompt": "LISTED for the coordinator (B-1fe9 U3): feedback.list (src/server/feedback-store.js — it judges no caller) answers EVERY conversation's open feedback report with the filing conversation's name and its words, to whoever may run the verb: the maintainer key (vsmk_, the fleet-feedback-marks design) and any conversation an automation key carrying feedback.list is granted to (its own session token + the key, the default reach — the verb has no target to reach). A's granted key also MARKS B's report handled (feedback.handled: an act on another conversation's report). Judged by the owner, not fixed here"
+  },
+  "refused": {
+    "python3": "the window targets' AT-SPI probe (src/window-targets.js runHelper, under the engine's list) — refused by the census; the list answers without it"
+  },
+  "shape": {
+    "/api/agent/channels/": {
+      "n": 9,
+      "why": "no channel is connected in the world: every channels verb wants its conversation / account argument (conv, account, a 2-character search) before any reach is judged — the channels' per-conversation reach is not swept deeper (no connector)"
+    },
+    "/api/agent/design/": {
+      "n": 7,
+      "why": "a design verb names a folder by its absolute path (or an artboard by file name); the probe bag names B's ids, never B's folder (its name is a sentinel) — A naming B's folder is not swept"
+    },
+    "/api/agent/window/": {
+      "n": 9,
+      "why": "a window verb names a window handle (vibespace-window list); no window is open in the world"
+    },
+    "/api/agent/apps/": {
+      "n": 4,
+      "why": "an apps verb names packages / a kind / plain search words; nothing is installed in the world"
+    },
+    "/api/agent/exit/": {
+      "n": 3,
+      "why": "an exit verb names a command or an absolute file path on a machine; no machine is open to A as an exit"
+    },
+    "/api/agent/vault/": {
+      "n": 6,
+      "why": "the vault's write and use verbs take closed shapes (a base32 seed, a user name, an entry name, run flags, a vault:// reference); the bag fits none — their own suites (test-vault-law, test-vault-paste) sweep them with every bearer"
+    },
+    "/api/agent/prompt-context/carried": {
+      "n": 1,
+      "why": "a delivery id (dl_…) the hook route names; B's deliveries are not planted"
+    },
+    "/api/agent/pages/publish": {
+      "n": 1,
+      "why": "the publish reads a raw page body; the bag is JSON (B's own page is planted through this route with a raw body)"
+    },
+    "/api/agent/jobs": {
+      "n": 1,
+      "why": "the job create refuses unknown fields (the bag); B's and A's jobs are planted through this route with their own bodies"
+    },
+    "/api/agent/user-todo #2": {
+      "n": 1,
+      "why": "the resolve of B's For-you item answers 400 «no open item matching … in this session» — an OWNERSHIP refusal under the verb's own 400 code (show and clear refuse 404 / 400 the same way)"
+    }
+  },
+  "deep": [
+    "GET /api/agent/apps",
+    "GET /api/agent/apps/kinds",
+    "GET /api/agent/apps/status",
+    "GET /api/agent/automation/audit",
+    "GET /api/agent/automation/keys",
+    "GET /api/agent/channels/api/creds",
+    "GET /api/agent/channels/list",
+    "GET /api/agent/channels/proposals",
+    "GET /api/agent/design/systems",
+    "GET /api/agent/designs",
+    "GET /api/agent/exit",
+    "GET /api/agent/exit/runs",
+    "GET /api/agent/feedback/mine",
+    "GET /api/agent/jobs",
+    "GET /api/agent/jobs-docs",
+    "GET /api/agent/msg/groups",
+    "GET /api/agent/msg/peers",
+    "GET /api/agent/pages",
+    "GET /api/agent/prompt-context",
+    "GET /api/agent/remote/audit",
+    "GET /api/agent/stop-check",
+    "GET /api/agent/task-context",
+    "GET /api/agent/vault/runnable",
+    "GET /api/agent/vault/state",
+    "GET /api/agent/vault/uses",
+    "GET /api/agent/window/targets",
+    "POST /api/agent/feedback",
+    "POST /api/agent/session-status",
+    "POST /api/agent/user-todo #0",
+    "POST /api/agent/vault/lock",
+    "POST /api/agent/vault/secret-request",
+    "POST /api/editor/open"
+  ],
+  "anonymous": {
+    "GET /api/agent/vault/totp/:name": "LISTED for the coordinator (B-1fe9 U3): every answer of the vault's agent doors — a refusal to a caller with NO token among them — spreads the whole vault.facts() (src/routes/vault.js `answer`: state, startedAt, setUpAt, unlockedSince, failedTries, pacedForMs, idleLockHours, corrupt, …), wider than the agent view agentFacts(); no secret, no conversation's fact — the instance's vault state and timings, to anyone who reaches the hub. Judged by the owner, not fixed here",
+    "GET /api/agent/vault/state": "LISTED for the coordinator (B-1fe9 U3): every answer of the vault's agent doors — a refusal to a caller with NO token among them — spreads the whole vault.facts() (src/routes/vault.js `answer`: state, startedAt, setUpAt, unlockedSince, failedTries, pacedForMs, idleLockHours, corrupt, …), wider than the agent view agentFacts(); no secret, no conversation's fact — the instance's vault state and timings, to anyone who reaches the hub. Judged by the owner, not fixed here",
+    "POST /api/agent/vault/totp": "LISTED for the coordinator (B-1fe9 U3): every answer of the vault's agent doors — a refusal to a caller with NO token among them — spreads the whole vault.facts() (src/routes/vault.js `answer`: state, startedAt, setUpAt, unlockedSince, failedTries, pacedForMs, idleLockHours, corrupt, …), wider than the agent view agentFacts(); no secret, no conversation's fact — the instance's vault state and timings, to anyone who reaches the hub. Judged by the owner, not fixed here",
+    "POST /api/agent/vault/login": "LISTED for the coordinator (B-1fe9 U3): every answer of the vault's agent doors — a refusal to a caller with NO token among them — spreads the whole vault.facts() (src/routes/vault.js `answer`: state, startedAt, setUpAt, unlockedSince, failedTries, pacedForMs, idleLockHours, corrupt, …), wider than the agent view agentFacts(); no secret, no conversation's fact — the instance's vault state and timings, to anyone who reaches the hub. Judged by the owner, not fixed here",
+    "POST /api/agent/vault/lock": "LISTED for the coordinator (B-1fe9 U3): every answer of the vault's agent doors — a refusal to a caller with NO token among them — spreads the whole vault.facts() (src/routes/vault.js `answer`: state, startedAt, setUpAt, unlockedSince, failedTries, pacedForMs, idleLockHours, corrupt, …), wider than the agent view agentFacts(); no secret, no conversation's fact — the instance's vault state and timings, to anyone who reaches the hub. Judged by the owner, not fixed here"
+  }
 }

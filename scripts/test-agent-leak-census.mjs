@@ -10,7 +10,8 @@
 //   the SIGNED-IN hub (a hub nobody signs in to opens every route to anyone — the `!this.enabled` door, said, not swept),
 //   and src/auth.js's middleware only: the WebSocket upgrade dispatcher and the hub's side listeners (the CDP mediator,
 //   the egress proxy, the metrics port) are other doors, judged by their own code.
-//   ① THE DOORS: every `if (…) return next();` in src/auth.js's middleware is a door, and each one is CLASSIFIED in
+//   ① THE DOORS: every `if` in src/auth.js's middleware whose consequent calls next() (`return next()`, a block around it,
+//      `next(); return;`) is a door — and every next() the middleware calls must sit in one — each one CLASSIFIED in
 //      scripts/fixtures/agent-leak-census.json: `bearer` (a bearer reaches it without a cookie — this census sweeps it)
 //      or `other: <why>` (its own credential). A new door in neither, a dead row, a reason-less `other` = RED. A
 //      bearer door must be a path test the census can read (`p.startsWith('<prefix>')` / `p === '<path>'`).
@@ -34,6 +35,23 @@
 //      = ③'s static list, both ways — a route gated off by a dep, one only a prefix or a computed path makes, a regex
 //      path = RED. A router module (browser, apps, window-targets) registers when it loads: its gating is in its
 //      handlers (the sweep's).
+//   ⑧ THE SWEEP (U3, run before ⑦): two conversations — A asks, B owns what is planted THROUGH THE REAL WRITERS (B's
+//      progress, B's job and A's on the real jobs engine, B's page — by their own tokens on the real routes —, a For-you
+//      item, B's meta under its socket, a feedback report; the vault set up with B's secret and an ungranted website
+//      login). Every mounted bearer route × five callers (A's vsst_, A's job's jbt_, the maintainer key vsmk_, a vsak_
+//      value no door knows, no bearer), its params and a probe bag naming B's ids (never a sentinel — no echo can make a
+//      hit); a row may send its own bodies naming B's things (`$B.<id>`). Then THE GRANTED KEY (a key minted through the
+//      real engine, every verb, granted to A, each verb aimed at B — its arguments derived from the door's own refusals)
+//      and THE RELATED PASS (A put in B's Task Group, every read again). Every answer (body + headers) is scanned for each
+//      sentinel raw / hex / URI-encoded / base64 and base64url at every byte offset. One verdict function over the answers
+//      and the table: `findings` (a hit; a blank why is no row), `shallow` (a crash, or a 5xx to A — by prefix, counted),
+//      `shape` (A's 400: the request's shape refused before any reach — by prefix, counted), `deep` (the routes A takes
+//      past their door, pinned both ways), `open` (2xx to no bearer), `anonymous` (a refusal to an unknown caller saying
+//      more than its own words), `refused` (a program a handler would start) — a new entry or a dead row = RED, each
+//      kind with a RED control over a planted table; no CRITICAL sentinel reaches A by any road, rowed or not.
+//      SCOPE: 136 routes, 108 past their door (28 shallow), A and B unrelated except in the related pass, one granted
+//      key with the default reach. Positive controls: A in B's group reads B's progress; ⑦'s planted wiring route
+//      answering B's name and a secret base64-encoded inside JSON is seen (NEW, CRITICAL).
 //   ⑦ CONTROLS of the world (last: every world shares the require cache, so a control's setup() re-points a router
 //      module's context): a route planted IN a wiring file is mounted and ⑥ is green on it; a dep-gated route is
 //      unmounted when the wiring passes null (⑥ names it) and mounted with the real dep; a router under a prefix and a
@@ -45,7 +63,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { trackedFiles } from './tracked-files.mjs';
-import { scratch, scratchHome } from './scratch.mjs';
+import { scratch, scratchHome, fixtureSid } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(path.join(REPO, 'package.json'));
@@ -82,20 +100,27 @@ function doorsOf(src) {
   let mw = null;
   walk(ast, (n) => { if (!mw && n.type === 'MethodDefinition' && n.key && n.key.name === 'middleware') mw = n; });
   if (!mw) return { doors: null, why: 'no middleware() method in src/auth.js' };
-  const doors = [];
-  const isNext = (s) => s && s.type === 'ReturnStatement' && s.argument && s.argument.type === 'CallExpression' && s.argument.callee.type === 'Identifier' && s.argument.callee.name === 'next';
+  const doors = [], nexts = [];
+  const isNextCall = (e) => e && e.type === 'CallExpression' && e.callee.type === 'Identifier' && e.callee.name === 'next';
+  // every `next()` the middleware calls (in any shape: `return next()`, `next(); return;`, `cond && next()`, …)
+  walk(mw.value.body, (n) => { if (isNextCall(n)) nexts.push(n.start); });
+  // a DOOR = an `if` whose consequent itself calls next() — `return next();`, or a block that does it among other
+  // statements (`{ log(); return next(); }`, `{ next(); return; }`) — never one only a nested function or `if` reaches
+  const callsNext = (st) => !!st && ((st.type === 'ReturnStatement' && isNextCall(st.argument)) || (st.type === 'ExpressionStatement' && isNextCall(st.expression)));
   walk(mw.value.body, (n) => {
     if (n.type !== 'IfStatement') return;
     const c = n.consequent;
-    if (!(isNext(c) || (c.type === 'BlockStatement' && c.body.length === 1 && isNext(c.body[0])))) return;
+    if (!(callsNext(c) || (c.type === 'BlockStatement' && c.body.some(callsNext)))) return;
     const t = n.test;
     let test = null;
     if (t.type === 'CallExpression' && t.callee.type === 'MemberExpression' && !t.callee.computed && t.callee.object.type === 'Identifier' && t.callee.object.name === 'p'
       && t.callee.property.name === 'startsWith' && t.arguments.length === 1 && t.arguments[0].type === 'Literal' && typeof t.arguments[0].value === 'string') test = { kind: 'prefix', path: t.arguments[0].value };
     else if (t.type === 'BinaryExpression' && t.operator === '===' && t.left.type === 'Identifier' && t.left.name === 'p' && t.right.type === 'Literal' && typeof t.right.value === 'string') test = { kind: 'exact', path: t.right.value };
-    doors.push({ cond: squash(src.slice(t.start, t.end)), line: lineAt(src, n.start), test });
+    doors.push({ cond: squash(src.slice(t.start, t.end)), line: lineAt(src, n.start), test, start: c.start, end: c.end });
   });
-  return { doors };
+  // a next() that no door's consequent holds is a pass the census cannot place (RED)
+  const unplaced = nexts.filter((at) => !doors.some((d) => at >= d.start && at < d.end)).map((at) => `src/auth.js:${lineAt(src, at)}`);
+  return { doors, unplaced };
 }
 
 const VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'all', 'use']);
@@ -177,11 +202,12 @@ function census({ files, read, table }) {
   const D = doorsOf(read('src/auth.js'));
   out.doorsWhy = D.why || null;
   const doorRows = table.doors || {};
+  out.unplaced = D.unplaced || [];
   if (D.doors) {
     out.doors = D.doors;
     const conds = new Set(D.doors.map((d) => d.cond));
     for (const d of D.doors) {
-      if (!has(doorRows, d.cond)) { out.doorUnclassified.push(`src/auth.js:${d.line} if (${d.cond}) return next();`); continue; }
+      if (!has(doorRows, d.cond)) { out.doorUnclassified.push(`src/auth.js:${d.line} if (${d.cond}) … next()`); continue; }
       const v = String(doorRows[d.cond] || '');
       if (v === 'bearer') { if (d.test) out.bearerDoors.push(d); else out.bearerUnreadable.push(`src/auth.js:${d.line} ${d.cond}`); }
       else if (!/^other: \S/.test(v)) out.doorReasonless.push(d.cond);
@@ -224,8 +250,9 @@ function census({ files, read, table }) {
 const FILES = hubFiles();
 const C = census({ files: FILES, read: readRepo, table: TABLE });
 
-console.log('① the doors (src/auth.js\'s middleware — every `if (…) return next();`)');
+console.log('① the doors (src/auth.js\'s middleware — every `if` whose consequent calls next())');
 ok(!C.doorsWhy && C.doors.length >= 10, `the middleware's doors are read (${C.doors.length})`, C.doorsWhy);
+ok(!C.unplaced.length, 'every next() the middleware calls sits in a door the census reads (any shape: `return next()`, a block around it, `next(); return;`)', C.unplaced.join(' | '));
 ok(!C.doorUnclassified.length, 'every door is classified in the table (`bearer` or `other: <why>`)', C.doorUnclassified.length ? 'NEW — add each to ' + TABLE_REL + ' doors: ' + C.doorUnclassified.join(' | ') : '');
 ok(!C.doorDead.length && !C.doorReasonless.length, 'no dead door row, no `other` without its why', [...C.doorDead.map((c) => 'DEAD ' + c), ...C.doorReasonless.map((c) => 'NO WHY ' + c)].join(' | '));
 ok(!C.bearerUnreadable.length && C.bearerDoors.length >= 2, `every bearer door is a path test the census reads (${C.bearerDoors.map((d) => (d.test.kind === 'prefix' ? d.test.path + '*' : d.test.path)).join(', ')})`, C.bearerUnreadable.join(' | '));
@@ -243,7 +270,6 @@ console.log('③ the bearer routes (every registration under a bearer door, and 
   console.log('    ' + Object.entries(per).sort((a, b) => b[1] - a[1]).map(([f, n]) => `${f.replace(/^src\//, '')} ${n}`).join(' · '));
   ok(!C.beltUnrowed.length && !C.beltDead.length && !C.beltReasonless.length, `every belt (a \`.use\` under a bearer door) is a \`belts\` row with its why (${C.belts.map((r) => `${r.path} ${r.file.replace(/^src\//, '')}:${r.line}`).join(', ')})`, [...C.beltUnrowed.map((k) => 'NEW ' + k), ...C.beltDead.map((k) => 'DEAD ' + k), ...C.beltReasonless.map((k) => 'NO WHY ' + k)].join(' | '));
   ok(C.routes.length >= 130 && Object.keys(per).length >= 10, `${C.routes.length} bearer routes in ${Object.keys(per).length} modules`);
-  for (const want of ['src/agent-routes.js', 'src/agent-routes/status.js', 'src/routes/vault.js', 'src/routes/browser.js', 'src/routes/editor.js', 'src/server/plugin-loader.js']) ok(per[want] > 0, `the census reads ${want}'s bearer routes`);
   ok(!C.unreached.length, 'every module holding a bearer route is LOADED by the hub (reached from server.js through its requires; mounted is ⑦\'s proof)', C.unreached.join(' '));
   ok(!C.routeDead.length && !C.routeReasonless.length, `every \`routes\` row names a bearer route that exists, every skip says why (${Object.keys(TABLE.routes || {}).length} rows)`, [...C.routeDead.map((k) => 'DEAD ' + k), ...C.routeReasonless.map((k) => 'NO WHY ' + k)].join(' | '));
   if (C.twice.length) console.log('    the same method + path registered twice: ' + C.twice.join(' · '));
@@ -264,6 +290,12 @@ const overlay = (over) => (f) => (has(over, f) ? over[f] : readRepo(f));
   ok(c1b.bearerDoors.some((d) => d.test.path === '/api/planted/') && !c1b.doorUnclassified.length, 'CONTROL: classified `bearer`, the planted door joins the sweep\'s doors');
   const c1c = census({ files: FILES, read: overlay({ 'src/auth.js': planted.replace("if (p.startsWith('/api/planted/'))", "if (/^\\/api\\/planted\\//.test(p))") }), table: { ...TABLE, doors: { ...TABLE.doors, '/^\\/api\\/planted\\//.test(p)': 'bearer' } } });
   ok(c1c.bearerUnreadable.length === 1, 'CONTROL: a `bearer` door written as a regex the census cannot read ⇒ RED', c1c.bearerUnreadable);
+  const blockDoor = auth.slice(0, at) + "if (p.startsWith('/api/planted-block/')) { req.planted = 1; return next(); }\n      if (p === '/api/planted-tail') { next(); return; }\n      " + auth.slice(at);
+  const c1d = census({ files: FILES, read: overlay({ 'src/auth.js': blockDoor }), table: TABLE });
+  ok(c1d.doorUnclassified.length === 2 && c1d.doorUnclassified.every((x) => /planted-(block|tail)/.test(x)), 'CONTROL: a door written as a block with more statements, and one as `next(); return;` ⇒ each read and RED (unclassified)', c1d.doorUnclassified);
+  const loose = auth.slice(0, at) + "p === '/api/planted-loose' && next();\n      " + auth.slice(at);
+  const c1e = census({ files: FILES, read: overlay({ 'src/auth.js': loose }), table: TABLE });
+  ok(c1e.unplaced.length === 1, 'CONTROL: a next() no door holds (`cond && next()`) ⇒ RED (unplaced)', c1e.unplaced);
 }
 {
   // a dynamic route, and a bearer route in a module nothing requires
@@ -454,10 +486,11 @@ function constructsIn(f, init, text) {
 }
 /** a `let x = null` (or `let x;`) filled in later: its FIRST wiring-time assignment `x = <expr>` in the block that
  *  declares it (into try / if / nested blocks, never into a function body — that one runs when called) */
-function assignmentIn(block, name) {
-  let rhs = null;
-  for (const st of block.body || []) walkA(st, (n) => { if (rhs || FNS.has(n.type)) return false; if (n.type === 'AssignmentExpression' && n.operator === '=' && n.left.type === 'Identifier' && n.left.name === name) rhs = n.right; });
-  return rhs;
+function assignmentIn(blockAnc, name) {
+  let hit = null;   // { rhs, anc }: evaluated WHERE IT STANDS (a try block's own consts are visible there)
+  const block = blockAnc[blockAnc.length - 1];
+  for (const st of block.body || []) walkA(st, (n, anc) => { if (hit || FNS.has(n.type)) return false; if (n.type === 'AssignmentExpression' && n.operator === '=' && n.left.type === 'Identifier' && n.left.name === name) hit = { rhs: n.right, anc: [...blockAnc, ...anc, n] }; }, []);
+  return hit;
 }
 const LITERALISH = new Set(['Literal', 'Identifier']);   // null / undefined / false / 0 / '' — a placeholder the boot replaces
 
@@ -506,8 +539,8 @@ function buildWorld({ read = readRepo, catalog, routes, root = ROOT, modules = {
       if (has(catalog, key) && catalog[key].kind !== 'eval') { v = rowValue(key); made.set(key, v); }
       else if (d.kind === 'fn') v = evalIn(d.file, d.anc, chainRest, '(' + WM.text(d.file, d.node) + ')');
       else if (d.kind === 'var' || d.kind === 'pick') {
-        let init = d.init;
-        if (d.kind === 'var' && (!init || (LITERALISH.has(init.type) && (init.type !== 'Identifier' || init.name === 'undefined')))) { const late = assignmentIn(d.anc[d.anc.length - 1], name); if (late) init = late; }
+        let init = d.init, initAnc = d.anc;
+        if (d.kind === 'var' && (!init || (LITERALISH.has(init.type) && (init.type !== 'Identifier' || init.name === 'undefined')))) { const late = assignmentIn(d.anc, name); if (late) { init = late.rhs; initAnc = late.anc; } }
         if (!init) v = undefined;
         else {
           const c = constructsIn(d.file, init, WM.text);
@@ -516,7 +549,7 @@ function buildWorld({ read = readRepo, catalog, routes, root = ROOT, modules = {
             if (c) used.add(key);
             // one construction per declaration: every pick of `const { a, b } = create(…)` reads the same value
             const wk = `${d.file}\0${d.node.start}\0init`;
-            const whole = d.kind === 'pick' && memo.has(wk) ? memo.get(wk) : evalIn(d.file, d.anc, chainRest, '(' + WM.text(d.file, init) + ')');
+            const whole = d.kind === 'pick' && memo.has(wk) ? memo.get(wk) : evalIn(d.file, initAnc, chainRest, '(' + WM.text(d.file, init) + ')');
             if (d.kind === 'pick') memo.set(wk, whole);
             v = d.kind === 'pick' ? (whole == null ? undefined : whole[d.key]) : whole;
             if (c) made.set(key, v);
@@ -571,13 +604,19 @@ function buildWorld({ read = readRepo, catalog, routes, root = ROOT, modules = {
     const u = { file: 'server.js', node: n, anc: [astOf('server.js', read), st], fnAnc: null, what: 'use', via: 'middleware' };
     sites.push({ u, ch: [u], tag: `server.js:${WM.lineOfAt('server.js', n.start)} app.use(${squash(WM.text('server.js', n.arguments[0])).slice(0, 50)}…)`, middleware: true });
   }
-  // (iv) every `app.locals.<x> = …` of server.js's top level (a route reads what the boot put there: authEnabled, safeFs…)
-  for (const st of astOf('server.js', read).body) {
-    const n = st.type === 'ExpressionStatement' ? st.expression : null;
-    if (!n || n.type !== 'AssignmentExpression' || !/^app\.locals\./.test(WM.text('server.js', n.left))) continue;
-    const u = { file: 'server.js', node: n, anc: [astOf('server.js', read), st], fnAnc: null, what: 'locals', via: 'locals' };
-    sites.push({ u, ch: [u], tag: `server.js:${WM.lineOfAt('server.js', n.start)} ${WM.text('server.js', n.left)} = …`, middleware: true });
-  }
+  // (iv) every wiring-time write of server.js to app.locals — `app.locals.<x> = …` and `Object.defineProperty(app.locals, …)`
+  // (a route reads what the boot put there: the authEnabled getter, safeFs…), at its top level or inside a block / if
+  // there (never inside a function: that one runs when called)
+  walkA(astOf('server.js', read), (n, anc) => {
+    if (FNS.has(n.type)) return false;
+    if (n.type !== 'ExpressionStatement') return;
+    const e = n.expression;
+    const isAssign = e.type === 'AssignmentExpression' && /^app\.locals\./.test(WM.text('server.js', e.left));
+    const isDefine = e.type === 'CallExpression' && WM.text('server.js', e.callee) === 'Object.defineProperty' && e.arguments[0] && WM.text('server.js', e.arguments[0]) === 'app.locals';
+    if (!isAssign && !isDefine) return;
+    const u = { file: 'server.js', node: e, anc: [...anc, n], fnAnc: null, what: 'locals', via: 'locals' };
+    sites.push({ u, ch: [u], tag: `server.js:${WM.lineOfAt('server.js', e.start)} ${squash(WM.text('server.js', e)).slice(0, 60)}`, middleware: true });
+  });
   // a site that is the right side of an assignment runs AS the assignment (`app.locals.vaultGate = …vaultGate(…)`)
   for (const s0 of sites) { const par = s0.u.anc[s0.u.anc.length - 1]; if (par && par.type === 'AssignmentExpression' && par.right === s0.u.node) s0.u = { ...s0.u, node: par, anc: s0.u.anc.slice(0, -1) }; }
   // the boot's order: by the server.js line each chain ends at, then the site's own place
@@ -637,15 +676,21 @@ const CATALOG = {
   'server.js:grants': { kind: 'eval', why: 'THE grants store (grants-store.js install(create)), real, on the scratch data dir' },
   'server.js:sessionStatus': { kind: 'make', why: 'THE session status store, real, on the scratch data dir', make: (w) => new (R('src/session-status.js').SessionStatusManager)({ dataDir: w.data, onChange: () => {} }) },
   'server.js:userTodos': { kind: 'make', why: 'THE For-you store, real, on the scratch data dir (no expiry sweep timer)', make: (w) => new (R('src/user-todos.js').UserTodoManager)({ dataDir: w.data, onChange: () => {}, expirySweepMs: 0 }) },
-  'server.js:spendGuard': { kind: 'make', why: 'THE SPEND CEILING: the census spends nothing — every authorize refuses by name', make: (w) => standIn(w, 'spendGuard', { authorize: () => ({ ok: false, allowed: false, code: 'census_no_spend', reason: 'the census starts no turn' }), note() {}, release() {}, reservationState: () => null, waitingReservations: () => [] }) },
-  'server.js:jobsWiring': { kind: 'make', why: 'the Background Work engine: a stand-in that knows the jobs the world planted (jobByToken / get / list)', make: (w) => ({ getJobs: () => jobsOf(w) }) },
-  'server.js:deliver': { kind: 'make', why: 'THE delivery ladder: a recorder — nothing reaches a CLI, a daemon or a stash on disk', make: (w) => standIn(w, 'deliver', { stashFor: (cid, env) => { (w.stash ||= []).push({ cid, env }); return { stored: true }; }, deliver: async () => ({ ok: false, code: 'census_no_delivery' }), drainStash: () => [], pendingFor: () => [] }) },
+  'server.js:spendGuard': { kind: 'make', why: 'THE SPEND CEILING: the census spends nothing — every authorize refuses by name', make: (w) => standIn(w, 'spendGuard', { authorize: () => ({ ok: false, allowed: false, code: 'census_no_spend', reason: 'the census starts no turn' }), note() {}, release() {}, reservationState: () => null, waitingReservations: () => [], nudgeRec: () => null }) },
+  'server.js:jobsWiring': { kind: 'make', why: 'THE Background Work engine, real (src/jobs.js JobManager) on the scratch data dir — its timers cleared, its spawn stubbed (a run is recorded, nothing starts)', make: (w) => {
+    const jm = new (R('src/jobs.js').JobManager)({ dataDir: path.join(w.data, 'jobs'), broadcast() {}, log() {}, notifyUser() {}, deliverToConversation: async () => ({ ok: true, lane: 'message' }), groupNotifyFor: () => null, notifyGlobal: () => true, peerReachable: () => true });
+    jm.init(); for (const t of jm._timers || []) clearInterval(t);
+    jm._spawn = (job, trigger) => { job.runs = job.runs || []; job.runs.push({ startedAt: Date.now(), trigger }); job.state = 'up'; };
+    return { jm, getJobs: () => jm };
+  } },
+  'server.js:deliver': { kind: 'eval', why: 'THE delivery ladder, real (conversation-deliver.js) on the scratch data dir and the scratch HOME — every spend it asks is refused by the census\'s spend ceiling, no machine is paired' },
   'server.js:AGENT_BIN_DIR': { kind: 'make', why: 'agent-tool-generators create()\'s bin dir: a scratch path (no helper is written)', make: (w) => path.join(w.root, 'agent-bin') },
   'server.js:auth': { kind: 'make', why: 'THE cookie gate, real (src/auth.js) on the scratch data dir, a password set — the signed-in hub', make: (w) => { const a = new (R('src/auth.js').Auth)(w.data, {}); a.setPassword('census-' + process.pid); return a; } },
   'server.js:hosts': { kind: 'make', why: 'THE machines store (src/hosts.js), real, on the scratch data dir (no machine paired)', make: (w) => new (R('src/hosts.js').HostManager)({ dataDir: w.data }) },
   // the Task Groups' ctx sync (task-groups-wiring.js ctxSync — moved out of server.js by «make room»): two picks of ONE construction
   'server.js:scheduleCtxSync': { kind: 'eval', why: 'a pick of task-groups-wiring.js ctxSync(), real: the remote ctx-folder sync — no session runs on a machine, so it syncs nothing (its 60 s timer never fires in the suite\'s seconds)' },
   'server.js:remoteCtxBaseFor': { kind: 'eval', why: 'the same ctxSync()\'s other pick: a remote session\'s ctx-folder base — none is remote' },
+  'server.js:convOps': { kind: 'inert', why: 'a pick of task-groups-wiring.js mountRoutes() (a wiring function — never evaluated whole): the conversation ops\' group births; broadcastActiveSessions calls it inside a try, no group is born in the census' },
   'server.js:instanceUrl': { kind: 'make', why: 'the instance\'s public address: loopback', make: (w) => standIn(w, 'instanceUrl', { url: () => 'http://127.0.0.1', publicUrl: () => null, status: () => ({}) }) },
   'server.js:integrationsWiring': { kind: 'make', why: 'the integrations store, real (src/server/integration-store.js) on the scratch data dir, no cluster env', make: (w) => ({ store: R('src/server/integration-store.js').create({ dataDir: w.data, env: {}, broadcast: () => {}, log: () => {} }) }) },
   'server.js:unblocker': { kind: 'make', why: 'the /proxy/ unblocker: a pass-through (it serves /proxy/ only; the census asks no proxied page)', make: () => (req, res, next) => next() },
@@ -656,8 +701,27 @@ const CATALOG = {
   'src/server/mounts-plugins-wiring.js:hostVersion': { kind: 'make', why: 'the plugin loader\'s host version (read from package.json under the root; the scratch root has none) — the tree\'s own', make: () => R('package.json').version },
   'src/server/mounts-plugins-wiring.js:browserKeeper': { kind: 'make', why: 'THE browser keeper starts Chrome — not in the world: null is the product\'s own branch (keeperOr503: «browser profiles are not available on this server»); the browser routes are swept to that refusal', make: () => null },
   'src/server/mounts-plugins-wiring.js:browserDialogs': { kind: 'make', why: 'the browser dialogs over the keeper — null with it', make: () => null },
-  'server.js:designEngine': { kind: 'inert', why: 'the design engine — U2 mounts its routes; the sweep (U3) gives it a seeded stand-in' },
-  'server.js:desktopAccess': { kind: 'inert', why: 'the desktop access gate (remote machines\' displays) — no machine is paired' },
+  'server.js:designEngine': { kind: 'eval', why: 'THE design engine, real (design-engine.js) on the scratch data dir' },
+  'server.js:sendUserInput': { kind: 'make', why: 'THE typing path into a running CLI: a recorder (no CLI runs in the census)', make: (w) => (...a) => { (w.typed ||= []).push(a.length); return { ok: false, code: 'census_no_cli' }; } },
+  'server.js:broadcastToSession': { kind: 'eval', why: 'the per-session broadcast, real (session-broadcast.js) — no client listens' },
+  'server.js:decisionEngine': { kind: 'inert', why: 'a pick of mounts-plugins-wiring create() (the whole wiring — never evaluated whole): the decision API, no judgment is asked' },
+  'server.js:mounts': { kind: 'inert', why: 'a pick of mounts-plugins-wiring create(): the mount manager — no storage is mounted' },
+  'server.js:telemetry': { kind: 'inert', why: 'the telemetry recorder — nothing is reported' },
+  'server.js:jsonBody': { kind: 'eval', why: 'THE body parser (express.json, 50 MB) — every agent POST reads its body through it' },
+  'server.js:channelsWiring': { kind: 'eval', why: 'THE channels + agent groups wiring, real (channels-wiring.js create) on the scratch data dir — no channel connected' },
+  'server.js:publishedPages': { kind: 'eval', why: 'THE published pages store, real (published-pages.js) on the scratch data dir' },
+  'server.js:exitProxy': { kind: 'eval', why: 'THE machines\' exits (ExitProxyManager), real over the scratch machines store and THE grants store — no machine paired' },
+  'src/server/mounts-plugins-wiring.js:feedbackForward': { kind: 'eval', why: 'the feedback forwarder, real — no collector configured, nothing is sent' },
+  'server.js:desktopKeeper': { kind: 'inert', why: 'the desktop-app keeper (a machine\'s windows over xpra / VNC) — no window is open; the window targets engine reads it' },
+  'src/server/mounts-plugins-wiring.js:jobBindings': { kind: 'eval', why: 'the jobs\' browser bindings, real (browser-bindings.js) on the scratch data dir' },
+  'src/server/mounts-plugins-wiring.js:browserKeys': { kind: 'eval', why: 'the per-conversation browser keys, real (browser-key.js) — over the absent keeper' },
+  'server.js:stashView': { kind: 'eval', why: 'the stash hand-over view, real (stash-handover.js) over the real delivery ladder' },
+  'server.js:accounts': { kind: 'inert', why: 'the agent CLI accounts store — no account in the census (nothing signs in)' },
+  'server.js:browserKeeper': { kind: 'make', why: 'server.js\'s pick of the browser keeper (mounts-plugins-wiring create) — null with the wiring\'s own row', make: () => null },
+  'server.js:browserKeys': { kind: 'make', why: 'server.js\'s pick of the browser keys (mounts-plugins-wiring create) — the wiring\'s own real one (its row)', make: (w) => w.made.get('src/server/mounts-plugins-wiring.js:browserKeys') || null },
+  'server.js:recordClear': { kind: 'eval', why: 'THE record clear (record-clear.js), real over the real stores — a conversation clears only its own records' },
+  'src/server/mounts-plugins-wiring.js:automationSettings': { kind: 'eval', why: 'the automation opens\' settings accessors, real (harness-config-sync.js) over the census\'s settings' },
+  'server.js:desktopAccess': { kind: 'make', why: 'the desktop access gate (a machine\'s ops — apps, displays): every op answers «no machine in the census» (the apps engine reads its result\'s fields)', make: (w) => standIn(w, 'desktopAccess', { setAppPlanner() {}, planDigest: () => null, call: async () => ({ ok: false, code: 'census_no_machine', error: 'no machine in the census', status: { ok: false, code: 'census_no_machine' }, results: [], plan: null }), hosts: () => [], machine: () => null }) },
   // ── src/server/mounts-plugins-wiring.js ──
   'src/server/mounts-plugins-wiring.js:feedback': { kind: 'eval', why: 'THE feedback store, real, on the scratch data dir' },
   'src/server/mounts-plugins-wiring.js:vault': { kind: 'make', why: 'THE vault, real (vault-engine.js) on the scratch data dir with a light KDF; set up and unlocked by the world', make: (w) => R('src/server/vault-engine.js').create({ dataDir: w.data, kdf: { N: 1024, r: 8, p: 1 }, log: () => {}, idleTimer: false, bcast: () => {} }) },
@@ -670,17 +734,13 @@ const CATALOG = {
   'src/server/mounts-plugins-wiring.js:vaultUseGrants': { kind: 'eval', why: 'the vault\'s use grants, real over THE grants store' },
   'src/server/mounts-plugins-wiring.js:vaultAttention': { kind: 'eval', why: 'the Vault window\'s «needs you» producers, real over THE For-you store' },
   // ── src/server/apps-wiring.js / window-live-wiring.js ──
-  'src/server/apps-wiring.js:engine': { kind: 'inert', why: 'the apps engine (apt installs on a machine) — nothing installs in the census' },
-  'src/server/window-live-wiring.js:engine': { kind: 'inert', why: 'the window targets engine (leases on live windows) — no window is open' },
+  'src/server/apps-wiring.js:engine': { kind: 'eval', why: 'THE apps engine, real (apps-engine.js) on the scratch data dir — its access stand-in installs nothing' },
+  'src/server/window-live-wiring.js:engine': { kind: 'eval', why: 'THE window targets engine, real (window-targets-engine.js) on the scratch data dir — no window is open' },
   'src/server/window-live-wiring.js:handover': { kind: 'inert', why: 'the desktop handover engine — no desktop is handed over' },
 };
 const META = new Map();
 function metaStore(w) {
   return { read: (id) => (META.has(String(id)) ? { ...META.get(String(id)) } : null), write: (id, m) => { META.set(String(id), { ...(META.get(String(id)) || {}), ...(m || {}) }); return true; } };
-}
-function jobsOf(w) {
-  w.jobs ||= standIn(w, 'jobs', { jobByToken: (t) => (w.jobRows || []).find((j) => j.token === t) || null, get: (id) => (w.jobRows || []).find((j) => j.id === id) || null, list: () => [...(w.jobRows || [])], ready: true });
-  return w.jobs;
 }
 
 const ROUTES_STATIC = C.routes;
@@ -703,9 +763,270 @@ console.log('⑥ the mount (the bearer routes the real wiring registers, against
   ok(!V.extra.length, 'within the modules ③ found, the real wiring mounts no bearer route ③ did not read (one only a router\'s prefix or a computed path makes)', V.extra.join(' | '));
   ok(!V.regex.length, 'no mounted route is a regex path the doors cannot judge', V.regex.join(' | '));
   ok(!V.unmountedReasonless.length && !V.unmountedStale.length, 'every `unmounted` row says why and names a route that is really unmounted', [...V.unmountedReasonless.map((k) => 'NO WHY ' + k), ...V.unmountedStale.map((k) => 'MOUNTED ' + k)].join(' | '));
-  const dead = Object.keys(CATALOG).filter((k) => !WORLD.used.has(k));
-  ok(!dead.length, `every CATALOG row is touched by the mount (${Object.keys(CATALOG).length} rows: ${Object.values(CATALOG).filter((r) => r.kind === 'eval').length} eval, ${Object.values(CATALOG).filter((r) => r.kind === 'make').length} make, ${Object.values(CATALOG).filter((r) => r.kind === 'inert').length} inert)`, dead.length ? 'DEAD: ' + dead.join(' | ') : '');
 }
+
+// ── ⑧ THE SWEEP (U3): every mounted bearer route × every bearer, over sentinels planted through the real writers ──────
+// Conversation A asks; conversation B owns everything planted. A sentinel is an alphanumeric word (never escaped, never
+// cut by a belt) or a token; an answer is scanned whole — body and headers — for each one raw, base64, base64url, hex and
+// URI-encoded. CRITICAL: B's tokens, a vault secret's bytes, a website login's password; LAW: an ungranted login's user
+// name; CONV: B's name, folder, words, Task Group, progress, job, For-you item, meta. A hit is a FINDING: a row of the
+// table's `findings` (listed for the coordinator, never fixed here) — a new hit or a row no hit answers = RED.
+console.log('⑧ the sweep (every mounted bearer route × every bearer, over sentinels planted through the real writers)');
+const crypto = require('node:crypto');
+const http = require('node:http');
+const hex = (n) => crypto.randomBytes(n).toString('hex');
+const word = (k) => `zq${k}${hex(5)}`;
+const SENT = { bName: word('bname'), bCwd: word('bcwd'), bPrompt: word('bprompt'), bGroup: word('bgroup'), bProgress: word('bprogress'), bJob: word('bjob'), bJobNote: word('bjobnote'), bTodo: word('btodo'), bMeta: word('bmeta'), bPage: word('bpage'), secret: word('secret') + hex(8), loginUser: word('loginuser'), loginPass: word('loginpass') + hex(4) };
+const KIND = { bToken: 'CRITICAL', bJobToken: 'CRITICAL', secret: 'CRITICAL', loginPass: 'CRITICAL', loginUser: 'LAW', bName: 'CONV', bCwd: 'CONV', bPrompt: 'CONV', bGroup: 'CONV', bProgress: 'CONV', bJob: 'CONV', bJobNote: 'CONV', bTodo: 'CONV', bMeta: 'CONV', bPage: 'CONV' };
+const TA = 'vsst_' + hex(24), TB = 'vsst_' + hex(24), TM = 'vsmk_' + crypto.randomBytes(32).toString('base64url').slice(0, 43);
+process.env.VIBESPACE_MAINTAINER_KEY_SHA = crypto.createHash('sha256').update(TM).digest('hex');
+const SID_A = fixtureSid(hex(6)), SID_B = fixtureSid(hex(6));
+const KEY_A = 'claude:' + SID_A, KEY_B = 'claude:' + SID_B;
+const W0 = WORLD.world;
+const sessions = W0.value('server.js', 'activeSessions');
+const CWD_A = path.join(ROOT, 'conv-a'), CWD_B = path.join(ROOT, SENT.bCwd);
+fs.mkdirSync(CWD_A, { recursive: true }); fs.mkdirSync(CWD_B, { recursive: true });
+fs.writeFileSync(path.join(CWD_B, 'notes.md'), SENT.bPrompt + '\n');
+sessions.set('wA', { agentToken: TA, claudeSessionId: SID_A, backendSessionId: SID_A, backend: 'claude', _webuiId: 'wA', sockName: 'cw-census-a', clients: new Set(), name: 'census asker', cwd: CWD_A, createdAt: Date.now() - 60e3 });
+sessions.set('wB', { agentToken: TB, claudeSessionId: SID_B, backendSessionId: SID_B, backend: 'claude', _webuiId: 'wB', sockName: 'cw-census-b', clients: new Set(), name: SENT.bName, cwd: CWD_B, createdAt: Date.now() - 120e3 });
+const ROUTE_ERRORS = new Map();   // route → the first error a handler threw (express's own error path, quietly)
+WORLD.app.use((err, req, res, next) => { const k = `${req.method} ${req.route ? req.route.path : req.path}`; if (!ROUTE_ERRORS.has(k)) ROUTE_ERRORS.set(k, String((err && err.message) || err).slice(0, 160)); if (!res.headersSent) res.status(500).json({ error: 'census: the handler threw', code: 'census_threw' }); });
+const SERVER = await new Promise((r) => { const sv = WORLD.app.listen(0, '127.0.0.1', () => r(sv)); });
+const PORT = SERVER.address().port;
+const REJECTED = [];
+process.on('unhandledRejection', (e) => REJECTED.push(String((e && e.message) || e).slice(0, 160)));
+/** one request: no Accept-Encoding (the compression middleware sends the bytes as they are) */
+function call(method, p, { bearer = null, body = undefined, raw = null, timeoutMs = 4000, port = PORT } = {}) {
+  return new Promise((resolve) => {
+    const data = raw !== null ? String(raw) : body === undefined ? null : JSON.stringify(body);
+    const headers = { host: `127.0.0.1:${port}` };
+    if (bearer) headers.authorization = 'Bearer ' + bearer;
+    if (data !== null) { headers['content-type'] = raw !== null ? 'text/html' : 'application/json'; headers['content-length'] = Buffer.byteLength(data); }
+    const rq = http.request({ host: '127.0.0.1', port, path: p, method, headers, timeout: timeoutMs }, (x) => {
+      const chunks = []; x.on('data', (c) => chunks.push(c));
+      x.on('end', () => resolve({ status: x.statusCode, text: Buffer.concat(chunks).toString('utf8'), headers: x.headers }));
+    });
+    rq.on('timeout', () => { rq.destroy(); resolve({ status: 0, text: '', headers: {}, timedOut: true }); });
+    rq.on('error', (e) => resolve({ status: -1, text: String(e.message), headers: {} }));
+    rq.end(data === null ? undefined : data);
+  });
+}
+const json = (r) => { try { return JSON.parse(r.text); } catch { return null; } };
+// ── the planting, through the real writers (B's own token where a route writes it) ──
+const tasksStore = W0.made.get('server.js:tasks');
+const gB = tasksStore.create({ title: 'census b group', objective: SENT.bGroup + ' objective', sessions: [KEY_B] });   // the title is no sentinel: the id is its slug, and A's probes carry the id
+sessions.get('wB')._initialGroupId = gB.id;
+const plant = [];
+plant.push(['B\'s progress (POST /api/agent/task-progress, B\'s token)', await call('POST', '/api/agent/task-progress', { bearer: TB, body: { note: SENT.bProgress, detail: SENT.bProgress + ' detail' } })]);
+plant.push(['B\'s job (POST /api/agent/jobs, B\'s token)', await call('POST', '/api/agent/jobs', { bearer: TB, body: { name: SENT.bJob, note: SENT.bJobNote, cmd: 'true' } })]);
+plant.push(['A\'s job (POST /api/agent/jobs, A\'s token)', await call('POST', '/api/agent/jobs', { bearer: TA, body: { name: 'census-a-job', cmd: 'true' } })]);
+plant.push(['B\'s page (POST /api/agent/pages/publish, B\'s token)', await call('POST', `/api/agent/pages/publish?title=${SENT.bPage}`, { bearer: TB, raw: `<html><body>${SENT.bPage} ${SENT.bPrompt}</body></html>` })]);
+plant.push(['B\'s feedback report (POST /api/agent/feedback, B\'s token)', await call('POST', '/api/agent/feedback', { bearer: TB, body: { text: SENT.bPrompt + ' feedback', about: 'census' } })]);
+const JM = W0.made.get('server.js:jobsWiring').jm;
+const jobB = [...JM.jobs.values()].find((j) => j.name === SENT.bJob), jobA = [...JM.jobs.values()].find((j) => j.name === 'census-a-job');
+const TJA = jobA ? JM._jobToken(jobA) : null, TJB = jobB ? JM._jobToken(jobB) : null;
+W0.made.get('server.js:userTodos').add(KEY_B, { text: SENT.bTodo, detail: SENT.bTodo + ' detail', by: 'agent', origin: 'agent', sessionName: SENT.bName });
+META.set('cw-census-b', { name: SENT.bMeta, title: SENT.bMeta, customName: SENT.bMeta, prompt: SENT.bPrompt });   // every reader keys the meta by the session's sockName
+const VAULT = W0.made.get('src/server/mounts-plugins-wiring.js:vault');
+const VAULT_PW = 'census-vault-' + hex(4);
+const vaultUp = await VAULT.setup(VAULT_PW);
+const putB = VAULT.secretPut('apikey:census-b', SENT.secret, { actor: 'owner' });
+const LOGIN_ORIGIN = 'https://census-login.example';
+const loginB = W0.made.get('src/server/mounts-plugins-wiring.js:browserLogins').addOwn({ origin: LOGIN_ORIGIN, username: SENT.loginUser, password: SENT.loginPass });
+ok(plant.every(([, r]) => r.status >= 200 && r.status < 300) && jobA && jobB && TJA && TJB, 'the planting runs through the real routes (B\'s progress, B\'s and A\'s jobs — the real jobs engine, its spawn stubbed)', plant.map(([n, r]) => `${n} → ${r.status} ${r.text.slice(0, 160)}`).join(' | '));
+ok(vaultUp && vaultUp.ok && putB && putB.ok !== false && loginB && loginB.ok !== false, 'the vault is set up and holds B\'s secret and an ungranted website login (the real engine and the real web-login door)', JSON.stringify({ vaultUp, putB, loginB }).slice(0, 400));
+const TOKENS = { bToken: TB, bJobToken: TJB };
+const B_REF = {};   // `$B.<key>` in a row's body: B's planted things, by the ids the real writers gave them
+const pageB = (() => { try { return JSON.parse(plant.find(([n]) => /B's page/.test(n))[1].text); } catch { return null; } })();
+const todoB = (W0.made.get('server.js:userTodos').snapshot().open || []).find((i) => i && String(i.text || '').includes(SENT.bTodo)) || null;
+const fbB = (() => { try { return JSON.parse(plant.find(([n]) => /B's feedback/.test(n))[1].text).report; } catch { return null; } })();
+Object.assign(B_REF, { group: gB.id, sid: SID_B, key: KEY_B, job: jobB && jobB.id, page: pageB && (pageB.id || (pageB.page && pageB.page.id)), todo: todoB && todoB.id, feedback: fbB && fbB.id });
+ok(Object.values(B_REF).every((v) => typeof v === 'string' && v.length > 3), 'B\'s planted things have the ids their real writers gave them (group, conversation, job, page, For-you item, feedback report)', JSON.stringify(B_REF));
+const NEEDLES = [];
+for (const [k, v] of Object.entries({ ...SENT, ...TOKENS })) {
+  if (!v) continue;
+  // base64 / base64url at EVERY byte offset: the bytes before the sentinel shift its encoding (three alignments); the
+  // core of each — its first block (the prefix's) and its last (the suffix's) cut — is the same whatever surrounds it
+  const b64 = [0, 1, 2].map((sh) => Buffer.concat([Buffer.alloc(sh), Buffer.from(v)]).toString('base64').replace(/=+$/, '').slice(sh ? 4 : 0, -4));
+  const forms = new Set([v, ...b64, ...b64.map((x) => x.replace(/\+/g, '-').replace(/\//g, '_')), Buffer.from(v).toString('hex'), encodeURIComponent(v)]);
+  for (const f of forms) NEEDLES.push([k, f]);
+}
+/** the sentinels an answer carries → [kind key] (nothing A sends carries one: the probe bag names B's ids, never a
+ *  sentinel — so no echo can make a hit, and none is blanked) */
+const hitsIn = (r) => { const hay = r.text + '\n' + JSON.stringify(r.headers || {}); const out = new Set(); for (const [k, f] of NEEDLES) if (hay.includes(f)) out.add(k); return [...out]; };
+// ── the sweep ──
+const BEARERS = [['A', TA], ['A-job', TJA], ['maintainer', TM], ['vsak', 'vsak_' + crypto.randomBytes(32).toString('base64url').slice(0, 43)], ['none', null]];
+const BAG = { id: gB.id, group: gB.id, groupId: gB.id, task: gB.id, taskId: gB.id, session: SID_B, sessionId: SID_B, sessionKey: KEY_B, conversation: SID_B, conversationId: SID_B, conv: SID_B, cid: SID_B, sid: SID_B, webuiId: 'wB', ref: jobB ? jobB.id : 'census', job: jobB ? jobB.id : 'census', jobId: jobB ? jobB.id : 'census', name: 'apikey:census-b', entry: 'apikey:census-b', origin: LOGIN_ORIGIN, to: SID_B, peer: SID_B, target: SID_B };
+const fillParam = (route, name) => {
+  const n = name.toLowerCase(), p = route.toLowerCase();
+  if (/ref|job/.test(n) || (/\/jobs\//.test(p) && n === 'id')) return BAG.job;
+  if (/group|task/.test(n)) return gB.id;
+  if (/conv|session|sid|cid/.test(n)) return SID_B;
+  if (/entry|secret/.test(n)) return BAG.entry;
+  if (n === 'verb') return 'feedback.list';   // the maintainer key's verb (POST /api/agent/automation/:verb)
+  return 'census';
+};
+const MOUNTED = [...new Set(stackRoutes(WORLD.app._router.stack).filter((r) => C.bearerDoors.some((d) => underDoor(r.slice(r.indexOf(' ') + 1), d.test))))];
+const RESULTS = [];
+const subst = (v) => (typeof v === 'string' && v.startsWith('$B.') ? B_REF[v.slice(3)] ?? v : Array.isArray(v) ? v.map(subst) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, subst(x)])) : v);
+const bodiesOf = (route) => { const row = (TABLE.routes || {})[route] || {}; return row.bodies ? row.bodies.map((b) => ({ bare: true, body: b })) : [{ bare: !!row.bare, body: row.body || {} }]; };
+async function sweepOne(route, who, bearer) {
+  const [method, rp] = [route.slice(0, route.indexOf(' ')), route.slice(route.indexOf(' ') + 1)];
+  const row = (TABLE.routes || {})[route] || {};
+  if (row.skip) return;
+  const p = rp.replace(/:([A-Za-z_]\w*)(\([^)]*\))?\??/g, (_, n) => encodeURIComponent(fillParam(rp, n))).replace(/\*$/, 'census');
+  const qs = method === 'GET' ? '?' + new URLSearchParams(BAG).toString() : '';
+  const many = bodiesOf(route).length > 1;
+  for (const [i, b] of bodiesOf(route).entries()) {
+    // `bare`: a closed argument set refuses the bag — the row's own body alone
+    const body = method === 'GET' ? undefined : b.bare ? subst(b.body) : { ...BAG, text: 'census', note: 'census', words: 'census', purpose: 'census', ...subst(b.body) };
+    const r = await call(method === 'ALL' ? 'POST' : method, p + qs, { bearer, body });
+    RESULTS.push({ route: many ? `${route} #${i}` : route, who, status: r.status, timedOut: !!r.timedOut, hits: hitsIn(r), text: r.text });
+  }
+}
+async function pool(jobs, n) { const q = [...jobs]; await Promise.all(Array.from({ length: n }, async () => { while (q.length) await q.shift()(); })); }
+const reads = MOUNTED.filter((r) => r.startsWith('GET ')), writes = MOUNTED.filter((r) => !r.startsWith('GET '));
+await pool(reads.flatMap((r) => BEARERS.map(([w, b]) => () => sweepOne(r, w, b))), 12);
+const lastOf = (r) => ((TABLE.routes || {})[r] || {}).last ? 1 : 0;
+for (const r of [...writes].sort((x, y) => lastOf(x) - lastOf(y))) for (const [w, b] of BEARERS) await sweepOne(r, w, b);   // writes one at a time, in order (a write may change what the next one finds); a `last` row after the rest
+const by = (pred) => RESULTS.filter(pred);
+const deep = new Set(by((x) => x.who === 'A' && x.status >= 200 && x.status < 300).map((x) => x.route));
+const errs = by((x) => x.status >= 500 || x.status <= 0 || x.timedOut);
+console.log(`    ${RESULTS.length} answers: ${MOUNTED.length} routes × ${BEARERS.length} bearers; A's token reached ${deep.size} routes past their door (2xx); ${errs.length} answers 5xx / no answer`);
+for (const [w] of BEARERS) { const s = {}; for (const x of by((y) => y.who === w)) { const k = x.timedOut ? 'timeout' : String(x.status); s[k] = (s[k] || 0) + 1; } console.log(`      ${w}: ${Object.entries(s).map(([k, v]) => `${k}×${v}`).join(' ')}`); }
+// ── THE GRANTED KEY (the row's «automation key»): a key minted through the REAL engine, every verb, granted to A with the
+// default reach (what the key itself opened) — then every verb aimed at B. Each verb's arguments are its own: the door
+// names an unknown one and it is dropped (derived, never typed). Its answers join the findings as caller `A-key`.
+const AE = W0.made.get('src/server/mounts-plugins-wiring.js:automation');
+const AKEYS = require(path.join(REPO, 'src/automation-keys.js'));
+const reopened = await VAULT.unlock(VAULT_PW);   // the sweep's last write locked it (an agent may)
+const minted = AE.mint({ name: 'census-key', scopes: [...AKEYS.VERBS], limits: { cwdRoots: [CWD_A], accounts: 'any', permissionModes: ['default'], models: 'any', modes: ['chat'] }, by: 'census' });   // its opens may land in A's folder only
+const granted = minted && minted.ok ? AE.grant(minted.key.id, ['session:' + SID_A], { by: 'census' }) : null;
+ok(reopened && reopened.ok !== false && minted && minted.ok && granted && granted.ok, `a key is minted through the real engine with every verb (${AKEYS.VERBS.length}) and granted to A (the default reach)`, JSON.stringify({ minted, granted }).slice(0, 300));
+const KEY_RESULTS = [];
+const layerOf = (v) => ((AKEYS.scopeOf ? AKEYS.scopeOf(v) : (AKEYS.SCOPES || []).find((x) => x.verb === v)) || {}).layer;
+if (minted && minted.ok) for (const verb of [...AKEYS.VERBS].sort((a, b) => (layerOf(a) === 'read' ? 0 : 1) - (layerOf(b) === 'read' ? 0 : 1))) {   // the reads first (an act may change what a read finds)
+  let args = { target: SID_B, group: gB.id, task: gB.id, id: B_REF.feedback, name: 'census', version: '2.369.407', force: false, resolveAsks: false, cwd: CWD_A };
+  let r = null;
+  for (let i = 0; i < 12; i++) {
+    r = await call('POST', `/api/agent/automation/${verb}?key=${encodeURIComponent(minted.key.id)}`, { bearer: TA, body: args });
+    const m = /unknown argument "([^"]+)"/.exec(String((json(r) || {}).why || ''));
+    if (!m) break;
+    const { [m[1]]: _drop, ...rest } = args; args = rest;
+  }
+  KEY_RESULTS.push({ route: `POST /api/agent/automation/${verb}`, who: 'A-key', status: r.status, timedOut: !!r.timedOut, hits: hitsIn(r), text: r.text });
+}
+// ── THE RELATED PASS: A put in B's Task Group, every read again — what a member may see is a finding row (allowed by
+// membership, listed), and no CRITICAL sentinel even then ──
+tasksStore.bind(gB.id, KEY_A);
+const MAIN = RESULTS.length;
+await pool(reads.flatMap((r) => [() => sweepOne(r, 'A-related', TA)]), 12);
+tasksStore.unbind(gB.id, KEY_A);
+const RELATED = RESULTS.splice(MAIN);
+for (const x of RELATED) x.who = 'A-related';
+console.log(`    the granted key: ${KEY_RESULTS.length} verbs aimed at B — ${KEY_RESULTS.map((x) => `${x.route.split('/').pop()} ${x.status}`).join(', ')}`);
+console.log(`    the related pass: ${RELATED.length} reads with A in B's group — ${RELATED.filter((x) => x.hits.length).length} carry B's facts`);
+// ── the verdicts — ONE function over the answers and a table (the controls below run it over planted tables) ──
+const CRASH_RE = /Cannot read propert|is not a function|is not iterable|is not defined|is not a constructor/;
+const ANON_KEYS = new Set(['ok', 'error', 'code', 'why', 'hint', 'success']);   // what a refusal to an unknown caller may say
+function sweepVerdicts(results, table) {
+  const by = (pred) => results.filter(pred);
+  const pathOf = (r) => r.slice(r.indexOf(' ') + 1);
+  const why = (v) => String((v && typeof v === 'object' ? v.why : v) || '').trim().length >= 20;
+  const prefixRows = (kind, now) => {   // rows by path prefix, each { why, n }: n = how many routes it covers today
+    const T = table[kind] || {};
+    const cover = (r) => Object.keys(T).filter((pre) => pathOf(r).startsWith(pre)).sort((a, b) => b.length - a.length)[0];
+    const per = {}; for (const r of now) { const c = cover(r); if (c) per[c] = (per[c] || 0) + 1; }
+    return {
+      now, per,
+      unrowed: now.filter((r) => !cover(r)),
+      dead: Object.keys(T).filter((pre) => !per[pre]),
+      blank: Object.entries(T).filter(([, v]) => !why(v)).map(([k]) => k),
+      count: Object.entries(T).filter(([k, v]) => per[k] && v && v.n !== per[k]).map(([k, v]) => `${k} n ${v && v.n} → ${per[k]}`),
+    };
+  };
+  // SHALLOW: a route a caller CRASHES in (a stand-in short of a member reads so), or A's token gets a 5xx from — the
+  // world cannot take it past its door; SHAPE: A's 400 — the request's shape refused before any reach is judged
+  const shallow = prefixRows('shallow', [...new Set(by((x) => CRASH_RE.test(x.text) || (x.who === 'A' && x.status >= 500)).map((x) => x.route))]);
+  const shape = prefixRows('shape', [...new Set(by((x) => x.who === 'A' && x.status === 400 && !CRASH_RE.test(x.text)).map((x) => x.route))]);
+  // DEEP: the routes A's token takes past their door (2xx), pinned both ways — a lost one and a new one are each said
+  const deepNow = [...new Set(by((x) => x.who === 'A' && x.status >= 200 && x.status < 300).map((x) => x.route))].sort();
+  const deepRow = new Set(table.deep || []);
+  const deep = { now: deepNow, lost: [...deepRow].filter((r) => !deepNow.includes(r)), gained: deepNow.filter((r) => !deepRow.has(r)) };
+  // OPEN: a 2xx to no bearer, or to a value no door knows
+  const OPEN = table.open || {};
+  const openNow = [...new Set(by((x) => (x.who === 'none' || x.who === 'vsak') && x.status >= 200 && x.status < 300).map((x) => x.route))];
+  const open = { now: openNow, unrowed: openNow.filter((r) => !(has(OPEN, r) && why(OPEN[r]))), dead: Object.keys(OPEN).filter((r) => !openNow.includes(r)) };
+  // ANONYMOUS: what a refusal to an unknown caller carries beyond its own words (a JSON key outside ANON_KEYS)
+  const ANON = table.anonymous || {};
+  const anonNow = [...new Set(by((x) => x.who === 'none' || x.who === 'vsak').flatMap((x) => { let j = null; try { j = JSON.parse(x.text); } catch { } return j && typeof j === 'object' && !Array.isArray(j) && Object.keys(j).some((k) => !ANON_KEYS.has(k)) ? [x.route] : []; }))];
+  const anon = { now: anonNow, unrowed: anonNow.filter((r) => !(has(ANON, r) && why(ANON[r]))), dead: Object.keys(ANON).filter((r) => !anonNow.includes(r)) };
+  // FINDINGS: every hit `<route> · <caller> · <sentinel>` — a row whose why is blank is no row
+  const F = table.findings || {};
+  const hits = [...new Set(by((x) => x.hits.length).flatMap((x) => x.hits.map((h) => `${x.route} · ${x.who} · ${h}`)))];
+  const findings = { hits, unrowed: hits.filter((h) => !(has(F, h) && why(F[h]))), dead: Object.keys(F).filter((h) => !hits.includes(h)), critical: hits.filter((h) => KIND[h.split(' · ')[2]] === 'CRITICAL' && !(has(F, h) && why(F[h]))) };
+  return { shallow, shape, deep, open, anon, findings };
+}
+const swept = MOUNTED.filter((r) => !((TABLE.routes || {})[r] || {}).skip);
+const expected = swept.reduce((n, r) => n + bodiesOf(r).length, 0) * BEARERS.length;
+ok(RESULTS.length === expected && !by((x) => x.timedOut || x.status <= 0).length, `every mounted bearer route answered every bearer (${RESULTS.length} = ${swept.length} routes, ${expected / BEARERS.length} requests each × ${BEARERS.length}; none timed out)`, by((x) => x.timedOut || x.status <= 0).map((x) => `${x.who} ${x.route}`).join(' | '));
+{
+  const RF = TABLE.refused || {};
+  const progs = [...new Set(SPAWNED.map((x) => x.split(' ')[1]))];
+  ok(progs.every((p) => has(RF, p)) && Object.keys(RF).every((p) => progs.includes(p)) && Object.values(RF).every((w) => String(w || '').trim().length >= 20), `every program a handler would start is refused and is a \`refused\` row with its why (${progs.join(', ') || 'none'})`, [...progs.filter((p) => !has(RF, p)).map((p) => 'NEW ' + p), ...Object.keys(RF).filter((p) => !progs.includes(p)).map((p) => 'DEAD ' + p)].join(' | '));
+}
+ok(!WORLD.demanded.size && !WORLD.gaps.size && !REJECTED.length, 'after the sweep: no construction without a row, no stand-in member missing, no unhandled rejection (a handler\'s own names are rows too)', [...[...WORLD.demanded].map(([k, v]) => `${k} — ${v}`), ...[...WORLD.gaps], ...REJECTED].slice(0, 12).join(' | '));
+SPAWNED.length = 0;   // the controls below count their own
+{
+  const dead = Object.keys(CATALOG).filter((k) => !WORLD.used.has(k));
+  ok(!dead.length, `every CATALOG row is touched by the mount or the sweep (${Object.keys(CATALOG).length} rows: ${Object.values(CATALOG).filter((r) => r.kind === 'eval').length} eval, ${Object.values(CATALOG).filter((r) => r.kind === 'make').length} make, ${Object.values(CATALOG).filter((r) => r.kind === 'inert').length} inert)`, dead.length ? 'DEAD: ' + dead.join(' | ') : '');
+}
+const ALL_RESULTS = [...RESULTS, ...KEY_RESULTS, ...RELATED];
+const SV = sweepVerdicts(RESULTS, TABLE);
+const SVF = sweepVerdicts(ALL_RESULTS, TABLE).findings;   // the findings over every pass (the five callers, the granted key, the related reads)
+const textOf = (r) => ((RESULTS.find((x) => x.route === r && x.who === 'A') || {}).text || '').slice(0, 110);
+const said = (v) => [...v.unrowed.map((r) => 'NEW ' + r + ' → ' + textOf(r)), ...v.dead.map((k) => 'DEAD ' + k), ...(v.blank || []).map((k) => 'NO WHY ' + k), ...(v.count || []).map((k) => 'COUNT ' + k)].join(' | ');
+ok(!SV.shallow.unrowed.length && !SV.shallow.dead.length && !SV.shallow.blank.length && !SV.shallow.count.length, `every route the world cannot take past its door (a crash, or a 5xx to A) is a \`shallow\` row with its why and its count (${SV.shallow.now.length}: ${Object.entries(SV.shallow.per).map(([k, n]) => `${k}* ${n}`).join(', ')})`, said(SV.shallow));
+ok(!SV.shape.unrowed.length && !SV.shape.dead.length && !SV.shape.blank.length && !SV.shape.count.length, `every route whose request SHAPE A's token is refused on (a 400 — the reach never judged) is a \`shape\` row with its why and its count (${SV.shape.now.length})`, said(SV.shape));
+ok(!SV.deep.lost.length && !SV.deep.gained.length, `the routes A's token takes past their door are the table's \`deep\` set, both ways (${SV.deep.now.length})`, [...SV.deep.lost.map((r) => 'LOST ' + r), ...SV.deep.gained.map((r) => 'NEW ' + r)].join(' | '));
+ok(!SV.open.unrowed.length && !SV.open.dead.length, `no bearer route answers 2xx with no bearer or a value no door knows, unless it is an \`open\` row with its why (${SV.open.now.length})`, said(SV.open));
+ok(!SV.anon.unrowed.length && !SV.anon.dead.length, `a refusal to an unknown caller says only its own words (${[...ANON_KEYS].join(' / ')}), unless it is an \`anonymous\` row with its why (${SV.anon.now.length})`, said(SV.anon));
+for (const h of SVF.hits) console.log(`    FINDING ${KIND[h.split(' · ')[2]]}: ${h}${has(TABLE.findings || {}, h) ? '' : ' — NEW'}`);
+ok(!SVF.unrowed.length, `every answer that carries another conversation's fact or a secret's bytes is a \`findings\` row with its why (${SVF.hits.length} hit(s) over the five callers, the granted key and the related reads)`, SVF.unrowed.map((h) => 'NEW ' + h).join(' | '));
+ok(!SVF.dead.length, 'no findings row no answer carries', SVF.dead.join(' | '));
+ok(!SVF.hits.some((h) => /· A(-job|-key|-related)? ·/.test(h) && KIND[h.split(' · ')[2]] === 'CRITICAL'), 'no CRITICAL sentinel (B\'s tokens, a secret\'s bytes, a login\'s password) reaches A by any road — its token, its job, its granted key, its membership — rowed or not');
+ok(!SVF.critical.length, 'no CRITICAL sentinel reaches any caller outside a listed finding', SVF.critical.join(' | '));
+// ── the table kinds' RED controls: the same verdict function over planted tables ──
+{
+  const t = JSON.parse(JSON.stringify(TABLE));
+  const firstShallow = Object.keys(t.shallow)[0], firstShape = Object.keys(t.shape)[0], firstFinding = Object.keys(t.findings)[0], firstAnon = Object.keys(t.anonymous)[0];
+  t.shallow['/api/agent/planted-dead/'] = { n: 1, why: 'a planted shallow row no route has' };
+  t.shallow[firstShallow] = { ...t.shallow[firstShallow], n: t.shallow[firstShallow].n + 1 };
+  t.shape[firstShape] = { ...t.shape[firstShape], why: ' ' };
+  t.deep = [...t.deep.slice(1), 'GET /api/agent/planted-deep'];
+  t.open = { 'GET /api/agent/planted-open': 'a planted open row no route answers' };
+  t.anonymous[firstAnon] = '';
+  t.findings['GET /api/agent/planted-finding · A · bName'] = 'a planted findings row no answer carries';
+  t.findings[firstFinding] = '';
+  const v = sweepVerdicts(ALL_RESULTS, t);
+  ok(v.shallow.dead.includes('/api/agent/planted-dead/') && v.shallow.count.length === 1, 'CONTROL: a `shallow` row no route has ⇒ DEAD, one whose count moved ⇒ RED', [v.shallow.dead, v.shallow.count]);
+  ok(v.shape.blank.includes(firstShape), 'CONTROL: a `shape` row with no why ⇒ RED', v.shape.blank);
+  ok(v.deep.lost.includes('GET /api/agent/planted-deep') && v.deep.gained.length === 1, 'CONTROL: the `deep` set pinned both ways — a route the table names that A no longer reaches, and one it reaches that the table does not name ⇒ each RED', v.deep);
+  ok(v.open.dead.includes('GET /api/agent/planted-open') && v.anon.unrowed.includes(firstAnon), 'CONTROL: an `open` row no route answers ⇒ DEAD; an `anonymous` row with no why is no row ⇒ RED', [v.open.dead, v.anon.unrowed]);
+  ok(v.findings.dead.includes('GET /api/agent/planted-finding · A · bName') && v.findings.unrowed.includes(firstFinding), 'CONTROL: a `findings` row no answer carries ⇒ DEAD; one with no why is no row (its hit ⇒ NEW) — a blank why never silences a hit', [v.findings.dead, v.findings.unrowed]);
+}
+// ── the positive controls: the same scanner over the same real routes, where the fact MAY be read ──
+{
+  // (p1) A joins B's Task Group: the group read now answers B's group and progress, and the scanner sees both
+  const before = await call('GET', `/api/agent/task?group=${encodeURIComponent(gB.id)}`, { bearer: TA });
+  tasksStore.bind(gB.id, KEY_A);
+  const inside = await call('GET', `/api/agent/task?group=${encodeURIComponent(gB.id)}`, { bearer: TA });
+  tasksStore.unbind(gB.id, KEY_A);
+  const after = await call('GET', `/api/agent/task?group=${encodeURIComponent(gB.id)}`, { bearer: TA });
+  const hIn = hitsIn(inside);
+  ok(before.status === 403 && inside.status === 200 && hIn.includes('bProgress') && after.status === 403, 'POSITIVE CONTROL: A put in B\'s Task Group reads it (200) and the scanner sees B\'s progress in that answer; out again ⇒ 403 (the sweep\'s refusals are real refusals)', [before.status, inside.status, hIn, after.status, inside.text.slice(0, 200)]);
+}
+
 
 console.log('⑦ controls of the world (planted copies, each world on its own scratch root)');
 {
@@ -722,10 +1043,22 @@ console.log('⑦ controls of the world (planted copies, each world on its own sc
   const at = mpw.indexOf("setTimeout(() => { try { const n = automation.reconcile();");
   ok(at > 0, 'the automation reconcile line is found in the wiring (the controls\' anchor)');
   // (a) a bearer route written straight into a wiring file: read by ③, mounted by evaluating it where it stands
-  const planted = mpw.slice(0, at) + "app.get('/api/agent/planted-wiring', (req, res) => res.json({ live: activeSessions.size, groups: typeof sessionCallerOf }));\n" + mpw.slice(at);
+  // the planted route LEAKS: every live conversation's name, and a secret's bytes in base64 — the sweep's scanner must see both
+  globalThis.__lgPlantedSecret = SENT.secret;
+  const planted = mpw.slice(0, at) + "app.get('/api/agent/planted-wiring', (req, res) => res.json({ live: activeSessions.size, groups: typeof sessionCallerOf, names: [...activeSessions.values()].map((s) => s.name), k: Buffer.from(JSON.stringify({ nm: String(globalThis.__lgPlantedSecret) })).toString('base64') }));\n" + mpw.slice(at);
   const a = again({ [MPW]: planted });
   const va = mountVerdict(a.B.app, a.c.routes, TABLE);
   ok(a.c.routes.some((r) => r.path === '/api/agent/planted-wiring' && r.file === MPW) && va.mounted.has('GET /api/agent/planted-wiring') && !va.unmounted.length && !va.extra.length && !a.B.threw.length, 'CONTROL: a bearer route planted IN the wiring file is read by ③ and mounted by the world — ⑥\'s verdict green on it (its handler closes over the wiring\'s own names)', [a.B.threw, va.unmounted, va.extra]);
+  {
+    const ss = a.B.world.value('server.js', 'activeSessions');
+    ss.set('wA', { ...sessions.get('wA') }); ss.set('wB', { ...sessions.get('wB') });
+    const sv = await new Promise((r) => { const x = a.B.app.listen(0, '127.0.0.1', () => r(x)); });
+    const ans = await call('GET', '/api/agent/planted-wiring', { bearer: TA, port: sv.address().port });
+    sv.close();
+    const h = hitsIn(ans);
+    const fv = sweepVerdicts([{ route: 'GET /api/agent/planted-wiring', who: 'A', status: ans.status, text: ans.text, hits: h }], TABLE).findings;
+    ok(ans.status === 200 && h.includes('bName') && h.includes('secret') && fv.unrowed.includes('GET /api/agent/planted-wiring · A · secret') && fv.critical.length === 1, 'CONTROL: the planted wiring route answers B\'s name and a secret\'s bytes base64-encoded INSIDE a JSON object (no 3-byte alignment) — the scanner sees both, and the findings verdict says NEW and CRITICAL ⇒ RED', [ans.status, h, fv.unrowed, ans.text.slice(0, 120)]);
+  }
   // (b) a route its module registers only when a dep is given: the wiring's dep made null ⇒ unmounted ⇒ RED
   const vault = readRepo('src/routes/vault.js');
   const vb = vault.indexOf('}) {', vault.indexOf('function registerVaultRoutes(')) + 4;
