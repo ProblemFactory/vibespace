@@ -837,7 +837,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         state: b ? b.state : 'not-started', live: B.isLiveBrowser(b), startedAt: b ? b.startedAt || 0 : 0, endedAt: b ? b.endedAt || 0 : 0, pid: b ? b.pid || null : null, stoppedBy: b ? b.stoppedBy || null : null, lastError: b ? b.lastError || null : null,
         adopted: !!(b && b.adoptedAt), usage: live.get(p.id) ? { ...live.get(p.id) } : null, createdAt: p.createdAt || 0,
         display: b && b.display ? b.display : null, // lane headless-fallback: the launch's display fact (headless instead of a window, and why)
-        kept: B.isBrowserKey(p.owner.id) && keptStore() ? keptStore().brief(p.owner.id) : null }; // lane browser-resume: what its conversation keeps when it stops
+        kept: B.isBrowserKey(p.owner.id) && keptStore() ? keptStore().brief(p.owner.id) : null, // lane browser-resume: what its conversation keeps when it stops
+        endedEarly: b && b.endedEarly ? { ...b.endedEarly } : null }; // B-346d law 2: its daemon ended before its idle timeout (the row's chip says so, never «idled out»)
   }
   function ephemeralFor(browserKey) { ensureLoaded(); const k = String(browserKey || ''); const p = reg.profiles.find((x) => isEph(x) && x.owner && String(x.owner.id) === k); return p ? ephRow(p) : null; } // B-7a30: one key's lookup computes one key
   function list() {
@@ -1946,17 +1947,28 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (v) log.log?.(`[browser] ${bk}: refused browser_cap (this conversation's cap ${v.cap}, ${v.own} running)`);
     return v;
   }
-  /** An ephemeral daemon whose pid is gone idled out (the CLI's own timeout):
-   *  recorded `stopped` — not an error; the next verb starts it again. */
+  /** An ephemeral daemon whose pid is gone: recorded `stopped` — not an error; the next verb starts it again. B-346d law 2:
+   *  it idled out (the CLI's own timeout) ONLY when it was quiet that long. `endedEarly` = its daemon ended BEFORE its idle
+   *  timeout — CERTAIN: the daemon served nothing later than max(the verb before the newest, its own start) (the newest verb
+   *  may be the very one asking now, stamped before this judge — takeover C3), so its own quiet is no longer than that. Why it
+   *  ended (a crash, a kill) is not known here: the words say so. stoppedBy stays 'idle': every behaviour keyed on it (the
+   *  next verb starts it again, its kept tabs reopen) is the idle-out's. */
   function markEphemeralGone(rec, seenBy = 'the tick') {
+    const idleFor = Number.isInteger(rec.idleMs) ? rec.idleMs : pairsIdleMs(pairsOf(rec.profileId));
+    const pe = profile(rec.profileId);
+    const served = Math.max(Number(pe && pe.verbBeforeAt) || 0, Number(rec.startedAt) || 0);
+    const quietMs = served > 0 ? Math.max(0, now() - served) : null;
+    const early = quietMs != null && Number(idleFor) > 0 && quietMs < Number(idleFor);
     rec.state = 'stopped'; rec.endedAt = now(); rec.stoppedBy = 'idle'; rec.lastError = null;
+    rec.endedEarly = early ? { afterMs: quietMs, idleMs: Number(idleFor) } : null;
     dropEgress(rec.profileId); delete rec.egress; // lane engine-spi-egress r2: its proxy's port is free again
-    rec.note = `the browser idled out (${Math.round((Number.isInteger(rec.idleMs) ? rec.idleMs : pairsIdleMs(pairsOf(rec.profileId))) / 60000)} min without a command) — the next command starts it again`;
+    rec.note = early ? `the browser ended ${Math.round(quietMs / 1000)} s after its last command, before its idle timeout (${Math.round(Number(idleFor) / 60000)} min) — why is not known here; the next command starts it again`
+      : `the browser idled out (${Math.round(Number(idleFor) / 60000)} min without a command) — the next command starts it again`;
     guard.delete(rec.profileId); live.delete(rec.profileId);
     dirty = true;
-    log.log?.(`[browser] ephemeral ${rec.profileId} (${rec.ns}) daemon gone (pid ${rec.pid}${livenessOf(rec) === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped (idle), the next verb restarts it`);
+    log.log?.(`[browser] ephemeral ${rec.profileId} (${rec.ns}) daemon gone (pid ${rec.pid}${livenessOf(rec) === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped (${early ? `ended ${Math.round(quietMs / 1000)} s after its last command, before its idle timeout` : 'idle'}), the next verb restarts it`);
     emitLease({ kind: 'browser-stopped', profileId: rec.profileId, why: 'idle', local: true, ...ephEventFields(rec.profileId) }); // lane H: its holder row leaves the digest
-    keptNote('stop', profile(rec.profileId), { why: 'idle' }); // lane browser-resume: its logins + its last tabs are kept (the daemon is gone: the relay's list)
+    keptNote('stop', profile(rec.profileId), { why: early ? 'ended' : 'idle' }); // lane browser-resume: its logins + its last tabs are kept (the daemon is gone: the relay's list); B-346d: 'ended' reopens as 'idle' does
     reapOrphan(rec, seenBy); // verify r2 M1: the Chrome its dead daemon left behind is ended (tracked; a start waits on it)
   }
   /** VERIFY r2 M1: a NAMED profile's local record whose daemon is gone (dead, or its pid recycled) — recorded stopped,
@@ -3201,6 +3213,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // agent's verbs' alone (a Resume the user pressed never tells the fact "the agent used its browser now")
     if (resume !== 'user') {
       turnIdleSince.delete(p.id); // MULTIVIEW B-325a: a verb is activity — the release clock starts again at the next idle turn
+      p.verbBeforeAt = p.lastVerbAt || 0; // B-346d law 2: the verb before this one — the last a daemon gone before THIS verb served
       p.lastVerbAt = now(); // lane S2: a pin set before this verb has applied now (the browser fact's `pin_pending` ends here)
     }
     commit();
@@ -7593,7 +7606,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (!B.isLiveBrowser(rec) || stopping.has(rec.profileId) || starting.has(rec.profileId)) continue;
       const p = profile(rec.profileId);
       // takeover C3: an ephemeral daemon's CLI owns its idle clock — a gone
-      // pid is an idle-out (stopped, not an error); the next verb restarts it
+      // pid is stopped, not an error (an idle-out, or B-346d: ended before its idle timeout, said so); the next verb restarts it
       // (verify r2 L4: dead OR recycled — a pid that is another process now is not the daemon; M1: its browser is ended)
       if (isEph(p) && daemonGone(rec)) { markEphemeralGone(rec); continue; }
       // P4: a process on a paired machine / an external browser is never

@@ -263,13 +263,16 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
   k.handback({ browserKey: KEY_A, profileId: null, viewerId: 'v1', cause: 'explicit' });
   c = await cli(['click', '@e1'], cliEnvFor(sessA));
   ok(c.status === 0 && cmds().length === 2, '…handed back, it runs');
-  // ─ an idle-out: the daemon's pid gone ⇒ stopped (not an error), the next verb relaunches
+  // ─ a daemon gone (killed seconds after a verb): stopped (not an error), the next verb relaunches — B-346d law 2: gone long
+  //   before its idle timeout, its words say it ENDED early (why not known here), never «idled out»
   const pid0 = k.browserOf(p.id).pid;
   process.kill(pid0, 'SIGKILL');
   for (let i = 0; i < 40 && alive(pid0); i++) await new Promise((res) => setTimeout(res, 25));
   await k.tick();
   const r0 = k.browserOf(p.id);
-  ok(r0.state === 'stopped' && r0.stoppedBy === 'idle' && r0.lastError === null && /idled out/.test(r0.note || ''), 'the daemon gone ⇒ the tick records `stopped` (idle), no error', r0);
+  ok(r0.state === 'stopped' && r0.stoppedBy === 'idle' && r0.lastError === null && r0.endedEarly && r0.endedEarly.afterMs >= 0 && r0.endedEarly.afterMs < r0.endedEarly.idleMs
+    && /^the browser ended \d+ s after its last command, before its idle timeout \(\d+ min\) — why is not known here; the next command starts it again$/.test(r0.note || '') && !/idled out/.test(r0.note || ''),
+    'the daemon gone ⇒ the tick records `stopped` (stoppedBy idle, no error) — killed seconds after a verb, its words say it ENDED before its idle timeout (B-346d law 2), never «idled out»', r0);
   ok(k._reg().leases.some((l) => l.profileId === p.id), '…and the lease stays (an idle-out is not a conversation end)');
   c = await cli(['snapshot'], cliEnvFor(sessA));
   const r1 = k.browserOf(p.id);

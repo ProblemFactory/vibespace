@@ -367,5 +367,56 @@ console.log('— ④ L3: the lifecycle of a child record, as the code has it');
   ok(kids.every((h) => !k._reg().children[h]), '…and goes with the parent (reconcile §3.7: the same rule and grace as a lease)', Object.keys(k._reg().children));
 }
 
+console.log('— ⑪ B-346d law 2: a daemon gone BEFORE its idle timeout is never «idled out» — the words say what is known');
+{
+  const KB = require('../src/browser-kept.js');
+  const mute = { log() { }, warn() { }, error() { }, info() { } };
+  const CLOCK = 1795000000000, IDLE = 900000;   // the keeper's clock; a 15-minute idle timeout (the row's)
+  const KEYS = ['bk-0000c461', 'bk-0000c462', 'bk-0000c463'];
+  const mk = (i, key, { startedAgo, lastAgo, beforeAgo }) => {
+    const id = 'bp-' + (0x20000000 + i).toString(16);
+    const profile = B.newProfileRecord({ id, label: `(ephemeral) law 2 #${i}`, dir: null, ephemeral: true, owner: { kind: 'conversation', id: key }, now: CLOCK - startedAgo });
+    profile.lastVerbAt = CLOCK - lastAgo; profile.verbBeforeAt = CLOCK - beforeAgo;
+    return { profile,
+      browser: { profileId: id, state: 'ready', pid: 4190000 + i, starttime: 1, cdpUrl: null, ns: 'vs-' + key, startedAt: CLOCK - startedAgo, idleMs: IDLE },   // a pid that names no process: its daemon is gone
+      lease: { profileId: id, browserKey: key, sessionId: 'sess-law2-' + i, targetId: null, since: CLOCK - startedAgo, input: 'agent', viewers: 0, carrierLostAt: null, alias: 'ephemeral' } };
+  };
+  const E = [
+    mk(1, KEYS[0], { startedAgo: 69e3, lastAgo: 60e3, beforeAgo: 65e3 }),        // the row's own: gone 69 s after its start, against a 15-minute idle
+    mk(2, KEYS[1], { startedAgo: 7200e3, lastAgo: 1200e3, beforeAgo: 1500e3 }),  // a real idle-out: quiet 20 min (25 by the verb before)
+    mk(3, KEYS[2], { startedAgo: 7200e3, lastAgo: 1e3, beforeAgo: 1800e3 }),     // takeover C3: the verb ASKING now was stamped 1 s ago; the one before, 30 min ago
+  ];
+  const law2 = async (Km) => {
+    const dataDir = path.join(ROOT, 'law2-' + (++dirN)); fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: E.map((x) => x.profile), leases: E.map((x) => x.lease),
+      browsers: Object.fromEntries(E.map((x) => [x.profile.id, x.browser])), children: {}, told: {}, pins: {} }));
+    const k = Km.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv }), liveKeys: () => new Set(KEYS), now: () => CLOCK, install: false, log: mute, tickMs: 3600e3 });
+    try {
+      await k.tick();
+      const rows = k.ephemerals();
+      return E.map((x) => { const r = k.browserOf(x.profile.id) || {}; const row = rows.find((y) => y.profileId === x.profile.id) || {}; return { state: r.state, by: r.stoppedBy, early: r.endedEarly || null, note: r.note || '', rowEarly: row.endedEarly || null }; });
+    } finally { try { k.shutdown(); } catch { /* none */ } }
+  };
+  const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const EARLY = '    const early = quietMs != null && Number(idleFor) > 0 && quietMs < Number(idleFor);';
+  const BEFORE = '    const served = Math.max(Number(pe && pe.verbBeforeAt) || 0, Number(rec.startedAt) || 0);';
+  if (!ksrc.includes(EARLY)) ok(false, 'the anchor of the control «B-346d law 2: the early verdict» is not in the source (src/server/browser-keeper.js)');
+  if (!ksrc.includes(BEFORE)) ok(false, 'the anchor of the control «B-346d law 2: the verb before the newest» is not in the source (src/server/browser-keeper.js)');
+  const Krel = ksrc.includes(EARLY) ? M.load('src/server/browser-keeper.js', ksrc.replace(EARLY, '    const early = false; // the release: every gone daemon «idled out»'), 'law2-release') : null;
+  const Knaive = ksrc.includes(BEFORE) ? M.load('src/server/browser-keeper.js', ksrc.replace(BEFORE, '    const served = Math.max(Number(pe && pe.lastVerbAt) || 0, Number(rec.startedAt) || 0); // the newest verb (the asking one)'), 'law2-newest-verb') : null;
+  const [r, rel, naive] = await Promise.all([law2(K), Krel ? law2(Krel) : null, Knaive ? law2(Knaive) : null]);
+  ok(r.every((x) => x.state === 'stopped' && x.by === 'idle'), 'every gone daemon is recorded stopped with stoppedBy «idle» — every behaviour keyed on it unchanged (the next verb starts it again, its kept tabs reopen)', r);
+  ok(r[0].early && r[0].early.afterMs === 65000 && r[0].early.idleMs === IDLE && /^the browser ended 65 s after its last command, before its idle timeout \(15 min\) — why is not known here; the next command starts it again$/.test(r[0].note) && r[0].rowEarly && r[0].rowEarly.afterMs === 65000,
+    'B-346d law 2: a daemon gone 69 s after its start against a 15-minute idle says «ended 65 s after its last command, before its idle timeout» — never «idled out» — the cause said as unknown; the Housekeeping row carries the fact', r[0]);
+  ok(!r[1].early && /^the browser idled out \(15 min without a command\)/.test(r[1].note) && !r[1].rowEarly, 'a daemon quiet past its idle timeout still idled out (the words as before)', r[1]);
+  ok(!r[2].early && /^the browser idled out/.test(r[2].note), 'takeover C3: the verb ASKING now (stamped 1 s ago, before the judge) never makes an idle-out read «ended 1 s after» — the daemon is judged by the verb before it', r[2]);
+  if (rel) ok(/idled out/.test(rel[0].note) && !rel[0].early, 'CONTROL (the release: every gone daemon «idled out»): the row\'s own 69 s daemon reads «idled out» — RED', rel[0]);
+  if (naive) ok(naive[2].early && /ended 1 s after/.test(naive[2].note), 'CONTROL (judged by the newest verb, the asking one): a real idle-out reads «ended 1 s after its last command» — RED', naive[2]);
+  // the kept store: 'ended' is its own word, reopened as an idle-out is (D2: an automatic stop)
+  ok(KB.STOP_WHYS.includes('ended') && KB.stopWhyOf('ended') === 'ended' && KB.restoreKindFor('ended') === 'auto' && KB.restoreKindFor('ended') === KB.restoreKindFor('idle')
+    && /ended before its idle timeout \(why is not known here\)/.test(KB.stopWhyWords('ended')) && KB.stopWhyWords('idle') === 'it idled out',
+    'the kept browser\'s reason: «ended» (before its idle timeout, why unknown) — its tabs reopen by themselves as an idle-out\'s do; the agent\'s words say it', { why: KB.stopWhyOf('ended'), kind: KB.restoreKindFor('ended'), words: KB.stopWhyWords('ended') });
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
