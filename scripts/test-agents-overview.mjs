@@ -29,7 +29,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const wt = scratch('agentsov-test'), fakeHome = scratch('agentsov-home');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
-const check = (n, c) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}`); } };
+const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + e : ''}`); } };   // + the detail (the EXCLUDED package: a red names what it saw)
 try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -232,24 +232,25 @@ check('overview door lands on the Agents rail panel', st4.agentsActive);
 // Drive the REAL flow: method → name dialog → confirm → a terminal window.
 const winsBefore = await evalJs(`app.wm.windows.size`);
 await evalJs(`(() => { app._addSubscription(); return 1; })()`);
-await sleep(500);
-const dlgOk = await evalJs(`(() => {
-  // the EXCLUDED package (2026-11-17, its run alone on the test machine): a FORM dialog is hosted by the form host since it was
-  // built — a sheet or a window's root, never the old bare .dialog-overlay — so it is found by its own id (input-dialog-<n>,
-  // src/lib/utils.js _modalShell), whichever host holds it
+// the EXCLUDED package (2026-11-17, its runs alone on the test machine): a FORM dialog is hosted by the form host — a sheet or
+// a window's root, never the old bare .dialog-overlay — and it may MOUNT LATER than a fixed pause (a form queued behind
+// another, a window the host opens): the suite waits, bounded (8 s), for the dialog's own id (input-dialog-<n>, src/lib/utils.js
+// _modalShell) with an input in it, and when none comes it SAYS what the page held
+const dlgOk = await evalJs(`new Promise((res) => { const t0 = Date.now(); (function look() {
   const ovs = [...document.querySelectorAll('[id^="input-dialog-"]')];
   const ov = ovs[ovs.length - 1];
-  const inp = ov?.querySelector('input, textarea');
-  if (!inp) return false;
-  inp.value = 'Smoke Sub';
-  inp.dispatchEvent(new Event('input', { bubbles: true }));
-  // the confirm button carries the confirmText ('Continue') — click by text,
-  // never by class (the shell's button classes are not part of this contract)
-  const btn = [...ov.querySelectorAll('button')].find((b) => /continue|确定|OK/i.test(b.textContent || ''));
-  btn?.click();
-  return !!btn;
-})()`);
-check('add-subscription name dialog confirmed', dlgOk);
+  const inp = ov && ov.querySelector('input, textarea');
+  if (inp) {
+    inp.value = 'Smoke Sub';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    // the confirm button carries the confirmText ('Continue') — click by text, never by class
+    const btn = [...ov.querySelectorAll('button')].find((b) => /continue|确定|OK/i.test(b.textContent || ''));
+    if (btn) btn.click();
+    return res(btn ? true : 'an input dialog with no Continue button');
+  }
+  if (Date.now() - t0 > 8000) return res('no name dialog in 8 s — input-dialog ' + ovs.length + ' · .dialog-overlay ' + document.querySelectorAll('.dialog-overlay').length + ' · .dialog-form ' + document.querySelectorAll('.dialog-form').length + ' · windows ' + app.wm.windows.size);
+  setTimeout(look, 200); })(); })`);
+check('add-subscription name dialog confirmed', dlgOk === true, String(dlgOk));
 await sleep(2500);
 const addRes = await evalJs(`(() => ({
   wins: app.wm.windows.size,
