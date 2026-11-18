@@ -89,8 +89,7 @@ console.log('§1 the PURE rule (src/desktop-viewers.js)');
   ok(DV.paneState({ lease: null, active: 'pa', myPane: 'pa' }) === 'active' && DV.paneState({ lease: null, active: 'pb', myPane: 'pa' }) === 'blocked' && DV.paneState({ lease: null, active: null, myPane: 'pa' }) === 'active' && DV.paneState({ known: false }) === 'active', 'the client\'s reading: its pane active ⇒ active, another ⇒ blocked, nobody / not known yet ⇒ active (the server holds the picture back anyway)');
   ok(DV.paneState({ lease: { input: 'agent' }, active: 'pa', myPane: 'pa' }) === 'watch' && DV.paneState({ lease: { input: 'user', takenBy: { tag: 'tk-1' } }, myTag: 'tk-1' }) === 'active' && DV.paneState({ lease: { input: 'user', takenBy: { tag: 'tk-1' } }, myTag: 'tk-2', active: 'pa', myPane: 'pa' }) === 'blocked', 'the client\'s reading with a lease: agent ⇒ watch; the takeover tag is mine ⇒ active; somebody else\'s ⇒ blocked');
   ok(DV.viewerLabel('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36') === 'Chrome · Linux' && DV.viewerLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1') === 'Safari · iOS' && DV.viewerLabel('') === 'Client', 'a viewer\'s label is browser · OS from its User-Agent (no version, no device id)');
-  const src = read('src/desktop-viewers.js');
-  ok(!/require\(|import /.test(src.replace(/^\s*(\*|\/\/).*$/gm, '')), 'desktop-viewers.js imports nothing (PURE — bundled into the window too)');
+  // (§1 the rule imports nothing — its source pin — MOVED to the fast scripts/test-desktop-viewers-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 console.log('§2 the keeper\'s election + its broadcast');
@@ -331,18 +330,7 @@ console.log('§4 the route + the wiring pins');
   await post('/api/desktop/apps/da-r/viewers/takeover', { viewerId: 'v-b' });
   ok(takes.length === 2 && takes[1].holderAlive === undefined, 'an agent DRIVING ⇒ the engine\'s ordinary human takeover (its own holder check)');
   await new Promise((r) => srv.close(r));
-  // WIRING PINS — code at the start of a line, never text after a mid-line // (the 2.369.134 lesson)
-  const code = read('src/server/window-live-wiring.js').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).map((l) => l.replace(/\s\/\/.*$/, '')).join('\n');
-  ok(/viewerSeats: \{/.test(code) && /state: \(id, viewerId\) => \(src\(id\)\.seat \? src\(id\)\.seat\(id, viewerId\) : governed\(id\) \? DV\.viewerState\(\{ active: keeper\.activeViewer\(id\) \}, viewerId, engine\.leaseInput\(id\)\) : 'free'\)/.test(code), 'WIRING PIN: the bridge\'s seat state IS the PURE rule over the keeper\'s election and the engine\'s lease');
-  ok(/keeper\.onViewers\?\.\(\(id\) => stream\.refresh\(id\)\)/.test(code) && /m\.type === 'window-leases-updated'\) \{ try \{ streamRef\?\.refreshAll\(\)/.test(code), 'WIRING PIN: a viewer change and every lease broadcast re-apply the sockets (refresh / refreshAll)');
-  const rsrc = read('src/routes/desktop-apps.js');
-  ok(/const v = ctx\.keeper\.takeoverViewer \? ctx\.keeper\.takeoverViewer\(req\.params\.id, viewerId\) : null;/.test(rsrc), 'WIRING PIN: the lease takeover route makes the taker the active viewer too');
-  const w = read('src/lib/desktop-app-window.js');
-  ok(/blockedTitle\.textContent = /.test(w) && !/blockedTitle\.innerHTML/.test(w) && /t\('Active on another client'\)/.test(w) && /t\('Resume here'\)/.test(w), 'the overlay names the app as TEXT (a title is peer-controlled) with the two words through t()');
-  ok(/optimistic = \{ state: 'active'/.test(w) && w.indexOf('renderSeat(); // the overlay goes NOW') < w.indexOf("/viewers/takeover`"), 'Resume here flips the pane BEFORE the request (never waits for the broadcast echo)');
-  const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
-  const keys = ['Active on another client', 'Resume here', 'Make this window the active one — the other client is blocked until it resumes', 'Could not resume here'];
-  ok(keys.every((k2) => zh[k2] && ja[k2]), 'the four new chrome strings have zh + ja entries');
+  // (§4 the wiring pins + the four strings' zh / ja — MOVED to the fast scripts/test-desktop-viewers-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
@@ -508,9 +496,7 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   await sleep(100);
   ok(reads === 0 && kc.get('da-t').appTitle == null, `CONTROL: without the read the blocked pane's record has no title (${JSON.stringify(kc.get('da-t').appTitle)}) — the overlay falls to the launch label "${kc.get('da-t').label}"`);
   kc.shutdown();
-  const w = read('src/lib/desktop-app-window.js');
-  ok(/const titleText = \(\) => \(seatState\(\) === 'blocked' \? \(rec && rec\.appTitle\) \|\| appTitle : appTitle \|\| \(rec && rec\.appTitle\)\) \|\| \(rec && rec\.label\) \|\| t\('Desktop app'\);/.test(w), 'the window: a BLOCKED pane names the app by the record\'s title first (its own protocol title is the last one it saw before the cut), an active one by its live protocol title — the launch label only when neither exists');
-  ok(/sessionStorage\.getItem\(prevKey\)/.test(w) && /&prev=\$\{encodeURIComponent\(prevPane\)\}/.test(w), 'the window names its predecessor pane (`prev`, per tab, sessionStorage) on its stream url — the grace\'s reload successor');
+  // (§5 the blocked pane's title + predecessor pins — MOVED to the fast scripts/test-desktop-viewers-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 console.log('§6 (desktop A r1) a Scale ▸ relaunch CARRIES the active seat to the successor — the relaunching pane is never blocked on its own window');
@@ -549,13 +535,7 @@ console.log('§6 (desktop A r1) a Scale ▸ relaunch CARRIES the active seat to 
   const kc = K.create({ dataDir: path.join(root, 'rl-ctl'), env: () => ({}), broadcast: () => {}, viewerGraceMs: 0, log: { log() {}, warn() {} } });
   kc.viewerJoined('da-new', { viewerId: 'v-H2', pane: 'pH' }); kc.viewerJoined('da-new', { viewerId: 'v-L2', pane: 'pL' });
   ok(kc.activeViewer('da-new') === 'v-H2', 'CONTROL: without the carry the previously BLOCKED client wins the first-attach election (the verifier\'s server log)');
-  // LANE C1: ONE relaunch (src/desktop-serve.js), the hub keeper's seat carry passed as its `onSuccessor` hook
-  const ksrc = fs.readFileSync(path.join(repo, 'src/server/desktop-app-keeper.js'), 'utf8');
-  const msrc = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
-  ok(/machine\.relaunch\(id, body, \{ onSuccessor: \(nextId\) => carrySeat\(id, nextId\) \}\)/.test(ksrc)
-    && /const armSeat = typeof onSuccessor === 'function' \? onSuccessor\(next\.id\) : null;\s*\n\s*rec\.replacedBy = next\.id;/.test(msrc)
-    && /const armSeat = typeof onSuccessor === 'function' \? onSuccessor\(nextId\) : null;\s*\n\s*rec\.replacedBy = nextId;/.test(msrc)
-    && (msrc.match(/finally \{ [^}]*if \(typeof armSeat === 'function'\) armSeat\(\); \}/g) || []).length === 2, 'WIRING PIN: relaunch() carries the seat BEFORE it commits replacedBy (the other clients retarget from that broadcast) and arms the hold after the old session\'s stop, even a failed one — both arms (a browser too) of the ONE machine relaunch, the carry the hub keeper\'s onSuccessor');
+  // (§6 the relaunch's seat-carry wiring pin — MOVED to the fast scripts/test-desktop-viewers-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

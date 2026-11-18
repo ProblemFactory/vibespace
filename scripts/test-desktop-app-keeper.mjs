@@ -905,9 +905,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   }
 }
 { // (f) the bring-up is a TABLE LOOKUP: a fourth rung = one row + one recipe, driven end to end with the keeper UNCHANGED
-  const src = (fs.readFileSync(path.join(repo, 'src/server/desktop-app-keeper.js'), 'utf8') + '\n' + fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8')).replace(/^\s*(\/\/|\*).*$/gm, ''); // lane C1: the keeper = the hub half + the machine half
-  ok(!/rec\.via ===|'Xvfb\+x11vnc'|'Xvnc'|unknown bring-up/.test(src), 'the keeper source spells no rung (no `rec.via ===`, no Xvnc / Xvfb+x11vnc literal, no "unknown bring-up")');
-  ok(/display\.RECIPES\[/.test(src) && /M\.recipeFor|resolved\.recipe/.test(src), 'it looks the recipe UP by the name the PURE table gives it');
+  // ((f) the keeper spells no rung — its source pins — MOVED to the fast scripts/test-desktop-app-keeper-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // lane dc-desktop-caps: the fourth rung declares its CELLS — an rfb picture that SCALES, one picture for the whole display
   const fourth = Object.freeze({ id: 'fake-rung', label: 'fake', stream: 'rfb', scales: true, crispText: false, perWindow: false, seamless: false, satellites: false, geometry: false, ownsDisplay: true, hostedClient: false, needs: Object.freeze([Object.freeze(['Xvfb', 'x11vnc'])]), recipes: Object.freeze({ 'Xvfb+x11vnc': 'x-then-server-copy' }), wired: true });
   const display = { ...D, RECIPES: Object.freeze({ ...D.RECIPES, 'x-then-server-copy': D.RECIPES['x-then-server'] }) };
