@@ -50,8 +50,16 @@ const SELF_PATH = fileURLToPath(import.meta.url);
 const quiet = { log() {}, warn() {}, error() {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // B-518e (R29-4 / R29-5b, red on the hosted runner at ×1.38–1.40): a step waits on the FACT it needs — asked a bounded COUNT of
-// times — never a fixed sleep raced against the product's timers; the bound only ends a wait that never comes (800 asks)
-const until = async (fn, { tries = 800, step = 10 } = {}) => { for (let k = 0; k < tries; k++) { if (await fn()) return true; await sleep(step); } return Boolean(await fn()); };
+// times — never a fixed sleep raced against the product's timers; the bound only ends a wait that never comes (300 asks), and
+// once ONE wait has run out every later wait asks once (a broken road fails several waits: the child's run stays inside the
+// parent's 30 s kill, so every leg still prints its red)
+let untilSpent = false;
+const until = async (fn, { tries = 300, step = 10 } = {}) => {
+  const n = untilSpent ? 1 : tries;
+  for (let k = 0; k < n; k++) { if (await fn()) return true; await sleep(step); }
+  untilSpent = true;
+  return Boolean(await fn());
+};
 const ALLOWED_ROAD_MODES = new Set(['mediated', 'scope', null]);
 
 export function inspectLeaseRoadSource(medSrc, BM = {}) {
@@ -986,7 +994,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
         logins,
         holdersOf: () => [{ browserKey: KEY, sessionId: 's-r294', ephemeral: false }],
         leaseCountOf: () => 1,
-        liveFillMaxMs: 180,
+        liveFillMaxMs: 60_000,   // B-518e: the REAL ceiling out of reach — the scenes start it on the clock handed in (P2c)
         enableTimeoutMs: 1200,
         interceptTimeoutMs: 1200,
         now: () => clock,
@@ -1000,17 +1008,18 @@ export async function runR29LoginNails({ repoDir, ok }) {
 
         // Scene P2c (ceiling expiry + site re-injecting 6-digit OTP 10ms after wipe!)
         const rawOtp = await openCdpWs(WebSocket, relay.wsUrl, tidOtp);
-        // (B-518e: the page COUNTS its re-injection — the fact the read waits on; its ticks are bounded by a count far above any
-        // ceiling: only a run whose wipe never comes ticks that long)
+        // (B-518e: the page COUNTS its re-injection — the fact the read waits on — and re-injects only once the leg OPENS it (the
+        // control reads in the window first); its ticks are bounded by a count far above the scene: only a broken run ticks long)
         await rawOtp.evalInDom(`(() => {
           const el = document.querySelector('#otp');
           let stashed = '';
           let n = 0;
           globalThis.__r29Reinjected = 0;
+          globalThis.__r29Open = false;
           const tick = () => {
             if (++n > 3000) return;
             if (el.value) stashed = el.value;
-            else if (stashed) { setTimeout(() => { el.value = stashed; globalThis.__r29Reinjected += 1; }, 55); return; }
+            else if (stashed && globalThis.__r29Open) { setTimeout(() => { el.value = stashed; globalThis.__r29Reinjected += 1; }, 55); return; }
             setTimeout(tick, 10);
           };
           tick();
@@ -1019,12 +1028,22 @@ export async function runR29LoginNails({ repoDir, ok }) {
           { profileId: PID, browserKey: KEY },
           { target: '#otp', spec: 'item4r29.example.test#alice/otp', targetId: tidOtp, facts: { conversationKeys: [KEY] } },
         );
-        clock += 250;
-        // the ceiling fires (its 180 ms), wipes `#otp`, the site re-injects 55 ms later — the read waits for THAT re-injection
-        // (the page's own count), never a 300 ms sleep (B-518e); the agent's read then catches it
+        // THE CEILING ON THE CLOCK HANDED IN (B-518e): the clock passes it and ONE look starts the same expireLiveFillCeiling its
+        // timer would (that answer is thrown away: it is the fence while the wipe runs); the wipe LIFTS the fence and leaves its
+        // guard — waited for by those two facts, never a 300 ms sleep
+        clock += 60_001;
+        dialogs.liveFillOnTarget(PID, tidOtp);
+        const p2cLifted = await until(() => dialogs.liveFillOnTarget(PID, tidOtp) === null && dialogs.hasPostLiftGuard(PID, tidOtp));
+        const medOtp = await openCdpWs(WebSocket, grant.url, tidOtp);
+        // CONTROL — THE WINDOW the old sleep raced (the hosted red): the site has not re-injected yet, so the agent's read here is
+        // NOT refused and reads an empty box — a read that lands before the re-injection cannot be the leg's verdict
+        const readWindow = await medOtp.evalInDom('document.querySelector("#otp").value');
+        const windowOpen = !readWindow?.error && readWindow?.result?.result?.value === '';
+        await rawOtp.evalInDom('globalThis.__r29Open = true');
+        // the site re-injects 55 ms after the word — the read waits for THAT re-injection (the page's own count); the agent's
+        // read then catches it and `postLiftGuards` re-arm
         const reinjectedOf = async (raw) => Number((await raw.evalInDom('globalThis.__r29Reinjected || 0'))?.result?.result?.value || 0);
         const p2cBack = await until(async () => (await reinjectedOf(rawOtp)) >= 1);
-        const medOtp = await openCdpWs(WebSocket, grant.url, tidOtp);
         const readP2cOtp = await medOtp.evalInDom('document.querySelector("#otp").value');
         const p2cRearmed = dialogs.liveFillOnTarget(PID, tidOtp);
         medOtp.close();
@@ -1045,19 +1064,21 @@ export async function runR29LoginNails({ repoDir, ok }) {
           };
           tick();
         })()`);
-        // Extend clock window so tidPw doesn't hit ceiling before same-origin submit
+        // (the ceiling is out of reach: only the submit wipes `#pw` in this scene)
         const fPw = await dialogs.fillVaultField(
           { profileId: PID, browserKey: KEY },
           { target: '#pw', spec: 'item4r29.example.test#alice/password', targetId: tidPw, facts: { conversationKeys: [KEY] } },
         );
-        // Simulate same-origin XHR credential submit completing (`Network.requestWillBeSent` + `Network.loadingFinished`)
-        relay.emitTargetEvent(tidPw, 'Network.requestWillBeSent', {
-          requestId: 'req-p2e-1',
-          type: 'Fetch',
-          documentURL: `${ORIGIN}/login`,
-          request: { url: `${ORIGIN}/api/login`, method: 'POST', headers: { 'content-type': 'application/json' }, postData: JSON.stringify({ pw: PW_VAL }) },
+        // A same-origin credential submit, the road the dialogs WATCH (B-518e, the read: two bare Network events reached no wipe —
+        // only a request the Fetch domain paused is a credential request — so the 180 ms ceiling had been this scene's wipe):
+        // the fake kernel pauses it, the dialogs mark it, its end wipes `#pw`
+        const p2eSubmit = await fk.simulateSubmitRequest(tidPw, {
+          url: `${ORIGIN}/api/login`,
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          postData: `pw=${encodeURIComponent(PW_VAL)}`,
+          resourceType: 'Fetch',
         });
-        relay.emitTargetEvent(tidPw, 'Network.loadingFinished', { requestId: 'req-p2e-1' });
         // `wipeAfterSameOriginSubmit` wipes `#pw` -> the site re-injects 55 ms later -> the agent's read finds it and `postLiftGuards`
         // re-arm — the read waits for the re-injection itself (the page's count), never a 550 ms sleep (B-518e)
         const p2eBack = await until(async () => (await reinjectedOf(rawPw)) >= 1);
@@ -1070,8 +1091,9 @@ export async function runR29LoginNails({ repoDir, ok }) {
         relay.emitTargetEvent(tidPw, 'Page.frameNavigated', {
           frame: { id: tidPw, url: `${ORIGIN}/dashboard`, securityOrigin: ORIGIN },
         });
-        // the lift is waited for by its fact (the fence gone), never a 60 ms sleep (B-518e)
-        const navLifted = await until(() => dialogs.liveFillOnTarget(PID, tidPw) === null);
+        // the lift is waited for by ITS facts — the fence AND the guards gone (only a navigation, a closed tab or a new address end
+        // the guards; a ceiling lift keeps them) — never a 60 ms sleep (B-518e)
+        const navLifted = await until(() => dialogs.liveFillOnTarget(PID, tidPw) === null && !dialogs.hasPostLiftGuard(PID, tidPw));
         const afterNavFence = dialogs.liveFillOnTarget(PID, tidPw);
         const readAfterNav = await medPw.call('Runtime.evaluate', { expression: 'location.href', returnByValue: true }, medPw.sid);
         medPw.close();
@@ -1079,7 +1101,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
 
         ok(
           wipeDispatchesChangeAndBlur
-            && p2cBack && p2eBack && navLifted
+            && p2cLifted && windowOpen && p2cBack && p2eBack && navLifted
             && fOtp.ok === true
             && Boolean(p2cRearmed)
             && Boolean(readP2cOtp?.error && /login_fill_live/.test(String(readP2cOtp.error.message || '')))
@@ -1091,7 +1113,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
             && afterNavFence === null
             && readAfterNav?.result?.result?.value === `${ORIGIN}/dashboard`,
           'R29-4 (Item 4 value has left the page): wipeNode dispatches change+blur, postLiftGuards re-arm login_fill_live on P2c (OTP ceiling re-inject) and P2e (password submit re-inject) with 0 secret leaks, and top-frame navigation lifts cleanly',
-          { wipeDispatchesChangeAndBlur, p2cBack, p2eBack, navLifted, p2cRearmed, readP2cOtp, p2eRearmed, readP2ePw, afterNavFence, readAfterNav },
+          { wipeDispatchesChangeAndBlur, p2cLifted, windowOpen, readWindow, p2cBack, p2eSubmit, p2eBack, navLifted, p2cRearmed, readP2cOtp, p2eRearmed, readP2ePw, afterNavFence, readAfterNav },
         );
       } finally {
         try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
@@ -1460,6 +1482,15 @@ export async function runR29LoginNails({ repoDir, ok }) {
         // check) leaves the word it had just before the step, or the fence is gone — never a fixed sleep
         const holdOf = (tid) => { const f = (keeper.loginFenceStateOf(PID).fences || []).find((x) => x.targetId === tid); return f ? String(f.hold || '') : 'gone'; };
         const m2m4Before = holdOf(tidLock);
+        // CONTROL — the old 350 ms read point: a read taken at the first Runtime call after the submit begins (the relay's hook —
+        // before the wipe has decided) finds the fence HELD and the record undecided: the old verdict («held») is green on nothing
+        // there; the leg waits for the decision and judges its word
+        const prevHook = relay.state.hook;
+        let inWipe = null;
+        relay.state.hook = async (m, x) => {
+          if (!inWipe && m && /^Runtime\./.test(String(m.method || ''))) inWipe = { word: holdOf(tidLock), held: Boolean(dialogs.liveFillOnTarget(PID, tidLock)) };
+          return typeof prevHook === 'function' ? prevHook(m, x) : undefined;
+        };
         // Trigger `M4` (`wipeAfterSameOriginSubmit` while locked with `sigs.length === 2` & `svs.length === 1`):
         await fk.simulateSubmitRequest(tidLock, {
           url: `${ORIGIN}/api/login`,
@@ -1469,7 +1500,9 @@ export async function runR29LoginNails({ repoDir, ok }) {
           resourceType: 'Fetch',
         });
         const m2m4Decided = m2m4Before !== 'gone' && await until(() => holdOf(tidLock) !== m2m4Before);
+        relay.state.hook = prevHook;
         const m2m4After = holdOf(tidLock);
+        const m2m4Window = Boolean(inWipe && inWipe.word === m2m4Before && inWipe.held === true);
         const m2m4Held = Boolean(dialogs.liveFillOnTarget(PID, tidLock));
 
         // Dedicated `M5` probe (`expireLiveFillCeiling` timer firing while in-memory targets are missing):
@@ -1480,7 +1513,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
           logins,
           holdersOf: () => [{ browserKey: KEY, sessionId: 's-5b', ephemeral: false }],
           leaseCountOf: () => 1,
-          liveFillMaxMs: 140,
+          liveFillMaxMs: 60_000,   // B-518e: the REAL timer out of reach — the ceiling starts on the clock handed in
           enableTimeoutMs: 1200,
           interceptTimeoutMs: 1200,
           now: () => clock,
@@ -1501,9 +1534,11 @@ export async function runR29LoginNails({ repoDir, ok }) {
           LF.clearFilledSecretsForTarget(tidLock);
           vault.lock();
           m5Before = holdOf(tidLock);
-          clock += 200;
-          // `liveFillTimer` fires `expireLiveFillCeiling` while in-memory targets are missing! — waited for by the record leaving
-          // its word (read from the keeper: no check of the dialogs starts the ceiling instead of its timer), never a 240 ms sleep
+          clock += 60_001;
+          // the ceiling's `expireLiveFillCeiling` runs while in-memory targets are missing! — started on the clock handed in by ONE
+          // look (the same function its timer calls; that answer is thrown away), and waited for by the record leaving its word
+          // (read from the keeper), never a 240 ms sleep against a 140 ms timer that began before the inserts
+          dialogsM5.liveFillOnTarget(PID, tidLock);
           m5Decided = m5Before !== 'gone' && await until(() => holdOf(tidLock) !== m5Before);
           m5After = holdOf(tidLock);
           m5Held = Boolean(dialogsM5.liveFillOnTarget(PID, tidLock));
@@ -1516,9 +1551,9 @@ export async function runR29LoginNails({ repoDir, ok }) {
             && resM10.ok === false && m10StillFenced && m10PendingKept
             && resM11.ok === false && resM11.code === 'login_phishing' && m11FenceCleared
             && fLockAlice.ok === true && fLockBob.ok === true
-            && m2m4Decided && m2m4Held && m5Decided && m5Held,
+            && m2m4Window && m2m4Decided && m2m4After === 'unknown_typed' && m2m4Held && m5Decided && m5After === 'unknown_typed' && m5Held,
           'R29-5b (Reader B in-memory mutants M2, M4, M5, M8, M10, M11): missing in-memory targets hold across submit/ceiling (M2, M4, M5), stale-rev rollback preserves newer pending (M8), unconfirmed-empty post-insert error keeps fence+pending (M10), and pre-insert abort clears armed fence (M11)',
-          { genEntryAfterM8, resM10, m10StillFenced, m10PendingKept, resM11, m11FenceCleared, m2m4Before, m2m4After, m2m4Decided, m2m4Held, m5Before, m5After, m5Decided, m5Held },
+          { genEntryAfterM8, resM10, m10StillFenced, m10PendingKept, resM11, m11FenceCleared, m2m4Before, inWipe, m2m4After, m2m4Decided, m2m4Held, m5Before, m5After, m5Decided, m5Held },
         );
       } finally {
         try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
