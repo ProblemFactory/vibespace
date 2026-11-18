@@ -148,6 +148,7 @@ const RECORD_FILE = 'browser-engines.json';
 const VERSION_MS = 5000;
 const STALL_MS = 120000;
 const ANSWER_MS = 10000;
+const LATE_LOOK_MS = 50;      // B-4d35 r3: an ask whose ONE bound is spent only LOOKS at a put-back — one that finds nothing aside ends within it
 const LAND_WAIT_MS = 30000;    // lane fleet-plugin-catalog r2 (N3) / r3 (N2): a start's WHOLE ask (the waiting kernel's landing + its hold), a measure, a put-back waits at most this — ONCE — for a landing in progress (a landing never waits for a start)
 const LAUNCH_HOLD_MS = 120000; // … a start's hold ends at its spawn — or after this, whatever happens to the start
 const MANIFEST_MAX = 256 * 1024;
@@ -652,7 +653,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     // B-4d35: a PUT-BACK in flight OUTSIDE a landing (restoreAside asked by a download's first step, a measure or the boot) renames
     // the place too — waited for within the ask's ONE bound, refused BY NAME past it. Before: no wait at all (a start went on beside
     // the emptied place; a later measure / boot / download took its hold, then awaited the shared rename unbounded)
-    if (!g.landing && restoring.has(sid) && !(await waitPutBack(sid, restoring.get(sid), freshAsk(a)))) throw named('engine_kernel_landing', putBackWords(sid));
+    if (!g.landing && restoring.has(sid) && !(await waitPutBack(sid, restoring.get(sid), a))) throw named('engine_kernel_landing', putBackWords(sid));
     // r6 (n1): a hold TAKEN (and maybe dropped) while a landing's in-use scan runs counts; (n5) whose it is, for the words
     g.holds++; g.taken++; g.lastAsker = a.asker; g.askers.set(a.asker, (g.askers.get(a.asker) || 0) + 1);
     let done = false, t = null;
@@ -660,18 +661,17 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     if (leaseMs > 0) { t = setTimeout(release, leaseMs); if (t.unref) t.unref(); }
     return release;
   }
-  /** B-4d35 (the lane's adversarial read): an ask that already spent its bound on a landing that only deletes the previous kernel (r5:
-   *  it goes on) gets ONE fresh bound for a put-back — never «being put back» said at once for a put-back that finds nothing aside;
-   *  never more than two bounds in all. */
-  const freshAsk = (a) => (a && a.late ? askOf(a.asker) : a);
   /** B-4d35: the words of an ask that stepped aside from a put-back past its bound (the rename runs on; the record follows it). */
   const putBackWords = (sid) => `the kernel is being put back in its place — try again in a moment (${who(sid)}'s previous kernel has been moving back for more than ${secs(landWaitMs)} s)`;
   /** B-4d35: an ask waits for a PUT-BACK outside a landing (`p`, restoreAside's shared promise) — within its ONE bound (askOf), said
    *  once per ask in the journal; never counted as «waiting for the new kernel to land» on the card (it is the previous kernel
    *  moving back). → true when `p` ended in time. */
   async function waitPutBack(sid, p, ask) {
-    if (ask.late) return false;
     if (await within(p, 0)) return true; // already over — nothing to wait for, nothing to say
+    // round 3 (the second adversarial read): an ask whose ONE bound is spent (it waited out a landing that only deletes — r5: it goes
+    // on) only LOOKS — a put-back that finds nothing aside, or a kernel in its place, ends within LATE_LOOK_MS; one still renaming is
+    // refused by name. Never a second bound (round 2's fresh one let an ask wait twice and the «within 30 seconds» was not true)
+    if (ask.late) return within(p, LATE_LOOK_MS);
     if (!ask.saidBack) { ask.saidBack = true; log.log?.(`[browser] ${who(sid)}: ${ask.asker} waits for its previous kernel to be put back in its place (≤ ${secs(landWaitMs)} s)`); }
     const ended = await within(p, ask.until - Date.now());
     if (!ended) { ask.late = true; log.warn?.(`[browser] ${who(sid)}'s previous kernel is still being put back after ${secs(landWaitMs)} s — ${ask.asker} waits no longer (the put-back runs on)`); }
@@ -681,7 +681,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
    *  (engine_kernel_landing — never a failure of the asker: no failure record, no For-you item); `ask` null ⇒ as before. */
   async function putBackWithin(sid, plan, ask) {
     const p = restoreAside(sid, plan);
-    if (!ask || await waitPutBack(sid, p, freshAsk(ask))) return p;
+    if (!ask || await waitPutBack(sid, p, ask)) return p;
     throw named('engine_kernel_landing', putBackWords(sid));
   }
   /** Round 2: ONE writer of the place and of the waiting kernel (`rec.next`, `.next-<tag>`) per engine at a time — a landing, a

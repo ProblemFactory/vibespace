@@ -1556,8 +1556,9 @@ async function putBackOutsideScene(EDM, { first = 'measure', next = false, after
 }
 await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s bound', async () => {
   const cut = (anchor, to, what) => swap(EDsrc, anchor, to, what);
-  const holdAnchor = "    if (!g.landing && restoring.has(sid) && !(await waitPutBack(sid, restoring.get(sid), freshAsk(a)))) throw named('engine_kernel_landing', putBackWords(sid));\n";
-  const ownAnchor = "    if (!ask || await waitPutBack(sid, p, freshAsk(ask))) return p;\n    throw named('engine_kernel_landing', putBackWords(sid));\n";
+  const holdAnchor = "    if (!g.landing && restoring.has(sid) && !(await waitPutBack(sid, restoring.get(sid), a))) throw named('engine_kernel_landing', putBackWords(sid));\n";
+  const ownAnchor = "    if (!ask || await waitPutBack(sid, p, ask)) return p;\n    throw named('engine_kernel_landing', putBackWords(sid));\n";
+  const lookAnchor = "    if (ask.late) return within(p, LATE_LOOK_MS);\n";
   const busyAnchor = "    if (restoring.has(sid)) return 'its previous kernel is being put back in its place';\n";
   const bootAnchor = "      try { const back = await putBackWithin(id, plan, askB);";
   const instAnchor = "      let back0 = null; try { back0 = await putBackWithin(sid, plan, ask0); } finally { rel0(); }";
@@ -1591,6 +1592,24 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
   ok(noBusy.s && noBusy.s.hung === true, 'CONTROL (B-4d35, a landing allowed beside a put-back): with a waiting kernel the START hangs — its landNext lands and awaits the shared rename', noBusy.s);
   ok(bootOpen.a && bootOpen.a.hung === true, 'CONTROL (B-4d35, the boot\'s own put-back unbounded): the boot HANGS on its rename', bootOpen.a);
   ok(instOpen.a && instOpen.a.hung === true, 'CONTROL (B-4d35, the download\'s own put-back unbounded): the download HANGS on its rename', instOpen.a);
+  // round 3 (the second adversarial read): an ask whose ONE bound is spent — a forced measure that waited out ㉓'s landing while it only
+  // DELETES the previous kernel (r5: it goes on) — only LOOKS at its put-back: there is a kernel in its place, so the put-back ends at
+  // once and the measure measures; never «being put back», never a second bound
+  const lateMeasure = async (EDM) => {
+    const BOUND = 100, S = {}; let rmIn = false, rmGo = null; const rmGate = new Promise((r) => { rmGo = r; });
+    const io = { rm: async (f, o) => { if (f.endsWith('/.removing-linux-x64') && S.L && S.L.receipt() === KSHA.k3) { rmIn = true; await rmGate; } return fs.promises.rm(f, o); } };
+    const L = light(snapC, { EDM, io, opts: { landWaitMs: BOUND } }); S.L = L;
+    const A = L.ED.landNext(EID);
+    const inCleanup = !!(await until(() => rmIn, 2000));
+    const t0 = Date.now();
+    const m = await Promise.race([L.ED.measure(EID, { force: true }).then((r) => ({ ok: r && r.ok, code: r && r.code, ms: Date.now() - t0 }), (e) => ({ threw: e && e.code })), sleep(LAND_WAIT_MS / 30).then(() => ({ hung: true }))]);
+    rmGo(); const a = await A;
+    return { inCleanup, m, a, said: L.journal.filter((l) => /is still being put back after/.test(l)).length };
+  };
+  const [lm, lmBad] = await Promise.all([lateMeasure(undefined), lateMeasure(load(cut(lookAnchor, '    if (ask.late) return false;\n', 'a late ask only looks'), 'b4d35-late-refused'))]);
+  ok(lm.inCleanup && lm.m && lm.m.ok === true && !lm.m.code && lm.m.ms < 1000 && !lm.said && lm.a === true,
+    'B-4d35 round 3: a forced measure whose ONE bound passed while the landing only deleted the previous kernel goes on and MEASURES — its put-back only looked (a kernel in its place) — never «being put back», never a second bound', lm);
+  ok(lmBad.m && lmBad.m.code === 'engine_kernel_landing', 'CONTROL (B-4d35 round 3, a late ask refused at once): that measure is answered «being put back» though nothing was aside', lmBad.m);
   // the keeper's first-use road reads the step-aside by its name (never «kernel missing» + a For-you item)
   const ksrc = read('src/server/browser-keeper.js');
   ok(ksrc.includes("if (refused && refused.code === 'engine_kernel_landing') throw namedError('engine_kernel_landing',") && read('src/routes/browser.js').includes('engine_kernel_landing: 409'),
