@@ -1,0 +1,298 @@
+{
+ "about": "B-18eb: the 2.369.410 push's mirror run 44368748819, attempt 2 a re-run of its failed jobs (heavy 3/7 and the heavy gate). Read by hand at the push and trimmed: each job's id, name, attempt, status, conclusion, start and end (the suite builds check_run_url from the id: an Actions job IS its check run). annotations: by check-run id — attempt 1's six shards that attempt 2 copied, attempt 2's re-run of heavy 3/7, and the copy of heavy 4/7 in attempt 2 as read (none); the other copies were not read and count as the same. The heavy 3/7 read names no check run; both of its attempts' logs print the same «(0):» line, so it is kept under the re-run.",
+ "runId": 44368748819,
+ "attempts": {
+  "1": {
+   "total_count": 10,
+   "jobs": [
+    {
+     "id": 135029478439,
+     "name": "fast 2/2",
+     "run_attempt": 1,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:27:57Z"
+    },
+    {
+     "id": 135029478886,
+     "name": "heavy 1/7",
+     "run_attempt": 1,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:56:43Z"
+    },
+    {
+     "id": 135029478906,
+     "name": "heavy 7/7",
+     "run_attempt": 1,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:50:35Z"
+    },
+    {
+     "id": 135029478952,
+     "name": "heavy 5/7",
+     "run_attempt": 1,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:54:54Z"
+    },
+    {
+     "id": 135029478976,
+     "name": "fast 1/2",
+     "run_attempt": 1,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:28:36Z"
+    },
+    {
+     "id": 135029479027,
+     "name": "heavy 4/7",
+     "run_attempt": 1,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:53:30Z"
+    },
+    {
+     "id": 135029479098,
+     "name": "heavy 6/7",
+     "run_attempt": 1,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:56:02Z"
+    },
+    {
+     "id": 135029479249,
+     "name": "heavy 2/7",
+     "run_attempt": 1,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:54:20Z"
+    },
+    {
+     "id": 135029479285,
+     "name": "heavy 3/7",
+     "run_attempt": 1,
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:57:38Z"
+    },
+    {
+     "id": 135052850730,
+     "name": "heavy",
+     "run_attempt": 1,
+     "status": "completed",
+     "conclusion": "failure",
+     "started_at": "2026-11-18T18:57:41Z",
+     "completed_at": "2026-11-18T18:57:46Z"
+    }
+   ]
+  },
+  "2": {
+   "total_count": 10,
+   "jobs": [
+    {
+     "id": 135056987475,
+     "name": "heavy 3/7",
+     "run_attempt": 2,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T19:04:13Z",
+     "completed_at": "2026-11-18T19:40:44Z"
+    },
+    {
+     "id": 135056987529,
+     "name": "fast 1/2",
+     "run_attempt": 2,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:28:36Z"
+    },
+    {
+     "id": 135056988760,
+     "name": "fast 2/2",
+     "run_attempt": 2,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:27:57Z"
+    },
+    {
+     "id": 135056989057,
+     "name": "heavy 4/7",
+     "run_attempt": 2,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:53:30Z"
+    },
+    {
+     "id": 135056989369,
+     "name": "heavy 5/7",
+     "run_attempt": 2,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:54:54Z"
+    },
+    {
+     "id": 135056989496,
+     "name": "heavy 6/7",
+     "run_attempt": 2,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:56:02Z"
+    },
+    {
+     "id": 135056989849,
+     "name": "heavy 7/7",
+     "run_attempt": 2,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:50:35Z"
+    },
+    {
+     "id": 135057082631,
+     "name": "heavy 1/7",
+     "run_attempt": 2,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:56:43Z"
+    },
+    {
+     "id": 135057093349,
+     "name": "heavy 2/7",
+     "run_attempt": 2,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T18:21:10Z",
+     "completed_at": "2026-11-18T18:54:20Z"
+    },
+    {
+     "id": 135079151224,
+     "name": "heavy",
+     "run_attempt": 2,
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-11-18T19:40:47Z",
+     "completed_at": "2026-11-18T19:40:52Z"
+    }
+   ]
+  }
+ },
+ "annotations": {
+  "135029478886": [
+   {
+    "annotation_level": "warning",
+    "title": "",
+    "message": "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/cache@v4, actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/"
+   },
+   {
+    "annotation_level": "notice",
+    "title": "ci-heavy-self-skipped",
+    "message": "heavy 1/7 (0):"
+   }
+  ],
+  "135029479249": [
+   {
+    "annotation_level": "warning",
+    "title": "",
+    "message": "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/cache@v4, actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/"
+   },
+   {
+    "annotation_level": "notice",
+    "title": "ci-heavy-self-skipped",
+    "message": "heavy 2/7 (0):"
+   },
+   {
+    "annotation_level": "warning",
+    "title": "",
+    "message": "ci-apt: apt-get … update passed its 40 s bound (a stalled mirror)"
+   }
+  ],
+  "135029479027": [
+   {
+    "annotation_level": "warning",
+    "title": "",
+    "message": "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/cache@v4, actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/"
+   },
+   {
+    "annotation_level": "notice",
+    "title": "ci-heavy-self-skipped",
+    "message": "heavy 4/7 (0):"
+   }
+  ],
+  "135029478952": [
+   {
+    "annotation_level": "warning",
+    "title": "",
+    "message": "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/cache@v4, actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/"
+   },
+   {
+    "annotation_level": "notice",
+    "title": "ci-heavy-self-skipped",
+    "message": "heavy 5/7 (0):"
+   },
+   {
+    "annotation_level": "warning",
+    "title": "",
+    "message": "ci-apt: apt-get … update passed its 40 s bound (a stalled mirror)"
+   }
+  ],
+  "135029479098": [
+   {
+    "annotation_level": "warning",
+    "title": "",
+    "message": "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/cache@v4, actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/"
+   },
+   {
+    "annotation_level": "notice",
+    "title": "ci-heavy-self-skipped",
+    "message": "heavy 6/7 (1): test-graduate-dial"
+   }
+  ],
+  "135029478906": [
+   {
+    "annotation_level": "warning",
+    "title": "",
+    "message": "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/cache@v4, actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/"
+   },
+   {
+    "annotation_level": "notice",
+    "title": "ci-heavy-self-skipped",
+    "message": "heavy 7/7 (1): test-vault-run-wire"
+   },
+   {
+    "annotation_level": "warning",
+    "title": "",
+    "message": "ci-apt: apt-get … update passed its 40 s bound (a stalled mirror)"
+   }
+  ],
+  "135056987475": [
+   {
+    "annotation_level": "warning",
+    "title": "",
+    "message": "Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/cache@v4, actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/"
+   },
+   {
+    "annotation_level": "notice",
+    "title": "ci-heavy-self-skipped",
+    "message": "heavy 3/7 (0):"
+   }
+  ],
+  "135056989057": []
+ }
+}

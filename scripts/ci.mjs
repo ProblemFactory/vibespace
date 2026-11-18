@@ -1006,7 +1006,7 @@ export const SUITES = [
   { name: 'test-ci-gate-reaper', tier: 'fast', why: 'LAW architecture · 1.5 s — the gate\'s own gate, part 5/7: §9 the scratch-orphan reaper, §9b the singleton Desktop\'s X server, §9c a scratch root off the arguments, §9d the directory sweep, §10 the launcher once for real (a stub repository)' },
   { name: 'test-ci-gate-hang', tier: 'fast', why: 'LAW architecture · 5.2 s — the gate\'s own gate, part 6/7: §11 a hang leaves a report (five planted suites under a 3 s budget, at once)' },
   { name: 'test-ci-gate-watchdog', tier: 'fast', why: 'LAW architecture · 4.1 s — the gate\'s own gate, part 7/7: §12 a suite\'s own clock fires before the gate\'s and names its leg (two planted suites under a 4 s row, at once)' },
-  { name: 'test-ci-heavy-verdict', tier: 'fast', why: 'LAW architecture · 4.6 s (B-a2c9, restated 2026-11-18 in the box\'s scale: 5.46 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 3.8–5.4 s); read on a run with legs red that this stack cures — the time of a whole run; was 3.6 s) (measured under the box\'s thermal cap, 2026-11-10: 3.64 s alone — not restated at full speed yet) — B-e381, lane ci-heavy-verdict r4: the CI mirror\'s verified run written as the HOSTED half\'s listed green (never full, the list read from the commit), the union reader (a red clears when every failed suite has run green since), LAW A (a marker that cannot be read never opens the gate; the writer, status and already-green see it too), LAW B (a list-scoped `absent` covers nothing; a FULL green clears), pruning by commits, five mutant controls, the parity over production\'s 30 markers; every refusal writes nothing' },
+  { name: 'test-ci-heavy-verdict', tier: 'fast', why: 'LAW architecture · 4.7 s (B-18eb, restated 2026-11-18: + the re-run attempt legs and their §5 mutants — alone on the test machine, alternated with the release\'s own suite file, 6 pairs over both zones: 7.47 s against 7.27 s, the medians — ×1.03 over 4.6 s) (B-a2c9, restated 2026-11-18 in the box\'s scale: 5.46 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 3.8–5.4 s); read on a run with legs red that this stack cures — the time of a whole run; was 3.6 s) (measured under the box\'s thermal cap, 2026-11-10: 3.64 s alone — not restated at full speed yet) — B-e381, lane ci-heavy-verdict r4: the CI mirror\'s verified run written as the HOSTED half\'s listed green (never full, the list read from the commit), the union reader (a red clears when every failed suite has run green since), LAW A (a marker that cannot be read never opens the gate; the writer, status and already-green see it too), LAW B (a list-scoped `absent` covers nothing; a FULL green clears), pruning by commits, five mutant controls, the parity over production\'s 30 markers; every refusal writes nothing' },
   { name: 'test-ci-heavy-queue', tier: 'fast', why: 'LAW architecture · 8.9 s (measured under the box\'s thermal cap, 2026-11-10: 8.61–8.87 s alone — not restated at full speed yet) — lane ci-heavy-queue (+ THE BUILD STAMP: a claim does not rebuild a tree built at its commit; a red build writes no verdict): the machine\'s heavy lock serves its waiters oldest first (a ticket each in <lock>.q, held only while its waiter is alive AND polling — dead, recycled and silent tickets reaped, the head at 200 ms), the wait line names the holder uncut, ONE door (only ci.mjs names the lock); real processes, three mutant controls' },
   { name: 'test-usage-ledger-perf', tier: 'fast', why: 'in-process · 4.7 s (restated 2026-10-20, was 551 ms)' }, // inc-mtox23xw: the estimator's per-pair ledger walk is O(log n + k) + interval-memoized (it blocked the loop 10-59s); parity vs brute force + timing pins
   { name: 'test-ledger-boot-load', tier: 'fast', why: 'in-process · 4.4 s measured in a depth-1 clone, three runs 4.37–4.42 s at a box load of ~5 (ledger-boot-load, 2.369.397: a 9 876-row real-shape ledger, 16 worker loads incl. 7 planted failures, three planted copies; the failing load\'s road in test-ledger-boot-fail)' }, // THE LEDGER'S FIRST LOAD OFF THE LOOP: «loading» until the worker's cache is swapped in; rows once; a dead worker said once, never a sync fallback
@@ -3794,7 +3794,7 @@ export function heavyBlocker({ dir, head, repoRoot = repo, resolveShort, peelFul
 // every `heavy i/n` the workflow AT THE SHA defines + the `heavy` gate are each
 // success (every job of a needed name; a missing, skipped or duplicate-failed
 // one refuses). gh absent / unauthenticated / 403 / timing out = «cannot
-// verify»: bounded GETs — the run, its jobs, and one annotations read per heavy shard job (B-479e) — no retry, never on a timer. The list is read from
+// verify»: bounded GETs — the run, its jobs, each EARLIER attempt's jobs (B-18eb) and one annotations read per heavy shard job (B-479e) — no retry, never on a timer. The list is read from
 // the COMMIT (its ci.mjs = the running one, byte for byte; its suite sources by
 // git cat-file). «Verified, never typed» is the WRITER's promise; the reader
 // opens the gate only on a marker it can read as a record of its kind (LAW A).
@@ -3928,19 +3928,43 @@ export function heavyVerdict({ sha, runId, repoRoot = repo, dir, ghJson = ghApiJ
   // B-479e (1): a hosted suite that SKIPPED ITSELF on the runner (exit 0, its last line «SKIP…») ran nothing — every heavy shard job's
   // annotations are read (one bounded GET each) and its self-skipped names leave the list; a job whose annotations cannot be read,
   // or carry no «ci-heavy-self-skipped» note, is a shard this writer cannot verify: it refuses and writes nothing
-  const skipped = new Set();
+  // B-18eb (the 2.369.410 push, run 44368748819): a RE-RUN of failed jobs makes a new attempt in which every job that was NOT re-run is
+  // a COPY — a new id, the original's start and end, and a check run with NO annotation of its own (measured: the copy of heavy 4/7
+  // had none, its original in attempt 1 had the note). So each heavy shard job is read at the attempt in which it really RAN: the
+  // earliest EARLIER attempt whose job of that name concluded success with the copy's own start and end (each earlier attempt's job
+  // list is read once; one that cannot be read, or that spans more than one page, refuses); none ⇒ the job itself (it ran in this
+  // attempt). A copy whose original is not found is read as itself — no note, so it still refuses. The marker says which attempt
+  // vouches for which shard.
+  const attempt = Number(r.json.run_attempt) || 1, earlier = [];
+  for (let k = 1; k < attempt; k++) {
+    const ja = ghJson(`repos/${slug}/actions/runs/${runId}/attempts/${k}/jobs?per_page=100`);
+    if (!ja || ja.err || !ja.json || !Array.isArray(ja.json.jobs)) return no(`cannot verify: attempt ${k}'s jobs could not be read (${(ja && ja.err) || 'gh gave nothing'})`);
+    if (Number(ja.json.total_count) > ja.json.jobs.length) return no(`cannot verify: attempt ${k} lists ${ja.json.total_count} jobs, more than one page`);
+    earlier.push({ k, jobs: ja.json.jobs });
+  }
+  const ranIn = (job) => {
+    for (const { k, jobs } of earlier) {
+      const o = jobs.find((x) => x && x.name === job.name && x.conclusion === 'success' && !!x.started_at && x.started_at === job.started_at && !!x.completed_at && x.completed_at === job.completed_at);
+      if (o) return { attempt: k, job: o };
+    }
+    return { attempt, job };
+  };
+  const skipped = new Set(), vouchedBy = {};
   for (const job of (j.json.jobs || []).filter((x) => x && /^heavy \d+\/\d+$/.test(x.name || ''))) {
-    const cr = (/\/check-runs\/(\d+)$/.exec(String(job.check_run_url || '')) || [])[1] || job.id;   // an Actions job IS a check run
+    const { attempt: at, job: src } = ranIn(job);
+    const cr = (/\/check-runs\/(\d+)$/.exec(String(src.check_run_url || '')) || [])[1] || src.id;   // an Actions job IS a check run
     const a = ghJson(`repos/${slug}/check-runs/${cr}/annotations?per_page=100`);
-    if (!a || a.err || a.json === undefined) return no(`cannot verify ${job.name}'s suites: its annotations could not be read (${(a && a.err) || 'gh gave nothing'})`);
+    const where = `read at attempt ${at}${at === attempt ? '' : ', where it ran'}`;
+    if (!a || a.err || a.json === undefined) return no(`cannot verify ${job.name}'s suites (${where}): its annotations could not be read (${(a && a.err) || 'gh gave nothing'})`);
     const sk = selfSkippedInNotes(a.json, job.name);
-    if (sk.err) return no(`cannot verify ${job.name}'s suites: ${sk.err}`);
+    if (sk.err) return no(`cannot verify ${job.name}'s suites (${where}): ${sk.err}`);
     for (const n of sk.names) skipped.add(n);
+    vouchedBy[job.name] = { attempt: at, job: Number(src.id) || null };
   }
   const list = names.filter((n) => !skipped.has(n)).sort();
   if (!list.length) return no('every hosted heavy suite skipped itself on the runner — nothing ran to vouch for');
   const rec = { sha: full, result: 'green', failed: [], scope: 'hosted', source: 'mirror', hosts: 'hosted', selected: list, partial: list, ghRun: Number(runId), attempt: r.json.run_attempt,
-    skippedOnRunner: skipped.size ? [...skipped].sort() : undefined,
+    skippedOnRunner: skipped.size ? [...skipped].sort() : undefined, vouchedBy,
     jobs: v.jobs, repo: slug, workflow: MIRROR_WORKFLOW, verifiedAt: now, startedAt: Date.parse(r.json.run_started_at) || now, endedAt: now, by };
   const file = path.join(d, `${full}.mirror.green`);
   try { fs.mkdirSync(d, { recursive: true }); } catch (e) { return no(`the markers path ${d} cannot be used: ${e.code || e.message}`); } // only now: a refusal leaves no directory behind
@@ -5297,7 +5321,10 @@ function main(argv) {
     const vSha = str('heavy-verdict') || argv[argv.indexOf('--heavy-verdict') + 1] || '';
     const vRun = str('gh-run') || (argv.includes('--gh-run') ? argv[argv.indexOf('--gh-run') + 1] || '' : '');
     const v = heavyVerdict({ sha: vSha, runId: vRun, dir });
-    if (v.ok) { console.log(`✓ heavy verdict: CI mirror run ${vRun} (attempt ${v.rec.attempt}) is green for ${v.rec.sha} — the HOSTED half: ${v.rec.selected.length} heavy suites (${v.rec.jobs.join(', ')}) — wrote ${v.file}`); return exitFlushed(0); }
+    if (v.ok) {
+      const ranEarlier = Object.entries(v.rec.vouchedBy || {}).filter(([, w]) => w.attempt !== v.rec.attempt).map(([n, w]) => `${n} at attempt ${w.attempt}`); // B-18eb
+      console.log(`✓ heavy verdict: CI mirror run ${vRun} (attempt ${v.rec.attempt}) is green for ${v.rec.sha} — the HOSTED half: ${v.rec.selected.length} heavy suites (${v.rec.jobs.join(', ')})${ranEarlier.length ? ` — copies read where they ran: ${ranEarlier.join(', ')}` : ''} — wrote ${v.file}`); return exitFlushed(0);
+    }
     console.error(`✗ heavy verdict REFUSED for ${vSha || '(no sha)'}: ${v.why} — nothing written`); return exitFlushed(3);
   }
   if (arg('heavy-launch') !== undefined) return exitFlushed(heavyLaunch(str('heavy-launch') || argv[argv.indexOf('--heavy-launch') + 1], { dir, only, lock, lockWaitMs, range: rangeArg || undefined }));
