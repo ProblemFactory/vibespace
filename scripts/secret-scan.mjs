@@ -273,7 +273,7 @@ export function formatFindings(findings) {
   for (const f of findings.slice(0, 40)) lines.push(`  \x1b[33m${f.rule}\x1b[0m ${f.file}:${f.line}${f.commit ? ` (commit ${f.commit.slice(0, 9)})` : ''}  ${f.d} → ${f.snippet}`);
   if (findings.length > 40) lines.push(`  … and ${findings.length - 40} more`);
   if (findings.some((f) => f.partner)) lines.push(`\nA \x1b[33mpartner\x1b[0m shape is what GitHub push protection refuses (GH013), and ${ALLOW_FILE} cannot allow it — ${FIXTURE_RULE}.`);
-  if (findings.some((f) => !f.partner)) lines.push(`\nIf a non-partner match is a false positive, add a line to \x1b[36m${ALLOW_FILE}\x1b[0m (regex or literal) that matches the finding itself.`);
+  if (findings.some((f) => !f.partner)) lines.push(`\nIf a non-partner match is a false positive, change the text so it no longer matches (${FIXTURE_RULE}). A row added to \x1b[36m${ALLOW_FILE}\x1b[0m in a pick never counts when the release is pushed: the push reads the PUSHING checkout's file (B-ecc4). A new row is the owner's to add.`);
   return lines.join('\n') + '\n';
 }
 

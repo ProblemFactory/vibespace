@@ -26,6 +26,11 @@
 //   ⑥ THE THREE CALLERS census: the pre-push hook (--range, before the bypass and every tier), scripts/ci.mjs's fast
 //      tier (--tree) and the Actions secret-scan workflow (--tree) run scripts/secret-scan.mjs, none carries a
 //      pattern of its own; the table's rows pinned by id, every `re:` inside the one table
+//   ⑦ B-ecc4 — THE PUSHING CHECKOUT'S ALLOW FILE JUDGES A PUSH: the hook runs `node scripts/secret-scan.mjs` in the
+//      checkout that pushes, so the allow rows are its WORKING TREE's — for a release pushed from production, the running
+//      release's, never the range's. The production-cwd case (a row added inside the range counts in the lane's own
+//      checkout and NOT in a checkout at the release), and therefore the pin: the tree's allow file gains no row over the
+//      77 it held at 2.369.407 (by hash; a dead row may go) — a text that needs a row is fixed instead
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -272,6 +277,39 @@ ok(JSON.stringify(S.RULES.filter((r) => !r.partner).map((r) => r.id)) === JSON.s
 const tableAt = scanSrc.indexOf('export const RULES = ['), tableEnd = scanSrc.indexOf('\n];\n', tableAt);
 const reAt = [...scanSrc.matchAll(/\bre: \//g)].map((m) => m.index);
 ok(tableAt > 0 && reAt.length === S.RULES.length && reAt.every((i) => i > tableAt && i < tableEnd), `every \`re:\` in scripts/secret-scan.mjs sits inside the one table (${reAt.length} rows)`);
+
+console.log('\n⑦ B-ecc4: the PUSHING checkout\'s allow file judges what a push publishes (the production-cwd case) — so a pick adds no row');
+{
+  const pc = path.join(ROOT, 'pushing');
+  fs.mkdirSync(pc, { recursive: true });
+  git(pc, ['init', '-q']);
+  const P0 = commit(pc, { 'scratch.txt': 'scratch\n', 'scripts/secret-scan.mjs': fs.readFileSync(SCAN, 'utf8'), '.repo-guard-allow': fs.readFileSync(path.join(REPO, '.repo-guard-allow'), 'utf8') }, 'P0: the release');
+  const VAL = rnd(ALNUM, 24), GENLINE = `const password = '${VAL}';`;   // a GENERIC shape (an allow row may silence it); built at runtime
+  const P1 = commit(pc, { 'src/g.js': GENLINE + '\n', '.repo-guard-allow': fs.readFileSync(path.join(pc, '.repo-guard-allow'), 'utf8') + VAL + '\n' }, 'P1: a generic secret and an allow row for it, in the range');
+  // the lane's own checkout (its working tree IS the range's tip): the row it added counts
+  const own = cli(pc, [`--range=${P0}..${P1}`, '--json', '--quiet']);
+  // the checkout that pushes a release (production — a CLONE): its working tree is the running release; the range's commits are in it
+  const prod = path.join(ROOT, 'pushing-prod');
+  git(ROOT, ['clone', '-q', pc, prod]);
+  git(prod, ['checkout', '-q', '--detach', P0]);
+  const atRelease = cli(prod, [`--range=${P0}..${P1}`, '--json', '--quiet'], path.join(prod, 'scripts', 'secret-scan.mjs'));
+  ok(own.status === 0 && atRelease.status === 1 && atRelease.json.some((f) => f.file === 'src/g.js' && f.line === 1 && f.rule === 'generic-secret-assign'),
+    `THE PRODUCTION-CWD CASE: one range, one allow row added in it — the lane's checkout (at the range's tip) says clean (rc ${own.status}), the pushing checkout at the release says RED at src/g.js:1 (rc ${atRelease.status}): the row never counts at the push`, { own: own.out, atRelease: atRelease.json });
+  // …and the hook asks exactly that checkout: its scan runs `node scripts/secret-scan.mjs` from the pushing checkout's root
+  const hookText = fs.readFileSync(path.join(REPO, 'scripts', 'git-hooks', 'pre-push'), 'utf8');
+  ok(/^\s*node scripts\/secret-scan\.mjs --range="\$\(range_for_sha "\$sha"\)" --quiet$/m.test(hookText) && !/--allow[\s=]/.test(hookText) && fs.readFileSync(SCAN, 'utf8').includes("fs.existsSync(ALLOW_FILE) ? [ALLOW_FILE] : []"),
+    '…the hook runs the pushing checkout\'s scripts/secret-scan.mjs with no --allow, and the scanner reads ALLOW_FILE relative to its cwd (the working tree), never the range\'s tip');
+  // PICK 1 — so a pick adds no row: every row the tree's allow file holds is one of the 77 it held at 2.369.407 (sha256, 12 hex)
+  const ALLOW_407 = new Set('3cc12ce2667e 3f3434d8240e c19438560b65 03d104c669e3 30548b5cb1c8 ea62db040a9c 01b9083c8bc8 e092ca99a7a7 8b02551f72b4 723ecb08abae 999d3d5fb4dc 7b4aa4407bc5 c32aa37b25e2 7dca712ed078 1966454e3b8a cf9935d8e391 45895de6778e ed1722b2d2ad 4f4552bff5b2 6bfdfbf9e1c1 27060996ec53 7e542c9b2015 f1f8a11fea21 8fd3fe55ed05 0e17bae56c63 5dcb6aad924d 9779fcac3937 da0b0b95d3b1 749c7dc29631 835f971d349b 865254dcfb90 f78312c46e59 bb49f01b9dd8 b7b70fd3a07e ca4e0588b586 f7d29a7e7b86 85b4932501f8 4e6e02616841 34359798e030 7fbc475f8283 6bbe590f1e6d eb227ed5bc15 1c22db73ecbb cbbc8a064f87 bc5e96105884 0b1905f56677 fe93c201d672 0fc4f6fa3a5e 8470b7b4c82c e0f51801d025 e101f457792f 79de2834097f 6cc566d54873 3a77e7758d0a 4841e95e341f ae5edd108af9 736257930fb7 e6972cb90caa 13f0c8e81e74 ba732f7f43bb 8803269a812f 79315bfa201b dfb8d5d93047 60d9057e35e2 7240ceccf4e4 0ef383bb9d47 77266140b7bb 00298af781bf 7f6fde709e71 6e9ea61808b9 b810b42b1e2a 1cb6571ffa9e c3b578964845 22601c9e6239 f65d7d8cceb3 1b5a110d3736 2f2cc53cc3bb'.split(' '));
+  const rowsOf = (text) => text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  const h12 = (r) => crypto.createHash('sha256').update(r).digest('hex').slice(0, 12);
+  const newRows = (text) => rowsOf(text).filter((r) => !ALLOW_407.has(h12(r)));
+  const treeAllow = fs.readFileSync(path.join(REPO, '.repo-guard-allow'), 'utf8');
+  ok(ALLOW_407.size === 77 && newRows(treeAllow).length === 0,
+    `PICK 1: .repo-guard-allow gains no row — ${rowsOf(treeAllow).length} row(s), each one of the 77 of 2.369.407 (a row added in a pick takes effect only after production moves; fix the text: ${S.FIXTURE_RULE})`, newRows(treeAllow).map((r) => r.slice(0, 40)));
+  ok(newRows(treeAllow + VAL + '\n').length === 1 && newRows(treeAllow.split('\n').slice(1).join('\n')).length === 0 && newRows('# a comment\n\n').length === 0,
+    'PICK 1 CONTROL: a planted row is named; a row taken away, a comment and a blank line are not');
+}
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
