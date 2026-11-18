@@ -25,7 +25,7 @@ function heldSender({ send, pause, resume }) {
     send(buf) {
       let ok = true;
       try { ok = send(buf) !== false; } catch { ok = true; }   // a dead link answers by its own death, never by a stall here
-      if (!ok && !held) { held = true; try { pause(); } catch { } }
+      if (!ok && !held) { held = true; try { pause(); } catch { } }   // a source without pause (an older node-pty): the release's road — queued, never a stall
       return ok;
     },
     writable() { if (!held) return; held = false; try { resume(); } catch { } },
@@ -41,7 +41,7 @@ function attachRoads({ mux, chan, stdin, stdout }) {
     out(buf) {
       const n = buf.length;
       const credit = () => { try { mux.credit(chan, n); } catch { } };
-      try { stdout.write(buf, credit); } catch { credit(); }   // a stdout that throws ends this process anyway
+      try { stdout.write(buf, credit); } catch { credit(); }   // a stdout that throws ends this process anyway; one that ended reports through the callback and does not throw — never two credits
     },
     /** stdin → device: a false answer pauses stdin */
     in(d) { return input.send(d); },

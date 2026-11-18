@@ -296,6 +296,30 @@ for (const [name, lib, want] of [['the bridge', real, true], ['RED CONTROL (the 
     W.end();
   }
 }
+{ // the cure of B-beaf (its readers): after a detach the device still credits the input it took before the CLOSE — those
+  // CREDIT frames find the channel forgotten and never make a send window again (one stale entry per detach for the link's life)
+  const MXS = fs.readFileSync(path.join(REPO, 'src/agentd/mux.js'), 'utf8');
+  const fixed = "        if (!this._sendWin.has(chan)) break;\n        this._sendWin.set(chan, this._sendWin.get(chan) + n);";
+  const muxCopy = MXS.split(fixed).length === 2 ? MUT.write('src/agentd/mux.js', MXS.replace(fixed, () => "        this._sendWin.set(chan, (this._sendWin.get(chan) ?? INITIAL_WINDOW) + n);"), 'stale-credit') : null;   // stale-pins: kept — the CONTROL re-creates the old mux line on purpose
+  const staleDM = muxCopy ? clMutant([["require('./mux.js')", `require(${JSON.stringify(muxCopy)})`]], 'stale-credit') : null;
+  for (const [name, DM, want] of [['the hub', DeviceManager, true], ['RED CONTROL (a stale credit makes the send window again)', staleDM, false]]) {
+    if (!DM) { ok(name + ': the mutant could be made', false); continue; }
+    const W = await worldB(real, { DM });
+    const chan = W.dev.chan;
+    W.A.data(1, Buffer.alloc(CHUNK, 0x61));                     // input through the bridge: the hub's mux sends on the channel
+    await until(() => W.dev.got >= CHUNK);
+    const had = W.dm._conn.mux._sendWin.has(chan);
+    W.sock.destroy();                                            // the attach client leaves: the detach forgets the channel
+    await until(() => W.dev.closed > 0);
+    const gone = !W.dm._conn.mux._sendWin.has(chan);
+    W.D.credit(chan, CHUNK);                                     // the device credits the input it took before the CLOSE
+    await quiet(() => W.dm._conn.mux._sendWin.has(chan));
+    const back = W.dm._conn.mux._sendWin.has(chan);
+    if (want) ok(`${name}: the detached channel's send window is forgotten and a late credit never makes it again`, had && gone && !back, { had, gone, back });
+    else ok(`${name}: the late credit makes the forgotten channel's window again (red)`, had && gone && back, { had, gone, back });
+    W.end();
+  }
+}
 { // the attach leaves WHILE the session is being opened (r2 #6): its handle is detached, `ready` settled, no hang, no unhandled rejection
   const r0 = rejections.length;
   const W = await worldB(real, { holdOpen: true });
