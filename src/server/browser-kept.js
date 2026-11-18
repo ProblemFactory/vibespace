@@ -251,16 +251,21 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
    *  a tick still waiting on a check starts no other. → the promise of the pass (the boot's first pass; the gate awaits it). */
   let thereTick = null;
   function recheckAll() {
-    if (thereTick) return thereTick;
-    thereTick = (async () => {
-      for (const k of Object.keys(load().entries)) {
-        const e = load().entries[k];
-        if (!e || !e.hasDir) continue;
-        const c = checking.get(k);
-        await (c ? c.p : startCheck(k).p); // a check already in flight is the pass's own (never a second stat of one folder)
-      }
-    })().finally(() => { thereTick = null; });
-    return thereTick;
+    if (thereTick && !thereTick.done) return thereTick.p;
+    // the pass is an OBJECT that ends itself (B-7a30: a pass finished without an await is never handed out again in the same run)
+    const pass = { done: false, p: null };
+    thereTick = pass;
+    pass.p = (async () => {
+      try {
+        for (const k of Object.keys(load().entries)) {
+          const e = load().entries[k];
+          if (!e || !e.hasDir) continue;
+          const c = checking.get(k);
+          await (c ? c.p : startCheck(k).p); // a check already in flight is the pass's own (never a second stat of one folder)
+        }
+      } finally { pass.done = true; if (thereTick === pass) thereTick = null; }
+    })();
+    return pass.p;
   }
   /** WHAT A VIEW READS for a key's folder (B-7a30, 主开发's ruling: a VIEW reads what the last check found): true / false, or null =
    *  STILL CHECKING — never checked since the boot, a check of it unanswered past THERE_ACT_MS, or the disk not answering (a check

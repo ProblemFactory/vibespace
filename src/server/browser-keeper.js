@@ -6688,19 +6688,25 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  pile); a pass still waiting starts no other; a record gone is pruned. → the promise of the pass (the gate awaits it). */
   let cliPass = null;
   function rejudgeClis() {
-    if (cliPass) return cliPass;
-    cliPass = (async () => {
-      for (const id of new Set([...cliKept.keys(), ...cliTold.keys(), ...cliJudging.keys()])) if (!reg.browsers[id]) { cliKept.delete(id); cliTold.delete(id); cliJudging.delete(id); }
-      for (const rec of Object.values(reg.browsers || {})) {
-        if (!rec || !rec.cli || !rec.cli.version || !isLocalRec(rec) || !B.isLiveBrowser(rec)) continue; // a stopped browser runs no CLI: its next start stamps its own
-        if (cliStuck(rec)) continue; // its file's judge hangs: not stacked
-        const j = cliJudging.get(rec.profileId);
-        let t = null;
-        await Promise.race([(j ? j.p : startCliJudge(rec).p), new Promise((res) => { t = setTimeout(res, 3 * cliActMs); if (t.unref) t.unref(); })]); // a hung judge never holds the pass
-        clearTimeout(t);
-      }
-    })().finally(() => { cliPass = null; });
-    return cliPass;
+    if (cliPass && !cliPass.done) return cliPass.p;
+    // the pass is an OBJECT that ends itself: a pass whose body finished without an await (no live record yet) is never handed
+    // out again by a call in the same synchronous run (a `.finally` that cleared it one microtask later did — and judged nothing)
+    const pass = { done: false, p: null };
+    cliPass = pass;
+    pass.p = (async () => {
+      try {
+        for (const id of new Set([...cliKept.keys(), ...cliTold.keys(), ...cliJudging.keys()])) if (!reg.browsers[id]) { cliKept.delete(id); cliTold.delete(id); cliJudging.delete(id); }
+        for (const rec of Object.values(reg.browsers || {})) {
+          if (!rec || !rec.cli || !rec.cli.version || !isLocalRec(rec) || !B.isLiveBrowser(rec)) continue; // a stopped browser runs no CLI: its next start stamps its own
+          if (cliStuck(rec)) continue; // its file's judge hangs: not stacked
+          const j = cliJudging.get(rec.profileId);
+          let t = null;
+          await Promise.race([(j ? j.p : startCliJudge(rec).p), new Promise((res) => { t = setTimeout(res, 3 * cliActMs); if (t.unref) t.unref(); })]); // a hung judge never holds the pass
+          clearTimeout(t);
+        }
+      } finally { pass.done = true; if (cliPass === pass) cliPass = null; }
+    })();
+    return pass.p;
   }
   /** The first pass at once (the views say «checking…» until it lands), then the keeper's own timer (unref'd; `cliEveryMs`). */
   let cliTimer = null;
