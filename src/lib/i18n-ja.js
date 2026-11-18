@@ -639,6 +639,8 @@ export default {
   "Yolo": "Yolo",
   "Folders (sessions by directory)": "フォルダ（ディレクトリ別セッション）",
   "Task Groups": "タスクグループ",
+  "Task Groups cannot be read right now — {file} in VibeSpace's data folder could not be read ({code})": "タスクグループを今は読み込めません — VibeSpace のデータフォルダーの {file} を読み込めませんでした（{code}）",
+  "It is kept exactly as it is: nothing writes it. Until it reads, Task Groups are not shown and nothing is recorded — an agent's progress line or a parked row is refused, and the agent is told. VibeSpace reads it again every few minutes and at every start; check the storage that holds the data folder.": "ファイルはそのまま保たれ、書き込まれません。読み込めるまで、タスクグループは表示されず、何も記録されません — エージェントの進捗行や保留項目は拒否され、エージェントに伝えられます。VibeSpace は数分ごとと起動のたびに読み直します。データフォルダーを置いているストレージを確認してください。",
   "Remote": "リモート",
   "Groups (board with member sessions)": "グループ（メンバーセッション付きボード）",
   "Tasks (flat list, sorted by urgency)": "タスク（緊急度順のフラット一覧）",

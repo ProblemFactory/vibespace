@@ -311,6 +311,7 @@ function opsOver(getDeps) {
   function settleBirthGroups() {
     const active = D().activeSessions;
     if (!active || typeof active.entries !== 'function' || !D().tasks) return 0;
+    if (D().tasks.unreadState?.()) return 0;   // THE STORE HELD UNREAD (lane bl-windows): the birth binds WAIT (kept on the sessions) for the lift — never consumed and lost
     let n = 0;
     for (const [id, s] of active.entries()) {
       const v = birthBindVerdict(s);
@@ -357,7 +358,9 @@ function opsOver(getDeps) {
     return eng.invite({ by: by && by.cid, group, members, context, quiet, mayWake, consent });
   }
 
-  return { conversationStatus, openConversation, renameConversation, bindConversation, settleBirthGroups, endConversation, inviteToGroup };
+  /** THE STORE HELD UNREAD (lane bl-windows): the task store's refusal words while it is held (else null) — the verbs ask it first */
+  const tasksUnread = (act) => { const t = D().tasks; return t && typeof t.unreadRefusal === 'function' ? t.unreadRefusal(act) : null; };
+  return { conversationStatus, openConversation, renameConversation, bindConversation, settleBirthGroups, endConversation, inviteToGroup, tasksUnread };
 }
 const sharedOps = opsOver(() => shared);
 /** ws-handler's own instance: its parts first, the provided ones (the task store, the spend guard…) behind them. */
@@ -441,6 +444,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       const t = reached(args.target, ctx);
       if (!t.ok) return t;
       const { caller, keyId } = ctx;
+      { const held = O().tasksUnread ? O().tasksUnread('adding a conversation to a Task Group') : null; if (held) return { ok: false, code: 'TASK_GROUPS_UNREAD', why: held }; }   // THE STORE HELD UNREAD: by its name, never «not granted»
       // the Task Group is one the CALLER belongs to (a key granted to a group is used by that group's own conversations)
       if (!(caller.groups || []).includes(args.task)) return { ok: false, code: 'not_granted', reach: 'member', callerMistake: true, why: 'the calling conversation is not in that Task Group' };
       try {

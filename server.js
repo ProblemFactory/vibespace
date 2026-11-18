@@ -607,7 +607,7 @@ if (!process.env.VIBESPACE_SKIP_AGENT_HOOKS) harnessConfig.syncCliConfig({ reaso
 setTimeout(checkAgentHookHealth, 60000).unref();
 setInterval(checkAgentHookHealth, 6 * 3600 * 1000).unref();
 
-const { tasks, taskFanout } = require('./src/server/task-groups-wiring.js').createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRouter, serverSetting, sessionStatusKey, dataDir: path.join(__dirname, 'data'), exitProxy: () => exitProxy, channelsWiring: () => channelsWiring, sessionStatus: () => sessionStatus, mounts: () => mounts }); // ── Task Groups (岗位; docs/design-task-system.md): the store, its fan-out, its routes and the remote context sync live in src/server/task-groups-wiring.js, called at their three old places ──
+const { tasks, taskFanout } = require('./src/server/task-groups-wiring.js').createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRouter, serverSetting, sessionStatusKey, dataDir: path.join(__dirname, 'data'), exitProxy: () => exitProxy, channelsWiring: () => channelsWiring, sessionStatus: () => sessionStatus, mounts: () => mounts, userTodos: () => userTodos }); // ── Task Groups (岗位; docs/design-task-system.md): the store, its fan-out, its routes and the remote context sync live in src/server/task-groups-wiring.js, called at their three old places ──
 // System info + memory-pressure watch (2.216.0, userL's 32Gi OOM kill —
 // the pod-level kill takes every dtach session; warn BEFORE the kernel acts)
 // ── Sysinfo wiring (src/server/sysinfo-wiring.js): remote snapshot ladder ──

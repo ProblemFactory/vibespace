@@ -46,6 +46,22 @@ const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked
 const SP = require('./storage-path.js');
 const GM = require('./grant-model.js'); // lane grants-unify: the group's outside visibility is a row of the ONE grants store
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
+const SR = require('./store-read.js'); // B-f276's law for THIS store (lane bl-windows): a store that could not be read is never written over
+// THE STORE HELD UNREAD (lane bl-windows 2026-11-18, 主开发 23:05Z — the release's _load read ANY failure as «no file»: the boot
+// then saved the old tasks.json, or an empty store, OVER task-groups.json it could not read; every group, backlog row and activity
+// log of the instance gone, nothing said). Only a file that is truly ABSENT falls to tasks.json or to an empty store; a read that
+// FAILED, bytes that do not parse, bytes not of the store's shape: the store is HELD — nothing writes it, every act that would
+// record something is refused BY NAME, the person is told ONCE, the read is tried again at a bounded pace (and at every start).
+const STORE_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && !!v.tasks && typeof v.tasks === 'object' && !Array.isArray(v.tasks) && Object.values(v.tasks).every((t) => !!t && typeof t === 'object' && !Array.isArray(t)); // a plain map of records (an array of tasks, a null record: held, never loaded into a boot that crashes or a save that drops them)
+const UNREAD_TEXT = "Task Groups cannot be read right now — {file} in VibeSpace's data folder could not be read ({code})"; // ui-words: an English KEY — the client words it through t() where the For-you item is drawn (zh / ja rows)
+const UNREAD_DETAIL = "It is kept exactly as it is: nothing writes it. Until it reads, Task Groups are not shown and nothing is recorded — an agent's progress line or a parked row is refused, and the agent is told. VibeSpace reads it again every few minutes and at every start; check the storage that holds the data folder."; // ui-words: an English KEY (zh / ja rows)
+const UNREAD_REFUSAL = "Task Groups: {act} was refused — {file} in VibeSpace's data folder could not be read ({code}); it is kept exactly as it is and read again every few minutes. Until it reads, Task Groups are not shown and nothing is recorded.";
+const fillWords = (t, p) => t.replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m));
+/** the person's words while the store is held (the For-you notice, once) → {text, detail, i18n} */
+function unreadNoticeWords(u) {
+  const p = { file: u.file, code: u.code };
+  return { text: fillWords(UNREAD_TEXT, p), detail: fillWords(UNREAD_DETAIL, p), i18n: { text: { key: UNREAD_TEXT, params: p }, detail: [{ key: UNREAD_DETAIL, params: p }] } };
+}
 const crypto = require('crypto');
 const os = require('os');
 const TC = require('./task-context.js'); // PURE: the Context table's rows, resolution, derivations, budget plan (lane task-group-context)
@@ -254,7 +270,7 @@ function sanitizeStrArray(arr, cap = 200) {
 const noneFitWords = (n, gid = '') => `none fit inline — ${n} line${n === 1 ? '' : 's'}; \`vibespace-task ${gid}show\` prints the newest`;
 
 class TaskGroupManager {
-  constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed, mirrorFs, mirrorBoundMs, sigBoundMs, isLiveKey, grants = null, homeDir }) {
+  constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed, mirrorFs, mirrorBoundMs, sigBoundMs, isLiveKey, grants = null, homeDir, unreadNotice = null, unreadRetry = null }) {
     // lane grants-unify: the group's outside visibility is a ROW of the ONE grants store (door group-visibility) — the store (or
     // a getter); absent ⇒ none (every group opaque, a write refused by name)
     this._grants = typeof grants === 'function' ? grants : () => grants;
@@ -294,7 +310,29 @@ class TaskGroupManager {
     this._archLive = new Set();
     this._archSeen = null;
     if (typeof readUserState === 'function') { try { const st = readUserState(); this._archSeen = new Set((st && Array.isArray(st.archivedSessions) ? st.archivedSessions : []).map(String)); } catch { this._archSeen = new Set(); } }
-    const existed = this._load();
+    // THE STORE HELD UNREAD: `unreadNotice` = { say(words) → a handle | null (the For-you door; null/throw = not up yet — said at
+    // the next try), lift(handle) } (task-groups-wiring.js); `unreadRetry` = { firstMs, maxMs } of the read again (a suite's)
+    this._readUserState = readUserState;
+    this._unread = null; this._unreadSaid = null; this._unreadTries = 0; this._unreadT = null; this._unreadP = null;
+    this._unreadNotice = unreadNotice && typeof unreadNotice.say === 'function' ? unreadNotice : null;
+    this._unreadRetryCfg = unreadRetry && typeof unreadRetry === 'object' ? unreadRetry : {};
+    this._afterLoad(this._load());
+    if (!this._unread) this._closeStaleNotice(0); // S1: a held boot's notice does not outlive a start that reads
+  }
+
+  /** a notice an EARLIER (held) boot filed, while this one reads: closed — when the For-you door stands (the boot builds it later) */
+  _closeStaleNotice(n) {
+    if (!this._unreadNotice || typeof this._unreadNotice.closeOpen !== 'function' || n > 3) return;
+    const later = () => { const t = setTimeout(() => this._closeStaleNotice(n + 1), 30_000); t.unref?.(); };
+    const tryNow = () => { if (this._unread) return; try { this._unreadNotice.closeOpen(); } catch { later(); } };
+    if (typeof setImmediate === 'function') setImmediate(tryNow); else tryNow();
+  }
+
+  /** what follows a load (the boot's, and a held store's read again that answered): the old fields held, the one-time
+   *  migrations, the saves they need, every TASK.md — NOTHING of it while the store is held (`existed` null) */
+  _afterLoad(existed) {
+    if (existed === null) return; // held: no migration, no save, no TASK.md (the in-memory store is empty — never the truth)
+    const readUserState = this._readUserState;
     for (const t of Object.values(this._state.tasks)) this._holdLegacy(t);
     // One-time migration: Task Groups lost their status (岗位 refactor) — a
     // `done` group becomes archived, others just drop the field.
@@ -353,7 +391,7 @@ class TaskGroupManager {
         }
       }
     }
-    if (!existed && typeof readUserState === 'function') {
+    if (existed === false && typeof readUserState === 'function') { // a store that could not be read is NOT absent: never migrated over
       // One-time legacy Groups migration (file existence is the guard: once the
       // store exists, legacy sessionGroups in user-state stay dormant).
       try { this._migrateGroups(readUserState()); } catch { /* fresh install */ }
@@ -368,19 +406,93 @@ class TaskGroupManager {
   }
 
   _load() {
-    // Prefer the current file; fall back to the legacy tasks.json ONCE and
-    // migrate it forward (write the new file). The legacy file is left in place
-    // (harmless) so an older server build could still read it if rolled back.
-    for (const [f, legacy] of [[this._file, false], [this._legacyFile, true]]) {
-      let parsed;
-      try { parsed = timedSync('task-groups.read', () => JSON.parse(fs.readFileSync(f, 'utf-8'))); } catch { continue; }
-      if (!parsed || typeof parsed.tasks !== 'object') continue;
-      this._state = parsed;
-      if (legacy) this._save(); // migrate tasks.json → task-groups.json
-      return true;
-    }
+    // Prefer the current file; fall back to the legacy tasks.json ONCE and migrate it forward (write the new file) — ONLY when
+    // the current file is truly ABSENT (THE STORE READ, src/store-read.js). The legacy file is left in place (harmless) so an
+    // older server build could still read it if rolled back. → true (read) · false (absent: empty) · null (HELD unread)
+    const read = (f) => { try { return { text: timedSync('task-groups.read', () => fs.readFileSync(f, 'utf-8')) }; } catch (error) { return { error }; } };
+    const a = SR.storeAnswer(read(this._file), { valid: STORE_SHAPE });
+    if (a.state === 'data') { this._state = a.value; return true; }
     this._state = { version: 1, tasks: {} };
-    return false;
+    if (a.state !== 'missing') { this._holdUnread(a, this._file); return null; } // NEVER written over: held
+    const l = SR.storeAnswer(read(this._legacyFile), { valid: STORE_SHAPE });
+    if (l.state === 'data') { this._state = l.value; this._save(); return true; } // migrate tasks.json → task-groups.json
+    if (l.state === 'unreadable') { this._holdUnread(l, this._legacyFile); return null; } // the old file EXISTS and could not be read: held, never started over
+    return false; // absent (an unparsable legacy file is an old build's, left in place as before)
+  }
+
+  // ── THE STORE HELD UNREAD (see STORE_SHAPE above) ──
+  /** the store could not be read: HELD — said once (the log, and the person through `unreadNotice`), read again soon */
+  _holdUnread(a, file) {
+    const was = this._unread;
+    this._unread = { file: path.basename(file), code: String(a.code || a.why || 'unreadable'), why: String(a.why || 'unreadable'), at: (was && was.at) || Date.now() };
+    if (!was) console.warn(`[tasks] ${this._unread.file} could not be read (${this._unread.code}: ${this._unread.why}) — HELD: kept exactly as it is, nothing writes it, nothing is recorded until it reads; read again soon`);
+    this._sayUnread();
+    if (!this._unreadSaid && typeof setImmediate === 'function') setImmediate(() => this._sayUnread()); // the boot builds the For-you door after this store: said once it stands
+    this._unreadRetrySoon();
+  }
+  /** → whether the store is held (and what it is: { file, code, why, at }) — the routes' and the board's question */
+  unreadState() { return this._unread ? { ...this._unread } : null; }
+  /** an act that would record something, while the store is held: REFUSED BY NAME (code TASK_GROUPS_UNREAD) — the route answers it */
+  _refuseUnread(act) {
+    if (!this._unread) return;
+    const e = new Error(fillWords(UNREAD_REFUSAL, { act, file: this._unread.file, code: this._unread.code }));
+    e.code = 'TASK_GROUPS_UNREAD';
+    throw e;
+  }
+  /** → the refusal's words while held (else null) — for a caller that answers instead of throwing (the agent routes) */
+  unreadRefusal(act) { return this._unread ? fillWords(UNREAD_REFUSAL, { act, file: this._unread.file, code: this._unread.code }) : null; }
+  /** the person is told ONCE (a For-you notice); a door not up yet (the boot builds it later) is tried again at the next read */
+  _sayUnread() {
+    if (!this._unread || this._unreadSaid || !this._unreadNotice) return;
+    let h = null;
+    try { h = this._unreadNotice.say(unreadNoticeWords(this._unread)); } catch { h = null; }
+    if (h != null && h !== false) this._unreadSaid = { handle: h };
+  }
+  _unreadRetrySoon() {
+    if (this._unreadT || !this._unread) return;
+    const n = ++this._unreadTries;
+    const t = setTimeout(() => { this._unreadT = null; this.readAgain().catch((e) => { console.warn(`[tasks] the read again failed: ${e && e.message}`); this._unreadRetrySoon(); }); }, SR.retryDelay(n, this._unreadRetryCfg));
+    t.unref?.(); this._unreadT = t;
+  }
+  /** ONE read again of a held store, OFF the loop (fs.promises), one in flight → true when it answered (the hold LIFTED: the
+   *  store loaded as the boot loads it, its notice lifted, every listener told); false = still held (the next try is armed) */
+  readAgain() {
+    if (!this._unread) return Promise.resolve(true);
+    if (this._unreadP) return this._unreadP;
+    const job = this._unreadP = (async () => {
+      const read = (f) => fs.promises.readFile(f, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
+      const a = SR.storeAnswer(await read(this._file), { valid: STORE_SHAPE });
+      let state = null, existed = null, held = null; const file = this._file;
+      if (a.state === 'data') { state = a.value; existed = true; }
+      // GONE SINCE THE HOLD (the reader's must): a hold PROVES the file was there — a read that now finds no file (a detached mount, a
+      // missing data folder) is NOT a fresh install: STILL HELD (no empty store, no migration, no save, the notice stands); the next
+      // START judges a truly absent file (the boot's rule), the reads go on meanwhile (the storage may come back)
+      else if (a.state === 'missing' && this._unread.file === path.basename(this._legacyFile)) {
+        // the hold was the LEGACY file's (task-groups.json absent at the boot, tasks.json unreadable): read IT again — migrated forward when it answers
+        const l = SR.storeAnswer(await read(this._legacyFile), { valid: STORE_SHAPE });
+        if (l.state === 'data') { state = l.value; existed = 'legacy'; }
+        else if (l.state === 'missing') held = { code: 'ENOENT', why: 'the file is not there since it could not be read' };
+        else held = l;
+        if (held) { this._holdUnread(held, this._legacyFile); return false; }
+      }
+      else if (a.state === 'missing') held = { code: 'ENOENT', why: 'the file is not there since it could not be read' };
+      else held = a;
+      if (held) { this._holdUnread(held, file); return false; }
+      const was = this._unread, said = this._unreadSaid, tries = this._unreadTries;
+      // THE HOLD LIFTS ONLY AFTER A WHOLE LOAD: the load (its migrations, their saves) runs with the hold down; a throw restores it
+      this._unread = null; this._state = state;
+      try { if (existed === 'legacy') this._save(); this._afterLoad(true); } // the legacy file migrated forward, as the boot does
+      catch (e) { this._state = { version: 1, tasks: {} }; this._unread = was; this._unreadSaid = said; console.warn(`[tasks] ${was.file} read again but its load failed (${e && e.message}) — STILL HELD`); this._unreadRetrySoon(); return false; }
+      this._unreadSaid = null; this._unreadTries = 0;
+      if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }
+      console.log(`[tasks] ${was.file} read again after ${tries} tr${tries === 1 ? 'y' : 'ies'}: ${Object.keys(this._state.tasks || {}).length} Task Group(s) — the hold is lifted`);
+      if (said && this._unreadNotice && typeof this._unreadNotice.lift === 'function') { try { this._unreadNotice.lift(said.handle); } catch { } }
+      this._notify(); // the late load: every listener told (the re-judge of reach, the board, the roster)
+      return true;
+    })();
+    const free = () => { if (this._unreadP === job) this._unreadP = null; };
+    job.then(free, free);
+    return job;
   }
 
   // the old fields leave the live record (nothing can read them by accident) and wait in _legacy for the file
@@ -395,6 +507,7 @@ class TaskGroupManager {
   rev() { return this._rev || 0; }
 
   _save() {
+    if (this._unread) return false; // HELD unread: task-groups.json is never written over (THE STORE HELD UNREAD)
     this._rev = (this._rev || 0) + 1;
     const tmp = this._file + '.tmp';
     // the held old fields ride back into the file beside each record (one release — see _holdLegacy)
@@ -1059,6 +1172,7 @@ class TaskGroupManager {
    *  its rows from its held old fields (TC.rowsFromLegacy — folders[] → 文件名 + 自动发现会话, contextDir → 文件名 +
    *  记笔记). The old fields stay in the file one release, no longer read. Idempotent (a group with `ctx` is skipped). */
   migrateContextRows() {
+    this._refuseUnread("the Context rows' migration"); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const rep = { groups: 0, rows: 0, folders: 0, notes: 0, merged: 0, nonRecursive: 0, skipped: 0 };
     for (const t of Object.values(this._state.tasks)) {
       if (Array.isArray(t.ctx)) { rep.skipped++; continue; }
@@ -2098,6 +2212,7 @@ class TaskGroupManager {
   }
 
   create({ title, kind, archived, objective, sessions, ctx, folders, contextDir, color, pattern, injectContext, browserProfileId, browserCap } = {}) {
+    this._refuseUnread('a new Task Group'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const cleanTitle = String(title || '').trim().slice(0, CAPS.title);
     if (!cleanTitle) throw new Error('title required');
     const id = this._genId(cleanTitle);
@@ -2201,6 +2316,7 @@ class TaskGroupManager {
   }
 
   update(id, patch = {}) {
+    this._refuseUnread('a change to a Task Group (a field, a backlog row)'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const t = this.get(id);
     if (patch.title !== undefined) {
       const clean = String(patch.title || '').trim().slice(0, CAPS.title);
@@ -2293,6 +2409,7 @@ class TaskGroupManager {
   }
 
   remove(id) {
+    this._refuseUnread('deleting a Task Group'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     this.get(id); // throws if missing
     // its archived Activity log goes with it (first: a failed delete keeps the group, never orphaned words)
     if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });
@@ -2306,6 +2423,7 @@ class TaskGroupManager {
   // Granular tag add/remove — atomic server-side so two clients binding
   // different sessions never clobber each other's sessions array.
   bind(id, sessionKey) {
+    this._refuseUnread('adding a conversation to a Task Group'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const t = this.get(id);
     const key = String(sessionKey || '');
     if (!key) throw new Error('sessionKey required');
@@ -2319,6 +2437,7 @@ class TaskGroupManager {
   }
 
   unbind(id, sessionKey) {
+    this._refuseUnread('removing a conversation from a Task Group'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const t = this.get(id);
     this.unbindKeys([String(sessionKey || '')], { ids: [id], exact: true });
     return { ...t };
@@ -2328,6 +2447,7 @@ class TaskGroupManager {
    *  null) — ONE save, ONE notify naming the groups that changed (the rule: task-membership membersWithout). `dryRun`
    *  writes nothing (the migration archives what would go first). → { changed: [group id], gone: { groupId: [key] } } */
   unbindKeys(keys, { ids = null, exact = false, dryRun = false } = {}) {
+    if (!dryRun) this._refuseUnread('a membership change'); // THE STORE HELD UNREAD (a dry run writes nothing)
     const changed = [], gone = {};
     for (const t of ids ? ids.map((i) => this._state.tasks[i]).filter(Boolean) : Object.values(this._state.tasks)) {
       const r = membersWithout(t.sessions, keys, { exact });
@@ -2347,6 +2467,7 @@ class TaskGroupManager {
    *  its next turn still needs the group's context (the owner's constraint) — and leaves at the first write after.
    *  → the group ids that changed */
   noteArchived(list) {
+    if (this._unread) return []; // THE STORE HELD UNREAD: nothing consumed — the archive list is judged after the hold lifts
     const now = new Set((Array.isArray(list) ? list : []).map(String));
     const was = this._archSeen;
     this._archSeen = now;
@@ -2367,6 +2488,7 @@ class TaskGroupManager {
   // the board's expandable rows). Keeping them separate is what lets the
   // injected Activity log stay dense without losing information.
   addProgress(id, { note, detail, session } = {}) {
+    this._refuseUnread('an activity-log line'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const t = this.get(id);
     const dataDir = path.dirname(this._file);   // the belt finds the vault from here
     const clean = belt.maskForSink(String(note || '').trim(), { dataDir }).slice(0, CAPS.note);   // agent-output-sinks: mask BEFORE it lands
@@ -2404,9 +2526,10 @@ class TaskGroupManager {
     try { return fs.readdirSync(path.join(this._archiveRoot, id)).filter((f) => MONTH_FILE_RE.test(f)).sort().reverse(); } catch { return []; }
   }
   /** one month file's entries (deduped by id, a cleared copy wins), or [] */
-  _monthEntries(id, file) {
+  _monthEntries(id, file, { strict = false } = {}) {
     let text = '';
-    try { text = fs.readFileSync(path.join(this._archiveRoot, id, file), 'utf8'); } catch { return []; }
+    try { text = fs.readFileSync(path.join(this._archiveRoot, id, file), 'utf8'); }
+    catch (e) { if (strict && !(e && e.code === 'ENOENT')) { const x = new Error(`Task Groups: an import was refused — the archived month ${file} of ${id} could not be read (${(e && e.code) || 'unreadable'}); it is kept as it is`); x.code = 'TASK_GROUPS_UNREAD'; throw x; } return []; } // strict (the import's rewrite): a month that could not be read is never written over
     const byId = new Map();
     for (const ln of text.split('\n')) { const p = parseLine(ln); if (p && (!byId.has(p.id) || p.clearedAt)) byId.set(p.id, p); }
     return [...byId.values()];
@@ -2508,6 +2631,7 @@ class TaskGroupManager {
    * ambiguous: [refs], refused: [{ref, id, code, why, status}]}.
    */
   clearProgress(id, refs, { by = 'owner', at = Date.now(), allow = null } = {}) {
+    this._refuseUnread('clearing activity-log lines'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const t = this.get(id);
     const out = { cleared: [], already: [], unknown: [], ambiguous: [], refused: [] };
     const targets = [];
@@ -2605,6 +2729,7 @@ class TaskGroupManager {
   // task or updates the existing one with the same id. One-shot at import —
   // after this the structured store is the truth (never re-parsed live).
   importFromFile(absPath) {
+    this._refuseUnread('an import'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) throw new Error('an absolute file path is required');
     let text;
     try { text = fs.readFileSync(absPath, 'utf-8'); } catch (e) { if (e && e.code === 'EVSMOUNTSYNC') throw e; throw new Error('cannot read ' + absPath); } // lane hub-fuse-sync-guard: a refusal is said by name, never as a missing file
@@ -2728,6 +2853,7 @@ class TaskGroupManager {
   // ── Config transfer (same contract as hosts/mounts) ──
   // 2.369.204: the archived Activity log rides along — { <taskId>: { <YYYY-MM>: ndjson } } (Backup & migrate)
   exportBundle() {
+    this._refuseUnread('a backup of Task Groups'); // THE STORE HELD UNREAD: never a backup that silently holds no groups
     const archive = {};
     for (const id of Object.keys(this._state.tasks)) for (const f of this._archiveMonths(id)) {
       try { (archive[id] = archive[id] || {})[f.slice(0, 7)] = fs.readFileSync(path.join(this._archiveRoot, id, f), 'utf8'); } catch { /* gone meanwhile */ }
@@ -2737,9 +2863,11 @@ class TaskGroupManager {
   /** an imported group's archive months, MERGED into this instance's (by id, a cleared copy wins, time order), one tmp + rename per month */
   _importArchive(id, months) {
     if (!archivableId(id) || !months || typeof months !== 'object') return;
+    const have = new Map(); // every month read FIRST (strict): one that could not be read refuses the import before any month is written
+    for (const [m, text] of Object.entries(months)) if (/^\d{4}-\d{2}$/.test(m) && typeof text === 'string') have.set(m, this._monthEntries(id, m + '.ndjson', { strict: true }));
     for (const [m, text] of Object.entries(months)) {
       if (!/^\d{4}-\d{2}$/.test(m) || typeof text !== 'string') continue;
-      const byId = new Map(this._monthEntries(id, m + '.ndjson').map((p) => [p.id, p]));
+      const byId = new Map(have.get(m).map((p) => [p.id, p]));
       for (const ln of text.split('\n')) {
         const p = parseLine(ln);
         if (!p || !PROGRESS_ID_RE.test(p.id) || !Number(p.at) || monthOf(p.at) !== m) continue;
@@ -2754,6 +2882,7 @@ class TaskGroupManager {
   }
 
   importBundle(bundle) {
+    this._refuseUnread('an import'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const items = Array.isArray(bundle?.tasks) ? bundle.tasks : [];
     let n = 0;
     for (const raw of items) {

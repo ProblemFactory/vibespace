@@ -862,6 +862,7 @@ const STORE_READS = [
   // CONVERTED (B-f276): every read goes through src/store-read.js storeAnswer — a failed read is held, never set aside
   { file: 'src/jobs.js', store: 'jobs.json', state: 'answer', mark: /this\._loadAnswer\(SR\.storeAnswer\(read, \{ valid: STORE_SHAPE \}\)\)/ },
   { file: 'src/jobs.js', store: 'jobs-archive.json', state: 'answer', mark: /this\._archiveAnswer\(SR\.storeAnswer\(read, \{ valid: Array\.isArray \}\)\)/ },
+  { file: 'src/task-groups.js', store: 'task-groups.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read\(this\._file\), \{ valid: STORE_SHAPE \}\);/ },   // lane bl-windows 2026-11-18: THE STORE HELD UNREAD (⑨ below)
   // RIGHT WITHOUT THE HELPER (judged by hand, 2026-11-17): a failed read refuses or answers an error; only unparsable bytes are set aside
   { file: 'src/server/integration-store.js', store: 'integrations.json', state: 'right', why: 'a failed read refuses (unreadable()); only a parse/shape failure is archived', mark: /return unreadable\('exists but cannot be read', e\);/ },
   { file: 'src/app-serve.js', store: 'apps manifest.json', state: 'right', why: 'a failed read is an error; only an unparsable manifest is set aside, at the next write', mark: /catch \(e\) \{ if \(e\.code === 'ENOENT'\) return \{ manifest: A\.emptyManifest\(\), error: null \}; return \{/ },
@@ -960,6 +961,124 @@ ok(c4.length === 1 && /^DEBT: 9 debt rows against READ_DEBT_CAP 8/.test(c4[0]) &
 const noReq = new Map(T); noReq.set('src/jobs.js', T.get('src/jobs.js').replace(/require\('\.\/store-read\.js'\)/, "require('./store-reader.js')"));
 ok(census(noReq).some((p) => /^src\/jobs\.js jobs\.json: an 'answer' row whose file does not require src\/store-read\.js/.test(p)), 'CONTROL: an answer row\'s file must require the helper');
 
+}
+
+// ── ⑨ THE TASK GROUPS STORE HELD UNREAD (lane bl-windows 2026-11-18, 主开发 23:05Z — found by a hunt): the release's _load read ANY
+// failure as «no file» and the boot saved the old tasks.json, or an empty store, OVER task-groups.json it could not read. THE LAW
+// (B-f276's, for this store): only a truly ABSENT file falls to tasks.json or to an empty store; a read that failed, bytes that do
+// not parse, bytes not of the store's shape: HELD — the bytes untouched by the boot and by every save, every recording act refused
+// BY NAME, the person told ONCE, the read tried again (its hold lifts when it reads). The REAL TaskGroupManager over a scratch
+// store of its own; the failures are stand-ins (an fs error thrown for that one file, bytes written); bytes counted, no clock.
+console.log('⑨ the Task Groups store: a store that could not be read is never written over (task-groups.json)');
+{
+  const { scratchDir } = await import('./scratch.mjs');
+  const JS = JSON.stringify, readSrc = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const TGP = path.join(REPO, 'src/task-groups.js');
+  const fresh = () => { delete require.cache[require.resolve(TGP)]; return require(TGP).TaskGroupManager; };
+  const SEED = { version: 1, tasks: { 'T-a1': { id: 'T-a1', title: 'Alpha', sessions: [], backlog: [{ id: 'B-0a01', text: 'kept row', status: 'open', claimedBy: [] }], progress: [{ id: 'P-0a01', at: 1, note: 'kept line' }], createdAt: 1, updatedAt: 1, colorSeq: 0 } } };
+  const roots = [];
+  const world = (name) => { const dd = scratchDir('tg-unread-' + name); roots.push(dd); return { dd, file: path.join(dd, 'task-groups.json'), legacy: path.join(dd, 'tasks.json') }; };
+  const make = (TGM, dd) => { const said = [], lifted = [], closed = []; const m = new TGM({ dataDir: dd, readUserState: () => ({}), unreadNotice: { say: (w) => { said.push(w); return 'n' + said.length; }, lift: (h) => lifted.push(h), closeOpen: () => closed.push(1) }, unreadRetry: { firstMs: 3600000, maxMs: 3600000 } }); return { m, said, lifted, closed }; };
+  const failing = (file, code, fn) => { const rf = fs.readFileSync; fs.readFileSync = function (f, ...a) { if (String(f) === file) { const e = new Error(`${code}: a stand-in i/o error`); e.code = code; throw e; } return rf.call(this, f, ...a); }; try { return fn(); } finally { fs.readFileSync = rf; } };
+  const tried = (fn) => { try { fn(); return null; } catch (e) { return { code: e.code, message: String(e.message) }; } };
+  const bytes = (f) => (fs.existsSync(f) ? fs.readFileSync(f) : null);
+  try {
+    // (a) a READ THAT THROWS at the boot (EIO, a stand-in): held — the bytes identical after the boot and after every save attempt
+    {
+      const w = world('eio'); const seed = Buffer.from(JSON.stringify(SEED)); fs.writeFileSync(w.file, seed);
+      const TGM = fresh();
+      const { m, said, lifted } = failing(w.file, 'EIO', () => make(TGM, w.dd));
+      const u = m.unreadState();
+      ok(!!u && u.file === 'task-groups.json' && u.code === 'EIO' && m.list().length === 0 && Buffer.compare(bytes(w.file), seed) === 0, '⑨ a read that FAILED at the boot (EIO): the store is HELD — not shown, its bytes IDENTICAL after the boot (the release saved an empty store over it)', { u, groups: m.list().length });
+      const refusals = [tried(() => m.addProgress('T-a1', { note: 'lost?' })), tried(() => m.update('T-a1', { backlog: [] })), tried(() => m.create({ title: 'New' })), tried(() => m.unbind('T-a1', 'claude:x')), tried(() => m.remove('T-a1'))];
+      const saved = m._save();
+      ok(refusals.every((r) => r && r.code === 'TASK_GROUPS_UNREAD' && /task-groups\.json/.test(r.message) && /\(EIO\)/.test(r.message) && /was refused/.test(r.message) && /nothing is recorded/.test(r.message)) && /an activity-log line/.test(refusals[0].message) && /a backlog row/.test(refusals[1].message) && saved === false && Buffer.compare(bytes(w.file), seed) === 0, '⑨ …every act that would record something is REFUSED BY NAME (code TASK_GROUPS_UNREAD: the file, the error, the act — a progress line, a parked row, a new group, an unbind, a delete) and the save writes NOTHING: the bytes identical', refusals.map((r) => r && r.message.slice(0, 90)));
+      ok(said.length === 1 && /task-groups\.json/.test(said[0].text) && /\(EIO\)/.test(said[0].text) && said[0].i18n && said[0].i18n.text && said[0].i18n.text.params.file === 'task-groups.json', '⑨ …the person is told ONCE (one For-you notice naming the file and the error, its words through i18n) — not again for each refusal', said.map((x) => x.text));
+      ok(JS(m.noteArchived(['claude:gone'])) === '[]' && typeof m.unreadRefusal('this request') === 'string' && /this request was refused/.test(m.unreadRefusal('this request')), '⑨ …a background road (an archive list) consumes nothing while held, and the agent routes\' words are the same refusal');
+      // the read again while the storage still fails: STILL HELD — bytes identical, the notice not filed again
+      const again = await (async () => { const rp = fs.promises.readFile; fs.promises.readFile = async function (f, ...a) { if (String(f) === w.file) { const e = new Error('EIO: a stand-in'); e.code = 'EIO'; throw e; } return rp.call(this, f, ...a); }; try { return await m.readAgain(); } finally { fs.promises.readFile = rp; } })();
+      ok(again === false && !!m.unreadState() && Buffer.compare(bytes(w.file), seed) === 0 && said.length === 1, '⑨ …a read again that still fails: STILL HELD, the bytes identical, the person not told twice', { again, said: said.length });
+      // a load that THROWS when the read answers (its migrations, their saves): held again — the hold lifts only after a WHOLE load
+      const al = m._afterLoad; m._afterLoad = () => { throw new Error('a stand-in load failure'); };
+      const broken = await m.readAgain(); m._afterLoad = al;
+      ok(broken === false && !!m.unreadState() && m.list().length === 0 && Buffer.compare(bytes(w.file), seed) === 0 && lifted.length === 0, '⑨ …a read that answers but whose LOAD throws: held again (never an empty store left standing, the notice not lifted)', { broken, lifted });
+      const ex = tried(() => m.exportBundle());
+      ok(!!ex && ex.code === 'TASK_GROUPS_UNREAD' && /a backup of Task Groups was refused/.test(ex.message), '⑨ …a backup of Task Groups while held is REFUSED BY NAME (never a backup file that silently holds no groups)', ex);
+      const back = await m.readAgain();
+      ok(back === true && !m.unreadState() && m.list().length === 1 && m.list()[0].title === 'Alpha' && JS(lifted) === JS(['n1']), '⑨ …the read TRIED AGAIN answers: the hold lifts, the groups are back (Alpha, its row and its line), the notice is lifted', { back, groups: m.list().map((g) => g.title), lifted });
+      m.addProgress('T-a1', { note: 'after the hold' });
+      const doc = JSON.parse(fs.readFileSync(w.file, 'utf8'));
+      ok(doc.tasks['T-a1'].progress.some((p) => p.note === 'kept line') && doc.tasks['T-a1'].progress.some((p) => p.note === 'after the hold') && doc.tasks['T-a1'].backlog.some((b) => b.text === 'kept row'), '⑨ …and recording works again ON the store as it was (its old line and row kept, the new line written)', doc.tasks['T-a1'].progress.map((p) => p.note));
+    }
+    // (b) bytes that do NOT PARSE and (c) bytes NOT OF THE STORE'S SHAPE: held the same way, the bytes untouched
+    for (const [name, text, why] of [['torn', '{"version":1,"tasks":{"T-a1":{', 'did not parse'], ['shape', '{"version":1}', 'not the expected shape'], ['array', '[]', 'not the expected shape']]) {
+      const w = world(name); const raw = Buffer.from(text); fs.writeFileSync(w.file, raw);
+      const { m, said } = make(fresh(), w.dd);
+      const r = tried(() => m.addProgress('T-a1', { note: 'x' })), r2 = tried(() => m.create({ title: 'x' }));
+      ok(!!m.unreadState() && m.unreadState().why === why && Buffer.compare(bytes(w.file), raw) === 0 && r && r.code === 'TASK_GROUPS_UNREAD' && r2 && r2.code === 'TASK_GROUPS_UNREAD' && said.length === 1, `⑨ bytes that ${why === 'did not parse' ? 'do NOT PARSE' : `are NOT the store's shape (${text})`}: HELD the same way — the bytes untouched by the boot and the refused acts, one notice`, { u: m.unreadState(), said: said.length });
+    }
+    // (d) an ABSENT file with the old tasks.json beside it still migrates forward; (e) an absent file alone starts empty
+    {
+      const w = world('legacy'); fs.writeFileSync(w.legacy, JSON.stringify(SEED));
+      const { m } = make(fresh(), w.dd);
+      const doc = fs.existsSync(w.file) ? JSON.parse(fs.readFileSync(w.file, 'utf8')) : null;
+      ok(!m.unreadState() && m.list().length === 1 && !!doc && !!doc.tasks['T-a1'] && fs.existsSync(w.legacy), '⑨ an ABSENT task-groups.json with the old tasks.json beside it: migrated forward (the new file written, the old left in place)', { groups: m.list().length });
+      const w2 = world('absent');
+      const { m: m2 } = make(fresh(), w2.dd);
+      ok(!m2.unreadState() && m2.list().length === 0 && fs.existsSync(w2.file) && JS(Object.keys(JSON.parse(fs.readFileSync(w2.file, 'utf8')).tasks)) === '[]', '⑨ an ABSENT file alone: an empty store, written (nothing was there to keep)');
+    }
+    // the agent routes ask the hold FIRST (never «no Task Group» for a store that is held, not empty)
+    ok(/function resolveAgentGroup\(hit, req, res\) \{[\s\S]{0,400}?tasks\.unreadRefusal\('this request'\)[\s\S]{0,200}?res\.status\(503\)\.json\(\{ error: held, code: 'TASK_GROUPS_UNREAD' \}\); return null; \}/.test(readSrc('src/agent-routes.js')), '⑨ the agent routes\' group resolution answers a held store BY NAME (503, TASK_GROUPS_UNREAD) before it looks for the group');
+    // GONE SINCE THE HOLD (the reader's must): a held store whose file is then NOT THERE (a detached mount) stays HELD — no empty store
+    {
+      const w = world('gone'); fs.writeFileSync(w.file, JSON.stringify(SEED));
+      const { m } = failing(w.file, 'EIO', () => make(fresh(), w.dd));
+      fs.rmSync(w.file);
+      const r = await m.readAgain();
+      ok(r === false && !!m.unreadState() && m.unreadState().code === 'ENOENT' && !fs.existsSync(w.file) && !!tried(() => m.create({ title: 'x' })), '⑨ a held store whose file is then GONE (a detached mount): STILL HELD — no empty store written, no migration, acts still refused (the next START judges a truly absent file)', m.unreadState());
+    }
+    // more shapes that are not the store: an ARRAY of tasks, a NULL record — held (never a boot that crashes or a save that drops them)
+    for (const [name, doc] of [['arr', { version: 1, tasks: [] }], ['nullrec', { version: 1, tasks: { 'T-a1': null } }]]) {
+      const w = world(name); const raw = Buffer.from(JSON.stringify(doc)); fs.writeFileSync(w.file, raw);
+      const { m } = make(fresh(), w.dd);
+      ok(!!m.unreadState() && m.unreadState().why === 'not the expected shape' && Buffer.compare(bytes(w.file), raw) === 0, `⑨ a store of the wrong inner shape (${name === 'arr' ? 'tasks an array' : 'a null record'}): HELD, the bytes untouched`, m.unreadState());
+    }
+    // a start that READS closes a notice an earlier held start left (S1)
+    {
+      const w = world('stale'); fs.writeFileSync(w.file, JSON.stringify(SEED));
+      const { m, closed } = make(fresh(), w.dd);
+      await new Promise((r) => setImmediate(r));
+      ok(!m.unreadState() && closed.length === 1, '⑨ a start that READS closes the For-you notice an earlier held start filed (it never outlives a store that reads)', { closed: closed.length });
+      // an archived MONTH that could not be read is never rewritten by an import (strict read refuses by name; a plain read is [])
+      const mf = path.join(w.dd, 'task-groups-archive', 'T-a1', '2026-01.ndjson'); fs.mkdirSync(path.dirname(mf), { recursive: true }); fs.writeFileSync(mf, '');
+      const sx = failing(mf, 'EIO', () => tried(() => m._monthEntries('T-a1', '2026-01.ndjson', { strict: true })));
+      const plain = failing(mf, 'EIO', () => m._monthEntries('T-a1', '2026-01.ndjson'));
+      ok(!!sx && sx.code === 'TASK_GROUPS_UNREAD' && /an import was refused/.test(sx.message) && JS(plain) === '[]', '⑨ an archived month that could not be read: the import\'s strict read REFUSES by name (never rewritten); a plain read stays empty', sx);
+    }
+    // the roads around the store ask the hold FIRST (source pins: the routes, the migrations, the conversation binds, the backup)
+    {
+      const WR = readSrc('src/server/task-groups-wiring.js'), PS = readSrc('src/routes/persistence.js'), CO = readSrc('src/server/conversation-ops.js'), MG = readSrc('src/server/migrations.js'), AR = readSrc('src/agent-routes.js');
+      ok(/app\.use\('\/api\/tasks', \(req, res, next\) => \{[^\n]*tasks\.unreadRefusal\?\.\('this request'\)[^\n]*res\.status\(503\)/.test(WR) && /unread \? \{ unread \} : \{\}/.test(WR), '⑨ every Task Groups route but the list answers a held store BY NAME (503) before it reads a group; the list says `unread`');
+      ok((PS.match(/unreadRefusal\?\.\('a backup of Task Groups'\)|unreadRefusal\?\.\('an import of Task Groups'\)/g) || []).length === 2, '⑨ the backup\'s export and import ask the hold before anything (an import refused WHOLE, before any section is applied)');
+      ok(/if \(D\(\)\.tasks\.unreadState\?\.\(\)\) return 0;/.test(CO) && /O\(\)\.tasksUnread\('adding a conversation to a Task Group'\)/.test(CO) && /const tasksUnread = \(act\) => \{ const t = D\(\)\.tasks;/.test(CO), '⑨ the birth binds WAIT for the lift (never consumed); the automation bind answers the hold by its name');
+      ok((MG.match(/unreadRefusal\('this migration'\) : null; if \(held\) throw new Error\(held\);/g) || []).length === 2, '⑨ the two migrations that touch the store refuse while it is held (never marked done over an empty or held store)');
+      ok(/app\.post\('\/api\/agent\/group-admin'[\s\S]{0,200}?tasks\.unreadRefusal\('this request'\)/.test(AR), '⑨ group-admin answers a held store by its name (never an empty list)');
+    }
+    // RED CONTROL — the release's own _load (its catch read every failure as «no file»), its PLANT PROVEN FIRST
+    {
+      const src = readSrc('src/task-groups.js');
+      const a = src.indexOf('  _load() {\n'), b = src.indexOf('  // ── THE STORE HELD UNREAD (see STORE_SHAPE above) ──');
+      const RELEASE_LOAD = "  _load() {\n    for (const [f, legacy] of [[this._file, false], [this._legacyFile, true]]) {\n      let parsed;\n      try { parsed = timedSync('task-groups.read', () => JSON.parse(fs.readFileSync(f, 'utf-8'))); } catch { continue; }\n      if (!parsed || typeof parsed.tasks !== 'object') continue;\n      this._state = parsed;\n      if (legacy) this._save(); // migrate tasks.json → task-groups.json\n      return true;\n    }\n    this._state = { version: 1, tasks: {} };\n    return false;\n  }\n\n";
+      const mut = a > 0 && b > a ? src.slice(0, a) + RELEASE_LOAD + src.slice(b) : null;
+      ok(!!mut && mut.includes("} catch { continue; }") && !mut.includes('const a = SR.storeAnswer(read(this._file)'), '⑨ RED CONTROL proves its plant first: the copy carries the release\'s _load (its catch-continue) and not the store read', { a, b });
+      const w = world('red'); const seed = Buffer.from(JSON.stringify(SEED)); fs.writeFileSync(w.file, seed);
+      const M = mutantCopies('tg-unread', REPO);
+      const TGM0 = mut ? M.load('src/task-groups.js', mut, 'r0').TaskGroupManager : null;
+      const after = TGM0 ? (failing(w.file, 'EIO', () => make(TGM0, w.dd)), bytes(w.file)) : null;
+      ok(!!after && Buffer.compare(after, seed) !== 0 && JS(Object.keys(JSON.parse(after.toString('utf8')).tasks)) === '[]', '⑨ RED CONTROL — the release\'s own catch: a read that failed at the boot WROTE AN EMPTY STORE OVER task-groups.json (the defect itself; the legs above go red)', after ? after.toString('utf8').slice(0, 80) : null);
+    }
+  } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

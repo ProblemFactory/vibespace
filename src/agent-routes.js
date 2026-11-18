@@ -506,6 +506,10 @@ function agentSession(req, res) {
 // without --group → 400 (agent must disambiguate). Returns a group id or null
 // (and has already replied).
 function resolveAgentGroup(hit, req, res) {
+  // THE STORE HELD UNREAD (lane bl-windows): task-groups.json could not be read — the request is refused BY NAME, never
+  // «no Task Group» (the store is held, not empty: an agent's progress line or a parked row must not vanish in silence)
+  const held = typeof tasks.unreadRefusal === 'function' ? tasks.unreadRefusal('this request') : null;
+  if (held) { res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); return null; }
   const [s, id] = hit;
   const key = sessionStatusKey(s, id);
   const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
@@ -1560,6 +1564,7 @@ app.post('/api/agent/task-backlog', (req, res) => {
 app.post('/api/agent/group-admin', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
+  { const held = typeof tasks.unreadRefusal === 'function' ? tasks.unreadRefusal('this request') : null; if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); }   // THE STORE HELD UNREAD (lane bl-windows): never an empty list for a held store
   const [s, id] = hit;
   const key = sessionStatusKey(s, id);
   try {

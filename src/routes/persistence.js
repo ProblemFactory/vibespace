@@ -1158,6 +1158,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   router.post('/api/config/export', (req, res) => (async () => {   // async (lane vault-contents-window r2: the second password's derive) — a throw still answers 500
     const { sections = [], includeSensitive = [], passphrase, clientPrefs } = req.body || {};
+    { const held = Array.isArray(sections) && sections.includes('tasks') ? getTasks?.()?.unreadRefusal?.('a backup of Task Groups') : null; if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); }   // THE STORE HELD UNREAD (lane bl-windows): never a backup that silently holds no groups
     const secondPassword = req.body ? req.body.secondPassword : undefined;   // lane vault-contents-window r2: taken off the request at once
     if (req.body) delete req.body.secondPassword;
     const file = {
@@ -1239,6 +1240,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // lane engine-spi-egress L1b r2 (V3): a bearer's import whose settings section would set, change or drop an engine's program / site
     // list row is refused WHOLE — all or nothing: no section of it is applied
     if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(req, res, file.sections.settings)) return;
+    { const held = sections.includes('tasks') && file.sections.tasks !== undefined ? getTasks?.()?.unreadRefusal?.('an import of Task Groups') : null; if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); }   // THE STORE HELD UNREAD: refused WHOLE before any section is applied
     const applied = [];
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;

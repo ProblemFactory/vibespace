@@ -640,6 +640,8 @@ export default {
   "Yolo": "Yolo",
   "Folders (sessions by directory)": "文件夹（按目录分组会话）",
   "Task Groups": "任务组",
+  "Task Groups cannot be read right now — {file} in VibeSpace's data folder could not be read ({code})": "任务组暂时无法读取 —— VibeSpace 数据文件夹里的 {file} 读不出来（{code}）",
+  "It is kept exactly as it is: nothing writes it. Until it reads, Task Groups are not shown and nothing is recorded — an agent's progress line or a parked row is refused, and the agent is told. VibeSpace reads it again every few minutes and at every start; check the storage that holds the data folder.": "它原样保留，不会被写入。在它能读取之前，任务组不显示，也不记录任何内容 —— 代理的进度行或暂存的待办会被拒绝，并告知代理。VibeSpace 每隔几分钟以及每次启动时都会再读一次；请检查存放数据文件夹的存储。",
   "Remote": "远程",
   "Groups (board with member sessions)": "组看板（含成员会话）",
   "Tasks (flat list, sorted by urgency)": "任务平铺（按紧急度排序）",

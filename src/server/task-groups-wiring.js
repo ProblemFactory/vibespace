@@ -16,7 +16,7 @@
 //   ctxSync      — the remote context-folder auto-sync, its 60 s timer and the path translation  (785–792, 795–863)
 
 /** → { tasks, taskFanout } — `exitProxy`, `channelsWiring`, `sessionStatus`, `mounts` are getters (server.js defines them later) */
-function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRouter, serverSetting, sessionStatusKey, dataDir, exitProxy, channelsWiring, sessionStatus, mounts }) {
+function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRouter, serverSetting, sessionStatusKey, dataDir, exitProxy, channelsWiring, sessionStatus, mounts, userTodos = () => null }) {
   // ── Task Groups (岗位; task system — docs/design-task-system.md + refactor) ──
   // data/task-groups.json is AUTHORITATIVE for everything the board renders (the
   // store migrates the legacy data/tasks.json forward once). The one-time legacy
@@ -43,6 +43,14 @@ function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRou
         }
       } catch (e) { console.warn('[browser] the Task Group change re-judge failed — ' + (e && e.message)); }
     },
+    // THE STORE HELD UNREAD (lane bl-windows 2026-11-18): task-groups.json could not be read — the person is told ONCE by a For-you
+    // notice (origin server, «This machine»), lifted when the store reads again. `userTodos` is a getter: server.js builds the
+    // For-you store later than this one, so a hold at the boot is said once it exists (the store tries again; a throw = not yet)
+    unreadNotice: {
+      say: (w) => { const td = userTodos(); if (!td) return null; const it = td.add('task-groups-unread', { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Task Groups', text: w.text, detail: w.detail, i18n: w.i18n }); return it && it.id ? it.id : null; },
+      lift: (id) => { const td = userTodos(); if (!td || !id) return; const open = td.idsWhere((i) => i.id === id && i.status === 'open'); if (open.length) td.setStatusMany(open, 'done', 'system'); }, // only an OPEN one (a person's dismissal stays theirs)
+      closeOpen: () => { const td = userTodos(); if (!td) throw new Error('the For-you store is not up yet'); const open = td.idsWhere((i) => i.sessionKey === 'task-groups-unread' && i.status === 'open'); if (open.length) td.setStatusMany(open, 'done', 'system'); },   // a held boot's notice, when a later start reads
+    },
   });
   const taskFanout = require('./task-fanout.js').create({ list: () => tasks.list(), send: (json) => wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } }) }); // lane task-group-fanout: the ONE tasks-updated broadcaster ({epoch, base, seq} — a client off `base` re-fetches)
   return { tasks, taskFanout };
@@ -51,7 +59,10 @@ function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRou
 /** the Task Groups' routes, mounted where server.js mounted them → { convOps } (server.js reads it later: the session list's notify
  *  point settles birth groups through it) */
 function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, serverSetting, sessionStatusKey, spendGuard }) {
-  app.get('/api/tasks', (req, res) => { const at = taskFanout.mark(); res.json({ tasks: tasks.list(), ...at }); }); require('./task-context-routes.js').mount(app, { tasks, serverSetting }); // lane task-group-context: the Context table's preview + path probe (no new line — the size ratchet)
+  // THE STORE HELD UNREAD (lane bl-windows): every Task Groups route but the list answers a held store BY NAME (503, TASK_GROUPS_UNREAD)
+  // before it reads a group (never «not found» for a store that is held, not empty); the list answers none, with `unread` saying why
+  app.use('/api/tasks', (req, res, next) => { const held = req.method === 'GET' && (req.path === '/' || req.path === '') ? null : tasks.unreadRefusal?.('this request'); if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); next(); });
+  app.get('/api/tasks', (req, res) => { const at = taskFanout.mark(); const unread = tasks.unreadState?.() || null; res.json({ tasks: tasks.list(), ...at, ...(unread ? { unread } : {}) }); }); require('./task-context-routes.js').mount(app, { tasks, serverSetting }); // lane task-group-context: the Context table's preview + path probe (no new line — the size ratchet)
   app.post('/api/tasks', (req, res) => {
     try { res.json({ success: true, task: tasks.create(req.body || {}) }); }
     catch (e) { res.status(400).json({ error: e.message }); }

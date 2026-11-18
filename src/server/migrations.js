@@ -651,11 +651,12 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       id: '2026-08-archive-dormant-task-plans',
       note: 'dormant checklist plan arrays (feature removed 2.121.0) → data/archive/',
       run() {
+        { const tm0 = typeof tasks === 'function' ? tasks() : tasks; const held = tm0 && typeof tm0.unreadRefusal === 'function' ? tm0.unreadRefusal('this migration') : null; if (held) throw new Error(held); }   // THE STORE HELD UNREAD (lane bl-windows): never a write of a held store — run again at the next start
         const f = path.join(dataDir, 'task-groups.json');
         let doc; try { doc = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return; } // no store yet = nothing to do
-        const tasks = doc.tasks || {};
+        const recs = doc.tasks || {};   // (named apart from the live store `tasks` the hold check above asks — lane bl-windows)
         const archived = {};
-        for (const [id, t] of Object.entries(tasks)) {
+        for (const [id, t] of Object.entries(recs)) {
           if (t && Array.isArray(t.plan) && t.plan.length) { archived[id] = t.plan; delete t.plan; }
           else if (t && 'plan' in t) delete t.plan;
         }
@@ -754,6 +755,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         try { const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'user-state.json'), 'utf-8')); archived = Array.isArray(st && st.archivedSessions) ? st.archivedSessions.map(String) : []; } catch { return { archived: 0 }; }
         if (!archived.length) return { archived: 0 };
         const tm = typeof tasks === 'function' ? tasks() : tasks;
+        { const held = tm && typeof tm.unreadRefusal === 'function' ? tm.unreadRefusal('this migration') : null; if (held) throw new Error(held); }   // THE STORE HELD UNREAD (lane bl-windows): a dry run over the EMPTY held store would mark it done with nothing pruned — run again at the next start
         const f = path.join(dataDir, 'task-groups.json');
         let doc = null;
         if (!tm || typeof tm.unbindKeys !== 'function') {
