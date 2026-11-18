@@ -2101,9 +2101,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // (a burst of grants is one write) and on close — a restart keeps every
   // floor (the in-memory Map it replaces forgot them all). Small by
   // construction: the engine prunes it to its windows on every change.
-  // lane lg-store-writes (B-0248 U3): its bytes go to THE STORE WRITER (owe — PACED: a lost last write is one floor a
-  // restart forgets); a flush asked (close, a suite) lands what is owed through the writer, waited for. A BLOCKED ledger
-  // keeps its old road: never overwritten, said a moment after each change.
+  // lane lg-store-writes (B-0248 U3): its bytes go to THE STORE WRITER (owe — PACED, ≥ 0.5 s: a lost last write is one
+  // floor a restart forgets — one possibly earlier, billed wake, which spend-guard still gates); a flush asked (close, a
+  // suite) lands what is owed through the writer, waited for. A BLOCKED ledger keeps its old road: never overwritten, said
+  // a moment after each change. After close() owe() writes at once: a failed write is SAID here, never thrown into the
+  // groups engine (as the release's flush did).
   const paceFile = path.join(dir, 'wake-pace.json');
   const pcLoad = loadJsonFamily(paceFile, (v) => v && typeof v === 'object' && !Array.isArray(v), () => ({ v: 1, pairs: {}, senders: {} }));
   let pc = pcLoad.value;
@@ -2119,14 +2121,16 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function paceSet(next) {
     pc = next;
     if (pcLoad.blocked) { paceDirty = true; if (closed) paceRefusedSay(); else if (!paceTimer) { paceTimer = setTimeout(paceFlush, 100); if (paceTimer.unref) paceTimer.unref(); } return; }
-    owe(paceFile, { name: 'channels-wake-pace.write', produce: jsonOf(() => pc) });
+    try { owe(paceFile, { name: 'channels-wake-pace.write', produce: jsonOf(() => pc) }); } catch (e) { warn('[channels]', (e && e.message) || e); }   // «wake-pace.json not written: …» (writeNow's own words)
   }
 
   // ── THE DISPATCH LEDGER (lane worker-dispatch verify r1 ②): the same shape as the pace ledger — held LIVE, written
   // atomically a moment after a change and on close, a BLOCKED file never overwritten (said each time). The PURE rules
   // are src/dispatch-model.js replayVerdict; the groups engine owns the calls and prunes it to the model's windows.
-  // lane lg-store-writes (B-0248 U3): through THE STORE WRITER as an ACT (rank 0, its durable() asked — the writer's next
-  // write): the entry a restart mid-wait replays from (`compactAt` before the frame) is not left to the pace.
+  // lane lg-store-writes (B-0248 U3): through THE STORE WRITER as an ACT (rank 0, its durable() asked — urgent, not
+  // awaited): the entry a restart mid-wait replays from (`compactAt`) is handed to the writer before the frame and lands
+  // after the write in flight and at most one paced write (2K + 1 writes for K acts owed) — a kill in that gap re-compacts
+  // once on the retry (spend-guard gates the wake). After close() a failed write is said, never thrown.
   const dispatchFile = path.join(dir, 'dispatch-ledger.json');
   const dlLoad = loadJsonFamily(dispatchFile, (v) => v && typeof v === 'object' && !Array.isArray(v) && v.entries && typeof v.entries === 'object', () => ({ v: 1, entries: {} }));
   let dl = dlLoad.value;
@@ -2141,8 +2145,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function dispatchSet(next) {
     dl = next;
     if (dlLoad.blocked) { dlDirty = true; if (closed) dispatchRefusedSay(); else if (!dlTimer) { dlTimer = setTimeout(dispatchFlush, 100); if (dlTimer.unref) dlTimer.unref(); } return; }
-    owe(dispatchFile, { name: 'channels-dispatch.write', act: true, produce: jsonOf(() => dl) });
-    if (!closed) W().durable(dispatchFile).catch(() => { });   // urgent: the writer's next write (a failure is the writer's said line)
+    try { owe(dispatchFile, { name: 'channels-dispatch.write', act: true, produce: jsonOf(() => dl) }); } catch (e) { warn('[channels]', (e && e.message) || e); }   // «dispatch-ledger.json not written: …»
+    if (!closed) W().durable(dispatchFile).catch(() => { });   // urgent (a failure is the writer's said line)
   }
 
   /** The audit log's LIVE tail (today's file), newest last, bounded. A

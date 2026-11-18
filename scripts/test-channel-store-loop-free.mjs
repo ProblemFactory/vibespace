@@ -21,6 +21,8 @@
 //       poll-stamps journal keeps every stamp set after the side file's bytes were made (folded down to them — cure r1;
 //       the bound across many snapshots is test-channel-store-writer-laws (h)).
 //   (e) close() writes every moved file through the writer; (f) the key-mint check reads the store's live records.
+//   (g) lane lg-store-writes U3 (B-0248): a dispatch-ledger set is an ACT (rank 0, durable() asked — urgent), a wake-pace
+//       set is PACED; RED: a mutant copy without the durable() line.
 // Run: node scripts/test-channel-store-loop-free.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -225,5 +227,37 @@ console.log('(e) close() writes every moved file through the writer; (f) the key
 
 
 try { SW.storeWriter().stop(); } catch { }
+// ═══ (g) lane lg-store-writes U3 (B-0248, reader round 1): the dispatch ledger is the writer's NEXT write ═══
+console.log('(g) the dispatch ledger is an ACT — rank 0 and durable() asked at every set (urgent); the wake-pace ledger PACED (no durable())');
+{
+  const calls = [];
+  const real = SW.create({ log: quiet });
+  const spy = { ...real,
+    dirty: (f, o) => { calls.push({ k: 'dirty', f: path.basename(f), name: o && o.name, rank: o && o.rank }); return real.dirty(f, o); },
+    durable: (f, o) => { calls.push({ k: 'durable', f: path.basename(f) }); return real.durable(f, o); } };
+  const legOf = (Mod, tag) => {
+    calls.length = 0;
+    const dir = path.join(ROOT, 'g-' + tag); fs.mkdirSync(dir, { recursive: true });
+    const st = Mod.createChannelStore({ dir, log: quiet, writer: spy });
+    st.pace.set({ v: 1, pairs: { g: 1 }, senders: {} });
+    st.dispatch.set({ v: 1, entries: { g: { at: 1 } } });
+    const c = calls.slice();
+    st.close();
+    return { disp: c.filter((x) => x.f === 'dispatch-ledger.json'), pace: c.filter((x) => x.f === 'wake-pace.json') };
+  };
+  const g = legOf(CS, 'moved');
+  ok(g.disp.some((x) => x.k === 'dirty' && x.name === 'channels-dispatch.write' && x.rank === 0) && g.disp.some((x) => x.k === 'durable')
+    && g.pace.some((x) => x.k === 'dirty' && x.name === 'channels-wake-pace.write' && x.rank === undefined) && !g.pace.some((x) => x.k === 'durable'),
+    '(g) a dispatch set hands the ledger as channels-dispatch.write, rank 0, and asks durable() (urgent); a wake-pace set is paced — no rank, no durable()', g);
+  const csSrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf8');
+  const aD = '    if (!closed) W().durable(dispatchFile).catch(() => { });';
+  ok(csSrc.split(aD).length === 2, '(g) ANCHOR: the dispatch ledger\'s one durable() line');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const NoUrgent = mutantCopies('loop-free-g', REPO).load('src/channel-store.js', csSrc.replace(aD, '   '), 'no-urgent');
+  const r = legOf(NoUrgent, 'red');
+  ok(!r.disp.some((x) => x.k === 'durable') && r.disp.some((x) => x.k === 'dirty'), '(g) CONTROL: the durable() line removed ⇒ the ledger waits for the pace (no durable() asked) — the check above would be red', r);
+  real.stop();
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -305,7 +305,7 @@ process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }
     store.pace.set({ v: 1, pairs: {}, senders: {} });
     store.dispatch.flush();
     const onDisk = JSON.parse(fs.readFileSync(path.join(tmp, 'channels', 'dispatch-ledger.json'), 'utf8'));
-    ok(Object.values(onDisk.entries || {}).some((e) => e.to === cidN(11) && e.compactAt && !e.deliveredAt), '②: the ledger is ON DISK before the frame — a restart remembers the ask', onDisk);
+    ok(Object.values(onDisk.entries || {}).some((e) => e.to === cidN(11) && e.compactAt && !e.deliveredAt), '②: the ledger holds the ask (compactAt) once its flush returns — handed to the store writer before the frame, a restart remembers it', onDisk);
     const rN = await run(wN, cidN(11));
     ok(rN.ok && of(wN).filter((x) => /\/compact/.test(x.text)).length === 1 && of(wN).filter((x) => x.kind === 'inbox').length === 1 && rN.record.compacted === 'skipped' && /earlier attempt of this same brief already asked/.test(rN.record.why) && rN.record.wake.billed === true, '②: the retry after a restart mid-wait compacts NOTHING (ONE /compact per brief) and posts the brief once, said', rN.record);
     ok(require(path.join(REPO, 'src/server/compaction-watch.js')).pendingWaiters() === 0, 'no waiter left behind after every leg (the dead attempt waited on its own never-resolving stand-in, as a dead process would)');

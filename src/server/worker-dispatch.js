@@ -127,7 +127,7 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
       const sendUserInput = getSendUserInput();
       inFlight.add(cid);
       try {
-        if (ledger) { try { ledger.set(key, { from, to: cid, compactAt: now() }); } catch { } }   // persisted BEFORE the frame: a restart mid-wait remembers the ask
+        if (ledger) { try { ledger.set(key, { from, to: cid, compactAt: now() }); } catch { } }   // handed to the store writer BEFORE the frame (urgent, not awaited — lane lg-store-writes U3): a restart mid-wait remembers the ask once it lands
         const byS = liveOf(from).s;
         const by = { cid: from, name: cleanName((byS && byS.name) || '') || String(from).slice(0, 8) };
         // the facts above were read in THIS tick (no await since): the target is idle, and the typing sender marks

@@ -22,8 +22,9 @@
 //     is on disk; the day's counter is an ACT (decision-usage.write, rank 0, 0600, durable() asked) — the CALL waits
 //     for it, never the loop —, the memo PACED (decision-memo.write); the bytes are the state when the write is due; a
 //     FAILED write is said ONCE and the next landing once; a new engine reads both back; an engine made again while a
-//     write is owed lands it first; a memo hit waits on nothing — RED (a mutant copy): the writes made on the main
-//     thread at the change ⇒ the files are there at once.
+//     write is owed lands it first; a memo hit waits on nothing; the TEXT-MODEL CLIENT (the drafter) has not answered
+//     while its counter is owed — RED (mutant copies): the writes made on the main thread at the change ⇒ the files are
+//     there at once; the drafter's settle not awaited ⇒ it answers while its counter is owed.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -298,6 +299,30 @@ console.log('⑩ the loop never waits on the decision files — the memo PACED, 
   const asks = a.rec.durables.length, fetches = a.w.fetches;
   const hit = await Promise.race([a.w.judge({ memo: { id: 'sw-1', rule: 'r' } }), new Promise((res) => setTimeout(() => res('waited'), 500))]);
   ok(hit && hit.ok && hit.memo === true && a.w.fetches === fetches && a.rec.durables.length === asks, 'a memo hit changes no counter and waits on nothing (no durable() asked, no fetch)', hit);
+  // the TEXT-MODEL CLIENT (the drafter) keeps the same law (reader round 1): its answer waits for the counter its call changed
+  const tmLeg = async (TMmod, tag) => {
+    const rec = standIn(), dataDir = path.join(ROOT, 'sw-tm-' + tag); fs.mkdirSync(dataDir, { recursive: true });
+    const KEYTM = ['sk-or-v1-', 'c'.repeat(40)].join('');
+    const integrations = { resolveIntegration: () => ({ values: { provider: 'openrouter', apiKey: KEYTM, model: '' }, source: 'user' }) };
+    const fetchImpl = async () => ({ status: 200, ok: true, headers: { get: () => null }, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }], usage: { prompt_tokens: 40, completion_tokens: 5, cost: 0.002 } }) });
+    const e = DE.create({ dataDir, writer: rec, fetchImpl, now: () => Date.UTC(2026, 9, 13, 12), tzOffset: () => 0, log: quiet, integrations });
+    e.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ rules: true, dailyBudgetCents: 100, learnModel: 'flash' }) });
+    const tm = TMmod.create({ integrations, ledger: e.ledger, fetchImpl, now: () => Date.UTC(2026, 9, 13, 12), log: quiet });
+    let done = false;
+    const p = tm.complete({ use: 'learn', messages: [{ role: 'user', content: 'x' }], schema: {}, est: 500 }).then((r) => { done = true; return r; });
+    await until(() => rec.durables.length >= 1); await tick(); await tick();
+    const waited = !done;
+    rec.land(); const r = await p;
+    return { waited, ok: r.ok, why: r.why, asked: rec.durables.length, usd: e.status().today.byUse.learn ? e.status().today.byUse.learn.usd : 0 };
+  };
+  const t1 = await tmLeg(require(path.join(REPO, 'src/server/text-model-client.js')), 'moved');
+  ok(t1.waited && t1.ok && t1.asked >= 1 && t1.usd > 0, 'the text-model client (the drafter) has NOT answered while the counter its call changed waits for the disk — it answers once the counter lands', t1);
+  const tmSrc = fs.readFileSync(path.join(REPO, 'src/server/text-model-client.js'), 'utf8');
+  const aT = '    await ledger.settle(hold, use, u, usd, est);';
+  ok(tmSrc.split(aT).length === 2, 'ANCHOR: the text-model client awaits its settle, once');
+  const TMno = mutantCopies('decision-budget-tm', REPO).load('src/server/text-model-client.js', tmSrc.replace(aT, '    ledger.settle(hold, use, u, usd, est);'), 'no-await');
+  const t2 = await tmLeg(TMno, 'red');
+  ok(!t2.waited && t2.ok, 'CONTROL: the settle not awaited ⇒ the drafter answers while its counter is still owed — the check above would be red', t2);
   // RED CONTROL: the change removed — the writes made on the main thread at the change (the old writeJsonAtomic shape)
   const engSrc = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
   const a3 = "  const W = () => writer || require('../store-writer.js').storeWriter();\n";

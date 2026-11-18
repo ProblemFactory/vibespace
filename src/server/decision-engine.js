@@ -89,9 +89,12 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   // lane lg-store-writes (B-0248 U1): THE MEMO AND THE DAY'S COUNTER GO THROUGH THE STORE WRITER (src/store-writer.js — its
   // own thread): the main loop never waits on their rename (decision-memo.json held the owner's hub 1.3 s and 1.5 s in one
   // calm hour on .396; a judged call wrote the counter up to three times). The memo is the hub's own cache — PACED (a lost
-  // last write re-asks the judge once); the counter is money — an ACT (rank 0, urgent: the writer's next write) and A CALL
-  // THAT CHANGED IT ANSWERS ONLY ONCE THE COUNTER HOLDING IT IS ON DISK (its own promise waits; the loop never does) —
-  // a kill after an answer never lowers the day's spend. The journal stays a named row (census debt).
+  // last write re-asks the judge once); the counter is money — an ACT (rank 0, urgent) and A CALL
+  // THAT CHANGED IT ANSWERS ONLY ONCE THE COUNTER HOLDING IT IS ON DISK (its own promise waits; the loop never does): an
+  // ANSWERED call's cost is on disk. The gap left is «billed, not answered yet» — a kill between the vendor's answer and the
+  // counter's landing — the write in flight, at most one paced write (the writer alternates acts and paced stores;
+  // 2K + 1 writes for K acts owed), then its own: ms on a local disk, seconds on the slow mount — forgets that one call;
+  // the release's synchronous write had a window of the same kind. The journal stays a named row.
   const W = () => writer || require('../store-writer.js').storeWriter();
   // A LOAD READS WHAT THIS PROCESS STILL OWES: an engine made again in the same process (a suite's restart) lands the
   // write the last one handed the writer BEFORE it reads the files — a hub's boot owes nothing (no wait)

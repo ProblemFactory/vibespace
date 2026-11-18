@@ -129,7 +129,7 @@ function createOutstanding(dir = null, { log = (...a) => console.log(...a), now 
       W().dirty(file, { name: 'turn-carry-outstanding.write', ...(act ? { rank: 0 } : {}),
         produce: () => { if (planted) { planted = false; throw new Error('planted at the file write'); } return JSON.stringify(rows); },
         onWritten: (ok, e) => { if (!ok) unsaved(e); } });
-      if (act) W().durable(file).catch(() => { });   // urgent: the writer's next write; a failure is said by onWritten
+      if (act) W().durable(file).catch(() => { });   // urgent (after the write in flight and at most one paced write); a failure is said by onWritten
       return true;
     } catch (e) { unsaved(e); return false; }
   }
