@@ -29,6 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
+import { fitVerdictSource, columnFactsSource, fits as fitsVerdict, columnReads } from './lib/fit-ladder.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -122,17 +123,23 @@ async function page({ vw, vh, mobile = false, query = '', sel }) {
   await until(`window.__ready === true && !!document.querySelector(${JSON.stringify(sel)})`, 200);
   await ev('document.fonts.ready.then(() => true)');
   const box = (s) => ev(`(() => { const d = document.querySelector(${JSON.stringify(s)}); if (!d) return null; const r = d.getBoundingClientRect(); return { x: Math.max(0, r.left - 6), y: Math.max(0, r.top - 6), width: Math.ceil(Math.min(innerWidth, r.width + 12)), height: Math.ceil(Math.min(innerHeight, r.height + 12)), left: r.left, right: r.right, vw: innerWidth }; })()`);
-  // FIT INSIDE the dialog: the dialog in the window, no part of it wider than it, nothing scrolling sideways
-  const fit = (s) => ev(`(() => { const d = document.querySelector(${JSON.stringify(s)}); if (!d) return null; const r = d.getBoundingClientRect(); const over = [...d.querySelectorAll('*')].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && (b.right > r.right + 0.5 || b.left < r.left - 0.5); }).map((e) => e.className || e.tagName).slice(0, 6); const sideways = [d, ...d.querySelectorAll('*')].filter((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible').map((e) => e.className || e.tagName).slice(0, 6); return { inWindow: r.left >= -0.5 && r.right <= innerWidth + 0.5, over, sideways }; })()`);
+  // FIT INSIDE the dialog — THE TREE's JUDGES, never a rule of this suite's own (主开发 13:46Z, after the hosted run): scripts/lib/
+  // fit-ladder.mjs. fitVerdictSource over the dialog — the LOCK's WORDS (a locked chip's name and words, a locked row's words) and the
+  // doors are never clipped (EVERY clip fails), nothing scrolls sideways (the dialog, its body); columnFactsSource over its body — the
+  // house law: an ellipsis whose tip (its own, its parent's or grandparent's title or aria-label) holds the WHOLE words is a preview
+  // (a plain row's name and hint at 280: the row's own title holds them); text past the column, a squeeze, a broken word fail.
+  const fit = async (s) => ({ inWindow: await ev(`(() => { const d = document.querySelector(${JSON.stringify(s)}); if (!d) return null; const r = d.getBoundingClientRect(); return r.left >= -0.5 && r.right <= innerWidth + 0.5; })()`),
+    v: await ev(fitVerdictSource(s, { controls: '.pp-chip-locked .pp-chip-door, .dialog-footer button', words: LOCK_WORDS, scrollers: s + ' .dialog-body' })), f: await ev(columnFactsSource(s + ' .dialog-body')) });
   // MUST 2: the refusal line and its door are not drawn before a refusal — in every dialog open
   const noRefusal = () => ev(`[...document.querySelectorAll('.vw-login-refusal, .vw-login-refusal-door')].every((e) => getComputedStyle(e).display === 'none' && e.getBoundingClientRect().width === 0)`);
   const shot = async (s, file) => { const b = await box(s); if (SHOTS && b) { fs.mkdirSync(SHOTS, { recursive: true }); const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: b.x, y: b.y, width: b.width, height: b.height, scale: 1 } }); fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r.result.data, 'base64')); } return b; };
   return { ev, until, box, fit, noRefusal, shot, close: () => { try { ws.close(); } catch { } } };
 }
 const LOGIN = '.vw-login-grant-dialog', Q = (s) => JSON.stringify(s);
+const LOCK_WORDS = '.pp-chip-locked .pp-chip-name, .pp-chip-locked .pp-chip-why, .pp-row.pp-locked .pp-lock-why';   // the lock's words: never clipped
 const textOf = (sel) => `(() => [...document.querySelectorAll(${Q(sel)})].map((d) => d.textContent || '').join(' | '))()`;
 const dialogs = (n) => `document.querySelectorAll(${Q(LOGIN)}).length >= ${n}`;
-const fits = (f) => !!f && f.inWindow && !f.over.length && !f.sideways.length;
+const fits = (x) => !!x && x.inWindow === true && fitsVerdict(x.v) && columnReads(x.f);
 console.log('① a login\'s 用于… — that login only; the star row\'s admit LOCKED «经由»; it fits 280–1440 inside; no refusal drawn');
 for (const [w, h, mobile] of [[280, 700, true], [360, 780, true], [768, 900, false], [960, 900, false], [1440, 900, false]]) {
   const p = await page({ vw: w, vh: h, mobile, query: 'mode=login', sel: LOGIN + ' .pp-chip-locked' });
@@ -143,7 +150,12 @@ for (const [w, h, mobile] of [[280, 700, true], [360, 780, true], [768, 900, fal
   ok(f.radios === 0 && f.title && f.picker && /经由：任何网站/.test(f.locked) && f.lockedX === 0 && f.door === '打开那份授权…' && /只在这个网站上/.test(f.consequence),
     `${w}: no radio; its title names THIS login; the house picker; the star row's admit a LOCKED chip «经由：任何网站» with its door «打开那份授权…» (the act, not the grant's name again) and NO ✕; the consequence speaks of this site only`, f);
   const fi = await p.fit(LOGIN);
-  ok(fits(fi), `${w}: the dialog is in the window and nothing inside it is wider than it or scrolls sideways`, fi);
+  ok(fits(fi), `${w}: the dialog is in the window, nothing scrolls sideways, the lock's words are whole on every locked chip and row, and nothing is cut but a preview whose tip holds its whole words`, fi);
+  if (w === 280) {   // RED CONTROL (主开发 13:46Z): a clipped text with NO tip is still red — the Everyone row's title taken away
+    const had = await p.ev(`(() => { const r = document.querySelector(${Q(LOGIN + ' .pp-row.pp-row-everyone')}); const t = r && r.getAttribute('title'); if (r) r.removeAttribute('title'); return t; })()`);
+    const fu = await p.fit(LOGIN);
+    ok(!!had && !!fu && !fits(fu) && fu.f.clipped.length > 0, '280 CONTROL: the Everyone row without its tip — its cut hint is a cut, and the fit names it', fu);
+  }
   ok(await p.noRefusal(), `${w}: no refusal line and no refusal door are drawn before a refusal`);
   if (w === 360 || w === 960) await p.shot(LOGIN, `login-dialog-${w}-zh.png`);
   if (w === 360) {
@@ -153,7 +165,9 @@ for (const [w, h, mobile] of [[280, 700, true], [360, 780, true], [768, 900, fal
     const after = await p.ev(`(() => ({ chips: document.querySelectorAll(${Q(LOGIN + ' .pp-chip')}).length, sel: (document.querySelector(${Q(ROW_B)}) || { getAttribute: () => '' }).getAttribute('aria-selected') }))()`);
     ok(row && row.locked && row.sel === 'true' && row.dis === 'true' && row.door === '打开那份授权…' && before === after.chips && after.sel === 'true', 'the locked list row is ticked, inert, and names its door as its chip does — a press on the row changes nothing', { row, before, after });
     console.log('② the locked row\'s door opens «任何网站…» as its own dialog');
-    await p.ev(`(document.querySelector(${Q(LOGIN + ' .pp-chip-locked .pp-chip-door')}).click(), true)`);
+    // the door of the conversation the STAR row admits (B, through «任何网站») — never the first locked chip: the roster lists the Task
+    // Groups first, and the group's lock goes through the SITE row, whose door opens the site's dialog (the hosted run's red, 2026-11-18)
+    await p.ev(`(document.querySelector(${Q(LOGIN + ' .pp-chip-locked[data-key="agent:conv-b"] .pp-chip-door')}).click(), true)`);
     const star = await p.until(`(() => { const t = ${textOf(LOGIN)}; return /在每个网站上/.test(t) ? t : null; })()`);
     ok(!!star && /以后添加的也算/.test(star), 'the door opens «任何网站…» as its own dialog, with its own consequence (every login on every site, the ones added later too)', String(star).slice(0, 300));
     ok(await p.noRefusal(), 'the «任何网站…» dialog draws no refusal line and no refusal door before a refusal');
