@@ -2959,7 +2959,7 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
     && /fetchJson\(`\/api\/browser\/engines\/\$\{encodeURIComponent\(id\)\}\/kernel`, \{ method: 'POST' \}\)/.test(ui)
     && ui.includes('const tick = () => { if (!line._kernelTick) line._kernelTick = setTimeout(() => { line._kernelTick = null; if (line.isConnected) again(); }, 1500); };')
     && ui.includes('    const step = kernelPollStep(r, line._kernelPolling);\n    line._kernelPolling = step.polling;\n    if (!step.redraw) { if (step.tick) tick(); return; }') && ui.includes('    if (step.tick) tick();\n')
-    && !/setInterval\(again/.test(ui) && /const words = kernelDownloadWords\(ans, t\);\n\s+if \(words\) this\._kernelSaid\.set\(id, words\);/.test(ui) && /b\.disabled = d\.busy \|\| this\._kernelAsks\.has\(d\.id\);/.test(ui)
+    && !/setInterval\(again/.test(ui) && /const words = kernelDownloadWords\(ans, t\);\n\s+if \(words\) this\._kernelSaid\.set\(id, words\);/.test(ui) && /b\.classList\.toggle\('is-busy', busy\);/.test(ui) && /if \(d\.busy \|\| this\._kernelAsks\.has\(d\.id\)\) \{ this\._kernelSaid\.set\(d\.id, t\('its kernel is already downloading'\)\); again\(\); return; \}/.test(ui) && !/b\.disabled = /.test(ui)
     && /, \.settings-engine-download \{ flex: none;/.test(css) && /\.settings-engine-doors \{/.test(css),
     'B-0bc7 wiring: the Settings engine row draws the doors with every engines answer, POSTs a press, asks the row again by the line\'s own tick while a kernel downloads (never a timer tied to the POST), disables a busy door, says each door\'s answer beside it — the row\'s own button rule (theme variables)');
   // CONTROL: a model copy whose doors skip a FAILED download (only «none yet») — the engine whose download failed would have no door

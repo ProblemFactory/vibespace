@@ -757,8 +757,9 @@ class SettingsUI {
         b.type = 'button';
         b.className = 'settings-engine-download';
         b.textContent = doors.length > 1 ? t('Download kernel: {plugin}', { plugin: d.label }) : t('Download kernel');
-        b.disabled = d.busy || this._kernelAsks.has(d.id);
-        b.onclick = () => this._downloadKernel(d.id, again);
+        const busy = d.busy || this._kernelAsks.has(d.id);
+        b.classList.toggle('is-busy', busy); // the control-says-why census: the door stays live — a press while it downloads SAYS so (never a dead button)
+        b.onclick = () => { if (d.busy || this._kernelAsks.has(d.id)) { this._kernelSaid.set(d.id, t('its kernel is already downloading')); again(); return; } this._downloadKernel(d.id, again); };
         if (!said.includes(d)) return [b];
         const w = document.createElement('span'); w.className = 'settings-engine-said'; w.textContent = this._kernelSaid.get(d.id);
         return [b, w];
