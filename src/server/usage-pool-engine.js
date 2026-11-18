@@ -38,7 +38,10 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
   resetCreditAckMs = null,
   // lane reset-path: the helper's codex command — default the one src/codex-thread-read.js is configured
   // with (server.js / cli-env, re-resolved with the CLI); a SUITE hands a stub app-server here
-  resetCreditHelper = null}) {
+  resetCreditHelper = null,
+  // lane auto-resume-bulk: the session list's ONE notify point (server.js broadcastActiveSessions) — a stop fact that
+  // appears or clears moves the sidebar card's chip and the filter's count; debounced here, one broadcast per burst
+  onSessionListChange = () => { }}) {
   RR.watch(USAGE_CACHE_DIR);   // B-403e: the readings folder — each reading asked once per synchronous run (a pass, a record, a broadcast)
   // the model facts' broadcaster (lane fable-52-cli-321): a verdict reached on either feed (a refusal) is told at once
   try { const MA = require('./model-ask.js'); MA.useBroadcast((s) => MA.broadcastFacts(s, s._webuiId, broadcastToSession)); } catch { }
@@ -2792,10 +2795,68 @@ function settleTurnLane(session) {
   resolveTurnLane(session, verdict, why);
 }
 
+// ── WHY A SESSION STOPPED — A FACT OF THE SESSION (lane auto-resume-bulk, .349) ──────────────────────────────────────
+// A turn the wall ended (onWalledTurn — the verdict this machine already takes) or the model's overload ended (the
+// harness's TYPED error: claude's assistant `error`, codex's `codexErrorInfo`) leaves `session._stoppedBy` behind —
+// PURE src/stopped-by.js decides it, this file writes it: in memory, in the session's meta (the spread idiom of
+// persistFallbackStamp, through the same lazy store), and on the live list (one debounced broadcast). It is cleared by
+// the next turn that RUNS (noteTurnRunning: the first main-thread output of a claude turn, codex task_started, an ACP
+// prompt) and by a turn that ends for any other reason. Nothing here spends or arms — the auto-resume wait keeps its
+// own ladder; this is what the card, the filter and the bulk resume read.
+const stoppedBy = require('../stopped-by.js');
+let _stoppedListTimer = null;
+function stoppedListChanged() {
+  if (_stoppedListTimer) return;
+  _stoppedListTimer = setTimeout(() => { _stoppedListTimer = null; try { onSessionListChange(); } catch { } }, 300);
+  if (_stoppedListTimer.unref) _stoppedListTimer.unref();
+}
+function persistStoppedBy(session) {
+  try {
+    if (!session || !session.sockName) return;
+    const prev = sessionMetaStore.readSessionMeta?.(session.sockName);
+    if (!prev || typeof prev !== 'object' || !Object.keys(prev).length) return; // no store, or no meta for this socket — memory only (never a stub file)
+    sessionMetaStore.writeSessionMeta?.(session.sockName, { ...(prev || {}), stoppedBy: session._stoppedBy || null });
+  } catch (e) { console.warn('[stopped-by] not persisted:', e.message); }
+}
+/** Write the stop fact (a verdict from stoppedBy.stopVerdict; null = nothing to write). */
+function noteStoppedBy(session, verdict) {
+  const f = stoppedBy.normalizeStoppedBy(verdict);
+  if (!session || !f) return null;
+  session._stoppedBy = f;
+  persistStoppedBy(session);
+  console.log(`[stopped-by] ${session._webuiId || '?'}: stopped by ${f.kind === 'quota' ? 'a usage limit' : 'an overloaded model'}${f.resetsAt ? ` (resets ${new Date(f.resetsAt).toISOString()})` : ''}`);
+  stoppedListChanged();
+  return f;
+}
+/** Clear it — the session runs again. Cheap when there is nothing to clear:
+ *  noteSessionProduced calls this on every main-thread record. */
+function clearStoppedBy(session, why = 'ran again') {
+  if (!session || !session._stoppedBy) return false;
+  session._stoppedBy = null;
+  persistStoppedBy(session);
+  console.log(`[stopped-by] ${session._webuiId || '?'}: cleared (${why})`);
+  stoppedListChanged();
+  return true;
+}
+/** A turn STARTED running (the harness said so) — the stop is over. */
+function noteTurnRunning(session) { try { clearStoppedBy(session, 'a turn started'); } catch { } }
+/** A TYPED error on the turn's main thread (claude: the assistant record's `error`; codex: task_failed's
+ *  codexErrorInfo, `final` — its task_failed IS the turn's end). The turn's LAST one is what its end reads; a later
+ *  record without one clears it (a retried error the turn got past is not why it stopped). */
+function noteTurnError(session, error, said = null, { final = false, at = null } = {}) {
+  if (!session) return;
+  session._turnLastError = error ? { error: String(error), said: typeof said === 'string' ? said : null } : null;
+  if (!final || !error) return;
+  const v = stoppedBy.stopVerdict({ lastError: error, overloadErrors: harnesses.overloadErrorsOf(session.backend), said, at: Number(at) > 0 ? Number(at) : Date.now() });
+  session._turnLastError = null;
+  if (v) noteStoppedBy(session, v);
+}
+
 /** Main-thread assistant output — work evidence for turn classification. */
 function noteSessionProduced(session, rec = null) {
   if (recordIsLate(session, rec)) return; // a backlog's work proves nothing about the turn running NOW
   if (session._turnWallSigs && session._turnWallSigs.length) session._turnWorkAfterSig = (session._turnWorkAfterSig || 0) + 1;
+  if (session._stoppedBy) noteTurnRunning(session); // lane auto-resume-bulk: a turn that produces is a turn that runs
 }
 /** The turn ended (claude `result` record / codex task_complete|task_failed).
  *  ALL wall-state transitions happen here and only here. */
@@ -2811,10 +2872,16 @@ function noteTurnEnd(session, rec = null) {
     session._turnLaneDefer = null; session._turnBannerLane = null;
     session._turnReadingSlot = null; session._turnWallRefile = null; session._turnWallRefuted = null; session._turnAsks = null;
     session._oatFileGen = null; // lane oat-identity-fix: a backlog's turn end says nothing about which token file the CLI holds
+    session._turnLastError = null; // lane auto-resume-bulk: …and a backlog's error is not why the session stopped NOW
     return;
   }
   persistRequestStamp(session); // the turn's last request outlives a restart (lane cache-warmth-tiles r1a′)
   const sigs = session._turnWallSigs || [];
+  // lane auto-resume-bulk: the turn's last TYPED error and the harness's own closing line, read once and cleared with
+  // the rest of the per-turn state (the walled branch below hands the line to onWalledTurn)
+  const lastError = session._turnLastError || null;
+  session._turnLastError = null;
+  const closingLine = rec && typeof rec.result === 'string' && rec.result ? rec.result : (lastError && lastError.said) || null;
   const workAfter = session._turnWorkAfterSig || 0;
   // THE LANE DECISION CLOSES WITH THE TURN (2026-09-13). It runs BEFORE the
   // signal list is swapped out, because resolving rewrites the provisional
@@ -2841,7 +2908,7 @@ function noteTurnEnd(session, rec = null) {
     // BLOCKED entry owns this turn's pool evaluation (B-2c9b): it runs AFTER
     // the demotion + the arm, so the link moves in the same tick and a hot
     // switch's fireNow() finds the session armed
-    try { onWalledTurn(session, sigs); } catch (e) { console.warn('[wall] blocked-entry failed:', e.message); }
+    try { onWalledTurn(session, sigs, closingLine); } catch (e) { console.warn('[wall] blocked-entry failed:', e.message); }
     clearRefile();
     return;
   }
@@ -2852,6 +2919,12 @@ function noteTurnEnd(session, rec = null) {
   // signals allowed to clear the loop breaker (round 4); a continue that
   // actually landed reaches this same line as its own turn's result
   try { getAutoResume()?.noteRecovered?.(session._webuiId, 'turn completed normally'); } catch { }
+  // lane auto-resume-bulk: a turn the MODEL'S OVERLOAD ended is a stop (the harness's typed error, its declared enum);
+  // any other turn end means the session ran — the mark clears
+  try {
+    const ov = lastError ? stoppedBy.stopVerdict({ lastError: lastError.error, overloadErrors: harnesses.overloadErrorsOf(session.backend), said: closingLine, at: Date.now() }) : null;
+    if (ov) noteStoppedBy(session, ov); else clearStoppedBy(session, 'turn completed');
+  } catch (e) { console.warn('[stopped-by] turn-end verdict failed:', e.message); }
 }
 
 /** A QUOTA READING ARRIVED FOR THIS SESSION — the harness-neutral half of the
@@ -3274,7 +3347,7 @@ function nearArmVeto(viaId, walledIds) {
   return has ? 'the verdict named a member that rejected this conversation as the way out' : null;
 }
 
-function onWalledTurn(session, sigs) {
+function onWalledTurn(session, sigs, said = null) {
   const id = session._webuiId;
   const model = sessionModelFor(session);
   const scope = _wallScope(session);
@@ -3286,6 +3359,15 @@ function onWalledTurn(session, sigs) {
   // BEFORE the verdict reads the cache (readings only confirm)
   let demoted = null;
   try { demoted = demoteWalledAccount(session, sigs); } catch (e) { console.warn('[wall] demotion failed:', e.message); }
+  // THE STOP IS A FACT OF THE SESSION (lane auto-resume-bulk) — written whether or not auto-resume is on (that is the
+  // whole point: with it off, nothing else remembers). The reset is the wall's own STATED one, else none (never a guess);
+  // the member is the slot the wall landed on (the demotion's key, else the signal's).
+  try {
+    const stated = Math.max(0, ...(sigs || []).map((s2) => (s2 && s2.resetsAtMs) || 0));
+    const resetsAt = stated || 0;   // U1 cure: the stated reset or none — the verdict's blockedUntil can be the engine's own bounded guess
+    const memberId = (demoted && demoted.key) || ((sigs || []).find((s2) => s2 && s2.key) || {}).key || null;
+    noteStoppedBy(session, stoppedBy.stopVerdict({ walled: true, resetsAt, memberId, said, at: Date.now() }));
+  } catch (e) { console.warn('[stopped-by] walled-turn fact failed:', e.message); }
   try {
     const ar = getAutoResume();
     if (!ar?.armIfEnabled) return;
@@ -8149,6 +8231,7 @@ function maybeStopOnFallback(session, id, from, to) {
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, noteServedModel, noteModelFallback, servedDefinesModel, projectionFamilyFor, rerouteAnnouncedBy, // the two stdout-fed model facts + the fallback predicate + the PROJECTION family + THE REROUTE THIS RECORD ANNOUNCES (2026-09-13: one implementation for the parse AND the device feed; r2: one rule for "which cap can refuse this turn"; r4: the fact is placed BEFORE its readers, at both feeds)
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,
     noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire,
+    noteStoppedBy, clearStoppedBy, noteTurnRunning, noteTurnError, // lane auto-resume-bulk: WHY a session stopped — the fact's writer/clearer and the turn-start + typed-error hooks the stdout consumers call
     noteStreamRecord, recordIsLate, liveFactVerdict, // a LATE record is not a live fact (lane-hot-switch): both feeds show every record to noteStreamRecord first
     laneIsProvisional, laneFromBanner, laneByEvidence, settleTurnLane, pendingLaneDeferrals, deferTurnLane, // the per-turn LANE decision (2026-09-13): a model-cap rejection arrives on the unscoped weekly lane (r3 exports `deferTurnLane` so its CAP — which drops a wall — can be driven; see the reachability note at LANE_DEFER_MAX)
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,

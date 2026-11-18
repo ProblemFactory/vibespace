@@ -143,6 +143,9 @@ function sessionFromMeta(meta, transportFacts) {
     // B-460d: the CPU priority the process STARTED with (src/server/spawn-priority.js factOf, spelled inline: this body is
     // compiled alone by test-oat-identity) — the running process keeps it across the hub's restart, so its properties do
     _cpuNice: meta.cpuNice && typeof meta.cpuNice === 'object' && Number.isInteger(meta.cpuNice.by) && meta.cpuNice.by >= 0 && meta.cpuNice.by <= 19 && (meta.cpuNice.by > 0 || ['off', 'no-nice', 'remote'].includes(meta.cpuNice.why)) ? (meta.cpuNice.by > 0 ? { by: meta.cpuNice.by } : { by: 0, why: meta.cpuNice.why }) : null,
+    // lane auto-resume-bulk: WHY it stopped (a usage wall / an overloaded model) survives a restart — the card keeps its
+    // mark until the session runs again
+    _stoppedBy: meta.stoppedBy && typeof meta.stoppedBy === 'object' ? meta.stoppedBy : null, // every reader re-validates it (src/stopped-by.js normalizeStoppedBy); this function is also evaluated stand-alone by suites, so it names nothing outside it
     // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
     // user-data-dir rung it spawned on. Restored so a later resume of this
     // conversation finds its key and the orphan sweep sees this session as

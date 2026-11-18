@@ -8,9 +8,11 @@ import { UI_ICONS } from './icons.js';
 import { shownText } from './record-clear-ui.js'; // "Clear content…": a cleared status reason is worded in this device's language
 import { sessionDisplayName } from '../session-name.js'; // lane session-title-record: THE name ladder
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE browser fact's words (the card's chip prints them)
+import { chipWords as stoppedChipWords } from '../stopped-by.js'; // lane auto-resume-bulk: WHY it stopped — the card's mark («因用量停止 · 重置 14:00»)
 import { stashHintChip } from './stash-strip.js'; // 2026-09-27: "N waiting" — what waits for this agent's next turn (the stash fact)
 import { stoppedWhyOf } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a stopped row says WHY (its process ended while the server was down)
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor, billingRow } from './agent-meta.js';
+const stopClock = (ms, now) => whenAt(ms, { now });   // the stop mark's time through the ONE formatter (page-time)
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
 const _s = (d, fill = false) => `<svg style="width:12px;height:12px;vertical-align:-2px" viewBox="0 0 16 16" fill="${fill ? 'currentColor' : 'none'}" stroke="${fill ? 'none' : 'currentColor'}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">${d}</svg>`;
@@ -407,6 +409,49 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       rchip.dataset.tip = tr('The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.');
     }
     stateChip.after(rchip);
+  }
+  // WHY IT STOPPED (lane auto-resume-bulk, .349 — a fleet power user, 2026-10-23: dozens of conversations stopped on
+  // usage walls the same day, and nothing on the list said which). A session a usage wall or an overloaded model
+  // stopped wears the mark until it RUNS again (the server clears the fact then) — on a LINE of its own under the
+  // card's path, so the words survive a narrow sidebar (the row's chips go icon-only below 190 px, and an hourglass
+  // alone says nothing): «因用量停止 · 重置 14:00» / «模型过载 · 停于 13:42» (PURE src/stopped-by.js chipWords), and
+  // beside it its auto-resume state «自动继续：开/关» — a click flips it through the chat chip's own road (ws
+  // `auto-resume` + the resume carrier). SVG icons (the icon law), escaped text.
+  const stopF = s.stoppedBy && typeof s.stoppedBy === 'object' && s.webuiId ? s.stoppedBy : null;
+  const stopW = stopF ? stoppedChipWords(stopF, tr, { autoResumeOn: stopF.autoResume === true ? true : stopF.autoResume === false ? false : null, waiting: stopF.waiting === true, clock: stopClock }) : null;
+  if (stopW) {
+    const line = document.createElement('div');
+    line.className = `session-card-stop ${stopW.cls}`;
+    const wchip = document.createElement('span');
+    wchip.className = `sess-stopped-chip ${stopW.cls}`;
+    wchip.innerHTML = `<span class="chip-icon">${UI_ICONS.hourglass || ''}</span><span class="chip-text">${escHtml(stopW.text)}</span>`;
+    wchip.dataset.tip = stopW.tip;
+    line.appendChild(wchip);
+    if (stopW.toggle) {
+      const tchip = document.createElement('button');   // a control: focus + keyboard (a span took neither)
+      tchip.type = 'button';
+      const paintToggle = (on) => {
+        tchip.className = 'sess-stopped-autoresume' + (on ? ' on' : '');
+        tchip.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const words = stoppedChipWords(stopF, tr, { autoResumeOn: on, waiting: on ? stopF.waiting === true : null, clock: stopClock });
+        tchip.innerHTML = `<span class="chip-icon">${UI_ICONS.autoContinue || ''}</span><span class="chip-text">${escHtml(words.toggle)}</span>`;
+        tchip.dataset.tip = on ? (stopF.waiting === true ? tr('Auto-continue is on: this session continues by itself when its limit resets — click to turn it off')
+            : tr('Auto-continue is on for the next limit; this session is not waiting for this one (its reset has passed or is too far) — open it to continue'))
+          : tr('Auto-continue is off: this session waits for you — click to have it continue by itself when its limit resets');
+      };
+      paintToggle(stopF.autoResume === true);
+      tchip.onclick = (e) => {
+        e.stopPropagation();
+        const on = !(stopF.autoResume === true);
+        try { app?.ws?.send({ type: 'auto-resume', sessionId: s.webuiId, enabled: on }); } catch { }
+        try { state.setSessionConfig?.(s, { ...(state.getSessionConfig?.(s) || {}), autoResume: on }); } catch { } // survives the next resume, like the chat chip
+        stopF.autoResume = on;
+        stopF.waiting = on && Number(stopF.resetsAt) > Date.now();   // the server arms exactly this case (auto-resume.js setEnabled); the next list restates it
+        paintToggle(on);
+      };
+      line.appendChild(tchip);
+    }
+    row.querySelector('.session-card-lines')?.appendChild(line);
   }
   // GIT CHIP (design-unknown-records, 2026-09-21): the last `vcs_state_changed`
   // fact the CLI announced — "push · fix/x" — a session FACT, never a card in

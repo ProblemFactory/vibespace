@@ -10,11 +10,12 @@
 // exactly as the inline branch kept it; every other field is on the session
 // object (src/session-schema.js rows, owner 'stdout').
 const { normalizeCodexSource } = require('../../adapters/codex');
+const { codexErrorEnum } = require('../../harnesses/codex-quota.js'); // lane auto-resume-bulk: THE reader of codexErrorInfo's two shapes (never a second one)
 
 const protocol = 'codex-events';
 
 function create({ engine, deliverRef, permissionRulesRef }) {
-  const { noteTurnEnd, recordCodexQuotaSignal, catchUpResetCreditFromBuffer } = engine;
+  const { noteTurnEnd, recordCodexQuotaSignal, catchUpResetCreditFromBuffer, noteTurnRunning, noteTurnError, recordIsLate } = engine;
   function attach(session, id, ptyProcess, { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta, updateSessionTodos }) {
     // THE WORD A RESTART LOSES (lane reset-path verify r10): before this bridge's first live byte, the keyed reset-credit
     // records the wrapper wrote to its own buffer file while no server was attached (a press that straddled the restart:
@@ -182,7 +183,7 @@ function create({ engine, deliverRef, permissionRulesRef }) {
             if (msg.type === 'event_msg') {
               const evType = payload.type;
               if (evType === 'task_started' && payload.turn_id) {
-                session._isStreaming = true; newLabel = 'thinking...';
+                session._isStreaming = true; newLabel = 'thinking...'; try { noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop
                 // lane queued-is-not-woke (law 1): the turn's start (said as «running since»), the edge a queued frame waits for
                 session._turnOpenedAt = Date.now();   // not _turnStartedAt (turn-state's request-out instant, its two writers only)
                 session._turnOpenSaidAt = Date.parse(msg.timestamp) || null;   // lane queued-is-not-woke laws 2 + 3 (Shape B): the opening AS THE RECORD STATES IT (src/server/wait-watch.js «its turn opened at»); none ⇒ «it is in a turn»
@@ -222,6 +223,13 @@ function create({ engine, deliverRef, permissionRulesRef }) {
           // (the whole RECORD rides along — verify r5: its own `timestamp` is how a backlog reading / wall is told from a live one)
           if (msg.type === 'event_msg' && (msg.payload?.type === 'rate_limits_updated' || msg.payload?.type === 'task_failed' || msg.payload?.type === 'reset_credit_result' || msg.payload?.type === 'reset_credit_sent')) {
             try { recordCodexQuotaSignal?.(session, msg.payload, msg); } catch {}
+          }
+          // lane auto-resume-bulk: a task_failed IS codex's turn end — its typed `codexErrorInfo` says whether the MODEL'S
+          // OVERLOAD ended it (serverOverloaded ⇒ the stop fact); a usage wall was already taken by the wall machine above
+          // (a backlog's record is not why it stopped NOW; an error the app-server says it will RETRY ended nothing; the stop's
+          // instant is the record's own)
+          if (msg.type === 'event_msg' && msg.payload?.type === 'task_failed' && !recordIsLate?.(session, msg) && msg.payload.willRetry !== true && msg.payload.will_retry !== true) {
+            try { const p = msg.payload; const said = typeof p.error === 'string' ? p.error : (p.error && typeof p.error.message === 'string' ? p.error.message : null); noteTurnError?.(session, codexErrorEnum(p.codexErrorInfo ?? p.codex_error_info).name || null, said, { final: true, at: Date.parse(msg.timestamp) || null }); } catch { }
           }
           // codex turn boundary (task_complete; task_failed classifies
           // inside recordCodexQuotaSignal) — same wall machine as claude

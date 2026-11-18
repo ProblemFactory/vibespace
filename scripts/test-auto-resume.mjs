@@ -571,7 +571,9 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
     } finally { console.log = origLog; global.__vsEvent = prevEv; }
     // order-of-operations pins (the fix IS the order)
     const eng2 = read('src/server/usage-pool-engine.js');
-    ok('PIN: onWalledTurn demotes BEFORE the verdict, and the verdict is session-aware', /function onWalledTurn\(session, sigs\) \{[\s\S]{0,900}demoteWalledAccount\(session, sigs\)[\s\S]{0,900}quotaVerdictFor\(scope, \{ model, session \}\)/.test(eng2));
+    const DEMOTE_FIRST = /function onWalledTurn\(session, sigs(?:, said = null)?\) \{[\s\S]{0,900}demoteWalledAccount\(session, sigs\)[\s\S]{0,2400}?const v = quotaVerdictFor\(scope, \{ model, session \}\)/;   // the ARM's verdict (U1 cure: anchored on it, not on any later call)
+    ok('PIN: onWalledTurn demotes BEFORE the verdict, and the verdict is session-aware', DEMOTE_FIRST.test(eng2));
+    ok('PIN CONTROL: the arm\'s verdict moved ABOVE the demotion is red', (() => { const VL = '    const v = quotaVerdictFor(scope, { model, session });\n'; if (!eng2.includes(VL) || !eng2.includes('demoted = demoteWalledAccount(session, sigs)')) return false; const moved = eng2.replace(VL, '').replace('demoted = demoteWalledAccount(session, sigs)', 'quotaVerdictFor(scope, { model, session }); demoted = demoteWalledAccount(session, sigs)'); return DEMOTE_FIRST.test(eng2) && !DEMOTE_FIRST.test(moved); })());
     // (reset credits r3: the held process's cold-restart re-ask follows the pool
     // evaluation — it reads where the pool landed — and nothing else does)
     ok("PIN: the walled turn's pool evaluation runs AFTER the arm (finally) so fireNow finds the session armed", /ar\.armIfEnabled\(id, session, Date\.now\(\) \+ 45000[\s\S]{0,2000}\} finally \{[\s\S]{0,700}maybePoolAutoSwitch\(session\);(\s*\n\s*\/\/[^\n]*)*\s*\n\s*requestHeldRestart\(session\);\s*\n\s*\}\s*\n\}/.test(eng2));
@@ -581,7 +583,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
     // window of its own, and clearing it beside the two turn pins (where it
     // looks like it belongs) put the banner's mark back on the member the turn
     // had just proved innocent.
-    ok('PIN: the turn-end proof outlives the demotion and is then dropped on both exits', /try \{ onWalledTurn\(session, sigs\); \}[^\n]*\n\s*clearRefile\(\);\s*\n\s*return;/.test(eng2) && (eng2.match(/\n\s*clearRefile\(\);/g) || []).length === 2 && /const clearRefile = \(\) => \{ session\._turnWallRefile = null; session\._turnWallRefuted = null; \};\s*\n\s*if \(sigs\.length/.test(eng2));
+    ok('PIN: the turn-end proof outlives the demotion and is then dropped on both exits', /try \{ onWalledTurn\(session, sigs(?:, closingLine)?\); \}[^\n]*\n\s*clearRefile\(\);\s*\n\s*return;/.test(eng2) && (eng2.match(/\n\s*clearRefile\(\);/g) || []).length === 2 && /const clearRefile = \(\) => \{ session\._turnWallRefile = null; session\._turnWallRefuted = null; \};\s*\n\s*if \(sigs\.length/.test(eng2));
     // THE MECHANISM, NOT THE LITERAL. This pin exists to stop the demotion
     // growing a SECOND writer; it used to spell the call byte-for-byte, which
     // also froze WHICH member is written — and inc-mttbrtc0-6049 is precisely
@@ -1422,6 +1424,86 @@ console.log('\n14b. the continue says what the CLI\'s reset time was and was not
   ok('14b. the account label rides the peer-text belt: a frame tag inert, a line break folded, a bidi override gone, ≤ 80', !!named && !/<system-reminder/.test(evil) && !/\n/.test(evil) && !/\u202E/.test(evil) && named[1].length <= 80, named && named[1]);
   ok('14b. …a "$&" in the label is the label, not a replacement pattern', CPF({ cls: 'switched' }, 'A$&B').includes('the account "A$&B"'));
   ok('14b. WIRING: the ONE fire choke point delivers continuePromptFor(note, label2) — what unblocked us, and the label it lands on', /verb\.deliver\(session, continuePromptFor\(note, label2\), \{ sendChatInput/.test(read('src/server/auto-resume.js')));
+}
+
+// ── 16. WHY A SESSION STOPPED — the fact, through the REAL engine (lane auto-resume-bulk, .349) ──────────────────────
+// The world of the incident: auto-resume OFF (this engine has NO auto-resume module at all — getAutoResume() is null),
+// a walled turn, an overloaded turn. The fact must be written anyway, persisted through the meta store, broadcast once,
+// and cleared by the next turn that runs. Called through the engine INSTANCE (functional seams, never a grep).
+{
+  console.log('\n16. the stop fact through the real engine (auto-resume absent — the incident\'s world)');
+  const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
+  const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
+  const metas = { 'sock-stop': { name: 'stop' } };   // a session with its OWN meta (U1 cure: a session with none gets no stub file)
+  let listChanges = 0;
+  const eng = engMod.create({
+    app, rootDir: os.tmpdir(), USAGE_CACHE_DIR: path.join(os.tmpdir(), 'vs-uc-stopped'), activeSessions: new Map(),
+    wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
+    serverSetting() { return undefined; }, getAccounts() { return null; }, getHosts() { return null; },
+    getUsageHistory() { return null; }, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
+    getSessionMetaStore: () => ({ readSessionMeta: (n) => metas[n] || {}, writeSessionMeta: (n, m) => { metas[n] = m; } }),
+    onSessionListChange: () => { listChanges++; },
+  });
+  ok('16. the engine INSTANCE exports the fact\'s seams', ['noteStoppedBy', 'clearStoppedBy', 'noteTurnRunning', 'noteTurnError'].every((k) => typeof eng[k] === 'function'));
+  const origLog = console.log; console.log = () => { };
+  const origWarn = console.warn; console.warn = () => { };
+  const s = { backend: 'claude', mode: 'chat', _webuiId: 'w-stop', sockName: 'sock-stop', claudeSessionId: 'c-stop' };
+  const reset = Date.now() + 2 * 3600e3;
+  let afterWall, afterRun, afterOverload, afterRateLimit, afterNormal, codexOv, codexWall, quiet;
+  try {
+    eng.noteWallSignal(s, { resetsAtMs: reset, bucket: 'fiveHour', key: '__global__' });
+    eng.noteTurnEnd(s, { type: 'result', result: "You've hit your limit · resets 2pm" });
+    afterWall = { f: s._stoppedBy && { ...s._stoppedBy }, meta: metas['sock-stop'] && metas['sock-stop'].stoppedBy };
+    await new Promise((r) => setTimeout(r, 360));
+    quiet = listChanges;
+    eng.noteSessionProduced(s, { type: 'assistant', message: { model: 'claude-opus-5-5' } });
+    afterRun = { f: s._stoppedBy, meta: metas['sock-stop'].stoppedBy };
+    eng.noteTurnError(s, 'overloaded', 'API Error: Repeated 529 Overloaded errors');
+    eng.noteTurnEnd(s, { type: 'result', is_error: true, result: 'API Error: Repeated 529 Overloaded errors' });
+    afterOverload = s._stoppedBy && { ...s._stoppedBy };
+    eng.noteTurnError(s, 'rate_limit', 'API Error: 429');
+    eng.noteTurnEnd(s, { type: 'result', is_error: true, result: 'API Error: 429' });
+    afterRateLimit = s._stoppedBy;
+    eng.noteTurnError(s, 'overloaded', 'x'); eng.noteTurnError(s, null, 'the retry got through');
+    eng.noteTurnEnd(s, { type: 'result', result: 'done' });
+    afterNormal = s._stoppedBy;
+    const c = { backend: 'codex', mode: 'chat', _webuiId: 'w-codex', sockName: 'sock-codex' };
+    eng.noteTurnError(c, 'serverOverloaded', 'Server overloaded', { final: true });
+    codexOv = c._stoppedBy && { ...c._stoppedBy };
+    eng.noteTurnRunning(c);
+    eng.noteTurnError(c, 'usageLimitExceeded', 'You have hit your usage limit', { final: true });
+    codexWall = c._stoppedBy;
+  } finally { console.log = origLog; console.warn = origWarn; }
+  ok('16. a WALLED turn with auto-resume absent still writes the fact: quota, its stated reset, the harness\'s line', afterWall.f && afterWall.f.kind === 'quota' && afterWall.f.resetsAt === reset && /hit your limit/.test(afterWall.f.said), JSON.stringify(afterWall));
+  ok('16. …persisted in the session\'s meta (the store a restart reads back)', afterWall.meta && afterWall.meta.kind === 'quota' && afterWall.meta.resetsAt === reset);
+  ok('16. …and ONE list broadcast for it (debounced)', quiet === 1, String(quiet));
+  ok('16. the next turn that PRODUCES clears it — in memory and on disk', afterRun.f === null && afterRun.meta === null, JSON.stringify(afterRun));
+  ok('16. a turn the harness ended with its declared overload enum ⇒ overload, with the line the CLI printed', afterOverload && afterOverload.kind === 'overload' && /529/.test(afterOverload.said), JSON.stringify(afterOverload));
+  ok('16. a 429 rate_limit turn end is NOT an overload (and a normal end clears the mark)', afterRateLimit === null);
+  ok('16. an overload the turn RECOVERED from (a later record without an error) is not why it stopped', afterNormal === null);
+  ok('16. codex: task_failed serverOverloaded (final) ⇒ overload; a turn start clears; usageLimitExceeded is the wall machine\'s, not this', codexOv && codexOv.kind === 'overload' && codexWall === null, JSON.stringify({ codexOv, codexWall }));
+}
+
+// ── 16b. TURNED ON AFTER THE WALL (lane auto-resume-bulk, U1 cure — the adversarial read's MUST 2): the card's switch says
+// «continues by itself when its limit resets»; before, only a wall seen WITH auto-continue on armed anything, so a press
+// after the wall kept no promise. Now the stop's OWN stated reset arms it; a passed reset or an overload arms nothing.
+{
+  console.log('\n16b. auto-continue turned on after the wall');
+  const fut = () => ({ kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 3600e3 });
+  const a = mk({ dflt: false }); const s1 = sess({ _stoppedBy: fut() }); a.sessions.set('s1', s1);
+  a.ar.setEnabled('s1', true);
+  const st = a.ar.statusFor('s1');
+  ok('16b. turned ON for a session a wall stopped ⇒ armed at that stop\'s OWN stated reset', st.armed === true && Math.abs(Number(st.resetsAt) - s1._stoppedBy.resetsAt) < 1000 && a.sent.length === 0, st);
+  const b = mk({ dflt: false }); b.sessions.set('s2', sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 7200e3, resetsAt: Date.now() - 60000 } })); b.ar.setEnabled('s2', true);
+  ok('16b. …a reset that has PASSED arms nothing — no billed turn ever starts from the switch itself', b.ar.statusFor('s2').armed === false && b.sent.length === 0);
+  const c = mk({ dflt: false }); c.sessions.set('s3', sess({ _stoppedBy: { kind: 'overload', at: Date.now() - 60000 } })); c.ar.setEnabled('s3', true);
+  ok('16b. …an overload arms nothing (auto-continue waits for a usage limit\'s reset only)', c.ar.statusFor('s3').armed === false);
+  const d = mk({ dflt: false }); d.sessions.set('s4', sess({ _stoppedBy: fut() })); d.ar.setEnabled('s4', false);
+  ok('16b. …turned OFF arms nothing', d.ar.statusFor('s4').armed === false);
+  const m = mutantAr([["      if (f && f.kind === 'quota' && Number(f.resetsAt) > Date.now()) {", '      if (false) {']]);
+  const mm = m.mod && m.mod.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')), activeSessions: new Map([['s1', sess({ _stoppedBy: fut() })]]), serverSetting: () => false, sendToSession: () => true });
+  if (mm) mm.setEnabled('s1', true);
+  ok('16b. CONTROL: without the turned-on arm the same press arms nothing — the first leg goes red', m.hits === 1 && !!mm && mm.statusFor('s1').armed === false, m.err || null);
 }
 
 // ── 15. THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

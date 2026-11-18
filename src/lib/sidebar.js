@@ -12,6 +12,7 @@ import { installSidebarWorkbench } from './sidebar-workbench.js';
 import { installSidebarColumn } from './sidebar-column.js'; // lane duo-build-1: the regular class's list column (one stream of rows)
 import { installSidebarTasks } from './sidebar-tasks.js';
 import { openRefreshLive, REFRESH_ICON } from './refresh-live.js'; // lane refresh-live-sessions: the list's ⋯ menu entry 「刷新所有活着的会话」
+import { isStoppedBy, filterWords as stoppedFilterWords } from '../stopped-by.js'; // lane auto-resume-bulk: the «因限额/过载停止 (N)» filter
 import { UI_ICONS } from './icons.js';
 import { createBarFold } from './bar-fold.js'; // lane ui-controls-and-bugs: the filter row folds through THE chrome-bar fold
 import { patchStashHints } from './stash-strip.js'; // 2026-09-27: the card's "N waiting" hint (the stash fact), patched in place
@@ -150,6 +151,11 @@ const LIVE_SESSION_FACTS = Object.freeze({
   autoAllowed: { digest: null },
   // B-460d: the CPU priority the conversation started at (server.js `cpuNice`) — CARRIED-ONLY: Session Properties' row
   cpuNice: { digest: null },
+  // lane auto-resume-bulk (.349): WHY the conversation stopped — {kind: 'quota'|'overload', at, resetsAt, said,
+  // autoResume} (src/stopped-by.js) — the card's chip («因用量停止 · 重置 14:00» + «自动继续：开/关») and the filter
+  // row's «因限额/过载停止 (N)» draw it, so it GATES — on a scalar projection (never the object, the trap above). It
+  // moves at most twice per stop (set at the turn end, cleared when the session runs) plus a toggle.
+  stoppedBy: { digest: (v) => (v && typeof v === 'object' ? `${v.kind}|${v.at || ''}|${v.resetsAt || ''}|${v.autoResume === true ? 'on' : v.autoResume === false ? 'off' : ''}` : '') },
 });
 const LIVE_SESSION_FACT_KEYS = Object.freeze(Object.keys(LIVE_SESSION_FACTS));
 /** Carry the live facts verbatim; an absent live row states nothing (null). */
@@ -482,6 +488,7 @@ class Sidebar {
     show('manage-toggle', t !== 'mounts');
     show('session-list-menu', t !== 'mounts'); // the list-wide ⋯ menu: wherever sessions are listed
     show('status-quick-tabs', t === 'folders');
+    show('stopped-quick-tabs', t === 'folders'); // lane auto-resume-bulk: the «stopped by a limit or overload» pill — a quick-view tab like its neighbour
     show('agent-kind-quick-tabs', t !== 'mounts'); // agentKind filter applies on tasks too
   }
 
@@ -856,6 +863,25 @@ class Sidebar {
     row.append(label, btn);
     this.listEl.appendChild(row);
     return row;
+  }
+
+  /** «因限额/过载停止 (N)» (lane auto-resume-bulk): the filter row's pill for the sessions a usage wall or an overloaded
+   *  model stopped (the live `stoppedBy` fact) — drawn only while there are some (or while it is on), so it never sits
+   *  there greyed; a press shows only them, a second press shows everything again. */
+  _renderStoppedQuickTab() {
+    const box = document.getElementById('stopped-quick-tabs');
+    if (!box) return;
+    box.innerHTML = '';
+    const n = (this._allSessions || []).filter((s) => isStoppedBy(s) && !this.isArchived(s) && (!this._agentKindFilter || passesAgentKindFilter(s, this._agentKindFilter))).length;   // N = what a press shows
+    if (!n && !this._stoppedOnly) return;
+    const btn = document.createElement('button');
+    btn.className = 'status-quick-tab stopped-quick-tab' + (this._stoppedOnly ? ' active' : '');
+    btn.style.setProperty('--tab-color', 'var(--yellow)');
+    btn.textContent = stoppedFilterWords(n, tr);
+    btn.title = this._stoppedOnly ? tr('Showing only the sessions a usage limit or an overloaded model stopped — click to show all')
+      : tr('Show only the sessions a usage limit or an overloaded model stopped');
+    btn.onclick = () => { this._stoppedOnly = !this._stoppedOnly; this._renderStoppedQuickTab(); this._render(); };
+    box.appendChild(btn);
   }
 
   _renderAgentKindQuickTabs() {
@@ -1246,6 +1272,7 @@ class Sidebar {
     this._sessionDigest = digest;
     this._updateBackendFilterBtn(document.getElementById('backend-filter'));
     this._renderAgentKindQuickTabs();
+    this._renderStoppedQuickTab();
     // Preserve scroll position across the auto-refresh re-render so browsing a
     // session lower in the list isn't interrupted by a jump to the top.
     const hosts = [this.listEl, this.listEl?.closest('.sidebar-section')].filter(Boolean);
@@ -1384,6 +1411,8 @@ class Sidebar {
     if (this._agentKindFilter) {
       sessions = sessions.filter(s => passesAgentKindFilter(s, this._agentKindFilter));
     }
+    // lane auto-resume-bulk: «因限额/过载停止 (N)» — only the sessions a usage wall or an overloaded model stopped
+    if (this._stoppedOnly && this._activeTab !== 'tasks') sessions = sessions.filter((s) => isStoppedBy(s));   // never the Tasks board (below)
 
     const searched = sessions.length; let statusLeft = null, archivedHid = 0; // the rows the search and the other filters leave, before the status filter (B-54d9 N5)
     // Archive filter: hide archived sessions unless 'archived' filter is on

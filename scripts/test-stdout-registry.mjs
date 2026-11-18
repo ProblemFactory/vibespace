@@ -57,6 +57,7 @@ const engine = {
   maybeRepinLockedModel() { }, maybeStopOnFallback() { }, notePoolAuthFailure() { }, modelsMatch: () => false,
   noteServedModel(s, m) { s._servedModel = m; s._servedModelAt = Date.now(); }, noteModelFallback() { }, // 2026-09-13: the served model + the fallback stamp are ONE engine consumer, shared by the parse and the device feed
   noteTurnStopped() { }, // 2026-09-22: the authoritative idle record is a soft-deferred pool move's FIRST STOP (warm-soft-defer)
+  noteTurnError() { }, noteTurnRunning() { }, // lane auto-resume-bulk: the turn's typed error (the stop verdict reads it) + a turn that starts ends the stop
   noteStreamRecord() { }, recordIsLate: () => false, // lane-hot-switch: the late-record rule's clock + the odometer's question (a live stub: nothing here is a backlog)
   settleTurnLane() { }, // r3: the consumer binds it on the session so session-stdout's TEARDOWN can close the per-turn lane decision (a turn that ends by the wrapper dying emits no `result`)
   // r3-r2: the target-less lock latch asks the engine whether the model that

@@ -419,6 +419,10 @@ module.exports = { projectReset, WEEK_SEC, unscopedWeeklyTypes: UNSCOPED_WEEKLY_
   // about the vendor, not a capability — `capsOf('claude').resetCredit` stays
   // false (the CLI offers only the interactive /limit-reset, §ban-safety).
   resetCreditVendor: 'anthropic',
+  // THE OVERLOAD ENUM (lane auto-resume-bulk): the values of the assistant record's typed `error` that mean "the model
+  // was overloaded" — the CLI fills it from the HTTP status (2.1.308: 529 or `overloaded_error` → "overloaded"; 429 →
+  // "rate_limit", a different fact). A turn that ENDS on one is a stop the card marks (src/stopped-by.js stopVerdict).
+  overloadErrors: Object.freeze(['overloaded']),
   // THE TYPED PRODUCERS (src/quota-model.js) — the write path takes these.
   // `limitSetFromSnapshot` is the HARNESS-NEUTRAL name the engine dispatches on
   // (`quotaSourceFor(backend).limitSetFromSnapshot`), never a backend-id branch:

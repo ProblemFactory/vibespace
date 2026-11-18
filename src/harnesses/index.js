@@ -71,6 +71,8 @@ function assertQuotaContract(id, quota, { full = true } = {}) {
   // (the core reaches adapters only through predict-adapters.js: the three built-in sources — the said limit; the safe direction)
   const predictErrs = (!full && quota.predict === undefined) ? [] : predictShapeErrs(quota.predict);
   if (predictErrs.length) throw new Error(`harness '${id}': quota.predict — ${predictErrs.join('; ')}`);
+  // lane auto-resume-bulk: the harness's typed "the model was overloaded" values (optional; absent = it reports none)
+  if (quota.overloadErrors !== undefined && !(Array.isArray(quota.overloadErrors) && quota.overloadErrors.every((x) => typeof x === 'string' && x))) throw new Error(`harness '${id}': quota.overloadErrors must be a list of non-empty strings when declared`);
   if (!QUOTA_PROBE_RUNGS.includes(quota.probe)) throw new Error(`harness '${id}': quota.probe must be one of ${QUOTA_PROBE_RUNGS.map(String).join('|')} (got ${String(quota.probe)})`);
 }
 
@@ -215,6 +217,11 @@ function unregister(id) {
 function resumeVerb(id) {
   try { return get(id).resume || null; } catch { return null; }
 }
+/** The harness's declared overload enum (quota.overloadErrors) — [] when it declares none or the id is unknown. The stop
+ *  verdict (src/stopped-by.js) reads THIS, never a backend id (lane auto-resume-bulk). */
+function overloadErrorsOf(id) {
+  try { const q = get(id).quota; return q && Array.isArray(q.overloadErrors) ? q.overloadErrors : []; } catch { return []; }
+}
 
 /** THE REWIND ROAD (B-437e): the harness's own `rewind.request(plan) → {line, requestId}` — null when it has none. The
  *  server's door (src/server/rewind-requests.js) asks THIS, never the row's granularity word: a contributed harness's
@@ -231,4 +238,4 @@ function assertRewindContract(h) {
 }
 
 module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, validate, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, predictShapeErrs, QUOTA_PROBE_RUNGS, NULL_QUOTA,
-  hasLimitSignal, assertResumeContract, resumeVerb, rewindRoad, assertRewindContract, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };
+  hasLimitSignal, assertResumeContract, resumeVerb, overloadErrorsOf, rewindRoad, assertRewindContract, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };

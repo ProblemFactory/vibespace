@@ -2002,7 +2002,7 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 /* Harness sections (derived from the descriptor tables): the section intro + the per-row apply chip / CLI-config receipts */
 .settings-section-note { font-size: 11px; color: var(--text-dim); margin: -4px 0 10px; line-height: 1.4; }
 /* the session search / filter row and the quick tabs hide on the tabs they do not filter (2.369.136) */
-#sidebar.sb-no-session-filter #session-filter-row, #sidebar.sb-no-session-filter #agent-kind-quick-tabs, #sidebar.sb-no-session-filter #status-quick-tabs { display: none !important; }
+#sidebar.sb-no-session-filter #session-filter-row, #sidebar.sb-no-session-filter #agent-kind-quick-tabs, #sidebar.sb-no-session-filter #stopped-quick-tabs, #sidebar.sb-no-session-filter #status-quick-tabs { display: none !important; }
 /* the vnc paste box (2.369.136): a textarea route for the clipboard when the browser will not hand it over */
 .vnc-paste-box { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
 .vnc-paste-note { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
@@ -2028,6 +2028,16 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 .settings-https-fact { order: 3; flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .settings-https-fact .settings-https-text { flex: 1 1 220px; min-width: 0; overflow-wrap: break-word; }
 .settings-https-fact.is-live { border-left-color: var(--accent); color: var(--text); }
+.session-card-stop { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; margin-top: 2px; font-size: 10.5px; line-height: 1.4; } /* the toggle wraps under the words on a narrow card — the words stay whole */
+.session-card-stop .chip-icon { display: inline-flex; align-items: center; flex: none; }
+.session-card-stop .chip-icon svg { width: 11px; height: 11px; display: block; }
+.sess-stopped-chip { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 100%; color: var(--yellow); }
+.sess-stopped-chip.overload { color: var(--red); }
+.sess-stopped-chip .chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-stopped-autoresume { font: inherit; background: transparent; display: inline-flex; align-items: center; gap: 3px; flex: none; padding: 0 5px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
+.sess-stopped-autoresume.on { color: var(--accent); border-color: var(--accent); }
+.sess-stopped-autoresume:hover { background: var(--bg-hover); color: var(--text); }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .session-card-stop { font-size: 12px; } .sess-stopped-autoresume { min-height: 26px; padding: 0 8px; } }
 .settings-https-copy, .settings-https-recheck, .settings-engine-download { flex: none; padding: 2px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); cursor: pointer; }
 .settings-https-copy:hover, .settings-https-recheck:hover, .settings-engine-download:hover { border-color: var(--border-active); }
 .settings-https-recheck:disabled, .settings-engine-download.is-busy { opacity: 0.6; cursor: default; }

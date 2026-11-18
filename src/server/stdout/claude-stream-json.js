@@ -91,7 +91,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
     noteCompacted,
-    modelsMatch, noteSessionProduced, noteModelRequest, noteTurnEnd, recordRateLimitEvent, resolveUsageKey, usageEstimator,
+    modelsMatch, noteSessionProduced, noteModelRequest, noteTurnEnd, noteTurnError, recordRateLimitEvent, resolveUsageKey, usageEstimator,
     noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, noteTurnStopped,
     noteStreamRecord, recordIsLate } = engine;
 
@@ -731,6 +731,12 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // own models — without the guard a haiku subagent both spuriously
           // triggered repins AND masked a real main-thread reroute when it
           // answered last.
+          // lane auto-resume-bulk: the turn's last TYPED error — the CLI's `error` enum on a main-thread assistant record
+          // (synthetic ones included: a 529 / overloaded_error ends the turn as `error: "overloaded"`). The turn end's stop
+          // verdict reads it (src/stopped-by.js); a later record without one clears it; a backlog's is not this turn's.
+          if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain && !recordIsLate?.(session, msg)) {
+            try { const tb = Array.isArray(msg.message?.content) ? msg.message.content.find((b) => b && b.type === 'text') : null; noteTurnError?.(session, typeof msg.error === 'string' ? msg.error : null, tb && typeof tb.text === 'string' ? tb.text : null); } catch { }
+          }
           // STEP 3 record REGISTRATION (first-writer-wins, parse-primary):
           // the parse marks every record it processes; the DEVICE feed runs
           // the side-effect families only for records the parse has NOT yet

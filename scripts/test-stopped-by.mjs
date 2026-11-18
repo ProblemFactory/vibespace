@@ -1,0 +1,130 @@
+#!/usr/bin/env node
+// WHY A SESSION STOPPED — A FACT OF THE SESSION (lane auto-resume-bulk, .349; a fleet power user, 2026-10-23: dozens of
+// conversations stopped on usage walls the same day with auto-resume off — nothing remembered which). Gate row
+// `test-stopped-by`, fast, PURE + source pins.
+//   §1 stopVerdict: the wall machine's walled turn ⇒ quota (its stated reset, its slot, the harness's own line bounded);
+//      a walled turn outranks an error; an overload ONLY from the harness's DECLARED enum (the real registry rows —
+//      claude `overloaded`, codex `serverOverloaded` in both spellings); a 429 `rate_limit`, a `server_error`, no error,
+//      a harness that declares none ⇒ nothing. CONTROL: with no declared list the claude enum is NOT an overload
+//   §2 normalizeStoppedBy: a persisted value re-validated (bad kinds / no `at` ⇒ null, overload carries no reset)
+//   §5 the words, through the REAL client dictionaries: «因用量上限停止 · 14:00 重置», «模型过载 · 停于 13:42»,
+//      «自动继续：开/关», «因用量上限/过载停止 (N)» — and every WORD_KEYS key in zh AND ja with its {params} kept
+//   §6 wiring pins (the fact's writer, clearers, restore, the live list, the card, the filter, the descriptors' rows)
+import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const CLK = (ms, now) => { const d = new Date(ms), n = new Date(now), p = (x) => String(x).padStart(2, '0'); const hm = `${p(d.getHours())}:${p(d.getMinutes())}`; return d.toDateString() === n.toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`; };   // the suite's own clock (the page hands page-time's)
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SB = require('../src/stopped-by.js');
+const harnesses = require('../src/harnesses');
+let failed = 0, passed = 0;
+const ok = (name, cond, extra) => {
+  if (typeof name !== 'string') throw new TypeError(`ok(name, cond): the name is a ${typeof name}, not a string — the arguments are swapped`);   // the swap guard (test-ci-gate-tiers §7b)
+  if (cond) { passed++; console.log(`  ✓ ${name}`); return; }
+  failed++; console.error(`  ✗ ${name}${extra !== undefined ? `\n    ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : ''}`);
+};
+const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+const NOW = 1_800_000_000_000, MIN = 60 * 1000, HOUR = 60 * MIN;
+const CLAUDE = harnesses.overloadErrorsOf('claude'), CODEX = harnesses.overloadErrorsOf('codex');
+
+// ── §1 THE VERDICT ──────────────────────────────────────────────────────────
+console.log('§1 stopVerdict (the walled turn, the declared overload enum)');
+{
+  const q = SB.stopVerdict({ walled: true, resetsAt: NOW + 2 * HOUR, memberId: 'sub-a', said: "You've hit your limit · resets 2pm", at: NOW });
+  ok('a walled turn ⇒ quota, with its stated reset, its slot and the harness\'s own line', q && q.kind === 'quota' && q.resetsAt === NOW + 2 * HOUR && q.memberId === 'sub-a' && q.at === NOW && /hit your limit/.test(q.said), q);
+  ok('a walled turn OUTRANKS a typed error (the wall ended it, whatever else it said)', SB.stopVerdict({ walled: true, lastError: 'overloaded', overloadErrors: CLAUDE, at: NOW }).kind === 'quota');
+  ok('a wall with no stated reset keeps `resetsAt: null` (never a guessed time)', SB.stopVerdict({ walled: true, at: NOW }).resetsAt === null);
+  ok('the harness\'s line is BOUNDED to one line of ≤ SAID_MAX chars', (() => { const v = SB.stopVerdict({ walled: true, said: 'x\n'.repeat(400), at: NOW }); return v.said.length <= SB.SAID_MAX && !/\n/.test(v.said); })());
+  ok('the REAL registry: claude declares `overloaded`, codex `serverOverloaded` (both spellings), shell nothing', CLAUDE.includes('overloaded') && CODEX.some((x) => /^server_?overloaded$/i.test(x)) && harnesses.overloadErrorsOf('shell').length === 0 && harnesses.overloadErrorsOf('nope').length === 0, { CLAUDE, CODEX });
+  const ROWS = [
+    ['claude `error: "overloaded"` (the CLI maps a 529 / overloaded_error to it)', 'overloaded', CLAUDE, 'overload'],
+    ['codex `serverOverloaded` (the app-server camelCase)', 'serverOverloaded', CODEX, 'overload'],
+    ['codex `server_overloaded` (the rollout snake_case — one variant, two spellings)', 'server_overloaded', CODEX, 'overload'],
+    ['claude `rate_limit` (a 429) is NOT an overload', 'rate_limit', CLAUDE, null],
+    ['claude `server_error` (a 5xx) is NOT an overload', 'server_error', CLAUDE, null],
+    ['claude `authentication_failed` is NOT an overload', 'authentication_failed', CLAUDE, null],
+    ['no error ⇒ nothing to mark', null, CLAUDE, null],
+    ['codex `usageLimitExceeded` is the WALL machine\'s, never an overload', 'usageLimitExceeded', CODEX, null],
+    ['a harness that declares no enum ⇒ never an overload', 'overloaded', harnesses.overloadErrorsOf('shell'), null],
+  ];
+  for (const [name, err, decl, kind] of ROWS) {
+    const v = SB.stopVerdict({ lastError: err, overloadErrors: decl, said: 'API Error: Repeated 529 Overloaded errors', at: NOW });
+    ok(name, kind === null ? v === null : (v && v.kind === kind && v.resetsAt === undefined && v.memberId === undefined), v);
+  }
+  ok('CONTROL: the verdict reads the DECLARED list — with none handed in, claude\'s own enum value is not an overload (no backend-id fallback)', SB.stopVerdict({ lastError: 'overloaded', at: NOW }) === null);
+}
+
+// ── §2 NORMALIZE ────────────────────────────────────────────────────────────
+console.log('§2 normalizeStoppedBy (a persisted value, re-validated)');
+ok('bad shapes ⇒ null (no kind, an unknown kind, no `at`, not an object)', [null, {}, { kind: 'quota' }, { kind: 'nap', at: NOW }, 'quota', 7].every((x) => SB.normalizeStoppedBy(x) === null));
+ok('a quota fact keeps its reset + slot; an overload carries neither', (() => {
+  const q = SB.normalizeStoppedBy({ kind: 'quota', at: NOW, resetsAt: NOW + HOUR, memberId: 'm', said: 'x', extra: 1 });
+  const o = SB.normalizeStoppedBy({ kind: 'overload', at: NOW, resetsAt: NOW + HOUR, memberId: 'm' });
+  return q.resetsAt === NOW + HOUR && q.memberId === 'm' && !('extra' in q) && !('resetsAt' in o) && !('memberId' in o);
+})());
+ok('liveFactOf: a quota stop carries its switch and whether the core WAITS for it; an overload and a harness with no resume verb carry none', (() => {
+  const q = { kind: 'quota', at: NOW, resetsAt: NOW + HOUR }, o = { kind: 'overload', at: NOW };
+  const on = SB.liveFactOf(q, { resume: 'prompt', enabled: true, armed: true }), noWait = SB.liveFactOf(q, { resume: 'prompt', enabled: true, armed: false, watch: false });
+  const ov = SB.liveFactOf(o, { resume: 'prompt', enabled: true, armed: false }), noVerb = SB.liveFactOf(q, { resume: null, enabled: true });
+  return on.autoResume === true && on.waiting === true && noWait.autoResume === true && noWait.waiting === false && ov.autoResume === null && noVerb.autoResume === null && SB.liveFactOf(null, {}) === null && SB.liveFactOf(q, null).autoResume === null;
+})());
+ok('isStoppedBy is the filter predicate (a row with a valid fact; nothing else)', SB.isStoppedBy({ stoppedBy: { kind: 'overload', at: NOW } }) && !SB.isStoppedBy({ stoppedBy: null }) && !SB.isStoppedBy({}) && !SB.isStoppedBy(null));
+
+// ── §5 THE WORDS ────────────────────────────────────────────────────────────
+console.log('§5 the words (en, and zh/ja through the REAL client dictionaries)');
+const zh = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default;
+const ja = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
+const fill = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
+const tZh = (s, p) => fill(zh[s] !== undefined ? zh[s] : s, p);
+{
+  const at = new Date(2026, 9, 23, 13, 42).getTime(), now = new Date(2026, 9, 23, 13, 50).getTime(), reset = new Date(2026, 9, 23, 14, 0).getTime();
+  const q = { kind: 'quota', at, resetsAt: reset, said: 'You hit your limit' }, o = { kind: 'overload', at };
+  ok('zh quota chip: «因用量上限停止 · 14:00 重置» (the release\'s word for a usage limit, 用量上限)', SB.chipWords(q, tZh, { now, clock: CLK }).text === '因用量上限停止 · 14:00 重置', SB.chipWords(q, tZh, { now, clock: CLK }).text);
+  ok('zh overload chip: «模型过载 · 停于 13:42»', SB.chipWords(o, tZh, { now, clock: CLK }).text === '模型过载 · 停于 13:42', SB.chipWords(o, tZh, { now, clock: CLK }).text);
+  ok('zh toggle: «自动继续：开» / «自动继续：关»; a harness with no verb draws none (null)', SB.chipWords(q, tZh, { now, clock: CLK, autoResumeOn: true }).toggle === '自动继续：开' && SB.chipWords(q, tZh, { now, clock: CLK, autoResumeOn: false }).toggle === '自动继续：关' && SB.chipWords(q, tZh, { now, clock: CLK, autoResumeOn: null }).toggle === null);
+  ok('en: "Stopped by a usage limit · resets 14:00" and a passed reset says so', SB.chipWords(q, null, { now, clock: CLK }).text === 'Stopped by a usage limit · resets 14:00' && SB.chipWords(q, null, { clock: CLK, now: reset + MIN }).text === 'Stopped by a usage limit · the limit has reset');
+  ok('another day: the chip names the date (M/D HH:MM)', SB.chipWords({ kind: 'quota', at, resetsAt: new Date(2026, 9, 25, 9, 5).getTime() }, null, { now, clock: CLK }).text.endsWith('10/25 09:05'));
+  ok('the page prints every stop time through page-time (the ONE formatter): the card hands its stampAt; the PURE default is no hand-built clock', /stoppedChipWords\(stopF, tr, \{[^}]*clock: stopClock \}\)/.test(read('src/lib/session-card.js')) && /const stopClock = \(ms, now\) => whenAt\(ms, \{ now \}\)/.test(read('src/lib/session-card.js')) && !/getHours|getMinutes/.test(read('src/stopped-by.js')));
+  ok('the tip carries the harness\'s own line and how long the mark stays', /You hit your limit/.test(SB.chipWords(q, tZh, { now, clock: CLK }).tip) && /再次运行/.test(SB.chipWords(q, tZh, { now, clock: CLK }).tip));
+  ok('zh filter: «因用量上限/过载停止 (3)»', SB.filterWords(3, tZh) === '因用量上限/过载停止 (3)');
+  ok('the tip is ONE line (the instant tooltip collapses a newline): its parts joined by « · »', !/\n/.test(SB.chipWords(q, tZh, { now, clock: CLK }).tip) && SB.chipWords(q, tZh, { now, clock: CLK }).tip.split(' · ').length >= 3);
+  ok('ON with no wait for THIS limit says so: «自动继续：开 · 这次上限不等待»', SB.chipWords(q, tZh, { now, clock: CLK, autoResumeOn: true, waiting: false }).toggle === '自动继续：开 · 这次上限不等待' && SB.chipWords(q, tZh, { now, clock: CLK, autoResumeOn: true, waiting: true }).toggle === '自动继续：开');
+  const skipped = Array.from({ length: 8 }, (_, i) => ({ id: 's' + i, why: 'walled', until: reset }));
+  const params = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join();
+  const miss = { zh: [], ja: [], params: [] };
+  for (const k of SB.WORD_KEYS) {
+    if (zh[k] === undefined) miss.zh.push(k);
+    if (ja[k] === undefined) miss.ja.push(k);
+    for (const d of [zh, ja]) if (d[k] !== undefined && params(d[k]) !== params(k)) miss.params.push(k);
+  }
+  ok(`every word key (${SB.WORD_KEYS.length}) is in zh AND ja, {params} kept`, !miss.zh.length && !miss.ja.length && !miss.params.length, miss);
+  ok('CONTROL: the census bites — a key missing from the dictionary is reported', zh['Stopped by a usage limit · resets {time} (planted)'] === undefined);
+}
+
+// ── §6 WIRING PINS ──────────────────────────────────────────────────────────
+console.log('§6 wiring pins');
+{
+  const eng = read('src/server/usage-pool-engine.js');
+  ok('the engine writes the fact at the WALLED turn — after the demotion, whatever auto-resume says (before its `armIfEnabled` early return)', (() => {
+    const i = eng.indexOf('function onWalledTurn('), d = eng.indexOf('demoteWalledAccount(session, sigs)', i), w = eng.indexOf('noteStoppedBy(session, stoppedBy.stopVerdict({ walled: true', i), a = eng.indexOf('if (!ar?.armIfEnabled) return;', i);
+    return i > 0 && d > i && w > d && a > w;
+  })());
+  ok('the normal turn end decides overload from the harness\'s DECLARED enum, else clears', /stoppedBy\.stopVerdict\(\{ lastError: lastError\.error, overloadErrors: harnesses\.overloadErrorsOf\(session\.backend\)/.test(eng) && /if \(ov\) noteStoppedBy\(session, ov\); else clearStoppedBy\(session, 'turn completed'\);/.test(eng));
+  ok('a turn that produces (claude main thread) clears it; the fact is persisted through the meta store', /if \(session\._stoppedBy\) noteTurnRunning\(session\);/.test(eng) && /writeSessionMeta\?\.\(session\.sockName, \{ \.\.\.\(prev \|\| \{\}\), stoppedBy: session\._stoppedBy \|\| null \}\)/.test(eng));
+  ok('codex task_started and an ACP prompt_start END the stop; codex task_failed hands its typed enum through codexErrorEnum', /task_started[^\n]*\n?[^\n]*noteTurnRunning\?\.\(session\)/.test(read('src/server/stdout/codex-events.js')) && /codexErrorEnum\(p\.codexErrorInfo \?\? p\.codex_error_info\)\.name/.test(read('src/server/stdout/codex-events.js')) && /prompt_start[^\n]*\n[^\n]*noteTurnRunning\?\.\(session\)/.test(read('src/server/stdout/acp-events.js')));
+  ok('codex: a LATE task_failed (a backlog) or one the app-server will RETRY marks nothing; the stop carries the record\'s own instant', /task_failed' && !recordIsLate\?\.\(session, msg\) && msg\.payload\.willRetry !== true && msg\.payload\.will_retry !== true\)/.test(read('src/server/stdout/codex-events.js')) && /\{ final: true, at: Date\.parse\(msg\.timestamp\) \|\| null \}/.test(read('src/server/stdout/codex-events.js')) && /function noteTurnError\(session, error, said = null, \{ final = false, at = null \} = \{\}\)/.test(eng));
+  ok('the wall\'s reset is the STATED one or none — never the verdict\'s blockedUntil (a guess the engine may have written)', /const resetsAt = stated \|\| 0;/.test(eng) && !/const resetsAt = stated \|\| \(\(\) => \{ try \{ return Number\(quotaVerdictFor/.test(eng));
+  ok('no stub meta: a session with no meta of its own keeps the fact in memory only', (() => { const i = eng.indexOf('function persistStoppedBy(session) {'); const b = eng.slice(i, eng.indexOf('\n}\n', i)); return i > 0 && /if \(!prev \|\| typeof prev !== 'object' \|\| !Object\.keys\(prev\)\.length\) return;/.test(b); })());
+  ok('the claude consumer notes the typed error of EVERY main-thread assistant record (synthetic ones included), never a backlog\'s', /!msg\.isSidechain && !recordIsLate\?\.\(session, msg\)\) \{\s*\n\s*try \{ const tb = [^\n]*noteTurnError\?\.\(session, typeof msg\.error === 'string' \? msg\.error : null/.test(read('src/server/stdout/claude-stream-json.js')));
+  ok('the descriptors DECLARE the enum (quota.overloadErrors) and the registry validates + hands it out', /overloadErrors: Object\.freeze\(\['overloaded'\]\)/.test(read('src/harnesses/claude-quota.js')) && /overloadErrors: Object\.freeze\(\['serverOverloaded'/.test(read('src/harnesses/codex-quota.js')) && /function overloadErrorsOf\(id\)/.test(read('src/harnesses/index.js')) && /quota\.overloadErrors must be a list/.test(read('src/harnesses/index.js')));
+  ok('boot restores the fact (sessionFromMeta — all restore paths)', /_stoppedBy: meta\.stoppedBy && typeof meta\.stoppedBy === 'object' \? meta\.stoppedBy : null/.test(read('src/server/boot-restore.js')));
+  ok('the live list carries it (server.js payload) and the sidebar GATES on a scalar projection of it', /stoppedBy: s\._stoppedBy \? \(\(\) => \{ try \{ return require\('\.\/src\/stopped-by\.js'\)\.liveFactOf\(s\._stoppedBy, autoResume\.statusFor\(id\)\); \} catch \{ return require\('\.\/src\/stopped-by\.js'\)\.liveFactOf\(s\._stoppedBy, null\); \} \}\)\(\) : null,/.test(read('server.js')) && /stoppedBy: \{ digest: \(v\) => \(v && typeof v === 'object' \? `\$\{v\.kind\}\|/.test(read('src/lib/sidebar.js')));
+  ok('the card draws the chip from chipWords; the filter row\'s pill reads isStoppedBy', /stoppedChipWords\(stopF, tr,/.test(read('src/lib/session-card.js')) && /if \(this\._stoppedOnly && this\._activeTab !== 'tasks'\) sessions = sessions\.filter\(\(s\) => isStoppedBy\(s\)\);/.test(read('src/lib/sidebar.js')));
+  ok('PURE: src/stopped-by.js requires nothing and names no harness id', !/require\(/.test(read('src/stopped-by.js').replace(/^\s*\/\/.*$/gm, '')) && !/'(claude|codex|shell|opencode|antigravity)'/.test(read('src/stopped-by.js').replace(/^\s*\/\/.*$/gm, '')));
+}
+
+console.log(`\n${failed ? 'FAILED' : 'ALL PASS'} (${passed} passed, ${failed} failed)`);
+process.exit(failed ? 1 : 0);

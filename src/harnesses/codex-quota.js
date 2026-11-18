@@ -453,6 +453,9 @@ module.exports = {
   // consumed credit RE-OPENS the period (account/rateLimitResetCredit/consume) —
   // the pool engine hands this to resetCreditVerdict as `vendor`, never a harness id.
   resetCreditVendor: 'openai',
+  // THE OVERLOAD ENUM (lane auto-resume-bulk): task_failed's `codexErrorInfo` (read by codexErrorEnum, both shapes) that
+  // means "the model was overloaded" — the app-server's camelCase and the rollout's snake_case spellings of one variant.
+  overloadErrors: Object.freeze(['serverOverloaded', 'server_overloaded']),
   // THE TYPED PRODUCERS (src/quota-model.js, B-9213) — the write path takes these
   toLimitSet, limitSetFromSnapshot, codexWindowKind, CODEX_EXTRA_KEYS,
   // named helpers for current callers / tests

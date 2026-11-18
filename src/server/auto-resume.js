@@ -325,7 +325,8 @@ function writeJsonAtomic(file, obj) {
  *        stands, so the money has to go back — otherwise a pty that refuses one
  *        frame keeps that slot's budget booked until the hold times out.
  */
-function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { } }) {
+function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
+  onListChange = null }) {   // lane auto-resume-bulk: the session list's one notify point — a STOPPED session's card shows its toggle
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
@@ -431,7 +432,19 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const session = activeSessions.get(id);
     if (session) session._autoResume = !!on;
     if (!on && armed.has(id)) { armed.delete(id); save(); }
+    // TURNED ON AFTER THE WALL (lane auto-resume-bulk, U1 cure): a session a usage wall already STOPPED is armed on that
+    // wall's own stated reset — the card's switch promises «continues by itself when its limit resets», and before this
+    // only a wall seen WITH auto-continue on armed anything. A reset that has passed (or none stated) arms nothing: no
+    // billed turn ever starts from the switch itself — the card says so (stopped-by.js liveFactOf `waiting`).
+    if (on && session && !armed.has(id)) {
+      const f = session._stoppedBy;
+      if (f && f.kind === 'quota' && Number(f.resetsAt) > Date.now()) {
+        try { armIfEnabled(id, session, Number(f.resetsAt), 'usage limit (auto-continue turned on after the wall)'); } catch (e) { log(`[auto-resume] ${id}: arming at the stop's reset failed: ${e.message}`); }
+      }
+    }
     emit(id);
+    // a STOPPED session's card shows its auto-resume state beside the mark (lane auto-resume-bulk) — every list hears it
+    if (session && session._stoppedBy && onListChange) { try { onListChange(); } catch { } }
     return statusFor(id);
   }
 
