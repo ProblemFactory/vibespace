@@ -4991,6 +4991,7 @@ export default {
   "Resume every session a usage limit or overload stopped ({n})": "恢复所有因用量上限/过载停止的会话 ({n})",
   "No sessions stopped by a limit": "没有因用量上限停止的会话",
   "None of the {m} stopped sessions can be resumed now": "{m} 个停下的会话现在都不能恢复",
+  "The stopped session cannot be resumed now": "这个停下的会话现在不能恢复",
   "still inside a limit": "仍在用量上限内",
   "already running": "已在运行",
   "its process has ended": "进程已结束",

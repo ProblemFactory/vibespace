@@ -2051,6 +2051,7 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 .session-card-stop .chip-icon svg { width: 11px; height: 11px; display: block; }
 .sess-stopped-chip { display: inline-flex; align-items: flex-start; gap: 3px; min-width: 0; max-width: 100%; color: var(--yellow); }
 .sess-stopped-chip.overload { color: var(--red); }
+.sess-stopped-chip .chip-icon { height: 1.4em; }   /* the icon box is the first line's height: the hourglass sits on that line's centre when the words wrap (the follow-up's read) */
 .sess-stopped-chip .chip-text { white-space: normal; overflow-wrap: anywhere; min-width: 0; } /* the stop's words WRAP, never cut with «…» (the follow-up's pictures: zh at the default width) */
 .sess-stopped-autoresume { font: inherit; background: transparent; display: inline-flex; align-items: center; gap: 3px; flex: 0 1 auto; min-width: 0; max-width: 100%; padding: 0 5px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); cursor: pointer; text-align: start; }
 .sess-stopped-autoresume .chip-text { white-space: normal; overflow-wrap: anywhere; min-width: 0; } /* «on · continues only if the limit clears early» WRAPS inside the card, never past its edge (the cure's pictures) */

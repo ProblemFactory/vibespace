@@ -12,7 +12,7 @@
 // Both are reached from Settings → Spending (the auto-resume row) and the session list's ⋯ menu.
 import { t } from './i18n.js';
 import { api, fetchJson, createModalShell, showToast } from './utils.js';
-import { autoResumeAllWords, resumeButtonWords, skipGroups, summaryWords, refusedWords } from '../stopped-by.js';
+import { autoResumeAllWords, resumeButtonWords, waitingCount, skipGroups, summaryWords, refusedWords } from '../stopped-by.js';
 import { costWords } from '../bulk-resume-cost.js';
 import { stampAt } from './page-time.js';   // the ONE formatter of a time a person reads
 import { autoResumeCapsFor } from './agent-meta.js';
@@ -50,7 +50,7 @@ export function planWords(plan) {
   const counts = autoResumeAllWords({ total: plan.counts ? plan.counts.total : 0, on: plan.counts ? plan.counts.on : 0 }, t);
   const n = plan.eligible ? plan.eligible.length : 0;
   const cw = n ? costWords(plan.estimate, t) : null;
-  return { ...counts, n, resumeButton: resumeButtonWords(n, t, { waiting: (plan.skipped || []).length }), passive: cw ? cw.passive : null };
+  return { ...counts, n, resumeButton: resumeButtonWords(n, t, { waiting: waitingCount(plan.skipped) }), passive: cw ? cw.passive : null };
 }
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
@@ -125,7 +125,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
   };
   if (!n && !p.running) {   // (a batch RUNNING with nothing left to plan still gets its Stop door and its progress — below)
     // NOTHING GREYED WITH A HINT: an empty set SAYS so (and why the ones it has are not resumable now)
-    body.appendChild(el('p', 'resume-stopped-empty', resumeButtonWords(0, t, { waiting: (p.skipped || []).length })));
+    body.appendChild(el('p', 'resume-stopped-empty', resumeButtonWords(0, t, { waiting: waitingCount(p.skipped) })));
     const sk = skippedList(p.skipped); if (sk) body.appendChild(sk);
     footer.appendChild(cancel);
     return null;

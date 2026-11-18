@@ -170,9 +170,13 @@ function autoResumeAllWords({ total = 0, on = 0 } = {}, tIn) {
 function resumeButtonWords(n, tIn, { waiting = 0 } = {}) {
   const t = tOf(tIn);
   if (n > 0) return t('Resume every session a usage limit or overload stopped ({n})', { n });
-  // stopped sessions that cannot be resumed NOW (still inside a limit, running…) are not «none stopped»
-  return waiting > 0 ? t('None of the {m} stopped sessions can be resumed now', { m: waiting }) : t('No sessions stopped by a limit');
+  // stopped sessions that cannot be resumed NOW (still inside a limit…) are not «none stopped»; ONE says so in the singular
+  // (the follow-up's read: «None of the 1 stopped sessions» is no English, «1 个…都» no Chinese)
+  return waiting === 1 ? t('The stopped session cannot be resumed now') : waiting > 1 ? t('None of the {m} stopped sessions can be resumed now', { m: waiting }) : t('No sessions stopped by a limit');
 }
+/** How many of the plan's skipped rows are STOPPED — a conversation that carries the mark but is RUNNING again is not
+ *  (its row still says «already running» in the list below; the count is of the ones waiting). */
+function waitingCount(skipped) { return (Array.isArray(skipped) ? skipped : []).filter((x) => x && x.why !== 'running').length; }
 
 const SKIP_KEYS = Object.freeze({
   walled: 'still inside a limit',
@@ -244,7 +248,7 @@ const WORD_KEYS = Object.freeze([
   'Model overloaded · stopped {time}', 'Auto-continue: on', 'Auto-continue: off', 'The harness said: {said}',
   'This mark stays until the session runs again.', 'Stopped by a limit or overload ({n})', 'Auto-continue: on · not waiting for this limit', 'Auto-continue: on · continues only if the limit clears early',
   'Will turn on {n} sessions; {m} already on', 'Turn auto-continue on for every session', 'Turn it off for all',
-  'Resume every session a usage limit or overload stopped ({n})', 'No sessions stopped by a limit', 'None of the {m} stopped sessions can be resumed now',
+  'Resume every session a usage limit or overload stopped ({n})', 'No sessions stopped by a limit', 'The stopped session cannot be resumed now', 'None of the {m} stopped sessions can be resumed now',
   ...Object.values(SKIP_KEYS), 'skipped', '{why} until {time}',
   'Resumed {n}', 'skipped {n} (still inside a limit)', 'skipped {n} ({w} still inside a limit)', 'skipped {n}', 'refused {n}', 'could not deliver {n}', 'not reached {n}',
   ...Object.values(REFUSED_KEYS), '{why} ({reason})', '{why} — {n}', 'stopped {n}',
@@ -253,5 +257,5 @@ const WORD_KEYS = Object.freeze([
 module.exports = {
   STOP_KINDS, SAID_MAX, SKIP_KEYS, REFUSED_KEYS, WORD_KEYS,
   boundSaid, isOverloadError, stopVerdict, normalizeStoppedBy, liveFactOf, isStoppedBy, stillWalled, planBatch,
-  chipWords, filterWords, autoResumeAllWords, resumeButtonWords, skipWords, skipGroups, summaryWords, refusedWords,
+  chipWords, filterWords, autoResumeAllWords, resumeButtonWords, waitingCount, skipWords, skipGroups, summaryWords, refusedWords,
 };
