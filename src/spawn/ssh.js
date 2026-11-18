@@ -109,14 +109,14 @@ function sshLadder(c) {
                     // base64 plan the install site sends — a host only ever
                     // spawned into (never Installed) gets the managed CLI-config
                     // keys at its next session start. base64 is shell-safe bare.
-                    // ONE composition (src/remote-shell.js): REMOTE_PRELUDE → node
-                    // finder → tools LAST (so ~/.vibespace/bin — the browser shim
-                    // included — stays first on PATH over node's own bin dir)
+                    // ONE composition (src/remote-shell.js), made ONCE at this setup's
+                    // top (integration on ⇒ REMOTE_PRELUDE → node finder → tools LAST,
+                    // so ~/.vibespace/bin — the browser shim included — stays first on
+                    // PATH over node's own bin dir): a ship that landed appends the register
                     // THE ROOT VERDICT (src/server-root.js): a worktree / temp
                     // server ships the tools but never runs the register helper —
                     // the host's CLI config belongs to the owner's instance.
-                    prelude = buildRemoteShellPrelude({ toolsOnPath: true, withNodeFinder: true })
-                      + (ownerWriteRefusal() ? '' : `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" >/dev/null 2>&1; `);
+                    prelude += (ownerWriteRefusal() ? '' : `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" >/dev/null 2>&1; `);
                     // EDITOR needs $HOME expansion → shell prefix assignment
                     // (envPairs are shq'd); PORT/SESSION_ID are static values.
                     tokenAssign = `VIBESPACE_SESSION_TOKEN="$(cat "$HOME/.vibespace/bin/${tokName}")" EDITOR="$HOME/.vibespace/editor/code" `;

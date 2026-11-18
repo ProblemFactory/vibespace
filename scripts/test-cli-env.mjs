@@ -246,9 +246,16 @@ const REAL8 = await (async () => {
     // the inherited PATH alone judged the machine's profile, not the product. The rc line reads its folder from ~/.vs-on-path
     // (written by envOf for an «on PATH» shape only): the shell is asked under serviceEnv's ALLOWLIST (src/server/cli-cmd.js),
     // which keeps HOME and drops any other name. `reset` = a profile that resets PATH before the rc (Debian's /etc/profile);
-    // `rcPath: false` = no such rc line (the leg as it was — the CONTROL shape)
+    // `rcPath: false` = no such rc line (the leg as it was — the CONTROL shape). ~/.profile carries the same head (the checkpoint's
+    // meeting with B-69ec ⑪, 2026-11-18): the remote twin's fallback rung asks a LOGIN sh (src/server/remote-cli.js `sh -lc`, the
+    // spawn's own road), which reads /etc/profile and ~/.profile — Debian's profile resets PATH for that shell too, so the planted
+    // reset is in ~/.profile as well and the remote road judges the same home on every machine (else a machine whose /etc/profile
+    // keeps PATH lets the fallback reach the program the person's shell no longer holds — the fallback rung's own law, pinned by
+    // ⑪'s «THE FALLBACK RUNG» leg (the module's law, on every machine) and the batch 63 cure's «a CLI only ~/.profile puts on
+    // PATH» leg (a real login sh, judged where the machine allows))
     const head = (reset ? 'PATH=/usr/bin:/bin\n' : '') + (rcPath ? '[ -r "$HOME/.vs-on-path" ] && PATH="$(cat "$HOME/.vs-on-path"):$PATH" && export PATH\n' : '');
     for (const f of ['.zshrc', '.bash_profile']) fs.writeFileSync(path.join(h, f), head + rc + '\n');
+    fs.writeFileSync(path.join(h, '.profile'), head);   // the login sh's own profile: the reset and the rc line, never the person's aliases
     if (target !== 'none') { fs.mkdirSync(path.join(h, '.local-cli'), { recursive: true }); if (target === 'exec') fake(path.join(h, '.local-cli', RN), 'alias-target'); else fs.writeFileSync(path.join(h, '.local-cli', RN), 'not a program\n', { mode: 0o644 }); }
     return h;
   };

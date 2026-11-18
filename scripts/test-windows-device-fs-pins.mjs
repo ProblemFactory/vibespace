@@ -27,6 +27,9 @@ const TABLE = [
   { file: 'src/exit-proxy.js', has: "await dm.runCmd(XS.POSIX_SHELL, ['-lc', cmd], { ...opts, by: opts.by });", verdict: 'win32', how: 'run-shell: the agent picks cmd.exe; a Windows agent without run-shell is refused by name (canRunLine ⇒ device_agent_outdated) before this rung' },
   { file: 'src/ctx-sync.js', has: "const inv = await dm.runCmd('sh', ['-c',", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by });", verdict: 'refused', how: DOOR },
+  // B-69ec: the remote CLI ask of a person's create (src/server/remote-cli.js) carries its consent — the consent rides the request
+  // only: runCmd (src/agentd/client.js) asks THE DOOR before it, so a Windows machine with no `sh` refuses it by name, as the plain probe on the next line of `_hostShell`
+  { file: 'src/hosts.js', has: "if (consent) { const rc = await dm.runCmd('sh', ['-c', script], { timeoutMs, by, consent: true });", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "out = String((await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { by: 'system:hosts' })).stdout", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "for c in dtach node claude codex", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "out = String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 10000, by })).stdout", verdict: 'refused', how: DOOR },

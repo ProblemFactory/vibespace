@@ -163,6 +163,13 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   const wc = ['src/ws-create.js', 'src/spawn/ssh.js', 'src/spawn/dial.js', 'src/spawn/local.js'].map((f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8')).join('\n');
   ok(!wc.includes('export PATH="$HOME/.vibespace/bin'), 'drift guard: ws-create.js + src/spawn/ hand-write NO ~/.vibespace/bin PATH prepend (every builder composes buildRemoteShellPrelude)');
   ok((wc.match(/buildRemoteShellPrelude\(\{/g) || []).length === 3, `the three agent-tool builders (ssh setup, dial pty, dial pipe) compose it (${(wc.match(/buildRemoteShellPrelude\(\{/g) || []).length})`);
+  // the ssh setup composes it ONCE, at its top; its after-ship branch APPENDS the register (checkpoint cure 411): a slip to
+  // `prelude =` would hand every integrated ssh spawn whose ship landed the register alone — no PATH, no node finder, no tools
+  const sshSrc = fs.readFileSync(new URL('../src/spawn/ssh.js', import.meta.url), 'utf8');
+  const appendsOnce = (s) => (s.match(/prelude \+= \(ownerWriteRefusal\(\) \? '' :/g) || []).length === 1 && !/^\s*prelude = /m.test(s);
+  ok(appendsOnce(sshSrc), 'the ssh setup\'s after-ship branch APPENDS the register to its one composition (`prelude += …`, no `prelude =` reassignment)');
+  const slip = sshSrc.replace("prelude += (ownerWriteRefusal() ? '' :", "prelude = (ownerWriteRefusal() ? '' :");
+  ok(slip !== sshSrc && !appendsOnce(slip), 'CONTROL: the one-character slip (`prelude = (ownerWriteRefusal() …`) is RED by the same judge');
   const hs = fs.readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf8');
   ok(/AGENT_TOOLS = \[[^\]]*'agent-browser'/.test(hs), 'the shim is an agent tool (it ships where the prelude puts it first)');
   ok((wc.match(/"\$HOME\/\.vibespace\/bin\/agent-browser"|"\$\{bin\}\/agent-browser"/g) || []).length === 2 && /chmod \+x "\$HOME\/\.vibespace\/bin"\/vibespace-\* "\$HOME\/\.vibespace\/bin\/agent-browser"/.test(hs), 'every ship path chmods the shim (it does not match the vibespace-* glob)');
