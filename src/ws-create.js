@@ -981,7 +981,12 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // src/billing-pick.js). A helper named in the machine's Claude settings outranks every OAuth login, and from 2.236.0 nothing
           // passed the adapter its neutralizer — a picked subscription billed the helper's paid credential. So the ONE spawn spec is
           // built HERE, after the account is resolved: the local dtach line, the daemon pipe and every remote builder run its args.
+          // ONE VARIABLE (主开发 22:14Z, the meeting with lane lg-providers): the helper is set aside when the billing pick's verdict says so
+          // OR the conversation runs on a third-party provider — the rule answers both (src/billing-pick.js: the resolved account's kind
+          // 'provider'; its own key must never be outranked by the machine's helper — U2); every reader below (the named fact, the
+          // notice a person sees) follows it, and a provider's words are its own (onProvider)
           const keyHelperOff = BILLPICK.setsHelperAside({ creds: harness && harness.creds, account: spawnAccount, linked: linkedAccountId });
+          const onProvider = !!(spawnAccount && spawnAccount.kind === 'provider');
           // THE CURE (主开发 09:09Z, «as if a must»): the person's own settings FILE is set aside only when that is needed — the ONE read of
           // the fact for this start (shared with the notice below), asked BEFORE the build only by a start that carries such a file (a
           // start without one never waits on a machine); the spawn's own env places the CLI's settings (agentEnv + the account's env)
@@ -1699,7 +1704,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // only a start that got this far is told (a refused one says its refusal)
           // (unit «billing pick alive»: an ADOPTED process — keeperSid — keeps the argv it started with; this start's notes are not its own)
           for (const k of (!data.keeperSid && sessionSpec && sessionSpec.settingsNotes) || []) {
-            const w = SFW.SETTINGS_FILE_WORDS[k], name = String(session.name || data.name || '').slice(0, 80) || 'This conversation';
+            // a third-party provider's start says ITS billing words (no subscription bills it; no «CLI login» door)
+            const w = (onProvider && SFW.PROVIDER_BILLING_WORDS[k]) || SFW.SETTINGS_FILE_WORDS[k], name = String(session.name || data.name || '').slice(0, 80) || 'This conversation';
             if (w) { try { serverNotice?.(`settings-file-${k}-${id}`, w.replace('{name}', () => name), { level: 1, i18n: { key: w, params: { name } } }); } catch { } }   // a function: a «$&» in a name is words
           }
           // B-6c55 (c): the CLI's own catalog gives the locked model no 1M form — SAID here, after the start's refusals (batch 21's cure);
@@ -1716,8 +1722,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             const acctId = (spawnAccount && spawnAccount.id) || linkedAccountId;
             // the paired machine by the name the person reads (the hosts store's record), never its id
             const hostName = data.hostId ? (() => { try { const h = (hosts && hosts.get(data.hostId)) || {}; return h.name || h.host || null; } catch { return null; } })() : null;
-            const said = BILLPICK.helperNotice({ name: session.name || data.name, accountId: acctId, host: hostName, hostId: data.hostId || null,
-              account: (() => { try { return accounts?.get?.(acctId)?.name || acctId; } catch { return acctId; } })() });
+            const said = BILLPICK.helperNotice({ name: session.name || data.name, accountId: acctId, host: hostName, hostId: data.hostId || null, provider: onProvider,
+              account: (() => { try { return accounts?.get?.(acctId)?.name || accounts?.providerRecordOf?.(acctId)?.label || acctId; } catch { return acctId; } })() });   // a provider conversation: its record's name, never its pv- id
             // a key this hub already said asks the machine nothing more — the notice channel says a key once per hub run
             if (said && !helperSaidKeys.has(said.key)) try { helperFact().then((on) => {
               if (on === true && serverNotice && serverNotice(said.key, said.text, { level: 1, i18n: { key: said.words, params: said.params } }) > 0) helperSaidKeys.add(said.key);

@@ -87,10 +87,30 @@
    "file": "src/model-providers.js",
    "keyedOn": "model",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "listedRows takes the harness row's own context (claude: the binary's catalog) before the [1m]/«1M» spelling",
+   "road": "listedRows takes the harness row's own context (claude: the binary's catalog) before the [1m]/«1M» spelling; + the SHIPPED third-party presets' dated rows (lane lg-providers: GLM-4.6's 200000) — a third party's model, never Claude's: no Claude Code update touches them",
    "suite": "test-claude-update-needs-nothing",
    "match": "context-claim",
-   "sites": 2
+   "sites": 3
+  },
+  {
+   "id": "provider-plan-family-env",
+   "file": "src/harnesses/claude.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a THIRD-PARTY provider conversation only (lane lg-providers U2): the CLI's own family env names (ANTHROPIC_DEFAULT_<FAMILY>_MODEL, ANTHROPIC_SMALL_FAST_MODEL) set to the PROVIDER's rows — its alias or its default; a new Claude version needs nothing here; a family a later CLI adds is asked of the provider under the provider's key and address — the third party answers or refuses it, never a claude-* account billed",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 1
+  },
+  {
+   "id": "provider-instance-default-1m",
+   "file": "src/ws-create.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a THIRD-PARTY provider conversation only (lane lg-providers remainders): an INSTANCE / harness default «<alias>[1m]» the provider does not serve is retried once without the [1m] mark against the provider's own aliases (a pick the person made stays refused by name) — spelling only, no model id named; a later CLI that spells long context otherwise falls to the provider's own default, never a claude-* account billed",
+   "suite": "test-harness-spawn",
+   "match": "one-m-suffix",
+   "sites": 1
   },
   {
    "id": "listed-rows-1m",

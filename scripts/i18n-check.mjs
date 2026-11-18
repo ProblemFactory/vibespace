@@ -51,6 +51,7 @@ export const noticeKeyTables = () => {
     { name: 'src/loop-hold.js PROFILE_STOPPED / PROFILE_UNSAMPLED', keys: (() => { const LH = req('../src/loop-hold.js'); return [...Object.values(LH.PROFILE_STOPPED), LH.PROFILE_STOPPED_ANY, ...Object.values(LH.PROFILE_UNSAMPLED), LH.PROFILE_UNSAMPLED_ANY, ...Object.values(LH.PROFILE_REFUSED), LH.PROFILE_REFUSED_ANY]; })() },
     // B-8dcf item two: what a person's own settings file met at a claude start — the hub's notices, worded by t() on the page
     { name: 'src/settings-file-words.js SETTINGS_FILE_WORDS', keys: Object.values(req('../src/settings-file-words.js').SETTINGS_FILE_WORDS) },
+    { name: 'src/settings-file-words.js PROVIDER_BILLING_WORDS', keys: Object.values(req('../src/settings-file-words.js').PROVIDER_BILLING_WORDS) },   // lane lg-providers: a provider start's two billing kinds
     // B-6c55: a locked conversation's resume that cannot keep its 1M ask — the hub's notice, worded by t() on the page
     { name: 'src/lock-context.js NO_LONG_CONTEXT', keys: [req('../src/lock-context.js').NO_LONG_CONTEXT] },
     // B-c9ed: THE picture rule's refusal words — a table of keys, worded by t() at the picture door (src/lib/image-attach.js)

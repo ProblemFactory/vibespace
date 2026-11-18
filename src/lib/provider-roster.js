@@ -40,13 +40,13 @@ function askKey(id, name) {
   return new Promise((resolve) => {
     let settled = false, holder = null;
     const finish = (v) => { if (!settled) { settled = true; resolve(v); } };
-    const keyEl = () => (holder ? holder.querySelector('.pw-key') : null);
+    const keyEl = () => (holder ? holder.querySelector('.pw-key-input') : null);
     // the unsaved rule (test-dialog-unsaved-census): a typed key is kept by Save, cleared from the page by Discard
     const { body, close, raised } = createModalShell({ id: 'provider-new-key', key: id, title: t('New key for {name}', { name }), minWidth: 'min(460px, 92vw)', kind: 'form', onClose: () => finish(null),
       unsaved: { isDirty: () => !!(keyEl() && keyEl().value.trim()), save: () => { finish(keyEl().value); return true; }, discard: () => { if (keyEl()) keyEl().value = ''; } } });
     if (raised) { finish(null); return; }
     holder = body;
-    body.innerHTML = `<label class="pw-field"><span>${escHtml(t('Key'))}</span><input class="pw-key" type="password" autocomplete="off" spellcheck="false"></label>
+    body.innerHTML = `<label class="pw-field"><span>${escHtml(t('Key'))}</span><input class="pw-key-input" type="password" autocomplete="off" spellcheck="false"></label>
       <div class="pw-actions"><button type="button" class="agent-btn primary pw-save">${escHtml(t('Save'))}</button></div>`;
     body.querySelector('.pw-save').onclick = () => { finish(keyEl().value); close(); };
   });

@@ -16,6 +16,9 @@
  *     not parse, a paired machine that does not answer) billing wins and the words say so (`billingUnread`); in every other
  *     start the file applies WHOLE, as on the release — its hooks and permission rules are never lost to a helper that is not
  *     there. (Merging the file and the one override into a file of the conversation's own: backlog B-e7c0.)
+ *   · A THIRD-PARTY PROVIDER's start (the meeting with lane lg-providers, 22:14Z) sets the file aside for the billing one's
+ *     reason — a helper must never outrank the provider's own key — and SAYS it in its own words (PROVIDER_BILLING_WORDS:
+ *     no subscription bills it, no «CLI login» door; the place to take the helper out of instead).
  * Each is SAID by name once per conversation start, where the person looks, with its door (the create's notice).
  * SETTINGS_FILE_WORDS[kind] = the person's words (English t() keys, {name} = the conversation; the page words them).
  * The kinds the file GOVERNS ride the session as `_settingsFileGoverns` (meta settingsFileGoverns): the paths that push a value
@@ -31,10 +34,17 @@ const SETTINGS_FILE_WORDS = Object.freeze({
   billingUnread: '{name} bills the subscription chosen for it, and whether the Claude settings of its machine name an apiKeyHelper could not be read, so your settings file was set aside for this start, all of it — to use the file, set its billing to «CLI login»',
 });
 const SETTINGS_FILE_KINDS = Object.freeze(Object.keys(SETTINGS_FILE_WORDS));
+/** THE TWO BILLING KINDS AT A THIRD-PARTY PROVIDER'S START (the meeting with lane lg-providers, 22:14Z): the file is set aside for
+ *  the same reason — a helper must never outrank the provider's own key — but no subscription bills it and the «CLI login» door
+ *  would move it off the provider: the create says these words for those two kinds instead */
+const PROVIDER_BILLING_WORDS = Object.freeze({
+  billing: '{name} runs on a third-party provider and a Claude settings file it reads names an apiKeyHelper, so your settings file was set aside for this start, all of it — VibeSpace sets a helper aside so it cannot outrank the provider’s own key; to use your file, take the apiKeyHelper out of the settings that name it (this machine’s, the project’s .claude files, or your file itself)',
+  billingUnread: '{name} runs on a third-party provider, and whether a Claude settings file it reads names an apiKeyHelper could not be read, so your settings file was set aside for this start, all of it — VibeSpace sets a helper aside so it cannot outrank the provider’s own key',
+});
 /** the kinds a governing file covers (the three; the two billing kinds are a set-aside, never a governing) */
 const GOVERNED_KINDS = Object.freeze(['outputStyle', 'noFallback', 'jobNotices']);
 /** does the person's settings file govern `kind` for this running session? */
 const fileGoverns = (session, kind) => !!(session && Array.isArray(session._settingsFileGoverns) && session._settingsFileGoverns.includes(kind));
 /** the live settings row a kind stands for (harness-config-sync's push) */
 const KIND_OF_ROW = Object.freeze({ disableModelFallback: 'noFallback' });
-module.exports = { SETTINGS_FILE_WORDS, SETTINGS_FILE_KINDS, GOVERNED_KINDS, fileGoverns, KIND_OF_ROW };
+module.exports = { SETTINGS_FILE_WORDS, SETTINGS_FILE_KINDS, PROVIDER_BILLING_WORDS, GOVERNED_KINDS, fileGoverns, KIND_OF_ROW };

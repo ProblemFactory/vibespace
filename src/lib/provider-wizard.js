@@ -81,12 +81,12 @@ export async function openProviderWizard({ backend, onDone = null } = {}) {   //
         <label class="pw-field"><span>${escHtml(t('Model id'))}</span><input class="pw-model" type="text" autocomplete="off" value="${escHtml(d.model || '')}"></label>` : '';
       body.innerHTML = `<p class="pw-lead">${escHtml(t('Paste your {provider} key', { provider: t(s.label) }))}${s.console ? ` · <a href="${escHtml(s.console)}" target="_blank" rel="noopener noreferrer">${escHtml(t('Where to get a key'))}</a>` : ''}</p>
         ${regions}${own}
-        <label class="pw-field"><span>${escHtml(t('Key'))}</span><input class="pw-key" type="password" autocomplete="off" spellcheck="false"></label>
+        <label class="pw-field"><span>${escHtml(t('Key'))}</span><input class="pw-key-input" type="password" autocomplete="off" spellcheck="false"></label>
         <p class="pw-note">${escHtml(t('The key is kept in the vault. The test sends the provider one short message with it — it costs a fraction of a cent.'))}</p>
         <div class="pw-error" role="alert">${escHtml(st.error)}</div>
         <div class="pw-actions"><button type="button" class="agent-btn pw-back">${escHtml(t('Back'))}</button><button type="button" class="agent-btn primary pw-save">${escHtml(t('Save and test'))}</button></div>
         ${fold(techRows())}`;
-      const keyEl = body.querySelector('.pw-key');
+      const keyEl = body.querySelector('.pw-key-input');
       if (d.key) keyEl.value = d.key;   // a refused save keeps what was typed (it is in this page's memory only, never drawn as text)
       body.querySelectorAll('input[name="pw-region"]').forEach((r) => { r.onchange = () => { st.region = r.value; }; });
       body.querySelector('.pw-back').onclick = () => { st.step = 'pick'; draw(); };

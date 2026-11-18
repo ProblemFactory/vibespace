@@ -432,6 +432,72 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const argsOf = (x) => (x.spawned[0] || { args: [] }).args;
   const modelOf = (x) => { const a = argsOf(x); const i = a.indexOf('--model'); return i >= 0 ? a[i + 1] : null; };
   ok(modelOf(cm) === 'deepseek-reasoner' && modelOf(cd) === 'deepseek-chat' && argsOf(cd).some((a) => String(a).includes('"apiKeyHelper":""')), 'a served pick is spawned as asked; NO pick ⇒ the provider\'s default (never the instance\'s claude-* default); a machine-wide apiKeyHelper is neutralized (--settings apiKeyHelper:"") — it would outrank the provider\'s key', { picked: modelOf(cm), none: modelOf(cd) });
+  // THE MEETING OF LOGIC (主开发 22:14Z, with lane bl-chat-b's billing half): ONE variable sets the machine's key helper aside —
+  // the billing pick's verdict OR a conversation on a third-party provider. The provider side: its spawn carries the emptied helper
+  // setting (a helper named in the machine's Claude settings would outrank the provider's own key); that half reverted is RED
+  ok(cd.spawned.length === 1 && argsOf(cd).some((a) => String(a).includes('"apiKeyHelper":""')), 'the ONE helper variable, its provider side: a provider conversation\'s spawn carries the emptied key helper setting', argsOf(cd));
+  // the rule answers both halves (src/billing-pick.js: the resolved account's kind 'provider', behind the harness's keyHelper row
+  // — a harness whose login no helper outranks sets nothing aside, a Codex provider neither); CONTROL: the rule without its
+  // provider line, swapped into the real create, starts a provider conversation with the machine's helper in force
+  const BP = require(path.join(REPO, 'src/billing-pick.js')), SFW = require(path.join(REPO, 'src/settings-file-words.js'));
+  ok(BP.setsHelperAside({ creds: H.get('claude').creds, account: { id: ds.id, kind: 'provider' } }) && !BP.setsHelperAside({ creds: H.get('codex').creds || null, account: { id: lab.id, kind: 'provider' } }),
+    'the rule: a Claude Code conversation on a provider sets the helper aside; a Codex one has no helper to set aside (nothing flagged)');
+  const BPSRC = fs.readFileSync(path.join(REPO, 'src/billing-pick.js'), 'utf8');
+  const PVLINE = "  if (!!account && typeof account === 'object' && account.kind === 'provider') return true;   // a third-party provider (the meeting, 22:14Z)\n";
+  const BPREQ = "require('./billing-pick.js')";
+  if (BPSRC.split(PVLINE).length !== 2 || src.split(BPREQ).length !== 2) throw new Error('the anchors of the control «the rule without its provider half» are not in the sources once');
+  const bpNo = M.write('src/billing-pick.js', BPSRC.replace(PVLINE, ''), 'bp-noprovider');
+  const hk0 = await drive(M.load('src/ws-create.js', src.replace(BPREQ, 'require(' + JSON.stringify(bpNo) + ')'), 'pv-nohelper'), { backend: 'claude', accountId: ds.id }, { accounts: am });
+  ok(hk0.spawned.length === 1 && !argsOf(hk0).some((a) => String(a).includes('"apiKeyHelper":""')), 'CONTROL: the rule without its provider half spawns a provider conversation with the machine\'s helper in force ⇒ the leg above goes RED', argsOf(hk0));
+  // EVERY READER FOLLOWS IT, IN A PROVIDER'S OWN WORDS (the cure's read: the notice called DeepSeek «the subscription you picked»
+  // and offered «CLI login»): the machine's Claude settings NAME a helper (a scratch config dir) ⇒ ONE notice, the provider's
+  // words, the provider named by its record; with the person's own --settings file the file is set aside and the provider's
+  // file words are said; a machine that names no helper ⇒ the file applies whole, nothing said
+  const CFG = scratchDir('hspawn-helper-cfg'), PFILE = path.join(CFG, 'mine.json');
+  fs.writeFileSync(PFILE, JSON.stringify({ permissions: { deny: ['Bash(rm:*)'] } }));
+  const helperNamed = (on) => fs.writeFileSync(path.join(CFG, 'settings.json'), on === 'garbled' ? '{ "apiKeyHelper": ' : JSON.stringify(on ? { apiKeyHelper: '/usr/local/bin/key-helper' } : { theme: 'dark' }));
+  const noticed = async (mod, data, want = true) => {
+    const notes = [];
+    const x = await drive(mod, { backend: 'claude', accountId: ds.id, name: 'Fix the build', ...data }, { accounts: am, serverNotice: (key, text, o) => { notes.push({ key, text, ...(o || {}) }); return 1; } }, () => ({ CLAUDE_CONFIG_DIR: CFG }));
+    if (want) { for (let i = 0; i < 150 && !notes.some((n) => n.key.startsWith('billing-pick-helper-')); i++) await new Promise((r) => setTimeout(r, 20)); }   // the fact is read after the spawn (bounded, local)
+    else await new Promise((r) => setTimeout(r, 300));   // room for a notice that must not come
+    return { x, notes };
+  };
+  const settingsArg = (x) => { const a = argsOf(x); const i = a.indexOf('--settings'); return i >= 0 ? String(a[i + 1]) : null; };
+  helperNamed(true);
+  const nh = await noticed(wsCreate, {});
+  const hn = nh.notes.filter((n) => n.key.startsWith('billing-pick-helper-'));
+  ok(hn.length === 1 && hn[0].key === `billing-pick-helper-${ds.id}-local` && hn[0].i18n && hn[0].i18n.key === BP.HELPER_SET_ASIDE.provider && hn[0].i18n.params.account === 'DeepSeek'
+    && / runs on DeepSeek, a third-party provider paid by use with your own key/.test(hn[0].text) && !/subscription|CLI login/.test(hn[0].text),
+    'the machine names a helper: a provider conversation is told ONCE, in a provider\'s words (paid by use, never «the subscription you picked», no «CLI login» door), the provider by its name', hn);
+  const nf = await noticed(wsCreate, { extraArgs: ['--settings', PFILE] });
+  const fileNote = nf.notes.find((n) => n.key.startsWith('settings-file-'));
+  ok(settingsArg(nf.x) !== PFILE && /"apiKeyHelper":""/.test(settingsArg(nf.x) || '') && fileNote && fileNote.i18n.key === SFW.PROVIDER_BILLING_WORDS.billing && !/subscription|CLI login/.test(fileNote.text),
+    'with the person\'s own --settings file: the file is set aside (the helper must not outrank the key) and the provider\'s file words are said — never «bills the subscription chosen for it»', { arg: settingsArg(nf.x), fileNote });
+  helperNamed(false);
+  const nn = await noticed(wsCreate, { extraArgs: ['--settings', PFILE] }, false);
+  ok(settingsArg(nn.x) === PFILE && !nn.notes.some((n) => n.key.startsWith('settings-file-billing') || n.key.startsWith('billing-pick-helper-')), 'a machine that names no helper: the person\'s file applies whole and nothing is said', { arg: settingsArg(nn.x), notes: nn.notes.map((n) => n.key) });
+  // the fact cannot be read (the machine's settings do not parse) ⇒ the file is set aside all the same, said in the provider's
+  // UNREAD words; a helper named ONLY in the person's own file ⇒ set aside, the words naming that place too
+  helperNamed('garbled');
+  const nu = await noticed(wsCreate, { extraArgs: ['--settings', PFILE] }, false);
+  const unreadNote = nu.notes.find((n) => n.key.startsWith('settings-file-'));
+  ok(settingsArg(nu.x) !== PFILE && unreadNote && unreadNote.key.startsWith('settings-file-billingUnread-') && unreadNote.i18n.key === SFW.PROVIDER_BILLING_WORDS.billingUnread && !/subscription|CLI login/.test(unreadNote.text),
+    'the fact cannot be read: the file is set aside (billing wins) and the provider\'s UNREAD words are said', { arg: settingsArg(nu.x), unreadNote });
+  helperNamed(false);
+  const OWNF = path.join(CFG, 'mine-helper.json');
+  fs.writeFileSync(OWNF, JSON.stringify({ apiKeyHelper: '/usr/local/bin/own-helper', permissions: { deny: ['Bash(rm:*)'] } }));
+  const no = await noticed(wsCreate, { extraArgs: ['--settings', OWNF] });
+  const ownNote = no.notes.find((n) => n.key.startsWith('settings-file-'));
+  ok(settingsArg(no.x) !== OWNF && ownNote && ownNote.i18n.key === SFW.PROVIDER_BILLING_WORDS.billing && /or your file itself/.test(ownNote.text),
+    'a helper named ONLY in the person\'s own file: the file is set aside and the words name that place (never only «this machine\'s settings»)', { arg: settingsArg(no.x), ownNote });
+  helperNamed(true);
+  const LABEL = ' || accounts?.providerRecordOf?.(acctId)?.label';
+  if (src.split(LABEL).length !== 2) throw new Error('the anchor of the control «the notice names the provider by its record» is not in the source once');
+  const nl = await noticed(M.load('src/ws-create.js', src.replace(LABEL, ''), 'pv-nolabel'), {});
+  const hl = nl.notes.filter((n) => n.key.startsWith('billing-pick-helper-'));
+  ok(hl.length === 1 && hl[0].i18n.params.account === ds.id, 'CONTROL: the notice without the record\'s name names the conversation\'s provider by its pv- id ⇒ the leg above goes RED', hl.map((n) => n.i18n && n.i18n.params));
+  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const d = fs.readFileSync(path.join(REPO, f), 'utf8'); ok([BP.HELPER_SET_ASIDE.provider, ...Object.values(SFW.PROVIDER_BILLING_WORDS)].every((w) => d.includes(JSON.stringify(w) + ':')), `${path.basename(f)}: a provider's three helper sentences have their rows`); }
   // (MAJOR 3) the badge names the provider, billed by use — never «API key» / «ChatGPT»
   const badgeC = H.get('claude').billingIdentity({ _accountId: ds.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
   const badgeX = H.get('codex').billingIdentity({ _accountId: lab.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });

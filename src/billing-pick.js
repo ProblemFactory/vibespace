@@ -1,6 +1,6 @@
 'use strict';
 /**
- * A SUBSCRIPTION PICK SETS THE MACHINE'S KEY HELPER ASIDE — PURE, imports nothing; CJS so the create, the suites and the
+ * A SUBSCRIPTION PICK (OR A THIRD-PARTY PROVIDER) SETS THE MACHINE'S KEY HELPER ASIDE — PURE, imports nothing; CJS so the create, the suites and the
  * dictionary check share ONE spelling (unit «billing pick alive», ruled by 主开发 2026-11-18 01:45Z).
  *
  * A helper named in the Claude settings of the machine the CLI runs on (`apiKeyHelper` in ~/.claude/settings.json) OUTRANKS
@@ -11,7 +11,7 @@
  * billing switcher and Manage agents said «picking a subscription bypasses the helper».
  *
  * THE LAWS (the ruling):
- *   · ONLY A PICK: the conversation's RESOLVED account is a subscription the person picked (their pick for it, or the default
+ *   · ONLY A PICK (or a third-party provider — the law below): the conversation's RESOLVED account is a subscription the person picked (their pick for it, or the default
  *     they starred in Manage agents — their standing pick, ruled 02:39Z: one conversation never changes who it bills between
  *     its first start and a resume) — a named subscription account or a
  *     pool of them (resolveForSpawn kind 'subscription'), or a picked subscription that runs on the machine's own login because
@@ -25,6 +25,11 @@
  *   · SAID ONCE, where the person looks, when the rule actually set a helper aside (the machine's settings name one), with its
  *     door: the billing switcher's CLI-login entry bills through the helper again (at the next start).
  *   · A RUNNING conversation is never touched: the answer rides a spawn only.
+ *   · A THIRD-PARTY PROVIDER TOO (the meeting with lane lg-providers, ruled by 主开发 2026-11-18 22:14Z — ONE variable): a
+ *     conversation whose resolved account is a provider (resolveForSpawn kind 'provider': its own key at its own address)
+ *     sets the helper aside as a pick does — a helper would outrank the provider's key and hand the machine's credential to
+ *     the third party's address (VibeSpace sets it aside so it cannot). Its words are its own (HELPER_SET_ASIDE.provider): paid by use, never «the subscription you
+ *     picked», and no «CLI login» door (that door moves it off the provider).
  *   · THE PERSON'S OWN SETTINGS FILE IS SET ASIDE ONLY WHEN THAT IS NEEDED (the cure, 主开发 09:09Z — «as if a must»): the one
  *     inline override cannot ride beside a `--settings <file>` (ONE flag), so a pick used to set the whole file aside at every
  *     start — its hooks and permission rules lost (a lost deny rule is a safety loss). Now the create reads THE FACT the notice
@@ -40,6 +45,7 @@
 function setsHelperAside({ creds = null, account = null, linked = null } = {}) {
   if (!creds || !creds.keyHelper || typeof creds.keyHelper !== 'object') return false;
   if (typeof linked === 'string' && linked) return true;
+  if (!!account && typeof account === 'object' && account.kind === 'provider') return true;   // a third-party provider (the meeting, 22:14Z)
   return !!account && typeof account === 'object' && account.kind === 'subscription';
 }
 
@@ -101,6 +107,8 @@ function remoteHelperFact(status, backend) {
 const HELPER_SET_ASIDE = Object.freeze({
   local: '{name} bills {account}, the subscription you picked — the apiKeyHelper in this machine’s Claude settings is not used for it. To bill through the helper, set its billing to «CLI login» (from its next start)',
   remote: '{name} bills {account}, the subscription you picked — the apiKeyHelper in the Claude settings on {host} is not used for it. To bill through the helper, set its billing to «CLI login @ {host}» (from its next start)',
+  // a third-party provider (this machine only — the create refuses one elsewhere): paid by use with its own key; no door
+  provider: '{name} runs on {account}, a third-party provider paid by use with your own key — the apiKeyHelper named in the Claude settings it reads is not used for it (VibeSpace sets it aside so it cannot outrank the provider’s key)',
 });
 
 /** the notice's key: ONE per picked account and machine — the person hears it the first time the rule acts there, not at
@@ -108,9 +116,9 @@ const HELPER_SET_ASIDE = Object.freeze({
 const noticeKey = (accountId, hostId) => `billing-pick-helper-${String(accountId || 'none').slice(0, 60)}-${hostId ? String(hostId).slice(0, 60) : 'local'}`;
 
 /** → { key, words, params, text } for the notice, or null without an account */
-function helperNotice({ name, account, accountId, host = null, hostId = null } = {}) {
+function helperNotice({ name, account, accountId, host = null, hostId = null, provider = false } = {}) {
   if (!accountId) return null;
-  const words = hostId ? HELPER_SET_ASIDE.remote : HELPER_SET_ASIDE.local;
+  const words = provider ? HELPER_SET_ASIDE.provider : hostId ? HELPER_SET_ASIDE.remote : HELPER_SET_ASIDE.local;
   const params = { name: String(name || '').slice(0, 80) || 'This conversation', account: String(account || accountId).slice(0, 80), ...(hostId ? { host: String(host || hostId).slice(0, 80) } : {}) };
   const text = words.replace(/\{(name|account|host)\}/g, (m, k) => (params[k] != null ? params[k] : m));
   return { key: noticeKey(accountId, hostId), words, params, text };
