@@ -46,7 +46,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, runnerFontEnv, realClicker, stillPresser } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, runnerFontEnv, realClicker, stillPresser } from './scratch.mjs';
+import { mintRoot, startHub, DAEMON_ROOT_ENV } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (test-architecture §57c)
 import { armWatchdog } from './suite-watchdog.mjs';
 import { navTitleMinText } from '../src/lib/title-chips.js'; // the release's readable minimum (lane phone-titlebar-title) — the ladder's since 主开发 09:33Z
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
@@ -62,8 +63,12 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 if (!fs.existsSync(path.join(TREE, 'public', 'bundle.js'))) { console.log(`✗ no ${TREE}/public/bundle.js — run \`npm run build\` first`); process.exit(1); }
 
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('phone-six-wt');
-const fakeHome = scratchHome('phone-six-home', fs);
+// the tree and the home live in ONE root the boot helper minted: at exit it ends the hub and everything rooted there, removes the
+// worktree through git, then the root (test-architecture §57c — no hub boot outside scripts/hub-boot.mjs)
+const root = mintRoot('phone-six');
+const wt = path.join(root, 't');
+const fakeHome = path.join(root, 'home');
+for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeDir = scratch('phone-six-chrome');
 const stubDir = scratch('phone-six-stub');
 const fontsDir = scratch('phone-six-fonts');
@@ -103,22 +108,22 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${TREE}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
-const srvLog = fs.openSync(path.join(SHOTS, 'server.log'), 'a');
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: path.join(stubDir, 'claude'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1' }, stdio: ['ignore', srvLog, srvLog] });
+const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: path.join(stubDir, 'claude'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1' };
+for (const k of DAEMON_ROOT_ENV) delete srvEnv[k];   // a device root, if the caller's env names one, would lie outside the minted root
+const hub = startHub({ root, tree: wt, port: PORT, env: srvEnv });   // its output: <root>/hub.log
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
   '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...FONT_ENV } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }
-  try { srv.kill('SIGKILL'); } catch { }
-  for (const root of [wt, fakeHome, stubDir, chromeDir]) { try { endRootedProcesses(root); } catch { } } // the server, dtach, the wrapper, the stub, Chrome (§57b)
+  try { hub.stop(); } catch { }
+  for (const r of [stubDir, chromeDir]) { try { endRootedProcesses(r); } catch { } } // the stub and Chrome, outside the minted root (§57b); the helper ends the hub's own
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
   for (const d of [chromeDir, fakeHome, stubDir, fontsDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 };
-process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
+process.on('exit', cleanup);   // a signal is the boot helper's (armed at mintRoot: each ends in exit, so this runs) — no signal line here
 const PENDS = new Map();
 armWatchdog({ capMs: 840e3, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
-for (let i = 0; i < 160; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
+if (!(await hub.ready({ ms: 40000 }))) console.log(`  (the hub did not answer in 40 s — its log:)\n${hub.log().slice(-2000)}`);   // the log lives in the minted root, gone at exit
 
 // ── raw CDP ──
 const WebSocket = require('ws');
