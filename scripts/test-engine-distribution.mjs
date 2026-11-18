@@ -1558,7 +1558,6 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
   const cut = (anchor, to, what) => swap(EDsrc, anchor, to, what);
   const holdAnchor = "    if (!g.landing && restoring.has(sid) && !(await waitPutBack(sid, restoring.get(sid), a))) throw named('engine_kernel_landing', putBackWords(sid));\n";
   const ownAnchor = "    if (!ask || await waitPutBack(sid, p, ask)) return p;\n    throw named('engine_kernel_landing', putBackWords(sid));\n";
-  const lookAnchor = "    if (ask.late) return within(p, LATE_LOOK_MS);\n";
   const bootAnchor = "      try { const back = await putBackWithin(id, plan, askB);";
   const instAnchor = "      let back0 = null; try { back0 = await putBackWithin(sid, plan, ask0); } finally { rel0(); }";
   const load = (src, tag) => MC.load('src/server/engine-distribution.js', src, tag);
@@ -1602,7 +1601,16 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
     rmGo(); const a = await A;
     return { inCleanup, m, a, said: L.journal.filter((l) => /is still being put back after/.test(l)).length };
   };
-  const [lm, lmBad] = await Promise.all([lateMeasure(undefined), lateMeasure(load(cut(lookAnchor, '    if (ask.late) return false;\n', 'a late ask only looks'), 'b4d35-late-refused'))]);
+  // the control's plant (2.369.411 block 1, a red by this chain alone — the race was IN the control): «a late ask refused at once»
+  // goes at the TOP of waitPutBack, before its zero-time check `within(p, 0)`. Cut in place of the look, the refusal raced that
+  // check: a put-back with nothing aside can settle before the 0 ms timer, the ask answered «over» before it was ever refused,
+  // and the control read {ok:true}. The plant is asserted where it claims before its verdict (the close's rule b)
+  const waitAnchor = '  async function waitPutBack(sid, p, ask) {\n    if (await within(p, 0)) return true;';
+  const lateSrc = cut(waitAnchor, "  async function waitPutBack(sid, p, ask) {\n    if (ask.late) return false; // the control: a late ask refused at once, before any look\n    if (await within(p, 0)) return true;", 'a late ask refused before the zero-time check');
+  const wpAt = lateSrc.indexOf('  async function waitPutBack(sid, p, ask) {'), plantAt = lateSrc.indexOf('    if (ask.late) return false; // the control', wpAt), zeroAt = lateSrc.indexOf('    if (await within(p, 0)) return true;', wpAt); // inside waitPutBack (the zero-time check is spelled elsewhere too)
+  ok(wpAt > -1 && plantAt > wpAt && zeroAt > plantAt,
+    'CONTROL setup (B-4d35 round 3): the plant «a late ask refused at once» stands BEFORE waitPutBack\'s zero-time check — never raced by it');
+  const [lm, lmBad] = await Promise.all([lateMeasure(undefined), lateMeasure(load(lateSrc, 'b4d35-late-refused'))]);
   // (the restack onto 2.369.410: «never a second bound» is judged by the journal — a bound waited out says «is still being put back
   // after» — and by the answer, never by a literal wall-clock bound: the release's ratchet of those is at 0)
   ok(lm.inCleanup && lm.m && lm.m.ok === true && !lm.m.code && !lm.said && lm.a === true,
