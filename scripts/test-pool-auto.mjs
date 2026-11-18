@@ -3202,10 +3202,10 @@ await (async () => {
       for (let i = 0; i < 4; i++) quietly(() => E.maybePoolAutoSwitchForPool(g.P, { kick: true }));   // five records in one moment
       Object.assign(r, { held: held(), s2: at(), trails: trails() });
       // the ONE armed re-run, fired with the gate wound open (ten seconds on): it EVALUATES — no record's decision is lost
-      const tm = E._poolKickTrail ? [...E._poolKickTrail.values()][0] : null, fire = tm && tm._onTimeout;
+      const tm = E._poolKickTrail ? [...E._poolKickTrail.values()][0] : null;
       if (E._poolEvalAt) E._poolEvalAt.set(g.P, Date.now() - 11000);
-      r.trailFired = typeof fire === 'function';
-      if (r.trailFired) { clearTimeout(tm); quietly(() => fire.call(tm)); }
+      r.trailFired = !!tm && typeof E.poolKickRerun === 'function';   // the engine's own seam (never a Node internal of the timer)
+      if (r.trailFired) { clearTimeout(tm); quietly(() => E.poolKickRerun(g.P)); }
       Object.assign(r, { trailEvaluated: fresh(), trailsAfter: trails() });
       // an un-forced pass that OWES its decision (the tick's form; a walled turn's end, the cold wall, the pre-fire first decision
       // are the same call): an evaluation 3 s ago shuts the kicks' gate, never this pass
@@ -3253,6 +3253,60 @@ await (async () => {
       };
       const C = await compactAsk(engMod);
       ck('B-37f9: a compaction\'s end, 3 s after the tick evaluated, ASKS the pool at once — not held (the release\'s road)', !!C && C.compacted && C.held === 0 && C.at > C.back, C);
+      ck('WIRING: the armed timer runs the engine\'s re-run seam (poolKickRerun), the one the leg above runs', ENG.includes('        const tm = setTimeout(() => poolKickRerun(poolId), wait + 50);\n'));
+      const GUARD = '    if (resetCreditPendingFor(currentId, now)) return;\n';
+      ck('ANCHOR (主开发\'s reading of 2438a6df7): the kicks\' stamp sits right AFTER the pool\'s last guard, and it is the ONLY stamp — no stamp before the guards', ENG.includes(GUARD + STAMP) && ENG.split('_poolEvalAt.set(').length === 2);
+      ck('WIRING: a person\'s reset-credit press asks the pool as an OWED ask — both after the credit landed and after its re-read probe',
+        ENG.includes('    else kickPoolEval(userAttempt ? { kick: false } : undefined);') && ENG.includes('const ask = userAttempt ? { kick: false } : undefined; Promise.resolve(probeQuotaForKey(tKey, { session })).then(() => kickPoolEval(ask), () => kickPoolEval(ask));'));
+      // THE FOLLOW-UP: the owed ask is never DROPPED by the hub-wide 5 s throttle — it passes it, and a pass already scheduled
+      // (a usage record in the same chunk) runs un-kicked
+      const throttled = async (engine, sameChunk) => {
+        const g = world({ engine });
+        if (!g || typeof g.eng.noteCompacted !== 'function' || typeof g.eng.kickPoolEval !== 'function') return null;
+        const E = g.eng, s = g.mk('s-ct', 'uci');
+        E._poolSwitchAt.clear(); E._poolAutoLast.clear(); if (E._poolGateHeld) E._poolGateHeld.clear();
+        const o = console.log, w2 = console.warn; console.log = console.warn = () => { };
+        let back = 0;
+        try {
+          if (!sameChunk) { E.kickPoolEval(); await new Promise((r) => setImmediate(r)); }   // a usage record's kick a moment ago: the 5 s throttle is shut
+          back = Date.now() - 3000;
+          if (E._poolEvalAt) E._poolEvalAt.set(g.P, back);   // and the pool's last evaluation 3 s ago: the kicks' gate is shut
+          if (sameChunk) E.kickPoolEval();   // a usage record in the SAME chunk: its pass is scheduled, not run yet
+          E.noteCompacted(s, { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto' }, uuid: 'u-ct-' + (sameChunk ? 'b' : 'a') });
+          await new Promise((r) => setImmediate(r));
+        } finally { console.log = o; console.warn = w2; }
+        const r = { held: (E._poolGateHeld && E._poolGateHeld.get(g.P)) || 0, at: (E._poolEvalAt && E._poolEvalAt.get(g.P)) || 0, back };
+        if (E._poolKickTrail) { for (const t of E._poolKickTrail.values()) clearTimeout(t); E._poolKickTrail.clear(); }
+        return r;
+      };
+      const TA = await throttled(engMod, false), TB = await throttled(engMod, true);
+      const afterOwed = async (engine) => {
+        const g = world({ engine });
+        if (!g || typeof g.eng.kickPoolEval !== 'function') return null;
+        const E = g.eng;
+        E._poolSwitchAt.clear(); E._poolAutoLast.clear(); if (E._poolGateHeld) E._poolGateHeld.clear();
+        const o = console.log, w2 = console.warn; console.log = console.warn = () => { };
+        try {
+          E.kickPoolEval({ kick: false }); await new Promise((r) => setImmediate(r));   // an owed ask evaluates the pool
+          E.kickPoolEval(); await new Promise((r) => setImmediate(r));   // a usage record's kick a moment later
+        } finally { console.log = o; console.warn = w2; }
+        const r = { held: (E._poolGateHeld && E._poolGateHeld.get(g.P)) || 0, trails: E._poolKickTrail ? E._poolKickTrail.size : 0 };
+        if (E._poolKickTrail) { for (const t of E._poolKickTrail.values()) clearTimeout(t); E._poolKickTrail.clear(); }
+        return r;
+      };
+      const AO = await afterOwed(engMod);
+      ck('B-37f9 follow-up: a kick a moment after an owed ask is NOT dropped by the throttle (an owed ask never stamps it) — the kicks\' gate holds it and arms its re-run', !!AO && AO.held === 1 && AO.trails === 1, AO);
+      ck('B-37f9 follow-up: a compaction\'s end 1 ms after a usage record\'s kick (the 5 s throttle shut) still ASKS the pool — the owed ask passes the throttle', !!TA && TA.held === 0 && TA.at > TA.back, TA);
+      ck('B-37f9 follow-up: a compaction\'s end in the SAME chunk as a usage record (its pass scheduled, not run) makes that pass UN-KICKED — evaluated, not held', !!TB && TB.held === 0 && TB.at > TB.back, TB);
+      const THR = '  if (kick && now - _poolEvalKickAt < 5000) return;   // the hub-wide 5 s throttle holds KICKS only\n';
+      const PEND = '  if (_poolEvalPending) { if (!kick) _poolEvalPending.kick = false; return; }   // one pass already scheduled: this ask rides it\n';
+      ck('ANCHOR: the throttle\'s kicks-only test and the pending pass\'s un-kick, each spelled once', ENG.split(THR).length === 2 && ENG.split(PEND).length === 2);
+      if (ENG.split(THR).length === 2 && ENG.split(PEND).length === 2) {
+        const MT = await throttled(M37.load('src/server/usage-pool-engine.js', ENG.replace(THR, '  if (now - _poolEvalKickAt < 5000) return;\n'), 'throttle-all'), false);   // stale-pins: kept (the release's throttle line, restored on purpose by this mutant)
+        ck('MUTANT RED: the throttle for every ask (the release\'s) ⇒ the compaction\'s ask 1 ms after a kick is DROPPED', !!MT && MT.at === MT.back, MT);
+        const MP = await throttled(M37.load('src/server/usage-pool-engine.js', ENG.replace(PEND, '  if (_poolEvalPending) return;\n'), 'pending-kicked'), true);
+        ck('MUTANT RED: a pending pass left KICKED ⇒ the same-chunk compaction rides a kick and the gate holds it', !!MP && MP.held === 1 && MP.at === MP.back, MP);
+      }
       const ASK = "  kickPoolEval({ kick: false });   // B-37f9: OWED — the free move window closes at the next request-out; never held by the kicks' gate (the release's road)\n";
       ck('ANCHOR: the compaction\'s owed ask, spelled once', ENG.split(ASK).length === 2);
       if (ENG.split(ASK).length === 2) {

@@ -552,10 +552,10 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
 }
 
 // B-37f9: THE TEN-SECOND EVALUATION GATE FOR KICKS (PURE — the engine only applies it). A KICK (src/server/usage-pool-engine.js
-// kickPoolEval: every usage record, and a few readings — a rate_limit_event, a reset credit's answer, a re-read probe, the codex
+// kickPoolEval: every usage record, and a few readings — a rate_limit_event, a reset credit's answer that no person pressed, a re-read probe, the codex
 // fresh window, a workflow tailer, the ledger's added rows) evaluates a pool again at most once per EVAL_GATE_MS after the pool's
 // LAST EVALUATION — any pass that got past the pool's own guards. Only kicks: every other caller (the 30 s tick, a walled turn's
-// end, the codex cold wall, the pre-fire first decision, the ledger's catch-up, a compaction's end) owes its decision and is never
+// end, the codex cold wall, the pre-fire first decision, the ledger's catch-up, a compaction's end, a person's reset-credit press) owes its decision and is never
 // held by it. Open when forced, with no evaluation yet, and on a clock stepped BACK (a negative age never shuts a pool for the
 // minutes the clock moved).
 const EVAL_GATE_MS = 10000;

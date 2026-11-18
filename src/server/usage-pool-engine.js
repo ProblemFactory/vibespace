@@ -5474,7 +5474,7 @@ function handleResetCreditResult(session, payload) {
       reRead = !!(c && triedAt && (Number(c.fetchedAt) || 0) > triedAt && (c.source === 'codex-rate-limits' || c.source === 'codex-reset-helper'));
     } catch { }
     if (tKey && !reRead) holdForResetReading(tKey, session ? session._webuiId : null);
-    else kickPoolEval();
+    else kickPoolEval(userAttempt ? { kick: false } : undefined);   // B-37f9 follow-up: a person's press is attended — its re-decision is owed, never held
     // R3: every card that offered this credit says it was used (the new window's end, when the post-reset reading said it)
     try {
       let untilSec = null;
@@ -5506,7 +5506,7 @@ function handleResetCreditResult(session, payload) {
     console.log(`[reset-credit] ${sid}: credit answer ${out || 'unknown'} on ${nameOf(tKey)} — ${superseded}; not a wall (re-reading instead of demoting)`);
     settleResetCreditTry(tryRec, String(out || 'superseded'), { failed: true, superseded: true });
     if (userAttempt) serverNotice(`codex-reset-fail-${sid}-${Date.now()}`, `Reset credit not used on ${nameOf(tKey)} — ${superseded}.`, { i18n: { key: out === 'alreadyRedeemed' ? i18nKey('Reset credit not used on {account} — the vendor says this limit was already redeemed.') : i18nKey('Reset credit not used on {account} — a reading newer than the attempt shows the limit open.'), params: { account: nameOf(tKey) } } });
-    try { Promise.resolve(probeQuotaForKey(tKey, { session })).then(() => kickPoolEval(), () => kickPoolEval()); } catch { }
+    try { const ask = userAttempt ? { kick: false } : undefined; Promise.resolve(probeQuotaForKey(tKey, { session })).then(() => kickPoolEval(ask), () => kickPoolEval(ask)); } catch { }   // B-37f9 follow-up: a person's press is owed here too
     return;
   }
   // a LATE answer (the not-sent / no-answer timer settled it first) still states the true outcome:
@@ -6337,14 +6337,21 @@ function autoCliReady(id) {
 // burns are seen the moment the CLI streams them, not when the ledger scan
 // catches up. Zero network; decision reads memory + local files only.
 let _poolEvalKickAt = 0;
-function kickPoolEval({ kick = true } = {}) {   // B-37f9: `kick: false` = an ask that OWES its decision (a compaction's end) — never held by the kicks' gate
+let _poolEvalPending = null;   // B-37f9 follow-up: the pass scheduled and not yet run ({ kick }) — an owed ask makes it un-kicked
+// B-37f9: `kick: false` = an ask that OWES its decision (a compaction's end, a person's reset-credit press) — never held by the
+// kicks' gate, and (the follow-up, 主开发's reading of 2438a6df7) never dropped by the hub-wide 5 s throttle: it passes it, and a
+// pass already scheduled (a usage record in the same chunk) runs un-kicked
+function kickPoolEval({ kick = true } = {}) {
   const now = Date.now();
-  if (now - _poolEvalKickAt < 5000) return;
-  _poolEvalKickAt = now;
+  if (_poolEvalPending) { if (!kick) _poolEvalPending.kick = false; return; }   // one pass already scheduled: this ask rides it
+  if (kick && now - _poolEvalKickAt < 5000) return;   // the hub-wide 5 s throttle holds KICKS only
+  if (kick) _poolEvalKickAt = now;   // an owed ask never stamps it: a kick after one meets the kicks' gate (and its re-run), as before
+  const pass = _poolEvalPending = { kick };
   setImmediate(() => {
+    _poolEvalPending = null;
     try {
       for (const a of accounts.list().accounts || []) {
-        if (a.type === 'pooled' && a.auto) { try { maybePoolAutoSwitchForPool(a.id, kick ? { kick: true } : undefined); } catch { } }   // B-37f9: a KICK — the evaluation gate holds it
+        if (a.type === 'pooled' && a.auto) { try { maybePoolAutoSwitchForPool(a.id, pass.kick ? { kick: true } : undefined); } catch { } }   // B-37f9: a KICK — the evaluation gate holds it
       }
     } catch { }
     try { sweepResetCreditAsks(); } catch { } // an ask item whose carrier is gone (r3)
@@ -7643,6 +7650,12 @@ function projectionRereadFor(memberId, nowMs = Date.now(), billing = null) {
     return { inMs: best.inSec * 1000, label: best.label, line: best.line, pctPerMin: best.pctPerMin, band: best.band, fam: best.fam, resetsAt: best.resetsAt || 0, burnPtPerMin: Math.round(burnPtPerMin * 100) / 100 };
   } catch { return null; }
 }
+/** B-37f9: the ONE re-run a held kick armed, at the gate's opening (a seam: a leg runs it without waiting for the timer). */
+function poolKickRerun(poolId) {
+  const tm = _poolKickTrail.get(poolId); if (tm) clearTimeout(tm);   // a seam call while the timer is live runs ONCE
+  _poolKickTrail.delete(poolId);
+  try { maybePoolAutoSwitchForPool(poolId, { kick: true }); } catch { }
+}
 function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, rosters = null, kick = false } = {}) {
   try {
     if (!poolId) return;
@@ -7659,13 +7672,15 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // evaluation forced here can no more oscillate than any other one. Every un-forced pass waits 10 s after a default switch (as
     // the release). B-37f9: a per-record KICK also waits 10 s after the pool's last EVALUATION (`_poolEvalAt`, stamped below) —
     // the release stamped only at a switch, so a kick was gated only within 10 s of one. The open / closed answer is PURE
-    // (account-pool-auto evalGateOpen). A held kick is counted and arms ONE re-run at the gate's opening: no record's decision is lost.
+    // (account-pool-auto evalGateOpen). A held kick is counted and arms ONE re-run at the gate's opening (poolKickRerun): its
+    // decision is not lost — except a kick inside 10 s of a default switch, which the switch gate just below returns before
+    // this one, as the release did (the 30 s tick or the next record decides it).
     if (!force && (now - (_poolAutoLast.get(poolId) || 0)) < 10000) return; // event-driven kicks need a tight gate; anti-flap = MIN_GAIN, not cadence
     if (kick && !evalGateOpen({ now, last: _poolEvalAt.get(poolId), force })) {
       _poolGateHeld.set(poolId, (_poolGateHeld.get(poolId) || 0) + 1);
       if (!_poolKickTrail.has(poolId)) {
         const wait = Math.max(0, EVAL_GATE_MS - (now - (_poolEvalAt.get(poolId) || 0)));
-        const tm = setTimeout(() => { _poolKickTrail.delete(poolId); try { maybePoolAutoSwitchForPool(poolId, { kick: true }); } catch { } }, wait + 50);
+        const tm = setTimeout(() => poolKickRerun(poolId), wait + 50);
         if (tm && typeof tm.unref === 'function') tm.unref();
         _poolKickTrail.set(poolId, tm);
       }
@@ -8143,7 +8158,7 @@ function maybeStopOnFallback(session, id, from, to) {
     oatIdentity, oatIdentityAttach, oatRebind, oatAnswer, tokenSpentBy, tokenGenOf, readingRoad, oatRoadOf, // lane oat-identity-postcheck: the long-lived token's identity post-check (the account routes wire its store hook + the re-bind door + the owner's answer); tokenGenOf = WHICH token a reading was produced with (lane oat-identity-fix)
     sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
     _wallRing, _sessionWalls, _sessionWallLanes, noteSessionWall, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
-    _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
+    _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, poolKickRerun, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
     sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
     usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
     writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
