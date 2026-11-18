@@ -386,7 +386,9 @@ hook_block() { # the block for $KEY / $ROOT, at install time — the start under
     N=\$(cat "\$R/state/node-path" 2>/dev/null); [ -x "\$N" ] || N=\$(command -v node)
     S=nohup; command -v setsid >/dev/null 2>&1 && S=setsid
     # the device agent's env rule (src/agent-env.js daemonEnv: a DENY list — the hub's own agent is born so): the
-    # entrypoint's proxy, CA store, locale stay; VIBESPACE_* but the agent's own, npm_*, AGENT_BROWSER_* and these go
+    # entrypoint's proxy, CA store, locale stay; VIBESPACE_* but the agent's own, npm_*, AGENT_BROWSER_* and these go.
+    # The DEVICE's own start is daemonEnv WITHOUT a credential drop list — as the agent's own restart and this installer's
+    # first start (the hub's local agent also drops the harness credential names: its env is the hub's)
     for V in \$(env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do
       case "\$V" in
         VIBESPACE_API|VIBESPACE_SESSION_TOKEN|VIBESPACE_TASK_ID|VIBESPACE_REMOTE_SID|VIBESPACE_REMOTE_RETRY|VIBESPACE_KEEPER_DIR|VIBESPACE_INSTANCE_NAME|VIBESPACE_DEVICE_ROOT|VIBESPACE_AGENTD_ROOT|VIBESPACE_NODE_MODULES|VIBESPACE_AGENTD_VERSION|VIBESPACE_INPUT_STUB_FILE|VIBESPACE_MIC_HELPER|VIBESPACE_SOUND_FFMPEG|VIBESPACE_NODE_MIRROR|VIBESPACE_RUNTIME_SWITCH|VIBESPACE_RUNTIME_REEXEC) ;;

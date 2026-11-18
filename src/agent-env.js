@@ -84,6 +84,8 @@ const DAEMON_ENV_KEEP = Object.freeze(new Set([...AGENT_ENV_KEEP, 'VIBESPACE_NOD
  * agentCredentialEnvNames; this module imports nothing, so the server-side
  * callers hand them in). Pure over its inputs; never mutates `base`.
  */
+// A NEW PREFIX RULE below (a `k.startsWith('…')` drop) must also enter the device boot block's case line
+// (scripts/vibespace-agentd-install.sh hook_block — B-8475): test-agent-lock §4 compares the two prefix sets.
 function agentEnv(base, { keep = AGENT_ENV_KEEP, drop = [] } = {}) {
   const out = {};
   const dropped = new Set(drop);

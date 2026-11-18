@@ -214,6 +214,12 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   const sameSet = (a, b) => !!a && a.length === b.length && b.every((x) => a.includes(x));
   ok(`census: the boot block's kept names ARE DAEMON_ENV_KEEP (${shKeep ? shKeep.length : 0}) and its dropped names AGENT_ENV_DROP (${shDrop ? shDrop.length : 0}) — one rule, spelled from src/agent-env.js`, sameSet(shKeep, [...AGE.DAEMON_ENV_KEEP]) && sameSet(shDrop, [...AGE.AGENT_ENV_DROP]), { shKeep, shDrop });
   ok('CONTROL: a census that lost one kept name goes red', !sameSet(shKeep && shKeep.slice(1), [...AGE.DAEMON_ENV_KEEP]));
+  // …and the PREFIX rules: every `k.startsWith('…')` drop in agentEnv's own source is a `<prefix>*` of the block's drop line
+  const AES = fs.readFileSync(path.join(REPO, 'src/agent-env.js'), 'utf8'), a0 = AES.indexOf('function agentEnv('), a1 = AES.indexOf('\nfunction ', a0 + 10);
+  const jsPre = a0 >= 0 ? [...AES.slice(a0, a1 > a0 ? a1 : undefined).matchAll(/k\.startsWith\('([A-Za-z_]+)'\)/g)].map((m) => m[1]) : [];
+  const shPre = ((/\n\s+((?:[A-Za-z_]+\*\|)+)[A-Z_|]+\) unset /.exec(FNS) || [])[1] || '').split('|').filter(Boolean).map((x) => x.replace(/\*$/, ''));
+  ok(`census: the block's prefix drops ARE agentEnv's own prefix rules (${shPre.join(', ')} ≡ ${jsPre.join(', ')})`, jsPre.length >= 3 && sameSet(shPre, jsPre), { shPre, jsPre });
+  ok('CONTROL: a prefix rule agentEnv gained (and the block did not) goes red', !sameSet(shPre, [...jsPre, 'NEWPREFIX_']));
   const before = fs.readFileSync(HOOK, 'utf8');
   const d1 = bashIn(F, 'drop_hook_block device-a'), dNone = bashIn(F, 'drop_hook_block device-zz');
   const after = fs.readFileSync(HOOK, 'utf8');
