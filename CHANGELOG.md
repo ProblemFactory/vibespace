@@ -36,6 +36,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A conversation's right-click menu has What it may use…, which opens Properties at that section.
 - What it may use now also shows the browser profiles this conversation may not use yet, beside the channel accounts, each with Who can use it.
 - Connecting Lark, Slack or Gmail from a chat now points to the browser profiles this conversation may not use yet, with the door to allow one.
+- A browser proxy’s user name and password are kept in the vault as its login; the browser never sees them.
+- New profile and a profile’s ⋯ › Proxy… set the proxy and its login. An old address that holds a password offers “Move the password to the vault”.
+- A profile’s ⋯ › Check the exit… reads its proxy’s public address, country and time zone from a check address you set; nothing is kept until you press Keep.
+- The kept exit is handed to an engine plugin when the browser starts; you can also type it by hand.
 
 ### Changed
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
@@ -115,6 +119,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - New Session: a channel account whose Except list leaves out a Task Group you picked is no longer shown as granted.
 - An open New Session form now updates what the conversation may use when a grant, a Task Group or a channel account changes elsewhere.
 - A resumed conversation that ran a turn, then ended with no page open, no longer comes back as ended while the server was down, with its old account.
+- A browser profile’s proxy now applies: http, https or socks5, on every start, and site names go through it too. It was saved but never used.
+- In a profile with a proxy, a page’s calls (WebRTC) also go only through the proxy; a call that needs UDP does not connect.
+- A locked vault stops a proxied browser from starting; it never falls back to a direct connection.
+- A cloud browser’s profile does not take a proxy: that browser runs at its vendor, where the proxy cannot reach it.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
