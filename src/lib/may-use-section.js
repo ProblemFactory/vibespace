@@ -114,8 +114,8 @@ export function mountMayUse(app, getRef) {
       else top = `<div class="ns-acc" data-acc-row="${escHtml(a.id)}"><span class="ns-acc-n"><span class="ns-chan-k">${escHtml(a.vendor || a.kind)}</span>${escHtml(a.label)}</span><span class="ns-pv-via dim">${escHtml(a.state === 'excepted' ? t('left out — Except: {name}', { name: a.exceptedBy ? exceptName(a.exceptedBy) : t('this conversation') }) : t('unknown — its Task Groups could not be read'))}</span><span class="ns-acc-end">${doorBtn('chan', t('Channels window'), `data-acc="${escHtml(a.id)}"`)}</span></div>`;
       const chanDoor = doorBtn('chan', t('Channels window'), `data-acc="${escHtml(a.id)}"`);
       const kids = [
-        ...x.rules.map((r) => line(r, '', r.detail && r.detail.authority ? authWords(r.detail.authority) : '')), moreOf({ more: x.rulesMore, moreRequest: x.rulesMoreRequest, moreOut: x.rulesMoreOut }, chanDoor),
-        ...x.chats.map((r) => line(r, '', r.detail && r.detail.authority ? authWords(r.detail.authority) : '')), moreOf({ more: x.chatsMore, moreRequest: x.chatsMoreRequest, moreOut: x.chatsMoreOut }, chanDoor),
+        ...x.rules.map((r) => line(r, '', r.detail && r.detail.authority ? authWords(r.detail.authority) : '')), moreOf({ more: x.rulesMore, moreRequest: x.rulesMoreRequest, moreOut: x.rulesMoreOut, moreClosed: x.rulesMoreClosed }, chanDoor),
+        ...x.chats.map((r) => line(r, '', r.detail && r.detail.authority ? authWords(r.detail.authority) : '')), moreOf({ more: x.chatsMore, moreRequest: x.chatsMoreRequest, moreOut: x.chatsMoreOut, moreClosed: x.chatsMoreClosed }, chanDoor),
         ...x.watch.map((r) => line({ ...r, name: t('Its notifications wake it — {name}', { name: r.name }) })),
         ...x.api.map((r) => line({ ...r, name: t('Raw API: {tier}', { tier: r.detail.tier }) }, '', r.detail.perDay ? t('{n} a day', { n: r.detail.perDay }) : '')),
       ].join('');
@@ -129,7 +129,7 @@ export function mountMayUse(app, getRef) {
     if (br) {
       const lines = br.remote ? none(t('Sessions on {host} cannot use this machine’s browser profiles', { host: f.host || '' }))
         : [...br.profiles.map((r) => line(r, doorBtn('bprof', t('Who can use it'), `data-id="${escHtml(r.resource)}" data-label="${escHtml(r.name)}"`))), moreOf({ more: br.profilesMore, moreOut: br.profilesMoreOut, moreClosed: br.profilesMoreClosed }, doorBtn('bprofs', t('Agent browser')))].join('') || none(t('No browser profile is open to it'));
-      const logins = [...br.logins.map((r) => line(r, doorBtn('vault', t('Vault'), `data-focus="${escHtml(r.resource)}"`))), moreOf({ more: br.loginsMore, moreOut: br.loginsMoreOut }, doorBtn('vault', t('Vault')))].join('');
+      const logins = [...br.logins.map((r) => line(r, doorBtn('vault', t('Vault'), `data-focus="${escHtml(r.resource)}"`))), moreOf({ more: br.loginsMore, moreOut: br.loginsMoreOut, moreClosed: br.loginsMoreClosed }, doorBtn('vault', t('Vault')))].join('');
       res.push({ key: 'browser', data: 'data-row="bprof"', icon: ic('globe'), name: t('Browser'), what: t('Opens a browser with a profile'), sub: lines + (logins ? `<div class="mu-kids">${logins}</div>` : ''),
         sum: br.remote ? t('not on this machine') : t('{n} profile(s) · {m} saved login(s)', { n: granted(br.profiles) + br.profilesMore, m: granted(br.logins) + br.loginsMore }) });   // SHOULD e: the GRANTED ones only
     }
@@ -138,8 +138,8 @@ export function mountMayUse(app, getRef) {
     if (va) {
       const hostsOf = (r) => (r.detail && Array.isArray(r.detail.hosts) && r.detail.hosts.length ? t('hosts {list}', { list: r.detail.hosts.slice(0, 3).join(', ') + (r.detail.hosts.length > 3 ? ' …' : '') }) : '');
       const lines = va.locked ? `<div class="ns-pv-via dim mu-none">${escHtml(t('The vault is locked — unlock it in the Vault window to see what it may use there'))} ${doorBtn('vault', t('Vault'))}</div>`
-        : [...va.use.map((r) => line(r, doorBtn('vault', t('Vault'), `data-focus="${escHtml(r.resource)}"`), hostsOf(r))), moreOf({ more: va.useMore, moreOut: va.useMoreOut }, doorBtn('vault', t('Vault'))),
-          ...va.jobs.map((r) => line({ ...r, name: t('Job {job} uses {entry} at every start', { job: r.detail.job, entry: r.name.split(' · ')[0] }) }, doorBtn('vault', t('Vault'), `data-focus="${escHtml(r.resource.split('|')[0])}"`))), moreOf({ more: va.jobsMore, moreOut: va.jobsMoreOut }, doorBtn('vault', t('Vault')))].join('')
+        : [...va.use.map((r) => line(r, doorBtn('vault', t('Vault'), `data-focus="${escHtml(r.resource)}"`), hostsOf(r))), moreOf({ more: va.useMore, moreOut: va.useMoreOut, moreClosed: va.useMoreClosed }, doorBtn('vault', t('Vault'))),
+          ...va.jobs.map((r) => line({ ...r, name: t('Job {job} uses {entry} at every start', { job: r.detail.job, entry: r.name.split(' · ')[0] }) }, doorBtn('vault', t('Vault'), `data-focus="${escHtml(r.resource.split('|')[0])}"`))), moreOf({ more: va.jobsMore, moreOut: va.jobsMoreOut, moreClosed: va.jobsMoreClosed }, doorBtn('vault', t('Vault')))].join('')
           || none(t('No vault entry is open to it'));
       res.push({ key: 'vault', data: 'data-fact="vault"', icon: ic('lock'), name: t('Vault'), what: t('By purpose — the agent gets the purpose, never the value'), end: doorBtn('vault', t('Vault')), sub: lines,
         sum: va.locked ? t('locked') : t('{n} entr(ies)', { n: granted(va.use) + va.useMore + granted(va.jobs) + va.jobsMore }) });   // SHOULD e: the GRANTED ones only

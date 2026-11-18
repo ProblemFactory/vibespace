@@ -99,8 +99,8 @@ function channelsOf(answers, accounts) {
     under.delete(`account:${a.id}`);
     const convs = bounded(kids.filter((k) => k.door === 'channel-reach' && /^conversation:/.test(k.resource)));
     const rules = bounded(kids.filter((k) => k.door === 'channel-reach' && /^rule:/.test(k.resource)));
-    out.push({ account: a, rules: rules.rows, rulesMore: rules.more, rulesMoreRequest: rules.moreRequest, rulesMoreOut: rules.moreOut,
-      chats: convs.rows, chatsMore: convs.more, chatsMoreRequest: convs.moreRequest, chatsMoreOut: convs.moreOut,   // `chats`: one account's single channel conversations (never a digest's `conversations` — test-channel-rows)
+    out.push({ account: a, rules: rules.rows, rulesMore: rules.more, rulesMoreRequest: rules.moreRequest, rulesMoreOut: rules.moreOut, rulesMoreClosed: rules.moreClosed,
+      chats: convs.rows, chatsMore: convs.more, chatsMoreRequest: convs.moreRequest, chatsMoreOut: convs.moreOut, chatsMoreClosed: convs.moreClosed,   // `chats`: one account's single channel conversations (never a digest's `conversations` — test-channel-rows)
       watch: kids.filter((k) => k.door === 'channel-watch').sort(byRank), api: kids.filter((k) => k.door === 'channel-api').sort(byRank) });
   }
   // a grain whose account is not in the list (an account removed while its rows stay) is said by itself, never dropped
@@ -128,13 +128,13 @@ function viewOf({ facts = {}, answers = [], accounts = [] } = {}) {
       const logins = bounded(of('browser').filter((r) => r.door === 'browser-login'));
       // profilesNotUsable: how many profiles it is KNOWN it may not use (not open + taken out), counted before the cut — the Connect form's fold
       kinds.push({ kind, remote: f.remote, profiles: profiles.rows, profilesMore: profiles.more, profilesMoreOut: profiles.moreOut, profilesMoreClosed: profiles.moreClosed,
-        profilesNotUsable: all.filter(notUsable).length, logins: logins.rows, loginsMore: logins.more, loginsMoreOut: logins.moreOut });
+        profilesNotUsable: all.filter(notUsable).length, logins: logins.rows, loginsMore: logins.more, loginsMoreOut: logins.moreOut, loginsMoreClosed: logins.moreClosed });
       continue;
     }
     if (kind === 'vault') {
       const use = bounded(of('vault').filter((r) => r.door === 'vault-use'));
       const jobs = bounded(of('vault').filter((r) => r.door === 'vault-job'));
-      kinds.push({ kind, use: use.rows, useMore: use.more, useMoreOut: use.moreOut, jobs: jobs.rows, jobsMore: jobs.more, jobsMoreOut: jobs.moreOut, locked: of('vault').some((r) => r.code === 'vault_locked') });
+      kinds.push({ kind, use: use.rows, useMore: use.more, useMoreOut: use.moreOut, useMoreClosed: use.moreClosed, jobs: jobs.rows, jobsMore: jobs.more, jobsMoreOut: jobs.moreOut, jobsMoreClosed: jobs.moreClosed, locked: of('vault').some((r) => r.code === 'vault_locked') });
       continue;
     }
     const b = bounded(of(kind), UNCUT.includes(kind) ? Infinity : NAMED_MAX);

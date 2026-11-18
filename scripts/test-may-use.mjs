@@ -507,6 +507,30 @@ console.log('— ⑰ B-460d + B-70f9: Session Properties holds the CPU priority 
   const oneB = Mo.viewOf({ facts: { live: true }, answers: [...unk, row('Work', false, 'not_open')], accounts: [] }).kinds.find((k) => k.kind === 'browser');
   ok(drawn && drawn.n === 3 && oneB.profilesMoreOut === 1 && !oneB.profiles.some((r) => r.state === 'closed'),
     'CONTROL (B-e630 cure): the drawn-rows fold says 3 of 5; one «left out» bucket hides the closed profile behind three unreadable rows and counts it «left out or unknown» (RED for the two legs above)', { drawn, moreOut: oneB.profilesMoreOut });
+  // cure 2 (主开发's read, 08:56Z): EVERY bounded list forwards its closed count, so a door that answers not_open past the cut is
+  // counted on its own list (today only the browser keeper answers it)
+  const shut5 = (door, res, extra = () => ({})) => Array.from({ length: 5 }, (_, i) => A(door, res(i), { ok: false, code: 'not_open', ...extra(i) }));
+  const allShut = (Mx) => {
+    const v = Mx.viewOf({ facts: { live: true }, accounts: [{ id: 'a1', label: 'Inbox', state: 'none' }], answers: [
+      ...shut5('channel-reach', (i) => `rule:a1/r${i}`, () => ({ parent: 'account:a1' })), ...shut5('channel-reach', (i) => `conversation:a1/c${i}`, () => ({ parent: 'account:a1' })),
+      ...shut5('channel-reach', (i) => `conversation:gone/c${i}`, () => ({ parent: 'account:gone' })), ...shut5('browser-login', (i) => `login:l${i}`),
+      ...shut5('vault-use', (i) => `entry:e${i}`), ...shut5('vault-job', (i) => `entry:e${i}|job${i}`, (i) => ({ detail: { job: 'j' + i } }))] });
+    const kOf = (k) => v.kinds.find((x) => x.kind === k), ch = kOf('channels'), acc = ch.accounts[0], brK = kOf('browser'), vaK = kOf('vault');
+    return { rules: acc && acc.rulesMoreClosed, chats: acc && acc.chatsMoreClosed, orphans: ch.orphans.moreClosed, logins: brK.loginsMoreClosed, use: vaK.useMoreClosed, jobs: vaK.jobsMoreClosed };
+  };
+  const counts = allShut(M);
+  ok(Object.values(counts).length === 6 && Object.values(counts).every((n) => n === 2),
+    'B-e630 cure 2: five closed rows on EVERY bounded list (channel rules, single chats, a removed account\'s rows, logins, vault use, vault jobs): three named, the other two counted «not open to it» on that list', counts);
+  const unforwarded = (secSrc) => (secSrc.match(/moreOf\(\{[^}]*\}/g) || []).filter((c) => /moreOut:/.test(c) && !/moreClosed:/.test(c));
+  const calls = (sec.match(/moreOf\(\{[^}]*\}/g) || []).length;
+  ok(calls === 6 && unforwarded(sec).length === 0, 'B-e630 cure 2: every list the section counts by hand (rules, chats, profiles, logins, vault use, vault jobs) hands its closed count to moreOf — a census over the section\'s calls', { calls, unforwarded: unforwarded(sec) });
+  // RED ×2: a model that forwards no closed count for logins; a section call that drops it
+  const fwd = 'loginsMoreOut: logins.moreOut, loginsMoreClosed: logins.moreClosed });';
+  ok(src.includes(fwd), 'control setup (B-e630 cure 2): the logins\' forward is where the control cuts');
+  const Mf = require(MCc.write('src/may-use-model.js', src.replace(fwd, 'loginsMoreOut: logins.moreOut });'), 'logins-unforwarded'));   // stale-pins: kept — the base's line, written back by this RED control
+  const secCut = 'moreOf({ more: br.loginsMore, moreOut: br.loginsMoreOut, moreClosed: br.loginsMoreClosed }, ';
+  ok(sec.includes(secCut) && allShut(Mf).logins === undefined && unforwarded(sec.replace(secCut, 'moreOf({ more: br.loginsMore, moreOut: br.loginsMoreOut }, ')).length === 1,   // stale-pins: kept — the base's line, written back by this RED control
+    'CONTROL (B-e630 cure 2): a model without the logins\' forward counts their closed rows nowhere, and a section call without it is named by the census (RED for the two legs above)');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
